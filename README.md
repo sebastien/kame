@@ -1,8 +1,5 @@
 == kame: A modern make replacement
 
-<script async="" defer="" src="https://factlink.com/lib/dist/factlink_loader.min.js">
-</script>
-
 `make` is an amazing tool, but over the years I've found that it created
 some friction with the following use cases:
 
