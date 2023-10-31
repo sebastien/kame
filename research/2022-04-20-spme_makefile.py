@@ -36,3 +36,4 @@ def run():
 
 @rule
 def run(deps=RUN_DEPS) -> None:
+    pass

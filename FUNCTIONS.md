@@ -47,6 +47,10 @@ Post:
 
 Returns true when the PATH exists
 
+## Text
+
+### `(rewrite FROMPAT TOPATH INPUT…)`
+
 ## Lists
 
 #### (filter VALUE EXPR)
