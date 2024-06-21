@@ -1,4 +1,4 @@
-# Kame ― Function Reference
+# Function Reference
 
 ## Variables
 
@@ -21,7 +21,7 @@ Post:
 Returns the current value of the variable `NAME`. The `NAME` needs to be
 defined in the current scope and have a value bound.
 
-Pre: 
+Pre:
 
 - `(defined? NAME)`
 
@@ -29,11 +29,11 @@ Pre:
 
 Sets the value of the variable `NAME` to the given `VALUE`.
 
-Pre: 
+Pre:
 
 - `(defined? NAME)`
 
-Post: 
+Post:
 
 - `(eq (get NAME) VALUE)`
 

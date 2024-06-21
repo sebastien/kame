@@ -1,7 +1,7 @@
 # Kame vs Make
 
 This document shows some comparisons between `make` and `kame`. I hope
-this show how `kame` is similar to make, and how it improves on some of
+this shows how `kame` is similar to make, and how it improves on some of
 the edge cases.
 
 ## Shell scripting
@@ -16,7 +16,7 @@ PACKAGE=$(SOURCES:src/%=dist/%)
 PACKAGE_HOST=server:~/packages
 
 # This is a file
-package.tar.gz: $(PACKAGE)  
+package.tar.gz: $(PACKAGE)
     env -C dist tar cvfz $(abspath $@) $<
 
 # This is a rule
@@ -41,7 +41,7 @@ package.tar.gz <- (all sources)
 # A rule
 @build <- package.tar.gz
     scp @< @{package-host}
-        
+
 ```
 
 ## Rule parameters
@@ -51,6 +51,7 @@ HOST_PRODUCTION=production.acme.corp
 HOST_STAGING=staging.acme.corp
 env-var=$($1_$*)
 release: release-development
+    @
 release-%:
     if [ -z "$(call env-var,HOST)" ]; then
         echo "Error: Environment not found $*"
@@ -66,7 +67,7 @@ release-%:
 With kame, it's possible to use string pattern matching to extract
 values from the rule name.
 
-``` kame
+```kame
 host.production=production.acme.corp
 host.staging=staging.acme.corp
 @release = @release/development
@@ -85,7 +86,7 @@ host.staging=staging.acme.corp
 In `make`, you will have to managed every single tool you refer to if
 you want them to be actual dependencies:
 
-``` make
+```make
 uses=$(foreach T,$1,$(require-$T))
 list-users: $(call uses,cat sort cut)
     cat /etc/passwrd | cut -d -f1 | sort
@@ -102,7 +103,7 @@ while in `kame`, this can be implicit
 
 ``` kame
 @list-users:
-    @`cat` /etc/passwd | @`cut`  
+    @`cat` /etc/passwd | @`cut`
 ```
 
 or explicit
@@ -110,7 +111,7 @@ or explicit
 ``` kame
 use(t...)=t | (all (assert (sh/which?) "Tool not found @{}))
 @list-users: [cat sort cut] | use
-    cat /etc/passwd | cut  
+    cat /etc/passwd | cut
 ```
 
 ## Depending on configuration variables

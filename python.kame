@@ -1,3 +1,0 @@
-
-paths.src.py = src/py
-sources.py   = (rfind {paths.src.py} *.py)

@@ -1,4 +1,4 @@
-# Kame − Language reference
+# Language reference
 
 ## Overview
 
@@ -25,6 +25,12 @@ The language's syntax is designed with the following use-cases:
     structure.
 
 ## Values
+
+Primitive values are the following:
+
+- Strings
+- Templates
+
 
 ### STRING
 
@@ -69,10 +75,21 @@ Project @{project.name} revision @{project.revision}
 The `@` character was chosen because it doesn't clash with the `$` of shell
 scripts, allowing expressions like "`Project @{project.name} ${BUILD_ID}`".
 
+### PATH
+
+A path is a string that starts with `/`, `./` or `xxx://`, where `xxx` is the
+protocol name.
+
+```
+./bin/python
+/usr/bin/env
+s3://bucket/path/object.tar.gz
+```
+
 ### TEMPLATE
 
 A **template** is a string that contains _wildcards_ that can match one or
-more strings. The `*`, `**` and `?` wildcards works just like in shell:
+more strings or paths. The `*`, `**` and `?` wildcards works just like in shell:
 
 ```
 src/c/*.c
@@ -112,7 +129,7 @@ src/{(.+\.c)}
 
 ### DEREFERENCE
 
-A derference to a symbol (parameter/rule) is a dot-separated string, prefixed with `@` and
+A dereference to a symbol (parameter/rule) is a dot-separated string, prefixed with `@` and
 optionally wrapped in `{…}`. The dots act as a destructuring operator in case the referenced
 value is composite. Names are a subset of strings and can't contain
 any template expression. Special characters are not allowed in names, except
@@ -172,7 +189,7 @@ is equivalent to
 ### DEFINITION
 
 A **definition** binds a _value_ to a _parameter_ in the _parameter space_. Definitions
-take STRINGS, but will interpret EXPRESSIONS and NAME if the trimmed string starts and ends
+take STRINGS, but will interpret EXPRESSIONS and derference NAMES if the trimmed string starts and ends
 with `(…)` or with `{…}` respectively.
 
 ```
@@ -180,9 +197,6 @@ with `(…)` or with `{…}` respectively.
 alias.cc  = gcc
 # Assigns the result of the evaluation of `(find src/*/*.c)` to sources.c
 sources.c = (find src/*/*.c)
-# The `(find …)` expression will be evaluated every time `sources.c`
-# is referenced or invoked.
-(sources.c) = (find src/*/*.c)
 # Desfines a new function `count-line`
 (count-lines text) = (split "\n" @text | filter (empty | not) | count)
 ```
@@ -194,7 +208,7 @@ like to keep them, you can use quotes:
 parameter-with-spaces = "  the leading and trailing spaces will be preserved  "
 ```
 
-When a definition value is an unquote string containing spaces, it will be
+When a definition value is an unquoted string containing spaces, it will be
 interpreted as a list instead of a single value.
 
 ```
@@ -222,6 +236,11 @@ shell script that transforms the _inputs_ into _outputs_.
 		gcc -c @{<} -o @{>}
 ```
 
+If a line starts with `@`, then the whole line is considered to be an expression
+to be evaluated, other lines are considered as strings. Within strings, the
+`@{}` dereference and `@()` evaluation operations apply, as well as the Special
+`` @`cmd` `` to reference system commands.
+
 The generic format for a rule is:
 
 ```
@@ -241,6 +260,14 @@ clean:
 | Cleans any product file
 	(all product | filter _ (exists?) | set cleaned | each (shell unlink {_}))
 	(log Cleaned (cleaned | count) files)
+```
+
+which translates into:
+
+```
+TASK: INPUTS…
+| DOCUMENTATION
+	OPERATION…
 ```
 
 ## Special Expressions
