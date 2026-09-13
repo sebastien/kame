@@ -28,6 +28,10 @@ Stored and serialized values exclude callables. Values retained outside their
 creating arena must be cloned into the destination allocator. Containers own
 their elements. Values are immutable after publication.
 
+Sources, batches, and stream controls are not values. `012-streams.md` defines
+their explicit resumable protocol and materializes them into these values before
+publication.
+
 ## Resources
 
 A resource key contains a kind and canonical name. Initial kinds are:
@@ -108,6 +112,9 @@ context and node identity, and returns one of:
 Producers publish through engine methods; they do not mutate nodes directly.
 The callback context may record evaluator state but must follow the ownership
 rules in `001-architecture.md`.
+
+A producer that emits incrementally uses the source protocol in
+`012-streams.md`. Node subscribers receive only its materialized value updates.
 
 ## Dependencies
 

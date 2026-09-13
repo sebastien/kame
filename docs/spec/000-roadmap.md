@@ -37,7 +37,7 @@ New specifications in this directory override every legacy source.
 | Spec | Subject | Depends on |
 | --- | --- | --- |
 | `001-architecture.md` | Package boundaries and portability | none |
-| `002-engine.md` | Values, graph, streams, scheduling, ownership | 001 |
+| `002-engine.md` | Values, graph, scheduling, ownership | 001 |
 | `003-posix-process.md` | Hosted process execution and lifecycle | 001 |
 | `004-language.md` | Template, expression, rule, and script syntax | 001 |
 | `005-evaluation.md` | Scopes, operations, selectors, and lifting | 002, 004 |
@@ -47,6 +47,7 @@ New specifications in this directory override every legacy source.
 | `009-cli.md` | Native command-line interface and diagnostics | 006, 008 |
 | `010-wasm.md` | Freestanding host ABI | 002, 004, 005, 006, 007, 008 |
 | `011-diagnostics.md` | Diagnostic code registry | 001 |
+| `012-streams.md` | Source protocol, batches, materialization | 002 |
 
 Every implementation specification also depends on the code registry in 011.
 
@@ -61,8 +62,8 @@ Every implementation specification also depends on the code registry in 011.
 
 ### Milestone 2: engine proof
 
-- Implement values, nodes, updates, dynamic dependencies, invalidation, and a
-  deterministic single-threaded scheduler.
+- Implement values, source materialization, nodes, updates, dynamic
+  dependencies, invalidation, and a deterministic single-threaded scheduler.
 - Test fan-out using latest-value plus future-update semantics.
 - Use a fake executor; no parser or operating-system dependency is needed.
 
