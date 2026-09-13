@@ -1,0 +1,21 @@
+// NOTE: This is managed by the SDK and is readonly
+{
+	"$schema": "https://opencode.ai/config.json",
+	"instructions": [".opencode/rules/*"],
+	"plugin": ["@dietrichgebert/ponytail"],
+	"mcp": {
+		"context7": {
+			"type": "local",
+			"command": [
+				"bun",
+				"x",
+				"-y",
+				"@upstash/context7-mcp",
+				"--api-key",
+				"{env:CONTEXT7_API_KEY}"
+			],
+			"enabled": true
+		}
+	}
+}
+// EOF
