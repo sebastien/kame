@@ -2,50 +2,24 @@ package core
 
 import (
 	"solod.dev/so/mem"
+	"solod.dev/so/path"
 	"solod.dev/so/slices"
 )
 
-// Node is engine-owned. Latest is valid only while Current is true and is
-// released by replacement, invalidation, or Engine.Free.
-type Node struct {
-	ID        int64
-	Name      string
-	Flow      *Materializer
-	Latest    Value
-	Current   bool
-	Requested bool
-	Completed bool
-	Revision  int64
-	Generation int64
-	Diagnostic Diagnostic
-	Subs      []*Subscription
+type Root struct {
+	node *Node
+	live bool
 }
 
-// Event transfers Value ownership to the receiver when HasValue is true.
-type Event struct {
-	Value      Value
-	HasValue   bool
-	Terminal   bool
-	Diagnostic Diagnostic
-}
-
-// Subscription is node-owned until Unsubscribe or Engine.Free. Its queue owns
-// clones of node publications; terminal is out-of-band from value capacity.
-type Subscription struct {
-	Alloc     mem.Allocator
-	Node      *Node
-	values    []Value
-	terminal  bool
-	diagnostic Diagnostic
-	unsubbed  bool
-}
-
-// Engine owns every registered node and its retained values. It deliberately
-// uses a sorted scan: the engine proof is deterministic without a queue layer.
 type Engine struct {
-	Alloc  mem.Allocator
-	nodes  []*Node
-	nextID int64
+	Alloc         mem.Allocator
+	nodes         []*Node
+	roots         []*Root
+	nextID        int64
+	cancellations []Cancellation
+	completions   []Completion
+	nextUpdate    int64
+	lastRun       *Node
 }
 
 func NewEngine(a mem.Allocator) *Engine {
@@ -54,211 +28,403 @@ func NewEngine(a mem.Allocator) *Engine {
 	return e
 }
 
-// AddSource transfers source ownership to the engine on success.
-func (e *Engine) AddSource(name string, source *Source) *Node {
+func canonicalName(a mem.Allocator, key ResourceKey) (string, bool) {
+	if key.Kind == ResourceFile {
+		return path.Clean(a, key.Name), true
+	}
+	return key.Name, false
+}
+
+func (e *Engine) find(key ResourceKey) *Node {
+	name, owned := canonicalName(e.Alloc, key)
 	for i := range e.nodes {
-		if e.nodes[i].Name == name {
-			return nil
+		n := e.nodes[i]
+		if n.Key.Kind == key.Kind && n.Key.Name == name {
+			if owned { mem.FreeString(e.Alloc, name) }
+			return n
 		}
 	}
+	if owned { mem.FreeString(e.Alloc, name) }
+	return nil
+}
+
+func (e *Engine) node(key ResourceKey) *Node {
+	if existing := e.find(key); existing != nil {
+		return existing
+	}
+	name, owned := canonicalName(e.Alloc, key)
 	n := mem.Alloc[Node](e.Alloc)
 	e.nextID++
 	n.ID = e.nextID
-	n.Name = NewString(e.Alloc, name).Text
-	n.Flow = NewMaterializer(e.Alloc, source)
+	n.Key = NewResourceKey(e.Alloc, key.Kind, name)
+	if owned { mem.FreeString(e.Alloc, name) }
+	n.State = NodeIdle
 	e.nodes = slices.Append(e.Alloc, e.nodes, n)
 	return n
 }
 
+func (e *Engine) Add(key ResourceKey, producer Producer, context any) *Node {
+	return e.AddOwned(key, producer, context, nil)
+}
+
+// AddOwned registers a producer context released with the engine.
+func (e *Engine) AddOwned(key ResourceKey, producer Producer, context any, free ContextFree) *Node {
+	n := e.node(key)
+	if n.Producer != nil || n.materializer != nil {
+		return nil
+	}
+	n.Producer = producer
+	n.Context = context
+	n.ContextFree = free
+	return n
+}
+
+func (e *Engine) AddStatic(n *Node, dependency *Node) bool {
+	if n != nil && (n.Requested || n.State != NodeIdle) { return false }
+	if n == nil || dependency == nil || n == dependency || reaches(dependency, n) {
+		if n != nil {
+			n.complete(e, Diagnostic{Code: DiagnosticDependencyCycle})
+		}
+		return false
+	}
+	if slices.Contains(n.Static, dependency) { return true }
+	n.Static = slices.Append(e.Alloc, n.Static, dependency)
+	dependency.Dependents = slices.Append(e.Alloc, dependency.Dependents, n)
+	if n.Interest != 0 { e.interest(dependency, n.Interest) }
+	return true
+}
+
+func reaches(from *Node, want *Node) bool {
+	if from == want { return true }
+	for i := range from.Static { if reaches(from.Static[i], want) { return true } }
+	for i := range from.Dynamic { if reaches(from.Dynamic[i], want) { return true } }
+	return false
+}
+
+func (e *Engine) RequestRoot(n *Node) *Root {
+	if n == nil { return nil }
+	r := mem.Alloc[Root](e.Alloc)
+	r.node, r.live = n, true
+	e.roots = slices.Append(e.Alloc, e.roots, r)
+	e.interest(n, 1)
+	request(n)
+	return r
+}
+
+// Request is the idempotent convenience root for a node.
 func (e *Engine) Request(n *Node) {
-	_ = e
-	if n != nil && !n.Completed {
-		n.Requested = true
+	if n != nil && n.RequestInterest == 0 {
+		n.RequestInterest = 1
+		e.interest(n, 1)
+		request(n)
+	}
+}
+
+func request(n *Node) {
+	n.Requested = true
+	for i := range n.Static { request(n.Static[i]) }
+	for i := range n.Dynamic { request(n.Dynamic[i]) }
+}
+
+func (e *Engine) Release(r *Root) {
+	if r == nil || !r.live { return }
+	r.live = false
+	e.interest(r.node, -1)
+	for i := range e.roots {
+		if e.roots[i] == r {
+			copy(e.roots[i:], e.roots[i+1:])
+			e.roots = e.roots[:len(e.roots)-1]
+			break
+		}
+	}
+	mem.Free(e.Alloc, r)
+}
+
+func (e *Engine) interest(n *Node, delta int64) {
+	n.Interest += delta
+	for i := range n.Static { e.interest(n.Static[i], delta) }
+	for i := range n.Dynamic { e.interest(n.Dynamic[i], delta) }
+	if n.Interest == 0 && !n.invalidating && n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled {
+		e.cancel(n)
 	}
 }
 
 func (e *Engine) Subscribe(n *Node) *Subscription {
-	if n == nil {
-		return nil
-	}
+	if n == nil { return nil }
 	s := mem.Alloc[Subscription](e.Alloc)
-	s.Alloc = e.Alloc
-	s.Node = n
+	s.Alloc, s.Node = e.Alloc, n
 	n.Subs = slices.Append(e.Alloc, n.Subs, s)
-	if n.Current {
-		s.push(n.Latest.Clone(e.Alloc))
-	}
-	if n.Completed {
-		s.terminal = true
-		s.diagnostic = n.Diagnostic
+	e.interest(n, 1)
+	request(n)
+	if n.Current { s.pushValue(Event{Kind: UpdateValue, NodeID: n.ID, Value: n.Latest.Clone(e.Alloc), Revision: n.Revision}) }
+	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
+		s.terminal = terminal(n)
 	}
 	return s
 }
 
-func (s *Subscription) push(value Value) {
-	if len(s.values) == 8 {
-		for i := 1; i < len(s.values); i++ {
-			s.values[i].Free(s.Alloc)
-		}
-		s.values = s.values[:1]
-	}
-	s.values = slices.Append(s.Alloc, s.values, value)
-}
-
-func (s *Subscription) Next() Event {
-	if len(s.values) != 0 {
-		value := s.values[0]
-		copy(s.values, s.values[1:])
-		s.values = s.values[:len(s.values)-1]
-		return Event{Value: value, HasValue: true}
-	}
-	if s.terminal {
-		s.terminal = false
-		return Event{Terminal: true, Diagnostic: s.diagnostic}
-	}
-	return Event{}
-}
-
-// Invalidate stops a source generation and clears its latest value. Call
-// ReplaceSource before requesting the node again.
-func (e *Engine) Invalidate(n *Node) {
-	if n == nil {
-		return
-	}
-	n.Generation++
-	n.Requested = false
-	n.Completed = false
-	n.Diagnostic = Diagnostic{}
-	if n.Flow != nil {
-		n.Flow.Free()
-		n.Flow = nil
-	}
-	if n.Current {
-		n.Latest.Free(e.Alloc)
-		n.Current = false
-	}
-}
-
-// ReplaceSource installs the next source generation after invalidation.
-func (e *Engine) ReplaceSource(n *Node, source *Source) {
-	if n == nil || source == nil {
-		return
-	}
-	if n.Flow != nil {
-		n.Flow.Free()
-	}
-	n.Flow = NewMaterializer(e.Alloc, source)
-	n.Completed = false
-	n.Diagnostic = Diagnostic{}
-}
-
-// Cancel releases active source state and sends one cancellation terminal event.
-func (e *Engine) Cancel(n *Node) {
-	_ = e
-	if n == nil || n.Completed {
-		return
-	}
-	if n.Flow != nil {
-		n.Flow.Free()
-		n.Flow = nil
-	}
-	n.Generation++
-	n.Requested = false
-	n.Completed = true
-	n.Diagnostic = Diagnostic{Code: DiagnosticCancelled}
+func (e *Engine) emit(n *Node, event Event) {
+	e.nextUpdate++
+	if event.NodeID == 0 { event.NodeID = n.ID }
+	event.Order = e.nextUpdate
 	for i := range n.Subs {
-		n.Subs[i].terminal = true
-		n.Subs[i].diagnostic = n.Diagnostic
-	}
-}
-
-func (e *Engine) Unsubscribe(s *Subscription) {
-	_ = e
-	if s == nil || s.unsubbed {
-		return
-	}
-	n := s.Node
-	for i := range n.Subs {
-		if n.Subs[i] == s {
-			copy(n.Subs[i:], n.Subs[i+1:])
-			n.Subs = n.Subs[:len(n.Subs)-1]
-			break
+		s := n.Subs[i]
+		if event.HasValue() {
+			s.pushValue(Event{Kind: event.Kind, NodeID: event.NodeID, DependencyID: event.DependencyID, Order: event.Order, Value: event.Value.Clone(e.Alloc), Revision: event.Revision})
+		} else if event.Terminal() {
+			s.terminal = event
+		} else {
+			if len(s.updates) == 8 {
+				s.updates = s.updates[:1]
+			}
+			s.updates = slices.Append(e.Alloc, s.updates, event)
 		}
 	}
-	s.free()
 }
 
-func (s *Subscription) free() {
-	for i := range s.values {
-		s.values[i].Free(s.Alloc)
+func (e *Engine) publish(n *Node, value Value) {
+	if value.HasCallable() {
+		value.Free(e.Alloc)
+		n.complete(e, Diagnostic{Code: DiagnosticExprValue})
+		return
 	}
-	slices.Free(s.Alloc, s.values)
-	s.unsubbed = true
-	mem.Free(s.Alloc, s)
+	if n.Current { n.Latest.Free(e.Alloc) }
+	n.Latest, n.Current = value.Clone(e.Alloc), true
+	value.Free(e.Alloc)
+	n.Revision++
+	e.emit(n, Event{Kind: UpdateValue, Value: n.Latest, Revision: n.Revision})
+	for i := range n.Dependents {
+		if n.Dependents[i].State == NodeWaiting { n.Dependents[i].State = NodeReady }
+	}
 }
 
-// Step processes at most one protocol atom from the lexically first ready node.
-// It returns the node that changed, or nil when no requested node can progress.
-func (e *Engine) Step() *Node {
+func (e *Engine) ready(n *Node) bool {
+	if n.Interest == 0 || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled || n.State == NodeWaiting { return false }
+	for i := range n.Static {
+		dependency := n.Static[i]
+		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
+			n.complete(e, dependency.Diagnostic)
+			return false
+		}
+		if dependency.State != NodeComplete { dependency.Requested = true; return false }
+	}
+	for i := range n.Dynamic {
+		dependency := n.Dynamic[i]
+		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
+			n.complete(e, dependency.Diagnostic)
+			return false
+		}
+		if !dependency.Current { dependency.Requested = true; return false }
+	}
+	return n.Requested
+}
+
+func (e *Engine) choose() *Node {
+	var first *Node
 	var selected *Node
 	for i := range e.nodes {
 		n := e.nodes[i]
-		if !n.Requested || n.Completed || n.Flow == nil {
-			continue
-		}
-		if selected == nil || n.Name < selected.Name {
-			selected = n
-		}
+		if !e.ready(n) || n.offered { continue }
+		if first == nil || lessNode(n, first) { first = n }
+		if e.lastRun != nil && lessNode(e.lastRun, n) && (selected == nil || lessNode(n, selected)) { selected = n }
 	}
-	if selected == nil {
-		return nil
-	}
+	if selected != nil { return selected }
+	return first
+}
 
-	step := selected.Flow.Next()
-	if step.Published {
-		if selected.Current {
-			selected.Latest.Free(e.Alloc)
+func lessNode(left *Node, right *Node) bool {
+	return left.Key.Name < right.Key.Name || (left.Key.Name == right.Key.Name && left.Key.Kind < right.Key.Kind)
+}
+
+// Ready returns up to capacity ready nodes in deterministic resource-key order.
+func (e *Engine) Ready(capacity int) []*Node {
+	if capacity <= 0 { return nil }
+	var nodes []*Node
+	for len(nodes) < capacity {
+		var selected *Node
+		for i := range e.nodes {
+			n := e.nodes[i]
+			if !e.ready(n) || n.offered || slices.Contains(nodes, n) { continue }
+			if selected == nil || lessNode(n, selected) { selected = n }
 		}
-		selected.Latest = step.Value
-		selected.Current = true
-		selected.Revision++
-		for i := range selected.Subs {
-			selected.Subs[i].push(selected.Latest.Clone(e.Alloc))
+		if selected == nil { break }
+		selected.offered = true
+		nodes = slices.Append(e.Alloc, nodes, selected)
+	}
+	return nodes
+}
+
+// Dispatch starts one node returned by Ready. A claimed node starts once.
+func (e *Engine) Dispatch(n *Node) *Node {
+	if n == nil || !n.offered { return nil }
+	return e.run(n)
+}
+
+// Step handles one completion or executes one deterministic ready node.
+func (e *Engine) Step() *Node {
+	if len(e.completions) != 0 {
+		c := e.completions[0]
+		copy(e.completions, e.completions[1:])
+		e.completions = e.completions[:len(e.completions)-1]
+		return e.accept(c)
+	}
+	n := e.choose()
+	if n == nil { return nil }
+	return e.run(n)
+}
+
+func (e *Engine) run(n *Node) *Node {
+	e.lastRun = n
+	n.offered = false
+	if n.materializer != nil {
+		n.Attempt++
+		c := &EngineContext{engine: e, node: n}
+		if n.HasCompletion { c.completion = n.Completion; n.Completion = Completion{}; n.HasCompletion = false }
+		result := n.materializer.Next(c)
+		if result.Published {
+			e.publish(n, result.Value)
+			if n.State == NodeFailed {
+				n.materializer.Free()
+				n.materializer = nil
+				return n
+			}
 		}
+		if result.Terminal {
+			n.materializer.Free()
+			n.materializer = nil
+			n.complete(e, result.Diagnostic)
+		} else if result.Waiting { n.State = NodeWaiting } else { n.State = NodeReady }
+		return n
 	}
-	if step.Terminal {
-		selected.Completed = true
-		selected.Diagnostic = step.Diagnostic
-		for i := range selected.Subs {
-			selected.Subs[i].terminal = true
-			selected.Subs[i].diagnostic = step.Diagnostic
-		}
+	if n.Producer == nil { n.complete(e, Diagnostic{Code: DiagnosticHostFailure}); return n }
+	n.Attempt++
+	c := &EngineContext{engine: e, node: n}
+	if n.HasCompletion { c.completion = n.Completion; n.Completion = Completion{}; n.HasCompletion = false }
+	result := n.Producer(c, n.ID)
+	if n.State == NodeComplete || n.State == NodeFailed { return n }
+	if n.materializer != nil && result == ProducerActive { return e.run(n) }
+	if result == ProducerCompleted { n.complete(e, Diagnostic{})
+	} else if result == ProducerFailed { n.complete(e, Diagnostic{Code: DiagnosticHostFailure})
+	} else if result == ProducerWaiting || result == ProducerSubmitted {
+		n.State = NodeWaiting
+		if result == ProducerSubmitted && !n.Submitted { n.complete(e, Diagnostic{Code: DiagnosticHostFailure}) }
+	} else { n.State = NodeReady }
+	return n
+}
+
+func (e *Engine) Complete(c Completion) {
+	queued := c
+	if c.HasValue { queued.Value = c.Value.Clone(e.Alloc); c.Value.Free(e.Alloc) }
+	e.completions = slices.Append(e.Alloc, e.completions, queued)
+}
+
+func (e *Engine) accept(c Completion) *Node {
+	for i := range e.nodes {
+		n := e.nodes[i]
+		if n.ID != c.NodeID { continue }
+		if !n.Submitted || n.Generation != c.Generation || n.Attempt != c.Attempt || n.HostRequestID != c.RequestID || n.State != NodeWaiting { c.Value.Free(e.Alloc); return nil }
+		n.Submitted = false
+		n.HostRequestID = 0
+		n.Completion, n.HasCompletion, n.State = c, true, NodeReady
+		return n
 	}
-	if step.Published || step.Terminal {
-		return selected
-	}
+	c.Value.Free(e.Alloc)
 	return nil
 }
 
-func (e *Engine) Free() {
-	if e == nil {
-		return
+func (e *Engine) Invalidate(n *Node) {
+	var seen []*Node
+	e.invalidate(n, &seen)
+	slices.Free(e.Alloc, seen)
+}
+
+func (e *Engine) invalidate(n *Node, seen *[]*Node) {
+	if n == nil { return }
+	if slices.Contains(*seen, n) { return }
+	*seen = slices.Append(e.Alloc, *seen, n)
+	n.invalidating = true
+	// Invalidating a child can remove its dynamic reverse edge from this node.
+	// Traverse a stable copy so that mutation cannot skip a sibling.
+	dependents := slices.Clone(e.Alloc, n.Dependents)
+	if n.Submitted {
+		e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 	}
+	n.Generation++
+	n.Submitted = false
+	n.HostRequestID = 0
+	if n.HasCompletion { n.Completion.Value.Free(e.Alloc); n.Completion = Completion{}; n.HasCompletion = false }
+	n.State, n.Requested, n.Diagnostic = NodeIdle, n.Interest != 0, Diagnostic{}
+	n.offered = false
+	if n.materializer != nil { n.materializer.Free(); n.materializer = nil }
+	if n.Current { n.Latest.Free(e.Alloc); n.Current = false }
+	for i := range n.Dynamic {
+		d := n.Dynamic[i]
+		removeDependent(d, n)
+		if n.Interest != 0 { e.interest(d, -n.Interest) }
+	}
+	slices.Free(e.Alloc, n.Dynamic); n.Dynamic = nil
+	e.emit(n, Event{Kind: UpdateInvalidated})
+	for i := range dependents { e.invalidate(dependents[i], seen) }
+	slices.Free(e.Alloc, dependents)
+	n.invalidating = false
+}
+
+func removeDependent(n, dependent *Node) {
+	for i := range n.Dependents { if n.Dependents[i] == dependent { copy(n.Dependents[i:], n.Dependents[i+1:]); n.Dependents = n.Dependents[:len(n.Dependents)-1]; return } }
+}
+
+// Cancel removes the convenience Request interest. Roots use Release instead.
+func (e *Engine) Cancel(n *Node) {
+	if n != nil && n.RequestInterest != 0 {
+		n.RequestInterest = 0
+		e.interest(n, -1)
+	}
+}
+
+func (e *Engine) cancel(n *Node) {
+	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled { return }
+	if n.materializer != nil { n.materializer.Free(); n.materializer = nil }
+	if n.HasCompletion { n.Completion.Value.Free(e.Alloc); n.Completion = Completion{}; n.HasCompletion = false }
+	if n.Submitted { e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID}) }
+	n.Submitted = false
+	n.HostRequestID = 0
+	n.Generation++; n.Requested = false; n.State = NodeCancelled; n.Diagnostic = Diagnostic{Code: DiagnosticCancelled}
+	e.emit(n, terminal(n))
+	for i := range n.Dependents {
+		if n.Dependents[i].State == NodeWaiting { n.Dependents[i].State = NodeReady }
+	}
+}
+
+func (e *Engine) NextCancellation() Cancellation {
+	if len(e.cancellations) == 0 { return Cancellation{} }
+	c := e.cancellations[0]
+	copy(e.cancellations, e.cancellations[1:])
+	e.cancellations = e.cancellations[:len(e.cancellations)-1]
+	return c
+}
+
+func (e *Engine) Unsubscribe(s *Subscription) {
+	if s == nil || s.unsubbed { return }
+	n := s.Node
+	for i := range n.Subs { if n.Subs[i] == s { copy(n.Subs[i:], n.Subs[i+1:]); n.Subs = n.Subs[:len(n.Subs)-1]; break } }
+	e.interest(n, -1)
+	s.free()
+}
+
+func (e *Engine) Free() {
+	if e == nil { return }
+	for i := range e.roots { mem.Free(e.Alloc, e.roots[i]) }
+	slices.Free(e.Alloc, e.roots)
 	for i := range e.nodes {
 		n := e.nodes[i]
-		for j := range n.Subs {
-			n.Subs[j].free()
-		}
-		slices.Free(e.Alloc, n.Subs)
-		if n.Current {
-			n.Latest.Free(e.Alloc)
-		}
-		if n.Flow != nil {
-			n.Flow.Free()
-		}
-		mem.FreeString(e.Alloc, n.Name)
-		mem.Free(e.Alloc, n)
+		for j := range n.Subs { n.Subs[j].free() }
+		slices.Free(e.Alloc, n.Subs); slices.Free(e.Alloc, n.Static); slices.Free(e.Alloc, n.Dynamic); slices.Free(e.Alloc, n.Dependents)
+		if n.Current { n.Latest.Free(e.Alloc) }
+		if n.materializer != nil { n.materializer.Free() }
+		if n.ContextFree != nil { n.ContextFree(e.Alloc, n.Context) }
+		if n.HasCompletion { n.Completion.Value.Free(e.Alloc) }
+		n.Key.Free(e.Alloc); mem.Free(e.Alloc, n)
 	}
-	slices.Free(e.Alloc, e.nodes)
-	mem.Free(e.Alloc, e)
+	for i := range e.completions { e.completions[i].Value.Free(e.Alloc) }
+	slices.Free(e.Alloc, e.nodes); slices.Free(e.Alloc, e.cancellations); slices.Free(e.Alloc, e.completions); mem.Free(e.Alloc, e)
 }

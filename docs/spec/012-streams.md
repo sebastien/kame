@@ -48,9 +48,16 @@ Source {
 ```
 
 `poll` emits at most one protocol atom per engine step. It may instead register
-a dependency or submit host work and return `waiting`. The completion is copied
-into an engine-owned message and a later step resumes the same source. A source
-that returns `completed` has no implicit value or batch to emit.
+a dependency or submit host work and return `waiting`. A source submitting host
+work records the host request ID through its engine context before returning
+waiting. The completion is copied into an engine-owned message and a later step
+resumes the same source. A source that returns `completed` has no implicit value
+or batch to emit.
+
+`waiting` is the only blocked state. Consuming any protocol atom, including a
+chunk, collection control, nested source, or inner `EndStream`, is internal
+progress even when it produces no materialized value. The scheduler requeues
+that source behind other ready work; it does not expose a heartbeat value.
 
 The engine invokes `free` exactly once after normal completion, failure,
 invalidation, cancellation, or engine teardown. A source transfers each emitted
@@ -85,9 +92,10 @@ stream termination without treating a stream as a `Value`.
 
 ## Materialization
 
-The engine owns a materializer for every active source node generation. It owns
-the source stack and every open batch builder. Raw protocol atoms are never
-delivered to node subscribers.
+The producer attaches a source through its engine context for an active node
+generation. The engine then owns that generation's materializer, source stack,
+and every open batch builder. Raw protocol atoms are never delivered to node
+subscribers. A source is never installed or replaced directly on a node.
 
 - `Atom(value)` publishes `value` with the node's next revision.
 - `Chunk(value)` transfers the value into the current collection builder.
@@ -116,9 +124,9 @@ by a node or subscription.
 
 Sources run only while their node has live root or subscriber interest. The
 single-threaded scheduler polls ready sources in canonical resource-key order.
-After one emitted atom, it requeues an interested nonterminal source behind
-other ready work. This bounds work per step and prevents an infinite source
-from starving dependency processing.
+After one consumed protocol atom, it requeues an interested nonterminal source
+behind other ready work. This bounds work per step and prevents an infinite
+source from starving dependency processing.
 
 Subscription coalescing occurs after materialization. A full queue may discard
 intermediate published batch lists according to `002-engine.md`, but it never
@@ -129,8 +137,9 @@ asked to replay discarded values.
 
 A waiting source records its node ID, generation, attempt, and host request ID.
 The engine copies completion bytes into its message allocation before the host
-call returns. On resume, the source may consume, clone, or free that message
-payload; it may not retain the host buffer.
+call returns and resumes a source only when all four identifiers match. On
+resume, the source may consume, clone, or free that message payload; it may not
+retain the host buffer.
 
 Invalidation and cancellation detach the waiting source from the active node
 generation, free its materializer, and request host cancellation where needed.

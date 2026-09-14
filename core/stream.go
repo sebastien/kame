@@ -25,6 +25,7 @@ const (
 	DiagnosticExprValue DiagnosticCode = "LM-EXPRV"
 	DiagnosticHostFailure DiagnosticCode = "LM-HOSTF"
 	DiagnosticCancelled  DiagnosticCode = "LM-CMDCN"
+	DiagnosticDependencyCycle DiagnosticCode = "LM-TRDCY"
 )
 
 type Diagnostic struct {
@@ -47,7 +48,7 @@ const (
 	PollFailed
 )
 
-type SourcePoll func(*Source, *Atom) PollResult
+type SourcePoll func(*EngineContext, *Source, *Atom) PollResult
 type SourceFree func(*Source)
 
 // Source is an allocator-owned resumable generator. State is interpreted only
@@ -76,6 +77,9 @@ func (s *Source) release(a mem.Allocator) {
 	mem.Free(a, s)
 }
 
+// FreeSource releases an untransferred source.
+func FreeSource(a mem.Allocator, s *Source) { s.release(a) }
+
 // Materializer owns active sources and incomplete batches. Next processes no
 // more than one generator atom, so an unbounded source cannot starve the stepper.
 type Materializer struct {
@@ -92,10 +96,13 @@ type sourceFrame struct {
 	collections [][]Value
 }
 
-type Step struct {
+// AtomResult is the outcome of consuming at most one protocol atom. The
+// materializer progresses one atom per call; only Waiting blocks the source.
+type AtomResult struct {
 	Value      Value
 	Published  bool
 	Terminal   bool
+	Waiting    bool
 	Diagnostic Diagnostic
 }
 
@@ -107,29 +114,29 @@ func NewMaterializer(a mem.Allocator, source *Source) *Materializer {
 }
 
 // Next returns a materialized publication, whether one was published, and
-// whether the source has reached a terminal state.
-func (m *Materializer) Next() Step {
+// whether the source has reached a terminal state. The engine context is the
+// active invocation's context; a caller that only drives the materializer
+// directly passes nil.
+func (m *Materializer) Next(c *EngineContext) AtomResult {
 	if m.finished || m.failed {
-		return Step{Terminal: true, Diagnostic: m.diagnostic}
+		return AtomResult{Terminal: true, Diagnostic: m.diagnostic}
 	}
 	if len(m.frames) == 0 {
 		m.finished = true
-		return Step{Terminal: true}
+		return AtomResult{Terminal: true}
 	}
 
 	frame := &m.frames[len(m.frames)-1]
 	s := frame.source
 	atom := Atom{}
-	result := s.Poll(s, &atom)
+	result := s.Poll(c, s, &atom)
 	if result == PollWaiting {
-		return Step{}
+		return AtomResult{Waiting: true}
 	}
 	if result == PollFailed {
 		return m.fail(Diagnostic{Code: DiagnosticHostFailure})
 	}
-	if result == PollCompleted {
-		atom.Kind = AtomEndStream
-	}
+	if result == PollCompleted { return m.completeFrame() }
 
 	switch atom.Kind {
 	case AtomValue:
@@ -137,7 +144,7 @@ func (m *Materializer) Next() Step {
 			atom.Value.Free(m.Alloc)
 			return m.fail(Diagnostic{Code: DiagnosticExprValue})
 		}
-		return Step{Value: atom.Value, Published: true}
+		return AtomResult{Value: atom.Value, Published: true}
 	case AtomChunk:
 		if len(frame.collections) == 0 {
 			frame.chunks = slices.Append(m.Alloc, frame.chunks, atom.Value)
@@ -149,7 +156,7 @@ func (m *Materializer) Next() Step {
 		if len(frame.collections) != 0 {
 			return m.fail(Diagnostic{Code: DiagnosticExprValue})
 		}
-		return Step{Value: commit(frame), Published: true}
+		return AtomResult{Value: commit(frame), Published: true}
 	case AtomStartCollection:
 		frame.collections = slices.Append(m.Alloc, frame.collections, nil)
 	case AtomEndCollection:
@@ -179,17 +186,21 @@ func (m *Materializer) Next() Step {
 		if published {
 			value = commit(frame)
 		}
+		// The frame leaves the stack here; committed chunks moved into value,
+		// so release the collection builder storage the frame still owns.
+		slices.Free(m.Alloc, frame.collections)
+		frame.collections = nil
 		m.frames = m.frames[:len(m.frames)-1]
 		s.release(m.Alloc)
 		if len(m.frames) == 0 {
 			m.finished = true
 			if published {
-				return Step{Value: value, Published: true, Terminal: true}
+				return AtomResult{Value: value, Published: true, Terminal: true}
 			}
-			return Step{Terminal: true}
+			return AtomResult{Terminal: true}
 		}
 		if published {
-			return Step{Value: value, Published: true}
+			return AtomResult{Value: value, Published: true}
 		}
 	case AtomFailed:
 		diagnostic := atom.Diagnostic
@@ -201,7 +212,7 @@ func (m *Materializer) Next() Step {
 		atom.Value.Free(m.Alloc)
 		return m.fail(Diagnostic{Code: DiagnosticExprValue})
 	}
-	return Step{}
+	return AtomResult{}
 }
 
 func commit(frame *sourceFrame) Value {
@@ -210,28 +221,39 @@ func commit(frame *sourceFrame) Value {
 	return Value{Kind: List, List: list}
 }
 
-func (m *Materializer) fail(diagnostic Diagnostic) Step {
+func (m *Materializer) fail(diagnostic Diagnostic) AtomResult {
 	m.discard()
 	m.failed = true
 	m.diagnostic = diagnostic
-	return Step{Terminal: true, Diagnostic: diagnostic}
+	return AtomResult{Terminal: true, Diagnostic: diagnostic}
+}
+
+func (m *Materializer) completeFrame() AtomResult {
+	last := len(m.frames) - 1
+	if len(m.frames[last].collections) != 0 { return m.fail(Diagnostic{Code: DiagnosticExprValue}) }
+	m.freeFrame(&m.frames[last])
+	m.frames = m.frames[:last]
+	if len(m.frames) == 0 {
+		m.finished = true
+		return AtomResult{Terminal: true}
+	}
+	return AtomResult{}
+}
+
+func (m *Materializer) freeFrame(frame *sourceFrame) {
+	for i := range frame.chunks { frame.chunks[i].Free(m.Alloc) }
+	slices.Free(m.Alloc, frame.chunks)
+	for i := range frame.collections {
+		for j := range frame.collections[i] { frame.collections[i][j].Free(m.Alloc) }
+		slices.Free(m.Alloc, frame.collections[i])
+	}
+	slices.Free(m.Alloc, frame.collections)
+	frame.source.release(m.Alloc)
 }
 
 func (m *Materializer) discard() {
 	for i := range m.frames {
-		frame := &m.frames[i]
-		for j := range frame.chunks {
-			frame.chunks[j].Free(m.Alloc)
-		}
-		slices.Free(m.Alloc, frame.chunks)
-		for j := range frame.collections {
-			for k := range frame.collections[j] {
-				frame.collections[j][k].Free(m.Alloc)
-			}
-			slices.Free(m.Alloc, frame.collections[j])
-		}
-		slices.Free(m.Alloc, frame.collections)
-		frame.source.release(m.Alloc)
+		m.freeFrame(&m.frames[i])
 	}
 	slices.Free(m.Alloc, m.frames)
 	m.frames = nil

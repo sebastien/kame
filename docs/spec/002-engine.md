@@ -98,10 +98,14 @@ its payload to the receiver; unsubscribe and engine teardown free every unpopped
 payload. Exact intermediate values require an explicit sink operation and are
 not a property of cells.
 
+Non-value updates use a separate queue with the same capacity and coalescing
+rule. Their retained order is preserved, but intermediate dependency and
+invalidation updates may be omitted when that queue fills.
+
 ## Producers
 
 A producer is a named function pointer and context. It receives an engine
-context and node identity, and returns one of:
+context and node identity, never a mutable node, and returns one of:
 
 - Completed synchronously.
 - Waiting for declared dependencies.
@@ -109,9 +113,17 @@ context and node identity, and returns one of:
 - Published a value and remains active.
 - Failed with a diagnostic.
 
-Producers publish through engine methods; they do not mutate nodes directly.
-The callback context may record evaluator state but must follow the ownership
-rules in `001-architecture.md`.
+Producers publish, request dependencies, submit host work, and attach a source
+through engine-context methods; they do not mutate nodes directly. A producer
+may attach one source to its active generation. The engine owns that source's
+materializer until completion, invalidation, cancellation, or teardown. The
+callback context may record evaluator state but must follow the ownership rules
+in `001-architecture.md`.
+
+A producer may read the current value of a dependency it has already requested
+through the engine context. The value is borrowed for the duration of the
+producer call and must be cloned before it is retained; reading does not add an
+edge. A dependency without a current value reports none instead of blocking.
 
 A producer that emits incrementally uses the source protocol in
 `012-streams.md`. Node subscribers receive only its materialized value updates.
@@ -136,6 +148,11 @@ One owner calls the engine step function. A step processes queued completions,
 propagates invalidations, and emits ready work in deterministic resource-key
 order.
 
+A source protocol atom consumed without a materialized value is internal
+progress, not waiting. The engine requeues that source behind other ready work;
+only a source that explicitly returns waiting blocks for a dependency or host
+completion.
+
 The host may execute ready jobs concurrently. A completion includes node ID,
 generation, and attempt. The engine discards a completion whose generation or
 attempt no longer matches the active invocation.
@@ -145,7 +162,8 @@ the same resource share that generation.
 
 ## Invalidation
 
-Invalidating a node:
+Invalidating a node while demand remains starts a replacement producer
+generation. Invalidating a node:
 
 - Increments its generation.
 - Cancels or logically abandons running work.
@@ -153,6 +171,12 @@ Invalidating a node:
 - Marks its latest value stale and retains it only for observers that already
   received it, until their queued copies are freed.
 - Recursively invalidates dependents once.
+
+The engine retains root and subscriber demand across invalidation. It abandons
+the old generation, requests host cancellation for submitted work, and schedules
+the replacement generation without a second root request. Producers recreate
+their generation-local source through the engine context; callers do not replace
+sources on nodes.
 
 Stale values do not satisfy dependency readiness and are not delivered to new
 subscribers. Publishing a replacement value makes it current. Failure leaves no
@@ -184,6 +208,8 @@ lines inside one build node remain one ordered shell script.
 - Independent nodes are offered as ready together and produce deterministic
   per-node revisions regardless of completion order.
 - A producer adds a dynamic dependency, waits, resumes, and publishes a value.
+- A producer reads the current value of a declared dependency and publishes a
+  derived value.
 - Direct and indirect dependency cycles return `LM-TRDCY`.
 - Two subscribers receive the current value and all future values independently.
 - A late subscriber receives only the latest retained value, not full history.

@@ -15,6 +15,8 @@ type sequence struct {
 
 type releaseRecord struct {
 	Freed bool
+	Polls int
+	Frees int
 }
 
 type failingSequence struct {
@@ -24,7 +26,33 @@ type failingSequence struct {
 	Alloc   mem.Allocator
 }
 
-func poll(s *core.Source, out *core.Atom) core.PollResult {
+type sourceFixture struct {
+	Source *core.Source
+}
+
+func sourceFixtureProducer(c *core.EngineContext, nodeID int64) core.ProducerResult {
+	_ = nodeID
+	state := c.Context().(*sourceFixture)
+	source := state.Source
+	if source == nil || !c.AttachSource(source) { return core.ProducerFailed }
+	state.Source = nil
+	return core.ProducerActive
+}
+
+func freeSourceFixture(a mem.Allocator, context any) {
+	state := context.(*sourceFixture)
+	if state.Source != nil { core.FreeSource(a, state.Source) }
+	mem.Free(a, state)
+}
+
+func addSource(e *core.Engine, name string, source *core.Source) *core.Node {
+	state := mem.Alloc[sourceFixture](e.Alloc)
+	state.Source = source
+	return e.AddOwned(core.ResourceKey{Kind: core.ResourceDefinition, Name: name}, sourceFixtureProducer, state, freeSourceFixture)
+}
+
+func poll(c *core.EngineContext, s *core.Source, out *core.Atom) core.PollResult {
+	_ = c
 	state := s.State.(*sequence)
 	if state.Index == len(state.Atoms) {
 		return core.PollCompleted
@@ -51,8 +79,10 @@ func newSequence(a mem.Allocator, atoms []core.Atom) *core.Source {
 	return core.NewSource(a, poll, free, state)
 }
 
-func pollFailingSequence(s *core.Source, out *core.Atom) core.PollResult {
+func pollFailingSequence(c *core.EngineContext, s *core.Source, out *core.Atom) core.PollResult {
+	_ = c
 	state := s.State.(*failingSequence)
+	if state.Index == len(state.Atoms) { return core.PollWaiting }
 	*out = state.Atoms[state.Index]
 	state.Index++
 	return core.PollEmitted
@@ -61,6 +91,7 @@ func pollFailingSequence(s *core.Source, out *core.Atom) core.PollResult {
 func freeFailingSequence(s *core.Source) {
 	state := s.State.(*failingSequence)
 	state.Record.Freed = true
+	state.Record.Frees++
 	mem.Free(state.Alloc, state)
 }
 
@@ -84,9 +115,9 @@ func TestMaterializesBatch(t *testing.T) {
 	})
 	m := core.NewMaterializer(a, source)
 
-	m.Next()
-	m.Next()
-	batch := m.Next()
+	m.Next(nil)
+	m.Next(nil)
+	batch := m.Next(nil)
 	if !batch.Published || batch.Value.Kind != core.List || len(batch.Value.List) != 2 {
 		t.Error("batch was not published as a two-item list")
 		m.Free()
@@ -99,18 +130,51 @@ func TestMaterializesBatch(t *testing.T) {
 		return
 	}
 	batch.Value.Free(a)
-	m.Next()
+	m.Next(nil)
 	m.Free()
 }
 
 func TestMaterializesEmptyBatch(t *testing.T) {
 	a := t.Allocator()
 	m := core.NewMaterializer(a, newSequence(a, []core.Atom{{Kind: core.AtomEndBatch}}))
-	batch := m.Next()
+	batch := m.Next(nil)
 	if !batch.Published || batch.Value.Kind != core.List || len(batch.Value.List) != 0 {
 		t.Error("empty batch was not published as an empty list")
 	}
 	batch.Value.Free(a)
+	m.Free()
+}
+
+func TestEndStreamCommitsNonemptyBatch(t *testing.T) {
+	a := t.Allocator()
+	m := core.NewMaterializer(a, newSequence(a, []core.Atom{
+		{Kind: core.AtomChunk, Value: core.NewString(a, "final")},
+		{Kind: core.AtomEndStream},
+	}))
+	m.Next(nil)
+	step := m.Next(nil)
+	if !step.Published || !step.Terminal || step.Value.Kind != core.List || len(step.Value.List) != 1 || step.Value.List[0].Text != "final" {
+		t.Error("EndStream did not commit the pending batch")
+	}
+	step.Value.Free(a)
+	m.Free()
+}
+
+func TestPollCompletedDiscardsUncommittedBatch(t *testing.T) {
+	a := t.Allocator()
+	m := core.NewMaterializer(a, newSequence(a, []core.Atom{{Kind: core.AtomChunk, Value: core.NewString(a, "discard")}}))
+	m.Next(nil)
+	step := m.Next(nil)
+	if step.Published || !step.Terminal { t.Error("PollCompleted committed an implicit batch") }
+	m.Free()
+}
+
+func TestPollCompletedWithOpenCollectionFails(t *testing.T) {
+	a := t.Allocator()
+	m := core.NewMaterializer(a, newSequence(a, []core.Atom{{Kind: core.AtomStartCollection}}))
+	m.Next(nil)
+	step := m.Next(nil)
+	if !step.Terminal || step.Diagnostic.Code != core.DiagnosticExprValue { t.Error("PollCompleted accepted an open collection") }
 	m.Free()
 }
 
@@ -123,14 +187,30 @@ func TestMaterializesNestedCollections(t *testing.T) {
 		{Kind: core.AtomEndBatch},
 	})
 	m := core.NewMaterializer(a, source)
-	m.Next()
-	m.Next()
-	m.Next()
-	batch := m.Next()
+	m.Next(nil)
+	m.Next(nil)
+	m.Next(nil)
+	batch := m.Next(nil)
 	if !batch.Published || batch.Value.Kind != core.List || len(batch.Value.List) != 1 || batch.Value.List[0].Kind != core.List || len(batch.Value.List[0].List) != 1 || batch.Value.List[0].List[0].Text != "nested" {
 		t.Error("nested collection was not materialized as a nested list")
 	}
 	batch.Value.Free(a)
+	m.Free()
+}
+
+func TestMaterializesEmptyNestedCollection(t *testing.T) {
+	a := t.Allocator()
+	m := core.NewMaterializer(a, newSequence(a, []core.Atom{
+		{Kind: core.AtomStartCollection},
+		{Kind: core.AtomEndCollection},
+		{Kind: core.AtomEndBatch},
+	}))
+	m.Next(nil); m.Next(nil)
+	step := m.Next(nil)
+	if !step.Published || step.Value.Kind != core.List || len(step.Value.List) != 1 || step.Value.List[0].Kind != core.List || len(step.Value.List[0].List) != 0 {
+		t.Error("empty nested collection was not materialized")
+	}
+	step.Value.Free(a)
 	m.Free()
 }
 
@@ -146,17 +226,38 @@ func TestNestedSourceUsesItsOwnBatch(t *testing.T) {
 		{Kind: core.AtomEndStream},
 	})
 	m := core.NewMaterializer(a, outer)
-	m.Next()
-	m.Next()
-	innerValue := m.Next()
-	m.Next()
-	outerBatch := m.Next()
+	m.Next(nil)
+	m.Next(nil)
+	innerValue := m.Next(nil)
+	m.Next(nil)
+	outerBatch := m.Next(nil)
 	if !innerValue.Published || innerValue.Value.Text != "inner" || !outerBatch.Published || outerBatch.Value.Kind != core.List || len(outerBatch.Value.List) != 1 || outerBatch.Value.List[0].Text != "outer" {
 		t.Error("nested source did not retain independent batch state")
 	}
 	innerValue.Value.Free(a)
 	outerBatch.Value.Free(a)
-	m.Next()
+	m.Next(nil)
+	m.Free()
+}
+
+func TestEndStreamReleasesCollectionBuilder(t *testing.T) {
+	a := t.Allocator()
+	m := core.NewMaterializer(a, newSequence(a, []core.Atom{
+		{Kind: core.AtomStartCollection},
+		{Kind: core.AtomChunk, Value: core.NewString(a, "nested")},
+		{Kind: core.AtomEndCollection},
+		{Kind: core.AtomEndBatch},
+		{Kind: core.AtomEndStream},
+	}))
+	m.Next(nil)
+	m.Next(nil)
+	m.Next(nil)
+	batch := m.Next(nil)
+	if !batch.Published || batch.Value.Kind != core.List || len(batch.Value.List) != 1 {
+		t.Error("collection batch was not committed before EndStream")
+	}
+	batch.Value.Free(a)
+	m.Next(nil)
 	m.Free()
 }
 
@@ -168,12 +269,25 @@ func TestFailureReleasesActiveSourceAndChunks(t *testing.T) {
 		{Kind: core.AtomFailed},
 	})
 	m := core.NewMaterializer(a, source)
-	m.Next()
-	failed := m.Next()
-	if !failed.Terminal || !record.Freed {
+	m.Next(nil)
+	failed := m.Next(nil)
+	if !failed.Terminal || !record.Freed || record.Frees != 1 {
 		t.Error("failure did not release the active source and its chunks")
 	}
 	m.Free()
+	mem.Free(a, record)
+}
+
+func TestNormalCompletionReleasesSourceOnce(t *testing.T) {
+	a := t.Allocator()
+	record := mem.Alloc[releaseRecord](a)
+	e := core.NewEngine(a)
+	n := addSource(e, "normal", newFailingSequence(a, record, []core.Atom{{Kind: core.AtomEndStream}}))
+	e.Request(n)
+	e.Step()
+	if n.State != core.NodeComplete || record.Frees != 1 { t.Error("normal completion did not release source exactly once") }
+	e.Free()
+	if record.Frees != 1 { t.Error("engine teardown released completed source twice") }
 	mem.Free(a, record)
 }
 
@@ -183,11 +297,23 @@ func TestProtocolViolationsReportExprValue(t *testing.T) {
 		{Kind: core.AtomStartCollection},
 		{Kind: core.AtomEndStream},
 	}))
-	m.Next()
-	failed := m.Next()
+	m.Next(nil)
+	failed := m.Next(nil)
 	if !failed.Terminal || failed.Diagnostic.Code != core.DiagnosticExprValue {
 		t.Error("unclosed collection did not report LM-EXPRV")
 	}
+	m.Free()
+}
+
+func TestAtomInsideBatchReportsExprValue(t *testing.T) {
+	a := t.Allocator()
+	m := core.NewMaterializer(a, newSequence(a, []core.Atom{
+		{Kind: core.AtomChunk, Value: core.NewString(a, "chunk")},
+		{Kind: core.AtomValue, Value: core.NewString(a, "atom")},
+	}))
+	m.Next(nil)
+	failed := m.Next(nil)
+	if !failed.Terminal || failed.Diagnostic.Code != core.DiagnosticExprValue { t.Error("atom inside batch did not report LM-EXPRV") }
 	m.Free()
 }
 
@@ -195,28 +321,25 @@ func TestInvalidateAndCancelReleaseSources(t *testing.T) {
 	a := t.Allocator()
 	e := core.NewEngine(a)
 	invalidated := mem.Alloc[releaseRecord](a)
-	n := e.AddSource("source", newFailingSequence(a, invalidated, nil))
-	e.Request(n)
-	e.Invalidate(n)
-	if !invalidated.Freed || n.Flow != nil || n.Current || n.Completed || n.Generation != 1 {
-		t.Error("invalidation did not release and reset the source generation")
-	}
-	e.ReplaceSource(n, newSequence(a, []core.Atom{{Kind: core.AtomValue, Value: core.NewString(a, "replacement")}}))
+	n := addSource(e, "source", newFailingSequence(a, invalidated, nil))
 	e.Request(n)
 	e.Step()
-	if !n.Current || n.Latest.Text != "replacement" {
-		t.Error("replacement source did not start after invalidation")
+	e.Invalidate(n)
+	if !invalidated.Freed || invalidated.Frees != 1 || n.HasActiveSource() || n.Current || n.Generation != 1 {
+		t.Error("invalidation did not release and reset the source generation")
 	}
+	e.Cancel(n)
 	cancelled := mem.Alloc[releaseRecord](a)
-	pending := e.AddSource("waiting", newFailingSequence(a, cancelled, nil))
+	pending := addSource(e, "waiting", newFailingSequence(a, cancelled, nil))
 	s := e.Subscribe(pending)
 	e.Request(pending)
+	e.Step()
 	e.Cancel(pending)
-	event := s.Next()
-	if !cancelled.Freed || !event.Terminal || event.Diagnostic.Code != core.DiagnosticCancelled {
-		t.Error("cancellation did not release the source and notify subscribers")
-	}
+	if cancelled.Freed { t.Error("cancellation ignored active subscriber interest") }
+	e.Unsubscribe(s)
+	if !cancelled.Freed || cancelled.Frees != 1 { t.Error("last interest did not cancel and release source exactly once") }
 	e.Free()
+	if invalidated.Frees != 1 || cancelled.Frees != 1 { t.Error("engine teardown released cancelled sources twice") }
 	mem.Free(a, invalidated)
 	mem.Free(a, cancelled)
 }
@@ -224,10 +347,10 @@ func TestInvalidateAndCancelReleaseSources(t *testing.T) {
 func TestEngineStartsRequestedSourcesInNameOrder(t *testing.T) {
 	a := t.Allocator()
 	e := core.NewEngine(a)
-	first := e.AddSource("a", newSequence(a, []core.Atom{
+	first := addSource(e, "a", newSequence(a, []core.Atom{
 		{Kind: core.AtomValue, Value: core.NewString(a, "first")},
 	}))
-	second := e.AddSource("b", newSequence(a, []core.Atom{
+	second := addSource(e, "b", newSequence(a, []core.Atom{
 		{Kind: core.AtomValue, Value: core.NewString(a, "second")},
 	}))
 	e.Request(second)
@@ -244,7 +367,7 @@ func TestEngineStartsRequestedSourcesInNameOrder(t *testing.T) {
 func TestSubscribersOwnIndependentValueCopies(t *testing.T) {
 	a := t.Allocator()
 	e := core.NewEngine(a)
-	n := e.AddSource("stream", newSequence(a, []core.Atom{
+	n := addSource(e, "stream", newSequence(a, []core.Atom{
 		{Kind: core.AtomValue, Value: core.NewString(a, "value")},
 	}))
 	first := e.Subscribe(n)
@@ -253,7 +376,7 @@ func TestSubscribersOwnIndependentValueCopies(t *testing.T) {
 	e.Step()
 	one := first.Next()
 	two := second.Next()
-	if !one.HasValue || !two.HasValue || one.Value.Text != "value" || two.Value.Text != "value" {
+	if !one.HasValue() || !two.HasValue() || one.Value.Text != "value" || two.Value.Text != "value" {
 		t.Error("subscribers did not receive the published value")
 		one.Value.Free(a)
 		two.Value.Free(a)
@@ -263,7 +386,7 @@ func TestSubscribersOwnIndependentValueCopies(t *testing.T) {
 	one.Value.Free(a)
 	two.Value.Free(a)
 	e.Step()
-	if !first.Next().Terminal || !second.Next().Terminal {
+	if !first.Next().Terminal() || !second.Next().Terminal() {
 		t.Error("subscribers did not receive independent terminal events")
 	}
 	e.Free()
