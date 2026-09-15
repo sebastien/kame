@@ -1,0 +1,8 @@
+build : ./app
+	echo building
+
+clean :
+	rm -rf ./dist
+
+test-{name} : ./{name}.o
+	echo testing @>

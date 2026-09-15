@@ -1,0 +1,11 @@
+VERSION = "1.0"
+SOURCES = ./src/a.c ./src/b.c
+
+default : ./app
+
+./app : @(wildcard ./src/*.c)
+	cc -o @> @<
+
+(version) = VERSION
+
+(version)

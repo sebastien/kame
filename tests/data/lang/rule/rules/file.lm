@@ -1,0 +1,9 @@
+./app : ./main.o ./util.o
+	cc -o @> @<
+
+./generated.c :
+	echo generated > @>
+
+./a.o ./b.o : ./a.c
+	cc -c @< -o @>
+	cp @> @>1

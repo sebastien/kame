@@ -1,0 +1,14 @@
+./bundle : ./a.o ./b.o
+	echo @<
+
+./strings : "literal input"
+	echo @<
+
+./generated : @(wildcard ./src/*.c)
+	echo @<
+
+./named : build clean
+	echo @<
+
+./templated : ./src/{name:*}.c
+	echo @<

@@ -1,0 +1,4 @@
+./app : ./main.c ./util.c
+	echo inputs: @< @<* count=@<#
+	echo outputs: @> @>* count=@>#
+	echo @{version} and @(count ./src)

@@ -1,0 +1,2 @@
+SOURCES = ./src/a.c ./src/b.c ./src/c.c
+FLAGS = -Wall -O2

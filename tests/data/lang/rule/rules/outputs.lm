@@ -1,0 +1,13 @@
+default : build
+
+./out.o : ./in.c
+	cc -c @< -o @>
+
+"./build dir/out.o" : ./in.c
+	cc -c @< -o @>
+
+live-{name} : ./{name}.c
+	echo live @>
+
+./{path:**}/{name:*}.c : ./src/{name:*}.c
+	echo @{name}

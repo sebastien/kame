@@ -1,0 +1,3 @@
+(compile src out) = (run cc src out)
+(all) = ./dist
+(join-all sep rest...) = (join rest sep)

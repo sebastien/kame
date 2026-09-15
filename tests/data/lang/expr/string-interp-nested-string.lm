@@ -1,0 +1,1 @@
+"outer {(join [(inner "x{(count files)}y")] " ")} end"

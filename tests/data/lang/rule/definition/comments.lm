@@ -1,0 +1,5 @@
+# Value definitions
+OUTPUT = ./dist/app
+
+// Function definition
+(build target) = (run make target)

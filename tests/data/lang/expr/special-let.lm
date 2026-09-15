@@ -1,0 +1,1 @@
+(let [name "app" path ./src] (join [name path] " "))

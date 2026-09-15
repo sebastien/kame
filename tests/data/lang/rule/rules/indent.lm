@@ -1,0 +1,7 @@
+# generate the script
+./script.sh :
+	# shell comment preserved literally
+	cat > @> <<'EOF'
+	  echo indented body
+	EOF
+	chmod +x @>

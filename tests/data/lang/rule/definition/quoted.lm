@@ -1,0 +1,2 @@
+GREETING = "hello @(project.name)"
+BANNER = "Bundle of @(count files) files"

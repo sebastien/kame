@@ -1,0 +1,1 @@
+(def twice [x] (mul x 2))

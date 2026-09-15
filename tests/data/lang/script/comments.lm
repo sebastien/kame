@@ -1,0 +1,9 @@
+# hash comment
+// slash comment
+
+OUTPUT = ./dist/app
+
+# comment between constructs
+
+./dist/app : ./src/main.c
+	cc -o @> @<

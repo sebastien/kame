@@ -1,0 +1,6 @@
+FILES = (wildcard ./src/*.c)
+META = [name: "app" path: ./src]
+PAIRS = [
+  name: "app"
+  count: 2
+]
