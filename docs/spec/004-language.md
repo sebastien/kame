@@ -116,6 +116,11 @@ balanced normally. `\{` produces a literal `{`. An unclosed interpolation is
 `LM-PARSE`; it does not use recipe recovery. `@(expression)` is also accepted
 inside quoted strings and has the same value semantics.
 
+Expression strings are parsed by the expression parser. `{(...)}` interpolation
+and the `\{` escape are specific to expression strings. `@(expression)` is the
+one expansion shared with string templates (see String Templates);
+`@{reference}` and contextual selectors are not expression-string syntax.
+
 Single quote is reserved and is not an alternative string delimiter.
 
 ### References
@@ -159,7 +164,13 @@ The evaluator recognizes these application heads specially:
 
 - `?` returns the first operand that does not fail with unknown-reference.
 - `let` evaluates sequential name/value bindings in a child lexical scope.
-- `def` binds a value or function in the current lexical scope.
+- `def` binds a value or function in the current lexical scope:
+  - `(def NAME value)` binds a value.
+  - `(def NAME [parameter...] body...)` binds a function. The parameter list
+    uses lambda parameter syntax and may end in one rest parameter.
+
+  A `def` with one operand after `NAME` is a value binding; with two or more,
+  the first operand is the parameter list and the rest is the function body.
 - `eval` evaluates expression text or an explicitly loaded script as specified
   in `005-evaluation.md`.
 
@@ -167,12 +178,18 @@ There is no language-level `if` in the initial implementation.
 
 ## String Templates
 
-Standalone and recipe strings contain literal segments and expansions:
+String templates are parsed by the template parser. They appear as definition
+right-hand sides that begin with `"`, as recipe text, and as standalone template
+sources. They contain literal segments and expansions:
 
 - `@(expression)` evaluates an expression.
 - `@{reference}` resolves a reference.
 - `@<`, `@>`, and argument forms resolve contextual selectors.
 - A backslash escapes `@` and `\`.
+
+`@(expression)` is shared with expression strings (see Strings); `@{reference}`
+and contextual selectors are template-only, while `{(...)}` interpolation is
+expression-string-only.
 
 Malformed `@(` or `@{` expansions remain literal and produce an `LM-PARSE`
 warning. A well-delimited but invalid contained expression is an error.
@@ -211,9 +228,12 @@ Indexes are zero-based. Negative indexes count from the end. Missing context is
 
 ## Target Templates
 
-A target template contains literal text and one or more capture groups:
+A target template contains literal text and zero or more capture groups. A
+template with no capture group matches only its literal text; rule headers
+classify such a target as a path or name rather than a template:
 
 ```littlemake
+./out.o
 ./{stem:*}.o
 ./{path:**}/{name:*}.c
 live-{name}
@@ -313,9 +333,9 @@ Headers are classified as:
 - Cached task: `task` followed by exactly one name or name template.
 - Service: `service` followed by exactly one name or name template.
 
-Mixing path and name outputs is invalid. A file-looking value such as `out.o`
-without `./` remains a task name; diagnostics should suggest `./out.o` when a
-file rule was likely intended.
+Mixing path and name outputs is invalid. A target token such as `out.o` that is
+neither a valid name nor an explicit path is a parse error; the diagnostic
+should suggest `./out.o` when a file rule was likely intended.
 
 Inputs may be names, explicit paths, templates, string values, or `@(expression)`
 expansions. Input expression lists are flattened recursively at evaluation.
@@ -367,6 +387,11 @@ produce an equivalent AST excluding spans.
   as a file rule.
 - Scalar, list, and function definitions follow deterministic RHS
   classification.
+- A target template with no capture group parses as a literal target.
+- Expression-string `{(...)}` interpolation and template `@(...)`/`@{...}`
+  expansions are parsed by their respective packages.
+- `def` distinguishes value and function bindings by the number of operands
+  after the bound name.
 - Malformed recipe interpolation remains literal and emits `LM-PARSE`.
 - Selectors retain their exact source spans.
 - Recipe lines format with tabs and preserve additional shell indentation.
