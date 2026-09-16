@@ -151,7 +151,7 @@ func ParsePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 
 func (p *parser) error(start int, end int, message string) {
 	if end > len(p.s.Text) { end = len(p.s.Text) }
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "LM-PARSE", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
+	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 func (p *parser) node(kind Kind, start int) *Expr {

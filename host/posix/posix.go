@@ -36,7 +36,7 @@ const (
 type DiagnosticCode string
 
 const (
-	DiagnosticHostFailure DiagnosticCode = "LM-HOSTF"
+	DiagnosticHostFailure DiagnosticCode = "HOST_FAIL"
 )
 
 // Diagnostic carries a host failure code and its owned message.

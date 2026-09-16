@@ -73,7 +73,7 @@ func TestInvalidFixture(t *testing.T) {
 		if count == 0 { t.Errorf("%s: expected diagnostic", path); continue }
 		expected := source.Error
 		if name == "rule-recipe-malformed-interpolation.lm" || strings.HasPrefix(name, "template-string-malformed-") { expected = source.Warning }
-		if diagnostic.Code != "LM-PARSE" || diagnostic.Severity != expected { t.Errorf("%s: diagnostic = %s/%d", path, diagnostic.Code, diagnostic.Severity) }
+		if diagnostic.Code != "PARSE_ERR" || diagnostic.Severity != expected { t.Errorf("%s: diagnostic = %s/%d", path, diagnostic.Code, diagnostic.Severity) }
 	}
 }
 

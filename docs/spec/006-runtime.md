@@ -30,7 +30,7 @@ filesystem access and starts no producer.
 
 Literal phony, cached-task, and service rules share the source-level target
 namespace. Defining the same literal name in more than one of those rule kinds
-is `LM-TRAMB` during compilation. A definition may share that name because it
+is `TGT_AMBIG` during compilation. A definition may share that name because it
 uses a distinct `definition` key; rule lookup wins and `@(NAME)` explicitly
 evaluates the definition. Overlapping templates remain a selection-time error.
 
@@ -53,8 +53,8 @@ source namespace. Selection of a path considers file rules:
 1. A literal output match wins over template matches.
 2. Otherwise every matching template is collected.
 3. Exactly one template match is selected.
-4. Multiple template matches fail with `LM-TRAMB`.
-5. No match fails with `LM-TRMRL` and may include a nearby-target suggestion.
+4. Multiple template matches fail with `TGT_AMBIG`.
+5. No match fails with `TGT_NO_RULE` and may include a nearby-target suggestion.
 
 Registration order never resolves ambiguity. Captures from the selected output
 are available while rendering that rule's remaining outputs and inputs.
@@ -118,7 +118,7 @@ computed from declared and discovered dependencies. Rendering always precedes
 the final freshness decision in the initial implementation.
 
 Operations that cannot be deferred, including collected `shell`, are invalid in
-planning or rendering and return `LM-PHASE`.
+planning or rendering and return `PHASE_INVALID`.
 
 ## File Rules
 
@@ -136,7 +136,7 @@ declared or discovered input is always stale.
 Before execution, the runtime creates parent directories for explicit relative
 and absolute filesystem outputs. After successful execution, every declared
 file output must exist unless the rule used `yield` for its single output.
-Missing output is `LM-OUTMS`.
+Missing output is `OUTPUT_MISSING`.
 
 ## Tasks
 
@@ -149,21 +149,21 @@ kind.
 
 Services parse into plans but execution is deferred. Attempting to execute a
 service before service support exists returns a clear unsupported diagnostic,
-`LM-UNSUP`, not ordinary task behavior.
+`FEATURE_UNSUP`, not ordinary task behavior.
 
 ## Rule Instances and Multiple Outputs
 
 One rule instance is keyed by the rule declaration and complete capture map.
 Every rendered output maps to that one node. Requests for sibling outputs share
 execution. If two outputs of one declaration both match a requested target but
-produce different captures, selection is ambiguous and returns `LM-TRAMB`.
-After capture rendering, duplicate output paths are `LM-PARSE`.
+produce different captures, selection is ambiguous and returns `TGT_AMBIG`.
+After capture rendering, duplicate output paths are `PARSE_ERR`.
 
 ## Yield and Effects
 
 `yield` appends bytes to declarative output content. It is valid only for a file
 rule with exactly one output. If the same accepted render contains any nonempty
-shell command, rendering fails with `LM-OUTCF`; the runtime does not inspect
+shell command, rendering fails with `OUTPUT_CONFLICT`; the runtime does not inspect
 shell syntax to infer output ownership. Yielded content is written atomically
 during execution.
 
@@ -210,7 +210,7 @@ bytes is a separate operation used by `cat`.
 
 - Compilation performs no filesystem or process operation.
 - A literal rule wins over a matching template rule.
-- Two matching templates produce `LM-TRAMB` regardless of source order.
+- Two matching templates produce `TGT_AMBIG` regardless of source order.
 - Captures render corresponding input and output templates.
 - Bare symbolic dependencies select rules before definitions with the same
   name; explicit definition evaluation remains available through `@(...)`.
@@ -224,11 +224,11 @@ bytes is a separate operation used by `cat`.
   render generation executes.
 - A discarded render commits no output effect.
 - Parent output directories are created before execution.
-- Successful commands that omit a declared output fail with `LM-OUTMS`.
+- Successful commands that omit a declared output fail with `OUTPUT_MISSING`.
 - Bare tasks run every time; cached task syntax remains distinguishable.
 - Requests for two sibling outputs share one rule-instance execution.
 - `yield` atomically writes one output and rejects tasks or multiple outputs.
-- `yield` combined with any nonempty rendered command returns `LM-OUTCF`.
+- `yield` combined with any nonempty rendered command returns `OUTPUT_CONFLICT`.
 - Command failure prevents dependent execution and carries mapped source span.
 - Cancelling a target leaves no process group running.
 - The equivalent of `deps/littlemake-legacy/Makefile.lmk` builds and then skips

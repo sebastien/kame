@@ -57,7 +57,7 @@ No C struct layout containing pointers is exposed directly to JavaScript.
 Every returned handle belongs to one global module handle table and encodes a
 table index plus a generation. Its table entry records the owning instance.
 Zero is invalid. Freeing increments the slot generation; stale or foreign
-handles return `LM-HNDLE`. Generation overflow retires the slot for the
+handles return `HANDLE_INVALID`. Generation overflow retires the slot for the
 remaining module lifetime.
 
 ## Host Requests
@@ -108,7 +108,7 @@ Individual `free` operations still release owned engine objects where supported
 so native and WebAssembly behavior remain comparable.
 
 Each instance reserves a static emergency diagnostic slot at creation.
-Out-of-memory returns allocation-free `LM-NOMEM` through that slot. The module
+Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly
 enables it.
 

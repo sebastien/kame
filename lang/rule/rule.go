@@ -142,7 +142,7 @@ func (p *parser) error(start int, end int, message string) {
 	if end > len(p.s.Text) {
 		end = len(p.s.Text)
 	}
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "LM-PARSE", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
+	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 func (p *parser) takeDiagnostics(diags []source.Diagnostic) {
@@ -165,7 +165,7 @@ func (p *parser) rule() *Rule {
 	}
 	headerStart, headerEnd := trim(p.s.Text, p.start, lineEnd)
 	r := mem.Alloc[Rule](p.a)
-	r.Header, r.Span = source.Span{Start: headerStart, End: headerEnd}, source.Span{Start: 0, End: lineEnd}
+	r.Header, r.Span = source.Span{Start: headerStart, End: headerEnd}, source.Span{Start: p.start, End: lineEnd}
 	colon := topLevel(p.s.Text[headerStart:headerEnd], ':')
 	if colon < 0 {
 		p.error(headerStart, headerEnd, "expected rule colon")

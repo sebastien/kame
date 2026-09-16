@@ -23,7 +23,7 @@ Comment markers inside strings, paths, or recipe text are literal.
 
 Parsers return an AST and zero or more diagnostics. Invalid syntax must never be
 silently discarded. Recovery may preserve malformed recipe interpolation as
-literal text with an `LM-PARSE` warning.
+literal text with an `PARSE_ERR` warning.
 
 ## Common Atoms
 
@@ -72,7 +72,7 @@ Base-prefixed digits follow the same optional-single-underscore rule. A leading
 or trailing underscore, consecutive underscores, `1.`, `.5`, hexadecimal
 floats, and a sign after a base prefix are invalid.
 
-Integer literals must fit `int64`. Numeric overflow is `LM-PARSE`.
+Integer literals must fit `int64`. Numeric overflow is `PARSE_ERR`.
 
 ## Expression Language
 
@@ -113,7 +113,7 @@ and `\t`. A quoted string may contain expression interpolation:
 Within a quoted expression string, `{(` opens interpolation and the matching
 `)}` closes it. Parentheses and quoted strings inside the expression are
 balanced normally. `\{` produces a literal `{`. An unclosed interpolation is
-`LM-PARSE`; it does not use recipe recovery. `@(expression)` is also accepted
+`PARSE_ERR`; it does not use recipe recovery. `@(expression)` is also accepted
 inside quoted strings and has the same value semantics.
 
 Expression strings are parsed by the expression parser. `{(...)}` interpolation
@@ -191,7 +191,7 @@ sources. They contain literal segments and expansions:
 and contextual selectors are template-only, while `{(...)}` interpolation is
 expression-string-only.
 
-Malformed `@(` or `@{` expansions remain literal and produce an `LM-PARSE`
+Malformed `@(` or `@{` expansions remain literal and produce an `PARSE_ERR`
 warning. A well-delimited but invalid contained expression is an error.
 
 Rendered list values are joined with one ASCII space. Nil renders as an empty
@@ -224,7 +224,7 @@ Function selectors are:
 | `@N` | argument index |
 
 Indexes are zero-based. Negative indexes count from the end. Missing context is
-`LM-SELCT`; invalid bounds are `LM-SELIX`.
+`SEL_NO_CONTEXT`; invalid bounds are `SEL_INDEX_INVALID`.
 
 ## Target Templates
 
@@ -254,7 +254,7 @@ Initial groups are `{name}`, `{name:*}`, `{name:**}`, and groups containing glob
 `?` or character classes. `{name}` is equivalent to `{name:*}`. `*` matches one
 or more non-`/` bytes, `?` matches exactly one non-`/` byte, and `**` matches one
 or more bytes including `/`. Character classes use `[abc]`, `[a-z]`, and
-`[!abc]`; an unclosed or empty class is `LM-PARSE`. `\` escapes the following
+`[!abc]`; an unclosed or empty class is `PARSE_ERR`. `\` escapes the following
 template byte. Matching is anchored to the complete target, and captures are
 never empty.
 
@@ -344,7 +344,7 @@ A body line belongs to the rule when it begins with at least one tab or space.
 The exact leading whitespace prefix of the first nonblank body line is the rule
 indent. Every nonblank body line must begin with that prefix. The parser removes
 that prefix and preserves further indentation; a shorter or different prefix
-ends the rule or reports `LM-PARSE` when still indented. Canonical formatting
+ends the rule or reports `PARSE_ERR` when still indented. Canonical formatting
 uses one tab for each recipe line.
 
 All rendered body lines become one shell script. The parser does not parse shell
@@ -356,7 +356,7 @@ A script contains comments, blank lines, definitions, rules, and top-level
 expressions. Imports are not part of the initial script language.
 
 The parser uses line context to distinguish a rule header from expression and
-record punctuation. Indented text without a preceding rule is `LM-PARSE`.
+record punctuation. Indented text without a preceding rule is `PARSE_ERR`.
 
 ## Formatting
 
@@ -392,7 +392,7 @@ produce an equivalent AST excluding spans.
   expansions are parsed by their respective packages.
 - `def` distinguishes value and function bindings by the number of operands
   after the bound name.
-- Malformed recipe interpolation remains literal and emits `LM-PARSE`.
+- Malformed recipe interpolation remains literal and emits `PARSE_ERR`.
 - Selectors retain their exact source spans.
 - Recipe lines format with tabs and preserve additional shell indentation.
 - Script formatting is idempotent and preserves comment order.

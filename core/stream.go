@@ -22,10 +22,10 @@ const (
 type DiagnosticCode string
 
 const (
-	DiagnosticExprValue DiagnosticCode = "LM-EXPRV"
-	DiagnosticHostFailure DiagnosticCode = "LM-HOSTF"
-	DiagnosticCancelled  DiagnosticCode = "LM-CMDCN"
-	DiagnosticDependencyCycle DiagnosticCode = "LM-TRDCY"
+	DiagnosticExprValue DiagnosticCode = "EXPR_INVALID"
+	DiagnosticHostFailure DiagnosticCode = "HOST_FAIL"
+	DiagnosticCancelled  DiagnosticCode = "EXEC_CANCELLED"
+	DiagnosticDependencyCycle DiagnosticCode = "DEP_CYCLE"
 )
 
 type Diagnostic struct {

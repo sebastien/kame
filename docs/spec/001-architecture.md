@@ -87,7 +87,7 @@ cleanup. Other outstanding host requests may be abandoned by transferring their
 payload ownership to the host and invalidating their engine handles; a later
 completion frees its own payload without accessing the engine. The runtime then
 frees subscriptions and engine nodes, the program, and finally the instance.
-Destroying a program with live nodes outside this sequence is `LM-PHASE`.
+Destroying a program with live nodes outside this sequence is `PHASE_INVALID`.
 
 No string or slice backed by a stack allocation may be stored in a node, map,
 queue, event, or returned result. Built-in fixed-capacity maps and slices are
@@ -109,7 +109,7 @@ only for function-local data with a statically known bound.
 Solod `error` values are sentinel control results. User-facing failures use a
 structured diagnostic value containing:
 
-- Stable code such as `LM-PARSE` or `LM-CMDFL`.
+- Stable code such as `PARSE_ERR` or `RECIPE_FAIL`.
 - Severity.
 - Owned message.
 - Optional source span.

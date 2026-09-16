@@ -20,7 +20,7 @@ func TestScriptComposesPositionedLanguageForms(t *testing.T) {
 	if s.Items[0].Kind != script.Comment || s.Items[1].Definition == nil || s.Items[2].Rule == nil || s.Items[3].Expression == nil {
 		t.Error("script item kind did not retain its delegated AST")
 	}
-	if !sameSpan(s.Items[2].Rule.Body[0].Span, 34, 41) || !sameSpan(s.Items[3].Expression.Span, 42, 54) {
+	if !sameSpan(s.Items[2].Rule.Span, 19, 41) || !sameSpan(s.Items[2].Rule.Body[0].Span, 34, 41) || !sameSpan(s.Items[3].Expression.Span, 42, 54) {
 		t.Error("delegated AST spans were not relative to the script source")
 	}
 }
@@ -28,7 +28,7 @@ func TestScriptComposesPositionedLanguageForms(t *testing.T) {
 func TestScriptReportsOrphanedIndent(t *testing.T) {
 	s := script.Parse(t.Allocator(), "test.lm", "\techo stray\n")
 	defer s.Free()
-	if len(s.Diagnostics) != 1 || s.Diagnostics[0].Code != "LM-PARSE" || !sameSpan(s.Diagnostics[0].Span, 0, 11) {
+	if len(s.Diagnostics) != 1 || s.Diagnostics[0].Code != "PARSE_ERR" || !sameSpan(s.Diagnostics[0].Span, 0, 11) {
 		t.Error("orphaned indentation did not produce a positioned parse error")
 	}
 }

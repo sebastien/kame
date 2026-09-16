@@ -16,4 +16,4 @@ Governing specs: `docs/spec/003-posix-process.md`,
 
 ## POSIX Host Hardening
 
-- [ ] On setup failure, retry `waitpid`; emit `LM-HOSTF` if reaping cannot be confirmed.
+- [ ] On setup failure, retry `waitpid`; emit `HOST_FAIL` if reaping cannot be confirmed.

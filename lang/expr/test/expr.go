@@ -67,7 +67,7 @@ func TestStringInterpolationAndRoundTrip(t *testing.T) {
 func TestInvalidNumberReportsParseSpan(t *testing.T) {
 	r := expr.Parse(t.Allocator(), "test.lm", "1_")
 	defer r.Free()
-	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "LM-PARSE" || !sameSpan(r.Diagnostics[0].Span, 0, 2) {
+	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "PARSE_ERR" || !sameSpan(r.Diagnostics[0].Span, 0, 2) {
 		t.Error("invalid number did not report its exact parse span")
 	}
 }
@@ -97,7 +97,7 @@ func TestValidSelectorRequiresCompleteSelector(t *testing.T) {
 func TestInvalidReferenceSliceReportsParseError(t *testing.T) {
 	r := expr.Parse(t.Allocator(), "test.lm", "files.1...4")
 	defer r.Free()
-	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "LM-PARSE" { t.Error("invalid reference slice was accepted") }
+	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "PARSE_ERR" { t.Error("invalid reference slice was accepted") }
 }
 
 func TestPathAndPipeChain(t *testing.T) {

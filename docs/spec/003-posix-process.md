@@ -62,7 +62,7 @@ both pipes reach EOF and the direct child is reaped. Spawn failure emits only a
 
 If pipe cleanup or `waitpid` itself fails permanently, the host performs all
 remaining best-effort closes and signals, then emits one `failed` terminal with
-`LM-HOSTF`. This is the only case where successful reaping cannot be confirmed.
+`HOST_FAIL`. This is the only case where successful reaping cannot be confirmed.
 
 ## Polling and Backpressure
 
@@ -142,7 +142,7 @@ normal event loop.
   dropping bytes.
 - Cancellation emits exactly one terminal event after explicit `waitpid`
   confirms the direct child is no longer waitable.
-- A forced `waitpid` error produces one `failed` terminal with `LM-HOSTF` after
+- A forced `waitpid` error produces one `failed` terminal with `HOST_FAIL` after
   best-effort descriptor cleanup.
 - Output larger than the retained limit remains fully streamed while retained
   logs contain the byte prefix and a truncation flag.

@@ -210,7 +210,7 @@ lines inside one build node remain one ordered shell script.
 - A producer adds a dynamic dependency, waits, resumes, and publishes a value.
 - A producer reads the current value of a declared dependency and publishes a
   derived value.
-- Direct and indirect dependency cycles return `LM-TRDCY`.
+- Direct and indirect dependency cycles return `DEP_CYCLE`.
 - Two subscribers receive the current value and all future values independently.
 - A late subscriber receives only the latest retained value, not full history.
 - A full subscriber queue coalesces values without losing terminal events.

@@ -83,7 +83,7 @@ The source may emit exactly one of these atoms from one poll:
 
 `Chunk` and collection controls are source-local. `Atom` is valid only when no
 batch or nested collection is open. `EndBatch` is valid only at collection depth
-zero. A source protocol violation fails the node with `LM-EXPRV`.
+zero. A source protocol violation fails the node with `EXPR_INVALID`.
 
 `Nested(source)` transfers ownership of the nested source to the materializer.
 An inner `EndStream` pops only that source and resumes the outer source. A
@@ -182,7 +182,7 @@ subscriber replay, dependency graph, or asynchronous iterator wrapper.
 - Nested collection controls produce an immutable nested list, including an
   empty nested list.
 - An unbalanced collection or an atom emitted during an open batch fails with
-  `LM-EXPRV` and frees all builders.
+  `EXPR_INVALID` and frees all builders.
 - A waiting source resumes only from a matching copied completion.
 - Invalidation, cancellation, failure, and normal completion each call a
   source free function exactly once.

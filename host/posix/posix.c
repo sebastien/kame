@@ -17,7 +17,7 @@ enum { LM_EXITED, LM_TIMED_OUT, LM_CANCELLED, LM_FAILED };
 enum { LM_QUEUE_LIMIT = 256 * 1024, LM_CHUNK = 16 * 1024, LM_GRACE_MS = 100 };
 
 // Host diagnostics use stable codes from docs/spec/011-diagnostics.md.
-#define LM_HOSTF "LM-HOSTF"
+#define LM_HOSTF "HOST_FAIL"
 
 typedef struct lm_process {
     int64_t id;

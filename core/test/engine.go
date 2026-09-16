@@ -580,7 +580,7 @@ func TestDependencyCyclesFail(t *testing.T) {
 	first := addSource(e, "a", newSequence(a, nil))
 	second := addSource(e, "b", newSequence(a, nil))
 	if !e.AddStatic(first, second) { t.Error("first edge rejected") }
-	if e.AddStatic(second, first) || second.Diagnostic.Code != core.DiagnosticDependencyCycle { t.Error("cycle did not report LM-TRDCY") }
+	if e.AddStatic(second, first) || second.Diagnostic.Code != core.DiagnosticDependencyCycle { t.Error("cycle did not report DEP_CYCLE") }
 	e.Free()
 }
 
@@ -593,7 +593,7 @@ func TestDynamicDependencyCyclesFail(t *testing.T) {
 	direct := e.Add(core.ResourceKey{Kind: core.ResourceDefinition, Name: "direct"}, publishOnce, directState)
 	e.Request(direct)
 	e.Step()
-	if direct.Diagnostic.Code != core.DiagnosticDependencyCycle { t.Error("direct dynamic cycle did not report LM-TRDCY") }
+	if direct.Diagnostic.Code != core.DiagnosticDependencyCycle { t.Error("direct dynamic cycle did not report DEP_CYCLE") }
 	firstState := mem.Alloc[producerState](a)
 	secondState := mem.Alloc[producerState](a)
 	firstState.Alloc, secondState.Alloc = a, a
@@ -604,7 +604,7 @@ func TestDynamicDependencyCyclesFail(t *testing.T) {
 	e.Request(first)
 	e.Step()
 	e.Step()
-	if second.Diagnostic.Code != core.DiagnosticDependencyCycle { t.Error("indirect dynamic cycle did not report LM-TRDCY") }
+	if second.Diagnostic.Code != core.DiagnosticDependencyCycle { t.Error("indirect dynamic cycle did not report DEP_CYCLE") }
 	e.Free()
 	mem.Free(a, directState); mem.Free(a, firstState); mem.Free(a, secondState)
 }

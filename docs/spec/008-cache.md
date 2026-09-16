@@ -81,7 +81,7 @@ on one is therefore always stale.
 
 Hashing is incremental and never requires loading a complete file into memory.
 A dependency manifest is limited to 16 MiB of encoded entries. Exceeding that
-limit makes the task uncacheable for that run and emits `LM-CACHE` as a warning;
+limit makes the task uncacheable for that run and emits `CACHE_UNUSABLE` as a warning;
 execution itself may continue.
 
 ## Records

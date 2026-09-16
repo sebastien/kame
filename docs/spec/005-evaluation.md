@@ -28,9 +28,9 @@ A scope is a parent-linked map of names to bindings. A binding is a value,
 lexical function, operation, or lazy definition.
 
 Lookup searches the current scope and then parents. Unknown lookup is
-`LM-REFNO`. Application heads use the same lexical lookup first, then the
-operation registry. A known non-callable head is `LM-EXPRV`; an absent operation
-is `LM-OPUNK`.
+`REF_MISSING`. Application heads use the same lexical lookup first, then the
+operation registry. A known non-callable head is `EXPR_INVALID`; an absent operation
+is `OP_UNKNOWN`.
 
 Top-level value definitions are lazy. First access starts one engine node for
 the definition, and concurrent accesses share it. Definition cycles are
@@ -40,7 +40,7 @@ not the definition AST.
 Program functions and their defining top-level scopes are program-owned.
 Call-local scopes and lambdas are run-owned and cannot be published as node
 values or stored in cacheable containers. Attempting to return such a callable
-across the run boundary is `LM-EXPRV`.
+across the run boundary is `EXPR_INVALID`.
 
 ## Values and Truth
 
@@ -59,7 +59,7 @@ and defining scope. Calling it creates a child scope, binds arguments, and
 evaluates body expressions in order. The final expression is returned; an empty
 body returns nil.
 
-Too few or too many arguments are `LM-EXPRV`. A rest argument receives a list,
+Too few or too many arguments are `EXPR_INVALID`. A rest argument receives a list,
 including an empty list.
 
 Function definitions in script and `(def ...)` use the same callable
@@ -105,7 +105,7 @@ containers.
 ### Fallback
 
 `(? expression...)` evaluates operands in order and returns the first that does
-not fail with `LM-REFNO`. No other failure is suppressed. Nil is a successful
+not fail with `REF_MISSING`. No other failure is suppressed. Nil is a successful
 value. With no operands it returns nil.
 
 ### Let
@@ -118,7 +118,7 @@ in that child scope and returns its final value.
 
 `(def name value)` evaluates and binds a value in the current scope.
 `(def name [parameters...] body...)` binds a lexical function without first
-evaluating its body. Invalid names or parameter lists are `LM-DEFIV`.
+evaluating its body. Invalid names or parameter lists are `DEF_INVALID`.
 
 ### Eval
 
@@ -141,7 +141,7 @@ Reference components resolve from left to right:
 - Selection returns a record containing the requested keys in request order.
 
 Negative indexes and bounds count from the end. Missing keys and invalid type
-access are `LM-REFNO`; invalid indexes and slices are `LM-SELIX`.
+access are `REF_MISSING`; invalid indexes and slices are `SEL_INDEX_INVALID`.
 
 ## Templates and Selectors
 
@@ -165,7 +165,7 @@ Pure text, collection, and path operations do not create resource edges.
 
 Capability names are `read`, `write`, `run`, and `env`. A grant is unrestricted
 or contains allowed canonical roots/names. Authorization occurs before any host
-request. Denial is `LM-CAPDN` and has no side effect.
+request. Denial is `CAP_DENIED` and has no side effect.
 
 Path authorization resolves relative paths against the evaluation working
 directory and rejects traversal outside granted roots after normalization.
@@ -177,7 +177,7 @@ containment, which is outside the initial implementation.
 
 - Top-level definitions are lazy and shared by two consumers.
 - Invalidating a definition causes one reevaluation on next access.
-- A definition cycle reports `LM-TRDCY` with definition frames.
+- A definition cycle reports `DEP_CYCLE` with definition frames.
 - Lexical functions capture their defining scope and bind rest arguments.
 - Lexical names override operation names only within their scope.
 - Arguments produce deterministic left-to-right diagnostics.

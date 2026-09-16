@@ -300,7 +300,7 @@ func TestProtocolViolationsReportExprValue(t *testing.T) {
 	m.Next(nil)
 	failed := m.Next(nil)
 	if !failed.Terminal || failed.Diagnostic.Code != core.DiagnosticExprValue {
-		t.Error("unclosed collection did not report LM-EXPRV")
+		t.Error("unclosed collection did not report EXPR_INVALID")
 	}
 	m.Free()
 }
@@ -313,7 +313,7 @@ func TestAtomInsideBatchReportsExprValue(t *testing.T) {
 	}))
 	m.Next(nil)
 	failed := m.Next(nil)
-	if !failed.Terminal || failed.Diagnostic.Code != core.DiagnosticExprValue { t.Error("atom inside batch did not report LM-EXPRV") }
+	if !failed.Terminal || failed.Diagnostic.Code != core.DiagnosticExprValue { t.Error("atom inside batch did not report EXPR_INVALID") }
 	m.Free()
 }
 

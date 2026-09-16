@@ -99,7 +99,7 @@ func (s *Script) takeDiagnostics(diags []source.Diagnostic) {
 }
 
 func (s *Script) error(start int, end int, message string) {
-	s.Diagnostics = slices.Append(s.Alloc, s.Diagnostics, source.Diagnostic{Code: "LM-PARSE", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
+	s.Diagnostics = slices.Append(s.Alloc, s.Diagnostics, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 func nextLine(text string, pos int) int { if pos < len(text) && text[pos] == '\n' { return pos+1 }; return pos }

@@ -143,7 +143,7 @@ invalid during planning.
 
 Effects record their source position. Evaluating or rerendering an effect does
 not perform it. The runtime commits it once for the accepted generation.
-Every build effect is invalid during planning and returns `LM-PHASE`.
+Every build effect is invalid during planning and returns `PHASE_INVALID`.
 
 ## Shell Operations
 
@@ -158,7 +158,7 @@ is provided for expressions that need collected process results. It requires
 Its arguments are a script string and optional option record. Streaming process
 events remain available through runtime execution, not as a list accumulated by
 the operation. `shell` is allowed in explicit expression execution but is
-invalid during planning and build rendering with `LM-PHASE`; recipes are the
+invalid during planning and build rendering with `PHASE_INVALID`; recipes are the
 only process interface for cacheable builds.
 
 Tagged-template shell helpers and multiple aliases such as legacy `sh` and

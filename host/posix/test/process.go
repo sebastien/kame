@@ -299,7 +299,7 @@ func TestWaitpidFailureEmitsHostFailure(t *testing.T) {
 	h.ForceWaitpidFailureForTest()
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Kind != posix.Terminal || terminal.Outcome != posix.Failed || terminal.Diagnostic.Code != posix.DiagnosticHostFailure || terminal.Diagnostic.Message != "waitpid failed" { t.Error("waitpid failure did not emit LM-HOSTF terminal") }
+	if terminal.Kind != posix.Terminal || terminal.Outcome != posix.Failed || terminal.Diagnostic.Code != posix.DiagnosticHostFailure || terminal.Diagnostic.Message != "waitpid failed" { t.Error("waitpid failure did not emit HOST_FAIL terminal") }
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	h.Free()

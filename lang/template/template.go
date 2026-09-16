@@ -30,6 +30,7 @@ type String struct {
 	Alloc       mem.Allocator
 	Source      *source.Source
 	OwnSource   bool
+	Span        source.Span
 	Parts       []Part
 	Diagnostics []source.Diagnostic
 }
@@ -67,7 +68,7 @@ func ParseString(a mem.Allocator, name string, text string) *String {
 	p := parser{a: a, s: source.New(a, name, text), end: len(text)}
 	p.stringParts()
 	t := mem.Alloc[String](a)
-	t.Alloc, t.Source, t.OwnSource, t.Parts, t.Diagnostics = a, p.s, true, p.parts, p.diags
+	t.Alloc, t.Source, t.OwnSource, t.Span, t.Parts, t.Diagnostics = a, p.s, true, source.Span{Start: 0, End: len(text)}, p.parts, p.diags
 	return t
 }
 
@@ -76,7 +77,7 @@ func ParseStringRange(a mem.Allocator, s *source.Source, start int, end int) *St
 	p := parser{a: a, s: s, pos: start, end: end}
 	p.stringParts()
 	t := mem.Alloc[String](a)
-	t.Alloc, t.Parts, t.Diagnostics = a, p.parts, p.diags
+	t.Alloc, t.Span, t.Parts, t.Diagnostics = a, source.Span{Start: start, End: end}, p.parts, p.diags
 	return t
 }
 
@@ -84,7 +85,7 @@ func (p *parser) diagnostic(severity source.Severity, start int, end int, messag
 	if end > len(p.s.Text) {
 		end = len(p.s.Text)
 	}
-	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "LM-PARSE", Severity: severity, Span: source.Span{Start: start, End: end}, Message: message})
+	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: severity, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 func (p *parser) literal(text *strings.Builder, start int, end int) {
@@ -335,7 +336,7 @@ func targetLiteral(a mem.Allocator, text string) string {
 }
 
 func parseDiagnostic(start int, end int, message string) source.Diagnostic {
-	return source.Diagnostic{Code: "LM-PARSE", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message}
+	return source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message}
 }
 
 func validCapture(name string) bool {

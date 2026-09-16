@@ -19,7 +19,7 @@ typedef struct lm_event {
     int signal;
     so_byte *data;
     int dataLen;
-    so_byte *diagnosticCode; // Stable code such as LM-HOSTF.
+    so_byte *diagnosticCode; // Stable code such as HOST_FAIL.
     int diagnosticCodeLen;
     so_byte *diagnostic;
     int diagnosticLen;
