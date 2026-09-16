@@ -68,7 +68,9 @@ type Expr struct {
 	Kind       Kind
 	Span       source.Span
 	Text       string
+	TextOwned  bool
 	Bool       bool
+	Rest       bool
 	Int        int64
 	Float      float64
 	Parts      []StringPart
@@ -106,6 +108,7 @@ func (r *Result) Free() {
 
 func freeExpr(a mem.Allocator, e *Expr) {
 	if e == nil { return }
+	if e.TextOwned { mem.FreeString(a, e.Text) }
 	for i := range e.Parts {
 		mem.FreeString(a, e.Parts[i].Text)
 		freeExpr(a, e.Parts[i].Expr)
@@ -124,6 +127,9 @@ func freeExpr(a mem.Allocator, e *Expr) {
 
 // Free releases an expression retained by another language AST.
 func Free(a mem.Allocator, e *Expr) { freeExpr(a, e) }
+
+// Clone returns an independent expression tree for runtime-owned definitions.
+func Clone(a mem.Allocator, e *Expr) *Expr { return cloneExpr(a, e) }
 
 type parser struct {
 	a     mem.Allocator
@@ -484,7 +490,16 @@ func (p *parser) list() *Expr {
 			p.pos++; record.Span.End = p.pos; freeExpr(p.a, list); return record
 		}
 		p.pos = mark
-		item := p.expression()
+		name = p.name()
+		var item *Expr
+		if name.OK && p.pos+3 <= len(p.s.Text) && p.s.Text[p.pos:p.pos+3] == "..." {
+			p.pos += 3
+			item = p.node(Name, mark)
+			item.Text, item.Rest = name.Text, true
+		} else {
+			p.pos = mark
+			item = p.expression()
+		}
 		if item == nil { break }
 		list.Items = slices.Append(p.a, list.Items, item)
 		space := p.skipSpace()
@@ -561,6 +576,7 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	if original == nil { return nil }
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
+	if original.Text != "" { copy.Text, copy.TextOwned = sourceText(a, original.Text), true }
 	copy.Parts, copy.Reference, copy.Items, copy.Fields, copy.Parameters, copy.Body = nil, nil, nil, nil, nil, nil
 	for i := range original.Parts {
 		part := original.Parts[i]
@@ -680,7 +696,7 @@ func write(b *strings.Builder, e *Expr) {
 	if e.Kind == Integer { var buf [strconv.MaxIntBase10Len]byte; b.WriteString(strconv.FormatInt(buf[:], e.Int, 10)); return }
 	if e.Kind == Float { var buf [strconv.MaxFloat64Len]byte; b.WriteString(strconv.FormatFloat(buf[:], e.Float, 'g', -1, 64)); return }
 	if e.Kind == Symbol { b.WriteByte(':'); b.WriteString(e.Text); return }
-	if e.Kind == Name { b.WriteString(e.Text); return }
+	if e.Kind == Name { b.WriteString(e.Text); if e.Rest { b.WriteString("...") }; return }
 	if e.Kind == Path { b.WriteString(e.Text); return }
 	if e.Kind == Selector { b.WriteString(e.Text); return }
 	if e.Kind == Reference { writeReference(b, e); return }

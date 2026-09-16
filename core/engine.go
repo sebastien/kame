@@ -193,9 +193,16 @@ func (e *Engine) publish(n *Node, value Value) {
 	value.Free(e.Alloc)
 	n.Revision++
 	e.emit(n, Event{Kind: UpdateValue, Value: n.Latest, Revision: n.Revision})
-	for i := range n.Dependents {
-		if n.Dependents[i].State == NodeWaiting { n.Dependents[i].State = NodeReady }
+	dependents := slices.Clone(e.Alloc, n.Dependents)
+	for i := range dependents {
+		dependent := dependents[i]
+		if dependent.State != NodeWaiting { continue }
+		// A host request was derived from an older dependency snapshot. Cancel it
+		// and restart from the newest values instead of accepting its completion.
+		if dependent.Submitted { e.invalidate(dependent, &[]*Node{}); continue }
+		dependent.State = NodeReady
 	}
+	slices.Free(e.Alloc, dependents)
 }
 
 func (e *Engine) ready(n *Node) bool {
@@ -203,7 +210,7 @@ func (e *Engine) ready(n *Node) bool {
 	for i := range n.Static {
 		dependency := n.Static[i]
 		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
-			n.complete(e, dependency.Diagnostic)
+			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
 			return false
 		}
 		if dependency.State != NodeComplete { dependency.Requested = true; return false }
@@ -211,7 +218,7 @@ func (e *Engine) ready(n *Node) bool {
 	for i := range n.Dynamic {
 		dependency := n.Dynamic[i]
 		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
-			n.complete(e, dependency.Diagnostic)
+			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
 			return false
 		}
 		if !dependency.Current { dependency.Requested = true; return false }
@@ -423,6 +430,7 @@ func (e *Engine) Free() {
 		if n.materializer != nil { n.materializer.Free() }
 		if n.ContextFree != nil { n.ContextFree(e.Alloc, n.Context) }
 		if n.HasCompletion { n.Completion.Value.Free(e.Alloc) }
+		n.Diagnostic.Free(e.Alloc)
 		n.Key.Free(e.Alloc); mem.Free(e.Alloc, n)
 	}
 	for i := range e.completions { e.completions[i].Value.Free(e.Alloc) }

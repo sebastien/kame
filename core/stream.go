@@ -1,6 +1,7 @@
 package core
 
 import (
+	"littlemake/diagnostic"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 )
@@ -19,24 +20,26 @@ const (
 	AtomFailed
 )
 
-type DiagnosticCode string
+type DiagnosticCode = string
 
 const (
-	DiagnosticExprValue DiagnosticCode = "EXPR_INVALID"
-	DiagnosticHostFailure DiagnosticCode = "HOST_FAIL"
-	DiagnosticCancelled  DiagnosticCode = "EXEC_CANCELLED"
-	DiagnosticDependencyCycle DiagnosticCode = "DEP_CYCLE"
+	DiagnosticExprValue = "EXPR_INVALID"
+	DiagnosticHostFailure = "HOST_FAIL"
+	DiagnosticCancelled  = "EXEC_CANCELLED"
+	DiagnosticDependencyCycle = "DEP_CYCLE"
 )
 
-type Diagnostic struct {
-	Code DiagnosticCode
-}
+type Diagnostic = diagnostic.Diagnostic
 
 type Atom struct {
 	Kind       AtomKind
 	Value      Value
 	Nested     *Source
 	Diagnostic Diagnostic
+	// Wait keeps the node dependency-waiting after publishing this value.
+	// It lets a reactive source publish one snapshot without a second poll
+	// window in which a dependency update could be lost.
+	Wait       bool
 }
 
 type PollResult int
@@ -144,7 +147,7 @@ func (m *Materializer) Next(c *EngineContext) AtomResult {
 			atom.Value.Free(m.Alloc)
 			return m.fail(Diagnostic{Code: DiagnosticExprValue})
 		}
-		return AtomResult{Value: atom.Value, Published: true}
+		return AtomResult{Value: atom.Value, Published: true, Waiting: atom.Wait}
 	case AtomChunk:
 		if len(frame.collections) == 0 {
 			frame.chunks = slices.Append(m.Alloc, frame.chunks, atom.Value)

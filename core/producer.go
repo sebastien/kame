@@ -1,6 +1,7 @@
 package core
 
 import (
+	"littlemake/diagnostic"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 )
@@ -57,7 +58,11 @@ func (c *EngineContext) Fail(d Diagnostic) { c.node.complete(c.engine, d) }
 func (c *EngineContext) Dependency(key ResourceKey) bool {
 	dep := c.engine.node(key)
 	if dep == nil || dep == c.node || reaches(dep, c.node) {
-		c.node.complete(c.engine, Diagnostic{Code: DiagnosticDependencyCycle})
+		d := Diagnostic{Code: DiagnosticDependencyCycle}
+		if c.node.Key.Kind == ResourceDefinition {
+			d.Frames = slices.Append(c.engine.Alloc, d.Frames, diagnostic.Frame{Label: "definition"})
+		}
+		c.node.complete(c.engine, d)
 		return false
 	}
 	if !slices.Contains(c.node.Dynamic, dep) {
@@ -79,6 +84,7 @@ func (c *EngineContext) Dependency(key ResourceKey) bool {
 // Clone Value before retaining it beyond the active producer call.
 type CurrentValue struct {
 	Value Value
+	Revision int64
 	OK    bool
 }
 
@@ -90,7 +96,7 @@ func (c *EngineContext) Value(key ResourceKey) CurrentValue {
 	if dep == nil || dep == c.node || (!slices.Contains(c.node.Static, dep) && !slices.Contains(c.node.Dynamic, dep)) || !dep.Current {
 		return CurrentValue{}
 	}
-	return CurrentValue{Value: dep.Latest, OK: true}
+	return CurrentValue{Value: dep.Latest, Revision: dep.Revision, OK: true}
 }
 
 func (c *EngineContext) Completion() Completion { return c.completion }
@@ -98,6 +104,12 @@ func (c *EngineContext) Completion() Completion { return c.completion }
 func (c *EngineContext) Context() any { return c.node.Context }
 
 func (c *EngineContext) Allocator() mem.Allocator { return c.engine.Alloc }
+func (c *EngineContext) NodeID() int64 { return c.node.ID }
+func (c *EngineContext) Generation() int64 { return c.node.Generation }
+func (c *EngineContext) Attempt() int64 { return c.node.Attempt }
+func (c *EngineContext) Failed() bool { return c.node.State == NodeFailed || c.node.State == NodeCancelled }
+func (c *EngineContext) Diagnostic() Diagnostic { return c.node.Diagnostic }
+func (c *EngineContext) Submitted() bool { return c.node.Submitted }
 
 // Submit records the host request that will later resume this invocation.
 func (c *EngineContext) Submit(requestID int64) {

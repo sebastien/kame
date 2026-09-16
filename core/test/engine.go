@@ -254,6 +254,16 @@ func TestTerminalSourceReleasesMaterializer(t *testing.T) {
 	e.Free()
 }
 
+func TestPublishedAtomCanWaitForDependencyWake(t *testing.T) {
+	a := t.Allocator()
+	e := core.NewEngine(a)
+	n := addSource(e, "waiting", newSequence(a, []core.Atom{{Kind: core.AtomValue, Value: core.NewString(a, "value"), Wait: true}}))
+	e.Request(n)
+	e.Step()
+	if !n.Current || n.State != core.NodeWaiting { t.Error("published waiting atom left a reactive node ready") }
+	e.Free()
+}
+
 func TestEngineResumesOuterSourceAfterNestedStream(t *testing.T) {
 	a := t.Allocator()
 	e := core.NewEngine(a)

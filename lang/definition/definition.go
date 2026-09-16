@@ -33,6 +33,7 @@ type Definition struct {
 	Span       source.Span
 	Name       string
 	NameSpan   source.Span
+	Function   bool
 	Parameters []Parameter
 	ValueKind  ValueKind
 	Expression *expr.Expr
@@ -132,6 +133,7 @@ func (p *parser) definition() *Definition {
 		return d
 	}
 	if p.s.Text[lhsStart] == '(' {
+		d.Function = true
 		p.functionLHS(d, lhsStart, lhsEnd)
 	} else {
 		name := scanName(p.s.Text, lhsStart)
@@ -307,7 +309,7 @@ func owned(a mem.Allocator, text string) string {
 // Format returns allocator-owned canonical definition text.
 func Format(a mem.Allocator, d *Definition) string {
 	b := strings.NewBuilder(a)
-	if len(d.Parameters) != 0 {
+	if d.Function {
 		b.WriteByte('(')
 		b.WriteString(d.Name)
 		for i := range d.Parameters {
