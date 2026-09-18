@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"littlemake/core"
+	"littlemake/diagnostic"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/testing"
@@ -435,6 +436,12 @@ func failProducer(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	return core.ProducerFailed
 }
 
+func failWithDiagnostic(c *core.EngineContext, nodeID int64) core.ProducerResult {
+	_ = nodeID
+	c.Fail(diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "unsupported"})
+	return core.ProducerFailed
+}
+
 func freeContext(s *core.Source) { _ = s }
 
 func TestStaticDependenciesRunFirst(t *testing.T) {
@@ -461,6 +468,16 @@ func TestFailedDependencyTerminatesDependent(t *testing.T) {
 	e.Step()
 	event := s.Next()
 	if !event.Terminal() || event.Kind != core.UpdateFailed { t.Error("failed dependency left dependent waiting") }
+	e.Free()
+}
+
+func TestProducerFailureDiagnosticSurvivesTeardown(t *testing.T) {
+	a := t.Allocator()
+	e := core.NewEngine(a)
+	n := e.Add(core.ResourceKey{Kind: core.ResourceTarget, Name: "service"}, failWithDiagnostic, nil)
+	e.Request(n)
+	e.Step()
+	if n.State != core.NodeFailed || n.Diagnostic.Code != "FEATURE_UNSUP" { t.Error("producer diagnostic was not retained") }
 	e.Free()
 }
 

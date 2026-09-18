@@ -26,6 +26,7 @@ type Frame struct {
 }
 
 type Diagnostic struct {
+	Source   string
 	Code     string
 	Severity Severity
 	Message  string
@@ -38,6 +39,7 @@ type Diagnostic struct {
 
 func (d *Diagnostic) Clone(a mem.Allocator) Diagnostic {
 	copy := *d
+	copy.Source = clone(a, d.Source)
 	copy.Code = clone(a, d.Code)
 	copy.Message = clone(a, d.Message)
 	copy.Target = clone(a, d.Target)
@@ -55,13 +57,14 @@ func (d *Diagnostic) Clone(a mem.Allocator) Diagnostic {
 func (d *Diagnostic) Free(a mem.Allocator) {
 	if d.Owned {
 		if d.Code != "" { mem.FreeString(a, d.Code) }
+		if d.Source != "" { mem.FreeString(a, d.Source) }
 		if d.Message != "" { mem.FreeString(a, d.Message) }
 		if d.Target != "" { mem.FreeString(a, d.Target) }
 		for i := range d.Notes { if d.Notes[i] != "" { mem.FreeString(a, d.Notes[i]) } }
 		for i := range d.Frames { if d.Frames[i].Label != "" { mem.FreeString(a, d.Frames[i].Label) } }
 	}
-	slices.Free(a, d.Frames)
-	slices.Free(a, d.Notes)
+	if len(d.Frames) != 0 { slices.Free(a, d.Frames) }
+	if len(d.Notes) != 0 { slices.Free(a, d.Notes) }
 	*d = Diagnostic{}
 }
 

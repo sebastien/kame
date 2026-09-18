@@ -156,6 +156,19 @@ func TestDynamicRequestStringsAndNULScript(t *testing.T) {
 	h.Free()
 }
 
+func TestEmptyScript(t *testing.T) {
+	a := t.Allocator()
+	h := posix.New(a)
+	r := request(a, 32, "")
+	if !h.Start(r) { t.Fatal("empty script start failed"); return }
+	var terminal posix.Event
+	events := drain(t, h, &terminal)
+	if terminal.Outcome != posix.Exited || terminal.Status != 0 { t.Error("empty script did not exit successfully") }
+	freeEvents(a, events)
+	freeRequest(a, &r)
+	h.Free()
+}
+
 func TestCancellationAndTimeout(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)

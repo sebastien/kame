@@ -100,6 +100,7 @@ Path operations are lexical and use slash-separated LittleMake paths:
 | `basename` | Final path component |
 | `dirname` | Path without final component |
 | `splitext` | Two-item list of root and final extension |
+| `ext` | Final extension |
 | `joinpath` | Join and clean path components |
 | `relpath` | Path relative to a base |
 | `abspath` | Path resolved against evaluation cwd |

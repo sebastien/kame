@@ -81,11 +81,11 @@ type EventResult struct {
 }
 
 func (e *Event) Free(a mem.Allocator) {
-	slices.Free(a, e.Data)
-	slices.Free(a, e.Stdout)
-	slices.Free(a, e.Stderr)
-	mem.FreeString(a, string(e.Diagnostic.Code))
-	mem.FreeString(a, e.Diagnostic.Message)
+	if len(e.Data) != 0 { slices.Free(a, e.Data) }
+	if len(e.Stdout) != 0 { slices.Free(a, e.Stdout) }
+	if len(e.Stderr) != 0 { slices.Free(a, e.Stderr) }
+	if e.Diagnostic.Code != "" { mem.FreeString(a, string(e.Diagnostic.Code)) }
+	if e.Diagnostic.Message != "" { mem.FreeString(a, e.Diagnostic.Message) }
 	*e = Event{}
 }
 

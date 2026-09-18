@@ -16,6 +16,9 @@ func Register(registry *eval.Registry) bool {
 		registry.Add(eval.Operation{Name: "first", Call: opFirst, MinArity: 1, MaxArity: 1}) &&
 		registry.Add(eval.Operation{Name: "list", Call: opList, MinArity: 0, MaxArity: -1}) &&
 		registry.Add(eval.Operation{Name: "map", Call: opMap, MinArity: 2, MaxArity: 2}) &&
+		registry.Add(eval.Operation{Name: "out", Call: opOut, MinArity: 1, MaxArity: -1}) &&
+		registry.Add(eval.Operation{Name: "err", Call: opErr, MinArity: 1, MaxArity: -1}) &&
+		registry.Add(eval.Operation{Name: "yield", Call: opYield, MinArity: 1, MaxArity: -1}) &&
 		registry.Add(eval.Operation{Name: "nop", Call: opNop, MinArity: 0, MaxArity: -1})
 }
 
@@ -59,6 +62,19 @@ func opNop(context *eval.Context, state any, values []core.Value) eval.Result {
 	_ = state
 	if len(values) == 0 { return eval.Result{Value: core.Value{Kind: core.Nil}} }
 	return eval.Result{Value: values[len(values)-1].Clone(context.Run)}
+}
+
+func opOut(context *eval.Context, state any, values []core.Value) eval.Result { _ = state; return effect(context, eval.EffectOut, values) }
+func opErr(context *eval.Context, state any, values []core.Value) eval.Result { _ = state; return effect(context, eval.EffectErr, values) }
+func opYield(context *eval.Context, state any, values []core.Value) eval.Result { _ = state; return effect(context, eval.EffectYield, values) }
+
+func effect(context *eval.Context, kind eval.EffectKind, values []core.Value) eval.Result {
+	for i := range values {
+		if values[i].Kind == core.String { context.Emit(kind, []byte(values[i].Text))
+		} else if values[i].Kind == core.Bytes { context.Emit(kind, values[i].Bytes)
+		} else { return invalid() }
+	}
+	return eval.Result{Value: core.Value{Kind: core.Nil}}
 }
 
 func opMap(context *eval.Context, state any, values []core.Value) eval.Result {

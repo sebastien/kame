@@ -453,9 +453,46 @@ type Context struct {
 	Outputs []core.Value
 	Args    []core.Value
 	RuleFrames []RuleFrame
+	Effects []Effect
+	Span    source.Span
+	Phase   Phase
+	ResolveDefinition DefinitionResolver
+	ResolverState any
+	DependencyObserver func(any, core.ResourceKey)
 	denied  bool
+	phaseInvalid bool
 	activeCapabilities []Capability
 }
+
+type Phase int
+
+const (
+	EvaluatePhase Phase = iota
+	PlanningPhase
+	RenderingPhase
+)
+
+type DefinitionResolver func(any, core.ResourceKey, *Context) Result
+
+type EffectKind int
+
+const (
+	EffectOut EffectKind = iota
+	EffectErr
+	EffectYield
+)
+
+type Effect struct { Kind EffectKind; Data []byte; Span source.Span }
+
+func (e *Effect) Free(a mem.Allocator) { if len(e.Data) != 0 { slices.Free(a, e.Data) }; *e = Effect{} }
+func FreeEffects(a mem.Allocator, effects []Effect) { for i := range effects { effects[i].Free(a) }; if len(effects) != 0 { slices.Free(a, effects) } }
+
+func (c *Context) Emit(kind EffectKind, data []byte) {
+	if c.Phase == PlanningPhase { c.phaseInvalid = true; return }
+	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: kind, Data: slices.Clone(c.Run, data), Span: c.Span})
+}
+
+func (c *Context) PhaseInvalid() bool { return c.phaseInvalid }
 
 // RuleFrame supplies the inputs and outputs for one enclosing rule evaluation.
 // Selectors use the most recently pushed frame.
@@ -498,7 +535,9 @@ func canonicalPath(a mem.Allocator, cwd string, name string) string {
 
 func (c *Context) Dependency(key core.ResourceKey) bool {
 	if c.Engine == nil { return false }
-	return c.Engine.Dependency(key)
+	current := c.Engine.Dependency(key)
+	if c.DependencyObserver != nil { c.DependencyObserver(c.ResolverState, key) }
+	return current
 }
 
 // Value returns a borrowed current dependency value after Dependency accepted it.
@@ -510,6 +549,7 @@ func (c *Context) Value(key core.ResourceKey) core.CurrentValue {
 // Submit queues an owned request and records its generated ID on the active
 // engine node. The host completes it using the request correlation data.
 func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
+	if c.Phase == PlanningPhase { c.phaseInvalid = true; return 0 }
 	if !c.requestAllowed(kind, payload) { c.denied = true; return 0 }
 	if c.Engine == nil || c.Requests == nil { return 0 }
 	id := c.Requests.Submit(c.Engine.NodeID(), c.Engine.Generation(), c.Engine.Attempt(), kind, payload)
@@ -578,6 +618,21 @@ func (p *Program) EvaluateWith(expression *expr.Expr, context *Context) Result {
 	return result
 }
 
+// EvaluateDefinition evaluates one lazy value definition in the caller's phase.
+// Planning uses it to resolve only definitions reached by its active expression.
+func (p *Program) EvaluateDefinition(key core.ResourceKey, context *Context) Result {
+	if p == nil || key.Kind != core.ResourceDefinition { return failure("REF_MISSING", source.Span{}, "unknown definition") }
+	for i := range p.Definitions {
+		d := p.Definitions[i]
+		if d.Name != key.Name { continue }
+		result := p.definitionValue(nil, d, p.Scope, context)
+		attachFrame(&result, context, d.Span, "definition")
+		attachSource(&result, context)
+		return result
+	}
+	return failure("REF_MISSING", source.Span{}, "unknown definition: "+key.Name)
+}
+
 func attachSource(result *Result, context *Context) {
 	// Context and program sources outlive their diagnostic results. Diagnostics
 	// borrowed from engine nodes must not be cloned or freed here.
@@ -614,6 +669,7 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	if b == nil { return failure("REF_MISSING", span, "unknown reference: "+name) }
 	if b.Kind == bindingValue { return Result{Value: b.Value.Clone(context.Run)} }
 	if b.Kind == bindingFunction { return Result{Value: core.Value{Kind: core.Callable, Callable: b.Function}} }
+	if context.Engine == nil && context.ResolveDefinition != nil { return context.ResolveDefinition(context.ResolverState, b.Definition, context) }
 	if context.Engine == nil || !context.Engine.Dependency(b.Definition) {
 		if context.Engine != nil && context.Engine.Failed() { return Result{Diagnostic: context.Engine.Diagnostic()} }
 		return Result{Waiting: true}
@@ -748,10 +804,10 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 		if r.Waiting || r.Diagnostic.Code != "" { freeValues(context.Run, values); return r }
 		values[i] = r.Value
 	}
-	previousCapabilities := context.activeCapabilities
-	context.denied, context.activeCapabilities = false, operation.Capabilities
+	previousCapabilities, previousSpan := context.activeCapabilities, context.Span
+	context.denied, context.activeCapabilities, context.Span = false, operation.Capabilities, span
 	result := operation.Call(context, operation.Context, values)
-	context.activeCapabilities = previousCapabilities
+	context.activeCapabilities, context.Span = previousCapabilities, previousSpan
 	freeValues(context.Run, values)
 	if context.denied { result.Free(context.Run); return failure("CAP_DENIED", span, "operation capability denied") }
 	return result

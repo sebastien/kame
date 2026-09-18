@@ -38,7 +38,10 @@ type ResourceKey struct {
 }
 
 func NewResourceKey(a mem.Allocator, kind ResourceKind, name string) ResourceKey {
-	return ResourceKey{Kind: kind, Name: NewString(a, name).Text}
+	if name == "" { return ResourceKey{Kind: kind} }
+	b := mem.AllocSlice[byte](a, len(name), len(name))
+	copy(b, []byte(name))
+	return ResourceKey{Kind: kind, Name: string(b)}
 }
 
 func (k *ResourceKey) Clone(a mem.Allocator) ResourceKey {

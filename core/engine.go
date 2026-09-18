@@ -280,6 +280,11 @@ func (e *Engine) Step() *Node {
 	return e.run(n)
 }
 
+// DrainCompletions accepts queued host completions without starting ready work.
+func (e *Engine) DrainCompletions() {
+	for len(e.completions) != 0 { e.Step() }
+}
+
 func (e *Engine) run(n *Node) *Node {
 	e.lastRun = n
 	n.offered = false

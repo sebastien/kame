@@ -185,7 +185,7 @@ int lm_host_start(lm_host *host, int64_t id, so_Slice shell, so_Slice script, so
     }
     argv[shell.len] = calloc((size_t)script.len + 1, 1);
     if (!argv[shell.len]) { lm_free_strings(argv, (int)shell.len + 1); lm_free_strings(envp, (int)environment.len); free(cwd); goto fail; }
-    memcpy(argv[shell.len], script.ptr, (size_t)script.len);
+    if (script.len) memcpy(argv[shell.len], script.ptr, (size_t)script.len);
     for (int i = 0; i < environment.len; i++) {
         envp[i] = lm_cstring(envs[i]);
         if (!envp[i]) { lm_free_strings(argv, (int)shell.len + 1); lm_free_strings(envp, (int)environment.len); free(cwd); goto fail; }
