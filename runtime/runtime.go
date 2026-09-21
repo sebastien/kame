@@ -113,6 +113,7 @@ type Options struct {
 	DryRun    bool
 	RetainBytes int
 	Jobs int
+	Grants []eval.Grant
 }
 
 type Program struct {
@@ -127,7 +128,10 @@ type Program struct {
 	Instances []instance
 	Events   []Event
 	nextRequest int64
+	Pending []pendingRequest
 }
+
+type pendingRequest struct { ID int64; NodeID int64; Generation int64; Attempt int64 }
 
 type registeredRule struct { Rule *rule.Rule }
 type instance struct { Rule *rule.Rule; Captures []template.CaptureValue; Node *core.Node; Plan Plan; Script string; LineSpans []diagnostic.Span; started bool; startedGeneration int64; terminalEmitted bool; terminalGeneration int64; valueRevision int64 }
@@ -154,9 +158,11 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	if compiled.Program == nil { engine.Free(); return result }
 	p := mem.Alloc[Program](a)
 	p.Alloc, p.Engine, p.Eval, p.Parsed = a, engine, compiled.Program, parsed
+	p.nextRequest = 1 << 60 // Evaluator queue request IDs start at one.
 	p.Options.Directory, p.Options.DryRun, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.RetainBytes, options.Jobs
 	for i := range options.Shell { p.Options.Shell = slices.Append(a, p.Options.Shell, cloneText(a, options.Shell[i])) }
 	for i := range options.Environment { p.Options.Environment = slices.Append(a, p.Options.Environment, cloneText(a, options.Environment[i])) }
+	for i := range options.Grants { grant := eval.Grant{Capability: options.Grants[i].Capability}; for j := range options.Grants[i].Names { grant.Names = slices.Append(a, grant.Names, cloneText(a, options.Grants[i].Names[j])) }; p.Options.Grants = slices.Append(a, p.Options.Grants, grant) }
 	if len(p.Options.Shell) == 0 { p.Options.Shell = slices.Append(a, p.Options.Shell, cloneText(a, "/bin/sh")); p.Options.Shell = slices.Append(a, p.Options.Shell, cloneText(a, "-c")) }
 	for i := range parsed.Items {
 		item := parsed.Items[i]
@@ -170,7 +176,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	for i := range result.Diagnostics {
 		if result.Diagnostics[i].Severity >= diagnostic.Error { p.Free(); return result }
 	}
-	p.Host = posix.New(a)
+	p.Host, p.nextRequest = posix.New(a), 1<<32
 	result.Program = p
 	return result
 }
@@ -216,8 +222,9 @@ func (p *Program) Free() {
 	if p.Options.Directory != "" { mem.FreeString(p.Alloc, p.Options.Directory) }
 	for i := range p.Options.Shell { mem.FreeString(p.Alloc, p.Options.Shell[i]) }
 	for i := range p.Options.Environment { mem.FreeString(p.Alloc, p.Options.Environment[i]) }
-	slices.Free(p.Alloc, p.Options.Shell); slices.Free(p.Alloc, p.Options.Environment)
-	slices.Free(p.Alloc, p.Instances); slices.Free(p.Alloc, p.Events); slices.Free(p.Alloc, p.Rules)
+	for i := range p.Options.Grants { for j := range p.Options.Grants[i].Names { mem.FreeString(p.Alloc, p.Options.Grants[i].Names[j]) }; slices.Free(p.Alloc, p.Options.Grants[i].Names) }
+	slices.Free(p.Alloc, p.Options.Shell); slices.Free(p.Alloc, p.Options.Environment); slices.Free(p.Alloc, p.Options.Grants)
+	slices.Free(p.Alloc, p.Instances); slices.Free(p.Alloc, p.Events); slices.Free(p.Alloc, p.Rules); slices.Free(p.Alloc, p.Pending)
 	if p.Host != nil { p.Host.Free() }
 	p.Engine.Free(); p.Eval.Free(); if p.ParsedOwned && p.Parsed != nil { p.Parsed.Free() }; mem.Free(p.Alloc, p)
 }
@@ -290,7 +297,7 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	inputs, outputs := makeValues(p.Alloc, plan.Inputs), makeValues(p.Alloc, plan.Outputs)
 	defer freeValues(p.Alloc, inputs); defer freeValues(p.Alloc, outputs)
 	state := planResolverState{Program: p}
-	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
+	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
 	result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
 	if state.Resolving != nil { slices.Free(p.Alloc, state.Resolving) }
 	if context.PhaseInvalid() || len(context.Effects) != 0 { eval.FreeEffects(p.Alloc, context.Effects); result.Free(p.Alloc); return failure("PHASE_INVALID", "build effects are invalid while planning") }

@@ -29,6 +29,8 @@ const (
 	ResourceFile
 	ResourceTask
 	ResourceService
+	ResourceGlob
+	ResourceEnvironment
 )
 
 // ResourceKey is owned by the allocator that created or cloned it.

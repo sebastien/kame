@@ -19,3 +19,25 @@ func TestQueueOwnsPayloadAndCorrelation(t *testing.T) {
 	next.Request.Free(a)
 	queue.Free()
 }
+
+func TestPayloadRecordsExposePathsAndScripts(t *testing.T) {
+	a := t.Allocator()
+	file := host.FilePayload(a, host.OpWildcard, "src/**/*.lm")
+	if host.PayloadPath(file) != "src/**/*.lm" || host.PayloadText(file, host.FieldOp) != host.OpWildcard { t.Error("file payload fields were not readable") }
+	file.Free(a)
+	process := host.ProcessPayload(a, "printf ok")
+	if host.PayloadText(process, host.FieldScript) != "printf ok" { t.Error("process payload script was not readable") }
+	process.Free(a)
+}
+
+func TestQueueReleasesRecordPayload(t *testing.T) {
+	a := t.Allocator()
+	queue := host.NewQueue(a)
+	payload := host.FilePayload(a, host.OpRead, "input")
+	queue.Submit(1, 1, 1, host.RequestReadFile, payload)
+	payload.Free(a)
+	next := queue.Next()
+	if !next.OK { t.Fatal("request missing"); return }
+	next.Request.Free(a)
+	queue.Free()
+}

@@ -223,6 +223,7 @@ type Program struct {
 	Definitions []*definition.Definition
 	Nodes       []definitionNode
 	Diagnostics []diagnostic.Diagnostic
+	OperationStates []operationState
 	Valid       bool
 }
 
@@ -304,7 +305,8 @@ func (p *Program) Free() {
 	p.Scope.Free()
 	p.Requests.Free()
 	for i := range p.Nodes { mem.FreeString(p.Alloc, p.Nodes[i].Name) }
-	slices.Free(p.Alloc, p.Nodes)
+	for i := range p.OperationStates { if p.OperationStates[i].Free != nil { p.OperationStates[i].Free(p.Alloc, p.OperationStates[i].Value) } }
+	slices.Free(p.Alloc, p.Nodes); slices.Free(p.Alloc, p.OperationStates)
 	slices.Free(p.Alloc, p.Definitions)
 	for i := range p.Diagnostics { p.Diagnostics[i].Free(p.Alloc) }
 	slices.Free(p.Alloc, p.Diagnostics)
@@ -454,6 +456,7 @@ type Context struct {
 	Args    []core.Value
 	RuleFrames []RuleFrame
 	Effects []Effect
+	WritePaths []string
 	Span    source.Span
 	Phase   Phase
 	ResolveDefinition DefinitionResolver
@@ -462,6 +465,28 @@ type Context struct {
 	denied  bool
 	phaseInvalid bool
 	activeCapabilities []Capability
+	operationStart int
+	operationEnd int
+	completionConsumed bool
+}
+
+type operationState struct { NodeID int64; Generation int64; Start int; End int; Value any; Free ContextFree }
+
+// OperationState survives a suspended application on one engine generation.
+// Operations use it only for progress that must not be replayed after a wait.
+func (c *Context) OperationState() any {
+	if c == nil || c.Program == nil || c.Engine == nil { return nil }
+	for i := range c.Program.OperationStates { state := &c.Program.OperationStates[i]; if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd { if state.Generation == c.Engine.Generation() { return state.Value }; if state.Free != nil { state.Free(c.Program.Alloc, state.Value) }; state.Generation, state.Value, state.Free = c.Engine.Generation(), nil, nil; return nil } }
+	return nil
+}
+func (c *Context) SetOperationState(value any, free ContextFree) {
+	if c == nil || c.Program == nil || c.Engine == nil { return }
+	for i := range c.Program.OperationStates { state := &c.Program.OperationStates[i]; if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd { state.Value, state.Free, state.Generation = value, free, c.Engine.Generation(); return } }
+	c.Program.OperationStates = slices.Append(c.Program.Alloc, c.Program.OperationStates, operationState{NodeID: c.Engine.NodeID(), Generation: c.Engine.Generation(), Start: c.operationStart, End: c.operationEnd, Value: value, Free: free})
+}
+func (c *Context) ClearOperationState() {
+	if c == nil || c.Program == nil || c.Engine == nil { return }
+	for i := range c.Program.OperationStates { state := &c.Program.OperationStates[i]; if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd { if state.Free != nil { state.Free(c.Program.Alloc, state.Value) }; copy(c.Program.OperationStates[i:], c.Program.OperationStates[i+1:]); c.Program.OperationStates = c.Program.OperationStates[:len(c.Program.OperationStates)-1]; return } }
 }
 
 type Phase int
@@ -480,6 +505,7 @@ const (
 	EffectOut EffectKind = iota
 	EffectErr
 	EffectYield
+	EffectWrite
 )
 
 type Effect struct { Kind EffectKind; Data []byte; Span source.Span }
@@ -491,8 +517,14 @@ func (c *Context) Emit(kind EffectKind, data []byte) {
 	if c.Phase == PlanningPhase { c.phaseInvalid = true; return }
 	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: kind, Data: slices.Clone(c.Run, data), Span: c.Span})
 }
+func (c *Context) EmitWrite(name string, data []byte) {
+	if c.Phase == PlanningPhase { c.phaseInvalid = true; return }
+	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: EffectWrite, Data: slices.Clone(c.Run, data), Span: c.Span})
+	c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, name))
+}
 
 func (c *Context) PhaseInvalid() bool { return c.phaseInvalid }
+func (c *Context) MarkPhaseInvalid() { c.phaseInvalid = true }
 
 // RuleFrame supplies the inputs and outputs for one enclosing rule evaluation.
 // Selectors use the most recently pushed frame.
@@ -535,9 +567,8 @@ func canonicalPath(a mem.Allocator, cwd string, name string) string {
 
 func (c *Context) Dependency(key core.ResourceKey) bool {
 	if c.Engine == nil { return false }
-	current := c.Engine.Dependency(key)
 	if c.DependencyObserver != nil { c.DependencyObserver(c.ResolverState, key) }
-	return current
+	return c.Engine.Dependency(key)
 }
 
 // Value returns a borrowed current dependency value after Dependency accepted it.
@@ -572,18 +603,20 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 		}
 		return true
 	}
-	if payload.Kind != core.String {
+	name := host.PayloadPath(payload)
+	if name == "" {
 		for i := range c.Grants { if c.Grants[i].Capability == capability && len(c.Grants[i].Names) == 0 { return true } }
 		return false
 	}
-	return c.Allows(capability, payload.Text)
+	return c.Allows(capability, name)
 }
 
 // Completion returns the host completion that resumed this evaluation, if any.
 func (c *Context) Completion() core.Completion {
-	if c.Engine == nil { return core.Completion{} }
+	if c.Engine == nil || c.completionConsumed { return core.Completion{} }
 	return c.Engine.Completion()
 }
+func (c *Context) TakeCompletion() core.Completion { completion := c.Completion(); if completion.RequestID != 0 { c.completionConsumed = true }; return completion }
 
 // Call invokes a lexical function with already evaluated values.
 func (c *Context) Call(callable core.Value, values []core.Value) Result {
@@ -804,10 +837,11 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 		if r.Waiting || r.Diagnostic.Code != "" { freeValues(context.Run, values); return r }
 		values[i] = r.Value
 	}
-	previousCapabilities, previousSpan := context.activeCapabilities, context.Span
+	previousCapabilities, previousSpan, previousStart, previousEnd := context.activeCapabilities, context.Span, context.operationStart, context.operationEnd
 	context.denied, context.activeCapabilities, context.Span = false, operation.Capabilities, span
+	context.operationStart, context.operationEnd = span.Start, span.End
 	result := operation.Call(context, operation.Context, values)
-	context.activeCapabilities, context.Span = previousCapabilities, previousSpan
+	context.activeCapabilities, context.Span, context.operationStart, context.operationEnd = previousCapabilities, previousSpan, previousStart, previousEnd
 	freeValues(context.Run, values)
 	if context.denied { result.Free(context.Run); return failure("CAP_DENIED", span, "operation capability denied") }
 	return result

@@ -601,3 +601,102 @@ func TestDynamicExternalFileDependencyIsCurrent(t *testing.T) {
 	second.Free(a)
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
+
+func TestWriteOperationDefersUntilExecution(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-runtime-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "test.lmk", "./output :\n\t@(write \"./output\" \"written\")\n")
+	registry := eval.NewRegistry(a)
+	lib.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "" { t.Errorf("write failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/output")
+	if readErr != nil || string(data) != "written" { t.Error("write did not commit") }
+	mem.FreeSlice(a, data)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+
+func TestReadOperationResumesDuringRendering(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-runtime-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	if os.WriteFile(dir+"/input", []byte("abc"), 0o644) != nil { t.Fatal("input write failed"); return }
+	parsed := script.Parse(a, "test.lmk", "./output :\n\t@(yield (str (count (read \"./input\"))))\n")
+	registry := eval.NewRegistry(a)
+	lib.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "" { t.Errorf("read failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/output")
+	if readErr != nil || string(data) != "3" { t.Error("read result did not resume into yield") }
+	mem.FreeSlice(a, data)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestWildcardRelativePathDoesNotLeak(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-runtime-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	if os.WriteFile(dir+"/input", []byte("abc"), 0o644) != nil { t.Fatal("input write failed"); return }
+	parsed := script.Parse(a, "test.lmk", "./output :\n\t@(yield (str (wildcard \"./*\")))\n")
+	registry := eval.NewRegistry(a)
+	lib.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "" { t.Errorf("wildcard failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/output")
+	if readErr != nil || string(data) != "[\"./input\"]" { t.Errorf("wildcard result = %s", string(data)) }
+	mem.FreeSlice(a, data)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestRenderFreesLineSpansWhenLaterLineWaits(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-runtime-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	if os.WriteFile(dir+"/input", []byte("abc"), 0o644) != nil { t.Fatal("input write failed"); return }
+	parsed := script.Parse(a, "test.lmk", "./output :\n\tkept\n\t@(yield (str (count (read \"./input\"))))\n")
+	registry := eval.NewRegistry(a)
+	lib.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "OUTPUT_CONFLICT" { t.Errorf("yield conflict = %s", result.Diagnostic.Code) }
+	result.Free(a)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestYieldBufferFreedWhenLaterWriteFails(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-runtime-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	if os.WriteFile(dir+"/not-a-dir", []byte("file"), 0o644) != nil { t.Fatal("blocker write failed"); return }
+	parsed := script.Parse(a, "test.lmk", "./output :\n\t@(yield \"data\")\n\t@(write \"./not-a-dir/child\" \"x\")\n")
+	registry := eval.NewRegistry(a)
+	lib.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "FS_ERR" { t.Errorf("write failure = %s", result.Diagnostic.Code) }
+	result.Free(a)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}

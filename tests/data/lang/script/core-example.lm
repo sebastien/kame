@@ -3,28 +3,23 @@
 
 SOURCE_PATH = ./src/ts/littlemake
 
-SOURCE_FILES = (flatmap SOURCE_PATH
-  ([dir] (filter
-    (filter
-      (wildcard (join [dir "/**/*.ts"] ""))
-      ([f] (not (ends? f ".d.ts"))))
-    ([f] (not (includes? f "/node_modules/")))))
-)
+SOURCE_FILES = (filter
+  ([f] (not (includes? f "/node_modules/")))
+  (filter
+    ([f] (not (ends? f ".d.ts")))
+    (wildcard (join [SOURCE_PATH "/**/*.ts"] ""))))
 
 FILE_COUNT = (count SOURCE_FILES)
 
 manifest = (map
-  SOURCE_FILES
   ([file] [
     path: (relpath file SOURCE_PATH)
     name: (nth (splitext file) 0)
   ])
+  SOURCE_FILES
 )
 
-bundle = (apply
-  SOURCE_FILES
-  ([files] "Bundle of {(count files)} files")
-)
+bundle = (([files] "Bundle of {(count files)} files") SOURCE_FILES)
 
 default :
 	echo @(bundle)

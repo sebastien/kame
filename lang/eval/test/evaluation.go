@@ -47,6 +47,15 @@ func readFileOperation(context *eval.Context, value any, args []core.Value) eval
 	return eval.Result{Waiting: true}
 }
 
+func recordReadFileOperation(context *eval.Context, value any, args []core.Value) eval.Result {
+	_, _ = value, args
+	payload := host.FilePayload(context.Run, host.OpRead, "../outside.txt")
+	id := context.Submit(host.RequestReadFile, payload)
+	payload.Free(context.Run)
+	if id == 0 { return eval.Result{Waiting: true} }
+	return eval.Result{Waiting: true}
+}
+
 func customReadOperation(context *eval.Context, value any, args []core.Value) eval.Result {
 	_, _ = value, args
 	if context.Submit(host.RequestCustom, core.Value{Kind: core.Nil}) == 0 { return eval.Result{Waiting: true} }
@@ -337,6 +346,21 @@ func TestRestrictedHostRequestIsDeniedBeforeQueueing(t *testing.T) {
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Cwd: "/workspace/project", Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"./allowed"}}}}
 	result := program.EvaluateWith(expression.Expr, &context)
 	if result.Diagnostic.Code != "CAP_DENIED" || program.Requests.Next().OK { t.Error("restricted host request was queued or not denied") }
+	result.Free(a); expression.Free()
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestRestrictedRecordHostRequestUsesPayloadPath(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	registry.Add(eval.Operation{Name: "read-file", Call: recordReadFileOperation, MinArity: 0, MaxArity: 0, Capabilities: []eval.Capability{eval.Read}})
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	expression := expr.Parse(a, "test", "(read-file)")
+	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Cwd: "/workspace/project", Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"./allowed"}}}}
+	result := program.EvaluateWith(expression.Expr, &context)
+	if result.Diagnostic.Code != "CAP_DENIED" { t.Error("restricted record request escaped capability root") }
 	result.Free(a); expression.Free()
 	engine.Free(); program.Free(); parsed.Free(); registry.Free()
 }
