@@ -13,6 +13,7 @@ import (
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
+	"solod.dev/so/time"
 )
 
 type Result struct {
@@ -42,6 +43,10 @@ func produceExternalFile(c *core.EngineContext, nodeID int64) core.ProducerResul
 	name := state.Program.canonicalTarget(state.Name, true)
 	_, err := os.Stat(name)
 	mem.FreeString(state.Program.Alloc, name)
+	// A missing path is an observed dependency, not a failed producer. Declared
+	// inputs still fail before execution. The cache records an explicit missing
+	// marker and invalidates when the path later appears.
+	if err == os.ErrNotExist { c.Publish(core.Value{Kind: core.Nil}); return core.ProducerCompleted }
 	if err != nil { c.Fail(failure("TGT_NO_RULE", "required input does not exist: "+state.Name)); return core.ProducerFailed }
 	c.Publish(core.NewString(c.Allocator(), state.Name))
 	return core.ProducerCompleted
@@ -49,7 +54,7 @@ func produceExternalFile(c *core.EngineContext, nodeID int64) core.ProducerResul
 func produceExternalValue(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	_ = nodeID
 	state := c.Context().(*externalValueState)
-	if state.Kind == core.ResourceEnvironment { value, ok := os.LookupEnv(state.Name); if ok { c.Publish(core.NewString(c.Allocator(), value)) } else { c.Publish(core.Value{Kind: core.Nil}) }
+	if state.Kind == core.ResourceEnvironment { value, ok := state.Program.configuredEnvironment(state.Name); if ok { c.Publish(core.NewString(c.Allocator(), value)) } else { c.Publish(core.Value{Kind: core.Nil}) }
 	} else if state.Kind == core.ResourceGlob { c.Publish(state.Program.wildcard(state.Name))
 	} else { c.Fail(failure("HOST_FAIL", "invalid external resource")); return core.ProducerFailed }
 	return core.ProducerCompleted
@@ -84,14 +89,92 @@ func (p *Program) Start(target string) HandleStart {
 	}
 	plan.Free(p.Alloc)
 	index := p.instanceIndex(node)
-	if index >= 0 && node.State == core.NodeComplete {
+	if index >= 0 {
+		p.epoch++
+		p.Instances[index].runEpoch = p.epoch
+		p.invalidateStaleBareTasks(index, p.epoch)
+	}
+	if index >= 0 && taskTerminal(node.State) {
 		entry := &p.Instances[index]
-		if entry.Rule.Kind == rule.FileRule { entry.Plan.Freshness = p.freshness(&entry.Plan, node); if entry.Plan.Freshness == Stale { p.Engine.Invalidate(node) }
+		if entry.Rule.Kind == rule.FileRule && node.State == core.NodeComplete { entry.Plan.Freshness = p.freshness(&entry.Plan, node); if entry.Plan.Freshness == Stale { p.Engine.Invalidate(node) }
 		} else if entry.Rule.Kind == rule.TaskRule || entry.Rule.Kind == rule.CachedTaskRule { p.Engine.Invalidate(node) }
 	}
 	handle := mem.Alloc[Handle](p.Alloc)
 	handle.Program, handle.Root, handle.Node, handle.Target, handle.Definition = p, p.Engine.RequestRoot(node), node, cloneText(p.Alloc, target), definition
 	return HandleStart{Handle: handle}
+}
+
+// invalidateStaleBareTasks reruns stale terminal bare tasks once for this root epoch.
+// It walks instance indexes and stored plan inputs only. Calling instanceFor here
+// would allocate and transfer Plans during the walk.
+func (p *Program) invalidateStaleBareTasks(root int, epoch int64) {
+	closure := p.taskClosure(root)
+	for i := len(closure) - 1; i >= 0; i-- {
+		p.claimStaleTask(p.Instances[closure[i]].Node, epoch)
+	}
+	slices.Free(p.Alloc, closure)
+}
+
+func taskTerminal(state core.NodeState) bool {
+	return state == core.NodeComplete || state == core.NodeFailed || state == core.NodeCancelled
+}
+
+// claimStaleTask invalidates one terminal task whose last claim is older than epoch.
+// The stamp is set before Invalidate so a later parent in this epoch, or a resumed
+// producer, does not invalidate the same generation again.
+func (p *Program) claimStaleTask(node *core.Node, epoch int64) {
+	if node == nil || epoch == 0 { return }
+	index := p.instanceIndex(node)
+	if index < 0 || p.Instances[index].Rule == nil { return }
+	kind := p.Instances[index].Rule.Kind
+	state := p.Instances[index].Node.State
+	if !taskTerminal(state) || p.Instances[index].Node.Interest > 0 || p.Instances[index].satisfiedEpoch >= epoch { return }
+	if kind == rule.CachedTaskRule {
+		if state == core.NodeComplete && !p.cacheBlockedByBareTask(&p.Instances[index]) { return }
+	} else if kind != rule.TaskRule {
+		return
+	}
+	p.Instances[index].satisfiedEpoch = epoch
+	p.Instances[index].runEpoch = epoch
+	p.Engine.Invalidate(p.Instances[index].Node)
+}
+
+func (p *Program) taskClosure(root int) []int {
+	var seen []int
+	seen = slices.Append(p.Alloc, seen, root)
+	i := 0
+	for i < len(seen) {
+		p.appendTaskClosure(seen[i], &seen)
+		i++
+	}
+	return seen
+}
+
+func (p *Program) appendTaskClosure(index int, seen *[]int) {
+	if index < 0 || index >= len(p.Instances) { return }
+	inputs := p.Instances[index].Plan.Inputs
+	if p.Instances[index].Plan.Resolved { inputs = p.Instances[index].Plan.ResolvedInputs }
+	for n := range inputs {
+		dep := p.instanceByTarget(inputs[n])
+		if dep >= 0 && !slices.Contains(*seen, dep) { *seen = slices.Append(p.Alloc, *seen, dep) }
+	}
+	node := p.Instances[index].Node
+	if node == nil { return }
+	for n := range node.Dynamic {
+		dep := p.instanceIndex(node.Dynamic[n])
+		if dep >= 0 && !slices.Contains(*seen, dep) { *seen = slices.Append(p.Alloc, *seen, dep) }
+	}
+	for n := range node.Static {
+		dep := p.instanceIndex(node.Static[n])
+		if dep >= 0 && !slices.Contains(*seen, dep) { *seen = slices.Append(p.Alloc, *seen, dep) }
+	}
+}
+
+func (p *Program) instanceByTarget(name string) int {
+	for i := range p.Instances {
+		if p.Instances[i].Plan.Target == name { return i }
+	}
+	return -1
 }
 
 func (p *Program) Tick(wait int) {
@@ -151,6 +234,11 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	p := state.Program
 	entry := &p.Instances[state.Index]
 	if !entry.started || entry.startedGeneration != c.Generation() {
+		if len(entry.CacheStdout) != 0 { slices.Free(p.Alloc, entry.CacheStdout) }; if len(entry.CacheStderr) != 0 { slices.Free(p.Alloc, entry.CacheStderr) }
+		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false
+		if entry.Script != "" { mem.FreeString(p.Alloc, entry.Script); entry.Script = "" }
+		freeStrings(p.Alloc, entry.Operations); entry.Operations = nil
+		if entry.runEpoch != 0 && entry.satisfiedEpoch < entry.runEpoch { entry.satisfiedEpoch = entry.runEpoch }
 		p.emitNode(entry.Node, entry.Plan.Target, TargetStarted, diagnostic.Span{}, nil)
 		entry.started, entry.startedGeneration, entry.terminalEmitted = true, c.Generation(), false
 	}
@@ -184,7 +272,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			entry = &p.Instances[state.Index]
 			if resolved.Node != nil {
 				resolved.Plan.Free(p.Alloc)
-				if !p.addDependency(c, entry, resolved.Node) { return core.ProducerWaiting }
+				if !p.prepareDependency(c, state.Index, resolved.Node) { return core.ProducerWaiting }
 				continue
 			}
 			resolved.Plan.Free(p.Alloc)
@@ -199,7 +287,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		dep, d := resolved.Node, resolved.Diagnostic
 		resolved.Plan.Free(p.Alloc)
 		if d.Code == "" && dep != nil {
-			if !p.addDependency(c, entry, dep) { return core.ProducerWaiting }
+			if !p.prepareDependency(c, state.Index, dep) { return core.ProducerWaiting }
 			continue
 		}
 		definition := p.Eval.Definition(input)
@@ -217,6 +305,21 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	if rendered.Waiting { return core.ProducerWaiting }
 	if d.Code != "" { c.Fail(d); return core.ProducerFailed }
 	if entry.Rule.Kind == rule.FileRule { entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node) } else { entry.Plan.Freshness = Stale }
+	if entry.Rule.Kind == rule.CachedTaskRule && !p.Options.CacheDisabled && !p.Options.DryRun {
+		entry.CacheReady = p.cacheFingerprint(entry, commands)
+		if !p.cacheBlockedByBareTask(entry) {
+			record := p.cacheLoad(entry, entry.CacheFingerprint[:])
+			if record.Identity != "" {
+				entry.Plan.Freshness = Fresh
+				p.emitCachedLog(entry, Stdout, record.Stdout, record.StdoutTruncated)
+				p.emitCachedLog(entry, Stderr, record.Stderr, record.StderrTruncated)
+				record.Free(p.Alloc)
+				if commands != "" { mem.FreeString(p.Alloc, commands) }
+				c.Publish(core.Value{Kind: core.Nil})
+				return core.ProducerCompleted
+			}
+		}
+	}
 	if entry.Plan.Freshness == Fresh && !p.Options.DryRun {
 		if commands != "" { mem.FreeString(p.Alloc, commands) }
 		if entry.Rule.Kind == rule.FileRule { c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0])) } else { c.Publish(core.Value{Kind: core.Nil}) }
@@ -235,6 +338,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				if err != nil { c.Fail(failure("OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i])); return core.ProducerFailed }
 			}
 		}
+		if entry.Rule.Kind == rule.CachedTaskRule && entry.CacheReady && !p.Options.CacheDisabled { p.cacheCommit(entry, nil, nil, false, false) }
 		if entry.Rule.Kind == rule.FileRule && hasYield(effects) { c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0])) } else { c.Publish(core.Value{Kind: core.Nil}) }
 		return core.ProducerCompleted
 	}
@@ -248,11 +352,16 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	}
 	p.nextRequest++
 	entry.Script = commands
-	request := posix.Request{ID: p.nextRequest, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: p.Options.Environment, RetainBytes: p.Options.RetainBytes}
+	retain := p.Options.RetainBytes
+	if entry.Rule.Kind == rule.CachedTaskRule && p.Options.CacheRetainBytes > retain { retain = p.Options.CacheRetainBytes }
+	entry.cacheStartedAt = time.Now().UnixNano()
+	entry.retryCount = 0
+	request := posix.Request{ID: p.nextRequest, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 	if !p.Host.Start(request) { c.Fail(failure("HOST_FAIL", "cannot start recipe")); return core.ProducerFailed }
 	c.Submit(request.ID)
 	return core.ProducerSubmitted
 }
+
 
 func (p *Program) render(c *core.EngineContext, entry *instance, names []string) renderResult {
 	inputs := makeValues(p.Alloc, names)
@@ -260,7 +369,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	defer freeValues(p.Alloc, inputs); defer freeValues(p.Alloc, outputs)
 	dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
 	context := mem.Alloc[eval.Context](p.Alloc)
-	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
+	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
 	b := strings.NewBuilder(p.Alloc)
 	defer b.Free()
 	var spans []diagnostic.Span
@@ -303,8 +412,44 @@ func observeRenderDependency(value any, key core.ResourceKey) {
 		resolved.Plan.Free(p.Alloc)
 	}
 	if state.Index < 0 || state.Index >= len(p.Instances) { return }
+	if resolved.Node != nil { p.adoptTask(resolved.Node, p.Instances[state.Index].runEpoch) }
 	entry := &p.Instances[state.Index]
 	p.emit(Event{Kind: DependencyDiscovered, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, DependencyKey: key})
+}
+
+func observeRenderOperation(value any, name string, version string) {
+	state := value.(*renderDependencyState)
+	if state.Index < 0 || state.Index >= len(state.Program.Instances) { return }
+	entry := &state.Program.Instances[state.Index]
+	identity := name + "\x00" + version
+	for i := range entry.Operations { if entry.Operations[i] == identity { return } }
+	entry.Operations = slices.Append(state.Program.Alloc, entry.Operations, cloneText(state.Program.Alloc, identity))
+}
+
+func (p *Program) cacheBlockedByBareTask(entry *instance) bool {
+	inputs, resources := entry.Plan.Inputs, entry.Plan.ResourceInputs
+	if entry.Plan.Resolved { inputs, resources = entry.Plan.ResolvedInputs, entry.Plan.ResolvedResourceInputs }
+	for i := range inputs {
+		if i < len(resources) && resources[i].Key.Kind == core.ResourceFile { continue }
+		if isFileName(inputs[i]) { continue }
+		selected := p.selectRule(inputs[i])
+		if selected.Rule != nil && selected.Rule.Kind == rule.TaskRule { freeCaptures(p.Alloc, selected.Captures); return true }
+		freeCaptures(p.Alloc, selected.Captures)
+	}
+	for i := range entry.Node.Dynamic {
+		dependency := entry.Node.Dynamic[i]
+		index := p.instanceIndex(dependency)
+		if index >= 0 && p.Instances[index].Rule.Kind == rule.TaskRule { return true }
+		if index >= 0 && p.Instances[index].Rule.Kind == rule.CachedTaskRule && p.cacheBlockedByBareTask(&p.Instances[index]) { return true }
+	}
+	return false
+}
+
+func (p *Program) emitCachedLog(entry *instance, kind EventKind, data []byte, truncated bool) {
+	if len(data) == 0 && !truncated { return }
+	event := Event{Kind: kind, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Cached: true, Truncated: truncated}
+	if len(data) != 0 { event.Data = slices.Clone(p.Alloc, data) }
+	p.emit(event)
 }
 
 func hasYield(effects []eval.Effect) bool { for i := range effects { if effects[i].Kind == eval.EffectYield { return true } }; return false }
@@ -319,7 +464,9 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 		effect := effects[i]
 		p.emitNode(entry.Node, entry.Plan.Target, Effect, diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, effect.Data)
 		if effect.Kind == eval.EffectOut { p.emitNode(entry.Node, entry.Plan.Target, Stdout, diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, effect.Data)
+			if entry.Rule.Kind == rule.CachedTaskRule { p.cacheAppend(&entry.CacheStdout, &entry.CacheStdoutTruncated, effect.Data, p.Options.CacheRetainBytes) }
 		} else if effect.Kind == eval.EffectErr { p.emitNode(entry.Node, entry.Plan.Target, Stderr, diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, effect.Data)
+			if entry.Rule.Kind == rule.CachedTaskRule { p.cacheAppend(&entry.CacheStderr, &entry.CacheStderrTruncated, effect.Data, p.Options.CacheRetainBytes) }
 		} else if effect.Kind == eval.EffectYield { hasYielded = true; for j := range effect.Data { yielded = slices.Append(p.Alloc, yielded, effect.Data[j]) } }
 		if effect.Kind == eval.EffectWrite { if writeIndex >= len(writePaths) { slices.Free(p.Alloc, yielded); return failure("FS_ERR", "missing write path") }; if !dryRun { name := p.canonicalTarget(writePaths[writeIndex], true); temporary := name + ".littlemake-write.tmp"; ok := mkdirParent(name) && os.WriteFile(temporary, effect.Data, 0o644) == nil && os.Rename(temporary, name) == nil; if !ok { os.Remove(temporary); mem.FreeString(p.Alloc, name); slices.Free(p.Alloc, yielded); return failure("FS_ERR", "cannot write file") }; mem.FreeString(p.Alloc, name) }; writeIndex++ }
 	}
@@ -356,7 +503,8 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		}
 		if input.Template == nil || len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil { freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Diagnostic: failure("EXPR_INVALID", "invalid rule input expression")} }
 		values, outputs := makeValues(p.Alloc, inputs), makeValues(p.Alloc, entry.Plan.Outputs)
-		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.PlanningPhase, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
+		dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
+		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.PlanningPhase, ResolverState: &dependencyState, OperationObserver: observeRenderOperation, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
 		result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
 		freeValues(p.Alloc, values); freeValues(p.Alloc, outputs)
 		if context.PhaseInvalid() || len(context.Effects) != 0 { eval.FreeEffects(p.Alloc, context.Effects); result.Free(p.Alloc); freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Diagnostic: failure("PHASE_INVALID", "build effects are invalid while planning")} }
@@ -428,9 +576,9 @@ func (p *Program) drainRequests() {
 		request := next.Request
 		if request.Kind == host.RequestProcess {
 			script := host.PayloadText(request.Payload, host.FieldScript)
-			if script == "" || p.Host == nil || !p.Host.Start(posix.Request{ID: request.ID, Shell: p.Options.Shell, Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, RetainBytes: p.Options.RetainBytes}) {
+			if script == "" || p.Host == nil || !p.Host.Start(posix.Request{ID: request.ID, Shell: p.Options.Shell, Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: p.Options.RetainBytes}) {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure("HOST_FAIL", "cannot start shell request")})
-			} else { p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt}) }
+			} else { p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0}) }
 		} else { p.completeRequest(request) }
 		request.Free(p.Alloc)
 	}
@@ -440,7 +588,7 @@ func (p *Program) completeRequest(request host.Request) {
 	completion := core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID}
 	name := host.PayloadPath(request.Payload)
 	if request.Kind == host.RequestEnvironment {
-		value, ok := os.LookupEnv(name)
+		value, ok := p.configuredEnvironment(name)
 		if ok { completion.Value, completion.HasValue = core.NewString(p.Alloc, value), true } else { completion.Value, completion.HasValue = core.Value{Kind: core.Nil}, true }
 	} else if request.Kind == host.RequestReadFile {
 		op := host.PayloadText(request.Payload, host.FieldOp)
@@ -581,7 +729,43 @@ func (p *Program) complete(event posix.Event) {
 		return
 	}
 	node := p.nodeForRequest(event.ID)
+	entry := p.instanceForRequest(event.ID)
+	if node!=nil && entry!=nil && node.HostRequestID==event.ID && node.State==core.NodeWaiting && d.Code!="" && d.Code!="EXEC_CANCELLED" && entry.retryCount<p.Options.RetryCount {
+		p.nextRequest++
+		retryID:=p.nextRequest
+		retain:=p.Options.RetainBytes
+		if p.Options.CacheRetainBytes>retain { retain=p.Options.CacheRetainBytes }
+		request:=posix.Request{ID:retryID,Shell:p.Options.Shell,Script:[]byte(entry.Script),Directory:p.Options.Directory,Environment:p.Options.Environment,TimeoutMS:p.Options.TimeoutMS,RetainBytes:retain}
+		if p.Host!=nil && p.Host.Start(request) {
+			entry.retryCount++
+			node.HostRequestID=retryID
+			return
+		}
+	}
+	if node != nil && entry != nil && node.HostRequestID == event.ID && node.State == core.NodeWaiting && entry.Rule.Kind == rule.CachedTaskRule && entry.CacheReady && d.Code == "" && event.Status == 0 && !p.Options.CacheDisabled {
+		p.cacheCommit(entry, event.Stdout, event.Stderr, event.StdoutTruncated, event.StderrTruncated)
+	}
 	if node != nil { p.Engine.Complete(core.Completion{NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: event.ID, Diagnostic: d}) }
+}
+
+func (p *Program) cacheAppend(dst *[]byte, truncated *bool, data []byte, limit int) {
+	if limit <= 0 { limit = cacheLogDefault }
+	for i := range data { if len(*dst) >= limit { *truncated = true; return }; *dst = slices.Append(p.Alloc, *dst, data[i]) }
+}
+
+func (p *Program) cacheCommit(entry *instance, stdout []byte, stderr []byte, stdoutTruncated bool, stderrTruncated bool) {
+	if p.cacheBlockedByBareTask(entry) { return }
+	p.cacheAppend(&entry.CacheStdout, &entry.CacheStdoutTruncated, stdout, p.Options.CacheRetainBytes)
+	p.cacheAppend(&entry.CacheStderr, &entry.CacheStderrTruncated, stderr, p.Options.CacheRetainBytes)
+	if stdoutTruncated { entry.CacheStdoutTruncated = true }; if stderrTruncated { entry.CacheStderrTruncated = true }
+	identity := p.cacheIdentity(entry)
+	completed := time.Now().UnixNano()
+	started := entry.cacheStartedAt
+	if started<=0 || started>completed { started=completed }
+	record := cacheRecord{Identity: identity, Schema: 1, StartedAt: started, CompletedAt: completed, Duration: completed-started, ExitStatus: 0, Manifest: slices.Clone(p.Alloc, entry.CacheManifest), Stdout: slices.Clone(p.Alloc, entry.CacheStdout), Stderr: slices.Clone(p.Alloc, entry.CacheStderr), StdoutTruncated: entry.CacheStdoutTruncated, StderrTruncated: entry.CacheStderrTruncated}
+	for i := range record.Fingerprint { record.Fingerprint[i] = entry.CacheFingerprint[i] }
+	p.cacheSave(entry, &record)
+	record.Free(p.Alloc)
 }
 
 func shellValue(a mem.Allocator, event posix.Event) core.Value {
@@ -597,6 +781,19 @@ func (p *Program) instanceForRequest(id int64) *instance {
 }
 
 func (p *Program) definitionNode(name string) *core.Node { return p.Eval.Definition(name) }
+
+func (p *Program) prepareDependency(c *core.EngineContext, index int, dependency *core.Node) bool {
+	p.adoptTask(dependency, p.Instances[index].runEpoch)
+	return p.addDependency(c, &p.Instances[index], dependency)
+}
+
+func (p *Program) adoptTask(node *core.Node, epoch int64) {
+	p.claimStaleTask(node, epoch)
+	index := p.instanceIndex(node)
+	if index < 0 || epoch == 0 { return }
+	if p.Instances[index].Node.State == core.NodeWaiting || p.Instances[index].Node.State == core.NodeReady { return }
+	if p.Instances[index].runEpoch < epoch { p.Instances[index].runEpoch = epoch }
+}
 
 func (p *Program) addDependency(c *core.EngineContext, entry *instance, dependency *core.Node) bool {
 	existed := slices.Contains(entry.Node.Dynamic, dependency)

@@ -68,6 +68,22 @@ change detection rather than authentication.
 - File dependency: canonical path, kind, size, modification time, and SHA-256
   content digest.
 - Missing path dependency: canonical path and explicit missing marker.
+
+Only a regular file is a cacheable present file. Its fingerprint uses `Lstat`,
+so a symlink is not treated as the file it points to, and symlinks are not
+followed. The present-file payload is the existing tagged 32-byte digest. The
+digest's kind byte is `1` for a regular file, followed by size, modification
+time, and an incremental content hash.
+
+A missing path is `Lstat` returning not-found. After the canonical path, the
+manifest stores one `0` byte and no content digest. A later appearance of that
+path is a different fingerprint and invalidates the task. A dangling symlink is
+not missing.
+
+Directories, symlinks, fifos, sockets, devices, and any other non-regular type
+are uncacheable. So is any stat, open, or read error other than not-found. The
+task still executes, no successful record is written, and verbose mode emits
+one `CACHE_UNUSABLE` warning. Those inputs never share the regular-file marker.
 - Glob dependency: pattern plus sorted matched path and file fingerprints.
 - Definition dependency: canonical encoded current value and its dependency
   fingerprints.
@@ -80,9 +96,11 @@ An ordinary bare task is never a cacheable dependency. A cached task depending
 on one is therefore always stale.
 
 Hashing is incremental and never requires loading a complete file into memory.
-A dependency manifest is limited to 16 MiB of encoded entries. Exceeding that
-limit makes the task uncacheable for that run and emits `CACHE_UNUSABLE` as a warning;
-execution itself may continue.
+A dependency manifest is limited to 16 MiB of encoded entries. That cap applies
+while constructing the identity, rule text, nested definition values, and the
+final encoding; construction does not allocate past the cap and releases the
+partial buffer on overflow. Exceeding that limit makes the task uncacheable for
+that run and emits `CACHE_UNUSABLE` as a warning; execution itself may continue.
 
 ## Records
 

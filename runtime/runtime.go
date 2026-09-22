@@ -71,6 +71,7 @@ const (
 	TargetCompleted
 	TargetFailed
 	TargetCancelled
+	CacheWarning
 )
 
 type Event struct {
@@ -87,6 +88,8 @@ type Event struct {
 	Data       []byte
 	Value      core.Value
 	Diagnostic diagnostic.Diagnostic
+	Cached     bool
+	Truncated  bool
 }
 
 type EventResult struct { Event Event; OK bool }
@@ -112,6 +115,14 @@ type Options struct {
 	Environment []string
 	DryRun    bool
 	RetainBytes int
+	CacheRetainBytes int
+	CacheDisabled bool
+	// CacheManifestMax is the encoded fingerprint cap in bytes. Zero selects the
+	// 16 MiB spec default. Tests inject a smaller cap to pin overflow boundaries.
+	CacheManifestMax int
+	TimeoutMS int64
+	RetryCount int
+	Verbose bool
 	Jobs int
 	Grants []eval.Grant
 }
@@ -129,12 +140,13 @@ type Program struct {
 	Events   []Event
 	nextRequest int64
 	Pending []pendingRequest
+	epoch int64
 }
 
-type pendingRequest struct { ID int64; NodeID int64; Generation int64; Attempt int64 }
+type pendingRequest struct { ID int64; NodeID int64; Generation int64; Attempt int64; Retries int }
 
 type registeredRule struct { Rule *rule.Rule }
-type instance struct { Rule *rule.Rule; Captures []template.CaptureValue; Node *core.Node; Plan Plan; Script string; LineSpans []diagnostic.Span; started bool; startedGeneration int64; terminalEmitted bool; terminalGeneration int64; valueRevision int64 }
+type instance struct { Rule *rule.Rule; Captures []template.CaptureValue; Node *core.Node; Plan Plan; Script string; LineSpans []diagnostic.Span; Operations []string; CacheFingerprint [32]byte; CacheManifest []byte; CacheStdout []byte; CacheStderr []byte; CacheStdoutTruncated bool; CacheStderrTruncated bool; CacheReady bool; cacheStartedAt int64; retryCount int; started bool; startedGeneration int64; terminalEmitted bool; terminalGeneration int64; valueRevision int64; satisfiedEpoch int64; runEpoch int64 }
 type selection struct { Rule *rule.Rule; Captures []template.CaptureValue; Ambiguous bool }
 type planResolverState struct { Program *Program; Resolving []string }
 
@@ -160,6 +172,10 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p.Alloc, p.Engine, p.Eval, p.Parsed = a, engine, compiled.Program, parsed
 	p.nextRequest = 1 << 60 // Evaluator queue request IDs start at one.
 	p.Options.Directory, p.Options.DryRun, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.RetainBytes, options.Jobs
+	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
+	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
+	if p.Options.RetryCount<0 { p.Options.RetryCount=0 }
+	if p.Options.CacheRetainBytes <= 0 { p.Options.CacheRetainBytes = cacheLogDefault }
 	for i := range options.Shell { p.Options.Shell = slices.Append(a, p.Options.Shell, cloneText(a, options.Shell[i])) }
 	for i := range options.Environment { p.Options.Environment = slices.Append(a, p.Options.Environment, cloneText(a, options.Environment[i])) }
 	for i := range options.Grants { grant := eval.Grant{Capability: options.Grants[i].Capability}; for j := range options.Grants[i].Names { grant.Names = slices.Append(a, grant.Names, cloneText(a, options.Grants[i].Names[j])) }; p.Options.Grants = slices.Append(a, p.Options.Grants, grant) }
@@ -217,7 +233,7 @@ func duplicateLiteral(p *Program, candidate *rule.Rule) bool {
 
 func (p *Program) Free() {
 	if p == nil { return }
-	for i := range p.Instances { p.Instances[i].Plan.Free(p.Alloc); freeCaptures(p.Alloc, p.Instances[i].Captures); if p.Instances[i].Script != "" { mem.FreeString(p.Alloc, p.Instances[i].Script) }; if len(p.Instances[i].LineSpans) != 0 { slices.Free(p.Alloc, p.Instances[i].LineSpans) } }
+	for i := range p.Instances { p.Instances[i].Plan.Free(p.Alloc); freeCaptures(p.Alloc, p.Instances[i].Captures); if p.Instances[i].Script != "" { mem.FreeString(p.Alloc, p.Instances[i].Script) }; if len(p.Instances[i].LineSpans) != 0 { slices.Free(p.Alloc, p.Instances[i].LineSpans) }; freeStrings(p.Alloc, p.Instances[i].Operations); if len(p.Instances[i].CacheManifest) != 0 { slices.Free(p.Alloc, p.Instances[i].CacheManifest) }; if len(p.Instances[i].CacheStdout) != 0 { slices.Free(p.Alloc, p.Instances[i].CacheStdout) }; if len(p.Instances[i].CacheStderr) != 0 { slices.Free(p.Alloc, p.Instances[i].CacheStderr) } }
 	for i := range p.Events { p.Events[i].Free(p.Alloc) }
 	if p.Options.Directory != "" { mem.FreeString(p.Alloc, p.Options.Directory) }
 	for i := range p.Options.Shell { mem.FreeString(p.Alloc, p.Options.Shell[i]) }

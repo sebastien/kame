@@ -181,7 +181,13 @@ func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Re
 	return eval.Result{Waiting: true}
 }
 func dependency(c *eval.Context, kind core.ResourceKind, name string) bool { key := core.NewResourceKey(c.Run, kind, name); current := c.Dependency(key); key.Free(c.Run); return current }
-func fileRequest(c *eval.Context, op string, value core.Value) eval.Result { if value.Kind != core.String { return invalid() }; return request(c, host.RequestReadFile, host.FilePayload(c.Run, op, value.Text)) }
+func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
+	if value.Kind != core.String { return invalid() }
+	kind := core.ResourceFile
+	if op == host.OpWildcard { kind = core.ResourceGlob }
+	if !dependency(c, kind, value.Text) { return eval.Result{Waiting: true} }
+	return request(c, host.RequestReadFile, host.FilePayload(c.Run, op, value.Text))
+}
 func opRead(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return fileRequest(c, host.OpRead, v[0]) }
 func opExists(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return fileRequest(c, host.OpExists, v[0]) }
 func opStat(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return fileRequest(c, host.OpStat, v[0]) }

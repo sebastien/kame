@@ -365,6 +365,7 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node) {
 	n.Submitted = false
 	n.HostRequestID = 0
 	if n.HasCompletion { n.Completion.Value.Free(e.Alloc); n.Completion = Completion{}; n.HasCompletion = false }
+	n.Diagnostic.Free(e.Alloc)
 	n.State, n.Requested, n.Diagnostic = NodeIdle, n.Interest != 0, Diagnostic{}
 	n.offered = false
 	if n.materializer != nil { n.materializer.Free(); n.materializer = nil }

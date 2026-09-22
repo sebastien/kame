@@ -462,6 +462,9 @@ type Context struct {
 	ResolveDefinition DefinitionResolver
 	ResolverState any
 	DependencyObserver func(any, core.ResourceKey)
+	// OperationObserver records the stable operation identity used by a render.
+	// It is observational only and must not mutate evaluation state.
+	OperationObserver func(any, string, string)
 	denied  bool
 	phaseInvalid bool
 	activeCapabilities []Capability
@@ -830,6 +833,7 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	// the resumed evaluation then snapshots every dependency at its latest value.
 	if context.Engine != nil && context.Engine.Submitted() && context.Completion().RequestID == 0 { return Result{Waiting: true} }
 	if len(arguments) < operation.MinArity || (operation.MaxArity >= 0 && len(arguments) > operation.MaxArity) { return failure("EXPR_INVALID", span, "invalid operation arity") }
+	if context.OperationObserver != nil { context.OperationObserver(context.ResolverState, operation.Name, operation.Version) }
 	for i := range operation.Capabilities { if !context.allowed(operation.Capabilities[i]) { return failure("CAP_DENIED", span, "operation capability denied") } }
 	values := slices.Make[core.Value](context.Run, len(arguments))
 	for i := range arguments {
