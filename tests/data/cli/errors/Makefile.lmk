@@ -1,0 +1,36 @@
+# Failure fixtures (spec 006).
+./missing.out :
+	true
+
+./failing.out :
+	echo failing
+	exit 3
+
+./conflict.out :
+	@(yield "declared")
+	echo command
+
+A = "@(B)"
+B = "@(A)"
+./cycle.out : @(A)
+	true
+
+./amb-{x}.c :
+	echo x
+./amb-{y}.c :
+	echo y
+
+./direct.out : ./dep-fails.out
+	echo dependent
+./dep-fails.out :
+	exit 4
+
+./timeout.out :
+	sleep 5
+	echo done > @>
+
+service serve : ./dep-fails.out
+	sleep 1
+
+task noart :
+	true

@@ -1,0 +1,6 @@
+# Freshness fixture: out depends on in; runs.log counts recipe executions.
+./out.txt : ./in.txt
+	echo run >> ./runs.log
+	cp @< @>
+
+default : ./out.txt

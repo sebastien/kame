@@ -1,0 +1,15 @@
+# JSON event fixture: text, binary, and failing outputs.
+./text.out :
+	printf 'plain text\n' > @>
+
+./binary.out :
+	printf '\377\376\000binary'
+	echo done > @>
+
+./fail.out :
+	echo before-failure
+	exit 7
+
+task speak :
+	echo to-stdout
+	echo to-stderr >&2

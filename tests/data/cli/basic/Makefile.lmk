@@ -1,0 +1,12 @@
+# Basic CLI fixture: a definition, a bare task, a cached task, and a file rule.
+GREETING = "hello"
+LIST = (list "alpha" "beta" "gamma")
+
+default : ./out/greeting.txt
+	@(out "default done\n")
+
+./out/greeting.txt :
+	printf '%s\n' @(GREETING) > @>
+
+task touch-only :
+	@(out "task done\n")

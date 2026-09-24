@@ -1,0 +1,10 @@
+# Cached-task fixture (spec 008): task records live under .littlemake/cache.
+task report : ./config.txt
+	echo report >> ./runs.log
+	cat @<
+
+task default : report
+
+task env-report :
+	echo "env=${CACHE_VALUE:-unset}" >> ./runs.log
+	@(out "env=${CACHE_VALUE:-unset}\n")

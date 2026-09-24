@@ -1,0 +1,2 @@
+./retry.out :
+	sh -c 'if [ -f ./retry.marker ]; then echo ok > ./retry.out; else touch ./retry.marker; exit 3; fi'

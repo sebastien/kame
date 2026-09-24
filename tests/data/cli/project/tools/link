@@ -1,0 +1,11 @@
+#!/bin/sh
+# link OUT IN...: deterministic link artifact for the test suite.
+set -eu
+out="$1"
+shift
+{
+	printf 'LINK'
+	for f in "$@"; do printf ' %s' "$f"; done
+	printf '\n'
+	for f in "$@"; do cat "$f"; done
+} >"$out"

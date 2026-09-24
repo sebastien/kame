@@ -1,0 +1,9 @@
+#!/bin/sh
+# compile OUT IN: deterministic object artifact for the test suite.
+set -eu
+out="$1"
+in="$2"
+{
+	printf 'OBJ %s\n' "$in"
+	cat "$in"
+} >"$out"
