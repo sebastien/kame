@@ -1,13 +1,14 @@
 //go:build ignore
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <poll.h>
-#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -44,6 +45,62 @@ struct lm_host {
     lm_event_node *first, *last;
     bool force_waitpid_failure;
 };
+
+static volatile sig_atomic_t lm_cli_signal = 0;
+static volatile sig_atomic_t lm_cli_signal_count = 0;
+static volatile sig_atomic_t lm_cli_first_signal_taken = 0;
+extern char **environ;
+
+static void lm_cli_signal_handler(int signal_number) {
+    lm_cli_signal = signal_number;
+    if (lm_cli_signal_count < 2) lm_cli_signal_count++;
+}
+
+int lm_cli_install_signals(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = lm_cli_signal_handler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+    lm_cli_signal = 0;
+    lm_cli_signal_count = 0;
+    lm_cli_first_signal_taken = 0;
+    if (sigaction(SIGINT, &action, NULL) != 0) return -1;
+    if (sigaction(SIGTERM, &action, NULL) != 0) return -1;
+    return 0;
+}
+
+int lm_cli_take_signal(void) {
+    if (lm_cli_signal_count == 0) return 0;
+    if (!lm_cli_first_signal_taken) {
+        lm_cli_first_signal_taken = 1;
+        lm_cli_signal_count--;
+        return (int)lm_cli_signal;
+    }
+    lm_cli_signal_count = 0;
+    return -(int)lm_cli_signal;
+}
+
+int lm_cli_environment_size(void) {
+    size_t total = 0;
+    if (environ == NULL) return 0;
+    for (char **entry = environ; *entry != NULL; entry++) total += strlen(*entry) + 1;
+    if (total > INT_MAX) return -1;
+    return (int)total;
+}
+
+int lm_cli_environment_copy(so_Slice out) {
+    int required = lm_cli_environment_size();
+    if (required < 0 || out.len < required) return -1;
+    int offset = 0;
+    if (environ == NULL) return 0;
+    for (char **entry = environ; *entry != NULL; entry++) {
+        size_t length = strlen(*entry) + 1;
+        memcpy(out.ptr + offset, *entry, length);
+        offset += (int)length;
+    }
+    return offset;
+}
 
 static int64_t lm_now(void) {
     struct timespec ts;

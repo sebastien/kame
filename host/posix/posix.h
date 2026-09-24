@@ -41,5 +41,9 @@ int lm_host_active(lm_host *);
 void lm_host_force_waitpid_failure(lm_host *);
 void lm_event_free(lm_event *);
 void lm_host_free(lm_host *);
+int lm_cli_install_signals(void);
+int lm_cli_take_signal(void);
+int lm_cli_environment_size(void);
+int lm_cli_environment_copy(so_Slice);
 
 #endif

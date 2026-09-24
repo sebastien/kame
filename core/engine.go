@@ -334,7 +334,7 @@ func (e *Engine) accept(c Completion) *Node {
 	for i := range e.nodes {
 		n := e.nodes[i]
 		if n.ID != c.NodeID { continue }
-		if !n.Submitted || n.Generation != c.Generation || n.Attempt != c.Attempt || n.HostRequestID != c.RequestID || n.State != NodeWaiting { c.Value.Free(e.Alloc); return nil }
+		if !n.Submitted || n.Generation != c.Generation || n.Attempt != c.Attempt || n.HostRequestID != c.RequestID || n.State != NodeWaiting { c.Value.Free(e.Alloc); c.Diagnostic.Free(e.Alloc); return nil }
 		n.Submitted = false
 		n.HostRequestID = 0
 		n.Completion, n.HasCompletion, n.State = c, true, NodeReady
@@ -439,6 +439,6 @@ func (e *Engine) Free() {
 		n.Diagnostic.Free(e.Alloc)
 		n.Key.Free(e.Alloc); mem.Free(e.Alloc, n)
 	}
-	for i := range e.completions { e.completions[i].Value.Free(e.Alloc) }
+	for i := range e.completions { e.completions[i].Value.Free(e.Alloc); e.completions[i].Diagnostic.Free(e.Alloc) }
 	slices.Free(e.Alloc, e.nodes); slices.Free(e.Alloc, e.cancellations); slices.Free(e.Alloc, e.completions); mem.Free(e.Alloc, e)
 }

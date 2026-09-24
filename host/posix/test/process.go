@@ -46,6 +46,15 @@ func freeEvents(a mem.Allocator, events []posix.Event) {
 	slices.Free(a, events)
 }
 
+func TestEnvironmentSnapshotIsCompleteAndOwned(t *testing.T) {
+	a := t.Allocator()
+	environment := posix.Environment(a)
+	defer posix.FreeEnvironment(a, environment)
+	foundPath := false
+	for i := range environment { if len(environment[i]) >= 5 && environment[i][:5] == "PATH=" { foundPath = true; break } }
+	if !foundPath { t.Error("environment snapshot does not include PATH") }
+}
+
 func TestStreamsStatusAndRetention(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)

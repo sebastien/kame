@@ -48,6 +48,7 @@ New specifications in this directory override every legacy source.
 | `010-wasm.md` | Freestanding host ABI | 002, 004, 005, 006, 007, 008 |
 | `011-diagnostics.md` | Diagnostic code registry | 001 |
 | `012-streams.md` | Source protocol, batches, materialization | 002 |
+| `013-tests.md` | End-to-end test suite and its contracts | all |
 
 Every implementation specification also depends on the code registry in 011.
 

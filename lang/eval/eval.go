@@ -116,8 +116,17 @@ func (r *Result) Free(a mem.Allocator) {
 	*r = Result{}
 }
 
-func failure(code string, span source.Span, message string) Result {
-	return Result{Diagnostic: diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message, Span: diagnostic.Span{Start: span.Start, End: span.End}}}
+// failure builds an owned diagnostic. Dynamic messages are stack strings and
+// must be copied into the run allocator before the result escapes the call.
+func failure(a mem.Allocator, code string, span source.Span, message string) Result {
+	return Result{Diagnostic: diagnostic.Diagnostic{Code: cloneFailureText(a, code), Severity: diagnostic.Error, Message: cloneFailureText(a, message), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
+}
+
+func cloneFailureText(a mem.Allocator, text string) string {
+	if len(text) == 0 { return "" }
+	b := mem.AllocSlice[byte](a, len(text), len(text))
+	copy(b, []byte(text))
+	return string(b)
 }
 
 func diagnosticSeverity(severity source.Severity) diagnostic.Severity {
@@ -224,6 +233,15 @@ type Program struct {
 	Nodes       []definitionNode
 	Diagnostics []diagnostic.Diagnostic
 	OperationStates []operationState
+	// Grants provide the ambient capability policy for lazy definitions. Rule
+	// rendering supplies its own context policy from the runtime.
+	Grants []Grant
+	// DefinitionDependencyObserver installs runtime resources needed by lazy
+	// definitions evaluated as standalone engine nodes.
+	DefinitionDependencyObserver func(any, core.ResourceKey)
+	DefinitionDependencyState any
+	DefinitionArgs []core.Value
+	DefinitionCwd string
 	Valid       bool
 }
 
@@ -309,8 +327,47 @@ func (p *Program) Free() {
 	slices.Free(p.Alloc, p.Nodes); slices.Free(p.Alloc, p.OperationStates)
 	slices.Free(p.Alloc, p.Definitions)
 	for i := range p.Diagnostics { p.Diagnostics[i].Free(p.Alloc) }
+	for i := range p.Grants { if len(p.Grants[i].Names) != 0 { slices.Free(p.Alloc, p.Grants[i].Names) } }
+	for i := range p.DefinitionArgs { p.DefinitionArgs[i].Free(p.Alloc) }
+	if p.DefinitionCwd != "" { mem.FreeString(p.Alloc, p.DefinitionCwd) }
 	slices.Free(p.Alloc, p.Diagnostics)
+	if len(p.Grants) != 0 { slices.Free(p.Alloc, p.Grants) }
+	if len(p.DefinitionArgs) != 0 { slices.Free(p.Alloc, p.DefinitionArgs) }
 	mem.Free(p.Alloc, p)
+}
+
+// SetGrants installs the capability policy used when lazy definitions run as
+// standalone engine nodes.
+func (p *Program) SetGrants(grants []Grant) {
+	if p == nil { return }
+	for i := range p.Grants { if len(p.Grants[i].Names) != 0 { slices.Free(p.Alloc, p.Grants[i].Names) } }
+	if len(p.Grants) != 0 { slices.Free(p.Alloc, p.Grants) }
+	for i := range grants {
+		grant := Grant{Capability: grants[i].Capability, Names: slices.Clone(p.Alloc, grants[i].Names)}
+		p.Grants = slices.Append(p.Alloc, p.Grants, grant)
+	}
+}
+
+// SetDefinitionDependencyObserver configures resource registration for lazy
+// definitions. The runtime owns state for at least as long as this Program.
+func (p *Program) SetDefinitionDependencyObserver(observer func(any, core.ResourceKey), state any) {
+	if p == nil { return }
+	p.DefinitionDependencyObserver, p.DefinitionDependencyState = observer, state
+}
+
+func (p *Program) SetDefinitionArgs(values []core.Value) {
+	if p == nil { return }
+	for i := range p.DefinitionArgs { p.DefinitionArgs[i].Free(p.Alloc) }
+	if len(p.DefinitionArgs) != 0 { slices.Free(p.Alloc, p.DefinitionArgs) }
+	for i := range values { p.DefinitionArgs = slices.Append(p.Alloc, p.DefinitionArgs, values[i].Clone(p.Alloc)) }
+}
+
+// SetDefinitionCwd supplies the working directory to standalone lazy
+// definitions. Rule rendering supplies Cwd through its own evaluation context.
+func (p *Program) SetDefinitionCwd(cwd string) {
+	if p == nil { return }
+	if p.DefinitionCwd != "" { mem.FreeString(p.Alloc, p.DefinitionCwd) }
+	p.DefinitionCwd = owned(p.Alloc, cwd)
 }
 
 func (p *Program) Definition(name string) *core.Node {
@@ -413,7 +470,7 @@ func freeCallables(a mem.Allocator, value *core.Value) {
 }
 
 func (p *Program) definition(engine *core.EngineContext, d *definition.Definition) Result {
-	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Source: p.Script.Source.Name}
+	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState}
 	result := p.definitionValue(engine, d, p.Scope, context)
 	if engine == nil || !engine.Failed() { attachFrame(&result, context, d.Span, "definition") }
 	attachSource(&result, context)
@@ -623,7 +680,8 @@ func (c *Context) TakeCompletion() core.Completion { completion := c.Completion(
 
 // Call invokes a lexical function with already evaluated values.
 func (c *Context) Call(callable core.Value, values []core.Value) Result {
-	if c == nil || c.Program == nil || callable.Kind != core.Callable { return failure("EXPR_INVALID", source.Span{}, "expected a function") }
+	if c == nil { return failure(mem.System, "EXPR_INVALID", source.Span{}, "expected a function") }
+	if c.Program == nil || callable.Kind != core.Callable { return failure(c.Run, "EXPR_INVALID", source.Span{}, "expected a function") }
 	return c.Program.callValues(callable.Callable.(*Function), values, c, source.Span{})
 }
 
@@ -638,26 +696,39 @@ func (p *Program) Evaluate(run mem.Allocator, expression *expr.Expr, scope *Scop
 // EvaluateWith evaluates an expression with caller-provided capability grants
 // and selector frames. The context remains caller-owned.
 func (p *Program) EvaluateWith(expression *expr.Expr, context *Context) Result {
-	if p == nil || context == nil { return failure("EXPR_INVALID", source.Span{}, "missing evaluation context") }
+	if p == nil || context == nil { return failure(mem.System, "EXPR_INVALID", source.Span{}, "missing evaluation context") }
 	if context.Program == nil { context.Program = p }
 	if context.Scope == nil { context.Scope = p.Scope }
 	if context.Requests == nil { context.Requests = p.Requests }
 	result := p.evaluate(context.Engine, context.Scope, expression, context)
-	if result.Diagnostic.Code != "" && len(context.Frames) != 0 {
-		frames := slices.Make[diagnostic.Frame](context.Run, len(context.Frames)+len(result.Diagnostic.Frames))
-		copy(frames, context.Frames)
-		copy(frames[len(context.Frames):], result.Diagnostic.Frames)
-		slices.Free(context.Run, result.Diagnostic.Frames)
-		result.Diagnostic.Frames = frames
-	}
+	attachContextFrames(&result, context)
 	attachSource(&result, context)
 	return result
+}
+
+// attachContextFrames prepends caller frames. Owned diagnostics release every
+// frame label, so borrowed context labels are cloned before attaching.
+func attachContextFrames(result *Result, context *Context) {
+	if result.Diagnostic.Code == "" || len(context.Frames) == 0 { return }
+	a := context.Run
+	if a == nil { a = mem.System }
+	total := len(context.Frames) + len(result.Diagnostic.Frames)
+	frames := slices.Make[diagnostic.Frame](a, total)
+	for i := range context.Frames {
+		label := context.Frames[i].Label
+		if result.Diagnostic.Owned { label = owned(a, label) }
+		frames[i] = diagnostic.Frame{Label: label, Span: context.Frames[i].Span}
+	}
+	copy(frames[len(context.Frames):], result.Diagnostic.Frames)
+	if result.Diagnostic.Owned { for i := range result.Diagnostic.Frames { if result.Diagnostic.Frames[i].Label != "" { mem.FreeString(a, result.Diagnostic.Frames[i].Label) } } }
+	slices.Free(a, result.Diagnostic.Frames)
+	result.Diagnostic.Frames = frames
 }
 
 // EvaluateDefinition evaluates one lazy value definition in the caller's phase.
 // Planning uses it to resolve only definitions reached by its active expression.
 func (p *Program) EvaluateDefinition(key core.ResourceKey, context *Context) Result {
-	if p == nil || key.Kind != core.ResourceDefinition { return failure("REF_MISSING", source.Span{}, "unknown definition") }
+	if p == nil || key.Kind != core.ResourceDefinition { return failure(context.Run, "REF_MISSING", source.Span{}, "unknown definition") }
 	for i := range p.Definitions {
 		d := p.Definitions[i]
 		if d.Name != key.Name { continue }
@@ -666,17 +737,21 @@ func (p *Program) EvaluateDefinition(key core.ResourceKey, context *Context) Res
 		attachSource(&result, context)
 		return result
 	}
-	return failure("REF_MISSING", source.Span{}, "unknown definition: "+key.Name)
+	return failure(context.Run, "REF_MISSING", source.Span{}, "unknown definition: "+key.Name)
 }
 
 func attachSource(result *Result, context *Context) {
 	// Context and program sources outlive their diagnostic results. Diagnostics
-	// borrowed from engine nodes must not be cloned or freed here.
-	if result.Diagnostic.Code != "" && context.Source != "" && !result.Diagnostic.Owned { result.Diagnostic.Target = context.Source }
+	// borrowed from engine nodes must not be cloned or freed here; owned
+	// diagnostics copy the source so Free releases it consistently.
+	if result.Diagnostic.Code != "" && context.Source != "" && result.Diagnostic.Target == "" {
+		if result.Diagnostic.Owned { result.Diagnostic.Target = cloneFailureText(context.Run, context.Source)
+		} else { result.Diagnostic.Target = context.Source }
+	}
 }
 
 func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression *expr.Expr, context *Context) Result {
-	if expression == nil { return failure("EXPR_INVALID", source.Span{}, "definition needs an expression value") }
+	if expression == nil { return failure(context.Run, "EXPR_INVALID", source.Span{}, "definition needs an expression value") }
 	context.Engine, context.Scope, context.Requests = engine, scope, p.Requests
 	switch expression.Kind {
 	case expr.Nil: return Result{Value: core.Value{Kind: core.Nil}}
@@ -697,12 +772,12 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 		return Result{Value: core.Value{Kind: core.Callable, Callable: function}}
 	case expr.Selector: return p.selector(expression.Text, expression.Span, context)
 	}
-	return failure("EXPR_INVALID", expression.Span, "invalid expression")
+	return failure(context.Run, "EXPR_INVALID", expression.Span, "invalid expression")
 }
 
 func name(scope *Scope, name string, span source.Span, context *Context) Result {
 	b := scope.lookup(name)
-	if b == nil { return failure("REF_MISSING", span, "unknown reference: "+name) }
+	if b == nil { return failure(context.Run, "REF_MISSING", span, "unknown reference: "+name) }
 	if b.Kind == bindingValue { return Result{Value: b.Value.Clone(context.Run)} }
 	if b.Kind == bindingFunction { return Result{Value: core.Value{Kind: core.Callable, Callable: b.Function}} }
 	if context.Engine == nil && context.ResolveDefinition != nil { return context.ResolveDefinition(context.ResolverState, b.Definition, context) }
@@ -748,7 +823,7 @@ func (p *Program) stringValue(scope *Scope, parts []expr.StringPart, context *Co
 		if r.Waiting || r.Diagnostic.Code != "" { return r }
 		text, ok := stringify(context.Run, r.Value)
 		r.Value.Free(context.Run)
-		if !ok { return failure("EXPR_INVALID", parts[i].Span, "records and bytes require explicit text conversion") }
+		if !ok { return failure(context.Run, "EXPR_INVALID", parts[i].Span, "records and bytes require explicit text conversion") }
 		b.WriteString(text); mem.FreeString(context.Run, text)
 	}
 	return Result{Value: core.NewString(context.Run, b.String())}
@@ -781,7 +856,10 @@ func freeRecord(a mem.Allocator, values []core.RecordField) { for i := range val
 func owned(a mem.Allocator, text string) string { if len(text) == 0 { return "" }; b := mem.AllocSlice[byte](a, len(text), len(text)); copy(b, []byte(text)); return string(b) }
 
 func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope, context *Context) Result {
-	if context == nil { context = &Context{Program: p, Scope: scope, Run: run} }
+	// A named local keeps the fallback context alive for the whole call; a
+	// Context literal inside the branch would become a block-scoped temporary.
+	fallback := Context{Program: p, Scope: scope, Run: run}
+	if context == nil { context = &fallback }
 	b := strings.NewBuilder(run)
 	defer b.Free()
 	for i := range value.Parts {
@@ -791,14 +869,14 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 		if part.Kind == template.Selector { r = p.selector(part.Text, part.Span, context) } else { r = p.evaluate(context.Engine, scope, part.Expr, context) }
 		if r.Waiting || r.Diagnostic.Code != "" { return r }
 		text, ok := stringify(run, r.Value); r.Value.Free(run)
-		if !ok { return failure("EXPR_INVALID", part.Span, "records and bytes require explicit text conversion") }
+		if !ok { return failure(context.Run, "EXPR_INVALID", part.Span, "records and bytes require explicit text conversion") }
 		b.WriteString(text); mem.FreeString(run, text)
 	}
 	return Result{Value: core.NewString(run, b.String())}
 }
 
 func (p *Program) application(scope *Scope, expression *expr.Expr, context *Context) Result {
-	if len(expression.Items) == 0 { return failure("EXPR_INVALID", expression.Span, "empty application") }
+	if len(expression.Items) == 0 { return failure(context.Run, "EXPR_INVALID", expression.Span, "empty application") }
 	head := expression.Items[0]
 	if head.Kind == expr.Name {
 		if head.Text == "?" { return p.fallback(scope, expression.Items[1:], context) }
@@ -810,16 +888,17 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 	if callee.Waiting || callee.Diagnostic.Code != "" {
 		if callee.Diagnostic.Code == "REF_MISSING" && head.Kind == expr.Name && p.Registry != nil {
 			operation := p.Registry.lookup(head.Text)
+			callee.Diagnostic.Free(context.Run)
 			if operation != nil {
 				result := p.operation(scope, operation, expression.Items[1:], context, expression.Span)
 				attachFrame(&result, context, expression.Span, "operation")
 				return result
 			}
-			return failure("OP_UNKNOWN", head.Span, "unknown operation: "+head.Text)
+			return failure(context.Run, "OP_UNKNOWN", head.Span, "unknown operation: "+head.Text)
 		}
 		return callee
 	}
-	if callee.Value.Kind != core.Callable { callee.Value.Free(context.Run); return failure("EXPR_INVALID", head.Span, "application head is not callable") }
+	if callee.Value.Kind != core.Callable { callee.Value.Free(context.Run); return failure(context.Run, "EXPR_INVALID", head.Span, "application head is not callable") }
 	function := callee.Value.Callable.(*Function)
 	result := p.call(function, expression.Items[1:], context, expression.Span)
 	freeCallables(context.Run, &callee.Value)
@@ -832,9 +911,9 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	// single request active until the engine supplies the matching completion;
 	// the resumed evaluation then snapshots every dependency at its latest value.
 	if context.Engine != nil && context.Engine.Submitted() && context.Completion().RequestID == 0 { return Result{Waiting: true} }
-	if len(arguments) < operation.MinArity || (operation.MaxArity >= 0 && len(arguments) > operation.MaxArity) { return failure("EXPR_INVALID", span, "invalid operation arity") }
+	if len(arguments) < operation.MinArity || (operation.MaxArity >= 0 && len(arguments) > operation.MaxArity) { return failure(context.Run, "EXPR_INVALID", span, "invalid operation arity") }
 	if context.OperationObserver != nil { context.OperationObserver(context.ResolverState, operation.Name, operation.Version) }
-	for i := range operation.Capabilities { if !context.allowed(operation.Capabilities[i]) { return failure("CAP_DENIED", span, "operation capability denied") } }
+	for i := range operation.Capabilities { if !context.allowed(operation.Capabilities[i]) { return failure(context.Run, "CAP_DENIED", span, "operation capability denied") } }
 	values := slices.Make[core.Value](context.Run, len(arguments))
 	for i := range arguments {
 		r := p.evaluate(context.Engine, context.Scope, arguments[i], context)
@@ -847,7 +926,7 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	result := operation.Call(context, operation.Context, values)
 	context.activeCapabilities, context.Span, context.operationStart, context.operationEnd = previousCapabilities, previousSpan, previousStart, previousEnd
 	freeValues(context.Run, values)
-	if context.denied { result.Free(context.Run); return failure("CAP_DENIED", span, "operation capability denied") }
+	if context.denied { result.Free(context.Run); return failure(context.Run, "CAP_DENIED", span, "operation capability denied") }
 	return result
 }
 
@@ -866,7 +945,7 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 	fixed := len(function.Parameters)
 	rest := fixed != 0 && function.Parameters[fixed-1].Rest
 	if rest { fixed-- }
-	if len(values) < fixed || (!rest && len(values) != fixed) { return failure("EXPR_INVALID", span, "invalid function arity") }
+	if len(values) < fixed || (!rest && len(values) != fixed) { return failure(context.Run, "EXPR_INVALID", span, "invalid function arity") }
 	child := newScope(context.Run, function.Scope)
 	defer child.Free()
 	for i := 0; i < fixed; i++ { child.setValue(function.Parameters[i].Name, values[i]) }
@@ -890,7 +969,11 @@ func attachFrame(result *Result, context *Context, span source.Span, label strin
 	if result.Diagnostic.Code == "" { return }
 	a := context.Run
 	if a == nil { a = mem.System }
-	result.Diagnostic.Frames = slices.Append(a, result.Diagnostic.Frames, diagnostic.Frame{Label: label, Span: diagnostic.Span{Start: span.Start, End: span.End}})
+	frameLabel := label
+	// An owned diagnostic releases every frame label. Static frame labels must
+	// therefore be cloned before becoming part of its owned frame slice.
+	if result.Diagnostic.Owned { frameLabel = owned(a, label) }
+	result.Diagnostic.Frames = slices.Append(a, result.Diagnostic.Frames, diagnostic.Frame{Label: frameLabel, Span: diagnostic.Span{Start: span.Start, End: span.End}})
 }
 
 func (p *Program) body(scope *Scope, body []*expr.Expr, context *Context) Result {
@@ -913,12 +996,12 @@ func (p *Program) fallback(scope *Scope, values []*expr.Expr, context *Context) 
 }
 
 func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
-	if len(values) == 0 || values[0].Kind != expr.List || len(values[0].Items)%2 != 0 { return failure("EXPR_INVALID", span, "let needs name/value pairs") }
+	if len(values) == 0 || values[0].Kind != expr.List || len(values[0].Items)%2 != 0 { return failure(context.Run, "EXPR_INVALID", span, "let needs name/value pairs") }
 	child := newScope(context.Run, scope)
 	defer child.Free()
 	for i := 0; i < len(values[0].Items); i += 2 {
 		name := values[0].Items[i]
-		if name.Kind != expr.Name { return failure("DEF_INVALID", name.Span, "let binding needs a name") }
+		if name.Kind != expr.Name { return failure(context.Run, "DEF_INVALID", name.Span, "let binding needs a name") }
 		r := p.evaluate(context.Engine, child, values[0].Items[i+1], context)
 		if r.Waiting || r.Diagnostic.Code != "" { return r }
 		child.setValue(name.Text, r.Value)
@@ -928,13 +1011,13 @@ func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span 
 }
 
 func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
-	if len(values) < 2 || values[0].Kind != expr.Name { return failure("DEF_INVALID", span, "def needs a name and value") }
+	if len(values) < 2 || values[0].Kind != expr.Name { return failure(context.Run, "DEF_INVALID", span, "def needs a name and value") }
 	if len(values) >= 3 && values[1].Kind == expr.List {
 		parameters := slices.Make[expr.Parameter](context.Run, len(values[1].Items))
 		for i := range values[1].Items {
 			parameter := values[1].Items[i]
-			if parameter.Kind != expr.Name || (parameter.Rest && i != len(values[1].Items)-1) { for j := 0; j < i; j++ { mem.FreeString(context.Run, parameters[j].Name) }; slices.Free(context.Run, parameters); return failure("DEF_INVALID", parameter.Span, "invalid function parameter") }
-			for j := 0; j < i; j++ { if parameters[j].Name == parameter.Text { for j := 0; j < i; j++ { mem.FreeString(context.Run, parameters[j].Name) }; slices.Free(context.Run, parameters); return failure("DEF_INVALID", parameter.Span, "duplicate function parameter") } }
+			if parameter.Kind != expr.Name || (parameter.Rest && i != len(values[1].Items)-1) { for j := 0; j < i; j++ { mem.FreeString(context.Run, parameters[j].Name) }; slices.Free(context.Run, parameters); return failure(context.Run, "DEF_INVALID", parameter.Span, "invalid function parameter") }
+			for j := 0; j < i; j++ { if parameters[j].Name == parameter.Text { for j := 0; j < i; j++ { mem.FreeString(context.Run, parameters[j].Name) }; slices.Free(context.Run, parameters); return failure(context.Run, "DEF_INVALID", parameter.Span, "duplicate function parameter") } }
 			parameters[i] = expr.Parameter{Name: owned(context.Run, parameter.Text), Span: parameter.Span, Rest: parameter.Rest}
 		}
 		function := mem.Alloc[Function](context.Run)
@@ -943,7 +1026,7 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 		scope.setFunction(values[0].Text, function)
 		return Result{Value: core.Value{Kind: core.Nil}}
 	}
-	if len(values) != 2 { return failure("DEF_INVALID", span, "invalid def form") }
+	if len(values) != 2 { return failure(context.Run, "DEF_INVALID", span, "invalid def form") }
 	r := p.evaluate(context.Engine, scope, values[1], context)
 	if r.Waiting || r.Diagnostic.Code != "" { return r }
 	scope.setValue(values[0].Text, r.Value)
@@ -951,10 +1034,10 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 }
 
 func (p *Program) evalText(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
-	if len(values) != 1 { return failure("EXPR_INVALID", span, "eval needs one string") }
+	if len(values) != 1 { return failure(context.Run, "EXPR_INVALID", span, "eval needs one string") }
 	r := p.evaluate(context.Engine, scope, values[0], context)
 	if r.Waiting || r.Diagnostic.Code != "" { return r }
-	if r.Value.Kind != core.String { r.Value.Free(context.Run); return failure("EXPR_INVALID", span, "eval needs text") }
+	if r.Value.Kind != core.String { r.Value.Free(context.Run); return failure(context.Run, "EXPR_INVALID", span, "eval needs text") }
 	parsed := expr.Parse(context.Run, "<eval>", r.Value.Text)
 	r.Value.Free(context.Run)
 	if len(parsed.Diagnostics) != 0 {
@@ -968,7 +1051,7 @@ func (p *Program) evalText(scope *Scope, values []*expr.Expr, context *Context, 
 }
 
 func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Context) Result {
-	if len(expression.Reference) == 0 { return failure("REF_MISSING", expression.Span, "empty reference") }
+	if len(expression.Reference) == 0 { return failure(context.Run, "REF_MISSING", expression.Span, "empty reference") }
 	result := name(scope, expression.Reference[0].Text, expression.Reference[0].Span, context)
 	if result.Waiting || result.Diagnostic.Code != "" { return result }
 	for i := 1; i < len(expression.Reference); i++ {
@@ -984,12 +1067,12 @@ func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Contex
 func (p *Program) referencePart(value core.Value, part expr.ReferencePart, context *Context) Result {
 	_ = p
 	if part.Kind == expr.ReferenceName {
-		if value.Kind != core.Record { return failure("REF_MISSING", part.Span, "record field not found") }
+		if value.Kind != core.Record { return failure(context.Run, "REF_MISSING", part.Span, "record field not found") }
 		for i := range value.Record { if value.Record[i].Key == part.Text { return Result{Value: value.Record[i].Value.Clone(context.Run)} } }
-		return failure("REF_MISSING", part.Span, "record field not found")
+		return failure(context.Run, "REF_MISSING", part.Span, "record field not found")
 	}
 	if part.Kind == expr.ReferenceSelection {
-		if value.Kind != core.Record { return failure("REF_MISSING", part.Span, "selection needs a record") }
+		if value.Kind != core.Record { return failure(context.Run, "REF_MISSING", part.Span, "selection needs a record") }
 		var fields []core.RecordField
 		start := 0
 		for i := 0; i <= len(part.Text); i++ {
@@ -997,47 +1080,47 @@ func (p *Program) referencePart(value core.Value, part expr.ReferencePart, conte
 			key := part.Text[start:i]
 			found := false
 			for j := range value.Record { if value.Record[j].Key == key { fields = slices.Append(context.Run, fields, core.RecordField{Key: key, Value: value.Record[j].Value.Clone(context.Run)}); found = true; break } }
-			if !found { freeRecord(context.Run, fields); return failure("REF_MISSING", part.Span, "record field not found") }
+			if !found { freeRecord(context.Run, fields); return failure(context.Run, "REF_MISSING", part.Span, "record field not found") }
 			start = i + 1
 		}
 		result := Result{Value: core.NewRecord(context.Run, fields)}; freeRecord(context.Run, fields); return result
 	}
 	if part.Kind == expr.ReferenceIndex {
 		index, ok := parseIndex(part.Text)
-		if !ok { return failure("SEL_INDEX_INVALID", part.Span, "invalid index") }
+		if !ok { return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "invalid index") }
 		if value.Kind == core.List {
 			index = normalizedIndex(index, len(value.List))
-			if index < 0 || index >= len(value.List) { return failure("SEL_INDEX_INVALID", part.Span, "index out of range") }
+			if index < 0 || index >= len(value.List) { return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "index out of range") }
 			return Result{Value: value.List[index].Clone(context.Run)}
 		}
 		if value.Kind == core.String {
 			index = normalizedIndex(index, utf8.RuneCountInString(value.Text))
 			start := runeOffset(value.Text, index)
 			end := runeOffset(value.Text, index+1)
-			if start < 0 || end < 0 { return failure("SEL_INDEX_INVALID", part.Span, "index out of range") }
+			if start < 0 || end < 0 { return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "index out of range") }
 			return Result{Value: core.NewString(context.Run, value.Text[start:end])}
 		}
-		return failure("REF_MISSING", part.Span, "index needs a list or string")
+		return failure(context.Run, "REF_MISSING", part.Span, "index needs a list or string")
 	}
 	if part.Kind == expr.ReferenceSlice {
 		bounds := parseSlice(part.Text)
-		if !bounds.OK { return failure("SEL_INDEX_INVALID", part.Span, "invalid slice") }
+		if !bounds.OK { return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "invalid slice") }
 		start, end := bounds.Start, bounds.End
 		if value.Kind == core.List {
 			bounds = normalizedSlice(start, end, len(value.List))
-			if !bounds.OK { return failure("SEL_INDEX_INVALID", part.Span, "slice out of range") }
+			if !bounds.OK { return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "slice out of range") }
 			start, end = bounds.Start, bounds.End
 			return Result{Value: core.NewList(context.Run, value.List[start:end])}
 		}
 		if value.Kind == core.String {
 			bounds = normalizedSlice(start, end, utf8.RuneCountInString(value.Text))
-			if !bounds.OK { return failure("SEL_INDEX_INVALID", part.Span, "slice out of range") }
+			if !bounds.OK { return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "slice out of range") }
 			start, end = bounds.Start, bounds.End
 			return Result{Value: core.NewString(context.Run, value.Text[runeOffset(value.Text, start):runeOffset(value.Text, end)])}
 		}
-		return failure("REF_MISSING", part.Span, "slice needs a list or string")
+		return failure(context.Run, "REF_MISSING", part.Span, "slice needs a list or string")
 	}
-	return failure("REF_MISSING", part.Span, "invalid reference")
+	return failure(context.Run, "REF_MISSING", part.Span, "invalid reference")
 }
 
 func parseIndex(text string) (int, bool) {
@@ -1089,22 +1172,22 @@ func (p *Program) selector(text string, span source.Span, context *Context) Resu
 		} else if text[1] == '<' { values = context.Inputs } else { values = context.Outputs }
 		offset = 2
 	}
-	if values == nil { return failure("SEL_NO_CONTEXT", span, "selector has no context") }
+	if values == nil { return failure(context.Run, "SEL_NO_CONTEXT", span, "selector has no context") }
 	suffix := text[offset:]
 	if suffix == "*" { return Result{Value: core.NewList(context.Run, values)} }
 	if suffix == "#" { return Result{Value: core.Value{Kind: core.Int, Int: int64(len(values))}} }
 	if suffix == "" || suffix == "_" {
-		if len(values) == 0 { return failure("SEL_INDEX_INVALID", span, "selector index is empty") }
+		if len(values) == 0 { return failure(context.Run, "SEL_INDEX_INVALID", span, "selector index is empty") }
 		return Result{Value: values[0].Clone(context.Run)}
 	}
 	if bounds := parseSlice(suffix); bounds.OK {
 		bounds = normalizedSlice(bounds.Start, bounds.End, len(values))
-		if !bounds.OK { return failure("SEL_INDEX_INVALID", span, "selector slice out of range") }
+		if !bounds.OK { return failure(context.Run, "SEL_INDEX_INVALID", span, "selector slice out of range") }
 		return Result{Value: core.NewList(context.Run, values[bounds.Start:bounds.End])}
 	}
 	index, ok := parseIndex(suffix)
-	if !ok { return failure("SEL_INDEX_INVALID", span, "invalid selector index") }
+	if !ok { return failure(context.Run, "SEL_INDEX_INVALID", span, "invalid selector index") }
 	index = normalizedIndex(index, len(values))
-	if index < 0 || index >= len(values) { return failure("SEL_INDEX_INVALID", span, "selector index out of range") }
+	if index < 0 || index >= len(values) { return failure(context.Run, "SEL_INDEX_INVALID", span, "selector index out of range") }
 	return Result{Value: values[index].Clone(context.Run)}
 }

@@ -237,6 +237,7 @@ func TestMatchingTemplatesAreAmbiguous(t *testing.T) {
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
 	planned := compiled.Program.Plan("out/demo")
 	if planned.Diagnostic.Code != "TGT_AMBIG" { t.Error("matching templates were not ambiguous") }
+	planned.Diagnostic.Free(a)
 	planned.Plan.Free(a)
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
@@ -1204,6 +1205,19 @@ func TestDefinitionExpressionSuppliesInput(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestDefinitionHostReadFailureReleasesDiagnosticOnce(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "test.lmk", "value = (read \"missing-file\")\n")
+	registry := eval.NewRegistry(a)
+	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("value")
+	if result.Diagnostic.Code != "FS_ERR" { t.Errorf("diagnostic = %s, want FS_ERR", result.Diagnostic.Code) }
+	result.Free(a)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestYieldWritesFileOutput(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)
@@ -1374,6 +1388,7 @@ func TestRenderedDuplicateOutputsAreRejected(t *testing.T) {
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	planned := compiled.Program.Plan("./out/x")
 	if planned.Diagnostic.Code != "PARSE_ERR" { t.Errorf("duplicate output diagnostic = %s", planned.Diagnostic.Code) }
+	planned.Diagnostic.Free(a)
 	planned.Plan.Free(a)
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }

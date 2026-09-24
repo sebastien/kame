@@ -53,7 +53,12 @@ func (p *Plan) Free(a mem.Allocator) {
 	for i := range p.ResolvedInputs { mem.FreeString(a, p.ResolvedInputs[i]) }
 	for i := range p.ResolvedResourceInputs { if p.ResolvedResourceInputs[i].Display != "" { mem.FreeString(a, p.ResolvedResourceInputs[i].Display) }; p.ResolvedResourceInputs[i].Key.Free(a) }
 	for i := range p.Outputs { mem.FreeString(a, p.Outputs[i]) }
-	slices.Free(a, p.Captures); slices.Free(a, p.Inputs); slices.Free(a, p.ResourceInputs); slices.Free(a, p.ResolvedInputs); slices.Free(a, p.ResolvedResourceInputs); slices.Free(a, p.Outputs)
+	if len(p.Captures) != 0 { slices.Free(a, p.Captures) }
+	if len(p.Inputs) != 0 { slices.Free(a, p.Inputs) }
+	if len(p.ResourceInputs) != 0 { slices.Free(a, p.ResourceInputs) }
+	if len(p.ResolvedInputs) != 0 { slices.Free(a, p.ResolvedInputs) }
+	if len(p.ResolvedResourceInputs) != 0 { slices.Free(a, p.ResolvedResourceInputs) }
+	if len(p.Outputs) != 0 { slices.Free(a, p.Outputs) }
 	*p = Plan{}
 }
 
@@ -114,6 +119,8 @@ type Options struct {
 	Shell     []string
 	Environment []string
 	DryRun    bool
+	// Force bypasses file freshness checks and cached-task lookup for this run.
+	Force     bool
 	RetainBytes int
 	CacheRetainBytes int
 	CacheDisabled bool
@@ -171,7 +178,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p := mem.Alloc[Program](a)
 	p.Alloc, p.Engine, p.Eval, p.Parsed = a, engine, compiled.Program, parsed
 	p.nextRequest = 1 << 60 // Evaluator queue request IDs start at one.
-	p.Options.Directory, p.Options.DryRun, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.RetainBytes, options.Jobs
+	p.Options.Directory, p.Options.DryRun, p.Options.Force, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.Force, options.RetainBytes, options.Jobs
 	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
 	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
 	if p.Options.RetryCount<0 { p.Options.RetryCount=0 }
@@ -179,6 +186,9 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	for i := range options.Shell { p.Options.Shell = slices.Append(a, p.Options.Shell, cloneText(a, options.Shell[i])) }
 	for i := range options.Environment { p.Options.Environment = slices.Append(a, p.Options.Environment, cloneText(a, options.Environment[i])) }
 	for i := range options.Grants { grant := eval.Grant{Capability: options.Grants[i].Capability}; for j := range options.Grants[i].Names { grant.Names = slices.Append(a, grant.Names, cloneText(a, options.Grants[i].Names[j])) }; p.Options.Grants = slices.Append(a, p.Options.Grants, grant) }
+	p.Eval.SetGrants(p.Options.Grants)
+	p.Eval.SetDefinitionCwd(p.Options.Directory)
+	p.Eval.SetDefinitionDependencyObserver(observeDefinitionDependency, p)
 	if len(p.Options.Shell) == 0 { p.Options.Shell = slices.Append(a, p.Options.Shell, cloneText(a, "/bin/sh")); p.Options.Shell = slices.Append(a, p.Options.Shell, cloneText(a, "-c")) }
 	for i := range parsed.Items {
 		item := parsed.Items[i]
@@ -196,6 +206,38 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	result.Program = p
 	return result
 }
+
+// HasTarget reports whether a literal rule or definition can be selected.
+// It performs no materialization and creates no rule instance.
+func (p *Program) HasTarget(target string) bool {
+	if p == nil { return false }
+	selected := p.selectRule(target)
+	found := selected.Rule != nil || p.Eval.Definition(target) != nil
+	freeCaptures(p.Alloc, selected.Captures)
+	return found
+}
+
+// NamedTargets returns literal non-file rule outputs in declaration order.
+// Template and path targets require an explicit request and are omitted.
+func (p *Program) NamedTargets() []string {
+	if p == nil { return nil }
+	var targets []string
+	for i := range p.Rules {
+		r := p.Rules[i].Rule
+		if r == nil || r.Kind == rule.FileRule { continue }
+		for j := range r.Outputs {
+			output := r.Outputs[j]
+			if output.Template || isFileName(output.Text) { continue }
+			duplicate := false
+			for k := range targets { if targets[k] == output.Text { duplicate = true; break } }
+			if !duplicate { targets = slices.Append(p.Alloc, targets, cloneText(p.Alloc, output.Text)) }
+		}
+	}
+	return targets
+}
+
+// FreeStrings releases a string list returned by a Program query.
+func FreeStrings(a mem.Allocator, values []string) { freeStrings(a, values) }
 
 // CompileMany combines source texts for parsing while qualifying diagnostics
 // with their originating source. Compile remains the zero-overhead one-source API.
@@ -250,7 +292,7 @@ func (p *Program) Free() {
 func (p *Program) Cancel(target string) diagnostic.Diagnostic {
 	resolved := p.instanceFor(target)
 	if resolved.Diagnostic.Code != "" { return resolved.Diagnostic }
-	if resolved.Node == nil { resolved.Plan.Free(p.Alloc); return failure("TGT_NO_RULE", "no rule for target: "+target) }
+	if resolved.Node == nil { resolved.Plan.Free(p.Alloc); return failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+target) }
 	p.Engine.Cancel(resolved.Node)
 	resolved.Plan.Free(p.Alloc)
 	p.drainCancellations()
@@ -259,10 +301,10 @@ func (p *Program) Cancel(target string) diagnostic.Diagnostic {
 
 func (p *Program) Plan(target string) PlanResult {
 	selected := p.selectRule(target)
-	if selected.Ambiguous { return PlanResult{Diagnostic: failure("TGT_AMBIG", "multiple rules match target")} }
+	if selected.Ambiguous { return PlanResult{Diagnostic: failure(p.Alloc, "TGT_AMBIG", "multiple rules match target")} }
 	if selected.Rule == nil {
 		if p.Eval.Definition(target) != nil { return PlanResult{Plan: Plan{Target: target, Key: core.NewResourceKey(p.Alloc, core.ResourceDefinition, target), Freshness: Unknown}} }
-		return PlanResult{Diagnostic: failure("TGT_NO_RULE", "no rule for target: "+target)}
+		return PlanResult{Diagnostic: failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+target)}
 	}
 	plan := Plan{Target: target, Rule: selected.Rule, RuleSpan: diagnostic.Span{Start: selected.Rule.Span.Start, End: selected.Rule.Span.End}, Body: selected.Rule.Body, Captures: cloneCaptures(p.Alloc, selected.Captures), Freshness: Unknown}
 	defer freeCaptures(p.Alloc, selected.Captures)
@@ -279,7 +321,7 @@ func (p *Program) Plan(target string) PlanResult {
 		for j := 0; j < i; j++ {
 			if plan.Outputs[i] == plan.Outputs[j] {
 				plan.Free(p.Alloc)
-				return PlanResult{Diagnostic: failureAt("PARSE_ERR", diagnostic.Span{Start: selected.Rule.Span.Start, End: selected.Rule.Span.End}, "rule outputs resolve to the same path")}
+				return PlanResult{Diagnostic: failureAt(p.Alloc, "PARSE_ERR", diagnostic.Span{Start: selected.Rule.Span.Start, End: selected.Rule.Span.End}, "rule outputs resolve to the same path")}
 			}
 		}
 	}
@@ -308,7 +350,7 @@ func (p *Program) Plan(target string) PlanResult {
 
 func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.Diagnostic {
 	if input.Template == nil || len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil {
-		return failure("EXPR_INVALID", "invalid rule input expression")
+		return failure(p.Alloc, "EXPR_INVALID", "invalid rule input expression")
 	}
 	inputs, outputs := makeValues(p.Alloc, plan.Inputs), makeValues(p.Alloc, plan.Outputs)
 	defer freeValues(p.Alloc, inputs); defer freeValues(p.Alloc, outputs)
@@ -316,17 +358,17 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
 	result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
 	if state.Resolving != nil { slices.Free(p.Alloc, state.Resolving) }
-	if context.PhaseInvalid() || len(context.Effects) != 0 { eval.FreeEffects(p.Alloc, context.Effects); result.Free(p.Alloc); return failure("PHASE_INVALID", "build effects are invalid while planning") }
-	if result.Waiting { result.Free(p.Alloc); return failure("PHASE_INVALID", "operation is invalid while planning") }
+	if context.PhaseInvalid() || len(context.Effects) != 0 { eval.FreeEffects(p.Alloc, context.Effects); result.Free(p.Alloc); return failure(p.Alloc, "PHASE_INVALID", "build effects are invalid while planning") }
+	if result.Waiting { result.Free(p.Alloc); return failure(p.Alloc, "PHASE_INVALID", "operation is invalid while planning") }
 	if result.Diagnostic.Code != "" { return result.Diagnostic }
-	if !appendPlanInputValue(p.Alloc, plan, result.Value) { result.Value.Free(p.Alloc); return failure("INPUT_INVALID", "rule input expression must produce strings, resources, lists, or nil") }
+	if !appendPlanInputValue(p.Alloc, plan, result.Value) { result.Value.Free(p.Alloc); return failure(p.Alloc, "INPUT_INVALID", "rule input expression must produce strings, resources, lists, or nil") }
 	result.Value.Free(p.Alloc)
 	return diagnostic.Diagnostic{}
 }
 
 func resolvePlanDefinition(value any, key core.ResourceKey, context *eval.Context) eval.Result {
 	state := value.(*planResolverState)
-	for i := range state.Resolving { if state.Resolving[i] == key.Name { return eval.Result{Diagnostic: failure("DEP_CYCLE", "definition cycle")} } }
+	for i := range state.Resolving { if state.Resolving[i] == key.Name { return eval.Result{Diagnostic: failure(state.Program.Alloc, "DEP_CYCLE", "definition cycle")} } }
 	state.Resolving = slices.Append(state.Program.Alloc, state.Resolving, key.Name)
 	result := state.Program.Eval.EvaluateDefinition(key, context)
 	state.Resolving = state.Resolving[:len(state.Resolving)-1]
@@ -434,8 +476,11 @@ func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
 func isPath(value string) bool { return len(value) != 0 && (value[0] == '/' || (len(value) > 1 && value[0] == '.' && value[1] == '/')) }
 func isFileName(value string) bool { return isPath(value) || hasSlash(value) }
 func hasSlash(value string) bool { for i := range value { if value[i] == '/' { return true } }; return false }
-func failure(code string, message string) diagnostic.Diagnostic { return diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message} }
-func failureAt(code string, span diagnostic.Span, message string) diagnostic.Diagnostic { return diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message, Span: span} }
+// failure builds an owned diagnostic. Dynamic messages come from stack
+// concatenations, so they are cloned into the program allocator before they
+// can outlive the function that produced them.
+func failure(a mem.Allocator, code string, message string) diagnostic.Diagnostic { return diagnostic.Diagnostic{Code: cloneText(a, code), Severity: diagnostic.Error, Message: cloneText(a, message), Owned: true} }
+func failureAt(a mem.Allocator, code string, span diagnostic.Span, message string) diagnostic.Diagnostic { return diagnostic.Diagnostic{Code: cloneText(a, code), Severity: diagnostic.Error, Message: cloneText(a, message), Span: span, Owned: true} }
 func cloneText(a mem.Allocator, text string) string {
 	if text == "" { return "" }
 	b := mem.AllocSlice[byte](a, len(text), len(text))
@@ -443,7 +488,7 @@ func cloneText(a mem.Allocator, text string) string {
 	return string(b)
 }
 func cloneCaptures(a mem.Allocator, in []template.CaptureValue) []template.CaptureValue { var out []template.CaptureValue; for i := range in { out = slices.Append(a, out, template.CaptureValue{Name: cloneText(a, in[i].Name), Text: cloneText(a, in[i].Text)}) }; return out }
-func freeCaptures(a mem.Allocator, values []template.CaptureValue) { for i := range values { mem.FreeString(a, values[i].Name); mem.FreeString(a, values[i].Text) }; slices.Free(a, values) }
+func freeCaptures(a mem.Allocator, values []template.CaptureValue) { for i := range values { mem.FreeString(a, values[i].Name); mem.FreeString(a, values[i].Text) }; if len(values) != 0 { slices.Free(a, values) } }
 
 func renderTarget(a mem.Allocator, target rule.Target, captures []template.CaptureValue) string {
 	if !target.Template { return cloneText(a, target.Text) }

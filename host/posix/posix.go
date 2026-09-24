@@ -148,6 +148,18 @@ func lm_event_free(event *nativeEvent) { _ = event }
 //so:extern
 func lm_host_free(h *nativeHost) { _ = h }
 
+//so:extern
+func lm_cli_install_signals() c.Int { return 0 }
+
+//so:extern
+func lm_cli_take_signal() c.Int { return 0 }
+
+//so:extern
+func lm_cli_environment_size() c.Int { return 0 }
+
+//so:extern nodecay
+func lm_cli_environment_copy(out []byte) c.Int { _ = out; return 0 }
+
 type Host struct {
 	Alloc mem.Allocator
 	native *nativeHost
@@ -212,6 +224,37 @@ func (h *Host) CancelAll() {
 func (h *Host) Active() int {
 	if h == nil || h.native == nil { return 0 }
 	return int(lm_host_active(h.native))
+}
+
+// InstallSignals installs async-safe SIGINT and SIGTERM notifications for the
+// command loop. The handler itself never touches Go/Solod state.
+func InstallSignals() bool { return lm_cli_install_signals() == 0 }
+
+// TakeSignal returns zero when no signal arrived, a positive signal number for
+// the first signal, or a negative number when a second signal arrived.
+func TakeSignal() int { return int(lm_cli_take_signal()) }
+
+// Environment returns a complete owned snapshot of the process environment.
+func Environment(a mem.Allocator) []string {
+	size := int(lm_cli_environment_size())
+	if size <= 0 { return nil }
+	data := mem.AllocSlice[byte](a, size, size)
+	written := int(lm_cli_environment_copy(data))
+	if written < 0 { mem.FreeSlice(a, data); return nil }
+	var values []string
+	start := 0
+	for i := 0; i < written; i++ {
+		if data[i] != 0 { continue }
+		if i > start { values = slices.Append(a, values, string(slices.Clone(a, data[start:i]))) }
+		start = i + 1
+	}
+	mem.FreeSlice(a, data)
+	return values
+}
+
+func FreeEnvironment(a mem.Allocator, values []string) {
+	for i := range values { mem.FreeString(a, values[i]) }
+	if len(values) != 0 { slices.Free(a, values) }
 }
 
 // ForceWaitpidFailureForTest makes the next process reaping attempt fail. It is

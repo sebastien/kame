@@ -3,6 +3,7 @@ package lib
 
 import (
 	"littlemake/core"
+	"littlemake/diagnostic"
 	"littlemake/host"
 	"littlemake/lang/eval"
 	"solod.dev/so/mem"
@@ -52,7 +53,10 @@ func add(r *eval.Registry, name string, call eval.OperationCall, min int, max in
 func addCapability(r *eval.Registry, name string, call eval.OperationCall, min int, max int, capability eval.Capability) bool { return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Capabilities: []eval.Capability{capability}, Version: version}) }
 
 func truth(v core.Value) bool { return v.Kind != core.Nil && !(v.Kind == core.Bool && !v.Bool) }
-func invalid() eval.Result { return eval.Result{Diagnostic: core.Diagnostic{Code: "EXPR_INVALID"}} }
+func failure(code string, message string) eval.Result {
+	return eval.Result{Diagnostic: core.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message, Owned: false}}
+}
+func invalid() eval.Result { return failure("EXPR_INVALID", "invalid operation arguments") }
 func text(v core.Value) (string, bool) { if v.Kind != core.String { return "", false }; return v.Text, true }
 
 func opNot(c *eval.Context, s any, v []core.Value) eval.Result { _, _ = c, s; return eval.Result{Value: core.Value{Kind: core.Bool, Bool: !truth(v[0])}} }
@@ -105,7 +109,14 @@ func opNth(c *eval.Context, s any, v []core.Value) eval.Result {
 	if v[0].Kind != core.String { return invalid() }; if index < 0 { index += utf8.RuneCountInString(v[0].Text) }; start, end := runeOffset(v[0].Text, index), runeOffset(v[0].Text, index+1); if start < 0 || end < 0 { return eval.Result{Value: core.Value{Kind: core.Nil}} }; return eval.Result{Value: core.NewString(c.Run, v[0].Text[start:end])}
 }
 func runeOffset(text string, index int) int { if index < 0 { return -1 }; offset := 0; for i := 0; i < index; i++ { if offset == len(text) { return -1 }; _, width := utf8.DecodeRuneInString(text[offset:]); offset += width }; return offset }
-func opApply(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; if v[0].Kind != core.Callable || v[1].Kind != core.List { return invalid() }; defer c.FreeCallable(&v[0]); return c.Call(v[0], v[1].List) }
+func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	// Legacy sources pass the argument list first; the function-first order is
+	// also accepted for symmetry.
+	if v[0].Kind == core.List && v[1].Kind == core.Callable { defer c.FreeCallable(&v[1]); return c.Call(v[1], v[0].List) }
+	if v[0].Kind == core.Callable && v[1].Kind == core.List { defer c.FreeCallable(&v[0]); return c.Call(v[0], v[1].List) }
+	return invalid()
+}
 func opList(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return eval.Result{Value: core.NewList(c.Run, v)} }
 func opNop(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; if len(v) == 0 { return eval.Result{Value: core.Value{Kind: core.Nil}} }; return eval.Result{Value: v[len(v)-1].Clone(c.Run)} }
 
@@ -155,14 +166,21 @@ func opLowercase(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; va
 func opBasename(c *eval.Context, s any, v []core.Value) eval.Result { _, _ = c, s; value, ok := text(v[0]); if !ok { return invalid() }; return eval.Result{Value: core.NewString(c.Run, path.Base(value))} }
 func opDirname(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; value, ok := text(v[0]); if !ok { return invalid() }; result := path.Dir(c.Run, value); return eval.Result{Value: core.Value{Kind: core.String, Text: result}} }
 func extension(value string) string { base := path.Base(value); if len(base) != 0 && base[0] == '.' && strings.Index(base[1:], ".") < 0 { return "" }; return path.Ext(value) }
-func opSplitext(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; value, ok := text(v[0]); if !ok { return invalid() }; suffix := extension(value); root := value[:len(value)-len(suffix)]; result := []core.Value{core.NewString(c.Run, root), core.NewString(c.Run, suffix)}; out := core.NewList(c.Run, result); freeValues(c, result); return eval.Result{Value: out} }
+func opSplitext(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; value, ok := text(v[0]); if !ok { return invalid() }; suffix := extension(value); root := value[:len(value)-len(suffix)]; result := slices.Make[core.Value](c.Run, 2); result[0] = core.NewString(c.Run, root); result[1] = core.NewString(c.Run, suffix); out := core.NewList(c.Run, result); freeValues(c, result); return eval.Result{Value: out} }
 func opExt(c *eval.Context, s any, v []core.Value) eval.Result { _, _ = c, s; value, ok := text(v[0]); if !ok { return invalid() }; return eval.Result{Value: core.NewString(c.Run, extension(value))} }
 func opJoinpath(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; var values []string; for i := range v { if v[i].Kind != core.String { slices.Free(c.Run, values); return invalid() }; values = slices.Append(c.Run, values, v[i].Text) }; joined := path.Join(c.Run, values...); slices.Free(c.Run, values); return eval.Result{Value: core.Value{Kind: core.String, Text: joined}} }
 func opAbspath(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; value, ok := text(v[0]); if !ok { return invalid() }; if path.IsAbs(value) { return eval.Result{Value: core.Value{Kind: core.String, Text: path.Clean(c.Run, value)}} }; return eval.Result{Value: core.Value{Kind: core.String, Text: path.Join(c.Run, c.Cwd, value)}} }
 func opRelpath(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s; target, ok := text(v[0]); if !ok || v[1].Kind != core.String { return invalid() }; base := path.Join(c.Run, c.Cwd, v[1].Text); absolute := path.Join(c.Run, c.Cwd, target); defer mem.FreeString(c.Run, base); defer mem.FreeString(c.Run, absolute); start := commonPathPrefix(base, absolute); b := strings.NewBuilder(c.Run); defer b.Free(); for i := start; i < len(base); { for i < len(base) && base[i] == '/' { i++ }; if i == len(base) { break }; for i < len(base) && base[i] != '/' { i++ }; if b.Len() != 0 { b.WriteByte('/') }; b.WriteString("..") }; suffix := absolute[start:]; for len(suffix) != 0 && suffix[0] == '/' { suffix = suffix[1:] }; if suffix != "" { if b.Len() != 0 { b.WriteByte('/') }; b.WriteString(suffix) }; if b.Len() == 0 { b.WriteByte('.') }; return eval.Result{Value: core.NewString(c.Run, b.String())}
 }
-func commonPathPrefix(left string, right string) int { i, last := 0, 0; for i < len(left) && i < len(right) && left[i] == right[i] { if left[i] == '/' { last = i + 1 }; i++ }; if i == len(left) && i == len(right) { return i }; return last }
+func commonPathPrefix(left string, right string) int {
+	i := 0
+	for i < len(left) && i < len(right) && left[i] == right[i] { i++ }
+	if i == len(left) && (i == len(right) || right[i] == '/') { return i }
+	if i == len(right) && (i == len(left) || left[i] == '/') { return i }
+	for i > 0 && left[i-1] != '/' { i-- }
+	return i
+}
 
 func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Result {
 	completion := c.TakeCompletion()
@@ -177,12 +195,13 @@ func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Re
 	}
 	id := c.Submit(kind, payload)
 	payload.Free(c.Run)
-	if id == 0 { return eval.Result{Diagnostic: core.Diagnostic{Code: "HOST_FAIL"}} }
+	if id == 0 { return failure("HOST_FAIL", "host request was not accepted") }
 	return eval.Result{Waiting: true}
 }
 func dependency(c *eval.Context, kind core.ResourceKind, name string) bool { key := core.NewResourceKey(c.Run, kind, name); current := c.Dependency(key); key.Free(c.Run); return current }
 func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 	if value.Kind != core.String { return invalid() }
+	if !c.Allows(eval.Read, value.Text) { return failure("CAP_DENIED", "read access denied") }
 	kind := core.ResourceFile
 	if op == host.OpWildcard { kind = core.ResourceGlob }
 	if !dependency(c, kind, value.Text) { return eval.Result{Waiting: true} }
@@ -192,9 +211,9 @@ func opRead(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return 
 func opExists(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return fileRequest(c, host.OpExists, v[0]) }
 func opStat(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return fileRequest(c, host.OpStat, v[0]) }
 func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return fileRequest(c, host.OpWildcard, v[0]) }
-func opWrite(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; if v[0].Kind != core.String || (v[1].Kind != core.String && v[1].Kind != core.Bytes) { return invalid() }; data := v[1].Bytes; if v[1].Kind == core.String { data = []byte(v[1].Text) }; if c.Phase == eval.RenderingPhase { c.EmitWrite(v[0].Text, data); return eval.Result{Value: core.Value{Kind: core.Nil}} }; if c.Phase == eval.PlanningPhase { c.MarkPhaseInvalid(); return eval.Result{Diagnostic: core.Diagnostic{Code: "PHASE_INVALID"}} }; return request(c, host.RequestWriteFile, host.WritePayload(c.Run, v[0].Text, data)) }
-func opEnv(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; if v[0].Kind != core.String { return invalid() }; if !dependency(c, core.ResourceEnvironment, v[0].Text) { return eval.Result{Waiting: true} }; return request(c, host.RequestEnvironment, core.NewString(c.Run, v[0].Text)) }
-func opShell(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; if c.Phase != eval.EvaluatePhase { c.MarkPhaseInvalid(); return eval.Result{Diagnostic: core.Diagnostic{Code: "PHASE_INVALID"}} }; if v[0].Kind != core.String || (len(v) == 2 && v[1].Kind != core.Record) { return invalid() }; return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text)) }
+func opWrite(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; if v[0].Kind != core.String || (v[1].Kind != core.String && v[1].Kind != core.Bytes) { return invalid() }; if !c.Allows(eval.Write, v[0].Text) { return failure("CAP_DENIED", "write access denied") }; data := v[1].Bytes; if v[1].Kind == core.String { data = []byte(v[1].Text) }; if c.Phase == eval.RenderingPhase { c.EmitWrite(v[0].Text, data); return eval.Result{Value: core.Value{Kind: core.Nil}} }; if c.Phase == eval.PlanningPhase { c.MarkPhaseInvalid(); return failure("PHASE_INVALID", "write is invalid while planning") }; return request(c, host.RequestWriteFile, host.WritePayload(c.Run, v[0].Text, data)) }
+func opEnv(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; if v[0].Kind != core.String { return invalid() }; if !c.Allows(eval.Env, v[0].Text) { return failure("CAP_DENIED", "environment access denied") }; if !dependency(c, core.ResourceEnvironment, v[0].Text) { return eval.Result{Waiting: true} }; return request(c, host.RequestEnvironment, core.NewString(c.Run, v[0].Text)) }
+func opShell(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; if c.Phase != eval.EvaluatePhase { c.MarkPhaseInvalid(); return failure("PHASE_INVALID", "shell is invalid outside evaluation") }; if v[0].Kind != core.String || (len(v) == 2 && v[1].Kind != core.Record) { return invalid() }; return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text)) }
 
 func opOut(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return effect(c, eval.EffectOut, v) }
 func opErr(c *eval.Context, s any, v []core.Value) eval.Result { _ = s; return effect(c, eval.EffectErr, v) }

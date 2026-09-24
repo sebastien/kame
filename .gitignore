@@ -1,3 +1,5 @@
 
+.littlemake
 .memo/memory/*
 generated/
+dist/

@@ -47,7 +47,7 @@ func produceExternalFile(c *core.EngineContext, nodeID int64) core.ProducerResul
 	// inputs still fail before execution. The cache records an explicit missing
 	// marker and invalidates when the path later appears.
 	if err == os.ErrNotExist { c.Publish(core.Value{Kind: core.Nil}); return core.ProducerCompleted }
-	if err != nil { c.Fail(failure("TGT_NO_RULE", "required input does not exist: "+state.Name)); return core.ProducerFailed }
+	if err != nil { c.Fail(failure(state.Program.Alloc, "TGT_NO_RULE", "required input does not exist: "+state.Name)); return core.ProducerFailed }
 	c.Publish(core.NewString(c.Allocator(), state.Name))
 	return core.ProducerCompleted
 }
@@ -56,7 +56,7 @@ func produceExternalValue(c *core.EngineContext, nodeID int64) core.ProducerResu
 	state := c.Context().(*externalValueState)
 	if state.Kind == core.ResourceEnvironment { value, ok := state.Program.configuredEnvironment(state.Name); if ok { c.Publish(core.NewString(c.Allocator(), value)) } else { c.Publish(core.Value{Kind: core.Nil}) }
 	} else if state.Kind == core.ResourceGlob { c.Publish(state.Program.wildcard(state.Name))
-	} else { c.Fail(failure("HOST_FAIL", "invalid external resource")); return core.ProducerFailed }
+	} else { c.Fail(failure(state.Program.Alloc, "HOST_FAIL", "invalid external resource")); return core.ProducerFailed }
 	return core.ProducerCompleted
 }
 
@@ -68,7 +68,7 @@ func (p *Program) Materialize(target string) Result {
 			name := p.canonicalTarget(target, true)
 			_, err := os.Stat(name)
 			mem.FreeString(p.Alloc, name)
-			if err == nil { return Result{Path: cloneText(p.Alloc, target), Fresh: true} }
+			if err == nil { d.Free(p.Alloc); return Result{Path: cloneText(p.Alloc, target), Fresh: true} }
 		}
 		return Result{Diagnostic: d}
 	}
@@ -85,7 +85,7 @@ func (p *Program) Start(target string) HandleStart {
 	node, plan, d := resolved.Node, resolved.Plan, resolved.Diagnostic
 	if d.Code != "" { return HandleStart{Diagnostic: d} }
 	definition := node == nil
-	if definition { node = p.Eval.Definition(target); if node == nil { plan.Free(p.Alloc); return HandleStart{Diagnostic: failure("TGT_NO_RULE", "no rule for target: "+target)} }
+	if definition { node = p.Eval.Definition(target); if node == nil { plan.Free(p.Alloc); return HandleStart{Diagnostic: failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+target)} }
 	}
 	plan.Free(p.Alloc)
 	index := p.instanceIndex(node)
@@ -96,7 +96,7 @@ func (p *Program) Start(target string) HandleStart {
 	}
 	if index >= 0 && taskTerminal(node.State) {
 		entry := &p.Instances[index]
-		if entry.Rule.Kind == rule.FileRule && node.State == core.NodeComplete { entry.Plan.Freshness = p.freshness(&entry.Plan, node); if entry.Plan.Freshness == Stale { p.Engine.Invalidate(node) }
+		if entry.Rule.Kind == rule.FileRule && node.State == core.NodeComplete { entry.Plan.Freshness = p.freshness(&entry.Plan, node); if p.Options.Force || entry.Plan.Freshness == Stale { p.Engine.Invalidate(node) }
 		} else if entry.Rule.Kind == rule.TaskRule || entry.Rule.Kind == rule.CachedTaskRule { p.Engine.Invalidate(node) }
 	}
 	handle := mem.Alloc[Handle](p.Alloc)
@@ -192,7 +192,7 @@ func (p *Program) Tick(wait int) {
 func (h *Handle) Cancel() { if h == nil || h.Program == nil || h.Root == nil { return }; h.Program.Engine.Release(h.Root); h.Root = nil; h.Program.drainCancellations() }
 
 func (h *Handle) Poll() HandleResult {
-	if h == nil || h.Program == nil || h.Node == nil { return HandleResult{Done: true, Result: Result{Diagnostic: failure("TGT_NO_RULE", "invalid handle")}} }
+	if h == nil || h.Program == nil || h.Node == nil { return HandleResult{Done: true, Result: Result{Diagnostic: failure(mem.System, "TGT_NO_RULE", "invalid handle")}} }
 	if h.Node.State != core.NodeComplete && h.Node.State != core.NodeFailed && h.Node.State != core.NodeCancelled { return HandleResult{} }
 	if h.Root != nil { h.Program.Engine.Release(h.Root); h.Root = nil }
 	if h.Node.State != core.NodeComplete { return HandleResult{Done: true, Result: Result{Diagnostic: h.Node.Diagnostic.Clone(h.Program.Alloc)}} }
@@ -217,7 +217,7 @@ func (p *Program) instanceFor(target string) instanceResult {
 	state := mem.Alloc[instanceState](p.Alloc)
 	state.Program, state.Index = p, len(p.Instances)
 	node := p.Engine.AddOwned(plan.Key, produce, state, freeInstanceState)
-	if node == nil { plan.Free(p.Alloc); return instanceResult{Diagnostic: failure("TGT_AMBIG", "duplicate rule instance")} }
+	if node == nil { plan.Free(p.Alloc); return instanceResult{Diagnostic: failure(p.Alloc, "TGT_AMBIG", "duplicate rule instance")} }
 	p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: plan.Rule, Captures: cloneCaptures(p.Alloc, plan.Captures), Node: node, Plan: plan})
 	return instanceResult{Node: node}
 }
@@ -242,7 +242,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.emitNode(entry.Node, entry.Plan.Target, TargetStarted, diagnostic.Span{}, nil)
 		entry.started, entry.startedGeneration, entry.terminalEmitted = true, c.Generation(), false
 	}
-	if entry.Rule.Kind == rule.ServiceRule { c.Fail(failure("FEATURE_UNSUP", "service execution is not supported")); return core.ProducerFailed }
+	if entry.Rule.Kind == rule.ServiceRule { c.Fail(failure(p.Alloc, "FEATURE_UNSUP", "service execution is not supported")); return core.ProducerFailed }
 	if c.Completion().RequestID != 0 && entry.Script != "" {
 		if entry.Script != "" { mem.FreeString(p.Alloc, entry.Script) }; entry.Script = ""
 		if c.Completion().Diagnostic.Code != "" { c.Fail(c.Completion().Diagnostic); return core.ProducerFailed }
@@ -251,7 +251,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				name := p.canonicalTarget(entry.Plan.Outputs[i], true)
 				_, err := os.Stat(name)
 				mem.FreeString(p.Alloc, name)
-				if err != nil { c.Fail(failure("OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i])); return core.ProducerFailed }
+				if err != nil { c.Fail(failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i])); return core.ProducerFailed }
 			}
 			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
 		} else { c.Publish(core.Value{Kind: core.Nil}) }
@@ -270,6 +270,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		if kind == core.ResourceFile || (kind == core.ResourceTarget && isFileName(input)) {
 			resolved := p.instanceFor(input)
 			entry = &p.Instances[state.Index]
+			resolved.Diagnostic.Free(p.Alloc)
 			if resolved.Node != nil {
 				resolved.Plan.Free(p.Alloc)
 				if !p.prepareDependency(c, state.Index, resolved.Node) { return core.ProducerWaiting }
@@ -279,7 +280,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			name := p.canonicalTarget(input, true)
 			_, err := os.Stat(name)
 			mem.FreeString(p.Alloc, name)
-			if err != nil { c.Fail(failure("TGT_NO_RULE", "required input does not exist: "+input)); return core.ProducerFailed }
+			if err != nil { c.Fail(failure(p.Alloc, "TGT_NO_RULE", "required input does not exist: "+input)); return core.ProducerFailed }
 			continue
 		}
 		resolved := p.instanceFor(input)
@@ -290,8 +291,9 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			if !p.prepareDependency(c, state.Index, dep) { return core.ProducerWaiting }
 			continue
 		}
+		d.Free(p.Alloc)
 		definition := p.Eval.Definition(input)
-		if definition == nil { c.Fail(failure("TGT_NO_RULE", "no rule for target: "+input)); return core.ProducerFailed }
+		if definition == nil { c.Fail(failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+input)); return core.ProducerFailed }
 		definitionNode := p.definitionNode(definition.Key.Name)
 		if definitionNode == nil || !p.addDependency(c, entry, definitionNode) { return core.ProducerWaiting }
 	}
@@ -305,7 +307,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	if rendered.Waiting { return core.ProducerWaiting }
 	if d.Code != "" { c.Fail(d); return core.ProducerFailed }
 	if entry.Rule.Kind == rule.FileRule { entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node) } else { entry.Plan.Freshness = Stale }
-	if entry.Rule.Kind == rule.CachedTaskRule && !p.Options.CacheDisabled && !p.Options.DryRun {
+	if entry.Rule.Kind == rule.CachedTaskRule && !p.Options.CacheDisabled && !p.Options.Force && !p.Options.DryRun {
 		entry.CacheReady = p.cacheFingerprint(entry, commands)
 		if !p.cacheBlockedByBareTask(entry) {
 			record := p.cacheLoad(entry, entry.CacheFingerprint[:])
@@ -320,13 +322,13 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			}
 		}
 	}
-	if entry.Plan.Freshness == Fresh && !p.Options.DryRun {
+	if entry.Plan.Freshness == Fresh && !p.Options.Force && !p.Options.DryRun {
 		if commands != "" { mem.FreeString(p.Alloc, commands) }
 		if entry.Rule.Kind == rule.FileRule { c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0])) } else { c.Publish(core.Value{Kind: core.Nil}) }
 		return core.ProducerCompleted
 	}
-	if hasYield(effects) && commands != "" { if commands != "" { mem.FreeString(p.Alloc, commands) }; c.Fail(failureAt("OUTPUT_CONFLICT", yieldSpan(effects), "yield cannot be combined with shell commands")); return core.ProducerFailed }
-	if effectDiagnostic := validateEffects(entry, effects); effectDiagnostic.Code != "" { if commands != "" { mem.FreeString(p.Alloc, commands) }; c.Fail(effectDiagnostic); return core.ProducerFailed }
+	if hasYield(effects) && commands != "" { if commands != "" { mem.FreeString(p.Alloc, commands) }; c.Fail(failureAt(p.Alloc, "OUTPUT_CONFLICT", yieldSpan(effects), "yield cannot be combined with shell commands")); return core.ProducerFailed }
+	if effectDiagnostic := validateEffects(p.Alloc, entry, effects); effectDiagnostic.Code != "" { if commands != "" { mem.FreeString(p.Alloc, commands) }; c.Fail(effectDiagnostic); return core.ProducerFailed }
 	if p.Options.DryRun { p.commitEffects(entry, effects, writePaths, true); if commands != "" { mem.FreeString(p.Alloc, commands) }; c.Publish(core.Value{Kind: core.Nil}); return core.ProducerCompleted }
 	if effectDiagnostic := p.commitEffects(entry, effects, writePaths, false); effectDiagnostic.Code != "" { if commands != "" { mem.FreeString(p.Alloc, commands) }; c.Fail(effectDiagnostic); return core.ProducerFailed }
 	if commands == "" {
@@ -335,7 +337,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				name := p.canonicalTarget(entry.Plan.Outputs[i], true)
 				_, err := os.Stat(name)
 				mem.FreeString(p.Alloc, name)
-				if err != nil { c.Fail(failure("OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i])); return core.ProducerFailed }
+				if err != nil { c.Fail(failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i])); return core.ProducerFailed }
 			}
 		}
 		if entry.Rule.Kind == rule.CachedTaskRule && entry.CacheReady && !p.Options.CacheDisabled { p.cacheCommit(entry, nil, nil, false, false) }
@@ -347,7 +349,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			name := p.canonicalTarget(entry.Plan.Outputs[i], true)
 			ok := mkdirParent(name)
 			mem.FreeString(p.Alloc, name)
-			if !ok { c.Fail(failure("FS_ERR", "cannot create output directory")); return core.ProducerFailed }
+			if !ok { c.Fail(failure(p.Alloc, "FS_ERR", "cannot create output directory")); return core.ProducerFailed }
 		}
 	}
 	p.nextRequest++
@@ -357,7 +359,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	entry.cacheStartedAt = time.Now().UnixNano()
 	entry.retryCount = 0
 	request := posix.Request{ID: p.nextRequest, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
-	if !p.Host.Start(request) { c.Fail(failure("HOST_FAIL", "cannot start recipe")); return core.ProducerFailed }
+	if !p.Host.Start(request) { c.Fail(failure(p.Alloc, "HOST_FAIL", "cannot start recipe")); return core.ProducerFailed }
 	c.Submit(request.ID)
 	return core.ProducerSubmitted
 }
@@ -377,7 +379,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 		result := p.Eval.Render(p.Alloc, entry.Rule.Body[i].Template, p.Eval.Scope, context)
 		if result.Waiting { if len(spans) != 0 { slices.Free(p.Alloc, spans) }; eval.FreeEffects(p.Alloc, context.Effects); freeStrings(p.Alloc, context.WritePaths); mem.Free(p.Alloc, context); return renderResult{Waiting: true} }
 		if result.Diagnostic.Code != "" { if len(spans) != 0 { slices.Free(p.Alloc, spans) }; eval.FreeEffects(p.Alloc, context.Effects); freeStrings(p.Alloc, context.WritePaths); mem.Free(p.Alloc, context); return renderResult{Diagnostic: result.Diagnostic} }
-		if result.Value.Kind != core.String { result.Value.Free(p.Alloc); if len(spans) != 0 { slices.Free(p.Alloc, spans) }; eval.FreeEffects(p.Alloc, context.Effects); freeStrings(p.Alloc, context.WritePaths); mem.Free(p.Alloc, context); return renderResult{Diagnostic: failure("EXPR_INVALID", "recipe line is not text")} }
+		if result.Value.Kind != core.String { result.Value.Free(p.Alloc); if len(spans) != 0 { slices.Free(p.Alloc, spans) }; eval.FreeEffects(p.Alloc, context.Effects); freeStrings(p.Alloc, context.WritePaths); mem.Free(p.Alloc, context); return renderResult{Diagnostic: failure(p.Alloc, "EXPR_INVALID", "recipe line is not text")} }
 		if result.Value.Text != "" { if b.Len() != 0 { b.WriteByte('\n') }; b.WriteString(result.Value.Text); spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: entry.Rule.Body[i].Span.Start, End: entry.Rule.Body[i].Span.End}) }
 		result.Value.Free(p.Alloc)
 	}
@@ -409,12 +411,37 @@ func observeRenderDependency(value any, key core.ResourceKey) {
 			external.Program, external.Name = p, cloneText(p.Alloc, key.Name)
 			if p.Engine.AddOwned(key, produceExternalFile, external, freeExternalFileState) == nil { freeExternalFileState(p.Alloc, external) }
 		}
-		resolved.Plan.Free(p.Alloc)
 	}
+	resolved.Plan.Free(p.Alloc)
+	resolved.Diagnostic.Free(p.Alloc)
 	if state.Index < 0 || state.Index >= len(p.Instances) { return }
 	if resolved.Node != nil { p.adoptTask(resolved.Node, p.Instances[state.Index].runEpoch) }
 	entry := &p.Instances[state.Index]
 	p.emit(Event{Kind: DependencyDiscovered, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, DependencyKey: key})
+}
+
+// observeDefinitionDependency supplies external resources to lazy definitions.
+// Definitions have no rule-instance event identity, so this intentionally only
+// registers resources and never emits a target dependency event.
+func observeDefinitionDependency(value any, key core.ResourceKey) {
+	p := value.(*Program)
+	if key.Name == "" { return }
+	if key.Kind == core.ResourceEnvironment || key.Kind == core.ResourceGlob {
+		state := mem.Alloc[externalValueState](p.Alloc)
+		state.Program, state.Name, state.Kind = p, cloneText(p.Alloc, key.Name), key.Kind
+		if p.Engine.AddOwned(key, produceExternalValue, state, freeExternalValueState) == nil { freeExternalValueState(p.Alloc, state) }
+		return
+	}
+	resolved := p.instanceFor(key.Name)
+	if resolved.Diagnostic.Code == "" || (resolved.Diagnostic.Code == "TGT_NO_RULE" && key.Kind == core.ResourceFile) {
+		if resolved.Node == nil && key.Kind == core.ResourceFile {
+			state := mem.Alloc[externalFileState](p.Alloc)
+			state.Program, state.Name = p, cloneText(p.Alloc, key.Name)
+			if p.Engine.AddOwned(key, produceExternalFile, state, freeExternalFileState) == nil { freeExternalFileState(p.Alloc, state) }
+		}
+	}
+	resolved.Plan.Free(p.Alloc)
+	resolved.Diagnostic.Free(p.Alloc)
 }
 
 func observeRenderOperation(value any, name string, version string) {
@@ -454,7 +481,7 @@ func (p *Program) emitCachedLog(entry *instance, kind EventKind, data []byte, tr
 
 func hasYield(effects []eval.Effect) bool { for i := range effects { if effects[i].Kind == eval.EffectYield { return true } }; return false }
 func yieldSpan(effects []eval.Effect) diagnostic.Span { for i := range effects { if effects[i].Kind == eval.EffectYield { return diagnostic.Span{Start: effects[i].Span.Start, End: effects[i].Span.End} } }; return diagnostic.Span{} }
-func validateEffects(entry *instance, effects []eval.Effect) diagnostic.Diagnostic { if hasYield(effects) && (entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1) { return failureAt("YIELD_INVALID", yieldSpan(effects), "yield requires one file output") }; return diagnostic.Diagnostic{} }
+func validateEffects(a mem.Allocator, entry *instance, effects []eval.Effect) diagnostic.Diagnostic { if hasYield(effects) && (entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1) { return failureAt(a, "YIELD_INVALID", yieldSpan(effects), "yield requires one file output") }; return diagnostic.Diagnostic{} }
 
 func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePaths []string, dryRun bool) diagnostic.Diagnostic {
 	var yielded []byte
@@ -468,11 +495,11 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 		} else if effect.Kind == eval.EffectErr { p.emitNode(entry.Node, entry.Plan.Target, Stderr, diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, effect.Data)
 			if entry.Rule.Kind == rule.CachedTaskRule { p.cacheAppend(&entry.CacheStderr, &entry.CacheStderrTruncated, effect.Data, p.Options.CacheRetainBytes) }
 		} else if effect.Kind == eval.EffectYield { hasYielded = true; for j := range effect.Data { yielded = slices.Append(p.Alloc, yielded, effect.Data[j]) } }
-		if effect.Kind == eval.EffectWrite { if writeIndex >= len(writePaths) { slices.Free(p.Alloc, yielded); return failure("FS_ERR", "missing write path") }; if !dryRun { name := p.canonicalTarget(writePaths[writeIndex], true); temporary := name + ".littlemake-write.tmp"; ok := mkdirParent(name) && os.WriteFile(temporary, effect.Data, 0o644) == nil && os.Rename(temporary, name) == nil; if !ok { os.Remove(temporary); mem.FreeString(p.Alloc, name); slices.Free(p.Alloc, yielded); return failure("FS_ERR", "cannot write file") }; mem.FreeString(p.Alloc, name) }; writeIndex++ }
+		if effect.Kind == eval.EffectWrite { if writeIndex >= len(writePaths) { slices.Free(p.Alloc, yielded); return failure(p.Alloc, "FS_ERR", "missing write path") }; if !dryRun { name := p.canonicalTarget(writePaths[writeIndex], true); temporary := name + ".littlemake-write.tmp"; ok := mkdirParent(name) && os.WriteFile(temporary, effect.Data, 0o644) == nil && os.Rename(temporary, name) == nil; if !ok { os.Remove(temporary); mem.FreeString(p.Alloc, name); slices.Free(p.Alloc, yielded); return failure(p.Alloc, "FS_ERR", "cannot write file") }; mem.FreeString(p.Alloc, name) }; writeIndex++ }
 	}
 	if !hasYielded { return diagnostic.Diagnostic{} }
 	if dryRun { if len(yielded) != 0 { slices.Free(p.Alloc, yielded) }; return diagnostic.Diagnostic{} }
-	if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 { slices.Free(p.Alloc, yielded); return failure("YIELD_INVALID", "yield requires one file output") }
+	if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 { slices.Free(p.Alloc, yielded); return failure(p.Alloc, "YIELD_INVALID", "yield requires one file output") }
 	name := p.canonicalTarget(entry.Plan.Outputs[0], true)
 	ok := mkdirParent(name)
 	temporary := name + ".littlemake-yield.tmp"
@@ -480,7 +507,7 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 	if wrote { ok = os.Rename(temporary, name) == nil }
 	if wrote && !ok { os.Remove(temporary) }
 	mem.FreeString(p.Alloc, name); slices.Free(p.Alloc, yielded)
-	if !ok { return failure("FS_ERR", "cannot write yielded output") }
+	if !ok { return failure(p.Alloc, "FS_ERR", "cannot write yielded output") }
 	return diagnostic.Diagnostic{}
 }
 
@@ -501,16 +528,16 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 			continue
 		}
-		if input.Template == nil || len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil { freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Diagnostic: failure("EXPR_INVALID", "invalid rule input expression")} }
+		if input.Template == nil || len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil { freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Diagnostic: failure(p.Alloc, "EXPR_INVALID", "invalid rule input expression")} }
 		values, outputs := makeValues(p.Alloc, inputs), makeValues(p.Alloc, entry.Plan.Outputs)
 		dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
 		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.PlanningPhase, ResolverState: &dependencyState, OperationObserver: observeRenderOperation, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
 		result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
 		freeValues(p.Alloc, values); freeValues(p.Alloc, outputs)
-		if context.PhaseInvalid() || len(context.Effects) != 0 { eval.FreeEffects(p.Alloc, context.Effects); result.Free(p.Alloc); freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Diagnostic: failure("PHASE_INVALID", "build effects are invalid while planning")} }
+		if context.PhaseInvalid() || len(context.Effects) != 0 { eval.FreeEffects(p.Alloc, context.Effects); result.Free(p.Alloc); freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Diagnostic: failure(p.Alloc, "PHASE_INVALID", "build effects are invalid while planning")} }
 		if result.Waiting { freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Waiting: true} }
 		if result.Diagnostic.Code != "" { freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Diagnostic: result.Diagnostic} }
-		if !appendInputValue(p.Alloc, &inputs, &resourceInputs, result.Value) { result.Value.Free(p.Alloc); freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Diagnostic: failure("INPUT_INVALID", "rule input expression must produce strings, resources, lists, or nil")} }
+		if !appendInputValue(p.Alloc, &inputs, &resourceInputs, result.Value) { result.Value.Free(p.Alloc); freeStrings(p.Alloc, inputs); freePlanInputs(p.Alloc, resourceInputs, true); return inputsResult{Diagnostic: failure(p.Alloc, "INPUT_INVALID", "rule input expression must produce strings, resources, lists, or nil")} }
 		result.Value.Free(p.Alloc)
 	}
 	freeStrings(p.Alloc, entry.Plan.ResolvedInputs)
@@ -576,8 +603,12 @@ func (p *Program) drainRequests() {
 		request := next.Request
 		if request.Kind == host.RequestProcess {
 			script := host.PayloadText(request.Payload, host.FieldScript)
-			if script == "" || p.Host == nil || !p.Host.Start(posix.Request{ID: request.ID, Shell: p.Options.Shell, Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: p.Options.RetainBytes}) {
-				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure("HOST_FAIL", "cannot start shell request")})
+			// The shell operation returns captured output, so it needs a
+			// retained-byte budget even when no --log-limit was given.
+			retain := p.Options.RetainBytes
+			if retain < cacheLogDefault { retain = cacheLogDefault }
+			if script == "" || p.Host == nil || !p.Host.Start(posix.Request{ID: request.ID, Shell: p.Options.Shell, Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}) {
+				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else { p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0}) }
 		} else { p.completeRequest(request) }
 		request.Free(p.Alloc)
@@ -599,9 +630,9 @@ func (p *Program) completeRequest(request host.Request) {
 		data := host.PayloadBytes(request.Payload, host.FieldData)
 		temporary := filename + ".littlemake-write.tmp"
 		ok := mkdirParent(filename) && os.WriteFile(temporary, data, 0o644) == nil && os.Rename(temporary, filename) == nil
-		if !ok { os.Remove(temporary); completion.Diagnostic = failure("FS_ERR", "cannot write file") } else { completion.Value, completion.HasValue = core.Value{Kind: core.Nil}, true }
+		if !ok { os.Remove(temporary); completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot write file") } else { completion.Value, completion.HasValue = core.Value{Kind: core.Nil}, true }
 		mem.FreeString(p.Alloc, filename)
-	} else { completion.Diagnostic = failure("HOST_FAIL", "unsupported host request") }
+	} else { completion.Diagnostic = failure(p.Alloc, "HOST_FAIL", "unsupported host request") }
 	p.Engine.Complete(completion)
 }
 
@@ -611,7 +642,7 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 	defer mem.FreeString(p.Alloc, filename)
 	if op == host.OpRead {
 		data, err := os.ReadFile(p.Alloc, filename)
-		if err != nil { completion.Diagnostic = failure("FS_ERR", "cannot read file"); return completion }
+		if err != nil { completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot read file"); return completion }
 		completion.Value, completion.HasValue = core.NewBytes(p.Alloc, data), true; mem.FreeSlice(p.Alloc, data); return completion
 	}
 	if op == host.OpExists {
@@ -619,14 +650,14 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 	}
 	if op == host.OpStat {
 		info, err := os.Stat(filename)
-		if err != nil { completion.Diagnostic = failure("FS_ERR", "cannot stat file"); return completion }
+		if err != nil { completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot stat file"); return completion }
 		fields := []core.RecordField{{Key: "name", Value: core.NewString(p.Alloc, name)}, {Key: "size", Value: core.Value{Kind: core.Int, Int: info.Size()}}, {Key: "mode", Value: core.Value{Kind: core.Int, Int: int64(info.Mode())}}, {Key: "dir", Value: core.Value{Kind: core.Bool, Bool: info.IsDir()}}}
 		completion.Value, completion.HasValue = core.NewRecord(p.Alloc, fields), true
 		for i := range fields { fields[i].Value.Free(p.Alloc) }
 		return completion
 	}
 	if op == host.OpWildcard { completion.Value, completion.HasValue = p.wildcard(name), true; return completion }
-	completion.Diagnostic = failure("HOST_FAIL", "unknown filesystem request")
+	completion.Diagnostic = failure(p.Alloc, "HOST_FAIL", "unknown filesystem request")
 	return completion
 }
 
@@ -714,15 +745,15 @@ func (p *Program) drainCancellations() {
 
 func (p *Program) complete(event posix.Event) {
 	var d diagnostic.Diagnostic
-	if event.Outcome == posix.Failed { d = failure("HOST_FAIL", event.Diagnostic.Message)
-	} else if event.Outcome == posix.TimedOut { d = failure("RECIPE_TIMEOUT", "recipe timed out")
-	} else if event.Outcome == posix.Cancelled { d = failure("EXEC_CANCELLED", "recipe cancelled")
-	} else if event.Status != 0 { d = failure("RECIPE_FAIL", "recipe exited unsuccessfully"); if entry := p.instanceForRequest(event.ID); entry != nil && len(entry.LineSpans) != 0 { d.Span = entry.LineSpans[0] } }
+	if event.Outcome == posix.Failed { d = failure(p.Alloc, "HOST_FAIL", event.Diagnostic.Message)
+	} else if event.Outcome == posix.TimedOut { d = failure(p.Alloc, "RECIPE_TIMEOUT", "recipe timed out")
+	} else if event.Outcome == posix.Cancelled { d = failure(p.Alloc, "EXEC_CANCELLED", "recipe cancelled")
+	} else if event.Status != 0 { d = failure(p.Alloc, "RECIPE_FAIL", "recipe exited unsuccessfully"); if entry := p.instanceForRequest(event.ID); entry != nil && len(entry.LineSpans) != 0 { d.Span = entry.LineSpans[0] } }
 	for i := range p.Pending {
 		pending := p.Pending[i]
 		if pending.ID != event.ID { continue }
 		copy(p.Pending[i:], p.Pending[i+1:]); p.Pending = p.Pending[:len(p.Pending)-1]
-		if d.Code == "RECIPE_FAIL" { d = diagnostic.Diagnostic{} }
+		if d.Code == "RECIPE_FAIL" { d.Free(p.Alloc); d = diagnostic.Diagnostic{} }
 		completion := core.Completion{NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: event.ID, Diagnostic: d}
 		if d.Code == "" { completion.Value, completion.HasValue = shellValue(p.Alloc, event), true }
 		p.Engine.Complete(completion)
@@ -739,13 +770,15 @@ func (p *Program) complete(event posix.Event) {
 		if p.Host!=nil && p.Host.Start(request) {
 			entry.retryCount++
 			node.HostRequestID=retryID
+			d.Free(p.Alloc)
 			return
 		}
 	}
 	if node != nil && entry != nil && node.HostRequestID == event.ID && node.State == core.NodeWaiting && entry.Rule.Kind == rule.CachedTaskRule && entry.CacheReady && d.Code == "" && event.Status == 0 && !p.Options.CacheDisabled {
 		p.cacheCommit(entry, event.Stdout, event.Stderr, event.StdoutTruncated, event.StderrTruncated)
 	}
-	if node != nil { p.Engine.Complete(core.Completion{NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: event.ID, Diagnostic: d}) }
+	if node != nil { p.Engine.Complete(core.Completion{NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: event.ID, Diagnostic: d})
+	} else { d.Free(p.Alloc) }
 }
 
 func (p *Program) cacheAppend(dst *[]byte, truncated *bool, data []byte, limit int) {
