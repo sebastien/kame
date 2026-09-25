@@ -8,6 +8,7 @@ expr-number-leading-dot.lm	PARSE_ERR	error	-
 expr-number-overflow.lm	PARSE_ERR	error	-
 expr-number-trailing-dot.lm	PARSE_ERR	error	-
 expr-number-underscore.lm	PARSE_ERR	error	-
+expr-pattern-mixed-groups.lm	PARSE_ERR	error	-
 expr-rest-not-last.lm	PARSE_ERR	error	-
 expr-rest-repeated.lm	PARSE_ERR	error	-
 expr-single-quote.lm	PARSE_ERR	error	-

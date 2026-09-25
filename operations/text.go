@@ -55,12 +55,25 @@ func opStrip(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	left, ok := text(v[0])
-	if !ok || v[1].Kind != core.String || v[2].Kind != core.String {
-		return invalid()
+	if v[0].Kind != core.Pattern {
+		// Legacy literal form: replace occurrences of one plain string.
+		if len(v) != 3 || v[0].Kind != core.String || v[1].Kind != core.String || v[2].Kind != core.String {
+			return failure("PAT_INVALID", "invalid replace arguments")
+		}
+		value := strings.ReplaceAll(c.Run, v[0].Text, v[1].Text, v[2].Text)
+		return eval.Result{Value: core.Value{Kind: core.String, Text: value}}
 	}
-	value := strings.ReplaceAll(c.Run, left, v[1].Text, v[2].Text)
-	return eval.Result{Value: core.Value{Kind: core.String, Text: value}}
+	var state *replaceState
+	parsed := parseReplaceState(c, v[0], v[1], &state)
+	if parsed.Diagnostic.Code != "" {
+		return parsed
+	}
+	if len(v) == 2 {
+		return replaceSection(c, state)
+	}
+	out := replaceApply(c, state, v[2])
+	freeReplaceState(c.Run, state)
+	return out
 }
 func opIncludes(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s

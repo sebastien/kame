@@ -51,6 +51,9 @@ func (p *Plan) Free(a mem.Allocator) {
 	if p == nil {
 		return
 	}
+	if p.Target != "" {
+		mem.FreeString(a, p.Target)
+	}
 	if p.Key.Name != "" {
 		p.Key.Free(a)
 	}

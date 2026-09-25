@@ -605,6 +605,11 @@ func (e *cacheEncoder) appendValue(value core.Value) {
 		e.appendText(value.Text)
 		return
 	}
+	if value.Kind == core.Pattern {
+		e.appendByte(10)
+		e.appendText(value.Text)
+		return
+	}
 	if value.Kind == core.Bytes {
 		e.appendBytes(value.Bytes)
 		return

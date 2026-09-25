@@ -88,6 +88,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Null()
 		return
 	}
+	if value.Pattern != nil {
+		e.pattern(value)
+		return
+	}
 	e.node(exprKind(value.Kind), value.Span)
 	if value.Kind == expr.Boolean {
 		e.Str("value")
@@ -180,7 +184,69 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("body")
 		e.exprs(value.Body)
 	}
+	if value.Kind == expr.Section {
+		e.Str("arity")
+		e.Int(int64(len(value.Parameters)))
+		e.Str("body")
+		e.exprs(value.Body)
+	}
+	if value.Kind == expr.Placeholder {
+		e.Str("index")
+		e.Int(value.Int)
+	}
 	e.EndObject()
+}
+
+func (e *astEncoder) pattern(value *expr.Expr) {
+	e.node("pattern", value.Span)
+	e.Str("text")
+	e.Str(value.Text)
+	e.Str("parts")
+	e.BeginArray()
+	for i := range value.Pattern.Parts {
+		p := value.Pattern.Parts[i]
+		e.BeginObject()
+		e.Str("kind")
+		e.Str(patternPartKind(p.Kind))
+		e.Str("span")
+		e.span(p.Span)
+		if p.Kind == expr.PatternLiteral {
+			e.Str("text")
+			e.Str(p.Text)
+		}
+		if p.Kind == expr.PatternMatcher {
+			e.Str("pattern")
+			e.Str(p.Pattern)
+			if p.Text != "" {
+				e.Str("name")
+				e.Str(p.Text)
+			}
+			e.Str("index")
+			e.Int(int64(p.Index))
+		}
+		if p.Kind == expr.PatternReference {
+			if p.Text != "" {
+				e.Str("name")
+				e.Str(p.Text)
+			} else {
+				e.Str("index")
+				e.Int(int64(p.Index))
+			}
+		}
+		e.EndObject()
+	}
+	e.EndArray()
+	e.EndObject()
+}
+
+func patternPartKind(k expr.PatternPartKind) string {
+	if k == expr.PatternLiteral {
+		return "literal"
+	}
+	if k == expr.PatternMatcher {
+		return "matcher"
+	}
+	return "reference"
 }
 
 func (e *astEncoder) exprs(values []*expr.Expr) {
@@ -232,6 +298,12 @@ func exprKind(k expr.Kind) string {
 	}
 	if k == expr.Lambda {
 		return "lambda"
+	}
+	if k == expr.Placeholder {
+		return "placeholder"
+	}
+	if k == expr.Section {
+		return "section"
 	}
 	return "invalid"
 }

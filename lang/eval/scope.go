@@ -29,6 +29,9 @@ type Scope struct {
 	Parent     *Scope
 	Bindings   []binding
 	References int
+	// Section holds the positional arguments of an enclosing placeholder
+	// section call. The scope owns these values and frees them with itself.
+	Section []core.Value
 }
 
 func newScope(a mem.Allocator, parent *Scope) *Scope {
@@ -105,6 +108,11 @@ func (s *Scope) Free() {
 			mem.Free(s.Alloc, s.Bindings[i].Function)
 		}
 	}
+	for i := range s.Section {
+		freeCallables(s.Alloc, &s.Section[i])
+		s.Section[i].Free(s.Alloc)
+	}
+	slices.Free(s.Alloc, s.Section)
 	slices.Free(s.Alloc, s.Bindings)
 	parent := s.Parent
 	mem.Free(s.Alloc, s)

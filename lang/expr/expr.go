@@ -27,6 +27,8 @@ const (
 	Record
 	Application
 	Lambda
+	Placeholder
+	Section
 )
 
 type ReferenceKind int
@@ -79,6 +81,7 @@ type Expr struct {
 	Fields     []Field
 	Parameters []Parameter
 	Body       []*Expr
+	Pattern    *Pattern
 }
 
 type Result struct {
@@ -109,6 +112,7 @@ func (r *Result) Free() {
 func freeExpr(a mem.Allocator, e *Expr) {
 	if e == nil { return }
 	if e.TextOwned { mem.FreeString(a, e.Text) }
+	e.Pattern.Free(a)
 	for i := range e.Parts {
 		mem.FreeString(a, e.Parts[i].Text)
 		freeExpr(a, e.Parts[i].Expr)
@@ -208,7 +212,30 @@ func (p *parser) path() *Expr {
 	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) { p.pos++ }
 	e := p.node(Path, start)
 	e.Text = p.s.Text[start:p.pos]
+	p.classifyPathPattern(e, start)
 	return e
+}
+
+// classifyPathPattern reclassifies a path atom containing braces as a pattern
+// value. A structurally invalid group leaves the plain path and its braces
+// literal; a clean parse mixing matchers and references is a parse error.
+func (p *parser) classifyPathPattern(e *Expr, start int) {
+	if e.Text == "" || strings.IndexByte(e.Text, '{') < 0 { return }
+	parsed := ParsePatternText(p.a, e.Text, start)
+	if len(parsed.Diagnostics) != 0 || !HasGroups(parsed.Pattern) {
+		parsed.Pattern.Free(p.a)
+		slices.Free(p.a, parsed.Diagnostics)
+		return
+	}
+	slices.Free(p.a, parsed.Diagnostics)
+	if parsed.Pattern.Matchers != 0 && parsed.Pattern.References != 0 {
+		p.error(start, start+len(e.Text), "pattern mixes matchers and references")
+		parsed.Pattern.Free(p.a)
+		return
+	}
+	e.TextOwned = true
+	e.Text = CanonicalPattern(p.a, parsed.Pattern)
+	e.Pattern = parsed.Pattern
 }
 
 func isNameStart(b byte) bool { return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
@@ -515,6 +542,89 @@ func (p *parser) itemAfterSpace() *Expr {
 	return p.expression()
 }
 
+// classifySection converts a single-item application containing placeholders
+// into a placeholder section. Nested sections and placeholder-free bodies are
+// left untouched.
+func (p *parser) classifySection(app *Expr) *Expr {
+	if len(app.Items) != 1 { return app }
+	body := app.Items[0]
+	if body == nil || body.Kind == Section || !containsPlaceholder(body) { return app }
+	arity := int64(0)
+	reclassifyPlaceholders(body, &arity)
+	app.Kind = Section
+	items := app.Items
+	app.Items = nil
+	slices.Free(p.a, items)
+	app.Body = slices.Append(p.a, app.Body, body)
+	for i := int64(0); i < arity; i++ {
+		var buffer [strconv.MaxIntBase10Len]byte
+		name := "_" + strconv.FormatInt(buffer[:], i, 10)
+		app.Parameters = slices.Append(p.a, app.Parameters, Parameter{Name: name, Span: body.Span})
+	}
+	return app
+}
+
+// containsPlaceholder reports whether the expression subtree contains a
+// placeholder name outside nested sections.
+func containsPlaceholder(e *Expr) bool {
+	if e == nil { return false }
+	if e.Kind == Section { return false }
+	if e.Kind == Name && placeholderIndex(e.Text) >= 0 { return true }
+	for i := range e.Items {
+		if containsPlaceholder(e.Items[i]) { return true }
+	}
+	for i := range e.Body {
+		if containsPlaceholder(e.Body[i]) { return true }
+	}
+	for i := range e.Fields {
+		if containsPlaceholder(e.Fields[i].Value) { return true }
+	}
+	for i := range e.Parts {
+		if containsPlaceholder(e.Parts[i].Expr) { return true }
+	}
+	return false
+}
+
+// reclassifyPlaceholders converts placeholder names to placeholder atoms and
+// records the section arity.
+func reclassifyPlaceholders(e *Expr, arity *int64) {
+	if e == nil || e.Kind == Section { return }
+	if e.Kind == Name {
+		if index := placeholderIndex(e.Text); index >= 0 {
+			e.Kind = Placeholder
+			e.Int = int64(index)
+			if int64(index) >= *arity { *arity = int64(index) + 1 }
+			return
+		}
+	}
+	for i := range e.Items { reclassifyPlaceholders(e.Items[i], arity) }
+	for i := range e.Body { reclassifyPlaceholders(e.Body[i], arity) }
+	for i := range e.Fields { reclassifyPlaceholders(e.Fields[i].Value, arity) }
+	for i := range e.Parts { reclassifyPlaceholders(e.Parts[i].Expr, arity) }
+}
+
+// placeholderIndex returns the positional index of a placeholder name, or -1
+// when the text is an ordinary name. Underscore runs index from their length
+// and underscore-prefixed canonical decimal digits index from their value.
+func placeholderIndex(text string) int {
+	if len(text) == 0 || text[0] != '_' { return -1 }
+	underscores := 0
+	for underscores < len(text) && text[underscores] == '_' { underscores++ }
+	if underscores == len(text) { return underscores - 1 }
+	rest := text[underscores:]
+	if underscores != 1 { return -1 }
+	if len(rest) > 1 && rest[0] == '0' { return -1 }
+	for i := 0; i < len(rest); i++ {
+		if !isDigit(rest[i]) { return -1 }
+	}
+	index := 0
+	for i := 0; i < len(rest); i++ {
+		if index > 1<<30 { return -1 }
+		index = index*10 + int(rest[i]-'0')
+	}
+	return index
+}
+
 func (p *parser) paren() *Expr {
 	start := p.pos; p.pos++; p.skipSpace()
 	if p.pos == len(p.s.Text) { p.error(start, p.pos, "unclosed application"); return nil }
@@ -525,7 +635,10 @@ func (p *parser) paren() *Expr {
 	app := p.node(Application, start); app.Items = slices.Append(p.a, app.Items, first)
 	for p.pos < len(p.s.Text) {
 		space := p.skipSpace()
-		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' { p.pos++; app.Span.End = p.pos; return app }
+		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' {
+			p.pos++; app.Span.End = p.pos
+			return p.classifySection(app)
+		}
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '|' {
 			p.pos++
 			if p.skipSpace() == 0 { p.error(p.pos, p.pos, "pipe needs right expression"); return app }
@@ -577,7 +690,8 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
 	if original.Text != "" { copy.Text, copy.TextOwned = sourceText(a, original.Text), true }
-	copy.Parts, copy.Reference, copy.Items, copy.Fields, copy.Parameters, copy.Body = nil, nil, nil, nil, nil, nil
+	copy.Parts, copy.Reference, copy.Items, copy.Fields, copy.Parameters, copy.Body, copy.Pattern = nil, nil, nil, nil, nil, nil, nil
+	if original.Pattern != nil { copy.Pattern = original.Pattern.Clone(a) }
 	for i := range original.Parts {
 		part := original.Parts[i]
 		if part.Expr != nil { part.Expr = cloneExpr(a, part.Expr) } else { part.Text = sourceText(a, part.Text) }
@@ -626,6 +740,7 @@ func (p *parser) quoted() *Expr {
 		b := p.s.Text[p.pos]
 		if b == '"' {
 			p.addTextPart(e, &text, partStart, p.pos)
+			p.classifyStringPattern(e, start, p.pos)
 			p.pos++; e.Span.End = p.pos; text.Free(); return e
 		}
 		if b == '\\' {
@@ -675,6 +790,60 @@ func (p *parser) addTextPart(e *Expr, text *strings.Builder, start int, end int)
 	text.Reset()
 }
 
+// classifyStringPattern reclassifies an interpolation-free quoted string
+// whose raw text contains pattern groups as a pattern value. A structurally
+// invalid group leaves the plain string; a clean parse mixing matchers and
+// references is a parse error.
+func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
+	// Parse the string's decoded value, not its source spelling: quoted-string
+	// escapes (for example, `\n`) have already been interpreted into Parts.
+	var decoded strings.Builder
+	decoded = strings.NewBuilder(p.a)
+	for i := range e.Parts {
+		if e.Parts[i].Expr != nil { decoded.Free(); return }
+		decoded.WriteString(e.Parts[i].Text)
+	}
+	text := sourceText(p.a, decoded.String())
+	decoded.Free()
+	defer mem.FreeString(p.a, text)
+	if text == "" || strings.IndexByte(text, '{') < 0 { return }
+	// Keep pattern-part spans anchored to the source even when an escape before
+	// a group makes source and decoded-string offsets differ.
+	var sourceStarts, sourceEnds []int
+	for pos := start + 1; pos < end; {
+		from := pos
+		if p.s.Text[pos] == '\\' && pos+1 < end { pos += 2 } else { pos++ }
+		sourceStarts = slices.Append(p.a, sourceStarts, from)
+		sourceEnds = slices.Append(p.a, sourceEnds, pos)
+	}
+	parsed := ParsePatternText(p.a, text, 0)
+	for i := range parsed.Pattern.Parts {
+		part := &parsed.Pattern.Parts[i]
+		if part.Span.Start >= 0 && part.Span.End > part.Span.Start && part.Span.End <= len(sourceStarts) {
+			part.Span = source.Span{Start: sourceStarts[part.Span.Start], End: sourceEnds[part.Span.End-1]}
+		}
+	}
+	slices.Free(p.a, sourceStarts)
+	slices.Free(p.a, sourceEnds)
+	if len(parsed.Diagnostics) != 0 || !HasGroups(parsed.Pattern) {
+		parsed.Pattern.Free(p.a)
+		slices.Free(p.a, parsed.Diagnostics)
+		return
+	}
+	slices.Free(p.a, parsed.Diagnostics)
+	if parsed.Pattern.Matchers != 0 && parsed.Pattern.References != 0 {
+		p.error(start, end, "pattern mixes matchers and references")
+		parsed.Pattern.Free(p.a)
+		return
+	}
+	for i := range e.Parts { mem.FreeString(p.a, e.Parts[i].Text) }
+	slices.Free(p.a, e.Parts)
+	e.Parts = nil
+	e.TextOwned = true
+	e.Text = CanonicalPattern(p.a, parsed.Pattern)
+	e.Pattern = parsed.Pattern
+}
+
 func sourceText(a mem.Allocator, text string) string {
 	if len(text) == 0 { return "" }
 	b := mem.AllocSlice[byte](a, len(text), len(text)); copy(b, []byte(text)); return string(b)
@@ -697,6 +866,13 @@ func write(b *strings.Builder, e *Expr) {
 	if e.Kind == Float { var buf [strconv.MaxFloat64Len]byte; b.WriteString(strconv.FormatFloat(buf[:], e.Float, 'g', -1, 64)); return }
 	if e.Kind == Symbol { b.WriteByte(':'); b.WriteString(e.Text); return }
 	if e.Kind == Name { b.WriteString(e.Text); if e.Rest { b.WriteString("...") }; return }
+	if e.Kind == Placeholder {
+		var buffer [strconv.MaxIntBase10Len]byte
+		b.WriteByte('_')
+		b.WriteString(strconv.FormatInt(buffer[:], e.Int, 10))
+		return
+	}
+	if e.Kind == Section { b.WriteByte('('); write(b, e.Body[0]); b.WriteByte(')'); return }
 	if e.Kind == Path { b.WriteString(e.Text); return }
 	if e.Kind == Selector { b.WriteString(e.Text); return }
 	if e.Kind == Reference { writeReference(b, e); return }
@@ -722,6 +898,18 @@ func writeReference(b *strings.Builder, e *Expr) {
 
 func writeString(b *strings.Builder, e *Expr) {
 	b.WriteByte('"')
+	if e.Pattern != nil {
+		for j := 0; j < len(e.Text); j++ {
+			c := e.Text[j]
+			if c == '"' || c == '\\' { b.WriteByte('\\'); b.WriteByte(c)
+			} else if c == '\n' { b.WriteString("\\n")
+			} else if c == '\r' { b.WriteString("\\r")
+			} else if c == '\t' { b.WriteString("\\t")
+			} else { b.WriteByte(c) }
+		}
+		b.WriteByte('"')
+		return
+	}
 	for i := range e.Parts {
 		part := e.Parts[i]
 		if part.Expr != nil { if part.Brace { b.WriteString("{(") } else { b.WriteString("@(") }; writeEmbedded(b, part.Expr); b.WriteByte(')'); if part.Brace { b.WriteByte('}') }; continue }

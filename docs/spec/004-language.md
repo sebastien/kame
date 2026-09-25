@@ -40,6 +40,10 @@ Examples are `build`, `_value`, `sha256-file`, and `exists?`. `42`, `42x`,
 `-name`, and `name?more` are not names. A digit-leading token is parsed as a
 number only when the complete token is a valid number; otherwise it is invalid.
 
+Runs of underscores and underscore-prefixed digit names such as `_`, `__`, and
+`_0` remain ordinary names everywhere except inside placeholder sections, where
+the grammar of `014-patterns.md` claims them.
+
 ### Paths
 
 A path is explicit when it begins with `/`, `./`, or `../`. No other string is
@@ -91,6 +95,7 @@ project.name
 [name: "app" path: ./src]
 (operation argument...)
 ([argument...] body...)
+((body _ _1))
 ```
 
 List items and application arguments are separated by whitespace, not commas.
@@ -175,6 +180,22 @@ The evaluator recognizes these application heads specially:
   in `005-evaluation.md`.
 
 There is no language-level `if` in the initial implementation.
+
+### Placeholder Sections
+
+A parenthesized application with exactly one item containing at least one
+placeholder is a placeholder section equivalent to a lambda over unnamed
+parameters. `((f _ __ ___))` is `([a b c] (f a b c))`. Placeholders are
+positional argument references, not names. Grammar, semantics, and formatting
+are specified in `014-patterns.md`.
+
+### Pattern Literals
+
+A bare path atom or a quoted string without interpolation whose text contains
+pattern groups is a pattern value. Groups with glob content (`{*}`, `{**}`,
+`{name:*}`, `{name:**}`) are matchers; `{name}` and `{_N}` are expansion
+references. Pattern values, matching, and the pattern form of `replace` are
+specified in `014-patterns.md`. Rule target templates are unchanged.
 
 ## String Templates
 
@@ -263,6 +284,9 @@ matching. Reusing one capture name requires every occurrence to match the same
 text.
 
 Regular-expression groups and capture processors are deferred.
+
+Expression-language pattern literals use a related grammar with `{name}` as an
+expansion reference rather than a capture; see `014-patterns.md`.
 
 ## Definitions
 
@@ -392,6 +416,10 @@ produce an equivalent AST excluding spans.
   expansions are parsed by their respective packages.
 - `def` distinguishes value and function bindings by the number of operands
   after the bound name.
+- Placeholder sections parse, format idempotently, and evaluate as lambdas;
+  `_` outside a section remains a name.
+- Pattern literals classify per `014-patterns.md`; mixed matcher and reference
+  groups are rejected.
 - Malformed recipe interpolation remains literal and emits `PARSE_ERR`.
 - Selectors retain their exact source spans.
 - Recipe lines format with tabs and preserve additional shell indentation.

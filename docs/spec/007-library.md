@@ -82,14 +82,25 @@ The initial text operations are:
 | `join` | Join a list of scalar strings with a separator |
 | `split` | Split text by a literal separator |
 | `strip` | Trim Unicode whitespace |
-| `replace` | Replace all literal occurrences |
 | `includes?` | Literal substring membership |
 | `starts?` | Literal prefix test |
 | `ends?` | Literal suffix test |
+| `replace` | Replace literal occurrences, or match and expand pattern arguments per `014-patterns.md` |
 | `uppercase` | Unicode uppercase conversion supported by Solod |
 | `lowercase` | Unicode lowercase conversion supported by Solod |
 
 Regular-expression operations are deferred.
+
+### Pattern Replace
+
+`replace` accepts two or three arguments. Two plain strings replace literal
+occurrences and behave exactly as before. A match pattern as the first argument
+selects anchored matching; the second argument is the constant or expansion
+replacement. Two pattern arguments return a callable section of arity one, so
+`map` and pipes apply it per item. A string subject produces the expanded
+string or `:nil` on no match; a list subject maps in order and retains `:nil`
+entries. Invalid pattern combinations and missing capture references are
+`PAT_INVALID`. Full semantics are specified in `014-patterns.md`.
 
 ## Path Operations
 
@@ -185,4 +196,6 @@ Reading the entire environment at once is not supported initially.
 - Denied read, write, run, or environment access performs no host action.
 - Deferred `out`, `err`, `yield`, and `write` effects commit once after rerender.
 - `shell` captures status and separate byte-bounded stdout/stderr.
+- Pattern `replace` matches anchored, expands references, returns `:nil`
+  without a match, and accepts a section through `map` and pipes.
 - Operation tests using `mem.Tracker` leak no returned container or string.

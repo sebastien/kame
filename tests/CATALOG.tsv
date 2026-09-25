@@ -47,3 +47,4 @@ tests/T012-01-streams-events.sh	012	streams	Terminal event uniqueness and proces
 tests/T013-01-meta-catalog.sh	013	meta	Catalog and test-name consistency
 tests/T013-02-meta-hygiene.sh	013	meta	Fixtures are never modified and scratch dirs stay in the test path
 tests/T013-03-meta-binary.sh	013	meta	Binary contract, no-op rebuilds, cross-copy determinism
+tests/T014-01-patterns-sections.sh	014	patterns	Placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs

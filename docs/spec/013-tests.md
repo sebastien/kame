@@ -41,7 +41,7 @@ tests/
 - `SSS` is the governing spec number and `NN` a two-digit sequence per spec.
 - `category` maps one-to-one to the spec: `host`=003, `lang`=004, `eval`=005,
   `runtime`=006, `lib`=007, `cache`=008, `cli`=009, `diag`=011, `streams`=012,
-  `meta`=013.
+  `meta`=013, `patterns`=014.
 - `lib-*.sh` files are support libraries and are never executed as tests.
 - Nothing under `tests/data/` is executed as a test.
 - Every test script has one `CATALOG.tsv` row; `T013-01` enforces both
@@ -116,13 +116,17 @@ Current coverage:
 | 009 CLI | `T009-01` … `T009-09`, `T009-11`, `T009-12` | help/version, discovery, targets, JSON, plan, cat, graph, dry-run, run parity, usage, case matrix |
 | 011 diagnostics | `T011-01`, `T011-02` | layout, notes, human/JSON equivalence, code and message integrity |
 | 012 streams | `T012-01` | terminal event uniqueness, process event balance |
+| 014 patterns | `T014-01` | placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs |
 | 013 meta | `T013-01` … `T013-03` | catalog consistency, fixture hygiene, binary contract, determinism |
 
 Planned but not yet implemented (tracked so no acceptance bullet is silently
 dropped): concurrent `-j` output-interleaving assertions, signal exit statuses
 beyond the first signal, `span --expand` dynamic definition evaluation, and the
 remaining cache fingerprint inputs (shell, dependency kind, log-limit
-truncation, concurrent writers).
+truncation, concurrent writers). Spec 014 coverage is in place: `T014-01`
+placeholder sections and pattern replace, plus `expr/section-*.lm`,
+`expr/pattern-*.lm`, and `invalid/expr-pattern-mixed-groups.lm` fixtures in the
+T004 parse/format suites.
 
 ## Defects found and fixed by this suite
 

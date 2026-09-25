@@ -23,10 +23,12 @@ The runtime value model is a closed tagged union with these initial kinds:
 - Record of string keys and values.
 - Callable operation or lexical function.
 - Resource reference.
+- Pattern (match or expansion pattern text; `014-patterns.md`).
 
 Stored and serialized values exclude callables. Values retained outside their
 creating arena must be cloned into the destination allocator. Containers own
-their elements. Values are immutable after publication.
+their elements. Values are immutable after publication. Patterns serialize as
+their canonical text.
 
 Sources, batches, and stream controls are not values. `012-streams.md` defines
 their explicit resumable protocol and materializes them into these values before

@@ -49,6 +49,7 @@ New specifications in this directory override every legacy source.
 | `011-diagnostics.md` | Diagnostic code registry | 001 |
 | `012-streams.md` | Source protocol, batches, materialization | 002 |
 | `013-tests.md` | End-to-end test suite and its contracts | all |
+| `014-patterns.md` | Placeholder sections and pattern values | 004, 005, 007 |
 
 Every implementation specification also depends on the code registry in 011.
 

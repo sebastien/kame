@@ -40,7 +40,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 			mem.Free(p.Alloc, context)
 			return renderResult{Diagnostic: result.Diagnostic}
 		}
-		if result.Value.Kind != core.String {
+		if result.Value.Kind != core.String && result.Value.Kind != core.Pattern {
 			result.Value.Free(p.Alloc)
 			if len(spans) != 0 {
 				slices.Free(p.Alloc, spans)

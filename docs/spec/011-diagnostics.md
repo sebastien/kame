@@ -17,13 +17,14 @@ must not change after release.
 
 | Code | Default severity | Meaning |
 | --- | --- | --- |
-| `PARSE_ERR` | error | Invalid syntax; recovery may lower it to warning |
+| `PARSE_ERR` | error | Invalid syntax; recovery may lower it to warning. Malformed pattern groups instead leave the token plain |
 | `REF_MISSING` | error | Unknown reference or missing record component |
 | `SEL_NO_CONTEXT` | error | Selector used without a matching context |
 | `SEL_INDEX_INVALID` | error | Invalid index or slice |
 | `OP_UNKNOWN` | error | Unknown operation |
 | `EXPR_INVALID` | error | Invalid expression value, type, or arity |
 | `DEF_INVALID` | error | Invalid definition or binding form |
+| `PAT_INVALID` | error | Invalid pattern combination or missing pattern capture reference |
 | `CAP_DENIED` | error | Capability denied |
 | `PHASE_INVALID` | error | Operation is not valid in the current phase |
 | `TGT_NO_RULE` | error | No rule or source for target |
@@ -57,6 +58,9 @@ must not change after release.
   no existing file uses `TGT_NO_RULE`.
 - Malformed cache data is a miss and `CACHE_UNUSABLE` warning, never a fatal error.
 - Unsupported service execution uses `FEATURE_UNSUP`.
+- Malformed pattern group syntax is `PARSE_ERR`; pattern misuse detected at
+  evaluation, such as a missing capture reference or an invalid argument
+  combination, uses `PAT_INVALID`.
 - OOM formatting must not allocate.
 
 ## Acceptance Tests

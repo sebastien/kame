@@ -170,7 +170,7 @@ func annotateTargetDiagnostic(d *diagnostic.Diagnostic, target string) {
 }
 
 func writeValue(out io.Writer, value core.Value) {
-	if value.Kind == core.String {
+	if value.Kind == core.String || value.Kind == core.Pattern {
 		io.WriteString(out, value.Text)
 		return
 	}

@@ -1452,6 +1452,28 @@ func TestMaterializeReevaluatesComputedInputsWithoutDuplication(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestPatternReplaceComputesObjectInputs(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-runtime-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	if os.Mkdir(dir+"/src", 0o755) != nil { t.Fatal("source directory failed"); return }
+	if os.WriteFile(dir+"/src/a.c", []byte("a"), 0o644) != nil || os.WriteFile(dir+"/src/b.c", []byte("b"), 0o644) != nil { t.Fatal("source write failed"); return }
+	parsed := script.Parse(a, "test.lmk", "sources = [\"./src/a.c\" \"./src/b.c\"]\nobjects = (replace ./src/{name:*}.c ./build/{name}.o sources)\n./build/marker : @(objects)\n\tcat @<* > @>\n./build/{name}.o : ./src/{name}.c\n\tcp @< @>\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
+	result := compiled.Program.Materialize("./build/marker")
+	if result.Diagnostic.Code != "" { t.Errorf("pattern replace build failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/build/marker")
+	if readErr != nil || string(data) != "ab" { t.Error("pattern replace did not compute object inputs") }
+	mem.FreeSlice(a, data)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestPlanReportsDefinitionCycleInInput(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "test.lmk", "A = \"@(B)\"\nB = \"@(A)\"\n./output : @(A)\n\ttrue\n")

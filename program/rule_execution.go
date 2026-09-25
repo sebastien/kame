@@ -229,7 +229,7 @@ func appendInputValue(a mem.Allocator, inputs *[]string, resourceInputs *[]PlanI
 	if value.Kind == core.Nil {
 		return true
 	}
-	if value.Kind == core.String {
+	if value.Kind == core.String || value.Kind == core.Pattern {
 		text := cloneText(a, value.Text)
 		*inputs = slices.Append(a, *inputs, text)
 		*resourceInputs = slices.Append(a, *resourceInputs, PlanInput{Display: cloneText(a, text), Key: core.NewResourceKey(a, core.ResourceTarget, text)})

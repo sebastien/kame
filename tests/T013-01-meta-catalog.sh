@@ -25,7 +25,7 @@ while IFS=$'\t' read -r file spec category covers; do
 	if [ -z "$file" ] || [ "${file#\#}" != "$file" ]; then
 		continue
 	fi
-	if printf '%s' "$file" | grep -Eq '^tests/T[0-9]{3}-[0-9]{2}-(host|lang|eval|runtime|lib|cache|cli|diag|streams|meta)-[a-z0-9-]+\.sh$'; then
+	if printf '%s' "$file" | grep -Eq '^tests/T[0-9]{3}-[0-9]{2}-(host|lang|eval|runtime|lib|cache|cli|diag|streams|meta|patterns)-[a-z0-9-]+\.sh$'; then
 		test-ok "name $(basename "$file")"
 	else
 		test-fail "invalid catalog name: $file"

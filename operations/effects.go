@@ -19,7 +19,7 @@ func opYield(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func effect(c *eval.Context, kind eval.EffectKind, v []core.Value) eval.Result {
 	for i := range v {
-		if v[i].Kind == core.String {
+		if v[i].Kind == core.String || v[i].Kind == core.Pattern {
 			c.Emit(kind, []byte(v[i].Text))
 		} else if v[i].Kind == core.Bytes {
 			c.Emit(kind, v[i].Bytes)

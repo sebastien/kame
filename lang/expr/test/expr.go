@@ -108,3 +108,86 @@ func TestPathAndPipeChain(t *testing.T) {
 	defer chain.Free()
 	if chain.Expr.Kind != expr.Application || len(chain.Expr.Items) != 3 || chain.Expr.Items[0].Text != "second" || chain.Expr.Items[1].Text != "b" || chain.Expr.Items[2].Kind != expr.Application { t.Error("pipe chain did not normalize") }
 }
+
+func TestPlaceholderSectionParsesAndFormats(t *testing.T) {
+	r := parse(t, "((f _ __ ___))")
+	defer r.Free()
+	if r.Expr == nil || r.Expr.Kind != expr.Section || len(r.Expr.Parameters) != 3 || len(r.Expr.Body) != 1 { t.Error("placeholder section did not parse"); return }
+	body := r.Expr.Body[0]
+	if body.Kind != expr.Application || len(body.Items) != 4 || body.Items[1].Kind != expr.Placeholder || body.Items[1].Int != 0 || body.Items[3].Int != 2 { t.Error("section placeholders did not classify") }
+	formatted := expr.Format(t.Allocator(), r.Expr)
+	if formatted != "((f _0 _1 _2))" { t.Errorf("Format() = %s", formatted) }
+	copy := parse(t, formatted)
+	if copy.Expr == nil || copy.Expr.Kind != expr.Section || len(copy.Expr.Parameters) != 3 { t.Error("formatted section did not re-parse") }
+	copy.Free()
+	mem.FreeString(t.Allocator(), formatted)
+}
+
+func TestPlaceholderRecognitionStaysContextual(t *testing.T) {
+	section := parse(t, "((f _1))")
+	defer section.Free()
+	if section.Expr == nil || section.Expr.Kind != expr.Section || len(section.Expr.Parameters) != 2 { t.Error("digit placeholder did not classify"); return }
+	if section.Expr.Body[0].Items[1].Int != 1 { t.Error("placeholder index was wrong") }
+	repeat := parse(t, "((cons _ _))")
+	defer repeat.Free()
+	if repeat.Expr == nil || repeat.Expr.Kind != expr.Section || len(repeat.Expr.Parameters) != 1 { t.Error("repeated placeholder did not reuse one argument") }
+	names := parse(t, "(f _)")
+	defer names.Free()
+	if names.Expr == nil || names.Expr.Kind != expr.Application || len(names.Expr.Items) != 2 || names.Expr.Items[1].Kind != expr.Name { t.Error("placeholder outside a section stayed a name") }
+	longer := parse(t, "(_0x)")
+	defer longer.Free()
+	if longer.Expr == nil || longer.Expr.Kind != expr.Application || longer.Expr.Items[0].Kind != expr.Name { t.Error("underscore-prefixed name became a placeholder") }
+	call := parse(t, "((f))")
+	defer call.Free()
+	if call.Expr == nil || call.Expr.Kind != expr.Application { t.Error("placeholder-free nested call became a section") }
+}
+
+func TestPatternPathsClassify(t *testing.T) {
+	r := parse(t, "./{**}/{*}.c")
+	defer r.Free()
+	if r.Expr == nil || r.Expr.Kind != expr.Path || r.Expr.Pattern == nil { t.Error("match pattern path did not classify"); return }
+	if r.Expr.Pattern.Matchers != 2 || r.Expr.Pattern.References != 0 || r.Expr.Text != "./{**}/{*}.c" { t.Error("match pattern groups were wrong") }
+	expand := parse(t, "./build/{_0}/{_1}.c")
+	defer expand.Free()
+	if expand.Expr == nil || expand.Expr.Pattern == nil || expand.Expr.Pattern.References != 2 || expand.Expr.Pattern.Matchers != 0 { t.Error("expansion pattern path did not classify") }
+	named := parse(t, "./build/{name}.o")
+	defer named.Free()
+	if named.Expr == nil || named.Expr.Pattern == nil || named.Expr.Pattern.References != 1 { t.Error("named reference did not classify") }
+	plain := parse(t, "./src/main.c")
+	defer plain.Free()
+	if plain.Expr == nil || plain.Expr.Pattern != nil { t.Error("plain path became a pattern") }
+	escaped := parse(t, "./a\\{b}.c")
+	defer escaped.Free()
+	if escaped.Expr == nil || escaped.Expr.Pattern != nil || escaped.Expr.Text != "./a\\{b}.c" { t.Error("escaped brace path became a pattern") }
+}
+
+func TestPatternStringsClassifyAndFormat(t *testing.T) {
+	r := parse(t, "\"./{**}/{*}.c\"")
+	defer r.Free()
+	if r.Expr == nil || r.Expr.Kind != expr.String || r.Expr.Pattern == nil || r.Expr.Pattern.Matchers != 2 { t.Error("pattern string did not classify"); return }
+	if len(r.Expr.Parts) != 0 { t.Error("pattern string kept string parts") }
+	formatted := expr.Format(t.Allocator(), r.Expr)
+	if formatted != "\"./{**}/{*}.c\"" { t.Errorf("Format() = %s", formatted) }
+	mem.FreeString(t.Allocator(), formatted)
+	escaped := parse(t, "\"line\\n{*}\"")
+	defer escaped.Free()
+	if escaped.Expr == nil || escaped.Expr.Pattern == nil || escaped.Expr.Text != "line\n{*}" { t.Error("quoted-string escapes were not decoded before pattern parsing") }
+	formatted = expr.Format(t.Allocator(), escaped.Expr)
+	if formatted != "\"line\\n{*}\"" { t.Errorf("escaped pattern Format() = %s", formatted) }
+	mem.FreeString(t.Allocator(), formatted)
+	interp := parse(t, "\"{(count files)}/*.c\"")
+	defer interp.Free()
+	if interp.Expr == nil || interp.Expr.Pattern != nil { t.Error("interpolated string became a pattern") }
+}
+
+func TestMixedPatternGroupsAreRejected(t *testing.T) {
+	r := expr.Parse(t.Allocator(), "test.lm", "./{**}/{name}.c")
+	defer r.Free()
+	if len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "PARSE_ERR" { t.Error("mixed matcher and reference groups were accepted") }
+	plain := parse(t, "./{*.c}")
+	defer plain.Free()
+	if plain.Expr == nil || plain.Expr.Pattern != nil || plain.Expr.Text != "./{*.c}" { t.Error("structurally invalid matcher did not stay a plain path") }
+	literal := parse(t, "\"literal \\{ brace\"")
+	defer literal.Free()
+	if literal.Expr == nil || literal.Expr.Pattern != nil { t.Error("escaped-brace string became a pattern") }
+}

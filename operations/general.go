@@ -52,6 +52,12 @@ func stringValue(a mem.Allocator, v core.Value, quoted bool) (string, bool) {
 		} else {
 			b.WriteString(v.Text)
 		}
+	} else if v.Kind == core.Pattern {
+		if quoted {
+			quote(&b, v.Text)
+		} else {
+			b.WriteString(v.Text)
+		}
 	} else if v.Kind == core.List {
 		b.WriteByte('[')
 		for i := range v.List {

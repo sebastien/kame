@@ -19,6 +19,7 @@ const (
 	Record
 	Callable
 	Resource
+	Pattern
 )
 
 type RecordField struct {
@@ -76,6 +77,16 @@ func NewResource(a mem.Allocator, kind ResourceKind, name string) Value {
 	return Value{Kind: Resource, Resource: NewResourceKey(a, kind, name)}
 }
 
+// NewPattern returns a pattern value carrying its canonical text.
+func NewPattern(a mem.Allocator, text string) Value {
+	if len(text) == 0 {
+		return Value{Kind: Pattern}
+	}
+	b := mem.AllocSlice[byte](a, len(text), len(text))
+	copy(b, []byte(text))
+	return Value{Kind: Pattern, Text: string(b)}
+}
+
 func (v *Value) Clone(a mem.Allocator) Value {
 	copy := *v
 	switch v.Kind {
@@ -89,6 +100,8 @@ func (v *Value) Clone(a mem.Allocator) Value {
 		copy = NewRecord(a, v.Record)
 	case Resource:
 		copy = Value{Kind: Resource, Resource: v.Resource.Clone(a)}
+	case Pattern:
+		copy = NewPattern(a, v.Text)
 	}
 	return copy
 }
@@ -133,6 +146,8 @@ func (v *Value) Free(a mem.Allocator) {
 		slices.Free(a, v.Record)
 	case Resource:
 		v.Resource.Free(a)
+	case Pattern:
+		mem.FreeString(a, v.Text)
 	}
 	*v = Value{}
 }

@@ -6,6 +6,7 @@ import (
 	"littlemake/lang/eval"
 	"littlemake/lang/expr"
 	"littlemake/lang/script"
+	"littlemake/operations"
 	"littlemake/host"
 	"solod.dev/so/mem"
 	"solod.dev/so/testing"
@@ -620,3 +621,88 @@ func TestOperationRegistersAndReadsDynamicFileDependency(t *testing.T) {
 }
 
 func freeFileState(a mem.Allocator, value any) { mem.Free(a, value.(*fileState)) }
+
+func TestPlaceholderSectionsEvaluateAsLambdas(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Error("library registration failed") }
+	parsed := script.Parse(a, "test", "(helper x) = (nop x)")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(((([x] x) _0)) 7)")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 7 { t.Error("identity section failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(((([a b] (list a b)) _ __)) \"one\" \"two\")")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].Text != "two" { t.Error("multi-placeholder section failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(((list _ _)) \"same\")")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 { t.Error("repeated placeholder did not reuse its argument") }
+	result.Free(a)
+	result = evaluate(t, program, "(((([x] x) _0)))")
+	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("section accepted too few arguments") }
+	result.Free(a)
+	result = evaluate(t, program, "(((([x] x) _0)) 1 2)")
+	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("section accepted too many arguments") }
+	result.Free(a)
+	result = evaluate(t, program, "_0")
+	if result.Diagnostic.Code != "REF_MISSING" { t.Error("placeholder outside a section stayed a name") }
+	result.Free(a)
+	result = evaluate(t, program, "(((helper _0)) \"bound\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "bound" { t.Error("section over a defined function failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(((list (nth _0 0) _1)) [\"x\"] \"y\")")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "x" || result.Value.List[1].Text != "y" { t.Error("section placeholders did not descend into nested calls") }
+	result.Free(a)
+	result = evaluate(t, program, "(map ((nth _0 0)) (list [\"a\" \"b\"] [\"c\"]))")
+	if result.Diagnostic.Code != "" || result.Value.List[0].Text != "a" || result.Value.List[1].Text != "c" { t.Error("nested section callback through map failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(((nop _0)) 7)")
+	if result.Diagnostic.Code != "" || result.Value.Int != 7 { t.Error("underscore identity section failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(((([x] x) _0)) 7)")
+	if result.Diagnostic.Code != "" || result.Value.Int != 7 { t.Error("digit identity section failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(([x] x) 7)")
+	if result.Diagnostic.Code != "" || result.Value.Int != 7 { t.Error("explicit lambda failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(apply ((list _0 _1)) [\"a\" \"b\"])")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].Text != "b" { t.Error("section through apply failed") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestPatternValuesMaterializeAsText(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "./{**}/{*}.c")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Pattern || result.Value.Text != "./{**}/{*}.c" { t.Error("path pattern did not materialize") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestPatternStringValuesMaterializeAsText(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "\"./{name:*}.c\"")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Pattern { t.Error("string pattern did not materialize") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestPlainPathValuesMaterializeAsText(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "./src/main.c")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String { t.Error("plain path stopped materializing as a string") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}

@@ -6,6 +6,16 @@ immutable inputs: tests copy them into their scratch directory with
 
 Language fixtures live in `../lang/` and are shared with the parser tests.
 
+## Language fixtures (`lang/`)
+
+Fixtures under `lang/expr/`, `lang/template/`, `lang/rule/`, and `lang/script/`
+feed the CLI parse matrix (T004-01), format canonicalization (T004-06), and
+format/AST stability (T004-08) suites. Fixtures under `lang/invalid/` plus
+`invalid/MANIFEST.tsv` feed the invalid-fixture suite (T004-02), which asserts
+each fixture's first diagnostic code and severity. Spec 014 syntax is covered
+by the `expr/section-*.lm`, `expr/pattern-*.lm`, `expr/placeholder-*.lm`, and
+`invalid/expr-pattern-mixed-groups.lm` fixtures.
+
 ## CLI fixtures (`cli/`)
 
 | Fixture | Used by | Contents |

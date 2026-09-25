@@ -54,6 +54,9 @@ func stringify(a mem.Allocator, value core.Value) (string, bool) {
 		var buffer [strconv.MaxFloat64Len]byte
 		return owned(a, strconv.FormatFloat(buffer[:], value.Float, 'g', -1, 64)), true
 	}
+	if value.Kind == core.Pattern {
+		return owned(a, value.Text), true
+	}
 	if value.Kind == core.List {
 		builder := strings.NewBuilder(a)
 		for i := range value.List {

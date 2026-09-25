@@ -113,8 +113,16 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 	case expr.Float:
 		return Result{Value: core.Value{Kind: core.Float, Float: expression.Float}}
 	case expr.String:
+		if expression.Pattern != nil {
+			return Result{Value: core.NewPattern(context.Run, expression.Text)}
+		}
 		return p.stringValue(scope, expression.Parts, context)
-	case expr.Symbol, expr.Path:
+	case expr.Symbol:
+		return Result{Value: core.NewString(context.Run, expression.Text)}
+	case expr.Path:
+		if expression.Pattern != nil {
+			return Result{Value: core.NewPattern(context.Run, expression.Text)}
+		}
 		return Result{Value: core.NewString(context.Run, expression.Text)}
 	case expr.Name:
 		return name(scope, expression.Text, expression.Span, context)
@@ -131,10 +139,33 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 		function.Parameters, function.Body, function.Scope, function.Temporary = expression.Parameters, expression.Body, scope, true
 		scope.Retain()
 		return Result{Value: core.Value{Kind: core.Callable, Callable: function}}
+	case expr.Section:
+		function := mem.Alloc[Function](context.Run)
+		function.Parameters, function.Expression, function.Scope, function.Temporary, function.Section = expression.Parameters, expression.Body[0], scope, true, true
+		scope.Retain()
+		return Result{Value: core.Value{Kind: core.Callable, Callable: function}}
+	case expr.Placeholder:
+		return placeholder(scope, expression, context)
 	case expr.Selector:
 		return p.selector(expression.Text, expression.Span, context)
 	}
 	return failure(context.Run, "EXPR_INVALID", expression.Span, "invalid expression")
+}
+
+// placeholder reads the indexed argument from the nearest enclosing section
+// scope. Placeholders never resolve through name lookup.
+func placeholder(scope *Scope, expression *expr.Expr, context *Context) Result {
+	for current := scope; current != nil; current = current.Parent {
+		if current.Section == nil {
+			continue
+		}
+		index := int(expression.Int)
+		if index >= len(current.Section) {
+			break
+		}
+		return Result{Value: current.Section[index].Clone(context.Run)}
+	}
+	return failure(context.Run, "EXPR_INVALID", expression.Span, "placeholder outside section")
 }
 
 func name(scope *Scope, name string, span source.Span, context *Context) Result {
@@ -143,6 +174,17 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		return failure(context.Run, "REF_MISSING", span, "unknown reference: "+name)
 	}
 	if b.Kind == bindingValue {
+		if b.Value.Kind == core.Callable {
+			// Binding-owned callables are returned as borrowed wrappers so
+			// call sites release the wrapper without freeing the binding's
+			// function or scope.
+			source := b.Value.Callable.(*Function)
+			wrapper := mem.Alloc[Function](context.Run)
+			*wrapper = *source
+			wrapper.Temporary = false
+			wrapper.Borrowed = true
+			return Result{Value: core.Value{Kind: core.Callable, Callable: wrapper}}
+		}
 		return Result{Value: b.Value.Clone(context.Run)}
 	}
 	if b.Kind == bindingFunction {

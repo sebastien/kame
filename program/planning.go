@@ -17,11 +17,11 @@ func (p *Program) Plan(target string) PlanResult {
 	}
 	if selected.Rule == nil {
 		if p.Eval.Definition(target) != nil {
-			return PlanResult{Plan: Plan{Target: target, Key: core.NewResourceKey(p.Alloc, core.ResourceDefinition, target), Freshness: Unknown}}
+			return PlanResult{Plan: Plan{Target: cloneText(p.Alloc, target), Key: core.NewResourceKey(p.Alloc, core.ResourceDefinition, target), Freshness: Unknown}}
 		}
 		return PlanResult{Diagnostic: failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+target)}
 	}
-	plan := Plan{Target: target, Rule: selected.Rule, RuleSpan: diagnostic.Span{Start: selected.Rule.Span.Start, End: selected.Rule.Span.End}, Body: selected.Rule.Body, Captures: cloneCaptures(p.Alloc, selected.Captures), Freshness: Unknown}
+	plan := Plan{Target: cloneText(p.Alloc, target), Rule: selected.Rule, RuleSpan: diagnostic.Span{Start: selected.Rule.Span.Start, End: selected.Rule.Span.End}, Body: selected.Rule.Body, Captures: cloneCaptures(p.Alloc, selected.Captures), Freshness: Unknown}
 	defer freeCaptures(p.Alloc, selected.Captures)
 	if selected.Rule.Kind == rule.FileRule {
 		canonical := p.canonicalTarget(target, true)
@@ -124,7 +124,7 @@ func appendPlanInputValue(a mem.Allocator, plan *Plan, value core.Value) bool {
 	if value.Kind == core.Nil {
 		return true
 	}
-	if value.Kind == core.String {
+	if value.Kind == core.String || value.Kind == core.Pattern {
 		text := cloneText(a, value.Text)
 		plan.Inputs = slices.Append(a, plan.Inputs, text)
 		plan.ResourceInputs = slices.Append(a, plan.ResourceInputs, PlanInput{Display: cloneText(a, text), Key: core.NewResourceKey(a, core.ResourceTarget, text)})

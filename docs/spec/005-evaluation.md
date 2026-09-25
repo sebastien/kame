@@ -59,8 +59,13 @@ and defining scope. Calling it creates a child scope, binds arguments, and
 evaluates body expressions in order. The final expression is returned; an empty
 body returns nil.
 
-Too few or too many arguments are `EXPR_INVALID`. A rest argument receives a list,
-including an empty list.
+Too few or too many arguments are `EXPR_INVALID`. A rest argument receives a
+list, including an empty list.
+
+Placeholder sections lower to ordinary lexical functions. A placeholder atom
+evaluates by reading its indexed argument from the enclosing section call
+without name lookup; user definitions named `_0` cannot shadow it. Section
+arity and argument-count diagnostics follow the ordinary function rules.
 
 Function definitions in script and `(def ...)` use the same callable
 representation.
@@ -179,6 +184,8 @@ containment, which is outside the initial implementation.
 - Invalidating a definition causes one reevaluation on next access.
 - A definition cycle reports `DEP_CYCLE` with definition frames.
 - Lexical functions capture their defining scope and bind rest arguments.
+- Placeholder sections read their indexed arguments without name lookup; a
+  definition named `_0` does not shadow a placeholder.
 - Lexical names override operation names only within their scope.
 - Arguments produce deterministic left-to-right diagnostics.
 - A lifted operation reruns once with the newest arguments after coalesced

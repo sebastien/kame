@@ -108,6 +108,12 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 }
 
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
+	if function.NativeCall != nil {
+		if len(values) != function.Arity {
+			return failure(context.Run, "EXPR_INVALID", span, "invalid function arity")
+		}
+		return function.NativeCall(context, function.Native, values)
+	}
 	fixed := len(function.Parameters)
 	rest := fixed != 0 && function.Parameters[fixed-1].Rest
 	if rest {
@@ -118,13 +124,24 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 	}
 	child := newScope(context.Run, function.Scope)
 	defer child.Free()
-	for i := 0; i < fixed; i++ {
-		child.setValue(function.Parameters[i].Name, values[i])
-	}
-	if rest {
-		remainder := core.NewList(context.Run, values[fixed:])
-		child.setValue(function.Parameters[fixed].Name, remainder)
-		remainder.Free(context.Run)
+	if function.Section {
+		// The section scope owns clones of the arguments so a closure that
+		// escapes the call keeps its arguments alive. The caller frees the
+		// original values.
+		owned := slices.Make[core.Value](context.Run, len(values))
+		for i := range values {
+			owned[i] = values[i].Clone(context.Run)
+		}
+		child.Section = owned
+	} else {
+		for i := 0; i < fixed; i++ {
+			child.setValue(function.Parameters[i].Name, values[i])
+		}
+		if rest {
+			remainder := core.NewList(context.Run, values[fixed:])
+			child.setValue(function.Parameters[fixed].Name, remainder)
+			remainder.Free(context.Run)
+		}
 	}
 	previousArgs, previousScope, previousHasArgs := context.Args, context.Scope, context.HasArgs
 	context.Args, context.HasArgs = values, true
