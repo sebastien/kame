@@ -16,7 +16,7 @@ lang/expr/      expression AST, parser, formatter
 lang/template/  template AST, parser, matcher, renderer, formatter
 lang/rule/      definition and rule AST, parser, formatter
 lang/program/   script composition and evaluation
-lib/            standard operations
+operations/     standard operations
 host/posix/     native filesystem and process execution
 cmd/littlemake/ CLI executable
 ```
@@ -29,8 +29,8 @@ cmd/littlemake/ CLI executable
 Allowed dependencies flow downward:
 
 ```text
-cmd -> runtime/program -> language + library + core
-runtime/program -> host contract
+cmd -> program -> language + operations + core
+program -> host contract
 host/posix -> platform and C interop
 language -> core values where evaluation requires them
 core -> portable Solod standard library only

@@ -4,7 +4,7 @@
 # Spec: docs/spec/013-tests.md — T007-06-lib-grants
 set -euo pipefail
 
-BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # shellcheck disable=SC1091
 source "$(dirname "$BASE")/tests/lib-testing.sh"
 # shellcheck disable=SC1091
@@ -16,7 +16,7 @@ test-step "toolchain and binary"
 cli_require_tools
 cli_build
 
-fixture_copy lib/lib-grants lib-grants
+operation_fixture_copy lib-grants lib-grants
 
 test-step "capabilities are denied by default"
 for expr in '(read "a.txt")' '(write "x.txt" "x")' '(env "HOME")' '(shell "true")'; do

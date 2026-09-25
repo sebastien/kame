@@ -18,7 +18,7 @@ so test ./runtime
 ```
 
 The failing regression is
-`runtime/test/runtime.go:TestReadOperationResumesDuringRendering`.
+`program/test/runtime.go:TestReadOperationResumesDuringRendering`.
 
 It creates `input` containing `abc`, then materializes this rule with a read
 grant:
@@ -57,7 +57,7 @@ tests; `go test ./...` does not provide equivalent behavioral coverage.
 
 `read` is an evaluator operation, not a recipe shell command:
 
-1. `lib.opRead` calls `request` in `lib/library.go`.
+1. `operations.opRead` calls `request` in `operations/operations.go`.
 2. `eval.Context.Submit` queues a correlated host request and marks the active
    engine node submitted.
 3. `runtime.Program.drainRequests` services the request and calls
@@ -68,7 +68,7 @@ tests; `go test ./...` does not provide equivalent behavioral coverage.
 The runtime originally treated **every** completion on a rule node as a finished
 recipe process. That skipped rerendering and failed with `OUTPUT_MISSING`.
 
-The necessary functional distinction is in `runtime/materialize.go`:
+The necessary functional distinction is in `program/materialize.go`:
 
 ```go
 if c.Completion().RequestID != 0 && entry.Script != "" {
@@ -185,7 +185,7 @@ CC=clang so test -check=sanitize -panic=abort ./lib
 CC=clang so test -check=sanitize -panic=abort ./lang/eval
 ```
 
-The read-resume regression must remain in `runtime/test/runtime.go` and must
+The read-resume regression must remain in `program/test/runtime.go` and must
 pass without a memory-leak report. If a full sanitizer suite is run, note the
 known POSIX timeout-classification flake separately rather than attributing it
 to this fix.

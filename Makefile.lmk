@@ -1,0 +1,19 @@
+# Project build, test, formatting, and cleanup targets.
+default : build
+build : dist
+dist : ./dist/littlemake.debug ./dist/littlemake
+./dist/littlemake.debug :
+	so build -check=warn -o @> ./cmd/littlemake
+./dist/littlemake :
+	CFLAGS=-O3 so build -assert=off -panic=exit -o @> ./cmd/littlemake
+test : test-so test-shell
+test-so :
+	so test ./...
+test-shell :
+	tests/harness.sh
+fmt :
+	git ls-files -z -- '*.go' | xargs -0r gofmt -w
+	git ls-files -z -- '*.sh' | xargs -0r shfmt -w
+	./dist/littlemake.debug do fmt -i Makefile.lmk
+clean :
+	rm -rf ./dist ./generated

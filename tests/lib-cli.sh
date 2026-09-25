@@ -556,6 +556,22 @@ function fixture_copy {
 	test_log_message "fixture $name → $(test-relpath "$dest")"
 }
 
+# Function: operation_fixture_copy NAME [DEST]
+# Copies a standard-library fixture NAME into DEST (default: current directory).
+function operation_fixture_copy {
+	local name="$1"
+	local dest="${2:-.}"
+	local src
+	src="$(tests_data_path "operations/$name")"
+	if [ ! -d "$src" ]; then
+		test-fail "unknown operation fixture: $name"
+		return 1
+	fi
+	mkdir -p "$dest"
+	cp -a "$src/." "$dest/"
+	test_log_message "operation fixture $name → $(test-relpath "$dest")"
+}
+
 # Function: case_path NAME
 # Absolute path of one table-driven case directory.
 function case_path {

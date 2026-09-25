@@ -6,7 +6,7 @@ import (
 	"littlemake/lang/eval"
 	"littlemake/lang/expr"
 	"littlemake/lang/script"
-	"littlemake/lib"
+	"littlemake/operations"
 	"solod.dev/so/testing"
 )
 
@@ -29,7 +29,7 @@ func TestPureOperations(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Error("library registration failed") }
+	if !operations.Register(registry) { t.Error("library registration failed") }
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(count (list \"one\" \"two\"))")
@@ -54,7 +54,7 @@ func TestMapResumesWithoutRepeatingCallbacks(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	lib.Register(registry)
+	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "wait-each", Call: waitEach, MinArity: 1, MaxArity: 1})
 	parsed := script.Parse(a, "test", "result = (map ([item] (wait-each item)) (list \"one\" \"two\"))")
 	program := eval.Compile(a, engine, parsed, registry)

@@ -2,7 +2,7 @@ package main
 
 import (
 	"littlemake/diagnostic"
-	"littlemake/runtime"
+	"littlemake/program"
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"

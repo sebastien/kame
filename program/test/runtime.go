@@ -3,10 +3,10 @@ package program_test
 import (
 	"littlemake/core"
 	"littlemake/diagnostic"
-	"littlemake/lib"
+	"littlemake/operations"
 	"littlemake/lang/eval"
 	"littlemake/lang/script"
-	"littlemake/runtime"
+	"littlemake/program"
 	"solod.dev/so/math"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
@@ -403,7 +403,7 @@ func TestCachedTaskCachesDeferredOutput(t *testing.T) {
 	defer os.Remove(dir)
 	parsed := script.Parse(a, "test.lmk", "task run :\n\t@(out \"out\")\n\t@(err \"err\")\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	first := compiled.Program.Materialize("run"); first.Free(a)
@@ -568,7 +568,7 @@ func TestCachedTaskInvalidatesForDeclaredEnvironmentDependency(t *testing.T) {
 	defer os.Remove(dir)
 	parsed := script.Parse(a, "test.lmk", "task run :\n\t@(out (str (env \"LM_CACHE_VALUE\")))\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	grant := []eval.Grant{{Capability: eval.Env, Names: []string{"LM_CACHE_VALUE"}}}
 	firstProgram := program.Compile(a, parsed, registry, program.Options{Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "LM_CACHE_VALUE=one"}, Grants: grant})
 	if firstProgram.Program == nil { t.Fatal("first compile failed"); return }
@@ -743,7 +743,7 @@ func TestCachedTaskInvalidatesWhenGlobMembershipChanges(t *testing.T) {
 	if os.WriteFile(dir+"/src/one", []byte("1"), 0o644) != nil { t.Fatal("source write failed"); return }
 	parsed := script.Parse(a, "test.lmk", "task run :\n\t@(out (str (count (wildcard \"./src/*\"))))\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	options := program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}}
 	firstProgram := program.Compile(a, parsed, registry, options)
 	if firstProgram.Program == nil { t.Fatal("first compile failed"); return }
@@ -1209,7 +1209,7 @@ func TestDefinitionHostReadFailureReleasesDiagnosticOnce(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "test.lmk", "value = (read \"missing-file\")\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	result := compiled.Program.Materialize("value")
@@ -1226,7 +1226,7 @@ func TestYieldWritesFileOutput(t *testing.T) {
 	defer os.Remove(dir)
 	parsed := script.Parse(a, "test.lmk", "./output :\n\t@(yield \"yielded\")\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
 	result := compiled.Program.Materialize("./output")
@@ -1242,7 +1242,7 @@ func TestOutAndErrEmitEvents(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "test.lmk", "run :\n\t@(out \"out\")\n\t@(err \"err\")\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
 	result := compiled.Program.Materialize("run")
@@ -1296,7 +1296,7 @@ func TestYieldRejectsShellCommand(t *testing.T) {
 	source := "./output :\n\t@(yield \"content\")\n\ttrue\n"
 	parsed := script.Parse(a, "test.lmk", source)
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
 	result := compiled.Program.Materialize("./output")
@@ -1312,7 +1312,7 @@ func TestBuildEffectInExpressionInputIsPhaseInvalid(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "test.lmk", "NAME = ./input\n./output : @(out NAME)\n\ttrue\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
 	result := compiled.Program.Materialize("./output")
@@ -1410,7 +1410,7 @@ func TestPlanFlattensComputedInputExpression(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "test.lmk", "SRC = ./src\nOTHER = ./other\n./output : @((list SRC (list OTHER :nil)))\n\ttrue\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	planned := compiled.Program.Plan("./output")
@@ -1440,7 +1440,7 @@ func TestMaterializeReevaluatesComputedInputsWithoutDuplication(t *testing.T) {
 	if os.WriteFile(dir+"/src", []byte("a"), 0o644) != nil || os.WriteFile(dir+"/other", []byte("b"), 0o644) != nil { t.Fatal("input write failed"); return }
 	parsed := script.Parse(a, "test.lmk", "SRC = ./src\nOTHER = ./other\n./output : @((list SRC OTHER))\n\tcat @<* > @>\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	result := compiled.Program.Materialize("./output")
@@ -1469,7 +1469,7 @@ func TestTargetEventsCarrySharedIdentity(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "test.lmk", "run :\n\t@(nop \"\")\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	result := compiled.Program.Materialize("run")
@@ -1551,7 +1551,7 @@ func TestWriteOperationDefersUntilExecution(t *testing.T) {
 	defer os.Remove(dir)
 	parsed := script.Parse(a, "test.lmk", "./output :\n\t@(write \"./output\" \"written\")\n")
 	registry := eval.NewRegistry(a)
-	lib.Register(registry)
+	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	result := compiled.Program.Materialize("./output")
@@ -1573,7 +1573,7 @@ func TestReadOperationResumesDuringRendering(t *testing.T) {
 	if os.WriteFile(dir+"/input", []byte("abc"), 0o644) != nil { t.Fatal("input write failed"); return }
 	parsed := script.Parse(a, "test.lmk", "./output :\n\t@(yield (str (count (read \"./input\"))))\n")
 	registry := eval.NewRegistry(a)
-	lib.Register(registry)
+	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	result := compiled.Program.Materialize("./output")
@@ -1594,7 +1594,7 @@ func TestWildcardRelativePathDoesNotLeak(t *testing.T) {
 	if os.WriteFile(dir+"/input", []byte("abc"), 0o644) != nil { t.Fatal("input write failed"); return }
 	parsed := script.Parse(a, "test.lmk", "./output :\n\t@(yield (str (wildcard \"./*\")))\n")
 	registry := eval.NewRegistry(a)
-	lib.Register(registry)
+	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	result := compiled.Program.Materialize("./output")
@@ -1615,7 +1615,7 @@ func TestRenderFreesLineSpansWhenLaterLineWaits(t *testing.T) {
 	if os.WriteFile(dir+"/input", []byte("abc"), 0o644) != nil { t.Fatal("input write failed"); return }
 	parsed := script.Parse(a, "test.lmk", "./output :\n\tkept\n\t@(yield (str (count (read \"./input\"))))\n")
 	registry := eval.NewRegistry(a)
-	lib.Register(registry)
+	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	result := compiled.Program.Materialize("./output")
@@ -1703,7 +1703,7 @@ func TestCachedTaskManifestOverflowFromNestedDefinition(t *testing.T) {
 	// The nested @(mid)/@(leaf) chain is what must consume the manifest budget.
 	parsed := script.Parse(a, "overflow.lmk", "leaf = \"nested-definition-value\"\nmid = \"@(leaf)\"\nouter = \"@(mid)\"\ntask run :\n\t@(nop outer)\n\tprintf x >> task-log\n")
 	registry := eval.NewRegistry(a)
-	if !lib.Register(registry) { t.Fatal("library registration failed"); return }
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	measured := program.Compile(a, parsed, registry, program.Options{Directory: dir})
 	if measured.Program == nil { t.Fatal("measure compile failed"); return }
 	first := finishMaterialize(t, a, measured.Program, "run", "measure")
@@ -1851,7 +1851,7 @@ func TestYieldBufferFreedWhenLaterWriteFails(t *testing.T) {
 	if os.WriteFile(dir+"/not-a-dir", []byte("file"), 0o644) != nil { t.Fatal("blocker write failed"); return }
 	parsed := script.Parse(a, "test.lmk", "./output :\n\t@(yield \"data\")\n\t@(write \"./not-a-dir/child\" \"x\")\n")
 	registry := eval.NewRegistry(a)
-	lib.Register(registry)
+	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	result := compiled.Program.Materialize("./output")

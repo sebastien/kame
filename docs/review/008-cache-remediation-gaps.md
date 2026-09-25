@@ -23,12 +23,12 @@ Several concerns from the initial review had already been addressed:
 
 - File fingerprints now include a kind marker and treat stat/open/read/close
   failures as unusable for caching rather than hashing an error message into a
-  candidate fingerprint (`runtime/cache.go:fileFingerprint`).
+  candidate fingerprint (`program/cache.go:fileFingerprint`).
 - The duplicate `CACHE_UNUSABLE` event path was removed; warning emission is
   owned by the fingerprint/record helpers.
 - A regression test changes a declared dependency from a directory to a regular
   file and checks for execution rather than cache reuse
-  (`runtime/test/runtime.go:TestCachedTaskInvalidatesWhenDependencyKindChanges`).
+  (`program/test/runtime.go:TestCachedTaskInvalidatesWhenDependencyKindChanges`).
 - Standard SHA-256 vectors, all value tags, and a complete task fingerprint
   vector are already covered by the existing runtime tests.
 
@@ -43,7 +43,7 @@ kept as a record of the defect and the test that now pins it.
 ### 1. The 16 MiB manifest cap does not bound all intermediate allocations
 
 `cacheBudget` is shared by the canonical fingerprint section appenders in
-`runtime/cache.go:29` and `cacheFingerprint` (`:156`), so ordinary section
+`program/cache.go:29` and `cacheFingerprint` (`:156`), so ordinary section
 construction stops when its budget is exhausted. However, the limit is not
 end-to-end:
 
@@ -72,7 +72,7 @@ requiring a very large fixture.
 
 ### 2. Missing-path dependencies do not have the specified encoded marker
 
-`fileFingerprint` returns `false` for every `Stat` error (`runtime/cache.go:312`),
+`fileFingerprint` returns `false` for every `Stat` error (`program/cache.go:312`),
 which makes the task uncacheable. The spec distinguishes a missing path
 dependency and requires its canonical path plus an explicit missing marker.
 This difference is conservative for cache hits, but it means missing

@@ -1,5 +1,13 @@
 # TODO
 
+Yes, but remaining work is higher-risk architectural refactoring:
+- Introduce a portable process-host contract so program no longer depends on host/posix.
+- Replace CLI dispatch/help duplication with declarative command metadata.
+- Split remaining evaluator orchestration from expression/container evaluation.
+- Split program/materialize.go lifecycle/producer orchestration further.
+- Reorganize large runtime tests by planning, execution, cache, and events.
+- Reconcile Makefile workflows and shell-test bootstrap duplication.
+-
 Governing specs: `docs/spec/003-posix-process.md`,
 `docs/spec/011-diagnostics.md`.
 

@@ -326,10 +326,14 @@ function test-run {
 	local exit_code
 	local prefix="$1"
 	shift
+	local display="$*"
+	if [ "$#" -eq 1 ]; then
+		display="$(test-repo-path "$1")"
+	fi
 	TEST_CURRENT_STEP=$TEST_STEP_COUNT
-	TEST_STEP_NAME="$*"
+	TEST_STEP_NAME="$display"
 	((TEST_STEP_COUNT += 1))
-	test_log "${BLUE}=== ${YELLOW}${BOLD}$* ${RESET}${BLUE}${DIM}in '${ORIGINAL_PATH}'${RESET}"
+	test_log "${BLUE}=== ${YELLOW}${BOLD}$display ${RESET}${BLUE}${DIM}in '${ORIGINAL_PATH}'${RESET}"
 	env -C "$ORIGINAL_PATH" "$SHELL" "$@" 2> >(sed "s/^/${RESET}${prefix} . ${GRAY}/" >&2) > >(sed "s/^/${RESET}${prefix} ! ${ORANGE}/")
 	return $?
 }
@@ -468,6 +472,16 @@ function test-path {
 
 function test-relpath {
 	realpath --relative-to="$PWD" "$1"
+}
+
+# Function: test-repo-path PATH
+# Renders a path relative to the directory from which the test suite started.
+function test-repo-path {
+	local path="$1"
+	if [[ "$path" != /* ]]; then
+		path="$ORIGINAL_PATH/$path"
+	fi
+	realpath --relative-to="$ORIGINAL_PATH" "$path"
 }
 
 function test-substring { # STRING STRING…

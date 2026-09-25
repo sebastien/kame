@@ -19,8 +19,8 @@ Language fixtures live in `../lang/` and are shared with the parser tests.
 | `errors/` | diagnostics, runtime | Missing output, failing recipe, yield conflict, definition cycle, ambiguity, service, timeout, bare task |
 | `signals/` | signals | Recipe writing its shell and child pids, then waiting on a background sleep |
 | `plan/` | plan, graph | Captures, dynamic body, body-less static rule for freshness, multi-target task |
-| `lib/lib-fs/` | library filesystem | Small text tree with a subdirectory for `read`, `stat`, and `wildcard` |
-| `lib/lib-grants/` | library capabilities | Read fixture plus a target for rooted write checks |
+| `operations/lib-fs/` | library filesystem | Small text tree with a subdirectory for `read`, `stat`, and `wildcard` |
+| `operations/lib-grants/` | library capabilities | Read fixture plus a target for rooted write checks |
 | `host/retry.lmk` | host process | Retry recipe that fails until a marker exists |
 | `fmt/` | formatter | Unformatted source and its canonical form |
 | `cases/` | table-driven matrix | Reserved for the `T009-12` case runner |

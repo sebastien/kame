@@ -21,40 +21,6 @@ const (
 	Resource
 )
 
-type ResourceKind int
-
-const (
-	ResourceDefinition ResourceKind = iota
-	ResourceTarget
-	ResourceFile
-	ResourceTask
-	ResourceService
-	ResourceGlob
-	ResourceEnvironment
-)
-
-// ResourceKey is owned by the allocator that created or cloned it.
-type ResourceKey struct {
-	Kind ResourceKind
-	Name string
-}
-
-func NewResourceKey(a mem.Allocator, kind ResourceKind, name string) ResourceKey {
-	if name == "" { return ResourceKey{Kind: kind} }
-	b := mem.AllocSlice[byte](a, len(name), len(name))
-	copy(b, []byte(name))
-	return ResourceKey{Kind: kind, Name: string(b)}
-}
-
-func (k *ResourceKey) Clone(a mem.Allocator) ResourceKey {
-	return NewResourceKey(a, k.Kind, k.Name)
-}
-
-func (k *ResourceKey) Free(a mem.Allocator) {
-	mem.FreeString(a, k.Name)
-	*k = ResourceKey{}
-}
-
 type RecordField struct {
 	Key   string
 	Value Value
@@ -63,14 +29,14 @@ type RecordField struct {
 // Value is immutable after publication. Its referenced storage is owned by the
 // allocator passed to its constructor or Clone and must be released with Free.
 type Value struct {
-	Kind  Kind
-	Bool  bool
-	Int   int64
-	Float float64
-	Text  string
-	Bytes []byte
-	List  []Value
-	Record []RecordField
+	Kind     Kind
+	Bool     bool
+	Int      int64
+	Float    float64
+	Text     string
+	Bytes    []byte
+	List     []Value
+	Record   []RecordField
 	Callable any
 	Resource ResourceKey
 }
@@ -128,12 +94,22 @@ func (v *Value) Clone(a mem.Allocator) Value {
 }
 
 func (v *Value) HasCallable() bool {
-	if v.Kind == Callable { return true }
+	if v.Kind == Callable {
+		return true
+	}
 	if v.Kind == List {
-		for i := range v.List { if v.List[i].HasCallable() { return true } }
+		for i := range v.List {
+			if v.List[i].HasCallable() {
+				return true
+			}
+		}
 	}
 	if v.Kind == Record {
-		for i := range v.Record { if v.Record[i].Value.HasCallable() { return true } }
+		for i := range v.Record {
+			if v.Record[i].Value.HasCallable() {
+				return true
+			}
+		}
 	}
 	return false
 }

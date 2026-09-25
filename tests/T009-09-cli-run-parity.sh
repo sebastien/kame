@@ -3,7 +3,7 @@
 # Spec: docs/spec/013-tests.md — T009-09-cli-run-parity
 set -euo pipefail
 
-BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # shellcheck disable=SC1091
 source "$(dirname "$BASE")/tests/lib-testing.sh"
 # shellcheck disable=SC1091

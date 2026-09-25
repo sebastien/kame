@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"littlemake/runtime"
+	"littlemake/program"
 	"os"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"

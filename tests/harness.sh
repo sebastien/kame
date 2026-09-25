@@ -24,9 +24,9 @@ for TEST in $FILES; do
 		fi
 		export TEST_COUNT
 		if test-run "${DIM}»${PURPLE}" "$TEST"; then
-			test-ok "Unit test succeeded: ${YELLOW}$TEST"
+			test-ok "Unit test succeeded: ${YELLOW}$(test-repo-path "$TEST")"
 		else
-			test-fail "Unit test failed: ${RED}$TEST"
+			test-fail "Unit test failed: ${RED}$(test-repo-path "$TEST")"
 		fi
 		;;
 	esac
