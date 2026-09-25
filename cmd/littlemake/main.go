@@ -54,6 +54,7 @@ type buildArguments struct {
 	DryRun bool
 	Force bool
 	JSON bool
+	Verbose bool
 	Grants []eval.Grant
 	NoDefaultGrants bool
 	Shell []string
@@ -115,7 +116,7 @@ func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bo
 	environment := posix.Environment(mem.System)
 	environment = mergeEnvironment(environment, options.Environment)
 	session.Parsed = script.Parse(mem.System, session.Source.Name, session.Source.Text)
-	compiled := program.Compile(mem.System, session.Parsed, session.Registry, program.Options{Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, Grants: grants})
+	compiled := program.Compile(mem.System, session.Parsed, session.Registry, program.Options{Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, Verbose: options.Verbose, Grants: grants})
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
 		for i := range compiled.Diagnostics { cliDiagnostic(errOut, compiled.Diagnostics[i]) }
@@ -145,6 +146,7 @@ func parseBuildArguments(args []string, errOut io.Writer) buildArguments {
 		if arg == "-n" || arg == "--dry-run" { result.DryRun = true; continue }
 		if arg == "--force" { result.Force = true; continue }
 		if arg == "--json" { result.JSON = true; continue }
+		if arg == "--verbose" { result.Verbose = true; continue }
 		if arg == "-f" || arg == "--file" || arg == "-c" || arg == "--command" || arg == "-C" || arg == "--directory" || arg == "-j" || arg == "--jobs" || arg == "--shell" || arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--env" {
 			if i+1 == len(args) { cliError(errOut, "OPT_NO_VALUE", "missing value for "+arg); return buildArguments{} }
 			i++
@@ -298,7 +300,8 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool)
 		} else if event.Kind == program.Stderr { errOut.Write(event.Data)
 		} else if event.Kind == program.TargetStarted { fmt.Fprintf(errOut, "[%s] started\n", event.Target)
 		} else if event.Kind == program.TargetCompleted { fmt.Fprintf(errOut, "[%s] complete\n", event.Target)
-		} else if event.Kind == program.TargetFailed || event.Kind == program.TargetCancelled { fmt.Fprintf(errOut, "[%s] failed\n", event.Target) }
+		} else if event.Kind == program.TargetFailed || event.Kind == program.TargetCancelled { fmt.Fprintf(errOut, "[%s] failed\n", event.Target)
+		} else if event.Kind == program.CacheWarning { fmt.Fprintf(errOut, "warning %s: %s\n", event.Diagnostic.Code, event.Diagnostic.Message) }
 		event.Free(mem.System)
 	}
 }

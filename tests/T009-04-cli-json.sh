@@ -101,4 +101,16 @@ test-step "process events carry a request identity"
 	cli_expect_event "$CLI_OUT" 'process-started' '.request != null'
 )
 
+test-step "recipe failures map a source span"
+(
+	cd json-events
+	cli_run -- --json ./fail.out
+	cli_expect_status 1
+	if jq -e -s 'any(.[]; .type == "target-failed" and .diagnostic.code == "RECIPE_FAIL" and .diagnostic.span.end > .diagnostic.span.start)' "$CLI_OUT" >/dev/null; then
+		test-ok "RECIPE_FAIL carries a non-empty source span"
+	else
+		test-fail "RECIPE_FAIL span is missing or empty"
+	fi
+)
+
 test-end

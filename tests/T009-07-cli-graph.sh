@@ -73,6 +73,16 @@ test-step "span separates static and dynamic resources"
 	cli_run -- do span --expand ./build/app
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.expanded' 'true'
+
+	cli_run -- do span --depth 0 ./build/app
+	cli_expect_status 0
+	cli_expect_json_query "$CLI_OUT" '.static.inputs | length' '0'
+	cli_expect_json_query "$CLI_OUT" '.static.outputs | length' '0'
+
+	cli_run -- do span --depth -1 ./build/app
+	cli_expect_status 0
+	cli_expect_json_query "$CLI_OUT" '.static.inputs | index("./src/main.c") != null' 'true'
+	cli_expect_json_query "$CLI_OUT" '.static.outputs | index("./build/main.o") != null' 'true'
 )
 
 test-step "graph commands validate depth and arity"

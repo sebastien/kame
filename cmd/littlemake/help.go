@@ -30,6 +30,7 @@ Build options:
   -n, --dry-run          plan and render without executing effects
       --force            ignore freshness and cached-task hits
       --json             emit machine-readable JSON Lines
+      --verbose          report cache decisions and warnings
       --shell SHELL      recipe shell executable (repeatable)
       --env NAME=VALUE   add a recipe environment entry (repeatable)
       --timeout MS       per-command timeout in milliseconds
@@ -97,6 +98,7 @@ Options:
   -n, --dry-run          plan and render without executing effects
       --force            ignore freshness and cached-task hits
       --json             emit machine-readable JSON Lines
+      --verbose          report cache decisions and warnings
       --shell SHELL      recipe shell executable (repeatable)
       --env NAME=VALUE   add a recipe environment entry (repeatable)
       --timeout MS       per-command timeout in milliseconds

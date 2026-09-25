@@ -33,6 +33,16 @@ cli_run -- do expr -c '@1' -- first second
 cli_expect_status 0
 cli_expect_stdout 'second'
 
+test-step "no arguments yields an empty argument list"
+cli_run -- do expr -c '(join @* "-")'
+cli_expect_status 0
+cli_expect_stdout ''
+cli_expect_stderr_empty
+
+cli_run -- do expr -c '@#'
+cli_expect_status 0
+cli_expect_stdout '0'
+
 test-step "expression read from stdin"
 printf '(join ["x" "y"] "")' >expression.lm
 cli_run --stdin expression.lm -- do expr

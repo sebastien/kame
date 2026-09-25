@@ -108,20 +108,21 @@ Current coverage:
 | Spec | Files | Focus |
 | --- | --- | --- |
 | 003 host | `T003-01`, `T003-02` | streaming, exit codes, retry, shell, environment, cwd, signal cancellation |
-| 004 language | `T004-01` … `T004-08` | parse matrix, invalid manifest, stdin/IO, usage, goldens, format idempotence and stability |
+| 004 language | `T004-01` … `T004-09` | parse matrix, invalid manifest, stdin/IO, usage, goldens, format idempotence and stability, standalone rule parsing |
 | 005 evaluation | `T005-01` … `T005-05` | values, references, special forms, pipes, arguments, failure messages |
+| 006 runtime | `T006-01`, `T006-02`, `T006-04`, `T006-05` | freshness, dependency scheduling, yield, deferred effects and dry-run |
 | 007 library | `T007-01` … `T007-07` | general, collection, text, path, filesystem, capability and shell operations, error messages |
-| 008 cache | `T008-01`, `T008-02` | record creation, hits, force, invalidation, corruption recovery |
-| 009 CLI | `T009-01` … `T009-09`, `T009-11` | help/version, discovery, targets, JSON, plan, cat, graph, dry-run, run parity, usage |
+| 008 cache | `T008-01` … `T008-03` | record creation, hits, force, invalidation, corruption recovery, glob and body fingerprints |
+| 009 CLI | `T009-01` … `T009-09`, `T009-11`, `T009-12` | help/version, discovery, targets, JSON, plan, cat, graph, dry-run, run parity, usage, case matrix |
 | 011 diagnostics | `T011-01`, `T011-02` | layout, notes, human/JSON equivalence, code and message integrity |
 | 012 streams | `T012-01` | terminal event uniqueness, process event balance |
 | 013 meta | `T013-01` … `T013-03` | catalog consistency, fixture hygiene, binary contract, determinism |
 
 Planned but not yet implemented (tracked so no acceptance bullet is silently
-dropped): concurrent `-j` output-interleaving assertions, table-driven
-`tests/data/cases/` matrix (`T009-12`), signal exit statuses beyond the first
-signal, cache warning visibility through the CLI (`--verbose`), and
-`span --expand` dynamic evaluation.
+dropped): concurrent `-j` output-interleaving assertions, signal exit statuses
+beyond the first signal, `span --expand` dynamic definition evaluation, and the
+remaining cache fingerprint inputs (shell, dependency kind, log-limit
+truncation, concurrent writers).
 
 ## Defects found and fixed by this suite
 
@@ -148,6 +149,16 @@ signal, cache warning visibility through the CLI (`--verbose`), and
     path separators.
 12. `Render` built its fallback `Context` as a block-scoped temporary that GCC
     flagged as dangling under `-check=warn`.
+13. Cache warnings were unreachable from the CLI; `--verbose` now reports them
+    on stderr and they remain JSON `cache-warning` events.
+14. `do expr` produced `SEL_NO_CONTEXT` for `@*` with no `--` arguments; the
+    evaluator now tracks whether an argument frame was provided.
+15. `do span --depth N` ignored depth; non-default depths now expand static
+    inputs and outputs transitively through the graph walker.
+16. A multi-assignment from two struct slice fields produced a bad pointer in
+    the Solod C build; the span command now reads plan fields directly.
+17. Recipe failures now have their mapped source span pinned through the JSON
+    event stream (`target-failed` carries a non-empty `diagnostic.span`).
 
 ## Suite acceptance criteria
 

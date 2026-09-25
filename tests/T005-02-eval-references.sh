@@ -51,6 +51,7 @@ diag '(let [l [1 2 3]] l.nope)' 'REF_MISSING'
 diag '(let [r [a: 1]] r.b)' 'REF_MISSING'
 diag '(let [l [1 2 3]] l.9)' 'SEL_INDEX_INVALID'
 diag 'unknown-symbol' 'REF_MISSING'
-diag '(@*)' 'SEL_NO_CONTEXT'
+diag '(@<)' 'SEL_NO_CONTEXT'
+evaluates '(join @* "-")' ''
 
 test-end

@@ -321,6 +321,15 @@ function cli_expect_stderr_empty { # [MESSAGE]
 	fi
 }
 
+function cli_expect_stderr_file { # FILE [MESSAGE]
+	local want="$1"
+	if cmp -s "$want" "$CLI_ERR"; then
+		test-ok "${2:-stderr matches $(test-relpath "$want")}"
+	else
+		_cli_diff "$want" "$CLI_ERR" "${2:-stderr differs from $(test-relpath "$want")}"
+	fi
+}
+
 function cli_expect_stderr_contains { # PATTERN… [MESSAGE]
 	local patterns=("$@")
 	local pattern

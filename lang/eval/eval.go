@@ -241,6 +241,7 @@ type Program struct {
 	DefinitionDependencyObserver func(any, core.ResourceKey)
 	DefinitionDependencyState any
 	DefinitionArgs []core.Value
+	DefinitionArgsSet bool
 	DefinitionCwd string
 	Valid       bool
 }
@@ -360,6 +361,7 @@ func (p *Program) SetDefinitionArgs(values []core.Value) {
 	for i := range p.DefinitionArgs { p.DefinitionArgs[i].Free(p.Alloc) }
 	if len(p.DefinitionArgs) != 0 { slices.Free(p.Alloc, p.DefinitionArgs) }
 	for i := range values { p.DefinitionArgs = slices.Append(p.Alloc, p.DefinitionArgs, values[i].Clone(p.Alloc)) }
+	p.DefinitionArgsSet = true
 }
 
 // SetDefinitionCwd supplies the working directory to standalone lazy
@@ -470,7 +472,7 @@ func freeCallables(a mem.Allocator, value *core.Value) {
 }
 
 func (p *Program) definition(engine *core.EngineContext, d *definition.Definition) Result {
-	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState}
+	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState}
 	result := p.definitionValue(engine, d, p.Scope, context)
 	if engine == nil || !engine.Failed() { attachFrame(&result, context, d.Span, "definition") }
 	attachSource(&result, context)
@@ -511,6 +513,7 @@ type Context struct {
 	Inputs  []core.Value
 	Outputs []core.Value
 	Args    []core.Value
+	HasArgs bool
 	RuleFrames []RuleFrame
 	Effects []Effect
 	WritePaths []string
@@ -954,13 +957,13 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		child.setValue(function.Parameters[fixed].Name, remainder)
 		remainder.Free(context.Run)
 	}
-	previousArgs, previousScope := context.Args, context.Scope
-	context.Args = values
+	previousArgs, previousScope, previousHasArgs := context.Args, context.Scope, context.HasArgs
+	context.Args, context.HasArgs = values, true
 	var result Result
 	if function.Definition != nil { result = p.definitionValue(context.Engine, function.Definition, child, context)
 	} else if function.Expression != nil { result = p.evaluate(context.Engine, child, function.Expression, context)
 	} else { result = p.body(child, function.Body, context) }
-	context.Args, context.Scope = previousArgs, previousScope
+	context.Args, context.Scope, context.HasArgs = previousArgs, previousScope, previousHasArgs
 	attachFrame(&result, context, span, "call")
 	return result
 }
@@ -1165,14 +1168,18 @@ func (p *Program) selector(text string, span source.Span, context *Context) Resu
 	_ = p
 	values := context.Args
 	offset := 1
+	present := context.HasArgs
 	if len(text) >= 2 && (text[1] == '<' || text[1] == '>') {
+		present = false
 		if len(context.RuleFrames) != 0 {
 			frame := context.RuleFrames[len(context.RuleFrames)-1]
 			if text[1] == '<' { values = frame.Inputs } else { values = frame.Outputs }
-		} else if text[1] == '<' { values = context.Inputs } else { values = context.Outputs }
+			present = true
+		} else if text[1] == '<' { values = context.Inputs; present = context.Inputs != nil
+		} else { values = context.Outputs; present = context.Outputs != nil }
 		offset = 2
 	}
-	if values == nil { return failure(context.Run, "SEL_NO_CONTEXT", span, "selector has no context") }
+	if !present { return failure(context.Run, "SEL_NO_CONTEXT", span, "selector has no context") }
 	suffix := text[offset:]
 	if suffix == "*" { return Result{Value: core.NewList(context.Run, values)} }
 	if suffix == "#" { return Result{Value: core.Value{Kind: core.Int, Int: int64(len(values))}} }

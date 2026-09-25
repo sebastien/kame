@@ -112,7 +112,19 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	if planResult.Diagnostic.Code != "" { annotateTargetDiagnostic(&planResult.Diagnostic, graph.Build.Targets[0]); emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), planResult.Diagnostic, graph.Build.JSON); planResult.Diagnostic.Free(mem.System); return 1 }
 	defer planResult.Plan.Free(mem.System)
 	e.BeginObject(); e.Str("schema"); e.Int(1); e.Str("type"); e.Str("span")
-	e.Str("static"); e.BeginObject(); e.Str("inputs"); stringArray(&e, planResult.Plan.Inputs); e.Str("outputs"); stringArray(&e, planResult.Plan.Outputs); e.EndObject()
+	e.Str("static"); e.BeginObject()
+	if graph.Depth == 1 {
+		e.Str("inputs"); stringArray(&e, planResult.Plan.Inputs); e.Str("outputs"); stringArray(&e, planResult.Plan.Outputs)
+	} else {
+		inTraversal := graphValues(session.Program, graph.Build.Targets[0], graph.Depth, "inputs")
+		if inTraversal.Diagnostic.Code != "" { annotateTargetDiagnostic(&inTraversal.Diagnostic, graph.Build.Targets[0]); emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), inTraversal.Diagnostic, graph.Build.JSON); inTraversal.Diagnostic.Free(mem.System); return 1 }
+		outTraversal := graphValues(session.Program, graph.Build.Targets[0], graph.Depth, "outputs")
+		if outTraversal.Diagnostic.Code != "" { program.FreeStrings(mem.System, inTraversal.Values); annotateTargetDiagnostic(&outTraversal.Diagnostic, graph.Build.Targets[0]); emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), outTraversal.Diagnostic, graph.Build.JSON); outTraversal.Diagnostic.Free(mem.System); return 1 }
+		e.Str("inputs"); stringArray(&e, inTraversal.Values); e.Str("outputs"); stringArray(&e, outTraversal.Values)
+		program.FreeStrings(mem.System, inTraversal.Values)
+		program.FreeStrings(mem.System, outTraversal.Values)
+	}
+	e.EndObject()
 	e.Str("dynamic"); e.BeginArray(); e.EndArray()
 	e.Str("expanded"); e.Bool(graph.Expand)
 	e.EndObject(); e.Flush(); io.WriteString(out, "\n")

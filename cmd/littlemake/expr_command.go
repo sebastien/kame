@@ -26,11 +26,13 @@ func runExpr(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	session := openBuildSession(options, errOut, true)
 	if session.Status != 0 { return session.Status }
 	defer session.Free()
-	var values []core.Value
-	for i := range parsed.Args { values = slices.Append(mem.System, values, core.NewString(mem.System, parsed.Args[i])) }
+	// The args frame must exist even when empty, so selectors yield empty
+	// results instead of SEL_NO_CONTEXT.
+	values := mem.AllocSlice[core.Value](mem.System, len(parsed.Args), len(parsed.Args)+1)
+	for i := range parsed.Args { values[i] = core.NewString(mem.System, parsed.Args[i]) }
 	session.Program.Eval.SetDefinitionArgs(values)
 	for i := range values { values[i].Free(mem.System) }
-	if len(values) != 0 { slices.Free(mem.System, values) }
+	slices.Free(mem.System, values)
 	started := session.Program.Start("result")
 	if started.Diagnostic.Code != "" { emitDiagnostic(errOut, started.Diagnostic, false); started.Diagnostic.Free(mem.System); return 1 }
 	handle := started.Handle

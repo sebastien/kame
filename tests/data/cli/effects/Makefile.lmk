@@ -1,0 +1,17 @@
+# Yield and effect fixtures (specs 006 and 007).
+./yield.out :
+	@(yield "declared content")
+
+./dynamic-yield.out :
+	@(yield (str (count (wildcard ./src/*.c))))
+
+./conflict.out :
+	@(yield "declared")
+	echo command
+
+./write.out :
+	@(write "./generated.txt" "written payload")
+	echo done > @>
+
+task yielded-task :
+	@(yield "not allowed")

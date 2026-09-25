@@ -10,11 +10,16 @@ tests/T004-05-lang-parse-goldens.sh	004	lang	CLI AST goldens are byte-stable
 tests/T004-06-lang-fmt-canonical.sh	004	lang	Canonical formatting and idempotence across fixtures
 tests/T004-07-lang-fmt-modes.sh	004	lang	Format stdin, -i, -n, conflicts, invalid sources
 tests/T004-08-lang-format-stability.sh	004	lang	Formatting preserves the AST apart from spans
+tests/T004-09-lang-parse-rules.sh	004	lang	Standalone rule parsing through do parse --lang rule
 tests/T005-01-eval-values.sh	005	eval	Literal, escape, interpolation, list and record outputs
 tests/T005-02-eval-references.sh	005	eval	Field, index, slice and selection references with diagnostics
 tests/T005-03-eval-specials.sh	005	eval	let, def, eval, optional and pipes
 tests/T005-04-eval-args.sh	005	eval	Argument selectors, stdin and file inputs, -C, conflicts
 tests/T005-05-eval-errors.sh	005	eval	Evaluation failure codes carry non-empty messages
+tests/T006-01-runtime-freshness.sh	006	runtime	Stale, fresh, older, newer, force, missing and dynamic dependency freshness
+tests/T006-02-runtime-deps.sh	006	runtime	Diamond sharing, failure blocking, missing inputs, independent roots, sibling outputs, parent dirs
+tests/T006-04-runtime-yield.sh	006	runtime	Yield output, dynamic content, conflict and task rejection
+tests/T006-05-runtime-effects.sh	006	runtime	Deferred out/err/write ordering and dry-run behavior
 tests/T007-01-lib-general.sh	007	lib	not, bool, str, count, first, nth, list, apply
 tests/T007-02-lib-collections.sh	007	lib	map, flatmap, filter, reduce, concat, slice, sorted, unique
 tests/T007-03-lib-text.sh	007	lib	join, split, strip, replace, membership, case conversion
@@ -24,6 +29,7 @@ tests/T007-06-lib-grants.sh	007	lib	Capability denial, rooted grants, environmen
 tests/T007-07-lib-errors.sh	007	lib	Operation arity and kind failures carry messages
 tests/T008-01-cache-hit.sh	008	cache	Record creation, cache hits, --force, input and environment invalidation
 tests/T008-02-cache-records.sh	008	cache	Corrupted records are misses and are rewritten
+tests/T008-03-cache-fingerprint.sh	008	cache	Glob membership, bare-dependency blocking, and rule body invalidation
 tests/T009-01-cli-help.sh	009	cli	Help, version, do namespace, bare-invocation overview
 tests/T009-02-cli-source.sh	009	cli	Source discovery order, -f/-c/-C, option validation
 tests/T009-03-cli-targets.sh	009	cli	Target selection, listing, sharing, definitions, ambiguity
@@ -34,6 +40,7 @@ tests/T009-07-cli-graph.sh	009	cli	inputs, outputs, span, depth and arity
 tests/T009-08-cli-dryrun.sh	009	cli	Dry-run performs no effects
 tests/T009-09-cli-run-parity.sh	009	cli	Primary invocation and do run parity
 tests/T009-11-cli-usage.sh	009	cli	Option and exit-status matrix, -j determinism
+tests/T009-12-cli-cases.sh	009	cli	Table-driven CLI cases over tests/data/cases
 tests/T011-01-diag-format.sh	011	diag	Diagnostic layout, notes, human/JSON equivalence
 tests/T011-02-diag-integrity.sh	011	diag	Codes, severities, non-empty printable messages
 tests/T012-01-streams-events.sh	012	streams	Terminal event uniqueness and process event balance
