@@ -46,12 +46,12 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 		return p.application(scope, expression, context)
 	case expr.Lambda:
 		function := mem.Alloc[Function](context.Run)
-		function.Parameters, function.Body, function.Scope, function.Temporary = expression.Parameters, expression.Body, scope, true
+		function.Kind, function.Parameters, function.Body, function.Scope = FunctionTemporary, expression.Parameters, expression.Body, scope
 		scope.Retain()
 		return Result{Value: core.Value{Kind: core.Callable, Callable: function}}
 	case expr.Section:
 		function := mem.Alloc[Function](context.Run)
-		function.Parameters, function.Expression, function.Scope, function.Temporary, function.Section = expression.Parameters, expression.Body[0], scope, true, true
+		function.Kind, function.Parameters, function.Expression, function.Scope, function.Section = FunctionTemporary, expression.Parameters, expression.Body[0], scope, true
 		scope.Retain()
 		return Result{Value: core.Value{Kind: core.Callable, Callable: function}}
 	case expr.Placeholder:
@@ -87,12 +87,11 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		if b.Value.Kind == core.Callable {
 			// Binding-owned callables are returned as borrowed wrappers so
 			// call sites release the wrapper without freeing the binding's
-			// function or scope.
+			// function or scope. The wrapper retains the scope so an escaped
+			// callable keeps its capture alive until Result.Free runs the
+			// cycle breaker.
 			source := b.Value.Callable.(*Function)
-			wrapper := mem.Alloc[Function](context.Run)
-			*wrapper = *source
-			wrapper.Temporary = false
-			wrapper.Borrowed = true
+			wrapper := borrowFunction(context.Run, source)
 			return Result{Value: core.Value{Kind: core.Callable, Callable: wrapper}}
 		}
 		return Result{Value: b.Value.Clone(context.Run)}

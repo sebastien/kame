@@ -32,6 +32,9 @@ type Scope struct {
 	// Section holds the positional arguments of an enclosing placeholder
 	// section call. The scope owns these values and frees them with itself.
 	Section []core.Value
+	// breakingCycles prevents recursive scope releases from trying to
+	// discover the same unreachable callable cycle while it is dismantled.
+	breakingCycles bool
 }
 
 func newScope(a mem.Allocator, parent *Scope) *Scope {
@@ -79,6 +82,9 @@ func (s *Scope) Free() {
 	}
 	s.References--
 	if s.References != 0 {
+		if !s.breakingCycles && s.breakCallableCycle() {
+			return
+		}
 		return
 	}
 	for i := range s.Bindings {
@@ -90,7 +96,7 @@ func (s *Scope) Free() {
 		if s.Bindings[i].Kind == bindingDefinition {
 			s.Bindings[i].Definition.Free(s.Alloc)
 		}
-		if s.Bindings[i].Kind == bindingFunction && s.Bindings[i].Function.Owned {
+		if s.Bindings[i].Kind == bindingFunction && s.Bindings[i].Function.Kind == FunctionDefinition {
 			if s.Bindings[i].Function.ParametersOwned {
 				if s.Bindings[i].Function.ParameterNamesOwned {
 					for j := range s.Bindings[i].Function.Parameters {

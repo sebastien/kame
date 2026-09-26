@@ -103,7 +103,7 @@ func replaceCall(c *eval.Context, state any, values []core.Value) eval.Result {
 // match and expansion to its argument.
 func replaceSection(c *eval.Context, state *replaceState) eval.Result {
 	function := mem.Alloc[eval.Function](c.Run)
-	function.Temporary = true
+	function.Kind = eval.FunctionTemporary
 	function.Arity = 1
 	function.Native = state
 	function.NativeCall = replaceCall

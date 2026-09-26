@@ -76,7 +76,8 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	for i := range arguments {
 		r := p.evaluate(context.Engine, context.Scope, arguments[i], context)
 		if r.Waiting || r.Diagnostic.Code != "" {
-			freeValues(context.Run, values)
+			// Discard: no Call ran, so no callee freed consumed callables.
+			freeValuesWithCallables(context.Run, values)
 			return r
 		}
 		values[i] = r.Value
@@ -86,6 +87,8 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	context.operationStart, context.operationEnd = span.Start, span.End
 	result := operation.Call(context, operation.Context, values)
 	context.activeCapabilities, context.Span, context.operationStart, context.operationEnd = previousCapabilities, previousSpan, previousStart, previousEnd
+	// Transfer: the operation freed consumed callables through FreeCallable;
+	// release only storage here so shared wrappers are not freed twice.
 	freeValues(context.Run, values)
 	if context.denied {
 		result.Free(context.Run)
@@ -96,15 +99,21 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 
 func (p *Program) call(function *Function, arguments []*expr.Expr, context *Context, span source.Span) Result {
 	values := slices.Make[core.Value](context.Run, len(arguments))
-	defer freeValues(context.Run, values)
 	for i := range arguments {
 		r := p.evaluate(context.Engine, context.Scope, arguments[i], context)
 		if r.Waiting || r.Diagnostic.Code != "" {
+			// Discard: arguments never reached callValues, so no child scope
+			// shares their callable storage.
+			freeValuesWithCallables(context.Run, values)
 			return r
 		}
 		values[i] = r.Value
 	}
-	return p.callValues(function, values, context, span)
+	result := p.callValues(function, values, context, span)
+	// Transfer: callValues cloned arguments into the child scope; release
+	// only storage here so shared callables are freed once by the child.
+	freeValues(context.Run, values)
+	return result
 }
 
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {

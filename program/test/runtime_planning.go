@@ -161,6 +161,22 @@ func TestPlanOnlyResolvesSelectedFallbackInput(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestPlanAndBuildInputLambdaReleasesItsScope(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "test.lmk", "sources = [\"source-a\" \"source-b\"]\ntask source-a :\ntask source-b :\ntask run : @((map ([s] s) sources))\n\ttrue\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	planned := compiled.Program.Plan("run")
+	if planned.Diagnostic.Code != "" || len(planned.Plan.Inputs) != 2 { t.Error("plan input lambda failed") }
+	planned.Plan.Free(a)
+	result := compiled.Program.Materialize("run")
+	if result.Diagnostic.Code != "" { t.Errorf("build input lambda failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestPatternReplaceComputesObjectInputs(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)

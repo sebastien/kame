@@ -13,33 +13,6 @@ import (
 	"solod.dev/so/slices"
 )
 
-type Function struct {
-	Parameters          []expr.Parameter
-	Body                []*expr.Expr
-	Expression          *expr.Expr
-	Scope               *Scope
-	Temporary           bool
-	Owned               bool
-	ParametersOwned     bool
-	ParameterNamesOwned bool
-	BodyOwned           bool
-	Definition          *definition.Definition
-	// Section marks a placeholder section. Positional arguments bind to the
-	// call scope for placeholder lookup instead of parameter names.
-	Section bool
-	// Borrowed marks a wrapper copied from a binding. Freeing releases the
-	// wrapper struct only; the binding keeps owning the captured state.
-	Borrowed bool
-	// NativeCall, when set, computes the result from evaluated argument
-	// values. Arity gives the fixed argument count. Native holds the
-	// implementation's opaque state and NativeFree releases it before a
-	// temporary function is freed.
-	NativeCall  func(c *Context, state any, values []core.Value) Result
-	Arity       int
-	Native      any
-	NativeFree  func(a mem.Allocator, state any)
-}
-
 type Program struct {
 	Alloc           mem.Allocator
 	Engine          *core.Engine
@@ -145,7 +118,7 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 		}
 		if d.Function {
 			function := mem.Alloc[Function](a)
-			function.Parameters, function.Expression, function.Scope, function.Owned, function.ParametersOwned, function.Definition = convertParameters(a, d.Parameters), d.Expression, p.Scope, true, true, d
+			function.Kind, function.Parameters, function.Expression, function.Scope, function.ParametersOwned, function.Definition = FunctionDefinition, convertParameters(a, d.Parameters), d.Expression, p.Scope, true, d
 			p.Scope.setFunction(d.Name, function)
 			continue
 		}
@@ -361,35 +334,6 @@ func freeDefinitionSource(source *core.Source) {
 	mem.Free(state.Alloc, state)
 }
 
-func freeCallables(a mem.Allocator, value *core.Value) {
-	if value.Kind == core.Callable {
-		function := value.Callable.(*Function)
-		if function.Temporary {
-			if function.NativeFree != nil {
-				function.NativeFree(a, function.Native)
-				function.Native = nil
-			}
-			function.Scope.Free()
-			mem.Free(a, function)
-		} else if function.Borrowed {
-			function.Native = nil
-			mem.Free(a, function)
-		}
-		value.Callable = nil
-		return
-	}
-	if value.Kind == core.List {
-		for i := range value.List {
-			freeCallables(a, &value.List[i])
-		}
-	}
-	if value.Kind == core.Record {
-		for i := range value.Record {
-			freeCallables(a, &value.Record[i].Value)
-		}
-	}
-}
-
 func (p *Program) definition(engine *core.EngineContext, d *definition.Definition) Result {
 	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState}
 	result := p.definitionValue(engine, d, p.Scope, context)
@@ -411,7 +355,9 @@ func (p *Program) definitionValue(engine *core.EngineContext, d *definition.Defi
 	for i := range d.Words {
 		r := p.Render(context.Run, d.Words[i].Template, scope, context)
 		if r.Waiting || r.Diagnostic.Code != "" {
-			freeValues(context.Run, values)
+			// Render yields strings only, so no callable shares storage here,
+			// but discard deeply for uniformity with other discard paths.
+			freeValuesWithCallables(context.Run, values)
 			return r
 		}
 		values[i] = r.Value

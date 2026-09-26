@@ -5,7 +5,6 @@ import (
 	"littlemake/core"
 	"littlemake/lang/expr"
 	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
 	"solod.dev/so/strings"
 )
@@ -78,18 +77,6 @@ func stringify(a mem.Allocator, value core.Value) (string, bool) {
 	return "", false
 }
 
-func freeValues(a mem.Allocator, values []core.Value) {
-	for i := range values {
-		values[i].Free(a)
-	}
-	slices.Free(a, values)
-}
-func freeRecord(a mem.Allocator, values []core.RecordField) {
-	for i := range values {
-		values[i].Value.Free(a)
-	}
-	slices.Free(a, values)
-}
 func owned(a mem.Allocator, text string) string {
 	if len(text) == 0 {
 		return ""

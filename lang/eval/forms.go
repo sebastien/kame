@@ -84,7 +84,7 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 		for i := 2; i < len(values); i++ {
 			function.Body = slices.Append(context.Run, function.Body, expr.Clone(context.Run, values[i]))
 		}
-		function.Parameters, function.Scope, function.Owned, function.ParametersOwned, function.ParameterNamesOwned, function.BodyOwned = parameters, scope, true, true, true, true
+		function.Kind, function.Parameters, function.Scope, function.ParametersOwned, function.ParameterNamesOwned, function.BodyOwned = FunctionDefinition, parameters, scope, true, true, true
 		scope.setFunction(values[0].Text, function)
 		return Result{Value: core.Value{Kind: core.Nil}}
 	}

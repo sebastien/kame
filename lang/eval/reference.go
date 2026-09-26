@@ -62,12 +62,16 @@ func (p *Program) referencePart(value core.Value, part expr.ReferencePart, conte
 				}
 			}
 			if !found {
+				// Shallow: fields share callable storage with the source record,
+				// which still owns those scopes.
 				freeRecord(context.Run, fields)
 				return failure(context.Run, "REF_MISSING", part.Span, "record field not found")
 			}
 			start = i + 1
 		}
 		result := Result{Value: core.NewRecord(context.Run, fields)}
+		// Shallow: NewRecord shallow-cloned callables shared with the source;
+		// the source and the result each own one logical share.
 		freeRecord(context.Run, fields)
 		return result
 	}

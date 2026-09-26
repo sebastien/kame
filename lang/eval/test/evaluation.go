@@ -5,8 +5,8 @@ import (
 	"littlemake/diagnostic"
 	"littlemake/lang/eval"
 	"littlemake/lang/expr"
-	"littlemake/lang/script"
 	"littlemake/host"
+	"littlemake/lang/script"
 	"littlemake/operations"
 	"solod.dev/so/mem"
 	"solod.dev/so/testing"
@@ -142,6 +142,120 @@ func TestLexicalFunctionAndOperationShadowing(t *testing.T) {
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(( [x] x) \"ok\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "ok" { t.Error("lambda call failed") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestLetBoundLambdaReleasesItsScope(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [f ([x] x)] \"x\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "x" { t.Error("let expression failed") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestEscapedLetLambdaRetainsThenReleasesItsScope(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [f ([x] x)] f)")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Callable { t.Error("let lambda did not escape") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestLetLambdaAliasReleasesItsScope(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [f ([x] x) g f] \"x\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "x" { t.Error("let lambda alias failed") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+// Leak checks ride on t.Allocator's Tracker: each test below frees its
+// result, engine, program, and registry, so a leaked Scope, wrapper, or
+// Native state fails the test through malloc/free mismatch.
+
+func TestSectionInLetReleasesItsScope(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Error("library registration failed") }
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [s ((list _0 _1))] \"x\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "x" { t.Error("let section failed") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestDefInsideLetReleasesItsFunction(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [] (def foo [x] x) \"x\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "x" { t.Error("def inside let failed") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestNativeReplaceSectionInLetReleasesItsState(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Error("library registration failed") }
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [r (replace ./src/{n:*}.c ./build/{n}.o)] \"x\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "x" { t.Error("native section let failed") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestListErrorDiscardsCallableScopes(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "[([x] x) missing]")
+	if result.Diagnostic.Code != "REF_MISSING" { t.Error("list error did not fail") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestRecordErrorDiscardsCallableScopes(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "[f: ([x] x) bad: missing]")
+	if result.Diagnostic.Code != "REF_MISSING" { t.Error("record error did not fail") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestCallErrorDiscardsCallableArgs(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(([f] f) ([x] x) missing)")
+	if result.Diagnostic.Code != "REF_MISSING" { t.Error("call error did not fail") }
 	result.Free(a)
 	engine.Free(); program.Free(); parsed.Free(); registry.Free()
 }
