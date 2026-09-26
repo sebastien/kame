@@ -2,6 +2,7 @@
 package posix
 
 import (
+	"littlemake/host"
 	"solod.dev/so/c"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
@@ -13,106 +14,52 @@ var posix_h string
 //so:embed posix.c
 var posix_c string
 
-// Outcome and EventKind values must match the lm_event enum in posix.c.
-type Outcome int
+// These aliases preserve the POSIX package's public API while the portable
+// process contract lives in host.
+type Outcome = host.ProcessOutcome
+type EventKind = host.ProcessEventKind
+type DiagnosticCode = string
+type Diagnostic = host.ProcessDiagnostic
+type Request = host.ProcessRequest
+type Event = host.ProcessEvent
+type EventResult = host.ProcessEventResult
 
 const (
-	Exited Outcome = iota
-	TimedOut
-	Cancelled
-	Failed
+	Exited                = host.ProcessExited
+	TimedOut              = host.ProcessTimedOut
+	Cancelled             = host.ProcessCancelled
+	Failed                = host.ProcessFailed
+	Started               = host.ProcessStarted
+	Stdout                = host.ProcessStdout
+	Stderr                = host.ProcessStderr
+	Terminal              = host.ProcessTerminal
+	DiagnosticHostFailure = "HOST_FAIL"
 )
-
-type EventKind int
-
-const (
-	Started EventKind = iota
-	Stdout
-	Stderr
-	Terminal
-)
-
-// DiagnosticCode is a stable code from docs/spec/011-diagnostics.md.
-type DiagnosticCode string
-
-const (
-	DiagnosticHostFailure DiagnosticCode = "HOST_FAIL"
-)
-
-// Diagnostic carries a host failure code and its owned message.
-type Diagnostic struct {
-	Code    DiagnosticCode
-	Message string
-}
-
-// Request remains owned by its caller until its terminal event. Shell contains
-// the executable followed by its arguments; Script is appended as its final
-// argument.
-type Request struct {
-	ID          int64
-	Shell       []string
-	Script      []byte
-	Directory   string
-	Environment []string // Complete KEY=VALUE entries; it is never inherited.
-	TimeoutMS   int64
-	RetainBytes int
-}
-
-// Event owns Data, Stdout, Stderr, and Diagnostic and must be released with Free.
-type Event struct {
-	Kind              EventKind
-	ID                int64
-	PID               int64
-	PGID              int64
-	Outcome           Outcome
-	Status            int
-	Signal            int
-	Data              []byte
-	Diagnostic        Diagnostic
-	Stdout            []byte
-	Stderr            []byte
-	StdoutTruncated   bool
-	StderrTruncated   bool
-}
-
-type EventResult struct {
-	Event Event
-	OK    bool
-}
-
-func (e *Event) Free(a mem.Allocator) {
-	if len(e.Data) != 0 { slices.Free(a, e.Data) }
-	if len(e.Stdout) != 0 { slices.Free(a, e.Stdout) }
-	if len(e.Stderr) != 0 { slices.Free(a, e.Stderr) }
-	if e.Diagnostic.Code != "" { mem.FreeString(a, string(e.Diagnostic.Code)) }
-	if e.Diagnostic.Message != "" { mem.FreeString(a, e.Diagnostic.Message) }
-	*e = Event{}
-}
 
 //so:extern lm_host
 type nativeHost struct{}
 
 //so:extern lm_event
 type nativeEvent struct {
-	kind      c.Int
-	id        int64
-	pid       int64
-	pgid      int64
-	outcome   c.Int
-	status    c.Int
-	signal    c.Int
-	data      *byte
-	dataLen   c.Int
-	diagnosticCode *byte
+	kind              c.Int
+	id                int64
+	pid               int64
+	pgid              int64
+	outcome           c.Int
+	status            c.Int
+	signal            c.Int
+	data              *byte
+	dataLen           c.Int
+	diagnosticCode    *byte
 	diagnosticCodeLen c.Int
-	diagnostic *byte
-	diagnosticLen c.Int
-	output    *byte
-	stdoutLen c.Int
-	errorOutput *byte
-	stderrLen c.Int
-	stdoutTruncated bool
-	stderrTruncated bool
+	diagnostic        *byte
+	diagnosticLen     c.Int
+	output            *byte
+	stdoutLen         c.Int
+	errorOutput       *byte
+	stderrLen         c.Int
+	stdoutTruncated   bool
+	stderrTruncated   bool
 }
 
 //so:extern
@@ -161,7 +108,7 @@ func lm_cli_environment_size() c.Int { return 0 }
 func lm_cli_environment_copy(out []byte) c.Int { _ = out; return 0 }
 
 type Host struct {
-	Alloc mem.Allocator
+	Alloc  mem.Allocator
 	native *nativeHost
 }
 
@@ -173,42 +120,58 @@ func New(a mem.Allocator) *Host {
 
 // Start queues a failed terminal event when the host rejects the request. A
 // nil host cannot queue anything and returns false without an event.
-func (h *Host) Start(request Request) bool {
-	if h == nil || h.native == nil { return false }
+func (h *Host) Start(request host.ProcessRequest) bool {
+	if h == nil || h.native == nil {
+		return false
+	}
 	return lm_host_start(h.native, request.ID, request.Shell, request.Script, request.Directory, request.Environment, request.TimeoutMS, request.RetainBytes) == 0
 }
 
 // Pump waits for at most waitMS milliseconds, reads available process output,
 // and advances timeout and cancellation state. Negative waits are treated as 0.
 func (h *Host) Pump(waitMS int) bool {
-	if h == nil || h.native == nil { return false }
-	if waitMS < 0 { waitMS = 0 }
+	if h == nil || h.native == nil {
+		return false
+	}
+	if waitMS < 0 {
+		waitMS = 0
+	}
 	return lm_host_pump(h.native, c.Int(waitMS)) == 0
 }
 
 func cloneBytes(a mem.Allocator, ptr *byte, n c.Int) []byte {
-	if ptr == nil || n <= 0 { return nil }
+	if ptr == nil || n <= 0 {
+		return nil
+	}
 	return slices.Clone(a, c.Bytes(ptr, int(n)))
 }
 
 func cloneString(a mem.Allocator, ptr *byte, n c.Int) string {
-	if ptr == nil || n <= 0 { return "" }
+	if ptr == nil || n <= 0 {
+		return ""
+	}
 	return string(cloneBytes(a, ptr, n))
 }
 
-func cloneDiagnostic(a mem.Allocator, code *byte, codeLen c.Int, message *byte, messageLen c.Int) Diagnostic {
-	if code == nil || codeLen <= 0 { return Diagnostic{} }
-	return Diagnostic{Code: DiagnosticCode(cloneString(a, code, codeLen)), Message: cloneString(a, message, messageLen)}
+func cloneDiagnostic(a mem.Allocator, code *byte, codeLen c.Int, message *byte, messageLen c.Int) host.ProcessDiagnostic {
+	if code == nil || codeLen <= 0 {
+		return Diagnostic{}
+	}
+	return Diagnostic{Code: cloneString(a, code, codeLen), Message: cloneString(a, message, messageLen)}
 }
 
 // Next returns the next owned event, if any.
-func (h *Host) Next() EventResult {
-	if h == nil || h.native == nil { return EventResult{} }
+func (h *Host) Next() host.ProcessEventResult {
+	if h == nil || h.native == nil {
+		return EventResult{}
+	}
 	var raw nativeEvent
-	if !lm_host_next(h.native, &raw) { return EventResult{} }
-	e := Event{Kind: EventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: Outcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated}
+	if !lm_host_next(h.native, &raw) {
+		return EventResult{}
+	}
+	e := host.ProcessEvent{Kind: host.ProcessEventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: host.ProcessOutcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated}
 	lm_event_free(&raw)
-	return EventResult{Event: e, OK: true}
+	return host.ProcessEventResult{Event: e, OK: true}
 }
 
 // Cancel requests process-group termination. Repeating it is harmless.
@@ -218,11 +181,15 @@ func (h *Host) Cancel(id int64) bool {
 
 // CancelAll requests termination for every active process group.
 func (h *Host) CancelAll() {
-	if h != nil && h.native != nil { lm_host_cancel_all(h.native) }
+	if h != nil && h.native != nil {
+		lm_host_cancel_all(h.native)
+	}
 }
 
 func (h *Host) Active() int {
-	if h == nil || h.native == nil { return 0 }
+	if h == nil || h.native == nil {
+		return 0
+	}
 	return int(lm_host_active(h.native))
 }
 
@@ -237,15 +204,24 @@ func TakeSignal() int { return int(lm_cli_take_signal()) }
 // Environment returns a complete owned snapshot of the process environment.
 func Environment(a mem.Allocator) []string {
 	size := int(lm_cli_environment_size())
-	if size <= 0 { return nil }
+	if size <= 0 {
+		return nil
+	}
 	data := mem.AllocSlice[byte](a, size, size)
 	written := int(lm_cli_environment_copy(data))
-	if written < 0 { mem.FreeSlice(a, data); return nil }
+	if written < 0 {
+		mem.FreeSlice(a, data)
+		return nil
+	}
 	var values []string
 	start := 0
 	for i := 0; i < written; i++ {
-		if data[i] != 0 { continue }
-		if i > start { values = slices.Append(a, values, string(slices.Clone(a, data[start:i]))) }
+		if data[i] != 0 {
+			continue
+		}
+		if i > start {
+			values = slices.Append(a, values, string(slices.Clone(a, data[start:i])))
+		}
 		start = i + 1
 	}
 	mem.FreeSlice(a, data)
@@ -253,21 +229,32 @@ func Environment(a mem.Allocator) []string {
 }
 
 func FreeEnvironment(a mem.Allocator, values []string) {
-	for i := range values { mem.FreeString(a, values[i]) }
-	if len(values) != 0 { slices.Free(a, values) }
+	for i := range values {
+		mem.FreeString(a, values[i])
+	}
+	if len(values) != 0 {
+		slices.Free(a, values)
+	}
 }
 
 // ForceWaitpidFailureForTest makes the next process reaping attempt fail. It is
 // exported because Solod tests are a separate package that can only reach the
 // exported API; it stays the sole test-only seam in this package.
 func (h *Host) ForceWaitpidFailureForTest() {
-	if h != nil && h.native != nil { lm_host_force_waitpid_failure(h.native) }
+	if h != nil && h.native != nil {
+		lm_host_force_waitpid_failure(h.native)
+	}
 }
 
 // Free terminates active process groups and releases the host. Call it exactly
 // once: the handle's own memory is released, so it cannot be reused.
 func (h *Host) Free() {
-	if h == nil { return }
-	if h.native != nil { lm_host_free(h.native); h.native = nil }
+	if h == nil {
+		return
+	}
+	if h.native != nil {
+		lm_host_free(h.native)
+		h.native = nil
+	}
 	mem.Free(h.Alloc, h)
 }

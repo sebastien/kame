@@ -6,8 +6,8 @@ import (
 	"littlemake/lang/eval"
 	"littlemake/lang/expr"
 	"littlemake/lang/script"
-	"littlemake/operations"
 	"littlemake/host"
+	"littlemake/operations"
 	"solod.dev/so/mem"
 	"solod.dev/so/testing"
 )

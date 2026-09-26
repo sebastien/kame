@@ -223,6 +223,16 @@ static int lm_spawn_failed(lm_host *host, int64_t id, const char *message) {
     return -1;
 }
 
+// A post-fork setup failure must not leave an untracked child behind. Retry an
+// interrupted wait and let the terminal diagnostic distinguish failed cleanup
+// from an ordinary spawn failure.
+static bool lm_abort_spawn(pid_t pid) {
+    if (kill(-pid, SIGKILL) < 0 && errno != ESRCH) return false;
+    pid_t result;
+    do { result = waitpid(pid, NULL, 0); } while (result < 0 && errno == EINTR);
+    return result == pid;
+}
+
 int lm_host_start(lm_host *host, int64_t id, so_Slice shell, so_Slice script, so_String directory, so_Slice environment, int64_t timeout, so_int retain) {
     if (!host) return -1;
     // Every rejected request emits exactly one failed terminal event.
@@ -261,11 +271,11 @@ int lm_host_start(lm_host *host, int64_t id, so_Slice shell, so_Slice script, so
     lm_free_strings(argv, (int)shell.len + 1); lm_free_strings(envp, (int)environment.len); free(cwd);
     close(out[1]); close(err[1]); close(execerr[1]); out[1] = err[1] = execerr[1] = -1;
     setpgid(pid, pid);
-    if (lm_set_nonblock(out[0]) || lm_set_nonblock(err[0]) || lm_set_nonblock(execerr[0])) { kill(-pid, SIGKILL); waitpid(pid, NULL, 0); lm_close(&out[0]); lm_close(&err[0]); lm_close(&execerr[0]); return lm_spawn_failed(host, id, "spawn failed"); }
+    if (lm_set_nonblock(out[0]) || lm_set_nonblock(err[0]) || lm_set_nonblock(execerr[0])) { bool reaped = lm_abort_spawn(pid); lm_close(&out[0]); lm_close(&err[0]); lm_close(&execerr[0]); return lm_spawn_failed(host, id, reaped ? "spawn failed" : "waitpid failed"); }
     if (host->len == host->cap) {
         int cap = host->cap ? host->cap * 2 : 4;
         lm_process *processes = realloc(host->processes, (size_t)cap * sizeof(*processes));
-        if (!processes) { kill(-pid, SIGKILL); waitpid(pid, NULL, 0); lm_close(&out[0]); lm_close(&err[0]); lm_close(&execerr[0]); return lm_spawn_failed(host, id, "spawn failed"); }
+        if (!processes) { bool reaped = lm_abort_spawn(pid); lm_close(&out[0]); lm_close(&err[0]); lm_close(&execerr[0]); return lm_spawn_failed(host, id, reaped ? "spawn failed" : "waitpid failed"); }
         host->processes = processes; host->cap = cap;
     }
     lm_process *p = &host->processes[host->len++];

@@ -29,6 +29,7 @@ The end-to-end binary is always the checks-enabled debug build
 ```text
 tests/
   harness.sh                       runner
+  lib-bootstrap.sh                 shared test-script bootstrap
   lib-testing.sh                   primitives and reporting
   lib-cli.sh                       CLI binary, invocation, assertion helpers
   CATALOG.tsv                      machine-readable test catalog
@@ -56,15 +57,17 @@ tests/
   it as `TMPDIR`, and changes into it; `test-end` reports and removes it.
 - Results are recorded in an append-only file inside the scratch directory, so
   assertions made in subshells or background jobs still reach the report.
-- Test scripts source `tests/lib-testing.sh` and `tests/lib-cli.sh`, call
-  `test-start`, run steps and assertions, and finish with `test-end`.
+- Test scripts source `tests/lib-bootstrap.sh` (which loads `lib-testing.sh`
+  and `lib-cli.sh`), call `test-start`, run steps and assertions, and finish
+  with `test-end`.
 
 ## Binary contract (`tests/lib-cli.sh`)
 
 - `LITTLEMAKE` points at `dist/littlemake.debug`.
-- `cli_build` builds with `so build -check=warn -o dist/littlemake.debug
-  ./cmd/littlemake` only when the binary is missing or older than tracked
-  sources, under a `flock` guard shared by concurrent runs.
+- `cli_build` builds the default debug binary through `make
+  dist/littlemake.debug` only when it is missing or older than tracked sources,
+  under a `flock` guard shared by concurrent runs. A caller-selected `CLI_BIN`
+  uses the equivalent direct build.
 - Every invocation runs with a controlled environment (`LC_ALL=C`, `TZ=UTC`,
   `HOME=$TEST_PATH`, no leaked `TMPDIR`) and a `timeout` safety bound.
 - `CDPATH` is unset so `cd` cannot pollute captured output.

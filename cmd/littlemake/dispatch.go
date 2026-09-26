@@ -20,39 +20,23 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 			writeDoHelp(out)
 			return 0
 		}
-		if args[1] == "help" {
-			return runHelpCommand(args[2:], out, errOut)
-		}
-		if args[1] == "parse" {
-			return runParse(args[2:], in, out, errOut)
-		}
-		if args[1] == "fmt" {
-			return runFormat(args[2:], in, out, errOut)
-		}
-		if args[1] == "plan" {
-			return runPlan(args[2:], out, errOut)
-		}
-		if args[1] == "cat" {
-			return runCat(args[2:], out, errOut)
-		}
-		if args[1] == "inputs" {
-			return runGraph(args[2:], out, errOut, "inputs")
-		}
-		if args[1] == "outputs" {
-			return runGraph(args[2:], out, errOut, "outputs")
-		}
-		if args[1] == "span" {
-			return runGraph(args[2:], out, errOut, "span")
-		}
-		if args[1] == "expr" {
-			return runExpr(args[2:], in, out, errOut)
-		}
-		if args[1] == "run" {
-			return runBuild(args[2:], out, errOut, true)
-		}
+		if spec := findCommand(args[1]); spec != nil { return runDoCommand(spec.Action, args[2:], in, out, errOut) }
 		cliError(errOut, "CMD_UNKNOWN", "unknown command: "+args[1])
 		io.WriteString(errOut, "run 'littlemake do --help' to list commands\n")
 		return 2
 	}
 	return runBuild(args, out, errOut, false)
+}
+
+func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
+	if action == commandRun { return runBuild(args, out, errOut, true) }
+	if action == commandPlan { return runPlan(args, out, errOut) }
+	if action == commandCat { return runCat(args, out, errOut) }
+	if action == commandInputs { return runGraph(args, out, errOut, "inputs") }
+	if action == commandOutputs { return runGraph(args, out, errOut, "outputs") }
+	if action == commandSpan { return runGraph(args, out, errOut, "span") }
+	if action == commandParse { return runParse(args, in, out, errOut) }
+	if action == commandFormat { return runFormat(args, in, out, errOut) }
+	if action == commandExpr { return runExpr(args, in, out, errOut) }
+	return runHelpCommand(args, out, errOut)
 }

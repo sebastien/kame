@@ -3,11 +3,8 @@
 # Spec: docs/spec/013-tests.md — T008-01-cache-hit
 set -euo pipefail
 
-BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # shellcheck disable=SC1091
-source "$(dirname "$BASE")/tests/lib-testing.sh"
-# shellcheck disable=SC1091
-source "$(dirname "$BASE")/tests/lib-cli.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 
 test-start "T008-01 cached task lookup"
 

@@ -3,11 +3,8 @@
 # Spec: docs/spec/013-tests.md — T004-08-lang-format-stability
 set -euo pipefail
 
-BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 # shellcheck disable=SC1091
-source "$(dirname "$BASE")/tests/lib-testing.sh"
-# shellcheck disable=SC1091
-source "$(dirname "$BASE")/tests/lib-cli.sh"
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 
 test-start "T004-08 format preserves the AST"
 

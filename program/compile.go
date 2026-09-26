@@ -3,7 +3,6 @@ package program
 import (
 	"littlemake/core"
 	"littlemake/diagnostic"
-	"littlemake/host/posix"
 	"littlemake/lang/eval"
 	"littlemake/lang/rule"
 	"littlemake/lang/script"
@@ -26,10 +25,13 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	if compiled.Program == nil {
 		engine.Free()
+		if options.Host != nil {
+			options.Host.Free()
+		}
 		return result
 	}
 	p := mem.Alloc[Program](a)
-	p.Alloc, p.Engine, p.Eval, p.Parsed = a, engine, compiled.Program, parsed
+	p.Alloc, p.Engine, p.Eval, p.Parsed, p.Host = a, engine, compiled.Program, parsed, options.Host
 	p.nextRequest = 1 << 60 // Evaluator queue request IDs start at one.
 	p.Options.Directory, p.Options.DryRun, p.Options.Force, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.Force, options.RetainBytes, options.Jobs
 	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
@@ -77,7 +79,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 			return result
 		}
 	}
-	p.Host, p.nextRequest = posix.New(a), 1<<32
+	p.nextRequest = 1 << 32
 	result.Program = p
 	return result
 }

@@ -4,7 +4,6 @@ import (
 	"littlemake/core"
 	"littlemake/diagnostic"
 	"littlemake/host"
-	"littlemake/host/posix"
 	"littlemake/lang/rule"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
@@ -23,13 +22,13 @@ func (p *Program) pump(wait int) {
 		}
 		event := next.Event
 		entry := p.instanceForRequest(event.ID)
-		if entry != nil && event.Kind == posix.Stdout {
+		if entry != nil && event.Kind == host.ProcessStdout {
 			p.emitNode(entry.Node, entry.Plan.Target, Stdout, diagnostic.Span{}, event.Data)
-		} else if entry != nil && event.Kind == posix.Stderr {
+		} else if entry != nil && event.Kind == host.ProcessStderr {
 			p.emitNode(entry.Node, entry.Plan.Target, Stderr, diagnostic.Span{}, event.Data)
-		} else if entry != nil && event.Kind == posix.Started {
+		} else if entry != nil && event.Kind == host.ProcessStarted {
 			p.emitNode(entry.Node, entry.Plan.Target, ProcessStarted, diagnostic.Span{}, nil)
-		} else if event.Kind == posix.Terminal {
+		} else if event.Kind == host.ProcessTerminal {
 			if entry != nil {
 				p.emitNode(entry.Node, entry.Plan.Target, ProcessExited, diagnostic.Span{}, nil)
 			}
@@ -57,7 +56,7 @@ func (p *Program) drainRequests() {
 			if retain < cacheLogDefault {
 				retain = cacheLogDefault
 			}
-			if script == "" || p.Host == nil || !p.Host.Start(posix.Request{ID: request.ID, Shell: p.Options.Shell, Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}) {
+			if script == "" || p.Host == nil || !p.Host.Start(host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}) {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else {
 				p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0})
@@ -115,13 +114,13 @@ func (p *Program) drainCancellations() {
 	}
 }
 
-func (p *Program) complete(event posix.Event) {
+func (p *Program) complete(event host.ProcessEvent) {
 	var d diagnostic.Diagnostic
-	if event.Outcome == posix.Failed {
+	if event.Outcome == host.ProcessFailed {
 		d = failure(p.Alloc, "HOST_FAIL", event.Diagnostic.Message)
-	} else if event.Outcome == posix.TimedOut {
+	} else if event.Outcome == host.ProcessTimedOut {
 		d = failure(p.Alloc, "RECIPE_TIMEOUT", "recipe timed out")
-	} else if event.Outcome == posix.Cancelled {
+	} else if event.Outcome == host.ProcessCancelled {
 		d = failure(p.Alloc, "EXEC_CANCELLED", "recipe cancelled")
 	} else if event.Status != 0 {
 		d = failure(p.Alloc, "RECIPE_FAIL", "recipe exited unsuccessfully")
@@ -156,7 +155,7 @@ func (p *Program) complete(event posix.Event) {
 		if p.Options.CacheRetainBytes > retain {
 			retain = p.Options.CacheRetainBytes
 		}
-		request := posix.Request{ID: retryID, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+		request := host.ProcessRequest{ID: retryID, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 		if p.Host != nil && p.Host.Start(request) {
 			entry.retryCount++
 			node.HostRequestID = retryID
@@ -172,4 +171,22 @@ func (p *Program) complete(event posix.Event) {
 	} else {
 		d.Free(p.Alloc)
 	}
+}
+
+func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
+	fields := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(event.Status)}}, {Key: "stdout", Value: core.NewBytes(a, event.Stdout)}, {Key: "stderr", Value: core.NewBytes(a, event.Stderr)}}
+	value := core.NewRecord(a, fields)
+	for i := range fields {
+		fields[i].Value.Free(a)
+	}
+	return value
+}
+
+func (p *Program) instanceForRequest(id int64) *instance {
+	for i := range p.Instances {
+		if p.Instances[i].Node.HostRequestID == id {
+			return &p.Instances[i]
+		}
+	}
+	return nil
 }

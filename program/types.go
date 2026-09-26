@@ -4,7 +4,7 @@ package program
 import (
 	"littlemake/core"
 	"littlemake/diagnostic"
-	"littlemake/host/posix"
+	"littlemake/host"
 	"littlemake/lang/eval"
 	"littlemake/lang/rule"
 	"littlemake/lang/script"
@@ -185,6 +185,10 @@ func (h *Handle) Free() {
 	p := h.Program
 	if h.Root != nil {
 		p.Engine.Release(h.Root)
+		// A caller may drop its final handle without issuing Cancel. Forward the
+		// resulting engine cancellation immediately so process groups do not wait
+		// for another runtime tick that may never occur.
+		p.drainCancellations()
 	}
 	if h.Target != "" {
 		mem.FreeString(p.Alloc, h.Target)
@@ -194,6 +198,9 @@ func (h *Handle) Free() {
 }
 
 type Options struct {
+	// Host executes recipe scripts. Compile transfers ownership to the Program,
+	// which releases it during Program.Free.
+	Host        host.ProcessHost
 	Directory   string
 	Shell       []string
 	Environment []string
@@ -219,7 +226,7 @@ type Program struct {
 	Eval        *eval.Program
 	Parsed      *script.Script
 	ParsedOwned bool
-	Host        *posix.Host
+	Host        host.ProcessHost
 	Options     Options
 	Rules       []registeredRule
 	Instances   []instance

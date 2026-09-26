@@ -115,7 +115,7 @@ func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bo
 	environment := posix.Environment(mem.System)
 	environment = mergeEnvironment(environment, options.Environment)
 	session.Parsed = script.Parse(mem.System, session.Source.Name, session.Source.Text)
-	compiled := program.Compile(mem.System, session.Parsed, session.Registry, program.Options{Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, Verbose: options.Verbose, Grants: grants})
+	compiled := program.Compile(mem.System, session.Parsed, session.Registry, program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, Verbose: options.Verbose, Grants: grants})
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
 		for i := range compiled.Diagnostics {

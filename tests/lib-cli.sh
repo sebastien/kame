@@ -100,8 +100,12 @@ function cli_build {
 		if [ -x "$CLI_BIN" ] && ! cli_sources_newer "$CLI_BIN"; then
 			exit 0
 		fi
-		cd "$CLI_ROOT" || exit 1
-		so build -check=warn -o "$CLI_BIN" ./cmd/littlemake >&2 || exit 1
+		if [ "$CLI_BIN" = "$CLI_ROOT/dist/littlemake.debug" ]; then
+			make -C "$CLI_ROOT" dist/littlemake.debug >&2 || exit 1
+		else
+			cd "$CLI_ROOT" || exit 1
+			so build -check=warn -o "$CLI_BIN" ./cmd/littlemake >&2 || exit 1
+		fi
 	) 9>"$lock"; then
 		test-fail "cannot build the CLI binary"
 		exit 1

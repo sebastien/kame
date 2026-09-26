@@ -7,9 +7,9 @@ import (
 // version is the release reported by -V/--version.
 const version = "0.1.0"
 
-// topHelpText is the overview shown by -h/--help and when a bare invocation
-// finds no build source. It is static so it can be written without allocation.
-const topHelpText = `littlemake - a reactive build engine with a build language
+// topHelpBeforeCommands and topHelpAfterCommands bracket the command list,
+// which is rendered from doCommands so dispatch and help share one registry.
+const topHelpBeforeCommands = `littlemake - a reactive build engine with a build language
 
 Usage:
   littlemake [OPTIONS] [TARGET...]
@@ -40,15 +40,10 @@ Build options:
   -V, --version          show the version
 
 Commands (littlemake do COMMAND):
-  run      materialize targets and stream all execution events
-  plan     print the resolved plan without executing
-  cat      materialize one target and print its artifact
-  inputs   list declared input paths
-  outputs  list declared output paths
-  span     show transitive inputs and outputs
-  parse    parse a language file and print a JSON AST
-  fmt      format source in place or check it
-  expr     evaluate a standalone expression
+
+`
+
+const topHelpAfterCommands = `
 
 Examples:
   littlemake                          build the default target
@@ -63,24 +58,17 @@ Examples:
 Run 'littlemake do COMMAND --help' for command-specific help.
 `
 
-// doHelpText lists the utility commands of the do namespace.
-const doHelpText = `littlemake do COMMAND [OPTIONS] [ARG...]
+const doHelpBeforeCommands = `littlemake do COMMAND [OPTIONS] [ARG...]
 
 Utility commands for building, inspecting, and working with LittleMake
 sources. Build execution still uses the primary invocation; these commands add
 inspection and language tooling.
 
 Commands:
-  run      materialize targets and stream all execution events
-  plan     print the resolved plan without executing
-  cat      materialize one target and print its artifact
-  inputs   list declared input paths (--depth N)
-  outputs  list declared output paths (--depth N)
-  span     show transitive inputs and outputs (--expand, --depth N)
-  parse    parse a language file and print a JSON AST (--lang LANG)
-  fmt      format source in place (-i) or check it (-n)
-  expr     evaluate a standalone expression with capability grants
-  help     show this help, or help for one COMMAND
+
+`
+
+const doHelpAfterCommands = `
 
 Run 'littlemake do COMMAND --help' for command-specific help.
 `
@@ -213,23 +201,75 @@ Options:
   -h, --help                show this help
 `
 
-func writeTopHelp(out io.Writer) { io.WriteString(out, topHelpText) }
-func writeDoHelp(out io.Writer) { io.WriteString(out, doHelpText) }
+type commandAction int
+
+const (
+	commandRun commandAction = iota
+	commandPlan
+	commandCat
+	commandInputs
+	commandOutputs
+	commandSpan
+	commandParse
+	commandFormat
+	commandExpr
+	commandHelp
+)
+
+type commandSpec struct {
+	Name       string
+	TopSummary string
+	DoSummary  string
+	Help       string
+	Action     commandAction
+}
+
+var doCommands = []commandSpec{
+	{Name: "run", TopSummary: "materialize targets and stream all execution events", DoSummary: "materialize targets and stream all execution events", Help: runHelpText, Action: commandRun},
+	{Name: "plan", TopSummary: "print the resolved plan without executing", DoSummary: "print the resolved plan without executing", Help: planHelpText, Action: commandPlan},
+	{Name: "cat", TopSummary: "materialize one target and print its artifact", DoSummary: "materialize one target and print its artifact", Help: catHelpText, Action: commandCat},
+	{Name: "inputs", TopSummary: "list declared input paths", DoSummary: "list declared input paths (--depth N)", Help: inputsHelpText, Action: commandInputs},
+	{Name: "outputs", TopSummary: "list declared output paths", DoSummary: "list declared output paths (--depth N)", Help: outputsHelpText, Action: commandOutputs},
+	{Name: "span", TopSummary: "show transitive inputs and outputs", DoSummary: "show transitive inputs and outputs (--expand, --depth N)", Help: spanHelpText, Action: commandSpan},
+	{Name: "parse", TopSummary: "parse a language file and print a JSON AST", DoSummary: "parse a language file and print a JSON AST (--lang LANG)", Help: parseHelpText, Action: commandParse},
+	{Name: "fmt", TopSummary: "format source in place or check it", DoSummary: "format source in place (-i) or check it (-n)", Help: fmtHelpText, Action: commandFormat},
+	{Name: "expr", TopSummary: "evaluate a standalone expression", DoSummary: "evaluate a standalone expression with capability grants", Help: exprHelpText, Action: commandExpr},
+	{Name: "help", DoSummary: "show this help, or help for one COMMAND", Action: commandHelp},
+}
+
+func writeCommandList(out io.Writer, top bool) {
+	for i := range doCommands {
+		summary := doCommands[i].DoSummary
+		if top { summary = doCommands[i].TopSummary }
+		if summary == "" { continue }
+		io.WriteString(out, "  ")
+		io.WriteString(out, doCommands[i].Name)
+		for n := len(doCommands[i].Name); n < 8; n++ { io.WriteString(out, " ") }
+		io.WriteString(out, " ")
+		io.WriteString(out, summary)
+		io.WriteString(out, "\n")
+	}
+}
+
+func writeTopHelp(out io.Writer) { io.WriteString(out, topHelpBeforeCommands); writeCommandList(out, true); io.WriteString(out, topHelpAfterCommands) }
+func writeDoHelp(out io.Writer) { io.WriteString(out, doHelpBeforeCommands); writeCommandList(out, false); io.WriteString(out, doHelpAfterCommands) }
 func writeVersion(out io.Writer) { io.WriteString(out, "littlemake "); io.WriteString(out, version); io.WriteString(out, "\n") }
+
+func findCommand(name string) *commandSpec {
+	for i := range doCommands {
+		if doCommands[i].Name == name { return &doCommands[i] }
+	}
+	return nil
+}
 
 // writeCommandHelp prints help for one do command and reports whether the
 // command is known.
 func writeCommandHelp(out io.Writer, command string) bool {
-	if command == "run" { io.WriteString(out, runHelpText); return true }
-	if command == "plan" { io.WriteString(out, planHelpText); return true }
-	if command == "cat" { io.WriteString(out, catHelpText); return true }
-	if command == "inputs" { io.WriteString(out, inputsHelpText); return true }
-	if command == "outputs" { io.WriteString(out, outputsHelpText); return true }
-	if command == "span" { io.WriteString(out, spanHelpText); return true }
-	if command == "parse" { io.WriteString(out, parseHelpText); return true }
-	if command == "fmt" { io.WriteString(out, fmtHelpText); return true }
-	if command == "expr" { io.WriteString(out, exprHelpText); return true }
-	return false
+	spec := findCommand(command)
+	if spec == nil { return false }
+	if spec.Name == "help" { writeDoHelp(out); return true }
+	io.WriteString(out, spec.Help)
+	return true
 }
 
 // runHelpCommand implements 'littlemake do help [COMMAND]'.
