@@ -1,0 +1,8 @@
+ENTRY = bin/littlemake
+OUTPUT = dist/littlemake
+
+./dist/littlemake : ./bin/littlemake
+	mkdir -p dist
+	cat @< > @>; printf 'run\n' >> runs.log
+
+default : ./dist/littlemake

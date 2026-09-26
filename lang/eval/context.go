@@ -109,6 +109,9 @@ type Phase int
 const (
 	EvaluatePhase Phase = iota
 	PlanningPhase
+	// ResolvingPhase permits read-only host requests while resolving rule inputs.
+	// It rejects effects, writes, and process execution.
+	ResolvingPhase
 	RenderingPhase
 )
 
@@ -145,14 +148,14 @@ func FreeEffects(a mem.Allocator, effects []Effect) {
 }
 
 func (c *Context) Emit(kind EffectKind, data []byte) {
-	if c.Phase == PlanningPhase {
+	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
 		c.phaseInvalid = true
 		return
 	}
 	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: kind, Data: slices.Clone(c.Run, data), Span: c.Span})
 }
 func (c *Context) EmitWrite(name string, data []byte) {
-	if c.Phase == PlanningPhase {
+	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
 		c.phaseInvalid = true
 		return
 	}
@@ -240,6 +243,10 @@ func (c *Context) Value(key core.ResourceKey) core.CurrentValue {
 // engine node. The host completes it using the request correlation data.
 func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 	if c.Phase == PlanningPhase {
+		c.phaseInvalid = true
+		return 0
+	}
+	if c.Phase == ResolvingPhase && kind != host.RequestReadFile && kind != host.RequestEnvironment {
 		c.phaseInvalid = true
 		return 0
 	}

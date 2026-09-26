@@ -29,6 +29,12 @@ type Plan struct {
 	Body                   []rule.RecipeLine
 	Captures               []template.CaptureValue
 	Inputs                 []string
+	// StaticInputs are literal and template inputs as authored.
+	StaticInputs           []string
+	// DynamicInputs are the values resolved from expression-form rule inputs.
+	// They remain separate so inspection can distinguish authored edges from
+	// resources discovered by evaluating definitions.
+	DynamicInputs          []string
 	ResourceInputs         []PlanInput
 	ResolvedInputs         []string
 	ResolvedResourceInputs []PlanInput
@@ -64,6 +70,12 @@ func (p *Plan) Free(a mem.Allocator) {
 	for i := range p.Inputs {
 		mem.FreeString(a, p.Inputs[i])
 	}
+	for i := range p.StaticInputs {
+		mem.FreeString(a, p.StaticInputs[i])
+	}
+	for i := range p.DynamicInputs {
+		mem.FreeString(a, p.DynamicInputs[i])
+	}
 	for i := range p.ResourceInputs {
 		if p.ResourceInputs[i].Display != "" {
 			mem.FreeString(a, p.ResourceInputs[i].Display)
@@ -87,6 +99,12 @@ func (p *Plan) Free(a mem.Allocator) {
 	}
 	if len(p.Inputs) != 0 {
 		slices.Free(a, p.Inputs)
+	}
+	if len(p.StaticInputs) != 0 {
+		slices.Free(a, p.StaticInputs)
+	}
+	if len(p.DynamicInputs) != 0 {
+		slices.Free(a, p.DynamicInputs)
 	}
 	if len(p.ResourceInputs) != 0 {
 		slices.Free(a, p.ResourceInputs)
@@ -250,6 +268,9 @@ type instance struct {
 	Captures             []template.CaptureValue
 	Node                 *core.Node
 	Plan                 Plan
+	// Inspection instances resolve inputs for span --expand only. They must not
+	// satisfy normal target lookup or participate in build execution.
+	Inspection           bool
 	Script               string
 	LineSpans            []diagnostic.Span
 	Operations           []string

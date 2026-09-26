@@ -161,6 +161,101 @@ func TestPlanOnlyResolvesSelectedFallbackInput(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestPlanDefersHostBackedInputWithoutPhaseFailure(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "test.lmk", "./output : @((wildcard ./source/*))\n\ttrue\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	planned := compiled.Program.Plan("./output")
+	if planned.Diagnostic.Code != "" || planned.Plan.Freshness != program.Unknown || len(planned.Plan.DynamicInputs) != 0 { t.Errorf("host-backed input plan = %s/%d/%d", planned.Diagnostic.Code, planned.Plan.Freshness, len(planned.Plan.DynamicInputs)) }
+	planned.Plan.Free(a)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestExpandPlanResolvesHostBackedInputsWithoutRunningRecipe(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-expand-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	if os.Mkdir(dir+"/src", 0o755) != nil || os.WriteFile(dir+"/src/one.c", []byte("one"), 0o644) != nil || os.WriteFile(dir+"/src/two.c", []byte("two"), 0o644) != nil { t.Fatal("source setup failed"); return }
+	parsed := script.Parse(a, "test.lmk", "./output : @((wildcard ./src/*.c))\n\tfalse\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	expanded := compiled.Program.ExpandPlan("./output")
+	if expanded.Diagnostic.Code != "" || len(expanded.Plan.DynamicInputs) != 2 || expanded.Plan.DynamicInputs[0] != "./src/one.c" || expanded.Plan.DynamicInputs[1] != "./src/two.c" { t.Errorf("expanded inputs = %s/%v", expanded.Diagnostic.Code, expanded.Plan.DynamicInputs) }
+	expanded.Plan.Free(a)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestExpandPlanDoesNotReplaceMaterializationInstance(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-expand-materialize-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	if os.Mkdir(dir+"/src", 0o755) != nil || os.WriteFile(dir+"/src/input.txt", []byte("input"), 0o644) != nil { t.Fatal("source setup failed"); return }
+	parsed := script.Parse(a, "test.lmk", "./output : @((wildcard ./src/*.txt))\n\tprintf expanded > @>\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	expanded := compiled.Program.ExpandPlan("./output")
+	if expanded.Diagnostic.Code != "" { t.Errorf("expand diagnostic: %s", expanded.Diagnostic.Code) }
+	expanded.Plan.Free(a)
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "" { t.Errorf("materialize diagnostic: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/output")
+	if readErr != nil || string(data) != "expanded" { t.Errorf("output = %q", string(data)) }
+	if len(data) != 0 { mem.FreeSlice(a, data) }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestExpandPlanDoesNotMaterializeRuleDependency(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-expand-read-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "test.lmk", "./generated:\n\tprintf ./input > @>\n./output : @((read \"./generated\"))\n\tprintf output > @>\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	expanded := compiled.Program.ExpandPlan("./output")
+	if expanded.Diagnostic.Code == "" { t.Error("expansion unexpectedly resolved generated rule") }
+	expanded.Plan.Free(a); expanded.Diagnostic.Free(a)
+	_, statErr := os.Stat(dir + "/generated")
+	if statErr == nil { t.Error("span expansion executed the generated recipe") }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestMaterializeResumesHostBackedRuleInput(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "littlemake-resolve-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	if os.Mkdir(dir+"/src", 0o755) != nil || os.WriteFile(dir+"/src/input.txt", []byte("resolved\n"), 0o644) != nil { t.Fatal("source setup failed"); return }
+	parsed := script.Parse(a, "test.lmk", "./output : @((wildcard ./src/*.txt))\n\tcat @< > @>\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "" { t.Errorf("materialize diagnostic: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/output")
+	if readErr != nil || string(data) != "resolved\n" { t.Errorf("resolved output = %q", string(data)) }
+	if len(data) != 0 { mem.FreeSlice(a, data) }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestPlanAndBuildInputLambdaReleasesItsScope(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "test.lmk", "sources = [\"source-a\" \"source-b\"]\ntask source-a :\ntask source-b :\ntask run : @((map ([s] s) sources))\n\ttrue\n")

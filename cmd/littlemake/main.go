@@ -119,7 +119,7 @@ func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bo
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
 		for i := range compiled.Diagnostics {
-			cliDiagnostic(errOut, compiled.Diagnostics[i])
+			cliDiagnosticWithSource(errOut, compiled.Diagnostics[i], session.Parsed.Source)
 		}
 		compiled.Free(mem.System)
 		session.Free()

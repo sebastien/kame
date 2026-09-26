@@ -84,7 +84,7 @@ func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
 		c.EmitWrite(v[0].Text, data)
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
-	if c.Phase == eval.PlanningPhase {
+	if c.Phase == eval.PlanningPhase || c.Phase == eval.ResolvingPhase {
 		c.MarkPhaseInvalid()
 		return failure("PHASE_INVALID", "write is invalid while planning")
 	}

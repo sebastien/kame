@@ -47,6 +47,18 @@ func TestPureOperations(t *testing.T) {
 	result = evaluate(t, program, "(map ([x] (list x x)) (list \"first\"))")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 1 || len(result.Value.List[0].List) != 2 { t.Error("map container result failed") }
 	result.Free(a)
+	result = evaluate(t, program, "(map (list \"first\" \"second\") ([x] x))")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].Text != "second" { t.Error("legacy map argument order failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(filter (list \"first\" \"second\") ([x] (includes? x \"second\")))")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 1 || result.Value.List[0].Text != "second" { t.Error("legacy filter argument order failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(flatmap \"first\" ([x] (list x x)))")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[1].Text != "first" { t.Error("legacy scalar flatmap failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(apply (list \"first\" \"second\") ([values] (count values)))")
+	if result.Diagnostic.Code != "" || result.Value.Int != 2 { t.Error("legacy list-consuming apply failed") }
+	result.Free(a)
 	engine.Free(); program.Free(); parsed.Free(); registry.Free()
 }
 

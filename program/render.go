@@ -81,6 +81,10 @@ func observeRenderDependency(value any, key core.ResourceKey) {
 		return
 	}
 	p := state.Program
+	if state.Inspection {
+		observeInspectionDependency(p, key)
+		return
+	}
 	if key.Kind == core.ResourceEnvironment || key.Kind == core.ResourceGlob {
 		state := mem.Alloc[externalValueState](p.Alloc)
 		state.Program, state.Name, state.Kind = p, cloneText(p.Alloc, key.Name), key.Kind
@@ -109,6 +113,31 @@ func observeRenderDependency(value any, key core.ResourceKey) {
 	}
 	entry := &p.Instances[state.Index]
 	p.emit(Event{Kind: DependencyDiscovered, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, DependencyKey: key})
+}
+
+// observeInspectionDependency provides only external resources to span
+// expansion. In particular it never calls instanceFor: discovering a file
+// rule here would turn a read-only inspection into recipe execution.
+func observeInspectionDependency(value any, key core.ResourceKey) {
+	p := value.(*Program)
+	if key.Name == "" {
+		return
+	}
+	if key.Kind == core.ResourceEnvironment || key.Kind == core.ResourceGlob {
+		state := mem.Alloc[externalValueState](p.Alloc)
+		state.Program, state.Name, state.Kind = p, cloneText(p.Alloc, key.Name), key.Kind
+		if p.Engine.AddOwned(key, produceExternalValue, state, freeExternalValueState) == nil {
+			freeExternalValueState(p.Alloc, state)
+		}
+		return
+	}
+	if key.Kind == core.ResourceFile {
+		state := mem.Alloc[externalFileState](p.Alloc)
+		state.Program, state.Name = p, cloneText(p.Alloc, key.Name)
+		if p.Engine.AddOwned(key, produceExternalFile, state, freeExternalFileState) == nil {
+			freeExternalFileState(p.Alloc, state)
+		}
+	}
 }
 
 // observeDefinitionDependency supplies external resources to lazy definitions.

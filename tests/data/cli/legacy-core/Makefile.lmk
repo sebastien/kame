@@ -1,0 +1,27 @@
+SOURCE_PATH = ./src/ts/littlemake
+
+SOURCE_FILES = (flatmap SOURCE_PATH
+  ([dir] (filter
+    (filter
+      (wildcard (join [dir "/**/*.ts"] ""))
+      ([f] (not (ends? f ".d.ts"))))
+    ([f] (not (includes? f "/node_modules/")))))
+)
+
+FILE_COUNT = (count SOURCE_FILES)
+
+manifest = (map
+  SOURCE_FILES
+  ([file] [
+    path: (relpath file SOURCE_PATH)
+    name: (nth (splitext file) 0)
+  ])
+)
+
+bundle = (apply
+  SOURCE_FILES
+  ([files] "Bundle of {(count files)} files")
+)
+
+default:
+	printf '%s\n' @(count SOURCE_FILES) > @>

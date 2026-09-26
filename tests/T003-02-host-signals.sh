@@ -80,4 +80,26 @@ test-step "SIGTERM cancels the active root"
 	kill_tree "$pid"
 )
 
+test-step "a repeated signal uses the conventional signal exit status"
+(
+	cd signals
+	rm -f shell.pid child.pid sleeper.out
+	cli_spawn . ./sleeper.out
+	pid="$CLI_SPAWN_PID"
+	if ! wait_for_file ./child.pid 10; then
+		test-fail "recipe did not start"
+		kill_tree "$pid"
+		exit 1
+	fi
+	kill -INT "$pid" 2>/dev/null || true
+	kill -INT "$pid" 2>/dev/null || true
+	wait_for_status "$pid" 15
+	if [ "$CLI_WAIT_STATUS" = "exited 130" ]; then
+		test-ok "second SIGINT exits 130"
+	else
+		test-fail "second SIGINT exit was $CLI_WAIT_STATUS, wanted exited 130"
+	fi
+	kill_tree "$pid"
+)
+
 test-end

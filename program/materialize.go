@@ -46,14 +46,16 @@ type renderResult struct {
 }
 type inputsResult struct {
 	Inputs         []string
+	DynamicInputs  []string
 	ResourceInputs []PlanInput
 	Owned          bool
 	Waiting        bool
 	Diagnostic     diagnostic.Diagnostic
 }
 type renderDependencyState struct {
-	Program *Program
-	Index   int
+	Program    *Program
+	Index      int
+	Inspection bool
 }
 type externalFileState struct {
 	Program *Program
@@ -270,7 +272,7 @@ func (p *Program) appendTaskClosure(index int, seen *[]int) {
 
 func (p *Program) instanceByTarget(name string) int {
 	for i := range p.Instances {
-		if p.Instances[i].Plan.Target == name {
+		if !p.Instances[i].Inspection && p.Instances[i].Plan.Target == name {
 			return i
 		}
 	}
@@ -349,7 +351,7 @@ func (p *Program) instanceFor(target string) instanceResult {
 	}
 	for i := range p.Instances {
 		entry := &p.Instances[i]
-		if entry.Rule == plan.Rule && sameCaptures(entry.Captures, plan.Captures) {
+		if !entry.Inspection && entry.Rule == plan.Rule && sameCaptures(entry.Captures, plan.Captures) {
 			return instanceResult{Node: entry.Node, Plan: plan}
 		}
 	}

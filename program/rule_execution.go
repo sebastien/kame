@@ -73,7 +73,7 @@ func yieldSpan(effects []eval.Effect) diagnostic.Span {
 }
 func validateEffects(a mem.Allocator, entry *instance, effects []eval.Effect) diagnostic.Diagnostic {
 	if hasYield(effects) && (entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1) {
-		return failureAt(a, "YIELD_INVALID", yieldSpan(effects), "yield requires one file output")
+		return failureAt(a, "EXPR_INVALID", yieldSpan(effects), "yield requires one file output")
 	}
 	return diagnostic.Diagnostic{}
 }
@@ -132,7 +132,7 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 	}
 	if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 {
 		slices.Free(p.Alloc, yielded)
-		return failure(p.Alloc, "YIELD_INVALID", "yield requires one file output")
+		return failure(p.Alloc, "EXPR_INVALID", "yield requires one file output")
 	}
 	name := p.canonicalTarget(entry.Plan.Outputs[0], true)
 	ok := mkdirParent(name)
@@ -153,6 +153,7 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 }
 
 func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsResult {
+	index := p.instanceIndex(entry.Node)
 	hasExpression := false
 	for i := range entry.Rule.Inputs {
 		if entry.Rule.Inputs[i].Kind == rule.InputExpression {
@@ -164,6 +165,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		return inputsResult{Inputs: entry.Plan.Inputs, ResourceInputs: entry.Plan.ResourceInputs}
 	}
 	var inputs []string
+	var dynamicInputs []string
 	var resourceInputs []PlanInput
 	for i := range entry.Rule.Inputs {
 		input := entry.Rule.Inputs[i]
@@ -183,12 +185,13 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		}
 		if input.Template == nil || len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil {
 			freeStrings(p.Alloc, inputs)
+			freeStrings(p.Alloc, dynamicInputs)
 			freePlanInputs(p.Alloc, resourceInputs, true)
 			return inputsResult{Diagnostic: failure(p.Alloc, "EXPR_INVALID", "invalid rule input expression")}
 		}
 		values, outputs := makeValues(p.Alloc, inputs), makeValues(p.Alloc, entry.Plan.Outputs)
-		dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
-		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.PlanningPhase, ResolverState: &dependencyState, OperationObserver: observeRenderOperation, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
+		dependencyState := renderDependencyState{Program: p, Index: index, Inspection: entry.Inspection}
+		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
 		result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
 		freeValues(p.Alloc, values)
 		freeValues(p.Alloc, outputs)
@@ -196,33 +199,50 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			eval.FreeEffects(p.Alloc, context.Effects)
 			result.Free(p.Alloc)
 			freeStrings(p.Alloc, inputs)
+			freeStrings(p.Alloc, dynamicInputs)
 			freePlanInputs(p.Alloc, resourceInputs, true)
 			return inputsResult{Diagnostic: failure(p.Alloc, "PHASE_INVALID", "build effects are invalid while planning")}
 		}
 		if result.Waiting {
 			freeStrings(p.Alloc, inputs)
+			freeStrings(p.Alloc, dynamicInputs)
 			freePlanInputs(p.Alloc, resourceInputs, true)
 			return inputsResult{Waiting: true}
 		}
 		if result.Diagnostic.Code != "" {
 			freeStrings(p.Alloc, inputs)
+			freeStrings(p.Alloc, dynamicInputs)
 			freePlanInputs(p.Alloc, resourceInputs, true)
 			return inputsResult{Diagnostic: result.Diagnostic}
 		}
+		before := len(inputs)
 		if !appendInputValue(p.Alloc, &inputs, &resourceInputs, result.Value) {
 			result.Value.Free(p.Alloc)
 			freeStrings(p.Alloc, inputs)
+			freeStrings(p.Alloc, dynamicInputs)
 			freePlanInputs(p.Alloc, resourceInputs, true)
-			return inputsResult{Diagnostic: failure(p.Alloc, "INPUT_INVALID", "rule input expression must produce strings, resources, lists, or nil")}
+			return inputsResult{Diagnostic: failure(p.Alloc, "EXPR_INVALID", "rule input expression must produce strings, resources, lists, or nil")}
 		}
 		result.Value.Free(p.Alloc)
+		for j := before; j < len(inputs); j++ {
+			dynamicInputs = slices.Append(p.Alloc, dynamicInputs, cloneText(p.Alloc, inputs[j]))
+		}
 	}
+	// Dependency discovery can append rule instances, invalidating the entry
+	// pointer passed by the producer. Reacquire it by stable node identity.
+	if index < 0 || index >= len(p.Instances) {
+		freeStrings(p.Alloc, inputs)
+		freeStrings(p.Alloc, dynamicInputs)
+		freePlanInputs(p.Alloc, resourceInputs, true)
+		return inputsResult{Diagnostic: failure(p.Alloc, "HOST_FAIL", "input resolver instance disappeared")}
+	}
+	entry = &p.Instances[index]
 	freeStrings(p.Alloc, entry.Plan.ResolvedInputs)
 	freePlanInputs(p.Alloc, entry.Plan.ResolvedResourceInputs, true)
 	entry.Plan.ResolvedInputs = cloneStrings(p.Alloc, inputs)
 	entry.Plan.ResolvedResourceInputs = clonePlanInputs(p.Alloc, resourceInputs)
 	entry.Plan.Resolved = true
-	return inputsResult{Inputs: inputs, ResourceInputs: resourceInputs, Owned: true}
+	return inputsResult{Inputs: inputs, DynamicInputs: dynamicInputs, ResourceInputs: resourceInputs, Owned: true}
 }
 
 func appendInputValue(a mem.Allocator, inputs *[]string, resourceInputs *[]PlanInput, value core.Value) bool {

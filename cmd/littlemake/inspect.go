@@ -22,7 +22,7 @@ func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 	failed := false
 	for i := range parsed.Targets {
 		result := session.Program.Plan(parsed.Targets[i])
-		if result.Diagnostic.Code != "" { annotateTargetDiagnostic(&result.Diagnostic, parsed.Targets[i]); emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), result.Diagnostic, parsed.JSON); result.Diagnostic.Free(mem.System); failed = true; continue }
+		if result.Diagnostic.Code != "" { annotateTargetDiagnostic(&result.Diagnostic, parsed.Targets[i]); emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), result.Diagnostic, parsed.JSON, session.Parsed.Source); result.Diagnostic.Free(mem.System); failed = true; continue }
 		writePlan(out, result.Plan)
 		result.Plan.Free(mem.System)
 	}
@@ -67,7 +67,7 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 			}
 		}
 		annotateTargetDiagnostic(&started.Diagnostic, parsed.Targets[0])
-		emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), started.Diagnostic, parsed.JSON); started.Diagnostic.Free(mem.System); return 1
+		emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), started.Diagnostic, parsed.JSON, session.Parsed.Source); started.Diagnostic.Free(mem.System); return 1
 	}
 	handle := started.Handle
 	defer handle.Free()
@@ -77,7 +77,7 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 		if handle.Definition && handle.Node.Current { writeValue(out, handle.Node.Latest); return 0 }
 		result := handle.Poll()
 		if !result.Done { continue }
-		if result.Result.Diagnostic.Code != "" { emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), result.Result.Diagnostic, parsed.JSON); result.Result.Free(mem.System); return 1 }
+		if result.Result.Diagnostic.Code != "" { emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), result.Result.Diagnostic, parsed.JSON, session.Parsed.Source); result.Result.Free(mem.System); return 1 }
 		if result.Result.Path == "" { result.Result.Free(mem.System); cliError(errOut, "NO_ARTIFACT", "target has no readable artifact"); return 1 }
 		name := result.Result.Path
 		if !path.IsAbs(name) { name = path.Join(mem.System, parsed.Directory, name) }
@@ -102,30 +102,22 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	e := json.NewEncoder(out)
 	if kind == "inputs" || kind == "outputs" {
 		traversal := graphValues(session.Program, graph.Build.Targets[0], graph.Depth, kind)
-		if traversal.Diagnostic.Code != "" { annotateTargetDiagnostic(&traversal.Diagnostic, graph.Build.Targets[0]); emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), traversal.Diagnostic, graph.Build.JSON); traversal.Diagnostic.Free(mem.System); return 1 }
+		if traversal.Diagnostic.Code != "" { annotateTargetDiagnostic(&traversal.Diagnostic, graph.Build.Targets[0]); emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), traversal.Diagnostic, graph.Build.JSON, session.Parsed.Source); traversal.Diagnostic.Free(mem.System); return 1 }
 		e.BeginArray()
 		for i := range traversal.Values { e.Str(traversal.Values[i]) }
 		e.EndArray(); e.Flush(); io.WriteString(out, "\n"); program.FreeStrings(mem.System, traversal.Values)
 		return 0
 	}
-	planResult := session.Program.Plan(graph.Build.Targets[0])
-	if planResult.Diagnostic.Code != "" { annotateTargetDiagnostic(&planResult.Diagnostic, graph.Build.Targets[0]); emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), planResult.Diagnostic, graph.Build.JSON); planResult.Diagnostic.Free(mem.System); return 1 }
-	defer planResult.Plan.Free(mem.System)
+	span := spanValues(session.Program, graph.Build.Targets[0], graph.Depth, graph.Expand)
+	if span.Diagnostic.Code != "" { annotateTargetDiagnostic(&span.Diagnostic, graph.Build.Targets[0]); emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), span.Diagnostic, graph.Build.JSON, session.Parsed.Source); span.Diagnostic.Free(mem.System); return 1 }
+	defer program.FreeStrings(mem.System, span.Static)
+	defer program.FreeStrings(mem.System, span.Dynamic)
+	defer program.FreeStrings(mem.System, span.Outputs)
 	e.BeginObject(); e.Str("schema"); e.Int(1); e.Str("type"); e.Str("span")
 	e.Str("static"); e.BeginObject()
-	if graph.Depth == 1 {
-		e.Str("inputs"); stringArray(&e, planResult.Plan.Inputs); e.Str("outputs"); stringArray(&e, planResult.Plan.Outputs)
-	} else {
-		inTraversal := graphValues(session.Program, graph.Build.Targets[0], graph.Depth, "inputs")
-		if inTraversal.Diagnostic.Code != "" { annotateTargetDiagnostic(&inTraversal.Diagnostic, graph.Build.Targets[0]); emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), inTraversal.Diagnostic, graph.Build.JSON); inTraversal.Diagnostic.Free(mem.System); return 1 }
-		outTraversal := graphValues(session.Program, graph.Build.Targets[0], graph.Depth, "outputs")
-		if outTraversal.Diagnostic.Code != "" { program.FreeStrings(mem.System, inTraversal.Values); annotateTargetDiagnostic(&outTraversal.Diagnostic, graph.Build.Targets[0]); emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), outTraversal.Diagnostic, graph.Build.JSON); outTraversal.Diagnostic.Free(mem.System); return 1 }
-		e.Str("inputs"); stringArray(&e, inTraversal.Values); e.Str("outputs"); stringArray(&e, outTraversal.Values)
-		program.FreeStrings(mem.System, inTraversal.Values)
-		program.FreeStrings(mem.System, outTraversal.Values)
-	}
+	e.Str("inputs"); stringArray(&e, span.Static); e.Str("outputs"); stringArray(&e, span.Outputs)
 	e.EndObject()
-	e.Str("dynamic"); e.BeginArray(); e.EndArray()
+	e.Str("dynamic"); stringArray(&e, span.Dynamic)
 	e.Str("expanded"); e.Bool(graph.Expand)
 	e.EndObject(); e.Flush(); io.WriteString(out, "\n")
 	return 0
@@ -133,6 +125,60 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 
 type graphNode struct { Target string; Depth int }
 type graphResult struct { Values []string; Diagnostic diagnostic.Diagnostic }
+type spanResult struct { Static []string; Dynamic []string; Outputs []string; Diagnostic diagnostic.Diagnostic }
+
+// spanValues walks only authored static edges. When expansion is requested it
+// also resolves expression-form inputs for every visited target, keeping their
+// results separate from the static graph.
+func spanValues(p *program.Program, target string, depth int, expand bool) spanResult {
+	if depth == 0 { return spanResult{} }
+	var pending []graphNode
+	pending = slices.Append(mem.System, pending, graphNode{Target: cloneCommandText(target)})
+	var visited []string
+	result := spanResult{}
+	for cursor := 0; cursor < len(pending); cursor++ {
+		node := pending[cursor]
+		if graphContains(visited, node.Target) { mem.FreeString(mem.System, node.Target); continue }
+		visited = slices.Append(mem.System, visited, node.Target)
+		planned := p.Plan(node.Target)
+		if planned.Diagnostic.Code != "" {
+			if node.Depth == 0 {
+				program.FreeStrings(mem.System, result.Static); program.FreeStrings(mem.System, result.Dynamic); program.FreeStrings(mem.System, result.Outputs)
+				program.FreeStrings(mem.System, visited); slices.Free(mem.System, pending)
+				return spanResult{Diagnostic: planned.Diagnostic}
+			}
+			planned.Diagnostic.Free(mem.System)
+			continue
+		}
+		if expand {
+			planned.Plan.Free(mem.System)
+			planned = p.ExpandPlan(node.Target)
+			if planned.Diagnostic.Code != "" {
+				if node.Depth == 0 {
+					program.FreeStrings(mem.System, result.Static); program.FreeStrings(mem.System, result.Dynamic); program.FreeStrings(mem.System, result.Outputs)
+					program.FreeStrings(mem.System, visited); slices.Free(mem.System, pending)
+					return spanResult{Diagnostic: planned.Diagnostic}
+				}
+				planned.Diagnostic.Free(mem.System)
+				continue
+			}
+		}
+		plan := planned.Plan
+		for i := range plan.StaticInputs { graphAppend(&result.Static, plan.StaticInputs[i]) }
+		if expand { for i := range plan.DynamicInputs { graphAppend(&result.Dynamic, plan.DynamicInputs[i]) } }
+		for i := range plan.Outputs { graphAppend(&result.Outputs, plan.Outputs[i]) }
+		if depth == -1 || node.Depth+1 < depth {
+			for i := range plan.StaticInputs {
+				if !p.HasTarget(plan.StaticInputs[i]) || graphContains(visited, plan.StaticInputs[i]) { continue }
+				pending = slices.Append(mem.System, pending, graphNode{Target: cloneCommandText(plan.StaticInputs[i]), Depth: node.Depth + 1})
+			}
+		}
+		plan.Free(mem.System)
+	}
+	if len(pending) != 0 { slices.Free(mem.System, pending) }
+	program.FreeStrings(mem.System, visited)
+	return result
+}
 
 // graphValues walks dependency plans breadth-first. Each discovered resource is
 // emitted once in discovery order, which keeps graph output stable and makes

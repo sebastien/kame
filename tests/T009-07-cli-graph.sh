@@ -71,6 +71,25 @@ test-step "span separates static and dynamic resources"
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.expanded' 'true'
 
+	cli_run -- do span --expand -c $'SOURCE = ./src/main.c\ntask inspect : @(SOURCE)\n\ttrue\n' inspect
+	cli_expect_status 0
+	cli_expect_json_query "$CLI_OUT" '.static.inputs | length' '0'
+	cli_expect_json_query "$CLI_OUT" '.dynamic | join(",")' './src/main.c'
+
+	cli_run -- do span --expand --depth 2 -c $'SOURCE = ./src/main.c\ntask child : @(SOURCE)\n\ttrue\ntask inspect : child\n\ttrue\n' inspect
+	cli_expect_status 0
+	cli_expect_json_query "$CLI_OUT" '.static.inputs | join(",")' 'child'
+	cli_expect_json_query "$CLI_OUT" '.dynamic | join(",")' './src/main.c'
+
+	mkdir -p expanded/src
+	touch expanded/src/one.c expanded/src/two.c
+	(
+		cd expanded
+		cli_run -- do span --expand -c $'task inspect : @((wildcard ./src/*.c))\n\tfalse\n' inspect
+		cli_expect_status 0
+		cli_expect_json_query "$CLI_OUT" '.dynamic | join(",")' './src/one.c,./src/two.c'
+	)
+
 	cli_run -- do span --depth 0 ./build/app
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.static.inputs | length' '0'

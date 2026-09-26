@@ -34,7 +34,7 @@ func runExpr(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	for i := range values { values[i].Free(mem.System) }
 	slices.Free(mem.System, values)
 	started := session.Program.Start("result")
-	if started.Diagnostic.Code != "" { emitDiagnostic(errOut, started.Diagnostic, false); started.Diagnostic.Free(mem.System); return 1 }
+	if started.Diagnostic.Code != "" { emitDiagnostic(errOut, started.Diagnostic, false, session.Parsed.Source); started.Diagnostic.Free(mem.System); return 1 }
 	handle := started.Handle
 	defer handle.Free()
 	for {
@@ -43,7 +43,7 @@ func runExpr(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 		if handle.Definition && handle.Node.Current { writeValue(out, handle.Node.Latest); return 0 }
 		result := handle.Poll()
 		if !result.Done { continue }
-		if result.Result.Diagnostic.Code != "" { emitDiagnostic(errOut, result.Result.Diagnostic, false); result.Result.Free(mem.System); return 1 }
+		if result.Result.Diagnostic.Code != "" { emitDiagnostic(errOut, result.Result.Diagnostic, false, session.Parsed.Source); result.Result.Free(mem.System); return 1 }
 		writeValue(out, result.Result.Value); result.Result.Free(mem.System); return 0
 	}
 }

@@ -73,6 +73,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	resolvedInputs := p.resolveInputs(c, entry)
 	inputs, resourceInputs := resolvedInputs.Inputs, resolvedInputs.ResourceInputs
 	defer freeOwnedStrings(p.Alloc, inputs, resolvedInputs.Owned)
+	defer freeStrings(p.Alloc, resolvedInputs.DynamicInputs)
 	defer freePlanInputs(p.Alloc, resourceInputs, resolvedInputs.Owned)
 	if resolvedInputs.Waiting {
 		return core.ProducerWaiting
@@ -256,4 +257,3 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	c.Submit(request.ID)
 	return core.ProducerSubmitted
 }
-

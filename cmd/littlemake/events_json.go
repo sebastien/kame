@@ -38,10 +38,18 @@ func writeJSONDiagnostic(out io.Writer, d diagnostic.Diagnostic) {
 
 func encodeDiagnostic(e *json.Encoder, d diagnostic.Diagnostic) {
 	e.BeginObject(); e.Str("code"); e.Str(d.Code); e.Str("severity")
-	if d.Severity == diagnostic.Warning { e.Str("warning") } else if d.Severity == diagnostic.Fatal { e.Str("fatal") } else { e.Str("error") }
+	e.Str(diagnosticSeverity(d.Severity))
 	e.Str("message"); e.Str(d.Message)
-	if d.Source != "" { e.Str("source"); e.Str(d.Source) }
+	source := d.Source
+	if source == "" { source = d.Target }
+	if source != "" { e.Str("source"); e.Str(source) }
 	e.Str("span"); e.BeginObject(); e.Str("start"); e.Int(int64(d.Span.Start)); e.Str("end"); e.Int(int64(d.Span.End)); e.EndObject()
+	if len(d.Notes) != 0 { e.Str("notes"); e.BeginArray(); for i := range d.Notes { e.Str(d.Notes[i]) }; e.EndArray() }
+	if len(d.Frames) != 0 {
+		e.Str("frames"); e.BeginArray()
+		for i := range d.Frames { e.BeginObject(); e.Str("label"); e.Str(d.Frames[i].Label); e.Str("span"); e.BeginObject(); e.Str("start"); e.Int(int64(d.Frames[i].Span.Start)); e.Str("end"); e.Int(int64(d.Frames[i].Span.End)); e.EndObject(); e.EndObject() }
+		e.EndArray()
+	}
 	e.EndObject()
 }
 

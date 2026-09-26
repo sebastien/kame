@@ -28,6 +28,8 @@ by the `expr/section-*.lm`, `expr/pattern-*.lm`, `expr/placeholder-*.lm`, and
 | `json/` | JSON events, dry-run, host | Text, binary, and failing recipes plus an `out`/`err` task |
 | `errors/` | diagnostics, runtime | Missing output, failing recipe, yield conflict, definition cycle, ambiguity, service, timeout, bare task |
 | `signals/` | signals | Recipe writing its shell and child pids, then waiting on a background sleep |
+| `legacy-runtime/` | runtime | Equivalent legacy `Makefile.lmk` file build with a fresh-output skip |
+| `legacy-core/` | library | Legacy core-make expression block against a small TypeScript tree |
 | `plan/` | plan, graph | Captures, dynamic body, body-less static rule for freshness, multi-target task |
 | `operations/lib-fs/` | library filesystem | Small text tree with a subdirectory for `read`, `stat`, and `wildcard` |
 | `operations/lib-grants/` | library capabilities | Read fixture plus a target for rooted write checks |

@@ -59,4 +59,14 @@ test-step "apply calls a function with a list of arguments"
 evaluates '(apply ([x y] (join [x y] "-")) (list "a" "b"))' 'a-b'
 evaluates '(apply (list "a" "b") ([x y] (join [x y] "-")))' 'a-b'
 
+test-step "legacy core-make expressions evaluate against a fixture tree"
+fixture_copy legacy-core legacy-core
+(
+	cd legacy-core
+	cli_run -- default
+	cli_expect_status 0
+	cli_expect_file ./default "2
+"
+)
+
 test-end

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"littlemake/diagnostic"
 	"littlemake/program"
 	"os"
 	"solod.dev/so/io"
@@ -266,6 +267,32 @@ func TestJSONDiagnosticUsesStdout(t *testing.T) {
 	if status != 1 || !strings.Contains(out.String(), "\"type\":\"diagnostic\"") || !strings.Contains(out.String(), "\"code\":\"TGT_NO_RULE\"") || errOut.Len() != 0 {
 		t.Errorf("json diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
+}
+
+func TestJSONDiagnosticRetainsNotesFramesAndSeverity(t *testing.T) {
+	var out bytes.Buffer
+	writeJSONDiagnostic(&out, diagnostic.Diagnostic{Code: "CACHE_UNUSABLE", Severity: diagnostic.Warning, Message: "cache record ignored", Notes: []string{"rebuild scheduled"}, Frames: []diagnostic.Frame{{Label: "rule", Span: diagnostic.Span{Start: 3, End: 7}}}})
+	text := out.String()
+	if !strings.Contains(text, `"severity":"warning"`) || !strings.Contains(text, `"notes":["rebuild scheduled"]`) || !strings.Contains(text, `"frames":[{"label":"rule","span":{"start":3,"end":7}}]`) { t.Errorf("JSON diagnostic omitted metadata: %s", text) }
+}
+
+func TestSpanExpandReportsExpressionInputs(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	source := "SOURCE = ./input\ntask build : @(SOURCE)\n\ttrue\n"
+	if status := Run([]string{"do", "span", "--expand", "-c", source, "build"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), `"static":{"inputs":[],"outputs":["build"]}`) || !strings.Contains(out.String(), `"dynamic":["./input"]`) || !strings.Contains(out.String(), `"expanded":true`) { t.Errorf("expanded span status=%d stdout=%q stderr=%q", status, out.String(), errOut.String()) }
+}
+
+func TestSourceDiagnosticRendersLocationAndExcerpt(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	if status := Run([]string{"-c", "value = (\n"}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command>:1:9: error PARSE_ERR:") || !strings.Contains(errOut.String(), "value = (") || !strings.Contains(errOut.String(), "        ^") { t.Errorf("source diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String()) }
+}
+
+func TestZeroWidthSourceDiagnosticRendersEOFLocation(t *testing.T) {
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	if status := Run([]string{"-c", "\n\nvalue ="}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command>:3:8: error PARSE_ERR:") || !strings.Contains(errOut.String(), "value =") { t.Errorf("zero-width source diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String()) }
 }
 
 func TestUnknownPathTargetSuggestsExplicitPrefix(t *testing.T) {

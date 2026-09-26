@@ -4,6 +4,7 @@ import (
 	"littlemake/core"
 	"littlemake/lang/eval"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
 	"solod.dev/so/strings"
 	"solod.dev/so/unicode/utf8"
@@ -199,13 +200,31 @@ func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 	// also accepted for symmetry.
 	if v[0].Kind == core.List && v[1].Kind == core.Callable {
 		defer c.FreeCallable(&v[1])
-		return c.Call(v[1], v[0].List)
+		arguments := applyArguments(c.Run, v[0], v[1])
+		result := c.Call(v[1], arguments.Values)
+		if arguments.Owned { slices.Free(c.Run, arguments.Values) }
+		return result
 	}
 	if v[0].Kind == core.Callable && v[1].Kind == core.List {
 		defer c.FreeCallable(&v[0])
-		return c.Call(v[0], v[1].List)
+		arguments := applyArguments(c.Run, v[1], v[0])
+		result := c.Call(v[0], arguments.Values)
+		if arguments.Owned { slices.Free(c.Run, arguments.Values) }
+		return result
 	}
 	return invalid()
+}
+type applyCall struct { Values []core.Value; Owned bool }
+func applyArguments(a mem.Allocator, values core.Value, function core.Value) applyCall {
+	callable := function.Callable.(*eval.Function)
+	// Legacy apply treats a one-parameter function as a list consumer. Keep
+	// function-first splatting for multi-parameter callbacks.
+	if len(callable.Parameters) == 1 || callable.Arity == 1 {
+		arguments := mem.AllocSlice[core.Value](a, 1, 1)
+		arguments[0] = values
+		return applyCall{Values: arguments, Owned: true}
+	}
+	return applyCall{Values: values.List}
 }
 func opList(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s

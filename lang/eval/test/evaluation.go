@@ -688,9 +688,9 @@ func TestEvaluationContextFramesAndDefinitionCycleFrames(t *testing.T) {
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	expression := expr.Parse(a, "test", "missing")
-	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Frames: []diagnostic.Frame{{Label: "rule"}}}
+	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Frames: []diagnostic.Frame{{Label: "rule", Span: diagnostic.Span{Start: 11, End: 15}}}}
 	result := program.EvaluateWith(expression.Expr, &context)
-	if result.Diagnostic.Code != "REF_MISSING" || len(result.Diagnostic.Frames) != 1 || result.Diagnostic.Frames[0].Label != "rule" { t.Error("evaluation context frames were not attached") }
+	if result.Diagnostic.Code != "REF_MISSING" || result.Diagnostic.Severity != diagnostic.Error || result.Diagnostic.Span.Start != 0 || result.Diagnostic.Span.End != 7 || len(result.Diagnostic.Frames) != 1 || result.Diagnostic.Frames[0].Label != "rule" || result.Diagnostic.Frames[0].Span.Start != 11 { t.Error("evaluation context frame wrapping changed the original diagnostic") }
 	result.Free(a); expression.Free()
 	engine.Free(); program.Free(); parsed.Free(); registry.Free()
 

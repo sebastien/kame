@@ -31,6 +31,9 @@ func (p *Program) emitNode(node *core.Node, target string, kind EventKind, span 
 func (p *Program) observeInstances() {
 	for i := range p.Instances {
 		entry := &p.Instances[i]
+		if entry.Inspection {
+			continue
+		}
 		node := entry.Node
 		if node.Current && node.Revision != entry.valueRevision {
 			event := Event{Kind: TargetValue, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: node.HostRequestID, Value: node.Latest.Clone(p.Alloc)}

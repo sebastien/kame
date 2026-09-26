@@ -90,6 +90,23 @@ test-step "a missing output rebuilds"
 	fi
 )
 
+test-step "legacy-equivalent file build skips its fresh output"
+fixture_copy legacy-runtime legacy-runtime
+(
+	cd legacy-runtime
+	cli_run --
+	cli_expect_status 0
+	cli_expect_file ./dist/littlemake "legacy executable payload
+"
+	cli_run --
+	cli_expect_status 0
+	if [ "$(run_count ./runs.log)" = 1 ]; then
+		test-ok "legacy-equivalent fresh target was skipped"
+	else
+		test-fail "legacy-equivalent target ran $(run_count ./runs.log) times"
+	fi
+)
+
 test-step "dynamic body dependencies re-render before freshness"
 (
 	mkdir -p dynamic/src

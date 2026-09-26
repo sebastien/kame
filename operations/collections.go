@@ -57,13 +57,19 @@ func finishCallback(c *eval.Context, state *callbackState) core.Value {
 }
 func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result {
 	_ = s
-	if v[0].Kind != core.Callable || v[1].Kind != core.List {
+	callback := &v[0]
+	values := v[1].List
+	if v[0].Kind != core.Callable {
+		if v[1].Kind != core.Callable { return invalid() }
+		callback = &v[1]
+		if v[0].Kind == core.List { values = v[0].List } else { values = v[:1] }
+	} else if v[1].Kind != core.List {
 		return invalid()
 	}
-	defer c.FreeCallable(&v[0])
+	defer c.FreeCallable(callback)
 	state := callbackProgress(c)
-	for state.Index < len(v[1].List) {
-		result := c.Call(v[0], v[1].List[state.Index:state.Index+1])
+	for state.Index < len(values) {
+		result := c.Call(*callback, values[state.Index:state.Index+1])
 		if result.Waiting {
 			return result
 		}
@@ -93,13 +99,18 @@ func opFilter(c *eval.Context, s any, v []core.Value) eval.Result    { return fi
 func opFilterOut(c *eval.Context, s any, v []core.Value) eval.Result { return filter(c, s, v, true) }
 func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 	_ = s
-	if v[0].Kind != core.Callable || v[1].Kind != core.List {
+	callback := &v[0]
+	values := v[1].List
+	if v[0].Kind != core.Callable {
+		if v[0].Kind != core.List || v[1].Kind != core.Callable { return invalid() }
+		callback, values = &v[1], v[0].List
+	} else if v[1].Kind != core.List {
 		return invalid()
 	}
-	defer c.FreeCallable(&v[0])
+	defer c.FreeCallable(callback)
 	state := callbackProgress(c)
-	for state.Index < len(v[1].List) {
-		result := c.Call(v[0], v[1].List[state.Index:state.Index+1])
+	for state.Index < len(values) {
+		result := c.Call(*callback, values[state.Index:state.Index+1])
 		if result.Waiting {
 			return result
 		}
@@ -110,7 +121,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 		keep := truth(result.Value)
 		result.Value.Free(c.Run)
 		if keep != invert {
-			state.Values = slices.Append(c.Run, state.Values, v[1].List[state.Index].Clone(c.Run))
+			state.Values = slices.Append(c.Run, state.Values, values[state.Index].Clone(c.Run))
 		}
 		state.Index++
 	}

@@ -5,6 +5,7 @@ import (
 	"littlemake/core"
 	"littlemake/diagnostic"
 	"littlemake/host/posix"
+	"littlemake/lang/source"
 	"littlemake/program"
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
@@ -19,7 +20,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 		started := p.Start(targets[i])
 		if started.Diagnostic.Code != "" {
 			annotateTargetDiagnostic(&started.Diagnostic, targets[i])
-			emitDiagnostic(diagnosticWriter(out, errOut, json), started.Diagnostic, json)
+			emitDiagnostic(diagnosticWriter(out, errOut, json), started.Diagnostic, json, p.Parsed.Source)
 			started.Diagnostic.Free(mem.System)
 			failed = true
 			continue
@@ -62,7 +63,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 				continue
 			}
 			if polled.Result.Diagnostic.Code != "" {
-				emitDiagnostic(diagnosticWriter(out, errOut, json), polled.Result.Diagnostic, json)
+				emitDiagnostic(diagnosticWriter(out, errOut, json), polled.Result.Diagnostic, json, p.Parsed.Source)
 				failed = true
 			} else if polled.Result.Value.Kind != core.Nil {
 				writeValue(out, polled.Result.Value)
@@ -75,6 +76,9 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 	}
 	drainEvents(p, out, errOut, json)
 	slices.Free(mem.System, handles)
+	// A second signal may arrive while the first cancellation reaps the final
+	// process. Consume it before returning the ordinary cancellation status.
+	if cancelling { signal := posix.TakeSignal(); if signal < 0 { return 128 - signal } }
 	if failed || cancelling {
 		return 1
 	}
@@ -107,12 +111,12 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool)
 	}
 }
 
-func emitDiagnostic(out io.Writer, d diagnostic.Diagnostic, json bool) {
+func emitDiagnostic(out io.Writer, d diagnostic.Diagnostic, json bool, src *source.Source) {
 	if json {
 		writeJSONDiagnostic(out, d)
 		return
 	}
-	cliDiagnostic(out, d)
+	cliDiagnosticWithSource(out, d, src)
 }
 
 // diagnosticWriter picks the stream for command diagnostics: JSON events are
@@ -124,18 +128,28 @@ func diagnosticWriter(out io.Writer, errOut io.Writer, json bool) io.Writer {
 	return errOut
 }
 
-func cliDiagnostic(out io.Writer, d diagnostic.Diagnostic) {
-	if d.Source != "" {
-		fmt.Fprintf(out, "%s:1:1: error %s: %s\n", d.Source, d.Code, d.Message)
-	} else {
-		cliError(out, d.Code, d.Message)
+func cliDiagnosticWithSource(out io.Writer, d diagnostic.Diagnostic, src *source.Source) {
+	hasSourceSpan := d.Span.End > d.Span.Start || d.Code == "PARSE_ERR"
+	name := d.Source
+	if name == "" { name = d.Target }
+	if name == "" && src != nil && hasSourceSpan { name = src.Name }
+	if name != "" && src != nil && hasSourceSpan {
+		position := src.Position(d.Span.Start)
+		fmt.Fprintf(out, "%s:%d:%d: %s %s: %s\n", name, position.Line, position.Column, diagnosticSeverity(d.Severity), d.Code, d.Message)
+		start := d.Span.Start; if start < 0 { start = 0 }; if start > len(src.Text) { start = len(src.Text) }
+		lineStart := start; for lineStart > 0 && src.Text[lineStart-1] != '\n' { lineStart-- }
+		lineEnd := start; for lineEnd < len(src.Text) && src.Text[lineEnd] != '\n' && src.Text[lineEnd] != '\r' { lineEnd++ }
+		io.WriteString(out, src.Text[lineStart:lineEnd]); io.WriteString(out, "\n")
+		for i := lineStart; i < start; i++ { if src.Text[i] == '\t' { io.WriteString(out, "\t") } else { io.WriteString(out, " ") } }
+		io.WriteString(out, "^\n")
+		for i := range d.Notes { io.WriteString(out, "note: "); io.WriteString(out, d.Notes[i]); io.WriteString(out, "\n") }
+		return
 	}
-	for i := range d.Notes {
-		io.WriteString(out, "note: ")
-		io.WriteString(out, d.Notes[i])
-		io.WriteString(out, "\n")
-	}
+	fmt.Fprintf(out, "<command>:1:1: %s %s: %s\n", diagnosticSeverity(d.Severity), d.Code, d.Message)
+	for i := range d.Notes { io.WriteString(out, "note: "); io.WriteString(out, d.Notes[i]); io.WriteString(out, "\n") }
 }
+
+func diagnosticSeverity(severity diagnostic.Severity) string { if severity == diagnostic.Warning { return "warning" }; if severity == diagnostic.Fatal { return "fatal" }; return "error" }
 
 // annotateTargetDiagnostic appends deterministic suggestions to unknown-target
 // diagnostics. Path-like targets written without an explicit ./ prefix suggest

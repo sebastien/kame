@@ -123,4 +123,24 @@ test-step "parallel roots share dependencies"
 	fi
 )
 
+test-step "-j 2 keeps concurrent recipe output line-integral"
+(
+	mkdir -p interleaving
+	cd interleaving
+	cat >Makefile.lmk <<'EOF'
+first:
+	for n in 1 2 3; do printf 'first-%s\n' "$n"; sleep 0.01; done
+second:
+	for n in 1 2 3; do printf 'second-%s\n' "$n"; sleep 0.01; done
+default : first second
+EOF
+	cli_run -- -j 2 default
+	cli_expect_status 0
+	if [ "$(grep -Ec '^(first|second)-[123]$' "$CLI_OUT")" = 6 ] && ! grep -Ev '^(first|second)-[123]$' "$CLI_OUT" >/dev/null; then
+		test-ok "concurrent recipe output has six intact tagged lines"
+	else
+		test-fail "concurrent recipe output was torn or incomplete: $(tr '\n' ' ' <"$CLI_OUT")"
+	fi
+)
+
 test-end
