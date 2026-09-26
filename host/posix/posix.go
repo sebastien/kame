@@ -60,6 +60,7 @@ type nativeEvent struct {
 	stderrLen         c.Int
 	stdoutTruncated   bool
 	stderrTruncated   bool
+	retainBytes       c.Int
 }
 
 //so:extern
@@ -100,6 +101,12 @@ func lm_cli_install_signals() c.Int { return 0 }
 
 //so:extern
 func lm_cli_take_signal() c.Int { return 0 }
+
+//so:extern
+func lm_cli_stderr_is_terminal() c.Int { return 0 }
+
+//so:extern
+func lm_cli_stderr_width() c.Int { return 0 }
 
 //so:extern
 func lm_cli_environment_size() c.Int { return 0 }
@@ -169,7 +176,7 @@ func (h *Host) Next() host.ProcessEventResult {
 	if !lm_host_next(h.native, &raw) {
 		return EventResult{}
 	}
-	e := host.ProcessEvent{Kind: host.ProcessEventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: host.ProcessOutcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated}
+	e := host.ProcessEvent{Kind: host.ProcessEventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: host.ProcessOutcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated, RetainBytes: int(raw.retainBytes)}
 	lm_event_free(&raw)
 	return host.ProcessEventResult{Event: e, OK: true}
 }
@@ -200,6 +207,13 @@ func InstallSignals() bool { return lm_cli_install_signals() == 0 }
 // TakeSignal returns zero when no signal arrived, a positive signal number for
 // the first signal, or a negative number when a second signal arrived.
 func TakeSignal() int { return int(lm_cli_take_signal()) }
+
+// StderrIsTerminal reports whether the diagnostic stream is attached to a TTY.
+func StderrIsTerminal() bool { return lm_cli_stderr_is_terminal() != 0 }
+
+// StderrWidth returns terminal columns, or zero when the stream has no known
+// width (including redirected output).
+func StderrWidth() int { return int(lm_cli_stderr_width()) }
 
 // Environment returns a complete owned snapshot of the process environment.
 func Environment(a mem.Allocator) []string {

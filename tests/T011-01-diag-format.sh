@@ -26,12 +26,12 @@ fixture_copy errors diag-format
 test-step "CLI diagnostics use the documented layout"
 cli_run -- do expr --bogus
 cli_expect_status 2
-cli_expect_stderr '<command>:1:1: error OPT_UNKNOWN: unknown option: --bogus
+	cli_expect_stderr 'error OPT_UNKNOWN: unknown option: --bogus
 '
 
 cli_run -- do plan
 cli_expect_status 2
-cli_expect_stderr '<command>:1:1: error OPT_NO_VALUE: plan requires at least one target
+	cli_expect_stderr 'error OPT_NO_VALUE: plan requires at least one target
 '
 
 test-step "build failures report the stable code and a message"

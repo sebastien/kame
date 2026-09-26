@@ -52,13 +52,23 @@ func attachContextFrames(result *Result, context *Context) {
 		if result.Diagnostic.Owned {
 			label = owned(a, label)
 		}
-		frames[i] = diagnostic.Frame{Label: label, Span: context.Frames[i].Span}
+		kind, source := context.Frames[i].Kind, context.Frames[i].Source
+		if result.Diagnostic.Owned {
+			kind, source = owned(a, kind), owned(a, source)
+		}
+		frames[i] = diagnostic.Frame{Kind: kind, Label: label, Source: source, Span: context.Frames[i].Span}
 	}
 	copy(frames[len(context.Frames):], result.Diagnostic.Frames)
 	if result.Diagnostic.Owned {
 		for i := range result.Diagnostic.Frames {
+			if result.Diagnostic.Frames[i].Kind != "" {
+				mem.FreeString(a, result.Diagnostic.Frames[i].Kind)
+			}
 			if result.Diagnostic.Frames[i].Label != "" {
 				mem.FreeString(a, result.Diagnostic.Frames[i].Label)
+			}
+			if result.Diagnostic.Frames[i].Source != "" {
+				mem.FreeString(a, result.Diagnostic.Frames[i].Source)
 			}
 		}
 	}
@@ -89,11 +99,11 @@ func attachSource(result *Result, context *Context) {
 	// Context and program sources outlive their diagnostic results. Diagnostics
 	// borrowed from engine nodes must not be cloned or freed here; owned
 	// diagnostics copy the source so Free releases it consistently.
-	if result.Diagnostic.Code != "" && context.Source != "" && result.Diagnostic.Target == "" {
+	if result.Diagnostic.Code != "" && context.Source != "" && result.Diagnostic.Source == "" {
 		if result.Diagnostic.Owned {
-			result.Diagnostic.Target = cloneFailureText(context.Run, context.Source)
+			result.Diagnostic.Source = cloneFailureText(context.Run, context.Source)
 		} else {
-			result.Diagnostic.Target = context.Source
+			result.Diagnostic.Source = context.Source
 		}
 	}
 }

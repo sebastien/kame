@@ -10,8 +10,72 @@ import (
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
+	"solod.dev/so/os"
 	"solod.dev/so/slices"
+	"solod.dev/so/unicode/utf8"
 )
+
+// Presentation state is initialized once per Run. It affects rendering only;
+// diagnostic data and JSON output remain independent of terminal capabilities.
+var diagnosticColor = "never"
+var requestedDiagnosticColor = "auto"
+var requestedDiagnosticFormat = "plain"
+var diagnosticFormat = "plain"
+var diagnosticWidth = 80
+
+func configureDiagnosticPresentation(options buildArguments) {
+	color, format := requestedDiagnosticColor, requestedDiagnosticFormat
+	if options.Color != "" {
+		color = options.Color
+	}
+	if options.DiagnosticFormat != "" {
+		format = options.DiagnosticFormat
+	}
+	diagnosticFormat = format
+	environment := posix.Environment(mem.System)
+	diagnosticColor = resolveDiagnosticColor(color, format, posix.StderrIsTerminal(), environment)
+	posix.FreeEnvironment(mem.System, environment)
+	diagnosticWidth = posix.StderrWidth()
+	if diagnosticWidth < 20 {
+		diagnosticWidth = 80
+	}
+}
+
+func setDiagnosticColor(color string) {
+	requestedDiagnosticColor = color
+}
+
+func setDiagnosticFormat(format string) { requestedDiagnosticFormat = format }
+
+func resolveDiagnosticColor(color string, format string, terminal bool, environment []string) string {
+	if format != "human" || color == "never" {
+		return "never"
+	}
+	if color == "always" {
+		return "always"
+	}
+	if environmentValue(environment, "NO_COLOR") != "" || environmentValue(environment, "CLICOLOR") == "0" || environmentValue(environment, "TERM") == "dumb" {
+		return "never"
+	}
+	if environmentValue(environment, "CLICOLOR_FORCE") != "" && environmentValue(environment, "CLICOLOR_FORCE") != "0" {
+		return "always"
+	}
+	if terminal {
+		return "always"
+	}
+	return "never"
+}
+
+func environmentValue(values []string, name string) string {
+	for i := range values {
+		value := values[i]
+		if len(value) <= len(name) || value[:len(name)] != name || value[len(name)] != '=' {
+			continue
+		}
+		return value[len(name)+1:]
+	}
+	return ""
+}
 
 func materializeTargets(p *program.Program, targets []string, out io.Writer, errOut io.Writer, json bool) int {
 	var handles []*program.Handle
@@ -63,6 +127,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 				continue
 			}
 			if polled.Result.Diagnostic.Code != "" {
+				annotateTargetDiagnostic(&polled.Result.Diagnostic, targets[i])
 				emitDiagnostic(diagnosticWriter(out, errOut, json), polled.Result.Diagnostic, json, p.Parsed.Source)
 				failed = true
 			} else if polled.Result.Value.Kind != core.Nil {
@@ -78,7 +143,12 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 	slices.Free(mem.System, handles)
 	// A second signal may arrive while the first cancellation reaps the final
 	// process. Consume it before returning the ordinary cancellation status.
-	if cancelling { signal := posix.TakeSignal(); if signal < 0 { return 128 - signal } }
+	if cancelling {
+		signal := posix.TakeSignal()
+		if signal < 0 {
+			return 128 - signal
+		}
+	}
 	if failed || cancelling {
 		return 1
 	}
@@ -112,6 +182,10 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool)
 }
 
 func emitDiagnostic(out io.Writer, d diagnostic.Diagnostic, json bool, src *source.Source) {
+	if d.Code == "NO_MEMORY" {
+		writeEmergencyDiagnostic(out, json)
+		return
+	}
 	if json {
 		writeJSONDiagnostic(out, d)
 		return
@@ -122,40 +196,272 @@ func emitDiagnostic(out io.Writer, d diagnostic.Diagnostic, json bool, src *sour
 // diagnosticWriter picks the stream for command diagnostics: JSON events are
 // stdout-only by specification; human diagnostics stay on stderr.
 func diagnosticWriter(out io.Writer, errOut io.Writer, json bool) io.Writer {
-	if json {
+	if json && out != nil {
 		return out
 	}
 	return errOut
 }
 
 func cliDiagnosticWithSource(out io.Writer, d diagnostic.Diagnostic, src *source.Source) {
-	hasSourceSpan := d.Span.End > d.Span.Start || d.Code == "PARSE_ERR"
-	name := d.Source
-	if name == "" { name = d.Target }
-	if name == "" && src != nil && hasSourceSpan { name = src.Name }
-	if name != "" && src != nil && hasSourceSpan {
-		position := src.Position(d.Span.Start)
-		fmt.Fprintf(out, "%s:%d:%d: %s %s: %s\n", name, position.Line, position.Column, diagnosticSeverity(d.Severity), d.Code, d.Message)
-		start := d.Span.Start; if start < 0 { start = 0 }; if start > len(src.Text) { start = len(src.Text) }
-		lineStart := start; for lineStart > 0 && src.Text[lineStart-1] != '\n' { lineStart-- }
-		lineEnd := start; for lineEnd < len(src.Text) && src.Text[lineEnd] != '\n' && src.Text[lineEnd] != '\r' { lineEnd++ }
-		io.WriteString(out, src.Text[lineStart:lineEnd]); io.WriteString(out, "\n")
-		for i := lineStart; i < start; i++ { if src.Text[i] == '\t' { io.WriteString(out, "\t") } else { io.WriteString(out, " ") } }
-		io.WriteString(out, "^\n")
-		for i := range d.Notes { io.WriteString(out, "note: "); io.WriteString(out, d.Notes[i]); io.WriteString(out, "\n") }
-		return
-	}
-	fmt.Fprintf(out, "<command>:1:1: %s %s: %s\n", diagnosticSeverity(d.Severity), d.Code, d.Message)
-	for i := range d.Notes { io.WriteString(out, "note: "); io.WriteString(out, d.Notes[i]); io.WriteString(out, "\n") }
+	cliDiagnosticWithSourceWidth(out, d, src, diagnosticWidth)
 }
 
-func diagnosticSeverity(severity diagnostic.Severity) string { if severity == diagnostic.Warning { return "warning" }; if severity == diagnostic.Fatal { return "fatal" }; return "error" }
+// cliDiagnosticWithSourceWidth makes source rendering reproducible for a
+// supplied terminal width. The production renderer uses a stable 80-column
+// fallback when stderr is redirected or the platform cannot report its width.
+func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *source.Source, width int) {
+	if width < 20 {
+		width = 80
+	}
+	renderSource, loaded := diagnosticSource(d.Source, src)
+	if diagnosticColor == "always" {
+		if d.Severity == diagnostic.Warning {
+			io.WriteString(out, "\x1b[33m")
+		} else {
+			io.WriteString(out, "\x1b[31m")
+		}
+	}
+	if d.Target != "" {
+		fmt.Fprintf(out, "%s failed: %s\n", d.Target, d.Code)
+		if len(d.TargetStack) > 1 {
+			io.WriteString(out, "  required by ")
+			for i := range d.TargetStack {
+				if i != 0 {
+					io.WriteString(out, " -> ")
+				}
+				io.WriteString(out, d.TargetStack[i])
+			}
+			io.WriteString(out, "\n")
+		}
+	}
+	if d.Source != "" && renderSource != nil && d.Source == renderSource.Name {
+		position := renderSource.Position(d.Span.Start)
+		fmt.Fprintf(out, "%s:%d:%d: %s %s: %s\n", d.Source, position.Line, position.Column, diagnosticSeverity(d.Severity), d.Code, d.Message)
+		start := d.Span.Start
+		if start < 0 {
+			start = 0
+		}
+		if start > len(renderSource.Text) {
+			start = len(renderSource.Text)
+		}
+		lineStart, lineEnd := renderSource.LineBounds(start)
+		writeWrappedExcerpt(out, renderSource.Text, lineStart, lineEnd, start, d.Span.End, width)
+	} else if d.Source != "" {
+		fmt.Fprintf(out, "%s: %s %s: %s\n", d.Source, diagnosticSeverity(d.Severity), d.Code, d.Message)
+	} else {
+		fmt.Fprintf(out, "%s %s: %s\n", diagnosticSeverity(d.Severity), d.Code, d.Message)
+	}
+	for i := range d.Notes {
+		io.WriteString(out, "note: ")
+		io.WriteString(out, d.Notes[i])
+		io.WriteString(out, "\n")
+	}
+	for i := range d.Related {
+		io.WriteString(out, "note: ")
+		if d.Related[i].Source != "" {
+			if renderSource != nil && renderSource.Name == d.Related[i].Source {
+				position := renderSource.Position(d.Related[i].Span.Start)
+				fmt.Fprintf(out, "%s:%d:%d: ", d.Related[i].Source, position.Line, position.Column)
+			} else {
+				fmt.Fprintf(out, "%s: ", d.Related[i].Source)
+			}
+		}
+		io.WriteString(out, d.Related[i].Message)
+		io.WriteString(out, "\n")
+	}
+	for i := range d.Frames {
+		io.WriteString(out, "while ")
+		if d.Frames[i].Kind != "" {
+			io.WriteString(out, d.Frames[i].Kind)
+			io.WriteString(out, " ")
+		}
+		io.WriteString(out, d.Frames[i].Label)
+		if d.Frames[i].Source != "" {
+			if renderSource != nil && renderSource.Name == d.Frames[i].Source {
+				position := renderSource.Position(d.Frames[i].Span.Start)
+				fmt.Fprintf(out, " at %s:%d:%d", d.Frames[i].Source, position.Line, position.Column)
+			} else {
+				fmt.Fprintf(out, " at %s", d.Frames[i].Source)
+			}
+		}
+		io.WriteString(out, "\n")
+	}
+	for i := range d.Tips {
+		io.WriteString(out, "help: ")
+		io.WriteString(out, d.Tips[i])
+		io.WriteString(out, "\n")
+	}
+	if d.Cause.Kind != "" {
+		io.WriteString(out, "caused by: ")
+		io.WriteString(out, d.Cause.Message)
+		if d.Cause.HasStatus {
+			fmt.Fprintf(out, " (status %d)", d.Cause.Status)
+		}
+		if d.Cause.HasSignal {
+			fmt.Fprintf(out, " (signal %d)", d.Cause.Signal)
+		}
+		io.WriteString(out, "\n")
+		if !d.Cause.OutputWasStreamed {
+			if d.Cause.Stderr != "" {
+				io.WriteString(out, "  │ ")
+				io.WriteString(out, d.Cause.Stderr)
+				if d.Cause.StderrTruncated {
+					io.WriteString(out, " [truncated]")
+				}
+				io.WriteString(out, "\n")
+			}
+			if d.Cause.Stdout != "" {
+				io.WriteString(out, "  │ ")
+				io.WriteString(out, d.Cause.Stdout)
+				if d.Cause.StdoutTruncated {
+					io.WriteString(out, " [truncated]")
+				}
+				io.WriteString(out, "\n")
+			}
+		}
+	}
+	if diagnosticColor == "always" {
+		io.WriteString(out, "\x1b[0m")
+	}
+	if loaded {
+		renderSource.Free(mem.System)
+	}
+}
+
+// diagnosticSource uses the already parsed source when possible. A different
+// file-backed primary source is loaded only for rendering and is never exposed
+// to JSON or stored in the diagnostic.
+func diagnosticSource(name string, primary *source.Source) (*source.Source, bool) {
+	if name == "" || (primary != nil && primary.Name == name) {
+		return primary, false
+	}
+	data, readErr := os.ReadFile(mem.System, name)
+	if readErr != nil {
+		return nil, false
+	}
+	loaded := source.New(mem.System, name, string(data))
+	mem.FreeSlice(mem.System, data)
+	return loaded, true
+}
+
+func writeWrappedExcerpt(out io.Writer, text string, lineStart int, lineEnd int, start int, end int, width int) {
+	if lineStart == lineEnd {
+		io.WriteString(out, "\n")
+		writeMarker(out, text, lineStart, start, end, lineEnd)
+		return
+	}
+	marked, segmentStart := false, lineStart
+	for segmentStart < lineEnd {
+		segmentEnd := excerptSegmentEnd(text, segmentStart, lineEnd, width)
+		io.WriteString(out, text[segmentStart:segmentEnd])
+		io.WriteString(out, "\n")
+		if !marked && start >= segmentStart && (start < segmentEnd || (segmentEnd == lineEnd && start == segmentEnd)) {
+			writeMarker(out, text, segmentStart, start, end, segmentEnd)
+			marked = true
+		}
+		segmentStart = segmentEnd
+	}
+}
+
+func excerptSegmentEnd(text string, start int, limit int, width int) int {
+	column, i := 1, start
+	for i < limit {
+		cells, size := 1, 1
+		if text[i] == '\t' {
+			cells = 8 - (column-1)%8
+		} else {
+			r, decoded := utf8.DecodeRuneInString(text[i:])
+			if decoded == 0 {
+				break
+			}
+			cells, size = source.DisplayWidth(r), decoded
+		}
+		if i != start && column-1+cells > width {
+			break
+		}
+		column, i = column+cells, i+size
+	}
+	return i
+}
+
+func writeMarker(out io.Writer, text string, lineStart int, start int, end int, lineEnd int) {
+	for i := lineStart; i < start; {
+		if text[i] == '\t' {
+			io.WriteString(out, "\t")
+			i++
+			continue
+		}
+		r, width := utf8.DecodeRuneInString(text[i:])
+		if width == 0 {
+			break
+		}
+		for n := 0; n < source.DisplayWidth(r); n++ {
+			io.WriteString(out, " ")
+		}
+		i += width
+	}
+	if end < start {
+		end = start
+	}
+	if end > lineEnd {
+		end = lineEnd
+	}
+	width := 0
+	for i := start; i < end; {
+		if text[i] == '\t' {
+			width += 8
+			i++
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if size == 0 {
+			break
+		}
+		width += source.DisplayWidth(r)
+		i += size
+	}
+	if width < 1 {
+		width = 1
+	}
+	io.WriteString(out, "^")
+	for i := 1; i < width; i++ {
+		io.WriteString(out, "~")
+	}
+	io.WriteString(out, "\n")
+}
+
+func diagnosticSeverity(severity diagnostic.Severity) string {
+	if severity == diagnostic.Warning {
+		return "warning"
+	}
+	if severity == diagnostic.Fatal {
+		return "fatal"
+	}
+	return "error"
+}
 
 // annotateTargetDiagnostic appends deterministic suggestions to unknown-target
 // diagnostics. Path-like targets written without an explicit ./ prefix suggest
 // the explicit form that file rules require.
 func annotateTargetDiagnostic(d *diagnostic.Diagnostic, target string) {
-	if d.Code != "TGT_NO_RULE" || len(target) == 0 {
+	if d == nil || len(target) == 0 {
+		return
+	}
+	if d.Target == "" {
+		d.Target = cloneCommandText(target)
+	}
+	if len(d.TargetStack) == 0 {
+		d.TargetStack = slices.Append(mem.System, d.TargetStack, cloneCommandText(target))
+	} else if d.TargetStack[0] != target {
+		stack := slices.Make[string](mem.System, len(d.TargetStack)+1)
+		stack[0] = cloneCommandText(target)
+		for i := range d.TargetStack {
+			stack[i+1] = d.TargetStack[i]
+		}
+		slices.Free(mem.System, d.TargetStack)
+		d.TargetStack = stack
+	}
+	if d.Code != "TGT_NO_RULE" {
 		return
 	}
 	if target[0] == '/' {

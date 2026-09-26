@@ -128,6 +128,10 @@ func (p *Program) complete(event host.ProcessEvent) {
 			d.Span = entry.LineSpans[0]
 		}
 	}
+	entry := p.instanceForRequest(event.ID)
+	if d.Code != "" {
+		p.attachProcessContext(&d, entry, event)
+	}
 	for i := range p.Pending {
 		pending := p.Pending[i]
 		if pending.ID != event.ID {
@@ -147,7 +151,6 @@ func (p *Program) complete(event host.ProcessEvent) {
 		return
 	}
 	node := p.nodeForRequest(event.ID)
-	entry := p.instanceForRequest(event.ID)
 	if node != nil && entry != nil && node.HostRequestID == event.ID && node.State == core.NodeWaiting && d.Code != "" && d.Code != "EXEC_CANCELLED" && entry.retryCount < p.Options.RetryCount {
 		p.nextRequest++
 		retryID := p.nextRequest
@@ -171,6 +174,98 @@ func (p *Program) complete(event host.ProcessEvent) {
 	} else {
 		d.Free(p.Alloc)
 	}
+}
+
+// attachProcessContext preserves the runtime diagnosis and carries only bounded
+// process metadata to renderers. The request script and environment are
+// deliberately never copied into a diagnostic.
+func (p *Program) attachProcessContext(d *diagnostic.Diagnostic, entry *instance, event host.ProcessEvent) {
+	if d == nil || d.Code == "" {
+		return
+	}
+	if entry != nil {
+		if d.Source == "" && p.Parsed != nil && p.Parsed.Source != nil {
+			d.Source = cloneText(p.Alloc, p.Parsed.Source.Name)
+		}
+		if d.Span.Start == 0 && d.Span.End == 0 && len(entry.LineSpans) != 0 {
+			d.Span = entry.LineSpans[0]
+		}
+		if d.Target == "" {
+			d.Target = cloneText(p.Alloc, entry.Plan.Target)
+		}
+		if len(d.TargetStack) == 0 {
+			d.TargetStack = p.targetStack(entry)
+		}
+	}
+	cause := diagnostic.Cause{Kind: cloneText(p.Alloc, "process"), Program: cloneText(p.Alloc, processProgram(p)), StdoutTruncated: event.StdoutTruncated, StderrTruncated: event.StderrTruncated, StdoutLimit: event.RetainBytes, StderrLimit: event.RetainBytes, OutputWasStreamed: true}
+	if event.Outcome == host.ProcessFailed {
+		cause.Message = cloneText(p.Alloc, event.Diagnostic.Message)
+	} else if event.Outcome == host.ProcessTimedOut {
+		cause.Message = cloneText(p.Alloc, "process timed out")
+	} else if event.Outcome == host.ProcessCancelled {
+		cause.Message = cloneText(p.Alloc, "process cancelled")
+	} else {
+		cause.Message = cloneText(p.Alloc, "process exited")
+		cause.Status, cause.HasStatus = event.Status, true
+	}
+	if event.Signal != 0 {
+		cause.Signal, cause.HasSignal = event.Signal, true
+	}
+	if len(event.Stdout) != 0 {
+		cause.Stdout = cloneText(p.Alloc, string(event.Stdout))
+	}
+	if len(event.Stderr) != 0 {
+		cause.Stderr = cloneText(p.Alloc, string(event.Stderr))
+	}
+	d.Cause = cause
+}
+
+// targetStack follows reverse dynamic edges from the failed instance to its
+// requested root. Dynamic edges are established in producer order, making a
+// first matching parent deterministic when a target has more than one consumer.
+// The bounded walk intentionally retains one repeated target when a cycle is
+// the context that led to the failure.
+func (p *Program) targetStack(entry *instance) []string {
+	if p == nil || entry == nil {
+		return nil
+	}
+	var reversed []string
+	current := entry
+	for steps := 0; current != nil && steps <= len(p.Instances); steps++ {
+		reversed = slices.Append(p.Alloc, reversed, cloneText(p.Alloc, current.Plan.Target))
+		current = p.parentInstance(current.Node, entry.runEpoch)
+	}
+	stack := slices.Make[string](p.Alloc, len(reversed))
+	for i := range reversed {
+		stack[len(reversed)-1-i] = reversed[i]
+	}
+	if len(reversed) != 0 {
+		slices.Free(p.Alloc, reversed)
+	}
+	return stack
+}
+
+func (p *Program) parentInstance(child *core.Node, epoch int64) *instance {
+	if child == nil {
+		return nil
+	}
+	for i := range p.Instances {
+		candidate := &p.Instances[i]
+		if candidate.Node == child || (epoch != 0 && candidate.runEpoch != 0 && candidate.runEpoch != epoch) {
+			continue
+		}
+		if slices.Contains(candidate.Node.Dynamic, child) {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func processProgram(p *Program) string {
+	if p != nil && len(p.Options.Shell) != 0 {
+		return p.Options.Shell[0]
+	}
+	return ""
 }
 
 func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {

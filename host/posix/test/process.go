@@ -68,7 +68,7 @@ func TestStreamsStatusAndRetention(t *testing.T) {
 		if events[i].Kind == posix.Stderr { for j := range events[i].Data { err = slices.Append(a, err, events[i].Data[j]) } }
 	}
 	if string(out) != "out" || string(err) != "err" { t.Error("streams were corrupted") }
-	if terminal.Outcome != posix.Exited || terminal.Status != 7 || string(terminal.Stdout) != "out" || string(terminal.Stderr) != "err" { t.Error("terminal result lost status or retained logs") }
+	if terminal.Outcome != posix.Exited || terminal.Status != 7 || string(terminal.Stdout) != "out" || string(terminal.Stderr) != "err" || terminal.RetainBytes != 1024 { t.Error("terminal result lost status, retention bound, or retained logs") }
 	if len(events) == 0 || events[len(events)-1].Kind != posix.Terminal { t.Error("terminal arrived before output was drained") }
 	freeEvents(a, events)
 	slices.Free(a, out); slices.Free(a, err)

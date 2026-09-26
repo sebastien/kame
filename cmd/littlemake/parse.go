@@ -1,11 +1,15 @@
 package main
 
 import (
+	"littlemake/diagnostic"
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 )
+
+var cliDiagnosticOut io.Writer
+var cliDiagnosticJSON bool
 
 func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	parsed := parseArguments(args, errOut)
@@ -88,5 +92,23 @@ func parseArguments(args []string, errOut io.Writer) parseArgumentResult {
 }
 
 func cliError(out io.Writer, code string, message string) {
-	fmt.Fprintf(out, "<command>:1:1: error %s: %s\n", code, message)
+	if code == "NO_MEMORY" {
+		writeEmergencyDiagnostic(out, cliDiagnosticJSON)
+		return
+	}
+	if cliDiagnosticJSON && cliDiagnosticOut != nil {
+		writeJSONDiagnostic(cliDiagnosticOut, diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message})
+		return
+	}
+	fmt.Fprintf(out, "error %s: %s\n", code, message)
+}
+
+// writeEmergencyDiagnostic allocates no diagnostic text, allowing the CLI to
+// report allocator exhaustion instead of failing silently while formatting it.
+func writeEmergencyDiagnostic(out io.Writer, json bool) {
+	if json && cliDiagnosticOut != nil {
+		io.WriteString(cliDiagnosticOut, "{\"schema\":1,\"type\":\"diagnostic\",\"diagnostic\":{\"code\":\"NO_MEMORY\",\"severity\":\"fatal\",\"message\":\"memory exhausted\"}}\n")
+		return
+	}
+	io.WriteString(out, "fatal NO_MEMORY: memory exhausted\n")
 }

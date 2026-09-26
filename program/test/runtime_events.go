@@ -75,6 +75,18 @@ func TestRecipeFailureRetainsBodySpan(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestRecipeFailureCarriesNestedTargetStack(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "test.lmk", "root : leaf\n\ttrue\nleaf :\n\tfalse\n")
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("root")
+	if result.Diagnostic.Code != "RECIPE_FAIL" || len(result.Diagnostic.TargetStack) != 2 || result.Diagnostic.TargetStack[0] != "root" || result.Diagnostic.TargetStack[1] != "leaf" { t.Errorf("target stack = %s %v", result.Diagnostic.Code, result.Diagnostic.TargetStack) }
+	result.Free(a)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestTargetEventsCarrySharedIdentity(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "test.lmk", "run :\n\t@(nop \"\")\n")

@@ -120,9 +120,10 @@ Packages return a result plus sentinel error where required by Solod. The
 structured diagnostic is part of the result or execution event and is not
 encoded into dynamically allocated error implementations.
 
-`011-diagnostics.md` is the authoritative registry for diagnostic codes and
-severities. Other specifications must use a registered code for every normative
-failure.
+`011-diagnostics.md` is the authoritative diagnostic model, renderer contract,
+and registry for codes and severities. Other specifications must use a
+registered code for every normative failure. They add diagnostic context rather
+than formatting user-facing error strings at their own layer.
 
 ## Determinism
 

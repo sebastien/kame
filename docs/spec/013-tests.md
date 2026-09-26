@@ -122,11 +122,8 @@ Current coverage:
 | 014 patterns | `T014-01` | placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs |
 | 013 meta | `T013-01` … `T013-03` | catalog consistency, fixture hygiene, binary contract, determinism |
 
-Planned but not yet implemented (tracked so no acceptance bullet is silently
-dropped): concurrent `-j` output-interleaving assertions, signal exit statuses
-beyond the first signal, `span --expand` dynamic definition evaluation, and the
-remaining cache fingerprint inputs (shell, dependency kind, log-limit
-truncation, concurrent writers). Spec 014 coverage is in place: `T014-01`
+All currently specified native acceptance bullets have an E2E or package-level
+test. Spec 014 coverage is in place: `T014-01`
 placeholder sections and pattern replace, plus `expr/section-*.lm`,
 `expr/pattern-*.lm`, and `invalid/expr-pattern-mixed-groups.lm` fixtures in the
 T004 parse/format suites.

@@ -29,6 +29,7 @@ typedef struct lm_event {
     int stderrLen;
     bool stdoutTruncated;
     bool stderrTruncated;
+    int retainBytes;
 } lm_event;
 
 lm_host *lm_host_new(void);
@@ -43,6 +44,8 @@ void lm_event_free(lm_event *);
 void lm_host_free(lm_host *);
 int lm_cli_install_signals(void);
 int lm_cli_take_signal(void);
+int lm_cli_stderr_is_terminal(void);
+int lm_cli_stderr_width(void);
 int lm_cli_environment_size(void);
 int lm_cli_environment_copy(so_Slice);
 

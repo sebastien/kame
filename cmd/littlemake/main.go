@@ -19,23 +19,25 @@ import (
 )
 
 type buildArguments struct {
-	File            string
-	Command         string
-	Directory       string
-	Jobs            int
-	DryRun          bool
-	Force           bool
-	JSON            bool
-	Verbose         bool
-	Grants          []eval.Grant
-	NoDefaultGrants bool
-	Shell           []string
-	Environment     []string
-	TimeoutMS       int64
-	RetryCount      int
-	RetainBytes     int
-	Targets         []string
-	OK              bool
+	File             string
+	Command          string
+	Directory        string
+	Jobs             int
+	DryRun           bool
+	Force            bool
+	JSON             bool
+	Verbose          bool
+	Color            string
+	DiagnosticFormat string
+	Grants           []eval.Grant
+	NoDefaultGrants  bool
+	Shell            []string
+	Environment      []string
+	TimeoutMS        int64
+	RetryCount       int
+	RetainBytes      int
+	Targets          []string
+	OK               bool
 }
 
 func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int {
@@ -85,6 +87,7 @@ type buildSession struct {
 }
 
 func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bool) buildSession {
+	configureDiagnosticPresentation(options)
 	session := buildSession{Source: loadBuildSource(options, errOut, reportMissing)}
 	if session.Source.Status != 0 {
 		session.Status = session.Source.Status
@@ -119,7 +122,7 @@ func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bo
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
 		for i := range compiled.Diagnostics {
-			cliDiagnosticWithSource(errOut, compiled.Diagnostics[i], session.Parsed.Source)
+			emitDiagnostic(diagnosticWriter(cliDiagnosticOut, errOut, cliDiagnosticJSON), compiled.Diagnostics[i], cliDiagnosticJSON, session.Parsed.Source)
 		}
 		compiled.Free(mem.System)
 		session.Free()
@@ -177,7 +180,7 @@ func parseBuildArguments(args []string, errOut io.Writer) buildArguments {
 			result.Verbose = true
 			continue
 		}
-		if arg == "-f" || arg == "--file" || arg == "-c" || arg == "--command" || arg == "-C" || arg == "--directory" || arg == "-j" || arg == "--jobs" || arg == "--shell" || arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--env" {
+		if arg == "-f" || arg == "--file" || arg == "-c" || arg == "--command" || arg == "-C" || arg == "--directory" || arg == "-j" || arg == "--jobs" || arg == "--shell" || arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--env" || arg == "--color" || arg == "--diagnostic-format" {
 			if i+1 == len(args) {
 				cliError(errOut, "OPT_NO_VALUE", "missing value for "+arg)
 				return buildArguments{}
@@ -242,6 +245,18 @@ func parseBuildArguments(args []string, errOut io.Writer) buildArguments {
 			}
 			continue
 		}
+		if len(arg) >= 8 && arg[:8] == "--color=" {
+			if !assignBuildOption(&result, "--color", arg[8:], errOut) {
+				return buildArguments{}
+			}
+			continue
+		}
+		if len(arg) >= 20 && arg[:20] == "--diagnostic-format=" {
+			if !assignBuildOption(&result, "--diagnostic-format", arg[20:], errOut) {
+				return buildArguments{}
+			}
+			continue
+		}
 		if len(arg) != 0 && arg[0] == '-' {
 			cliError(errOut, "OPT_UNKNOWN", "unknown option: "+arg)
 			return buildArguments{}
@@ -290,6 +305,22 @@ func assignBuildOption(result *buildArguments, option string, value string, errO
 			return false
 		}
 		result.Environment = slices.Append(mem.System, result.Environment, value)
+		return true
+	}
+	if option == "--color" {
+		if value != "auto" && value != "always" && value != "never" {
+			cliError(errOut, "OPT_VALUE_INVALID", "color must be auto, always, or never")
+			return false
+		}
+		result.Color = value
+		return true
+	}
+	if option == "--diagnostic-format" {
+		if value != "human" && value != "plain" {
+			cliError(errOut, "OPT_VALUE_INVALID", "diagnostic format must be human or plain")
+			return false
+		}
+		result.DiagnosticFormat = value
 		return true
 	}
 	number, convertErr := strconv.Atoi(value)

@@ -175,11 +175,30 @@ func attachFrame(result *Result, context *Context, span source.Span, label strin
 	if a == nil {
 		a = mem.System
 	}
-	frameLabel := label
+	frameLabel, frameKind, frameSource := label, label, context.Source
 	// An owned diagnostic releases every frame label. Static frame labels must
 	// therefore be cloned before becoming part of its owned frame slice.
 	if result.Diagnostic.Owned {
 		frameLabel = owned(a, label)
+		frameKind = owned(a, label)
+		frameSource = owned(a, context.Source)
 	}
-	result.Diagnostic.Frames = slices.Append(a, result.Diagnostic.Frames, diagnostic.Frame{Label: frameLabel, Span: diagnostic.Span{Start: span.Start, End: span.End}})
+	for i := range result.Diagnostic.Frames {
+		frame := result.Diagnostic.Frames[i]
+		if frame.Kind == frameKind && frame.Label == frameLabel && frame.Source == frameSource && frame.Span.Start == span.Start && frame.Span.End == span.End {
+			if result.Diagnostic.Owned {
+				if frameLabel != "" {
+					mem.FreeString(a, frameLabel)
+				}
+				if frameKind != "" {
+					mem.FreeString(a, frameKind)
+				}
+				if frameSource != "" {
+					mem.FreeString(a, frameSource)
+				}
+			}
+			return
+		}
+	}
+	result.Diagnostic.Frames = slices.Append(a, result.Diagnostic.Frames, diagnostic.Frame{Kind: frameKind, Label: frameLabel, Source: frameSource, Span: diagnostic.Span{Start: span.Start, End: span.End}})
 }

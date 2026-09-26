@@ -18,6 +18,17 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	compiled := eval.CompileChecked(a, engine, parsed, registry)
 	result := CompileResult{Diagnostics: slices.Clone(a, compiled.Diagnostics)}
 	slices.Free(a, compiled.Diagnostics)
+	// Parser and evaluator diagnostics are tied to this parsed source. Keep the
+	// borrowed source identity with them; the parsed script outlives CompileResult.
+	for i := range result.Diagnostics {
+		if result.Diagnostics[i].Source == "" && parsed != nil && parsed.Source != nil {
+			if result.Diagnostics[i].Owned {
+				result.Diagnostics[i].Source = cloneText(a, parsed.Source.Name)
+			} else {
+				result.Diagnostics[i].Source = parsed.Source.Name
+			}
+		}
+	}
 	for i := range parsed.Diagnostics {
 		if parsed.Diagnostics[i].Severity == 0 {
 			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Source: parsed.Source.Name, Code: parsed.Diagnostics[i].Code, Severity: diagnostic.Warning, Message: parsed.Diagnostics[i].Message, Span: diagnostic.Span{Start: parsed.Diagnostics[i].Span.Start, End: parsed.Diagnostics[i].Span.End}})
@@ -68,7 +79,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 			continue
 		}
 		if duplicateLiteral(p, item.Rule) {
-			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: "TGT_AMBIG", Severity: diagnostic.Error, Message: "duplicate literal rule target", Span: diagnostic.Span{Start: item.Rule.Header.Start, End: item.Rule.Header.End}})
+			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Source: parsed.Source.Name, Code: "TGT_AMBIG", Severity: diagnostic.Error, Message: "duplicate literal rule target", Span: diagnostic.Span{Start: item.Rule.Header.Start, End: item.Rule.Header.End}})
 			continue
 		}
 		p.Rules = slices.Append(a, p.Rules, registeredRule{Rule: item.Rule})

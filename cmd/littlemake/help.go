@@ -29,7 +29,9 @@ Build options:
   -j, --jobs N           maximum concurrent nodes (N > 0, default 1)
   -n, --dry-run          plan and render without executing effects
       --force            ignore freshness and cached-task hits
-      --json             emit machine-readable JSON Lines
+       --json             emit machine-readable JSON Lines
+	      --color MODE       diagnostic colour: auto, always, or never
+	      --diagnostic-format FORMAT  diagnostic presentation: human or plain
       --verbose          report cache decisions and warnings
       --shell SHELL      recipe shell executable (repeatable)
       --env NAME=VALUE   add a recipe environment entry (repeatable)
@@ -85,7 +87,9 @@ Options:
   -j, --jobs N           maximum concurrent nodes (N > 0, default 1)
   -n, --dry-run          plan and render without executing effects
       --force            ignore freshness and cached-task hits
-      --json             emit machine-readable JSON Lines
+       --json             emit machine-readable JSON Lines
+	      --color MODE       diagnostic colour: auto, always, or never
+	      --diagnostic-format FORMAT  diagnostic presentation: human or plain
       --verbose          report cache decisions and warnings
       --shell SHELL      recipe shell executable (repeatable)
       --env NAME=VALUE   add a recipe environment entry (repeatable)
@@ -240,24 +244,44 @@ var doCommands = []commandSpec{
 func writeCommandList(out io.Writer, top bool) {
 	for i := range doCommands {
 		summary := doCommands[i].DoSummary
-		if top { summary = doCommands[i].TopSummary }
-		if summary == "" { continue }
+		if top {
+			summary = doCommands[i].TopSummary
+		}
+		if summary == "" {
+			continue
+		}
 		io.WriteString(out, "  ")
 		io.WriteString(out, doCommands[i].Name)
-		for n := len(doCommands[i].Name); n < 8; n++ { io.WriteString(out, " ") }
+		for n := len(doCommands[i].Name); n < 8; n++ {
+			io.WriteString(out, " ")
+		}
 		io.WriteString(out, " ")
 		io.WriteString(out, summary)
 		io.WriteString(out, "\n")
 	}
 }
 
-func writeTopHelp(out io.Writer) { io.WriteString(out, topHelpBeforeCommands); writeCommandList(out, true); io.WriteString(out, topHelpAfterCommands) }
-func writeDoHelp(out io.Writer) { io.WriteString(out, doHelpBeforeCommands); writeCommandList(out, false); io.WriteString(out, doHelpAfterCommands) }
-func writeVersion(out io.Writer) { io.WriteString(out, "littlemake "); io.WriteString(out, version); io.WriteString(out, "\n") }
+func writeTopHelp(out io.Writer) {
+	io.WriteString(out, topHelpBeforeCommands)
+	writeCommandList(out, true)
+	io.WriteString(out, topHelpAfterCommands)
+}
+func writeDoHelp(out io.Writer) {
+	io.WriteString(out, doHelpBeforeCommands)
+	writeCommandList(out, false)
+	io.WriteString(out, doHelpAfterCommands)
+}
+func writeVersion(out io.Writer) {
+	io.WriteString(out, "littlemake ")
+	io.WriteString(out, version)
+	io.WriteString(out, "\n")
+}
 
 func findCommand(name string) *commandSpec {
 	for i := range doCommands {
-		if doCommands[i].Name == name { return &doCommands[i] }
+		if doCommands[i].Name == name {
+			return &doCommands[i]
+		}
 	}
 	return nil
 }
@@ -266,17 +290,29 @@ func findCommand(name string) *commandSpec {
 // command is known.
 func writeCommandHelp(out io.Writer, command string) bool {
 	spec := findCommand(command)
-	if spec == nil { return false }
-	if spec.Name == "help" { writeDoHelp(out); return true }
+	if spec == nil {
+		return false
+	}
+	if spec.Name == "help" {
+		writeDoHelp(out)
+		return true
+	}
 	io.WriteString(out, spec.Help)
 	return true
 }
 
 // runHelpCommand implements 'littlemake do help [COMMAND]'.
 func runHelpCommand(args []string, out io.Writer, errOut io.Writer) int {
-	if len(args) != 0 && args[0] == "--" { args = args[1:] }
-	if len(args) == 0 || args[0] == "help" { writeDoHelp(out); return 0 }
-	if writeCommandHelp(out, args[0]) { return 0 }
+	if len(args) != 0 && args[0] == "--" {
+		args = args[1:]
+	}
+	if len(args) == 0 || args[0] == "help" {
+		writeDoHelp(out)
+		return 0
+	}
+	if writeCommandHelp(out, args[0]) {
+		return 0
+	}
 	cliError(errOut, "CMD_UNKNOWN", "unknown command: "+args[0])
 	io.WriteString(errOut, "run 'littlemake do --help' to list commands\n")
 	return 2
@@ -303,19 +339,36 @@ func detectEarlyAction(args []string) earlyAction {
 	version := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--" { break }
-		if arg == "-h" || arg == "--help" { help = true; continue }
-		if arg == "-V" || arg == "--version" { version = true; continue }
-		if optionTakesValue(arg) { i++; continue }
+		if arg == "--" {
+			break
+		}
+		if arg == "-h" || arg == "--help" {
+			help = true
+			continue
+		}
+		if arg == "-V" || arg == "--version" {
+			version = true
+			continue
+		}
+		if optionTakesValue(arg) {
+			i++
+			continue
+		}
 	}
-	if help { return earlyAction{Kind: actionHelp, Command: helpTopic(args), Do: len(args) != 0 && args[0] == "do"} }
-	if version { return earlyAction{Kind: actionVersion} }
+	if help {
+		return earlyAction{Kind: actionHelp, Command: helpTopic(args), Do: len(args) != 0 && args[0] == "do"}
+	}
+	if version {
+		return earlyAction{Kind: actionVersion}
+	}
 	return earlyAction{}
 }
 
 // helpTopic returns the do command a help request refers to, if any.
 func helpTopic(args []string) string {
-	if len(args) > 1 && args[0] == "do" && args[1] != "help" && len(args[1]) != 0 && args[1][0] != '-' { return args[1] }
+	if len(args) > 1 && args[0] == "do" && args[1] != "help" && len(args[1]) != 0 && args[1][0] != '-' {
+		return args[1]
+	}
 	return ""
 }
 
@@ -336,11 +389,20 @@ func optionTakesValue(arg string) bool {
 // Help takes precedence over version.
 func handleHelpAndVersion(args []string, out io.Writer) (bool, int) {
 	action := detectEarlyAction(args)
-	if action.Kind == actionVersion { writeVersion(out); return true, 0 }
+	if action.Kind == actionVersion {
+		writeVersion(out)
+		return true, 0
+	}
 	if action.Kind == actionHelp {
-		if action.Command != "" && writeCommandHelp(out, action.Command) { return true, 0 }
-		if action.Do { writeDoHelp(out); return true, 0 }
-		writeTopHelp(out); return true, 0
+		if action.Command != "" && writeCommandHelp(out, action.Command) {
+			return true, 0
+		}
+		if action.Do {
+			writeDoHelp(out)
+			return true, 0
+		}
+		writeTopHelp(out)
+		return true, 0
 	}
 	return false, 0
 }

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <time.h>
@@ -79,6 +80,14 @@ int lm_cli_take_signal(void) {
     }
     lm_cli_signal_count = 0;
     return -(int)lm_cli_signal;
+}
+
+int lm_cli_stderr_is_terminal(void) { return isatty(STDERR_FILENO); }
+
+int lm_cli_stderr_width(void) {
+    struct winsize size;
+    if (ioctl(STDERR_FILENO, TIOCGWINSZ, &size) != 0 || size.ws_col == 0) return 0;
+    return (int)size.ws_col;
 }
 
 int lm_cli_environment_size(void) {
@@ -183,7 +192,7 @@ static bool lm_append(so_byte **data, int *len, int *cap, const so_byte *chunk, 
 static void lm_emit_terminal(lm_host *host, lm_process *p, int outcome, const char *diagnostic) {
     if (p->terminal) return;
     p->terminal = true;
-    lm_event event = { .kind = LM_TERMINAL, .id = p->id, .pid = p->pid, .pgid = p->pid, .outcome = outcome, .status = p->status, .signal = p->signal, .output = lm_copy(p->stdout_data, p->stdout_len), .stdoutLen = p->stdout_len, .errorOutput = lm_copy(p->stderr_data, p->stderr_len), .stderrLen = p->stderr_len, .stdoutTruncated = p->stdout_truncated, .stderrTruncated = p->stderr_truncated };
+    lm_event event = { .kind = LM_TERMINAL, .id = p->id, .pid = p->pid, .pgid = p->pid, .outcome = outcome, .status = p->status, .signal = p->signal, .output = lm_copy(p->stdout_data, p->stdout_len), .stdoutLen = p->stdout_len, .errorOutput = lm_copy(p->stderr_data, p->stderr_len), .stderrLen = p->stderr_len, .stdoutTruncated = p->stdout_truncated, .stderrTruncated = p->stderr_truncated, .retainBytes = p->retain };
     if (diagnostic) lm_diagnostic(&event, LM_HOSTF, diagnostic);
     lm_push(host, p, event);
 }

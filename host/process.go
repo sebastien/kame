@@ -60,6 +60,9 @@ type ProcessEvent struct {
 	Stderr          []byte
 	StdoutTruncated bool
 	StderrTruncated bool
+	// RetainBytes is the per-stream capture bound used for this terminal event.
+	// It lets diagnostics report whether retained process output was truncated.
+	RetainBytes int
 }
 
 func (e *ProcessEvent) Free(a mem.Allocator) {

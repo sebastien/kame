@@ -46,7 +46,7 @@ New specifications in this directory override every legacy source.
 | `008-cache.md` | Cached tasks, fingerprints, and records | 006, 007 |
 | `009-cli.md` | Native command-line interface and diagnostics | 006, 008 |
 | `010-wasm.md` | Freestanding host ABI | 002, 004, 005, 006, 007, 008 |
-| `011-diagnostics.md` | Diagnostic code registry | 001 |
+| `011-diagnostics.md` | Diagnostic model, reporting, and code registry | 001 |
 | `012-streams.md` | Source protocol, batches, materialization | 002 |
 | `013-tests.md` | End-to-end test suite and its contracts | all |
 | `014-patterns.md` | Placeholder sections and pattern values | 004, 005, 007 |
