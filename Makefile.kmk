@@ -1,0 +1,31 @@
+# Project build, test, formatting, and cleanup targets.
+default : build
+build : dist
+dist : ./build/kame.debug ./dist/kame
+./build/kame.debug :
+	mkdir -p ./build
+	cd ./src/go/kame && so build -check=warn -o ../../../build/kame.debug ./cmd/kame
+./dist/kame :
+	mkdir -p ./dist
+	cd ./src/go/kame && CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
+test : test-so test-examples test-go test-cli
+test-so :
+	cd ./src/go/kame && so test ./...
+test-examples :
+	cd ./examples && so test ./...
+test-go :
+	cd ./src/go/kame && go test ./cmd/kame
+test-cli : ./build/kame.debug
+	tests/harness.sh
+test-all : test test-sanitize
+test-sanitize :
+	cd ./src/go/kame && CC=clang so test -check=sanitize -panic=abort ./...
+	cd ./examples && CC=clang so test -check=sanitize -panic=abort ./...
+fmt : ./build/kame.debug
+	git ls-files -z -- '*.go' | xargs -0r gofmt -w
+	git ls-files -z -- '*.sh' | xargs -0r shfmt -w
+	./build/kame.debug do fmt -i Makefile.kmk
+clean :
+	rm -rf ./build ./dist
+demo :
+	cd ./examples && so run ./demo

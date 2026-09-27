@@ -61,6 +61,6 @@ sweep_dir . REF_MISSING do expr -c 'unknown-name'
 sweep_dir . EXPR_INVALID do expr -c '(first 1)'
 sweep_dir . CAP_DENIED do expr -c '(read "x")'
 sweep_dir diag-sweep NO_ARTIFACT do cat noart
-sweep_dir diag-sweep FS_ERR -f missing-build.lmk anything
+sweep_dir diag-sweep FS_ERR -f missing-build.kmk anything
 
 test-end

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # --
-# CLI conformance helpers for the compiled littlemake binary.
+# CLI conformance helpers for the compiled kame binary.
 #
 # Sourced by tests/T*-*.sh after tests/lib-testing.sh. Never executed as a
 # test: tests/harness.sh skips tests/lib-*.sh.
@@ -18,16 +18,16 @@ CLI_ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." &>/dev/null 
 
 # Variable: CLI_BIN
 # Debug build of the CLI under test (checks enabled, warnings reported).
-CLI_BIN="${CLI_BIN:-$CLI_ROOT/dist/littlemake.debug}"
+CLI_BIN="${CLI_BIN:-$CLI_ROOT/build/kame.debug}"
 
-# Variable: LITTLEMAKE
+# Variable: KAME
 # Convenience alias used by tests.
-LITTLEMAKE="$CLI_BIN"
-export CLI_BIN LITTLEMAKE
+KAME="$CLI_BIN"
+export CLI_BIN KAME
 
 # Variable: CLI_SOURCES
 # Directories whose changes require a rebuild of CLI_BIN.
-CLI_SOURCES=("$CLI_ROOT/cmd" "$CLI_ROOT/core" "$CLI_ROOT/diagnostic" "$CLI_ROOT/host" "$CLI_ROOT/lang" "$CLI_ROOT/lib" "$CLI_ROOT/runtime" "$CLI_ROOT/generated")
+CLI_SOURCES=("$CLI_ROOT/src/go/kame/cmd" "$CLI_ROOT/src/go/kame/core" "$CLI_ROOT/src/go/kame/diagnostic" "$CLI_ROOT/src/go/kame/host" "$CLI_ROOT/src/go/kame/lang" "$CLI_ROOT/src/go/kame/operations" "$CLI_ROOT/src/go/kame/program")
 
 # Variable: CLI_OUT, CLI_ERR, CLI_STATUS
 # Captures from the most recent cli_run invocation.
@@ -72,7 +72,7 @@ function cli_sources_newer {
 		fi
 	done
 	local module
-	for module in "$CLI_ROOT/go.mod" "$CLI_ROOT/go.sum"; do
+	for module in "$CLI_ROOT/src/go/kame/go.mod" "$CLI_ROOT/src/go/kame/go.sum"; do
 		if [ -e "$module" ] && [ "$module" -nt "$binary" ]; then
 			return 0
 		fi
@@ -91,8 +91,8 @@ function cli_build {
 		test_log_message "CLI binary is current: $(test-relpath "$CLI_BIN")"
 		return 0
 	fi
-	local lock="$CLI_ROOT/dist/.littlemake.debug.lock"
-	mkdir -p "$CLI_ROOT/dist"
+	local lock="$CLI_ROOT/build/.kame.debug.lock"
+	mkdir -p "$CLI_ROOT/build"
 	test_log_message "building CLI: $(test-relpath "$CLI_BIN")"
 	# Serialize concurrent suite runs; the build takes ~25s.
 	if ! (
@@ -100,11 +100,11 @@ function cli_build {
 		if [ -x "$CLI_BIN" ] && ! cli_sources_newer "$CLI_BIN"; then
 			exit 0
 		fi
-		if [ "$CLI_BIN" = "$CLI_ROOT/dist/littlemake.debug" ]; then
-			make -C "$CLI_ROOT" dist/littlemake.debug >&2 || exit 1
+		if [ "$CLI_BIN" = "$CLI_ROOT/build/kame.debug" ]; then
+			make -C "$CLI_ROOT" build/kame.debug >&2 || exit 1
 		else
-			cd "$CLI_ROOT" || exit 1
-			so build -check=warn -o "$CLI_BIN" ./cmd/littlemake >&2 || exit 1
+			cd "$CLI_ROOT/src/go/kame" || exit 1
+			so build -check=warn -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
 		fi
 	) 9>"$lock"; then
 		test-fail "cannot build the CLI binary"

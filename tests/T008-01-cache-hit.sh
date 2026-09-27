@@ -25,7 +25,7 @@ test-step "a successful cached task writes a record"
 	else
 		test-fail "recipe runs: $(run_count ./runs.log)"
 	fi
-	records="$(find .littlemake/cache/tasks -name '*.lmkr' -type f 2>/dev/null | wc -l | tr -d ' ')"
+	records="$(find .kame/cache/tasks -name '*.kmkr' -type f 2>/dev/null | wc -l | tr -d ' ')"
 	if [ "$records" -ge 1 ]; then
 		test-ok "cache record written"
 	else
@@ -74,7 +74,7 @@ test-step "input changes invalidate the record"
 test-step "environment changes invalidate the record"
 (
 	cd cache-hit
-	rm -rf .littlemake runs.log
+	rm -rf .kame runs.log
 	cli_run -- --env CACHE_VALUE=one env-report
 	cli_expect_status 0
 	cli_run -- --json --env CACHE_VALUE=one env-report
@@ -100,10 +100,10 @@ test-step "environment changes invalidate the record"
 test-step "failed cached tasks do not commit a record"
 (
 	cd cache-hit
-	rm -rf .littlemake
+	rm -rf .kame
 	cli_run -- -c $'task failing :\n\texit 1' failing
 	cli_expect_status 1
-	records="$(find .littlemake -name '*.lmkr' -type f 2>/dev/null | wc -l | tr -d ' ')" || true
+	records="$(find .kame -name '*.kmkr' -type f 2>/dev/null | wc -l | tr -d ' ')" || true
 	if [ "$records" = 0 ]; then
 		test-ok "no record committed for a failed task"
 	else

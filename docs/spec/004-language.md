@@ -1,8 +1,8 @@
-# LittleMake Language
+# Kame Language
 
 ## Purpose
 
-LittleMake combines a Lisp-like expression language with Make-like definitions
+Kame combines a Lisp-like expression language with Make-like definitions
 and rules. Template, expression, and rule syntax must each be independently
 parseable and formattable. Script parsing composes those parsers rather than
 creating a second representation.
@@ -20,6 +20,12 @@ Line endings `LF` and `CRLF` are accepted. Canonical formatting emits `LF`.
 
 A line whose first non-whitespace text begins with `#` or `//` is a comment.
 Comment markers inside strings, paths, or recipe text are literal.
+
+`include PATH` is a top-level source-composition directive. `PATH` is a quoted
+or unquoted path without whitespace, resolved relative to the including file.
+Includes are expanded depth-first at their declaration location; included
+definitions and rules share the caller's scope and source order. Includes are
+only valid for file-backed sources. Repeated or cyclic inclusion is an error.
 
 Parsers return an AST and zero or more diagnostics. Invalid syntax must never be
 silently discarded. Recovery may preserve malformed recipe interpolation as
@@ -82,7 +88,7 @@ Integer literals must fit `int64`. Numeric overflow is `PARSE_ERR`.
 
 Expressions use these values:
 
-```littlemake
+```kame
 :true
 :false
 :nil
@@ -111,7 +117,7 @@ invalid.
 Expression strings use double quotes. They support `\"`, `\\`, `\n`, `\r`,
 and `\t`. A quoted string may contain expression interpolation:
 
-```littlemake
+```kame
 "Bundle of {(count files)} files"
 ```
 
@@ -132,7 +138,7 @@ Single quote is reserved and is not an alternative string delimiter.
 
 A reference starts with a name and contains dot-separated components:
 
-```littlemake
+```kame
 project.name
 files.0
 files.-1
@@ -149,14 +155,14 @@ names.
 
 `|` rewrites applications before evaluation:
 
-```littlemake
+```kame
 (value | transform a)
 ```
 
 is equivalent to `(transform a value)`. One or more `_` placeholders on the
 right are each replaced with the piped value:
 
-```littlemake
+```kame
 (value | transform _ a)
 ```
 
@@ -253,7 +259,7 @@ A target template contains literal text and zero or more capture groups. A
 template with no capture group matches only its literal text; rule headers
 classify such a target as a path or name rather than a template:
 
-```littlemake
+```kame
 ./out.o
 ./{stem:*}.o
 ./{path:**}/{name:*}.c
@@ -292,13 +298,13 @@ expansion reference rather than a capture; see `014-patterns.md`.
 
 A value definition is:
 
-```littlemake
+```kame
 NAME = value
 ```
 
 A function definition is:
 
-```littlemake
+```kame
 (NAME argument... rest...) = value
 ```
 
@@ -318,7 +324,7 @@ Definitions are lazy as specified in `005-evaluation.md`.
 
 A rule has a header and zero or more indented body lines:
 
-```littlemake
+```kame
 ./output : ./input
 	command @< @>
 

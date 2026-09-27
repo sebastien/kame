@@ -31,7 +31,7 @@ else
 fi
 
 test-step "fixtures copy instead of moving"
-if [ -f "$(fixture_path basic/Makefile.lmk)" ]; then
+if [ -f "$(fixture_path basic/Makefile.kmk)" ]; then
 	test-ok "source fixture still present"
 else
 	test-fail "source fixture disappeared"

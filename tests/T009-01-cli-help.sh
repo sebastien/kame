@@ -15,7 +15,7 @@ cli_build
 test-step "help prints the overview on stdout and exits 0"
 cli_run -- --help
 cli_expect_status 0
-cli_expect_stdout_contains "Usage:" "littlemake do COMMAND" "Build options:" "Commands (littlemake do COMMAND):"
+cli_expect_stdout_contains "Usage:" "kame do COMMAND" "Build options:" "Commands (kame do COMMAND):"
 cli_expect_stderr_empty
 
 test-step "short help flag"
@@ -24,17 +24,17 @@ cli_expect_status 0
 cli_expect_stdout_contains "Usage:"
 cli_expect_stderr_empty
 
-test-step "version prints 'littlemake VERSION' on stdout and exits 0"
+test-step "version prints 'kame VERSION' on stdout and exits 0"
 cli_run -- --version
 cli_expect_status 0
-cli_expect_stdout "littlemake 0.1.0
+cli_expect_stdout "kame 0.1.0
 "
 cli_expect_stderr_empty
 
 test-step "short version flag"
 cli_run -- -V
 cli_expect_status 0
-cli_expect_stdout "littlemake 0.1.0
+cli_expect_stdout "kame 0.1.0
 "
 
 test-step "help takes precedence over version"
@@ -51,7 +51,7 @@ cli_expect_stderr_empty
 test-step "do namespace overview"
 cli_run -- do
 cli_expect_status 0
-cli_expect_stdout_contains "littlemake do COMMAND" "Commands:" "parse" "expr"
+cli_expect_stdout_contains "kame do COMMAND" "Commands:" "parse" "expr"
 cli_expect_stderr_empty
 
 cli_run -- do --help
@@ -66,22 +66,22 @@ test-step "per-command help"
 for command in run plan cat inputs outputs span parse fmt expr; do
 	cli_run -- do "$command" --help
 	cli_expect_status 0
-	cli_expect_stdout_contains "Usage: littlemake do $command"
+	cli_expect_stdout_contains "Usage: kame do $command"
 	cli_expect_stderr_empty
 done
 
 cli_run -- do help run
 cli_expect_status 0
-cli_expect_stdout_contains "Usage: littlemake do run"
+cli_expect_stdout_contains "Usage: kame do run"
 
 test-step "unknown do command is a usage error with a hint"
 cli_run -- do bogus
 cli_expect_status 2
-cli_expect_stderr_contains "CMD_UNKNOWN" "unknown command: bogus" "littlemake do --help"
+cli_expect_stderr_contains "CMD_UNKNOWN" "unknown command: bogus" "kame do --help"
 
 cli_run -- do help bogus
 cli_expect_status 2
-cli_expect_stderr_contains "CMD_UNKNOWN" "littlemake do --help"
+cli_expect_stderr_contains "CMD_UNKNOWN" "kame do --help"
 
 test-step "help token after -- is a target, not a request"
 cli_run -- -- --help
@@ -118,7 +118,7 @@ cli_expect_status 1
 cli_expect_stderr_contains "BUILD_NO_SOURCE"
 
 test-step "an explicitly requested missing source is FS_ERR"
-cli_run -- -f missing.lmk
+cli_run -- -f missing.kmk
 cli_expect_status 1
 cli_expect_stderr_contains "FS_ERR" "cannot read source"
 

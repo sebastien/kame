@@ -41,14 +41,14 @@ cli_expect_status 0
 cli_expect_stdout '0'
 
 test-step "expression read from stdin"
-printf '(join ["x" "y"] "")' >expression.lm
-cli_run --stdin expression.lm -- do expr
+printf '(join ["x" "y"] "")' >expression.km
+cli_run --stdin expression.km -- do expr
 cli_expect_status 0
 cli_expect_stdout 'xy'
 cli_expect_stderr_empty
 
 test-step "expression read from a file"
-cli_run -- do expr expression.lm
+cli_run -- do expr expression.km
 cli_expect_status 0
 cli_expect_stdout 'xy'
 
@@ -63,7 +63,7 @@ else
 fi
 
 test-step "input source conflicts and missing values"
-cli_run -- do expr -c '(list 1)' expression.lm
+cli_run -- do expr -c '(list 1)' expression.km
 cli_expect_status 2
 cli_expect_stderr_contains 'OPT_CONFLICT'
 

@@ -18,7 +18,7 @@ fmt_stable_ast() {
 	local dir="$1"
 	local lang="$2"
 	local file
-	for file in "$dir"/*.lm; do
+	for file in "$dir"/*.km; do
 		[ -e "$file" ] || continue
 		cli_run -- do parse --lang "$lang" "$file"
 		if [ "$CLI_STATUS" != 0 ]; then
@@ -31,8 +31,8 @@ fmt_stable_ast() {
 			test-fail "fmt $(test-relpath "$file") exited $CLI_STATUS"
 			continue
 		fi
-		cp "$CLI_OUT" formatted.lm
-		cli_run -- do parse --lang "$lang" formatted.lm
+		cp "$CLI_OUT" formatted.km
+		cli_run -- do parse --lang "$lang" formatted.km
 		if [ "$CLI_STATUS" != 0 ]; then
 			test-fail "parse formatted $(test-relpath "$file") exited $CLI_STATUS"
 			continue

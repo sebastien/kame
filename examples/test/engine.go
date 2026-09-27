@@ -1,8 +1,8 @@
 package examples_test
 
 import (
-	"littlemake/core"
-	"littlemake/examples"
+	"kame/core"
+	"kame/examples"
 	"solod.dev/so/io"
 	"solod.dev/so/testing"
 )

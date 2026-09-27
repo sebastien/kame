@@ -19,7 +19,7 @@ parse_matrix() {
 	local dir="$1"
 	local lang="$2"
 	local file size
-	for file in "$dir"/*.lm; do
+	for file in "$dir"/*.km; do
 		[ -e "$file" ] || continue
 		size="$(wc -c <"$file")"
 		cli_run -- do parse --lang "$lang" "$file"

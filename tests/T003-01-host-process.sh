@@ -18,8 +18,8 @@ fixture_copy project host-process
 test-step "large stdout streams without truncation"
 (
 	cd host-process
-	printf 'task big :\n\tseq 1 2000\n' >Big.lmk
-	cli_run -- -f Big.lmk big
+	printf 'task big :\n\tseq 1 2000\n' >Big.kmk
+	cli_run -- -f Big.kmk big
 	cli_expect_status 0
 	lines="$(wc -l <"$CLI_OUT" | tr -d ' ')"
 	if [ "$lines" = 2000 ]; then
@@ -32,8 +32,8 @@ test-step "large stdout streams without truncation"
 test-step "stdout and stderr stay on their streams"
 (
 	cd host-process
-	printf 'task streams :\n\techo to-stdout\n\techo to-stderr >&2\n' >Streams.lmk
-	cli_run -- -f Streams.lmk streams
+	printf 'task streams :\n\techo to-stdout\n\techo to-stderr >&2\n' >Streams.kmk
+	cli_run -- -f Streams.kmk streams
 	cli_expect_status 0
 	cli_expect_stdout "to-stdout
 "
@@ -48,8 +48,8 @@ test-step "stdout and stderr stay on their streams"
 test-step "recipe exit codes surface as RECIPE_FAIL"
 (
 	cd host-process
-	printf 'task fail :\n\texit 7\n' >Exit.lmk
-	cli_run -- -f Exit.lmk fail
+	printf 'task fail :\n\texit 7\n' >Exit.kmk
+	cli_run -- -f Exit.kmk fail
 	cli_expect_status 1
 	cli_expect_stderr_contains 'RECIPE_FAIL'
 )
@@ -57,8 +57,8 @@ test-step "recipe exit codes surface as RECIPE_FAIL"
 test-step "--retry re-runs failed commands"
 (
 	cd host-process
-	cp "$(fixture_path host/retry.lmk)" Retry.lmk
-	cli_run -- -f Retry.lmk --retry 1 ./retry.out
+	cp "$(fixture_path host/retry.kmk)" Retry.kmk
+	cli_run -- -f Retry.kmk --retry 1 ./retry.out
 	cli_expect_status 0
 	cli_expect_file ./retry.out "ok
 "
@@ -67,8 +67,8 @@ test-step "--retry re-runs failed commands"
 test-step "--shell selects the recipe executable"
 (
 	cd host-process
-	printf 'task shell :\n\techo shell-ran\n' >Shell.lmk
-	cli_run -- -f Shell.lmk --shell /bin/sh --shell -c shell
+	printf 'task shell :\n\techo shell-ran\n' >Shell.kmk
+	cli_run -- -f Shell.kmk --shell /bin/sh --shell -c shell
 	cli_expect_status 0
 	cli_expect_stdout "shell-ran
 "
@@ -77,8 +77,8 @@ test-step "--shell selects the recipe executable"
 test-step "--env entries reach recipes"
 (
 	cd host-process
-	printf 'task env :\n\techo "value=$HOST_TEST_VALUE"\n' >Env.lmk
-	cli_run -- -f Env.lmk --env HOST_TEST_VALUE=from-cli env
+	printf 'task env :\n\techo "value=$HOST_TEST_VALUE"\n' >Env.kmk
+	cli_run -- -f Env.kmk --env HOST_TEST_VALUE=from-cli env
 	cli_expect_status 0
 	cli_expect_stdout "value=from-cli
 "
@@ -88,8 +88,8 @@ test-step "commands run in the build directory"
 (
 	cd host-process
 	expected="$PWD"
-	printf 'task cwd :\n\tpwd\n' >Cwd.lmk
-	cli_run -- -f Cwd.lmk cwd
+	printf 'task cwd :\n\tpwd\n' >Cwd.kmk
+	cli_run -- -f Cwd.kmk cwd
 	cli_expect_status 0
 	if [ "$(cat "$CLI_OUT")" = "$expected" ]; then
 		test-ok "recipe cwd is the build directory"

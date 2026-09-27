@@ -43,8 +43,8 @@ test-step "build failures report the stable code and a message"
 )
 
 test-step "source-qualified parse diagnostics keep the source prefix"
-printf 'value = (unclosed\n' >broken.lmk
-cli_run -- -f broken.lmk anything
+printf 'value = (unclosed\n' >broken.kmk
+cli_run -- -f broken.kmk anything
 cli_expect_status 1
 	if grep -Eq '^[^:]+:[0-9]+:[0-9]+: error PARSE_ERR: .+' "$CLI_ERR"; then
 	test-ok "parse diagnostic is source-qualified"

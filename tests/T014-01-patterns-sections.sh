@@ -61,7 +61,7 @@ test-step "patterns render as their text in rule inputs"
 (
 	mkdir -p patternproj/src
 	cd patternproj
-	cat > Makefile.lmk <<'LMK'
+	cat > Makefile.kmk <<'LMK'
 sources = ["./src/a.c" "./src/b.c"]
 objects = (replace ./src/{name:*}.c ./build/{name}.o sources)
 ./build/marker : @(objects)

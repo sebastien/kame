@@ -1,9 +1,5 @@
-./bin/littlemake
-^littlemake$
-.littlemake
+/build/
+/dist/
+.kame/
 .memo/memory/*
-generated/
-dist/
 .littledocs.*
-tmp.testing.*
-*.debug

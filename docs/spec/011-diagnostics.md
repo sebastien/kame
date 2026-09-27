@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This file defines LittleMake's user-facing failure model, machine-readable
+This file defines Kame's user-facing failure model, machine-readable
 representation, and terminal reporting. It is the authoritative registry of
 stable diagnostic codes. Codes use uppercase ASCII words separated by
 underscores, and a code's meaning must not change after release.
@@ -10,8 +10,8 @@ underscores, and a code's meaning must not change after release.
 A useful diagnostic answers, in order:
 
 1. What failed.
-2. Where it failed, when LittleMake knows an authored location.
-3. Why LittleMake believes it failed, including the relevant evaluation or
+2. Where it failed, when Kame knows an authored location.
+3. Why Kame believes it failed, including the relevant evaluation or
    target context.
 4. What the user can do to recover, when a concrete action is known.
 5. What an underlying host process reported, when applicable.
@@ -179,7 +179,7 @@ template. The renderer accepts an explicit terminal width and uses a documented
 stable fallback when no width is available; wrapping is deterministic for a
 given width and never changes plain or JSON output.
 
-Use the authored LittleMake location, not a generated shell-script location.
+Use the authored Kame location, not a generated shell-script location.
 For a diagnostic without a source location, render the severity, code, and
 message without inventing a `<command>:1:1` location.
 
@@ -187,9 +187,9 @@ message without inventing a `<command>:1:1` location.
 message. `tips` state a concrete action and use `help:`. A target stack appears
 only for an actual nested target dependency. Frames appear from the immediate
 context outward, using wording such as `while evaluating definition "SOURCES"`
-or `called from Makefile.lmk:3:1: rule "build"`.
+or `called from Makefile.kmk:3:1: rule "build"`.
 
-The `cause` block follows LittleMake's explanation. It distinguishes the
+The `cause` block follows Kame's explanation. It distinguishes the
 interpreted diagnosis from the process outcome:
 
 ```text
@@ -205,7 +205,7 @@ truncated rather than silently cut off.
 
 ### Certainty and Writing
 
-State facts only when LittleMake established them through parsing, evaluation,
+State facts only when Kame established them through parsing, evaluation,
 or a documented host result. Use qualified language for an inference, for
 example `this appears to be an incomplete if block`, rather than claiming that
 the user made a particular mistake.
@@ -249,11 +249,11 @@ not a reduced summary. Existing schema-1 fields remain stable:
     "code": "RECIPE_FAIL",
     "severity": "error",
     "message": "recipe exited unsuccessfully",
-    "source": "Makefile.lmk",
+    "source": "Makefile.kmk",
     "span": { "start": 84, "end": 101 },
     "notes": ["output was not produced"],
-    "related": [{ "message": "declared here", "source": "Makefile.lmk", "span": { "start": 42, "end": 47 } }],
-    "frames": [{ "kind": "rule", "label": "build", "source": "Makefile.lmk", "span": { "start": 42, "end": 101 } }],
+    "related": [{ "message": "declared here", "source": "Makefile.kmk", "span": { "start": 42, "end": 47 } }],
+    "frames": [{ "kind": "rule", "label": "build", "source": "Makefile.kmk", "span": { "start": 42, "end": 101 } }],
     "target": "build",
     "targetStack": ["all", "build"],
     "tips": ["check that the compiler is installed"],
@@ -274,7 +274,7 @@ contain no ANSI escapes, and use no terminal-width-dependent wrapping.
 
 - Human, plain, and JSON representations preserve the same code, severity,
   message, primary source identity/span, and available context.
-- Human diagnostics place LittleMake's explanation before an underlying process
+- Human diagnostics place Kame's explanation before an underlying process
   cause or captured process output.
 - A renderer omits unavailable information; it never fabricates a source
   location, target path, command, or recovery action.
@@ -296,7 +296,7 @@ contain no ANSI escapes, and use no terminal-width-dependent wrapping.
   and does not mark a following line.
 - A propagated diagnostic renders its primary location, related location or
   frame context, and target stack without duplicating equivalent frames.
-- A command failure renders LittleMake's diagnosis before its process cause and
+- A command failure renders Kame's diagnosis before its process cause and
   does not repeat output that was already streamed.
 - Human, plain, and JSON formatting represent the same code, message, source
   span, notes, frames, target context, tips, and bounded cause metadata.

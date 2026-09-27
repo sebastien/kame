@@ -62,7 +62,7 @@ else
 fi
 
 test-step "invalid diagnostics are printable"
-cli_run -- do parse --lang expr "$(lang_fixture invalid/expr-empty-application.lm)"
+cli_run -- do parse --lang expr "$(lang_fixture invalid/expr-empty-application.km)"
 cli_expect_status 1
 cli_expect_printable "$CLI_OUT"
 

@@ -19,7 +19,7 @@ test-step "a corrupted record is a miss and is rewritten"
 	cd cache-records
 	cli_run -- report
 	cli_expect_status 0
-	record="$(find .littlemake/cache/tasks -name '*.lmkr' -type f | head -1)"
+	record="$(find .kame/cache/tasks -name '*.kmkr' -type f | head -1)"
 	if [ -n "$record" ]; then
 		test-ok "record path found"
 	else
@@ -44,12 +44,12 @@ test-step "a corrupted record is a miss and is rewritten"
 test-step "records are keyed by content, not target text"
 (
 	cd cache-records
-	before="$(find .littlemake/cache/tasks -name '*.lmkr' -type f | wc -l | tr -d ' ')"
+	before="$(find .kame/cache/tasks -name '*.kmkr' -type f | wc -l | tr -d ' ')"
 	cli_run -- -c $'task alt-report : ./config.txt\n\techo alt >> ./runs.log\n\t@(out "alt\\n")' alt-report
 	cli_expect_status 0
 	cli_run -- -c $'task alt-report : ./config.txt\n\techo alt >> ./runs.log\n\t@(out "alt\\n")' alt-report
 	cli_expect_status 0
-	after="$(find .littlemake/cache/tasks -name '*.lmkr' -type f | wc -l | tr -d ' ')"
+	after="$(find .kame/cache/tasks -name '*.kmkr' -type f | wc -l | tr -d ' ')"
 	if [ "$after" -ge 2 ]; then
 		test-ok "distinct tasks use distinct records ($before -> $after)"
 	else
@@ -60,11 +60,11 @@ test-step "records are keyed by content, not target text"
 test-step "cache directories stay inside the working tree"
 (
 	cd cache-records
-	escaped="$(find . -path './.littlemake/cache/tasks/*' -name '*.lmkr' -type f | wc -l | tr -d ' ')"
+	escaped="$(find . -path './.kame/cache/tasks/*' -name '*.kmkr' -type f | wc -l | tr -d ' ')"
 	if [ "$escaped" -ge 1 ]; then
-		test-ok "records live under .littlemake/cache/tasks"
+		test-ok "records live under .kame/cache/tasks"
 	else
-		test-fail "no record under .littlemake/cache/tasks"
+		test-fail "no record under .kame/cache/tasks"
 	fi
 )
 

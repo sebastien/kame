@@ -1,0 +1,1 @@
+{"schema":1,"lang":"expr","source":"testdata/parse/expr.km","ast":{"kind":"list","span":{"start":0,"end":3},"items":[{"kind":"integer","span":{"start":1,"end":2},"value":1}]},"diagnostics":[]}

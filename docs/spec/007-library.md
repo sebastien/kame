@@ -104,7 +104,7 @@ entries. Invalid pattern combinations and missing capture references are
 
 ## Path Operations
 
-Path operations are lexical and use slash-separated LittleMake paths:
+Path operations are lexical and use slash-separated Kame paths:
 
 | Name | Contract |
 | --- | --- |
@@ -163,7 +163,7 @@ Normal recipes are the primary shell interface. One explicit `shell` operation
 is provided for expressions that need collected process results. It requires
 `run`, submits a process through `003-posix-process.md`, and returns:
 
-```littlemake
+```kame
 [status: 0 stdout: "..." stderr: "..."]
 ```
 

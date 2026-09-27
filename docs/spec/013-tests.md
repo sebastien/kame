@@ -3,8 +3,9 @@
 ## Purpose
 
 This specification defines the end-to-end conformance suite for the compiled
-`littlemake` binary. In-process tests (`go test ./cmd/littlemake`) and package
-tests (`so test ./...`) cannot catch Solod-to-C defects; this suite exercises
+`kame` binary. In-process tests (`cd src/go/kame && go test ./cmd/kame`) and
+package tests (`cd src/go/kame && so test ./...`) cannot catch Solod-to-C
+defects; this suite exercises
 the real binary against real files, processes, streams, and signals, and
 asserts the behavior promised by specifications `003` through `012`.
 
@@ -16,13 +17,14 @@ expected-failure markers and no skipped assertions.
 
 | Layer | Command | Scope |
 | --- | --- | --- |
-| Package tests | `so test ./...` | Solod package internals |
-| CLI unit tests | `go test ./cmd/littlemake` | in-process `Run()` behavior |
+| Package tests | `cd src/go/kame && so test ./...` | Solod package internals |
+| Examples tests | `cd examples && so test ./...` | external-consumer engine examples |
+| CLI unit tests | `cd src/go/kame && go test ./cmd/kame` | in-process `Run()` behavior |
 | End-to-end | `tests/harness.sh`, `make test-cli` | compiled debug binary, real system calls |
-| Sanitizers | `CC=clang so test -check=sanitize -panic=abort ./...` | memory safety |
+| Sanitizers | `CC=clang` with the package-test commands | memory safety |
 
 The end-to-end binary is always the checks-enabled debug build
-(`dist/littlemake.debug`), never the release build.
+(`build/kame.debug`), never the release build.
 
 ## Naming and layout
 
@@ -53,8 +55,8 @@ tests/
 - `tests/harness.sh [FILE...]` runs every `tests/**/*.sh` except `lib-*.sh`,
   `harness.sh`, and anything under `tests/data/`.
 - Each test is a separate process started from the repository root.
-- `test-start` creates a scratch directory under the repository root, exports
-  it as `TMPDIR`, and changes into it; `test-end` reports and removes it.
+- `test-start` creates a scratch directory under `build/tests/`, exports it as
+  `TMPDIR`, and changes into it; `test-end` reports and removes it.
 - Results are recorded in an append-only file inside the scratch directory, so
   assertions made in subshells or background jobs still reach the report.
 - Test scripts source `tests/lib-bootstrap.sh` (which loads `lib-testing.sh`
@@ -63,9 +65,9 @@ tests/
 
 ## Binary contract (`tests/lib-cli.sh`)
 
-- `LITTLEMAKE` points at `dist/littlemake.debug`.
+- `KAME` points at `build/kame.debug`.
 - `cli_build` builds the default debug binary through `make
-  dist/littlemake.debug` only when it is missing or older than tracked sources,
+  build/kame.debug` only when it is missing or older than tracked sources,
   under a `flock` guard shared by concurrent runs. A caller-selected `CLI_BIN`
   uses the equivalent direct build.
 - Every invocation runs with a controlled environment (`LC_ALL=C`, `TZ=UTC`,
@@ -124,8 +126,8 @@ Current coverage:
 
 All currently specified native acceptance bullets have an E2E or package-level
 test. Spec 014 coverage is in place: `T014-01`
-placeholder sections and pattern replace, plus `expr/section-*.lm`,
-`expr/pattern-*.lm`, and `invalid/expr-pattern-mixed-groups.lm` fixtures in the
+placeholder sections and pattern replace, plus `expr/section-*.km`,
+`expr/pattern-*.km`, and `invalid/expr-pattern-mixed-groups.km` fixtures in the
 T004 parse/format suites.
 
 ## Defects found and fixed by this suite

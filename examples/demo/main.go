@@ -2,7 +2,7 @@
 package main
 
 import (
-	"littlemake/examples"
+	"kame/examples"
 	"solod.dev/so/fmt"
 	"solod.dev/so/mem"
 )

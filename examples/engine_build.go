@@ -5,7 +5,7 @@
 package examples
 
 import (
-	"littlemake/core"
+	"kame/core"
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -22,7 +22,7 @@ const (
 	deriveDefault
 )
 
-var sourceNames = [4]string{"file1.lm", "file2.lm", "file3.lm", "file4.lm"}
+var sourceNames = [4]string{"file1.km", "file2.km", "file3.km", "file4.km"}
 
 func definition(name string) core.ResourceKey {
 	return core.ResourceKey{Kind: core.ResourceDefinition, Name: name}

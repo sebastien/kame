@@ -18,7 +18,7 @@ fixture_copy effects effects
 test-step "out and err effects keep their streams and order"
 (
 	cd effects
-	cli_run -- -f Effects.lmk default
+	cli_run -- -f Effects.kmk default
 	cli_expect_status 0
 	# Deferred effects commit in source order before the one shell command.
 	cli_expect_stdout "first
@@ -36,7 +36,7 @@ command-last
 test-step "dry-run reports effects without running the command"
 (
 	cd effects
-	cli_run -- -n -f Effects.lmk default
+	cli_run -- -n -f Effects.kmk default
 	cli_expect_status 0
 	if grep -q 'command-last' "$CLI_OUT"; then
 		test-fail "dry-run executed the recipe command"

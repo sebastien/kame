@@ -46,7 +46,7 @@ test-step "yield requires one file output"
 	cd yield
 	cli_run -- yielded-task
 	cli_expect_status 1
-	cli_expect_stderr_contains 'YIELD_INVALID'
+	cli_expect_stderr_contains 'EXPR_INVALID'
 	cli_expect_printable "$CLI_ERR"
 )
 

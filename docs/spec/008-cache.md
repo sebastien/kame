@@ -19,7 +19,7 @@ One cached task instance is identified by:
 The local backend encodes this identity into a safe path below:
 
 ```text
-.littlemake/cache/tasks/
+.kame/cache/tasks/
 ```
 
 User target text is not used directly as an unchecked filesystem path.
@@ -143,7 +143,7 @@ renames it over the previous record. A crash must leave either the old valid
 record or no valid record, never a valid-looking partial record.
 
 Concurrent production of one task is already deduplicated by the engine.
-Cross-process cache locking is deferred. Concurrent LittleMake processes may
+Cross-process cache locking is deferred. Concurrent Kame processes may
 both execute a miss, but each atomic successful record remains readable.
 
 ## Invalidations
@@ -158,7 +158,7 @@ These changes must cause a miss:
 - Explicit shell, cwd, environment dependency, timeout, or retry settings.
 - Any value in the complete process environment used by the recipe.
 
-The process host has no implicit ambient environment. LittleMake display options
+The process host has no implicit ambient environment. Kame display options
 do not participate.
 
 ## Limits

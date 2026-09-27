@@ -44,11 +44,11 @@ cli_expect_stderr_contains "OPT_UNKNOWN"
 test-step "help wins over execution"
 cli_run -- do parse --help
 cli_expect_status 0
-cli_expect_stdout_contains "Usage: littlemake do parse"
+cli_expect_stdout_contains "Usage: kame do parse"
 cli_expect_stderr_empty
 
 cli_run -- do help parse
 cli_expect_status 0
-cli_expect_stdout_contains "Usage: littlemake do parse"
+cli_expect_stdout_contains "Usage: kame do parse"
 
 test-end

@@ -17,21 +17,21 @@ test-step "fixture formatting matches the canonical fixture"
 fixture_copy fmt fmtcheck
 (
 	cd fmtcheck
-	cli_run -- do fmt --lang script canonical.lmk
+	cli_run -- do fmt --lang script canonical.kmk
 	cli_expect_status 0
-	cli_expect_stdout_file canonical.lmk
+	cli_expect_stdout_file canonical.kmk
 
-	cli_run -- do fmt --lang script unformatted.lmk
+	cli_run -- do fmt --lang script unformatted.kmk
 	cli_expect_status 0
-	cli_expect_stdout_file canonical.lmk
+	cli_expect_stdout_file canonical.kmk
 
-	cli_run -- do fmt --lang script -n canonical.lmk
+	cli_run -- do fmt --lang script -n canonical.kmk
 	cli_expect_status 0
 	cli_expect_stdout_empty
 
-	cli_run -- do fmt --lang script -n unformatted.lmk
+	cli_run -- do fmt --lang script -n unformatted.kmk
 	cli_expect_status 1
-	cli_expect_stdout "unformatted.lmk
+	cli_expect_stdout "unformatted.kmk
 "
 )
 
@@ -41,7 +41,7 @@ fmt_stable() {
 	local dir="$1"
 	local lang="$2"
 	local file
-	for file in "$dir"/*.lm; do
+	for file in "$dir"/*.km; do
 		[ -e "$file" ] || continue
 		cli_run -- do fmt --lang "$lang" "$file"
 		if [ "$CLI_STATUS" != 0 ]; then

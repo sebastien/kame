@@ -1,7 +1,7 @@
 package examples
 
 import (
-	"littlemake/core"
+	"kame/core"
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -35,10 +35,10 @@ func logPoll(c *core.EngineContext, source *core.Source, out *core.Atom) core.Po
 	switch s.Phase {
 	case 0:
 		s.Phase++
-		*out = core.Atom{Kind: core.AtomChunk, Value: core.NewString(s.Alloc, "compiling a.lm")}
+		*out = core.Atom{Kind: core.AtomChunk, Value: core.NewString(s.Alloc, "compiling a.km")}
 	case 1:
 		s.Phase++
-		*out = core.Atom{Kind: core.AtomChunk, Value: core.NewString(s.Alloc, "compiling b.lm")}
+		*out = core.Atom{Kind: core.AtomChunk, Value: core.NewString(s.Alloc, "compiling b.km")}
 	case 2:
 		s.Phase++
 		*out = core.Atom{Kind: core.AtomEndBatch}
@@ -216,7 +216,7 @@ func (s *Stream) Run(out io.Writer) StreamReport {
 
 	first := sub.Next()
 	second := sub.Next()
-	r.Batches = valueIsTwoStrings(first, "compiling a.lm", "compiling b.lm") && valueIsNestedList(second, "linked")
+	r.Batches = valueIsTwoStrings(first, "compiling a.km", "compiling b.km") && valueIsNestedList(second, "linked")
 	freeEvent(a, first)
 	freeEvent(a, second)
 	terminal := sub.Next()

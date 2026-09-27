@@ -94,7 +94,7 @@ Cancellation is idempotent. A process that exits during cancellation reports
 cancelled or timed out according to the initiating request, plus its observed
 status when available.
 
-CLI shutdown waits for this sequence. LittleMake guarantees termination of
+CLI shutdown waits for this sequence. Kame guarantees termination of
 descendants that remain in the process group it created. A descendant that
 deliberately creates a new session escapes this guarantee; stronger containment
 is outside the POSIX process-group contract.

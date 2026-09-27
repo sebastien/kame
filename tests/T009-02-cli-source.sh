@@ -12,50 +12,50 @@ test-step "toolchain and binary"
 cli_require_tools
 cli_build
 
-test-step "discovery order: Makefile.lmk, then make.lmk, then src/lmk/main.lmk"
+test-step "discovery order: Makefile.kmk, then make.kmk, then src/kmk/main.kmk"
 fixture_copy discovery order
 (
 	cd order
 	cli_run -- where
 	cli_expect_status 0
-	cli_expect_stdout "Makefile.lmk
+	cli_expect_stdout "Makefile.kmk
 "
 
-	rm -f Makefile.lmk
+	rm -f Makefile.kmk
 	cli_run -- where
 	cli_expect_status 0
-	cli_expect_stdout "make.lmk
+	cli_expect_stdout "make.kmk
 "
 
-	rm -f make.lmk
+	rm -f make.kmk
 	cli_run -- where
 	cli_expect_status 0
-	cli_expect_stdout "src/lmk/main.lmk
+	cli_expect_stdout "src/kmk/main.kmk
 "
 
 	rm -rf src
 	cli_run -- where
 	cli_expect_status 1
-	cli_expect_stderr_contains "BUILD_NO_SOURCE" "Makefile.lmk" "make.lmk" "src/lmk/main.lmk"
+	cli_expect_stderr_contains "BUILD_NO_SOURCE" "Makefile.kmk" "make.kmk" "src/kmk/main.kmk"
 )
 
 test-step "explicit file selection and --file= form"
 fixture_copy discovery explicit
 (
 	cd explicit
-	cli_run -- -f make.lmk where
+	cli_run -- -f make.kmk where
 	cli_expect_status 0
-	cli_expect_stdout "make.lmk
+	cli_expect_stdout "make.kmk
 "
 
-	cli_run -- --file=Makefile.lmk where
+	cli_run -- --file=Makefile.kmk where
 	cli_expect_status 0
-	cli_expect_stdout "Makefile.lmk
+	cli_expect_stdout "Makefile.kmk
 "
 
-	cli_run -- -f ./src/lmk/main.lmk where
+	cli_run -- -f ./src/kmk/main.kmk where
 	cli_expect_status 0
-	cli_expect_stdout "src/lmk/main.lmk
+	cli_expect_stdout "src/kmk/main.kmk
 "
 )
 
@@ -66,17 +66,53 @@ cli_expect_status 0
 cli_expect_stdout "inline
 "
 
+test-step "file includes merge rules and definitions in source order"
+mkdir -p includes
+cat > includes/child.kmk <<'EOF'
+name = "included"
+task child :
+	@(out "child\n")
+EOF
+cat > includes/Makefile.kmk <<'EOF'
+include ./child.kmk
+task default : child
+	@(out "@(name)\n")
+EOF
+(
+	cd includes
+	cli_run -- default
+	cli_expect_status 0
+	cli_expect_stdout "child
+included
+"
+)
+
+test-step "include cycles fail before compilation"
+mkdir -p include-cycle
+cat > include-cycle/first.kmk <<'EOF'
+include ./second.kmk
+EOF
+cat > include-cycle/second.kmk <<'EOF'
+include ./first.kmk
+EOF
+(
+	cd include-cycle
+	cli_run -- -f first.kmk
+	cli_expect_status 1
+	cli_expect_stderr_contains "DEP_CYCLE"
+)
+
 cli_run -- "--command=$INLINE" hi
 cli_expect_status 0
 cli_expect_stdout "inline
 "
 
 test-step "--file and --command are mutually exclusive"
-cli_run -- -f Makefile.lmk -c "task x :"
+cli_run -- -f Makefile.kmk -c "task x :"
 cli_expect_status 2
 cli_expect_stderr_contains "OPT_CONFLICT"
 
-cli_run -- --command=x --file=Makefile.lmk
+cli_run -- --command=x --file=Makefile.kmk
 cli_expect_status 2
 cli_expect_stderr_contains "OPT_CONFLICT"
 
@@ -84,17 +120,17 @@ test-step "-C discovers beneath the given directory"
 mkdir -p elsewhere
 cli_run --dir elsewhere -- -C ../explicit where
 cli_expect_status 0
-cli_expect_stdout "Makefile.lmk
+cli_expect_stdout "Makefile.kmk
 "
 
 test-step "--directory= form"
 cli_run -- "--directory=explicit" where
 cli_expect_status 0
-cli_expect_stdout "Makefile.lmk
+cli_expect_stdout "Makefile.kmk
 "
 
-test-step "positional .lmk values are target names, not sources"
-cli_run --dir explicit -- make.lmk
+test-step "positional .kmk values are target names, not sources"
+cli_run --dir explicit -- make.kmk
 cli_expect_status 1
 cli_expect_stderr_contains "TGT_NO_RULE"
 
@@ -104,7 +140,7 @@ cli_expect_status 0
 cli_expect_stdout "inline
 "
 
-cli_run --dir explicit -- -f make.lmk where -- --force
+cli_run --dir explicit -- -f make.kmk where -- --force
 cli_expect_status 1
 cli_expect_stderr_contains "TGT_NO_RULE"
 

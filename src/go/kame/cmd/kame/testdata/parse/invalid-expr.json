@@ -1,0 +1,1 @@
+{"schema":1,"lang":"expr","source":"testdata/parse/invalid-expr.km","ast":{"kind":"list","span":{"start":0,"end":2},"items":[]},"diagnostics":[{"code":"PARSE_ERR","severity":"error","message":"unclosed list","span":{"start":0,"end":2}}]}

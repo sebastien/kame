@@ -40,7 +40,7 @@ A name that merely starts with an underscore is not a placeholder: `_0x`,
 A placeholder section is a parenthesized application whose items are exactly
 one expression, where that expression contains at least one placeholder:
 
-```littlemake
+```kame
 ((f _))
 ((f _ __ ___))
 ((f _0 _1 _2))
@@ -50,7 +50,7 @@ one expression, where that expression contains at least one placeholder:
 
 The first four are respectively equivalent to:
 
-```littlemake
+```kame
 ([a] (f a))
 ([a b c] (f a b c))
 ([a b c] (f a b c))
@@ -93,7 +93,7 @@ Pipe rewriting inspects only direct right-side items for `_` placeholders, so
 a placeholder inside a section is never rewritten and the section travels as
 one item:
 
-```littlemake
+```kame
 (files | map ((replace ./{**}/{*}.c ./build/{_0}/{_1}.c)))
 ```
 
@@ -193,14 +193,14 @@ With two pattern arguments `replace` returns a callable section of arity one
 that applies the match/expand behavior to its argument, so both of these
 rewrite each source path:
 
-```littlemake
+```kame
 (map (replace ./{**}/{*}.c ./build/{_0}/{_1}.c) sources)
 (sources | replace ./{**}/{*}.c ./build/{_0}/{_1}.c)
 ```
 
 Named references use capture names:
 
-```littlemake
+```kame
 (replace ./src/{name:*}.c ./build/{name}.o "./src/demo.c")
 ```
 

@@ -1,0 +1,1 @@
+{"schema":1,"lang":"rule","source":"testdata/parse/rule.km","ast":{"kind":"task","span":{"start":0,"end":15},"header":{"start":0,"end":15},"outputs":[{"kind":"name","text":"default","span":{"start":0,"end":7}}],"inputs":[{"kind":"name","text":"input","span":{"start":10,"end":15}}],"body":[]},"diagnostics":[]}

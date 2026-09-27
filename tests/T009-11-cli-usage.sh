@@ -127,7 +127,7 @@ test-step "-j 2 keeps concurrent recipe output line-integral"
 (
 	mkdir -p interleaving
 	cd interleaving
-	cat >Makefile.lmk <<'EOF'
+	cat >Makefile.kmk <<'EOF'
 first:
 	for n in 1 2 3; do printf 'first-%s\n' "$n"; sleep 0.01; done
 second:

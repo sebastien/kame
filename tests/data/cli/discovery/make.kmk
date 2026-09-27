@@ -1,0 +1,2 @@
+task where :
+	@(out "make.kmk\n")

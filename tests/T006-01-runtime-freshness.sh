@@ -96,7 +96,7 @@ fixture_copy legacy-runtime legacy-runtime
 	cd legacy-runtime
 	cli_run --
 	cli_expect_status 0
-	cli_expect_file ./dist/littlemake "legacy executable payload
+	cli_expect_file ./dist/kame "legacy executable payload
 "
 	cli_run --
 	cli_expect_status 0
@@ -111,7 +111,7 @@ test-step "dynamic body dependencies re-render before freshness"
 (
 	mkdir -p dynamic/src
 	cd dynamic
-	printf 'task default : ./list.out\n./list.out :\n\tprintf "%%s\\n" @(wildcard ./src/*) > @>\n' >Makefile.lmk
+	printf 'task default : ./list.out\n./list.out :\n\tprintf "%%s\\n" @(wildcard ./src/*) > @>\n' >Makefile.kmk
 	cli_run -- ./list.out
 	cli_expect_status 0
 	cli_expect_file ./list.out

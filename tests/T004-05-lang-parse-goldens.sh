@@ -12,7 +12,7 @@ test-step "toolchain and binary"
 cli_require_tools
 cli_build
 
-cp -a "$CLI_ROOT/cmd/littlemake/testdata/parse" parse
+cp -a "$CLI_ROOT/src/go/kame/cmd/kame/testdata/parse" parse
 
 test-step "CLI AST goldens are byte-stable apart from the source path"
 (
@@ -20,7 +20,7 @@ test-step "CLI AST goldens are byte-stable apart from the source path"
 	for entry in expr:expr template:template rule:rule script:script invalid-expr:expr; do
 		name="${entry%%:*}"
 		lang="${entry##*:}"
-		cli_run -- do parse --lang "$lang" "$name.lm"
+		cli_run -- do parse --lang "$lang" "$name.km"
 		if [ "$name" = "invalid-expr" ]; then
 			cli_expect_status 1
 		else

@@ -12,29 +12,29 @@ test-step "host tools are available"
 cli_require_tools
 
 test-step "the CLI under test is an executable debug build"
-if [ -x "$LITTLEMAKE" ]; then
-	test-ok "CLI is executable: $(test-relpath "$LITTLEMAKE")"
+if [ -x "$KAME" ]; then
+	test-ok "CLI is executable: $(test-relpath "$KAME")"
 else
-	test-fail "CLI is not executable: $LITTLEMAKE"
+	test-fail "CLI is not executable: $KAME"
 fi
-if printf '%s' "$LITTLEMAKE" | grep -q 'dist/littlemake.debug$'; then
+if printf '%s' "$KAME" | grep -q 'build/kame.debug$'; then
 	test-ok "tests run the debug build"
 else
-	test-fail "unexpected binary path: $LITTLEMAKE"
+	test-fail "unexpected binary path: $KAME"
 fi
 cli_run -- --version
 cli_expect_status 0
-if grep -Eq '^littlemake [0-9]+\.[0-9]+\.[0-9]+$' "$CLI_OUT"; then
-	test-ok "version matches littlemake VERSION"
+if grep -Eq '^kame [0-9]+\.[0-9]+\.[0-9]+$' "$CLI_OUT"; then
+	test-ok "version matches kame VERSION"
 else
 	test-fail "version output: $(cat -A "$CLI_OUT")"
 fi
 
 test-step "cli_build is a no-op when the binary is current"
 cli_build
-before="$(stat -c %Y "$LITTLEMAKE")"
+before="$(stat -c %Y "$KAME")"
 cli_build
-after="$(stat -c %Y "$LITTLEMAKE")"
+after="$(stat -c %Y "$KAME")"
 if [ "$before" = "$after" ]; then
 	test-ok "binary was not rebuilt"
 else

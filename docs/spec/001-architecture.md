@@ -2,8 +2,9 @@
 
 ## Purpose
 
-LittleMake is a reactive orchestration engine with a build language layered on
-top. The implementation must not make the engine depend on build files, shells,
+Kame is a modern build system in the spirit of GNU Make, with a Lisp-like
+language and a streaming incremental engine that should cover all your needs.
+The implementation must not make the engine depend on build files, shells,
 or a particular host platform.
 
 ## Package Boundaries
@@ -11,15 +12,27 @@ or a particular host platform.
 The initial package layout is:
 
 ```text
-core/           values, graph, scheduler, updates
-lang/expr/      expression AST, parser, formatter
-lang/template/  template AST, parser, matcher, renderer, formatter
-lang/rule/      definition and rule AST, parser, formatter
-lang/program/   script composition and evaluation
-operations/     standard operations
-host/posix/     native filesystem and process execution
-cmd/littlemake/ CLI executable
+src/go/kame/core/             values, graph, scheduler, updates
+src/go/kame/diagnostic/       stable codes, severity, diagnostic model
+src/go/kame/lang/expr/        expression AST, parser, formatter
+src/go/kame/lang/template/    template AST, parser, matcher, renderer, formatter
+src/go/kame/lang/rule/        definition and rule AST, parser, formatter
+src/go/kame/lang/definition/  definition AST, parser, formatter
+src/go/kame/lang/script/      script composition
+src/go/kame/lang/eval/        scopes, operations, evaluator
+src/go/kame/lang/source/      source text and display positions
+src/go/kame/lang/fixture/     shared fixture validation helpers
+src/go/kame/operations/       standard operations
+src/go/kame/program/          planning, resources, execution
+src/go/kame/host/             portable request contracts
+src/go/kame/host/posix/       native filesystem and process execution
+src/go/kame/cmd/kame/         CLI executable
 ```
+
+The module root is `src/go/kame` (module `kame`). `docs/` and `tests/` remain
+at the repository root. `examples/` is a separate module (`kame/examples`) that
+consumes the module through a local `replace` directive, so the examples
+compile against the same packages an external caller would import.
 
 `host/wasm` is added only when `010-wasm.md` begins. Packages named `utils` or
 `tools` must not be created without at least two concrete consumers.
@@ -65,7 +78,7 @@ pointer. Solod has no closures, and `any` has no runtime type information, so:
 
 ## Ownership
 
-LittleMake uses four lifetimes:
+Kame uses four lifetimes:
 
 1. Instance lifetime for operation registrations and global configuration.
 2. Program lifetime for source text, ASTs, top-level definitions, and lexical
@@ -128,7 +141,7 @@ than formatting user-facing error strings at their own layer.
 ## Determinism
 
 Given the same program, resource state, operation results, and requested
-targets, LittleMake must produce the same:
+targets, Kame must produce the same:
 
 - Rule selection.
 - Dependency order.

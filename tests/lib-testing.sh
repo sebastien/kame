@@ -151,7 +151,8 @@ function test-start {
 	((TEST_COUNT += 1))
 	TEST_CURRENT=$TEST_COUNT
 	TEST_CURRENT_STEP=""
-	TEST_PATH="$(realpath "$(mktemp -d -p "$ORIGINAL_PATH" -t tmp.testing.XXX)")"
+	mkdir -p "$ORIGINAL_PATH/build/tests"
+	TEST_PATH="$(realpath "$(mktemp -d -p "$ORIGINAL_PATH/build/tests" -t tmp.testing.XXX)")"
 	TMPDIR="$TEST_PATH"
 	export TMPDIR
 	TEST_NAME="${1:-$TEST_NAME}"
@@ -225,7 +226,7 @@ function test-end {
 			# Empty test
 			test_log "${GREEN}${BOLD}EPASS 100% (0/0)${RESET}"
 			res=0
-		elif [ ${#TEST_ERRORS[@]} -eq 0 ]; then
+		elif [ "$en" -eq 0 ]; then
 			# 100% sucesss
 			test_log "${GREEN}${BOLD}EOK${RESET}${GREEN}  $((100 * sn / tn))% ($sn/$tn) succeeded${RESET}"
 			res=0
@@ -462,8 +463,8 @@ function test-expect-failure {
 }
 
 function test-path {
-	if [ ! -e "$BASE_PATH/.deps/run" ]; then mkdir -p "$BASE_PATH/.deps/run"; fi
-	TEST_PATH="$(mktemp -d -p "$BASE_PATH/.deps/run" "$TEST_NAME.test.XXXXX")"
+	if [ ! -e "$BASE_PATH/build/tests" ]; then mkdir -p "$BASE_PATH/build/tests"; fi
+	TEST_PATH="$(mktemp -d -p "$BASE_PATH/build/tests" "$TEST_NAME.test.XXXXX")"
 	export TEST_PATH
 	mkdir -p "$TEST_PATH"
 	cd "$ORIGINAL_PATH"

@@ -1,0 +1,8 @@
+ENTRY = bin/kame
+OUTPUT = dist/kame
+
+./dist/kame : ./bin/kame
+	mkdir -p dist
+	cat @< > @>; printf 'run\n' >> runs.log
+
+default : ./dist/kame

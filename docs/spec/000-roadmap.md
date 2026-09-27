@@ -1,6 +1,6 @@
-# LittleMake Rewrite Roadmap
+# Kame Rewrite Roadmap
 
-This directory specifies the Solod rewrite of LittleMake. The legacy project in
+This directory specifies the Solod rewrite of Kame. The legacy project in
 `deps/littlemake-legacy` is a behavioral reference, not an architecture to port.
 
 When references disagree, compatibility follows this order:
@@ -19,7 +19,7 @@ New specifications in this directory override every legacy source.
 - Independently usable expression, template, and rule languages.
 - A stream-aware standard library whose operations remain ordinary functions.
 - Reliable native process orchestration with streaming output and cancellation.
-- A familiar LittleMake build language without preserving legacy internals.
+- A familiar Kame build language without preserving legacy internals.
 - A freestanding WebAssembly target after the native vertical slice works.
 
 ## Non-goals
@@ -73,8 +73,8 @@ Every implementation specification also depends on the code registry in 011.
 
 - Parse scalar definitions, simple rules, paths, selectors, and recipes.
 - Plan and execute a dependency graph through the engine and POSIX host.
-- Support the equivalent of the legacy repository's `Makefile.lmk`.
-- Add mtime freshness and the minimal `littlemake` CLI.
+- Support the equivalent of the legacy repository's `Makefile.kmk`.
+- Add mtime freshness and the minimal `kame` CLI.
 
 ### Milestone 4: language and library
 
@@ -111,9 +111,9 @@ Every implementation specification also depends on the code registry in 011.
 The eventual project-level verification commands are:
 
 ```sh
-so test -check=sanitize -panic=abort ./...
-so build -check=warn ./cmd/littlemake
-so translate-test -o generated ./core/...
+(cd src/go/kame && so test -check=sanitize -panic=abort ./...)
+(cd src/go/kame && so build -check=warn ./cmd/kame)
+(cd src/go/kame && so translate-test -o ../../../build/generated ./core/...)
 ```
 
 Commands may be introduced incrementally as packages are created. Generated C
