@@ -89,6 +89,27 @@ func TestBareTaskRuns(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestRepeatedProgramMaterializationReleasesRunState(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-leak-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "test.kmk", "run :\n\tprintf x >> task-log\n")
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Fatal("compile failed"); return }
+	for i := 0; i < 64; i++ {
+		result := compiled.Program.Materialize("run")
+		if result.Diagnostic.Code != "" { result.Free(a); t.Fatalf("materialization %d failed: %s", i, result.Diagnostic.Code) }
+		result.Free(a)
+	}
+	data, readErr := os.ReadFile(a, dir+"/task-log")
+	if readErr != nil || len(data) != 64 { t.Errorf("repeated task did not complete: %d bytes", len(data)) }
+	mem.FreeSlice(a, data)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestBareTaskDependencyPreventsCachedHit(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)

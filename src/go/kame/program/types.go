@@ -148,6 +148,7 @@ type Event struct {
 	RequestID     int64
 	DependencyID  int64
 	DependencyKey core.ResourceKey
+	Effect        string
 	Span          diagnostic.Span
 	Data          []byte
 	Value         core.Value
@@ -238,6 +239,9 @@ type Options struct {
 	Grants           []eval.Grant
 }
 
+// Tool records a globally declared command and its resolved executable path.
+type Tool struct { Name string; Path string }
+
 type Program struct {
 	Alloc       mem.Allocator
 	Engine      *core.Engine
@@ -247,6 +251,7 @@ type Program struct {
 	Host        host.ProcessHost
 	Options     Options
 	Rules       []registeredRule
+	Tools       []Tool
 	Instances   []instance
 	Events      []Event
 	nextRequest int64

@@ -34,6 +34,7 @@ A task fingerprint is a canonical binary encoding of:
 - Resolved declared input resource keys and their current fingerprints.
 - Dynamic file, glob, resource, and environment dependencies from the
   accepted render generation.
+- Resolved executable files referenced with `@(x/NAME)`.
 - Stable versions of invoked operations.
 - Shell path, working directory, and explicit execution options affecting the
   result.

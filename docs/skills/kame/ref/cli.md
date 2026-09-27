@@ -52,9 +52,6 @@ Recipes receive an explicit complete environment. The CLI starts from its
 environment and applies `--env` replacements; cache fingerprints include the
 process environment and other execution inputs that affect results.
 
-`kame do run` uses the same execution behavior as primary invocation, but is
-useful when a caller explicitly wants the execution-event command namespace.
-
 ## Inspect before executing
 
 Use inspection commands to verify a migration or diagnose a target without

@@ -16,7 +16,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	defer freeValues(p.Alloc, outputs)
 	dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
 	context := mem.Alloc[eval.Context](p.Alloc)
-	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
+	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
 	b := strings.NewBuilder(p.Alloc)
 	defer b.Free()
 	var spans []diagnostic.Span
@@ -113,6 +113,11 @@ func observeRenderDependency(value any, key core.ResourceKey) {
 	}
 	entry := &p.Instances[state.Index]
 	p.emit(Event{Kind: DependencyDiscovered, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, DependencyKey: key})
+}
+
+func resolveRenderTool(value any, name string) (string, bool) {
+	state := value.(*renderDependencyState)
+	return state.Program.toolPath(name)
 }
 
 // observeInspectionDependency provides only external resources to span

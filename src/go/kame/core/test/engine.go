@@ -182,6 +182,23 @@ func TestEngineFreeReleasesLiveRoots(t *testing.T) {
 	e.Free()
 }
 
+func TestRepeatedEngineLifecycleReleasesSubscriptionsAndValues(t *testing.T) {
+	a := t.Allocator()
+	for i := 0; i < 128; i++ {
+		e := core.NewEngine(a)
+		n := addSource(e, "root", newSequence(a, []core.Atom{{Kind: core.AtomValue, Value: core.NewString(a, "value")}, {Kind: core.AtomEndStream}}))
+		root := e.RequestRoot(n)
+		subscription := e.Subscribe(n)
+		e.Step(); e.Step()
+		update := subscription.Next()
+		if !update.HasValue() || update.Value.Text != "value" { t.Error("subscription did not receive the published value") }
+		update.Value.Free(a)
+		e.Release(root)
+		e.Unsubscribe(subscription)
+		e.Free()
+	}
+}
+
 func TestSubscriptionCoalescesMetadataUpdates(t *testing.T) {
 	a := t.Allocator()
 	e := core.NewEngine(a)

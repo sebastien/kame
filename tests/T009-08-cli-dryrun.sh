@@ -28,15 +28,6 @@ test-step "dry-run builds no files and writes no effects"
 	cli_expect_stdout_empty
 )
 
-test-step "do run shares dry-run semantics"
-(
-	cd dry-run
-	cli_run -- do run -n ./text.out
-	cli_expect_status 0
-	cli_expect_no_file ./text.out
-	cli_expect_stderr_contains '[./text.out] started'
-)
-
 test-step "dry-run does not execute failing recipes"
 (
 	cd dry-run

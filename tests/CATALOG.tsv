@@ -38,7 +38,6 @@ tests/T009-05-cli-plan.sh	009	cli	Plan JSON, captures, freshness, diagnostics
 tests/T009-06-cli-cat.sh	009	cli	Exact artifact bytes, definitions, NO_ARTIFACT, arity
 tests/T009-07-cli-graph.sh	009	cli	inputs, outputs, span, depth and arity
 tests/T009-08-cli-dryrun.sh	009	cli	Dry-run performs no effects
-tests/T009-09-cli-run-parity.sh	009	cli	Primary invocation and do run parity
 tests/T009-11-cli-usage.sh	009	cli	Option and exit-status matrix, -j determinism
 tests/T009-12-cli-cases.sh	009	cli	Table-driven CLI cases over tests/data/cases
 tests/T011-01-diag-format.sh	011	diag	Diagnostic layout, notes, human/JSON equivalence

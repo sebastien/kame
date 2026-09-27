@@ -119,9 +119,6 @@ func freePresentationArgs(args []string) {
 }
 
 func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
-	if action == commandRun {
-		return runBuild(args, out, errOut, true)
-	}
 	if action == commandPlan {
 		return runPlan(args, out, errOut)
 	}
@@ -137,6 +134,7 @@ func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writ
 	if action == commandSpan {
 		return runGraph(args, out, errOut, "span")
 	}
+	if action == commandTools { return runTools(args, out, errOut) }
 	if action == commandParse {
 		return runParse(args, in, out, errOut)
 	}

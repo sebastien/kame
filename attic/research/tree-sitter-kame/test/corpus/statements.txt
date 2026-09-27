@@ -1,0 +1,57 @@
+==================
+Number
+==================
+
+a=1
+
+---
+
+(source_file
+  (value_definition
+    (name (identifier))
+    (value (number))
+	))
+
+==================
+Quoted String
+==================
+
+a="quoted string"
+
+---
+
+(source_file
+  (value_definition
+    (name (identifier))
+    (value (string))
+	))
+
+
+==================
+Single Quoted String
+==================
+
+a='quoted string'
+
+---
+
+(source_file
+  (value_definition
+    (name (identifier))
+    (value (string))
+	))
+
+
+==================
+Fully Qualified assignment
+==================
+
+compiler.cc=gcc
+
+---
+
+(source_file
+  (value_definition
+    (name (identifier identifier))
+    (value (string))
+	))

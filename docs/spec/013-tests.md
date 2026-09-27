@@ -18,10 +18,11 @@ expected-failure markers and no skipped assertions.
 | Layer | Command | Scope |
 | --- | --- | --- |
 | Package tests | `cd src/go/kame && so test ./...` | Solod package internals |
-| Examples tests | `cd examples && so test ./...` | external-consumer engine examples |
+| Engine examples tests | `cd examples/engine && so test ./...` | external-consumer engine examples |
 | CLI unit tests | `cd src/go/kame && go test ./cmd/kame` | in-process `Run()` behavior |
 | End-to-end | `tests/harness.sh`, `make test-cli` | compiled debug binary, real system calls |
-| Sanitizers | `CC=clang` with the package-test commands | memory safety |
+| Sanitized package tests | `make test-sanitize` | allocator tracking and native memory safety |
+| Leak gate | `make test-leaks` | sanitized package tests plus the compiled CLI end-to-end suite |
 
 The end-to-end binary is always the checks-enabled debug build
 (`build/kame.debug`), never the release build.
@@ -118,7 +119,7 @@ Current coverage:
 | 006 runtime | `T006-01`, `T006-02`, `T006-04`, `T006-05` | freshness, dependency scheduling, yield, deferred effects and dry-run |
 | 007 library | `T007-01` … `T007-07` | general, collection, text, path, filesystem, capability and shell operations, error messages |
 | 008 cache | `T008-01` … `T008-03` | record creation, hits, force, invalidation, corruption recovery, glob and body fingerprints |
-| 009 CLI | `T009-01` … `T009-09`, `T009-11`, `T009-12` | help/version, discovery, targets, JSON, plan, cat, graph, dry-run, run parity, usage, case matrix |
+| 009 CLI | `T009-01` … `T009-08`, `T009-11`, `T009-12` | help/version, discovery, targets, JSON, plan, cat, graph, dry-run, usage, case matrix |
 | 011 diagnostics | `T011-01`, `T011-02` | layout, notes, human/JSON equivalence, code and message integrity |
 | 012 streams | `T012-01` | terminal event uniqueness, process event balance |
 | 014 patterns | `T014-01` | placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs |
@@ -174,3 +175,16 @@ T004 parse/format suites.
 - Normalized event streams and artifacts are identical across fresh copies.
 - Fixing a defect never weakens a test: assertions cite their governing spec in
   a header comment.
+
+## Leak verification
+
+`make test-leaks` is the full native leak gate. It runs package and external
+consumer tests with Clang and Solod's `-check=sanitize`, then builds the CLI
+with the same checks and executes `tests/harness.sh` against that binary.
+`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` and
+`UBSAN_OPTIONS=halt_on_error=1` are passed through the harness's otherwise
+hermetic command environment. New owning types and lifecycle paths require a
+tracker-backed regression test; high-churn paths should repeat construction and
+teardown in one process so retained allocations cannot hide behind process exit.
+The binary-contract meta test is excluded because it deliberately requires the
+normal debug binary path and verifies the harness's non-sanitized rebuild flow.

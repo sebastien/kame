@@ -11,77 +11,234 @@ import (
 	"solod.dev/so/slices"
 )
 
-type formatArguments struct { Lang string; InPlace bool; Check bool; Files []string; OK bool }
+type formatArguments struct {
+	Lang        string
+	Indent      string
+	IndentWidth int
+	InPlace     bool
+	Check       bool
+	Files       []string
+	OK          bool
+}
+
+func (options *formatArguments) Free() {
+	if len(options.Files) != 0 { slices.Free(mem.System, options.Files) }
+	*options = formatArguments{}
+}
 
 func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	parsed := parseFormatArguments(args, errOut)
-	if !parsed.OK { return 2 }
+	defer parsed.Free()
+	if !parsed.OK {
+		return 2
+	}
 	if len(parsed.Files) == 0 {
 		data, readErr := io.ReadAll(mem.System, in)
-		if readErr != nil { cliError(errOut, "FS_ERR", "cannot read stdin"); return 1 }
-		formatted, ok := formatSource(parsed.Lang, "<stdin>", string(data), errOut)
-		if len(data) != 0 { mem.FreeSlice(mem.System, data) }
-		if !ok { return 1 }
-		io.WriteString(out, formatted); mem.FreeString(mem.System, formatted)
+		if readErr != nil {
+			cliError(errOut, "FS_ERR", "cannot read stdin")
+			return 1
+		}
+		formatted, ok := formatSource(parsed.Lang, "<stdin>", string(data), parsed.Indent, parsed.IndentWidth, errOut)
+		if len(data) != 0 {
+			mem.FreeSlice(mem.System, data)
+		}
+		if !ok {
+			return 1
+		}
+		io.WriteString(out, formatted)
+		mem.FreeString(mem.System, formatted)
 		return 0
 	}
 	different := false
 	for i := range parsed.Files {
 		data, readErr := os.ReadFile(mem.System, parsed.Files[i])
-		if readErr != nil { cliError(errOut, "FS_ERR", "cannot read source: "+parsed.Files[i]); return 1 }
-		formatted, ok := formatSource(parsed.Lang, parsed.Files[i], string(data), errOut)
+		if readErr != nil {
+			cliError(errOut, "FS_ERR", "cannot read source: "+parsed.Files[i])
+			return 1
+		}
+		formatted, ok := formatSource(parsed.Lang, parsed.Files[i], string(data), parsed.Indent, parsed.IndentWidth, errOut)
 		changed := ok && string(data) != formatted
-		if len(data) != 0 { mem.FreeSlice(mem.System, data) }
-		if !ok { return 1 }
-		if parsed.Check && changed { io.WriteString(out, parsed.Files[i]); io.WriteString(out, "\n"); different = true }
+		if len(data) != 0 {
+			mem.FreeSlice(mem.System, data)
+		}
+		if !ok {
+			return 1
+		}
+		if parsed.Check && changed {
+			io.WriteString(out, parsed.Files[i])
+			io.WriteString(out, "\n")
+			different = true
+		}
 		if parsed.InPlace && changed {
 			temporary := parsed.Files[i] + ".kame-fmt.tmp"
-			if os.WriteFile(temporary, []byte(formatted), 0o644) != nil || os.Rename(temporary, parsed.Files[i]) != nil { os.Remove(temporary); mem.FreeString(mem.System, formatted); cliError(errOut, "FS_ERR", "cannot replace source: "+parsed.Files[i]); return 1 }
+			if os.WriteFile(temporary, []byte(formatted), 0o644) != nil || os.Rename(temporary, parsed.Files[i]) != nil {
+				os.Remove(temporary)
+				mem.FreeString(mem.System, formatted)
+				cliError(errOut, "FS_ERR", "cannot replace source: "+parsed.Files[i])
+				return 1
+			}
 		}
-		if !parsed.InPlace && !parsed.Check { io.WriteString(out, formatted) }
+		if !parsed.InPlace && !parsed.Check {
+			io.WriteString(out, formatted)
+		}
 		mem.FreeString(mem.System, formatted)
 	}
-	if different { return 1 }
+	if different {
+		return 1
+	}
 	return 0
 }
 
 func parseFormatArguments(args []string, errOut io.Writer) formatArguments {
-	result := formatArguments{Lang: "script"}
+	result := formatArguments{Lang: "script", Indent: "tabs", IndentWidth: 4}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "-i" { result.InPlace = true; continue }
-		if arg == "-n" { result.Check = true; continue }
-		if arg == "--lang" {
-			if i+1 == len(args) { cliError(errOut, "OPT_NO_VALUE", "missing value for --lang"); return formatArguments{} }
-			i++; result.Lang = args[i]; continue
+		if arg == "-i" {
+			result.InPlace = true
+			continue
 		}
-		if len(arg) > 7 && arg[:7] == "--lang=" { result.Lang = arg[7:]; continue }
-		if len(arg) != 0 && arg[0] == '-' { cliError(errOut, "OPT_UNKNOWN", "unknown option: "+arg); return formatArguments{} }
+		if arg == "-n" {
+			result.Check = true
+			continue
+		}
+		if arg == "--lang" {
+			if i+1 == len(args) {
+				cliError(errOut, "OPT_NO_VALUE", "missing value for --lang")
+				return result
+			}
+			i++
+			result.Lang = args[i]
+			continue
+		}
+		if len(arg) > 7 && arg[:7] == "--lang=" {
+			result.Lang = arg[7:]
+			continue
+		}
+		if arg == "--indent" {
+			if i+1 == len(args) {
+				cliError(errOut, "OPT_NO_VALUE", "missing value for --indent")
+				return result
+			}
+			i++
+			result.Indent = args[i]
+			continue
+		}
+		if len(arg) > len("--indent=") && arg[:len("--indent=")] == "--indent=" {
+			result.Indent = arg[len("--indent="):]
+			continue
+		}
+		if arg == "--indent-width" {
+			if i+1 == len(args) {
+				cliError(errOut, "OPT_NO_VALUE", "missing value for --indent-width")
+				return result
+			}
+			i++
+			width, valid := parseIndentWidth(args[i])
+			if !valid {
+				cliError(errOut, "OPT_VALUE_INVALID", "invalid indent width: "+args[i])
+				return result
+			}
+			result.IndentWidth = width
+			continue
+		}
+		if len(arg) > len("--indent-width=") && arg[:len("--indent-width=")] == "--indent-width=" {
+			value := arg[len("--indent-width="):]
+			width, valid := parseIndentWidth(value)
+			if !valid {
+				cliError(errOut, "OPT_VALUE_INVALID", "invalid indent width: "+value)
+				return result
+			}
+			result.IndentWidth = width
+			continue
+		}
+		if len(arg) != 0 && arg[0] == '-' {
+			cliError(errOut, "OPT_UNKNOWN", "unknown option: "+arg)
+			return result
+		}
 		result.Files = slices.Append(mem.System, result.Files, arg)
 	}
-	if result.InPlace && result.Check { cliError(errOut, "OPT_CONFLICT", "-i and -n cannot be used together"); return formatArguments{} }
-	if result.Lang != "expr" && result.Lang != "template" && result.Lang != "rule" && result.Lang != "script" { cliError(errOut, "OPT_VALUE_INVALID", "invalid language: "+result.Lang); return formatArguments{} }
+	if result.InPlace && result.Check {
+		cliError(errOut, "OPT_CONFLICT", "-i and -n cannot be used together")
+		return result
+	}
+	if result.Lang != "expr" && result.Lang != "template" && result.Lang != "rule" && result.Lang != "script" {
+		cliError(errOut, "OPT_VALUE_INVALID", "invalid language: "+result.Lang)
+		return result
+	}
+	if result.Indent != "tabs" && result.Indent != "spaces" {
+		cliError(errOut, "OPT_VALUE_INVALID", "invalid indent style: "+result.Indent)
+		return result
+	}
 	result.OK = true
 	return result
 }
 
-func formatSource(lang string, name string, text string, errOut io.Writer) (string, bool) {
+func parseIndentWidth(value string) (int, bool) {
+	if len(value) == 0 {
+		return 0, false
+	}
+	width := 0
+	for i := range value {
+		digit := value[i] - '0'
+		if digit > 9 {
+			return 0, false
+		}
+		width = width*10 + int(digit)
+		if width > 16 {
+			return 0, false
+		}
+	}
+	return width, width > 0
+}
+
+func formatSource(lang string, name string, text string, indentStyle string, indentWidth int, errOut io.Writer) (string, bool) {
+	indent := "\t"
+	if indentStyle == "spaces" {
+		indent = ""
+		for i := 0; i < indentWidth; i++ {
+			indent += " "
+		}
+	}
 	if lang == "expr" {
 		result := expr.Parse(mem.System, name, text)
-		if len(result.Diagnostics) != 0 { cliError(errOut, result.Diagnostics[0].Code, result.Diagnostics[0].Message); result.Free(); return "", false }
-		formatted := expr.Format(mem.System, result.Expr); result.Free(); return formatted, true
+		if len(result.Diagnostics) != 0 {
+			cliError(errOut, result.Diagnostics[0].Code, result.Diagnostics[0].Message)
+			result.Free()
+			return "", false
+		}
+		formatted := expr.Format(mem.System, result.Expr)
+		result.Free()
+		return formatted, true
 	}
 	if lang == "template" {
 		result := template.ParseString(mem.System, name, text)
-		if len(result.Diagnostics) != 0 { cliError(errOut, result.Diagnostics[0].Code, result.Diagnostics[0].Message); result.Free(); return "", false }
-		formatted := template.FormatString(mem.System, result); result.Free(); return formatted, true
+		if len(result.Diagnostics) != 0 {
+			cliError(errOut, result.Diagnostics[0].Code, result.Diagnostics[0].Message)
+			result.Free()
+			return "", false
+		}
+		formatted := template.FormatString(mem.System, result)
+		result.Free()
+		return formatted, true
 	}
 	if lang == "rule" {
 		result := rule.ParseRule(mem.System, name, text)
-		if len(result.Diagnostics) != 0 { cliError(errOut, result.Diagnostics[0].Code, result.Diagnostics[0].Message); result.Free(); return "", false }
-		formatted := rule.FormatRule(mem.System, result.Rule); result.Free(); return formatted, true
+		if len(result.Diagnostics) != 0 {
+			cliError(errOut, result.Diagnostics[0].Code, result.Diagnostics[0].Message)
+			result.Free()
+			return "", false
+		}
+		formatted := rule.FormatRuleWithIndent(mem.System, result.Rule, indent)
+		result.Free()
+		return formatted, true
 	}
 	result := script.Parse(mem.System, name, text)
-	if len(result.Diagnostics) != 0 { cliError(errOut, result.Diagnostics[0].Code, result.Diagnostics[0].Message); result.Free(); return "", false }
-	formatted := script.Format(mem.System, result); result.Free(); return formatted, true
+	if len(result.Diagnostics) != 0 {
+		cliError(errOut, result.Diagnostics[0].Code, result.Diagnostics[0].Message)
+		result.Free()
+		return "", false
+	}
+	formatted := script.FormatWithIndent(mem.System, result, indent)
+	result.Free()
+	return formatted, true
 }

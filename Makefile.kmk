@@ -5,6 +5,9 @@ dist : ./build/kame.debug ./dist/kame
 ./build/kame.debug :
 	mkdir -p ./build
 	cd ./src/go/kame && so build -check=warn -o ../../../build/kame.debug ./cmd/kame
+./build/kame.sanitize :
+	mkdir -p ./build
+	cd ./src/go/kame && CC=clang so build -check=sanitize -panic=abort -o ../../../build/kame.sanitize ./cmd/kame
 ./dist/kame :
 	mkdir -p ./dist
 	cd ./src/go/kame && CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
@@ -12,15 +15,19 @@ test : test-so test-examples test-go test-cli
 test-so :
 	cd ./src/go/kame && so test ./...
 test-examples :
-	cd ./examples && so test ./...
+	cd ./examples/engine && so test ./...
 test-go :
 	cd ./src/go/kame && go test ./cmd/kame
 test-cli : ./build/kame.debug
 	tests/harness.sh
-test-all : test test-sanitize
+test-all : test test-leaks
 test-sanitize :
 	cd ./src/go/kame && CC=clang so test -check=sanitize -panic=abort ./...
-	cd ./examples && CC=clang so test -check=sanitize -panic=abort ./...
+	cd ./examples/engine && CC=clang so test -check=sanitize -panic=abort ./...
+test-leaks : ./build/kame.sanitize
+	cd ./src/go/kame && CC=clang so test -check=sanitize -panic=abort ./...
+	cd ./examples/engine && CC=clang so test -check=sanitize -panic=abort ./...
+	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 CLI_BIN="$(pwd)/build/kame.sanitize" ./tests/harness.sh $(find tests -type f -name 'T*.sh' ! -name 'T013-03-meta-binary.sh')
 fmt : ./build/kame.debug
 	git ls-files -z -- '*.go' | xargs -0r gofmt -w
 	git ls-files -z -- '*.sh' | xargs -0r shfmt -w
@@ -28,4 +35,4 @@ fmt : ./build/kame.debug
 clean :
 	rm -rf ./build ./dist
 demo :
-	cd ./examples && so run ./demo
+	cd ./examples/engine && so run ./demo

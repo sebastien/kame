@@ -33,6 +33,7 @@ type Context struct {
 	ResolveDefinition  DefinitionResolver
 	ResolverState      any
 	DependencyObserver func(any, core.ResourceKey)
+	ToolResolver       func(any, string) (string, bool)
 	// OperationObserver records the stable operation identity used by a render.
 	// It is observational only and must not mutate evaluation state.
 	OperationObserver  func(any, string, string)

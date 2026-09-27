@@ -11,8 +11,19 @@ import (
 
 type exprArguments struct { Text string; File string; Directory string; Args []string; Grants []eval.Grant; OK bool }
 
+func (options *exprArguments) Free() {
+	if len(options.Args) != 0 { slices.Free(mem.System, options.Args) }
+	for i := range options.Grants {
+		for j := range options.Grants[i].Names { mem.FreeString(mem.System, options.Grants[i].Names[j]) }
+		if len(options.Grants[i].Names) != 0 { slices.Free(mem.System, options.Grants[i].Names) }
+	}
+	if len(options.Grants) != 0 { slices.Free(mem.System, options.Grants) }
+	*options = exprArguments{}
+}
+
 func runExpr(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	parsed := parseExprArguments(args, errOut)
+	defer parsed.Free()
 	if !parsed.OK { return 2 }
 	text := parsed.Text
 	var data []byte
@@ -22,10 +33,11 @@ func runExpr(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	// nop is the identity operation. Wrapping the text keeps atoms such as
 	// :nil or 0x10 expressions instead of definition right-hand-side string
 	// templates, without changing the meaning of any expression form.
-	options := buildArguments{Command: "result = (nop " + text + ")", Directory: parsed.Directory, Jobs: 1, Grants: parsed.Grants, NoDefaultGrants: true, OK: true}
+	command := "result = (nop " + text + ")"
+	options := buildArguments{Command: command, Directory: parsed.Directory, Jobs: 1, Grants: parsed.Grants, NoDefaultGrants: true, OK: true}
 	session := openBuildSession(options, errOut, true)
-	if session.Status != 0 { return session.Status }
 	defer session.Free()
+	if session.Status != 0 { return session.Status }
 	// The args frame must exist even when empty, so selectors yield empty
 	// results instead of SEL_NO_CONTEXT.
 	values := mem.AllocSlice[core.Value](mem.System, len(parsed.Args), len(parsed.Args)+1)

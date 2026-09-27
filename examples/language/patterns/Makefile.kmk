@@ -1,0 +1,5 @@
+# A captured target template maps each source file to its corresponding output.
+default : ./build/alpha.txt ./build/beta.txt
+./build/{name}.txt : ./src/{name}.txt
+	mkdir -p ./build
+	cp @< @>

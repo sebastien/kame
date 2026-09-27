@@ -2,7 +2,7 @@ package examples_test
 
 import (
 	"kame/core"
-	"kame/examples"
+	"kame/examples/engine"
 	"solod.dev/so/io"
 	"solod.dev/so/testing"
 )

@@ -123,11 +123,18 @@ func FreeRule(a mem.Allocator, r *Rule) {
 	if r == nil {
 		return
 	}
-	for i := range r.Outputs { r.Outputs[i].TargetForm.Free() }
+	for i := range r.Outputs {
+		r.Outputs[i].TargetForm.Free()
+	}
 	slices.Free(a, r.Outputs)
-	for i := range r.Inputs { r.Inputs[i].Template.Free(); r.Inputs[i].TargetForm.Free() }
+	for i := range r.Inputs {
+		r.Inputs[i].Template.Free()
+		r.Inputs[i].TargetForm.Free()
+	}
 	slices.Free(a, r.Inputs)
-	for i := range r.Body { r.Body[i].Template.Free() }
+	for i := range r.Body {
+		r.Body[i].Template.Free()
+	}
 	slices.Free(a, r.Body)
 	mem.Free(a, r)
 }
@@ -146,7 +153,9 @@ func (p *parser) error(start int, end int, message string) {
 }
 
 func (p *parser) takeDiagnostics(diags []source.Diagnostic) {
-	for i := range diags { p.diags = slices.Append(p.a, p.diags, diags[i]) }
+	for i := range diags {
+		p.diags = slices.Append(p.a, p.diags, diags[i])
+	}
 }
 
 func (p *parser) takeTargetDiagnostics(diags []source.Diagnostic, offset int) {
@@ -205,9 +214,15 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 		text := p.s.Text[words[i].Start:words[i].End]
 		value := targetValue(text)
 		path, templated := explicitPath(value), hasTemplate(value)
-		if !path && !templated && !validName(value) { p.error(words[i].Start, words[i].End, "invalid rule target; use ./ for a file path") }
+		if !path && !templated && !validName(value) {
+			p.error(words[i].Start, words[i].End, "invalid rule target; use ./ for a file path")
+		}
 		kind := TargetName
-		if path { kind = TargetPath } else if templated { kind = TargetTemplate }
+		if path {
+			kind = TargetPath
+		} else if templated {
+			kind = TargetTemplate
+		}
 		output := Target{Kind: kind, Text: text, Span: words[i], Path: path, Template: templated}
 		if templated {
 			output.TargetForm = template.ParseTarget(p.a, p.s.Name, value)
@@ -234,7 +249,9 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 			p.takeTargetDiagnostics(input.TargetForm.Diagnostics, span.Start)
 		} else if explicitPath(text) {
 			input.Kind = InputPath
-		} else if !validName(text) { p.error(span.Start, span.End, "invalid rule input") }
+		} else if !validName(text) {
+			p.error(span.Start, span.End, "invalid rule input")
+		}
 		if input.Template != nil {
 			p.takeDiagnostics(input.Template.Diagnostics)
 			slices.Free(p.a, input.Template.Diagnostics)
@@ -272,7 +289,9 @@ func (p *parser) classify(r *Rule) {
 
 func (p *parser) recipe(r *Rule, lineEnd int) {
 	pos := lineEnd
-	if pos < p.end && p.s.Text[pos] == '\r' { pos++ }
+	if pos < p.end && p.s.Text[pos] == '\r' {
+		pos++
+	}
 	if pos < p.end && p.s.Text[pos] == '\n' {
 		pos++
 	}
@@ -283,7 +302,9 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 			end++
 		}
 		contentEnd := end
-		if contentEnd > lineStart && p.s.Text[contentEnd-1] == '\r' { contentEnd-- }
+		if contentEnd > lineStart && p.s.Text[contentEnd-1] == '\r' {
+			contentEnd--
+		}
 		if lineStart == contentEnd {
 			pos = end + 1
 			continue
@@ -304,7 +325,9 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 		}
 		bodyStart := lineStart + len(indent)
 		line := template.ParseStringRange(p.a, p.s, bodyStart, contentEnd)
-		for i := range line.Diagnostics { p.diags = slices.Append(p.a, p.diags, line.Diagnostics[i]) }
+		for i := range line.Diagnostics {
+			p.diags = slices.Append(p.a, p.diags, line.Diagnostics[i])
+		}
 		slices.Free(p.a, line.Diagnostics)
 		line.Diagnostics = nil
 		r.Body = slices.Append(p.a, r.Body, RecipeLine{Text: p.s.Text[bodyStart:contentEnd], Span: source.Span{Start: bodyStart, End: contentEnd}, Template: line})
@@ -360,19 +383,27 @@ func hasTemplate(text string) bool {
 }
 
 func targetValue(text string) string {
-	if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' { return text[1 : len(text)-1] }
+	if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
+		return text[1 : len(text)-1]
+	}
 	return text
 }
 
 func validName(text string) bool {
-	if len(text) == 0 || !nameStart(text[0]) { return false }
+	if len(text) == 0 || !nameStart(text[0]) {
+		return false
+	}
 	i := 1
-	for i < len(text) && nameContinue(text[i]) { i++ }
-	if i < len(text) && (text[i] == '?' || text[i] == '!') { i++ }
+	for i < len(text) && nameContinue(text[i]) {
+		i++
+	}
+	if i < len(text) && (text[i] == '?' || text[i] == '!') {
+		i++
+	}
 	return i == len(text)
 }
 
-func nameStart(b byte) bool { return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
+func nameStart(b byte) bool    { return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
 func nameContinue(b byte) bool { return nameStart(b) || (b >= '0' && b <= '9') || b == '-' }
 
 func ranges(a mem.Allocator, text string, start int, end int) []source.Span {
@@ -388,15 +419,25 @@ func ranges(a mem.Allocator, text string, start int, end int) []source.Span {
 		for start < end {
 			b := text[start]
 			if quote {
-				if b == '\\' && start+1 < end { start += 2; continue }
-				if b == '"' { quote = false }
+				if b == '\\' && start+1 < end {
+					start += 2
+					continue
+				}
+				if b == '"' {
+					quote = false
+				}
 				start++
 				continue
 			}
-			if b == '"' { quote = true
-			} else if b == '(' || b == '[' || b == '{' { depth++
-			} else if b == ')' || b == ']' || b == '}' { depth--
-			} else if depth == 0 && space(b) { break }
+			if b == '"' {
+				quote = true
+			} else if b == '(' || b == '[' || b == '{' {
+				depth++
+			} else if b == ')' || b == ']' || b == '}' {
+				depth--
+			} else if depth == 0 && space(b) {
+				break
+			}
 			start++
 		}
 		out = slices.Append(a, out, source.Span{Start: item, End: start})
@@ -415,6 +456,11 @@ func owned(a mem.Allocator, text string) string {
 
 // FormatRule returns allocator-owned canonical rule text without a terminal newline.
 func FormatRule(a mem.Allocator, r *Rule) string {
+	return FormatRuleWithIndent(a, r, "\t")
+}
+
+// FormatRuleWithIndent returns allocator-owned canonical rule text without a terminal newline.
+func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 	b := strings.NewBuilder(a)
 	if r.Kind == CachedTaskRule {
 		b.WriteString("task ")
@@ -434,7 +480,8 @@ func FormatRule(a mem.Allocator, r *Rule) string {
 		b.WriteString(r.Inputs[i].Text)
 	}
 	for i := range r.Body {
-		b.WriteString("\n\t")
+		b.WriteByte('\n')
+		b.WriteString(indent)
 		b.WriteString(r.Body[i].Text)
 	}
 	value := owned(a, b.String())

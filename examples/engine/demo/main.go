@@ -2,7 +2,7 @@
 package main
 
 import (
-	"kame/examples"
+	"kame/examples/engine"
 	"solod.dev/so/fmt"
 	"solod.dev/so/mem"
 )

@@ -21,6 +21,18 @@ func TestStringTemplateRetainsExpansionSpans(t *testing.T) {
 	}
 }
 
+func TestCommandToolReferenceIsGlobalTemplatePart(t *testing.T) {
+	parsed := template.ParseString(t.Allocator(), "test.km", "@(x/gcc) -c @<")
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || len(parsed.Parts) != 3 || parsed.Parts[0].Kind != template.Tool || parsed.Parts[0].Text != "gcc" || !sameSpan(parsed.Parts[0].Span, 0, 8) {
+		t.Error("command reference did not parse as a tool part")
+		return
+	}
+	formatted := template.FormatString(t.Allocator(), parsed)
+	if formatted != "@(x/gcc) -c @<" { t.Errorf("formatted command reference = %q", formatted) }
+	mem.FreeString(t.Allocator(), formatted)
+}
+
 func TestMalformedExpansionStaysLiteralWithWarning(t *testing.T) {
 	parsed := template.ParseString(t.Allocator(), "test.km", "echo @(name")
 	defer parsed.Free()

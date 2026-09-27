@@ -159,6 +159,14 @@ Every build effect is invalid during planning and returns `PHASE_INVALID`.
 
 ## Shell Operations
 
+Recipes may refer to a globally declared executable with `@(x/NAME)`. Kame
+collects these references from every rule before execution, resolves `NAME`
+against the build driver's startup `PATH` (not the recipe's configured PATH),
+and rejects a build with a missing or non-executable tool before starting any
+rule. The reference renders the resolved executable path and records that file
+as a dynamic dependency of the using rule. `kame do tools` reports the global
+tool set and resolved paths. Ordinary command names remain shell-resolved.
+
 Normal recipes are the primary shell interface. One explicit `shell` operation
 is provided for expressions that need collected process results. It requires
 `run`, submits a process through `003-posix-process.md`, and returns:

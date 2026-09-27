@@ -63,16 +63,12 @@ cli_expect_status 0
 cli_expect_stdout_contains "Commands:"
 
 test-step "per-command help"
-for command in run plan cat inputs outputs span parse fmt expr; do
+for command in plan cat inputs outputs span parse fmt expr; do
 	cli_run -- do "$command" --help
 	cli_expect_status 0
 	cli_expect_stdout_contains "Usage: kame do $command"
 	cli_expect_stderr_empty
 done
-
-cli_run -- do help run
-cli_expect_status 0
-cli_expect_stdout_contains "Usage: kame do run"
 
 test-step "unknown do command is a usage error with a hint"
 cli_run -- do bogus

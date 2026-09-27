@@ -357,6 +357,7 @@ func templateKind(k template.PartKind) string {
 	if k == template.Reference {
 		return "reference"
 	}
+	if k == template.Tool { return "tool" }
 	return "selector"
 }
 

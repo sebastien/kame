@@ -84,7 +84,7 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 	hasYielded := false
 	for i := range effects {
 		effect := effects[i]
-		p.emitNode(entry.Node, entry.Plan.Target, Effect, diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, effect.Data)
+		p.emit(Event{Kind: Effect, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, RequestID: entry.Node.HostRequestID, Span: diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, Data: slices.Clone(p.Alloc, effect.Data), Effect: effectName(effect.Kind)})
 		if effect.Kind == eval.EffectOut {
 			p.emitNode(entry.Node, entry.Plan.Target, Stdout, diagnostic.Span{Start: effect.Span.Start, End: effect.Span.End}, effect.Data)
 			if entry.Rule.Kind == rule.CachedTaskRule {
@@ -152,6 +152,13 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 	return diagnostic.Diagnostic{}
 }
 
+func effectName(kind eval.EffectKind) string {
+	if kind == eval.EffectOut { return "out" }
+	if kind == eval.EffectErr { return "err" }
+	if kind == eval.EffectYield { return "yield" }
+	return "write"
+}
+
 func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsResult {
 	index := p.instanceIndex(entry.Node)
 	hasExpression := false
@@ -191,7 +198,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		}
 		values, outputs := makeValues(p.Alloc, inputs), makeValues(p.Alloc, entry.Plan.Outputs)
 		dependencyState := renderDependencyState{Program: p, Index: index, Inspection: entry.Inspection}
-		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
+		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
 		result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
 		freeValues(p.Alloc, values)
 		freeValues(p.Alloc, outputs)

@@ -6,6 +6,7 @@ import (
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/script"
+	"kame/lang/template"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
@@ -83,6 +84,13 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 			continue
 		}
 		p.Rules = slices.Append(a, p.Rules, registeredRule{Rule: item.Rule})
+		for j := range item.Rule.Body {
+			for k := range item.Rule.Body[j].Template.Parts {
+				part := item.Rule.Body[j].Template.Parts[k]
+				if part.Kind != template.Tool || p.toolIndex(part.Text) >= 0 { continue }
+				p.Tools = slices.Append(a, p.Tools, Tool{Name: cloneText(a, part.Text)})
+			}
+		}
 	}
 	for i := range result.Diagnostics {
 		if result.Diagnostics[i].Severity >= diagnostic.Error {
@@ -93,6 +101,26 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p.nextRequest = 1 << 32
 	result.Program = p
 	return result
+}
+
+func (p *Program) toolIndex(name string) int {
+	for i := range p.Tools { if p.Tools[i].Name == name { return i } }
+	return -1
+}
+
+// SetToolPath records a preflight-resolved executable for a declared tool.
+func (p *Program) SetToolPath(name, executable string) bool {
+	i := p.toolIndex(name)
+	if i < 0 { return false }
+	if p.Tools[i].Path != "" { mem.FreeString(p.Alloc, p.Tools[i].Path) }
+	p.Tools[i].Path = cloneText(p.Alloc, executable)
+	return true
+}
+
+func (p *Program) toolPath(name string) (string, bool) {
+	i := p.toolIndex(name)
+	if i < 0 || p.Tools[i].Path == "" { return "", false }
+	return p.Tools[i].Path, true
 }
 
 // HasTarget reports whether a literal rule or definition can be selected.
@@ -228,6 +256,7 @@ func (p *Program) Free() {
 			slices.Free(p.Alloc, p.Instances[i].CacheStderr)
 		}
 	}
+	for i := range p.Tools { mem.FreeString(p.Alloc, p.Tools[i].Name); mem.FreeString(p.Alloc, p.Tools[i].Path) }
 	for i := range p.Events {
 		p.Events[i].Free(p.Alloc)
 	}
@@ -252,6 +281,7 @@ func (p *Program) Free() {
 	slices.Free(p.Alloc, p.Instances)
 	slices.Free(p.Alloc, p.Events)
 	slices.Free(p.Alloc, p.Rules)
+	slices.Free(p.Alloc, p.Tools)
 	slices.Free(p.Alloc, p.Pending)
 	if p.Host != nil {
 		p.Host.Free()

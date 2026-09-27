@@ -29,9 +29,10 @@ Build options:
   -j, --jobs N           maximum concurrent nodes (N > 0, default 1)
   -n, --dry-run          plan and render without executing effects
       --force            ignore freshness and cached-task hits
-       --json             emit machine-readable JSON Lines
+	      --json             emit machine-readable JSON Lines
 	      --color MODE       diagnostic colour: auto, always, or never
-	      --diagnostic-format FORMAT  diagnostic presentation: human or plain
+	      --diagnostic-format FORMAT
+	                         diagnostic presentation: human or plain
       --verbose          report cache decisions and warnings
       --shell SHELL      recipe shell executable (repeatable)
       --env NAME=VALUE   add a recipe environment entry (repeatable)
@@ -73,30 +74,6 @@ Commands:
 const doHelpAfterCommands = `
 
 Run 'kame do COMMAND --help' for command-specific help.
-`
-
-const runHelpText = `Usage: kame do run [OPTIONS] [TARGET...]
-
-Materialize targets and stream every execution event. This shares the runtime
-path with the primary invocation; it differs in presentation and options only.
-
-Options:
-  -f, --file FILE        use one build file
-  -c, --command TEXT     use inline build source
-  -C, --directory DIR    set the working directory
-  -j, --jobs N           maximum concurrent nodes (N > 0, default 1)
-  -n, --dry-run          plan and render without executing effects
-      --force            ignore freshness and cached-task hits
-       --json             emit machine-readable JSON Lines
-	      --color MODE       diagnostic colour: auto, always, or never
-	      --diagnostic-format FORMAT  diagnostic presentation: human or plain
-      --verbose          report cache decisions and warnings
-      --shell SHELL      recipe shell executable (repeatable)
-      --env NAME=VALUE   add a recipe environment entry (repeatable)
-      --timeout MS       per-command timeout in milliseconds
-      --retry N          retry failed commands N times
-      --log-limit N      maximum captured bytes per step
-  -h, --help             show this help
 `
 
 const planHelpText = `Usage: kame do plan [OPTIONS] TARGET...
@@ -167,6 +144,12 @@ Options:
   -h, --help             show this help
 `
 
+const toolsHelpText = `Usage: kame do tools [OPTIONS]
+
+List globally referenced @(x/NAME) tools and their preflight-resolved paths.
+Missing tools are reported with an empty path; recipes are never executed.
+`
+
 const parseHelpText = `Usage: kame do parse --lang LANG [FILE]
 
 Parse FILE, or stdin when FILE is omitted, and print a stable JSON AST. Source
@@ -177,13 +160,15 @@ Options:
   -h, --help        show this help
 `
 
-const fmtHelpText = `Usage: kame do fmt [--lang LANG] [-i | -n] [FILE...]
+const fmtHelpText = `Usage: kame do fmt [--lang LANG] [--indent tabs|spaces] [--indent-width N] [-i | -n] [FILE...]
 
 Format source to stdout, or replace each FILE. With no FILE, read stdin (only
 without -i or -n). -n lists files that would change and exits 1 when any differ.
 
 Options:
       --lang LANG   expr | template | rule | script (default script)
+      --indent STYLE tabs (default) or spaces for rule bodies
+      --indent-width N  spaces per indentation level (default 4, range 1-16)
   -i                replace files in place
   -n                check for differences without writing
   -h, --help        show this help
@@ -208,12 +193,12 @@ Options:
 type commandAction int
 
 const (
-	commandRun commandAction = iota
-	commandPlan
+	commandPlan commandAction = iota
 	commandCat
 	commandInputs
 	commandOutputs
 	commandSpan
+	commandTools
 	commandParse
 	commandFormat
 	commandExpr
@@ -229,12 +214,12 @@ type commandSpec struct {
 }
 
 var doCommands = []commandSpec{
-	{Name: "run", TopSummary: "materialize targets and stream all execution events", DoSummary: "materialize targets and stream all execution events", Help: runHelpText, Action: commandRun},
 	{Name: "plan", TopSummary: "print the resolved plan without executing", DoSummary: "print the resolved plan without executing", Help: planHelpText, Action: commandPlan},
 	{Name: "cat", TopSummary: "materialize one target and print its artifact", DoSummary: "materialize one target and print its artifact", Help: catHelpText, Action: commandCat},
 	{Name: "inputs", TopSummary: "list declared input paths", DoSummary: "list declared input paths (--depth N)", Help: inputsHelpText, Action: commandInputs},
 	{Name: "outputs", TopSummary: "list declared output paths", DoSummary: "list declared output paths (--depth N)", Help: outputsHelpText, Action: commandOutputs},
 	{Name: "span", TopSummary: "show transitive inputs and outputs", DoSummary: "show transitive inputs and outputs (--expand, --depth N)", Help: spanHelpText, Action: commandSpan},
+	{Name: "tools", TopSummary: "list globally referenced build tools", DoSummary: "list globally referenced build tools", Help: toolsHelpText, Action: commandTools},
 	{Name: "parse", TopSummary: "parse a language file and print a JSON AST", DoSummary: "parse a language file and print a JSON AST (--lang LANG)", Help: parseHelpText, Action: commandParse},
 	{Name: "fmt", TopSummary: "format source in place or check it", DoSummary: "format source in place (-i) or check it (-n)", Help: fmtHelpText, Action: commandFormat},
 	{Name: "expr", TopSummary: "evaluate a standalone expression", DoSummary: "evaluate a standalone expression with capability grants", Help: exprHelpText, Action: commandExpr},

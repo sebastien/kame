@@ -2,6 +2,7 @@
 package main
 
 import (
+	"kame/diagnostic"
 	"kame/host/posix"
 	"kame/lang/eval"
 	"kame/lang/expr"
@@ -40,8 +41,19 @@ type buildArguments struct {
 	OK               bool
 }
 
+	// Free releases the parser-owned backing arrays. Option values themselves
+// borrow argv storage; Program.CompileMany clones values it retains.
+func (options *buildArguments) Free() {
+	if len(options.Grants) != 0 { slices.Free(mem.System, options.Grants) }
+	if len(options.Shell) != 0 { slices.Free(mem.System, options.Shell) }
+	if len(options.Environment) != 0 { slices.Free(mem.System, options.Environment) }
+	if len(options.Targets) != 0 { slices.Free(mem.System, options.Targets) }
+	*options = buildArguments{}
+}
+
 func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int {
 	parsed := parseBuildArguments(args, errOut)
+	defer parsed.Free()
 	if !parsed.OK {
 		return 2
 	}
@@ -49,15 +61,14 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 	// opportunity: present the overview instead of a terse diagnostic.
 	bare := len(args) == 0 && !toolRun
 	session := openBuildSession(parsed, errOut, !bare)
+	defer session.Free()
 	if session.Status != 0 {
 		if bare && session.Source.Missing {
 			writeTopHelp(out)
-			session.Free()
 			return 0
 		}
 		return session.Status
 	}
-	defer session.Free()
 	targets := parsed.Targets
 	if len(targets) == 0 {
 		if session.Program.HasTarget("default") {
@@ -65,6 +76,7 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 			// transpile to a block-scoped C compound literal that dies before
 			// materializeTargets reads it.
 			targets = slices.Append(mem.System, targets, "default")
+			parsed.Targets = targets
 		} else {
 			names := session.Program.NamedTargets()
 			for i := range names {
@@ -88,6 +100,10 @@ type buildSession struct {
 }
 
 func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bool) buildSession {
+	return openBuildSessionForTools(options, errOut, reportMissing, false)
+}
+
+func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMissing bool, allowMissingTools bool) buildSession {
 	configureDiagnosticPresentation(options)
 	session := buildSession{Source: loadBuildSource(options, errOut, reportMissing)}
 	if session.Source.Status != 0 {
@@ -96,17 +112,22 @@ func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bo
 	}
 	// Capability roots and canonical file keys compare against an absolute
 	// working directory; discovery above already resolved source names.
+	directoryOwned := false
 	if !path.IsAbs(options.Directory) {
 		buffer := mem.AllocSlice[byte](mem.System, os.MaxPathLen, os.MaxPathLen)
 		working, workingErr := os.Getwd(buffer)
 		if workingErr == nil && working != "" {
 			options.Directory = path.Join(mem.System, working, options.Directory)
+			directoryOwned = true
 		}
 		mem.FreeSlice(mem.System, buffer)
 	}
 	session.Registry = eval.NewRegistry(mem.System)
 	if !operations.Register(session.Registry) {
 		cliError(errOut, "HOST_FAIL", "cannot register standard operations")
+		if directoryOwned {
+			mem.FreeString(mem.System, options.Directory)
+		}
 		session.Free()
 		session.Status = 1
 		return session
@@ -126,6 +147,9 @@ func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bo
 	slices.Free(mem.System, sources)
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
+		if directoryOwned {
+			mem.FreeString(mem.System, options.Directory)
+		}
 		for i := range compiled.Diagnostics {
 			emitDiagnostic(diagnosticWriter(cliDiagnosticOut, errOut, cliDiagnosticJSON), compiled.Diagnostics[i], cliDiagnosticJSON, session.Parsed.Source)
 		}
@@ -134,12 +158,67 @@ func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bo
 		session.Status = 1
 		return session
 	}
+	toolEnvironment := posix.Environment(mem.System)
+	for i := range compiled.Program.Tools {
+		name := compiled.Program.Tools[i].Name
+		resolved := resolveTool(name, options.Directory, toolEnvironment)
+		if resolved == "" {
+			if allowMissingTools { continue }
+			cliError(errOut, "TOOL_MISSING", "required tool not found or not executable: "+name)
+			posix.FreeEnvironment(mem.System, toolEnvironment)
+			if directoryOwned {
+				mem.FreeString(mem.System, options.Directory)
+			}
+			compiled.Program.Free()
+			compiled.Free(mem.System)
+			session.Free()
+			session.Status = 1
+			return session
+		}
+		compiled.Program.SetToolPath(name, resolved)
+		mem.FreeString(mem.System, resolved)
+	}
+	posix.FreeEnvironment(mem.System, toolEnvironment)
+	if directoryOwned {
+		mem.FreeString(mem.System, options.Directory)
+	}
+	for i := range compiled.Diagnostics {
+		if compiled.Diagnostics[i].Severity == diagnostic.Warning {
+			emitDiagnostic(diagnosticWriter(cliDiagnosticOut, errOut, cliDiagnosticJSON), compiled.Diagnostics[i], cliDiagnosticJSON, session.Parsed.Source)
+		}
+	}
 	if session.Parsed != nil { session.Parsed.Free() }
 	session.Program = compiled.Program
 	session.Parsed = compiled.Program.Parsed
 	session.ParsedBorrowed = true
 	compiled.Free(mem.System)
 	return session
+}
+
+func resolveTool(name, cwd string, environment []string) string {
+	if name == "" { return "" }
+	if name[0] == '/' {
+		if executableFile(name) { return cloneCommandText(name) }
+		return ""
+	}
+	pathValue := environmentValue(environment, "PATH")
+	for start := 0; start <= len(pathValue); {
+		end := start
+		for end < len(pathValue) && pathValue[end] != ':' { end++ }
+		directory := pathValue[start:end]
+		if directory == "" { directory = cwd }
+		candidate := path.Join(mem.System, directory, name)
+		if executableFile(candidate) { return candidate }
+		mem.FreeString(mem.System, candidate)
+		if end == len(pathValue) { break }
+		start = end + 1
+	}
+	return ""
+}
+
+func executableFile(name string) bool {
+	info, err := os.Stat(name)
+	return err == nil && info.Mode().IsRegular() && info.Mode()&0111 != 0
 }
 
 func (s *buildSession) Free() {

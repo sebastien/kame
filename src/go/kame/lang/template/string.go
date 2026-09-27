@@ -16,6 +16,7 @@ const (
 	Expression
 	Reference
 	Selector
+	Tool
 )
 
 type Part struct {
@@ -101,6 +102,16 @@ func (p *parser) stringParts() {
 	literal = strings.NewBuilder(p.a)
 	literalStart := p.pos
 	for p.pos < p.end {
+		if p.pos+4 < p.end && p.s.Text[p.pos:p.pos+4] == "@(x/" {
+			end := p.pos + 4
+			for end < p.end && (isToolNameByte(p.s.Text[end])) { end++ }
+			if end > p.pos+4 && end < p.end && p.s.Text[end] == ')' {
+				p.literal(&literal, literalStart, p.pos)
+				p.parts = slices.Append(p.a, p.parts, Part{Kind: Tool, Text: p.s.Text[p.pos+4:end], Span: source.Span{Start: p.pos, End: end+1}})
+				p.pos, literalStart = end+1, end+1
+				continue
+			}
+		}
 		if p.s.Text[p.pos] == '\\' && p.pos+1 < p.end && (p.s.Text[p.pos+1] == '@' || p.s.Text[p.pos+1] == '\\') {
 			literal.WriteByte(p.s.Text[p.pos+1])
 			p.pos += 2
@@ -163,6 +174,10 @@ func (p *parser) stringParts() {
 	}
 	p.literal(&literal, literalStart, p.pos)
 	literal.Free()
+}
+
+func isToolNameByte(b byte) bool {
+	return b == '_' || b == '-' || b == '.' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 func (p *parser) embeddedExpression(start int, close byte) expr.Prefix {
@@ -258,6 +273,12 @@ func FormatString(a mem.Allocator, t *String) string {
 		}
 		if part.Kind == Selector {
 			b.WriteString(part.Text)
+			continue
+		}
+		if part.Kind == Tool {
+			b.WriteString("@(x/")
+			b.WriteString(part.Text)
+			b.WriteByte(')')
 			continue
 		}
 		if part.Kind == Expression {

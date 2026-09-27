@@ -12,6 +12,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 	"solod.dev/so/slices"
+	"solod.dev/so/time"
 	"solod.dev/so/unicode/utf8"
 )
 
@@ -78,8 +79,10 @@ func environmentValue(values []string, name string) string {
 }
 
 func materializeTargets(p *program.Program, targets []string, out io.Writer, errOut io.Writer, json bool) int {
+	startedAt := time.Now().UnixNano()
 	var handles []*program.Handle
 	failed := false
+	progress := buildProgress{}
 	for i := range targets {
 		started := p.Start(targets[i])
 		if started.Diagnostic.Code != "" {
@@ -107,7 +110,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			}
 		}
 		p.Tick(10)
-		drainEvents(p, out, errOut, json)
+		drainEvents(p, out, errOut, json, &progress)
 		for i := range handles {
 			if handles[i] == nil {
 				continue
@@ -139,7 +142,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			remaining--
 		}
 	}
-	drainEvents(p, out, errOut, json)
+	drainEvents(p, out, errOut, json, &progress)
 	slices.Free(mem.System, handles)
 	// A second signal may arrive while the first cancellation reaps the final
 	// process. Consume it before returning the ordinary cancellation status.
@@ -149,13 +152,25 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			return 128 - signal
 		}
 	}
+	if !json && progress.Completed+progress.Failed != 0 {
+		elapsedMS := (time.Now().UnixNano() - startedAt) / 1000000
+		if progress.Failed == 0 { fmt.Fprintf(errOut, "Summary: %d %s complete in %d.%03ds\n", progress.Completed, targetWord(progress.Completed), elapsedMS/1000, elapsedMS%1000)
+		} else { fmt.Fprintf(errOut, "Summary: %d complete, %d failed in %d.%03ds\n", progress.Completed, progress.Failed, elapsedMS/1000, elapsedMS%1000) }
+	}
 	if failed || cancelling {
 		return 1
 	}
 	return 0
 }
 
-func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool) {
+func targetWord(count int) string {
+	if count == 1 { return "target" }
+	return "targets"
+}
+
+type buildProgress struct { Active int; Completed int; Failed int }
+
+func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool, progress *buildProgress) {
 	for {
 		next := p.NextEvent()
 		if !next.OK {
@@ -169,11 +184,16 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool)
 		} else if event.Kind == program.Stderr {
 			errOut.Write(event.Data)
 		} else if event.Kind == program.TargetStarted {
-			fmt.Fprintf(errOut, "[%s] started\n", event.Target)
+			progress.Active++
+			fmt.Fprintf(errOut, "[%s] started (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
 		} else if event.Kind == program.TargetCompleted {
-			fmt.Fprintf(errOut, "[%s] complete\n", event.Target)
+			if progress.Active != 0 { progress.Active-- }
+			progress.Completed++
+			fmt.Fprintf(errOut, "[%s] complete (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
 		} else if event.Kind == program.TargetFailed || event.Kind == program.TargetCancelled {
-			fmt.Fprintf(errOut, "[%s] failed\n", event.Target)
+			if progress.Active != 0 { progress.Active-- }
+			progress.Failed++
+			fmt.Fprintf(errOut, "[%s] failed (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
 		} else if event.Kind == program.CacheWarning {
 			fmt.Fprintf(errOut, "warning %s: %s\n", event.Diagnostic.Code, event.Diagnostic.Message)
 		}
@@ -222,12 +242,16 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 		}
 	}
 	if d.Target != "" {
-		fmt.Fprintf(out, "%s failed: %s\n", d.Target, d.Code)
+		if diagnosticFormat == "human" {
+			fmt.Fprintf(out, "✗ %s failed · %s\n", d.Target, d.Code)
+		} else {
+			fmt.Fprintf(out, "%s failed: %s\n", d.Target, d.Code)
+		}
 		if len(d.TargetStack) > 1 {
 			io.WriteString(out, "  required by ")
 			for i := range d.TargetStack {
 				if i != 0 {
-					io.WriteString(out, " -> ")
+					if diagnosticFormat == "human" { io.WriteString(out, " → ") } else { io.WriteString(out, " -> ") }
 				}
 				io.WriteString(out, d.TargetStack[i])
 			}

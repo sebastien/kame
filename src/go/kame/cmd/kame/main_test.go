@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"kame/core"
 	"kame/diagnostic"
 	"kame/lang/source"
 	"kame/program"
@@ -173,13 +174,22 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 }
 
-func TestRunOptionsValidateAndReachRuntime(t *testing.T) {
+func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := Run([]string{"do", "run", "-n", "--timeout", "100", "--retry=1", "--log-limit", "8", "--env", "KM_TEST=value", "--shell", "/bin/sh", "--shell", "-c", "-c", "task default :\n\techo ignored", "default"}, &input{}, &out, &errOut)
+	source := "task build :\n\t@(x/sh) -c 'true'\n"
+	status := Run([]string{"do", "tools", "-c", source}, &input{}, &out, &errOut)
+	if status != 0 || !strings.Contains(out.String(), `"name":"sh"`) || !strings.Contains(out.String(), `"path":"`) {
+		t.Errorf("tools status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+}
+
+func TestBuildOptionsValidateAndReachRuntime(t *testing.T) {
+	var out, errOut bytes.Buffer
+	status := Run([]string{"-n", "--timeout", "100", "--retry=1", "--log-limit", "8", "--env", "KM_TEST=value", "--shell", "/bin/sh", "--shell", "-c", "-c", "task default :\n\techo ignored", "default"}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(errOut.String(), "[default] complete") {
 		t.Errorf("run options status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
-	if status := Run([]string{"do", "run", "--env", "invalid", "-c", "task default :", "default"}, &input{}, &out, &errOut); status != 2 {
+	if status := Run([]string{"--env", "invalid", "-c", "task default :", "default"}, &input{}, &out, &errOut); status != 2 {
 		t.Errorf("invalid env status=%d", status)
 	}
 }
@@ -211,7 +221,6 @@ func TestDoNamespaceHelp(t *testing.T) {
 		{[]string{"do"}, "Commands:"},
 		{[]string{"do", "--help"}, "Commands:"},
 		{[]string{"do", "help"}, "Commands:"},
-		{[]string{"do", "help", "run"}, "Usage: kame do run"},
 		{[]string{"do", "plan", "--help"}, "Usage: kame do plan"},
 		{[]string{"do", "expr", "-h"}, "Usage: kame do expr"},
 	}
@@ -274,6 +283,18 @@ func TestJSONEventEncodesBinaryChunk(t *testing.T) {
 	if out.String() != want {
 		t.Errorf("JSON event = %q, want %q", out.String(), want)
 	}
+}
+
+func TestJSONEventIncludesStructuredRuntimeContext(t *testing.T) {
+	var out bytes.Buffer
+	writeJSONEvent(&out, program.Event{Kind: program.DependencyDiscovered, Target: "build", Key: core.ResourceKey{Kind: core.ResourceTask, Name: "build"}, DependencyID: 9, DependencyKey: core.ResourceKey{Kind: core.ResourceFile, Name: "./input"}})
+	text := out.String()
+	for _, field := range []string{`"resource":{"kind":"task","name":"build"}`, `"dependency":{"node":9,"resource":{"kind":"file","name":"./input"}}`} {
+		if !strings.Contains(text, field) { t.Errorf("JSON event missing %s: %s", field, text) }
+	}
+	out.Reset()
+	writeJSONEvent(&out, program.Event{Kind: program.TargetValue, Target: "result", Value: core.Value{Kind: core.String, Text: "value"}})
+	if !strings.Contains(out.String(), `"value":{"kind":"string","data":"value"}`) { t.Errorf("JSON target value = %s", out.String()) }
 }
 
 func TestEmptyLongOptionValuesAreInvalid(t *testing.T) {

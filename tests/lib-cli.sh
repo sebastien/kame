@@ -189,6 +189,8 @@ function cli_run {
 			LC_ALL=C \
 			TZ=UTC \
 			NO_COLOR=1 \
+			ASAN_OPTIONS="${ASAN_OPTIONS:-}" \
+			UBSAN_OPTIONS="${UBSAN_OPTIONS:-}" \
 			${envs[@]+"${envs[@]}"} \
 			timeout --signal=TERM "$timeout_s" "$CLI_BIN" "$@"
 	) <"$stdin_file" >"$CLI_OUT" 2>"$CLI_ERR"
@@ -218,6 +220,8 @@ function cli_spawn {
 			LC_ALL=C \
 			TZ=UTC \
 			NO_COLOR=1 \
+			ASAN_OPTIONS="${ASAN_OPTIONS:-}" \
+			UBSAN_OPTIONS="${UBSAN_OPTIONS:-}" \
 			"$CLI_BIN" "$@"
 	) >"$TEST_PATH/spawn.out" 2>"$TEST_PATH/spawn.err" &
 	CLI_SPAWN_PID=$!

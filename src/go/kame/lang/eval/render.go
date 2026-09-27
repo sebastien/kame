@@ -23,6 +23,28 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 			b.WriteString(part.Text)
 			continue
 		}
+		if part.Kind == template.Tool {
+			if context.ToolResolver == nil {
+				return failure(context.Run, "TOOL_UNKNOWN", part.Span, "tool registry is unavailable")
+			}
+			tool, ok := context.ToolResolver(context.ResolverState, part.Text)
+			if !ok {
+				return failure(context.Run, "TOOL_MISSING", part.Span, "required tool is unavailable: "+part.Text)
+			}
+			key := core.NewResourceKey(context.Run, core.ResourceFile, tool)
+			if context.Engine != nil {
+				current := context.Engine.Dependency(key)
+				if context.DependencyObserver != nil {
+					context.DependencyObserver(context.ResolverState, key)
+				}
+				key.Free(context.Run)
+				if !current { return Result{Waiting: true} }
+			} else {
+				key.Free(context.Run)
+			}
+			b.WriteString(tool)
+			continue
+		}
 		var r Result
 		if part.Kind == template.Selector {
 			r = p.selector(part.Text, part.Span, context)

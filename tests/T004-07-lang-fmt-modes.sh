@@ -26,6 +26,16 @@ cli_expect_status 0
 cli_expect_stdout "./x :
 	true"
 
+cli_run --stdin rule.kmk -- do fmt --lang rule --indent spaces
+cli_expect_status 0
+cli_expect_stdout "./x :
+    true"
+
+cli_run --stdin rule.kmk -- do fmt --lang rule --indent spaces --indent-width 2
+cli_expect_status 0
+cli_expect_stdout "./x :
+  true"
+
 printf '( join [a b] "," )' >expression.km
 cli_run --stdin expression.km -- do fmt --lang expr
 cli_expect_status 0
@@ -87,6 +97,14 @@ test-step "format usage errors"
 	cli_run -- do fmt --bogus
 	cli_expect_status 2
 	cli_expect_stderr_contains "OPT_UNKNOWN"
+
+	cli_run -- do fmt --indent invalid
+	cli_expect_status 2
+	cli_expect_stderr_contains "OPT_VALUE_INVALID"
+
+	cli_run -- do fmt --indent-width 0
+	cli_expect_status 2
+	cli_expect_stderr_contains "OPT_VALUE_INVALID"
 )
 
 test-step "invalid sources fail without partial output"

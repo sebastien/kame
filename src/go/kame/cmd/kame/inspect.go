@@ -14,11 +14,12 @@ import (
 
 func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 	parsed := parseBuildArguments(args, errOut)
+	defer parsed.Free()
 	if !parsed.OK { return 2 }
 	if len(parsed.Targets) == 0 { cliError(errOut, "OPT_NO_VALUE", "plan requires at least one target"); return 2 }
 	session := openBuildSession(parsed, errOut, true)
-	if session.Status != 0 { return session.Status }
 	defer session.Free()
+	if session.Status != 0 { return session.Status }
 	failed := false
 	for i := range parsed.Targets {
 		result := session.Program.Plan(parsed.Targets[i])
@@ -27,6 +28,23 @@ func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 		result.Plan.Free(mem.System)
 	}
 	if failed { return 1 }
+	return 0
+}
+
+func runTools(args []string, out io.Writer, errOut io.Writer) int {
+	parsed := parseBuildArguments(args, errOut)
+	defer parsed.Free()
+	if !parsed.OK { return 2 }
+	if len(parsed.Targets) != 0 { cliError(errOut, "OPT_VALUE_INVALID", "tools does not accept targets"); return 2 }
+	session := openBuildSessionForTools(parsed, errOut, true, true)
+	defer session.Free()
+	if session.Status != 0 { return session.Status }
+	e := json.NewEncoder(out)
+	e.BeginArray()
+	for i := range session.Program.Tools {
+		e.BeginObject(); e.Str("name"); e.Str(session.Program.Tools[i].Name); e.Str("path"); e.Str(session.Program.Tools[i].Path); e.EndObject()
+	}
+	e.EndArray(); e.Flush(); io.WriteString(out, "\n")
 	return 0
 }
 
@@ -45,11 +63,12 @@ func stringArray(e *json.Encoder, values []string) { e.BeginArray(); for i := ra
 
 func runCat(args []string, out io.Writer, errOut io.Writer) int {
 	parsed := parseBuildArguments(args, errOut)
+	defer parsed.Free()
 	if !parsed.OK { return 2 }
 	if len(parsed.Targets) != 1 { cliError(errOut, "OPT_VALUE_INVALID", "cat requires exactly one target"); return 2 }
 	session := openBuildSession(parsed, errOut, true)
-	if session.Status != 0 { return session.Status }
 	defer session.Free()
+	if session.Status != 0 { return session.Status }
 	started := session.Program.Start(parsed.Targets[0])
 	if started.Diagnostic.Code != "" {
 		// Materializing an existing file target needs no rule (006): cat prints
@@ -92,13 +111,16 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 
 type graphArguments struct { Build buildArguments; Depth int; Expand bool; OK bool }
 
+func (arguments *graphArguments) Free() { arguments.Build.Free(); *arguments = graphArguments{} }
+
 func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	graph := parseGraphArguments(args, errOut, kind == "span")
+	defer graph.Free()
 	if !graph.OK { return 2 }
 	if len(graph.Build.Targets) != 1 { cliError(errOut, "OPT_VALUE_INVALID", kind+" requires exactly one target"); return 2 }
 	session := openBuildSession(graph.Build, errOut, true)
-	if session.Status != 0 { return session.Status }
 	defer session.Free()
+	if session.Status != 0 { return session.Status }
 	e := json.NewEncoder(out)
 	if kind == "inputs" || kind == "outputs" {
 		traversal := graphValues(session.Program, graph.Build.Targets[0], graph.Depth, kind)
