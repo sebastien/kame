@@ -132,6 +132,50 @@ The initial implementation does not load filesystem paths or complete scripts.
 Those capabilities may be added with explicit host requests after the native
 vertical slice.
 
+### If
+
+`(if TEST THEN [TEST THEN]... [ELSE])` evaluates operands left to right in test
+order. It evaluates the then-body of the first true test, or the trailing else,
+and returns that value; with no true test and no else it returns nil. An even
+operand count has no else; an odd operand count ends in else. Zero or one
+operand is `EXPR_INVALID`. Exactly one branch evaluates, so a branch may
+reference a name that is valid only when selected. Truth follows "Values and
+Truth": only false and nil are false.
+
+### And and Or
+
+`(and EXPR...)` evaluates operands left to right and returns the first false
+operand, or the last operand when every operand is true; `(and)` is `:true`.
+`(or EXPR...)` returns the first true operand, or the last operand when every
+operand is false; `(or)` is `:false`. Evaluation stops at the deciding operand,
+so later operands are never evaluated and their dependencies and effects do not
+run. A single operand is returned without further evaluation.
+
+### Match
+
+`(match SUBJECT CLAUSE...)` evaluates `SUBJECT` once and requires a string, path,
+or pattern; a `Bytes` subject is `EXPR_INVALID` and must be converted with `text`
+first. Each clause `[PATTERN BODY...]` begins with a match pattern parsed at
+parse time: a path or string with matcher groups matches with the anchored
+semantics of `014-patterns.md`, while a path or string with no groups matches by
+exact text. The first matching clause is selected, and its body evaluates in a
+run-owned child scope where each named capture binds as a name, with the
+enclosing scope as parent. Anonymous `{*}` and `{**}` captures match but bind no
+name, and a reused capture name must match the same text. `[:else BODY...]` is
+optional and terminal; when no clause matches and there is no else, the result is
+nil. Only the selected body evaluates. A malformed clause is `EXPR_INVALID`;
+pattern misuse, such as a clause pattern that is a pure expansion pattern, is
+`PAT_INVALID`.
+
+### With
+
+`(with RECORD BODY...)` evaluates `RECORD`, requires a record, creates a
+run-owned child scope whose parent is the caller, binds each field key as a name,
+and evaluates the body in that scope, returning the body's final value. A
+duplicate key re-binds, so the last field wins. An empty body returns nil.
+Capture bindings and `with` bindings cannot escape the run that created them,
+consistent with lexical scopes.
+
 ## Containers and References
 
 List values evaluate their elements left-to-right. Record values evaluate
@@ -193,6 +237,15 @@ containment, which is outside the initial implementation.
 - A stale operation completion is not published.
 - Empty lists and strings are true; false and nil are false.
 - `?` suppresses only unknown-reference failures.
+- `if` evaluates exactly one branch and returns the first true then-body, the
+  trailing else, or nil; a missing operand count is `EXPR_INVALID`.
+- `and` and `or` short-circuit and return the deciding operand; an unselected
+  operand's failing `read` never runs.
+- `match` selects the first matching clause, binds named captures in a
+  run-owned child scope, returns nil on no match without else, and never
+  evaluates an unselected arm.
+- `with` binds record fields in a child scope, last duplicate wins, and the
+  bindings do not leak into the parent.
 - `let` bindings see previous bindings but do not leak into their parent.
 - Reference indexes, negative indexes, slices, and selections work on valid
   values and diagnose invalid bounds.

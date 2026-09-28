@@ -18,8 +18,22 @@ text from data. It adds:
 Document templates lower to the expression language: every directive compiles
 to `if`, `map`, `join`, `let`, `with`, `cat`, or `render`. There is no second
 evaluator, so templates share laziness, capabilities, and dynamic dependencies
-with the rest of Kame. Inline `@(...)`, `@{...}`, and selectors remain the
-native template form used by recipes and definitions.
+with the rest of Kame. Inline `@(...)` and selectors remain the native template
+form used by recipes and definitions.
+
+## Relationship to Kash
+
+A document template is not a Kash source. Its executable forms are template
+directives and inline `@(EXPRESSION)` forms, both of which use Kame expression
+syntax. `$REFERENCE`, `${REFERENCE}`, and `$(COMMAND)` are Kash-only forms and
+are emitted literally in document text.
+
+The `@(EXPRESSION)` syntax is shared with Kash: it parses and evaluates the
+same Kame expression. Its result context differs: a document template renders
+the result as text, while Kash supplies it as a typed command argument. Template
+directives such as `@if` and `@for` are keyword-gated, whole-line constructs;
+they are not Kash meta-programming forms. Likewise, Kash `@NAME` and
+`@tmpl(...)` are not recognized in document templates.
 
 ## Document Templates
 
@@ -70,7 +84,7 @@ A mustache-style HTML page needs no rewriting to become a template:
 ```html
 <ul>
 <!-- @for([post] posts) -->
-  <li><a href="@(post.url)">@{post.title}</a>
+  <li><a href="@(post.url)">@(post.title)</a>
 <!-- @if(post.pinned) -->
     <span class="pin">pinned</span>
 <!-- @else -->
@@ -110,12 +124,14 @@ without an open block.
 
 A body is a sequence of literal text, inline expansions, and nested blocks.
 Write `L(x)` for the lowering of `x`. Literal text lowers to a string literal,
-and an inline `@(E)` or `@{R}` lowers to `E` or `R`. A body `B1 ... Bn` lowers to
-`(cat L(B1) ... L(Bn))`, and an empty body lowers to `(cat)`, the empty string.
+and an inline `@(E)` lowers to `E`. A reference is written as an expression, for
+example `@(post.title)`. A body `B1 ... Bn` lowers to `(cat L(B1) ... L(Bn))`,
+and an empty body lowers to `(cat)`, the empty string.
 Blocks lower as follows:
 
 ```text
-L(@if(c) A @elif(c2) B @else C @end) = (if c L(A) (if c2 L(B) L(C)))
+L(@if(c) A @elif(c2) B @else C @end) = (if c L(A) c2 L(B) L(C))
+L(@if(c) A @end)                     = (if c L(A))
 L(@for([p...] xs) A @end)            = (join (map ([p...] L(A)) xs) "")
 L(@for([p...] xs sep) A @end)        = (join (map ([p...] L(A)) xs) sep)
 L(@with(r) A @end)                   = (with r L(A))
@@ -127,6 +143,17 @@ L(@raw ... @end)                     = the raw text as a string literal
 
 Blocks nest arbitrarily. Lowering happens when the template is parsed, so a
 malformed template fails before any body text is produced.
+
+### Recipe Bodies
+
+A rule recipe body is a document template in `plain` style whose rendered output
+is the shell script. Directive lines are recognized by the same keyword-gated,
+whole-line rule as any document template, and each is removed together with its
+rule indent and line ending. Selected body lines render as shell text, so
+indentation inside a branch is preserved. Inline `@(...)` and selectors keep
+their string-template meaning, and a non-directive line such as a comment
+carrying `@media` is emitted unchanged. `016`'s escaping rules (`@@`, `\@`, and
+`@raw`) apply to recipes identically.
 
 ### Whitespace
 
@@ -195,10 +222,10 @@ only. Style names are matched literally and case-insensitively.
 ### Payload
 
 `(render SOURCE PAYLOAD)` binds `PAYLOAD`, a record, for the duration of
-rendering. The payload is applied with the semantics of `with`, so `@{title}`
-and `@(title)` resolve to its fields. The expression scope of the caller remains
-visible as the parent, so a template may also reference definitions and captured
-values. With no payload the caller scope is used unchanged.
+rendering. The payload is applied with the semantics of `with`, so `@(title)`
+resolves to its field. The expression scope of the caller remains visible as the
+parent, so a template may also reference definitions and captured values. With no
+payload the caller scope is used unchanged.
 
 ### Dependencies
 
@@ -225,10 +252,13 @@ argument unchanged. Invalid UTF-8 is `EXPR_INVALID`.
 
 ### if
 
-`(if COND THEN [ELSE])` is a special form. It evaluates `COND`, then exactly one
-of `THEN` or `ELSE`, and returns that value. With no `ELSE` a false `COND`
-returns `:nil`. Only `:nil` and `:false` are false. The unused branch is not
-evaluated, so a branch may reference a name that is only valid when selected.
+`(if TEST THEN [TEST THEN]... [ELSE])` is a special form defined in
+`005-evaluation.md`. It evaluates tests left to right and evaluates exactly one
+then-body or the trailing else. An even operand count has no else; an odd count
+ends in else; zero or one operand is `EXPR_INVALID`. With no true test and no
+else it returns `:nil`. Only `:nil` and `:false` are false. Unselected branches
+are not evaluated, so a branch may reference a name that is valid only when
+selected.
 
 ### with
 
@@ -256,7 +286,7 @@ CARD = """
 <!-- @if(post.pinned) -->
 <span class="pin">pinned</span>
 <!-- @end -->
-<h2>@{post.title}</h2>
+<h2>@(post.title)</h2>
 </article>
 """
 
@@ -310,11 +340,11 @@ verbatim literal is idempotent.
 
 ## Related Specifications
 
-- `004-language.md`: add the `if` and `with` special forms, the verbatim
-  multi-line string literal, and a pointer to this specification for document
-  templates.
-- `005-evaluation.md`: specify lazy `if` and scope-binding `with`, and the
-  dependency behavior of `render`.
+- `004-language.md`: add the `if`, `and`, `or`, `match`, and `with` special
+  forms, the comparison operator atoms, the recipe directive pointer, and the
+  verbatim multi-line string literal.
+- `005-evaluation.md`: specify lazy `if`, `and`, `or`, and `match`, scope-binding
+  `with`, and the dependency behavior of `render`.
 - `007-library.md`: add `cat`, `text`, and `render`.
 - `009-cli.md`: add the `do render` command.
 - `011-diagnostics.md`: register the codes above.
@@ -322,6 +352,7 @@ verbatim literal is idempotent.
 ## Deferred
 
 - Block labels such as `@end(for)` for stronger matching diagnostics.
+- A `@match(PATTERN)` document directive with pattern clauses.
 - Whitespace trim markers around directive lines.
 - Inline (non-line) block directives.
 - Automatic comment-style detection from content.
@@ -334,7 +365,9 @@ verbatim literal is idempotent.
 - A `hash` document with `# @if(cond)` renders its consequent when `cond` is
   true and its `@else` body otherwise.
 - `@elif` chains select the first true branch; a false chain renders `@else` or
-  nothing.
+  nothing, and the chain lowers to one variadic `if` expression.
+- A recipe body removes `@if`/`@else`/`@end` directive lines with their rule
+  indent and renders only the selected branch lines as shell text.
 - `@for([x] xs)` renders its body once per item in order; an optional separator
   is inserted between results and nowhere else.
 - `@for` binds lambda parameter lists, including a rest parameter.

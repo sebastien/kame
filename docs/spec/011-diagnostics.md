@@ -146,8 +146,13 @@ meaning by themselves.
 - Malformed pattern group syntax is `PARSE_ERR`; pattern misuse detected at
   evaluation, such as a missing capture reference or an invalid argument
   combination, uses `PAT_INVALID`.
+- A malformed `if`, `and`, `or`, `match`, or comparison form — wrong operand
+  count, an unorderable mixed-kind comparison, or a non-string `match` subject —
+  uses `EXPR_INVALID`. A `match` clause whose pattern is not a valid matcher
+  uses `PAT_INVALID`.
 - Document template failures use `TPL_PARSE`, `TPL_BLOCK`, `TPL_STYLE`, and
-  `TPL_CYCLE` as specified in `016-templates.md`.
+  `TPL_CYCLE` as specified in `016-templates.md`; the same codes cover a
+  malformed recipe directive.
 - OOM formatting must not allocate.
 
 ## Human and Plain Rendering

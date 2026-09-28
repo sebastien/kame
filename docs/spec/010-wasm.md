@@ -150,6 +150,8 @@ The wrapper services host requests with JavaScript host capabilities:
 - run maps to a child process with streamed stdout and stderr, exit status,
   signal forwarding, and cancellation.
 - time maps to the JavaScript wall and monotonic clocks.
+- cache get, put, and delete map to opaque records under a per-project cache
+  root; the runtime owns key construction and record validation.
 
 Capability grants follow `009-cli.md`: denied by default and granted by
 `--allow-read`, `--allow-write`, `--allow-run`, and `--allow-env`. A browser or

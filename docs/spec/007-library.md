@@ -47,6 +47,32 @@ The initial general operations are:
 order. Bytes require explicit text or hexadecimal conversion and are not
 silently decoded.
 
+## Comparison Operations
+
+Comparison operations compare materialized scalars. The spelled names are
+canonical; the symbolic aliases are equivalent and parse as expression atoms per
+`004-language.md`.
+
+| Name | Alias | Contract |
+| --- | --- | --- |
+| `eq` | `=` | Strict, kind-aware equality |
+| `is` | `==` | Identical to `eq` |
+| `ne` | `!=` | Negation of `eq` |
+| `lt` | `<` | Ascending order |
+| `gt` | `>` | Descending order |
+| `gte` | `>=` | Order at or after |
+| `lte` | `<=` | Order at or before |
+
+`eq` supports nil, boolean, number, and string. Values of different kinds are
+unequal rather than an error; `:nil` and `:false` are distinct, and a number is
+never equal to a string. Number equality and ordering are numeric across integer
+and float; string equality is exact byte equality and string ordering compares
+UTF-8 bytes. Lists, records, bytes, and patterns are `EXPR_INVALID` and must be
+converted or compared explicitly. Ordering (`lt`, `gt`, `gte`, `lte`) accepts
+only numbers and strings; a mixed-kind or non-scalar argument is
+`EXPR_INVALID`. Boolean negation remains the general `not` operation, and
+`ne`/`!=` is equality negation, not a synonym for `not`.
+
 ## Collection Operations
 
 The initial collection operations are:
@@ -184,6 +210,22 @@ only process interface for cacheable builds.
 Tagged-template shell helpers and multiple aliases such as legacy `sh` and
 `shellrun` are deferred.
 
+## Clock Operations
+
+Clock operations read the host clocks. They are effectful: they submit host
+requests and are invalid during planning and resolving with `PHASE_INVALID`,
+because a plan must not depend on the time at which it was computed. They are
+allowed in explicit expression execution and in build rendering.
+
+| Name | Contract |
+| --- | --- |
+| `now` | Wall-clock nanoseconds since the Unix epoch |
+| `monotonic` | Monotonic-clock nanoseconds from an arbitrary origin |
+
+Both return integer nanoseconds. `monotonic` never decreases and is unaffected
+by wall-clock adjustments, so it measures durations; only differences between
+two readings are meaningful. Neither requires a capability grant.
+
 ## Environment
 
 An `env` operation requires the `env` capability and reads one named variable.
@@ -207,3 +249,9 @@ Reading the entire environment at once is not supported initially.
 - Pattern `replace` matches anchored, expands references, returns `:nil`
   without a match, and accepts a section through `map` and pipes.
 - Operation tests using `mem.Tracker` leak no returned container or string.
+- `eq`/`=` and `is`/`==` share one strict, kind-aware comparison; `ne`/`!=` is
+  its negation and `not` remains boolean negation.
+- `eq` treats values of different kinds as unequal; `:nil` and `:false` are
+  distinct; numbers compare numerically across integer and float.
+- `lt`/`gt`/`gte`/`lte` order numbers and strings and reject mixed-kind or
+  non-scalar arguments with `EXPR_INVALID`.

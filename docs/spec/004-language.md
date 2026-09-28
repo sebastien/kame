@@ -129,8 +129,8 @@ inside quoted strings and has the same value semantics.
 
 Expression strings are parsed by the expression parser. `{(...)}` interpolation
 and the `\{` escape are specific to expression strings. `@(expression)` is the
-one expansion shared with string templates (see String Templates);
-`@{reference}` and contextual selectors are not expression-string syntax.
+one expansion shared with string templates (see String Templates); contextual
+selectors are not expression-string syntax.
 
 Single quote is reserved and is not an alternative string delimiter.
 
@@ -169,6 +169,28 @@ right are each replaced with the piped value:
 is equivalent to `(transform value a)`. A pipe must have expressions on both
 sides.
 
+### Comparison Operators
+
+The symbols `=`, `==`, `!=`, `<`, `>`, `<=`, and `>=` are expression atoms and
+may appear wherever an expression may appear. Used as an application head they
+name the comparison operations of `007-library.md`:
+
+| Symbol | Operation |
+| --- | --- |
+| `=` | `eq` |
+| `==` | `is` |
+| `!=` | `ne` |
+| `<` | `lt` |
+| `>` | `gt` |
+| `<=` | `lte` |
+| `>=` | `gte` |
+
+`=`/`eq` and `==`/`is` have identical strict, kind-aware semantics; `is` is the
+readable spelling of `eq`. The symbol and the spelled operation are aliases, and
+canonical formatting preserves whichever spelling the source used. Elsewhere, `=`
+is the definition separator and `<`/`>` introduce selectors only after `@`, so
+these atoms conflict with no existing syntax.
+
 ### Special Forms
 
 The evaluator recognizes these application heads specially:
@@ -184,8 +206,24 @@ The evaluator recognizes these application heads specially:
   the first operand is the parameter list and the rest is the function body.
 - `eval` evaluates expression text or an explicitly loaded script as specified
   in `005-evaluation.md`.
+- `if` selects among branches by truth. Operand count determines the branches:
+  `(if TEST THEN [TEST THEN]... [ELSE])` evaluates tests left to right and
+  evaluates exactly one then-body or the trailing else. An even operand count
+  has no else; an odd count ends in else. Zero or one operand is
+  `EXPR_INVALID`.
+- `and` and `or` are lazy conjunction and disjunction. They evaluate operands
+  left to right, stop at the operand that decides the result, and return that
+  operand (see `005-evaluation.md`).
+- `match` dispatches a string-like subject against pattern clauses:
+  `(match SUBJECT [PATTERN BODY...]... [:else BODY...])`. The first matching
+  clause runs; its named captures bind as names in that clause's child scope
+  (see `005-evaluation.md`).
+- `with` evaluates a record in a child scope where each field key is bound as a
+  name: `(with RECORD BODY...)` (see `016-templates.md`).
 
-There is no language-level `if` in the initial implementation.
+These heads are special forms: their operands are evaluated only when the form
+selects them. `if`, `and`, `or`, and `match` must not be implemented as eager
+operations.
 
 ### Placeholder Sections
 
@@ -209,17 +247,15 @@ String templates are parsed by the template parser. They appear as definition
 right-hand sides that begin with `"`, as recipe text, and as standalone template
 sources. They contain literal segments and expansions:
 
-- `@(expression)` evaluates an expression.
-- `@{reference}` resolves a reference.
+- `@(expression)` evaluates an expression, including a reference expression.
 - `@<`, `@>`, and argument forms resolve contextual selectors.
 - A backslash escapes `@` and `\`.
 
-`@(expression)` is shared with expression strings (see Strings); `@{reference}`
-and contextual selectors are template-only, while `{(...)}` interpolation is
-expression-string-only.
+`@(expression)` is shared with expression strings (see Strings); contextual
+selectors are template-only, while `{(...)}` interpolation is expression-string-only.
 
-Malformed `@(` or `@{` expansions remain literal and produce an `PARSE_ERR`
-warning. A well-delimited but invalid contained expression is an error.
+Malformed `@(` expansions remain literal and produce an `PARSE_ERR` warning. A
+well-delimited but invalid contained expression is an error.
 
 Rendered list values are joined with one ASCII space. Nil renders as an empty
 string. Records and bytes cannot be interpolated into command text without an
@@ -380,6 +416,13 @@ uses one tab for each recipe line.
 All rendered body lines become one shell script. The parser does not parse shell
 syntax.
 
+A recipe body is a `plain`-style document template (`016-templates.md`). A
+whole-line, keyword-gated directive (`@if`, `@elif`, `@else`, `@for`, `@with`,
+`@let`, `@include`, `@raw`, `@end`) is removed together with its rule indent and
+line ending and contributes no shell text; the selected body lines render as
+shell. Inline `@(...)`, `@<`, `@>`, and the `@@`/`\@` escapes retain their
+string-template meaning. Text that is not a directive line remains opaque shell.
+
 ## Scripts
 
 A script contains comments, blank lines, definitions, rules, and top-level
@@ -425,10 +468,24 @@ excluding spans.
 - Scalar, list, and function definitions follow deterministic RHS
   classification.
 - A target template with no capture group parses as a literal target.
-- Expression-string `{(...)}` interpolation and template `@(...)`/`@{...}`
-  expansions are parsed by their respective packages.
+- Expression-string `{(...)}` interpolation and template `@(...)` expansions
+  are parsed by their respective packages.
 - `def` distinguishes value and function bindings by the number of operands
   after the bound name.
+- `if`, `and`, `or`, and `match` are special forms: each operand is evaluated
+  only when selected, so an unselected branch's dependencies and effects never
+  run.
+- `(if c a)` returns `a` or `:nil`, `(if c a b)` returns `a` or `b`, and an even
+  operand count has no else.
+- `and`/`or` return the deciding operand and stop evaluating after it.
+- `match` selects the first matching clause, binds its named captures, and
+  returns `:nil` when nothing matches without an `:else` clause.
+- `=`/`eq`, `==`/`is`, `!=`/`ne`, `<`/`lt`, `>`/`gt`, `<=`/`lte`, and `>=`/`gte`
+  are aliases; `=` and `==` share one strict, kind-aware equality.
+- Symbolic operator atoms parse and format idempotently wherever an expression
+  is allowed.
+- A recipe directive line contributes no shell text, while a non-directive
+  comment such as `@media` remains literal shell text.
 - Placeholder sections parse, format idempotently, and evaluate as lambdas;
   `_` outside a section remains a name.
 - Pattern literals classify per `014-patterns.md`; mixed matcher and reference

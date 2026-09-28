@@ -117,6 +117,10 @@ A successful record contains:
 - Dependency manifest sufficient to recompute the fingerprint.
 - Optional structured provenance for diagnostics.
 
+A host that cannot expose a synchronous wall clock records zero start,
+completion, and duration times. Zero timing is still a valid record: ordering
+and a zero exit status are required, but the absolute times are informational.
+
 A failed attempt may store diagnostic metadata for inspection, but it is never
 a cache hit. Cancellation does not create or replace a successful record.
 

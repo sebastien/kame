@@ -52,6 +52,7 @@ New specifications in this directory override every legacy source.
 | `014-patterns.md` | Placeholder sections and pattern values | 004, 005, 007 |
 | `015-distribution.md` | Release artifacts, launcher, bootstrap Makefile | 009, 010 |
 | `016-templates.md` | Text templates, directives, and rendering | 004, 005, 007, 009 |
+| `017-kash.md` | Kash command language and Kame expression boundary | 003, 004, 005, 012 |
 
 Every implementation specification also depends on the code registry in 011.
 

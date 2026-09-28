@@ -44,8 +44,8 @@ tests/
 
 - `SSS` is the governing spec number and `NN` a two-digit sequence per spec.
 - `category` maps one-to-one to the spec: `host`=003, `lang`=004, `eval`=005,
-  `runtime`=006, `lib`=007, `cache`=008, `cli`=009, `diag`=011, `streams`=012,
-  `meta`=013, `patterns`=014.
+  `runtime`=006, `lib`=007, `cache`=008, `cli`=009, `wasm`=010, `diag`=011,
+  `streams`=012, `meta`=013, `patterns`=014, `dist`=015.
 - `lib-*.sh` files are support libraries and are never executed as tests.
 - Nothing under `tests/data/` is executed as a test.
 - Every test script has one `CATALOG.tsv` row; `T013-01` enforces both
