@@ -4,9 +4,6 @@ import (
 	"solod.dev/so/io"
 )
 
-// version is the release reported by -V/--version.
-const version = "0.1.0"
-
 // topHelpBeforeCommands and topHelpAfterCommands bracket the command list,
 // which is rendered from doCommands so dispatch and help share one registry.
 const topHelpBeforeCommands = `kame - a modern build system in the spirit of GNU Make, with a Lisp-like language and a streaming incremental engine that should cover all your needs.

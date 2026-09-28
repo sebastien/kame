@@ -87,6 +87,7 @@ function cli_build {
 		test-fail "the 'so' toolchain is not available"
 		exit 1
 	fi
+	"$CLI_ROOT/tools/generate-version.sh"
 	if [ -x "$CLI_BIN" ] && ! cli_sources_newer "$CLI_BIN"; then
 		test_log_message "CLI binary is current: $(test-relpath "$CLI_BIN")"
 		return 0

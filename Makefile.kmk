@@ -4,15 +4,18 @@ WASM_MAX_MEMORY = 67108864
 default : build
 build : dist
 dist : ./build/kame.debug ./dist/kame
-./build/kame.debug :
+version-source :
+	./tools/generate-version.sh
+./build/kame.debug : version-source
 	mkdir -p ./build
 	cd ./src/go/kame && so build -check=warn -o ../../../build/kame.debug ./cmd/kame
-./build/kame.sanitize :
+./build/kame.sanitize : version-source
 	mkdir -p ./build
 	cd ./src/go/kame && CC=clang so build -check=sanitize -panic=abort -o ../../../build/kame.sanitize ./cmd/kame
-./dist/kame :
+./dist/kame : version-source
 	mkdir -p ./dist
 	cd ./src/go/kame && CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
+dist-ape : ./dist/kame.com
 wasm-translate :
 	mkdir -p ./build/wasm/c
 	cd ./src/go/kame && so translate -o ../../../build/wasm/c ./host/wasm
@@ -21,19 +24,24 @@ wasm : wasm-translate
 	command -v "$WASM_SDK/bin/clang"
 	command -v "$WASM_SDK/bin/wasm-ld"
 	"$WASM_SDK/bin/clang" --target=wasm32-unknown-unknown -ffreestanding -nostdlib -DSO_HEAP_SIZE=8388608 -fuse-ld="$WASM_SDK/bin/wasm-ld" -I ./build/wasm/c -I ./src/go/kame/host/wasm -Wl,--no-entry -Wl,--export-memory -Wl,--initial-memory=@{WASM_INITIAL_MEMORY} -Wl,--max-memory=@{WASM_MAX_MEMORY} -Wl,--export=kame_wasm_abi_version -Wl,--export=kame_wasm_alloc -Wl,--export=kame_wasm_free -Wl,--export=kame_wasm_event_header -Wl,--export=kame_wasm_copy -Wl,--export=kame_wasm_eval_pure -Wl,--export=kame_wasm_eval_source_pure -Wl,--export=kame_wasm_instance_create -Wl,--export=kame_wasm_instance_free -Wl,--export=kame_wasm_source_compile -Wl,--export=kame_wasm_expression_request -Wl,--export=kame_wasm_expression_begin -Wl,--export=kame_wasm_expression_cancel -Wl,--export=kame_wasm_step -Wl,--export=kame_wasm_next_event_header -Wl,--export=kame_wasm_next_request_kind -Wl,--export=kame_wasm_next_request_data_length -Wl,--export=kame_wasm_request_data_copy -Wl,--export=kame_wasm_event_payload_copy -Wl,--export=kame_wasm_event_discard -Wl,--export=kame_wasm_complete_bytes -Wl,--export=kame_wasm_complete_text -Wl,--export=kame_wasm_complete_nil -Wl,--export=kame_wasm_complete_failure -Wl,--export=kame_wasm_result_copy -Wl,--export=kame_wasm_diagnostic_length -Wl,--export=kame_wasm_diagnostic_copy $(find ./build/wasm/c -name '*.c' -print) ./tools/wasm/kame_wasm_abi.c -o ./build/wasm/kame.wasm
+./build/tools/cosmocc/bin/cosmocc :
+	./tools/provision-cosmocc.sh ./build/tools/cosmocc
+./dist/kame.com : ./build/tools/cosmocc/bin/cosmocc version-source
+	mkdir -p ./dist
+	cd ./src/go/kame && CC=@(abspath ./build/tools/cosmocc/bin/cosmocc) CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
 test : test-so test-examples test-go test-cli
-test-so :
+test-so : version-source
 	cd ./src/go/kame && so test ./...
 test-examples :
 	cd ./examples/engine && so test ./...
-test-go :
+test-go : version-source
 	cd ./src/go/kame && go test ./cmd/kame
 test-cli : ./build/kame.debug
 	tests/harness.sh
 test-wasm : wasm
 	./tests/T010-01-wasm-loader.sh
 test-all : test test-leaks
-test-sanitize :
+test-sanitize : version-source
 	cd ./src/go/kame && CC=clang so test -check=sanitize -panic=abort ./...
 	cd ./examples/engine && CC=clang so test -check=sanitize -panic=abort ./...
 test-leaks : ./build/kame.sanitize

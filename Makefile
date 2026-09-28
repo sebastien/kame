@@ -9,20 +9,20 @@ WASM_INITIAL_MEMORY ?= 16777216
 WASM_MAX_MEMORY ?= 67108864
 
 
-.PHONY: build dist wasm wasm-translate test-wasm build/kame.debug build/kame.sanitize dist/kame \
+.PHONY: build dist dist-ape wasm wasm-translate test-wasm version-source build/kame.debug build/kame.sanitize dist/kame dist/kame.com \
 	test test-so test-examples test-go test-cli test-all test-sanitize test-leaks fmt clean demo
 
 build: dist
 
 test: test-so test-examples test-go test-cli
 
-test-so:
+test-so: version-source
 	cd $(KAME_DIR) && so test ./...
 
 test-examples:
 	cd $(EXAMPLES_DIR) && so test ./...
 
-test-go:
+test-go: version-source
 	cd $(KAME_DIR) && go test ./cmd/kame
 
 test-cli: build/kame.debug
@@ -33,7 +33,7 @@ test-wasm: wasm
 
 test-all: test test-leaks
 
-test-sanitize:
+test-sanitize: version-source
 	cd $(KAME_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 	cd $(EXAMPLES_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 
@@ -56,6 +56,8 @@ demo:
 
 dist: build/kame.debug dist/kame
 
+dist-ape: dist/kame.com
+
 # The freestanding target begins with ABI primitives. It stays outside the
 # default build until the portable runtime no longer reaches hosted imports.
 # WASM_LD is explicit because a host clang installation need not provide it.
@@ -68,14 +70,24 @@ wasm: wasm-translate
 	command -v $(WASM_LD)
 	$(WASM_CC) --target=wasm32-unknown-unknown -ffreestanding -nostdlib -DSO_HEAP_SIZE=8388608 -fuse-ld=$(WASM_LD) -I build/wasm/c -I $(KAME_DIR)/host/wasm -Wl,--no-entry -Wl,--export-memory -Wl,--initial-memory=$(WASM_INITIAL_MEMORY) -Wl,--max-memory=$(WASM_MAX_MEMORY) -Wl,--export=kame_wasm_abi_version -Wl,--export=kame_wasm_alloc -Wl,--export=kame_wasm_free -Wl,--export=kame_wasm_event_header -Wl,--export=kame_wasm_copy -Wl,--export=kame_wasm_eval_pure -Wl,--export=kame_wasm_eval_source_pure -Wl,--export=kame_wasm_instance_create -Wl,--export=kame_wasm_instance_free -Wl,--export=kame_wasm_source_compile -Wl,--export=kame_wasm_expression_request -Wl,--export=kame_wasm_expression_begin -Wl,--export=kame_wasm_expression_cancel -Wl,--export=kame_wasm_step -Wl,--export=kame_wasm_next_event_header -Wl,--export=kame_wasm_next_request_kind -Wl,--export=kame_wasm_next_request_data_length -Wl,--export=kame_wasm_request_data_copy -Wl,--export=kame_wasm_event_payload_copy -Wl,--export=kame_wasm_event_discard -Wl,--export=kame_wasm_complete_bytes -Wl,--export=kame_wasm_complete_text -Wl,--export=kame_wasm_complete_nil -Wl,--export=kame_wasm_complete_failure -Wl,--export=kame_wasm_result_copy -Wl,--export=kame_wasm_diagnostic_length -Wl,--export=kame_wasm_diagnostic_copy $$(find build/wasm/c -name '*.c' -print) tools/wasm/kame_wasm_abi.c -o build/wasm/kame.wasm
 
-build/kame.debug:
+version-source:
+	tools/generate-version.sh
+
+build/kame.debug: version-source
 	mkdir -p build
 	cd $(KAME_DIR) && so build -check=warn -o ../../../build/kame.debug ./cmd/kame
 
-build/kame.sanitize:
+build/kame.sanitize: version-source
 	mkdir -p build
 	cd $(KAME_DIR) && CC=clang so build -check=sanitize -panic=abort -o ../../../build/kame.sanitize ./cmd/kame
 
-dist/kame:
+dist/kame: version-source
 	mkdir -p dist
 	cd $(KAME_DIR) && CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
+
+build/tools/cosmocc/bin/cosmocc:
+	tools/provision-cosmocc.sh build/tools/cosmocc
+
+dist/kame.com: build/tools/cosmocc/bin/cosmocc version-source
+	mkdir -p dist
+	cd $(KAME_DIR) && CC=$(CURDIR)/build/tools/cosmocc/bin/cosmocc CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame

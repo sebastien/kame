@@ -24,7 +24,7 @@ else
 fi
 cli_run -- --version
 cli_expect_status 0
-if grep -Eq '^kame [0-9]+\.[0-9]+\.[0-9]+$' "$CLI_OUT"; then
+if [ "$(cat "$CLI_OUT")" = "kame $(<"$CLI_ROOT/VERSION")" ]; then
 	test-ok "version matches kame VERSION"
 else
 	test-fail "version output: $(cat -A "$CLI_OUT")"

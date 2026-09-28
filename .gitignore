@@ -1,5 +1,6 @@
 /build/
 /dist/
+/src/go/kame/cmd/kame/version_generated.go
 .kame/
 .memo/memory/*
 .littledocs.*

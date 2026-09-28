@@ -852,13 +852,13 @@ func sourceText(a mem.Allocator, text string) string {
 // Format returns allocator-owned canonical expression text.
 func Format(a mem.Allocator, e *Expr) string {
 	b := strings.NewBuilder(a)
-	write(&b, e)
+	writeExpr(&b, e)
 	text := sourceText(a, b.String())
 	b.Free()
 	return text
 }
 
-func write(b *strings.Builder, e *Expr) {
+func writeExpr(b *strings.Builder, e *Expr) {
 	if e == nil { return }
 	if e.Kind == Boolean { if e.Bool { b.WriteString(":true") } else { b.WriteString(":false") }; return }
 	if e.Kind == Nil { b.WriteString(":nil"); return }
@@ -872,19 +872,19 @@ func write(b *strings.Builder, e *Expr) {
 		b.WriteString(strconv.FormatInt(buffer[:], e.Int, 10))
 		return
 	}
-	if e.Kind == Section { b.WriteByte('('); write(b, e.Body[0]); b.WriteByte(')'); return }
+	if e.Kind == Section { b.WriteByte('('); writeExpr(b, e.Body[0]); b.WriteByte(')'); return }
 	if e.Kind == Path { b.WriteString(e.Text); return }
 	if e.Kind == Selector { b.WriteString(e.Text); return }
 	if e.Kind == Reference { writeReference(b, e); return }
 	if e.Kind == String { writeString(b, e); return }
 	if e.Kind == List { writeMany(b, '[', ']', e.Items); return }
 	if e.Kind == Application { writeMany(b, '(', ')', e.Items); return }
-	if e.Kind == Record { b.WriteByte('['); for i := range e.Fields { if i != 0 { b.WriteByte(' ') }; b.WriteString(e.Fields[i].Key); b.WriteString(": "); write(b, e.Fields[i].Value) }; b.WriteByte(']'); return }
-	if e.Kind == Lambda { b.WriteString("(["); for i := range e.Parameters { if i != 0 { b.WriteByte(' ') }; b.WriteString(e.Parameters[i].Name); if e.Parameters[i].Rest { b.WriteString("...") } }; b.WriteByte(']'); for i := range e.Body { b.WriteByte(' '); write(b, e.Body[i]) }; b.WriteByte(')') }
+	if e.Kind == Record { b.WriteByte('['); for i := range e.Fields { if i != 0 { b.WriteByte(' ') }; b.WriteString(e.Fields[i].Key); b.WriteString(": "); writeExpr(b, e.Fields[i].Value) }; b.WriteByte(']'); return }
+	if e.Kind == Lambda { b.WriteString("(["); for i := range e.Parameters { if i != 0 { b.WriteByte(' ') }; b.WriteString(e.Parameters[i].Name); if e.Parameters[i].Rest { b.WriteString("...") } }; b.WriteByte(']'); for i := range e.Body { b.WriteByte(' '); writeExpr(b, e.Body[i]) }; b.WriteByte(')') }
 }
 
 func writeMany(b *strings.Builder, open byte, close byte, items []*Expr) {
-	b.WriteByte(open); for i := range items { if i != 0 { b.WriteByte(' ') }; write(b, items[i]) }; b.WriteByte(close)
+	b.WriteByte(open); for i := range items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, items[i]) }; b.WriteByte(close)
 }
 
 func writeReference(b *strings.Builder, e *Expr) {
@@ -927,6 +927,6 @@ func writeString(b *strings.Builder, e *Expr) {
 }
 
 func writeEmbedded(b *strings.Builder, e *Expr) {
-	if e.Kind != Application { write(b, e); return }
-	for i := range e.Items { if i != 0 { b.WriteByte(' ') }; write(b, e.Items[i]) }
+	if e.Kind != Application { writeExpr(b, e); return }
+	for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }
 }

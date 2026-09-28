@@ -225,8 +225,8 @@ func TestHelpAndVersion(t *testing.T) {
 	}{
 		{[]string{"--help"}, "Usage:"},
 		{[]string{"-h"}, "Commands (kame do COMMAND):"},
-		{[]string{"--version"}, "kame 0.1.0\n"},
-		{[]string{"-V"}, "kame 0.1.0\n"},
+		{[]string{"--version"}, "kame " + version + "\n"},
+		{[]string{"-V"}, "kame " + version + "\n"},
 		{[]string{"--version", "--help"}, "Usage:"},
 	}
 	for _, test := range tests {
