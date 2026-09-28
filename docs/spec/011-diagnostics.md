@@ -102,6 +102,10 @@ meaning by themselves.
 | `EXPR_INVALID` | error | Invalid expression value, type, or arity |
 | `DEF_INVALID` | error | Invalid definition or binding form |
 | `PAT_INVALID` | error | Invalid pattern combination or missing pattern capture reference |
+| `TPL_PARSE` | error | Malformed template directive, argument list, or verbatim literal |
+| `TPL_BLOCK` | error | Unterminated, stray, or mismatched template block directive |
+| `TPL_STYLE` | error | Missing or unknown template comment style |
+| `TPL_CYCLE` | error | Recursive template inclusion |
 | `CAP_DENIED` | error | Capability denied |
 | `PHASE_INVALID` | error | Operation is not valid in the current phase |
 | `TGT_NO_DEFAULT` | error | No target was requested and no default target is defined |
@@ -142,6 +146,8 @@ meaning by themselves.
 - Malformed pattern group syntax is `PARSE_ERR`; pattern misuse detected at
   evaluation, such as a missing capture reference or an invalid argument
   combination, uses `PAT_INVALID`.
+- Document template failures use `TPL_PARSE`, `TPL_BLOCK`, `TPL_STYLE`, and
+  `TPL_CYCLE` as specified in `016-templates.md`.
 - OOM formatting must not allocate.
 
 ## Human and Plain Rendering

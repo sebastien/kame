@@ -1,0 +1,53 @@
+Improve:
+- `@(x/cmd)` should only be checked for the targets on the path of execution, otherwise on missing tool in an unused rule fails all
+- `kame do tools check TARGETS...` would check the tools in the target(s) plan and fail if unmet
+- `./src/**/*.km` should really be a path marked as a wildcard, there should be no need for `(wildcard ./src/**/*.km)`
+- Ensure that wildcards are lazily resolved to singleton sources, and that they can stream updates -- it doesn't need to work right away, as we'll add live updates later on.
+- Support capture in target names, like `aws-shell@{role-account}`
+- Support arguments in target names, like `deploy {env=ENVIRONMENT}` (an argument is a standalone capture block `{name}` (required) or `{name=value}` (optional), these then become symbols available in the dependencies and rule.
+- Conditional forms
+
+Validate:
+- Streaming capabilities of standard library
+
+Research:
+- We really need to design a nice CLI experience, it's quite bare bones for now
+- How do we do live updates (incremental builds as things get loaded)
+- How do we manage services running/provisioning
+- Using kame as a general scripting language (view of replacing shell, so that you just get kame)
+- File templating is also a common use case: replacing, repeating, etc.
+
+Consider:
+- Terminal colors easy functions
+- A JavaScript API?
+- A python API?
+
+Improve:
+- Learnability
+- The error taxonomy (TGT_NO_RULE, TGT_AMBIG, REF_MISSING, SEL_NO_CONTEXT, …) is better than Make's, even if a few messages are cryptic.
+
+Feedback
+
+
+(llm porting sdk.mk)
+
+What's rough (bugs aside — those are in KAME-BUGS.md)
+- The language is under-powered for meta-builds. No if, no defined?, no lambdas, single-assignment definitions, no ?=. Individually defensible; together they force "always run, no-op when empty" logic and push configuration into recipes. The port is arguably more verbose than the Make original in places.
+- No dynamic definition lookup ($($(VAR))) and no generated rules ($(eval)/include-time loops). That's the real fidelity cliff: AWS_ENV_<tenancy>_<environment> and per-tool/per-dependency rule generation simply cannot be expressed. I had to hardcode every module include too, losing SDK_MODULES composition.
+- Pattern ergonomics. Header-path interpolation is disallowed while recipes allow it; leading {capture} patterns don't parse; bare targets can't capture. These feel like parser gaps, not principles, and they block otherwise natural designs.
+- @(x/NAME) is a trap. The idea is great; global preflight makes it unusable for anything optional, which is most of an integration SDK. I dropped it entirely.
+- CLI/do expr inconsistencies. -C ignoring relative -f, capability-gated wildcard in do expr, and the concat deadlock all cost time.
+- Docs omit the gotchas. $$, [a b]-are-references, empty-definition parse errors, "patterns must start with a literal" — a one-page idioms/gotchas section would have saved hours.
+Design decisions I'd push back on
+1. Global tool preflight — should be per-target or opt-in, otherwise optional tools are impossible.
+2. Single-assignment, no overrides — a config-file layering or ?=-like mechanism is needed for the "consumer overrides the framework" pattern that build frameworks depend on.
+3. No conditionals/includes gating — even a minimal if/when and conditional include would restore a lot of composability.
+
+Compared to GNU Make
+Make's superpower here was metaprogramming: computed variable names, ?= overrides, $(shell) at parse, generated rules. Kame trades that away for a legible graph and correct incrementality. For a greenfield project with mostly-static configuration, I'd pick Kame. For a framework whose purpose is dynamic, project-owned configuration (this SDK), Make currently expresses more — at the cost of being much harder to debug. The honest summary: Kame made the graph better and the metaprogramming worse, and this port needed both.
+
+- Per-target (or opt-in) tool resolution, not global preflight.
+- A small conditional/when plus conditional include, and any form of definition override.
+- Fix/allow: leading-capture patterns, @(…) in header paths, literal wildcard, and the do expr concat hang.
+- A documented "idioms and gotchas" page (the skill's current docs skip everything that bit me).
+- Optional: bare-target parameters, so tf-plan@ws-style ergonomics don't require file-target workarounds.
