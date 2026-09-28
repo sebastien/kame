@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+$if(description)$<meta name="description" content="$description$">$endif$
+<title>$title$ — Alpine</title>
+<link rel="stylesheet" href="$css$">
+</head>
+<body>
+<header class="site"><a class="brand" href="$home$">Alpine</a><nav><a href="$home$">Home</a> <a href="$about$">About</a></nav></header>
+<main>
+<article>
+<h1>$title$</h1>
+$if(date)$<p class="meta">$date$$if(description)$ — $description$$endif$</p>$endif$
+$body$
+</article>
+<p><a href="$home$">← All posts and projects</a></p>
+</main>
+<footer class="site"><p>Built with kame + pandoc. Follow me on the web.</p></footer>
+</body>
+</html>

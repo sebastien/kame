@@ -1,0 +1,58 @@
+# A captured target template maps each source file to its corresponding output.
+posts = (wildcard ./content/posts/*.md)
+projects = (wildcard ./content/projects/*.md)
+post-html = (map posts (replace ./content/posts/{name:*}.md ./build/posts/{name}.html))
+project-html = (map projects (replace ./content/projects/{name:*}.md ./build/projects/{name}.html))
+
+default : ./build/index.html ./build/author.html @(post-html) @(project-html) ./build/style.css
+
+./build/posts/{name}.html : ./content/posts/{name}.md ./templates/post.html
+	mkdir -p ./build/posts
+	@(x/pandoc) @< --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="../style.css" -V home="../index.html" -V about="../author.html" -o @>
+
+./build/projects/{name}.html : ./content/projects/{name}.md ./templates/post.html
+	mkdir -p ./build/projects
+	@(x/pandoc) @< --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="../style.css" -V home="../index.html" -V about="../author.html" -o @>
+
+./build/author.html : ./content/author.md ./templates/post.html
+	mkdir -p ./build
+	@(x/pandoc) @< --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="./style.css" -V home="./index.html" -V about="./author.html" -o @>
+
+# Helper script lives here in the Kamefile and is materialized as a build
+# artifact, so the index recipe stays small and inspectable with
+# `kame do cat ./build/tools/row.sh`.
+./build/tools/row.sh : ./Makefile.kmk
+	mkdir -p ./build/tools
+	cat > @> <<'EOF'
+	#!/bin/sh
+	f="$1"
+	slug="$(basename "$f" .md)"
+	section="$(basename "$(dirname "$f")")"
+	title="$(sed -n 's/^title: *"\(.*\)"/\1/p' "$f")"
+	date="$(sed -n 's/^date: *"\(.*\)"/\1/p' "$f")"
+	desc="$(sed -n 's/^description: *"\(.*\)"/\1/p' "$f")"
+	echo "<li><time>$date</time> <a href=\"./$section/$slug.html\">$title</a><p>$desc</p></li>"
+	EOF
+
+./build/index.html : @(posts) @(projects) ./templates/header.html ./templates/footer.html ./build/tools/row.sh
+	mkdir -p ./build
+	cat ./templates/header.html > @>
+	echo "<h2>Posts</h2>" >> @>
+	echo "<ul class=\"posts\">" >> @>
+	for f in @(posts); do sh ./build/tools/row.sh "$f"; done | sort -r >> @>
+	echo "</ul>" >> @>
+	echo "<h2>Projects</h2>" >> @>
+	echo "<ul class=\"posts\">" >> @>
+	for f in @(projects); do sh ./build/tools/row.sh "$f"; done | sort -r >> @>
+	echo "</ul>" >> @>
+	cat ./templates/footer.html >> @>
+
+./build/style.css : ./style.css
+	mkdir -p ./build
+	cp @< @>
+
+clean :
+	rm -rf ./build
+
+serve : default
+	@(x/python3) -m http.server -d ./build 8000

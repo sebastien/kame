@@ -1,0 +1,19 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body { margin: 0 auto; max-width: 42rem; padding: 2rem 1.25rem 4rem; font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.site { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding-bottom: 1rem; border-bottom: 1px solid currentColor; }
+.brand { font-weight: 700; font-size: 1.25rem; text-decoration: none; color: inherit; }
+nav a { margin-left: 1rem; }
+.hero { padding: 2rem 0 1rem; }
+.hero h1 { font-size: 2.25rem; line-height: 1.15; margin: 0 0 0.5rem; letter-spacing: -0.02em; }
+h2 { margin-top: 2.5rem; font-size: 1.25rem; }
+ul.posts { list-style: none; padding: 0; margin: 0; }
+ul.posts li { padding: 0.75rem 0; border-top: 1px solid #8884; }
+ul.posts time { display: block; font-size: 0.85rem; opacity: 0.7; }
+ul.posts a { font-weight: 600; }
+ul.posts p { margin: 0.25rem 0 0; opacity: 0.85; }
+.meta { opacity: 0.7; font-size: 0.9rem; }
+article h1 { font-size: 2rem; letter-spacing: -0.02em; }
+pre { overflow: auto; padding: 1rem; border: 1px solid #8884; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; }
+footer.site { margin-top: 3rem; padding-top: 1rem; font-size: 0.9rem; opacity: 0.8; }
