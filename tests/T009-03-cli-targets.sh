@@ -35,14 +35,12 @@ test-step "implicit default target"
 "
 )
 
-test-step "without a default, literal named targets are listed in declaration order"
+test-step "without a default, the invocation fails and reports available targets"
 TWO_TASKS=$'task first :\ntask second :'
 cli_run -- -c "$TWO_TASKS"
-cli_expect_status 0
-cli_expect_stdout "first
-second
-"
-cli_expect_stderr_empty
+cli_expect_status 1
+cli_expect_stdout_empty
+cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first, second"
 
 test-step "multiple targets run in argument order"
 (

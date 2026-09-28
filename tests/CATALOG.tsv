@@ -32,7 +32,7 @@ tests/T008-02-cache-records.sh	008	cache	Corrupted records are misses and are re
 tests/T008-03-cache-fingerprint.sh	008	cache	Glob membership, bare-dependency blocking, and rule body invalidation
 tests/T009-01-cli-help.sh	009	cli	Help, version, do namespace, bare-invocation overview
 tests/T009-02-cli-source.sh	009	cli	Source discovery order, -f/-c/-C, option validation
-tests/T009-03-cli-targets.sh	009	cli	Target selection, listing, sharing, definitions, ambiguity
+tests/T009-03-cli-targets.sh	009	cli	Target selection, default resolution, sharing, definitions, ambiguity
 tests/T009-04-cli-json.sh	009	cli	JSON Lines schema, lifecycle events, encodings, failures
 tests/T009-05-cli-plan.sh	009	cli	Plan JSON, captures, freshness, diagnostics
 tests/T009-06-cli-cat.sh	009	cli	Exact artifact bytes, definitions, NO_ARTIFACT, arity

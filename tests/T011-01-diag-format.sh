@@ -29,9 +29,9 @@ cli_expect_status 2
 	cli_expect_stderr 'error OPT_UNKNOWN: unknown option: --bogus
 '
 
-cli_run -- do plan
+cli_run -- do plan -f
 cli_expect_status 2
-	cli_expect_stderr 'error OPT_NO_VALUE: plan requires at least one target
+	cli_expect_stderr 'error OPT_NO_VALUE: missing value for -f
 '
 
 test-step "build failures report the stable code and a message"

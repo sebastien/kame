@@ -64,13 +64,19 @@ test-step "cat rejects a task without an artifact"
 	cli_expect_printable "$CLI_ERR"
 )
 
-test-step "cat requires exactly one target"
+test-step "cat selects the default target when none is given"
+cli_run -- do cat -c 'default = "value"'
+cli_expect_status 0
+cli_expect_stdout "value"
+
+test-step "cat without a default fails with the available targets"
+cli_run -- do cat -c 'task first :'
+cli_expect_status 1
+cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first"
+
+test-step "cat rejects more than one target"
 (
 	cd cat-basic
-	cli_run -- do cat
-	cli_expect_status 2
-	cli_expect_stderr_contains "OPT_VALUE_INVALID"
-
 	cli_run -- do cat ./out/greeting.txt GREETING
 	cli_expect_status 2
 	cli_expect_stderr_contains "OPT_VALUE_INVALID"

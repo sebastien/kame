@@ -119,15 +119,39 @@ func TestPrimaryInvocationMaterializesInlineSource(t *testing.T) {
 	}
 }
 
-func TestPrimaryInvocationUsageAndTargetListing(t *testing.T) {
+func TestPrimaryInvocationUsageAndMissingDefault(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if status := Run([]string{"-j", "0"}, &input{}, &out, &errOut); status != 2 || !strings.Contains(errOut.String(), "OPT_VALUE_INVALID") {
 		t.Errorf("invalid jobs status=%d stderr=%q", status, errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"-n", "-c", "task first :\ntask second :"}, &input{}, &out, &errOut); status != 0 || out.String() != "first\nsecond\n" {
-		t.Errorf("target listing status=%d stdout=%q", status, out.String())
+	if status := Run([]string{"-n", "-c", "task first :\ntask second :"}, &input{}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "TGT_NO_DEFAULT") || !strings.Contains(errOut.String(), "available targets: first, second") {
+		t.Errorf("missing default status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+}
+
+// Every target-taking command shares the primary invocation's selection: an
+// empty target list becomes "default" when one is defined, and otherwise fails
+// with TGT_NO_DEFAULT and the available targets.
+func TestTargetTakingCommandsSelectDefault(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"do", "plan", "-c", "task default : ./dep\n\techo ignored\ntask dep :\n\techo ignored"}, `"target":"default"`},
+		{[]string{"do", "cat", "-c", `default = "value"`}, "value"},
+		{[]string{"do", "inputs", "-c", "task default : dep\n\techo ignored\ntask dep :\n\techo ignored"}, `["dep"]`},
+	}
+	for _, test := range tests {
+		var out, errOut bytes.Buffer
+		if status := Run(test.args, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), test.want) || errOut.Len() != 0 {
+			t.Errorf("args=%q status=%d stdout=%q stderr=%q", test.args, status, out.String(), errOut.String())
+		}
+	}
+	var out, errOut bytes.Buffer
+	if status := Run([]string{"do", "plan", "--json", "-c", "task first :"}, &input{}, &out, &errOut); status != 1 || errOut.Len() != 0 || !strings.Contains(out.String(), `"code":"TGT_NO_DEFAULT"`) || !strings.Contains(out.String(), `"notes":["available targets: first"]`) {
+		t.Errorf("json missing default status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
 

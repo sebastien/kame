@@ -116,14 +116,33 @@ test-step "graph commands validate depth and arity"
 	cli_expect_status 2
 	cli_expect_stderr_contains "OPT_UNKNOWN"
 
-	cli_run -- do inputs
-	cli_expect_status 2
-	cli_expect_stderr_contains "OPT_VALUE_INVALID"
-
 	cli_run -- do outputs ./build/app ./build/main.o
 	cli_expect_status 2
 	cli_expect_stderr_contains "OPT_VALUE_INVALID"
 )
+
+test-step "graph commands select the default target when none is given"
+(
+	cd graph
+	cli_run -- do inputs
+	cli_expect_status 0
+	cli_expect_stdout '["./build/app"]
+'
+	cli_run -- do span
+	cli_expect_status 0
+	cli_expect_json_query "$CLI_OUT" '.static.inputs | join(",")' './build/app'
+	cli_expect_json_query "$CLI_OUT" '.static.outputs | join(",")' 'default'
+)
+
+test-step "graph commands without a default fail with the available targets"
+cli_run -- do inputs -c 'task first :'
+cli_expect_status 1
+cli_expect_stdout_empty
+cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first"
+
+cli_run -- do span -c 'task first :'
+cli_expect_status 1
+cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first"
 
 test-step "graph commands report unknown targets"
 (

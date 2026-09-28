@@ -17,6 +17,7 @@ import (
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
+	"solod.dev/so/strings"
 )
 
 type buildArguments struct {
@@ -69,25 +70,53 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 		}
 		return session.Status
 	}
-	targets := parsed.Targets
+	targets := selectTargets(session.Program, parsed.Targets)
+	parsed.Targets = targets
 	if len(targets) == 0 {
-		if session.Program.HasTarget("default") {
-			// Append through the allocator: a Go slice literal here would
-			// transpile to a block-scoped C compound literal that dies before
-			// materializeTargets reads it.
-			targets = slices.Append(mem.System, targets, "default")
-			parsed.Targets = targets
-		} else {
-			names := session.Program.NamedTargets()
-			for i := range names {
-				io.WriteString(out, names[i])
-				io.WriteString(out, "\n")
-			}
-			program.FreeStrings(mem.System, names)
-			return 0
-		}
+		return reportNoDefault(session.Program, out, errOut, parsed.JSON)
 	}
 	return materializeTargets(session.Program, targets, out, errOut, parsed.JSON)
+}
+
+// selectTargets applies the uniform target selection shared by the primary
+// invocation and every target-taking command: explicit targets pass through,
+// and otherwise "default" is selected when the program defines it. An empty
+// result means no target was selected because no default is defined.
+func selectTargets(p *program.Program, targets []string) []string {
+	if len(targets) != 0 {
+		return targets
+	}
+	if p.HasTarget("default") {
+		// Append through the allocator: a Go slice literal here would transpile
+		// to a block-scoped C compound literal that dies before the caller reads
+		// the result.
+		return slices.Append(mem.System, targets, "default")
+	}
+	return nil
+}
+
+// reportNoDefault reports TGT_NO_DEFAULT when no target was requested and the
+// program defines no "default". The available literal named targets are offered
+// as a note so the user can choose one. It returns the CLI failure status.
+func reportNoDefault(p *program.Program, out io.Writer, errOut io.Writer, json bool) int {
+	note := "available targets: (none)"
+	if names := p.NamedTargets(); len(names) != 0 {
+		joined := strings.Join(mem.System, names, ", ")
+		note = "available targets: " + joined
+		mem.FreeString(mem.System, joined)
+		program.FreeStrings(mem.System, names)
+	}
+	d := diagnostic.Diagnostic{
+		Code:     cloneCommandText("TGT_NO_DEFAULT"),
+		Severity: diagnostic.Error,
+		Message:  cloneCommandText("no target was requested and no default target is defined"),
+		Owned:    true,
+	}
+	d.Notes = slices.Append(mem.System, d.Notes, cloneCommandText(note))
+	d.Tips = slices.Append(mem.System, d.Tips, cloneCommandText("define a default target or name a target explicitly"))
+	emitDiagnostic(diagnosticWriter(out, errOut, json), d, json, nil)
+	d.Free(mem.System)
+	return 1
 }
 
 type buildSession struct {

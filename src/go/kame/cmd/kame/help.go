@@ -18,9 +18,9 @@ Usage:
   kame -V | --version
 
 Builds TARGET using rules from a Kame source. With no TARGET, the
-default target is built when defined; otherwise the available targets are
-listed. Without -f/--file or -c/--command, source discovery tries
-Makefile.kmk, then make.kmk, then src/kmk/main.kmk.
+default target is built when defined; otherwise the invocation fails and
+reports the available targets. Without -f/--file or -c/--command, source
+discovery tries Makefile.kmk, then make.kmk, then src/kmk/main.kmk.
 
 Build options:
   -f, --file FILE        use one build file
@@ -76,11 +76,12 @@ const doHelpAfterCommands = `
 Run 'kame do COMMAND --help' for command-specific help.
 `
 
-const planHelpText = `Usage: kame do plan [OPTIONS] TARGET...
+const planHelpText = `Usage: kame do plan [OPTIONS] [TARGET...]
 
 Print the selected rule, captures, declared inputs and outputs, and freshness
 for each TARGET, without evaluating effects or running processes. Emits one
-JSON object per target.
+JSON object per target. With no TARGET, the default target is selected; when
+it is not defined the command fails and reports the available targets.
 
 Options:
   -f, --file FILE        use one build file
@@ -90,11 +91,12 @@ Options:
   -h, --help             show this help
 `
 
-const catHelpText = `Usage: kame do cat [OPTIONS] TARGET
+const catHelpText = `Usage: kame do cat [OPTIONS] [TARGET]
 
 Materialize exactly one TARGET and write its file bytes or definition value to
 stdout without a trailing newline. A task without an artifact fails with
-NO_ARTIFACT.
+NO_ARTIFACT. With no TARGET, the default target is selected; when it is not
+defined the command fails and reports the available targets.
 
 Options:
   -f, --file FILE        use one build file
@@ -104,10 +106,12 @@ Options:
   -h, --help             show this help
 `
 
-const inputsHelpText = `Usage: kame do inputs [--depth N] [OPTIONS] TARGET
+const inputsHelpText = `Usage: kame do inputs [--depth N] [OPTIONS] [TARGET]
 
 List the declared input paths of one TARGET as a JSON array. --depth 0 returns
-no edges, 1 (the default) returns direct edges, and -1 is unlimited.
+no edges, 1 (the default) returns direct edges, and -1 is unlimited. With no
+TARGET, the default target is selected; when it is not defined the command
+fails and reports the available targets.
 
 Options:
       --depth N          edge depth: -1, 0, or a positive integer
@@ -117,10 +121,12 @@ Options:
   -h, --help             show this help
 `
 
-const outputsHelpText = `Usage: kame do outputs [--depth N] [OPTIONS] TARGET
+const outputsHelpText = `Usage: kame do outputs [--depth N] [OPTIONS] [TARGET]
 
 List the declared output paths of one TARGET as a JSON array. --depth 0 returns
-no edges, 1 (the default) returns direct edges, and -1 is unlimited.
+no edges, 1 (the default) returns direct edges, and -1 is unlimited. With no
+TARGET, the default target is selected; when it is not defined the command
+fails and reports the available targets.
 
 Options:
       --depth N          edge depth: -1, 0, or a positive integer
@@ -130,10 +136,12 @@ Options:
   -h, --help             show this help
 `
 
-const spanHelpText = `Usage: kame do span [--expand] [--depth N] [OPTIONS] TARGET
+const spanHelpText = `Usage: kame do span [--expand] [--depth N] [OPTIONS] [TARGET]
 
 Show statically known and evaluation-dependent inputs and outputs for one
 TARGET as JSON. --expand evaluates dynamic definitions without running recipes.
+With no TARGET, the default target is selected; when it is not defined the
+command fails and reports the available targets.
 
 Options:
       --expand           evaluate dynamic definitions

@@ -39,11 +39,12 @@ sweep_dir() {
 test-step "usage diagnostics"
 sweep_dir . OPT_UNKNOWN do expr --bogus
 sweep_dir . OPT_VALUE_INVALID do expr -c '(count)' --allow-read=
-sweep_dir . OPT_NO_VALUE do plan
+sweep_dir . OPT_NO_VALUE do plan -f
 sweep_dir . CMD_UNKNOWN do bogus
 sweep_dir . BUILD_NO_SOURCE --force
 
 test-step "selection and planning diagnostics"
+sweep_dir diag-sweep TGT_NO_DEFAULT
 sweep_dir diag-sweep TGT_NO_RULE ./no-such.txt
 sweep_dir diag-sweep TGT_AMBIG ./amb-q.c
 sweep_dir diag-sweep DEP_CYCLE ./cycle.out

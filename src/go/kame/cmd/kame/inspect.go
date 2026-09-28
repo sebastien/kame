@@ -16,10 +16,12 @@ func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 	parsed := parseBuildArguments(args, errOut)
 	defer parsed.Free()
 	if !parsed.OK { return 2 }
-	if len(parsed.Targets) == 0 { cliError(errOut, "OPT_NO_VALUE", "plan requires at least one target"); return 2 }
 	session := openBuildSession(parsed, errOut, true)
 	defer session.Free()
 	if session.Status != 0 { return session.Status }
+	targets := selectTargets(session.Program, parsed.Targets)
+	parsed.Targets = targets
+	if len(targets) == 0 { return reportNoDefault(session.Program, out, errOut, parsed.JSON) }
 	failed := false
 	for i := range parsed.Targets {
 		result := session.Program.Plan(parsed.Targets[i])
@@ -65,10 +67,13 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 	parsed := parseBuildArguments(args, errOut)
 	defer parsed.Free()
 	if !parsed.OK { return 2 }
-	if len(parsed.Targets) != 1 { cliError(errOut, "OPT_VALUE_INVALID", "cat requires exactly one target"); return 2 }
 	session := openBuildSession(parsed, errOut, true)
 	defer session.Free()
 	if session.Status != 0 { return session.Status }
+	targets := selectTargets(session.Program, parsed.Targets)
+	parsed.Targets = targets
+	if len(targets) == 0 { return reportNoDefault(session.Program, out, errOut, parsed.JSON) }
+	if len(parsed.Targets) != 1 { cliError(errOut, "OPT_VALUE_INVALID", "cat requires exactly one target"); return 2 }
 	started := session.Program.Start(parsed.Targets[0])
 	if started.Diagnostic.Code != "" {
 		// Materializing an existing file target needs no rule (006): cat prints
@@ -117,10 +122,13 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	graph := parseGraphArguments(args, errOut, kind == "span")
 	defer graph.Free()
 	if !graph.OK { return 2 }
-	if len(graph.Build.Targets) != 1 { cliError(errOut, "OPT_VALUE_INVALID", kind+" requires exactly one target"); return 2 }
 	session := openBuildSession(graph.Build, errOut, true)
 	defer session.Free()
 	if session.Status != 0 { return session.Status }
+	targets := selectTargets(session.Program, graph.Build.Targets)
+	graph.Build.Targets = targets
+	if len(targets) == 0 { return reportNoDefault(session.Program, out, errOut, graph.Build.JSON) }
+	if len(graph.Build.Targets) != 1 { cliError(errOut, "OPT_VALUE_INVALID", kind+" requires exactly one target"); return 2 }
 	e := json.NewEncoder(out)
 	if kind == "inputs" || kind == "outputs" {
 		traversal := graphValues(session.Program, graph.Build.Targets[0], graph.Depth, kind)
