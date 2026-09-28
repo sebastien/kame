@@ -178,9 +178,10 @@ T004 parse/format suites.
 
 ## Leak verification
 
-`make test-leaks` is the full native leak gate. It runs package and external
-consumer tests with Clang and Solod's `-check=sanitize`, then builds the CLI
-with the same checks and executes `tests/harness.sh` against that binary.
+`make test-leaks` is the full native leak gate. It runs CLI unit tests with Go
+AddressSanitizer and Clang, package and external consumer tests with Clang and
+Solod's `-check=sanitize`, then builds the CLI with the same checks and
+executes `tests/harness.sh` against that binary.
 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1` and
 `UBSAN_OPTIONS=halt_on_error=1` are passed through the harness's otherwise
 hermetic command environment. New owning types and lifecycle paths require a

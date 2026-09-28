@@ -7,8 +7,10 @@ kame [OPTIONS] [TARGET...]
 kame do COMMAND [OPTIONS] [ARG...]
 ```
 
-With no target, Kame builds `default` when it exists; otherwise it lists literal
-named targets. A bare invocation with no source prints help. Source discovery
+With no target, Kame builds `default` when it exists; otherwise the invocation
+fails with `TGT_NO_DEFAULT` and reports the available named targets. Every
+target-taking command resolves targets this way. A bare invocation with no
+source prints help. Source discovery
 tries `Makefile.kmk`, `make.kmk`, then `src/kmk/main.kmk` below the selected
 working directory.
 
@@ -68,11 +70,11 @@ kame -n ./build/app
 
 | Command | Output and behavior |
 | --- | --- |
-| `do plan TARGET...` | JSON plan(s): selected rule, captures, declared inputs, outputs, and freshness. Does not evaluate body effects or run processes. |
-| `do inputs [--depth N] TARGET` | JSON array of input edges. |
-| `do outputs [--depth N] TARGET` | JSON array of output edges. |
-| `do span [--expand] [--depth N] TARGET` | JSON separating static inputs/outputs from evaluation-dependent inputs. `--expand` evaluates dynamic definitions without executing recipes. |
-| `do cat TARGET` | Materialize one target, then write its exact file bytes or definition value without a newline. |
+| `do plan [TARGET...]` | JSON plan(s): selected rule, captures, declared inputs, outputs, and freshness. Does not evaluate body effects or run processes. |
+| `do inputs [--depth N] [TARGET]` | JSON array of input edges. |
+| `do outputs [--depth N] [TARGET]` | JSON array of output edges. |
+| `do span [--expand] [--depth N] [TARGET]` | JSON separating static inputs/outputs from evaluation-dependent inputs. `--expand` evaluates dynamic definitions without executing recipes. |
+| `do cat [TARGET]` | Materialize one target, then write its exact file bytes or definition value without a newline. |
 
 Depth `0` returns no edges, `1` returns direct edges, and `-1` traverses without
 a depth limit. Use `span` when a rule uses `wildcard`, `read`, or other

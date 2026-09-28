@@ -104,6 +104,7 @@ meaning by themselves.
 | `PAT_INVALID` | error | Invalid pattern combination or missing pattern capture reference |
 | `CAP_DENIED` | error | Capability denied |
 | `PHASE_INVALID` | error | Operation is not valid in the current phase |
+| `TGT_NO_DEFAULT` | error | No target was requested and no default target is defined |
 | `TGT_NO_RULE` | error | No rule or source for target |
 | `TGT_AMBIG` | error | More than one rule instance matches |
 | `DEP_CYCLE` | error | Dependency cycle |
@@ -134,6 +135,8 @@ meaning by themselves.
 - Command exit uses `RECIPE_FAIL`; inability to spawn or reap uses `HOST_FAIL`.
 - A missing requested source file uses `FS_ERR`; a file target with no rule and
   no existing file uses `TGT_NO_RULE`.
+- A target-less invocation with no `default` target uses `TGT_NO_DEFAULT` and
+  reports the available named targets as a note.
 - Malformed cache data is a miss and `CACHE_UNUSABLE` warning, never a fatal error.
 - Unsupported service execution uses `FEATURE_UNSUP`.
 - Malformed pattern group syntax is `PARSE_ERR`; pattern misuse detected at

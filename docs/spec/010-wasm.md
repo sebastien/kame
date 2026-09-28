@@ -112,10 +112,68 @@ Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly
 enables it.
 
-## JavaScript Wrapper
+## JavaScript CLI Wrapper
 
-A small wrapper may provide promises and async iterables as JavaScript
-conveniences, but these are not engine semantics. The wrapper must:
+### Role
+
+`dist/kame.js` is the canonical JavaScript entry point to the freestanding
+module and the WebAssembly counterpart of the native CLI in `009-cli.md`. Its
+source is `src/js/kame.js`; packaging copies it unchanged. It is one ESM file
+that requires only Node 18 or later and an adjacent `kame.wasm`, with no
+third-party dependencies.
+
+```text
+node dist/kame.js [OPTIONS] [TARGET...]
+node dist/kame.js do COMMAND [OPTIONS] [ARG...]
+```
+
+### CLI Contract
+
+The wrapper reproduces the invocation model of `009-cli.md`: the same options
+and commands, the same stream separation (normal output and JSON on stdout,
+progress and human diagnostics on stderr), and the same exit statuses (0 for
+success, 1 for parse, evaluation, build, or cache failure, 2 for usage errors,
+and 128 plus the signal number for forced termination). `--json` emits JSON
+Lines with `schema: 1`. `-V` and `--version` print `kame VERSION`; the launcher
+may answer that request without loading the module (`015-distribution.md`).
+
+For ABI conformance testing, the wrapper also accepts `--wasm-abi-info` and
+`--wasm-self-test`, which print ABI exports and self-test results as JSON.
+These are diagnostic flags, not part of the `009-cli.md` surface.
+
+### Host Mapping
+
+The wrapper services host requests with JavaScript host capabilities:
+
+- read, stat, glob, and write map to the Node filesystem, rooted by grants.
+- env maps to `process.env` through the authorized `env` operation.
+- run maps to a child process with streamed stdout and stderr, exit status,
+  signal forwarding, and cancellation.
+- time maps to the JavaScript wall and monotonic clocks.
+
+Capability grants follow `009-cli.md`: denied by default and granted by
+`--allow-read`, `--allow-write`, `--allow-run`, and `--allow-env`. A browser or
+embedded wrapper instead supplies its own host, as described in Host Requests.
+
+### Staged Coverage
+
+The ABI and host services arrive in stages, and the wrapper reports coverage
+honestly rather than faking effects:
+
+| Stage | ABI available | CLI coverage |
+| --- | --- | --- |
+| 0 | pure evaluation, instance create/free, source compile | `--version`, `-h`/`--help`, `do help`, `do expr`, and pure parse and format of stdin |
+| 1 | step, event, completion, and read/stat/glob/write host requests | source discovery and inspection: `do plan`, `do inputs`, `do outputs`, `do span`, and `do cat` for values and files |
+| 2 | process host requests | primary materialization, recipe execution, retries, timeouts, and cancellation |
+| 3 | full ABI, including cache | full `009-cli.md` parity, including `--json` event streams |
+
+An invocation whose selected work requires a capability the current stage does
+not provide fails with `FEATURE_UNSUP`. The wrapper does not skip or approximate
+the effect.
+
+### Wrapper Rules
+
+The wrapper must:
 
 - Serialize calls into one instance.
 - Copy bytes before a subsequent allocating ABI call.
@@ -141,3 +199,10 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 - An undersized heap produces a diagnostic rather than memory corruption.
 - The JavaScript wrapper copies payloads before further allocation and rejects
   use after disposal.
+- `node dist/kame.js --version` prints `kame VERSION` and exits 0.
+- `do expr` output matches native output byte-for-byte for pure expressions.
+- `--json` output is valid JSON Lines on stdout and leaves stderr unused.
+- Exit statuses and stream separation match `009-cli.md`.
+- An invocation that needs a capability absent from the current stage reports
+  `FEATURE_UNSUP`.
+- `--wasm-abi-info` and `--wasm-self-test` report the current stage's ABI.

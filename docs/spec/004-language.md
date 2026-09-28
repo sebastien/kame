@@ -394,19 +394,26 @@ Formatting is AST-based and canonical:
 
 - `LF` line endings.
 - One space around definition `=` and rule `:`.
-- One tab before recipe content.
+- One tab before recipe content; blank recipe lines carry no indentation.
 - Two-space indentation inside multiline expressions.
 - No trailing whitespace.
-- One terminal newline for scripts.
+- Blank lines between script items, between recipe lines, and at the beginning
+  and end of script input keep their count. A blank line between a rule header
+  and its first recipe line is not part of the recipe and is removed.
+- Scripts end with a newline; trailing blank lines are preserved, so input
+  without a terminal newline gains exactly one.
 
-Comments remain attached in source order. Exact original whitespace is not
-preserved. Formatting must be idempotent, and parsing formatted output must
-produce an equivalent AST excluding spans.
+Comments remain attached in source order. Whitespace is canonicalized as
+described above; the original source text is not preserved verbatim. Formatting
+must be idempotent, and parsing formatted output must produce an equivalent AST
+excluding spans.
 
 ## Acceptance Tests
 
 - Each language package parses and formats its syntax without using the script
   parser.
+- Blank lines keep their count between script items, between recipe lines, and
+  at the script edges; whitespace-only blank lines are canonicalized.
 - Expression parse/format/parse covers literals, lists, records, lambdas,
   references, selectors, and pipes.
 - Target templates match `./archive.o` against `./{stem:*}.o` with
