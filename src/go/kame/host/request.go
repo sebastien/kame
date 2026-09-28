@@ -14,6 +14,19 @@ const (
 	RequestWriteFile
 	RequestProcess
 	RequestEnvironment
+	// RequestStatPath and RequestExpandGlob remain distinct from reads so hosts
+	// can grant, schedule, and cache them without interpreting an operation
+	// field in a generic read request.
+	RequestStatPath
+	RequestExpandGlob
+	RequestWallTime
+	RequestMonotonicTime
+	// Cache operations transport opaque, canonically encoded records. The
+	// portable runtime owns validation and key construction; hosts only persist
+	// and retrieve bytes.
+	RequestCacheGet
+	RequestCachePut
+	RequestCacheDelete
 )
 
 // Request owns Payload until it is popped or the queue is freed.

@@ -12,6 +12,8 @@ const (
 	FieldPath   = "path"
 	FieldData   = "data"
 	FieldScript = "script"
+	FieldKey    = "key"
+	FieldRecord = "record"
 	OpRead      = "read"
 	OpExists    = "exists"
 	OpStat      = "stat"
@@ -44,6 +46,35 @@ func WritePayload(a mem.Allocator, name string, data []byte) core.Value {
 	}
 	return payload
 }
+
+// CacheGetPayload identifies one opaque cache record. Cache keys are bytes,
+// rather than paths, because the portable runtime defines their encoding.
+func CacheGetPayload(a mem.Allocator, key []byte) core.Value {
+	return core.NewBytes(a, key)
+}
+
+// CachePutPayload carries a complete cache record. Hosts must make a complete
+// record visible atomically, or report a failure; partial records are never
+// valid cache hits.
+func CachePutPayload(a mem.Allocator, key []byte, record []byte) core.Value {
+	fields := []core.RecordField{{Key: FieldKey, Value: core.NewBytes(a, key)}, {Key: FieldRecord, Value: core.NewBytes(a, record)}}
+	payload := core.NewRecord(a, fields)
+	for i := range fields {
+		fields[i].Value.Free(a)
+	}
+	return payload
+}
+
+// CacheKey returns the cache key from a cache get, put, or delete payload.
+func CacheKey(payload core.Value) []byte {
+	if payload.Kind == core.Bytes {
+		return payload.Bytes
+	}
+	return PayloadBytes(payload, FieldKey)
+}
+
+// CacheRecord returns a cache record from a cache put payload.
+func CacheRecord(payload core.Value) []byte { return PayloadBytes(payload, FieldRecord) }
 
 // PayloadPath returns the path or environment name carried by a request.
 func PayloadPath(payload core.Value) string {

@@ -33,6 +33,10 @@ type Context struct {
 	ResolveDefinition  DefinitionResolver
 	ResolverState      any
 	DependencyObserver func(any, core.ResourceKey)
+	// DirectHostRequests bypasses build-graph dependency discovery for host
+	// operations. Embedders with an explicit request/completion loop use it to
+	// obtain each host value directly from their capability provider.
+	DirectHostRequests bool
 	ToolResolver       func(any, string) (string, bool)
 	// OperationObserver records the stable operation identity used by a render.
 	// It is observational only and must not mutate evaluation state.

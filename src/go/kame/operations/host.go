@@ -47,7 +47,7 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 	if op == host.OpWildcard {
 		kind = core.ResourceGlob
 	}
-	if !dependency(c, kind, value.Text) {
+	if !c.DirectHostRequests && !dependency(c, kind, value.Text) {
 		return eval.Result{Waiting: true}
 	}
 	return request(c, host.RequestReadFile, host.FilePayload(c.Run, op, value.Text))
@@ -98,7 +98,7 @@ func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 	if !c.Allows(eval.Env, v[0].Text) {
 		return failure("CAP_DENIED", "environment access denied")
 	}
-	if !dependency(c, core.ResourceEnvironment, v[0].Text) {
+	if !c.DirectHostRequests && !dependency(c, core.ResourceEnvironment, v[0].Text) {
 		return eval.Result{Waiting: true}
 	}
 	return request(c, host.RequestEnvironment, core.NewString(c.Run, v[0].Text))

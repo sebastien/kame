@@ -77,6 +77,13 @@ func stringify(a mem.Allocator, value core.Value) (string, bool) {
 	return "", false
 }
 
+// Stringify returns Kame's canonical scalar/list rendering. It is exported for
+// hosts that serialize a completed portable value without exposing Value's
+// allocation-backed representation across an ABI boundary.
+func Stringify(a mem.Allocator, value core.Value) (string, bool) {
+	return stringify(a, value)
+}
+
 func owned(a mem.Allocator, text string) string {
 	if len(text) == 0 {
 		return ""

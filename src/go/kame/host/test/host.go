@@ -23,11 +23,27 @@ func TestQueueOwnsPayloadAndCorrelation(t *testing.T) {
 func TestPayloadRecordsExposePathsAndScripts(t *testing.T) {
 	a := t.Allocator()
 	file := host.FilePayload(a, host.OpWildcard, "src/**/*.km")
-	if host.PayloadPath(file) != "src/**/*.km" || host.PayloadText(file, host.FieldOp) != host.OpWildcard { t.Error("file payload fields were not readable") }
+	if host.PayloadPath(file) != "src/**/*.km" || host.PayloadText(file, host.FieldOp) != host.OpWildcard {
+		t.Error("file payload fields were not readable")
+	}
 	file.Free(a)
 	process := host.ProcessPayload(a, "printf ok")
-	if host.PayloadText(process, host.FieldScript) != "printf ok" { t.Error("process payload script was not readable") }
+	if host.PayloadText(process, host.FieldScript) != "printf ok" {
+		t.Error("process payload script was not readable")
+	}
 	process.Free(a)
+	key := host.CacheGetPayload(a, []byte{1, 2})
+	wantKey := []byte{1, 2}
+	if string(host.CacheKey(key)) != string(wantKey) {
+		t.Error("cache get payload key was not readable")
+	}
+	key.Free(a)
+	put := host.CachePutPayload(a, []byte{3}, []byte{4, 5})
+	wantPutKey, wantRecord := []byte{3}, []byte{4, 5}
+	if string(host.CacheKey(put)) != string(wantPutKey) || string(host.CacheRecord(put)) != string(wantRecord) {
+		t.Error("cache put payload was not readable")
+	}
+	put.Free(a)
 }
 
 func TestQueueReleasesRecordPayload(t *testing.T) {
@@ -37,7 +53,10 @@ func TestQueueReleasesRecordPayload(t *testing.T) {
 	queue.Submit(1, 1, 1, host.RequestReadFile, payload)
 	payload.Free(a)
 	next := queue.Next()
-	if !next.OK { t.Fatal("request missing"); return }
+	if !next.OK {
+		t.Fatal("request missing")
+		return
+	}
 	next.Request.Free(a)
 	queue.Free()
 }

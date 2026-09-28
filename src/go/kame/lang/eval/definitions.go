@@ -31,6 +31,9 @@ type Program struct {
 	// definitions evaluated as standalone engine nodes.
 	DefinitionDependencyObserver func(any, core.ResourceKey)
 	DefinitionDependencyState    any
+	// DirectHostRequests applies the embedding host's request loop to lazy
+	// definitions instead of requiring native build-graph resources.
+	DirectHostRequests            bool
 	DefinitionArgs               []core.Value
 	DefinitionArgsSet            bool
 	DefinitionCwd                string
@@ -335,7 +338,7 @@ func freeDefinitionSource(source *core.Source) {
 }
 
 func (p *Program) definition(engine *core.EngineContext, d *definition.Definition) Result {
-	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState}
+	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState, DirectHostRequests: p.DirectHostRequests}
 	result := p.definitionValue(engine, d, p.Scope, context)
 	if engine == nil || !engine.Failed() {
 		attachFrame(&result, context, d.Span, "definition")

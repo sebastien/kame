@@ -465,3 +465,31 @@ func TestEmergencyDiagnosticNeedsNoAllocator(t *testing.T) {
 		t.Errorf("json emergency diagnostic = %q", string(json.data[:json.n]))
 	}
 }
+
+// Repeating parser and session paths in one process keeps transient argument,
+// source, session, and result state under sustained churn. The test-leaks CLI
+// gate complements this by running the compiled executable under LeakSanitizer.
+func TestRepeatedCLICommandLifecycleReleasesTransientState(t *testing.T) {
+	tests := []struct {
+		args   []string
+		status int
+	}{
+		{[]string{"-c", "task first :\ntask second :"}, 1},
+		{[]string{"do", "expr", "--allow-read=/tmp", "--allow-env=HOME", "-c", "(nop 42)", "--", "left", "right"}, 0},
+		{[]string{"do", "plan", "-c", "task build :\n\techo ignored", "build"}, 0},
+		{[]string{"do", "span", "--expand", "-c", "SOURCE = ./input\ntask build : @(SOURCE)\n\ttrue", "build"}, 0},
+		{[]string{"do", "fmt", "--lang", "expr"}, 0},
+		{[]string{"--shell", "/bin/sh", "--env", "KM_TEST=value", "--unknown"}, 2},
+		{[]string{"do", "expr", "--allow-read=/tmp", "--allow-env=HOME", "--unknown"}, 2},
+		{[]string{"do", "fmt", "-i", "-n", "source.kmk"}, 2},
+		{[]string{"do", "inputs", "build", "--depth", "invalid"}, 2},
+	}
+	for iteration := 0; iteration < 64; iteration++ {
+		for _, test := range tests {
+			var out, errOut bytes.Buffer
+			if status := Run(test.args, &input{text: "42\n"}, &out, &errOut); status != test.status {
+				t.Fatalf("iteration %d args=%q status=%d want=%d stdout=%q stderr=%q", iteration, test.args, status, test.status, out.String(), errOut.String())
+			}
+		}
+	}
+}
