@@ -305,8 +305,21 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 		if contentEnd > lineStart && p.s.Text[contentEnd-1] == '\r' {
 			contentEnd--
 		}
-		if lineStart == contentEnd {
-			pos = end + 1
+		blankEnd := lineStart
+		for blankEnd < contentEnd && (p.s.Text[blankEnd] == ' ' || p.s.Text[blankEnd] == '\t') {
+			blankEnd++
+		}
+		if blankEnd == contentEnd {
+			next := end + 1
+			look := next
+			for look < p.end && p.s.Text[look] == '\n' {
+				look++
+			}
+			if len(r.Body) != 0 && look < p.end && (p.s.Text[look] == ' ' || p.s.Text[look] == '\t') {
+				r.Body = slices.Append(p.a, r.Body, RecipeLine{Span: source.Span{Start: lineStart, End: contentEnd}})
+				r.Span.End = end
+			}
+			pos = next
 			continue
 		}
 		if p.s.Text[lineStart] != ' ' && p.s.Text[lineStart] != '\t' {
@@ -481,8 +494,10 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 	}
 	for i := range r.Body {
 		b.WriteByte('\n')
-		b.WriteString(indent)
-		b.WriteString(r.Body[i].Text)
+		if r.Body[i].Text != "" {
+			b.WriteString(indent)
+			b.WriteString(r.Body[i].Text)
+		}
 	}
 	value := owned(a, b.String())
 	b.Free()

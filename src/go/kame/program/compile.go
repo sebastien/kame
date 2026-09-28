@@ -85,6 +85,9 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		}
 		p.Rules = slices.Append(a, p.Rules, registeredRule{Rule: item.Rule})
 		for j := range item.Rule.Body {
+			if item.Rule.Body[j].Template == nil {
+				continue
+			}
 			for k := range item.Rule.Body[j].Template.Parts {
 				part := item.Rule.Body[j].Template.Parts[k]
 				if part.Kind != template.Tool || p.toolIndex(part.Text) >= 0 { continue }

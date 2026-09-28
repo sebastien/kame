@@ -320,3 +320,22 @@ func TestCompileManyQualifiesDiagnostics(t *testing.T) {
 	compiled.Free(a)
 	registry.Free()
 }
+
+func TestBlankRecipeLinesCompileMaterializeAndRender(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-blank-recipe-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "test.kmk", "./build/marker :\n\tprintf one > @>\n\n\tprintf two >> @>\n")
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Errorf("compile failed: %d diagnostics", len(compiled.Diagnostics)); return }
+	result := compiled.Program.Materialize("./build/marker")
+	if result.Diagnostic.Code != "" { t.Errorf("blank recipe line build failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/build/marker")
+	if readErr != nil || string(data) != "onetwo" { t.Errorf("blank recipe line rendered recipe = %q", string(data)) }
+	mem.FreeSlice(a, data)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}

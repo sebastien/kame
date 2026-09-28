@@ -21,6 +21,9 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	defer b.Free()
 	var spans []diagnostic.Span
 	for i := range entry.Rule.Body {
+		if entry.Rule.Body[i].Template == nil {
+			continue
+		}
 		result := p.Eval.Render(p.Alloc, entry.Rule.Body[i].Template, p.Eval.Scope, context)
 		if result.Waiting {
 			if len(spans) != 0 {

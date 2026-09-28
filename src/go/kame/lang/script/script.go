@@ -244,45 +244,85 @@ func owned(a mem.Allocator, text string) string {
 	return string(b)
 }
 
-// Format returns allocator-owned canonical script text with one terminal LF.
+// Format returns allocator-owned canonical script text with a terminal LF and
+// the source's blank-line counts between items and at the script edges.
 func Format(a mem.Allocator, s *Script) string {
 	return FormatWithIndent(a, s, "\t")
 }
 
-// FormatWithIndent returns allocator-owned canonical script text with one terminal LF.
+// FormatWithIndent returns allocator-owned canonical script text with a
+// terminal LF and the source's blank-line counts between items and at the
+// script edges.
 func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 	b := strings.NewBuilder(a)
+	text := s.Source.Text
+	previousEnd := 0
 	for i := range s.Items {
-		if i != 0 {
+		item := s.Items[i]
+		gapStart, gapEnd := previousEnd, item.Span.Start
+		if gapStart < 0 {
+			gapStart = 0
+		}
+		if gapEnd > len(text) {
+			gapEnd = len(text)
+		}
+		if gapStart > gapEnd {
+			gapStart = gapEnd
+		}
+		breaks := 0
+		for j := gapStart; j < gapEnd; j++ {
+			if text[j] == '\n' {
+				breaks++
+			}
+		}
+		if i != 0 && breaks == 0 {
+			breaks = 1
+		}
+		for j := 0; j < breaks; j++ {
 			b.WriteByte('\n')
 		}
-		item := s.Items[i]
 		if item.Kind == Comment {
 			b.WriteString(item.Text)
+			previousEnd = item.Span.End
 			continue
 		}
 		if item.Kind == Include {
 			b.WriteString("include ")
 			b.WriteString(item.Include)
+			previousEnd = item.Span.End
 			continue
 		}
 		if item.Kind == Definition {
 			value := definition.Format(a, item.Definition)
 			b.WriteString(value)
 			mem.FreeString(a, value)
+			previousEnd = item.Span.End
 			continue
 		}
 		if item.Kind == Rule {
 			value := rule.FormatRuleWithIndent(a, item.Rule, indent)
 			b.WriteString(value)
 			mem.FreeString(a, value)
+			previousEnd = item.Span.End
 			continue
 		}
 		value := expr.Format(a, item.Expression)
 		b.WriteString(value)
 		mem.FreeString(a, value)
+		previousEnd = item.Span.End
 	}
-	b.WriteByte('\n')
+	trailing := 0
+	for j := previousEnd; j < len(text); j++ {
+		if text[j] == '\n' {
+			trailing++
+		}
+	}
+	if trailing < 1 {
+		trailing = 1
+	}
+	for j := 0; j < trailing; j++ {
+		b.WriteByte('\n')
+	}
 	value := owned(a, b.String())
 	b.Free()
 	return value
