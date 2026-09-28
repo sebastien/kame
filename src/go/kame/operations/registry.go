@@ -32,7 +32,8 @@ func Register(r *eval.Registry) bool {
 		addCapability(r, "env", opEnv, 1, 1, eval.Env) &&
 		addCapability(r, "shell", opShell, 1, 2, eval.Run) &&
 		add(r, "out", opOut, 1, -1) && add(r, "err", opErr, 1, -1) &&
-		add(r, "yield", opYield, 1, -1) && add(r, "nop", opNop, 0, -1)
+		add(r, "yield", opYield, 1, -1) && add(r, "nop", opNop, 0, -1) &&
+		add(r, "now", opNow, 0, 0) && add(r, "monotonic", opMonotonic, 0, 0)
 }
 
 func add(r *eval.Registry, name string, call eval.OperationCall, min int, max int) bool {

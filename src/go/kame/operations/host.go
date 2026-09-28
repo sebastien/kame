@@ -114,3 +114,28 @@ func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text))
 }
+
+// opNow reads the host wall clock as nanoseconds since the Unix epoch. Clocks
+// are impure, so they are invalid while planning or resolving a graph; the
+// request stays a host operation rather than a cached value.
+func opNow(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	_ = v
+	if c.Phase == eval.PlanningPhase || c.Phase == eval.ResolvingPhase {
+		c.MarkPhaseInvalid()
+		return failure("PHASE_INVALID", "now is invalid while planning")
+	}
+	return request(c, host.RequestWallTime, core.Value{Kind: core.Nil})
+}
+
+// opMonotonic reads the host monotonic clock as nanoseconds from an arbitrary
+// origin, for measuring durations without wall-clock jumps.
+func opMonotonic(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	_ = v
+	if c.Phase == eval.PlanningPhase || c.Phase == eval.ResolvingPhase {
+		c.MarkPhaseInvalid()
+		return failure("PHASE_INVALID", "monotonic is invalid while planning")
+	}
+	return request(c, host.RequestMonotonicTime, core.Value{Kind: core.Nil})
+}
