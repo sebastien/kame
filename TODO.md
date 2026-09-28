@@ -6,6 +6,7 @@ Improve:
 - Support capture in target names, like `aws-shell@{role-account}`
 - Support arguments in target names, like `deploy {env=ENVIRONMENT}` (an argument is a standalone capture block `{name}` (required) or `{name=value}` (optional), these then become symbols available in the dependencies and rule.
 - Conditional forms
+- Improved templates (```...```, proc`....`)
 
 Validate:
 - Streaming capabilities of standard library
@@ -16,14 +17,18 @@ Research:
 - How do we manage services running/provisioning
 - Using kame as a general scripting language (view of replacing shell, so that you just get kame)
 - File templating is also a common use case: replacing, repeating, etc.
+- Having a cli that shows number of jobs, for each job what the program is, its arguments and its running time.
 
 Consider:
 - Terminal colors easy functions
 - A JavaScript API?
 - A python API?
+- <- for stuff that builds (as opposed to targets)
+- , for sequencing in dependencies
 
 Improve:
 - Learnability
+- Embrace metaprogramming, kame is made for that
 - The error taxonomy (TGT_NO_RULE, TGT_AMBIG, REF_MISSING, SEL_NO_CONTEXT, …) is better than Make's, even if a few messages are cryptic.
 
 Feedback

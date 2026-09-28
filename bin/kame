@@ -1,0 +1,266 @@
+#!/bin/sh
+# Kame launcher: provisions and runs the pinned Kame build for the host.
+#
+# Spec: docs/spec/015-distribution.md. POSIX sh, uses only the same downloader
+# and verifier tools as the bootstrap Makefile. The launcher is silent on
+# success; KAME_VERBOSE=1 narrates provisioning on stderr. It never writes to
+# stdout except its own --version answer.
+set -eu
+
+# Stamped to the pinned version at release time. Empty in a source checkout,
+# where the version comes from a VERSION file.
+KAME_STAMP=""
+
+die() {
+	printf 'kame: %s\n' "$1" >&2
+	exit 1
+}
+
+note() {
+	if [ "${KAME_VERBOSE:-0}" = "1" ]; then
+		printf 'kame: %s\n' "$1" >&2
+	fi
+}
+
+launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+# --- Version resolution: KAME_VERSION, embedded stamp, then VERSION file. ---
+version=""
+if [ -n "${KAME_VERSION:-}" ]; then
+	version=$KAME_VERSION
+fi
+if [ -z "$version" ] && [ -n "$KAME_STAMP" ]; then
+	version=$KAME_STAMP
+fi
+if [ -z "$version" ]; then
+	for candidate in "$launcher_dir/VERSION" "$launcher_dir/../VERSION"; do
+		if [ -f "$candidate" ]; then
+			version=$(tr -d ' \t\r\n' <"$candidate")
+			[ -n "$version" ] && break
+		fi
+	done
+fi
+[ -n "$version" ] || die "cannot determine version"
+
+# --- A lone version request is answered without provisioning. ---
+if [ "$#" -eq 1 ] && { [ "$1" = "-V" ] || [ "$1" = "--version" ]; }; then
+	printf 'kame %s\n' "$version"
+	exit 0
+fi
+
+# --- KAME_BIN bypasses detection and download entirely. ---
+if [ -n "${KAME_BIN:-}" ]; then
+	[ -x "$KAME_BIN" ] || die "KAME_BIN is not executable: $KAME_BIN"
+	exec "$KAME_BIN" "$@"
+fi
+
+# --- Cache root. ---
+if [ -n "${KAME_HOME:-}" ]; then
+	cache_root=$KAME_HOME
+elif [ -n "${XDG_DATA_HOME:-}" ]; then
+	cache_root=$XDG_DATA_HOME/kame
+elif [ -n "${HOME:-}" ]; then
+	cache_root=$HOME/.local/share/kame
+else
+	die "no usable cache root"
+fi
+cache=$cache_root/$version
+release_base=${KAME_RELEASE_URL:-https://github.com/sebastien/kame/releases/download/v$version/}
+case $release_base in
+*/) ;;
+*) release_base=$release_base/ ;;
+esac
+
+fetch() {
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$1" -o "$2" || die "download failed: $1"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -q -O "$2" "$1" || die "download failed: $1"
+	else
+		die "no downloader (curl or wget)"
+	fi
+}
+
+verify() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		actual=$(sha256sum "$1" | cut -d' ' -f1)
+	elif command -v shasum >/dev/null 2>&1; then
+		actual=$(shasum -a 256 "$1" | cut -d' ' -f1)
+	else
+		die "no SHA-256 verifier (sha256sum or shasum)"
+	fi
+	[ "$actual" = "$2" ]
+}
+
+manifest_entry() {
+	while read -r hex asset _rest; do
+		if [ "$asset" = "$2" ]; then
+			printf '%s' "$hex"
+			return 0
+		fi
+	done <"$1"
+	return 1
+}
+
+lock_dir=$cache/.lock
+
+acquire_lock() {
+	mkdir -p "$cache_root" "$cache"
+	while ! mkdir "$lock_dir" 2>/dev/null; do
+		holder=""
+		if [ -f "$lock_dir/pid" ]; then
+			holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
+		fi
+		if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+			rm -rf "$lock_dir"
+			continue
+		fi
+		sleep 0.1
+	done
+	printf '%s\n' "$$" >"$lock_dir/pid"
+}
+
+release_lock() {
+	rm -rf "$lock_dir"
+}
+
+ensure_manifest() {
+	[ -f "$cache/SHA256SUMS" ] && return 0
+	[ "${KAME_NO_DOWNLOAD:-0}" = "1" ] && die "missing SHA256SUMS (download disabled)"
+	staging="$cache/.staging.$$"
+	rm -rf "$staging"
+	mkdir -p "$staging"
+	note "fetching SHA256SUMS for $version"
+	fetch "${release_base}SHA256SUMS" "$staging/SHA256SUMS"
+	mv "$staging/SHA256SUMS" "$cache/SHA256SUMS"
+	rmdir "$staging"
+}
+
+install_wasm() {
+	if [ -f "$cache/wasm/kame.js" ] && [ -f "$cache/wasm/kame.wasm" ]; then
+		return 0
+	fi
+	[ "${KAME_NO_DOWNLOAD:-0}" = "1" ] && die "missing cached wasm artifacts (download disabled)"
+	ensure_manifest
+	staging="$cache/.staging.$$"
+	rm -rf "$staging"
+	mkdir -p "$staging/wasm"
+	for asset in kame.js kame.wasm; do
+		note "fetching $asset"
+		fetch "${release_base}${asset}" "$staging/wasm/$asset"
+		hex=$(manifest_entry "$cache/SHA256SUMS" "$asset") || {
+			rm -rf "$staging"
+			die "missing manifest entry: $asset"
+		}
+		verify "$staging/wasm/$asset" "$hex" || {
+			rm -rf "$staging"
+			die "checksum mismatch: $asset"
+		}
+	done
+	mv "$staging/wasm" "$cache/wasm"
+	rmdir "$staging"
+}
+
+install_ape() {
+	[ -x "$cache/ape/kame.com" ] && return 0
+	[ "${KAME_NO_DOWNLOAD:-0}" = "1" ] && die "missing cached APE (download disabled)"
+	ensure_manifest
+	staging="$cache/.staging.$$"
+	rm -rf "$staging"
+	mkdir -p "$staging/ape"
+	note "fetching kame.com"
+	fetch "${release_base}kame.com" "$staging/ape/kame.com"
+	hex=$(manifest_entry "$cache/SHA256SUMS" "kame.com") || {
+		rm -rf "$staging"
+		die "missing manifest entry: kame.com"
+	}
+	verify "$staging/ape/kame.com" "$hex" || {
+		rm -rf "$staging"
+		die "checksum mismatch: kame.com"
+	}
+	chmod +x "$staging/ape/kame.com"
+	mv "$staging/ape" "$cache/ape"
+	rmdir "$staging"
+}
+
+ape_host() {
+	kame_os=$(uname -s 2>/dev/null || true)
+	kame_arch=$(uname -m 2>/dev/null || true)
+	case $kame_arch in
+	x86_64 | amd64 | aarch64 | arm64) ;;
+	*) return 1 ;;
+	esac
+	case $kame_os in
+	Linux | Darwin | FreeBSD | NetBSD | OpenBSD | MINGW* | MSYS* | CYGWIN*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+js_runtime() {
+	js=${KAME_JS:-node}
+	command -v "$js" >/dev/null 2>&1 || die "no JavaScript runtime: $js"
+	js_version=$("$js" --version 2>/dev/null || true)
+	js_version=${js_version#v}
+	js_major=${js_version%%.*}
+	case $js_major in
+	'' | *[!0-9]*) die "cannot determine JavaScript runtime version" ;;
+	esac
+	[ "$js_major" -ge 18 ] || die "JavaScript runtime must be Node 18 or later"
+	printf '%s' "$js"
+}
+
+write_backend() {
+	printf '%s\n' "$1" >"$cache/.backend"
+}
+
+select_backend() {
+	requested=${KAME_BACKEND:-auto}
+	case $requested in
+	ape | wasm) printf '%s' "$requested"; return 0 ;;
+	auto) ;;
+	*) die "invalid KAME_BACKEND: $requested" ;;
+	esac
+	if [ -f "$cache/.backend" ]; then
+		cached=$(cat "$cache/.backend")
+		if [ "$cached" = "ape" ] && [ -x "$cache/ape/kame.com" ]; then
+			printf 'ape'
+			return 0
+		fi
+		if [ "$cached" = "wasm" ] && [ -f "$cache/wasm/kame.js" ]; then
+			printf 'wasm'
+			return 0
+		fi
+	fi
+	backend=wasm
+	if ape_host; then
+		install_ape
+		if "$cache/ape/kame.com" --version >/dev/null 2>&1; then
+			backend=ape
+		fi
+	fi
+	write_backend "$backend"
+	printf '%s' "$backend"
+}
+
+trap release_lock EXIT INT TERM
+acquire_lock
+backend=$(select_backend)
+case $backend in
+ape)
+	# install_ape runs within the lock during selection; re-check for the forced path.
+	install_ape
+	apt=$cache/ape/kame.com
+	release_lock
+	trap - EXIT INT TERM
+	exec "$apt" "$@"
+	;;
+wasm)
+	install_wasm
+	js=$(js_runtime)
+	wscript=$cache/wasm/kame.js
+	release_lock
+	trap - EXIT INT TERM
+	exec "$js" "$wscript" "$@"
+	;;
+esac
+die "unreachable backend: $backend"

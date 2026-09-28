@@ -90,8 +90,3 @@ What we want `kame` to bring:
 
 The name `kame` is *verlan* for `make`, a nod to the process of starting from the result (a makefile without the quirks), and building the language/system to support it.
 
-## Actually Portable Executable (APE)
-
-An experimental APE build is available with `make dist-ape` or `kame dist-ape`. The target provisions the official Cosmopolitan `cosmocc` toolchain under `build/tools/cosmocc` and produces `dist/kame.com`, without changing the default native build. It requires `curl` and `unzip`; set `COSMOCC_URL` to override the default toolchain archive URL.
-
-The APE is intended for POSIX environments supported by Cosmopolitan. Kame still runs build recipes through `/bin/sh` by default, so projects need a POSIX shell and their usual build tools; the APE does not bundle these dependencies or provide native Windows recipe support.
