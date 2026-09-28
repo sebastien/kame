@@ -1,6 +1,7 @@
 package main
 
 import (
+	"kame/cli"
 	"kame/core"
 	"kame/lang/eval"
 	"solod.dev/so/io"
@@ -63,34 +64,11 @@ func runExpr(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 func freeCommandBytes(data []byte) { if len(data) != 0 { mem.FreeSlice(mem.System, data) } }
 
 func parseExprArguments(args []string, errOut io.Writer) exprArguments {
-	result := exprArguments{Directory: "."}
-	positional := false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" { positional = true; continue }
-		if positional { result.Args = slices.Append(mem.System, result.Args, arg); continue }
-		if arg == "-C" || arg == "--directory" { if i+1 == len(args) { cliError(errOut, "OPT_NO_VALUE", "missing value for "+arg); return exprArguments{} }; i++; result.Directory = args[i]; continue }
-		if len(arg) > 12 && arg[:12] == "--directory=" { result.Directory = arg[12:]; continue }
-		if !positional && arg == "-c" { if i+1 == len(args) { cliError(errOut, "OPT_NO_VALUE", "missing value for -c"); return exprArguments{} }; i++; result.Text = args[i]; continue }
-		if !positional && (arg == "--allow-read" || arg == "--allow-write" || arg == "--allow-env" || arg == "--allow-run") { result.Grants = appendExprGrant(result.Grants, arg, ""); continue }
-		if !positional && len(arg) >= 13 && arg[:13] == "--allow-read=" { if len(arg) == 13 { cliError(errOut, "OPT_VALUE_INVALID", "empty value for --allow-read"); return exprArguments{} }; result.Grants = appendExprGrant(result.Grants, "--allow-read", arg[13:]); continue }
-		if !positional && len(arg) >= 14 && arg[:14] == "--allow-write=" { if len(arg) == 14 { cliError(errOut, "OPT_VALUE_INVALID", "empty value for --allow-write"); return exprArguments{} }; result.Grants = appendExprGrant(result.Grants, "--allow-write", arg[14:]); continue }
-		if !positional && len(arg) >= 12 && arg[:12] == "--allow-env=" { if len(arg) == 12 { cliError(errOut, "OPT_VALUE_INVALID", "empty value for --allow-env"); return exprArguments{} }; result.Grants = appendExprGrant(result.Grants, "--allow-env", arg[12:]); continue }
-		if !positional && len(arg) != 0 && arg[0] == '-' { cliError(errOut, "OPT_UNKNOWN", "unknown option: "+arg); return exprArguments{} }
-		if !positional && result.File == "" { result.File = arg; continue }
+	inv := cli.Parse("expr", args)
+	if !inv.OK {
+		cliError(errOut, inv.Error.Code, inv.Error.Message)
+		inv.Free()
+		return exprArguments{}
 	}
-	if result.Text != "" && result.File != "" { cliError(errOut, "OPT_CONFLICT", "-c and expression file cannot be used together"); return exprArguments{} }
-	result.OK = true
-	return result
-}
-
-func appendExprGrant(grants []eval.Grant, option string, name string) []eval.Grant {
-	capability := eval.Read
-	if option == "--allow-write" { capability = eval.Write }
-	if option == "--allow-run" { capability = eval.Run }
-	if option == "--allow-env" { capability = eval.Env }
-	grant := eval.Grant{Capability: capability}
-	// Allocate the name list: a slice literal would not outlive this function.
-	if name != "" { grant.Names = slices.Append(mem.System, grant.Names, cloneCommandText(name)) }
-	return slices.Append(mem.System, grants, grant)
+	return exprArguments{Text: inv.Command, File: inv.File, Directory: inv.Directory, Args: inv.Args, Grants: inv.Grants, OK: inv.OK}
 }

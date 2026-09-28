@@ -1,4 +1,4 @@
-package main
+package ast
 
 import (
 	"kame/lang/definition"
@@ -9,7 +9,45 @@ import (
 	"kame/lang/template"
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
+	"solod.dev/so/mem"
 )
+
+// WriteAST parses text as lang and writes its schema-1 AST JSON to out. It
+// returns 0 on success and 1 when the source has errors or encoding fails. The
+// JSON is written even when the parse has diagnostics, matching the CLI.
+func WriteAST(out io.Writer, lang string, name string, text string) int {
+	enc := newASTEncoder(out, lang, name)
+	failed := false
+	if lang == "expr" {
+		result := expr.Parse(mem.System, name, text)
+		enc.expr(result.Expr)
+		failed = enc.diagnostics(result.Diagnostics)
+		result.Free()
+	} else if lang == "template" {
+		result := template.ParseString(mem.System, name, text)
+		enc.template(result)
+		failed = enc.diagnostics(result.Diagnostics)
+		result.Free()
+	} else if lang == "rule" {
+		result := rule.ParseRule(mem.System, name, text)
+		enc.rule(result.Rule)
+		failed = enc.diagnostics(result.Diagnostics)
+		result.Free()
+	} else {
+		result := script.Parse(mem.System, name, text)
+		enc.script(result)
+		failed = enc.diagnostics(result.Diagnostics)
+		result.Free()
+	}
+	enc.finish()
+	if enc.err() != nil {
+		return 1
+	}
+	if failed {
+		return 1
+	}
+	return 0
+}
 
 type astEncoder struct {
 	enc json.Encoder
@@ -357,7 +395,9 @@ func templateKind(k template.PartKind) string {
 	if k == template.Reference {
 		return "reference"
 	}
-	if k == template.Tool { return "tool" }
+	if k == template.Tool {
+		return "tool"
+	}
 	return "selector"
 }
 

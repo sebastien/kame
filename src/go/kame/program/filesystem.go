@@ -4,7 +4,6 @@ import (
 	"kame/core"
 	"kame/host"
 	"solod.dev/so/mem"
-	"solod.dev/so/os"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
 )
@@ -14,7 +13,7 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 	filename := p.canonicalTarget(name, true)
 	defer mem.FreeString(p.Alloc, filename)
 	if op == host.OpRead {
-		data, err := os.ReadFile(p.Alloc, filename)
+		data, err := p.Host.ReadFile(p.Alloc, filename)
 		if err != nil {
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot read file")
 			return completion
@@ -24,17 +23,16 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 		return completion
 	}
 	if op == host.OpExists {
-		_, err := os.Stat(filename)
-		completion.Value, completion.HasValue = core.Value{Kind: core.Bool, Bool: err == nil}, true
+		completion.Value, completion.HasValue = core.Value{Kind: core.Bool, Bool: p.Host.Stat(filename).Exists}, true
 		return completion
 	}
 	if op == host.OpStat {
-		info, err := os.Stat(filename)
-		if err != nil {
+		result := p.Host.Stat(filename)
+		if !result.Exists {
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot stat file")
 			return completion
 		}
-		fields := []core.RecordField{{Key: "name", Value: core.NewString(p.Alloc, name)}, {Key: "size", Value: core.Value{Kind: core.Int, Int: info.Size()}}, {Key: "mode", Value: core.Value{Kind: core.Int, Int: int64(info.Mode())}}, {Key: "dir", Value: core.Value{Kind: core.Bool, Bool: info.IsDir()}}}
+		fields := []core.RecordField{{Key: "name", Value: core.NewString(p.Alloc, name)}, {Key: "size", Value: core.Value{Kind: core.Int, Int: result.Info.Size}}, {Key: "mode", Value: core.Value{Kind: core.Int, Int: int64(result.Info.Mode)}}, {Key: "dir", Value: core.Value{Kind: core.Bool, Bool: result.Info.IsDir}}}
 		completion.Value, completion.HasValue = core.NewRecord(p.Alloc, fields), true
 		for i := range fields {
 			fields[i].Value.Free(p.Alloc)
@@ -55,7 +53,7 @@ func (p *Program) wildcard(pattern string) core.Value {
 	root := globRoot(p.Alloc, pattern)
 	defer mem.FreeString(p.Alloc, root)
 	var names []string
-	collectPaths(p.Alloc, root, &names)
+	p.collectPaths(root, &names)
 	var values []core.Value
 	for i := range names {
 		matched, err := globMatches(pattern, names[i])
@@ -114,17 +112,18 @@ func globRoot(a mem.Allocator, pattern string) string {
 	return cloneText(a, pattern[:cut-1])
 }
 
-func collectPaths(a mem.Allocator, directory string, names *[]string) {
-	entries, err := os.ReadDir(a, directory)
+func (p *Program) collectPaths(directory string, names *[]string) {
+	entries, err := p.Host.ReadDir(p.Alloc, directory)
 	if err != nil {
 		return
 	}
-	defer os.FreeDirEntry(a, entries)
+	defer slices.Free(p.Alloc, entries)
 	for i := range entries {
-		name := path.Join(a, directory, entries[i].Name)
-		*names = slices.Append(a, *names, name)
+		name := path.Join(p.Alloc, directory, entries[i].Name)
+		mem.FreeString(p.Alloc, entries[i].Name)
+		*names = slices.Append(p.Alloc, *names, name)
 		if entries[i].IsDir {
-			collectPaths(a, name, names)
+			p.collectPaths(name, names)
 		}
 	}
 }

@@ -40,6 +40,25 @@ tests/T009-07-cli-graph.sh	009	cli	inputs, outputs, span, depth and arity
 tests/T009-08-cli-dryrun.sh	009	cli	Dry-run performs no effects
 tests/T009-11-cli-usage.sh	009	cli	Option and exit-status matrix, -j determinism
 tests/T009-12-cli-cases.sh	009	cli	Table-driven CLI cases over tests/data/cases
+tests/T010-01-wasm-loader.sh	010	wasm	Freestanding module loads, pure and async expression evaluation, handle and completion lifecycle
+tests/T010-02-wasm-abi.sh	010	wasm	Import gate, distinct host request kinds, canonical JSON completion, per-instance diagnostics
+tests/T010-03-wasm-target.sh	010	wasm	Definition targets materialize against the in-memory host; missing targets diagnose
+tests/T010-04-wasm-forwarding.sh	010	wasm	Target host requests for read, process, and write are forwarded and completed asynchronously
+tests/T010-05-wasm-rule-target.sh	010	wasm	A file rule materializes with its recipe forwarded to the embedding host
+tests/T010-06-wasm-cli.sh	010	wasm	dist/kame.js version, help, do expr byte parity, grants, diagnostic flags, and exit statuses
+tests/T010-07-wasm-cat.sh	010	wasm	dist/kame.js do cat and primary materialization over a discovered source
+tests/T010-08-wasm-glob.sh	010	wasm	Wildcard host requests match native output byte-for-byte and require a read grant
+tests/T010-09-wasm-parse.sh	010	wasm	dist/kame.js do parse matches native AST JSON for all languages, stdin, and errors
+tests/T010-10-wasm-fmt.sh	010	wasm	dist/kame.js do fmt matches native canonical output, check, in-place, stdin, and usage errors
+tests/T010-11-wasm-plan.sh	010	wasm	dist/kame.js do plan JSON matches native for captures, dynamic inputs, and missing targets
+tests/T010-12-wasm-graph.sh	010	wasm	dist/kame.js do inputs/outputs/span match native for depths, expansion, and errors
+tests/T010-13-wasm-tools.sh	010	wasm	dist/kame.js do tools matches native including unresolved tool paths and target rejection
+tests/T010-14-wasm-json.sh	010	wasm	dist/kame.js --json primary streams native JSON Lines and keeps failures valid
+tests/T010-15-wasm-process-control.sh	010	wasm	dist/kame.js --timeout kills an overrunning recipe and --retry reruns a failed one
+tests/T010-16-wasm-cancellation.sh	010	wasm	dist/kame.js forwards SIGINT/SIGTERM to the recipe process group and exits 128 plus the signal
+tests/T010-17-wasm-human-output.sh	010	wasm	dist/kame.js primary progress, stream forwarding, diagnostics, and summary match native
+tests/T010-18-wasm-clock.sh	010	wasm	dist/kame.js services now/monotonic host requests with integer nanoseconds and no grant
+tests/T010-19-wasm-cache.sh	010	wasm	dist/kame.js persists and replays cached tasks through cache get/put host requests
 tests/T011-01-diag-format.sh	011	diag	Diagnostic layout, notes, human/JSON equivalence
 tests/T011-02-diag-integrity.sh	011	diag	Codes, severities, non-empty printable messages
 tests/T012-01-streams-events.sh	012	streams	Terminal event uniqueness and process event balance
@@ -47,3 +66,5 @@ tests/T013-01-meta-catalog.sh	013	meta	Catalog and test-name consistency
 tests/T013-02-meta-hygiene.sh	013	meta	Fixtures are never modified and scratch dirs stay in the test path
 tests/T013-03-meta-binary.sh	013	meta	Binary contract, no-op rebuilds, cross-copy determinism
 tests/T014-01-patterns-sections.sh	014	patterns	Placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs
+tests/T015-01-dist-launcher.sh	015	dist	Launcher version, provisioning, checksums, cache reuse, backend selection, and bootstrap delegation
+tests/T015-02-dist-launcher-backends.sh	015	dist	Launcher APE probe fallback, forced backends, missing manifest, no-download, concurrency, and cache roots

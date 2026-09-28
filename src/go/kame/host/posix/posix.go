@@ -6,6 +6,7 @@ import (
 	"solod.dev/so/c"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/time"
 )
 
 //so:embed posix.h
@@ -117,11 +118,14 @@ func km_cli_environment_copy(out []byte) c.Int { _ = out; return 0 }
 type Host struct {
 	Alloc  mem.Allocator
 	native *nativeHost
+	// start anchors the monotonic clock at host creation.
+	start time.Time
 }
 
 func New(a mem.Allocator) *Host {
 	h := mem.Alloc[Host](a)
 	h.Alloc, h.native = a, km_host_new()
+	h.start = time.Now()
 	return h
 }
 

@@ -22,15 +22,15 @@ const (
 )
 
 type Plan struct {
-	Target                 string
-	Key                    core.ResourceKey
-	Rule                   *rule.Rule
-	RuleSpan               diagnostic.Span
-	Body                   []rule.RecipeLine
-	Captures               []template.CaptureValue
-	Inputs                 []string
+	Target   string
+	Key      core.ResourceKey
+	Rule     *rule.Rule
+	RuleSpan diagnostic.Span
+	Body     []rule.RecipeLine
+	Captures []template.CaptureValue
+	Inputs   []string
 	// StaticInputs are literal and template inputs as authored.
-	StaticInputs           []string
+	StaticInputs []string
 	// DynamicInputs are the values resolved from expression-form rule inputs.
 	// They remain separate so inspection can distinguish authored edges from
 	// resources discovered by evaluating definitions.
@@ -217,9 +217,10 @@ func (h *Handle) Free() {
 }
 
 type Options struct {
-	// Host executes recipe scripts. Compile transfers ownership to the Program,
-	// which releases it during Program.Free.
-	Host        host.ProcessHost
+	// Host executes recipe scripts and services the runtime's filesystem and
+	// clock. Compile transfers ownership to the Program, which releases it
+	// during Program.Free.
+	Host        host.ProgramHost
 	Directory   string
 	Shell       []string
 	Environment []string
@@ -237,10 +238,18 @@ type Options struct {
 	Verbose          bool
 	Jobs             int
 	Grants           []eval.Grant
+	// ForwardRequests routes evaluator host requests to an embedding host
+	// instead of servicing them locally. The wasm runtime sets it so the
+	// JavaScript host can service filesystem, environment, and process work
+	// asynchronously. Native callers leave it false.
+	ForwardRequests bool
 }
 
 // Tool records a globally declared command and its resolved executable path.
-type Tool struct { Name string; Path string }
+type Tool struct {
+	Name string
+	Path string
+}
 
 type Program struct {
 	Alloc       mem.Allocator
@@ -248,7 +257,7 @@ type Program struct {
 	Eval        *eval.Program
 	Parsed      *script.Script
 	ParsedOwned bool
-	Host        host.ProcessHost
+	Host        host.ProgramHost
 	Options     Options
 	Rules       []registeredRule
 	Tools       []Tool
@@ -257,6 +266,10 @@ type Program struct {
 	nextRequest int64
 	Pending     []pendingRequest
 	epoch       int64
+	// Forwarding mirrors Options.ForwardRequests; Outbound holds requests an
+	// embedding host must service and complete.
+	Forwarding bool
+	Outbound   []host.Request
 }
 
 type pendingRequest struct {
@@ -269,10 +282,10 @@ type pendingRequest struct {
 
 type registeredRule struct{ Rule *rule.Rule }
 type instance struct {
-	Rule                 *rule.Rule
-	Captures             []template.CaptureValue
-	Node                 *core.Node
-	Plan                 Plan
+	Rule     *rule.Rule
+	Captures []template.CaptureValue
+	Node     *core.Node
+	Plan     Plan
 	// Inspection instances resolve inputs for span --expand only. They must not
 	// satisfy normal target lookup or participate in build execution.
 	Inspection           bool
@@ -287,6 +300,7 @@ type instance struct {
 	CacheStderrTruncated bool
 	CacheReady           bool
 	cacheStartedAt       int64
+	cachePending         bool
 	retryCount           int
 	started              bool
 	startedGeneration    int64

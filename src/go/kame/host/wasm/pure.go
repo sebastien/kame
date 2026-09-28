@@ -10,12 +10,15 @@ import (
 )
 
 // PureResult is intentionally byte-oriented at the module boundary. Text and
-// diagnostics remain owned by the supplied allocator until Free.
+// diagnostics remain owned by the supplied allocator until Free. SpanStart and
+// SpanEnd carry a parse diagnostic's source range when one is available.
 type PureResult struct {
 	Text       string
 	Code       string
 	Message    string
 	HostNeeded bool
+	SpanStart  int
+	SpanEnd    int
 }
 
 func (r *PureResult) Free(a mem.Allocator) {
@@ -35,6 +38,22 @@ func pureText(a mem.Allocator, text string) string {
 	return core.NewString(a, text).Text
 }
 
+// parseFailure clones the first parse diagnostic's message and span so callers
+// report the specific syntax error rather than a generic one. It frees the
+// script.
+func parseFailure(a mem.Allocator, parsed *script.Script) PureResult {
+	message := "source contains invalid syntax"
+	spanStart, spanEnd := 0, 0
+	if len(parsed.Diagnostics) != 0 {
+		message = parsed.Diagnostics[0].Message
+		spanStart = parsed.Diagnostics[0].Span.Start
+		spanEnd = parsed.Diagnostics[0].Span.End
+	}
+	out := PureResult{Code: pureText(a, "PARSE_ERR"), Message: pureText(a, message), SpanStart: spanStart, SpanEnd: spanEnd}
+	parsed.Free()
+	return out
+}
+
 // EvaluatePure compiles and evaluates exactly one expression. It provides the
 // wasm target's initial no-host vertical slice; requests are surfaced as
 // HostNeeded instead of being serviced implicitly.
@@ -47,8 +66,7 @@ func EvaluatePure(a mem.Allocator, text string) PureResult {
 func EvaluateSourcePure(a mem.Allocator, source string, text string) PureResult {
 	parsed := script.Parse(a, "<wasm-source>", source)
 	if len(parsed.Diagnostics) != 0 {
-		parsed.Free()
-		return PureResult{Code: pureText(a, "PARSE_ERR"), Message: pureText(a, "source contains invalid syntax")}
+		return parseFailure(a, parsed)
 	}
 	parsedExpression := script.Parse(a, "<wasm-expr>", text)
 	if len(parsedExpression.Diagnostics) != 0 || len(parsedExpression.Items) != 1 || parsedExpression.Items[0].Expression == nil {
@@ -67,8 +85,7 @@ func EvaluateSourcePure(a mem.Allocator, source string, text string) PureResult 
 func ValidateSource(a mem.Allocator, source string) PureResult {
 	parsed := script.Parse(a, "<wasm-source>", source)
 	if len(parsed.Diagnostics) != 0 {
-		parsed.Free()
-		return PureResult{Code: pureText(a, "PARSE_ERR"), Message: pureText(a, "source contains invalid syntax")}
+		return parseFailure(a, parsed)
 	}
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
@@ -118,14 +135,11 @@ func evaluateParsed(a mem.Allocator, parsed *script.Script, expression *expr.Exp
 		parsed.Free()
 		return out
 	}
-	value, ok := eval.Stringify(a, result.Value)
+	value := eval.Display(a, result.Value)
 	result.Free(a)
 	program.Free()
 	engine.Free()
 	registry.Free()
 	parsed.Free()
-	if !ok {
-		return PureResult{Code: pureText(a, "EXPR_INVALID"), Message: pureText(a, "value cannot be represented as text")}
-	}
 	return PureResult{Text: value}
 }

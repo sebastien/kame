@@ -27,7 +27,7 @@ export CLI_BIN KAME
 
 # Variable: CLI_SOURCES
 # Directories whose changes require a rebuild of CLI_BIN.
-CLI_SOURCES=("$CLI_ROOT/src/go/kame/cmd" "$CLI_ROOT/src/go/kame/core" "$CLI_ROOT/src/go/kame/diagnostic" "$CLI_ROOT/src/go/kame/host" "$CLI_ROOT/src/go/kame/lang" "$CLI_ROOT/src/go/kame/operations" "$CLI_ROOT/src/go/kame/program")
+CLI_SOURCES=("$CLI_ROOT/src/go/kame/cli" "$CLI_ROOT/src/go/kame/cmd" "$CLI_ROOT/src/go/kame/core" "$CLI_ROOT/src/go/kame/diagnostic" "$CLI_ROOT/src/go/kame/host" "$CLI_ROOT/src/go/kame/lang" "$CLI_ROOT/src/go/kame/operations" "$CLI_ROOT/src/go/kame/program")
 
 # Variable: CLI_OUT, CLI_ERR, CLI_STATUS
 # Captures from the most recent cli_run invocation.

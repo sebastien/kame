@@ -45,6 +45,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p := mem.Alloc[Program](a)
 	p.Alloc, p.Engine, p.Eval, p.Parsed, p.Host = a, engine, compiled.Program, parsed, options.Host
 	p.nextRequest = 1 << 60 // Evaluator queue request IDs start at one.
+	p.Forwarding = options.ForwardRequests
 	p.Options.Directory, p.Options.DryRun, p.Options.Force, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.Force, options.RetainBytes, options.Jobs
 	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
 	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
@@ -90,7 +91,9 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 			}
 			for k := range item.Rule.Body[j].Template.Parts {
 				part := item.Rule.Body[j].Template.Parts[k]
-				if part.Kind != template.Tool || p.toolIndex(part.Text) >= 0 { continue }
+				if part.Kind != template.Tool || p.toolIndex(part.Text) >= 0 {
+					continue
+				}
 				p.Tools = slices.Append(a, p.Tools, Tool{Name: cloneText(a, part.Text)})
 			}
 		}
@@ -107,22 +110,32 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 }
 
 func (p *Program) toolIndex(name string) int {
-	for i := range p.Tools { if p.Tools[i].Name == name { return i } }
+	for i := range p.Tools {
+		if p.Tools[i].Name == name {
+			return i
+		}
+	}
 	return -1
 }
 
 // SetToolPath records a preflight-resolved executable for a declared tool.
 func (p *Program) SetToolPath(name, executable string) bool {
 	i := p.toolIndex(name)
-	if i < 0 { return false }
-	if p.Tools[i].Path != "" { mem.FreeString(p.Alloc, p.Tools[i].Path) }
+	if i < 0 {
+		return false
+	}
+	if p.Tools[i].Path != "" {
+		mem.FreeString(p.Alloc, p.Tools[i].Path)
+	}
 	p.Tools[i].Path = cloneText(p.Alloc, executable)
 	return true
 }
 
 func (p *Program) toolPath(name string) (string, bool) {
 	i := p.toolIndex(name)
-	if i < 0 || p.Tools[i].Path == "" { return "", false }
+	if i < 0 || p.Tools[i].Path == "" {
+		return "", false
+	}
 	return p.Tools[i].Path, true
 }
 
@@ -259,7 +272,10 @@ func (p *Program) Free() {
 			slices.Free(p.Alloc, p.Instances[i].CacheStderr)
 		}
 	}
-	for i := range p.Tools { mem.FreeString(p.Alloc, p.Tools[i].Name); mem.FreeString(p.Alloc, p.Tools[i].Path) }
+	for i := range p.Tools {
+		mem.FreeString(p.Alloc, p.Tools[i].Name)
+		mem.FreeString(p.Alloc, p.Tools[i].Path)
+	}
 	for i := range p.Events {
 		p.Events[i].Free(p.Alloc)
 	}
@@ -286,6 +302,11 @@ func (p *Program) Free() {
 	slices.Free(p.Alloc, p.Rules)
 	slices.Free(p.Alloc, p.Tools)
 	slices.Free(p.Alloc, p.Pending)
+	for i := range p.Outbound {
+		p.Outbound[i].Free(p.Alloc)
+	}
+	// An empty Outbound can still own a backing array after requests are popped.
+	slices.Free(p.Alloc, p.Outbound)
 	if p.Host != nil {
 		p.Host.Free()
 	}

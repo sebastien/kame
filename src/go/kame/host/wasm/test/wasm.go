@@ -33,6 +33,25 @@ func TestHandlesRejectStaleAndForeignOwners(t *testing.T) {
 	table.FreeTable()
 }
 
+func TestOwnerResolvesHandlesWithoutPriorOwner(t *testing.T) {
+	table := wasm.NewTable(t.Allocator())
+	if table.Owner(0) != 0 {
+		t.Error("zero handle reported an owner")
+	}
+	handle := table.Add(7, 99)
+	if owner := table.Owner(handle); owner != 7 {
+		t.Errorf("owner = %d, want 7", owner)
+	}
+	if value, ok := table.Get(table.Owner(handle), handle); !ok || value != 99 {
+		t.Error("owner did not round-trip into a value lookup")
+	}
+	table.Free(7, handle)
+	if table.Owner(handle) != 0 {
+		t.Error("stale handle reported an owner")
+	}
+	table.FreeTable()
+}
+
 func TestEventHeaderHasStableLittleEndianLayout(t *testing.T) {
 	var out [wasm.EventHeaderSize]byte
 	header := wasm.EventHeader{Kind: 9, Root: 1, Node: 2, Request: 3, Generation: 4, Revision: 5, PayloadLen: 6}
@@ -94,6 +113,225 @@ func TestPureExpressionUsesPortableEvaluator(t *testing.T) {
 		t.Errorf("source evaluation = %#v", fromSource)
 	}
 	fromSource.Free(a)
+}
+
+func TestCompletionValueFromJSONParsesCanonicalValues(t *testing.T) {
+	a := t.Allocator()
+	var boolValue core.Value
+	if !wasm.CompletionValueFromJSON(a, []byte("true"), &boolValue) || boolValue.Kind != core.Bool || !boolValue.Bool {
+		t.Errorf("true = %#v", boolValue)
+	}
+	boolValue.Free(a)
+	var intValue core.Value
+	if !wasm.CompletionValueFromJSON(a, []byte("-42"), &intValue) || intValue.Kind != core.Int || intValue.Int != -42 {
+		t.Errorf("-42 = %#v", intValue)
+	}
+	intValue.Free(a)
+	var floatValue core.Value
+	if !wasm.CompletionValueFromJSON(a, []byte("1.5"), &floatValue) || floatValue.Kind != core.Float || floatValue.Float != 1.5 {
+		t.Errorf("1.5 = %#v", floatValue)
+	}
+	floatValue.Free(a)
+	var stringValue core.Value
+	if !wasm.CompletionValueFromJSON(a, []byte(`"a\nb\u0041"`), &stringValue) || stringValue.Kind != core.String || stringValue.Text != "a\nbA" {
+		t.Errorf("escaped string = %#v", stringValue)
+	}
+	stringValue.Free(a)
+	var listValue core.Value
+	if !wasm.CompletionValueFromJSON(a, []byte(`["x","y"]`), &listValue) || listValue.Kind != core.List || len(listValue.List) != 2 || listValue.List[1].Text != "y" {
+		t.Errorf("list = %#v", listValue)
+	}
+	listValue.Free(a)
+	var recordValue core.Value
+	if !wasm.CompletionValueFromJSON(a, []byte(`{"name":"x","size":3,"dir":true}`), &recordValue) || recordValue.Kind != core.Record || len(recordValue.Record) != 3 || recordValue.Record[1].Value.Int != 3 {
+		t.Errorf("record = %#v", recordValue)
+	}
+	recordValue.Free(a)
+	malformed := []string{`{"a":}`, `true false`, `[1,]`, `"unterminated`, `nul`}
+	for i := range malformed {
+		var value core.Value
+		if wasm.CompletionValueFromJSON(a, []byte(malformed[i]), &value) {
+			value.Free(a)
+			t.Errorf("malformed JSON accepted: %s", malformed[i])
+		}
+	}
+	var empty core.Value
+	if !wasm.CompletionValueFromJSON(a, []byte("null"), &empty) || empty.Kind != core.Nil {
+		t.Errorf("null = %#v", empty)
+	}
+	empty.Free(a)
+}
+
+func TestRuntimeMaterializesDefinitionTargetWithMemoryHost(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "result = (read \"input.txt\")\n")
+	if started.Runtime == nil {
+		t.Fatalf("runtime did not compile: %s", started.Result.Code)
+		return
+	}
+	runtime := started.Runtime
+	defer runtime.Free()
+	if !runtime.SetFile("input.txt", []byte("wasm-target")) {
+		t.Fatal("memory host rejected a file")
+		return
+	}
+	if preflight := runtime.RequestTarget("result"); preflight.Code != "" {
+		t.Fatalf("target request failed: %s", preflight.Code)
+		return
+	}
+	done := false
+	for i := 0; i < 32 && !done; i++ {
+		runtime.Step()
+		probe := runtime.Result()
+		done = probe.Done
+		probe.Free(a)
+	}
+	result := runtime.Result()
+	if !result.Done {
+		t.Error("target did not complete")
+	} else if result.Diagnostic.Code != "" {
+		t.Error("target diagnostic " + result.Diagnostic.Code + ": " + result.Diagnostic.Message)
+	} else if result.Value.Kind != core.Bytes {
+		t.Error("target value was not bytes")
+	} else if string(result.Value.Bytes) != "wasm-target" {
+		t.Error("target bytes = " + string(result.Value.Bytes))
+	}
+	result.Free(a)
+}
+
+func TestRuntimeTargetEnvironmentComesFromConfiguration(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "result = (env \"KAME_TARGET_ENV\")\n")
+	if started.Runtime == nil {
+		t.Fatalf("runtime did not compile: %s", started.Result.Code)
+		return
+	}
+	runtime := started.Runtime
+	defer runtime.Free()
+	if !runtime.SetEnvironment("KAME_TARGET_ENV", "target-value") {
+		t.Fatal("memory host rejected an environment entry")
+		return
+	}
+	if preflight := runtime.RequestTarget("result"); preflight.Code != "" {
+		t.Fatalf("target request failed: %s", preflight.Code)
+		return
+	}
+	done := false
+	for i := 0; i < 32 && !done; i++ {
+		runtime.Step()
+		probe := runtime.Result()
+		done = probe.Done
+		probe.Free(a)
+	}
+	result := runtime.Result()
+	if !result.Done {
+		t.Error("target did not complete")
+	} else if result.Diagnostic.Code != "" {
+		t.Error("target diagnostic " + result.Diagnostic.Code + ": " + result.Diagnostic.Message)
+	} else if result.Value.Kind != core.String {
+		t.Error("target value was not a string")
+	} else if result.Value.Text != "target-value" {
+		t.Error("target text = " + result.Value.Text)
+	}
+	result.Free(a)
+}
+
+func TestRuntimeForwardsTargetHostRequests(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "result = (read \"input.txt\")\n")
+	if started.Runtime == nil {
+		t.Fatalf("runtime did not compile: %s", started.Result.Code)
+		return
+	}
+	runtime := started.Runtime
+	defer runtime.Free()
+	if !runtime.SetForwarding(true) {
+		t.Fatal("forwarding was rejected")
+		return
+	}
+	if preflight := runtime.RequestTarget("result"); preflight.Code != "" {
+		t.Fatalf("target request failed: %s", preflight.Code)
+		return
+	}
+	serviced := false
+	done := false
+	for i := 0; i < 64 && !done; i++ {
+		next := runtime.Step()
+		if next.OK {
+			if next.Request.Kind != host.RequestReadFile || host.PayloadPath(next.Request.Payload) != "input.txt" {
+				t.Error("unexpected forwarded request")
+				break
+			}
+			runtime.Complete(next.Request, core.NewBytes(a, []byte("forwarded")), diagnostic.Diagnostic{})
+			next.Request.Free(a)
+			serviced = true
+		}
+		probe := runtime.Result()
+		done = probe.Done
+		probe.Free(a)
+	}
+	if !serviced {
+		t.Error("no host request was forwarded")
+	}
+	result := runtime.Result()
+	if !result.Done {
+		t.Error("forwarded target did not complete")
+	} else if result.Diagnostic.Code != "" {
+		t.Error("forwarded target diagnostic " + result.Diagnostic.Code + ": " + result.Diagnostic.Message)
+	} else if result.Value.Kind != core.Bytes {
+		t.Error("forwarded target value was not bytes")
+	} else if string(result.Value.Bytes) != "forwarded" {
+		t.Error("forwarded target bytes = " + string(result.Value.Bytes))
+	}
+	result.Free(a)
+}
+
+func TestRuntimeForwardsRuleRecipe(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "./out.txt :\n\tprintf written\n")
+	if started.Runtime == nil {
+		t.Fatalf("runtime did not compile: %s", started.Result.Code)
+		return
+	}
+	runtime := started.Runtime
+	defer runtime.Free()
+	if !runtime.SetForwarding(true) {
+		t.Fatal("forwarding was rejected")
+		return
+	}
+	if preflight := runtime.RequestTarget("./out.txt"); preflight.Code != "" {
+		t.Fatalf("target request failed: %s", preflight.Code)
+		return
+	}
+	serviced := false
+	done := false
+	for i := 0; i < 64 && !done; i++ {
+		next := runtime.Step()
+		if next.OK {
+			if next.Request.Kind != host.RequestProcess || host.PayloadText(next.Request.Payload, host.FieldScript) != "printf written" {
+				t.Error("unexpected forwarded recipe request")
+				break
+			}
+			runtime.Complete(next.Request, core.NewString(a, ""), diagnostic.Diagnostic{})
+			next.Request.Free(a)
+			serviced = true
+		}
+		probe := runtime.Result()
+		done = probe.Done
+		probe.Free(a)
+	}
+	if !serviced {
+		t.Error("recipe was not forwarded")
+	}
+	result := runtime.Result()
+	if !result.Done {
+		t.Error("rule target did not complete")
+	} else if result.Diagnostic.Code != "" {
+		t.Error("rule target diagnostic " + result.Diagnostic.Code + ": " + result.Diagnostic.Message)
+	} else if result.Value.Kind != core.String || result.Value.Text != "./out.txt" {
+		t.Error("rule target path = " + result.Value.Text)
+	}
+	result.Free(a)
 }
 
 func TestRuntimeYieldsHostRequestAndResumes(t *testing.T) {

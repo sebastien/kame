@@ -7,10 +7,8 @@ package program
 import (
 	"kame/core"
 	"kame/lang/rule"
-	"solod.dev/so/io"
 	"solod.dev/so/math"
 	"solod.dev/so/mem"
-	"solod.dev/so/os"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
 )
@@ -332,6 +330,20 @@ func (p *Program) cacheIdentity(entry *instance) string {
 }
 
 func (p *Program) cachePath(entry *instance) string {
+	key := p.cacheKey(entry)
+	hex := cacheHex(p.Alloc, key)
+	mem.FreeSlice(p.Alloc, key)
+	root := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/tasks")
+	result := path.Join(p.Alloc, root, hex+".kmkr")
+	mem.FreeString(p.Alloc, hex)
+	mem.FreeString(p.Alloc, root)
+	return result
+}
+
+// cacheKey returns the identity digest that names a cached task's record. The
+// host treats it as an opaque byte key, so the same key selects the same record
+// on the file host and on a forwarding host.
+func (p *Program) cacheKey(entry *instance) []byte {
 	target := p.identityTarget(entry)
 	var sink hashSink
 	sink.state = newSHA256()
@@ -339,12 +351,7 @@ func (p *Program) cachePath(entry *instance) string {
 	mem.FreeString(p.Alloc, target)
 	var digest [32]byte
 	sink.state.Sum(digest[:])
-	root := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/tasks")
-	hex := cacheHex(p.Alloc, digest[:])
-	result := path.Join(p.Alloc, root, hex+".kmkr")
-	mem.FreeString(p.Alloc, hex)
-	mem.FreeString(p.Alloc, root)
-	return result
+	return slices.Clone(p.Alloc, digest[:])
 }
 
 func (p *Program) cacheFingerprint(entry *instance, script string) bool {
@@ -427,7 +434,7 @@ func (p *Program) appendDynamicSection(e *cacheEncoder, entry *instance) {
 		e.appendText(key.Name)
 		if key.Kind == core.ResourceFile {
 			canonical := p.canonicalTarget(key.Name, true)
-			appendLiveFile(e, canonical)
+			p.appendLiveFile(e, canonical)
 			mem.FreeString(p.Alloc, canonical)
 		} else if key.Kind == core.ResourceGlob {
 			var fp [32]byte
@@ -504,7 +511,7 @@ func (p *Program) appendInputSection(e *cacheEncoder, entry *instance) {
 			canonical := p.canonicalTarget(name, true)
 			e.appendByte(byte(kind))
 			e.appendText(canonical)
-			appendLiveFile(e, canonical)
+			p.appendLiveFile(e, canonical)
 			mem.FreeString(p.Alloc, canonical)
 			continue
 		}
@@ -555,9 +562,9 @@ func (p *Program) appendTaskSection(e *cacheEncoder, entry *instance) {
 	e.patchU64(at, start)
 }
 
-func appendLiveFile(e *cacheEncoder, name string) {
+func (p *Program) appendLiveFile(e *cacheEncoder, name string) {
 	var digest [32]byte
-	finger := fileFingerprint(name, digest[:])
+	finger := p.fileFingerprint(name, digest[:])
 	if finger.Missing {
 		e.appendByte(cacheFileMissing)
 		return
@@ -713,7 +720,7 @@ func (p *Program) appendDefinitionDependency(e *cacheEncoder, dependency *core.N
 		switch key.Kind {
 		case core.ResourceFile:
 			name := p.canonicalTarget(key.Name, true)
-			appendLiveFile(e, name)
+			p.appendLiveFile(e, name)
 			mem.FreeString(p.Alloc, name)
 		case core.ResourceGlob:
 			var fp [32]byte
@@ -758,46 +765,35 @@ type fileFingerprintResult struct {
 // fileFingerprint hashes a regular file without following links. Directories,
 // symlinks, and other non-regular types are unusable so they never share a
 // regular-file marker. Missing paths are cacheable and carry no content digest.
-func fileFingerprint(name string, out []byte) fileFingerprintResult {
-	info, err := os.Lstat(name)
-	if err == os.ErrNotExist {
+func (p *Program) fileFingerprint(name string, out []byte) fileFingerprintResult {
+	result := p.Host.Lstat(name)
+	if result.Failed {
+		return fileFingerprintResult{}
+	}
+	if !result.Exists {
 		return fileFingerprintResult{Missing: true}
 	}
-	if err != nil || !info.Mode().IsRegular() || len(out) < 32 {
+	info := result.Info
+	if !info.Regular || len(out) < 32 {
 		return fileFingerprintResult{}
 	}
 	s := newSHA256()
 	s.Write([]byte("file\x00" + name))
 	s.Write([]byte{cacheFileRegular})
 	var meta [16]byte
-	size := uint64(info.Size())
-	mt := uint64(info.ModTime().UnixNano())
+	size := uint64(info.Size)
+	mt := uint64(info.ModTime)
 	for i := 0; i < 8; i++ {
 		meta[i] = byte(size >> uint(i*8))
 		meta[8+i] = byte(mt >> uint(i*8))
 	}
 	s.Write(meta[:])
-	f, openErr := os.Open(name)
-	if openErr != nil {
+	data, readErr := p.Host.ReadFile(p.Alloc, name)
+	if readErr != nil {
 		return fileFingerprintResult{}
 	}
-	var block [32768]byte
-	for {
-		n, readErr := f.Read(block[:])
-		if n > 0 {
-			s.Write(block[:n])
-		}
-		if readErr != nil {
-			if readErr != io.EOF {
-				f.Close()
-				return fileFingerprintResult{}
-			}
-			break
-		}
-	}
-	if f.Close() != nil {
-		return fileFingerprintResult{}
-	}
+	s.Write(data)
+	mem.FreeSlice(p.Alloc, data)
 	s.Sum(out)
 	return fileFingerprintResult{Ready: true}
 }

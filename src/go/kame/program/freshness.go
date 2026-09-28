@@ -3,7 +3,6 @@ package program
 import (
 	"kame/core"
 	"solod.dev/so/mem"
-	"solod.dev/so/os"
 )
 
 func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
@@ -15,16 +14,16 @@ func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
 		inputs = plan.ResolvedInputs
 	}
 	fileInputs := 0
-	var oldest os.FileInfo
+	var oldest int64
 	for i := range plan.Outputs {
 		name := p.canonicalTarget(plan.Outputs[i], true)
-		info, err := os.Stat(name)
+		result := p.Host.Stat(name)
 		mem.FreeString(p.Alloc, name)
-		if err != nil {
+		if !result.Exists {
 			return Stale
 		}
-		if i == 0 || info.ModTime().Before(oldest.ModTime()) {
-			oldest = info
+		if i == 0 || result.Info.ModTime < oldest {
+			oldest = result.Info.ModTime
 		}
 	}
 	for i := range inputs {
@@ -33,12 +32,12 @@ func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
 		}
 		fileInputs++
 		name := p.canonicalTarget(inputs[i], true)
-		info, err := os.Stat(name)
+		result := p.Host.Stat(name)
 		mem.FreeString(p.Alloc, name)
-		if err != nil {
+		if !result.Exists {
 			return Stale
 		}
-		if oldest.ModTime().Before(info.ModTime()) {
+		if oldest < result.Info.ModTime {
 			return Stale
 		}
 	}
@@ -50,12 +49,12 @@ func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
 			}
 			fileInputs++
 			name := p.canonicalTarget(dependency.Key.Name, true)
-			info, err := os.Stat(name)
+			result := p.Host.Stat(name)
 			mem.FreeString(p.Alloc, name)
-			if err != nil {
+			if !result.Exists {
 				return Stale
 			}
-			if oldest.ModTime().Before(info.ModTime()) {
+			if oldest < result.Info.ModTime {
 				return Stale
 			}
 		}

@@ -7,9 +7,9 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"solod.dev/so/math/bits"
 	"solod.dev/so/mem"
-	"solod.dev/so/os"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 )
@@ -210,7 +210,7 @@ func (p *Program) globFingerprint(pattern string, out []byte) bool {
 		slices.Free(mem.System, encoded)
 		name := p.canonicalTarget(value.List[i].Text, true)
 		var digest [32]byte
-		finger := fileFingerprint(name, digest[:])
+		finger := p.fileFingerprint(name, digest[:])
 		mem.FreeString(p.Alloc, name)
 		if finger.Missing {
 			s.Write([]byte{cacheFileMissing})
@@ -332,7 +332,9 @@ func parseRecord(a mem.Allocator, data []byte) cacheRecord {
 	r.CompletedAt = int64(takeU64(data, &at))
 	r.Duration = int64(takeU64(data, &at))
 	r.ExitStatus = int64(takeU64(data, &at))
-	if r.StartedAt <= 0 || r.CompletedAt < r.StartedAt || r.Duration < 0 || r.ExitStatus != 0 {
+	// A forwarding host may not expose a synchronous clock, so a record can
+	// carry zero timing. Ordering and a completed status are still required.
+	if r.StartedAt < 0 || r.CompletedAt < r.StartedAt || r.Duration < 0 || r.ExitStatus != 0 {
 		r.Free(a)
 		return cacheRecord{}
 	}
@@ -381,28 +383,36 @@ func parseRecord(a mem.Allocator, data []byte) cacheRecord {
 
 func (p *Program) cacheLoad(entry *instance, fingerprint []byte) cacheRecord {
 	name := p.cachePath(entry)
-	info, statErr := os.Stat(name)
+	info := p.Host.Stat(name)
 	maxLog := p.Options.CacheRetainBytes
 	if maxLog < cacheLogDefault {
 		maxLog = cacheLogDefault
 	}
 	maxRecord := int64(cacheManifestMax) + int64(maxLog)*2 + 1024*1024
-	if statErr != nil {
+	if !info.Exists {
 		mem.FreeString(p.Alloc, name)
 		return cacheRecord{}
 	}
-	if info.Size() < 0 || info.Size() > maxRecord {
+	if info.Info.Size < 0 || info.Info.Size > maxRecord {
 		p.cacheWarning(entry, "CACHE_RECORD", "cache record exceeds the supported size")
 		mem.FreeString(p.Alloc, name)
 		return cacheRecord{}
 	}
-	data, err := os.ReadFile(p.Alloc, name)
+	data, err := p.Host.ReadFile(p.Alloc, name)
 	mem.FreeString(p.Alloc, name)
 	if err != nil {
 		return cacheRecord{}
 	}
-	r := parseRecord(p.Alloc, data)
+	r := p.validateRecord(entry, fingerprint, data)
 	mem.FreeSlice(p.Alloc, data)
+	return r
+}
+
+// validateRecord parses and validates one encoded cache record. A malformed,
+// stale, or mismatched record is freed and returns a zero record, which callers
+// treat as a miss.
+func (p *Program) validateRecord(entry *instance, fingerprint []byte, data []byte) cacheRecord {
+	r := parseRecord(p.Alloc, data)
 	if r.Identity == "" {
 		p.cacheWarning(entry, "CACHE_RECORD", "malformed or unsupported cache record")
 		return r
@@ -419,6 +429,52 @@ func (p *Program) cacheLoad(entry *instance, fingerprint []byte) cacheRecord {
 	return r
 }
 
+// cacheLookupResult reports a cached record, a hit, or a pending forwarded
+// lookup the producer must resume.
+type cacheLookupResult struct {
+	Record  cacheRecord
+	Hit     bool
+	Waiting bool
+}
+
+// cacheLookup returns the cached record for a task, or reports that a forwarded
+// lookup was submitted and the producer must resume. The file host answers
+// synchronously; a forwarding host owns persistence and answers through the
+// cache request kinds.
+func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLookupResult {
+	if !p.Forwarding {
+		record := p.cacheLoad(entry, entry.CacheFingerprint[:])
+		return cacheLookupResult{Record: record, Hit: record.Identity != ""}
+	}
+	if entry.cachePending {
+		entry.cachePending = false
+		completion := c.Completion()
+		if completion.RequestID == 0 {
+			return cacheLookupResult{Waiting: true}
+		}
+		if completion.Diagnostic.Code != "" {
+			completion.Diagnostic.Free(p.Alloc)
+			completion.Value.Free(p.Alloc)
+			return cacheLookupResult{}
+		}
+		if completion.Value.Kind != core.Bytes {
+			completion.Value.Free(p.Alloc)
+			return cacheLookupResult{}
+		}
+		record := p.validateRecord(entry, entry.CacheFingerprint[:], completion.Value.Bytes)
+		completion.Value.Free(p.Alloc)
+		return cacheLookupResult{Record: record, Hit: record.Identity != ""}
+	}
+	key := p.cacheKey(entry)
+	payload := host.CacheGetPayload(p.Alloc, key)
+	mem.FreeSlice(p.Alloc, key)
+	p.nextRequest++
+	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestCacheGet, Payload: payload})
+	c.Submit(p.nextRequest)
+	entry.cachePending = true
+	return cacheLookupResult{Waiting: true}
+}
+
 func (p *Program) cacheWarning(entry *instance, code string, message string) {
 	if !p.Options.Verbose {
 		return
@@ -430,36 +486,23 @@ func (p *Program) cacheWarning(entry *instance, code string, message string) {
 	p.emit(Event{Kind: CacheWarning, Target: target, Diagnostic: diagnostic.Diagnostic{Code: code, Severity: diagnostic.Warning, Message: message}})
 }
 func (p *Program) cacheSave(entry *instance, r *cacheRecord) bool {
+	if p.Forwarding {
+		key := p.cacheKey(entry)
+		data := recordBytes(r)
+		payload := host.CachePutPayload(p.Alloc, key, data)
+		mem.FreeSlice(p.Alloc, key)
+		mem.FreeSlice(mem.System, data)
+		p.nextRequest++
+		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCachePut, Payload: payload})
+		return true
+	}
 	name := p.cachePath(entry)
-	if !mkdirParent(name) {
+	if !p.mkdirParent(name) {
 		mem.FreeString(p.Alloc, name)
 		return false
 	}
 	data := recordBytes(r)
-	separator := strings.LastIndexByte(name, '/')
-	directory := name[:separator]
-	buffer := make([]byte, os.MaxPathLen)
-	f, err := os.CreateTemp(buffer, directory, ".kame-cache-")
-	ok := err == nil
-	tmp := ""
-	if ok {
-		tmp = f.Name()
-		_, err = f.Write(data)
-		if err == nil {
-			err = f.Sync()
-		}
-		closeErr := f.Close()
-		if err == nil {
-			err = closeErr
-		}
-		ok = err == nil
-	}
-	if ok {
-		ok = os.Rename(tmp, name) == nil
-	}
-	if !ok && tmp != "" {
-		os.Remove(tmp)
-	}
+	ok := p.Host.WriteFileAtomic(name, data, 0o644, true) == nil
 	mem.FreeSlice(mem.System, data)
 	mem.FreeString(p.Alloc, name)
 	return ok

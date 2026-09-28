@@ -30,18 +30,52 @@ static uint32_t kame_wasm_diagnostic_len;
 #define KAME_WASM_SOURCE_CAPACITY 65536u
 #define KAME_WASM_ARENA_CAPACITY 262144u
 typedef struct {
-  uint32_t generation;
+  uint64_t owner;        /* handle-table owner token for this instance */
   uint32_t source_len;
   bool live;
-  bool retired;
   wasm_Runtime *runtime;
   host_Request pending;
   bool has_pending;
   bool event_pinned;
+  uint64_t request;      /* handle of the pinned request, zero when none */
+  uint64_t last_request; /* most recent request handle, for late completions */
+  uint64_t root;         /* handle of the active expression root */
+  uint64_t node;         /* handle of the active expression node */
+  uint32_t diagnostic_len; /* per-instance emergency diagnostic length */
+  char diagnostic[256];    /* static, allocation-free diagnostic slot */
+  bool diagnostic_has_span; /* whether the diagnostic carries a source span */
+  int32_t diagnostic_span_start;
+  int32_t diagnostic_span_end;
+  uint32_t source_name_len; /* label reported in diagnostics for the source */
+  char source_name[256];
   char source[KAME_WASM_SOURCE_CAPACITY];
   char arena[KAME_WASM_ARENA_CAPACITY];
 } kame_wasm_instance;
 static kame_wasm_instance kame_wasm_instances[KAME_WASM_INSTANCE_CAPACITY];
+
+/*
+ * One module-global handle table owns every ABI handle: instances plus their
+ * root, node, and request handles. Its entries record the owning instance token
+ * so a handle from another instance is rejected. The table lives outside any
+ * instance arena, so its lifetime is the module's, not a single instance's.
+ */
+static wasm_Table *kame_wasm_handles;
+static uint64_t kame_wasm_next_owner;
+
+static wasm_Table *kame_wasm_table(void) {
+  if (kame_wasm_handles == NULL) kame_wasm_handles = wasm_NewTable(mem_System);
+  return kame_wasm_handles;
+}
+
+static uint64_t kame_wasm_next_token(void) {
+  kame_wasm_next_owner++;
+  if (kame_wasm_next_owner == 0u) kame_wasm_next_owner = 1u;
+  return kame_wasm_next_owner;
+}
+
+static uint64_t kame_wasm_child_handle(kame_wasm_instance *instance, uint64_t value) {
+  return (uint64_t)wasm_Table_Add(kame_wasm_table(), instance->owner, value);
+}
 
 static uint32_t kame_wasm_align(uint32_t value, uint32_t alignment) {
   return (value + alignment - 1u) & ~(alignment - 1u);
@@ -116,14 +150,21 @@ uint32_t kame_wasm_copy(uint32_t dst, uint32_t dst_len,
   return KAME_WASM_OK;
 }
 
-static void kame_wasm_set_diagnostic(so_String code, so_String message) {
-  kame_wasm_diagnostic_len = 0u;
+static void kame_wasm_write_diagnostic(char *dst, uint32_t cap, uint32_t *out_len, so_String code, so_String message) {
+  *out_len = 0u;
   const so_String parts[] = {code, (so_String){": ", 2}, message};
   for (uint32_t p = 0; p < 3u; p++) {
-    for (so_int i = 0; i < parts[p].len && kame_wasm_diagnostic_len < sizeof(kame_wasm_diagnostic); i++) {
-      kame_wasm_diagnostic[kame_wasm_diagnostic_len++] = (char)parts[p].ptr[i];
+    for (so_int i = 0; i < parts[p].len && *out_len < cap; i++) {
+      dst[(*out_len)++] = (char)parts[p].ptr[i];
     }
   }
+}
+
+/* Module-global diagnostic, used by host-free entry points and by failures that
+ * happen before an instance exists. Instance entry points write to the
+ * instance's static emergency slot instead. */
+static void kame_wasm_set_diagnostic(so_String code, so_String message) {
+  kame_wasm_write_diagnostic(kame_wasm_diagnostic, (uint32_t)sizeof(kame_wasm_diagnostic), &kame_wasm_diagnostic_len, code, message);
 }
 
 static void kame_wasm_set_static_diagnostic(const char *code, const char *message) {
@@ -132,22 +173,91 @@ static void kame_wasm_set_static_diagnostic(const char *code, const char *messag
       (so_String){message, (so_int)strlen(message)});
 }
 
-static uint64_t kame_wasm_handle(uint32_t index, uint32_t generation) {
-  return ((uint64_t)generation << 32u) | (uint64_t)(index + 1u);
+static void kame_wasm_instance_set_diagnostic(kame_wasm_instance *instance, so_String code, so_String message) {
+  instance->diagnostic_has_span = false;
+  instance->diagnostic_span_start = 0;
+  instance->diagnostic_span_end = 0;
+  kame_wasm_write_diagnostic(instance->diagnostic, (uint32_t)sizeof(instance->diagnostic), &instance->diagnostic_len, code, message);
+}
+
+static void kame_wasm_instance_set_diagnostic_span(kame_wasm_instance *instance, so_String code, so_String message, int32_t start, int32_t end) {
+  kame_wasm_instance_set_diagnostic(instance, code, message);
+  instance->diagnostic_has_span = true;
+  instance->diagnostic_span_start = start;
+  instance->diagnostic_span_end = end;
+}
+
+static void kame_wasm_instance_set_static_diagnostic(kame_wasm_instance *instance, const char *code, const char *message) {
+  kame_wasm_instance_set_diagnostic(
+      instance,
+      (so_String){code, (so_int)strlen(code)},
+      (so_String){message, (so_int)strlen(message)});
 }
 
 static kame_wasm_instance *kame_wasm_instance_get(uint64_t handle) {
-  uint32_t index = (uint32_t)handle;
-  uint32_t generation = (uint32_t)(handle >> 32u);
-  if (index == 0u || index > KAME_WASM_INSTANCE_CAPACITY || generation == 0u) return NULL;
-  kame_wasm_instance *instance = &kame_wasm_instances[index - 1u];
-  if (!instance->live || instance->generation != generation) return NULL;
+  if (handle == 0u) return NULL;
+  wasm_Table *table = kame_wasm_table();
+  uint64_t owner = wasm_Table_Owner(table, (wasm_Handle)handle);
+  if (owner == 0u) return NULL;
+  so_R_u64_bool resolved = wasm_Table_Get(table, owner, (wasm_Handle)handle);
+  if (!resolved.val2 || resolved.val >= KAME_WASM_INSTANCE_CAPACITY) return NULL;
+  kame_wasm_instance *instance = &kame_wasm_instances[(uint32_t)resolved.val];
+  if (!instance->live || instance->owner != owner) return NULL;
   return instance;
 }
 
 static so_String kame_wasm_request_payload(host_Request request) {
   if (request.Kind == host_RequestProcess) return host_PayloadText(request.Payload, so_str("script"));
   return host_PayloadPath(request.Payload);
+}
+
+static bool kame_wasm_string_eq(so_String value, const char *literal) {
+  so_int len = (so_int)strlen(literal);
+  if (value.len != len) return false;
+  for (so_int i = 0; i < len; i++) {
+    if (value.ptr[i] != literal[i]) return false;
+  }
+  return true;
+}
+
+/*
+ * Derive the ABI request kind from the engine request. Filesystem operations
+ * share host_RequestReadFile internally and carry their operation in the
+ * payload, so the op field is promoted to a distinct kind. This is what lets a
+ * host dispatch read, exists, stat, and glob without interpreting payloads.
+ */
+static uint32_t kame_wasm_request_kind(host_Request request) {
+  switch (request.Kind) {
+    case host_RequestReadFile: {
+      so_String op = host_PayloadText(request.Payload, so_str("op"));
+      if (kame_wasm_string_eq(op, "exists")) return 7u;
+      if (kame_wasm_string_eq(op, "stat")) return 5u;
+      if (kame_wasm_string_eq(op, "wildcard")) return 6u;
+      return 1u;
+    }
+    case host_RequestWriteFile:
+      return 2u;
+    case host_RequestProcess:
+      return 3u;
+    case host_RequestEnvironment:
+      return 4u;
+    case host_RequestStatPath:
+      return 5u;
+    case host_RequestExpandGlob:
+      return 6u;
+    case host_RequestWallTime:
+      return 8u;
+    case host_RequestMonotonicTime:
+      return 9u;
+    case host_RequestCacheGet:
+      return 10u;
+    case host_RequestCachePut:
+      return 11u;
+    case host_RequestCacheDelete:
+      return 12u;
+    default:
+      return (uint32_t)request.Kind;
+  }
 }
 
 uint32_t kame_wasm_diagnostic_length(void) { return kame_wasm_diagnostic_len; }
@@ -161,14 +271,60 @@ uint32_t kame_wasm_diagnostic_copy(uint32_t dst, uint32_t dst_len) {
   return KAME_WASM_OK;
 }
 
+/* Instance-scoped retrieval of the static emergency slot. It is valid even
+ * after an out-of-memory failure because it is part of the instance record. */
+uint32_t kame_wasm_instance_diagnostic_length(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return 0u;
+  return instance->diagnostic_len;
+}
+
+uint32_t kame_wasm_instance_diagnostic_copy(uint64_t handle, uint32_t dst, uint32_t dst_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (dst_len < instance->diagnostic_len) return KAME_WASM_BUFFER_TOO_SMALL;
+  if (instance->diagnostic_len == 0u) return KAME_WASM_OK;
+  if (dst == 0u) return KAME_WASM_STATE_INVALID;
+  uint8_t *out = (uint8_t *)(uintptr_t)dst;
+  for (uint32_t i = 0; i < instance->diagnostic_len; i++) out[i] = (uint8_t)instance->diagnostic[i];
+  return KAME_WASM_OK;
+}
+
+/* Copy the current diagnostic's source span into two caller-owned int32 slots.
+ * Returns OK and writes the span when one is present, STATE_INVALID otherwise. */
+uint32_t kame_wasm_instance_diagnostic_span(uint64_t handle, uint32_t out_start, uint32_t out_end) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (!instance->diagnostic_has_span) return KAME_WASM_STATE_INVALID;
+  if (out_start == 0u || out_end == 0u) return KAME_WASM_STATE_INVALID;
+  *(int32_t *)(uintptr_t)out_start = instance->diagnostic_span_start;
+  *(int32_t *)(uintptr_t)out_end = instance->diagnostic_span_end;
+  return KAME_WASM_OK;
+}
+
 uint64_t kame_wasm_instance_create(void) {
   for (uint32_t i = 0; i < KAME_WASM_INSTANCE_CAPACITY; i++) {
     kame_wasm_instance *instance = &kame_wasm_instances[i];
-    if (instance->live || instance->retired) continue;
-    if (instance->generation == 0u) instance->generation = 1u;
-    instance->live = true;
+    if (instance->live) continue;
+    uint64_t owner = kame_wasm_next_token();
+    wasm_Handle handle = wasm_Table_Add(kame_wasm_table(), owner, (uint64_t)i);
+    if (handle == 0u) {
+      kame_wasm_set_static_diagnostic("NO_MEMORY", "instance handle table is full");
+      return 0u;
+    }
+    instance->owner = owner;
     instance->source_len = 0u;
-    return kame_wasm_handle(i, instance->generation);
+    instance->source_name_len = 0u;
+    instance->runtime = NULL;
+    instance->pending = (host_Request){};
+    instance->has_pending = false;
+    instance->event_pinned = false;
+    instance->request = 0u;
+    instance->last_request = 0u;
+    instance->root = 0u;
+    instance->node = 0u;
+    instance->live = true;
+    return (uint64_t)handle;
   }
   kame_wasm_set_static_diagnostic("NO_MEMORY", "instance handle table is full");
   return 0u;
@@ -186,12 +342,29 @@ uint32_t kame_wasm_instance_free(uint64_t handle) {
     wasm_Runtime_Free(instance->runtime);
     instance->runtime = NULL;
   }
+  /* Release every handle owned by this instance, including its own. */
+  wasm_Table_FreeAll(kame_wasm_table(), instance->owner);
   instance->live = false;
+  instance->owner = 0u;
   instance->source_len = 0u;
   instance->has_pending = false;
   instance->event_pinned = false;
-  if (instance->generation == UINT32_MAX) instance->retired = true;
-  else instance->generation++;
+  instance->request = 0u;
+  instance->last_request = 0u;
+  instance->root = 0u;
+  instance->node = 0u;
+  return KAME_WASM_OK;
+}
+
+/* Label the compiled source for diagnostics. Must be called before
+ * kame_wasm_source_compile; an unset or empty name keeps the default. */
+uint32_t kame_wasm_set_source_name(uint64_t handle, uint32_t name, uint32_t name_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (name_len != 0u && name == 0u) return KAME_WASM_STATE_INVALID;
+  if (name_len > sizeof(instance->source_name)) return KAME_WASM_NO_MEMORY;
+  for (uint32_t i = 0; i < name_len; i++) instance->source_name[i] = ((const char *)(uintptr_t)name)[i];
+  instance->source_name_len = name_len;
   return KAME_WASM_OK;
 }
 
@@ -199,18 +372,19 @@ uint32_t kame_wasm_source_compile(uint64_t handle, uint32_t source, uint32_t sou
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
   if ((source_len != 0u && source == 0u)) return KAME_WASM_STATE_INVALID;
+  instance->diagnostic_len = 0u;
   if (instance->has_pending) {
-    kame_wasm_set_static_diagnostic("PHASE_INVALID", "cannot compile while a host request is pending");
+    kame_wasm_instance_set_static_diagnostic(instance, "PHASE_INVALID", "cannot compile while a host request is pending");
     return KAME_WASM_STATE_INVALID;
   }
   if (source_len > KAME_WASM_SOURCE_CAPACITY) {
-    kame_wasm_set_static_diagnostic("NO_MEMORY", "source exceeds instance capacity");
+    kame_wasm_instance_set_static_diagnostic(instance, "NO_MEMORY", "source exceeds instance capacity");
     return KAME_WASM_NO_MEMORY;
   }
   size_t mark = so_heap_mark();
   wasm_PureResult result = wasm_ValidateSource(mem_System, (so_String){(const char *)(uintptr_t)source, (so_int)source_len});
   if (result.Code.len != 0) {
-    kame_wasm_set_diagnostic(result.Code, result.Message);
+    kame_wasm_instance_set_diagnostic_span(instance, result.Code, result.Message, (int32_t)result.SpanStart, (int32_t)result.SpanEnd);
     wasm_PureResult_Free(&result, mem_System);
     so_heap_release(mark);
     return KAME_WASM_DIAGNOSTIC;
@@ -225,9 +399,10 @@ uint32_t kame_wasm_source_compile(uint64_t handle, uint32_t source, uint32_t sou
   }
   wasm_RuntimeStart started = wasm_NewRuntimeIn(
       (so_Slice){(so_byte *)instance->arena, (so_int)KAME_WASM_ARENA_CAPACITY, (so_int)KAME_WASM_ARENA_CAPACITY},
+      (so_String){instance->source_name, (so_int)instance->source_name_len},
       (so_String){instance->source, (so_int)instance->source_len});
   if (started.Runtime == NULL) {
-    kame_wasm_set_diagnostic(started.Result.Code, started.Result.Message);
+    kame_wasm_instance_set_diagnostic(instance, started.Result.Code, started.Result.Message);
     wasm_PureResult_Free(&started.Result, mem_System);
     return KAME_WASM_DIAGNOSTIC;
   }
@@ -239,12 +414,248 @@ uint32_t kame_wasm_expression_begin(uint64_t handle, uint32_t source, uint32_t s
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
   if (instance->runtime == NULL || (source_len != 0u && source == 0u)) return KAME_WASM_STATE_INVALID;
+  instance->diagnostic_len = 0u;
   wasm_PureResult result = wasm_Runtime_RequestExpression(instance->runtime, (so_String){(const char *)(uintptr_t)source, (so_int)source_len});
   if (result.Code.len != 0) {
-    kame_wasm_set_diagnostic(result.Code, result.Message);
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
     wasm_PureResult_Free(&result, instance->runtime->Alloc);
     return KAME_WASM_DIAGNOSTIC;
   }
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  instance->root = kame_wasm_child_handle(instance, 0u);
+  instance->node = kame_wasm_child_handle(instance, 0u);
+  if (instance->root == 0u || instance->node == 0u) {
+    kame_wasm_instance_set_static_diagnostic(instance, "NO_MEMORY", "cannot allocate expression handles");
+    return KAME_WASM_NO_MEMORY;
+  }
+  return KAME_WASM_OK;
+}
+
+/* Set the working directory the build runtime canonicalizes against. Must be
+ * called before kame_wasm_prepare, kame_wasm_target_begin, or kame_wasm_plan. */
+uint32_t kame_wasm_set_directory(uint64_t handle, uint32_t directory, uint32_t directory_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL) return KAME_WASM_STATE_INVALID;
+  if (directory_len != 0u && directory == 0u) return KAME_WASM_STATE_INVALID;
+  bool ok = wasm_Runtime_SetDirectory(instance->runtime, (so_String){(const char *)(uintptr_t)directory, (so_int)directory_len});
+  return ok ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
+/* Route target host requests to the embedding host instead of the in-memory
+ * filesystem. Must be called before kame_wasm_target_begin. */
+uint32_t kame_wasm_set_forwarding(uint64_t handle, uint32_t enabled) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL) return KAME_WASM_STATE_INVALID;
+  bool ok = wasm_Runtime_SetForwarding(instance->runtime, enabled != 0u);
+  return ok ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
+/* Supplying an in-memory file or environment entry before kame_wasm_target_begin
+ * lets a target run without any asynchronous host work. */
+uint32_t kame_wasm_host_set_file(uint64_t handle, uint32_t path, uint32_t path_len, uint32_t data, uint32_t data_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL) return KAME_WASM_STATE_INVALID;
+  if ((path_len != 0u && path == 0u) || (data_len != 0u && data == 0u)) return KAME_WASM_STATE_INVALID;
+  bool ok = wasm_Runtime_SetFile(instance->runtime,
+      (so_String){(const char *)(uintptr_t)path, (so_int)path_len},
+      (so_Slice){(so_byte *)(uintptr_t)data, (so_int)data_len, (so_int)data_len});
+  return ok ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
+uint32_t kame_wasm_host_set_env(uint64_t handle, uint32_t name, uint32_t name_len, uint32_t value, uint32_t value_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL) return KAME_WASM_STATE_INVALID;
+  if ((name_len != 0u && name == 0u) || (value_len != 0u && value == 0u)) return KAME_WASM_STATE_INVALID;
+  bool ok = wasm_Runtime_SetEnvironment(instance->runtime,
+      (so_String){(const char *)(uintptr_t)name, (so_int)name_len},
+      (so_String){(const char *)(uintptr_t)value, (so_int)value_len});
+  return ok ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
+/* Schedule one target through the portable build runtime. The active root is a
+ * target rather than an expression; step, result, and diagnostics are shared. */
+uint32_t kame_wasm_target_begin(uint64_t handle, uint32_t target, uint32_t target_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || (target_len != 0u && target == 0u)) return KAME_WASM_STATE_INVALID;
+  instance->diagnostic_len = 0u;
+  wasm_PureResult result = wasm_Runtime_RequestTarget(instance->runtime, (so_String){(const char *)(uintptr_t)target, (so_int)target_len});
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
+/* Pop one queued target lifecycle event and copy its schema-1 JSON line. A
+ * zero-length result means no event is pending. */
+uint32_t kame_wasm_target_event(uint64_t handle, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || out_len == 0u) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  if (wasm_Runtime_EventJSONLength(instance->runtime) == 0) {
+    wasm_Runtime_NextEventJSON(instance->runtime);
+  }
+  uint32_t needed = (uint32_t)wasm_Runtime_EventJSONLength(instance->runtime);
+  *(uint32_t *)(uintptr_t)out_len = needed;
+  if (needed == 0u) return KAME_WASM_OK;
+  if (dst_len < needed) return KAME_WASM_BUFFER_TOO_SMALL;
+  if (dst == 0u) return KAME_WASM_STATE_INVALID;
+  if (!wasm_Runtime_EventJSONCopy(instance->runtime,
+      (so_Slice){(so_byte *)(uintptr_t)dst, (so_int)needed, (so_int)needed})) {
+    return KAME_WASM_STATE_INVALID;
+  }
+  return KAME_WASM_OK;
+}
+
+uint32_t kame_wasm_process_started(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || !instance->has_pending) return KAME_WASM_STATE_INVALID;
+  wasm_Runtime_ProcessStarted(instance->runtime, instance->pending);
+  return KAME_WASM_OK;
+}
+
+uint32_t kame_wasm_process_stream(uint64_t handle, uint32_t stderr, uint32_t data, uint32_t data_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || !instance->has_pending) return KAME_WASM_STATE_INVALID;
+  if (data_len != 0u && data == 0u) return KAME_WASM_STATE_INVALID;
+  wasm_Runtime_ProcessStream(instance->runtime, instance->pending, stderr != 0u,
+      (so_Slice){(so_byte *)(uintptr_t)data, (so_int)data_len, (so_int)data_len});
+  return KAME_WASM_OK;
+}
+
+uint32_t kame_wasm_process_terminal(uint64_t handle, int32_t status, int32_t signal, uint32_t outcome,
+    uint32_t stdout_, uint32_t stdout_len, uint32_t stderr_, uint32_t stderr_len,
+    uint32_t code, uint32_t code_len, uint32_t message, uint32_t message_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || !instance->has_pending) return KAME_WASM_STATE_INVALID;
+  if (stdout_len != 0u && stdout_ == 0u) return KAME_WASM_STATE_INVALID;
+  if (stderr_len != 0u && stderr_ == 0u) return KAME_WASM_STATE_INVALID;
+  wasm_Runtime_ProcessTerminal(instance->runtime, instance->pending,
+      (so_Slice){(so_byte *)(uintptr_t)stdout_, (so_int)stdout_len, (so_int)stdout_len},
+      (so_Slice){(so_byte *)(uintptr_t)stderr_, (so_int)stderr_len, (so_int)stderr_len},
+      (so_int)status, (so_int)signal, (so_int)outcome,
+      (so_String){(const char *)(uintptr_t)code, (so_int)code_len},
+      (so_String){(const char *)(uintptr_t)message, (so_int)message_len});
+  instance->pending = (host_Request){};
+  instance->has_pending = false;
+  instance->event_pinned = false;
+  instance->request = 0u;
+  return KAME_WASM_OK;
+}
+
+/* Copy the declared build tool names as a JSON array. */
+uint32_t kame_wasm_tools(uint64_t handle, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || out_len == 0u) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
+  wasm_PureResult result = wasm_Runtime_ToolNames(instance->runtime);
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  uint32_t needed = (uint32_t)result.Text.len;
+  *(uint32_t *)(uintptr_t)out_len = needed;
+  if (dst_len < needed) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_BUFFER_TOO_SMALL;
+  }
+  if (needed != 0u && dst == 0u) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_STATE_INVALID;
+  }
+  for (uint32_t i = 0; i < needed; i++) ((uint8_t *)(uintptr_t)dst)[i] = (uint8_t)result.Text.ptr[i];
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
+/* Walk one target's declared inputs/outputs (kind 0/1) or span (kind 2). */
+uint32_t kame_wasm_graph(uint64_t handle, uint32_t target, uint32_t target_len, int32_t depth, uint32_t kind, uint32_t expand, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || out_len == 0u || (target_len != 0u && target == 0u)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
+  so_String name = (so_String){(const char *)(uintptr_t)target, (so_int)target_len};
+  wasm_PureResult result;
+  if (kind == 2u) {
+    result = wasm_Runtime_SpanJSON(instance->runtime, name, (so_int)depth, expand != 0u);
+  } else {
+    result = wasm_Runtime_GraphJSON(instance->runtime, name, (so_int)depth, kind == 0u ? so_str("inputs") : so_str("outputs"));
+  }
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  uint32_t needed = (uint32_t)result.Text.len;
+  *(uint32_t *)(uintptr_t)out_len = needed;
+  if (dst_len < needed) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_BUFFER_TOO_SMALL;
+  }
+  if (needed != 0u && dst == 0u) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_STATE_INVALID;
+  }
+  for (uint32_t i = 0; i < needed; i++) ((uint8_t *)(uintptr_t)dst)[i] = (uint8_t)result.Text.ptr[i];
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
+/* Compile the instance source into a build runtime for planning/inspection. */
+uint32_t kame_wasm_prepare(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL) return KAME_WASM_STATE_INVALID;
+  instance->diagnostic_len = 0u;
+  wasm_PureResult result = wasm_Runtime_Prepare(instance->runtime);
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
+/* Resolve one target plan and copy its schema-1 JSON into caller memory. */
+uint32_t kame_wasm_plan(uint64_t handle, uint32_t target, uint32_t target_len, uint32_t expand, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || out_len == 0u || (target_len != 0u && target == 0u)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
+  wasm_PureResult result = wasm_Runtime_PlanJSON(instance->runtime, (so_String){(const char *)(uintptr_t)target, (so_int)target_len}, expand != 0u);
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  uint32_t needed = (uint32_t)result.Text.len;
+  *(uint32_t *)(uintptr_t)out_len = needed;
+  if (dst_len < needed) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_BUFFER_TOO_SMALL;
+  }
+  if (needed != 0u && dst == 0u) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_STATE_INVALID;
+  }
+  for (uint32_t i = 0; i < needed; i++) ((uint8_t *)(uintptr_t)dst)[i] = (uint8_t)result.Text.ptr[i];
   wasm_PureResult_Free(&result, instance->runtime->Alloc);
   return KAME_WASM_OK;
 }
@@ -253,6 +664,8 @@ uint32_t kame_wasm_expression_cancel(uint64_t handle) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
   if (instance->runtime == NULL || !wasm_Runtime_Cancel(instance->runtime)) return KAME_WASM_STATE_INVALID;
+  if (instance->request != 0u) instance->last_request = instance->request;
+  instance->request = 0u;
   if (instance->has_pending) {
     host_Request_Free(&instance->pending, instance->runtime->Alloc);
     instance->pending = (host_Request){};
@@ -272,6 +685,11 @@ uint32_t kame_wasm_step(uint64_t handle) {
     instance->pending = next.Request;
     instance->has_pending = true;
     instance->event_pinned = true;
+    instance->request = kame_wasm_child_handle(instance, (uint64_t)next.Request.ID);
+    instance->last_request = instance->request;
+    if (instance->request == 0u) {
+      kame_wasm_instance_set_static_diagnostic(instance, "NO_MEMORY", "cannot allocate request handle");
+    }
     return 1u;
   }
   wasm_RuntimeResult result = wasm_Runtime_Result(instance->runtime);
@@ -285,17 +703,17 @@ uint32_t kame_wasm_step(uint64_t handle) {
 uint32_t kame_wasm_next_event_header(uint64_t handle, uint32_t dst, uint32_t dst_len) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
-  if (!instance->has_pending || !instance->event_pinned) return KAME_WASM_STATE_INVALID;
+  if (!instance->has_pending || !instance->event_pinned || instance->request == 0u) return KAME_WASM_STATE_INVALID;
   so_String payload = kame_wasm_request_payload(instance->pending);
-  return kame_wasm_event_header(dst, dst_len, 1u, handle, (uint64_t)instance->pending.NodeID,
-      (uint64_t)instance->pending.ID, instance->pending.Generation, 0, (uint32_t)payload.len);
+  return kame_wasm_event_header(dst, dst_len, 1u, instance->root, instance->node,
+      instance->request, instance->pending.Generation, 0, (uint32_t)payload.len);
 }
 
 uint32_t kame_wasm_next_request_kind(uint64_t handle) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return 0u;
   if (!instance->has_pending || !instance->event_pinned) return 0u;
-  return (uint32_t)instance->pending.Kind;
+  return kame_wasm_request_kind(instance->pending);
 }
 
 uint32_t kame_wasm_next_request_data_length(uint64_t handle) {
@@ -314,6 +732,50 @@ uint32_t kame_wasm_request_data_copy(uint64_t handle, uint32_t dst, uint32_t dst
   if (data.len != 0 && dst == 0u) return KAME_WASM_STATE_INVALID;
   const uint8_t *bytes = (const uint8_t *)data.ptr;
   for (so_int i = 0; i < data.len; i++) ((uint8_t *)(uintptr_t)dst)[i] = bytes[i];
+  return KAME_WASM_OK;
+}
+
+static bool kame_wasm_is_cache_request(host_RequestKind kind) {
+  return kind == host_RequestCacheGet || kind == host_RequestCachePut || kind == host_RequestCacheDelete;
+}
+
+/* Copy the opaque cache key of a pinned cache request. */
+uint32_t kame_wasm_next_request_key_length(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL || !instance->has_pending || !instance->event_pinned) return 0u;
+  if (!kame_wasm_is_cache_request(instance->pending.Kind)) return 0u;
+  return (uint32_t)host_CacheKey(instance->pending.Payload).len;
+}
+
+uint32_t kame_wasm_request_key_copy(uint64_t handle, uint32_t dst, uint32_t dst_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (!instance->has_pending || !instance->event_pinned || !kame_wasm_is_cache_request(instance->pending.Kind)) return KAME_WASM_STATE_INVALID;
+  so_Slice key = host_CacheKey(instance->pending.Payload);
+  if (dst_len < (uint32_t)key.len) return KAME_WASM_BUFFER_TOO_SMALL;
+  if (key.len != 0 && dst == 0u) return KAME_WASM_STATE_INVALID;
+  const uint8_t *bytes = (const uint8_t *)key.ptr;
+  for (so_int i = 0; i < key.len; i++) ((uint8_t *)(uintptr_t)dst)[i] = bytes[i];
+  return KAME_WASM_OK;
+}
+
+/* Copy the opaque record carried by a pinned cache put request. */
+uint32_t kame_wasm_next_request_record_length(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL || !instance->has_pending || !instance->event_pinned) return 0u;
+  if (instance->pending.Kind != host_RequestCachePut) return 0u;
+  return (uint32_t)host_CacheRecord(instance->pending.Payload).len;
+}
+
+uint32_t kame_wasm_request_record_copy(uint64_t handle, uint32_t dst, uint32_t dst_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (!instance->has_pending || !instance->event_pinned || instance->pending.Kind != host_RequestCachePut) return KAME_WASM_STATE_INVALID;
+  so_Slice record = host_CacheRecord(instance->pending.Payload);
+  if (dst_len < (uint32_t)record.len) return KAME_WASM_BUFFER_TOO_SMALL;
+  if (record.len != 0 && dst == 0u) return KAME_WASM_STATE_INVALID;
+  const uint8_t *bytes = (const uint8_t *)record.ptr;
+  for (so_int i = 0; i < record.len; i++) ((uint8_t *)(uintptr_t)dst)[i] = bytes[i];
   return KAME_WASM_OK;
 }
 
@@ -336,45 +798,74 @@ uint32_t kame_wasm_event_discard(uint64_t handle) {
   return KAME_WASM_OK;
 }
 
-uint32_t kame_wasm_complete_bytes(uint64_t handle, uint64_t request, uint32_t data, uint32_t data_len) {
-  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
-  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
-  /* A request that was already completed is a harmless late host callback.
-   * There is no retained host buffer or runtime mutation to perform. */
-  if (!instance->has_pending) return KAME_WASM_OK;
-  if (instance->pending.ID != (int64_t)request) return KAME_WASM_STATE_INVALID;
-  if (data_len != 0u && data == 0u) return KAME_WASM_STATE_INVALID;
-  core_Value value = core_NewBytes(instance->runtime->Alloc, (so_Slice){(so_byte *)(uintptr_t)data, (so_int)data_len, (so_int)data_len});
-  wasm_Runtime_Complete(instance->runtime, instance->pending, value, (diagnostic_Diagnostic){});
+/*
+ * Resolve a completion's request handle. The handle must belong to this
+ * instance. A handle matching the request that is currently pinned is applied;
+ * a completion for the most recent request after it completed or was cancelled
+ * is accepted and ignored, as docs/spec/010-wasm.md requires. Any other handle
+ * is foreign or stale.
+ */
+static uint32_t kame_wasm_completion_target(kame_wasm_instance *instance, uint64_t request, bool *pending) {
+  *pending = false;
+  if (request == 0u) return KAME_WASM_HANDLE_INVALID;
+  wasm_Table *table = kame_wasm_table();
+  uint64_t owner = wasm_Table_Owner(table, (wasm_Handle)request);
+  if (owner == 0u || owner != instance->owner) return KAME_WASM_HANDLE_INVALID;
+  so_R_u64_bool resolved = wasm_Table_Get(table, owner, (wasm_Handle)request);
+  if (!resolved.val2) return KAME_WASM_HANDLE_INVALID;
+  if (instance->has_pending) {
+    if (request != instance->request) return KAME_WASM_HANDLE_INVALID;
+    *pending = true;
+    return KAME_WASM_OK;
+  }
+  if (request != instance->last_request) return KAME_WASM_HANDLE_INVALID;
+  return KAME_WASM_OK;
+}
+
+static void kame_wasm_clear_completion(kame_wasm_instance *instance) {
   instance->pending = (host_Request){};
   instance->has_pending = false;
   instance->event_pinned = false;
+  instance->request = 0u;
+}
+
+uint32_t kame_wasm_complete_bytes(uint64_t handle, uint64_t request, uint32_t data, uint32_t data_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  bool pending = false;
+  uint32_t status = kame_wasm_completion_target(instance, request, &pending);
+  if (status != KAME_WASM_OK) return status;
+  if (!pending) return KAME_WASM_OK;
+  if (data_len != 0u && data == 0u) return KAME_WASM_STATE_INVALID;
+  core_Value value = core_NewBytes(instance->runtime->Alloc, (so_Slice){(so_byte *)(uintptr_t)data, (so_int)data_len, (so_int)data_len});
+  wasm_Runtime_Complete(instance->runtime, instance->pending, value, (diagnostic_Diagnostic){});
+  kame_wasm_clear_completion(instance);
   return KAME_WASM_OK;
 }
 
 uint32_t kame_wasm_complete_text(uint64_t handle, uint64_t request, uint32_t data, uint32_t data_len) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
-  if (!instance->has_pending) return KAME_WASM_OK;
-  if (instance->pending.ID != (int64_t)request) return KAME_WASM_STATE_INVALID;
+  bool pending = false;
+  uint32_t status = kame_wasm_completion_target(instance, request, &pending);
+  if (status != KAME_WASM_OK) return status;
+  if (!pending) return KAME_WASM_OK;
   if (data_len != 0u && data == 0u) return KAME_WASM_STATE_INVALID;
   core_Value value = core_NewString(instance->runtime->Alloc, (so_String){(const char *)(uintptr_t)data, (so_int)data_len});
   wasm_Runtime_Complete(instance->runtime, instance->pending, value, (diagnostic_Diagnostic){});
-  instance->pending = (host_Request){};
-  instance->has_pending = false;
-  instance->event_pinned = false;
+  kame_wasm_clear_completion(instance);
   return KAME_WASM_OK;
 }
 
 uint32_t kame_wasm_complete_nil(uint64_t handle, uint64_t request) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
-  if (!instance->has_pending) return KAME_WASM_OK;
-  if (instance->pending.ID != (int64_t)request) return KAME_WASM_STATE_INVALID;
+  bool pending = false;
+  uint32_t status = kame_wasm_completion_target(instance, request, &pending);
+  if (status != KAME_WASM_OK) return status;
+  if (!pending) return KAME_WASM_OK;
   wasm_Runtime_Complete(instance->runtime, instance->pending, (core_Value){}, (diagnostic_Diagnostic){});
-  instance->pending = (host_Request){};
-  instance->has_pending = false;
-  instance->event_pinned = false;
+  kame_wasm_clear_completion(instance);
   return KAME_WASM_OK;
 }
 
@@ -383,18 +874,47 @@ uint32_t kame_wasm_complete_failure(uint64_t handle, uint64_t request,
                                     uint32_t message, uint32_t message_len) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
-  if (!instance->has_pending) return KAME_WASM_OK;
-  if (instance->pending.ID != (int64_t)request) return KAME_WASM_STATE_INVALID;
+  bool pending = false;
+  uint32_t status = kame_wasm_completion_target(instance, request, &pending);
+  if (status != KAME_WASM_OK) return status;
+  if (!pending) return KAME_WASM_OK;
   if ((code_len != 0u && code == 0u) || (message_len != 0u && message == 0u)) return KAME_WASM_STATE_INVALID;
   diagnostic_Diagnostic diagnostic = (diagnostic_Diagnostic){
       .Code = (so_String){(const char *)(uintptr_t)code, (so_int)code_len},
       .Message = (so_String){(const char *)(uintptr_t)message, (so_int)message_len},
   };
   wasm_Runtime_Complete(instance->runtime, instance->pending, (core_Value){}, diagnostic);
-  instance->pending = (host_Request){};
-  instance->has_pending = false;
-  instance->event_pinned = false;
+  kame_wasm_clear_completion(instance);
   return KAME_WASM_OK;
+}
+
+/* Complete a structured request with a canonical JSON value. Records, lists,
+ * booleans, integers, floats, strings, and null are accepted; the engine owns
+ * the parsed value. Invalid JSON fails the pending request with HOST_FAIL. */
+uint32_t kame_wasm_complete_json(uint64_t handle, uint64_t request, uint32_t data, uint32_t data_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  bool pending = false;
+  uint32_t status = kame_wasm_completion_target(instance, request, &pending);
+  if (status != KAME_WASM_OK) return status;
+  if (!pending) return KAME_WASM_OK;
+  if (data_len != 0u && data == 0u) return KAME_WASM_STATE_INVALID;
+  core_Value value = (core_Value){};
+  so_Slice json = (so_Slice){(so_byte *)(uintptr_t)data, (so_int)data_len, (so_int)data_len};
+  if (!wasm_CompletionValueFromJSON(instance->runtime->Alloc, json, &value)) {
+    kame_wasm_instance_set_static_diagnostic(instance, "HOST_FAIL", "host completion is not valid canonical JSON");
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  wasm_Runtime_Complete(instance->runtime, instance->pending, value, (diagnostic_Diagnostic){});
+  kame_wasm_clear_completion(instance);
+  return KAME_WASM_OK;
+}
+
+/* Shape of a completed target: 0 none, 1 definition value, 2 file path. */
+uint32_t kame_wasm_result_kind(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL || instance->runtime == NULL) return 0u;
+  return wasm_Runtime_TargetResultKind(instance->runtime);
 }
 
 uint32_t kame_wasm_result_copy(uint64_t handle, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
@@ -402,56 +922,39 @@ uint32_t kame_wasm_result_copy(uint64_t handle, uint32_t dst, uint32_t dst_len, 
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
   if (instance->runtime == NULL || out_len == 0u) return KAME_WASM_STATE_INVALID;
   *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
   wasm_RuntimeResult result = wasm_Runtime_Result(instance->runtime);
   if (!result.Done) {
     wasm_RuntimeResult_Free(&result, instance->runtime->Alloc);
     return KAME_WASM_STATE_INVALID;
   }
   if (result.Diagnostic.Code.len != 0) {
-    kame_wasm_set_diagnostic(result.Diagnostic.Code, result.Diagnostic.Message);
+    kame_wasm_instance_set_diagnostic(instance, result.Diagnostic.Code, result.Diagnostic.Message);
     wasm_RuntimeResult_Free(&result, instance->runtime->Alloc);
     return KAME_WASM_DIAGNOSTIC;
   }
-  if (result.Value.Kind == core_Bytes) {
-    uint32_t needed = (uint32_t)result.Value.Bytes.len;
-    *(uint32_t *)(uintptr_t)out_len = needed;
-    if (dst_len < needed) {
-      wasm_RuntimeResult_Free(&result, instance->runtime->Alloc);
-      return KAME_WASM_BUFFER_TOO_SMALL;
-    }
-    if (needed != 0u && dst == 0u) {
-      wasm_RuntimeResult_Free(&result, instance->runtime->Alloc);
-      return KAME_WASM_STATE_INVALID;
-    }
-    const uint8_t *bytes = (const uint8_t *)result.Value.Bytes.ptr;
-    for (uint32_t i = 0; i < needed; i++) ((uint8_t *)(uintptr_t)dst)[i] = bytes[i];
-    wasm_RuntimeResult_Free(&result, instance->runtime->Alloc);
-    return KAME_WASM_OK;
-  }
-  so_R_str_bool text = eval_Stringify(instance->runtime->Alloc, result.Value);
+  // Render exactly as the native CLI writes a result to stdout.
+  so_String text = eval_Display(instance->runtime->Alloc, result.Value);
   wasm_RuntimeResult_Free(&result, instance->runtime->Alloc);
-  if (!text.val2) {
-    kame_wasm_set_static_diagnostic("EXPR_INVALID", "terminal value cannot be represented as text");
-    return KAME_WASM_DIAGNOSTIC;
-  }
-  *(uint32_t *)(uintptr_t)out_len = (uint32_t)text.val.len;
-  if (dst_len < (uint32_t)text.val.len) {
-    mem_FreeString(instance->runtime->Alloc, text.val);
+  *(uint32_t *)(uintptr_t)out_len = (uint32_t)text.len;
+  if (dst_len < (uint32_t)text.len) {
+    mem_FreeString(instance->runtime->Alloc, text);
     return KAME_WASM_BUFFER_TOO_SMALL;
   }
-  if (text.val.len != 0 && dst == 0u) {
-    mem_FreeString(instance->runtime->Alloc, text.val);
+  if (text.len != 0 && dst == 0u) {
+    mem_FreeString(instance->runtime->Alloc, text);
     return KAME_WASM_STATE_INVALID;
   }
-  for (so_int i = 0; i < text.val.len; i++) ((uint8_t *)(uintptr_t)dst)[i] = (uint8_t)text.val.ptr[i];
-  mem_FreeString(instance->runtime->Alloc, text.val);
+  for (so_int i = 0; i < text.len; i++) ((uint8_t *)(uintptr_t)dst)[i] = (uint8_t)text.ptr[i];
+  mem_FreeString(instance->runtime->Alloc, text);
   return KAME_WASM_OK;
 }
 
 static uint32_t kame_wasm_finish_pure(size_t mark, wasm_PureResult result,
-                                      uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+                                      uint32_t dst, uint32_t dst_len, uint32_t out_len,
+                                      char *diag, uint32_t diag_cap, uint32_t *diag_len) {
   if (result.Code.len != 0) {
-    kame_wasm_set_diagnostic(result.Code, result.Message);
+    kame_wasm_write_diagnostic(diag, diag_cap, diag_len, result.Code, result.Message);
     wasm_PureResult_Free(&result, mem_System);
     so_heap_release(mark);
     return KAME_WASM_DIAGNOSTIC;
@@ -474,6 +977,66 @@ static uint32_t kame_wasm_finish_pure(size_t mark, wasm_PureResult result,
   return KAME_WASM_OK;
 }
 
+/* Parse one language source and return its schema-1 AST JSON. Parse errors are
+ * embedded in the JSON diagnostics, matching the native `do parse` output. */
+uint32_t kame_wasm_parse(uint64_t handle, uint32_t lang, uint32_t lang_len,
+                         uint32_t name, uint32_t name_len,
+                         uint32_t text, uint32_t text_len,
+                         uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (out_len == 0u || (lang_len != 0u && lang == 0u) || (name_len != 0u && name == 0u) || (text_len != 0u && text == 0u)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
+  size_t mark = so_heap_mark();
+  wasm_PureResult result = wasm_ParseLanguage(
+      mem_System,
+      (so_String){(const char *)(uintptr_t)lang, (so_int)lang_len},
+      (so_String){(const char *)(uintptr_t)name, (so_int)name_len},
+      (so_String){(const char *)(uintptr_t)text, (so_int)text_len});
+  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len, instance->diagnostic, (uint32_t)sizeof(instance->diagnostic), &instance->diagnostic_len);
+}
+
+/* Format one language source and copy the canonical text into caller-owned
+ * memory. A parse failure reports the first diagnostic through the instance. */
+uint32_t kame_wasm_format(uint64_t handle, uint32_t lang, uint32_t lang_len,
+                          uint32_t name, uint32_t name_len,
+                          uint32_t text, uint32_t text_len,
+                          uint32_t indent, uint32_t indent_len, uint32_t width,
+                          uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (out_len == 0u || (lang_len != 0u && lang == 0u) || (name_len != 0u && name == 0u) || (text_len != 0u && text == 0u) || (indent_len != 0u && indent == 0u)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
+  size_t mark = so_heap_mark();
+  wasm_PureResult result = wasm_FormatLanguage(
+      mem_System,
+      (so_String){(const char *)(uintptr_t)lang, (so_int)lang_len},
+      (so_String){(const char *)(uintptr_t)name, (so_int)name_len},
+      (so_String){(const char *)(uintptr_t)text, (so_int)text_len},
+      (so_String){(const char *)(uintptr_t)indent, (so_int)indent_len},
+      (so_int)width);
+  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len, instance->diagnostic, (uint32_t)sizeof(instance->diagnostic), &instance->diagnostic_len);
+}
+
+/* Parse one command line with the shared CLI grammar and return its
+ * Invocation JSON. Arguments are NUL-separated; command is "" for the primary
+ * invocation. This is the single grammar shared with the native CLI. */
+uint32_t kame_wasm_cli(uint64_t handle, uint32_t command, uint32_t command_len, uint32_t args, uint32_t args_len, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (out_len == 0u || (command_len != 0u && command == 0u) || (args_len != 0u && args == 0u)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
+  size_t mark = so_heap_mark();
+  wasm_PureResult result = wasm_ParseCLI(
+      mem_System,
+      (so_String){(const char *)(uintptr_t)command, (so_int)command_len},
+      (so_String){(const char *)(uintptr_t)args, (so_int)args_len});
+  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len, instance->diagnostic, (uint32_t)sizeof(instance->diagnostic), &instance->diagnostic_len);
+}
+
 uint32_t kame_wasm_eval_pure(uint32_t source, uint32_t source_len,
                              uint32_t dst, uint32_t dst_len, uint32_t out_len) {
   if (out_len == 0u || (source_len != 0u && source == 0u)) return KAME_WASM_STATE_INVALID;
@@ -481,7 +1044,8 @@ uint32_t kame_wasm_eval_pure(uint32_t source, uint32_t source_len,
   kame_wasm_diagnostic_len = 0u;
   size_t mark = so_heap_mark();
   wasm_PureResult result = wasm_EvaluatePure(mem_System, (so_String){(const char *)(uintptr_t)source, (so_int)source_len});
-  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len);
+  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len,
+      kame_wasm_diagnostic, (uint32_t)sizeof(kame_wasm_diagnostic), &kame_wasm_diagnostic_len);
 }
 
 uint32_t kame_wasm_eval_source_pure(uint32_t program, uint32_t program_len,
@@ -495,7 +1059,8 @@ uint32_t kame_wasm_eval_source_pure(uint32_t program, uint32_t program_len,
       mem_System,
       (so_String){(const char *)(uintptr_t)program, (so_int)program_len},
       (so_String){(const char *)(uintptr_t)source, (so_int)source_len});
-  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len);
+  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len,
+      kame_wasm_diagnostic, (uint32_t)sizeof(kame_wasm_diagnostic), &kame_wasm_diagnostic_len);
 }
 
 uint32_t kame_wasm_expression_request(uint64_t handle, uint32_t source,
@@ -505,11 +1070,12 @@ uint32_t kame_wasm_expression_request(uint64_t handle, uint32_t source,
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
   if (out_len == 0u || (source_len != 0u && source == 0u)) return KAME_WASM_STATE_INVALID;
   *(uint32_t *)(uintptr_t)out_len = 0u;
-  kame_wasm_diagnostic_len = 0u;
+  instance->diagnostic_len = 0u;
   size_t mark = so_heap_mark();
   wasm_PureResult result = wasm_EvaluateSourcePure(
       mem_System,
       (so_String){instance->source, (so_int)instance->source_len},
       (so_String){(const char *)(uintptr_t)source, (so_int)source_len});
-  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len);
+  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len,
+      instance->diagnostic, (uint32_t)sizeof(instance->diagnostic), &instance->diagnostic_len);
 }

@@ -7,7 +7,6 @@ import (
 	"kame/lang/rule"
 	"kame/lang/template"
 	"solod.dev/so/mem"
-	"solod.dev/so/os"
 	"solod.dev/so/slices"
 )
 
@@ -87,18 +86,18 @@ func produceExternalFile(c *core.EngineContext, nodeID int64) core.ProducerResul
 	_ = nodeID
 	state := c.Context().(*externalFileState)
 	name := state.Program.canonicalTarget(state.Name, true)
-	_, err := os.Stat(name)
+	result := state.Program.Host.Stat(name)
 	mem.FreeString(state.Program.Alloc, name)
 	// A missing path is an observed dependency, not a failed producer. Declared
 	// inputs still fail before execution. The cache records an explicit missing
 	// marker and invalidates when the path later appears.
-	if err == os.ErrNotExist {
-		c.Publish(core.Value{Kind: core.Nil})
-		return core.ProducerCompleted
-	}
-	if err != nil {
+	if result.Failed {
 		c.Fail(failure(state.Program.Alloc, "TGT_NO_RULE", "required input does not exist: "+state.Name))
 		return core.ProducerFailed
+	}
+	if !result.Exists {
+		c.Publish(core.Value{Kind: core.Nil})
+		return core.ProducerCompleted
 	}
 	c.Publish(core.NewString(c.Allocator(), state.Name))
 	return core.ProducerCompleted
@@ -128,9 +127,9 @@ func (p *Program) Materialize(target string) Result {
 	if d.Code != "" {
 		if d.Code == "TGT_NO_RULE" && isPathTarget(target) {
 			name := p.canonicalTarget(target, true)
-			_, err := os.Stat(name)
+			result := p.Host.Stat(name)
 			mem.FreeString(p.Alloc, name)
-			if err == nil {
+			if result.Exists {
 				d.Free(p.Alloc)
 				return Result{Path: cloneText(p.Alloc, target), Fresh: true}
 			}

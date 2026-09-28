@@ -7,9 +7,7 @@ import (
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"solod.dev/so/mem"
-	"solod.dev/so/os"
 	"solod.dev/so/slices"
-	"solod.dev/so/time"
 )
 
 // produce advances one rule instance through dependency resolution, rendering,
@@ -29,6 +27,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			slices.Free(p.Alloc, entry.CacheStderr)
 		}
 		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false
+		entry.cachePending = false
 		if entry.Script != "" {
 			mem.FreeString(p.Alloc, entry.Script)
 			entry.Script = ""
@@ -54,16 +53,21 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			c.Fail(c.Completion().Diagnostic)
 			return core.ProducerFailed
 		}
-		if entry.Rule.Kind == rule.FileRule {
+		// When requests are forwarded, the embedding host owns the filesystem and
+		// reports recipe failures through the completion; the local synchronous
+		// output check cannot see files the host wrote.
+		if entry.Rule.Kind == rule.FileRule && !p.Forwarding {
 			for i := range entry.Plan.Outputs {
 				name := p.canonicalTarget(entry.Plan.Outputs[i], true)
-				_, err := os.Stat(name)
+				result := p.Host.Stat(name)
 				mem.FreeString(p.Alloc, name)
-				if err != nil {
+				if !result.Exists {
 					c.Fail(failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
 					return core.ProducerFailed
 				}
 			}
+		}
+		if entry.Rule.Kind == rule.FileRule {
 			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
 		} else {
 			c.Publish(core.Value{Kind: core.Nil})
@@ -101,9 +105,9 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			}
 			resolved.Plan.Free(p.Alloc)
 			name := p.canonicalTarget(input, true)
-			_, err := os.Stat(name)
+			result := p.Host.Stat(name)
 			mem.FreeString(p.Alloc, name)
-			if err != nil {
+			if !result.Exists {
 				c.Fail(failure(p.Alloc, "TGT_NO_RULE", "required input does not exist: "+input))
 				return core.ProducerFailed
 			}
@@ -154,8 +158,15 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	if entry.Rule.Kind == rule.CachedTaskRule && !p.Options.CacheDisabled && !p.Options.Force && !p.Options.DryRun {
 		entry.CacheReady = p.cacheFingerprint(entry, commands)
 		if !p.cacheBlockedByBareTask(entry) {
-			record := p.cacheLoad(entry, entry.CacheFingerprint[:])
-			if record.Identity != "" {
+			lookup := p.cacheLookup(c, entry)
+			if lookup.Waiting {
+				if commands != "" {
+					mem.FreeString(p.Alloc, commands)
+				}
+				return core.ProducerSubmitted
+			}
+			if lookup.Hit {
+				record := lookup.Record
 				entry.Plan.Freshness = Fresh
 				p.emitCachedLog(entry, Stdout, record.Stdout, record.StdoutTruncated)
 				p.emitCachedLog(entry, Stderr, record.Stderr, record.StderrTruncated)
@@ -166,6 +177,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				c.Publish(core.Value{Kind: core.Nil})
 				return core.ProducerCompleted
 			}
+			lookup.Record.Free(p.Alloc)
 		}
 	}
 	if entry.Plan.Freshness == Fresh && !p.Options.Force && !p.Options.DryRun {
@@ -209,12 +221,12 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerFailed
 	}
 	if commands == "" {
-		if entry.Rule.Kind == rule.FileRule && !hasYield(effects) {
+		if entry.Rule.Kind == rule.FileRule && !hasYield(effects) && !p.Forwarding {
 			for i := range entry.Plan.Outputs {
 				name := p.canonicalTarget(entry.Plan.Outputs[i], true)
-				_, err := os.Stat(name)
+				result := p.Host.Stat(name)
 				mem.FreeString(p.Alloc, name)
-				if err != nil {
+				if !result.Exists {
 					c.Fail(failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
 					return core.ProducerFailed
 				}
@@ -233,7 +245,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	if entry.Rule.Kind == rule.FileRule {
 		for i := range entry.Plan.Outputs {
 			name := p.canonicalTarget(entry.Plan.Outputs[i], true)
-			ok := mkdirParent(name)
+			ok := p.mkdirParent(name)
 			mem.FreeString(p.Alloc, name)
 			if !ok {
 				c.Fail(failure(p.Alloc, "FS_ERR", "cannot create output directory"))
@@ -247,9 +259,17 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	if entry.Rule.Kind == rule.CachedTaskRule && p.Options.CacheRetainBytes > retain {
 		retain = p.Options.CacheRetainBytes
 	}
-	entry.cacheStartedAt = time.Now().UnixNano()
+	entry.cacheStartedAt = p.Host.Now()
 	entry.retryCount = 0
 	request := host.ProcessRequest{ID: p.nextRequest, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+	if p.Forwarding {
+		// The embedding host runs the recipe; correlation uses the node so the
+		// completion resumes this producer.
+		payload := host.ProcessPayload(p.Alloc, entry.Script)
+		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestProcess, Payload: payload})
+		c.Submit(request.ID)
+		return core.ProducerSubmitted
+	}
 	if p.Host == nil || !p.Host.Start(request) {
 		c.Fail(failure(p.Alloc, "HOST_FAIL", "cannot start recipe"))
 		return core.ProducerFailed

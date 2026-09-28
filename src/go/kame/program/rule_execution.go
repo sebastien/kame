@@ -7,7 +7,6 @@ import (
 	"kame/lang/rule"
 	"kame/lang/template"
 	"solod.dev/so/mem"
-	"solod.dev/so/os"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
 )
@@ -108,10 +107,8 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 			}
 			if !dryRun {
 				name := p.canonicalTarget(writePaths[writeIndex], true)
-				temporary := name + ".kame-write.tmp"
-				ok := mkdirParent(name) && os.WriteFile(temporary, effect.Data, 0o644) == nil && os.Rename(temporary, name) == nil
+				ok := p.mkdirParent(name) && p.Host.WriteFileAtomic(name, effect.Data, 0o644, false) == nil
 				if !ok {
-					os.Remove(temporary)
 					mem.FreeString(p.Alloc, name)
 					slices.Free(p.Alloc, yielded)
 					return failure(p.Alloc, "FS_ERR", "cannot write file")
@@ -135,15 +132,7 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 		return failure(p.Alloc, "EXPR_INVALID", "yield requires one file output")
 	}
 	name := p.canonicalTarget(entry.Plan.Outputs[0], true)
-	ok := mkdirParent(name)
-	temporary := name + ".kame-yield.tmp"
-	wrote := ok && os.WriteFile(temporary, yielded, 0o644) == nil
-	if wrote {
-		ok = os.Rename(temporary, name) == nil
-	}
-	if wrote && !ok {
-		os.Remove(temporary)
-	}
+	ok := p.mkdirParent(name) && p.Host.WriteFileAtomic(name, yielded, 0o644, false) == nil
 	mem.FreeString(p.Alloc, name)
 	slices.Free(p.Alloc, yielded)
 	if !ok {
@@ -153,9 +142,15 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 }
 
 func effectName(kind eval.EffectKind) string {
-	if kind == eval.EffectOut { return "out" }
-	if kind == eval.EffectErr { return "err" }
-	if kind == eval.EffectYield { return "yield" }
+	if kind == eval.EffectOut {
+		return "out"
+	}
+	if kind == eval.EffectErr {
+		return "err"
+	}
+	if kind == eval.EffectYield {
+		return "yield"
+	}
 	return "write"
 }
 
@@ -337,22 +332,21 @@ func freePlanInputs(a mem.Allocator, values []PlanInput, owned bool) {
 	}
 }
 
-func mkdirParent(name string) bool {
+func (p *Program) mkdirParent(name string) bool {
 	parent := path.Dir(mem.System, name)
 	defer mem.FreeString(mem.System, parent)
 	if parent == "." || parent == "/" {
 		return true
 	}
-	if _, err := os.Stat(parent); err == nil {
+	if p.Host.Stat(parent).Exists {
 		return true
 	}
 	// The recursive walk is deliberately lexical; output paths have already been normalized.
-	if !mkdirParent(parent) {
+	if !p.mkdirParent(parent) {
 		return false
 	}
-	if os.Mkdir(parent, 0o755) == nil {
+	if p.Host.Mkdir(parent, 0o755) == nil {
 		return true
 	}
-	_, err := os.Stat(parent)
-	return err == nil
+	return p.Host.Stat(parent).Exists
 }

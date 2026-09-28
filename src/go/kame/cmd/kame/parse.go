@@ -1,6 +1,7 @@
 package main
 
 import (
+	"kame/cli"
 	"kame/diagnostic"
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
@@ -46,49 +47,13 @@ type parseArgumentResult struct {
 }
 
 func parseArguments(args []string, errOut io.Writer) parseArgumentResult {
-	lang, file := "", ""
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			if i+2 != len(args) || file != "" {
-				cliError(errOut, "OPT_VALUE_INVALID", "parse accepts at most one file")
-				return parseArgumentResult{}
-			}
-			file = args[i+1]
-			break
-		}
-		if arg == "--lang" {
-			if i+1 == len(args) {
-				cliError(errOut, "OPT_NO_VALUE", "missing value for --lang")
-				return parseArgumentResult{}
-			}
-			i++
-			lang = args[i]
-			continue
-		}
-		if len(arg) > 7 && arg[:7] == "--lang=" {
-			lang = arg[7:]
-			continue
-		}
-		if len(arg) != 0 && arg[0] == '-' {
-			cliError(errOut, "OPT_UNKNOWN", "unknown option: "+arg)
-			return parseArgumentResult{}
-		}
-		if file != "" {
-			cliError(errOut, "OPT_VALUE_INVALID", "parse accepts at most one file")
-			return parseArgumentResult{}
-		}
-		file = arg
-	}
-	if lang == "" {
-		cliError(errOut, "OPT_NO_VALUE", "missing required --lang")
+	inv := cli.Parse("parse", args)
+	if !inv.OK {
+		cliError(errOut, inv.Error.Code, inv.Error.Message)
+		inv.Free()
 		return parseArgumentResult{}
 	}
-	if lang != "expr" && lang != "template" && lang != "rule" && lang != "script" {
-		cliError(errOut, "OPT_VALUE_INVALID", "invalid language: "+lang)
-		return parseArgumentResult{}
-	}
-	return parseArgumentResult{Lang: lang, File: file, OK: true}
+	return parseArgumentResult{Lang: inv.Lang, File: inv.File, OK: inv.OK}
 }
 
 func cliError(out io.Writer, code string, message string) {

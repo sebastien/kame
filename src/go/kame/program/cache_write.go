@@ -2,7 +2,6 @@ package program
 
 import (
 	"solod.dev/so/slices"
-	"solod.dev/so/time"
 )
 
 func (p *Program) cacheAppend(dst *[]byte, truncated *bool, data []byte, limit int) {
@@ -31,7 +30,7 @@ func (p *Program) cacheCommit(entry *instance, stdout []byte, stderr []byte, std
 		entry.CacheStderrTruncated = true
 	}
 	identity := p.cacheIdentity(entry)
-	completed := time.Now().UnixNano()
+	completed := p.Host.Now()
 	started := entry.cacheStartedAt
 	if started <= 0 || started > completed {
 		started = completed

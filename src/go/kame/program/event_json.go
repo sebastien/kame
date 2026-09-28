@@ -1,9 +1,8 @@
-package main
+package program
 
 import (
 	"kame/core"
 	"kame/diagnostic"
-	"kame/program"
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -11,7 +10,17 @@ import (
 	"solod.dev/so/unicode/utf8"
 )
 
-func writeJSONEvent(out io.Writer, event program.Event) {
+func diagnosticSeverity(severity diagnostic.Severity) string {
+	if severity == diagnostic.Warning {
+		return "warning"
+	}
+	if severity == diagnostic.Fatal {
+		return "fatal"
+	}
+	return "error"
+}
+
+func WriteJSONEvent(out io.Writer, event Event) {
 	e := json.NewEncoder(out)
 	e.BeginObject()
 	e.Str("schema")
@@ -26,7 +35,10 @@ func writeJSONEvent(out io.Writer, event program.Event) {
 	e.Int(event.Generation)
 	e.Str("attempt")
 	e.Int(event.Attempt)
-	if event.Key.Name != "" { e.Str("resource"); encodeResourceKey(&e, event.Key) }
+	if event.Key.Name != "" {
+		e.Str("resource")
+		encodeResourceKey(&e, event.Key)
+	}
 	if event.RequestID != 0 {
 		e.Str("request")
 		e.Int(event.RequestID)
@@ -46,11 +58,25 @@ func writeJSONEvent(out io.Writer, event program.Event) {
 		}
 	}
 	if event.DependencyKey.Name != "" {
-		e.Str("dependency"); e.BeginObject(); e.Str("node"); e.Int(event.DependencyID); e.Str("resource"); encodeResourceKey(&e, event.DependencyKey); e.EndObject()
+		e.Str("dependency")
+		e.BeginObject()
+		e.Str("node")
+		e.Int(event.DependencyID)
+		e.Str("resource")
+		encodeResourceKey(&e, event.DependencyKey)
+		e.EndObject()
 	}
-	if event.Effect != "" { e.Str("effect"); e.Str(event.Effect) }
-	if event.Span.Start != 0 || event.Span.End != 0 { encodeSpan(&e, event.Span) }
-	if event.Kind == program.TargetValue { e.Str("value"); encodeValue(&e, event.Value) }
+	if event.Effect != "" {
+		e.Str("effect")
+		e.Str(event.Effect)
+	}
+	if event.Span.Start != 0 || event.Span.End != 0 {
+		encodeSpan(&e, event.Span)
+	}
+	if event.Kind == TargetValue {
+		e.Str("value")
+		encodeValue(&e, event.Value)
+	}
 	if event.Cached {
 		e.Str("cached")
 		e.Bool(true)
@@ -69,51 +95,133 @@ func writeJSONEvent(out io.Writer, event program.Event) {
 }
 
 func encodeResourceKey(e *json.Encoder, key core.ResourceKey) {
-	e.BeginObject(); e.Str("kind"); e.Str(resourceKind(key.Kind)); e.Str("name"); e.Str(key.Name); e.EndObject()
+	e.BeginObject()
+	e.Str("kind")
+	e.Str(eventResourceKind(key.Kind))
+	e.Str("name")
+	e.Str(key.Name)
+	e.EndObject()
 }
 
-func resourceKind(kind core.ResourceKind) string {
-	if kind == core.ResourceDefinition { return "definition" }
-	if kind == core.ResourceTarget { return "target" }
-	if kind == core.ResourceFile { return "file" }
-	if kind == core.ResourceTask { return "task" }
-	if kind == core.ResourceService { return "service" }
-	if kind == core.ResourceGlob { return "glob" }
+func eventResourceKind(kind core.ResourceKind) string {
+	if kind == core.ResourceDefinition {
+		return "definition"
+	}
+	if kind == core.ResourceTarget {
+		return "target"
+	}
+	if kind == core.ResourceFile {
+		return "file"
+	}
+	if kind == core.ResourceTask {
+		return "task"
+	}
+	if kind == core.ResourceService {
+		return "service"
+	}
+	if kind == core.ResourceGlob {
+		return "glob"
+	}
 	return "environment"
 }
 
 func encodeValue(e *json.Encoder, value core.Value) {
-	e.BeginObject(); e.Str("kind"); e.Str(valueKind(value.Kind))
-	if value.Kind == core.Bool { e.Str("data"); e.Bool(value.Bool) }
-	if value.Kind == core.Int { e.Str("data"); e.Int(value.Int) }
-	if value.Kind == core.Float { e.Str("data"); e.Float(value.Float) }
-	if value.Kind == core.String || value.Kind == core.Pattern { e.Str("data"); e.Str(value.Text) }
+	e.BeginObject()
+	e.Str("kind")
+	e.Str(valueKind(value.Kind))
+	if value.Kind == core.Bool {
+		e.Str("data")
+		e.Bool(value.Bool)
+	}
+	if value.Kind == core.Int {
+		e.Str("data")
+		e.Int(value.Int)
+	}
+	if value.Kind == core.Float {
+		e.Str("data")
+		e.Float(value.Float)
+	}
+	if value.Kind == core.String || value.Kind == core.Pattern {
+		e.Str("data")
+		e.Str(value.Text)
+	}
 	if value.Kind == core.Bytes {
 		e.Str("data")
-		if utf8.Valid(value.Bytes) { e.Str(string(value.Bytes)); e.Str("encoding"); e.Str("utf-8")
-		} else { encoded := base64Text(value.Bytes); e.Str(encoded); mem.FreeString(mem.System, encoded); e.Str("encoding"); e.Str("base64") }
+		if utf8.Valid(value.Bytes) {
+			e.Str(string(value.Bytes))
+			e.Str("encoding")
+			e.Str("utf-8")
+		} else {
+			encoded := base64Text(value.Bytes)
+			e.Str(encoded)
+			mem.FreeString(mem.System, encoded)
+			e.Str("encoding")
+			e.Str("base64")
+		}
 	}
-	if value.Kind == core.List { e.Str("items"); e.BeginArray(); for i := range value.List { encodeValue(e, value.List[i]) }; e.EndArray() }
-	if value.Kind == core.Record { e.Str("fields"); e.BeginArray(); for i := range value.Record { e.BeginObject(); e.Str("name"); e.Str(value.Record[i].Key); e.Str("value"); encodeValue(e, value.Record[i].Value); e.EndObject() }; e.EndArray() }
-	if value.Kind == core.Resource { e.Str("resource"); encodeResourceKey(e, value.Resource) }
+	if value.Kind == core.List {
+		e.Str("items")
+		e.BeginArray()
+		for i := range value.List {
+			encodeValue(e, value.List[i])
+		}
+		e.EndArray()
+	}
+	if value.Kind == core.Record {
+		e.Str("fields")
+		e.BeginArray()
+		for i := range value.Record {
+			e.BeginObject()
+			e.Str("name")
+			e.Str(value.Record[i].Key)
+			e.Str("value")
+			encodeValue(e, value.Record[i].Value)
+			e.EndObject()
+		}
+		e.EndArray()
+	}
+	if value.Kind == core.Resource {
+		e.Str("resource")
+		encodeResourceKey(e, value.Resource)
+	}
 	e.EndObject()
 }
 
 func valueKind(kind core.Kind) string {
-	if kind == core.Nil { return "nil" }
-	if kind == core.Bool { return "bool" }
-	if kind == core.Int { return "int" }
-	if kind == core.Float { return "float" }
-	if kind == core.String { return "string" }
-	if kind == core.Bytes { return "bytes" }
-	if kind == core.List { return "list" }
-	if kind == core.Record { return "record" }
-	if kind == core.Callable { return "callable" }
-	if kind == core.Resource { return "resource" }
+	if kind == core.Nil {
+		return "nil"
+	}
+	if kind == core.Bool {
+		return "bool"
+	}
+	if kind == core.Int {
+		return "int"
+	}
+	if kind == core.Float {
+		return "float"
+	}
+	if kind == core.String {
+		return "string"
+	}
+	if kind == core.Bytes {
+		return "bytes"
+	}
+	if kind == core.List {
+		return "list"
+	}
+	if kind == core.Record {
+		return "record"
+	}
+	if kind == core.Callable {
+		return "callable"
+	}
+	if kind == core.Resource {
+		return "resource"
+	}
 	return "pattern"
 }
 
-func writeJSONDiagnostic(out io.Writer, d diagnostic.Diagnostic) {
+func WriteJSONDiagnostic(out io.Writer, d diagnostic.Diagnostic) {
 	e := json.NewEncoder(out)
 	e.BeginObject()
 	e.Str("schema")
@@ -262,38 +370,38 @@ func encodeCause(e *json.Encoder, cause diagnostic.Cause) {
 	e.EndObject()
 }
 
-func eventType(kind program.EventKind) string {
-	if kind == program.TargetStarted {
+func eventType(kind EventKind) string {
+	if kind == TargetStarted {
 		return "target-started"
 	}
-	if kind == program.ProcessStarted {
+	if kind == ProcessStarted {
 		return "process-started"
 	}
-	if kind == program.ProcessExited {
+	if kind == ProcessExited {
 		return "process-exited"
 	}
-	if kind == program.Stdout {
+	if kind == Stdout {
 		return "stdout"
 	}
-	if kind == program.Stderr {
+	if kind == Stderr {
 		return "stderr"
 	}
-	if kind == program.DependencyDiscovered {
+	if kind == DependencyDiscovered {
 		return "dependency"
 	}
-	if kind == program.Effect {
+	if kind == Effect {
 		return "effect"
 	}
-	if kind == program.TargetValue {
+	if kind == TargetValue {
 		return "target-value"
 	}
-	if kind == program.TargetCompleted {
+	if kind == TargetCompleted {
 		return "target-completed"
 	}
-	if kind == program.TargetFailed {
+	if kind == TargetFailed {
 		return "target-failed"
 	}
-	if kind == program.TargetCancelled {
+	if kind == TargetCancelled {
 		return "target-cancelled"
 	}
 	return "cache-warning"

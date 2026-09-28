@@ -73,6 +73,22 @@ func (t *Table) Add(owner uint64, value uint64) Handle {
 	return makeHandle(len(t.slots)-1, 1)
 }
 
+// Owner returns the owner recorded by a live handle, or zero when the handle
+// is malformed, stale, or has no slot. Instance handles are resolved this way
+// because their owner is the instance token and callers do not know it in
+// advance; callers pair it with Get to resolve the slot value.
+func (t *Table) Owner(handle Handle) uint64 {
+	parts := splitHandle(handle)
+	if !parts.OK || t == nil || parts.Index >= len(t.slots) {
+		return 0
+	}
+	slot := t.slots[parts.Index]
+	if !slot.Live || slot.Generation != parts.Generation {
+		return 0
+	}
+	return slot.Owner
+}
+
 // Get resolves handle only when it remains live and belongs to owner.
 func (t *Table) Get(owner uint64, handle Handle) (uint64, bool) {
 	parts := splitHandle(handle)

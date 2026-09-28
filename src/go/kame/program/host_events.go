@@ -6,7 +6,6 @@ import (
 	"kame/host"
 	"kame/lang/rule"
 	"solod.dev/so/mem"
-	"solod.dev/so/os"
 	"solod.dev/so/slices"
 )
 
@@ -48,6 +47,12 @@ func (p *Program) drainRequests() {
 			return
 		}
 		request := next.Request
+		if p.Forwarding {
+			// Ownership transfers to the outbound queue; the embedding host
+			// frees the request when it completes it.
+			p.Outbound = slices.Append(p.Alloc, p.Outbound, request)
+			continue
+		}
 		if request.Kind == host.RequestProcess {
 			script := host.PayloadText(request.Payload, host.FieldScript)
 			// The shell operation returns captured output, so it needs a
@@ -66,6 +71,131 @@ func (p *Program) drainRequests() {
 		}
 		request.Free(p.Alloc)
 	}
+}
+
+// ProcessStarted, ProcessStream, and ProcessTerminal service one forwarded
+// process request, emitting the same lifecycle events the native host would so
+// --json output stays comparable.
+func (p *Program) ProcessStarted(request host.Request) {
+	entry := p.instanceForRequest(request.ID)
+	if entry == nil {
+		return
+	}
+	p.emitNode(entry.Node, entry.Plan.Target, ProcessStarted, diagnostic.Span{}, nil)
+}
+
+func (p *Program) ProcessStream(request host.Request, stderr bool, data []byte) {
+	entry := p.instanceForRequest(request.ID)
+	if entry == nil {
+		return
+	}
+	kind := Stdout
+	if stderr {
+		kind = Stderr
+	}
+	p.emitNode(entry.Node, entry.Plan.Target, kind, diagnostic.Span{}, data)
+}
+
+// ProcessTerminal adapts a forwarded process terminal into the same event a
+// native ProcessHost would emit, so completion values and failure diagnostics
+// match the native path. Captured output is bounded like the native host and
+// copied into the program allocator because the caller's bytes are transient.
+func (p *Program) ProcessTerminal(request host.Request, stdout []byte, stderr []byte, status int, signal int, outcome int, code string, message string) {
+	entry := p.instanceForRequest(request.ID)
+	if entry != nil {
+		p.emitNode(entry.Node, entry.Plan.Target, ProcessExited, diagnostic.Span{}, nil)
+	}
+	isInstance := p.nodeForRequest(request.ID) != nil
+	retain := p.Options.RetainBytes
+	if isInstance {
+		// Recipes retain only what the native host would: nothing for a file
+		// rule, the cache bound for a cached task.
+		entry := p.instanceForRequest(request.ID)
+		if entry != nil && entry.Rule.Kind == rule.CachedTaskRule && p.Options.CacheRetainBytes > retain {
+			retain = p.Options.CacheRetainBytes
+		}
+	} else if retain < cacheLogDefault {
+		// A collected shell operation returns captured output, so it needs a
+		// retained-byte budget even without --log-limit.
+		retain = cacheLogDefault
+	}
+	event := host.ProcessEvent{Kind: host.ProcessTerminal, ID: request.ID, Status: status, Signal: signal, Outcome: host.ProcessExited, RetainBytes: retain}
+	if outcome == 1 {
+		event.Outcome = host.ProcessTimedOut
+	} else if outcome == 2 {
+		event.Outcome = host.ProcessCancelled
+	} else if outcome == 3 {
+		event.Outcome = host.ProcessFailed
+	}
+	event.StdoutTruncated = len(stdout) > retain
+	if event.StdoutTruncated {
+		stdout = stdout[:retain]
+	}
+	if len(stdout) != 0 {
+		event.Stdout = mem.AllocSlice[byte](p.Alloc, len(stdout), len(stdout))
+		copy(event.Stdout, stdout)
+	}
+	event.StderrTruncated = len(stderr) > retain
+	if event.StderrTruncated {
+		stderr = stderr[:retain]
+	}
+	if len(stderr) != 0 {
+		event.Stderr = mem.AllocSlice[byte](p.Alloc, len(stderr), len(stderr))
+		copy(event.Stderr, stderr)
+	}
+	if code != "" {
+		event.Diagnostic.Code = cloneText(p.Alloc, code)
+		event.Diagnostic.Message = cloneText(p.Alloc, message)
+	}
+	if isInstance {
+		p.complete(event)
+	} else {
+		p.completeShell(request, event)
+	}
+	event.Free(p.Alloc)
+}
+
+// completeShell resumes a forwarded evaluator process request, a collected
+// shell operation whose node is not a program instance. A non-zero exit is part
+// of the operation's value rather than a failure, matching the native pending
+// path; only a host, timeout, or cancellation outcome produces a diagnostic.
+func (p *Program) completeShell(request host.Request, event host.ProcessEvent) {
+	var d diagnostic.Diagnostic
+	if event.Outcome == host.ProcessFailed {
+		d = failure(p.Alloc, "HOST_FAIL", event.Diagnostic.Message)
+	} else if event.Outcome == host.ProcessTimedOut {
+		d = failure(p.Alloc, "RECIPE_TIMEOUT", "recipe timed out")
+	} else if event.Outcome == host.ProcessCancelled {
+		d = failure(p.Alloc, "EXEC_CANCELLED", "recipe cancelled")
+	}
+	completion := core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: d}
+	if d.Code == "" {
+		completion.Value, completion.HasValue = shellValue(p.Alloc, event), true
+	}
+	p.Engine.Complete(completion)
+}
+
+// NextOutbound pops the oldest request an embedding host must service. The
+// returned request is caller-owned and must be freed after completion.
+func (p *Program) NextOutbound() host.NextResult {
+	if p == nil || len(p.Outbound) == 0 {
+		return host.NextResult{}
+	}
+	request := p.Outbound[0]
+	copy(p.Outbound, p.Outbound[1:])
+	p.Outbound = p.Outbound[:len(p.Outbound)-1]
+	return host.NextResult{Request: request, OK: true}
+}
+
+// Complete feeds one host completion back to the engine. The completion value
+// and diagnostic are transferred to the engine.
+func (p *Program) Complete(request host.Request, value core.Value, diagnostic diagnostic.Diagnostic) {
+	if p == nil {
+		value.Free(mem.System)
+		diagnostic.Free(mem.System)
+		return
+	}
+	p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Value: value, HasValue: diagnostic.Code == "", Diagnostic: diagnostic})
 }
 
 func (p *Program) completeRequest(request host.Request) {
@@ -87,15 +217,17 @@ func (p *Program) completeRequest(request host.Request) {
 	} else if request.Kind == host.RequestWriteFile {
 		filename := p.canonicalTarget(name, true)
 		data := host.PayloadBytes(request.Payload, host.FieldData)
-		temporary := filename + ".kame-write.tmp"
-		ok := mkdirParent(filename) && os.WriteFile(temporary, data, 0o644) == nil && os.Rename(temporary, filename) == nil
+		ok := p.mkdirParent(filename) && p.Host.WriteFileAtomic(filename, data, 0o644, false) == nil
 		if !ok {
-			os.Remove(temporary)
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot write file")
 		} else {
 			completion.Value, completion.HasValue = core.Value{Kind: core.Nil}, true
 		}
 		mem.FreeString(p.Alloc, filename)
+	} else if request.Kind == host.RequestWallTime {
+		completion.Value, completion.HasValue = core.Value{Kind: core.Int, Int: p.Host.Now()}, true
+	} else if request.Kind == host.RequestMonotonicTime {
+		completion.Value, completion.HasValue = core.Value{Kind: core.Int, Int: p.Host.Monotonic()}, true
 	} else {
 		completion.Diagnostic = failure(p.Alloc, "HOST_FAIL", "unsupported host request")
 	}

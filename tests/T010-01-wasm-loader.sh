@@ -56,13 +56,13 @@ if [ "$actual" != "async-read" ]; then
 	exit 1
 fi
 actual="$(node ./tools/kame-wasm.mjs do expr --async -c "(write \"$written\" \"async-write\")")"
-if [ -n "$actual" ] || [ "$(cat "$written")" != "async-write" ]; then
+if [ "$actual" != "nil" ] || [ "$(cat "$written")" != "async-write" ]; then
 	echo "WASM async write CLI failed" >&2
 	exit 1
 fi
 printf 'result = (write "%s" "source-write")\n' "$written" >"$program"
 actual="$(node ./tools/kame-wasm.mjs do expr --async -f "$program")"
-if [ -n "$actual" ] || [ "$(cat "$written")" != "source-write" ]; then
+if [ "$actual" != "nil" ] || [ "$(cat "$written")" != "source-write" ]; then
 	echo "WASM async source write CLI failed" >&2
 	exit 1
 fi
@@ -124,7 +124,7 @@ if (exports.kame_wasm_event_payload_copy(asyncInstance, payload, payloadLength) 
 if (new TextDecoder().decode(new Uint8Array(exports.memory.buffer, payload, payloadLength)) !== 'echo wasm') throw new Error('unexpected process payload');
 if (exports.kame_wasm_source_compile(asyncInstance, 0, 0) !== 4) throw new Error('compile replaced a pending expression');
 const [completion, completionLength] = write('wasm');
-if (exports.kame_wasm_complete_bytes(asyncInstance, request + 1n, completion, completionLength) !== 4) throw new Error('foreign request completion was accepted');
+if (exports.kame_wasm_complete_bytes(asyncInstance, request + 1n, completion, completionLength) !== 1) throw new Error('foreign request completion was accepted');
 if (exports.kame_wasm_complete_bytes(asyncInstance, request, completion, completionLength) !== 0) throw new Error('completion was rejected');
 if (exports.kame_wasm_complete_bytes(asyncInstance, request, completion, completionLength) !== 0) throw new Error('late completion was not ignored');
 let state = 0;
@@ -136,14 +136,18 @@ const cancelledInstance = exports.kame_wasm_instance_create();
 if (exports.kame_wasm_source_compile(cancelledInstance, 0, 0) !== 0) throw new Error('cancelled instance did not compile');
 if (exports.kame_wasm_expression_begin(cancelledInstance, expression, expressionLength) !== 0) throw new Error('cancelled expression did not begin');
 if (exports.kame_wasm_step(cancelledInstance) !== 1) throw new Error('cancelled expression did not yield');
+const cancelledHeader = alloc(48, 8);
+if (exports.kame_wasm_next_event_header(cancelledInstance, cancelledHeader, 48) !== 0) throw new Error('cancelled request header was unavailable');
+const cancelledRequest = new DataView(exports.memory.buffer, cancelledHeader, 48).getBigUint64(20, true);
 if (exports.kame_wasm_expression_cancel(cancelledInstance) !== 0) throw new Error('host request cancellation was rejected');
-if (exports.kame_wasm_complete_bytes(cancelledInstance, request, completion, completionLength) !== 0) throw new Error('cancelled request late completion was not ignored');
+if (exports.kame_wasm_complete_bytes(cancelledInstance, cancelledRequest, completion, completionLength) !== 0) throw new Error('cancelled request late completion was not ignored');
 if (exports.kame_wasm_step(cancelledInstance) !== 2) throw new Error('cancelled expression was not terminal');
 const cancelledLength = alloc(4, 4);
 if (exports.kame_wasm_result_copy(cancelledInstance, 0, 0, cancelledLength) !== 5) throw new Error('cancelled expression lacked a diagnostic');
-const diagnosticLength = exports.kame_wasm_diagnostic_length();
+const diagnosticLength = exports.kame_wasm_instance_diagnostic_length(cancelledInstance);
+if (diagnosticLength === 0) throw new Error('cancelled instance had no diagnostic');
 const diagnosticPointer = alloc(diagnosticLength || 1);
-if (exports.kame_wasm_diagnostic_copy(diagnosticPointer, diagnosticLength) !== 0) throw new Error('cancellation diagnostic copy failed');
+if (exports.kame_wasm_instance_diagnostic_copy(cancelledInstance, diagnosticPointer, diagnosticLength) !== 0) throw new Error('cancellation diagnostic copy failed');
 if (!new TextDecoder().decode(new Uint8Array(exports.memory.buffer, diagnosticPointer, diagnosticLength)).includes('EXEC_CANCELLED')) throw new Error('unexpected cancellation diagnostic');
 if (exports.kame_wasm_instance_free(cancelledInstance) !== 0) throw new Error('cancelled instance did not free');
 NODE
