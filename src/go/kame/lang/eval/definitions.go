@@ -31,6 +31,10 @@ type Program struct {
 	// definitions evaluated as standalone engine nodes.
 	DefinitionDependencyObserver func(any, core.ResourceKey)
 	DefinitionDependencyState    any
+	// DefinitionEffectSink receives successful standalone-definition effects.
+	// Rule rendering keeps effects on its Context for the build runtime instead.
+	DefinitionEffectSink  func(any, Effect)
+	DefinitionEffectState any
 	// DirectHostRequests applies the embedding host's request loop to lazy
 	// definitions instead of requiring native build-graph resources.
 	DirectHostRequests            bool
@@ -195,6 +199,15 @@ func (p *Program) SetDefinitionDependencyObserver(observer func(any, core.Resour
 	p.DefinitionDependencyObserver, p.DefinitionDependencyState = observer, state
 }
 
+// SetDefinitionEffectSink installs the output destination for standalone lazy
+// definitions. It is called only after an evaluation completes successfully.
+func (p *Program) SetDefinitionEffectSink(sink func(any, Effect), state any) {
+	if p == nil {
+		return
+	}
+	p.DefinitionEffectSink, p.DefinitionEffectState = sink, state
+}
+
 func (p *Program) SetDefinitionArgs(values []core.Value) {
 	if p == nil {
 		return
@@ -328,6 +341,12 @@ func (p *Program) definition(engine *core.EngineContext, d *definition.Definitio
 		attachFrame(&result, context, d.Span, "definition")
 	}
 	attachSource(&result, context)
+	if !result.Waiting && !result.Completed && result.Stream == nil && result.Diagnostic.Code == "" && !result.Value.HasCallable() && p.DefinitionEffectSink != nil {
+		for i := range context.Effects {
+			p.DefinitionEffectSink(p.DefinitionEffectState, context.Effects[i])
+		}
+	}
+	FreeEffects(p.Alloc, context.Effects)
 	return result
 }
 

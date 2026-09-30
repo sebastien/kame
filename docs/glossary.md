@@ -288,6 +288,10 @@ write to the corresponding runtime streams, and `write` can write a file.
 output. Yield cannot share an accepted render with a nonempty shell command,
 because Kame must have one unambiguous owner for that output.
 
+In standalone evaluation, the context flushes successful `out`, `err`, and
+`yield` effects to its output streams instead. This happens only after the
+evaluation completes, so a host-request retry does not duplicate output.
+
 ### Host request
 
 A **host request** is the portable description of work that only an embedding

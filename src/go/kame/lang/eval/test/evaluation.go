@@ -178,6 +178,121 @@ func TestEvaluatesContainersReferencesAndSpecialForms(t *testing.T) {
 	registry.Free()
 }
 
+func TestIfAndOrWithMatchFormsAreLazy(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(if :false missing \"fallback\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "fallback" {
+		t.Error("if did not skip its unselected branch")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(if :false \"a\" :false \"b\" \"c\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "c" {
+		t.Error("variadic if did not select else")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(and :true 1 2)")
+	if result.Diagnostic.Code != "" || result.Value.Int != 2 {
+		t.Error("and did not return its last true operand")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(or :false :nil \"x\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "x" {
+		t.Error("or did not return its first true operand")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(with [a: 1 a: 2] a)")
+	if result.Diagnostic.Code != "" || result.Value.Int != 2 {
+		t.Error("with duplicate did not let the last field win")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(with 1 a)")
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("with accepted a non-record")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(match \"./a.c\" [./{name:*}.c name] [:else \"no\"])")
+	if result.Diagnostic.Code != "" || result.Value.Text != "a" {
+		t.Error("match did not bind its capture")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestComparisonsCatAndText(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(= 1 1.0)")
+	if result.Diagnostic.Code != "" || !result.Value.Bool {
+		t.Error("numeric equality across int and float failed")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(ne :nil :false)")
+	if result.Diagnostic.Code != "" || !result.Value.Bool {
+		t.Error("nil and false were not distinct")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(lt 1 \"a\")")
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("mixed ordering was not rejected")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(cat \"a\" :nil 1)")
+	if result.Diagnostic.Code != "" || result.Value.Text != "a1" {
+		t.Error("cat did not concatenate")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(cat [a: 1])")
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("cat accepted a record")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(text \"hi\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "hi" {
+		t.Error("text did not pass through a string")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestRenderContentTemplate(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(render \"# @if(:true)\nhi\n# @end\n\" \"hash\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "hi\n" {
+		t.Error("content render did not remove directive lines")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func TestLexicalFunctionAndOperationShadowing(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
@@ -322,6 +437,125 @@ func TestDefValueFormCallableReleasesItsScope(t *testing.T) {
 	result.Free(a)
 	called.Free()
 	defined.Free()
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestDefValueFormCallableAcrossScopesRejected(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [] (def f (let [g ([x] x)] g)) \"x\")")
+	if result.Diagnostic.Code != "DEF_ESCAPE" {
+		t.Error("cross-scope function def was not rejected")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestLetBindingCallableAcrossScopesRejected(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [f (let [g ([x] x)] g)] \"x\")")
+	if result.Diagnostic.Code != "DEF_ESCAPE" {
+		t.Error("cross-scope function binding was not rejected")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestLetBindingListWithEscapingCallableRejected(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [f (let [g ([x] x)] [g])] \"x\")")
+	if result.Diagnostic.Code != "DEF_ESCAPE" {
+		t.Error("list with cross-scope function was not rejected")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestLetBindingRecordWithEscapingCallableRejected(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [f (let [g ([x] x)] [v: g])] \"x\")")
+	if result.Diagnostic.Code != "DEF_ESCAPE" {
+		t.Error("record with cross-scope function was not rejected")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestDefFunctionFormAcrossScopesRejected(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [] (def f (let [] (def inner [x] x) inner)) \"x\")")
+	if result.Diagnostic.Code != "DEF_ESCAPE" {
+		t.Error("cross-scope definition function was not rejected")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestDescendantStoreAllowed(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [a ([x] x)] (let [b a] (b 42)))")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
+		t.Error("descendant function store was rejected")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestCallArgDescendantAllowed(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [f ([x] x)] (f 42))")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
+		t.Error("same-scope function call failed")
+	}
+	result.Free(a)
 	engine.Free()
 	program.Free()
 	parsed.Free()

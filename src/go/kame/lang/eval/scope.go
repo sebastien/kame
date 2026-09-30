@@ -58,11 +58,41 @@ func (s *Scope) setValue(name string, value core.Value) {
 	// clones share the function pointer: the scope becomes a co-owner, so
 	// callers transfer (shallow-free the original) or read back a fresh
 	// borrow, never return the same value.
+	//
+	// Raw setValue performs no strand check. Form stores that can target an
+	// ancestor must go through trySetValue; fresh-child stores in callValues
+	// use this directly because a fresh child cannot be an ancestor.
 	s.Bindings = slices.Append(s.Alloc, s.Bindings, binding{Kind: bindingValue, Name: owned(s.Alloc, name), Value: value.Clone(s.Alloc)})
+}
+
+// trySetValue stores value under name unless it would strand its capture.
+// It reports false without storing when wouldStrandCapture holds; callers
+// reject with rejectStrandedCapture on false. Returns true after storing,
+// after which the caller transfers (shallow-frees the original).
+func (s *Scope) trySetValue(name string, value core.Value) bool {
+	if wouldStrandCapture(s, value) {
+		return false
+	}
+	s.setValue(name, value)
+	return true
 }
 
 func (s *Scope) setFunction(name string, function *Function) {
 	s.Bindings = slices.Append(s.Alloc, s.Bindings, binding{Kind: bindingFunction, Name: owned(s.Alloc, name), Function: function})
+}
+
+// RenderChildScope creates a child scope binding each record field as a name
+// for template payloads. It returns nil without storing when a binding would
+// strand its capture; the caller reports EXPR_INVALID and frees the child.
+func RenderChildScope(c *Context, parent *Scope, record core.Value) *Scope {
+	child := newScope(c.Run, parent)
+	for i := range record.Record {
+		if !child.trySetValue(record.Record[i].Key, record.Record[i].Value) {
+			child.Free()
+			return nil
+		}
+	}
+	return child
 }
 
 func (s *Scope) setDefinition(name string) {

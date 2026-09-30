@@ -25,6 +25,11 @@ import (
 //     through Context.FreeCallable, then the caller shallow-frees the argument
 //     slice. The pre-Call error path discards deeply because no callee ran.
 //   - Result.Free always frees deeply; it owns its value.
+//   - Ancestor stores are rejected: storing a value that would strand its
+//     capture (wouldStrandCapture) fails with DEF_ESCAPE via
+//     rejectStrandedCapture. Enforcement lives in the checked
+//     Scope.trySetValue wrapper used by let/def value forms; raw setValue
+//     stays for fresh-child stores in callValues that cannot strand.
 //
 // FunctionKind replaces the former Temporary/Borrowed/Owned/ScopeRetained
 // bool matrix with one explicit lifetime.
@@ -125,6 +130,49 @@ func freeBorrowedWrapper(a mem.Allocator, function *Function) {
 	function.Scope.Free()
 	function.Native = nil
 	mem.Free(a, function)
+}
+
+// wouldStrandCapture reports whether storing value in scope would strand a
+// capture: true when value holds a callable whose capture scope is strictly
+// enclosed by scope (scope is an ancestor of the capture). Such a store
+// deadlocks teardown: scope waits on the capture's parent retain while the
+// capture waits on the stored wrapper, and the cycle breaker only handles
+// self-cycles. Same-scope, descendant, and cousin stores stay safe through
+// transfer discipline and late-release re-driving, so only ancestor stores
+// are rejected. Nil and nil-scope captures cannot strand and are allowed.
+//
+// The name distinguishes this forbidden ancestor store from the allowed
+// "escaped" closures in tests (e.g. a let-bound lambda returned as its own
+// result): returning a closure keeps its capture alive through the borrowed
+// wrapper, while storing it into an ancestor strands it.
+func wouldStrandCapture(scope *Scope, value core.Value) bool {
+	if value.Kind == core.Callable {
+		function := value.Callable.(*Function)
+		if function == nil || function.Scope == nil || function.Scope == scope {
+			return false
+		}
+		for s := function.Scope.Parent; s != nil; s = s.Parent {
+			if s == scope {
+				return true
+			}
+		}
+		return false
+	}
+	if value.Kind == core.List {
+		for i := range value.List {
+			if wouldStrandCapture(scope, value.List[i]) {
+				return true
+			}
+		}
+	}
+	if value.Kind == core.Record {
+		for i := range value.Record {
+			if wouldStrandCapture(scope, value.Record[i].Value) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // freeValues releases storage only. Use after values were cloned into a

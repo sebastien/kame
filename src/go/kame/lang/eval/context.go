@@ -40,7 +40,10 @@ type Context struct {
 	ToolResolver       func(any, string) (string, bool)
 	// OperationObserver records the stable operation identity used by a render.
 	// It is observational only and must not mutate evaluation state.
-	OperationObserver  func(any, string, string)
+	OperationObserver func(any, string, string)
+	// RenderStack tracks file templates currently being rendered for
+	// TPL_CYCLE detection. Entries are Run-owned canonical paths.
+	RenderStack        []string
 	denied             bool
 	phaseInvalid       bool
 	activeCapabilities []Capability

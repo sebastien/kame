@@ -191,3 +191,60 @@ func TestMixedPatternGroupsAreRejected(t *testing.T) {
 	defer literal.Free()
 	if literal.Expr == nil || literal.Expr.Pattern != nil { t.Error("escaped-brace string became a pattern") }
 }
+
+func TestComparisonOperatorsParseAsNameAtoms(t *testing.T) {
+	checkOp(t, "=")
+	checkOp(t, "==")
+	checkOp(t, "!=")
+	checkOp(t, "<")
+	checkOp(t, ">")
+	checkOp(t, "<=")
+	checkOp(t, ">=")
+	bad := expr.Parse(t.Allocator(), "test.km", "===")
+	defer bad.Free()
+	if len(bad.Diagnostics) == 0 { t.Error("malformed operator run was accepted") }
+}
+
+func checkOp(t *testing.T, text string) {
+	r := parse(t, text)
+	if r.Expr == nil || r.Expr.Kind != expr.Name || r.Expr.Text != text {
+		t.Errorf("operator %q did not parse as a name atom", text)
+		r.Free()
+		return
+	}
+	r.Free()
+	app := parse(t, "("+text+" 1 2)")
+	if app.Expr == nil || app.Expr.Kind != expr.Application || len(app.Expr.Items) != 3 || app.Expr.Items[0].Text != text {
+		t.Errorf("operator %q did not parse as an application head", text)
+		app.Free()
+		return
+	}
+	formatted := expr.Format(t.Allocator(), app.Expr)
+	expected := "(" + text + " 1 2)"
+	if formatted != expected {
+		t.Errorf("Format() = %q, want %q", formatted, expected)
+	}
+	mem.FreeString(t.Allocator(), formatted)
+	app.Free()
+}
+
+func TestVerbatimLiteralIsRawAndRoundTrips(t *testing.T) {
+	r := parse(t, "\"\"\"hello @(x) world\"\"\"")
+	defer r.Free()
+	if r.Expr == nil || r.Expr.Kind != expr.String || !r.Expr.Verbatim || r.Expr.VerbatimLen != 3 || len(r.Expr.Parts) != 1 || r.Expr.Parts[0].Expr != nil || r.Expr.Parts[0].Text != "hello @(x) world" {
+		t.Error("verbatim literal did not stay raw")
+		return
+	}
+	formatted := expr.Format(t.Allocator(), r.Expr)
+	if formatted != "\"\"\"hello @(x) world\"\"\"" { t.Errorf("Format() = %q", formatted) }
+	copy := parse(t, formatted)
+	if copy.Expr == nil || !copy.Expr.Verbatim || len(copy.Expr.Parts) != 1 || copy.Expr.Parts[0].Text != "hello @(x) world" { t.Error("formatted verbatim did not re-parse") }
+	copy.Free()
+	mem.FreeString(t.Allocator(), formatted)
+	long := parse(t, "\"\"\"\"has \"\"\" inside\"\"\"\"")
+	defer long.Free()
+	if long.Expr == nil || !long.Expr.Verbatim || long.Expr.VerbatimLen != 4 || long.Expr.Parts[0].Text != "has \"\"\" inside" { t.Error("longer verbatim delimiter did not round-trip") }
+	unclosed := expr.Parse(t.Allocator(), "test.km", "\"\"\"open")
+	defer unclosed.Free()
+	if len(unclosed.Diagnostics) == 0 || unclosed.Diagnostics[0].Code != "TPL_PARSE" { t.Error("unclosed verbatim literal was not TPL_PARSE") }
+}

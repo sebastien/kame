@@ -161,6 +161,25 @@ func (p *parser) definition() *Definition {
 		return d
 	}
 	if p.s.Text[rhsStart] == '"' {
+		// Verbatim multi-line literal (3+ quotes) is raw: parse as expression
+		// so @(...) inside stays literal until render. Single-quote strings
+		// keep template semantics.
+		n := 0
+		for rhsStart+n < rhsEnd && p.s.Text[rhsStart+n] == '"' {
+			n++
+		}
+		if n >= 3 {
+			prefix := expr.ParsePrefix(p.a, p.s, rhsStart)
+			d.Expression, d.ValueKind = prefix.Expr, ValueExpression
+			for i := range prefix.Diagnostics {
+				p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
+			}
+			slices.Free(p.a, prefix.Diagnostics)
+			if prefix.Expr == nil || prefix.End != rhsEnd {
+				p.error(rhsStart, rhsEnd, "malformed verbatim literal")
+			}
+			return d
+		}
 		if rhsEnd-rhsStart < 2 || p.s.Text[rhsEnd-1] != '"' {
 			p.error(rhsStart, rhsEnd, "unclosed template string")
 			return d

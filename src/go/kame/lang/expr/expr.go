@@ -75,6 +75,8 @@ type Expr struct {
 	Rest       bool
 	Int        int64
 	Float      float64
+	Verbatim   bool
+	VerbatimLen int
 	Parts      []StringPart
 	Reference  []ReferencePart
 	Items      []*Expr
@@ -196,7 +198,7 @@ func (p *parser) expression() *Expr {
 	case '[':
 		return p.list()
 	case '"':
-		return p.quoted()
+		return p.stringOrVerbatim()
 	case ':':
 		return p.symbol()
 	case '@':
@@ -207,6 +209,7 @@ func (p *parser) expression() *Expr {
 		e.Text = "?"
 		return e
 	}
+	if op := p.operator(); op != nil { return op }
 	if isNameStart(p.s.Text[p.pos]) { return p.reference() }
 	if p.s.Text[p.pos] == '/' || (p.s.Text[p.pos] == '.' && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '/' || (p.pos+2 < len(p.s.Text) && p.s.Text[p.pos+1] == '.' && p.s.Text[p.pos+2] == '/'))) { return p.path() }
 	if p.s.Text[p.pos] == '-' || isDigit(p.s.Text[p.pos]) { return p.number() }
@@ -221,6 +224,85 @@ func (p *parser) path() *Expr {
 	e.Text = p.s.Text[start:p.pos]
 	p.classifyPathPattern(e, start)
 	return e
+}
+
+// operator parses comparison operator atoms (=, ==, !=, <, >, <=, >=).
+// They are Name atoms valid anywhere an expression may appear; as an
+// application head they name the comparison operations of 007-library.md.
+func (p *parser) operator() *Expr {
+	start := p.pos
+	text := p.s.Text
+	if start >= len(text) { return nil }
+	var end int
+	switch text[start] {
+	case '=':
+		if start+1 < len(text) && text[start+1] == '=' { end = start + 2 } else { end = start + 1 }
+	case '!':
+		if start+1 < len(text) && text[start+1] == '=' { end = start + 2 } else { return nil }
+	case '<', '>':
+		if start+1 < len(text) && text[start+1] == '=' { end = start + 2 } else { end = start + 1 }
+	default:
+		return nil
+	}
+	if end < len(text) && !isDelimiter(text[end]) { return nil }
+	// Reject bare ! (not an operator) and malformed runs like ===.
+	// Valid operators are exactly =, ==, !=, <, >, <=, >=.
+	op := text[start:end]
+	switch op {
+	case "=", "==", "!=", "<", ">", "<=", ">=":
+	default:
+		return nil
+	}
+	p.pos = end
+	e := p.node(Name, start)
+	e.Text = op
+	e.Span.End = end
+	return e
+}
+
+func (p *parser) stringOrVerbatim() *Expr {
+	// A run of 3+ quotes opens a verbatim literal.
+	n := 0
+	for p.pos+n < len(p.s.Text) && p.s.Text[p.pos+n] == '"' { n++ }
+	if n >= 3 { return p.verbatim(n) }
+	return p.quoted()
+}
+
+// verbatim parses a raw multi-line string literal delimited by N>=3 quotes.
+// Content is raw: no escapes, no interpolation, no directive recognition.
+// Closing run must be exactly N quotes.
+func (p *parser) verbatim(n int) *Expr {
+	start := p.pos
+	p.pos += n
+	contentStart := p.pos
+	text := p.s.Text
+	for p.pos < len(text) {
+		if text[p.pos] != '"' { p.pos++; continue }
+		run := 0
+		for p.pos+run < len(text) && text[p.pos+run] == '"' { run++ }
+		if run == n {
+			content := text[contentStart:p.pos]
+			e := p.node(String, start)
+			e.Verbatim, e.VerbatimLen = true, n
+			if len(content) != 0 {
+				e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, content), Span: source.Span{Start: contentStart, End: p.pos}})
+			}
+			p.pos += n
+			e.Span.End = p.pos
+			return e
+		}
+		// A run of different length is literal content.
+		p.pos += run
+	}
+	p.tplError(start, p.pos, "unclosed verbatim literal")
+	e := p.node(String, start)
+	e.Verbatim, e.VerbatimLen = true, n
+	return e
+}
+
+func (p *parser) tplError(start int, end int, message string) {
+	if end > len(p.s.Text) { end = len(p.s.Text) }
+	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "TPL_PARSE", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
 // classifyPathPattern reclassifies a path atom containing braces as a pattern
@@ -911,6 +993,17 @@ func writeReference(b *strings.Builder, e *Expr) {
 }
 
 func writeString(b *strings.Builder, e *Expr) {
+	if e.Verbatim {
+		n := e.VerbatimLen
+		if n < 3 { n = 3 }
+		for i := 0; i < n; i++ { b.WriteByte('"') }
+		for i := range e.Parts {
+			// Verbatim parts are always literal text.
+			b.WriteString(e.Parts[i].Text)
+		}
+		for i := 0; i < n; i++ { b.WriteByte('"') }
+		return
+	}
 	b.WriteByte('"')
 	if e.Pattern != nil {
 		for j := 0; j < len(e.Text); j++ {

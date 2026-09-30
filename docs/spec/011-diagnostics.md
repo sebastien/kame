@@ -101,6 +101,7 @@ meaning by themselves.
 | `OP_UNKNOWN` | error | Unknown operation |
 | `EXPR_INVALID` | error | Invalid expression value, type, or arity |
 | `DEF_INVALID` | error | Invalid definition or binding form |
+| `DEF_ESCAPE` | error | function value escapes its scope; define it with (def name [params] body) instead |
 | `PAT_INVALID` | error | Invalid pattern combination or missing pattern capture reference |
 | `TPL_PARSE` | error | Malformed template directive, argument list, or verbatim literal |
 | `TPL_BLOCK` | error | Unterminated, stray, or mismatched template block directive |

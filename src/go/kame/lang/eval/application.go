@@ -28,6 +28,33 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		if head.Text == "eval" {
 			return p.evalText(scope, expression.Items[1:], context, expression.Span)
 		}
+		if head.Text == "if" {
+			return p.conditional(scope, expression.Items[1:], context, expression.Span)
+		}
+		if head.Text == "and" {
+			return p.logicalAnd(scope, expression.Items[1:], context, expression.Span)
+		}
+		if head.Text == "or" {
+			return p.logicalOr(scope, expression.Items[1:], context, expression.Span)
+		}
+		if head.Text == "with" {
+			return p.scopedWith(scope, expression.Items[1:], context, expression.Span)
+		}
+		if head.Text == "match" {
+			return p.patternMatch(scope, expression.Items[1:], context, expression.Span)
+		}
+		// Comparison aliases parse as Name atoms; canonicalize before lookup.
+		if aliased, ok := comparisonAlias(head.Text); ok {
+			if p.Registry != nil {
+				operation := p.Registry.lookup(aliased)
+				if operation != nil {
+					result := p.operation(scope, operation, expression.Items[1:], context, expression.Span)
+					attachFrame(&result, context, expression.Span, "operation")
+					return result
+				}
+			}
+			return failure(context.Run, "OP_UNKNOWN", head.Span, "unknown operation: "+head.Text)
+		}
 	}
 	callee := p.evaluate(context.Engine, scope, head, context)
 	if callee.Waiting || callee.Diagnostic.Code != "" {
@@ -52,6 +79,27 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 	result := p.call(function, expression.Items[1:], context, expression.Span)
 	freeCallables(context.Run, &callee.Value)
 	return result
+}
+
+// comparisonAlias maps symbolic comparison atoms to canonical operation names.
+func comparisonAlias(name string) (string, bool) {
+	switch name {
+	case "=":
+		return "eq", true
+	case "==":
+		return "is", true
+	case "!=":
+		return "ne", true
+	case "<":
+		return "lt", true
+	case ">":
+		return "gt", true
+	case "<=":
+		return "lte", true
+	case ">=":
+		return "gte", true
+	}
+	return "", false
 }
 
 func (p *Program) operation(scope *Scope, operation *Operation, arguments []*expr.Expr, context *Context, span source.Span) Result {
@@ -144,6 +192,8 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		}
 		child.Section = owned
 	} else {
+		// No wouldStrandCapture check here: child is freshly created, so it cannot
+		// be an ancestor of any capture scope and the store cannot deadlock.
 		for i := 0; i < fixed; i++ {
 			child.setValue(function.Parameters[i].Name, values[i])
 		}
