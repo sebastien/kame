@@ -1,4 +1,5 @@
 Improve:
+- Operation diagnostics should name the offending argument, its kind, and the expected types (e.g. `(out 10)` fails with generic `EXPR_INVALID: invalid operation arguments` instead of saying `out` expects coercible text/bytes values but got int at arg 2)
 - `@(x/cmd)` should only be checked for the targets on the path of execution, otherwise on missing tool in an unused rule fails all
 - `kame do tools check TARGETS...` would check the tools in the target(s) plan and fail if unmet
 - `./src/**/*.km` should really be a path marked as a wildcard, there should be no need for `(wildcard ./src/**/*.km)`

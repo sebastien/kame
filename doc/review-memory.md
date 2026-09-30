@@ -323,6 +323,30 @@ changes or a language-level restriction; left for a design decision.
 - Pre-existing failure, unrelated to the audit fixes (those files only had
   guard normalizations); fixed per the `solod-unused-receiver` convention.
 
+### Language restriction: ancestor-scope callable stores rejected (2026-10-01)
+
+Implemented the restriction option: storing a callable into a strict ancestor
+of its capture scope now fails with `DEF_ESCAPE` ("function value escapes its
+scope; define it with (def name [params] body) instead"), registered in
+`docs/spec/011-diagnostics.md`. Rationale, verified by tracing every store
+direction:
+
+- Same-scope, descendant (call args into fresh child scopes), and cousin
+  stores teardown correctly and stay allowed.
+- Only ancestor stores deadlock (outer waits on the capture's parent retain
+  while the capture waits on the outer-owned wrapper; the cycle breaker
+  handles self-cycles only). The check also covers raw `FunctionDefinition`
+  pointers, which dangle the same way with no retain at all.
+- Enforcement lives at exactly two sites — value-form `def` and the `let`
+  binding loop (`callValues` needs none: fresh children have no subtree).
+  Rejected values are freed deeply on the spot, so the path is Tracker-clean
+  by construction. Cost is one ancestry walk per stored callable.
+- Real programs pay nothing: specs, examples, and stdlib contain no
+  cross-level function stores (stdlib avoids let-escape per `ownership.go`),
+  and function-form `def` — which owns its AST — is the pointed-to
+  alternative. The full `so test` suite, CLI tests, and sanitize gates pass
+  unchanged, which is itself the evidence no legitimate program hits the rule.
+
 ## Remediation (2026-09-30, first pass)
 
 All items implemented; verified with `so build -check=warn ./cmd/kame`
