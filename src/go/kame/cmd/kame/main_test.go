@@ -196,6 +196,21 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	if status := Run([]string{"do", "expr", "-c", "(join @* \",\")", "--", "left", "right"}, &input{}, &out, &errOut); status != 0 || out.String() != "left,right" {
 		t.Errorf("expr args status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
+	out.Reset()
+	errOut.Reset()
+	if status := Run([]string{"do", "expr", "-c", "(let [a 10] (out \"hello\" a))"}, &input{}, &out, &errOut); status != 0 || out.String() != "hello10hello10" || errOut.Len() != 0 {
+		t.Errorf("expr out status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if status := Run([]string{"do", "expr", "-c", "(err \"notice\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "notice" || errOut.String() != "notice" {
+		t.Errorf("expr err status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if status := Run([]string{"do", "expr", "-c", "(yield \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generatednil" || errOut.Len() != 0 {
+		t.Errorf("expr yield status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
 }
 
 func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {

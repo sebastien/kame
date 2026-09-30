@@ -11,6 +11,13 @@ import (
 )
 
 type exprArguments struct { Text string; File string; Directory string; Args []string; Grants []eval.Grant; OK bool }
+type exprEffectOutput struct { Out io.Writer; Err io.Writer }
+
+func writeExprEffect(value any, effect eval.Effect) {
+	output := value.(*exprEffectOutput)
+	if effect.Kind == eval.EffectErr { output.Err.Write(effect.Data); return }
+	if effect.Kind == eval.EffectOut || effect.Kind == eval.EffectYield { output.Out.Write(effect.Data) }
+}
 
 func (options *exprArguments) Free() {
 	slices.Free(mem.System, options.Args)
@@ -44,6 +51,7 @@ func runExpr(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	values := mem.AllocSlice[core.Value](mem.System, len(parsed.Args), len(parsed.Args)+1)
 	for i := range parsed.Args { values[i] = core.NewString(mem.System, parsed.Args[i]) }
 	session.Program.Eval.SetDefinitionArgs(values)
+	session.Program.Eval.SetDefinitionEffectSink(writeExprEffect, &exprEffectOutput{Out: out, Err: errOut})
 	for i := range values { values[i].Free(mem.System) }
 	slices.Free(mem.System, values)
 	started := session.Program.Start("result")
@@ -52,7 +60,6 @@ func runExpr(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	defer handle.Free()
 	for {
 		session.Program.Tick(10)
-		discardEvents(session.Program)
 		if handle.Definition && handle.Node.Current { writeValue(out, handle.Node.Latest); return 0 }
 		result := handle.Poll()
 		if !result.Done { continue }

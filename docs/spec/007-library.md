@@ -179,6 +179,12 @@ invalid during planning.
 | `yield` | Append bytes or text to one declarative file output |
 | `nop` | Return its final argument, or nil |
 
+During standalone evaluation, `out` and `err` both emit their arguments and
+return their concatenated output (text unless any argument is bytes). `yield`
+emits to the evaluation output context and returns nil. During rule rendering,
+all three retain their nil result so an effect expression contributes no shell
+command text; `yield` remains the declarative file-output effect.
+
 Effects record their source position. Evaluating or rerendering an effect does
 not perform it. The runtime commits it once for the accepted generation.
 Every build effect is invalid during planning and returns `PHASE_INVALID`.

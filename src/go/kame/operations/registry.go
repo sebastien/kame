@@ -9,6 +9,12 @@ const version = "v1"
 func Register(r *eval.Registry) bool {
 	return add(r, "not", opNot, 1, 1) && add(r, "bool", opBool, 1, 1) &&
 		add(r, "str", opStr, 1, 1) && add(r, "count", opCount, 1, 1) &&
+		add(r, "eq", opEq, 2, 2) && add(r, "is", opIs, 2, 2) &&
+		add(r, "ne", opNe, 2, 2) && add(r, "lt", opLt, 2, 2) &&
+		add(r, "gt", opGt, 2, 2) && add(r, "gte", opGte, 2, 2) &&
+		add(r, "lte", opLte, 2, 2) &&
+		add(r, "cat", opCat, 0, -1) && add(r, "text", opText, 1, 1) &&
+		add(r, "render", opRender, 1, 3) &&
 		add(r, "first", opFirst, 1, 1) && add(r, "nth", opNth, 2, 2) &&
 		add(r, "apply", opApply, 2, 2) && add(r, "list", opList, 0, -1) &&
 		add(r, "map", opMap, 2, 2) && add(r, "flatmap", opFlatMap, 2, 2) &&

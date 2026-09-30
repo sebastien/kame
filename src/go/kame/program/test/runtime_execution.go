@@ -603,6 +603,26 @@ func TestWriteOperationDefersUntilExecution(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestWriteOperationCoercesValue(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(write \"./output\" 42)\n")
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "" { t.Errorf("write failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/output")
+	if readErr != nil || string(data) != "42" { t.Error("write did not coerce its value") }
+	mem.FreeSlice(a, data)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 
 func TestReadOperationResumesDuringRendering(t *testing.T) {
 	a := t.Allocator()

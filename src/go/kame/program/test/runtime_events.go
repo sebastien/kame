@@ -31,6 +31,35 @@ func TestOutAndErrEmitEvents(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestOutCoercesScalarValues(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "test.kmk", "run :\n\t@(out 42)\n\t@(out :true)\n\t@(out :nil)\n\t@(out 1.5)\n\t@(out (list 1 2))\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
+	result := compiled.Program.Materialize("run")
+	if result.Diagnostic.Code != "" { t.Errorf("effects failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	index := 0
+	for {
+		next := compiled.Program.NextEvent()
+		if !next.OK { break }
+		if next.Event.Kind == program.Stdout && next.Event.Target == "run" {
+			text := string(next.Event.Data)
+			if index == 0 && text != "42" { t.Error("out did not render an integer") }
+			if index == 1 && text != "true" { t.Error("out did not render a boolean") }
+			if index == 2 && text != "nil" { t.Error("out did not render nil") }
+			if index == 3 && text != "1.5" { t.Error("out did not render a float") }
+			if index == 4 && text != "[1,2]" { t.Error("out did not render a list") }
+			index++
+		}
+		next.Event.Free(a)
+	}
+	if index != 5 { t.Error("out did not emit one event per coerced value") }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestOperationDependencyEmitsEvent(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "test.kmk", "input :\n\ttrue\noutput : input\n\t@(depends \"x\")\n\ttrue\n")

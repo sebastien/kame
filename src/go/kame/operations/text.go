@@ -3,8 +3,10 @@ package operations
 import (
 	"kame/core"
 	"kame/lang/eval"
+	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
+	"solod.dev/so/unicode/utf8"
 )
 
 func opJoin(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -124,4 +126,39 @@ func opLowercase(c *eval.Context, s any, v []core.Value) eval.Result {
 		return invalid()
 	}
 	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToLower(c.Run, value)}}
+}
+
+func opCat(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	b := strings.NewBuilder(c.Run)
+	defer b.Free()
+	for i := range v {
+		text, ok := eval.Stringify(c.Run, v[i])
+		if !ok {
+			freeArgCallables(c, v)
+			return invalid()
+		}
+		b.WriteString(text)
+		mem.FreeString(c.Run, text)
+	}
+	return eval.Result{Value: core.NewString(c.Run, b.String())}
+}
+
+func opText(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	switch v[0].Kind {
+	case core.String:
+		return eval.Result{Value: v[0].Clone(c.Run)}
+	case core.Bytes:
+		if !utf8.Valid(v[0].Bytes) {
+			freeArgCallables(c, v)
+			return invalid()
+		}
+		// Copy bytes as a string; Bytes holds binary, String holds UTF-8 text.
+		b := mem.AllocSlice[byte](c.Run, len(v[0].Bytes), len(v[0].Bytes))
+		copy(b, v[0].Bytes)
+		return eval.Result{Value: core.Value{Kind: core.String, Text: string(b)}}
+	}
+	freeArgCallables(c, v)
+	return invalid()
 }

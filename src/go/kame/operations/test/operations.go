@@ -17,6 +17,9 @@ func waitEach(context *eval.Context, state any, values []core.Value) eval.Result
 	return eval.Result{Waiting: true}
 }
 
+type outputState struct { Count int }
+func captureOutput(value any, effect eval.Effect) { _ = effect; state := value.(*outputState); state.Count++ }
+
 func evaluate(t *testing.T, program *eval.Program, text string) eval.Result {
 	parsed := expr.Parse(t.Allocator(), "test", text)
 	if len(parsed.Diagnostics) != 0 { t.Error("parse failed"); parsed.Free(); return eval.Result{} }
@@ -59,6 +62,60 @@ func TestPureOperations(t *testing.T) {
 	result = evaluate(t, program, "(apply (list \"first\" \"second\") ([values] (count values)))")
 	if result.Diagnostic.Code != "" || result.Value.Int != 2 { t.Error("legacy list-consuming apply failed") }
 	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestOutRejectsCallable(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Error("library registration failed") }
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(out (replace ./{*} ./out/{_0}))")
+	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("out accepted a callable") }
+	result.Free(a)
+	result = evaluate(t, program, "(err (replace ./{*} ./out/{_0}))")
+	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("err accepted a callable") }
+	result.Free(a)
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestOutputEffectsReturnCombinedStandaloneValue(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Error("library registration failed") }
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	expression := expr.Parse(a, "test", "(out \"hello\" 10)")
+	context := eval.Context{Program: program, Scope: program.Scope, Run: a}
+	result := program.EvaluateWith(expression.Expr, &context)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "hello10" { t.Error("out did not return combined text") }
+	if len(context.Effects) != 2 || string(context.Effects[0].Data) != "hello" || string(context.Effects[1].Data) != "10" { t.Error("out did not preserve output chunks") }
+	result.Free(a); eval.FreeEffects(a, context.Effects); expression.Free()
+	engine.Free(); program.Free(); parsed.Free(); registry.Free()
+}
+
+func TestDefinitionOutputFlushesOnlyAfterSuccessfulResume(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	registry.Add(eval.Operation{Name: "wait-each", Call: waitEach, MinArity: 1, MaxArity: 1})
+	parsed := script.Parse(a, "test", "result = (list (out \"once\") (wait-each \"done\"))")
+	program := eval.Compile(a, engine, parsed, registry)
+	state := &outputState{}
+	program.SetDefinitionEffectSink(captureOutput, state)
+	node := program.Definition("result")
+	engine.Request(node)
+	for i := 0; i < 2; i++ { engine.Step() }
+	request := program.Requests.Next()
+	if !request.OK { t.Fatal("definition did not wait"); return }
+	engine.Complete(core.Completion{NodeID: request.Request.NodeID, Generation: request.Request.Generation, Attempt: request.Request.Attempt, RequestID: request.Request.ID})
+	request.Request.Free(a)
+	for i := 0; i < 3; i++ { engine.Step() }
+	if !node.Current || state.Count != 1 { t.Error("definition output did not flush once after resume") }
 	engine.Free(); program.Free(); parsed.Free(); registry.Free()
 }
 

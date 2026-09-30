@@ -86,7 +86,7 @@ environment values can invalidate a consumer.
 | `exists?` | `(exists? PATH)` | read | Whether a path exists. |
 | `stat` | `(stat PATH)` | read | Stable file metadata. |
 | `wildcard` | `(wildcard PATTERN)` | read | Sorted matching paths. |
-| `write` | `(write PATH TEXT-OR-BYTES)` | write | Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
+| `write` | `(write PATH VALUE)` | write | Bytes write raw; other coercible values render as with `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
 | `env` | `(env NAME)` | env | Environment value. |
 | `shell` | `(shell COMMAND [OPTIONS])` | run | Runs a collected command only in standalone expression evaluation. Invalid during planning or recipe rendering. |
 
@@ -95,14 +95,17 @@ needed roots, names, or process access with its `--allow-*` options.
 
 ## Build effects
 
-These operations are meaningful in a rule recipe expression. They accept one or
-more strings, patterns, or bytes and return `:nil`.
+These operations are meaningful in a rule recipe expression. Bytes are
+emitted raw; every other coercible value is rendered as with `str`
+(nil as `nil`, booleans, integers, floats, text, lists and records in
+stable syntax) and emitted. Unrenderable values (callables, resources)
+still report `EXPR_INVALID`.
 
 | Operation | Signature | Effect |
 | --- | --- | --- |
-| `out` | `(out VALUE...)` | Defers bytes to the target's stdout. |
-| `err` | `(err VALUE...)` | Defers bytes to the target's stderr. |
-| `yield` | `(yield VALUE...)` | Supplies the bytes for a declared file output. It is valid only for a file rule with one output. |
+| `out` | `(out VALUE...)` | In a rule, defers bytes to the target's stdout. Standalone evaluation writes to stdout and returns the combined output. |
+| `err` | `(err VALUE...)` | In a rule, defers bytes to the target's stderr. Standalone evaluation writes to stderr and returns the combined output. |
+| `yield` | `(yield VALUE...)` | Supplies the bytes for a declared file output. Standalone evaluation writes to stdout and returns nil. It is valid only for a file rule with one output. |
 
 Do not combine a nonempty shell recipe with `yield`; Kame reports an output
 conflict rather than choosing a producer.

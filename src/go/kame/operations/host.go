@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/host"
 	"kame/lang/eval"
+	"solod.dev/so/mem"
 )
 
 func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Result {
@@ -75,26 +76,36 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[0].Kind != core.String || (v[1].Kind != core.String && v[1].Kind != core.Bytes) {
+	if v[0].Kind != core.String {
 		freeArgCallables(c, v)
 		return invalid()
 	}
 	if !c.Allows(eval.Write, v[0].Text) {
 		return failure("CAP_DENIED", "write access denied")
 	}
-	data := v[1].Bytes
-	if v[1].Kind == core.String {
-		data = []byte(v[1].Text)
+	// Bytes write raw; every other coercible value renders as with str.
+	if v[1].Kind == core.Bytes {
+		return writeBytes(c, v[0].Text, v[1].Bytes)
 	}
+	text, ok := stringValue(c.Run, v[1], false)
+	if !ok {
+		freeArgCallables(c, v)
+		return invalid()
+	}
+	result := writeBytes(c, v[0].Text, []byte(text))
+	mem.FreeString(c.Run, text)
+	return result
+}
+func writeBytes(c *eval.Context, path string, data []byte) eval.Result {
 	if c.Phase == eval.RenderingPhase {
-		c.EmitWrite(v[0].Text, data)
+		c.EmitWrite(path, data)
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
 	if c.Phase == eval.PlanningPhase || c.Phase == eval.ResolvingPhase {
 		c.MarkPhaseInvalid()
 		return failure("PHASE_INVALID", "write is invalid while planning")
 	}
-	return request(c, host.RequestWriteFile, host.WritePayload(c.Run, v[0].Text, data))
+	return request(c, host.RequestWriteFile, host.WritePayload(c.Run, path, data))
 }
 func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
