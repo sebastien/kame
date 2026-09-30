@@ -20,6 +20,11 @@ func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Contex
 	for i := 1; i < len(expression.Reference); i++ {
 		part := expression.Reference[i]
 		next := p.referencePart(result.Value, part, context)
+		// Transfer: next clones out of result.Value, so release only a
+		// top-level wrapper here; nested shares still belong to next.
+		if result.Value.Kind == core.Callable {
+			freeCallables(context.Run, &result.Value)
+		}
 		result.Value.Free(context.Run)
 		result = next
 		if result.Diagnostic.Code != "" {

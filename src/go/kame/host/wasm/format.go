@@ -11,12 +11,8 @@ func FormatLanguage(a mem.Allocator, lang string, name string, text string, inde
 	result := format.Source(a, lang, name, text, indentStyle, indentWidth)
 	if !result.OK {
 		out := PureResult{Code: pureText(a, result.Code), Message: pureText(a, result.Message)}
-		if result.Code != "" {
-			mem.FreeString(a, result.Code)
-		}
-		if result.Message != "" {
-			mem.FreeString(a, result.Message)
-		}
+		mem.FreeString(a, result.Code)
+		mem.FreeString(a, result.Message)
 		return out
 	}
 	return PureResult{Text: result.Text}

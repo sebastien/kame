@@ -10,6 +10,7 @@ import (
 func opJoin(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.List || v[1].Kind != core.String {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	b := strings.NewBuilder(c.Run)
@@ -29,6 +30,7 @@ func opSplit(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	left, ok := text(v[0])
 	if !ok || v[1].Kind != core.String || v[1].Text == "" {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	var out []core.Value
@@ -49,6 +51,7 @@ func opStrip(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return eval.Result{Value: core.NewString(c.Run, strings.TrimSpace(value))}
@@ -58,6 +61,7 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 	if v[0].Kind != core.Pattern {
 		// Legacy literal form: replace occurrences of one plain string.
 		if len(v) != 3 || v[0].Kind != core.String || v[1].Kind != core.String || v[2].Kind != core.String {
+			freeArgCallables(c, v)
 			return failure("PAT_INVALID", "invalid replace arguments")
 		}
 		value := strings.ReplaceAll(c.Run, v[0].Text, v[1].Text, v[2].Text)
@@ -66,6 +70,7 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 	var state *replaceState
 	parsed := parseReplaceState(c, v[0], v[1], &state)
 	if parsed.Diagnostic.Code != "" {
+		freeArgCallables(c, v)
 		return parsed
 	}
 	if len(v) == 2 {
@@ -79,6 +84,7 @@ func opIncludes(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	left, ok := text(v[0])
 	if !ok || v[1].Kind != core.String {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.Contains(left, v[1].Text)}}
@@ -87,6 +93,7 @@ func opStarts(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	left, ok := text(v[0])
 	if !ok || v[1].Kind != core.String {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.HasPrefix(left, v[1].Text)}}
@@ -95,6 +102,7 @@ func opEnds(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	left, ok := text(v[0])
 	if !ok || v[1].Kind != core.String {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.HasSuffix(left, v[1].Text)}}
@@ -103,6 +111,7 @@ func opUppercase(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToUpper(c.Run, value)}}
@@ -111,6 +120,7 @@ func opLowercase(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToLower(c.Run, value)}}

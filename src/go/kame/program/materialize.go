@@ -18,9 +18,7 @@ type Result struct {
 }
 
 func (r *Result) Free(a mem.Allocator) {
-	if r.Path != "" {
-		mem.FreeString(a, r.Path)
-	}
+	mem.FreeString(a, r.Path)
 	r.Value.Free(a)
 	r.Diagnostic.Free(a)
 	*r = Result{}
@@ -69,16 +67,12 @@ type externalValueState struct {
 func freeInstanceState(a mem.Allocator, value any) { mem.Free(a, value.(*instanceState)) }
 func freeExternalFileState(a mem.Allocator, value any) {
 	state := value.(*externalFileState)
-	if state.Name != "" {
-		mem.FreeString(a, state.Name)
-	}
+	mem.FreeString(a, state.Name)
 	mem.Free(a, state)
 }
 func freeExternalValueState(a mem.Allocator, value any) {
 	state := value.(*externalValueState)
-	if state.Name != "" {
-		mem.FreeString(a, state.Name)
-	}
+	mem.FreeString(a, state.Name)
 	mem.Free(a, state)
 }
 
@@ -290,9 +284,7 @@ func (p *Program) Tick(wait int) {
 	for i := range ready {
 		p.Engine.Dispatch(ready[i])
 	}
-	if len(ready) != 0 {
-		slices.Free(p.Alloc, ready)
-	}
+	slices.Free(p.Alloc, ready)
 	p.observeInstances()
 }
 

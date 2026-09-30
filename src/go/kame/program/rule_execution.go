@@ -122,9 +122,7 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 		return diagnostic.Diagnostic{}
 	}
 	if dryRun {
-		if len(yielded) != 0 {
-			slices.Free(p.Alloc, yielded)
-		}
+		slices.Free(p.Alloc, yielded)
 		return diagnostic.Diagnostic{}
 	}
 	if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 {
@@ -304,13 +302,9 @@ func freeValues(a mem.Allocator, values []core.Value) {
 }
 func freeStrings(a mem.Allocator, values []string) {
 	for i := range values {
-		if values[i] != "" {
-			mem.FreeString(a, values[i])
-		}
+		mem.FreeString(a, values[i])
 	}
-	if len(values) != 0 {
-		slices.Free(a, values)
-	}
+	slices.Free(a, values)
 }
 func freeOwnedStrings(a mem.Allocator, values []string, owned bool) {
 	if owned {
@@ -322,14 +316,10 @@ func freePlanInputs(a mem.Allocator, values []PlanInput, owned bool) {
 		return
 	}
 	for i := range values {
-		if values[i].Display != "" {
-			mem.FreeString(a, values[i].Display)
-		}
+		mem.FreeString(a, values[i].Display)
 		values[i].Key.Free(a)
 	}
-	if len(values) != 0 {
-		slices.Free(a, values)
-	}
+	slices.Free(a, values)
 }
 
 func (p *Program) mkdirParent(name string) bool {

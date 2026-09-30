@@ -66,21 +66,11 @@ type ProcessEvent struct {
 }
 
 func (e *ProcessEvent) Free(a mem.Allocator) {
-	if len(e.Data) != 0 {
-		slices.Free(a, e.Data)
-	}
-	if len(e.Stdout) != 0 {
-		slices.Free(a, e.Stdout)
-	}
-	if len(e.Stderr) != 0 {
-		slices.Free(a, e.Stderr)
-	}
-	if e.Diagnostic.Code != "" {
-		mem.FreeString(a, e.Diagnostic.Code)
-	}
-	if e.Diagnostic.Message != "" {
-		mem.FreeString(a, e.Diagnostic.Message)
-	}
+	slices.Free(a, e.Data)
+	slices.Free(a, e.Stdout)
+	slices.Free(a, e.Stderr)
+	mem.FreeString(a, e.Diagnostic.Code)
+	mem.FreeString(a, e.Diagnostic.Message)
 	*e = ProcessEvent{}
 }
 

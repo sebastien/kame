@@ -26,18 +26,14 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 		}
 		result := p.Eval.Render(p.Alloc, entry.Rule.Body[i].Template, p.Eval.Scope, context)
 		if result.Waiting {
-			if len(spans) != 0 {
-				slices.Free(p.Alloc, spans)
-			}
+			slices.Free(p.Alloc, spans)
 			eval.FreeEffects(p.Alloc, context.Effects)
 			freeStrings(p.Alloc, context.WritePaths)
 			mem.Free(p.Alloc, context)
 			return renderResult{Waiting: true}
 		}
 		if result.Diagnostic.Code != "" {
-			if len(spans) != 0 {
-				slices.Free(p.Alloc, spans)
-			}
+			slices.Free(p.Alloc, spans)
 			eval.FreeEffects(p.Alloc, context.Effects)
 			freeStrings(p.Alloc, context.WritePaths)
 			mem.Free(p.Alloc, context)
@@ -45,9 +41,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 		}
 		if result.Value.Kind != core.String && result.Value.Kind != core.Pattern {
 			result.Value.Free(p.Alloc)
-			if len(spans) != 0 {
-				slices.Free(p.Alloc, spans)
-			}
+			slices.Free(p.Alloc, spans)
 			eval.FreeEffects(p.Alloc, context.Effects)
 			freeStrings(p.Alloc, context.WritePaths)
 			mem.Free(p.Alloc, context)

@@ -39,9 +39,7 @@ func (h *MemoryHost) SetFile(path string, data []byte) {
 		return
 	}
 	if i := h.findFile(path); i >= 0 {
-		if len(h.Files[i].Data) != 0 {
-			slices.Free(h.Alloc, h.Files[i].Data)
-		}
+		slices.Free(h.Alloc, h.Files[i].Data)
 		h.Files[i].Data = slices.Clone(h.Alloc, data)
 		return
 	}
@@ -201,27 +199,29 @@ func (h *MemoryHost) Monotonic() int64 {
 }
 
 func (h *MemoryHost) Start(request host.ProcessRequest) bool {
-	_ = request
+	_, _ = h, request
 	return false
 }
 
 func (h *MemoryHost) Pump(waitMS int) bool {
-	_ = waitMS
+	_, _ = h, waitMS
 	return false
 }
 
 func (h *MemoryHost) Next() host.ProcessEventResult {
+	_ = h
 	return host.ProcessEventResult{}
 }
 
 func (h *MemoryHost) Cancel(id int64) bool {
-	_ = id
+	_, _ = h, id
 	return false
 }
 
-func (h *MemoryHost) CancelAll() {}
+func (h *MemoryHost) CancelAll() { _ = h }
 
 func (h *MemoryHost) Active() int {
+	_ = h
 	return 0
 }
 
@@ -231,9 +231,7 @@ func (h *MemoryHost) Free() {
 	}
 	for i := range h.Files {
 		mem.FreeString(h.Alloc, h.Files[i].Path)
-		if len(h.Files[i].Data) != 0 {
-			slices.Free(h.Alloc, h.Files[i].Data)
-		}
+		slices.Free(h.Alloc, h.Files[i].Data)
 	}
 	for i := range h.Dirs {
 		mem.FreeString(h.Alloc, h.Dirs[i])

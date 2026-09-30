@@ -53,6 +53,11 @@ func (s *Scope) Retain() {
 }
 
 func (s *Scope) setValue(name string, value core.Value) {
+	// Values are cloned into the scope allocator, so callers must hold
+	// context.Run == s.Alloc (true via newScope(context.Run)). Callable
+	// clones share the function pointer: the scope becomes a co-owner, so
+	// callers transfer (shallow-free the original) or read back a fresh
+	// borrow, never return the same value.
 	s.Bindings = slices.Append(s.Alloc, s.Bindings, binding{Kind: bindingValue, Name: owned(s.Alloc, name), Value: value.Clone(s.Alloc)})
 }
 

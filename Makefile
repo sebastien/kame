@@ -128,14 +128,17 @@ build/wasm/kame.wasm: $(WASM_SOURCES)
 version-source:
 	tools/generate-version.sh
 
+build/kame.debug: KAME_BUILD_MODE=debug
 build/kame.debug: version-source
 	mkdir -p build
 	cd $(KAME_DIR) && so build -check=warn -o ../../../build/kame.debug ./cmd/kame
 
+build/kame.sanitize: KAME_BUILD_MODE=sanitize
 build/kame.sanitize: version-source
 	mkdir -p build
 	cd $(KAME_DIR) && CC=clang so build -check=sanitize -panic=abort -o ../../../build/kame.sanitize ./cmd/kame
 
+dist/kame: KAME_BUILD_MODE=release
 dist/kame: version-source
 	mkdir -p dist
 	cd $(KAME_DIR) && CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
@@ -143,6 +146,7 @@ dist/kame: version-source
 build/tools/cosmocc/bin/cosmocc:
 	tools/provision-cosmocc.sh build/tools/cosmocc
 
+dist/kame.com: KAME_BUILD_MODE=release
 dist/kame.com: build/tools/cosmocc/bin/cosmocc version-source
 	mkdir -p dist
 	cd $(KAME_DIR) && CC=$(CURDIR)/build/tools/cosmocc/bin/cosmocc CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame

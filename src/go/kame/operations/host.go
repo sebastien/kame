@@ -38,6 +38,11 @@ func dependency(c *eval.Context, kind core.ResourceKind, name string) bool {
 }
 func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 	if value.Kind != core.String {
+		// value is a copy of the caller's element: releasing the single
+		// retain here is balanced, the caller's shallow free never touches it.
+		if value.Kind == core.Callable {
+			c.FreeCallable(&value)
+		}
 		return invalid()
 	}
 	if !c.Allows(eval.Read, value.Text) {
@@ -71,6 +76,7 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.String || (v[1].Kind != core.String && v[1].Kind != core.Bytes) {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	if !c.Allows(eval.Write, v[0].Text) {
@@ -93,6 +99,7 @@ func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
 func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.String {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	if !c.Allows(eval.Env, v[0].Text) {
@@ -107,9 +114,11 @@ func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if c.Phase != eval.EvaluatePhase {
 		c.MarkPhaseInvalid()
+		freeArgCallables(c, v)
 		return failure("PHASE_INVALID", "shell is invalid outside evaluation")
 	}
 	if v[0].Kind != core.String || (len(v) == 2 && v[1].Kind != core.Record) {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text))

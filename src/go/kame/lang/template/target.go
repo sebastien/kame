@@ -48,6 +48,9 @@ func (t *Target) Free() {
 }
 
 func ParseTarget(a mem.Allocator, name string, text string) *Target {
+	// Captures borrow the caller's text, not the Source clone: the caller
+	// text must outlive the Target. Free releases the Source clone plus
+	// owned literal texts only.
 	s := source.New(a, name, text)
 	t := mem.Alloc[Target](a)
 	t.Alloc, t.Source = a, s

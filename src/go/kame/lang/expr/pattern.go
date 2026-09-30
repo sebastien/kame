@@ -46,7 +46,7 @@ func (p *Pattern) Free(a mem.Allocator) {
 		mem.FreeString(a, p.Parts[i].Pattern)
 	}
 	for i := range p.Names {
-		if p.Names[i] != "" { mem.FreeString(a, p.Names[i]) }
+		mem.FreeString(a, p.Names[i])
 	}
 	slices.Free(a, p.Parts)
 	slices.Free(a, p.Names)
@@ -344,7 +344,6 @@ func (p *Pattern) ExpandText(a mem.Allocator, match *Pattern, slots []string) Ex
 				var buffer [strconv.MaxIntBase10Len]byte
 				name = "_" + strconv.FormatInt(buffer[:], int64(part.Index), 10)
 			}
-			b.Free()
 			return Expansion{Missing: ownedText(a, name)}
 		}
 		b.WriteString(slots[index])

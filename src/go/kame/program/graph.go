@@ -144,9 +144,7 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 		}
 		plan.Free(p.Alloc)
 	}
-	if len(pending) != 0 {
-		slices.Free(p.Alloc, pending)
-	}
+	slices.Free(p.Alloc, pending)
 	FreeStrings(p.Alloc, visited)
 	return result
 }
@@ -200,9 +198,7 @@ func (p *Program) graphValues(target string, depth int, kind string) graphResult
 		}
 		plan.Free(p.Alloc)
 	}
-	if len(pending) != 0 {
-		slices.Free(p.Alloc, pending)
-	}
+	slices.Free(p.Alloc, pending)
 	FreeStrings(p.Alloc, visited)
 	return graphResult{Values: values}
 }

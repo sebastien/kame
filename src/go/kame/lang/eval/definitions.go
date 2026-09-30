@@ -158,23 +158,15 @@ func (p *Program) Free() {
 		p.Diagnostics[i].Free(p.Alloc)
 	}
 	for i := range p.Grants {
-		if len(p.Grants[i].Names) != 0 {
-			slices.Free(p.Alloc, p.Grants[i].Names)
-		}
+		slices.Free(p.Alloc, p.Grants[i].Names)
 	}
 	for i := range p.DefinitionArgs {
 		p.DefinitionArgs[i].Free(p.Alloc)
 	}
-	if p.DefinitionCwd != "" {
-		mem.FreeString(p.Alloc, p.DefinitionCwd)
-	}
+	mem.FreeString(p.Alloc, p.DefinitionCwd)
 	slices.Free(p.Alloc, p.Diagnostics)
-	if len(p.Grants) != 0 {
-		slices.Free(p.Alloc, p.Grants)
-	}
-	if len(p.DefinitionArgs) != 0 {
-		slices.Free(p.Alloc, p.DefinitionArgs)
-	}
+	slices.Free(p.Alloc, p.Grants)
+	slices.Free(p.Alloc, p.DefinitionArgs)
 	mem.Free(p.Alloc, p)
 }
 
@@ -185,13 +177,9 @@ func (p *Program) SetGrants(grants []Grant) {
 		return
 	}
 	for i := range p.Grants {
-		if len(p.Grants[i].Names) != 0 {
-			slices.Free(p.Alloc, p.Grants[i].Names)
-		}
+		slices.Free(p.Alloc, p.Grants[i].Names)
 	}
-	if len(p.Grants) != 0 {
-		slices.Free(p.Alloc, p.Grants)
-	}
+	slices.Free(p.Alloc, p.Grants)
 	for i := range grants {
 		grant := Grant{Capability: grants[i].Capability, Names: slices.Clone(p.Alloc, grants[i].Names)}
 		p.Grants = slices.Append(p.Alloc, p.Grants, grant)
@@ -214,9 +202,7 @@ func (p *Program) SetDefinitionArgs(values []core.Value) {
 	for i := range p.DefinitionArgs {
 		p.DefinitionArgs[i].Free(p.Alloc)
 	}
-	if len(p.DefinitionArgs) != 0 {
-		slices.Free(p.Alloc, p.DefinitionArgs)
-	}
+	slices.Free(p.Alloc, p.DefinitionArgs)
 	for i := range values {
 		p.DefinitionArgs = slices.Append(p.Alloc, p.DefinitionArgs, values[i].Clone(p.Alloc))
 	}
@@ -229,9 +215,7 @@ func (p *Program) SetDefinitionCwd(cwd string) {
 	if p == nil {
 		return
 	}
-	if p.DefinitionCwd != "" {
-		mem.FreeString(p.Alloc, p.DefinitionCwd)
-	}
+	mem.FreeString(p.Alloc, p.DefinitionCwd)
 	p.DefinitionCwd = owned(p.Alloc, cwd)
 }
 

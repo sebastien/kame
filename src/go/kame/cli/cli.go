@@ -56,31 +56,18 @@ type Invocation struct {
 // storage; consumers clone what they retain.
 func (inv *Invocation) Free() {
 	for i := range inv.Grants {
-		if len(inv.Grants[i].Names) != 0 {
-			slices.Free(mem.System, inv.Grants[i].Names)
+		for j := range inv.Grants[i].Names {
+			mem.FreeString(mem.System, inv.Grants[i].Names[j])
 		}
+		slices.Free(mem.System, inv.Grants[i].Names)
 	}
-	if len(inv.Grants) != 0 {
-		slices.Free(mem.System, inv.Grants)
-	}
-	if len(inv.Shell) != 0 {
-		slices.Free(mem.System, inv.Shell)
-	}
-	if len(inv.Environment) != 0 {
-		slices.Free(mem.System, inv.Environment)
-	}
-	if len(inv.Targets) != 0 {
-		slices.Free(mem.System, inv.Targets)
-	}
-	if len(inv.Files) != 0 {
-		slices.Free(mem.System, inv.Files)
-	}
-	if len(inv.Args) != 0 {
-		slices.Free(mem.System, inv.Args)
-	}
-	if inv.Error.Message != "" {
-		mem.FreeString(mem.System, inv.Error.Message)
-	}
+	slices.Free(mem.System, inv.Grants)
+	slices.Free(mem.System, inv.Shell)
+	slices.Free(mem.System, inv.Environment)
+	slices.Free(mem.System, inv.Targets)
+	slices.Free(mem.System, inv.Files)
+	slices.Free(mem.System, inv.Args)
+	mem.FreeString(mem.System, inv.Error.Message)
 	*inv = Invocation{}
 }
 
@@ -341,9 +328,7 @@ func parseGraph(inv *Invocation, args []string, allowExpand bool) {
 		remaining = slices.Append(mem.System, remaining, arg)
 	}
 	parseBuild(inv, remaining)
-	if len(remaining) != 0 {
-		slices.Free(mem.System, remaining)
-	}
+	slices.Free(mem.System, remaining)
 }
 
 func parseDepth(value string) (int, bool) {

@@ -38,9 +38,7 @@ func freeCaptures(a mem.Allocator, values []template.CaptureValue) {
 		mem.FreeString(a, values[i].Name)
 		mem.FreeString(a, values[i].Text)
 	}
-	if len(values) != 0 {
-		slices.Free(a, values)
-	}
+	slices.Free(a, values)
 }
 
 func renderTarget(a mem.Allocator, target rule.Target, captures []template.CaptureValue) string {

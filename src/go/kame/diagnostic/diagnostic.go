@@ -113,83 +113,39 @@ func (d *Diagnostic) Clone(a mem.Allocator) Diagnostic {
 
 func (d *Diagnostic) Free(a mem.Allocator) {
 	if d.Owned {
-		if d.Code != "" {
-			mem.FreeString(a, d.Code)
-		}
-		if d.Source != "" {
-			mem.FreeString(a, d.Source)
-		}
-		if d.Message != "" {
-			mem.FreeString(a, d.Message)
-		}
-		if d.Target != "" {
-			mem.FreeString(a, d.Target)
-		}
+		mem.FreeString(a, d.Code)
+		mem.FreeString(a, d.Source)
+		mem.FreeString(a, d.Message)
+		mem.FreeString(a, d.Target)
 		for i := range d.Notes {
-			if d.Notes[i] != "" {
-				mem.FreeString(a, d.Notes[i])
-			}
+			mem.FreeString(a, d.Notes[i])
 		}
 		for i := range d.Related {
-			if d.Related[i].Message != "" {
-				mem.FreeString(a, d.Related[i].Message)
-			}
-			if d.Related[i].Source != "" {
-				mem.FreeString(a, d.Related[i].Source)
-			}
+			mem.FreeString(a, d.Related[i].Message)
+			mem.FreeString(a, d.Related[i].Source)
 		}
 		for i := range d.Frames {
-			if d.Frames[i].Kind != "" {
-				mem.FreeString(a, d.Frames[i].Kind)
-			}
-			if d.Frames[i].Label != "" {
-				mem.FreeString(a, d.Frames[i].Label)
-			}
-			if d.Frames[i].Source != "" {
-				mem.FreeString(a, d.Frames[i].Source)
-			}
+			mem.FreeString(a, d.Frames[i].Kind)
+			mem.FreeString(a, d.Frames[i].Label)
+			mem.FreeString(a, d.Frames[i].Source)
 		}
 		for i := range d.TargetStack {
-			if d.TargetStack[i] != "" {
-				mem.FreeString(a, d.TargetStack[i])
-			}
+			mem.FreeString(a, d.TargetStack[i])
 		}
 		for i := range d.Tips {
-			if d.Tips[i] != "" {
-				mem.FreeString(a, d.Tips[i])
-			}
+			mem.FreeString(a, d.Tips[i])
 		}
-		if d.Cause.Kind != "" {
-			mem.FreeString(a, d.Cause.Kind)
-		}
-		if d.Cause.Message != "" {
-			mem.FreeString(a, d.Cause.Message)
-		}
-		if d.Cause.Program != "" {
-			mem.FreeString(a, d.Cause.Program)
-		}
-		if d.Cause.Stdout != "" {
-			mem.FreeString(a, d.Cause.Stdout)
-		}
-		if d.Cause.Stderr != "" {
-			mem.FreeString(a, d.Cause.Stderr)
-		}
+		mem.FreeString(a, d.Cause.Kind)
+		mem.FreeString(a, d.Cause.Message)
+		mem.FreeString(a, d.Cause.Program)
+		mem.FreeString(a, d.Cause.Stdout)
+		mem.FreeString(a, d.Cause.Stderr)
 	}
-	if len(d.Frames) != 0 {
-		slices.Free(a, d.Frames)
-	}
-	if len(d.Notes) != 0 {
-		slices.Free(a, d.Notes)
-	}
-	if len(d.Related) != 0 {
-		slices.Free(a, d.Related)
-	}
-	if len(d.TargetStack) != 0 {
-		slices.Free(a, d.TargetStack)
-	}
-	if len(d.Tips) != 0 {
-		slices.Free(a, d.Tips)
-	}
+	slices.Free(a, d.Frames)
+	slices.Free(a, d.Notes)
+	slices.Free(a, d.Related)
+	slices.Free(a, d.TargetStack)
+	slices.Free(a, d.Tips)
 	*d = Diagnostic{}
 }
 

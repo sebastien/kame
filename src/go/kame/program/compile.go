@@ -124,9 +124,7 @@ func (p *Program) SetToolPath(name, executable string) bool {
 	if i < 0 {
 		return false
 	}
-	if p.Tools[i].Path != "" {
-		mem.FreeString(p.Alloc, p.Tools[i].Path)
-	}
+	mem.FreeString(p.Alloc, p.Tools[i].Path)
 	p.Tools[i].Path = cloneText(p.Alloc, executable)
 	return true
 }
@@ -255,22 +253,12 @@ func (p *Program) Free() {
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)
-		if p.Instances[i].Script != "" {
-			mem.FreeString(p.Alloc, p.Instances[i].Script)
-		}
-		if len(p.Instances[i].LineSpans) != 0 {
-			slices.Free(p.Alloc, p.Instances[i].LineSpans)
-		}
+		mem.FreeString(p.Alloc, p.Instances[i].Script)
+		slices.Free(p.Alloc, p.Instances[i].LineSpans)
 		freeStrings(p.Alloc, p.Instances[i].Operations)
-		if len(p.Instances[i].CacheManifest) != 0 {
-			slices.Free(p.Alloc, p.Instances[i].CacheManifest)
-		}
-		if len(p.Instances[i].CacheStdout) != 0 {
-			slices.Free(p.Alloc, p.Instances[i].CacheStdout)
-		}
-		if len(p.Instances[i].CacheStderr) != 0 {
-			slices.Free(p.Alloc, p.Instances[i].CacheStderr)
-		}
+		slices.Free(p.Alloc, p.Instances[i].CacheManifest)
+		slices.Free(p.Alloc, p.Instances[i].CacheStdout)
+		slices.Free(p.Alloc, p.Instances[i].CacheStderr)
 	}
 	for i := range p.Tools {
 		mem.FreeString(p.Alloc, p.Tools[i].Name)
@@ -279,9 +267,7 @@ func (p *Program) Free() {
 	for i := range p.Events {
 		p.Events[i].Free(p.Alloc)
 	}
-	if p.Options.Directory != "" {
-		mem.FreeString(p.Alloc, p.Options.Directory)
-	}
+	mem.FreeString(p.Alloc, p.Options.Directory)
 	for i := range p.Options.Shell {
 		mem.FreeString(p.Alloc, p.Options.Shell[i])
 	}

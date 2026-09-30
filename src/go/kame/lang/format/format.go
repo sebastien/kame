@@ -97,7 +97,5 @@ func cloneText(a mem.Allocator, text string) string {
 }
 
 func freeIndent(a mem.Allocator, indent []byte) {
-	if len(indent) != 0 {
-		slices.Free(a, indent)
-	}
+	slices.Free(a, indent)
 }

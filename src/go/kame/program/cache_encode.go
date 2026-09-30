@@ -368,9 +368,7 @@ func (p *Program) cacheFingerprint(entry *instance, script string) bool {
 		return false
 	}
 	cacheHash(enc.buf, entry.CacheFingerprint[:])
-	if len(entry.CacheManifest) != 0 {
-		slices.Free(p.Alloc, entry.CacheManifest)
-	}
+	slices.Free(p.Alloc, entry.CacheManifest)
 	entry.CacheManifest = enc.buf
 	enc.buf = nil
 	return true

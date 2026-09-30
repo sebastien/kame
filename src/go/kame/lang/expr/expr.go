@@ -120,6 +120,13 @@ func freeExpr(a mem.Allocator, e *Expr) {
 	for i := range e.Items { freeExpr(a, e.Items[i]) }
 	for i := range e.Fields { freeExpr(a, e.Fields[i].Value) }
 	for i := range e.Body { freeExpr(a, e.Body[i]) }
+	// Section parameters are synthesized ("_0", ...) and allocator-owned;
+	// lambda parameters borrow source text and stay unfreed.
+	if e.Kind == Section {
+		for i := range e.Parameters {
+			mem.FreeString(a, e.Parameters[i].Name)
+		}
+	}
 	slices.Free(a, e.Parts)
 	slices.Free(a, e.Reference)
 	slices.Free(a, e.Items)
@@ -558,7 +565,7 @@ func (p *parser) classifySection(app *Expr) *Expr {
 	app.Body = slices.Append(p.a, app.Body, body)
 	for i := int64(0); i < arity; i++ {
 		var buffer [strconv.MaxIntBase10Len]byte
-		name := "_" + strconv.FormatInt(buffer[:], i, 10)
+		name := sourceText(p.a, "_"+strconv.FormatInt(buffer[:], i, 10))
 		app.Parameters = slices.Append(p.a, app.Parameters, Parameter{Name: name, Span: body.Span})
 	}
 	return app
@@ -701,6 +708,13 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	for i := range original.Items { copy.Items = slices.Append(a, copy.Items, cloneExpr(a, original.Items[i])) }
 	for i := range original.Fields { field := original.Fields[i]; field.Value = cloneExpr(a, field.Value); copy.Fields = slices.Append(a, copy.Fields, field) }
 	copy.Parameters = slices.Clone(a, original.Parameters)
+	// Section parameters are owned (see classifySection); duplicate them so
+	// the clone frees independently. Lambda parameters stay borrowed.
+	if original.Kind == Section {
+		for i := range copy.Parameters {
+			copy.Parameters[i].Name = sourceText(a, copy.Parameters[i].Name)
+		}
+	}
 	for i := range original.Body { copy.Body = slices.Append(a, copy.Body, cloneExpr(a, original.Body[i])) }
 	return copy
 }

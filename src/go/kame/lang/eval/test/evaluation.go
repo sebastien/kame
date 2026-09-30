@@ -287,6 +287,183 @@ func TestDefInsideLetReleasesItsFunction(t *testing.T) {
 	registry.Free()
 }
 
+func TestDefValueFormCallableReleasesItsScope(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	// Value-form def stores the value and returns an independent copy: the
+	// scope binding and the result must never share one callable wrapper.
+	// Both parses stay alive across the two evaluations, mirroring a
+	// session-lived AST: the stored wrapper borrows the defining parse.
+	defined := expr.Parse(a, "test", "(def f (([q] q) ([x] x)))")
+	if len(defined.Diagnostics) != 0 {
+		t.Error("parse failed")
+		defined.Free()
+		return
+	}
+	result := program.Evaluate(a, defined.Expr, program.Scope)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Callable {
+		t.Error("def value-form callable failed")
+	}
+	result.Free(a)
+	called := expr.Parse(a, "test", "(f 42)")
+	if len(called.Diagnostics) != 0 {
+		t.Error("parse failed")
+		called.Free()
+		defined.Free()
+		return
+	}
+	result = program.Evaluate(a, called.Expr, program.Scope)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
+		t.Error("def value-form callable call failed")
+	}
+	result.Free(a)
+	called.Free()
+	defined.Free()
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestDefValueFormScalar(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [] (def answer 42) answer)")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
+		t.Error("def value-form scalar failed")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestInvalidOperationArgsReleaseCallables(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(count ([x] x))")
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("count of callable was not rejected")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(first ([x] x))")
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("first of callable was not rejected")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(apply ([x] x) ([y] y))")
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("apply of two callables was not rejected")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestFilterCallbackReturningLambdaReleases(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(filter ([x] ([y] y)) [1 2])")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 {
+		t.Error("filter with lambda result failed")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestFlatmapCallbackReturningLambdaIsInvalid(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(flatmap ([x] ([y] y)) [1])")
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("flatmap of lambda result was not rejected")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestApplyFormsReleaseCallables(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	// One-parameter functions consume the whole list.
+	result := evaluate(t, program, "(apply ([x] x) [1])")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 1 {
+		t.Error("apply list-first failed")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(apply [1] ([x] x))")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 1 {
+		t.Error("apply function-first failed")
+	}
+	result.Free(a)
+	// Multi-parameter functions splat the list.
+	result = evaluate(t, program, "(apply ([x y] x) [1 2])")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 1 {
+		t.Error("apply splat failed")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestSectionDefBodyCloneReleases(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "(let [] (def foo [x] (_0)) \"x\")")
+	if result.Diagnostic.Code != "" || result.Value.Text != "x" {
+		t.Error("def with section body failed")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func TestNativeReplaceSectionInLetReleasesItsState(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)

@@ -255,7 +255,123 @@ unconditional; keep that. Recommendation: standardize on unconditional free
 - `main.go:106-134` double `session.Free()` on compile failure is safe only
   because `Free` zeroes `*s`; intentional but fragile.
 
-## Recommended fix order
+## Follow-up hardening (2026-09-30, second pass)
+
+New Tracker tests (all passing, sanitizer-clean) exposed two deeper issues;
+both are fixed below. Verified: `so build -check=warn ./cmd/kame` ok,
+`so test ./...` 15 packages ok, `-check=sanitize` clean for lang (53 eval
+tests), program (84), core (55), wasm portable check ok, `go test` ok.
+
+### Solod emits textually-prior defers at every later return
+
+`opApply` was the only function with conditional defers (one per branch).
+Generated C proved Solod 0.4.0 inlines, at each `return`, every `defer`
+statement that appears textually earlier — even inside untaken branches:
+
+- Branch-2 exit ran branch-1's defer (a list recursion into
+  caller-owned elements) plus its own.
+- The trailing `return invalid()` ran both, double-freeing anything the new
+  `freeArgCallables` helper had just released (`freeCallables` nils the
+  pointer but keeps `Kind`, so the second free faults on a null `Function`).
+
+Top-level unconditional defers are unaffected (identical to Go). Rule going
+forward: **never use conditional defers in Solod code** — a repo-wide grep
+confirms `opApply` was the sole case. Fix: `opApply` now uses explicit frees
+on every path (same order the defers ran), so it is correct under both the
+current hoisting behavior and a hypothetical dominance-correct Solod.
+Single-defer functions (`transform`, `filter`, `opReduce`, `opRelpath`,
+`produce`, …) are safe: returns before the defer precede it textually, and
+every later return passed it.
+
+### Nested-scope parent-retain deadlock (pre-existing, known limitation)
+
+A nested scope holding an escaping callable cannot teardown by refcounting:
+the outer scope waits on the inner scope's parent retain while the inner
+scope waits on a wrapper owned by the stuck outer scope, and
+`breakCallableCycle` only handles self-cycles (quorum `count == References`
+can never include cross-owned retains). Reproduces identically on pristine
+and fixed trees (9 unfreed allocs for a nested value-form def), so it is not
+a regression from the C2 fix, which is retain-neutral there. The committed
+C2 test therefore uses top-level form with session-lived parses — and that
+test was proven to catch the original bug: pristine `forms.go` aborts with
+`free(): double free detected`. Fixing the deadlock needs refcounting
+changes or a language-level restriction; left for a design decision.
+
+### Ancillary corrections from test evidence
+
+- `apply` with a one-parameter function consumes the whole list
+  (`(apply ([x] x) [1])` yields `[1]`); multi-parameter functions splat.
+  Initial test expectations said otherwise — fixed in the tests, not the code.
+- `so test` ignores `*_test.go` files (scratch tests only ran after renaming
+  to `scratchcases.go`); `so test` also takes a single package pattern per
+  invocation.
+- `callbackState` now records its own `Alloc`: the direct (`c.Run`),
+  `ClearOperationState`, and generation-mismatch (`Program.Alloc`) paths each
+  handed in a different allocator. Robust by construction instead of assuming
+  equality.
+- `FreeString("")` is a safe no-op (early return in Solod's `mem.go`), so all
+  54 single-statement `!= ""` guards were normalized like the M1 slice guards.
+
+### Full-gate validation (2026-10-01)
+
+- `so test ./...` (kame): 15 packages ok. Examples module: ok.
+- `so test -check=sanitize -panic=abort ./...` (kame): 15 packages ok, zero
+  findings — after fixing 6 stub methods on `host/wasm.MemoryHost`
+  (`Start`/`Pump`/`Next`/`Cancel`/`CancelAll`/`Active`) that ignored their
+  receiver and failed the `-Werror=unused-variable` build. Same fix, examples
+  sanitize ok.
+- Pre-existing failure, unrelated to the audit fixes (those files only had
+  guard normalizations); fixed per the `solod-unused-receiver` convention.
+
+## Remediation (2026-09-30, first pass)
+
+All items implemented; verified with `so build -check=warn ./cmd/kame`
+(exit 0), `so test` for lang/operations/cli/core/diagnostic/host/program
+(all ok), `so test -check=sanitize -panic=abort` for lang + program/core
+(all ok, incl. 46 eval + 84 program tests), `tools/wasm/check-portable.sh`
+(ok), `go test ./cmd/kame` (ok).
+
+- C1: dropped the explicit `b.Free()` on the missing-reference branch; the
+  `defer b.Free()` covers both exits.
+- C2: `def` value path now transfers to the scope (shallow-free of the
+  original) and returns a fresh `name()` lookup, so scope and result never
+  share one wrapper. Same move pattern as `let`.
+- C3: `attachContextFrames` no longer frees the shared tail strings; it only
+  releases the old backing (transfer), mirroring `attachFrame`.
+- C4: section synthetic parameters are allocator-owned via `sourceText`;
+  `freeExpr` frees them for `Section` only (lambda params stay borrowed) and
+  `cloneExpr` duplicates them for `Section` so clones free independently.
+- C5: `Invocation.Free` frees each `Grants[i].Names[j]` before the backing.
+- C6: `produce` frees `commands` on the mkdir-parent failure path.
+- H1: discard paths now deep-free: `body` loop, `evalText` non-string,
+  `stringValue`/`Render` stringify failure, `reference` loop (top-level
+  wrapper only, since `next` clones out of the old value), non-callable
+  application head.
+- H2: new `freeArgCallables` helper (top-level wrappers only; nested shares
+  untouched) applied to every reject path in operations without defer
+  coverage (general/path/text/collections/pattern/host/effects), plus
+  bare-callable results in `transform` flatten-invalid and `filter` truth
+  paths. Post-defer paths untouched: the deferred `FreeCallable` already
+  owns the callback (a second free would nil-deref).
+- H3: second-signal abort in `materializeTargets` frees live handles and the
+  backing before returning.
+- H4/M2: no behavior change; ownership pinned with comments at
+  `posix.cloneString`, `source.readBuildSource`, `Scope.setValue`,
+  `template.ParseTarget`.
+- M1: all 64 single-statement `if len != 0 { slices.Free }` guards normalized
+  to unconditional free (`slices.Free(nil)` is a safe no-op, exercised e.g.
+  by empty `handles` in `materializeTargets`). `FreeString("")` guards left
+  as-is. Pre-existing `gofmt -l` count unchanged (30 before/after).
+
+Residual (documented, not fixed): callables nested inside list/record values
+share pointers through `Clone`, so a scope and a result holding "copies" of
+one list still co-own nested wrappers. Fixing that needs refcounting or move
+semantics in `Clone` — same trade-off `let` already lives with. Operation
+reject paths free top-level wrappers only for the same reason; nested rejects
+(e.g. sorting a list containing a lambda) still leak one scope retain per
+error. `def` value-form of a list containing callables inherits both.
+
+## Recommended fix order (historical — all done above)
 
 1. C1 (mechanical, one-line), C5 (mechanical), C6 (mechanical).
 2. C3 (transfer, no free loop), C4 (`sourceText`), C2 (move semantics for

@@ -55,10 +55,12 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 			return r
 		}
 		text, ok := stringify(run, r.Value)
-		r.Value.Free(run)
 		if !ok {
+			freeCallables(run, &r.Value)
+			r.Value.Free(run)
 			return failure(context.Run, "EXPR_INVALID", part.Span, "records and bytes require explicit text conversion")
 		}
+		r.Value.Free(run)
 		b.WriteString(text)
 		mem.FreeString(run, text)
 	}

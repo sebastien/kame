@@ -44,6 +44,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		return callee
 	}
 	if callee.Value.Kind != core.Callable {
+		freeCallables(context.Run, &callee.Value)
 		callee.Value.Free(context.Run)
 		return failure(context.Run, "EXPR_INVALID", head.Span, "application head is not callable")
 	}
@@ -187,15 +188,9 @@ func attachFrame(result *Result, context *Context, span source.Span, label strin
 		frame := result.Diagnostic.Frames[i]
 		if frame.Kind == frameKind && frame.Label == frameLabel && frame.Source == frameSource && frame.Span.Start == span.Start && frame.Span.End == span.End {
 			if result.Diagnostic.Owned {
-				if frameLabel != "" {
-					mem.FreeString(a, frameLabel)
-				}
-				if frameKind != "" {
-					mem.FreeString(a, frameKind)
-				}
-				if frameSource != "" {
-					mem.FreeString(a, frameSource)
-				}
+				mem.FreeString(a, frameLabel)
+				mem.FreeString(a, frameKind)
+				mem.FreeString(a, frameSource)
 			}
 			return
 		}

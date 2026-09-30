@@ -59,19 +59,9 @@ func attachContextFrames(result *Result, context *Context) {
 		frames[i] = diagnostic.Frame{Kind: kind, Label: label, Source: source, Span: context.Frames[i].Span}
 	}
 	copy(frames[len(context.Frames):], result.Diagnostic.Frames)
-	if result.Diagnostic.Owned {
-		for i := range result.Diagnostic.Frames {
-			if result.Diagnostic.Frames[i].Kind != "" {
-				mem.FreeString(a, result.Diagnostic.Frames[i].Kind)
-			}
-			if result.Diagnostic.Frames[i].Label != "" {
-				mem.FreeString(a, result.Diagnostic.Frames[i].Label)
-			}
-			if result.Diagnostic.Frames[i].Source != "" {
-				mem.FreeString(a, result.Diagnostic.Frames[i].Source)
-			}
-		}
-	}
+	// Transfer: the new slice shares the result tail strings, so release only
+	// the old backing. Freeing the shared strings here would leave the new
+	// tail dangling.
 	slices.Free(a, result.Diagnostic.Frames)
 	result.Diagnostic.Frames = frames
 }

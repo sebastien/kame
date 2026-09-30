@@ -13,6 +13,7 @@ func opMap(c *eval.Context, s any, v []core.Value) eval.Result     { return tran
 func opFlatMap(c *eval.Context, s any, v []core.Value) eval.Result { return transform(c, s, v, true) }
 
 type callbackState struct {
+	Alloc          mem.Allocator
 	Index          int
 	Values         []core.Value
 	Accumulator    core.Value
@@ -21,7 +22,12 @@ type callbackState struct {
 }
 
 func freeCallbackState(a mem.Allocator, value any) {
+	// The state remembers its own allocator: the direct (c.Run),
+	// ClearOperationState, and generation-mismatch (Program.Alloc) paths
+	// each hand in a different allocator, so none of them is reliable here.
+	_ = a
 	state := value.(*callbackState)
+	a = state.Alloc
 	for i := range state.Values {
 		state.Values[i].Free(a)
 	}
@@ -37,6 +43,7 @@ func callbackProgress(c *eval.Context) *callbackState {
 		return existing.(*callbackState)
 	}
 	state := mem.Alloc[callbackState](c.Run)
+	state.Alloc = c.Run
 	if c.Engine != nil {
 		state.Tracked = true
 		c.SetOperationState(state, freeCallbackState)
@@ -60,10 +67,14 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 	callback := &v[0]
 	values := v[1].List
 	if v[0].Kind != core.Callable {
-		if v[1].Kind != core.Callable { return invalid() }
+		if v[1].Kind != core.Callable {
+			freeArgCallables(c, v)
+			return invalid()
+		}
 		callback = &v[1]
 		if v[0].Kind == core.List { values = v[0].List } else { values = v[:1] }
 	} else if v[1].Kind != core.List {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	defer c.FreeCallable(callback)
@@ -79,6 +90,11 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 		}
 		if flatten {
 			if result.Value.Kind != core.List {
+				// The callback returned a scalar: nothing shares it, so
+				// release a bare wrapper before the shallow free.
+				if result.Value.Kind == core.Callable {
+					c.FreeCallable(&result.Value)
+				}
 				result.Value.Free(c.Run)
 				discardCallback(c, state)
 				return invalid()
@@ -102,9 +118,13 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 	callback := &v[0]
 	values := v[1].List
 	if v[0].Kind != core.Callable {
-		if v[0].Kind != core.List || v[1].Kind != core.Callable { return invalid() }
+		if v[0].Kind != core.List || v[1].Kind != core.Callable {
+			freeArgCallables(c, v)
+			return invalid()
+		}
 		callback, values = &v[1], v[0].List
 	} else if v[1].Kind != core.List {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	defer c.FreeCallable(callback)
@@ -119,6 +139,11 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 			return result
 		}
 		keep := truth(result.Value)
+		// truth discards nothing: release a bare callable wrapper here so
+		// the shallow free below does not leak its scope retain.
+		if result.Value.Kind == core.Callable {
+			c.FreeCallable(&result.Value)
+		}
 		result.Value.Free(c.Run)
 		if keep != invert {
 			state.Values = slices.Append(c.Run, state.Values, values[state.Index].Clone(c.Run))
@@ -130,6 +155,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.Callable || v[1].Kind != core.List {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	defer c.FreeCallable(&v[0])
@@ -181,6 +207,7 @@ func opConcat(c *eval.Context, s any, v []core.Value) eval.Result {
 func opSlice(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[1].Kind != core.Int || (len(v) == 3 && v[2].Kind != core.Int) {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	length := 0
@@ -189,6 +216,7 @@ func opSlice(c *eval.Context, s any, v []core.Value) eval.Result {
 	} else if v[0].Kind == core.String {
 		length = utf8.RuneCountInString(v[0].Text)
 	} else {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	start, end := int(v[1].Int), length
@@ -251,6 +279,7 @@ func compare(left core.Value, right core.Value) int {
 func opSorted(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.List {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	out := core.NewList(c.Run, v[0].List)
@@ -272,6 +301,7 @@ func opSorted(c *eval.Context, s any, v []core.Value) eval.Result {
 func opUnique(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.List {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	var out []core.Value

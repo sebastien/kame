@@ -24,6 +24,7 @@ func effect(c *eval.Context, kind eval.EffectKind, v []core.Value) eval.Result {
 		} else if v[i].Kind == core.Bytes {
 			c.Emit(kind, v[i].Bytes)
 		} else {
+			freeArgCallables(c, v)
 			return invalid()
 		}
 	}

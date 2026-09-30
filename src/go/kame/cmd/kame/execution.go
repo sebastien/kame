@@ -99,6 +99,12 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 	for remaining != 0 {
 		signal := posix.TakeSignal()
 		if signal < 0 {
+			for i := range handles {
+				if handles[i] != nil {
+					handles[i].Free()
+				}
+			}
+			slices.Free(mem.System, handles)
 			return 128 - signal
 		}
 		if signal > 0 && !cancelling {

@@ -20,12 +20,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	p := state.Program
 	entry := &p.Instances[state.Index]
 	if !entry.started || entry.startedGeneration != c.Generation() {
-		if len(entry.CacheStdout) != 0 {
-			slices.Free(p.Alloc, entry.CacheStdout)
-		}
-		if len(entry.CacheStderr) != 0 {
-			slices.Free(p.Alloc, entry.CacheStderr)
-		}
+		slices.Free(p.Alloc, entry.CacheStdout)
+		slices.Free(p.Alloc, entry.CacheStderr)
 		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false
 		entry.cachePending = false
 		if entry.Script != "" {
@@ -45,9 +41,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerFailed
 	}
 	if c.Completion().RequestID != 0 && entry.Script != "" {
-		if entry.Script != "" {
-			mem.FreeString(p.Alloc, entry.Script)
-		}
+		mem.FreeString(p.Alloc, entry.Script)
 		entry.Script = ""
 		if c.Completion().Diagnostic.Code != "" {
 			c.Fail(c.Completion().Diagnostic)
@@ -137,9 +131,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	entry = &p.Instances[state.Index]
 	rendered := p.render(c, entry, inputs)
 	commands, effects, writePaths, d := rendered.Commands, rendered.Effects, rendered.WritePaths, rendered.Diagnostic
-	if len(entry.LineSpans) != 0 {
-		slices.Free(p.Alloc, entry.LineSpans)
-	}
+	slices.Free(p.Alloc, entry.LineSpans)
 	entry.LineSpans = rendered.LineSpans
 	defer eval.FreeEffects(p.Alloc, effects)
 	defer freeStrings(p.Alloc, writePaths)
@@ -160,9 +152,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		if !p.cacheBlockedByBareTask(entry) {
 			lookup := p.cacheLookup(c, entry)
 			if lookup.Waiting {
-				if commands != "" {
-					mem.FreeString(p.Alloc, commands)
-				}
+				mem.FreeString(p.Alloc, commands)
 				return core.ProducerSubmitted
 			}
 			if lookup.Hit {
@@ -171,9 +161,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				p.emitCachedLog(entry, Stdout, record.Stdout, record.StdoutTruncated)
 				p.emitCachedLog(entry, Stderr, record.Stderr, record.StderrTruncated)
 				record.Free(p.Alloc)
-				if commands != "" {
-					mem.FreeString(p.Alloc, commands)
-				}
+				mem.FreeString(p.Alloc, commands)
 				c.Publish(core.Value{Kind: core.Nil})
 				return core.ProducerCompleted
 			}
@@ -181,9 +169,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		}
 	}
 	if entry.Plan.Freshness == Fresh && !p.Options.Force && !p.Options.DryRun {
-		if commands != "" {
-			mem.FreeString(p.Alloc, commands)
-		}
+		mem.FreeString(p.Alloc, commands)
 		if entry.Rule.Kind == rule.FileRule {
 			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
 		} else {
@@ -192,31 +178,23 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerCompleted
 	}
 	if hasYield(effects) && commands != "" {
-		if commands != "" {
-			mem.FreeString(p.Alloc, commands)
-		}
+		mem.FreeString(p.Alloc, commands)
 		c.Fail(failureAt(p.Alloc, "OUTPUT_CONFLICT", yieldSpan(effects), "yield cannot be combined with shell commands"))
 		return core.ProducerFailed
 	}
 	if effectDiagnostic := validateEffects(p.Alloc, entry, effects); effectDiagnostic.Code != "" {
-		if commands != "" {
-			mem.FreeString(p.Alloc, commands)
-		}
+		mem.FreeString(p.Alloc, commands)
 		c.Fail(effectDiagnostic)
 		return core.ProducerFailed
 	}
 	if p.Options.DryRun {
 		p.commitEffects(entry, effects, writePaths, true)
-		if commands != "" {
-			mem.FreeString(p.Alloc, commands)
-		}
+		mem.FreeString(p.Alloc, commands)
 		c.Publish(core.Value{Kind: core.Nil})
 		return core.ProducerCompleted
 	}
 	if effectDiagnostic := p.commitEffects(entry, effects, writePaths, false); effectDiagnostic.Code != "" {
-		if commands != "" {
-			mem.FreeString(p.Alloc, commands)
-		}
+		mem.FreeString(p.Alloc, commands)
 		c.Fail(effectDiagnostic)
 		return core.ProducerFailed
 	}
@@ -248,6 +226,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			ok := p.mkdirParent(name)
 			mem.FreeString(p.Alloc, name)
 			if !ok {
+				// commands transfers to entry.Script below; it never got
+				// there on this path, so release it here like every other
+				// early exit above.
+				mem.FreeString(p.Alloc, commands)
 				c.Fail(failure(p.Alloc, "FS_ERR", "cannot create output directory"))
 				return core.ProducerFailed
 			}

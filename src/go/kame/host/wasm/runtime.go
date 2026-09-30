@@ -552,9 +552,7 @@ func (r *Runtime) Free() {
 	for i := range r.Environment {
 		mem.FreeString(r.Alloc, r.Environment[i])
 	}
-	if len(r.Environment) != 0 {
-		slices.Free(r.Alloc, r.Environment)
-	}
+	slices.Free(r.Alloc, r.Environment)
 	if r.ExprParsed != nil {
 		r.ExprParsed.Free()
 	}

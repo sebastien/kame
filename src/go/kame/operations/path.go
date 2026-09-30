@@ -13,6 +13,7 @@ func opBasename(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	value, ok := text(v[0])
 	if !ok {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return eval.Result{Value: core.NewString(c.Run, path.Base(value))}
@@ -21,6 +22,7 @@ func opDirname(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	result := path.Dir(c.Run, value)
@@ -37,6 +39,7 @@ func opSplitext(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	suffix := extension(value)
@@ -52,6 +55,7 @@ func opExt(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	value, ok := text(v[0])
 	if !ok {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return eval.Result{Value: core.NewString(c.Run, extension(value))}
@@ -61,6 +65,7 @@ func opJoinpath(c *eval.Context, s any, v []core.Value) eval.Result {
 	var values []string
 	for i := range v {
 		if v[i].Kind != core.String {
+			freeArgCallables(c, v)
 			slices.Free(c.Run, values)
 			return invalid()
 		}
@@ -74,6 +79,7 @@ func opAbspath(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	if path.IsAbs(value) {
@@ -85,6 +91,7 @@ func opRelpath(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	target, ok := text(v[0])
 	if !ok || v[1].Kind != core.String {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	base := path.Join(c.Run, c.Cwd, v[1].Text)

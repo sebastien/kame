@@ -57,9 +57,7 @@ func (p *Plan) Free(a mem.Allocator) {
 	if p == nil {
 		return
 	}
-	if p.Target != "" {
-		mem.FreeString(a, p.Target)
-	}
+	mem.FreeString(a, p.Target)
 	if p.Key.Name != "" {
 		p.Key.Free(a)
 	}
@@ -77,47 +75,27 @@ func (p *Plan) Free(a mem.Allocator) {
 		mem.FreeString(a, p.DynamicInputs[i])
 	}
 	for i := range p.ResourceInputs {
-		if p.ResourceInputs[i].Display != "" {
-			mem.FreeString(a, p.ResourceInputs[i].Display)
-		}
+		mem.FreeString(a, p.ResourceInputs[i].Display)
 		p.ResourceInputs[i].Key.Free(a)
 	}
 	for i := range p.ResolvedInputs {
 		mem.FreeString(a, p.ResolvedInputs[i])
 	}
 	for i := range p.ResolvedResourceInputs {
-		if p.ResolvedResourceInputs[i].Display != "" {
-			mem.FreeString(a, p.ResolvedResourceInputs[i].Display)
-		}
+		mem.FreeString(a, p.ResolvedResourceInputs[i].Display)
 		p.ResolvedResourceInputs[i].Key.Free(a)
 	}
 	for i := range p.Outputs {
 		mem.FreeString(a, p.Outputs[i])
 	}
-	if len(p.Captures) != 0 {
-		slices.Free(a, p.Captures)
-	}
-	if len(p.Inputs) != 0 {
-		slices.Free(a, p.Inputs)
-	}
-	if len(p.StaticInputs) != 0 {
-		slices.Free(a, p.StaticInputs)
-	}
-	if len(p.DynamicInputs) != 0 {
-		slices.Free(a, p.DynamicInputs)
-	}
-	if len(p.ResourceInputs) != 0 {
-		slices.Free(a, p.ResourceInputs)
-	}
-	if len(p.ResolvedInputs) != 0 {
-		slices.Free(a, p.ResolvedInputs)
-	}
-	if len(p.ResolvedResourceInputs) != 0 {
-		slices.Free(a, p.ResolvedResourceInputs)
-	}
-	if len(p.Outputs) != 0 {
-		slices.Free(a, p.Outputs)
-	}
+	slices.Free(a, p.Captures)
+	slices.Free(a, p.Inputs)
+	slices.Free(a, p.StaticInputs)
+	slices.Free(a, p.DynamicInputs)
+	slices.Free(a, p.ResourceInputs)
+	slices.Free(a, p.ResolvedInputs)
+	slices.Free(a, p.ResolvedResourceInputs)
+	slices.Free(a, p.Outputs)
 	*p = Plan{}
 }
 
@@ -180,18 +158,14 @@ type HandleStart struct {
 }
 
 func (e *Event) Free(a mem.Allocator) {
-	if e.Target != "" {
-		mem.FreeString(a, e.Target)
-	}
+	mem.FreeString(a, e.Target)
 	if e.Key.Name != "" {
 		e.Key.Free(a)
 	}
 	if e.DependencyKey.Name != "" {
 		e.DependencyKey.Free(a)
 	}
-	if len(e.Data) != 0 {
-		slices.Free(a, e.Data)
-	}
+	slices.Free(a, e.Data)
 	e.Value.Free(a)
 	e.Diagnostic.Free(a)
 	*e = Event{}
@@ -209,9 +183,7 @@ func (h *Handle) Free() {
 		// for another runtime tick that may never occur.
 		p.drainCancellations()
 	}
-	if h.Target != "" {
-		mem.FreeString(p.Alloc, h.Target)
-	}
+	mem.FreeString(p.Alloc, h.Target)
 	*h = Handle{}
 	mem.Free(p.Alloc, h)
 }

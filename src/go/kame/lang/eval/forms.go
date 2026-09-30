@@ -13,6 +13,9 @@ import (
 func (p *Program) body(scope *Scope, body []*expr.Expr, context *Context) Result {
 	result := Result{Value: core.Value{Kind: core.Nil}}
 	for i := range body {
+		// Discard: intermediates never escape, so release callables as well
+		// as storage. Core Value.Free is callable-blind by design.
+		freeCallables(context.Run, &result.Value)
 		result.Value.Free(context.Run)
 		result = p.evaluate(context.Engine, scope, body[i], context)
 		if result.Waiting || result.Diagnostic.Code != "" {
@@ -95,8 +98,13 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 	if r.Waiting || r.Diagnostic.Code != "" {
 		return r
 	}
+	// Transfer: the scope clones the value, so relinquish the original and
+	// read the binding back. Returning r directly would share one callable
+	// wrapper between the scope and the result (double free on Result.Free);
+	// the fresh lookup owns an independent clone (or borrowed wrapper).
 	scope.setValue(values[0].Text, r.Value)
-	return r
+	r.Value.Free(context.Run)
+	return name(scope, values[0].Text, values[0].Span, context)
 }
 
 func (p *Program) evalText(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
@@ -108,6 +116,7 @@ func (p *Program) evalText(scope *Scope, values []*expr.Expr, context *Context, 
 		return r
 	}
 	if r.Value.Kind != core.String {
+		freeCallables(context.Run, &r.Value)
 		r.Value.Free(context.Run)
 		return failure(context.Run, "EXPR_INVALID", span, "eval needs text")
 	}

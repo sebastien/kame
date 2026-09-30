@@ -23,10 +23,12 @@ func (p *Program) stringValue(scope *Scope, parts []expr.StringPart, context *Co
 			return r
 		}
 		text, ok := stringify(context.Run, r.Value)
-		r.Value.Free(context.Run)
 		if !ok {
+			freeCallables(context.Run, &r.Value)
+			r.Value.Free(context.Run)
 			return failure(context.Run, "EXPR_INVALID", parts[i].Span, "records and bytes require explicit text conversion")
 		}
+		r.Value.Free(context.Run)
 		b.WriteString(text)
 		mem.FreeString(context.Run, text)
 	}
@@ -93,9 +95,7 @@ func Display(a mem.Allocator, value core.Value) string {
 	var out []byte
 	appendDisplay(a, &out, value)
 	result := owned(a, string(out))
-	if len(out) != 0 {
-		slices.Free(a, out)
-	}
+	slices.Free(a, out)
 	return result
 }
 

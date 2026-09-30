@@ -34,18 +34,10 @@ type cacheRecord struct {
 }
 
 func (r *cacheRecord) Free(a mem.Allocator) {
-	if r.Identity != "" {
-		mem.FreeString(a, r.Identity)
-	}
-	if len(r.Manifest) != 0 {
-		slices.Free(a, r.Manifest)
-	}
-	if len(r.Stdout) != 0 {
-		slices.Free(a, r.Stdout)
-	}
-	if len(r.Stderr) != 0 {
-		slices.Free(a, r.Stderr)
-	}
+	mem.FreeString(a, r.Identity)
+	slices.Free(a, r.Manifest)
+	slices.Free(a, r.Stdout)
+	slices.Free(a, r.Stderr)
 	*r = cacheRecord{}
 }
 

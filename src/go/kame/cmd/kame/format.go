@@ -20,9 +20,7 @@ type formatArguments struct {
 }
 
 func (options *formatArguments) Free() {
-	if len(options.Files) != 0 {
-		slices.Free(mem.System, options.Files)
-	}
+	slices.Free(mem.System, options.Files)
 	*options = formatArguments{}
 }
 
@@ -103,12 +101,8 @@ func formatSource(lang string, name string, text string, indentStyle string, ind
 	result := format.Source(mem.System, lang, name, text, indentStyle, indentWidth)
 	if !result.OK {
 		cliError(errOut, result.Code, result.Message)
-		if result.Code != "" {
-			mem.FreeString(mem.System, result.Code)
-		}
-		if result.Message != "" {
-			mem.FreeString(mem.System, result.Message)
-		}
+		mem.FreeString(mem.System, result.Code)
+		mem.FreeString(mem.System, result.Message)
 		return "", false
 	}
 	return result.Text, true

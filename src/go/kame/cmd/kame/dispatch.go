@@ -113,9 +113,7 @@ func requestsJSONDiagnostics(args []string) bool {
 }
 
 func freePresentationArgs(args []string) {
-	if len(args) != 0 {
-		slices.Free(mem.System, args)
-	}
+	slices.Free(mem.System, args)
 }
 
 func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {

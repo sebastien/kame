@@ -138,18 +138,14 @@ type Effect struct {
 }
 
 func (e *Effect) Free(a mem.Allocator) {
-	if len(e.Data) != 0 {
-		slices.Free(a, e.Data)
-	}
+	slices.Free(a, e.Data)
 	*e = Effect{}
 }
 func FreeEffects(a mem.Allocator, effects []Effect) {
 	for i := range effects {
 		effects[i].Free(a)
 	}
-	if len(effects) != 0 {
-		slices.Free(a, effects)
-	}
+	slices.Free(a, effects)
 }
 
 func (c *Context) Emit(kind EffectKind, data []byte) {

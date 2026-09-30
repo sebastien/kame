@@ -135,6 +135,11 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 		}
 		return eval.Result{Value: core.Value{Kind: core.List, List: out}}
 	}
+	// subject is a copy of the caller's element: releasing the single retain
+	// here is balanced, the caller's shallow free never touches it.
+	if subject.Kind == core.Callable {
+		c.FreeCallable(&subject)
+	}
 	return invalid()
 }
 

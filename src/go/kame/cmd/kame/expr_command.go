@@ -13,12 +13,12 @@ import (
 type exprArguments struct { Text string; File string; Directory string; Args []string; Grants []eval.Grant; OK bool }
 
 func (options *exprArguments) Free() {
-	if len(options.Args) != 0 { slices.Free(mem.System, options.Args) }
+	slices.Free(mem.System, options.Args)
 	for i := range options.Grants {
 		for j := range options.Grants[i].Names { mem.FreeString(mem.System, options.Grants[i].Names[j]) }
-		if len(options.Grants[i].Names) != 0 { slices.Free(mem.System, options.Grants[i].Names) }
+		slices.Free(mem.System, options.Grants[i].Names)
 	}
-	if len(options.Grants) != 0 { slices.Free(mem.System, options.Grants) }
+	slices.Free(mem.System, options.Grants)
 	*options = exprArguments{}
 }
 

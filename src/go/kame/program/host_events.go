@@ -371,9 +371,7 @@ func (p *Program) targetStack(entry *instance) []string {
 	for i := range reversed {
 		stack[len(reversed)-1-i] = reversed[i]
 	}
-	if len(reversed) != 0 {
-		slices.Free(p.Alloc, reversed)
-	}
+	slices.Free(p.Alloc, reversed)
 	return stack
 }
 

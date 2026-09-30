@@ -23,6 +23,7 @@ func opStr(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := stringValue(c.Run, v[0], false)
 	if !ok {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	result := eval.Result{Value: core.NewString(c.Run, value)}
@@ -139,6 +140,7 @@ func opCount(c *eval.Context, s any, v []core.Value) eval.Result {
 	} else if v[0].Kind == core.Record {
 		n = len(v[0].Record)
 	} else {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	return eval.Result{Value: core.Value{Kind: core.Int, Int: int64(n)}}
@@ -146,6 +148,7 @@ func opCount(c *eval.Context, s any, v []core.Value) eval.Result {
 func opFirst(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.List {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	if len(v[0].List) == 0 {
@@ -156,6 +159,7 @@ func opFirst(c *eval.Context, s any, v []core.Value) eval.Result {
 func opNth(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[1].Kind != core.Int {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	index := int(v[1].Int)
@@ -169,6 +173,7 @@ func opNth(c *eval.Context, s any, v []core.Value) eval.Result {
 		return eval.Result{Value: v[0].List[index].Clone(c.Run)}
 	}
 	if v[0].Kind != core.String {
+		freeArgCallables(c, v)
 		return invalid()
 	}
 	if index < 0 {
@@ -198,20 +203,25 @@ func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	// Legacy sources pass the argument list first; the function-first order is
 	// also accepted for symmetry.
+	//
+	// Frees are explicit, never deferred: Solod emits textually-prior defers
+	// at every later return, so conditional defers would also run on paths
+	// whose branch never executed (double free with freeArgCallables below).
 	if v[0].Kind == core.List && v[1].Kind == core.Callable {
-		defer c.FreeCallable(&v[1])
 		arguments := applyArguments(c.Run, v[0], v[1])
 		result := c.Call(v[1], arguments.Values)
 		if arguments.Owned { slices.Free(c.Run, arguments.Values) }
+		c.FreeCallable(&v[1])
 		return result
 	}
 	if v[0].Kind == core.Callable && v[1].Kind == core.List {
-		defer c.FreeCallable(&v[0])
 		arguments := applyArguments(c.Run, v[1], v[0])
 		result := c.Call(v[0], arguments.Values)
 		if arguments.Owned { slices.Free(c.Run, arguments.Values) }
+		c.FreeCallable(&v[0])
 		return result
 	}
+	freeArgCallables(c, v)
 	return invalid()
 }
 type applyCall struct { Values []core.Value; Owned bool }

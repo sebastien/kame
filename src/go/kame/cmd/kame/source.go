@@ -33,10 +33,10 @@ func freeBuildSource(source *buildSource) {
 	}
 	for i := range source.Files {
 		if len(source.Files[i].Data) != 0 { mem.FreeSlice(mem.System, source.Files[i].Data) }
-		if source.Files[i].OwnedName && source.Files[i].Name != "" { mem.FreeString(mem.System, source.Files[i].Name) }
+		if source.Files[i].OwnedName { mem.FreeString(mem.System, source.Files[i].Name) }
 	}
-	if len(source.Files) != 0 { slices.Free(mem.System, source.Files) }
-	if len(source.Parts) != 0 { slices.Free(mem.System, source.Parts) }
+	slices.Free(mem.System, source.Files)
+	slices.Free(mem.System, source.Parts)
 	*source = buildSource{}
 }
 
@@ -113,6 +113,8 @@ func readBuildSource(name string, errOut io.Writer) buildSource {
 		return buildSource{Status: 1}
 	}
 	result := buildSource{}
+	// Text wraps Data backing (zero-copy string conversion in Solod):
+	// freeBuildSource frees Data only, Text never outlives it.
 	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), Data: data, OwnedName: true})
 	if !expandIncludes(&result, 0, errOut) { result.Status = 1 }
 	return result

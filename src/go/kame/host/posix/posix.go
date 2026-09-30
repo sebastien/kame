@@ -161,6 +161,8 @@ func cloneString(a mem.Allocator, ptr *byte, n c.Int) string {
 	if ptr == nil || n <= 0 {
 		return ""
 	}
+	// string wraps the clone backing (zero-copy in Solod): ownership
+	// transfers to the string, so the intermediate slice is never freed.
 	return string(cloneBytes(a, ptr, n))
 }
 
@@ -250,9 +252,7 @@ func FreeEnvironment(a mem.Allocator, values []string) {
 	for i := range values {
 		mem.FreeString(a, values[i])
 	}
-	if len(values) != 0 {
-		slices.Free(a, values)
-	}
+	slices.Free(a, values)
 }
 
 // ForceWaitpidFailureForTest makes the next process reaping attempt fail. It is

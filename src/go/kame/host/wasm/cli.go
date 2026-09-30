@@ -14,9 +14,7 @@ import (
 func ParseCLI(a mem.Allocator, command string, encoded string) PureResult {
 	args := splitNUL(encoded)
 	inv := cli.Parse(command, args)
-	if len(args) != 0 {
-		slices.Free(mem.System, args)
-	}
+	slices.Free(mem.System, args)
 	var buffer bytes.Buffer = bytes.NewBuffer(a, nil)
 	cli.WriteJSON(&buffer, &inv)
 	inv.Free()

@@ -93,9 +93,7 @@ func (q *EventQueue) Discard() bool {
 }
 
 func (q *EventQueue) discardCurrent() {
-	if len(q.current.Payload) != 0 {
-		slices.Free(q.alloc, q.current.Payload)
-	}
+	slices.Free(q.alloc, q.current.Payload)
 	q.current, q.pinned = QueuedEvent{}, false
 }
 
@@ -107,9 +105,7 @@ func (q *EventQueue) Free() {
 		q.discardCurrent()
 	}
 	for i := range q.items {
-		if len(q.items[i].Payload) != 0 {
-			slices.Free(q.alloc, q.items[i].Payload)
-		}
+		slices.Free(q.alloc, q.items[i].Payload)
 	}
 	slices.Free(q.alloc, q.items)
 	mem.Free(q.alloc, q)
