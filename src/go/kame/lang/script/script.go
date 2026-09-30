@@ -178,7 +178,40 @@ func multilineDefinitionEnd(text string, start int, lineEnd int) int {
 	for pos < len(text) && space(text[pos]) {
 		pos++
 	}
-	if pos == len(text) || (text[pos] != '(' && text[pos] != '[') {
+	if pos == len(text) {
+		return lineEnd
+	}
+	if text[pos] == '"' {
+		// Verbatim multi-line literal: 3+ quotes open raw until same-length run.
+		n := 0
+		for pos+n < len(text) && text[pos+n] == '"' {
+			n++
+		}
+		if n >= 3 {
+			cur := pos + n
+			for cur < len(text) {
+				if text[cur] != '"' {
+					cur++
+					continue
+				}
+				run := 0
+				for cur+run < len(text) && text[cur+run] == '"' {
+					run++
+				}
+				if run == n {
+					cur += n
+					for cur < len(text) && text[cur] != '\n' {
+						cur++
+					}
+					return cur
+				}
+				cur += run
+			}
+			return lineEnd
+		}
+		return lineEnd
+	}
+	if text[pos] != '(' && text[pos] != '[' {
 		return lineEnd
 	}
 	depth, quote := 0, false

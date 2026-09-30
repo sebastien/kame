@@ -64,6 +64,7 @@ type Rule struct {
 	Outputs []Target
 	Inputs  []Input
 	Body    []RecipeLine
+	BodyDoc *template.Document
 }
 
 type Result struct {
@@ -136,6 +137,10 @@ func FreeRule(a mem.Allocator, r *Rule) {
 		r.Body[i].Template.Free()
 	}
 	slices.Free(a, r.Body)
+	if r.BodyDoc != nil {
+		r.BodyDoc.Free()
+		r.BodyDoc = nil
+	}
 	mem.Free(a, r)
 }
 
@@ -347,6 +352,81 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 		r.Span.End = contentEnd
 		pos = end + 1
 	}
+	p.recipeDocument(r, indent)
+}
+
+func (p *parser) recipeDocument(r *Rule, indent string) {
+	if len(r.Body) == 0 {
+		return
+	}
+	// Detect plain-style directive lines in stripped body text. If none,
+	// keep per-line templates for exact backward-compatible rendering.
+	found := false
+	for i := range r.Body {
+		// Blank lines (nil Template) cannot be directives.
+		if r.Body[i].Template == nil {
+			continue
+		}
+		text := r.Body[i].Text
+		// Trim trailing spaces for whole-line check.
+		end := len(text)
+		for end > 0 && (text[end-1] == ' ' || text[end-1] == '\t') {
+			end--
+		}
+		if end == 0 || text[0] != '@' {
+			continue
+		}
+		if end >= 2 && text[0] == '@' && text[1] == '@' {
+			found = true
+			break
+		}
+		// Keyword letters.
+		kend := 1
+		for kend < end && isDocKeywordLetter(text[kend]) {
+			kend++
+		}
+		if kend == 1 {
+			continue
+		}
+		if !isDocKeyword(text[1:kend]) {
+			continue
+		}
+		word := text[1:kend]
+		if word == "else" || word == "end" || word == "raw" {
+			found = true
+			break
+		}
+		// Args keywords need "(" adjacent; "@if (" is ordinary text.
+		if kend < end && text[kend] == '(' {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return
+	}
+	// Parse whole body range as plain document, preserving original spans.
+	// First body line is non-blank; reconstruct its lineStart.
+	firstStart := r.Body[0].Span.Start - len(indent)
+	if firstStart < 0 {
+		firstStart = r.Body[0].Span.Start
+	}
+	lastEnd := r.Body[len(r.Body)-1].Span.End
+	doc := template.ParseDocumentRange(p.a, p.s, firstStart, lastEnd, "plain")
+	for i := range doc.Diagnostics {
+		p.diags = slices.Append(p.a, p.diags, doc.Diagnostics[i])
+	}
+	r.BodyDoc = doc
+}
+
+func isDocKeywordLetter(b byte) bool { return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
+
+func isDocKeyword(word string) bool {
+	switch word {
+	case "if", "elif", "else", "for", "with", "let", "include", "raw", "end":
+		return true
+	}
+	return false
 }
 
 func topLevel(text string, want byte) int {

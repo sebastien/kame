@@ -118,3 +118,21 @@ func TestFormatTemplateCanonicalizesEscapes(t *testing.T) {
 	if formatted != "a\\@b @(name)" { t.Errorf("FormatString() = %q", formatted) }
 	mem.FreeString(t.Allocator(), formatted)
 }
+
+func TestDocumentIfElseLowersWithoutBlankDebt(t *testing.T) {
+	doc := template.ParseDocument(t.Allocator(), "test.hash", "# @if(cond)\nyes\n# @else\nno\n# @end\n", "hash")
+	defer doc.Free()
+	if len(doc.Diagnostics) != 0 || doc.Root == nil { t.Error("hash document did not parse") }
+}
+
+func TestDocumentStrayEndIsBlockError(t *testing.T) {
+	doc := template.ParseDocument(t.Allocator(), "test.tmpl", "@end\n", "plain")
+	defer doc.Free()
+	if len(doc.Diagnostics) == 0 || doc.Diagnostics[0].Code != "TPL_BLOCK" { t.Error("stray @end was not TPL_BLOCK") }
+}
+
+func TestDocumentUnknownStyleIsStyleError(t *testing.T) {
+	doc := template.ParseDocument(t.Allocator(), "test.tmpl", "hi\n", "unknown")
+	defer doc.Free()
+	if len(doc.Diagnostics) == 0 || doc.Diagnostics[0].Code != "TPL_STYLE" { t.Error("unknown style was not TPL_STYLE") }
+}

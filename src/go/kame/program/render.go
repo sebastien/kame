@@ -17,6 +17,9 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
+	if entry.Rule.BodyDoc != nil {
+		return p.renderDocument(entry, context)
+	}
 	b := strings.NewBuilder(p.Alloc)
 	defer b.Free()
 	var spans []diagnostic.Span
@@ -70,6 +73,95 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	result := renderResult{Commands: cloneText(p.Alloc, b.String()), Effects: effects, WritePaths: writePaths, LineSpans: spans}
 	mem.Free(p.Alloc, context)
 	return result
+}
+
+func diagnosticFromSource(a mem.Allocator, code string, start int, end int, src string) diagnostic.Diagnostic {
+	return diagnostic.Diagnostic{Code: cloneText(a, code), Severity: diagnostic.Error, Message: cloneText(a, code), Source: cloneText(a, src), Span: diagnostic.Span{Start: start, End: end}, Owned: true}
+}
+
+func (p *Program) renderDocument(entry *instance, context *eval.Context) renderResult {
+	doc := entry.Rule.BodyDoc
+	if len(doc.Diagnostics) != 0 {
+		d := doc.Diagnostics[0]
+		eval.FreeEffects(p.Alloc, context.Effects)
+		freeStrings(p.Alloc, context.WritePaths)
+		mem.Free(p.Alloc, context)
+		return renderResult{Diagnostic: diagnosticFromSource(p.Alloc, d.Code, d.Span.Start, d.Span.End, doc.Source.Name)}
+	}
+	result := p.Eval.EvaluateWith(doc.Root, context)
+	if result.Waiting {
+		eval.FreeEffects(p.Alloc, context.Effects)
+		freeStrings(p.Alloc, context.WritePaths)
+		mem.Free(p.Alloc, context)
+		return renderResult{Waiting: true}
+	}
+	if result.Diagnostic.Code != "" {
+		eval.FreeEffects(p.Alloc, context.Effects)
+		freeStrings(p.Alloc, context.WritePaths)
+		mem.Free(p.Alloc, context)
+		return renderResult{Diagnostic: result.Diagnostic}
+	}
+	if result.Value.Kind != core.String {
+		result.Value.Free(p.Alloc)
+		eval.FreeEffects(p.Alloc, context.Effects)
+		freeStrings(p.Alloc, context.WritePaths)
+		mem.Free(p.Alloc, context)
+		return renderResult{Diagnostic: failure(p.Alloc, "EXPR_INVALID", "recipe document is not text")}
+	}
+	script := result.Value.Text
+	// Trim a single trailing newline for shell parity with per-line rendering.
+	// Document bodies preserve endings; per-line joins without trailing NL.
+	if len(script) != 0 && script[len(script)-1] == '\n' {
+		trimmed := ""
+		if len(script)-1 != 0 {
+			trimmed = cloneText(p.Alloc, script[:len(script)-1])
+		}
+		result.Value.Free(p.Alloc)
+		// Strip a trailing \r for CRLF bodies.
+		if len(trimmed) != 0 && trimmed[len(trimmed)-1] == '\r' {
+			rerim := ""
+			if len(trimmed)-1 != 0 {
+				rerim = cloneText(p.Alloc, trimmed[:len(trimmed)-1])
+			}
+			mem.FreeString(p.Alloc, trimmed)
+			trimmed = rerim
+		}
+		script = trimmed
+		// Transfer: script now owns trimmed storage; prevent double free below.
+		// result.Value already freed; set empty to keep Free safe.
+		result.Value = core.Value{}
+		// Re-wrap trimmed as owned value for uniform handling below.
+		if script != "" {
+			// script already owned; create value referencing it without copy?
+			// Use NewString which copies; free the intermediate.
+			owned := core.NewString(p.Alloc, script)
+			mem.FreeString(p.Alloc, script)
+			result.Value = owned
+			script = result.Value.Text
+		}
+	}
+	var spans []diagnostic.Span
+	if result.Value.Text != "" && len(entry.Rule.Body) != 0 {
+		// Single authored span covering the recipe body.
+		first := entry.Rule.Body[0].Span
+		last := entry.Rule.Body[len(entry.Rule.Body)-1].Span
+		spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: first.Start, End: last.End})
+	}
+	var effects []eval.Effect
+	for i := range context.Effects {
+		effects = slices.Append(p.Alloc, effects, eval.Effect{Kind: context.Effects[i].Kind, Data: slices.Clone(p.Alloc, context.Effects[i].Data), Span: context.Effects[i].Span})
+	}
+	eval.FreeEffects(p.Alloc, context.Effects)
+	var writePaths []string
+	for i := range context.WritePaths {
+		writePaths = slices.Append(p.Alloc, writePaths, cloneText(p.Alloc, context.WritePaths[i]))
+		mem.FreeString(p.Alloc, context.WritePaths[i])
+	}
+	slices.Free(p.Alloc, context.WritePaths)
+	out := renderResult{Commands: cloneText(p.Alloc, result.Value.Text), Effects: effects, WritePaths: writePaths, LineSpans: spans}
+	result.Value.Free(p.Alloc)
+	mem.Free(p.Alloc, context)
+	return out
 }
 
 func observeRenderDependency(value any, key core.ResourceKey) {
