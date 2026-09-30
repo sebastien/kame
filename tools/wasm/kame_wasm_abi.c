@@ -675,6 +675,30 @@ uint32_t kame_wasm_expression_cancel(uint64_t handle) {
   return KAME_WASM_OK;
 }
 
+uint32_t kame_wasm_expression_effect_kind(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL || instance->runtime == NULL) return 0u;
+  return wasm_Runtime_ExpressionEffectKind(instance->runtime);
+}
+
+uint32_t kame_wasm_expression_effect_length(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL || instance->runtime == NULL) return 0u;
+  return (uint32_t)wasm_Runtime_ExpressionEffectLength(instance->runtime);
+}
+
+uint32_t kame_wasm_expression_effect_copy(uint64_t handle, uint32_t dst, uint32_t dst_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL) return KAME_WASM_STATE_INVALID;
+  uint32_t needed = (uint32_t)wasm_Runtime_ExpressionEffectLength(instance->runtime);
+  if (wasm_Runtime_ExpressionEffectKind(instance->runtime) == 0u) return KAME_WASM_STATE_INVALID;
+  if (dst_len < needed) return KAME_WASM_BUFFER_TOO_SMALL;
+  if (needed != 0u && dst == 0u) return KAME_WASM_STATE_INVALID;
+  return wasm_Runtime_CopyExpressionEffect(instance->runtime,
+      (so_Slice){(so_byte *)(uintptr_t)dst, (so_int)dst_len, (so_int)dst_len}) ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
 uint32_t kame_wasm_step(uint64_t handle) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;

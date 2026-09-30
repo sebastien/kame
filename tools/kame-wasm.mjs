@@ -37,6 +37,9 @@ const requiredExports = [
   'kame_wasm_target_begin',
   'kame_wasm_expression_begin',
   'kame_wasm_expression_cancel',
+  'kame_wasm_expression_effect_kind',
+  'kame_wasm_expression_effect_length',
+  'kame_wasm_expression_effect_copy',
   'kame_wasm_step',
   'kame_wasm_next_event_header',
   'kame_wasm_event_payload_copy',
@@ -265,6 +268,7 @@ async function evaluateAsync(exports, program, text) {
     if (exports.kame_wasm_expression_begin(instance, expression.pointer, expression.length) !== 0) throw new Error(instanceDiagnostic(exports, instance));
     for (;;) {
       const state = exports.kame_wasm_step(instance);
+      drainExpressionEffects(exports, instance);
       if (state === 2) break;
       if (state !== 1) continue;
       const header = allocate(exports, 48, 8);
@@ -355,6 +359,18 @@ async function evaluateAsync(exports, program, text) {
     return new TextDecoder().decode(new Uint8Array(exports.memory.buffer, output, length));
   } finally {
     exports.kame_wasm_instance_free(instance);
+  }
+}
+
+function drainExpressionEffects(exports, instance) {
+  for (;;) {
+    const kind = exports.kame_wasm_expression_effect_kind(instance);
+    if (kind === 0) return;
+    const length = exports.kame_wasm_expression_effect_length(instance);
+    const output = allocate(exports, length || 1);
+    if (exports.kame_wasm_expression_effect_copy(instance, output, length) !== 0) throw new Error(instanceDiagnostic(exports, instance));
+    const data = new Uint8Array(exports.memory.buffer, output, length).slice();
+    if (kind === 2) stderr.write(data); else stdout.write(data);
   }
 }
 

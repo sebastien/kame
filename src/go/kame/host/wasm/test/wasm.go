@@ -115,6 +115,43 @@ func TestPureExpressionUsesPortableEvaluator(t *testing.T) {
 	fromSource.Free(a)
 }
 
+func TestRuntimeExpressionEffectsDrainInOrder(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "")
+	if started.Runtime == nil {
+		t.Fatal("runtime did not compile")
+		return
+	}
+	runtime := started.Runtime
+	defer runtime.Free()
+	if request := runtime.RequestExpression("(out \"one\" 2)"); request.Code != "" {
+		t.Fatalf("request expression failed: %s", request.Code)
+		return
+	}
+	for i := 0; i < 4; i++ {
+		runtime.Step()
+	}
+	result := runtime.Result()
+	if !result.Done || result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "one2" {
+		t.Errorf("effect result = %#v", result)
+	}
+	result.Free(a)
+	if runtime.ExpressionEffectKind() != 1 || runtime.ExpressionEffectLength() != 3 {
+		t.Error("first effect was not stdout one")
+	}
+	first := make([]byte, 3)
+	if !runtime.CopyExpressionEffect(first) || string(first) != "one" {
+		t.Error("first effect copy failed")
+	}
+	if runtime.ExpressionEffectKind() != 1 || runtime.ExpressionEffectLength() != 1 {
+		t.Error("second effect was not stdout two")
+	}
+	second := make([]byte, 1)
+	if !runtime.CopyExpressionEffect(second) || string(second) != "2" || runtime.ExpressionEffectKind() != 0 {
+		t.Error("second effect copy failed")
+	}
+}
+
 func TestCompletionValueFromJSONParsesCanonicalValues(t *testing.T) {
 	a := t.Allocator()
 	var boolValue core.Value

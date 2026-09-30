@@ -38,7 +38,7 @@ else
 fi
 
 test-step "do expr matches native output byte-for-byte"
-for expression in '(count [1 2 3])' '(join ["a" "b"] ":")' '(uppercase "kame")'; do
+for expression in '(count [1 2 3])' '(join ["a" "b"] ":")' '(uppercase "kame")' '(let [a 10] (out "hello" a))' '(yield "generated")'; do
 	node "$CLI_ROOT/dist/kame.js" do expr -c "$expression" >"$work/wasm.out"
 	"$CLI_BIN" do expr -c "$expression" >"$work/native.out"
 	if cmp -s "$work/wasm.out" "$work/native.out"; then
@@ -47,6 +47,16 @@ for expression in '(count [1 2 3])' '(join ["a" "b"] ":")' '(uppercase "kame")';
 		test-fail "parity: $expression (wasm=$(cat "$work/wasm.out") native=$(cat "$work/native.out"))"
 	fi
 done
+run do expr -c '(err "notice")'
+wasm_status=$status
+cp "$work/out" "$work/wasm.err-effect.out"
+cp "$work/err" "$work/wasm.err-effect.err"
+"$CLI_BIN" do expr -c '(err "notice")' >"$work/native.err-effect.out" 2>"$work/native.err-effect.err"
+if [ "$wasm_status" = 0 ] && cmp -s "$work/wasm.err-effect.out" "$work/native.err-effect.out" && cmp -s "$work/wasm.err-effect.err" "$work/native.err-effect.err"; then
+	test-ok "parity: err preserves stdout and stderr"
+else
+	test-fail "err parity: wasm-out=$(cat "$work/wasm.err-effect.out") wasm-err=$(cat "$work/wasm.err-effect.err") native-out=$(cat "$work/native.err-effect.out") native-err=$(cat "$work/native.err-effect.err")"
+fi
 printf '(join ["wasm" "source"] "-")\n' >"$work/expression.kmk"
 node "$CLI_ROOT/dist/kame.js" do expr "$work/expression.kmk" >"$work/wasm.expr"
 "$CLI_BIN" do expr "$work/expression.kmk" >"$work/native.expr"

@@ -35,6 +35,8 @@ type Runtime struct {
 	Environment []string
 	Forwarding  bool
 	EventJSON   []byte
+	Effects     []eval.Effect
+	EffectIndex int
 	// Directory is the working directory the build runtime canonicalizes
 	// against. It defaults to "." and the host may set the absolute cwd.
 	Directory string
@@ -415,6 +417,7 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	context := &eval.Context{Program: r.Eval, Engine: c, Scope: r.Eval.Scope, Run: c.Allocator(), Grants: grants, DirectHostRequests: true}
 	result := r.Eval.EvaluateWith(r.Expr, context)
 	if result.Waiting {
+		eval.FreeEffects(c.Allocator(), context.Effects)
 		result.Free(c.Allocator())
 		if c.Submitted() {
 			return core.ProducerSubmitted
@@ -422,15 +425,56 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerWaiting
 	}
 	if result.Diagnostic.Code != "" {
+		eval.FreeEffects(c.Allocator(), context.Effects)
 		c.Fail(result.Diagnostic)
 		result.Diagnostic = diagnostic.Diagnostic{}
 		result.Free(c.Allocator())
 		return core.ProducerFailed
 	}
+	r.Effects = context.Effects
+	context.Effects = nil
 	c.Publish(result.Value)
 	result.Value = core.Value{}
 	result.Free(c.Allocator())
 	return core.ProducerCompleted
+}
+
+// ExpressionEffectKind returns the next standalone expression effect: 1 out,
+// 2 err, 3 yield, or 0 when the completed expression has none left.
+func (r *Runtime) ExpressionEffectKind() uint32 {
+	if r == nil || r.EffectIndex >= len(r.Effects) {
+		return 0
+	}
+	kind := r.Effects[r.EffectIndex].Kind
+	if kind == eval.EffectOut {
+		return 1
+	}
+	if kind == eval.EffectErr {
+		return 2
+	}
+	if kind == eval.EffectYield {
+		return 3
+	}
+	return 0
+}
+
+func (r *Runtime) ExpressionEffectLength() int {
+	if r == nil || r.EffectIndex >= len(r.Effects) {
+		return 0
+	}
+	return len(r.Effects[r.EffectIndex].Data)
+}
+
+// CopyExpressionEffect copies and releases the next expression effect.
+func (r *Runtime) CopyExpressionEffect(dst []byte) bool {
+	if r == nil || r.EffectIndex >= len(r.Effects) || len(dst) < len(r.Effects[r.EffectIndex].Data) {
+		return false
+	}
+	effect := &r.Effects[r.EffectIndex]
+	copy(dst, effect.Data)
+	effect.Free(r.Alloc)
+	r.EffectIndex++
+	return true
 }
 
 // Step advances at most one engine action and transfers one host request to
@@ -549,6 +593,7 @@ func (r *Runtime) Free() {
 		slices.Free(r.Alloc, r.EventJSON)
 		r.EventJSON = nil
 	}
+	eval.FreeEffects(r.Alloc, r.Effects)
 	for i := range r.Environment {
 		mem.FreeString(r.Alloc, r.Environment[i])
 	}

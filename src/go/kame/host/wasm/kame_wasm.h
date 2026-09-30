@@ -178,6 +178,12 @@ uint32_t kame_wasm_process_terminal(uint64_t instance, int32_t status,
 uint32_t kame_wasm_expression_begin(uint64_t instance, uint32_t source,
                                     uint32_t source_len);
 uint32_t kame_wasm_expression_cancel(uint64_t instance);
+/* Completed standalone-expression effects. kind is 1=out, 2=err, 3=yield,
+ * or 0 when no effect remains. Copy advances to the next effect. */
+uint32_t kame_wasm_expression_effect_kind(uint64_t instance);
+uint32_t kame_wasm_expression_effect_length(uint64_t instance);
+uint32_t kame_wasm_expression_effect_copy(uint64_t instance, uint32_t dst,
+                                           uint32_t dst_len);
 uint32_t kame_wasm_step(uint64_t instance);
 uint32_t kame_wasm_next_event_header(uint64_t instance, uint32_t dst,
                                      uint32_t dst_len);

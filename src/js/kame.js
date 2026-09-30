@@ -542,6 +542,9 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_cli',
   'kame_wasm_expression_begin',
   'kame_wasm_expression_cancel',
+  'kame_wasm_expression_effect_kind',
+  'kame_wasm_expression_effect_length',
+  'kame_wasm_expression_effect_copy',
   'kame_wasm_set_forwarding',
   'kame_wasm_set_directory',
   'kame_wasm_target_begin',
@@ -834,6 +837,7 @@ class Module {
       if (this.exports.kame_wasm_expression_begin(instance, encoded.pointer, encoded.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
       for (;;) {
         const state = this.exports.kame_wasm_step(instance);
+        this.drainExpressionEffects(instance);
         if (state === 2) break;
         if (state !== 1) continue;
         await this.service(instance, context);
@@ -841,6 +845,18 @@ class Module {
       return this.copyResult(instance);
     } finally {
       this.exports.kame_wasm_instance_free(instance);
+    }
+  }
+
+  drainExpressionEffects(instance) {
+    for (;;) {
+      const kind = this.exports.kame_wasm_expression_effect_kind(instance);
+      if (kind === 0) return;
+      const length = this.exports.kame_wasm_expression_effect_length(instance);
+      const pointer = this.allocate(length || 1);
+      if (this.exports.kame_wasm_expression_effect_copy(instance, pointer, length) !== 0) throw new Error('expression effect copy failed');
+      const data = new Uint8Array(this.exports.memory.buffer, pointer, length).slice();
+      if (kind === 2) stderr.write(data); else stdout.write(data);
     }
   }
 

@@ -27,6 +27,24 @@ if [ "$actual" != "3" ]; then
 	echo "WASM expression CLI = $actual, want 3" >&2
 	exit 1
 fi
+actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(let [a 10] (out "hello" a))')"
+if [ "$actual" != "hello10hello10" ]; then
+	echo "WASM output expression CLI = $actual, want hello10hello10" >&2
+	exit 1
+fi
+effect_err="$(mktemp)"
+actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(err "notice")' 2>"$effect_err")"
+if [ "$actual" != "notice" ] || [ "$(cat "$effect_err")" != "notice" ]; then
+	echo "WASM stderr expression CLI did not preserve streams" >&2
+	rm -f "$effect_err"
+	exit 1
+fi
+rm -f "$effect_err"
+actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(yield "generated")')"
+if [ "$actual" != "generatednil" ]; then
+	echo "WASM yield expression CLI = $actual, want generatednil" >&2
+	exit 1
+fi
 program="$(mktemp)"
 input="$(mktemp)"
 written="$(mktemp)"
