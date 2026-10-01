@@ -61,7 +61,7 @@ fixture_copy discovery explicit
 
 test-step "inline source with -c and --command="
 INLINE=$'task hi :\n\t@(out "inline\\n")'
-cli_run -- -c "$INLINE" hi
+cli_run -- -l kmk -c "$INLINE" hi
 cli_expect_status 0
 cli_expect_stdout "inline
 "
@@ -102,19 +102,19 @@ EOF
 	cli_expect_stderr_contains "DEP_CYCLE"
 )
 
-cli_run -- "--command=$INLINE" hi
+cli_run -- -l kmk "--command=$INLINE" hi
 cli_expect_status 0
 cli_expect_stdout "inline
 "
 
-test-step "--file and --command are mutually exclusive"
-cli_run -- -f Makefile.kmk -c "task x :"
-cli_expect_status 2
-cli_expect_stderr_contains "OPT_CONFLICT"
+test-step "--file and --command compose in input order"
+cli_run -- -f explicit/make.kmk where -c '(out "after")'
+cli_expect_status 0
+cli_expect_stdout $'make.kmk\nafter"after"'
 
-cli_run -- --command=x --file=Makefile.kmk
-cli_expect_status 2
-cli_expect_stderr_contains "OPT_CONFLICT"
+cli_run -- --allow-run -c 'name = "shared"' --file=explicit/make.kmk where -c 'name'
+cli_expect_status 0
+cli_expect_stdout $'make.kmk\n"shared"'
 
 test-step "-C discovers beneath the given directory"
 mkdir -p elsewhere
@@ -129,20 +129,20 @@ cli_expect_status 0
 cli_expect_stdout "Makefile.kmk
 "
 
-test-step "positional .kmk values are target names, not sources"
-cli_run --dir explicit -- make.kmk
-cli_expect_status 1
-cli_expect_stderr_contains "TGT_NO_RULE"
+test-step "positional .kmk operands select explicit sources"
+cli_run --dir explicit -- make.kmk where
+cli_expect_status 0
+cli_expect_stdout $'make.kmk\n'
 
-test-step "-- ends option parsing; later tokens are targets"
-cli_run -- -c "$INLINE" -- hi
+test-step "-- ends option parsing; later tokens are program arguments"
+cli_run -- -l kmk -c "$INLINE" hi -- literal
 cli_expect_status 0
 cli_expect_stdout "inline
 "
 
 cli_run --dir explicit -- -f make.kmk where -- --force
-cli_expect_status 1
-cli_expect_stderr_contains "TGT_NO_RULE"
+cli_expect_status 0
+cli_expect_stdout $'make.kmk\n'
 
 test-step "option validation for source-related options"
 cli_run -- -f

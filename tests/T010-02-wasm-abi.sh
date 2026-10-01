@@ -22,12 +22,12 @@ printf 'x' >"$marker"
 trap 'rm -f "$marker"' EXIT
 
 test-step "async host services exists, stat, and glob distinctly"
-if exists="$(node tools/kame-wasm.mjs do expr --async -c "(exists? \"$marker\")")" && [ "$exists" = "true" ]; then
+if exists="$(node tools/kame-wasm.mjs do expr --async -c "(exists? \"$marker\")")" && [ "$exists" = ':true' ]; then
 	test-ok "exists? on a present path is true"
 else
 	test-fail "exists? on a present path = ${exists:-<error>}"
 fi
-if missing="$(node tools/kame-wasm.mjs do expr --async -c '(exists? "/nonexistent-kame-path")')" && [ "$missing" = "false" ]; then
+if missing="$(node tools/kame-wasm.mjs do expr --async -c '(exists? "/nonexistent-kame-path")')" && [ "$missing" = ':false' ]; then
 	test-ok "exists? on an absent path is false"
 else
 	test-fail "exists? on an absent path = ${missing:-<error>}"
@@ -106,7 +106,7 @@ if (exports.kame_wasm_result_copy(jsonInstance, 0, 0, outLength) !== 3) throw ne
 const resultLength = new DataView(exports.memory.buffer, outLength, 4).getUint32(0, true);
 const output = alloc(resultLength || 1);
 if (exports.kame_wasm_result_copy(jsonInstance, output, resultLength, outLength) !== 0) throw new Error('result copy failed');
-if (new TextDecoder().decode(new Uint8Array(exports.memory.buffer, output, resultLength)) !== 'true') throw new Error('json completion value was not preserved');
+if (new TextDecoder().decode(new Uint8Array(exports.memory.buffer, output, resultLength)) !== ':true') throw new Error('json completion value was not preserved');
 if (exports.kame_wasm_instance_free(jsonInstance) !== 0) throw new Error('json instance did not free');
 
 // Instance diagnostics are isolated to their instance.

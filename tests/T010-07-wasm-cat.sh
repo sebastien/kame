@@ -33,7 +33,7 @@ wasm() {
 
 test-step "do cat prints definition values and file artifacts"
 wasm do cat GREETING
-if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = "hello" ] && [ ! -s "$project/err.txt" ]; then
+if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '"hello"' ] && [ ! -s "$project/err.txt" ]; then
 	test-ok "cat definition value"
 else
 	test-fail "cat GREETING: status=$status out=$(cat "$project/out.txt")"
@@ -75,7 +75,7 @@ fi
 
 test-step "primary invocation prints definition values and builds files quietly"
 wasm GREETING
-if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = "hello" ]; then
+if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '"hello"' ]; then
 	test-ok "primary invocation prints a definition value"
 else
 	test-fail "primary GREETING: status=$status out=$(cat "$project/out.txt")"
@@ -90,13 +90,13 @@ fi
 
 test-step "source discovery honors -C and -c"
 wasm do cat -C "$project" GREETING
-if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = "hello" ]; then
+if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '"hello"' ]; then
 	test-ok "cat resolves the source and target under -C"
 else
 	test-fail "cat -C: status=$status out=$(cat "$project/out.txt")"
 fi
 wasm do cat -c 'value = 7' value
-if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = "7" ]; then
+if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '"7"' ]; then
 	test-ok "cat uses an inline source"
 else
 	test-fail "cat -c: status=$status out=$(cat "$project/out.txt")"

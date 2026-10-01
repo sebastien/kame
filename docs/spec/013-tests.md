@@ -126,11 +126,48 @@ Current coverage:
 | 013 meta | `T013-01` … `T013-03` | catalog consistency, fixture hygiene, binary contract, determinism |
 | 015 dist | `T015-01` … `T015-03` | launcher version/provisioning/checksums, APE probe and backend selection, generated metadata and self-build incrementality |
 
-All currently specified native acceptance bullets have an E2E or package-level
-test. Spec 014 coverage is in place: `T014-01`
+The existing command tests cover the implementation's pre-unified-run surface;
+they do not establish that the direct-execution and `do run` contract now in
+`009-cli.md` is implemented. Spec 014 coverage is in place: `T014-01`
 placeholder sections and pattern replace, plus `expr/section-*.km`,
 `expr/pattern-*.km`, and `invalid/expr-pattern-mixed-groups.km` fixtures in the
 T004 parse/format suites.
+
+### Unified-run migration coverage
+
+When implementing `009-cli.md`, migrate expression-command cases to `do run
+--lang expr` rather than dropping their evaluator, argument, capability, or
+byte-output assertions. Historical defect descriptions below retain the old
+command name because they describe the interface at the time of the defect.
+
+Add native/WASM conformance for:
+
+- Direct `.km`, `.kmk`, `.kash`, and `.ksh` execution versus `do run` equivalence.
+- Inline/stdin language selection and unknown-suffix validation without effects.
+- Repeated/interleaved files and `-c` fragments: compile the whole sequence before
+  execution, then share definitions and run work in input order. Include a rule
+  build followed by a value expression reading its definition, and a Kash file
+  followed by a default-Kame inline fragment.
+- Syntax errors, missing later files, duplicate top-level names, and invalid
+  static entries prevent earlier effects; runtime failure stops later fragments
+  without replay or rollback. Verify distinct inline source spans and forward
+  references across file/inline boundaries.
+- Named value entries, forward lazy definitions, top-level expression sequencing,
+  definitions-only defaults, empty programs, and final-value presentation.
+- Explicit source sequencing, discovered-build append behavior, and literal
+  target escapes/`--entry` selection for program-like suffixes.
+- Source resolution before `-C`, with no implicit change to the source directory.
+- Program arguments after `--`, including empty frames and whitespace-bearing values.
+- Language-specific defaults and rejection of inappropriate options before effects.
+- First-fragment capability defaults, inherited policy in later languages, shared
+  cwd/args/timeout budgets, and whole-session dry-run suppression.
+- Kash stdin isolation, recovery, cancellation, async handles across fragments,
+  and owned async joining at whole-session completion rather than file boundaries.
+- Deterministic migration diagnostics for removed `do expr` and `do kash` names.
+
+Keep fixtures and examples that exercise the current CLI runnable until runtime
+implementation lands; a spec update alone does not authorize claiming runner
+support or removing executable regression coverage.
 
 ## Defects found and fixed by this suite
 

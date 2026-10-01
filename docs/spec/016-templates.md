@@ -314,7 +314,7 @@ kame do render [-c TEXT | FILE] [--define NAME=VALUE]...
 With no `FILE` it reads stdin. `--define NAME=VALUE` adds a string field to the
 payload and repeats. `--comment STYLE` overrides extension inference. `--check`
 parses and reports diagnostics without producing output. Capability options and
-grants are those of `kame do expr`: `read` is denied by default and granted with
+grants are those of `kame do run --lang expr`: `read` is denied by default and granted with
 `--allow-read`.
 
 ## Diagnostics

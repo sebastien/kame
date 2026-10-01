@@ -60,7 +60,7 @@ fi
 printf '(join ["wasm" "source"] "-")\n' >"$work/expression.kmk"
 node "$CLI_ROOT/dist/kame.js" do expr "$work/expression.kmk" >"$work/wasm.expr"
 "$CLI_BIN" do expr "$work/expression.kmk" >"$work/native.expr"
-if cmp -s "$work/wasm.expr" "$work/native.expr" && [ "$(cat "$work/wasm.expr")" = "wasm-source" ]; then
+if cmp -s "$work/wasm.expr" "$work/native.expr" && [ "$(cat "$work/wasm.expr")" = '"wasm-source"' ]; then
 	test-ok "do expr FILE reads an expression file and matches native"
 else
 	test-fail "do expr FILE: wasm=$(cat "$work/wasm.expr") native=$(cat "$work/native.expr")"
@@ -80,7 +80,7 @@ else
 	test-fail "read with grant failed: status=$status out=$(cat "$work/out")"
 fi
 run do expr --allow-run -c '(shell "printf run-ok")'
-if [ "$status" = 0 ] && [ "$(cat "$work/out")" = "run-ok" ]; then
+if [ "$status" = 0 ] && [ "$(cat "$work/out")" = '"run-ok"' ]; then
 	test-ok "shell with --allow-run succeeds"
 else
 	test-fail "shell with grant failed: status=$status out=$(cat "$work/out")"
@@ -94,7 +94,7 @@ else
 	test-fail "--wasm-abi-info: $(cat "$work/out")"
 fi
 run --wasm-self-test
-if [ "$status" = 0 ] && node -e 'const i=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); if(!i.selfTest||i.selfTest.pure!=="a:b")process.exit(1)' "$work/out"; then
+if [ "$status" = 0 ] && node -e 'const i=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); if(!i.selfTest||i.selfTest.pure!=="\"a:b\"")process.exit(1)' "$work/out"; then
 	test-ok "--wasm-self-test evaluates a pure expression"
 else
 	test-fail "--wasm-self-test: $(cat "$work/out")"

@@ -63,7 +63,7 @@ const [value, valueLength] = write('target-value');
 if (exports.kame_wasm_host_set_env(envInstance, name, nameLength, value, valueLength) !== 0) throw new Error('host env was rejected');
 if (exports.kame_wasm_target_begin(envInstance, target, targetLength) !== 0) throw new Error('env target did not begin');
 runTarget(envInstance);
-if (resultText(envInstance) !== 'target-value') throw new Error('env target value was wrong');
+if (resultText(envInstance) !== '"target-value"') throw new Error('env target value was wrong');
 exports.kame_wasm_instance_free(envInstance);
 
 const missingInstance = exports.kame_wasm_instance_create();

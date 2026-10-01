@@ -33,11 +33,11 @@ test-step "cat writes definition values without a trailing newline"
 	cd cat-basic
 	cli_run -- do cat GREETING
 	cli_expect_status 0
-	cli_expect_stdout "hello"
+	cli_expect_stdout '"hello"' 
 
 	cli_run -- do cat LIST
 	cli_expect_status 0
-	cli_expect_stdout "[alpha beta gamma]"
+	cli_expect_stdout '["alpha" "beta" "gamma"]'
 )
 
 test-step "cat prints an existing file that has no rule"
@@ -67,7 +67,7 @@ test-step "cat rejects a task without an artifact"
 test-step "cat selects the default target when none is given"
 cli_run -- do cat -c 'default = "value"'
 cli_expect_status 0
-cli_expect_stdout "value"
+cli_expect_stdout '"value"'
 
 test-step "cat without a default fails with the available targets"
 cli_run -- do cat -c 'task first :'

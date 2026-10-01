@@ -107,7 +107,7 @@ const shellRun = run('result = (shell "printf forwarded-shell")', (handle, reque
   const [pointer, length] = write(child.stdout);
   if (exports.kame_wasm_complete_text(handle, request, pointer, length) !== 0) throw new Error('process completion failed');
 });
-if (shellRun.text !== 'forwarded-shell') throw new Error('forwarded shell value was wrong');
+if (shellRun.text !== '"forwarded-shell"') throw new Error('forwarded shell value was wrong');
 exports.kame_wasm_instance_free(shellRun.handle);
 
 const writeRun = run(`result = (write "${process.env.KAME_WRITE_PATH}" "forwarded-write")`, (handle, request) => {
@@ -117,7 +117,7 @@ const writeRun = run(`result = (write "${process.env.KAME_WRITE_PATH}" "forwarde
   writeFileSync(target, data);
   if (exports.kame_wasm_complete_nil(handle, request) !== 0) throw new Error('write completion failed');
 });
-if (writeRun.text !== 'nil') throw new Error('write target value was not nil');
+if (writeRun.text !== ':nil') throw new Error('write target value was not nil');
 exports.kame_wasm_instance_free(writeRun.handle);
 if (readFileSync(process.env.KAME_WRITE_PATH, 'utf8') !== 'forwarded-write') throw new Error('write target did not write the file');
 NODE

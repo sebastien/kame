@@ -16,7 +16,7 @@ for export in memory kame_wasm_abi_version kame_wasm_alloc kame_wasm_copy kame_w
 	esac
 done
 case "$info" in
-*'"schema":1'*'"payloadLength":6'*'"memoryBytes":'*'"pureExpression":"a:b"'*) ;;
+*'"schema":1'*'"payloadLength":6'*'"memoryBytes":'*'"pureExpression":"\"a:b\""'*) ;;
 *)
 	echo "WASM loader did not complete ABI self-test: $info" >&2
 	exit 1
@@ -28,21 +28,21 @@ if [ "$actual" != "3" ]; then
 	exit 1
 fi
 actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(let [a 10] (out "hello" a))')"
-if [ "$actual" != "hello10hello10" ]; then
-	echo "WASM output expression CLI = $actual, want hello10hello10" >&2
+if [ "$actual" != 'hello10"hello10"' ]; then
+	echo "WASM output expression CLI = $actual, want hello10\"hello10\"" >&2
 	exit 1
 fi
 effect_err="$(mktemp)"
 actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(err "notice")' 2>"$effect_err")"
-if [ "$actual" != "notice" ] || [ "$(cat "$effect_err")" != "notice" ]; then
+if [ "$actual" != '"notice"' ] || [ "$(cat "$effect_err")" != "notice" ]; then
 	echo "WASM stderr expression CLI did not preserve streams" >&2
 	rm -f "$effect_err"
 	exit 1
 fi
 rm -f "$effect_err"
 actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(yield "generated")')"
-if [ "$actual" != "generatednil" ]; then
-	echo "WASM yield expression CLI = $actual, want generatednil" >&2
+if [ "$actual" != "generated:nil" ]; then
+	echo "WASM yield expression CLI = $actual, want generated:nil" >&2
 	exit 1
 fi
 program="$(mktemp)"
@@ -51,14 +51,14 @@ written="$(mktemp)"
 trap 'rm -f "$program" "$input" "$written"' EXIT
 printf 'result = (join ["wasm" "source"] "-")\n' >"$program"
 actual="$(node ./tools/kame-wasm.mjs do expr -f "$program")"
-if [ "$actual" != "wasm-source" ]; then
-	echo "WASM source expression CLI = $actual, want wasm-source" >&2
+if [ "$actual" != '"wasm-source"' ]; then
+	echo "WASM source expression CLI = $actual, want \"wasm-source\"" >&2
 	exit 1
 fi
 printf 'result = (shell "printf async-source")\n' >"$program"
 actual="$(node ./tools/kame-wasm.mjs do expr --async -f "$program")"
-if [ "$actual" != "async-source" ]; then
-	echo "WASM async source expression CLI = $actual, want async-source" >&2
+if [ "$actual" != '"async-source"' ]; then
+	echo "WASM async source expression CLI = $actual, want \"async-source\"" >&2
 	exit 1
 fi
 printf 'async-read' >"$input"
@@ -74,23 +74,23 @@ if [ "$actual" != "async-read" ]; then
 	exit 1
 fi
 actual="$(node ./tools/kame-wasm.mjs do expr --async -c "(write \"$written\" \"async-write\")")"
-if [ "$actual" != "nil" ] || [ "$(cat "$written")" != "async-write" ]; then
+if [ "$actual" != ":nil" ] || [ "$(cat "$written")" != "async-write" ]; then
 	echo "WASM async write CLI failed" >&2
 	exit 1
 fi
 printf 'result = (write "%s" "source-write")\n' "$written" >"$program"
 actual="$(node ./tools/kame-wasm.mjs do expr --async -f "$program")"
-if [ "$actual" != "nil" ] || [ "$(cat "$written")" != "source-write" ]; then
+if [ "$actual" != ":nil" ] || [ "$(cat "$written")" != "source-write" ]; then
 	echo "WASM async source write CLI failed" >&2
 	exit 1
 fi
 actual="$(KAME_WASM_TEST_VALUE=async-env node ./tools/kame-wasm.mjs do expr --async -c '(env "KAME_WASM_TEST_VALUE")')"
-if [ "$actual" != "async-env" ]; then
-	echo "WASM async environment CLI = $actual, want async-env" >&2
+if [ "$actual" != '"async-env"' ]; then
+	echo "WASM async environment CLI = $actual, want \"async-env\"" >&2
 	exit 1
 fi
 actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(shell "printf async-wasm")')"
-if [ "$actual" != "async-wasm" ]; then
+if [ "$actual" != '"async-wasm"' ]; then
 	echo "WASM async expression CLI = $actual, want async-wasm" >&2
 	exit 1
 fi

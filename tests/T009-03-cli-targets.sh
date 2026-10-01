@@ -87,11 +87,11 @@ test-step "definitions requested as targets print their value"
 	cd basic
 	cli_run -- GREETING
 	cli_expect_status 0
-	cli_expect_stdout "hello"
+	cli_expect_stdout '"hello"' 
 
 	cli_run -- LIST
 	cli_expect_status 0
-	cli_expect_stdout "[alpha beta gamma]"
+	cli_expect_stdout '["alpha" "beta" "gamma"]'
 )
 
 test-step "unknown targets fail with TGT_NO_RULE"
