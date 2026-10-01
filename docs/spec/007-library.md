@@ -44,8 +44,8 @@ The initial general operations are:
 | `list` | Return arguments as a list |
 
 `str` uses canonical JSON-like text for lists and records with stable record key
-order. Bytes require explicit text or hexadecimal conversion and are not
-silently decoded.
+order; it is distinct from the Kame value display of `005-evaluation.md`. Bytes
+require explicit text or hexadecimal conversion and are not silently decoded.
 
 ## Comparison Operations
 

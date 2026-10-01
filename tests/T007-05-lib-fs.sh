@@ -29,29 +29,29 @@ cli_expect_stdout "gamma
 test-step "exists? reports presence"
 cli_run --dir lib-fs -- do expr --allow-read -c '(exists? "a.txt")'
 cli_expect_status 0
-cli_expect_stdout 'true'
+cli_expect_stdout ':true'
 
 cli_run --dir lib-fs -- do expr --allow-read -c '(exists? "missing.txt")'
 cli_expect_status 0
-cli_expect_stdout 'false'
+cli_expect_stdout ':false'
 
 test-step "stat returns stable metadata"
 cli_run --dir lib-fs -- do expr --allow-read -c '(stat "a.txt")'
 cli_expect_status 0
-cli_expect_stdout_contains 'name: a.txt' 'size: 6' 'dir: false'
+cli_expect_stdout_contains 'name: "a.txt"' 'size: 6' 'dir: :false'
 
 test-step "wildcard returns sorted matching paths"
 cli_run --dir lib-fs -- do expr --allow-read -c '(wildcard "*.txt")'
 cli_expect_status 0
-cli_expect_stdout '[./a.txt ./b.txt]'
+cli_expect_stdout '["./a.txt" "./b.txt"]'
 
 cli_run --dir lib-fs -- do expr --allow-read -c '(wildcard "sub/*.txt")'
 cli_expect_status 0
-cli_expect_stdout '[./sub/c.txt]'
+cli_expect_stdout '["./sub/c.txt"]'
 
 cli_run --dir lib-fs -- do expr --allow-read -c '(wildcard "**/*.txt")'
 cli_expect_status 0
-cli_expect_stdout '[./a.txt ./b.txt ./sub/c.txt]'
+cli_expect_stdout '["./a.txt" "./b.txt" "./sub/c.txt"]'
 
 test-step "missing reads fail with FS_ERR"
 cli_run --dir lib-fs -- do expr --allow-read -c '(read "missing.txt")'

@@ -36,11 +36,11 @@ evaluates '(let [l [10 20 30]] l.-1)' '30'
 
 test-step "slice references"
 evaluates '(let [l [1 2 3]] l.1..3)' '[2 3]'
-evaluates '(let [s "abc"] s.1..3)' 'bc'
+evaluates '(let [s "abc"] s.1..3)' '"bc"'
 evaluates '(let [l [1 2 3]] l.0..0)' '[]'
 
 test-step "selection references"
-evaluates '(let [r [host: "x" port: 80]] r.{host,port})' '[host: x port: 80]'
+evaluates '(let [r [host: "x" port: 80]] r.{host,port})' '[host: "x" port: 80]'
 evaluates '(let [r [host: "x" port: 80]] r.{port})' '[port: 80]'
 
 test-step "reference diagnostics"
@@ -49,6 +49,6 @@ diag '(let [r [a: 1]] r.b)' 'REF_MISSING'
 diag '(let [l [1 2 3]] l.9)' 'SEL_INDEX_INVALID'
 diag 'unknown-symbol' 'REF_MISSING'
 diag '(@<)' 'SEL_NO_CONTEXT'
-evaluates '(join @* "-")' ''
+evaluates '(join @* "-")' '""'
 
 test-end

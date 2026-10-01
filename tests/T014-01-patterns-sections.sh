@@ -32,9 +32,9 @@ diag() { # EXPR CODE
 
 test-step "placeholder sections evaluate as lambda equivalents"
 evaluates '(((nop _0)) 7)' '7'
-evaluates '(((list _0 _0)) "same")' '[same same]'
-evaluates '(((list _0 __ _2)) "a" "b" "c")' '[a b c]'
-evaluates '(((list _1)) "unused" "kept")' '[kept]'
+evaluates '(((list _0 _0)) "same")' '["same" "same"]'
+evaluates '(((list _0 __ _2)) "a" "b" "c")' '["a" "b" "c"]'
+evaluates '(((list _1)) "unused" "kept")' '["kept"]'
 
 test-step "section arity is enforced"
 diag '(((nop _0)))' 'EXPR_INVALID'
@@ -42,15 +42,15 @@ diag '(((nop _0)) 1 2)' 'EXPR_INVALID'
 diag '_0x' 'REF_MISSING'
 
 test-step "patterns classify and pattern replace matches"
-evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c "./a/b/x.c")' './build/a/b/x.c'
-evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c "./a.c")' 'nil'
-evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c ["./a.c" "./x/y.c" "./no.obj"])' '[nil ./build/x/y.c nil]'
-evaluates '(replace ./src/{name:*}.c ./build/{name}.o "./src/demo.c")' './build/demo.o'
-evaluates '(map (replace ./{**}/{*}.c ./build/{_0}.o) ["./a.c" "./x/y.c"])' '[nil ./build/x.o]'
-evaluates '(replace ./{**}/{*}.c ./x/{_0}.o "./a/b.c")' './x/a.o'
-evaluates '(replace ./{**}/{*}.c ./x/{_1}.o "./a/b.c")' './x/b.o'
-evaluates '(str ./{**}/{*}.c)' './{**}/{*}.c'
-evaluates '(replace "banana" "a" "b")' 'bbnbnb'
+evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c "./a/b/x.c")' '"./build/a/b/x.c"'
+evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c "./a.c")' ':nil'
+evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c ["./a.c" "./x/y.c" "./no.obj"])' '[:nil "./build/x/y.c" :nil]'
+evaluates '(replace ./src/{name:*}.c ./build/{name}.o "./src/demo.c")' '"./build/demo.o"'
+evaluates '(map (replace ./{**}/{*}.c ./build/{_0}.o) ["./a.c" "./x/y.c"])' '[:nil "./build/x.o"]'
+evaluates '(replace ./{**}/{*}.c ./x/{_0}.o "./a/b.c")' '"./x/a.o"'
+evaluates '(replace ./{**}/{*}.c ./x/{_1}.o "./a/b.c")' '"./x/b.o"'
+evaluates '(str ./{**}/{*}.c)' '"./{**}/{*}.c"'
+evaluates '(replace "banana" "a" "b")' '"bbnbnb"'
 
 test-step "invalid pattern combinations"
 diag '(replace "a" "b")' 'PAT_INVALID'

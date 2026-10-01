@@ -82,7 +82,7 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 	defer c.FreeCallable(callback)
 	state := callbackProgress(c)
 	for state.Index < len(values) {
-		result := c.Call(*callback, values[state.Index:state.Index+1])
+		result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
 		if result.Waiting {
 			return result
 		}
@@ -134,7 +134,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 	defer c.FreeCallable(callback)
 	state := callbackProgress(c)
 	for state.Index < len(values) {
-		result := c.Call(*callback, values[state.Index:state.Index+1])
+		result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
 		if result.Waiting {
 			return result
 		}
@@ -178,7 +178,7 @@ func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	for state.Index < len(v[1].List) {
 		args := []core.Value{state.Accumulator, v[1].List[state.Index]}
-		result := c.Call(v[0], args)
+		result := c.CallAt(v[0], args, state.Index)
 		if result.Waiting {
 			return result
 		}

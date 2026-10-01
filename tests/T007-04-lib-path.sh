@@ -20,34 +20,34 @@ evaluates() { # EXPR EXPECTED
 }
 
 test-step "basename and dirname"
-evaluates '(basename "a/b/c.txt")' 'c.txt'
-evaluates '(dirname "a/b/c.txt")' 'a/b'
-evaluates '(basename "c.txt")' 'c.txt'
-evaluates '(dirname "c.txt")' '.'
+evaluates '(basename "a/b/c.txt")' '"c.txt"'
+evaluates '(dirname "a/b/c.txt")' '"a/b"'
+evaluates '(basename "c.txt")' '"c.txt"'
+evaluates '(dirname "c.txt")' '"."'
 
 test-step "extension helpers"
-evaluates '(ext "a/b/c.txt")' '.txt'
-evaluates '(ext "a/b/c")' ''
-evaluates '(splitext "a/b/c.txt")' '[a/b/c .txt]'
-evaluates '(splitext "a.tar.gz")' '[a.tar .gz]'
-evaluates '(splitext "archive")' '[archive ]'
-evaluates '(splitext ".hidden")' '[.hidden ]'
+evaluates '(ext "a/b/c.txt")' '".txt"'
+evaluates '(ext "a/b/c")' '""'
+evaluates '(splitext "a/b/c.txt")' '["a/b/c" ".txt"]'
+evaluates '(splitext "a.tar.gz")' '["a.tar" ".gz"]'
+evaluates '(splitext "archive")' '["archive" ""]'
+evaluates '(splitext ".hidden")' '[".hidden" ""]'
 
 test-step "joinpath normalizes components"
-evaluates '(joinpath "a" "b")' 'a/b'
-evaluates '(joinpath "a" "b" ".." "c")' 'a/c'
-evaluates '(joinpath "a" "")' 'a'
+evaluates '(joinpath "a" "b")' '"a/b"'
+evaluates '(joinpath "a" "b" ".." "c")' '"a/c"'
+evaluates '(joinpath "a" "")' '"a"'
 
 test-step "relpath and abspath are lexical"
-evaluates '(relpath "a/b/c" "a")' 'b/c'
-evaluates '(relpath "a" "a")' '.'
+evaluates '(relpath "a/b/c" "a")' '"b/c"'
+evaluates '(relpath "a" "a")' '"."'
 cli_run -- do expr -c '(abspath "x")'
 cli_expect_status 0
-cli_expect_stdout "$PWD/x"
+cli_expect_stdout "\"$PWD/x\""
 
 test-step "path operations do not touch the filesystem"
 cli_run -- do expr -c '(joinpath "no-such-dir" "file.txt")'
 cli_expect_status 0
-cli_expect_stdout 'no-such-dir/file.txt'
+cli_expect_stdout '"no-such-dir/file.txt"'
 
 test-end

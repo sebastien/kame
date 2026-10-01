@@ -27,28 +27,28 @@ diag() { # EXPR CODE
 }
 
 test-step "join and split"
-evaluates '(join (list "a" "b" "c") "-")' 'a-b-c'
-evaluates '(join (list) "-")' ''
-evaluates '(split "a-b-c" "-")' '[a b c]'
-evaluates '(split "abc" "-")' '[abc]'
+evaluates '(join (list "a" "b" "c") "-")' '"a-b-c"'
+evaluates '(join (list) "-")' '""'
+evaluates '(split "a-b-c" "-")' '["a" "b" "c"]'
+evaluates '(split "abc" "-")' '["abc"]'
 
 test-step "strip, replace"
-evaluates '(strip "  padded  ")' 'padded'
-evaluates '(replace "a-b-a" "a" "x")' 'x-b-x'
-evaluates '(replace "abc" "z" "y")' 'abc'
+evaluates '(strip "  padded  ")' '"padded"'
+evaluates '(replace "a-b-a" "a" "x")' '"x-b-x"'
+evaluates '(replace "abc" "z" "y")' '"abc"'
 
 test-step "membership tests"
-evaluates '(includes? "abc" "b")' 'true'
-evaluates '(includes? "abc" "z")' 'false'
-evaluates '(starts? "abc" "ab")' 'true'
-evaluates '(starts? "abc" "b")' 'false'
-evaluates '(ends? "abc" "bc")' 'true'
-evaluates '(ends? "abc" "a")' 'false'
+evaluates '(includes? "abc" "b")' ':true'
+evaluates '(includes? "abc" "z")' ':false'
+evaluates '(starts? "abc" "ab")' ':true'
+evaluates '(starts? "abc" "b")' ':false'
+evaluates '(ends? "abc" "bc")' ':true'
+evaluates '(ends? "abc" "a")' ':false'
 
 test-step "case conversion"
-evaluates '(uppercase "abc")' 'ABC'
-evaluates '(lowercase "ABC")' 'abc'
-evaluates '(uppercase "MiXeD")' 'MIXED'
+evaluates '(uppercase "abc")' '"ABC"'
+evaluates '(lowercase "ABC")' '"abc"'
+evaluates '(uppercase "MiXeD")' '"MIXED"'
 
 test-step "text operations validate arguments"
 diag '(join "not-a-list" "-")' 'EXPR_INVALID'

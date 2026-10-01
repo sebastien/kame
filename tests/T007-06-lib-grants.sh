@@ -57,11 +57,11 @@ cli_expect_stderr_contains 'CAP_DENIED'
 test-step "environment grants scope variable names"
 cli_run --dir lib-grants -- do expr --allow-env -c '(env "HOME")'
 cli_expect_status 0
-cli_expect_stdout "$TEST_PATH"
+cli_expect_stdout "\"$TEST_PATH\""
 
 cli_run --dir lib-grants -- do expr --allow-env=HOME -c '(env "HOME")'
 cli_expect_status 0
-cli_expect_stdout "$TEST_PATH"
+cli_expect_stdout "\"$TEST_PATH\""
 
 cli_run --dir lib-grants -- do expr --allow-env=OTHER_NAME -c '(env "HOME")'
 cli_expect_status 1
