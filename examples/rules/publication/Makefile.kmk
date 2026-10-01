@@ -1,0 +1,22 @@
+# Calculated paths become dependencies, not commands.
+sources = (wildcard ./notes/*.txt)
+pages = (map sources (replace ./notes/{name:*}.txt ./public/{name}.txt))
+
+default : ./public/index.txt
+
+# One rule describes every corresponding source/output pair.
+./public/{name}.txt : ./notes/{name}.txt ./banner.txt
+	mkdir -p ./public
+	cat ./banner.txt > @>
+	tr '[:lower:]' '[:upper:]' < @< >> @>
+	echo rendered @>
+
+# The discovered source set determines the shape of this dependency graph.
+./public/index.txt : @(pages)
+	cat @(pages) > @>
+	echo assembled @>
+
+# A bare task deliberately runs whenever requested.
+check : ./public/index.txt
+	grep -q 'LITTLE PUBLICATION' @<
+	echo publication checked

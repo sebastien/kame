@@ -1,0 +1,10 @@
+# Staged: requires the standalone Kash runner; kame must also be on PATH.
+# This is an explicit subprocess boundary, not a shared in-process build graph.
+kame -f ./Makefile.kmk
+kame -f ./Makefile.kmk check
+
+# Lazy discovery is first demanded after the build has completed.
+pages = (wildcard ./public/*.txt)
+echo "Publication files:" @(count pages)
+wc -l $pages
+cat ./public/index.txt | sort | uniq

@@ -1,0 +1,4 @@
+# Discovery is a value computation with a tracked filesystem dependency.
+sources = (wildcard ./notes/*.txt)
+pages = (map sources (replace ./notes/{name:*}.txt ./public/{name}.txt))
+publication = [sources: sources pages: pages count: (count pages)]

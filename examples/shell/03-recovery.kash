@@ -1,0 +1,19 @@
+# Requires standalone Kash, including command and value recovery.
+
+# An expected non-zero exit is accepted, not confused with a fallback value.
+grep -q needle ./sample.txt ?
+echo "continued after an accepted non-match"
+
+# A failed command can select another command.
+grep -q needle ./sample.txt ? echo "no needle in the sample"
+
+# A failed captured computation can select a value.
+result = $(false) ?? "no result"
+echo $result
+
+# Selecting a branch does not demand computations in the other branch.
+mode = "preview"
+if @(eq mode "preview")
+    echo "preview only"
+else
+    no-such-publication-command

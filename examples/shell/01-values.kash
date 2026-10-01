@@ -1,0 +1,12 @@
+# Requires the standalone Kash runner specified in docs/spec/017-kash.md.
+title = "Little publication"
+names = ["hello world.txt" "second.txt"]
+(label name) = (uppercase name)
+
+echo $title
+printf "[%s]\n" $names
+printf "[%s]\n" @(map names label)
+
+# Capture is a value; strip explicitly removes its preserved trailing newline.
+greeting = $(printf "hello\n")
+echo @(uppercase (strip greeting))

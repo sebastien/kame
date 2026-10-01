@@ -1,0 +1,17 @@
+# Requires standalone Kash, including streaming pipelines and redirection.
+names = ["world" "hello" "hello"]
+
+# The outer pipe streams process output.
+printf "%s\n" $names | sort | uniq
+
+# The inner pipe transforms a Kame value before starting a process.
+printf "%s\n" @(names | unique | sorted)
+
+# The result is captured as one string, with its trailing newlines preserved.
+listing = $(printf "%s\n" $names | sort | uniq)
+echo @(count listing)
+
+# Writing the report is explicit, not an effect of computing its path.
+report = ./report.txt
+printf "%s" $listing > $report
+cat < $report

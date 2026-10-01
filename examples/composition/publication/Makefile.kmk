@@ -1,0 +1,17 @@
+include ./publication.km
+
+default : ./public/index.txt
+
+./public/{name}.txt : ./notes/{name}.txt ./banner.txt
+	mkdir -p ./public
+	cat ./banner.txt > @>
+	tr '[:lower:]' '[:upper:]' < @< >> @>
+	echo rendered @>
+
+./public/index.txt : @(pages)
+	cat @(pages) > @>
+	echo assembled @>
+
+check : ./public/index.txt
+	grep -q 'LITTLE PUBLICATION' @<
+	echo publication checked

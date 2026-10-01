@@ -1,0 +1,6 @@
+# This value program also supplies the rule file's definitions unchanged.
+title = "Little publication"
+sources = (wildcard ./notes/*.txt)
+(page source) = (replace ./notes/{name:*}.txt ./public/{name}.txt source)
+pages = (map sources page)
+publication = [title: title sources: sources pages: pages count: (count pages)]

@@ -54,6 +54,13 @@ mixed or unsupported list is invalid.
 | `ends?` | `(ends? TEXT SUFFIX)` | Literal suffix test. |
 | `uppercase` | `(uppercase TEXT)` | Unicode uppercase conversion. |
 | `lowercase` | `(lowercase TEXT)` | Unicode lowercase conversion. |
+| `cat` | `(cat VALUE...)` | Concatenate renderable scalars/lists; nil is empty. Records/bytes require explicit conversion. |
+| `text` | `(text VALUE)` | Convert UTF-8 bytes to a string, or return a string unchanged. |
+| `render` | `(render SOURCE [PAYLOAD] [STYLE])` | Render a document template with optional record bindings/style; file sources require read capability and track dependencies. |
+
+See [Templates](./templates.md) for document directives, source resolution,
+comment styles, and payload scopes. Lazy `if`, `and`, `or`, `match`, and `with`
+are special forms, not eager library operations; see [Expressions](./expressions.md).
 
 Pattern replacement uses Kame pattern literals such as `./src/{name:*}.c` and
 expansion references such as `./build/{name}.o`. Invalid matcher/expansion

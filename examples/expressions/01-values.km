@@ -1,0 +1,9 @@
+# A value program: request publication, title, pages, or first-page.
+title = "Little publication"
+sources = [./notes/hello.txt ./notes/world.txt]
+pages = (map sources (replace ./notes/{name:*}.txt ./public/{name}.txt))
+first-page = (first pages)
+publication = [title: title pages: pages count: (count pages)]
+
+# Valid syntax, but an invalid computation. Nothing demands it by default.
+unused = (uppercase 42)

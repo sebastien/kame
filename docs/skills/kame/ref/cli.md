@@ -1,9 +1,10 @@
 # Kame CLI reference
 
-Kame's primary invocation builds targets:
+Kame's primary invocation builds discovered targets or executes explicit sources:
 
 ```text
 kame [OPTIONS] [TARGET...]
+kame [OPTIONS] FILE.km|FILE.kmk|FILE.kash [ENTRY...] [-- ARG...]
 kame do COMMAND [OPTIONS] [ARG...]
 ```
 
@@ -19,7 +20,41 @@ rules. Relative include paths are resolved from the including source, expanded
 depth-first, and reject repeated or cyclic inclusion. Inline `-c` / `--command`
 sources cannot use includes.
 
-## Build and run
+## Execute values, rules, and processes
+
+```sh
+kame do run --lang expr -c '(join ["a" "b"] ",")'
+kame do run ./values.km result
+kame do run ./Makefile.kmk check
+kame do run ./publish.kash -- preview
+kame do run -c 'name = "Ada"' -c '(uppercase name)'
+```
+
+Direct source execution is shorthand for `do run`. Execution accepts ordered,
+repeatable file/`-f` and `-c` fragments sharing one scope and engine. Parse all
+fragments before effects. Suffixes infer `km`, `kmk`, or `kash` (`.ksh` aliases
+`.kash`); inline/stdin defaults to `km`. `--lang km|kmk|kash|expr` overrides
+subsequent fragments until changed, not earlier ones. `expr` accepts exactly
+one expression. Parse/format modes `template`, `rule`, and `script` are not
+execution language names.
+
+Named entries follow the associated `km`/`kmk` source. Use `--entry NAME` if an
+entry resembles a source filename. Kash and expr accept no named entries.
+Arguments after `--` are program arguments; in discovered build mode they are
+literal target operands instead. To build an artifact ending in a program
+suffix, use `kame -- ./output.km` or an explicit rule source and `--entry`.
+
+Source filenames resolve against original cwd before `-C`; evaluation resources
+use the selected working directory. Includes remain source-relative. Later
+fragments share the first fragment's capability policy, not implicit new grants.
+
+The unified runner supersedes the specified `do expr`/`do kash` execution
+interfaces. Transitional binaries may still expose `do expr`; prefer `do run
+--lang expr` for new examples. Check `kame do run --help` and smoke-test on the
+selected backend. Current native runner sessions reject `--json` with
+`FEATURE_UNSUP`; build/inspection JSON support does not imply runner support.
+
+## Build targets
 
 ```sh
 kame                         # build default
@@ -36,8 +71,8 @@ Primary options:
 
 | Option | Meaning |
 | --- | --- |
-| `-f`, `--file FILE` | Select one Kame source file. |
-| `-c`, `--command TEXT` | Supply inline build source. Mutually exclusive with `--file`. |
+| `-f`, `--file FILE` | Select a source; repeatable/mixable in execution sessions. Inspection retains a single source. |
+| `-c`, `--command TEXT` | Append inline source, defaulting to `km` in the runner; use `--lang kmk` for inline rules. |
 | `-C`, `--directory DIR` | Set the working directory. |
 | `-j`, `--jobs N` | Limit concurrent graph nodes; `N` must be positive. |
 | `-n`, `--dry-run` | Render without writing effects or starting processes. |
@@ -90,32 +125,47 @@ kame do fmt < Makefile.kmk        # write canonical source to stdout
 kame do parse --lang script Makefile.kmk
 ```
 
-`do fmt` defaults to `script` language. `--lang` also accepts `expr`,
-`template`, and `rule`. `do parse` prints a stable JSON AST, including source
-spans, which is useful for language tooling rather than ordinary build checks.
+`do fmt` defaults to `script` language. `--lang` (`-l`) also accepts `expr`,
+`template`, `rule`, and `kash`. The specified `km`/`kmk` aliases are not yet
+accepted by current parse/format tooling, which can also lag `.km` expression
+statement support. Verify individual expressions with `expr` and value programs
+with the runner. Use an explicit mode rather than
+assuming filename inference in language tools. `do parse` prints a stable JSON
+AST with spans. `template` handles inline template syntax, not host-document
+formatting; do not apply the source formatter to HTML/config templates.
 
 ## Evaluate a standalone expression
 
 ```sh
-kame do expr -c '(join ["a" "b"] ",")'
-kame do expr --allow-read=./src -c '(wildcard ./src/*.c)'
-kame do expr --allow-env=HOME -c '(env "HOME")'
+kame do run --lang expr -c '(join ["a" "b"] ",")'
+kame do run --lang expr --allow-read=./src -c '(wildcard ./src/*.c)'
+kame do run --lang expr --allow-env=HOME -c '(env "HOME")'
 ```
 
-`do expr` denies filesystem, environment, and process capabilities by default.
+Value-first (`km`/`expr`) sessions deny filesystem, environment, and process
+capabilities by default.
 Grant only what the expression needs:
 
 | Option | Grant |
 | --- | --- |
 | `--allow-read[=ROOTS]` | Filesystem reads and globs, optionally under listed roots. |
 | `--allow-write[=ROOTS]` | Filesystem writes, optionally under listed roots. |
-| `--allow-run` | Collected shell execution. |
+| `--allow-run[=ROOTS]` | Process execution, optionally restricted by executable path. Does not override phase restrictions. |
 | `--allow-env[=NAMES]` | Reads of named environment variables. |
 
 Arguments after `--` are available to the expression as `args`. These grants
 apply to standalone expression execution; normal builds grant recipe execution
 and working-directory read/write access, while language-level environment reads
 and access outside the working directory remain denied without explicit grants.
+
+Render a document with `(render SOURCE [PAYLOAD] [STYLE])`, for example:
+
+```sh
+kame do run --lang expr --allow-read -c '(render ./page.html [title: "Hello"])'
+```
+
+The standalone `do render` command is specified but not currently registered;
+do not assume its options exist. See [Templates](./templates.md).
 
 ## Automation and diagnostics
 
