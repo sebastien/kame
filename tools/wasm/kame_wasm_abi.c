@@ -28,7 +28,7 @@ static uint32_t kame_wasm_diagnostic_len;
 
 #define KAME_WASM_INSTANCE_CAPACITY 16u
 #define KAME_WASM_SOURCE_CAPACITY 65536u
-#define KAME_WASM_ARENA_CAPACITY 262144u
+#define KAME_WASM_ARENA_CAPACITY (16u * 1024u * 1024u)
 typedef struct {
   uint64_t owner;        /* handle-table owner token for this instance */
   uint32_t source_len;
@@ -49,7 +49,9 @@ typedef struct {
   uint32_t source_name_len; /* label reported in diagnostics for the source */
   char source_name[256];
   char source[KAME_WASM_SOURCE_CAPACITY];
-  char arena[KAME_WASM_ARENA_CAPACITY];
+  /* Lazily allocate and reuse each slot's arena: captures need more than the
+   * old 256 KiB, but reserving all 16 arenas exceeds module memory. */
+  char *arena;
 } kame_wasm_instance;
 static kame_wasm_instance kame_wasm_instances[KAME_WASM_INSTANCE_CAPACITY];
 
@@ -207,7 +209,11 @@ static kame_wasm_instance *kame_wasm_instance_get(uint64_t handle) {
 }
 
 static so_String kame_wasm_request_payload(host_Request request) {
-  if (request.Kind == host_RequestProcess) return host_PayloadText(request.Payload, so_str("script"));
+  if (request.Kind == host_RequestProcess) {
+    if (host_PayloadStages(request.Payload).len != 0) return host_PayloadText(request.Payload, so_str("data"));
+    if (host_PayloadArgv(request.Payload).len != 0) return host_PayloadText(request.Payload, so_str("data"));
+    return host_PayloadText(request.Payload, so_str("script"));
+  }
   return host_PayloadPath(request.Payload);
 }
 
@@ -238,7 +244,9 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
     case host_RequestWriteFile:
       return 2u;
     case host_RequestProcess:
-      return 3u;
+      if (host_PayloadSetups(request.Payload).len != 0 || host_PayloadText(request.Payload, so_str("input")).len != 0 || host_PayloadText(request.Payload, so_str("output")).len != 0) return 15u;
+      if (host_PayloadStages(request.Payload).len != 0) return 14u;
+      return host_PayloadArgv(request.Payload).len != 0 ? 13u : 3u;
     case host_RequestEnvironment:
       return 4u;
     case host_RequestStatPath:
@@ -381,6 +389,13 @@ uint32_t kame_wasm_source_compile(uint64_t handle, uint32_t source, uint32_t sou
     kame_wasm_instance_set_static_diagnostic(instance, "NO_MEMORY", "source exceeds instance capacity");
     return KAME_WASM_NO_MEMORY;
   }
+  if (instance->arena == NULL) {
+    instance->arena = (char *)(uintptr_t)kame_wasm_alloc(KAME_WASM_ARENA_CAPACITY, 16u);
+    if (instance->arena == NULL) {
+      kame_wasm_instance_set_static_diagnostic(instance, "NO_MEMORY", "cannot allocate instance arena");
+      return KAME_WASM_NO_MEMORY;
+    }
+  }
   size_t mark = so_heap_mark();
   wasm_PureResult result = wasm_ValidateSource(mem_System, (so_String){(const char *)(uintptr_t)source, (so_int)source_len});
   if (result.Code.len != 0) {
@@ -428,6 +443,48 @@ uint32_t kame_wasm_expression_begin(uint64_t handle, uint32_t source, uint32_t s
     kame_wasm_instance_set_static_diagnostic(instance, "NO_MEMORY", "cannot allocate expression handles");
     return KAME_WASM_NO_MEMORY;
   }
+  return KAME_WASM_OK;
+}
+
+__attribute__((export_name("kame_wasm_session_compile")))
+uint32_t kame_wasm_session_compile(uint64_t handle, uint32_t data, uint32_t length) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || instance->has_pending || (length && !data)) return KAME_WASM_STATE_INVALID;
+  wasm_PureResult result = wasm_Runtime_PrepareSession(instance->runtime, (so_Slice){(so_byte *)(uintptr_t)data, length, length});
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic_span(instance, result.Code, result.Message, result.SpanStart, result.SpanEnd);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
+__attribute__((export_name("kame_wasm_session_work_count")))
+uint32_t kame_wasm_session_work_count(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  return instance && instance->runtime ? (uint32_t)wasm_Runtime_SessionWorkCount(instance->runtime) : 0u;
+}
+
+__attribute__((export_name("kame_wasm_session_work_kind")))
+uint32_t kame_wasm_session_work_kind(uint64_t handle, uint32_t index) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  return instance && instance->runtime ? wasm_Runtime_SessionWorkKind(instance->runtime, index) : 0u;
+}
+
+__attribute__((export_name("kame_wasm_session_work_begin")))
+uint32_t kame_wasm_session_work_begin(uint64_t handle, uint32_t index) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (!instance) return KAME_WASM_HANDLE_INVALID;
+  if (!instance->runtime || instance->has_pending) return KAME_WASM_STATE_INVALID;
+  wasm_PureResult result = wasm_Runtime_RequestSessionWork(instance->runtime, index);
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
   return KAME_WASM_OK;
 }
 
@@ -1008,8 +1065,18 @@ uint32_t kame_wasm_result_copy(uint64_t handle, uint32_t dst, uint32_t dst_len, 
     wasm_RuntimeResult_Free(&result, instance->runtime->Alloc);
     return KAME_WASM_DIAGNOSTIC;
   }
-  // Render exactly as the native CLI writes a result to stdout.
-  so_String text = eval_Display(instance->runtime->Alloc, result.Value);
+  // A kind-2 result is a file artifact path, not an expression value, so it is
+  // returned verbatim for the caller to read. Every other result renders
+  // exactly as the native CLI writes a value to stdout.
+  so_String text;
+  if (wasm_Runtime_TargetResultKind(instance->runtime) == 2u) {
+    so_Slice buffer = mem_AllocSlice(char, instance->runtime->Alloc, result.Value.Text.len, result.Value.Text.len);
+    char *bytes = (char *)buffer.ptr;
+    for (so_int i = 0; i < result.Value.Text.len; i++) bytes[i] = result.Value.Text.ptr[i];
+    text = (so_String){bytes, result.Value.Text.len};
+  } else {
+    text = eval_Display(instance->runtime->Alloc, result.Value);
+  }
   wasm_RuntimeResult_Free(&result, instance->runtime->Alloc);
   *(uint32_t *)(uintptr_t)out_len = (uint32_t)text.len;
   if (dst_len < (uint32_t)text.len) {

@@ -195,12 +195,12 @@ func TestQueriedEventStaysPinnedUntilCopiedOrDiscarded(t *testing.T) {
 func TestPureExpressionUsesPortableEvaluator(t *testing.T) {
 	a := t.Allocator()
 	result := wasm.EvaluatePure(a, "(join [\"left\" \"right\"] \":\")")
-	if result.Code != "" || result.Text != "left:right" || result.HostNeeded {
+	if result.Code != "" || result.Text != "\"left:right\"" || result.HostNeeded {
 		t.Errorf("pure evaluation = %#v", result)
 	}
 	result.Free(a)
 	fromSource := wasm.EvaluateSourcePure(a, "name = \"Kame\"\n", "(uppercase name)")
-	if fromSource.Code != "" || fromSource.Text != "KAME" {
+	if fromSource.Code != "" || fromSource.Text != "\"KAME\"" {
 		t.Errorf("source evaluation = %#v", fromSource)
 	}
 	fromSource.Free(a)

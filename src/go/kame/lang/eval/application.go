@@ -229,6 +229,8 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		}
 	}
 	previousArgs, previousScope, previousHasArgs := context.Args, context.Scope, context.HasArgs
+	previousCallPath := context.CallPath
+	context.CallPath = invocationPath(context.Run, previousCallPath, span.Start, span.End)
 	context.Args, context.HasArgs = values, true
 	var result Result
 	if function.Definition != nil {
@@ -239,6 +241,8 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		result = p.body(child, function.Body, context)
 	}
 	context.Args, context.Scope, context.HasArgs = previousArgs, previousScope, previousHasArgs
+	mem.FreeString(context.Run, context.CallPath)
+	context.CallPath = previousCallPath
 	label := "function"
 	if function.Definition != nil {
 		label = function.Definition.Name

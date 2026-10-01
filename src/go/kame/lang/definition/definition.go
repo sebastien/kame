@@ -109,6 +109,42 @@ type parser struct {
 	start int
 	end   int
 	diags []source.Diagnostic
+	kash bool
+}
+
+// KashHeaderEnd recognizes only a valid header followed by standalone '='.
+// Command words containing '=' never become definitions by accident.
+func KashHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
+	text := s.Text
+	if start >= len(text) { return 0 }
+	end := start
+	if text[start] == '(' {
+		for end < len(text) && text[end] != ')' && text[end] != '\n' { end++ }
+		if end == len(text) || text[end] != ')' { return 0 }
+		end++
+		p := parser{a: a, s: s}
+		d := Definition{}
+		p.functionLHS(&d, start, end)
+		valid := len(p.diags) == 0
+		slices.Free(a, d.Parameters); slices.Free(a, p.diags)
+		if !valid { return 0 }
+	} else {
+		name := scanName(text, start)
+		if !name.OK { return 0 }
+		end = name.End
+	}
+	pos := end
+	for pos < len(text) && space(text[pos]) { pos++ }
+	if pos == end || pos == len(text) || text[pos] != '=' { return 0 }
+	if pos+1 < len(text) && !space(text[pos+1]) && text[pos+1] != '\n' && text[pos+1] != ';' { return 0 }
+	return pos+1
+}
+
+// ParseKashPrefix uses Kame's header and expression grammar with Kash value
+// wrappers. Its span ends after the single RHS, not at the end of the source.
+func ParseKashPrefix(a mem.Allocator, s *source.Source, start int) Part {
+	p := parser{a: a, s: s, start: start, end: len(s.Text), kash: true}
+	return Part{Definition: p.definition(), Diagnostics: p.diags}
 }
 
 func (p *parser) error(start int, end int, message string) {
@@ -144,11 +180,18 @@ func (p *parser) definition() *Definition {
 		}
 	}
 	rhsStart, rhsEnd := trim(p.s.Text, equals+1, p.end)
+	if p.kash {
+		prefix := expr.ParseKashValuePrefix(p.a, p.s, rhsStart)
+		d.Expression, d.ValueKind, d.Span.End = prefix.Expr, ValueExpression, prefix.End
+		for i := range prefix.Diagnostics { p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i]) }
+		slices.Free(p.a, prefix.Diagnostics)
+		return d
+	}
 	if rhsStart == rhsEnd {
 		p.error(equals+1, rhsEnd, "expected definition value")
 		return d
 	}
-	if p.s.Text[rhsStart] == '(' || p.s.Text[rhsStart] == '[' {
+	if p.s.Text[rhsStart] == '(' || p.s.Text[rhsStart] == '[' || (rhsStart+1 < rhsEnd && p.s.Text[rhsStart:rhsStart+2] == "$(") {
 		prefix := expr.ParsePrefix(p.a, p.s, rhsStart)
 		d.Expression, d.ValueKind = prefix.Expr, ValueExpression
 		for i := range prefix.Diagnostics {

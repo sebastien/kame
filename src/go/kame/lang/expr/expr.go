@@ -29,6 +29,12 @@ const (
 	Lambda
 	Placeholder
 	Section
+	CommandCapture
+	CommandWord
+	CommandStage
+	CommandRedirection
+	CommandSetup
+	CommandGraph
 )
 
 type ReferenceKind int
@@ -63,6 +69,8 @@ type StringPart struct {
 	Span source.Span
 	Expr *Expr
 	Brace bool
+	// Form retains Kash's parser boundary: $, ${, @, or $(.
+	Form string
 }
 
 // Expr is immutable after parsing. All child storage is owned by Result.Alloc.
@@ -203,6 +211,8 @@ func (p *parser) expression() *Expr {
 		return p.symbol()
 	case '@':
 		return p.selector()
+	case '$':
+		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' { return p.commandCapture() }
 	case '?':
 		p.pos++
 		e := p.node(Name, start)
@@ -956,6 +966,11 @@ func Format(a mem.Allocator, e *Expr) string {
 
 func writeExpr(b *strings.Builder, e *Expr) {
 	if e == nil { return }
+	if e.Kind == CommandCapture || e.Kind == CommandGraph { if e.Kind == CommandCapture { b.WriteString("$(") }; for i := range e.Items { if i != 0 { b.WriteString(" | ") }; writeExpr(b, e.Items[i]) }; if e.Kind == CommandCapture { b.WriteByte(')') }; return }
+	if e.Kind == CommandStage { for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }; return }
+	if e.Kind == CommandRedirection { b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
+	if e.Kind == CommandSetup { b.WriteByte(':'); b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
+	if e.Kind == CommandWord { writeCommandWord(b, e); return }
 	if e.Kind == Boolean { if e.Bool { b.WriteString(":true") } else { b.WriteString(":false") }; return }
 	if e.Kind == Nil { b.WriteString(":nil"); return }
 	if e.Kind == Integer { var buf [strconv.MaxIntBase10Len]byte; b.WriteString(strconv.FormatInt(buf[:], e.Int, 10)); return }

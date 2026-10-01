@@ -70,7 +70,8 @@ func Source(a mem.Allocator, lang string, name string, text string, indentStyle 
 		freeIndent(a, indentBuf)
 		return Result{Text: formatted, OK: true}
 	}
-	result := script.Parse(a, name, text)
+	var result *script.Script
+	if lang == "kash" { result = script.ParseKash(a, name, text) } else { result = script.Parse(a, name, text) }
 	if len(result.Diagnostics) != 0 {
 		out := diagnosticResult(a, result.Diagnostics[0].Code, result.Diagnostics[0].Message)
 		result.Free()

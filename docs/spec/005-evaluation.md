@@ -17,10 +17,30 @@ Every evaluation receives a context containing:
 - Current function arguments, when applicable.
 - Operation registry.
 - Granted capabilities.
+- Execution phase and available host services/request queue.
+- Working directory, configured process environment, timeout and capture policy.
+- Execution ownership, cancellation, and request generation/attempt correlation.
+- Dynamic dependency and effect channels.
 - Diagnostic source and frame stack.
 
 Operations receive this context explicitly. There is no thread-local or
 async-local evaluation state.
+
+These fields define the execution context shared by Kame effects, Kash, and
+embedded `$(...)` processes (`017-kash.md`). Lexical scope governs name lookup;
+it does not confer authority. Embedded processes inherit the caller's policy,
+and nested configuration cannot broaden grants or relax caller limits. Lazy
+definition nodes use their owning program's explicitly configured policy, never
+an unrelated caller's broader grants. Unselected or unused computations perform
+no host effects.
+
+Parsing is context-independent. A demanded process substitution requires both
+a phase permitting process execution and the applicable run grant. Planning or
+resolution fails with `PHASE_INVALID`; absent grants fail with `CAP_DENIED`;
+authorized but unavailable host services fail with `HOST_FAIL`. Redirections
+and explicit environment lookups require their own grants. Capability denial
+and cancellation are not recoverable through Kash fallback operators. Existing
+Kame `?` continues to handle only `REF_MISSING`.
 
 ## Scope
 
@@ -42,6 +62,50 @@ Call-local scopes and lambdas are run-owned and cannot be published as node
 values or stored in cacheable containers. Attempting to return such a callable
 across the run boundary is `EXPR_INVALID`.
 
+### Value-program execution
+
+An executable `.km` program composes lazy definitions with top-level expression
+statements (`004-language.md`). Register definitions before demanding selected
+work so expressions may refer to later definitions. A named-entry run requests
+only the selected definitions; an expression-statement run evaluates statements
+in source order and returns the final value. The definitions-only `default`
+convention, empty-program behavior, and CLI result presentation are defined in
+`009-cli.md`.
+
+Statement sequencing does not make all definitions eager. Every statement and
+selected definition uses the owning program's argument frame, cwd, grants,
+generation correlation, and dependency/effect channels. A failure stops the
+selected sequence; output already committed is not rolled back. Resumption
+must not replay an accepted earlier statement or consume another statement's
+host completion. Named entries share one engine and lazy dependency nodes.
+
+### Composed execution sessions
+
+The runner can load multiple sources and inline fragments in command-line order.
+Parse all inputs and register their shared top-level scope before any demanded
+work executes. Named-entry and expression-statement behavior above applies to
+each fragment, with definitions-only value fragments contributing bindings
+without demanding a default when later work is present. Source order sequences
+statements and target checkpoints, not lazy definition registration or visibility.
+
+All fragments use one engine and owning program context. In particular, an
+expression appended after a rule or Kash file can demand that file's definitions
+with the same policy and host services. A language boundary does not reset cwd,
+args, invocation limits, or grants; changing parser cannot broaden authority.
+The first source establishes the default policy, and explicit grants configure
+the session as a whole. Pure value sessions do not implicitly gain process
+authority by appending a Kash file.
+
+Compile-time failure in any fragment prevents the sequence from starting.
+Runtime failure stops later fragments without rolling back earlier effects.
+Resume suspended work using fragment identity and authored spans in addition to
+invocation/callback correlation; identical inline text in distinct fragments is
+not the same host call. Completed fragments do not replay when later work resumes.
+
+The unified runner is a host entry point, not a new evaluator. Single-expression
+mode uses the same expression parser and evaluation context directly; removing
+the CLI `do expr` command does not remove expression evaluation APIs.
+
 ## Values and Truth
 
 Evaluation uses the value kinds from `002-engine.md`. Only false and nil are
@@ -51,6 +115,35 @@ true.
 Arguments evaluate left-to-right for deterministic diagnostics and effects.
 Independent dependency nodes discovered by those arguments may execute in
 parallel.
+
+## Value Display
+
+When a materialized value is written to stdout — a `do run`/`do expr` result, a
+definition value selected as a target, or a `do cat` definition value — it uses
+one canonical notation that is also a valid Kame expression:
+
+| Kind | Notation |
+| --- | --- |
+| nil | `:nil` |
+| boolean | `:true` / `:false` |
+| integer | decimal digits |
+| float | shortest `%g`; negative zero is written `0` |
+| string | double-quoted, with `\"`, `\\`, `\n`, `\r`, and `\t` escapes |
+| pattern | double-quoted canonical pattern text |
+| list | `[ITEM ...]`, items space-separated |
+| record | `[KEY: VALUE ...]`, keys bare names, pairs space-separated |
+
+The display is idempotent: evaluating the displayed text and displaying the
+result again yields the same bytes. Nil, booleans, strings, patterns, lists, and
+records also reproduce a value of the same kind; an integral float re-evaluates
+as an integer but still displays identically. Record keys are produced from
+`NAME:` syntax and are always valid names.
+
+Bytes are written raw and resources as their name; the grammar has no literal
+for either, so they are outside the notation. This notation is distinct from the
+`str` operation (`007-library.md`), which encodes lists and records as JSON-like
+text. `--json` emits structured values in its event schema instead of this
+notation.
 
 ## Functions
 
@@ -252,4 +345,7 @@ containment, which is outside the initial implementation.
 - Rule and argument selectors choose the nearest correct frame.
 - A filesystem read records a dependency on its canonical file resource.
 - Denied operations create no host request.
+- The value display of nil, booleans, numbers, strings, patterns, lists, and
+  records re-parses as a Kame expression and displays identically; nested values
+  use the same notation as top-level values.
 - Evaluation teardown under `mem.Tracker` leaks no scope, closure, or value.

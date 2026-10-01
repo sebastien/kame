@@ -142,7 +142,11 @@ func (p *Program) evalText(scope *Scope, values []*expr.Expr, context *Context, 
 		parsed.Free()
 		return Result{Diagnostic: diagnostic.Diagnostic{Code: parseDiagnostic.Code, Severity: diagnosticSeverity(parseDiagnostic.Severity), Message: parseDiagnostic.Message, Span: diagnostic.Span{Start: parseDiagnostic.Span.Start, End: parseDiagnostic.Span.End}}}
 	}
+	previousCallPath := context.CallPath
+	context.CallPath = invocationPath(context.Run, previousCallPath, span.Start, span.End)
 	result := p.evaluate(context.Engine, scope, parsed.Expr, context)
+	mem.FreeString(context.Run, context.CallPath)
+	context.CallPath = previousCallPath
 	parsed.Free()
 	return result
 }

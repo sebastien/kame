@@ -32,6 +32,44 @@ func TestMaterializeWritesOutput(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestCaptureRedirectionDependenciesAndEffects(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-redirection-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "test.kmk", "./input :\n\tprintf source > @>\nrun :\n\t@(nop $(cat < input > output))\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}}
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: grants})
+	if compiled.Program == nil || len(compiled.Diagnostics) != 0 { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("run")
+	if result.Diagnostic.Code != "" { t.Errorf("redirection failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/output")
+	if readErr != nil || string(data) != "source" { t.Error("write effect overwrote process output") }
+	mem.FreeSlice(a, data)
+	dependency, started := false, false
+	writes := 0
+	for {
+		next := compiled.Program.NextEvent()
+		if !next.OK { break }
+		if next.Event.Kind == program.DependencyDiscovered && next.Event.DependencyKey.Kind == core.ResourceFile && next.Event.DependencyKey.Name == dir+"/input" {
+			if !dependency && started { t.Error("process started before discovering its input") }
+			dependency = true
+		}
+		if next.Event.Kind == program.ProcessStarted { started = true }
+		if next.Event.Kind == program.Effect && next.Event.Effect == "process-write" {
+			if string(next.Event.Data) != dir+"/output" { t.Error("write effect omitted its path") }
+			writes++
+		}
+		next.Event.Free(a)
+	}
+	if !dependency || !started || writes != 1 { t.Error("redirection omitted dependency, process event, or unique write effect") }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestMissingDeclaredOutputFails(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)

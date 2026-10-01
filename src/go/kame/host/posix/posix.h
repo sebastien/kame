@@ -30,10 +30,14 @@ typedef struct km_event {
     bool stdoutTruncated;
     bool stderrTruncated;
     int retainBytes;
+    int *stageData;
+    int stageCount;
 } km_event;
 
 km_host *km_host_new(void);
-int km_host_start(km_host *, int64_t, so_Slice, so_Slice, so_String, so_Slice, int64_t, so_int);
+int km_host_start(km_host *, int64_t, so_Slice, so_Slice, so_String, so_Slice, int64_t, so_int, bool);
+int km_host_start_graph(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool);
+int km_event_stage_field(km_event *, int, int);
 int km_host_pump(km_host *, int);
 bool km_host_next(km_host *, km_event *);
 int km_host_cancel(km_host *, int64_t, bool);

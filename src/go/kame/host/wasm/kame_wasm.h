@@ -22,6 +22,14 @@ enum kame_wasm_status {
   KAME_WASM_HOST_NEEDED = 6
 };
 
+/* Ordered session descriptor; work kind: 1 implicit value, 2 selected value,
+ * 3 process/rule (no implicit value display). Existing step/completion APIs
+ * drive each work item on the same instance. */
+uint32_t kame_wasm_session_compile(uint64_t handle, uint32_t data, uint32_t length);
+uint32_t kame_wasm_session_work_count(uint64_t handle);
+uint32_t kame_wasm_session_work_kind(uint64_t handle, uint32_t index);
+uint32_t kame_wasm_session_work_begin(uint64_t handle, uint32_t index);
+
 /* Request kinds reported by kame_wasm_next_request_kind. Filesystem
  * operations that the engine carries as one read request are promoted to
  * distinct kinds so a host can dispatch without decoding payloads. */
@@ -37,7 +45,13 @@ enum kame_wasm_request_kind {
   KAME_WASM_REQUEST_MONOTONIC_TIME = 9,
   KAME_WASM_REQUEST_CACHE_GET = 10,
   KAME_WASM_REQUEST_CACHE_PUT = 11,
-  KAME_WASM_REQUEST_CACHE_DELETE = 12
+  KAME_WASM_REQUEST_CACHE_DELETE = 12,
+  // JSON argv array, executed directly; success is text, exits a status record.
+  KAME_WASM_REQUEST_ARGV = 13,
+  // JSON array of stage argv arrays; connects streams without a shell.
+  KAME_WASM_REQUEST_PIPELINE = 14,
+  // JSON {stages, input, output, append, setup}; per-stage cwd/env/timeout.
+  KAME_WASM_REQUEST_REDIRECTED_GRAPH = 15
 };
 
 /* Terminal process outcomes reported by kame_wasm_process_terminal. */

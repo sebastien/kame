@@ -10,6 +10,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
+	"solod.dev/so/strconv"
 )
 
 type Context struct {
@@ -31,6 +32,8 @@ type Context struct {
 	WritePaths         []string
 	Span               source.Span
 	OperationName      string
+	// CallPath distinguishes repeated calls of the same authored AST on a node.
+	CallPath           string
 	operationArguments []*expr.Expr
 	Phase              Phase
 	ResolveDefinition  DefinitionResolver
@@ -56,6 +59,7 @@ type Context struct {
 }
 
 type operationState struct {
+	CallPath   string
 	NodeID     int64
 	Generation int64
 	Start      int
@@ -72,7 +76,7 @@ func (c *Context) OperationState() any {
 	}
 	for i := range c.Program.OperationStates {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd {
+		if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
 			if state.Generation == c.Engine.Generation() {
 				return state.Value
 			}
@@ -91,12 +95,12 @@ func (c *Context) SetOperationState(value any, free ContextFree) {
 	}
 	for i := range c.Program.OperationStates {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd {
+		if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
 			state.Value, state.Free, state.Generation = value, free, c.Engine.Generation()
 			return
 		}
 	}
-	c.Program.OperationStates = slices.Append(c.Program.Alloc, c.Program.OperationStates, operationState{NodeID: c.Engine.NodeID(), Generation: c.Engine.Generation(), Start: c.operationStart, End: c.operationEnd, Value: value, Free: free})
+	c.Program.OperationStates = slices.Append(c.Program.Alloc, c.Program.OperationStates, operationState{CallPath: owned(c.Program.Alloc, c.CallPath), NodeID: c.Engine.NodeID(), Generation: c.Engine.Generation(), Start: c.operationStart, End: c.operationEnd, Value: value, Free: free})
 }
 func (c *Context) ClearOperationState() {
 	if c == nil || c.Program == nil || c.Engine == nil {
@@ -104,10 +108,11 @@ func (c *Context) ClearOperationState() {
 	}
 	for i := range c.Program.OperationStates {
 		state := &c.Program.OperationStates[i]
-		if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd {
+		if state.NodeID == c.Engine.NodeID() && state.Start == c.operationStart && state.End == c.operationEnd && state.CallPath == c.CallPath {
 			if state.Free != nil {
 				state.Free(c.Program.Alloc, state.Value)
 			}
+			mem.FreeString(c.Program.Alloc, state.CallPath)
 			copy(c.Program.OperationStates[i:], c.Program.OperationStates[i+1:])
 			c.Program.OperationStates = c.Program.OperationStates[:len(c.Program.OperationStates)-1]
 			return
@@ -135,6 +140,8 @@ const (
 	EffectErr
 	EffectYield
 	EffectWrite
+	// ProcessWrite records a process-owned path, not bytes to write on commit.
+	EffectProcessWrite
 )
 
 type Effect struct {
@@ -280,6 +287,12 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 		capability = Write
 	case host.RequestProcess:
 		capability = Run
+		input, output := host.PayloadText(payload, host.FieldInput), host.PayloadText(payload, host.FieldOutput)
+		if (input != "" && !c.Allows(Read, input)) || (output != "" && !c.Allows(Write, output)) { return false }
+		stages := host.PayloadStages(payload)
+		for i := range stages {
+			if stages[i].Kind != core.List || len(stages[i].List) == 0 || stages[i].List[0].Kind != core.String || !authorizeExecutable(c, stages[i].List[0].Text) { return false }
+		}
 	case host.RequestEnvironment:
 		capability = Env
 	default:
@@ -332,7 +345,23 @@ func (c *Context) Call(callable core.Value, values []core.Value) Result {
 	if c.Program == nil || callable.Kind != core.Callable {
 		return failure(c.Run, "EXPR_INVALID", source.Span{}, "expected a function")
 	}
-	return c.Program.callValues(callable.Callable.(*Function), values, c, source.Span{})
+	return c.Program.callValues(callable.Callable.(*Function), values, c, c.Span)
+}
+
+// CallAt supplies a stable ordinal for callbacks resumed within a collection
+// operation. Identical arguments at different indexes are still distinct calls.
+func (c *Context) CallAt(callable core.Value, values []core.Value, index int) Result {
+	previous := c.CallPath
+	c.CallPath = invocationPath(c.Run, previous, c.Span.Start, index)
+	r := c.Call(callable, values)
+	mem.FreeString(c.Run, c.CallPath)
+	c.CallPath = previous
+	return r
+}
+
+func invocationPath(a mem.Allocator, parent string, start int, end int) string {
+	var first, second [strconv.MaxIntBase10Len]byte
+	return owned(a, parent+"/"+strconv.FormatInt(first[:], int64(start), 10)+":"+strconv.FormatInt(second[:], int64(end), 10))
 }
 
 // FreeCallable releases a temporary function after an operation has finished

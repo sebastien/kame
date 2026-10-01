@@ -201,6 +201,7 @@ type Options struct {
 	// Force bypasses file freshness checks and cached-task lookup for this run.
 	Force            bool
 	RetainBytes      int
+	CaptureLimit     int
 	CacheRetainBytes int
 	CacheDisabled    bool
 	// CacheManifestMax is the encoded fingerprint cap in bytes. Zero selects the
@@ -245,10 +246,14 @@ type Program struct {
 	// Forwarding mirrors Options.ForwardRequests; Outbound holds requests an
 	// embedding host must service and complete.
 	Forwarding bool
+	// SessionPolicy makes legacy recipe launches inherit runner capability grants.
+	SessionPolicy bool
 	Outbound   []host.Request
 }
 
 type pendingRequest struct {
+	Capture    bool
+	Stream     bool
 	ID         int64
 	NodeID     int64
 	Generation int64

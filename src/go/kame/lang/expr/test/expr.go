@@ -19,6 +19,109 @@ func sameSpan(span source.Span, start int, end int) bool {
 	return span.Start == start && span.End == end
 }
 
+func TestCommandCaptureBoundaries(t *testing.T) {
+	text := "(cat $(printf \"%s\" ${project.name}) [$(printf $files)])"
+	r := parse(t, text)
+	defer r.Free()
+	capture := r.Expr.Items[1]
+	if capture.Kind != expr.CommandCapture || capture.Span.Start != 5 || len(capture.Items) != 1 || len(capture.Items[0].Items) != 3 {
+		t.Error("command capture lost its words or enclosing span")
+		return
+	}
+	word := capture.Items[0].Items[2]
+	if !word.Bool || word.Parts[0].Expr.Kind != expr.Reference || word.Parts[0].Form != "${" {
+		t.Error("braced reference did not retain its Kame AST and boundary")
+	}
+	formatted := expr.Format(t.Allocator(), r.Expr)
+	copy := expr.Parse(t.Allocator(), "formatted.km", formatted)
+	if len(copy.Diagnostics) != 0 { t.Error("formatted command capture did not reparse") }
+	again := expr.Format(t.Allocator(), copy.Expr)
+	if formatted != again { t.Error("command formatting is not idempotent") }
+	mem.FreeString(t.Allocator(), again)
+	copy.Free()
+	mem.FreeString(t.Allocator(), formatted)
+	cloned := expr.Clone(t.Allocator(), r.Expr)
+	expr.Free(t.Allocator(), cloned)
+}
+
+func TestCommandCaptureRejectsUnsupportedAndMalformedSyntax(t *testing.T) {
+	inputs := []string{"$()", "$(printf", "$(printf \"unterminated)", "$(echo |)", "$(| cat)", "$(echo || cat)", "$(echo >)", "$(echo && echo)", "$(echo ${})", "$(echo ${name)", "$(echo @macro)", "$(echo 'literal')", "$(echo \"\\q\")"}
+	for i := range inputs {
+		r := expr.Parse(t.Allocator(), "bad.km", inputs[i])
+		if len(r.Diagnostics) == 0 { t.Error("malformed or unsupported process syntax was accepted") }
+		r.Free()
+	}
+	plain := parse(t, "\"$(echo literal)\"")
+	if plain.Expr.Kind != expr.String || len(plain.Expr.Parts) != 1 || plain.Expr.Parts[0].Expr != nil { t.Error("plain expression string executed a substitution") }
+	plain.Free()
+}
+
+func TestKashExpressionBoundaryUsesKameValues(t *testing.T) {
+	inputs := []string{"$(echo @([1 2]))", "$(echo @([name: \"app\"]))", "$(echo @([x] x))", "$(echo @((cat \"a\" \"b\")))", "$(echo @(name))", "$(echo @(name | str))", "$(echo @(((cat _ \"!\"))))"}
+	kinds := []expr.Kind{expr.List, expr.Record, expr.Lambda, expr.Application, expr.Name, expr.Application, expr.Section}
+	for i := range inputs {
+		r := parse(t, inputs[i])
+		if len(r.Diagnostics) == 0 && r.Expr.Items[0].Items[1].Parts[0].Expr.Kind != kinds[i] { t.Error("Kash boundary changed the Kame value grammar") }
+		formatted := expr.Format(t.Allocator(), r.Expr)
+		copy := expr.Parse(t.Allocator(), "formatted.km", formatted)
+		if len(copy.Diagnostics) != 0 { t.Error("Kash value boundary did not reparse") }
+		again := expr.Format(t.Allocator(), copy.Expr)
+		if formatted != again { t.Error("Kash value boundary formatting is not idempotent") }
+		mem.FreeString(t.Allocator(), again)
+		mem.FreeString(t.Allocator(), formatted)
+		copy.Free()
+		r.Free()
+	}
+}
+
+func TestCommandPipelineParserBoundaries(t *testing.T) {
+	r := parse(t, "$(printf \"a|b\"|tr @(\"a\" | uppercase) X | cat)")
+	if len(r.Expr.Items) != 3 || r.Expr.Items[0].Kind != expr.CommandStage || r.Expr.Items[0].Items[1].Parts[0].Text != "a|b" { t.Error("pipeline stage or quoted operator boundary was lost") }
+	formatted := expr.Format(t.Allocator(), r.Expr)
+	copy := parse(t, formatted)
+	again := expr.Format(t.Allocator(), copy.Expr)
+	if formatted != again { t.Error("pipeline formatter is not idempotent") }
+	mem.FreeString(t.Allocator(), formatted)
+	mem.FreeString(t.Allocator(), again)
+	copy.Free()
+	r.Free()
+}
+
+func TestCommandRedirectionsRetainBoundaries(t *testing.T) {
+	r := parse(t, "$(< ${input} cat | cat >> @(output))")
+	if len(r.Expr.Items) != 2 || r.Expr.Items[0].Items[0].Kind != expr.CommandRedirection || r.Expr.Items[1].Items[1].Text != ">>" { t.Error("redirection syntax was not retained in its stage") }
+	formatted := expr.Format(t.Allocator(), r.Expr)
+	copy := parse(t, formatted)
+	again := expr.Format(t.Allocator(), copy.Expr)
+	if formatted != again { t.Error("redirection formatting is not idempotent") }
+	mem.FreeString(t.Allocator(), formatted)
+	mem.FreeString(t.Allocator(), again)
+	copy.Free(); r.Free()
+	invalid := []string{"$(> file)", "$(cat <)", "$(cat >)", "$(cat << file)", "$(cat >>> file)", "$(cat < one < two)", "$(cat > one >> two)", "$(cat > file | cat)", "$(cat | cat < file)"}
+	for i := range invalid {
+		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
+		if len(r.Diagnostics) == 0 { t.Error("conflicting or malformed redirection was accepted") }
+		r.Free()
+	}
+}
+
+func TestCommandSetupParserAndFormatter(t *testing.T) {
+	r := parse(t, "$(:cwd ${directory} :timeout @(0.1) :MODE production cat | :MODE test cat :ordinary)")
+	if r.Expr.Items[0].Items[0].Kind != expr.CommandSetup || r.Expr.Items[0].Items[0].Text != "cwd" || r.Expr.Items[1].Items[2].Kind != expr.CommandWord { t.Error("stage setup lost its syntax boundary") }
+	formatted := expr.Format(t.Allocator(), r.Expr)
+	copy := parse(t, formatted)
+	again := expr.Format(t.Allocator(), copy.Expr)
+	if formatted != again { t.Error("stage setup formatting is not idempotent") }
+	mem.FreeString(t.Allocator(), formatted); mem.FreeString(t.Allocator(), again)
+	copy.Free(); r.Free()
+	invalid := []string{"$(:cwd)", "$(:cwd x)", "$(:cwd x :cwd y cat)", "$(:X a :X b cat)", "$(:async true cat)", "$(:9BAD x cat)", "$(:bad-key x cat)", "$(:timeout | cat)"}
+	for i := range invalid {
+		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
+		if len(r.Diagnostics) == 0 { t.Error("invalid stage setup was accepted") }
+		r.Free()
+	}
+}
+
 func TestRecordAndReferenceSpans(t *testing.T) {
 	r := parse(t, "(build [name: \"app\" count: 2] project.name)")
 	defer r.Free()

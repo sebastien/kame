@@ -31,6 +31,7 @@ type Runtime struct {
 	// mutually exclusive with the single-expression mode above.
 	Host             *MemoryHost
 	Program          *program.Program
+	Session          *program.Session
 	Handle           *program.Handle
 	Environment      []string
 	ToolPaths        []program.Tool
@@ -545,6 +546,12 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 // ExpressionEffectKind returns the next standalone expression effect: 1 out,
 // 2 err, 3 yield, or 0 when the completed expression has none left.
 func (r *Runtime) ExpressionEffectKind() uint32 {
+	if r != nil {
+		for r.EffectIndex < len(r.Effects) && r.Effects[r.EffectIndex].Kind == eval.EffectProcessWrite {
+			r.Effects[r.EffectIndex].Free(r.Alloc)
+			r.EffectIndex++
+		}
+	}
 	if r == nil || r.EffectIndex >= len(r.Effects) {
 		return 0
 	}
@@ -684,7 +691,10 @@ func (r *Runtime) Free() {
 		r.Handle.Free()
 		r.Handle = nil
 	}
-	if r.Program != nil {
+	if r.Session != nil {
+		r.Session.Free()
+		r.Session, r.Program = nil, nil
+	} else if r.Program != nil {
 		r.Program.Free()
 		r.Program = nil
 	}

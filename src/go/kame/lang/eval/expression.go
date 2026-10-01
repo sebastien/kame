@@ -50,6 +50,8 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.record(scope, expression.Fields, context)
 	case expr.Application:
 		return p.application(scope, expression, context)
+	case expr.CommandCapture, expr.CommandGraph:
+		return p.capture(expression, context)
 	case expr.Lambda:
 		function := mem.Alloc[Function](context.Run)
 		function.Kind, function.Parameters, function.Body, function.Scope = FunctionTemporary, expression.Parameters, expression.Body, scope

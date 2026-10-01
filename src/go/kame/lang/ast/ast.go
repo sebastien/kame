@@ -34,7 +34,8 @@ func WriteAST(out io.Writer, lang string, name string, text string) int {
 		failed = enc.diagnostics(result.Diagnostics)
 		result.Free()
 	} else {
-		result := script.Parse(mem.System, name, text)
+		var result *script.Script
+		if lang == "kash" { result = script.ParseKash(mem.System, name, text) } else { result = script.Parse(mem.System, name, text) }
 		enc.script(result)
 		failed = enc.diagnostics(result.Diagnostics)
 		result.Free()
@@ -143,7 +144,8 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("value")
 		e.Float(value.Float)
 	}
-	if value.Kind == expr.String {
+	if value.Kind == expr.String || value.Kind == expr.CommandWord {
+		if value.Kind == expr.CommandWord { e.Str("splice"); e.Bool(value.Bool) }
 		e.Str("parts")
 		e.BeginArray()
 		for i := range value.Parts {
@@ -152,6 +154,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 			e.Str("span")
 			e.span(p.Span)
 			if p.Expr != nil {
+				if value.Kind == expr.CommandWord { e.Str("form"); e.Str(p.Form) }
 				e.Str("expression")
 				e.expr(p.Expr)
 				e.Str("brace")
@@ -164,7 +167,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.Selector {
+	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.Selector || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup {
 		e.Str("text")
 		e.Str(value.Text)
 	}
@@ -184,7 +187,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.List || value.Kind == expr.Application {
+	if value.Kind == expr.List || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph {
 		e.Str("items")
 		e.exprs(value.Items)
 	}
@@ -295,6 +298,12 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
+	if k == expr.CommandCapture { return "command-capture" }
+	if k == expr.CommandGraph { return "command-graph" }
+	if k == expr.CommandWord { return "command-word" }
+	if k == expr.CommandStage { return "command-stage" }
+	if k == expr.CommandRedirection { return "command-redirection" }
+	if k == expr.CommandSetup { return "command-setup" }
 	if k == expr.Boolean {
 		return "boolean"
 	}
@@ -571,6 +580,7 @@ func (e *astEncoder) script(value *script.Script) {
 	e.EndObject()
 }
 func scriptKind(k script.ScriptItemKind) string {
+	if k == script.Command { return "command" }
 	if k == script.Comment {
 		return "comment"
 	}

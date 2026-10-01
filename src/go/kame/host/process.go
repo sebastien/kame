@@ -37,11 +37,30 @@ type ProcessDiagnostic struct {
 type ProcessRequest struct {
 	ID          int64
 	Shell       []string
+	// Argv executes directly instead of appending Script to Shell.
+	// A nonempty Argv also closes stdin for command substitution.
+	Argv        []string
+	Stages      []ProcessStage
+	Input       string
+	Output      string
+	Append      bool
 	Script      []byte
 	Directory   string
 	Environment []string
 	TimeoutMS   int64
 	RetainBytes int
+}
+
+type ProcessStage struct {
+	Argv []string
+	Directory string
+	Environment []string
+	TimeoutMS int64
+}
+type ProcessStageResult struct {
+	Status int
+	Signal int
+	Outcome ProcessOutcome
 }
 
 // ProcessEvent owns Data, Stdout, Stderr, and Diagnostic and must be released
@@ -63,12 +82,14 @@ type ProcessEvent struct {
 	// RetainBytes is the per-stream capture bound used for this terminal event.
 	// It lets diagnostics report whether retained process output was truncated.
 	RetainBytes int
+	Stages []ProcessStageResult
 }
 
 func (e *ProcessEvent) Free(a mem.Allocator) {
 	slices.Free(a, e.Data)
 	slices.Free(a, e.Stdout)
 	slices.Free(a, e.Stderr)
+	slices.Free(a, e.Stages)
 	mem.FreeString(a, e.Diagnostic.Code)
 	mem.FreeString(a, e.Diagnostic.Message)
 	*e = ProcessEvent{}

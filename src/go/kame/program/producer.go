@@ -139,6 +139,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	}
 	entry = &p.Instances[state.Index]
 	rendered := p.render(c, entry, inputs)
+	// Rendering may discover a file producer and grow the instance slice.
+	entry = &p.Instances[state.Index]
 	commands, effects, writePaths, d := rendered.Commands, rendered.Effects, rendered.WritePaths, rendered.Diagnostic
 	slices.Free(p.Alloc, entry.LineSpans)
 	entry.LineSpans = rendered.LineSpans
@@ -201,6 +203,15 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		mem.FreeString(p.Alloc, commands)
 		c.Publish(core.Value{Kind: core.Nil})
 		return core.ProducerCompleted
+	}
+	if p.SessionPolicy && commands != "" {
+		allowed := false
+		for i := range p.Options.Grants { if p.Options.Grants[i].Capability == eval.Run && len(p.Options.Grants[i].Names) == 0 { allowed = true } }
+		if !allowed {
+			mem.FreeString(p.Alloc, commands)
+			p.failRule(c, state.Index, failure(p.Alloc, "CAP_DENIED", "shell recipes require unrestricted run capability"))
+			return core.ProducerFailed
+		}
 	}
 	if effectDiagnostic := p.commitEffects(entry, effects, writePaths, false); effectDiagnostic.Code != "" {
 		mem.FreeString(p.Alloc, commands)

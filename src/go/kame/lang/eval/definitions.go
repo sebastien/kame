@@ -153,6 +153,7 @@ func (p *Program) Free() {
 		mem.FreeString(p.Alloc, p.Nodes[i].Name)
 	}
 	for i := range p.OperationStates {
+		mem.FreeString(p.Alloc, p.OperationStates[i].CallPath)
 		if p.OperationStates[i].Free != nil {
 			p.OperationStates[i].Free(p.Alloc, p.OperationStates[i].Value)
 		}

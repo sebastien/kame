@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
 #include <signal.h>
@@ -21,6 +22,13 @@ enum { KM_QUEUE_LIMIT = 256 * 1024, KM_CHUNK = 16 * 1024, KM_GRACE_MS = 100 };
 // Host diagnostics use stable codes from docs/spec/011-diagnostics.md.
 #define KM_HOSTF "HOST_FAIL"
 
+typedef struct km_stage {
+    pid_t pid;
+    int64_t deadline;
+    int status, signal, outcome;
+    bool reaped;
+} km_stage;
+
 typedef struct km_process {
     int64_t id;
     pid_t pid;
@@ -32,6 +40,9 @@ typedef struct km_process {
     so_byte *stdout_data, *stderr_data;
     int stdout_len, stderr_len, retain, stdout_cap, stderr_cap;
     bool stdout_truncated, stderr_truncated;
+    bool direct;
+    km_stage *stages;
+    int stage_count;
 } km_process;
 
 typedef struct km_event_node {
@@ -120,6 +131,7 @@ static int64_t km_now(void) {
 static void km_free_event(km_event *event) {
     free(event->data); free(event->diagnosticCode); free(event->diagnostic);
     free(event->output); free(event->errorOutput);
+    free(event->stageData);
     memset(event, 0, sizeof(*event));
 }
 
@@ -172,6 +184,7 @@ static bool km_close_checked(int *fd) {
 static void km_release_process(km_process *p) {
     km_close(&p->outfd); km_close(&p->errfd); km_close(&p->execfd);
     free(p->stdout_data); free(p->stderr_data);
+    free(p->stages);
     memset(p, 0, sizeof(*p)); p->outfd = p->errfd = p->execfd = -1;
 }
 
@@ -193,11 +206,51 @@ static void km_emit_terminal(km_host *host, km_process *p, int outcome, const ch
     if (p->terminal) return;
     p->terminal = true;
     km_event event = { .kind = KM_TERMINAL, .id = p->id, .pid = p->pid, .pgid = p->pid, .outcome = outcome, .status = p->status, .signal = p->signal, .output = km_copy(p->stdout_data, p->stdout_len), .stdoutLen = p->stdout_len, .errorOutput = km_copy(p->stderr_data, p->stderr_len), .stderrLen = p->stderr_len, .stdoutTruncated = p->stdout_truncated, .stderrTruncated = p->stderr_truncated, .retainBytes = p->retain };
+    if (p->stage_count) {
+        event.stageData = calloc((size_t)p->stage_count * 3, sizeof(int));
+        if (!event.stageData) { outcome = event.outcome = KM_FAILED; diagnostic = "stage result allocation failed"; }
+        else {
+            event.stageCount = p->stage_count;
+            for (int i = 0; i < p->stage_count; i++) {
+                event.stageData[i * 3] = p->stages[i].status;
+                event.stageData[i * 3 + 1] = p->stages[i].signal;
+                event.stageData[i * 3 + 2] = p->stages[i].outcome;
+            }
+        }
+    }
     if (diagnostic) km_diagnostic(&event, KM_HOSTF, diagnostic);
     km_push(host, p, event);
 }
 
+// Each stage owns a process group, including its descendants. Graph cancellation
+// signals every group, even if its immediate stage process has already exited.
+static int km_signal(km_process *p, int sig) {
+    int failed = 0;
+    if (!p->stage_count) return kill(-p->pid, sig) < 0 && errno != ESRCH ? -1 : 0;
+    for (int i = 0; i < p->stage_count; i++) if (p->stages[i].pid > 0 && kill(-p->stages[i].pid, sig) < 0 && errno != ESRCH) failed = -1;
+    return failed;
+}
+
+static void km_wait_graph(km_process *p) {
+    for (int i = 0; i < p->stage_count; i++) {
+        km_stage *s = &p->stages[i];
+        if (s->pid <= 0 || s->reaped) continue;
+        int status; pid_t result;
+        do { result = waitpid(s->pid, &status, 0); } while (result < 0 && errno == EINTR);
+        s->reaped = true;
+        if (result == s->pid) {
+            if (WIFEXITED(status)) s->status = WEXITSTATUS(status);
+            else if (WIFSIGNALED(status)) s->signal = WTERMSIG(status);
+        }
+    }
+    p->reaped = true;
+}
+
 static void km_fail(km_host *host, km_process *p, const char *diagnostic) {
+    if (p->stage_count) {
+        for (int i = 0; i < p->stage_count; i++) if (!p->stages[i].reaped && !p->terminating) p->stages[i].outcome = KM_FAILED;
+        km_signal(p, SIGKILL); km_wait_graph(p);
+    }
     if (!p->reaped) kill(-p->pid, SIGKILL);
     km_close(&p->outfd); km_close(&p->errfd);
     km_emit_terminal(host, p, KM_FAILED, diagnostic);
@@ -242,7 +295,33 @@ static bool km_abort_spawn(pid_t pid) {
     return result == pid;
 }
 
-int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so_String directory, so_Slice environment, int64_t timeout, so_int retain) {
+// Unlike execvp, never fall back to /bin/sh for an ENOEXEC file.
+static void km_exec_argv(char **argv, char **envp) {
+    if (strchr(argv[0], '/')) { execve(argv[0], argv, envp); return; }
+    const char *paths = "/bin:/usr/bin";
+    for (char **entry = envp; *entry; entry++) if (strncmp(*entry, "PATH=", 5) == 0) { paths = *entry + 5; break; }
+    int saved = ENOENT;
+    const char *part = paths;
+    for (;;) {
+        const char *end = strchr(part, ':');
+        size_t n = end ? (size_t)(end - part) : strlen(part);
+        size_t name_len = strlen(argv[0]);
+        char *path = malloc(n + name_len + 2);
+        if (!path) { errno = ENOMEM; return; }
+        if (n) { memcpy(path, part, n); path[n] = '/'; memcpy(path + n + 1, argv[0], name_len + 1); }
+        else memcpy(path, argv[0], name_len + 1);
+        execve(path, argv, envp);
+        int error = errno;
+        free(path);
+        if (error != ENOENT && error != ENOTDIR && error != EACCES) { errno = error; return; }
+        if (error == EACCES) saved = EACCES;
+        if (!end) break;
+        part = end + 1;
+    }
+    errno = saved;
+}
+
+int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so_String directory, so_Slice environment, int64_t timeout, so_int retain, bool direct) {
     if (!host) return -1;
     // Every rejected request emits exactly one failed terminal event.
     if (id == 0 || shell.len == 0 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid request");
@@ -259,9 +338,11 @@ int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so
         argv[i] = km_cstring(shells[i]);
         if (!argv[i]) { km_free_strings(argv, (int)shell.len + 1); km_free_strings(envp, (int)environment.len); free(cwd); goto fail; }
     }
-    argv[shell.len] = calloc((size_t)script.len + 1, 1);
-    if (!argv[shell.len]) { km_free_strings(argv, (int)shell.len + 1); km_free_strings(envp, (int)environment.len); free(cwd); goto fail; }
-    if (script.len) memcpy(argv[shell.len], script.ptr, (size_t)script.len);
+    if (!direct) {
+        argv[shell.len] = calloc((size_t)script.len + 1, 1);
+        if (!argv[shell.len]) { km_free_strings(argv, (int)shell.len + 1); km_free_strings(envp, (int)environment.len); free(cwd); goto fail; }
+        if (script.len) memcpy(argv[shell.len], script.ptr, (size_t)script.len);
+    }
     for (int i = 0; i < environment.len; i++) {
         envp[i] = km_cstring(envs[i]);
         if (!envp[i]) { km_free_strings(argv, (int)shell.len + 1); km_free_strings(envp, (int)environment.len); free(cwd); goto fail; }
@@ -274,7 +355,13 @@ int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so
         if (setpgid(0, 0) || dup2(out[1], STDOUT_FILENO) < 0 || dup2(err[1], STDERR_FILENO) < 0 || chdir(cwd) < 0) {
             child_errno = errno; write(execerr[1], &child_errno, sizeof(child_errno)); _exit(127);
         }
-        close(out[1]); close(err[1]); execve(argv[0], argv, envp);
+        close(out[1]); close(err[1]);
+        if (direct) {
+            int input = open("/dev/null", O_RDONLY);
+            if (input < 0 || dup2(input, STDIN_FILENO) < 0) { child_errno = errno; write(execerr[1], &child_errno, sizeof(child_errno)); _exit(127); }
+            if (input != STDIN_FILENO) close(input);
+            km_exec_argv(argv, envp);
+        } else execve(argv[0], argv, envp);
         child_errno = errno; write(execerr[1], &child_errno, sizeof(child_errno)); _exit(127);
     }
     km_free_strings(argv, (int)shell.len + 1); km_free_strings(envp, (int)environment.len); free(cwd);
@@ -289,10 +376,122 @@ int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so
     }
     km_process *p = &host->processes[host->len++];
     memset(p, 0, sizeof(*p)); p->id = id; p->pid = pid; p->outfd = out[0]; p->errfd = err[0]; p->execfd = execerr[0]; p->retain = retain; p->deadline = timeout ? km_now() + timeout : 0;
+    p->direct = direct;
     return 0;
 fail:
     km_close(&out[0]); km_close(&out[1]); km_close(&err[0]); km_close(&err[1]); km_close(&execerr[0]); km_close(&execerr[1]);
     return km_spawn_failed(host, id, "spawn failed");
+}
+
+// Flattened argv plus per-stage lengths keeps the ABI independent of generated
+// Go structs. OS pipes carry intermediate bytes directly, with backpressure.
+int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output) {
+    if (!host) return -1;
+    if (!id || lengths.len < 1 || lengths.len > INT_MAX / 2 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid graph request");
+    for (int i = 0; i < host->len; i++) if (host->processes[i].id == id) return km_spawn_failed(host, id, "request ID already active");
+    so_int *counts = lengths.ptr;
+    so_int total = 0;
+    for (int i = 0; i < lengths.len; i++) {
+        if (counts[i] <= 0 || counts[i] > arguments.len - total) return km_spawn_failed(host, id, "invalid graph argv");
+        total += counts[i];
+    }
+    if (total != arguments.len) return km_spawn_failed(host, id, "invalid graph argv");
+    int n = (int)lengths.len;
+    if (directories.len != n || environment_lengths.len != n || timeouts.len != n) return km_spawn_failed(host, id, "invalid graph setup");
+    so_int *envcounts = environment_lengths.ptr;
+    int64_t *stage_timeouts = timeouts.ptr;
+    so_int envtotal = 0;
+    for (int i = 0; i < n; i++) {
+        if (envcounts[i] < 0 || envcounts[i] > environment.len - envtotal || stage_timeouts[i] < 0) return km_spawn_failed(host, id, "invalid graph setup");
+        envtotal += envcounts[i];
+    }
+    if (envtotal != environment.len) return km_spawn_failed(host, id, "invalid graph environment");
+    int out[2] = {-1,-1}, err[2] = {-1,-1}, execerr[2] = {-1,-1};
+    int *edges = malloc((size_t)(n > 1 ? n - 1 : 1) * 2 * sizeof(int));
+    int inputfd = -1, outputfd = -1;
+    char *input_name = km_cstring(input_path), *output_name = km_cstring(output_path);
+    char ***argv = calloc((size_t)n, sizeof(char **));
+    char ***envp = calloc((size_t)n, sizeof(char **));
+    char **cwd = calloc((size_t)n, sizeof(char *));
+    km_process p = {.id = id, .outfd = -1, .errfd = -1, .execfd = -1, .direct = true, .retain = (int)retain, .stage_count = n};
+    p.stages = calloc((size_t)n, sizeof(km_stage));
+    if (edges) for (int i = 0; i < (n - 1) * 2; i++) edges[i] = -1;
+    bool ok = edges && argv && envp && cwd && p.stages && input_name && output_name;
+    so_String *args = arguments.ptr, *envs = environment.ptr, *dirs = directories.ptr;
+    int at = 0;
+    for (int i = 0; ok && i < n; i++) {
+        argv[i] = calloc((size_t)counts[i] + 1, sizeof(char *));
+        if (!argv[i]) { ok = false; break; }
+        for (int j = 0; j < counts[i]; j++) {
+            argv[i][j] = km_cstring(args[at++]);
+            if (!argv[i][j] || (j == 0 && !argv[i][j][0])) { ok = false; break; }
+        }
+    }
+    int envat = 0;
+    for (int i = 0; ok && i < n; i++) {
+        cwd[i] = km_cstring(dirs[i]);
+        envp[i] = calloc((size_t)envcounts[i] + 1, sizeof(char *));
+        if (!cwd[i] || !envp[i]) { ok = false; break; }
+        struct stat directory_stat;
+        if (stat(cwd[i], &directory_stat) || !S_ISDIR(directory_stat.st_mode)) { ok = false; break; }
+        for (int j = 0; j < envcounts[i]; j++) { envp[i][j] = km_cstring(envs[envat++]); if (!envp[i][j]) { ok = false; break; } }
+    }
+    if (ok && (pipe(out) || pipe(err) || pipe(execerr))) ok = false;
+    for (int i = 0; ok && i < n - 1; i++) if (pipe(edges + i * 2)) ok = false;
+    // Exec closes every unused descriptor, including the shared launch channel.
+    for (int i = 0; ok && i < (n - 1) * 2; i++) if (fcntl(edges[i], F_SETFD, FD_CLOEXEC) < 0) ok = false;
+    if (ok && (fcntl(execerr[1], F_SETFD, FD_CLOEXEC) < 0 || km_set_nonblock(out[0]) || km_set_nonblock(err[0]) || km_set_nonblock(execerr[0]))) ok = false;
+    if (ok && host->len == host->cap) {
+        int cap = host->cap ? host->cap * 2 : 4;
+        km_process *grown = realloc(host->processes, (size_t)cap * sizeof(km_process));
+        if (!grown) ok = false;
+        else { host->processes = grown; host->cap = cap; }
+    }
+    // Every argv is already validated. Open input before output so a missing
+    // source cannot truncate the destination. Evaluator grants precede this call.
+    if (ok && input_name[0]) { inputfd = open(input_name, O_RDONLY); if (inputfd < 0) ok = false; }
+    if (ok && output_name[0]) { outputfd = open(output_name, O_WRONLY | O_CREAT | (append_output ? O_APPEND : O_TRUNC), 0666); if (outputfd < 0) ok = false; }
+    for (int i = 0; ok && i < n; i++) {
+        pid_t pid = fork();
+        if (pid < 0) { ok = false; break; }
+        if (pid == 0) {
+            int input = i ? edges[(i - 1) * 2] : (inputfd >= 0 ? inputfd : open("/dev/null", O_RDONLY));
+            int output = i == n - 1 ? (outputfd >= 0 ? outputfd : out[1]) : edges[i * 2 + 1];
+            if (setpgid(0, 0) || input < 0 || dup2(input, STDIN_FILENO) < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(err[1], STDERR_FILENO) < 0 || chdir(cwd[i]) < 0) {
+                int error = errno; write(execerr[1], &error, sizeof(error)); _exit(127);
+            }
+            if (i == 0 && input != STDIN_FILENO) close(input);
+            if (i != 0 && inputfd >= 0) close(inputfd);
+            if (outputfd >= 0) close(outputfd);
+            for (int j = 0; j < (n - 1) * 2; j++) close(edges[j]);
+            close(out[0]); close(out[1]); close(err[0]); close(err[1]); close(execerr[0]);
+            km_exec_argv(argv[i], envp[i]);
+            int error = errno; write(execerr[1], &error, sizeof(error)); _exit(127);
+        }
+        p.stages[i].pid = pid;
+        p.stages[i].deadline = stage_timeouts[i] ? km_now() + stage_timeouts[i] : 0;
+        setpgid(pid, pid);
+        if (i == 0) p.pid = pid;
+    }
+    if (argv) { for (int i = 0; i < n; i++) km_free_strings(argv[i], (int)counts[i]); free(argv); }
+    if (envp) { for (int i = 0; i < n; i++) km_free_strings(envp[i], (int)envcounts[i]); free(envp); }
+    km_free_strings(cwd, n); free(input_name); free(output_name);
+    km_close(&inputfd); km_close(&outputfd);
+    if (edges) { for (int i = 0; i < (n - 1) * 2; i++) km_close(&edges[i]); free(edges); }
+    km_close(&out[1]); km_close(&err[1]); km_close(&execerr[1]);
+    if (!ok) {
+        if (p.stages) { km_signal(&p, SIGKILL); km_wait_graph(&p); }
+        free(p.stages); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]);
+        return km_spawn_failed(host, id, "graph spawn failed");
+    }
+    p.outfd = out[0]; p.errfd = err[0]; p.execfd = execerr[0]; p.deadline = timeout ? km_now() + timeout : 0;
+    host->processes[host->len++] = p;
+    return 0;
+}
+
+int km_event_stage_field(km_event *event, int index, int field) {
+    if (!event || index < 0 || index >= event->stageCount || field < 0 || field > 2) return 0;
+    return event->stageData[index * 3 + field];
 }
 
 static void km_exec_ready(km_host *host, km_process *p) {
@@ -306,6 +505,7 @@ static void km_exec_ready(km_host *host, km_process *p) {
         return;
     }
     km_close(&p->execfd); km_close(&p->outfd); km_close(&p->errfd);
+    if (p->stage_count) { km_fail(host, p, "spawn failed"); return; }
     pid_t result;
     do { result = waitpid(p->pid, NULL, 0); } while (result < 0 && errno == EINTR);
     if (result != p->pid) { km_fail(host, p, "waitpid failed"); return; }
@@ -314,6 +514,8 @@ static void km_exec_ready(km_host *host, km_process *p) {
     km_diagnostic(&event, KM_HOSTF, "spawn failed");
     km_push(host, p, event);
 }
+
+static void km_terminate(km_host *host, km_process *p, int outcome);
 
 static void km_read(km_host *host, km_process *p, int *fd, int kind) {
     if (*fd < 0 || p->queued >= KM_QUEUE_LIMIT) return;
@@ -326,6 +528,7 @@ static void km_read(km_host *host, km_process *p, int *fd, int kind) {
     p->queued += (int)n;
     if (kind == KM_STDOUT) { if (!km_append(&p->stdout_data, &p->stdout_len, &p->stdout_cap, buffer, (int)n, p->retain, &p->stdout_truncated)) km_fail(host, p, "retained output allocation failed"); }
     else if (!km_append(&p->stderr_data, &p->stderr_len, &p->stderr_cap, buffer, (int)n, p->retain, &p->stderr_truncated)) km_fail(host, p, "retained output allocation failed");
+    if (p->direct && p->retain > 0 && p->stdout_truncated) km_terminate(host, p, KM_CANCELLED);
 }
 
 static void km_reap(km_host *host, km_process *p) {
@@ -333,6 +536,25 @@ static void km_reap(km_host *host, km_process *p) {
     if (host->force_waitpid_failure) {
         host->force_waitpid_failure = false;
         km_fail(host, p, "waitpid failed");
+        return;
+    }
+    if (p->stage_count) {
+        bool all = true;
+        for (int i = 0; i < p->stage_count; i++) {
+            km_stage *s = &p->stages[i];
+            if (s->reaped) continue;
+            int status; pid_t result = waitpid(s->pid, &status, WNOHANG);
+            if (result == 0 || (result < 0 && errno == EINTR)) { all = false; continue; }
+            if (result < 0) { km_fail(host, p, "waitpid failed"); return; }
+            s->reaped = true;
+            if (WIFEXITED(status)) s->status = WEXITSTATUS(status);
+            else if (WIFSIGNALED(status)) s->signal = WTERMSIG(status);
+        }
+        p->reaped = all;
+        if (all) for (int i = 0; i < p->stage_count; i++) {
+            km_stage *s = &p->stages[i];
+            if (s->status || s->signal) { p->status = s->signal ? 128 + s->signal : s->status; p->signal = s->signal; }
+        }
         return;
     }
     int status; pid_t result = waitpid(p->pid, &status, WNOHANG);
@@ -344,7 +566,8 @@ static void km_reap(km_host *host, km_process *p) {
 
 static void km_terminate(km_host *host, km_process *p, int outcome) {
     if (p->terminal || p->terminating) return;
-    if (kill(-p->pid, SIGTERM) < 0 && errno != ESRCH) { km_fail(host, p, "SIGTERM failed"); return; }
+    for (int i = 0; i < p->stage_count; i++) if (!p->stages[i].reaped) p->stages[i].outcome = outcome;
+    if (km_signal(p, SIGTERM) < 0) { km_fail(host, p, "SIGTERM failed"); return; }
     p->terminating = true; p->outcome = outcome; p->kill_deadline = km_now() + KM_GRACE_MS;
 }
 
@@ -364,14 +587,23 @@ int km_host_pump(km_host *host, int wait) {
     int64_t now = km_now();
     for (int i = 0; i < host->len; i++) {
         km_process *p = &host->processes[i];
+        if (!p->terminal && p->stage_count) km_reap(host, p);
+        for (int j = 0; !p->terminal && !p->terminating && j < p->stage_count; j++) {
+            km_stage *stage = &p->stages[j];
+            if (!stage->reaped && stage->deadline && now >= stage->deadline) km_terminate(host, p, KM_TIMED_OUT);
+        }
         if (!p->terminal && p->deadline && now >= p->deadline) km_terminate(host, p, KM_TIMED_OUT);
-        if (!p->terminal && p->terminating && !p->killed && now >= p->kill_deadline) { if (kill(-p->pid, SIGKILL) < 0 && errno != ESRCH) km_fail(host, p, "SIGKILL failed"); p->killed = true; }
+        if (!p->terminal && p->terminating && !p->killed && now >= p->kill_deadline) { if (km_signal(p, SIGKILL) < 0) km_fail(host, p, "SIGKILL failed"); p->killed = true; }
     }
     int poll_wait = wait < 0 ? 0 : wait;
     for (int i = 0; i < host->len; i++) {
         km_process *p = &host->processes[i];
         int64_t due = 0;
         if (!p->terminal && !p->terminating && p->deadline) due = p->deadline;
+        for (int j = 0; !p->terminal && !p->terminating && j < p->stage_count; j++) {
+            km_stage *stage = &p->stages[j];
+            if (!stage->reaped && stage->deadline && (!due || stage->deadline < due)) due = stage->deadline;
+        }
         if (!p->terminal && p->terminating && !p->killed && (!due || p->kill_deadline < due)) due = p->kill_deadline;
         if (due) {
             int64_t remaining = due - now;
@@ -431,11 +663,15 @@ void km_host_force_waitpid_failure(km_host *host) {
 
 void km_host_free(km_host *host) {
     if (!host) return;
-    for (int i = 0; i < host->len; i++) if (!host->processes[i].reaped) kill(-host->processes[i].pid, SIGTERM);
+    for (int i = 0; i < host->len; i++) if (!host->processes[i].reaped) km_signal(&host->processes[i], SIGTERM);
     poll(NULL, 0, KM_GRACE_MS);
     for (int i = 0; i < host->len; i++) {
         km_process *p = &host->processes[i];
-        if (!p->reaped) { kill(-p->pid, SIGKILL); while (waitpid(p->pid, NULL, 0) < 0 && errno == EINTR) {} }
+        if (!p->reaped) {
+            km_signal(p, SIGKILL);
+            if (p->stage_count) km_wait_graph(p);
+            else while (waitpid(p->pid, NULL, 0) < 0 && errno == EINTR) {}
+        }
         km_release_process(p);
     }
     free(host->processes);

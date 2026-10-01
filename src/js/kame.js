@@ -8,11 +8,11 @@
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
 import { readFile, stat, writeFile } from 'node:fs/promises';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, closeSync, constants as fsConstants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
-import { constants as osConstants } from 'node:os';
+import { dirname, join, normalize, resolve } from 'node:path';
+import { spawn, spawnSync } from 'node:child_process';
+import { constants as osConstants, tmpdir } from 'node:os';
 import process, { argv, env, stderr, stdout } from 'node:process';
 
 // Children run in their own process group so a signal terminates the whole
@@ -353,6 +353,7 @@ function usage() {
   stdout.write('  kame [OPTIONS] [TARGET...]\n');
   stdout.write('  kame do COMMAND [OPTIONS] [ARG...]\n\n');
   stdout.write('Commands:\n');
+  stdout.write('  do run          execute ordered source fragments in one session\n');
   stdout.write('  do plan         print the resolved plan as JSON\n');
   stdout.write('  do inputs       list declared input paths (--depth N)\n');
   stdout.write('  do outputs      list declared output paths (--depth N)\n');
@@ -804,6 +805,33 @@ class Module {
       const encoded = this.write(value);
       return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
     }
+    if (kind === 13 || kind === 14 || kind === 15) {
+      if (!grants.run) return this.deny(instance, request);
+      const decoded = JSON.parse(payload);
+      const stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
+      const redirections = kind === 15 ? decoded : { input: '', output: '', append: false };
+      for (const [field, capability] of [['input', 'read'], ['output', 'write']]) {
+        const name = redirections[field];
+        if (typeof name !== 'string' || name.includes('\0')) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid redirection path');
+        if (name && (!grants[capability] || !pathGranted(resolve(name), context[`${capability}Roots`]))) return this.deny(instance, request);
+      }
+      if (context.runRoots !== null && context.runRoots !== undefined) {
+        for (const args of stages) {
+          if (!args[0].includes('/')) return this.deny(instance, request);
+          const executable = resolve(args[0]);
+          if (!context.runRoots.some((root) => executable === root || executable.startsWith(`${root}/`))) return this.deny(instance, request);
+        }
+      }
+      const completion = await runArgvCapture(stages, { ...context, ...redirections, onStdout: redirections.stream ? (chunk) => this.processStream(instance, false, chunk) : null, onStderr: context.streaming ? (chunk) => this.processStream(instance, true, chunk) : null });
+      if (completion.ok) {
+        if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
+          const encoded = this.write(completion.value.stdout);
+          return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
+        }
+        return this.completeJSON(instance, request, completion.value);
+      }
+      return this.completeFailure(instance, request, completion.code, completion.message);
+    }
     if (kind === 3) {
       if (!grants.run) return this.deny(instance, request);
       if (context.streaming) {
@@ -1071,6 +1099,47 @@ class Module {
     return this.copyQuery(call, instance);
   }
 
+  async runSession(fragments, inv, context) {
+    if (!this.exports.kame_wasm_session_compile) throw Object.assign(new Error('runner session ABI unavailable'), { code: 'FEATURE_UNSUP' });
+    const instance = this.exports.kame_wasm_instance_create();
+    if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
+    try {
+      if (this.exports.kame_wasm_source_compile(instance, 0, 0) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      const directory = this.write(process.cwd());
+      if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
+      this.inspectionGrant(instance, '', '');
+      const grants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
+      for (const grant of grants) {
+        if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
+        else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
+      }
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, captureLimit: inv.captureLimit }));
+      if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      context.streaming = true;
+      context.human = true;
+      let last;
+      const deadline = inv.timeoutMS > 0 ? performance.now() + inv.timeoutMS : Infinity;
+      const count = this.exports.kame_wasm_session_work_count(instance);
+      for (let i = 0; i < count; i++) {
+        const kind = this.exports.kame_wasm_session_work_kind(instance, i);
+        if (this.exports.kame_wasm_session_work_begin(instance, i) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
+        for (;;) {
+          context.timeoutMS = Number.isFinite(deadline) ? Math.max(1, Math.ceil(deadline - performance.now())) : 0;
+          if (performance.now() >= deadline) throw Object.assign(new Error('invocation timed out'), { code: 'RECIPE_TIMEOUT' });
+          const state = this.exports.kame_wasm_step(instance);
+          this.drainEvents(instance, context);
+          this.drainExpressionEffects(instance);
+          if (state === 2) break;
+          if (state === 1) await this.service(instance, context);
+        }
+        const bytes = this.copyResult(instance);
+        if (kind === 2) stdout.write(bytes);
+        else if (kind === 1) last = bytes;
+      }
+      if (last !== undefined) stdout.write(last);
+    } finally { this.exports.kame_wasm_instance_free(instance); }
+  }
+
   async selfTest() {
     const info = this.abiInfo();
     const context = { grants: { read: true, write: true, run: true, env: true } };
@@ -1107,6 +1176,199 @@ function runProcessDirect(script, context) {
       else resolveRun({ ok: true, text: Buffer.concat(out).toString('utf8') });
     });
   });
+}
+
+// Structured requests never cross a shell-text boundary. Captured stdout is
+// bounded and private; stderr is forwarded while the child is still running.
+function processDeadline(milliseconds, callback) {
+  const deadline = performance.now() + milliseconds;
+  let timer;
+  const arm = () => {
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) callback();
+    else timer = setTimeout(arm, Math.min(remaining, 2147483647));
+  };
+  arm();
+  return () => clearTimeout(timer);
+}
+
+function runArgvCapture(stages, context) {
+  if (!Array.isArray(stages) || stages.length === 0 || stages.some((args) => !Array.isArray(args) || args.length === 0 || !args[0] || args.some((arg) => typeof arg !== 'string' || arg.includes('\0')))) {
+    return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid process argv' });
+  }
+  const setups = context.setup ?? [];
+  if (!Array.isArray(setups) || (setups.length !== 0 && setups.length !== stages.length) || setups.some((setup) => typeof setup.cwd !== 'string' || setup.cwd.includes('\0') || !Number.isSafeInteger(setup.timeoutMS) || setup.timeoutMS < 0 || !Array.isArray(setup.environment) || setup.environment.some((entry) => typeof entry !== 'string' || entry.includes('\0') || !/^[A-Za-z_][A-Za-z0-9_]*=/.test(entry)))) {
+    return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid stage setup' });
+  }
+  return new Promise((resolveRun) => {
+    const childEnv = { ...process.env };
+    for (const entry of context.environment ?? []) {
+      const at = entry.indexOf('=');
+      if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
+    }
+    const configurations = stages.map((_, i) => {
+      const setup = setups[i];
+      const env = { ...childEnv };
+      for (const entry of setup?.environment ?? []) { const at = entry.indexOf('='); env[entry.slice(0, at)] = entry.slice(at + 1); }
+      return { env, cwd: setup?.cwd || process.cwd(), timeoutMS: setup?.timeoutMS ?? 0 };
+    });
+    let executables;
+    try {
+      for (const configuration of configurations) if (!statSync(configuration.cwd).isDirectory()) throw new Error('invalid stage cwd');
+      executables = stages.map((args, i) => argvExecutable(args[0], configurations[i].env, configurations[i].cwd));
+    }
+    catch { resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot start process' }); return; }
+    let pipes;
+    try { pipes = pipelinePipes(stages.length - 1); }
+    catch { resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot create pipeline pipes (POSIX mkfifo required)' }); return; }
+    let input, output;
+    try {
+      // Input opens first: missing sources must not truncate destinations.
+      if (context.input) input = openSync(context.input, 'r');
+      if (context.output) output = openSync(context.output, context.append ? 'a' : 'w');
+    } catch {
+      if (input !== undefined) closeSync(input);
+      for (const pipe of pipes) { closeSync(pipe.read); closeSync(pipe.write); }
+      resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot open process redirection' });
+      return;
+    }
+    const children = [];
+    const results = [];
+    const chunks = [];
+    const limit = context.captureLimit > 0 ? context.captureLimit : 1024 * 1024;
+    let length = 0;
+    let failure = null;
+    const timers = [];
+    let remaining = 0;
+    let launched = false;
+    const stop = (code, message) => {
+      if (failure !== null) return;
+      failure = { ok: false, code, message };
+      for (const child of children) {
+        if (child.pid === undefined) continue;
+        try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
+      }
+    };
+    if (context.timeoutMS > 0) timers.push(processDeadline(context.timeoutMS, () => stop('RECIPE_TIMEOUT', 'process timed out')));
+    const finish = () => {
+      if (!launched || remaining !== 0) return;
+      for (const cancel of timers) cancel();
+      if (failure !== null) { resolveRun(failure); return; }
+      let status = 0, signal = 0;
+      for (const result of results) {
+        if (result.status !== 0 || result.signal !== 0) { status = result.signal ? 128 + result.signal : result.status; signal = result.signal; }
+      }
+      // Let the portable evaluator classify exit failure before decoding output.
+      if (status !== 0 || signal !== 0) { resolveRun({ ok: true, value: { status, signal, stages: results, stdout: '' } }); return; }
+      if (context.stream) { resolveRun({ ok: true, value: { status: 0, signal: 0, stages: results, stdout: '' } }); return; }
+      let output;
+      try { output = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)); }
+      catch { resolveRun({ ok: false, code: 'CAPTURE_ENCODING', message: 'command substitution output is not valid UTF-8' }); return; }
+      resolveRun({ ok: true, value: { status: 0, signal: 0, stages: results, stdout: output } });
+    };
+    try {
+      for (let i = 0; i < stages.length; i++) {
+        const args = stages[i];
+        const configuration = configurations[i];
+        const child = spawn(executables[i], args.slice(1), { argv0: args[0], shell: false, stdio: [i === 0 ? input ?? 'ignore' : pipes[i - 1].read, i === stages.length - 1 ? output ?? 'pipe' : pipes[i].write, 'pipe'], env: configuration.env, cwd: configuration.cwd, detached: true });
+        children.push(child);
+        remaining++;
+        track(child);
+        const cancel = configuration.timeoutMS > 0 ? processDeadline(configuration.timeoutMS, () => stop('RECIPE_TIMEOUT', 'stage timed out')) : () => {};
+        timers.push(cancel);
+        child.once('exit', cancel);
+        child.stderr.on('data', (chunk) => { if (context.onStderr) context.onStderr(chunk); else stderr.write(chunk); });
+        child.once('error', () => stop('HOST_FAIL', 'cannot start process'));
+        child.once('close', (status, signalName) => {
+          results[i] = { status: status ?? 0, signal: osConstants.signals[signalName] ?? 0, outcome: 0 };
+          remaining--;
+          finish();
+        });
+        if (i === stages.length - 1 && child.stdout !== null) child.stdout.on('data', (chunk) => {
+          if (context.stream) { context.onStdout(chunk); return; }
+          length += chunk.length;
+          if (length > limit) stop('CAPTURE_LIMIT', 'command substitution exceeded capture limit');
+          else if (failure === null) chunks.push(chunk);
+        });
+      }
+    } catch { stop('HOST_FAIL', 'cannot start process'); }
+    finally {
+      for (const fd of [input, output]) {
+        if (fd !== undefined) { try { closeSync(fd); } catch { stop('HOST_FAIL', 'cannot close redirection'); } }
+      }
+      for (const pipe of pipes) for (const fd of [pipe.read, pipe.write]) {
+        try { closeSync(fd); } catch { stop('HOST_FAIL', 'cannot close pipeline pipe'); }
+      }
+    }
+    launched = true;
+    finish();
+  });
+}
+
+// Node's 'pipe' stdio uses socketpairs on Unix; unread bytes on an early close
+// can turn SIGPIPE into ECONNRESET/exit 1. Pass real blocking FIFO descriptors to
+// the children instead. mkfifo is a POSIX host utility, never a user shell.
+function pipelinePipes(count) {
+  if (count === 0) return [];
+  const directory = mkdtempSync(join(tmpdir(), 'kame-pipes-'));
+  const names = Array.from({ length: count }, (_, index) => join(directory, String(index)));
+  const pipes = [];
+  let failure = null;
+  try {
+    const utility = existsSync('/usr/bin/mkfifo') ? '/usr/bin/mkfifo' : '/bin/mkfifo';
+    const result = spawnSync(utility, names, { shell: false, stdio: 'ignore', timeout: 1000, killSignal: 'SIGKILL' });
+    if (result.error || result.status !== 0) throw new Error('mkfifo unavailable');
+    for (const name of names) {
+      // The temporary RDWR anchor lets both blocking endpoints open without
+      // deadlock. It is closed before launch so only actual writers govern EOF.
+      const anchor = openSync(name, fsConstants.O_RDWR);
+      let read, write;
+      try {
+        read = openSync(name, fsConstants.O_RDONLY);
+        write = openSync(name, fsConstants.O_WRONLY);
+        pipes.push({ read, write });
+      } catch (error) { if (read !== undefined) closeSync(read); throw error; }
+      finally { closeSync(anchor); }
+    }
+  } catch (error) {
+    failure = error;
+  } finally {
+    // Open descriptors remain valid after unlinking. No temporary paths survive
+    // to graph execution, including failure, interruption and cancellation.
+    for (const name of names) { try { unlinkSync(name); } catch (error) { if (error.code !== 'ENOENT') failure ??= error; } }
+    try { rmdirSync(directory); } catch (error) { if (error.code !== 'ENOENT') failure ??= error; }
+  }
+  if (failure) {
+    for (const pipe of pipes) { closeSync(pipe.read); closeSync(pipe.write); }
+    throw failure;
+  }
+  return pipes;
+}
+
+// Node/libuv can silently invoke /bin/sh for ENOEXEC even with shell:false.
+// Reject unrecognized files instead of treating ordinary text as shell code.
+// ponytail: format preflight is not an OS sandbox or an atomic exec guarantee.
+function argvExecutable(name, childEnv, cwd = process.cwd()) {
+  if (process.platform === 'win32') return name;
+  const candidates = name.includes('/') ? [resolve(cwd, name)] : (childEnv.PATH ?? '/bin:/usr/bin').split(':').map((part) => resolve(cwd, part || '.', name));
+  for (const candidate of candidates) {
+    let fd;
+    try {
+      accessSync(candidate, fsConstants.X_OK);
+      fd = openSync(candidate, 'r');
+      const header = Buffer.alloc(4);
+      if (readSync(fd, header, 0, 4, 0) < 2) throw new Error('invalid executable');
+      const magic = header.readUInt32BE(0);
+      if (header.subarray(0, 2).toString() === '#!' || header.subarray(0, 2).toString() === 'MZ' || magic === 0x7f454c46 || [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe].includes(magic)) return candidate;
+      // ENOEXEC terminates PATH search, as in the native direct-exec host.
+      throw Object.assign(new Error('unrecognized executable format'), { code: 'ENOEXEC' });
+    } catch (error) {
+      if (!['ENOENT', 'ENOTDIR', 'EACCES'].includes(error.code)) throw error;
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  }
+  throw new Error('executable unavailable');
 }
 
 // runProcess runs a recipe on the host, streaming stdout/stderr back to the
@@ -1184,14 +1446,30 @@ function effectiveGrants(inv) {
 }
 
 function contextFor(inv) {
+  const runGrants = (inv.grants ?? []).filter((grant) => grant.capability === 'run');
   return {
     grants: effectiveGrants(inv),
+    runRoots: runGrants.length === 0 || runGrants.some((grant) => grant.names.length === 0) ? null : runGrants.flatMap((grant) => grant.names.map((name) => resolve(name))),
+    readRoots: capabilityRoots(inv, 'read'),
+    writeRoots: capabilityRoots(inv, 'write'),
     shell: inv.shell ?? [],
     environment: inv.environment ?? [],
     json: inv.json === true,
     timeoutMS: inv.timeoutMS ?? 0,
+    captureLimit: inv.captureLimit ?? 0,
     retryCount: inv.retryCount ?? 0,
   };
+}
+
+function capabilityRoots(inv, capability) {
+  const grants = (inv.grants ?? []).filter((grant) => grant.capability === capability);
+  if ((inv.grants ?? []).length === 0 && !inv.noDefaultGrants) return [process.cwd()];
+  if (grants.some((grant) => grant.names.length === 0)) return null;
+  return grants.flatMap((grant) => grant.names.map((name) => resolve(name)));
+}
+
+function pathGranted(name, roots) {
+  return roots == null || roots.some((root) => name === root || name.startsWith(root.endsWith('/') ? root : `${root}/`));
 }
 
 function applyDirectory(inv) {
@@ -1205,10 +1483,10 @@ function applyDirectory(inv) {
 }
 
 async function discoverSource(inv) {
-  if (inv.command) return { name: '<command>', text: inv.command };
+  if (inv.command) return { name: inv.sourceName ?? '<command>', text: inv.command };
   if (inv.file) {
     try {
-      return { name: inv.file, text: await readFile(inv.file, 'utf8') };
+      return { name: inv.sourceName ?? inv.file, text: await readFile(inv.file, 'utf8') };
     } catch (error) {
       throw Object.assign(new Error(`cannot read file: ${error.message}`), { code: 'FS_ERR' });
     }
@@ -1267,6 +1545,29 @@ async function runParse(module, inv) {
   return document.diagnostics && document.diagnostics.some((entry) => entry.severity === 'error') ? 1 : 0;
 }
 
+async function runSession(module, inv, sourceDirectory) {
+  if (inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk') {
+    const input = inv.inputs[0];
+    if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'file' ? normalize(input.value) : '<command:1>', file: input.kind === 'file' ? resolve(sourceDirectory, input.value) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false);
+  }
+  if (inv.json) return featureUnsupported('JSON runner sessions');
+  if (inv.dryRun) return featureUnsupported('composed dry-run runner sessions');
+  const fragments = [];
+  for (let i = 0; i < inv.inputs.length; i++) {
+    const input = inv.inputs[i];
+    let name = `<command:${i + 1}>`, text = input.value;
+    if (input.kind === 'file') {
+      name = normalize(input.value);
+      try { text = await readFile(resolve(sourceDirectory, input.value), 'utf8'); }
+      catch { return failure('FS_ERR', `cannot read source: ${input.value}`); }
+    } else if (input.kind === 'stdin') { name = '<stdin>'; text = await readStdin(); }
+    fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: input.kind === 'file' ? 0 : 1 });
+  }
+  buildProgress = { active: 0, completed: 0, failed: 0 };
+  await module.runSession(fragments, inv, contextFor(inv));
+  return 0;
+}
+
 async function runFmt(module, inv) {
   if (inv.files.length === 0) {
     stdout.write(await module.format(inv.lang, '<stdin>', await readStdin(), inv.indent, inv.indentWidth));
@@ -1281,7 +1582,7 @@ async function runFmt(module, inv) {
       return failure('FS_ERR', `cannot read source: ${file}`);
     }
     const bytes = await module.format(inv.lang, file, text, inv.indent, inv.indentWidth);
-    if (new TextDecoder().decode(bytes) === text) continue;
+    if ((inv.check || inv.inPlace) && new TextDecoder().decode(bytes) === text) continue;
     if (inv.check) {
       stdout.write(`${file}\n`);
       different = true;
@@ -1426,12 +1727,14 @@ async function dispatch(module, inv, noArguments) {
   primarySource = null;
   diagnosticFormat = inv.diagnosticFormat === 'human' ? 'human' : 'plain';
   diagnosticColor = resolveColor(inv.color, diagnosticFormat);
+  const sourceDirectory = process.cwd();
   applyDirectory(inv);
   if (inv.name === 'help') {
     usage();
     return 0;
   }
   if (inv.name === 'expr') return runExpr(module, inv);
+  if (inv.name === 'run') return runSession(module, inv, sourceDirectory);
   if (inv.name === 'parse') return runParse(module, inv);
   if (inv.name === 'fmt') return runFmt(module, inv);
   if (inv.name === 'plan') return runPlan(module, inv);

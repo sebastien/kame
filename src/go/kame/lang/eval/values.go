@@ -87,9 +87,12 @@ func Stringify(a mem.Allocator, value core.Value) (string, bool) {
 	return stringify(a, value)
 }
 
-// Display renders a value exactly as the CLI writes a result to stdout: strings
-// and patterns verbatim, bytes raw, nil as "nil", and lists and records
-// bracketed. Hosts use it so a completed value matches native output
+// Display renders a value exactly as the CLI writes a result to stdout using
+// the canonical value notation of docs/spec/005-evaluation.md: nil and booleans
+// as :nil/:true/:false, strings and patterns as quoted literals, ints and
+// floats numerically, and lists and records bracketed. The notation is a subset
+// of the expression grammar, so evaluating it reproduces a value that displays
+// identically. Hosts use it so a completed value matches native output
 // byte-for-byte.
 func Display(a mem.Allocator, value core.Value) string {
 	var out []byte
@@ -102,23 +105,29 @@ func Display(a mem.Allocator, value core.Value) string {
 func appendDisplay(a mem.Allocator, out *[]byte, value core.Value) {
 	switch value.Kind {
 	case core.String, core.Pattern:
-		*out = appendTextBytes(a, *out, value.Text)
+		*out = appendQuotedText(a, *out, value.Text)
 	case core.Bytes:
 		*out = appendTextBytes(a, *out, string(value.Bytes))
 	case core.Bool:
 		if value.Bool {
-			*out = appendTextBytes(a, *out, "true")
+			*out = appendTextBytes(a, *out, ":true")
 		} else {
-			*out = appendTextBytes(a, *out, "false")
+			*out = appendTextBytes(a, *out, ":false")
 		}
 	case core.Int:
 		var buffer [strconv.MaxIntBase10Len]byte
 		*out = appendTextBytes(a, *out, strconv.FormatInt(buffer[:], value.Int, 10))
 	case core.Float:
 		var buffer [strconv.MaxFloat64Len]byte
-		*out = appendTextBytes(a, *out, strconv.FormatFloat(buffer[:], value.Float, 'g', -1, 64))
+		text := strconv.FormatFloat(buffer[:], value.Float, 'g', -1, 64)
+		// Negative zero parses back as the integer 0, so fold it to keep the
+		// display a fixed point under evaluation.
+		if text == "-0" {
+			text = "0"
+		}
+		*out = appendTextBytes(a, *out, text)
 	case core.Nil:
-		*out = appendTextBytes(a, *out, "nil")
+		*out = appendTextBytes(a, *out, ":nil")
 	case core.Resource:
 		*out = appendTextBytes(a, *out, value.Resource.Name)
 	case core.List:
@@ -149,6 +158,29 @@ func appendTextBytes(a mem.Allocator, out []byte, text string) []byte {
 		out = slices.Append(a, out, text[i])
 	}
 	return out
+}
+
+// appendQuotedText writes text as a double-quoted Kame string, escaping the
+// characters the language recognises. It mirrors operations.quote so nested
+// values read back as the string they hold.
+func appendQuotedText(a mem.Allocator, out []byte, text string) []byte {
+	out = slices.Append(a, out, '"')
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '"', '\\':
+			out = slices.Append(a, out, '\\')
+			out = slices.Append(a, out, text[i])
+		case '\n':
+			out = appendTextBytes(a, out, "\\n")
+		case '\r':
+			out = appendTextBytes(a, out, "\\r")
+		case '\t':
+			out = appendTextBytes(a, out, "\\t")
+		default:
+			out = slices.Append(a, out, text[i])
+		}
+	}
+	return slices.Append(a, out, '"')
 }
 
 func owned(a mem.Allocator, text string) string {

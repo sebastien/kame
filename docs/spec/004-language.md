@@ -112,6 +112,17 @@ An application is a parenthesized non-empty sequence. A parenthesized form
 whose first item is a parameter list is a lambda. An empty application is
 invalid.
 
+### Embedded Kash Processes
+
+`$(COMMAND)` is an expression atom as specified in `017-kash.md`. The expression
+parser owns the substitution node and delegates its contents to the Kash process
+parser. It is valid wherever an expression is accepted, including application
+arguments, list/record values, and lambda bodies. On evaluation, it captures
+stdout as a string using the caller's execution context from `005-evaluation.md`.
+Parsing is independent of capabilities and host availability; execution is not.
+Kash reference wrappers and its application shorthand or infix recovery syntax
+are not thereby added to the Kame expression grammar.
+
 ### Strings
 
 Expression strings use double quotes. They support `\"`, `\\`, `\n`, `\r`,
@@ -133,6 +144,11 @@ one expansion shared with string templates (see String Templates); contextual
 selectors are not expression-string syntax.
 
 Single quote is reserved and is not an alternative string delimiter.
+
+Plain `$(...)` inside a quoted expression string is literal text. To execute a
+Kash process there, use existing expression interpolation, for example
+`"Revision: {(cat $(git rev-parse --short HEAD))}"`. This does not change the
+ownership of opaque recipe text by its shell.
 
 ### References
 
@@ -348,7 +364,7 @@ A rest parameter ends in `...`, appears once, and must be last.
 
 Definition right-hand sides are classified as follows:
 
-1. A leading `(` or `[` is parsed as one expression value.
+1. A leading `(`, `[`, or `$(` is parsed as one expression value.
 2. A leading `"` is parsed as one quoted string template.
 3. Otherwise top-level whitespace separates one or more unquoted string
    templates; one item is a scalar and multiple items form a list.
@@ -431,6 +447,47 @@ expressions. Imports are not part of the initial script language.
 The parser uses line context to distinguish a rule header from expression and
 record punctuation. Indented text without a preceding rule is `PARSE_ERR`.
 
+### Executable source layers
+
+The source suffix names the independently usable outer language:
+
+| Suffix | Source form |
+| --- | --- |
+| `.km` | Value program: comments, blank lines, includes, lazy definitions, and top-level expressions |
+| `.kmk` | Rule program: the script grammar, including definitions and recipes |
+| `.kash` | Process program: the Kash grammar in `017-kash.md` |
+| `.ksh` | Alternate suffix for exactly the `.kash` grammar |
+
+`.km` composes the existing definition and expression parsers; it does not
+introduce another expression grammar or reinterpret expressions as shell text.
+Rule headers and recipe bodies are invalid in a value program. Definitions
+retain their documented RHS classification and lazy semantics; top-level
+expression statements always use expression parsing, never RHS classification.
+Thus a statement `42` is an integer and a statement `:nil` is nil. Balanced
+expressions may span lines, and comments/blank lines do not become statements.
+
+`include PATH` retains the source-composition behavior above. Included sources
+retain their parser and spans: a `.km` source can supply definitions to a `.kmk`
+program without being reparsed as recipe text. A value program cannot import
+rule declarations through an include to circumvent its grammar restriction.
+Kash inclusion is not added by these execution conventions.
+
+File execution, named value entries, expression-statement result selection,
+program arguments, and the unified `kame do run` command are defined in
+`009-cli.md`. Source suffixes select a language, not a requirement to use the
+other two layers. Parsing and formatting never execute a program. The `expr`
+parser remains available for exactly one expression independently of the `km`
+program parser.
+
+The runner may compose several file and inline sources (`009-cli.md`). Parse
+each with its selected outer grammar and preserve its source spans before
+registering a shared program scope; do not concatenate heterogeneous text and
+reparse it. A balanced expression, rule recipe, or Kash control block cannot
+start in one fragment and finish in another. Top-level duplicate definitions
+across fragments follow the same registration errors as duplicates in one
+source. Forward visibility does not merge branch-local scopes or turn ordinary
+definitions into mutable sequential assignments.
+
 ## Formatting
 
 Formatting is AST-based and canonical:
@@ -467,6 +524,9 @@ excluding spans.
   as a file rule.
 - Scalar, list, and function definitions follow deterministic RHS
   classification.
+- Command-substitution atoms delegate to Kash, retain embedded source spans,
+  and parse/format without performing host effects. A leading `$(` definition
+  RHS is an expression, while `$(...)` in plain quoted strings remains literal.
 - A target template with no capture group parses as a literal target.
 - Expression-string `{(...)}` interpolation and template `@(...)` expansions
   are parsed by their respective packages.

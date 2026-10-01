@@ -10,24 +10,25 @@ import (
 )
 
 func (p *Program) render(c *core.EngineContext, entry *instance, names []string) renderResult {
+	body := entry.Rule.Body
 	inputs := makeValues(p.Alloc, names)
 	outputs := makeValues(p.Alloc, entry.Plan.Outputs)
 	defer freeValues(p.Alloc, inputs)
 	defer freeValues(p.Alloc, outputs)
 	dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
 	context := mem.Alloc[eval.Context](p.Alloc)
-	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
+	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
 	if entry.Rule.BodyDoc != nil {
 		return p.renderDocument(entry, context)
 	}
 	b := strings.NewBuilder(p.Alloc)
 	defer b.Free()
 	var spans []diagnostic.Span
-	for i := range entry.Rule.Body {
-		if entry.Rule.Body[i].Template == nil {
+	for i := range body {
+		if body[i].Template == nil {
 			continue
 		}
-		result := p.Eval.Render(p.Alloc, entry.Rule.Body[i].Template, p.Eval.Scope, context)
+		result := p.Eval.Render(p.Alloc, body[i].Template, p.Eval.Scope, context)
 		if result.Waiting {
 			slices.Free(p.Alloc, spans)
 			eval.FreeEffects(p.Alloc, context.Effects)
@@ -55,7 +56,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 				b.WriteByte('\n')
 			}
 			b.WriteString(result.Value.Text)
-			spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: entry.Rule.Body[i].Span.Start, End: entry.Rule.Body[i].Span.End})
+			spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: body[i].Span.Start, End: body[i].Span.End})
 		}
 		result.Value.Free(p.Alloc)
 	}
@@ -81,6 +82,7 @@ func diagnosticFromSource(a mem.Allocator, code string, message string, start in
 
 func (p *Program) renderDocument(entry *instance, context *eval.Context) renderResult {
 	doc := entry.Rule.BodyDoc
+	body := entry.Rule.Body
 	if len(doc.Diagnostics) != 0 {
 		d := doc.Diagnostics[0]
 		eval.FreeEffects(p.Alloc, context.Effects)
@@ -141,10 +143,10 @@ func (p *Program) renderDocument(entry *instance, context *eval.Context) renderR
 		}
 	}
 	var spans []diagnostic.Span
-	if result.Value.Text != "" && len(entry.Rule.Body) != 0 {
+	if result.Value.Text != "" && len(body) != 0 {
 		// Single authored span covering the recipe body.
-		first := entry.Rule.Body[0].Span
-		last := entry.Rule.Body[len(entry.Rule.Body)-1].Span
+		first := body[0].Span
+		last := body[len(body)-1].Span
 		spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: first.Start, End: last.End})
 	}
 	var effects []eval.Effect

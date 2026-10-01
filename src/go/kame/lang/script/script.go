@@ -19,6 +19,7 @@ const (
 	Rule
 	Expression
 	Include
+	Command
 )
 
 type ScriptItem struct {
@@ -36,6 +37,7 @@ type Script struct {
 	Source      *source.Source
 	Items       []ScriptItem
 	Diagnostics []source.Diagnostic
+	BorrowedSource bool
 }
 
 func (s *Script) Free() {
@@ -49,7 +51,7 @@ func (s *Script) Free() {
 	}
 	slices.Free(s.Alloc, s.Items)
 	slices.Free(s.Alloc, s.Diagnostics)
-	s.Source.Free(s.Alloc)
+	if s.BorrowedSource { mem.Free(s.Alloc, s.Source) } else { s.Source.Free(s.Alloc) }
 	a := s.Alloc
 	*s = Script{}
 	mem.Free(a, s)
@@ -58,7 +60,13 @@ func (s *Script) Free() {
 func Parse(a mem.Allocator, name string, text string) *Script {
 	s := mem.Alloc[Script](a)
 	s.Alloc, s.Source = a, source.New(a, name, text)
-	for pos := 0; pos < len(text); {
+	parseScript(s, 0)
+	return s
+}
+
+func parseScript(s *Script, offset int) {
+	a, text := s.Alloc, s.Source.Text
+	for pos := offset; pos < len(text); {
 		lineEnd := pos
 		for lineEnd < len(text) && text[lineEnd] != '\n' {
 			lineEnd++
@@ -84,7 +92,7 @@ func Parse(a mem.Allocator, name string, text string) *Script {
 			continue
 		}
 		if topLevel(text[start:end], '=') >= 0 {
-			definitionEnd := multilineDefinitionEnd(text, start, end)
+			definitionEnd := multilineDefinitionEnd(a, s.Source, start, end)
 			part := definition.ParseRange(a, s.Source, start, definitionEnd)
 			s.takeDiagnostics(part.Diagnostics)
 			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Definition, Span: source.Span{Start: start, End: definitionEnd}, Definition: part.Definition})
@@ -114,7 +122,6 @@ func Parse(a mem.Allocator, name string, text string) *Script {
 		s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: end}, Expression: prefix.Expr})
 		pos = nextLine(text, lineEnd)
 	}
-	return s
 }
 
 func (s *Script) takeDiagnostics(diags []source.Diagnostic) {
@@ -169,7 +176,8 @@ func include(text string) (string, bool) {
 	return path, true
 }
 
-func multilineDefinitionEnd(text string, start int, lineEnd int) int {
+func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEnd int) int {
+	text := s.Text
 	equals := topLevel(text[start:lineEnd], '=')
 	if equals < 0 {
 		return lineEnd
@@ -211,37 +219,18 @@ func multilineDefinitionEnd(text string, start int, lineEnd int) int {
 		}
 		return lineEnd
 	}
-	if text[pos] != '(' && text[pos] != '[' {
+	if text[pos] != '(' && text[pos] != '[' && !(pos+1 < len(text) && text[pos:pos+2] == "$(") {
 		return lineEnd
 	}
-	depth, quote := 0, false
-	for pos < len(text) {
-		b := text[pos]
-		if quote {
-			if b == '\\' {
-				pos += 2
-				continue
-			}
-			if b == '"' {
-				quote = false
-			}
-		} else if b == '"' {
-			quote = true
-		} else if b == '(' || b == '[' {
-			depth++
-		} else if b == ')' || b == ']' {
-			depth--
-			if depth == 0 {
-				pos++
-				for pos < len(text) && text[pos] != '\n' {
-					pos++
-				}
-				return pos
-			}
-		}
-		pos++
-	}
-	return lineEnd
+	// Delegate nested delimiter ownership to the expression/process parsers;
+	// shell-like escaped parentheses are not expression delimiters.
+	prefix := expr.ParsePrefix(a, s, pos)
+	end := prefix.End
+	expr.Free(a, prefix.Expr)
+	slices.Free(a, prefix.Diagnostics)
+	if end < lineEnd { return lineEnd }
+	for end < len(text) && text[end] != '\n' { end++ }
+	return end
 }
 
 func topLevel(text string, want byte) int {

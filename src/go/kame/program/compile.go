@@ -50,6 +50,8 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
 	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
 	p.Options.ResolveTool = options.ResolveTool
+	p.Options.CaptureLimit = options.CaptureLimit
+	if p.Options.CaptureLimit <= 0 { p.Options.CaptureLimit = 1024 * 1024 }
 	if p.Options.RetryCount < 0 {
 		p.Options.RetryCount = 0
 	}

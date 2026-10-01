@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/lang/eval"
 	"kame/lang/rule"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
@@ -21,6 +22,14 @@ func (p *Program) pump(wait int) {
 		}
 		event := next.Event
 		entry := p.instanceForRequest(event.ID)
+		if event.Kind == host.ProcessStderr || event.Kind == host.ProcessStdout {
+			for i := range p.Pending {
+				if p.Pending[i].ID == event.ID && (p.Pending[i].Capture || p.Pending[i].Stream) {
+					if event.Kind == host.ProcessStderr { p.captureStderr(p.Pending[i], event.Data) } else if p.Pending[i].Stream { p.statementStdout(p.Pending[i], event.Data) }
+					break
+				}
+			}
+		}
 		if entry != nil && event.Kind == host.ProcessStdout {
 			p.emitNode(entry.Node, entry.Plan.Target, Stdout, diagnostic.Span{}, event.Data)
 		} else if entry != nil && event.Kind == host.ProcessStderr {
@@ -55,17 +64,43 @@ func (p *Program) drainRequests() {
 		}
 		if request.Kind == host.RequestProcess {
 			script := host.PayloadText(request.Payload, host.FieldScript)
+			values := host.PayloadArgv(request.Payload)
+			var argv []string
+			for i := range values { argv = slices.Append(p.Alloc, argv, values[i].Text) }
+			var stages []host.ProcessStage
+			graphs := host.PayloadStages(request.Payload)
+			setups := host.PayloadSetups(request.Payload)
+			for i := range graphs {
+				var arguments []string
+				for j := range graphs[i].List { arguments = slices.Append(p.Alloc, arguments, graphs[i].List[j].Text) }
+				stage := host.ProcessStage{Argv: arguments}
+				if i < len(setups) {
+					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
+					values := host.PayloadList(setups[i], host.FieldEnvironment)
+					for j := range values { stage.Environment = slices.Append(p.Alloc, stage.Environment, values[j].Text) }
+				}
+				stages = slices.Append(p.Alloc, stages, stage)
+			}
 			// The shell operation returns captured output, so it needs a
 			// retained-byte budget even when no --log-limit was given.
 			retain := p.Options.RetainBytes
 			if retain < cacheLogDefault {
 				retain = cacheLogDefault
 			}
-			if script == "" || p.Host == nil || !p.Host.Start(host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}) {
+			capture := len(argv) != 0 || len(stages) != 0
+			stream := false
+			for i := range request.Payload.Record { if request.Payload.Record[i].Key == "stream" { stream = request.Payload.Record[i].Value.Bool } }
+			capture = capture && !stream
+			if capture { retain = p.Options.CaptureLimit }
+			if stream { retain = 0 }
+			if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}) {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else {
-				p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0})
+				p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0, Capture: capture, Stream: stream})
 			}
+			slices.Free(p.Alloc, argv)
+			for i := range stages { slices.Free(p.Alloc, stages[i].Argv); slices.Free(p.Alloc, stages[i].Environment) }
+			slices.Free(p.Alloc, stages)
 		} else {
 			p.completeRequest(request)
 		}
@@ -85,6 +120,17 @@ func (p *Program) ProcessStarted(request host.Request) {
 }
 
 func (p *Program) ProcessStream(request host.Request, stderr bool, data []byte) {
+	for i := range request.Payload.Record {
+		if request.Payload.Record[i].Key == "stream" && request.Payload.Record[i].Value.Bool {
+			pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Stream: true}
+			if stderr { p.captureStderr(pending, data) } else { p.statementStdout(pending, data) }
+			return
+		}
+	}
+	if stderr && (len(host.PayloadArgv(request.Payload)) != 0 || len(host.PayloadStages(request.Payload)) != 0) {
+		p.captureStderr(pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Capture: true}, data)
+		return
+	}
 	entry := p.instanceForRequest(request.ID)
 	if entry == nil {
 		return
@@ -271,6 +317,10 @@ func (p *Program) complete(event host.ProcessEvent) {
 		}
 		copy(p.Pending[i:], p.Pending[i+1:])
 		p.Pending = p.Pending[:len(p.Pending)-1]
+		if pending.Capture && event.StdoutTruncated {
+			d.Free(p.Alloc)
+			d = failure(p.Alloc, "CAPTURE_LIMIT", "command substitution exceeded capture limit")
+		}
 		if d.Code == "RECIPE_FAIL" {
 			d.Free(p.Alloc)
 			d = diagnostic.Diagnostic{}
@@ -278,6 +328,7 @@ func (p *Program) complete(event host.ProcessEvent) {
 		completion := core.Completion{NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: event.ID, Diagnostic: d}
 		if d.Code == "" {
 			completion.Value, completion.HasValue = shellValue(p.Alloc, event), true
+			if pending.Capture || pending.Stream { completion.Value.Record = slices.Append(p.Alloc, completion.Value.Record, core.RecordField{Key: cloneText(p.Alloc, "signal"), Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}}) }
 		}
 		p.Engine.Complete(completion)
 		return
@@ -398,7 +449,31 @@ func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
+	if len(event.Stages) != 0 {
+		var stages []core.Value
+		for i := range event.Stages {
+			stage := event.Stages[i]
+			parts := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(stage.Status)}}, {Key: "signal", Value: core.Value{Kind: core.Int, Int: int64(stage.Signal)}}, {Key: "outcome", Value: core.Value{Kind: core.Int, Int: int64(stage.Outcome)}}}
+			stages = slices.Append(a, stages, core.NewRecord(a, parts))
+		}
+		value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "stages"), Value: core.NewList(a, stages)})
+		for i := range stages { stages[i].Free(a) }
+		slices.Free(a, stages)
+	}
 	return value
+}
+
+// Captured stdout is private to the expression; stderr remains a live stream.
+func (p *Program) captureStderr(pending pendingRequest, data []byte) {
+	if p.Eval.DefinitionEffectSink != nil {
+		p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectErr, Data: data})
+	} else {
+		p.emit(Event{Kind: Stderr, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data)})
+	}
+}
+
+func (p *Program) statementStdout(pending pendingRequest, data []byte) {
+	if p.Eval.DefinitionEffectSink != nil { p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectOut, Data: data}) } else { p.emit(Event{Kind: Stdout, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data)}) }
 }
 
 func (p *Program) instanceForRequest(id int64) *instance {

@@ -6,6 +6,7 @@ import (
 	"solod.dev/so/c"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strings"
 	"solod.dev/so/time"
 )
 
@@ -62,16 +63,27 @@ type nativeEvent struct {
 	stdoutTruncated   bool
 	stderrTruncated   bool
 	retainBytes       c.Int
+	stageData         *c.Int
+	stageCount        c.Int
 }
 
 //so:extern
 func km_host_new() *nativeHost { return nil }
 
 //so:extern nodecay
-func km_host_start(h *nativeHost, id int64, shell []string, script []byte, directory string, environment []string, timeoutMS int64, retainBytes int) c.Int {
-	_, _, _, _, _, _, _, _ = h, id, shell, script, directory, environment, timeoutMS, retainBytes
+func km_host_start(h *nativeHost, id int64, shell []string, script []byte, directory string, environment []string, timeoutMS int64, retainBytes int, direct bool) c.Int {
+	_, _, _, _, _, _, _, _, _ = h, id, shell, script, directory, environment, timeoutMS, retainBytes, direct
 	return 0
 }
+
+//so:extern nodecay
+func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool) c.Int {
+	_, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput
+	return 0
+}
+
+//so:extern
+func km_event_stage_field(event *nativeEvent, index c.Int, field c.Int) c.Int { _, _, _ = event, index, field; return 0 }
 
 //so:extern
 func km_host_pump(h *nativeHost, waitMS c.Int) c.Int { _, _ = h, waitMS; return 0 }
@@ -135,7 +147,45 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 	if h == nil || h.native == nil {
 		return false
 	}
-	return km_host_start(h.native, request.ID, request.Shell, request.Script, request.Directory, request.Environment, request.TimeoutMS, request.RetainBytes) == 0
+	if len(request.Stages) != 0 {
+		var arguments []string
+		var lengths []int
+		var directories, environment []string
+		var environmentLengths []int
+		var timeouts []int64
+		for i := range request.Stages {
+			lengths = slices.Append(h.Alloc, lengths, len(request.Stages[i].Argv))
+			for j := range request.Stages[i].Argv { arguments = slices.Append(h.Alloc, arguments, request.Stages[i].Argv[j]) }
+			directory := request.Stages[i].Directory
+			if directory == "" { directory = request.Directory }
+			directories = slices.Append(h.Alloc, directories, directory)
+			timeouts = slices.Append(h.Alloc, timeouts, request.Stages[i].TimeoutMS)
+			start := len(environment)
+			for j := range request.Environment {
+				entry := request.Environment[j]
+				overridden := false
+				for k := range request.Stages[i].Environment {
+					replacement := request.Stages[i].Environment[k]
+					at := strings.IndexByte(replacement, '=')
+					if at > 0 && strings.HasPrefix(entry, replacement[:at+1]) { overridden = true }
+				}
+				if !overridden { environment = slices.Append(h.Alloc, environment, entry) }
+			}
+			for j := range request.Stages[i].Environment { environment = slices.Append(h.Alloc, environment, request.Stages[i].Environment[j]) }
+			environmentLengths = slices.Append(h.Alloc, environmentLengths, len(environment)-start)
+		}
+		ok := km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append) == 0
+		slices.Free(h.Alloc, arguments)
+		slices.Free(h.Alloc, lengths)
+		slices.Free(h.Alloc, directories)
+		slices.Free(h.Alloc, environment)
+		slices.Free(h.Alloc, environmentLengths)
+		slices.Free(h.Alloc, timeouts)
+		return ok
+	}
+	argv, direct := request.Shell, false
+	if len(request.Argv) != 0 { argv, direct = request.Argv, true }
+	return km_host_start(h.native, request.ID, argv, request.Script, request.Directory, request.Environment, request.TimeoutMS, request.RetainBytes, direct) == 0
 }
 
 // Pump waits for at most waitMS milliseconds, reads available process output,
@@ -183,6 +233,9 @@ func (h *Host) Next() host.ProcessEventResult {
 		return EventResult{}
 	}
 	e := host.ProcessEvent{Kind: host.ProcessEventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: host.ProcessOutcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated, RetainBytes: int(raw.retainBytes)}
+	for i := 0; i < int(raw.stageCount); i++ {
+		e.Stages = slices.Append(h.Alloc, e.Stages, host.ProcessStageResult{Status: int(km_event_stage_field(&raw, c.Int(i), 0)), Signal: int(km_event_stage_field(&raw, c.Int(i), 1)), Outcome: host.ProcessOutcome(km_event_stage_field(&raw, c.Int(i), 2))})
+	}
 	km_event_free(&raw)
 	return host.ProcessEventResult{Event: e, OK: true}
 }

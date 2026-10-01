@@ -1,6 +1,7 @@
 package posix_test
 
 import (
+	"kame/host"
 	"kame/host/posix"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
@@ -44,6 +45,53 @@ func drain(t *testing.T, h *posix.Host, terminal *posix.Event) []posix.Event {
 func freeEvents(a mem.Allocator, events []posix.Event) {
 	for i := range events { events[i].Free(a) }
 	slices.Free(a, events)
+}
+
+func TestPipelineRetainsEveryStageStatus(t *testing.T) {
+	a := t.Allocator()
+	h := posix.New(a)
+	stages := []host.ProcessStage{{Argv: []string{"/bin/sh", "-c", "printf first >&2; exit 7"}}, {Argv: []string{"/bin/sh", "-c", "cat; printf second >&2; exit 9"}}, {Argv: []string{"/bin/cat"}}}
+	r := host.ProcessRequest{ID: 71, Stages: stages, Directory: ".", Environment: []string{"PATH=/bin:/usr/bin"}, RetainBytes: 1024}
+	if !h.Start(r) { t.Fatal("pipeline start failed"); return }
+	var terminal posix.Event
+	events := drain(t, h, &terminal)
+	if terminal.Outcome != posix.Exited || terminal.Status != 9 || len(terminal.Stages) != 3 { t.Error("pipeline lost aggregate status or stage results")
+	} else if terminal.Stages[0].Status != 7 || terminal.Stages[1].Status != 9 || terminal.Stages[2].Status != 0 { t.Error("pipeline did not retain every stage's status") }
+	if len(terminal.Stdout) != 0 || len(terminal.Stderr) != len("firstsecond") { t.Error("pipeline streams were not routed correctly") }
+	freeEvents(a, events)
+	h.Free()
+}
+
+func TestPipelineStreamsBeyondCaptureLimit(t *testing.T) {
+	a := t.Allocator()
+	h := posix.New(a)
+	stages := []host.ProcessStage{{Argv: []string{"/usr/bin/head", "-c", "4194304", "/dev/zero"}}, {Argv: []string{"/usr/bin/wc", "-c"}}}
+	r := host.ProcessRequest{ID: 72, Stages: stages, Directory: ".", Environment: []string{"PATH=/bin:/usr/bin"}, RetainBytes: 16}
+	if !h.Start(r) { t.Fatal("pipeline start failed"); return }
+	var terminal posix.Event
+	events := drain(t, h, &terminal)
+	if terminal.Outcome != posix.Exited || terminal.Status != 0 || terminal.StdoutTruncated || string(terminal.Stdout) != "4194304\n" { t.Error("pipeline buffered or captured intermediate stdout") }
+	freeEvents(a, events)
+	h.Free()
+}
+
+func TestPipelineTimeoutAndLaunchFailureReapAllStages(t *testing.T) {
+	a := t.Allocator()
+	for i := 0; i < 2; i++ {
+		h := posix.New(a)
+		second := "/bin/cat"
+		if i == 1 { second = "/no-such-kash-pipeline-executable" }
+		stages := []host.ProcessStage{{Argv: []string{"/bin/sh", "-c", "sleep 30"}}, {Argv: []string{second}}}
+		r := host.ProcessRequest{ID: 73, Stages: stages, Directory: ".", Environment: []string{"PATH=/bin:/usr/bin"}, TimeoutMS: 50, RetainBytes: 16}
+		if !h.Start(r) { t.Fatal("pipeline fork failed"); h.Free(); return }
+		var terminal posix.Event
+		events := drain(t, h, &terminal)
+		if i == 0 && terminal.Outcome != posix.TimedOut { t.Error("graph timeout was not propagated") }
+		if i == 1 && terminal.Outcome != posix.Failed { t.Error("stage launch failure was not propagated") }
+		if h.Active() != 0 || len(terminal.Stages) != 2 { t.Error("graph was not completely retired") }
+		freeEvents(a, events)
+		h.Free()
+	}
 }
 
 func TestEnvironmentSnapshotIsCompleteAndOwned(t *testing.T) {

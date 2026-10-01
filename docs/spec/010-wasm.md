@@ -122,8 +122,41 @@ allocate.
 
 ## Memory
 
-The initial module uses a fixed-size arena supplied at instance creation.
+The initial module uses a fixed-size arena allocated on first source compilation
+and reused by that instance slot. The freestanding ABI reserves 16 MiB per
+compiled slot on demand, rather than reserving memory for every possible slot.
+This accommodates the default 1 MiB Kash capture plus evaluator allocation and
+copy overhead. The module memory maximum still bounds simultaneous compiled
+instances and larger captures; an unavailable arena reports `NO_MEMORY`.
 Instance destruction releases all logical allocations by resetting that arena.
+
+The POSIX JavaScript CLI host uses the system `mkfifo` utility for intermediate
+Kash pipeline descriptors. Children inherit blocking FIFO endpoints directly,
+preserving kernel backpressure, EOF, and SIGPIPE semantics; intermediate stdout
+never passes through JavaScript capture buffers. The private FIFO paths are
+unlinked before graph execution. An unavailable utility produces `HOST_FAIL`.
+Node's socket-based subprocess `pipe` streams are not interchangeable here:
+early-reader closure can produce ECONNRESET instead of native SIGPIPE.
+
+Structured process requests distinguish direct argv (ABI kind 13, a JSON argv
+array) from pipelines (kind 14, a JSON array of stage argv arrays) and redirected
+configured graphs (kind 15, a JSON object with `stages`, `input`, `output`,
+`append`, and a parallel `setup` array). Each setup record carries `cwd`,
+`timeoutMS`, and `environment` (`KEY=value` overrides). Stages inherit the
+invocation environment and limits; their own timeout terminates the whole graph
+but ceases when that stage exits. PATH lookup uses the effective stage environment
+and cwd. Setup does not broaden caller grants.
+Redirection paths are authorized before opening; input opens before output so a
+missing source cannot truncate the destination. Redirected stdout is neither
+captured nor UTF-8 decoded. A pipeline is
+one owned host request: all stages are validated before launch, intermediate
+streams are connected directly, every stage's stderr is live, and only final
+stdout is captured. Aggregate failure selects the rightmost failing stage;
+signal exits contribute `128 + signal`. Exit completions carry aggregate status,
+signal, and per-stage status/signal/outcome records. A successful capture may
+complete directly as UTF-8 text to avoid escaping large strings through JSON.
+Launch failures, timeout, cancellation, and capture overflow terminate and reap
+all remaining stages before completing the request.
 Individual `free` operations still release owned engine objects where supported
 so native and WebAssembly behavior remain comparable.
 
@@ -173,8 +206,13 @@ The wrapper services host requests with JavaScript host capabilities:
 - cache get, put, and delete map to opaque records under a per-project cache
   root; the runtime owns key construction and record validation.
 
-Capability grants follow `009-cli.md`: denied by default and granted by
-`--allow-read`, `--allow-write`, `--allow-run`, and `--allow-env`. A browser or
+Capability grants follow `009-cli.md`: sessions beginning with value/expression
+fragments deny host capabilities by default; sessions beginning with rule/Kash
+fragments use the documented cwd-scoped
+read/write and run defaults. Explicit grants use `--allow-read`, `--allow-write`,
+`--allow-run`, and `--allow-env`. Direct file execution and `do run` must normalize
+to the same invocation and authority policy as on native hosts. Later fragments
+inherit that policy without broadening it through language selection. A browser or
 embedded wrapper instead supplies its own host, as described in Host Requests.
 
 ### Staged Coverage
@@ -184,7 +222,7 @@ honestly rather than faking effects:
 
 | Stage | ABI available | CLI coverage |
 | --- | --- | --- |
-| 0 | pure evaluation, instance create/free, source compile | `--version`, `-h`/`--help`, `do help`, `do expr`, and pure parse and format of stdin |
+| 0 | pure evaluation, instance create/free, source compile | `--version`, `-h`/`--help`, `do help`, pure inline/stdin `do run --lang expr`, and pure parse and format of stdin |
 | 1 | step, event, completion, and read/stat/glob/write host requests | source discovery and inspection: `do plan`, `do inputs`, `do outputs`, `do span`, and `do cat` for values and files |
 | 2 | process host requests | primary materialization, recipe execution, retries, timeouts, and cancellation |
 | 3 | full ABI, including cache | full `009-cli.md` parity, including `--json` event streams |
@@ -222,7 +260,13 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 - The JavaScript wrapper copies payloads before further allocation and rejects
   use after disposal.
 - `node dist/kame.js --version` prints `kame VERSION` and exits 0.
-- `do expr` output matches native output byte-for-byte for pure expressions.
+- `do run --lang expr` output matches native output byte-for-byte for pure expressions.
+- Direct `.km`/`.kmk`/`.kash`/`.ksh` execution and `do run` share native dispatch,
+  ordered multi-source compilation, shared scope/engine, first-fragment policy,
+  selected-work, argument, grant, and stream semantics. A later parse failure
+  prevents earlier effects; fragment boundaries retain authored source spans.
+  Missing backend support
+  reports `FEATURE_UNSUP`; removed command names are not wrapper-only aliases.
 - `--json` output is valid JSON Lines on stdout and leaves stderr unused.
 - Exit statuses and stream separation match `009-cli.md`.
 - An invocation that needs a capability absent from the current stage reports

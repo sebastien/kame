@@ -27,9 +27,9 @@ Kame has three related source layers:
 
 | Layer | Responsibility |
 | --- | --- |
-| Kame expressions | Values, references, functions, patterns, templates, and value transformations. |
-| `.kmk` scripts and rules | Declarative definitions, targets, inputs, and recipes. |
-| Kash | Command statements and process orchestration, using Kame expressions as its computation layer. |
+| `.km` value programs and Kame expressions | Values, references, functions, patterns, templates, and value transformations. |
+| `.kmk` rule programs | Declarative definitions, targets, inputs, and recipes. |
+| `.kash` process programs | Command statements and process orchestration, using Kame expressions as its computation layer. |
 
 Kash is a new outer syntax, so it is not a literal grammar superset of a Kame
 script. Raw command lines are not Kame expressions. It is, however, an
@@ -44,15 +44,46 @@ specification.
 
 ### Files and invocation
 
-Kash files use `.kash`. `kame do kash FILE [-- ARG...]` executes a file;
-`FILE` may be `-` for standard input. Arguments after `--` use Kame's normal
+Kash files use canonical `.kash`, with `.ksh` accepted as an equivalent suffix.
+Both are Kash sources, not KornShell or system-shell scripts. Execute a file
+directly or through the unified runner:
+
+```text
+kame [OPTIONS] FILE.kash [INPUT...] [-- ARG...]
+kame do run [OPTIONS] FILE.kash [INPUT...] [-- ARG...]
+kame do run [OPTIONS] --lang kash -c TEXT [-- ARG...]
+kame do run [OPTIONS] --lang kash - [-- ARG...]
+```
+
+The file forms also accept `.ksh` and may append other files or repeated `-c`
+fragments as defined by `009-cli.md`. Parse all fragments before execution;
+share top-level definitions, one engine, and one invocation policy. A trailing
+`-c '(out name)'` uses Kame syntax by default and can refer to a definition in
+the Kash source. It is not raw Kash command text unless a forward-scoped
+`--lang kash` explicitly selects that parser.
+
+Arguments after `--` use Kame's normal
 argument binding. Execution supports the existing directory, capability,
-timeout, and diagnostic options, with the same default capability policy as
-build execution. Relative source filenames resolve before any directory change.
+timeout, and diagnostic options. Sessions beginning with Kash have the same
+default capability policy as build execution; Kash appended to a value session
+inherits that session's more restrictive policy. Relative source filenames
+resolve before any directory change. No named entry operands are accepted for
+Kash fragments: run statements in source order. Direct
+and explicit execution share the same parser, engine, process ownership, and
+policy; they are not shell-launching shortcuts. `009-cli.md` owns dispatch and
+option validation. The previously specified `do kash` command is replaced by
+`do run`, as is the separate `do expr` execution command.
+Async work belongs to the combined invocation: a source boundary does not join
+it, later fragments may await shared handles, and normal session completion joins
+outstanding graphs. Failure or cancellation stops the remaining session and
+reaps owned processes. Appending another source does not implicitly export
+branch-local definitions.
 
 `kame do parse --lang kash` and `kame do fmt --lang kash` use the existing
 file/stdin conventions. Native and WASM hosts must implement identical language
-semantics. Kash does not join build-file discovery or implicitly change `.kmk`.
+semantics. `.kash` and `.ksh` do not join build-file discovery or implicitly
+change `.kmk` recipes. These invocation forms are a specification contract;
+implementations must not claim them until their corresponding runner exists.
 
 ## Source and statements
 
@@ -76,10 +107,11 @@ watch-assets &
 
 The Kame expression grammar named `EXPRESSION` in `004-language.md` remains the
 sole grammar for values, applications, lists, records, lambdas, references,
-patterns, and expression pipes. Kash delegates ordinary definition operands to
-that grammar unchanged. Kash's `$...` forms wrap a Kame reference, and its
-`$(...)` form wraps a process expression; neither adds an alternate value
-grammar. This makes parser ownership visible in source and diagnostics.
+patterns, and expression pipes. This specification extends that grammar with
+one expression atom, `$(COMMAND)`, whose contents delegate to the Kash process
+parser. Kash delegates ordinary definition operands to the resulting Kame
+grammar. Kash's `$REFERENCE` forms wrap a Kame reference; they do not add an
+alternate value grammar. Parser ownership remains visible in diagnostics.
 
 A definition is recognized only when a valid name or function header is followed
 by a standalone `=` separator. `echo revision=$revision` is a command, not a
@@ -87,13 +119,16 @@ definition. A definition right-hand side is one Kame expression, one Kash
 substitution, or a `??` composition of those operands:
 
 ```text
-VALUE = EXPRESSION | $REFERENCE | ${REFERENCE} | @(BOUNDARY) | $(COMMAND)
+VALUE = EXPRESSION | $REFERENCE | ${REFERENCE} | @(BOUNDARY)
 RHS = VALUE ("??" RHS)?
 ```
 
-The expression parser owns each `EXPRESSION` operand; Kash owns substitution
-wrappers and recovery separators. Wrappers are not valid inside ordinary Kame
-expressions: use `(cat "Hello, " WHO)`, not `(cat "Hello, " $WHO)`. Functions
+The expression parser owns each `EXPRESSION` operand, including command
+substitution atoms; Kash owns their process contents, the other substitution
+wrappers, and recovery separators. `$REFERENCE`, `${REFERENCE}`, Kash's `@(...)`
+shorthand, and infix `??` are not added to ordinary Kame expressions: use
+`(cat "Hello, " WHO)`, not `(cat "Hello, " $WHO)`. Existing Kame template
+expansions and expression-string interpolation retain their own rules. Functions
 retain Kame parameter and lazy evaluation semantics. Kash does not inherit
 `.kmk` word-list or recipe-template RHS syntax.
 
@@ -163,8 +198,9 @@ whitespace-separated sequence of complete Kame expressions:
 - A top-level value pipe uses Kame's existing parenthesized pipe parser:
   `@(sources | map render)` means `(sources | map render)`.
 - Empty contents are an error. Delimiters, strings, lambdas, patterns, sections,
-  and application/pipe rules otherwise remain those of Kame. Kash substitutions
-  and `??` are not recognized inside the boundary.
+  and application/pipe rules otherwise remain those of Kame. `$(COMMAND)` is
+  allowed as a Kame expression atom; `$REFERENCE`, `${REFERENCE}`, nested Kash
+  boundary shorthand, and infix `??` are not Kame expression syntax.
 
 This wrapper composes existing expression and application parsers, not a second
 value grammar. It is the form for calls, functions, lists, records,
@@ -199,7 +235,30 @@ echo revision=$revision
 ```
 
 It never means Kame expression evaluation. A failed command substitution fails
-its enclosing expression unless a Kash recovery form handles it.
+its enclosing expression unless an applicable recovery form handles it.
+
+`$(COMMAND)` is also a Kame expression atom wherever an expression is accepted,
+including applications, lists, records, lambdas, and expression-valued `.kmk`
+definitions:
+
+```kame
+revision = $(git rev-parse --short HEAD)
+banner = (cat "Revision: " $(git rev-parse --short HEAD))
+```
+
+The outer expression parser retains a command-substitution node and delegates
+the enclosed process expression to Kash. Embedded Kash may itself contain Kame
+expressions and nested substitutions; each parser retains its original source
+spans. Parsing never depends on grants, host availability, or execution phase.
+Evaluation requires a context permitting process execution, as defined below.
+
+Kame quoted strings do not gain implicit command interpolation: `"$(git status)"`
+is literal text. Existing expression interpolation can explicitly evaluate a
+substitution, for example `"Revision: {(cat $(git rev-parse --short HEAD))}"`.
+Kash command-word double quotes still allow substitutions as specified below.
+Opaque `.kmk` recipe text remains shell text: a raw recipe `$(...)` is interpreted
+by the recipe's shell, not Kash. A substitution inside an explicit Kame recipe
+expansion is owned by the expression parser instead.
 
 Substitution captures only the final stage's stdout and does not also forward it
 to the enclosing stdout. Stderr remains live. The result is a Kame string:
@@ -538,6 +597,41 @@ statement value, or nil when no branch is selected.
 
 ## Results and lowering
 
+### Execution context
+
+Kash and embedded command substitutions use the Kame evaluation context defined
+in `005-evaluation.md`, not a second ambient context. Its execution components
+are phase, capability grants, host services, working directory and process
+environment, timeout and capture policy, execution ownership/cancellation, and
+dependency/effect channels. Lexical scope determines what names mean; it is not
+an authorization mechanism.
+
+Embedded Kash inherits the caller's execution context and lexical scope. Calling
+a function or demanding a lazy definition must not introduce implicit grants;
+shared definition evaluation uses the owning program's explicitly configured
+policy and cannot borrow broader grants from another execution. Unused lazy
+definitions and unselected branches perform no authorization checks or effects.
+
+Process execution requires both an evaluation phase permitting that effect and
+the relevant run grant. Planning and resolution reject a demanded substitution
+with `PHASE_INVALID`, even when a run grant exists. Missing grants produce
+`CAP_DENIED`; an authorized but unavailable host service produces `HOST_FAIL`.
+Neither parsing nor formatting executes a substitution.
+
+Nested setup can change process configuration but cannot broaden capability
+grants or relax caller limits. Paths are authorized after resolving the effective
+working directory. Stage timeouts and capture limits remain bounded by caller
+policy. Explicit environment lookups and redirections additionally require their
+respective environment/read/write grants. Capability denial and cancellation
+cannot be suppressed by Kash recovery.
+
+A run grant authorizes direct executable requests, not implicit shell-text
+evaluation. `$(git status)` runs argv directly. Launching a shell requires an
+explicit shell executable request authorized by the caller's run policy; there
+is no additional implicit shell capability or shell fallback.
+
+### Process values and lowering
+
 A command or pipeline returns a `Process`/`Result` value rather than an untyped
 string. It carries process completion, status, streams, and related execution
 information. `$(COMMAND)` is the explicit conversion point that captures
@@ -577,6 +671,8 @@ Formatting must preserve the parser boundary:
 - A Kame expression inside `@(...)` is formatted by the Kame expression
   formatter, preserving the single-expression versus parenthesized-form boundary.
 - A nested command substitution is formatted by the Kash formatter.
+- Command substitutions embedded in Kame expressions also delegate their
+  contents to the Kash formatter and preserve their enclosing expression spans.
 - Formatter output is idempotent and reparses to an equivalent Kash AST.
 
 Malformed references are Kame reference errors, malformed `@(...)` contents are
@@ -615,8 +711,8 @@ live forwarding and explicit capture remain separate channels.
 - Existing `.kmk` recipes retain their shell-text behavior unless an explicit
   future Kash recipe mode is selected.
 - Definition detection distinguishes `name = VALUE` from `echo name=value`;
-  function RHSs use unchanged Kame expressions, not shell-style infix
-  concatenation or nested Kash substitutions.
+  function RHSs use Kame expressions, including command-substitution atoms, not
+  shell-style infix concatenation or Kash reference wrappers.
 - Single-expression, shorthand application, lambda, and value-pipe boundaries
   agree with their corresponding ordinary Kame expressions.
 - `$name.c` resolves a component; `${name}.c` appends a literal suffix.
@@ -643,4 +739,15 @@ live forwarding and explicit capture remain separate channels.
 - Mixed indentation, invalid dedents, empty blocks, misplaced keywords, and
   semicolon-separated block headers produce precise diagnostics.
 - Native and WASM agree on argv, captures, statuses, capabilities, source spans,
-  and formatting; `.kash` does not affect build-file discovery.
+  and formatting; `.kash`/`.ksh` do not affect build-file discovery.
+- Direct Kash execution and `do run` agree for files, program arguments, capability
+  defaults, cancellation, and async joining; `.ksh` is the same language, not a
+  fallback to a system shell. Inline/stdin forms use explicit `--lang kash`.
+- `$(...)` parses as a Kame atom in applications, lists, records, lambdas, and
+  expression-valued definitions; its contents always parse as Kash processes.
+- The same substitution parses with or without grants and host services; demanded
+  execution reports `PHASE_INVALID`, `CAP_DENIED`, or `HOST_FAIL` as applicable.
+- Embedded processes inherit scope and execution policy without broadening
+  grants, escaping resolved path restrictions, or relaxing caller limits.
+- Plain Kame strings containing `$(...)` remain literal; explicit expression
+  interpolation can evaluate it, while raw `.kmk` recipe text stays shell-owned.

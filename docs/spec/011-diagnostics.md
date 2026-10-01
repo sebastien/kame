@@ -115,7 +115,7 @@ meaning by themselves.
 | `TPL_CYCLE` | error | Recursive template inclusion |
 | `CAP_DENIED` | error | Capability denied |
 | `PHASE_INVALID` | error | Operation is not valid in the current phase |
-| `TGT_NO_DEFAULT` | error | No target was requested and no default target is defined |
+| `TGT_NO_DEFAULT` | error | No target or value entry was requested and the required default is absent |
 | `TGT_NO_RULE` | error | No rule or source for target |
 | `TGT_AMBIG` | error | More than one rule instance matches |
 | `DEP_CYCLE` | error | Dependency cycle |
@@ -148,6 +148,16 @@ meaning by themselves.
   no existing file uses `TGT_NO_RULE`.
 - A target-less invocation with no `default` target uses `TGT_NO_DEFAULT` and
   reports the available named targets as a note.
+- A nonempty definitions-only value session without selected entries, later
+  executable fragments, or a `default` definition also uses `TGT_NO_DEFAULT`,
+  with available definition names rather than invented build targets.
+  Expression-statement and empty-program runs do
+  not require a default (`009-cli.md`). Removed `do expr` and `do kash` commands
+  use `CMD_UNKNOWN` with the appropriate `do run` migration spelling.
+- File and inline fragments in execution mode are not an `OPT_CONFLICT`.
+  Conflicts discovered while compiling the combined scope retain their existing
+  definition/rule codes and source spans; diagnostics identify the originating
+  file or distinct inline fragment rather than a flattened synthetic source.
 - Malformed cache data is a miss and `CACHE_UNUSABLE` warning, never a fatal error.
 - Unsupported service execution uses `FEATURE_UNSUP`.
 - Malformed pattern group syntax is `PARSE_ERR`; pattern misuse detected at
