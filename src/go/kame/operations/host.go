@@ -8,6 +8,9 @@ import (
 )
 
 func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Result {
+	if c.Engine != nil && c.Program != nil && (kind == host.RequestReadFile || kind == host.RequestEnvironment) {
+		return readRequest(c, kind, payload)
+	}
 	completion := c.TakeCompletion()
 	if completion.RequestID != 0 {
 		// Resume does not submit, so the freshly built payload is still owned here.
@@ -18,7 +21,7 @@ func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Re
 			return result
 		}
 		if !completion.HasValue {
-			return invalid()
+			return c.InvalidOperation("host completion omitted its result")
 		}
 		result := eval.Result{Value: completion.Value.Clone(c.Run)}
 		completion.Value.Free(c.Run)
@@ -27,6 +30,79 @@ func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Re
 	id := c.Submit(kind, payload)
 	payload.Free(c.Run)
 	if id == 0 {
+		return failure("HOST_FAIL", "host request was not accepted")
+	}
+	return eval.Result{Waiting: true}
+}
+
+// Read-only requests are stable within an engine generation. Retain their
+// values so replaying an outer expression neither repeats a completed read nor
+// lets an earlier call consume a later call's completion.
+type readRequestState struct {
+	Alloc mem.Allocator
+	Kind  host.RequestKind
+	Name  string
+	Op    string
+	ID    int64
+	Value core.Value
+	Done  bool
+}
+
+func freeReadRequestState(a mem.Allocator, value any) {
+	_ = a
+	state := value.(*readRequestState)
+	mem.FreeString(state.Alloc, state.Name)
+	mem.FreeString(state.Alloc, state.Op)
+	state.Value.Free(state.Alloc)
+	mem.Free(state.Alloc, state)
+}
+
+func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Result {
+	name, op := host.PayloadPath(payload), host.PayloadText(payload, host.FieldOp)
+	if kind == host.RequestEnvironment {
+		name = payload.Text
+	}
+	var state *readRequestState
+	if stored := c.OperationState(); stored != nil {
+		state = stored.(*readRequestState)
+		if state.Kind != kind || state.Name != name || state.Op != op {
+			c.ClearOperationState()
+			state = nil
+		}
+	}
+	if state == nil {
+		state = mem.Alloc[readRequestState](c.Program.Alloc)
+		state.Alloc, state.Kind = c.Program.Alloc, kind
+		state.Name, state.Op = core.NewString(state.Alloc, name).Text, core.NewString(state.Alloc, op).Text
+		c.SetOperationState(state, freeReadRequestState)
+	}
+	if state.Done {
+		payload.Free(c.Run)
+		return eval.Result{Value: state.Value.Clone(c.Run)}
+	}
+	if state.ID != 0 {
+		payload.Free(c.Run)
+		if c.Completion().RequestID != state.ID {
+			return eval.Result{Waiting: true}
+		}
+		completion := c.TakeCompletion()
+		if completion.Diagnostic.Code != "" {
+			result := eval.Result{Diagnostic: completion.Diagnostic.Clone(c.Run)}
+			completion.Diagnostic.Free(c.Run)
+			completion.Value.Free(c.Run)
+			return result
+		}
+		if !completion.HasValue {
+			completion.Value.Free(c.Run)
+			return c.InvalidOperation("host completion omitted its result")
+		}
+		state.Value, state.Done = completion.Value.Clone(state.Alloc), true
+		completion.Value.Free(c.Run)
+		return eval.Result{Value: state.Value.Clone(c.Run)}
+	}
+	state.ID = c.Submit(kind, payload)
+	payload.Free(c.Run)
+	if state.ID == 0 {
 		return failure("HOST_FAIL", "host request was not accepted")
 	}
 	return eval.Result{Waiting: true}
@@ -44,7 +120,7 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 		if value.Kind == core.Callable {
 			c.FreeCallable(&value)
 		}
-		return invalid()
+		return c.InvalidArgument(0, "string", value.Kind)
 	}
 	if !c.Allows(eval.Read, value.Text) {
 		return failure("CAP_DENIED", "read access denied")
@@ -77,8 +153,7 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.String {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	if !c.Allows(eval.Write, v[0].Text) {
 		return failure("CAP_DENIED", "write access denied")
@@ -89,8 +164,7 @@ func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	text, ok := stringValue(c.Run, v[1], false)
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 1, "bytes or text-coercible value")
 	}
 	result := writeBytes(c, v[0].Text, []byte(text))
 	mem.FreeString(c.Run, text)
@@ -110,8 +184,7 @@ func writeBytes(c *eval.Context, path string, data []byte) eval.Result {
 func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.String {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	if !c.Allows(eval.Env, v[0].Text) {
 		return failure("CAP_DENIED", "environment access denied")
@@ -128,9 +201,11 @@ func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 		freeArgCallables(c, v)
 		return failure("PHASE_INVALID", "shell is invalid outside evaluation")
 	}
-	if v[0].Kind != core.String || (len(v) == 2 && v[1].Kind != core.Record) {
-		freeArgCallables(c, v)
-		return invalid()
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
+	}
+	if len(v) == 2 && v[1].Kind != core.Record {
+		return invalidArgument(c, v, 1, "record")
 	}
 	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text))
 }

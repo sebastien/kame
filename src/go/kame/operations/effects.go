@@ -36,8 +36,7 @@ func effect(c *eval.Context, kind eval.EffectKind, returnOutput bool, v []core.V
 		text, ok := stringValue(c.Run, v[i], false)
 		if !ok {
 			slices.Free(c.Run, output)
-			freeArgCallables(c, v)
-			return invalid()
+			return invalidArgument(c, v, i, "bytes or text-coercible value (nil, bool, int, float, string, pattern, list, or record)")
 		}
 		c.Emit(kind, []byte(text))
 		if returnOutput && c.Phase == eval.EvaluatePhase {

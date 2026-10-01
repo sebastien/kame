@@ -42,7 +42,7 @@ rendered as placeholders.
 | `target` | Current target when one target directly owns the failure. | headline subject |
 | `targetStack` | Ordered root-to-current target dependency path. | `required by a → b → target` |
 | `tips` | Concrete recovery actions. | `help:` lines |
-| `cause` | Underlying process or host failure metadata, such as executable, status, signal, bounded stdout, and bounded stderr. | `caused by:` block |
+| `cause` | Underlying process or host failure metadata, such as executable, status, signal, and capture truncation limits. | `caused by:` block |
 
 The primary span identifies the expression, selector, rule segment, or recipe
 that directly failed. A related span identifies a separate declaration or call
@@ -59,8 +59,12 @@ tabs advance to the next eight-column boundary, combining code points have zero
 width, and wide code points have width two.
 
 `cause` is an object with a `kind` and a concise outcome message. Process causes
-may include `program`, `status`, `signal`, `stdout`, `stderr`,
-`stdoutTruncated`, `stderrTruncated`, and their byte limits. Host-specific
+may include `program`, `status`, `signal`, `stdoutTruncated`, `stderrTruncated`,
+and their byte limits. Captured stdout and stderr are deliberately omitted from
+diagnostic causes because arbitrary process output cannot be guaranteed free of
+secrets. Live recipe streams and explicit collected operation values are
+unchanged; this policy protects diagnostic retention, not application logs.
+Host-specific
 causes may add additive fields, but they must never include environment values,
 credential-like arguments, authorization headers, or other secrets.
 
@@ -99,6 +103,8 @@ meaning by themselves.
 | `SEL_NO_CONTEXT` | error | Selector used without a matching context |
 | `SEL_INDEX_INVALID` | error | Invalid index or slice |
 | `OP_UNKNOWN` | error | Unknown operation |
+| `TOOL_UNKNOWN` | error | Tool reference used without a tool resolver |
+| `TOOL_MISSING` | error | Referenced tool was not found or is not executable |
 | `EXPR_INVALID` | error | Invalid expression value, type, or arity |
 | `DEF_INVALID` | error | Invalid definition or binding form |
 | `DEF_ESCAPE` | error | function value escapes its scope; define it with (def name [params] body) instead |
@@ -155,6 +161,11 @@ meaning by themselves.
   `TPL_CYCLE` as specified in `016-templates.md`; the same codes cover a
   malformed recipe directive.
 - OOM formatting must not allocate.
+- Operation argument diagnostics name the operation, the one-based operand
+  index (excluding the application head), the expected kinds or constraint, and
+  the established actual kind. The primary span identifies that operand.
+  Arity errors state the expected count or range and the supplied count.
+  Rejected values are not printed merely to explain their kinds.
 
 ## Human and Plain Rendering
 
@@ -175,7 +186,6 @@ note: {related-source}:{line}:{column}: {related context}
 help: {concrete recovery action}
 
 caused by: {host or process outcome}
-  │ {bounded stderr or stdout line}
 ```
 
 The headline is shown for a target or command failure. `subject` is the failed
@@ -213,10 +223,10 @@ Diagnosis   recipe uses an unavailable executable
 Cause       sh exited with status 127
 ```
 
-When stdout or stderr was already streamed interactively, it is not repeated in
-the final human diagnostic. The cause may state that output was streamed.
-Otherwise, only bounded captured output is rendered. Long output is marked as
-truncated rather than silently cut off.
+Captured stdout and stderr are never retained or rendered in a diagnostic cause,
+even when they were not streamed. The cause may state that output was streamed
+and includes available capture truncation flags and byte limits. Explicit live
+streams and collected shell-operation values remain unchanged.
 
 ### Certainty and Writing
 
@@ -272,7 +282,7 @@ not a reduced summary. Existing schema-1 fields remain stable:
     "target": "build",
     "targetStack": ["all", "build"],
     "tips": ["check that the compiler is installed"],
-    "cause": { "kind": "process", "message": "sh exited with status 127", "program": "sh", "status": 127, "stderr": "sh: cc: not found\n", "stderrTruncated": false, "stderrLimit": 65536 }
+    "cause": { "kind": "process", "message": "sh exited with status 127", "program": "sh", "status": 127, "stderrTruncated": false, "stderrLimit": 65536 }
   }
 }
 ```
@@ -280,9 +290,10 @@ not a reduced summary. Existing schema-1 fields remain stable:
 `source` and `span` remain offsets so tools can resolve them against the source
 they supplied or received. `notes` remains an array of strings; `related` is
 the separate array for located messages. New optional context fields are
-additive within schema 1, and consumers must ignore unknown fields. JSON
-preserves bounded process output even when human-mode output was streamed and
-includes deterministic truncation flags and limits. JSON must redact secrets,
+additive within schema 1, and consumers must ignore unknown fields. Captured
+`cause.stdout` and `cause.stderr` are no longer emitted: omission is the secrecy
+policy, rather than heuristic filtering of arbitrary process output. JSON
+preserves deterministic capture truncation flags and limits. JSON must redact secrets,
 contain no ANSI escapes, and use no terminal-width-dependent wrapping.
 
 ## Rendering Invariants
@@ -290,7 +301,7 @@ contain no ANSI escapes, and use no terminal-width-dependent wrapping.
 - Human, plain, and JSON representations preserve the same code, severity,
   message, primary source identity/span, and available context.
 - Human diagnostics place Kame's explanation before an underlying process
-  cause or captured process output.
+  cause metadata.
 - A renderer omits unavailable information; it never fabricates a source
   location, target path, command, or recovery action.
 - A renderer must tolerate diagnostics with no optional fields and must be able
@@ -320,6 +331,6 @@ contain no ANSI escapes, and use no terminal-width-dependent wrapping.
 - Given the same width, diagnostics wrap identically; plain and JSON output are
   invariant across terminal widths.
 - Schema-1 diagnostic additions are optional, additive, and preserve the
-  string-only `notes` representation. Captured cause data is bounded, exposes
-  truncation metadata, and redacts secrets.
+  string-only `notes` representation. Causes expose capture truncation metadata
+  but omit captured stdout/stderr. Live stream events remain unchanged.
 - Static `NO_MEMORY` formatting succeeds with a failing allocator.

@@ -8,6 +8,35 @@ import (
 
 type Kind int
 
+// KindName is the user-facing name of a value's kind, never its contents.
+func KindName(kind Kind) string {
+	switch kind {
+	case Nil:
+		return "nil"
+	case Bool:
+		return "bool"
+	case Int:
+		return "int"
+	case Float:
+		return "float"
+	case String:
+		return "string"
+	case Bytes:
+		return "bytes"
+	case List:
+		return "list"
+	case Record:
+		return "record"
+	case Callable:
+		return "callable"
+	case Resource:
+		return "resource"
+	case Pattern:
+		return "pattern"
+	}
+	return "unknown"
+}
+
 const (
 	Nil Kind = iota
 	Bool

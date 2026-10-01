@@ -24,6 +24,7 @@ type Program struct {
 	Nodes           []definitionNode
 	Diagnostics     []diagnostic.Diagnostic
 	OperationStates []operationState
+	SourceParts     []SourcePart
 	// Grants provide the ambient capability policy for lazy definitions. Rule
 	// rendering supplies its own context policy from the runtime.
 	Grants []Grant
@@ -37,11 +38,11 @@ type Program struct {
 	DefinitionEffectState any
 	// DirectHostRequests applies the embedding host's request loop to lazy
 	// definitions instead of requiring native build-graph resources.
-	DirectHostRequests            bool
-	DefinitionArgs               []core.Value
-	DefinitionArgsSet            bool
-	DefinitionCwd                string
-	Valid                        bool
+	DirectHostRequests bool
+	DefinitionArgs     []core.Value
+	DefinitionArgsSet  bool
+	DefinitionCwd      string
+	Valid              bool
 }
 
 // CompileResult separates registration diagnostics from an executable program.
@@ -145,6 +146,7 @@ func (p *Program) Free() {
 	if p == nil {
 		return
 	}
+	p.freeSourceParts()
 	p.Scope.Free()
 	p.Requests.Free()
 	for i := range p.Nodes {
@@ -338,7 +340,7 @@ func (p *Program) definition(engine *core.EngineContext, d *definition.Definitio
 	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState, DirectHostRequests: p.DirectHostRequests}
 	result := p.definitionValue(engine, d, p.Scope, context)
 	if engine == nil || !engine.Failed() {
-		attachFrame(&result, context, d.Span, "definition")
+		attachNamedFrame(&result, context, d.Span, "definition", d.Name)
 	}
 	attachSource(&result, context)
 	if !result.Waiting && !result.Completed && result.Stream == nil && result.Diagnostic.Code == "" && !result.Value.HasCallable() && p.DefinitionEffectSink != nil {

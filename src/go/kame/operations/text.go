@@ -11,15 +11,17 @@ import (
 
 func opJoin(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[0].Kind != core.List || v[1].Kind != core.String {
-		freeArgCallables(c, v)
-		return invalid()
+	if v[0].Kind != core.List {
+		return invalidArgument(c, v, 0, "list of strings")
+	}
+	if v[1].Kind != core.String {
+		return invalidArgument(c, v, 1, "string")
 	}
 	b := strings.NewBuilder(c.Run)
 	defer b.Free()
 	for i := range v[0].List {
 		if v[0].List[i].Kind != core.String {
-			return invalid()
+			return c.InvalidElement(0, i, "string", v[0].List[i].Kind)
 		}
 		if i != 0 {
 			b.WriteString(v[1].Text)
@@ -31,9 +33,11 @@ func opJoin(c *eval.Context, s any, v []core.Value) eval.Result {
 func opSplit(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	left, ok := text(v[0])
-	if !ok || v[1].Kind != core.String || v[1].Text == "" {
-		freeArgCallables(c, v)
-		return invalid()
+	if !ok {
+		return invalidArgument(c, v, 0, "string")
+	}
+	if v[1].Kind != core.String || v[1].Text == "" {
+		return invalidArgument(c, v, 1, "non-empty string")
 	}
 	var out []core.Value
 	for {
@@ -53,8 +57,7 @@ func opStrip(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	return eval.Result{Value: core.NewString(c.Run, strings.TrimSpace(value))}
 }
@@ -85,27 +88,33 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 func opIncludes(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	left, ok := text(v[0])
-	if !ok || v[1].Kind != core.String {
-		freeArgCallables(c, v)
-		return invalid()
+	if !ok {
+		return invalidArgument(c, v, 0, "string")
+	}
+	if v[1].Kind != core.String {
+		return invalidArgument(c, v, 1, "string")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.Contains(left, v[1].Text)}}
 }
 func opStarts(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	left, ok := text(v[0])
-	if !ok || v[1].Kind != core.String {
-		freeArgCallables(c, v)
-		return invalid()
+	if !ok {
+		return invalidArgument(c, v, 0, "string")
+	}
+	if v[1].Kind != core.String {
+		return invalidArgument(c, v, 1, "string")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.HasPrefix(left, v[1].Text)}}
 }
 func opEnds(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	left, ok := text(v[0])
-	if !ok || v[1].Kind != core.String {
-		freeArgCallables(c, v)
-		return invalid()
+	if !ok {
+		return invalidArgument(c, v, 0, "string")
+	}
+	if v[1].Kind != core.String {
+		return invalidArgument(c, v, 1, "string")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.HasSuffix(left, v[1].Text)}}
 }
@@ -113,8 +122,7 @@ func opUppercase(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToUpper(c.Run, value)}}
 }
@@ -122,8 +130,7 @@ func opLowercase(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToLower(c.Run, value)}}
 }
@@ -135,8 +142,7 @@ func opCat(c *eval.Context, s any, v []core.Value) eval.Result {
 	for i := range v {
 		text, ok := eval.Stringify(c.Run, v[i])
 		if !ok {
-			freeArgCallables(c, v)
-			return invalid()
+			return invalidArgument(c, v, i, "text-renderable scalar or list")
 		}
 		b.WriteString(text)
 		mem.FreeString(c.Run, text)
@@ -152,13 +158,12 @@ func opText(c *eval.Context, s any, v []core.Value) eval.Result {
 	case core.Bytes:
 		if !utf8.Valid(v[0].Bytes) {
 			freeArgCallables(c, v)
-			return invalid()
+			return c.InvalidOperation("argument 1 contains bytes that are not valid UTF-8")
 		}
 		// Copy bytes as a string; Bytes holds binary, String holds UTF-8 text.
 		b := mem.AllocSlice[byte](c.Run, len(v[0].Bytes), len(v[0].Bytes))
 		copy(b, v[0].Bytes)
 		return eval.Result{Value: core.Value{Kind: core.String, Text: string(b)}}
 	}
-	freeArgCallables(c, v)
-	return invalid()
+	return invalidArgument(c, v, 0, "string or UTF-8 bytes")
 }

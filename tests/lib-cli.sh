@@ -302,6 +302,15 @@ function cli_expect_stdout_file { # FILE [MESSAGE]
 	fi
 }
 
+function cli_expect_stdout_matches { # REGEX [MESSAGE]
+	local pattern="$1"
+	if grep -Eq "$pattern" "$CLI_OUT"; then
+		test-ok "${2:-stdout matches $pattern}"
+	else
+		test-fail "${2:-stdout does not match $pattern}: $(test_fmt_line "$(cat "$CLI_OUT")")"
+	fi
+}
+
 function cli_expect_stdout_empty { # [MESSAGE]
 	if [ -s "$CLI_OUT" ]; then
 		test-fail "${1:-stdout is not empty}: $(test_fmt_line "$(cat "$CLI_OUT")")"

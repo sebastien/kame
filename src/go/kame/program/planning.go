@@ -51,7 +51,9 @@ func (p *Program) Plan(target string) PlanResult {
 				plan.Free(p.Alloc)
 				return PlanResult{Diagnostic: d}
 			}
-			for j := before; j < len(plan.Inputs); j++ { plan.DynamicInputs = slices.Append(p.Alloc, plan.DynamicInputs, cloneText(p.Alloc, plan.Inputs[j])) }
+			for j := before; j < len(plan.Inputs); j++ {
+				plan.DynamicInputs = slices.Append(p.Alloc, plan.DynamicInputs, cloneText(p.Alloc, plan.Inputs[j]))
+			}
 			continue
 		}
 		if input.Kind == rule.InputTemplate {
@@ -82,6 +84,12 @@ func (p *Program) Plan(target string) PlanResult {
 // rendering or running a recipe. It is intended for graph inspection: unlike
 // Plan, it may perform granted read-only host operations such as wildcard.
 func (p *Program) ExpandPlan(target string) PlanResult {
+	return p.expandPlan(target, false)
+}
+
+// expandPlan may yield to an embedding host while retaining inspection interest.
+// Retrying the query resumes the same node; no recipe producer is instantiated.
+func (p *Program) expandPlan(target string, yield bool) PlanResult {
 	result := p.Plan(target)
 	if result.Diagnostic.Code != "" || result.Plan.Rule == nil || !hasExpressionInput(result.Plan.Rule) {
 		return result
@@ -92,23 +100,39 @@ func (p *Program) ExpandPlan(target string) PlanResult {
 	p.Eval.SetDefinitionDependencyObserver(observeInspectionDependency, p)
 	defer p.Eval.SetDefinitionDependencyObserver(previousObserver, previousState)
 	index := len(p.Instances)
-	state := mem.Alloc[instanceState](p.Alloc)
-	state.Program, state.Index = p, index
-	keyName := "\x00span:" + target
-	key := core.NewResourceKey(p.Alloc, core.ResourceTarget, keyName)
-	node := p.Engine.AddOwned(key, expandPlanProduce, state, freeInstanceState)
-	key.Free(p.Alloc)
-	if node == nil {
-		mem.Free(p.Alloc, state)
-		result.Plan.Free(p.Alloc)
-		return PlanResult{Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot create input resolver")}
+	var node *core.Node
+	for i := range p.Instances {
+		if p.Instances[i].Inspection && p.Instances[i].Plan.Target == target {
+			index, node = i, p.Instances[i].Node
+			break
+		}
 	}
-	p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: result.Plan.Rule, Captures: cloneCaptures(p.Alloc, result.Plan.Captures), Node: node, Plan: clonePlan(p.Alloc, result.Plan), Inspection: true})
-	root := p.Engine.RequestRoot(node)
+	if node == nil {
+		state := mem.Alloc[instanceState](p.Alloc)
+		state.Program, state.Index = p, index
+		keyName := "\x00span:" + target
+		key := core.NewResourceKey(p.Alloc, core.ResourceTarget, keyName)
+		node = p.Engine.AddOwned(key, expandPlanProduce, state, freeInstanceState)
+		key.Free(p.Alloc)
+		if node == nil {
+			mem.Free(p.Alloc, state)
+			result.Plan.Free(p.Alloc)
+			return PlanResult{Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot create input resolver")}
+		}
+		p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: result.Plan.Rule, Captures: cloneCaptures(p.Alloc, result.Plan.Captures), Node: node, Plan: clonePlan(p.Alloc, result.Plan), Inspection: true})
+	}
+	if p.Instances[index].inspectionRoot == nil {
+		p.Instances[index].inspectionRoot = p.Engine.RequestRoot(node)
+	}
 	for node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
 		p.Tick(0)
+		if yield && len(p.Outbound) != 0 {
+			result.Plan.Free(p.Alloc)
+			return PlanResult{Waiting: true}
+		}
 	}
-	p.Engine.Release(root)
+	p.Engine.Release(p.Instances[index].inspectionRoot)
+	p.Instances[index].inspectionRoot = nil
 	if node.State != core.NodeComplete {
 		result.Plan.Free(p.Alloc)
 		return PlanResult{Diagnostic: node.Diagnostic.Clone(p.Alloc)}
@@ -121,7 +145,9 @@ func (p *Program) ExpandPlan(target string) PlanResult {
 
 func hasExpressionInput(r *rule.Rule) bool {
 	for i := range r.Inputs {
-		if r.Inputs[i].Kind == rule.InputExpression { return true }
+		if r.Inputs[i].Kind == rule.InputExpression {
+			return true
+		}
 	}
 	return false
 }
@@ -135,7 +161,9 @@ func expandPlanProduce(c *core.EngineContext, nodeID int64) core.ProducerResult 
 		return core.ProducerFailed
 	}
 	resolved := p.resolveInputs(c, &p.Instances[state.Index])
-	if resolved.Waiting { return core.ProducerWaiting }
+	if resolved.Waiting {
+		return core.ProducerWaiting
+	}
 	if resolved.Diagnostic.Code != "" {
 		c.Fail(resolved.Diagnostic)
 		return core.ProducerFailed
@@ -169,6 +197,12 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	}
 	if context.PhaseInvalid() || len(context.Effects) != 0 {
 		eval.FreeEffects(p.Alloc, context.Effects)
+		if result.Diagnostic.Code != "" {
+			d := result.Diagnostic
+			result.Diagnostic = diagnostic.Diagnostic{}
+			result.Free(p.Alloc)
+			return d
+		}
 		result.Free(p.Alloc)
 		return failure(p.Alloc, "PHASE_INVALID", "build effects are invalid while planning")
 	}

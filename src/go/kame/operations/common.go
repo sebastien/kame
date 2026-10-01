@@ -11,7 +11,11 @@ func truth(v core.Value) bool { return v.Kind != core.Nil && !(v.Kind == core.Bo
 func failure(code string, message string) eval.Result {
 	return eval.Result{Diagnostic: core.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message, Owned: false}}
 }
-func invalid() eval.Result { return failure("EXPR_INVALID", "invalid operation arguments") }
+func invalidArgument(c *eval.Context, values []core.Value, index int, expected string) eval.Result {
+	result := c.InvalidArgument(index, expected, values[index].Kind)
+	freeArgCallables(c, values)
+	return result
+}
 
 // freeArgCallables releases top-level callables in rejected arguments. The
 // caller shallow-frees v afterwards, so wrappers must be freed here or they

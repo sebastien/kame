@@ -37,6 +37,8 @@ type Diagnostic struct {
 type Source struct {
 	Name string
 	Text string
+	// Expanded text combines authored include segments and is not a file excerpt.
+	Expanded bool
 }
 
 func clone(a mem.Allocator, text string) string {

@@ -24,7 +24,7 @@ func TestCloneOwnsStructuredDiagnosticContext(t *testing.T) {
 		Frames:      []diagnostic.Frame{{Kind: "rule", Label: "build", Source: "Makefile.kmk", Span: diagnostic.Span{Start: 1, End: 7}}},
 		TargetStack: []string{"all", "build"},
 		Tips:        []string{"check the compiler"},
-		Cause:       diagnostic.Cause{Kind: "process", Message: "shell exited", Program: "sh", Status: 127, HasStatus: true, Stderr: "not found"},
+		Cause:       diagnostic.Cause{Kind: "process", Message: "shell exited", Program: "sh", Status: 127, HasStatus: true, StderrTruncated: true, StderrLimit: 64},
 	}
 	copy := d.Clone(a)
 	if !copy.Owned || len(copy.Related) != 1 || copy.Frames[0].Kind != "rule" || len(copy.TargetStack) != 2 || copy.Cause.Status != 127 {

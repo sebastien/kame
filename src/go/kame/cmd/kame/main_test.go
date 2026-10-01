@@ -398,10 +398,10 @@ func TestUnknownPathTargetSuggestsExplicitPrefix(t *testing.T) {
 
 func TestDiagnosticJSONCarriesStructuredContext(t *testing.T) {
 	var out bytes.Buffer
-	d := diagnostic.Diagnostic{Code: "RECIPE_FAIL", Severity: diagnostic.Error, Message: "recipe exited unsuccessfully", Source: "Makefile.kmk", Span: diagnostic.Span{Start: 4, End: 7}, Related: []diagnostic.Related{{Message: "declared here", Source: "Makefile.kmk", Span: diagnostic.Span{Start: 0, End: 3}}}, Frames: []diagnostic.Frame{{Kind: "rule", Label: "build", Source: "Makefile.kmk", Span: diagnostic.Span{Start: 0, End: 7}}}, Target: "build", TargetStack: []string{"all", "build"}, Tips: []string{"check the compiler"}, Cause: diagnostic.Cause{Kind: "process", Message: "shell exited", Program: "sh", Status: 127, HasStatus: true, Stderr: "not found", StderrLimit: 64}}
+	d := diagnostic.Diagnostic{Code: "RECIPE_FAIL", Severity: diagnostic.Error, Message: "recipe exited unsuccessfully", Source: "Makefile.kmk", Span: diagnostic.Span{Start: 4, End: 7}, Related: []diagnostic.Related{{Message: "declared here", Source: "Makefile.kmk", Span: diagnostic.Span{Start: 0, End: 3}}}, Frames: []diagnostic.Frame{{Kind: "rule", Label: "build", Source: "Makefile.kmk", Span: diagnostic.Span{Start: 0, End: 7}}}, Target: "build", TargetStack: []string{"all", "build"}, Tips: []string{"check the compiler"}, Cause: diagnostic.Cause{Kind: "process", Message: "shell exited", Program: "sh", Status: 127, HasStatus: true, StderrTruncated: true, StderrLimit: 64}}
 	writeJSONDiagnostic(&out, d)
 	text := out.String()
-	for _, field := range []string{`"related"`, `"kind":"rule"`, `"targetStack":["all","build"]`, `"tips":["check the compiler"]`, `"cause":{"kind":"process"`, `"status":127`} {
+	for _, field := range []string{`"related"`, `"kind":"rule"`, `"targetStack":["all","build"]`, `"tips":["check the compiler"]`, `"cause":{"kind":"process"`, `"status":127`, `"stderrTruncated":true`, `"stderrLimit":64`} {
 		if !strings.Contains(text, field) {
 			t.Errorf("JSON diagnostic missing %s: %s", field, text)
 		}

@@ -49,10 +49,30 @@ The exported C ABI provides conceptual operations for:
 - Next event metadata and payload copy.
 - Host completion success or failure.
 - Diagnostic retrieval.
+- Tool declaration, host-supplied tool path, and target-scoped tool checks.
+- Inspection capability policy for read-only dependency resolution.
+
+The tool and inspection operations are the WASM counterpart of the native
+`do tools`/`do tools check` surface described in `009-cli.md`. `kame_wasm_tools`
+copies the declared tool names; `kame_wasm_set_tool_path` supplies a
+host-resolved executable (an empty path marks an unavailable tool);
+`kame_wasm_tools_check` walks a selected target's dependency plan and returns
+schema-1 diagnostic JSON Lines without executing a recipe; and
+`kame_wasm_inspection_grant` configures the capability policy used while
+resolving read-only computed inputs (an empty capability clears the defaults).
+`kame_wasm_tools_check` may return `KAME_WASM_HOST_NEEDED` when inspection must
+forward a filesystem or environment request to the embedding host; the host
+steps, services the request, and retries the query, which resumes the same
+resolver rather than restarting it.
 
 Exact symbol names are implementation details, but the ABI must use fixed-width
 integers, pointer-plus-length byte strings, and caller-owned output buffers.
 No C struct layout containing pointers is exposed directly to JavaScript.
+
+Every exported symbol is listed explicitly in the build's link line
+(`-Wl,--export=...`) in both `Makefile` and `Makefile.kmk`; the C source does not
+carry per-symbol `export_name` attributes, so the manifest stays the single
+source of truth for the module's public surface.
 
 Every returned handle belongs to one global module handle table and encodes a
 table index plus a generation. Its table entry records the owning instance.
@@ -207,4 +227,6 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 - Exit statuses and stream separation match `009-cli.md`.
 - An invocation that needs a capability absent from the current stage reports
   `FEATURE_UNSUP`.
+- `do tools check TARGETS...` resolves host paths, forwards read-only filesystem
+  and environment requests, and reports missing tools without executing a recipe.
 - `--wasm-abi-info` and `--wasm-self-test` report the current stage's ABI.

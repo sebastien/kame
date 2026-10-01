@@ -8,6 +8,7 @@ import (
 	"kame/lang/source"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strconv"
 )
 
 func (p *Program) application(scope *Scope, expression *expr.Expr, context *Context) Result {
@@ -49,7 +50,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 				operation := p.Registry.lookup(aliased)
 				if operation != nil {
 					result := p.operation(scope, operation, expression.Items[1:], context, expression.Span)
-					attachFrame(&result, context, expression.Span, "operation")
+					attachNamedFrame(&result, context, expression.Span, "operation", head.Text)
 					return result
 				}
 			}
@@ -63,7 +64,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 			callee.Diagnostic.Free(context.Run)
 			if operation != nil {
 				result := p.operation(scope, operation, expression.Items[1:], context, expression.Span)
-				attachFrame(&result, context, expression.Span, "operation")
+				attachNamedFrame(&result, context, expression.Span, "operation", head.Text)
 				return result
 			}
 			return failure(context.Run, "OP_UNKNOWN", head.Span, "unknown operation: "+head.Text)
@@ -111,14 +112,14 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 		return Result{Waiting: true}
 	}
 	if len(arguments) < operation.MinArity || (operation.MaxArity >= 0 && len(arguments) > operation.MaxArity) {
-		return failure(context.Run, "EXPR_INVALID", span, "invalid operation arity")
+		return arityFailure(context.Run, span, operation.Name, len(arguments), operation.MinArity, operation.MaxArity)
 	}
 	if context.OperationObserver != nil {
 		context.OperationObserver(context.ResolverState, operation.Name, operation.Version)
 	}
 	for i := range operation.Capabilities {
 		if !context.allowed(operation.Capabilities[i]) {
-			return failure(context.Run, "CAP_DENIED", span, "operation capability denied")
+			return failure(context.Run, "CAP_DENIED", span, "`"+operation.Name+"` requires a capability that was not granted")
 		}
 	}
 	values := slices.Make[core.Value](context.Run, len(arguments))
@@ -132,16 +133,32 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 		values[i] = r.Value
 	}
 	previousCapabilities, previousSpan, previousStart, previousEnd := context.activeCapabilities, context.Span, context.operationStart, context.operationEnd
+	previousName, previousArguments := context.OperationName, context.operationArguments
+	context.OperationName, context.operationArguments = operation.Name, arguments
 	context.denied, context.activeCapabilities, context.Span = false, operation.Capabilities, span
 	context.operationStart, context.operationEnd = span.Start, span.End
 	result := operation.Call(context, operation.Context, values)
+	if result.Diagnostic.Code != "" && !result.Diagnostic.Owned {
+		owned := result.Diagnostic.Clone(context.Run)
+		result.Diagnostic.Free(context.Run)
+		result.Diagnostic = owned
+	}
+	// Legacy/custom operations can return a source-neutral diagnostic. Supply
+	// the call site only when no authored primary location has been established.
+	if result.Diagnostic.Code != "" && result.Diagnostic.Source == "" {
+		if result.Diagnostic.Span.Start == 0 && result.Diagnostic.Span.End == 0 {
+			result.Diagnostic.Span = diagnostic.Span{Start: span.Start, End: span.End}
+		}
+		attachSource(&result, context)
+	}
+	context.OperationName, context.operationArguments = previousName, previousArguments
 	context.activeCapabilities, context.Span, context.operationStart, context.operationEnd = previousCapabilities, previousSpan, previousStart, previousEnd
 	// Transfer: the operation freed consumed callables through FreeCallable;
 	// release only storage here so shared wrappers are not freed twice.
 	freeValues(context.Run, values)
 	if context.denied {
 		result.Free(context.Run)
-		return failure(context.Run, "CAP_DENIED", span, "operation capability denied")
+		return failure(context.Run, "CAP_DENIED", span, "`"+operation.Name+"` requires a capability that was not granted")
 	}
 	return result
 }
@@ -168,7 +185,7 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
 	if function.NativeCall != nil {
 		if len(values) != function.Arity {
-			return failure(context.Run, "EXPR_INVALID", span, "invalid function arity")
+			return arityFailure(context.Run, span, "function", len(values), function.Arity, function.Arity)
 		}
 		return function.NativeCall(context, function.Native, values)
 	}
@@ -178,7 +195,15 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		fixed--
 	}
 	if len(values) < fixed || (!rest && len(values) != fixed) {
-		return failure(context.Run, "EXPR_INVALID", span, "invalid function arity")
+		name := "function"
+		if function.Definition != nil {
+			name = function.Definition.Name
+		}
+		max := fixed
+		if rest {
+			max = -1
+		}
+		return arityFailure(context.Run, span, name, len(values), fixed, max)
 	}
 	child := newScope(context.Run, function.Scope)
 	defer child.Free()
@@ -214,11 +239,15 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		result = p.body(child, function.Body, context)
 	}
 	context.Args, context.Scope, context.HasArgs = previousArgs, previousScope, previousHasArgs
-	attachFrame(&result, context, span, "call")
+	label := "function"
+	if function.Definition != nil {
+		label = function.Definition.Name
+	}
+	attachNamedFrame(&result, context, span, "call", label)
 	return result
 }
 
-func attachFrame(result *Result, context *Context, span source.Span, label string) {
+func attachNamedFrame(result *Result, context *Context, span source.Span, kind string, label string) {
 	if result.Diagnostic.Code == "" {
 		return
 	}
@@ -226,13 +255,18 @@ func attachFrame(result *Result, context *Context, span source.Span, label strin
 	if a == nil {
 		a = mem.System
 	}
-	frameLabel, frameKind, frameSource := label, label, context.Source
+	location := context.Program.LocateSource(context.Source, span)
+	if context.Source != "" && location.Source == "" {
+		return
+	}
+	span = location.Span
+	frameLabel, frameKind, frameSource := label, kind, location.Source
 	// An owned diagnostic releases every frame label. Static frame labels must
 	// therefore be cloned before becoming part of its owned frame slice.
 	if result.Diagnostic.Owned {
 		frameLabel = owned(a, label)
-		frameKind = owned(a, label)
-		frameSource = owned(a, context.Source)
+		frameKind = owned(a, kind)
+		frameSource = owned(a, location.Source)
 	}
 	for i := range result.Diagnostic.Frames {
 		frame := result.Diagnostic.Frames[i]
@@ -246,4 +280,20 @@ func attachFrame(result *Result, context *Context, span source.Span, label strin
 		}
 	}
 	result.Diagnostic.Frames = slices.Append(a, result.Diagnostic.Frames, diagnostic.Frame{Kind: frameKind, Label: frameLabel, Source: frameSource, Span: diagnostic.Span{Start: span.Start, End: span.End}})
+}
+
+func arityFailure(a mem.Allocator, span source.Span, name string, count int, min int, max int) Result {
+	var countBuffer, minBuffer, maxBuffer [strconv.MaxIntBase10Len]byte
+	got := strconv.FormatInt(countBuffer[:], int64(count), 10)
+	expected := strconv.FormatInt(minBuffer[:], int64(min), 10)
+	if max < 0 {
+		expected = "at least " + expected
+	} else if max != min {
+		expected += " to " + strconv.FormatInt(maxBuffer[:], int64(max), 10)
+	}
+	unit := "arguments"
+	if min == 1 && (max == 1 || max < 0) {
+		unit = "argument"
+	}
+	return failure(a, "EXPR_INVALID", span, "`"+name+"` expects "+expected+" "+unit+"; got "+got)
 }

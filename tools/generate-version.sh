@@ -4,7 +4,7 @@ set -euo pipefail
 root="$(realpath "$(dirname "${BASH_SOURCE[0]}")/..")"
 version="$(cat "$root/VERSION")"
 build_id="$(git -C "$root" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
-build_time="${KAME_BUILD_TIME:-$(date -u '+%Y-%m-%dT%H:%M:%SZ')}"
+build_time="${KAME_BUILD_TIME:-development}"
 build_mode="${KAME_BUILD_MODE:-development}"
 
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then

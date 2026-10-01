@@ -160,8 +160,11 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 	}
 	if !json && progress.Completed+progress.Failed != 0 {
 		elapsedMS := (time.Now().UnixNano() - startedAt) / 1000000
-		if progress.Failed == 0 { fmt.Fprintf(errOut, "Summary: %d %s complete in %d.%03ds\n", progress.Completed, targetWord(progress.Completed), elapsedMS/1000, elapsedMS%1000)
-		} else { fmt.Fprintf(errOut, "Summary: %d complete, %d failed in %d.%03ds\n", progress.Completed, progress.Failed, elapsedMS/1000, elapsedMS%1000) }
+		if progress.Failed == 0 {
+			fmt.Fprintf(errOut, "Summary: %d %s complete in %d.%03ds\n", progress.Completed, targetWord(progress.Completed), elapsedMS/1000, elapsedMS%1000)
+		} else {
+			fmt.Fprintf(errOut, "Summary: %d complete, %d failed in %d.%03ds\n", progress.Completed, progress.Failed, elapsedMS/1000, elapsedMS%1000)
+		}
 	}
 	if failed || cancelling {
 		return 1
@@ -170,11 +173,17 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 }
 
 func targetWord(count int) string {
-	if count == 1 { return "target" }
+	if count == 1 {
+		return "target"
+	}
 	return "targets"
 }
 
-type buildProgress struct { Active int; Completed int; Failed int }
+type buildProgress struct {
+	Active    int
+	Completed int
+	Failed    int
+}
 
 func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool, progress *buildProgress) {
 	for {
@@ -193,11 +202,15 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			progress.Active++
 			fmt.Fprintf(errOut, "[%s] started (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
 		} else if event.Kind == program.TargetCompleted {
-			if progress.Active != 0 { progress.Active-- }
+			if progress.Active != 0 {
+				progress.Active--
+			}
 			progress.Completed++
 			fmt.Fprintf(errOut, "[%s] complete (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
 		} else if event.Kind == program.TargetFailed || event.Kind == program.TargetCancelled {
-			if progress.Active != 0 { progress.Active-- }
+			if progress.Active != 0 {
+				progress.Active--
+			}
 			progress.Failed++
 			fmt.Fprintf(errOut, "[%s] failed (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
 		} else if event.Kind == program.CacheWarning {
@@ -257,7 +270,11 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 			io.WriteString(out, "  required by ")
 			for i := range d.TargetStack {
 				if i != 0 {
-					if diagnosticFormat == "human" { io.WriteString(out, " → ") } else { io.WriteString(out, " -> ") }
+					if diagnosticFormat == "human" {
+						io.WriteString(out, " → ")
+					} else {
+						io.WriteString(out, " -> ")
+					}
 				}
 				io.WriteString(out, d.TargetStack[i])
 			}
@@ -289,12 +306,8 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 	for i := range d.Related {
 		io.WriteString(out, "note: ")
 		if d.Related[i].Source != "" {
-			if renderSource != nil && renderSource.Name == d.Related[i].Source {
-				position := renderSource.Position(d.Related[i].Span.Start)
-				fmt.Fprintf(out, "%s:%d:%d: ", d.Related[i].Source, position.Line, position.Column)
-			} else {
-				fmt.Fprintf(out, "%s: ", d.Related[i].Source)
-			}
+			writeDiagnosticLocation(out, d.Related[i].Source, d.Related[i].Span.Start, renderSource)
+			io.WriteString(out, ": ")
 		}
 		io.WriteString(out, d.Related[i].Message)
 		io.WriteString(out, "\n")
@@ -307,12 +320,8 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 		}
 		io.WriteString(out, d.Frames[i].Label)
 		if d.Frames[i].Source != "" {
-			if renderSource != nil && renderSource.Name == d.Frames[i].Source {
-				position := renderSource.Position(d.Frames[i].Span.Start)
-				fmt.Fprintf(out, " at %s:%d:%d", d.Frames[i].Source, position.Line, position.Column)
-			} else {
-				fmt.Fprintf(out, " at %s", d.Frames[i].Source)
-			}
+			io.WriteString(out, " at ")
+			writeDiagnosticLocation(out, d.Frames[i].Source, d.Frames[i].Span.Start, renderSource)
 		}
 		io.WriteString(out, "\n")
 	}
@@ -331,24 +340,6 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 			fmt.Fprintf(out, " (signal %d)", d.Cause.Signal)
 		}
 		io.WriteString(out, "\n")
-		if !d.Cause.OutputWasStreamed {
-			if d.Cause.Stderr != "" {
-				io.WriteString(out, "  │ ")
-				io.WriteString(out, d.Cause.Stderr)
-				if d.Cause.StderrTruncated {
-					io.WriteString(out, " [truncated]")
-				}
-				io.WriteString(out, "\n")
-			}
-			if d.Cause.Stdout != "" {
-				io.WriteString(out, "  │ ")
-				io.WriteString(out, d.Cause.Stdout)
-				if d.Cause.StdoutTruncated {
-					io.WriteString(out, " [truncated]")
-				}
-				io.WriteString(out, "\n")
-			}
-		}
 	}
 	if diagnosticColor == "always" {
 		io.WriteString(out, "\x1b[0m")
@@ -362,7 +353,7 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 // file-backed primary source is loaded only for rendering and is never exposed
 // to JSON or stored in the diagnostic.
 func diagnosticSource(name string, primary *source.Source) (*source.Source, bool) {
-	if name == "" || (primary != nil && primary.Name == name) {
+	if name == "" || (primary != nil && primary.Name == name && !primary.Expanded) {
 		return primary, false
 	}
 	data, readErr := os.ReadFile(mem.System, name)
@@ -372,6 +363,19 @@ func diagnosticSource(name string, primary *source.Source) (*source.Source, bool
 	loaded := source.New(mem.System, name, string(data))
 	mem.FreeSlice(mem.System, data)
 	return loaded, true
+}
+
+func writeDiagnosticLocation(out io.Writer, name string, offset int, primary *source.Source) {
+	src, loaded := diagnosticSource(name, primary)
+	if src != nil && src.Name == name {
+		position := src.Position(offset)
+		fmt.Fprintf(out, "%s:%d:%d", name, position.Line, position.Column)
+	} else {
+		io.WriteString(out, name)
+	}
+	if loaded {
+		src.Free(mem.System)
+	}
 }
 
 func writeWrappedExcerpt(out io.Writer, text string, lineStart int, lineEnd int, start int, end int, width int) {
@@ -415,9 +419,11 @@ func excerptSegmentEnd(text string, start int, limit int, width int) int {
 }
 
 func writeMarker(out io.Writer, text string, lineStart int, start int, end int, lineEnd int) {
+	column := 1
 	for i := lineStart; i < start; {
 		if text[i] == '\t' {
 			io.WriteString(out, "\t")
+			column += 8 - (column-1)%8
 			i++
 			continue
 		}
@@ -428,6 +434,7 @@ func writeMarker(out io.Writer, text string, lineStart int, start int, end int, 
 		for n := 0; n < source.DisplayWidth(r); n++ {
 			io.WriteString(out, " ")
 		}
+		column += source.DisplayWidth(r)
 		i += width
 	}
 	if end < start {
@@ -439,7 +446,8 @@ func writeMarker(out io.Writer, text string, lineStart int, start int, end int, 
 	width := 0
 	for i := start; i < end; {
 		if text[i] == '\t' {
-			width += 8
+			cells := 8 - (column-1)%8
+			width, column = width+cells, column+cells
 			i++
 			continue
 		}
@@ -447,7 +455,8 @@ func writeMarker(out io.Writer, text string, lineStart int, start int, end int, 
 		if size == 0 {
 			break
 		}
-		width += source.DisplayWidth(r)
+		cells := source.DisplayWidth(r)
+		width, column = width+cells, column+cells
 		i += size
 	}
 	if width < 1 {

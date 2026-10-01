@@ -68,14 +68,16 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 	values := v[1].List
 	if v[0].Kind != core.Callable {
 		if v[1].Kind != core.Callable {
-			freeArgCallables(c, v)
-			return invalid()
+			return invalidArgument(c, v, 1, "callable when argument 1 is a value")
 		}
 		callback = &v[1]
-		if v[0].Kind == core.List { values = v[0].List } else { values = v[:1] }
+		if v[0].Kind == core.List {
+			values = v[0].List
+		} else {
+			values = v[:1]
+		}
 	} else if v[1].Kind != core.List {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 1, "list")
 	}
 	defer c.FreeCallable(callback)
 	state := callbackProgress(c)
@@ -90,6 +92,7 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 		}
 		if flatten {
 			if result.Value.Kind != core.List {
+				d := c.InvalidOperation("callback must return list; got " + core.KindName(result.Value.Kind))
 				// The callback returned a scalar: nothing shares it, so
 				// release a bare wrapper before the shallow free.
 				if result.Value.Kind == core.Callable {
@@ -97,7 +100,7 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 				}
 				result.Value.Free(c.Run)
 				discardCallback(c, state)
-				return invalid()
+				return d
 			}
 			for j := range result.Value.List {
 				state.Values = slices.Append(c.Run, state.Values, result.Value.List[j].Clone(c.Run))
@@ -118,14 +121,15 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 	callback := &v[0]
 	values := v[1].List
 	if v[0].Kind != core.Callable {
-		if v[0].Kind != core.List || v[1].Kind != core.Callable {
-			freeArgCallables(c, v)
-			return invalid()
+		if v[0].Kind != core.List {
+			return invalidArgument(c, v, 0, "callable or list")
+		}
+		if v[1].Kind != core.Callable {
+			return invalidArgument(c, v, 1, "callable")
 		}
 		callback, values = &v[1], v[0].List
 	} else if v[1].Kind != core.List {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 1, "list")
 	}
 	defer c.FreeCallable(callback)
 	state := callbackProgress(c)
@@ -154,9 +158,11 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 }
 func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[0].Kind != core.Callable || v[1].Kind != core.List {
-		freeArgCallables(c, v)
-		return invalid()
+	if v[0].Kind != core.Callable {
+		return invalidArgument(c, v, 0, "callable")
+	}
+	if v[1].Kind != core.List {
+		return invalidArgument(c, v, 1, "list")
 	}
 	defer c.FreeCallable(&v[0])
 	state := callbackProgress(c)
@@ -206,9 +212,11 @@ func opConcat(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opSlice(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[1].Kind != core.Int || (len(v) == 3 && v[2].Kind != core.Int) {
-		freeArgCallables(c, v)
-		return invalid()
+	if v[1].Kind != core.Int {
+		return invalidArgument(c, v, 1, "int")
+	}
+	if len(v) == 3 && v[2].Kind != core.Int {
+		return invalidArgument(c, v, 2, "int")
 	}
 	length := 0
 	if v[0].Kind == core.List {
@@ -216,8 +224,7 @@ func opSlice(c *eval.Context, s any, v []core.Value) eval.Result {
 	} else if v[0].Kind == core.String {
 		length = utf8.RuneCountInString(v[0].Text)
 	} else {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "list or string")
 	}
 	start, end := int(v[1].Int), length
 	if len(v) == 3 {
@@ -230,7 +237,7 @@ func opSlice(c *eval.Context, s any, v []core.Value) eval.Result {
 		end += length
 	}
 	if start < 0 || end < start || end > length {
-		return invalid()
+		return c.InvalidOperation("slice bounds must satisfy 0 <= start <= end <= length after resolving negative indices")
 	}
 	if v[0].Kind == core.List {
 		return eval.Result{Value: core.NewList(c.Run, v[0].List[start:end])}
@@ -279,8 +286,7 @@ func compare(left core.Value, right core.Value) int {
 func opSorted(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.List {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "list")
 	}
 	out := core.NewList(c.Run, v[0].List)
 	for i := 1; i < len(out.List); i++ {
@@ -288,7 +294,7 @@ func opSorted(c *eval.Context, s any, v []core.Value) eval.Result {
 			order := compare(out.List[j-1], out.List[j])
 			if order == 2 {
 				out.Free(c.Run)
-				return invalid()
+				return c.InvalidOperation("argument 1 must contain comparable values of the same kind (nil, bool, int, float, or string)")
 			}
 			if order <= 0 {
 				break
@@ -301,8 +307,7 @@ func opSorted(c *eval.Context, s any, v []core.Value) eval.Result {
 func opUnique(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.List {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "list")
 	}
 	var out []core.Value
 	for i := range v[0].List {
@@ -311,7 +316,7 @@ func opUnique(c *eval.Context, s any, v []core.Value) eval.Result {
 			order := compare(out[j], v[0].List[i])
 			if order == 2 {
 				freeValues(c, out)
-				return invalid()
+				return c.InvalidOperation("argument 1 must contain comparable values of the same kind (nil, bool, int, float, or string)")
 			}
 			if order == 0 {
 				found = true

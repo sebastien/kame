@@ -38,7 +38,9 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 					context.DependencyObserver(context.ResolverState, key)
 				}
 				key.Free(context.Run)
-				if !current { return Result{Waiting: true} }
+				if !current {
+					return Result{Waiting: true}
+				}
 			} else {
 				key.Free(context.Run)
 			}
@@ -52,6 +54,7 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 			r = p.evaluate(context.Engine, scope, part.Expr, context)
 		}
 		if r.Waiting || r.Diagnostic.Code != "" {
+			attachSource(&r, context)
 			return r
 		}
 		text, ok := stringify(run, r.Value)

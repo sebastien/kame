@@ -29,14 +29,17 @@ type Runtime struct {
 	ExprParsed *script.Script
 	// Target mode uses the portable build runtime with an in-memory host. It is
 	// mutually exclusive with the single-expression mode above.
-	Host        *MemoryHost
-	Program     *program.Program
-	Handle      *program.Handle
-	Environment []string
-	Forwarding  bool
-	EventJSON   []byte
-	Effects     []eval.Effect
-	EffectIndex int
+	Host             *MemoryHost
+	Program          *program.Program
+	Handle           *program.Handle
+	Environment      []string
+	ToolPaths        []program.Tool
+	InspectionGrants []eval.Grant
+	InspectionPolicy bool
+	Forwarding       bool
+	EventJSON        []byte
+	Effects          []eval.Effect
+	EffectIndex      int
 	// Directory is the working directory the build runtime canonicalizes
 	// against. It defaults to "." and the host may set the absolute cwd.
 	Directory string
@@ -148,6 +151,9 @@ func (r *Runtime) Prepare() PureResult {
 	}
 	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}}
 	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: r.Environment, Grants: grants, ForwardRequests: r.Forwarding}
+	if r.InspectionPolicy {
+		options.Grants = r.InspectionGrants
+	}
 	compiled := program.Compile(r.Alloc, r.Parsed, r.Registry, options)
 	if compiled.Program == nil {
 		r.Host = nil
@@ -156,7 +162,103 @@ func (r *Runtime) Prepare() PureResult {
 	}
 	r.Host = nil
 	r.Program = compiled.Program
+	r.applyToolPaths()
 	return PureResult{}
+}
+
+// InspectionGrant configures the same capability policy used by the native
+// driver. An empty capability clears defaults; names are optional scope roots.
+func (r *Runtime) InspectionGrant(capability string, name string) bool {
+	if r == nil || r.Program != nil {
+		return false
+	}
+	if capability == "" {
+		for i := range r.InspectionGrants {
+			for j := range r.InspectionGrants[i].Names {
+				mem.FreeString(r.Alloc, r.InspectionGrants[i].Names[j])
+			}
+			slices.Free(r.Alloc, r.InspectionGrants[i].Names)
+		}
+		slices.Free(r.Alloc, r.InspectionGrants)
+		r.InspectionGrants = nil
+		r.InspectionPolicy = true
+		return true
+	}
+	grant := eval.Grant{}
+	switch capability {
+	case "read":
+		grant.Capability = eval.Read
+	case "write":
+		grant.Capability = eval.Write
+	case "run":
+		grant.Capability = eval.Run
+	case "env":
+		grant.Capability = eval.Env
+	default:
+		return false
+	}
+	if name != "" {
+		grant.Names = slices.Append(r.Alloc, grant.Names, pureText(r.Alloc, name))
+	}
+	r.InspectionGrants = slices.Append(r.Alloc, r.InspectionGrants, grant)
+	r.InspectionPolicy = true
+	return true
+}
+
+// SetToolPath supplies host-resolved paths without treating unused missing tools
+// as compilation failures. Paths may be supplied before target compilation.
+func (r *Runtime) SetToolPath(name string, path string) bool {
+	if r == nil || name == "" {
+		return false
+	}
+	if r.Program != nil {
+		return r.Program.SetToolPath(name, path)
+	}
+	for i := range r.ToolPaths {
+		if r.ToolPaths[i].Name == name {
+			mem.FreeString(r.Alloc, r.ToolPaths[i].Path)
+			r.ToolPaths[i].Path = pureText(r.Alloc, path)
+			return true
+		}
+	}
+	r.ToolPaths = slices.Append(r.Alloc, r.ToolPaths, program.Tool{Name: pureText(r.Alloc, name), Path: pureText(r.Alloc, path)})
+	return true
+}
+
+func (r *Runtime) applyToolPaths() {
+	for i := range r.ToolPaths {
+		r.Program.SetToolPath(r.ToolPaths[i].Name, r.ToolPaths[i].Path)
+	}
+}
+
+// ToolsCheckJSON returns schema-1 diagnostic events, or empty text on success.
+// The dependency traversal is shared with the native CLI and never runs recipes.
+func (r *Runtime) ToolsCheckJSON(target string) PureResult {
+	if r == nil || r.Program == nil {
+		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no compiled build source")}
+	}
+	result := r.Program.RequiredTools(target)
+	if result.Waiting {
+		result.Free(r.Alloc)
+		return PureResult{HostNeeded: true}
+	}
+	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
+	if result.Diagnostic.Code != "" {
+		program.WriteJSONDiagnostic(&buffer, result.Diagnostic)
+	} else {
+		for i := range result.Uses {
+			use := result.Uses[i]
+			if r.Program.ResolveTool(use.Name) != "" {
+				continue
+			}
+			d := diagnostic.Diagnostic{Code: "TOOL_MISSING", Severity: diagnostic.Error, Message: "required tool not found or not executable: " + use.Name, Source: use.Source, Span: use.Span, Target: use.Target, TargetStack: use.TargetStack, Tips: []string{"install the tool or add its executable directory to PATH"}}
+			program.WriteJSONDiagnostic(&buffer, d)
+		}
+	}
+	text := pureText(r.Alloc, buffer.String())
+	buffer.Free()
+	result.Free(r.Alloc)
+	return PureResult{Text: text}
 }
 
 // PlanJSON resolves one target plan (optionally expanding expression inputs)
@@ -304,6 +406,7 @@ func (r *Runtime) RequestTarget(target string) PureResult {
 	// The Program now owns the host and releases it during Program.Free.
 	r.Host = nil
 	r.Program = compiled.Program
+	r.applyToolPaths()
 	started := r.Program.Start(target)
 	if started.Diagnostic.Code != "" {
 		out := PureResult{Code: pureText(r.Alloc, started.Diagnostic.Code), Message: pureText(r.Alloc, started.Diagnostic.Message)}
@@ -598,6 +701,12 @@ func (r *Runtime) Free() {
 		mem.FreeString(r.Alloc, r.Environment[i])
 	}
 	slices.Free(r.Alloc, r.Environment)
+	r.InspectionGrant("", "")
+	for i := range r.ToolPaths {
+		mem.FreeString(r.Alloc, r.ToolPaths[i].Name)
+		mem.FreeString(r.Alloc, r.ToolPaths[i].Path)
+	}
+	slices.Free(r.Alloc, r.ToolPaths)
 	if r.ExprParsed != nil {
 		r.ExprParsed.Free()
 	}

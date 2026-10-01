@@ -75,8 +75,8 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	return result
 }
 
-func diagnosticFromSource(a mem.Allocator, code string, start int, end int, src string) diagnostic.Diagnostic {
-	return diagnostic.Diagnostic{Code: cloneText(a, code), Severity: diagnostic.Error, Message: cloneText(a, code), Source: cloneText(a, src), Span: diagnostic.Span{Start: start, End: end}, Owned: true}
+func diagnosticFromSource(a mem.Allocator, code string, message string, start int, end int, src string) diagnostic.Diagnostic {
+	return diagnostic.Diagnostic{Code: cloneText(a, code), Severity: diagnostic.Error, Message: cloneText(a, message), Source: cloneText(a, src), Span: diagnostic.Span{Start: start, End: end}, Owned: true}
 }
 
 func (p *Program) renderDocument(entry *instance, context *eval.Context) renderResult {
@@ -86,7 +86,7 @@ func (p *Program) renderDocument(entry *instance, context *eval.Context) renderR
 		eval.FreeEffects(p.Alloc, context.Effects)
 		freeStrings(p.Alloc, context.WritePaths)
 		mem.Free(p.Alloc, context)
-		return renderResult{Diagnostic: diagnosticFromSource(p.Alloc, d.Code, d.Span.Start, d.Span.End, doc.Source.Name)}
+		return renderResult{Diagnostic: diagnosticFromSource(p.Alloc, d.Code, d.Message, d.Span.Start, d.Span.End, doc.Source.Name)}
 	}
 	result := p.Eval.EvaluateWith(doc.Root, context)
 	if result.Waiting {

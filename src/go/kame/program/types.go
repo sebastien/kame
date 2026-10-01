@@ -51,6 +51,7 @@ type PlanInput struct {
 type PlanResult struct {
 	Plan       Plan
 	Diagnostic diagnostic.Diagnostic
+	Waiting    bool
 }
 
 func (p *Plan) Free(a mem.Allocator) {
@@ -215,6 +216,9 @@ type Options struct {
 	// JavaScript host can service filesystem, environment, and process work
 	// asynchronously. Native callers leave it false.
 	ForwardRequests bool
+	// ResolveTool returns an allocator-owned executable path when a reached
+	// recipe references a tool. A nil callback uses paths supplied by the host.
+	ResolveTool func(mem.Allocator, string, string, []string) string
 }
 
 // Tool records a globally declared command and its resolved executable path.
@@ -261,6 +265,7 @@ type instance struct {
 	// Inspection instances resolve inputs for span --expand only. They must not
 	// satisfy normal target lookup or participate in build execution.
 	Inspection           bool
+	inspectionRoot       *core.Root
 	Script               string
 	LineSpans            []diagnostic.Span
 	Operations           []string

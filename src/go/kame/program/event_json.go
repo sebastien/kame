@@ -347,21 +347,17 @@ func encodeCause(e *json.Encoder, cause diagnostic.Cause) {
 		e.Str("signal")
 		e.Int(int64(cause.Signal))
 	}
-	if cause.Stdout != "" {
-		e.Str("stdout")
-		e.Str(cause.Stdout)
+	if cause.OutputWasStreamed {
+		e.Str("outputWasStreamed")
+		e.Bool(true)
 	}
-	if cause.Stderr != "" {
-		e.Str("stderr")
-		e.Str(cause.Stderr)
-	}
-	if cause.Stdout != "" || cause.StdoutTruncated {
+	if cause.StdoutLimit > 0 || cause.StdoutTruncated {
 		e.Str("stdoutTruncated")
 		e.Bool(cause.StdoutTruncated)
 		e.Str("stdoutLimit")
 		e.Int(int64(cause.StdoutLimit))
 	}
-	if cause.Stderr != "" || cause.StderrTruncated {
+	if cause.StderrLimit > 0 || cause.StderrTruncated {
 		e.Str("stderrTruncated")
 		e.Bool(cause.StderrTruncated)
 		e.Str("stderrLimit")

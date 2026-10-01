@@ -7,7 +7,6 @@ import (
 	"kame/lang/expr"
 	"kame/lang/source"
 	"solod.dev/so/mem"
-	"solod.dev/so/slices"
 )
 
 func (p *Program) Evaluate(run mem.Allocator, expression *expr.Expr, scope *Scope) Result {
@@ -35,7 +34,8 @@ func (p *Program) EvaluateWith(expression *expr.Expr, context *Context) Result {
 	return result
 }
 
-// attachContextFrames prepends caller frames. Owned diagnostics release every
+// attachContextFrames appends outer caller frames after the immediate context.
+// Owned diagnostics release every
 // frame label, so borrowed context labels are cloned before attaching.
 func attachContextFrames(result *Result, context *Context) {
 	if result.Diagnostic.Code == "" || len(context.Frames) == 0 {
@@ -45,25 +45,14 @@ func attachContextFrames(result *Result, context *Context) {
 	if a == nil {
 		a = mem.System
 	}
-	total := len(context.Frames) + len(result.Diagnostic.Frames)
-	frames := slices.Make[diagnostic.Frame](a, total)
 	for i := range context.Frames {
-		label := context.Frames[i].Label
-		if result.Diagnostic.Owned {
-			label = owned(a, label)
-		}
-		kind, source := context.Frames[i].Kind, context.Frames[i].Source
-		if result.Diagnostic.Owned {
-			kind, source = owned(a, kind), owned(a, source)
-		}
-		frames[i] = diagnostic.Frame{Kind: kind, Label: label, Source: source, Span: context.Frames[i].Span}
+		frame := context.Frames[i]
+		caller := *context
+		caller.Run, caller.Source = a, frame.Source
+		// Caller-supplied locations are already authored, not combined AST offsets.
+		caller.Program = nil
+		attachNamedFrame(result, &caller, source.Span{Start: frame.Span.Start, End: frame.Span.End}, frame.Kind, frame.Label)
 	}
-	copy(frames[len(context.Frames):], result.Diagnostic.Frames)
-	// Transfer: the new slice shares the result tail strings, so release only
-	// the old backing. Freeing the shared strings here would leave the new
-	// tail dangling.
-	slices.Free(a, result.Diagnostic.Frames)
-	result.Diagnostic.Frames = frames
 }
 
 // EvaluateDefinition evaluates one lazy value definition in the caller's phase.
@@ -78,7 +67,7 @@ func (p *Program) EvaluateDefinition(key core.ResourceKey, context *Context) Res
 			continue
 		}
 		result := p.definitionValue(nil, d, p.Scope, context)
-		attachFrame(&result, context, d.Span, "definition")
+		attachNamedFrame(&result, context, d.Span, "definition", d.Name)
 		attachSource(&result, context)
 		return result
 	}
@@ -90,10 +79,12 @@ func attachSource(result *Result, context *Context) {
 	// borrowed from engine nodes must not be cloned or freed here; owned
 	// diagnostics copy the source so Free releases it consistently.
 	if result.Diagnostic.Code != "" && context.Source != "" && result.Diagnostic.Source == "" {
+		location := context.Program.LocateSource(context.Source, source.Span{Start: result.Diagnostic.Span.Start, End: result.Diagnostic.Span.End})
+		result.Diagnostic.Span = diagnostic.Span{Start: location.Span.Start, End: location.Span.End}
 		if result.Diagnostic.Owned {
-			result.Diagnostic.Source = cloneFailureText(context.Run, context.Source)
+			result.Diagnostic.Source = cloneFailureText(context.Run, location.Source)
 		} else {
-			result.Diagnostic.Source = context.Source
+			result.Diagnostic.Source = location.Source
 		}
 	}
 }

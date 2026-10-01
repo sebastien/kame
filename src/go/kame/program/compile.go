@@ -49,6 +49,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p.Options.Directory, p.Options.DryRun, p.Options.Force, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.Force, options.RetainBytes, options.Jobs
 	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
 	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
+	p.Options.ResolveTool = options.ResolveTool
 	if p.Options.RetryCount < 0 {
 		p.Options.RetryCount = 0
 	}
@@ -131,10 +132,22 @@ func (p *Program) SetToolPath(name, executable string) bool {
 
 func (p *Program) toolPath(name string) (string, bool) {
 	i := p.toolIndex(name)
-	if i < 0 || p.Tools[i].Path == "" {
+	if i < 0 {
+		return "", false
+	}
+	if p.Tools[i].Path == "" && p.Options.ResolveTool != nil {
+		p.Tools[i].Path = p.Options.ResolveTool(p.Alloc, name, p.Options.Directory, p.Options.Environment)
+	}
+	if p.Tools[i].Path == "" {
 		return "", false
 	}
 	return p.Tools[i].Path, true
+}
+
+// ResolveTool resolves one declared tool on demand and returns a borrowed path.
+func (p *Program) ResolveTool(name string) string {
+	path, _ := p.toolPath(name)
+	return path
 }
 
 // HasTarget reports whether a literal rule or definition can be selected.
@@ -202,26 +215,37 @@ func CompileMany(a mem.Allocator, sources []CompileSource, registry *eval.Regist
 	text := cloneText(a, builder.String())
 	builder.Free()
 	parsed := script.Parse(a, sources[0].Name, text)
+	parsed.Source.Expanded = len(sources) > 1 || sources[0].Offset != 0
 	mem.FreeString(a, text)
 	result := Compile(a, parsed, registry, options)
-	if result.Program == nil {
-		parsed.Free()
-	} else {
+	if result.Program != nil {
 		result.Program.ParsedOwned = true
+		for i := range sources {
+			result.Program.Eval.AddSourcePart(sources[i].Name, offsets[i], offsets[i]+len(sources[i].Text), sources[i].Offset)
+		}
 	}
 	for i := range result.Diagnostics {
 		position := result.Diagnostics[i].Span.Start
+		// Diagnostics must outlive the temporary combined parser and the caller's
+		// source descriptors, including on failed compilation.
+		owned := result.Diagnostics[i].Clone(a)
+		result.Diagnostics[i].Free(a)
+		result.Diagnostics[i] = owned
 		owner := 0
 		for j := 1; j < len(sources); j++ {
 			if offsets[j] <= position {
 				owner = j
 			}
 		}
-		result.Diagnostics[i].Source = sources[owner].Name
+		mem.FreeString(a, result.Diagnostics[i].Source)
+		result.Diagnostics[i].Source = cloneText(a, sources[owner].Name)
 		result.Diagnostics[i].Span.Start -= offsets[owner]
 		result.Diagnostics[i].Span.End -= offsets[owner]
 		result.Diagnostics[i].Span.Start += sources[owner].Offset
 		result.Diagnostics[i].Span.End += sources[owner].Offset
+	}
+	if result.Program == nil {
+		parsed.Free()
 	}
 	return result
 }

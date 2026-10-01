@@ -120,10 +120,11 @@ Current coverage:
 | 007 library | `T007-01` … `T007-07` | general, collection, text, path, filesystem, capability and shell operations, error messages |
 | 008 cache | `T008-01` … `T008-03` | record creation, hits, force, invalidation, corruption recovery, glob and body fingerprints |
 | 009 CLI | `T009-01` … `T009-08`, `T009-11`, `T009-12` | help/version, discovery, targets, JSON, plan, cat, graph, dry-run, usage, case matrix |
-| 011 diagnostics | `T011-01`, `T011-02` | layout, notes, human/JSON equivalence, code and message integrity |
+| 011 diagnostics | `T011-01` … `T011-03` | layout, notes, human/JSON equivalence, code/message integrity, operand spans, included sources, target-scoped tools checks |
 | 012 streams | `T012-01` | terminal event uniqueness, process event balance |
 | 014 patterns | `T014-01` | placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs |
 | 013 meta | `T013-01` … `T013-03` | catalog consistency, fixture hygiene, binary contract, determinism |
+| 015 dist | `T015-01` … `T015-03` | launcher version/provisioning/checksums, APE probe and backend selection, generated metadata and self-build incrementality |
 
 All currently specified native acceptance bullets have an E2E or package-level
 test. Spec 014 coverage is in place: `T014-01`

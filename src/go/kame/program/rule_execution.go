@@ -197,10 +197,15 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		freeValues(p.Alloc, outputs)
 		if context.PhaseInvalid() || len(context.Effects) != 0 {
 			eval.FreeEffects(p.Alloc, context.Effects)
+			d := result.Diagnostic
+			result.Diagnostic = diagnostic.Diagnostic{}
 			result.Free(p.Alloc)
 			freeStrings(p.Alloc, inputs)
 			freeStrings(p.Alloc, dynamicInputs)
 			freePlanInputs(p.Alloc, resourceInputs, true)
+			if d.Code != "" {
+				return inputsResult{Diagnostic: d}
+			}
 			return inputsResult{Diagnostic: failure(p.Alloc, "PHASE_INVALID", "build effects are invalid while planning")}
 		}
 		if result.Waiting {

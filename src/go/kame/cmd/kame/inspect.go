@@ -47,19 +47,30 @@ func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 }
 
 func runTools(args []string, out io.Writer, errOut io.Writer) int {
+	check := len(args) != 0 && args[0] == "check"
+	if check {
+		args = args[1:]
+	}
 	parsed := parseBuildArguments(args, errOut)
 	defer parsed.Free()
 	if !parsed.OK {
 		return 2
 	}
-	if len(parsed.Targets) != 0 {
+	if !check && len(parsed.Targets) != 0 {
 		cliError(errOut, "OPT_VALUE_INVALID", "tools does not accept targets")
 		return 2
 	}
-	session := openBuildSessionForTools(parsed, errOut, true, true)
+	if check && len(parsed.Targets) == 0 {
+		cliError(errOut, "OPT_VALUE_INVALID", "tools check requires at least one target")
+		return 2
+	}
+	session := openBuildSessionForTools(parsed, errOut, true, !check)
 	defer session.Free()
 	if session.Status != 0 {
 		return session.Status
+	}
+	if check {
+		return checkTargetTools(session.Program, parsed, out, errOut)
 	}
 	e := json.NewEncoder(out)
 	e.BeginArray()
@@ -74,6 +85,32 @@ func runTools(args []string, out io.Writer, errOut io.Writer) int {
 	e.EndArray()
 	e.Flush()
 	io.WriteString(out, "\n")
+	return 0
+}
+
+func checkTargetTools(p *program.Program, parsed buildArguments, out io.Writer, errOut io.Writer) int {
+	failed := false
+	for i := range parsed.Targets {
+		result := p.RequiredTools(parsed.Targets[i])
+		if result.Diagnostic.Code != "" {
+			emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), result.Diagnostic, parsed.JSON, p.Parsed.Source)
+			failed = true
+		} else {
+			for j := range result.Uses {
+				use := result.Uses[j]
+				if p.ResolveTool(use.Name) != "" {
+					continue
+				}
+				d := diagnostic.Diagnostic{Code: "TOOL_MISSING", Severity: diagnostic.Error, Message: "required tool not found or not executable: " + use.Name, Source: use.Source, Span: use.Span, Target: use.Target, TargetStack: use.TargetStack, Tips: []string{"install the tool or add its executable directory to PATH"}}
+				emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), d, parsed.JSON, p.Parsed.Source)
+				failed = true
+			}
+		}
+		result.Free(mem.System)
+	}
+	if failed {
+		return 1
+	}
 	return 0
 }
 

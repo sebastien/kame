@@ -13,8 +13,7 @@ func opBasename(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	value, ok := text(v[0])
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	return eval.Result{Value: core.NewString(c.Run, path.Base(value))}
 }
@@ -22,8 +21,7 @@ func opDirname(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	result := path.Dir(c.Run, value)
 	return eval.Result{Value: core.Value{Kind: core.String, Text: result}}
@@ -39,8 +37,7 @@ func opSplitext(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	suffix := extension(value)
 	root := value[:len(value)-len(suffix)]
@@ -55,8 +52,7 @@ func opExt(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
 	value, ok := text(v[0])
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	return eval.Result{Value: core.NewString(c.Run, extension(value))}
 }
@@ -65,9 +61,8 @@ func opJoinpath(c *eval.Context, s any, v []core.Value) eval.Result {
 	var values []string
 	for i := range v {
 		if v[i].Kind != core.String {
-			freeArgCallables(c, v)
 			slices.Free(c.Run, values)
-			return invalid()
+			return invalidArgument(c, v, i, "string")
 		}
 		values = slices.Append(c.Run, values, v[i].Text)
 	}
@@ -79,8 +74,7 @@ func opAbspath(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := text(v[0])
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string")
 	}
 	if path.IsAbs(value) {
 		return eval.Result{Value: core.Value{Kind: core.String, Text: path.Clean(c.Run, value)}}
@@ -90,9 +84,11 @@ func opAbspath(c *eval.Context, s any, v []core.Value) eval.Result {
 func opRelpath(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	target, ok := text(v[0])
-	if !ok || v[1].Kind != core.String {
-		freeArgCallables(c, v)
-		return invalid()
+	if !ok {
+		return invalidArgument(c, v, 0, "string")
+	}
+	if v[1].Kind != core.String {
+		return invalidArgument(c, v, 1, "string")
 	}
 	base := path.Join(c.Run, c.Cwd, v[1].Text)
 	absolute := path.Join(c.Run, c.Cwd, target)

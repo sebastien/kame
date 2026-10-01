@@ -316,11 +316,11 @@ func (p *Program) attachProcessContext(d *diagnostic.Diagnostic, entry *instance
 		return
 	}
 	if entry != nil {
-		if d.Source == "" && p.Parsed != nil && p.Parsed.Source != nil {
-			d.Source = cloneText(p.Alloc, p.Parsed.Source.Name)
-		}
 		if d.Span.Start == 0 && d.Span.End == 0 && len(entry.LineSpans) != 0 {
 			d.Span = entry.LineSpans[0]
+		}
+		if d.Source == "" && p.Parsed != nil && p.Parsed.Source != nil && (d.Span.Start != 0 || d.Span.End != 0) {
+			p.locateDiagnostic(d, d.Span)
 		}
 		if d.Target == "" {
 			d.Target = cloneText(p.Alloc, entry.Plan.Target)
@@ -342,12 +342,6 @@ func (p *Program) attachProcessContext(d *diagnostic.Diagnostic, entry *instance
 	}
 	if event.Signal != 0 {
 		cause.Signal, cause.HasSignal = event.Signal, true
-	}
-	if len(event.Stdout) != 0 {
-		cause.Stdout = cloneText(p.Alloc, string(event.Stdout))
-	}
-	if len(event.Stderr) != 0 {
-		cause.Stderr = cloneText(p.Alloc, string(event.Stderr))
 	}
 	d.Cause = cause
 }

@@ -24,18 +24,16 @@ cli_expect_status 0
 cli_expect_stdout_contains "Usage:"
 cli_expect_stderr_empty
 
-test-step "version prints 'kame VERSION' on stdout and exits 0"
+test-step "version prints 'kame VERSION (BUILD_ID; BUILD_TIME; BUILD_MODE)' on stdout and exits 0"
 cli_run -- --version
 cli_expect_status 0
-cli_expect_stdout "kame $(<"$CLI_ROOT/VERSION")
-"
+cli_expect_stdout_matches "^kame $(<"$CLI_ROOT/VERSION") \([^;]*; [^;]*; [^;]*\)$"
 cli_expect_stderr_empty
 
 test-step "short version flag"
 cli_run -- -V
 cli_expect_status 0
-cli_expect_stdout "kame $(<"$CLI_ROOT/VERSION")
-"
+cli_expect_stdout_matches "^kame $(<"$CLI_ROOT/VERSION") \([^;]*; [^;]*; [^;]*\)$"
 
 test-step "help takes precedence over version"
 cli_run -- --version --help

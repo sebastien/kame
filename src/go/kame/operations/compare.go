@@ -11,7 +11,7 @@ func opEq(c *eval.Context, s any, v []core.Value) eval.Result {
 	eq, ok := compareEq(v[0], v[1])
 	if !ok {
 		freeArgCallables(c, v)
-		return invalid()
+		return c.InvalidOperation("cannot compare equality of " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects scalar values (nil, bool, int, float, or string)")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: eq}}
 }
@@ -25,7 +25,7 @@ func opNe(c *eval.Context, s any, v []core.Value) eval.Result {
 	eq, ok := compareEq(v[0], v[1])
 	if !ok {
 		freeArgCallables(c, v)
-		return invalid()
+		return c.InvalidOperation("cannot compare equality of " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects scalar values (nil, bool, int, float, or string)")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: !eq}}
 }
@@ -35,7 +35,7 @@ func opLt(c *eval.Context, s any, v []core.Value) eval.Result {
 	ord, ok := compareOrdered(v[0], v[1])
 	if !ok {
 		freeArgCallables(c, v)
-		return invalid()
+		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two numbers or two strings")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: ord < 0}}
 }
@@ -45,7 +45,7 @@ func opGt(c *eval.Context, s any, v []core.Value) eval.Result {
 	ord, ok := compareOrdered(v[0], v[1])
 	if !ok {
 		freeArgCallables(c, v)
-		return invalid()
+		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two numbers or two strings")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: ord > 0}}
 }
@@ -55,7 +55,7 @@ func opGte(c *eval.Context, s any, v []core.Value) eval.Result {
 	ord, ok := compareOrdered(v[0], v[1])
 	if !ok {
 		freeArgCallables(c, v)
-		return invalid()
+		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two numbers or two strings")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: ord >= 0}}
 }
@@ -65,7 +65,7 @@ func opLte(c *eval.Context, s any, v []core.Value) eval.Result {
 	ord, ok := compareOrdered(v[0], v[1])
 	if !ok {
 		freeArgCallables(c, v)
-		return invalid()
+		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two numbers or two strings")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: ord <= 0}}
 }

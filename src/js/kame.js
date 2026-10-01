@@ -108,6 +108,13 @@ function runeAt(text, at) {
   return { code, size: code > 0xffff ? 2 : 1 };
 }
 
+// Portable source spans count UTF-8 bytes, not JavaScript UTF-16 code units.
+function sourceIndex(text, byteOffset) {
+  const bytes = Buffer.from(text, 'utf8');
+  const offset = Math.max(0, Math.min(byteOffset, bytes.length));
+  return bytes.subarray(0, offset).toString('utf8').length;
+}
+
 function sourcePosition(text, offset) {
   if (offset < 0) offset = 0;
   if (offset > text.length) offset = text.length;
@@ -159,19 +166,22 @@ function excerptSegmentEnd(text, start, limit, width) {
 
 function marker(text, lineStart, start, end, lineEnd) {
   let out = '';
+  let column = 1;
   for (let i = lineStart; i < start;) {
-    if (text[i] === '\t') { out += '\t'; i++; continue; }
+    if (text[i] === '\t') { out += '\t'; column += 8 - (column - 1) % 8; i++; continue; }
     const rune = runeAt(text, i);
     out += ' '.repeat(displayWidth(rune.code));
+    column += displayWidth(rune.code);
     i += rune.size;
   }
   if (end < start) end = start;
   if (end > lineEnd) end = lineEnd;
   let width = 0;
   for (let i = start; i < end;) {
-    if (text[i] === '\t') { width += 8; i++; continue; }
+    if (text[i] === '\t') { const cells = 8 - (column - 1) % 8; width += cells; column += cells; i++; continue; }
     const rune = runeAt(text, i);
     width += displayWidth(rune.code);
+    column += displayWidth(rune.code);
     i += rune.size;
   }
   if (width < 1) width = 1;
@@ -217,13 +227,15 @@ function renderDiagnostic(d, source, width) {
   }
   const span = d.span ?? { start: 0, end: 0 };
   if (d.source && renderSource && d.source === renderSource.name) {
-    const pos = sourcePosition(renderSource.text, span.start);
+    const sourceStart = sourceIndex(renderSource.text, span.start);
+    const sourceEnd = sourceIndex(renderSource.text, span.end);
+    const pos = sourcePosition(renderSource.text, sourceStart);
     out += `${d.source}:${pos.line}:${pos.column}: ${severityName(d.severity)} ${d.code}: ${d.message}\n`;
-    let start = span.start;
+    let start = sourceStart;
     if (start < 0) start = 0;
     if (start > renderSource.text.length) start = renderSource.text.length;
     const [lineStart, lineEnd] = lineBounds(renderSource.text, start);
-    out += wrappedExcerpt(renderSource.text, lineStart, lineEnd, start, span.end, width);
+    out += wrappedExcerpt(renderSource.text, lineStart, lineEnd, start, sourceEnd, width);
   } else if (d.source) {
     out += `${d.source}: ${severityName(d.severity)} ${d.code}: ${d.message}\n`;
   } else {
@@ -233,8 +245,9 @@ function renderDiagnostic(d, source, width) {
   for (const related of d.related ?? []) {
     out += 'note: ';
     if (related.source) {
-      if (renderSource && renderSource.name === related.source) {
-        const pos = sourcePosition(renderSource.text, (related.span ?? { start: 0 }).start);
+      const relatedSource = diagnosticSource(related.source, renderSource);
+      if (relatedSource && relatedSource.name === related.source) {
+        const pos = sourcePosition(relatedSource.text, sourceIndex(relatedSource.text, (related.span ?? { start: 0 }).start));
         out += `${related.source}:${pos.line}:${pos.column}: `;
       } else {
         out += `${related.source}: `;
@@ -247,8 +260,9 @@ function renderDiagnostic(d, source, width) {
     if (frame.kind) out += `${frame.kind} `;
     out += frame.label;
     if (frame.source) {
-      if (renderSource && renderSource.name === frame.source) {
-        const pos = sourcePosition(renderSource.text, (frame.span ?? { start: 0 }).start);
+      const frameSource = diagnosticSource(frame.source, renderSource);
+      if (frameSource && frameSource.name === frame.source) {
+        const pos = sourcePosition(frameSource.text, sourceIndex(frameSource.text, (frame.span ?? { start: 0 }).start));
         out += ` at ${frame.source}:${pos.line}:${pos.column}`;
       } else {
         out += ` at ${frame.source}`;
@@ -490,6 +504,7 @@ function collectPaths(directory, names) {
 }
 
 function wildcardPaths(pattern) {
+  while (pattern.startsWith('./')) pattern = pattern.slice(2);
   const names = [];
   collectPaths(globRoot(pattern), names);
   const matches = [];
@@ -514,7 +529,7 @@ function resolveTool(name) {
   if (name.startsWith('/')) return isExecutable(name) ? name : '';
   const pathValue = env.PATH ?? '';
   for (const directory of pathValue.split(':')) {
-    const candidate = directory === '' ? join(process.cwd(), name) : join(directory, name);
+    const candidate = resolve(process.cwd(), directory, name);
     if (isExecutable(candidate)) return candidate;
   }
   return '';
@@ -552,6 +567,9 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_plan',
   'kame_wasm_graph',
   'kame_wasm_tools',
+  'kame_wasm_set_tool_path',
+  'kame_wasm_tools_check',
+  'kame_wasm_inspection_grant',
   'kame_wasm_step',
   'kame_wasm_next_event_header',
   'kame_wasm_next_request_kind',
@@ -679,6 +697,16 @@ class Module {
     return new Uint8Array(this.exports.memory.buffer, output, length).slice();
   }
 
+  async copyInspectionQuery(call, instance, context) {
+    const lengthPointer = this.allocate(4, 4);
+    for (;;) {
+      const query = call(instance, 0, 0, lengthPointer);
+      if (query !== 6) return this.copyQuery(call, instance);
+      if (this.exports.kame_wasm_step(instance) !== 1) throw Object.assign(new Error('inspection host request unavailable'), { code: 'HOST_FAIL' });
+      if (await this.service(instance, context) !== 0) throw Object.assign(new Error('inspection host completion failed'), { code: 'HOST_FAIL' });
+    }
+  }
+
   async parseCLI(command, args) {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
@@ -736,7 +764,7 @@ class Module {
         new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
         return this.exports.kame_wasm_complete_bytes(instance, request, pointer, bytes.length);
       } catch (error) {
-        return this.completeFailure(instance, request, 'FS_ERR', `cannot read file: ${error.message}`);
+        return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot read file' : `cannot read file: ${error.message}`);
       }
     }
     if (kind === 5) {
@@ -745,7 +773,7 @@ class Module {
         const info = await stat(payload);
         return this.completeJSON(instance, request, { name: payload, size: info.size, mode: info.mode, dir: info.isDirectory() });
       } catch (error) {
-        return this.completeFailure(instance, request, 'FS_ERR', `cannot stat file: ${error.message}`);
+        return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot stat file' : `cannot stat file: ${error.message}`);
       }
     }
     if (kind === 7) {
@@ -767,7 +795,11 @@ class Module {
     }
     if (kind === 4) {
       if (!grants.env) return this.deny(instance, request);
-      const value = env[payload];
+      let value = env[payload];
+      for (const entry of context.environment ?? []) {
+        const at = entry.indexOf('=');
+        if (at > 0 && entry.slice(0, at) === payload) value = entry.slice(at + 1);
+      }
       if (value === undefined) return this.exports.kame_wasm_complete_nil(instance, request);
       const encoded = this.write(value);
       return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
@@ -889,14 +921,24 @@ class Module {
     }
   }
 
-  async prepared(source, run, name) {
+  async prepared(source, run, name, context) {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
       const compiled = this.write(source);
       if (name !== undefined && name !== '') this.setSourceName(instance, name);
       if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      if (context) {
+        const directory = this.write(process.cwd());
+        if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0 || this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('inspection host forwarding unavailable'), { code: 'HOST_FAIL' });
+        this.inspectionGrant(instance, '', '');
+        for (const grant of context.inspectionGrants) {
+          if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
+          else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
+        }
+      }
       if (this.exports.kame_wasm_prepare(instance) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
+      if (context) return await this.copyInspectionQuery(run(instance), instance, context);
       return this.copyQuery(run(instance), instance);
     } finally {
       this.exports.kame_wasm_instance_free(instance);
@@ -929,6 +971,27 @@ class Module {
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_tools(handle, dst, dstLen, lengthPointer);
     }, name);
     return JSON.parse(this.decode0(bytes));
+  }
+
+  setToolPath(instance, name, path) {
+    const n = this.write(name);
+    const p = this.write(path);
+    if (this.exports.kame_wasm_set_tool_path(instance, n.pointer, n.length, p.pointer, p.length) !== 0) throw new Error('cannot supply tool path');
+  }
+
+  inspectionGrant(instance, capability, name) {
+    const c = this.write(capability);
+    const n = this.write(name);
+    if (this.exports.kame_wasm_inspection_grant(instance, c.pointer, c.length, n.pointer, n.length) !== 0) throw Object.assign(new Error('inspection capability policy unavailable'), { code: 'HOST_FAIL' });
+  }
+
+  async toolsCheck(source, target, name, context) {
+    const names = await this.toolNames(source, name);
+    return this.prepared(source, (instance) => {
+      for (const tool of names) this.setToolPath(instance, tool, resolveTool(tool));
+      const t = this.write(target);
+      return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_tools_check(handle, t.pointer, t.length, dst, dstLen, lengthPointer);
+    }, name, context);
   }
 
   // drainEvents pops every queued target event. JSON mode writes the raw event
@@ -975,12 +1038,14 @@ class Module {
   }
 
   async materialize(source, target, context, name) {
+    const tools = await this.toolNames(source, name);
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
       const compiled = this.write(source);
       if (name !== undefined && name !== '') this.setSourceName(instance, name);
       if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool));
       const directoryBytes = this.write(process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directoryBytes.pointer, directoryBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
@@ -1258,10 +1323,31 @@ async function runGraph(module, inv) {
 }
 
 async function runTools(module, inv) {
-  if (inv.targets.length !== 0) return usageError('OPT_VALUE_INVALID', 'tools does not accept targets');
+  const check = inv.targets[0] === 'check';
+  const targets = check ? inv.targets.slice(1) : inv.targets;
+  if (!check && targets.length !== 0) return usageError('OPT_VALUE_INVALID', 'tools does not accept targets');
+  if (check && targets.length === 0) return usageError('OPT_VALUE_INVALID', 'tools check requires at least one target');
   const source = await discoverSource(inv);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
+  if (check) {
+    let failed = false;
+    for (const target of targets) {
+      const context = contextFor(inv);
+      context.inspection = true;
+      context.grants.write = false;
+      context.grants.run = false;
+      context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
+      const text = module.decode0(await module.toolsCheck(source.text, target, source.name, context));
+      for (const line of text.split('\n').filter(Boolean)) {
+        const event = JSON.parse(line);
+        if (inv.json) stdout.write(`${line}\n`);
+        else stderr.write(renderDiagnostic(event.diagnostic, source, 80));
+        failed = true;
+      }
+    }
+    return failed ? 1 : 0;
+  }
   const names = await module.toolNames(source.text, source.name);
   stdout.write(`${JSON.stringify(names.map((name) => ({ name, path: resolveTool(name) })))}\n`);
   return 0;

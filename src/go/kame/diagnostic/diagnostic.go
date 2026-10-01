@@ -35,8 +35,9 @@ type Related struct {
 	Span    Span
 }
 
-// Cause records a bounded host or process outcome. Presence flags distinguish
-// an omitted status or signal from their valid zero values.
+// Cause records host or process metadata, never captured output. Process output
+// can contain arbitrary secrets; it belongs only to the explicit live streams
+// and collected operation values. Presence flags distinguish omitted values.
 type Cause struct {
 	Kind              string
 	Message           string
@@ -45,8 +46,6 @@ type Cause struct {
 	HasStatus         bool
 	Signal            int
 	HasSignal         bool
-	Stdout            string
-	Stderr            string
 	StdoutTruncated   bool
 	StderrTruncated   bool
 	StdoutLimit       int
@@ -105,8 +104,6 @@ func (d *Diagnostic) Clone(a mem.Allocator) Diagnostic {
 	copy.Cause.Kind = clone(a, d.Cause.Kind)
 	copy.Cause.Message = clone(a, d.Cause.Message)
 	copy.Cause.Program = clone(a, d.Cause.Program)
-	copy.Cause.Stdout = clone(a, d.Cause.Stdout)
-	copy.Cause.Stderr = clone(a, d.Cause.Stderr)
 	copy.Owned = true
 	return copy
 }
@@ -138,8 +135,6 @@ func (d *Diagnostic) Free(a mem.Allocator) {
 		mem.FreeString(a, d.Cause.Kind)
 		mem.FreeString(a, d.Cause.Message)
 		mem.FreeString(a, d.Cause.Program)
-		mem.FreeString(a, d.Cause.Stdout)
-		mem.FreeString(a, d.Cause.Stderr)
 	}
 	slices.Free(a, d.Frames)
 	slices.Free(a, d.Notes)

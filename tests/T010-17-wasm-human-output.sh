@@ -67,4 +67,7 @@ this is not valid
 EOF
 compare "parse error" ./out.txt
 
+test-step "operand diagnostics after multibyte text retain native columns"
+compare "Unicode operand failure" -c $'root :\n\t@(nop "界e\u0301") @(first 1)\n' root
+
 test-end

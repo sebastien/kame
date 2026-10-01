@@ -22,7 +22,6 @@ import (
 // freestanding JavaScript wrapper parse argv with the same code.
 type buildArguments = cli.Invocation
 
-
 func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int {
 	parsed := parseBuildArguments(args, errOut)
 	defer parsed.Free()
@@ -103,7 +102,7 @@ func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bo
 	return openBuildSessionForTools(options, errOut, reportMissing, false)
 }
 
-func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMissing bool, allowMissingTools bool) buildSession {
+func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMissing bool, listTools bool) buildSession {
 	configureDiagnosticPresentation(options)
 	session := buildSession{Source: loadBuildSource(options, errOut, reportMissing)}
 	if session.Source.Status != 0 {
@@ -143,7 +142,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	if len(session.Source.Files) != 0 {
 		session.Parsed = script.Parse(mem.System, session.Source.Files[0].Name, session.Source.Files[0].Text)
 	}
-	compiled := program.CompileMany(mem.System, sources, session.Registry, program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, Verbose: options.Verbose, Grants: grants})
+	compiled := program.CompileMany(mem.System, sources, session.Registry, program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool})
 	slices.Free(mem.System, sources)
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
@@ -158,29 +157,11 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 		session.Status = 1
 		return session
 	}
-	toolEnvironment := posix.Environment(mem.System)
-	for i := range compiled.Program.Tools {
-		name := compiled.Program.Tools[i].Name
-		resolved := resolveTool(name, options.Directory, toolEnvironment)
-		if resolved == "" {
-			if allowMissingTools {
-				continue
-			}
-			cliError(errOut, "TOOL_MISSING", "required tool not found or not executable: "+name)
-			posix.FreeEnvironment(mem.System, toolEnvironment)
-			if directoryOwned {
-				mem.FreeString(mem.System, options.Directory)
-			}
-			compiled.Program.Free()
-			compiled.Free(mem.System)
-			session.Free()
-			session.Status = 1
-			return session
+	if listTools {
+		for i := range compiled.Program.Tools {
+			compiled.Program.ResolveTool(compiled.Program.Tools[i].Name)
 		}
-		compiled.Program.SetToolPath(name, resolved)
-		mem.FreeString(mem.System, resolved)
 	}
-	posix.FreeEnvironment(mem.System, toolEnvironment)
 	if directoryOwned {
 		mem.FreeString(mem.System, options.Directory)
 	}
@@ -216,10 +197,12 @@ func resolveTool(name, cwd string, environment []string) string {
 			end++
 		}
 		directory := pathValue[start:end]
-		if directory == "" {
-			directory = cwd
+		candidate := ""
+		if path.IsAbs(directory) {
+			candidate = path.Join(mem.System, directory, name)
+		} else {
+			candidate = path.Join(mem.System, cwd, directory, name)
 		}
-		candidate := path.Join(mem.System, directory, name)
 		if executableFile(candidate) {
 			return candidate
 		}
@@ -230,6 +213,15 @@ func resolveTool(name, cwd string, environment []string) string {
 		start = end + 1
 	}
 	return ""
+}
+
+func resolveBuildTool(a mem.Allocator, name string, cwd string, environment []string) string {
+	_ = a           // The native CLI and its Program both use mem.System.
+	_ = environment // Tool references use startup PATH, not recipe --env overrides.
+	startup := posix.Environment(mem.System)
+	resolved := resolveTool(name, cwd, startup)
+	posix.FreeEnvironment(mem.System, startup)
+	return resolved
 }
 
 func executableFile(name string) bool {

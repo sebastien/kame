@@ -18,7 +18,8 @@ enum kame_wasm_status {
   KAME_WASM_NO_MEMORY = 2,
   KAME_WASM_BUFFER_TOO_SMALL = 3,
   KAME_WASM_STATE_INVALID = 4,
-  KAME_WASM_DIAGNOSTIC = 5
+  KAME_WASM_DIAGNOSTIC = 5,
+  KAME_WASM_HOST_NEEDED = 6
 };
 
 /* Request kinds reported by kame_wasm_next_request_kind. Filesystem
@@ -155,6 +156,16 @@ uint32_t kame_wasm_graph(uint64_t instance, uint32_t target, uint32_t target_len
 /* Copy the declared build tool names as a JSON array. */
 uint32_t kame_wasm_tools(uint64_t instance, uint32_t dst, uint32_t dst_len,
                          uint32_t out_len);
+/* Supply a host-resolved executable; an empty path marks an unavailable tool. */
+uint32_t kame_wasm_set_tool_path(uint64_t instance, uint32_t name, uint32_t name_len,
+                                uint32_t path, uint32_t path_len);
+/* Check the selected dependency plan; output contains diagnostic JSON Lines.
+ * HOST_NEEDED means step/service a forwarded request, then retry this query. */
+uint32_t kame_wasm_tools_check(uint64_t instance, uint32_t target, uint32_t target_len,
+                              uint32_t dst, uint32_t dst_len, uint32_t out_len);
+/* Configure inspection grants before prepare; empty capability clears defaults. */
+uint32_t kame_wasm_inspection_grant(uint64_t instance, uint32_t capability, uint32_t capability_len,
+                                   uint32_t name, uint32_t name_len);
 /* Pop one target lifecycle event as a schema-1 JSON line; a zero-length result
  * means no event is pending. */
 uint32_t kame_wasm_target_event(uint64_t instance, uint32_t dst,

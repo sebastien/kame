@@ -24,8 +24,10 @@ else
 fi
 cli_run -- --version
 cli_expect_status 0
-if [ "$(cat "$CLI_OUT")" = "kame $(<"$CLI_ROOT/VERSION")" ]; then
-	test-ok "version matches kame VERSION"
+# Spec 009: `kame VERSION (BUILD_ID; BUILD_TIME; BUILD_MODE)`.
+version_pattern="^kame $(<"$CLI_ROOT/VERSION") \([^;]*; [^;]*; [^;]*\)$"
+if grep -Eq "$version_pattern" "$CLI_OUT"; then
+	test-ok "version matches kame VERSION and build metadata"
 else
 	test-fail "version output: $(cat -A "$CLI_OUT")"
 fi

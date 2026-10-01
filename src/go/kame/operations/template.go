@@ -15,7 +15,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if len(v) < 1 || len(v) > 3 {
 		freeArgCallables(c, v)
-		return invalid()
+		return c.InvalidOperation("expects 1 to 3 arguments")
 	}
 	// Split PAYLOAD vs STYLE for 2-arg form: record is payload, string is style.
 	var payload *core.Value
@@ -26,26 +26,25 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		} else if v[1].Kind == core.String {
 			styleArg = &v[1]
 		} else {
-			freeArgCallables(c, v)
-			return invalid()
+			return invalidArgument(c, v, 1, "record or string")
 		}
 	}
 	if len(v) == 3 {
-		if v[1].Kind != core.Record || v[2].Kind != core.String {
-			freeArgCallables(c, v)
-			return invalid()
+		if v[1].Kind != core.Record {
+			return invalidArgument(c, v, 1, "record")
+		}
+		if v[2].Kind != core.String {
+			return invalidArgument(c, v, 2, "string")
 		}
 		payload = &v[1]
 		styleArg = &v[2]
 	}
 	if payload != nil && payload.Kind != core.Record {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 1, "record")
 	}
 	src := &v[0]
 	if src.Kind != core.String && src.Kind != core.Bytes {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string or bytes")
 	}
 	// Resolve source bytes, style, and file identity.
 	var content string
@@ -66,7 +65,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		style = norm
 		if !utf8.Valid(src.Bytes) {
 			freeArgCallables(c, v)
-			return invalid()
+			return c.InvalidOperation("argument 1 contains bytes that are not valid UTF-8")
 		}
 		if len(src.Bytes) != 0 {
 			b := mem.AllocSlice[byte](c.Run, len(src.Bytes), len(src.Bytes))
@@ -110,7 +109,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 				if !utf8.Valid(got.Value.Bytes) {
 					got.Value.Free(c.Run)
 					freeArgCallables(c, v)
-					return invalid()
+					return c.InvalidOperation("template file contains bytes that are not valid UTF-8")
 				}
 				if len(got.Value.Bytes) != 0 {
 					b := mem.AllocSlice[byte](c.Run, len(got.Value.Bytes), len(got.Value.Bytes))
@@ -133,7 +132,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 				if contentOwned {
 					mem.FreeString(c.Run, content)
 				}
-				return invalid()
+				return c.InvalidOperation("template file read must return bytes or string")
 			}
 			if styleArg != nil {
 				norm, ok := template.NormalizeStyle(styleArg.Text)
@@ -223,7 +222,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 				popRenderStack(c)
 			}
 			freeArgCallables(c, v)
-			return invalid()
+			return c.InvalidOperation("cannot create template payload scope")
 		}
 		evalScope = child
 		c.Scope = child
@@ -245,8 +244,9 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		return res
 	}
 	if res.Value.Kind != core.String {
+		d := c.InvalidOperation("template must produce string; got " + core.KindName(res.Value.Kind))
 		res.Value.Free(c.Run)
-		return invalid()
+		return d
 	}
 	return res
 }
@@ -373,7 +373,7 @@ func readFileBytes(c *eval.Context, path string) eval.Result {
 		}
 		if !completion.HasValue {
 			completion.Value.Free(c.Run)
-			return invalid()
+			return c.InvalidOperation("template file read completion omitted its result")
 		}
 		result := eval.Result{Value: completion.Value.Clone(c.Run)}
 		completion.Value.Free(c.Run)

@@ -23,8 +23,7 @@ func opStr(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	value, ok := stringValue(c.Run, v[0], false)
 	if !ok {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "text-coercible value (nil, bool, int, float, string, pattern, list, or record)")
 	}
 	result := eval.Result{Value: core.NewString(c.Run, value)}
 	mem.FreeString(c.Run, value)
@@ -140,16 +139,14 @@ func opCount(c *eval.Context, s any, v []core.Value) eval.Result {
 	} else if v[0].Kind == core.Record {
 		n = len(v[0].Record)
 	} else {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "string, bytes, list, or record")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Int, Int: int64(n)}}
 }
 func opFirst(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.List {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "list")
 	}
 	if len(v[0].List) == 0 {
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
@@ -159,8 +156,7 @@ func opFirst(c *eval.Context, s any, v []core.Value) eval.Result {
 func opNth(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[1].Kind != core.Int {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 1, "int")
 	}
 	index := int(v[1].Int)
 	if v[0].Kind == core.List {
@@ -173,8 +169,7 @@ func opNth(c *eval.Context, s any, v []core.Value) eval.Result {
 		return eval.Result{Value: v[0].List[index].Clone(c.Run)}
 	}
 	if v[0].Kind != core.String {
-		freeArgCallables(c, v)
-		return invalid()
+		return invalidArgument(c, v, 0, "list or string")
 	}
 	if index < 0 {
 		index += utf8.RuneCountInString(v[0].Text)
@@ -210,21 +205,35 @@ func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 	if v[0].Kind == core.List && v[1].Kind == core.Callable {
 		arguments := applyArguments(c.Run, v[0], v[1])
 		result := c.Call(v[1], arguments.Values)
-		if arguments.Owned { slices.Free(c.Run, arguments.Values) }
+		if arguments.Owned {
+			slices.Free(c.Run, arguments.Values)
+		}
 		c.FreeCallable(&v[1])
 		return result
 	}
 	if v[0].Kind == core.Callable && v[1].Kind == core.List {
 		arguments := applyArguments(c.Run, v[1], v[0])
 		result := c.Call(v[0], arguments.Values)
-		if arguments.Owned { slices.Free(c.Run, arguments.Values) }
+		if arguments.Owned {
+			slices.Free(c.Run, arguments.Values)
+		}
 		c.FreeCallable(&v[0])
 		return result
 	}
-	freeArgCallables(c, v)
-	return invalid()
+	if v[0].Kind == core.Callable {
+		return invalidArgument(c, v, 1, "list")
+	}
+	if v[0].Kind == core.List {
+		return invalidArgument(c, v, 1, "callable")
+	}
+	return invalidArgument(c, v, 0, "list or callable")
 }
-type applyCall struct { Values []core.Value; Owned bool }
+
+type applyCall struct {
+	Values []core.Value
+	Owned  bool
+}
+
 func applyArguments(a mem.Allocator, values core.Value, function core.Value) applyCall {
 	callable := function.Callable.(*eval.Function)
 	// Legacy apply treats a one-parameter function as a list consumer. Keep

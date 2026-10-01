@@ -5,6 +5,7 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/lang/expr"
 	"kame/lang/source"
 	"solod.dev/so/mem"
 	"solod.dev/so/path"
@@ -29,6 +30,8 @@ type Context struct {
 	Effects            []Effect
 	WritePaths         []string
 	Span               source.Span
+	OperationName      string
+	operationArguments []*expr.Expr
 	Phase              Phase
 	ResolveDefinition  DefinitionResolver
 	ResolverState      any

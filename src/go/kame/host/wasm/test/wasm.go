@@ -5,8 +5,99 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"kame/host/wasm"
+	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
+
+func TestToolChecksRetainPathsAndAllowRepeatedComputedPlans(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "root : @(\"leaf\")\nleaf :\n\t@(x/test-tool)\n")
+	if started.Runtime == nil {
+		t.Error("runtime did not compile")
+		started.Result.Free(a)
+		return
+	}
+	r := started.Runtime
+	if !r.SetToolPath("test-tool", "/bin/test-tool") {
+		t.Error("tool path was rejected")
+	}
+	prepared := r.Prepare()
+	if prepared.Code != "" {
+		t.Error("prepare failed")
+	}
+	prepared.Free(a)
+	for i := 0; i < 2; i++ {
+		checked := r.ToolsCheckJSON("root")
+		if checked.Code != "" || checked.Text != "" {
+			t.Error("resolved tool check failed")
+		}
+		checked.Free(a)
+	}
+	r.SetToolPath("test-tool", "")
+	checked := r.ToolsCheckJSON("root")
+	if !strings.Contains(checked.Text, "TOOL_MISSING") || !strings.Contains(checked.Text, "\"targetStack\":[\"root\",\"leaf\"]") {
+		t.Error("missing-tool check lost its dependency context")
+	}
+	checked.Free(a)
+	r.Free()
+}
+
+func TestToolInspectionYieldsHostRequestsWithoutRunningRecipes(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "root : @((if (env \"TOOL_INPUTS\") (wildcard ./input/*.txt) []))\n\ttouch forbidden\n./input/needs.txt :\n\t@(x/test-tool)\n")
+	if started.Runtime == nil {
+		t.Error("runtime did not compile")
+		started.Result.Free(a)
+		return
+	}
+	r := started.Runtime
+	r.SetForwarding(true)
+	r.InspectionGrant("", "")
+	r.InspectionGrant("read", "")
+	r.InspectionGrant("env", "TOOL_INPUTS")
+	prepared := r.Prepare()
+	if prepared.Code != "" {
+		t.Error("prepare failed")
+	}
+	prepared.Free(a)
+	checked := r.ToolsCheckJSON("root")
+	if !checked.HostNeeded || checked.Code != "" {
+		t.Error("inspection did not yield its host request")
+	}
+	checked.Free(a)
+	next := r.Step()
+	if !next.OK || next.Request.Kind != host.RequestEnvironment {
+		t.Error("inspection did not request the granted environment value")
+	}
+	r.Complete(next.Request, core.NewString(a, "yes"), diagnostic.Diagnostic{})
+	next.Request.Free(a)
+	checked = r.ToolsCheckJSON("root")
+	if !checked.HostNeeded {
+		t.Error("inspection did not yield its second host request")
+	}
+	checked.Free(a)
+	next = r.Step()
+	if !next.OK || next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, "op") != host.OpWildcard {
+		t.Error("inspection emitted a non-read request")
+	}
+	items := []core.Value{core.NewString(a, "./input/needs.txt")}
+	value := core.NewList(a, items)
+	items[0].Free(a)
+	r.Complete(next.Request, value, diagnostic.Diagnostic{})
+	next.Request.Free(a)
+	for i := 0; i < 2; i++ {
+		checked = r.ToolsCheckJSON("root")
+		if checked.HostNeeded || checked.Code != "" || !strings.Contains(checked.Text, "TOOL_MISSING") || !strings.Contains(checked.Text, "\"targetStack\":[\"root\",\"./input/needs.txt\"]") {
+			t.Error("resumed inspection lost the host-discovered target")
+		}
+		checked.Free(a)
+	}
+	if pending := r.Step(); pending.OK {
+		t.Error("inspection queued a recipe or another host effect")
+		pending.Request.Free(a)
+	}
+	r.Free()
+}
 
 func TestHandlesRejectStaleAndForeignOwners(t *testing.T) {
 	table := wasm.NewTable(t.Allocator())

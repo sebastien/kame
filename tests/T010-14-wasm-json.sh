@@ -68,4 +68,15 @@ else
 	test-fail "failure diagnostics differ: $(diff "$project/fail.wasm.norm" "$project/fail.native.norm" | head -4)"
 fi
 
+test-step "WASM diagnostic causes omit process captures without filtering live streams"
+set +e
+(cd "$project" && node "$CLI_ROOT/dist/kame.js" --json -c $'fails :\n\tprintf diagnostic-secret-output\n\tprintf diagnostic-secret-error >&2\n\texit 7\n' fails) >"$project/secret.jsonl" 2>"$project/secret.err"
+status=$?
+set -e
+if [ "$status" = 1 ] && jq -e -s 'map(select(.diagnostic.cause != null)) | length > 0 and all(.[]; .diagnostic.cause | .status == 7 and (has("stdout") | not) and (has("stderr") | not))' "$project/secret.jsonl" >/dev/null && jq -e -s 'map(select(.type == "stdout" or .type == "stderr") | .data) | join("") | contains("diagnostic-secret-output") and contains("diagnostic-secret-error")' "$project/secret.jsonl" >/dev/null; then
+	test-ok "WASM causes retain metadata only; live streams remain unchanged"
+else
+	test-fail "WASM output-omission policy failed"
+fi
+
 test-end

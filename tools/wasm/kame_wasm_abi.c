@@ -582,6 +582,56 @@ uint32_t kame_wasm_tools(uint64_t handle, uint32_t dst, uint32_t dst_len, uint32
   return KAME_WASM_OK;
 }
 
+uint32_t kame_wasm_set_tool_path(uint64_t handle, uint32_t name, uint32_t name_len, uint32_t path, uint32_t path_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || name_len == 0u || name == 0u || (path_len != 0u && path == 0u)) return KAME_WASM_STATE_INVALID;
+  return wasm_Runtime_SetToolPath(instance->runtime,
+      (so_String){(const char *)(uintptr_t)name, (so_int)name_len},
+      (so_String){(const char *)(uintptr_t)path, (so_int)path_len}) ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
+uint32_t kame_wasm_tools_check(uint64_t handle, uint32_t target, uint32_t target_len, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || out_len == 0u || (target_len != 0u && target == 0u)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  if (instance->has_pending) return KAME_WASM_HOST_NEEDED;
+  instance->diagnostic_len = 0u;
+  wasm_PureResult result = wasm_Runtime_ToolsCheckJSON(instance->runtime, (so_String){(const char *)(uintptr_t)target, (so_int)target_len});
+  if (result.HostNeeded) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_HOST_NEEDED;
+  }
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  uint32_t needed = (uint32_t)result.Text.len;
+  *(uint32_t *)(uintptr_t)out_len = needed;
+  if (dst_len < needed) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_BUFFER_TOO_SMALL;
+  }
+  if (needed != 0u && dst == 0u) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_STATE_INVALID;
+  }
+  for (uint32_t i = 0; i < needed; i++) ((uint8_t *)(uintptr_t)dst)[i] = (uint8_t)result.Text.ptr[i];
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
+uint32_t kame_wasm_inspection_grant(uint64_t handle, uint32_t capability, uint32_t capability_len, uint32_t name, uint32_t name_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || (capability_len != 0u && capability == 0u) || (name_len != 0u && name == 0u)) return KAME_WASM_STATE_INVALID;
+  return wasm_Runtime_InspectionGrant(instance->runtime,
+      (so_String){(const char *)(uintptr_t)capability, (so_int)capability_len},
+      (so_String){(const char *)(uintptr_t)name, (so_int)name_len}) ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
 /* Walk one target's declared inputs/outputs (kind 0/1) or span (kind 2). */
 uint32_t kame_wasm_graph(uint64_t handle, uint32_t target, uint32_t target_len, int32_t depth, uint32_t kind, uint32_t expand, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
@@ -904,6 +954,7 @@ uint32_t kame_wasm_complete_failure(uint64_t handle, uint64_t request,
   if (!pending) return KAME_WASM_OK;
   if ((code_len != 0u && code == 0u) || (message_len != 0u && message == 0u)) return KAME_WASM_STATE_INVALID;
   diagnostic_Diagnostic diagnostic = (diagnostic_Diagnostic){
+      .Severity = diagnostic_Error,
       .Code = (so_String){(const char *)(uintptr_t)code, (so_int)code_len},
       .Message = (so_String){(const char *)(uintptr_t)message, (so_int)message_len},
   };

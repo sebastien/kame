@@ -150,9 +150,12 @@ Options:
 `
 
 const toolsHelpText = `Usage: kame do tools [OPTIONS]
+	   kame do tools check [OPTIONS] TARGETS...
 
-List globally referenced @(x/NAME) tools and their preflight-resolved paths.
+List globally referenced @(x/NAME) tools and their resolved paths.
 Missing tools are reported with an empty path; recipes are never executed.
+Use check to validate only tools in the selected targets' dependency plans.
+Read-only dynamic inputs may be resolved; recipes are never executed.
 `
 
 const parseHelpText = `Usage: kame do parse --lang LANG [FILE]

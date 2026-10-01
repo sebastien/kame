@@ -9,6 +9,12 @@ import (
 )
 
 func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression *expr.Expr, context *Context) Result {
+	result := p.evaluateExpression(engine, scope, expression, context)
+	attachSource(&result, context)
+	return result
+}
+
+func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, expression *expr.Expr, context *Context) Result {
 	if expression == nil {
 		return failure(context.Run, "EXPR_INVALID", source.Span{}, "definition needs an expression value")
 	}

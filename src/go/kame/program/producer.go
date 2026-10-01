@@ -37,14 +37,14 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		entry.started, entry.startedGeneration, entry.terminalEmitted = true, c.Generation(), false
 	}
 	if entry.Rule.Kind == rule.ServiceRule {
-		c.Fail(failure(p.Alloc, "FEATURE_UNSUP", "service execution is not supported"))
+		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service execution is not supported"))
 		return core.ProducerFailed
 	}
 	if c.Completion().RequestID != 0 && entry.Script != "" {
 		mem.FreeString(p.Alloc, entry.Script)
 		entry.Script = ""
 		if c.Completion().Diagnostic.Code != "" {
-			c.Fail(c.Completion().Diagnostic)
+			p.failRule(c, state.Index, c.Completion().Diagnostic)
 			return core.ProducerFailed
 		}
 		// When requests are forwarded, the embedding host owns the filesystem and
@@ -56,7 +56,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				result := p.Host.Stat(name)
 				mem.FreeString(p.Alloc, name)
 				if !result.Exists {
-					c.Fail(failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
+					p.failRule(c, state.Index, failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
 					return core.ProducerFailed
 				}
 			}
@@ -77,7 +77,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerWaiting
 	}
 	if resolvedInputs.Diagnostic.Code != "" {
-		c.Fail(resolvedInputs.Diagnostic)
+		p.failRule(c, state.Index, resolvedInputs.Diagnostic)
 		return core.ProducerFailed
 	}
 	for i := range inputs {
@@ -89,6 +89,11 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		if kind == core.ResourceFile || (kind == core.ResourceTarget && isFileName(input)) {
 			resolved := p.instanceFor(input)
 			entry = &p.Instances[state.Index]
+			if resolved.Diagnostic.Code != "" && resolved.Diagnostic.Code != "TGT_NO_RULE" {
+				resolved.Plan.Free(p.Alloc)
+				p.failRule(c, state.Index, resolved.Diagnostic)
+				return core.ProducerFailed
+			}
 			resolved.Diagnostic.Free(p.Alloc)
 			if resolved.Node != nil {
 				resolved.Plan.Free(p.Alloc)
@@ -102,7 +107,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			result := p.Host.Stat(name)
 			mem.FreeString(p.Alloc, name)
 			if !result.Exists {
-				c.Fail(failure(p.Alloc, "TGT_NO_RULE", "required input does not exist: "+input))
+				p.failRule(c, state.Index, failure(p.Alloc, "TGT_NO_RULE", "required input does not exist: "+input))
 				return core.ProducerFailed
 			}
 			continue
@@ -117,10 +122,14 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			}
 			continue
 		}
+		if d.Code != "" && d.Code != "TGT_NO_RULE" {
+			p.failRule(c, state.Index, d)
+			return core.ProducerFailed
+		}
 		d.Free(p.Alloc)
 		definition := p.Eval.Definition(input)
 		if definition == nil {
-			c.Fail(failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+input))
+			p.failRule(c, state.Index, failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+input))
 			return core.ProducerFailed
 		}
 		definitionNode := p.definitionNode(definition.Key.Name)
@@ -139,7 +148,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerWaiting
 	}
 	if d.Code != "" {
-		c.Fail(d)
+		p.failRule(c, state.Index, d)
 		return core.ProducerFailed
 	}
 	if entry.Rule.Kind == rule.FileRule {
@@ -179,12 +188,12 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	}
 	if hasYield(effects) && commands != "" {
 		mem.FreeString(p.Alloc, commands)
-		c.Fail(failureAt(p.Alloc, "OUTPUT_CONFLICT", yieldSpan(effects), "yield cannot be combined with shell commands"))
+		p.failRule(c, state.Index, failureAt(p.Alloc, "OUTPUT_CONFLICT", yieldSpan(effects), "yield cannot be combined with shell commands"))
 		return core.ProducerFailed
 	}
 	if effectDiagnostic := validateEffects(p.Alloc, entry, effects); effectDiagnostic.Code != "" {
 		mem.FreeString(p.Alloc, commands)
-		c.Fail(effectDiagnostic)
+		p.failRule(c, state.Index, effectDiagnostic)
 		return core.ProducerFailed
 	}
 	if p.Options.DryRun {
@@ -195,7 +204,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	}
 	if effectDiagnostic := p.commitEffects(entry, effects, writePaths, false); effectDiagnostic.Code != "" {
 		mem.FreeString(p.Alloc, commands)
-		c.Fail(effectDiagnostic)
+		p.failRule(c, state.Index, effectDiagnostic)
 		return core.ProducerFailed
 	}
 	if commands == "" {
@@ -205,7 +214,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				result := p.Host.Stat(name)
 				mem.FreeString(p.Alloc, name)
 				if !result.Exists {
-					c.Fail(failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
+					p.failRule(c, state.Index, failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
 					return core.ProducerFailed
 				}
 			}
@@ -230,7 +239,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				// there on this path, so release it here like every other
 				// early exit above.
 				mem.FreeString(p.Alloc, commands)
-				c.Fail(failure(p.Alloc, "FS_ERR", "cannot create output directory"))
+				p.failRule(c, state.Index, failure(p.Alloc, "FS_ERR", "cannot create output directory"))
 				return core.ProducerFailed
 			}
 		}
@@ -253,7 +262,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerSubmitted
 	}
 	if p.Host == nil || !p.Host.Start(request) {
-		c.Fail(failure(p.Alloc, "HOST_FAIL", "cannot start recipe"))
+		p.failRule(c, state.Index, failure(p.Alloc, "HOST_FAIL", "cannot start recipe"))
 		return core.ProducerFailed
 	}
 	c.Submit(request.ID)
