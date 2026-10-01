@@ -5,6 +5,7 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host/posix"
+	"kame/lang/eval"
 	"kame/lang/source"
 	"kame/program"
 	"solod.dev/so/fmt"
@@ -528,60 +529,10 @@ func annotateTargetDiagnostic(d *diagnostic.Diagnostic, target string) {
 	d.Notes = slices.Append(mem.System, d.Notes, cloneCommandText(note))
 }
 
+// writeValue prints a value with the shared portable display so native and
+// WASM output stay byte-for-byte identical.
 func writeValue(out io.Writer, value core.Value) {
-	if value.Kind == core.String || value.Kind == core.Pattern {
-		io.WriteString(out, value.Text)
-		return
-	}
-	if value.Kind == core.Bytes {
-		out.Write(value.Bytes)
-		return
-	}
-	if value.Kind == core.Bool {
-		if value.Bool {
-			io.WriteString(out, "true")
-		} else {
-			io.WriteString(out, "false")
-		}
-		return
-	}
-	if value.Kind == core.Int {
-		fmt.Fprintf(out, "%d", value.Int)
-		return
-	}
-	if value.Kind == core.Float {
-		fmt.Fprintf(out, "%g", value.Float)
-		return
-	}
-	if value.Kind == core.Nil {
-		io.WriteString(out, "nil")
-		return
-	}
-	if value.Kind == core.Resource {
-		io.WriteString(out, value.Resource.Name)
-		return
-	}
-	if value.Kind == core.List {
-		io.WriteString(out, "[")
-		for i := range value.List {
-			if i != 0 {
-				io.WriteString(out, " ")
-			}
-			writeValue(out, value.List[i])
-		}
-		io.WriteString(out, "]")
-		return
-	}
-	if value.Kind == core.Record {
-		io.WriteString(out, "[")
-		for i := range value.Record {
-			if i != 0 {
-				io.WriteString(out, " ")
-			}
-			io.WriteString(out, value.Record[i].Key)
-			io.WriteString(out, ": ")
-			writeValue(out, value.Record[i].Value)
-		}
-		io.WriteString(out, "]")
-	}
+	text := eval.Display(mem.System, value)
+	io.WriteString(out, text)
+	mem.FreeString(mem.System, text)
 }

@@ -15,6 +15,7 @@ type exprArguments struct {
 	Text      string
 	File      string
 	Directory string
+	CaptureLimit int
 	Args      []string
 	Grants    []eval.Grant
 	OK        bool
@@ -76,7 +77,7 @@ func runExpr(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	// :nil or 0x10 expressions instead of definition right-hand-side string
 	// templates, without changing the meaning of any expression form.
 	command := "result = (nop " + text + ")"
-	options := buildArguments{Command: command, Directory: parsed.Directory, Jobs: 1, Grants: parsed.Grants, NoDefaultGrants: true, OK: true}
+	options := buildArguments{Command: command, Directory: parsed.Directory, CaptureLimit: parsed.CaptureLimit, Jobs: 1, Grants: parsed.Grants, NoDefaultGrants: true, OK: true}
 	session := openBuildSession(options, errOut, true)
 	defer session.Free()
 	if session.Status != 0 {
@@ -145,5 +146,5 @@ func parseExprArguments(args []string, errOut io.Writer) exprArguments {
 		inv.Free()
 		return exprArguments{}
 	}
-	return exprArguments{Text: inv.Command, File: inv.File, Directory: inv.Directory, Args: inv.Args, Grants: inv.Grants, OK: inv.OK}
+	return exprArguments{Text: inv.Command, File: inv.File, Directory: inv.Directory, CaptureLimit: inv.CaptureLimit, Args: inv.Args, Grants: inv.Grants, OK: inv.OK}
 }

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"kame/cli"
 	"kame/host/posix"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -39,6 +40,7 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 		io.WriteString(errOut, "run 'kame do --help' to list commands\n")
 		return 2
 	}
+	if cli.SelectsRun(args) { return runSession(args, in, out, errOut) }
 	return runBuild(args, out, errOut, false)
 }
 
@@ -117,6 +119,7 @@ func freePresentationArgs(args []string) {
 }
 
 func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
+	if action == commandRun { return runSession(args, in, out, errOut) }
 	if action == commandPlan {
 		return runPlan(args, out, errOut)
 	}

@@ -3,6 +3,7 @@ package main
 
 import (
 	"kame/lang/script"
+	"kame/lang/source"
 	"kame/program"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -105,6 +106,10 @@ func mergeEnvironment(current []string, overrides []string) []string {
 }
 
 func readBuildSource(name string, errOut io.Writer) buildSource {
+	return readBuildSourceLanguage(name, errOut, "kmk")
+}
+
+func readBuildSourceLanguage(name string, errOut io.Writer, lang string) buildSource {
 	canonical := path.Clean(mem.System, name)
 	data, readErr := os.ReadFile(mem.System, canonical)
 	if readErr != nil {
@@ -116,7 +121,7 @@ func readBuildSource(name string, errOut io.Writer) buildSource {
 	// Text wraps Data backing (zero-copy string conversion in Solod):
 	// freeBuildSource frees Data only, Text never outlives it.
 	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), Data: data, OwnedName: true})
-	if !expandIncludes(&result, 0, errOut) { result.Status = 1 }
+	if !expandIncludesLanguage(&result, 0, errOut, lang) { result.Status = 1 }
 	return result
 }
 
@@ -126,9 +131,11 @@ func (s *buildSource) compileSources() []program.CompileSource {
 	return result
 }
 
-func expandIncludes(s *buildSource, fileIndex int, errOut io.Writer) bool {
+func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lang string) bool {
 	file := s.Files[fileIndex]
-	parsed := script.Parse(mem.System, file.Name, file.Text)
+	authored := source.New(mem.System, file.Name, file.Text)
+	parsed := script.ParseFragment(mem.System, authored, lang, 0, len(file.Text))
+	defer authored.Free(mem.System)
 	start := 0
 	for i := range parsed.Items {
 		item := parsed.Items[i]
@@ -152,7 +159,7 @@ func expandIncludes(s *buildSource, fileIndex int, errOut io.Writer) bool {
 		data, readErr := os.ReadFile(mem.System, includeName)
 		if readErr != nil { cliError(errOut, "FS_ERR", "cannot read included source: "+includeName); mem.FreeString(mem.System, includeName); parsed.Free(); return false }
 		s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), Data: data, OwnedName: true})
-		if !expandIncludes(s, len(s.Files)-1, errOut) { parsed.Free(); return false }
+		if !expandIncludesLanguage(s, len(s.Files)-1, errOut, lang) { parsed.Free(); return false }
 		start = item.Span.End
 	}
 	s.Parts = slices.Append(mem.System, s.Parts, sourcePart{Name: file.Name, Text: file.Text[start:], Offset: start})

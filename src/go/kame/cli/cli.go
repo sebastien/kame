@@ -38,6 +38,7 @@ type Invocation struct {
 	TimeoutMS        int64
 	RetryCount       int
 	RetainBytes      int
+	CaptureLimit     int
 	Lang             string
 	Indent           string
 	IndentWidth      int
@@ -48,6 +49,7 @@ type Invocation struct {
 	Targets          []string
 	Files            []string
 	Args             []string
+	Inputs           []RunInput
 	OK               bool
 	Error            Diagnostic
 }
@@ -55,6 +57,8 @@ type Invocation struct {
 // Free releases all parser-owned backing arrays. Option values borrow argv
 // storage; consumers clone what they retain.
 func (inv *Invocation) Free() {
+	for i := range inv.Inputs { slices.Free(mem.System, inv.Inputs[i].Entries) }
+	slices.Free(mem.System, inv.Inputs)
 	for i := range inv.Grants {
 		for j := range inv.Grants[i].Names {
 			mem.FreeString(mem.System, inv.Grants[i].Names[j])
@@ -81,6 +85,8 @@ func (inv *Invocation) fail(code string, message string) {
 // Parse parses one command's arguments. command is "" for the primary
 // invocation or the name after "do".
 func Parse(command string, args []string) Invocation {
+	if command == "run" { return ParseRun(args) }
+	if command == "" && SelectsRun(args) { return ParseRun(args) }
 	inv := Invocation{Name: command, Directory: ".", Jobs: 1, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
 	if !isCommand(command) {
 		inv.fail("CMD_UNKNOWN", "unknown command: "+command)
@@ -118,7 +124,7 @@ func Parse(command string, args []string) Invocation {
 }
 
 func isCommand(command string) bool {
-	return command == "" || command == "build" || command == "help" || command == "expr" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt"
+	return command == "" || command == "build" || command == "help" || command == "expr" || command == "run" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt"
 }
 
 // parseBuild mirrors the primary and do-plan/cat/tools grammar.
@@ -161,7 +167,7 @@ func parseBuild(inv *Invocation, args []string) {
 			}
 			continue
 		}
-		if equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--env", inv) || equalsValue(arg, "--color", inv) || equalsValue(arg, "--diagnostic-format", inv) {
+		if equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) || equalsValue(arg, "--color", inv) || equalsValue(arg, "--diagnostic-format", inv) {
 			if inv.Error.Code != "" {
 				return
 			}
@@ -181,6 +187,7 @@ func parseBuild(inv *Invocation, args []string) {
 }
 
 func isBuildValueOption(arg string) bool {
+	if arg == "--capture-limit" { return true }
 	if arg == "-f" || arg == "--file" || arg == "-c" || arg == "--command" || arg == "-C" || arg == "--directory" || arg == "-j" || arg == "--jobs" || arg == "--shell" || arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--env" || arg == "--color" || arg == "--diagnostic-format" {
 		return true
 	}
@@ -254,6 +261,11 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 	if convertErr != nil {
 		inv.fail("OPT_VALUE_INVALID", "invalid numeric option value")
 		return false
+	}
+	if option == "--capture-limit" {
+		if number <= 0 { inv.fail("OPT_VALUE_INVALID", "capture limit must be positive"); return false }
+		inv.CaptureLimit = number
+		return true
 	}
 	if option == "-j" || option == "--jobs" {
 		if number <= 0 {
@@ -354,7 +366,7 @@ func parseFormat(inv *Invocation, args []string) {
 			inv.Check = true
 			continue
 		}
-		if arg == "--lang" {
+		if arg == "-l" || arg == "--lang" {
 			if i+1 == len(args) {
 				inv.fail("OPT_NO_VALUE", "missing value for --lang")
 				return
@@ -414,7 +426,7 @@ func parseFormat(inv *Invocation, args []string) {
 		inv.fail("OPT_CONFLICT", "-i and -n cannot be used together")
 		return
 	}
-	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" {
+	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
 		return
 	}
@@ -456,7 +468,7 @@ func parseParse(inv *Invocation, args []string) {
 			inv.File = args[i+1]
 			break
 		}
-		if arg == "--lang" {
+		if arg == "-l" || arg == "--lang" {
 			if i+1 == len(args) {
 				inv.fail("OPT_NO_VALUE", "missing value for --lang")
 				return
@@ -483,7 +495,7 @@ func parseParse(inv *Invocation, args []string) {
 		inv.fail("OPT_NO_VALUE", "missing required --lang")
 		return
 	}
-	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" {
+	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
 		return
 	}
@@ -501,6 +513,16 @@ func parseExpr(inv *Invocation, args []string) {
 		}
 		if positional {
 			inv.Args = slices.Append(mem.System, inv.Args, arg)
+			continue
+		}
+		if arg == "--capture-limit" {
+			if i+1 == len(args) { inv.fail("OPT_NO_VALUE", "missing value for "+arg); return }
+			i++
+			if !assignBuildOption(inv, arg, args[i]) { return }
+			continue
+		}
+		if equalsValue(arg, "--capture-limit", inv) {
+			if inv.Error.Code != "" { return }
 			continue
 		}
 		if arg == "-C" || arg == "--directory" {
@@ -551,6 +573,11 @@ func parseExpr(inv *Invocation, args []string) {
 				return
 			}
 			inv.Grants = appendGrant(inv.Grants, "--allow-env", arg[12:])
+			continue
+		}
+		if len(arg) >= 12 && arg[:12] == "--allow-run=" {
+			if len(arg) == 12 { inv.fail("OPT_VALUE_INVALID", "empty value for --allow-run"); return }
+			inv.Grants = appendGrant(inv.Grants, "--allow-run", arg[12:])
 			continue
 		}
 		if len(arg) != 0 && arg[0] == '-' {

@@ -142,7 +142,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	if len(session.Source.Files) != 0 {
 		session.Parsed = script.Parse(mem.System, session.Source.Files[0].Name, session.Source.Files[0].Text)
 	}
-	compiled := program.CompileMany(mem.System, sources, session.Registry, program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool})
+	compiled := program.CompileMany(mem.System, sources, session.Registry, program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, CaptureLimit: options.CaptureLimit, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool})
 	slices.Free(mem.System, sources)
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {

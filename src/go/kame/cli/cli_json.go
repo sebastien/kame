@@ -43,6 +43,8 @@ func WriteJSON(out io.Writer, inv *Invocation) {
 	e.Int(int64(inv.RetryCount))
 	e.Str("logLimit")
 	e.Int(int64(inv.RetainBytes))
+	e.Str("captureLimit")
+	e.Int(int64(inv.CaptureLimit))
 	e.Str("grants")
 	e.BeginArray()
 	for i := range inv.Grants {
@@ -76,6 +78,17 @@ func WriteJSON(out io.Writer, inv *Invocation) {
 	writeStrings(&e, inv.Files)
 	e.Str("args")
 	writeStrings(&e, inv.Args)
+	e.Str("inputs")
+	e.BeginArray()
+	for i := range inv.Inputs {
+		e.BeginObject()
+		e.Str("kind"); e.Str(inv.Inputs[i].Kind)
+		e.Str("value"); e.Str(inv.Inputs[i].Value)
+		e.Str("lang"); e.Str(inv.Inputs[i].Lang)
+		e.Str("entries"); writeStrings(&e, inv.Inputs[i].Entries)
+		e.EndObject()
+	}
+	e.EndArray()
 	e.Str("ok")
 	e.Bool(inv.OK)
 	e.Str("error")

@@ -113,7 +113,7 @@ func TestParseASTPreservesNestedTemplateSpans(t *testing.T) {
 
 func TestPrimaryInvocationMaterializesInlineSource(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := Run([]string{"-n", "-c", "task default :\n\techo ignored"}, &input{}, &out, &errOut)
+	status := Run([]string{"-n", "-l", "kmk", "-c", "task default :\n\techo ignored"}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(errOut.String(), "[default] complete") {
 		t.Errorf("primary invocation status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -126,7 +126,7 @@ func TestPrimaryInvocationUsageAndMissingDefault(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"-n", "-c", "task first :\ntask second :"}, &input{}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "TGT_NO_DEFAULT") || !strings.Contains(errOut.String(), "available targets: first, second") {
+	if status := Run([]string{"-n", "-l", "kmk", "-c", "task first :\ntask second :"}, &input{}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "TGT_NO_DEFAULT") || !strings.Contains(errOut.String(), "available targets: first, second") {
 		t.Errorf("missing default status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -172,7 +172,7 @@ func TestPlanDoesNotMaterializeRecipe(t *testing.T) {
 
 func TestExpressionAndGraphInspection(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if status := Run([]string{"do", "expr", "-c", "(join [\"a\" \"b\"] \",\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "a,b" {
+	if status := Run([]string{"do", "expr", "-c", "(join [\"a\" \"b\"] \",\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"a,b\"" {
 		t.Errorf("expr status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -193,22 +193,22 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "expr", "-c", "(join @* \",\")", "--", "left", "right"}, &input{}, &out, &errOut); status != 0 || out.String() != "left,right" {
+	if status := Run([]string{"do", "expr", "-c", "(join @* \",\")", "--", "left", "right"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"left,right\"" {
 		t.Errorf("expr args status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "expr", "-c", "(let [a 10] (out \"hello\" a))"}, &input{}, &out, &errOut); status != 0 || out.String() != "hello10hello10" || errOut.Len() != 0 {
+	if status := Run([]string{"do", "expr", "-c", "(let [a 10] (out \"hello\" a))"}, &input{}, &out, &errOut); status != 0 || out.String() != "hello10\"hello10\"" || errOut.Len() != 0 {
 		t.Errorf("expr out status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "expr", "-c", "(err \"notice\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "notice" || errOut.String() != "notice" {
+	if status := Run([]string{"do", "expr", "-c", "(err \"notice\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"notice\"" || errOut.String() != "notice" {
 		t.Errorf("expr err status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "expr", "-c", "(yield \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generatednil" || errOut.Len() != 0 {
+	if status := Run([]string{"do", "expr", "-c", "(yield \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generated:nil" || errOut.Len() != 0 {
 		t.Errorf("expr yield status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -224,7 +224,7 @@ func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {
 
 func TestBuildOptionsValidateAndReachRuntime(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := Run([]string{"-n", "--timeout", "100", "--retry=1", "--log-limit", "8", "--env", "KM_TEST=value", "--shell", "/bin/sh", "--shell", "-c", "-c", "task default :\n\techo ignored", "default"}, &input{}, &out, &errOut)
+	status := Run([]string{"-n", "-l", "kmk", "--timeout", "100", "--retry=1", "--log-limit", "8", "--env", "KM_TEST=value", "--shell", "/bin/sh", "--shell", "-c", "-c", "task default :\n\techo ignored", "default"}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(errOut.String(), "[default] complete") {
 		t.Errorf("run options status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -337,11 +337,15 @@ func TestJSONEventIncludesStructuredRuntimeContext(t *testing.T) {
 }
 
 func TestEmptyLongOptionValuesAreInvalid(t *testing.T) {
-	for _, arg := range []string{"--file=", "--command=", "--jobs=", "--env=", "--timeout="} {
+	for _, arg := range []string{"--file=", "--jobs=", "--env=", "--timeout="} {
 		var out, errOut bytes.Buffer
 		if status := Run([]string{arg}, &input{}, &out, &errOut); status != 2 || !strings.Contains(errOut.String(), "OPT_VALUE_INVALID") {
 			t.Errorf("%s status=%d stderr=%q", arg, status, errOut.String())
 		}
+	}
+	var out, errOut bytes.Buffer
+	if status := Run([]string{"--command="}, &input{}, &out, &errOut); status != 0 || out.Len() != 0 || errOut.Len() != 0 {
+		t.Errorf("empty runner source status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
 
@@ -375,7 +379,7 @@ func TestSpanExpandReportsExpressionInputs(t *testing.T) {
 func TestSourceDiagnosticRendersLocationAndExcerpt(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	if status := Run([]string{"-c", "value = (\n"}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command>:1:9: error PARSE_ERR:") || !strings.Contains(errOut.String(), "value = (") || !strings.Contains(errOut.String(), "        ^") {
+	if status := Run([]string{"-c", "value = (\n"}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command:1>:1:9: error PARSE_ERR:") || !strings.Contains(errOut.String(), "value = (") || !strings.Contains(errOut.String(), "        ^") {
 		t.Errorf("source diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -383,7 +387,7 @@ func TestSourceDiagnosticRendersLocationAndExcerpt(t *testing.T) {
 func TestZeroWidthSourceDiagnosticRendersEOFLocation(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	if status := Run([]string{"-c", "\n\nvalue ="}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command>:3:8: error PARSE_ERR:") || !strings.Contains(errOut.String(), "value =") {
+	if status := Run([]string{"-c", "\n\nvalue ="}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command:1>:3:8: error PARSE_ERR:") || !strings.Contains(errOut.String(), "value =") {
 		t.Errorf("zero-width source diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }

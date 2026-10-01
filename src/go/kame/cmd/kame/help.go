@@ -36,6 +36,7 @@ Build options:
       --timeout MS       per-command timeout in milliseconds
       --retry N          retry failed commands N times
       --log-limit N      maximum captured bytes per step
+      --capture-limit N  maximum stdout bytes per Kash substitution
   -h, --help             show this help
   -V, --version          show the version
 
@@ -158,13 +159,28 @@ Use check to validate only tools in the selected targets' dependency plans.
 Read-only dynamic inputs may be resolved; recipes are never executed.
 `
 
+const runHelpText = `Usage: kame do run [OPTIONS] INPUT... [-- ARG...]
+
+Compose source files and repeated inline fragments in one execution session.
+
+  -f, --file FILE   append a source file
+  -c, --command TEXT append inline source (default km)
+  -l, --lang LANG   forward-scoped parser: km | kmk | kash | expr
+      --entry NAME  select an entry on the preceding km/kmk fragment
+  -C, --directory DIR evaluation working directory
+      --allow-read[=PATH] | --allow-write[=PATH] | --allow-run[=PATH]
+      --allow-env[=NAME]  configure invocation capabilities
+      --capture-limit N  maximum captured substitution bytes
+      --timeout MS   bound the entire invocation
+`
+
 const parseHelpText = `Usage: kame do parse --lang LANG [FILE]
 
 Parse FILE, or stdin when FILE is omitted, and print a stable JSON AST. Source
 spans are included; allocator and pointer details are not.
 
 Options:
-      --lang LANG   required: expr | template | rule | script
+  -l, --lang LANG   required: expr | template | rule | script | kash
   -h, --help        show this help
 `
 
@@ -174,7 +190,7 @@ Format source to stdout, or replace each FILE. With no FILE, read stdin (only
 without -i or -n). -n lists files that would change and exits 1 when any differ.
 
 Options:
-      --lang LANG   expr | template | rule | script (default script)
+  -l, --lang LANG   expr | template | rule | script | kash (default script)
       --indent STYLE tabs (default) or spaces for rule bodies
       --indent-width N  spaces per indentation level (default 4, range 1-16)
   -i                replace files in place
@@ -193,7 +209,8 @@ Options:
   -C, --directory DIR       set the working directory
       --allow-read[=ROOTS]  permit file reads
       --allow-write[=ROOTS] permit file writes
-      --allow-run           permit shell execution
+      --allow-run[=ROOTS]   permit process execution
+      --capture-limit N    maximum stdout bytes per substitution (default 1 MiB)
       --allow-env[=NAMES]   permit environment reads
   -h, --help                show this help
 `
@@ -210,6 +227,7 @@ const (
 	commandParse
 	commandFormat
 	commandExpr
+	commandRun
 	commandHelp
 )
 
@@ -222,6 +240,7 @@ type commandSpec struct {
 }
 
 var doCommands = []commandSpec{
+	{Name: "run", TopSummary: "execute ordered source fragments in one session", DoSummary: "execute ordered source fragments in one session", Help: runHelpText, Action: commandRun},
 	{Name: "plan", TopSummary: "print the resolved plan without executing", DoSummary: "print the resolved plan without executing", Help: planHelpText, Action: commandPlan},
 	{Name: "cat", TopSummary: "materialize one target and print its artifact", DoSummary: "materialize one target and print its artifact", Help: catHelpText, Action: commandCat},
 	{Name: "inputs", TopSummary: "list declared input paths", DoSummary: "list declared input paths (--depth N)", Help: inputsHelpText, Action: commandInputs},
@@ -371,8 +390,8 @@ func optionTakesValue(arg string) bool {
 		arg == "-C" || arg == "--directory" ||
 		arg == "-j" || arg == "--jobs" ||
 		arg == "--shell" || arg == "--env" ||
-		arg == "--timeout" || arg == "--retry" || arg == "--log-limit" ||
-		arg == "--lang" || arg == "--depth"
+		arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--capture-limit" ||
+		arg == "-l" || arg == "--lang" || arg == "--entry" || arg == "--depth"
 }
 
 // handleHelpAndVersion writes help or version output when requested. It reports
