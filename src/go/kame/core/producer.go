@@ -56,6 +56,21 @@ func (c *EngineContext) Fail(d Diagnostic) { c.node.complete(c.engine, d) }
 
 // Dependency adds one generation-owned edge and returns whether it is current.
 func (c *EngineContext) Dependency(key ResourceKey) bool {
+	return c.dependency(key, false)
+}
+
+// TryDependency lets a producer inspect a dependency's failure as a value.
+// The edge retains normal interest, invalidation, and cycle detection.
+func (c *EngineContext) TryDependency(key ResourceKey) bool { return c.dependency(key, true) }
+
+// DependencyDiagnostic returns a borrowed diagnostic for an observed edge.
+func (c *EngineContext) DependencyDiagnostic(key ResourceKey) Diagnostic {
+	dep := c.engine.find(key)
+	if dep != nil && slices.Contains(c.node.Observed, dep) && (dep.State == NodeFailed || dep.State == NodeCancelled) { return dep.Diagnostic }
+	return Diagnostic{}
+}
+
+func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 	dep := c.engine.node(key)
 	if dep == nil || dep == c.node || reaches(dep, c.node) {
 		d := Diagnostic{Code: DiagnosticDependencyCycle}
@@ -67,11 +82,20 @@ func (c *EngineContext) Dependency(key ResourceKey) bool {
 	}
 	if !slices.Contains(c.node.Dynamic, dep) {
 		c.node.Dynamic = slices.Append(c.engine.Alloc, c.node.Dynamic, dep)
+		if observed { c.node.Observed = slices.Append(c.engine.Alloc, c.node.Observed, dep) }
 		dep.Dependents = slices.Append(c.engine.Alloc, dep.Dependents, c.node)
 		c.engine.emit(c.node, Event{Kind: UpdateDependency, DependencyID: dep.ID})
 		if c.node.Interest != 0 {
 			c.engine.interest(dep, c.node.Interest)
 		}
+	}
+	if !observed {
+		for i := range c.node.Observed { if c.node.Observed[i] == dep { copy(c.node.Observed[i:], c.node.Observed[i+1:]); c.node.Observed = c.node.Observed[:len(c.node.Observed)-1]; break } }
+	}
+	if observed && (dep.State == NodeFailed || dep.State == NodeCancelled) { return true }
+	if !observed && (dep.State == NodeFailed || dep.State == NodeCancelled) {
+		c.node.complete(c.engine, dep.Diagnostic.Clone(c.engine.Alloc))
+		return false
 	}
 	if !dep.Current || dep.State == NodeFailed || dep.State == NodeCancelled {
 		request(dep)
@@ -105,6 +129,9 @@ func (c *EngineContext) Context() any { return c.node.Context }
 
 func (c *EngineContext) Allocator() mem.Allocator { return c.engine.Alloc }
 func (c *EngineContext) NodeID() int64 { return c.node.ID }
+
+// RetainRoot pins the demanding generation for invocation-owned handles.
+func (c *EngineContext) RetainRoot() *Root { return c.engine.RequestRoot(c.node) }
 func (c *EngineContext) Generation() int64 { return c.node.Generation }
 func (c *EngineContext) Attempt() int64 { return c.node.Attempt }
 func (c *EngineContext) Failed() bool { return c.node.State == NodeFailed || c.node.State == NodeCancelled }

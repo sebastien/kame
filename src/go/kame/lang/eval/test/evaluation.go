@@ -1084,27 +1084,30 @@ func TestCommandCaptureExecutionPolicy(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	expression := expr.Parse(a, "test", "$(printf hello)")
-	context := eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Run}}}
-	context.Phase = eval.PlanningPhase
-	result := program.EvaluateWith(expression.Expr, &context)
-	if result.Diagnostic.Code != "PHASE_INVALID" { t.Error("planning authorized a process") }
-	result.Free(a)
-	context.Phase = eval.ResolvingPhase
-	result = program.EvaluateWith(expression.Expr, &context)
-	if result.Diagnostic.Code != "PHASE_INVALID" { t.Error("resolution authorized a process") }
-	result.Free(a)
-	context.Phase = eval.EvaluatePhase
-	context.Grants = nil
-	result = program.EvaluateWith(expression.Expr, &context)
-	if result.Diagnostic.Code != "CAP_DENIED" { t.Error("missing run capability was not denied") }
-	result.Free(a)
-	context.Grants = []eval.Grant{{Capability: eval.Run}}
-	result = program.EvaluateWith(expression.Expr, &context)
-	if result.Diagnostic.Code != "HOST_FAIL" { t.Error("missing execution host was not diagnosed") }
-	result.Free(a)
-	if program.Requests.Next().OK { t.Error("invalid execution context submitted a request") }
-	expression.Free()
+	forms := []string{"$(printf hello)", "(run \"printf\" \"hello\")", "(pipe (run \"printf\" \"hello\") (run \"cat\"))"}
+	for i := range forms {
+		expression := expr.Parse(a, "test", forms[i])
+		context := eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Run}}}
+		context.Phase = eval.PlanningPhase
+		result := program.EvaluateWith(expression.Expr, &context)
+		if result.Diagnostic.Code != "PHASE_INVALID" { t.Error("planning authorized a process") }
+		result.Free(a)
+		context.Phase = eval.ResolvingPhase
+		result = program.EvaluateWith(expression.Expr, &context)
+		if result.Diagnostic.Code != "PHASE_INVALID" { t.Error("resolution authorized a process") }
+		result.Free(a)
+		context.Phase = eval.EvaluatePhase
+		context.Grants = nil
+		result = program.EvaluateWith(expression.Expr, &context)
+		if result.Diagnostic.Code != "CAP_DENIED" { t.Error("missing run capability was not denied") }
+		result.Free(a)
+		context.Grants = []eval.Grant{{Capability: eval.Run}}
+		result = program.EvaluateWith(expression.Expr, &context)
+		if result.Diagnostic.Code != "HOST_FAIL" { t.Error("missing execution host was not diagnosed") }
+		result.Free(a)
+		if program.Requests.Next().OK { t.Error("invalid execution context submitted a request") }
+		expression.Free()
+	}
 	engine.Free()
 	program.Free()
 	parsed.Free()

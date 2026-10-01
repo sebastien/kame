@@ -72,6 +72,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		p.Options.Grants = slices.Append(a, p.Options.Grants, grant)
 	}
 	p.Eval.SetGrants(p.Options.Grants)
+	p.Eval.DryRun = options.DryRun
 	p.Eval.SetDefinitionCwd(p.Options.Directory)
 	p.Eval.SetDefinitionDependencyObserver(observeDefinitionDependency, p)
 	if len(p.Options.Shell) == 0 {
@@ -276,6 +277,7 @@ func (p *Program) Free() {
 	if p == nil {
 		return
 	}
+	p.Eval.CancelProcesses()
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)

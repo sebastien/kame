@@ -40,7 +40,7 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 			if depth == 0 && (s.Text[i] == ' ' || s.Text[i] == '\t' || s.Text[i] == '\n' || s.Text[i] == '\r') { break }
 		}
 	}
-	p := parser{a: a, s: bounded, pos: start}
+	p := parser{a: a, s: bounded, pos: start, kash: true}
 	var e *Expr
 	if start < len(s.Text) && ((s.Text[start] == '$' && (start+1 == len(s.Text) || s.Text[start+1] != '(')) || (start+1 < len(s.Text) && s.Text[start:start+2] == "@(")) {
 		word := p.commandWord()
@@ -50,11 +50,30 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 		} else { p.error(start, p.pos, "definition value must be one Kame expression or standalone substitution") }
 		freeExpr(a, word)
 	} else { e = p.expression() }
+	p.s = s
 	mem.Free(a, bounded)
+	end := p.pos
+	for end < len(s.Text) && (s.Text[end] == ' ' || s.Text[end] == '\t' || s.Text[end] == '\r') { end++ }
+	if len(p.diags) == 0 && end > p.pos && end+2 < len(s.Text) && s.Text[end:end+2] == "??" && commandWhitespace(s.Text[end+2]) {
+		rightStart := end+2
+		for rightStart < len(s.Text) && (s.Text[rightStart] == ' ' || s.Text[rightStart] == '\t' || s.Text[rightStart] == '\r') { rightStart++ }
+		if rightStart == len(s.Text) || s.Text[rightStart] == '\n' || s.Text[rightStart] == ';' || s.Text[rightStart] == '#' { p.error(end, rightStart, "expected value after ??") } else {
+			right := ParseKashValuePrefix(a, s, rightStart)
+			for i := range right.Diagnostics { p.diags = slices.Append(a, p.diags, right.Diagnostics[i]) }
+			slices.Free(a, right.Diagnostics)
+			recovery := mem.Alloc[Expr](a)
+			recovery.Kind, recovery.Span = ValueRecovery, source.Span{Start: start, End: right.End}
+			recovery.Items = slices.Append(a, recovery.Items, e)
+			recovery.Items = slices.Append(a, recovery.Items, right.Expr)
+			e, p.pos = recovery, right.End
+		}
+	}
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
 func (p *parser) commandGraph(start int, capture bool) *Expr {
+	previousKash := p.kash
+	p.kash = true
 	kind := CommandGraph
 	if capture { kind = CommandCapture }
 	e := p.node(kind, start)
@@ -77,6 +96,34 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 		}
 		if !capture && (p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#') { break }
 		if capture && p.s.Text[p.pos] == ';' { p.error(p.pos, p.pos+1, "command substitution contains exactly one process expression"); break }
+		if p.s.Text[p.pos] == '?' {
+			from := p.pos
+			p.pos++
+			if !hasExecutable(stage) { p.error(from, p.pos, "acceptance requires a complete process graph"); break }
+			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '?' { p.error(from, p.pos+1, "?? is not a raw-command operator"); break }
+			stage.Span.End = from
+			separated := from > start && commandWhitespace(p.s.Text[from-1]) && p.pos < len(p.s.Text) && commandWhitespace(p.s.Text[p.pos])
+			p.commandSpace(capture)
+			if !capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '&' { e.AcceptExit = true; continue }
+			if p.pos < len(p.s.Text) && !((capture && p.s.Text[p.pos] == ')') || (!capture && (p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#'))) {
+				if !separated { p.error(from, p.pos, "command recovery requires whitespace around ?"); break }
+				e.Body = slices.Append(p.a, e.Body, p.commandGraph(p.pos, capture))
+				break
+			}
+			e.AcceptExit = true
+			if capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' { p.pos++; break }
+			if capture { p.error(start, p.pos, "unclosed Kash command substitution") }
+			break
+		}
+		if p.s.Text[p.pos] == '&' {
+			from := p.pos
+			p.pos++
+			if capture || !hasExecutable(stage) { p.error(from, p.pos, "async syntax requires a complete command statement"); break }
+			p.commandSpace(false)
+			if p.pos < len(p.s.Text) && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' { p.error(from, p.pos, "& must terminate the process expression"); break }
+			e.Async = true
+			break
+		}
 		if p.s.Text[p.pos] == ')' {
 			if !capture { p.error(p.pos, p.pos+1, "unexpected Kash closing parenthesis"); break }
 			stage.Span.End = p.pos
@@ -157,6 +204,8 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 	}
 	if stage.Span.End == stage.Span.Start { stage.Span.End = p.pos }
 	e.Span.End = p.pos
+	if len(e.Body) != 0 && e.Body[0].Async { e.Async = true; e.Body[0].Async = false }
+	p.kash = previousKash
 	return e
 }
 
@@ -174,6 +223,8 @@ func setupKeyByte(b byte, first bool) bool {
 	return b == '_' || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (!first && b >= '0' && b <= '9')
 }
 
+func commandWhitespace(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
+
 func commandOperator(b byte) bool {
 	return b == '|' || b == '<' || b == '>' || b == '&' || b == '?' || b == ';' || b == '(' || b == '\''
 }
@@ -186,7 +237,7 @@ func (p *parser) commandWord() *Expr {
 	partStart := start
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
-		if !quoted && (b == ')' || b == ';' || b == '|' || b == '<' || b == '>' || b == ' ' || b == '\t' || b == '\r' || b == '\n') {
+		if !quoted && (b == '?' || b == ')' || b == ';' || b == '|' || b == '<' || b == '>' || b == ' ' || b == '\t' || b == '\r' || b == '\n') {
 			break
 		}
 		if b == '"' {

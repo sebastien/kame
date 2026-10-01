@@ -23,6 +23,8 @@ func WriteJSON(out io.Writer, inv *Invocation) {
 	e.Int(int64(inv.Jobs))
 	e.Str("dryRun")
 	e.Bool(inv.DryRun)
+	e.Str("watch")
+	e.Bool(inv.Watch)
 	e.Str("force")
 	e.Bool(inv.Force)
 	e.Str("json")

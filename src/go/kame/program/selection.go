@@ -63,7 +63,13 @@ func (p *Program) selectRule(target string) selection {
 			if file && !isPath(matchTarget) {
 				matchTarget = "./" + matchTarget
 			}
-			match := output.TargetForm.MatchTarget(p.Alloc, matchTarget)
+			relativeOwned := false
+            if file && path.IsAbs(matchTarget) && !path.IsAbs(output.Text) {
+                matchTarget = p.relativePath(matchTarget)
+                relativeOwned = true
+            }
+            match := output.TargetForm.MatchTarget(p.Alloc, matchTarget)
+            if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
 			if match == nil {
 				continue
 			}

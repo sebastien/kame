@@ -17,6 +17,10 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 	}
 	head := expression.Items[0]
 	if head.Kind == expr.Name {
+		if head.Text == "await" { return p.awaitProcess(expression, context) }
+		if head.Text == "run" || head.Text == "pipe" {
+			return p.processExpression(expression, context)
+		}
 		if head.Text == "?" {
 			return p.fallback(scope, expression.Items[1:], context)
 		}

@@ -13,11 +13,19 @@ func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Contex
 	if len(expression.Reference) == 0 {
 		return failure(context.Run, "REF_MISSING", expression.Span, "empty reference")
 	}
-	result := name(scope, expression.Reference[0].Text, expression.Reference[0].Span, context)
+	var result Result
+	firstPart := 1
+	if expression.Kind == expr.EnvironmentReference {
+		if p.Registry == nil { return failure(context.Run, "OP_UNKNOWN", expression.Span, "environment operation unavailable") }
+		operation := p.Registry.lookup("env")
+		if operation == nil { return failure(context.Run, "OP_UNKNOWN", expression.Span, "environment operation unavailable") }
+		result = p.operation(scope, operation, expression.Items, context, expression.Span)
+		firstPart = 2
+	} else { result = name(scope, expression.Reference[0].Text, expression.Reference[0].Span, context) }
 	if result.Waiting || result.Diagnostic.Code != "" {
 		return result
 	}
-	for i := 1; i < len(expression.Reference); i++ {
+	for i := firstPart; i < len(expression.Reference); i++ {
 		part := expression.Reference[i]
 		next := p.referencePart(result.Value, part, context)
 		// Transfer: next clones out of result.Value, so release only a

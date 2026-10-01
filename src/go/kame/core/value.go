@@ -33,6 +33,8 @@ func KindName(kind Kind) string {
 		return "resource"
 	case Pattern:
 		return "pattern"
+	case Process:
+		return "process"
 	}
 	return "unknown"
 }
@@ -49,6 +51,7 @@ const (
 	Callable
 	Resource
 	Pattern
+	Process
 )
 
 type RecordField struct {
@@ -68,6 +71,8 @@ type Value struct {
 	List     []Value
 	Record   []RecordField
 	Callable any
+	// Process is opaque and borrowed from its invocation owner, never serialized.
+	Process any
 	Resource ResourceKey
 }
 

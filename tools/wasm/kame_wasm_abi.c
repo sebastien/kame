@@ -29,12 +29,18 @@ static uint32_t kame_wasm_diagnostic_len;
 #define KAME_WASM_INSTANCE_CAPACITY 16u
 #define KAME_WASM_SOURCE_CAPACITY 65536u
 #define KAME_WASM_ARENA_CAPACITY (16u * 1024u * 1024u)
+typedef struct kame_wasm_parked_request {
+  host_Request pending;
+  uint64_t request;
+  struct kame_wasm_parked_request *next;
+} kame_wasm_parked_request;
 typedef struct {
   uint64_t owner;        /* handle-table owner token for this instance */
   uint32_t source_len;
   bool live;
   wasm_Runtime *runtime;
   host_Request pending;
+  kame_wasm_parked_request *parked;
   bool has_pending;
   bool event_pinned;
   uint64_t request;      /* handle of the pinned request, zero when none */
@@ -325,6 +331,7 @@ uint64_t kame_wasm_instance_create(void) {
     instance->source_name_len = 0u;
     instance->runtime = NULL;
     instance->pending = (host_Request){};
+    instance->parked = NULL;
     instance->has_pending = false;
     instance->event_pinned = false;
     instance->request = 0u;
@@ -347,6 +354,12 @@ uint32_t kame_wasm_instance_free(uint64_t handle) {
     instance->has_pending = false;
   }
   if (instance->runtime != NULL) {
+    while (instance->parked) {
+      kame_wasm_parked_request *saved = instance->parked;
+      instance->parked = saved->next;
+      host_Request_Free(&saved->pending, instance->runtime->Alloc);
+      mem_Free(kame_wasm_parked_request, instance->runtime->Alloc, saved);
+    }
     wasm_Runtime_Free(instance->runtime);
     instance->runtime = NULL;
   }
@@ -381,7 +394,7 @@ uint32_t kame_wasm_source_compile(uint64_t handle, uint32_t source, uint32_t sou
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
   if ((source_len != 0u && source == 0u)) return KAME_WASM_STATE_INVALID;
   instance->diagnostic_len = 0u;
-  if (instance->has_pending) {
+  if (instance->has_pending || instance->parked) {
     kame_wasm_instance_set_static_diagnostic(instance, "PHASE_INVALID", "cannot compile while a host request is pending");
     return KAME_WASM_STATE_INVALID;
   }
@@ -450,7 +463,7 @@ __attribute__((export_name("kame_wasm_session_compile")))
 uint32_t kame_wasm_session_compile(uint64_t handle, uint32_t data, uint32_t length) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
-  if (instance->runtime == NULL || instance->has_pending || (length && !data)) return KAME_WASM_STATE_INVALID;
+  if (instance->runtime == NULL || instance->has_pending || instance->parked || (length && !data)) return KAME_WASM_STATE_INVALID;
   wasm_PureResult result = wasm_Runtime_PrepareSession(instance->runtime, (so_Slice){(so_byte *)(uintptr_t)data, length, length});
   if (result.Code.len != 0) {
     kame_wasm_instance_set_diagnostic_span(instance, result.Code, result.Message, result.SpanStart, result.SpanEnd);
@@ -604,6 +617,7 @@ uint32_t kame_wasm_process_terminal(uint64_t handle, int32_t status, int32_t sig
       (so_int)status, (so_int)signal, (so_int)outcome,
       (so_String){(const char *)(uintptr_t)code, (so_int)code_len},
       (so_String){(const char *)(uintptr_t)message, (so_int)message_len});
+  host_Request_Free(&instance->pending, instance->runtime->Alloc);
   instance->pending = (host_Request){};
   instance->has_pending = false;
   instance->event_pinned = false;
@@ -936,6 +950,8 @@ uint32_t kame_wasm_event_discard(uint64_t handle) {
  * is accepted and ignored, as docs/spec/010-wasm.md requires. Any other handle
  * is foreign or stale.
  */
+uint32_t kame_wasm_request_detach(uint64_t handle, uint64_t request);
+
 static uint32_t kame_wasm_completion_target(kame_wasm_instance *instance, uint64_t request, bool *pending) {
   *pending = false;
   if (request == 0u) return KAME_WASM_HANDLE_INVALID;
@@ -944,6 +960,23 @@ static uint32_t kame_wasm_completion_target(kame_wasm_instance *instance, uint64
   if (owner == 0u || owner != instance->owner) return KAME_WASM_HANDLE_INVALID;
   so_R_u64_bool resolved = wasm_Table_Get(table, owner, (wasm_Handle)request);
   if (!resolved.val2) return KAME_WASM_HANDLE_INVALID;
+  kame_wasm_parked_request **at = &instance->parked;
+  while (*at && (*at)->request != request) at = &(*at)->next;
+  if (*at) {
+    kame_wasm_parked_request *saved = *at;
+    *at = saved->next;
+    if (instance->has_pending) {
+      kame_wasm_parked_request *active = mem_Alloc(kame_wasm_parked_request, instance->runtime->Alloc);
+      active->pending = instance->pending;
+      active->request = instance->request;
+      active->next = instance->parked;
+      instance->parked = active;
+    }
+    instance->pending = saved->pending;
+    instance->request = request;
+    instance->has_pending = true;
+    mem_Free(kame_wasm_parked_request, instance->runtime->Alloc, saved);
+  }
   if (instance->has_pending) {
     if (request != instance->request) return KAME_WASM_HANDLE_INVALID;
     *pending = true;
@@ -953,11 +986,64 @@ static uint32_t kame_wasm_completion_target(kame_wasm_instance *instance, uint64
   return KAME_WASM_OK;
 }
 
+__attribute__((export_name("kame_wasm_request_attach")))
+uint32_t kame_wasm_request_attach(uint64_t handle, uint64_t request) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (!instance) return KAME_WASM_HANDLE_INVALID;
+  bool pending = false;
+  uint32_t status = kame_wasm_completion_target(instance, request, &pending);
+  if (status != KAME_WASM_OK || !pending) return KAME_WASM_HANDLE_INVALID;
+  instance->event_pinned = true;
+  return KAME_WASM_OK;
+}
+
 static void kame_wasm_clear_completion(kame_wasm_instance *instance) {
+  host_Request_Free(&instance->pending, instance->runtime->Alloc);
   instance->pending = (host_Request){};
   instance->has_pending = false;
   instance->event_pinned = false;
   instance->request = 0u;
+}
+
+/* Unpin a launched process so the same instance can service other nodes. */
+__attribute__((export_name("kame_wasm_request_detach")))
+uint32_t kame_wasm_request_detach(uint64_t handle, uint64_t request) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (!instance || !instance->runtime || !instance->has_pending || instance->request != request) return KAME_WASM_STATE_INVALID;
+  kame_wasm_parked_request *saved = mem_Alloc(kame_wasm_parked_request, instance->runtime->Alloc);
+  saved->pending = instance->pending;
+  saved->request = request;
+  saved->next = instance->parked;
+  instance->parked = saved;
+  instance->pending = (host_Request){};
+  instance->has_pending = false;
+  instance->event_pinned = false;
+  instance->request = 0u;
+  return KAME_WASM_OK;
+}
+
+__attribute__((export_name("kame_wasm_process_stream_request")))
+uint32_t kame_wasm_process_stream_request(uint64_t handle, uint64_t request, uint32_t stderr, uint32_t data, uint32_t length) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (!instance || !instance->runtime || (length && !data)) return KAME_WASM_STATE_INVALID;
+  host_Request *pending = NULL;
+  if (instance->has_pending && instance->request == request) pending = &instance->pending;
+  for (kame_wasm_parked_request *saved = instance->parked; saved && !pending; saved = saved->next) {
+    if (saved->request == request) pending = &saved->pending;
+  }
+  if (!pending) return KAME_WASM_HANDLE_INVALID;
+  wasm_Runtime_ProcessStream(instance->runtime, *pending, stderr != 0u, (so_Slice){(so_byte *)(uintptr_t)data, (so_int)length, (so_int)length});
+  return KAME_WASM_OK;
+}
+
+__attribute__((export_name("kame_wasm_process_started_request")))
+uint32_t kame_wasm_process_started_request(uint64_t handle, uint64_t request) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (!instance || !instance->runtime) return KAME_WASM_STATE_INVALID;
+  for (kame_wasm_parked_request *saved = instance->parked; saved; saved = saved->next) {
+    if (saved->request == request) { wasm_Runtime_ProcessStarted(instance->runtime, saved->pending); return KAME_WASM_OK; }
+  }
+  return KAME_WASM_HANDLE_INVALID;
 }
 
 uint32_t kame_wasm_complete_bytes(uint64_t handle, uint64_t request, uint32_t data, uint32_t data_len) {

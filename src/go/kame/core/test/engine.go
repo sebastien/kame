@@ -515,6 +515,42 @@ func TestFailedDynamicDependencyTerminatesRequester(t *testing.T) {
 	mem.Free(a, state)
 }
 
+func observeFailure(c *core.EngineContext, nodeID int64) core.ProducerResult {
+	_ = nodeID
+	state := c.Context().(*producerState)
+	state.Runs++
+	if !c.TryDependency(state.Dependency) { return core.ProducerWaiting }
+	d := c.DependencyDiagnostic(state.Dependency)
+	if d.Code != "" { c.Publish(core.NewString(c.Allocator(), "fallback")) } else {
+		value := c.Value(state.Dependency)
+		if !value.OK { return core.ProducerWaiting }
+		c.Publish(value.Value.Clone(c.Allocator()))
+	}
+	return core.ProducerCompleted
+}
+
+func TestObservedFailureWakesAndRetainsInvalidation(t *testing.T) {
+	a := t.Allocator()
+	e := core.NewEngine(a)
+	dep := e.Add(core.ResourceKey{Kind: core.ResourceDefinition, Name: "dep"}, failProducer, nil)
+	state := mem.Alloc[producerState](a)
+	state.Dependency = dep.Key
+	n := e.Add(core.ResourceKey{Kind: core.ResourceDefinition, Name: "value"}, observeFailure, state)
+	e.Request(n)
+	for i := 0; i < 10 && !n.Current; i++ { e.Step() }
+	if !n.Current || n.Latest.Text != "fallback" || state.Runs != 2 || len(n.Observed) != 1 { t.Error("observed failure did not resume producer") }
+	dep.Producer = publishOnce
+	repaired := mem.Alloc[producerState](a)
+	repaired.Alloc, repaired.Text = a, "repaired"
+	dep.Context = repaired
+	e.Invalidate(dep)
+	for i := 0; i < 10 && !n.Current; i++ { e.Step() }
+	if !n.Current || n.Latest.Text != "repaired" { t.Error("observed edge lost invalidation or value updates") }
+	e.Free()
+	mem.Free(a, state)
+	mem.Free(a, repaired)
+}
+
 func TestDynamicDependencyResumesProducer(t *testing.T) {
 	a := t.Allocator()
 	e := core.NewEngine(a)

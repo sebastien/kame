@@ -80,7 +80,7 @@ else
 	test-fail "read with grant failed: status=$status out=$(cat "$work/out")"
 fi
 run do expr --allow-run -c '(shell "printf run-ok")'
-if [ "$status" = 0 ] && [ "$(cat "$work/out")" = '"run-ok"' ]; then
+if [ "$status" = 0 ] && [ "$(cat "$work/out")" = '[status: 0 stdout: run-ok stderr: ]' ]; then
 	test-ok "shell with --allow-run succeeds"
 else
 	test-fail "shell with grant failed: status=$status out=$(cat "$work/out")"

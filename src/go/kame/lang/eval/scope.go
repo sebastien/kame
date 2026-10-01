@@ -14,6 +14,7 @@ const (
 	bindingValue bindingKind = iota
 	bindingFunction
 	bindingDefinition
+	bindingLocalDefinition
 )
 
 type binding struct {
@@ -22,6 +23,7 @@ type binding struct {
 	Value      core.Value
 	Function   *Function
 	Definition core.ResourceKey
+	Local      *localDefinition
 }
 
 type Scope struct {
@@ -130,6 +132,13 @@ func (s *Scope) Free() {
 		}
 		if s.Bindings[i].Kind == bindingDefinition {
 			s.Bindings[i].Definition.Free(s.Alloc)
+		}
+		if s.Bindings[i].Kind == bindingLocalDefinition {
+			local := s.Bindings[i].Local
+			local.Value.Free(s.Alloc)
+			local.Diagnostic.Free(s.Alloc)
+			FreeEffects(s.Alloc, local.Effects)
+			mem.Free(s.Alloc, local)
 		}
 		if s.Bindings[i].Kind == bindingFunction && s.Bindings[i].Function.Kind == FunctionDefinition {
 			if s.Bindings[i].Function.ParametersOwned {

@@ -63,7 +63,7 @@ cli_expect_status 2
 cli_expect_stderr_contains "OPT_VALUE_INVALID"
 
 test-step "targets after -- are not options"
-cli_run -- -c "task default :" -- --force
+cli_run -- do plan -c "task default :" -- --force
 cli_expect_status 1
 cli_expect_stderr_contains "TGT_NO_RULE"
 

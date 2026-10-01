@@ -56,6 +56,8 @@ type Context struct {
 	operationStart     int
 	operationEnd       int
 	completionConsumed bool
+	RecoverFailures bool
+	ReserveEnv bool
 }
 
 type operationState struct {
@@ -166,6 +168,7 @@ func (c *Context) Emit(kind EffectKind, data []byte) {
 		c.phaseInvalid = true
 		return
 	}
+	if c.Program != nil && c.Program.DryRun && (kind == EffectOut || kind == EffectErr) { return }
 	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: kind, Data: slices.Clone(c.Run, data), Span: c.Span})
 }
 func (c *Context) EmitWrite(name string, data []byte) {
@@ -236,21 +239,29 @@ func canonicalPath(a mem.Allocator, cwd string, name string) string {
 }
 
 func (c *Context) Dependency(key core.ResourceKey) bool {
-	if c.Engine == nil {
-		return false
-	}
-	if c.DependencyObserver != nil {
-		c.DependencyObserver(c.ResolverState, key)
-	}
-	return c.Engine.Dependency(key)
+    if c.Engine == nil { return false }
+    resourcePath := ""
+    if key.Kind == core.ResourceFile {
+        resourcePath = canonicalPath(c.Run, c.Cwd, key.Name)
+        key.Name = resourcePath
+    }
+    if c.DependencyObserver != nil { c.DependencyObserver(c.ResolverState, key) }
+    current := c.Engine.Dependency(key)
+    mem.FreeString(c.Run, resourcePath)
+    return current
 }
 
 // Value returns a borrowed current dependency value after Dependency accepted it.
 func (c *Context) Value(key core.ResourceKey) core.CurrentValue {
-	if c.Engine == nil {
-		return core.CurrentValue{}
-	}
-	return c.Engine.Value(key)
+    if c.Engine == nil { return core.CurrentValue{} }
+    resourcePath := ""
+    if key.Kind == core.ResourceFile {
+        resourcePath = canonicalPath(c.Run, c.Cwd, key.Name)
+        key.Name = resourcePath
+    }
+    current := c.Engine.Value(key)
+    mem.FreeString(c.Run, resourcePath)
+    return current
 }
 
 // Submit queues an owned request and records its generated ID on the active

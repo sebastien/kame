@@ -28,6 +28,7 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 	if !parsed.OK {
 		return 2
 	}
+	if parsed.Watch { return runWatch(parsed, out, errOut) }
 	// A bare primary invocation with no build source is a discoverability
 	// opportunity: present the overview instead of a terse diagnostic.
 	bare := len(args) == 0 && !toolRun

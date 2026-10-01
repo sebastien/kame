@@ -14,6 +14,8 @@ import (
 )
 
 type Program struct {
+	// DryRun suppresses invocation-owned process, write and output effects.
+	DryRun bool
 	Alloc           mem.Allocator
 	Engine          *core.Engine
 	Script          *script.Script
@@ -24,6 +26,7 @@ type Program struct {
 	Nodes           []definitionNode
 	Diagnostics     []diagnostic.Diagnostic
 	OperationStates []operationState
+	Processes []*processTask
 	SourceParts     []SourcePart
 	// Grants provide the ambient capability policy for lazy definitions. Rule
 	// rendering supplies its own context policy from the runtime.
@@ -147,6 +150,8 @@ func (p *Program) Free() {
 		return
 	}
 	p.freeSourceParts()
+	for i := range p.Processes { freeProcessTask(p.Alloc, p.Processes[i]) }
+	slices.Free(p.Alloc, p.Processes)
 	p.Scope.Free()
 	p.Requests.Free()
 	for i := range p.Nodes {

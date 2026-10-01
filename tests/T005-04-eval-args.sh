@@ -62,10 +62,10 @@ else
 	test-fail "abspath was $(cat "$CLI_OUT"), wanted $PWD/work"
 fi
 
-test-step "input source conflicts and missing values"
+test-step "ordered source inputs and missing values"
 cli_run -- do expr -c '(list 1)' expression.km
-cli_expect_status 2
-cli_expect_stderr_contains 'OPT_CONFLICT'
+cli_expect_status 0
+cli_expect_stdout '"xy"'
 
 cli_run -- do expr -c
 cli_expect_status 2

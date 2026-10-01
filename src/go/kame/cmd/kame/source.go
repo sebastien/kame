@@ -2,6 +2,7 @@
 package main
 
 import (
+	"kame/diagnostic"
 	"kame/lang/script"
 	"kame/lang/source"
 	"kame/program"
@@ -17,6 +18,7 @@ type sourceFile struct {
 	Text string
 	Data []byte
 	OwnedName bool
+	Parent int
 }
 
 type sourcePart struct { Name string; Text string; Offset int }
@@ -26,6 +28,7 @@ type buildSource struct {
 	Parts     []sourcePart
 	Missing   bool
 	Status    int
+	JSON bool
 }
 
 func freeBuildSource(source *buildSource) {
@@ -33,7 +36,7 @@ func freeBuildSource(source *buildSource) {
 		return
 	}
 	for i := range source.Files {
-		if len(source.Files[i].Data) != 0 { mem.FreeSlice(mem.System, source.Files[i].Data) }
+		mem.FreeSlice(mem.System, source.Files[i].Data)
 		if source.Files[i].OwnedName { mem.FreeString(mem.System, source.Files[i].Name) }
 	}
 	slices.Free(mem.System, source.Files)
@@ -110,17 +113,26 @@ func readBuildSource(name string, errOut io.Writer) buildSource {
 }
 
 func readBuildSourceLanguage(name string, errOut io.Writer, lang string) buildSource {
+	return readRunSource(name, errOut, lang, false)
+}
+
+func sourceError(out io.Writer, code string, message string, json bool) {
+	if !json { cliError(out, code, message); return }
+	emitDiagnostic(out, diagnostic.Diagnostic{Code: code, Message: message, Severity: diagnostic.Error}, true, nil)
+}
+
+func readRunSource(name string, errOut io.Writer, lang string, json bool) buildSource {
 	canonical := path.Clean(mem.System, name)
 	data, readErr := os.ReadFile(mem.System, canonical)
 	if readErr != nil {
-		cliError(errOut, "FS_ERR", "cannot read source: "+canonical)
+		sourceError(errOut, "FS_ERR", "cannot read source: "+canonical, json)
 		mem.FreeString(mem.System, canonical)
 		return buildSource{Status: 1}
 	}
-	result := buildSource{}
+	result := buildSource{JSON: json}
 	// Text wraps Data backing (zero-copy string conversion in Solod):
 	// freeBuildSource frees Data only, Text never outlives it.
-	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), Data: data, OwnedName: true})
+	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), Data: data, OwnedName: true, Parent: -1})
 	if !expandIncludesLanguage(&result, 0, errOut, lang) { result.Status = 1 }
 	return result
 }
@@ -140,7 +152,7 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if item.Kind != script.Include { continue }
-		if file.Name == "<command>" { cliError(errOut, "FEATURE_UNSUP", "include requires a file-backed build source"); parsed.Free(); return false }
+		if file.Name == "<command>" { sourceError(errOut, "FEATURE_UNSUP", "include requires a file-backed build source", s.JSON); parsed.Free(); return false }
 		s.Parts = slices.Append(mem.System, s.Parts, sourcePart{Name: file.Name, Text: file.Text[start:item.Span.Start], Offset: start})
 		includeName := cloneCommandText(item.Include)
 		if !path.IsAbs(includeName) {
@@ -153,12 +165,12 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 		canonical := path.Clean(mem.System, includeName)
 		mem.FreeString(mem.System, includeName)
 		includeName = canonical
-		for j := range s.Files {
-			if s.Files[j].Name == includeName { cliError(errOut, "DEP_CYCLE", "include cycle: "+includeName); mem.FreeString(mem.System, includeName); parsed.Free(); return false }
+		for j := fileIndex; j >= 0; j = s.Files[j].Parent {
+			if s.Files[j].Name == includeName { sourceError(errOut, "DEP_CYCLE", "include cycle: "+includeName, s.JSON); mem.FreeString(mem.System, includeName); parsed.Free(); return false }
 		}
 		data, readErr := os.ReadFile(mem.System, includeName)
-		if readErr != nil { cliError(errOut, "FS_ERR", "cannot read included source: "+includeName); mem.FreeString(mem.System, includeName); parsed.Free(); return false }
-		s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), Data: data, OwnedName: true})
+		if readErr != nil { sourceError(errOut, "FS_ERR", "cannot read included source: "+includeName, s.JSON); mem.FreeString(mem.System, includeName); parsed.Free(); return false }
+		s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), Data: data, OwnedName: true, Parent: fileIndex})
 		if !expandIncludesLanguage(s, len(s.Files)-1, errOut, lang) { parsed.Free(); return false }
 		start = item.Span.End
 	}

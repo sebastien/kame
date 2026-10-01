@@ -32,7 +32,7 @@ func runSession(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 		input := inv.Inputs[i]
 		name, text := input.Value, input.Value
 		if input.Kind == "file" {
-			file := readBuildSourceLanguage(name, errOut, input.Lang)
+			file := readRunSource(name, diagnosticWriter(out, errOut, inv.JSON), input.Lang, inv.JSON)
 			loaded = slices.Append(mem.System, loaded, file)
 			if file.Status != 0 { freeRunInputs(fragments, storage, names); return 1 }
 			for j := range file.Parts {
@@ -43,7 +43,7 @@ func runSession(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 			continue
 		} else if input.Kind == "stdin" {
 			data, err := io.ReadAll(mem.System, in)
-			if err != nil { freeRunInputs(fragments, storage, names); cliError(errOut, "FS_ERR", "cannot read stdin"); return 1 }
+			if err != nil { freeRunInputs(fragments, storage, names); sourceError(diagnosticWriter(out, errOut, inv.JSON), "FS_ERR", "cannot read stdin", inv.JSON); return 1 }
 			storage = slices.Append(mem.System, storage, data)
 			text, name = string(data), "<stdin>"
 		} else {
@@ -86,46 +86,48 @@ func runSession(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 	slices.Free(mem.System, values)
 	// A single rule source keeps the established build presentation, parallel
 	// target handling, JSON events, freshness and cache path unchanged.
+	workStart := 0
+	startedAt := time.Now().UnixNano()
 	if len(inv.Inputs) == 1 && inv.Inputs[0].Lang == "kmk" {
 		var targets []string
 		for i := range session.Work { targets = slices.Append(mem.System, targets, session.Work[i].Target) }
 		status := materializeTargets(p, targets, out, errOut, inv.JSON)
 		slices.Free(mem.System, targets)
-		return status
+		if status != 0 { return status }
+		workStart = len(session.Work) // Recipes ran already; only owned async joins remain.
 	}
-	if inv.JSON { cliError(errOut, "FEATURE_UNSUP", "JSON runner sessions are not yet supported"); return 1 }
-	if inv.DryRun { cliError(errOut, "FEATURE_UNSUP", "composed dry-run runner sessions are not yet supported"); return 1 }
 	output := exprEffectOutput{Out: out, Err: errOut}
-	p.Eval.SetDefinitionEffectSink(writeExprEffect, &output)
+	if inv.JSON { session.SetJSON(true) } else { p.Eval.SetDefinitionEffectSink(writeExprEffect, &output) }
 	var last core.Value
 	hasLast := false
 	defer last.Free(mem.System)
 	progress := buildProgress{}
-	startedAt := time.Now().UnixNano()
-	for i := range session.Work {
+	for i := workStart; i <= len(session.Work); i++ {
+		if i == len(session.Work) && len(p.Eval.Processes) == 0 { break }
 		started := session.Start(i)
-		if started.Diagnostic.Code != "" { emitRunDiagnostic(errOut, started.Diagnostic, false, fragments, loaded); started.Diagnostic.Free(mem.System); return 1 }
+		if started.Diagnostic.Code != "" { emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), started.Diagnostic, inv.JSON, fragments, loaded); started.Diagnostic.Free(mem.System); return 1 }
 		h := started.Handle
 		for {
 			signal := posix.TakeSignal()
 			if signal != 0 { h.Cancel(); p.Tick(10); h.Free(); if signal < 0 { return 128-signal }; return 128+signal }
-			if inv.TimeoutMS > 0 && (time.Now().UnixNano()-startedAt)/1000000 >= inv.TimeoutMS { h.Cancel(); p.Tick(10); h.Free(); cliError(errOut, "RECIPE_TIMEOUT", "invocation timed out"); return 1 }
+			if inv.TimeoutMS > 0 && (time.Now().UnixNano()-startedAt)/1000000 >= inv.TimeoutMS { h.Cancel(); p.Tick(10); h.Free(); sourceError(diagnosticWriter(out, errOut, inv.JSON), "RECIPE_TIMEOUT", "invocation timed out", inv.JSON); return 1 }
 			p.Tick(10)
-			drainEvents(p, out, errOut, false, &progress)
+			session.Observe(h)
+			drainEvents(p, out, errOut, inv.JSON, &progress)
 			if h.Definition && h.Node.Current {
-				if session.Work[i].Selected { writeValue(out, h.Node.Latest) } else if session.Work[i].Value { last.Free(mem.System); last = h.Node.Latest.Clone(mem.System); hasLast = true }
+				if i < len(session.Work) && !inv.JSON && !inv.DryRun && session.Work[i].Selected { writeValue(out, h.Node.Latest) } else if i < len(session.Work) && !inv.JSON && !inv.DryRun && session.Work[i].Value { last.Free(mem.System); last = h.Node.Latest.Clone(mem.System); hasLast = true }
 				break
 			}
 			polled := h.Poll()
 			if !polled.Done { continue }
-			if polled.Result.Diagnostic.Code != "" { emitRunDiagnostic(errOut, polled.Result.Diagnostic, false, fragments, loaded); polled.Result.Free(mem.System); h.Free(); return 1 }
-			if session.Work[i].Value { last.Free(mem.System); last = polled.Result.Value.Clone(mem.System); hasLast = true }
+			if polled.Result.Diagnostic.Code != "" { if !inv.JSON { emitRunDiagnostic(errOut, polled.Result.Diagnostic, false, fragments, loaded) }; polled.Result.Free(mem.System); h.Free(); return 1 }
+			if i < len(session.Work) && session.Work[i].Value { last.Free(mem.System); last = polled.Result.Value.Clone(mem.System); hasLast = true }
 			polled.Result.Free(mem.System)
 			break
 		}
 		h.Free()
 	}
-	if hasLast { writeValue(out, last) }
+	if hasLast && !inv.JSON && !inv.DryRun { writeValue(out, last) }
 	return 0
 }
 

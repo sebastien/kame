@@ -328,6 +328,13 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			previousEnd = item.Span.End
 			continue
 		}
+		if item.Expression != nil && (item.Expression.Kind == expr.KashIf || item.Expression.Kind == expr.KashMatch) {
+			value := expr.FormatKashControl(a, item.Expression, indent)
+			b.WriteString(value)
+			mem.FreeString(a, value)
+			previousEnd = item.Span.End
+			continue
+		}
 		value := expr.Format(a, item.Expression)
 		b.WriteString(value)
 		mem.FreeString(a, value)

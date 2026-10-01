@@ -8,7 +8,7 @@ const version = "v1"
 // so operation implementations can be organized by domain independently.
 func Register(r *eval.Registry) bool {
 	return add(r, "not", opNot, 1, 1) && add(r, "bool", opBool, 1, 1) &&
-		add(r, "str", opStr, 1, 1) && add(r, "count", opCount, 1, 1) &&
+		add(r, "fail", opFail, 1, 1) && add(r, "parse-json", opParseJSON, 1, 1) && add(r, "str", opStr, 1, 1) && add(r, "count", opCount, 1, 1) &&
 		add(r, "eq", opEq, 2, 2) && add(r, "is", opIs, 2, 2) &&
 		add(r, "ne", opNe, 2, 2) && add(r, "lt", opLt, 2, 2) &&
 		add(r, "gt", opGt, 2, 2) && add(r, "gte", opGte, 2, 2) &&

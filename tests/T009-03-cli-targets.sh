@@ -37,7 +37,7 @@ test-step "implicit default target"
 
 test-step "without a default, the invocation fails and reports available targets"
 TWO_TASKS=$'task first :\ntask second :'
-cli_run -- -c "$TWO_TASKS"
+cli_run -- -l kmk -c "$TWO_TASKS"
 cli_expect_status 1
 cli_expect_stdout_empty
 cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first, second"
@@ -120,7 +120,7 @@ fixture_copy errors errors
 
 test-step "a target named do is requested after --"
 DO_SOURCE=$'task do :\n\t@(out "do-target\\n")'
-cli_run -- -c "$DO_SOURCE" -- do
+cli_run -- -l kmk -c "$DO_SOURCE" do
 cli_expect_status 0
 cli_expect_stdout "do-target
 "

@@ -35,6 +35,17 @@ const (
 	CommandRedirection
 	CommandSetup
 	CommandGraph
+	ValueRecovery
+	CommandTest
+	KashIf
+	KashBranch
+	KashDefinition
+	KashComment
+	KashMatch
+	EnvironmentReference
+	// CommandResult is the runtime lowering of expression-level run/pipe.
+	CommandResult
+	InvocationJoin
 )
 
 type ReferenceKind int
@@ -75,6 +86,10 @@ type StringPart struct {
 
 // Expr is immutable after parsing. All child storage is owned by Result.Alloc.
 type Expr struct {
+	Async bool
+	Kash bool
+	// AcceptExit applies terminal Kash ? to the complete process graph.
+	AcceptExit bool
 	Kind       Kind
 	Span       source.Span
 	Text       string
@@ -90,6 +105,7 @@ type Expr struct {
 	Items      []*Expr
 	Fields     []Field
 	Parameters []Parameter
+	// Body holds callable expressions, or one right-associative process fallback.
 	Body       []*Expr
 	Pattern    *Pattern
 }
@@ -157,6 +173,7 @@ type parser struct {
 	s     *source.Source
 	pos   int
 	diags []source.Diagnostic
+	kash bool
 }
 
 func Parse(a mem.Allocator, name string, text string) *Result {
@@ -176,6 +193,12 @@ func ParsePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
+func ParseKashExpressionPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
+	p := parser{a: a, s: s, pos: start, kash: true}
+	e := p.expression()
+	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
+}
+
 func (p *parser) error(start int, end int, message string) {
 	if end > len(p.s.Text) { end = len(p.s.Text) }
 	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
@@ -183,7 +206,7 @@ func (p *parser) error(start int, end int, message string) {
 
 func (p *parser) node(kind Kind, start int) *Expr {
 	e := mem.Alloc[Expr](p.a)
-	e.Kind, e.Span = kind, source.Span{Start: start, End: p.pos}
+	e.Kind, e.Span, e.Kash = kind, source.Span{Start: start, End: p.pos}, p.kash
 	return e
 }
 
@@ -548,6 +571,14 @@ func (p *parser) reference() *Expr {
 		e.Reference = slices.Append(p.a, e.Reference, ReferencePart{Kind: kind, Text: text, Span: source.Span{Start: partStart, End: p.pos}})
 	}
 	e.Span.End = p.pos
+	if p.kash && name.Text == "env" {
+		if len(e.Reference) < 2 || e.Reference[1].Kind != ReferenceName { p.error(start, p.pos, "environment namespace requires a named variable") } else {
+			e.Kind = EnvironmentReference
+			variable := p.node(Symbol, e.Reference[1].Span.Start)
+			variable.Text, variable.Span = e.Reference[1].Text, e.Reference[1].Span
+			e.Items = slices.Append(p.a, e.Items, variable)
+		}
+	}
 	return e
 }
 
@@ -818,6 +849,7 @@ func (p *parser) lambda(start int) *Expr {
 	for p.pos < len(p.s.Text) && p.s.Text[p.pos] != ']' {
 		name := p.name()
 		if !name.OK { p.error(p.pos, p.pos+1, "expected parameter"); return lambda }
+		if p.kash && name.Text == "env" { p.error(name.Span.Start, name.Span.End, "env is reserved in Kash") }
 		rest := false
 		if p.pos+3 <= len(p.s.Text) && p.s.Text[p.pos:p.pos+3] == "..." { p.pos += 3; rest = true }
 		lambda.Parameters = slices.Append(p.a, lambda.Parameters, Parameter{Name: name.Text, Span: source.Span{Start: name.Span.Start, End: p.pos}, Rest: rest})
@@ -964,9 +996,17 @@ func Format(a mem.Allocator, e *Expr) string {
 	return text
 }
 
+func writeProcess(b *strings.Builder, e *Expr) {
+	for i := range e.Items { if i != 0 { b.WriteString(" | ") }; writeExpr(b, e.Items[i]) }
+	if e.AcceptExit { b.WriteString(" ?") }
+	if len(e.Body) != 0 { b.WriteString(" ? "); writeProcess(b, e.Body[0]) }
+	if e.Async { b.WriteString(" &") }
+}
+
 func writeExpr(b *strings.Builder, e *Expr) {
 	if e == nil { return }
-	if e.Kind == CommandCapture || e.Kind == CommandGraph { if e.Kind == CommandCapture { b.WriteString("$(") }; for i := range e.Items { if i != 0 { b.WriteString(" | ") }; writeExpr(b, e.Items[i]) }; if e.Kind == CommandCapture { b.WriteByte(')') }; return }
+	if e.Kind == ValueRecovery { writeExpr(b, e.Items[0]); b.WriteString(" ?? "); writeExpr(b, e.Items[1]); return }
+	if e.Kind == CommandCapture || e.Kind == CommandGraph || e.Kind == CommandTest { if e.Kind == CommandCapture { b.WriteString("$(") }; writeProcess(b, e); if e.Kind == CommandCapture { b.WriteByte(')') }; return }
 	if e.Kind == CommandStage { for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }; return }
 	if e.Kind == CommandRedirection { b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
 	if e.Kind == CommandSetup { b.WriteByte(':'); b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
@@ -986,7 +1026,7 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	if e.Kind == Section { b.WriteByte('('); writeExpr(b, e.Body[0]); b.WriteByte(')'); return }
 	if e.Kind == Path { b.WriteString(e.Text); return }
 	if e.Kind == Selector { b.WriteString(e.Text); return }
-	if e.Kind == Reference { writeReference(b, e); return }
+	if e.Kind == Reference || e.Kind == EnvironmentReference { writeReference(b, e); return }
 	if e.Kind == String { writeString(b, e); return }
 	if e.Kind == List { writeMany(b, '[', ']', e.Items); return }
 	if e.Kind == Application { writeMany(b, '(', ')', e.Items); return }

@@ -35,10 +35,15 @@ func WriteAST(out io.Writer, lang string, name string, text string) int {
 		result.Free()
 	} else {
 		var result *script.Script
-		if lang == "kash" { result = script.ParseKash(mem.System, name, text) } else { result = script.Parse(mem.System, name, text) }
+		var authored *source.Source
+		if lang == "kash" { result = script.ParseKash(mem.System, name, text) } else if lang == "km" {
+			authored = source.New(mem.System, name, text)
+			result = script.ParseFragment(mem.System, authored, lang, 0, len(text))
+		} else { result = script.Parse(mem.System, name, text) }
 		enc.script(result)
 		failed = enc.diagnostics(result.Diagnostics)
 		result.Free()
+		if authored != nil { authored.Free(mem.System) }
 	}
 	enc.finish()
 	if enc.err() != nil {
@@ -167,11 +172,11 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.Selector || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup {
+	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.Selector || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashComment {
 		e.Str("text")
 		e.Str(value.Text)
 	}
-	if value.Kind == expr.Reference {
+	if value.Kind == expr.Reference || value.Kind == expr.EnvironmentReference {
 		e.Str("parts")
 		e.BeginArray()
 		for i := range value.Reference {
@@ -187,7 +192,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.List || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph {
+	if value.Kind == expr.List || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || value.Kind == expr.KashIf || value.Kind == expr.KashMatch || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition {
+		if value.AcceptExit { e.Str("acceptExit"); e.Bool(true) }
+		if value.Async { e.Str("async"); e.Bool(true) }
+		if (value.Kind == expr.CommandCapture || value.Kind == expr.CommandGraph) && len(value.Body) != 0 { e.Str("fallback"); e.expr(value.Body[0]) }
 		e.Str("items")
 		e.exprs(value.Items)
 	}
@@ -207,7 +215,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.Lambda {
+	if value.Kind == expr.KashBranch { e.Str("body"); e.exprs(value.Body) }
+	if value.Kind == expr.KashMatch && len(value.Body) != 0 { e.Str("subject"); e.expr(value.Body[0]); if len(value.Body) > 1 { e.Str("comments"); e.exprs(value.Body[1:]) } }
+	if value.Kind == expr.KashDefinition { e.Str("function"); e.Bool(value.Bool) }
+	if value.Kind == expr.Lambda || value.Kind == expr.KashDefinition {
 		e.Str("parameters")
 		e.BeginArray()
 		for i := range value.Parameters {
@@ -298,6 +309,14 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
+	if k == expr.EnvironmentReference { return "environment-reference" }
+	if k == expr.KashMatch { return "kash-match" }
+	if k == expr.KashIf { return "kash-if" }
+	if k == expr.KashBranch { return "kash-branch" }
+	if k == expr.KashDefinition { return "kash-definition" }
+	if k == expr.KashComment { return "kash-comment" }
+	if k == expr.CommandTest { return "command-test" }
+	if k == expr.ValueRecovery { return "value-recovery" }
 	if k == expr.CommandCapture { return "command-capture" }
 	if k == expr.CommandGraph { return "command-graph" }
 	if k == expr.CommandWord { return "command-word" }

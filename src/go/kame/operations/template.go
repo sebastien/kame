@@ -361,29 +361,7 @@ func eqFoldExt(s string, lower string) bool {
 }
 
 func readFileBytes(c *eval.Context, path string) eval.Result {
-	completion := c.TakeCompletion()
-	if completion.RequestID != 0 {
-		payload := host.FilePayload(c.Run, host.OpRead, path)
-		payload.Free(c.Run)
-		if completion.Diagnostic.Code != "" {
-			result := eval.Result{Diagnostic: completion.Diagnostic.Clone(c.Run)}
-			completion.Diagnostic.Free(c.Run)
-			completion.Value.Free(c.Run)
-			return result
-		}
-		if !completion.HasValue {
-			completion.Value.Free(c.Run)
-			return c.InvalidOperation("template file read completion omitted its result")
-		}
-		result := eval.Result{Value: completion.Value.Clone(c.Run)}
-		completion.Value.Free(c.Run)
-		return result
-	}
-	payload := host.FilePayload(c.Run, host.OpRead, path)
-	id := c.Submit(host.RequestReadFile, payload)
-	payload.Free(c.Run)
-	if id == 0 {
-		return failure("HOST_FAIL", "host request was not accepted")
-	}
-	return eval.Result{Waiting: true}
+    // Retain each completed read across nested include waits. Otherwise an outer
+    // render can consume the inner include's completion as its own source.
+    return request(c, host.RequestReadFile, host.FilePayload(c.Run, host.OpRead, path))
 }

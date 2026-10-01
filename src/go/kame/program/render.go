@@ -18,9 +18,12 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
-	if entry.Rule.BodyDoc != nil {
-		return p.renderDocument(entry, context)
-	}
+	scope := p.ruleScope(context, entry.Captures)
+    context.Scope = scope
+    defer scope.Free()
+    if entry.Rule.BodyDoc != nil {
+        return p.renderDocument(entry, context)
+    }
 	b := strings.NewBuilder(p.Alloc)
 	defer b.Free()
 	var spans []diagnostic.Span
@@ -28,7 +31,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 		if body[i].Template == nil {
 			continue
 		}
-		result := p.Eval.Render(p.Alloc, body[i].Template, p.Eval.Scope, context)
+		result := p.Eval.Render(p.Alloc, body[i].Template, scope, context)
 		if result.Waiting {
 			slices.Free(p.Alloc, spans)
 			eval.FreeEffects(p.Alloc, context.Effects)

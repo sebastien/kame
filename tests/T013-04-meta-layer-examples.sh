@@ -42,11 +42,11 @@ test-step "value programs, functions, pipes, discovery and lazy failure"
 	cli_run -- -f ./02-functions.km publication
 	cli_expect_status 0
 	cli_expect_stdout '[pages: ["./public/hello.txt" "./public/world.txt"] labels: ["HELLO.TXT" "WORLD.TXT"]]'
-	cli_run -- -f ./03-resources.km publication
+	cli_run -- --allow-read -f ./03-resources.km publication
 	cli_expect_status 0
 	cli_expect_stdout '[sources: ["./notes/hello.txt" "./notes/world.txt"] pages: ["./public/hello.txt" "./public/world.txt"] count: 2]'
 	printf 'a new note\n' >./notes/third.txt
-	cli_run -- -f ./03-resources.km publication
+	cli_run -- --allow-read -f ./03-resources.km publication
 	cli_expect_status 0
 	cli_expect_stdout_contains './notes/third.txt' './public/third.txt' 'count: 3'
 	if [ ! -e ./public ]; then
@@ -148,7 +148,7 @@ test-step "native source composition reuses the value program unchanged"
 	cd composition/publication
 	cli_run -- do fmt -n ./publication.km
 	cli_expect_status 0
-	cli_run -- -f ./publication.km publication
+	cli_run -- --allow-read -f ./publication.km publication
 	cli_expect_status 0
 	cli_expect_stdout_contains 'count: 3'
 	cp "$CLI_OUT" ./value-result
@@ -164,7 +164,7 @@ test-step "native source composition reuses the value program unchanged"
 test-step "available Kash boundary: typed argv, capture, explicit grants"
 cli_run -- do expr --allow-run -c '(let [names ["hello world.txt" "second.txt" "a; echo surprise"]] $(printf "[%s]\n" $names))'
 cli_expect_status 0
-cli_expect_stdout $'"[hello world.txt]\n[second.txt]\n[a; echo surprise]\n"'
+cli_expect_stdout '"[hello world.txt]\n[second.txt]\n[a; echo surprise]\n"'
 cli_run -- do expr --allow-run -c '(uppercase (strip $(printf "hello\n")))'
 cli_expect_status 0
 cli_expect_stdout '"HELLO"'

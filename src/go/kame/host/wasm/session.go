@@ -5,6 +5,7 @@ import (
 	"kame/host"
 	"kame/lang/eval"
 	"kame/program"
+	"solod.dev/so/bytes"
 	"solod.dev/so/slices"
 )
 
@@ -21,7 +22,7 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 		var entries []string
 		items := host.PayloadList(inputs[i], "entries")
 		for j := range items { entries = slices.Append(r.Alloc, entries, items[j].Text) }
-		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0}
+		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0}
 		if f.Lang != "km" && f.Lang != "kmk" && f.Lang != "kash" && f.Lang != "expr" {
 			for j := range fragments { slices.Free(r.Alloc, fragments[j].Entries) }
 			slices.Free(r.Alloc, entries); slices.Free(r.Alloc, fragments)
@@ -31,22 +32,30 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	}
 	if len(fragments) == 0 { slices.Free(r.Alloc, fragments); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "empty session descriptor")} }
 	grants := r.InspectionGrants
-	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: r.Environment, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit"))}
+	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: r.Environment, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0}
 	compiled := program.CompileSession(r.Alloc, fragments, r.Registry, options)
 	r.Host = nil
 	for i := range fragments { slices.Free(r.Alloc, fragments[i].Entries) }
 	slices.Free(r.Alloc, fragments)
 	if compiled.Session == nil {
+		if host.PayloadInt(value, "json") != 0 {
+			buffer := bytes.NewBuffer(r.Alloc, nil)
+			for i := range compiled.Diagnostics { program.WriteJSONDiagnostic(&buffer, compiled.Diagnostics[i]) }
+			r.EventJSONClear()
+			r.EventJSON = slices.Clone(r.Alloc, []byte(buffer.String()))
+			buffer.Free()
+		}
 		out := PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "cannot compile session")}
 		if len(compiled.Diagnostics) != 0 { out.Free(r.Alloc); out = PureResult{Code: pureText(r.Alloc, compiled.Diagnostics[0].Code), Message: pureText(r.Alloc, compiled.Diagnostics[0].Message), SpanStart: compiled.Diagnostics[0].Span.Start, SpanEnd: compiled.Diagnostics[0].Span.End} }
 		compiled.Free(r.Alloc)
 		return out
 	}
 	r.Session, r.Program = compiled.Session, compiled.Session.Program
+	r.Session.SetJSON(host.PayloadInt(value, "json") != 0)
 	compiled.Free(r.Alloc)
 	args := host.PayloadList(value, "args")
 	r.Program.Eval.SetDefinitionArgs(args)
-	r.Program.Eval.SetDefinitionEffectSink(sessionEffect, r)
+	if !r.Session.JSON { r.Program.Eval.SetDefinitionEffectSink(sessionEffect, r) }
 	return PureResult{}
 }
 
@@ -57,7 +66,7 @@ func sessionEffect(value any, effect eval.Effect) {
 
 func (r *Runtime) SessionWorkCount() int {
 	if r.Session == nil { return 0 }
-	return len(r.Session.Work)
+	return len(r.Session.Work)+1 // Final invocation-owned join, never a displayed value.
 }
 
 func (r *Runtime) SessionWorkKind(index int) uint32 {
@@ -69,7 +78,7 @@ func (r *Runtime) SessionWorkKind(index int) uint32 {
 }
 
 func (r *Runtime) RequestSessionWork(index int) PureResult {
-	if r.Session == nil || index < 0 || index >= len(r.Session.Work) { return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "invalid session work index")} }
+	if r.Session == nil || index < 0 || index > len(r.Session.Work) { return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "invalid session work index")} }
 	if r.Handle != nil { r.Handle.Free(); r.Handle = nil }
 	eval.FreeEffects(r.Alloc, r.Effects)
 	r.Effects, r.EffectIndex = nil, 0

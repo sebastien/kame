@@ -30,7 +30,11 @@ type captureState struct {
 	Timeout int64
 	ID     int64
 	Done   bool
+	Async bool
+	Recovering bool
 	Value  core.Value
+	Effects []Effect
+	WritePaths []string
 }
 
 func freeCaptureState(a mem.Allocator, value any) {
@@ -51,6 +55,9 @@ func freeCaptureState(a mem.Allocator, value any) {
 	for i := range s.Environment { s.Environment[i].Free(a) }
 	slices.Free(a, s.Environment)
 	s.Value.Free(a)
+	FreeEffects(a, s.Effects)
+	for i := range s.WritePaths { mem.FreeString(a, s.WritePaths[i]) }
+	slices.Free(a, s.WritePaths)
 	mem.Free(a, s)
 }
 
@@ -81,6 +88,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		state.Alloc = p.Alloc
 		c.SetOperationState(state, freeCaptureState)
 	}
+	for i := range state.Effects { effect := state.Effects[i]; c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)}) }
+	for i := range state.WritePaths { c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i])) }
+	if state.Recovering {
+		if state.Output != "" { c.Emit(EffectProcessWrite, []byte(state.Output)) }
+		return p.capture(e.Body[0], c)
+	}
 	if state.Stage == len(e.Items) && state.Input != "" && !c.DirectHostRequests {
 		key := core.NewResourceKey(c.Run, core.ResourceFile, state.Input)
 		ready := c.Dependency(key)
@@ -103,19 +116,27 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			if r.Diagnostic.Span.Start == 0 && r.Diagnostic.Span.End == 0 {
 				r.Diagnostic.Span.Start, r.Diagnostic.Span.End = e.Span.Start, e.Span.End
 			}
-			return r
+			return p.captureRecovery(e, c, state, r)
 		}
 		if !completion.HasValue {
 			return failure(c.Run, "HOST_FAIL", e.Span, "process completion omitted its result")
 		}
-		if e.Kind == expr.CommandGraph {
+		if e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult {
 			// A statement streams bytes; only status is interpreted, never stdout.
 			for i := range completion.Value.Record {
 				if completion.Value.Record[i].Key == "stdout" { completion.Value.Record[i].Value.Free(c.Run); completion.Value.Record[i].Value = core.NewString(c.Run, "") }
 				if completion.Value.Record[i].Key == "stdoutTruncated" { completion.Value.Record[i].Value.Bool = false }
 			}
 		}
-		r := captureValue(c.Run, completion.Value, e.Span)
+		r := captureValue(c.Run, completion.Value, e.Span, e.AcceptExit || e.Kind == expr.CommandTest)
+		if (e.Kind == expr.CommandResult || e.Kind == expr.CommandGraph) && r.Diagnostic.Code == "" {
+			r.Value.Free(c.Run)
+			r = processResult(c.Run, completion.Value, e.Span)
+		}
+		if e.Kind == expr.CommandTest && r.Diagnostic.Code == "" {
+			r.Value.Free(c.Run)
+			r.Value = core.Value{Kind: core.Bool, Bool: host.PayloadInt(completion.Value, "status") == 0 && host.PayloadInt(completion.Value, "signal") == 0}
+		}
 		if r.Diagnostic.Code == "RECIPE_FAIL" {
 			stages := host.PayloadStages(completion.Value)
 			for i := range stages {
@@ -134,15 +155,26 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if r.Diagnostic.Code == "" {
 			state.Value, state.Done = r.Value.Clone(state.Alloc), true
 		}
-		return r
+		return p.captureRecovery(e, c, state, r)
 	}
 	for state.Stage < len(e.Items) {
 		stage := e.Items[state.Stage]
 		for state.Index < len(stage.Items) {
 			word := stage.Items[state.Index]
 			if word.Kind == expr.CommandSetup {
+				before := len(c.Effects)
+				beforePaths := len(c.WritePaths)
 				r := p.commandWord(word.Items[0], c)
 				if r.Waiting || r.Diagnostic.Code != "" { return r }
+				rememberArgumentEffects(state, c, before, beforePaths)
+				if word.Text == "async" {
+					if r.Value.Kind != core.Bool { r.Free(c.Run); return failure(c.Run, "EXPR_INVALID", word.Span, "async setup requires a boolean") }
+					async := r.Value.Bool
+					r.Free(c.Run)
+					state.Async = async
+					state.Index++
+					continue
+				}
 				text, ok := processScalar(c.Run, r.Value)
 				r.Free(c.Run)
 				if !ok { return failure(c.Run, "EXPR_INVALID", word.Span, "stage setup requires one scalar without NUL bytes") }
@@ -162,8 +194,11 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				continue
 			}
 			if word.Kind == expr.CommandRedirection {
+				before := len(c.Effects)
+				beforePaths := len(c.WritePaths)
 				r := p.commandWord(word.Items[0], c)
 				if r.Waiting || r.Diagnostic.Code != "" { return r }
+				rememberArgumentEffects(state, c, before, beforePaths)
 				text, ok := processScalar(c.Run, r.Value)
 				r.Free(c.Run)
 				if !ok || text == "" { mem.FreeString(c.Run, text); return failure(c.Run, "EXPR_INVALID", word.Span, "redirection requires one nonempty scalar path without NUL bytes") }
@@ -172,10 +207,13 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				state.Index++
 				continue
 			}
+			before := len(c.Effects)
+			beforePaths := len(c.WritePaths)
 			r := p.commandWord(word, c)
 			if r.Waiting || r.Diagnostic.Code != "" {
 				return r
 			}
+			rememberArgumentEffects(state, c, before, beforePaths)
 			if r.Value.Kind == core.List {
 				if len(state.Argv) == 0 {
 					r.Free(c.Run)
@@ -232,6 +270,18 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		state.Stage++
 		state.Index = 0
 	}
+	if p.DryRun {
+		if state.Async || e.Async { return Result{Value: core.Value{Kind: core.Process, Process: p}} }
+		if e.Kind == expr.CommandTest { return Result{Value: core.Value{Kind: core.Bool, Bool: false}} }
+		if e.Kind == expr.CommandResult || e.Kind == expr.CommandGraph {
+			fields := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int}}}
+			completion := core.NewRecord(c.Run, fields)
+			r := processResult(c.Run, completion, e.Span)
+			completion.Free(c.Run)
+			return r
+		}
+		return Result{Value: core.NewString(c.Run, "")}
+	}
 	if state.Input != "" && !c.DirectHostRequests {
 		key := core.NewResourceKey(c.Run, core.ResourceFile, state.Input)
 		ready := c.Dependency(key)
@@ -241,15 +291,21 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	configured := false
 	for i := range e.Items { for j := range e.Items[i].Items { if e.Items[i].Items[j].Kind == expr.CommandSetup { configured = true } } }
 	payload := host.ArgvPayload(c.Run, state.Stages[0].List)
-	if configured || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph {
+	if configured || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
 		payload.Free(c.Run)
 		payload = host.PipelinePayload(c.Run, state.Stages)
 	}
 	if state.Input != "" || state.Output != "" { host.ConfigureRedirections(c.Run, &payload, state.Input, state.Output, state.Append) }
-	if configured && e.Kind != expr.CommandGraph { host.ConfigureStages(c.Run, &payload, state.Setups) }
-	if e.Kind == expr.CommandGraph {
+	if e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult {
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "stream"), Value: core.Value{Kind: core.Bool, Bool: true}})
-		host.ConfigureStages(c.Run, &payload, state.Setups)
+	}
+	if e.AcceptExit { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "acceptExit"), Value: core.Value{Kind: core.Bool, Bool: true}}) }
+	if configured || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit { host.ConfigureStages(c.Run, &payload, state.Setups) }
+	if state.Async || e.Async {
+		r := p.startProcess(e, c, state)
+		payload.Free(c.Run)
+		if r.Diagnostic.Code == "" { state.Value, state.Done = r.Value.Clone(state.Alloc), true }
+		return r
 	}
 	state.ID = c.Submit(host.RequestProcess, payload)
 	payload.Free(c.Run)
@@ -257,6 +313,22 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		return failure(c.Run, "HOST_FAIL", e.Span, "host request was not accepted")
 	}
 	return Result{Waiting: true}
+}
+
+// Completed argument values are not reevaluated after a later argument waits.
+// Retain their declarative effects alongside the cached argv progress.
+func rememberArgumentEffects(state *captureState, c *Context, before int, beforePaths int) {
+	for i := before; i < len(c.Effects); i++ { effect := c.Effects[i]; state.Effects = slices.Append(state.Alloc, state.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(state.Alloc, effect.Data)}) }
+	for i := beforePaths; i < len(c.WritePaths); i++ { state.WritePaths = slices.Append(state.Alloc, state.WritePaths, owned(state.Alloc, c.WritePaths[i])) }
+}
+
+// Only a completed process failure selects the fallback. Argument evaluation,
+// authorization, and waiting never reach this recovery boundary.
+func (p *Program) captureRecovery(e *expr.Expr, c *Context, state *captureState, r Result) Result {
+	if len(e.Body) == 0 || (r.Diagnostic.Code != "RECIPE_FAIL" && r.Diagnostic.Code != "HOST_FAIL" && r.Diagnostic.Code != "RECIPE_TIMEOUT") { return r }
+	state.Recovering = true
+	r.Free(c.Run)
+	return p.capture(e.Body[0], c)
 }
 
 // Scalar conversion is shared with argv, but redirections never splice lists.
@@ -336,7 +408,7 @@ func (p *Program) commandWord(e *expr.Expr, c *Context) Result {
 	return Result{Value: value}
 }
 
-func captureValue(a mem.Allocator, value core.Value, span source.Span) Result {
+func captureValue(a mem.Allocator, value core.Value, span source.Span, acceptExit bool) Result {
 	// A host may complete a successful capture as text directly, avoiding JSON
 	// escaping and extra copies for large strings. Failures retain exit metadata.
 	if value.Kind == core.String {
@@ -368,7 +440,7 @@ func captureValue(a mem.Allocator, value core.Value, span source.Span) Result {
 	if !hasStatus {
 		return failure(a, "HOST_FAIL", span, "process completion omitted status")
 	}
-	if status != 0 || signal != 0 {
+	if !acceptExit && (status != 0 || signal != 0) {
 		if signal != 0 && status == 0 {
 			status = 128 + signal
 		}
@@ -378,7 +450,7 @@ func captureValue(a mem.Allocator, value core.Value, span source.Span) Result {
 		return r
 	}
 	if output.Kind == core.String {
-		return captureValue(a, output, span)
+		return captureValue(a, output, span, acceptExit)
 	}
 	if output.Kind != core.Bytes {
 		return failure(a, "HOST_FAIL", span, "process completion omitted stdout")

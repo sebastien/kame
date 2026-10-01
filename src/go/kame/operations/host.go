@@ -179,6 +179,7 @@ func writeBytes(c *eval.Context, path string, data []byte) eval.Result {
 		c.MarkPhaseInvalid()
 		return failure("PHASE_INVALID", "write is invalid while planning")
 	}
+	if c.Program != nil && c.Program.DryRun { return eval.Result{Value: core.Value{Kind: core.Nil}} }
 	return request(c, host.RequestWriteFile, host.WritePayload(c.Run, path, data))
 }
 func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -207,6 +208,7 @@ func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 	if len(v) == 2 && v[1].Kind != core.Record {
 		return invalidArgument(c, v, 1, "record")
 	}
+	if c.Program != nil && c.Program.DryRun { return eval.Result{Value: core.NewString(c.Run, "")} }
 	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text))
 }
 

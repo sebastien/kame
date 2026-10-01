@@ -64,7 +64,7 @@ for backend in native wasm; do
 	if [ ! -e "$work/executed" ] && [ ! -e "$work/captured" ]; then test-ok "$backend performs no process effects"; else test-fail "$backend executed while inspecting"; fi
 
 	test-step "$backend: malformed sources retain diagnostics and are never rewritten"
-	for text in 'value = one two' 'value = 1; value = 2' 'printf one |' 'printf one > file | cat' 'printf $(echo one; echo two)' ':cwd . :cwd . printf one' 'if cat { echo yes }' 'printf one &'; do
+	for text in 'value = one two' 'value = 1; value = 2' 'printf one |' 'printf one > file | cat' 'printf $(echo one; echo two)' ':cwd . :cwd . printf one' 'if cat { echo yes }' 'printf one &&'; do
 		printf '%s\n' "$text" >"$work/invalid.kash"
 		cp "$work/invalid.kash" "$work/original"
 		parse_status=0

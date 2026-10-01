@@ -191,7 +191,10 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	defer freeValues(p.Alloc, outputs)
 	state := planResolverState{Program: p}
 	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
-	result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
+	scope := p.ruleScope(context, plan.Captures)
+    context.Scope = scope
+    result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
+    scope.Free()
 	if state.Resolving != nil {
 		slices.Free(p.Alloc, state.Resolving)
 	}

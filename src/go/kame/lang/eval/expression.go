@@ -9,7 +9,10 @@ import (
 )
 
 func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression *expr.Expr, context *Context) Result {
+	previousEnv := context.ReserveEnv
+	if expression != nil { context.ReserveEnv = expression.Kash }
 	result := p.evaluateExpression(engine, scope, expression, context)
+	context.ReserveEnv = previousEnv
 	attachSource(&result, context)
 	return result
 }
@@ -41,8 +44,11 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		}
 		return Result{Value: core.NewString(context.Run, expression.Text)}
 	case expr.Name:
+		if expression.Kash && expression.Text == "env" { return failure(context.Run, "REF_MISSING", expression.Span, "environment namespace requires a named variable") }
 		return name(scope, expression.Text, expression.Span, context)
-	case expr.Reference:
+	case expr.InvocationJoin:
+		return p.joinProcesses(context)
+	case expr.Reference, expr.EnvironmentReference:
 		return p.reference(scope, expression, context)
 	case expr.List:
 		return p.list(scope, expression.Items, context)
@@ -50,8 +56,12 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.record(scope, expression.Fields, context)
 	case expr.Application:
 		return p.application(scope, expression, context)
-	case expr.CommandCapture, expr.CommandGraph:
+	case expr.CommandCapture, expr.CommandGraph, expr.CommandTest:
 		return p.capture(expression, context)
+	case expr.KashIf, expr.KashMatch:
+		return p.kashControl(scope, expression, context)
+	case expr.ValueRecovery:
+		return p.recoverValue(scope, expression, context)
 	case expr.Lambda:
 		function := mem.Alloc[Function](context.Run)
 		function.Kind, function.Parameters, function.Body, function.Scope = FunctionTemporary, expression.Parameters, expression.Body, scope
@@ -107,10 +117,19 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	if b.Kind == bindingFunction {
 		return Result{Value: core.Value{Kind: core.Callable, Callable: b.Function}}
 	}
+	if b.Kind == bindingLocalDefinition { return context.Program.localValue(b.Local, context) }
 	if context.Engine == nil && context.ResolveDefinition != nil {
 		return context.ResolveDefinition(context.ResolverState, b.Definition, context)
 	}
-	if context.Engine == nil || !context.Engine.Dependency(b.Definition) {
+	ready := false
+	if context.Engine != nil {
+		if context.RecoverFailures {
+			ready = context.Engine.TryDependency(b.Definition)
+			d := context.Engine.DependencyDiagnostic(b.Definition)
+			if d.Code != "" { return Result{Diagnostic: d.Clone(context.Run)} }
+		} else { ready = context.Engine.Dependency(b.Definition) }
+	}
+	if !ready {
 		if context.Engine != nil && context.Engine.Failed() {
 			return Result{Diagnostic: context.Engine.Diagnostic()}
 		}

@@ -33,7 +33,7 @@ command-last
 	fi
 )
 
-test-step "dry-run reports effects without running the command"
+test-step "dry-run suppresses effects without running the command"
 (
 	cd effects
 	cli_run -- -n -f Effects.kmk default
@@ -43,7 +43,7 @@ test-step "dry-run reports effects without running the command"
 	else
 		test-ok "dry-run skipped the recipe command"
 	fi
-	cli_expect_stdout_contains 'first' 'third'
+	cli_expect_stdout_empty
 )
 
 test-step "write is a deferred effect committed during execution"

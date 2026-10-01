@@ -215,6 +215,20 @@ to the same invocation and authority policy as on native hosts. Later fragments
 inherit that policy without broadening it through language selection. A browser or
 embedded wrapper instead supplies its own host, as described in Host Requests.
 
+Invocation-owned asynchronous process graphs use independent engine roots, not
+detached daemons. A host copies each request and calls `kame_wasm_request_detach`
+to release its query pin while servicing other nodes in the same instance.
+Completions retain their request handles; request-aware process stream/start
+exports correlate events without relying on whichever request is currently
+pinned. `kame_wasm_request_attach` selects a detached request for the legacy
+terminal-event export. Foreign-instance handles remain invalid. Recompilation
+while detached requests are outstanding is rejected.
+
+The JavaScript runner services outstanding requests concurrently, executes a
+final portable invocation join, and cancels/reaps every owned process group on
+failure or interruption before releasing the instance. A later fragment can
+await a shared process handle, but handles cannot escape into another invocation.
+
 ### Staged Coverage
 
 The ABI and host services arrive in stages, and the wrapper reports coverage

@@ -10,7 +10,7 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { accessSync, closeSync, constants as fsConstants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, normalize, resolve } from 'node:path';
+import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { constants as osConstants, tmpdir } from 'node:os';
 import process, { argv, env, stderr, stdout } from 'node:process';
@@ -18,10 +18,16 @@ import process, { argv, env, stderr, stdout } from 'node:process';
 // Children run in their own process group so a signal terminates the whole
 // tree, and a forced termination reports 128 plus the signal number.
 const activeChildren = new Set();
+const invocationCancellations = new Set();
+let interruptedStatus = 0;
 
 function installSignals() {
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {
+      if (interruptedStatus) return;
+      interruptedStatus = 128 + (osConstants.signals[signal] ?? 0);
+      const reaped = [...activeChildren].map((child) => new Promise((resolve) => child.once('close', resolve)));
+      for (const cancellation of invocationCancellations) cancellation.abort();
       for (const child of activeChildren) {
         try {
           process.kill(-child.pid, 'SIGKILL');
@@ -33,7 +39,7 @@ function installSignals() {
           }
         }
       }
-      process.exit(128 + (osConstants.signals[signal] ?? 0));
+      Promise.all(reaped).then(() => process.exit(interruptedStatus));
     });
   }
 }
@@ -361,7 +367,7 @@ function usage() {
   stdout.write('  do tools        list globally referenced build tools\n');
   stdout.write('  do parse        parse a language file and print a JSON AST\n');
   stdout.write('  do fmt          format source in place (-i) or check it (-n)\n');
-  stdout.write('  do expr         evaluate a standalone expression\n');
+  stdout.write('  do expr         compatibility alias for do run --lang expr\n');
   stdout.write('  do cat TARGET   materialize one target and print its artifact\n');
   stdout.write('  do help         show this help\n\n');
   stdout.write('Options: -f FILE  -c TEXT  -C DIR  -j N  -n  --force  -h  -V\n');
@@ -752,6 +758,7 @@ class Module {
     const payloadPointer = this.allocate(payloadLength || 1);
     if (this.exports.kame_wasm_event_payload_copy(instance, payloadPointer, payloadLength) !== 0) throw Object.assign(new Error('request payload copy failed'), { code: 'HOST_FAIL' });
     const payload = this.decode(payloadPointer, payloadLength);
+    if (context.concurrent && this.exports.kame_wasm_request_detach(instance, request) !== 0) throw Object.assign(new Error('cannot unpin host request'), { code: 'HOST_FAIL' });
     return this.dispatch(instance, request, kind, payload, data, context, key, record);
   }
 
@@ -822,7 +829,8 @@ class Module {
           if (!context.runRoots.some((root) => executable === root || executable.startsWith(`${root}/`))) return this.deny(instance, request);
         }
       }
-      const completion = await runArgvCapture(stages, { ...context, ...redirections, onStdout: redirections.stream ? (chunk) => this.processStream(instance, false, chunk) : null, onStderr: context.streaming ? (chunk) => this.processStream(instance, true, chunk) : null });
+      const detached = context.concurrent === true;
+      const completion = await runArgvCapture(stages, { ...context, ...redirections, onStdout: redirections.stream ? (chunk) => this.processStream(instance, false, chunk, detached ? request : undefined) : null, onStderr: context.streaming ? (chunk) => this.processStream(instance, true, chunk, detached ? request : undefined) : null });
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout);
@@ -835,7 +843,8 @@ class Module {
     if (kind === 3) {
       if (!grants.run) return this.deny(instance, request);
       if (context.streaming) {
-        await runProcess(this, instance, payload, context);
+        const detached = context.concurrent === true;
+        await runProcess(this, instance, payload, context, detached ? request : undefined);
         return 0;
       }
       const completion = await runProcessDirect(payload, context);
@@ -1039,25 +1048,32 @@ class Module {
       const bytes = new Uint8Array(this.exports.memory.buffer, output, length).slice();
       if (json) {
         stdout.write(bytes);
-        const event = JSON.parse(this.decode0(bytes));
-        if (event.diagnostic && (event.type === 'target-failed' || event.type === 'target-cancelled')) lastDiagnostic = event.diagnostic;
+        for (const line of this.decode0(bytes).trim().split('\n')) {
+          const event = JSON.parse(line);
+          if (event.diagnostic && (event.type === 'target-failed' || event.type === 'target-cancelled')) lastDiagnostic = event.diagnostic;
+        }
       } else if (human) {
         humanEvent(bytes);
       }
     }
   }
 
-  processStarted(instance) {
-    if (this.exports.kame_wasm_process_started(instance) !== 0) throw new Error('process start event failed');
+  processStarted(instance, request) {
+    const status = request === undefined ? this.exports.kame_wasm_process_started(instance) : this.exports.kame_wasm_process_started_request(instance, request);
+    if (status !== 0) throw new Error('process start event failed');
   }
 
-  processStream(instance, stderrStream, chunk) {
+  processStream(instance, stderrStream, chunk, request) {
     const pointer = this.allocate(chunk.length || 1);
     new Uint8Array(this.exports.memory.buffer, pointer, chunk.length).set(chunk);
-    if (this.exports.kame_wasm_process_stream(instance, stderrStream ? 1 : 0, pointer, chunk.length) !== 0) throw new Error('process stream event failed');
+    const status = request === undefined
+      ? this.exports.kame_wasm_process_stream(instance, stderrStream ? 1 : 0, pointer, chunk.length)
+      : this.exports.kame_wasm_process_stream_request(instance, request, stderrStream ? 1 : 0, pointer, chunk.length);
+    if (status !== 0) throw new Error('process stream event failed');
   }
 
-  processTerminal(instance, outcome, status, signal, stdoutBytes, stderrBytes, code, message) {
+  processTerminal(instance, outcome, status, signal, stdoutBytes, stderrBytes, code, message, request) {
+    if (request !== undefined && this.exports.kame_wasm_request_attach(instance, request) !== 0) throw new Error('process completion correlation failed');
     const stdout = this.write(stdoutBytes ?? new Uint8Array(0));
     const stderr = this.write(stderrBytes ?? new Uint8Array(0));
     const codeBytes = this.write(code);
@@ -1103,6 +1119,12 @@ class Module {
     if (!this.exports.kame_wasm_session_compile) throw Object.assign(new Error('runner session ABI unavailable'), { code: 'FEATURE_UNSUP' });
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
+    const pending = new Set();
+    const cancellation = new AbortController();
+    invocationCancellations.add(cancellation);
+    context.concurrent = true;
+    context.signal = cancellation.signal;
+    let hostError;
     try {
       if (this.exports.kame_wasm_source_compile(instance, 0, 0) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
       const directory = this.write(process.cwd());
@@ -1113,10 +1135,13 @@ class Module {
         if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
         else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
       }
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, captureLimit: inv.captureLimit }));
-      if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0 }));
+      if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
+        if (inv.json) { this.drainEvents(instance, context); return 1; }
+        throw this.compileFailure(instance, 'PARSE_ERR');
+      }
       context.streaming = true;
-      context.human = true;
+      context.human = !inv.json;
       let last;
       const deadline = inv.timeoutMS > 0 ? performance.now() + inv.timeoutMS : Infinity;
       const count = this.exports.kame_wasm_session_work_count(instance);
@@ -1130,14 +1155,30 @@ class Module {
           this.drainEvents(instance, context);
           this.drainExpressionEffects(instance);
           if (state === 2) break;
-          if (state === 1) await this.service(instance, context);
+          if (hostError) throw hostError;
+          if (state === 1) {
+            const request = this.service(instance, context).catch((error) => { hostError = error; }).finally(() => pending.delete(request));
+            pending.add(request);
+            await Promise.resolve();
+          } else if (pending.size) {
+            await Promise.race([...pending, new Promise((resolve) => setTimeout(resolve, 10))]);
+          }
         }
         const bytes = this.copyResult(instance);
-        if (kind === 2) stdout.write(bytes);
-        else if (kind === 1) last = bytes;
+        if (!inv.json && !inv.dryRun && kind === 2) stdout.write(bytes);
+        else if (!inv.json && !inv.dryRun && kind === 1) last = bytes;
       }
       if (last !== undefined) stdout.write(last);
-    } finally { this.exports.kame_wasm_instance_free(instance); }
+      return 0;
+    } catch (error) {
+      if (inv.json && lastDiagnostic !== null) return 1;
+      throw error;
+    } finally {
+      cancellation.abort();
+      await Promise.all(pending);
+      invocationCancellations.delete(cancellation);
+      this.exports.kame_wasm_instance_free(instance);
+    }
   }
 
   async selfTest() {
@@ -1193,6 +1234,7 @@ function processDeadline(milliseconds, callback) {
 }
 
 function runArgvCapture(stages, context) {
+  if (context.signal?.aborted) return Promise.resolve({ ok: false, code: 'EXEC_CANCELLED', message: 'invocation cancelled' });
   if (!Array.isArray(stages) || stages.length === 0 || stages.some((args) => !Array.isArray(args) || args.length === 0 || !args[0] || args.some((arg) => typeof arg !== 'string' || arg.includes('\0')))) {
     return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid process argv' });
   }
@@ -1249,22 +1291,25 @@ function runArgvCapture(stages, context) {
         try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
       }
     };
+    const cancelled = () => stop('EXEC_CANCELLED', 'invocation cancelled');
+    context.signal?.addEventListener('abort', cancelled, { once: true });
     if (context.timeoutMS > 0) timers.push(processDeadline(context.timeoutMS, () => stop('RECIPE_TIMEOUT', 'process timed out')));
     const finish = () => {
       if (!launched || remaining !== 0) return;
       for (const cancel of timers) cancel();
+      context.signal?.removeEventListener('abort', cancelled);
       if (failure !== null) { resolveRun(failure); return; }
       let status = 0, signal = 0;
       for (const result of results) {
         if (result.status !== 0 || result.signal !== 0) { status = result.signal ? 128 + result.signal : result.status; signal = result.signal; }
       }
       // Let the portable evaluator classify exit failure before decoding output.
-      if (status !== 0 || signal !== 0) { resolveRun({ ok: true, value: { status, signal, stages: results, stdout: '' } }); return; }
-      if (context.stream) { resolveRun({ ok: true, value: { status: 0, signal: 0, stages: results, stdout: '' } }); return; }
+      if (!context.acceptExit && (status !== 0 || signal !== 0)) { resolveRun({ ok: true, value: { status, signal, stages: results, stdout: '' } }); return; }
+      if (context.stream) { resolveRun({ ok: true, value: { status, signal, stages: results, stdout: '' } }); return; }
       let output;
       try { output = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)); }
       catch { resolveRun({ ok: false, code: 'CAPTURE_ENCODING', message: 'command substitution output is not valid UTF-8' }); return; }
-      resolveRun({ ok: true, value: { status: 0, signal: 0, stages: results, stdout: output } });
+      resolveRun({ ok: true, value: { status, signal, stages: results, stdout: output } });
     };
     try {
       for (let i = 0; i < stages.length; i++) {
@@ -1376,24 +1421,24 @@ function argvExecutable(name, childEnv, cwd = process.cwd()) {
 // and --retry (rerunning a failed attempt) before reporting a terminal status.
 // The terminal report carries the wait status and captured output so the engine
 // reconstructs the native completion value and failure cause.
-async function runProcess(module, instance, script, context) {
+async function runProcess(module, instance, script, context, request) {
   let attempt = 0;
   for (;;) {
-    const outcome = await runProcessAttempt(module, instance, script, context);
+    const outcome = await runProcessAttempt(module, instance, script, context, request);
     if (outcome.ok) {
-      module.processTerminal(instance, 0, 0, 0, outcome.stdout, outcome.stderr, '', '');
+      module.processTerminal(instance, 0, 0, 0, outcome.stdout, outcome.stderr, '', '', request);
       return;
     }
     if (outcome.retryable && attempt < context.retryCount) {
       attempt++;
       continue;
     }
-    module.processTerminal(instance, outcome.outcome, outcome.status, outcome.signal, outcome.stdout, outcome.stderr, outcome.code, outcome.message);
+    module.processTerminal(instance, outcome.outcome, outcome.status, outcome.signal, outcome.stdout, outcome.stderr, outcome.code, outcome.message, request);
     return;
   }
 }
 
-function runProcessAttempt(module, instance, script, context) {
+function runProcessAttempt(module, instance, script, context, request) {
   return new Promise((resolveAttempt) => {
     const shell = context.shell.length !== 0 ? context.shell : ['/bin/sh', '-c'];
     const childEnv = { ...process.env };
@@ -1403,7 +1448,7 @@ function runProcessAttempt(module, instance, script, context) {
     }
     const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, detached: true });
     track(child);
-    module.processStarted(instance);
+    module.processStarted(instance, request);
     const out = [];
     const err = [];
     let failure = null;
@@ -1412,18 +1457,23 @@ function runProcessAttempt(module, instance, script, context) {
     if (context.timeoutMS > 0) {
       timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, context.timeoutMS);
     }
-    child.stdout.on('data', (chunk) => { out.push(chunk); module.processStream(instance, false, chunk); });
-    child.stderr.on('data', (chunk) => { err.push(chunk); module.processStream(instance, true, chunk); });
+    const cancelled = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } };
+    context.signal?.addEventListener('abort', cancelled, { once: true });
+    if (context.signal?.aborted) cancelled();
+    child.stdout.on('data', (chunk) => { out.push(chunk); module.processStream(instance, false, chunk, request); });
+    child.stderr.on('data', (chunk) => { err.push(chunk); module.processStream(instance, true, chunk, request); });
     child.once('error', (error) => { failure = error; });
     child.once('close', (code, signalName) => {
       if (timer !== null) clearTimeout(timer);
+      context.signal?.removeEventListener('abort', cancelled);
       const stdout = Buffer.concat(out);
       const stderr = Buffer.concat(err);
       let status = 0;
       let signal = 0;
       if (code !== null) status = code;
       if (signalName !== null) signal = osConstants.signals[signalName] ?? 0;
-      if (timedOut) resolveAttempt({ ok: false, outcome: 1, status: 0, signal, code: 'RECIPE_TIMEOUT', message: 'recipe timed out', stdout, stderr, retryable: false });
+      if (context.signal?.aborted) resolveAttempt({ ok: false, outcome: 2, status: 0, signal, code: 'EXEC_CANCELLED', message: 'invocation cancelled', stdout, stderr, retryable: false });
+      else if (timedOut) resolveAttempt({ ok: false, outcome: 1, status: 0, signal, code: 'RECIPE_TIMEOUT', message: 'recipe timed out', stdout, stderr, retryable: false });
       else if (failure !== null) resolveAttempt({ ok: false, outcome: 3, status: 0, signal: 0, code: 'HOST_FAIL', message: failure.message, stdout, stderr, retryable: false });
       else if (status !== 0 || signal !== 0) resolveAttempt({ ok: false, outcome: 0, status, signal, code: 'RECIPE_FAIL', message: `process exited with status ${status}`, stdout, stderr, retryable: true });
       else resolveAttempt({ ok: true, stdout, stderr });
@@ -1512,20 +1562,6 @@ function failure(code, message) {
   return 1;
 }
 
-async function runExpr(module, inv) {
-  let expression = inv.command ?? '';
-  if (!expression && inv.file) {
-    try {
-      expression = await readFile(inv.file, 'utf8');
-    } catch (error) {
-      return failure('FS_ERR', `cannot read expression: ${inv.file}`);
-    }
-  }
-  if (!expression) expression = await readStdin();
-  stdout.write(await module.evaluate('', expression, contextFor(inv)));
-  return 0;
-}
-
 async function runParse(module, inv) {
   let name = '<stdin>';
   let text = '';
@@ -1546,12 +1582,6 @@ async function runParse(module, inv) {
 }
 
 async function runSession(module, inv, sourceDirectory) {
-  if (inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk') {
-    const input = inv.inputs[0];
-    if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'file' ? normalize(input.value) : '<command:1>', file: input.kind === 'file' ? resolve(sourceDirectory, input.value) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false);
-  }
-  if (inv.json) return featureUnsupported('JSON runner sessions');
-  if (inv.dryRun) return featureUnsupported('composed dry-run runner sessions');
   const fragments = [];
   for (let i = 0; i < inv.inputs.length; i++) {
     const input = inv.inputs[i];
@@ -1561,11 +1591,44 @@ async function runSession(module, inv, sourceDirectory) {
       try { text = await readFile(resolve(sourceDirectory, input.value), 'utf8'); }
       catch { return failure('FS_ERR', `cannot read source: ${input.value}`); }
     } else if (input.kind === 'stdin') { name = '<stdin>'; text = await readStdin(); }
-    fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: input.kind === 'file' ? 0 : 1 });
+    if (input.kind === 'file' && (input.lang === 'km' || input.lang === 'kmk')) {
+      const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang);
+      for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], lang: input.lang, entries: j + 1 === parts.length ? input.entries : [], inline: j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
+    } else fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: input.kind === 'file' ? 0 : 1 });
+  }
+  if (!inv.dryRun && inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1) {
+    const input = inv.inputs[0];
+    if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'file' ? normalize(input.value) : '<command:1>', file: input.kind === 'file' ? resolve(sourceDirectory, input.value) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false);
   }
   buildProgress = { active: 0, completed: 0, failed: 0 };
-  await module.runSession(fragments, inv, contextFor(inv));
-  return 0;
+  return module.runSession(fragments, inv, contextFor(inv));
+}
+
+// Syntax and byte spans come from the portable parser, not a second JS grammar.
+async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = []) {
+  const identity = resolve(sourceDirectory, name);
+  if (active.includes(identity)) throw Object.assign(new Error(`include cycle: ${name}`), { code: 'DEP_CYCLE' });
+  const document = JSON.parse(new TextDecoder().decode(await module.parse(lang === 'kmk' ? 'script' : lang, name, text)));
+  const invalid = document.diagnostics.find((item) => item.severity === 'error');
+  if (invalid) {
+    primarySource = { name, text };
+    throw Object.assign(new Error(invalid.message), { code: invalid.code, span: invalid.span, diagnostics: document.diagnostics.filter((item) => item.severity === 'error').map((item) => ({ ...item, source: name })) });
+  }
+  const bytes = new TextEncoder().encode(text);
+  const parts = [];
+  let start = 0;
+  for (const item of document.ast.items) {
+    if (item.kind !== 'include') continue;
+    parts.push({ name, text: new TextDecoder().decode(bytes.subarray(start, item.span.start)), offset: start });
+    const included = normalize(isAbsolute(item.path) ? item.path : join(dirname(name), item.path));
+    let child;
+    try { child = await readFile(resolve(sourceDirectory, included), 'utf8'); }
+    catch { throw Object.assign(new Error(`cannot read included source: ${included}`), { code: 'FS_ERR' }); }
+    parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity]));
+    start = item.span.end;
+  }
+  parts.push({ name, text: new TextDecoder().decode(bytes.subarray(start)), offset: start });
+  return parts;
 }
 
 async function runFmt(module, inv) {
@@ -1687,6 +1750,7 @@ async function runCat(module, inv) {
 }
 
 async function runPrimary(module, inv, noArguments) {
+  if (inv.watch) return featureUnsupported("--watch requires the native POSIX backend");
   const source = await discoverSource(inv);
   if (source === null) {
     if (noArguments) {
@@ -1733,7 +1797,6 @@ async function dispatch(module, inv, noArguments) {
     usage();
     return 0;
   }
-  if (inv.name === 'expr') return runExpr(module, inv);
   if (inv.name === 'run') return runSession(module, inv, sourceDirectory);
   if (inv.name === 'parse') return runParse(module, inv);
   if (inv.name === 'fmt') return runFmt(module, inv);
@@ -1795,8 +1858,14 @@ async function main() {
 main().then(
   (status) => { process.exitCode = status; },
   (error) => {
+    if (interruptedStatus) { process.exitCode = interruptedStatus; return; }
     if (jsonMode) {
-      diagnostic(error.code ?? 'HOST_FAIL', error.message);
+      if (error.diagnostics) {
+        for (const detail of error.diagnostics) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
+      } else {
+        if (lastDiagnostic === null && error.span !== undefined && primarySource) lastDiagnostic = { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message, source: primarySource.name, span: error.span };
+        diagnostic(error.code ?? 'HOST_FAIL', error.message);
+      }
     } else {
       const detail = lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
       if (error.span !== undefined && primarySource) { detail.source = primarySource.name; detail.span = error.span; }

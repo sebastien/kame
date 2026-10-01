@@ -140,6 +140,7 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 	e.Str("output"); e.Str(PayloadText(*payload, FieldOutput))
 	e.Str("append"); e.Bool(PayloadAppend(*payload))
 	for i := range payload.Record { if payload.Record[i].Key == "stream" { e.Str("stream"); e.Bool(payload.Record[i].Value.Bool) } }
+	for i := range payload.Record { if payload.Record[i].Key == "acceptExit" { e.Str("acceptExit"); e.Bool(payload.Record[i].Value.Bool) } }
 	e.Str("setup"); e.BeginArray()
 	setups := PayloadSetups(*payload)
 	for i := range setups {

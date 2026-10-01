@@ -59,7 +59,18 @@ test-wasm: wasm-check
 	tests/T017-04-eval-redirections.sh
 	tests/T017-05-eval-setup.sh
 	tests/T017-06-kash-source.sh
-	tests/T017-07-run-session.sh
+	tests/T017-07-cli-run-session.sh
+	tests/T017-08-cli-run-includes.sh
+	tests/T017-09-cli-run-json.sh
+	tests/T017-10-cli-run-dry-run.sh
+	tests/T017-11-kash-accept-exit.sh
+	tests/T017-12-kash-command-recovery.sh
+	tests/T017-13-kash-value-recovery.sh
+	tests/T017-14-kash-if.sh
+	tests/T017-15-kash-match.sh
+	tests/T017-16-kash-environment.sh
+	tests/T017-17-eval-process-expressions.sh
+	tests/T017-18-kash-async.sh
 
 test-all: test test-leaks
 

@@ -58,6 +58,7 @@ func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span 
 		if name.Kind != expr.Name {
 			return failure(context.Run, "DEF_INVALID", name.Span, "let binding needs a name")
 		}
+		if context.ReserveEnv && name.Text == "env" { return failure(context.Run, "DEF_INVALID", name.Span, "env is reserved in Kash") }
 		r := p.evaluate(context.Engine, child, values[0].Items[i+1], context)
 		if r.Waiting || r.Diagnostic.Code != "" {
 			return r
@@ -74,7 +75,9 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 	if len(values) < 2 || values[0].Kind != expr.Name {
 		return failure(context.Run, "DEF_INVALID", span, "def needs a name and value")
 	}
+	if context.ReserveEnv && values[0].Text == "env" { return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash") }
 	if len(values) >= 3 && values[1].Kind == expr.List {
+		if context.ReserveEnv { for i := range values[1].Items { parameter := values[1].Items[i]; if parameter.Kind == expr.Name && parameter.Text == "env" { return failure(context.Run, "DEF_INVALID", parameter.Span, "env is reserved in Kash") } } }
 		parameters := slices.Make[expr.Parameter](context.Run, len(values[1].Items))
 		for i := range values[1].Items {
 			parameter := values[1].Items[i]
@@ -241,6 +244,7 @@ func (p *Program) scopedWith(scope *Scope, values []*expr.Expr, context *Context
 	defer child.Free()
 	for i := range r.Value.Record {
 		key := r.Value.Record[i].Key
+		if context.ReserveEnv && key == "env" { r.Free(context.Run); return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash") }
 		if !child.trySetValue(key, r.Value.Record[i].Value) {
 			reject := rejectStrandedCapture(context.Run, &r.Value, values[0].Span)
 			return reject
@@ -310,6 +314,7 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 		mout := matchPattern(context.Run, subjectText, &pr.Value, head.Span)
 		matched, names, captures := mout.Matched, mout.Names, mout.Captures
 		diag := mout.Diag
+		if context.ReserveEnv { for i := range names { if names[i] == "env" && diag.Code == "" { denied := failure(context.Run, "DEF_INVALID", head.Span, "env is reserved in Kash"); diag = denied.Diagnostic } } }
 		freeCallables(context.Run, &pr.Value)
 		pr.Value.Free(context.Run)
 		if diag.Code != "" {

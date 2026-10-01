@@ -72,7 +72,8 @@ Kash fragments: run statements in source order. Direct
 and explicit execution share the same parser, engine, process ownership, and
 policy; they are not shell-launching shortcuts. `009-cli.md` owns dispatch and
 option validation. The previously specified `do kash` command is replaced by
-`do run`, as is the separate `do expr` execution command.
+`do run`, as is the separate `do expr` execution path. `do expr` remains only
+as a deprecated alias for `do run --lang expr` (with implicit stdin).
 Async work belongs to the combined invocation: a source boundary does not join
 it, later fragments may await shared handles, and normal session completion joins
 outstanding graphs. Failure or cancellation stops the remaining session and
@@ -82,8 +83,7 @@ branch-local definitions.
 `kame do parse --lang kash` and `kame do fmt --lang kash` use the existing
 file/stdin conventions. Native and WASM hosts must implement identical language
 semantics. `.kash` and `.ksh` do not join build-file discovery or implicitly
-change `.kmk` recipes. These invocation forms are a specification contract;
-implementations must not claim them until their corresponding runner exists.
+change `.kmk` recipes. Native and WASM runners implement these invocation forms.
 
 ## Source and statements
 
@@ -644,6 +644,13 @@ identity/capture metadata. Streams are not automatically converted to strings
 or retained without a capture request. Results are not argv scalars. The concrete
 core representation is implementation-defined, but these observable distinctions
 are required and must not depend on the backend.
+
+The current synchronous representation is a record exposing `status`, `signal`,
+`stages`, `stdoutCaptured`, and `stderrCaptured`. Each stage exposes `status`,
+`signal`, and `outcome`, in source order. Raw commands and expression-level
+`run`/`pipe` stream output and set both capture flags to false; the result does
+not contain retained stdout or stderr. A result may be inspected through ordinary
+Kame references, but cannot be passed directly as an argv argument.
 
 The Kash parser may own statement, pipeline, redirection, async, and recovery
 AST nodes. Every embedded expression and reference must retain the normal Kame

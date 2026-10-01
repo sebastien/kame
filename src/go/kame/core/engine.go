@@ -218,6 +218,7 @@ func (e *Engine) ready(n *Node) bool {
 	for i := range n.Dynamic {
 		dependency := n.Dynamic[i]
 		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
+			if slices.Contains(n.Observed, dependency) { continue }
 			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
 			return false
 		}
@@ -264,6 +265,13 @@ func (e *Engine) Ready(capacity int) []*Node {
 // Dispatch starts one node returned by Ready. A claimed node starts once.
 func (e *Engine) Dispatch(n *Node) *Node {
 	if n == nil || !n.offered { return nil }
+	return e.run(n)
+}
+
+// DispatchRoot starts a newly requested independent root without reentering
+// the scheduler (and therefore without redispatching the current producer).
+func (e *Engine) DispatchRoot(n *Node) *Node {
+	if n == nil || !e.ready(n) { return nil }
 	return e.run(n)
 }
 
@@ -376,6 +384,7 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node) {
 		if n.Interest != 0 { e.interest(d, -n.Interest) }
 	}
 	slices.Free(e.Alloc, n.Dynamic); n.Dynamic = nil
+	slices.Free(e.Alloc, n.Observed); n.Observed = nil
 	e.emit(n, Event{Kind: UpdateInvalidated})
 	for i := range dependents { e.invalidate(dependents[i], seen) }
 	slices.Free(e.Alloc, dependents)
@@ -432,6 +441,7 @@ func (e *Engine) Free() {
 		n := e.nodes[i]
 		for j := range n.Subs { n.Subs[j].free() }
 		slices.Free(e.Alloc, n.Subs); slices.Free(e.Alloc, n.Static); slices.Free(e.Alloc, n.Dynamic); slices.Free(e.Alloc, n.Dependents)
+		slices.Free(e.Alloc, n.Observed)
 		if n.Current { n.Latest.Free(e.Alloc) }
 		if n.materializer != nil { n.materializer.Free() }
 		if n.ContextFree != nil { n.ContextFree(e.Alloc, n.Context) }
@@ -442,3 +452,8 @@ func (e *Engine) Free() {
 	for i := range e.completions { e.completions[i].Value.Free(e.Alloc); e.completions[i].Diagnostic.Free(e.Alloc) }
 	slices.Free(e.Alloc, e.nodes); slices.Free(e.Alloc, e.cancellations); slices.Free(e.Alloc, e.completions); mem.Free(e.Alloc, e)
 }
+
+// TrackedNodes returns a caller-owned slice of borrowed runtime nodes.
+func (e *Engine) TrackedNodes() []*Node { return slices.Clone(e.Alloc, e.nodes) }
+
+func (e *Engine) Lookup(key ResourceKey) *Node { return e.find(key) }

@@ -27,6 +27,8 @@ type Node struct {
 	Diagnostic      Diagnostic
 	Static          []*Node
 	Dynamic         []*Node
+	// Observed failures wake the producer instead of failing it transitively.
+	Observed        []*Node
 	Dependents      []*Node
 	Subs            []*Subscription
 	Interest        int64

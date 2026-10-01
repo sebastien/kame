@@ -189,6 +189,13 @@ uint32_t kame_wasm_target_event(uint64_t instance, uint32_t dst,
  * stdout and stderr captures, and a kame_wasm_process_outcome. code and message
  * are empty on success, or a stable failure code with its message. */
 uint32_t kame_wasm_process_started(uint64_t instance);
+/* Detach a copied host request from the query pin while its host work runs.
+ * Request-aware events and completions retain instance/generation ownership. */
+uint32_t kame_wasm_request_detach(uint64_t instance, uint64_t request);
+uint32_t kame_wasm_request_attach(uint64_t instance, uint64_t request);
+uint32_t kame_wasm_process_started_request(uint64_t instance, uint64_t request);
+uint32_t kame_wasm_process_stream_request(uint64_t instance, uint64_t request,
+                                         uint32_t stderr, uint32_t data, uint32_t data_len);
 uint32_t kame_wasm_process_stream(uint64_t instance, uint32_t stderr,
                                   uint32_t data, uint32_t data_len);
 uint32_t kame_wasm_process_terminal(uint64_t instance, int32_t status,

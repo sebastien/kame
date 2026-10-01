@@ -35,6 +35,47 @@ type SessionWork struct {
 type Session struct {
 	Program *Program
 	Work []SessionWork
+	JSON bool
+	reported bool
+	active int
+	JoinExpression expr.Expr
+}
+
+// JSON sessions share the build event encoder, including binary-safe streams.
+func (s *Session) SetJSON(enabled bool) {
+	s.JSON = enabled
+	if enabled { s.Program.Eval.SetDefinitionEffectSink(sessionEventEffect, s.Program) }
+}
+
+func sessionEventEffect(state any, effect eval.Effect) {
+	p := state.(*Program)
+	kind := Stdout
+	if effect.Kind == eval.EffectErr { kind = Stderr } else if effect.Kind != eval.EffectOut && effect.Kind != eval.EffectYield { return }
+	p.emit(Event{Kind: kind, Data: slices.Clone(p.Alloc, effect.Data)})
+}
+
+// Observe reports value/statement roots once. Recipe roots already emit their
+// own lifecycle through observeInstances and must not be duplicated here.
+func (s *Session) Observe(h *Handle) {
+	if !s.JSON || s.reported || h == nil || !h.Definition { return }
+	n := h.Node
+	if !n.Current && n.State != core.NodeFailed && n.State != core.NodeCancelled { return }
+	s.reported = true
+	p := s.Program
+	if s.active == len(s.Work) && n.State != core.NodeFailed && n.State != core.NodeCancelled { return }
+	e := Event{Target: h.Target, Key: n.Key, NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, Kind: TargetCompleted}
+	if n.State == core.NodeFailed || n.State == core.NodeCancelled {
+		e.Kind = TargetFailed
+		if n.State == core.NodeCancelled { e.Kind = TargetCancelled }
+		e.Diagnostic = n.Diagnostic.Clone(p.Alloc)
+	} else {
+		if s.active < len(s.Work) && s.Work[s.active].Value && !p.Options.DryRun {
+			value := e
+			value.Kind, value.Value = TargetValue, n.Latest.Clone(p.Alloc)
+			p.emit(value)
+		}
+	}
+	p.emit(e)
 }
 
 type SessionCompile struct {
@@ -187,7 +228,6 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	_ = id
 	state := c.Context().(*statementState)
 	p := state.Program
-	if p.Options.DryRun { c.Publish(core.Value{Kind: core.Nil}); return core.ProducerCompleted }
 	context := eval.Context{Program: p.Eval, Engine: c, Run: c.Allocator(), Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: true, DependencyObserver: p.Eval.DefinitionDependencyObserver, ResolverState: p.Eval.DefinitionDependencyState}
 	r := p.Eval.EvaluateWith(state.Expression, &context)
 	if !r.Waiting && r.Diagnostic.Code == "" && p.Eval.DefinitionEffectSink != nil {
@@ -203,7 +243,11 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 }
 
 func (s *Session) Start(index int) HandleStart {
-	w := s.Work[index]
+	s.reported = false
+	s.active = index
+	w := SessionWork{}
+	if index < len(s.Work) { w = s.Work[index] }
+	if index == len(s.Work) { s.JoinExpression.Kind = expr.InvocationJoin; w.Expression = &s.JoinExpression }
 	if w.Expression == nil { return s.Program.Start(w.Target) }
 	p := s.Program
 	state := mem.Alloc[statementState](p.Alloc)

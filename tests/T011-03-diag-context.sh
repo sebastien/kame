@@ -13,7 +13,7 @@ cli_build
 test-step "operation contracts identify operands instead of generic arguments"
 cli_run -- do expr -c '(first 1)'
 cli_expect_status 1
-cli_expect_stderr_contains '<command>:1:8: error EXPR_INVALID: `first` argument 1 expects list; got int' 'while operation first'
+cli_expect_stderr_contains '<command:1>:1:8: error EXPR_INVALID: `first` argument 1 expects list; got int' 'while operation first'
 if grep -q 'result = (nop' "$CLI_ERR"; then
 	test-fail "expression diagnostic exposes the driver's synthetic wrapper"
 else
@@ -28,10 +28,10 @@ cli_expect_stderr_contains '`first` expects 1 argument; got 0'
 
 test-step "recipe failures retain the operand span and full dependency path"
 build=$'root : leaf\nleaf :\n\t@(first 1)\n'
-cli_run -- --json -c "$build" root
+cli_run -- --json -l kmk -c "$build" root
 cli_expect_status 1
 diagnostic="$(jq -c 'select(.type == "diagnostic") | .diagnostic' "$CLI_OUT")"
-if jq -e '.code == "EXPR_INVALID" and .message == "`first` argument 1 expects list; got int" and .source == "<command>" and .target == "leaf" and .targetStack == ["root", "leaf"] and .frames[0].label == "first" and .frames[1].label == "leaf"' <<<"$diagnostic" >/dev/null; then
+if jq -e '.code == "EXPR_INVALID" and .message == "`first` argument 1 expects list; got int" and .source == "<command:1>" and .target == "leaf" and .targetStack == ["root", "leaf"] and .frames[0].label == "first" and .frames[1].label == "leaf"' <<<"$diagnostic" >/dev/null; then
 	test-ok "JSON retains precise failure and context"
 else
 	test-fail "unexpected diagnostic: $diagnostic"
@@ -48,7 +48,7 @@ test-step "unused tools do not block planning or execution"
 tools=$'good :\n\ttrue\nbad :\n\t@(x/kame-definitely-missing-tool)\nroot : bad\n'
 cli_run -- do plan -c "$tools" good
 cli_expect_status 0
-cli_run -- -c "$tools" good
+cli_run -- -l kmk -c "$tools" good
 cli_expect_status 0
 cli_run -- do tools check -c "$tools" good
 cli_expect_status 0
@@ -64,7 +64,7 @@ if jq -e '.diagnostic.targetStack == ["root", "bad"] and .diagnostic.source == "
 else
 	test-fail "tool check omitted context"
 fi
-cli_run -- -c "$tools" bad
+cli_run -- -l kmk -c "$tools" bad
 cli_expect_status 1
 cli_expect_stderr_contains 'TOOL_MISSING' '@(x/kame-definitely-missing-tool)' 'while rule bad'
 cli_run -- do tools check -c "$tools"
@@ -106,7 +106,7 @@ EOF
 chmod +x tool-project/bin/kame-test-tool
 PATH="bin:$PATH" cli_run -- do tools check -C tool-project -c $'using :\n\t@(x/kame-test-tool)\n' using
 cli_expect_status 0
-PATH="bin:$PATH" cli_run -- -C tool-project --env PATH=/does-not-exist -c $'using :\n\t@(x/kame-test-tool)\n' using
+PATH="bin:$PATH" cli_run -- -C tool-project --env PATH=/does-not-exist -l kmk -c $'using :\n\t@(x/kame-test-tool)\n' using
 cli_expect_status 0
 cli_expect_stdout 'tool-ok'
 
@@ -130,7 +130,7 @@ cli_expect_status 1
 cli_expect_stderr_contains 'Makefile.kmk:4:17: error EXPR_INVALID:' '@(first 1)'
 
 test-step "diagnostic causes omit captured output but retain outcome and capture metadata"
-cli_run -- --json --log-limit 4 -c $'fails :\n\tprintf diagnostic-secret-output\n\tprintf diagnostic-secret-error >&2\n\texit 7\n' fails
+cli_run -- --json --log-limit 4 -l kmk -c $'fails :\n\tprintf diagnostic-secret-output\n\tprintf diagnostic-secret-error >&2\n\texit 7\n' fails
 cli_expect_status 1
 if jq -e -s 'map(select(.diagnostic.cause != null)) | length > 0 and all(.[]; .diagnostic.cause | .status == 7 and .stdoutLimit == 4 and .stderrLimit == 4 and .stdoutTruncated == true and .stderrTruncated == true and (has("stdout") | not) and (has("stderr") | not))' "$CLI_OUT" >/dev/null; then
 	test-ok "causes contain metadata only"

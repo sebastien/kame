@@ -19,6 +19,62 @@ func sameSpan(span source.Span, start int, end int) bool {
 	return span.Start == start && span.End == end
 }
 
+func TestCommandAcceptanceOwnsWholePipelineAndSurvivesClone(t *testing.T) {
+	a := t.Allocator()
+	r := parse(t, "$(printf \"literal?\" | cat?)")
+	defer r.Free()
+	if r.Expr == nil || !r.Expr.AcceptExit || len(r.Expr.Items) != 2 { t.Fatal("acceptance did not bind to the complete pipeline"); return }
+	copy := expr.Clone(a, r.Expr)
+	defer expr.Free(a, copy)
+	formatted := expr.Format(a, copy)
+	defer mem.FreeString(a, formatted)
+	if formatted != "$(\"printf\" \"literal?\" | \"cat\" ?)" { t.Error("acceptance or literal suffix lost in canonical format") }
+	again := parse(t, formatted)
+	defer again.Free()
+	if !again.Expr.AcceptExit { t.Error("formatting changed accepted exit policy") }
+}
+
+func TestReferenceSuffixIsNotCommandAcceptance(t *testing.T) {
+	r := parse(t, "$(printf $name?)")
+	defer r.Free()
+	if r.Expr == nil || r.Expr.AcceptExit { t.Error("reference suffix became process acceptance") }
+}
+
+func TestCommandRecoveryIsRightAssociative(t *testing.T) {
+	a := t.Allocator()
+	r := parse(t, "$(false | cat ? false ? printf fallback?)")
+	defer r.Free()
+	if len(r.Expr.Items) != 2 || len(r.Expr.Body) != 1 || len(r.Expr.Body[0].Body) != 1 || !r.Expr.Body[0].Body[0].AcceptExit { t.Fatal("recovery did not bind after pipelines, right-associatively"); return }
+	cloned := expr.Clone(a, r.Expr)
+	defer expr.Free(a, cloned)
+	formatted := expr.Format(a, cloned)
+	defer mem.FreeString(a, formatted)
+	again := parse(t, formatted)
+	defer again.Free()
+	canonical := expr.Format(a, again.Expr)
+	defer mem.FreeString(a, canonical)
+	if formatted != canonical || len(again.Expr.Body) != 1 { t.Error("recovery did not survive clone and canonical formatting") }
+}
+
+func TestEnvironmentNamespaceIsConfinedToKashSyntax(t *testing.T) {
+	a := t.Allocator()
+	r := parse(t, "(cat env.NAME $(printf $env.NAME @(env.OTHER)))")
+	defer r.Free()
+	if r.Expr.Items[1].Kind != expr.Reference { t.Error("ordinary Kame env reference was changed") }
+	stage := r.Expr.Items[2].Items[0]
+	for i := 1; i < len(stage.Items); i++ {
+		reference := stage.Items[i].Parts[0].Expr
+		if reference.Kind != expr.EnvironmentReference || !reference.Kash || len(reference.Items) != 1 { t.Error("Kash environment lookup was not explicit in the AST") }
+	}
+	cloned := expr.Clone(a, r.Expr)
+	defer expr.Free(a, cloned)
+	formatted := expr.Format(a, cloned)
+	defer mem.FreeString(a, formatted)
+	again := parse(t, formatted)
+	defer again.Free()
+	if again.Expr.Items[1].Kind != expr.Reference || again.Expr.Items[2].Items[0].Items[1].Parts[0].Expr.Kind != expr.EnvironmentReference { t.Error("formatting changed the environment namespace boundary") }
+}
+
 func TestCommandCaptureBoundaries(t *testing.T) {
 	text := "(cat $(printf \"%s\" ${project.name}) [$(printf $files)])"
 	r := parse(t, text)

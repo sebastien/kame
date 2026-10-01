@@ -4,11 +4,9 @@ Kash (`.kash`, or equivalent `.ksh`) is a process language, not a system shell
 or KornShell. It embeds Kame expressions and values without converting them
 to shell text. Existing `.kmk` recipes remain shell scripts, not Kash.
 
-Current standalone parsing implements definitions, command words, substitutions,
-pipelines, redirections, and stage setup. Control blocks, raw async/recovery
-operators, and `??` RHS recovery below are specification contracts, not yet
-supported standalone syntax. Do not present those examples as runnable until
-the selected implementation supports them.
+Native and WASM execution implement definitions, command words, substitutions,
+pipelines, redirections, stage setup, control blocks, recovery, and invocation-owned
+async graphs. Both use the unified `do run` runner.
 
 ```kash
 name = "Ada Lovelace"
@@ -21,8 +19,8 @@ echo revision=$revision
 ```
 
 Definitions/functions are lazy. Their RHS is an expression/substitution, not
-`.kmk` whitespace-separated template words; the specification additionally
-defines `??` compositions.
+`.kmk` whitespace-separated template words; Kash RHSs additionally accept
+`??` compositions.
 Statements run in source order; newlines or `;` separate them. Word-start `#`
 introduces a comment; `//` is literal. Branch-local definitions do not escape.
 
@@ -76,7 +74,7 @@ newlines; stderr remains live. Capture is limited (default 1 MiB), never silentl
 truncated. Pipelines fail on any stage's nonzero/signal exit, including SIGPIPE;
 aggregate status is the rightmost failure. Failures/cancellation reap owned work.
 
-## Specified control, recovery, and ownership
+## Control, recovery, and ownership
 
 ```kash
 if test -f ./output.txt
@@ -107,6 +105,11 @@ scoped to the selected arm.
   joins outstanding work. It is not daemonization or detachment.
 - To bind a handle, use `job = @(run :async :true "worker")`, then demand
   `@(await job)` as appropriate. Both definitions remain lazy.
+- Expression-level `(run "command" args...)` and `(pipe (run ...) (run ...))`
+  use the same graph executor. Synchronous results expose `status`, `signal`,
+  `stages`, `stdoutCaptured`, and `stderrCaptured`; streams are live, not retained.
+- `await` is repeat-safe. Unobserved async failures fail the final invocation join;
+  source failure/interruption cancels and reaps every outstanding graph.
 - `&&`, `||`, shell subshell grouping, and single-quoted shell strings are not
   supported. Use Kash control statements or Kame special forms.
 

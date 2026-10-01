@@ -45,9 +45,9 @@ test-step "records are keyed by content, not target text"
 (
 	cd cache-records
 	before="$(find .kame/cache/tasks -name '*.kmkr' -type f | wc -l | tr -d ' ')"
-	cli_run -- -c $'task alt-report : ./config.txt\n\techo alt >> ./runs.log\n\t@(out "alt\\n")' alt-report
+	cli_run -- -l kmk -c $'task alt-report : ./config.txt\n\techo alt >> ./runs.log\n\t@(out "alt\\n")' alt-report
 	cli_expect_status 0
-	cli_run -- -c $'task alt-report : ./config.txt\n\techo alt >> ./runs.log\n\t@(out "alt\\n")' alt-report
+	cli_run -- -l kmk -c $'task alt-report : ./config.txt\n\techo alt >> ./runs.log\n\t@(out "alt\\n")' alt-report
 	cli_expect_status 0
 	after="$(find .kame/cache/tasks -name '*.kmkr' -type f | wc -l | tr -d ' ')"
 	if [ "$after" -ge 2 ]; then

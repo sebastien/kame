@@ -26,6 +26,7 @@ type Invocation struct {
 	Directory        string
 	Jobs             int
 	DryRun           bool
+	Watch            bool
 	Force            bool
 	JSON             bool
 	Verbose          bool
@@ -85,6 +86,12 @@ func (inv *Invocation) fail(code string, message string) {
 // Parse parses one command's arguments. command is "" for the primary
 // invocation or the name after "do".
 func Parse(command string, args []string) Invocation {
+	if command == "expr" {
+		forwarded := ExpressionRunArgs(args)
+		inv := ParseRun(forwarded)
+		slices.Free(mem.System, forwarded)
+		return inv
+	}
 	if command == "run" { return ParseRun(args) }
 	if command == "" && SelectsRun(args) { return ParseRun(args) }
 	inv := Invocation{Name: command, Directory: ".", Jobs: 1, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
@@ -94,12 +101,6 @@ func Parse(command string, args []string) Invocation {
 	}
 	if command == "" || command == "build" {
 		parseBuild(&inv, args)
-		return inv
-	}
-	if command == "expr" {
-		// do expr denies host capabilities unless --allow-* is given.
-		inv.NoDefaultGrants = true
-		parseExpr(&inv, args)
 		return inv
 	}
 	if command == "fmt" {
@@ -142,6 +143,10 @@ func parseBuild(inv *Invocation, args []string) {
 		}
 		if arg == "-n" || arg == "--dry-run" {
 			inv.DryRun = true
+			continue
+		}
+		if arg == "--watch" {
+			inv.Watch = true
 			continue
 		}
 		if arg == "--force" {
@@ -497,100 +502,6 @@ func parseParse(inv *Invocation, args []string) {
 	}
 	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
-		return
-	}
-	inv.OK = true
-}
-
-// parseExpr mirrors do expr.
-func parseExpr(inv *Invocation, args []string) {
-	positional := false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			positional = true
-			continue
-		}
-		if positional {
-			inv.Args = slices.Append(mem.System, inv.Args, arg)
-			continue
-		}
-		if arg == "--capture-limit" {
-			if i+1 == len(args) { inv.fail("OPT_NO_VALUE", "missing value for "+arg); return }
-			i++
-			if !assignBuildOption(inv, arg, args[i]) { return }
-			continue
-		}
-		if equalsValue(arg, "--capture-limit", inv) {
-			if inv.Error.Code != "" { return }
-			continue
-		}
-		if arg == "-C" || arg == "--directory" {
-			if i+1 == len(args) {
-				inv.fail("OPT_NO_VALUE", "missing value for "+arg)
-				return
-			}
-			i++
-			inv.Directory = args[i]
-			continue
-		}
-		if len(arg) > 12 && arg[:12] == "--directory=" {
-			inv.Directory = arg[12:]
-			continue
-		}
-		if arg == "-c" {
-			if i+1 == len(args) {
-				inv.fail("OPT_NO_VALUE", "missing value for -c")
-				return
-			}
-			i++
-			inv.Command = args[i]
-			continue
-		}
-		if arg == "--allow-read" || arg == "--allow-write" || arg == "--allow-env" || arg == "--allow-run" {
-			inv.Grants = appendGrant(inv.Grants, arg, "")
-			continue
-		}
-		if len(arg) >= 13 && arg[:13] == "--allow-read=" {
-			if len(arg) == 13 {
-				inv.fail("OPT_VALUE_INVALID", "empty value for --allow-read")
-				return
-			}
-			inv.Grants = appendGrant(inv.Grants, "--allow-read", arg[13:])
-			continue
-		}
-		if len(arg) >= 14 && arg[:14] == "--allow-write=" {
-			if len(arg) == 14 {
-				inv.fail("OPT_VALUE_INVALID", "empty value for --allow-write")
-				return
-			}
-			inv.Grants = appendGrant(inv.Grants, "--allow-write", arg[14:])
-			continue
-		}
-		if len(arg) >= 12 && arg[:12] == "--allow-env=" {
-			if len(arg) == 12 {
-				inv.fail("OPT_VALUE_INVALID", "empty value for --allow-env")
-				return
-			}
-			inv.Grants = appendGrant(inv.Grants, "--allow-env", arg[12:])
-			continue
-		}
-		if len(arg) >= 12 && arg[:12] == "--allow-run=" {
-			if len(arg) == 12 { inv.fail("OPT_VALUE_INVALID", "empty value for --allow-run"); return }
-			inv.Grants = appendGrant(inv.Grants, "--allow-run", arg[12:])
-			continue
-		}
-		if len(arg) != 0 && arg[0] == '-' {
-			inv.fail("OPT_UNKNOWN", "unknown option: "+arg)
-			return
-		}
-		if inv.File == "" {
-			inv.File = arg
-			continue
-		}
-	}
-	if inv.Command != "" && inv.File != "" {
-		inv.fail("OPT_CONFLICT", "-c and expression file cannot be used together")
 		return
 	}
 	inv.OK = true

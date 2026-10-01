@@ -52,7 +52,7 @@ Examples:
   kame -f Build.kmk dist        use a specific build file
   kame do plan dist             inspect a target plan
   kame do fmt -i Makefile.kmk   format a build file in place
-  kame do expr -c '(join ["a" "b"] ",")'
+  kame do run --lang expr -c '(join ["a" "b"] ",")'
   kame --help                   show the overview
   kame --version                show the version
 
@@ -198,21 +198,11 @@ Options:
   -h, --help        show this help
 `
 
-const exprHelpText = `Usage: kame do expr [-c TEXT | FILE] [OPTIONS] [-- ARG...]
+const exprHelpText = `Usage: kame do expr [RUN OPTIONS] [-- ARG...]
 
-Evaluate an expression and print its result. Reads FILE, or stdin when neither
--c nor FILE is given. Arguments after -- are available to the expression as the
-args list. Capabilities are denied by default.
-
-Options:
-  -c, --command TEXT        expression source text
-  -C, --directory DIR       set the working directory
-      --allow-read[=ROOTS]  permit file reads
-      --allow-write[=ROOTS] permit file writes
-      --allow-run[=ROOTS]   permit process execution
-      --capture-limit N    maximum stdout bytes per substitution (default 1 MiB)
-      --allow-env[=NAMES]   permit environment reads
-  -h, --help                show this help
+Compatibility alias for kame do run --lang expr. Uses the unified runner's
+grammar, capabilities, argument frame, async joins and cleanup. With no source
+input, this alias selects stdin. Prefer do run --lang expr for new invocations.
 `
 
 type commandAction int
@@ -249,7 +239,7 @@ var doCommands = []commandSpec{
 	{Name: "tools", TopSummary: "list globally referenced build tools", DoSummary: "list globally referenced build tools", Help: toolsHelpText, Action: commandTools},
 	{Name: "parse", TopSummary: "parse a language file and print a JSON AST", DoSummary: "parse a language file and print a JSON AST (--lang LANG)", Help: parseHelpText, Action: commandParse},
 	{Name: "fmt", TopSummary: "format source in place or check it", DoSummary: "format source in place (-i) or check it (-n)", Help: fmtHelpText, Action: commandFormat},
-	{Name: "expr", TopSummary: "evaluate a standalone expression", DoSummary: "evaluate a standalone expression with capability grants", Help: exprHelpText, Action: commandExpr},
+	{Name: "expr", DoSummary: "compatibility alias for do run --lang expr", Help: exprHelpText, Action: commandExpr},
 	{Name: "help", DoSummary: "show this help, or help for one COMMAND", Action: commandHelp},
 }
 

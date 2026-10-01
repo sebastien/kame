@@ -39,11 +39,59 @@ func TestKashStatementDelimitersAndMultilineValues(t *testing.T) {
 }
 
 func TestKashRejectsMalformedAndUnsupportedSource(t *testing.T) {
-	invalid := []string{"name =\necho next", "name = one two", "name = a\nname = b", "(f X) = X\nf = 1", "value = ${name}suffix", "value = @(cat \"a\")suffix", "value = (cat \"a\" $name)", "echo |\necho next", "echo >\necho next", "echo > a | cat", "echo | cat < a", "echo $(printf one; printf two)", "if cat { echo yes }", "match value { echo yes }", "echo &", "value = 1 ?? 2", "echo \"unclosed"}
+	invalid := []string{"name =\necho next", "name = one two", "name = a\nname = b", "(f X) = X\nf = 1", "value = ${name}suffix", "value = @(cat \"a\")suffix", "value = (cat \"a\" $name)", "echo |\necho next", "echo >\necho next", "echo > a | cat", "echo | cat < a", "echo $(printf one; printf two)", "if cat { echo yes }", "match value { echo yes }", "echo && cat", "value = 1 ??", "echo \"unclosed"}
 	for i := range invalid {
 		s := script.ParseKash(t.Allocator(), "invalid.kash", invalid[i])
 		if len(s.Diagnostics) == 0 { t.Error("malformed or unsupported Kash source was accepted") }
 		if len(s.Diagnostics) != 0 && (s.Diagnostics[0].Span.Start < 0 || s.Diagnostics[0].Span.End > len(invalid[i])) { t.Error("Kash diagnostic escaped the original source") }
 		s.Free()
 	}
+}
+
+func TestKashValueRecoveryKeepsExpressionBoundary(t *testing.T) {
+	a := t.Allocator()
+	s := script.ParseKash(a, "recover.kash", "value = $(false) ?? missing ?? \"fallback\"; printf $value")
+	defer s.Free()
+	if len(s.Diagnostics) != 0 || len(s.Items) != 2 { t.Fatal("Kash recovery did not parse"); return }
+	e := s.Items[0].Definition.Expression
+	if e.Kind != expr.ValueRecovery || e.Items[1].Kind != expr.ValueRecovery || e.Items[0].Kind != expr.CommandCapture { t.Error("value recovery lost right-associative binding") }
+	invalid := []string{"value = [1]?? [2]", "value = :nil ??\nnext = 1", "value = @(:nil ?? 1)", "value = (:nil ?? 1)"}
+	for i := range invalid {
+		bad := script.ParseKash(a, "bad.kash", invalid[i])
+		if len(bad.Diagnostics) == 0 { t.Error("Kash recovery entered embedded expression syntax or crossed a statement") }
+		bad.Free()
+	}
+}
+
+func TestKashIfRetainsNestedBodiesAndLocalDefinitions(t *testing.T) {
+	a := t.Allocator()
+	s := script.ParseKash(a, "control.kash", "if @(:true)\n  name = \"inner\"\n  if false\n    printf no\n  else\n    printf $name\nelif true\n  printf fallback\nelse\n  printf no\nprintf after\n")
+	defer s.Free()
+	if len(s.Diagnostics) != 0 || len(s.Items) != 2 { t.Fatal("nested conditional did not parse"); return }
+	e := s.Items[0].Expression
+	if e.Kind != expr.KashIf || len(e.Items) != 3 || e.Items[0].Body[0].Kind != expr.KashDefinition || e.Items[0].Body[1].Kind != expr.KashIf || e.Items[1].Items[0].Kind != expr.CommandTest { t.Error("conditional AST lost its language or lexical boundaries") }
+	formatted := script.Format(a, s)
+	defer mem.FreeString(a, formatted)
+	again := script.ParseKash(a, "canonical.kash", formatted)
+	defer again.Free()
+	if len(again.Diagnostics) != 0 { t.Error("canonical control syntax did not parse") }
+	canonical := script.Format(a, again)
+	defer mem.FreeString(a, canonical)
+	if formatted != canonical { t.Error("control formatting changed block nesting") }
+}
+
+func TestKashMatchRetainsSubjectAndArmBoundaries(t *testing.T) {
+	a := t.Allocator()
+	s := script.ParseKash(a, "match.kash", "match $(printf main.c)\n  case \"{name:*}.c\"\n    local = name\n    printf $local\n  else\n    printf no\nprintf after\n")
+	defer s.Free()
+	if len(s.Diagnostics) != 0 || len(s.Items) != 2 { t.Fatal("match did not parse"); return }
+	e := s.Items[0].Expression
+	if e.Kind != expr.KashMatch || len(e.Items) != 2 || e.Body[0].Kind != expr.CommandCapture || e.Items[0].Items[0].Pattern == nil || e.Items[0].Body[0].Kind != expr.KashDefinition { t.Error("match lost its subject, pattern or lexical definition") }
+	cloned := expr.Clone(a, e)
+	defer expr.Free(a, cloned)
+	formatted := expr.FormatKashControl(a, cloned, "\t")
+	defer mem.FreeString(a, formatted)
+	again := script.ParseKash(a, "canonical.kash", formatted)
+	defer again.Free()
+	if len(again.Diagnostics) != 0 || len(again.Items) != 1 { t.Error("canonical match failed to reparse") }
 }

@@ -60,3 +60,28 @@ func TestSessionCannotCompleteSyntaxAcrossFragments(t *testing.T) {
 	defer compiled.Free(a)
 	if compiled.Session != nil || len(compiled.Diagnostics) == 0 { t.Error("fragment syntax was combined and reparsed") }
 }
+
+func TestSessionDryRunEvaluatesWithoutEffectRequests(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	fragments := []program.Fragment{{Name: "dry.km", Lang: "km", Text: "capture = $(printf ignored)\nlegacy = (shell \"printf ignored\")\n(out \"hidden\")\n(write \"protected\" \"hidden\")\n(count [capture legacy])\n"}}
+	grants := []eval.Grant{{Capability: eval.Run}, {Capability: eval.Write}}
+	compiled := program.CompileSession(a, fragments, registry, program.Options{DryRun: true, Grants: grants})
+	defer compiled.Free(a)
+	if compiled.Session == nil { t.Fatal("dry-run compilation failed"); return }
+	s := compiled.Session
+	defer s.Free()
+	for i := range s.Work {
+		start := s.Start(i)
+		if start.Handle == nil { t.Fatal("dry-run scheduling failed"); return }
+		h := start.Handle
+		for j := 0; j < 100 && !h.Node.Current; j++ { s.Program.Tick(0) }
+		if !h.Node.Current { h.Free(); t.Fatal("dry-run submitted an effect instead of publishing"); return }
+		if i+1 == len(s.Work) && (h.Node.Latest.Kind != core.Int || h.Node.Latest.Int != 2) { t.Error("dry-run skipped pure evaluation") }
+		h.Free()
+	}
+	if s.Program.Eval.Requests.Next().OK || len(s.Program.Pending) != 0 { t.Error("dry-run issued process/write requests") }
+	if s.Program.NextEvent().OK { t.Error("dry-run emitted a live output effect") }
+}
