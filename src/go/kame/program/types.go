@@ -29,6 +29,7 @@ type Plan struct {
 	Body     []rule.RecipeLine
 	Captures []template.CaptureValue
 	Configuration []string
+	Tools []Tool
 	Inputs   []string
 	// StaticInputs are literal and template inputs as authored.
 	StaticInputs []string
@@ -98,6 +99,7 @@ func (p *Plan) Free(a mem.Allocator) {
 	slices.Free(a, p.ResolvedInputs)
 	slices.Free(a, p.ResolvedResourceInputs)
 	slices.Free(a, p.Outputs)
+	freeTools(a, p.Tools)
 	freeStrings(a, p.Configuration)
 	*p = Plan{}
 }
@@ -200,6 +202,7 @@ type Options struct {
 	Shell       []string
 	Environment []string
 	Defines     []string
+	ToolOverrides []string
 	DryRun      bool
 	// Force bypasses file freshness checks and cached-task lookup for this run.
 	Force            bool
@@ -229,6 +232,8 @@ type Options struct {
 type Tool struct {
 	Name string
 	Path string
+	Resolved bool
+	Declarative bool
 }
 
 type Program struct {

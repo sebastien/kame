@@ -169,6 +169,7 @@ func resourceKindName(kind core.ResourceKind) string {
 	if kind == core.ResourceGlob {
 		return "glob"
 	}
+	if kind == core.ResourceTool { return "tool" }
 	return "environment"
 }
 

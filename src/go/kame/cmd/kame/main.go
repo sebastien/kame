@@ -143,7 +143,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	if len(session.Source.Files) != 0 {
 		session.Parsed = script.Parse(mem.System, session.Source.Files[0].Name, session.Source.Files[0].Text)
 	}
-	compiled := program.CompileMany(mem.System, sources, session.Registry, program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, Defines: options.Defines, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, CaptureLimit: options.CaptureLimit, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool})
+	compiled := program.CompileMany(mem.System, sources, session.Registry, program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, Defines: options.Defines, ToolOverrides: options.ToolOverrides, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, CaptureLimit: options.CaptureLimit, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool})
 	slices.Free(mem.System, sources)
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
@@ -189,6 +189,12 @@ func resolveTool(name, cwd string, environment []string) string {
 		if executableFile(name) {
 			return cloneCommandText(name)
 		}
+		return ""
+	}
+	if strings.IndexByte(name, '/') >= 0 {
+		candidate := path.Join(mem.System, cwd, name)
+		if executableFile(candidate) { return candidate }
+		mem.FreeString(mem.System, candidate)
 		return ""
 	}
 	pathValue := environmentValue(environment, "PATH")

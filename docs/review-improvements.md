@@ -64,7 +64,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 
 | Gap | Current disposition and acceptance direction |
 | --- | --- |
-| A1 tool discovery without arbitrary parse-time effects | Remaining: dependency-tracked resolver plus overrides, resolved once and visible in plans. Quoted shell-text definitions now make the repository build parse, but do not satisfy resolver acceptance. |
+| A1 tool discovery without arbitrary parse-time effects | Implemented: dependency-tracked `(tool NAME)`, repeatable `--tool NAME=PATH`, one resolver lookup per name, executable file dependencies, and plan metadata. T007-11 covers native/WASM parity; the counted resolver sanitizer test verifies reuse. |
 | A2 configuration defaults/overrides | Implemented: lazy `?=`, literal repeatable `--define`, and case-sensitive `KAME_<NAME>` environment values. Last CLI entry wins over environment and authored defaults; plan JSON reports effective provided values. T009-13 covers both hosts. |
 | A3 target-scoped environment/build mode | Remaining: inherited environment must affect execution and fingerprints; debug/release artifacts need correct metadata without generated-source churn. |
 | A4 declaration conditionals/gated includes | Remaining; expression/Kash control flow does not conditionally register build declarations. Repeated nonrecursive includes are now legal, so the old blanket repeated-include prohibition is stale. |

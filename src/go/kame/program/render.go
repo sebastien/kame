@@ -179,6 +179,10 @@ func observeRenderDependency(value any, key core.ResourceKey) {
 		observeInspectionDependency(p, key)
 		return
 	}
+	if key.Kind == core.ResourceTool {
+		p.observeToolDependency(key)
+		return
+	}
 	if key.Kind == core.ResourceEnvironment || key.Kind == core.ResourceGlob {
 		state := mem.Alloc[externalValueState](p.Alloc)
 		state.Program, state.Name, state.Kind = p, cloneText(p.Alloc, key.Name), key.Kind
@@ -222,6 +226,10 @@ func observeInspectionDependency(value any, key core.ResourceKey) {
 	if key.Name == "" {
 		return
 	}
+	if key.Kind == core.ResourceTool {
+		p.observeToolDependency(key)
+		return
+	}
 	if key.Kind == core.ResourceEnvironment || key.Kind == core.ResourceGlob {
 		state := mem.Alloc[externalValueState](p.Alloc)
 		state.Program, state.Name, state.Kind = p, cloneText(p.Alloc, key.Name), key.Kind
@@ -245,6 +253,10 @@ func observeInspectionDependency(value any, key core.ResourceKey) {
 func observeDefinitionDependency(value any, key core.ResourceKey) {
 	p := value.(*Program)
 	if key.Name == "" {
+		return
+	}
+	if key.Kind == core.ResourceTool {
+		p.observeToolDependency(key)
 		return
 	}
 	if key.Kind == core.ResourceEnvironment || key.Kind == core.ResourceGlob {

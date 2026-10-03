@@ -55,6 +55,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p.Options.Directory, p.Options.DryRun, p.Options.Force, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.Force, options.RetainBytes, options.Jobs
 	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
 	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
+	p.Options.ToolOverrides = cloneStrings(a, options.ToolOverrides)
 	p.Options.ResolveTool = options.ResolveTool
 	p.Options.CaptureLimit = options.CaptureLimit
 	if p.Options.CaptureLimit <= 0 { p.Options.CaptureLimit = 1024 * 1024 }
@@ -114,6 +115,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 			return result
 		}
 	}
+	p.declareBuildTools(parsed)
 	p.nextRequest = 1 << 32
 	result.Program = p
 	return result
@@ -136,6 +138,7 @@ func (p *Program) SetToolPath(name, executable string) bool {
 	}
 	mem.FreeString(p.Alloc, p.Tools[i].Path)
 	p.Tools[i].Path = cloneText(p.Alloc, executable)
+	p.Tools[i].Resolved = true
 	return true
 }
 
@@ -144,8 +147,9 @@ func (p *Program) toolPath(name string) (string, bool) {
 	if i < 0 {
 		return "", false
 	}
-	if p.Tools[i].Path == "" && p.Options.ResolveTool != nil {
-		p.Tools[i].Path = p.Options.ResolveTool(p.Alloc, name, p.Options.Directory, p.Options.Environment)
+	if !p.Tools[i].Resolved && p.Options.ResolveTool != nil {
+		p.Tools[i].Resolved = true
+		p.Tools[i].Path = p.Options.ResolveTool(p.Alloc, p.toolRequestName(name), p.Options.Directory, p.Options.Environment)
 	}
 	if p.Tools[i].Path == "" {
 		return "", false
@@ -285,6 +289,7 @@ func (p *Program) Free() {
 	}
 	p.Eval.CancelProcesses()
 	freeStrings(p.Alloc, p.Configuration)
+	freeStrings(p.Alloc, p.Options.ToolOverrides)
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)

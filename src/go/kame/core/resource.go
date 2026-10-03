@@ -13,6 +13,7 @@ const (
 	ResourceService
 	ResourceGlob
 	ResourceEnvironment
+	ResourceTool
 )
 
 // ResourceKey is owned by the allocator that created or cloned it.

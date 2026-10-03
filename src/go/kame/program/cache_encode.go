@@ -448,6 +448,8 @@ func (p *Program) appendDynamicSection(e *cacheEncoder, entry *instance) {
 			} else {
 				e.appendByte(0)
 			}
+		} else if key.Kind == core.ResourceTool {
+			e.appendValue(dependency.Latest)
 		} else if key.Kind == core.ResourceDefinition {
 			p.appendDefinitionDependency(e, dependency, 0)
 		} else if key.Kind == core.ResourceTask {
@@ -734,6 +736,8 @@ func (p *Program) appendDefinitionDependency(e *cacheEncoder, dependency *core.N
 			} else {
 				e.appendByte(0)
 			}
+		case core.ResourceTool:
+			e.appendValue(child.Latest)
 		case core.ResourceDefinition:
 			p.appendDefinitionDependency(e, child, depth+1)
 		case core.ResourceTask:

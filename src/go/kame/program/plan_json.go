@@ -17,6 +17,11 @@ func WritePlan(out io.Writer, plan *Plan) {
 	e.Str("plan")
 	e.Str("target")
 	e.Str(plan.Target)
+	if len(plan.Tools) > 0 {
+		e.Str("tools"); e.BeginObject()
+		for i := range plan.Tools { e.Str(plan.Tools[i].Name); e.Str(plan.Tools[i].Path) }
+		e.EndObject()
+	}
 	if len(plan.Configuration) > 0 {
 		e.Str("configuration")
 		e.BeginObject()

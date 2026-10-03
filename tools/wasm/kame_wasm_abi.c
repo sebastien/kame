@@ -243,6 +243,8 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
   switch (request.Kind) {
     case host_RequestReadFile: {
       so_String op = host_PayloadText(request.Payload, so_str("op"));
+      if (kame_wasm_string_eq(op, "resolve-tool")) return 18u;
+      if (kame_wasm_string_eq(op, "tool-exists")) return 19u;
       if (kame_wasm_string_eq(op, "output-exists")) return 17u;
       if (kame_wasm_string_eq(op, "exists")) return 7u;
       if (kame_wasm_string_eq(op, "stat")) return 5u;

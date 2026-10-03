@@ -227,3 +227,9 @@ tracker-backed regression test; high-churn paths should repeat construction and
 teardown in one process so retained allocations cannot hide behind process exit.
 The binary-contract meta test is excluded because it deliberately requires the
 normal debug binary path and verifies the harness's non-sanitized rebuild flow.
+
+`T007-11-lib-tools.sh` verifies native/WASM tool resolution, explicit relative
+paths in a directory containing spaces, repeated override precedence, missing
+tools before effects, plan metadata, and computed names in source sessions.
+The program resolver unit test counts lookups and checks tool/file dependency
+registration under AddressSanitizer.

@@ -41,9 +41,12 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	for i := range r.Environment { environment = slices.Append(r.Alloc, environment, r.Environment[i]) }
 	fields = host.PayloadList(value, "environment")
 	for i := range fields { environment = slices.Append(r.Alloc, environment, fields[i].Text) }
-	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0}
+	var tools []string
+	fields = host.PayloadList(value, "toolOverrides")
+	for i := range fields { tools = slices.Append(r.Alloc, tools, fields[i].Text) }
+	options := program.Options{ToolOverrides: tools, Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0}
 	compiled := program.CompileSession(r.Alloc, fragments, r.Registry, options)
-	slices.Free(r.Alloc, overrides); slices.Free(r.Alloc, environment)
+	slices.Free(r.Alloc, tools); slices.Free(r.Alloc, overrides); slices.Free(r.Alloc, environment)
 	r.Host = nil
 	for i := range fragments { slices.Free(r.Alloc, fragments[i].Entries); slices.Free(r.Alloc, fragments[i].Defines) }
 	slices.Free(r.Alloc, fragments)

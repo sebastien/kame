@@ -48,6 +48,7 @@ type Invocation struct {
 	Check            bool
 	Comment          string
 	Defines          []string
+	ToolOverrides    []string
 	Depth            int
 	Expand           bool
 	Targets          []string
@@ -76,6 +77,7 @@ func (inv *Invocation) Free() {
 	slices.Free(mem.System, inv.Files)
 	slices.Free(mem.System, inv.Args)
 	slices.Free(mem.System, inv.Defines)
+	slices.Free(mem.System, inv.ToolOverrides)
 	mem.FreeString(mem.System, inv.Error.Message)
 	*inv = Invocation{}
 }
@@ -184,7 +186,7 @@ func parseBuild(inv *Invocation, args []string) {
 			}
 			continue
 		}
-		if equalsValue(arg, "--define", inv) || equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) || equalsValue(arg, "--color", inv) || equalsValue(arg, "--diagnostic-format", inv) {
+		if equalsValue(arg, "--tool", inv) || equalsValue(arg, "--define", inv) || equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) || equalsValue(arg, "--color", inv) || equalsValue(arg, "--diagnostic-format", inv) {
 			if inv.Error.Code != "" {
 				return
 			}
@@ -208,7 +210,7 @@ func parseBuild(inv *Invocation, args []string) {
 }
 
 func isBuildValueOption(arg string) bool {
-	if arg == "--define" { return true }
+	if arg == "--define" || arg == "--tool" { return true }
 	if arg == "--capture-limit" { return true }
 	if arg == "-f" || arg == "--file" || arg == "-c" || arg == "--command" || arg == "-C" || arg == "--directory" || arg == "-j" || arg == "--jobs" || arg == "--shell" || arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--env" || arg == "--color" || arg == "--diagnostic-format" {
 		return true
@@ -228,6 +230,13 @@ func equalsValue(arg string, name string, inv *Invocation) bool {
 }
 
 func assignBuildOption(inv *Invocation, option string, value string) bool {
+	if option == "--tool" {
+		equal := -1
+		for i := range value { if value[i] == '=' { equal = i; break } }
+		if equal <= 0 || equal+1 == len(value) { inv.fail("OPT_VALUE_INVALID", "tool must be NAME=PATH with a nonempty path"); return false }
+		inv.ToolOverrides = slices.Append(mem.System, inv.ToolOverrides, value)
+		return true
+	}
 	if option == "--define" {
 		equal := -1
 		for i := range value { if value[i] == '=' { equal = i; break } }

@@ -21,7 +21,7 @@ Related material:
 ## TL;DR
 
 The remaining porting gaps concern build configuration and declarations:
-target environments, tool-path resolution,
+target environments,
 conditional includes, generated declarations, and order-only prerequisites.
 The detailed acceptance clauses below track those requests.
 
@@ -73,9 +73,11 @@ it is the largest conceptual gap; it is now fixed.
 
 ## A. Evaluation model
 
-### A1 — No parse-time shell
+### A1 — No parse-time shell (fixed)
 
-**Symptom.** GNU computes tool paths once, while reading the file:
+**Current behavior.** `(tool "clang")` resolves an executable once per build, with a dependency node for its selected path and a file dependency for the executable. Repeatable `--tool clang=PATH` overrides use the last entry; explicit relative paths resolve beneath `-C`. Plan JSON reports declared/resolved tools. Resolution launches no process. T007-11 covers both hosts, including computed names and paths with spaces; a counted resolver unit test verifies one lookup across materialization and planning.
+
+**Historical symptom.** GNU computes tool paths once, while reading the file:
 
 ```make
 WASM_SDK ?= $(shell mise where asdf:mise-plugins/mise-wasi-sdk 2>/dev/null)/wasi-sdk
@@ -468,7 +470,7 @@ Ordered by value-to-effort for porting real projects:
 - [x] **A2** Add `--define NAME=VALUE` + a documented env convention, then `?=`.
 - [ ] **A3** Add target-scoped environment inherited by prerequisites, included
       in cache fingerprints; restore `KAME_BUILD_MODE`.
-- [ ] **A1** Add a hermetic tool resolver (not general parse-time shell) and a
+- [x] **A1** Add a hermetic tool resolver (not general parse-time shell) and a
       `--tool` override.
 - [x] **B1** Multiple patterns / alternation for `wildcard`, or a `find`-style
       op with include/exclude.

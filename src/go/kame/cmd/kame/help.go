@@ -37,6 +37,7 @@ Build options:
       --verbose          report cache decisions and warnings
       --shell SHELL      recipe shell executable (repeatable)
       --env NAME=VALUE   add a recipe environment entry (repeatable)
+      --tool NAME=PATH   select an executable for a declared tool (repeatable)
       --define NAME=VALUE override a declared value with literal text (repeatable)
       --timeout MS       per-command timeout in milliseconds
       --retry N          retry failed commands N times
@@ -378,7 +379,7 @@ func optionTakesValue(arg string) bool {
 		arg == "-c" || arg == "--command" ||
 		arg == "-C" || arg == "--directory" ||
 		arg == "-j" || arg == "--jobs" ||
-		arg == "--shell" || arg == "--env" || arg == "--define" || arg == "--comment" ||
+		arg == "--shell" || arg == "--env" || arg == "--define" || arg == "--tool" || arg == "--comment" ||
 		arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--capture-limit" ||
 		arg == "-l" || arg == "--lang" || arg == "--entry" || arg == "--depth"
 }

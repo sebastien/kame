@@ -372,7 +372,7 @@ function usage() {
   stdout.write('  do render       render a document template (--define, --comment, --check)\n');
   stdout.write('  do cat TARGET   materialize one target and print its artifact\n');
   stdout.write('  do help         show this help\n\n');
-  stdout.write('Options: -f FILE  -c TEXT  -C DIR  -j N  -n  --force  --define NAME=VALUE  -h  -V\n');
+  stdout.write('Options: -f FILE  -c TEXT  -C DIR  -j N  -n  --force  --define NAME=VALUE  --tool NAME=PATH  -h  -V\n');
   stdout.write('Later-stage behavior reports FEATURE_UNSUP.\n');
 }
 
@@ -550,15 +550,25 @@ function isExecutable(file) {
   }
 }
 
-function resolveTool(name) {
-  if (name === '') return '';
-  if (name.startsWith('/')) return isExecutable(name) ? name : '';
-  const pathValue = env.PATH ?? '';
-  for (const directory of pathValue.split(':')) {
-    const candidate = resolve(process.cwd(), directory, name);
-    if (isExecutable(candidate)) return candidate;
+function resolveTool(name, overrides = [], cache) {
+  if (cache?.has(name)) return cache.get(name);
+  const identity = name;
+  const prefix = `${name}=`;
+  for (let i = overrides.length - 1; i >= 0; i--) {
+    if (overrides[i].startsWith(prefix)) { name = overrides[i].slice(prefix.length); break; }
   }
-  return '';
+  let selected = '';
+  if (name.includes('/')) {
+    const absolute = resolve(process.cwd(), name);
+    if (isExecutable(absolute)) selected = absolute;
+  } else if (name) {
+    for (const directory of (env.PATH ?? '').split(':')) {
+      const candidate = resolve(process.cwd(), directory, name);
+      if (isExecutable(candidate)) { selected = candidate; break; }
+    }
+  }
+  cache?.set(identity, selected);
+  return selected;
 }
 
 function readStdin() {
@@ -788,6 +798,12 @@ class Module {
 
   async dispatch(instance, request, kind, payload, data, context, key, record) {
     const grants = context.grants;
+    if (kind === 19) return this.completeJSON(instance, request, existsSync(payload));
+    if (kind === 18) {
+      const resolved = resolveTool(payload, [], context.toolCache);
+      if (!resolved) return this.completeFailure(instance, request, 'TOOL_MISSING', `cannot resolve tool: ${payload}`);
+      return this.completeJSON(instance, request, resolved);
+    }
     if (kind === 1) {
       if (!grants.read) return this.deny(instance, request, 'read');
       try {
@@ -990,7 +1006,7 @@ class Module {
     }
   }
 
-  async prepared(source, run, name, context) {
+  async prepared(source, run, name, context, resolveTools = true) {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
@@ -1005,6 +1021,10 @@ class Module {
         }
       }
       if (this.exports.kame_wasm_prepare(instance) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      if (resolveTools) {
+        const names = JSON.parse(this.decode0(this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_tools(handle, dst, capacity, length), instance)));
+        for (const tool of names) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context?.toolCache));
+      }
       if (context) return await this.copyInspectionQuery(run(instance), instance, context);
       return this.copyQuery(run(instance), instance);
     } finally {
@@ -1018,7 +1038,7 @@ class Module {
     if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     if (Array.isArray(source)) {
       if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
-      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, environment: source.environment }));
+      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, environment: source.environment, toolOverrides: source.toolOverrides }));
       if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
   }
@@ -1047,7 +1067,7 @@ class Module {
   async toolNames(source, name) {
     const bytes = await this.prepared(source, () => {
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_tools(handle, dst, dstLen, lengthPointer);
-    }, name);
+    }, name, undefined, false);
     return JSON.parse(this.decode0(bytes));
   }
 
@@ -1064,9 +1084,7 @@ class Module {
   }
 
   async toolsCheck(source, target, name, context) {
-    const names = await this.toolNames(source, name);
     return this.prepared(source, (instance) => {
-      for (const tool of names) this.setToolPath(instance, tool, resolveTool(tool));
       const t = this.write(target);
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_tools_check(handle, t.pointer, t.length, dst, dstLen, lengthPointer);
     }, name, context);
@@ -1128,7 +1146,7 @@ class Module {
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
       this.compileBuild(instance, source, name);
-      for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool));
+      for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
       const directoryBytes = this.write(process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directoryBytes.pointer, directoryBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
@@ -1176,7 +1194,7 @@ class Module {
       }
       const environment = Object.entries(process.env).filter(([name]) => name.startsWith('KAME_')).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment.filter((entry) => entry.startsWith('KAME_')));
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, buildDefines: inv.name === 'render' ? [] : inv.defines, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0 }));
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0 }));
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');
@@ -1539,6 +1557,7 @@ function effectiveGrants(inv) {
 function contextFor(inv) {
   const runGrants = (inv.grants ?? []).filter((grant) => grant.capability === 'run');
   return {
+    toolCache: new Map(),
     grants: effectiveGrants(inv),
     runRoots: runGrants.length === 0 || runGrants.some((grant) => grant.names.length === 0) ? null : runGrants.flatMap((grant) => grant.names.map((name) => resolve(name))),
     readRoots: capabilityRoots(inv, 'read'),
@@ -1660,8 +1679,9 @@ async function discoverBuildSource(module, inv, sourceDirectory) {
   const environment = Object.entries(process.env).filter(([name]) => name.startsWith('KAME_')).map(([name, value]) => `${name}=${value}`);
   environment.push(...inv.environment.filter((entry) => entry.startsWith('KAME_')));
   parts.defines = inv.defines;
+  parts.toolOverrides = inv.toolOverrides;
   parts.environment = environment;
-  return { name, text: source.text, compiled: parts.length === 1 && !inv.defines.length && !environment.length ? source.text : parts };
+  return { name, text: source.text, compiled: parts.length === 1 && !inv.defines.length && !inv.toolOverrides.length && !environment.length ? source.text : parts };
 }
 
 // Syntax and byte spans come from the portable parser, not a second JS grammar.
@@ -1783,7 +1803,7 @@ async function runTools(module, inv, sourceDirectory) {
     return failed ? 1 : 0;
   }
   const names = await module.toolNames(source.compiled, source.name);
-  stdout.write(`${JSON.stringify(names.map((name) => ({ name, path: resolveTool(name) })))}\n`);
+  stdout.write(`${JSON.stringify(names.map((name) => ({ name, path: resolveTool(name, inv.toolOverrides) })))}\n`);
   return 0;
 }
 

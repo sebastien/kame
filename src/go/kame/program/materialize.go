@@ -58,6 +58,7 @@ type renderDependencyState struct {
 type externalFileState struct {
 	Program *Program
 	Name    string
+	Tool    bool
 }
 type externalValueState struct {
 	Program *Program
@@ -83,7 +84,9 @@ func produceExternalFile(c *core.EngineContext, nodeID int64) core.ProducerResul
 	if state.Program.Forwarding {
 		completion := c.Completion()
 		if completion.RequestID == 0 {
-			payload := host.FilePayload(c.Allocator(), host.OpExists, state.Name)
+			op := host.OpExists
+			if state.Tool { op = "tool-exists" }
+			payload := host.FilePayload(c.Allocator(), op, state.Name)
 			id := state.Program.Eval.Requests.Submit(c.NodeID(), c.Generation(), c.Attempt(), host.RequestReadFile, payload)
 			payload.Free(c.Allocator())
 			c.Submit(id)

@@ -319,3 +319,12 @@ write requests. The target waits for host completion, preserves authored effect
 order, and propagates publication failures. A dependent recipe runs after the
 file is published. The JavaScript host writes through a unique private sibling
 staging directory and atomic rename, cleaning staging on success and failure.
+
+Tool resolution uses ABI request kind 18 with an executable name or selected
+path. The host completes it with the resolved path as a JSON string or a
+`TOOL_MISSING` diagnostic. Kind 19 checks existence of an internally declared
+executable dependency and completes with a JSON boolean. These requests do not
+execute a process; user filesystem reads retain their ordinary capability checks.
+Build/source descriptors carry `toolOverrides` as `NAME=PATH` strings. The JS
+host shares a resolution cache across the invocation and also supplies paths for
+literal declarations through `kame_wasm_set_tool_path`.

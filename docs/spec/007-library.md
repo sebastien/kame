@@ -258,6 +258,22 @@ An `env` operation requires the `env` capability and reads one named variable.
 It registers the variable name and observed value as a dynamic dependency.
 Reading the entire environment at once is not supported initially.
 
+## Tool configuration
+
+`(tool NAME)` accepts one nonempty string and returns the resolved executable
+path. It requires a build or source session. The operation registers a shared
+`tool` dependency and a file dependency for the selected executable; it is not
+a pure operation. Resolution performs no process execution and is cached per
+name for the invocation. Missing executables report `TOOL_MISSING` before the
+using recipe executes. Computed names resolve when reached; literal names also
+appear in declaration inspection. Plan JSON includes a `tools` object mapping
+names to selected paths. An unavailable inspected declaration has an empty path.
+
+The host resolves explicit paths beneath the selected working directory and bare
+names against its startup PATH. Recipe environment changes do not alter this
+lookup policy. Repeatable `--tool NAME=PATH` selects the last override. Internal
+executable metadata checks do not grant access to user read operations.
+
 ## Acceptance Tests
 
 - Every operation validates arity and value kinds without mutating arguments.

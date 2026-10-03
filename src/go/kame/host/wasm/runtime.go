@@ -34,6 +34,7 @@ type Runtime struct {
 	Session          *program.Session
 	BuildSources     []program.CompileSource
 	BuildDefines     []string
+	BuildToolOverrides []string
 	BuildEnvironment []string
 	Handle           *program.Handle
 	Environment      []string

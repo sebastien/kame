@@ -51,6 +51,11 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 		total += len(text)
 		r.BuildSources = slices.Append(r.Alloc, r.BuildSources, program.CompileSource{Name: pureText(r.Alloc, name), Text: pureText(r.Alloc, text), Offset: int(offset)})
 	}
+	tools := host.PayloadList(descriptor, "toolOverrides")
+	for i := range tools {
+		if tools[i].Kind != core.String { r.freeBuildSources(); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid tool override")} }
+		r.BuildToolOverrides = slices.Append(r.Alloc, r.BuildToolOverrides, pureText(r.Alloc, tools[i].Text))
+	}
 	defines := host.PayloadList(descriptor, "defines")
 	for i := range defines {
 		if defines[i].Kind != core.String { r.freeBuildSources(); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid definition override")} }
@@ -71,6 +76,8 @@ func (r *Runtime) freeBuildSources() {
 	}
 	slices.Free(r.Alloc, r.BuildSources)
 	r.BuildSources = nil
+	for i := range r.BuildToolOverrides { mem.FreeString(r.Alloc, r.BuildToolOverrides[i]) }
+	slices.Free(r.Alloc, r.BuildToolOverrides); r.BuildToolOverrides = nil
 	for i := range r.BuildDefines { mem.FreeString(r.Alloc, r.BuildDefines[i]) }
 	for i := range r.BuildEnvironment { mem.FreeString(r.Alloc, r.BuildEnvironment[i]) }
 	slices.Free(r.Alloc, r.BuildDefines); r.BuildDefines = nil
@@ -79,6 +86,7 @@ func (r *Runtime) freeBuildSources() {
 
 func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 	options.Defines = r.BuildDefines
+	options.ToolOverrides = r.BuildToolOverrides
 	var environment []string
 	for i := range options.Environment { environment = slices.Append(r.Alloc, environment, options.Environment[i]) }
 	for i := range r.BuildEnvironment { environment = slices.Append(r.Alloc, environment, r.BuildEnvironment[i]) }

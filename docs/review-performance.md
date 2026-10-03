@@ -86,3 +86,8 @@ state even after a lazy definition had published its current value. Handle
 polling now copies that value before releasing root interest, allowing the
 portable `Materialize` API to return. Program sanitizer coverage includes the
 definition path; this is a termination fix, without a timing benchmark claim.
+
+Tool configuration now shares one dependency producer per name. The counted
+resolver regression verifies one native lookup across repeated materialization
+and planning; the JS host caches resolved paths across its invocation contexts.
+This removes repeated resolver calls, without claiming a wall-clock speedup.

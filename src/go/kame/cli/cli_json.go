@@ -37,6 +37,7 @@ func WriteJSON(out io.Writer, inv *Invocation) {
 	e.Str(inv.DiagnosticFormat)
 	e.Str("shell")
 	writeStrings(&e, inv.Shell)
+	e.Str("toolOverrides"); writeStrings(&e, inv.ToolOverrides)
 	e.Str("environment")
 	writeStrings(&e, inv.Environment)
 	e.Str("timeoutMS")
