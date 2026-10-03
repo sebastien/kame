@@ -68,3 +68,17 @@ func TestScriptParsesMultilineDefinition(t *testing.T) {
 		t.Error("multiline definition did not compose")
 	}
 }
+
+func TestContinuationsPreserveSourceSpansAndRecipeBackslashes(t *testing.T) {
+	a := t.Allocator()
+	text := "# comment \\\nwords = one \\\n  two \\\r\n  three\npaths = (list ./a \\\n ./b)\n./out : ./a \\\n ./b @(paths)\n\tprintf one \\\n\t two\n"
+	s := script.Parse(a, "continued.kmk", text)
+	defer s.Free()
+	if len(s.Diagnostics) != 0 || len(s.Items) != 4 || s.Source.Text != text { t.Error("continuation changed source or item boundaries"); return }
+	words := s.Items[1].Definition.Words
+	if len(words) != 3 || words[0].Text != "one" || words[1].Text != "two" || words[2].Text != "three" { t.Error("continued definition did not split words"); return }
+	position := s.Source.Position(words[2].Span.Start)
+	if position.Line != 4 || position.Column != 3 { t.Error("continuation lost authored position") }
+	r := s.Items[3].Rule
+	if len(r.Inputs) != 3 || r.Inputs[0].Text != "./a" || r.Inputs[1].Text != "./b" || len(r.Body) != 2 || r.Body[0].Text != "printf one \\" { t.Error("continued header or shell backslash changed") }
+}

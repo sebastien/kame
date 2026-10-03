@@ -56,7 +56,7 @@ strictly better (dynamic glob dependencies, real file-rule freshness, cached
 | A3 | No target-specific variables or `export` propagation | Language design | High | `KAME_BUILD_MODE` |
 | A4 | No conditionals or conditional include | Missing feature | Medium | not used here |
 | A5 | No dynamic names (`$($(VAR))`) / `eval` / generated rules | Missing feature | Medium | not used here |
-| A6 | No line continuation, no multi-line `define` | Parser gap | Low | long `KAME_INPUTS` |
+| A6 | Declaration continuations and multiline values | Parser gap, fixed | Low → fixed | long `KAME_INPUTS` |
 | B1 | `wildcard` pattern unions | Library gap, fixed | High → fixed | `WASM_SOURCES` |
 | B2 | `concat` of two non-empty wildcard globs hung | Engine bug (KB-1) | Critical → fixed | `WASM_SOURCES` (workaround retained) |
 | B3 | Multiple expressions per rule header | Verified and covered | Medium → fixed | `WASM_SOURCES` + glue |
@@ -196,7 +196,15 @@ every module include and per-tenant/per-environment rule.
 computed key; ideally a programmatic rule-emission form. Design before
 implementation — this is the largest language change on the list.
 
-### A6 — No line continuation / multi-line `define`
+### A6 — Declaration continuations and multiline values (fixed)
+
+Backslash-LF and backslash-CRLF act as whitespace outside quoted declaration
+strings, without changing source text or diagnostic offsets. Definitions and
+rule headers may continue onto indented lines; recipes preserve shell-owned
+backslashes, and comments stay physical lines. Multiline expression and verbatim
+string definitions already provide multiline values. T004-10 passes 10 parity
+assertions; the script sanitizer suite passes 12 tests including authored positions.
+The historical report follows.
 
 **Symptom.** A backslash continuation is a parse error:
 
@@ -445,7 +453,7 @@ Ordered by value-to-effort for porting real projects:
       op with include/exclude.
 - [x] **B5** Accept scalar pattern expansions; leading captures; captures on
       bare targets.
-- [ ] **A6** Backslash line continuation in definitions.
+- [x] **A6** Backslash line continuation in definitions.
 - [ ] **A5** Design computed-key definitions and rule emission (largest change).
 - [ ] **A4** Minimal `when`/`if` plus conditional include.
 - [x] **D3** Add an "Idioms and gotchas" page to the skill/reference docs.

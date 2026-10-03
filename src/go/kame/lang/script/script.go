@@ -67,16 +67,16 @@ func Parse(a mem.Allocator, name string, text string) *Script {
 func parseScript(s *Script, offset int) {
 	a, text := s.Alloc, s.Source.Text
 	for pos := offset; pos < len(text); {
-		lineEnd := pos
-		for lineEnd < len(text) && text[lineEnd] != '\n' {
-			lineEnd++
-		}
+		lineEnd := source.LogicalLineEnd(text, pos)
 		start, end := trim(text, pos, lineEnd)
 		if start == end {
 			pos = nextLine(text, lineEnd)
 			continue
 		}
 		if comment(text, start, end) {
+			lineEnd = pos
+			for lineEnd < len(text) && text[lineEnd] != '\n' { lineEnd++ }
+			start, end = trim(text, pos, lineEnd)
 			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Comment, Text: text[start:end], Span: source.Span{Start: start, End: end}})
 			pos = nextLine(text, lineEnd)
 			continue

@@ -53,6 +53,10 @@ all inputs. Kame expressions use `@(EXPRESSION)` in recipes. Build headers accep
 `@(DIRECTORY)/suffix`, interleaved with literal or quoted paths. Each whole
 expression is evaluated and flattened independently, in authored order.
 
+Long definitions and rule headers may continue with backslash-newline; indented
+continuation lines belong to that declaration. Use multiline expressions or a
+verbatim quoted string for multiline values. Recipe continuations remain shell syntax.
+
 Quote shell text held in a Kame definition:
 
 ```kame

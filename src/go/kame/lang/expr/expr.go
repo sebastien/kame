@@ -213,6 +213,8 @@ func (p *parser) node(kind Kind, start int) *Expr {
 func (p *parser) skipSpace() int {
 	start := p.pos
 	for p.pos < len(p.s.Text) {
+		next := source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text))
+		if next != p.pos { p.pos = next; continue }
 		b := p.s.Text[p.pos]
 		if b != ' ' && b != '\t' && b != '\n' && b != '\r' { break }
 		p.pos++
@@ -256,7 +258,7 @@ func (p *parser) expression() *Expr {
 
 func (p *parser) path() *Expr {
 	start := p.pos
-	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) { p.pos++ }
+	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos { p.pos++ }
 	e := p.node(Path, start)
 	e.Text = p.s.Text[start:p.pos]
 	p.classifyPathPattern(e, start)
@@ -430,7 +432,7 @@ func ValidSelector(text string) bool {
 
 func (p *parser) number() *Expr {
 	start := p.pos
-	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) { p.pos++ }
+	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos { p.pos++ }
 	text := p.s.Text[start:p.pos]
 	if !validNumber(text) { p.error(start, p.pos, "invalid number"); return nil }
 	if hasFloat(text) {

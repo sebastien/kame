@@ -180,6 +180,11 @@ func (p *parser) definition() *Definition {
 		}
 	}
 	rhsStart, rhsEnd := trim(p.s.Text, equals+1, p.end)
+	for rhsStart < rhsEnd {
+		next := source.ContinuationEnd(p.s.Text, rhsStart, rhsEnd)
+		if next == rhsStart { break }
+		rhsStart, rhsEnd = trim(p.s.Text, next, rhsEnd)
+	}
 	if p.kash {
 		prefix := expr.ParseKashValuePrefix(p.a, p.s, rhsStart)
 		d.Expression, d.ValueKind, d.Span.End = prefix.Expr, ValueExpression, prefix.End
@@ -238,7 +243,7 @@ func (p *parser) definition() *Definition {
 	d.ValueKind = ValueWords
 	for pos := rhsStart; pos < rhsEnd; {
 		start := pos
-		for pos < rhsEnd && !space(p.s.Text[pos]) {
+		for pos < rhsEnd && !space(p.s.Text[pos]) && source.ContinuationEnd(p.s.Text, pos, rhsEnd) == pos {
 			pos++
 		}
 		word := template.ParseStringRange(p.a, p.s, start, pos)
@@ -248,7 +253,10 @@ func (p *parser) definition() *Definition {
 		slices.Free(p.a, word.Diagnostics)
 		word.Diagnostics = nil
 		d.Words = slices.Append(p.a, d.Words, Word{Text: p.s.Text[start:pos], Span: source.Span{Start: start, End: pos}, Template: word})
-		for pos < rhsEnd && space(p.s.Text[pos]) {
+		for pos < rhsEnd {
+			next := source.ContinuationEnd(p.s.Text, pos, rhsEnd)
+			if next != pos { pos = next; continue }
+			if !space(p.s.Text[pos]) { break }
 			pos++
 		}
 	}

@@ -512,8 +512,19 @@ described above; the original source text is not preserved verbatim. Formatting
 must be idempotent, and parsing formatted output must produce an equivalent AST
 excluding spans.
 
+## Declaration continuations
+
+Outside quoted strings, a backslash immediately followed by LF or CRLF acts as
+whitespace in definitions, expression whitespace and rule headers. Continuations
+may span indented physical lines. Parsers retain the original source bytes, so
+spans and diagnostics still refer to authored lines and columns. Comments end at
+their physical line ending; recipe backslashes remain shell-owned. Multi-line
+expression definitions and verbatim string definitions remain supported.
+
 ## Acceptance Tests
 
+- Continued declarations execute and format idempotently, retaining authored
+  spans, CRLF behavior, comment boundaries and shell recipe backslashes.
 - Each language package parses and formats its syntax without using the script
   parser.
 - Blank lines keep their count between script items, between recipe lines, and

@@ -69,7 +69,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | A3 target-scoped environment/build mode | Remaining: inherited environment must affect execution and fingerprints; debug/release artifacts need correct metadata without generated-source churn. |
 | A4 declaration conditionals/gated includes | Remaining; expression/Kash control flow does not conditionally register build declarations. Repeated nonrecursive includes are now legal, so the old blanket repeated-include prohibition is stale. |
 | A5 computed lookup/generated rules | Remaining design and implementation; record lookup is useful but does not by itself generate rule declarations. Preserve no-effects compilation. |
-| A6 continuations/multiline definitions | Remaining parser/formatter work; verbatim template literals do not prove general continued rule headers or definitions. |
+| A6 continuations/multiline definitions | Implemented backslash LF/CRLF declaration continuations, preserving authored offsets, physical comments and recipe escapes; T004-10 verifies native/WASM execution and formatter idempotence. |
 | B1 discovery unions/alternation/file filtering | Pattern unions are implemented: sorted, duplicate-free results and independent glob dependencies; T007-09 covers native/WASM evaluation and membership changes. Directory filtering uses metadata predicates. |
 | B2 concatenated wildcard deadlock | Fixed (KB-1); keep both native and WASM multi-read regressions. |
 | B3 multiple expression inputs | Already supported by the parser and now verified by T004-09 across multiple host-backed expressions, literal and interpolated paths. |

@@ -173,10 +173,7 @@ func (p *parser) takeTargetDiagnostics(diags []source.Diagnostic, offset int) {
 }
 
 func (p *parser) rule() *Rule {
-	lineEnd := p.start
-	for lineEnd < p.end && p.s.Text[lineEnd] != '\n' {
-		lineEnd++
-	}
+	lineEnd := source.LogicalLineEnd(p.s.Text[:p.end], p.start)
 	headerStart, headerEnd := trim(p.s.Text, p.start, lineEnd)
 	r := mem.Alloc[Rule](p.a)
 	r.Header, r.Span = source.Span{Start: headerStart, End: headerEnd}, source.Span{Start: p.start, End: lineEnd}
@@ -505,7 +502,10 @@ func nameContinue(b byte) bool { return nameStart(b) || (b >= '0' && b <= '9') |
 func ranges(a mem.Allocator, text string, start int, end int) []source.Span {
 	var out []source.Span
 	for start < end {
-		for start < end && space(text[start]) {
+		for start < end {
+			next := source.ContinuationEnd(text, start, end)
+			if next != start { start = next; continue }
+			if !space(text[start]) { break }
 			start++
 		}
 		if start == end {
@@ -514,6 +514,7 @@ func ranges(a mem.Allocator, text string, start int, end int) []source.Span {
 		item, depth, quote := start, 0, false
 		for start < end {
 			b := text[start]
+			if !quote && depth == 0 && source.ContinuationEnd(text, start, end) != start { break }
 			if quote {
 				if b == '\\' && start+1 < end {
 					start += 2
