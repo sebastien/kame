@@ -28,7 +28,7 @@ untrusted builds. Avoid describing `--allow-read=DIR` as a filesystem sandbox.
 | SEC-1 | High when output directories contain attacker-controlled entries | Non-durable native writes opened `OUTPUT.kame-write.tmp` directly, following a pre-created symlink and allowing concurrent writers to share staging data. | Fixed: exclusively create a unique sibling temporary, apply requested permissions, and rename only after successful write and close. |
 | SEC-2 | Trust-boundary limitation | Lexical roots permit symlink escape and executable grants do not constrain child effects. | Explicitly specified behavior; require host containment for hostile code. |
 | SEC-9 | Availability | An 8 MiB WASM recipe output aborts in transient event JSON allocation before forwarding all bytes. | KB-9 fixed: T012-03 verifies lossless 8 MiB NUL/binary stdout/stderr, bounded failure retention and 64 KiB cache replay on both hosts. All 28 WASM host sanitizer tests pass. True logical-heap exhaustion diagnostics remain open under spec 010. |
-| SEC-3 | Verification gap | Portable package sanitizer verification passes; the compiled CLI leak gate remains unverified. | All 359 package tests pass under Clang AddressSanitizer in the current checkout. Keep release completion open until sanitized CLI conformance and external-consumer checks finish. |
+| SEC-3 | Verification gap | The compiled CLI leak gate previously lacked trustworthy instrumented results. | Verified: all 102 selected CLI suites pass with ASAN/UBSAN and leak detection enabled. ASAN symbols remain present before and after the run. The binary metadata suite is intentionally excluded from this gate. Earlier broad package coverage passed 359 tests; current focused coverage passes 28 WASM host and 96 program tests, plus Go CLI sanitizer tests. |
 | SEC-7 | Memory safety | Returning a definition function from a `let` exposed a freed function and scope to calls and ancestor-store rejection. | Fixed: definition lookups return an owned wrapper retaining the lexical scope. All 65 evaluator sanitizer tests pass, including returned-function calls, result cleanup, and `DEF_ESCAPE` rejection. |
 | SEC-8 | Input validation | WASM build-source descriptors accepted incorrectly typed fields and offsets whose source end exceeded the 32-bit span range. | Fixed: require string names/text, integer offsets, and an in-range source end before copying fragments. All 26 WASM host sanitizer tests pass, including malformed descriptors and recovery after rejection. |
 | SEC-6 | High when cache directories contain attacker-controlled entries | WASM cache put followed an existing record symlink and overwrote its target. | Fixed: exclusive sibling staging, file sync, and rename; T010-19 preserves a public marker and verifies the published cache hit. |
@@ -73,11 +73,10 @@ by spec 008.
 - Native/WASM public-marker symlink reproduction confirms the documented lexical
   grant boundary.
 - `tests/T010-19-wasm-cache.sh`: 9 assertions pass, including record-symlink replacement, marker preservation, readable cache replay, and staging cleanup.
-- Signal, pipeline, redirection, grant, and cancellation suites are part of the
-  broader running conformance check; do not infer whole-suite success from the
-  targeted results above.
+- Signal, pipeline, redirection, grant and cancellation suites pass in the
+  completed 102-suite compiled CLI leak gate.
 
-The broad portable-package command `cd src/go/kame && CC=clang so test -check=sanitize -panic=abort ./...` passes all 359 tests across 16 packages. This includes executable dependency tracking and literal wildcard ownership. Full compiled CLI leak verification is a separate gate.
+The earlier broad portable-package command `cd src/go/kame && CC=clang so test -check=sanitize -panic=abort ./...` passed all 359 tests across 16 packages before the optional-include and large-stream additions. This includes executable dependency tracking and literal wildcard ownership. The subsequent compiled CLI leak gate passes all 102 selected suites with actual ASAN/UBSAN instrumentation and leak detection. Current stream changes also pass all 28 WASM host and 96 program sanitizer tests, plus Go CLI sanitizer tests.
 
 Go's CLI compatibility tests initially failed AddressSanitizer during repeated
 command execution. Symbolization located reclaimed `Script.Items` and
@@ -90,3 +89,13 @@ the separate compiled CLI leak gate still verifies actual frees and retained
 allocations.
 
 The CLI harness now preserves sanitizer build flags when refreshing `build/kame.sanitize`. A forced harness rebuild was checked for `__asan_init`/report symbols and passed the 94-assertion parse matrix. The earlier run that replaced the executable with a checks-only binary is discarded as leak-gate evidence.
+
+The current compiled CLI gate completed with exit 0; its log is
+`build/review/cli-leak-gate-current.log`. `nm` finds `__asan_init` and
+`__asan_report_load1` both before and after the harness run. The command is the
+CLI conformance portion of `make test-leaks`, with
+`ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`, `UBSAN_OPTIONS=halt_on_error=1`, and
+`CLI_BIN=build/kame.sanitize` (absolute path). All 102 selected suites pass;
+`T013-03-meta-binary.sh` is intentionally excluded because it checks the debug
+artifact's metadata. This closes the compiled CLI verification gap, while the
+remaining specification/feature requirements still prevent release completion.

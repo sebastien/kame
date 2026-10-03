@@ -109,3 +109,9 @@ sanitizer tests pass; 1,000 unordered allocation/free cycles fit in 4 KiB.
 The original NUL recipe now forwards exactly 8,388,608 bytes and exits 0; its
 observed 1.530s is one run, not a comparative throughput benchmark. True heap
 exhaustion diagnostics remain a separate acceptance gap.
+
+The post-fix compiled CLI gate passes all 102 selected suites with ASAN/UBSAN
+and leak detection, with instrumentation verified before and after the run.
+Focused sanitizer coverage passes 28 WASM host tests and 96 program tests; Go
+CLI sanitizer tests pass too. These are ownership/correctness checks, without
+claims about production throughput or all remaining specification requirements.

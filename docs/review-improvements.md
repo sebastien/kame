@@ -100,14 +100,16 @@ lack implementation evidence.
 
 ## Latest verification
 
-A fresh `make test` passes the package, external example, Go CLI unit, and all
-100 shell conformance suites in the current checkout. Broad Clang
-AddressSanitizer passes all 359 portable package tests; the two external engine
-examples also pass with sanitizers. Go CLI sanitizer compatibility tests pass
+The earlier full `make test` passed package, external example, Go CLI unit, and
+all 100 shell conformance suites before optional includes and the live/large
+stream regressions were added. The broad Clang AddressSanitizer snapshot passed
+359 portable package tests; the two external engine examples passed too. Go CLI sanitizer compatibility tests pass
 with the explicit `GOGC=off` setting documented in spec 013. The compiled CLI
-LeakSanitizer conformance run remains a separate pending gate. These passing
-checks do not close A3, A4, order-only prerequisites, or other requirements still
-listed as remaining above.
+LeakSanitizer conformance now passes all 102 selected CLI suites under a
+verified ASAN/UBSAN binary; the debug-binary metadata suite is intentionally
+excluded. Current stream changes also pass 28 WASM host and 96 program sanitizer
+tests, plus Go CLI sanitizer tests. These checks do not close A3, A4, order-only
+prerequisites, or other requirements listed as remaining above.
 
 The live CLI stream boundary now has before-completion proof: T012-02 observes
 human/JSON stdout and stderr while a recipe remains blocked on a release file,
