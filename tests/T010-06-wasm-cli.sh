@@ -23,6 +23,34 @@ run() {
 	set -e
 }
 
+test-step "-C resolves relative explicit files in both option orders"
+mkdir -p "$work/project"
+cat > "$work/project/Makefile.kmk" <<'EOF'
+task default :
+	@(out "directory-ok\n")
+EOF
+for args in first last absolute discover plan; do
+	case "$args" in
+	first) invocation=(-C "$work/project" -f Makefile.kmk default) ;;
+	last) invocation=(-f Makefile.kmk -C "$work/project" default) ;;
+	absolute) invocation=(-C "$work/project" -f "$work/project/Makefile.kmk" default) ;;
+	discover) invocation=(-C "$work/project" default) ;;
+	plan) invocation=(do plan -C "$work/project" -f Makefile.kmk default) ;;
+	esac
+	run "${invocation[@]}"
+	wasm_status=$status
+	cp "$work/out" "$work/wasm-directory.out"
+	set +e
+	"$CLI_BIN" "${invocation[@]}" >"$work/native-directory.out" 2>"$work/native-directory.err"
+	native_status=$?
+	set -e
+	if [ "$wasm_status" = 0 ] && [ "$native_status" = 0 ] && cmp -s "$work/wasm-directory.out" "$work/native-directory.out"; then
+		test-ok "directory source parity: $args"
+	else
+		test-fail "directory source parity: $args wasm=$wasm_status native=$native_status"
+	fi
+done
+
 test-step "version and help do not require the module"
 run --version
 if [ "$status" = 0 ] && [ "$(cat "$work/out")" = "kame $(cat "$CLI_ROOT/VERSION")" ] && [ ! -s "$work/err" ]; then

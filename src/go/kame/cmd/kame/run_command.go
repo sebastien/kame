@@ -51,7 +51,15 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		name, text := input.Value, input.Value
 		if input.Kind == "file" || input.Kind == "discover" {
 			file := buildSource{}
-			if input.Kind == "discover" { file = loadBuildSource(buildArguments{Directory: inv.Directory, JSON: inv.JSON}, diagnosticWriter(out, errOut, inv.JSON), true) } else { file = readRunSource(name, diagnosticWriter(out, errOut, inv.JSON), input.Lang, inv.JSON) }
+			if input.Kind == "discover" {
+				file = loadBuildSource(buildArguments{Directory: inv.Directory, JSON: inv.JSON}, diagnosticWriter(out, errOut, inv.JSON), true)
+			} else if path.IsAbs(name) {
+				file = readRunSource(name, diagnosticWriter(out, errOut, inv.JSON), input.Lang, inv.JSON)
+			} else {
+				resolved := path.Join(mem.System, inv.Directory, name)
+				file = readRunSource(resolved, diagnosticWriter(out, errOut, inv.JSON), input.Lang, inv.JSON)
+				mem.FreeString(mem.System, resolved)
+			}
 			loaded = slices.Append(mem.System, loaded, file)
 			if file.Status != 0 { freeRunInputs(fragments, storage, names); return 1 }
 			for j := range file.Parts {

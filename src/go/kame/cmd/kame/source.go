@@ -52,7 +52,12 @@ func loadBuildSource(options buildArguments, errOut io.Writer, reportMissing boo
 		return result
 	}
 	if options.File != "" {
-		return readBuildSource(options.File, errOut)
+		name := options.File
+		if path.IsAbs(name) { return readBuildSource(name, errOut) }
+		name = path.Join(mem.System, options.Directory, name)
+		result := readBuildSource(name, errOut)
+		mem.FreeString(mem.System, name)
+		return result
 	}
 	candidates := []string{"Makefile.kmk", "make.kmk", "src/kmk/main.kmk"}
 	for i := range candidates {

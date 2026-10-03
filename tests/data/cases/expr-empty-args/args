@@ -1,4 +1,6 @@
 do
+run
+--lang
 expr
 -c
 (join @* "-")

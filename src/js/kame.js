@@ -1592,8 +1592,8 @@ async function runSession(module, inv, sourceDirectory) {
       name = normalize(join(inv.directory || '.', source.name));
       text = source.text;
     } else if (input.kind === 'file') {
-      name = normalize(input.value);
-      try { text = await readFile(resolve(sourceDirectory, input.value), 'utf8'); }
+      name = isAbsolute(input.value) ? normalize(input.value) : normalize(join(inv.directory || '.', input.value));
+      try { text = await readFile(resolve(sourceDirectory, name), 'utf8'); }
       catch { return failure('FS_ERR', `cannot read source: ${input.value}`); }
     } else if (input.kind === 'stdin') { name = '<stdin>'; text = await readStdin(); }
     if (fileBacked && (input.lang === 'km' || input.lang === 'kmk')) {
@@ -1603,7 +1603,7 @@ async function runSession(module, inv, sourceDirectory) {
   }
   if (!inv.dryRun && inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1) {
     const input = inv.inputs[0];
-    if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'file' ? normalize(input.value) : '<command:1>', file: input.kind === 'file' ? resolve(sourceDirectory, input.value) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false);
+    if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'file' ? fragments[0].name : '<command:1>', file: input.kind === 'file' ? resolve(sourceDirectory, fragments[0].name) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false);
   }
   buildProgress = { active: 0, completed: 0, failed: 0 };
   return module.runSession(fragments, inv, contextFor(inv));

@@ -67,7 +67,7 @@ strictly better (dynamic glob dependencies, real file-rule freshness, cached
 | C3 | Automatic variables only partially mapped | Rule semantics | Low | `$@`/`$<`/`$^` only |
 | C4 | One-shell recipe vs Make's line-per-shell | Behavioural | Info | compatible here |
 | D1 | `do expr` capability-gated `wildcard` (needs `--allow-read`) | CLI/UX | Low | diagnostics only |
-| D2 | `-C` ignores a relative `-f` | CLI bug (KB-2) | Medium | not used here |
+| D2 | `-C` ignores a relative `-f` | CLI bug (KB-2), fixed | Medium → fixed | not used here |
 | D3 | No idioms/gotchas page | Docs | Medium | cost time |
 
 Severity is relative to "making a real project build faithfully on Kame", not
@@ -372,7 +372,8 @@ grant to add (it is close today).
 
 ### D2 — CLI inconsistencies
 
-**`-C` ignores a relative `-f`** is now confirmed and tracked as
+**`-C` ignores a relative `-f`** is fixed, with native/WASM regression tests in
+T009-02 and T010-06. The historical reproduction is tracked as
 [KAME-BUGS.md](KAME-BUGS.md) KB-2: `kame -C sub -f Makefile.kmk` fails with
 `FS_ERR: cannot read source: Makefile.kmk`, while `-f sub/Makefile.kmk -C sub`
 works. Capability-gated `wildcard` in `do expr` (D1) is intentional; the concat

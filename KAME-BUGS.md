@@ -5,17 +5,16 @@ features and design gaps live in `TODO-GAPS.md`; this file is only for behaviour
 that is wrong, not behaviour that is absent.
 
 Environment for all entries: Kame 0.1.0. KB-1 was recorded at revision around
-`2ef00c6` and is fixed in the current working-copy revision; KB-2 is verified
-against the current tree. "Verified" means the reproduction was run against
+`2ef00c6` and is fixed in the current working-copy revision; KB-2 is fixed; KB-3 is verified against the current tree. "Verified" means the reproduction was run against
 this tree.
 
-## Open
+## Fixed
 
 ### KB-2 — `-f` ignores `-C` when resolving a relative source path
 
 - **Severity:** medium
 - **Area:** CLI option handling (`cmd/kame`)
-- **Status:** open
+- **Status:** fixed
 - **Related:** `TODO-GAPS.md` D2
 
 GNU Make changes directory for `-C` before reading makefiles, so
@@ -31,8 +30,8 @@ kame -C sub -f Makefile.kmk default
 - **Expected:** builds `sub/Makefile.kmk`.
 - **Actual:** `error FS_ERR: cannot read source: Makefile.kmk`.
 
-**Workaround.** Qualify the path relative to the original directory, or drop
-`-f`:
+**Historical workaround (before the fix).** Qualify the path relative to the
+original directory, or drop `-f`:
 
 ```sh
 kame -f sub/Makefile.kmk -C sub default   # works
@@ -42,8 +41,11 @@ kame -C sub default                       # autodiscovery works
 The defect is specifically that `-C` does not affect resolution of a relative
 `-f`.
 
-**Regression tests to add.** `-C` with a relative `-f` in both option orders,
-plus `-C` with autodiscovery (already passing).
+**Verification.** `tests/T009-02-cli-source.sh` passes 53 assertions, including
+both option orders, absolute sources, inspection commands, and relative includes.
+`tests/T010-06-wasm-cli.sh` passes 21 assertions, including native/WASM parity
+for both option orders, absolute sources, autodiscovery, and planning. Both native
+source loaders and the JS unified runner resolve explicit sources beneath `-C`.
 
 ## Reported (needs confirmation)
 
@@ -52,8 +54,6 @@ plus `-C` with autodiscovery (already passing).
   confirms the first; KB-1 (the concat deadlock) is fixed. The capability-gated
   `wildcard` is intentional; only revisit if the denial does not name the grant
   to add.
-
-## Fixed
 
 ### KB-1 — `concat` of two non-empty wildcard globs deadlocked
 
@@ -93,3 +93,22 @@ coverage lives in `tests/T011-03-diag-context.sh` (`two_reads`, `two_globs`) and
 **Follow-up (not a hang).** A pattern replacement expansion still rejects a bare
 scalar (`(replace P 1 S)` → `PAT_INVALID`) while `(replace P "1" S)` works; that
 is tracked separately as `TODO-GAPS.md` B5.
+
+## Open
+
+### KB-3 — WASM discovered builds and inspections ignore includes
+
+- **Severity:** high
+- **Area:** JavaScript host source loading
+- **Status:** open
+
+A `Makefile.kmk` containing `include ./child.kmk` and a default recipe that
+references a definition from `child.kmk` works natively.
+`node dist/kame.js -C PROJECT default` instead fails `REF_MISSING`.
+`do plan -C PROJECT -f Makefile.kmk default` succeeds but reports spans from
+unexpanded text, differing from the native plan. Explicit file execution through
+the unified runner already expands includes. Shared inspection/build loading must
+expand them too and preserve authored source locations in diagnostics.
+
+Regression coverage must include primary autodiscovery, plan/graph/tools/cat,
+nested includes, cycles, and diagnostics from included files.

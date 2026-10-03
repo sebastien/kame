@@ -129,6 +129,22 @@ cli_expect_status 0
 cli_expect_stdout "Makefile.kmk
 "
 
+test-step "relative explicit sources resolve beneath -C in either option order"
+cli_run -- -C explicit -f make.kmk where
+cli_expect_status 0
+cli_expect_stdout $'make.kmk\n'
+cli_run -- -f make.kmk -C explicit where
+cli_expect_status 0
+cli_expect_stdout $'make.kmk\n'
+cli_run -- -C explicit -f "$(pwd)/explicit/make.kmk" where
+cli_expect_status 0
+cli_expect_stdout $'make.kmk\n'
+cli_run -- do plan -C explicit -f make.kmk where
+cli_expect_status 0
+cli_run -- -C includes -f Makefile.kmk default
+cli_expect_status 0
+cli_expect_stdout $'child\nincluded\n'
+
 test-step "positional .kmk operands select explicit sources"
 cli_run --dir explicit -- make.kmk where
 cli_expect_status 0
