@@ -63,6 +63,14 @@ func parseReplaceState(c *eval.Context, match core.Value, expansion core.Value, 
 		*out = state
 		return eval.Result{}
 	}
+	if expansion.Kind == core.Int || expansion.Kind == core.Float || expansion.Kind == core.Bool {
+		text, ok := stringValue(c.Run, expansion, false)
+		if ok {
+			state.constant = core.Value{Kind: core.String, Text: text}
+			*out = state
+			return eval.Result{}
+		}
+	}
 	if expansion.Kind == core.Pattern {
 		expanded := expr.ParsePatternText(c.Run, expansion.Text, 0)
 		if len(expanded.Diagnostics) != 0 || expanded.Pattern.Matchers != 0 || expanded.Pattern.References == 0 {
@@ -77,7 +85,7 @@ func parseReplaceState(c *eval.Context, match core.Value, expansion core.Value, 
 		return eval.Result{}
 	}
 	freeReplaceState(c.Run, state)
-	return ownedFailure(c.Run, "PAT_INVALID", "expansion must be a string or an expansion pattern")
+	return ownedFailure(c.Run, "PAT_INVALID", "expansion must be a string, number, bool, or expansion pattern")
 }
 
 func freeReplaceState(a mem.Allocator, state *replaceState) {

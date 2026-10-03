@@ -35,7 +35,7 @@ See the security and performance reviews for evidence and limitations.
 | Omit captured process output from causes | Implemented policy; do not reintroduce captured bytes in diagnostic wrapping. |
 | Literal wildcard paths | Remaining language work: recognize a wildcard resource in input position and keep a plain Kash wildcard literal. Define expression-path semantics without silently changing argv. |
 | Lazy singleton glob sources and future updates | Engine sources and canonical resource identities exist. Prove glob deduplication and membership freshness first; watcher delivery remains separate work. |
-| Captures in bare target names | Remaining parser/runtime work; reuse pattern matching and ambiguity rules, with exact targets taking precedence. |
+| Captures in bare target names | Already supported and verified by T014-02 on both hosts; exact targets take precedence and overlapping templates remain ambiguous. |
 | Required/optional target arguments | Remaining design/implementation: define argument binding, default evaluation, escaping, identity, and precedence with invocation args. Do not approximate with file outputs. |
 | Conditional forms | Kame lazy `if`/`and`/`or`/`match` and Kash control blocks exist. Rule declaration conditionals and gated includes remain a distinct gap (A4). |
 | Improved templates | Spec 016 defines directives, verbatim strings, rendering, and `do render`; T016 covers these. Audit all acceptance clauses rather than introducing unrelated delimiter syntax. |
@@ -74,7 +74,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | B2 concatenated wildcard deadlock | Fixed (KB-1); keep both native and WASM multi-read regressions. |
 | B3 multiple expression inputs | Already supported by the parser and now verified by T004-09 across multiple host-backed expressions, literal and interpolated paths. |
 | B4 header path interpolation | Implemented through shared template rendering for path and quoted input tokens; T004-09 pins planning, expanded inspection and execution parity. |
-| B5 scalar expansion/leading captures/bare captures | Separate parser, coercion, and target-matching changes. Preserve strict string operations and matcher/expansion classification tests. |
+| B5 scalar expansion/leading captures/bare captures | Implemented scalar expansion text and leading expression patterns. Bare target captures already existed; T014-02 verifies exact precedence and template ambiguity on both hosts. |
 | C1 forced file rebuild | `--force` is an existing invocation override. Document it; a persistent per-rule always-rebuild declaration is a separate requested escape hatch. |
 | C2 order-only prerequisites | Remaining rule semantics; maintain scheduling edges while excluding them from freshness/cache content identity where specified. |
 | C3 automatic variables | Existing selectors cover inputs/outputs. Newer-input and stem equivalents need precise freshness/capture definitions; directory extraction can use pure path operations. |

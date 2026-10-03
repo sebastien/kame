@@ -288,6 +288,12 @@ func TestPatternReplace(t *testing.T) {
 		t.Error("pattern replace did not expand positional captures")
 	}
 	result.Free(a)
+	result = evaluate(t, program, "(replace {name:*}.c 1 \"hello.c\")")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "1" { t.Error("leading pattern or integer expansion failed") }
+	result.Free(a)
+	result = evaluate(t, program, "(map (replace {*}.c :false) [\"a.c\" \"b.c\"])")
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "false" || result.Value.List[1].Text != "false" { t.Error("scalar replacement section failed") }
+	result.Free(a)
 	result = evaluate(t, program, "(replace ./src/{name:*}.c ./build/{name}.o \"./src/demo.c\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "./build/demo.o" {
 		t.Error("pattern replace did not expand named captures")

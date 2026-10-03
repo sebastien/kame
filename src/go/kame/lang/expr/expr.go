@@ -228,6 +228,10 @@ func (p *parser) expression() *Expr {
 		return p.paren()
 	case '[':
 		return p.list()
+	case '{':
+		e := p.path()
+		if e.Pattern == nil { p.error(start, p.pos, "expected a valid pattern group") }
+		return e
 	case '"':
 		return p.stringOrVerbatim()
 	case ':':

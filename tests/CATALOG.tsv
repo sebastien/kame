@@ -93,3 +93,4 @@ tests/T010-20-wasm-build-includes.sh	010	cli	Build and inspection includes, nest
 tests/T007-09-wildcard-union.sh	007	lib	Sorted multi-pattern unions, deduplication, independent dependency membership and native/WASM file input parity
 tests/T004-09-rule-header-composition.sh	004	lang	Mixed expression and interpolated rule inputs, quoted paths, expanded inspection and native/WASM ordering
 tests/T010-21-wasm-build-effects.sh	010	cli	Isolated binary yield and write publication, dependent recipe ordering, failures and atomic staging cleanup
+tests/T014-02-pattern-ergonomics.sh	014	lang	Leading pattern captures, numeric and boolean expansions, bare targets, exact precedence and template ambiguity on native/WASM

@@ -61,7 +61,7 @@ strictly better (dynamic glob dependencies, real file-rule freshness, cached
 | B2 | `concat` of two non-empty wildcard globs hung | Engine bug (KB-1) | Critical → fixed | `WASM_SOURCES` (workaround retained) |
 | B3 | Multiple expressions per rule header | Verified and covered | Medium → fixed | `WASM_SOURCES` + glue |
 | B4 | Path interpolation in rule headers (`@(VAR)/suffix`) | Parser/evaluator gap, fixed | Medium → fixed | all input paths |
-| B5 | Pattern expansion must be a string; bare targets cannot capture | Parser gap | Low | not used here |
+| B5 | Scalar expansions and leading/bare captures | Implemented and verified | Low → fixed | not used here |
 | C1 | No way to force-rebuild a file output (`.PHONY` equivalent) | Rule semantics | Low | GNU marks outputs phony |
 | C2 | No order-only prerequisites | Rule semantics | Low | not used here |
 | C3 | Automatic variables only partially mapped | Rule semantics | Low | `$@`/`$<`/`$^` only |
@@ -332,7 +332,13 @@ use, then classify the rendered value. Keep rejecting genuinely dynamic
 **Acceptance.** `./out : @(KAME_DIR)/cmd/kame/version_generated.go` resolves to
 `./src/go/kame/cmd/kame/version_generated.go` in `do plan`.
 
-### B5 — Pattern ergonomics
+### B5 — Pattern ergonomics (fixed)
+
+Pattern replacement expansions accept numbers and booleans as text. Expression
+patterns may start with a capture group. Bare target captures were already
+implemented and are now verified alongside exact-target precedence and ambiguity
+rejection. T014-02 covers both hosts; expression and operation sanitizer tests
+also pass. The historical report follows.
 
 **Reported, not re-verified here:** leading-capture patterns do not parse, and
 bare targets cannot capture (`TODO.md`). Separately verified: a pattern
@@ -437,7 +443,7 @@ Ordered by value-to-effort for porting real projects:
       `--tool` override.
 - [x] **B1** Multiple patterns / alternation for `wildcard`, or a `find`-style
       op with include/exclude.
-- [ ] **B5** Accept scalar pattern expansions; leading captures; captures on
+- [x] **B5** Accept scalar pattern expansions; leading captures; captures on
       bare targets.
 - [ ] **A6** Backslash line continuation in definitions.
 - [ ] **A5** Design computed-key definitions and rule emission (largest change).

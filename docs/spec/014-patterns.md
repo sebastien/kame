@@ -111,7 +111,8 @@ output produces an equivalent AST, and formatting is idempotent.
 
 ### Pattern Literals
 
-A pattern literal is a bare path atom or a quoted string without interpolation
+A pattern literal is a bare path atom, an atom starting with a pattern group,
+or a quoted string without interpolation
 whose text contains one or more pattern groups. Interpolated strings are never
 patterns. Runtime string values are never reclassified: a string computed by an
 expression and containing braces is a plain string.
@@ -253,3 +254,7 @@ requires a pattern literal or a pattern value.
 - A string operation given a pattern is `EXPR_INVALID`.
 - Formatting sections and patterns is idempotent and preserves section form.
 - Pattern and section tests under `mem.Tracker` leak no values.
+
+Pattern replacement expansions also accept integer, float and boolean values,
+converted to their ordinary `str` text. Collections, bytes, callable values and
+nil remain invalid expansions. This coercion does not alter literal string replace.

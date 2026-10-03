@@ -73,8 +73,8 @@ union; filter results with collection operations. `**` matches zero or more dire
 
 ## Patterns and expansions
 
-A replacement's expansion must be a string or an expansion pattern. Use
-`"1"`, not `1`, when the replacement is text:
+A replacement expansion may be a string, a number, a boolean, or an expansion
+pattern. Scalar expansions convert to text:
 
 ```sh
 kame do run --lang expr -c '(replace ./src/{name:*}.c "1" "./src/demo.c")'
@@ -83,8 +83,10 @@ kame do run --lang expr -c '(replace ./src/{name:*}.c "1" "./src/demo.c")'
 
 A missing pattern match returns `:nil`. Keep match patterns and expansion
 patterns distinct; their capture/reference groups have different roles.
-Leading and bare-target captures have remaining gaps documented in
-[TODO-GAPS.md](../TODO-GAPS.md).
+Patterns can start with a capture, and bare targets can capture: `{name:*}`
+or `aws-shell@{role-account}`. Exact targets win over templates; two matching
+templates remain ambiguous. Required/optional standalone target arguments are
+a separate remaining request in [TODO-GAPS.md](../TODO-GAPS.md).
 
 ## Inspection and reproducibility
 
