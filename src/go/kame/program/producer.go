@@ -206,7 +206,7 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		if !entry.FileContextReady {
 			entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node)
 		}
-		if hasYield(effects) && len(entry.Plan.Outputs) == 1 && !p.Forwarding && !entry.FileContextWanted {
+		if hasYield(effects) && len(entry.Plan.Outputs) == 1 && !p.Forwarding && !entry.FileContextWanted && !entry.Rule.Always {
 			entry.Plan.Freshness = p.yieldFreshness(entry, effects)
 		}
 	} else {

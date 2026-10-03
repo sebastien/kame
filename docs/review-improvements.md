@@ -161,3 +161,7 @@ normal and compiled sanitizer CLIs, including corrupt-record and replaced-output
 recovery. ASAN/UBSAN program tests pass all 99 cases. Existing file freshness,
 dependency, always-rule, declarative publication, native/WASM cache and catalog
 checks pass. The broad suite has not been rerun for this change.
+
+A follow-up fixes content-equal `yield` overriding `always` freshness on the
+native host. T006-03 now checks that an equal payload republishes an intentionally
+old output on both hosts; all 17 assertions pass.

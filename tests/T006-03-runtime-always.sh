@@ -21,6 +21,8 @@ always ./one ./two : ./input
 	cp @< ./one; cp @< ./two; printf m >> ./multi-runs
 always ./capture/{name}.txt : ./input
 	printf %s @(name) > @>; printf c >> ./capture-runs
+always ./yielded : ./input
+	@(yield "constant")
 always ./missing : ./input
 	true
 always :
@@ -47,6 +49,19 @@ for backend in native wasm; do
  "${runner[@]}" -C "$project" ./capture/alpha.txt >"$project/out" 2>"$project/err"
  "${runner[@]}" -C "$project" ./capture/beta.txt >"$project/out" 2>"$project/err"
  if [ "$(cat "$project/capture-runs")" = ccc ] && [ "$(cat "$project/capture/alpha.txt")" = alpha ] && [ "$(cat "$project/capture/beta.txt")" = beta ]; then test-ok "$backend capture instances rerun with their bound names"; else test-fail "$backend always capture semantics"; fi
+ test-step "$backend republishes content-equal always yields"
+ "${runner[@]}" -C "$project" ./yielded >"$project/out" 2>"$project/err"
+ python3 - "$project/yielded" <<'PYTIME'
+import os, sys
+os.utime(sys.argv[1], ns=(1000000000, 1000000000))
+PYTIME
+ "${runner[@]}" -C "$project" ./yielded >"$project/out" 2>"$project/err"
+ if python3 - "$project/yielded" <<'PYTIME'
+import os, sys
+assert os.stat(sys.argv[1]).st_mtime_ns != 1000000000
+assert open(sys.argv[1]).read() == 'constant'
+PYTIME
+ then test-ok "$backend always yields bypass content freshness"; else test-fail "$backend equal always yield was skipped"; fi
  test-step "$backend preserves planning and authored syntax"
  "${runner[@]}" do plan -C "$project" --json ./output >"$project/plan" 2>"$project/err"
  "${runner[@]}" do parse --lang script "$project/Makefile.kmk" >"$project/ast" 2>"$project/err"
