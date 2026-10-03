@@ -242,3 +242,20 @@ alignment, failed reallocation and 1,000 reuse cycles in a 4 KiB buffer.
 
 This fixes the stream-growth failure. Spec 010's separate requirement to turn
 true logical-heap exhaustion into an allocation-free diagnostic remains open.
+
+### KB-10 — Failed mixed WASM sessions report epoch-sized elapsed time
+
+- **Severity:** low
+- **Area:** human CLI summary
+- **Status:** fixed
+
+A mixed invocation such as `do run -c 'ignored = :nil' Makefile.kmk ./out`
+can fail its build entry because the value-first invocation lacks recipe
+capabilities. The WASM failure summary reported about 1.79 billion seconds
+elapsed: `runSession` reset progress counters but left the start clock at zero.
+Primary builds already initialized the clock.
+
+Mixed sessions now initialize both together before execution. The same
+reproduction reports an invocation-scale duration (0.047 s in the focused run).
+T017-07 checks a failed mixed-session summary is present and below 60 seconds;
+all 78 assertions pass with the compiled sanitizer CLI and WASM host.

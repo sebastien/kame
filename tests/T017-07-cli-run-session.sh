@@ -88,6 +88,15 @@ for backend in native wasm; do
 	reject CAP_DENIED do run -c 'name = "Ada"' "$work/process.kash" "$work/functions.km"
 	reject CAP_DENIED do run -c '$(printf denied)'
 	reject CAP_DENIED do run -c 'name = "Ada"' "$work/rules.kmk" build
+    if [ "$backend" = wasm ]; then
+        if python3 - "$work/err" <<'PYTIME'
+import re, sys
+text = open(sys.argv[1]).read()
+match = re.search(r'Summary: .* in ([0-9.]+)s', text)
+sys.exit(0 if match and 0 <= float(match.group(1)) < 60 else 1)
+PYTIME
+        then test-ok "WASM mixed-session failure summary uses invocation elapsed time"; else test-fail "WASM mixed-session summary clock"; fi
+    fi
 	reject CAPTURE_LIMIT do run --allow-run --capture-limit 1 -l expr -c '$(printf abc)'
 	reject RECIPE_FAIL do run -l expr --allow-run -c '"must-not-print"' -l kash -c '/bin/sh -c "exit 7"'
 	reject PARSE_ERR do run -l expr -c '(cat "a"' -c '"b")'

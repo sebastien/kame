@@ -1756,6 +1756,7 @@ async function runSession(module, inv, sourceDirectory) {
     if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'command' ? '<command:1>' : fragments[0].name, file: input.kind === 'file' ? resolve(sourceDirectory, fragments[0].name) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false, sourceDirectory);
   }
   buildProgress = { active: 0, completed: 0, failed: 0 };
+  buildStartedAt = Date.now();
   return module.runSession(fragments, inv, contextFor(inv));
 }
 
