@@ -133,6 +133,13 @@ intermediate published batch lists according to `002-engine.md`, but it never
 mutates an already published list or drops a terminal event. Sources are not
 asked to replay discarded values.
 
+CLI publication must honor the output sink's backpressure independently of
+private process capture limits. The Node host pauses publishing child pipes
+when either public stdout or stderr needs draining, and resumes them once both
+sinks are ready. Runtime stepping also waits for public drains, including cached
+output replay. Cancellation releases paused readers and waiters while terminating
+the child process group; timeout also releases killed readers so they can close.
+
 ## Host Work and Cancellation
 
 A waiting source records its node ID, generation, attempt, and host request ID.

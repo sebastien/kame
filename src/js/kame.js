@@ -26,6 +26,7 @@ function installSignals() {
     process.on(signal, () => {
       if (interruptedStatus) return;
       interruptedStatus = 128 + (osConstants.signals[signal] ?? 0);
+      syncOutputReaders();
       const reaped = [...activeChildren].map((child) => new Promise((resolve) => child.once('close', resolve)));
       for (const cancellation of invocationCancellations) cancellation.abort();
       for (const child of activeChildren) {
@@ -47,6 +48,40 @@ function installSignals() {
 function track(child) {
   activeChildren.add(child);
   child.once('close', () => activeChildren.delete(child));
+}
+
+// A blocked public sink must stop every publishing child pipe. One pair of
+// drain listeners serves concurrent children without accumulating listeners.
+const publishedReaders = new Set();
+const publicationWaiters = new Set();
+function syncOutputReaders() {
+  const blocked = stdout.writableNeedDrain || stderr.writableNeedDrain;
+  if (!blocked || interruptedStatus) for (const settle of publicationWaiters) settle();
+  for (const reader of publishedReaders) {
+    if (blocked && !interruptedStatus && !reader.stopped()) reader.stream.pause();
+    else reader.stream.resume();
+  }
+}
+function waitOutputReady(signal) {
+  if ((!stdout.writableNeedDrain && !stderr.writableNeedDrain) || interruptedStatus || signal?.aborted) return Promise.resolve();
+  return new Promise((resolveReady) => {
+    const settle = () => {
+      publicationWaiters.delete(settle);
+      signal?.removeEventListener('abort', settle);
+      resolveReady();
+    };
+    publicationWaiters.add(settle);
+    signal?.addEventListener('abort', settle, { once: true });
+  });
+}
+stdout.on('drain', syncOutputReaders);
+stderr.on('drain', syncOutputReaders);
+function publishReader(stream, publish, stopped) {
+  const reader = { stream, stopped };
+  publishedReaders.add(reader);
+  stream.on('data', (chunk) => { publish(chunk); syncOutputReaders(); });
+  stream.once('close', () => publishedReaders.delete(reader));
+  syncOutputReaders();
 }
 
 const STAGE = 2;
@@ -983,6 +1018,7 @@ class Module {
       const encoded = this.write(expression);
       if (this.exports.kame_wasm_expression_begin(instance, encoded.pointer, encoded.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
       for (;;) {
+        await waitOutputReady(context.signal);
         const state = this.exports.kame_wasm_step(instance);
         this.drainExpressionEffects(instance);
         if (state === 2) break;
@@ -1184,6 +1220,7 @@ class Module {
       const encoded = this.write(target);
       if (this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length) !== 0) throw this.compileFailure(instance, 'TGT_NO_RULE');
       for (;;) {
+        await waitOutputReady(context.signal);
         const state = this.exports.kame_wasm_step(instance);
         this.drainEvents(instance, context);
         if (state === 2) break;
@@ -1240,6 +1277,7 @@ class Module {
         for (;;) {
           context.timeoutMS = Number.isFinite(deadline) ? Math.max(1, Math.ceil(deadline - performance.now())) : 0;
           if (performance.now() >= deadline) throw Object.assign(new Error('invocation timed out'), { code: 'RECIPE_TIMEOUT' });
+          await waitOutputReady(context.signal);
           const state = this.exports.kame_wasm_step(instance);
           this.drainEvents(instance, context);
           this.drainExpressionEffects(instance);
@@ -1379,6 +1417,7 @@ function runArgvCapture(stages, context) {
         if (child.pid === undefined) continue;
         try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
       }
+      syncOutputReaders();
     };
     const cancelled = () => stop('EXEC_CANCELLED', 'invocation cancelled');
     context.signal?.addEventListener('abort', cancelled, { once: true });
@@ -1411,19 +1450,23 @@ function runArgvCapture(stages, context) {
         const cancel = configuration.timeoutMS > 0 ? processDeadline(configuration.timeoutMS, () => stop('RECIPE_TIMEOUT', 'stage timed out')) : () => {};
         timers.push(cancel);
         child.once('exit', cancel);
-        child.stderr.on('data', (chunk) => { if (context.onStderr) context.onStderr(chunk); else stderr.write(chunk); });
+        publishReader(child.stderr, (chunk) => { if (context.onStderr) context.onStderr(chunk); else stderr.write(chunk); }, () => failure !== null || context.signal?.aborted);
         child.once('error', () => stop('HOST_FAIL', 'cannot start process'));
         child.once('close', (status, signalName) => {
           results[i] = { status: status ?? 0, signal: osConstants.signals[signalName] ?? 0, outcome: 0 };
           remaining--;
           finish();
         });
-        if (i === stages.length - 1 && child.stdout !== null) child.stdout.on('data', (chunk) => {
-          if (context.stream) { context.onStdout(chunk); return; }
-          length += chunk.length;
-          if (length > limit) stop('CAPTURE_LIMIT', 'command substitution exceeded capture limit');
-          else if (failure === null) chunks.push(chunk);
-        });
+        if (i === stages.length - 1 && child.stdout !== null) {
+          const receive = (chunk) => {
+            if (context.stream) { context.onStdout(chunk); return; }
+            length += chunk.length;
+            if (length > limit) stop('CAPTURE_LIMIT', 'command substitution exceeded capture limit');
+            else if (failure === null) chunks.push(chunk);
+          };
+          if (context.stream) publishReader(child.stdout, receive, () => failure !== null || context.signal?.aborted);
+          else child.stdout.on('data', receive);
+        }
       }
     } catch { stop('HOST_FAIL', 'cannot start process'); }
     finally {
@@ -1549,23 +1592,23 @@ function runProcessAttempt(module, instance, script, context, request) {
     let timedOut = false;
     let timer = null;
     if (context.timeoutMS > 0) {
-      timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, context.timeoutMS);
+      timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } syncOutputReaders(); }, context.timeoutMS);
     }
-    const cancelled = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } };
+    const cancelled = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } syncOutputReaders(); };
     context.signal?.addEventListener('abort', cancelled, { once: true });
     if (context.signal?.aborted) cancelled();
-    child.stdout.on('data', (chunk) => {
+    publishReader(child.stdout, (chunk) => {
       const kept = Math.min(chunk.length, retain + 1 - outLength);
       if (kept > 0) { out.push(Buffer.from(chunk.subarray(0, kept))); outLength += kept; }
       module.processStream(instance, false, chunk, request);
       module.drainEvents(instance, context);
-    });
-    child.stderr.on('data', (chunk) => {
+    }, () => timedOut || context.signal?.aborted);
+    publishReader(child.stderr, (chunk) => {
       const kept = Math.min(chunk.length, retain + 1 - errLength);
       if (kept > 0) { err.push(Buffer.from(chunk.subarray(0, kept))); errLength += kept; }
       module.processStream(instance, true, chunk, request);
       module.drainEvents(instance, context);
-    });
+    }, () => timedOut || context.signal?.aborted);
     child.once('error', (error) => { failure = error; });
     child.once('close', (code, signalName) => {
       if (timer !== null) clearTimeout(timer);

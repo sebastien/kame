@@ -115,3 +115,14 @@ and leak detection, with instrumentation verified before and after the run.
 Focused sanitizer coverage passes 28 WASM host tests and 96 program tests; Go
 CLI sanitizer tests pass too. These are ownership/correctness checks, without
 claims about production throughput or all remaining specification requirements.
+
+An unread-pipe reproduction showed the Node host previously drained an 8 MiB
+recipe to completion while public stdout was blocked. Capture limits did not
+bound the writable publication queue. The host now pauses publishing child
+pipes when either public sink needs draining, and waits between runtime steps
+so cached replay cannot advance work behind a blocked sink. Resuming the reader
+publishes every byte. Cancellation releases paused readers and waits before
+reaping the child group; timeout kills the whole group and drains killed pipes.
+T012-04 covers stdout, stderr, JSON, direct argv, cached replay, cancellation and
+timeout with deliberately unread pipes. This establishes backpressure behavior,
+without a production latency or peak-memory benchmark claim.
