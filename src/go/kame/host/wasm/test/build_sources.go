@@ -106,6 +106,11 @@ func TestBuildSourceDescriptorRejectsOversizeAndOverflowingOffsets(t *testing.T)
 		t.Error("overflowing source offset accepted")
 	}
 	configured.Free(a)
+	configured = r.SetBuildSources([]byte(`{"sources":[{"name":"source.kmk","text":"x = 1","offset":2147483647}]}`))
+	if configured.Code != "PARSE_ERR" || len(r.BuildSources) != 0 {
+		t.Error("overflowing source end accepted")
+	}
+	configured.Free(a)
 	b := strings.NewBuilder(a)
 	b.WriteString(`{"sources":[{"name":"source.kmk","text":"`)
 	for i := 0; i < 65537; i++ {
@@ -118,4 +123,26 @@ func TestBuildSourceDescriptorRejectsOversizeAndOverflowingOffsets(t *testing.T)
 	}
 	configured.Free(a)
 	b.Free()
+}
+
+func TestBuildSourceDescriptorRejectsInvalidFieldTypes(t *testing.T) {
+	a := t.Allocator()
+	start := wasm.NewRuntime(a, "")
+	if start.Runtime == nil { t.Fatal("create runtime"); return }
+	r := start.Runtime
+	defer r.Free()
+	bad := []string{
+		`{"sources":[{"name":"source.kmk","text":"","offset":"1"}]}`,
+		`{"sources":[{"name":"source.kmk","text":1,"offset":0}]}`,
+		`{"sources":[{"name":"source.kmk","offset":0}]}`,
+		`{"sources":[{"name":1,"text":"","offset":0}]}`,
+	}
+	for i := range bad {
+		configured := r.SetBuildSources([]byte(bad[i]))
+		if configured.Code != "PARSE_ERR" || len(r.BuildSources) != 0 { t.Error("invalid source field accepted") }
+		configured.Free(a)
+	}
+	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"source.kmk","text":""}]}`))
+	if configured.Code != "" { t.Error("optional zero offset rejected") }
+	configured.Free(a)
 }

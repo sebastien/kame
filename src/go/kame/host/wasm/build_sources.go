@@ -26,13 +26,24 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 	}
 	total := 0
 	for i := range inputs {
+		valid, hasName, hasText := inputs[i].Kind == core.Record, false, false
+		for j := range inputs[i].Record {
+			field := inputs[i].Record[j]
+			if field.Key == "name" { hasName = true; if field.Value.Kind != core.String { valid = false } }
+			if field.Key == "text" { hasText = true; if field.Value.Kind != core.String { valid = false } }
+			if field.Key == "offset" && field.Value.Kind != core.Int { valid = false }
+		}
 		name := host.PayloadText(inputs[i], "name")
 		offset := host.PayloadInt(inputs[i], "offset")
-		if name == "" || offset < 0 || offset > 2147483647 {
+		if !valid || !hasName || !hasText || name == "" || offset < 0 || offset > 2147483647 {
 			r.freeBuildSources()
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build source fragment")}
 		}
 		text := host.PayloadText(inputs[i], "text")
+		if int64(len(text)) > 2147483647-offset {
+			r.freeBuildSources()
+			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "build source span exceeds instance range")}
+		}
 		if len(text) > 65536-total {
 			r.freeBuildSources()
 			return PureResult{Code: pureText(r.Alloc, "NO_MEMORY"), Message: pureText(r.Alloc, "build sources exceed instance capacity")}
