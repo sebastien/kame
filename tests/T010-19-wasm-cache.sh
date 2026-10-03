@@ -73,4 +73,19 @@ else
 	test-fail "after delete: runs=$(runs "$project")"
 fi
 
+test-step "cache publication replaces record symlinks without following them"
+record="$(find "$project/.kame/cache/host" -type f -print -quit)"
+printf marker >"$project/marker"
+rm -f "$record"
+ln -s "$project/marker" "$record"
+(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >/dev/null 2>&1
+if [ "$(cat "$project/marker")" = marker ] && [ ! -L "$record" ] && [ "$(runs "$project")" = 3 ]; then
+ test-ok "cache put preserves symlink target and replaces the record"
+else
+ test-fail "cache publication followed a symlink"
+fi
+(cd "$project" && node "$CLI_ROOT/dist/kame.js" cached) >/dev/null 2>&1
+if [ "$(runs "$project")" = 3 ]; then test-ok "published record is readable on the next invocation"; else test-fail "published record was not complete"; fi
+if find "$project" -name '.kame-write-*' -print -quit | grep -q .; then test-fail "cache publication leaked staging"; else test-ok "cache staging was cleaned"; fi
+
 test-end

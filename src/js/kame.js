@@ -7,8 +7,8 @@
 // is parsed by the shared portable `cli` package inside the module via
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
-import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { accessSync, closeSync, constants as fsConstants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdir, mkdtemp, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { accessSync, closeSync, constants as fsConstants, existsSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -524,13 +524,17 @@ function wildcardPaths(pattern) {
   return matches;
 }
 
-async function writeFileAtomic(name, data) {
+async function writeFileAtomic(name, data, durable = false) {
   const directory = dirname(name);
   await mkdir(directory, { recursive: true });
   const staging = await mkdtemp(join(directory, '.kame-write-'));
   try {
     const temporary = join(staging, 'output');
-    await writeFile(temporary, data, { flag: 'wx', mode: 0o644 });
+    const file = await open(temporary, 'wx', 0o644);
+    try {
+      await file.writeFile(data);
+      if (durable) await file.sync();
+    } finally { await file.close(); }
     await rename(temporary, name);
   } finally {
     await rm(staging, { recursive: true, force: true });
@@ -902,8 +906,7 @@ class Module {
     if (kind === 11) {
       try {
         const path = cacheEntryPath(key);
-        mkdirSync(dirname(path), { recursive: true });
-        writeFileSync(path, record);
+        await writeFileAtomic(path, record, true);
       } catch (error) {
         return this.completeFailure(instance, request, 'FS_ERR', `cannot write cache record: ${error.message}`);
       }

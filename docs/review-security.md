@@ -1,6 +1,6 @@
 # Security review
 
-Reviewed 2026-10-03. This review covers the native POSIX host, evaluation grants,
+Reviewed 2026-10-03; cache publication rechecked 2026-10-04. This review covers the native POSIX host, evaluation grants,
 JS/WASM forwarding, artifact writes, process cancellation, and diagnostic output.
 It is a source review with selected runtime reproductions, not a claim of complete
 memory-safety verification. Full repository verification remains in progress.
@@ -28,6 +28,7 @@ untrusted builds. Avoid describing `--allow-read=DIR` as a filesystem sandbox.
 | SEC-1 | High when output directories contain attacker-controlled entries | Non-durable native writes opened `OUTPUT.kame-write.tmp` directly, following a pre-created symlink and allowing concurrent writers to share staging data. | Fixed: exclusively create a unique sibling temporary, apply requested permissions, and rename only after successful write and close. |
 | SEC-2 | Trust-boundary limitation | Lexical roots permit symlink escape and executable grants do not constrain child effects. | Explicitly specified behavior; require host containment for hostile code. |
 | SEC-3 | Verification gap | The full sanitizer suite and all memory-ownership paths have not yet been verified in this review. | Keep release completion open until broad checks finish; targeted POSIX sanitizer tests pass. |
+| SEC-6 | High when cache directories contain attacker-controlled entries | WASM cache put followed an existing record symlink and overwrote its target. | Fixed: exclusive sibling staging, file sync, and rename; T010-19 preserves a public marker and verifies the published cache hit. |
 | SEC-5 | Atomic visibility | JS write requests previously used direct file writes. | Fixed: exclusive staging in a private sibling directory followed by rename; T010-21 covers bytes, zero length, failed publication and cleanup. |
 | SEC-4 | Low confidentiality limit | Live process streams, collected shell results, and explicit `out` remain observable, even though diagnostic causes omit captured output. | Intended: omission protects diagnostic serialization, not deliberate output. |
 
@@ -61,13 +62,14 @@ by spec 008.
 
 ## Verification
 
-- `cd src/go/kame && so test ./host/posix`: 20 tests pass, including staging
+- `cd src/go/kame && so test ./host/posix`: 21 tests pass, including staging
   symlink protection, output permissions, durable output, and temporary cleanup
   after a failed rename.
 - `cd src/go/kame && CC=clang so test -check=sanitize -panic=abort ./host/posix`:
-  20 tests pass with the atomic-write fix.
+  21 tests pass with the atomic-write fix.
 - Native/WASM public-marker symlink reproduction confirms the documented lexical
   grant boundary.
+- `tests/T010-19-wasm-cache.sh`: 9 assertions pass, including record-symlink replacement, marker preservation, readable cache replay, and staging cleanup.
 - Signal, pipeline, redirection, grant, and cancellation suites are part of the
   broader running conformance check; do not infer whole-suite success from the
   targeted results above.
