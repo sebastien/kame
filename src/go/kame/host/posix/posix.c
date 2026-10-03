@@ -663,8 +663,12 @@ void km_host_force_waitpid_failure(km_host *host) {
 
 void km_host_free(km_host *host) {
     if (!host) return;
-    for (int i = 0; i < host->len; i++) if (!host->processes[i].reaped) km_signal(&host->processes[i], SIGTERM);
-    poll(NULL, 0, KM_GRACE_MS);
+    bool terminating = false;
+    for (int i = 0; i < host->len; i++) if (!host->processes[i].reaped) {
+        km_signal(&host->processes[i], SIGTERM);
+        terminating = true;
+    }
+    if (terminating) poll(NULL, 0, KM_GRACE_MS);
     for (int i = 0; i < host->len; i++) {
         km_process *p = &host->processes[i];
         if (!p->reaped) {
