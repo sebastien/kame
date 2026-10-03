@@ -68,7 +68,7 @@ strictly better (dynamic glob dependencies, real file-rule freshness, cached
 | C4 | One-shell recipe vs Make's line-per-shell | Behavioural | Info | compatible here |
 | D1 | `do expr` capability-gated `wildcard` (needs `--allow-read`) | CLI/UX | Low | diagnostics only |
 | D2 | `-C` ignores a relative `-f` | CLI bug (KB-2), fixed | Medium → fixed | not used here |
-| D3 | No idioms/gotchas page | Docs | Medium | cost time |
+| D3 | No idioms/gotchas page | Docs, fixed | Medium → fixed | docs/idioms-and-gotchas.md |
 
 Severity is relative to "making a real project build faithfully on Kame", not
 to Kame's own roadmap. B2 was called Critical because it was a hang, not because
@@ -97,8 +97,8 @@ decision. The build instead embeds literal `$(mise where ...)` text in a
 definition and lets the recipe shell expand it:
 
 ```kame
-WASM_SDK = $(mise where asdf:mise-plugins/mise-wasi-sdk)/wasi-sdk
-WASM_CC  = @(WASM_SDK)/bin/clang
+WASM_SDK = "$(mise where asdf:mise-plugins/mise-wasi-sdk)/wasi-sdk"
+WASM_CC  = "@(WASM_SDK)/bin/clang"
 ```
 
 This works because `@()`/nested definitions render the `$(...)` through to the
@@ -379,7 +379,10 @@ T009-02 and T010-06. The historical reproduction is tracked as
 works. Capability-gated `wildcard` in `do expr` (D1) is intentional; the concat
 deadlock was KB-1 and is now fixed.
 
-### D3 — Docs omit the gotchas
+### D3 — Docs omit the gotchas (fixed)
+
+Added [docs/idioms-and-gotchas.md](docs/idioms-and-gotchas.md), with executed
+expression examples and explicit remaining syntax boundaries. Historical finding:
 
 The skill/reference docs cover the happy path but not: shell-text definitions
 (A1), header interpolation limits (B4), `$$`/literal-`$`
