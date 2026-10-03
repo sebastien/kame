@@ -67,34 +67,30 @@ func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
 	return out, nil
 }
 
-// WriteFileAtomic mirrors the two write disciplines the runtime uses: a plain
-// sibling temp plus rename for effects, and a synced unique temp plus rename
-// for the cache. Both remove their temporary on any failure.
+// WriteFileAtomic uses an exclusively created sibling temp so concurrent writes
+// cannot share a staging file or follow a pre-created staging symlink. Durable
+// cache writes also sync before rename. Failures remove the temporary.
 func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error {
 	_ = h
-	if !durable {
-		temporary := name + ".kame-write.tmp"
-		if err := os.WriteFile(temporary, data, os.FileMode(perm)); err != nil {
-			return err
-		}
-		if err := os.Rename(temporary, name); err != nil {
-			os.Remove(temporary)
-			return err
-		}
-		return nil
-	}
 	separator := strings.LastIndexByte(name, '/')
 	directory := "."
 	if separator >= 0 {
 		directory = name[:separator]
 	}
-	buffer := make([]byte, os.MaxPathLen)
+	if separator == 0 {
+		directory = "/"
+	}
+	buffer := make([]byte, len(directory)+len("/.kame-tmp-")+7)
 	f, err := os.CreateTemp(buffer, directory, ".kame-tmp-")
 	if err != nil {
 		return err
 	}
 	temporary := f.Name()
-	if _, err = f.Write(data); err == nil {
+	_, err = f.Write(data)
+	if err == nil {
+		err = os.Chmod(temporary, os.FileMode(perm))
+	}
+	if err == nil && durable {
 		err = f.Sync()
 	}
 	closeErr := f.Close()
