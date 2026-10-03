@@ -20,21 +20,15 @@ Related material:
 
 ## TL;DR
 
-Three things stop a 1:1 port of this build:
+The remaining porting gaps concern build configuration and declarations:
+`?=` and external overrides, target environments, tool-path resolution,
+conditional includes, generated declarations, and order-only prerequisites.
+The detailed acceptance clauses below track those requests.
 
-1. **No parse-time evaluation.** No `$(shell ...)`, no `?=`/CLI override, no
-   target-specific variables or `export` propagation.
-2. **Weaker source discovery.** `wildcard` is single-pattern and has no
-   alternation/extension union. (The obvious multi-glob composition *used to*
-   hang; that hang is fixed — see `KAME-BUGS.md` KB-1 — but the expressiveness
-   gap remains.)
-3. **Header composition limits.** Rule inputs cannot interpolate a variable
-   into a path, and at most one expression is allowed per header.
-
-Everything else in this Makefile is translation (path syntax, `default`,
-captures, one-shell recipes), not obstruction. Several Kame behaviours are
-strictly better (dynamic glob dependencies, real file-rule freshness, cached
-`task`s), so the port improves the graph while losing metaprogramming.
+Source discovery and header composition have been addressed: wildcard accepts
+multiple patterns, headers accept multiple expressions and interpolated paths,
+and declaration continuations preserve authored spans. The historical glob and
+relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 
 ## Scope and method
 
