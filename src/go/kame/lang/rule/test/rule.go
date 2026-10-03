@@ -84,3 +84,11 @@ func TestRuleRetainsTargetFormAndNormalizesCRLFRecipe(t *testing.T) {
 		t.Errorf("rule forms=%t/%t body=%d diagnostics=%d", result.Rule.Outputs[0].TargetForm != nil, result.Rule.Inputs[0].TargetForm != nil, len(result.Rule.Body), len(result.Diagnostics))
 	}
 }
+
+func TestWildcardInputRetainsAuthoredToken(t *testing.T) {
+ result := rule.ParseRule(t.Allocator(), "test.kmk", "default : ./src/**/*.c \"./literal*.c\"\n\techo ok")
+ defer result.Free()
+ if len(result.Diagnostics) != 0 || len(result.Rule.Inputs) != 2 || result.Rule.Inputs[0].Kind != rule.InputWildcard || result.Rule.Inputs[0].Template == nil || result.Rule.Inputs[1].Kind != rule.InputString {
+  t.Error("wildcard input classification or quoted literal changed")
+ }
+}

@@ -3,6 +3,7 @@ package rule
 
 import (
 	"kame/lang/source"
+ "kame/lang/expr"
 	"kame/lang/template"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
@@ -25,6 +26,7 @@ const (
 	InputTemplate
 	InputString
 	InputExpression
+ InputWildcard
 )
 
 type Target struct {
@@ -254,6 +256,10 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 			p.takeTargetDiagnostics(input.TargetForm.Diagnostics, span.Start)
 		} else if explicitPath(text) {
 			input.Kind = InputPath
+   if strings.ContainsAny(text, "*?[") {
+    input.Kind = InputWildcard
+    input.Template = wildcardInput(p.a, text, span)
+   }
 		} else if !validName(text) {
 			p.error(span.Start, span.End, "invalid rule input")
 		}
@@ -586,4 +592,20 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 	value := owned(a, b.String())
 	b.Free()
 	return value
+}
+
+// The authored token and spans remain intact; the evaluator shares wildcard's
+// existing capability checks and dependency tracking.
+func wildcardInput(a mem.Allocator, text string, span source.Span) *template.String {
+ call := mem.Alloc[expr.Expr](a)
+ call.Kind, call.Span = expr.Application, span
+ name := mem.Alloc[expr.Expr](a)
+ name.Kind, name.Text, name.Span = expr.Name, "wildcard", span
+ pattern := mem.Alloc[expr.Expr](a)
+ pattern.Kind, pattern.Text, pattern.Span = expr.Symbol, text, span
+ call.Items = slices.Append(a, call.Items, name, pattern)
+ value := mem.Alloc[template.String](a)
+ value.Alloc, value.Span = a, span
+ value.Parts = slices.Append(a, value.Parts, template.Part{Kind: template.Expression, Span: span, Expr: call})
+ return value
 }

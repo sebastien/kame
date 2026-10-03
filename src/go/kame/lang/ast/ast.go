@@ -519,6 +519,7 @@ func targetKind(k rule.TargetKind) string {
 	return "template"
 }
 func inputKind(k rule.InputKind) string {
+ if k == rule.InputWildcard { return "wildcard" }
 	if k == rule.InputName {
 		return "name"
 	}

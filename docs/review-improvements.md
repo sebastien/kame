@@ -33,7 +33,7 @@ See the security and performance reviews for evidence and limitations.
 | Target-scoped native tool resolution and `tools check` | Already implemented; keep unused missing tools harmless and checks free of recipe execution. |
 | WASM tool paths, computed checks, and host-dependent inspection | Existing tests cover the implementation; include-loaded declarations are covered by T010-20. |
 | Omit captured process output from causes | Implemented policy; do not reintroduce captured bytes in diagnostic wrapping. |
-| Literal wildcard paths | Remaining language work: recognize a wildcard resource in input position and keep a plain Kash wildcard literal. Define expression-path semantics without silently changing argv. |
+| Literal wildcard paths | Implemented for unquoted explicit rule-input paths: dependency-tracked wildcard expansion, recursive patterns and membership invalidation. Quoted inputs and plain Kash argv retain literal characters. T004-11 verifies both hosts. Expression-path shorthand remains a separate language decision. |
 | Lazy singleton glob sources and future updates | Engine sources and canonical resource identities exist. Prove glob deduplication and membership freshness first; watcher delivery remains separate work. |
 | Captures in bare target names | Already supported and verified by T014-02 on both hosts; exact targets take precedence and overlapping templates remain ambiguous. |
 | Required/optional target arguments | Remaining design/implementation: define argument binding, default evaluation, escaping, identity, and precedence with invocation args. Do not approximate with file outputs. |

@@ -157,7 +157,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 	index := p.instanceIndex(entry.Node)
 	hasExpression := false
 	for i := range entry.Rule.Inputs {
-		if entry.Rule.Inputs[i].Kind == rule.InputExpression || entry.Rule.Inputs[i].Kind == rule.InputString {
+		if entry.Rule.Inputs[i].Kind == rule.InputExpression || entry.Rule.Inputs[i].Kind == rule.InputString || entry.Rule.Inputs[i].Kind == rule.InputWildcard {
 			hasExpression = true
 			break
 		}
@@ -170,7 +170,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 	var resourceInputs []PlanInput
 	for i := range entry.Rule.Inputs {
 		input := entry.Rule.Inputs[i]
-		if input.Kind != rule.InputExpression && input.Kind != rule.InputString {
+		if input.Kind != rule.InputExpression && input.Kind != rule.InputString && input.Kind != rule.InputWildcard {
 			if input.Kind == rule.InputTemplate {
 				inputs = slices.Append(p.Alloc, inputs, renderInput(p.Alloc, input, entry.Captures))
 			} else {

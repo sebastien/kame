@@ -44,7 +44,7 @@ func (p *Program) Plan(target string) PlanResult {
 	}
 	for i := range selected.Rule.Inputs {
 		input := selected.Rule.Inputs[i]
-		if input.Kind == rule.InputExpression || input.Kind == rule.InputString {
+		if input.Kind == rule.InputExpression || input.Kind == rule.InputString || input.Kind == rule.InputWildcard {
 			plan.Freshness = Unknown
 			before := len(plan.Inputs)
 			if d := p.planInputExpression(input, &plan); d.Code != "" {
@@ -147,7 +147,7 @@ func (p *Program) expandPlan(target string, yield bool) PlanResult {
 
 func hasExpressionInput(r *rule.Rule) bool {
 	for i := range r.Inputs {
-		if r.Inputs[i].Kind == rule.InputExpression || r.Inputs[i].Kind == rule.InputString {
+		if r.Inputs[i].Kind == rule.InputExpression || r.Inputs[i].Kind == rule.InputString || r.Inputs[i].Kind == rule.InputWildcard {
 			return true
 		}
 	}

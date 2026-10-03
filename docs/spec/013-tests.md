@@ -233,3 +233,5 @@ paths in a directory containing spaces, repeated override precedence, missing
 tools before effects, plan metadata, and computed names in source sessions.
 The program resolver unit test counts lookups and checks tool/file dependency
 registration under AddressSanitizer.
+
+`T004-11-lang-wildcard-inputs.sh` covers first-class wildcard rule inputs, recursive expansion, empty matches, quoted literal paths, authored formatting, AST classification and membership invalidation on both hosts.

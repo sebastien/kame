@@ -404,7 +404,7 @@ OUTPUTS = OUTPUT-TARGET (WS+ OUTPUT-TARGET)*
 INPUTS = INPUT (WS+ INPUT)*
 OUTPUT-TARGET = NAME | PATH | TEMPLATE | QUOTED-PATH
 NAME-TARGET = NAME | NAME-TEMPLATE
-INPUT = NAME | PATH | TEMPLATE | QUOTED-STRING | "@(" EXPRESSION ")" | INTERPOLATED-PATH
+INPUT = NAME | PATH | WILDCARD-PATH | TEMPLATE | QUOTED-STRING | "@(" EXPRESSION ")" | INTERPOLATED-PATH
 ```
 
 Whitespace inside quoted strings and balanced input expressions does not split
@@ -412,6 +412,13 @@ header items. Each whole `@(EXPRESSION)` contributes a value independently;
 strings, resources, lists and nil are flattened in authored order. Quoted input
 tokens and interpolated paths such as `@(ROOT)/suffix` render one path through
 the shared template engine and retain dependencies of their expressions.
+An unquoted explicit path containing `*`, `?`, or `[` is a wildcard input.
+It lowers to the dependency-tracked `wildcard` operation, produces sorted files,
+and contributes no input when unmatched. Recursive `**` follows the library
+contract. Membership changes invalidate dependent output identity. Quoted paths
+retain literal wildcard characters, and Kash argv keeps its existing semantics.
+Formatting preserves the authored wildcard token; AST JSON marks it `wildcard`.
+
 A file rule may have multiple outputs. Phony tasks, cached tasks,
 and services have exactly one output target. `task` and `service` are reserved at
 the start of a header and the prefixed form is tested before the unprefixed form.
