@@ -3,6 +3,7 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/template"
@@ -79,6 +80,29 @@ func freeExternalValueState(a mem.Allocator, value any) {
 func produceExternalFile(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	_ = nodeID
 	state := c.Context().(*externalFileState)
+	if state.Program.Forwarding {
+		completion := c.Completion()
+		if completion.RequestID == 0 {
+			payload := host.FilePayload(c.Allocator(), host.OpExists, state.Name)
+			id := state.Program.Eval.Requests.Submit(c.NodeID(), c.Generation(), c.Attempt(), host.RequestReadFile, payload)
+			payload.Free(c.Allocator())
+			c.Submit(id)
+			return core.ProducerSubmitted
+		}
+		if completion.Diagnostic.Code != "" {
+			completion.Value.Free(c.Allocator())
+			c.Fail(completion.Diagnostic)
+			return core.ProducerFailed
+		}
+		exists := completion.HasValue && completion.Value.Kind == core.Bool && completion.Value.Bool
+		completion.Value.Free(c.Allocator())
+		if exists {
+			c.Publish(core.NewString(c.Allocator(), state.Name))
+		} else {
+			c.Publish(core.Value{Kind: core.Nil})
+		}
+		return core.ProducerCompleted
+	}
 	name := state.Program.canonicalTarget(state.Name, true)
 	result := state.Program.Host.Stat(name)
 	mem.FreeString(state.Program.Alloc, name)

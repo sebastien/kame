@@ -137,3 +137,32 @@ native nanosecond timestamps in its POSIX host on Linux and macOS layouts.
 `TestStatPreservesSubsecondModificationTimes` pins distinct timestamps within
 one second, for both Stat and Lstat. The POSIX sanitizer suite passes 21 tests;
 T013-04 now passes all 102 assertions, including immediate graph growth.
+
+### KB-5 — WASM declared file inputs checked the module memory filesystem
+
+- **Severity:** high
+- **Area:** forwarded build dependencies
+- **Status:** fixed
+
+A host wildcard returned existing files, but a file rule consuming them failed
+`TGT_NO_RULE`: external file producers and recipe preflight checked the empty
+in-module filesystem. Forwarded external file producers now request existence
+from the embedding host, and recipe preflight uses the completed dependency's
+value. A missing file remains an observed nil value and fails only when required.
+
+T007-09 passes 10 assertions including native/WASM shell recipes over union file
+inputs. The WASM host sanitizer suite passes 22 tests, including successful and
+missing declared file inputs with exactly one forwarded request.
+
+### KB-6 — WASM declarative file effects do not publish to the host filesystem
+
+- **Severity:** high
+- **Area:** forwarded build effects
+- **Status:** open
+
+A file recipe containing `yield` reports success but writes only into the module
+memory host. Primary execution leaves no output on disk, and `do cat` fails if
+another backend has not already created it. Native-first comparisons masked this
+failure by leaving the artifact behind. Verification must isolate output paths
+between backends and cover yielded bytes, explicit writes, host failures, and
+ordering before dependent recipes.

@@ -115,9 +115,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
                 mem.FreeString(p.Alloc, name)
                 return core.ProducerWaiting
             }
-			result := p.Host.Stat(name)
 			mem.FreeString(p.Alloc, name)
-			if !result.Exists {
+			if !dependency.Current || dependency.Latest.Kind == core.Nil {
 				p.failRule(c, state.Index, failure(p.Alloc, "TGT_NO_RULE", "required input does not exist: "+input))
 				return core.ProducerFailed
 			}

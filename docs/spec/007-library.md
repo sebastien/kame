@@ -156,7 +156,7 @@ Filesystem operations issue host requests and require capabilities:
 | `write` | `write` | Atomically write bytes or UTF-8 text |
 | `exists?` | `read` | Return whether a path exists |
 | `stat` | `read` | Return stable metadata record |
-| `wildcard` | `read` | Return sorted matching filesystem paths |
+| `wildcard` | `read` | Return the sorted, duplicate-free union of one or more filesystem patterns |
 
 `read`, `stat`, and `wildcard` register file or glob dependencies before
 returning. `exists?` also registers a dependency so creation or removal can
@@ -164,7 +164,10 @@ invalidate its consumer.
 
 Relative paths resolve against evaluation cwd. `wildcard` supports `*`, `?`,
 character classes, and recursive `**`. Results are canonical cwd-relative paths
-with `./` prefixes where possible, sorted by raw UTF-8 bytes.
+with `./` prefixes where possible, sorted by raw UTF-8 bytes. Each argument is
+a string pattern and retains its own glob dependency, including empty members.
+For example, `(wildcard ./src/**/*.go ./glue/**/*.c ./glue/**/*.h)`
+combines source extensions without shell discovery.
 
 `write` is immediate only in explicit expression execution. During build
 rendering it becomes a deferred effect committed during execution. It is

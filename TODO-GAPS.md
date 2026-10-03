@@ -57,7 +57,7 @@ strictly better (dynamic glob dependencies, real file-rule freshness, cached
 | A4 | No conditionals or conditional include | Missing feature | Medium | not used here |
 | A5 | No dynamic names (`$($(VAR))`) / `eval` / generated rules | Missing feature | Medium | not used here |
 | A6 | No line continuation, no multi-line `define` | Parser gap | Low | long `KAME_INPUTS` |
-| B1 | `wildcard` single-pattern; no alternation, extension union, `-type f` | Library gap | High | `WASM_SOURCES` |
+| B1 | `wildcard` pattern unions | Library gap, fixed | High → fixed | `WASM_SOURCES` |
 | B2 | `concat` of two non-empty wildcard globs hung | Engine bug (KB-1) | Critical → fixed | `WASM_SOURCES` (workaround retained) |
 | B3 | At most one expression per rule header | Parser gap | Medium | `WASM_SOURCES` + glue |
 | B4 | No path interpolation in rule headers (`@(VAR)/suffix`) | Parser gap | Medium | all input paths |
@@ -219,7 +219,14 @@ same definition/rule line). Low risk, high readability payoff.
 
 ## B. Source discovery and expression composition
 
-### B1 — `wildcard` is single-pattern and cannot express `find`
+### B1 — `wildcard` pattern unions (fixed)
+
+`wildcard` accepts one or more patterns and returns a sorted, duplicate-free
+union. Every member retains its dynamic glob dependency, including empty globs.
+T007-09 verifies native/WASM evaluation, operand diagnostics, recipe execution,
+and a membership change in the second pattern. Patterns still use the documented
+glob grammar; directory filtering is available through `stat` and predicates.
+The historical finding follows.
 
 **Symptom.** The GNU side discovers sources with:
 
@@ -407,7 +414,7 @@ Ordered by value-to-effort for porting real projects:
 
 - [x] **KB-1** (was B2) Fixed the `concat`-of-wildcards hang with per-operation
       read-request state; regression coverage in `T011-03` and `T010-13`.
-- [ ] **KB-2** Fix `-C` + relative `-f`; add CLI regression tests.
+- [x] **KB-2** Fix `-C` + relative `-f`; add CLI regression tests.
 - [ ] **B3** Allow multiple expressions/literals per rule header, flattening
       dependency edges.
 - [ ] **B4** Allow `@(VAR)/suffix` and other path interpolation in headers by
@@ -417,14 +424,14 @@ Ordered by value-to-effort for porting real projects:
       in cache fingerprints; restore `KAME_BUILD_MODE`.
 - [ ] **A1** Add a hermetic tool resolver (not general parse-time shell) and a
       `--tool` override.
-- [ ] **B1** Multiple patterns / alternation for `wildcard`, or a `find`-style
+- [x] **B1** Multiple patterns / alternation for `wildcard`, or a `find`-style
       op with include/exclude.
 - [ ] **B5** Accept scalar pattern expansions; leading captures; captures on
       bare targets.
 - [ ] **A6** Backslash line continuation in definitions.
 - [ ] **A5** Design computed-key definitions and rule emission (largest change).
 - [ ] **A4** Minimal `when`/`if` plus conditional include.
-- [ ] **D3** Add an "Idioms and gotchas" page to the skill/reference docs.
+- [x] **D3** Add an "Idioms and gotchas" page to the skill/reference docs.
 
 ## What is *not* a gap
 

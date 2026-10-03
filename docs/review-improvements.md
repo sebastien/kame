@@ -67,7 +67,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | A4 declaration conditionals/gated includes | Remaining; expression/Kash control flow does not conditionally register build declarations. Repeated nonrecursive includes are now legal, so the old blanket repeated-include prohibition is stale. |
 | A5 computed lookup/generated rules | Remaining design and implementation; record lookup is useful but does not by itself generate rule declarations. Preserve no-effects compilation. |
 | A6 continuations/multiline definitions | Remaining parser/formatter work; verbatim template literals do not prove general continued rule headers or definitions. |
-| B1 discovery unions/alternation/file filtering | Remaining; single-pattern glob plus collection filtering is a workaround. Prove union dependency membership and exclusion behavior. |
+| B1 discovery unions/alternation/file filtering | Pattern unions are implemented: sorted, duplicate-free results and independent glob dependencies; T007-09 covers native/WASM evaluation and membership changes. Directory filtering uses metadata predicates. |
 | B2 concatenated wildcard deadlock | Fixed (KB-1); keep both native and WASM multi-read regressions. |
 | B3 multiple expression inputs | Remaining: independently parse/evaluate/flatten each token with ordered dependencies; do not concatenate text into one accidental expression. |
 | B4 header path interpolation | Remaining: render path tokens from their Kame values and retain dynamic edges; reject invalid types precisely. |

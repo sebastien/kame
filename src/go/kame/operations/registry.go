@@ -33,7 +33,7 @@ func Register(r *eval.Registry) bool {
 		addCapability(r, "read", opRead, 1, 1, eval.Read) &&
 		addCapability(r, "exists?", opExists, 1, 1, eval.Read) &&
 		addCapability(r, "stat", opStat, 1, 1, eval.Read) &&
-		addCapability(r, "wildcard", opWildcard, 1, 1, eval.Read) &&
+		addCapability(r, "wildcard", opWildcard, 1, -1, eval.Read) &&
 		addCapability(r, "write", opWrite, 2, 2, eval.Write) &&
 		addCapability(r, "env", opEnv, 1, 1, eval.Env) &&
 		addCapability(r, "shell", opShell, 1, 2, eval.Run) &&

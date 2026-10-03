@@ -5,6 +5,8 @@ import (
 	"kame/host"
 	"kame/lang/eval"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
+	"solod.dev/so/strconv"
 )
 
 func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Result {
@@ -148,7 +150,52 @@ func opStat(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	return fileRequest(c, host.OpWildcard, v[0])
+	if len(v) == 1 {
+		return fileRequest(c, host.OpWildcard, v[0])
+	}
+	for i := range v {
+		if v[i].Kind != core.String {
+			return invalidArgument(c, v, i, "string")
+		}
+	}
+	// Each union member has its own replay identity, so a later suspension
+	// neither repeats earlier host reads nor consumes their completions.
+	var values []core.Value
+	for i := range v {
+		previous := c.CallPath
+		var digits [32]byte
+		index := strconv.Itoa(digits[:], i)
+		member := core.NewString(c.Run, previous+"/wildcard:"+index)
+		c.CallPath = member.Text
+		result := fileRequest(c, host.OpWildcard, v[i])
+		c.CallPath = previous
+		member.Free(c.Run)
+		if result.Waiting || result.Diagnostic.Code != "" {
+			freeValues(c, values)
+			return result
+		}
+		for j := range result.Value.List {
+			found := false
+			for k := range values {
+				if values[k].Text == result.Value.List[j].Text {
+					found = true
+					break
+				}
+			}
+			if !found {
+				values = slices.Append(c.Run, values, result.Value.List[j].Clone(c.Run))
+			}
+		}
+		result.Value.Free(c.Run)
+	}
+	for i := 1; i < len(values); i++ {
+		for j := i; j > 0 && values[j].Text < values[j-1].Text; j-- {
+			values[j], values[j-1] = values[j-1], values[j]
+		}
+	}
+	out := core.NewList(c.Run, values)
+	freeValues(c, values)
+	return eval.Result{Value: out}
 }
 func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
@@ -179,7 +226,9 @@ func writeBytes(c *eval.Context, path string, data []byte) eval.Result {
 		c.MarkPhaseInvalid()
 		return failure("PHASE_INVALID", "write is invalid while planning")
 	}
-	if c.Program != nil && c.Program.DryRun { return eval.Result{Value: core.Value{Kind: core.Nil}} }
+	if c.Program != nil && c.Program.DryRun {
+		return eval.Result{Value: core.Value{Kind: core.Nil}}
+	}
 	return request(c, host.RequestWriteFile, host.WritePayload(c.Run, path, data))
 }
 func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -208,7 +257,9 @@ func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 	if len(v) == 2 && v[1].Kind != core.Record {
 		return invalidArgument(c, v, 1, "record")
 	}
-	if c.Program != nil && c.Program.DryRun { return eval.Result{Value: core.NewString(c.Run, "")} }
+	if c.Program != nil && c.Program.DryRun {
+		return eval.Result{Value: core.NewString(c.Run, "")}
+	}
 	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text))
 }
 

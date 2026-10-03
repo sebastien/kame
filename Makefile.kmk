@@ -182,6 +182,7 @@ test-wasm : wasm-check
 	./tests/T010-18-wasm-clock.sh
 	./tests/T010-19-wasm-cache.sh
 	./tests/T010-20-wasm-build-includes.sh
+	./tests/T007-09-wildcard-union.sh
 
 # --- Formatting and cleanup -------------------------------------------------
 
