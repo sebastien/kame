@@ -77,3 +77,13 @@ by spec 008.
   targeted results above.
 
 The broad portable-package command `cd src/go/kame && CC=clang so test -check=sanitize -panic=abort ./...` passes all 359 tests across 16 packages. This includes executable dependency tracking and literal wildcard ownership. Full compiled CLI leak verification is a separate gate.
+
+Go's CLI compatibility tests initially failed AddressSanitizer during repeated
+command execution. Symbolization located reclaimed `Script.Items` and
+`Definition.Words` slices. Solod 0.4.0 allocates pointer-bearing structs as byte
+slices in its Go stubs; Go cannot scan those pointers, and its `slices.Append`
+stub bypasses the explicit allocator. `GOGC=off` makes the unchanged CLI tests
+pass. The Go compatibility gate now states that setting explicitly. This is a
+compatibility-test limitation, not evidence that compiled C ownership is safe;
+the separate compiled CLI leak gate still verifies actual frees and retained
+allocations.

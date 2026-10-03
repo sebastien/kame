@@ -235,3 +235,12 @@ The program resolver unit test counts lookups and checks tool/file dependency
 registration under AddressSanitizer.
 
 `T004-11-lang-wildcard-inputs.sh` covers first-class wildcard rule inputs, recursive expansion, empty matches, quoted literal paths, authored formatting, AST classification and membership invalidation on both hosts.
+
+The Go CLI unit-test sanitizer command uses `GOGC=off`. Solod 0.4.0's Go
+compatibility allocator stores structs in unscanned byte slices, while its Go
+`slices.Append` stub uses ordinary Go append. A slice reachable only through such
+a struct is invisible to Go's collector and can be reclaimed during sustained
+CLI churn. Disabling collection for this short-lived compatibility test preserves
+the explicit C lifetime model. It does not replace allocator tracking or the
+compiled CLI AddressSanitizer/LeakSanitizer gate, which run with the actual C
+allocator and remain mandatory.
