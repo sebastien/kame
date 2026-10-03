@@ -36,7 +36,7 @@ WASM_MAX_MEMORY = 67108864
 # metadata and this build file so any of them can invalidate a native binary.
 # The generated version file is named explicitly to match the GNU Makefile.
 KAME_SOURCES = (wildcard ./src/go/kame/**/*.go)
-KAME_INPUTS = (concat [./src/go/kame/cmd/kame/version_generated.go] KAME_SOURCES [./src/go/kame/go.mod ./src/go/kame/go.sum ./Makefile.kmk])
+KAME_INPUTS = (concat [./src/go/kame/cmd/kame/version_generated.go] KAME_SOURCES [./src/go/kame/go.mod ./src/go/kame/go.sum ./src/go/kame/cmd/kame/build_mode.h ./Makefile.kmk])
 
 # The wasm module links the portable runtime (every Go package except cmd/kame)
 # plus the handwritten ABI glue listed in the rule header. cmd/kame is excluded
@@ -62,20 +62,19 @@ version-source : ./src/go/kame/cmd/kame/version_generated.go
 
 # --- Native binaries --------------------------------------------------------
 #
-# The GNU Makefile sets a target-specific KAME_BUILD_MODE (debug/sanitize/
-# release) that reaches generate-version.sh. Kame has no target-specific
-# variables, so the generated version reports the default "development" mode.
+# Each native artifact embeds its own mode through compiler flags. Shared version
+# metadata remains target-independent, so switching modes does not rewrite it.
 ./build/kame.debug : @(KAME_INPUTS)
 	mkdir -p ./build
-	cd @(KAME_DIR) && so build -check=warn -o ../../../build/kame.debug ./cmd/kame
+	cd @(KAME_DIR) && CFLAGS="${CFLAGS:--O2} -DKAME_BUILD_MODE_DEBUG" so build -check=warn -o ../../../build/kame.debug ./cmd/kame
 
 ./build/kame.sanitize : @(KAME_INPUTS)
 	mkdir -p ./build
-	cd @(KAME_DIR) && CC=clang so build -check=sanitize -panic=abort -o ../../../build/kame.sanitize ./cmd/kame
+	cd @(KAME_DIR) && CC=clang CFLAGS="${CFLAGS:--O2} -DKAME_BUILD_MODE_SANITIZE" so build -check=sanitize -panic=abort -o ../../../build/kame.sanitize ./cmd/kame
 
 ./dist/kame : @(KAME_INPUTS)
 	mkdir -p ./dist
-	cd @(KAME_DIR) && CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
+	cd @(KAME_DIR) && CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
 
 # --- Cosmopolitan / APE -----------------------------------------------------
 
@@ -84,7 +83,7 @@ version-source : ./src/go/kame/cmd/kame/version_generated.go
 
 ./dist/kame.com : ./build/tools/cosmocc/bin/cosmocc @(KAME_INPUTS)
 	mkdir -p ./dist
-	cd @(KAME_DIR) && CC=@(abspath ./build/tools/cosmocc/bin/cosmocc) CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
+	cd @(KAME_DIR) && CC=@(abspath ./build/tools/cosmocc/bin/cosmocc) CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
 
 dist-ape : ./dist/kame.com
 

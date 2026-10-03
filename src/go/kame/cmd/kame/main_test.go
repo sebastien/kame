@@ -240,8 +240,8 @@ func TestHelpAndVersion(t *testing.T) {
 	}{
 		{[]string{"--help"}, "Usage:"},
 		{[]string{"-h"}, "Commands (kame do COMMAND):"},
-		{[]string{"--version"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode + ")\n"},
-		{[]string{"-V"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode + ")\n"},
+		{[]string{"--version"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode() + ")\n"},
+		{[]string{"-V"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode() + ")\n"},
 		{[]string{"--version", "--help"}, "Usage:"},
 	}
 	for _, test := range tests {

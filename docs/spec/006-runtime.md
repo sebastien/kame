@@ -223,8 +223,9 @@ Kame variables or perform evaluation during registration.
 
 File recipes with declared or inherited scoped values currently rebuild
 conservatively. Persisting environment identity alongside file freshness remains
-required before claiming unchanged scoped files skip execution. Per-artifact
-project build-mode metadata also remains an A3 acceptance requirement.
+required before claiming unchanged scoped files skip execution. The repository build
+uses compiler-bound artifact modes and target-independent generated metadata,
+so that separate A3 build-mode acceptance is covered by T013-05.
 
 ## Failure and Cancellation
 

@@ -24,8 +24,10 @@ expected-failure markers and no skipped assertions.
 | Sanitized package tests | `make test-sanitize` | allocator tracking and native memory safety |
 | Leak gate | `make test-leaks` | sanitized package tests plus the compiled CLI end-to-end suite |
 
-The end-to-end binary is always the checks-enabled debug build
-(`build/kame.debug`), never the release build.
+General end-to-end conformance uses the checks-enabled debug build
+(`build/kame.debug`); the leak gate selects `build/kame.sanitize`. T013-05 also
+inspects release artifact version metadata and uses the debug binary to verify
+unchanged repository build incrementality.
 
 ## Naming and layout
 
@@ -67,6 +69,10 @@ tests/
 ## Binary contract (`tests/lib-cli.sh`)
 
 - `KAME` points at `build/kame.debug`.
+- Repository artifacts report `debug`, `sanitize` and `release` according to their
+  compiler-bound mode. Shared generated source is target-independent; switching
+  mode alone does not change its bytes or timestamp. T013-05 checks real artifacts
+  and unchanged Kame file-output timestamps.
 - `cli_build` builds the default debug binary through `make
   build/kame.debug` only when it is missing or older than tracked sources,
   under a `flock` guard shared by concurrent runs. A caller-selected `CLI_BIN`

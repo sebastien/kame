@@ -274,7 +274,7 @@ func writeDoHelp(out io.Writer) {
 	io.WriteString(out, doHelpAfterCommands)
 }
 func writeVersion(out io.Writer) {
-	io.WriteString(out, "kame "+version+" ("+buildID+"; "+buildTime+"; "+buildMode+")\n")
+	io.WriteString(out, "kame "+version+" ("+buildID+"; "+buildTime+"; "+buildMode()+")\n")
 }
 
 func findCommand(name string) *commandSpec {

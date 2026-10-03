@@ -164,27 +164,23 @@ $(KAME_DIR)/cmd/kame/version_generated.go: VERSION tools/generate-version.sh
 version-source: $(KAME_DIR)/cmd/kame/version_generated.go
 
 KAME_SOURCES := $(shell find $(KAME_DIR) -type f -name '*.go')
-KAME_BUILD_INPUTS := $(KAME_DIR)/cmd/kame/version_generated.go $(KAME_SOURCES) $(KAME_DIR)/go.mod $(KAME_DIR)/go.sum Makefile
+KAME_BUILD_INPUTS := $(KAME_DIR)/cmd/kame/version_generated.go $(KAME_SOURCES) $(KAME_DIR)/go.mod $(KAME_DIR)/go.sum $(KAME_DIR)/cmd/kame/build_mode.h Makefile
 
-build/kame.debug: KAME_BUILD_MODE=debug
 build/kame.debug: $(KAME_BUILD_INPUTS)
 	mkdir -p build
-	cd $(KAME_DIR) && so build -check=warn -o ../../../build/kame.debug ./cmd/kame
+	cd $(KAME_DIR) && CFLAGS="$${CFLAGS:--O2} -DKAME_BUILD_MODE_DEBUG" so build -check=warn -o ../../../build/kame.debug ./cmd/kame
 
-build/kame.sanitize: KAME_BUILD_MODE=sanitize
 build/kame.sanitize: $(KAME_BUILD_INPUTS)
 	mkdir -p build
-	cd $(KAME_DIR) && CC=clang so build -check=sanitize -panic=abort -o ../../../build/kame.sanitize ./cmd/kame
+	cd $(KAME_DIR) && CC=clang CFLAGS="$${CFLAGS:--O2} -DKAME_BUILD_MODE_SANITIZE" so build -check=sanitize -panic=abort -o ../../../build/kame.sanitize ./cmd/kame
 
-dist/kame: KAME_BUILD_MODE=release
 dist/kame: $(KAME_BUILD_INPUTS)
 	mkdir -p dist
-	cd $(KAME_DIR) && CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
+	cd $(KAME_DIR) && CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
 
 build/tools/cosmocc/bin/cosmocc:
 	tools/provision-cosmocc.sh build/tools/cosmocc
 
-dist/kame.com: KAME_BUILD_MODE=release
 dist/kame.com: build/tools/cosmocc/bin/cosmocc $(KAME_BUILD_INPUTS)
 	mkdir -p dist
-	cd $(KAME_DIR) && CC=$(CURDIR)/build/tools/cosmocc/bin/cosmocc CFLAGS=-O3 so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
+	cd $(KAME_DIR) && CC=$(CURDIR)/build/tools/cosmocc/bin/cosmocc CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
