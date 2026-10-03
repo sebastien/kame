@@ -5,7 +5,7 @@ features and design gaps live in `TODO-GAPS.md`; this file is only for behaviour
 that is wrong, not behaviour that is absent.
 
 Environment for all entries: Kame 0.1.0. KB-1 was recorded at revision around
-`2ef00c6` and is fixed in the current working-copy revision; KB-2 is fixed; KB-3 is fixed. "Verified" means the reproduction was run against
+`2ef00c6` and is fixed in the current working-copy revision; KB-2 through KB-7 are fixed. "Verified" means the reproduction was run against
 this tree.
 
 ## Fixed
@@ -47,13 +47,12 @@ both option orders, absolute sources, inspection commands, and relative includes
 for both option orders, absolute sources, autodiscovery, and planning. Both native
 source loaders and the JS unified runner resolve explicit sources beneath `-C`.
 
-## Reported (needs confirmation)
+## Reviewed CLI follow-up
 
 - `TODO.md` reports a cluster of CLI/`do expr` inconsistencies (`-C` + relative
   `-f`, capability-gated `wildcard` in `do expr`, the concat deadlock). KB-2
   confirms the first; KB-1 (the concat deadlock) is fixed. The capability-gated
-  `wildcard` is intentional; only revisit if the denial does not name the grant
-  to add.
+  `wildcard` is intentional; its denial now names `--allow-read=ROOT`, with native/WASM regression coverage.
 
 ### KB-1 — `concat` of two non-empty wildcard globs deadlocked
 
@@ -68,13 +67,14 @@ Concatenating per-directory `wildcard` results is the natural way to translate
 the current tree completes it. Exact reproduction:
 
 ```sh
-timeout -s KILL 8 kame do expr --allow-read=. \
+timeout -s KILL 8 kame do run --lang expr --allow-read=. \
   -c '(count (concat (wildcard ./src/go/kame/cli/**/*.go) \
                      (wildcard ./src/go/kame/core/**/*.go)))'
 ```
 
-- **Expected and actual now:** `12` (2 cli + 10 core), exit 0, well under a
-  second.
+- **Expected and actual now:** the combined matched-file count, exit 0 without
+  hanging. The current checkout returns `17` on both native and WASM; this count
+  grows when source files are added.
 
 **Root cause.** Each read-only host request in `operations/host.go` was
 submitted without retaining its completion; a replay could resubmit or consume
@@ -90,9 +90,8 @@ variant completes (`kame -n`/`do plan` over the concatenated inputs). Regression
 coverage lives in `tests/T011-03-diag-context.sh` (`two_reads`, `two_globs`) and
 `tests/T010-13-wasm-tools.sh`.
 
-**Follow-up (not a hang).** A pattern replacement expansion still rejects a bare
-scalar (`(replace P 1 S)` → `PAT_INVALID`) while `(replace P "1" S)` works; that
-is tracked separately as `TODO-GAPS.md` B5.
+**Follow-up (fixed).** Pattern replacement expansion now accepts a bare scalar
+through text conversion. `TODO-GAPS.md` B5 records the fix and conformance coverage.
 
 ## Additional fixed source defects
 
