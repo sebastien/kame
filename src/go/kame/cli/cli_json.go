@@ -68,6 +68,8 @@ func WriteJSON(out io.Writer, inv *Invocation) {
 	e.Int(int64(inv.IndentWidth))
 	e.Str("inPlace")
 	e.Bool(inv.InPlace)
+	e.Str("comment"); e.Str(inv.Comment)
+	e.Str("defines"); writeStrings(&e, inv.Defines)
 	e.Str("check")
 	e.Bool(inv.Check)
 	e.Str("depth")

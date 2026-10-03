@@ -7,6 +7,7 @@ import (
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
+ "kame/lang/template"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
@@ -20,6 +21,9 @@ type Fragment struct {
 	Entries []string
 	Inline bool
 	SkipStatements bool
+ Comment string
+ Defines []string
+ Check bool
 	Offset int
 }
 
@@ -28,6 +32,7 @@ type SessionWork struct {
 	Target string
 	Selected bool
 	Value bool
+ Raw bool
 	ImplicitDefault bool
 }
 
@@ -114,6 +119,18 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 	valueDefinitions, ruleFragments, kashFragments := false, false, false
 	for i := range fragments {
 		f := fragments[i]
+  if f.Lang == "template" {
+   style := f.Comment
+   if style == "" && !f.Inline { inferred, ok := template.InferStyle(f.Name); if ok { style = inferred } else { style = "unknown" } }
+   doc := template.ParseDocumentRange(a, parsed.Source, offsets[i], offsets[i]+len(f.Text), style)
+   for j := range doc.Diagnostics { parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, doc.Diagnostics[j]) }
+   slices.Free(a, doc.Diagnostics); doc.Diagnostics = nil
+   root := templateBindings(a, doc.Root, f.Defines)
+   doc.Root = nil; doc.Free()
+   parsed.Items = slices.Append(a, parsed.Items, script.ScriptItem{Kind: script.Expression, Expression: root, Span: root.Span})
+   if !f.Check { work = slices.Append(a, work, SessionWork{Expression: root, Value: true, Raw: true}) }
+   continue
+  }
 		part := script.ParseFragment(a, parsed.Source, f.Lang, offsets[i], offsets[i]+len(f.Text))
 		for j := range part.Diagnostics { parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, part.Diagnostics[j]) }
 		slices.Free(a, part.Diagnostics)
@@ -215,7 +232,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 	return result
 }
 
-type statementState struct { Program *Program; Expression *expr.Expr }
+type statementState struct { Program *Program; Expression *expr.Expr; Raw bool }
 
 func freeSessionWork(a mem.Allocator, work []SessionWork) {
 	for i := range work { mem.FreeString(a, work[i].Target) }
@@ -236,6 +253,7 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	eval.FreeEffects(c.Allocator(), context.Effects)
 	if r.Waiting { r.Free(c.Allocator()); if c.Submitted() { return core.ProducerSubmitted }; return core.ProducerWaiting }
 	if r.Diagnostic.Code != "" { c.Fail(r.Diagnostic); r.Diagnostic = diagnostic.Diagnostic{}; r.Free(c.Allocator()); return core.ProducerFailed }
+	if state.Raw && r.Value.Kind == core.String { raw := core.NewBytes(c.Allocator(), []byte(r.Value.Text)); r.Value.Free(c.Allocator()); r.Value = raw }
 	c.Publish(r.Value)
 	r.Value = core.Value{}
 	r.Free(c.Allocator())
@@ -251,7 +269,7 @@ func (s *Session) Start(index int) HandleStart {
 	if w.Expression == nil { return s.Program.Start(w.Target) }
 	p := s.Program
 	state := mem.Alloc[statementState](p.Alloc)
-	state.Program, state.Expression = p, w.Expression
+	state.Program, state.Expression, state.Raw = p, w.Expression, w.Raw
 	var buffer [strconv.MaxIntBase10Len]byte
 	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<statement:"+strconv.Itoa(buffer[:], index)+">")
 	node := p.Engine.AddOwned(key, runStatement, state, freeStatement)

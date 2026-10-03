@@ -121,6 +121,7 @@ func freePresentationArgs(args []string) {
 }
 
 func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
+	if action == commandRender { return runRender(args, in, out, errOut) }
 	if action == commandRun { return runSession(args, in, out, errOut) }
 	if action == commandPlan {
 		return runPlan(args, out, errOut)
@@ -145,4 +146,10 @@ func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writ
 		return runFormat(args, in, out, errOut)
 	}
 	return runHelpCommand(args, out, errOut)
+}
+
+func runRender(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
+ inv := cli.Parse("render", args)
+ defer inv.Free()
+ return runParsedSession(inv, in, out, errOut)
 }

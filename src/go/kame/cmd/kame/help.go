@@ -215,6 +215,7 @@ const (
 	commandParse
 	commandFormat
 	commandRun
+	commandRender
 	commandHelp
 )
 
@@ -227,7 +228,8 @@ type commandSpec struct {
 }
 
 var doCommands = []commandSpec{
-	{Name: "run", TopSummary: "execute ordered source fragments in one session", DoSummary: "execute ordered source fragments in one session", Help: runHelpText, Action: commandRun},
+	{Name: "render", TopSummary: "render a document template", DoSummary: "render a document template", Help: "Usage: kame do render [-c TEXT | FILE] [--define NAME=VALUE]... [--comment STYLE] [--check] [--allow-read[=PATH]]\nRenders raw text without an added newline. No file reads stdin. Template reads need an explicit grant.\n", Action: commandRender},
+ 	{Name: "run", TopSummary: "execute ordered source fragments in one session", DoSummary: "execute ordered source fragments in one session", Help: runHelpText, Action: commandRun},
 	{Name: "plan", TopSummary: "print the resolved plan without executing", DoSummary: "print the resolved plan without executing", Help: planHelpText, Action: commandPlan},
 	{Name: "cat", TopSummary: "materialize one target and print its artifact", DoSummary: "materialize one target and print its artifact", Help: catHelpText, Action: commandCat},
 	{Name: "inputs", TopSummary: "list declared input paths", DoSummary: "list declared input paths (--depth N)", Help: inputsHelpText, Action: commandInputs},

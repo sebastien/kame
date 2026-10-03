@@ -95,3 +95,4 @@ tests/T004-09-rule-header-composition.sh	004	lang	Mixed expression and interpola
 tests/T010-21-wasm-build-effects.sh	010	cli	Isolated binary yield and write publication, dependent recipe ordering, failures and atomic staging cleanup
 tests/T014-02-pattern-ergonomics.sh	014	lang	Leading pattern captures, numeric and boolean expansions, bare targets, exact precedence and template ambiguity on native/WASM
 tests/T004-10-line-continuations.sh	004	lang	Continued definitions and headers, recipe backslashes, multiline verbatim values and native/WASM format idempotence
+tests/T016-01-render-cli.sh	016	cli	Raw document rendering, repeated string payloads, comment inference, parse-only checks and capability parity on native/WASM

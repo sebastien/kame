@@ -60,6 +60,7 @@ test-wasm: wasm-check
 	tests/T004-10-line-continuations.sh
 	tests/T010-21-wasm-build-effects.sh
 	tests/T014-02-pattern-ergonomics.sh
+	tests/T016-01-render-cli.sh
 	tests/T017-02-wasm-capture.sh
 	tests/T017-03-eval-pipelines.sh
 	tests/T017-04-eval-redirections.sh

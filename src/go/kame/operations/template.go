@@ -145,7 +145,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 				}
 				style = norm
 			} else {
-				inferred, ok := inferStyle(filePath)
+				inferred, ok := template.InferStyle(filePath)
 				if !ok {
 					freeArgCallables(c, v)
 					if contentOwned {
@@ -300,65 +300,9 @@ func isExplicitPath(text string) bool {
 	return false
 }
 
-func inferStyle(path string) (string, bool) {
-	// Extension after last dot in basename, case-insensitive.
-	baseStart := 0
-	for i := len(path) - 1; i >= 0; i-- {
-		if path[i] == '/' {
-			baseStart = i + 1
-			break
-		}
-	}
-	dot := -1
-	for i := baseStart; i < len(path); i++ {
-		if path[i] == '.' {
-			dot = i
-		}
-	}
-	if dot < 0 || dot+1 >= len(path) {
-		return "", false
-	}
-	ext := path[dot+1:]
-	return extStyle(ext)
-}
 
-func extStyle(ext string) (string, bool) {
-	if eqFoldExt(ext, "html") || eqFoldExt(ext, "htm") || eqFoldExt(ext, "xml") || eqFoldExt(ext, "svg") || eqFoldExt(ext, "vue") || eqFoldExt(ext, "md") || eqFoldExt(ext, "markdown") {
-		return "html", true
-	}
-	if eqFoldExt(ext, "c") || eqFoldExt(ext, "h") || eqFoldExt(ext, "cc") || eqFoldExt(ext, "cpp") || eqFoldExt(ext, "hpp") || eqFoldExt(ext, "java") || eqFoldExt(ext, "js") || eqFoldExt(ext, "mjs") || eqFoldExt(ext, "ts") || eqFoldExt(ext, "tsx") || eqFoldExt(ext, "jsx") || eqFoldExt(ext, "go") || eqFoldExt(ext, "rs") || eqFoldExt(ext, "css") || eqFoldExt(ext, "scss") || eqFoldExt(ext, "less") || eqFoldExt(ext, "php") || eqFoldExt(ext, "swift") || eqFoldExt(ext, "kt") {
-		return "c", true
-	}
-	if eqFoldExt(ext, "sh") || eqFoldExt(ext, "bash") || eqFoldExt(ext, "zsh") || eqFoldExt(ext, "yaml") || eqFoldExt(ext, "yml") || eqFoldExt(ext, "py") || eqFoldExt(ext, "rb") || eqFoldExt(ext, "toml") || eqFoldExt(ext, "ini") || eqFoldExt(ext, "conf") || eqFoldExt(ext, "properties") || eqFoldExt(ext, "pl") || eqFoldExt(ext, "r") {
-		return "hash", true
-	}
-	if eqFoldExt(ext, "sql") || eqFoldExt(ext, "lua") || eqFoldExt(ext, "hs") || eqFoldExt(ext, "elm") || eqFoldExt(ext, "ada") {
-		return "dash", true
-	}
-	if eqFoldExt(ext, "lisp") || eqFoldExt(ext, "clj") || eqFoldExt(ext, "cljs") || eqFoldExt(ext, "el") || eqFoldExt(ext, "scm") || eqFoldExt(ext, "asm") {
-		return "semi", true
-	}
-	if eqFoldExt(ext, "tex") || eqFoldExt(ext, "erl") || eqFoldExt(ext, "hrl") || eqFoldExt(ext, "m") {
-		return "percent", true
-	}
-	return "", false
-}
 
-func eqFoldExt(s string, lower string) bool {
-	if len(s) != len(lower) {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		b := s[i]
-		if b >= 'A' && b <= 'Z' {
-			b += 'a' - 'A'
-		}
-		if b != lower[i] {
-			return false
-		}
-	}
-	return true
-}
+
 
 func readFileBytes(c *eval.Context, path string) eval.Result {
     // Retain each completed read across nested include waits. Otherwise an outer

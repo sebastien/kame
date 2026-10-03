@@ -138,7 +138,7 @@ func readRunSource(name string, errOut io.Writer, lang string, json bool) buildS
 	// Text wraps Data backing (zero-copy string conversion in Solod):
 	// freeBuildSource frees Data only, Text never outlives it.
 	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), Data: data, OwnedName: true, Parent: -1})
-	if !expandIncludesLanguage(&result, 0, errOut, lang) { result.Status = 1 }
+	if lang == "template" { result.Parts = slices.Append(mem.System, result.Parts, sourcePart{Name: canonical, Text: string(data)}) } else if !expandIncludesLanguage(&result, 0, errOut, lang) { result.Status = 1 }
 	return result
 }
 

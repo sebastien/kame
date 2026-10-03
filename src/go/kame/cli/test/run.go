@@ -86,3 +86,15 @@ func TestRemovedExecutionCommandsGiveMigrationHelp(t *testing.T) {
 		inv.Free()
 	}
 }
+
+func TestRenderGrammarKeepsPayloadSourceAndCapabilities(t *testing.T) {
+ inv := cli.Parse("render", []string{"--define", "name=a=b", "--allow-read=./templates", "--comment=HTML", "--check", "page.md"})
+ defer inv.Free()
+ if !inv.OK || len(inv.Inputs) != 1 || inv.Inputs[0].Kind != "file" || inv.Inputs[0].Lang != "template" || !inv.NoDefaultGrants || !inv.Check || len(inv.Defines) != 1 || inv.Defines[0] != "name=a=b" || len(inv.Grants) != 1 { t.Error("render source, literal payload, or capability policy was lost") }
+ conflict := cli.Parse("render", []string{"-c", "", "page.md"})
+ defer conflict.Free()
+ if conflict.OK || conflict.Error.Code != "OPT_CONFLICT" { t.Error("empty inline source did not count as a source") }
+ stdin := cli.Parse("render", nil)
+ defer stdin.Free()
+ if !stdin.OK || len(stdin.Inputs) != 1 || stdin.Inputs[0].Kind != "stdin" { t.Error("render must default to stdin") }
+}

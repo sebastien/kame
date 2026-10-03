@@ -20,12 +20,15 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	inputs := host.PayloadList(value, "fragments")
 	for i := range inputs {
 		var entries []string
+  var defines []string
+  fields := host.PayloadList(inputs[i], "defines")
+  for j := range fields { defines = slices.Append(r.Alloc, defines, fields[j].Text) }
 		items := host.PayloadList(inputs[i], "entries")
 		for j := range items { entries = slices.Append(r.Alloc, entries, items[j].Text) }
-		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0}
-		if f.Lang != "km" && f.Lang != "kmk" && f.Lang != "kash" && f.Lang != "expr" {
-			for j := range fragments { slices.Free(r.Alloc, fragments[j].Entries) }
-			slices.Free(r.Alloc, entries); slices.Free(r.Alloc, fragments)
+		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0, Comment: host.PayloadText(inputs[i], "comment"), Defines: defines, Check: host.PayloadInt(inputs[i], "check") != 0}
+		if f.Lang != "km" && f.Lang != "kmk" && f.Lang != "kash" && f.Lang != "expr" && f.Lang != "template" {
+			for j := range fragments { slices.Free(r.Alloc, fragments[j].Entries); slices.Free(r.Alloc, fragments[j].Defines) }
+			slices.Free(r.Alloc, defines); slices.Free(r.Alloc, entries); slices.Free(r.Alloc, fragments)
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid session language")}
 		}
 		fragments = slices.Append(r.Alloc, fragments, f)
@@ -35,16 +38,14 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: r.Environment, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0}
 	compiled := program.CompileSession(r.Alloc, fragments, r.Registry, options)
 	r.Host = nil
-	for i := range fragments { slices.Free(r.Alloc, fragments[i].Entries) }
+	for i := range fragments { slices.Free(r.Alloc, fragments[i].Entries); slices.Free(r.Alloc, fragments[i].Defines) }
 	slices.Free(r.Alloc, fragments)
 	if compiled.Session == nil {
-		if host.PayloadInt(value, "json") != 0 {
-			buffer := bytes.NewBuffer(r.Alloc, nil)
+		buffer := bytes.NewBuffer(r.Alloc, nil)
 			for i := range compiled.Diagnostics { program.WriteJSONDiagnostic(&buffer, compiled.Diagnostics[i]) }
 			r.EventJSONClear()
 			r.EventJSON = slices.Clone(r.Alloc, []byte(buffer.String()))
 			buffer.Free()
-		}
 		out := PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "cannot compile session")}
 		if len(compiled.Diagnostics) != 0 { out.Free(r.Alloc); out = PureResult{Code: pureText(r.Alloc, compiled.Diagnostics[0].Code), Message: pureText(r.Alloc, compiled.Diagnostics[0].Message), SpanStart: compiled.Diagnostics[0].Span.Start, SpanEnd: compiled.Diagnostics[0].Span.End} }
 		compiled.Free(r.Alloc)

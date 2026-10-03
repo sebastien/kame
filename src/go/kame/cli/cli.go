@@ -45,6 +45,8 @@ type Invocation struct {
 	IndentWidth      int
 	InPlace          bool
 	Check            bool
+	Comment          string
+	Defines          []string
 	Depth            int
 	Expand           bool
 	Targets          []string
@@ -72,6 +74,7 @@ func (inv *Invocation) Free() {
 	slices.Free(mem.System, inv.Targets)
 	slices.Free(mem.System, inv.Files)
 	slices.Free(mem.System, inv.Args)
+	slices.Free(mem.System, inv.Defines)
 	mem.FreeString(mem.System, inv.Error.Message)
 	*inv = Invocation{}
 }
@@ -103,6 +106,7 @@ func Parse(command string, args []string) Invocation {
 		parseBuild(&inv, args)
 		return inv
 	}
+	if command == "render" { parseRender(&inv, args); return inv }
 	if command == "fmt" {
 		parseFormat(&inv, args)
 		return inv
@@ -125,7 +129,7 @@ func Parse(command string, args []string) Invocation {
 }
 
 func isCommand(command string) bool {
-	return command == "" || command == "build" || command == "help" || command == "run" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt"
+	return command == "" || command == "build" || command == "help" || command == "run" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt" || command == "render"
 }
 
 // RemovedCommandMessage keeps native/WASM migration diagnostics identical.

@@ -65,7 +65,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 			for j := range file.Parts {
 				entries := input.Entries
 				if j+1 != len(file.Parts) { entries = nil }
-				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Lang: input.Lang, Entries: entries, Inline: j+1 != len(file.Parts), SkipStatements: len(input.Entries) != 0})
+				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Lang: input.Lang, Entries: entries, Inline: j+1 != len(file.Parts), SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
 			}
 			continue
 		} else if input.Kind == "stdin" {
@@ -78,7 +78,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 			name = cloneCommandText("<command:"+strconv.Itoa(buffer[:], i+1)+">")
 			names = slices.Append(mem.System, names, name)
 		}
-		fragments = slices.Append(mem.System, fragments, program.Fragment{Name: name, Text: text, Lang: input.Lang, Entries: input.Entries, Inline: input.Kind != "file"})
+		fragments = slices.Append(mem.System, fragments, program.Fragment{Name: name, Text: text, Lang: input.Lang, Entries: input.Entries, Inline: input.Kind != "file", Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
 	}
 	defer freeRunInputs(fragments, storage, names)
 	directory := inv.Directory

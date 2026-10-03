@@ -369,6 +369,7 @@ function usage() {
   stdout.write('  do tools        list globally referenced build tools\n');
   stdout.write('  do parse        parse a language file and print a JSON AST\n');
   stdout.write('  do fmt          format source in place (-i) or check it (-n)\n');
+  stdout.write('  do render       render a document template (--define, --comment, --check)\n');
   stdout.write('  do cat TARGET   materialize one target and print its artifact\n');
   stdout.write('  do help         show this help\n\n');
   stdout.write('Options: -f FILE  -c TEXT  -C DIR  -j N  -n  --force  -h  -V\n');
@@ -1623,10 +1624,11 @@ async function runSession(module, inv, sourceDirectory) {
       try { text = await readFile(resolve(sourceDirectory, name), 'utf8'); }
       catch { return failure('FS_ERR', `cannot read source: ${input.value}`); }
     } else if (input.kind === 'stdin') { name = '<stdin>'; text = await readStdin(); }
+    sourceTexts.set(name, text);
     if (fileBacked && (input.lang === 'km' || input.lang === 'kmk')) {
       const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang);
       for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], lang: input.lang, entries: j + 1 === parts.length ? input.entries : [], inline: j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
-    } else fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1 });
+    } else fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1, comment: inv.comment, defines: inv.defines, check: inv.check ? 1 : 0 });
   }
   if (!inv.dryRun && inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1) {
     const input = inv.inputs[0];
@@ -1853,7 +1855,7 @@ async function dispatch(module, inv, noArguments) {
     usage();
     return 0;
   }
-  if (inv.name === 'run') return runSession(module, inv, sourceDirectory);
+  if (inv.name === 'run' || inv.name === 'render') return runSession(module, inv, sourceDirectory);
   if (inv.name === 'parse') return runParse(module, inv);
   if (inv.name === 'fmt') return runFmt(module, inv);
   if (inv.name === 'plan') return runPlan(module, inv, sourceDirectory);

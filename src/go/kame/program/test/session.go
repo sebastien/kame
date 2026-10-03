@@ -85,3 +85,43 @@ func TestSessionDryRunEvaluatesWithoutEffectRequests(t *testing.T) {
 	if s.Program.Eval.Requests.Next().OK || len(s.Program.Pending) != 0 { t.Error("dry-run issued process/write requests") }
 	if s.Program.NextEvent().OK { t.Error("dry-run emitted a live output effect") }
 }
+
+func TestTemplateSessionPreservesPayloadAndAuthoredDiagnostics(t *testing.T) {
+ a := t.Allocator()
+ registry := eval.NewRegistry(a)
+ defer registry.Free()
+ operations.Register(registry)
+ fragments := []program.Fragment{{Name: "page.md", Lang: "template", Text: "Hello @(name)!", Defines: []string{"name=old", "name=\"new\""}}}
+ compiled := program.CompileSession(a, fragments, registry, program.Options{})
+ defer compiled.Free(a)
+ if compiled.Session == nil { t.Fatal("template compilation failed"); return }
+ s := compiled.Session
+ defer s.Free()
+ start := s.Start(0)
+ if start.Handle == nil { t.Fatal("template did not schedule"); return }
+ h := start.Handle
+ for j := 0; j < 100 && !h.Node.Current; j++ { s.Program.Tick(0) }
+ if !h.Node.Current || string(h.Node.Latest.Bytes) != "Hello \"new\"!" { t.Error("template payload changed type or escaping") }
+ h.Free()
+ bad := []program.Fragment{{Name: "bad.md", Lang: "template", Text: "<!-- @if(:true) -->\nmissing end", Check: true}}
+ rejected := program.CompileSession(a, bad, registry, program.Options{})
+ defer rejected.Free(a)
+ if rejected.Session != nil { rejected.Session.Free(); t.Error("parse-only mode accepted an unclosed block"); return }
+ if len(rejected.Diagnostics) == 0 { t.Fatal("missing template diagnostic"); return }
+ d := rejected.Diagnostics[0]
+ if d.Code != "TPL_BLOCK" || d.Source != "bad.md" || d.Span.Start != 0 { t.Error("template diagnostic lost authored source") }
+}
+
+func TestTemplateCheckNeverEvaluates(t *testing.T) {
+ a := t.Allocator()
+ registry := eval.NewRegistry(a)
+ defer registry.Free()
+ operations.Register(registry)
+ fragments := []program.Fragment{{Name: "<stdin>", Lang: "template", Text: "@(read ./secret)", Inline: true, Check: true}}
+ compiled := program.CompileSession(a, fragments, registry, program.Options{})
+ defer compiled.Free(a)
+ if compiled.Session == nil { t.Fatal("check evaluated a denied read"); return }
+ s := compiled.Session
+ defer s.Free()
+ if len(s.Work) != 0 || s.Program.Eval.Requests.Next().OK { t.Error("check scheduled template effects") }
+}
