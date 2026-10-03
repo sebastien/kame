@@ -164,4 +164,4 @@ checks pass. The broad suite has not been rerun for this change.
 
 A follow-up fixes content-equal `yield` overriding `always` freshness on the
 native host. T006-03 now checks that an equal payload republishes an intentionally
-old output on both hosts; all 17 assertions pass.
+old output on both hosts; all 18 assertions pass.
