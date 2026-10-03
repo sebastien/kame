@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/host"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
 )
 
 // Output verification belongs to the file rule, including recipes containing no
@@ -16,26 +17,41 @@ func (p *Program) verifyForwardOutputs(c *core.EngineContext, index int) core.Pr
 			return core.ProducerWaiting
 		}
 		entry.VerifyPending = false
-		exists := completion.HasValue && completion.Value.Kind == core.Bool && completion.Value.Bool
-		completion.Value.Free(c.Allocator())
 		if completion.Diagnostic.Code != "" {
+			completion.Value.Free(c.Allocator())
 			p.failRule(c, index, completion.Diagnostic)
 			return core.ProducerFailed
 		}
-		if !exists {
-			p.failRule(c, index, failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[entry.VerifyIndex]))
-			return core.ProducerFailed
+		for i := range entry.Plan.Outputs {
+			var timestamp int64
+			if completion.Value.Kind != core.List || i >= len(completion.Value.List) || !contextTime(completion.Value.List[i], &timestamp) {
+				completion.Value.Free(c.Allocator())
+				p.failRule(c, index, failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
+				return core.ProducerFailed
+			}
 		}
-		entry.VerifyIndex++
+		if entry.FileContextWanted {
+			var digest [32]byte
+			if contextRecord(entry.FileContextDigest[:], completion.Value.List, len(entry.Plan.Outputs), digest[:]) {
+				payload := host.CachePutPayload(p.Alloc, entry.FileContextKey[:], digest[:])
+				p.nextRequest++
+				p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCachePut, Payload: payload})
+			}
+		}
+		completion.Value.Free(c.Allocator())
+		entry.VerifyIndex = len(entry.Plan.Outputs)
 	}
 	if entry.VerifyIndex < len(entry.Plan.Outputs) {
-		name := p.canonicalTarget(entry.Plan.Outputs[entry.VerifyIndex], true)
-		payload := host.FilePayload(c.Allocator(), host.OpOutputExists, name)
-		mem.FreeString(p.Alloc, name)
-		id := p.Eval.Requests.Submit(c.NodeID(), c.Generation(), c.Attempt(), host.RequestReadFile, payload)
-		payload.Free(c.Allocator())
+		var names []string
+		for i := range entry.Plan.Outputs {
+			names = slices.Append(p.Alloc, names, p.canonicalTarget(entry.Plan.Outputs[i], true))
+		}
+		p.submitFileTimes(c, names)
+		for i := range names {
+			mem.FreeString(p.Alloc, names[i])
+		}
+		slices.Free(p.Alloc, names)
 		entry.VerifyPending = true
-		c.Submit(id)
 		return core.ProducerSubmitted
 	}
 	entry.VerifyOutputs = false

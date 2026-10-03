@@ -9,11 +9,6 @@ func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
 	if (plan.Rule != nil && plan.Rule.Always) || len(plan.Outputs) == 0 {
 		return Stale
 	}
- if plan.Rule != nil && len(plan.Rule.Environment) != 0 { return Stale }
- if node != nil {
-  index := p.instanceIndex(node)
-  if index >= 0 && p.Instances[index].ScopedEnvironment { return Stale }
- }
 	inputs := plan.Inputs
 	if plan.Resolved {
 		inputs = plan.ResolvedInputs

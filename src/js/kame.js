@@ -839,6 +839,17 @@ class Module {
         return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot stat file' : `cannot stat file: ${error.message}`);
       }
     }
+    if (kind === 20) {
+      let paths;
+      try { paths = JSON.parse(payload); } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid file metadata request'); }
+      if (!Array.isArray(paths) || paths.some((name) => typeof name !== 'string' || name.includes('\0'))) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid file metadata paths');
+      const times = [];
+      for (const name of paths) {
+        try { times.push((await stat(name, { bigint: true })).mtimeNs.toString()); }
+        catch { times.push(null); }
+      }
+      return this.completeJSON(instance, request, times);
+    }
     if (kind === 7 || kind === 17) {
       if (kind === 7 && !grants.read) return this.deny(instance, request, 'read');
       return this.completeJSON(instance, request, existsSync(payload));
@@ -1211,8 +1222,8 @@ class Module {
         if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
         else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
       }
-      const environment = Object.entries(process.env).filter(([name]) => name.startsWith('KAME_')).map(([name, value]) => `${name}=${value}`);
-      environment.push(...inv.environment.filter((entry) => entry.startsWith('KAME_')));
+      const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
+      environment.push(...inv.environment);
       const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0 }));
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
@@ -1710,8 +1721,8 @@ async function discoverBuildSource(module, inv, sourceDirectory) {
   if (source === null) return null;
   const name = inv.sourceName ?? (inv.command ? source.name : isAbsolute(source.name) ? normalize(source.name) : normalize(join(inv.directory || '.', source.name)));
   const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, false);
-  const environment = Object.entries(process.env).filter(([name]) => name.startsWith('KAME_')).map(([name, value]) => `${name}=${value}`);
-  environment.push(...inv.environment.filter((entry) => entry.startsWith('KAME_')));
+  const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
+  environment.push(...inv.environment);
   parts.defines = inv.defines;
   parts.toolOverrides = inv.toolOverrides;
   parts.environment = environment;

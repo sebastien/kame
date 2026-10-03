@@ -66,7 +66,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | --- | --- |
 | A1 tool discovery without arbitrary parse-time effects | Implemented: dependency-tracked `(tool NAME)`, repeatable `--tool NAME=PATH`, one resolver lookup per name, executable file dependencies, and plan metadata. T007-11 covers native/WASM parity; the counted resolver sanitizer test verifies reuse. |
 | A2 configuration defaults/overrides | Implemented: lazy `?=`, literal repeatable `--define`, and case-sensitive `KAME_<NAME>` environment values. Last CLI entry wins over environment and authored defaults; plan JSON reports effective provided values. T009-13 covers both hosts. |
-| A3 target-scoped environment/build mode | Recipe inheritance, overrides, shared conflicts and cached-task fingerprints are implemented. Per-artifact debug/release metadata and unchanged-build incrementality now pass T013-05. Scoped file freshness and expression/definition configuration remain. |
+| A3 target-scoped environment/build mode | Recipe inheritance, overrides, shared conflicts and cached-task fingerprints are implemented. Per-artifact debug/release metadata and unchanged-build incrementality now pass T013-05. Persistent scoped-file freshness now covers changed and removed settings; expression/definition configuration remains. |
 | A4 declaration conditionals/gated includes | Optional `include? PATH` is implemented and covered by T004-12 on both hosts. Declaration conditionals and gated includes remain: expression/Kash control flow does not conditionally register build declarations. Repeated nonrecursive includes are legal. |
 | A5 computed lookup / generators | Minimum lookup implemented through `get`; T007-10 pins typed configuration and planning parity. Optional generated declarations have a separate design proposal. |
 | A6 continuations/multiline definitions | Implemented backslash LF/CRLF declaration continuations, preserving authored offsets, physical comments and recipe escapes; T004-10 verifies native/WASM execution and formatter idempotence. |
@@ -150,3 +150,14 @@ assertions with leak detection and instrumentation verified. Four existing
 catalog/help/binary/environment conformance suites pass too. This closes A3's
 concrete repository build-mode example;
 it does not yet close general scoped-file freshness.
+
+Scoped-file freshness now persists digests bound to successful output timestamps.
+Native and WASM use the same portable decision with nanosecond host metadata.
+T006-06 extends the environment tests with unchanged, changed and removed-scope
+checks on isolated host fixtures. Expression/definition configuration remains open.
+
+The scoped-file change passes 31 native/WASM environment assertions both with
+normal and compiled sanitizer CLIs, including corrupt-record and replaced-output
+recovery. ASAN/UBSAN program tests pass all 99 cases. Existing file freshness,
+dependency, always-rule, declarative publication, native/WASM cache and catalog
+checks pass. The broad suite has not been rerun for this change.

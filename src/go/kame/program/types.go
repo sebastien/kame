@@ -278,6 +278,11 @@ type instance struct {
  EnvironmentClaimed bool
  ScopedEnvironment bool
  EnvironmentConflict bool
+ FileContext *fileContextState
+ FileContextReady bool
+ FileContextWanted bool
+ FileContextDigest [32]byte
+ FileContextKey [32]byte
 	Rule     *rule.Rule
 	Captures []template.CaptureValue
 	Node     *core.Node

@@ -293,6 +293,7 @@ func (p *Program) Free() {
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
   slices.Free(p.Alloc, p.Instances[i].Environment)
+  p.freeFileContext(p.Instances[i].FileContext)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)
 		mem.FreeString(p.Alloc, p.Instances[i].Script)
 		p.freeForwardEffects(p.Instances[i].ForwardEffects)

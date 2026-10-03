@@ -221,9 +221,14 @@ recipes; Kame definitions, `env` reads, tool lookup and expression-level process
 requests still use invocation configuration. Assignments do not introduce
 Kame variables or perform evaluation during registration.
 
-File recipes with declared or inherited scoped values currently rebuild
-conservatively. Persisting environment identity alongside file freshness remains
-required before claiming unchanged scoped files skip execution. The repository build
+File recipes with declared or inherited scoped values persist a fingerprint of
+the effective environment, rendered recipe and dependency paths. Records bind
+the fingerprint to the successful output timestamps, so changed settings,
+removed scope, missing records and externally replaced outputs require a rebuild.
+Unchanged scoped outputs skip execution when every file input is older. Hosts
+supply timestamps and opaque record storage; the portable runtime decides
+freshness. Records contain digests rather than environment values.
+The repository build
 uses compiler-bound artifact modes and target-independent generated metadata,
 so that separate A3 build-mode acceptance is covered by T013-05.
 

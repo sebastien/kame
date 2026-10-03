@@ -24,10 +24,13 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		slices.Free(p.Alloc, entry.CacheStderr)
 		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false
 		entry.cachePending = false
-  entry.EnvironmentConflict = false
+		entry.EnvironmentConflict = false
+		p.freeFileContext(entry.FileContext)
+		entry.FileContext = nil
+		entry.FileContextReady, entry.FileContextWanted = false, false
 		p.freeForwardEffects(entry.ForwardEffects)
 		entry.ForwardEffects = nil
-  entry.VerifyOutputs, entry.VerifyPending, entry.VerifyIndex = false, false, 0
+		entry.VerifyOutputs, entry.VerifyPending, entry.VerifyIndex = false, false, 0
 		if entry.Script != "" {
 			mem.FreeString(p.Alloc, entry.Script)
 			entry.Script = ""
@@ -44,7 +47,12 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service execution is not supported"))
 		return core.ProducerFailed
 	}
-	if entry.VerifyOutputs { return p.verifyForwardOutputs(c, state.Index) }
+	if entry.FileContext != nil {
+		return p.continueFileContext(c, state.Index)
+	}
+	if entry.VerifyOutputs {
+		return p.verifyForwardOutputs(c, state.Index)
+	}
 	if entry.ForwardEffects != nil {
 		return p.continueForwardEffects(c, state.Index)
 	}
@@ -55,7 +63,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			p.failRule(c, state.Index, c.Completion().Diagnostic)
 			return core.ProducerFailed
 		}
-		if entry.Rule.Kind == rule.FileRule && p.Forwarding { entry.VerifyOutputs = true; return p.verifyForwardOutputs(c, state.Index) }
+		if entry.Rule.Kind == rule.FileRule && p.Forwarding {
+			entry.VerifyOutputs = true
+			return p.verifyForwardOutputs(c, state.Index)
+		}
 		// When requests are forwarded, the embedding host owns the filesystem and
 		// reports recipe failures through the completion; the local synchronous
 		// output check cannot see files the host wrote.
@@ -71,6 +82,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			}
 		}
 		if entry.Rule.Kind == rule.FileRule {
+			p.saveNativeFileContext(entry)
 			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
 		} else {
 			c.Publish(core.Value{Kind: core.Nil})
@@ -82,10 +94,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	defer freeOwnedStrings(p.Alloc, inputs, resolvedInputs.Owned)
 	defer freeStrings(p.Alloc, resolvedInputs.DynamicInputs)
 	defer freePlanInputs(p.Alloc, resourceInputs, resolvedInputs.Owned)
- if p.Instances[state.Index].EnvironmentConflict {
-  p.failRule(c, state.Index, failure(p.Alloc, "ENV_CONFLICT", "shared prerequisite has a different recipe environment"))
-  return core.ProducerFailed
- }
+	if p.Instances[state.Index].EnvironmentConflict {
+		p.failRule(c, state.Index, failure(p.Alloc, "ENV_CONFLICT", "shared prerequisite has a different recipe environment"))
+		return core.ProducerFailed
+	}
 	if resolvedInputs.Waiting {
 		return core.ProducerWaiting
 	}
@@ -117,17 +129,17 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			}
 			resolved.Plan.Free(p.Alloc)
 			name := p.canonicalTarget(input, true)
-            key := core.ResourceKey{Kind: core.ResourceFile, Name: name}
-            dependency := p.Engine.Lookup(key)
-            if dependency == nil {
-                external := mem.Alloc[externalFileState](p.Alloc)
-                external.Program, external.Name = p, cloneText(p.Alloc, name)
-                dependency = p.Engine.AddOwned(key, produceExternalFile, external, freeExternalFileState)
-            }
-            if !p.prepareDependency(c, state.Index, dependency) {
-                mem.FreeString(p.Alloc, name)
-                return core.ProducerWaiting
-            }
+			key := core.ResourceKey{Kind: core.ResourceFile, Name: name}
+			dependency := p.Engine.Lookup(key)
+			if dependency == nil {
+				external := mem.Alloc[externalFileState](p.Alloc)
+				external.Program, external.Name = p, cloneText(p.Alloc, name)
+				dependency = p.Engine.AddOwned(key, produceExternalFile, external, freeExternalFileState)
+			}
+			if !p.prepareDependency(c, state.Index, dependency) {
+				mem.FreeString(p.Alloc, name)
+				return core.ProducerWaiting
+			}
 			mem.FreeString(p.Alloc, name)
 			if !dependency.Current || dependency.Latest.Kind == core.Nil {
 				p.failRule(c, state.Index, failure(p.Alloc, "TGT_NO_RULE", "required input does not exist: "+input))
@@ -164,29 +176,39 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	rendered := p.render(c, entry, inputs)
 	// Rendering may discover a file producer and grow the instance slice.
 	entry = &p.Instances[state.Index]
+	return p.finishRenderedRule(c, state.Index, rendered)
+}
+
+func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered renderResult) core.ProducerResult {
+	entry := &p.Instances[index]
+	if entry.Rule.Kind == rule.FileRule && !rendered.Waiting && rendered.Diagnostic.Code == "" && !entry.EnvironmentConflict && !entry.FileContextReady && !p.Options.DryRun {
+		return p.beginFileContext(c, index, rendered)
+	}
 	commands, effects, writePaths, d := rendered.Commands, rendered.Effects, rendered.WritePaths, rendered.Diagnostic
 	slices.Free(p.Alloc, entry.LineSpans)
 	entry.LineSpans = rendered.LineSpans
 	defer eval.FreeEffects(p.Alloc, effects)
 	defer freeStrings(p.Alloc, writePaths)
- if entry.EnvironmentConflict {
-  mem.FreeString(p.Alloc, commands)
-  d.Free(p.Alloc)
-  p.failRule(c, state.Index, failure(p.Alloc, "ENV_CONFLICT", "shared prerequisite has a different recipe environment"))
-  return core.ProducerFailed
- }
+	if entry.EnvironmentConflict {
+		mem.FreeString(p.Alloc, commands)
+		d.Free(p.Alloc)
+		p.failRule(c, index, failure(p.Alloc, "ENV_CONFLICT", "shared prerequisite has a different recipe environment"))
+		return core.ProducerFailed
+	}
 	if rendered.Waiting {
 		return core.ProducerWaiting
 	}
 	if d.Code != "" {
-		p.failRule(c, state.Index, d)
+		p.failRule(c, index, d)
 		return core.ProducerFailed
 	}
 	if entry.Rule.Kind == rule.FileRule {
-		entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node)
-        if hasYield(effects) && len(entry.Plan.Outputs) == 1 && !p.Forwarding {
-            entry.Plan.Freshness = p.yieldFreshness(entry, effects)
-        }
+		if !entry.FileContextReady {
+			entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node)
+		}
+		if hasYield(effects) && len(entry.Plan.Outputs) == 1 && !p.Forwarding && !entry.FileContextWanted {
+			entry.Plan.Freshness = p.yieldFreshness(entry, effects)
+		}
 	} else {
 		entry.Plan.Freshness = Stale
 	}
@@ -222,12 +244,12 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	}
 	if hasYield(effects) && commands != "" {
 		mem.FreeString(p.Alloc, commands)
-		p.failRule(c, state.Index, failureAt(p.Alloc, "OUTPUT_CONFLICT", yieldSpan(effects), "yield cannot be combined with shell commands"))
+		p.failRule(c, index, failureAt(p.Alloc, "OUTPUT_CONFLICT", yieldSpan(effects), "yield cannot be combined with shell commands"))
 		return core.ProducerFailed
 	}
 	if effectDiagnostic := validateEffects(p.Alloc, entry, effects); effectDiagnostic.Code != "" {
 		mem.FreeString(p.Alloc, commands)
-		p.failRule(c, state.Index, effectDiagnostic)
+		p.failRule(c, index, effectDiagnostic)
 		return core.ProducerFailed
 	}
 	if p.Options.DryRun {
@@ -238,10 +260,14 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	}
 	if p.SessionPolicy && commands != "" {
 		allowed := false
-		for i := range p.Options.Grants { if p.Options.Grants[i].Capability == eval.Run && len(p.Options.Grants[i].Names) == 0 { allowed = true } }
+		for i := range p.Options.Grants {
+			if p.Options.Grants[i].Capability == eval.Run && len(p.Options.Grants[i].Names) == 0 {
+				allowed = true
+			}
+		}
 		if !allowed {
 			mem.FreeString(p.Alloc, commands)
-			p.failRule(c, state.Index, failure(p.Alloc, "CAP_DENIED", "shell recipes require unrestricted run capability"))
+			p.failRule(c, index, failure(p.Alloc, "CAP_DENIED", "shell recipes require unrestricted run capability"))
 			return core.ProducerFailed
 		}
 	}
@@ -254,20 +280,23 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			pending.Effects = slices.Append(p.Alloc, pending.Effects, eval.Effect{Kind: effects[i].Kind, Span: effects[i].Span, Data: slices.Clone(p.Alloc, effects[i].Data)})
 		}
 		entry.ForwardEffects = pending
-		return p.continueForwardEffects(c, state.Index)
+		return p.continueForwardEffects(c, index)
 	}
 	if effectDiagnostic := p.commitEffects(entry, effects, writePaths, false); effectDiagnostic.Code != "" {
 		mem.FreeString(p.Alloc, commands)
-		p.failRule(c, state.Index, effectDiagnostic)
+		p.failRule(c, index, effectDiagnostic)
 		return core.ProducerFailed
 	}
-	return p.finishRecipe(c, state.Index, commands, hasYield(effects))
+	return p.finishRecipe(c, index, commands, hasYield(effects))
 }
 
 func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string, yielded bool) core.ProducerResult {
 	entry := &p.Instances[index]
 	if commands == "" {
-  if entry.Rule.Kind == rule.FileRule && !yielded && p.Forwarding { entry.VerifyOutputs = true; return p.verifyForwardOutputs(c, index) }
+		if entry.Rule.Kind == rule.FileRule && p.Forwarding {
+			entry.VerifyOutputs = true
+			return p.verifyForwardOutputs(c, index)
+		}
 		if entry.Rule.Kind == rule.FileRule && !yielded && !p.Forwarding {
 			for i := range entry.Plan.Outputs {
 				name := p.canonicalTarget(entry.Plan.Outputs[i], true)
@@ -281,6 +310,9 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 		}
 		if entry.Rule.Kind == rule.CachedTaskRule && entry.CacheReady && !p.Options.CacheDisabled {
 			p.cacheCommit(entry, nil, nil, false, false)
+		}
+		if entry.Rule.Kind == rule.FileRule && !p.Forwarding {
+			p.saveNativeFileContext(entry)
 		}
 		if entry.Rule.Kind == rule.FileRule && yielded {
 			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
@@ -316,8 +348,12 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	if p.Forwarding {
 		// The embedding host runs the recipe; correlation uses the node so the
 		// completion resumes this producer.
-  payload := core.Value{}
-  if entry.Rule.Kind == rule.FileRule || entry.ScopedEnvironment { payload = host.RecipeEnvironmentPayload(p.Alloc, entry.Script, entry.Plan.Outputs, entry.Environment) } else { payload = host.ProcessPayload(p.Alloc, entry.Script) }
+		payload := core.Value{}
+		if entry.Rule.Kind == rule.FileRule || entry.ScopedEnvironment {
+			payload = host.RecipeEnvironmentPayload(p.Alloc, entry.Script, entry.Plan.Outputs, entry.Environment)
+		} else {
+			payload = host.ProcessPayload(p.Alloc, entry.Script)
+		}
 		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestProcess, Payload: payload})
 		c.Submit(request.ID)
 		return core.ProducerSubmitted

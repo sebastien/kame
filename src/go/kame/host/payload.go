@@ -29,6 +29,7 @@ const (
 	OpRead      = "read"
 	OpExists    = "exists"
  OpOutputExists = "output-exists"
+ OpFileTimes = "file-times"
 	OpStat      = "stat"
 	OpWildcard  = "wildcard"
 )

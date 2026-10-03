@@ -41,7 +41,7 @@ dynamic-root : ; env "MODE=dynamic"
 retry : ; env "MODE=retry"
 	printf %s "$MODE" >> retry-log; if [ ! -e retry-marker ]; then touch retry-marker; exit 1; fi
 ./output : ./input ; env "MODE=debug"
-	printf %s "$MODE" > @>
+	printf %s "$MODE" > @>; printf x >> file-runs
 KMK
  test-step "$backend inherits values and applies local overrides"
  MODE=ambient "${runner[@]}" -C "$project" root plain > "$project/out" 2> "$project/err"
@@ -61,6 +61,27 @@ KMK
  printf source > "$project/input"
  MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/output")" = debug ]; then test-ok "$backend file recipe environment"; else test-fail "$backend file environment"; fi
+ test-step "$backend skips unchanged scoped file recipes"
+ MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/file-runs")" = x ]; then test-ok "$backend unchanged scoped file is fresh"; else test-fail "$backend unchanged scoped file rebuilt"; fi
+ test-step "$backend rebuilds when its scoped environment changes"
+ sed -i 's/env "MODE=debug"$/env "MODE=release"/' "$project/Makefile.kmk"
+ MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/file-runs")" = xx ] && [ "$(cat "$project/output")" = release ]; then test-ok "$backend changed file environment rebuilds"; else test-fail "$backend changed file environment stayed fresh"; fi
+ test-step "$backend rebuilds after removing the scoped environment"
+ sed -i 's/\(\.\/output : \.\/input\) ; env "MODE=release"/\1/' "$project/Makefile.kmk"
+ MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
+ MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/file-runs")" = xxx ] && [ "$(cat "$project/output")" = ambient ]; then test-ok "$backend scope removal rebuilds once"; else test-fail "$backend scope removal freshness"; fi
+ test-step "$backend rebuilds externally replaced scoped output"
+ printf replaced > "$project/output"
+ MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/file-runs")" = xxxx ] && [ "$(cat "$project/output")" = ambient ]; then test-ok "$backend replaced output invalidates context stamp"; else test-fail "$backend replacement context freshness"; fi
+ test-step "$backend rebuilds with a corrupt context record"
+ if [ "$backend" = native ]; then record_dir="$project/.kame/cache/file-context"; else record_dir="$project/.kame/cache/host"; fi
+ for record in "$record_dir"/*; do if [ "$(wc -c < "$record")" -eq 32 ]; then printf corrupt > "$record"; fi; done
+ MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/file-runs")" = xxxxx ]; then test-ok "$backend corrupt context stamp rebuilds"; else test-fail "$backend corrupt context accepted"; fi
  test-step "$backend inherits through dynamically discovered file producers"
  MODE=ambient "${runner[@]}" -C "$project" dynamic-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/dynamic-log")" = dynamic ]; then test-ok "$backend dynamic file producer inherits environment"; else test-fail "$backend dynamic producer environment"; fi
