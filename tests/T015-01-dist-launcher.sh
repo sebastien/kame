@@ -130,7 +130,7 @@ project="$root/project"
 mkdir -p "$project"
 sed 's|@KAME_VERSION@|9.9.9|' "$CLI_ROOT/Makefile.bootstrap" >"$project/Makefile"
 set +e
-out="$(cd "$project" && KAME_HOME="$root/bootcache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm make KAME="$project/bin/kame" hello 2>&1)"
+out="$(cd "$project" && KAME_HOME="$root/bootcache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm make --no-print-directory KAME="$project/bin/kame" hello 2>&1)"
 status=$?
 set -e
 if [ "$status" = 0 ] && [ "$out" = "wasm:hello" ] && [ -x "$project/bin/kame" ]; then

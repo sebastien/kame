@@ -24,9 +24,9 @@ EXAMPLES_DIR = ./examples
 # wasi-sdk is provisioned project-locally by Mise. Its LLVM bundle supplies
 # wasm-ld; unlike the asdf plugin shims, that binary lives beneath wasi-sdk/bin.
 # The `$(mise ...)` command substitution is left for the shell to expand.
-WASM_SDK = $(mise where asdf:mise-plugins/mise-wasi-sdk)/wasi-sdk
-WASM_CC = @(WASM_SDK)/bin/clang
-WASM_LD = @(WASM_SDK)/bin/wasm-ld
+WASM_SDK = "$(mise where asdf:mise-plugins/mise-wasi-sdk)/wasi-sdk"
+WASM_CC = "@(WASM_SDK)/bin/clang"
+WASM_LD = "@(WASM_SDK)/bin/wasm-ld"
 WASM_INITIAL_MEMORY = 16777216
 WASM_MAX_MEMORY = 67108864
 
