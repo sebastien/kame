@@ -201,6 +201,31 @@ Runtime execution emits:
 Events include target identity and enough source metadata for diagnostics.
 Direct streams are not truncated. Retained logs follow the configured byte cap.
 
+## Scoped Recipe Environments
+
+`target : prerequisites ; env "NAME=value" ...` attaches literal child-process
+environment assignments to a rule. Root recipes begin with the invocation's
+environment. Prerequisite recipes inherit the effective parent environment;
+their own assignments override inherited values. Later assignments to the same
+name win. Environments are immutable per active shared rule instance, and
+canonical ordering makes equivalent assignments share the same cache identity.
+A conflicting claim on a shared prerequisite returns `ENV_CONFLICT`, without
+including environment values in its diagnostic. A released instance can bind a
+new environment for a later root; unrelated roots retain their own environments.
+Native recipe retries and forwarded WASM recipes receive the same values.
+
+Cached-task execution fingerprints include the complete effective environment.
+Plan and AST JSON expose authored assignments, without publishing the ambient
+environment. This initial surface scopes shell recipes and their prerequisite
+recipes; Kame definitions, `env` reads, tool lookup and expression-level process
+requests still use invocation configuration. Assignments do not introduce
+Kame variables or perform evaluation during registration.
+
+File recipes with declared or inherited scoped values currently rebuild
+conservatively. Persisting environment identity alongside file freshness remains
+required before claiming unchanged scoped files skip execution. Per-artifact
+project build-mode metadata also remains an A3 acceptance requirement.
+
 ## Failure and Cancellation
 
 A failed dependency prevents dependent execution. Already running independent
@@ -238,6 +263,10 @@ bytes is a separate operation used by `cat`.
 - A discarded render commits no output effect.
 - Parent output directories are created before execution.
 - Successful commands that omit a declared output fail with `OUTPUT_MISSING`.
+- Scoped recipe environments inherit through prerequisites, apply local/last
+  overrides, isolate roots, and reject conflicting active shared contexts.
+- Equivalent assignment order shares a prerequisite; changing inherited values
+  invalidates a cached task while unchanged values reuse its record.
 - Bare tasks run every time; cached task syntax remains distinguishable.
 - Requests for two sibling outputs share one rule-instance execution.
 - `yield` atomically writes one output and rejects tasks or multiple outputs.

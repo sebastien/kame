@@ -207,6 +207,11 @@ func observeRenderDependency(value any, key core.ResourceKey) {
 		return
 	}
 	if resolved.Node != nil {
+  child := p.instanceIndex(resolved.Node)
+  if child >= 0 && !p.claimEnvironment(child, p.Instances[state.Index].Environment) {
+   p.Instances[state.Index].EnvironmentConflict = true
+   return
+  }
 		p.adoptTask(resolved.Node, p.Instances[state.Index].runEpoch)
 	}
 	entry := &p.Instances[state.Index]

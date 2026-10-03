@@ -406,7 +406,8 @@ service server : ./output
 ```
 
 ```text
-RULE = PREFIXED-RULE | ALWAYS-RULE | UNPREFIXED-RULE
+RULE = (PREFIXED-RULE | ALWAYS-RULE | UNPREFIXED-RULE) ENVIRONMENT?
+ENVIRONMENT = WS* ";" WS* "env" (WS+ QUOTED-ASSIGNMENT)+
 PREFIXED-RULE = ("task" | "service") WS+ NAME-TARGET WS* ":" (WS+ INPUTS)?
 ALWAYS-RULE = "always" WS+ OUTPUTS WS* ":" (WS+ INPUTS)?
 UNPREFIXED-RULE = OUTPUTS WS* ":" (WS+ INPUTS)?
@@ -449,6 +450,14 @@ verification. It is invalid on named/cached tasks or services. A standalone
 header `always :` remains an ordinary bare task named `always`. Formatting
 preserves the prefix; AST and plan JSON emit `always: true` when set. Runtime
 rerun and sharing semantics are specified in `006-runtime.md`.
+
+A header may end with `; env "NAME=value" ...`. Assignments must be literal
+quoted strings, with decoded escapes, no interpolation or NUL, and an ASCII
+name matching `[A-Za-z_][A-Za-z0-9_]*`. Empty values are valid. A semicolon
+inside a quoted input or balanced expression remains part of that input.
+Metadata is separate from prerequisite items and preserves its authored order
+in formatting and AST/plan JSON. Recipe inheritance, override precedence and
+shared-context failures are defined in `006-runtime.md`.
 
 Mixing path and name outputs is invalid. A target token such as `out.o` that is
 neither a valid name nor an explicit path is a parse error; the diagnostic

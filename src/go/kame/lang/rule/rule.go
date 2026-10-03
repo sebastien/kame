@@ -59,7 +59,15 @@ const (
 	ServiceRule
 )
 
+// EnvironmentAssignment retains authored spelling and a decoded literal value.
+type EnvironmentAssignment struct {
+ Text string
+ Value string
+ Span source.Span
+}
+
 type Rule struct {
+ Environment []EnvironmentAssignment
 	// Always bypasses freshness while preserving file-output semantics.
 	Always  bool
 	Span    source.Span
@@ -137,6 +145,8 @@ func FreeRule(a mem.Allocator, r *Rule) {
 		r.Inputs[i].TargetForm.Free()
 	}
 	slices.Free(a, r.Inputs)
+ for i := range r.Environment { mem.FreeString(a, r.Environment[i].Value) }
+ slices.Free(a, r.Environment)
 	for i := range r.Body {
 		r.Body[i].Template.Free()
 	}
@@ -190,6 +200,12 @@ func (p *parser) rule() *Rule {
 	leftStart, leftEnd := trim(p.s.Text, headerStart, colon)
 	rightStart, rightEnd := trim(p.s.Text, colon+1, headerEnd)
 	p.ruleTargets(r, leftStart, leftEnd)
+ metadata := topLevel(p.s.Text[rightStart:rightEnd], ';')
+ if metadata >= 0 {
+  metadata += rightStart
+  p.ruleEnvironment(r, metadata+1, rightEnd)
+  rightEnd = metadata
+ }
 	p.ruleInputs(r, rightStart, rightEnd)
 	p.classify(r)
 	p.recipe(r, lineEnd)
@@ -594,6 +610,11 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 		b.WriteByte(' ')
 		b.WriteString(r.Inputs[i].Text)
 	}
+ for i := range r.Environment {
+  if i == 0 { b.WriteString(" ; env") }
+  b.WriteByte(' ')
+  b.WriteString(r.Environment[i].Text)
+ }
 	for i := range r.Body {
 		b.WriteByte('\n')
 		if r.Body[i].Text != "" {

@@ -438,6 +438,11 @@ func (e *astEncoder) rule(value *rule.Rule) {
 	if value.Always {
 		e.Str("always"); e.Bool(true)
 	}
+ if len(value.Environment) != 0 {
+  e.Str("environment"); e.BeginArray()
+  for i := range value.Environment { e.Str(value.Environment[i].Value) }
+  e.EndArray()
+ }
 	e.Str("header")
 	e.span(value.Header)
 	e.Str("outputs")

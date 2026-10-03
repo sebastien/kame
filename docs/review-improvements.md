@@ -66,7 +66,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | --- | --- |
 | A1 tool discovery without arbitrary parse-time effects | Implemented: dependency-tracked `(tool NAME)`, repeatable `--tool NAME=PATH`, one resolver lookup per name, executable file dependencies, and plan metadata. T007-11 covers native/WASM parity; the counted resolver sanitizer test verifies reuse. |
 | A2 configuration defaults/overrides | Implemented: lazy `?=`, literal repeatable `--define`, and case-sensitive `KAME_<NAME>` environment values. Last CLI entry wins over environment and authored defaults; plan JSON reports effective provided values. T009-13 covers both hosts. |
-| A3 target-scoped environment/build mode | Remaining: inherited environment must affect execution and fingerprints; debug/release artifacts need correct metadata without generated-source churn. |
+| A3 target-scoped environment/build mode | Recipe inheritance, overrides, shared conflicts and cached-task fingerprints are implemented. Scoped file freshness, expression/definition configuration and per-artifact debug/release metadata remain. |
 | A4 declaration conditionals/gated includes | Optional `include? PATH` is implemented and covered by T004-12 on both hosts. Declaration conditionals and gated includes remain: expression/Kash control flow does not conditionally register build declarations. Repeated nonrecursive includes are legal. |
 | A5 computed lookup / generators | Minimum lookup implemented through `get`; T007-10 pins typed configuration and planning parity. Optional generated declarations have a separate design proposal. |
 | A6 continuations/multiline definitions | Implemented backslash LF/CRLF declaration continuations, preserving authored offsets, physical comments and recipe escapes; T004-10 verifies native/WASM execution and formatter idempotence. |
@@ -130,3 +130,14 @@ predates this new feature; focused sanitizer conformance and existing freshness
 regressions verify this change separately. The new 15-assertion native/WASM
 suite also passes against the compiled sanitizer CLI with leak detection enabled
 and ASAN symbols verified.
+
+The A3 recipe-environment foundation now passes 21 native/WASM assertions for
+inheritance, local/last overrides, root isolation, cached-task identity,
+equivalent assignment order, shared-context conflicts, dynamic file producers,
+retries, inspection and invalid-assignment preflight. The same suite passes with
+compiled CLI ASAN/UBSAN and leak detection; instrumentation is verified before
+and after execution. Rule parser and program sanitizer suites pass 11 and 99
+tests. Existing freshness, dependency, always-rule, cache, parser and catalog
+suites pass separately. This does not close A3: scoped file recipes currently
+rebuild conservatively, expression/definition configuration remains global, and
+per-artifact project build-mode metadata still needs implementation.

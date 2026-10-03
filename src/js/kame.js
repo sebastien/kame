@@ -904,6 +904,10 @@ class Module {
         try { for (const name of recipe.outputs) await mkdir(dirname(name), { recursive: true }); }
         catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot create output directory'); }
         payload = recipe.script;
+        if (recipe.environment !== undefined) {
+          if (!Array.isArray(recipe.environment) || recipe.environment.some((entry) => typeof entry !== 'string' || entry.includes('\0') || entry.indexOf('=') < 1)) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe environment');
+          context = { ...context, environment: recipe.environment };
+        }
       }
       if (context.streaming) {
         const detached = context.concurrent === true;

@@ -8,6 +8,11 @@ import (
 func (p *Program) definitionNode(name string) *core.Node { return p.Eval.Definition(name) }
 
 func (p *Program) prepareDependency(c *core.EngineContext, index int, dependency *core.Node) bool {
+ child := p.instanceIndex(dependency)
+ if child >= 0 && !p.claimEnvironment(child, p.Instances[index].Environment) {
+  p.failRule(c, index, failure(p.Alloc, "ENV_CONFLICT", "shared prerequisite has a different recipe environment"))
+  return false
+ }
 	p.adoptTask(dependency, p.Instances[index].runEpoch)
 	return p.addDependency(c, &p.Instances[index], dependency)
 }

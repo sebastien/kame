@@ -273,6 +273,11 @@ type pendingRequest struct {
 
 type registeredRule struct{ Rule *rule.Rule }
 type instance struct {
+ // Environment borrows strings from Options and parsed rules; owns the slice.
+ Environment []string
+ EnvironmentClaimed bool
+ ScopedEnvironment bool
+ EnvironmentConflict bool
 	Rule     *rule.Rule
 	Captures []template.CaptureValue
 	Node     *core.Node

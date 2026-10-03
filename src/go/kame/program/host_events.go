@@ -350,7 +350,7 @@ func (p *Program) complete(event host.ProcessEvent) {
 		if p.Options.CacheRetainBytes > retain {
 			retain = p.Options.CacheRetainBytes
 		}
-		request := host.ProcessRequest{ID: retryID, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+		request := host.ProcessRequest{ID: retryID, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 		if p.Host != nil && p.Host.Start(request) {
 			entry.retryCount++
 			node.HostRequestID = retryID

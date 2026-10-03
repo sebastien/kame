@@ -384,7 +384,7 @@ func (p *Program) encodeManifest(e *cacheEncoder, entry *instance, script string
 	e.appendU64(8)
 	appendCaptureSection(e, entry)
 	p.appendDynamicSection(e, entry)
-	p.appendExecutionSection(e, script)
+	p.appendExecutionSection(e, entry, script)
 	appendFormatSection(e)
 	p.appendInputSection(e, entry)
 	appendOperationSection(e, entry)
@@ -465,17 +465,15 @@ func (p *Program) appendDynamicSection(e *cacheEncoder, entry *instance) {
 	e.patchU64(at, start)
 }
 
-func (p *Program) appendExecutionSection(e *cacheEncoder, script string) {
+func (p *Program) appendExecutionSection(e *cacheEncoder, entry *instance, script string) {
 	at, start := e.beginSection("execution")
 	e.appendU64(uint64(len(p.Options.Shell)))
 	for i := range p.Options.Shell {
 		e.appendText(p.Options.Shell[i])
 	}
 	e.appendText(p.Options.Directory)
-	e.appendU64(uint64(len(p.Options.Environment)))
-	for i := range p.Options.Environment {
-		e.appendText(p.Options.Environment[i])
-	}
+	e.appendU64(uint64(len(entry.Environment)))
+ for i := range entry.Environment { e.appendText(entry.Environment[i]) }
 	e.appendText(script)
 	e.appendU64(uint64(p.Options.TimeoutMS))
 	e.appendU64(uint64(p.Options.RetryCount))

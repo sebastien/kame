@@ -118,6 +118,7 @@ meaning by themselves.
 | `TGT_NO_DEFAULT` | error | No target or value entry was requested and the required default is absent |
 | `TGT_NO_RULE` | error | No rule or source for target |
 | `TGT_AMBIG` | error | More than one rule instance matches |
+| `ENV_CONFLICT` | error | Active shared rule instance has a different recipe environment |
 | `DEP_CYCLE` | error | Dependency cycle |
 | `RECIPE_FAIL` | error | Recipe process exited unsuccessfully |
 | `RECIPE_TIMEOUT` | error | Recipe process timed out |

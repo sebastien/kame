@@ -24,6 +24,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		slices.Free(p.Alloc, entry.CacheStderr)
 		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false
 		entry.cachePending = false
+  entry.EnvironmentConflict = false
 		p.freeForwardEffects(entry.ForwardEffects)
 		entry.ForwardEffects = nil
   entry.VerifyOutputs, entry.VerifyPending, entry.VerifyIndex = false, false, 0
@@ -81,6 +82,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	defer freeOwnedStrings(p.Alloc, inputs, resolvedInputs.Owned)
 	defer freeStrings(p.Alloc, resolvedInputs.DynamicInputs)
 	defer freePlanInputs(p.Alloc, resourceInputs, resolvedInputs.Owned)
+ if p.Instances[state.Index].EnvironmentConflict {
+  p.failRule(c, state.Index, failure(p.Alloc, "ENV_CONFLICT", "shared prerequisite has a different recipe environment"))
+  return core.ProducerFailed
+ }
 	if resolvedInputs.Waiting {
 		return core.ProducerWaiting
 	}
@@ -164,6 +169,12 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	entry.LineSpans = rendered.LineSpans
 	defer eval.FreeEffects(p.Alloc, effects)
 	defer freeStrings(p.Alloc, writePaths)
+ if entry.EnvironmentConflict {
+  mem.FreeString(p.Alloc, commands)
+  d.Free(p.Alloc)
+  p.failRule(c, state.Index, failure(p.Alloc, "ENV_CONFLICT", "shared prerequisite has a different recipe environment"))
+  return core.ProducerFailed
+ }
 	if rendered.Waiting {
 		return core.ProducerWaiting
 	}
@@ -301,12 +312,12 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	}
 	entry.cacheStartedAt = p.Host.Now()
 	entry.retryCount = 0
-	request := host.ProcessRequest{ID: p.nextRequest, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+	request := host.ProcessRequest{ID: p.nextRequest, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 	if p.Forwarding {
 		// The embedding host runs the recipe; correlation uses the node so the
 		// completion resumes this producer.
   payload := core.Value{}
-  if entry.Rule.Kind == rule.FileRule { payload = host.RecipePayload(p.Alloc, entry.Script, entry.Plan.Outputs) } else { payload = host.ProcessPayload(p.Alloc, entry.Script) }
+  if entry.Rule.Kind == rule.FileRule || entry.ScopedEnvironment { payload = host.RecipeEnvironmentPayload(p.Alloc, entry.Script, entry.Plan.Outputs, entry.Environment) } else { payload = host.ProcessPayload(p.Alloc, entry.Script) }
 		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestProcess, Payload: payload})
 		c.Submit(request.ID)
 		return core.ProducerSubmitted

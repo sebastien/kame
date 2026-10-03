@@ -292,6 +292,7 @@ func (p *Program) Free() {
 	freeStrings(p.Alloc, p.Options.ToolOverrides)
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
+  slices.Free(p.Alloc, p.Instances[i].Environment)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)
 		mem.FreeString(p.Alloc, p.Instances[i].Script)
 		p.freeForwardEffects(p.Instances[i].ForwardEffects)

@@ -55,6 +55,11 @@ func WritePlan(out io.Writer, plan *Plan) {
 		e.Str("unknown")
 	}
 	if plan.Rule != nil {
+  if len(plan.Rule.Environment) != 0 {
+   e.Str("environment"); e.BeginArray()
+   for i := range plan.Rule.Environment { e.Str(plan.Rule.Environment[i].Value) }
+   e.EndArray()
+  }
 		if plan.Rule.Always {
 			e.Str("always"); e.Bool(true)
 		}

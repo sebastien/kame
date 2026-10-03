@@ -161,7 +161,9 @@ These changes must cause a miss:
 - Dynamic dependency set or content.
 - Invoked operation version.
 - Explicit shell, cwd, environment dependency, timeout, or retry settings.
-- Any value in the complete process environment used by the recipe.
+- Any value in the complete process environment used by the recipe. This includes
+  inherited and rule-local `; env` assignments, after overrides and canonical
+  ordering.
 
 The process host has no implicit ambient environment. Kame display options
 do not participate.

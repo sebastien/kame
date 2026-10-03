@@ -56,11 +56,22 @@ func ProcessPayload(a mem.Allocator, script string) core.Value {
 // host must create before starting a shell recipe. Script remains available to
 // in-process hosts; Data is the structured freestanding wire spelling.
 func RecipePayload(a mem.Allocator, script string, outputs []string) core.Value {
+ return RecipeEnvironmentPayload(a, script, outputs, nil)
+}
+
+// RecipeEnvironmentPayload also carries the exact child environment when scoped.
+func RecipeEnvironmentPayload(a mem.Allocator, script string, outputs []string, environment []string) core.Value {
  b := strings.NewBuilder(a)
  e := json.NewEncoder(&b)
  e.BeginObject(); e.Str("script"); e.Str(script); e.Str("outputs"); e.BeginArray()
  for i := range outputs { e.Str(outputs[i]) }
- e.EndArray(); e.EndObject(); e.Flush()
+ e.EndArray()
+ if environment != nil {
+  e.Str("environment"); e.BeginArray()
+  for i := range environment { e.Str(environment[i]) }
+  e.EndArray()
+ }
+ e.EndObject(); e.Flush()
  fields := []core.RecordField{{Key: FieldOp, Value: core.NewString(a, "recipe")}, {Key: FieldScript, Value: core.NewString(a, script)}, {Key: FieldData, Value: core.NewString(a, b.String())}}
  payload := core.NewRecord(a, fields)
  for i := range fields { fields[i].Value.Free(a) }

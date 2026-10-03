@@ -48,7 +48,7 @@ relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 | --- | --- | --- | --- | --- |
 | A1 | No parse-time `$(shell ...)` / no `do expr shell` during builds | Language design | High | `WASM_SDK`/`WASM_CC`/`WASM_LD` |
 | A2 | Lazy defaults and build-variable overrides | Implemented | High → fixed | `WASM_CC ?=` |
-| A3 | No target-specific variables or `export` propagation | Language design | High | `KAME_BUILD_MODE` |
+| A3 | Scoped recipe environment and per-artifact build mode | Partly implemented; file freshness and build metadata remain | High | `KAME_BUILD_MODE` |
 | A4 | No conditionals or conditional include | Missing feature | Medium | not used here |
 | A5 | Computed configuration lookup and generator design | Minimum implemented; generator proposal documented | Medium → addressed | not used here |
 | A6 | Declaration continuations and multiline values | Parser gap, fixed | Low → fixed | long `KAME_INPUTS` |
@@ -150,6 +150,20 @@ for tools too ("`?=` overrides" and "single-assignment, no overrides").
 links against the override and `kame do plan` shows the effective value.
 
 ### A3 — No target-specific variables / no export propagation
+
+**Implemented foundation.** Rule headers accept `; env "NAME=value" ...`.
+Literal assignments inherit through prerequisite recipes; local and last
+assignments win. Native retries and WASM forwarded shell recipes receive the
+same values. Cached-task fingerprints include the complete effective environment.
+Active shared prerequisites reject conflicting environments with `ENV_CONFLICT`.
+Equivalent assignment order does not create a conflict. AST, plan and formatter
+preserve authored metadata, and invalid/computed assignments fail before effects.
+
+**Remaining.** Scoped file recipes conservatively rebuild; persistent environment
+freshness is not yet implemented. Kame definitions/environment reads, tool lookup
+and expression-level processes still use invocation configuration. The repository
+build has not yet migrated its debug/release metadata to per-artifact mode, so the
+acceptance below remains open. The historical finding follows.
 
 **Symptom.** GNU scopes a variable to a target *and its prerequisites*:
 

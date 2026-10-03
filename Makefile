@@ -66,6 +66,7 @@ test-wasm: wasm-check
 	tests/T012-02-streams-live-cli.sh
 	tests/T012-03-streams-large-output.sh
 	tests/T006-03-runtime-always.sh
+	tests/T006-06-runtime-environment.sh
 	tests/T010-21-wasm-build-effects.sh
 	tests/T014-02-patterns-ergonomics.sh
 	tests/T016-01-cli-render.sh

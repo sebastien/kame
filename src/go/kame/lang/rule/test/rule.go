@@ -86,11 +86,11 @@ func TestRuleRetainsTargetFormAndNormalizesCRLFRecipe(t *testing.T) {
 }
 
 func TestWildcardInputRetainsAuthoredToken(t *testing.T) {
- result := rule.ParseRule(t.Allocator(), "test.kmk", "default : ./src/**/*.c \"./literal*.c\"\n\techo ok")
- defer result.Free()
- if len(result.Diagnostics) != 0 || len(result.Rule.Inputs) != 2 || result.Rule.Inputs[0].Kind != rule.InputWildcard || result.Rule.Inputs[0].Template == nil || result.Rule.Inputs[1].Kind != rule.InputString {
-  t.Error("wildcard input classification or quoted literal changed")
- }
+	result := rule.ParseRule(t.Allocator(), "test.kmk", "default : ./src/**/*.c \"./literal*.c\"\n\techo ok")
+	defer result.Free()
+	if len(result.Diagnostics) != 0 || len(result.Rule.Inputs) != 2 || result.Rule.Inputs[0].Kind != rule.InputWildcard || result.Rule.Inputs[0].Template == nil || result.Rule.Inputs[1].Kind != rule.InputString {
+		t.Error("wildcard input classification or quoted literal changed")
+	}
 }
 
 func TestAlwaysPreservesFileKindOutputsAndFormatting(t *testing.T) {
@@ -108,8 +108,42 @@ func TestAlwaysPreservesFileKindOutputsAndFormatting(t *testing.T) {
 	mem.FreeString(a, formatted)
 	bad := rule.ParseRule(a, "bad.kmk", "always named :\n\techo forbidden\n")
 	defer bad.Free()
-	if len(bad.Diagnostics) == 0 { t.Error("always accepted a named task") }
+	if len(bad.Diagnostics) == 0 {
+		t.Error("always accepted a named task")
+	}
 	ordinary := rule.ParseRule(a, "ordinary.kmk", "always :\n\techo normal\n")
 	defer ordinary.Free()
-	if len(ordinary.Diagnostics) != 0 || ordinary.Rule.Always || ordinary.Rule.Kind != rule.TaskRule { t.Error("the ordinary target named always stopped working") }
+	if len(ordinary.Diagnostics) != 0 || ordinary.Rule.Always || ordinary.Rule.Kind != rule.TaskRule {
+		t.Error("the ordinary target named always stopped working")
+	}
+}
+
+func TestRuleEnvironmentLiteralMetadataAndRoundTrip(t *testing.T) {
+	a := t.Allocator()
+	text := "task build : ./input ; env \"MODE=debug\" \"MESSAGE=spaces; equal=ok\\n\" \"MODE=release\"\n\tprintf done"
+	parsed := rule.ParseRule(a, "environment.kmk", text)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 1 || len(parsed.Rule.Environment) != 3 {
+		t.Error("environment metadata was not separated from dependencies")
+		return
+	}
+	if parsed.Rule.Environment[0].Value != "MODE=debug" || parsed.Rule.Environment[1].Value != "MESSAGE=spaces; equal=ok\n" || parsed.Rule.Environment[2].Value != "MODE=release" {
+		t.Error("environment literals lost escaping or assignment order")
+	}
+	formatted := rule.FormatRule(a, parsed.Rule)
+	if formatted != text {
+		t.Error("environment metadata failed canonical round trip")
+	}
+	mem.FreeString(a, formatted)
+}
+
+func TestRuleEnvironmentRejectsInvalidOrComputedAssignments(t *testing.T) {
+	texts := []string{"x : ; env", "x : ; other \"MODE=debug\"", "x : ; env MODE", "x : ; env \"1MODE=debug\"", "x : ; env \"MODE\"", "x : ; env \"MODE=@(value)\"", "x : ; env \"MODE=\\u0000\""}
+	for i := range texts {
+		parsed := rule.ParseRule(t.Allocator(), "invalid.kmk", texts[i])
+		if len(parsed.Diagnostics) == 0 {
+			t.Error("invalid environment metadata was accepted")
+		}
+		parsed.Free()
+	}
 }
