@@ -108,3 +108,8 @@ with the explicit `GOGC=off` setting documented in spec 013. The compiled CLI
 LeakSanitizer conformance run remains a separate pending gate. These passing
 checks do not close A3, A4, order-only prerequisites, or other requirements still
 listed as remaining above.
+
+The live CLI stream boundary now has before-completion proof: T012-02 observes
+human/JSON stdout and stderr while a recipe remains blocked on a release file,
+on both hosts, and observes native watch output before termination. This closes
+KB-8; completion-order-only event assertions would not have detected it.

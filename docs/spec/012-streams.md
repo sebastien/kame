@@ -192,3 +192,10 @@ subscriber replay, dependency graph, or asynchronous iterator wrapper.
   from being processed.
 - Repeated atom, batch, nested-source, cancellation, and stale-completion tests
   using `mem.Tracker` leak no source state, builder, value, or message payload.
+
+CLI stream publication must remain observable while the process is running.
+Native C stdio streams are flushed after event drains, including JSON records.
+WASM host callbacks drain copied ABI stream events during awaited host requests;
+waiting for terminal completion before publishing chunks violates this contract.
+`T012-02-streams-live-cli.sh` holds a recipe until its markers are observed and
+also checks declarative native watch output while the session remains alive.

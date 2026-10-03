@@ -91,3 +91,9 @@ Tool configuration now shares one dependency producer per name. The counted
 resolver regression verifies one native lookup across repeated materialization
 and planning; the JS host caches resolved paths across its invocation contexts.
 This removes repeated resolver calls, without claiming a wall-clock speedup.
+
+A blocked-recipe test exposed unbounded publication latency: native redirected
+stdio and WASM events queued during awaited host requests stayed hidden until
+completion. Native event drains now flush stdio, and WASM process callbacks drain
+queued events. The regression proves markers arrive before releasing a waiting
+recipe; it does not claim a latency percentile or throughput improvement.

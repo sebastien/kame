@@ -190,6 +190,10 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 	for {
 		next := p.NextEvent()
 		if !next.OK {
+   // C stdio buffers redirected streams. Publish drained events while the
+   // process or watch session is still alive, including JSON records.
+   flushCLIOutput(out)
+   flushCLIOutput(errOut)
 			return
 		}
 		event := next.Event
@@ -535,4 +539,8 @@ func writeValue(out io.Writer, value core.Value) {
 	text := eval.Display(mem.System, value)
 	io.WriteString(out, text)
 	mem.FreeString(mem.System, text)
+}
+
+func flushCLIOutput(out io.Writer) {
+ if file, ok := out.(*os.File); ok { _ = file.Sync() }
 }

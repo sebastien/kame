@@ -193,3 +193,20 @@ T010-21 passes 25 isolated native/WASM assertions, including missing outputs,
 empty shell recipes, nested outputs, explicit writes, blocked parents, and
 publication failures. T010-05 pins the recipe/output-check ABI sequence;
 24 WASM host tests pass with ASAN/UBSAN.
+
+### KB-8 — Native redirected output and WASM host callbacks delayed live chunks
+
+- **Severity:** high for streaming and watch consumers
+- **Area:** CLI stream publication
+- **Status:** fixed
+
+A recipe printed stdout/stderr markers and waited for a release file. Native C
+stdio buffered redirected output until exit; the WASM primary loop awaited host
+service completion before draining queued stream events. A caller waiting for a
+marker before releasing the recipe could deadlock. Native watch `out` effects
+also remained buffered while the session stayed alive.
+
+Native event drains now flush stdout and stderr. WASM process-start/data callbacks
+now drain copied ABI events while the host request is pending. T012-02 verifies
+human and JSON markers on both streams before the release file exists and before
+the process completes, plus native watch output before termination.

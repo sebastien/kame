@@ -248,3 +248,5 @@ allocator and remain mandatory.
 The harness preserves `-check=sanitize -panic=abort` and Clang when freshness requires rebuilding `build/kame.sanitize`. A stale sanitized binary must never be replaced by a checks-only executable during the leak gate.
 
 `T004-12-lang-optional-includes.sh` verifies missing and present optional sources, newly registered declarations, value-source fragments, formatting/AST metadata, parse failures before effects, cycles and existing-directory read failures on native/WASM.
+
+`T012-02-streams-live-cli.sh` requires native/WASM human and JSON chunks to reach pipes before allowing the recipe to complete, and verifies native watch output before termination.

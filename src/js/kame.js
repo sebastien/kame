@@ -870,7 +870,7 @@ class Module {
         }
       }
       const detached = context.concurrent === true;
-      const completion = await runArgvCapture(stages, { ...context, ...redirections, onStdout: redirections.stream ? (chunk) => this.processStream(instance, false, chunk, detached ? request : undefined) : null, onStderr: context.streaming ? (chunk) => this.processStream(instance, true, chunk, detached ? request : undefined) : null });
+      const completion = await runArgvCapture(stages, { ...context, ...redirections, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout);
@@ -1508,6 +1508,7 @@ function runProcessAttempt(module, instance, script, context, request) {
     const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, detached: true });
     track(child);
     module.processStarted(instance, request);
+    module.drainEvents(instance, context);
     const out = [];
     const err = [];
     let failure = null;
@@ -1519,8 +1520,8 @@ function runProcessAttempt(module, instance, script, context, request) {
     const cancelled = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } };
     context.signal?.addEventListener('abort', cancelled, { once: true });
     if (context.signal?.aborted) cancelled();
-    child.stdout.on('data', (chunk) => { out.push(chunk); module.processStream(instance, false, chunk, request); });
-    child.stderr.on('data', (chunk) => { err.push(chunk); module.processStream(instance, true, chunk, request); });
+    child.stdout.on('data', (chunk) => { out.push(chunk); module.processStream(instance, false, chunk, request); module.drainEvents(instance, context); });
+    child.stderr.on('data', (chunk) => { err.push(chunk); module.processStream(instance, true, chunk, request); module.drainEvents(instance, context); });
     child.once('error', (error) => { failure = error; });
     child.once('close', (code, signalName) => {
       if (timer !== null) clearTimeout(timer);
