@@ -86,14 +86,14 @@ func (inv *Invocation) fail(code string, message string) {
 // Parse parses one command's arguments. command is "" for the primary
 // invocation or the name after "do".
 func Parse(command string, args []string) Invocation {
-	if command == "expr" {
-		forwarded := ExpressionRunArgs(args)
-		inv := ParseRun(forwarded)
-		slices.Free(mem.System, forwarded)
+	if message := RemovedCommandMessage(command); message != "" {
+		inv := Invocation{Name: command}
+		inv.fail("CMD_UNKNOWN", message)
 		return inv
 	}
 	if command == "run" { return ParseRun(args) }
 	if command == "" && SelectsRun(args) { return ParseRun(args) }
+	if command == "" && AppendsCommands(args) { return parseRun(args, true) }
 	inv := Invocation{Name: command, Directory: ".", Jobs: 1, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
 	if !isCommand(command) {
 		inv.fail("CMD_UNKNOWN", "unknown command: "+command)
@@ -125,7 +125,14 @@ func Parse(command string, args []string) Invocation {
 }
 
 func isCommand(command string) bool {
-	return command == "" || command == "build" || command == "help" || command == "expr" || command == "run" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt"
+	return command == "" || command == "build" || command == "help" || command == "run" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt"
+}
+
+// RemovedCommandMessage keeps native/WASM migration diagnostics identical.
+func RemovedCommandMessage(command string) string {
+	if command == "expr" { return "do expr was removed; use kame do run --lang expr -c TEXT (or - for stdin)" }
+	if command == "kash" { return "do kash was removed; use kame do run FILE.kash" }
+	return ""
 }
 
 // parseBuild mirrors the primary and do-plan/cat/tools grammar.
@@ -184,7 +191,11 @@ func parseBuild(inv *Invocation, args []string) {
 		}
 		inv.Targets = slices.Append(mem.System, inv.Targets, arg)
 	}
-	if inv.File != "" && inv.Command != "" {
+	if inv.Watch && inv.Name != "" && inv.Name != "build" {
+        inv.fail("OPT_CONFLICT", "--watch is supported only for builds")
+        return
+    }
+    if inv.File != "" && inv.Command != "" {
 		inv.fail("OPT_CONFLICT", "--file and --command cannot be used together")
 		return
 	}

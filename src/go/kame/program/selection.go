@@ -69,13 +69,14 @@ func (p *Program) selectRule(target string) selection {
                 relativeOwned = true
             }
             match := output.TargetForm.MatchTarget(p.Alloc, matchTarget)
-            if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
-			if match == nil {
+            if match == nil {
+                if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
 				continue
 			}
 			if matched != nil {
 				if matched != r || !sameCaptures(captures, match.Captures) {
 					match.Free(p.Alloc)
+                    if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
 					freeCaptures(p.Alloc, captures)
 					if file {
 						mem.FreeString(p.Alloc, target)
@@ -83,10 +84,12 @@ func (p *Program) selectRule(target string) selection {
 					return selection{Ambiguous: true}
 				}
 				match.Free(p.Alloc)
+                if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
 				continue
 			}
 			matched, captures = r, cloneCaptures(p.Alloc, match.Captures)
 			match.Free(p.Alloc)
+            if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
 		}
 	}
 	if file {

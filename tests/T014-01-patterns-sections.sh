@@ -12,11 +12,11 @@ test-step "toolchain and binary"
 cli_require_tools
 cli_build
 
-# evaluates EXPR to EXPECTED via `do expr`
+# evaluates EXPR to EXPECTED via `do run --lang expr`
 evaluates() { # EXPR EXPECTED
 	local expr="$1"
 	local expected="$2"
-	cli_run -- do expr -c "$expr"
+	cli_run -- do run --lang expr -c "$expr"
 	cli_expect_status 0 "$expr"
 	cli_expect_stdout "$expected" "$expr"
 	cli_expect_stderr_empty
@@ -25,7 +25,7 @@ evaluates() { # EXPR EXPECTED
 diag() { # EXPR CODE
 	local expr="$1"
 	local code="$2"
-	cli_run -- do expr -c "$expr"
+	cli_run -- do run --lang expr -c "$expr"
 	cli_expect_status 1 "$expr"
 	cli_expect_stderr_contains "$code"
 }

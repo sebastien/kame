@@ -13,7 +13,7 @@ cli_require_tools
 cli_build
 
 evaluates() { # EXPR EXPECTED
-	cli_run -- do expr -c "$1"
+	cli_run -- do run --lang expr -c "$1"
 	cli_expect_status 0 "$1"
 	cli_expect_stdout "$2" "$1"
 	cli_expect_stderr_empty
@@ -41,12 +41,12 @@ evaluates '(joinpath "a" "")' '"a"'
 test-step "relpath and abspath are lexical"
 evaluates '(relpath "a/b/c" "a")' '"b/c"'
 evaluates '(relpath "a" "a")' '"."'
-cli_run -- do expr -c '(abspath "x")'
+cli_run -- do run --lang expr -c '(abspath "x")'
 cli_expect_status 0
 cli_expect_stdout "\"$PWD/x\""
 
 test-step "path operations do not touch the filesystem"
-cli_run -- do expr -c '(joinpath "no-such-dir" "file.txt")'
+cli_run -- do run --lang expr -c '(joinpath "no-such-dir" "file.txt")'
 cli_expect_status 0
 cli_expect_stdout '"no-such-dir/file.txt"'
 

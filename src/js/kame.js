@@ -367,7 +367,6 @@ function usage() {
   stdout.write('  do tools        list globally referenced build tools\n');
   stdout.write('  do parse        parse a language file and print a JSON AST\n');
   stdout.write('  do fmt          format source in place (-i) or check it (-n)\n');
-  stdout.write('  do expr         compatibility alias for do run --lang expr\n');
   stdout.write('  do cat TARGET   materialize one target and print its artifact\n');
   stdout.write('  do help         show this help\n\n');
   stdout.write('Options: -f FILE  -c TEXT  -C DIR  -j N  -n  --force  -h  -V\n');
@@ -1586,15 +1585,21 @@ async function runSession(module, inv, sourceDirectory) {
   for (let i = 0; i < inv.inputs.length; i++) {
     const input = inv.inputs[i];
     let name = `<command:${i + 1}>`, text = input.value;
-    if (input.kind === 'file') {
+    const fileBacked = input.kind === 'file' || input.kind === 'discover';
+    if (input.kind === 'discover') {
+      const source = await discoverSource({});
+      if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found (tried Makefile.kmk, make.kmk, src/kmk/main.kmk)');
+      name = normalize(join(inv.directory || '.', source.name));
+      text = source.text;
+    } else if (input.kind === 'file') {
       name = normalize(input.value);
       try { text = await readFile(resolve(sourceDirectory, input.value), 'utf8'); }
       catch { return failure('FS_ERR', `cannot read source: ${input.value}`); }
     } else if (input.kind === 'stdin') { name = '<stdin>'; text = await readStdin(); }
-    if (input.kind === 'file' && (input.lang === 'km' || input.lang === 'kmk')) {
+    if (fileBacked && (input.lang === 'km' || input.lang === 'kmk')) {
       const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang);
       for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], lang: input.lang, entries: j + 1 === parts.length ? input.entries : [], inline: j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
-    } else fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: input.kind === 'file' ? 0 : 1 });
+    } else fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1 });
   }
   if (!inv.dryRun && inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1) {
     const input = inv.inputs[0];

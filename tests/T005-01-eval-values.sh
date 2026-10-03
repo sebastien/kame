@@ -17,7 +17,7 @@ cli_build
 evaluates() { # EXPR EXPECTED
 	local expr="$1"
 	local expected="$2"
-	cli_run -- do expr -c "$expr"
+	cli_run -- do run --lang expr -c "$expr"
 	cli_expect_status 0 "$expr"
 	cli_expect_stdout "$expected" "$expr"
 	cli_expect_stderr_empty

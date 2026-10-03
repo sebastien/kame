@@ -349,3 +349,27 @@ func (p *Program) mkdirParent(name string) bool {
 	}
 	return p.Host.Stat(parent).Exists
 }
+
+// Rendered bytes are authoritative for yielded files. Membership changes can
+// alter a document even when every remaining input predates its output.
+func (p *Program) yieldFreshness(entry *instance, effects []eval.Effect) Freshness {
+    name := p.canonicalTarget(entry.Plan.Outputs[0], true)
+    data, err := p.Host.ReadFile(p.Alloc, name)
+    mem.FreeString(p.Alloc, name)
+    if err != nil { return Stale }
+    total := 0
+    for i := range effects { if effects[i].Kind == eval.EffectYield { total += len(effects[i].Data) } }
+    if total != len(data) { mem.FreeSlice(p.Alloc, data); return Stale }
+    position := 0
+    equal := true
+    for i := range effects {
+        if effects[i].Kind != eval.EffectYield { continue }
+        for j := range effects[i].Data {
+            if data[position] != effects[i].Data[j] { equal = false }
+            position++
+        }
+    }
+    mem.FreeSlice(p.Alloc, data)
+    if equal { return Fresh }
+    return Stale
+}

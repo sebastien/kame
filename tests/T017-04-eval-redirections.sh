@@ -15,7 +15,7 @@ check() {
 	local expression="$1" expected_status="$2" expected_stdout="$3" code="${4:-}"
 	shift 4
 	set +e
-	"${command[@]}" do expr --allow-run "$@" -c "$expression" >"$work/stdout" 2>"$work/stderr"
+	"${command[@]}" do run --lang expr --allow-run "$@" -c "$expression" >"$work/stdout" 2>"$work/stderr"
 	local status=$?
 	set -e
 	if [ "$status" = "$expected_status" ] && [ "$(cat "$work/stdout")" = "$expected_stdout" ]; then test-ok "$backend: $expression"; else test-fail "$backend: status=$status: $expression"; fi
@@ -63,7 +63,7 @@ for backend in native wasm; do
 	check '$(printf invalid > "")' 1 '' EXPR_INVALID "${grants[@]}"
 	check "\$(printf denied > \"$output\")" 1 '' CAP_DENIED "--allow-write=$work/other"
 	set +e
-	"${command[@]}" do expr --allow-run=/usr/bin/printf "${grants[@]}" -c "\$(/usr/bin/printf denied | /usr/bin/cat > \"$output\")" >"$work/stdout" 2>"$work/stderr"
+	"${command[@]}" do run --lang expr --allow-run=/usr/bin/printf "${grants[@]}" -c "\$(/usr/bin/printf denied | /usr/bin/cat > \"$output\")" >"$work/stdout" 2>"$work/stderr"
 	status=$?
 	set -e
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/stderr"; then test-ok "$backend authorizes every stage before truncation"; else test-fail "$backend did not deny the later stage"; fi
@@ -71,7 +71,7 @@ for backend in native wasm; do
 
 	test-step "$backend: relative paths use the invocation directory"
 	set +e
-	"${command[@]}" do expr -C "$work" --allow-run --allow-read=./ --allow-write=./ -c '$(cat < input > relative)' >"$work/stdout" 2>"$work/stderr"
+	"${command[@]}" do run --lang expr -C "$work" --allow-run --allow-read=./ --allow-write=./ -c '$(cat < input > relative)' >"$work/stdout" 2>"$work/stderr"
 	status=$?
 	set -e
 	if [ "$status" = 0 ] && [ "$(cat "$work/relative")" = input ] && [ "$(cat "$work/stdout")" = '""' ]; then test-ok "$backend resolves relative redirections"; else test-fail "$backend relative redirection failed"; fi

@@ -24,8 +24,8 @@ printf x >"$project/src/two.km"
 
 test-step "wildcard output matches native byte-for-byte"
 for expression in '(wildcard "*.md")' '(wildcard "src/**/*.km")' '(wildcard "src/*.km")' '(count (wildcard "*"))'; do
-	(cd "$project" && node "$CLI_ROOT/dist/kame.js" do expr --allow-read -c "$expression") >"$project/wasm.out"
-	(cd "$project" && "$CLI_BIN" do expr --allow-read -c "$expression") >"$project/native.out"
+	(cd "$project" && node "$CLI_ROOT/dist/kame.js" do run --lang expr --allow-read -c "$expression") >"$project/wasm.out"
+	(cd "$project" && "$CLI_BIN" do run --lang expr --allow-read -c "$expression") >"$project/native.out"
 	if cmp -s "$project/wasm.out" "$project/native.out"; then
 		test-ok "parity: $expression"
 	else
@@ -35,7 +35,7 @@ done
 
 test-step "wildcard needs a read grant"
 set +e
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" do expr -c '(wildcard "*.md")') >"$project/out.txt" 2>"$project/err.txt"
+(cd "$project" && node "$CLI_ROOT/dist/kame.js" do run --lang expr -c '(wildcard "*.md")') >"$project/out.txt" 2>"$project/err.txt"
 status=$?
 set -e
 if [ "$status" = 1 ] && grep -q 'CAP_DENIED' "$project/err.txt"; then

@@ -10,22 +10,26 @@ const topHelpBeforeCommands = `kame - a modern build system in the spirit of GNU
 
 Usage:
   kame [OPTIONS] [TARGET...]
+  kame [OPTIONS] INPUT... [-- ARG...]
   kame do COMMAND [OPTIONS] [ARG...]
   kame -h | --help
   kame -V | --version
 
 Builds TARGET using rules from a Kame source. With no TARGET, the
 default target is built when defined; otherwise the invocation fails and
-reports the available targets. Without -f/--file or -c/--command, source
-discovery tries Makefile.kmk, then make.kmk, then src/kmk/main.kmk.
+reports the available targets. Source discovery tries Makefile.kmk, then
+make.kmk, then src/kmk/main.kmk. A target-led invocation such as build -c TEXT
+appends inline work to that discovered source; a source-led invocation uses
+only its explicit files and commands.
 
 Build options:
-  -f, --file FILE        use one build file
-  -c, --command TEXT     use inline build source
+  -f, --file FILE        append a file source (repeatable)
+  -c, --command TEXT     append Kame source (repeatable; --lang overrides)
   -C, --directory DIR    set the working directory
   -j, --jobs N           maximum concurrent nodes (N > 0, default 1)
   -n, --dry-run          plan and render without executing effects
       --force            ignore freshness and cached-task hits
+      --watch            poll tracked inputs and rebuild affected roots (native)
 	      --json             emit machine-readable JSON Lines
 	      --color MODE       diagnostic colour: auto, always, or never
 	      --diagnostic-format FORMAT
@@ -53,6 +57,8 @@ Examples:
   kame do plan dist             inspect a target plan
   kame do fmt -i Makefile.kmk   format a build file in place
   kame do run --lang expr -c '(join ["a" "b"] ",")'
+  kame do run Makefile.kmk -c '(out some-symbol)'
+  kame build -c '(report some-symbol)'
   kame --help                   show the overview
   kame --version                show the version
 
@@ -61,9 +67,8 @@ Run 'kame do COMMAND --help' for command-specific help.
 
 const doHelpBeforeCommands = `kame do COMMAND [OPTIONS] [ARG...]
 
-Utility commands for building, inspecting, and working with Kame
-sources. Build execution still uses the primary invocation; these commands add
-inspection and language tooling.
+Commands for running, inspecting, and working with Kame sources. Direct file
+execution and do run compose ordered files and inline fragments in one session.
 
 Commands:
 
@@ -198,13 +203,6 @@ Options:
   -h, --help        show this help
 `
 
-const exprHelpText = `Usage: kame do expr [RUN OPTIONS] [-- ARG...]
-
-Compatibility alias for kame do run --lang expr. Uses the unified runner's
-grammar, capabilities, argument frame, async joins and cleanup. With no source
-input, this alias selects stdin. Prefer do run --lang expr for new invocations.
-`
-
 type commandAction int
 
 const (
@@ -216,7 +214,6 @@ const (
 	commandTools
 	commandParse
 	commandFormat
-	commandExpr
 	commandRun
 	commandHelp
 )
@@ -239,7 +236,6 @@ var doCommands = []commandSpec{
 	{Name: "tools", TopSummary: "list globally referenced build tools", DoSummary: "list globally referenced build tools", Help: toolsHelpText, Action: commandTools},
 	{Name: "parse", TopSummary: "parse a language file and print a JSON AST", DoSummary: "parse a language file and print a JSON AST (--lang LANG)", Help: parseHelpText, Action: commandParse},
 	{Name: "fmt", TopSummary: "format source in place or check it", DoSummary: "format source in place (-i) or check it (-n)", Help: fmtHelpText, Action: commandFormat},
-	{Name: "expr", DoSummary: "compatibility alias for do run --lang expr", Help: exprHelpText, Action: commandExpr},
 	{Name: "help", DoSummary: "show this help, or help for one COMMAND", Action: commandHelp},
 }
 

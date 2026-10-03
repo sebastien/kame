@@ -91,7 +91,7 @@ for backend in native wasm; do
 	timeout 10 "${command[@]}" -C "$work" "$work/direct.ksh" >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = nextasync ]; then test-ok "$backend direct .ksh joins graphs"; else test-fail "$backend direct async dispatch"; fi
 	rm "$work/gate"
-	timeout 10 "${command[@]}" do expr --allow-run -c '(let [job (run :async :true "true")] (await job))' >"$work/out" 2>"$work/err"
+	timeout 10 "${command[@]}" do run --lang expr --allow-run -c '(let [job (run :async :true "true")] (await job))' >"$work/out" 2>"$work/err"
 	if grep -q 'status: 0' "$work/out"; then test-ok "$backend deprecated expression spelling uses shared await"; else test-fail "$backend separate expression executor"; fi
 done
 test-step "async parser and canonical formatter parity"

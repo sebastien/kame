@@ -21,6 +21,24 @@ import (
 func runSession(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	inv := cli.ParseRun(args)
 	defer inv.Free()
+	return runParsedSession(inv, in, out, errOut)
+}
+
+func runPrimarySession(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
+	inv := cli.Parse("", args)
+	defer inv.Free()
+	return runParsedSession(inv, in, out, errOut)
+}
+
+type exprEffectOutput struct { Out io.Writer; Err io.Writer }
+
+func writeExprEffect(value any, effect eval.Effect) {
+	output := value.(*exprEffectOutput)
+	if effect.Kind == eval.EffectErr { output.Err.Write(effect.Data); return }
+	if effect.Kind == eval.EffectOut || effect.Kind == eval.EffectYield { output.Out.Write(effect.Data) }
+}
+
+func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io.Writer) int {
 	if !inv.OK { cliError(errOut, inv.Error.Code, inv.Error.Message); return 2 }
 	configureDiagnosticPresentation(inv)
 	var fragments []program.Fragment
@@ -31,8 +49,9 @@ func runSession(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 	for i := range inv.Inputs {
 		input := inv.Inputs[i]
 		name, text := input.Value, input.Value
-		if input.Kind == "file" {
-			file := readRunSource(name, diagnosticWriter(out, errOut, inv.JSON), input.Lang, inv.JSON)
+		if input.Kind == "file" || input.Kind == "discover" {
+			file := buildSource{}
+			if input.Kind == "discover" { file = loadBuildSource(buildArguments{Directory: inv.Directory, JSON: inv.JSON}, diagnosticWriter(out, errOut, inv.JSON), true) } else { file = readRunSource(name, diagnosticWriter(out, errOut, inv.JSON), input.Lang, inv.JSON) }
 			loaded = slices.Append(mem.System, loaded, file)
 			if file.Status != 0 { freeRunInputs(fragments, storage, names); return 1 }
 			for j := range file.Parts {

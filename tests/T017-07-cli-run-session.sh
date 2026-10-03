@@ -31,6 +31,12 @@ leaf :
 build : @((first @*))
 	printf "rule%s" @((first @*))
 KMK
+cat >"$work/cwd/Makefile.kmk" <<'KMK'
+name = "Ada"
+(report value) = (out value)
+build :
+	printf rule
+KMK
 
 for backend in native wasm; do
 	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
@@ -89,5 +95,16 @@ for backend in native wasm; do
 	test-step "$backend rule and value composition"
 	check 'rule"Ada"' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
 	check 'leafruleleaf"done"' do run "$work/arguments.kmk" build -c '"done"' -- leaf
+	test-step "$backend discovered build plus inline work"
+	check 'ruleAda"Ada"' -C "$work/cwd" build -c '(report name)'
+	check 'rulefirstAda"Ada"' -C "$work/cwd" build -c '(out "first")' -c '(report name)'
+	reject PARSE_ERR -C "$work/cwd" build -c '['
+	reject DEF_INVALID -C "$work/cwd" build -c 'name = "duplicate"'
+	test-step "$backend removed commands give migration help"
+	for removed in expr kash; do
+		status=0
+		"${command[@]}" do "$removed" -c '42' >"$work/out" 2>"$work/err" || status=$?
+		if [ "$status" = 2 ] && grep -q CMD_UNKNOWN "$work/err" && grep -q 'use kame do run' "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend migration for do $removed"; else test-fail "$backend migration for do $removed"; fi
+	done
 done
 test-end

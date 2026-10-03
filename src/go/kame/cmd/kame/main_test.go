@@ -172,7 +172,7 @@ func TestPlanDoesNotMaterializeRecipe(t *testing.T) {
 
 func TestExpressionAndGraphInspection(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if status := Run([]string{"do", "expr", "-c", "(join [\"a\" \"b\"] \",\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"a,b\"" {
+	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(join [\"a\" \"b\"] \",\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"a,b\"" {
 		t.Errorf("expr status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -193,22 +193,22 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "expr", "-c", "(join @* \",\")", "--", "left", "right"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"left,right\"" {
+	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(join @* \",\")", "--", "left", "right"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"left,right\"" {
 		t.Errorf("expr args status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "expr", "-c", "(let [a 10] (out \"hello\" a))"}, &input{}, &out, &errOut); status != 0 || out.String() != "hello10\"hello10\"" || errOut.Len() != 0 {
+	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(let [a 10] (out \"hello\" a))"}, &input{}, &out, &errOut); status != 0 || out.String() != "hello10\"hello10\"" || errOut.Len() != 0 {
 		t.Errorf("expr out status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "expr", "-c", "(err \"notice\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"notice\"" || errOut.String() != "notice" {
+	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(err \"notice\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"notice\"" || errOut.String() != "notice" {
 		t.Errorf("expr err status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "expr", "-c", "(yield \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generated:nil" || errOut.Len() != 0 {
+	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(yield \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generated:nil" || errOut.Len() != 0 {
 		t.Errorf("expr yield status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -261,7 +261,7 @@ func TestDoNamespaceHelp(t *testing.T) {
 		{[]string{"do", "--help"}, "Commands:"},
 		{[]string{"do", "help"}, "Commands:"},
 		{[]string{"do", "plan", "--help"}, "Usage: kame do plan"},
-		{[]string{"do", "expr", "-h"}, "Usage: kame do expr"},
+		{[]string{"do", "run", "--lang", "expr", "-h"}, "Usage: kame do run"},
 	}
 	for _, test := range tests {
 		var out, errOut bytes.Buffer
@@ -296,7 +296,7 @@ func TestHelpTokenAfterSeparatorIsNotHelp(t *testing.T) {
 
 func TestHelpTokenAsOptionValueIsNotHelp(t *testing.T) {
 	var out, errOut bytes.Buffer
-	Run([]string{"do", "expr", "-c", "--help"}, &input{}, &out, &errOut)
+	Run([]string{"do", "run", "--lang", "expr", "-c", "--help"}, &input{}, &out, &errOut)
 	if strings.Contains(out.String(), "Usage:") || strings.Contains(errOut.String(), "Usage:") {
 		t.Errorf("option value requested help: stdout=%q stderr=%q", out.String(), errOut.String())
 	}
@@ -494,12 +494,12 @@ func TestRepeatedCLICommandLifecycleReleasesTransientState(t *testing.T) {
 		status int
 	}{
 		{[]string{"-c", "task first :\ntask second :"}, 1},
-		{[]string{"do", "expr", "--allow-read=/tmp", "--allow-env=HOME", "-c", "(nop 42)", "--", "left", "right"}, 0},
+		{[]string{"do", "run", "--lang", "expr", "--allow-read=/tmp", "--allow-env=HOME", "-c", "(nop 42)", "--", "left", "right"}, 0},
 		{[]string{"do", "plan", "-c", "task build :\n\techo ignored", "build"}, 0},
 		{[]string{"do", "span", "--expand", "-c", "SOURCE = ./input\ntask build : @(SOURCE)\n\ttrue", "build"}, 0},
 		{[]string{"do", "fmt", "--lang", "expr"}, 0},
 		{[]string{"--shell", "/bin/sh", "--env", "KM_TEST=value", "--unknown"}, 2},
-		{[]string{"do", "expr", "--allow-read=/tmp", "--allow-env=HOME", "--unknown"}, 2},
+		{[]string{"do", "run", "--lang", "expr", "--allow-read=/tmp", "--allow-env=HOME", "--unknown"}, 2},
 		{[]string{"do", "fmt", "-i", "-n", "source.kmk"}, 2},
 		{[]string{"do", "inputs", "build", "--depth", "invalid"}, 2},
 	}

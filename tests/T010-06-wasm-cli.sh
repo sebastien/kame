@@ -37,49 +37,49 @@ else
 	test-fail "--help: status=$status"
 fi
 
-test-step "do expr matches native output byte-for-byte"
+test-step "do run --lang expr matches native output byte-for-byte"
 for expression in '(count [1 2 3])' '(join ["a" "b"] ":")' '(uppercase "kame")' '(let [a 10] (out "hello" a))' '(yield "generated")'; do
-	node "$CLI_ROOT/dist/kame.js" do expr -c "$expression" >"$work/wasm.out"
-	"$CLI_BIN" do expr -c "$expression" >"$work/native.out"
+	node "$CLI_ROOT/dist/kame.js" do run --lang expr -c "$expression" >"$work/wasm.out"
+	"$CLI_BIN" do run --lang expr -c "$expression" >"$work/native.out"
 	if cmp -s "$work/wasm.out" "$work/native.out"; then
 		test-ok "parity: $expression"
 	else
 		test-fail "parity: $expression (wasm=$(cat "$work/wasm.out") native=$(cat "$work/native.out"))"
 	fi
 done
-run do expr -c '(err "notice")'
+run do run --lang expr -c '(err "notice")'
 wasm_status=$status
 cp "$work/out" "$work/wasm.err-effect.out"
 cp "$work/err" "$work/wasm.err-effect.err"
-"$CLI_BIN" do expr -c '(err "notice")' >"$work/native.err-effect.out" 2>"$work/native.err-effect.err"
+"$CLI_BIN" do run --lang expr -c '(err "notice")' >"$work/native.err-effect.out" 2>"$work/native.err-effect.err"
 if [ "$wasm_status" = 0 ] && cmp -s "$work/wasm.err-effect.out" "$work/native.err-effect.out" && cmp -s "$work/wasm.err-effect.err" "$work/native.err-effect.err"; then
 	test-ok "parity: err preserves stdout and stderr"
 else
 	test-fail "err parity: wasm-out=$(cat "$work/wasm.err-effect.out") wasm-err=$(cat "$work/wasm.err-effect.err") native-out=$(cat "$work/native.err-effect.out") native-err=$(cat "$work/native.err-effect.err")"
 fi
 printf '(join ["wasm" "source"] "-")\n' >"$work/expression.kmk"
-node "$CLI_ROOT/dist/kame.js" do expr "$work/expression.kmk" >"$work/wasm.expr"
-"$CLI_BIN" do expr "$work/expression.kmk" >"$work/native.expr"
+node "$CLI_ROOT/dist/kame.js" do run --lang expr "$work/expression.kmk" >"$work/wasm.expr"
+"$CLI_BIN" do run --lang expr "$work/expression.kmk" >"$work/native.expr"
 if cmp -s "$work/wasm.expr" "$work/native.expr" && [ "$(cat "$work/wasm.expr")" = '"wasm-source"' ]; then
-	test-ok "do expr FILE reads an expression file and matches native"
+	test-ok "do run --lang expr FILE reads an expression file and matches native"
 else
-	test-fail "do expr FILE: wasm=$(cat "$work/wasm.expr") native=$(cat "$work/native.expr")"
+	test-fail "do run --lang expr FILE: wasm=$(cat "$work/wasm.expr") native=$(cat "$work/native.expr")"
 fi
 
 test-step "capability grants are denied by default"
-run do expr -c '(read "VERSION")'
+run do run --lang expr -c '(read "VERSION")'
 if [ "$status" = 1 ] && [ ! -s "$work/out" ] && grep -q 'CAP_DENIED' "$work/err"; then
 	test-ok "read without --allow-read is denied"
 else
 	test-fail "read was not denied: status=$status out=$(cat "$work/out") err=$(cat "$work/err")"
 fi
-run do expr --allow-read -c '(read "VERSION")'
+run do run --lang expr --allow-read -c '(read "VERSION")'
 if [ "$status" = 0 ] && [ "$(cat "$work/out")" = "$(cat "$CLI_ROOT/VERSION")" ]; then
 	test-ok "read with --allow-read succeeds"
 else
 	test-fail "read with grant failed: status=$status out=$(cat "$work/out")"
 fi
-run do expr --allow-run -c '(shell "printf run-ok")'
+run do run --lang expr --allow-run -c '(shell "printf run-ok")'
 if [ "$status" = 0 ] && [ "$(cat "$work/out")" = '[status: 0 stdout: run-ok stderr: ]' ]; then
 	test-ok "shell with --allow-run succeeds"
 else

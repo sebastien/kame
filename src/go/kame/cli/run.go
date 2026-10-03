@@ -8,7 +8,7 @@ import (
 // RunInput retains command-line order and the language selected when an input
 // was encountered. Text and filenames borrow argv; entry arrays belong to inv.
 type RunInput struct {
-	Kind string // file, command, stdin
+	Kind string // file, command, stdin, discover
 	Value string
 	Lang string
 	Entries []string
@@ -17,14 +17,33 @@ type RunInput struct {
 // ParseRun is the unified runner grammar. Keep it separate from build parsing:
 // '--' starts program arguments, not targets, and '-c' may be repeated/mixed.
 func ParseRun(args []string) Invocation {
+	return parseRun(args, false)
+}
+
+// AppendsCommands identifies discovered-build invocations with trailing inline
+// work. Source/option values and operands after -- are never inspected as flags.
+func AppendsCommands(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" { return false }
+		if arg == "-c" || arg == "--command" || (len(arg) >= 10 && arg[:10] == "--command=") { return true }
+		if arg == "-l" || arg == "--lang" || arg == "--entry" || isBuildValueOption(arg) { i++ }
+	}
+	return false
+}
+
+func parseRun(args []string, discover bool) Invocation {
 	inv := Invocation{Name: "run", Directory: ".", Jobs: 1}
+	if discover { inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: "discover", Lang: "kmk"}) }
 	language := ""
 	stdin := false
 	ruleOptions, processOptions := false, false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" {
-			for j := i+1; j < len(args); j++ { inv.Args = slices.Append(mem.System, inv.Args, args[j]) }
+			for j := i+1; j < len(args); j++ {
+				if discover { inv.Inputs[0].Entries = slices.Append(mem.System, inv.Inputs[0].Entries, args[j]) } else { inv.Args = slices.Append(mem.System, inv.Args, args[j]) }
+			}
 			break
 		}
 		if runGrant(&inv, arg) {
@@ -73,11 +92,15 @@ func ParseRun(args []string) Invocation {
 		if arg == "--force" { inv.Force, ruleOptions = true, true; continue }
 		if arg == "--json" { inv.JSON = true; continue }
 		if arg == "--verbose" { inv.Verbose = true; continue }
-		if arg == "-" || runLanguage(arg) != "" {
+		if !discover && (arg == "-" || runLanguage(arg) != "") {
 			if !runFile(&inv, arg, language, &stdin) { return inv }
 			continue
 		}
 		if len(arg) != 0 && arg[0] == '-' { inv.fail("OPT_UNKNOWN", "unknown option: "+arg); return inv }
+		if discover {
+			inv.Inputs[0].Entries = slices.Append(mem.System, inv.Inputs[0].Entries, arg)
+			continue
+		}
 		if len(inv.Inputs) == 0 {
 			if !runFile(&inv, arg, language, &stdin) { return inv }
 			continue

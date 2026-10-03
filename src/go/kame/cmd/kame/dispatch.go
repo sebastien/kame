@@ -36,11 +36,13 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 		if spec := findCommand(args[1]); spec != nil {
 			return runDoCommand(spec.Action, args[2:], in, out, errOut)
 		}
-		cliError(errOut, "CMD_UNKNOWN", "unknown command: "+args[1])
+		message := cli.RemovedCommandMessage(args[1])
+		if message == "" { message = "unknown command: "+args[1] }
+		cliError(errOut, "CMD_UNKNOWN", message)
 		io.WriteString(errOut, "run 'kame do --help' to list commands\n")
 		return 2
 	}
-	if cli.SelectsRun(args) { return runSession(args, in, out, errOut) }
+	if cli.SelectsRun(args) || cli.AppendsCommands(args) { return runPrimarySession(args, in, out, errOut) }
 	return runBuild(args, out, errOut, false)
 }
 
@@ -141,9 +143,6 @@ func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writ
 	}
 	if action == commandFormat {
 		return runFormat(args, in, out, errOut)
-	}
-	if action == commandExpr {
-		return runExpr(args, in, out, errOut)
 	}
 	return runHelpCommand(args, out, errOut)
 }

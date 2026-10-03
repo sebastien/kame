@@ -11,7 +11,7 @@ cli_require_tools
 cli_build
 
 test-step "operation contracts identify operands instead of generic arguments"
-cli_run -- do expr -c '(first 1)'
+cli_run -- do run --lang expr -c '(first 1)'
 cli_expect_status 1
 cli_expect_stderr_contains '<command:1>:1:8: error EXPR_INVALID: `first` argument 1 expects list; got int' 'while operation first'
 if grep -q 'result = (nop' "$CLI_ERR"; then
@@ -19,10 +19,10 @@ if grep -q 'result = (nop' "$CLI_ERR"; then
 else
 	test-ok "expression diagnostic uses only authored input"
 fi
-cli_run -- do expr -c '(nth [1] :false)'
+cli_run -- do run --lang expr -c '(nth [1] :false)'
 cli_expect_status 1
 cli_expect_stderr_contains '`nth` argument 2 expects int; got bool'
-cli_run -- do expr -c '(first)'
+cli_run -- do run --lang expr -c '(first)'
 cli_expect_status 1
 cli_expect_stderr_contains '`first` expects 1 argument; got 0'
 

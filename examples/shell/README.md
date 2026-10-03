@@ -4,17 +4,17 @@
 functions as a Kame value program?
 
 These `.kash` sources follow [the Kash specification](../../docs/spec/017-kash.md).
-**Standalone Kash execution is not implemented in the current CLI.** These are
-staged lessons, not scripts to execute with Bash or a claim that the future
-runner already exists. Pipelines, redirection, recovery, and control blocks
-below require that runner. No build file or publication project is required.
+The CLI now accepts standalone Kash through `do run`, but these complete lessons
+remain staged: `01-values.kash` currently reports `EXEC_CANCELLED` when reusing
+lazy definitions across statements. Do not execute them with Bash. No build
+file or publication project is required.
 
-The specified invocation, once supported, is:
+The invocation for these lessons is:
 
 ```sh
-kame do kash ./01-values.kash
-kame do kash ./02-pipelines.kash
-kame do kash ./03-recovery.kash
+kame do run ./01-values.kash
+kame do run ./02-pipelines.kash
+kame do run ./03-recovery.kash
 ```
 
 ## 1. Commands receive values
@@ -35,8 +35,8 @@ cannot splice a list.
 **Try now:** Embedded command capture is available in the current CLI:
 
 ```sh
-kame do expr --allow-run -c '(let [names ["hello world.txt" "second.txt"]] $(printf "[%s]\n" $names))'
-kame do expr --allow-run -c '(uppercase (strip $(printf "hello\n")))'
+kame do run --lang expr --allow-run -c '(let [names ["hello world.txt" "second.txt"]] $(printf "[%s]\n" $names))'
+kame do run --lang expr --allow-run -c '(uppercase (strip $(printf "hello\n")))'
 ```
 
 These exercise the actual expression/process boundary without pretending to run

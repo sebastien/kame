@@ -14,7 +14,7 @@ cli_require_tools
 cli_build
 
 diag() { # EXPR CODE
-	cli_run -- do expr -c "$1"
+	cli_run -- do run --lang expr -c "$1"
 	cli_expect_status 1 "$1"
 	cli_expect_stderr_contains "$2"
 	cli_expect_printable "$CLI_ERR"
@@ -27,7 +27,7 @@ diag() { # EXPR CODE
 
 test-step "unknown operations name the operation"
 diag '(definitely-not-an-operation 1)' 'OP_UNKNOWN'
-cli_run -- do expr -c '(definitely-not-an-operation 1)'
+cli_run -- do run --lang expr -c '(definitely-not-an-operation 1)'
 cli_expect_status 1
 cli_expect_stderr_contains 'definitely-not-an-operation'
 
@@ -44,7 +44,7 @@ diag '(slice 1 0 2)' 'EXPR_INVALID'
 diag '(sorted "abc")' 'EXPR_INVALID'
 
 test-step "failure diagnostics stay printable"
-cli_run -- do expr -c '(no-such-operation 1)'
+cli_run -- do run --lang expr -c '(no-such-operation 1)'
 cli_expect_printable "$CLI_ERR"
 cli_expect_printable "$CLI_OUT"
 

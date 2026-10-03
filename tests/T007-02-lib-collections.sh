@@ -13,14 +13,14 @@ cli_require_tools
 cli_build
 
 evaluates() { # EXPR EXPECTED
-	cli_run -- do expr -c "$1"
+	cli_run -- do run --lang expr -c "$1"
 	cli_expect_status 0 "$1"
 	cli_expect_stdout "$2" "$1"
 	cli_expect_stderr_empty
 }
 
 diag() { # EXPR CODE
-	cli_run -- do expr -c "$1"
+	cli_run -- do run --lang expr -c "$1"
 	cli_expect_status 1 "$1"
 	cli_expect_stderr_contains "$2"
 	cli_expect_printable "$CLI_ERR"

@@ -11,7 +11,7 @@ expressions = [
     '(parse-json " {\\\"name\\\":\\\"Texto\\\",\\\"items\\\":[true,false,null,-42,1.5]} \\n")',
     '(parse-json "\\\"\\\\ud83d\\\\ude80\\\"")',
     '(let [page (parse-json "{\\\"title\\\":\\\"News\\\"}")] page.title)',
-    '(parse-json "01")', '(parse-json "[1,]")', '(parse-json "{bad}")', '(parse-json 42)',
+    '(parse-json "01")', '(parse-json "[1,]")', '(parse-json "[bad]")', '(parse-json 42)',
 ]
 for expression in expressions:
     first = subprocess.run([str(native), 'do', 'expr', '-c', expression], capture_output=True)

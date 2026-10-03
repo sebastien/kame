@@ -15,7 +15,7 @@ cli_build
 
 # Function: diagnosis EXPR CODE
 diag() {
-	cli_run -- do expr -c "$1"
+	cli_run -- do run --lang expr -c "$1"
 	cli_expect_status 1 "$1"
 	cli_expect_stderr_contains "$2"
 	cli_expect_printable "$CLI_ERR"
@@ -51,7 +51,7 @@ diag '(shell "true")' 'CAP_DENIED'
 diag '(write "x" "y")' 'CAP_DENIED'
 
 test-step "failures write nothing to stdout"
-cli_run -- do expr -c 'unknown-name'
+cli_run -- do run --lang expr -c 'unknown-name'
 cli_expect_stdout_empty
 cli_expect_stderr_contains 'REF_MISSING'
 

@@ -297,14 +297,20 @@ func (h *Handle) Cancel() {
 	h.Program.drainCancellations()
 }
 
-func (h *Handle) Poll() HandleResult {
+func (h *Handle) Poll() HandleResult { return h.poll(true) }
+
+// PollRetained observes completion without dropping root interest. Watchers and
+// reactive hosts retain the root across subsequent invalidations.
+func (h *Handle) PollRetained() HandleResult { return h.poll(false) }
+
+func (h *Handle) poll(release bool) HandleResult {
 	if h == nil || h.Program == nil || h.Node == nil {
 		return HandleResult{Done: true, Result: Result{Diagnostic: failure(mem.System, "TGT_NO_RULE", "invalid handle")}}
 	}
 	if h.Node.State != core.NodeComplete && h.Node.State != core.NodeFailed && h.Node.State != core.NodeCancelled {
 		return HandleResult{}
 	}
-	if h.Root != nil {
+	if release && h.Root != nil {
 		h.Program.Engine.Release(h.Root)
 		h.Root = nil
 	}

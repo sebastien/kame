@@ -46,7 +46,7 @@ tests/T010-02-wasm-abi.sh	010	wasm	Import gate, distinct host request kinds, can
 tests/T010-03-wasm-target.sh	010	wasm	Definition targets materialize against the in-memory host; missing targets diagnose
 tests/T010-04-wasm-forwarding.sh	010	wasm	Target host requests for read, process, and write are forwarded and completed asynchronously
 tests/T010-05-wasm-rule-target.sh	010	wasm	A file rule materializes with its recipe forwarded to the embedding host
-tests/T010-06-wasm-cli.sh	010	wasm	dist/kame.js version, help, do expr byte parity, grants, diagnostic flags, and exit statuses
+tests/T010-06-wasm-cli.sh	010	wasm	dist/kame.js version, help, do run expression byte parity, grants, diagnostic flags, and exit statuses
 tests/T010-07-wasm-cat.sh	010	wasm	dist/kame.js do cat and primary materialization over a discovered source
 tests/T010-08-wasm-glob.sh	010	wasm	Wildcard host requests match native output byte-for-byte and require a read grant
 tests/T010-09-wasm-parse.sh	010	wasm	dist/kame.js do parse matches native AST JSON for all languages, stdin, and errors

@@ -135,7 +135,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
             drainEvents(session.Program, out, errOut, options.JSON, &progress)
             for i := range handles {
                 if handles[i].Definition && handles[i].Node.Current { continue }
-                polled := handles[i].Poll()
+                polled := handles[i].PollRetained()
                 if !polled.Done { busy = true }
                 if polled.Done && polled.Result.Diagnostic.Code != "" && !reported {
                     emitDiagnostic(diagnosticWriter(out, errOut, options.JSON), polled.Result.Diagnostic, options.JSON, session.Program.Parsed.Source)

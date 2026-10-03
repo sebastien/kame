@@ -162,13 +162,13 @@ test-step "native source composition reuses the value program unchanged"
 )
 
 test-step "available Kash boundary: typed argv, capture, explicit grants"
-cli_run -- do expr --allow-run -c '(let [names ["hello world.txt" "second.txt" "a; echo surprise"]] $(printf "[%s]\n" $names))'
+cli_run -- do run --lang expr --allow-run -c '(let [names ["hello world.txt" "second.txt" "a; echo surprise"]] $(printf "[%s]\n" $names))'
 cli_expect_status 0
 cli_expect_stdout '"[hello world.txt]\n[second.txt]\n[a; echo surprise]\n"'
-cli_run -- do expr --allow-run -c '(uppercase (strip $(printf "hello\n")))'
+cli_run -- do run --lang expr --allow-run -c '(uppercase (strip $(printf "hello\n")))'
 cli_expect_status 0
 cli_expect_stdout '"HELLO"'
-cli_run -- do expr -c '$(printf denied)'
+cli_run -- do run --lang expr -c '$(printf denied)'
 cli_expect_status 1
 cli_expect_stderr_contains CAP_DENIED
 

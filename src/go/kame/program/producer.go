@@ -104,6 +104,17 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			}
 			resolved.Plan.Free(p.Alloc)
 			name := p.canonicalTarget(input, true)
+            key := core.ResourceKey{Kind: core.ResourceFile, Name: name}
+            dependency := p.Engine.Lookup(key)
+            if dependency == nil {
+                external := mem.Alloc[externalFileState](p.Alloc)
+                external.Program, external.Name = p, cloneText(p.Alloc, name)
+                dependency = p.Engine.AddOwned(key, produceExternalFile, external, freeExternalFileState)
+            }
+            if !p.prepareDependency(c, state.Index, dependency) {
+                mem.FreeString(p.Alloc, name)
+                return core.ProducerWaiting
+            }
 			result := p.Host.Stat(name)
 			mem.FreeString(p.Alloc, name)
 			if !result.Exists {
@@ -155,6 +166,9 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	}
 	if entry.Rule.Kind == rule.FileRule {
 		entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node)
+        if hasYield(effects) && len(entry.Plan.Outputs) == 1 && !p.Forwarding {
+            entry.Plan.Freshness = p.yieldFreshness(entry, effects)
+        }
 	} else {
 		entry.Plan.Freshness = Stale
 	}

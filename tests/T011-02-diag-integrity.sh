@@ -37,8 +37,8 @@ sweep_dir() {
 }
 
 test-step "usage diagnostics"
-sweep_dir . OPT_UNKNOWN do expr --bogus
-sweep_dir . OPT_VALUE_INVALID do expr -c '(count)' --allow-read=
+sweep_dir . OPT_UNKNOWN do run --lang expr --bogus
+sweep_dir . OPT_VALUE_INVALID do run --lang expr -c '(count)' --allow-read=
 sweep_dir . OPT_NO_VALUE do plan -f
 sweep_dir . CMD_UNKNOWN do bogus
 sweep_dir . BUILD_NO_SOURCE --force
@@ -58,9 +58,9 @@ sweep_dir diag-sweep RECIPE_TIMEOUT --timeout 100 ./timeout.out
 
 test-step "language and capability diagnostics"
 sweep_dir . PARSE_ERR do parse --lang expr
-sweep_dir . REF_MISSING do expr -c 'unknown-name'
-sweep_dir . EXPR_INVALID do expr -c '(first 1)'
-sweep_dir . CAP_DENIED do expr -c '(read "x")'
+sweep_dir . REF_MISSING do run --lang expr -c 'unknown-name'
+sweep_dir . EXPR_INVALID do run --lang expr -c '(first 1)'
+sweep_dir . CAP_DENIED do run --lang expr -c '(read "x")'
 sweep_dir diag-sweep NO_ARTIFACT do cat noart
 sweep_dir diag-sweep FS_ERR -f missing-build.kmk anything
 

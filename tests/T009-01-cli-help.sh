@@ -49,7 +49,7 @@ cli_expect_stderr_empty
 test-step "do namespace overview"
 cli_run -- do
 cli_expect_status 0
-cli_expect_stdout_contains "kame do COMMAND" "Commands:" "parse" "expr"
+cli_expect_stdout_contains "kame do COMMAND" "Commands:" "parse" "run"
 cli_expect_stderr_empty
 
 cli_run -- do --help
@@ -61,7 +61,7 @@ cli_expect_status 0
 cli_expect_stdout_contains "Commands:"
 
 test-step "per-command help"
-for command in plan cat inputs outputs span parse fmt expr; do
+for command in plan cat inputs outputs span parse fmt run; do
 	cli_run -- do "$command" --help
 	cli_expect_status 0
 	cli_expect_stdout_contains "Usage: kame do $command"
@@ -88,7 +88,7 @@ fi
 cli_expect_stderr_contains "BUILD_NO_SOURCE"
 
 test-step "help token as an option value is that option's value"
-cli_run -- do expr -c --help
+cli_run -- do run --lang expr -c --help
 if grep -q "Usage:" "$CLI_OUT" || grep -q "Usage:" "$CLI_ERR"; then
 	test-fail "option value requested help"
 else

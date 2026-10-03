@@ -15,9 +15,9 @@ parity() {
 	local expression="$1" expected_status="$2"
 	shift 2
 	set +e
-	"$CLI_BIN" do expr "$@" -c "$expression" >"$work/native.out" 2>"$work/native.err"
+	"$CLI_BIN" do run --lang expr "$@" -c "$expression" >"$work/native.out" 2>"$work/native.err"
 	local native_status=$?
-	node "$CLI_ROOT/dist/kame.js" do expr "$@" -c "$expression" >"$work/wasm.out" 2>"$work/wasm.err"
+	node "$CLI_ROOT/dist/kame.js" do run --lang expr "$@" -c "$expression" >"$work/wasm.out" 2>"$work/wasm.err"
 	local wasm_status=$?
 	set -e
 	if [ "$native_status" = "$expected_status" ] && [ "$wasm_status" = "$expected_status" ] && cmp -s "$work/native.out" "$work/wasm.out"; then

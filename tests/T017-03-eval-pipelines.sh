@@ -14,9 +14,9 @@ mkdir -p "$work"
 parity() {
 	local expression="$1" expected="$2" code="${3:-}"
 	set +e
-	"$CLI_BIN" do expr --allow-run --capture-limit=32 -c "$expression" >"$work/native.out" 2>"$work/native.err"
+	"$CLI_BIN" do run --lang expr --allow-run --capture-limit=32 -c "$expression" >"$work/native.out" 2>"$work/native.err"
 	local native_status=$?
-	node "$CLI_ROOT/dist/kame.js" do expr --allow-run --capture-limit=32 -c "$expression" >"$work/wasm.out" 2>"$work/wasm.err"
+	node "$CLI_ROOT/dist/kame.js" do run --lang expr --allow-run --capture-limit=32 -c "$expression" >"$work/wasm.out" 2>"$work/wasm.err"
 	local wasm_status=$?
 	set -e
 	if [ "$native_status" = "$expected" ] && [ "$wasm_status" = "$expected" ] && cmp -s "$work/native.out" "$work/wasm.out"; then test-ok "$expression"; else test-fail "pipeline backend mismatch: native=$native_status wasm=$wasm_status: $expression"; fi
@@ -68,7 +68,7 @@ if [ ! -e "$marker" ]; then test-ok "all argv validated before launch"; else tes
 for backend in native wasm; do
 	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
 	set +e
-	"${command[@]}" do expr --allow-run=/usr/bin/printf -c "\$(/usr/bin/printf x | /bin/sh -c \"touch '$marker'\")" >"$work/$backend.out" 2>"$work/$backend.err"
+	"${command[@]}" do run --lang expr --allow-run=/usr/bin/printf -c "\$(/usr/bin/printf x | /bin/sh -c \"touch '$marker'\")" >"$work/$backend.out" 2>"$work/$backend.err"
 	status=$?
 	set -e
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/$backend.err" && [ ! -e "$marker" ]; then test-ok "$backend validates every executable grant"; else test-fail "$backend leaked stage authorization"; fi

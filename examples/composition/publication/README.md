@@ -49,7 +49,7 @@ determines which computations must be orchestrated.
 Read `publish.kash`. Once standalone Kash is supported, its invocation will be:
 
 ```sh
-kame do kash ./publish.kash
+kame do run ./publish.kash
 ```
 
 It invokes the build, validates it, then summarizes its files. Its definitions

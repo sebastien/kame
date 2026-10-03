@@ -9,7 +9,7 @@ cli_require_tools
 cli_build
 
 evaluates() {
-	cli_run -- do expr --allow-run -c "$1"
+	cli_run -- do run --lang expr --allow-run -c "$1"
 	cli_expect_status 0 "$1"
 	cli_expect_stdout "$2" "$1"
 	cli_expect_stderr_empty
@@ -36,57 +36,57 @@ evaluates '$(printf "")' '""'
 evaluates $'$(printf "[%s]" a \\\n b)' '"[a][b]"'
 
 test-step "missing capabilities and failing commands remain failures"
-cli_run -- do expr -c '$(printf denied)'
+cli_run -- do run --lang expr -c '$(printf denied)'
 cli_expect_status 1
 cli_expect_stderr_contains CAP_DENIED
-cli_run -- do expr --allow-run -c '$(sh -c "printf diagnostic >&2; exit 7")'
+cli_run -- do run --lang expr --allow-run -c '$(sh -c "printf diagnostic >&2; exit 7")'
 cli_expect_status 1
 cli_expect_stdout ''
 cli_expect_stderr_contains diagnostic
 cli_expect_stderr_contains RECIPE_FAIL
-cli_run -- do expr --allow-run -c '$(no-such-executable-kash)'
+cli_run -- do run --lang expr --allow-run -c '$(no-such-executable-kash)'
 cli_expect_status 1
 cli_expect_stderr_contains HOST_FAIL
-cli_run -- do expr --allow-run -c '(let [files ["a"]] $(printf "%s" "$files"))'
+cli_run -- do run --lang expr --allow-run -c '(let [files ["a"]] $(printf "%s" "$files"))'
 cli_expect_status 1
 cli_expect_stderr_contains EXPR_INVALID
-cli_run -- do expr --allow-run -c '$(printf "\\377")'
+cli_run -- do run --lang expr --allow-run -c '$(printf "\\377")'
 cli_expect_status 1
 cli_expect_stderr_contains CAPTURE_ENCODING
-cli_run -- do expr --allow-run -c '$(head -c 1048577 /dev/zero)'
+cli_run -- do run --lang expr --allow-run -c '$(head -c 1048577 /dev/zero)'
 cli_expect_status 1
 cli_expect_stderr_contains CAPTURE_LIMIT
 
 test-step "per-substitution capture limits and option validation"
-cli_run -- do expr --allow-run --capture-limit 3 -c '$(printf abc)'
+cli_run -- do run --lang expr --allow-run --capture-limit 3 -c '$(printf abc)'
 cli_expect_status 0
 cli_expect_stdout '"abc"'
-cli_run -- do expr --allow-run --capture-limit=3 -c '$(printf abcd)'
+cli_run -- do run --lang expr --allow-run --capture-limit=3 -c '$(printf abcd)'
 cli_expect_status 1
 cli_expect_stdout ''
 cli_expect_stderr_contains CAPTURE_LIMIT
-cli_run -- do expr --allow-run --capture-limit=3 -c '(cat $(printf abc) $(printf def))'
+cli_run -- do run --lang expr --allow-run --capture-limit=3 -c '(cat $(printf abc) $(printf def))'
 cli_expect_status 0
 cli_expect_stdout '"abcdef"'
-cli_run -- do expr --allow-run --capture-limit=3 -c '$(printf "%s" $(printf abcd))'
+cli_run -- do run --lang expr --allow-run --capture-limit=3 -c '$(printf "%s" $(printf abcd))'
 cli_expect_status 1
 cli_expect_stderr_contains CAPTURE_LIMIT
-cli_run -- do expr --allow-run --capture-limit=3 -c '$(sh -c "printf abcdef >&2; printf abc")'
+cli_run -- do run --lang expr --allow-run --capture-limit=3 -c '$(sh -c "printf abcdef >&2; printf abc")'
 cli_expect_status 0
 cli_expect_stdout '"abc"'
 cli_expect_stderr_contains abcdef
-cli_run -- do expr --allow-run --capture-limit=2 -c '$(printf "é")'
+cli_run -- do run --lang expr --allow-run --capture-limit=2 -c '$(printf "é")'
 cli_expect_status 0
 cli_expect_stdout '"é"'
-cli_run -- do expr --allow-run --capture-limit=1 -c '$(printf "é")'
+cli_run -- do run --lang expr --allow-run --capture-limit=1 -c '$(printf "é")'
 cli_expect_status 1
 cli_expect_stderr_contains CAPTURE_LIMIT
 for invalid in 0 -1 nope 999999999999999999999999 ''; do
-	cli_run -- do expr "--capture-limit=$invalid" -c '$(printf unused)'
+	cli_run -- do run --lang expr "--capture-limit=$invalid" -c '$(printf unused)'
 	cli_expect_status 2
 	cli_expect_stderr_contains OPT_VALUE_INVALID
 done
-cli_run -- do expr --capture-limit
+cli_run -- do run --lang expr --capture-limit
 cli_expect_status 2
 cli_expect_stderr_contains OPT_NO_VALUE
 

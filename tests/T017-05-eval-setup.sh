@@ -20,7 +20,7 @@ check() {
 	local expression="$1" expected_status="$2" expected_stdout="$3" code="$4"
 	shift 4
 	set +e
-	"${command[@]}" do expr --allow-run "--allow-read=$work" "--allow-write=$work" "$@" -c "$expression" >"$work/stdout" 2>"$work/stderr"
+	"${command[@]}" do run --lang expr --allow-run "--allow-read=$work" "--allow-write=$work" "$@" -c "$expression" >"$work/stdout" 2>"$work/stderr"
 	local status=$?
 	set -e
 	if [ "$status" = "$expected_status" ] && [ "$(cat "$work/stdout")" = "$expected_stdout" ]; then test-ok "$backend: $expression"; else test-fail "$backend: status=$status: $expression"; fi
@@ -66,7 +66,7 @@ for backend in native wasm; do
 
 	test-step "$backend: stage cwd cannot broaden scoped executable grants"
 	set +e
-	"${command[@]}" do expr --allow-run=/usr/bin/printf -c "\$(:cwd \"$work/left\" ./bin/stage-print denied > output)" >"$work/stdout" 2>"$work/stderr"
+	"${command[@]}" do run --lang expr --allow-run=/usr/bin/printf -c "\$(:cwd \"$work/left\" ./bin/stage-print denied > output)" >"$work/stdout" 2>"$work/stderr"
 	status=$?
 	set -e
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/stderr"; then test-ok "$backend preserves caller run roots"; else test-fail "$backend broadened run grants"; fi

@@ -67,3 +67,22 @@ func TestPrimaryRunSelectionDoesNotProbeFilesystem(t *testing.T) {
 	build := [][]string{{}, {"-C", "work", "target"}, {"target", "-c", "rule text"}, {"--", "literal.kash"}}
 	for i := range build { if cli.SelectsRun(build[i]) { t.Error("ordinary build operand was reinterpreted as a runner source") } }
 }
+
+func TestDiscoveredBuildAppendsCommandsWithoutReinterpretingTargets(t *testing.T) {
+	inv := cli.Parse("", []string{"build", "-c", "(out name)", "./output.km", "--command=42", "--", "--help"})
+	defer inv.Free()
+	if !inv.OK || inv.Name != "run" || len(inv.Inputs) != 3 { t.Error("discovered build did not compose its inline fragments"); return }
+	input := inv.Inputs[0]
+	if input.Kind != "discover" || input.Lang != "kmk" || len(input.Entries) != 3 || input.Entries[0] != "build" || input.Entries[1] != "./output.km" || input.Entries[2] != "--help" { t.Error("discovered build targets changed meaning") }
+	if inv.Inputs[1].Value != "(out name)" || inv.Inputs[2].Value != "42" || inv.Inputs[1].Lang != "km" || inv.NoDefaultGrants || len(inv.Args) != 0 { t.Error("appended command order, language or build policy changed") }
+	if cli.AppendsCommands([]string{"build", "--env", "-c", "--", "-c"}) { t.Error("option values or literal targets became commands") }
+}
+
+func TestRemovedExecutionCommandsGiveMigrationHelp(t *testing.T) {
+	commands := []string{"expr", "kash"}
+	for i := range commands {
+		inv := cli.Parse(commands[i], []string{"-c", "42"})
+		if inv.OK || inv.Error.Code != "CMD_UNKNOWN" || inv.Error.Message != cli.RemovedCommandMessage(commands[i]) { t.Error("removed execution command did not report migration help") }
+		inv.Free()
+	}
+}

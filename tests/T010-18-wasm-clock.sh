@@ -32,8 +32,8 @@ native() {
 }
 
 test-step "now returns epoch nanoseconds on both backends"
-wasm do expr -c '(now)'
-native do expr -c '(now)'
+wasm do run --lang expr -c '(now)'
+native do run --lang expr -c '(now)'
 if [ "$status" = 0 ] && [ "$nstatus" = 0 ] && [[ "$(cat "$project/out.txt")" =~ ^1[0-9]{18}$ ]] && [[ "$(cat "$project/nout.txt")" =~ ^1[0-9]{18}$ ]]; then
 	# Both readings are within a minute of each other.
 	drift=$(( $(cat "$project/nout.txt") - $(cat "$project/out.txt") ))
@@ -48,9 +48,9 @@ else
 fi
 
 test-step "monotonic is a non-negative, non-decreasing nanosecond clock"
-wasm do expr -c '(monotonic)'
+wasm do run --lang expr -c '(monotonic)'
 first="$(cat "$project/out.txt")"
-wasm do expr -c '(monotonic)'
+wasm do run --lang expr -c '(monotonic)'
 second="$(cat "$project/out.txt")"
 if [ "$status" = 0 ] && [ "$first" -ge 0 ] && [ "$second" -ge "$first" ]; then
 	test-ok "monotonic readings are non-negative and non-decreasing"
@@ -59,7 +59,7 @@ else
 fi
 
 test-step "clocks need no capability grant"
-wasm do expr -c '(now)'
+wasm do run --lang expr -c '(now)'
 if [ "$status" = 0 ] && [ ! -s "$project/err.txt" ]; then
 	test-ok "now runs under the default deny-all grants"
 else
