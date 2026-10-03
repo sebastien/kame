@@ -19,7 +19,7 @@ trap 'rm -rf "$work"' EXIT
 
 test-step "target requests are forwarded and completed asynchronously"
 if KAME_READ_PATH="$read_file" KAME_WRITE_PATH="$write_file" node --input-type=module - <<'NODE'
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const bytes = await readFileSync('./build/wasm/kame.wasm');
@@ -82,7 +82,11 @@ const run = (source, service) => {
     state = exports.kame_wasm_step(handle);
     if (state === 1) {
       requests++;
-      service(handle, requestHandle());
+      const request = requestHandle();
+      if (requestKind() === 7) {
+        const [pointer, length] = write(JSON.stringify(existsSync(payloadText())));
+        if (exports.kame_wasm_complete_json(handle, request, pointer, length) !== 0) throw new Error('file existence completion failed');
+      } else service(handle, request);
     }
   }
   if (state !== 2) throw new Error(`target did not complete: ${state}`);
