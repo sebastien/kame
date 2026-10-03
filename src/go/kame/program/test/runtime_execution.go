@@ -733,3 +733,31 @@ func TestDefinitionMaterializationReturnsCurrentValue(t *testing.T) {
  result.Free(a)
  compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
+
+func TestAlwaysFileRerunsOncePerRootEpochAndRemainsAnArtifact(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-always-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	if os.WriteFile(dir+"/input", []byte("source"), 0o644) != nil { t.Fatal("input write failed"); return }
+	parsed := script.Parse(a, "always.kmk", "always ./output : ./input\n\tcp @< @>\n\tprintf x >> recipe-log\nleft : ./output\nright : ./output\nroot : left right\n")
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
+	if compiled.Program == nil || len(compiled.Diagnostics) != 0 { t.Fatal("always compile failed"); return }
+	for cycle := 0; cycle < 3; cycle++ {
+		result := compiled.Program.Materialize("root")
+		if result.Diagnostic.Code != "" { t.Error("always diamond root failed") }
+		result.Free(a)
+	}
+	data, readErr := os.ReadFile(a, dir+"/recipe-log")
+	if readErr != nil || string(data) != "xxx" { t.Error("always file did not rerun exactly once per diamond root") }
+	mem.FreeSlice(a, data)
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "" || result.Fresh || result.Path != "./output" { t.Error("always target lost artifact semantics or reported fresh") }
+	result.Free(a)
+	data, readErr = os.ReadFile(a, dir+"/recipe-log")
+	if readErr != nil || string(data) != "xxxx" { t.Error("direct always request did not rerun") }
+	mem.FreeSlice(a, data)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}

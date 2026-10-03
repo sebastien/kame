@@ -92,3 +92,24 @@ func TestWildcardInputRetainsAuthoredToken(t *testing.T) {
   t.Error("wildcard input classification or quoted literal changed")
  }
 }
+
+func TestAlwaysPreservesFileKindOutputsAndFormatting(t *testing.T) {
+	a := t.Allocator()
+	parsed := rule.ParseRule(a, "always.kmk", "always ./one ./two : ./input\n  cp @< @>\n")
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || !parsed.Rule.Always || parsed.Rule.Kind != rule.FileRule || len(parsed.Rule.Outputs) != 2 {
+		t.Error("always did not preserve file-rule semantics")
+		return
+	}
+	formatted := rule.FormatRule(a, parsed.Rule)
+	if formatted != "always ./one ./two : ./input\n\tcp @< @>" {
+		t.Error("always formatter lost the prefix or outputs")
+	}
+	mem.FreeString(a, formatted)
+	bad := rule.ParseRule(a, "bad.kmk", "always named :\n\techo forbidden\n")
+	defer bad.Free()
+	if len(bad.Diagnostics) == 0 { t.Error("always accepted a named task") }
+	ordinary := rule.ParseRule(a, "ordinary.kmk", "always :\n\techo normal\n")
+	defer ordinary.Free()
+	if len(ordinary.Diagnostics) != 0 || ordinary.Rule.Always || ordinary.Rule.Kind != rule.TaskRule { t.Error("the ordinary target named always stopped working") }
+}

@@ -28,6 +28,9 @@ strings. Bytes print directly. Do not infer string splitting from display.
 `./output.txt` names a file artifact; `output.txt` without an explicit path is
 not automatically a file rule. A bare task runs when requested; `task NAME` is
 a cached task. Use `--force` to bypass freshness/cache decisions for an invocation.
+For a persistent file-rule override, write `always ./output : ./input`. It keeps
+file artifacts and output checks, and reruns whenever a new root reaches it.
+Shared prerequisites still run once within a diamond or concurrent root batch.
 
 `-C project -f Makefile.kmk` selects `project/Makefile.kmk`, independent of
 option order. Absolute source paths stay absolute. Includes are relative to

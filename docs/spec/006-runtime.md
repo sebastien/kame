@@ -124,6 +124,8 @@ planning or rendering and return `PHASE_INVALID`.
 
 A file rule is fresh when:
 
+- It has no `always` prefix.
+
 - It has at least one output.
 - Every output exists.
 - Every declared and discovered file input exists.
@@ -132,6 +134,15 @@ A file rule is fresh when:
 
 Freshness is evaluated after dependency-discovering render. A file rule with no
 declared or discovered input is always stale.
+
+An `always` file rule, for example `always ./stamp : ./input`, bypasses
+freshness every time it is reached from a new requested-root epoch. It remains
+a file resource: output paths, multi-output aliases, captures, publication
+checks and `do cat` work as for an ordinary file rule. It has no cache lookup.
+Shared prerequisites execute once within a diamond or a concurrent root batch;
+sequential requests after releasing the previous root rerun the rule. An active
+root retains its generation, so overlapping roots share ongoing work. A failed
+or cancelled prior generation may be retried by a new root.
 
 Before execution, the runtime creates parent directories for explicit relative
 and absolute filesystem outputs. After successful execution, every declared
@@ -216,6 +227,8 @@ bytes is a separate operation used by `cat`.
   name; explicit definition evaluation remains available through `@(...)`.
 - A diamond dependency graph executes its shared node once.
 - Existing fresh file outputs are skipped; older or missing outputs rebuild.
+- `always` file outputs rerun on sequential roots and invocations, while shared
+  diamond dependencies execute once per root; artifact/output verification remains.
 - A rule with a dynamic body dependency renders before its first freshness
   decision; plan reports `unknown` before that render.
 - Independent prerequisites can execute concurrently while one recipe remains

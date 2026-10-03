@@ -219,7 +219,8 @@ func taskTerminal(state core.NodeState) bool {
 	return state == core.NodeComplete || state == core.NodeFailed || state == core.NodeCancelled
 }
 
-// claimStaleTask invalidates one terminal task whose last claim is older than epoch.
+// claimStaleTask invalidates a terminal task or always file rule whose last claim
+// is older than epoch.
 // The stamp is set before Invalidate so a later parent in this epoch, or a resumed
 // producer, does not invalidate the same generation again.
 func (p *Program) claimStaleTask(node *core.Node, epoch int64) {
@@ -239,7 +240,7 @@ func (p *Program) claimStaleTask(node *core.Node, epoch int64) {
 		if state == core.NodeComplete && !p.cacheBlockedByBareTask(&p.Instances[index]) {
 			return
 		}
-	} else if kind != rule.TaskRule {
+	} else if kind != rule.TaskRule && !(kind == rule.FileRule && p.Instances[index].Rule.Always) {
 		return
 	}
 	p.Instances[index].satisfiedEpoch = epoch

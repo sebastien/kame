@@ -60,6 +60,8 @@ const (
 )
 
 type Rule struct {
+	// Always bypasses freshness while preserving file-output semantics.
+	Always  bool
 	Span    source.Span
 	Header  source.Span
 	Kind    Kind
@@ -202,6 +204,10 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 		p.error(start, end, "expected rule output")
 		return
 	}
+	if len(words) >= 2 && p.s.Text[words[0].Start:words[0].End] == "always" {
+		r.Always = true
+		words = words[1:]
+	}
 	if len(words) >= 2 && (p.s.Text[words[0].Start:words[0].End] == "task" || p.s.Text[words[0].Start:words[0].End] == "service") {
 		if p.s.Text[words[0].Start:words[0].End] == "task" {
 			r.Kind = CachedTaskRule
@@ -282,6 +288,9 @@ func (p *parser) classify(r *Rule) {
 		if r.Outputs[i].Path != paths {
 			p.error(r.Outputs[i].Span.Start, r.Outputs[i].Span.End, "cannot mix path and name outputs")
 		}
+	}
+	if r.Always && !paths {
+		p.error(r.Header.Start, r.Header.End, "always rules require file outputs")
 	}
 	if r.Kind == CachedTaskRule || r.Kind == ServiceRule {
 		if r.Outputs[0].Path {
@@ -565,6 +574,9 @@ func FormatRule(a mem.Allocator, r *Rule) string {
 // FormatRuleWithIndent returns allocator-owned canonical rule text without a terminal newline.
 func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 	b := strings.NewBuilder(a)
+	if r.Always {
+		b.WriteString("always ")
+	}
 	if r.Kind == CachedTaskRule {
 		b.WriteString("task ")
 	}

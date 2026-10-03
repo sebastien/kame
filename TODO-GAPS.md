@@ -57,7 +57,7 @@ relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 | B3 | Multiple expressions per rule header | Verified and covered | Medium → fixed | `WASM_SOURCES` + glue |
 | B4 | Path interpolation in rule headers (`@(VAR)/suffix`) | Parser/evaluator gap, fixed | Medium → fixed | all input paths |
 | B5 | Scalar expansions and leading/bare captures | Implemented and verified | Low → fixed | not used here |
-| C1 | No way to force-rebuild a file output (`.PHONY` equivalent) | Rule semantics | Low | GNU marks outputs phony |
+| C1 | Persistent always-rebuild file outputs | Implemented | Low → fixed | GNU marks outputs phony |
 | C2 | No order-only prerequisites | Rule semantics | Low | not used here |
 | C3 | Automatic variables only partially mapped | Rule semantics | Low | `$@`/`$<`/`$^` only |
 | C4 | One-shell recipe vs Make's line-per-shell | Behavioural | Info | compatible here |
@@ -386,15 +386,23 @@ in `TODO.md`.
 
 ## C. Rule semantics
 
-### C1 — No force-rebuild for a file output
+### C1 — Persistent always-rebuild file outputs (fixed)
 
-GNU's `.PHONY` naming a real output makes it rebuild every run. Kame has no
-equivalent: a bare task always runs, but you cannot give it the same name as an
+`always ./output : ./input` preserves the file resource and publication checks,
+but bypasses freshness for each new root epoch. Shared prerequisites run once
+per diamond; multiple outputs, pattern captures, `do cat`, plan metadata and
+canonical formatting remain file-rule behavior. `always :` is still an ordinary
+target name; prefixed named tasks/services are rejected before effects.
+T006-03 passes 15 native/WASM assertions. The parser sanitizer suite passes 9
+tests; all 97 program sanitizer tests pass, including repeated materialization
+and shared always-output dependencies in one runtime.
+
+Historical finding: GNU's `.PHONY` naming a real output makes it rebuild every
+run. Kame had no equivalent: a bare task always runs, but you cannot give it the same name as an
 artifact. In this Makefile the GNU `.PHONY` list names `build/kame.debug`,
 `build/kame.sanitize`, `dist/kame`, and `dist/kame.com`, which contradicts its
 own `KAME_BUILD_INPUTS`; `Makefile.kmk` intentionally treats them as file rules.
-This is arguably a Makefile bug, not a Kame gap, but the absence of an explicit
-"always run this file target" escape hatch should be documented.
+The new `always` prefix supplies the explicit file-target escape hatch.
 
 ### C2 — No order-only prerequisites
 
@@ -481,6 +489,7 @@ Ordered by value-to-effort for porting real projects:
 - [x] **A6** Backslash line continuation in definitions.
 - [x] **A5** Implement computed record lookup and document the optional generator design.
 - [ ] **A4** Minimal `when`/`if` plus conditional include.
+- [x] **C1** Persistent `always` file rules with ordinary artifact semantics.
 - [x] **D3** Add an "Idioms and gotchas" page to the skill/reference docs.
 
 ## What is *not* a gap

@@ -406,8 +406,9 @@ service server : ./output
 ```
 
 ```text
-RULE = PREFIXED-RULE | UNPREFIXED-RULE
+RULE = PREFIXED-RULE | ALWAYS-RULE | UNPREFIXED-RULE
 PREFIXED-RULE = ("task" | "service") WS+ NAME-TARGET WS* ":" (WS+ INPUTS)?
+ALWAYS-RULE = "always" WS+ OUTPUTS WS* ":" (WS+ INPUTS)?
 UNPREFIXED-RULE = OUTPUTS WS* ":" (WS+ INPUTS)?
 OUTPUTS = OUTPUT-TARGET (WS+ OUTPUT-TARGET)*
 INPUTS = INPUT (WS+ INPUT)*
@@ -441,6 +442,13 @@ Headers are classified as:
 - Task: exactly one bare name or name template without a prefix.
 - Cached task: `task` followed by exactly one name or name template.
 - Service: `service` followed by exactly one name or name template.
+
+`always` followed by one or more explicit file outputs marks a file rule as
+always stale, without changing its artifact kind, inputs, captures, or output
+verification. It is invalid on named/cached tasks or services. A standalone
+header `always :` remains an ordinary bare task named `always`. Formatting
+preserves the prefix; AST and plan JSON emit `always: true` when set. Runtime
+rerun and sharing semantics are specified in `006-runtime.md`.
 
 Mixing path and name outputs is invalid. A target token such as `out.o` that is
 neither a valid name nor an explicit path is a parse error; the diagnostic

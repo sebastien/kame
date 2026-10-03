@@ -75,7 +75,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | B3 multiple expression inputs | Already supported by the parser and now verified by T004-09 across multiple host-backed expressions, literal and interpolated paths. |
 | B4 header path interpolation | Implemented through shared template rendering for path and quoted input tokens; T004-09 pins planning, expanded inspection and execution parity. |
 | B5 scalar expansion/leading captures/bare captures | Implemented scalar expansion text and leading expression patterns. Bare target captures already existed; T014-02 verifies exact precedence and template ambiguity on both hosts. |
-| C1 forced file rebuild | `--force` is an existing invocation override. Document it; a persistent per-rule always-rebuild declaration is a separate requested escape hatch. |
+| C1 forced file rebuild | Implemented: `always ./output : ./input` preserves file artifacts and output checks while rerunning once per requested-root epoch. T006-03 covers both hosts; parser/program sanitizer suites pass 9/97 tests, including repeated roots and diamond sharing. `--force` remains an invocation override. |
 | C2 order-only prerequisites | Remaining rule semantics; maintain scheduling edges while excluding them from freshness/cache content identity where specified. |
 | C3 automatic variables | Existing selectors cover inputs/outputs. Newer-input and stem equivalents need precise freshness/capture definitions; directory extraction can use pure path operations. |
 | C4 one shell per recipe | Intentional behavior; document the porting implications and keep process-host multiline tests. |
@@ -120,3 +120,13 @@ KB-9 is fixed: bounded instance-block reuse, binary encoding scratch and JS
 buffers now pass 8 MiB stdout/stderr parity on both hosts in human/JSON mode.
 Failure truncation metadata and bounded cached replay are verified too. True
 logical-heap exhaustion diagnostics remain an open spec-010 acceptance item.
+
+C1 now has a persistent file-rule escape hatch: `always` bypasses freshness
+without turning outputs into named tasks. The new native/WASM regression passes
+15 assertions for reruns, diamond sharing, multiple artifacts, captures, cat, inspection,
+formatting and pre-effect rejection. Parser and program ASAN/UBSAN suites pass
+9 and 97 tests respectively. The previous 102-suite compiled CLI leak gate
+predates this new feature; focused sanitizer conformance and existing freshness
+regressions verify this change separately. The new 15-assertion native/WASM
+suite also passes against the compiled sanitizer CLI with leak detection enabled
+and ASAN symbols verified.

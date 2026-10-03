@@ -6,7 +6,7 @@ import (
 )
 
 func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
-	if len(plan.Outputs) == 0 {
+	if (plan.Rule != nil && plan.Rule.Always) || len(plan.Outputs) == 0 {
 		return Stale
 	}
 	inputs := plan.Inputs

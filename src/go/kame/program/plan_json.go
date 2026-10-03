@@ -55,6 +55,9 @@ func WritePlan(out io.Writer, plan *Plan) {
 		e.Str("unknown")
 	}
 	if plan.Rule != nil {
+		if plan.Rule.Always {
+			e.Str("always"); e.Bool(true)
+		}
 		e.Str("rule")
 		e.BeginObject()
 		e.Str("start")

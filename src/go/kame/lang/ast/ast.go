@@ -435,6 +435,9 @@ func (e *astEncoder) rule(value *rule.Rule) {
 		return
 	}
 	e.node(ruleKind(value.Kind), value.Span)
+	if value.Always {
+		e.Str("always"); e.Bool(true)
+	}
 	e.Str("header")
 	e.span(value.Header)
 	e.Str("outputs")
