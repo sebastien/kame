@@ -97,3 +97,14 @@ and invocation capability inheritance need direct evidence.
 Maintain this review as decisions become verified. Do not erase remaining design
 items or mark the overall objective complete while named gaps or spec clauses
 lack implementation evidence.
+
+## Latest verification
+
+A fresh `make test` passes the package, external example, Go CLI unit, and all
+100 shell conformance suites in the current checkout. Broad Clang
+AddressSanitizer passes all 359 portable package tests; the two external engine
+examples also pass with sanitizers. Go CLI sanitizer compatibility tests pass
+with the explicit `GOGC=off` setting documented in spec 013. The compiled CLI
+LeakSanitizer conformance run remains a separate pending gate. These passing
+checks do not close A3, A4, order-only prerequisites, or other requirements still
+listed as remaining above.
