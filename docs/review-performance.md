@@ -73,3 +73,10 @@ These workloads do not establish throughput for large process pipelines,
 streaming latency, maximum graph size, retained-memory bounds, or release
 performance. Those need dedicated measurements; source-level complexity findings
 above are opportunities, not measured bottlenecks.
+
+The CLI test harness now excludes unit-package directories and Go-only test files
+from native executable freshness checks. Those files do not enter `so build
+./cmd/kame`; counting their timestamps caused avoidable native recompilation.
+A temporary filesystem check confirms that unit-only changes keep the binary
+current and a production source change still requests a rebuild. Production
+package directories and module metadata remain covered.

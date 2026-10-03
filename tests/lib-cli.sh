@@ -59,7 +59,8 @@ function cli_require_tools {
 }
 
 # Function: cli_sources_newer BINARY
-# Reports success (0) when any tracked source is newer than BINARY.
+# Reports success (0) when a production source is newer than BINARY. Unit
+# packages and Go-only test files do not participate in the native executable.
 function cli_sources_newer {
 	local binary="$1"
 	local dir
@@ -67,7 +68,7 @@ function cli_sources_newer {
 		if [ ! -d "$dir" ]; then
 			continue
 		fi
-		if [ -n "$(find "$dir" -type f -newer "$binary" -print -quit 2>/dev/null)" ]; then
+		if [ -n "$(find "$dir" -type f ! -path '*/test/*' ! -name '*_test.go' -newer "$binary" -print -quit 2>/dev/null)" ]; then
 			return 0
 		fi
 	done
