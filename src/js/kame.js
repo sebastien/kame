@@ -1696,7 +1696,7 @@ async function runFmt(module, inv) {
     }
     if (inv.inPlace) {
       try {
-        await writeFile(file, bytes);
+        await writeFileAtomic(file, bytes);
       } catch (error) {
         return failure('FS_ERR', `cannot replace source: ${file}`);
       }
