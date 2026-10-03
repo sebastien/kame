@@ -96,3 +96,4 @@ tests/T010-21-wasm-build-effects.sh	010	cli	Isolated binary yield and write publ
 tests/T014-02-patterns-ergonomics.sh	014	lang	Leading pattern captures, numeric and boolean expansions, bare targets, exact precedence and template ambiguity on native/WASM
 tests/T004-10-lang-line-continuations.sh	004	lang	Continued definitions and headers, recipe backslashes, multiline verbatim values and native/WASM format idempotence
 tests/T016-01-cli-render.sh	016	cli	Raw document rendering, repeated string payloads, comment inference, parse-only checks and capability parity on native/WASM
+tests/T007-10-lib-record-lookup.sh	007	lib	Computed record keys, nil/default contracts, callable transfer and configuration/input planning parity

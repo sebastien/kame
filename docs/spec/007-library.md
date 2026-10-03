@@ -38,6 +38,7 @@ The initial general operations are:
 | `bool` | Convert to language truth value |
 | `str` | Convert scalar to text; encode lists/records canonically |
 | `count` | Length of string code points, bytes, list, or record |
+| `get` | `(get RECORD KEY [DEFAULT])`: computed string key; missing keys return nil or DEFAULT |
 | `first` | First list item or nil |
 | `nth` | Indexed list or string item with negative indexes |
 | `apply` | Call a function with a list of arguments |
@@ -46,6 +47,19 @@ The initial general operations are:
 `str` uses canonical JSON-like text for lists and records with stable record key
 order; it is distinct from the Kame value display of `005-evaluation.md`. Bytes
 require explicit text or hexadecimal conversion and are not silently decoded.
+
+`get` uses byte-exact string keys and returns the selected value with its type
+and callable ownership intact. An invalid record/key type is `EXPR_INVALID`.
+`DEFAULT` is an ordinary evaluated argument, including when the key exists.
+Records can replace families of computed configuration names:
+
+```kame
+modes = [debug: "-O0" release: "-O2"]
+selected = "release"
+flags = (get modes selected)
+```
+
+The operation is pure and works in definitions, input headers, and planning.
 
 ## Comparison Operations
 

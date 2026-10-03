@@ -379,3 +379,35 @@ func TestPatternReplace(t *testing.T) {
 	parsed.Free()
 	registry.Free()
 }
+
+func TestComputedRecordLookupTransfersSelectedCallables(t *testing.T) {
+ a := t.Allocator()
+ engine := core.NewEngine(a)
+ defer engine.Free()
+ registry := eval.NewRegistry(a)
+ defer registry.Free()
+ operations.Register(registry)
+ parsed := script.Parse(a, "lookup", "")
+ defer parsed.Free()
+ p := eval.Compile(a, engine, parsed, registry)
+ defer p.Free()
+ samples := []string{
+  "(get [one: 1 two: 2] (cat \"t\" \"wo\"))",
+  "(get [one: 1] \"missing\" 7)",
+  "(get [one: 1] \"missing\")",
+  "(apply (get [used: ([x] (cat \"hello \" x)) unused: ([x] x)] \"used\" ([x] x)) [\"Ada\"])",
+  "(apply (get [unused: ([x] x)] \"missing\" ([x] (cat \"fallback \" x))) [\"Ada\"])",
+  "(get [one: 1] 1)",
+ }
+ for i := range samples {
+  r := evaluate(t, p, samples[i])
+  if i < 5 && r.Diagnostic.Code != "" { t.Error("valid computed lookup failed") }
+  if i == 0 && r.Value.Int != 2 { t.Error("computed key lost") }
+  if i == 1 && r.Value.Int != 7 { t.Error("missing-key default lost") }
+  if i == 2 && r.Value.Kind != core.Nil { t.Error("missing key must yield nil") }
+  if i == 3 && r.Value.Text != "hello Ada" { t.Error("selected callable did not survive lookup") }
+  if i == 4 && r.Value.Text != "fallback Ada" { t.Error("fallback callable did not survive lookup") }
+  if i == 5 && r.Diagnostic.Code != "EXPR_INVALID" { t.Error("invalid key type was accepted") }
+  r.Free(a)
+ }
+}

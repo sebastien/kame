@@ -143,6 +143,24 @@ func opCount(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	return eval.Result{Value: core.Value{Kind: core.Int, Int: int64(n)}}
 }
+// opGet selects a record value by a computed string key. The selected value
+// transfers callable ownership; discarded fields/defaults release theirs.
+func opGet(c *eval.Context, s any, v []core.Value) eval.Result {
+ _ = s
+ if v[0].Kind != core.Record { return invalidArgument(c, v, 0, "record") }
+ if v[1].Kind != core.String { return invalidArgument(c, v, 1, "string") }
+ selected := -1
+ for i := range v[0].Record { if v[0].Record[i].Key == v[1].Text { selected = i; break } }
+ result := core.Value{Kind: core.Nil}
+ for i := range v[0].Record {
+  if i == selected { result = v[0].Record[i].Value.Clone(c.Run) } else { c.FreeCallable(&v[0].Record[i].Value) }
+ }
+ if len(v) == 3 {
+  if selected < 0 { result = v[2].Clone(c.Run) } else { c.FreeCallable(&v[2]) }
+ }
+ return eval.Result{Value: result}
+}
+
 func opFirst(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.List {

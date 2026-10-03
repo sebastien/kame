@@ -49,7 +49,7 @@ relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 | A2 | No `?=`, no build-variable override from policy/CLI | Language design | High | `WASM_CC ?=` |
 | A3 | No target-specific variables or `export` propagation | Language design | High | `KAME_BUILD_MODE` |
 | A4 | No conditionals or conditional include | Missing feature | Medium | not used here |
-| A5 | No dynamic names (`$($(VAR))`) / `eval` / generated rules | Missing feature | Medium | not used here |
+| A5 | Computed configuration lookup and generator design | Minimum implemented; generator proposal documented | Medium → addressed | not used here |
 | A6 | Declaration continuations and multiline values | Parser gap, fixed | Low → fixed | long `KAME_INPUTS` |
 | B1 | `wildcard` pattern unions | Library gap, fixed | High → fixed | `WASM_SOURCES` |
 | B2 | `concat` of two non-empty wildcard globs hung | Engine bug (KB-1) | Critical → fixed | `WASM_SOURCES` (workaround retained) |
@@ -180,7 +180,20 @@ next thing a real project hits.
 conditional include. `TODO.md` asks for "a minimal if/when and conditional
 include".
 
-### A5 — No dynamic definition lookup / `eval`
+### A5 — Computed record lookup and generated-declaration design (minimum addressed)
+
+`(get RECORD KEY [DEFAULT])` supplies typed lookup by a computed string key.
+Record-valued definitions can replace computed configuration-name families;
+selected lists work directly in headers and planning. T007-10 passes 18
+native/WASM assertions, and 8 operation sanitizer tests cover scalar/default
+semantics and transfer of selected/default callable ownership.
+
+[declaration-generation-design.md](docs/declaration-generation-design.md)
+records the optional generator proposal, including bounded typed batches,
+all-or-nothing registration, authored diagnostics, dependency invalidation,
+plan visibility, policy and ownership. General rule emission is a proposal,
+not executable syntax. The minimum lookup request is implemented.
+The historical finding follows.
 
 **Symptom.** `$($(VAR))` and `$(eval ...)` have no equivalent. `TODO.md`
 reports this as "the real fidelity cliff" for `sdk.mk`, where it had to hardcode

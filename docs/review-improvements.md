@@ -54,7 +54,7 @@ See the security and performance reviews for evidence and limitations.
 | Alternative `<-` build syntax | Design proposal, not a correctness gap. Evaluate readability and formatter compatibility before changing existing rules. |
 | Dependency sequencing with `,` | Define whether ordering is an edge or effect sequence; preserve parallel independence and failure propagation. Kash statement sequencing already has different semantics. |
 | Learnability | Finish idioms/gotchas and independent value/rule/process lessons with executable smoke coverage. |
-| Metaprogramming | A2/A4/A5 and B3/B4 remain substantive work, not solved by putting shell syntax in recipes. Keep generated declarations visible to inspection and deterministic registration. |
+| Metaprogramming | A2/A4 remain substantive work. Computed record lookup is implemented through `get`; optional generated declarations have a separate design proposal. Headers now compose expressions and interpolated paths. |
 | Error taxonomy | Existing codes are registered and machine-readable. Add actionable messages rather than speculative taxonomy churn. |
 
 ## Build-port gaps
@@ -68,7 +68,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | A2 configuration defaults/overrides | Remaining: define-only-if-absent and typed invocation overrides applied before planning, with effective values in inspection. Resolve conflict/precedence explicitly. |
 | A3 target-scoped environment/build mode | Remaining: inherited environment must affect execution and fingerprints; debug/release artifacts need correct metadata without generated-source churn. |
 | A4 declaration conditionals/gated includes | Remaining; expression/Kash control flow does not conditionally register build declarations. Repeated nonrecursive includes are now legal, so the old blanket repeated-include prohibition is stale. |
-| A5 computed lookup/generated rules | Remaining design and implementation; record lookup is useful but does not by itself generate rule declarations. Preserve no-effects compilation. |
+| A5 computed lookup / generators | Minimum lookup implemented through `get`; T007-10 pins typed configuration and planning parity. Optional generated declarations have a separate design proposal. |
 | A6 continuations/multiline definitions | Implemented backslash LF/CRLF declaration continuations, preserving authored offsets, physical comments and recipe escapes; T004-10 verifies native/WASM execution and formatter idempotence. |
 | B1 discovery unions/alternation/file filtering | Pattern unions are implemented: sorted, duplicate-free results and independent glob dependencies; T007-09 covers native/WASM evaluation and membership changes. Directory filtering uses metadata predicates. |
 | B2 concatenated wildcard deadlock | Fixed (KB-1); keep both native and WASM multi-read regressions. |
