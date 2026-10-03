@@ -182,7 +182,9 @@ spurious relink when the mode is unchanged.
 
 ### A4 — No conditionals / conditional include
 
-**Symptom.** No declaration-level `ifeq`/`if`/`ifdef`, no optional `-include`.
+**Current behavior.** `include? PATH` supplies optional source composition on native and WASM: only an absent file is ignored. Existing read errors, parser errors, and cycles remain failures before effects. T004-12 covers both build and value sources.
+
+**Remaining.** Declaration-level `ifeq`/`if`/`ifdef` and conditionally gated includes are not yet implemented.
 `include` is depth-first and rejects active-ancestry cycles. Repeated nonrecursive
 includes are legal; duplicated declarations are checked during registration.
 

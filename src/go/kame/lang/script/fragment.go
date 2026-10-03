@@ -4,6 +4,7 @@ import (
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
+ "solod.dev/so/strings"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 )
@@ -39,7 +40,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		for lineEnd < end && text[lineEnd] != '\n' { lineEnd++ }
 		if comment(text, pos, lineEnd) { pos = nextLine(text, lineEnd); continue }
 		if name, ok := include(text[pos:lineEnd]); ok {
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: pos, End: lineEnd}, Include: name})
+			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: pos, End: lineEnd}, Include: name, OptionalInclude: strings.HasPrefix(text[pos:lineEnd], "include?")})
 			pos = nextLine(text, lineEnd)
 			continue
 		}

@@ -30,6 +30,7 @@ type ScriptItem struct {
 	Rule       *rule.Rule
 	Expression *expr.Expr
 	Include    string
+ OptionalInclude bool
 }
 
 type Script struct {
@@ -82,7 +83,7 @@ func parseScript(s *Script, offset int) {
 			continue
 		}
 		if includePath, ok := include(text[start:end]); ok {
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: start, End: end}, Include: includePath})
+			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: start, End: end}, Include: includePath, OptionalInclude: strings.HasPrefix(text[start:end], "include?")})
 			pos = nextLine(text, lineEnd)
 			continue
 		}
@@ -155,10 +156,12 @@ func comment(text string, start int, end int) bool {
 	return text[start] == '#' || (start+1 < end && text[start] == '/' && text[start+1] == '/')
 }
 func include(text string) (string, bool) {
-	if len(text) < 9 || text[:7] != "include" || !space(text[7]) {
+	prefix := 7
+ if strings.HasPrefix(text, "include?") { prefix = 8 }
+ if len(text) < prefix+2 || text[:7] != "include" || !space(text[prefix]) {
 		return "", false
 	}
-	path := text[8:]
+	path := text[prefix+1:]
 	for len(path) != 0 && space(path[0]) {
 		path = path[1:]
 	}
@@ -309,7 +312,7 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			continue
 		}
 		if item.Kind == Include {
-			b.WriteString("include ")
+			if item.OptionalInclude { b.WriteString("include? ") } else { b.WriteString("include ") }
 			b.WriteString(item.Include)
 			previousEnd = item.Span.End
 			continue

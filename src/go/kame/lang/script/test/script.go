@@ -82,3 +82,16 @@ func TestContinuationsPreserveSourceSpansAndRecipeBackslashes(t *testing.T) {
 	r := s.Items[3].Rule
 	if len(r.Inputs) != 3 || r.Inputs[0].Text != "./a" || r.Inputs[1].Text != "./b" || len(r.Body) != 2 || r.Body[0].Text != "printf one \\" { t.Error("continued header or shell backslash changed") }
 }
+
+func TestOptionalIncludesPreserveParsingAndFormatting(t *testing.T) {
+ text := "include? ./optional.kmk\ninclude ./required.kmk\n"
+ parsed := script.Parse(t.Allocator(), "test.kmk", text)
+ defer parsed.Free()
+ if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 || !parsed.Items[0].OptionalInclude || parsed.Items[1].OptionalInclude || parsed.Items[0].Include != "./optional.kmk" {
+  t.Error("optional include did not retain its path and required distinction")
+  return
+ }
+ formatted := script.Format(t.Allocator(), parsed)
+ defer mem.FreeString(t.Allocator(), formatted)
+ if formatted != text { t.Error("optional include formatting changed") }
+}

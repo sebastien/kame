@@ -189,6 +189,7 @@ test-wasm : wasm-check
 	./tests/T004-09-lang-rule-header-composition.sh
 	./tests/T004-10-lang-line-continuations.sh
 	./tests/T004-11-lang-wildcard-inputs.sh
+	./tests/T004-12-lang-optional-includes.sh
 	./tests/T010-21-wasm-build-effects.sh
 	./tests/T014-02-patterns-ergonomics.sh
 	./tests/T016-01-cli-render.sh

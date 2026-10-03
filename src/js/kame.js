@@ -1705,7 +1705,10 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
     const included = normalize(isAbsolute(item.path) ? item.path : join(dirname(name), item.path));
     let child;
     try { child = await readFile(resolve(sourceDirectory, included), 'utf8'); }
-    catch { throw Object.assign(new Error(`cannot read included source: ${included}`), { code: 'FS_ERR' }); }
+    catch (error) {
+      if (item.optional && error.code === 'ENOENT') { start = item.span.end; continue; }
+      throw Object.assign(new Error(`cannot read included source: ${included}`), { code: 'FS_ERR' });
+    }
     parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity], true, validate));
     start = item.span.end;
   }

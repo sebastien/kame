@@ -581,6 +581,7 @@ func (e *astEncoder) script(value *script.Script) {
 		if item.Kind == script.Include {
 			e.Str("path")
 			e.Str(item.Include)
+   if item.OptionalInclude { e.Str("optional"); e.Bool(true) }
 		}
 		if item.Definition != nil {
 			e.Str("definition")

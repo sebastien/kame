@@ -246,3 +246,5 @@ compiled CLI AddressSanitizer/LeakSanitizer gate, which run with the actual C
 allocator and remain mandatory.
 
 The harness preserves `-check=sanitize -panic=abort` and Clang when freshness requires rebuilding `build/kame.sanitize`. A stale sanitized binary must never be replaced by a checks-only executable during the leak gate.
+
+`T004-12-lang-optional-includes.sh` verifies missing and present optional sources, newly registered declarations, value-source fragments, formatting/AST metadata, parse failures before effects, cycles and existing-directory read failures on native/WASM.

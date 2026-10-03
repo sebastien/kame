@@ -25,7 +25,16 @@ Comment markers inside strings, paths, or recipe text are literal.
 or unquoted path without whitespace, resolved relative to the including file.
 Includes are expanded depth-first at their declaration location; included
 definitions and rules share the caller's scope and source order. Includes are
-only valid for file-backed sources. Repeated or cyclic inclusion is an error.
+only valid for file-backed sources. Active-ancestry cycles are an error;
+repeated nonrecursive includes expand again and ordinary declaration registration
+checks duplicates.
+
+`include? PATH` follows the same grammar and expansion order, but ignores a
+missing file. Existing unreadable files, directories, malformed sources, and
+cycles still fail before execution. AST JSON emits `optional: true` for this
+form; formatting retains `include?`. Native source tracking retains missing
+optional path identities so watch can notice their later creation. The directive
+is source configuration and follows ordinary include loading policy.
 
 Parsers return an AST and zero or more diagnostics. Invalid syntax must never be
 silently discarded. Recovery may preserve malformed recipe interpolation as

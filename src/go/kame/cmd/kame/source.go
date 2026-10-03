@@ -174,7 +174,15 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 			if s.Files[j].Name == includeName { sourceError(errOut, "DEP_CYCLE", "include cycle: "+includeName, s.JSON); mem.FreeString(mem.System, includeName); parsed.Free(); return false }
 		}
 		data, readErr := os.ReadFile(mem.System, includeName)
-		if readErr != nil { sourceError(errOut, "FS_ERR", "cannot read included source: "+includeName, s.JSON); mem.FreeString(mem.System, includeName); parsed.Free(); return false }
+		if readErr != nil {
+   if item.OptionalInclude && readErr == os.ErrNotExist {
+    // Retain the absent source identity so watch notices its later creation.
+    s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, OwnedName: true, Parent: fileIndex})
+    start = item.Span.End
+    continue
+   }
+   sourceError(errOut, "FS_ERR", "cannot read included source: "+includeName, s.JSON); mem.FreeString(mem.System, includeName); parsed.Free(); return false
+  }
 		s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), Data: data, OwnedName: true, Parent: fileIndex})
 		if !expandIncludesLanguage(s, len(s.Files)-1, errOut, lang) { parsed.Free(); return false }
 		start = item.Span.End
