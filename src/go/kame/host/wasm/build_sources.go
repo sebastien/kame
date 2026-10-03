@@ -66,10 +66,12 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 		if environment[i].Kind != core.String { r.freeBuildSources(); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build environment")} }
 		r.BuildEnvironment = slices.Append(r.Alloc, r.BuildEnvironment, pureText(r.Alloc, environment[i].Text))
 	}
+	r.BuildForce = host.PayloadInt(descriptor, "force") != 0
 	return PureResult{}
 }
 
 func (r *Runtime) freeBuildSources() {
+ r.BuildForce = false
 	for i := range r.BuildSources {
 		mem.FreeString(r.Alloc, r.BuildSources[i].Name)
 		mem.FreeString(r.Alloc, r.BuildSources[i].Text)
@@ -85,6 +87,7 @@ func (r *Runtime) freeBuildSources() {
 }
 
 func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
+	options.Force = r.BuildForce
 	options.Defines = r.BuildDefines
 	options.ToolOverrides = r.BuildToolOverrides
 	var environment []string

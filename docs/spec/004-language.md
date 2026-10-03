@@ -295,6 +295,7 @@ Rule selectors are:
 | `@<` | first input |
 | `@<*` | all inputs |
 | `@<#` | input count |
+| `@<?` | unique normal file inputs newer than the oldest output, in file recipes |
 | `@<N` | input index |
 | `@<A..B` | input slice |
 | `@>` | first output |

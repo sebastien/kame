@@ -77,7 +77,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | B5 scalar expansion/leading captures/bare captures | Implemented scalar expansion text and leading expression patterns. Bare target captures already existed; T014-02 verifies exact precedence and template ambiguity on both hosts. |
 | C1 forced file rebuild | Implemented: `always ./output : ./input` preserves file artifacts and output checks while rerunning once per requested-root epoch. T006-03 covers both hosts; parser/program sanitizer suites pass 9/97 tests, including repeated roots and diamond sharing. `--force` remains an invocation override. |
 | C2 order-only prerequisites | Implemented with `|`: scheduling/failure edges, freshness/cache exclusions and explicit-read/normal-edge upgrades. T006-04 covers both hosts. |
-| C3 automatic variables | Existing selectors cover inputs/outputs. Newer-input and stem equivalents need precise freshness/capture definitions; directory extraction can use pure path operations. |
+| C3 automatic variables | Implemented: `@<?` selects newer normal file inputs; explicit pattern captures supply stems and `dirname` supplies input/output directories. T006-07 verifies both hosts, including scoped freshness, oldest/missing outputs, equality, force and phase rejection. |
 | C4 one shell per recipe | Intentional behavior; document the porting implications and keep process-host multiline tests. |
 | D1 capability-gated wildcard | Fixed diagnostic: missing or insufficient read authority names `--allow-read=ROOT` on native and WASM. T007-06/T010-08 cover denials and successful grants; examples use `do run --lang expr --allow-read=.`. |
 | D2 relative `-f` beneath `-C` | Fixed on native and WASM, with regression tests. Align spec prose with the corrected behavior. |
@@ -181,3 +181,15 @@ fixtures for timestamp-array and cache-get requests. The output-verification
 fixture accepts a decimal timestamp beyond JavaScript's safe integer range and
 still checks missing outputs, host failures and completion ordering. Spec 010
 documents ABI kind 20 and the cache responses required by forwarding hosts.
+
+C3 now passes all 25 native/WASM assertions against the compiled sanitizer CLI
+with leak detection and ASAN symbols verified before and after execution.
+Expression/evaluator sanitizer suites pass 27/66 tests; program tests pass 100
+cases. WASM embedding sanitizer tests pass 29 cases, including force descriptor
+transport. The equality test exposed a missing WASM `--force` option transport;
+both primary builds and mixed runner sessions now pass it to portable runtime
+options. The scoped fingerprint uses stable authored context so publication's
+change to the newer-input subset does not trigger a redundant rebuild.
+Existing freshness, dependency, always-rule, order-only, environment, WASM
+cache, mixed-session and catalog suites all pass separately against the sanitizer
+CLI. The catalog verifies 442 assertions. Full-suite completion remains pending.

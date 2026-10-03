@@ -236,7 +236,7 @@ func selectorEnd(text string, start int) int {
 	}
 	i := start + 2
 	if b == '<' || b == '>' {
-		if i < len(text) && (text[i] == '*' || text[i] == '#') {
+		if i < len(text) && (text[i] == '*' || text[i] == '#' || (b == '<' && text[i] == '?')) {
 			return i + 1
 		}
 	}

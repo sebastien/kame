@@ -128,7 +128,10 @@ func TestBuildSourceDescriptorRejectsOversizeAndOverflowingOffsets(t *testing.T)
 func TestBuildSourceDescriptorRejectsInvalidFieldTypes(t *testing.T) {
 	a := t.Allocator()
 	start := wasm.NewRuntime(a, "")
-	if start.Runtime == nil { t.Fatal("create runtime"); return }
+	if start.Runtime == nil {
+		t.Fatal("create runtime")
+		return
+	}
 	r := start.Runtime
 	defer r.Free()
 	bad := []string{
@@ -139,28 +142,76 @@ func TestBuildSourceDescriptorRejectsInvalidFieldTypes(t *testing.T) {
 	}
 	for i := range bad {
 		configured := r.SetBuildSources([]byte(bad[i]))
-		if configured.Code != "PARSE_ERR" || len(r.BuildSources) != 0 { t.Error("invalid source field accepted") }
+		if configured.Code != "PARSE_ERR" || len(r.BuildSources) != 0 {
+			t.Error("invalid source field accepted")
+		}
 		configured.Free(a)
 	}
 	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"source.kmk","text":""}]}`))
-	if configured.Code != "" { t.Error("optional zero offset rejected") }
+	if configured.Code != "" {
+		t.Error("optional zero offset rejected")
+	}
 	configured.Free(a)
 }
 
 func TestBuildSourceConfigurationCopiesOverrideAndEnvironment(t *testing.T) {
- a := t.Allocator()
- start := wasm.NewRuntime(a, "")
- if start.Runtime == nil { t.Fatal("create runtime"); return }
- r := start.Runtime
- defer r.Free()
- data := slices.Clone(a, []byte(`{"sources":[{"name":"config.kmk","text":"SDK ?= \"default\"\n","offset":0}],"defines":["SDK=literal"],"environment":["KAME_SDK=environment"]}`))
- configured := r.SetBuildSources(data)
- for i := range data { data[i] = 0 }
- slices.Free(a, data)
- if configured.Code != "" { t.Error("configure overrides"); configured.Free(a); return }
- configured.Free(a)
- prepared := r.Prepare()
- if prepared.Code != "" || r.Program == nil { t.Error("prepare configured build"); prepared.Free(a); return }
- prepared.Free(a)
- if len(r.Program.Configuration) != 1 || r.Program.Configuration[0] != "SDK=literal" { t.Error("configuration was not copied or CLI precedence failed") }
+	a := t.Allocator()
+	start := wasm.NewRuntime(a, "")
+	if start.Runtime == nil {
+		t.Fatal("create runtime")
+		return
+	}
+	r := start.Runtime
+	defer r.Free()
+	data := slices.Clone(a, []byte(`{"sources":[{"name":"config.kmk","text":"SDK ?= \"default\"\n","offset":0}],"defines":["SDK=literal"],"environment":["KAME_SDK=environment"]}`))
+	configured := r.SetBuildSources(data)
+	for i := range data {
+		data[i] = 0
+	}
+	slices.Free(a, data)
+	if configured.Code != "" {
+		t.Error("configure overrides")
+		configured.Free(a)
+		return
+	}
+	configured.Free(a)
+	prepared := r.Prepare()
+	if prepared.Code != "" || r.Program == nil {
+		t.Error("prepare configured build")
+		prepared.Free(a)
+		return
+	}
+	prepared.Free(a)
+	if len(r.Program.Configuration) != 1 || r.Program.Configuration[0] != "SDK=literal" {
+		t.Error("configuration was not copied or CLI precedence failed")
+	}
+}
+
+func TestBuildSourceDescriptorPreservesForce(t *testing.T) {
+	a := t.Allocator()
+	for scenario := 0; scenario < 2; scenario++ {
+		started := wasm.NewRuntime(a, "")
+		if started.Runtime == nil {
+			t.Fatal("create force runtime")
+			return
+		}
+		r := started.Runtime
+		data := `{"sources":[{"name":"force.kmk","text":"./out :\n\ttrue\n","offset":0}],"force":0}`
+		if scenario == 1 {
+			data = `{"sources":[{"name":"force.kmk","text":"./out :\n\ttrue\n","offset":0}],"force":1}`
+		}
+		configured := r.SetBuildSources([]byte(data))
+		if configured.Code != "" {
+			t.Error("configure force descriptor")
+		}
+		configured.Free(a)
+		prepared := r.Prepare()
+		if prepared.Code != "" || r.Program == nil {
+			t.Error("prepare force descriptor")
+		} else if r.Program.Options.Force != (scenario == 1) {
+			t.Error("build descriptor lost force flag")
+		}
+		prepared.Free(a)
+		r.Free()
+	}
 }

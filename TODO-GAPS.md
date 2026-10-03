@@ -59,7 +59,7 @@ relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 | B5 | Scalar expansions and leading/bare captures | Implemented and verified | Low → fixed | not used here |
 | C1 | Persistent always-rebuild file outputs | Implemented | Low → fixed | GNU marks outputs phony |
 | C2 | Order-only prerequisites | Implemented | Low | not used here |
-| C3 | Automatic variables only partially mapped | Rule semantics | Low | `$@`/`$<`/`$^` only |
+| C3 | Newer-input selector and capture/directory equivalents | Implemented | Low | `@<?`, explicit captures and `dirname` |
 | C4 | One-shell recipe vs Make's line-per-shell | Behavioural | Info | compatible here |
 | D1 | Capability-gated `wildcard` names the read grant | CLI/UX, fixed | Low → fixed | diagnostics only |
 | D2 | `-C` ignores a relative `-f` | CLI bug (KB-2), fixed | Medium → fixed | not used here |
@@ -435,11 +435,19 @@ input selectors exclude them. Normal occurrences and explicit reads upgrade the
 edge to a content dependency. Parser/formatter/AST and plans retain the purpose;
 T006-04 exercises both hosts. Not used by this repository build.
 
-### C3 — Partial automatic variables
+### C3 — Automatic variable equivalents (implemented)
 
-Only `$@`→`@>`, `$<`→`@<`, `$^`→`@<*` map cleanly. `$?` (newer inputs), `$*`
-(stem), `$(@D)`, `$(<D)` have no general equivalent. Use explicit captures and
-selectors (`@<N`, `@<A..B`). Not used here.
+`$@`→`@>`, `$<`→`@<`, and `$^`→`@<*` retain their existing mappings. `$?` maps
+to `@<?`: unique normal declared file inputs strictly newer than the oldest
+output, or all normal file inputs if any output is absent. Order-only inputs
+are excluded. Forced execution leaves equal/older inputs out of this list.
+
+Pattern stems use explicit captures, for example `./build/{stem}.o` and
+`@(stem)` in the recipe. `$(@D)` and `$(<D)` use `@(dirname @>)` and
+`@(dirname @<)`. T006-07 covers both hosts, scoped freshness after the newer
+subset changes, missing/oldest sibling outputs, equality, forced primary and
+mixed-session execution, context/phase rejection and formatting. It also found
+and fixed WASM `--force` descriptor transport. Not used by this Makefile.
 
 ### C4 — One shell per recipe, not per line
 

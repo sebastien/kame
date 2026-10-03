@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/lang/eval"
+ "kame/lang/rule"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
@@ -18,8 +19,10 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	defer freeValues(p.Alloc, inputs)
 	defer freeValues(p.Alloc, outputs)
 	dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
+ var newer []core.Value
+ if entry.NewerInputs != nil { newer = entry.NewerInputs.Values }
 	context := mem.Alloc[eval.Context](p.Alloc)
-	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
+	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, NewerInputs: newer}}}
 	scope := p.ruleScope(context, entry.Captures)
     context.Scope = scope
     defer scope.Free()

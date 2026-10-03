@@ -86,7 +86,9 @@ accepts a copied JSON descriptor with `sources` entries containing `name`, `text
 and authored byte `offset`, after initializing an empty source instance and
 before target execution or preparation. The portable compiler combines these
 fragments and maps diagnostic spans back to authored sources. No filesystem work
-occurs during compilation. Registration failures expose their complete diagnostic
+occurs during compilation. Build and runner session descriptors carry `force`
+as 0 or 1 into portable runtime options; `--force` bypasses file freshness and
+cached-task lookup on either host. Registration failures expose their complete diagnostic
 list through the target-event query, including in non-JSON presentation modes.
 
 ## Host Requests

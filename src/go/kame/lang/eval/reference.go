@@ -230,6 +230,11 @@ func normalizedSlice(start int, end int, length int) sliceBounds {
 
 func (p *Program) selector(text string, span source.Span, context *Context) Result {
 	_ = p
+ if text == "@<?" {
+  if context.Phase == PlanningPhase || context.Phase == ResolvingPhase { return failure(context.Run, "PHASE_INVALID", span, "newer-input selection is available only while rendering a file recipe") }
+  if len(context.RuleFrames) == 0 || !context.RuleFrames[len(context.RuleFrames)-1].FileRule { return failure(context.Run, "SEL_NO_CONTEXT", span, "newer-input selector requires a file rule") }
+  return Result{Value: core.NewList(context.Run, context.RuleFrames[len(context.RuleFrames)-1].NewerInputs)}
+ }
 	values := context.Args
 	offset := 1
 	present := context.HasArgs

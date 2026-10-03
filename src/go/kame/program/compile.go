@@ -294,6 +294,7 @@ func (p *Program) Free() {
 		p.Instances[i].Plan.Free(p.Alloc)
   slices.Free(p.Alloc, p.Instances[i].Environment)
   p.freeFileContext(p.Instances[i].FileContext)
+ p.freeNewerInputs(p.Instances[i].NewerInputs)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)
 		mem.FreeString(p.Alloc, p.Instances[i].Script)
 		p.freeForwardEffects(p.Instances[i].ForwardEffects)

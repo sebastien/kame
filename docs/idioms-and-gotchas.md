@@ -52,7 +52,13 @@ A `.kmk` recipe is one shell script. Shell variables and `cd` persist between
 its lines. Port Make recipes that relied on one shell per line carefully.
 
 Kame selectors use `@>` for outputs, `@<` for the first input, and `@<*` for
-all inputs. Kame expressions use `@(EXPRESSION)` in recipes. Build headers accept multiple whole input expressions and paths such as
+all normal inputs. `@<?` selects unique normal file inputs strictly newer than
+the oldest output, or all normal file inputs when any output is missing. It
+excludes order-only prerequisites and is available only inside file recipes.
+Use explicit `{stem}` pattern captures for stems, `@(dirname @>)` for the output
+directory and `@(dirname @<)` for the first input directory.
+
+Kame expressions use `@(EXPRESSION)` in recipes. Build headers accept multiple whole input expressions and paths such as
 `@(DIRECTORY)/suffix`, interleaved with literal or quoted paths. Each whole
 expression is evaluated and flattened independently, in authored order.
 

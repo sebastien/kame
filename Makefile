@@ -69,6 +69,7 @@ test-wasm: wasm-check
 	tests/T006-03-runtime-always.sh
 	tests/T006-04-runtime-order-only.sh
 	tests/T006-06-runtime-environment.sh
+	tests/T006-07-runtime-newer-inputs.sh
 	tests/T010-21-wasm-build-effects.sh
 	tests/T014-02-patterns-ergonomics.sh
 	tests/T016-01-cli-render.sh

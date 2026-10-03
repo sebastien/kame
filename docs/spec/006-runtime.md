@@ -292,3 +292,26 @@ bytes is a separate operation used by `cat`.
 - Cancelling a target leaves no process group running.
 - The equivalent of `deps/littlemake-legacy/Makefile.lmk` builds and then skips
   its fresh file target.
+
+## Newer-input selection
+
+In a file recipe, `@<?` is the list of unique normal declared file inputs whose
+modification times are strictly newer than the oldest declared output. If any
+output is absent, it selects all normal file inputs. It preserves input order
+and authored path spelling; order-only prerequisites and named tasks are omitted.
+A recipe with no normal file inputs gets an empty list. Forced execution does
+not invent newer inputs. Input planning rejects this selector with `PHASE_INVALID`;
+a task recipe or evaluation without a file-rule frame gets `SEL_NO_CONTEXT`.
+
+The snapshot is taken after prerequisites finish and before rendering; repeated
+references, including references through definitions, share it. Hosts supply
+nanosecond timestamps through the same metadata transport used for freshness.
+For scoped file contexts using this selector, the persisted fingerprint covers
+the authored combined source, configuration, invocation arguments, shell,
+environment and dependency paths rather than the changing rendered subset.
+Consequently a successful build may skip its next invocation; changing unrelated
+authored source can conservatively rebuild a scoped artifact in that source.
+
+Make's `$?` maps to `@<?`. Pattern stems use explicit captures, for example
+`./build/{stem}.o` and `@(stem)` in its recipe. Output and first-input directories
+use `@(dirname @>)` and `@(dirname @<)`.

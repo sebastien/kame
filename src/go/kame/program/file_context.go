@@ -21,6 +21,7 @@ type fileContextState struct {
 	Outputs  int
 	Phase    int
 	Times    core.Value
+ DigestValid bool
 }
 
 func (p *Program) freeFileContext(state *fileContextState) {
@@ -40,7 +41,7 @@ func (p *Program) freeFileContext(state *fileContextState) {
 func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered renderResult) core.ProducerResult {
 	entry := &p.Instances[index]
 	state := mem.Alloc[fileContextState](p.Alloc)
-	state.Rendered, state.Outputs = rendered, len(entry.Plan.Outputs)
+	state.Rendered, state.Outputs, state.DigestValid = rendered, len(entry.Plan.Outputs), true
 	for i := range entry.Plan.Outputs {
 		state.Paths = slices.Append(p.Alloc, state.Paths, p.canonicalTarget(entry.Plan.Outputs[i], true))
 	}
@@ -71,6 +72,24 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 	for i := range entry.Environment {
 		context.appendText(entry.Environment[i])
 	}
+ if entry.NewerInputs != nil {
+  // The selector changes after publication. Hash its stable authored context,
+  // rather than commands containing the transient newer-input subset.
+  context.appendText("newer-input-context-v1")
+  context.appendText(p.Parsed.Source.Text)
+  context.appendU64(uint64(len(p.Configuration)))
+  for i := range p.Configuration { context.appendText(p.Configuration[i]) }
+  context.appendU64(uint64(len(p.Options.Shell)))
+  for i := range p.Options.Shell { context.appendText(p.Options.Shell[i]) }
+  context.appendU64(uint64(len(p.Eval.DefinitionArgs)))
+  for i := range p.Eval.DefinitionArgs {
+   encoded := EncodeFingerprintValue(p.Alloc, p.Eval.DefinitionArgs[i])
+   if len(encoded) == 0 { state.DigestValid = false }
+   context.appendU64(uint64(len(encoded)))
+   context.state.Write(encoded)
+   slices.Free(p.Alloc, encoded)
+  }
+ } else {
 	context.appendText(rendered.Commands)
 	for i := range rendered.Effects {
 		context.appendU64(uint64(rendered.Effects[i].Kind))
@@ -80,6 +99,7 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 	for i := range rendered.WritePaths {
 		context.appendText(rendered.WritePaths[i])
 	}
+ }
 	for i := range state.Paths {
 		context.appendText(state.Paths[i])
 	}
@@ -207,7 +227,7 @@ func contextRecord(base []byte, times []core.Value, outputs int, digest []byte) 
 func (p *Program) decideFileContext(entry *instance, state *fileContextState, record core.Value) {
 	_ = p
 	entry.Plan.Freshness = Stale
-	if entry.Rule.Always || state.Times.Kind != core.List || len(state.Times.List) != len(state.Paths) || len(state.Paths) <= state.Outputs {
+	if !state.DigestValid || entry.Rule.Always || state.Times.Kind != core.List || len(state.Times.List) != len(state.Paths) || len(state.Paths) <= state.Outputs {
 		return
 	}
 	var oldest int64

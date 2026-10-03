@@ -186,6 +186,8 @@ func (c *Context) MarkPhaseInvalid()  { c.phaseInvalid = true }
 // RuleFrame supplies the inputs and outputs for one enclosing rule evaluation.
 // Selectors use the most recently pushed frame.
 type RuleFrame struct {
+ FileRule bool
+ NewerInputs []core.Value
 	Inputs  []core.Value
 	Outputs []core.Value
 }

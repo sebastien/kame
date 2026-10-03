@@ -402,7 +402,7 @@ func (p *parser) selector() *Expr {
 	p.pos++
 	if p.pos == len(p.s.Text) { p.error(start, p.pos, "invalid selector"); return nil }
 	if p.s.Text[p.pos] == '<' || p.s.Text[p.pos] == '>' { p.pos++ }
-	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '*' || p.s.Text[p.pos] == '#' || p.s.Text[p.pos] == '_') { p.pos++
+	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '*' || p.s.Text[p.pos] == '#' || p.s.Text[p.pos] == '_' || (p.s.Text[p.pos] == '?' && p.pos == start+2 && p.s.Text[start+1] == '<')) { p.pos++
 	} else {
 		for p.pos < len(p.s.Text) && (isDigit(p.s.Text[p.pos]) || p.s.Text[p.pos] == '.' || p.s.Text[p.pos] == '-') { p.pos++ }
 	}
@@ -413,6 +413,7 @@ func (p *parser) selector() *Expr {
 
 // ValidSelector reports whether text is a complete selector.
 func ValidSelector(text string) bool {
+ if text == "@<?" { return true }
 	if len(text) < 2 || text[0] != '@' { return false }
 	i := 1
 	if text[i] == '<' || text[i] == '>' { i++ }

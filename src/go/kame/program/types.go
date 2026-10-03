@@ -279,6 +279,7 @@ type instance struct {
  EnvironmentClaimed bool
  ScopedEnvironment bool
  EnvironmentConflict bool
+ NewerInputs *newerInputState
  FileContext *fileContextState
  FileContextReady bool
  FileContextWanted bool

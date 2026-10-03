@@ -36,6 +36,7 @@ type Runtime struct {
 	BuildDefines     []string
 	BuildToolOverrides []string
 	BuildEnvironment []string
+ BuildForce bool
 	Handle           *program.Handle
 	Environment      []string
 	ToolPaths        []program.Tool
