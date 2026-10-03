@@ -244,3 +244,5 @@ CLI churn. Disabling collection for this short-lived compatibility test preserve
 the explicit C lifetime model. It does not replace allocator tracking or the
 compiled CLI AddressSanitizer/LeakSanitizer gate, which run with the actual C
 allocator and remain mandatory.
+
+The harness preserves `-check=sanitize -panic=abort` and Clang when freshness requires rebuilding `build/kame.sanitize`. A stale sanitized binary must never be replaced by a checks-only executable during the leak gate.

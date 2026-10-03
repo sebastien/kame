@@ -106,7 +106,11 @@ function cli_build {
 			make -C "$CLI_ROOT" build/kame.debug >&2 || exit 1
 		else
 			cd "$CLI_ROOT/src/go/kame" || exit 1
-			so build -check=warn -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
+			if [ "$CLI_BIN" = "$CLI_ROOT/build/kame.sanitize" ]; then
+				CC=clang so build -check=sanitize -panic=abort -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
+			else
+				so build -check=warn -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
+			fi
 		fi
 	) 9>"$lock"; then
 		test-fail "cannot build the CLI binary"

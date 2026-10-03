@@ -87,3 +87,5 @@ pass. The Go compatibility gate now states that setting explicitly. This is a
 compatibility-test limitation, not evidence that compiled C ownership is safe;
 the separate compiled CLI leak gate still verifies actual frees and retained
 allocations.
+
+The CLI harness now preserves sanitizer build flags when refreshing `build/kame.sanitize`. A forced harness rebuild was checked for `__asan_init`/report symbols and passed the 94-assertion parse matrix. The earlier run that replaced the executable with a checks-only binary is discarded as leak-gate evidence.
