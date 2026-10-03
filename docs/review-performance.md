@@ -24,9 +24,10 @@ source change, not every timing difference to this patch.
 
 The changed POSIX host passes 20 sanitizer tests, including cancellation of
 background grandchildren and cleanup of active process groups. The CLI signal
-suite passes all 9 assertions in an isolated rerun. The broad suite had a
-repeated-SIGINT assertion failure under load, so an isolated pass does not prove
-that timing-sensitive test is reliable under all scheduling.
+suite passes ten consecutive targeted runs after correcting the repeated-signal
+test: identical standard signals may coalesce, so it now sends distinct signal
+kinds and checks a conventional forced-termination status. The earlier broad
+run exposed that test assumption; the correction changes no shutdown timing.
 
 ## Remaining costs and priorities
 
