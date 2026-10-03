@@ -528,6 +528,28 @@ func TestDefFunctionFormAcrossScopesRejected(t *testing.T) {
 	registry.Free()
 }
 
+func TestReturnedDefinitionFunctionKeepsItsScopeAlive(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, "((let [captured \"alive\"] (def inner [x] captured) inner) :nil)")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "alive" {
+		t.Error("returned definition lost its captured scope")
+	}
+	result.Free(a)
+	result = evaluate(t, program, "(let [] (def inner [x] x) inner)")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Callable {
+		t.Error("definition function did not escape as an owned result")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func TestDescendantStoreAllowed(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)

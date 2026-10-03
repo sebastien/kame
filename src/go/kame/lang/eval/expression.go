@@ -115,7 +115,10 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		return Result{Value: b.Value.Clone(context.Run)}
 	}
 	if b.Kind == bindingFunction {
-		return Result{Value: core.Value{Kind: core.Callable, Callable: b.Function}}
+		// A definition can be returned from its defining let scope. Keep
+		// that scope alive until the returned value is consumed or rejected.
+		wrapper := borrowFunction(context.Run, b.Function)
+		return Result{Value: core.Value{Kind: core.Callable, Callable: wrapper}}
 	}
 	if b.Kind == bindingLocalDefinition { return context.Program.localValue(b.Local, context) }
 	if context.Engine == nil && context.ResolveDefinition != nil {
