@@ -78,6 +78,7 @@ let diagnosticColor = false;
 let buildProgress = null;
 let buildStartedAt = 0;
 let primarySource = null;
+const sourceTexts = new Map();
 
 function diagnostic(code, message) {
   if (jsonMode) {
@@ -290,6 +291,7 @@ function renderDiagnostic(d, source, width) {
 // diagnosticSource uses the primary source when the names match, otherwise
 // reads the referenced file for rendering only.
 function diagnosticSource(name, primary) {
+  if (sourceTexts.has(name)) return { name, text: sourceTexts.get(name) };
   if (!name || (primary && primary.name === name)) return primary;
   try {
     return { name, text: readFileSync(name, 'utf8') };
@@ -666,6 +668,11 @@ class Module {
     const error = diagnosticError(this.instanceDiagnostic(instance), fallbackCode);
     const span = this.instanceDiagnosticSpan(instance);
     if (span !== null) error.span = span;
+    // Failed portable registration can expose several authored diagnostics.
+    try {
+      const bytes = this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_target_event(handle, dst, capacity, length), instance);
+      if (bytes.length) error.diagnostics = this.decode0(bytes).trim().split('\n').map((line) => JSON.parse(line).diagnostic);
+    } catch { /* source_compile can fail before a runtime exists. */ }
     return error;
   }
 
@@ -961,9 +968,7 @@ class Module {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
-      const compiled = this.write(source);
-      if (name !== undefined && name !== '') this.setSourceName(instance, name);
-      if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      this.compileBuild(instance, source, name);
       if (context) {
         const directory = this.write(process.cwd());
         if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0 || this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('inspection host forwarding unavailable'), { code: 'HOST_FAIL' });
@@ -973,11 +978,22 @@ class Module {
           else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
         }
       }
-      if (this.exports.kame_wasm_prepare(instance) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
+      if (this.exports.kame_wasm_prepare(instance) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
       if (context) return await this.copyInspectionQuery(run(instance), instance, context);
       return this.copyQuery(run(instance), instance);
     } finally {
       this.exports.kame_wasm_instance_free(instance);
+    }
+  }
+
+  compileBuild(instance, source, name) {
+    if (name) this.setSourceName(instance, name);
+    const compiled = this.write(Array.isArray(source) ? '' : source);
+    if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+    if (Array.isArray(source)) {
+      if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
+      const descriptor = this.write(JSON.stringify({ sources: source }));
+      if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
   }
 
@@ -1045,12 +1061,12 @@ class Module {
       const output = this.allocate(length || 1);
       if (this.exports.kame_wasm_target_event(instance, output, length, lengthPointer) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       const bytes = new Uint8Array(this.exports.memory.buffer, output, length).slice();
+      for (const line of this.decode0(bytes).trim().split('\n')) {
+        const event = JSON.parse(line);
+        if (event.diagnostic && (event.type === 'target-failed' || event.type === 'target-cancelled')) lastDiagnostic = event.diagnostic;
+      }
       if (json) {
         stdout.write(bytes);
-        for (const line of this.decode0(bytes).trim().split('\n')) {
-          const event = JSON.parse(line);
-          if (event.diagnostic && (event.type === 'target-failed' || event.type === 'target-cancelled')) lastDiagnostic = event.diagnostic;
-        }
       } else if (human) {
         humanEvent(bytes);
       }
@@ -1085,16 +1101,14 @@ class Module {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
-      const compiled = this.write(source);
-      if (name !== undefined && name !== '') this.setSourceName(instance, name);
-      if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      this.compileBuild(instance, source, name);
       for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool));
       const directoryBytes = this.write(process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directoryBytes.pointer, directoryBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
       context.streaming = true;
       const encoded = this.write(target);
-      if (this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'TGT_NO_RULE');
+      if (this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length) !== 0) throw this.compileFailure(instance, 'TGT_NO_RULE');
       for (;;) {
         const state = this.exports.kame_wasm_step(instance);
         this.drainEvents(instance, context);
@@ -1603,19 +1617,29 @@ async function runSession(module, inv, sourceDirectory) {
   }
   if (!inv.dryRun && inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1) {
     const input = inv.inputs[0];
-    if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'file' ? fragments[0].name : '<command:1>', file: input.kind === 'file' ? resolve(sourceDirectory, fragments[0].name) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false);
+    if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'command' ? '<command:1>' : fragments[0].name, file: input.kind === 'file' ? resolve(sourceDirectory, fragments[0].name) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false, sourceDirectory);
   }
   buildProgress = { active: 0, completed: 0, failed: 0 };
   return module.runSession(fragments, inv, contextFor(inv));
 }
 
+async function discoverBuildSource(module, inv, sourceDirectory) {
+  const source = await discoverSource(inv);
+  if (source === null) return null;
+  const name = inv.sourceName ?? (inv.command ? source.name : isAbsolute(source.name) ? normalize(source.name) : normalize(join(inv.directory || '.', source.name)));
+  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, false);
+  // Ordinary sources retain the existing ABI; includes carry source identities.
+  return { name, text: source.text, compiled: parts.length === 1 ? source.text : parts };
+}
+
 // Syntax and byte spans come from the portable parser, not a second JS grammar.
-async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = []) {
+async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true) {
   const identity = resolve(sourceDirectory, name);
+  sourceTexts.set(name, text);
   if (active.includes(identity)) throw Object.assign(new Error(`include cycle: ${name}`), { code: 'DEP_CYCLE' });
   const document = JSON.parse(new TextDecoder().decode(await module.parse(lang === 'kmk' ? 'script' : lang, name, text)));
   const invalid = document.diagnostics.find((item) => item.severity === 'error');
-  if (invalid) {
+  if (invalid && validate) {
     primarySource = { name, text };
     throw Object.assign(new Error(invalid.message), { code: invalid.code, span: invalid.span, diagnostics: document.diagnostics.filter((item) => item.severity === 'error').map((item) => ({ ...item, source: name })) });
   }
@@ -1624,12 +1648,13 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
   let start = 0;
   for (const item of document.ast.items) {
     if (item.kind !== 'include') continue;
+    if (!fileBacked) throw Object.assign(new Error('include requires a file-backed build source'), { code: 'FEATURE_UNSUP' });
     parts.push({ name, text: new TextDecoder().decode(bytes.subarray(start, item.span.start)), offset: start });
     const included = normalize(isAbsolute(item.path) ? item.path : join(dirname(name), item.path));
     let child;
     try { child = await readFile(resolve(sourceDirectory, included), 'utf8'); }
     catch { throw Object.assign(new Error(`cannot read included source: ${included}`), { code: 'FS_ERR' }); }
-    parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity]));
+    parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity], true, validate));
     start = item.span.end;
   }
   parts.push({ name, text: new TextDecoder().decode(bytes.subarray(start)), offset: start });
@@ -1669,34 +1694,34 @@ async function runFmt(module, inv) {
   return different ? 1 : 0;
 }
 
-async function runPlan(module, inv) {
-  const source = await discoverSource(inv);
+async function runPlan(module, inv, sourceDirectory) {
+  const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
   const targets = inv.targets.length !== 0 ? inv.targets : ['default'];
   for (const target of targets) {
-    stdout.write(await module.planJSON(source.text, target, false, source.name));
+    stdout.write(await module.planJSON(source.compiled, target, false, source.name));
   }
   return 0;
 }
 
-async function runGraph(module, inv) {
-  const source = await discoverSource(inv);
+async function runGraph(module, inv, sourceDirectory) {
+  const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
   const targets = inv.targets.length !== 0 ? inv.targets : ['default'];
   if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', `${inv.name} requires exactly one target`);
   const kind = inv.name === 'inputs' ? 0 : inv.name === 'outputs' ? 1 : 2;
-  stdout.write(await module.graphJSON(source.text, targets[0], inv.depth, kind, inv.expand, source.name));
+  stdout.write(await module.graphJSON(source.compiled, targets[0], inv.depth, kind, inv.expand, source.name));
   return 0;
 }
 
-async function runTools(module, inv) {
+async function runTools(module, inv, sourceDirectory) {
   const check = inv.targets[0] === 'check';
   const targets = check ? inv.targets.slice(1) : inv.targets;
   if (!check && targets.length !== 0) return usageError('OPT_VALUE_INVALID', 'tools does not accept targets');
   if (check && targets.length === 0) return usageError('OPT_VALUE_INVALID', 'tools check requires at least one target');
-  const source = await discoverSource(inv);
+  const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
   if (check) {
@@ -1707,7 +1732,7 @@ async function runTools(module, inv) {
       context.grants.write = false;
       context.grants.run = false;
       context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
-      const text = module.decode0(await module.toolsCheck(source.text, target, source.name, context));
+      const text = module.decode0(await module.toolsCheck(source.compiled, target, source.name, context));
       for (const line of text.split('\n').filter(Boolean)) {
         const event = JSON.parse(line);
         if (inv.json) stdout.write(`${line}\n`);
@@ -1717,20 +1742,20 @@ async function runTools(module, inv) {
     }
     return failed ? 1 : 0;
   }
-  const names = await module.toolNames(source.text, source.name);
+  const names = await module.toolNames(source.compiled, source.name);
   stdout.write(`${JSON.stringify(names.map((name) => ({ name, path: resolveTool(name) })))}\n`);
   return 0;
 }
 
-async function runCat(module, inv) {
-  const source = await discoverSource(inv);
+async function runCat(module, inv, sourceDirectory) {
+  const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
   const targets = inv.targets.length !== 0 ? inv.targets : ['default'];
   if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', 'cat requires exactly one target');
   const target = targets[0];
   try {
-    const { kind, bytes } = await module.materialize(source.text, target, contextFor(inv), source.name);
+    const { kind, bytes } = await module.materialize(source.compiled, target, contextFor(inv), source.name);
     if (kind === 1) {
       stdout.write(bytes);
       return 0;
@@ -1754,9 +1779,9 @@ async function runCat(module, inv) {
   }
 }
 
-async function runPrimary(module, inv, noArguments) {
+async function runPrimary(module, inv, noArguments, sourceDirectory) {
   if (inv.watch) return featureUnsupported("--watch requires the native POSIX backend");
-  const source = await discoverSource(inv);
+  const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) {
     if (noArguments) {
       usage();
@@ -1774,13 +1799,17 @@ async function runPrimary(module, inv, noArguments) {
   for (const target of targets) {
     try {
       lastDiagnostic = null;
-      const { kind, bytes } = await module.materialize(source.text, target, context, source.name);
+      const { kind, bytes } = await module.materialize(source.compiled, target, context, source.name);
       if (kind === 1) stdout.write(bytes);
     } catch (error) {
       if (inv.json === true) throw error;
+      if (error.diagnostics) {
+        for (const detail of error.diagnostics) stderr.write(renderDiagnostic(detail, primarySource, 80));
+        return 1;
+      }
       failed = true;
-      const detail = lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
-      if (error.span !== undefined) { detail.source = source.name; detail.span = error.span; }
+      const detail = error.diagnostics?.[0] ?? lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
+      if (!error.diagnostics && !lastDiagnostic && error.span !== undefined) { detail.source = source.name; detail.span = error.span; }
       if (!detail.target && detail.code !== 'PARSE_ERR') detail.target = target;
       stderr.write(renderDiagnostic(detail, primarySource, 80));
     }
@@ -1794,6 +1823,7 @@ async function dispatch(module, inv, noArguments) {
   lastDiagnostic = null;
   buildProgress = null;
   primarySource = null;
+  sourceTexts.clear();
   diagnosticFormat = inv.diagnosticFormat === 'human' ? 'human' : 'plain';
   diagnosticColor = resolveColor(inv.color, diagnosticFormat);
   const sourceDirectory = process.cwd();
@@ -1805,15 +1835,15 @@ async function dispatch(module, inv, noArguments) {
   if (inv.name === 'run') return runSession(module, inv, sourceDirectory);
   if (inv.name === 'parse') return runParse(module, inv);
   if (inv.name === 'fmt') return runFmt(module, inv);
-  if (inv.name === 'plan') return runPlan(module, inv);
-  if (inv.name === 'inputs' || inv.name === 'outputs' || inv.name === 'span') return runGraph(module, inv);
-  if (inv.name === 'tools') return runTools(module, inv);
+  if (inv.name === 'plan') return runPlan(module, inv, sourceDirectory);
+  if (inv.name === 'inputs' || inv.name === 'outputs' || inv.name === 'span') return runGraph(module, inv, sourceDirectory);
+  if (inv.name === 'tools') return runTools(module, inv, sourceDirectory);
   if (inv.name === 'cat') {
     if (inv.dryRun) return featureUnsupported('--dry-run');
-    return runCat(module, inv);
+    return runCat(module, inv, sourceDirectory);
   }
   if (inv.dryRun) return featureUnsupported('--dry-run');
-  return runPrimary(module, inv, noArguments === true);
+  return runPrimary(module, inv, noArguments === true, sourceDirectory);
 }
 
 async function main() {
@@ -1872,8 +1902,13 @@ main().then(
         diagnostic(error.code ?? 'HOST_FAIL', error.message);
       }
     } else {
-      const detail = lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
-      if (error.span !== undefined && primarySource) { detail.source = primarySource.name; detail.span = error.span; }
+      if (error.diagnostics) {
+        for (const detail of error.diagnostics) stderr.write(renderDiagnostic(detail, primarySource, 80));
+        process.exitCode = 1;
+        return;
+      }
+      const detail = error.diagnostics?.[0] ?? lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
+      if (!error.diagnostics && !lastDiagnostic && error.span !== undefined && primarySource) { detail.source = primarySource.name; detail.span = error.span; }
       stderr.write(renderDiagnostic(detail, primarySource, 80));
       if (buildProgress !== null && buildProgress.completed + buildProgress.failed !== 0) printSummary();
     }

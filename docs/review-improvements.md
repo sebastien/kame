@@ -12,7 +12,8 @@ found missing WASM include expansion in discovered builds/inspections (KB-3) and
 an aggregate publication output that can remain stale after adding a glob member
 immediately after a rebuild. The aggregate defect (KB-4) was caused by Solod dropping timestamp nanoseconds
 and is now fixed in the POSIX host: 21 sanitizer tests and all 102 publication
-assertions pass. WASM include expansion remains open. Complete the requirement-by-requirement spec
+assertions pass. WASM build and inspection include expansion is fixed (KB-3): 24 parity assertions
+and 21 WASM host sanitizer tests pass. Complete the requirement-by-requirement spec
 comparison and full sanitizer/WASM checks before declaring this project done.
 
 The directory-source bug KB-2 is fixed, as are stale expression command fixtures,
@@ -27,7 +28,7 @@ See the security and performance reviews for evidence and limitations.
 | --- | --- |
 | Operand-aware operation errors and `out` coercion | Already marked complete; retain collection/type/error tests as acceptance evidence. |
 | Target-scoped native tool resolution and `tools check` | Already implemented; keep unused missing tools harmless and checks free of recipe execution. |
-| WASM tool paths, computed checks, and host-dependent inspection | Existing tests cover the implementation; include-loaded declarations still need KB-3 coverage. |
+| WASM tool paths, computed checks, and host-dependent inspection | Existing tests cover the implementation; include-loaded declarations are covered by T010-20. |
 | Omit captured process output from causes | Implemented policy; do not reintroduce captured bytes in diagnostic wrapping. |
 | Literal wildcard paths | Remaining language work: recognize a wildcard resource in input position and keep a plain Kash wildcard literal. Define expression-path semantics without silently changing argv. |
 | Lazy singleton glob sources and future updates | Engine sources and canonical resource identities exist. Prove glob deduplication and membership freshness first; watcher delivery remains separate work. |

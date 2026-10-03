@@ -89,3 +89,4 @@ tests/T017-15-kash-match.sh	017	kash	Kash match patterns, lexical captures, subj
 tests/T017-16-kash-environment.sh	017	kash	Explicit Kash environment lookup, scoped grants, reserved bindings and native/WASM parity
 tests/T017-17-eval-process-expressions.sh	017	eval	Expression run/pipe graphs, structured results, lazy replay safety and native/WASM parity
 tests/T017-18-kash-async.sh	017	kash	Async graph ownership, lazy handles, repeat-safe await, joins, cancellation and native/WASM parity
+tests/T010-20-wasm-build-includes.sh	010	cli	Build and inspection includes, nested source loading, cycles, duplicate declarations and authored diagnostic parity

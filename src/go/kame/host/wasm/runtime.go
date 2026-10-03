@@ -32,6 +32,7 @@ type Runtime struct {
 	Host             *MemoryHost
 	Program          *program.Program
 	Session          *program.Session
+	BuildSources     []program.CompileSource
 	Handle           *program.Handle
 	Environment      []string
 	ToolPaths        []program.Tool
@@ -155,14 +156,16 @@ func (r *Runtime) Prepare() PureResult {
 	if r.InspectionPolicy {
 		options.Grants = r.InspectionGrants
 	}
-	compiled := program.Compile(r.Alloc, r.Parsed, r.Registry, options)
+	compiled := r.compileBuild(options)
 	if compiled.Program == nil {
 		r.Host = nil
+		out := r.buildCompileFailure(&compiled)
 		compiled.Free(r.Alloc)
-		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "source cannot be compiled")}
+		return out
 	}
 	r.Host = nil
 	r.Program = compiled.Program
+	compiled.Free(r.Alloc)
 	r.applyToolPaths()
 	return PureResult{}
 }
@@ -397,16 +400,18 @@ func (r *Runtime) RequestTarget(target string) PureResult {
 	}
 	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}}
 	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: r.Environment, Grants: grants, ForwardRequests: r.Forwarding}
-	compiled := program.Compile(r.Alloc, r.Parsed, r.Registry, options)
+	compiled := r.compileBuild(options)
 	if compiled.Program == nil {
 		// Compile released the host on failure, so drop the borrowed pointer too.
 		r.Host = nil
+		out := r.buildCompileFailure(&compiled)
 		compiled.Free(r.Alloc)
-		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "source cannot be compiled")}
+		return out
 	}
 	// The Program now owns the host and releases it during Program.Free.
 	r.Host = nil
 	r.Program = compiled.Program
+	compiled.Free(r.Alloc)
 	r.applyToolPaths()
 	started := r.Program.Start(target)
 	if started.Diagnostic.Code != "" {
@@ -732,6 +737,7 @@ func (r *Runtime) Free() {
 	r.Engine.Free()
 	r.Registry.Free()
 	r.Parsed.Free()
+	r.freeBuildSources()
 	if r.Arena != nil {
 		r.Arena.Reset()
 		return

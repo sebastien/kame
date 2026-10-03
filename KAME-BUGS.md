@@ -5,7 +5,7 @@ features and design gaps live in `TODO-GAPS.md`; this file is only for behaviour
 that is wrong, not behaviour that is absent.
 
 Environment for all entries: Kame 0.1.0. KB-1 was recorded at revision around
-`2ef00c6` and is fixed in the current working-copy revision; KB-2 is fixed; KB-3 is verified against the current tree. "Verified" means the reproduction was run against
+`2ef00c6` and is fixed in the current working-copy revision; KB-2 is fixed; KB-3 is fixed. "Verified" means the reproduction was run against
 this tree.
 
 ## Fixed
@@ -94,13 +94,13 @@ coverage lives in `tests/T011-03-diag-context.sh` (`two_reads`, `two_globs`) and
 scalar (`(replace P 1 S)` → `PAT_INVALID`) while `(replace P "1" S)` works; that
 is tracked separately as `TODO-GAPS.md` B5.
 
-## Open
+## Additional fixed source defects
 
 ### KB-3 — WASM discovered builds and inspections ignore includes
 
 - **Severity:** high
 - **Area:** JavaScript host source loading
-- **Status:** open
+- **Status:** fixed
 
 A `Makefile.kmk` containing `include ./child.kmk` and a default recipe that
 references a definition from `child.kmk` works natively.
@@ -110,8 +110,14 @@ unexpanded text, differing from the native plan. Explicit file execution through
 the unified runner already expands includes. Shared inspection/build loading must
 expand them too and preserve authored source locations in diagnostics.
 
-Regression coverage must include primary autodiscovery, plan/graph/tools/cat,
-nested includes, cycles, and diagnostics from included files.
+WASM now expands includes through the shared build loader and passes copied
+source fragments to portable `CompileMany`. Diagnostics retain authored source
+names, offsets, frames, and complete parser diagnostic lists.
+
+**Verification.** T010-20 passes 24 native/WASM parity assertions covering primary
+autodiscovery, explicit files, `-C`, plan/graph/tools/cat, nested includes, cycles,
+missing files, malformed sources, duplicates, repeated nonrecursive includes,
+and inline include rejection. The WASM host sanitizer suite passes 21 tests.
 
 ## Additional fixed defects
 

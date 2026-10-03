@@ -80,6 +80,15 @@ Zero is invalid. Freeing increments the slot generation; stale or foreign
 handles return `HANDLE_INVALID`. Generation overflow retires the slot for the
 remaining module lifetime.
 
+File-backed builds and inspection commands load include fragments through the
+host. The optional `kame_wasm_set_build_sources(handle, data, length)` export
+accepts a copied JSON descriptor with `sources` entries containing `name`, `text`,
+and authored byte `offset`, after initializing an empty source instance and
+before target execution or preparation. The portable compiler combines these
+fragments and maps diagnostic spans back to authored sources. No filesystem work
+occurs during compilation. Registration failures expose their complete diagnostic
+list through the target-event query, including in non-JSON presentation modes.
+
 ## Host Requests
 
 Initial request kinds are:
@@ -288,3 +297,7 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 - `do tools check TARGETS...` resolves host paths, forwards read-only filesystem
   and environment requests, and reports missing tools without executing a recipe.
 - `--wasm-abi-info` and `--wasm-self-test` report the current stage's ABI.
+
+Build source descriptors are bounded to 512 KiB of encoded JSON and 64 KiB
+of combined source text, matching the single-source text capacity. Oversize
+input returns `NO_MEMORY`; offsets must fit a nonnegative 32-bit span.

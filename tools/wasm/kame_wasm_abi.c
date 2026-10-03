@@ -438,6 +438,25 @@ uint32_t kame_wasm_source_compile(uint64_t handle, uint32_t source, uint32_t sou
   return KAME_WASM_OK;
 }
 
+__attribute__((export_name("kame_wasm_set_build_sources")))
+uint32_t kame_wasm_set_build_sources(uint64_t handle, uint32_t data, uint32_t length) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || instance->has_pending || instance->parked || (length && !data)) return KAME_WASM_STATE_INVALID;
+  if (length > 8u * KAME_WASM_SOURCE_CAPACITY) {
+    kame_wasm_instance_set_static_diagnostic(instance, "NO_MEMORY", "build source descriptor exceeds instance capacity");
+    return KAME_WASM_NO_MEMORY;
+  }
+  wasm_PureResult result = wasm_Runtime_SetBuildSources(instance->runtime, (so_Slice){(so_byte *)(uintptr_t)data, length, length});
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic_span(instance, result.Code, result.Message, result.SpanStart, result.SpanEnd);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
 uint32_t kame_wasm_expression_begin(uint64_t handle, uint32_t source, uint32_t source_len) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;

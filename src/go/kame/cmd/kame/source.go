@@ -46,9 +46,9 @@ func freeBuildSource(source *buildSource) {
 
 func loadBuildSource(options buildArguments, errOut io.Writer, reportMissing bool) buildSource {
 	if options.Command != "" {
-		result := buildSource{}
-		result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: "<command>", Text: options.Command})
-		result.Parts = slices.Append(mem.System, result.Parts, sourcePart{Name: "<command>", Text: options.Command})
+		result := buildSource{JSON: options.JSON}
+		result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: "<command>", Text: options.Command, Parent: -1})
+		if !expandIncludesLanguage(&result, 0, errOut, "kmk") { result.Status = 1 }
 		return result
 	}
 	if options.File != "" {
