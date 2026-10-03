@@ -337,9 +337,8 @@ func (p *Program) mkdirParent(name string) bool {
 	if parent == "." || parent == "/" {
 		return true
 	}
-	if p.Host.Stat(parent).Exists {
-		return true
-	}
+	info := p.Host.Stat(parent)
+ if info.Exists { return info.Info.IsDir }
 	// The recursive walk is deliberately lexical; output paths have already been normalized.
 	if !p.mkdirParent(parent) {
 		return false
@@ -347,7 +346,8 @@ func (p *Program) mkdirParent(name string) bool {
 	if p.Host.Mkdir(parent, 0o755) == nil {
 		return true
 	}
-	return p.Host.Stat(parent).Exists
+	info = p.Host.Stat(parent)
+ return info.Exists && info.Info.IsDir
 }
 
 // Rendered bytes are authoritative for yielded files. Membership changes can

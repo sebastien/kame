@@ -28,6 +28,7 @@ const (
 	FieldRecord = "record"
 	OpRead      = "read"
 	OpExists    = "exists"
+ OpOutputExists = "output-exists"
 	OpStat      = "stat"
 	OpWildcard  = "wildcard"
 )
@@ -48,6 +49,23 @@ func ProcessPayload(a mem.Allocator, script string) core.Value {
 	payload := core.NewRecord(a, fields)
 	fields[0].Value.Free(a)
 	return payload
+}
+
+
+// RecipePayload carries the file outputs whose parent directories the embedding
+// host must create before starting a shell recipe. Script remains available to
+// in-process hosts; Data is the structured freestanding wire spelling.
+func RecipePayload(a mem.Allocator, script string, outputs []string) core.Value {
+ b := strings.NewBuilder(a)
+ e := json.NewEncoder(&b)
+ e.BeginObject(); e.Str("script"); e.Str(script); e.Str("outputs"); e.BeginArray()
+ for i := range outputs { e.Str(outputs[i]) }
+ e.EndArray(); e.EndObject(); e.Flush()
+ fields := []core.RecordField{{Key: FieldOp, Value: core.NewString(a, "recipe")}, {Key: FieldScript, Value: core.NewString(a, script)}, {Key: FieldData, Value: core.NewString(a, b.String())}}
+ payload := core.NewRecord(a, fields)
+ for i := range fields { fields[i].Value.Free(a) }
+ b.Free()
+ return payload
 }
 
 // ArgvPayload is a structured process request, distinct from shell script text.

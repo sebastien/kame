@@ -804,8 +804,8 @@ class Module {
         return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot stat file' : `cannot stat file: ${error.message}`);
       }
     }
-    if (kind === 7) {
-      if (!grants.read) return this.deny(instance, request);
+    if (kind === 7 || kind === 17) {
+      if (kind === 7 && !grants.read) return this.deny(instance, request);
       return this.completeJSON(instance, request, existsSync(payload));
     }
     if (kind === 6) {
@@ -860,8 +860,16 @@ class Module {
       }
       return this.completeFailure(instance, request, completion.code, completion.message);
     }
-    if (kind === 3) {
+    if (kind === 3 || kind === 16) {
       if (!grants.run) return this.deny(instance, request);
+      if (kind === 16) {
+        let recipe;
+        try { recipe = JSON.parse(payload); } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe request'); }
+        if (typeof recipe.script !== 'string' || !Array.isArray(recipe.outputs) || recipe.outputs.some((name) => typeof name !== 'string' || name.includes('\0'))) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe outputs');
+        try { for (const name of recipe.outputs) await mkdir(dirname(name), { recursive: true }); }
+        catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot create output directory'); }
+        payload = recipe.script;
+      }
       if (context.streaming) {
         const detached = context.concurrent === true;
         await runProcess(this, instance, payload, context, detached ? request : undefined);

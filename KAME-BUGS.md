@@ -173,3 +173,24 @@ rename with private sibling staging. T010-21 passes 15 assertions for isolated
 native/WASM binary bytes, explicit writes, dependent recipe ordering, `cat`,
 zero-byte yields, failure propagation, and staging cleanup. The WASM host sanitizer
 suite passes 23 tests, including write payload ordering and host failure.
+
+### KB-7 — Forwarded shell file recipes omit host directory preparation and output checks
+
+- **Severity:** high
+- **Status:** fixed
+
+A WASM shell file rule containing `true` completed without its declared output,
+while native correctly reported `OUTPUT_MISSING`. A nested shell output failed
+because directory preparation only reached the module memory filesystem.
+
+File recipes now send structured host requests carrying their declared outputs.
+The host prepares parent directories before launch, and the portable engine
+requests and checks each output after successful execution. Recipes with only
+explicit writes also verify their output. Dependents wait for those checks.
+Existing native parents must be directories; a regular file produces `FS_ERR`
+before launching the recipe.
+
+T010-21 passes 25 isolated native/WASM assertions, including missing outputs,
+empty shell recipes, nested outputs, explicit writes, blocked parents, and
+publication failures. T010-05 pins the recipe/output-check ABI sequence;
+24 WASM host tests pass with ASAN/UBSAN.

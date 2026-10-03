@@ -273,6 +273,9 @@ type instance struct {
 	Inspection           bool
 	inspectionRoot       *core.Root
 	ForwardEffects       *forwardEffectsState
+ VerifyOutputs bool
+ VerifyPending bool
+ VerifyIndex int
 	Script               string
 	LineSpans            []diagnostic.Span
 	Operations           []string

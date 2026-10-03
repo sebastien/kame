@@ -147,6 +147,14 @@ unlinked before graph execution. An unavailable utility produces `HOST_FAIL`.
 Node's socket-based subprocess `pipe` streams are not interchangeable here:
 early-reader closure can produce ECONNRESET instead of native SIGPIPE.
 
+File-rule shell requests use ABI kind 16: a JSON object with `script` and
+`outputs`. The embedding host creates output parent directories before launch.
+After successful process completion, or a recipe containing no shell/yield,
+the engine emits ABI kind 17 for each declared output path. The host completes
+that internal metadata request with an existence boolean. The engine reports
+`OUTPUT_MISSING` and withholds dependent execution when an output is absent.
+These checks do not evaluate a user library read or broaden expression grants.
+
 Structured process requests distinguish direct argv (ABI kind 13, a JSON argv
 array) from pipelines (kind 14, a JSON array of stage argv arrays) and redirected
 configured graphs (kind 15, a JSON object with `stages`, `input`, `output`,

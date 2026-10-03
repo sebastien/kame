@@ -26,6 +26,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		entry.cachePending = false
 		p.freeForwardEffects(entry.ForwardEffects)
 		entry.ForwardEffects = nil
+  entry.VerifyOutputs, entry.VerifyPending, entry.VerifyIndex = false, false, 0
 		if entry.Script != "" {
 			mem.FreeString(p.Alloc, entry.Script)
 			entry.Script = ""
@@ -42,6 +43,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service execution is not supported"))
 		return core.ProducerFailed
 	}
+	if entry.VerifyOutputs { return p.verifyForwardOutputs(c, state.Index) }
 	if entry.ForwardEffects != nil {
 		return p.continueForwardEffects(c, state.Index)
 	}
@@ -52,6 +54,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			p.failRule(c, state.Index, c.Completion().Diagnostic)
 			return core.ProducerFailed
 		}
+		if entry.Rule.Kind == rule.FileRule && p.Forwarding { entry.VerifyOutputs = true; return p.verifyForwardOutputs(c, state.Index) }
 		// When requests are forwarded, the embedding host owns the filesystem and
 		// reports recipe failures through the completion; the local synchronous
 		// output check cannot see files the host wrote.
@@ -253,6 +256,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string, yielded bool) core.ProducerResult {
 	entry := &p.Instances[index]
 	if commands == "" {
+  if entry.Rule.Kind == rule.FileRule && !yielded && p.Forwarding { entry.VerifyOutputs = true; return p.verifyForwardOutputs(c, index) }
 		if entry.Rule.Kind == rule.FileRule && !yielded && !p.Forwarding {
 			for i := range entry.Plan.Outputs {
 				name := p.canonicalTarget(entry.Plan.Outputs[i], true)
@@ -274,7 +278,7 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 		}
 		return core.ProducerCompleted
 	}
-	if entry.Rule.Kind == rule.FileRule {
+	if entry.Rule.Kind == rule.FileRule && !p.Forwarding {
 		for i := range entry.Plan.Outputs {
 			name := p.canonicalTarget(entry.Plan.Outputs[i], true)
 			ok := p.mkdirParent(name)
@@ -301,7 +305,8 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	if p.Forwarding {
 		// The embedding host runs the recipe; correlation uses the node so the
 		// completion resumes this producer.
-		payload := host.ProcessPayload(p.Alloc, entry.Script)
+  payload := core.Value{}
+  if entry.Rule.Kind == rule.FileRule { payload = host.RecipePayload(p.Alloc, entry.Script, entry.Plan.Outputs) } else { payload = host.ProcessPayload(p.Alloc, entry.Script) }
 		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestProcess, Payload: payload})
 		c.Submit(request.ID)
 		return core.ProducerSubmitted

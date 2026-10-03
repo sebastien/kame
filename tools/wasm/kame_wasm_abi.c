@@ -216,6 +216,7 @@ static kame_wasm_instance *kame_wasm_instance_get(uint64_t handle) {
 
 static so_String kame_wasm_request_payload(host_Request request) {
   if (request.Kind == host_RequestProcess) {
+    if (host_PayloadText(request.Payload, so_str("data")).len != 0) return host_PayloadText(request.Payload, so_str("data"));
     if (host_PayloadStages(request.Payload).len != 0) return host_PayloadText(request.Payload, so_str("data"));
     if (host_PayloadArgv(request.Payload).len != 0) return host_PayloadText(request.Payload, so_str("data"));
     return host_PayloadText(request.Payload, so_str("script"));
@@ -242,6 +243,7 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
   switch (request.Kind) {
     case host_RequestReadFile: {
       so_String op = host_PayloadText(request.Payload, so_str("op"));
+      if (kame_wasm_string_eq(op, "output-exists")) return 17u;
       if (kame_wasm_string_eq(op, "exists")) return 7u;
       if (kame_wasm_string_eq(op, "stat")) return 5u;
       if (kame_wasm_string_eq(op, "wildcard")) return 6u;
@@ -250,6 +252,7 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
     case host_RequestWriteFile:
       return 2u;
     case host_RequestProcess:
+      if (kame_wasm_string_eq(host_PayloadText(request.Payload, so_str("op")), "recipe")) return 16u;
       if (host_PayloadSetups(request.Payload).len != 0 || host_PayloadText(request.Payload, so_str("input")).len != 0 || host_PayloadText(request.Payload, so_str("output")).len != 0) return 15u;
       if (host_PayloadStages(request.Payload).len != 0) return 14u;
       return host_PayloadArgv(request.Payload).len != 0 ? 13u : 3u;

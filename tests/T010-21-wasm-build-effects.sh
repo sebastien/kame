@@ -24,6 +24,16 @@ default : ./nested/out.bin
 	@(yield "")
 ./blocked :
 	@(yield "failure")
+./shell/nested.out :
+	printf shell > @>
+./missing :
+	true
+./no-shell :
+	@(out "")
+./written :
+	@(write "./written" "written")
+./bad-parent/output :
+	printf blocked > @>
 KMK
 cat "$project/input.bin" >"$project/expected.bin"
 printf tail >>"$project/expected.bin"
@@ -46,6 +56,20 @@ for backend in native wasm; do
 	status=0
 	"${runner[@]}" -C "$project" ./blocked >"$project/value" 2>"$project/error" || status=$?
 	if [ "$status" = 1 ] && grep -q FS_ERR "$project/error"; then test-ok "$backend host publication failure fails target"; else test-fail "$backend write error was ignored"; fi
+ rm -rf "$project/shell" "$project/missing" "$project/no-shell" "$project/written" "$project/bad-parent"
+ "${runner[@]}" -C "$project" ./shell/nested.out >"$project/value" 2>"$project/error"
+ if [ "$(cat "$project/shell/nested.out")" = shell ]; then test-ok "$backend creates shell output parent directories"; else test-fail "$backend shell parent directories"; fi
+ for target in ./missing ./no-shell; do
+  status=0
+  "${runner[@]}" -C "$project" "$target" >"$project/value" 2>"$project/error" || status=$?
+  if [ "$status" = 1 ] && grep -q OUTPUT_MISSING "$project/error"; then test-ok "$backend rejects omitted output $target"; else test-fail "$backend omitted output was accepted"; cat "$project/error"; fi
+ done
+ "${runner[@]}" -C "$project" ./written >"$project/value" 2>"$project/error"
+ if [ "$(cat "$project/written")" = written ]; then test-ok "$backend verifies explicit write output without shell"; else test-fail "$backend explicit write output"; fi
+ printf file >"$project/bad-parent"
+ status=0
+ "${runner[@]}" -C "$project" ./bad-parent/output >"$project/value" 2>"$project/error" || status=$?
+ if [ "$status" = 1 ] && grep -q FS_ERR "$project/error"; then test-ok "$backend parent directory failure fails before shell"; else test-fail "$backend parent directory error"; fi
 	if find "$project" -name '.kame-write-*' -print -quit | grep -q .; then test-fail "$backend leaked atomic staging"; else test-ok "$backend cleans staging after failed publication"; fi
 done
 if cmp -s "$project/native.out" "$project/wasm.out" && cmp -s "$project/native.cat" "$project/wasm.cat"; then test-ok "isolated native/WASM bytes match"; else test-fail "isolated build effect parity"; fi
