@@ -721,3 +721,15 @@ func TestRenderFreesLineSpansWhenLaterLineWaits(t *testing.T) {
 	result.Free(a)
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
+
+func TestDefinitionMaterializationReturnsCurrentValue(t *testing.T) {
+ a := t.Allocator()
+ parsed := script.Parse(a, "value.kmk", "answer = [1 2]\n")
+ registry := eval.NewRegistry(a)
+ compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
+ if compiled.Program == nil { t.Error("compile definition"); compiled.Free(a); parsed.Free(); registry.Free(); return }
+ result := compiled.Program.Materialize("answer")
+ if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 || result.Value.List[1].Int != 2 { t.Error("current definition was not materialized") }
+ result.Free(a)
+ compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}

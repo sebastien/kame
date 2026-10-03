@@ -331,6 +331,14 @@ func (h *Handle) poll(release bool) HandleResult {
 	if h == nil || h.Program == nil || h.Node == nil {
 		return HandleResult{Done: true, Result: Result{Diagnostic: failure(mem.System, "TGT_NO_RULE", "invalid handle")}}
 	}
+	if h.Definition && h.Node.Current && h.Node.State != core.NodeFailed && h.Node.State != core.NodeCancelled {
+		value := h.Node.Latest.Clone(h.Program.Alloc)
+		if release && h.Root != nil {
+			h.Program.Engine.Release(h.Root)
+			h.Root = nil
+		}
+		return HandleResult{Done: true, Result: Result{Value: value}}
+	}
 	if h.Node.State != core.NodeComplete && h.Node.State != core.NodeFailed && h.Node.State != core.NodeCancelled {
 		return HandleResult{}
 	}
