@@ -5,6 +5,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 	"solod.dev/so/testing"
+	"solod.dev/so/time"
 )
 
 func TestAtomicWriteIgnoresPredictableStagingSymlink(t *testing.T) {
@@ -87,4 +88,37 @@ func removeAtomicTestDirectory(directory string) {
 		os.FreeDirEntry(mem.System, entries)
 	}
 	os.Remove(directory)
+}
+
+func TestStatPreservesSubsecondModificationTimes(t *testing.T) {
+	var buffer [os.MaxPathLen]byte
+	directory, err := os.MkdirTemp(buffer[:], "", "kame-stat-")
+	if err != nil {
+		t.Fatal("create test directory")
+		return
+	}
+	defer removeAtomicTestDirectory(directory)
+	name := directory + "/input"
+	if os.WriteFile(name, []byte("input"), 0o600) != nil {
+		t.Fatal("create input")
+		return
+	}
+	h := posix.New(mem.System)
+	defer h.Free()
+	first := time.Unix(1700000000, 100000000)
+	second := time.Unix(1700000000, 900000000)
+	if os.Chtimes(name, first, first) != nil {
+		t.Fatal("set first timestamp")
+		return
+	}
+	before := h.Stat(name)
+	if os.Chtimes(name, second, second) != nil {
+		t.Fatal("set second timestamp")
+		return
+	}
+	after := h.Stat(name)
+	link := h.Lstat(name)
+	if !before.Exists || !after.Exists || !link.Exists || before.Info.ModTime != first.UnixNano() || after.Info.ModTime != second.UnixNano() || link.Info.ModTime != second.UnixNano() {
+		t.Error("stat discarded subsecond precision")
+	}
 }

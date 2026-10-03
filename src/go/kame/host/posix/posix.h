@@ -52,5 +52,6 @@ int km_cli_stderr_is_terminal(void);
 int km_cli_stderr_width(void);
 int km_cli_environment_size(void);
 int km_cli_environment_copy(so_Slice);
+int64_t km_file_modtime(so_String, bool);
 
 #endif

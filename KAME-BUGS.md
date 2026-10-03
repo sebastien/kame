@@ -18,7 +18,7 @@ this tree.
 - **Related:** `TODO-GAPS.md` D2
 
 GNU Make changes directory for `-C` before reading makefiles, so
-`make -C sub -f Makefile` reads `sub/Makefile`. Kame resolves a relative `-f`
+`make -C sub -f Makefile` reads `sub/Makefile`. Before the fix, Kame resolved a relative `-f`
 against the original working directory instead.
 
 ```sh
@@ -28,7 +28,7 @@ kame -C sub -f Makefile.kmk default
 ```
 
 - **Expected:** builds `sub/Makefile.kmk`.
-- **Actual:** `error FS_ERR: cannot read source: Makefile.kmk`.
+- **Historical actual:** `error FS_ERR: cannot read source: Makefile.kmk`.
 
 **Historical workaround (before the fix).** Qualify the path relative to the
 original directory, or drop `-f`:
@@ -112,3 +112,22 @@ expand them too and preserve authored source locations in diagnostics.
 
 Regression coverage must include primary autodiscovery, plan/graph/tools/cat,
 nested includes, cycles, and diagnostics from included files.
+
+## Additional fixed defects
+
+### KB-4 — Subsecond input changes were treated as fresh
+
+- **Severity:** high
+- **Area:** POSIX filesystem timestamps / file-rule freshness
+- **Status:** fixed
+
+`tests/T013-04-meta-layer-examples.sh` failed in both the broad suite and an
+isolated run: after rebuilding publication, immediately adding a new note built
+the new page but skipped aggregate `public/index.txt`. The new page had a newer
+filesystem mtime, but both timestamps were in the same second.
+
+Solod 0.4.0 `so/os/os.c` sets `modNsec=0` for stat and lstat. Kame now reads
+native nanosecond timestamps in its POSIX host on Linux and macOS layouts.
+`TestStatPreservesSubsecondModificationTimes` pins distinct timestamps within
+one second, for both Stat and Lstat. The POSIX sanitizer suite passes 21 tests;
+T013-04 now passes all 102 assertions, including immediate graph growth.

@@ -34,7 +34,12 @@ func (h *Host) Stat(name string) host.StatResult {
 	if err != nil {
 		return host.StatResult{Failed: err != os.ErrNotExist}
 	}
-	return host.StatResult{Info: portableFileInfo(info), Exists: true}
+	result := portableFileInfo(info)
+	// Solod 0.4.0 drops stat nanoseconds. Preserve them for same-second builds.
+	if stamp := km_file_modtime(name, false); stamp != 0 {
+		result.ModTime = stamp
+	}
+	return host.StatResult{Info: result, Exists: true}
 }
 
 func (h *Host) Lstat(name string) host.StatResult {
@@ -43,7 +48,11 @@ func (h *Host) Lstat(name string) host.StatResult {
 	if err != nil {
 		return host.StatResult{Failed: err != os.ErrNotExist}
 	}
-	return host.StatResult{Info: portableFileInfo(info), Exists: true}
+	result := portableFileInfo(info)
+	if stamp := km_file_modtime(name, true); stamp != 0 {
+		result.ModTime = stamp
+	}
+	return host.StatResult{Info: result, Exists: true}
 }
 
 func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {

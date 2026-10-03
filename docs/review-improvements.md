@@ -10,9 +10,9 @@ remaining work. It does not close a feature request merely by proposing a design
 Fix reproducible correctness failures before expanding syntax. The current review
 found missing WASM include expansion in discovered builds/inspections (KB-3) and
 an aggregate publication output that can remain stale after adding a glob member
-immediately after a rebuild. The latter failed in the full suite and an isolated
-rerun; retain it as a correctness issue until its freshness decision is explained
-and regression coverage passes. Complete the requirement-by-requirement spec
+immediately after a rebuild. The aggregate defect (KB-4) was caused by Solod dropping timestamp nanoseconds
+and is now fixed in the POSIX host: 21 sanitizer tests and all 102 publication
+assertions pass. WASM include expansion remains open. Complete the requirement-by-requirement spec
 comparison and full sanitizer/WASM checks before declaring this project done.
 
 The directory-source bug KB-2 is fixed, as are stale expression command fixtures,
@@ -77,7 +77,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | C4 one shell per recipe | Intentional behavior; document the porting implications and keep process-host multiline tests. |
 | D1 capability-gated wildcard | Intentional; confirm denial names the missing authority and show `do run --lang expr --allow-read` in examples. |
 | D2 relative `-f` beneath `-C` | Fixed on native and WASM, with regression tests. Align spec prose with the corrected behavior. |
-| D3 idioms/gotchas | Remaining documentation deliverable: selectors, literal dollars, quoted shell text, list references, empty definitions, interpolation, pattern expansion, and grants. Test examples before publishing them as runnable. |
+| D3 idioms/gotchas | Added `docs/idioms-and-gotchas.md` covering selectors, dollars, shell text, references, empty definitions, interpolation, patterns, and grants. Expression examples were executed against the native CLI. |
 
 ## Completion gates
 
@@ -85,7 +85,7 @@ Use specification acceptance clauses as requirements, not just the existence of
 numbered test files. The first full `make test` attempt passed portable package,
 example-package, and Go CLI tests but failed five of 89 CLI suites. Isolated
 reruns confirmed fixed table fixtures, bootstrap, self-build, and signal coverage;
-publication graph growth still fails. Rerun affected suites after fixes, then the
+publication graph growth now passes after the timestamp-precision fix. Rerun affected suites after fixes, then the
 broad suite on the final checkout. Broad sanitizers and the explicit `test-wasm`
 gate remain required. Cross-host source locations, includes, dry-run side effects,
 and invocation capability inheritance need direct evidence.

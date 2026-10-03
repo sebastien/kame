@@ -160,6 +160,20 @@ static char *km_cstring(so_String value) {
     return out;
 }
 
+int64_t km_file_modtime(so_String name, bool link) {
+    char *path = km_cstring(name);
+    if (!path) return 0;
+    struct stat info;
+    int result = link ? lstat(path, &info) : stat(path, &info);
+    free(path);
+    if (result != 0) return 0;
+#if defined(__APPLE__)
+    return (int64_t)info.st_mtimespec.tv_sec * 1000000000LL + info.st_mtimespec.tv_nsec;
+#else
+    return (int64_t)info.st_mtim.tv_sec * 1000000000LL + info.st_mtim.tv_nsec;
+#endif
+}
+
 static void km_free_strings(char **strings, int count) {
     if (!strings) return;
     for (int i = 0; i < count; i++) free(strings[i]);
