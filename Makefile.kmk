@@ -182,12 +182,12 @@ test-wasm : wasm-check
 	./tests/T010-18-wasm-clock.sh
 	./tests/T010-19-wasm-cache.sh
 	./tests/T010-20-wasm-build-includes.sh
-	./tests/T007-09-wildcard-union.sh
-	./tests/T004-09-rule-header-composition.sh
-	./tests/T004-10-line-continuations.sh
+	./tests/T007-09-lib-wildcard-union.sh
+	./tests/T004-09-lang-rule-header-composition.sh
+	./tests/T004-10-lang-line-continuations.sh
 	./tests/T010-21-wasm-build-effects.sh
-	./tests/T014-02-pattern-ergonomics.sh
-	./tests/T016-01-render-cli.sh
+	./tests/T014-02-patterns-ergonomics.sh
+	./tests/T016-01-cli-render.sh
 
 # --- Formatting and cleanup -------------------------------------------------
 
