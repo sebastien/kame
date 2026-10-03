@@ -48,12 +48,16 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 	if entry.Plan.Resolved {
 		inputs = entry.Plan.ResolvedInputs
 	}
+ resources := entry.Plan.ResourceInputs
+ if entry.Plan.Resolved { resources = entry.Plan.ResolvedResourceInputs }
 	for i := range inputs {
+  if i < len(resources) && resources[i].OrderOnly { continue }
 		if isFileName(inputs[i]) {
 			p.appendContextPath(state, inputs[i])
 		}
 	}
 	for i := range entry.Node.Dynamic {
+  if slices.Contains(entry.Node.OrderOnly, entry.Node.Dynamic[i]) { continue }
 		if entry.Node.Dynamic[i].Key.Kind == core.ResourceFile {
 			p.appendContextPath(state, entry.Node.Dynamic[i].Key.Name)
 		}

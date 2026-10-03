@@ -76,7 +76,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | B4 header path interpolation | Implemented through shared template rendering for path and quoted input tokens; T004-09 pins planning, expanded inspection and execution parity. |
 | B5 scalar expansion/leading captures/bare captures | Implemented scalar expansion text and leading expression patterns. Bare target captures already existed; T014-02 verifies exact precedence and template ambiguity on both hosts. |
 | C1 forced file rebuild | Implemented: `always ./output : ./input` preserves file artifacts and output checks while rerunning once per requested-root epoch. T006-03 covers both hosts; parser/program sanitizer suites pass 9/97 tests, including repeated roots and diamond sharing. `--force` remains an invocation override. |
-| C2 order-only prerequisites | Remaining rule semantics; maintain scheduling edges while excluding them from freshness/cache content identity where specified. |
+| C2 order-only prerequisites | Implemented with `|`: scheduling/failure edges, freshness/cache exclusions and explicit-read/normal-edge upgrades. T006-04 covers both hosts. |
 | C3 automatic variables | Existing selectors cover inputs/outputs. Newer-input and stem equivalents need precise freshness/capture definitions; directory extraction can use pure path operations. |
 | C4 one shell per recipe | Intentional behavior; document the porting implications and keep process-host multiline tests. |
 | D1 capability-gated wildcard | Fixed diagnostic: missing or insufficient read authority names `--allow-read=ROOT` on native and WASM. T007-06/T010-08 cover denials and successful grants; examples use `do run --lang expr --allow-read=.`. |
@@ -165,3 +165,12 @@ checks pass. The broad suite has not been rerun for this change.
 A follow-up fixes content-equal `yield` overriding `always` freshness on the
 native host. T006-03 now checks that an equal payload republishes an intentionally
 old output on both hosts; all 18 assertions pass.
+
+Order-only prerequisites pass 20 isolated native/WASM assertions, 64 engine
+sanitizer tests, 13 rule-parser sanitizer tests and 100 program sanitizer tests.
+The program test verifies sequential root epochs rerun ordering work while
+skipping the unchanged artifact. Existing freshness, dependency, always-rule,
+environment, native/WASM cache, plan and catalog suites pass separately.
+The compiled sanitizer CLI passes all 19 order-only assertions with leak detection;
+ASAN instrumentation is verified before and after the run. The normal run includes
+one additional binary-build assertion. Broad full-suite coverage remains pending.

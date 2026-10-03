@@ -108,6 +108,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	for i := range inputs {
 		input := inputs[i]
 		kind := core.ResourceTarget
+  ordered := i < len(resourceInputs) && resourceInputs[i].OrderOnly
 		if i < len(resourceInputs) {
 			kind = resourceInputs[i].Key.Kind
 		}
@@ -122,7 +123,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			resolved.Diagnostic.Free(p.Alloc)
 			if resolved.Node != nil {
 				resolved.Plan.Free(p.Alloc)
-				if !p.prepareDependency(c, state.Index, resolved.Node) {
+				if !p.prepareDependency(c, state.Index, resolved.Node, ordered) {
 					return core.ProducerWaiting
 				}
 				continue
@@ -136,7 +137,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				external.Program, external.Name = p, cloneText(p.Alloc, name)
 				dependency = p.Engine.AddOwned(key, produceExternalFile, external, freeExternalFileState)
 			}
-			if !p.prepareDependency(c, state.Index, dependency) {
+			if !p.prepareDependency(c, state.Index, dependency, ordered) {
 				mem.FreeString(p.Alloc, name)
 				return core.ProducerWaiting
 			}
@@ -152,7 +153,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		dep, d := resolved.Node, resolved.Diagnostic
 		resolved.Plan.Free(p.Alloc)
 		if d.Code == "" && dep != nil {
-			if !p.prepareDependency(c, state.Index, dep) {
+			if !p.prepareDependency(c, state.Index, dep, ordered) {
 				return core.ProducerWaiting
 			}
 			continue
@@ -168,7 +169,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			return core.ProducerFailed
 		}
 		definitionNode := p.definitionNode(definition.Key.Name)
-		if definitionNode == nil || !p.addDependency(c, entry, definitionNode) {
+		if definitionNode == nil || !p.addPurposeDependency(c, entry, definitionNode, ordered) {
 			return core.ProducerWaiting
 		}
 	}
@@ -206,6 +207,8 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		if !entry.FileContextReady {
 			entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node)
 		}
+		beforeInvalidation := entry.Plan.Freshness
+  if entry.Node.InvalidatedForOrderOnly { entry.Plan.Freshness = beforeInvalidation }
 		if hasYield(effects) && len(entry.Plan.Outputs) == 1 && !p.Forwarding && !entry.FileContextWanted && !entry.Rule.Always {
 			entry.Plan.Freshness = p.yieldFreshness(entry, effects)
 		}

@@ -199,7 +199,7 @@ func (e *Engine) publish(n *Node, value Value) {
 		if dependent.State != NodeWaiting { continue }
 		// A host request was derived from an older dependency snapshot. Cancel it
 		// and restart from the newest values instead of accepting its completion.
-		if dependent.Submitted { e.invalidate(dependent, &[]*Node{}); continue }
+		if dependent.Submitted { e.Invalidate(dependent); continue }
 		dependent.State = NodeReady
 	}
 	slices.Free(e.Alloc, dependents)
@@ -353,9 +353,32 @@ func (e *Engine) accept(c Completion) *Node {
 }
 
 func (e *Engine) Invalidate(n *Node) {
+ var reasons []*Node
+ e.collectInvalidationReasons(n, false, &reasons)
+ slices.Free(e.Alloc, reasons)
 	var seen []*Node
 	e.invalidate(n, &seen)
 	slices.Free(e.Alloc, seen)
+}
+
+// Collect reasons before edges are removed, so a normal diamond path dominates
+// an order-only path regardless of traversal order.
+func (e *Engine) collectInvalidationReasons(n *Node, ordered bool, seen *[]*Node) {
+	if n == nil {
+		return
+	}
+	if slices.Contains(*seen, n) {
+		if !n.InvalidatedForOrderOnly || ordered {
+			return
+		}
+	} else {
+		*seen = slices.Append(e.Alloc, *seen, n)
+	}
+	n.InvalidatedForOrderOnly = ordered
+	for i := range n.Dependents {
+		dependent := n.Dependents[i]
+		e.collectInvalidationReasons(dependent, ordered || slices.Contains(dependent.OrderOnly, n), seen)
+	}
 }
 
 func (e *Engine) invalidate(n *Node, seen *[]*Node) {
@@ -385,6 +408,7 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node) {
 	}
 	slices.Free(e.Alloc, n.Dynamic); n.Dynamic = nil
 	slices.Free(e.Alloc, n.Observed); n.Observed = nil
+ slices.Free(e.Alloc, n.OrderOnly); n.OrderOnly = nil
 	e.emit(n, Event{Kind: UpdateInvalidated})
 	for i := range dependents { e.invalidate(dependents[i], seen) }
 	slices.Free(e.Alloc, dependents)
@@ -442,6 +466,7 @@ func (e *Engine) Free() {
 		for j := range n.Subs { n.Subs[j].free() }
 		slices.Free(e.Alloc, n.Subs); slices.Free(e.Alloc, n.Static); slices.Free(e.Alloc, n.Dynamic); slices.Free(e.Alloc, n.Dependents)
 		slices.Free(e.Alloc, n.Observed)
+  slices.Free(e.Alloc, n.OrderOnly)
 		if n.Current { n.Latest.Free(e.Alloc) }
 		if n.materializer != nil { n.materializer.Free() }
 		if n.ContextFree != nil { n.ContextFree(e.Alloc, n.Context) }

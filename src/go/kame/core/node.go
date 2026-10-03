@@ -27,6 +27,9 @@ type Node struct {
 	Diagnostic      Diagnostic
 	Static          []*Node
 	Dynamic         []*Node
+	// OrderOnly edges schedule work without consuming prerequisite contents.
+	OrderOnly []*Node
+	InvalidatedForOrderOnly bool
 	// Observed failures wake the producer instead of failing it transitively.
 	Observed        []*Node
 	Dependents      []*Node

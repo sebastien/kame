@@ -46,6 +46,7 @@ type Plan struct {
 }
 
 type PlanInput struct {
+ OrderOnly bool
 	Display string
 	Key     core.ResourceKey
 }

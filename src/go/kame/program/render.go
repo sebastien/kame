@@ -11,7 +11,9 @@ import (
 
 func (p *Program) render(c *core.EngineContext, entry *instance, names []string) renderResult {
 	body := entry.Rule.Body
-	inputs := makeValues(p.Alloc, names)
+ resources := entry.Plan.ResourceInputs
+ if entry.Plan.Resolved { resources = entry.Plan.ResolvedResourceInputs }
+ inputs := makeRuleInputValues(p.Alloc, names, resources)
 	outputs := makeValues(p.Alloc, entry.Plan.Outputs)
 	defer freeValues(p.Alloc, inputs)
 	defer freeValues(p.Alloc, outputs)

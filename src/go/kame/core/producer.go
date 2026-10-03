@@ -59,6 +59,20 @@ func (c *EngineContext) Dependency(key ResourceKey) bool {
 	return c.dependency(key, false)
 }
 
+// OrderDependency schedules a hard prerequisite without consuming its contents.
+// A normal edge already present cannot be downgraded to order-only.
+func (c *EngineContext) OrderDependency(key ResourceKey) bool {
+	dep := c.engine.find(key)
+	existed := dep != nil && slices.Contains(c.node.Dynamic, dep)
+	ordered := dep != nil && slices.Contains(c.node.OrderOnly, dep)
+	ready := c.dependency(key, false)
+	dep = c.engine.find(key)
+	if dep != nil && (!existed || ordered) && slices.Contains(c.node.Dynamic, dep) {
+		c.node.OrderOnly = slices.Append(c.engine.Alloc, c.node.OrderOnly, dep)
+	}
+	return ready
+}
+
 // TryDependency lets a producer inspect a dependency's failure as a value.
 // The edge retains normal interest, invalidation, and cycle detection.
 func (c *EngineContext) TryDependency(key ResourceKey) bool { return c.dependency(key, true) }
@@ -89,6 +103,13 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 			c.engine.interest(dep, c.node.Interest)
 		}
 	}
+ for i := range c.node.OrderOnly {
+  if c.node.OrderOnly[i] == dep {
+   copy(c.node.OrderOnly[i:], c.node.OrderOnly[i+1:])
+   c.node.OrderOnly = c.node.OrderOnly[:len(c.node.OrderOnly)-1]
+   break
+  }
+ }
 	if !observed {
 		for i := range c.node.Observed { if c.node.Observed[i] == dep { copy(c.node.Observed[i:], c.node.Observed[i+1:]); c.node.Observed = c.node.Observed[:len(c.node.Observed)-1]; break } }
 	}

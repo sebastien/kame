@@ -67,6 +67,7 @@ test-wasm: wasm-check
 	tests/T012-03-streams-large-output.sh
 	tests/T012-04-streams-backpressure.sh
 	tests/T006-03-runtime-always.sh
+	tests/T006-04-runtime-order-only.sh
 	tests/T006-06-runtime-environment.sh
 	tests/T010-21-wasm-build-effects.sh
 	tests/T014-02-patterns-ergonomics.sh

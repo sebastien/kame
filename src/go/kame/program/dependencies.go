@@ -7,14 +7,14 @@ import (
 
 func (p *Program) definitionNode(name string) *core.Node { return p.Eval.Definition(name) }
 
-func (p *Program) prepareDependency(c *core.EngineContext, index int, dependency *core.Node) bool {
+func (p *Program) prepareDependency(c *core.EngineContext, index int, dependency *core.Node, ordered bool) bool {
  child := p.instanceIndex(dependency)
  if child >= 0 && !p.claimEnvironment(child, p.Instances[index].Environment) {
   p.failRule(c, index, failure(p.Alloc, "ENV_CONFLICT", "shared prerequisite has a different recipe environment"))
   return false
  }
 	p.adoptTask(dependency, p.Instances[index].runEpoch)
-	return p.addDependency(c, &p.Instances[index], dependency)
+	return p.addPurposeDependency(c, &p.Instances[index], dependency, ordered)
 }
 
 func (p *Program) adoptTask(node *core.Node, epoch int64) {
@@ -31,9 +31,14 @@ func (p *Program) adoptTask(node *core.Node, epoch int64) {
 	}
 }
 
-func (p *Program) addDependency(c *core.EngineContext, entry *instance, dependency *core.Node) bool {
+func (p *Program) addPurposeDependency(c *core.EngineContext, entry *instance, dependency *core.Node, ordered bool) bool {
 	existed := slices.Contains(entry.Node.Dynamic, dependency)
-	current := c.Dependency(dependency.Key)
+	current := false
+	if ordered {
+		current = c.OrderDependency(dependency.Key)
+	} else {
+		current = c.Dependency(dependency.Key)
+	}
 	if !existed && slices.Contains(entry.Node.Dynamic, dependency) {
 		event := Event{Kind: DependencyDiscovered, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, DependencyID: dependency.ID, DependencyKey: dependency.Key}
 		p.emit(event)

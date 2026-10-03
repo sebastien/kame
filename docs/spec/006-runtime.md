@@ -135,6 +135,17 @@ A file rule is fresh when:
 Freshness is evaluated after dependency-discovering render. A file rule with no
 declared or discovered input is always stale.
 
+A standalone `|` separates order-only prerequisites, for example
+`./out : ./input | prepare ./directory`. Both sections must finish before the
+recipe runs, and failures in either section block execution. Order-only inputs
+are excluded from timestamp freshness, cached-task content manifests and input
+selectors such as `@<*`. An explicit expression read or a normal occurrence of
+the same dependency makes it a content dependency. Ordering alone does not
+satisfy the file-input requirement for freshness. Plans and graph inspection
+retain all prerequisites; plan JSON additionally reports `orderOnlyInputs`.
+Quoted pipe characters remain literal input text. Empty and repeated order-only
+sections are parse errors. Environment inheritance applies to both sections.
+
 An `always` file rule, for example `always ./stamp : ./input`, bypasses
 freshness every time it is reached from a new requested-root epoch. It remains
 a file resource: output paths, multi-output aliases, captures, publication

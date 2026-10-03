@@ -107,3 +107,4 @@ tests/T006-03-runtime-always.sh	006	runtime	Always file outputs rerun once per r
 tests/T006-06-runtime-environment.sh	006	runtime	Scoped recipe environment inheritance, local overrides, root isolation, shared conflicts, cache identity, persisted file freshness and literal metadata
 tests/T013-05-meta-build-mode.sh	013	meta	Debug/release/sanitizer artifact modes, mode-independent generated version source and unchanged Kame build incrementality
 tests/T012-04-streams-backpressure.sh	012	streams	Unread stdout/stderr/JSON/argv pipes and cached replay pause producers/runtime steps, then resume losslessly or cancel/timeout without hanging
+tests/T006-04-runtime-order-only.sh	006	runtime	Order-only scheduling and failures, freshness/cache exclusion, normal/read upgrades, expression inputs and metadata on both hosts

@@ -3,6 +3,7 @@ package program
 import (
 	"kame/core"
 	"solod.dev/so/mem"
+ "solod.dev/so/slices"
 )
 
 func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
@@ -26,7 +27,10 @@ func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
 			oldest = result.Info.ModTime
 		}
 	}
+ resources := plan.ResourceInputs
+ if plan.Resolved { resources = plan.ResolvedResourceInputs }
 	for i := range inputs {
+  if i < len(resources) && resources[i].OrderOnly { continue }
 		if !isFileName(inputs[i]) {
 			continue
 		}
@@ -44,6 +48,7 @@ func (p *Program) freshness(plan *Plan, node *core.Node) Freshness {
 	if node != nil {
 		for i := range node.Dynamic {
 			dependency := node.Dynamic[i]
+   if slices.Contains(node.OrderOnly, dependency) { continue }
 			if dependency.Key.Kind != core.ResourceFile {
 				continue
 			}

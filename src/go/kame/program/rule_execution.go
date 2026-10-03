@@ -17,6 +17,7 @@ func (p *Program) cacheBlockedByBareTask(entry *instance) bool {
 		inputs, resources = entry.Plan.ResolvedInputs, entry.Plan.ResolvedResourceInputs
 	}
 	for i := range inputs {
+  if i < len(resources) && resources[i].OrderOnly { continue }
 		if i < len(resources) && resources[i].Key.Kind == core.ResourceFile {
 			continue
 		}
@@ -32,6 +33,7 @@ func (p *Program) cacheBlockedByBareTask(entry *instance) bool {
 	}
 	for i := range entry.Node.Dynamic {
 		dependency := entry.Node.Dynamic[i]
+  if slices.Contains(entry.Node.OrderOnly, dependency) { continue }
 		index := p.instanceIndex(dependency)
 		if index >= 0 && p.Instances[index].Rule.Kind == rule.TaskRule {
 			return true
@@ -181,7 +183,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			if input.Kind == rule.InputPath {
 				kind = core.ResourceFile
 			}
-			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
+			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{OrderOnly: input.OrderOnly, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 			continue
 		}
 		if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil)) {
@@ -190,7 +192,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			freePlanInputs(p.Alloc, resourceInputs, true)
 			return inputsResult{Diagnostic: failure(p.Alloc, "EXPR_INVALID", "invalid rule input expression")}
 		}
-		values, outputs := makeValues(p.Alloc, inputs), makeValues(p.Alloc, entry.Plan.Outputs)
+		values, outputs := makeRuleInputValues(p.Alloc, inputs, resourceInputs), makeValues(p.Alloc, entry.Plan.Outputs)
 		dependencyState := renderDependencyState{Program: p, Index: index, Inspection: entry.Inspection}
 		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
 		scope := p.ruleScope(context, entry.Captures)
@@ -233,6 +235,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			return inputsResult{Diagnostic: failure(p.Alloc, "EXPR_INVALID", "rule input expression must produce strings, resources, lists, or nil")}
 		}
 		result.Value.Free(p.Alloc)
+		for j := before; j < len(resourceInputs); j++ { resourceInputs[j].OrderOnly = input.OrderOnly }
 		for j := before; j < len(inputs); j++ {
 			dynamicInputs = slices.Append(p.Alloc, dynamicInputs, cloneText(p.Alloc, inputs[j]))
 		}
@@ -291,7 +294,7 @@ func cloneStrings(a mem.Allocator, values []string) []string {
 func clonePlanInputs(a mem.Allocator, values []PlanInput) []PlanInput {
 	var out []PlanInput
 	for i := range values {
-		out = slices.Append(a, out, PlanInput{Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
+		out = slices.Append(a, out, PlanInput{OrderOnly: values[i].OrderOnly, Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
 	}
 	return out
 }
@@ -372,4 +375,17 @@ func (p *Program) yieldFreshness(entry *instance, effects []eval.Effect) Freshne
     mem.FreeSlice(p.Alloc, data)
     if equal { return Fresh }
     return Stale
+}
+
+// Automatic input selectors expose content inputs only; order-only inputs still
+// appear in plans and remain scheduling prerequisites.
+func makeRuleInputValues(a mem.Allocator, names []string, resources []PlanInput) []core.Value {
+	var out []core.Value
+	for i := range names {
+		if i < len(resources) && resources[i].OrderOnly {
+			continue
+		}
+		out = slices.Append(a, out, core.NewString(a, names[i]))
+	}
+	return out
 }

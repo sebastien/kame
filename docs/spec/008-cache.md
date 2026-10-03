@@ -31,7 +31,7 @@ A task fingerprint is a canonical binary encoding of:
 - Cache format version.
 - Canonical task identity and captures.
 - Canonically formatted rule header and body AST.
-- Resolved declared input resource keys and their current fingerprints.
+- Resolved declared content-input resource keys and their current fingerprints.
 - Dynamic file, glob, resource, and environment dependencies from the
   accepted render generation.
 - Resolved executable files referenced with `@(x/NAME)`.
@@ -63,6 +63,13 @@ formatter whitespace.
 
 The digest is SHA-256 with published standard test vectors. This hash is for
 change detection rather than authentication.
+
+Order-only prerequisites still materialize before lookup, but their content,
+values and task outcomes do not enter the input or dynamic content sections.
+An order-only bare task does not by itself disable caching. Normal occurrences
+or explicit expression reads upgrade an edge to a content dependency. The
+selected authored rule declaration remains part of the fingerprint, including
+its prerequisite syntax.
 
 ## Dependency Fingerprints
 

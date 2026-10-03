@@ -404,7 +404,9 @@ func appendCaptureSection(e *cacheEncoder, entry *instance) {
 
 func (p *Program) appendDynamicSection(e *cacheEncoder, entry *instance) {
 	at, start := e.beginSection("dynamic")
-	e.appendU64(uint64(len(entry.Node.Dynamic)))
+	count := 0
+ for i := range entry.Node.Dynamic { if !slices.Contains(entry.Node.OrderOnly, entry.Node.Dynamic[i]) { count++ } }
+ e.appendU64(uint64(count))
 	order := make([]int, len(entry.Node.Dynamic))
 	for i := range order {
 		order[i] = i
@@ -427,6 +429,7 @@ func (p *Program) appendDynamicSection(e *cacheEncoder, entry *instance) {
 			break
 		}
 		dependency := entry.Node.Dynamic[order[n]]
+  if slices.Contains(entry.Node.OrderOnly, dependency) { continue }
 		key := dependency.Key
 		e.appendByte(byte(key.Kind))
 		e.appendText(key.Name)
@@ -493,8 +496,11 @@ func (p *Program) appendInputSection(e *cacheEncoder, entry *instance) {
 	if entry.Plan.Resolved {
 		inputs, resources = entry.Plan.ResolvedInputs, entry.Plan.ResolvedResourceInputs
 	}
-	e.appendU64(uint64(len(inputs)))
+	count := 0
+ for i := range inputs { if i >= len(resources) || !resources[i].OrderOnly { count++ } }
+ e.appendU64(uint64(count))
 	for i := range inputs {
+  if i < len(resources) && resources[i].OrderOnly { continue }
 		if e.exceeded {
 			break
 		}

@@ -144,6 +144,14 @@ request a dynamic dependency. The engine then:
 Repeated discovery of the same edge is idempotent. Dynamic edges belong to one
 generation and are replaced when that node is reevaluated.
 
+An order-only dynamic edge retains ordinary scheduling interest, cycle detection
+and failure propagation. A normal request for that edge upgrades its purpose;
+an order-only request cannot downgrade a normal edge. Invalidation still restarts
+the consumer, but records when every path to it crosses an order-only edge. The
+runtime can then reevaluate file freshness without treating ordering work as a
+content change. A normal path in a diamond overrides the order-only reason.
+Reasons are collected before generation edges are removed.
+
 ## Scheduling
 
 One owner calls the engine step function. A step processes queued completions,

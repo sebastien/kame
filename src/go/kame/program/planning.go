@@ -51,6 +51,7 @@ func (p *Program) Plan(target string) PlanResult {
 				plan.Free(p.Alloc)
 				return PlanResult{Diagnostic: d}
 			}
+			for j := before; j < len(plan.ResourceInputs); j++ { plan.ResourceInputs[j].OrderOnly = input.OrderOnly }
 			for j := before; j < len(plan.Inputs); j++ {
 				plan.DynamicInputs = slices.Append(p.Alloc, plan.DynamicInputs, cloneText(p.Alloc, plan.Inputs[j]))
 			}
@@ -60,7 +61,7 @@ func (p *Program) Plan(target string) PlanResult {
 			text := renderInput(p.Alloc, input, selected.Captures)
 			plan.Inputs = slices.Append(p.Alloc, plan.Inputs, text)
 			plan.StaticInputs = slices.Append(p.Alloc, plan.StaticInputs, cloneText(p.Alloc, text))
-			plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, text)})
+			plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, text)})
 			continue
 		}
 		text := cloneText(p.Alloc, input.Text)
@@ -70,7 +71,7 @@ func (p *Program) Plan(target string) PlanResult {
 		if input.Kind == rule.InputPath {
 			kind = core.ResourceFile
 		}
-		plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
+		plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 	}
 	if selected.Rule.Kind == rule.FileRule && len(selected.Rule.Body) == 0 {
 		plan.Freshness = p.freshness(&plan, nil)
@@ -188,7 +189,7 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil)) {
 		return failure(p.Alloc, "EXPR_INVALID", "invalid rule input expression")
 	}
-	inputs, outputs := makeValues(p.Alloc, plan.Inputs), makeValues(p.Alloc, plan.Outputs)
+	inputs, outputs := makeRuleInputValues(p.Alloc, plan.Inputs, plan.ResourceInputs), makeValues(p.Alloc, plan.Outputs)
 	defer freeValues(p.Alloc, inputs)
 	defer freeValues(p.Alloc, outputs)
 	state := planResolverState{Program: p}

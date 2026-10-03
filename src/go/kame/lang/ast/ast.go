@@ -472,6 +472,7 @@ func (e *astEncoder) rule(value *rule.Rule) {
 	for i := range value.Inputs {
 		in := value.Inputs[i]
 		e.BeginObject()
+  if in.OrderOnly { e.Str("orderOnly"); e.Bool(true) }
 		e.Str("kind")
 		e.Str(inputKind(in.Kind))
 		e.Str("text")

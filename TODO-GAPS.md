@@ -58,7 +58,7 @@ relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 | B4 | Path interpolation in rule headers (`@(VAR)/suffix`) | Parser/evaluator gap, fixed | Medium → fixed | all input paths |
 | B5 | Scalar expansions and leading/bare captures | Implemented and verified | Low → fixed | not used here |
 | C1 | Persistent always-rebuild file outputs | Implemented | Low → fixed | GNU marks outputs phony |
-| C2 | No order-only prerequisites | Rule semantics | Low | not used here |
+| C2 | Order-only prerequisites | Implemented | Low | not used here |
 | C3 | Automatic variables only partially mapped | Rule semantics | Low | `$@`/`$<`/`$^` only |
 | C4 | One-shell recipe vs Make's line-per-shell | Behavioural | Info | compatible here |
 | D1 | Capability-gated `wildcard` names the read grant | CLI/UX, fixed | Low → fixed | diagnostics only |
@@ -427,10 +427,13 @@ artifact. In this Makefile the GNU `.PHONY` list names `build/kame.debug`,
 own `KAME_BUILD_INPUTS`; `Makefile.kmk` intentionally treats them as file rules.
 The new `always` prefix supplies the explicit file-target escape hatch.
 
-### C2 — No order-only prerequisites
+### C2 — Order-only prerequisites (implemented)
 
-No `|` equivalent. Redesign so order-only dependencies are ordinary inputs or
-separate tasks. Not used here.
+Rule headers accept `|` before order-only prerequisites. They schedule normally
+and propagate failures, while timestamp freshness, cache content manifests and
+input selectors exclude them. Normal occurrences and explicit reads upgrade the
+edge to a content dependency. Parser/formatter/AST and plans retain the purpose;
+T006-04 exercises both hosts. Not used by this repository build.
 
 ### C3 — Partial automatic variables
 

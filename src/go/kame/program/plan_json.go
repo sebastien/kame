@@ -33,6 +33,13 @@ func WritePlan(out io.Writer, plan *Plan) {
 	}
 	e.Str("inputs")
 	writeStringArray(&e, plan.Inputs)
+ ordered := false
+ for i := range plan.ResourceInputs { if plan.ResourceInputs[i].OrderOnly { ordered = true } }
+ if ordered {
+  e.Str("orderOnlyInputs"); e.BeginArray()
+  for i := range plan.ResourceInputs { if plan.ResourceInputs[i].OrderOnly { e.Str(plan.ResourceInputs[i].Display) } }
+  e.EndArray()
+ }
 	e.Str("outputs")
 	writeStringArray(&e, plan.Outputs)
 	e.Str("captures")

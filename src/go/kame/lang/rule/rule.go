@@ -38,6 +38,7 @@ type Target struct {
 	TargetForm *template.Target
 }
 type Input struct {
+ OrderOnly bool
 	Kind       InputKind
 	Text       string
 	Span       source.Span
@@ -260,9 +261,15 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 
 func (p *parser) ruleInputs(r *Rule, start int, end int) {
 	items := ranges(p.a, p.s.Text, start, end)
-	for _, span := range items {
-		text := p.s.Text[span.Start:span.End]
-		input := Input{Kind: InputName, Text: text, Span: span}
+ ordered := false
+ for i, span := range items {
+  text := p.s.Text[span.Start:span.End]
+  if text == "|" {
+   if ordered || i == len(items)-1 { p.error(span.Start, span.End, "expected one order-only prerequisite section") }
+   ordered = true
+   continue
+  }
+  input := Input{OrderOnly: ordered, Kind: InputName, Text: text, Span: span}
 		if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
 			input.Kind = InputString
 			input.Template = template.ParseStringRange(p.a, p.s, span.Start+1, span.End-1)
@@ -606,7 +613,8 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 		b.WriteString(r.Outputs[i].Text)
 	}
 	b.WriteString(" :")
-	for i := range r.Inputs {
+ for i := range r.Inputs {
+  if r.Inputs[i].OrderOnly && (i == 0 || !r.Inputs[i-1].OrderOnly) { b.WriteString(" |") }
 		b.WriteByte(' ')
 		b.WriteString(r.Inputs[i].Text)
 	}
