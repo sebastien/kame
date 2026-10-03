@@ -79,7 +79,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | C2 order-only prerequisites | Remaining rule semantics; maintain scheduling edges while excluding them from freshness/cache content identity where specified. |
 | C3 automatic variables | Existing selectors cover inputs/outputs. Newer-input and stem equivalents need precise freshness/capture definitions; directory extraction can use pure path operations. |
 | C4 one shell per recipe | Intentional behavior; document the porting implications and keep process-host multiline tests. |
-| D1 capability-gated wildcard | Intentional; confirm denial names the missing authority and show `do run --lang expr --allow-read` in examples. |
+| D1 capability-gated wildcard | Fixed diagnostic: missing or insufficient read authority names `--allow-read=ROOT` on native and WASM. T007-06/T010-08 cover denials and successful grants; examples use `do run --lang expr --allow-read=.`. |
 | D2 relative `-f` beneath `-C` | Fixed on native and WASM, with regression tests. Align spec prose with the corrected behavior. |
 | D3 idioms/gotchas | Added `docs/idioms-and-gotchas.md` covering selectors, dollars, shell text, references, empty definitions, interpolation, patterns, and grants. Expression examples were executed against the native CLI. |
 

@@ -789,7 +789,7 @@ class Module {
   async dispatch(instance, request, kind, payload, data, context, key, record) {
     const grants = context.grants;
     if (kind === 1) {
-      if (!grants.read) return this.deny(instance, request);
+      if (!grants.read) return this.deny(instance, request, 'read');
       try {
         const bytes = await readFile(payload);
         const pointer = this.allocate(bytes.length || 1);
@@ -800,7 +800,7 @@ class Module {
       }
     }
     if (kind === 5) {
-      if (!grants.read) return this.deny(instance, request);
+      if (!grants.read) return this.deny(instance, request, 'read');
       try {
         const info = await stat(payload);
         return this.completeJSON(instance, request, { name: payload, size: info.size, mode: info.mode, dir: info.isDirectory() });
@@ -809,11 +809,11 @@ class Module {
       }
     }
     if (kind === 7 || kind === 17) {
-      if (kind === 7 && !grants.read) return this.deny(instance, request);
+      if (kind === 7 && !grants.read) return this.deny(instance, request, 'read');
       return this.completeJSON(instance, request, existsSync(payload));
     }
     if (kind === 6) {
-      if (!grants.read) return this.deny(instance, request);
+      if (!grants.read) return this.deny(instance, request, 'read');
       return this.completeJSON(instance, request, wildcardPaths(payload));
     }
     if (kind === 2) {
@@ -923,8 +923,9 @@ class Module {
     return this.completeFailure(instance, request, 'FEATURE_UNSUP', `host request kind ${kind} is not implemented in this stage`);
   }
 
-  deny(instance, request) {
-    return this.completeFailure(instance, request, 'CAP_DENIED', 'operation capability denied');
+  deny(instance, request, capability) {
+    const message = capability === 'read' ? 'read access denied; grant the required path with --allow-read=ROOT' : 'operation capability denied';
+    return this.completeFailure(instance, request, 'CAP_DENIED', message);
   }
 
   async evaluate(source, expression, context) {

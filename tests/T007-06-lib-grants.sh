@@ -53,6 +53,15 @@ test-step "wildcard cannot escape the granted root"
 cli_run --dir lib-grants -- do run --lang expr "--allow-read=$PWD/lib-grants" -c '(wildcard "../*.txt")'
 cli_expect_status 1
 cli_expect_stderr_contains 'CAP_DENIED'
+cli_expect_stderr_contains '--allow-read=ROOT'
+
+test-step "wildcard denial names the required grant"
+cli_run --dir lib-grants -- do run --lang expr -c '(wildcard "*.txt")'
+cli_expect_status 1
+cli_expect_stderr_contains 'CAP_DENIED' '--allow-read=ROOT'
+cli_run --dir lib-grants -- do run --lang expr --allow-read=. -c '(wildcard "*.txt")'
+cli_expect_status 0
+cli_expect_stdout_contains 'a.txt'
 
 test-step "environment grants scope variable names"
 cli_run --dir lib-grants -- do run --lang expr --allow-env -c '(env "HOME")'

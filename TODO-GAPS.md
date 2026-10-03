@@ -60,7 +60,7 @@ relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 | C2 | No order-only prerequisites | Rule semantics | Low | not used here |
 | C3 | Automatic variables only partially mapped | Rule semantics | Low | `$@`/`$<`/`$^` only |
 | C4 | One-shell recipe vs Make's line-per-shell | Behavioural | Info | compatible here |
-| D1 | `do expr` capability-gated `wildcard` (needs `--allow-read`) | CLI/UX | Low | diagnostics only |
+| D1 | Capability-gated `wildcard` names the read grant | CLI/UX, fixed | Low → fixed | diagnostics only |
 | D2 | `-C` ignores a relative `-f` | CLI bug (KB-2), fixed | Medium → fixed | not used here |
 | D3 | No idioms/gotchas page | Docs, fixed | Medium → fixed | docs/idioms-and-gotchas.md |
 
@@ -169,8 +169,9 @@ spurious relink when the mode is unchanged.
 
 ### A4 — No conditionals / conditional include
 
-**Symptom.** No `ifeq`/`if`/`ifdef`, no `-include`. `include` is depth-first and
-rejects repeated or cyclic inclusion, so it is not an idempotent `-include`.
+**Symptom.** No declaration-level `ifeq`/`if`/`ifdef`, no optional `-include`.
+`include` is depth-first and rejects active-ancestry cycles. Repeated nonrecursive
+includes are legal; duplicated declarations are checked during registration.
 
 **Impact.** Optional configuration and platform branches must be pushed into
 recipes or made unconditional. Not exercised by this Makefile, but it is the
@@ -403,11 +404,13 @@ aborting the next) can change behaviour. This Makefile already uses
 
 ## D. Tooling and docs
 
-### D1 — Capability-gated `wildcard` in `do expr`
+### D1 — Capability-gated `wildcard` diagnostics (fixed)
 
-`kame do expr -c '(wildcard ...)'` needs `--allow-read`; without it the read is
-denied. Correct by design, but it surprised the port; the error should name the
-grant to add (it is close today).
+`kame do run --lang expr -c '(wildcard ...)'` needs a read grant. Native and WASM
+denials now name `--allow-read=ROOT`, both for missing authority and a path outside
+the granted root. For the current directory, use
+`kame do run --lang expr --allow-read=. -c '(wildcard ./docs/*.md)'`.
+T007-06 and T010-08 cover denied access, the hint, and authorized wildcard results.
 
 ### D2 — CLI inconsistencies
 

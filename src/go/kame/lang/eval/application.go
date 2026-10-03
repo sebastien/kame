@@ -123,7 +123,11 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	}
 	for i := range operation.Capabilities {
 		if !context.allowed(operation.Capabilities[i]) {
-			return failure(context.Run, "CAP_DENIED", span, "`"+operation.Name+"` requires a capability that was not granted")
+			message := "`"+operation.Name+"` requires a capability that was not granted"
+			if operation.Capabilities[i] == Read {
+				message += "; grant read access with --allow-read=ROOT"
+			}
+			return failure(context.Run, "CAP_DENIED", span, message)
 		}
 	}
 	values := slices.Make[core.Value](context.Run, len(arguments))

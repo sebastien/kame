@@ -38,7 +38,7 @@ set +e
 (cd "$project" && node "$CLI_ROOT/dist/kame.js" do run --lang expr -c '(wildcard "*.md")') >"$project/out.txt" 2>"$project/err.txt"
 status=$?
 set -e
-if [ "$status" = 1 ] && grep -q 'CAP_DENIED' "$project/err.txt"; then
+if [ "$status" = 1 ] && grep -q 'CAP_DENIED' "$project/err.txt" && grep -q -- '--allow-read=ROOT' "$project/err.txt"; then
 	test-ok "wildcard without --allow-read is denied"
 else
 	test-fail "wildcard denial: status=$status err=$(cat "$project/err.txt")"

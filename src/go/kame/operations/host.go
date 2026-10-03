@@ -125,7 +125,7 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 		return c.InvalidArgument(0, "string", value.Kind)
 	}
 	if !c.Allows(eval.Read, value.Text) {
-		return failure("CAP_DENIED", "read access denied")
+		return failure("CAP_DENIED", "read access denied; grant the required path with --allow-read=ROOT")
 	}
 	kind := core.ResourceFile
 	if op == host.OpWildcard {
