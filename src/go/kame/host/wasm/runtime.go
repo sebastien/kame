@@ -33,6 +33,8 @@ type Runtime struct {
 	Program          *program.Program
 	Session          *program.Session
 	BuildSources     []program.CompileSource
+	BuildDefines     []string
+	BuildEnvironment []string
 	Handle           *program.Handle
 	Environment      []string
 	ToolPaths        []program.Tool

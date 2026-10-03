@@ -623,6 +623,7 @@ func (e *astEncoder) definition(value *definition.Definition) {
 	e.node("definition", value.Span)
 	e.Str("name")
 	e.Str(value.Name)
+	if value.Default { e.Str("default"); e.Bool(true) }
 	e.Str("nameSpan")
 	e.span(value.NameSpan)
 	e.Str("parameters")

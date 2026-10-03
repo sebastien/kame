@@ -54,7 +54,7 @@ See the security and performance reviews for evidence and limitations.
 | Alternative `<-` build syntax | Design proposal, not a correctness gap. Evaluate readability and formatter compatibility before changing existing rules. |
 | Dependency sequencing with `,` | Define whether ordering is an edge or effect sequence; preserve parallel independence and failure propagation. Kash statement sequencing already has different semantics. |
 | Learnability | Finish idioms/gotchas and independent value/rule/process lessons with executable smoke coverage. |
-| Metaprogramming | A2/A4 remain substantive work. Computed record lookup is implemented through `get`; optional generated declarations have a separate design proposal. Headers now compose expressions and interpolated paths. |
+| Metaprogramming | A4 remains substantive work. Defaults and literal CLI/environment overrides are implemented; computed record lookup uses `get`. Optional generated declarations have a separate design proposal. Headers compose expressions and interpolated paths. |
 | Error taxonomy | Existing codes are registered and machine-readable. Add actionable messages rather than speculative taxonomy churn. |
 
 ## Build-port gaps
@@ -65,7 +65,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | Gap | Current disposition and acceptance direction |
 | --- | --- |
 | A1 tool discovery without arbitrary parse-time effects | Remaining: dependency-tracked resolver plus overrides, resolved once and visible in plans. Quoted shell-text definitions now make the repository build parse, but do not satisfy resolver acceptance. |
-| A2 configuration defaults/overrides | Remaining: define-only-if-absent and typed invocation overrides applied before planning, with effective values in inspection. Resolve conflict/precedence explicitly. |
+| A2 configuration defaults/overrides | Implemented: lazy `?=`, literal repeatable `--define`, and case-sensitive `KAME_<NAME>` environment values. Last CLI entry wins over environment and authored defaults; plan JSON reports effective provided values. T009-13 covers both hosts. |
 | A3 target-scoped environment/build mode | Remaining: inherited environment must affect execution and fingerprints; debug/release artifacts need correct metadata without generated-source churn. |
 | A4 declaration conditionals/gated includes | Remaining; expression/Kash control flow does not conditionally register build declarations. Repeated nonrecursive includes are now legal, so the old blanket repeated-include prohibition is stale. |
 | A5 computed lookup / generators | Minimum lookup implemented through `get`; T007-10 pins typed configuration and planning parity. Optional generated declarations have a separate design proposal. |

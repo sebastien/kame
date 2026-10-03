@@ -6,6 +6,7 @@ package cli
 
 import (
 	"kame/lang/eval"
+	"kame/lang/definition"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
@@ -183,7 +184,7 @@ func parseBuild(inv *Invocation, args []string) {
 			}
 			continue
 		}
-		if equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) || equalsValue(arg, "--color", inv) || equalsValue(arg, "--diagnostic-format", inv) {
+		if equalsValue(arg, "--define", inv) || equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) || equalsValue(arg, "--color", inv) || equalsValue(arg, "--diagnostic-format", inv) {
 			if inv.Error.Code != "" {
 				return
 			}
@@ -207,6 +208,7 @@ func parseBuild(inv *Invocation, args []string) {
 }
 
 func isBuildValueOption(arg string) bool {
+	if arg == "--define" { return true }
 	if arg == "--capture-limit" { return true }
 	if arg == "-f" || arg == "--file" || arg == "-c" || arg == "--command" || arg == "-C" || arg == "--directory" || arg == "-j" || arg == "--jobs" || arg == "--shell" || arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--env" || arg == "--color" || arg == "--diagnostic-format" {
 		return true
@@ -226,6 +228,13 @@ func equalsValue(arg string, name string, inv *Invocation) bool {
 }
 
 func assignBuildOption(inv *Invocation, option string, value string) bool {
+	if option == "--define" {
+		equal := -1
+		for i := range value { if value[i] == '=' { equal = i; break } }
+		if equal <= 0 || !definition.ValidName(value[:equal]) { inv.fail("OPT_VALUE_INVALID", "define must be NAME=VALUE with a valid name"); return false }
+		inv.Defines = slices.Append(mem.System, inv.Defines, value)
+		return true
+	}
 	if value == "" {
 		inv.fail("OPT_VALUE_INVALID", "empty value for "+option)
 		return false

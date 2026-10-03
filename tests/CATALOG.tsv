@@ -97,3 +97,4 @@ tests/T014-02-patterns-ergonomics.sh	014	lang	Leading pattern captures, numeric 
 tests/T004-10-lang-line-continuations.sh	004	lang	Continued definitions and headers, recipe backslashes, multiline verbatim values and native/WASM format idempotence
 tests/T016-01-cli-render.sh	016	cli	Raw document rendering, repeated string payloads, comment inference, parse-only checks and capability parity on native/WASM
 tests/T007-10-lib-record-lookup.sh	007	lib	Computed record keys, nil/default contracts, callable transfer and configuration/input planning parity
+tests/T009-13-cli-configuration.sh	009	cli	Build defaults, CLI and environment override precedence, literal values, effective plans and authored formatting on native/WASM

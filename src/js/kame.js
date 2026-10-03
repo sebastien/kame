@@ -372,7 +372,7 @@ function usage() {
   stdout.write('  do render       render a document template (--define, --comment, --check)\n');
   stdout.write('  do cat TARGET   materialize one target and print its artifact\n');
   stdout.write('  do help         show this help\n\n');
-  stdout.write('Options: -f FILE  -c TEXT  -C DIR  -j N  -n  --force  -h  -V\n');
+  stdout.write('Options: -f FILE  -c TEXT  -C DIR  -j N  -n  --force  --define NAME=VALUE  -h  -V\n');
   stdout.write('Later-stage behavior reports FEATURE_UNSUP.\n');
 }
 
@@ -1018,7 +1018,7 @@ class Module {
     if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     if (Array.isArray(source)) {
       if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
-      const descriptor = this.write(JSON.stringify({ sources: source }));
+      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, environment: source.environment }));
       if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
   }
@@ -1174,7 +1174,9 @@ class Module {
         if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
         else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
       }
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0 }));
+      const environment = Object.entries(process.env).filter(([name]) => name.startsWith('KAME_')).map(([name, value]) => `${name}=${value}`);
+      environment.push(...inv.environment.filter((entry) => entry.startsWith('KAME_')));
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, buildDefines: inv.name === 'render' ? [] : inv.defines, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0 }));
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');
@@ -1655,8 +1657,11 @@ async function discoverBuildSource(module, inv, sourceDirectory) {
   if (source === null) return null;
   const name = inv.sourceName ?? (inv.command ? source.name : isAbsolute(source.name) ? normalize(source.name) : normalize(join(inv.directory || '.', source.name)));
   const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, false);
-  // Ordinary sources retain the existing ABI; includes carry source identities.
-  return { name, text: source.text, compiled: parts.length === 1 ? source.text : parts };
+  const environment = Object.entries(process.env).filter(([name]) => name.startsWith('KAME_')).map(([name, value]) => `${name}=${value}`);
+  environment.push(...inv.environment.filter((entry) => entry.startsWith('KAME_')));
+  parts.defines = inv.defines;
+  parts.environment = environment;
+  return { name, text: source.text, compiled: parts.length === 1 && !inv.defines.length && !environment.length ? source.text : parts };
 }
 
 // Syntax and byte spans come from the portable parser, not a second JS grammar.

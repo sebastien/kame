@@ -96,7 +96,9 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	defer registry.Free()
 	operations.Register(registry)
 	environment := mergeEnvironment(posix.Environment(mem.System), inv.Environment)
-	compiled := program.CompileSession(mem.System, fragments, registry, program.Options{Host: posix.New(mem.System), Directory: directory, Environment: environment, Shell: inv.Shell, Grants: grants, Jobs: inv.Jobs, CaptureLimit: inv.CaptureLimit, TimeoutMS: inv.TimeoutMS, DryRun: inv.DryRun, Force: inv.Force, CacheDisabled: inv.Force, RetryCount: inv.RetryCount, RetainBytes: inv.RetainBytes, ResolveTool: resolveBuildTool})
+	defines := inv.Defines
+	if inv.Name == "render" { defines = nil }
+	compiled := program.CompileSession(mem.System, fragments, registry, program.Options{Host: posix.New(mem.System), Directory: directory, Environment: environment, Defines: defines, Shell: inv.Shell, Grants: grants, Jobs: inv.Jobs, CaptureLimit: inv.CaptureLimit, TimeoutMS: inv.TimeoutMS, DryRun: inv.DryRun, Force: inv.Force, CacheDisabled: inv.Force, RetryCount: inv.RetryCount, RetainBytes: inv.RetainBytes, ResolveTool: resolveBuildTool})
 	posix.FreeEnvironment(mem.System, environment)
 	defer compiled.Free(mem.System)
 	if compiled.Session == nil {

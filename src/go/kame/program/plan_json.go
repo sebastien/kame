@@ -3,6 +3,7 @@ package program
 import (
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
+	"solod.dev/so/strings"
 )
 
 // WritePlan emits the schema-1 plan document the CLI prints. It is portable so
@@ -16,6 +17,15 @@ func WritePlan(out io.Writer, plan *Plan) {
 	e.Str("plan")
 	e.Str("target")
 	e.Str(plan.Target)
+	if len(plan.Configuration) > 0 {
+		e.Str("configuration")
+		e.BeginObject()
+		for i := range plan.Configuration {
+			equal := strings.IndexByte(plan.Configuration[i], '=')
+			e.Str(plan.Configuration[i][:equal]); e.Str(plan.Configuration[i][equal+1:])
+		}
+		e.EndObject()
+	}
 	e.Str("inputs")
 	writeStringArray(&e, plan.Inputs)
 	e.Str("outputs")

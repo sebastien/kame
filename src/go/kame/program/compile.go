@@ -44,6 +44,12 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	p := mem.Alloc[Program](a)
 	p.Alloc, p.Engine, p.Eval, p.Parsed, p.Host = a, engine, compiled.Program, parsed, options.Host
+	configurationError := p.configureDefinitions(options.Defines, options.Environment)
+	if configurationError.Code != "" {
+		result.Diagnostics = slices.Append(a, result.Diagnostics, configurationError)
+		p.Free()
+		return result
+	}
 	p.nextRequest = 1 << 60 // Evaluator queue request IDs start at one.
 	p.Forwarding = options.ForwardRequests
 	p.Options.Directory, p.Options.DryRun, p.Options.Force, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.Force, options.RetainBytes, options.Jobs
@@ -278,6 +284,7 @@ func (p *Program) Free() {
 		return
 	}
 	p.Eval.CancelProcesses()
+	freeStrings(p.Alloc, p.Configuration)
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)

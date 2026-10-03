@@ -28,6 +28,7 @@ type Plan struct {
 	RuleSpan diagnostic.Span
 	Body     []rule.RecipeLine
 	Captures []template.CaptureValue
+	Configuration []string
 	Inputs   []string
 	// StaticInputs are literal and template inputs as authored.
 	StaticInputs []string
@@ -97,6 +98,7 @@ func (p *Plan) Free(a mem.Allocator) {
 	slices.Free(a, p.ResolvedInputs)
 	slices.Free(a, p.ResolvedResourceInputs)
 	slices.Free(a, p.Outputs)
+	freeStrings(a, p.Configuration)
 	*p = Plan{}
 }
 
@@ -197,6 +199,7 @@ type Options struct {
 	Directory   string
 	Shell       []string
 	Environment []string
+	Defines     []string
 	DryRun      bool
 	// Force bypasses file freshness checks and cached-task lookup for this run.
 	Force            bool
@@ -238,6 +241,7 @@ type Program struct {
 	Options     Options
 	Rules       []registeredRule
 	Tools       []Tool
+	Configuration []string
 	Instances   []instance
 	Events      []Event
 	nextRequest int64

@@ -34,6 +34,7 @@ type Definition struct {
 	Name       string
 	NameSpan   source.Span
 	Function   bool
+	Default    bool
 	Parameters []Parameter
 	ValueKind  ValueKind
 	Expression *expr.Expr
@@ -115,6 +116,15 @@ type parser struct {
 // KashHeaderEnd recognizes only a valid header followed by standalone '='.
 // Command words containing '=' never become definitions by accident.
 func KashHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
+	return headerEnd(a, s, start, false)
+}
+
+// ValueHeaderEnd additionally recognizes Kame's contiguous default operator.
+func ValueHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
+	return headerEnd(a, s, start, true)
+}
+
+func headerEnd(a mem.Allocator, s *source.Source, start int, defaults bool) int {
 	text := s.Text
 	if start >= len(text) { return 0 }
 	end := start
@@ -135,7 +145,10 @@ func KashHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
 	}
 	pos := end
 	for pos < len(text) && space(text[pos]) { pos++ }
-	if pos == end || pos == len(text) || text[pos] != '=' { return 0 }
+	defaultOp := false
+	if defaults && pos+1 < len(text) && text[pos] == '?' && text[pos+1] == '=' { defaultOp = true; pos++ }
+	if defaults && pos == end && pos < len(text) && text[pos] == '=' && end > start && text[end-1] == '?' { defaultOp = true }
+	if (pos == end && !defaultOp) || pos == len(text) || text[pos] != '=' { return 0 }
 	if pos+1 < len(text) && !space(text[pos+1]) && text[pos+1] != '\n' && text[pos+1] != ';' { return 0 }
 	return pos+1
 }
@@ -164,11 +177,16 @@ func (p *parser) definition() *Definition {
 	d := mem.Alloc[Definition](p.a)
 	d.Span = source.Span{Start: p.start, End: p.end}
 	lhsStart, lhsEnd := trim(p.s.Text, p.start, equals)
+	if equals > lhsStart && p.s.Text[equals-1] == '?' {
+		d.Default = true
+		lhsStart, lhsEnd = trim(p.s.Text, lhsStart, lhsEnd-1)
+	}
 	if lhsStart == lhsEnd {
 		p.error(p.start, equals, "expected definition name")
 		return d
 	}
 	if p.s.Text[lhsStart] == '(' {
+		if d.Default { p.error(lhsStart, lhsEnd, "default definitions must name a value") }
 		d.Function = true
 		p.functionLHS(d, lhsStart, lhsEnd)
 	} else {
@@ -351,6 +369,12 @@ type nameResult struct {
 	OK   bool
 }
 
+// ValidName applies the definition grammar to one complete name.
+func ValidName(text string) bool {
+	name := scanName(text, 0)
+	return name.OK && name.End == len(text)
+}
+
 func scanName(text string, start int) nameResult {
 	if start == len(text) || !nameStart(text[start]) {
 		return nameResult{End: start}
@@ -393,7 +417,7 @@ func Format(a mem.Allocator, d *Definition) string {
 	} else {
 		b.WriteString(d.Name)
 	}
-	b.WriteString(" = ")
+	if d.Default { b.WriteString(" ?= ") } else { b.WriteString(" = ") }
 	if d.ValueKind == ValueExpression {
 		value := expr.Format(a, d.Expression)
 		b.WriteString(value)

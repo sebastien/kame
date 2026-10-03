@@ -354,6 +354,13 @@ A value definition is:
 NAME = value
 ```
 
+`NAME ?= value` registers a lazy default only when that name is not already
+registered. A later default is skipped without evaluating its right-hand side;
+a second ordinary `=` definition remains an error. The `?=` operator is
+contiguous: `name? = value` still defines the name `name?`. Default function
+definitions are invalid. This declaration form applies to Kame value/build
+sources; Kash keeps its existing standalone `=` header grammar.
+
 A function definition is:
 
 ```kame

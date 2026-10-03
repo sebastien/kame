@@ -146,3 +146,21 @@ func TestBuildSourceDescriptorRejectsInvalidFieldTypes(t *testing.T) {
 	if configured.Code != "" { t.Error("optional zero offset rejected") }
 	configured.Free(a)
 }
+
+func TestBuildSourceConfigurationCopiesOverrideAndEnvironment(t *testing.T) {
+ a := t.Allocator()
+ start := wasm.NewRuntime(a, "")
+ if start.Runtime == nil { t.Fatal("create runtime"); return }
+ r := start.Runtime
+ defer r.Free()
+ data := slices.Clone(a, []byte(`{"sources":[{"name":"config.kmk","text":"SDK ?= \"default\"\n","offset":0}],"defines":["SDK=literal"],"environment":["KAME_SDK=environment"]}`))
+ configured := r.SetBuildSources(data)
+ for i := range data { data[i] = 0 }
+ slices.Free(a, data)
+ if configured.Code != "" { t.Error("configure overrides"); configured.Free(a); return }
+ configured.Free(a)
+ prepared := r.Prepare()
+ if prepared.Code != "" || r.Program == nil { t.Error("prepare configured build"); prepared.Free(a); return }
+ prepared.Free(a)
+ if len(r.Program.Configuration) != 1 || r.Program.Configuration[0] != "SDK=literal" { t.Error("configuration was not copied or CLI precedence failed") }
+}

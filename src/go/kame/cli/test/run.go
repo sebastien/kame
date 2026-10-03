@@ -98,3 +98,12 @@ func TestRenderGrammarKeepsPayloadSourceAndCapabilities(t *testing.T) {
  defer stdin.Free()
  if !stdin.OK || len(stdin.Inputs) != 1 || stdin.Inputs[0].Kind != "stdin" { t.Error("render must default to stdin") }
 }
+
+func TestBuildDefinitionOverrideGrammar(t *testing.T) {
+ inv := cli.Parse("plan", []string{"--define", "mode=debug", "--define=mode=release", "--define", "empty=", "default"})
+ if !inv.OK || len(inv.Defines) != 3 || inv.Defines[2] != "empty=" { t.Error("build overrides lost repetitions or empty value") }
+ inv.Free()
+ inv = cli.Parse("build", []string{"--define", "missing-equals"})
+ if inv.OK || inv.Error.Code != "OPT_VALUE_INVALID" { t.Error("malformed override accepted") }
+ inv.Free()
+}

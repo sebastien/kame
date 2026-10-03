@@ -119,7 +119,7 @@ Current coverage:
 | 006 runtime | `T006-01`, `T006-02`, `T006-04`, `T006-05` | freshness, dependency scheduling, yield, deferred effects and dry-run |
 | 007 library | `T007-01` … `T007-07` | general, collection, text, path, filesystem, capability and shell operations, error messages |
 | 008 cache | `T008-01` … `T008-03` | record creation, hits, force, invalidation, corruption recovery, glob and body fingerprints |
-| 009 CLI | `T009-01` … `T009-08`, `T009-11`, `T009-12` | help/version, discovery, targets, JSON, plan, cat, graph, dry-run, usage, case matrix |
+| 009 CLI | `T009-01` … `T009-08`, `T009-11`, `T009-12`, `T009-13` | help/version, discovery, targets, JSON, plan, cat, graph, dry-run, usage, case matrix, configuration defaults/overrides |
 | 011 diagnostics | `T011-01` … `T011-03` | layout, notes, human/JSON equivalence, code/message integrity, operand spans, included sources, target-scoped tools checks |
 | 012 streams | `T012-01` | terminal event uniqueness, process event balance |
 | 014 patterns | `T014-01` | placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs |

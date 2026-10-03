@@ -89,6 +89,7 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 			}
 		}
 		if duplicate {
+			if item.Definition.Default { continue }
 			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: "DEF_INVALID", Severity: diagnostic.Error, Message: "duplicate definition", Span: diagnostic.Span{Start: item.Definition.NameSpan.Start, End: item.Definition.NameSpan.End}})
 		} else {
 			names = slices.Append(a, names, item.Definition.Name)
@@ -123,6 +124,7 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 		}
 		d := item.Definition
 		if p.Scope.lookup(d.Name) != nil {
+			if d.Default { continue }
 			p.Valid = false
 			p.Diagnostics = slices.Append(a, p.Diagnostics, diagnostic.Diagnostic{Code: "DEF_INVALID", Severity: diagnostic.Error, Message: "duplicate definition", Span: diagnostic.Span{Start: d.NameSpan.Start, End: d.NameSpan.End}})
 			continue
@@ -255,9 +257,14 @@ func (p *Program) Definition(name string) *core.Node {
 type definitionState struct {
 	Program    *Program
 	Definition *definition.Definition
+	Owned      bool
 }
 
-func freeDefinitionState(a mem.Allocator, value any) { mem.Free(a, value.(*definitionState)) }
+func freeDefinitionState(a mem.Allocator, value any) {
+	state := value.(*definitionState)
+	if state.Owned { definition.Free(a, state.Definition) }
+	mem.Free(a, state)
+}
 
 func evaluateDefinition(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	_ = nodeID

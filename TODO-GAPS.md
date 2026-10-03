@@ -21,13 +21,14 @@ Related material:
 ## TL;DR
 
 The remaining porting gaps concern build configuration and declarations:
-`?=` and external overrides, target environments, tool-path resolution,
+target environments, tool-path resolution,
 conditional includes, generated declarations, and order-only prerequisites.
 The detailed acceptance clauses below track those requests.
 
 Source discovery and header composition have been addressed: wildcard accepts
 multiple patterns, headers accept multiple expressions and interpolated paths,
-and declaration continuations preserve authored spans. The historical glob and
+and declaration continuations preserve authored spans. Lazy defaults and literal
+CLI/environment overrides now configure builds before planning. The historical glob and
 relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 
 ## Scope and method
@@ -46,7 +47,7 @@ relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 | ID | Gap | Class | Severity | In this Makefile |
 | --- | --- | --- | --- | --- |
 | A1 | No parse-time `$(shell ...)` / no `do expr shell` during builds | Language design | High | `WASM_SDK`/`WASM_CC`/`WASM_LD` |
-| A2 | No `?=`, no build-variable override from policy/CLI | Language design | High | `WASM_CC ?=` |
+| A2 | Lazy defaults and build-variable overrides | Implemented | High → fixed | `WASM_CC ?=` |
 | A3 | No target-specific variables or `export` propagation | Language design | High | `KAME_BUILD_MODE` |
 | A4 | No conditionals or conditional include | Missing feature | Medium | not used here |
 | A5 | Computed configuration lookup and generator design | Minimum implemented; generator proposal documented | Medium → addressed | not used here |
@@ -113,7 +114,17 @@ shell, but `mise where` now runs 4× per wasm link instead of once.
 `command -v` and the link line without re-resolving per use, with the resolver
 result recorded in the plan.
 
-### A2 — No `?=` and no variable overrides
+### A2 — Defaults and variable overrides (fixed)
+
+`NAME ?= value` now registers only the first available definition, preserving
+lazy evaluation. Repeatable `--define NAME=VALUE` and case-sensitive
+`KAME_<NAME>` environment values apply before planning. CLI values win, with
+the last repeated entry taking precedence. Values remain literal strings,
+including an empty value; explicit unknown names and function overrides fail
+before effects. Plan JSON records provided effective values in `configuration`.
+T009-13 passes 20 native/WASM assertions, and program sanitizer coverage pins
+ownership, precedence, skipped defaults, and unchanged authored ASTs.
+The historical finding follows.
 
 **Symptom.** GNU lets the environment or the command line override a default:
 `make WASM_SDK=/opt/wasi-sdk`. `?=` is the standard "framework default,
@@ -454,7 +465,7 @@ Ordered by value-to-effort for porting real projects:
       dependency edges.
 - [x] **B4** Allow `@(VAR)/suffix` and other path interpolation in headers by
       parsing inputs as string templates.
-- [ ] **A2** Add `--define NAME=VALUE` + a documented env convention, then `?=`.
+- [x] **A2** Add `--define NAME=VALUE` + a documented env convention, then `?=`.
 - [ ] **A3** Add target-scoped environment inherited by prerequisites, included
       in cache fingerprints; restore `KAME_BUILD_MODE`.
 - [ ] **A1** Add a hermetic tool resolver (not general parse-time shell) and a
@@ -464,7 +475,7 @@ Ordered by value-to-effort for porting real projects:
 - [x] **B5** Accept scalar pattern expansions; leading captures; captures on
       bare targets.
 - [x] **A6** Backslash line continuation in definitions.
-- [ ] **A5** Design computed-key definitions and rule emission (largest change).
+- [x] **A5** Implement computed record lookup and document the optional generator design.
 - [ ] **A4** Minimal `when`/`if` plus conditional include.
 - [x] **D3** Add an "Idioms and gotchas" page to the skill/reference docs.
 

@@ -80,3 +80,9 @@ from native executable freshness checks. Those files do not enter `so build
 A temporary filesystem check confirms that unit-only changes keep the binary
 current and a production source change still requests a rebuild. Production
 package directories and module metadata remain covered.
+
+Definition materialization previously waited indefinitely for a terminal node
+state even after a lazy definition had published its current value. Handle
+polling now copies that value before releasing root interest, allowing the
+portable `Materialize` API to return. Program sanitizer coverage includes the
+definition path; this is a termination fix, without a timing benchmark claim.

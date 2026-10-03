@@ -43,7 +43,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 			pos = nextLine(text, lineEnd)
 			continue
 		}
-		if definition.KashHeaderEnd(a, s.Source, pos) != 0 {
+		if definition.ValueHeaderEnd(a, s.Source, pos) != 0 {
 			definitionEnd := multilineDefinitionEnd(a, s.Source, pos, lineEnd)
 			part := definition.ParseRange(a, s.Source, pos, definitionEnd)
 			s.takeDiagnostics(part.Diagnostics)

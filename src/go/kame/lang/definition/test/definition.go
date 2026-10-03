@@ -57,3 +57,19 @@ func TestFormatDefinitionCanonicalizesWhitespace(t *testing.T) {
 	}
 	mem.FreeString(t.Allocator(), formatted)
 }
+
+func TestDefaultDefinitionPreservesSpansAndFormatting(t *testing.T) {
+ a := t.Allocator()
+ result := definition.Parse(a, "test.km", "value ?= words")
+ defer result.Free()
+ if len(result.Diagnostics) != 0 || result.Definition == nil || !result.Definition.Default || !sameSpan(result.Definition.NameSpan, 0, 5) { t.Error("default definition lost name/span"); return }
+ formatted := definition.Format(a, result.Definition)
+ if formatted != "value ?= words" { t.Error("default definition formatting lost operator") }
+ mem.FreeString(a, formatted)
+}
+
+func TestQuestionMarkNameIsNotDefaultOperator(t *testing.T) {
+ result := definition.Parse(t.Allocator(), "test.km", "name? = \"name?\"")
+ defer result.Free()
+ if len(result.Diagnostics) != 0 || result.Definition == nil || result.Definition.Default || result.Definition.Name != "name?" { t.Error("question-mark name became a default") }
+}

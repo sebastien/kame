@@ -184,6 +184,7 @@ test-wasm : wasm-check
 	./tests/T010-20-wasm-build-includes.sh
 	./tests/T007-09-lib-wildcard-union.sh
 	./tests/T007-10-lib-record-lookup.sh
+	./tests/T009-13-cli-configuration.sh
 	./tests/T004-09-lang-rule-header-composition.sh
 	./tests/T004-10-lang-line-continuations.sh
 	./tests/T010-21-wasm-build-effects.sh

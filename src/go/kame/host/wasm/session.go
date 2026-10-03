@@ -35,8 +35,15 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	}
 	if len(fragments) == 0 { slices.Free(r.Alloc, fragments); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "empty session descriptor")} }
 	grants := r.InspectionGrants
-	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: r.Environment, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0}
+	var overrides, environment []string
+	fields := host.PayloadList(value, "buildDefines")
+	for i := range fields { overrides = slices.Append(r.Alloc, overrides, fields[i].Text) }
+	for i := range r.Environment { environment = slices.Append(r.Alloc, environment, r.Environment[i]) }
+	fields = host.PayloadList(value, "environment")
+	for i := range fields { environment = slices.Append(r.Alloc, environment, fields[i].Text) }
+	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0}
 	compiled := program.CompileSession(r.Alloc, fragments, r.Registry, options)
+	slices.Free(r.Alloc, overrides); slices.Free(r.Alloc, environment)
 	r.Host = nil
 	for i := range fragments { slices.Free(r.Alloc, fragments[i].Entries); slices.Free(r.Alloc, fragments[i].Defines) }
 	slices.Free(r.Alloc, fragments)
