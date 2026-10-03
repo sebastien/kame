@@ -158,7 +158,7 @@ missing declared file inputs with exactly one forwarded request.
 
 - **Severity:** high
 - **Area:** forwarded build effects
-- **Status:** open
+- **Status:** fixed
 
 A file recipe containing `yield` reports success but writes only into the module
 memory host. Primary execution leaves no output on disk, and `do cat` fails if
@@ -166,3 +166,10 @@ another backend has not already created it. Native-first comparisons masked this
 failure by leaving the artifact behind. Verification must isolate output paths
 between backends and cover yielded bytes, explicit writes, host failures, and
 ordering before dependent recipes.
+
+Deferred writes and concatenated yields now suspend the recipe until embedding
+host completion, then resume remaining effects once. JS publication uses atomic
+rename with private sibling staging. T010-21 passes 15 assertions for isolated
+native/WASM binary bytes, explicit writes, dependent recipe ordering, `cat`,
+zero-byte yields, failure propagation, and staging cleanup. The WASM host sanitizer
+suite passes 23 tests, including write payload ordering and host failure.

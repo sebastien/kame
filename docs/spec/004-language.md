@@ -397,11 +397,15 @@ OUTPUTS = OUTPUT-TARGET (WS+ OUTPUT-TARGET)*
 INPUTS = INPUT (WS+ INPUT)*
 OUTPUT-TARGET = NAME | PATH | TEMPLATE | QUOTED-PATH
 NAME-TARGET = NAME | NAME-TEMPLATE
-INPUT = NAME | PATH | TEMPLATE | QUOTED-STRING | "@(" EXPRESSION ")"
+INPUT = NAME | PATH | TEMPLATE | QUOTED-STRING | "@(" EXPRESSION ")" | INTERPOLATED-PATH
 ```
 
 Whitespace inside quoted strings and balanced input expressions does not split
-header items. A file rule may have multiple outputs. Phony tasks, cached tasks,
+header items. Each whole `@(EXPRESSION)` contributes a value independently;
+strings, resources, lists and nil are flattened in authored order. Quoted input
+tokens and interpolated paths such as `@(ROOT)/suffix` render one path through
+the shared template engine and retain dependencies of their expressions.
+A file rule may have multiple outputs. Phony tasks, cached tasks,
 and services have exactly one output target. `task` and `service` are reserved at
 the start of a header and the prefixed form is tested before the unprefixed form.
 A quoted output is valid only when its decoded value begins with an explicit

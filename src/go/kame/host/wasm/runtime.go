@@ -317,6 +317,7 @@ func (r *Runtime) SpanJSON(target string, depth int, expand bool) PureResult {
 	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
 	d := r.Program.WriteSpan(&buffer, target, depth, expand)
+	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
 	if d.Code != "" {
 		out := PureResult{Code: pureText(r.Alloc, d.Code), Message: pureText(r.Alloc, d.Message)}
 		d.Free(r.Alloc)

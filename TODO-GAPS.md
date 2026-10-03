@@ -59,8 +59,8 @@ strictly better (dynamic glob dependencies, real file-rule freshness, cached
 | A6 | No line continuation, no multi-line `define` | Parser gap | Low | long `KAME_INPUTS` |
 | B1 | `wildcard` pattern unions | Library gap, fixed | High → fixed | `WASM_SOURCES` |
 | B2 | `concat` of two non-empty wildcard globs hung | Engine bug (KB-1) | Critical → fixed | `WASM_SOURCES` (workaround retained) |
-| B3 | At most one expression per rule header | Parser gap | Medium | `WASM_SOURCES` + glue |
-| B4 | No path interpolation in rule headers (`@(VAR)/suffix`) | Parser gap | Medium | all input paths |
+| B3 | Multiple expressions per rule header | Verified and covered | Medium → fixed | `WASM_SOURCES` + glue |
+| B4 | Path interpolation in rule headers (`@(VAR)/suffix`) | Parser/evaluator gap, fixed | Medium → fixed | all input paths |
 | B5 | Pattern expansion must be a string; bare targets cannot capture | Parser gap | Low | not used here |
 | C1 | No way to force-rebuild a file output (`.PHONY` equivalent) | Rule semantics | Low | GNU marks outputs phony |
 | C2 | No order-only prerequisites | Rule semantics | Low | not used here |
@@ -272,7 +272,12 @@ per-directory globs, which in turn forced the four non-Go glue inputs into a
 literal list in the rule header (see B3/B4). `concat` of per-directory globs is
 now viable and the workaround can be retired.
 
-### B3 — At most one expression per rule header
+### B3 — Multiple expressions per rule header (verified)
+
+The current parser already separates multiple balanced expression tokens.
+T004-09 now verifies each expression contributes its inputs independently,
+interleaved with literals and path templates, on native and WASM. The historical
+limitation below no longer reproduces.
 
 **Symptom.** Two expressions in one header are rejected:
 
@@ -295,7 +300,13 @@ dependency edges.
 **Acceptance.** A header may mix several wildcards, definitions, and literal
 paths, and the plan reports the union of inputs.
 
-### B4 — No path interpolation in rule headers
+### B4 — Path interpolation in rule headers (fixed)
+
+Header input tokens such as `@(ROOT)/suffix` now use shared template rendering,
+including quoted paths. Whole expressions keep their value/list shape. Planning
+and execution share this distinction and retain dynamic dependencies. T004-09
+passes 11 native/WASM assertions, including expanded inspection and ordered
+recipe inputs. The historical finding follows.
 
 **Symptom.** `@(VAR)` works in a recipe, including with a suffix, but not in an
 input slot:
@@ -415,9 +426,9 @@ Ordered by value-to-effort for porting real projects:
 - [x] **KB-1** (was B2) Fixed the `concat`-of-wildcards hang with per-operation
       read-request state; regression coverage in `T011-03` and `T010-13`.
 - [x] **KB-2** Fix `-C` + relative `-f`; add CLI regression tests.
-- [ ] **B3** Allow multiple expressions/literals per rule header, flattening
+- [x] **B3** Allow multiple expressions/literals per rule header, flattening
       dependency edges.
-- [ ] **B4** Allow `@(VAR)/suffix` and other path interpolation in headers by
+- [x] **B4** Allow `@(VAR)/suffix` and other path interpolation in headers by
       parsing inputs as string templates.
 - [ ] **A2** Add `--define NAME=VALUE` + a documented env convention, then `?=`.
 - [ ] **A3** Add target-scoped environment inherited by prerequisites, included

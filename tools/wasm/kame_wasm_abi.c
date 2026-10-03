@@ -728,6 +728,7 @@ uint32_t kame_wasm_graph(uint64_t handle, uint32_t target, uint32_t target_len, 
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
   if (instance->runtime == NULL || out_len == 0u || (target_len != 0u && target == 0u)) return KAME_WASM_STATE_INVALID;
   *(uint32_t *)(uintptr_t)out_len = 0u;
+  if (instance->has_pending) return KAME_WASM_HOST_NEEDED;
   instance->diagnostic_len = 0u;
   so_String name = (so_String){(const char *)(uintptr_t)target, (so_int)target_len};
   wasm_PureResult result;
@@ -735,6 +736,10 @@ uint32_t kame_wasm_graph(uint64_t handle, uint32_t target, uint32_t target_len, 
     result = wasm_Runtime_SpanJSON(instance->runtime, name, (so_int)depth, expand != 0u);
   } else {
     result = wasm_Runtime_GraphJSON(instance->runtime, name, (so_int)depth, kind == 0u ? so_str("inputs") : so_str("outputs"));
+  }
+  if (result.HostNeeded) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_HOST_NEEDED;
   }
   if (result.Code.len != 0) {
     kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);

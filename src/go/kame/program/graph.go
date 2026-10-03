@@ -19,6 +19,7 @@ type graphResult struct {
 }
 
 type spanResult struct {
+	Waiting bool
 	Static     []string
 	Dynamic    []string
 	Outputs    []string
@@ -45,7 +46,9 @@ func (p *Program) WriteGraph(out io.Writer, target string, depth int, kind strin
 
 // WriteSpan emits the span JSON object for one target.
 func (p *Program) WriteSpan(out io.Writer, target string, depth int, expand bool) diagnostic.Diagnostic {
+	p.InspectionWaiting = false
 	span := p.spanValues(target, depth, expand)
+	if span.Waiting { p.InspectionWaiting = true; return diagnostic.Diagnostic{} }
 	if span.Diagnostic.Code != "" {
 		return span.Diagnostic
 	}
@@ -108,7 +111,16 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 		}
 		if expand {
 			planned.Plan.Free(p.Alloc)
-			planned = p.ExpandPlan(node.Target)
+			planned = p.expandPlan(node.Target, p.Forwarding)
+			if planned.Waiting {
+				FreeStrings(p.Alloc, result.Static)
+				FreeStrings(p.Alloc, result.Dynamic)
+				FreeStrings(p.Alloc, result.Outputs)
+				FreeStrings(p.Alloc, visited)
+				for i := cursor+1; i < len(pending); i++ { mem.FreeString(p.Alloc, pending[i].Target) }
+				slices.Free(p.Alloc, pending)
+				return spanResult{Waiting: true}
+			}
 			if planned.Diagnostic.Code != "" {
 				if node.Depth == 0 {
 					FreeStrings(p.Alloc, result.Static)

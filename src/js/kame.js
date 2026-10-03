@@ -7,7 +7,7 @@
 // is parsed by the shared portable `cli` package inside the module via
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { accessSync, closeSync, constants as fsConstants, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
@@ -523,6 +523,19 @@ function wildcardPaths(pattern) {
   return matches;
 }
 
+async function writeFileAtomic(name, data) {
+  const directory = dirname(name);
+  await mkdir(directory, { recursive: true });
+  const staging = await mkdtemp(join(directory, '.kame-write-'));
+  try {
+    const temporary = join(staging, 'output');
+    await writeFile(temporary, data, { flag: 'wx', mode: 0o644 });
+    await rename(temporary, name);
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
+
 function isExecutable(file) {
   try {
     const info = statSync(file);
@@ -801,7 +814,7 @@ class Module {
     if (kind === 2) {
       if (!grants.write) return this.deny(instance, request);
       try {
-        await writeFile(payload, data);
+        await writeFileAtomic(payload, data);
         return this.exports.kame_wasm_complete_nil(instance, request);
       } catch (error) {
         return this.completeFailure(instance, request, 'FS_ERR', `cannot write file: ${error.message}`);
@@ -1010,12 +1023,12 @@ class Module {
     }, name);
   }
 
-  async graphJSON(source, target, depth, kind, expand, name) {
+  async graphJSON(source, target, depth, kind, expand, name, context) {
     return this.prepared(source, (instance) => {
       const targetBytes = this.write(target);
       const flag = expand ? 1 : 0;
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_graph(handle, targetBytes.pointer, targetBytes.length, depth, kind, flag, dst, dstLen, lengthPointer);
-    }, name);
+    }, name, context);
   }
 
   async toolNames(source, name) {
@@ -1712,7 +1725,15 @@ async function runGraph(module, inv, sourceDirectory) {
   const targets = inv.targets.length !== 0 ? inv.targets : ['default'];
   if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', `${inv.name} requires exactly one target`);
   const kind = inv.name === 'inputs' ? 0 : inv.name === 'outputs' ? 1 : 2;
-  stdout.write(await module.graphJSON(source.compiled, targets[0], inv.depth, kind, inv.expand, source.name));
+  let context;
+  if (inv.expand) {
+    context = contextFor(inv);
+    context.inspection = true;
+    context.grants.write = false;
+    context.grants.run = false;
+    context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }];
+  }
+  stdout.write(await module.graphJSON(source.compiled, targets[0], inv.depth, kind, inv.expand, source.name, context));
   return 0;
 }
 

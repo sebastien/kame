@@ -32,6 +32,7 @@ KMK
 compare() {
 	local native_status=0 wasm_status=0
 	"$CLI_BIN" "$@" >"$work/native.out" 2>"$work/native.err" || native_status=$?
+	if [ "${!#}" = ./artifact.txt ]; then rm -f "$work/project/artifact.txt"; fi
 	node "$CLI_ROOT/dist/kame.js" "$@" >"$work/wasm.out" 2>"$work/wasm.err" || wasm_status=$?
 	if [ "$native_status" = 0 ] && [ "$wasm_status" = 0 ] && cmp -s "$work/native.out" "$work/wasm.out"; then
 		test-ok "source parity: $*"

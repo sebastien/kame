@@ -282,6 +282,7 @@ func (p *Program) Free() {
 		p.Instances[i].Plan.Free(p.Alloc)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)
 		mem.FreeString(p.Alloc, p.Instances[i].Script)
+		p.freeForwardEffects(p.Instances[i].ForwardEffects)
 		slices.Free(p.Alloc, p.Instances[i].LineSpans)
 		freeStrings(p.Alloc, p.Instances[i].Operations)
 		slices.Free(p.Alloc, p.Instances[i].CacheManifest)

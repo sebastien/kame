@@ -49,10 +49,9 @@ A `.kmk` recipe is one shell script. Shell variables and `cd` persist between
 its lines. Port Make recipes that relied on one shell per line carefully.
 
 Kame selectors use `@>` for outputs, `@<` for the first input, and `@<*` for
-all inputs. Kame expressions use `@(EXPRESSION)` in recipes. Build headers
-currently accept whole input expressions, but do not support arbitrary
-`@(DIRECTORY)/suffix` path composition; put path construction inside the expression.
-Do not assume multiple adjacent expressions are one input list.
+all inputs. Kame expressions use `@(EXPRESSION)` in recipes. Build headers accept multiple whole input expressions and paths such as
+`@(DIRECTORY)/suffix`, interleaved with literal or quoted paths. Each whole
+expression is evaluated and flattened independently, in authored order.
 
 Quote shell text held in a Kame definition:
 
@@ -69,9 +68,8 @@ is not part of that atom. Do not use Make's `$$` habit blindly: raw recipe text
 is shell-owned, so `$HOME` is a shell expansion; `$$` means the shell process ID.
 
 A literal wildcard in Kash argv stays literal. Ask Kame to discover files with
-an explicit wildcard expression when that is intended. `wildcard` currently
-takes one pattern; combine results with `concat` and filter them with collection
-operations. `**` matches zero or more directory levels.
+an explicit wildcard expression when that is intended. `wildcard` accepts one or more patterns and returns a sorted, duplicate-free
+union; filter results with collection operations. `**` matches zero or more directory levels.
 
 ## Patterns and expansions
 

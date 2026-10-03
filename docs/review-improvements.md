@@ -19,7 +19,10 @@ comparison and full sanitizer/WASM checks before declaring this project done.
 The directory-source bug KB-2 is fixed, as are stale expression command fixtures,
 unquoted tool-path definitions in the repository build, and bootstrap test output
 pollution from recursive Make directory messages. Native artifact writes now use
-exclusive staging files. Native shutdown no longer waits 100 ms with no children.
+exclusive staging files. Native shutdown no longer waits 100 ms with no children. WASM declared file
+inputs now query the embedding filesystem (KB-5), expanded spans service host
+reads, and declarative write/yield effects publish before dependent recipes
+(KB-6). T010-21 uses isolated outputs so native runs cannot mask missing WASM writes.
 See the security and performance reviews for evidence and limitations.
 
 ## TODO.md disposition
@@ -69,8 +72,8 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | A6 continuations/multiline definitions | Remaining parser/formatter work; verbatim template literals do not prove general continued rule headers or definitions. |
 | B1 discovery unions/alternation/file filtering | Pattern unions are implemented: sorted, duplicate-free results and independent glob dependencies; T007-09 covers native/WASM evaluation and membership changes. Directory filtering uses metadata predicates. |
 | B2 concatenated wildcard deadlock | Fixed (KB-1); keep both native and WASM multi-read regressions. |
-| B3 multiple expression inputs | Remaining: independently parse/evaluate/flatten each token with ordered dependencies; do not concatenate text into one accidental expression. |
-| B4 header path interpolation | Remaining: render path tokens from their Kame values and retain dynamic edges; reject invalid types precisely. |
+| B3 multiple expression inputs | Already supported by the parser and now verified by T004-09 across multiple host-backed expressions, literal and interpolated paths. |
+| B4 header path interpolation | Implemented through shared template rendering for path and quoted input tokens; T004-09 pins planning, expanded inspection and execution parity. |
 | B5 scalar expansion/leading captures/bare captures | Separate parser, coercion, and target-matching changes. Preserve strict string operations and matcher/expansion classification tests. |
 | C1 forced file rebuild | `--force` is an existing invocation override. Document it; a persistent per-rule always-rebuild declaration is a separate requested escape hatch. |
 | C2 order-only prerequisites | Remaining rule semantics; maintain scheduling edges while excluding them from freshness/cache content identity where specified. |

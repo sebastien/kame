@@ -56,6 +56,8 @@ test-wasm: wasm-check
 	tests/T010-19-wasm-cache.sh
 	tests/T010-20-wasm-build-includes.sh
 	tests/T007-09-wildcard-union.sh
+	tests/T004-09-rule-header-composition.sh
+	tests/T010-21-wasm-build-effects.sh
 	tests/T017-02-wasm-capture.sh
 	tests/T017-03-eval-pipelines.sh
 	tests/T017-04-eval-redirections.sh

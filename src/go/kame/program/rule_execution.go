@@ -157,7 +157,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 	index := p.instanceIndex(entry.Node)
 	hasExpression := false
 	for i := range entry.Rule.Inputs {
-		if entry.Rule.Inputs[i].Kind == rule.InputExpression {
+		if entry.Rule.Inputs[i].Kind == rule.InputExpression || entry.Rule.Inputs[i].Kind == rule.InputString {
 			hasExpression = true
 			break
 		}
@@ -170,7 +170,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 	var resourceInputs []PlanInput
 	for i := range entry.Rule.Inputs {
 		input := entry.Rule.Inputs[i]
-		if input.Kind != rule.InputExpression {
+		if input.Kind != rule.InputExpression && input.Kind != rule.InputString {
 			if input.Kind == rule.InputTemplate {
 				inputs = slices.Append(p.Alloc, inputs, renderInput(p.Alloc, input, entry.Captures))
 			} else {
@@ -184,7 +184,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 			continue
 		}
-		if input.Template == nil || len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil {
+		if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil)) {
 			freeStrings(p.Alloc, inputs)
 			freeStrings(p.Alloc, dynamicInputs)
 			freePlanInputs(p.Alloc, resourceInputs, true)
@@ -195,7 +195,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
 		scope := p.ruleScope(context, entry.Captures)
         context.Scope = scope
-        result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
+        result := p.evaluateInput(input, context)
         scope.Free()
 		freeValues(p.Alloc, values)
 		freeValues(p.Alloc, outputs)

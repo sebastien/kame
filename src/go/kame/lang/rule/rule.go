@@ -248,6 +248,9 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 		} else if len(text) >= 3 && text[0] == '@' && text[1] == '(' && text[len(text)-1] == ')' {
 			input.Kind = InputExpression
 			input.Template = template.ParseStringRange(p.a, p.s, span.Start, span.End)
+		} else if strings.Contains(text, "@(") {
+			input.Kind = InputString
+			input.Template = template.ParseStringRange(p.a, p.s, span.Start, span.End)
 		} else if hasTemplate(text) {
 			input.Kind = InputTemplate
 			input.TargetForm = template.ParseTarget(p.a, p.s.Name, text)

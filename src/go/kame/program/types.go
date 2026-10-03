@@ -245,6 +245,7 @@ type Program struct {
 	epoch       int64
 	// Forwarding mirrors Options.ForwardRequests; Outbound holds requests an
 	// embedding host must service and complete.
+	InspectionWaiting bool
 	Forwarding bool
 	// SessionPolicy makes legacy recipe launches inherit runner capability grants.
 	SessionPolicy bool
@@ -271,6 +272,7 @@ type instance struct {
 	// satisfy normal target lookup or participate in build execution.
 	Inspection           bool
 	inspectionRoot       *core.Root
+	ForwardEffects       *forwardEffectsState
 	Script               string
 	LineSpans            []diagnostic.Span
 	Operations           []string

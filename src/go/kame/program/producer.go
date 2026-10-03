@@ -24,6 +24,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		slices.Free(p.Alloc, entry.CacheStderr)
 		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false
 		entry.cachePending = false
+		p.freeForwardEffects(entry.ForwardEffects)
+		entry.ForwardEffects = nil
 		if entry.Script != "" {
 			mem.FreeString(p.Alloc, entry.Script)
 			entry.Script = ""
@@ -39,6 +41,9 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	if entry.Rule.Kind == rule.ServiceRule {
 		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service execution is not supported"))
 		return core.ProducerFailed
+	}
+	if entry.ForwardEffects != nil {
+		return p.continueForwardEffects(c, state.Index)
 	}
 	if c.Completion().RequestID != 0 && entry.Script != "" {
 		mem.FreeString(p.Alloc, entry.Script)
@@ -226,19 +231,35 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			return core.ProducerFailed
 		}
 	}
+	if p.Forwarding {
+		pending := mem.Alloc[forwardEffectsState](p.Alloc)
+		pending.Commands = commands
+		pending.WritePaths = cloneStrings(p.Alloc, writePaths)
+		pending.HasYield = hasYield(effects)
+		for i := range effects {
+			pending.Effects = slices.Append(p.Alloc, pending.Effects, eval.Effect{Kind: effects[i].Kind, Span: effects[i].Span, Data: slices.Clone(p.Alloc, effects[i].Data)})
+		}
+		entry.ForwardEffects = pending
+		return p.continueForwardEffects(c, state.Index)
+	}
 	if effectDiagnostic := p.commitEffects(entry, effects, writePaths, false); effectDiagnostic.Code != "" {
 		mem.FreeString(p.Alloc, commands)
 		p.failRule(c, state.Index, effectDiagnostic)
 		return core.ProducerFailed
 	}
+	return p.finishRecipe(c, state.Index, commands, hasYield(effects))
+}
+
+func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string, yielded bool) core.ProducerResult {
+	entry := &p.Instances[index]
 	if commands == "" {
-		if entry.Rule.Kind == rule.FileRule && !hasYield(effects) && !p.Forwarding {
+		if entry.Rule.Kind == rule.FileRule && !yielded && !p.Forwarding {
 			for i := range entry.Plan.Outputs {
 				name := p.canonicalTarget(entry.Plan.Outputs[i], true)
 				result := p.Host.Stat(name)
 				mem.FreeString(p.Alloc, name)
 				if !result.Exists {
-					p.failRule(c, state.Index, failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
+					p.failRule(c, index, failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
 					return core.ProducerFailed
 				}
 			}
@@ -246,7 +267,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		if entry.Rule.Kind == rule.CachedTaskRule && entry.CacheReady && !p.Options.CacheDisabled {
 			p.cacheCommit(entry, nil, nil, false, false)
 		}
-		if entry.Rule.Kind == rule.FileRule && hasYield(effects) {
+		if entry.Rule.Kind == rule.FileRule && yielded {
 			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
 		} else {
 			c.Publish(core.Value{Kind: core.Nil})
@@ -263,7 +284,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				// there on this path, so release it here like every other
 				// early exit above.
 				mem.FreeString(p.Alloc, commands)
-				p.failRule(c, state.Index, failure(p.Alloc, "FS_ERR", "cannot create output directory"))
+				p.failRule(c, index, failure(p.Alloc, "FS_ERR", "cannot create output directory"))
 				return core.ProducerFailed
 			}
 		}
@@ -286,7 +307,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerSubmitted
 	}
 	if p.Host == nil || !p.Host.Start(request) {
-		p.failRule(c, state.Index, failure(p.Alloc, "HOST_FAIL", "cannot start recipe"))
+		p.failRule(c, index, failure(p.Alloc, "HOST_FAIL", "cannot start recipe"))
 		return core.ProducerFailed
 	}
 	c.Submit(request.ID)

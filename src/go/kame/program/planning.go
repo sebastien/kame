@@ -44,7 +44,7 @@ func (p *Program) Plan(target string) PlanResult {
 	}
 	for i := range selected.Rule.Inputs {
 		input := selected.Rule.Inputs[i]
-		if input.Kind == rule.InputExpression {
+		if input.Kind == rule.InputExpression || input.Kind == rule.InputString {
 			plan.Freshness = Unknown
 			before := len(plan.Inputs)
 			if d := p.planInputExpression(input, &plan); d.Code != "" {
@@ -145,7 +145,7 @@ func (p *Program) expandPlan(target string, yield bool) PlanResult {
 
 func hasExpressionInput(r *rule.Rule) bool {
 	for i := range r.Inputs {
-		if r.Inputs[i].Kind == rule.InputExpression {
+		if r.Inputs[i].Kind == rule.InputExpression || r.Inputs[i].Kind == rule.InputString {
 			return true
 		}
 	}
@@ -183,7 +183,7 @@ func clonePlan(a mem.Allocator, plan Plan) Plan {
 }
 
 func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.Diagnostic {
-	if input.Template == nil || len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil {
+	if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil)) {
 		return failure(p.Alloc, "EXPR_INVALID", "invalid rule input expression")
 	}
 	inputs, outputs := makeValues(p.Alloc, plan.Inputs), makeValues(p.Alloc, plan.Outputs)
@@ -193,7 +193,7 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
 	scope := p.ruleScope(context, plan.Captures)
     context.Scope = scope
-    result := p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
+    result := p.evaluateInput(input, context)
     scope.Free()
 	if state.Resolving != nil {
 		slices.Free(p.Alloc, state.Resolving)
@@ -278,4 +278,13 @@ func resourceKind(r *rule.Rule) core.ResourceKind {
 		return core.ResourceService
 	}
 	return core.ResourceTarget
+}
+
+// Complete expression inputs retain their value shape for list flattening;
+// interpolated path tokens render one string through the shared template engine.
+func (p *Program) evaluateInput(input rule.Input, context *eval.Context) eval.Result {
+	if input.Kind == rule.InputString {
+		return p.Eval.Render(p.Alloc, input.Template, context.Scope, context)
+	}
+	return p.Eval.EvaluateWith(input.Template.Parts[0].Expr, context)
 }

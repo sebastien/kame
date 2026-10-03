@@ -301,3 +301,13 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 Build source descriptors are bounded to 512 KiB of encoded JSON and 64 KiB
 of combined source text, matching the single-source text capacity. Oversize
 input returns `NO_MEMORY`; offsets must fit a nonnegative 32-bit span.
+
+Expanded span queries service read-only host requests through the same pending
+query protocol as tool inspection: `HOST_NEEDED` means step, complete the yielded
+request, and retry the query. Static queries perform no host effects.
+
+Forwarded build effects publish explicit writes and concatenated yields through
+write requests. The target waits for host completion, preserves authored effect
+order, and propagates publication failures. A dependent recipe runs after the
+file is published. The JavaScript host writes through a unique private sibling
+staging directory and atomic rename, cleaning staging on success and failure.

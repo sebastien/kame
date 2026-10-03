@@ -28,6 +28,7 @@ untrusted builds. Avoid describing `--allow-read=DIR` as a filesystem sandbox.
 | SEC-1 | High when output directories contain attacker-controlled entries | Non-durable native writes opened `OUTPUT.kame-write.tmp` directly, following a pre-created symlink and allowing concurrent writers to share staging data. | Fixed: exclusively create a unique sibling temporary, apply requested permissions, and rename only after successful write and close. |
 | SEC-2 | Trust-boundary limitation | Lexical roots permit symlink escape and executable grants do not constrain child effects. | Explicitly specified behavior; require host containment for hostile code. |
 | SEC-3 | Verification gap | The full sanitizer suite and all memory-ownership paths have not yet been verified in this review. | Keep release completion open until broad checks finish; targeted POSIX sanitizer tests pass. |
+| SEC-5 | Atomic visibility | JS write requests previously used direct file writes. | Fixed: exclusive staging in a private sibling directory followed by rename; T010-21 covers bytes, zero length, failed publication and cleanup. |
 | SEC-4 | Low confidentiality limit | Live process streams, collected shell results, and explicit `out` remain observable, even though diagnostic causes omit captured output. | Intended: omission protects diagnostic serialization, not deliberate output. |
 
 The atomic-write fix also removes the old fixed path-length temporary buffer:
