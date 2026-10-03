@@ -156,11 +156,22 @@ early-reader closure can produce ECONNRESET instead of native SIGPIPE.
 
 File-rule shell requests use ABI kind 16: a JSON object with `script` and
 `outputs`. The embedding host creates output parent directories before launch.
+File-rule freshness and successful-output verification use ABI kind 20
+(`file-times`): a JSON array of canonical paths. The host completes it with a
+JSON array in the same order, containing decimal nanosecond modification times
+as strings, or null for absent paths. Strings preserve 64-bit timestamps across
+JavaScript transport; portable hosts may supply integer values directly.
+Freshness also requests the opaque file-context cache record through the existing
+cache-get protocol. A missing record is nil. Scoped successful builds publish
+updated records through cache-put.
+
 After successful process completion, or a recipe containing no shell/yield,
-the engine emits ABI kind 17 for each declared output path. The host completes
-that internal metadata request with an existence boolean. The engine reports
-`OUTPUT_MISSING` and withholds dependent execution when an output is absent.
-These checks do not evaluate a user library read or broaden expression grants.
+the engine verifies every declared output through a separate kind-20 request.
+It reports `OUTPUT_MISSING` and withholds dependent execution when an output is
+absent; a host verification failure remains a failure. Kind 17 remains reserved
+for the earlier individual existence request. Embedding hosts must service
+kind 20 and cache requests when forwarding file rules. These metadata checks do
+not evaluate a user library read or broaden expression grants.
 
 Structured process requests distinguish direct argv (ABI kind 13, a JSON argv
 array) from pipelines (kind 14, a JSON array of stage argv arrays) and redirected

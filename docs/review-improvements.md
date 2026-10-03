@@ -174,3 +174,10 @@ environment, native/WASM cache, plan and catalog suites pass separately.
 The compiled sanitizer CLI passes all 19 order-only assertions with leak detection;
 ASAN instrumentation is verified before and after the run. The normal run includes
 one additional binary-build assertion. Broad full-suite coverage remains pending.
+
+The forwarded file metadata protocol now has embedding-host coverage as well as
+CLI coverage. All 28 `host/wasm` tests pass under ASAN/UBSAN after updating three
+fixtures for timestamp-array and cache-get requests. The output-verification
+fixture accepts a decimal timestamp beyond JavaScript's safe integer range and
+still checks missing outputs, host failures and completion ordering. Spec 010
+documents ABI kind 20 and the cache responses required by forwarding hosts.

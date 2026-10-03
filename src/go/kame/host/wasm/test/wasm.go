@@ -436,12 +436,21 @@ func TestRuntimeForwardsRuleRecipe(t *testing.T) {
 	for i := 0; i < 64 && !done; i++ {
 		next := runtime.Step()
 		if next.OK {
-   if next.Request.Kind == host.RequestProcess {
-    if host.PayloadText(next.Request.Payload, host.FieldScript) != "printf written" { t.Error("unexpected forwarded recipe script") }
-    runtime.Complete(next.Request, core.NewString(a, ""), diagnostic.Diagnostic{})
-   } else if next.Request.Kind == host.RequestReadFile && host.PayloadText(next.Request.Payload, host.FieldOp) == host.OpOutputExists {
-    runtime.Complete(next.Request, core.Value{Kind: core.Bool, Bool: true}, diagnostic.Diagnostic{})
-   } else { next.Request.Free(a); t.Error("unexpected forwarded recipe request"); break }
+			if next.Request.Kind == host.RequestProcess {
+				if host.PayloadText(next.Request.Payload, host.FieldScript) != "printf written" {
+					t.Error("unexpected forwarded recipe script")
+				}
+				runtime.Complete(next.Request, core.NewString(a, ""), diagnostic.Diagnostic{})
+			} else if next.Request.Kind == host.RequestCacheGet {
+				runtime.Complete(next.Request, core.Value{Kind: core.Nil}, diagnostic.Diagnostic{})
+			} else if next.Request.Kind == host.RequestReadFile && host.PayloadText(next.Request.Payload, host.FieldOp) == host.OpFileTimes {
+				items := []core.Value{{Kind: core.Int, Int: 1}}
+				runtime.Complete(next.Request, core.NewList(a, items), diagnostic.Diagnostic{})
+			} else {
+				next.Request.Free(a)
+				t.Error("unexpected forwarded recipe request")
+				break
+			}
 			next.Request.Free(a)
 			serviced = true
 		}
