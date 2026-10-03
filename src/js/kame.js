@@ -625,6 +625,7 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_result_kind',
   'kame_wasm_target_event',
   'kame_wasm_process_started',
+  'kame_wasm_process_retain_limit',
   'kame_wasm_process_stream',
   'kame_wasm_process_terminal',
   'kame_wasm_instance_diagnostic_length',
@@ -636,6 +637,7 @@ class Module {
   constructor(exports) {
     this.exports = exports;
     this.path = wasmPath;
+    this.scratchBuffers = new Map();
   }
 
   static async load() {
@@ -661,6 +663,19 @@ class Module {
     const pointer = this.exports.kame_wasm_alloc(size, alignment);
     if (pointer === 0) throw new Error(`WASM allocation failed for ${size} bytes`);
     return pointer;
+  }
+
+  // ABI calls copy these inputs before returning. Separate slots keep fields
+  // that are passed together alive, and geometric growth bounds abandoned
+  // buffers in the ABI's monotonic host allocator.
+  scratch(name, size, alignment = 1) {
+    let buffer = this.scratchBuffers.get(name);
+    if (!buffer || buffer.capacity < size) {
+      const capacity = Math.max(64, 2 ** Math.ceil(Math.log2(Math.max(1, size))));
+      buffer = { pointer: this.allocate(capacity, alignment), capacity };
+      this.scratchBuffers.set(name, buffer);
+    }
+    return buffer.pointer;
   }
 
   write(bytes) {
@@ -1097,12 +1112,12 @@ class Module {
     const json = context.json === true;
     const human = context.human === true && !json;
     for (;;) {
-      const lengthPointer = this.allocate(4, 4);
+      const lengthPointer = this.scratch('eventLength', 4, 4);
       const query = this.exports.kame_wasm_target_event(instance, 0, 0, lengthPointer);
       if (query !== 0 && query !== 3) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       const length = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
       if (length === 0) return;
-      const output = this.allocate(length || 1);
+      const output = this.scratch('eventOutput', length || 1);
       if (this.exports.kame_wasm_target_event(instance, output, length, lengthPointer) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       const bytes = new Uint8Array(this.exports.memory.buffer, output, length).slice();
       for (const line of this.decode0(bytes).trim().split('\n')) {
@@ -1123,7 +1138,7 @@ class Module {
   }
 
   processStream(instance, stderrStream, chunk, request) {
-    const pointer = this.allocate(chunk.length || 1);
+    const pointer = this.scratch('processStream', chunk.length || 1);
     new Uint8Array(this.exports.memory.buffer, pointer, chunk.length).set(chunk);
     const status = request === undefined
       ? this.exports.kame_wasm_process_stream(instance, stderrStream ? 1 : 0, pointer, chunk.length)
@@ -1498,6 +1513,8 @@ async function runProcess(module, instance, script, context, request) {
 }
 
 function runProcessAttempt(module, instance, script, context, request) {
+  const retain = module.exports.kame_wasm_process_retain_limit(instance, request ?? 0n);
+  if (retain === 0xffffffff) throw new Error('process retention budget unavailable');
   return new Promise((resolveAttempt) => {
     const shell = context.shell.length !== 0 ? context.shell : ['/bin/sh', '-c'];
     const childEnv = { ...process.env };
@@ -1511,6 +1528,8 @@ function runProcessAttempt(module, instance, script, context, request) {
     module.drainEvents(instance, context);
     const out = [];
     const err = [];
+    let outLength = 0;
+    let errLength = 0;
     let failure = null;
     let timedOut = false;
     let timer = null;
@@ -1520,8 +1539,18 @@ function runProcessAttempt(module, instance, script, context, request) {
     const cancelled = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } };
     context.signal?.addEventListener('abort', cancelled, { once: true });
     if (context.signal?.aborted) cancelled();
-    child.stdout.on('data', (chunk) => { out.push(chunk); module.processStream(instance, false, chunk, request); module.drainEvents(instance, context); });
-    child.stderr.on('data', (chunk) => { err.push(chunk); module.processStream(instance, true, chunk, request); module.drainEvents(instance, context); });
+    child.stdout.on('data', (chunk) => {
+      const kept = Math.min(chunk.length, retain + 1 - outLength);
+      if (kept > 0) { out.push(Buffer.from(chunk.subarray(0, kept))); outLength += kept; }
+      module.processStream(instance, false, chunk, request);
+      module.drainEvents(instance, context);
+    });
+    child.stderr.on('data', (chunk) => {
+      const kept = Math.min(chunk.length, retain + 1 - errLength);
+      if (kept > 0) { err.push(Buffer.from(chunk.subarray(0, kept))); errLength += kept; }
+      module.processStream(instance, true, chunk, request);
+      module.drainEvents(instance, context);
+    });
     child.once('error', (error) => { failure = error; });
     child.once('close', (code, signalName) => {
       if (timer !== null) clearTimeout(timer);

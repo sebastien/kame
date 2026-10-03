@@ -98,9 +98,14 @@ completion. Native event drains now flush stdio, and WASM process callbacks drai
 queued events. The regression proves markers arrive before releasing a waiting
 recipe; it does not claim a latency percentile or throughput improvement.
 
-An 8 MiB NUL-byte recipe now provides a concrete memory failure reproduction:
-native exits 0 with 8,388,608 bytes, while WASM exits 1 after 790,528 bytes in this
-run, trapping inside event JSON allocation. The partial count varies with chunk
-boundaries. The source shows a fixed arena with limited free reuse and the JS
-recipe host accumulating every output chunk. KB-9 remains open; fix allocation
-reuse and retention before tuning throughput or increasing memory limits.
+The original 8 MiB stream-growth trap (KB-9) is fixed without increasing the
+16 MiB instance capacity. A coalescing heap reuses arbitrary freed event blocks,
+binary JSON scratch uses the instance allocator, and JS reuses geometrically
+grown input/output scratch buffers. Recipe capture retains the native budget
+plus one sentinel byte, so truncation metadata survives bounded retention.
+T012-03 verifies 8 MiB on each stdout/stderr stream for NUL and binary data in
+human/JSON mode, including failures, and 64 KiB cache replay. All 28 WASM host
+sanitizer tests pass; 1,000 unordered allocation/free cycles fit in 4 KiB.
+The original NUL recipe now forwards exactly 8,388,608 bytes and exits 0; its
+observed 1.530s is one run, not a comparative throughput benchmark. True heap
+exhaustion diagnostics remain a separate acceptance gap.

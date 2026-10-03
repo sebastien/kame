@@ -137,7 +137,14 @@ compiled slot on demand, rather than reserving memory for every possible slot.
 This accommodates the default 1 MiB Kash capture plus evaluator allocation and
 copy overhead. The module memory maximum still bounds simultaneous compiled
 instances and larger captures; an unavailable arena reports `NO_MEMORY`.
-Instance destruction releases all logical allocations by resetting that arena.
+Within each slot, a coalescing heap reclaims arbitrary freed blocks while the
+compiled program remains alive; instance destruction resets the supplied buffer.
+The JS host reuses separate geometrically grown scratch buffers for process
+chunks and event JSON. `kame_wasm_process_retain_limit(instance, request)` reports
+the portable process retention budget (zero request selects the pinned request;
+`UINT32_MAX` means invalid). Recipe hosts retain that prefix plus at most one
+sentinel byte, preserving terminal truncation metadata while forwarding every
+live chunk. Binary event JSON scratch uses the instance allocator as well.
 
 The POSIX JavaScript CLI host uses the system `mkfifo` utility for intermediate
 Kash pipeline descriptors. Children inherit blocking FIFO endpoints directly,

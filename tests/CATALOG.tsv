@@ -102,3 +102,4 @@ tests/T007-11-lib-tools.sh	007	lib	Shared executable resolution, computed tool n
 tests/T004-11-lang-wildcard-inputs.sh	004	lang	Literal wildcard rule inputs, recursive membership dependencies, authored formatting and quoted literals on native/WASM
 tests/T004-12-lang-optional-includes.sh	004	lang	Optional include absence, present declarations, value fragments, formatting, malformed sources, cycles and read failures on native/WASM
 tests/T012-02-streams-live-cli.sh	012	streams	Human/JSON chunks reach pipes before recipe completion on native/WASM, and native watch flushes declarative stdout
+tests/T012-03-streams-large-output.sh	012	streams	8 MiB NUL/binary stdout and stderr remain lossless on native/WASM in human/JSON mode; bounded retention preserves failure truncation metadata

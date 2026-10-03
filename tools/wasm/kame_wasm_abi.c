@@ -1051,6 +1051,21 @@ uint32_t kame_wasm_request_detach(uint64_t handle, uint64_t request) {
   return KAME_WASM_OK;
 }
 
+/* Return the portable retention budget for a pending or detached process.
+ * UINT32_MAX denotes an invalid request rather than an unlimited budget. */
+__attribute__((export_name("kame_wasm_process_retain_limit")))
+uint32_t kame_wasm_process_retain_limit(uint64_t handle, uint64_t request) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (!instance || !instance->runtime) return UINT32_MAX;
+  host_Request *pending = NULL;
+  if (instance->has_pending && (request == 0u || instance->request == request)) pending = &instance->pending;
+  for (kame_wasm_parked_request *saved = instance->parked; saved && !pending; saved = saved->next) {
+    if (saved->request == request) pending = &saved->pending;
+  }
+  if (!pending) return UINT32_MAX;
+  return (uint32_t)wasm_Runtime_ProcessRetainLimit(instance->runtime, *pending);
+}
+
 __attribute__((export_name("kame_wasm_process_stream_request")))
 uint32_t kame_wasm_process_stream_request(uint64_t handle, uint64_t request, uint32_t stderr, uint32_t data, uint32_t length) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);

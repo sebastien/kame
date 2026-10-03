@@ -142,15 +142,10 @@ func (p *Program) ProcessStream(request host.Request, stderr bool, data []byte) 
 	p.emitNode(entry.Node, entry.Plan.Target, kind, diagnostic.Span{}, data)
 }
 
-// ProcessTerminal adapts a forwarded process terminal into the same event a
-// native ProcessHost would emit, so completion values and failure diagnostics
-// match the native path. Captured output is bounded like the native host and
-// copied into the program allocator because the caller's bytes are transient.
-func (p *Program) ProcessTerminal(request host.Request, stdout []byte, stderr []byte, status int, signal int, outcome int, code string, message string) {
-	entry := p.instanceForRequest(request.ID)
-	if entry != nil {
-		p.emitNode(entry.Node, entry.Plan.Target, ProcessExited, diagnostic.Span{}, nil)
-	}
+// ProcessRetainLimit reports the native retention budget for a forwarded
+// request. An embedding host may keep that prefix plus one sentinel byte, so
+// ProcessTerminal can detect truncation without receiving the entire stream.
+func (p *Program) ProcessRetainLimit(request host.Request) int {
 	isInstance := p.nodeForRequest(request.ID) != nil
 	retain := p.Options.RetainBytes
 	if isInstance {
@@ -165,6 +160,20 @@ func (p *Program) ProcessTerminal(request host.Request, stdout []byte, stderr []
 		// retained-byte budget even without --log-limit.
 		retain = cacheLogDefault
 	}
+	return retain
+}
+
+// ProcessTerminal adapts a forwarded process terminal into the same event a
+// native ProcessHost would emit, so completion values and failure diagnostics
+// match the native path. Captured output is bounded like the native host and
+// copied into the program allocator because the caller's bytes are transient.
+func (p *Program) ProcessTerminal(request host.Request, stdout []byte, stderr []byte, status int, signal int, outcome int, code string, message string) {
+	entry := p.instanceForRequest(request.ID)
+	if entry != nil {
+		p.emitNode(entry.Node, entry.Plan.Target, ProcessExited, diagnostic.Span{}, nil)
+	}
+	isInstance := p.nodeForRequest(request.ID) != nil
+	retain := p.ProcessRetainLimit(request)
 	event := host.ProcessEvent{Kind: host.ProcessTerminal, ID: request.ID, Status: status, Signal: signal, Outcome: host.ProcessExited, RetainBytes: retain}
 	if outcome == 1 {
 		event.Outcome = host.ProcessTimedOut

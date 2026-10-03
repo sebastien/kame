@@ -21,6 +21,13 @@ func diagnosticSeverity(severity diagnostic.Severity) string {
 }
 
 func WriteJSONEvent(out io.Writer, event Event) {
+	WriteJSONEventWithAllocator(mem.System, out, event)
+}
+
+// WriteJSONEventWithAllocator keeps encoding scratch storage in the caller's
+// allocator. Freestanding hosts must not leak binary encoding into a global
+// bump heap whose Free operation cannot reclaim it.
+func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 	e := json.NewEncoder(out)
 	e.BeginObject()
 	e.Str("schema")
@@ -50,9 +57,9 @@ func WriteJSONEvent(out io.Writer, event Event) {
 			e.Str("encoding")
 			e.Str("utf-8")
 		} else {
-			encoded := base64Text(event.Data)
+			encoded := base64Text(a, event.Data)
 			e.Str(encoded)
-			mem.FreeString(mem.System, encoded)
+			mem.FreeString(a, encoded)
 			e.Str("encoding")
 			e.Str("base64")
 		}
@@ -75,7 +82,7 @@ func WriteJSONEvent(out io.Writer, event Event) {
 	}
 	if event.Kind == TargetValue {
 		e.Str("value")
-		encodeValue(&e, event.Value)
+		encodeValue(a, &e, event.Value)
 	}
 	if event.Cached {
 		e.Str("cached")
@@ -126,7 +133,7 @@ func eventResourceKind(kind core.ResourceKind) string {
 	return "environment"
 }
 
-func encodeValue(e *json.Encoder, value core.Value) {
+func encodeValue(a mem.Allocator, e *json.Encoder, value core.Value) {
 	e.BeginObject()
 	e.Str("kind")
 	e.Str(valueKind(value.Kind))
@@ -153,9 +160,9 @@ func encodeValue(e *json.Encoder, value core.Value) {
 			e.Str("encoding")
 			e.Str("utf-8")
 		} else {
-			encoded := base64Text(value.Bytes)
+			encoded := base64Text(a, value.Bytes)
 			e.Str(encoded)
-			mem.FreeString(mem.System, encoded)
+			mem.FreeString(a, encoded)
 			e.Str("encoding")
 			e.Str("base64")
 		}
@@ -164,7 +171,7 @@ func encodeValue(e *json.Encoder, value core.Value) {
 		e.Str("items")
 		e.BeginArray()
 		for i := range value.List {
-			encodeValue(e, value.List[i])
+			encodeValue(a, e, value.List[i])
 		}
 		e.EndArray()
 	}
@@ -176,7 +183,7 @@ func encodeValue(e *json.Encoder, value core.Value) {
 			e.Str("name")
 			e.Str(value.Record[i].Key)
 			e.Str("value")
-			encodeValue(e, value.Record[i].Value)
+			encodeValue(a, e, value.Record[i].Value)
 			e.EndObject()
 		}
 		e.EndArray()
@@ -404,9 +411,9 @@ func eventType(kind EventKind) string {
 	return "cache-warning"
 }
 
-func base64Text(data []byte) string {
+func base64Text(a mem.Allocator, data []byte) string {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	b := strings.NewBuilder(mem.System)
+	b := strings.NewBuilder(a)
 	defer b.Free()
 	for i := 0; i < len(data); i += 3 {
 		value := int(data[i]) << 16
@@ -429,5 +436,5 @@ func base64Text(data []byte) string {
 			b.WriteByte('=')
 		}
 	}
-	return strings.Clone(mem.System, b.String())
+	return strings.Clone(a, b.String())
 }

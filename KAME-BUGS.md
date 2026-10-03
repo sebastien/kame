@@ -217,7 +217,7 @@ the process completes, plus native watch output before termination.
 
 - **Severity:** high
 - **Area:** WASM stream/event allocation and retained output
-- **Status:** open
+- **Status:** fixed
 
 A file-backed build containing `default :` and the recipe
 `head -c 8388608 /dev/zero` exits 0 and forwards all 8 MiB natively. The WASM CLI
@@ -226,9 +226,19 @@ exits 1 with an uncaught `RuntimeError: unreachable` from
 length depends on host chunk boundaries. Redirect stdout to a file when
 reproducing; the bytes are NULs.
 
-The reproduction is retained under `build/review/large-output/`. Stream events
-are now drained live, but the fixed runtime arena does not reclaim arbitrary
-freed transient allocations. The JS process path also accumulates every output
-chunk before terminal completion. Fix bounded allocation reuse and retained
-output policy; increasing the arena merely moves the failure threshold. Spec 010
-requires memory exhaustion diagnostics and spec 012 requires bounded streaming.
+The original reproduction is retained under `build/review/large-output/`. The instance now uses a bounded heap that splits and coalesces freed blocks,
+so event storage can be reclaimed while the compiled program remains alive.
+Binary event encoding uses that same allocator. JS reuses per-operation scratch
+buffers and retains only the portable process budget plus one byte to preserve
+truncation detection at completion.
+
+`T012-03-streams-large-output.sh` passes on native and WASM: each process forwards
+8 MiB on stdout and stderr, with NUL and invalid-UTF-8 binary vectors in human
+and JSON modes. Successful and failed processes preserve complete stream bytes;
+failed diagnostics preserve truncation flags and limits. Cached tasks replay
+only the 64 KiB retained prefix with the truncation marker, without rerunning.
+All 28 WASM host tests pass under ASAN/UBSAN, including allocator coalescing,
+alignment, failed reallocation and 1,000 reuse cycles in a 4 KiB buffer.
+
+This fixes the stream-growth failure. Spec 010's separate requirement to turn
+true logical-heap exhaustion into an allocation-free diagnostic remains open.

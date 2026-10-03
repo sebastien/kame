@@ -19,7 +19,7 @@ import (
 // It deliberately neither performs host work nor creates a thread.
 type Runtime struct {
 	Alloc      mem.Allocator
-	Arena      *mem.Arena
+	Arena      *Heap
 	Engine     *core.Engine
 	Eval       *eval.Program
 	Parsed     *script.Script
@@ -80,8 +80,8 @@ func NewRuntime(a mem.Allocator, source string) RuntimeStart {
 // ABI callers supply one fixed arena per instance and Runtime.Free resets it.
 // name labels the source in diagnostics; an empty name keeps the default.
 func NewRuntimeIn(buf []byte, name string, source string) RuntimeStart {
-	arena := mem.Alloc[mem.Arena](mem.System)
-	*arena = mem.NewArena(buf)
+	arena := mem.Alloc[Heap](mem.System)
+	*arena = NewHeap(buf)
 	result := newRuntime(arena, arena, name, source)
 	if result.Runtime == nil {
 		arena.Reset()
@@ -89,7 +89,7 @@ func NewRuntimeIn(buf []byte, name string, source string) RuntimeStart {
 	return result
 }
 
-func newRuntime(a mem.Allocator, arena *mem.Arena, name string, source string) RuntimeStart {
+func newRuntime(a mem.Allocator, arena *Heap, name string, source string) RuntimeStart {
 	if name == "" {
 		name = "<wasm-source>"
 	}
@@ -467,7 +467,7 @@ func (r *Runtime) NextEventJSON() bool {
 		return false
 	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
-	program.WriteJSONEvent(&buffer, next.Event)
+	program.WriteJSONEventWithAllocator(r.Alloc, &buffer, next.Event)
 	next.Event.Free(r.Alloc)
 	r.EventJSON = slices.Clone(r.Alloc, []byte(buffer.String()))
 	buffer.Free()
@@ -512,6 +512,13 @@ func (r *Runtime) ProcessStream(request host.Request, stderr bool, data []byte) 
 	if r != nil && r.Program != nil {
 		r.Program.ProcessStream(request, stderr, data)
 	}
+}
+
+func (r *Runtime) ProcessRetainLimit(request host.Request) int {
+	if r.Program != nil {
+		return r.Program.ProcessRetainLimit(request)
+	}
+	return 64 * 1024
 }
 
 func (r *Runtime) ProcessTerminal(request host.Request, stdout []byte, stderr []byte, status int, signal int, outcome int, code string, message string) {
