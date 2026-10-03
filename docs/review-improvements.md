@@ -113,3 +113,5 @@ The live CLI stream boundary now has before-completion proof: T012-02 observes
 human/JSON stdout and stderr while a recipe remains blocked on a release file,
 on both hosts, and observes native watch output before termination. This closes
 KB-8; completion-order-only event assertions would not have detected it.
+
+KB-9 remains a verified release blocker: an 8 MiB recipe output streams successfully natively but traps during WASM event JSON allocation. Live publication fixes latency, but does not yet prove bounded retained/transient memory.

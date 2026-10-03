@@ -210,3 +210,25 @@ Native event drains now flush stdout and stderr. WASM process-start/data callbac
 now drain copied ABI events while the host request is pending. T012-02 verifies
 human and JSON markers on both streams before the release file exists and before
 the process completes, plus native watch output before termination.
+
+## Open verified defects
+
+### KB-9 — Large WASM recipe output exhausts transient event memory
+
+- **Severity:** high
+- **Area:** WASM stream/event allocation and retained output
+- **Status:** open
+
+A file-backed build containing `default :` and the recipe
+`head -c 8388608 /dev/zero` exits 0 and forwards all 8 MiB natively. The WASM CLI
+exits 1 with an uncaught `RuntimeError: unreachable` from
+`Runtime_NextEventJSON`; this run forwarded only 790,528 bytes. Exact partial
+length depends on host chunk boundaries. Redirect stdout to a file when
+reproducing; the bytes are NULs.
+
+The reproduction is retained under `build/review/large-output/`. Stream events
+are now drained live, but the fixed runtime arena does not reclaim arbitrary
+freed transient allocations. The JS process path also accumulates every output
+chunk before terminal completion. Fix bounded allocation reuse and retained
+output policy; increasing the arena merely moves the failure threshold. Spec 010
+requires memory exhaustion diagnostics and spec 012 requires bounded streaming.

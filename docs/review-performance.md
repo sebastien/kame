@@ -97,3 +97,10 @@ stdio and WASM events queued during awaited host requests stayed hidden until
 completion. Native event drains now flush stdio, and WASM process callbacks drain
 queued events. The regression proves markers arrive before releasing a waiting
 recipe; it does not claim a latency percentile or throughput improvement.
+
+An 8 MiB NUL-byte recipe now provides a concrete memory failure reproduction:
+native exits 0 with 8,388,608 bytes, while WASM exits 1 after 790,528 bytes in this
+run, trapping inside event JSON allocation. The partial count varies with chunk
+boundaries. The source shows a fixed arena with limited free reuse and the JS
+recipe host accumulating every output chunk. KB-9 remains open; fix allocation
+reuse and retention before tuning throughput or increasing memory limits.
