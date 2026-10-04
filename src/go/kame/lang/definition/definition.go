@@ -129,7 +129,7 @@ func headerEnd(a mem.Allocator, s *source.Source, start int, defaults bool) int 
 	if start >= len(text) { return 0 }
 	end := start
 	if text[start] == '(' {
-		for end < len(text) && text[end] != ')' && text[end] != '\n' { end++ }
+		for end < len(text) && text[end] != ')' && (defaults || text[end] != '\n') { end++ }
 		if end == len(text) || text[end] != ')' { return 0 }
 		end++
 		p := parser{a: a, s: s}
@@ -402,12 +402,37 @@ func owned(a mem.Allocator, text string) string {
 
 // Format returns allocator-owned canonical definition text.
 func Format(a mem.Allocator, d *Definition) string {
+	return formatDefinition(a, d, false)
+}
+
+// FormatCompact keeps definitions embedded in Kash's statement grammar inline.
+func FormatCompact(a mem.Allocator, d *Definition) string {
+	return formatDefinition(a, d, true)
+}
+
+func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 	b := strings.NewBuilder(a)
+	headerWidth := expr.Columns(d.Name, 1) + 1
+	for i := range d.Parameters {
+		headerWidth = expr.Columns(d.Parameters[i].Name, headerWidth+1)
+		if d.Parameters[i].Rest {
+			headerWidth += 3
+		}
+	}
+	headerWidth += 2
+	if d.Default {
+		headerWidth++
+	}
+	expandedHeader := !compact && d.Function && headerWidth > 80
 	if d.Function {
 		b.WriteByte('(')
 		b.WriteString(d.Name)
 		for i := range d.Parameters {
-			b.WriteByte(' ')
+			if expandedHeader {
+				b.WriteString("\n  ")
+			} else {
+				b.WriteByte(' ')
+			}
 			b.WriteString(d.Parameters[i].Name)
 			if d.Parameters[i].Rest {
 				b.WriteString("...")
@@ -417,27 +442,47 @@ func Format(a mem.Allocator, d *Definition) string {
 	} else {
 		b.WriteString(d.Name)
 	}
-	if d.Default { b.WriteString(" ?= ") } else { b.WriteString(" = ") }
+	if d.Default {
+		b.WriteString(" ?=")
+	} else {
+		b.WriteString(" =")
+	}
+	v := strings.NewBuilder(a)
 	if d.ValueKind == ValueExpression {
-		value := expr.Format(a, d.Expression)
-		b.WriteString(value)
+		value := expr.Compact(a, d.Expression)
+		v.WriteString(value)
 		mem.FreeString(a, value)
 	} else if d.ValueKind == ValueTemplate {
-		b.WriteByte('"')
+		v.WriteByte('"')
 		value := template.FormatString(a, d.Template)
-		b.WriteString(value)
+		v.WriteString(value)
 		mem.FreeString(a, value)
-		b.WriteByte('"')
+		v.WriteByte('"')
 	} else {
 		for i := range d.Words {
 			if i != 0 {
-				b.WriteByte(' ')
+				v.WriteByte(' ')
 			}
 			value := template.FormatString(a, d.Words[i].Template)
-			b.WriteString(value)
+			v.WriteString(value)
 			mem.FreeString(a, value)
 		}
 	}
+	column := expr.Columns(b.String(), 0) + 1
+	if compact || (!expandedHeader && expr.Fits(v.String(), column)) {
+		b.WriteByte(' ')
+		b.WriteString(v.String())
+	} else {
+		b.WriteString("\n  ")
+		if d.ValueKind == ValueExpression {
+			formatted := expr.FormatAt(a, d.Expression, 2)
+			b.WriteString(formatted)
+			mem.FreeString(a, formatted)
+		} else {
+			b.WriteString(v.String())
+		}
+	}
+	v.Free()
 	value := owned(a, b.String())
 	b.Free()
 	return value

@@ -501,6 +501,15 @@ A header may end with `; env "NAME=value" ...`. Assignments must be literal
 quoted strings, with decoded escapes, no interpolation or NUL, and an ASCII
 name matching `[A-Za-z_][A-Za-z0-9_]*`. Empty values are valid. A semicolon
 inside a quoted input or balanced expression remains part of that input.
+Alternatively, a header may end with a Kame metadata record:
+`target : inputs ; [shell: kash env: [MODE: mode]]`. The supported keys are
+`shell` and `env`; duplicate and unknown keys are errors. `env` contains valid
+environment names with string values, including pure Kame expressions. Settings
+are evaluated under planning policy before prerequisite recipes execute.
+`shell` overrides the build-wide `SHELL` definition for this rule. It accepts the
+Kash constructor, an executable string with `-c` implied, or a nonempty argv
+list. The record and legacy `env` suffix are alternative header forms.
+
 Metadata is separate from prerequisite items and preserves its authored order
 in formatting and AST/plan JSON. Recipe inheritance, override precedence and
 shared-context failures are defined in `006-runtime.md`.
@@ -579,6 +588,10 @@ source. Forward visibility does not merge branch-local scopes or turn ordinary
 definitions into mutable sequential assignments.
 
 ## Formatting
+
+Canonical expression layouts and authoring conventions are specified in
+[018-source-style.md](018-source-style.md). Naming and file organization are
+authoring conventions; the formatter must not rename or reorder source items.
 
 Formatting is AST-based and canonical:
 

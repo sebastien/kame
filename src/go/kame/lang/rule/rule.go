@@ -626,7 +626,7 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
   b.WriteString(r.Environment[i].Text)
  }
 	if r.Metadata != nil {
-		metadata := expr.Format(a, r.Metadata)
+		metadata := expr.Compact(a, r.Metadata)
 		b.WriteString(" ; ")
 		b.WriteString(metadata)
 		mem.FreeString(a, metadata)

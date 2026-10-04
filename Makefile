@@ -47,6 +47,7 @@ test-wasm: wasm-check
 	tests/T010-08-wasm-glob.sh
 	tests/T010-09-wasm-parse.sh
 	tests/T010-10-wasm-fmt.sh
+	tests/T018-01-lang-source-style.sh
 	tests/T010-11-wasm-plan.sh
 	tests/T010-12-wasm-graph.sh
 	tests/T010-13-wasm-tools.sh

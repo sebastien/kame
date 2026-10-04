@@ -996,6 +996,11 @@ func sourceText(a mem.Allocator, text string) string {
 
 // Format returns allocator-owned canonical expression text.
 func Format(a mem.Allocator, e *Expr) string {
+	return FormatAt(a, e, 0)
+}
+
+// Compact preserves the surrounding grammar of templates and process words.
+func Compact(a mem.Allocator, e *Expr) string {
 	b := strings.NewBuilder(a)
 	writeExpr(&b, e)
 	text := sourceText(a, b.String())

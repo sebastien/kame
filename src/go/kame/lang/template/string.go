@@ -286,7 +286,7 @@ func FormatString(a mem.Allocator, t *String) string {
 		} else {
 			b.WriteString("@{")
 		}
-		value := expr.Format(a, part.Expr)
+		value := expr.Compact(a, part.Expr)
 		b.WriteString(value)
 		mem.FreeString(a, value)
 		if part.Kind == Expression {

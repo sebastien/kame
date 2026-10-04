@@ -37,11 +37,12 @@ type ScriptItem struct {
 }
 
 type Script struct {
-	Alloc       mem.Allocator
-	Source      *source.Source
-	Items       []ScriptItem
-	Diagnostics []source.Diagnostic
+	Alloc          mem.Allocator
+	Source         *source.Source
+	Items          []ScriptItem
+	Diagnostics    []source.Diagnostic
 	BorrowedSource bool
+	Kash           bool
 }
 
 func (s *Script) Free() {
@@ -109,6 +110,16 @@ func parseScript(s *Script, offset int) {
 			pos = nextLine(text, definitionEnd)
 			continue
 		}
+		// A canonical long function header can span physical lines.
+		headerEnd := definition.ValueHeaderEnd(a, s.Source, start)
+		if text[start] == '(' && headerEnd > end {
+			definitionEnd := multilineDefinitionEnd(a, s.Source, start, source.LogicalLineEnd(text, headerEnd))
+			part := definition.ParseRange(a, s.Source, start, definitionEnd)
+			s.takeDiagnostics(part.Diagnostics)
+			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Definition, Span: source.Span{Start: start, End: definitionEnd}, Definition: part.Definition})
+			pos = nextLine(text, definitionEnd)
+			continue
+		}
 		if topLevel(text[start:end], ':') >= 0 {
 			part := rule.ParseRuleRange(a, s.Source, start, len(text))
 			s.takeDiagnostics(part.Diagnostics)
@@ -126,6 +137,10 @@ func parseScript(s *Script, offset int) {
 		}
 		prefix := expr.ParsePrefix(a, s.Source, start)
 		s.takeDiagnostics(prefix.Diagnostics)
+		if prefix.End > end {
+			lineEnd = source.LogicalLineEnd(text, prefix.End)
+			_, end = trim(text, start, lineEnd)
+		}
 		if prefix.End != end {
 			s.error(prefix.End, end, "unexpected top-level input")
 		}
@@ -196,11 +211,14 @@ func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEn
 		return lineEnd
 	}
 	pos := start + equals + 1
-	for pos < len(text) && space(text[pos]) {
+	for pos < len(text) && (space(text[pos]) || text[pos] == '\n') {
 		pos++
 	}
 	if pos == len(text) {
 		return lineEnd
+	}
+	if pos > lineEnd {
+		lineEnd = source.LogicalLineEnd(text, pos)
 	}
 	if text[pos] == '"' {
 		// Verbatim multi-line literal: 3+ quotes open raw until same-length run.
@@ -323,7 +341,7 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 		}
 		if item.Kind == When {
 			b.WriteString("when ")
-			value := expr.Format(a, item.Expression)
+			value := expr.FormatAt(a, item.Expression, 5)
 			b.WriteString(value)
 			mem.FreeString(a, value)
 			previousEnd = item.Span.End
@@ -345,7 +363,12 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			continue
 		}
 		if item.Kind == Definition {
-			value := definition.Format(a, item.Definition)
+			value := ""
+			if s.Kash {
+				value = definition.FormatCompact(a, item.Definition)
+			} else {
+				value = definition.Format(a, item.Definition)
+			}
 			b.WriteString(value)
 			mem.FreeString(a, value)
 			previousEnd = item.Span.End
@@ -365,7 +388,12 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			previousEnd = item.Span.End
 			continue
 		}
-		value := expr.Format(a, item.Expression)
+		value := ""
+		if s.Kash {
+			value = expr.Compact(a, item.Expression)
+		} else {
+			value = expr.Format(a, item.Expression)
+		}
 		b.WriteString(value)
 		mem.FreeString(a, value)
 		previousEnd = item.Span.End

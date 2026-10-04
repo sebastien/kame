@@ -18,6 +18,7 @@ func ParseKash(a mem.Allocator, name string, text string) *Script {
 }
 
 func parseKash(s *Script, offset int) {
+	s.Kash = true
 	p := kashParser{Script: s, Pos: offset}
 	s.Items = p.sequence(0)
 }

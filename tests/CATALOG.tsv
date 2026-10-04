@@ -1,5 +1,6 @@
 # CLI conformance test catalog. One row per test script.
 # Columns: file<TAB>spec<TAB>category<TAB>covers
+tests/T018-01-lang-source-style.sh	018	lang	Canonical structural layouts, 80-column Unicode/tab boundaries, definitions, literals, AST stability and native/WASM parity
 tests/T013-04-meta-layer-examples.sh	013	meta	Independent value/rule examples, source composition, selective rebuilding, graph growth and embedded Kash arguments
 tests/T003-01-host-process.sh	003	host	Process streaming, exit codes, retry, shell, environment, cwd
 tests/T003-02-host-signals.sh	003	host	SIGINT/SIGTERM cancellation and process-group reaping
