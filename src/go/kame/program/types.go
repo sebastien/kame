@@ -298,6 +298,7 @@ func (c *ServiceConfig) Free(a mem.Allocator) {
 type registeredRule struct{ Rule *rule.Rule }
 type instance struct {
 	Service ServiceConfig
+	ServiceReady bool
 	Shell []string
 	Kash bool
 	ScopedShell bool

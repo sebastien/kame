@@ -29,6 +29,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		entry.KashPrepared, entry.KashPreparing = false, false
 		if entry.KashContext != nil { p.freeKashContext(entry.KashContext); entry.KashContext = nil }
 		entry.EnvironmentConflict = false
+		entry.ServiceReady = false
 		p.freeNewerInputs(entry.NewerInputs)
  entry.NewerInputs = nil
 		p.freeFileContext(entry.FileContext)
@@ -49,12 +50,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.emitNode(entry.Node, entry.Plan.Target, TargetStarted, diagnostic.Span{}, nil)
 		entry.started, entry.startedGeneration, entry.terminalEmitted = true, c.Generation(), false
 	}
-	if entry.Rule.Kind == rule.ServiceRule {
-		if d := p.recipeSettings(state.Index); d.Code != "" {
-			p.failRule(c, state.Index, d)
-			return core.ProducerFailed
-		}
-		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service execution is not supported"))
+	if entry.Rule.Kind == rule.ServiceRule && (len(entry.Service.ReadyArgv) != 0 || len(entry.Service.HealthArgv) != 0 || entry.Service.RestartAttempts != 0 || entry.Kash) {
+		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service probes, restarts, and kash services are not supported yet"))
 		return core.ProducerFailed
 	}
 	if entry.FileContext != nil {
@@ -383,9 +380,14 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	if entry.Rule.Kind == rule.CachedTaskRule && p.Options.CacheRetainBytes > retain {
 		retain = p.Options.CacheRetainBytes
 	}
+	timeout := p.Options.TimeoutMS
+	if entry.Rule.Kind == rule.ServiceRule {
+		retain = int(entry.Service.LogBytes)
+		timeout = 0
+	}
 	entry.cacheStartedAt = p.Host.Now()
 	entry.retryCount = 0
-	request := host.ProcessRequest{ID: p.nextRequest, Shell: entry.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+	request := host.ProcessRequest{ID: p.nextRequest, Shell: entry.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: timeout, RetainBytes: retain}
 	if p.Forwarding {
 		// The embedding host runs the recipe; correlation uses the node so the
 		// completion resumes this producer.

@@ -574,6 +574,27 @@ func TestServiceIsExplicitlyUnsupported(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestServicePublishesOnSpawnAndKeepsPrerequisiteAlive(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "test.kmk", "service daemon :\n\twhile :; do sleep 1; done\nconsumer : daemon\n\ttrue\n")
+	registry := eval.NewRegistry(a)
+	host := posix.New(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: dir})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
+	result := compiled.Program.Materialize("consumer")
+	if result.Diagnostic.Code != "" { t.Errorf("consumer failed before service readiness: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	for attempt := 0; attempt < 20 && host.Active() != 0; attempt++ {
+		compiled.Program.Tick(50)
+	}
+	if host.Active() != 0 { t.Error("service prerequisite remained active after its final consumer released it") }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestInvalidServiceConfigFailsBeforeExecution(t *testing.T) {
 	invalid := []string{
 		"service daemon : ; [ready: [argv: [\"probe\"] interval-ms: :true]]\n\ttrue\n",

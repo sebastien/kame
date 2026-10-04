@@ -343,6 +343,7 @@ func (h *Handle) poll(release bool) HandleResult {
 		if release && h.Root != nil {
 			h.Program.Engine.Release(h.Root)
 			h.Root = nil
+			h.Program.drainCancellations()
 		}
 		return HandleResult{Done: true, Result: Result{Value: value}}
 	}
@@ -352,6 +353,7 @@ func (h *Handle) poll(release bool) HandleResult {
 	if release && h.Root != nil {
 		h.Program.Engine.Release(h.Root)
 		h.Root = nil
+		h.Program.drainCancellations()
 	}
 	if h.Node.State != core.NodeComplete {
 		return HandleResult{Done: true, Result: Result{Diagnostic: h.Node.Diagnostic.Clone(h.Program.Alloc)}}

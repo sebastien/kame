@@ -120,3 +120,13 @@ without leaving a process group alive.
   probes and process trees and reject late completions.
 - Native, WASM CLI, and public embedding tests cover lifecycle parity, repeated
   start/stop, shared prerequisites, restart recovery, health failure and cleanup.
+
+## Implementation status
+
+The runtime currently starts a service body as a persistent process and
+publishes the default spawn-ready value, allowing dependent rules to proceed
+while the process remains active. Releasing the final dependent cancels it.
+Typed readiness and health probes, restart policy, grace-period shutdown,
+bounded service log retention, explicit root-ready handles, and lifecycle event
+parity remain open; configured probes or restarts still report
+`FEATURE_UNSUP`.

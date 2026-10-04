@@ -207,6 +207,17 @@ func (e *Engine) publish(n *Node, value Value) {
 	slices.Free(e.Alloc, dependents)
 }
 
+// Publish makes a new current value visible for a live node without completing
+// its producer. Runtime adapters use this for readiness signals whose process
+// continues running after consumers may begin.
+func (e *Engine) Publish(n *Node, value Value) {
+	if n == nil || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
+		value.Free(e.Alloc)
+		return
+	}
+	e.publish(n, value)
+}
+
 func (e *Engine) ready(n *Node) bool {
 	if n.Interest == 0 || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled || n.State == NodeWaiting { return false }
 	for i := range n.Static {

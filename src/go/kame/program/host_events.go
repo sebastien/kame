@@ -48,6 +48,7 @@ func (p *Program) pump(wait int) {
 			p.emitNode(entry.Node, entry.Plan.Target, Stderr, diagnostic.Span{}, event.Data)
 		} else if entry != nil && event.Kind == host.ProcessStarted {
 			p.emitProcess(entry, ProcessStarted, event.ID)
+			p.serviceSpawned(entry)
 		} else if event.Kind == host.ProcessTerminal {
 			if entry != nil {
 				p.emitProcess(entry, ProcessExited, event.ID)
@@ -159,6 +160,15 @@ func (p *Program) ProcessStarted(request host.Request) {
 		return
 	}
 	p.emitProcess(entry, ProcessStarted, request.ID)
+	p.serviceSpawned(entry)
+}
+
+func (p *Program) serviceSpawned(entry *instance) {
+	if entry == nil || entry.Rule.Kind != rule.ServiceRule || entry.ServiceReady || len(entry.Service.ReadyArgv) != 0 {
+		return
+	}
+	entry.ServiceReady = true
+	p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
 }
 
 func (p *Program) ProcessStream(request host.Request, stderr bool, data []byte) {
@@ -198,7 +208,9 @@ func (p *Program) ProcessRetainLimit(request host.Request) int {
 		// Recipes retain only what the native host would: nothing for a file
 		// rule, the cache bound for a cached task.
 		entry := p.instanceForRequest(request.ID)
-		if entry != nil && entry.Rule.Kind == rule.CachedTaskRule && p.Options.CacheRetainBytes > retain {
+		if entry != nil && entry.Rule.Kind == rule.ServiceRule {
+			retain = int(entry.Service.LogBytes)
+		} else if entry != nil && entry.Rule.Kind == rule.CachedTaskRule && p.Options.CacheRetainBytes > retain {
 			retain = p.Options.CacheRetainBytes
 		}
 	} else if retain < cacheLogDefault {
