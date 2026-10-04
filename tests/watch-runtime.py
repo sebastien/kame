@@ -96,4 +96,18 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-glob-') as directory:
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-missing-source-') as directory:
+    project = Path(directory)
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: 'BUILD_NO_SOURCE' in error.read_text(), error, 'missing source diagnostic')
+            (project / 'Makefile.kmk').write_text('chosen :\n\tprintf appeared > source-created\n')
+            wait_for(process, lambda: read(project / 'source-created') == 'appeared', error, 'creation of discovered source')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 print(f'{cases} watch scenarios passed')
