@@ -19,11 +19,11 @@ the staged release bundle/launcher checks also pass; the audit records commands
 and the host execution boundary.
 
 The TODO review distinguishes required correctness/specification work from
-proposed features. Required/optional standalone target arguments, expression-path
-wildcard shorthand, richer job presentation, parser zero-copy and optional
-language/API additions remain proposals. Their disposition below preserves that
-scope. Managed services and declaration generation retain explicit design
-boundaries rather than placeholder behavior.
+proposed features. Required/optional target arguments are implemented by spec
+022 and verified on native and WASM. Expression-path wildcard shorthand,
+richer job presentation, parser zero-copy and optional language/API additions
+remain proposals. Managed services and declaration generation retain explicit
+design boundaries rather than placeholder behavior.
 
 ## TODO.md disposition
 
@@ -36,15 +36,15 @@ boundaries rather than placeholder behavior.
 | Literal wildcard paths | Implemented for unquoted explicit rule-input paths: dependency-tracked wildcard expansion, recursive patterns and membership invalidation. Quoted inputs and plain Kash argv retain literal characters. T004-11 verifies both hosts. Expression-path shorthand remains a separate language decision. |
 | Lazy singleton glob sources and future updates | Engine sources and canonical resource identities exist. Prove glob deduplication and membership freshness first; watcher delivery remains separate work. |
 | Captures in bare target names | Already supported and verified by T014-02 on both hosts; exact targets take precedence and overlapping templates remain ambiguous. |
-| Required/optional target arguments | Remaining design/implementation: define argument binding, default evaluation, escaping, identity, and precedence with invocation args. Do not approximate with file outputs. |
+| Required/optional target arguments | Implemented by spec 022: required and optional named values bind in declaration order, remain separate from captures, and participate in task identity. T009-15 and T010-24 cover native/WASM planning and execution. |
 | Conditional forms | Kame lazy `if`/`and`/`or`/`match` and Kash control blocks exist. Top-level `when`/`otherwise`/`end` now select declarations and includes before registration (A4; T004-13). |
 | Improved templates | Spec 016 defines directives, verbatim strings, rendering, and `do render`; The previously missing CLI is implemented and covered by T016-01; portable template units cover directives and verbatim strings. Audit all acceptance clauses rather than introducing unrelated delimiter syntax. |
 | More intuitive error names | Keep registered stable codes and improve concrete messages/tips first. Renaming public codes needs coordinated specs, diagnostics, fixtures, and compatibility policy. |
 | Streaming standard library | Verified portable atom/batch/nested-source lifting through uppercase, map, filter, flatmap and reduce. Callback replacement exposed KB-12, now fixed with cancellation, stale-completion and partial-progress regressions. Core protocol tests cover bounds, fairness and ownership; CLI publication retains its independent backpressure gates. |
 | Security model and process groups | Reviewed in `review-security.md`; targeted POSIX sanitizer tests pass. Grants are lexical host-operation controls, with documented symlink and child-process boundaries. |
 | CLI experience | Unified runner is implemented. Prioritize accurate help, migration errors, examples, and discoverable grants; maintain native/WASM parity. |
-| Live incremental updates | Native watch reloads the build graph after source edits and recovers from malformed included sources. T009-14 also covers input changes during a running recipe. WASM watch remains unsupported. |
-| Managed services/provisioning | Research item. Define persistent process ownership, health, restart, teardown, and state before exposing commands. |
+| Live incremental updates | Native and WASM watch retain roots, reload the graph, recover from malformed included sources, and process active input changes. Remaining D01 evidence includes grant preservation, public allocation/JSON failures, and bounded live publication. |
+| Managed services/provisioning | D02 implementation remains open: define typed service settings, readiness and health, restart policy, prerequisite lifetime, bounded logs, and stop/cancellation cleanup before exposing commands. |
 | General scripting/shell replacement | Kash and shared multi-fragment execution now address this. The standalone `examples/shell/01-values.kash` runs with exit 0 and identical native/WASM output, including repeated lazy-definition reads. Recovery, async joining, and interruption retain their conformance coverage. |
 | File templating | Implemented through spec 016. Verify dependency capture, include cycles, source diagnostics, and native/WASM render parity. |
 | Parser zero-copy | Partial borrowing, not zero-copy: `source.New` clones source name/text, decoded strings and target literals own buffers. Consider an explicit adopted/borrowed source API and measure allocations before changing ownership. |
@@ -55,7 +55,7 @@ boundaries rather than placeholder behavior.
 | Alternative `<-` build syntax | Design proposal, not a correctness gap. Evaluate readability and formatter compatibility before changing existing rules. |
 | Dependency sequencing with `,` | Define whether ordering is an edge or effect sequence; preserve parallel independence and failure propagation. Kash statement sequencing already has different semantics. |
 | Learnability | Finish idioms/gotchas and independent value/rule/process lessons with executable smoke coverage. |
-| Metaprogramming | A4 declaration selection, defaults, and literal CLI/environment overrides are implemented; computed record lookup uses `get`. Optional generated declarations have a separate design proposal. Headers compose expressions and interpolated paths. |
+| Metaprogramming | A4 declaration selection, defaults, and literal CLI/environment overrides are implemented; computed record lookup uses `get`. D03 generated declarations remain open; `declaration-generation-design.md` is the starting proposal. Headers compose expressions and interpolated paths. |
 | Error taxonomy | Existing codes are registered and machine-readable. Add actionable messages rather than speculative taxonomy churn. |
 
 ## Build-port gaps
@@ -69,7 +69,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | A2 configuration defaults/overrides | Implemented: lazy `?=`, literal repeatable `--define`, and case-sensitive `KAME_<NAME>` environment values. Last CLI entry wins over environment and authored defaults; plan JSON reports effective provided values. T009-13 covers both hosts. |
 | A3 target-scoped environment/build mode | Addressed: recipes, dynamic prerequisites, lazy definitions and collected shell calls inherit immutable snapshots. Persistent freshness and cache identity include configuration. Declared tools intentionally use startup PATH under specs 007/009. T006-06, T007-11 and T013-05 cover the contracts. |
 | A4 declaration conditionals/gated includes | `when`/`otherwise`/`end` selects declarations before registration; inactive includes are never read. T004-13 passes 35 cases per host. Optional `include? PATH` retains T004-12 coverage; repeated nonrecursive includes remain legal. |
-| A5 computed lookup / generators | Minimum lookup implemented through `get`; T007-10 pins typed configuration and planning parity. Optional generated declarations have a separate design proposal. |
+| A5 computed lookup / generators | Minimum lookup implemented through `get`; T007-10 pins typed configuration and planning parity. D03 still requires bounded generated declaration batches, complete validation, tracked dependencies, and native/WASM cleanup coverage. |
 | A6 continuations/multiline definitions | Implemented backslash LF/CRLF declaration continuations, preserving authored offsets, physical comments and recipe escapes; T004-10 verifies native/WASM execution and formatter idempotence. |
 | B1 discovery unions/alternation/file filtering | Pattern unions are implemented: sorted, duplicate-free results and independent glob dependencies; T007-09 covers native/WASM evaluation and membership changes. Directory filtering uses metadata predicates. |
 | B2 concatenated wildcard deadlock | Fixed (KB-1); keep both native and WASM multi-read regressions. |
@@ -93,11 +93,12 @@ debug metadata suite; the normal harness includes it. Git HEAD was stable during
 build-mode and no-relink assertions. Direct WASM suite modes are corrected rather
 than bypassed through the Bash harness.
 
-Standalone target parameters and parser zero-copy remain explicitly reviewed
-TODO proposals. They are not current specification acceptance requirements.
-Optional generation, services and release signing retain their documented design
-boundaries. Future work should use this disposition without treating those
-proposals as implemented behavior.
+Expression-path wildcard shorthand and parser zero-copy remain explicitly
+reviewed proposals. They are not current specification acceptance requirements.
+Generated declarations, managed services and release signing remain required
+deferred implementation work under spec 019 and their design documents. Future
+work should use those documented boundaries without treating a design proposal
+as implemented behavior.
 
 ## Earlier verification snapshots
 
