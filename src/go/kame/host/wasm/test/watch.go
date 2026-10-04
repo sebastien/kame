@@ -96,6 +96,16 @@ func TestWatchInvalidationBatchRejectsPartialMutation(t *testing.T) {
 		}
 	}
 	before := r.WatchStateJSON()
+	malformed := r.InvalidateWatch([]byte("[{"))
+	if malformed.Code != "PARSE_ERR" {
+		t.Error("malformed invalidation JSON accepted")
+	}
+	malformed.Free(a)
+	afterMalformed := r.WatchStateJSON()
+	if before.Text != afterMalformed.Text {
+		t.Error("malformed JSON partially changed graph state")
+	}
+	afterMalformed.Free(a)
 	invalid := r.InvalidateWatch([]byte("[{\"kind\":\"file\",\"name\":\"input\"},{\"kind\":\"process\",\"name\":\"bad\"}]"))
 	if invalid.Code != "PARSE_ERR" {
 		t.Error("invalid batch accepted")
@@ -111,7 +121,7 @@ func TestWatchInvalidationBatchRejectsPartialMutation(t *testing.T) {
 
 func TestWatchRejectsInvalidTargetsAndFreesFailedBatch(t *testing.T) {
 	a := t.Allocator()
-	invalid := []string{"[]", "{}", "[1]", "[\"\"]", "[\"A\",false]"}
+	invalid := []string{"[", "[]", "{}", "[1]", "[\"\"]", "[\"A\",false]"}
 	for i := range invalid {
 		started := wasm.NewRuntime(a, "A = 1\n")
 		if started.Runtime == nil {
