@@ -90,6 +90,14 @@ func NewRuntimeIn(buf []byte, name string, source string) RuntimeStart {
 	return result
 }
 
+// NewRuntimeWithHeap borrows a host-owned allocator descriptor. The descriptor
+// stays outside the logical heap so an ABI allocation-failure boundary can
+// discard a partially constructed runtime without traversing its objects.
+func NewRuntimeWithHeap(arena *Heap, name string, source string) RuntimeStart {
+ arena.Reset()
+ return newRuntime(arena, arena, name, source)
+}
+
 func newRuntime(a mem.Allocator, arena *Heap, name string, source string) RuntimeStart {
 	if name == "" {
 		name = "<wasm-source>"

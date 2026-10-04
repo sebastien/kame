@@ -108,7 +108,11 @@ human/JSON mode, including failures, and 64 KiB cache replay. All 28 WASM host
 sanitizer tests pass; 1,000 unordered allocation/free cycles fit in 4 KiB.
 The original NUL recipe now forwards exactly 8,388,608 bytes and exits 0; its
 observed 1.530s is one run, not a comparative throughput benchmark. True heap
-exhaustion diagnostics remain a separate acceptance gap.
+exhaustion now unwinds to an allocation-free ABI diagnostic. T010-22 verifies
+100 undersized instance cycles, a surviving instance, a failed 1 MiB host
+completion in a 64 KiB logical heap, and repeated temporary module-heap recovery.
+The runtime is discarded after instance exhaustion; normal heap capacity and
+stream retention budgets remain unchanged.
 
 The post-fix compiled CLI gate passes all 102 selected suites with ASAN/UBSAN
 and leak detection, with instrumentation verified before and after the run.

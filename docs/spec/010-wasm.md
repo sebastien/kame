@@ -202,6 +202,21 @@ Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly
 enables it.
 
+`kame_wasm_instance_set_heap_limit(handle, bytes)` sets a logical allocator
+budget from 1 byte through 16 MiB before compilation; the backing arena size
+remains unchanged. Allocator exhaustion invalidates the affected instance
+runtime: evaluator calls and result copies return `NO_MEMORY`, and `step` returns
+terminal state 2. Its emergency diagnostic remains readable and destruction
+remains valid. Create a new instance to resume work; other instances survive.
+Temporary host-free queries restore their module-heap allocation checkpoint on
+exhaustion. Other panics and out-of-bounds accesses remain traps.
+
+The freestanding module uses native WebAssembly exception handling and LLVM
+WASM SjLj lowering to unwind allocator panics to an ABI checkpoint. It provides
+its own small [compiler helper ABI](https://github.com/emscripten-core/emscripten/blob/main/system/lib/compiler-rt/emscripten_setjmp.c)
+implementation and exception tag, without host imports. Embedders therefore
+need WebAssembly exception-handling support.
+
 ## JavaScript CLI Wrapper
 
 ### Role

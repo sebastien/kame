@@ -119,7 +119,12 @@ KB-8; completion-order-only event assertions would not have detected it.
 KB-9 is fixed: bounded instance-block reuse, binary encoding scratch and JS
 buffers now pass 8 MiB stdout/stderr parity on both hosts in human/JSON mode.
 Failure truncation metadata and bounded cached replay are verified too. True
-logical-heap exhaustion diagnostics remain an open spec-010 acceptance item.
+logical-heap exhaustion now returns static `NO_MEMORY` through WASM ABI
+checkpoints, using native exception handling without host imports. T010-22
+checks undersized compilation, asynchronous completion, 100 failed slot reuse
+cycles, surviving instances, temporary module-heap recovery and unrelated traps.
+Validation uses an isolated checkout to exclude concurrent unfinished Kash and
+source-formatting changes in the shared working copy.
 
 C1 now has a persistent file-rule escape hatch: `always` bypasses freshness
 without turning outputs into named tasks. The new native/WASM regression passes

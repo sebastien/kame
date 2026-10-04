@@ -241,7 +241,10 @@ All 28 WASM host tests pass under ASAN/UBSAN, including allocator coalescing,
 alignment, failed reallocation and 1,000 reuse cycles in a 4 KiB buffer.
 
 This fixes the stream-growth failure. Spec 010's separate requirement to turn
-true logical-heap exhaustion into an allocation-free diagnostic remains open.
+true logical-heap exhaustion into an allocation-free diagnostic is now covered
+by T010-22: undersized compilation and host completion return `NO_MEMORY`,
+failed slots can be freed and reused, and another instance remains usable.
+Repeated module-heap query failures also recover; unrelated traps remain traps.
 
 ### KB-10 — Failed mixed WASM sessions report epoch-sized elapsed time
 

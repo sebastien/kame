@@ -127,6 +127,10 @@ uint32_t kame_wasm_instance_diagnostic_span(uint64_t instance, uint32_t out_star
  * return. */
 uint64_t kame_wasm_instance_create(void);
 uint32_t kame_wasm_instance_free(uint64_t instance);
+/* Set the logical allocator budget before compilation: 1..16 MiB. The backing
+ * arena remains 16 MiB. Exhausted instances allow diagnostics and destruction;
+ * create a fresh instance to resume evaluation. */
+uint32_t kame_wasm_instance_set_heap_limit(uint64_t instance, uint32_t limit);
 uint32_t kame_wasm_source_compile(uint64_t instance, uint32_t source,
                                   uint32_t source_len);
 /* Label the compiled source for diagnostics. Call before source_compile; an
