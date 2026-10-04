@@ -30,13 +30,16 @@ JavaScript drives the engine synchronously through explicit calls:
 
 1. Create an instance with a fixed or host-provided heap.
 2. Compile source.
-3. Request one or more targets or expressions.
+3. Request one or more targets or expressions, or retain watch roots.
 4. Call `step` until the engine emits an event or needs host work.
 5. Perform host work asynchronously in JavaScript.
 6. Feed completion data back with request ID and generation.
 7. Continue stepping until roots complete.
 
 The module creates no hidden thread and does not block awaiting JavaScript.
+Watch roots remain retained after settling. The JavaScript host polls external
+resources, sends invalidations, and reloads the program when a build source
+changes; the freestanding module performs no filesystem watching.
 
 ## ABI
 
@@ -51,6 +54,7 @@ The exported C ABI provides conceptual operations for:
 - Diagnostic retrieval.
 - Tool declaration, host-supplied tool path, and target-scoped tool checks.
 - Inspection capability policy for read-only dependency resolution.
+- Retained watch roots, resource snapshots, batch invalidation and cancellation.
 
 The tool and inspection operations are the WASM counterpart of the native
 `do tools`/`do tools check` surface described in `009-cli.md`. `kame_wasm_tools`

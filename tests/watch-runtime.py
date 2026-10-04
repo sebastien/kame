@@ -7,7 +7,7 @@ import sys
 import tempfile
 import time
 
-binary = sys.argv[1]
+runner = sys.argv[1:]
 cases = 0
 
 def wait_for(process, predicate, error, label):
@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
     included.write_text('MARK = "alpha"\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
-        process = subprocess.Popen([binary, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
         try:
             log = project / 'source-log'
             wait_for(process, lambda: read(log) == 'alpha', error, 'initial source build')
@@ -66,7 +66,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-busy-') as directory:
     (project / 'Makefile.kmk').write_text('./output : ./input\n\tcp @< ./snapshot; touch ready; while [ ! -e release ]; do sleep .01; done; cp ./snapshot @>; printf x >> runs\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
-        process = subprocess.Popen([binary, '-C', directory, '--watch', './output'], stdout=stdout, stderr=stderr)
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', './output'], stdout=stdout, stderr=stderr)
         try:
             wait_for(process, lambda: (project / 'ready').exists(), error, 'recipe read handshake')
             (project / 'input').write_text('after')
@@ -78,4 +78,22 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-busy-') as directory:
         finally:
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
-print(f'{cases} native watch scenarios passed')
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-glob-') as directory:
+    project = Path(directory)
+    (project / 'inputs').mkdir()
+    (project / 'inputs/a.txt').write_text('a')
+    (project / 'Makefile.kmk').write_text('./joined : ./inputs/*.txt\n\tcat @<* > @>\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', './joined'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: read(project / 'joined') == 'a', error, 'initial glob build')
+            (project / 'inputs/b.txt').write_text('b')
+            wait_for(process, lambda: read(project / 'joined') == 'ab', error, 'glob membership invalidation')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+print(f'{cases} watch scenarios passed')

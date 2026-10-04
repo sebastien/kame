@@ -12,6 +12,7 @@ import { accessSync, closeSync, constants as fsConstants, existsSync, mkdtempSyn
 import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { constants as osConstants, tmpdir } from 'node:os';
 import process, { argv, env, stderr, stdout } from 'node:process';
 
@@ -19,6 +20,7 @@ import process, { argv, env, stderr, stdout } from 'node:process';
 // tree, and a forced termination reports 128 plus the signal number.
 const activeChildren = new Set();
 const invocationCancellations = new Set();
+const invocationDisposals = new Set();
 let interruptedStatus = 0;
 
 function installSignals() {
@@ -40,7 +42,7 @@ function installSignals() {
           }
         }
       }
-      Promise.all(reaped).then(() => process.exit(interruptedStatus));
+      Promise.all([...reaped, ...invocationDisposals]).then(() => process.exit(interruptedStatus));
     });
   }
 }
@@ -667,6 +669,10 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_instance_diagnostic_length',
   'kame_wasm_instance_diagnostic_copy',
   'kame_wasm_instance_diagnostic_span',
+  'kame_wasm_watch_begin',
+  'kame_wasm_watch_invalidate',
+  'kame_wasm_watch_state',
+  'kame_wasm_watch_cancel',
 ];
 
 class Module {
@@ -1280,6 +1286,78 @@ class Module {
     }
   }
 
+  async beginWatch(source, targets, name, context) {
+    for (const method of ['kame_wasm_watch_begin', 'kame_wasm_watch_state', 'kame_wasm_watch_invalidate', 'kame_wasm_watch_cancel']) {
+      if (!this.exports[method]) throw Object.assign(new Error(`watch ABI is missing ${method}`), { code: 'FEATURE_UNSUP' });
+    }
+    const tools = await this.toolNames(source, name);
+    const instance = this.exports.kame_wasm_instance_create();
+    if (instance === 0n) throw Object.assign(new Error('cannot create WASM watch instance'), { code: 'NO_MEMORY' });
+    const pending = new Set();
+    const cancellation = new AbortController();
+    context.concurrent = true;
+    context.signal = cancellation.signal;
+    context.streaming = true;
+    context.human = !context.json;
+    let hostError;
+    try {
+      this.compileBuild(instance, source, name, context);
+      for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
+      const directory = this.write(process.cwd());
+      if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
+      if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
+      if (context.portableGrants) {
+        this.inspectionGrant(instance, '', '');
+        for (const grant of context.portableGrants) {
+          if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
+          else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
+        }
+      }
+      const targetsBytes = this.write(JSON.stringify(targets));
+      if (this.exports.kame_wasm_watch_begin(instance, targetsBytes.pointer, targetsBytes.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      return { instance, pending, cancellation, context, targets, hostError, live: true };
+    } catch (error) {
+      cancellation.abort();
+      await Promise.all(pending);
+      this.exports.kame_wasm_instance_free(instance);
+      throw error;
+    }
+  }
+
+  watchSnapshot(watch) {
+    return JSON.parse(this.decode0(this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_watch_state(handle, dst, capacity, length), watch.instance)));
+  }
+
+  invalidateWatch(watch, resources) {
+    const bytes = this.write(JSON.stringify(resources));
+    const status = this.exports.kame_wasm_watch_invalidate(watch.instance, bytes.pointer, bytes.length);
+    if (status !== 0) throw diagnosticError(this.instanceDiagnostic(watch.instance), 'HOST_FAIL');
+  }
+
+  drainWatch(watch) {
+    const { instance, context } = watch;
+    const state = this.exports.kame_wasm_step(instance);
+    this.drainEvents(instance, context);
+    this.drainExpressionEffects(instance);
+    return state;
+  }
+
+  serviceWatchRequest(watch) {
+    const request = this.service(watch.instance, watch.context)
+      .catch((error) => { watch.hostError = error; })
+      .finally(() => watch.pending.delete(request));
+    watch.pending.add(request);
+  }
+
+  async disposeWatch(watch) {
+    if (!watch?.live) return;
+    watch.live = false;
+    watch.cancellation.abort();
+    await Promise.all(watch.pending);
+    this.exports.kame_wasm_watch_cancel(watch.instance);
+    this.exports.kame_wasm_instance_free(watch.instance);
+  }
+
   copyResult(instance) {
     const call = (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_result_copy(handle, dst, dstLen, lengthPointer);
     return this.copyQuery(call, instance);
@@ -1825,12 +1903,22 @@ async function runSession(module, inv, sourceDirectory) {
   return module.runSession(fragments, inv, contextFor(inv));
 }
 
-async function discoverBuildSource(module, inv, sourceDirectory) {
+async function discoverBuildSource(module, inv, sourceDirectory, watchedSources = null) {
+  if (watchedSources && inv.file) watchedSources.add(resolve(inv.file));
+  if (watchedSources && !inv.file && !inv.command) {
+    const candidates = ['Makefile.kmk', 'make.kmk', 'src/kmk/main.kmk'];
+    for (const candidate of candidates) {
+      const path = resolve(process.cwd(), candidate);
+      watchedSources.add(path);
+      if (existsSync(path)) break;
+    }
+  }
   const source = await discoverSource(inv);
   if (source === null) return null;
   const name = inv.sourceName ?? (inv.command ? source.name : isAbsolute(source.name) ? normalize(source.name) : normalize(join(inv.directory || '.', source.name)));
+  watchedSources?.add(resolve(sourceDirectory, name));
   const environment = [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment];
-  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, true, { defines: inv.defines, environment, parts: [] });
+  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, true, { defines: inv.defines, environment, parts: [], watchedSources });
   parts.defines = inv.defines;
   parts.toolOverrides = inv.toolOverrides;
   parts.force = inv.force ? 1 : 0;
@@ -1841,6 +1929,7 @@ async function discoverBuildSource(module, inv, sourceDirectory) {
 // Syntax and byte spans come from the portable parser, not a second JS grammar.
 async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true, selection = { defines: [], environment: [], parts: [] }) {
   const identity = resolve(sourceDirectory, name);
+  selection.watchedSources?.add(identity);
   sourceTexts.set(name, text);
   if (active.includes(identity)) throw Object.assign(new Error(`include cycle: ${name}`), { code: 'DEP_CYCLE' });
   const document = JSON.parse(new TextDecoder().decode(await module.parse(lang === 'kmk' ? 'script' : lang, name, text)));
@@ -1881,6 +1970,7 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
     if (!fileBacked) throw Object.assign(new Error('include requires a file-backed build source'), { code: 'FEATURE_UNSUP' });
     append(item.span.start);
     const included = normalize(isAbsolute(item.path) ? item.path : join(dirname(name), item.path));
+    selection.watchedSources?.add(resolve(sourceDirectory, included));
     let child;
     try { child = await readFile(resolve(sourceDirectory, included), 'utf8'); }
     catch (error) {
@@ -2020,8 +2110,175 @@ async function runCat(module, inv, sourceDirectory) {
   }
 }
 
+async function watchFingerprint(kind, name) {
+  if (kind === 'glob') return JSON.stringify(wildcardPaths(name));
+  try {
+    const bytes = await readFile(name);
+    return createHash('sha256').update(bytes).digest('hex');
+  } catch (error) {
+    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return 'missing';
+    return `error:${error.code ?? error.message}`;
+  }
+}
+
+function watchKey(kind, name) { return `${kind}\0${name}`; }
+
+function reportWatchError(error, source) {
+  if (error.diagnostics?.length) {
+    for (const detail of error.diagnostics) {
+      if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
+      else stderr.write(renderDiagnostic(detail, source, 80));
+    }
+    return;
+  }
+  const detail = lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
+  if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
+  else stderr.write(renderDiagnostic(detail, source, 80));
+}
+
+async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
+  const cancellation = new AbortController();
+  invocationCancellations.add(cancellation);
+  let finishDisposal;
+  const disposal = new Promise((resolveDisposal) => { finishDisposal = resolveDisposal; });
+  invocationDisposals.add(disposal);
+  const targets = inv.targets.length ? inv.targets : ['default'];
+  const context = contextFor(inv);
+  context.human = inv.json !== true;
+  const watchedSources = new Set();
+  let source = null;
+  let watch = null;
+  let fingerprints = new Map();
+  let pending = new Map();
+  let lastScan = 0;
+  let lastChange = 0;
+  let reported = new Set();
+  let status = 0;
+  stderr.write('Watching filesystem resources (200ms polling; 100ms debounce)\n');
+
+  const seedSources = async () => {
+    for (const name of watchedSources) {
+      const key = watchKey('file', name);
+      if (!fingerprints.has(key)) fingerprints.set(key, { kind: 'file', name, stamp: await watchFingerprint('file', name), source: true });
+    }
+  };
+  const compile = async () => {
+    watchedSources.clear();
+    buildProgress = { active: 0, completed: 0, failed: 0 };
+    buildStartedAt = Date.now();
+    try {
+      source = await discoverBuildSource(module, inv, sourceDirectory, watchedSources);
+      if (source === null) {
+        if (!noArguments) reportWatchError(Object.assign(new Error('no build source found'), { code: 'BUILD_NO_SOURCE' }), null);
+        await seedSources();
+        return false;
+      }
+      primarySource = source;
+      lastDiagnostic = null;
+      watch = await module.beginWatch(source.compiled, targets, source.name, context);
+      cancellation.signal.addEventListener('abort', () => watch?.cancellation.abort(), { once: true });
+      invocationCancellations.add(watch.cancellation);
+      const snapshot = module.watchSnapshot(watch);
+      syncWatchResources(snapshot);
+      await seedSources();
+      return true;
+    } catch (error) {
+      reportWatchError(error, source);
+      await seedSources();
+      return false;
+    }
+  };
+  const syncWatchResources = (snapshot) => {
+    const active = new Set();
+    for (const resource of snapshot.resources ?? []) {
+      const key = watchKey(resource.kind, resource.name);
+      active.add(key);
+      if (!fingerprints.has(key)) fingerprints.set(key, { ...resource, stamp: null, source: false });
+    }
+    for (const [key, record] of fingerprints) {
+      if (!record.source && !active.has(key)) fingerprints.delete(key);
+    }
+  };
+
+  try {
+    let active = await compile();
+    while (!cancellation.signal.aborted) {
+      if (active) {
+        await waitOutputReady(cancellation.signal);
+        const step = module.drainWatch(watch);
+        if (step === 1) module.serviceWatchRequest(watch);
+        if (watch.hostError) throw watch.hostError;
+        const snapshot = module.watchSnapshot(watch);
+        syncWatchResources(snapshot);
+        for (const root of snapshot.roots ?? []) {
+          if (!root.done || !root.diagnosticJSON) continue;
+          const key = `${root.index}:${root.revision}:${root.generation}`;
+          if (reported.has(key)) continue;
+          reported.add(key);
+          const detail = JSON.parse(root.diagnosticJSON);
+          if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
+          else stderr.write(renderDiagnostic(detail, source, 80));
+        }
+      }
+
+      const now = Date.now();
+      if (now - lastScan >= 200) {
+        await seedSources();
+        for (const [key, record] of fingerprints) {
+          const stamp = await watchFingerprint(record.kind, record.name);
+          if (record.stamp === null) { record.stamp = stamp; continue; }
+          if (stamp !== record.stamp) {
+            record.stamp = stamp;
+            pending.set(key, { kind: record.kind, name: record.name });
+            if (record.source) pending.set(`source\0${record.name}`, { kind: 'source', name: record.name });
+            lastChange = now;
+          }
+        }
+        lastScan = now;
+      }
+
+      if (pending.size && now - lastChange >= 100 && (!active || !module.watchSnapshot(watch).busy)) {
+        const sourceChanged = [...pending.values()].some((item) => item.kind === 'source');
+        if (sourceChanged && active) {
+          invocationCancellations.delete(watch.cancellation);
+          await module.disposeWatch(watch);
+          watch = null;
+          active = false;
+        }
+        if (sourceChanged || !active) {
+          fingerprints = new Map([...fingerprints].filter(([, record]) => record.source));
+          reported = new Set();
+          pending.clear();
+          active = await compile();
+          lastScan = Date.now();
+        } else {
+          const resources = [...pending.values()].filter((item) => item.kind === 'file' || item.kind === 'glob');
+          if (resources.length) module.invalidateWatch(watch, resources);
+          pending.clear();
+          reported = new Set();
+        }
+      }
+      await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+    }
+  } catch (error) {
+    if (!cancellation.signal.aborted) {
+      reportWatchError(error, source);
+      status = 1;
+    } else if (interruptedStatus) status = interruptedStatus;
+  } finally {
+    if (watch) {
+      invocationCancellations.delete(watch.cancellation);
+      try { await module.disposeWatch(watch); } catch { status = status || 1; }
+    }
+    invocationCancellations.delete(cancellation);
+    invocationDisposals.delete(disposal);
+    finishDisposal();
+  }
+  return interruptedStatus || status;
+}
+
 async function runPrimary(module, inv, noArguments, sourceDirectory) {
-  if (inv.watch) return featureUnsupported("--watch requires the native POSIX backend");
+  if (inv.watch) return runPrimaryWatch(module, inv, noArguments, sourceDirectory);
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) {
     if (noArguments) {

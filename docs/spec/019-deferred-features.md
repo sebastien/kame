@@ -62,5 +62,8 @@ review documents with the resulting behavior and remaining material boundaries.
 
 ## Evidence
 
-All D01–D18 items are open at introduction of this specification. The preceding
+All D01–D18 items were open at introduction of this specification. D01 now has
+retained portable roots, additive WASM watch ABI calls, JavaScript polling and
+invalidation, and five passing native/WASM live scenarios; its remaining
+acceptance cases are listed in 020. D02–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.

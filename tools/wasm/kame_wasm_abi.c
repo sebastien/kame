@@ -662,6 +662,64 @@ uint32_t kame_wasm_target_begin(uint64_t handle, uint32_t target, uint32_t targe
   return KAME_WASM_OK;
 }
 
+uint32_t kame_wasm_watch_cancel(uint64_t handle) {
+  return kame_wasm_expression_cancel(handle);
+}
+
+static uint32_t kame_wasm_watch_batch(uint64_t handle, uint32_t data, uint32_t len, bool start) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || (len != 0u && data == 0u)) return KAME_WASM_STATE_INVALID;
+  instance->diagnostic_len = 0u;
+  so_Slice bytes = {(so_byte *)(uintptr_t)data, (so_int)len, (so_int)len};
+  wasm_PureResult result = start ? wasm_Runtime_RequestWatch(instance->runtime, bytes)
+                               : wasm_Runtime_InvalidateWatch(instance->runtime, bytes);
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
+uint32_t kame_wasm_watch_begin(uint64_t handle, uint32_t data, uint32_t len) {
+  return kame_wasm_watch_batch(handle, data, len, true);
+}
+
+uint32_t kame_wasm_watch_invalidate(uint64_t handle, uint32_t data, uint32_t len) {
+  return kame_wasm_watch_batch(handle, data, len, false);
+}
+
+/* Copy a nonmutating snapshot of retained roots and observed file/glob keys. */
+uint32_t kame_wasm_watch_state(uint64_t handle, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || out_len == 0u) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  wasm_PureResult result = wasm_Runtime_WatchStateJSON(instance->runtime);
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  uint32_t needed = (uint32_t)result.Text.len;
+  *(uint32_t *)(uintptr_t)out_len = needed;
+  if (dst_len < needed) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_BUFFER_TOO_SMALL;
+  }
+  if (needed != 0u && dst == 0u) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_STATE_INVALID;
+  }
+  for (uint32_t i = 0; i < needed; i++) ((uint8_t *)(uintptr_t)dst)[i] = (uint8_t)result.Text.ptr[i];
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
 /* Pop one queued target lifecycle event and copy its schema-1 JSON line. A
  * zero-length result means no event is pending. */
 uint32_t kame_wasm_target_event(uint64_t handle, uint32_t dst, uint32_t dst_len, uint32_t out_len) {

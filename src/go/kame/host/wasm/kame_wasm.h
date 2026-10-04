@@ -174,6 +174,15 @@ uint32_t kame_wasm_host_set_env(uint64_t instance, uint32_t name,
 /* Schedule one target using the portable build runtime and its in-memory host. */
 uint32_t kame_wasm_target_begin(uint64_t instance, uint32_t target,
                                 uint32_t target_len);
+/* Retain a shared build graph. begin takes a JSON array of target strings;
+ * invalidate takes [{"kind":"file"|"glob","name":RESOURCE_KEY_NAME}].
+ * state copies {busy, roots, resources}; repeated queries retain root interest.
+ * Resources exclude produced outputs. The host owns polling and source reload. */
+uint32_t kame_wasm_watch_begin(uint64_t instance, uint32_t data, uint32_t len);
+uint32_t kame_wasm_watch_invalidate(uint64_t instance, uint32_t data, uint32_t len);
+uint32_t kame_wasm_watch_state(uint64_t instance, uint32_t dst, uint32_t dst_len,
+                               uint32_t out_len);
+uint32_t kame_wasm_watch_cancel(uint64_t instance);
 /* Compile the instance source for planning, then resolve one target plan into
  * caller-owned schema-1 JSON. expand resolves expression-form inputs. */
 uint32_t kame_wasm_prepare(uint64_t instance);

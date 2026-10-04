@@ -111,6 +111,7 @@ tests/T012-04-streams-backpressure.sh	012	streams	Unread stdout/stderr/JSON/argv
 tests/T006-04-runtime-order-only.sh	006	runtime	Order-only scheduling and failures, freshness/cache exclusion, normal/read upgrades, expression inputs and metadata on both hosts
 tests/T006-07-runtime-newer-inputs.sh	006	runtime	Unique newer normal inputs, missing sibling outputs, scoped freshness, empty lists, captures, directories and context rejection on both hosts
 tests/T010-22-wasm-memory.sh	010	wasm	Allocation-free compile/completion/module exhaustion diagnostics, instance isolation and repeated reuse, with unrelated traps preserved; shell/argv stream publishers preserve diagnostics and reap children
+tests/T010-23-wasm-watch.sh	010	wasm	dist/kame.js retains watch roots, reloads changed or repaired source, invalidates active inputs during recipes, and disposes on SIGINT
 tests/T004-13-lang-declaration-conditions.sh	004	lang	Pure when/otherwise/end declaration selection, gated includes, literal configuration, nested inactive branches, source/session parity and authored diagnostics
 tests/T017-19-kash-recipes.sh	017	kash	Selected shell policies, structured recipe cache/retry/timeout, reusable scripts and invocation-owned callable lifetime on both hosts
 tests/T009-14-cli-watch.sh	009	cli	Native include/root source reload, preserved timestamps, malformed-source recovery, changed graph and input invalidation during an active recipe

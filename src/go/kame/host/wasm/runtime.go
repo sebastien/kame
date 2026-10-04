@@ -29,25 +29,27 @@ type Runtime struct {
 	ExprParsed *script.Script
 	// Target mode uses the portable build runtime with an in-memory host. It is
 	// mutually exclusive with the single-expression mode above.
-	Host             *MemoryHost
-	Program          *program.Program
-	Session          *program.Session
-	BuildSources     []program.CompileSource
-	BuildDefines     []string
+	Host               *MemoryHost
+	Program            *program.Program
+	Session            *program.Session
+	BuildSources       []program.CompileSource
+	BuildDefines       []string
 	BuildToolOverrides []string
-	BuildEnvironment []string
- BuildForce bool
-	BuildTimeoutMS int64
-	BuildRetryCount int
-	Handle           *program.Handle
-	Environment      []string
-	ToolPaths        []program.Tool
-	InspectionGrants []eval.Grant
-	InspectionPolicy bool
-	Forwarding       bool
-	EventJSON        []byte
-	Effects          []eval.Effect
-	EffectIndex      int
+	BuildEnvironment   []string
+	BuildForce         bool
+	BuildTimeoutMS     int64
+	BuildRetryCount    int
+	Handle             *program.Handle
+	Watching           bool
+	WatchHandles       []*program.Handle
+	Environment        []string
+	ToolPaths          []program.Tool
+	InspectionGrants   []eval.Grant
+	InspectionPolicy   bool
+	Forwarding         bool
+	EventJSON          []byte
+	Effects            []eval.Effect
+	EffectIndex        int
 	// Directory is the working directory the build runtime canonicalizes
 	// against. It defaults to "." and the host may set the absolute cwd.
 	Directory string
@@ -96,8 +98,8 @@ func NewRuntimeIn(buf []byte, name string, source string) RuntimeStart {
 // stays outside the logical heap so an ABI allocation-failure boundary can
 // discard a partially constructed runtime without traversing its objects.
 func NewRuntimeWithHeap(arena *Heap, name string, source string) RuntimeStart {
- arena.Reset()
- return newRuntime(arena, arena, name, source)
+	arena.Reset()
+	return newRuntime(arena, arena, name, source)
 }
 
 func newRuntime(a mem.Allocator, arena *Heap, name string, source string) RuntimeStart {
@@ -331,7 +333,10 @@ func (r *Runtime) SpanJSON(target string, depth int, expand bool) PureResult {
 	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
 	d := r.Program.WriteSpan(&buffer, target, depth, expand)
-	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
+	if r.Program.InspectionWaiting {
+		buffer.Free()
+		return PureResult{HostNeeded: true}
+	}
 	if d.Code != "" {
 		out := PureResult{Code: pureText(r.Alloc, d.Code), Message: pureText(r.Alloc, d.Message)}
 		d.Free(r.Alloc)
@@ -415,7 +420,9 @@ func (r *Runtime) RequestTarget(target string) PureResult {
 	}
 	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}}
 	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: r.Environment, Grants: grants, ForwardRequests: r.Forwarding}
-	if r.InspectionPolicy { options.Grants = r.InspectionGrants }
+	if r.InspectionPolicy {
+		options.Grants = r.InspectionGrants
+	}
 	compiled := r.compileBuild(options)
 	if compiled.Program == nil {
 		// Compile released the host on failure, so drop the borrowed pointer too.
@@ -661,6 +668,10 @@ func (r *Runtime) Complete(request host.Request, value core.Value, diagnostic di
 // any outstanding host request as cancelled and ignores a later completion.
 func (r *Runtime) Cancel() bool {
 	if r != nil && r.Program != nil && r.Handle != nil {
+		for i := range r.WatchHandles {
+			r.Program.Engine.Cancel(r.WatchHandles[i].Node)
+			r.WatchHandles[i].Cancel()
+		}
 		r.Program.Engine.Cancel(r.Handle.Node)
 		r.Handle.Cancel()
 		r.Program.Eval.CancelProcesses()
@@ -670,12 +681,17 @@ func (r *Runtime) Cancel() bool {
 		return false
 	}
 	r.Engine.Cancel(r.Node)
-	if r.Eval != nil { r.Eval.CancelProcesses() }
+	if r.Eval != nil {
+		r.Eval.CancelProcesses()
+	}
 	return true
 }
 
 func (r *Runtime) Result() RuntimeResult {
 	if r == nil {
+		return RuntimeResult{}
+	}
+	if r.Watching {
 		return RuntimeResult{}
 	}
 	if r.Program != nil {
@@ -684,7 +700,9 @@ func (r *Runtime) Result() RuntimeResult {
 		}
 		// Definition targets publish a current value without reaching a terminal
 		// node state; this mirrors the native CLI's expression loop.
-		if r.Session != nil { r.Session.Observe(r.Handle) }
+		if r.Session != nil {
+			r.Session.Observe(r.Handle)
+		}
 		if r.Handle.Definition && r.Handle.Node != nil && r.Handle.Node.Current {
 			return RuntimeResult{Value: r.Handle.Node.Latest.Clone(r.Alloc), Done: true}
 		}
@@ -723,6 +741,7 @@ func (r *Runtime) Free() {
 	if r == nil {
 		return
 	}
+	r.freeWatchHandles()
 	if r.Handle != nil {
 		r.Handle.Free()
 		r.Handle = nil

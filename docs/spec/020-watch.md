@@ -61,3 +61,16 @@ allocation-failure boundary. The JS host owns polling, source loading and signal
   invalidation, invalid batch rejection, failed starts and disposal.
 - Public ABI tests cover query/copy, malformed resource kinds, repeated use,
   instance isolation and allocation failures.
+
+## Implementation status
+
+The portable WASM runtime now retains multiple roots, reports their state and
+observed resources, validates invalidation batches before applying them, and
+releases retained handles on cancellation or instance disposal. The JavaScript
+CLI implements polling, debounce, source reload and repair, queued active-input
+changes, live event publication and signal-driven disposal. T010-23 exercises
+native and WASM source reload, malformed-source recovery, graph replacement,
+input changes during a running recipe, glob membership and SIGINT cleanup.
+Portable allocator coverage includes shared roots, repeated snapshots, invalid
+batch atomicity and failed-start cleanup. D01 remains open for the remaining
+acceptance cases and public allocation-failure/JSON/grant conformance.
