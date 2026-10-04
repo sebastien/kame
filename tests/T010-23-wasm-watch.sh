@@ -8,5 +8,5 @@ cd "$CLI_ROOT"
 make dist-wasm >/dev/null
 test-step "source reload, scoped environments, repair, invalidation, subscription cleanup and cancellation"
 python3 "$CLI_ROOT/tests/watch-runtime.py" node "$CLI_ROOT/dist/kame.js"
-test-ok "WASM watch reloads sources and tracks only active inputs"
+test-ok "WASM watch tracks active inputs and reaps children on cancellation"
 test-end

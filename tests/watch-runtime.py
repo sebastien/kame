@@ -194,6 +194,27 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-scoped-env-') as directory:
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-active-cancel-') as directory:
+    project = Path(directory)
+    (project / 'Makefile.kmk').write_text('chosen :\n\tsleep 60 & echo $! > child-pid; touch ready; wait\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+        wait_for(process, lambda: (project / 'ready').exists() and (project / 'child-pid').exists(), error, 'active watcher child start')
+        child_pid = int((project / 'child-pid').read_text())
+        stop(process)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(.025)
+        else:
+            raise AssertionError(f'watch cancellation left child process {child_pid} alive')
+        cases += 1
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
     project = Path(directory)
     (project / 'Makefile.kmk').write_text('MARK = (text (read ./input))\nchosen :\n\tprintf %s @(MARK) >> watch-log\n')
