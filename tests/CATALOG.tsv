@@ -99,13 +99,13 @@ tests/T004-10-lang-line-continuations.sh	004	lang	Continued definitions and head
 tests/T016-01-cli-render.sh	016	cli	Raw document rendering, repeated string payloads, comment inference, parse-only checks and capability parity on native/WASM
 tests/T007-10-lib-record-lookup.sh	007	lib	Computed record keys, nil/default contracts, callable transfer and configuration/input planning parity
 tests/T009-13-cli-configuration.sh	009	cli	Build defaults, CLI and environment override precedence, literal values, effective plans and authored formatting on native/WASM
-tests/T007-11-lib-tools.sh	007	lib	Shared executable resolution, computed tool names, repeatable host overrides, plan visibility and missing-tool failure on native/WASM
+tests/T007-11-lib-tools.sh	007	lib	Shared executable resolution, computed tool names, repeatable host overrides, plan visibility, startup PATH policy under target overrides and missing-tool failure on native/WASM
 tests/T004-11-lang-wildcard-inputs.sh	004	lang	Literal wildcard rule inputs, recursive membership dependencies, authored formatting and quoted literals on native/WASM
 tests/T004-12-lang-optional-includes.sh	004	lang	Optional include absence, present declarations, value fragments, formatting, malformed sources, cycles and read failures on native/WASM
 tests/T012-02-streams-live-cli.sh	012	streams	Human/JSON chunks reach pipes before recipe completion on native/WASM, and native watch flushes declarative stdout
 tests/T012-03-streams-large-output.sh	012	streams	8 MiB NUL/binary stdout and stderr remain lossless on native/WASM in human/JSON mode; bounded retention preserves failure truncation metadata
 tests/T006-03-runtime-always.sh	006	runtime	Always file outputs rerun once per root, preserve artifact/multiple-output semantics and formatter/AST/plan metadata, and reject missing outputs and named tasks on both hosts
-tests/T006-06-runtime-environment.sh	006	runtime	Scoped recipe environment inheritance, local overrides, root isolation, shared conflicts, cache identity, persisted file freshness, lazy definitions and functions, KAME_NAME precedence, grants, cycles, read-only input resolution and literal metadata
+tests/T006-06-runtime-environment.sh	006	runtime	Scoped recipe environment inheritance, local overrides, root isolation, shared conflicts, cache identity, persisted file freshness, lazy definitions and functions, KAME_NAME precedence, grants, cycles, read-only input resolution, collected shell snapshots and literal metadata
 tests/T013-05-meta-build-mode.sh	013	meta	Debug/release/sanitizer artifact modes, mode-independent generated version source and unchanged Kame build incrementality
 tests/T012-04-streams-backpressure.sh	012	streams	Unread stdout/stderr/JSON/argv pipes and cached replay pause producers/runtime steps, then resume losslessly or cancel/timeout without hanging
 tests/T006-04-runtime-order-only.sh	006	runtime	Order-only scheduling and failures, freshness/cache exclusion, normal/read upgrades, expression inputs and metadata on both hosts

@@ -230,8 +230,10 @@ is provided for expressions that need collected process results. It requires
 Its arguments are a script string and optional option record. Streaming process
 events remain available through runtime execution, not as a list accumulated by
 the operation. `shell` is allowed in explicit expression execution but is
-invalid during planning and build rendering with `PHASE_INVALID`; recipes are the
-only process interface for cacheable builds.
+invalid during planning and direct build-template rendering with `PHASE_INVALID`.
+Demanded lazy values and Kash recipe expressions evaluate in their runtime phase;
+when bound to a target, their collected shell calls inherit its environment and
+retain the invocation run policy. Declaration registration never launches them.
 
 Tagged-template shell helpers and multiple aliases such as legacy `sh` and
 `shellrun` are deferred.

@@ -14,12 +14,20 @@ mkdir -p "$project"
 printf '#!/bin/sh\nprintf tool-a\n' >"$project/tool-a"
 printf '#!/bin/sh\nprintf tool-b\n' >"$project/tool-b"
 chmod +x "$project/tool-a" "$project/tool-b"
+mkdir -p "$project/startup tools" "$project/scoped tools"
+printf '#!/bin/sh\nprintf tool-startup\n' > "$project/startup tools/kame-test-compiler"
+printf '#!/bin/sh\nprintf tool-scoped\n' > "$project/scoped tools/kame-test-compiler"
+chmod +x "$project/startup tools/kame-test-compiler" "$project/scoped tools/kame-test-compiler"
 cat >"$project/Makefile.kmk" <<'KMK'
 compiler = (tool "kame-test-compiler")
 computed = "kame-test-compiler"
 default :
 	"@(compiler)"
 	"@(tool computed)"
+scoped : ; env "PATH=./scoped tools"
+	"@(compiler)"
+	"@(tool computed)"
+	"@(x/kame-test-compiler)"
 KMK
 for backend in native wasm; do
  test-step "$backend tool resolution and overrides"
@@ -43,5 +51,10 @@ import json,sys
 assert json.load(open(sys.argv[1])) == sys.argv[2]
 PY
  then test-ok "$backend computed tool in unified session"; else test-fail "$backend session tool"; fi
+ test-step "$backend preserves startup tool policy under target PATH overrides"
+ PATH="$project/startup tools:$PATH" "${runner[@]}" -C "$project" scoped > "$project/value" 2> "$project/error"
+ if [ "$(cat "$project/value")" = tool-startuptool-startuptool-startup ]; then test-ok "$backend lazy, computed and authored tools use startup PATH"; else test-fail "$backend target PATH changed declared tool policy"; fi
+ PATH="$project/startup tools:$PATH" "${runner[@]}" -C "$project" --tool kame-test-compiler=./tool-b scoped > "$project/value" 2> "$project/error"
+ if [ "$(cat "$project/value")" = tool-btool-btool-b ]; then test-ok "$backend explicit tool overrides win under target PATH"; else test-fail "$backend scoped tool override"; fi
 done
 test-end

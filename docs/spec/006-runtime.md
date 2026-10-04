@@ -244,7 +244,10 @@ strings. Definitions retain separate engine values per environment and phase,
 including ordinary replay, dependency and cycle handling. Produced file reads
 reached through definitions inherit the demanding target environment.
 Dynamic prerequisites retain their read-only phase through lazy definitions.
-Tool lookup and expression-level shell requests still use invocation configuration.
+Collected shell requests reached during runtime evaluation receive the same
+snapshot, including an explicit empty environment. Their run grants still apply.
+Declared tool lookup intentionally uses startup PATH and CLI `--tool` overrides,
+as specified in 007/009; a recipe PATH assignment changes child command lookup.
 Assignments do not introduce undeclared Kame variables or perform evaluation
 during registration.
 

@@ -174,7 +174,11 @@ argv. A supplied shell argv must be nonempty, contain only strings without NUL,
 and have a nonempty executable. Remaining arguments, including empty strings,
 are preserved before appending the rendered recipe text. The embedding host
 creates output parent directories before launch. Existing recipe descriptors
-without a shell field retain the invocation shell policy.
+without a shell field retain the invocation shell policy. A present `environment`
+is an exact snapshot, including an empty array; an omitted field retains the host
+invocation environment. Collected shell calls bound to a target use the same kind
+16 descriptor with empty `outputs`, preserving the runtime environment without
+introducing file publication.
 Kash file recipes request output-parent preparation separately through ABI kind
 21: the same recipe descriptor with an empty `script`. The host validates
 `outputs`, creates their parent directories, and completes with nil before any

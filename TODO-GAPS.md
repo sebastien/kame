@@ -20,9 +20,9 @@ Related material:
 
 ## TL;DR
 
-The remaining porting gaps concern build configuration and declarations:
-expression configuration under target environments. Optional generated declarations remain a separate design
-proposal. Order-only prerequisites and newer-input selection are implemented.
+The concrete porting gaps below are addressed. Target environments now cover
+recipes, prerequisites, lazy definitions and collected runtime shell calls.
+Optional generated declarations remain a separate design proposal. Order-only prerequisites and newer-input selection are implemented.
 The detailed acceptance clauses below track those requests.
 
 Source discovery and header composition have been addressed: wildcard accepts
@@ -48,7 +48,7 @@ relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 | --- | --- | --- | --- | --- |
 | A1 | No parse-time `$(shell ...)` / no `do expr shell` during builds | Language design | High | `WASM_SDK`/`WASM_CC`/`WASM_LD` |
 | A2 | Lazy defaults and build-variable overrides | Implemented | High → fixed | `WASM_CC ?=` |
-| A3 | Scoped recipe environment and per-artifact build mode | Partly implemented; expression configuration remains | High | `KAME_BUILD_MODE` |
+| A3 | Scoped recipe environment and per-artifact build mode | Implemented and covered | High → fixed | `KAME_BUILD_MODE` |
 | A4 | Declaration conditions and gated includes | Addressed | Medium | T004-13 |
 | A5 | Computed configuration lookup and generator design | Minimum implemented; generator proposal documented | Medium → addressed | not used here |
 | A6 | Declaration continuations and multiline values | Parser gap, fixed | Low → fixed | long `KAME_INPUTS` |
@@ -149,7 +149,7 @@ for tools too ("`?=` overrides" and "single-assignment, no overrides").
 **Acceptance.** `kame --define WASM_SDK=/opt/wasi-sdk ./build/wasm/kame.wasm`
 links against the override and `kame do plan` shows the effective value.
 
-### A3 — Scoped recipe environments and build mode (partly implemented)
+### A3 — Scoped recipe environments and build mode (addressed)
 
 **Implemented foundation.** Rule headers accept `; env "NAME=value" ...`.
 Literal assignments inherit through prerequisite recipes; local and last
@@ -174,14 +174,22 @@ are literal, explicit `--define` values win, and separate engine nodes retain
 ordinary replay and cycle handling. Produced file reads reached through lazy
 values inherit the same environment. Dynamic inputs remain read-only.
 
-**Remaining.** Tool lookup and expression-level shell requests
-still use invocation configuration. The repository
-build now embeds mode per artifact through compiler flags, independently of
+**Collected shell configuration.** Runtime `shell` requests receive the complete
+target snapshot on native and WASM hosts, including a present empty snapshot.
+Run grants still apply. T006-06 passes 63 current native/WASM assertions for
+inheritance, definitions, collected shell calls, cache identity and freshness.
+Portable host and WASM-host sanitizer tests cover empty-snapshot transport.
+
+**Tool policy.** Specs 007/009 intentionally resolve declared tools against startup
+PATH and CLI `--tool` overrides. Recipe PATH changes affect ordinary child command
+lookup. T007-11 passes 15 current assertions, including lazy, computed and authored
+references beneath scoped PATH and explicit override precedence. The former
+remaining-tool clause conflicted with this explicit contract and is removed.
+
+The repository embeds mode per artifact through compiler flags, independently of
 shared generated metadata. T013-05 verifies real debug/release modes, sanitizer
 mode when selected, unchanged metadata on mode switches, and no Kame relink for
-unchanged native outputs. This closes the concrete build-mode acceptance below;
-tool and collected-shell configuration remain open. The historical
-finding follows.
+unchanged native outputs. The historical finding follows.
 
 **Symptom.** GNU scopes a variable to a target *and its prerequisites*:
 
@@ -524,7 +532,7 @@ Ordered by value-to-effort for porting real projects:
 - [x] **B4** Allow `@(VAR)/suffix` and other path interpolation in headers by
       parsing inputs as string templates.
 - [x] **A2** Add `--define NAME=VALUE` + a documented env convention, then `?=`.
-- [ ] **A3** Add target-scoped environment inherited by prerequisites, included
+- [x] **A3** Add target-scoped environment inherited by prerequisites, included
       in cache fingerprints, with persistent scoped-file freshness. Per-artifact
       debug/release mode metadata is implemented and verified by T013-05.
 - [x] **A1** Add a hermetic tool resolver (not general parse-time shell) and a
@@ -555,4 +563,6 @@ Listed so the gaps above are not read as "Kame is worse":
 
 The honest summary matches `TODO.md`: Kame makes the graph better and the
 metaprogramming worse. For this Makefile the missing metaprogramming cost three
-targeted workarounds; closing B1–B4 and A1–A3 would make the port literal.
+targeted workarounds. B1–B4 and A1–A3 are now addressed through the explicit
+contracts and acceptance coverage above; optional declaration generation remains
+a separately documented proposal.

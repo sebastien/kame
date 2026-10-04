@@ -67,12 +67,22 @@ func RecipeEnvironmentPayload(a mem.Allocator, script string, outputs []string, 
 
 // RecipeExecutionPayload carries the selected rule shell argv as well as its environment.
 func RecipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string) core.Value {
+ return recipeExecutionPayload(a, script, outputs, environment, shell, environment != nil)
+}
+
+// ScopedProcessPayload carries an exact environment for a collected shell call,
+// including an explicitly empty snapshot. It declares no file outputs.
+func ScopedProcessPayload(a mem.Allocator, script string, environment []string) core.Value {
+ return recipeExecutionPayload(a, script, nil, environment, nil, true)
+}
+
+func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string, includeEnvironment bool) core.Value {
  b := strings.NewBuilder(a)
  e := json.NewEncoder(&b)
  e.BeginObject(); e.Str("script"); e.Str(script); e.Str("outputs"); e.BeginArray()
  for i := range outputs { e.Str(outputs[i]) }
  e.EndArray()
- if environment != nil {
+ if includeEnvironment {
   e.Str("environment"); e.BeginArray()
   for i := range environment { e.Str(environment[i]) }
   e.EndArray()
@@ -85,6 +95,13 @@ func RecipeExecutionPayload(a mem.Allocator, script string, outputs []string, en
  e.EndObject(); e.Flush()
  fields := []core.RecordField{{Key: FieldOp, Value: core.NewString(a, "recipe")}, {Key: FieldScript, Value: core.NewString(a, script)}, {Key: FieldData, Value: core.NewString(a, b.String())}}
  payload := core.NewRecord(a, fields)
+ if includeEnvironment {
+  var values []core.Value
+  for i := range environment { values = slices.Append(a, values, core.NewString(a, environment[i])) }
+  payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, FieldEnvironment).Text, Value: core.NewList(a, values)})
+  for i := range values { values[i].Free(a) }
+  slices.Free(a, values)
+ }
  for i := range fields { fields[i].Value.Free(a) }
  b.Free()
  return payload

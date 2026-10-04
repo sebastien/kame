@@ -119,11 +119,21 @@ func (p *Program) drainRequests() {
 			if stream {
 				retain = 0
 			}
-			if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}) {
+			environment := p.Options.Environment
+			var scopedEnvironment []string
+			for i := range request.Payload.Record {
+				if request.Payload.Record[i].Key == host.FieldEnvironment {
+					values := request.Payload.Record[i].Value.List
+					for j := range values { scopedEnvironment = slices.Append(p.Alloc, scopedEnvironment, values[j].Text) }
+					environment = scopedEnvironment
+				}
+			}
+			if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}) {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else {
 				p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0, Capture: capture, Stream: stream})
 			}
+			slices.Free(p.Alloc, scopedEnvironment)
 			slices.Free(p.Alloc, argv)
 			for i := range stages {
 				slices.Free(p.Alloc, stages[i].Argv)

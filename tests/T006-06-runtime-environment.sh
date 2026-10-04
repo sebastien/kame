@@ -61,6 +61,18 @@ definition-generated-root : ; env "MODE=generated"
 	printf %s @(GENERATED) > definition-generated-log
 ./definition-input :
 	printf %s "$MODE" > @>
+COLLECTED = (shell "printf %s \"$MODE\"; printf captured-error >&2")
+COLLECTED_VALUE = (text (get COLLECTED "stdout"))
+collected-root : collected-cached ; env "MODE=debug"
+collected-release-root : collected-cached ; env "MODE=release"
+task collected-cached :
+	printf %s @(COLLECTED_VALUE) > collected-log; printf x >> collected-runs
+kash-collected : ; [shell: kash env: [MODE: "kash"]]
+	value = (shell "printf %s \"$MODE\"")
+	printf %s \@(text (get value "stdout"))
+collected-denied : ; [shell: kash env: [MODE: "secret"]]
+	value = (shell "touch forbidden-collected")
+	\@(out (get value "status"))
 BAD = (shell "touch forbidden-phase")
 definition-phase : @(BAD) ; env "MODE=debug"
 CYCLE = (str CYCLE)
@@ -113,6 +125,15 @@ KMK
  if [ "$(cat "$project/definition-generated-log")" = generated ]; then test-ok "$backend produced files reached through definitions inherit environment"; else test-fail "$backend generated definition prerequisite context"; fi
  if "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk definition-phase > "$project/out" 2> "$project/err"; then test-fail "$backend launched definition during input resolution"; elif rg -q PHASE_INVALID "$project/err" && [ ! -e "$project/forbidden-phase" ]; then test-ok "$backend scoped definitions keep dynamic inputs read-only"; else test-fail "$backend scoped definition phase"; fi
  if "${runner[@]}" -C "$project" definition-cycle > "$project/out" 2> "$project/err"; then test-fail "$backend accepted scoped definition cycle"; elif rg -q DEP_CYCLE "$project/err" && [ ! -e "$project/forbidden-cycle" ]; then test-ok "$backend scoped definition cycles fail without effects"; else test-fail "$backend scoped cycle diagnostic"; fi
+ test-step "$backend forwards target environments into collected shell requests"
+ MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk collected-root > "$project/out" 2> "$project/err"
+ MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk collected-root > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/collected-log")" = debug ] && [ "$(cat "$project/collected-runs")" = x ]; then test-ok "$backend collected shell inherits target snapshot and cache identity"; else test-fail "$backend collected shell scoped cache"; fi
+ MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk collected-release-root > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/collected-log")" = release ] && [ "$(cat "$project/collected-runs")" = xx ]; then test-ok "$backend collected shell changes with inherited environment"; else test-fail "$backend collected shell changed context"; fi
+ MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk kash-collected > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/out")" = kash ]; then test-ok "$backend collected shell in structured recipes inherits metadata"; else test-fail "$backend structured collected shell snapshot"; fi
+ if "${runner[@]}" --allow-env=MODE -C "$project" -f Makefile.kmk collected-denied > "$project/out" 2> "$project/err"; then test-fail "$backend collected shell bypassed run grant"; elif rg -q CAP_DENIED "$project/err" && [ ! -e "$project/forbidden-collected" ]; then test-ok "$backend collected shell retains run policy before effects"; else test-fail "$backend collected shell denial"; fi
  test-step "$backend shares equivalent environments regardless of assignment order"
  MODE=ambient "${runner[@]}" -C "$project" equivalent-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/equivalent-log")" = 'one|two' ] && [ "$(cat "$project/equivalent-runs")" = x ]; then test-ok "$backend equivalent environments share a prerequisite"; else test-fail "$backend assignment ordering changed environment identity"; fi

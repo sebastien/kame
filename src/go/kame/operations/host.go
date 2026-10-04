@@ -273,6 +273,7 @@ func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 	if c.Program != nil && c.Program.DryRun {
 		return eval.Result{Value: core.NewString(c.Run, "")}
 	}
+	if c.HasEnvironment { return request(c, host.RequestProcess, host.ScopedProcessPayload(c.Run, v[0].Text, c.Environment)) }
 	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text))
 }
 

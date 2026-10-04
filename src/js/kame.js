@@ -975,7 +975,7 @@ class Module {
         }
         if (recipe.environment !== undefined) {
           if (!Array.isArray(recipe.environment) || recipe.environment.some((entry) => typeof entry !== 'string' || entry.includes('\0') || entry.indexOf('=') < 1)) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe environment');
-          context = { ...context, environment: recipe.environment };
+          context = { ...context, environment: recipe.environment, environmentExact: true };
         }
       }
       if (context.streaming) {
@@ -1372,7 +1372,7 @@ class Module {
 function runProcessDirect(script, context) {
   return new Promise((resolveRun) => {
     const shell = context.shell.length !== 0 ? context.shell : ['/bin/sh', '-c'];
-    const childEnv = { ...process.env };
+    const childEnv = context.environmentExact ? {} : { ...process.env };
     for (const entry of context.environment) {
       const at = entry.indexOf('=');
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
@@ -1416,7 +1416,7 @@ function runArgvCapture(stages, context) {
     return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid stage setup' });
   }
   return new Promise((resolveRun, rejectRun) => {
-    const childEnv = { ...process.env };
+    const childEnv = context.environmentExact ? {} : { ...process.env };
     for (const entry of context.environment ?? []) {
       const at = entry.indexOf('=');
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
@@ -1629,7 +1629,7 @@ function runProcessAttempt(module, instance, script, context, request) {
   if (retain === 0xffffffff) throw new Error('process retention budget unavailable');
   return new Promise((resolveAttempt, rejectAttempt) => {
     const shell = context.shell.length !== 0 ? context.shell : ['/bin/sh', '-c'];
-    const childEnv = { ...process.env };
+    const childEnv = context.environmentExact ? {} : { ...process.env };
     for (const entry of context.environment) {
       const at = entry.indexOf('=');
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);

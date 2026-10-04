@@ -52,6 +52,9 @@ enum kame_wasm_request_kind {
   KAME_WASM_REQUEST_PIPELINE = 14,
   // JSON {stages, input, output, append, setup}; per-stage cwd/env/timeout.
   KAME_WASM_REQUEST_REDIRECTED_GRAPH = 15,
+  // JSON {script, outputs, environment?, shell?}; supplied environment is exact.
+  // Target-bound collected shell calls declare an empty outputs array.
+  KAME_WASM_REQUEST_RECIPE = 16,
   // Recipe descriptor with outputs; prepares parents before structured execution.
   KAME_WASM_REQUEST_PREPARE_OUTPUTS = 21
 };
