@@ -66,7 +66,9 @@ func (p *Program) EvaluateDefinition(key core.ResourceKey, context *Context) Res
 		if d.Name != key.Name {
 			continue
 		}
+		previousEngine, previousScope, previousRequests := context.Engine, context.Scope, context.Requests
 		result := p.definitionValue(nil, d, p.Scope, context)
+		context.Engine, context.Scope, context.Requests = previousEngine, previousScope, previousRequests
 		attachNamedFrame(&result, context, d.Span, "definition", d.Name)
 		attachSource(&result, context)
 		return result

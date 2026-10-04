@@ -209,3 +209,10 @@ from start/stream callbacks. Shell and argv hosts kill their process groups and
 wait for child close before propagating failure. T010-22 additionally runs real
 unbounded stdout/stderr children against a 256 KiB logical heap and checks
 clean `NO_MEMORY` reporting plus child reaping on both launch paths.
+
+Declaration-predicate work exposed a caller-context bug in inline lazy
+definition evaluation: reading a global definition as one function operand
+replaced the function scope, so its following parameter operand failed with
+`REF_MISSING`. The evaluator now restores the caller engine, scope and request
+queue after inline definition evaluation. A direct regression and all 67
+evaluator ASAN/UBSAN tests pass in the isolated conditional-work checkout.
