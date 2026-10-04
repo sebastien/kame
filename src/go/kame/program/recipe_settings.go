@@ -65,6 +65,15 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	if c.PhaseInvalid() || len(c.Effects) != 0 {
 		return failureAt(p.Alloc, "PHASE_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "recipe settings cannot perform effects")
 	}
+	if entry.Rule.Kind == rule.ServiceRule {
+		span := diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}
+		if entry.Rule.Metadata != nil { span = diagnostic.Span{Start: entry.Rule.Metadata.Span.Start, End: entry.Rule.Metadata.Span.End} }
+		var config ServiceConfig
+		d := parseServiceConfig(p.Alloc, metadata, span, &config)
+		if d.Code != "" { return d }
+		entry.Service.Free(p.Alloc)
+		entry.Service = config
+	}
 	explicit := false
 	for i := range metadata.Record {
 		field := metadata.Record[i]

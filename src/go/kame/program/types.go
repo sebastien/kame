@@ -274,8 +274,30 @@ type pendingRequest struct {
 	Retries    int
 }
 
+// ServiceConfig owns the validated, bounded lifecycle policy for one service
+// rule. Empty probe argv means that probe is disabled.
+type ServiceConfig struct {
+	ReadyArgv []string
+	ReadyInterval int64
+	ReadyTimeout int64
+	HealthArgv []string
+	HealthInterval int64
+	HealthFailures int64
+	RestartAttempts int64
+	RestartBackoff int64
+	StopGrace int64
+	LogBytes int64
+}
+
+func (c *ServiceConfig) Free(a mem.Allocator) {
+	freeStrings(a, c.ReadyArgv)
+	freeStrings(a, c.HealthArgv)
+	*c = ServiceConfig{}
+}
+
 type registeredRule struct{ Rule *rule.Rule }
 type instance struct {
+	Service ServiceConfig
 	Shell []string
 	Kash bool
 	ScopedShell bool

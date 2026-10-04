@@ -564,7 +564,7 @@ func TestYieldRejectsShellCommand(t *testing.T) {
 
 func TestServiceIsExplicitlyUnsupported(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "service daemon :\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "service daemon : ; [ready: [argv: [\"./daemon\" \"ready\"]]]\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
@@ -572,6 +572,28 @@ func TestServiceIsExplicitlyUnsupported(t *testing.T) {
 	if result.Diagnostic.Code != "FEATURE_UNSUP" { t.Errorf("service diagnostic = %s", result.Diagnostic.Code) }
 	result.Free(a)
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestInvalidServiceConfigFailsBeforeExecution(t *testing.T) {
+	invalid := []string{
+		"service daemon : ; [ready: [argv: [\"probe\"] interval-ms: :true]]\n\ttrue\n",
+		"service daemon : ; [ready: [argv: [\"probe\"] unexpected: 1]]\n\ttrue\n",
+	}
+	for i := range invalid {
+		a := t.Allocator()
+		parsed := script.Parse(a, "test.kmk", invalid[i])
+		registry := eval.NewRegistry(a)
+		compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
+		if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
+			t.Error("invalid service settings failed during compilation")
+			compiled.Free(a); parsed.Free(); registry.Free()
+			continue
+		}
+		result := compiled.Program.Materialize("daemon")
+		if result.Diagnostic.Code != "EXPR_INVALID" { t.Errorf("invalid service settings diagnostic = %s", result.Diagnostic.Code) }
+		result.Free(a)
+		compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+	}
 }
 
 func TestFileDependencyRunsProducerBeforeDependent(t *testing.T) {

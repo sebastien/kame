@@ -302,6 +302,7 @@ func (p *Program) Free() {
 	freeStrings(p.Alloc, p.Options.ToolOverrides)
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
+		p.Instances[i].Service.Free(p.Alloc)
   freeStrings(p.Alloc, p.Instances[i].Environment)
   freeStrings(p.Alloc, p.Instances[i].Shell)
   freeStrings(p.Alloc, p.Instances[i].MetadataEnvironment)

@@ -50,6 +50,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		entry.started, entry.startedGeneration, entry.terminalEmitted = true, c.Generation(), false
 	}
 	if entry.Rule.Kind == rule.ServiceRule {
+		if d := p.recipeSettings(state.Index); d.Code != "" {
+			p.failRule(c, state.Index, d)
+			return core.ProducerFailed
+		}
 		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service execution is not supported"))
 		return core.ProducerFailed
 	}

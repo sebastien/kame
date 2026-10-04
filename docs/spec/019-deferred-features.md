@@ -77,6 +77,8 @@ and native/WASM execution, dry-run and watch coverage in T009-15 and T010-24.
 D07 is covered by first-class wildcard inputs and shared lazy glob dependencies;
 T004-11, T009-14 and T010-23 pass expansion, quoted-literal,
 membership-addition/removal and watch-update checks on native and WASM. D02's
-managed lifecycle contract is enumerated in 024; implementation and acceptance
-remain open. D03–D05 and D08–D18 remain open. The preceding
+typed lifecycle metadata is now parsed, bounded, and rejected before dependency
+recipes run; parser round trips and runtime validation have Go coverage. Service
+execution, ownership, and native/WASM lifecycle acceptance remain open under
+024. D03–D05 and D08–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.
