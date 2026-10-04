@@ -67,6 +67,8 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 		r.BuildEnvironment = slices.Append(r.Alloc, r.BuildEnvironment, pureText(r.Alloc, environment[i].Text))
 	}
 	r.BuildForce = host.PayloadInt(descriptor, "force") != 0
+	r.BuildTimeoutMS = host.PayloadInt(descriptor, "timeoutMS")
+	r.BuildRetryCount = int(host.PayloadInt(descriptor, "retryCount"))
 	return PureResult{}
 }
 
@@ -88,6 +90,7 @@ func (r *Runtime) freeBuildSources() {
 
 func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 	options.Force = r.BuildForce
+	options.TimeoutMS, options.RetryCount = r.BuildTimeoutMS, r.BuildRetryCount
 	options.Defines = r.BuildDefines
 	options.ToolOverrides = r.BuildToolOverrides
 	var environment []string

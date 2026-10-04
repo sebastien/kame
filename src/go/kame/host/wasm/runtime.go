@@ -37,6 +37,8 @@ type Runtime struct {
 	BuildToolOverrides []string
 	BuildEnvironment []string
  BuildForce bool
+	BuildTimeoutMS int64
+	BuildRetryCount int
 	Handle           *program.Handle
 	Environment      []string
 	ToolPaths        []program.Tool

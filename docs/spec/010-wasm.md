@@ -99,7 +99,7 @@ and authored byte `offset`, after initializing an empty source instance and
 before target execution or preparation. The portable compiler combines these
 fragments and maps diagnostic spans back to authored sources. No filesystem work
 occurs during compilation. Build and runner session descriptors carry `force`
-as 0 or 1 into portable runtime options; `--force` bypasses file freshness and
+as 0 or 1, and `timeoutMS` and `retryCount` as nonnegative integers, into portable runtime options; `--force` bypasses file freshness and
 cached-task lookup on either host. Registration failures expose their complete diagnostic
 list through the target-event query, including in non-JSON presentation modes.
 

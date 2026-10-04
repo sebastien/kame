@@ -1113,13 +1113,13 @@ class Module {
     }
   }
 
-  compileBuild(instance, source, name) {
+  compileBuild(instance, source, name, context = {}) {
     if (name) this.setSourceName(instance, name);
     const compiled = this.write(Array.isArray(source) ? '' : source);
     if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     if (Array.isArray(source)) {
       if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
-      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force }));
+      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0 }));
       if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
   }
@@ -1225,8 +1225,14 @@ class Module {
     const tools = await this.toolNames(source, name);
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
+    const pending = new Set();
+    const cancellation = new AbortController();
+    invocationCancellations.add(cancellation);
+    context.concurrent = true;
+    context.signal = cancellation.signal;
+    let hostError;
     try {
-      this.compileBuild(instance, source, name);
+      this.compileBuild(instance, source, name, context);
       for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
       const directoryBytes = this.write(process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directoryBytes.pointer, directoryBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
@@ -1239,12 +1245,22 @@ class Module {
         const state = this.exports.kame_wasm_step(instance);
         this.drainEvents(instance, context);
         if (state === 2) break;
-        if (state !== 1) continue;
-        await this.service(instance, context);
+        if (state !== 1) {
+          if (hostError) throw hostError;
+          if (pending.size) await Promise.race([...pending, new Promise((resolve) => setTimeout(resolve, 10))]);
+          continue;
+        }
+        if (hostError) throw hostError;
+        const request = this.service(instance, context).catch((error) => { hostError = error; }).finally(() => pending.delete(request));
+        pending.add(request);
+        await Promise.resolve();
       }
       const kind = this.exports.kame_wasm_result_kind(instance);
       return { kind, bytes: this.copyResult(instance) };
     } finally {
+      cancellation.abort();
+      await Promise.all(pending);
+      invocationCancellations.delete(cancellation);
       this.exports.kame_wasm_instance_free(instance);
     }
   }
@@ -1276,7 +1292,7 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0 }));
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0 }));
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');
