@@ -2226,7 +2226,8 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
           const key = `${root.index}:${root.revision}:${root.generation}`;
           if (reported.has(key)) continue;
           reported.add(key);
-          const detail = JSON.parse(root.diagnosticJSON);
+          const encoded = JSON.parse(root.diagnosticJSON);
+          const detail = encoded.diagnostic ?? encoded;
           if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
           else stderr.write(renderDiagnostic(detail, source, 80));
         }

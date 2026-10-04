@@ -112,4 +112,30 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-missing-source-') as directo
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-grants-') as directory:
+    project = Path(directory)
+    source = project / 'Makefile.kmk'
+    secret = project / 'secret'
+    other = project / 'other'
+    secret.write_text('first')
+    source.write_text('MARK = (text (read ./secret))\nchosen : ./secret\n\tprintf %s @(MARK) >> watch-log\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+        try:
+            log = project / 'watch-log'
+            wait_for(process, lambda: read(log) == 'first', error, 'granted initial read')
+            secret.write_text('second')
+            wait_for(process, lambda: read(log) == 'firstsecond', error, 'granted input invalidation')
+            source.write_text('MARK = (text (read ../secret))\nchosen : ./secret\n\tprintf %s @(MARK) >> watch-log\n')
+            wait_for(process, lambda: 'CAP_DENIED' in error.read_text(), error, 'denied read after source reload')
+            assert read(log) == 'firstsecond', 'denied read ran the recipe'
+            other.write_text('third')
+            source.write_text('MARK = (text (read ./other))\nchosen : ./secret\n\tprintf %s @(MARK) >> watch-log\n')
+            wait_for(process, lambda: read(log) == 'firstsecondthird', error, 'grant preserved after source reload')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 print(f'{cases} watch scenarios passed')
