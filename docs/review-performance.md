@@ -220,3 +220,23 @@ superseded by this verified policy; T007-11 passes 15 assertions. T013-05 passes
 five active assertions at a stable revision, including unchanged native build
 outputs. Changing revision during compilation changes generated build metadata
 and invalidates that incrementality experiment.
+
+## Reactive restart retention and parser copying
+
+A pending invocation restart temporarily retains its prior dynamic dependencies
+while discovering the replacement set. Reusing an edge transfers its existing
+interest; accepted publication releases unused holds. Cancellation, termination
+and explicit invalidation also release them. This avoids cancelling and restarting
+a live input stream merely to replace a consumer callback. Retained edge storage
+scales with the previous dependency set and can last through a suspended
+replacement. No graph-size throughput or peak-retention benchmark has been run.
+Core and standard-library sanitizer regressions establish ownership and branch
+release, not a measured performance improvement.
+
+The newly noted zero-copy parser request is not fully implemented. `source.New`
+clones name and text, while spans and many raw tokens borrow source storage;
+decoded strings and target literals require separate owned buffers. An adopted
+source constructor could remove a redundant copy from source-loading paths, but
+must distinguish owned input from borrowed embedding buffers and preserve
+include/source diagnostic lifetime. Allocation measurements should precede
+changing this ownership contract.

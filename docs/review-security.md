@@ -34,6 +34,7 @@ untrusted builds. Avoid describing `--allow-read=DIR` as a filesystem sandbox.
 | SEC-6 | High when cache directories contain attacker-controlled entries | WASM cache put followed an existing record symlink and overwrote its target. | Fixed: exclusive sibling staging, file sync, and rename; T010-19 preserves a public marker and verifies the published cache hit. |
 | SEC-5 | Atomic visibility | JS write requests previously used direct file writes. | Fixed: exclusive staging in a private sibling directory followed by rename; T010-21 covers bytes, zero length, failed publication and cleanup. |
 | SEC-10 | Memory safety | An operation-wrapped lazy definition cycle reallocated frames borrowed from an engine diagnostic, leaving a dangling frame pointer for the scheduler. | KB-11 fixed: clone evaluator failure results before adding frames; preserve terminal state after source polling and free discarded results. A pre-feature compiled ASAN reproduction confirms the defect predates scoped definitions. |
+| SEC-11 | Memory safety | Nested operation teardown freed borrowed outer definition state first; reactive callback restart also dropped the sole publishing source interest. | KB-12 fixed by inside-out teardown and retained interest through rebinding. Isolated sanitizer regressions cover cancelled callbacks, stale completions, partial-progress disposal and obsolete branch release. |
 | SEC-4 | Low confidentiality limit | Live process streams, collected shell results, and explicit `out` remain observable, even though diagnostic causes omit captured output. | Intended: omission protects diagnostic serialization, not deliberate output. |
 
 The atomic-write fix also removes the old fixed path-length temporary buffer:
@@ -179,3 +180,19 @@ before effects. Portable payload tests cover explicit empty environments, and an
 isolated WASM-host ASAN/UBSAN suite passes 33 tests including transport of the
 empty snapshot. The selected JS wrapper passes syntax checking. These focused
 checks do not replace the final full-tree security gate.
+
+## Nested stream teardown and reactive callback replacement
+
+A streamed batch replacing a pending collection callback reproduced an ASAN
+write-after-free in `freeOperationStream` after `freeDefinitionSource` released
+its outer state. Materializers now release inner frames before outer owners.
+Reactive restarts retain old dependency interest until edge rediscovery, then
+release obsolete holds without preserving reverse subscriptions. This prevents
+cancellation of a sole source during its own publication. Last-consumer
+cancellation and explicit invalidation also release pending holds.
+
+The selected commit passes isolated core and library ASAN/UBSAN suites with
+66 and 13 tests. Callback replacement rejects stale completions and discards
+partial results; separate core tests prove obsolete branch cancellation and
+release before rebinding. Current evaluator, program and WASM-host sanitizer
+suites pass 72, 104 and 33 tests. Broader release verification remains required.

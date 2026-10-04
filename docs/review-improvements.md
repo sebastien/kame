@@ -40,13 +40,14 @@ See the security and performance reviews for evidence and limitations.
 | Conditional forms | Kame lazy `if`/`and`/`or`/`match` and Kash control blocks exist. Top-level `when`/`otherwise`/`end` now select declarations and includes before registration (A4; T004-13). |
 | Improved templates | Spec 016 defines directives, verbatim strings, rendering, and `do render`; The previously missing CLI is implemented and covered by T016-01; portable template units cover directives and verbatim strings. Audit all acceptance clauses rather than introducing unrelated delimiter syntax. |
 | More intuitive error names | Keep registered stable codes and improve concrete messages/tips first. Renaming public codes needs coordinated specs, diagnostics, fixtures, and compatibility policy. |
-| Streaming standard library | Validate atom/batch/nested-source semantics, callbacks, bounds, fairness, cancellation, and ownership against specs 007/012. Process byte streaming alone does not prove library lifting. |
+| Streaming standard library | Verified portable atom/batch/nested-source lifting through uppercase, map, filter, flatmap and reduce. Callback replacement exposed KB-12, now fixed with cancellation, stale-completion and partial-progress regressions. Core protocol tests cover bounds, fairness and ownership; CLI publication retains its independent backpressure gates. |
 | Security model and process groups | Reviewed in `review-security.md`; targeted POSIX sanitizer tests pass. Grants are lexical host-operation controls, with documented symlink and child-process boundaries. |
 | CLI experience | Unified runner is implemented. Prioritize accurate help, migration errors, examples, and discoverable grants; maintain native/WASM parity. |
 | Live incremental updates | Native watch reloads the build graph after source edits and recovers from malformed included sources. T009-14 also covers input changes during a running recipe. WASM watch remains unsupported. |
 | Managed services/provisioning | Research item. Define persistent process ownership, health, restart, teardown, and state before exposing commands. |
 | General scripting/shell replacement | Kash and shared multi-fragment execution now address this. The standalone `examples/shell/01-values.kash` runs with exit 0 and identical native/WASM output, including repeated lazy-definition reads. Recovery, async joining, and interruption retain their conformance coverage. |
 | File templating | Implemented through spec 016. Verify dependency capture, include cycles, source diagnostics, and native/WASM render parity. |
+| Parser zero-copy | Partial borrowing, not zero-copy: `source.New` clones source name/text, decoded strings and target literals own buffers. Consider an explicit adopted/borrowed source API and measure allocations before changing ownership. |
 | Jobs/program/argv/runtime display | Existing progress reports activity and totals. Per-job argv/timing presentation needs bounded storage, clear stream behavior, and no leakage into JSON diagnostics. |
 | Terminal color functions | Optional library feature; CLI presentation already has a color policy. Avoid mixing terminal escapes into canonical value display. |
 | JavaScript API | The module ABI and JS loader exist. A documented embedding API should expose disposal, copied buffers, grants, host completion, and cancellation; CLI internals are not an API contract. |
@@ -365,3 +366,23 @@ Default GCC also reports a signedness warning in generated Solod math C; Clang
 passes the warning gate without weakening checks. A3 is addressed; required and
 optional target parameters, streaming-library acceptance and final full-tree
 verification still need work.
+
+## Streaming-library ownership verification
+
+New standard-library integration tests drive scalar atoms, complete and empty
+batches, and nested sources through uppercase, map, filter, flatmap and reduce.
+Correlated barriers make each expected publication observable without sleeps.
+An owned earlier result survives later updates, and pure lifted operations issue
+no host requests. The callback replacement test cancels an outstanding request,
+discards already accumulated callback progress, rejects its late completion and
+resumes the replacement batch in input order.
+
+This exposed KB-12: outer-first source teardown wrote into freed definition
+state, and dropping a submitted consumer's edges cancelled its sole publishing
+source. Nested teardown now unwinds inside out; reactive restart retains prior
+interest through dependency rebinding and releases obsolete branches. Current
+ASAN/UBSAN suites pass 66 core, 72 evaluator, 13 operation, 104 program and 33
+WASM-host tests. The selected commit independently passes 66 core and 13 operation
+tests in an isolated checkout. T012-02 passes all seven active assertions,
+including native/WASM markers before completion and native watch output while
+alive. Final full-tree verification remains separate.
