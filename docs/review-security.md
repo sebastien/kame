@@ -1,9 +1,14 @@
 # Security review
 
-Reviewed 2026-10-03; cache publication rechecked 2026-10-04. This review covers the native POSIX host, evaluation grants,
+Reviewed 2026-10-03; cache publication rechecked 2026-10-04; final ownership
+gates updated 2026-10-05. This review covers the native POSIX host, evaluation grants,
 JS/WASM forwarding, artifact writes, process cancellation, and diagnostic output.
 It is a source review with selected runtime reproductions, not a claim of complete
-memory-safety verification. Full repository verification remains in progress.
+memory-safety verification. The current full leak gate passes 409 portable tests,
+two external engine tests, Go CLI ASAN tests and 113 compiled CLI suites with
+ASAN/UBSAN and leak detection. The normal full gate also passes all 114 CLI
+suites. The dedicated WASM gate passes all 60 suites and both import audits;
+[review-specs.md](review-specs.md) records commands and release-artifact checks.
 
 ## Trust boundary
 
@@ -28,13 +33,14 @@ untrusted builds. Avoid describing `--allow-read=DIR` as a filesystem sandbox.
 | SEC-1 | High when output directories contain attacker-controlled entries | Non-durable native writes opened `OUTPUT.kame-write.tmp` directly, following a pre-created symlink and allowing concurrent writers to share staging data. | Fixed: exclusively create a unique sibling temporary, apply requested permissions, and rename only after successful write and close. |
 | SEC-2 | Trust-boundary limitation | Lexical roots permit symlink escape and executable grants do not constrain child effects. | Explicitly specified behavior; require host containment for hostile code. |
 | SEC-9 | Availability | An 8 MiB WASM recipe output aborts in transient event JSON allocation before forwarding all bytes. | KB-9 fixed: T012-03 verifies lossless 8 MiB NUL/binary stdout/stderr, bounded failure retention and 64 KiB cache replay on both hosts. All 28 WASM host sanitizer tests pass. T010-22 now verifies static `NO_MEMORY` diagnostics, instance isolation/reuse, host-completion exhaustion, temporary module-heap recovery and unrelated traps. |
-| SEC-3 | Verification gap | The compiled CLI leak gate previously lacked trustworthy instrumented results. | Verified: all 102 selected CLI suites pass with ASAN/UBSAN and leak detection enabled. ASAN symbols remain present before and after the run. The binary metadata suite is intentionally excluded from this gate. Earlier broad package coverage passed 359 tests; current focused coverage passes 28 WASM host and 96 program tests, plus Go CLI sanitizer tests. |
+| SEC-3 | Verification gap | The compiled CLI leak gate previously lacked trustworthy instrumented results. | Closed: the current complete `make test-leaks` passes 409 portable tests, two external engine tests, Go CLI ASAN tests and all 113 selected compiled CLI suites. ASAN/UBSAN symbols remain present after the run. Only the debug binary metadata suite is excluded. |
 | SEC-7 | Memory safety | Returning a definition function from a `let` exposed a freed function and scope to calls and ancestor-store rejection. | Fixed: definition lookups return an owned wrapper retaining the lexical scope. All 65 evaluator sanitizer tests pass, including returned-function calls, result cleanup, and `DEF_ESCAPE` rejection. |
 | SEC-8 | Input validation | WASM build-source descriptors accepted incorrectly typed fields and offsets whose source end exceeded the 32-bit span range. | Fixed: require string names/text, integer offsets, and an in-range source end before copying fragments. All 26 WASM host sanitizer tests pass, including malformed descriptors and recovery after rejection. |
 | SEC-6 | High when cache directories contain attacker-controlled entries | WASM cache put followed an existing record symlink and overwrote its target. | Fixed: exclusive sibling staging, file sync, and rename; T010-19 preserves a public marker and verifies the published cache hit. |
 | SEC-5 | Atomic visibility | JS write requests previously used direct file writes. | Fixed: exclusive staging in a private sibling directory followed by rename; T010-21 covers bytes, zero length, failed publication and cleanup. |
 | SEC-10 | Memory safety | An operation-wrapped lazy definition cycle reallocated frames borrowed from an engine diagnostic, leaving a dangling frame pointer for the scheduler. | KB-11 fixed: clone evaluator failure results before adding frames; preserve terminal state after source polling and free discarded results. A pre-feature compiled ASAN reproduction confirms the defect predates scoped definitions. |
 | SEC-11 | Memory safety | Nested operation teardown freed borrowed outer definition state first; reactive callback restart also dropped the sole publishing source interest. | KB-12 fixed by inside-out teardown and retained interest through rebinding. Isolated sanitizer regressions cover cancelled callbacks, stale completions, partial-progress disposal and obsolete branch release. |
+| SEC-12 | Build supply-chain boundary | `tools/provision-cosmocc.sh` downloads the compiler from a mutable HTTPS URL without a pinned version or archive digest. | Reproducible release builds need a separately pinned and verified compiler; generated release checksums authenticate neither the compiler nor their own provenance. Runtime launcher checksum verification is a separate contract. |
 | SEC-4 | Low confidentiality limit | Live process streams, collected shell results, and explicit `out` remain observable, even though diagnostic causes omit captured output. | Intended: omission protects diagnostic serialization, not deliberate output. |
 
 The atomic-write fix also removes the old fixed path-length temporary buffer:
@@ -65,7 +71,10 @@ Cache records are local build data; successful records use temporary writes and
 rename. Cross-process cache locking and cache eviction are explicitly deferred
 by spec 008.
 
-## Verification
+## Earlier verification snapshots
+
+The results below document preceding revisions. Current full-tree results and
+commands are recorded in [review-specs.md](review-specs.md).
 
 - `cd src/go/kame && so test ./host/posix`: 21 tests pass, including staging
   symlink protection, output permissions, durable output, and temporary cleanup
@@ -92,15 +101,16 @@ allocations.
 
 The CLI harness now preserves sanitizer build flags when refreshing `build/kame.sanitize`. A forced harness rebuild was checked for `__asan_init`/report symbols and passed the 94-assertion parse matrix. The earlier run that replaced the executable with a checks-only binary is discarded as leak-gate evidence.
 
-The current compiled CLI gate completed with exit 0; its log is
+The earlier 102-suite compiled CLI gate completed with exit 0; its log is
 `build/review/cli-leak-gate-current.log`. `nm` finds `__asan_init` and
 `__asan_report_load1` both before and after the harness run. The command is the
 CLI conformance portion of `make test-leaks`, with
 `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`, `UBSAN_OPTIONS=halt_on_error=1`, and
 `CLI_BIN=build/kame.sanitize` (absolute path). All 102 selected suites pass;
 `T013-03-meta-binary.sh` is intentionally excluded because it checks the debug
-artifact's metadata. This closes the compiled CLI verification gap, while the
-remaining specification/feature requirements still prevent release completion.
+artifact's metadata. That run closed the instrumentation gap at its revision.
+Subsequent requirement fixes and their final full-tree results are recorded in
+the specification audit.
 
 The 2026-10-04 allocator checkpoint and publisher fixes were verified in an
 isolated checkout containing the committed changes, excluding unfinished Kash

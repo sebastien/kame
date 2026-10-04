@@ -1,29 +1,29 @@
 # Improvements review
 
-Reviewed 2026-10-03 against `TODO.md`, `TODO-GAPS.md`, the current specification
-acceptance lists, implementation, and running native/WASM conformance suites.
+Reviewed 2026-10-03; specification audit and final gates updated 2026-10-05
+against `TODO.md`, `TODO-GAPS.md`, the current specification acceptance lists,
+implementation, and running native/WASM conformance suites.
 This document distinguishes implemented behavior, documented boundaries, and
 remaining work. It does not close a feature request merely by proposing a design.
 
-## Release priorities
+## Current disposition
 
-Fix reproducible correctness failures before expanding syntax. The current review
-found missing WASM include expansion in discovered builds/inspections (KB-3) and
-an aggregate publication output that can remain stale after adding a glob member
-immediately after a rebuild. The aggregate defect (KB-4) was caused by Solod dropping timestamp nanoseconds
-and is now fixed in the POSIX host: 21 sanitizer tests and all 102 publication
-assertions pass. WASM build and inspection include expansion is fixed (KB-3): 24 parity assertions
-and 21 WASM host sanitizer tests pass. Complete the requirement-by-requirement spec
-comparison and full sanitizer/WASM checks before declaring this project done.
+All concrete `TODO-GAPS.md` porting requirements are addressed, and KB-1 through
+KB-12 in `KAME-BUGS.md` are fixed. [review-specs.md](review-specs.md) maps specs
+000–018 to implementation evidence and explicit design boundaries. The current
+complete leak gate passes 409 portable tests, two external engine tests, Go CLI
+ASAN tests and all 113 selected CLI suites. The normal full gate also passes all
+114 CLI suites, including binary metadata. The dedicated WASM gate passes all
+60 directly invoked suites and both import audits. Actual APE conformance and
+the staged release bundle/launcher checks also pass; the audit records commands
+and the host execution boundary.
 
-The directory-source bug KB-2 is fixed, as are stale expression command fixtures,
-unquoted tool-path definitions in the repository build, and bootstrap test output
-pollution from recursive Make directory messages. Native artifact writes now use
-exclusive staging files. Native shutdown no longer waits 100 ms with no children. WASM declared file
-inputs now query the embedding filesystem (KB-5), expanded spans service host
-reads, and declarative write/yield effects publish before dependent recipes
-(KB-6). T010-21 uses isolated outputs so native runs cannot mask missing WASM writes.
-See the security and performance reviews for evidence and limitations.
+The TODO review distinguishes required correctness/specification work from
+proposed features. Required/optional standalone target arguments, expression-path
+wildcard shorthand, richer job presentation, parser zero-copy and optional
+language/API additions remain proposals. Their disposition below preserves that
+scope. Managed services and declaration generation retain explicit design
+boundaries rather than placeholder behavior.
 
 ## TODO.md disposition
 
@@ -86,20 +86,24 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 
 ## Completion gates
 
-Use specification acceptance clauses as requirements, not just the existence of
-numbered test files. The first full `make test` attempt passed portable package,
-example-package, and Go CLI tests but failed five of 89 CLI suites. Isolated
-reruns confirmed fixed table fixtures, bootstrap, self-build, and signal coverage;
-publication graph growth now passes after the timestamp-precision fix. Rerun affected suites after fixes, then the
-broad suite on the final checkout. Broad sanitizers and the explicit `test-wasm`
-gate remain required. Cross-host source locations, includes, dry-run side effects,
-and invocation capability inheritance need direct evidence.
+The final normal, complete leak and dedicated WASM gates pass. The specification
+audit records exact commands, counts, revision scope and release-artifact proof.
+The leak harness keeps ASAN/UBSAN instrumentation and excludes only the dedicated
+debug metadata suite; the normal harness includes it. Git HEAD was stable during
+build-mode and no-relink assertions. Direct WASM suite modes are corrected rather
+than bypassed through the Bash harness.
 
-Maintain this review as decisions become verified. Do not erase remaining design
-items or mark the overall objective complete while named gaps or spec clauses
-lack implementation evidence.
+Standalone target parameters and parser zero-copy remain explicitly reviewed
+TODO proposals. They are not current specification acceptance requirements.
+Optional generation, services and release signing retain their documented design
+boundaries. Future work should use this disposition without treating those
+proposals as implemented behavior.
 
-## Latest verification
+## Earlier verification snapshots
+
+The entries below record successive revisions. Counts and pending statements
+apply to their original snapshots; the current disposition and specification
+audit supersede them.
 
 The earlier full `make test` passed package, external example, Go CLI unit, and
 all 100 shell conformance suites before optional includes and the live/large
@@ -363,9 +367,10 @@ with Clang at a stable revision, including debug/release modes, unchanged shared
 metadata and no relink of unchanged native outputs. Committing during an earlier
 run changed the build ID mid-compilation; that run is not regression evidence.
 Default GCC also reports a signedness warning in generated Solod math C; Clang
-passes the warning gate without weakening checks. A3 is addressed; required and
-optional target parameters, streaming-library acceptance and final full-tree
-verification still need work.
+passes the warning gate without weakening checks. At this snapshot A3 was
+addressed, while streaming-library acceptance and final full-tree verification
+still needed work. Standalone required/optional target
+parameters remained a TODO design proposal.
 
 ## Streaming-library ownership verification
 

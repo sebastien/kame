@@ -211,7 +211,7 @@ now drain copied ABI events while the host request is pending. T012-02 verifies
 human and JSON markers on both streams before the release file exists and before
 the process completes, plus native watch output before termination.
 
-## Open verified defects
+## Later fixed defects
 
 ### KB-9 — Large WASM recipe output exhausts transient event memory
 

@@ -6,6 +6,17 @@ startup, loading, compilation, evaluation/inspection, and teardown. Five samples
 per case were checked for correct output. Other conformance tests were running,
 so these observations are not stable release benchmarks or isolated CPU profiles.
 
+## Verification scope
+
+The measurements below are historical 2026-10-03 observations; they have not been
+remeasured after the scoped-definition and streaming fixes. The current complete
+leak gate passes 409 portable tests, two external engine tests, Go CLI ASAN tests
+and 113 selected CLI suites. These establish runtime conformance and ownership
+under the exercised workloads, not throughput or allocation benchmarks.
+The normal gate also passes all 114 CLI suites; the dedicated WASM gate passes
+all 60 suites and both import audits. [review-specs.md](review-specs.md) records
+commands and release-artifact checks.
+
 ## Measured results
 
 | Workload | Native before (median ms) | Native after (median ms) | WASM after (median ms) |

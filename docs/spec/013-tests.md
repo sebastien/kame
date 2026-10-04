@@ -132,9 +132,9 @@ Current coverage:
 | 013 | 5 suites; sequences 01, 02, 03, 04, 05 | Catalog, fixture hygiene, binary contract, graph growth and artifact build modes |
 | 014 | 2 suites; sequences 01, 02 | Sections, pattern replace, bare captures and exact/template precedence |
 | 015 | 3 suites; sequences 01, 02, 03 | Launcher integrity, backend choice, provisioning and build metadata |
-| 016 | 1 suites; sequences 01 | Template rendering, directives, includes, styles and check mode |
+| 016 | 1 suite; sequences 01 | Template rendering, directives, includes, styles and check mode |
 | 017 | 19 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 | Kash processes/control, unified sessions, capabilities, async ownership and recipe interpreters |
-| 018 | 1 suites; sequences 01 | Structural formatting goldens, equivalent ASTs, width boundaries and host parity |
+| 018 | 1 suite; sequences 01 | Structural formatting goldens, equivalent ASTs, width boundaries and host parity |
 
 The catalog is authoritative; these suite counts describe coverage rather than
 replacing a clause-by-clause spec audit. Unified-run coverage in T017-05 through
@@ -147,10 +147,9 @@ ownership, fairness and retained interest through reactive rebinding.
 
 ### Unified-run regression coverage
 
-Expression-command cases have migrated to `do run
---lang expr` rather than dropping their evaluator, argument, capability, or
-byte-output assertions. Historical defect descriptions below retain the old
-command name because they describe the interface at the time of the defect.
+Expression-command cases have migrated to `do run --lang expr` rather than
+dropping their evaluator, argument, capability, or byte-output assertions.
+Historical defect descriptions below retain the old command name because they describe the interface at the time of the defect.
 
 Retain native/WASM conformance for:
 
