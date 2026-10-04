@@ -696,7 +696,7 @@ class Module {
 
   allocate(size, alignment = 1) {
     const pointer = this.exports.kame_wasm_alloc(size, alignment);
-    if (pointer === 0) throw new Error(`WASM allocation failed for ${size} bytes`);
+    if (pointer === 0) throw Object.assign(new Error(`WASM allocation failed for ${size} bytes`), { code: 'NO_MEMORY' });
     return pointer;
   }
 
@@ -1185,7 +1185,7 @@ class Module {
 
   processStarted(instance, request) {
     const status = request === undefined ? this.exports.kame_wasm_process_started(instance) : this.exports.kame_wasm_process_started_request(instance, request);
-    if (status !== 0) throw new Error('process start event failed');
+    if (status !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
   }
 
   processStream(instance, stderrStream, chunk, request) {
@@ -1194,16 +1194,16 @@ class Module {
     const status = request === undefined
       ? this.exports.kame_wasm_process_stream(instance, stderrStream ? 1 : 0, pointer, chunk.length)
       : this.exports.kame_wasm_process_stream_request(instance, request, stderrStream ? 1 : 0, pointer, chunk.length);
-    if (status !== 0) throw new Error('process stream event failed');
+    if (status !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
   }
 
   processTerminal(instance, outcome, status, signal, stdoutBytes, stderrBytes, code, message, request) {
-    if (request !== undefined && this.exports.kame_wasm_request_attach(instance, request) !== 0) throw new Error('process completion correlation failed');
+    if (request !== undefined && this.exports.kame_wasm_request_attach(instance, request) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
     const stdout = this.write(stdoutBytes ?? new Uint8Array(0));
     const stderr = this.write(stderrBytes ?? new Uint8Array(0));
     const codeBytes = this.write(code);
     const messageBytes = this.write(message);
-    if (this.exports.kame_wasm_process_terminal(instance, status, signal, outcome, stdout.pointer, stdout.length, stderr.pointer, stderr.length, codeBytes.pointer, codeBytes.length, messageBytes.pointer, messageBytes.length) !== 0) throw new Error('process terminal event failed');
+    if (this.exports.kame_wasm_process_terminal(instance, status, signal, outcome, stdout.pointer, stdout.length, stderr.pointer, stderr.length, codeBytes.pointer, codeBytes.length, messageBytes.pointer, messageBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
   }
 
   async materialize(source, target, context, name) {
@@ -1369,7 +1369,7 @@ function runArgvCapture(stages, context) {
   if (!Array.isArray(setups) || (setups.length !== 0 && setups.length !== stages.length) || setups.some((setup) => typeof setup.cwd !== 'string' || setup.cwd.includes('\0') || !Number.isSafeInteger(setup.timeoutMS) || setup.timeoutMS < 0 || !Array.isArray(setup.environment) || setup.environment.some((entry) => typeof entry !== 'string' || entry.includes('\0') || !/^[A-Za-z_][A-Za-z0-9_]*=/.test(entry)))) {
     return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid stage setup' });
   }
-  return new Promise((resolveRun) => {
+  return new Promise((resolveRun, rejectRun) => {
     const childEnv = { ...process.env };
     for (const entry of context.environment ?? []) {
       const at = entry.indexOf('=');
@@ -1407,6 +1407,7 @@ function runArgvCapture(stages, context) {
     const limit = context.captureLimit > 0 ? context.captureLimit : 1024 * 1024;
     let length = 0;
     let failure = null;
+    let publicationFailure = null;
     const timers = [];
     let remaining = 0;
     let launched = false;
@@ -1419,6 +1420,11 @@ function runArgvCapture(stages, context) {
       }
       syncOutputReaders();
     };
+    const publish = (callback, chunk) => {
+      if (failure !== null) return;
+      try { callback(chunk); }
+      catch (error) { publicationFailure = error; stop(error.code ?? 'HOST_FAIL', error.message); }
+    };
     const cancelled = () => stop('EXEC_CANCELLED', 'invocation cancelled');
     context.signal?.addEventListener('abort', cancelled, { once: true });
     if (context.timeoutMS > 0) timers.push(processDeadline(context.timeoutMS, () => stop('RECIPE_TIMEOUT', 'process timed out')));
@@ -1426,6 +1432,7 @@ function runArgvCapture(stages, context) {
       if (!launched || remaining !== 0) return;
       for (const cancel of timers) cancel();
       context.signal?.removeEventListener('abort', cancelled);
+      if (publicationFailure !== null) { rejectRun(publicationFailure); return; }
       if (failure !== null) { resolveRun(failure); return; }
       let status = 0, signal = 0;
       for (const result of results) {
@@ -1450,7 +1457,7 @@ function runArgvCapture(stages, context) {
         const cancel = configuration.timeoutMS > 0 ? processDeadline(configuration.timeoutMS, () => stop('RECIPE_TIMEOUT', 'stage timed out')) : () => {};
         timers.push(cancel);
         child.once('exit', cancel);
-        publishReader(child.stderr, (chunk) => { if (context.onStderr) context.onStderr(chunk); else stderr.write(chunk); }, () => failure !== null || context.signal?.aborted);
+        publishReader(child.stderr, (chunk) => { publish((bytes) => { if (context.onStderr) context.onStderr(bytes); else stderr.write(bytes); }, chunk); }, () => failure !== null || context.signal?.aborted);
         child.once('error', () => stop('HOST_FAIL', 'cannot start process'));
         child.once('close', (status, signalName) => {
           results[i] = { status: status ?? 0, signal: osConstants.signals[signalName] ?? 0, outcome: 0 };
@@ -1459,7 +1466,7 @@ function runArgvCapture(stages, context) {
         });
         if (i === stages.length - 1 && child.stdout !== null) {
           const receive = (chunk) => {
-            if (context.stream) { context.onStdout(chunk); return; }
+            if (context.stream) { publish(context.onStdout, chunk); return; }
             length += chunk.length;
             if (length > limit) stop('CAPTURE_LIMIT', 'command substitution exceeded capture limit');
             else if (failure === null) chunks.push(chunk);
@@ -1573,7 +1580,7 @@ async function runProcess(module, instance, script, context, request) {
 function runProcessAttempt(module, instance, script, context, request) {
   const retain = module.exports.kame_wasm_process_retain_limit(instance, request ?? 0n);
   if (retain === 0xffffffff) throw new Error('process retention budget unavailable');
-  return new Promise((resolveAttempt) => {
+  return new Promise((resolveAttempt, rejectAttempt) => {
     const shell = context.shell.length !== 0 ? context.shell : ['/bin/sh', '-c'];
     const childEnv = { ...process.env };
     for (const entry of context.environment) {
@@ -1582,37 +1589,42 @@ function runProcessAttempt(module, instance, script, context, request) {
     }
     const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, detached: true });
     track(child);
-    module.processStarted(instance, request);
-    module.drainEvents(instance, context);
     const out = [];
     const err = [];
     let outLength = 0;
     let errLength = 0;
     let failure = null;
+    let publicationFailure = null;
     let timedOut = false;
     let timer = null;
     if (context.timeoutMS > 0) {
       timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } syncOutputReaders(); }, context.timeoutMS);
     }
     const cancelled = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } syncOutputReaders(); };
+    const publish = (callback) => {
+      if (publicationFailure !== null) return;
+      try { callback(); }
+      catch (error) { publicationFailure = error; cancelled(); }
+    };
     context.signal?.addEventListener('abort', cancelled, { once: true });
     if (context.signal?.aborted) cancelled();
-    publishReader(child.stdout, (chunk) => {
+    publishReader(child.stdout, (chunk) => publish(() => {
       const kept = Math.min(chunk.length, retain + 1 - outLength);
       if (kept > 0) { out.push(Buffer.from(chunk.subarray(0, kept))); outLength += kept; }
       module.processStream(instance, false, chunk, request);
       module.drainEvents(instance, context);
-    }, () => timedOut || context.signal?.aborted);
-    publishReader(child.stderr, (chunk) => {
+    }), () => publicationFailure !== null || timedOut || context.signal?.aborted);
+    publishReader(child.stderr, (chunk) => publish(() => {
       const kept = Math.min(chunk.length, retain + 1 - errLength);
       if (kept > 0) { err.push(Buffer.from(chunk.subarray(0, kept))); errLength += kept; }
       module.processStream(instance, true, chunk, request);
       module.drainEvents(instance, context);
-    }, () => timedOut || context.signal?.aborted);
+    }), () => publicationFailure !== null || timedOut || context.signal?.aborted);
     child.once('error', (error) => { failure = error; });
     child.once('close', (code, signalName) => {
       if (timer !== null) clearTimeout(timer);
       context.signal?.removeEventListener('abort', cancelled);
+      if (publicationFailure !== null) { rejectAttempt(publicationFailure); return; }
       const stdout = Buffer.concat(out);
       const stderr = Buffer.concat(err);
       let status = 0;
@@ -1624,6 +1636,10 @@ function runProcessAttempt(module, instance, script, context, request) {
       else if (failure !== null) resolveAttempt({ ok: false, outcome: 3, status: 0, signal: 0, code: 'HOST_FAIL', message: failure.message, stdout, stderr, retryable: false });
       else if (status !== 0 || signal !== 0) resolveAttempt({ ok: false, outcome: 0, status, signal, code: 'RECIPE_FAIL', message: `process exited with status ${status}`, stdout, stderr, retryable: true });
       else resolveAttempt({ ok: true, stdout, stderr });
+    });
+    publish(() => {
+      module.processStarted(instance, request);
+      module.drainEvents(instance, context);
     });
   });
 }

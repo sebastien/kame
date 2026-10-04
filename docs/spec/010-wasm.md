@@ -217,6 +217,11 @@ its own small [compiler helper ABI](https://github.com/emscripten-core/emscripte
 implementation and exception tag, without host imports. Embedders therefore
 need WebAssembly exception-handling support.
 
+The JavaScript host preserves the diagnostic when an ABI process publisher
+fails. It stops and kills the affected shell or argv process groups, waits for
+all children to close, then rejects the host operation. Streaming callbacks
+must not throw uncaught exceptions or retry an exhausted instance.
+
 ## JavaScript CLI Wrapper
 
 ### Role

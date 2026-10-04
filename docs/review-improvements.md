@@ -203,3 +203,9 @@ KB-10 fixes the mixed WASM runner's failure-summary clock. Its reproduction
 changed from epoch-sized elapsed seconds to 0.047 s; T017-07 passes all 78
 assertions with the compiled sanitizer CLI and WASM, including the bounded
 invocation-duration check. This is a correctness check, not a latency benchmark.
+
+WASM process publishers now preserve allocator diagnostics and contain errors
+from start/stream callbacks. Shell and argv hosts kill their process groups and
+wait for child close before propagating failure. T010-22 additionally runs real
+unbounded stdout/stderr children against a 256 KiB logical heap and checks
+clean `NO_MEMORY` reporting plus child reaping on both launch paths.

@@ -82,4 +82,10 @@ NODE
 else
   test-fail "memory exhaustion ABI assertions failed"
 fi
+test-step "stream publisher exhaustion kills and reaps shell and argv children"
+if python3 "$CLI_ROOT/tests/wasm-memory.py" "$CLI_ROOT"; then
+  test-ok "stdout/stderr failures preserve NO_MEMORY after process cleanup"
+else
+  test-fail "process publisher exhaustion assertions failed"
+fi
 test-end
