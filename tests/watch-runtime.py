@@ -172,6 +172,28 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-shared-roots-') as directory
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-scoped-env-') as directory:
+    project = Path(directory)
+    (project / 'input').write_text('first')
+    source = project / 'Makefile.kmk'
+    source.write_text('chosen : ./input ; [env: [WATCH_SCOPED: "scoped"]]\n\tprintf %s "$WATCH_SCOPED" >> watch-log\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--env', 'WATCH_SCOPED=invocation', '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+        try:
+            log = project / 'watch-log'
+            wait_for(process, lambda: read(log) == 'scoped', error, 'initial scoped environment')
+            (project / 'input').write_text('second')
+            wait_for(process, lambda: read(log) == 'scopedscoped', error, 'scoped environment after input invalidation')
+            source.write_text('chosen : ./input ; [env: [WATCH_SCOPED: "scoped"]]\n\tprintf %s "$WATCH_SCOPED" >> watch-log; : # source reload\n')
+            wait_for(process, lambda: read(log) == 'scopedscopedscoped', error, 'scoped environment after source reload')
+            (project / 'input').write_text('third')
+            wait_for(process, lambda: read(log) == 'scopedscopedscopedscoped', error, 'scoped environment after reloaded graph invalidation')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
     project = Path(directory)
     (project / 'Makefile.kmk').write_text('MARK = (text (read ./input))\nchosen :\n\tprintf %s @(MARK) >> watch-log\n')

@@ -2190,7 +2190,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       cancellation.signal.addEventListener('abort', () => watch?.cancellation.abort(), { once: true });
       invocationCancellations.add(watch.cancellation);
       const snapshot = module.watchSnapshot(watch);
-      syncWatchResources(snapshot);
+      await syncWatchResources(snapshot);
       await seedSources();
       return true;
     } catch (error) {
@@ -2199,14 +2199,17 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       return false;
     }
   };
-  const syncWatchResources = (snapshot) => {
+  const syncWatchResources = async (snapshot) => {
     const active = new Set();
     for (const resource of snapshot.resources ?? []) {
       const key = watchKey(resource.kind, resource.name);
       active.add(key);
       const tracked = fingerprints.get(key);
-      if (!tracked) fingerprints.set(key, { ...resource, stamp: resource.missing === true ? 'missing' : null, source: false });
-      else if (tracked.stamp === null && resource.missing === true) tracked.stamp = 'missing';
+      if (!tracked || tracked.stamp === null) {
+        const stamp = resource.missing === true ? 'missing' : await watchFingerprint(resource.kind, resource.name);
+        if (!tracked) fingerprints.set(key, { ...resource, stamp, source: false });
+        else tracked.stamp = stamp;
+      }
     }
     for (const [key, record] of fingerprints) {
       if (!record.source && !active.has(key)) fingerprints.delete(key);
@@ -2222,7 +2225,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
         if (step === 1) module.serviceWatchRequest(watch);
         if (watch.hostError) throw watch.hostError;
         const snapshot = module.watchSnapshot(watch);
-        syncWatchResources(snapshot);
+        await syncWatchResources(snapshot);
         for (const root of snapshot.roots ?? []) {
           if (!root.done || !root.diagnosticJSON) continue;
           const key = `${root.index}:${root.revision}:${root.generation}`;
