@@ -176,6 +176,11 @@ Filesystem operations issue host requests and require capabilities:
 returning. `exists?` also registers a dependency so creation or removal can
 invalidate its consumer.
 
+Every reached glob pattern is represented by one shared lazy dependency source,
+including when its current result is empty. The dependency tracks membership,
+so watch invalidation reevaluates the same source and its consumers when a match
+is added or removed. See `023-wildcard-sources.md`.
+
 Relative paths resolve against evaluation cwd. `wildcard` supports `*`, `?`,
 character classes, and recursive `**`. Results are canonical cwd-relative paths
 with `./` prefixes where possible, sorted by raw UTF-8 bytes. Each argument is

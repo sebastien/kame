@@ -436,6 +436,10 @@ Definitions are lazy as specified in `005-evaluation.md`.
 
 ## Rules
 
+Named task rules may declare standalone named arguments after their target;
+required and optional forms, literal defaults, and their distinction from file
+captures are defined in `022-target-arguments.md`.
+
 A rule has a header and zero or more indented body lines:
 
 ```kame
@@ -475,6 +479,9 @@ and contributes no input when unmatched. Recursive `**` follows the library
 contract. Membership changes invalidate dependent output identity. Quoted paths
 retain literal wildcard characters, and Kash argv keeps its existing semantics.
 Formatting preserves the authored wildcard token; AST JSON marks it `wildcard`.
+Each reached pattern is a lazy shared glob resource, including an empty match;
+watch invalidation updates its membership and retained consumers. See
+`023-wildcard-sources.md` for the source lifecycle contract.
 
 A file rule may have multiple outputs. Phony tasks, cached tasks,
 and services have exactly one output target. `task` and `service` are reserved at

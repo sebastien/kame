@@ -91,6 +91,8 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-glob-') as directory:
             wait_for(process, lambda: read(project / 'joined') == 'a', error, 'initial glob build')
             (project / 'inputs/b.txt').write_text('b')
             wait_for(process, lambda: read(project / 'joined') == 'ab', error, 'glob membership invalidation')
+            (project / 'inputs/b.txt').unlink()
+            wait_for(process, lambda: read(project / 'joined') == 'a', error, 'removed glob member invalidation')
             cases += 1
         finally:
             stop(process)
