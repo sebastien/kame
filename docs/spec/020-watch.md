@@ -74,7 +74,7 @@ changes, live event publication and signal-driven disposal. T010-23 exercises
 native and WASM source reload, malformed-source recovery, graph replacement,
 failed-root recovery after an input appears or an optional include is created,
 input changes during a running recipe, glob membership, idle settled-root
-stability and SIGINT cleanup.
+stability, obsolete-input subscription removal and SIGINT cleanup.
 Portable allocator coverage includes shared roots, repeated snapshots, invalid
 batch atomicity, malformed JSON rejection and failed-start cleanup. T009-14 and
 T010-23 also verify grant preservation through invalidation and source reload,

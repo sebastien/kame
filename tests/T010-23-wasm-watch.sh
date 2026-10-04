@@ -6,7 +6,7 @@ test-start "T010-23 wasm watch source graph and active inputs"
 test-step "build WASM CLI"
 cd "$CLI_ROOT"
 make dist-wasm >/dev/null
-test-step "source reload, repair, active input changes and cancellation"
+test-step "source reload, repair, active input changes, subscription cleanup and cancellation"
 python3 "$CLI_ROOT/tests/watch-runtime.py" node "$CLI_ROOT/dist/kame.js"
-test-ok "WASM watch reloads sources and rebuilds changed active inputs"
+test-ok "WASM watch reloads sources and tracks only active inputs"
 test-end

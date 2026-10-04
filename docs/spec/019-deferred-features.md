@@ -64,9 +64,10 @@ review documents with the resulting behavior and remaining material boundaries.
 
 All D01–D18 items were open at introduction of this specification. D01 now has
 retained portable roots, additive WASM watch ABI calls, JavaScript polling and
-invalidation, and nine passing native/WASM live scenarios, including optional-
-include creation and settled-root idleness; its remaining
-acceptance cases are listed in 020. T010-25 now covers public ABI query/copy,
+invalidation, and ten passing native/WASM live scenarios, including optional-
+include creation, settled-root idleness and obsolete-input subscription cleanup;
+its remaining acceptance cases are listed in 020. T010-25 now covers public
+ABI query/copy,
 malformed input, retained-root invalidation, allocation-failure diagnostics,
 instance isolation and disposal. T009-14 and T010-23 additionally verify grant
 preservation through invalidation and source reload, with denied reads blocked

@@ -129,6 +129,33 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-optional-include-') as direc
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-obsolete-input-') as directory:
+    project = Path(directory)
+    old_input = project / 'old'
+    new_input = project / 'new'
+    output = project / 'joined'
+    runs = project / 'runs'
+    old_input.write_text('old')
+    source = project / 'Makefile.kmk'
+    source.write_text('./joined : ./old\n\tcat @< > @>; printf x >> runs\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', './joined'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: read(output) == 'old' and read(runs) == 'x', error, 'initial observed input')
+            source.write_text('./joined : ./new\n\tcat @< > @>; printf x >> runs\n')
+            new_input.write_text('new')
+            wait_for(process, lambda: read(output) == 'new' and read(runs) == 'xx', error, 'replacement input graph')
+            old_input.write_text('obsolete')
+            time.sleep(.5)
+            assert read(output) == 'new' and read(runs) == 'xx', 'obsolete input subscription triggered work'
+            new_input.write_text('current')
+            wait_for(process, lambda: read(output) == 'current' and read(runs) == 'xxx', error, 'current input subscription remains active')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
     project = Path(directory)
     (project / 'Makefile.kmk').write_text('MARK = (text (read ./input))\nchosen :\n\tprintf %s @(MARK) >> watch-log\n')
