@@ -113,6 +113,13 @@ func (r *Runtime) WatchStateJSON() PureResult {
 		}
 		e.Str("name")
 		e.Str(keys[i].Name)
+		if keys[i].Kind == core.ResourceFile {
+			node := r.Program.Engine.Lookup(keys[i])
+			if node != nil && node.Current {
+				e.Str("missing")
+				e.Bool(node.Latest.Kind == core.Nil)
+			}
+		}
 		e.EndObject()
 		keys[i].Free(r.Alloc)
 	}

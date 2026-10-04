@@ -103,7 +103,9 @@ const initial = state(first);
 assert.equal(initial.busy, false, JSON.stringify(initial));
 assert.equal(initial.roots.length, 1);
 assert.equal(initial.roots[0].value, '"first"');
-assert.ok(initial.resources.some((item) => item.kind === 'file' && item.name.includes('input')));
+const observedInput = initial.resources.find((item) => item.kind === 'file' && item.name.includes('input'));
+assert.ok(observedInput);
+assert.equal(observedInput.missing, false);
 assert.deepEqual(state(first), initial, 'repeated state queries changed or dropped root state');
 
 fileContent = 'second';

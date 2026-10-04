@@ -119,6 +119,71 @@ func TestWatchInvalidationBatchRejectsPartialMutation(t *testing.T) {
 	after.Free(a)
 }
 
+func TestWatchFailedReadRecoversAfterMissingFileAppears(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "VALUE = (text (read ./input))\n")
+	if started.Runtime == nil {
+		t.Fatal("compile watched definition")
+		return
+	}
+	r := started.Runtime
+	defer r.Free()
+	r.SetFile("seed", []byte("seed"))
+	filesystem := r.Host
+	begin := r.RequestWatch([]byte("[\"VALUE\"]"))
+	if begin.Code != "" {
+		t.Error(begin.Message)
+		begin.Free(a)
+		return
+	}
+	begin.Free(a)
+	for i := 0; i < 64; i++ {
+		next := r.Step()
+		if next.OK {
+			next.Request.Free(a)
+			t.Error("memory watch submitted host request")
+			return
+		}
+	}
+	snapshot := r.WatchStateJSON()
+	if !strings.Contains(snapshot.Text, "FS_ERR") || !strings.Contains(snapshot.Text, `"missing":true`) {
+		t.Error(snapshot.Text)
+	}
+	snapshot.Free(a)
+	resources := r.Program.FilesystemResources()
+	found := false
+	for i := range resources {
+		if resources[i].Kind == core.ResourceFile && strings.Contains(resources[i].Name, "input") {
+			found = true
+		}
+		resources[i].Free(a)
+	}
+	slices.Free(a, resources)
+	if !found {
+		t.Fatal("failed read was dropped from retained watch resources")
+		return
+	}
+	filesystem.SetFile("input", []byte("recovered"))
+	invalidated := r.InvalidateWatch([]byte("[{\"kind\":\"file\",\"name\":\"input\"}]"))
+	if invalidated.Code != "" {
+		t.Error(invalidated.Message)
+	}
+	invalidated.Free(a)
+	for i := 0; i < 64; i++ {
+		next := r.Step()
+		if next.OK {
+			next.Request.Free(a)
+			t.Error("repaired memory watch submitted host request")
+			return
+		}
+	}
+	snapshot = r.WatchStateJSON()
+	if !strings.Contains(snapshot.Text, `"value":"\"recovered\""`) {
+		t.Error(snapshot.Text)
+	}
+	snapshot.Free(a)
+}
+
 func TestWatchRejectsInvalidTargetsAndFreesFailedBatch(t *testing.T) {
 	a := t.Allocator()
 	invalid := []string{"[", "[]", "{}", "[1]", "[\"\"]", "[\"A\",false]"}

@@ -112,6 +112,21 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-missing-source-') as directo
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
+    project = Path(directory)
+    (project / 'Makefile.kmk').write_text('MARK = (text (read ./input))\nchosen :\n\tprintf %s @(MARK) >> watch-log\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: 'FS_ERR' in error.read_text(), error, 'failed root with missing input')
+            (project / 'input').write_text('recovered')
+            wait_for(process, lambda: read(project / 'watch-log') == 'recovered', error, 'root recovery after input repair')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 with tempfile.TemporaryDirectory(prefix='kame-watch-grants-') as directory:
     project = Path(directory)
     source = project / 'Makefile.kmk'

@@ -51,9 +51,14 @@ func addWatchResource(items *[]watchResource, p *program.Program, key core.Resou
             (*items)[i].Source = (*items)[i].Source || source
             return
         }
-    }
-    stamp := watchStamp(p, key, source)
-    *items = slices.Append(mem.System, *items, watchResource{Key: key.Clone(mem.System), Stamp: stamp, Source: source, Seen: true})
+	}
+	stamp := watchStamp(p, key, source)
+	if !source && p != nil && key.Kind == core.ResourceFile {
+		if node := p.Engine.Lookup(key); node != nil && node.Current && node.Latest.Kind == core.Nil {
+			stamp = cloneCommandText("missing")
+		}
+	}
+	*items = slices.Append(mem.System, *items, watchResource{Key: key.Clone(mem.System), Stamp: stamp, Source: source, Seen: true})
 }
 
 func refreshWatchResources(items *[]watchResource, session *buildSession, options buildArguments) {

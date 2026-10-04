@@ -40,7 +40,9 @@ watching or clock reads. Additive ABI calls accept a JSON array of target names,
 copy a nonmutating snapshot of busy state, root results and observed resources,
 and invalidate a validated JSON array of file/glob keys. Invalid batches have no
 partial effects. Queries preserve buffer-size/copy semantics and the static
-allocation-failure boundary. The JS host owns polling, source loading and signals.
+allocation-failure boundary. A settled file resource reports whether its cached
+observation was missing, allowing hosts to catch a file created before its first
+poll. The JS host owns polling, source loading and signals.
 
 ## Acceptance
 
@@ -70,7 +72,8 @@ releases retained handles on cancellation or instance disposal. The JavaScript
 CLI implements polling, debounce, source reload and repair, queued active-input
 changes, live event publication and signal-driven disposal. T010-23 exercises
 native and WASM source reload, malformed-source recovery, graph replacement,
-input changes during a running recipe, glob membership and SIGINT cleanup.
+failed-root recovery after an input appears, input changes during a running
+recipe, glob membership and SIGINT cleanup.
 Portable allocator coverage includes shared roots, repeated snapshots, invalid
 batch atomicity, malformed JSON rejection and failed-start cleanup. T009-14 and
 T010-23 also verify grant preservation through invalidation and source reload,

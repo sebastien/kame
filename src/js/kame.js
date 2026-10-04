@@ -2204,7 +2204,9 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
     for (const resource of snapshot.resources ?? []) {
       const key = watchKey(resource.kind, resource.name);
       active.add(key);
-      if (!fingerprints.has(key)) fingerprints.set(key, { ...resource, stamp: null, source: false });
+      const tracked = fingerprints.get(key);
+      if (!tracked) fingerprints.set(key, { ...resource, stamp: resource.missing === true ? 'missing' : null, source: false });
+      else if (tracked.stamp === null && resource.missing === true) tracked.stamp = 'missing';
     }
     for (const [key, record] of fingerprints) {
       if (!record.source && !active.has(key)) fingerprints.delete(key);
