@@ -19,6 +19,8 @@ Validate:
 - Streaming capabilities of standard library
 - [ ] security model of process execution, hopefully uses groups, etc
 
+- [x] Watch detect source changes to Kame's build graph
+
 Research:
 - We really need to design a nice CLI experience, it's quite bare bones for now
 - How do we do live updates (incremental builds as things get loaded)
