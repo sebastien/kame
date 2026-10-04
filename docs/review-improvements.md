@@ -43,7 +43,7 @@ See the security and performance reviews for evidence and limitations.
 | Streaming standard library | Validate atom/batch/nested-source semantics, callbacks, bounds, fairness, cancellation, and ownership against specs 007/012. Process byte streaming alone does not prove library lifting. |
 | Security model and process groups | Reviewed in `review-security.md`; targeted POSIX sanitizer tests pass. Grants are lexical host-operation controls, with documented symlink and child-process boundaries. |
 | CLI experience | Unified runner is implemented. Prioritize accurate help, migration errors, examples, and discoverable grants; maintain native/WASM parity. |
-| Live incremental updates | Native watch code exists, but the roadmap defers initial watch requirements and WASM reports unsupported. Audit native behavior separately; no claim of universal live-source delivery. |
+| Live incremental updates | Native watch reloads the build graph after source edits and recovers from malformed included sources. T009-14 also covers input changes during a running recipe. WASM watch remains unsupported. |
 | Managed services/provisioning | Research item. Define persistent process ownership, health, restart, teardown, and state before exposing commands. |
 | General scripting/shell replacement | Kash and shared multi-fragment execution now address this. The standalone `examples/shell/01-values.kash` runs with exit 0 and identical native/WASM output, including repeated lazy-definition reads. Recovery, async joining, and interruption retain their conformance coverage. |
 | File templating | Implemented through spec 016. Verify dependency capture, include cycles, source diagnostics, and native/WASM render parity. |
@@ -318,3 +318,12 @@ WASM formatter suites pass 193/93/6 assertions, and 27 expression sanitizer test
 pass. The registered catalog passes all 454 assertions. Advisory naming and
 organization conventions remain author guidance; the formatter preserves names,
 declaration order and surrounding language syntax.
+
+Native watch now compares source bytes even when both timestamps and size are
+preserved. Observed input invalidation forces another file recipe after an older
+input snapshot produces a newer output; order-only invalidation preserves its
+existing freshness behavior. T009-14 passes four compiled ASAN scenarios for
+source edits, malformed-source repair, graph changes and active-input changes.
+The pre-fix binary fails the preserved-metadata source check and the active-input
+case separately. Existing freshness and order-only gates pass 23 and 19
+assertions across native/WASM hosts; the catalog passes 458 assertions.

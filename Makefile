@@ -62,6 +62,7 @@ test-wasm: wasm-check
 	tests/T007-10-lib-record-lookup.sh
 	tests/T007-11-lib-tools.sh
 	tests/T009-13-cli-configuration.sh
+	tests/T009-14-cli-watch.sh
 	tests/T004-09-lang-rule-header-composition.sh
 	tests/T004-10-lang-line-continuations.sh
 	tests/T004-11-lang-wildcard-inputs.sh

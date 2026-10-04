@@ -23,8 +23,8 @@ func freeWatchResources(items []watchResource) {
     slices.Free(mem.System, items)
 }
 
-func watchStamp(p *program.Program, key core.ResourceKey) string {
-    if p != nil { return p.ResourceFingerprint(key) }
+func watchStamp(p *program.Program, key core.ResourceKey, source bool) string {
+    if p != nil && !source { return p.ResourceFingerprint(key) }
     h := posix.New(mem.System)
     info := h.Stat(key.Name)
     h.Free()
@@ -52,7 +52,7 @@ func addWatchResource(items *[]watchResource, p *program.Program, key core.Resou
             return
         }
     }
-    stamp := watchStamp(p, key)
+    stamp := watchStamp(p, key, source)
     *items = slices.Append(mem.System, *items, watchResource{Key: key.Clone(mem.System), Stamp: stamp, Source: source, Seen: true})
 }
 
@@ -148,7 +148,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
         if now-lastScan >= 200 {
             refreshWatchResources(&resources, &session, options)
             for i := range resources {
-                stamp := watchStamp(session.Program, resources[i].Key)
+                stamp := watchStamp(session.Program, resources[i].Key, resources[i].Source)
                 if stamp != resources[i].Stamp {
                     pending = slices.Append(mem.System, pending, resources[i].Key.Clone(mem.System))
                     recompile = recompile || resources[i].Source

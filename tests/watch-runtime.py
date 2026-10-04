@@ -1,0 +1,81 @@
+"""Native source reload and input invalidation during an active recipe."""
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+
+binary = sys.argv[1]
+cases = 0
+
+def wait_for(process, predicate, error, label):
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        assert process.poll() is None, (label, process.returncode, error.read_text())
+        if predicate():
+            return
+        time.sleep(.025)
+    raise AssertionError((label, error.read_text()))
+
+def read(path):
+    return path.read_text() if path.exists() else ''
+
+def stop(process):
+    process.send_signal(signal.SIGINT)
+    try:
+        assert process.wait(timeout=5) == 130, process.returncode
+    except BaseException:
+        process.kill()
+        process.wait()
+        raise
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
+    project = Path(directory)
+    source = project / 'Makefile.kmk'
+    included = project / 'values.kmk'
+    source.write_text('include values.kmk\nchosen :\n\tprintf %s @(MARK) >> source-log\n')
+    included.write_text('MARK = "alpha"\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([binary, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+        try:
+            log = project / 'source-log'
+            wait_for(process, lambda: read(log) == 'alpha', error, 'initial source build')
+            stamp = included.stat()
+            included.write_text('MARK = "bravo"\n')
+            os.utime(included, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+            wait_for(process, lambda: read(log) == 'alphabravo', error, 'preserved-mtime included source reload')
+            cases += 1
+            included.write_text('MARK = (\n')
+            wait_for(process, lambda: 'PARSE_ERR' in error.read_text(), error, 'malformed include diagnostic')
+            included.write_text('MARK = "gamma"\n')
+            wait_for(process, lambda: read(log) == 'alphabravogamma', error, 'recovery after source repair')
+            cases += 1
+            source.write_text('include values.kmk\nchosen : added\n\tprintf %s @(MARK) >> source-log\nadded :\n\tprintf dependency >> source-log\n')
+            wait_for(process, lambda: read(log) == 'alphabravogammadependencygamma', error, 'changed source graph')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-busy-') as directory:
+    project = Path(directory)
+    (project / 'input').write_text('before')
+    (project / 'Makefile.kmk').write_text('./output : ./input\n\tcp @< ./snapshot; touch ready; while [ ! -e release ]; do sleep .01; done; cp ./snapshot @>; printf x >> runs\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([binary, '-C', directory, '--watch', './output'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: (project / 'ready').exists(), error, 'recipe read handshake')
+            (project / 'input').write_text('after')
+            # Give the 200 ms scanner an opportunity while the recipe is blocked.
+            time.sleep(.35)
+            (project / 'release').touch()
+            wait_for(process, lambda: read(project / 'output') == 'after' and read(project / 'runs') == 'xx', error, 'invalidation after newer output publication')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+print(f'{cases} native watch scenarios passed')

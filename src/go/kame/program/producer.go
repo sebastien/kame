@@ -228,6 +228,12 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 			entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node)
 		}
 		beforeInvalidation := entry.Plan.Freshness
+		// Invalidation records an observed change even if an output was written
+		// later by a recipe that had already read the previous input contents.
+		if entry.Node.Generation > 0 {
+			entry.Plan.Freshness = Stale
+		}
+
   if entry.Node.InvalidatedForOrderOnly { entry.Plan.Freshness = beforeInvalidation }
 		if hasYield(effects) && len(entry.Plan.Outputs) == 1 && !p.Forwarding && !entry.FileContextWanted && !entry.Rule.Always {
 			entry.Plan.Freshness = p.yieldFreshness(entry, effects)
