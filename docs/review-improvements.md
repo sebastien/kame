@@ -66,7 +66,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | --- | --- |
 | A1 tool discovery without arbitrary parse-time effects | Implemented: dependency-tracked `(tool NAME)`, repeatable `--tool NAME=PATH`, one resolver lookup per name, executable file dependencies, and plan metadata. T007-11 covers native/WASM parity; the counted resolver sanitizer test verifies reuse. |
 | A2 configuration defaults/overrides | Implemented: lazy `?=`, literal repeatable `--define`, and case-sensitive `KAME_<NAME>` environment values. Last CLI entry wins over environment and authored defaults; plan JSON reports effective provided values. T009-13 covers both hosts. |
-| A3 target-scoped environment/build mode | Recipe inheritance, overrides, shared conflicts and cached-task fingerprints are implemented. Per-artifact debug/release metadata and unchanged-build incrementality now pass T013-05. Persistent scoped-file freshness now covers changed and removed settings; expression/definition configuration remains. |
+| A3 target-scoped environment/build mode | Addressed: recipes, dynamic prerequisites, lazy definitions and collected shell calls inherit immutable snapshots. Persistent freshness and cache identity include configuration. Declared tools intentionally use startup PATH under specs 007/009. T006-06, T007-11 and T013-05 cover the contracts. |
 | A4 declaration conditionals/gated includes | `when`/`otherwise`/`end` selects declarations before registration; inactive includes are never read. T004-13 passes 35 cases per host. Optional `include? PATH` retains T004-12 coverage; repeated nonrecursive includes remain legal. |
 | A5 computed lookup / generators | Minimum lookup implemented through `get`; T007-10 pins typed configuration and planning parity. Optional generated declarations have a separate design proposal. |
 | A6 continuations/multiline definitions | Implemented backslash LF/CRLF declaration continuations, preserving authored offsets, physical comments and recipe escapes; T004-10 verifies native/WASM execution and formatter idempotence. |
@@ -344,3 +344,24 @@ use-after-free reproduced on the pre-feature compiled sanitizer binary. Failure
 results now own cloned frames, and source polling preserves engine terminal state.
 The new evaluator regression and native/WASM cycle cases fail cleanly before
 recipe effects.
+
+## Collected shell configuration and A3 closure
+
+Collected runtime shell requests now carry the target environment on both hosts,
+including an explicitly empty snapshot. The WASM descriptor distinguishes omitted
+inheritance from a present exact environment. T006-06 passes 63 assertions;
+T007-11 passes 15 for declared startup-PATH tool resolution and explicit overrides.
+Tool lookup follows specs 007/009 rather than changing with recipe PATH. This
+corrects the older remaining-tool claim above.
+
+The selected shell commit also passes 33 WASM-host ASAN/UBSAN tests in an isolated
+checkout, including empty-snapshot transport, and its JS wrapper passes syntax
+checking. Structured recipe coverage passes 29 policy and 39 script cases per
+host; the catalog passes 458 assertions. T013-05 passes all five active assertions
+with Clang at a stable revision, including debug/release modes, unchanged shared
+metadata and no relink of unchanged native outputs. Committing during an earlier
+run changed the build ID mid-compilation; that run is not regression evidence.
+Default GCC also reports a signedness warning in generated Solod math C; Clang
+passes the warning gate without weakening checks. A3 is addressed; required and
+optional target parameters, streaming-library acceptance and final full-tree
+verification still need work.

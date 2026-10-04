@@ -203,3 +203,20 @@ stamp copies on every scan; retained stamp storage scales with total source size
 External input watching still uses metadata fingerprints. No large-source watch
 benchmark has been run. The four T009-14 scenarios establish correctness, including
 invalidation after a running recipe publishes an output newer than the changed input.
+
+## Collected shell environment costs and tool policy
+
+Collected target-bound shell requests serialize the complete immutable snapshot
+for forwarding hosts and retain owned environment values in the portable payload.
+Native dispatch constructs a temporary borrowed string slice, starts the host
+request and frees that slice. Empty snapshots remain explicit. This adds work
+proportional to environment size per collected request; no large-environment
+benchmark has been run.
+
+Declared tool resolution already follows the startup-PATH contract in specs
+007/009 and retains its per-name resolver cache. Recipe PATH does not trigger
+another tool lookup. The older unfinished scoped-tool statement above is
+superseded by this verified policy; T007-11 passes 15 assertions. T013-05 passes
+five active assertions at a stable revision, including unchanged native build
+outputs. Changing revision during compilation changes generated build metadata
+and invalidates that incrementality experiment.

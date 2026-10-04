@@ -164,3 +164,18 @@ file inheritance. The native binary retains ASAN instrumentation. Current
 ASAN/UBSAN core/evaluator/program/WASM-host suites pass 64/72/104/32 tests, including
 the focused operation-cycle ownership regression. The older 102-suite CLI result
 predates the latest features; a final current full-tree gate is still required.
+
+## Collected shell snapshot transport
+
+Target-bound collected shell requests retain run grants and phase checks before
+submission. Their exact environment travels through the owned process payload;
+an empty array remains empty in the WASM forwarding descriptor and JS child
+environment. Missing snapshot names cannot silently inherit ambient host values.
+Collected shell output remains intentionally readable by its caller. This does
+not restrict a granted child process beyond the existing process policy.
+
+T006-06 passes 63 native/WASM assertions, including denied collected shell calls
+before effects. Portable payload tests cover explicit empty environments, and an
+isolated WASM-host ASAN/UBSAN suite passes 33 tests including transport of the
+empty snapshot. The selected JS wrapper passes syntax checking. These focused
+checks do not replace the final full-tree security gate.
