@@ -103,7 +103,7 @@ func TestCompleteTaskFingerprintVector(t *testing.T) {
 	fingerprintAt:=13+int(identityLength)
 	if fingerprintAt+32>len(data) { mem.FreeSlice(a,data);t.Fatal("record fingerprint is truncated");return }
 	fingerprint:=program.FingerprintHex(data[fingerprintAt:fingerprintAt+32])
-	if fingerprint!="41be157af48fb3688e9e2e644bf68eb9368cf50c959b53b1d034da830a73e506" { t.Errorf("complete task fingerprint = %s",fingerprint) }
+	if fingerprint!="3473ede1d722e4e6472667839964f86b68e4ab6102f41613cf51b76fa3644345" { t.Errorf("complete task fingerprint = %s",fingerprint) }
 	mem.FreeString(mem.System,fingerprint);mem.FreeSlice(a,data)
 	compiled.Program.Free();compiled.Free(a);parsed.Free();registry.Free()
 	entries,err=os.ReadDir(a,dir+"/.kame/cache/tasks")

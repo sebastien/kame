@@ -81,6 +81,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		return failure(context.Run, "EXPR_INVALID", head.Span, "application head is not callable")
 	}
 	function := callee.Value.Callable.(*Function)
+	context.Scope = scope
 	result := p.call(function, expression.Items[1:], context, expression.Span)
 	freeCallables(context.Run, &callee.Value)
 	return result
@@ -172,9 +173,10 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 }
 
 func (p *Program) call(function *Function, arguments []*expr.Expr, context *Context, span source.Span) Result {
+	scope := context.Scope
 	values := slices.Make[core.Value](context.Run, len(arguments))
 	for i := range arguments {
-		r := p.evaluate(context.Engine, context.Scope, arguments[i], context)
+		r := p.evaluate(context.Engine, scope, arguments[i], context)
 		if r.Waiting || r.Diagnostic.Code != "" {
 			// Discard: arguments never reached callValues, so no child scope
 			// shares their callable storage.
@@ -183,6 +185,9 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 		}
 		values[i] = r.Value
 	}
+	// Argument expressions may enter temporary scopes. Native constructors
+	// capture the application scope, which must still be alive after arguments.
+	context.Scope = scope
 	result := p.callValues(function, values, context, span)
 	// Transfer: callValues cloned arguments into the child scope; release
 	// only storage here so shared callables are freed once by the child.
@@ -191,6 +196,15 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 }
 
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
+	if function.Kind == FunctionInvocation {
+		if function.Owner != p { return failure(context.Run, "EXPR_INVALID", span, "Kash callable belongs to another invocation") }
+		previousStart, previousEnd := context.operationStart, context.operationEnd
+		context.operationStart, context.operationEnd = span.Start, span.End
+		var result Result
+		if function.KashConstructor { result = p.constructKash(values, context, span) } else { result = p.invokeKash(function.KashScript, function.Scope, values, context) }
+		context.operationStart, context.operationEnd = previousStart, previousEnd
+		return result
+	}
 	if function.NativeCall != nil {
 		if len(values) != function.Arity {
 			return arityFailure(context.Run, span, "function", len(values), function.Arity, function.Arity)

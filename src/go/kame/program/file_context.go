@@ -69,6 +69,8 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 	identity.appendText(state.Paths[0])
 	identity.state.Sum(entry.FileContextKey[:])
 	context.appendText("kame-file-context-v1")
+	if entry.Kash { context.appendText("kash-v1"); context.appendText(p.Parsed.Source.Text) } else { context.appendText("shell-v1") }
+	for i := range entry.Shell { context.appendText(entry.Shell[i]) }
 	for i := range entry.Environment {
 		context.appendText(entry.Environment[i])
 	}
@@ -104,7 +106,7 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 		context.appendText(state.Paths[i])
 	}
 	context.state.Sum(entry.FileContextDigest[:])
-	entry.FileContextWanted = entry.ScopedEnvironment || len(entry.Rule.Environment) != 0
+	entry.FileContextWanted = entry.ScopedEnvironment || len(entry.Rule.Environment) != 0 || entry.Rule.Metadata != nil || entry.ScopedShell
 	entry.FileContext = state
 	if !p.Forwarding {
 		var times []core.Value

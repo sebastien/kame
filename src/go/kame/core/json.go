@@ -4,6 +4,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
+    "solod.dev/so/unicode/utf8"
 )
 
 // ParseJSON parses one canonical JSON document into an owned
@@ -11,6 +12,7 @@ import (
 // records and lists as canonical JSON and the engine owns the parsed value.
 // It reports false on any syntax or shape error, leaving out untouched.
 func ParseJSON(a mem.Allocator, data []byte, out *Value) bool {
+	if !utf8.Valid(data) { return false }
 	p := jsonParser{alloc: a, data: data}
 	var value Value
 	ok := p.value(&value)

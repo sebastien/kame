@@ -68,6 +68,7 @@ type EnvironmentAssignment struct {
 }
 
 type Rule struct {
+	Metadata *expr.Expr
  Environment []EnvironmentAssignment
 	// Always bypasses freshness while preserving file-output semantics.
 	Always  bool
@@ -137,6 +138,7 @@ func FreeRule(a mem.Allocator, r *Rule) {
 	if r == nil {
 		return
 	}
+	expr.Free(a, r.Metadata)
 	for i := range r.Outputs {
 		r.Outputs[i].TargetForm.Free()
 	}
@@ -204,7 +206,7 @@ func (p *parser) rule() *Rule {
  metadata := topLevel(p.s.Text[rightStart:rightEnd], ';')
  if metadata >= 0 {
   metadata += rightStart
-  p.ruleEnvironment(r, metadata+1, rightEnd)
+  p.ruleMetadata(r, metadata+1, rightEnd)
   rightEnd = metadata
  }
 	p.ruleInputs(r, rightStart, rightEnd)
@@ -623,6 +625,12 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
   b.WriteByte(' ')
   b.WriteString(r.Environment[i].Text)
  }
+	if r.Metadata != nil {
+		metadata := expr.Format(a, r.Metadata)
+		b.WriteString(" ; ")
+		b.WriteString(metadata)
+		mem.FreeString(a, metadata)
+	}
 	for i := range r.Body {
 		b.WriteByte('\n')
 		if r.Body[i].Text != "" {

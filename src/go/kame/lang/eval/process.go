@@ -255,7 +255,27 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			mem.FreeString(state.Alloc, text)
 			if word.Text == "<" { state.Input = resolved } else { state.Output = resolved }
 		}
-		state.Setups = slices.Append(state.Alloc, state.Setups, host.StageSetupPayload(state.Alloc, state.Cwd, state.Timeout, state.Environment))
+		var environment []core.Value
+		for i := range c.Environment { environment = slices.Append(state.Alloc, environment, core.NewString(state.Alloc, c.Environment[i])) }
+		for i := range state.Environment {
+			assignment := state.Environment[i]
+			equal := strings.IndexByte(assignment.Text, '=')
+			replaced := false
+			for j := range environment {
+				if equal > 0 && strings.HasPrefix(environment[j].Text, assignment.Text[:equal+1]) {
+					environment[j].Free(state.Alloc)
+					environment[j] = assignment.Clone(state.Alloc)
+					replaced = true
+					break
+				}
+			}
+			if !replaced { environment = slices.Append(state.Alloc, environment, assignment.Clone(state.Alloc)) }
+		}
+		timeout := state.Timeout
+		if timeout == 0 { timeout = c.TimeoutMS }
+		state.Setups = slices.Append(state.Alloc, state.Setups, host.StageSetupPayload(state.Alloc, state.Cwd, timeout, environment))
+		for i := range environment { environment[i].Free(state.Alloc) }
+		slices.Free(state.Alloc, environment)
 		mem.FreeString(state.Alloc, state.Cwd)
 		state.Cwd, state.Timeout = "", 0
 		for i := range state.Environment { state.Environment[i].Free(state.Alloc) }
@@ -291,7 +311,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	configured := false
 	for i := range e.Items { for j := range e.Items[i].Items { if e.Items[i].Items[j].Kind == expr.CommandSetup { configured = true } } }
 	payload := host.ArgvPayload(c.Run, state.Stages[0].List)
-	if configured || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
+	if configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
 		payload.Free(c.Run)
 		payload = host.PipelinePayload(c.Run, state.Stages)
 	}
@@ -300,7 +320,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "stream"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
 	if e.AcceptExit { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "acceptExit"), Value: core.Value{Kind: core.Bool, Bool: true}}) }
-	if configured || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit { host.ConfigureStages(c.Run, &payload, state.Setups) }
+	if configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit { host.ConfigureStages(c.Run, &payload, state.Setups) }
 	if state.Async || e.Async {
 		r := p.startProcess(e, c, state)
 		payload.Free(c.Run)

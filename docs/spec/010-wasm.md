@@ -175,6 +175,11 @@ and have a nonempty executable. Remaining arguments, including empty strings,
 are preserved before appending the rendered recipe text. The embedding host
 creates output parent directories before launch. Existing recipe descriptors
 without a shell field retain the invocation shell policy.
+Kash file recipes request output-parent preparation separately through ABI kind
+21: the same recipe descriptor with an empty `script`. The host validates
+`outputs`, creates their parent directories, and completes with nil before any
+structured process runs. An existing parent must be a directory.
+
 File-rule freshness and successful-output verification use ABI kind 20
 (`file-times`): a JSON array of canonical paths. The host completes it with a
 JSON array in the same order, containing decimal nanosecond modification times

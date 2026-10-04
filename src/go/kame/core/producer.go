@@ -94,6 +94,9 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 		c.node.complete(c.engine, d)
 		return false
 	}
+	if dep.Restartable && dep.State == NodeCancelled && dep.Interest == 0 {
+		c.engine.Invalidate(dep)
+	}
 	if !slices.Contains(c.node.Dynamic, dep) {
 		c.node.Dynamic = slices.Append(c.engine.Alloc, c.node.Dynamic, dep)
 		if observed { c.node.Observed = slices.Append(c.engine.Alloc, c.node.Observed, dep) }

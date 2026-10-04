@@ -133,6 +133,10 @@ func appendDisplay(a mem.Allocator, out *[]byte, value core.Value) {
 	case core.Process:
 		// An opaque display marker is not a serialization of the handle.
 		*out = appendTextBytes(a, *out, "<process>")
+	case core.Callable:
+		if value.CallableOwner != nil {
+			if value.Text == "kash" { *out = appendTextBytes(a, *out, "<kash-constructor>") } else { *out = appendTextBytes(a, *out, "<kash-script>") }
+		}
 	case core.List:
 		*out = appendTextBytes(a, *out, "[")
 		for i := range value.List {

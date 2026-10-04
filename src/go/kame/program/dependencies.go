@@ -10,7 +10,7 @@ func (p *Program) definitionNode(name string) *core.Node { return p.Eval.Definit
 func (p *Program) prepareDependency(c *core.EngineContext, index int, dependency *core.Node, ordered bool) bool {
  child := p.instanceIndex(dependency)
  if child >= 0 && !p.claimEnvironment(child, p.Instances[index].Environment) {
-  p.failRule(c, index, failure(p.Alloc, "ENV_CONFLICT", "shared prerequisite has a different recipe environment"))
+  p.failRule(c, index, p.environmentFailure(child, "shared prerequisite has a different recipe environment"))
   return false
  }
 	p.adoptTask(dependency, p.Instances[index].runEpoch)

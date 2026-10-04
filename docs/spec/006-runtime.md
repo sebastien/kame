@@ -215,7 +215,13 @@ Direct streams are not truncated. Retained logs follow the configured byte cap.
 ## Scoped Recipe Environments
 
 `target : prerequisites ; env "NAME=value" ...` attaches literal child-process
-environment assignments to a rule. Root recipes begin with the invocation's
+environment assignments to a rule. The equivalent record surface is
+`; [env: [NAME: value]]`, whose string values may be pure Kame expressions.
+Record settings cannot launch processes or perform host effects during their
+planning evaluation. Resolved definition dependencies are tracked by the rule.
+A record may also contain `shell`, selecting that rule's interpreter as specified
+in `017-kash.md`. Interpreter selection is local; environment inheritance applies
+to both shell and Kash recipes. Root recipes begin with the invocation's
 environment. Prerequisite recipes inherit the effective parent environment;
 their own assignments override inherited values. Later assignments to the same
 name win. Environments are immutable per active shared rule instance, and
@@ -227,11 +233,11 @@ Native recipe retries and forwarded WASM recipes receive the same values.
 
 Cached-task execution fingerprints include the complete effective environment.
 Plan and AST JSON expose authored assignments, without publishing the ambient
-environment. This initial surface scopes shell recipes and their prerequisite
-recipes. Direct `env` reads in recipe templates use the effective target
-snapshot after checking environment grants; absent names return nil, including
-in an empty snapshot. Kame definitions, tool lookup and expression-level shell
-requests still use invocation configuration. Assignments do not introduce
+environment. This surface scopes shell/Kash recipes and their prerequisite
+recipes. Direct `env` reads in recipe templates and structured recipes use the
+effective target snapshot after checking environment grants; absent names return
+nil, including in an empty snapshot. Kame definitions, tool lookup and
+expression-level shell requests still use invocation configuration. Assignments do not introduce
 Kame variables or perform evaluation during registration.
 
 File recipes with declared or inherited scoped values persist a fingerprint of

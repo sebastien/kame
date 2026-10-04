@@ -1,8 +1,10 @@
 package program
 
 import (
+	"kame/lang/expr"
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
+	"solod.dev/so/mem"
 	"solod.dev/so/strings"
 )
 
@@ -62,6 +64,11 @@ func WritePlan(out io.Writer, plan *Plan) {
 		e.Str("unknown")
 	}
 	if plan.Rule != nil {
+		if plan.Rule.Metadata != nil {
+			metadata := expr.Format(mem.System, plan.Rule.Metadata)
+			e.Str("metadata"); e.Str(metadata)
+			mem.FreeString(mem.System, metadata)
+		}
   if len(plan.Rule.Environment) != 0 {
    e.Str("environment"); e.BeginArray()
    for i := range plan.Rule.Environment { e.Str(plan.Rule.Environment[i].Value) }

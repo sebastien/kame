@@ -25,6 +25,9 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		slices.Free(p.Alloc, entry.CacheStderr)
 		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false
 		entry.cachePending = false
+		entry.KashRunning = false
+		entry.KashPrepared, entry.KashPreparing = false, false
+		if entry.KashContext != nil { p.freeKashContext(entry.KashContext); entry.KashContext = nil }
 		entry.EnvironmentConflict = false
 		p.freeNewerInputs(entry.NewerInputs)
  entry.NewerInputs = nil
@@ -59,6 +62,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	if entry.ForwardEffects != nil {
 		return p.continueForwardEffects(c, state.Index)
 	}
+	if entry.KashRunning { return p.continueKashRecipe(c, state.Index) }
 	if c.Completion().RequestID != 0 && entry.Script != "" {
 		mem.FreeString(p.Alloc, entry.Script)
 		entry.Script = ""
@@ -91,6 +95,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			c.Publish(core.Value{Kind: core.Nil})
 		}
 		return core.ProducerCompleted
+	}
+	for i := range entry.SettingsDependencies {
+		dependency := p.Eval.Definition(entry.SettingsDependencies[i])
+		if dependency != nil && !p.addPurposeDependency(c, entry, dependency, false) { return core.ProducerWaiting }
 	}
 	resolvedInputs := p.resolveInputs(c, entry)
 	inputs, resourceInputs := resolvedInputs.Inputs, resolvedInputs.ResourceInputs
@@ -212,6 +220,9 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		p.failRule(c, index, d)
 		return core.ProducerFailed
 	}
+	if entry.Kash {
+		if parsed := p.validateRenderedKash(index, commands); parsed.Code != "" { mem.FreeString(p.Alloc, commands); p.failRule(c, index, parsed); return core.ProducerFailed }
+	}
 	if entry.Rule.Kind == rule.FileRule {
 		if !entry.FileContextReady {
 			entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node)
@@ -270,7 +281,7 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		c.Publish(core.Value{Kind: core.Nil})
 		return core.ProducerCompleted
 	}
-	if p.SessionPolicy && commands != "" {
+	if p.SessionPolicy && commands != "" && !entry.Kash {
 		allowed := false
 		for i := range p.Options.Grants {
 			if p.Options.Grants[i].Capability == eval.Run && len(p.Options.Grants[i].Names) == 0 {
@@ -326,7 +337,7 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 		if entry.Rule.Kind == rule.FileRule && !p.Forwarding {
 			p.saveNativeFileContext(entry)
 		}
-		if entry.Rule.Kind == rule.FileRule && yielded {
+		if entry.Rule.Kind == rule.FileRule {
 			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
 		} else {
 			c.Publish(core.Value{Kind: core.Nil})
@@ -348,6 +359,12 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 			}
 		}
 	}
+	if entry.Kash {
+		entry.retryCount = 0
+		entry.cacheStartedAt = p.Host.Now()
+		entry.Script, entry.KashRunning = commands, true
+		return p.continueKashRecipe(c, index)
+	}
 	p.nextRequest++
 	entry.Script = commands
 	retain := p.Options.RetainBytes
@@ -356,13 +373,13 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	}
 	entry.cacheStartedAt = p.Host.Now()
 	entry.retryCount = 0
-	request := host.ProcessRequest{ID: p.nextRequest, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+	request := host.ProcessRequest{ID: p.nextRequest, Shell: entry.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 	if p.Forwarding {
 		// The embedding host runs the recipe; correlation uses the node so the
 		// completion resumes this producer.
 		payload := core.Value{}
-		if entry.Rule.Kind == rule.FileRule || entry.ScopedEnvironment {
-			payload = host.RecipeEnvironmentPayload(p.Alloc, entry.Script, entry.Plan.Outputs, entry.Environment)
+		if entry.Rule.Kind == rule.FileRule || entry.ScopedEnvironment || entry.ScopedShell {
+			payload = host.RecipeExecutionPayload(p.Alloc, entry.Script, entry.Plan.Outputs, entry.Environment, entry.Shell)
 		} else {
 			payload = host.ProcessPayload(p.Alloc, entry.Script)
 		}

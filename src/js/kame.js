@@ -942,7 +942,7 @@ class Module {
         }
       }
       const detached = context.concurrent === true;
-      const completion = await runArgvCapture(stages, { ...context, ...redirections, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
+      const completion = await runArgvCapture(stages, { ...context, ...redirections, onStarted: () => { this.processStarted(instance, detached ? request : undefined); this.drainEvents(instance, context); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout);
@@ -951,6 +951,14 @@ class Module {
         return this.completeJSON(instance, request, completion.value);
       }
       return this.completeFailure(instance, request, completion.code, completion.message);
+    }
+    if (kind === 21) {
+      let recipe;
+      try { recipe = JSON.parse(payload); } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid output preparation request'); }
+      if (!Array.isArray(recipe.outputs) || recipe.outputs.some((name) => typeof name !== 'string' || name.includes('\0'))) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe outputs');
+      try { for (const name of recipe.outputs) await mkdir(dirname(name), { recursive: true }); }
+      catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot create output directory'); }
+      return this.exports.kame_wasm_complete_nil(instance, request);
     }
     if (kind === 3 || kind === 16) {
       if (!grants.run) return this.deny(instance, request);
@@ -1492,6 +1500,7 @@ function runArgvCapture(stages, context) {
         children.push(child);
         remaining++;
         track(child);
+        if (i === 0 && context.onStarted) publish(() => context.onStarted());
         const cancel = configuration.timeoutMS > 0 ? processDeadline(configuration.timeoutMS, () => stop('RECIPE_TIMEOUT', 'stage timed out')) : () => {};
         timers.push(cancel);
         child.once('exit', cancel);

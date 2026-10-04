@@ -5,6 +5,7 @@ import (
 	"kame/core"
 	"kame/lang/definition"
 	"kame/lang/expr"
+	"kame/lang/script"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 )
@@ -56,9 +57,14 @@ const (
 	// function). The scope owns the Function struct plus owned AST slices;
 	// values carrying it are borrowed and must not free the struct.
 	FunctionDefinition
+	// FunctionInvocation is immutable and owned by Program until shutdown.
+	FunctionInvocation
 )
 
 type Function struct {
+	Owner *Program
+	KashConstructor bool
+	KashScript *script.Script
 	Kind                FunctionKind
 	Parameters          []expr.Parameter
 	Body                []*expr.Expr
@@ -85,6 +91,7 @@ type Function struct {
 // that retains the captured Scope. The wrapper shares parameters, body, and
 // Native state with its source.
 func borrowFunction(a mem.Allocator, source *Function) *Function {
+	if source.Kind == FunctionInvocation { return source }
 	wrapper := mem.Alloc[Function](a)
 	*wrapper = *source
 	wrapper.Kind = FunctionBorrowed
@@ -148,6 +155,7 @@ func freeBorrowedWrapper(a mem.Allocator, function *Function) {
 func wouldStrandCapture(scope *Scope, value core.Value) bool {
 	if value.Kind == core.Callable {
 		function := value.Callable.(*Function)
+		if function != nil && function.Kind == FunctionInvocation { return false }
 		if function == nil || function.Scope == nil || function.Scope == scope {
 			return false
 		}

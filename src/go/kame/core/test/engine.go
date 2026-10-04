@@ -878,3 +878,34 @@ func TestSharedInterestCancelsOnlyLastRoot(t *testing.T) {
 	if shared.State != core.NodeCancelled { t.Error("last root did not cancel shared dependency") }
 	e.Free()
 }
+
+// Releasing a reactive definition during invalidation must not poison its next consumer.
+func reusableDefinition(c *core.EngineContext, nodeID int64) core.ProducerResult {
+    _ = nodeID
+    c.Publish(core.NewString(c.Allocator(), "cached"))
+    return core.ProducerActive
+}
+func reusableConsumer(c *core.EngineContext, nodeID int64) core.ProducerResult {
+    _ = nodeID
+    key := core.ResourceKey{Kind: core.ResourceDefinition, Name: "reusable"}
+    if !c.Dependency(key) { return core.ProducerWaiting }
+    value := c.Value(key)
+    c.Publish(value.Value.Clone(c.Allocator()))
+    return core.ProducerCompleted
+}
+func TestReleasedDefinitionCanBeReacquired(t *testing.T) {
+    a := t.Allocator()
+    e := core.NewEngine(a)
+    definition := e.Add(core.ResourceKey{Kind: core.ResourceDefinition, Name: "reusable"}, reusableDefinition, nil)
+    definition.Restartable = true
+    consumer := e.Add(core.ResourceKey{Kind: core.ResourceTask, Name: "consumer"}, reusableConsumer, nil)
+    root := e.RequestRoot(consumer)
+    for i := 0; i < 12 && consumer.State != core.NodeComplete; i++ { e.Step() }
+    if consumer.State != core.NodeComplete { t.Error("initial consumer did not complete") }
+    e.Invalidate(consumer)
+    if definition.State != core.NodeCancelled { t.Error("unobserved definition was not released") }
+    for i := 0; i < 12 && consumer.State != core.NodeComplete; i++ { e.Step() }
+    if consumer.State != core.NodeComplete || consumer.Latest.Text != "cached" { t.Error("reacquired definition propagated cancellation") }
+    e.Release(root)
+    e.Free()
+}

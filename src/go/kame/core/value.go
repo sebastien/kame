@@ -71,6 +71,9 @@ type Value struct {
 	List     []Value
 	Record   []RecordField
 	Callable any
+	// CallableOwner marks immutable invocation-owned callables. Their owner
+	// outlives engine snapshots; ordinary lexical closures remain unpublished.
+	CallableOwner any
 	// Process is opaque and borrowed from its invocation owner, never serialized.
 	Process any
 	Resource ResourceKey
@@ -158,6 +161,13 @@ func (v *Value) HasCallable() bool {
 			}
 		}
 	}
+	return false
+}
+
+func (v *Value) HasTransientCallable() bool {
+	if v.Kind == Callable { return v.CallableOwner == nil }
+	for i := range v.List { if v.List[i].HasTransientCallable() { return true } }
+	for i := range v.Record { if v.Record[i].Value.HasTransientCallable() { return true } }
 	return false
 }
 

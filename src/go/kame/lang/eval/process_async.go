@@ -25,7 +25,10 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	task := mem.Alloc[processTask](p.Alloc)
 	task.Program, task.Graph = p, expr.Clone(p.Alloc, e)
 	task.Graph.Async = false
-	task.Context = Context{Program: p, Scope: c.Scope, Run: p.Alloc, Cwd: owned(p.Alloc, c.Cwd), Source: owned(p.Alloc, c.Source), HasArgs: c.HasArgs, Phase: c.Phase, DirectHostRequests: c.DirectHostRequests, DependencyObserver: c.DependencyObserver, ResolverState: c.ResolverState, ResolveDefinition: c.ResolveDefinition, ToolResolver: c.ToolResolver}
+	task.Context = Context{Program: p, Scope: c.Scope, Run: p.Alloc, Cwd: owned(p.Alloc, c.Cwd), Source: owned(p.Alloc, c.Source), HasArgs: c.HasArgs, HasEnvironment: c.HasEnvironment, Phase: c.Phase, DirectHostRequests: c.DirectHostRequests, DependencyObserver: c.DependencyObserver, ResolverState: c.ResolverState, ResolveDefinition: c.ResolveDefinition, ToolResolver: c.ToolResolver}
+	task.Context.ScriptGroup, task.Context.TimeoutMS = c.ScriptGroup, c.TimeoutMS
+	task.Context.RecipeNode = c.RecipeNode
+	for i := range c.Environment { task.Context.Environment = slices.Append(p.Alloc, task.Context.Environment, owned(p.Alloc, c.Environment[i])) }
 	c.Scope.Retain()
 	for i := range c.Grants {
 		grant := Grant{Capability: c.Grants[i].Capability}
@@ -113,6 +116,7 @@ func (p *Program) awaitProcess(e *expr.Expr, c *Context) Result {
 func (p *Program) joinProcesses(c *Context) Result {
 	for i := range p.Processes {
 		task := p.Processes[i]
+		if c.ScriptGroup != 0 && task.Context.ScriptGroup != c.ScriptGroup { continue }
 		if task.Observed { continue }
 		if !c.Engine.TryDependency(task.Node.Key) { return Result{Waiting: true} }
 		if d := c.Engine.DependencyDiagnostic(task.Node.Key); d.Code != "" { return Result{Diagnostic: d.Clone(c.Run)} }
@@ -131,12 +135,20 @@ func (p *Program) CancelProcesses() {
 	}
 }
 
+// ProcessRecipeNode supplies build attribution for an independent async node.
+func (p *Program) ProcessRecipeNode(node int64) int64 {
+	for i := range p.Processes { if p.Processes[i].Node.ID == node { return p.Processes[i].Context.RecipeNode } }
+	return node
+}
+
 func freeProcessTask(a mem.Allocator, task *processTask) {
 	if task.Prepared != nil { freeCaptureState(a, task.Prepared) }
 	task.Context.Scope.Free()
 	expr.Free(a, task.Graph)
 	mem.FreeString(a, task.Context.Cwd)
 	mem.FreeString(a, task.Context.Source)
+	for i := range task.Context.Environment { mem.FreeString(a, task.Context.Environment[i]) }
+	slices.Free(a, task.Context.Environment)
 	for i := range task.Context.Args { task.Context.Args[i].Free(a) }
 	slices.Free(a, task.Context.Args)
 	for i := range task.Context.Inputs { task.Context.Inputs[i].Free(a) }

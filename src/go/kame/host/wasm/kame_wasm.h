@@ -51,7 +51,9 @@ enum kame_wasm_request_kind {
   // JSON array of stage argv arrays; connects streams without a shell.
   KAME_WASM_REQUEST_PIPELINE = 14,
   // JSON {stages, input, output, append, setup}; per-stage cwd/env/timeout.
-  KAME_WASM_REQUEST_REDIRECTED_GRAPH = 15
+  KAME_WASM_REQUEST_REDIRECTED_GRAPH = 15,
+  // Recipe descriptor with outputs; prepares parents before structured execution.
+  KAME_WASM_REQUEST_PREPARE_OUTPUTS = 21
 };
 
 /* Terminal process outcomes reported by kame_wasm_process_terminal. */

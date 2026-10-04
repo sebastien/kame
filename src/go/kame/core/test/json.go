@@ -27,3 +27,12 @@ func TestJSONRejectsMalformedInput(t *testing.T) {
         if v.Kind != core.Int || v.Int != 7 { t.Error("failed parse changed output") }
     }
 }
+
+func TestJSONRejectsInvalidUTF8AndExcessiveDepth(t *testing.T) {
+    a := t.Allocator()
+    var value core.Value
+    if core.ParseJSON(a, []byte{'"', 0xff, '"'}, &value) { value.Free(a); t.Error("invalid UTF-8 accepted") }
+    var nested [600]byte
+    for i := 0; i < 300; i++ { nested[i] = '['; nested[599-i] = ']' }
+    if core.ParseJSON(a, nested[:], &value) { value.Free(a); t.Error("excessive nesting accepted") }
+}

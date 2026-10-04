@@ -37,10 +37,58 @@ expression extension in the user-facing sense: every Kash value computation
 delegates to the existing Kame expression grammar and evaluator rather than a
 second value language.
 
-Existing `.kmk` recipe behavior is unchanged. Rule bodies currently render to
-one shell script and are not parsed as Kash. A future rule may explicitly opt
-into Kash for its body, but no existing recipe is reinterpreted by this
-specification.
+Rule bodies expand through the existing recipe template engine before their
+selected interpreter receives the resulting script. Without an explicit
+interpreter setting, existing shell recipe behavior is preserved.
+
+### Recipe interpreters and reusable scripts
+
+`SHELL = kash` selects the built-in Kash constructor callable for all recipes.
+A rule may override that selection with a metadata record:
+
+```kame
+SHELL = kash
+
+build : ./input ; [env: [MODE: mode]]
+	printf '%s\n' "@(mode)"
+
+legacy : ; [shell: ["/bin/sh" "-c"]]
+	printf '%s\n' "$MODE"
+```
+
+The `shell` value accepts the Kash constructor, an executable string (with
+`-c` implied), or a nonempty list of interpreter argv strings. Per-rule shell
+selection does not propagate to prerequisites. An absent `SHELL` uses the
+invocation's configured shell, defaulting to `/bin/sh -c`. Bare `kash` as a
+complete definition value denotes the constructor; quote it to obtain a string.
+
+Kash recipes use **template expansion, then Kash parsing**, just as external
+shells receive expanded recipe text. This preserves template metaprogramming;
+escape an `@` through the template layer when an expansion must reach Kash.
+The entire rendered script is parsed before any of its statements execute.
+Statements share rule inputs, outputs, captures, build definitions and invocation
+arguments. Each rule joins its asynchronous work before verifying file outputs
+or publishing completion. Timeouts cover the whole recipe; retries start a fresh
+script invocation. Interpreter identity participates in cache and file freshness.
+
+`(kash TEXT)` parses text without running commands and returns an immutable,
+invocation-owned callable that retains its construction scope:
+
+```kame
+script = (kash """printf %s @_""")
+result = (script "hello")
+```
+
+Verbatim strings preserve argument selectors for evaluation when the script is
+called. Calls bind arguments through the normal Kame argument selectors, create fresh
+script-local definitions and inherit the caller's execution policy, directory
+and child environment. Commands stream their output; the call returns its last
+statement value (nil for an empty script). Use `$(...)` inside Kash for captured
+stdout. Constructed text is already script text and does not undergo an implicit
+recipe-template expansion. These callables can be retained by lazy definitions;
+ordinary transient closures remain prohibited across engine publication. CLI
+displays use opaque `<kash-constructor>` and `<kash-script>` markers.
+
 
 ### Files and invocation
 
@@ -83,7 +131,7 @@ branch-local definitions.
 `kame do parse --lang kash` and `kame do fmt --lang kash` use the existing
 file/stdin conventions. Native and WASM hosts must implement identical language
 semantics. `.kash` and `.ksh` do not join build-file discovery or implicitly
-change `.kmk` recipes. Native and WASM runners implement these invocation forms.
+select the recipe interpreter. Native and WASM runners implement these invocation forms.
 
 ## Source and statements
 

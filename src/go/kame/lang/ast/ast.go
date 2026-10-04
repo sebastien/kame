@@ -435,6 +435,7 @@ func (e *astEncoder) rule(value *rule.Rule) {
 		return
 	}
 	e.node(ruleKind(value.Kind), value.Span)
+	if value.Metadata != nil { e.Str("metadata"); e.expr(value.Metadata) }
 	if value.Always {
 		e.Str("always"); e.Bool(true)
 	}

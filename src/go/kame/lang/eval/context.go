@@ -23,6 +23,9 @@ type Context struct {
 	Environment []string
 	// HasEnvironment binds a complete snapshot, including an empty environment.
 	HasEnvironment bool
+	ScriptGroup int64
+	RecipeNode int64
+	TimeoutMS int64
 	Frames             []diagnostic.Frame
 	Source             string
 	Grants             []Grant
@@ -336,6 +339,12 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 		return false
 	}
 	return c.Allows(capability, name)
+}
+
+// Resume binds a retained context to a new engine call and its completion.
+func (c *Context) Resume(engine *core.EngineContext) {
+ c.Engine, c.Requests = engine, c.Program.Requests
+ c.completionConsumed, c.denied, c.phaseInvalid = false, false, false
 }
 
 // Completion returns the host completion that resumed this evaluation, if any.

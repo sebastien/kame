@@ -470,10 +470,12 @@ func (p *Program) appendDynamicSection(e *cacheEncoder, entry *instance) {
 
 func (p *Program) appendExecutionSection(e *cacheEncoder, entry *instance, script string) {
 	at, start := e.beginSection("execution")
-	e.appendU64(uint64(len(p.Options.Shell)))
-	for i := range p.Options.Shell {
-		e.appendText(p.Options.Shell[i])
+	if entry.Kash { e.appendByte(1) } else { e.appendByte(0) }
+	e.appendU64(uint64(len(entry.Shell)))
+	for i := range entry.Shell {
+		e.appendText(entry.Shell[i])
 	}
+	if entry.Kash { e.appendText(p.Parsed.Source.Text) }
 	e.appendText(p.Options.Directory)
 	e.appendU64(uint64(len(entry.Environment)))
  for i := range entry.Environment { e.appendText(entry.Environment[i]) }
@@ -583,6 +585,7 @@ func (e *cacheEncoder) appendValue(value core.Value) {
 	if e.exceeded {
 		return
 	}
+	if value.Kind == core.Callable && value.CallableOwner != nil && value.Text == "kash" { e.appendByte(11); e.appendText("kash"); return }
 	if value.Kind == core.Nil {
 		e.appendByte(0)
 		return

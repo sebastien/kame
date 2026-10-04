@@ -27,6 +27,8 @@ const (
 	RequestCacheGet
 	RequestCachePut
 	RequestCacheDelete
+	// PrepareOutputs creates implicit parent directories for structured recipes.
+	RequestPrepareOutputs
 )
 
 // Request owns Payload until it is popped or the queue is freed.

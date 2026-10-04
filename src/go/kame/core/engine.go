@@ -183,7 +183,7 @@ func (e *Engine) emit(n *Node, event Event) {
 }
 
 func (e *Engine) publish(n *Node, value Value) {
-	if value.HasCallable() {
+	if value.HasTransientCallable() {
 		value.Free(e.Alloc)
 		n.complete(e, Diagnostic{Code: DiagnosticExprValue})
 		return

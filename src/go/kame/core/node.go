@@ -43,6 +43,8 @@ type Node struct {
 	materializer    *Materializer
 	offered         bool
 	invalidating    bool
+	// Restartable nodes can be evaluated again after their last consumer releases them.
+	Restartable bool
 }
 
 func (n *Node) HasActiveSource() bool { return n != nil && n.materializer != nil }

@@ -214,7 +214,7 @@ func (p *parser) definition() *Definition {
 		p.error(equals+1, rhsEnd, "expected definition value")
 		return d
 	}
-	if p.s.Text[rhsStart] == '(' || p.s.Text[rhsStart] == '[' || (rhsStart+1 < rhsEnd && p.s.Text[rhsStart:rhsStart+2] == "$(") {
+	if p.s.Text[rhsStart:rhsEnd] == "kash" || p.s.Text[rhsStart] == '(' || p.s.Text[rhsStart] == '[' || (rhsStart+1 < rhsEnd && p.s.Text[rhsStart:rhsStart+2] == "$(") {
 		prefix := expr.ParsePrefix(p.a, p.s, rhsStart)
 		d.Expression, d.ValueKind = prefix.Expr, ValueExpression
 		for i := range prefix.Diagnostics {

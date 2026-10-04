@@ -22,10 +22,22 @@ func (p *Program) pump(wait int) {
 		}
 		event := next.Event
 		entry := p.instanceForRequest(event.ID)
+		if entry == nil && (event.Kind == host.ProcessStarted || event.Kind == host.ProcessTerminal) {
+			for i := range p.Pending {
+				if p.Pending[i].ID == event.ID {
+					entry = p.streamInstance(p.Pending[i].NodeID)
+					break
+				}
+			}
+		}
 		if event.Kind == host.ProcessStderr || event.Kind == host.ProcessStdout {
 			for i := range p.Pending {
 				if p.Pending[i].ID == event.ID && (p.Pending[i].Capture || p.Pending[i].Stream) {
-					if event.Kind == host.ProcessStderr { p.captureStderr(p.Pending[i], event.Data) } else if p.Pending[i].Stream { p.statementStdout(p.Pending[i], event.Data) }
+					if event.Kind == host.ProcessStderr {
+						p.captureStderr(p.Pending[i], event.Data)
+					} else if p.Pending[i].Stream {
+						p.statementStdout(p.Pending[i], event.Data)
+					}
 					break
 				}
 			}
@@ -35,10 +47,10 @@ func (p *Program) pump(wait int) {
 		} else if entry != nil && event.Kind == host.ProcessStderr {
 			p.emitNode(entry.Node, entry.Plan.Target, Stderr, diagnostic.Span{}, event.Data)
 		} else if entry != nil && event.Kind == host.ProcessStarted {
-			p.emitNode(entry.Node, entry.Plan.Target, ProcessStarted, diagnostic.Span{}, nil)
+			p.emitProcess(entry, ProcessStarted, event.ID)
 		} else if event.Kind == host.ProcessTerminal {
 			if entry != nil {
-				p.emitNode(entry.Node, entry.Plan.Target, ProcessExited, diagnostic.Span{}, nil)
+				p.emitProcess(entry, ProcessExited, event.ID)
 			}
 			p.complete(event)
 		}
@@ -66,18 +78,24 @@ func (p *Program) drainRequests() {
 			script := host.PayloadText(request.Payload, host.FieldScript)
 			values := host.PayloadArgv(request.Payload)
 			var argv []string
-			for i := range values { argv = slices.Append(p.Alloc, argv, values[i].Text) }
+			for i := range values {
+				argv = slices.Append(p.Alloc, argv, values[i].Text)
+			}
 			var stages []host.ProcessStage
 			graphs := host.PayloadStages(request.Payload)
 			setups := host.PayloadSetups(request.Payload)
 			for i := range graphs {
 				var arguments []string
-				for j := range graphs[i].List { arguments = slices.Append(p.Alloc, arguments, graphs[i].List[j].Text) }
+				for j := range graphs[i].List {
+					arguments = slices.Append(p.Alloc, arguments, graphs[i].List[j].Text)
+				}
 				stage := host.ProcessStage{Argv: arguments}
 				if i < len(setups) {
 					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
 					values := host.PayloadList(setups[i], host.FieldEnvironment)
-					for j := range values { stage.Environment = slices.Append(p.Alloc, stage.Environment, values[j].Text) }
+					for j := range values {
+						stage.Environment = slices.Append(p.Alloc, stage.Environment, values[j].Text)
+					}
 				}
 				stages = slices.Append(p.Alloc, stages, stage)
 			}
@@ -89,17 +107,28 @@ func (p *Program) drainRequests() {
 			}
 			capture := len(argv) != 0 || len(stages) != 0
 			stream := false
-			for i := range request.Payload.Record { if request.Payload.Record[i].Key == "stream" { stream = request.Payload.Record[i].Value.Bool } }
+			for i := range request.Payload.Record {
+				if request.Payload.Record[i].Key == "stream" {
+					stream = request.Payload.Record[i].Value.Bool
+				}
+			}
 			capture = capture && !stream
-			if capture { retain = p.Options.CaptureLimit }
-			if stream { retain = 0 }
+			if capture {
+				retain = p.Options.CaptureLimit
+			}
+			if stream {
+				retain = 0
+			}
 			if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: p.Options.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}) {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else {
 				p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0, Capture: capture, Stream: stream})
 			}
 			slices.Free(p.Alloc, argv)
-			for i := range stages { slices.Free(p.Alloc, stages[i].Argv); slices.Free(p.Alloc, stages[i].Environment) }
+			for i := range stages {
+				slices.Free(p.Alloc, stages[i].Argv)
+				slices.Free(p.Alloc, stages[i].Environment)
+			}
 			slices.Free(p.Alloc, stages)
 		} else {
 			p.completeRequest(request)
@@ -114,16 +143,23 @@ func (p *Program) drainRequests() {
 func (p *Program) ProcessStarted(request host.Request) {
 	entry := p.instanceForRequest(request.ID)
 	if entry == nil {
+		entry = p.streamInstance(request.NodeID)
+	}
+	if entry == nil {
 		return
 	}
-	p.emitNode(entry.Node, entry.Plan.Target, ProcessStarted, diagnostic.Span{}, nil)
+	p.emitProcess(entry, ProcessStarted, request.ID)
 }
 
 func (p *Program) ProcessStream(request host.Request, stderr bool, data []byte) {
 	for i := range request.Payload.Record {
 		if request.Payload.Record[i].Key == "stream" && request.Payload.Record[i].Value.Bool {
 			pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Stream: true}
-			if stderr { p.captureStderr(pending, data) } else { p.statementStdout(pending, data) }
+			if stderr {
+				p.captureStderr(pending, data)
+			} else {
+				p.statementStdout(pending, data)
+			}
 			return
 		}
 	}
@@ -146,7 +182,7 @@ func (p *Program) ProcessStream(request host.Request, stderr bool, data []byte) 
 // request. An embedding host may keep that prefix plus one sentinel byte, so
 // ProcessTerminal can detect truncation without receiving the entire stream.
 func (p *Program) ProcessRetainLimit(request host.Request) int {
-	isInstance := p.nodeForRequest(request.ID) != nil
+	isInstance := p.instanceForRequest(request.ID) != nil
 	retain := p.Options.RetainBytes
 	if isInstance {
 		// Recipes retain only what the native host would: nothing for a file
@@ -169,10 +205,13 @@ func (p *Program) ProcessRetainLimit(request host.Request) int {
 // copied into the program allocator because the caller's bytes are transient.
 func (p *Program) ProcessTerminal(request host.Request, stdout []byte, stderr []byte, status int, signal int, outcome int, code string, message string) {
 	entry := p.instanceForRequest(request.ID)
-	if entry != nil {
-		p.emitNode(entry.Node, entry.Plan.Target, ProcessExited, diagnostic.Span{}, nil)
+	if entry == nil {
+		entry = p.streamInstance(request.NodeID)
 	}
-	isInstance := p.nodeForRequest(request.ID) != nil
+	if entry != nil {
+		p.emitProcess(entry, ProcessExited, request.ID)
+	}
+	isInstance := p.instanceForRequest(request.ID) != nil
 	retain := p.ProcessRetainLimit(request)
 	event := host.ProcessEvent{Kind: host.ProcessTerminal, ID: request.ID, Status: status, Signal: signal, Outcome: host.ProcessExited, RetainBytes: retain}
 	if outcome == 1 {
@@ -249,6 +288,11 @@ func (p *Program) Complete(request host.Request, value core.Value, diagnostic di
 		value.Free(mem.System)
 		diagnostic.Free(mem.System)
 		return
+	}
+	if request.Kind == host.RequestProcess && (len(host.PayloadArgv(request.Payload)) != 0 || len(host.PayloadStages(request.Payload)) != 0) {
+		if entry := p.streamInstance(request.NodeID); entry != nil {
+			p.emitProcess(entry, ProcessExited, request.ID)
+		}
 	}
 	p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Value: value, HasValue: diagnostic.Code == "", Diagnostic: diagnostic})
 }
@@ -337,7 +381,9 @@ func (p *Program) complete(event host.ProcessEvent) {
 		completion := core.Completion{NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: event.ID, Diagnostic: d}
 		if d.Code == "" {
 			completion.Value, completion.HasValue = shellValue(p.Alloc, event), true
-			if pending.Capture || pending.Stream { completion.Value.Record = slices.Append(p.Alloc, completion.Value.Record, core.RecordField{Key: cloneText(p.Alloc, "signal"), Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}}) }
+			if pending.Capture || pending.Stream {
+				completion.Value.Record = slices.Append(p.Alloc, completion.Value.Record, core.RecordField{Key: cloneText(p.Alloc, "signal"), Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}})
+			}
 		}
 		p.Engine.Complete(completion)
 		return
@@ -350,7 +396,7 @@ func (p *Program) complete(event host.ProcessEvent) {
 		if p.Options.CacheRetainBytes > retain {
 			retain = p.Options.CacheRetainBytes
 		}
-		request := host.ProcessRequest{ID: retryID, Shell: p.Options.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+		request := host.ProcessRequest{ID: retryID, Shell: entry.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 		if p.Host != nil && p.Host.Start(request) {
 			entry.retryCount++
 			node.HostRequestID = retryID
@@ -390,6 +436,10 @@ func (p *Program) attachProcessContext(d *diagnostic.Diagnostic, entry *instance
 		}
 	}
 	cause := diagnostic.Cause{Kind: cloneText(p.Alloc, "process"), Program: cloneText(p.Alloc, processProgram(p)), StdoutTruncated: event.StdoutTruncated, StderrTruncated: event.StderrTruncated, StdoutLimit: event.RetainBytes, StderrLimit: event.RetainBytes, OutputWasStreamed: true}
+	if entry != nil && len(entry.Shell) != 0 {
+		mem.FreeString(p.Alloc, cause.Program)
+		cause.Program = cloneText(p.Alloc, entry.Shell[0])
+	}
 	if event.Outcome == host.ProcessFailed {
 		cause.Message = cloneText(p.Alloc, event.Diagnostic.Message)
 	} else if event.Outcome == host.ProcessTimedOut {
@@ -466,7 +516,9 @@ func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
 			stages = slices.Append(a, stages, core.NewRecord(a, parts))
 		}
 		value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "stages"), Value: core.NewList(a, stages)})
-		for i := range stages { stages[i].Free(a) }
+		for i := range stages {
+			stages[i].Free(a)
+		}
 		slices.Free(a, stages)
 	}
 	return value
@@ -474,6 +526,10 @@ func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
 
 // Captured stdout is private to the expression; stderr remains a live stream.
 func (p *Program) captureStderr(pending pendingRequest, data []byte) {
+	if entry := p.streamInstance(pending.NodeID); entry != nil {
+		p.recipeStream(entry, Stderr, data)
+		return
+	}
 	if p.Eval.DefinitionEffectSink != nil {
 		p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectErr, Data: data})
 	} else {
@@ -482,14 +538,49 @@ func (p *Program) captureStderr(pending pendingRequest, data []byte) {
 }
 
 func (p *Program) statementStdout(pending pendingRequest, data []byte) {
-	if p.Eval.DefinitionEffectSink != nil { p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectOut, Data: data}) } else { p.emit(Event{Kind: Stdout, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data)}) }
+	if entry := p.streamInstance(pending.NodeID); entry != nil {
+		p.recipeStream(entry, Stdout, data)
+		return
+	}
+	if p.Eval.DefinitionEffectSink != nil {
+		p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectOut, Data: data})
+	} else {
+		p.emit(Event{Kind: Stdout, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data)})
+	}
 }
 
-func (p *Program) instanceForRequest(id int64) *instance {
+func (p *Program) streamInstance(node int64) *instance {
+	node = p.Eval.ProcessRecipeNode(node)
 	for i := range p.Instances {
-		if p.Instances[i].Node.HostRequestID == id {
+		if p.Instances[i].Node.ID == node && p.Instances[i].Kash {
 			return &p.Instances[i]
 		}
 	}
 	return nil
+}
+
+func (p *Program) recipeStream(entry *instance, kind EventKind, data []byte) {
+	p.emitNode(entry.Node, entry.Plan.Target, kind, diagnostic.Span{}, data)
+	if entry.Rule.Kind != rule.CachedTaskRule {
+		return
+	}
+	if kind == Stdout {
+		p.cacheAppend(&entry.CacheStdout, &entry.CacheStdoutTruncated, data, p.Options.CacheRetainBytes)
+	} else {
+		p.cacheAppend(&entry.CacheStderr, &entry.CacheStderrTruncated, data, p.Options.CacheRetainBytes)
+	}
+}
+
+func (p *Program) instanceForRequest(id int64) *instance {
+	for i := range p.Instances {
+		if p.Instances[i].Node.HostRequestID == id && !p.Instances[i].KashRunning {
+			return &p.Instances[i]
+		}
+	}
+	return nil
+}
+
+func (p *Program) emitProcess(entry *instance, kind EventKind, requestID int64) {
+	node := entry.Node
+	p.emit(Event{Kind: kind, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: requestID})
 }

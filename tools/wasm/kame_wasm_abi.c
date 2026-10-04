@@ -275,7 +275,7 @@ static kame_wasm_instance *kame_wasm_instance_get(uint64_t handle) {
 }
 
 static so_String kame_wasm_request_payload(host_Request request) {
-  if (request.Kind == host_RequestProcess) {
+  if (request.Kind == host_RequestProcess || request.Kind == host_RequestPrepareOutputs) {
     if (host_PayloadText(request.Payload, so_str("data")).len != 0) return host_PayloadText(request.Payload, so_str("data"));
     if (host_PayloadStages(request.Payload).len != 0) return host_PayloadText(request.Payload, so_str("data"));
     if (host_PayloadArgv(request.Payload).len != 0) return host_PayloadText(request.Payload, so_str("data"));
@@ -335,6 +335,8 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       return 11u;
     case host_RequestCacheDelete:
       return 12u;
+    case host_RequestPrepareOutputs:
+      return 21u;
     default:
       return (uint32_t)request.Kind;
   }

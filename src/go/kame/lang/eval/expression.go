@@ -101,9 +101,11 @@ func placeholder(scope *Scope, expression *expr.Expr, context *Context) Result {
 func name(scope *Scope, name string, span source.Span, context *Context) Result {
 	b := scope.lookup(name)
 	if b == nil {
+		if name == "kash" && context.Program != nil { return Result{Value: context.Program.KashConstructor()} }
 		return failure(context.Run, "REF_MISSING", span, "unknown reference: "+name)
 	}
 	if b.Kind == bindingValue {
+		if b.Value.CallableOwner != nil { return Result{Value: b.Value.Clone(context.Run)} }
 		if b.Value.Kind == core.Callable {
 			// Binding-owned callables are returned as borrowed wrappers so
 			// call sites release the wrapper without freeing the binding's

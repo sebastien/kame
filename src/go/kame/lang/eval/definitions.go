@@ -14,6 +14,8 @@ import (
 )
 
 type Program struct {
+	KashFunctions []*Function
+	NextScriptGroup int64
 	// DryRun suppresses invocation-owned process, write and output effects.
 	DryRun bool
 	Alloc           mem.Allocator
@@ -154,6 +156,7 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 		context := mem.Alloc[definitionState](a)
 		context.Program, context.Definition = p, d
 		node := engine.AddOwned(core.ResourceKey{Kind: core.ResourceDefinition, Name: d.Name}, evaluateDefinition, context, freeDefinitionState)
+		node.Restartable = true
 		p.Nodes = slices.Append(a, p.Nodes, definitionNode{Name: owned(a, d.Name), Node: node})
 	}
 	return p
@@ -168,6 +171,7 @@ func (p *Program) Free() {
 	p.freeSourceParts()
 	for i := range p.Processes { freeProcessTask(p.Alloc, p.Processes[i]) }
 	slices.Free(p.Alloc, p.Processes)
+	p.Processes = nil
 	p.Scope.Free()
 	p.Requests.Free()
 	for i := range p.Nodes {
@@ -181,6 +185,7 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.Nodes)
 	slices.Free(p.Alloc, p.OperationStates)
+	p.freeKashFunctions()
 	slices.Free(p.Alloc, p.Definitions)
 	for i := range p.Diagnostics {
 		p.Diagnostics[i].Free(p.Alloc)
@@ -329,7 +334,7 @@ func pollDefinition(c *core.EngineContext, source *core.Source, atom *core.Atom)
 	if result.Completed {
 		return core.PollWaiting
 	}
-	if result.Value.HasCallable() {
+	if result.Value.HasTransientCallable() {
 		freeCallables(state.Alloc, &result.Value)
 		result.Value.Free(state.Alloc)
 		atom.Kind = core.AtomFailed

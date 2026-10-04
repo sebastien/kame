@@ -185,7 +185,7 @@ func (p *Program) Start(target string) HandleStart {
 	index := p.instanceIndex(node)
 	if index >= 0 {
   if !p.claimEnvironment(index, p.Options.Environment) {
-   return HandleStart{Diagnostic: failure(p.Alloc, "ENV_CONFLICT", "active target has a different recipe environment")}
+   return HandleStart{Diagnostic: p.environmentFailure(index, "active target has a different recipe environment")}
   }
 		p.epoch++
 		p.Instances[index].runEpoch = p.epoch

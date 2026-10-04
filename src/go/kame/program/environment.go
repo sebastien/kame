@@ -9,6 +9,10 @@ import (
 // environment. Rule-local values override inherited values; last assignment wins.
 // Active shared resources cannot be rebound to a conflicting context.
 func (p *Program) claimEnvironment(index int, inherited []string) bool {
+	d := p.recipeSettings(index)
+	p.Instances[index].SettingsDiagnostic.Free(p.Alloc)
+	p.Instances[index].SettingsDiagnostic = d
+	if d.Code != "" { return false }
 	var environment []string
 	for i := range inherited {
 		environment = p.setEnvironment(environment, inherited[i])
@@ -16,6 +20,7 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 	for i := range p.Instances[index].Rule.Environment {
 		environment = p.setEnvironment(environment, p.Instances[index].Rule.Environment[i].Value)
 	}
+	for i := range p.Instances[index].MetadataEnvironment { environment = p.setEnvironment(environment, p.Instances[index].MetadataEnvironment[i]) }
 	// Canonical order prevents equivalent inherited assignments from creating
 	// different cache fingerprints merely through authored ordering.
 	for i := 1; i < len(environment); i++ {
@@ -35,10 +40,12 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 		}
 		p.Engine.Invalidate(entry.Node)
 	}
-	slices.Free(p.Alloc, entry.Environment)
-	entry.Environment = environment
+	resolved := cloneStrings(p.Alloc, environment)
+	slices.Free(p.Alloc, environment)
+	freeStrings(p.Alloc, entry.Environment)
+	entry.Environment = resolved
 	entry.EnvironmentClaimed = true
-	entry.ScopedEnvironment = !sameEnvironment(environment, p.Options.Environment)
+	entry.ScopedEnvironment = !sameEnvironment(resolved, p.Options.Environment)
 	return true
 }
 

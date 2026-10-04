@@ -33,7 +33,7 @@ func (p *Program) localValue(local *localDefinition, c *Context) Result {
 	c.Scope = callerScope
 	local.Active = false
 	if !r.Waiting {
-		if r.Value.HasCallable() && r.Diagnostic.Code == "" { r.Free(c.Run); return failure(c.Run, "EXPR_INVALID", local.Expression.Span, "callable cannot cross evaluation boundary") }
+		if r.Value.HasTransientCallable() && r.Diagnostic.Code == "" { r.Free(c.Run); return failure(c.Run, "EXPR_INVALID", local.Expression.Span, "callable cannot cross evaluation boundary") }
 		local.Done, local.Value, local.Diagnostic = true, r.Value.Clone(local.Scope.Alloc), r.Diagnostic.Clone(local.Scope.Alloc)
 		for i := before; i < len(c.Effects); i++ {
 			effect := c.Effects[i]

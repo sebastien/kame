@@ -292,7 +292,12 @@ func (p *Program) Free() {
 	freeStrings(p.Alloc, p.Options.ToolOverrides)
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
-  slices.Free(p.Alloc, p.Instances[i].Environment)
+  freeStrings(p.Alloc, p.Instances[i].Environment)
+  freeStrings(p.Alloc, p.Instances[i].Shell)
+  freeStrings(p.Alloc, p.Instances[i].MetadataEnvironment)
+  freeStrings(p.Alloc, p.Instances[i].SettingsDependencies)
+  p.Instances[i].SettingsDiagnostic.Free(p.Alloc)
+  if p.Instances[i].KashContext != nil { p.freeKashContext(p.Instances[i].KashContext) }
   p.freeFileContext(p.Instances[i].FileContext)
  p.freeNewerInputs(p.Instances[i].NewerInputs)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)

@@ -274,7 +274,17 @@ type pendingRequest struct {
 
 type registeredRule struct{ Rule *rule.Rule }
 type instance struct {
- // Environment borrows strings from Options and parsed rules; owns the slice.
+	Shell []string
+	Kash bool
+	ScopedShell bool
+	MetadataEnvironment []string
+	SettingsDependencies []string
+	SettingsDiagnostic diagnostic.Diagnostic
+	KashRunning bool
+	KashContext *eval.Context
+	KashPrepared bool
+	KashPreparing bool
+ // Environment owns the resolved child-process assignments.
  Environment []string
  EnvironmentClaimed bool
  ScopedEnvironment bool
