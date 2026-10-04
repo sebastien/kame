@@ -21,8 +21,9 @@ Related material:
 ## TL;DR
 
 The remaining porting gaps concern build configuration and declarations:
-target environments,
-conditional includes, generated declarations, and order-only prerequisites.
+expression configuration under target environments, declaration conditionals
+and gated includes. Optional generated declarations remain a separate design
+proposal. Order-only prerequisites and newer-input selection are implemented.
 The detailed acceptance clauses below track those requests.
 
 Source discovery and header composition have been addressed: wildcard accepts

@@ -99,3 +99,14 @@ CLI conformance portion of `make test-leaks`, with
 `T013-03-meta-binary.sh` is intentionally excluded because it checks the debug
 artifact's metadata. This closes the compiled CLI verification gap, while the
 remaining specification/feature requirements still prevent release completion.
+
+The 2026-10-04 allocator checkpoint and publisher fixes were verified in an
+isolated checkout containing the committed changes, excluding unfinished Kash
+and source-formatting work in the shared checkout. All 29 WASM host ASAN/UBSAN
+tests pass. T010-22 checks allocator exhaustion at compilation and asynchronous
+completion, static diagnostics, repeated slot reuse, surviving instances,
+temporary module-heap rollback and preservation of unrelated traps. Its real
+shell/argv stdout/stderr reproductions additionally require a clean `NO_MEMORY`
+CLI diagnostic and reaped children. The eight publication-backpressure checks,
+large-output suite and timeout/retry suite pass after the publisher changes.
+These focused results do not establish a final full-tree verification.

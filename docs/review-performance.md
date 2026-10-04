@@ -130,3 +130,11 @@ reaping the child group; timeout kills the whole group and drains killed pipes.
 T012-04 covers stdout, stderr, JSON, direct argv, cached replay, cancellation and
 timeout with deliberately unread pipes. This establishes backpressure behavior,
 without a production latency or peak-memory benchmark claim.
+
+The allocator checkpoint build passes the existing eight WASM publication
+backpressure checks and large-output suite in an isolated checkout. This
+verifies lossless normal streaming, bounded retention and cancellation after
+adding WebAssembly exception handling; it is not a timing benchmark. T010-22
+also verifies that shell/argv callback exhaustion terminates and reaps real
+stdout/stderr publishers before surfacing the diagnostic. All 29 WASM host
+ASAN/UBSAN tests pass for the committed allocator changes.
