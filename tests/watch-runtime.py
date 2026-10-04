@@ -156,6 +156,22 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-obsolete-input-') as directo
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-shared-roots-') as directory:
+    project = Path(directory)
+    (project / 'Makefile.kmk').write_text('shared :\n\tprintf s >> shared-log\nalpha : shared\n\tprintf a > alpha-out\nbeta : shared\n\tprintf b > beta-out\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'alpha', 'beta'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: read(project / 'alpha-out') == 'a' and read(project / 'beta-out') == 'b', error, 'shared prerequisite roots')
+            assert read(project / 'shared-log') == 's', 'shared prerequisite ran more than once'
+            time.sleep(.5)
+            assert read(project / 'shared-log') == 's', 'idle shared roots repeated prerequisite work'
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
     project = Path(directory)
     (project / 'Makefile.kmk').write_text('MARK = (text (read ./input))\nchosen :\n\tprintf %s @(MARK) >> watch-log\n')
