@@ -86,7 +86,9 @@ batch or nested collection is open. `EndBatch` is valid only at collection depth
 zero. A source protocol violation fails the node with `EXPR_INVALID`.
 
 `Nested(source)` transfers ownership of the nested source to the materializer.
-An inner `EndStream` pops only that source and resumes the outer source. A
+An inner `EndStream` pops only that source and resumes the outer source.
+Failure and teardown unwind nested sources before outer sources, so an inner
+source may safely borrow state retained by its enclosing source. A
 failure in an inner source fails the enclosing node. This preserves local nested
 stream termination without treating a stream as a `Value`.
 
@@ -150,6 +152,13 @@ retain the host buffer.
 
 Invalidation and cancellation detach the waiting source from the active node
 generation, free its materializer, and request host cancellation where needed.
+When an update replaces an outstanding consumer invocation, retain its previous
+dependency interest through edge rediscovery. Otherwise removing the sole old
+edge would cancel the source publishing that update. Rediscovered edges adopt
+the retained interest; obsolete holds are released at an accepted publication,
+terminal result, explicit invalidation or last-consumer cancellation. Holds do
+not act as reverse dependency edges in the replacement generation.
+
 Late completions are freed without polling the source when their node,
 generation, or attempt is stale. This applies equally to atom, batch, and
 stream operations.

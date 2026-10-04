@@ -191,7 +191,11 @@ an application over reactive inputs:
 One application has at most one accepted operation invocation. Each invocation
 increments the node attempt number. If arguments change while it runs, its
 completion no longer matches the active attempt and one invocation starts with
-the newest complete argument set.
+the newest complete argument set. During this reactive restart, old dependency
+interest remains live until the replacement invocation rebinds its edges.
+Rediscovered edges adopt that interest; obsolete dependencies are released at
+accepted publication or termination. Cancellation and explicit invalidation
+also release pending holds, and stale completions cannot restore old results.
 
 An operation may itself return a value, complete without a value, submit a host
 request, or publish a stream of values. Nested lists and records are ordinary

@@ -144,6 +144,7 @@ func (e *Engine) interest(n *Node, delta int64) {
 	n.Interest += delta
 	for i := range n.Static { e.interest(n.Static[i], delta) }
 	for i := range n.Dynamic { e.interest(n.Dynamic[i], delta) }
+	for i := range n.previousDynamic { e.interest(n.previousDynamic[i], delta) }
 	if n.Interest == 0 && !n.invalidating && n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled {
 		e.cancel(n)
 	}
@@ -192,6 +193,7 @@ func (e *Engine) publish(n *Node, value Value) {
 	n.Latest, n.Current = value.Clone(e.Alloc), true
 	value.Free(e.Alloc)
 	n.Revision++
+	e.releasePreviousDependencies(n)
 	e.emit(n, Event{Kind: UpdateValue, Value: n.Latest, Revision: n.Revision})
 	dependents := slices.Clone(e.Alloc, n.Dependents)
 	for i := range dependents {
@@ -199,7 +201,7 @@ func (e *Engine) publish(n *Node, value Value) {
 		if dependent.State != NodeWaiting { continue }
 		// A host request was derived from an older dependency snapshot. Cancel it
 		// and restart from the newest values instead of accepting its completion.
-		if dependent.Submitted { e.Invalidate(dependent); continue }
+		if dependent.Submitted { e.restartFromPublication(dependent); continue }
 		dependent.State = NodeReady
 	}
 	slices.Free(e.Alloc, dependents)
@@ -366,7 +368,7 @@ func (e *Engine) Invalidate(n *Node) {
  e.collectInvalidationReasons(n, false, &reasons)
  slices.Free(e.Alloc, reasons)
 	var seen []*Node
-	e.invalidate(n, &seen)
+	e.invalidate(n, &seen, false)
 	slices.Free(e.Alloc, seen)
 }
 
@@ -390,7 +392,7 @@ func (e *Engine) collectInvalidationReasons(n *Node, ordered bool, seen *[]*Node
 	}
 }
 
-func (e *Engine) invalidate(n *Node, seen *[]*Node) {
+func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool) {
 	if n == nil { return }
 	if slices.Contains(*seen, n) { return }
 	*seen = slices.Append(e.Alloc, *seen, n)
@@ -413,15 +415,39 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node) {
 	for i := range n.Dynamic {
 		d := n.Dynamic[i]
 		removeDependent(d, n)
-		if n.Interest != 0 { e.interest(d, -n.Interest) }
+		if retain {
+			n.previousDynamic = slices.Append(e.Alloc, n.previousDynamic, d)
+		} else if n.Interest != 0 { e.interest(d, -n.Interest) }
 	}
+	if !retain { e.releasePreviousDependencies(n) }
 	slices.Free(e.Alloc, n.Dynamic); n.Dynamic = nil
 	slices.Free(e.Alloc, n.Observed); n.Observed = nil
  slices.Free(e.Alloc, n.OrderOnly); n.OrderOnly = nil
 	e.emit(n, Event{Kind: UpdateInvalidated})
-	for i := range dependents { e.invalidate(dependents[i], seen) }
+	for i := range dependents { e.invalidate(dependents[i], seen, retain) }
 	slices.Free(e.Alloc, dependents)
 	n.invalidating = false
+}
+
+// Preserve the interest of old edges until a restarted invocation has rebound
+// its dependencies. Otherwise invalidating a sole consumer cancels the source
+// that is currently publishing the update which caused the restart.
+func (e *Engine) restartFromPublication(n *Node) {
+ var seen []*Node
+ e.collectInvalidationReasons(n, false, &seen)
+ slices.Free(e.Alloc, seen)
+ seen = nil
+ e.invalidate(n, &seen, true)
+ slices.Free(e.Alloc, seen)
+}
+
+func (e *Engine) releasePreviousDependencies(n *Node) {
+ previous := n.previousDynamic
+ n.previousDynamic = nil
+ for i := range previous {
+  if n.Interest != 0 { e.interest(previous[i], -n.Interest) }
+ }
+ slices.Free(e.Alloc, previous)
 }
 
 func removeDependent(n, dependent *Node) {
@@ -443,6 +469,7 @@ func (e *Engine) cancel(n *Node) {
 	if n.Submitted { e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID}) }
 	n.Submitted = false
 	n.HostRequestID = 0
+	e.releasePreviousDependencies(n)
 	n.Generation++; n.Requested = false; n.State = NodeCancelled; n.Diagnostic = Diagnostic{Code: DiagnosticCancelled}
 	e.emit(n, terminal(n))
 	for i := range n.Dependents {
@@ -473,7 +500,7 @@ func (e *Engine) Free() {
 	for i := range e.nodes {
 		n := e.nodes[i]
 		for j := range n.Subs { n.Subs[j].free() }
-		slices.Free(e.Alloc, n.Subs); slices.Free(e.Alloc, n.Static); slices.Free(e.Alloc, n.Dynamic); slices.Free(e.Alloc, n.Dependents)
+		slices.Free(e.Alloc, n.Subs); slices.Free(e.Alloc, n.Static); slices.Free(e.Alloc, n.Dynamic); slices.Free(e.Alloc, n.previousDynamic); slices.Free(e.Alloc, n.Dependents)
 		slices.Free(e.Alloc, n.Observed)
   slices.Free(e.Alloc, n.OrderOnly)
 		if n.Current { n.Latest.Free(e.Alloc) }

@@ -282,3 +282,29 @@ Evaluator results now clone engine failures before wrapping. Source polling also
 preserves a failure or cancellation raised during dependency discovery and frees
 its discarded result instead of replacing the terminal state. The focused
 evaluator test and T006-06 require clean `DEP_CYCLE` failure without recipe effects.
+
+### KB-12 — Stream updates cancel their publishing source and free outer state first
+
+- **Severity:** memory safety and reactive correctness
+- **Area:** nested source teardown and pending invocation restart
+- **Status:** fixed
+
+The portable `TestStreamUpdateCancelsPendingLibraryCallback` fixture streams
+complete batches into `(map ([x] (wait-each x)) feed)`. While a callback waits,
+the source publishes its next batch. The previous engine invalidated the
+consumer and dropped its dynamic interest immediately, cancelling its sole
+publishing source. Materializer teardown then freed the outer definition source
+before its nested operation wrapper; `freeOperationStream` wrote to freed outer
+state. The compiled ASAN reproduction identifies that write and the preceding
+`freeDefinitionSource` allocation release.
+
+Teardown now unwinds nested frames before their outer owners. A reactive restart
+retains old dependency interest while the replacement invocation rediscovers its
+edges. Rediscovered dependencies adopt that interest; an accepted publication,
+terminal result, explicit invalidation or last-consumer cancellation releases
+obsolete holds. Removed edges no longer act as reverse dependency subscriptions.
+
+The library regression requires cancellation of the old request, rejection of
+its late completion, disposal of partial callback progress and ordered callbacks
+for the replacement batch. Core regressions also require branch removal and
+release when the consumer disappears before rebinding.

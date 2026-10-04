@@ -183,8 +183,9 @@ func (m *Materializer) freeFrame(frame *sourceFrame) {
 }
 
 func (m *Materializer) discard() {
-	for i := range m.frames {
-		m.freeFrame(&m.frames[i])
+	// Nested sources may borrow outer state; unwind the stack inside out.
+	for i := len(m.frames); i > 0; i-- {
+		m.freeFrame(&m.frames[i-1])
 	}
 	slices.Free(m.Alloc, m.frames)
 	m.frames = nil

@@ -102,7 +102,16 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 		if observed { c.node.Observed = slices.Append(c.engine.Alloc, c.node.Observed, dep) }
 		dep.Dependents = slices.Append(c.engine.Alloc, dep.Dependents, c.node)
 		c.engine.emit(c.node, Event{Kind: UpdateDependency, DependencyID: dep.ID})
-		if c.node.Interest != 0 {
+		held := false
+		for i := range c.node.previousDynamic {
+			if c.node.previousDynamic[i] == dep {
+				copy(c.node.previousDynamic[i:], c.node.previousDynamic[i+1:])
+				c.node.previousDynamic = c.node.previousDynamic[:len(c.node.previousDynamic)-1]
+				held = true
+				break
+			}
+		}
+		if c.node.Interest != 0 && !held {
 			c.engine.interest(dep, c.node.Interest)
 		}
 	}

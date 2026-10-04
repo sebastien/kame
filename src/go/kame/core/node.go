@@ -27,6 +27,8 @@ type Node struct {
 	Diagnostic      Diagnostic
 	Static          []*Node
 	Dynamic         []*Node
+	// Retain old dependency interest while a reactive invocation rebinds edges.
+	previousDynamic []*Node
 	// OrderOnly edges schedule work without consuming prerequisite contents.
 	OrderOnly []*Node
 	InvalidatedForOrderOnly bool
@@ -53,6 +55,7 @@ func (n *Node) complete(e *Engine, diagnostic Diagnostic) {
 	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled { return }
 	n.Diagnostic = diagnostic
 	if diagnostic.Code == "" { n.State = NodeComplete } else { n.State = NodeFailed; if n.Current { n.Latest.Free(e.Alloc); n.Current = false } }
+	e.releasePreviousDependencies(n)
 	e.emit(n, terminal(n))
 	for i := range n.Dependents {
 		if n.Dependents[i].State == NodeWaiting { n.Dependents[i].State = NodeReady }
