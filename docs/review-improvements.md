@@ -37,7 +37,7 @@ See the security and performance reviews for evidence and limitations.
 | Lazy singleton glob sources and future updates | Engine sources and canonical resource identities exist. Prove glob deduplication and membership freshness first; watcher delivery remains separate work. |
 | Captures in bare target names | Already supported and verified by T014-02 on both hosts; exact targets take precedence and overlapping templates remain ambiguous. |
 | Required/optional target arguments | Remaining design/implementation: define argument binding, default evaluation, escaping, identity, and precedence with invocation args. Do not approximate with file outputs. |
-| Conditional forms | Kame lazy `if`/`and`/`or`/`match` and Kash control blocks exist. Rule declaration conditionals and gated includes remain a distinct gap (A4). |
+| Conditional forms | Kame lazy `if`/`and`/`or`/`match` and Kash control blocks exist. Top-level `when`/`otherwise`/`end` now select declarations and includes before registration (A4; T004-13). |
 | Improved templates | Spec 016 defines directives, verbatim strings, rendering, and `do render`; The previously missing CLI is implemented and covered by T016-01; portable template units cover directives and verbatim strings. Audit all acceptance clauses rather than introducing unrelated delimiter syntax. |
 | More intuitive error names | Keep registered stable codes and improve concrete messages/tips first. Renaming public codes needs coordinated specs, diagnostics, fixtures, and compatibility policy. |
 | Streaming standard library | Validate atom/batch/nested-source semantics, callbacks, bounds, fairness, cancellation, and ownership against specs 007/012. Process byte streaming alone does not prove library lifting. |
@@ -54,7 +54,7 @@ See the security and performance reviews for evidence and limitations.
 | Alternative `<-` build syntax | Design proposal, not a correctness gap. Evaluate readability and formatter compatibility before changing existing rules. |
 | Dependency sequencing with `,` | Define whether ordering is an edge or effect sequence; preserve parallel independence and failure propagation. Kash statement sequencing already has different semantics. |
 | Learnability | Finish idioms/gotchas and independent value/rule/process lessons with executable smoke coverage. |
-| Metaprogramming | A4 remains substantive work. Defaults and literal CLI/environment overrides are implemented; computed record lookup uses `get`. Optional generated declarations have a separate design proposal. Headers compose expressions and interpolated paths. |
+| Metaprogramming | A4 declaration selection, defaults, and literal CLI/environment overrides are implemented; computed record lookup uses `get`. Optional generated declarations have a separate design proposal. Headers compose expressions and interpolated paths. |
 | Error taxonomy | Existing codes are registered and machine-readable. Add actionable messages rather than speculative taxonomy churn. |
 
 ## Build-port gaps
@@ -67,7 +67,7 @@ implementation/acceptance is not yet proven, not that documentation is sufficien
 | A1 tool discovery without arbitrary parse-time effects | Implemented: dependency-tracked `(tool NAME)`, repeatable `--tool NAME=PATH`, one resolver lookup per name, executable file dependencies, and plan metadata. T007-11 covers native/WASM parity; the counted resolver sanitizer test verifies reuse. |
 | A2 configuration defaults/overrides | Implemented: lazy `?=`, literal repeatable `--define`, and case-sensitive `KAME_<NAME>` environment values. Last CLI entry wins over environment and authored defaults; plan JSON reports effective provided values. T009-13 covers both hosts. |
 | A3 target-scoped environment/build mode | Recipe inheritance, overrides, shared conflicts and cached-task fingerprints are implemented. Per-artifact debug/release metadata and unchanged-build incrementality now pass T013-05. Persistent scoped-file freshness now covers changed and removed settings; expression/definition configuration remains. |
-| A4 declaration conditionals/gated includes | Optional `include? PATH` is implemented and covered by T004-12 on both hosts. Declaration conditionals and gated includes remain: expression/Kash control flow does not conditionally register build declarations. Repeated nonrecursive includes are legal. |
+| A4 declaration conditionals/gated includes | `when`/`otherwise`/`end` selects declarations before registration; inactive includes are never read. T004-13 passes 35 cases per host. Optional `include? PATH` retains T004-12 coverage; repeated nonrecursive includes remain legal. |
 | A5 computed lookup / generators | Minimum lookup implemented through `get`; T007-10 pins typed configuration and planning parity. Optional generated declarations have a separate design proposal. |
 | A6 continuations/multiline definitions | Implemented backslash LF/CRLF declaration continuations, preserving authored offsets, physical comments and recipe escapes; T004-10 verifies native/WASM execution and formatter idempotence. |
 | B1 discovery unions/alternation/file filtering | Pattern unions are implemented: sorted, duplicate-free results and independent glob dependencies; T007-09 covers native/WASM evaluation and membership changes. Directory filtering uses metadata predicates. |

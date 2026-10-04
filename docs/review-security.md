@@ -110,3 +110,20 @@ shell/argv stdout/stderr reproductions additionally require a clean `NO_MEMORY`
 CLI diagnostic and reaped children. The eight publication-backpressure checks,
 large-output suite and timeout/retry suite pass after the publisher changes.
 These focused results do not establish a final full-tree verification.
+
+
+## Declaration source selection
+
+Declaration predicates run through the portable evaluator in planning phase
+with no host and no capability grants. Literal invocation configuration is
+supplied as definition overrides; it does not grant general environment reads.
+Selected definitions stay lazy, and inactive nested predicates and include
+paths are not evaluated or read. Selected inline includes remain unsupported.
+Syntax validation covers both branches before execution, and direct evaluator
+registration rejects uncomposed markers so embedding callers cannot accidentally
+register an inactive declaration. T004-13 verifies rejected shell/read/output
+predicates, no resulting effects, inactive missing/cyclic includes, and authored
+diagnostic spans on both CLI hosts. Typed WASM descriptor checks pass alongside
+all 30 host sanitizer tests; raw registration rejection is included in the
+68-case evaluator sanitizer run. This source-selection boundary retains the
+existing limits of runtime process grants described above.

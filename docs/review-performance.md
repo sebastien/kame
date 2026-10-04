@@ -138,3 +138,18 @@ adding WebAssembly exception handling; it is not a timing benchmark. T010-22
 also verifies that shell/argv callback exhaustion terminates and reaps real
 stdout/stderr publishers before surfacing the diagnostic. All 29 WASM host
 ASAN/UBSAN tests pass for the committed allocator changes.
+
+
+## Declaration source selection
+
+Each reached `when` compiles the growing prefix of selected definitions before
+evaluating its predicate. The native loader reparses selected parts to extract
+definitions in their original language; JavaScript extracts them from the
+existing portable AST. This introduces repeated parsing and registration work
+for sources with many conditions. Inactive nested predicates bypass the query,
+and inactive includes perform no reads. The conformance checks prove selection
+and ownership behavior, but do not provide a selection-latency benchmark.
+Measure source loading separately from final compilation before replacing this
+simple implementation with a persistent configuration evaluator; any reuse
+must preserve source order, lazy defaults, override precedence, and effect
+restrictions.
