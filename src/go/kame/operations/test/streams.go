@@ -234,3 +234,45 @@ func TestStreamUpdateCancelsPendingLibraryCallback(t *testing.T) {
 		t.Error("replacement callbacks lost order or reused discarded progress")
 	}
 }
+
+func TestLibraryCoalescesTwoStreamInputsBeforeInvocation(t *testing.T) {
+	a := t.Allocator()
+	streamRecord := mem.Alloc[libraryStreamRecord](a)
+	defer mem.Free(a, streamRecord)
+	output := mem.Alloc[outputState](a)
+	defer mem.Free(a, output)
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	registry.Add(eval.Operation{Name: "fixture-stream", Call: libraryStreamOperation, Context: streamRecord, MinArity: 0, MaxArity: 0})
+	parsed := script.Parse(a, "coalesced.km", "left = (fixture-stream)\nright = (fixture-stream)\nresult = (out (cat (uppercase left) (uppercase right)))\n")
+	defer parsed.Free()
+	program := eval.Compile(a, engine, parsed, registry)
+	defer program.Free()
+	defer engine.Free()
+	program.SetDefinitionEffectSink(captureOutput, output)
+	node, left, right := program.Definition("result"), program.Definition("left"), program.Definition("right")
+	engine.Request(node)
+	for step := 0; step < 64 && (!node.Current || !left.Submitted || !right.Submitted); step++ {
+		engine.Step()
+	}
+	if !node.Current || node.Latest.Text != "ONEONE" || output.Count != 1 {
+		t.Error("initial invocation did not wait for both current arguments")
+	}
+	resumeLibraryStream(engine, left)
+	resumeLibraryStream(engine, right)
+	// Deliver both ready input publications before scheduling the consumer.
+	// Coalescing applies to changes observed before its next invocation.
+	engine.Step()
+	engine.Step()
+	engine.DispatchRoot(left)
+	engine.DispatchRoot(right)
+	for step := 0; step < 64 && (!left.Submitted || !right.Submitted || node.Latest.Text != "TWOTWO"); step++ {
+		engine.Step()
+	}
+	if !node.Current || node.Latest.Text != "TWOTWO" || output.Count != 2 {
+		t.Error("coalesced inputs repeated an invocation or mixed old and new values: " + node.Latest.Text)
+		t.Errorf("effect count: %d", output.Count)
+	}
+}

@@ -62,6 +62,7 @@ if (exports.kame_wasm_target_begin(handle, target, targetLength) !== 0) throw ne
 let state = 0;
 let recipes = 0;
 let checks = 0;
+let freshness = 0;
 for (let i = 0; i < 256 && state !== 2; i++) {
   state = exports.kame_wasm_step(handle);
   if (state === 1) {
@@ -73,16 +74,25 @@ for (let i = 0; i < 256 && state !== 2; i++) {
       const [pointer, length] = write('');
       if (exports.kame_wasm_complete_text(handle, request, pointer, length) !== 0) throw new Error('recipe completion failed');
       recipes++;
-    } else if (kind === 17) {
-      if (recipes !== 1 || payloadText(handle) !== 'out.txt') throw new Error('output check did not follow process completion');
-      const [pointer, length] = write('true');
-      if (exports.kame_wasm_complete_json(handle, request, pointer, length) !== 0) throw new Error('output verification completion failed');
-      checks++;
+    } else if (kind === 20) {
+      const paths = JSON.parse(payloadText(handle));
+      if (paths.length !== 1 || paths[0] !== 'out.txt') throw new Error('file-times request lost canonical output');
+      if (recipes === 0) freshness++;
+      else if (recipes === 1) checks++;
+      else throw new Error('output verification did not follow one recipe');
+      const [pointer, length] = write(JSON.stringify([recipes === 0 ? null : '1234567890123456789']));
+      if (exports.kame_wasm_complete_json(handle, request, pointer, length) !== 0) throw new Error('file-times completion failed');
+    } else if (kind === 10) {
+      if (recipes !== 0) throw new Error('context lookup must precede recipe execution');
+      if (exports.kame_wasm_complete_nil(handle, request) !== 0) throw new Error('cache miss completion failed');
+    } else if (kind === 11) {
+      if (recipes !== 1 || checks !== 1 || freshness !== 1) throw new Error('context publication must follow verified output');
+      if (exports.kame_wasm_complete_nil(handle, request) !== 0) throw new Error('context publication completion failed');
     } else throw new Error(`unexpected file recipe request kind: ${kind}`);
   }
 }
 if (state !== 2) throw new Error(`rule target did not complete: ${state}`);
-if (recipes !== 1 || checks !== 1) throw new Error(`recipe request count was ${recipes}`);
+if (recipes !== 1 || checks !== 1 || freshness !== 1) throw new Error(`recipe request count was ${recipes}`);
 if (resultText(handle) !== './out.txt') throw new Error('rule target path was wrong');
 if (exports.kame_wasm_instance_free(handle) !== 0) throw new Error('instance did not free');
 NODE

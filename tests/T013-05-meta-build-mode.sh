@@ -30,6 +30,11 @@ KAME_BUILD_MODE=debug "$CLI_ROOT/tools/generate-version.sh"
 KAME_BUILD_MODE=release "$CLI_ROOT/tools/generate-version.sh"
 if cmp -s "$metadata" "$TMPDIR/version-before" && [ "$(stat -c %y "$metadata")" = "$before" ] && ! rg -q 'const buildMode' "$metadata"; then test-ok "shared version source is independent of artifact mode"; else test-fail "mode switch rewrote generated source"; fi
 
+test-step "establish successful artifact execution contexts"
+# GNU Make does not publish Kame's scoped file-context records. Materialize once
+# before testing reuse so an old/missing context record is not called unchanged.
+"$CLI_ROOT/build/kame.debug" --json -C "$CLI_ROOT" ./build/kame.debug ./dist/kame > "$TMPDIR/context-events" 2> "$TMPDIR/context-err"
+
 test-step "Kame skips unchanged debug and release file outputs"
 debug_before="$(stat -c %y "$CLI_ROOT/build/kame.debug")"
 release_before="$(stat -c %y "$CLI_ROOT/dist/kame")"

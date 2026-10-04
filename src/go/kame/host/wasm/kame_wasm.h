@@ -55,6 +55,11 @@ enum kame_wasm_request_kind {
   // JSON {script, outputs, environment?, shell?}; supplied environment is exact.
   // Target-bound collected shell calls declare an empty outputs array.
   KAME_WASM_REQUEST_RECIPE = 16,
+  KAME_WASM_REQUEST_OUTPUT_EXISTS = 17,
+  KAME_WASM_REQUEST_RESOLVE_TOOL = 18,
+  KAME_WASM_REQUEST_TOOL_EXISTS = 19,
+  // JSON canonical path array; completion is ordered decimal timestamp strings/null.
+  KAME_WASM_REQUEST_FILE_TIMES = 20,
   // Recipe descriptor with outputs; prepares parents before structured execution.
   KAME_WASM_REQUEST_PREPARE_OUTPUTS = 21
 };

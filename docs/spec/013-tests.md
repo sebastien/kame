@@ -117,36 +117,42 @@ is the fixture catalog.
 `tests/CATALOG.tsv` is the authoritative list; `T013-01` keeps it consistent.
 Current coverage:
 
-| Spec | Files | Focus |
+| Spec | Current CLI suites | Focus |
 | --- | --- | --- |
-| 003 host | `T003-01`, `T003-02` | streaming, exit codes, retry, shell, environment, cwd, signal cancellation |
-| 004 language | `T004-01` … `T004-09` | parse matrix, invalid manifest, stdin/IO, usage, goldens, format idempotence and stability, standalone rule parsing |
-| 005 evaluation | `T005-01` … `T005-05` | values, references, special forms, pipes, arguments, failure messages |
-| 006 runtime | `T006-01`, `T006-02`, `T006-04`, `T006-05` | freshness, dependency scheduling, yield, deferred effects and dry-run |
-| 007 library | `T007-01` … `T007-07` | general, collection, text, path, filesystem, capability and shell operations, error messages |
-| 008 cache | `T008-01` … `T008-03` | record creation, hits, force, invalidation, corruption recovery, glob and body fingerprints |
-| 009 CLI | `T009-01` … `T009-08`, `T009-11`, `T009-12`, `T009-13` | help/version, discovery, targets, JSON, plan, cat, graph, dry-run, usage, case matrix, configuration defaults/overrides |
-| 011 diagnostics | `T011-01` … `T011-03` | layout, notes, human/JSON equivalence, code/message integrity, operand spans, included sources, target-scoped tools checks |
-| 012 streams | `T012-01` | terminal event uniqueness, process event balance |
-| 014 patterns | `T014-01` | placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs |
-| 013 meta | `T013-01` … `T013-03` | catalog consistency, fixture hygiene, binary contract, determinism |
-| 015 dist | `T015-01` … `T015-03` | launcher version/provisioning/checksums, APE probe and backend selection, generated metadata and self-build incrementality |
+| 003 | 2 suites; sequences 01, 02 | POSIX streams, shell, retries, timeout and process-group cleanup |
+| 004 | 14 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 09, 10, 11, 12, 13 | Parsers, formatting, headers, continuations, wildcard inputs and declaration selection |
+| 005 | 5 suites; sequences 01, 02, 03, 04, 05 | Values, references, lexical forms, selectors and arguments |
+| 006 | 8 suites; sequences 01, 02, 03, 04, 04, 05, 06, 07 | Freshness, dependencies, always/order-only rules, deferred effects and target environments |
+| 007 | 10 suites; sequences 01, 02, 03, 04, 05, 06, 07, 09, 10, 11 | All standard operations, grants, wildcard unions, record lookup and declared tool policy |
+| 008 | 3 suites; sequences 01, 02, 03 | Cached task identity, invalidation and corrupt-record recovery |
+| 009 | 12 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 11, 12, 13, 14 | Help, discovery, targets, JSON, inspection, configuration and native watch |
+| 010 | 22 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22 | Public ABI, embedding services, metadata/effect publication, native parity and OOM recovery |
+| 011 | 3 suites; sequences 01, 02, 03 | Code registry, source layout, structured context and process cause policy |
+| 012 | 4 suites; sequences 01, 02, 03, 04 | Protocol/event ownership, live output, large captures and public backpressure |
+| 013 | 5 suites; sequences 01, 02, 03, 04, 05 | Catalog, fixture hygiene, binary contract, graph growth and artifact build modes |
+| 014 | 2 suites; sequences 01, 02 | Sections, pattern replace, bare captures and exact/template precedence |
+| 015 | 3 suites; sequences 01, 02, 03 | Launcher integrity, backend choice, provisioning and build metadata |
+| 016 | 1 suites; sequences 01 | Template rendering, directives, includes, styles and check mode |
+| 017 | 19 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 | Kash processes/control, unified sessions, capabilities, async ownership and recipe interpreters |
+| 018 | 1 suites; sequences 01 | Structural formatting goldens, equivalent ASTs, width boundaries and host parity |
 
-The existing command tests cover the implementation's pre-unified-run surface;
-they do not establish that the direct-execution and `do run` contract now in
-`009-cli.md` is implemented. Spec 014 coverage is in place: `T014-01`
-placeholder sections and pattern replace, plus `expr/section-*.km`,
-`expr/pattern-*.km`, and `invalid/expr-pattern-mixed-groups.km` fixtures in the
-T004 parse/format suites.
+The catalog is authoritative; these suite counts describe coverage rather than
+replacing a clause-by-clause spec audit. Unified-run coverage in T017-05 through
+T017-10 includes direct/explicit dispatch, whole-sequence preflight, shared
+fragments and includes, JSON, dry-run and invocation policy on both hosts.
+T017-19 covers selected recipe interpreters and invocation-owned script values.
+Portable operation stream tests additionally verify complete batch lifting,
+callback replacement and two-input coalescing; core tests verify protocol
+ownership, fairness and retained interest through reactive rebinding.
 
-### Unified-run migration coverage
+### Unified-run regression coverage
 
-When implementing `009-cli.md`, migrate expression-command cases to `do run
+Expression-command cases have migrated to `do run
 --lang expr` rather than dropping their evaluator, argument, capability, or
 byte-output assertions. Historical defect descriptions below retain the old
 command name because they describe the interface at the time of the defect.
 
-Add native/WASM conformance for:
+Retain native/WASM conformance for:
 
 - Direct `.km`, `.kmk`, `.kash`, and `.ksh` execution versus `do run` equivalence.
 - Inline/stdin language selection and unknown-suffix validation without effects.
@@ -171,9 +177,8 @@ Add native/WASM conformance for:
   and owned async joining at whole-session completion rather than file boundaries.
 - Deterministic migration diagnostics for removed `do expr` and `do kash` names.
 
-Keep fixtures and examples that exercise the current CLI runnable until runtime
-implementation lands; a spec update alone does not authorize claiming runner
-support or removing executable regression coverage.
+Keep fixtures and examples runnable; changes to this specification do not
+authorize removing executable regression coverage.
 
 ## Defects found and fixed by this suite
 
@@ -256,3 +261,10 @@ The harness preserves `-check=sanitize -panic=abort` and Clang when freshness re
 `T004-12-lang-optional-includes.sh` verifies missing and present optional sources, newly registered declarations, value-source fragments, formatting/AST metadata, parse failures before effects, cycles and existing-directory read failures on native/WASM.
 
 `T012-02-streams-live-cli.sh` requires native/WASM human and JSON chunks to reach pipes before allowing the recipe to complete, and verifies native watch output before termination.
+
+T010-05 embedding hosts service the current kind-20 file-times arrays, asserting
+canonical paths, absent-before/present-after recipe ordering and 64-bit decimal
+nanosecond strings. T013-05 establishes one successful Kame artifact context
+before asserting the next unchanged build skips; GNU Make does not publish those
+context records. Keep the revision stable during build-mode gates because the
+generated build ID follows Git HEAD.

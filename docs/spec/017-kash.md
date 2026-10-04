@@ -763,8 +763,8 @@ live forwarding and explicit capture remain separate channels.
 - Only the selected control-statement branch runs; an unselected branch's
   commands and effects never occur.
 - Nested control blocks parse and format idempotently.
-- Existing `.kmk` recipes retain their shell-text behavior unless an explicit
-  future Kash recipe mode is selected.
+- Existing `.kmk` recipes retain their shell-text behavior unless explicit
+  Kash recipe metadata or `SHELL = kash` selects the portable interpreter.
 - Definition detection distinguishes `name = VALUE` from `echo name=value`;
   function RHSs use Kame expressions, including command-substitution atoms, not
   shell-style infix concatenation or Kash reference wrappers.
