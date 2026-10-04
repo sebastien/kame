@@ -75,6 +75,6 @@ Portable allocator coverage includes shared roots, repeated snapshots, invalid
 batch atomicity, malformed JSON rejection and failed-start cleanup. T009-14 and
 T010-23 also verify grant preservation through invalidation and source reload,
 and that denied reads do not run recipes. D01 remains open for the other
-acceptance cases and public ABI allocation-failure conformance. T010-25 adds
-raw ABI query/copy, malformed target/resource rejection, retained-root
-invalidation, instance isolation and disposal coverage.
+acceptance cases. T010-25 adds raw ABI query/copy, malformed target/resource
+rejection, retained-root invalidation, allocation-failure diagnostics, instance
+isolation and disposal coverage.

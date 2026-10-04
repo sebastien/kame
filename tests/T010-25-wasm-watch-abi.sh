@@ -7,7 +7,7 @@ test-start "T010-25 WASM watch ABI"
 cd "$CLI_ROOT"
 test-step "build the freestanding WASM module"
 make wasm >/dev/null
-test-step "watch queries, invalidation validation and instance isolation"
+test-step "watch snapshots, validation, allocation failure, isolation and disposal"
 if node --input-type=module - <<'NODE'
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
@@ -75,6 +75,17 @@ const advanceWatch = (handle) => {
   throw new Error(`watch did not settle: ${JSON.stringify(state(handle))}; ${diagnostic(handle)}`);
 };
 
+const constrained = e.kame_wasm_instance_create();
+assert.notEqual(constrained, 0n);
+assert.equal(e.kame_wasm_instance_set_heap_limit(constrained, 11000), 0);
+compile(constrained, 'VALUE = 1\n');
+const [constrainedTargets, constrainedTargetsLength] = write('["VALUE"]');
+assert.equal(e.kame_wasm_watch_begin(constrained, constrainedTargets, constrainedTargetsLength), 0);
+for (let i = 0; i < 8; i++) e.kame_wasm_step(constrained);
+assert.equal(e.kame_wasm_watch_state(constrained, 0, 0, alloc(4, 4)), 2);
+assert.match(diagnostic(constrained), /^NO_MEMORY: instance heap exhausted$/);
+assert.equal(e.kame_wasm_instance_free(constrained), 0);
+
 const first = e.kame_wasm_instance_create();
 const second = e.kame_wasm_instance_create();
 let fileContent = 'first';
@@ -135,7 +146,7 @@ assert.equal(e.kame_wasm_instance_free(malformed), 0);
 assert.equal(e.kame_wasm_watch_state(first, 0, 0, alloc(4, 4)), 1);
 NODE
 then
-	test-ok "watch ABI snapshots, rejection, isolation and disposal are stable"
+	test-ok "watch ABI snapshots, rejection, exhaustion, isolation and disposal are stable"
 else
 	test-fail "raw WASM watch ABI assertions failed"
 fi
