@@ -1793,7 +1793,7 @@ async function discoverBuildSource(module, inv, sourceDirectory) {
   if (source === null) return null;
   const name = inv.sourceName ?? (inv.command ? source.name : isAbsolute(source.name) ? normalize(source.name) : normalize(join(inv.directory || '.', source.name)));
   const environment = [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment];
-  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, false, { defines: inv.defines, environment, parts: [] });
+  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, true, { defines: inv.defines, environment, parts: [] });
   parts.defines = inv.defines;
   parts.toolOverrides = inv.toolOverrides;
   parts.force = inv.force ? 1 : 0;

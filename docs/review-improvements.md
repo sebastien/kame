@@ -226,3 +226,16 @@ statements. Earlier included and explicit-file configuration participates in
 source order. Portable parser/program/host sanitizer suites pass 16/102/30 tests.
 Uncomposed evaluator registration is explicitly rejected, and host predicates
 have no capabilities. Full-suite validation remains pending.
+
+
+The declaration-loader regression checks exposed two preflight diagnostic issues:
+native JSON inspection selected the error stream, while WASM legacy composition
+reparsed a malformed include and attributed a trailing error to the parent.
+The loaders now validate each authored source before composition and use the
+invocation diagnostic writer. T010-20 passes all 24 native/WASM parity assertions;
+optional includes, configuration, and shared sessions pass 19/20/78 assertions.
+The evaluator sanitizer suite passes 68 cases, including rejection of raw
+conditional markers. The isolated catalog passes 446 checks. The shared checkout
+build still encounters five source-span/diagnostic-span type mismatches in the
+separate uncommitted recipe-settings work; these feature checks use the isolated
+checkout. Full-suite validation remains pending.

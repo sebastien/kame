@@ -57,7 +57,8 @@ func freeBuildSource(source *buildSource) {
 }
 
 func loadBuildSource(options buildArguments, errOut io.Writer, reportMissing bool) buildSource {
-	return loadBuildSourceWithPrefix(options, errOut, reportMissing, "")
+	options.JSON = options.JSON || cliDiagnosticJSON
+	return loadBuildSourceWithPrefix(options, diagnosticWriter(cliDiagnosticOut, errOut, options.JSON), reportMissing, "")
 }
 
 func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportMissing bool, prefix string) buildSource {
