@@ -127,3 +127,24 @@ diagnostic spans on both CLI hosts. Typed WASM descriptor checks pass alongside
 all 30 host sanitizer tests; raw registration rejection is included in the
 68-case evaluator sanitizer run. This source-selection boundary retains the
 existing limits of runtime process grants described above.
+
+## Scoped environment reads and portable target policy
+
+Scoped recipe reads resolve inside the evaluator, so they cannot rely on the
+JavaScript host request handler to enforce grants. Primary WASM builds now
+forward the CLI policy into portable target compilation. The evaluator checks
+name-specific env grants before reading target snapshots, and an explicit empty
+embedding policy rejects reads before requests or effects. T006-06 passes all
+40 cross-host assertions; native runs use the ASAN/UBSAN CLI. The WASM host
+sanitizer suite passes 32 tests including the explicit empty-policy regression.
+Missing snapshot names return nil; they do not fall back to the ambient host.
+These controls retain the documented child-process and filesystem boundaries.
+
+The committed script constructor is pure: it parses before returning a callable,
+retains its lexical scope, and performs effects only when invoked under the
+caller's phase and grants. Callable values retain invocation identity; foreign
+invocations and persistent JSON serialization reject them. Focused isolated
+sanitizer coverage passes 64 core, 71 evaluator, 103 program and 32 WASM host
+cases. T017-19 additionally covers restricted executable grants, construction
+without effects, parse failure, cancellation of background work, bounded cached
+streams and aggregate timeout/retry policy on both CLI hosts.

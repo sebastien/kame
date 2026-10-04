@@ -249,8 +249,8 @@ cases use the compiled ASAN/UBSAN CLI. Program/evaluator/core sanitizer suites
 pass 102/68/64 cases, and the shell-descriptor host suite passes four cases.
 The existing scoped-environment regression passes all 31 assertions. This does
 not close A3: definition/environment reads and tool resolution still require
-scoped-configuration implementation, and the structured recipe work still needs
-cache/retry/cancellation and callable-lifetime review before committing it.
+scoped-configuration implementation. Structured recipe cache, retry, cancellation
+and callable ownership now have focused coverage and the feature is committed.
 
 WASM primary `--dry-run` now uses the shared session dry-run path rather than
 returning `FEATURE_UNSUP`. T017-10 passes 23 behavioral assertions (24 total when rebuilding the CLI) on
@@ -275,9 +275,10 @@ rebuilds the module when its build settings change. Primary WASM builds now
 service independent requests concurrently and forward timeout/retry policy into
 portable build and session options.
 
-The structured recipe feature remains under integration review. Native reusable
-script file freshness and A3's scoped definition/environment reads and tool
-resolution remain unfinished.
+The structured recipe feature is committed with isolated host and sanitizer
+verification. Reusable script file freshness now passes on both hosts: declared inputs permit
+skipping unchanged outputs, while input-free file recipes rerun as spec 006
+requires. A3 scoped definitions and tool resolution remain unfinished.
 
 Nested operand scope restoration is committed separately with a focused
 operation-context regression. The shared evaluator passes 71 ASAN/UBSAN tests;
@@ -285,3 +286,35 @@ the temporary-operand Kash constructor reproducer now passes on native and WASM.
 Existing timeout/retry, signal cancellation, cached-task, and async-graph suites
 pass 87 behavioral assertions. The expanded reusable-script helper has also
 added file-freshness cases; that integration review remains open.
+
+Direct recipe-template environment reads now bind to the effective target
+snapshot and retain capability checks. Operation and program ASAN/UBSAN suites
+pass 9 and 103 tests, including empty/missing snapshots, denial, and cached
+prerequisite rebinding across debug/release roots. General scoped definition
+configuration, tool lookup and collected shell requests remain open under A3.
+
+Dynamic prerequisite expressions now use the same bound snapshot as rendering.
+T006-06 passes all 40 native/WASM assertions, including grants, cache identity,
+changed roots and dependency selection. Native checks use a compiled sanitizer
+binary whose ASAN symbols remain present after harness refresh. Primary WASM
+target evaluation now receives the CLI policy; missing env grants fail inside
+the module before effects. Embedding hosts retain the previous all-capability
+default unless they supply an explicit policy.
+
+The committed Kash feature is verified independently from pending formatter and
+watch edits. T017-19 passes 29 policy and 39 script cases per host, with native
+ASAN symbols verified. Isolated core/evaluator/program/WASM sanitizer suites pass
+64/71/103/32 tests. Recipes expand templates before Kash parsing; selected shell
+and environment metadata are pure, with cache, freshness, timeout, retry,
+cancellation, file publication and invocation-owned constructor coverage.
+
+Spec 018 canonical layouts are committed. T018-01 passes 41 goldens per host,
+including nested special forms, binding pairs, records, long operators/headers,
+80/81-column Unicode and prefix boundaries, literal preservation and declaration
+predicate width. Every golden also checks AST equivalence and idempotence;
+formatted multiline value programs execute on both hosts. Formatting an effectful
+declaration predicate produces no effects. Existing canonical, AST stability and
+WASM formatter suites pass 193/93/6 assertions, and 27 expression sanitizer tests
+pass. The registered catalog passes all 454 assertions. Advisory naming and
+organization conventions remain author guidance; the formatter preserves names,
+declaration order and surrounding language syntax.

@@ -153,3 +153,34 @@ Measure source loading separately from final compilation before replacing this
 simple implementation with a persistent configuration evaluator; any reuse
 must preserve source order, lazy defaults, override precedence, and effect
 restrictions.
+
+## Scoped snapshot reads
+
+Direct scoped env reads scan the already owned target environment and clone only
+the selected value. They avoid the previous shared ambient resource node and
+host request/replay cycle. Complete environment fingerprints already bind cached
+tasks and scoped file rules, so changed inherited values still invalidate work.
+T006-06 proves unchanged cache reuse and changed-root invalidation on both hosts;
+103 program sanitizer tests pass. No timing or large-environment benchmark has
+been run, so this is a correctness and allocation-path review, not a measured
+throughput improvement. Scoped definition and tool resolution remain unfinished.
+
+## Structured recipe ownership and retention
+
+Structured recipes retain one evaluation context through suspended process
+steps, avoiding dangling scope/resolver pointers. Script constructors own parsed
+ASTs and retained lexical scopes for the invocation. `freeKashFunctions` releases
+these at program teardown. Repeated construction adds entries to `KashFunctions`;
+the implementation does not reclaim an unreferenced constructed script earlier.
+Long watch sessions that reconstruct scripts after invalidation can therefore
+retain increasing AST/scope storage. This follows from the lifetime code and has
+not been quantified with a long-running memory benchmark. Any future reclamation
+must preserve scripts stored in lazy definitions, cross-node values and captured
+scopes. Existing ASAN/UBSAN gates prove teardown ownership, not bounded memory
+throughout an arbitrarily long invocation.
+
+The structural formatter also repeatedly computes compact subtree text during
+width decisions (`inlineFits`). Deeply nested expanded input can cause repeated
+allocation and traversal; `layout.go` records this optimization point. Width
+caching should be considered after measuring realistic source depth, preserving
+actual starting columns, closing-delimiter budgets and Unicode/tab widths.
