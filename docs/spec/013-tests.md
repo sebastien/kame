@@ -126,7 +126,7 @@ Current coverage:
 | 007 | 10 suites; sequences 01, 02, 03, 04, 05, 06, 07, 09, 10, 11 | All standard operations, grants, wildcard unions, record lookup and declared tool policy |
 | 008 | 3 suites; sequences 01, 02, 03 | Cached task identity, invalidation and corrupt-record recovery |
 | 009 | 13 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 11, 12, 13, 14, 15 | Help, discovery, targets, JSON, inspection, configuration, native watch and target arguments |
-| 010 | 24 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24 | Public ABI, embedding services, metadata/effect publication, native parity, OOM recovery, retained watch and target arguments |
+| 010 | 25 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25 | Public ABI, embedding services, metadata/effect publication, native parity, OOM recovery, retained watch, target arguments and watch ABI conformance |
 | 011 | 3 suites; sequences 01, 02, 03 | Code registry, source layout, structured context and process cause policy |
 | 012 | 4 suites; sequences 01, 02, 03, 04 | Protocol/event ownership, live output, large captures and public backpressure |
 | 013 | 5 suites; sequences 01, 02, 03, 04, 05 | Catalog, fixture hygiene, binary contract, graph growth and artifact build modes |
