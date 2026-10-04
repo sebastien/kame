@@ -128,13 +128,18 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	if context.Engine == nil && context.ResolveDefinition != nil {
 		return context.ResolveDefinition(context.ResolverState, b.Definition, context)
 	}
+	key := b.Definition
+	if context.Engine != nil && context.HasDefinitionNamespace {
+		node := context.Program.scopedDefinition(key, context)
+		if node != nil { key = node.Key }
+	}
 	ready := false
 	if context.Engine != nil {
 		if context.RecoverFailures {
-			ready = context.Engine.TryDependency(b.Definition)
-			d := context.Engine.DependencyDiagnostic(b.Definition)
+			ready = context.Engine.TryDependency(key)
+			d := context.Engine.DependencyDiagnostic(key)
 			if d.Code != "" { return Result{Diagnostic: d.Clone(context.Run)} }
-		} else { ready = context.Engine.Dependency(b.Definition) }
+		} else { ready = context.Engine.Dependency(key) }
 	}
 	if !ready {
 		if context.Engine != nil && context.Engine.Failed() {
@@ -143,7 +148,7 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		}
 		return Result{Waiting: true}
 	}
-	value := context.Engine.Value(b.Definition)
+	value := context.Engine.Value(key)
 	if !value.OK {
 		return Result{Waiting: true}
 	}

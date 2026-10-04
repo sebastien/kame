@@ -168,13 +168,19 @@ and dynamic prerequisite expressions use the effective target snapshot, enforce 
 grants, and invalidate cached work when inherited values change. Missing names
 return nil without reading ambient host values.
 
-**Remaining.** Kame definitions, tool lookup and expression-level shell requests
+**Scoped definitions.** Lazy definitions and functions reached while rendering
+or resolving dynamic prerequisites use the target snapshot. `KAME_NAME` overrides
+are literal, explicit `--define` values win, and separate engine nodes retain
+ordinary replay and cycle handling. Produced file reads reached through lazy
+values inherit the same environment. Dynamic inputs remain read-only.
+
+**Remaining.** Tool lookup and expression-level shell requests
 still use invocation configuration. The repository
 build now embeds mode per artifact through compiler flags, independently of
 shared generated metadata. T013-05 verifies real debug/release modes, sanitizer
 mode when selected, unchanged metadata on mode switches, and no Kame relink for
 unchanged native outputs. This closes the concrete build-mode acceptance below;
-expression/definition configuration remains open. The historical
+tool and collected-shell configuration remain open. The historical
 finding follows.
 
 **Symptom.** GNU scopes a variable to a target *and its prerequisites*:

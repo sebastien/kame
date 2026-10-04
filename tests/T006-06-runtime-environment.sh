@@ -42,6 +42,30 @@ retry : ; env "MODE=retry"
 	printf %s "$MODE" >> retry-log; if [ ! -e retry-marker ]; then touch retry-marker; exit 1; fi
 ./output : ./input ; env "MODE=debug"
 	printf %s "$MODE" > @>; printf x >> file-runs
+SETTING = "authored"
+NEXT = (env "NEXT")
+MODE = (env "MODE")
+(mode) = (str MODE)
+VALUE = (mode)
+definition-root : definition-cached ; env "MODE=debug" "KAME_SETTING=debug"
+release-definition-root : definition-cached ; env "MODE=release" "KAME_SETTING=release"
+task definition-cached :
+	printf '%s|%s' '@(VALUE)' '@(SETTING)' > definition-log; printf x >> definition-runs
+definition-select : @(NEXT) ; env "NEXT=definition-selected" "MODE=chosen"
+definition-selected :
+	printf %s @(VALUE) > definition-selected-log
+definition-denied : ; env "MODE=secret"
+	printf %s @(VALUE); touch forbidden-definition
+GENERATED = (text (read ./definition-input))
+definition-generated-root : ; env "MODE=generated"
+	printf %s @(GENERATED) > definition-generated-log
+./definition-input :
+	printf %s "$MODE" > @>
+BAD = (shell "touch forbidden-phase")
+definition-phase : @(BAD) ; env "MODE=debug"
+CYCLE = (str CYCLE)
+definition-cycle :
+	printf %s @(CYCLE); touch forbidden-cycle
 read-root : read-cached ; env "MODE=debug"
 release-read-root : read-cached ; env "MODE=release"
 task read-cached :
@@ -74,6 +98,21 @@ KMK
  if [ "$(cat "$project/select-log")" = chosen ] && [ ! -e "$project/forbidden-selection" ]; then test-ok "$backend dynamic prerequisite selection uses target environment"; else test-fail "$backend dynamic prerequisite used ambient environment"; fi
  test-step "$backend preserves grants for scoped expression reads"
  if MODE=ambient "${runner[@]}" -C "$project" read-denied > "$project/out" 2> "$project/err"; then test-fail "$backend scoped expression bypassed environment grants"; elif rg -q CAP_DENIED "$project/err" && [ ! -e "$project/forbidden-read" ]; then test-ok "$backend denied scoped reads have no recipe effects"; else test-fail "$backend scoped expression grant diagnostic"; fi
+ test-step "$backend isolates lazy definitions, functions and KAME_NAME configuration"
+ KAME_SETTING=ambient MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk definition-root > "$project/out" 2> "$project/err"
+ KAME_SETTING=ambient MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk definition-root > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/definition-log")" = 'debug|debug' ] && [ "$(cat "$project/definition-runs")" = x ]; then test-ok "$backend scoped definitions reuse equivalent snapshots"; else test-fail "$backend scoped definition cache or value"; fi
+ KAME_SETTING=ambient MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk release-definition-root > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/definition-log")" = 'release|release' ] && [ "$(cat "$project/definition-runs")" = xx ]; then test-ok "$backend scoped definitions invalidate changed snapshots"; else test-fail "$backend scoped definition changed value"; fi
+ "${runner[@]}" --allow-run --allow-env=MODE --define 'SETTING=@(missing)=literal' -C "$project" -f Makefile.kmk definition-root > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/definition-log")" = 'debug|@(missing)=literal' ]; then test-ok "$backend explicit literal definitions win over scoped KAME_NAME"; else test-fail "$backend scoped definition precedence"; fi
+ NEXT=ambient-selected MODE=ambient "${runner[@]}" --allow-run --allow-env=NEXT --allow-env=MODE -C "$project" -f Makefile.kmk definition-select > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/definition-selected-log")" = chosen ]; then test-ok "$backend dynamic inputs traverse scoped definitions"; else test-fail "$backend dynamic definition context"; fi
+ if "${runner[@]}" -C "$project" definition-denied > "$project/out" 2> "$project/err"; then test-fail "$backend scoped definitions bypassed grants"; elif rg -q CAP_DENIED "$project/err" && [ ! -e "$project/forbidden-definition" ]; then test-ok "$backend scoped definitions retain grants before effects"; else test-fail "$backend definition denial"; fi
+ "${runner[@]}" -C "$project" definition-generated-root > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/definition-generated-log")" = generated ]; then test-ok "$backend produced files reached through definitions inherit environment"; else test-fail "$backend generated definition prerequisite context"; fi
+ if "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk definition-phase > "$project/out" 2> "$project/err"; then test-fail "$backend launched definition during input resolution"; elif rg -q PHASE_INVALID "$project/err" && [ ! -e "$project/forbidden-phase" ]; then test-ok "$backend scoped definitions keep dynamic inputs read-only"; else test-fail "$backend scoped definition phase"; fi
+ if "${runner[@]}" -C "$project" definition-cycle > "$project/out" 2> "$project/err"; then test-fail "$backend accepted scoped definition cycle"; elif rg -q DEP_CYCLE "$project/err" && [ ! -e "$project/forbidden-cycle" ]; then test-ok "$backend scoped definition cycles fail without effects"; else test-fail "$backend scoped cycle diagnostic"; fi
  test-step "$backend shares equivalent environments regardless of assignment order"
  MODE=ambient "${runner[@]}" -C "$project" equivalent-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/equivalent-log")" = 'one|two' ] && [ "$(cat "$project/equivalent-runs")" = x ]; then test-ok "$backend equivalent environments share a prerequisite"; else test-fail "$backend assignment ordering changed environment identity"; fi

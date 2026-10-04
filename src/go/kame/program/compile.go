@@ -82,6 +82,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p.Eval.DryRun = options.DryRun
 	p.Eval.SetDefinitionCwd(p.Options.Directory)
 	p.Eval.SetDefinitionDependencyObserver(observeDefinitionDependency, p)
+	p.Eval.DefinitionDependencyContextObserver = observeScopedDefinitionDependency
 	if len(p.Options.Shell) == 0 {
 		p.Options.Shell = slices.Append(a, p.Options.Shell, cloneText(a, "/bin/sh"))
 		p.Options.Shell = slices.Append(a, p.Options.Shell, cloneText(a, "-c"))

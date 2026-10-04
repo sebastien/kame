@@ -236,9 +236,17 @@ Plan and AST JSON expose authored assignments, without publishing the ambient
 environment. This surface scopes shell/Kash recipes and their prerequisite
 recipes. Direct `env` reads in recipe templates and structured recipes use the
 effective target snapshot after checking environment grants; absent names return
-nil, including in an empty snapshot. Kame definitions, tool lookup and
-expression-level shell requests still use invocation configuration. Assignments do not introduce
-Kame variables or perform evaluation during registration.
+nil, including in an empty snapshot. Lazy definitions and functions reached from
+recipes or dynamic prerequisites evaluate against the same target environment.
+A target's `KAME_NAME` assignment overrides a declared value definition `NAME`;
+explicit `--define NAME=value` wins over that assignment. Overrides remain literal
+strings. Definitions retain separate engine values per environment and phase,
+including ordinary replay, dependency and cycle handling. Produced file reads
+reached through definitions inherit the demanding target environment.
+Dynamic prerequisites retain their read-only phase through lazy definitions.
+Tool lookup and expression-level shell requests still use invocation configuration.
+Assignments do not introduce undeclared Kame variables or perform evaluation
+during registration.
 
 File recipes with declared or inherited scoped values persist a fingerprint of
 the effective environment, rendered recipe and dependency paths. Records bind

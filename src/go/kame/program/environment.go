@@ -1,6 +1,7 @@
 package program
 
 import (
+	"kame/lang/eval"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 )
@@ -82,4 +83,19 @@ func sameEnvironment(left []string, right []string) bool {
 		}
 	}
 	return true
+}
+
+// Bind lazy definition identity to the same snapshot as recipe evaluation.
+// The digest contains no plaintext environment values in graph/event keys.
+func (p *Program) bindDefinitionEnvironment(context *eval.Context) {
+    _ = p
+    if !context.HasEnvironment { return }
+    var identity hashSink
+    identity.state = newSHA256()
+    identity.appendText("kame-definition-environment-v1")
+    identity.appendText(context.Cwd)
+    identity.appendU64(uint64(context.Phase))
+    for i := range context.Environment { identity.appendText(context.Environment[i]) }
+    identity.state.Sum(context.DefinitionNamespace[:])
+    context.HasDefinitionNamespace = true
 }

@@ -28,6 +28,8 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	task.Context = Context{Program: p, Scope: c.Scope, Run: p.Alloc, Cwd: owned(p.Alloc, c.Cwd), Source: owned(p.Alloc, c.Source), HasArgs: c.HasArgs, HasEnvironment: c.HasEnvironment, Phase: c.Phase, DirectHostRequests: c.DirectHostRequests, DependencyObserver: c.DependencyObserver, ResolverState: c.ResolverState, ResolveDefinition: c.ResolveDefinition, ToolResolver: c.ToolResolver}
 	task.Context.ScriptGroup, task.Context.TimeoutMS = c.ScriptGroup, c.TimeoutMS
 	task.Context.RecipeNode = c.RecipeNode
+	task.Context.DefinitionNamespace, task.Context.HasDefinitionNamespace = c.DefinitionNamespace, c.HasDefinitionNamespace
+	task.Context.DependencyContextObserver = c.DependencyContextObserver
 	for i := range c.Environment { task.Context.Environment = slices.Append(p.Alloc, task.Context.Environment, owned(p.Alloc, c.Environment[i])) }
 	c.Scope.Retain()
 	for i := range c.Grants {

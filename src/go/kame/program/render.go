@@ -23,6 +23,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
  if entry.NewerInputs != nil { newer = entry.NewerInputs.Values }
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: true, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, NewerInputs: newer}}}
+	p.bindDefinitionEnvironment(context)
 	scope := p.ruleScope(context, entry.Captures)
     context.Scope = scope
     defer scope.Free()
@@ -304,4 +305,17 @@ func observeRenderOperation(value any, name string, version string) {
 		}
 	}
 	entry.Operations = slices.Append(state.Program.Alloc, entry.Operations, cloneText(state.Program.Alloc, identity))
+}
+
+// Lazy definition reads can discover produced files just as recipe expressions
+// do. Bind those producers before adding the demanding engine edge.
+func observeScopedDefinitionDependency(value any, key core.ResourceKey, context *eval.Context) {
+    p := value.(*Program)
+    p.Eval.DefinitionDependencyObserver(value, key)
+    if key.Kind != core.ResourceFile && key.Kind != core.ResourceTarget && key.Kind != core.ResourceTask { return }
+    node := p.Engine.Lookup(key)
+    index := p.instanceIndex(node)
+    if index >= 0 && !p.Instances[index].Inspection && !p.claimEnvironment(index, context.Environment) {
+        context.Engine.Fail(p.environmentFailure(index, "definition prerequisite has a different recipe environment"))
+    }
 }

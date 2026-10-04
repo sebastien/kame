@@ -24,6 +24,8 @@ type Program struct {
 	Registry        *Registry
 	Requests        *host.Queue
 	Scope           *Scope
+	// Explicit CLI definition overrides take precedence over target KAME_NAME values.
+	explicitDefinitionOverrides []string
 	Definitions     []*definition.Definition
 	Nodes           []definitionNode
 	Diagnostics     []diagnostic.Diagnostic
@@ -37,6 +39,7 @@ type Program struct {
 	// definitions evaluated as standalone engine nodes.
 	DefinitionDependencyObserver func(any, core.ResourceKey)
 	DefinitionDependencyState    any
+	DefinitionDependencyContextObserver func(any, core.ResourceKey, *Context)
 	// DefinitionEffectSink receives successful standalone-definition effects.
 	// Rule rendering keeps effects on its Context for the build runtime instead.
 	DefinitionEffectSink  func(any, Effect)
@@ -168,6 +171,8 @@ func (p *Program) Free() {
 	if p == nil {
 		return
 	}
+	for i := range p.explicitDefinitionOverrides { mem.FreeString(p.Alloc, p.explicitDefinitionOverrides[i]) }
+	slices.Free(p.Alloc, p.explicitDefinitionOverrides)
 	p.freeSourceParts()
 	for i := range p.Processes { freeProcessTask(p.Alloc, p.Processes[i]) }
 	slices.Free(p.Alloc, p.Processes)
@@ -277,11 +282,17 @@ type definitionState struct {
 	Program    *Program
 	Definition *definition.Definition
 	Owned      bool
+	Environment []string
+	Namespace [32]byte
+	Scoped bool
+	Phase Phase
 }
 
 func freeDefinitionState(a mem.Allocator, value any) {
 	state := value.(*definitionState)
 	if state.Owned { definition.Free(a, state.Definition) }
+	for i := range state.Environment { mem.FreeString(a, state.Environment[i]) }
+	slices.Free(a, state.Environment)
 	mem.Free(a, state)
 }
 
@@ -311,7 +322,7 @@ func pollDefinition(c *core.EngineContext, source *core.Source, atom *core.Atom)
 		return core.PollWaiting
 	}
 	definition := c.Context().(*definitionState)
-	result := definition.Program.definition(c, definition.Definition)
+	result := definition.Program.definition(c, definition)
 	if c.Failed() && result.Diagnostic.Code == "" {
 		d := c.Diagnostic()
 		atom.Kind, atom.Diagnostic = core.AtomFailed, d.Clone(c.Allocator())
@@ -369,8 +380,18 @@ func freeDefinitionSource(source *core.Source) {
 	mem.Free(state.Alloc, state)
 }
 
-func (p *Program) definition(engine *core.EngineContext, d *definition.Definition) Result {
+func (p *Program) definition(engine *core.EngineContext, state *definitionState) Result {
+	d := state.Definition
 	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState, DirectHostRequests: p.DirectHostRequests}
+	if state.Scoped {
+		context.Environment, context.HasEnvironment = state.Environment, true
+		context.DefinitionNamespace, context.HasDefinitionNamespace = state.Namespace, true
+		context.Phase = state.Phase
+		context.DependencyContextObserver = p.DefinitionDependencyContextObserver
+		// Lazy values may perform evaluation-only host operations during render.
+		// Dynamic prerequisite resolution remains read-only.
+		if context.Phase == RenderingPhase { context.Phase = EvaluatePhase }
+	}
 	result := p.definitionValue(engine, d, p.Scope, context)
 	if engine == nil || !engine.Failed() {
 		attachNamedFrame(&result, context, d.Span, "definition", d.Name)

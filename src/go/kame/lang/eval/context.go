@@ -23,6 +23,9 @@ type Context struct {
 	Environment []string
 	// HasEnvironment binds a complete snapshot, including an empty environment.
 	HasEnvironment bool
+	// DefinitionNamespace identifies an immutable runtime environment and phase.
+	DefinitionNamespace [32]byte
+	HasDefinitionNamespace bool
 	ScriptGroup int64
 	RecipeNode int64
 	TimeoutMS int64
@@ -45,6 +48,7 @@ type Context struct {
 	ResolveDefinition  DefinitionResolver
 	ResolverState      any
 	DependencyObserver func(any, core.ResourceKey)
+	DependencyContextObserver func(any, core.ResourceKey, *Context)
 	// DirectHostRequests bypasses build-graph dependency discovery for host
 	// operations. Embedders with an explicit request/completion loop use it to
 	// obtain each host value directly from their capability provider.
@@ -253,7 +257,7 @@ func (c *Context) Dependency(key core.ResourceKey) bool {
         resourcePath = canonicalPath(c.Run, c.Cwd, key.Name)
         key.Name = resourcePath
     }
-    if c.DependencyObserver != nil { c.DependencyObserver(c.ResolverState, key) }
+    if c.DependencyContextObserver != nil { c.DependencyContextObserver(c.ResolverState, key, c) } else if c.DependencyObserver != nil { c.DependencyObserver(c.ResolverState, key) }
     current := c.Engine.Dependency(key)
     mem.FreeString(c.Run, resourcePath)
     return current

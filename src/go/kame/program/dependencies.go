@@ -5,8 +5,6 @@ import (
 	"solod.dev/so/slices"
 )
 
-func (p *Program) definitionNode(name string) *core.Node { return p.Eval.Definition(name) }
-
 func (p *Program) prepareDependency(c *core.EngineContext, index int, dependency *core.Node, ordered bool) bool {
  child := p.instanceIndex(dependency)
  if child >= 0 && !p.claimEnvironment(child, p.Instances[index].Environment) {

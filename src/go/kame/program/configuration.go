@@ -13,6 +13,7 @@ func (p *Program) configureDefinitions(defines, environment []string) diagnostic
 			return failure(p.Alloc, "DEF_INVALID", "--define must name a declared value definition")
 		}
 	}
+	p.Eval.SetDefinitionOverrides(defines)
 	for i := range p.Eval.Definitions {
 		name := p.Eval.Definitions[i].Name
 		prefix := "KAME_" + name + "="

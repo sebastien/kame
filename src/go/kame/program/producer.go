@@ -179,7 +179,9 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			p.failRule(c, state.Index, failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+input))
 			return core.ProducerFailed
 		}
-		definitionNode := p.definitionNode(definition.Key.Name)
+		definitionContext := &eval.Context{Environment: entry.Environment, HasEnvironment: entry.EnvironmentClaimed, Cwd: p.Options.Directory, Phase: eval.EvaluatePhase}
+		p.bindDefinitionEnvironment(definitionContext)
+		definitionNode := p.Eval.DefinitionWith(definition.Key.Name, definitionContext)
 		if definitionNode == nil || !p.addPurposeDependency(c, entry, definitionNode, ordered) {
 			return core.ProducerWaiting
 		}
