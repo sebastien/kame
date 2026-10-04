@@ -87,7 +87,7 @@ func (c *EngineContext) DependencyDiagnostic(key ResourceKey) Diagnostic {
 func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 	dep := c.engine.node(key)
 	if dep == nil || dep == c.node || reaches(dep, c.node) {
-		d := Diagnostic{Code: DiagnosticDependencyCycle}
+		d := Diagnostic{Code: DiagnosticDependencyCycle, Severity: diagnostic.Error, Message: "dependency cycle"}
 		if c.node.Key.Kind == ResourceDefinition {
 			d.Frames = slices.Append(c.engine.Alloc, d.Frames, diagnostic.Frame{Label: "definition"})
 		}

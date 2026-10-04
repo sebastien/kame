@@ -1329,7 +1329,7 @@ func TestDefinitionCycleFailsThroughEngine(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		engine.Step()
 	}
-	if node.State != core.NodeFailed || node.Diagnostic.Code != "DEP_CYCLE" {
+	if node.State != core.NodeFailed || node.Diagnostic.Code != "DEP_CYCLE" || node.Diagnostic.Severity != diagnostic.Error {
 		t.Error("definition cycle did not fail")
 	}
 	engine.Free()
@@ -1659,4 +1659,25 @@ func TestPlainPathValuesMaterializeAsText(t *testing.T) {
 	program.Free()
 	parsed.Free()
 	registry.Free()
+}
+
+func TestOperationWrappedDefinitionCycleOwnsDiagnosticFrames(t *testing.T) {
+    a := t.Allocator()
+    engine := core.NewEngine(a)
+    registry := eval.NewRegistry(a)
+    operations.Register(registry)
+    parsed := script.Parse(a, "cycle.km", "value = (str value)")
+    program := eval.Compile(a, engine, parsed, registry)
+    node := program.Definition("value")
+    engine.Request(node)
+    for i := 0; i < 6; i++ { engine.Step() }
+    if node.State != core.NodeFailed || node.Diagnostic.Code != "DEP_CYCLE" || node.Diagnostic.Severity != diagnostic.Error {
+        t.Error("operation cycle overwrote the engine failure")
+    }
+    cloned := node.Diagnostic.Clone(a)
+    cloned.Free(a)
+    engine.Free()
+    program.Free()
+    parsed.Free()
+    registry.Free()
 }

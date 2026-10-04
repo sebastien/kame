@@ -301,6 +301,15 @@ func (e *Engine) run(n *Node) *Node {
 		c := &EngineContext{engine: e, node: n}
 		if n.HasCompletion { c.completion = n.Completion; n.Completion = Completion{}; n.HasCompletion = false }
 		result := n.materializer.Next(c)
+		// A dependency discovered while polling can fail this node immediately.
+		// Its terminal state and diagnostic already belong to the engine.
+		if n.State == NodeFailed || n.State == NodeCancelled {
+			result.Value.Free(e.Alloc)
+			result.Diagnostic.Free(e.Alloc)
+			n.materializer.Free()
+			n.materializer = nil
+			return n
+		}
 		if result.Published {
 			e.publish(n, result.Value)
 			if n.State == NodeFailed {

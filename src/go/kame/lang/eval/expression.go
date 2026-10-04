@@ -138,7 +138,8 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	}
 	if !ready {
 		if context.Engine != nil && context.Engine.Failed() {
-			return Result{Diagnostic: context.Engine.Diagnostic()}
+			d := context.Engine.Diagnostic()
+			return Result{Diagnostic: d.Clone(context.Run)}
 		}
 		return Result{Waiting: true}
 	}

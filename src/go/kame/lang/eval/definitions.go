@@ -313,7 +313,8 @@ func pollDefinition(c *core.EngineContext, source *core.Source, atom *core.Atom)
 	definition := c.Context().(*definitionState)
 	result := definition.Program.definition(c, definition.Definition)
 	if c.Failed() && result.Diagnostic.Code == "" {
-		atom.Kind, atom.Diagnostic = core.AtomFailed, c.Diagnostic()
+		d := c.Diagnostic()
+		atom.Kind, atom.Diagnostic = core.AtomFailed, d.Clone(c.Allocator())
 		return core.PollEmitted
 	}
 	if result.Waiting {
