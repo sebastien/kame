@@ -27,7 +27,7 @@ adapters and integration evidence rather than placeholder methods.
 | D02 | Managed services and provisioning | Typed service configuration; start/readiness/health/restart/stop ownership; prerequisite lifetime; bounded logs; interruption and process-tree cleanup on native and WASM. |
 | D03 | Generated declarations | Bounded typed batches; complete validation before registration; generator dependency tracking; deterministic replacement; authored diagnostics; native/WASM parity and failure cleanup. |
 | D04 | Cache lifecycle and backends | Cross-process miss locking, failure/crash recovery, bounded eviction and explicit inspection/cleanup; local and second concrete backend; identity and atomic-publication conformance. |
-| D05 | Release integrity | Pinned and verified compiler provisioning; signed manifests and provenance creation/verification; tamper/wrong-key rejection; actual staged release tests. Keys are provided by the release operator, never committed. |
+| D05 | Release integrity | Pinned and verified compiler provisioning (021); signed manifests and provenance creation/verification; tamper/wrong-key rejection; actual staged release tests. Keys are provided by the release operator, never committed. |
 | D06 | Target arguments | Required `{name}` and optional `{name=value}` standalone arguments; typed binding/defaults, capture distinction, identity, planning and execution parity. |
 | D07 | Wildcard expressions and sources | Explicit unquoted expression paths expand globs; quoted text stays literal; singleton dependency sources track membership and future updates. |
 | D08 | Parser and runtime performance | Borrow/adopt source lifetimes with zero-copy parsing where decoding is unnecessary; remove unconditional pure-expression waits; indexed graph/scope lookup; pruned glob traversal; allocation and workload measurements. |
@@ -65,5 +65,7 @@ review documents with the resulting behavior and remaining material boundaries.
 All D01–D18 items were open at introduction of this specification. D01 now has
 retained portable roots, additive WASM watch ABI calls, JavaScript polling and
 invalidation, and five passing native/WASM live scenarios; its remaining
-acceptance cases are listed in 020. D02–D18 remain open. The preceding
+acceptance cases are listed in 020. D05 now has a versioned, digest-verified
+Cosmocc provisioner with fixture coverage; release signing and provenance
+remain open. D02–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.

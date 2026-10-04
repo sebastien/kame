@@ -37,12 +37,21 @@ WASM_STACK_SIZE = 262144
 # metadata and this build file so any of them can invalidate a native binary.
 # The generated version file is named explicitly to match the GNU Makefile.
 KAME_SOURCES = (wildcard ./src/go/kame/**/*.go)
-KAME_INPUTS = (concat [./src/go/kame/cmd/kame/version_generated.go] KAME_SOURCES [./src/go/kame/go.mod ./src/go/kame/go.sum ./src/go/kame/cmd/kame/build_mode.h ./Makefile.kmk])
+KAME_INPUTS =
+  (concat
+    [./src/go/kame/cmd/kame/version_generated.go]
+    KAME_SOURCES
+    [
+      ./src/go/kame/go.mod
+      ./src/go/kame/go.sum
+      ./src/go/kame/cmd/kame/build_mode.h
+      ./Makefile.kmk])
 
 # The wasm module links the portable runtime (every Go package except cmd/kame)
 # plus the handwritten ABI glue listed in the rule header. cmd/kame is excluded
 # because its generated version file would relink the module on every build.
-WASM_SOURCES = (filter-out (replace ./src/go/kame/cmd/{rest:**} "1") KAME_SOURCES)
+WASM_SOURCES =
+  (filter-out (replace ./src/go/kame/cmd/{rest:**} "1") KAME_SOURCES)
 
 # --- Aggregate targets ------------------------------------------------------
 
@@ -79,12 +88,12 @@ version-source : ./src/go/kame/cmd/kame/version_generated.go
 
 # --- Cosmopolitan / APE -----------------------------------------------------
 
-./build/tools/cosmocc/bin/cosmocc :
-	./tools/provision-cosmocc.sh ./build/tools/cosmocc
+./build/tools/cosmocc-4.0.2/bin/cosmocc : ./tools/provision-cosmocc.sh
+	./tools/provision-cosmocc.sh ./build/tools/cosmocc-4.0.2
 
-./dist/kame.com : ./build/tools/cosmocc/bin/cosmocc @(KAME_INPUTS)
+./dist/kame.com : ./build/tools/cosmocc-4.0.2/bin/cosmocc @(KAME_INPUTS)
 	mkdir -p ./dist
-	cd @(KAME_DIR) && CC=@(abspath ./build/tools/cosmocc/bin/cosmocc) CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
+	cd @(KAME_DIR) && CC=@(abspath ./build/tools/cosmocc-4.0.2/bin/cosmocc) CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
 
 dist-ape : ./dist/kame.com
 

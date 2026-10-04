@@ -189,9 +189,9 @@ dist/kame: $(KAME_BUILD_INPUTS)
 	mkdir -p dist
 	cd $(KAME_DIR) && CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
 
-build/tools/cosmocc/bin/cosmocc:
-	tools/provision-cosmocc.sh build/tools/cosmocc
+build/tools/cosmocc-4.0.2/bin/cosmocc: tools/provision-cosmocc.sh
+	tools/provision-cosmocc.sh build/tools/cosmocc-4.0.2
 
-dist/kame.com: build/tools/cosmocc/bin/cosmocc $(KAME_BUILD_INPUTS)
+dist/kame.com: build/tools/cosmocc-4.0.2/bin/cosmocc $(KAME_BUILD_INPUTS)
 	mkdir -p dist
-	cd $(KAME_DIR) && CC=$(CURDIR)/build/tools/cosmocc/bin/cosmocc CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
+	cd $(KAME_DIR) && CC=$(CURDIR)/build/tools/cosmocc-4.0.2/bin/cosmocc CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame

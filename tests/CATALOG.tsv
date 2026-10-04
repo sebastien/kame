@@ -115,3 +115,4 @@ tests/T010-23-wasm-watch.sh	010	wasm	dist/kame.js retains watch roots, reloads c
 tests/T004-13-lang-declaration-conditions.sh	004	lang	Pure when/otherwise/end declaration selection, gated includes, literal configuration, nested inactive branches, source/session parity and authored diagnostics
 tests/T017-19-kash-recipes.sh	017	kash	Selected shell policies, structured recipe cache/retry/timeout, reusable scripts and invocation-owned callable lifetime on both hosts
 tests/T009-14-cli-watch.sh	009	cli	Native include/root source reload, preserved timestamps, malformed-source recovery, changed graph and input invalidation during an active recipe
+tests/T015-03-dist-cosmocc-integrity.sh	015	dist	Cosmocc provisioning pins a versioned archive, verifies its SHA-256 before extraction, and rejects mismatches
