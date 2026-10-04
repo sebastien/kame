@@ -46,6 +46,11 @@ read-root : read-cached ; env "MODE=debug"
 release-read-root : read-cached ; env "MODE=release"
 task read-cached :
 	printf %s @(env "MODE") > read-log; printf x >> read-runs
+select-root : @(env "NEXT") ; env "NEXT=selected" "MODE=chosen"
+selected :
+	printf %s @(env "MODE") > select-log
+ambient-selected :
+	touch forbidden-selection
 read-denied : ; env "MODE=secret"
 	printf %s @(env "MODE"); touch forbidden-read
 KMK
@@ -64,6 +69,9 @@ KMK
  if [ "$(cat "$project/read-log")" = debug ] && [ "$(cat "$project/read-runs")" = x ]; then test-ok "$backend expression reads inherit and reuse the scoped cache"; else test-fail "$backend expression environment or cache reuse"; fi
  MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk release-read-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/read-log")" = release ] && [ "$(cat "$project/read-runs")" = xx ]; then test-ok "$backend scoped expression cache invalidates on changed values"; else test-fail "$backend expression cache leaked earlier scoped values"; fi
+ test-step "$backend resolves dynamic prerequisites using scoped expression reads"
+ NEXT=ambient-selected MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE --allow-env=NEXT -C "$project" -f Makefile.kmk select-root > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/select-log")" = chosen ] && [ ! -e "$project/forbidden-selection" ]; then test-ok "$backend dynamic prerequisite selection uses target environment"; else test-fail "$backend dynamic prerequisite used ambient environment"; fi
  test-step "$backend preserves grants for scoped expression reads"
  if MODE=ambient "${runner[@]}" -C "$project" read-denied > "$project/out" 2> "$project/err"; then test-fail "$backend scoped expression bypassed environment grants"; elif rg -q CAP_DENIED "$project/err" && [ ! -e "$project/forbidden-read" ]; then test-ok "$backend denied scoped reads have no recipe effects"; else test-fail "$backend scoped expression grant diagnostic"; fi
  test-step "$backend shares equivalent environments regardless of assignment order"

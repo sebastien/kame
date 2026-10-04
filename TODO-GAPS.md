@@ -164,7 +164,7 @@ output timestamps. Unchanged settings skip recipes; changed or removed scoped
 settings rebuild outputs on both hosts.
 
 **Scoped expression reads.** Direct `(env "NAME")` reads in recipe templates
-and structured recipes use the effective target snapshot, enforce environment
+and dynamic prerequisite expressions use the effective target snapshot, enforce environment
 grants, and invalidate cached work when inherited values change. Missing names
 return nil without reading ambient host values.
 

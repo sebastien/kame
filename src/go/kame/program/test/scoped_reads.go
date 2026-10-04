@@ -20,10 +20,10 @@ func TestScopedEnvironmentReadsRebindCachedPrerequisites(t *testing.T) {
 		return
 	}
 	defer os.Remove(directory)
-	parsed := script.Parse(a, "scoped.kmk", "debug : cached ; env \"MODE=debug\"\nrelease : cached ; env \"MODE=release\"\ntask cached :\n\tprintf %s @(env \"MODE\") >> runs\n")
+	parsed := script.Parse(a, "scoped.kmk", "debug : @(env \"NEXT\") ; env \"NEXT=cached\" \"MODE=debug\"\nrelease : @(env \"NEXT\") ; env \"NEXT=cached\" \"MODE=release\"\ntask cached :\n\tprintf %s @(env \"MODE\") >> runs\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: directory, Environment: []string{"PATH=/usr/bin:/bin", "MODE=ambient"}, Grants: []eval.Grant{{Capability: eval.Env, Names: []string{"MODE"}}}})
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: directory, Environment: []string{"PATH=/usr/bin:/bin", "MODE=ambient"}, Grants: []eval.Grant{{Capability: eval.Env, Names: []string{"MODE", "NEXT"}}}})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
 		t.Fatal("compile failed")
 		return
