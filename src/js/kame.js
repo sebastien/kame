@@ -1237,6 +1237,13 @@ class Module {
       const directoryBytes = this.write(process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directoryBytes.pointer, directoryBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
+      if (context.portableGrants) {
+        this.inspectionGrant(instance, '', '');
+        for (const grant of context.portableGrants) {
+          if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
+          else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
+        }
+      }
       context.streaming = true;
       const encoded = this.write(target);
       if (this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length) !== 0) throw this.compileFailure(instance, 'TGT_NO_RULE');
@@ -1692,6 +1699,7 @@ function effectiveGrants(inv) {
 function contextFor(inv) {
   const runGrants = (inv.grants ?? []).filter((grant) => grant.capability === 'run');
   return {
+    portableGrants: inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }],
     toolCache: new Map(),
     grants: effectiveGrants(inv),
     runRoots: runGrants.length === 0 || runGrants.some((grant) => grant.names.length === 0) ? null : runGrants.flatMap((grant) => grant.names.map((name) => resolve(name))),

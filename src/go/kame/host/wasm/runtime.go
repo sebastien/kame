@@ -415,6 +415,7 @@ func (r *Runtime) RequestTarget(target string) PureResult {
 	}
 	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}}
 	options := program.Options{Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: r.Environment, Grants: grants, ForwardRequests: r.Forwarding}
+	if r.InspectionPolicy { options.Grants = r.InspectionGrants }
 	compiled := r.compileBuild(options)
 	if compiled.Program == nil {
 		// Compile released the host on failure, so drop the borrowed pointer too.
