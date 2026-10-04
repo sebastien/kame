@@ -106,7 +106,7 @@ function cli_build {
 			make -C "$CLI_ROOT" build/kame.debug >&2 || exit 1
 		else
 			cd "$CLI_ROOT/src/go/kame" || exit 1
-			if [ "$CLI_BIN" = "$CLI_ROOT/build/kame.sanitize" ]; then
+			if [[ "$CLI_BIN" == *.sanitize ]]; then
 				CC=clang CFLAGS="${CFLAGS:--O2} -DKAME_BUILD_MODE_SANITIZE" so build -check=sanitize -panic=abort -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
 			else
 				so build -check=warn -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
