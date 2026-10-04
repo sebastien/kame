@@ -216,3 +216,13 @@ replaced the function scope, so its following parameter operand failed with
 `REF_MISSING`. The evaluator now restores the caller engine, scope and request
 queue after inline definition evaluation. A direct regression and all 67
 evaluator ASAN/UBSAN tests pass in the isolated conditional-work checkout.
+
+
+A4 declaration conditions now select source fragments before registration on
+native and WASM. All 35 public cases pass per host, with the native executable
+instrumented by ASAN/UBSAN. Predicate configuration contains only selected
+lazy definitions; it does not reparse value statements as rule syntax or execute
+statements. Earlier included and explicit-file configuration participates in
+source order. Portable parser/program/host sanitizer suites pass 16/102/30 tests.
+Uncomposed evaluator registration is explicitly rejected, and host predicates
+have no capabilities. Full-suite validation remains pending.

@@ -20,6 +20,9 @@ const (
 	Expression
 	Include
 	Command
+	When
+	Otherwise
+	EndWhen
 )
 
 type ScriptItem struct {
@@ -82,6 +85,12 @@ func parseScript(s *Script, offset int) {
 			pos = nextLine(text, lineEnd)
 			continue
 		}
+		if start == pos {
+			if following := parseConditional(s, start, end); following != 0 {
+				pos = following
+				continue
+			}
+		}
 		if includePath, ok := include(text[start:end]); ok {
 			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: start, End: end}, Include: includePath, OptionalInclude: strings.HasPrefix(text[start:end], "include?")})
 			pos = nextLine(text, lineEnd)
@@ -123,6 +132,7 @@ func parseScript(s *Script, offset int) {
 		s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: end}, Expression: prefix.Expr})
 		pos = nextLine(text, lineEnd)
 	}
+	validateConditionals(s)
 }
 
 func (s *Script) takeDiagnostics(diags []source.Diagnostic) {
@@ -308,6 +318,23 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 		}
 		if item.Kind == Comment {
 			b.WriteString(item.Text)
+			previousEnd = item.Span.End
+			continue
+		}
+		if item.Kind == When {
+			b.WriteString("when ")
+			value := expr.Format(a, item.Expression)
+			b.WriteString(value)
+			mem.FreeString(a, value)
+			previousEnd = item.Span.End
+			continue
+		}
+		if item.Kind == Otherwise || item.Kind == EndWhen {
+			if item.Kind == Otherwise {
+				b.WriteString("otherwise")
+			} else {
+				b.WriteString("end")
+			}
 			previousEnd = item.Span.End
 			continue
 		}

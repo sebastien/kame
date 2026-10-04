@@ -21,8 +21,7 @@ Related material:
 ## TL;DR
 
 The remaining porting gaps concern build configuration and declarations:
-expression configuration under target environments, declaration conditionals
-and gated includes. Optional generated declarations remain a separate design
+expression configuration under target environments. Optional generated declarations remain a separate design
 proposal. Order-only prerequisites and newer-input selection are implemented.
 The detailed acceptance clauses below track those requests.
 
@@ -50,7 +49,7 @@ relative `-C`/`-f` defects are also fixed and covered on native and WASM hosts.
 | A1 | No parse-time `$(shell ...)` / no `do expr shell` during builds | Language design | High | `WASM_SDK`/`WASM_CC`/`WASM_LD` |
 | A2 | Lazy defaults and build-variable overrides | Implemented | High → fixed | `WASM_CC ?=` |
 | A3 | Scoped recipe environment and per-artifact build mode | Partly implemented; expression configuration remains | High | `KAME_BUILD_MODE` |
-| A4 | No conditionals or conditional include | Missing feature | Medium | not used here |
+| A4 | Declaration conditions and gated includes | Addressed | Medium | T004-13 |
 | A5 | Computed configuration lookup and generator design | Minimum implemented; generator proposal documented | Medium → addressed | not used here |
 | A6 | Declaration continuations and multiline values | Parser gap, fixed | Low → fixed | long `KAME_INPUTS` |
 | B1 | `wildcard` pattern unions | Library gap, fixed | High → fixed | `WASM_SOURCES` |
@@ -204,21 +203,22 @@ is documented inline in `Makefile.kmk` as a known non-equivalence.
 `buildMode=debug` and `buildMode=release` respectively, without forcing a
 spurious relink when the mode is unchanged.
 
-### A4 — No conditionals / conditional include
+### A4 — Declaration conditions and gated includes (addressed)
 
-**Current behavior.** `include? PATH` supplies optional source composition on native and WASM: only an absent file is ignored. Existing read errors, parser errors, and cycles remain failures before effects. T004-12 covers both build and value sources.
+`when PREDICATE`, optional `otherwise`, and matching `end` select `.km`/`.kmk`
+source declarations before registration. Pure boolean predicates see earlier
+selected definitions and includes plus literal invocation configuration.
+Inactive includes are never opened, nested inactive predicates are not evaluated,
+and selected branches share scope. Required/optional include failures and
+active-ancestry cycles retain their existing behavior. See the language spec's
+conditional source declarations section for source-order and embedding rules.
 
-**Remaining.** Declaration-level `ifeq`/`if`/`ifdef` and conditionally gated includes are not yet implemented.
-`include` is depth-first and rejects active-ancestry cycles. Repeated nonrecursive
-includes are legal; duplicated declarations are checked during registration.
-
-**Impact.** Optional configuration and platform branches must be pushed into
-recipes or made unconditional. Not exercised by this Makefile, but it is the
-next thing a real project hits.
-
-**Remediation.** A small `when`/`if` form over definition predicates plus a
-conditional include. `TODO.md` asks for "a minimal if/when and conditional
-include".
+T004-13 covers 35 public cases on each native/WASM host, including override
+precedence, selected configuration includes, inspection, nesting, duplicate
+branch declarations, inline/stdin inputs, mixed files, formatting, and authored
+predicate spans. The native CLI run uses ASAN/UBSAN with leak detection. Portable
+parser/program/host tests additionally cover structural errors, cycles, rejected
+host effects, descriptor typing, and registration of uncomposed markers.
 
 ### A5 — Computed record lookup and generated-declaration design (minimum addressed)
 
@@ -524,7 +524,7 @@ Ordered by value-to-effort for porting real projects:
       bare targets.
 - [x] **A6** Backslash line continuation in definitions.
 - [x] **A5** Implement computed record lookup and document the optional generator design.
-- [ ] **A4** Minimal `when`/`if` plus conditional include.
+- [x] **A4** Minimal `when` plus conditional include (T004-13).
 - [x] **C1** Persistent `always` file rules with ordinary artifact semantics.
 - [x] **D3** Add an "Idioms and gotchas" page to the skill/reference docs.
 

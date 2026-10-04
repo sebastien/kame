@@ -131,6 +131,10 @@ uint32_t kame_wasm_instance_free(uint64_t instance);
  * arena remains 16 MiB. Exhausted instances allow diagnostics and destruction;
  * create a fresh instance to resume evaluation. */
 uint32_t kame_wasm_instance_set_heap_limit(uint64_t instance, uint32_t limit);
+/* Pure source-composition predicate query: JSON descriptor in, true/false out.
+ * Uses the same length-query convention and emergency diagnostics as parse. */
+uint32_t kame_wasm_declaration_predicate(uint64_t instance, uint32_t data,
+    uint32_t data_len, uint32_t dst, uint32_t dst_len, uint32_t out_len);
 uint32_t kame_wasm_source_compile(uint64_t instance, uint32_t source,
                                   uint32_t source_len);
 /* Label the compiled source for diagnostics. Call before source_compile; an

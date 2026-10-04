@@ -610,6 +610,9 @@ func (e *astEncoder) script(value *script.Script) {
 	e.EndObject()
 }
 func scriptKind(k script.ScriptItemKind) string {
+ if k == script.When { return "when" }
+ if k == script.Otherwise { return "otherwise" }
+ if k == script.EndWhen { return "end-when" }
 	if k == script.Command { return "command" }
 	if k == script.Comment {
 		return "comment"

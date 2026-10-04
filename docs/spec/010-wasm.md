@@ -69,10 +69,22 @@ Exact symbol names are implementation details, but the ABI must use fixed-width
 integers, pointer-plus-length byte strings, and caller-owned output buffers.
 No C struct layout containing pointers is exposed directly to JavaScript.
 
-Every exported symbol is listed explicitly in the build's link line
-(`-Wl,--export=...`) in both `Makefile` and `Makefile.kmk`; the C source does not
-carry per-symbol `export_name` attributes, so the manifest stays the single
-source of truth for the module's public surface.
+Core exports and the declaration predicate query are listed explicitly in the
+build link lines (`-Wl,--export=...`) in both `Makefile` and `Makefile.kmk`.
+Additional session, process-streaming, and heap-control extensions carry
+`export_name` attributes in the C ABI source.
+
+Source-composition hosts may call `kame_wasm_declaration_predicate(handle,
+data, length, dst, capacity, out_length)`. Its JSON descriptor accepts optional
+`name` and `prefix` strings, a required `predicate` string, and optional
+`defines`/`environment` arrays of strings. The prefix contains only already
+selected definition declarations, extracted using each source's own portable
+parser. The result is UTF-8 `true` or `false`; ordinary query buffer statuses,
+instance diagnostics, and allocation-exhaustion recovery apply. The query never
+requests host work or acquires runtime grants. Hosts retain authored predicate
+spans for diagnostic rendering, select branches and includes in source order,
+and supply only selected fragments to compilation. Direct registration of
+uncomposed markers returns `FEATURE_UNSUP`.
 
 Every returned handle belongs to one global module handle table and encodes a
 table index plus a generation. Its table entry records the owning instance.

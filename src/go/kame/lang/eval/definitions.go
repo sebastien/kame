@@ -78,6 +78,10 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 	var names []string
 	for i := range parsed.Items {
 		item := parsed.Items[i]
+		if item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
+			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "declaration conditionals require source composition before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
+			continue
+		}
 		if item.Kind != script.Definition || item.Definition == nil {
 			continue
 		}
@@ -117,6 +121,16 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 	p.Requests = host.NewQueue(a)
 	p.Valid = true
 	p.Scope = newScope(a, nil)
+	for i := range parsed.Items {
+		item := parsed.Items[i]
+		if item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
+			p.Valid = false
+			p.Diagnostics = slices.Append(a, p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "declaration conditionals require source composition before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
+		}
+	}
+	if !p.Valid {
+		return p
+	}
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if item.Kind != script.Definition || item.Definition == nil {

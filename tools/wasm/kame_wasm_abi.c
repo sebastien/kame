@@ -1464,3 +1464,18 @@ uint32_t kame_wasm_instance_set_heap_limit(uint64_t handle, uint32_t limit) {
   instance->heap_limit = limit;
   return KAME_WASM_OK;
 }
+
+uint32_t kame_wasm_declaration_predicate(uint64_t handle, uint32_t data,
+    uint32_t data_len, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, true);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (out_len == 0u || (data_len && !data)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
+  size_t mark = so_heap_mark();
+  wasm_PureResult result = wasm_DeclarationPredicate(mem_System,
+      (so_Slice){(so_byte *)(uintptr_t)data, data_len, data_len});
+  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len,
+      instance->diagnostic, (uint32_t)sizeof(instance->diagnostic), &instance->diagnostic_len);
+}

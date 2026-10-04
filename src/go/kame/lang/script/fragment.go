@@ -39,6 +39,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		lineEnd := pos
 		for lineEnd < end && text[lineEnd] != '\n' { lineEnd++ }
 		if comment(text, pos, lineEnd) { pos = nextLine(text, lineEnd); continue }
+		if following := parseConditional(s, pos, lineEnd); following != 0 { pos = following; continue }
 		if name, ok := include(text[pos:lineEnd]); ok {
 			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: pos, End: lineEnd}, Include: name, OptionalInclude: strings.HasPrefix(text[pos:lineEnd], "include?")})
 			pos = nextLine(text, lineEnd)
@@ -61,5 +62,6 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		if pos < end && text[pos] != '\n' { s.error(pos, pos+1, "expected statement separator") }
 		if len(s.Diagnostics) != 0 || pos <= from { break }
 	}
+	validateConditionals(s)
 	return s
 }

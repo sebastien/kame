@@ -36,6 +36,51 @@ form; formatting retains `include?`. Native source tracking retains missing
 optional path identities so watch can notice their later creation. The directive
 is source configuration and follows ordinary include loading policy.
 
+### Conditional source declarations
+
+Kame value (`.km`) and rule (`.kmk`) sources select declarations with
+`when PREDICATE`, an optional `otherwise`, and a matching `end`:
+
+```kmk
+mode ?= "debug"
+when (eq mode "debug")
+include debug.kmk
+otherwise
+include release.kmk
+end
+```
+
+These are top-level source markers, with rule-source markers and declarations
+flush left and ordinary indentation for recipes. Branches may nest. Each
+physical source must balance its markers; an included file cannot close its
+caller's branch. More than one `otherwise`, a missing predicate, or an unmatched
+marker is `PARSE_ERR`. The parser checks inactive text for syntax errors, and
+formatting and AST inspection retain both branches and their authored byte
+spans (`when`, `otherwise`, and `end-when` AST kinds).
+
+Selection happens before registration or execution. Predicates must return a
+boolean and may use pure expressions and lazy definitions selected earlier in
+source order, including earlier selected includes and earlier explicit `.km`
+or `.kmk` inputs. They cannot depend on subsequent declarations or the effects
+of earlier value statements. Literal `--define NAME=VALUE` and case-sensitive
+`KAME_NAME` configuration follow ordinary override precedence; the final
+registration still validates explicit override names. Unused definitions remain
+lazy. A predicate inside an inactive branch is not evaluated.
+
+Only selected declarations enter the shared scope. Inactive includes are not
+read, tracked, or cycle-checked, even when required or missing. Selected includes
+retain the ordinary required/optional and active-ancestry rules. Inline and stdin
+sources support conditional declarations but a selected include still requires
+a file-backed source. A nonboolean predicate reports `EXPR_INVALID`; unknown
+references, cycles, capability use, and effectful operations fail with their
+ordinary diagnostic codes before recipes or statements execute. Runtime grants
+do not grant predicates host authority.
+
+Embedding hosts compose source branches before compilation. Passing authored
+conditional markers directly to evaluator registration fails `FEATURE_UNSUP`
+rather than registering both branches. The portable predicate query and the
+native/JavaScript source loaders share predicate evaluation semantics.
+
 Parsers return an AST and zero or more diagnostics. Invalid syntax must never be
 silently discarded. Recovery may preserve malformed recipe interpolation as
 literal text with an `PARSE_ERR` warning.

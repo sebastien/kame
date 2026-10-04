@@ -663,6 +663,7 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_process_retain_limit',
   'kame_wasm_process_stream',
   'kame_wasm_process_terminal',
+  'kame_wasm_declaration_predicate',
   'kame_wasm_instance_diagnostic_length',
   'kame_wasm_instance_diagnostic_copy',
   'kame_wasm_instance_diagnostic_span',
@@ -796,6 +797,16 @@ class Module {
       if (this.exports.kame_wasm_step(instance) !== 1) throw Object.assign(new Error('inspection host request unavailable'), { code: 'HOST_FAIL' });
       if (await this.service(instance, context) !== 0) throw Object.assign(new Error('inspection host completion failed'), { code: 'HOST_FAIL' });
     }
+  }
+
+  async declarationPredicate(descriptor) {
+    const instance = this.exports.kame_wasm_instance_create();
+    if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
+    try {
+      const bytes = this.write(JSON.stringify(descriptor));
+      const result = this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_declaration_predicate(handle, bytes.pointer, bytes.length, dst, capacity, length), instance);
+      return new TextDecoder().decode(result) === 'true';
+    } finally { this.exports.kame_wasm_instance_free(instance); }
   }
 
   async parseCLI(command, args) {
@@ -1747,6 +1758,7 @@ async function runParse(module, inv) {
 
 async function runSession(module, inv, sourceDirectory) {
   const fragments = [];
+  const selection = { defines: inv.defines, environment: [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment], parts: [] };
   for (let i = 0; i < inv.inputs.length; i++) {
     const input = inv.inputs[i];
     let name = `<command:${i + 1}>`, text = input.value;
@@ -1762,9 +1774,9 @@ async function runSession(module, inv, sourceDirectory) {
       catch { return failure('FS_ERR', `cannot read source: ${input.value}`); }
     } else if (input.kind === 'stdin') { name = '<stdin>'; text = await readStdin(); }
     sourceTexts.set(name, text);
-    if (fileBacked && (input.lang === 'km' || input.lang === 'kmk')) {
-      const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang);
-      for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], lang: input.lang, entries: j + 1 === parts.length ? input.entries : [], inline: j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
+    if (input.lang === 'km' || input.lang === 'kmk') {
+      const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang, [], fileBacked, true, selection);
+      for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], lang: input.lang, entries: j + 1 === parts.length ? input.entries : [], inline: fileBacked && j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
     } else fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1, comment: inv.comment, defines: inv.defines, check: inv.check ? 1 : 0 });
   }
   if (!inv.dryRun && inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1) {
@@ -1780,9 +1792,8 @@ async function discoverBuildSource(module, inv, sourceDirectory) {
   const source = await discoverSource(inv);
   if (source === null) return null;
   const name = inv.sourceName ?? (inv.command ? source.name : isAbsolute(source.name) ? normalize(source.name) : normalize(join(inv.directory || '.', source.name)));
-  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, false);
-  const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
-  environment.push(...inv.environment);
+  const environment = [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment];
+  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, false, { defines: inv.defines, environment, parts: [] });
   parts.defines = inv.defines;
   parts.toolOverrides = inv.toolOverrides;
   parts.force = inv.force ? 1 : 0;
@@ -1791,23 +1802,47 @@ async function discoverBuildSource(module, inv, sourceDirectory) {
 }
 
 // Syntax and byte spans come from the portable parser, not a second JS grammar.
-async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true) {
+async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true, selection = { defines: [], environment: [], parts: [] }) {
   const identity = resolve(sourceDirectory, name);
   sourceTexts.set(name, text);
   if (active.includes(identity)) throw Object.assign(new Error(`include cycle: ${name}`), { code: 'DEP_CYCLE' });
   const document = JSON.parse(new TextDecoder().decode(await module.parse(lang === 'kmk' ? 'script' : lang, name, text)));
   const invalid = document.diagnostics.find((item) => item.severity === 'error');
-  if (invalid && validate) {
+  if (invalid && (validate || document.ast.items.some((item) => ['when', 'otherwise', 'end-when'].includes(item.kind)))) {
     primarySource = { name, text };
     throw Object.assign(new Error(invalid.message), { code: invalid.code, span: invalid.span, diagnostics: document.diagnostics.filter((item) => item.severity === 'error').map((item) => ({ ...item, source: name })) });
   }
   const bytes = new TextEncoder().encode(text);
   const parts = [];
+  const branches = [];
+  const enabled = () => branches.length === 0 || (branches.at(-1).parent && branches.at(-1).selected);
+  const append = (end) => {
+    const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), offset: start };
+    parts.push(part);
+    selection.parts.push(document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => new TextDecoder().decode(bytes.subarray(item.span.start, item.span.end))).join('\n'));
+  };
   let start = 0;
   for (const item of document.ast.items) {
+    if (['when', 'otherwise', 'end-when'].includes(item.kind)) {
+      const parent = enabled();
+      if (parent) append(item.span.start);
+      start = item.span.end;
+      if (item.kind === 'when') {
+        let selected = false;
+        if (parent) {
+          try {
+            selected = await module.declarationPredicate({ name, prefix: selection.parts.join('\n'), predicate: new TextDecoder().decode(bytes.subarray(item.expression.span.start, item.expression.span.end)), defines: selection.defines, environment: selection.environment });
+          } catch (error) { primarySource = { name, text }; error.span = item.expression.span; throw error; }
+        }
+        branches.push({ parent, selected });
+      } else if (item.kind === 'otherwise') branches.at(-1).selected = !branches.at(-1).selected;
+      else branches.pop();
+      continue;
+    }
     if (item.kind !== 'include') continue;
+    if (!enabled()) { start = item.span.end; continue; }
     if (!fileBacked) throw Object.assign(new Error('include requires a file-backed build source'), { code: 'FEATURE_UNSUP' });
-    parts.push({ name, text: new TextDecoder().decode(bytes.subarray(start, item.span.start)), offset: start });
+    append(item.span.start);
     const included = normalize(isAbsolute(item.path) ? item.path : join(dirname(name), item.path));
     let child;
     try { child = await readFile(resolve(sourceDirectory, included), 'utf8'); }
@@ -1815,10 +1850,10 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
       if (item.optional && error.code === 'ENOENT') { start = item.span.end; continue; }
       throw Object.assign(new Error(`cannot read included source: ${included}`), { code: 'FS_ERR' });
     }
-    parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity], true, validate));
+    parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity], true, validate, selection));
     start = item.span.end;
   }
-  parts.push({ name, text: new TextDecoder().decode(bytes.subarray(start)), offset: start });
+  if (enabled()) append(bytes.length);
   return parts;
 }
 

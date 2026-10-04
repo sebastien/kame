@@ -50,16 +50,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		input := inv.Inputs[i]
 		name, text := input.Value, input.Value
 		if input.Kind == "file" || input.Kind == "discover" {
-			file := buildSource{}
-			if input.Kind == "discover" {
-				file = loadBuildSource(buildArguments{Directory: inv.Directory, JSON: inv.JSON}, diagnosticWriter(out, errOut, inv.JSON), true)
-			} else if path.IsAbs(name) {
-				file = readRunSource(name, diagnosticWriter(out, errOut, inv.JSON), input.Lang, inv.JSON)
-			} else {
-				resolved := path.Join(mem.System, inv.Directory, name)
-				file = readRunSource(resolved, diagnosticWriter(out, errOut, inv.JSON), input.Lang, inv.JSON)
-				mem.FreeString(mem.System, resolved)
-			}
+			file := loadRunSourceInput(inv, input, fragments, diagnosticWriter(out, errOut, inv.JSON))
 			loaded = slices.Append(mem.System, loaded, file)
 			if file.Status != 0 { freeRunInputs(fragments, storage, names); return 1 }
 			for j := range file.Parts {
@@ -78,6 +69,17 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 			name = cloneCommandText("<command:"+strconv.Itoa(buffer[:], i+1)+">")
 			names = slices.Append(mem.System, names, name)
 		}
+        if input.Lang == "km" || input.Lang == "kmk" {
+            file := inlineRunSourceInput(inv, name, text, input.Lang, fragments, diagnosticWriter(out, errOut, inv.JSON))
+            loaded = slices.Append(mem.System, loaded, file)
+            if file.Status != 0 { freeRunInputs(fragments, storage, names); return 1 }
+            for j := range file.Parts {
+                entries := input.Entries
+                if j+1 != len(file.Parts) { entries = nil }
+                fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Lang: input.Lang, Entries: entries, Inline: true, SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
+            }
+            continue
+        }
 		fragments = slices.Append(mem.System, fragments, program.Fragment{Name: name, Text: text, Lang: input.Lang, Entries: input.Entries, Inline: input.Kind != "file", Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
 	}
 	defer freeRunInputs(fragments, storage, names)
