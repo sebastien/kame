@@ -961,6 +961,10 @@ class Module {
         try { for (const name of recipe.outputs) await mkdir(dirname(name), { recursive: true }); }
         catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot create output directory'); }
         payload = recipe.script;
+        if (recipe.shell !== undefined) {
+          if (!Array.isArray(recipe.shell) || recipe.shell.length === 0 || recipe.shell.some((argument) => typeof argument !== 'string' || argument.includes('\0')) || recipe.shell[0] === '') return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe shell argv');
+          context = { ...context, shell: recipe.shell };
+        }
         if (recipe.environment !== undefined) {
           if (!Array.isArray(recipe.environment) || recipe.environment.some((entry) => typeof entry !== 'string' || entry.includes('\0') || entry.indexOf('=') < 1)) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe environment');
           context = { ...context, environment: recipe.environment };

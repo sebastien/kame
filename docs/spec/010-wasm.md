@@ -169,7 +169,12 @@ Node's socket-based subprocess `pipe` streams are not interchangeable here:
 early-reader closure can produce ECONNRESET instead of native SIGPIPE.
 
 File-rule shell requests use ABI kind 16: a JSON object with `script` and
-`outputs`. The embedding host creates output parent directories before launch.
+`outputs`, with optional `environment` string assignments and optional `shell`
+argv. A supplied shell argv must be nonempty, contain only strings without NUL,
+and have a nonempty executable. Remaining arguments, including empty strings,
+are preserved before appending the rendered recipe text. The embedding host
+creates output parent directories before launch. Existing recipe descriptors
+without a shell field retain the invocation shell policy.
 File-rule freshness and successful-output verification use ABI kind 20
 (`file-times`): a JSON array of canonical paths. The host completes it with a
 JSON array in the same order, containing decimal nanosecond modification times

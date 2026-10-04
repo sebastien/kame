@@ -62,6 +62,11 @@ func RecipePayload(a mem.Allocator, script string, outputs []string) core.Value 
 
 // RecipeEnvironmentPayload also carries the exact child environment when scoped.
 func RecipeEnvironmentPayload(a mem.Allocator, script string, outputs []string, environment []string) core.Value {
+ return RecipeExecutionPayload(a, script, outputs, environment, nil)
+}
+
+// RecipeExecutionPayload carries the selected rule shell argv as well as its environment.
+func RecipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string) core.Value {
  b := strings.NewBuilder(a)
  e := json.NewEncoder(&b)
  e.BeginObject(); e.Str("script"); e.Str(script); e.Str("outputs"); e.BeginArray()
@@ -70,6 +75,11 @@ func RecipeEnvironmentPayload(a mem.Allocator, script string, outputs []string, 
  if environment != nil {
   e.Str("environment"); e.BeginArray()
   for i := range environment { e.Str(environment[i]) }
+  e.EndArray()
+ }
+ if shell != nil {
+  e.Str("shell"); e.BeginArray()
+  for i := range shell { e.Str(shell[i]) }
   e.EndArray()
  }
  e.EndObject(); e.Flush()
