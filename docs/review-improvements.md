@@ -258,3 +258,30 @@ the shared sanitizer checkout, including primary explicit/discovered/inline rule
 JSON output, mixed values/processes, retained grants, and absence of effects.
 Source-style integration also passes all 38 native/WASM golden cases; complete
 spec-018 acceptance review remains pending.
+
+Structured recipe review now covers 29 policy cases per host, including bounded
+stdout/stderr cache replay from synchronous and async commands, inherited process
+environments, successful retries, aggregate timeout budgets, and cancellation of
+background work after a later command fails. Native checks use ASAN/UBSAN. The
+WASM reusable-script helper also passes 33 cases. The instance-heap sanitizer
+suite passes 31 tests, including a forwarded async structured recipe.
+
+The review exposed a deferred call-path double-free during recursive retries and
+a retained context that kept its previous completion-consumed flag. Stable local
+cleanup handles and explicit context resumption fix both. The same generated
+WASM C that trapped during nested async argv cloning succeeds with a 256 KiB
+linker stack; both build files now reserve that stack explicitly and GNU Make
+rebuilds the module when its build settings change. Primary WASM builds now
+service independent requests concurrently and forward timeout/retry policy into
+portable build and session options.
+
+The structured recipe feature remains under integration review. Native reusable
+script file freshness and A3's scoped definition/environment reads and tool
+resolution remain unfinished.
+
+Nested operand scope restoration is committed separately with a focused
+operation-context regression. The shared evaluator passes 71 ASAN/UBSAN tests;
+the temporary-operand Kash constructor reproducer now passes on native and WASM.
+Existing timeout/retry, signal cancellation, cached-task, and async-graph suites
+pass 87 behavioral assertions. The expanded reusable-script helper has also
+added file-freshness cases; that integration review remains open.
