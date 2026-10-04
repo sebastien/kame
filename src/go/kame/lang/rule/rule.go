@@ -2,8 +2,8 @@
 package rule
 
 import (
+	"kame/lang/expr"
 	"kame/lang/source"
- "kame/lang/expr"
 	"kame/lang/template"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
@@ -26,7 +26,7 @@ const (
 	InputTemplate
 	InputString
 	InputExpression
- InputWildcard
+	InputWildcard
 )
 
 type Target struct {
@@ -38,7 +38,7 @@ type Target struct {
 	TargetForm *template.Target
 }
 type Input struct {
- OrderOnly bool
+	OrderOnly  bool
 	Kind       InputKind
 	Text       string
 	Span       source.Span
@@ -62,14 +62,22 @@ const (
 
 // EnvironmentAssignment retains authored spelling and a decoded literal value.
 type EnvironmentAssignment struct {
- Text string
- Value string
- Span source.Span
+	Text  string
+	Value string
+	Span  source.Span
+}
+
+type TargetArgument struct {
+	Name     string
+	Default  string
+	Optional bool
+	Span     source.Span
 }
 
 type Rule struct {
-	Metadata *expr.Expr
- Environment []EnvironmentAssignment
+	Metadata    *expr.Expr
+	Environment []EnvironmentAssignment
+	Arguments   []TargetArgument
 	// Always bypasses freshness while preserving file-output semantics.
 	Always  bool
 	Span    source.Span
@@ -148,8 +156,15 @@ func FreeRule(a mem.Allocator, r *Rule) {
 		r.Inputs[i].TargetForm.Free()
 	}
 	slices.Free(a, r.Inputs)
- for i := range r.Environment { mem.FreeString(a, r.Environment[i].Value) }
- slices.Free(a, r.Environment)
+	for i := range r.Environment {
+		mem.FreeString(a, r.Environment[i].Value)
+	}
+	slices.Free(a, r.Environment)
+	for i := range r.Arguments {
+		mem.FreeString(a, r.Arguments[i].Name)
+		mem.FreeString(a, r.Arguments[i].Default)
+	}
+	slices.Free(a, r.Arguments)
 	for i := range r.Body {
 		r.Body[i].Template.Free()
 	}
@@ -203,48 +218,76 @@ func (p *parser) rule() *Rule {
 	leftStart, leftEnd := trim(p.s.Text, headerStart, colon)
 	rightStart, rightEnd := trim(p.s.Text, colon+1, headerEnd)
 	p.ruleTargets(r, leftStart, leftEnd)
- metadata := topLevel(p.s.Text[rightStart:rightEnd], ';')
- if metadata >= 0 {
-  metadata += rightStart
-  p.ruleMetadata(r, metadata+1, rightEnd)
-  rightEnd = metadata
- }
+	metadata := topLevel(p.s.Text[rightStart:rightEnd], ';')
+	if metadata >= 0 {
+		metadata += rightStart
+		p.ruleMetadata(r, metadata+1, rightEnd)
+		rightEnd = metadata
+	}
 	p.ruleInputs(r, rightStart, rightEnd)
 	p.classify(r)
+	p.validateArguments(r)
 	p.recipe(r, lineEnd)
 	return r
 }
 
 func (p *parser) ruleTargets(r *Rule, start int, end int) {
-	items := ranges(p.a, p.s.Text, start, end)
-	defer slices.Free(p.a, items)
-	words := items
-	if len(words) == 0 {
+	allItems := ranges(p.a, p.s.Text, start, end)
+	defer slices.Free(p.a, allItems)
+	items := allItems
+	if len(items) == 0 {
 		p.error(start, end, "expected rule output")
 		return
 	}
-	if len(words) >= 2 && p.s.Text[words[0].Start:words[0].End] == "always" {
+	var words []source.Span
+	argumentBlocks := false
+	if len(items) >= 2 && p.s.Text[items[0].Start:items[0].End] == "always" {
 		r.Always = true
-		words = words[1:]
+		items = items[1:]
 	}
-	if len(words) >= 2 && (p.s.Text[words[0].Start:words[0].End] == "task" || p.s.Text[words[0].Start:words[0].End] == "service") {
-		if p.s.Text[words[0].Start:words[0].End] == "task" {
+	if len(items) >= 2 && (p.s.Text[items[0].Start:items[0].End] == "task" || p.s.Text[items[0].Start:items[0].End] == "service") {
+		if p.s.Text[items[0].Start:items[0].End] == "task" {
 			r.Kind = CachedTaskRule
 		} else {
 			r.Kind = ServiceRule
 		}
-		if len(words) != 2 {
-			p.error(start, end, "prefixed rule needs one target")
-			return
+		items = items[1:]
+	}
+	// A literal named task target followed only by standalone brace blocks
+	// declares arguments. A leading brace block (for example `task {name}`)
+	// remains a target-template output for compatibility.
+	if len(items) >= 2 {
+		first := targetValue(p.s.Text[items[0].Start:items[0].End])
+		argumentBlocks = validName(first) && !explicitPath(first) && !hasTemplate(first)
+		for i := 1; argumentBlocks && i < len(items); i++ {
+			text := p.s.Text[items[i].Start:items[i].End]
+			if len(text) < 3 || text[0] != '{' || text[len(text)-1] != '}' {
+				argumentBlocks = false
+			}
 		}
-		words = words[1:]
+	}
+	for i := range items {
+		span := items[i]
+		text := p.s.Text[span.Start:span.End]
+		if argumentBlocks && len(text) != 0 && text[0] == '{' {
+			p.targetArgument(r, span, text)
+			continue
+		}
+		words = slices.Append(p.a, words, span)
+	}
+	defer slices.Free(p.a, words)
+	if r.Kind == CachedTaskRule || r.Kind == ServiceRule {
+		if len(words) != 1 {
+			p.error(start, end, "prefixed rule needs one target")
+		}
 	}
 	for i := range words {
-		text := p.s.Text[words[i].Start:words[i].End]
+		span := words[i]
+		text := p.s.Text[span.Start:span.End]
 		value := targetValue(text)
 		path, templated := explicitPath(value), hasTemplate(value)
 		if !path && !templated && !validName(value) {
-			p.error(words[i].Start, words[i].End, "invalid rule target; use ./ for a file path")
+			p.error(span.Start, span.End, "invalid rule target; use ./ for a file path")
 		}
 		kind := TargetName
 		if path {
@@ -252,26 +295,70 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 		} else if templated {
 			kind = TargetTemplate
 		}
-		output := Target{Kind: kind, Text: text, Span: words[i], Path: path, Template: templated}
+		output := Target{Kind: kind, Text: text, Span: span, Path: path, Template: templated}
 		if templated {
 			output.TargetForm = template.ParseTarget(p.a, p.s.Name, value)
-			p.takeTargetDiagnostics(output.TargetForm.Diagnostics, words[i].Start)
+			p.takeTargetDiagnostics(output.TargetForm.Diagnostics, span.Start)
 		}
 		r.Outputs = slices.Append(p.a, r.Outputs, output)
 	}
 }
 
+func (p *parser) targetArgument(r *Rule, span source.Span, text string) {
+	if len(text) < 3 || text[len(text)-1] != '}' {
+		p.error(span.Start, span.End, "invalid target argument; expected {name} or {name=value}")
+		return
+	}
+	content := text[1 : len(text)-1]
+	equal := -1
+	for i := range content {
+		if content[i] == '=' {
+			equal = i
+			break
+		}
+	}
+	name, defaultValue, optional := content, "", false
+	if equal >= 0 {
+		name, defaultValue, optional = content[:equal], content[equal+1:], true
+	}
+	if !validName(name) || strings.ContainsAny(defaultValue, "{}\x00 \t\r\n") {
+		p.error(span.Start, span.End, "invalid target argument name or default")
+		return
+	}
+	for i := range r.Arguments {
+		if r.Arguments[i].Name == name {
+			p.error(span.Start, span.End, "duplicate target argument: "+name)
+			return
+		}
+	}
+	r.Arguments = slices.Append(p.a, r.Arguments, TargetArgument{Name: owned(p.a, name), Default: owned(p.a, defaultValue), Optional: optional, Span: span})
+}
+
+func (p *parser) validateArguments(r *Rule) {
+	if len(r.Arguments) == 0 {
+		return
+	}
+	if r.Kind != TaskRule && r.Kind != CachedTaskRule {
+		p.error(r.Arguments[0].Span.Start, r.Arguments[len(r.Arguments)-1].Span.End, "target arguments require one named task target")
+	}
+	if len(r.Outputs) != 1 || r.Outputs[0].Template || r.Outputs[0].Path {
+		p.error(r.Header.Start, r.Header.End, "target arguments cannot be used with file or template targets")
+	}
+}
+
 func (p *parser) ruleInputs(r *Rule, start int, end int) {
 	items := ranges(p.a, p.s.Text, start, end)
- ordered := false
- for i, span := range items {
-  text := p.s.Text[span.Start:span.End]
-  if text == "|" {
-   if ordered || i == len(items)-1 { p.error(span.Start, span.End, "expected one order-only prerequisite section") }
-   ordered = true
-   continue
-  }
-  input := Input{OrderOnly: ordered, Kind: InputName, Text: text, Span: span}
+	ordered := false
+	for i, span := range items {
+		text := p.s.Text[span.Start:span.End]
+		if text == "|" {
+			if ordered || i == len(items)-1 {
+				p.error(span.Start, span.End, "expected one order-only prerequisite section")
+			}
+			ordered = true
+			continue
+		}
+		input := Input{OrderOnly: ordered, Kind: InputName, Text: text, Span: span}
 		if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
 			input.Kind = InputString
 			input.Template = template.ParseStringRange(p.a, p.s, span.Start+1, span.End-1)
@@ -287,10 +374,10 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 			p.takeTargetDiagnostics(input.TargetForm.Diagnostics, span.Start)
 		} else if explicitPath(text) {
 			input.Kind = InputPath
-   if strings.ContainsAny(text, "*?[") {
-    input.Kind = InputWildcard
-    input.Template = wildcardInput(p.a, text, span)
-   }
+			if strings.ContainsAny(text, "*?[") {
+				input.Kind = InputWildcard
+				input.Template = wildcardInput(p.a, text, span)
+			}
 		} else if !validName(text) {
 			p.error(span.Start, span.End, "invalid rule input")
 		}
@@ -544,8 +631,13 @@ func ranges(a mem.Allocator, text string, start int, end int) []source.Span {
 	for start < end {
 		for start < end {
 			next := source.ContinuationEnd(text, start, end)
-			if next != start { start = next; continue }
-			if !space(text[start]) { break }
+			if next != start {
+				start = next
+				continue
+			}
+			if !space(text[start]) {
+				break
+			}
 			start++
 		}
 		if start == end {
@@ -554,7 +646,9 @@ func ranges(a mem.Allocator, text string, start int, end int) []source.Span {
 		item, depth, quote := start, 0, false
 		for start < end {
 			b := text[start]
-			if !quote && depth == 0 && source.ContinuationEnd(text, start, end) != start { break }
+			if !quote && depth == 0 && source.ContinuationEnd(text, start, end) != start {
+				break
+			}
 			if quote {
 				if b == '\\' && start+1 < end {
 					start += 2
@@ -614,17 +708,31 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 		}
 		b.WriteString(r.Outputs[i].Text)
 	}
+	for i := range r.Arguments {
+		argument := r.Arguments[i]
+		b.WriteString(" {")
+		b.WriteString(argument.Name)
+		if argument.Optional {
+			b.WriteByte('=')
+			b.WriteString(argument.Default)
+		}
+		b.WriteByte('}')
+	}
 	b.WriteString(" :")
- for i := range r.Inputs {
-  if r.Inputs[i].OrderOnly && (i == 0 || !r.Inputs[i-1].OrderOnly) { b.WriteString(" |") }
+	for i := range r.Inputs {
+		if r.Inputs[i].OrderOnly && (i == 0 || !r.Inputs[i-1].OrderOnly) {
+			b.WriteString(" |")
+		}
 		b.WriteByte(' ')
 		b.WriteString(r.Inputs[i].Text)
 	}
- for i := range r.Environment {
-  if i == 0 { b.WriteString(" ; env") }
-  b.WriteByte(' ')
-  b.WriteString(r.Environment[i].Text)
- }
+	for i := range r.Environment {
+		if i == 0 {
+			b.WriteString(" ; env")
+		}
+		b.WriteByte(' ')
+		b.WriteString(r.Environment[i].Text)
+	}
 	if r.Metadata != nil {
 		metadata := expr.Compact(a, r.Metadata)
 		b.WriteString(" ; ")
@@ -646,15 +754,15 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 // The authored token and spans remain intact; the evaluator shares wildcard's
 // existing capability checks and dependency tracking.
 func wildcardInput(a mem.Allocator, text string, span source.Span) *template.String {
- call := mem.Alloc[expr.Expr](a)
- call.Kind, call.Span = expr.Application, span
- name := mem.Alloc[expr.Expr](a)
- name.Kind, name.Text, name.Span = expr.Name, "wildcard", span
- pattern := mem.Alloc[expr.Expr](a)
- pattern.Kind, pattern.Text, pattern.Span = expr.Symbol, text, span
- call.Items = slices.Append(a, call.Items, name, pattern)
- value := mem.Alloc[template.String](a)
- value.Alloc, value.Span = a, span
- value.Parts = slices.Append(a, value.Parts, template.Part{Kind: template.Expression, Span: span, Expr: call})
- return value
+	call := mem.Alloc[expr.Expr](a)
+	call.Kind, call.Span = expr.Application, span
+	name := mem.Alloc[expr.Expr](a)
+	name.Kind, name.Text, name.Span = expr.Name, "wildcard", span
+	pattern := mem.Alloc[expr.Expr](a)
+	pattern.Kind, pattern.Text, pattern.Span = expr.Symbol, text, span
+	call.Items = slices.Append(a, call.Items, name, pattern)
+	value := mem.Alloc[template.String](a)
+	value.Alloc, value.Span = a, span
+	value.Parts = slices.Append(a, value.Parts, template.Part{Kind: template.Expression, Span: span, Expr: call})
+	return value
 }

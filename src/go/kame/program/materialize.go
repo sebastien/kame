@@ -387,7 +387,7 @@ func (p *Program) instanceFor(target string) instanceResult {
 	}
 	for i := range p.Instances {
 		entry := &p.Instances[i]
-		if !entry.Inspection && entry.Rule == plan.Rule && sameCaptures(entry.Captures, plan.Captures) {
+		if !entry.Inspection && entry.Rule == plan.Rule && sameCaptures(entry.Captures, plan.Captures) && sameArguments(entry.Plan.Arguments, plan.Arguments) {
 			return instanceResult{Node: entry.Node, Plan: plan}
 		}
 	}
@@ -411,5 +411,11 @@ func sameCaptures(left, right []template.CaptureValue) bool {
 			return false
 		}
 	}
+	return true
+}
+
+func sameArguments(left, right []ArgumentValue) bool {
+	if len(left) != len(right) { return false }
+	for i := range left { if left[i].Name != right[i].Name || left[i].Value != right[i].Value { return false } }
 	return true
 }

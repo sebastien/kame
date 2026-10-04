@@ -12,23 +12,35 @@ import (
 
 func (p *Program) Plan(target string) PlanResult {
 	selected := p.selectRule(target)
+	if selected.Diagnostic.Code != "" {
+		freeCaptures(p.Alloc, selected.Captures)
+		freeArguments(p.Alloc, selected.Arguments)
+		mem.FreeString(p.Alloc, selected.Target)
+		return PlanResult{Diagnostic: selected.Diagnostic}
+	}
 	if selected.Ambiguous {
+		mem.FreeString(p.Alloc, selected.Target)
 		return PlanResult{Diagnostic: failure(p.Alloc, "TGT_AMBIG", "multiple rules match target")}
 	}
 	if selected.Rule == nil {
+		mem.FreeString(p.Alloc, selected.Target)
 		if p.Eval.Definition(target) != nil {
 			return PlanResult{Plan: Plan{Tools: p.plannedTools(), Configuration: cloneStrings(p.Alloc, p.Configuration), Target: cloneText(p.Alloc, target), Key: core.NewResourceKey(p.Alloc, core.ResourceDefinition, target), Freshness: Unknown}}
 		}
 		return PlanResult{Diagnostic: failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+target)}
 	}
-	plan := Plan{Tools: p.plannedTools(), Configuration: cloneStrings(p.Alloc, p.Configuration), Target: cloneText(p.Alloc, target), Rule: selected.Rule, RuleSpan: diagnostic.Span{Start: selected.Rule.Span.Start, End: selected.Rule.Span.End}, Body: selected.Rule.Body, Captures: cloneCaptures(p.Alloc, selected.Captures), Freshness: Unknown}
+	plan := Plan{Tools: p.plannedTools(), Configuration: cloneStrings(p.Alloc, p.Configuration), Target: cloneText(p.Alloc, target), Rule: selected.Rule, RuleSpan: diagnostic.Span{Start: selected.Rule.Span.Start, End: selected.Rule.Span.End}, Body: selected.Rule.Body, Captures: cloneCaptures(p.Alloc, selected.Captures), Arguments: cloneArguments(p.Alloc, selected.Arguments), Freshness: Unknown}
 	defer freeCaptures(p.Alloc, selected.Captures)
+	defer freeArguments(p.Alloc, selected.Arguments)
+	defer mem.FreeString(p.Alloc, selected.Target)
 	if selected.Rule.Kind == rule.FileRule {
 		canonical := p.canonicalTarget(target, true)
 		plan.Key = core.NewResourceKey(p.Alloc, resourceKind(selected.Rule), canonical)
 		mem.FreeString(p.Alloc, canonical)
 	} else {
-		plan.Key = core.NewResourceKey(p.Alloc, resourceKind(selected.Rule), target)
+		keyName := targetArgumentKey(p.Alloc, selected.Target, selected.Arguments)
+		plan.Key = core.NewResourceKey(p.Alloc, resourceKind(selected.Rule), keyName)
+		mem.FreeString(p.Alloc, keyName)
 	}
 	for i := range selected.Rule.Outputs {
 		output := renderTarget(p.Alloc, selected.Rule.Outputs[i], selected.Captures)
@@ -181,7 +193,7 @@ func expandPlanProduce(c *core.EngineContext, nodeID int64) core.ProducerResult 
 }
 
 func clonePlan(a mem.Allocator, plan Plan) Plan {
-	clone := Plan{Tools: cloneTools(a, plan.Tools), Configuration: cloneStrings(a, plan.Configuration), Target: cloneText(a, plan.Target), Key: plan.Key.Clone(a), Rule: plan.Rule, RuleSpan: plan.RuleSpan, Body: plan.Body, Captures: cloneCaptures(a, plan.Captures), Inputs: cloneStrings(a, plan.Inputs), StaticInputs: cloneStrings(a, plan.StaticInputs), DynamicInputs: cloneStrings(a, plan.DynamicInputs), ResourceInputs: clonePlanInputs(a, plan.ResourceInputs), ResolvedInputs: cloneStrings(a, plan.ResolvedInputs), ResolvedResourceInputs: clonePlanInputs(a, plan.ResolvedResourceInputs), Resolved: plan.Resolved, Outputs: cloneStrings(a, plan.Outputs), Freshness: plan.Freshness}
+	clone := Plan{Tools: cloneTools(a, plan.Tools), Configuration: cloneStrings(a, plan.Configuration), Target: cloneText(a, plan.Target), Key: plan.Key.Clone(a), Rule: plan.Rule, RuleSpan: plan.RuleSpan, Body: plan.Body, Captures: cloneCaptures(a, plan.Captures), Arguments: cloneArguments(a, plan.Arguments), Inputs: cloneStrings(a, plan.Inputs), StaticInputs: cloneStrings(a, plan.StaticInputs), DynamicInputs: cloneStrings(a, plan.DynamicInputs), ResourceInputs: clonePlanInputs(a, plan.ResourceInputs), ResolvedInputs: cloneStrings(a, plan.ResolvedInputs), ResolvedResourceInputs: clonePlanInputs(a, plan.ResolvedResourceInputs), Resolved: plan.Resolved, Outputs: cloneStrings(a, plan.Outputs), Freshness: plan.Freshness}
 	return clone
 }
 
@@ -194,7 +206,7 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	defer freeValues(p.Alloc, outputs)
 	state := planResolverState{Program: p}
 	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
-	scope := p.ruleScope(context, plan.Captures)
+	scope := p.ruleScope(context, plan.Captures, plan.Arguments)
     context.Scope = scope
     result := p.evaluateInput(input, context)
     scope.Free()

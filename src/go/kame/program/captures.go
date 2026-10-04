@@ -8,10 +8,13 @@ import (
 )
 
 // Captures are lexical values in both prerequisite expressions and recipes.
-func (p *Program) ruleScope(c *eval.Context, captures []template.CaptureValue) *eval.Scope {
+func (p *Program) ruleScope(c *eval.Context, captures []template.CaptureValue, arguments []ArgumentValue) *eval.Scope {
     var fields []core.RecordField
     for i := range captures {
         fields = slices.Append(p.Alloc, fields, core.RecordField{Key: captures[i].Name, Value: core.NewString(p.Alloc, captures[i].Text)})
+    }
+    for i := range arguments {
+        fields = slices.Append(p.Alloc, fields, core.RecordField{Key: arguments[i].Name, Value: core.NewString(p.Alloc, arguments[i].Value)})
     }
     payload := core.NewRecord(p.Alloc, fields)
     for i := range fields { fields[i].Value.Free(p.Alloc) }

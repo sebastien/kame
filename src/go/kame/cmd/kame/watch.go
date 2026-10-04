@@ -109,7 +109,7 @@ func startWatchHandles(session *buildSession, options buildArguments, out io.Wri
             started.Diagnostic.Free(mem.System)
         } else { handles = slices.Append(mem.System, handles, started.Handle) }
     }
-    slices.Free(mem.System, targets)
+    program.FreeStrings(mem.System, targets)
     return handles
 }
 

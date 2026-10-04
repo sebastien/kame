@@ -24,7 +24,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: true, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, NewerInputs: newer}}}
 	p.bindDefinitionEnvironment(context)
-	scope := p.ruleScope(context, entry.Captures)
+	scope := p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
     context.Scope = scope
     defer scope.Free()
     if entry.Rule.BodyDoc != nil {

@@ -54,16 +54,15 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 // and otherwise "default" is selected when the program defines it. An empty
 // result means no target was selected because no default is defined.
 func selectTargets(p *program.Program, targets []string) []string {
-	if len(targets) != 0 {
-		return targets
-	}
-	if p.HasTarget("default") {
+	if len(targets) == 0 && p.HasTarget("default") {
 		// Append through the allocator: a Go slice literal here would transpile
 		// to a block-scoped C compound literal that dies before the caller reads
 		// the result.
-		return slices.Append(mem.System, targets, "default")
+		targets = slices.Append(mem.System, targets, "default")
 	}
-	return nil
+	joined := p.JoinTargetOperands(targets)
+	slices.Free(mem.System, targets)
+	return joined
 }
 
 // reportNoDefault reports TGT_NO_DEFAULT when no target was requested and the

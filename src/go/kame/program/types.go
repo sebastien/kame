@@ -28,6 +28,7 @@ type Plan struct {
 	RuleSpan diagnostic.Span
 	Body     []rule.RecipeLine
 	Captures []template.CaptureValue
+	Arguments []ArgumentValue
 	Configuration []string
 	Tools []Tool
 	Inputs   []string
@@ -69,6 +70,7 @@ func (p *Plan) Free(a mem.Allocator) {
 		mem.FreeString(a, p.Captures[i].Name)
 		mem.FreeString(a, p.Captures[i].Text)
 	}
+	freeArguments(a, p.Arguments)
 	for i := range p.Inputs {
 		mem.FreeString(a, p.Inputs[i])
 	}
@@ -331,7 +333,17 @@ type instance struct {
 type selection struct {
 	Rule      *rule.Rule
 	Captures  []template.CaptureValue
+	Arguments []ArgumentValue
+	Target    string
+	Diagnostic diagnostic.Diagnostic
 	Ambiguous bool
+}
+
+// ArgumentValue is a bound named target argument. It remains separate from
+// file-pattern captures throughout planning and instance identity.
+type ArgumentValue struct {
+	Name  string
+	Value string
 }
 type planResolverState struct {
 	Program   *Program

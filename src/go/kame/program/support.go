@@ -41,6 +41,12 @@ func freeCaptures(a mem.Allocator, values []template.CaptureValue) {
 	slices.Free(a, values)
 }
 
+func cloneArguments(a mem.Allocator, in []ArgumentValue) []ArgumentValue {
+	var out []ArgumentValue
+	for i := range in { out = slices.Append(a, out, ArgumentValue{Name: cloneText(a, in[i].Name), Value: cloneText(a, in[i].Value)}) }
+	return out
+}
+
 func renderTarget(a mem.Allocator, target rule.Target, captures []template.CaptureValue) string {
 	if !target.Template {
 		return cloneText(a, target.Text)

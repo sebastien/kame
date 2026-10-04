@@ -32,6 +32,56 @@ func TestMaterializeWritesOutput(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestNamedTargetArgumentsBindDefaultsAndSeparateInstances(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-target-arguments-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "arguments.kmk", "prepare {region=west} {zone=global} :\n\tprintf @(region) >> ./dependency-log\ndeploy {region=west} {zone=global} : \"prepare region=@(region) zone=@(zone)\"\n\tprintf @(region) >> ./deploy-log\n")
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
+	defaultPlan := compiled.Program.Plan("deploy")
+	if defaultPlan.Diagnostic.Code != "" || len(defaultPlan.Plan.Arguments) != 2 || defaultPlan.Plan.Arguments[0].Value != "west" || defaultPlan.Plan.Arguments[1].Value != "global" { t.Error("optional defaults were not bound in the plan") }
+	customPlan := compiled.Program.Plan("deploy region=east zone=eu")
+	reorderedPlan := compiled.Program.Plan("deploy zone=eu region=east")
+	if customPlan.Diagnostic.Code != "" || len(customPlan.Plan.Arguments) != 2 || customPlan.Plan.Arguments[0].Value != "east" || customPlan.Plan.Arguments[1].Value != "eu" { t.Error("named values were not bound in declaration order") }
+	if defaultPlan.Plan.Key.Name == customPlan.Plan.Key.Name { t.Error("different argument values shared an instance key") }
+	if customPlan.Plan.Key.Name != reorderedPlan.Plan.Key.Name { t.Error("assignment order changed target identity") }
+	defaultPlan.Plan.Free(a); customPlan.Plan.Free(a); reorderedPlan.Plan.Free(a)
+	targets := []string{"deploy", "deploy region=east zone=eu"}
+	for i := range targets {
+		target := targets[i]
+		result := compiled.Program.Materialize(target)
+		if result.Diagnostic.Code != "" { t.Error("materialize failed: " + result.Diagnostic.Code + " " + result.Diagnostic.Message) }
+		result.Free(a)
+	}
+	data, readErr := os.ReadFile(a, dir+"/deploy-log")
+	if readErr != nil || string(data) != "westeast" { t.Error("recipe scope did not receive default and supplied values") }
+	mem.FreeSlice(a, data)
+	dependencies, dependencyErr := os.ReadFile(a, dir+"/dependency-log")
+	if dependencyErr != nil || string(dependencies) != "westeast" { t.Error("argument values did not flow into dependency target selection") }
+	mem.FreeSlice(a, dependencies)
+	invalid := []string{"deploy unknown=west", "deploy region=a region=b", "deploy region"}
+	for i := range invalid {
+		target := invalid[i]
+		result := compiled.Program.Plan(target)
+		if result.Diagnostic.Code != "TGT_ARGUMENT" { t.Error("invalid invocation " + target + " returned " + result.Diagnostic.Code) }
+		result.Diagnostic.Free(a); result.Plan.Free(a)
+	}
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestNamedTargetArgumentCannotShadowDefinition(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "arguments.kmk", "region = \"global\"\ndeploy {region=west} :\n\ttrue\n")
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
+	if compiled.Program != nil || len(compiled.Diagnostics) == 0 || compiled.Diagnostics[0].Code != "TGT_ARGUMENT" { t.Error("target argument shadowing was not rejected") }
+	compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestCaptureRedirectionDependenciesAndEffects(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)

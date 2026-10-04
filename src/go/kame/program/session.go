@@ -205,7 +205,11 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 				// Preflight only authored target selection, not dynamic inputs:
 				// those may depend on args or earlier session effects.
 				selected := p.selectRule(work[i].Target)
-				if selected.Ambiguous { result.Diagnostics = slices.Append(a, result.Diagnostics, failure(a, "TGT_AMBIG", "multiple rules match target")) } else if selected.Rule == nil && p.Eval.Definition(work[i].Target) == nil { result.Diagnostics = slices.Append(a, result.Diagnostics, failure(a, "TGT_NO_RULE", "no rule for target: "+work[i].Target)) }
+				freeArguments(p.Alloc, selected.Arguments)
+				mem.FreeString(p.Alloc, selected.Target)
+				if selected.Diagnostic.Code != "" {
+					result.Diagnostics = slices.Append(a, result.Diagnostics, selected.Diagnostic)
+				} else if selected.Ambiguous { result.Diagnostics = slices.Append(a, result.Diagnostics, failure(a, "TGT_AMBIG", "multiple rules match target")) } else if selected.Rule == nil && p.Eval.Definition(work[i].Target) == nil { result.Diagnostics = slices.Append(a, result.Diagnostics, failure(a, "TGT_NO_RULE", "no rule for target: "+work[i].Target)) }
 				freeCaptures(a, selected.Captures)
 			}
 		}

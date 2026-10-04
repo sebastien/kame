@@ -97,6 +97,12 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 			continue
 		}
 		p.Rules = slices.Append(a, p.Rules, registeredRule{Rule: item.Rule})
+		for j := range item.Rule.Arguments {
+			argument := item.Rule.Arguments[j]
+			if p.Eval.Definition(argument.Name) != nil {
+				result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Source: parsed.Source.Name, Code: "TGT_ARGUMENT", Severity: diagnostic.Error, Message: "target argument shadows definition: " + argument.Name, Span: diagnostic.Span{Start: argument.Span.Start, End: argument.Span.End}})
+			}
+		}
 		for j := range item.Rule.Body {
 			if item.Rule.Body[j].Template == nil {
 				continue
@@ -173,6 +179,9 @@ func (p *Program) HasTarget(target string) bool {
 	selected := p.selectRule(target)
 	found := selected.Rule != nil || p.Eval.Definition(target) != nil
 	freeCaptures(p.Alloc, selected.Captures)
+	freeArguments(p.Alloc, selected.Arguments)
+	mem.FreeString(p.Alloc, selected.Target)
+	selected.Diagnostic.Free(p.Alloc)
 	return found
 }
 

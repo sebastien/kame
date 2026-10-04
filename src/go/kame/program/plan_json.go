@@ -55,6 +55,12 @@ func WritePlan(out io.Writer, plan *Plan) {
 		e.EndObject()
 	}
 	e.EndArray()
+	if len(plan.Arguments) != 0 {
+		e.Str("arguments")
+		e.BeginObject()
+		for i := range plan.Arguments { e.Str(plan.Arguments[i].Name); e.Str(plan.Arguments[i].Value) }
+		e.EndObject()
+	}
 	e.Str("freshness")
 	if plan.Freshness == Fresh {
 		e.Str("fresh")

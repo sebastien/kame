@@ -67,8 +67,11 @@ retained portable roots, additive WASM watch ABI calls, JavaScript polling and
 invalidation, and six passing native/WASM live scenarios; its remaining
 acceptance cases are listed in 020. D05 now has a versioned, digest-verified
 Cosmocc provisioner with fixture coverage; release signing and provenance
-remain open. D07 is covered by first-class wildcard inputs and shared lazy glob
-dependencies; T004-11, T009-14 and T010-23 pass expansion, quoted-literal,
-membership-addition/removal and watch-update checks on native and WASM. D02–D06
+remain open. D06 now has required and optional named task arguments, default
+binding, dependency and recipe scope, plan JSON, argument-sensitive identity,
+and native/WASM execution, dry-run and watch coverage in T009-15 and T010-24.
+D07 is covered by first-class wildcard inputs and shared lazy glob dependencies;
+T004-11, T009-14 and T010-23 pass expansion, quoted-literal,
+membership-addition/removal and watch-update checks on native and WASM. D02–D05
 and D08–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.

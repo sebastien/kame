@@ -36,14 +36,20 @@ func WriteAST(out io.Writer, lang string, name string, text string) int {
 	} else {
 		var result *script.Script
 		var authored *source.Source
-		if lang == "kash" { result = script.ParseKash(mem.System, name, text) } else if lang == "km" {
+		if lang == "kash" {
+			result = script.ParseKash(mem.System, name, text)
+		} else if lang == "km" {
 			authored = source.New(mem.System, name, text)
 			result = script.ParseFragment(mem.System, authored, lang, 0, len(text))
-		} else { result = script.Parse(mem.System, name, text) }
+		} else {
+			result = script.Parse(mem.System, name, text)
+		}
 		enc.script(result)
 		failed = enc.diagnostics(result.Diagnostics)
 		result.Free()
-		if authored != nil { authored.Free(mem.System) }
+		if authored != nil {
+			authored.Free(mem.System)
+		}
 	}
 	enc.finish()
 	if enc.err() != nil {
@@ -150,7 +156,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Float(value.Float)
 	}
 	if value.Kind == expr.String || value.Kind == expr.CommandWord {
-		if value.Kind == expr.CommandWord { e.Str("splice"); e.Bool(value.Bool) }
+		if value.Kind == expr.CommandWord {
+			e.Str("splice")
+			e.Bool(value.Bool)
+		}
 		e.Str("parts")
 		e.BeginArray()
 		for i := range value.Parts {
@@ -159,7 +168,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 			e.Str("span")
 			e.span(p.Span)
 			if p.Expr != nil {
-				if value.Kind == expr.CommandWord { e.Str("form"); e.Str(p.Form) }
+				if value.Kind == expr.CommandWord {
+					e.Str("form")
+					e.Str(p.Form)
+				}
 				e.Str("expression")
 				e.expr(p.Expr)
 				e.Str("brace")
@@ -193,9 +205,18 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.EndArray()
 	}
 	if value.Kind == expr.List || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || value.Kind == expr.KashIf || value.Kind == expr.KashMatch || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition {
-		if value.AcceptExit { e.Str("acceptExit"); e.Bool(true) }
-		if value.Async { e.Str("async"); e.Bool(true) }
-		if (value.Kind == expr.CommandCapture || value.Kind == expr.CommandGraph) && len(value.Body) != 0 { e.Str("fallback"); e.expr(value.Body[0]) }
+		if value.AcceptExit {
+			e.Str("acceptExit")
+			e.Bool(true)
+		}
+		if value.Async {
+			e.Str("async")
+			e.Bool(true)
+		}
+		if (value.Kind == expr.CommandCapture || value.Kind == expr.CommandGraph) && len(value.Body) != 0 {
+			e.Str("fallback")
+			e.expr(value.Body[0])
+		}
 		e.Str("items")
 		e.exprs(value.Items)
 	}
@@ -215,9 +236,22 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.KashBranch { e.Str("body"); e.exprs(value.Body) }
-	if value.Kind == expr.KashMatch && len(value.Body) != 0 { e.Str("subject"); e.expr(value.Body[0]); if len(value.Body) > 1 { e.Str("comments"); e.exprs(value.Body[1:]) } }
-	if value.Kind == expr.KashDefinition { e.Str("function"); e.Bool(value.Bool) }
+	if value.Kind == expr.KashBranch {
+		e.Str("body")
+		e.exprs(value.Body)
+	}
+	if value.Kind == expr.KashMatch && len(value.Body) != 0 {
+		e.Str("subject")
+		e.expr(value.Body[0])
+		if len(value.Body) > 1 {
+			e.Str("comments")
+			e.exprs(value.Body[1:])
+		}
+	}
+	if value.Kind == expr.KashDefinition {
+		e.Str("function")
+		e.Bool(value.Bool)
+	}
 	if value.Kind == expr.Lambda || value.Kind == expr.KashDefinition {
 		e.Str("parameters")
 		e.BeginArray()
@@ -309,20 +343,48 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
-	if k == expr.EnvironmentReference { return "environment-reference" }
-	if k == expr.KashMatch { return "kash-match" }
-	if k == expr.KashIf { return "kash-if" }
-	if k == expr.KashBranch { return "kash-branch" }
-	if k == expr.KashDefinition { return "kash-definition" }
-	if k == expr.KashComment { return "kash-comment" }
-	if k == expr.CommandTest { return "command-test" }
-	if k == expr.ValueRecovery { return "value-recovery" }
-	if k == expr.CommandCapture { return "command-capture" }
-	if k == expr.CommandGraph { return "command-graph" }
-	if k == expr.CommandWord { return "command-word" }
-	if k == expr.CommandStage { return "command-stage" }
-	if k == expr.CommandRedirection { return "command-redirection" }
-	if k == expr.CommandSetup { return "command-setup" }
+	if k == expr.EnvironmentReference {
+		return "environment-reference"
+	}
+	if k == expr.KashMatch {
+		return "kash-match"
+	}
+	if k == expr.KashIf {
+		return "kash-if"
+	}
+	if k == expr.KashBranch {
+		return "kash-branch"
+	}
+	if k == expr.KashDefinition {
+		return "kash-definition"
+	}
+	if k == expr.KashComment {
+		return "kash-comment"
+	}
+	if k == expr.CommandTest {
+		return "command-test"
+	}
+	if k == expr.ValueRecovery {
+		return "value-recovery"
+	}
+	if k == expr.CommandCapture {
+		return "command-capture"
+	}
+	if k == expr.CommandGraph {
+		return "command-graph"
+	}
+	if k == expr.CommandWord {
+		return "command-word"
+	}
+	if k == expr.CommandStage {
+		return "command-stage"
+	}
+	if k == expr.CommandRedirection {
+		return "command-redirection"
+	}
+	if k == expr.CommandSetup {
+		return "command-setup"
+	}
 	if k == expr.Boolean {
 		return "boolean"
 	}
@@ -435,15 +497,22 @@ func (e *astEncoder) rule(value *rule.Rule) {
 		return
 	}
 	e.node(ruleKind(value.Kind), value.Span)
-	if value.Metadata != nil { e.Str("metadata"); e.expr(value.Metadata) }
-	if value.Always {
-		e.Str("always"); e.Bool(true)
+	if value.Metadata != nil {
+		e.Str("metadata")
+		e.expr(value.Metadata)
 	}
- if len(value.Environment) != 0 {
-  e.Str("environment"); e.BeginArray()
-  for i := range value.Environment { e.Str(value.Environment[i].Value) }
-  e.EndArray()
- }
+	if value.Always {
+		e.Str("always")
+		e.Bool(true)
+	}
+	if len(value.Environment) != 0 {
+		e.Str("environment")
+		e.BeginArray()
+		for i := range value.Environment {
+			e.Str(value.Environment[i].Value)
+		}
+		e.EndArray()
+	}
 	e.Str("header")
 	e.span(value.Header)
 	e.Str("outputs")
@@ -468,12 +537,35 @@ func (e *astEncoder) rule(value *rule.Rule) {
 		e.EndObject()
 	}
 	e.EndArray()
+	if len(value.Arguments) != 0 {
+		e.Str("arguments")
+		e.BeginArray()
+		for i := range value.Arguments {
+			argument := value.Arguments[i]
+			e.BeginObject()
+			e.Str("name")
+			e.Str(argument.Name)
+			e.Str("optional")
+			e.Bool(argument.Optional)
+			if argument.Optional {
+				e.Str("default")
+				e.Str(argument.Default)
+			}
+			e.Str("span")
+			e.span(argument.Span)
+			e.EndObject()
+		}
+		e.EndArray()
+	}
 	e.Str("inputs")
 	e.BeginArray()
 	for i := range value.Inputs {
 		in := value.Inputs[i]
 		e.BeginObject()
-  if in.OrderOnly { e.Str("orderOnly"); e.Bool(true) }
+		if in.OrderOnly {
+			e.Str("orderOnly")
+			e.Bool(true)
+		}
 		e.Str("kind")
 		e.Str(inputKind(in.Kind))
 		e.Str("text")
@@ -529,7 +621,9 @@ func targetKind(k rule.TargetKind) string {
 	return "template"
 }
 func inputKind(k rule.InputKind) string {
- if k == rule.InputWildcard { return "wildcard" }
+	if k == rule.InputWildcard {
+		return "wildcard"
+	}
 	if k == rule.InputName {
 		return "name"
 	}
@@ -591,7 +685,10 @@ func (e *astEncoder) script(value *script.Script) {
 		if item.Kind == script.Include {
 			e.Str("path")
 			e.Str(item.Include)
-   if item.OptionalInclude { e.Str("optional"); e.Bool(true) }
+			if item.OptionalInclude {
+				e.Str("optional")
+				e.Bool(true)
+			}
 		}
 		if item.Definition != nil {
 			e.Str("definition")
@@ -611,10 +708,18 @@ func (e *astEncoder) script(value *script.Script) {
 	e.EndObject()
 }
 func scriptKind(k script.ScriptItemKind) string {
- if k == script.When { return "when" }
- if k == script.Otherwise { return "otherwise" }
- if k == script.EndWhen { return "end-when" }
-	if k == script.Command { return "command" }
+	if k == script.When {
+		return "when"
+	}
+	if k == script.Otherwise {
+		return "otherwise"
+	}
+	if k == script.EndWhen {
+		return "end-when"
+	}
+	if k == script.Command {
+		return "command"
+	}
 	if k == script.Comment {
 		return "comment"
 	}
@@ -638,7 +743,10 @@ func (e *astEncoder) definition(value *definition.Definition) {
 	e.node("definition", value.Span)
 	e.Str("name")
 	e.Str(value.Name)
-	if value.Default { e.Str("default"); e.Bool(true) }
+	if value.Default {
+		e.Str("default")
+		e.Bool(true)
+	}
 	e.Str("nameSpan")
 	e.span(value.NameSpan)
 	e.Str("parameters")

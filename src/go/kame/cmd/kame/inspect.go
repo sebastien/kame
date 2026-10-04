@@ -70,6 +70,7 @@ func runTools(args []string, out io.Writer, errOut io.Writer) int {
 		return session.Status
 	}
 	if check {
+		parsed.Targets = selectTargets(session.Program, parsed.Targets)
 		return checkTargetTools(session.Program, parsed, out, errOut)
 	}
 	e := json.NewEncoder(out)

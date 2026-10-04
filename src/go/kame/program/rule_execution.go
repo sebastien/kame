@@ -25,6 +25,9 @@ func (p *Program) cacheBlockedByBareTask(entry *instance) bool {
 			continue
 		}
 		selected := p.selectRule(inputs[i])
+		freeArguments(p.Alloc, selected.Arguments)
+		mem.FreeString(p.Alloc, selected.Target)
+		selected.Diagnostic.Free(p.Alloc)
 		if selected.Rule != nil && selected.Rule.Kind == rule.TaskRule {
 			freeCaptures(p.Alloc, selected.Captures)
 			return true
@@ -196,7 +199,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		dependencyState := renderDependencyState{Program: p, Index: index, Inspection: entry.Inspection}
 		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: entry.EnvironmentClaimed, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
 		p.bindDefinitionEnvironment(context)
-		scope := p.ruleScope(context, entry.Captures)
+		scope := p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
         context.Scope = scope
         result := p.evaluateInput(input, context)
         scope.Free()

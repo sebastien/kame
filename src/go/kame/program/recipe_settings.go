@@ -45,7 +45,7 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	entry := &p.Instances[index]
 	state := recipeSettingsResolver{Program: p}
 	c := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.PlanningPhase, ResolveDefinition: resolveRecipeDefinition, ResolverState: &state}
-	scope := p.ruleScope(c, entry.Captures)
+	scope := p.ruleScope(c, entry.Captures, entry.Plan.Arguments)
 	c.Scope = scope
 	defer scope.Free()
 	defer p.freeSettingsContext(&state, c)
@@ -195,7 +195,7 @@ func (p *Program) kashContext(c *core.EngineContext, index int) *eval.Context {
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Environment: entry.Environment, HasEnvironment: true, TimeoutMS: p.Options.TimeoutMS, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.EvaluatePhase, ResolverState: state, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: frames}
 	p.bindDefinitionEnvironment(context)
-	context.Scope = p.ruleScope(context, entry.Captures)
+	context.Scope = p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
 	context.RecipeNode = entry.Node.ID
 	return context
 }

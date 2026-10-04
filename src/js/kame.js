@@ -1894,7 +1894,7 @@ async function runSession(module, inv, sourceDirectory) {
       for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], lang: input.lang, entries: j + 1 === parts.length ? input.entries : [], inline: fileBacked && j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
     } else fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1, comment: inv.comment, defines: inv.defines, check: inv.check ? 1 : 0 });
   }
-  if (!inv.dryRun && inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1) {
+  if (inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1) {
     const input = inv.inputs[0];
     if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'command' ? '<command:1>' : fragments[0].name, file: input.kind === 'file' ? resolve(sourceDirectory, fragments[0].name) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false, sourceDirectory);
   }
@@ -2017,11 +2017,22 @@ async function runFmt(module, inv) {
   return different ? 1 : 0;
 }
 
+function joinTargetArguments(targets) {
+  const joined = [];
+  for (const target of targets) {
+    const equal = target.indexOf('=');
+    const assignment = equal > 0 && !target.slice(0, equal).includes('/');
+    if (assignment && joined.length !== 0) joined[joined.length - 1] += ` ${target}`;
+    else joined.push(target);
+  }
+  return joined;
+}
+
 async function runPlan(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
-  const targets = inv.targets.length !== 0 ? inv.targets : ['default'];
+  const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
   for (const target of targets) {
     stdout.write(await module.planJSON(source.compiled, target, false, source.name));
   }
@@ -2032,7 +2043,7 @@ async function runGraph(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
-  const targets = inv.targets.length !== 0 ? inv.targets : ['default'];
+  const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
   if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', `${inv.name} requires exactly one target`);
   const kind = inv.name === 'inputs' ? 0 : inv.name === 'outputs' ? 1 : 2;
   let context;
@@ -2049,7 +2060,7 @@ async function runGraph(module, inv, sourceDirectory) {
 
 async function runTools(module, inv, sourceDirectory) {
   const check = inv.targets[0] === 'check';
-  const targets = check ? inv.targets.slice(1) : inv.targets;
+  const targets = joinTargetArguments(check ? inv.targets.slice(1) : inv.targets);
   if (!check && targets.length !== 0) return usageError('OPT_VALUE_INVALID', 'tools does not accept targets');
   if (check && targets.length === 0) return usageError('OPT_VALUE_INVALID', 'tools check requires at least one target');
   const source = await discoverBuildSource(module, inv, sourceDirectory);
@@ -2082,7 +2093,7 @@ async function runCat(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
-  const targets = inv.targets.length !== 0 ? inv.targets : ['default'];
+  const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
   if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', 'cat requires exactly one target');
   const target = targets[0];
   try {
@@ -2142,7 +2153,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   let finishDisposal;
   const disposal = new Promise((resolveDisposal) => { finishDisposal = resolveDisposal; });
   invocationDisposals.add(disposal);
-  const targets = inv.targets.length ? inv.targets : ['default'];
+  const targets = joinTargetArguments(inv.targets.length ? inv.targets : ['default']);
   const context = contextFor(inv);
   context.human = inv.json !== true;
   const watchedSources = new Set();
@@ -2292,7 +2303,25 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
   buildStartedAt = Date.now();
   const context = contextFor(inv);
   context.human = inv.json !== true;
-  const targets = inv.targets.length !== 0 ? inv.targets : ['default'];
+  const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
+  if (inv.dryRun) {
+    let failed = false;
+    for (const target of targets) {
+      try {
+        await module.planJSON(source.compiled, target, false, source.name);
+      } catch (error) {
+        failed = true;
+        if (error.diagnostics) {
+          for (const detail of error.diagnostics) stderr.write(renderDiagnostic(detail, source, 80));
+        } else {
+          const detail = lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
+          if (!detail.target) detail.target = target;
+          stderr.write(renderDiagnostic(detail, source, 80));
+        }
+      }
+    }
+    return failed ? 1 : 0;
+  }
   let failed = false;
   for (const target of targets) {
     try {
