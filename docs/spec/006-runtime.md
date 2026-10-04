@@ -228,7 +228,9 @@ Native recipe retries and forwarded WASM recipes receive the same values.
 Cached-task execution fingerprints include the complete effective environment.
 Plan and AST JSON expose authored assignments, without publishing the ambient
 environment. This initial surface scopes shell recipes and their prerequisite
-recipes; Kame definitions, `env` reads, tool lookup and expression-level process
+recipes. Direct `env` reads in recipe templates use the effective target
+snapshot after checking environment grants; absent names return nil, including
+in an empty snapshot. Kame definitions, tool lookup and expression-level shell
 requests still use invocation configuration. Assignments do not introduce
 Kame variables or perform evaluation during registration.
 

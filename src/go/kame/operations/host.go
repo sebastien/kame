@@ -7,6 +7,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
+	"solod.dev/so/strings"
 )
 
 func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Result {
@@ -238,6 +239,18 @@ func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	if !c.Allows(eval.Env, v[0].Text) {
 		return failure("CAP_DENIED", "environment access denied")
+	}
+	if c.HasEnvironment {
+		// Target environments already participate in recipe fingerprints. Do not
+		// attach a shared ambient node to a target-local value.
+		for i := range c.Environment {
+			assignment := c.Environment[i]
+			equal := strings.IndexByte(assignment, '=')
+			if equal >= 0 && assignment[:equal] == v[0].Text {
+				return eval.Result{Value: core.NewString(c.Run, assignment[equal+1:])}
+			}
+		}
+		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
 	if !c.DirectHostRequests && !dependency(c, core.ResourceEnvironment, v[0].Text) {
 		return eval.Result{Waiting: true}

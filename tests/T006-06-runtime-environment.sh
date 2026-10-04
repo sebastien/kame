@@ -42,6 +42,12 @@ retry : ; env "MODE=retry"
 	printf %s "$MODE" >> retry-log; if [ ! -e retry-marker ]; then touch retry-marker; exit 1; fi
 ./output : ./input ; env "MODE=debug"
 	printf %s "$MODE" > @>; printf x >> file-runs
+read-root : read-cached ; env "MODE=debug"
+release-read-root : read-cached ; env "MODE=release"
+task read-cached :
+	printf %s @(env "MODE") > read-log; printf x >> read-runs
+read-denied : ; env "MODE=secret"
+	printf %s @(env "MODE"); touch forbidden-read
 KMK
  test-step "$backend inherits values and applies local overrides"
  MODE=ambient "${runner[@]}" -C "$project" root plain > "$project/out" 2> "$project/err"
@@ -52,6 +58,14 @@ KMK
  if [ "$(cat "$project/cache-runs")" = x ] && [ "$(cat "$project/cache-log")" = debug ]; then test-ok "$backend unchanged inherited environment hits cache"; else test-fail "$backend inherited cache reuse"; fi
  MODE=ambient "${runner[@]}" -C "$project" other-cache-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/cache-runs")" = xx ] && [ "$(cat "$project/cache-log")" = release ]; then test-ok "$backend changed inherited environment invalidates cache"; else test-fail "$backend inherited cache identity"; fi
+ test-step "$backend scopes expression environment reads and cache identity"
+ MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk read-root > "$project/out" 2> "$project/err"
+ MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk read-root > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/read-log")" = debug ] && [ "$(cat "$project/read-runs")" = x ]; then test-ok "$backend expression reads inherit and reuse the scoped cache"; else test-fail "$backend expression environment or cache reuse"; fi
+ MODE=ambient "${runner[@]}" --allow-run --allow-env=MODE -C "$project" -f Makefile.kmk release-read-root > "$project/out" 2> "$project/err"
+ if [ "$(cat "$project/read-log")" = release ] && [ "$(cat "$project/read-runs")" = xx ]; then test-ok "$backend scoped expression cache invalidates on changed values"; else test-fail "$backend expression cache leaked earlier scoped values"; fi
+ test-step "$backend preserves grants for scoped expression reads"
+ if MODE=ambient "${runner[@]}" -C "$project" read-denied > "$project/out" 2> "$project/err"; then test-fail "$backend scoped expression bypassed environment grants"; elif rg -q CAP_DENIED "$project/err" && [ ! -e "$project/forbidden-read" ]; then test-ok "$backend denied scoped reads have no recipe effects"; else test-fail "$backend scoped expression grant diagnostic"; fi
  test-step "$backend shares equivalent environments regardless of assignment order"
  MODE=ambient "${runner[@]}" -C "$project" equivalent-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/equivalent-log")" = 'one|two' ] && [ "$(cat "$project/equivalent-runs")" = x ]; then test-ok "$backend equivalent environments share a prerequisite"; else test-fail "$backend assignment ordering changed environment identity"; fi

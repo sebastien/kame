@@ -20,6 +20,9 @@ type Context struct {
 	Run                mem.Allocator
 	Requests           *host.Queue
 	Cwd                string
+	Environment []string
+	// HasEnvironment binds a complete snapshot, including an empty environment.
+	HasEnvironment bool
 	Frames             []diagnostic.Frame
 	Source             string
 	Grants             []Grant

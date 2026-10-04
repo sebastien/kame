@@ -163,8 +163,13 @@ Scoped file recipes persist an execution-context fingerprint tied to successful
 output timestamps. Unchanged settings skip recipes; changed or removed scoped
 settings rebuild outputs on both hosts.
 
-**Remaining.** Kame definitions/environment reads, tool lookup
-and expression-level processes still use invocation configuration. The repository
+**Scoped expression reads.** Direct `(env "NAME")` reads in recipe templates
+and structured recipes use the effective target snapshot, enforce environment
+grants, and invalidate cached work when inherited values change. Missing names
+return nil without reading ambient host values.
+
+**Remaining.** Kame definitions, tool lookup and expression-level shell requests
+still use invocation configuration. The repository
 build now embeds mode per artifact through compiler flags, independently of
 shared generated metadata. T013-05 verifies real debug/release modes, sanitizer
 mode when selected, unchanged metadata on mode switches, and no Kame relink for
