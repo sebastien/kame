@@ -10,9 +10,11 @@ import (
 
 func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression *expr.Expr, context *Context) Result {
 	previousEnv := context.ReserveEnv
+	previousEngine, previousScope, previousRequests := context.Engine, context.Scope, context.Requests
 	if expression != nil { context.ReserveEnv = expression.Kash }
 	result := p.evaluateExpression(engine, scope, expression, context)
 	context.ReserveEnv = previousEnv
+	context.Engine, context.Scope, context.Requests = previousEngine, previousScope, previousRequests
 	attachSource(&result, context)
 	return result
 }
