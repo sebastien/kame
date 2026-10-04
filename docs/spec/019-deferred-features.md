@@ -24,7 +24,7 @@ adapters and integration evidence rather than placeholder methods.
 | ID | Feature | Completion evidence |
 | --- | --- | --- |
 | D01 | WASM watch | Retained graph roots, file/glob invalidation during active work, source reload and repair, shared roots, grants, stream publication, cancellation and disposal; native/WASM public conformance. See 020. |
-| D02 | Managed services and provisioning | Typed service configuration; start/readiness/health/restart/stop ownership; prerequisite lifetime; bounded logs; interruption and process-tree cleanup on native and WASM. |
+| D02 | Managed services and provisioning | Typed service configuration; start/readiness/health/restart/stop ownership; prerequisite lifetime; bounded logs; interruption and process-tree cleanup on native and WASM. See 024. |
 | D03 | Generated declarations | Bounded typed batches; complete validation before registration; generator dependency tracking; deterministic replacement; authored diagnostics; native/WASM parity and failure cleanup. |
 | D04 | Cache lifecycle and backends | Cross-process miss locking, failure/crash recovery, bounded eviction and explicit inspection/cleanup; local and second concrete backend; identity and atomic-publication conformance. |
 | D05 | Release integrity | Pinned and verified compiler provisioning (021); signed manifests and provenance creation/verification; tamper/wrong-key rejection; actual staged release tests. Keys are provided by the release operator, never committed. |
@@ -76,6 +76,7 @@ binding, dependency and recipe scope, plan JSON, argument-sensitive identity,
 and native/WASM execution, dry-run and watch coverage in T009-15 and T010-24.
 D07 is covered by first-class wildcard inputs and shared lazy glob dependencies;
 T004-11, T009-14 and T010-23 pass expansion, quoted-literal,
-membership-addition/removal and watch-update checks on native and WASM. D02–D05
-and D08–D18 remain open. The preceding
+membership-addition/removal and watch-update checks on native and WASM. D02's
+managed lifecycle contract is enumerated in 024; implementation and acceptance
+remain open. D03–D05 and D08–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.

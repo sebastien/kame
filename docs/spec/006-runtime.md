@@ -171,7 +171,8 @@ kind.
 
 Services parse into plans but execution is deferred. Attempting to execute a
 service before service support exists returns a clear unsupported diagnostic,
-`FEATURE_UNSUP`, not ordinary task behavior.
+`FEATURE_UNSUP`, not ordinary task behavior. The managed lifecycle contract and
+acceptance scope are specified in `024-managed-services.md`.
 
 ## Rule Instances and Multiple Outputs
 

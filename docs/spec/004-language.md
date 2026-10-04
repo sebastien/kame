@@ -497,6 +497,9 @@ Headers are classified as:
 - Cached task: `task` followed by exactly one name or name template.
 - Service: `service` followed by exactly one name or name template.
 
+Service lifecycle metadata and process ownership are specified in
+`024-managed-services.md`.
+
 `always` followed by one or more explicit file outputs marks a file rule as
 always stale, without changing its artifact kind, inputs, captures, or output
 verification. It is invalid on named/cached tasks or services. A standalone
