@@ -327,3 +327,20 @@ source edits, malformed-source repair, graph changes and active-input changes.
 The pre-fix binary fails the preserved-metadata source check and the active-input
 case separately. Existing freshness and order-only gates pass 23 and 19
 assertions across native/WASM hosts; the catalog passes 458 assertions.
+
+Lazy definitions now bind to immutable target environments through separate
+engine namespaces. Function-derived values, literal KAME_NAME overrides, explicit
+CLI precedence, dynamic prerequisite selection, grants and generated-file reads
+are covered by T006-06 (56 native/WASM assertions). Repeated materialization in
+one program also switches debug/release environments without value leakage.
+Current ASAN/UBSAN suites pass 64 core, 72 evaluator, 104 program and 32 WASM-host
+tests. Existing build-configuration coverage passes 20 assertions, and structured
+recipe coverage still passes 29 policy plus 39 script cases per host. The catalog
+passes 458 assertions. A3 remains open for tool lookup and collected shell request
+configuration; these focused gates do not replace final full-tree verification.
+
+An operation-wrapped definition cycle also exposed KB-11, a diagnostic-frame
+use-after-free reproduced on the pre-feature compiled sanitizer binary. Failure
+results now own cloned frames, and source polling preserves engine terminal state.
+The new evaluator regression and native/WASM cycle cases fail cleanly before
+recipe effects.

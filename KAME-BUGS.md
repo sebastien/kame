@@ -262,3 +262,23 @@ Mixed sessions now initialize both together before execution. The same
 reproduction reports an invocation-scale duration (0.047 s in the focused run).
 T017-07 checks a failed mixed-session summary is present and below 60 seconds;
 all 78 assertions pass with the compiled sanitizer CLI and WASM host.
+
+### KB-11 — Operation-wrapped definition cycles reuse freed diagnostic frames
+
+- **Severity:** memory safety
+- **Area:** evaluator diagnostic ownership and engine source scheduling
+- **Status:** fixed
+
+```kame
+CYCLE = (str CYCLE)
+default :
+    printf %s @(CYCLE)
+```
+
+The compiled pre-fix sanitizer binary reports a heap-use-after-free. A failed
+reference borrowed the engine diagnostic, and wrapping the `str` operation
+reallocated its frame storage. The scheduler later cloned the dangling frames.
+Evaluator results now clone engine failures before wrapping. Source polling also
+preserves a failure or cancellation raised during dependency discovery and frees
+its discarded result instead of replacing the terminal state. The focused
+evaluator test and T006-06 require clean `DEP_CYCLE` failure without recipe effects.

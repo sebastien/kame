@@ -33,6 +33,7 @@ untrusted builds. Avoid describing `--allow-read=DIR` as a filesystem sandbox.
 | SEC-8 | Input validation | WASM build-source descriptors accepted incorrectly typed fields and offsets whose source end exceeded the 32-bit span range. | Fixed: require string names/text, integer offsets, and an in-range source end before copying fragments. All 26 WASM host sanitizer tests pass, including malformed descriptors and recovery after rejection. |
 | SEC-6 | High when cache directories contain attacker-controlled entries | WASM cache put followed an existing record symlink and overwrote its target. | Fixed: exclusive sibling staging, file sync, and rename; T010-19 preserves a public marker and verifies the published cache hit. |
 | SEC-5 | Atomic visibility | JS write requests previously used direct file writes. | Fixed: exclusive staging in a private sibling directory followed by rename; T010-21 covers bytes, zero length, failed publication and cleanup. |
+| SEC-10 | Memory safety | An operation-wrapped lazy definition cycle reallocated frames borrowed from an engine diagnostic, leaving a dangling frame pointer for the scheduler. | KB-11 fixed: clone evaluator failure results before adding frames; preserve terminal state after source polling and free discarded results. A pre-feature compiled ASAN reproduction confirms the defect predates scoped definitions. |
 | SEC-4 | Low confidentiality limit | Live process streams, collected shell results, and explicit `out` remain observable, even though diagnostic causes omit captured output. | Intended: omission protects diagnostic serialization, not deliberate output. |
 
 The atomic-write fix also removes the old fixed path-length temporary buffer:
@@ -148,3 +149,18 @@ sanitizer coverage passes 64 core, 71 evaluator, 103 program and 32 WASM host
 cases. T017-19 additionally covers restricted executable grants, construction
 without effects, parse failure, cancellation of background work, bounded cached
 streams and aggregate timeout/retry policy on both CLI hosts.
+
+## Target-scoped definitions and cycle ownership
+
+The scoped-definition change preserves environment grants and the read-only phase
+of dynamic prerequisite resolution. KAME_NAME and explicit CLI overrides remain
+literal values. Environment namespaces use a digest rather than placing snapshot
+values in resource keys. Generated-file reads reached through lazy definitions
+bind their producers to the demanding environment before adding the engine edge.
+
+T006-06 passes 56 native/WASM assertions, including denied reads, phase rejection,
+cycle failure without effects, cache isolation, override precedence and generated
+file inheritance. The native binary retains ASAN instrumentation. Current
+ASAN/UBSAN core/evaluator/program/WASM-host suites pass 64/72/104/32 tests, including
+the focused operation-cycle ownership regression. The older 102-suite CLI result
+predates the latest features; a final current full-tree gate is still required.

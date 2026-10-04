@@ -163,7 +163,7 @@ tasks and scoped file rules, so changed inherited values still invalidate work.
 T006-06 proves unchanged cache reuse and changed-root invalidation on both hosts;
 103 program sanitizer tests pass. No timing or large-environment benchmark has
 been run, so this is a correctness and allocation-path review, not a measured
-throughput improvement. Scoped definition and tool resolution remain unfinished.
+throughput improvement. Scoped tool resolution remains unfinished.
 
 ## Structured recipe ownership and retention
 
@@ -184,3 +184,22 @@ width decisions (`inlineFits`). Deeply nested expanded input can cause repeated
 allocation and traversal; `layout.go` records this optimization point. Width
 caching should be considered after measuring realistic source depth, preserving
 actual starting columns, closing-delimiter budgets and Unicode/tab widths.
+
+## Scoped lazy definition storage
+
+Each reached definition retains one immutable environment snapshot per digest and
+phase. The digest includes the canonical complete environment and working directory;
+repeated reads reuse the same engine node. This prevents cross-target value/cache
+reuse, but every new environment/definition pair copies the complete environment
+and remains registered until engine teardown. Definition lookup still scans source
+items and engine lookup remains linear. Sharing immutable environment storage and
+reclaiming inactive namespaces may improve long watch sessions; neither behavior
+has a measured memory or throughput benchmark yet. Separate phases prevent a
+value computed during recipe evaluation from bypassing dynamic-input restrictions.
+
+Native source watch compares complete source bytes every 200 ms, so edits with
+preserved size and timestamps still reload the graph. This costs source reads and
+stamp copies on every scan; retained stamp storage scales with total source size.
+External input watching still uses metadata fingerprints. No large-source watch
+benchmark has been run. The four T009-14 scenarios establish correctness, including
+invalidation after a running recipe publishes an output newer than the changed input.
