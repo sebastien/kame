@@ -112,6 +112,23 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-missing-source-') as directo
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-optional-include-') as directory:
+    project = Path(directory)
+    (project / 'Makefile.kmk').write_text('include? ./optional.kmk\nchosen : configured\n\tprintf chosen >> watch-log\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: 'TGT_NO_RULE' in error.read_text(), error, 'missing optional include dependency')
+            (project / 'optional.kmk').write_text('configured :\n\tprintf configured >> watch-log\n')
+            wait_for(process, lambda: read(project / 'watch-log') == 'configuredchosen', error, 'optional include creation and root recovery')
+            time.sleep(.5)
+            assert read(project / 'watch-log') == 'configuredchosen', 'idle watcher repeated settled tasks'
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
     project = Path(directory)
     (project / 'Makefile.kmk').write_text('MARK = (text (read ./input))\nchosen :\n\tprintf %s @(MARK) >> watch-log\n')
