@@ -9,7 +9,7 @@ import sys
 import tempfile
 import time
 
-def drain(pipe, json_events=False):
+def drain(pipe, json_events=False, expected_bytes=None):
     deadline = time.monotonic() + 20
     total = 0
     pending = b''
@@ -22,6 +22,8 @@ def drain(pipe, json_events=False):
             return total
         if not json_events:
             total += chunk.count(b'Z')
+            if expected_bytes is not None and total >= expected_bytes:
+                return total
             continue
         pending += chunk
         while b'\n' in pending:
@@ -29,6 +31,8 @@ def drain(pipe, json_events=False):
             event = json.loads(line)
             if event.get('type') == 'stdout':
                 total += len(event.get('data', ''))
+        if expected_bytes is not None and total >= expected_bytes:
+            return total
 
 
 root = Path(sys.argv[1])
@@ -56,6 +60,8 @@ with tempfile.TemporaryDirectory() as temporary:
         command += ['-C', str(project)]
         if case == 'json':
             command.append('--json')
+        if case == 'watch':
+            command.append('--watch')
         if timeout:
             command += ['--timeout', '2000']
         command.append('emit')
@@ -92,6 +98,17 @@ with tempfile.TemporaryDirectory() as temporary:
             drain(pipe)
             assert process.wait(timeout=5) != 0, 'paused timeout succeeded'
             assert not (project / 'done').exists(), 'timed out producer completed'
+        elif case == 'watch':
+            expected = 8 * 1024 * 1024
+            total = drain(pipe, expected_bytes=expected)
+            assert total == expected, f'published byte count {total}'
+            deadline = time.monotonic() + 5
+            while not (project / 'done').exists():
+                assert process.poll() is None, 'watch exited before settling'
+                assert time.monotonic() < deadline, 'watch producer did not finish after public drain'
+                time.sleep(.01)
+            process.send_signal(signal.SIGINT)
+            assert process.wait(timeout=5) == 130, 'watch cancellation after drain failed'
         else:
             total = drain(pipe, case == 'json')
             assert process.wait(timeout=15) == 0, 'resumed CLI failed'

@@ -76,11 +76,15 @@ failed-root recovery after an input appears or an optional include is created,
 input changes during a running recipe, shared roots, glob membership, idle
 settled-root stability, obsolete-input subscription removal, scoped-environment
 preservation across reload/invalidation, idle and active SIGINT cleanup, and
-active recipe-child reaping.
+active recipe-child reaping. Both native and WASM runners also stall a recipe
+behind an unread watch stdout pipe, verify that runtime work stops, drain all
+8 MiB losslessly, and cancel the still-running watcher. T012-04 separately
+covers the WASM CLI host's watch-output backpressure path. Together with
+T010-25's raw ABI and allocation-failure checks, this provides direct evidence
+for every acceptance item above on native and WASM; D01 is complete.
 Portable allocator coverage includes shared roots, repeated snapshots, invalid
 batch atomicity, malformed JSON rejection and failed-start cleanup. T009-14 and
 T010-23 also verify grant preservation through invalidation and source reload,
-and that denied reads do not run recipes. D01 remains open for the other
-acceptance cases. T010-25 adds raw ABI query/copy, malformed target/resource
-rejection, retained-root invalidation, allocation-failure diagnostics, instance
-isolation and disposal coverage.
+and that denied reads do not run recipes. T010-25 adds raw ABI query/copy,
+malformed target/resource rejection, retained-root invalidation, allocation-
+failure diagnostics, instance isolation and disposal coverage.

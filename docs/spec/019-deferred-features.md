@@ -23,7 +23,7 @@ adapters and integration evidence rather than placeholder methods.
 
 | ID | Feature | Completion evidence |
 | --- | --- | --- |
-| D01 | WASM watch | Retained graph roots, file/glob invalidation during active work, source reload and repair, shared roots, grants, stream publication, cancellation and disposal; native/WASM public conformance. See 020. |
+| D01 | WASM watch | Complete: retained graph roots, file/glob invalidation during active work, source reload and repair, shared roots, grants, stream publication, cancellation and disposal; native/WASM public conformance. See 020. |
 | D02 | Managed services and provisioning | Typed service configuration; start/readiness/health/restart/stop ownership; prerequisite lifetime; bounded logs; interruption and process-tree cleanup on native and WASM. See 024. |
 | D03 | Generated declarations | Bounded typed batches; complete validation before registration; generator dependency tracking; deterministic replacement; authored diagnostics; native/WASM parity and failure cleanup. |
 | D04 | Cache lifecycle and backends | Cross-process miss locking, failure/crash recovery, bounded eviction and explicit inspection/cleanup; local and second concrete backend; identity and atomic-publication conformance. |
@@ -62,15 +62,14 @@ review documents with the resulting behavior and remaining material boundaries.
 
 ## Evidence
 
-All D01–D18 items were open at introduction of this specification. D01 now has
-retained portable roots, additive WASM watch ABI calls, JavaScript polling and
-invalidation, and thirteen passing native/WASM live scenarios, including shared
-roots, scoped environments across reload, optional-include creation, settled-
-root idleness, obsolete-input subscription cleanup and active-child disposal;
-its remaining acceptance cases are listed in 020.
-T010-25 now covers public ABI query/copy, malformed input, retained-root
-invalidation, allocation-failure diagnostics,
-instance isolation and disposal. T009-14 and T010-23 additionally verify grant
+All D01–D18 items were open at introduction of this specification. D01 is now
+complete: retained portable roots, additive WASM watch ABI calls, JavaScript
+polling and invalidation, and fourteen passing native/WASM live scenarios cover
+shared roots, scoped environments across reload, optional-include creation,
+settled-root idleness, obsolete-input subscription cleanup, active-child
+disposal and bounded output under pipe pressure. T010-25 covers public ABI
+query/copy, malformed input, retained-root invalidation, allocation-failure
+diagnostics, instance isolation and disposal. T009-14 and T010-23 verify grant
 preservation through invalidation and source reload, with denied reads blocked
 before recipe effects. D05 now has a versioned, digest-verified
 Cosmocc provisioner with fixture coverage; release signing and provenance

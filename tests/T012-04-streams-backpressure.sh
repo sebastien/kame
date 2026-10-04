@@ -7,7 +7,7 @@ test-step "build WASM host"
 cli_require_tools
 cd "$CLI_ROOT"
 make dist-wasm >/dev/null
-for scenario in stdout stderr json argv cache cancel timeout; do
+for scenario in stdout stderr json argv cache cancel timeout watch; do
  test-step "public pipe pressure: $scenario"
  if python3 "$CLI_ROOT/tests/backpressure.py" "$CLI_ROOT" "$scenario"; then
   test-ok "$scenario pauses producers and resumes or terminates correctly"

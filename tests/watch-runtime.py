@@ -1,6 +1,7 @@
 """Native source reload and input invalidation during an active recipe."""
 import os
 from pathlib import Path
+import select
 import signal
 import subprocess
 import sys
@@ -200,19 +201,52 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-active-cancel-') as director
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
-        wait_for(process, lambda: (project / 'ready').exists() and (project / 'child-pid').exists(), error, 'active watcher child start')
-        child_pid = int((project / 'child-pid').read_text())
-        stop(process)
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            try:
-                os.kill(child_pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(.025)
-        else:
-            raise AssertionError(f'watch cancellation left child process {child_pid} alive')
-        cases += 1
+        try:
+            wait_for(process, lambda: (project / 'ready').exists() and (project / 'child-pid').exists(), error, 'active watcher child start')
+            child_pid = int((project / 'child-pid').read_text())
+            stop(process)
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(child_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(.025)
+            else:
+                raise AssertionError(f'watch cancellation left child process {child_pid} alive')
+            cases += 1
+        finally:
+            if process.poll() is None:
+                stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-output-pressure-') as directory:
+    project = Path(directory)
+    (project / 'emit.py').write_text("import os,pathlib\npathlib.Path('ready').touch()\nfor _ in range(128): os.write(1,b'Z'*65536)\npathlib.Path('done').touch()\n")
+    (project / 'Makefile.kmk').write_text('chosen :\n\tpython3 emit.py\n')
+    error = project / 'stderr'
+    with error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=subprocess.PIPE, stderr=stderr)
+        try:
+            wait_for(process, lambda: (project / 'ready').exists(), error, 'watch producer readiness')
+            time.sleep(.5)
+            assert not (project / 'done').exists(), 'watch producer outran an unread public pipe'
+            total = 0
+            deadline = time.monotonic() + 15
+            expected = 8 * 1024 * 1024
+            while total < expected:
+                remaining = deadline - time.monotonic()
+                assert remaining > 0 and select.select([process.stdout], [], [], remaining)[0], 'watch output drain stalled'
+                chunk = os.read(process.stdout.fileno(), 65536)
+                assert chunk, 'watch output closed before all bytes were drained'
+                total += chunk.count(b'Z')
+            assert total == expected, f'watch output byte count = {total}'
+            wait_for(process, lambda: (project / 'done').exists(), error, 'watch producer resumes after drain')
+            cases += 1
+        finally:
+            if process.poll() is None:
+                stop(process)
+            process.stdout.close()
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
