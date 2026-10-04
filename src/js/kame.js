@@ -2050,7 +2050,10 @@ async function dispatch(module, inv, noArguments) {
     if (inv.dryRun) return featureUnsupported('--dry-run');
     return runCat(module, inv, sourceDirectory);
   }
-  if (inv.dryRun) return featureUnsupported('--dry-run');
+  if (inv.dryRun) {
+    const input = { kind: inv.command ? 'command' : inv.file === '-' ? 'stdin' : inv.file ? 'file' : 'discover', value: inv.command || inv.file || '', lang: 'kmk', entries: inv.targets };
+    return runSession(module, { ...inv, name: 'run', inputs: [input] }, sourceDirectory);
+  }
   return runPrimary(module, inv, noArguments === true, sourceDirectory);
 }
 

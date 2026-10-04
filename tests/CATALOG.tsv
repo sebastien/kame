@@ -80,7 +80,7 @@ tests/T017-06-kash-source.sh	017	parse	Standalone Kash source, strict definition
 tests/T017-07-cli-run-session.sh	017	cli	Unified native/WASM sessions, shared scope, ordered effects, streaming commands and preflight
 tests/T017-08-cli-run-includes.sh	017	cli	Runner includes, source-relative paths, byte spans, shared entries and preflight across backends
 tests/T017-09-cli-run-json.sh	017	cli	Mixed runner JSON events, binary streams, values, diagnostics and native/WASM parity
-tests/T017-10-cli-run-dry-run.sh	017	cli	Mixed runner dry-run suppresses process, write and output effects across all fragments
+tests/T017-10-cli-run-dry-run.sh	017	cli	Primary file/discovery/inline and mixed runner dry-run suppress process, write and output effects across all fragments
 tests/T017-11-kash-accept-exit.sh	017	kash	Terminal process exit acceptance, failure boundaries, pipelines, capture and format parity
 tests/T017-12-kash-command-recovery.sh	017	kash	Command fallback recovery, failure boundaries, replay safety and native/WASM parity
 tests/T017-13-kash-value-recovery.sh	017	kash	Kash value recovery, lazy failure observation, validation boundaries and native/WASM parity

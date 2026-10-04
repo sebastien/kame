@@ -29,8 +29,21 @@ touch statement-ran
 KASH
 printf '%s' sentinel >"$work/protected"
 
+cp "$work/rules.kmk" "$work/Makefile.kmk"
+
 for backend in native wasm; do
 	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	test-step "$backend primary dry-run supports explicit, discovered and inline builds"
+	for source in file discover command; do
+		arguments=(-n -C "$work")
+		if [ "$source" = file ]; then arguments+=(-f rules.kmk build); elif [ "$source" = command ]; then arguments+=(-l kmk -c $'build :\n\ttouch recipe-ran\n' build); else arguments+=(build); fi
+		status=0
+		"${command[@]}" "${arguments[@]}" >"$work/out" 2>"$work/err" || status=$?
+		if [ "$status" = 0 ] && [ ! -s "$work/out" ] && [ ! -e "$work/recipe-ran" ] && [ "$(cat "$work/protected")" = sentinel ] && ! grep -q rule-err "$work/err"; then test-ok "$backend primary $source dry-run suppresses effects"; else test-fail "$backend primary $source dry-run"; cat "$work/err"; fi
+	done
+	"${command[@]}" --json -n -C "$work" build >"$work/primary.jsonl" 2>"$work/err"
+	if [ ! -s "$work/err" ] && jq -e -s 'all(.schema == 1 and .type != "stdout" and .type != "stderr" and .type != "process-started")' "$work/primary.jsonl" >/dev/null; then test-ok "$backend primary JSON dry-run has no live effects"; else test-fail "$backend primary JSON dry-run"; fi
+
 	test-step "$backend suppresses effects in rule, value, lazy and Kash work"
 	status=0
 	"${command[@]}" do run -n -C "$work" "$work/rules.kmk" build "$work/values.km" "$work/process.kash" >"$work/$backend.out" 2>"$work/$backend.err" || status=$?

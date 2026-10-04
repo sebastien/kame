@@ -235,7 +235,26 @@ The loaders now validate each authored source before composition and use the
 invocation diagnostic writer. T010-20 passes all 24 native/WASM parity assertions;
 optional includes, configuration, and shared sessions pass 19/20/78 assertions.
 The evaluator sanitizer suite passes 68 cases, including rejection of raw
-conditional markers. The isolated catalog passes 446 checks. The shared checkout
-build still encounters five source-span/diagnostic-span type mismatches in the
-separate uncommitted recipe-settings work; these feature checks use the isolated
-checkout. Full-suite validation remains pending.
+conditional markers. The isolated catalog passes 446 checks. These declaration checks used the isolated checkout while the shared recipe-settings
+work was still being integrated. The subsequent integration checks below describe
+the shared checkout. Full-suite validation remains pending.
+
+
+The shared checkout now builds native and WASM after correcting recipe-settings
+span conversions, allocating returned rule frames, and connecting the previously
+unused Kash recipe helpers. In-progress metadata integration passes 22 public
+cases per host, including selected shells, computed environment metadata, failure
+short-circuiting, file outputs, dry-run, inspection, and once-only stdout. Native
+cases use the compiled ASAN/UBSAN CLI. Program/evaluator/core sanitizer suites
+pass 102/68/64 cases, and the shell-descriptor host suite passes four cases.
+The existing scoped-environment regression passes all 31 assertions. This does
+not close A3: definition/environment reads and tool resolution still require
+scoped-configuration implementation, and the structured recipe work still needs
+cache/retry/cancellation and callable-lifetime review before committing it.
+
+WASM primary `--dry-run` now uses the shared session dry-run path rather than
+returning `FEATURE_UNSUP`. T017-10 passes 23 behavioral assertions (24 total when rebuilding the CLI) on
+the shared sanitizer checkout, including primary explicit/discovered/inline rule inputs,
+JSON output, mixed values/processes, retained grants, and absence of effects.
+Source-style integration also passes all 38 native/WASM golden cases; complete
+spec-018 acceptance review remains pending.
