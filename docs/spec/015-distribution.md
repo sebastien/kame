@@ -38,9 +38,10 @@ release publishes these flat assets under the base URL
 Asset filenames carry no version; the release tag does. The Windows bundle is a
 native executable launcher for the Node/WASM CLI and requires Node 18 or later.
 The Cosmopolitan APE remains the full native CLI for its supported hosts.
-The native-artifact workflow builds host binaries for Linux and macOS on x64
-and ARM64 and stores each as `dist/native/PLATFORM/kame`. Before signing a multi-platform release,
-collect each workflow artifact under `dist/native/` and run `dist-release`;
+The native-artifact workflows build Linux and macOS binaries on x64 and ARM64,
+plus x64 binaries on FreeBSD, NetBSD and OpenBSD. Each is stored as
+`dist/native/PLATFORM/kame`. Before signing a multi-platform release, collect
+each workflow artifact under `dist/native/` and run `dist-release`;
 staging flattens them to `kame-PLATFORM`, and the checksum manifest and
 provenance include every staged native binary. The release signer should stage
 only outputs from trusted builds of the tagged source revision.
@@ -245,7 +246,9 @@ Release assets are built with these targets, additive to the existing
   manual, out-of-band step.
 - `dist-native` builds the current host's full native CLI and places it at
   `dist/native/PLATFORM/kame`; `.github/workflows/native-artifacts.yml` uploads
-  Linux and macOS x64/ARM64 host builds for later release staging.
+  Linux and macOS x64/ARM64 host builds, and
+  `.github/workflows/native-bsd-artifacts.yml` uploads FreeBSD, NetBSD and
+  OpenBSD x64 builds for later release staging.
 
 Install the pinned package definitions directly from a release:
 
@@ -296,12 +299,15 @@ existing build rules.
 - The bootstrap Makefile provisions once and forwards single, multiple, and
   default goals in order with the delegate's exit status.
 - Cache root selection honors `KAME_HOME`, then `XDG_DATA_HOME`, then `HOME`.
+- Native POSIX package/host tests and version execution run on Linux and macOS
+  x64/ARM64 plus FreeBSD, NetBSD and OpenBSD x64. The native artifact
+  workflows retain hosted execution results; unrun jobs are not conformance
+  evidence.
 
 ## Deferred
 
-- Full native per-platform CLI binaries beyond Linux and macOS x64/ARM64,
-  including BSD builds and a native Windows CLI rather than the current
-  Node/WASM launcher.
+- A native Windows CLI rather than the current Node/WASM launcher.
 - Windows-host launcher and process lifecycle conformance; a cross-compiled PE
   file alone is not host execution evidence.
-- Package-manager integrations.
+- Maintained Homebrew tap and Scoop bucket repositories with automated
+  manifest publication.

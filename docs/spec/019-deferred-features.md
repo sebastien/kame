@@ -38,8 +38,8 @@ adapters and integration evidence rather than placeholder methods.
 | D13 | Resource protocols | Complete: canonical `file:` and `mem:` identity, scoped grants, dependency invalidation, URI-aware filesystem traversal, native/POSIX and WASM host mappings, and portable memory storage; native/WASM CLI acceptance in T031-01 plus host, evaluator and program suites. See 031. |
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
-| D16 | Platform execution | In progress: the Node/WASM host has Windows stream pipelines and process-tree termination; a native Windows x64 launcher is built and packaged. POSIX lifecycle coverage passes on the current Linux host. Windows runtime and APE host workflows now target Windows, Darwin and BSD; successful host runs are still required. |
-| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, Windows x64 launcher bundle, Linux/macOS x64 and ARM64 native build artifacts, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. BSD and native Windows CLI support and maintained tap/bucket publication remain. |
+| D16 | Platform execution | In progress: the Node/WASM host has Windows stream pipelines and process-tree termination; a native Windows x64 launcher is built and packaged. POSIX lifecycle coverage passes on the current Linux host. Windows runtime, APE and native POSIX host workflows now target Windows, Darwin and BSD; successful host runs are still required. |
+| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, Windows x64 launcher bundle, Linux/macOS x64 and ARM64 plus BSD x64 native build workflows, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. Hosted BSD artifact runs, a native Windows CLI, and maintained tap/bucket publication remain. |
 | D18 | Remaining library/ergonomic extensions | Complete: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, safely quoted `shell-template` interpolation, and comma-separated prerequisite sequencing have specified semantics and native/WASM acceptance coverage. |
 
 The explicit boundaries in this table are a finite work inventory. General
@@ -126,9 +126,12 @@ lifecycle coverage and Darwin/BSD native-host runs remain open. The new
 `tools/platform/test-ape.sh` checks APE version, recipe process execution,
 environment forwarding, timeout and reaping; `.github/workflows/ape-platforms.yml`
 runs one built APE on Linux, Darwin, Windows POSIX, FreeBSD, NetBSD and OpenBSD.
-Non-Linux workflow results are still needed to claim APE conformance. The
-initial-contract audit remains historical evidence, not completion of this
-work.
+Non-Linux workflow results are still needed to claim APE conformance.
+`.github/workflows/native-artifacts.yml` and
+`.github/workflows/native-bsd-artifacts.yml` also run the native package/host
+tests and build an executable CLI on Linux, macOS and the BSD hosts; hosted
+results remain pending. The initial-contract audit remains historical
+evidence, not completion of this work.
 D18's equality-value shorthand is implemented: `(filter LIST VALUE)` retains
 strict scalar-equal items, and `filter-out` removes them with the same numeric,
 cross-kind, and invalid-composite rules as `eq`. T007-02 now covers both
@@ -163,7 +166,8 @@ release. T015-05 builds the Windows x64 launcher bundle; the signed manifest
 includes that bundle. T015-04 checks the generated Homebrew formula and Scoop
 manifest against their release asset digests and verifies their inclusion in
 signed provenance. `make dist-native` builds a host-native binary under a
-stable OS/architecture key; the native-artifact workflow builds Linux and
-macOS x64/ARM64 outputs, and `dist-release` includes any collected outputs in its signed
-manifest and provenance. Native Windows CLI support and maintained tap/bucket
-publication remain open, as do native BSD release builds.
+stable OS/architecture key; native-artifact workflows target Linux and macOS
+x64/ARM64 plus x64 FreeBSD, NetBSD and OpenBSD. `dist-release` includes
+collected outputs in its signed manifest and provenance. Hosted BSD artifact
+runs, native Windows CLI support and maintained tap/bucket publication remain
+open.

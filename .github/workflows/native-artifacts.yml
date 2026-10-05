@@ -35,6 +35,8 @@ jobs:
         run: |
           go install solod.dev/cmd/so@v0.4.0
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Run native package and host tests
+        run: make test-so
       - name: Build host-native CLI
         run: make dist-native
       - name: Run host-native CLI

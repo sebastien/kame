@@ -1,0 +1,81 @@
+name: BSD native CLI artifacts
+
+on:
+  push:
+    paths:
+      - '.github/workflows/native-bsd-artifacts.yml'
+      - 'Makefile'
+      - 'src/go/kame/**'
+      - 'tools/platform_id.py'
+  pull_request:
+    paths:
+      - '.github/workflows/native-bsd-artifacts.yml'
+      - 'Makefile'
+      - 'src/go/kame/**'
+      - 'tools/platform_id.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  freebsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          release: '15.1'
+          prepare: pkg install -y go gmake
+          run: |
+            export PATH="$(go env GOPATH)/bin:$PATH"
+            go install solod.dev/cmd/so@v0.4.0
+            /usr/local/bin/gmake test-so
+            /usr/local/bin/gmake dist/native/freebsd-x86_64/kame
+            ./dist/native/freebsd-x86_64/kame --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-freebsd-x86_64
+          path: dist/native/
+          if-no-files-found: error
+
+  netbsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: vmactions/netbsd-vm@v1
+        with:
+          release: '11.0'
+          usesh: true
+          prepare: /usr/sbin/pkg_add go gmake
+          run: |
+            export PATH="/usr/pkg/bin:$(go env GOPATH)/bin:$PATH"
+            go install solod.dev/cmd/so@v0.4.0
+            /usr/pkg/bin/gmake test-so
+            /usr/pkg/bin/gmake dist/native/netbsd-x86_64/kame
+            ./dist/native/netbsd-x86_64/kame --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-netbsd-x86_64
+          path: dist/native/
+          if-no-files-found: error
+
+  openbsd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: vmactions/openbsd-vm@v1
+        with:
+          release: '7.9'
+          prepare: pkg_add go gmake
+          run: |
+            export PATH="/usr/local/bin:$(go env GOPATH)/bin:$PATH"
+            go install solod.dev/cmd/so@v0.4.0
+            /usr/local/bin/gmake test-so
+            /usr/local/bin/gmake dist/native/openbsd-x86_64/kame
+            ./dist/native/openbsd-x86_64/kame --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-openbsd-x86_64
+          path: dist/native/
+          if-no-files-found: error
