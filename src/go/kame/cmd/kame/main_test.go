@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host/posix"
 	"kame/lang/source"
 	"kame/program"
 	"os"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
 	"strings"
 	"testing"
 )
@@ -322,6 +324,27 @@ func TestMergeEnvironmentOverridesExistingValue(t *testing.T) {
 	}()
 	if values[0] != "KM_CLI_TEST=new" || values[1] != "KEEP=value" {
 		t.Errorf("environment = %q", values)
+	}
+}
+
+func TestMergeEnvironmentUsesHostNameRules(t *testing.T) {
+	values := slices.Make[string](mem.System, 3)
+	values[0] = cloneCommandText("KM_CASE_TEST=old")
+	values[1] = cloneCommandText("KEEP=value")
+	values = values[:2]
+	values = mergeEnvironment(values, []string{"km_case_test=new"})
+	defer func() {
+		for i := range values {
+			mem.FreeString(mem.System, values[i])
+		}
+		slices.Free(mem.System, values)
+	}()
+	if posix.EnvironmentNameEqual("KM_CASE_TEST", "km_case_test") {
+		if len(values) != 2 || values[0] != "km_case_test=new" || values[1] != "KEEP=value" {
+			t.Errorf("case-insensitive environment = %q", values)
+		}
+	} else if len(values) != 3 || values[0] != "KM_CASE_TEST=old" || values[2] != "km_case_test=new" {
+		t.Errorf("case-sensitive environment = %q", values)
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 	"solod.dev/so/time"
+	"solod.dev/so/unicode"
+	"solod.dev/so/unicode/utf8"
 )
 
 //so:embed posix.h
@@ -141,6 +143,9 @@ func km_cli_stderr_width() c.Int { return 0 }
 
 //so:extern
 func km_cli_environment_size() c.Int { return 0 }
+
+//so:extern
+func km_cli_environment_names_case_insensitive() bool { return false }
 
 //so:extern nodecay
 func km_cli_environment_copy(out []byte) c.Int { _ = out; return 0 }
@@ -348,6 +353,30 @@ func FreeEnvironment(a mem.Allocator, values []string) {
 		mem.FreeString(a, values[i])
 	}
 	slices.Free(a, values)
+}
+
+// EnvironmentNameEqual uses the active host's environment-name comparison
+// rules. Windows names are case-insensitive; POSIX names are byte-sensitive.
+func EnvironmentNameEqual(left string, right string) bool {
+	if left == right {
+		return true
+	}
+	if !km_cli_environment_names_case_insensitive() {
+		return false
+	}
+	for i, j := 0, 0; i < len(left) && j < len(right); {
+		a, an := utf8.DecodeRuneInString(left[i:])
+		b, bn := utf8.DecodeRuneInString(right[j:])
+		if unicode.ToLower(a) != unicode.ToLower(b) {
+			return false
+		}
+		i += an
+		j += bn
+		if i == len(left) || j == len(right) {
+			return i == len(left) && j == len(right)
+		}
+	}
+	return len(left) == 0 && len(right) == 0
 }
 
 // ForceWaitpidFailureForTest makes the next process reaping attempt fail. It is

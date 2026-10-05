@@ -121,7 +121,7 @@ func mergeEnvironment(current []string, overrides []string) []string {
 			if len(current[j]) <= nameEnd || current[j][nameEnd] != '=' {
 				continue
 			}
-			if current[j][:nameEnd] != entry[:nameEnd] {
+			if !posix.EnvironmentNameEqual(current[j][:nameEnd], entry[:nameEnd]) {
 				continue
 			}
 			mem.FreeString(mem.System, current[j])

@@ -241,6 +241,14 @@ int km_cli_environment_copy(so_Slice out) {
     return offset;
 }
 
+bool km_cli_environment_names_case_insensitive(void) {
+#if defined(__COSMOPOLITAN__)
+    return IsWindows();
+#else
+    return false;
+#endif
+}
+
 static int64_t km_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
