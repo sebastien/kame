@@ -29,8 +29,8 @@ accept either `(FUNCTION LIST)` or the legacy `(LIST FUNCTION)` order.
 | --- | --- | --- |
 | `map` | `(map FUNCTION LIST)` | One callback result per item. |
 | `flatmap` | `(flatmap FUNCTION LIST)` | Maps and flattens one list level; every callback result must be a list. |
-| `filter` | `(filter PREDICATE LIST)` | Items whose predicate result is true. |
-| `filter-out` | `(filter-out PREDICATE LIST)` | Items whose predicate result is false. |
+| `filter` | `(filter PREDICATE LIST)` or `(filter LIST VALUE)` | Items whose predicate is true or equal to `VALUE`. |
+| `filter-out` | `(filter-out PREDICATE LIST)` or `(filter-out LIST VALUE)` | Items whose predicate is false or unequal to `VALUE`. |
 | `reduce` | `(reduce FUNCTION LIST [INITIAL])` | Left fold. Without `INITIAL`, the first item is the accumulator; an empty list produces `:nil`. |
 | `concat` | `(concat VALUE...)` | Flattens list arguments one level and appends scalar arguments. |
 | `slice` | `(slice LIST-OR-TEXT START [END])` | Half-open slice; negative bounds count from the end. |

@@ -38,6 +38,10 @@ evaluates '(flatmap ([x] (list x)) (list 1 2))' '[1 2]'
 test-step "filter and filter-out"
 evaluates '(filter ([x] (includes? x "a")) (list "a" "b" "aa"))' '["a" "aa"]'
 evaluates '(filter-out ([x] (includes? x "a")) (list "a" "b" "aa"))' '["b"]'
+evaluates '(filter (list "a" "b" "a") "a")' '["a" "a"]'
+evaluates '(filter-out (list "a" "b" "a") "a")' '["b"]'
+evaluates '(filter (list 1 "1" 1.0) 1.0)' '[1 1]'
+diag '(filter (list 1) (list 1))' 'EXPR_INVALID'
 
 test-step "reduce folds from the left"
 evaluates '(reduce ([a b] (join [b a] "")) (list "a" "b") "z")' '"baz"'

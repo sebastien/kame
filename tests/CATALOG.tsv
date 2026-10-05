@@ -23,7 +23,7 @@ tests/T006-02-runtime-deps.sh	006	runtime	Diamond sharing, failure blocking, mis
 tests/T006-04-runtime-yield.sh	006	runtime	Yield output, dynamic content, conflict and task rejection
 tests/T006-05-runtime-effects.sh	006	runtime	Deferred out/err/write ordering and dry-run behavior
 tests/T007-01-lib-general.sh	007	lib	not, bool, str, count, first, nth, list, apply
-tests/T007-02-lib-collections.sh	007	lib	map, flatmap, filter, reduce, concat, slice, sorted, unique
+tests/T007-02-lib-collections.sh	007	lib	map, flatmap, predicate and equality-value filter/filter-out, reduce, concat, slice, sorted, unique
 tests/T007-03-lib-text.sh	007	lib	join, split, strip, replace, membership, case conversion
 tests/T007-04-lib-path.sh	007	lib	basename, dirname, splitext, ext, joinpath, relpath, abspath
 tests/T007-05-lib-fs.sh	007	lib	read, exists?, stat, wildcard and missing-path failures

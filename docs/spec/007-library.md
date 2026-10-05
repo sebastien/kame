@@ -107,8 +107,11 @@ Callbacks are lexical functions evaluated in item order for deterministic
 effects and diagnostics. Their internally discovered host dependencies may run
 in parallel, but the resulting list preserves input order.
 
-`filter` and `filter-out` require a callable predicate in the new language; the
-legacy equality-value shorthand is deferred.
+`filter` and `filter-out` accept a callable predicate in either argument order,
+or `(LIST VALUE)` as an equality shorthand. The shorthand retains or removes
+items equal to `VALUE`, respectively, using `eq`'s strict scalar semantics:
+integers and floats compare numerically, different kinds are unequal, and
+list, record, bytes, or pattern values are `EXPR_INVALID`.
 
 `unique` initially supports nil, boolean, number, and string values. Sorting
 mixed kinds is invalid.
@@ -286,6 +289,9 @@ executable metadata checks do not grant access to user read operations.
 - Every operation validates arity and value kinds without mutating arguments.
 - Pure operations issue no host request and register no dependency.
 - Collection callbacks preserve input order.
+- `filter` and `filter-out` accept both callback orders and the `(LIST VALUE)`
+  equality shorthand, including mixed-kind inequality and numeric int/float
+  equality; nonscalar equality values are `EXPR_INVALID`.
 - The expressions on lines 18-41 of legacy `core-make.example.lm` parse and
   evaluate unchanged against a fixture source tree.
 - Path operations handle root, dotfiles, trailing separators, and relative

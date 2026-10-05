@@ -116,45 +116,72 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 }
 func opFilter(c *eval.Context, s any, v []core.Value) eval.Result    { return filter(c, s, v, false) }
 func opFilterOut(c *eval.Context, s any, v []core.Value) eval.Result { return filter(c, s, v, true) }
+func freeOptionalCallable(c *eval.Context, callback *core.Value) {
+	if callback != nil {
+		c.FreeCallable(callback)
+	}
+}
 func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 	_ = s
-	callback := &v[0]
-	values := v[1].List
-	if v[0].Kind != core.Callable {
-		if v[0].Kind != core.List {
-			return invalidArgument(c, v, 0, "callable or list")
+	var callback *core.Value
+	var values []core.Value
+	var target *core.Value
+	if v[0].Kind == core.Callable {
+		callback = &v[0]
+		if v[1].Kind != core.List {
+			return invalidArgument(c, v, 1, "list")
 		}
-		if v[1].Kind != core.Callable {
-			return invalidArgument(c, v, 1, "callable")
+		values = v[1].List
+	} else if v[0].Kind == core.List {
+		values = v[0].List
+		if v[1].Kind == core.Callable {
+			callback = &v[1]
+		} else {
+			target = &v[1]
+			if _, ok := compareEq(*target, *target); !ok {
+				return invalidArgument(c, v, 1, "scalar equality value")
+			}
 		}
-		callback, values = &v[1], v[0].List
-	} else if v[1].Kind != core.List {
-		return invalidArgument(c, v, 1, "list")
+	} else {
+		return invalidArgument(c, v, 0, "callable or list")
 	}
-	defer c.FreeCallable(callback)
 	state := callbackProgress(c)
 	for state.Index < len(values) {
-		result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
-		if result.Waiting {
-			return result
+		var keep bool
+		if target != nil {
+			var ok bool
+			keep, ok = compareEq(values[state.Index], *target)
+			if !ok {
+				discardCallback(c, state)
+				return c.InvalidOperation("cannot compare equality of " + core.KindName(values[state.Index].Kind) + " and " + core.KindName(target.Kind) + "; expects scalar values (nil, bool, int, float, or string)")
+			}
+		} else {
+			result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
+			if result.Waiting {
+				freeOptionalCallable(c, callback)
+				return result
+			}
+			if result.Diagnostic.Code != "" {
+				discardCallback(c, state)
+				freeOptionalCallable(c, callback)
+				return result
+			}
+			keep = truth(result.Value)
+			// truth discards nothing: release a bare callable wrapper here so
+			// the shallow free below does not leak its scope retain.
+			if result.Value.Kind == core.Callable {
+				c.FreeCallable(&result.Value)
+			}
+			result.Value.Free(c.Run)
 		}
-		if result.Diagnostic.Code != "" {
-			discardCallback(c, state)
-			return result
-		}
-		keep := truth(result.Value)
-		// truth discards nothing: release a bare callable wrapper here so
-		// the shallow free below does not leak its scope retain.
-		if result.Value.Kind == core.Callable {
-			c.FreeCallable(&result.Value)
-		}
-		result.Value.Free(c.Run)
 		if keep != invert {
 			state.Values = slices.Append(c.Run, state.Values, values[state.Index].Clone(c.Run))
 		}
 		state.Index++
 	}
-	return eval.Result{Value: finishCallback(c, state)}
+	value := finishCallback(c, state)
+	freeOptionalCallable(c, callback)
+	return eval.Result{Value: value}
 }
 func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s

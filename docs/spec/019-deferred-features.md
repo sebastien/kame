@@ -40,7 +40,7 @@ adapters and integration evidence rather than placeholder methods.
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
 | D16 | Platform execution | In progress: the Node/WASM host now has Windows stream pipelines and process-tree termination, with a Windows-only descendant test; Windows-native launch, native-host lifecycle, and APE conformance on advertised non-Linux hosts remain. |
 | D17 | Distribution tooling | Explicit update/latest selection alongside pinned defaults; native platform artifacts; package-manager integration; `kame init` without overwriting existing project files; provisioning/integrity tests. |
-| D18 | Remaining library/ergonomic extensions | Specified tagged shell helpers and aliases, equality-value filtering, terminal color functions, dependency sequencing and alternative build syntax; formatting and execution tests. |
+| D18 | Remaining library/ergonomic extensions | In progress: equality-value `filter`/`filter-out` now has specified strict scalar semantics and T007-02 coverage. Tagged shell helpers/aliases, terminal color functions, dependency sequencing and alternative build syntax remain. |
 
 The explicit boundaries in this table are a finite work inventory. General
 phrases such as "library breadth" do not authorize an unspecified infinite API.
@@ -117,3 +117,8 @@ case; this workspace has no Windows runner, so that case is not yet execution
 evidence. D16's native launcher, platform lifecycle matrix, and non-Linux APE
 verification remain open. The initial-contract audit remains historical
 evidence, not completion of this work.
+D18's equality-value shorthand is implemented: `(filter LIST VALUE)` retains
+strict scalar-equal items, and `filter-out` removes them with the same numeric,
+cross-kind, and invalid-composite rules as `eq`. T007-02 now covers both
+operations, numeric int/float equivalence, kind mismatch, and invalid list
+values; the remaining D18 clauses are still open.
