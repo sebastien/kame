@@ -499,7 +499,7 @@ func TestCachedTaskInvalidatesForShell(t *testing.T) {
 	if firstProgram.Program == nil { t.Fatal("first compile failed"); return }
 	first := firstProgram.Program.Materialize("run"); first.Free(a)
 	firstProgram.Program.Free(); firstProgram.Free(a)
-	secondProgram := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Shell: []string{"/bin/bash", "-c"}})
+	secondProgram := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Shell: []string{"/usr/bin/env", "bash", "-c"}})
 	if secondProgram.Program == nil { t.Fatal("second compile failed"); return }
 	second := secondProgram.Program.Materialize("run")
 	if second.Diagnostic.Code != "" { t.Error("second cached task failed") }

@@ -65,12 +65,15 @@ func TestPipelineRetainsEveryStageStatus(t *testing.T) {
 func TestPipelineStreamsBeyondCaptureLimit(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
-	stages := []host.ProcessStage{{Argv: []string{"/usr/bin/head", "-c", "4194304", "/dev/zero"}}, {Argv: []string{"/bin/sh", "-c", "wc -c | tr -d ' '"}}}
+	stages := []host.ProcessStage{{Argv: []string{"/usr/bin/head", "-c", "4194304", "/dev/zero"}}, {Argv: []string{"/bin/sh", "-c", "wc -c | tr -d '[:space:]'"}}}
 	r := host.ProcessRequest{ID: 72, Stages: stages, Directory: ".", Environment: []string{"PATH=/bin:/usr/bin"}, RetainBytes: 16}
 	if !h.Start(r) { t.Fatal("pipeline start failed"); return }
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Outcome != posix.Exited || terminal.Status != 0 || terminal.StdoutTruncated || string(terminal.Stdout) != "4194304\n" { t.Error("pipeline buffered or captured intermediate stdout") }
+	if terminal.Outcome != posix.Exited || terminal.Status != 0 || terminal.StdoutTruncated || string(terminal.Stdout) != "4194304" {
+		t.Error("pipeline buffered or captured intermediate stdout")
+		t.Error(string(terminal.Stdout))
+	}
 	freeEvents(a, events)
 	h.Free()
 }
@@ -237,9 +240,20 @@ func TestCancellationAndTimeout(t *testing.T) {
 	if terminal.Outcome != posix.Cancelled { t.Error("cancellation did not win terminal outcome") }
 	freeEvents(a, events)
 	freeRequest(a, &r)
-	r = request(a, 5, "trap '' TERM; while :; do :; done")
-	r.TimeoutMS = 10
+	r = request(a, 5, "trap '' TERM; printf READY; while :; do :; done")
+	r.TimeoutMS = 100
 	if !h.Start(r) { t.Fatal("timeout start failed"); return }
+	ready := false
+	for attempt := 0; attempt < 100 && !ready; attempt++ {
+		if !h.Pump(10) { t.Fatal("host pump failed"); return }
+		for {
+			result := h.Next()
+			if !result.OK { break }
+			if result.Event.Kind == posix.Stdout && string(result.Event.Data) == "READY" { ready = true }
+			result.Event.Free(a)
+		}
+	}
+	if !ready { t.Fatal("timeout process did not install its TERM handler"); return }
 	terminal = posix.Event{}
 	events = drain(t, h, &terminal)
 	if terminal.Outcome != posix.TimedOut || terminal.Signal != 9 || h.Active() != 0 { t.Errorf("timeout did not kill and reap process group: kind=%d outcome=%d status=%d signal=%d active=%d", terminal.Kind, terminal.Outcome, terminal.Status, terminal.Signal, h.Active()) }

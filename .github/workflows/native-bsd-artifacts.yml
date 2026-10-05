@@ -50,10 +50,10 @@ jobs:
         with:
           release: '11.0'
           usesh: true
-          prepare: /usr/sbin/pkg_add go gmake bash
+          prepare: /usr/sbin/pkg_add go125 pkg_alternatives gmake bash
           run: |
             export KAME_PLATFORM=netbsd-x86_64
-            export PATH="/usr/pkg/go/bin:/usr/pkg/bin:$(go env GOPATH)/bin:$PATH"
+            export PATH="/usr/pkg/bin:$(go env GOPATH)/bin:$PATH"
             go install solod.dev/cmd/so@v0.4.0
             /usr/pkg/bin/gmake version-source
             cd src/go/kame && so test -panic=exit ./...
