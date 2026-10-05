@@ -37,6 +37,11 @@ test-step "SIGINT cancels the active root and reaps its process group"
 	else
 		test-fail "signal exit was $result, wanted exited 1"
 	fi
+	if grep -Fq "[./sleeper.out] cancelled" "$TEST_PATH/spawn.err"; then
+		test-ok "human progress reports cancellation separately"
+	else
+		test-fail "human progress reported cancellation as failure"
+	fi
 	if wait_for_pid_gone "$child_pid" 10; then
 		test-ok "child process was reaped"
 	else
@@ -54,7 +59,7 @@ test-step "SIGTERM cancels the active root"
 (
 	cd signals
 	rm -f shell.pid child.pid sleeper.out
-	cli_spawn . ./sleeper.out
+	cli_spawn . --json ./sleeper.out
 	pid="$CLI_SPAWN_PID"
 	if wait_for_file ./child.pid 10; then
 		test-ok "recipe started"
@@ -71,6 +76,11 @@ test-step "SIGTERM cancels the active root"
 		test-ok "first SIGTERM exits 1"
 	else
 		test-fail "signal exit was $result, wanted exited 1"
+	fi
+	if jq -e -s 'any(.[]; .type == "target-cancelled" and .target == "./sleeper.out")' "$TEST_PATH/spawn.out" >/dev/null && [ ! -s "$TEST_PATH/spawn.err" ]; then
+		test-ok "JSON cancellation stays on stdout without human progress"
+	else
+		test-fail "JSON cancellation stream or stderr separation was wrong"
 	fi
 	if wait_for_pid_gone "$child_pid" 10; then
 		test-ok "child process was reaped"

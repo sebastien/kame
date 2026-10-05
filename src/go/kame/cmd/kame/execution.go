@@ -166,12 +166,14 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			return 128 - signal
 		}
 	}
-	if !json && progress.Completed+progress.Failed != 0 {
+	if !json && progress.Completed+progress.Failed+progress.Cancelled != 0 {
 		elapsedMS := (time.Now().UnixNano() - startedAt) / 1000000
-		if progress.Failed == 0 {
+		if progress.Failed == 0 && progress.Cancelled == 0 {
 			fmt.Fprintf(errOut, "Summary: %d %s complete in %d.%03ds\n", progress.Completed, targetWord(progress.Completed), elapsedMS/1000, elapsedMS%1000)
+		} else if progress.Failed == 0 {
+			fmt.Fprintf(errOut, "Summary: %d complete, %d cancelled in %d.%03ds\n", progress.Completed, progress.Cancelled, elapsedMS/1000, elapsedMS%1000)
 		} else {
-			fmt.Fprintf(errOut, "Summary: %d complete, %d failed in %d.%03ds\n", progress.Completed, progress.Failed, elapsedMS/1000, elapsedMS%1000)
+			fmt.Fprintf(errOut, "Summary: %d complete, %d failed, %d cancelled in %d.%03ds\n", progress.Completed, progress.Failed, progress.Cancelled, elapsedMS/1000, elapsedMS%1000)
 		}
 	}
 	if failed || cancelling {
@@ -191,6 +193,7 @@ type buildProgress struct {
 	Active    int
 	Completed int
 	Failed    int
+	Cancelled int
 }
 
 func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool, progress *buildProgress) {
@@ -219,12 +222,18 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			}
 			progress.Completed++
 			fmt.Fprintf(errOut, "[%s] complete (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
-		} else if event.Kind == program.TargetFailed || event.Kind == program.TargetCancelled {
+		} else if event.Kind == program.TargetFailed {
 			if progress.Active != 0 {
 				progress.Active--
 			}
 			progress.Failed++
 			fmt.Fprintf(errOut, "[%s] failed (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
+		} else if event.Kind == program.TargetCancelled {
+			if progress.Active != 0 {
+				progress.Active--
+			}
+			progress.Cancelled++
+			fmt.Fprintf(errOut, "[%s] cancelled (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
 		} else if event.Kind == program.CacheWarning {
 			fmt.Fprintf(errOut, "warning %s: %s\n", event.Diagnostic.Code, event.Diagnostic.Message)
 		} else if event.Kind == program.ServiceState {
