@@ -78,10 +78,14 @@ static bool km_cache_lock_initialized;
 typedef int64_t (__msabi *km_create_job_object_fn)(void *, const char16_t *);
 typedef int32_t (__msabi *km_assign_process_to_job_object_fn)(int64_t, int64_t);
 typedef int32_t (__msabi *km_terminate_job_object_fn)(int64_t, uint32_t);
+typedef uint32_t (__msabi *km_get_process_id_fn)(int64_t);
+typedef int32_t (__msabi *km_is_process_in_job_fn)(int64_t, int64_t, int32_t *);
 
 static km_create_job_object_fn km_create_job_object;
 static km_assign_process_to_job_object_fn km_assign_process_to_job_object;
 static km_terminate_job_object_fn km_terminate_job_object;
+static km_get_process_id_fn km_get_process_id;
+static km_is_process_in_job_fn km_is_process_in_job;
 static bool km_windows_job_api_loaded;
 
 static bool km_windows_jobs_needed(void) {
@@ -98,6 +102,8 @@ static bool km_load_windows_job_api(void) {
             km_create_job_object = (km_create_job_object_fn)GetProcAddress(kernel, "CreateJobObjectW");
             km_assign_process_to_job_object = (km_assign_process_to_job_object_fn)GetProcAddress(kernel, "AssignProcessToJobObject");
             km_terminate_job_object = (km_terminate_job_object_fn)GetProcAddress(kernel, "TerminateJobObject");
+            km_get_process_id = (km_get_process_id_fn)GetProcAddress(kernel, "GetProcessId");
+            km_is_process_in_job = (km_is_process_in_job_fn)GetProcAddress(kernel, "IsProcessInJob");
         }
         km_windows_job_api_loaded = true;
     }
@@ -118,7 +124,11 @@ static bool km_windows_job_assign(int64_t job, pid_t pid) {
     int64_t process = OpenProcess(0x0100u | 0x0001u, 0, (uint32_t)pid);
     if (!process || process == -1) return false;
     bool assigned = km_assign_process_to_job_object(job, process) != 0;
-    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job assign: job=%lld pid=%d process=%lld assigned=%d\n", (long long)job, (int)pid, (long long)process, assigned);
+    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) {
+        int32_t in_job = -1;
+        bool queried = km_is_process_in_job && km_is_process_in_job(process, job, &in_job);
+        fprintf(stderr, "job assign: job=%lld posix_pid=%d native_pid=%u process=%lld assigned=%d membership_query=%d in_job=%d\n", (long long)job, (int)pid, km_get_process_id ? km_get_process_id(process) : 0, (long long)process, assigned, queried, in_job);
+    }
     CloseHandle(process);
     return assigned;
 }
