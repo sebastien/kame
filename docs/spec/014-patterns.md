@@ -224,8 +224,6 @@ requires a pattern literal or a pattern value.
 
 ## Deferred
 
-- Anonymous `{*}`, `{**}`, and positional `{_N}` groups in rule target
-  templates. One shared pattern grammar makes this a later, small change.
 - Pattern construction from runtime text through an operation.
 - Regular-expression groups.
 

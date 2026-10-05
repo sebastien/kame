@@ -125,6 +125,7 @@ tests/T010-23-wasm-watch.sh	010	wasm	dist/kame.js retains shared watch roots, sc
 tests/T010-24-wasm-target-arguments.sh	010	wasm	WASM target arguments in plan JSON, defaults, dependency scope, identity, diagnostics, dry-run and watch invalidation
 tests/T010-25-wasm-watch-abi.sh	010	wasm	Public watch ABI query/copy semantics, retained roots, file invalidation, malformed resource rejection, allocation failure, instance isolation and disposal
 tests/T004-13-lang-declaration-conditions.sh	004	lang	Pure when/otherwise/end declaration selection, gated includes, literal configuration, nested inactive branches, source/session parity and authored diagnostics
+tests/T004-14-lang-rule-positional-captures.sh	004	lang	Anonymous rule output captures and positional input references on native and WASM
 tests/T017-19-kash-recipes.sh	017	kash	Selected shell policies, structured recipe cache/retry/timeout, reusable scripts and invocation-owned callable lifetime on both hosts
 tests/T009-14-cli-watch.sh	009	cli	Native shared watch roots, scoped environments and grants across invalidation/source reload, preserved timestamps, malformed-source recovery, optional-include and failed-root repair, obsolete-input subscription cleanup, bounded unread watch output, idle settled roots, active recipe-child cleanup, changed graph, active-input invalidation and denied-effect protection
 tests/T009-15-cli-target-arguments.sh	009	cli	Native target arguments in plan JSON, defaults, dependency scope, identity, diagnostics, dry-run and watch invalidation

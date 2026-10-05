@@ -43,7 +43,9 @@ func freeCaptures(a mem.Allocator, values []template.CaptureValue) {
 
 func cloneArguments(a mem.Allocator, in []ArgumentValue) []ArgumentValue {
 	var out []ArgumentValue
-	for i := range in { out = slices.Append(a, out, ArgumentValue{Name: cloneText(a, in[i].Name), Value: cloneText(a, in[i].Value)}) }
+	for i := range in {
+		out = slices.Append(a, out, ArgumentValue{Name: cloneText(a, in[i].Name), Value: cloneText(a, in[i].Value)})
+	}
 	return out
 }
 
@@ -53,20 +55,62 @@ func renderTarget(a mem.Allocator, target rule.Target, captures []template.Captu
 	}
 	b := strings.NewBuilder(a)
 	defer b.Free()
+	index := 0
 	for i := range target.TargetForm.Parts {
 		part := target.TargetForm.Parts[i]
 		if part.Kind == template.TargetLiteral {
 			b.WriteString(part.Text)
 		} else {
-			for j := range captures {
-				if captures[j].Name == part.Name {
-					b.WriteString(captures[j].Text)
-					break
+			captureIndex := index
+			index++
+			found := false
+			if part.Name == "" {
+				if captureIndex < len(captures) {
+					b.WriteString(captures[captureIndex].Text)
+					found = true
+				}
+			} else {
+				for j := range captures {
+					if captures[j].Name == part.Name {
+						b.WriteString(captures[j].Text)
+						found = true
+						break
+					}
+				}
+			}
+			if !found {
+				if part.Name != "" {
+					if positional, ok := positionalCapture(part.Name); ok {
+						captureIndex = positional
+					} else {
+						continue
+					}
+				}
+				if captureIndex >= 0 && captureIndex < len(captures) {
+					b.WriteString(captures[captureIndex].Text)
 				}
 			}
 		}
 	}
 	return cloneText(a, b.String())
+}
+
+func positionalCapture(name string) (int, bool) {
+	if len(name) < 2 || name[0] != '_' || (len(name) > 2 && name[1] == '0') {
+		return 0, false
+	}
+	index := 0
+	for i := 1; i < len(name); i++ {
+		if name[i] < '0' || name[i] > '9' {
+			return 0, false
+		}
+		digit := int(name[i] - '0')
+		if index > (int(^uint(0)>>1)-digit)/10 {
+			return 0, false
+		}
+		index = index*10 + digit
+	}
+	return index, true
 }
 
 func renderInput(a mem.Allocator, input rule.Input, captures []template.CaptureValue) string {

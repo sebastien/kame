@@ -7,7 +7,9 @@ import (
 	"solod.dev/so/testing"
 )
 
-func sameSpan(span source.Span, start int, end int) bool { return span.Start == start && span.End == end }
+func sameSpan(span source.Span, start int, end int) bool {
+	return span.Start == start && span.End == end
+}
 
 func TestStringTemplateRetainsExpansionSpans(t *testing.T) {
 	parsed := template.ParseString(t.Allocator(), "test.km", "before @(project.name) @< after")
@@ -29,7 +31,9 @@ func TestCommandToolReferenceIsGlobalTemplatePart(t *testing.T) {
 		return
 	}
 	formatted := template.FormatString(t.Allocator(), parsed)
-	if formatted != "@(x/gcc) -c @<" { t.Errorf("formatted command reference = %q", formatted) }
+	if formatted != "@(x/gcc) -c @<" {
+		t.Errorf("formatted command reference = %q", formatted)
+	}
 	mem.FreeString(t.Allocator(), formatted)
 }
 
@@ -81,18 +85,51 @@ func TestTargetDoubleStarCrossesSlash(t *testing.T) {
 		return
 	}
 	match.Free(t.Allocator())
-	if target.MatchTarget(t.Allocator(), "./src/lib/main.c/") != nil { t.Error("target matching was not anchored") }
+	if target.MatchTarget(t.Allocator(), "./src/lib/main.c/") != nil {
+		t.Error("target matching was not anchored")
+	}
+}
+
+func TestTargetAnonymousCapturesKeepPositionalOrder(t *testing.T) {
+	target := template.ParseTarget(t.Allocator(), "test.km", "./{**}/{*}.c")
+	defer target.Free()
+	if len(target.Diagnostics) != 0 {
+		t.Error("anonymous target captures did not parse")
+		return
+	}
+	match := target.MatchTarget(t.Allocator(), "./src/demo.c")
+	if match == nil {
+		t.Error("anonymous target captures did not match")
+		return
+	}
+	defer match.Free(t.Allocator())
+	if len(match.Captures) != 2 || match.Captures[0].Name != "" || match.Captures[0].Text != "src" || match.Captures[1].Name != "" || match.Captures[1].Text != "demo" {
+		t.Error("anonymous target captures lost source order")
+	}
+	formatted := template.FormatTarget(t.Allocator(), target)
+	if formatted != "./{**}/{*}.c" {
+		t.Error("anonymous target capture formatting changed: " + formatted)
+	}
+	mem.FreeString(t.Allocator(), formatted)
 }
 
 func TestTargetEscapesAndLiteralTarget(t *testing.T) {
 	escaped := template.ParseTarget(t.Allocator(), "test.km", "./\\{literal\\}-{name}")
 	defer escaped.Free()
 	match := escaped.MatchTarget(t.Allocator(), "./{literal}-ok")
-	if match == nil || match.Captures[0].Text != "ok" { t.Error("escaped target literal was not matched") } else { match.Free(t.Allocator()) }
+	if match == nil || match.Captures[0].Text != "ok" {
+		t.Error("escaped target literal was not matched")
+	} else {
+		match.Free(t.Allocator())
+	}
 	plain := template.ParseTarget(t.Allocator(), "test.km", "./literal")
 	defer plain.Free()
 	match = plain.MatchTarget(t.Allocator(), "./literal")
-	if len(plain.Diagnostics) != 0 || match == nil { t.Error("literal target was not accepted") } else { match.Free(t.Allocator()) }
+	if len(plain.Diagnostics) != 0 || match == nil {
+		t.Error("literal target was not accepted")
+	} else {
+		match.Free(t.Allocator())
+	}
 }
 
 func TestTargetCharacterClassesRejectDescendingRanges(t *testing.T) {
@@ -115,24 +152,32 @@ func TestFormatTemplateCanonicalizesEscapes(t *testing.T) {
 	parsed := template.ParseString(t.Allocator(), "test.km", "a\\@b @(name)")
 	defer parsed.Free()
 	formatted := template.FormatString(t.Allocator(), parsed)
-	if formatted != "a\\@b @(name)" { t.Errorf("FormatString() = %q", formatted) }
+	if formatted != "a\\@b @(name)" {
+		t.Errorf("FormatString() = %q", formatted)
+	}
 	mem.FreeString(t.Allocator(), formatted)
 }
 
 func TestDocumentIfElseLowersWithoutBlankDebt(t *testing.T) {
 	doc := template.ParseDocument(t.Allocator(), "test.hash", "# @if(cond)\nyes\n# @else\nno\n# @end\n", "hash")
 	defer doc.Free()
-	if len(doc.Diagnostics) != 0 || doc.Root == nil { t.Error("hash document did not parse") }
+	if len(doc.Diagnostics) != 0 || doc.Root == nil {
+		t.Error("hash document did not parse")
+	}
 }
 
 func TestDocumentStrayEndIsBlockError(t *testing.T) {
 	doc := template.ParseDocument(t.Allocator(), "test.tmpl", "@end\n", "plain")
 	defer doc.Free()
-	if len(doc.Diagnostics) == 0 || doc.Diagnostics[0].Code != "TPL_BLOCK" { t.Error("stray @end was not TPL_BLOCK") }
+	if len(doc.Diagnostics) == 0 || doc.Diagnostics[0].Code != "TPL_BLOCK" {
+		t.Error("stray @end was not TPL_BLOCK")
+	}
 }
 
 func TestDocumentUnknownStyleIsStyleError(t *testing.T) {
 	doc := template.ParseDocument(t.Allocator(), "test.tmpl", "hi\n", "unknown")
 	defer doc.Free()
-	if len(doc.Diagnostics) == 0 || doc.Diagnostics[0].Code != "TPL_STYLE" { t.Error("unknown style was not TPL_STYLE") }
+	if len(doc.Diagnostics) == 0 || doc.Diagnostics[0].Code != "TPL_STYLE" {
+		t.Error("unknown style was not TPL_STYLE")
+	}
 }

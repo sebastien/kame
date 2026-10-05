@@ -69,6 +69,23 @@ func ParseTarget(a mem.Allocator, name string, text string) *Target {
 		}
 		groupStart := pos
 		pos++
+		if pos < len(text) && text[pos] == '*' {
+			pattern := "*"
+			pos++
+			if pos < len(text) && text[pos] == '*' {
+				pattern = "**"
+				pos++
+			}
+			if pos == len(text) || text[pos] != '}' {
+				t.Diagnostics = slices.Append(a, t.Diagnostics, parseDiagnostic(groupStart, pos, "invalid anonymous capture group"))
+				start = groupStart
+				break
+			}
+			pos++
+			t.Parts = slices.Append(a, t.Parts, TargetPart{Kind: Capture, Pattern: pattern, Span: source.Span{Start: groupStart, End: pos}})
+			start = pos
+			continue
+		}
 		nameStart := pos
 		for pos < len(text) && isCaptureContinue(text[pos]) {
 			pos++
@@ -235,10 +252,12 @@ func (t *Target) match(a mem.Allocator, target string, part int, offset int, cap
 	}
 	previous := ""
 	found := false
-	for i := range *captures {
-		if (*captures)[i].Name == p.Name {
-			previous, found = (*captures)[i].Text, true
-			break
+	if p.Name != "" {
+		for i := range *captures {
+			if (*captures)[i].Name == p.Name {
+				previous, found = (*captures)[i].Text, true
+				break
+			}
 		}
 	}
 	for end := offset + 1; end <= len(target); end++ {
@@ -249,15 +268,11 @@ func (t *Target) match(a mem.Allocator, target string, part int, offset int, cap
 		if !matchPattern(p.Pattern, value) {
 			continue
 		}
-		if !found {
-			*captures = slices.Append(a, *captures, CaptureValue{Name: p.Name, Text: value})
-		}
+		*captures = slices.Append(a, *captures, CaptureValue{Name: p.Name, Text: value})
 		if t.match(a, target, part+1, end, captures) {
 			return true
 		}
-		if !found {
-			*captures = (*captures)[:len(*captures)-1]
-		}
+		*captures = (*captures)[:len(*captures)-1]
 	}
 	return false
 }
@@ -338,6 +353,11 @@ func FormatTarget(a mem.Allocator, t *Target) string {
 			continue
 		}
 		b.WriteByte('{')
+		if part.Name == "" {
+			b.WriteString(part.Pattern)
+			b.WriteByte('}')
+			continue
+		}
 		b.WriteString(part.Name)
 		if part.Pattern != "*" {
 			b.WriteByte(':')
