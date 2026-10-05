@@ -33,6 +33,8 @@ const (
 	RequestProcessCancel
 	RequestCacheLock
 	RequestCacheUnlock
+	// RequestPlugin invokes one explicitly registered, versioned operation.
+	RequestPlugin
 )
 
 // Request owns Payload until it is popped or the queue is freed.

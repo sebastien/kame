@@ -94,6 +94,9 @@ func (r *Registry) lookup(name string) *Operation {
 	return nil
 }
 
+// HasOperation reports whether the registry already contains a named operation.
+func (r *Registry) HasOperation(name string) bool { return r.lookup(name) != nil }
+
 func (r *Registry) Free() {
 	if r == nil {
 		return

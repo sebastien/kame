@@ -77,6 +77,26 @@ func ScopedProcessPayload(a mem.Allocator, script string, environment []string) 
  return recipeExecutionPayload(a, script, nil, environment, nil, true)
 }
 
+// PluginInvocationPayload copies one operation call into a serializable host
+// request. The host owns the payload and must return one core value or a
+// diagnostic through the existing request correlation contract.
+func PluginInvocationPayload(a mem.Allocator, plugin string, pluginVersion string, operation string, operationVersion string, maxRequestBytes int, maxResponseBytes int, timeoutMS int64, args []core.Value) core.Value {
+	values := core.NewList(a, args)
+	fields := []core.RecordField{
+		{Key: "plugin", Value: core.NewString(a, plugin)},
+		{Key: "pluginVersion", Value: core.NewString(a, pluginVersion)},
+		{Key: "operation", Value: core.NewString(a, operation)},
+		{Key: "operationVersion", Value: core.NewString(a, operationVersion)},
+		{Key: "maxRequestBytes", Value: core.Value{Kind: core.Int, Int: int64(maxRequestBytes)}},
+		{Key: "maxResponseBytes", Value: core.Value{Kind: core.Int, Int: int64(maxResponseBytes)}},
+		{Key: "timeoutMS", Value: core.Value{Kind: core.Int, Int: timeoutMS}},
+		{Key: "args", Value: values},
+	}
+	payload := core.NewRecord(a, fields)
+	for i := range fields { fields[i].Value.Free(a) }
+	return payload
+}
+
 func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string, includeEnvironment bool) core.Value {
  b := strings.NewBuilder(a)
  e := json.NewEncoder(&b)
