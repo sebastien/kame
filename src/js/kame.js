@@ -9,7 +9,7 @@
 // file supplies only host capabilities and stream/exit policy.
 import { mkdir, mkdtemp, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import { accessSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
@@ -807,19 +807,21 @@ class Module {
     this.cacheWrites = new Map();
   }
 
-  static async load() {
+  static async load(path = wasmPath) {
     let bytes;
     try {
-      bytes = await readFile(wasmPath);
+      bytes = await readFile(path);
     } catch (error) {
-      throw Object.assign(new Error(`cannot read ${wasmPath}: ${error.message}`), { code: 'FS_ERR' });
+      throw Object.assign(new Error(`cannot read ${path}: ${error.message}`), { code: 'FS_ERR' });
     }
     const { instance } = await WebAssembly.instantiate(bytes, {});
     const exports = instance.exports;
     const missing = REQUIRED_EXPORTS.filter((name) => !(name in exports));
     if (missing.length !== 0) throw Object.assign(new Error(`WASM ABI is incomplete: missing ${missing.join(', ')}`), { code: 'FEATURE_UNSUP' });
     if (exports.kame_wasm_abi_version() !== 1) throw Object.assign(new Error('unsupported WASM ABI schema'), { code: 'FEATURE_UNSUP' });
-    return new Module(exports);
+    const module = new Module(exports);
+    module.path = path;
+    return module;
   }
 
   abiInfo() {
@@ -990,6 +992,10 @@ class Module {
 
   async dispatch(instance, request, kind, payload, data, context, key, record) {
     const grants = context.grants;
+    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18].includes(kind)) {
+      const response = await this.customHostRequest(instance, request, kind, payload, data, context, key, record);
+      if (response !== undefined) return response;
+    }
     if (kind === 24) {
       const owner = this.cacheLeaseKey(instance, key);
       if (!this.cacheLeases.has(owner)) {
@@ -1209,6 +1215,73 @@ class Module {
     return this.completeFailure(instance, request, 'FEATURE_UNSUP', `host request kind ${kind} is not implemented in this stage`);
   }
 
+  async customHostRequest(instance, request, kind, payload, data, context, key, record) {
+    const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 ? 'read'
+      : kind === 2 ? 'write'
+        : kind === 4 ? 'env'
+          : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 ? 'run' : null;
+    if (capability && !context.grants[capability]) return this.deny(instance, request, capability);
+    if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 2) && typeof payload === 'string') {
+      const grantKind = kind === 2 ? 'write' : 'read';
+      const roots = context[`${grantKind}Roots`];
+      let names = [payload];
+      if (kind === 20) {
+        try { names = JSON.parse(payload); } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid file metadata paths'); }
+        if (!Array.isArray(names) || names.some((name) => typeof name !== 'string')) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid file metadata paths');
+      }
+      if (roots !== null && roots !== undefined && names.some((name) => !pathGranted(resolve(context.cwd ?? process.cwd(), name), roots))) return this.deny(instance, request, grantKind);
+    }
+    if (capability === 'run' && context.runRoots !== null && context.runRoots !== undefined && [13, 14, 15].includes(kind)) {
+      let stages;
+      try {
+        const decoded = JSON.parse(payload);
+        stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
+      } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process request'); }
+      if (!Array.isArray(stages) || stages.some((args) => !Array.isArray(args) || typeof args[0] !== 'string' || !args[0].includes('/') || !pathGranted(resolve(context.cwd ?? process.cwd(), args[0]), context.runRoots))) return this.deny(instance, request, 'run');
+    }
+    if (context.signal?.aborted) return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'invocation cancelled');
+    const descriptor = Object.freeze({
+      id: request,
+      kind,
+      payload,
+      data: data?.slice() ?? new Uint8Array(0),
+      key: key?.slice() ?? null,
+      record: record?.slice() ?? null,
+      capability,
+      signal: context.signal,
+    });
+    let abortListener;
+    const aborted = new Promise((resolveAbort) => {
+      if (!context.signal) return;
+      abortListener = () => resolveAbort({ type: 'failure', code: 'EXEC_CANCELLED', message: 'invocation cancelled' });
+      context.signal.addEventListener('abort', abortListener, { once: true });
+    });
+    let result;
+    try {
+      result = await (context.signal ? Promise.race([Promise.resolve().then(() => context.hostRequest(descriptor)), aborted]) : context.hostRequest(descriptor));
+    } catch (error) {
+      return this.completeFailure(instance, request, error.code ?? 'HOST_FAIL', error.message ?? 'host request failed');
+    } finally {
+      if (abortListener) context.signal.removeEventListener('abort', abortListener);
+    }
+    if (context.signal?.aborted) return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'invocation cancelled');
+    if (!result || typeof result !== 'object') return this.completeFailure(instance, request, 'HOST_FAIL', 'host callback returned no completion');
+    if (result.type === 'bytes' && (result.value instanceof Uint8Array || Buffer.isBuffer(result.value))) {
+      const bytes = this.write(result.value);
+      return this.exports.kame_wasm_complete_bytes(instance, request, bytes.pointer, bytes.length);
+    }
+    if (result.type === 'text' && typeof result.value === 'string') {
+      const bytes = this.write(result.value);
+      return this.exports.kame_wasm_complete_text(instance, request, bytes.pointer, bytes.length);
+    }
+    if (result.type === 'json') return this.completeJSON(instance, request, result.value);
+    if (result.type === 'nil') return this.exports.kame_wasm_complete_nil(instance, request);
+    if (result.type === 'failure' && typeof result.code === 'string' && typeof result.message === 'string') {
+      return this.completeFailure(instance, request, result.code, result.message);
+    }
+    return this.completeFailure(instance, request, 'HOST_FAIL', 'host callback returned an invalid completion');
+  }
+
   cacheLeaseKey(instance, key) {
     return `${instance}:${Buffer.from(key).toString('hex')}`;
   }
@@ -1234,6 +1307,10 @@ class Module {
     try {
       const compiled = this.write(source);
       if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      if (context.cwd) {
+        const directory = this.write(context.cwd);
+        if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
+      }
       const encoded = this.write(expression);
       if (this.exports.kame_wasm_expression_begin(instance, encoded.pointer, encoded.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
       for (;;) {
@@ -1393,8 +1470,11 @@ class Module {
       for (const line of this.decode0(bytes).trim().split('\n')) {
         const event = JSON.parse(line);
         if (event.diagnostic && (event.type === 'target-failed' || event.type === 'target-cancelled')) lastDiagnostic = event.diagnostic;
+        context.events?.push(event);
       }
-      if (json) {
+      if (context.api === true) {
+        continue;
+      } else if (json) {
         stdout.write(bytes);
       } else if (human) {
         humanEvent(bytes);
@@ -1437,6 +1517,9 @@ class Module {
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     const pending = new Set();
     const cancellation = new AbortController();
+    const externalSignal = context.signal;
+    const cancel = () => cancellation.abort();
+    externalSignal?.addEventListener('abort', cancel, { once: true });
     invocationCancellations.add(cancellation);
     context.concurrent = true;
     context.signal = cancellation.signal;
@@ -1445,7 +1528,7 @@ class Module {
     try {
       this.compileBuild(instance, source, name, context);
       for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
-      const directoryBytes = this.write(process.cwd());
+      const directoryBytes = this.write(context.cwd ?? process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directoryBytes.pointer, directoryBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
       if (context.portableGrants) {
@@ -1475,9 +1558,10 @@ class Module {
         await Promise.resolve();
       }
       const kind = this.exports.kame_wasm_result_kind(instance);
-      return { kind, bytes: this.copyResult(instance) };
+      return { kind, bytes: this.copyResult(instance), events: context.events?.slice() ?? [] };
     } finally {
       cancellation.abort();
+      externalSignal?.removeEventListener('abort', cancel);
       await Promise.all(pending);
       if (targetStarted) this.drainEvents(instance, context);
       invocationCancellations.delete(cancellation);
@@ -1494,6 +1578,9 @@ class Module {
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM watch instance'), { code: 'NO_MEMORY' });
     const pending = new Set();
     const cancellation = new AbortController();
+    const externalSignal = context.signal;
+    const cancel = () => cancellation.abort();
+    externalSignal?.addEventListener('abort', cancel, { once: true });
     context.concurrent = true;
     context.signal = cancellation.signal;
     context.streaming = true;
@@ -1502,7 +1589,7 @@ class Module {
     try {
       this.compileBuild(instance, source, name, context);
       for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
-      const directory = this.write(process.cwd());
+      const directory = this.write(context.cwd ?? process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
       if (context.portableGrants) {
@@ -1514,9 +1601,10 @@ class Module {
       }
       const targetsBytes = this.write(JSON.stringify(targets));
       if (this.exports.kame_wasm_watch_begin(instance, targetsBytes.pointer, targetsBytes.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
-      return { instance, pending, cancellation, context, targets, hostError, live: true };
+      return { instance, pending, cancellation, context, targets, hostError, live: true, externalSignal, cancel };
     } catch (error) {
       cancellation.abort();
+      externalSignal?.removeEventListener('abort', cancel);
       await Promise.all(pending);
       this.exports.kame_wasm_instance_free(instance);
       throw error;
@@ -1555,6 +1643,7 @@ class Module {
     await Promise.all(watch.pending);
     this.exports.kame_wasm_watch_cancel(watch.instance);
     this.exports.kame_wasm_instance_free(watch.instance);
+    watch.externalSignal?.removeEventListener('abort', watch.cancel);
   }
 
   copyResult(instance) {
@@ -1641,6 +1730,270 @@ class Module {
 
   decode0(bytes) {
     return new TextDecoder().decode(bytes);
+  }
+}
+
+function apiContext(options, signal) {
+  const cwd = resolve(options.cwd ?? process.cwd());
+  const grants = { read: false, write: false, run: false, env: false };
+  const portableGrants = [];
+  const roots = { read: [], write: [], run: [] };
+  for (const grant of options.grants ?? []) {
+    if (!grant || !['read', 'write', 'run', 'env'].includes(grant.capability)) throw Object.assign(new Error('invalid capability grant'), { code: 'OPT_VALUE_INVALID' });
+    const names = [...(grant.names ?? [])];
+    if (names.some((name) => typeof name !== 'string')) throw Object.assign(new Error('grant paths must be strings'), { code: 'OPT_VALUE_INVALID' });
+    grants[grant.capability] = true;
+    portableGrants.push({ capability: grant.capability, names });
+    if (grant.capability === 'read' || grant.capability === 'write' || grant.capability === 'run') {
+      roots[grant.capability].push(...names.map((name) => resolve(cwd, name)));
+    }
+  }
+  const grantRoots = (capability) => !grants[capability] || portableGrants.some((grant) => grant.capability === capability && grant.names.length === 0)
+    ? null : roots[capability];
+  return {
+    api: true,
+    cwd,
+    grants,
+    portableGrants,
+    readRoots: grantRoots('read'),
+    writeRoots: grantRoots('write'),
+    runRoots: grantRoots('run'),
+    environment: [...(options.environment ?? [])],
+    shell: [...(options.shell ?? [])],
+    toolCache: new Map(),
+    events: [],
+    signal,
+    hostRequest: options.hostRequest,
+    json: false,
+    human: false,
+  };
+}
+
+export class Kame {
+  constructor(module) {
+    this.module = module;
+    this.programs = new Set();
+    this.operations = new Set();
+    this.watches = new Set();
+    this.disposed = false;
+  }
+
+  static async create(options = {}) {
+    const path = options.wasmPath ? resolve(options.wasmPath) : wasmPath;
+    return new Kame(await Module.load(path));
+  }
+
+  assertLive() {
+    if (this.disposed) throw Object.assign(new Error('Kame object has been disposed'), { code: 'DISPOSED' });
+  }
+
+  async operation(program, options, callback) {
+    this.assertLive();
+    if (program?.disposed) throw Object.assign(new Error('Kame program has been disposed'), { code: 'DISPOSED' });
+    if (program && [...this.watches].some((watch) => watch.program === program && !watch.closed)) throw Object.assign(new Error('close the active watch before starting another operation'), { code: 'BUSY' });
+    const controller = new AbortController();
+    const external = options?.signal;
+    const abort = () => controller.abort();
+    external?.addEventListener('abort', abort, { once: true });
+    if (external?.aborted) controller.abort();
+    const token = { program, controller, promise: null };
+    const context = apiContext(options ?? {}, controller.signal);
+    token.promise = Promise.resolve().then(() => callback(context));
+    this.operations.add(token);
+    try {
+      return await token.promise;
+    } finally {
+      external?.removeEventListener('abort', abort);
+      this.operations.delete(token);
+    }
+  }
+
+  async parse(language, source, options = {}) {
+    return this.operation(null, options, async () => {
+      const bytes = await this.module.parse(language, options.name ?? 'input.km', source);
+      return JSON.parse(this.module.decode0(bytes));
+    });
+  }
+
+  async format(language, source, options = {}) {
+    return this.operation(null, options, async () => {
+      const bytes = await this.module.format(language, options.name ?? 'input.km', source, options.indentStyle ?? 'tab', options.indentWidth ?? 4);
+      return this.module.decode0(bytes);
+    });
+  }
+
+  async compile(source, options = {}) {
+    const name = options.name ?? 'input.km';
+    const language = options.language ?? 'script';
+    return this.operation(null, options, async () => {
+      const module = await Module.load(this.module.path);
+      try {
+        const bytes = await module.parse(language, name, source);
+        const ast = JSON.parse(module.decode0(bytes));
+        const program = new KameProgram(this, module, source, name, language, ast);
+        this.programs.add(program);
+        return program;
+      } catch (error) {
+        throw error;
+      }
+    });
+  }
+
+  async dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    for (const operation of this.operations) operation.controller.abort();
+    await Promise.allSettled([...this.watches].map((watch) => watch.close()));
+    await Promise.allSettled([...this.operations].map((operation) => operation.promise));
+    for (const program of this.programs) {
+      program.disposed = true;
+      program.source = '';
+      program._ast = null;
+      program.module = null;
+    }
+    this.programs.clear();
+  }
+}
+
+export class KameProgram {
+  constructor(owner, module, source, name, language, ast) {
+    this.owner = owner;
+    this.module = module;
+    this.source = `${source}`;
+    this.name = `${name}`;
+    this.language = language;
+    this._ast = structuredClone(ast);
+    this.disposed = false;
+    this.tail = Promise.resolve();
+  }
+
+  async serialized(callback) {
+    const previous = this.tail;
+    let release;
+    this.tail = new Promise((resolveSerial) => { release = resolveSerial; });
+    await previous;
+    try { return await callback(); }
+    finally { release(); }
+  }
+
+  get ast() {
+    this.owner.assertLive();
+    if (this.disposed) throw Object.assign(new Error('Kame program has been disposed'), { code: 'DISPOSED' });
+    return structuredClone(this._ast);
+  }
+
+  async evaluate(expression, options = {}) {
+    return this.owner.operation(this, options, async (context) => this.serialized(async () => {
+      const result = await this.module.evaluate(this.source, expression, context);
+      return this.module.decode0(result);
+    }));
+  }
+
+  async build(targets, options = {}) {
+    const requested = Array.isArray(targets) ? [...targets] : [targets];
+    if (requested.some((target) => typeof target !== 'string')) throw Object.assign(new Error('build targets must be strings'), { code: 'OPT_VALUE_INVALID' });
+    return this.owner.operation(this, options, async (base) => this.serialized(async () => {
+      const results = [];
+      const events = [];
+      for (const target of requested) {
+        if (base.signal.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
+        const context = { ...base, events: [] };
+        const result = await this.module.materialize(this.source, target, context, this.name);
+        results.push({ target, kind: result.kind, value: this.module.decode0(result.bytes) });
+        events.push(...context.events);
+      }
+      return { results, events: structuredClone(events) };
+    }));
+  }
+
+  async watch(targets, options = {}) {
+    this.owner.assertLive();
+    if (this.disposed) throw Object.assign(new Error('Kame program has been disposed'), { code: 'DISPOSED' });
+    if ([...this.owner.watches].some((watch) => watch.program === this && !watch.closed)) throw Object.assign(new Error('a watch is already active for this program'), { code: 'BUSY' });
+    const names = Array.isArray(targets) ? [...targets] : [targets];
+    if (names.some((target) => typeof target !== 'string')) throw Object.assign(new Error('watch targets must be strings'), { code: 'OPT_VALUE_INVALID' });
+    const controller = new AbortController();
+    const external = options.signal;
+    const abort = () => controller.abort();
+    external?.addEventListener('abort', abort, { once: true });
+    if (external?.aborted) controller.abort();
+    const context = apiContext(options, controller.signal);
+    try {
+      const watch = await this.serialized(() => this.module.beginWatch(this.source, names, this.name, context));
+      const apiWatch = new KameWatch(this, watch, controller, external, abort);
+      this.owner.watches.add(apiWatch);
+      return apiWatch;
+    } catch (error) {
+      external?.removeEventListener('abort', abort);
+      throw error;
+    }
+  }
+
+  async dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    await Promise.allSettled([...this.owner.watches].filter((watch) => watch.program === this).map((watch) => watch.close()));
+    const operations = [...this.owner.operations].filter((operation) => operation.program === this);
+    for (const operation of operations) operation.controller.abort();
+    await Promise.allSettled(operations.map((operation) => operation.promise));
+    this.owner.programs.delete(this);
+    this.module = null;
+  }
+}
+
+export class KameWatch {
+  constructor(program, watch, controller, externalSignal, abort) {
+    this.program = program;
+    this.watch = watch;
+    this.controller = controller;
+    this.externalSignal = externalSignal;
+    this.abort = abort;
+    this.closed = false;
+    this.started = false;
+  }
+
+  assertLive() {
+    if (this.closed || this.program.disposed || this.program.owner.disposed) throw Object.assign(new Error('Kame watch has been disposed'), { code: 'DISPOSED' });
+  }
+
+  snapshot() {
+    this.assertLive();
+    return structuredClone(this.program.module.watchSnapshot(this.watch));
+  }
+
+  invalidate(resources) {
+    this.assertLive();
+    this.program.module.invalidateWatch(this.watch, structuredClone(resources));
+  }
+
+  async next() {
+    this.assertLive();
+    const module = this.program.module;
+    while (!this.closed && !this.controller.signal.aborted) {
+      const state = module.drainWatch(this.watch);
+      if (state === 1) module.serviceWatchRequest(this.watch);
+      if (this.watch.hostError) throw this.watch.hostError;
+      const events = this.watch.context.events.splice(0);
+      const snapshot = this.snapshot();
+      if (!this.started || events.length !== 0) {
+        this.started = true;
+        return { done: false, value: { snapshot, events: structuredClone(events) } };
+      }
+      if (this.watch.pending.size) await Promise.race([...this.watch.pending, new Promise((resolveWait) => setTimeout(resolveWait, 10))]);
+      else await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+    }
+    return { done: true, value: undefined };
+  }
+
+  [Symbol.asyncIterator]() { return this; }
+
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.controller.abort();
+    await this.program.module.disposeWatch(this.watch);
+    this.externalSignal?.removeEventListener('abort', this.abort);
+    this.program.owner.watches.delete(this);
   }
 }
 
@@ -2668,28 +3021,30 @@ async function main() {
   return dispatch(module, inv, args.length === 0);
 }
 
-main().then(
-  (status) => { process.exitCode = status; },
-  (error) => {
-    if (interruptedStatus) { process.exitCode = interruptedStatus; return; }
-    if (jsonMode) {
-      if (error.diagnostics) {
-        for (const detail of error.diagnostics) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().then(
+    (status) => { process.exitCode = status; },
+    (error) => {
+      if (interruptedStatus) { process.exitCode = interruptedStatus; return; }
+      if (jsonMode) {
+        if (error.diagnostics) {
+          for (const detail of error.diagnostics) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
+        } else {
+          if (lastDiagnostic === null && error.span !== undefined && primarySource) lastDiagnostic = { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message, source: primarySource.name, span: error.span };
+          diagnostic(error.code ?? 'HOST_FAIL', error.message);
+        }
       } else {
-        if (lastDiagnostic === null && error.span !== undefined && primarySource) lastDiagnostic = { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message, source: primarySource.name, span: error.span };
-        diagnostic(error.code ?? 'HOST_FAIL', error.message);
+        if (error.diagnostics) {
+          for (const detail of error.diagnostics) stderr.write(renderDiagnostic(detail, primarySource, 80));
+          process.exitCode = 1;
+          return;
+        }
+        const detail = error.diagnostics?.[0] ?? lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
+        if (!error.diagnostics && !lastDiagnostic && error.span !== undefined && primarySource) { detail.source = primarySource.name; detail.span = error.span; }
+        stderr.write(renderDiagnostic(detail, primarySource, 80));
+        if (buildProgress !== null && buildProgress.completed + buildProgress.failed !== 0) printSummary();
       }
-    } else {
-      if (error.diagnostics) {
-        for (const detail of error.diagnostics) stderr.write(renderDiagnostic(detail, primarySource, 80));
-        process.exitCode = 1;
-        return;
-      }
-      const detail = error.diagnostics?.[0] ?? lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
-      if (!error.diagnostics && !lastDiagnostic && error.span !== undefined && primarySource) { detail.source = primarySource.name; detail.span = error.span; }
-      stderr.write(renderDiagnostic(detail, primarySource, 80));
-      if (buildProgress !== null && buildProgress.completed + buildProgress.failed !== 0) printSummary();
-    }
-    process.exitCode = 1;
-  },
-);
+      process.exitCode = 1;
+    },
+  );
+}
