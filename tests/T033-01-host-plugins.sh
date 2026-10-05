@@ -47,6 +47,39 @@ const roundTrip = await call('(example-run "hello")', declarations(), async (req
 assert.equal(JSON.parse(roundTrip), 'plugin value');
 assert.equal(calls, 1);
 
+const embeddingKame = await Kame.create();
+const embeddingProgram = await embeddingKame.compile('answer = (example-run "embedded")\n', { name: 'plugin-embedding.km' });
+const responseFor = (request) => ({
+  protocol: 1, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion,
+  operation: request.operation, operationVersion: request.operationVersion, generation: request.generation,
+  attempt: request.attempt, value: { kind: 'int', data: 37 },
+});
+let buildCalls = 0;
+await embeddingProgram.build('answer', {
+  plugins: declarations(),
+  pluginCallbacks: { example: async (request) => { buildCalls++; return responseFor(request); } },
+});
+assert.equal(buildCalls, 1, 'build invocation did not dispatch its plugin callback');
+let watchCalls = 0;
+const duplicateDeclarations = [...declarations(), ...declarations()];
+await assert.rejects(
+  embeddingProgram.watch('answer', { plugins: duplicateDeclarations, pluginCallbacks: { example: async (request) => { watchCalls++; return responseFor(request); } } }),
+  (error) => error.code === 'PLUGIN_CONFIG',
+);
+const pluginWatch = await embeddingProgram.watch('answer', {
+  plugins: declarations(),
+  pluginCallbacks: { example: async (request) => { watchCalls++; return responseFor(request); } },
+});
+const initialPluginSnapshot = await Promise.race([
+  pluginWatch.next(),
+  new Promise((_, reject) => setTimeout(() => reject(new Error('plugin watch did not produce its initial snapshot')), 3000)),
+]);
+assert.equal(initialPluginSnapshot.done, false);
+assert.equal(watchCalls, 0, 'watch setup unexpectedly executed a value-only target');
+await pluginWatch.close();
+await embeddingProgram.dispose();
+await embeddingKame.dispose();
+
 await assert.rejects(call('(example-run "x")', declarations(), async (request) => ({
   protocol: 1, request: 'stale', plugin: request.plugin, pluginVersion: request.pluginVersion,
   operation: request.operation, operationVersion: request.operationVersion, generation: request.generation, attempt: request.attempt, value: { kind: 'nil' },

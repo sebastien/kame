@@ -124,7 +124,7 @@ tests/T006-07-runtime-newer-inputs.sh	006	runtime	Unique newer normal inputs, mi
 tests/T010-22-wasm-memory.sh	010	wasm	Allocation-free compile/completion/module exhaustion diagnostics, instance isolation and repeated reuse, with unrelated traps preserved; shell/argv stream publishers preserve diagnostics and reap children
 tests/T010-32-wasm-embedding-js.sh	010	wasm	Importable JS embedding compile/evaluate/build/watch, copied results, async host completion, grants and repeated deterministic disposal
 tests/T010-33-wasm-embedding-python.sh	010	wasm	Asynchronous Python embedding compile/evaluate/build/watch, copied results, grants, cancellation and repeated disposal
-tests/T033-01-host-plugins.sh	033	host	Plugin callback and native-process round-trip, identity, capability, bounds, timeout, cancellation and cleanup behavior
+tests/T033-01-host-plugins.sh	033	host	Evaluate/build/watch plugin configuration plus callback and native-process identity, capability, bounds, timeout, cancellation and cleanup
 tests/T010-23-wasm-watch.sh	010	wasm	dist/kame.js retains shared watch roots, scoped environments and grants across invalidation/source reload, recovers repaired roots and optional includes, drops obsolete input subscriptions, bounds unread watch output, keeps settled roots idle, denies ungranted effects, and kills active recipe children on SIGINT
 tests/T010-24-wasm-target-arguments.sh	010	wasm	WASM target arguments in plan JSON, defaults, dependency scope, identity, diagnostics, dry-run and watch invalidation
 tests/T010-25-wasm-watch-abi.sh	010	wasm	Public watch ABI query/copy semantics, retained roots, file invalidation, malformed resource rejection, allocation failure, instance isolation and disposal
