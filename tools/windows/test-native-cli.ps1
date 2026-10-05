@@ -20,6 +20,8 @@ task native-windows :
 '@ | Set-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :
+	Set-Content recipe-pid $PID
+	Write-Output "native-recipe-pid=$PID"
 	Start-Process -FilePath cmd.exe -ArgumentList '/d /s /c "echo started > child-started & timeout /t 18 /nobreak >nul & echo late > descendant-marker"' -WorkingDirectory (Get-Location)
 	for ($attempt = 0; $attempt -lt 40 -and !(Test-Path child-started); $attempt++) { Start-Sleep -Milliseconds 100 }
 	if (!(Test-Path child-started)) { throw 'native timeout child did not start' }
@@ -46,8 +48,9 @@ task native-timeout :
 		$childLaunched = Test-Path (Join-Path $project 'child-launched')
 		$descendantFinished = Test-Path (Join-Path $project 'descendant-marker')
 		$parentFinished = Test-Path (Join-Path $project 'parent-marker')
+		$recipePid = if (Test-Path (Join-Path $project 'recipe-pid')) { (Get-Content -Raw (Join-Path $project 'recipe-pid')).Trim() } else { 'missing' }
 		if ($timeoutStatus -eq 0 -or ($timeoutOutput -join "`n") -notmatch 'RECIPE_TIMEOUT' -or !$childStarted -or !$childLaunched -or $descendantFinished -or $parentFinished) {
-			throw "Native timeout did not stop and reap its process tree: exit=$timeoutStatus childStarted=$childStarted childLaunched=$childLaunched descendantFinished=$descendantFinished parentFinished=$parentFinished output=$($timeoutOutput -join ' | ')"
+			throw "Native timeout did not stop and reap its process tree: exit=$timeoutStatus recipePid=$recipePid childStarted=$childStarted childLaunched=$childLaunched descendantFinished=$descendantFinished parentFinished=$parentFinished output=$($timeoutOutput -join ' | ')"
 		}
 	} finally {
 		Pop-Location
