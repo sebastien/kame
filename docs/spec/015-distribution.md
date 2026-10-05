@@ -25,7 +25,9 @@ release publishes these flat assets under the base URL
 | `kame.wasm` | `make wasm` | freestanding module |
 | `kame.js` | packaged JS CLI | Node CLI wrapper for `kame.wasm` (`010-wasm.md`) |
 | `bin/kame` | stamped launcher | host provisioning and dispatch |
-| `SHA256SUMS` | checksums | integrity manifest |
+| `PROVENANCE.json` | release builder | version, source revision and asset digests |
+| `SHA256SUMS` | checksums | signed integrity manifest |
+| `SHA256SUMS.sig` | release signer | Ed25519 signature over the exact manifest bytes |
 
 Asset filenames carry no version; the release tag does. Native per-platform
 binaries are not published initially: the APE covers supported hosts and the
@@ -37,9 +39,13 @@ by asset name, using the conventional two-space separator.
 ## Integrity
 
 Every downloaded asset is verified against `SHA256SUMS` before it is installed
-or executed. A missing manifest entry, a checksum mismatch, or the absence of
-any SHA-256 verifier is fatal; the launcher fails closed and installs nothing.
-A partial or unverified download never replaces a cached artifact.
+or executed. The launcher first verifies the detached Ed25519 signature using a
+public key embedded in the stamped launcher, then checks the provenance file
+and selected assets against that manifest. The release operator supplies both
+key files to `make dist-release`; neither is stored in the repository. A
+missing signature verifier, invalid signature, missing manifest entry, or
+checksum mismatch is fatal. A partial or unverified download never replaces a
+cached artifact, and cached artifacts are checked again before reuse.
 
 ## Version Pinning
 
@@ -193,8 +199,9 @@ existing build rules.
 - The launcher selects `wasm` when the host is unsupported for APE or the APE
   probe fails.
 - `KAME_BACKEND` forces a strategy; `KAME_BIN` bypasses detection and download.
-- A missing manifest entry, a checksum mismatch, and a missing verifier each
-  fail closed and leave no installed artifact.
+- A missing manifest entry, checksum mismatch, invalid or wrong-key signature,
+  provenance tampering, and missing OpenSSL verifier each fail closed and leave
+  no installed artifact.
 - A second invocation with a populated cache performs no network access.
 - `KAME_NO_DOWNLOAD=1` fails when the artifact is absent.
 - A lone `--version` prints `kame VERSION` and provisions nothing.
@@ -205,7 +212,6 @@ existing build rules.
 
 ## Deferred
 
-- Signed checksums and provenance attestation.
 - Auto-update or a latest channel; pinning is intentional.
 - Native per-platform release binaries.
 - Windows-native (`cmd.exe`, PowerShell) launcher.

@@ -142,16 +142,24 @@ dist/kame.js: src/js/kame.js
 	mkdir -p dist
 	cp src/js/kame.js dist/kame.js
 
-# Stage the flat release assets with a stamped launcher and SHA256SUMS. Publishing
-# is manual and out of band.
+# Stage and sign the flat release assets. The release operator supplies both
+# key paths; neither private nor public key material is checked into source.
+KAME_RELEASE_PUBLIC_KEY ?=
+KAME_RELEASE_SIGNING_KEY ?=
+KAME_RELEASE_REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 dist-release: dist/kame.com dist/kame.wasm dist/kame.js
+	test -n "$(KAME_RELEASE_PUBLIC_KEY)" -a -f "$(KAME_RELEASE_PUBLIC_KEY)"
+	test -n "$(KAME_RELEASE_SIGNING_KEY)" -a -f "$(KAME_RELEASE_SIGNING_KEY)"
 	mkdir -p dist/release/bin
 	cp dist/kame.com dist/release/kame.com
 	cp dist/kame.wasm dist/release/kame.wasm
 	cp dist/kame.js dist/release/kame.js
-	sed "s|^KAME_STAMP=.*|KAME_STAMP=\"$$(cat VERSION)\"|" bin/kame > dist/release/bin/kame
+	public_key_b64=$$(openssl pkey -pubin -in "$(KAME_RELEASE_PUBLIC_KEY)" -outform DER | openssl base64 -A); \
+	sed -e "s|^KAME_STAMP=.*|KAME_STAMP=\"$$(cat VERSION)\"|" \
+	    -e "s|^KAME_RELEASE_PUBKEY_B64=.*|KAME_RELEASE_PUBKEY_B64=\"$$public_key_b64\"|" \
+	    bin/kame > dist/release/bin/kame
 	chmod +x dist/release/bin/kame
-	cd dist/release && { sha256sum kame.com kame.wasm kame.js bin/kame 2>/dev/null || shasum -a 256 kame.com kame.wasm kame.js bin/kame; } | sort -k2 > SHA256SUMS
+	python3 tools/release_manifest.py --directory dist/release --version "$$(cat VERSION)" --revision "$(KAME_RELEASE_REVISION)" --public-key "$(KAME_RELEASE_PUBLIC_KEY)" --signing-key "$(KAME_RELEASE_SIGNING_KEY)"
 
 dist-ape: dist/kame.com
 

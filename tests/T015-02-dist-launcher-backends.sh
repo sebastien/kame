@@ -5,6 +5,8 @@ set -euo pipefail
 
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
+# shellcheck disable=SC1091
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-release.sh"
 
 test-start "T015-02 distribution launcher backends and cache"
 cd "$CLI_ROOT"
@@ -21,6 +23,7 @@ sha() {
 
 root="$TMPDIR/t015b"
 mkdir -p "$root"
+release_test_keys "$root/keys"
 
 # build_release DIR APE_BODY writes a complete verified release tree.
 build_release() {
@@ -30,14 +33,8 @@ build_release() {
 	chmod +x "$dir/kame.com"
 	printf 'const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$dir/kame.js"
 	printf 'dummy-wasm' >"$dir/kame.wasm"
-	sed 's|^KAME_STAMP=.*|KAME_STAMP="9.9.9"|' "$launcher" >"$dir/bin/kame"
-	chmod +x "$dir/bin/kame"
-	{
-		echo "$(sha "$dir/kame.com")  kame.com"
-		echo "$(sha "$dir/kame.js")  kame.js"
-		echo "$(sha "$dir/kame.wasm")  kame.wasm"
-		echo "$(sha "$dir/bin/kame")  bin/kame"
-	} | sort -k2 >"$dir/SHA256SUMS"
+	release_test_stamp_launcher "$launcher" "$dir/bin/kame" 9.9.9
+	release_test_sign "$dir" 9.9.9 fixture "$root/keys"
 }
 
 good="$root/good"
@@ -74,7 +71,9 @@ echo "ape:$*"'
 	echo "$(sha "$nomanifest/kame.com")  kame.com"
 	echo "$(sha "$nomanifest/kame.wasm")  kame.wasm"
 	echo "$(sha "$nomanifest/bin/kame")  bin/kame"
+	echo "$(sha "$nomanifest/PROVENANCE.json")  PROVENANCE.json"
 } | sort -k2 >"$nomanifest/SHA256SUMS"
+openssl pkeyutl -sign -inkey "$root/keys/signing.pem" -rawin -in "$nomanifest/SHA256SUMS" -out "$nomanifest/SHA256SUMS.sig"
 set +e
 KAME_RELEASE_URL="file://$nomanifest" KAME_HOME="$root/nomanifest-cache" KAME_BACKEND=wasm "$nomanifest/bin/kame" x >"$root/out" 2>"$root/err"
 status=$?

@@ -131,7 +131,7 @@ Current coverage:
 | 012 | 4 suites; sequences 01, 02, 03, 04 | Protocol/event ownership, live output, large captures and public backpressure |
 | 013 | 5 suites; sequences 01, 02, 03, 04, 05 | Catalog, fixture hygiene, binary contract, graph growth and artifact build modes |
 | 014 | 2 suites; sequences 01, 02 | Sections, pattern replace, bare captures and exact/template precedence |
-| 015 | 3 suites; sequences 01, 02, 03 | Launcher integrity, backend choice, provisioning and build metadata |
+| 015 | 4 suites; sequences 01, 02, 03, 04 | Launcher integrity, backend choice, provisioning, build metadata and signed release provenance |
 | 016 | 1 suite; sequences 01 | Template rendering, directives, includes, styles and check mode |
 | 017 | 19 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 | Kash processes/control, unified sessions, capabilities, async ownership and recipe interpreters |
 | 018 | 1 suite; sequences 01 | Structural formatting goldens, equivalent ASTs, width boundaries and host parity |

@@ -5,6 +5,8 @@ set -euo pipefail
 
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
+# shellcheck disable=SC1091
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-release.sh"
 
 test-start "T015-01 distribution launcher"
 cd "$CLI_ROOT"
@@ -23,6 +25,8 @@ root="$TMPDIR/t015"
 release="$root/release"
 cache="$root/cache"
 mkdir -p "$release/bin"
+release_test_keys "$root/keys"
+export KAME_RELEASE_PUBKEY_B64_OVERRIDE="$RELEASE_TEST_KEY_B64"
 
 cat >"$release/kame.com" <<'SH'
 #!/bin/sh
@@ -35,14 +39,8 @@ SH
 chmod +x "$release/kame.com"
 printf 'const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$release/kame.js"
 printf 'dummy-wasm' >"$release/kame.wasm"
-sed 's|^KAME_STAMP=.*|KAME_STAMP="9.9.9"|' "$launcher" >"$release/bin/kame"
-chmod +x "$release/bin/kame"
-{
-	echo "$(sha "$release/kame.com")  kame.com"
-	echo "$(sha "$release/kame.js")  kame.js"
-	echo "$(sha "$release/kame.wasm")  kame.wasm"
-	echo "$(sha "$release/bin/kame")  bin/kame"
-} | sort -k2 >"$release/SHA256SUMS"
+release_test_stamp_launcher "$launcher" "$release/bin/kame" 9.9.9
+release_test_sign "$release" 9.9.9 fixture "$root/keys"
 
 export KAME_VERSION=9.9.9
 export KAME_RELEASE_URL="file://$release"
@@ -90,6 +88,7 @@ test-step "a checksum mismatch fails closed and installs nothing"
 bad="$root/bad"
 mkdir -p "$bad/bin"
 cp "$release/kame.com" "$release/kame.js" "$release/kame.wasm" "$bad/"
+cp "$release/PROVENANCE.json" "$bad/"
 cp "$release/bin/kame" "$bad/bin/kame"
 {
 	echo "$(sha "$bad/kame.com")  kame.com"
@@ -97,6 +96,9 @@ cp "$release/bin/kame" "$bad/bin/kame"
 	echo "$(sha "$bad/kame.wasm")  kame.wasm"
 	echo "$(sha "$bad/bin/kame")  bin/kame"
 } | sort -k2 >"$bad/SHA256SUMS"
+echo "$(sha "$bad/PROVENANCE.json")  PROVENANCE.json" >>"$bad/SHA256SUMS"
+sort -k2 "$bad/SHA256SUMS" -o "$bad/SHA256SUMS"
+openssl pkeyutl -sign -inkey "$root/keys/signing.pem" -rawin -in "$bad/SHA256SUMS" -out "$bad/SHA256SUMS.sig"
 set +e
 KAME_HOME="$root/badcache" KAME_RELEASE_URL="file://$bad" KAME_BACKEND=wasm "$launcher" x >"$root/out" 2>"$root/err"
 status=$?
@@ -119,7 +121,7 @@ set +e
 PATH="$tools" KAME_HOME="$root/nocache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$launcher" x >"$root/out" 2>"$root/err"
 status=$?
 set -e
-if [ "$status" = 1 ] && grep -q 'no SHA-256 verifier' "$root/err"; then
+if [ "$status" = 1 ] && grep -q 'no signature verifier' "$root/err"; then
 	test-ok "missing verifier is fatal"
 else
 	test-fail "missing verifier: status=$status err=$(cat "$root/err")"

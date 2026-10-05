@@ -1,8 +1,8 @@
 #!/bin/sh
 # Kame launcher: provisions and runs the pinned Kame build for the host.
 #
-# Spec: docs/spec/015-distribution.md. POSIX sh, uses only the same downloader
-# and verifier tools as the bootstrap Makefile. The launcher is silent on
+# Spec: docs/spec/015-distribution.md. POSIX sh, uses the configured downloader,
+# SHA-256 utility, and OpenSSL signature verifier. The launcher is silent on
 # success; KAME_VERBOSE=1 narrates provisioning on stderr. It never writes to
 # stdout except its own --version answer.
 set -eu
@@ -10,6 +10,8 @@ set -eu
 # Stamped to the pinned version at release time. Empty in a source checkout,
 # where the version comes from a VERSION file.
 KAME_STAMP=""
+# Embedded from the release operator's verification key when staging a release.
+KAME_RELEASE_PUBKEY_B64=""
 
 die() {
 	printf 'kame: %s\n' "$1" >&2
@@ -92,6 +94,27 @@ verify() {
 	[ "$actual" = "$2" ]
 }
 
+verify_signature() {
+	manifest=$1
+	signature=$2
+	public_key=$cache/.release-public.$$
+	if ! command -v openssl >/dev/null 2>&1; then
+		die "no signature verifier (openssl)"
+	fi
+	public_key_b64=${KAME_RELEASE_PUBKEY_B64_OVERRIDE:-$KAME_RELEASE_PUBKEY_B64}
+	[ -n "$public_key_b64" ] || die "release verification key is not configured"
+	printf '%s' "$public_key_b64" | openssl base64 -d -A >"$public_key" 2>/dev/null || {
+		rm -f "$public_key"
+		die "invalid release verification key"
+	}
+	if ! openssl pkeyutl -verify -pubin -keyform DER -inkey "$public_key" -rawin -in "$manifest" -sigfile "$signature" >/dev/null 2>&1; then
+		rm -f "$public_key"
+		return 1
+	fi
+	rm -f "$public_key"
+	return 0
+}
+
 manifest_entry() {
 	while read -r hex asset _rest; do
 		if [ "$asset" = "$2" ]; then
@@ -125,23 +148,60 @@ release_lock() {
 }
 
 ensure_manifest() {
-	[ -f "$cache/SHA256SUMS" ] && return 0
+	if [ -f "$cache/SHA256SUMS" ] && [ -f "$cache/SHA256SUMS.sig" ]; then
+		verify_signature "$cache/SHA256SUMS" "$cache/SHA256SUMS.sig" || die "release manifest signature is invalid"
+		verify_provenance
+		return 0
+	fi
 	[ "${KAME_NO_DOWNLOAD:-0}" = "1" ] && die "missing SHA256SUMS (download disabled)"
 	staging="$cache/.staging.$$"
 	rm -rf "$staging"
 	mkdir -p "$staging"
 	note "fetching SHA256SUMS for $version"
 	fetch "${release_base}SHA256SUMS" "$staging/SHA256SUMS"
+	fetch "${release_base}SHA256SUMS.sig" "$staging/SHA256SUMS.sig"
+	verify_signature "$staging/SHA256SUMS" "$staging/SHA256SUMS.sig" || {
+		rm -rf "$staging"
+		die "release manifest signature is invalid"
+	}
 	mv "$staging/SHA256SUMS" "$cache/SHA256SUMS"
+	mv "$staging/SHA256SUMS.sig" "$cache/SHA256SUMS.sig"
 	rmdir "$staging"
+	verify_provenance
+}
+
+verify_provenance() {
+	staging="$cache/.provenance.$$"
+	rm -rf "$staging"
+	mkdir -p "$staging"
+	if [ -f "$cache/PROVENANCE.json" ]; then
+		cp "$cache/PROVENANCE.json" "$staging/PROVENANCE.json"
+	else
+		[ "${KAME_NO_DOWNLOAD:-0}" != "1" ] || { rm -rf "$staging"; die "missing cached PROVENANCE.json (download disabled)"; }
+		fetch "${release_base}PROVENANCE.json" "$staging/PROVENANCE.json"
+	fi
+	hex=$(manifest_entry "$cache/SHA256SUMS" "PROVENANCE.json") || {
+		rm -rf "$staging"
+		die "missing manifest entry: PROVENANCE.json"
+	}
+	verify "$staging/PROVENANCE.json" "$hex" || {
+		rm -rf "$staging"
+		die "checksum mismatch: PROVENANCE.json"
+	}
+	if [ ! -f "$cache/PROVENANCE.json" ]; then mv "$staging/PROVENANCE.json" "$cache/PROVENANCE.json"; fi
+	rm -rf "$staging"
 }
 
 install_wasm() {
+	ensure_manifest
 	if [ -f "$cache/wasm/kame.js" ] && [ -f "$cache/wasm/kame.wasm" ]; then
+		for asset in kame.js kame.wasm; do
+			hex=$(manifest_entry "$cache/SHA256SUMS" "$asset") || die "missing manifest entry: $asset"
+			verify "$cache/wasm/$asset" "$hex" || die "checksum mismatch: cached $asset"
+		done
 		return 0
 	fi
 	[ "${KAME_NO_DOWNLOAD:-0}" = "1" ] && die "missing cached wasm artifacts (download disabled)"
-	ensure_manifest
 	staging="$cache/.staging.$$"
 	rm -rf "$staging"
 	mkdir -p "$staging/wasm"
@@ -162,9 +222,13 @@ install_wasm() {
 }
 
 install_ape() {
-	[ -x "$cache/ape/kame.com" ] && return 0
-	[ "${KAME_NO_DOWNLOAD:-0}" = "1" ] && die "missing cached APE (download disabled)"
 	ensure_manifest
+	if [ -x "$cache/ape/kame.com" ]; then
+		hex=$(manifest_entry "$cache/SHA256SUMS" "kame.com") || die "missing manifest entry: kame.com"
+		verify "$cache/ape/kame.com" "$hex" || die "checksum mismatch: cached kame.com"
+		return 0
+	fi
+	[ "${KAME_NO_DOWNLOAD:-0}" = "1" ] && die "missing cached APE (download disabled)"
 	staging="$cache/.staging.$$"
 	rm -rf "$staging"
 	mkdir -p "$staging/ape"
