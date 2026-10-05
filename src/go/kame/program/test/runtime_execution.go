@@ -3,6 +3,7 @@ package program_test
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/host/posix"
 	"kame/operations"
 	"kame/lang/eval"
@@ -627,6 +628,24 @@ func TestServiceStopUsesConfiguredGracePeriod(t *testing.T) {
 	started.Handle.Cancel()
 	for i := 0; i < 30 && host.Active() != 0; i++ { compiled.Program.Tick(10) }
 	if host.Active() != 0 { t.Error("zero grace period did not force service process cleanup") }
+	started.Handle.Free()
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestForwardedServiceUsesConfiguredLogRetention(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "service.kmk", "service daemon : ; [log-bytes: 17]\n\twhile :; do sleep 1; done\n")
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ForwardRequests: true})
+	if compiled.Program == nil || len(compiled.Diagnostics) != 0 { t.Fatal("compile failed"); return }
+	started := compiled.Program.Start("daemon")
+	if started.Diagnostic.Code != "" || started.Handle == nil { t.Fatal("service did not start"); return }
+	compiled.Program.Tick(0)
+	next := compiled.Program.NextOutbound()
+	if !next.OK || next.Request.Kind != host.RequestProcess { t.Fatal("service start request was not forwarded"); return }
+	if retain := compiled.Program.ProcessRetainLimit(next.Request); retain != 17 { t.Errorf("service retention limit = %d, want 17", retain) }
+	next.Request.Free(a)
+	started.Handle.Cancel()
 	started.Handle.Free()
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }

@@ -84,7 +84,8 @@ native and forwarded readiness probes gate dependents, readiness timeouts tear
 down the service, and configured SIGTERM-to-SIGKILL grace periods are honored
 by native and JavaScript CLI hosts. Native and forwarded health probes now
 restart unhealthy services within configured bounds, and startup failures
-retry before dependents resume; Go tests and T010-26 cover these paths.
-Bounded log retention and full embedding lifecycle parity remain open under
-024. D03–D05 and D08–D18 remain open. The preceding
+retry before dependents resume. Per-service log retention is bounded on native
+and forwarded hosts; Go tests and T010-26 cover these paths. Full lifecycle
+event parity and embedding lifecycle parity remain open under 024. D03–D05 and
+D08–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.
