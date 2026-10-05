@@ -84,7 +84,12 @@ static km_assign_process_to_job_object_fn km_assign_process_to_job_object;
 static km_terminate_job_object_fn km_terminate_job_object;
 static bool km_windows_job_api_loaded;
 
-static bool km_windows_jobs_needed(void) { return IsWindows(); }
+static bool km_windows_jobs_needed(void) {
+    bool windows = IsWindows();
+    intptr_t kernel = windows ? GetModuleHandle("kernel32.dll") : 0;
+    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job host detection: windows=%d kernel=%lld\n", windows, (long long)kernel);
+    return windows && kernel != 0;
+}
 
 static bool km_load_windows_job_api(void) {
     if (!km_windows_job_api_loaded) {
@@ -103,6 +108,7 @@ static int64_t km_windows_job_create(void) {
     if (!km_windows_jobs_needed()) return 0;
     if (!km_load_windows_job_api()) return -1;
     int64_t job = km_create_job_object(NULL, NULL);
+    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job create: handle=%lld\n", (long long)job);
     return job && job != -1 ? job : -1;
 }
 
@@ -112,6 +118,7 @@ static bool km_windows_job_assign(int64_t job, pid_t pid) {
     int64_t process = OpenProcess(0x0100u | 0x0001u, 0, (uint32_t)pid);
     if (!process || process == -1) return false;
     bool assigned = km_assign_process_to_job_object(job, process) != 0;
+    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job assign: job=%lld pid=%d process=%lld assigned=%d\n", (long long)job, (int)pid, (long long)process, assigned);
     CloseHandle(process);
     return assigned;
 }
@@ -119,7 +126,9 @@ static bool km_windows_job_assign(int64_t job, pid_t pid) {
 static bool km_windows_job_terminate(int64_t job, int sig) {
     if (!job || !km_windows_jobs_needed()) return true;
     if (!km_load_windows_job_api()) return false;
-    return km_terminate_job_object(job, (uint32_t)(128 + sig)) != 0;
+    bool terminated = km_terminate_job_object(job, (uint32_t)(128 + sig)) != 0;
+    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job terminate: job=%lld signal=%d result=%d\n", (long long)job, sig, terminated);
+    return terminated;
 }
 
 static void km_windows_job_close(int64_t *job) {
