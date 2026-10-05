@@ -37,7 +37,7 @@ adapters and integration evidence rather than placeholder methods.
 | D12 | Template extensions | Complete: matched labels, match blocks, trim markers, inline blocks, auto style, PowerShell/batch comments, canonical formatting and loop index/key bindings; native/WASM conformance in T016-02. See 030. |
 | D13 | Resource protocols | Complete: canonical `file:` and `mem:` identity, scoped grants, dependency invalidation, URI-aware filesystem traversal, native/POSIX and WASM host mappings, and portable memory storage; native/WASM CLI acceptance in T031-01 plus host, evaluator and program suites. See 031. |
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
-| D15 | Plugins | Contract in 033 defines explicit versioned operation registrations, canonical bounded-value JSON, trusted native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules; implementation and acceptance remain. |
+| D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
 | D16 | Platform execution | Windows process lifecycle and launcher; APE verification on the advertised non-Linux hosts; platform tests prove spawn, pipes, timeout and descendant cleanup. |
 | D17 | Distribution tooling | Explicit update/latest selection alongside pinned defaults; native platform artifacts; package-manager integration; `kame init` without overwriting existing project files; provisioning/integrity tests. |
 | D18 | Remaining library/ergonomic extensions | Specified tagged shell helpers and aliases, equality-value filtering, terminal color functions, dependency sequencing and alternative build syntax; formatting and execution tests. |
@@ -101,5 +101,13 @@ release locks on failure, owner interruption and waiter cancellation;
 T010-30 covers these paths. The
 portable in-memory filesystem stores complete task records and reuses them
 through the shared identity and validation path in T008-04. T010-28 covers
-bounded eviction and inspection/cleanup on native and WASM. D08–D18 remain open. The preceding
+bounded eviction and inspection/cleanup on native and WASM. D15 now has a
+versioned plugin registry with all-or-nothing declaration validation,
+capability and arity enforcement, canonical value serialization, request
+generation/attempt correlation, and Go/WASM host bridges. The Node.js embedding
+supports both callbacks and direct-argv native processes; T033-01 covers every
+canonical value kind, identity and protocol rejection, limits, process
+termination, cancellation, disposal, and evaluate/build/watch configuration.
+The core codec and plugin registry tests also verify allocator ownership and
+version-sensitive operation identity. D16–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.

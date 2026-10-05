@@ -62,13 +62,14 @@ soon as the response is accepted.
 
 ## Native process adapter
 
-The POSIX adapter starts the configured argv for each invocation, writes one
+The Node.js adapter starts the configured argv for each invocation, writes one
 request object followed by a newline to stdin, and reads one response object
-from stdout. Stderr is retained only up to the declared bound and is never
-copied into diagnostics. The adapter closes stdin after the request, rejects
-extra stdout records or a nonzero exit, and reaps the whole child process group
-on completion, timeout, or cancellation. The executable path and argv are
-configuration data and are never interpolated into a shell command.
+from stdout. It drains and discards stderr so plugins cannot block on a full
+pipe or expose private output through diagnostics. The adapter closes stdin
+after the request, rejects extra stdout records or a nonzero exit, and reaps the
+whole child process group on completion, timeout, cancellation, or embedding
+disposal. The executable path and argv are configuration data and are never
+interpolated into a shell command.
 
 ## JavaScript host adapter
 
@@ -79,14 +80,14 @@ adapter; an explicit callback for the same plugin takes precedence. The process
 adapter passes argv directly to `spawn` with shell parsing disabled, writes one
 JSON request line to stdin, and accepts exactly one JSON response line from
 stdout. It drains but never exposes stderr, bounds stdout, and terminates the
-child process group on timeout or cancellation. A callback receives an object
-with `protocol`, `request`,
-`plugin`, `pluginVersion`, `operation`, `operationVersion`, `generation`,
-`attempt`, and a positional `args` array containing tagged Kame values. It also
-receives `{ signal }` as its second argument. The response repeats all request
-identity fields and contains exactly one tagged `value`, or an `error` with a
-stable code and bounded message. Unknown fields or mismatched identity fail
-with `PLUGIN_PROTOCOL`.
+child process group on timeout, cancellation, or embedding disposal. A callback
+receives an object with `protocol`, `request`, `plugin`, `pluginVersion`,
+`operation`, `operationVersion`, `generation`, `attempt`, and a positional
+`args` array containing tagged Kame values. It also receives `{ signal }` as
+its second argument. The response repeats all request identity fields and
+contains exactly one tagged `value`, or an `error` with a stable code and
+bounded message. Unknown fields or mismatched identity fail with
+`PLUGIN_PROTOCOL`.
 
 Callback results may be promises. Rejected promises become `PLUGIN_FAIL`;
 expired calls become `PLUGIN_TIMEOUT`. The runtime aborts the callback signal
@@ -121,3 +122,11 @@ disposal.
   and disposal each produce one terminal result and clean up their resources.
 - Repeated bounded calls leave no allocator-owned values, child processes, or
   pending JavaScript callbacks behind.
+
+T033-01 covers callback and native-process adapters across all canonical value
+kinds, declaration modes, identity and type failures, arity and capability
+denials, limits, timeout, cancellation, disposal, stale completion, and
+process-group cleanup. `TestPluginValueJSONRoundTripsSupportedKinds`,
+`TestEitherPluginVersionChangesOperationIdentity`, and the WASM runtime
+registration test cover portable encoding, cache identity, and request
+correlation.
