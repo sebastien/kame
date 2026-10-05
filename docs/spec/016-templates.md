@@ -351,14 +351,10 @@ verbatim literal is idempotent.
 
 ## Deferred
 
-- Block labels such as `@end(for)` for stronger matching diagnostics.
-- A `@match(PATTERN)` document directive with pattern clauses.
-- Whitespace trim markers around directive lines.
-- Inline (non-line) block directives.
-- Automatic comment-style detection from content.
-- Additional host comment conventions.
-- Template formatting and normalization.
-- An index or key in `@for` beyond the parameter bindings.
+The D12 extensions are specified in `030-template-extensions.md`: labeled
+block endings, pattern matching blocks, trim markers, inline blocks,
+content-based style inference, PowerShell and batch comment conventions,
+canonical formatting, and loop index/key bindings.
 
 ## Acceptance Tests
 
