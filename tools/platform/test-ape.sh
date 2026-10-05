@@ -61,6 +61,16 @@ smoke_output=$(cat "$work_path/ape-smoke.out")
 if [ "$smoke_status" -ne 0 ] || [ "$smoke_output" != "APE bootstrap smoke passed" ]; then
 	echo "APE bootstrap smoke failed: exit=$smoke_status output=$smoke_output" >&2
 	cat "$work_path/ape-smoke.err" >&2
+	if [ "$ape_host" = OpenBSD ]; then
+		report_phase "trace OpenBSD APE bootstrap failure"
+		if run_binary "$smoke_path" --strace >"$work_path/ape-smoke.trace.out" 2>"$work_path/ape-smoke.trace.err"; then
+			trace_status=0
+		else
+			trace_status=$?
+		fi
+		echo "OpenBSD APE trace exit=$trace_status" >&2
+		cat "$work_path/ape-smoke.trace.err" >&2
+	fi
 	exit 1
 fi
 
