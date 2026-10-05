@@ -44,4 +44,5 @@ task native-timeout :
 	Remove-Item -Recurse -Force $project
 }
 
+$global:LASTEXITCODE = 0
 Write-Output "Native Windows CLI passed: $version"
