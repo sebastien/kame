@@ -14,10 +14,19 @@ $project = Join-Path $env:TEMP ("kame-native-windows-" + [guid]::NewGuid().ToStr
 New-Item -ItemType Directory -Path $project | Out-Null
 try {
 	@'
+include ./native-child.kmk
+
 task native-windows :
 	Write-Output 'native-windows-recipe-ok'
 	Set-Content -Path native-env.txt -Value $env:KAME_NATIVE_ENV
+
+task native-cwd :
+	(Get-Location).Path | Set-Content -NoNewline native-cwd.txt
 '@ | Set-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
+	@'
+task native-included :
+	Write-Output 'native-include-ok'
+'@ | Set-Content -Encoding ascii (Join-Path $project 'native-child.kmk')
 	@'
 task native-timeout :
 	Set-Content recipe-pid $PID
@@ -32,12 +41,21 @@ task native-timeout :
 	$shell = (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe').Replace('\', '/')
 	Push-Location $project
 	try {
-		$output = & $exe --env KAME_NATIVE_ENV=passed --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-windows 2>&1
+		$env:KAME_NATIVE_ENV = 'inherited'
+		$output = & $exe --directory $project --env kame_native_env=passed --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-windows 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch 'native-windows-recipe-ok') {
 			throw "Native recipe check failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
 		}
 		if ((Get-Content (Join-Path $project 'native-env.txt') -Raw).Trim() -ne 'passed') {
-			throw 'Native recipe did not receive the CLI environment override or write its output file.'
+			throw 'Native recipe did not replace the inherited environment name case-insensitively or write its output file.'
+		}
+		$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-cwd 2>&1
+		if ($LASTEXITCODE -ne 0 -or (Get-Content (Join-Path $project 'native-cwd.txt') -Raw) -ne $project) {
+			throw "Native CLI working-directory selection failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
+		}
+		$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-included 2>&1
+		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch 'native-include-ok') {
+			throw "Native source include check failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
 		}
 		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
