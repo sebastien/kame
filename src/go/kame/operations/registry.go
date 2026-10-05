@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v4"
+const version = "v5"
 
 // Register installs every standard operation. Registration stays declarative
 // so operation implementations can be organized by domain independently.
@@ -17,6 +17,8 @@ func Register(r *eval.Registry) bool {
 		add(r, "render", opRender, 1, 3) &&
 		add(r, "template-items", opTemplateItems, 1, 1) &&
 		add(r, "template-apply", opTemplateApply, 2, 2) &&
+		add(r, "template-trim-start", opTemplateTrimStart, 1, 1) &&
+		add(r, "template-trim-end", opTemplateTrimEnd, 1, 1) &&
 		add(r, "tool", opTool, 1, 1) && add(r, "get", opGet, 2, 3) && add(r, "first", opFirst, 1, 1) && add(r, "nth", opNth, 2, 2) &&
 		add(r, "apply", opApply, 2, 2) && add(r, "list", opList, 0, -1) &&
 		add(r, "map", opMap, 2, 2) && add(r, "flatmap", opFlatMap, 2, 2) &&

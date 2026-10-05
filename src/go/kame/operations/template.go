@@ -257,7 +257,11 @@ func opTemplateItems(c *eval.Context, state any, values []core.Value) eval.Resul
 	_ = state
 	input := values[0]
 	count := 0
-	if input.Kind == core.List { count = len(input.List) } else if input.Kind == core.Record { count = len(input.Record) } else {
+	if input.Kind == core.List {
+		count = len(input.List)
+	} else if input.Kind == core.Record {
+		count = len(input.Record)
+	} else {
 		return invalidArgument(c, values, 0, "list or record")
 	}
 	items := slices.Make[core.Value](c.Run, count)
@@ -287,11 +291,47 @@ func opTemplateItems(c *eval.Context, state any, values []core.Value) eval.Resul
 // document loop calls distinct from apply's legacy single-list argument rule.
 func opTemplateApply(c *eval.Context, state any, values []core.Value) eval.Result {
 	_ = state
-	if values[0].Kind != core.Callable { return invalidArgument(c, values, 0, "callable") }
-	if values[1].Kind != core.List { return invalidArgument(c, values, 1, "list") }
+	if values[0].Kind != core.Callable {
+		return invalidArgument(c, values, 0, "callable")
+	}
+	if values[1].Kind != core.List {
+		return invalidArgument(c, values, 1, "list")
+	}
 	result := c.Call(values[0], values[1].List)
 	c.FreeCallable(&values[0])
 	return result
+}
+
+func opTemplateTrimStart(c *eval.Context, state any, values []core.Value) eval.Result {
+	_ = state
+	return opTemplateTrim(c, values, true)
+}
+
+func opTemplateTrimEnd(c *eval.Context, state any, values []core.Value) eval.Result {
+	_ = state
+	return opTemplateTrim(c, values, false)
+}
+
+func opTemplateTrim(c *eval.Context, values []core.Value, trimStart bool) eval.Result {
+	if values[0].Kind != core.String {
+		return invalidArgument(c, values, 0, "string")
+	}
+	text := values[0].Text
+	start, end := 0, len(text)
+	if trimStart {
+		for start < end && isTemplateWhitespace(text[start]) {
+			start++
+		}
+	} else {
+		for end > start && isTemplateWhitespace(text[end-1]) {
+			end--
+		}
+	}
+	return eval.Result{Value: core.NewString(c.Run, text[start:end])}
+}
+
+func isTemplateWhitespace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
 }
 
 func popRenderStack(c *eval.Context) {
@@ -343,12 +383,8 @@ func isExplicitPath(text string) bool {
 	return false
 }
 
-
-
-
-
 func readFileBytes(c *eval.Context, path string) eval.Result {
-    // Retain each completed read across nested include waits. Otherwise an outer
-    // render can consume the inner include's completion as its own source.
-    return request(c, host.RequestReadFile, host.FilePayload(c.Run, host.OpRead, path))
+	// Retain each completed read across nested include waits. Otherwise an outer
+	// render can consume the inner include's completion as its own source.
+	return request(c, host.RequestReadFile, host.FilePayload(c.Run, host.OpRead, path))
 }

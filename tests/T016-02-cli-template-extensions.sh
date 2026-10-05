@@ -32,6 +32,14 @@ list_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@
 record_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: [first: "A" second: "B"]] "plain")'
 inline_plain='(render "Hi @if(:true)there@end!" "plain")'
 inline_html='(render "a<!-- @if(:true) -->b<!-- @end(if) -->c" "html")'
+inline_c='(render "x/* @if(:true) */y/* @end(if) */z" "c")'
+inline_powershell='(render "x<# @if(:true) #>y<# @end(if) #>z" "powershell")'
+inline_for='(render (cat "<@for([item] xs)" "@" "(item)" "@end(for)>!") [xs: ["x" "y"]] "plain")'
+inline_with='(render (cat "x@with([name: " "\"A\"" "])@" "(name)" "@end(with)z") "plain")'
+inline_match='(render (cat "x@match(path)@case(./{slug:*}.md)" "@" "(slug)" "@else other@end(match)z") [path: "./a.md"] "plain")'
+inline_raw='(render (cat "a@raw " "@" "(name)" "@end(raw)c") "plain")'
+trim_markers='(render "left   @-if(:true)-  right  @-end(if)- \r\n\t tail" "plain")'
+trim_else='(render "A@if(:false) B@else-  C@end(if)D" "plain")'
 nested_loop='(render (cat "@for([group] groups)\nouter:" "@" "(index)" "[\n@for([item] group)\n" "@" "(index)" ":" "@" "(item)" ",\n@end(for)\n]" "@" "(index)" "\n@end(for)\n") [groups: [["a" "b"] ["c"]]] "plain")'
 
 for host in native wasm; do
@@ -72,6 +80,46 @@ for host in native wasm; do
 		test-ok "$host renders HTML inline blocks across text boundaries"
 	else
 		test-fail "$host HTML inline block: $(cat "$TMPDIR/$host.inline-html.err") $(cat "$TMPDIR/$host.inline-html.out")"
+	fi
+	"${runner[@]}" do run --lang expr -c "$inline_c" >"$TMPDIR/$host.inline-c.out" 2>"$TMPDIR/$host.inline-c.err"
+	if [ "$(cat "$TMPDIR/$host.inline-c.out")" = '"xyz"' ]; then
+		test-ok "$host renders C inline block comments"
+	else
+		test-fail "$host C inline block: $(cat "$TMPDIR/$host.inline-c.err") $(cat "$TMPDIR/$host.inline-c.out")"
+	fi
+	"${runner[@]}" do run --lang expr -c "$inline_powershell" >"$TMPDIR/$host.inline-powershell.out" 2>"$TMPDIR/$host.inline-powershell.err"
+	if [ "$(cat "$TMPDIR/$host.inline-powershell.out")" = '"xyz"' ]; then
+		test-ok "$host renders PowerShell inline block comments"
+	else
+		test-fail "$host PowerShell inline block: $(cat "$TMPDIR/$host.inline-powershell.err") $(cat "$TMPDIR/$host.inline-powershell.out")"
+	fi
+	for block in for with match raw; do
+		value="inline_$block"
+		expected=''
+		case "$block" in
+			for) expected='"<xy>!"' ;;
+			with) expected='"xAz"' ;;
+			match) expected='"xaz"' ;;
+			raw) expected='"a @(name)c"' ;;
+		esac
+		"${runner[@]}" do run --lang expr -c "${!value}" >"$TMPDIR/$host.inline-$block.out" 2>"$TMPDIR/$host.inline-$block.err"
+		if [ "$(cat "$TMPDIR/$host.inline-$block.out")" = "$expected" ]; then
+			test-ok "$host renders inline $block blocks"
+		else
+			test-fail "$host inline $block block: $(cat "$TMPDIR/$host.inline-$block.err") $(cat "$TMPDIR/$host.inline-$block.out")"
+		fi
+	done
+	"${runner[@]}" do run --lang expr -c "$trim_markers" >"$TMPDIR/$host.trim.out" 2>"$TMPDIR/$host.trim.err"
+	if [ "$(cat "$TMPDIR/$host.trim.out")" = '"leftrighttail"' ]; then
+		test-ok "$host trims adjacent ASCII whitespace across CRLF"
+	else
+		test-fail "$host trim markers: $(cat "$TMPDIR/$host.trim.err") $(cat "$TMPDIR/$host.trim.out")"
+	fi
+	"${runner[@]}" do run --lang expr -c "$trim_else" >"$TMPDIR/$host.trim-else.out" 2>"$TMPDIR/$host.trim-else.err"
+	if [ "$(cat "$TMPDIR/$host.trim-else.out")" = '"ACD"' ]; then
+		test-ok "$host applies right trimming to the selected else branch"
+	else
+		test-fail "$host else trim: $(cat "$TMPDIR/$host.trim-else.err") $(cat "$TMPDIR/$host.trim-else.out")"
 	fi
 	"${runner[@]}" do run --lang expr -c "$list_loop" >"$TMPDIR/$host.list-loop.out" 2>"$TMPDIR/$host.list-loop.err"
 	if [ "$(cat "$TMPDIR/$host.list-loop.out")" = '"0::a;\n1::b;\n"' ]; then

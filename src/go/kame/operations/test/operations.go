@@ -6,6 +6,7 @@ import (
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
+	"kame/lang/template"
 	"kame/operations"
 	"solod.dev/so/testing"
 )
@@ -554,6 +555,31 @@ func TestDocumentInlineBlocksRenderAcrossTextBoundaries(t *testing.T) {
 	result = evaluate(t, program, `(render "a<!-- @if(:true) -->b<!-- @end(if) -->c" "html")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "abc" {
 		t.Error("HTML inline if block did not preserve text around the block")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestDocumentTrimMarkersRemoveAdjacentASCIIWhitespace(t *testing.T) {
+	a := t.Allocator()
+	doc := template.ParseDocument(a, "trim", "left   @-if(:true)-  right  @-end(if)- \r\n\t tail", "plain")
+	if len(doc.Diagnostics) != 0 {
+		t.Error("trim document parse: " + doc.Diagnostics[0].Code + " " + doc.Diagnostics[0].Message)
+	}
+	doc.Free()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "document-trim", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, `(render "left   @-if(:true)-  right  @-end(if)- \r\n\t tail" "plain")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "leftrighttail" {
+		t.Error("trim markers did not remove adjacent ASCII whitespace: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
 	}
 	result.Free(a)
 	engine.Free()
