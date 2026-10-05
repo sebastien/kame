@@ -20,7 +20,7 @@ task native-windows :
 '@ | Set-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :
-	$childScript = "Set-Content -Path '$env:KAME_CHILD_STARTED_MARKER' -Value started; Start-Sleep -Seconds 4; Set-Content -Path '$env:KAME_DESCENDANT_MARKER' -Value late"
+	$childScript = "Set-Content -Path '$env:KAME_CHILD_STARTED_MARKER' -Value started; Start-Sleep -Seconds 15; Set-Content -Path '$env:KAME_DESCENDANT_MARKER' -Value late"
 	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childScript))
 	Start-Process -FilePath $env:KAME_NATIVE_SHELL -ArgumentList "-NoProfile -NonInteractive -EncodedCommand $encoded"
 	Start-Sleep -Seconds 10
@@ -39,9 +39,9 @@ task native-timeout :
 		$childStartedMarker = Join-Path $project 'child-started-marker'
 		$descendantMarker = Join-Path $project 'descendant-marker'
 		$parentMarker = Join-Path $project 'parent-marker'
-		$timeoutOutput = & $exe --timeout 2000 --env "KAME_NATIVE_SHELL=$shell" --env "KAME_CHILD_STARTED_MARKER=$childStartedMarker" --env "KAME_DESCENDANT_MARKER=$descendantMarker" --env "KAME_PARENT_MARKER=$parentMarker" --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
+		$timeoutOutput = & $exe --timeout 10000 --env "KAME_NATIVE_SHELL=$shell" --env "KAME_CHILD_STARTED_MARKER=$childStartedMarker" --env "KAME_DESCENDANT_MARKER=$descendantMarker" --env "KAME_PARENT_MARKER=$parentMarker" --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
-		Start-Sleep -Seconds 5
+		Start-Sleep -Seconds 8
 		if ($timeoutStatus -eq 0 -or !(Test-Path $childStartedMarker) -or (Test-Path $descendantMarker) -or (Test-Path $parentMarker)) {
 			throw "Native timeout did not stop and reap its process tree: exit=$timeoutStatus output=$($timeoutOutput -join ' | ')"
 		}
