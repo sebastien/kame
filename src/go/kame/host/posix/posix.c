@@ -14,6 +14,14 @@
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(__COSMOPOLITAN__)
+#define _COSMO_SOURCE
+#include "libc/dce.h"
+#include "libc/nt/dll.h"
+#include "libc/nt/process.h"
+#include "libc/nt/runtime.h"
+#include "libc/nt/thunk/msabi.h"
+#endif
 
 // Event kind and outcome values must match posix.EventKind and posix.Outcome.
 enum { KM_STARTED, KM_STDOUT, KM_STDERR, KM_TERMINAL };
@@ -25,6 +33,7 @@ enum { KM_QUEUE_LIMIT = 256 * 1024, KM_CHUNK = 16 * 1024, KM_GRACE_MS = 100 };
 
 typedef struct km_stage {
     pid_t pid;
+    int64_t job;
     int64_t deadline;
     int status, signal, outcome;
     bool reaped;
@@ -33,6 +42,7 @@ typedef struct km_stage {
 typedef struct km_process {
     int64_t id;
     pid_t pid;
+    int64_t job;
     int outfd, errfd, execfd;
     bool started, reaped, terminating, killed, terminal;
     int outcome, status, signal;
@@ -63,6 +73,66 @@ struct km_host {
 static int km_cache_lock_fd[256];
 static unsigned km_cache_lock_refs[256];
 static bool km_cache_lock_initialized;
+
+#if defined(__COSMOPOLITAN__)
+typedef int64_t (__msabi *km_create_job_object_fn)(void *, const char16_t *);
+typedef int32_t (__msabi *km_assign_process_to_job_object_fn)(int64_t, int64_t);
+typedef int32_t (__msabi *km_terminate_job_object_fn)(int64_t, uint32_t);
+
+static km_create_job_object_fn km_create_job_object;
+static km_assign_process_to_job_object_fn km_assign_process_to_job_object;
+static km_terminate_job_object_fn km_terminate_job_object;
+static bool km_windows_job_api_loaded;
+
+static bool km_windows_jobs_needed(void) { return IsWindows(); }
+
+static bool km_load_windows_job_api(void) {
+    if (!km_windows_job_api_loaded) {
+        intptr_t kernel = GetModuleHandle("kernel32.dll");
+        if (kernel) {
+            km_create_job_object = (km_create_job_object_fn)GetProcAddress(kernel, "CreateJobObjectW");
+            km_assign_process_to_job_object = (km_assign_process_to_job_object_fn)GetProcAddress(kernel, "AssignProcessToJobObject");
+            km_terminate_job_object = (km_terminate_job_object_fn)GetProcAddress(kernel, "TerminateJobObject");
+        }
+        km_windows_job_api_loaded = true;
+    }
+    return km_create_job_object && km_assign_process_to_job_object && km_terminate_job_object;
+}
+
+static int64_t km_windows_job_create(void) {
+    if (!km_windows_jobs_needed()) return 0;
+    if (!km_load_windows_job_api()) return -1;
+    int64_t job = km_create_job_object(NULL, NULL);
+    return job && job != -1 ? job : -1;
+}
+
+static bool km_windows_job_assign(int64_t job, pid_t pid) {
+    if (!km_windows_jobs_needed()) return true;
+    if (!job || !km_load_windows_job_api()) return false;
+    int64_t process = OpenProcess(0x0100u | 0x0001u, 0, (uint32_t)pid);
+    if (!process || process == -1) return false;
+    bool assigned = km_assign_process_to_job_object(job, process) != 0;
+    CloseHandle(process);
+    return assigned;
+}
+
+static bool km_windows_job_terminate(int64_t job, int sig) {
+    if (!job || !km_windows_jobs_needed()) return true;
+    if (!km_load_windows_job_api()) return false;
+    return km_terminate_job_object(job, (uint32_t)(128 + sig)) != 0;
+}
+
+static void km_windows_job_close(int64_t *job) {
+    if (job && *job) CloseHandle(*job);
+    if (job) *job = 0;
+}
+#else
+static bool km_windows_jobs_needed(void) { return false; }
+static int64_t km_windows_job_create(void) { return 0; }
+static bool km_windows_job_assign(int64_t job, pid_t pid) { (void)job; (void)pid; return true; }
+static bool km_windows_job_terminate(int64_t job, int sig) { (void)job; (void)sig; return true; }
+static void km_windows_job_close(int64_t *job) { if (job) *job = 0; }
+#endif
 
 static volatile sig_atomic_t km_cli_signal = 0;
 static volatile sig_atomic_t km_cli_signal_count = 0;
@@ -204,6 +274,8 @@ static bool km_close_checked(int *fd) {
 static void km_release_process(km_process *p) {
     km_close(&p->outfd); km_close(&p->errfd); km_close(&p->execfd);
     free(p->stdout_data); free(p->stderr_data);
+    km_windows_job_close(&p->job);
+    for (int i = 0; i < p->stage_count; i++) km_windows_job_close(&p->stages[i].job);
     free(p->stages);
     memset(p, 0, sizeof(*p)); p->outfd = p->errfd = p->execfd = -1;
 }
@@ -246,8 +318,19 @@ static void km_emit_terminal(km_host *host, km_process *p, int outcome, const ch
 // signals every group, even if its immediate stage process has already exited.
 static int km_signal(km_process *p, int sig) {
     int failed = 0;
-    if (!p->stage_count) return kill(-p->pid, sig) < 0 && errno != ESRCH ? -1 : 0;
-    for (int i = 0; i < p->stage_count; i++) if (p->stages[i].pid > 0 && kill(-p->stages[i].pid, sig) < 0 && errno != ESRCH) failed = -1;
+    if (!p->stage_count) {
+        if (km_windows_jobs_needed() && p->job) {
+            if (sig == SIGKILL) return km_windows_job_terminate(p->job, sig) ? 0 : -1;
+            return kill(p->pid, sig) < 0 && errno != ESRCH ? -1 : 0;
+        }
+        return kill(-p->pid, sig) < 0 && errno != ESRCH ? -1 : 0;
+    }
+    for (int i = 0; i < p->stage_count; i++) if (p->stages[i].pid > 0) {
+        if (km_windows_jobs_needed() && p->stages[i].job) {
+            if (sig == SIGKILL) { if (!km_windows_job_terminate(p->stages[i].job, sig)) failed = -1; }
+            else if (kill(p->stages[i].pid, sig) < 0 && errno != ESRCH) failed = -1;
+        } else if (kill(-p->stages[i].pid, sig) < 0 && errno != ESRCH) failed = -1;
+    }
     return failed;
 }
 
@@ -348,8 +431,10 @@ static int km_spawn_failed(km_host *host, int64_t id, const char *message) {
 // A post-fork setup failure must not leave an untracked child behind. Retry an
 // interrupted wait and let the terminal diagnostic distinguish failed cleanup
 // from an ordinary spawn failure.
-static bool km_abort_spawn(pid_t pid) {
-    if (kill(-pid, SIGKILL) < 0 && errno != ESRCH) return false;
+static bool km_abort_spawn(pid_t pid, int64_t job) {
+    if (km_windows_jobs_needed() && job) {
+        if (!km_windows_job_terminate(job, SIGKILL)) return false;
+    } else if (kill(-pid, SIGKILL) < 0 && errno != ESRCH) return false;
     pid_t result;
     do { result = waitpid(pid, NULL, 0); } while (result < 0 && errno == EINTR);
     return result == pid;
@@ -386,7 +471,10 @@ int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so
     // Every rejected request emits exactly one failed terminal event.
     if (id == 0 || shell.len == 0 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid request");
     for (int i = 0; i < host->len; i++) if (host->processes[i].id == id) return km_spawn_failed(host, id, "request ID already active");
-    int out[2] = {-1, -1}, err[2] = {-1, -1}, execerr[2] = {-1, -1};
+    int out[2] = {-1, -1}, err[2] = {-1, -1}, execerr[2] = {-1, -1}, ready[2] = {-1, -1};
+    int64_t job = km_windows_job_create();
+    if (job < 0) goto fail;
+    if (km_windows_jobs_needed() && pipe(ready)) goto fail;
     if (pipe(out) || pipe(err) || pipe(execerr)) goto fail;
     if (fcntl(execerr[1], F_SETFD, FD_CLOEXEC) < 0) goto fail;
     char **argv = calloc((size_t)shell.len + 2, sizeof(char *));
@@ -412,6 +500,14 @@ int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so
     if (pid == 0) {
         int child_errno;
         close(out[0]); close(err[0]); close(execerr[0]);
+        if (ready[0] >= 0) {
+            close(ready[1]);
+            char token = 0;
+            ssize_t n;
+            do { n = read(ready[0], &token, 1); } while (n < 0 && errno == EINTR);
+            close(ready[0]);
+            if (n != 1 || token != 1) _exit(126);
+        }
         if (setpgid(0, 0) || dup2(out[1], STDOUT_FILENO) < 0 || dup2(err[1], STDERR_FILENO) < 0 || chdir(cwd) < 0) {
             child_errno = errno; write(execerr[1], &child_errno, sizeof(child_errno)); _exit(127);
         }
@@ -427,18 +523,37 @@ int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so
     km_free_strings(argv, (int)shell.len + 1); km_free_strings(envp, (int)environment.len); free(cwd);
     close(out[1]); close(err[1]); close(execerr[1]); out[1] = err[1] = execerr[1] = -1;
     setpgid(pid, pid);
-    if (km_set_nonblock(out[0]) || km_set_nonblock(err[0]) || km_set_nonblock(execerr[0])) { bool reaped = km_abort_spawn(pid); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]); return km_spawn_failed(host, id, reaped ? "spawn failed" : "waitpid failed"); }
+    if (ready[0] >= 0) {
+        km_close(&ready[0]);
+        if (!km_windows_job_assign(job, pid)) {
+            km_close(&ready[1]);
+            bool reaped = km_abort_spawn(pid, job);
+            km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]); km_windows_job_close(&job);
+            return km_spawn_failed(host, id, reaped ? "process group setup failed" : "waitpid failed");
+        }
+        char token = 1;
+        ssize_t written;
+        do { written = write(ready[1], &token, 1); } while (written < 0 && errno == EINTR);
+        km_close(&ready[1]);
+        if (written != 1) {
+            bool reaped = km_abort_spawn(pid, job);
+            km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]); km_windows_job_close(&job);
+            return km_spawn_failed(host, id, reaped ? "process group setup failed" : "waitpid failed");
+        }
+    }
+    if (km_set_nonblock(out[0]) || km_set_nonblock(err[0]) || km_set_nonblock(execerr[0])) { bool reaped = km_abort_spawn(pid, job); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]); km_windows_job_close(&job); return km_spawn_failed(host, id, reaped ? "spawn failed" : "waitpid failed"); }
     if (host->len == host->cap) {
         int cap = host->cap ? host->cap * 2 : 4;
         km_process *processes = realloc(host->processes, (size_t)cap * sizeof(*processes));
-        if (!processes) { bool reaped = km_abort_spawn(pid); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]); return km_spawn_failed(host, id, reaped ? "spawn failed" : "waitpid failed"); }
+        if (!processes) { bool reaped = km_abort_spawn(pid, job); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]); km_windows_job_close(&job); return km_spawn_failed(host, id, reaped ? "spawn failed" : "waitpid failed"); }
         host->processes = processes; host->cap = cap;
     }
     km_process *p = &host->processes[host->len++];
-    memset(p, 0, sizeof(*p)); p->id = id; p->pid = pid; p->outfd = out[0]; p->errfd = err[0]; p->execfd = execerr[0]; p->retain = retain; p->deadline = timeout ? km_now() + timeout : 0;
+    memset(p, 0, sizeof(*p)); p->id = id; p->pid = pid; p->job = job; p->outfd = out[0]; p->errfd = err[0]; p->execfd = execerr[0]; p->retain = retain; p->deadline = timeout ? km_now() + timeout : 0;
     p->direct = direct;
     return 0;
 fail:
+    km_close(&ready[0]); km_close(&ready[1]); km_windows_job_close(&job);
     km_close(&out[0]); km_close(&out[1]); km_close(&err[0]); km_close(&err[1]); km_close(&execerr[0]); km_close(&execerr[1]);
     return km_spawn_failed(host, id, "spawn failed");
 }
@@ -512,9 +627,19 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
     if (ok && input_name[0]) { inputfd = open(input_name, O_RDONLY); if (inputfd < 0) ok = false; }
     if (ok && output_name[0]) { outputfd = open(output_name, O_WRONLY | O_CREAT | (append_output ? O_APPEND : O_TRUNC), 0666); if (outputfd < 0) ok = false; }
     for (int i = 0; ok && i < n; i++) {
+        int ready[2] = {-1, -1};
+        if (km_windows_jobs_needed()) {
+            p.stages[i].job = km_windows_job_create();
+            if (p.stages[i].job < 0 || pipe(ready)) {
+                km_windows_job_close(&p.stages[i].job);
+                ok = false;
+                break;
+            }
+        }
         pid_t pid = fork();
-        if (pid < 0) { ok = false; break; }
+        if (pid < 0) { km_close(&ready[0]); km_close(&ready[1]); ok = false; break; }
         if (pid == 0) {
+            if (ready[0] >= 0) close(ready[1]);
             int input = i ? edges[(i - 1) * 2] : (inputfd >= 0 ? inputfd : open("/dev/null", O_RDONLY));
             int output = i == n - 1 ? (outputfd >= 0 ? outputfd : out[1]) : edges[i * 2 + 1];
             if (setpgid(0, 0) || input < 0 || dup2(input, STDIN_FILENO) < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(err[1], STDERR_FILENO) < 0 || chdir(cwd[i]) < 0) {
@@ -525,6 +650,13 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
             if (outputfd >= 0) close(outputfd);
             for (int j = 0; j < (n - 1) * 2; j++) close(edges[j]);
             close(out[0]); close(out[1]); close(err[0]); close(err[1]); close(execerr[0]);
+            if (ready[0] >= 0) {
+                char token = 0;
+                ssize_t nread;
+                do { nread = read(ready[0], &token, 1); } while (nread < 0 && errno == EINTR);
+                close(ready[0]);
+                if (nread != 1 || token != 1) _exit(126);
+            }
             km_exec_argv(argv[i], envp[i]);
             int error = errno; write(execerr[1], &error, sizeof(error)); _exit(127);
         }
@@ -532,6 +664,18 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
         p.stages[i].deadline = stage_timeouts[i] ? km_now() + stage_timeouts[i] : 0;
         setpgid(pid, pid);
         if (i == 0) p.pid = pid;
+        if (ready[0] >= 0) {
+            km_close(&ready[0]);
+            bool assigned = km_windows_job_assign(p.stages[i].job, pid);
+            if (assigned) {
+                char token = 1;
+                ssize_t written;
+                do { written = write(ready[1], &token, 1); } while (written < 0 && errno == EINTR);
+                if (written != 1) assigned = false;
+            }
+            km_close(&ready[1]);
+            if (!assigned) { ok = false; break; }
+        }
     }
     if (argv) { for (int i = 0; i < n; i++) km_free_strings(argv[i], (int)counts[i]); free(argv); }
     if (envp) { for (int i = 0; i < n; i++) km_free_strings(envp[i], (int)envcounts[i]); free(envp); }
@@ -541,6 +685,7 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
     km_close(&out[1]); km_close(&err[1]); km_close(&execerr[1]);
     if (!ok) {
         if (p.stages) { km_signal(&p, SIGKILL); km_wait_graph(&p); }
+        if (p.stages) for (int i = 0; i < n; i++) km_windows_job_close(&p.stages[i].job);
         free(p.stages); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]);
         return km_spawn_failed(host, id, "graph spawn failed");
     }
