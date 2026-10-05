@@ -268,8 +268,10 @@ existing build rules.
   closed, while pinned launches do not self-update.
 - `kame-windows-x64.zip` contains exactly `kame.exe`, `kame.js`, and
   `kame.wasm`; the native launcher preserves argv, standard streams, working
-  directory, environment and the Node process exit status. Run its lifecycle
-  tests on Windows before claiming Windows-host conformance.
+  directory, environment and the Node process exit status. On a Windows host,
+  run `node tools/windows/test-launcher.mjs dist/windows` after
+  `make dist-windows`; it exercises the packaged CLI and the launcher contract.
+  Passing a cross-compile alone does not establish Windows-host conformance.
 - An invalid version override fails before creating or accessing a cache path.
 - `kame init` writes a correctly stamped bootstrap sidecar, preserves an
   existing `Makefile`, and refuses a second write without changing either file.

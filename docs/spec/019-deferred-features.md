@@ -116,8 +116,10 @@ direct-child completion. T033-01 retains a Windows-only descendant cleanup
 case; this workspace has no Windows runner, so that case is not yet execution
 evidence. D16 now cross-compiles a native Windows x64 launcher that starts the
 adjacent Node/WASM CLI; T015-05 verifies argv, exit status and the PE bundle on
-the current host. That is not Windows runtime evidence. The native POSIX host
-suite passes on this Linux host: 24 host package tests, T003-01 (17/17), and
+the current host. `tools/windows/test-launcher.mjs` now exercises the actual
+bundle and launcher process contract on Windows, but this Linux workspace
+cannot run it, so Windows runtime evidence is still missing. The native POSIX
+host suite passes on this Linux host: 24 host package tests, T003-01 (17/17), and
 T003-02 (11/11). Windows-host lifecycle coverage, Darwin/BSD native-host runs,
 and APE verification on advertised non-Linux hosts remain open. The
 initial-contract audit remains historical evidence, not completion of this
