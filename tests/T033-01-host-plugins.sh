@@ -47,6 +47,26 @@ const roundTrip = await call('(example-run "hello")', declarations(), async (req
 assert.equal(JSON.parse(roundTrip), 'plugin value');
 assert.equal(calls, 1);
 
+const allKinds = {
+  kind: 'list',
+  items: [
+    { kind: 'nil' }, { kind: 'bool', data: true }, { kind: 'int', data: -42 },
+    { kind: 'float', data: 1.5 }, { kind: 'string', data: 'text' },
+    { kind: 'pattern', data: '{name:*}' }, { kind: 'bytes', data: 'QUJD' },
+    { kind: 'resource', resourceKind: 'file', name: 'file:///work/input' },
+    { kind: 'list', items: [{ kind: 'string', data: 'nested' }, { kind: 'bool', data: false }] },
+    { kind: 'record', fields: [['field', { kind: 'string', data: 'record' }]] },
+    { kind: 'resource', resourceKind: 'tool', name: 'compiler' },
+  ],
+};
+const allKindsDisplay = '[:nil :true -42 1.5 "text" "{name:*}" ABC file:///work/input ["nested" :false] [field: "record"] compiler]';
+const callbackKinds = await call('(example-run "all-kinds")', declarations(), async (request) => ({
+  protocol: 1, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion,
+  operation: request.operation, operationVersion: request.operationVersion, generation: request.generation,
+  attempt: request.attempt, value: allKinds,
+}));
+assert.equal(callbackKinds, allKindsDisplay, 'JavaScript callback changed a canonical Kame value kind');
+
 const embeddingKame = await Kame.create();
 const embeddingProgram = await embeddingKame.compile('answer = (example-run "embedded")\n', { name: 'plugin-embedding.km' });
 const responseFor = (request) => ({
@@ -84,6 +104,26 @@ await assert.rejects(call('(example-run "x")', declarations(), async (request) =
   protocol: 1, request: 'stale', plugin: request.plugin, pluginVersion: request.pluginVersion,
   operation: request.operation, operationVersion: request.operationVersion, generation: request.generation, attempt: request.attempt, value: { kind: 'nil' },
 })), (error) => error.code === 'PLUGIN_PROTOCOL');
+await assert.rejects(call('(example-run "x")', declarations(), async (request) => ({
+  ...responseFor(request), protocol: 2,
+})), (error) => error.code === 'PLUGIN_PROTOCOL');
+await assert.rejects(call('(example-run "x")', declarations(), async (request) => ({
+  ...responseFor(request), operationVersion: 'stale',
+})), (error) => error.code === 'PLUGIN_PROTOCOL');
+await assert.rejects(call('(example-run "x")', declarations(), async (request) => {
+  const { value, ...identity } = responseFor(request);
+  return { ...identity, error: { code: 'PLUGIN_FAIL', message: 'failed', private: 'extra' } };
+}), (error) => error.code === 'PLUGIN_PROTOCOL');
+
+let arityCalls = 0;
+await assert.rejects(call('(example-run "x")', declarations({ minArity: 2, maxArity: 2 }), async () => { arityCalls++; return {}; }), (error) => error.code === 'EXPR_INVALID');
+assert.equal(arityCalls, 0, 'arity denial reached the plugin adapter');
+const duplicateOperations = [{ name: 'example', version: '1', operations: [
+  { name: 'same-operation', version: '1', minArity: 0, maxArity: 0 },
+  { name: 'same-operation', version: '2', minArity: 0, maxArity: 0 },
+]}];
+await assert.rejects(call('(same-operation)', duplicateOperations, async () => ({})), (error) => error.code === 'PLUGIN_CONFIG');
+await assert.rejects(call('(example-run "x")', declarations(), undefined), (error) => error.code === 'FEATURE_UNSUP');
 
 let deniedCalls = 0;
 await assert.rejects(call('(example-run "x")', declarations({ capabilities: ['run'] }), async () => { deniedCalls++; return {}; }), (error) => error.code === 'CAP_DENIED');
@@ -120,15 +160,19 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', () => {
   const request = JSON.parse(input);
-  if (process.argv[1] !== 'literal;$(touch should-not-exist)') process.exit(7);
-  process.stdout.write(JSON.stringify({ protocol: request.protocol, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion, operation: request.operation, operationVersion: request.operationVersion, generation: request.generation, attempt: request.attempt, value: { kind: 'string', data: 'native value' } }) + '\\n');
-});`, 'literal;$(touch should-not-exist)'];
+  if (process.argv[2] !== 'literal;$(touch should-not-exist)') process.exit(7);
+  process.stdout.write(JSON.stringify({ protocol: request.protocol, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion, operation: request.operation, operationVersion: request.operationVersion, generation: request.generation, attempt: request.attempt, value: JSON.parse(process.argv[1]) }) + '\\n');
+});`, JSON.stringify(allKinds), 'literal;$(touch should-not-exist)'];
 const nativeRoundTrip = await call('(example-run "native")', processDeclaration, undefined);
-assert.equal(JSON.parse(nativeRoundTrip), 'native value');
+assert.equal(nativeRoundTrip, allKindsDisplay, 'native process changed a canonical Kame value kind');
 
 const malformedProcess = declarations();
 malformedProcess[0].argv = [process.execPath, '-e', `process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('{}\\n{}\\n'));`];
 await assert.rejects(call('(example-run "x")', malformedProcess, undefined), (error) => error.code === 'PLUGIN_PROTOCOL');
+
+const oversizedProcess = declarations({ maxResponseBytes: 256 });
+oversizedProcess[0].argv = [process.execPath, '-e', `process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('x'.repeat(300)));`];
+await assert.rejects(call('(example-run "x")', oversizedProcess, undefined), (error) => error.code === 'PLUGIN_LIMIT');
 
 const failedProcess = declarations();
 failedProcess[0].argv = [process.execPath, '-e', `process.stdin.resume(); process.stdin.on('end', () => { process.stderr.write('secret'); process.exit(9); });`];
@@ -155,6 +199,26 @@ processAbortController.abort();
 await assert.rejects(cancelledProcess, (error) => error.code === 'EXEC_CANCELLED');
 assert.equal(readFileSync(stoppedPath, 'utf8'), 'stopped');
 rmSync(processDir, { recursive: true, force: true });
+
+const disposalDir = mkdtempSync(join(tmpdir(), 'kame-plugin-dispose-'));
+const disposalReadyPath = join(disposalDir, 'ready');
+const disposalStoppedPath = join(disposalDir, 'stopped');
+const disposalKame = await Kame.create();
+const disposalProgram = await disposalKame.compile('answer = (example-run "dispose")\n', { name: 'plugin-dispose.km' });
+const disposalPlugin = declarations();
+disposalPlugin[0].argv = [process.execPath, '-e', `
+const fs = require('node:fs');
+fs.writeFileSync(process.argv[1], 'ready');
+process.on('SIGTERM', () => { fs.writeFileSync(process.argv[2], 'stopped'); process.exit(0); });
+process.stdin.resume();
+setInterval(() => {}, 1000);`, disposalReadyPath, disposalStoppedPath];
+const disposedInvocation = disposalProgram.evaluate('answer', { plugins: disposalPlugin });
+while (!existsSync(disposalReadyPath)) await new Promise((resolve) => setTimeout(resolve, 1));
+await disposalProgram.dispose();
+await assert.rejects(disposedInvocation, (error) => error.code === 'EXEC_CANCELLED');
+assert.equal(readFileSync(disposalStoppedPath, 'utf8'), 'stopped', 'program disposal did not reap its native plugin process');
+await disposalKame.dispose();
+rmSync(disposalDir, { recursive: true, force: true });
 NODE
 then
 	test-ok "callback and process adapters enforce identity, capability, bounds, timeout and failure contracts"
