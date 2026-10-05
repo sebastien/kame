@@ -1,10 +1,9 @@
 # Performance review
 
-Reviewed 2026-10-03 on Linux x86-64, Node v24.18.0, using the native debug build
-and the freestanding WASM module through its JS CLI. All timings include process
-startup, loading, compilation, evaluation/inspection, and teardown. Five samples
-per case were checked for correct output. Other conformance tests were running,
-so these observations are not stable release benchmarks or isolated CPU profiles.
+Reviewed 2026-10-06 on Linux x86-64, Node v24.18.0, using the native debug build
+and the freestanding WASM module through its JS CLI. The updated D08 workload
+measurements below use five checked samples per case. The earlier comparative
+measurements retain their 2026-10-03 date and verification limits.
 
 ## Verification scope
 
@@ -31,11 +30,11 @@ match count before recording time.
 
 | Workload | Native median (ms) | Native range (ms) | WASM median (ms) | WASM range (ms) |
 | --- | ---: | ---: | ---: | ---: |
-| Parse 512 definitions | 3.01 | 2.98–5.95 | 264.57 | 190.60–282.75 |
-| Wide scope, 1,000 bindings | 13.58 | 12.83–15.12 | 418.06 | 355.14–548.27 |
-| Deep scope, 16 levels | 11.46 | 11.32–11.62 | 216.99 | 203.55–283.08 |
-| Graph lookup, 512 resources | 6.38 | 5.56–7.64 | 1,578.34 | 1,413.57–1,783.72 |
-| Selective glob, 128 directories | 43.35 | 42.50–45.43 | 225.83 | 202.02–273.00 |
+| Parse 512 definitions | 3.47 | 2.82–5.32 | 201.25 | 189.42–238.69 |
+| Wide scope, 1,000 bindings | 14.54 | 13.47–15.15 | 423.87 | 354.75–441.23 |
+| Deep scope, 16 levels | 11.55 | 11.42–11.60 | 208.70 | 191.37–308.39 |
+| Graph lookup, 512 resources | 7.43 | 5.47–11.69 | 1,450.00 | 1,434.21–1,496.12 |
+| Selective glob, 128 directories | 43.43 | 42.60–44.17 | 236.61 | 215.92–265.08 |
 
 The native binary SHA-256 is
 `9b72e08fc45585c42e3d3eaaa799ae828f1a506b62b52a57a3d22a192619cdbc`; the JS
@@ -46,9 +45,11 @@ The WASM values include Node and runtime startup and vary substantially under
 load. They are host-specific observations, not portable performance targets.
 The suite also confirms that 10,000 parsed definitions and 256 nested scopes
 exceed the current WASM instance limits, so it uses the largest smaller cases
-that complete on both hosts. Tracker allocation comparison remains focused on
-owning versus borrowed parsing; wide-scope and graph lookup allocation totals
-are still outstanding.
+that complete on both hosts. Borrowed parsing saves at least the source-text
+length in tracked allocations. Once prepared, wide/deep scope resolution and
+512 graph-index lookups each use zero tracked allocation, checked by
+`TestWideAndDeepScopeLookupAllocatesNoTrackedMemory` and
+`TestEngineResourceIndexKeepsNodeIdentity`.
 
 Reproduce with `python3 tools/benchmark-cli.py --samples 5` after building the
 debug CLI and WASM distribution.
@@ -85,19 +86,17 @@ run exposed that test assumption; the correction changes no shutdown timing.
    load (184–514 ms for the small expression); do not infer a regression from
    native/WASM ratios alone. Benchmark a reused embedding instance separately
    from CLI startup before optimizing ABI evaluation.
-3. `core.Engine.find` scans nodes linearly, and scopes/definitions use linear
-   lookup. Repeated registration and resolution can scale quadratically. Use
-   larger dependency graphs and profile lookup work before selecting an index;
-   preserve deterministic ordering and resource-key normalization.
-4. JS `wildcardPaths` collects an entire subtree beneath the static glob root
-   before matching and sorting. Traversal work and memory depend on the subtree,
-   not just result count. Prune with remaining pattern segments and measure
-   broad and selective patterns against native parity, including `**` matching
-   zero directory levels.
-5. Task caches have no eviction or cross-process locking in the initial spec.
-   They avoid repeated task execution but can grow without bound. Measure cache
-   hit/miss time, bytes hashed, and cache growth before designing lifecycle
-   controls. Do not replace declared source dependencies with always-run tasks.
+3. Engine resources and lexical bindings now use sorted indexes; prepared
+   lookups allocate no tracked memory. The 512-resource benchmark includes CLI
+   startup, so it cannot isolate lookup throughput. A larger reused-engine
+   profile would separate lookup cost from parsing and startup.
+4. Wildcard traversal now prunes incompatible subtrees and the acceptance gate
+   checks enumerated entries against a full walk. The new selective 128-directory
+   workload includes CLI startup; larger recursive `**` profiles remain useful
+   for measuring traversal independently.
+5. D04 now bounds cache retention and supports cross-process miss locking,
+   inspection and cleanup. The measurements here do not compare cache hit/miss
+   throughput or bytes hashed; those are separate operational benchmarks.
 
 ## Reproduction and limits
 

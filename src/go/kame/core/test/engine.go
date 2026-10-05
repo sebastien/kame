@@ -72,23 +72,29 @@ func newCallableSource(a mem.Allocator, record *releaseRecord) *core.Source {
 
 func TestEngineResourceIndexKeepsNodeIdentity(t *testing.T) {
 	a := t.Allocator()
+	tracker := a.(*mem.Tracker)
 	engine := core.NewEngine(a)
 	defer engine.Free()
-	const count = 128
+	const count = 512
 	nodes := make([]*core.Node, count)
+	keys := make([]core.ResourceKey, count)
 	for i := range nodes {
 		name := "resource-" + string(byte('A'+i/26)) + string(byte('A'+i%26))
 		key := core.NewResourceKey(a, core.ResourceTask, name)
 		nodes[i] = engine.Add(key, nil, nil)
 		key.Free(a)
 		if nodes[i] == nil { t.Fatalf("resource %d was not registered", i); return }
+		keys[i] = core.NewResourceKey(a, core.ResourceTask, name)
 	}
+	before := tracker.Stats().TotalAlloc
 	for i := count - 1; i >= 0; i-- {
-		name := "resource-" + string(byte('A'+i/26)) + string(byte('A'+i%26))
-		key := core.NewResourceKey(a, core.ResourceTask, name)
-		found := engine.Lookup(key)
-		key.Free(a)
+		found := engine.Lookup(keys[i])
 		if found != nodes[i] { t.Errorf("lookup for resource %d returned a different node", i) }
+	}
+	lookupAllocations := tracker.Stats().TotalAlloc - before
+	for i := range keys { keys[i].Free(a) }
+	if lookupAllocations != 0 {
+		t.Errorf("512 indexed resource lookups allocated %d tracked bytes, want 0", lookupAllocations)
 	}
 }
 

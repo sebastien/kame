@@ -52,9 +52,10 @@ deterministic gates. Wall-clock measurements are reported as repeated medians
 and are informational, not brittle pass/fail thresholds. Native and
 portable-runtime results are recorded separately.
 
-`D08` remains open until each section above has implementation and focused
-native/WASM or portable-runtime evidence, and the complete measurement workload
-has been rerun after the changes.
+Completion evidence: each section has implementation and focused native/WASM or
+portable-runtime coverage; the complete five-sample measurement workload was
+rerun after the final test changes on 2026-10-06. The results are recorded in
+`docs/review-performance.md`.
 
 Current evidence includes `TestBorrowedParseMatchesOwningParseWithFewerAllocations`,
 `TestEngineResourceIndexKeepsNodeIdentity`, `TestLexicalFunctionAndOperationShadowing`,
@@ -62,5 +63,8 @@ Current evidence includes `TestBorrowedParseMatchesOwningParseWithFewerAllocatio
 `TestWildcardTraversalPrunesUnrelatedSubtrees`. The repeatable deep-tree gate
 counts enumerated entries against a full recursive walk. `tools/benchmark-cli.py`
 reports five-sample native/WASM measurements for all four runtime workloads and
-large-source parsing; broad scope/graph tracker-allocation totals remain
-outstanding. See `docs/review-performance.md` for the 2026-10-06 run and limits.
+large-source parsing. `TestWideAndDeepScopeLookupAllocatesNoTrackedMemory` and
+`TestEngineResourceIndexKeepsNodeIdentity` verify that already-built scopes and
+resource indexes resolve 512-entry/deep lookups with zero tracked allocation;
+`TestBorrowedParseMatchesOwningParseWithFewerAllocations` pins the source-copy
+savings. See `docs/review-performance.md` for the 2026-10-06 run and limits.

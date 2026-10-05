@@ -9,6 +9,7 @@ import (
 	"kame/lang/script"
 	"kame/operations"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
 	"solod.dev/so/testing"
 )
 
@@ -308,6 +309,83 @@ func TestLexicalFunctionAndOperationShadowing(t *testing.T) {
 	program.Free()
 	parsed.Free()
 	registry.Free()
+}
+
+func TestWideAndDeepScopeLookupAllocatesNoTrackedMemory(t *testing.T) {
+	a := t.Allocator()
+	tracker := a.(*mem.Tracker)
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "scope-index", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	defer engine.Free()
+	defer program.Free()
+	defer parsed.Free()
+	defer registry.Free()
+
+	wideFields := slices.Make[core.RecordField](a, 512)
+	for i := range wideFields {
+		name := "v" + string(byte('0'+i/100)) + string(byte('0'+i/10%10)) + string(byte('0'+i%10))
+		wideFields[i] = core.RecordField{Key: name, Value: core.Value{Kind: core.Int, Int: int64(i)}}
+	}
+	wideRecord := core.NewRecord(a, wideFields)
+	slices.Free(a, wideFields)
+	context := &eval.Context{Program: program, Run: a, Scope: program.Scope}
+	wide := eval.RenderChildScope(context, program.Scope, wideRecord)
+	wideRecord.Free(a)
+	if wide == nil {
+		t.Fatal("failed to construct wide scope")
+		return
+	}
+	wideExpr := expr.Parse(a, "wide-scope", "v511")
+	if len(wideExpr.Diagnostics) != 0 {
+		t.Fatal("failed to parse wide-scope lookup")
+		return
+	}
+	before := tracker.Stats().TotalAlloc
+	wideResult := program.Evaluate(a, wideExpr.Expr, wide)
+	wideAllocations := tracker.Stats().TotalAlloc - before
+	if wideResult.Diagnostic.Code != "" || wideResult.Value.Kind != core.Int || wideResult.Value.Int != 511 {
+		t.Error("wide-scope lookup returned the wrong binding")
+	}
+	wideResult.Free(a)
+	wide.Free()
+	wideExpr.Free()
+	if wideAllocations != 0 {
+		t.Errorf("wide-scope lookup allocated %d tracked bytes, want 0", wideAllocations)
+	}
+
+	outer := core.NewRecord(a, []core.RecordField{{Key: "outer", Value: core.Value{Kind: core.Int, Int: 42}}})
+	deep := eval.RenderChildScope(context, program.Scope, outer)
+	outer.Free(a)
+	for i := 0; i < 16; i++ {
+		local := core.NewRecord(a, []core.RecordField{{Key: "local", Value: core.Value{Kind: core.Int, Int: int64(i)}}})
+		child := eval.RenderChildScope(context, deep, local)
+		local.Free(a)
+		deep.Free()
+		if child == nil {
+			t.Fatal("failed to construct deep scope")
+			return
+		}
+		deep = child
+	}
+	deepExpr := expr.Parse(a, "deep-scope", "outer")
+	if len(deepExpr.Diagnostics) != 0 {
+		t.Fatal("failed to parse deep-scope lookup")
+		return
+	}
+	before = tracker.Stats().TotalAlloc
+	deepResult := program.Evaluate(a, deepExpr.Expr, deep)
+	deepAllocations := tracker.Stats().TotalAlloc - before
+	if deepResult.Diagnostic.Code != "" || deepResult.Value.Kind != core.Int || deepResult.Value.Int != 42 {
+		t.Error("deep-scope lookup returned the wrong binding")
+	}
+	deepResult.Free(a)
+	deep.Free()
+	deepExpr.Free()
+	if deepAllocations != 0 {
+		t.Errorf("deep-scope lookup allocated %d tracked bytes, want 0", deepAllocations)
+	}
 }
 
 func TestLetBoundLambdaReleasesItsScope(t *testing.T) {
