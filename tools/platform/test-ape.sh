@@ -2,19 +2,25 @@
 # Spec: docs/spec/015-distribution.md — APE host conformance
 set -eu
 
-if [ "$#" -ne 1 ]; then
-	echo "usage: test-ape.sh PATH_TO_KAME_COM" >&2
+if [ "$#" -ne 2 ]; then
+	echo "usage: test-ape.sh PATH_TO_KAME_COM PATH_TO_APE_SMOKE" >&2
 	exit 2
 fi
 
 ape_directory=$(CDPATH= cd "$(dirname "$1")" && pwd -P)
 ape_name=$(basename "$1")
 ape_path=$ape_directory/$ape_name
+smoke_directory=$(CDPATH= cd "$(dirname "$2")" && pwd -P)
+smoke_name=$(basename "$2")
+smoke_path=$smoke_directory/$smoke_name
 work_path=$(mktemp -d "${TMPDIR:-/tmp}/kame-ape.XXXXXX")
 trap 'rm -rf "$work_path"' 0 HUP INT TERM
 cp "$ape_path" "$work_path/kame.com"
+cp "$smoke_path" "$work_path/ape-smoke.com"
 chmod +x "$work_path/kame.com"
+chmod +x "$work_path/ape-smoke.com"
 ape_path=$work_path/kame.com
+smoke_path=$work_path/ape-smoke.com
 ape_shell=${KAME_APE_SHELL:-bash}
 ape_host=$(uname -s)
 report_phase() {
@@ -32,18 +38,28 @@ if [ "$ape_host" = OpenBSD ]; then
 else
 	report_phase "assimilate APE"
 	"$ape_shell" "$ape_path" --assimilate
+	"$ape_shell" "$smoke_path" --assimilate
 fi
 
-run_ape() {
+run_binary() {
+	binary=$1
+	shift
 	if [ "$ape_host" = OpenBSD ]; then
-		"$ape_shell" "$ape_path" "$@"
+		"$ape_shell" "$binary" "$@"
 	else
-		"$ape_path" "$@"
+		"$binary" "$@"
 	fi
 }
 
+report_phase "run minimal Cosmopolitan APE smoke program"
+smoke_output=$(run_binary "$smoke_path")
+if [ "$smoke_output" != "APE bootstrap smoke passed" ]; then
+	echo "APE bootstrap smoke output mismatch: $smoke_output" >&2
+	exit 1
+fi
+
 report_phase "run version command"
-version=$(run_ape --version)
+version=$(run_binary "$ape_path" --version)
 case "$version" in
 	"kame "*) ;;
 	*)
@@ -64,7 +80,7 @@ EOF
 
 cd "$work_path"
 report_phase "run host environment task"
-output=$(run_ape --env KAME_PLATFORM_ENV=passed -f Makefile.kmk platform-smoke)
+output=$(run_binary "$ape_path" --env KAME_PLATFORM_ENV=passed -f Makefile.kmk platform-smoke)
 if [ "$output" != "platform-smoke-ok" ]; then
 	echo "APE task output mismatch: $output" >&2
 	exit 1
@@ -76,7 +92,7 @@ fi
 
 set +e
 report_phase "run timeout task"
-run_ape --timeout 100 -f Makefile.kmk platform-timeout \
+run_binary "$ape_path" --timeout 100 -f Makefile.kmk platform-timeout \
 	>"$work_path/timeout.out" 2>"$work_path/timeout.err"
 timeout_status=$?
 set -e

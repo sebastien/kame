@@ -188,7 +188,11 @@ dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zi
 	chmod +x dist/release/bin/kame
 	python3 tools/release_manifest.py --directory dist/release --version "$$(cat VERSION)" --revision "$(KAME_RELEASE_REVISION)" --public-key "$(KAME_RELEASE_PUBLIC_KEY)" --signing-key "$(KAME_RELEASE_SIGNING_KEY)"
 
-dist-ape: dist/kame.com
+dist-ape: dist/kame.com dist/ape-smoke.com
+
+dist/ape-smoke.com: tools/platform/ape-smoke.c build/tools/cosmocc-4.0.2/bin/cosmocc
+	mkdir -p $(@D)
+	build/tools/cosmocc-4.0.2/bin/cosmocc -O2 -o $@ tools/platform/ape-smoke.c
 
 dist/windows/kame.exe: $(wildcard $(KAME_DIR)/cmd/kame-launcher/*.go) dist/kame.js dist/kame.wasm
 	mkdir -p dist/windows

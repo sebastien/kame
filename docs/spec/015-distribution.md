@@ -304,6 +304,9 @@ existing build rules.
   x64/ARM64 plus FreeBSD, NetBSD and OpenBSD x64. The native artifact
   workflows retain hosted execution results; unrun jobs are not conformance
   evidence.
+- APE host conformance runs a minimal standalone Cosmopolitan executable
+  before the Kame CLI checks, so loader failures are distinct from application
+  startup failures on each tested host.
 
 ## Deferred
 
