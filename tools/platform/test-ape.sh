@@ -62,14 +62,14 @@ if [ "$smoke_status" -ne 0 ] || [ "$smoke_output" != "APE bootstrap smoke passed
 	echo "APE bootstrap smoke failed: exit=$smoke_status output=$smoke_output" >&2
 	cat "$work_path/ape-smoke.err" >&2
 	if [ "$ape_host" = OpenBSD ]; then
-		report_phase "trace OpenBSD APE bootstrap failure"
-		if run_binary "$smoke_path" --strace >"$work_path/ape-smoke.trace.out" 2>"$work_path/ape-smoke.trace.err"; then
+		report_phase "capture OpenBSD APE bootstrap syscalls"
+		if ktrace -i -f "$work_path/ape-smoke.ktrace" "$ape_shell" "$smoke_path"; then
 			trace_status=0
 		else
 			trace_status=$?
 		fi
-		echo "OpenBSD APE trace exit=$trace_status" >&2
-		cat "$work_path/ape-smoke.trace.err" >&2
+		echo "OpenBSD APE syscall trace exit=$trace_status" >&2
+		kdump -f "$work_path/ape-smoke.ktrace" >&2
 	fi
 	exit 1
 fi
