@@ -39,7 +39,6 @@ task native-timeout :
 		if ((Get-Content (Join-Path $project 'native-env.txt') -Raw).Trim() -ne 'passed') {
 			throw 'Native recipe did not receive the CLI environment override or write its output file.'
 		}
-		$env:KAME_DEBUG_WINDOWS_JOBS = '1'
 		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
 		Start-Sleep -Seconds 20
@@ -49,7 +48,7 @@ task native-timeout :
 		$descendantFinished = Test-Path (Join-Path $project 'descendant-marker')
 		$parentFinished = Test-Path (Join-Path $project 'parent-marker')
 		$recipePid = if (Test-Path (Join-Path $project 'recipe-pid')) { (Get-Content -Raw (Join-Path $project 'recipe-pid')).Trim() } else { 'missing' }
-		if ($timeoutStatus -eq 0 -or ($timeoutOutput -join "`n") -notmatch 'RECIPE_TIMEOUT' -or !$childStarted -or !$childLaunched -or $descendantFinished -or $parentFinished) {
+		if ($timeoutStatus -eq 0 -or ($timeoutOutput -join "`n") -notmatch 'RECIPE_TIMEOUT' -or $recipePid -eq 'missing' -or !$childStarted -or !$childLaunched -or $descendantFinished -or $parentFinished) {
 			throw "Native timeout did not stop and reap its process tree: exit=$timeoutStatus recipePid=$recipePid childStarted=$childStarted childLaunched=$childLaunched descendantFinished=$descendantFinished parentFinished=$parentFinished output=$($timeoutOutput -join ' | ')"
 		}
 	} finally {
