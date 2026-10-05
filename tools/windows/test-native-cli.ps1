@@ -30,7 +30,7 @@ task native-included :
 '@ | Set-Content -Encoding ascii (Join-Path $project 'native-child.kmk')
 	$pipeline = @'
 task native-pipeline :
-	@(out (pipe (run "__SHELL__" "-NoProfile" "-NonInteractive" "-Command" "$b=New-Object byte[] 2097152; [Console]::OpenStandardOutput().Write($b,0,$b.Length)") (run "__SHELL__" "-NoProfile" "-NonInteractive" "-Command" "$s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r }; [Console]::Write($n)")))
+	@(out (pipe (run "__SHELL__" "-NoProfile" "-NonInteractive" "-Command" "[Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 2097152; [Console]::OpenStandardOutput().Write($b,0,$b.Length)") (run "__SHELL__" "-NoProfile" "-NonInteractive" "-Command" "$s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r }; [Console]::Write($n)")))
 '@
 	$pipeline.Replace('__SHELL__', $shell) | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
@@ -83,9 +83,14 @@ task native-cache :
 		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch 'native-include-ok') {
 			throw "Native source include check failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
 		}
-		$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline 2>&1
-		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch '2097152') {
-			throw "Native binary pipeline failed to transfer 2 MiB through both stages: exit=$LASTEXITCODE output=$($output -join ' | ')"
+		$pipelineOutputPath = Join-Path $project 'pipeline.out'
+		$pipelineErrorPath = Join-Path $project 'pipeline.err'
+		$null = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline 1> $pipelineOutputPath 2> $pipelineErrorPath
+		$pipelineStatus = $LASTEXITCODE
+		$pipelineOutput = Get-Content -Raw $pipelineOutputPath
+		$pipelineError = Get-Content -Raw $pipelineErrorPath
+		if ($pipelineStatus -ne 0 -or $pipelineOutput -notmatch '2097152' -or $pipelineOutput -notmatch '"stages":\[\{[^}]*"status":0\},\{[^}]*"status":0\}\]' -or $pipelineError -notmatch 'native-pipeline-stderr') {
+			throw "Native binary pipeline failed to preserve 2 MiB flow, per-stage status, or stream separation: exit=$pipelineStatus stdout=$pipelineOutput stderr=$pipelineError"
 		}
 		$cacheArgs = @('--json', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-cache')
 		$null = & $exe @cacheArgs 2>&1
