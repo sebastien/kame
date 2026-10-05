@@ -26,11 +26,14 @@ jobs:
       - uses: vmactions/freebsd-vm@v1
         with:
           release: '15.1'
-          prepare: pkg install -y go gmake bash python3
+          prepare: pkg install -y go gmake bash
           run: |
+            export KAME_PLATFORM=freebsd-x86_64
             export PATH="$(go env GOPATH)/bin:$PATH"
             go install solod.dev/cmd/so@v0.4.0
-            /usr/local/bin/gmake test-so
+            /usr/local/bin/gmake version-source
+            cd src/go/kame && so test -panic=exit ./...
+            cd "$GITHUB_WORKSPACE"
             /usr/local/bin/gmake dist/native/freebsd-x86_64/kame
             ./dist/native/freebsd-x86_64/kame --version
       - uses: actions/upload-artifact@v4
@@ -47,11 +50,14 @@ jobs:
         with:
           release: '11.0'
           usesh: true
-          prepare: /usr/sbin/pkg_add go gmake bash python3
+          prepare: /usr/sbin/pkg_add go gmake bash
           run: |
+            export KAME_PLATFORM=netbsd-x86_64
             export PATH="/usr/pkg/go/bin:/usr/pkg/bin:$(go env GOPATH)/bin:$PATH"
             go install solod.dev/cmd/so@v0.4.0
-            /usr/pkg/bin/gmake test-so
+            /usr/pkg/bin/gmake version-source
+            cd src/go/kame && so test -panic=exit ./...
+            cd "$GITHUB_WORKSPACE"
             /usr/pkg/bin/gmake dist/native/netbsd-x86_64/kame
             ./dist/native/netbsd-x86_64/kame --version
       - uses: actions/upload-artifact@v4
@@ -67,11 +73,14 @@ jobs:
       - uses: vmactions/openbsd-vm@v1
         with:
           release: '7.9'
-          prepare: pkg_add go gmake bash python3
+          prepare: pkg_add go gmake bash
           run: |
+            export KAME_PLATFORM=openbsd-x86_64
             export PATH="/usr/local/bin:$(go env GOPATH)/bin:$PATH"
             go install solod.dev/cmd/so@v0.4.0
-            /usr/local/bin/gmake test-so
+            /usr/local/bin/gmake version-source
+            cd src/go/kame && so test -panic=exit ./...
+            cd "$GITHUB_WORKSPACE"
             /usr/local/bin/gmake dist/native/openbsd-x86_64/kame
             ./dist/native/openbsd-x86_64/kame --version
       - uses: actions/upload-artifact@v4
