@@ -39,6 +39,7 @@ SH
 chmod +x "$release/kame.com"
 printf 'const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$release/kame.js"
 printf 'dummy-wasm' >"$release/kame.wasm"
+printf '9.9.9\n' >"$release/VERSION"
 cp "$CLI_ROOT/Makefile.bootstrap" "$release/Makefile.bootstrap"
 release_test_stamp_launcher "$launcher" "$release/bin/kame" 9.9.9
 release_test_sign "$release" 9.9.9 fixture "$root/keys"
@@ -53,6 +54,29 @@ if [ "$out" = "kame 9.9.9" ] && [ ! -e "$cache" ]; then
 	test-ok "--version answers without provisioning"
 else
 	test-fail "--version: out=$out cache-exists=$([ -e "$cache" ] && echo yes || echo no)"
+fi
+
+test-step "the explicit latest channel resolves a release version without provisioning"
+out="$(KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" KAME_HOME="$root/latest-version-cache" "$launcher" --version)"
+if [ "$out" = "kame 9.9.9" ] && [ ! -e "$root/latest-version-cache" ]; then
+	test-ok "latest resolves its signed-release version asset before --version"
+else
+	test-fail "latest version lookup: out=$out"
+fi
+set +e
+latest_offline_out="$(KAME_VERSION=latest KAME_NO_DOWNLOAD=1 KAME_HOME="$root/latest-offline-cache" "$launcher" --version 2>&1)"
+latest_offline_status=$?
+set -e
+if [ "$latest_offline_status" = 1 ] && grep -q 'latest channel selection requires a download' <<<"$latest_offline_out" && [ ! -e "$root/latest-offline-cache" ]; then
+	test-ok "latest selection fails clearly when downloads are disabled"
+else
+	test-fail "offline latest lookup: status=$latest_offline_status out=$latest_offline_out"
+fi
+out="$(KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" KAME_RELEASE_URL="file://$release" KAME_HOME="$root/latest-cache" KAME_BACKEND=wasm "$launcher" latest)"
+if [ "$out" = "wasm:latest" ] && [ -f "$root/latest-cache/9.9.9/wasm/kame.js" ]; then
+	test-ok "latest selects and provisions the resolved immutable release"
+else
+	test-fail "latest backend: out=$out"
 fi
 
 set +e
@@ -98,7 +122,7 @@ fi
 test-step "a checksum mismatch fails closed and installs nothing"
 bad="$root/bad"
 mkdir -p "$bad/bin"
-cp "$release/kame.com" "$release/kame.js" "$release/kame.wasm" "$bad/"
+cp "$release/kame.com" "$release/kame.js" "$release/kame.wasm" "$release/VERSION" "$bad/"
 cp "$release/Makefile.bootstrap" "$bad/"
 cp "$release/PROVENANCE.json" "$bad/"
 cp "$release/bin/kame" "$bad/bin/kame"
@@ -106,6 +130,7 @@ cp "$release/bin/kame" "$bad/bin/kame"
 	echo "$(sha "$bad/kame.com")  kame.com"
 	printf '%064d  kame.js\n' 0
 echo "$(sha "$bad/kame.wasm")  kame.wasm"
+echo "$(sha "$bad/VERSION")  VERSION"
 echo "$(sha "$bad/bin/kame")  bin/kame"
 echo "$(sha "$bad/Makefile.bootstrap")  Makefile.bootstrap"
 } | sort -k2 >"$bad/SHA256SUMS"

@@ -26,6 +26,7 @@ release publishes these flat assets under the base URL
 | `kame.js` | packaged JS CLI | Node CLI wrapper for `kame.wasm` (`010-wasm.md`) |
 | `bin/kame` | stamped launcher | host provisioning and dispatch |
 | `Makefile.bootstrap` | bootstrap template | project-local make delegation and `kame init` |
+| `VERSION` | release tree | signed version selector for the explicit latest channel |
 | `PROVENANCE.json` | release builder | version, source revision and asset digests |
 | `SHA256SUMS` | checksums | signed integrity manifest |
 | `SHA256SUMS.sig` | release signer | Ed25519 signature over the exact manifest bytes |
@@ -50,18 +51,27 @@ cached artifact, and cached artifacts are checked again before reuse.
 
 ## Version Pinning
 
-The launcher is pinned to one version. Valid version labels contain only ASCII
-letters, digits, `.`, `+`, and `-`, preventing cache paths from escaping their
-per-version root. It resolves that version in order:
+The launcher uses a pinned version by default. Valid version labels contain
+only ASCII letters, digits, `.`, `+`, and `-`, preventing cache paths from
+escaping their per-version root. It resolves that version in order:
 
-1. `KAME_VERSION` when set and nonempty.
+1. `KAME_VERSION` when set to a concrete version.
 2. An embedded stamp present in the released `bin/kame` asset.
 3. A `VERSION` file in the launcher's directory or its parent, used for a
-   source checkout.
+  source checkout.
 
-The launcher never queries the network to discover a newer release. Updating
-means replacing the launcher or setting `KAME_VERSION`. This is deliberate: no
-run has hidden network latency, and a project's pin is explicit.
+Setting `KAME_VERSION=latest` opts into a moving channel. Unless `KAME_BIN` is
+set, the launcher fetches the plain-text `VERSION` selector from
+`KAME_LATEST_URL` (default:
+`https://github.com/sebastien/kame/releases/latest/download/VERSION`) on each
+invocation, validates the resolved value as a concrete version, then uses that
+version's normal signed release manifest and cache. The selector only chooses
+which immutable release to verify; it does not bypass signature or checksum
+verification. `KAME_RELEASE_URL` still controls the selected release's asset
+base URL. The latest selector requires downloads and fails when
+`KAME_NO_DOWNLOAD=1`. `--version` may fetch the selector but provisions no
+runtime artifacts. Concrete `KAME_VERSION` values and the launcher's stamped
+version remain pinned and perform no selector request.
 
 ## Cache
 
@@ -215,6 +225,9 @@ existing build rules.
 - A second invocation with a populated cache performs no network access.
 - `KAME_NO_DOWNLOAD=1` fails when the artifact is absent.
 - A lone `--version` prints `kame VERSION` and provisions nothing.
+- `KAME_VERSION=latest` resolves the selector, prints its concrete version
+  without provisioning for `--version`, and provisions only that version for
+  execution; disabled downloads fail before creating the cache.
 - An invalid version override fails before creating or accessing a cache path.
 - `kame init` writes a correctly stamped bootstrap sidecar, preserves an
   existing `Makefile`, and refuses a second write without changing either file.
@@ -225,7 +238,8 @@ existing build rules.
 
 ## Deferred
 
-- Auto-update or a latest channel; pinning is intentional.
+- Automatic self-update; the explicit `latest` channel does not replace the
+  launcher itself, and pinned versions remain the default.
 - Native per-platform release binaries.
 - Windows-native (`cmd.exe`, PowerShell) launcher.
 - Package-manager integrations.

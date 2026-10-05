@@ -39,7 +39,7 @@ adapters and integration evidence rather than placeholder methods.
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
 | D16 | Platform execution | In progress: the Node/WASM host now has Windows stream pipelines and process-tree termination, with a Windows-only descendant test; Windows-native launch, native-host lifecycle, and APE conformance on advertised non-Linux hosts remain. |
-| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap` release asset and non-overwriting `kame init` are specified and covered. Update/latest selection, native platform artifacts and package-manager integration remain. |
+| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap` and `VERSION` release assets, non-overwriting `kame init`, and the opt-in `KAME_VERSION=latest` channel are specified and covered. Automatic launcher updates, native platform artifacts and package-manager integration remain. |
 | D18 | Remaining library/ergonomic extensions | In progress: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, and ANSI terminal style functions now have specified semantics and acceptance coverage. Tagged-template shell helpers and dependency sequencing remain. |
 
 The explicit boundaries in this table are a finite work inventory. General
@@ -130,8 +130,14 @@ style functions wrap text in foreground or bold/dim sequences; T007-03 verifies
 all styles, selective nesting resets, nonstring rejection, canonical value
 display and native/WASM output. Tagged-template shell helpers and dependency
 sequencing remain open.
-D17 now packages `Makefile.bootstrap` inside the signed release manifest.
-`kame init` verifies that asset, creates a pinned sidecar atomically, preserves
-an existing `Makefile`, and refuses to replace an existing sidecar. T015-01
-covers successful, repeated, and concurrent initialization; T015-04 exercises
-init against the actual signed release. The remaining D17 items are still open.
+D17 packages `Makefile.bootstrap` and `VERSION` inside the signed release
+manifest. `kame init` verifies the bootstrap asset, creates a pinned sidecar
+atomically, preserves an existing `Makefile`, and refuses to replace an
+existing sidecar. The opt-in `KAME_VERSION=latest` channel fetches the selector
+on each invocation, then uses the ordinary signed manifest for the selected
+immutable release; pinned versions remain the default. T015-01 covers selector
+resolution, no-provisioning version output, disabled-download rejection, and
+provisioning the selected release, as well as successful, repeated, and
+concurrent initialization. T015-04 exercises init against the actual signed
+release. Automatic launcher updates, native artifacts, and package-manager
+integration remain open.

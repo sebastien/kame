@@ -76,10 +76,10 @@ tests/T013-01-meta-catalog.sh	013	meta	Catalog and test-name consistency
 tests/T013-02-meta-hygiene.sh	013	meta	Fixtures are never modified and scratch dirs stay in the test path
 tests/T013-03-meta-binary.sh	013	meta	Binary contract, no-op rebuilds, cross-copy determinism
 tests/T014-01-patterns-sections.sh	014	patterns	Placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs
-tests/T015-01-dist-launcher.sh	015	dist	Launcher version, provisioning, checksums, cache reuse, backend selection, bootstrap delegation, and non-overwriting init
+tests/T015-01-dist-launcher.sh	015	dist	Pinned/latest version selection, provisioning, checksums, cache reuse, backend selection, bootstrap delegation, and non-overwriting init
 tests/T015-02-dist-launcher-backends.sh	015	dist	Launcher APE probe fallback, forced backends, missing manifest, no-download, concurrency, and cache roots
 tests/T015-03-dist-self-build.sh	015	dist	Generated version metadata stability, incremental self-build input declaration, and fresh-skip behavior
-tests/T015-04-dist-signed-release.sh	015	dist	Operator-supplied Ed25519 signing keys, authenticated bootstrap template, checksums, provenance and tamper rejection
+tests/T015-04-dist-signed-release.sh	015	dist	Operator-supplied Ed25519 signing keys, authenticated bootstrap and VERSION assets, checksums, provenance and tamper rejection
 tests/T017-01-eval-capture.sh	017	eval	Embedded Kash atoms, direct argv, quoting, list splicing, capture, lazy execution and capabilities
 tests/T017-02-wasm-capture.sh	017	wasm	Native/WASM capture, argv, scope, failure, grant, AST and formatting parity
 tests/T017-03-eval-pipelines.sh	017	eval	Streaming Kash pipelines, stage statuses, failure cleanup, grants and native/WASM parity

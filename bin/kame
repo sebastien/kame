@@ -24,12 +24,41 @@ note() {
 	fi
 }
 
+fetch() {
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$1" -o "$2" || die "download failed: $1"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -q -O "$2" "$1" || die "download failed: $1"
+	else
+		die "no downloader (curl or wget)"
+	fi
+}
+
+fetch_text() {
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSL "$1" || die "download failed: $1"
+	elif command -v wget >/dev/null 2>&1; then
+		wget -q -O - "$1" || die "download failed: $1"
+	else
+		die "no downloader (curl or wget)"
+	fi
+}
+
 launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 # --- Version resolution: KAME_VERSION, embedded stamp, then VERSION file. ---
 version=""
-if [ -n "${KAME_VERSION:-}" ]; then
-	version=$KAME_VERSION
+requested_version=${KAME_VERSION:-}
+if [ "$requested_version" = "latest" ] && [ -z "${KAME_BIN:-}" ]; then
+	[ "${KAME_NO_DOWNLOAD:-0}" != "1" ] || die "latest channel selection requires a download"
+	latest_url=${KAME_LATEST_URL:-https://github.com/sebastien/kame/releases/latest/download/VERSION}
+	version=$(fetch_text "$latest_url")
+	requested_version=""
+elif [ "$requested_version" = "latest" ]; then
+	requested_version=""
+fi
+if [ -n "$requested_version" ]; then
+	version=$requested_version
 fi
 if [ -z "$version" ] && [ -n "$KAME_STAMP" ]; then
 	version=$KAME_STAMP
@@ -75,16 +104,6 @@ case $release_base in
 */) ;;
 *) release_base=$release_base/ ;;
 esac
-
-fetch() {
-	if command -v curl >/dev/null 2>&1; then
-		curl -fsSL "$1" -o "$2" || die "download failed: $1"
-	elif command -v wget >/dev/null 2>&1; then
-		wget -q -O "$2" "$1" || die "download failed: $1"
-	else
-		die "no downloader (curl or wget)"
-	fi
-}
 
 verify() {
 	if command -v sha256sum >/dev/null 2>&1; then

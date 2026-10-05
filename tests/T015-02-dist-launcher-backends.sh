@@ -33,6 +33,7 @@ build_release() {
 	chmod +x "$dir/kame.com"
 	printf 'const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$dir/kame.js"
 	printf 'dummy-wasm' >"$dir/kame.wasm"
+	printf '9.9.9\n' >"$dir/VERSION"
 	cp "$CLI_ROOT/Makefile.bootstrap" "$dir/Makefile.bootstrap"
 	release_test_stamp_launcher "$launcher" "$dir/bin/kame" 9.9.9
 	release_test_sign "$dir" 9.9.9 fixture "$root/keys"
@@ -73,6 +74,7 @@ echo "ape:$*"'
 	echo "$(sha "$nomanifest/kame.wasm")  kame.wasm"
 	echo "$(sha "$nomanifest/bin/kame")  bin/kame"
 	echo "$(sha "$nomanifest/Makefile.bootstrap")  Makefile.bootstrap"
+	echo "$(sha "$nomanifest/VERSION")  VERSION"
 	echo "$(sha "$nomanifest/PROVENANCE.json")  PROVENANCE.json"
 } | sort -k2 >"$nomanifest/SHA256SUMS"
 openssl pkeyutl -sign -inkey "$root/keys/signing.pem" -rawin -in "$nomanifest/SHA256SUMS" -out "$nomanifest/SHA256SUMS.sig"
