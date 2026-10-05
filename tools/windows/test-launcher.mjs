@@ -66,7 +66,7 @@ try {
   await mkdir(workspace);
   await writeFile(
     path.join(workspace, 'Windows.kmk'),
-    `task windows-launcher :\r\n\tnode -e "console.log('KAME_WINDOWS_RUNTIME_OK '+process.env.KAME_WINDOWS_TEST)"\r\n`,
+    `task windows-launcher :\r\n\tnode -p process.env.KAME_WINDOWS_TEST\r\n`,
   );
   const build = await run(
     launcher,
@@ -79,7 +79,6 @@ try {
   );
   assert.equal(build.timedOut, false, 'bundled CLI build timed out');
   assert.equal(build.code, 0, `bundled CLI build failed: ${build.stderr}`);
-  assert.match(build.stdout, /KAME_WINDOWS_RUNTIME_OK/);
   assert.match(build.stdout, /from-host/);
 
   const timeoutWorkspace = path.join(temporary, 'timeout-workspace');
