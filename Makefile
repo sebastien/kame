@@ -83,6 +83,7 @@ test-wasm: wasm-check
 	tests/T010-26-wasm-service-readiness.sh
 	tests/T010-27-wasm-generated-declarations.sh
 	tests/T010-28-cache-management.sh
+	tests/T010-29-cache-locking.sh
 	tests/T014-02-patterns-ergonomics.sh
 	tests/T016-01-cli-render.sh
 	tests/T017-02-wasm-capture.sh

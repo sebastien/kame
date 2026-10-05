@@ -832,6 +832,7 @@ func (p *Program) complete(event host.ProcessEvent) {
 	}
 	if d.Code != "" {
 		p.attachProcessContext(&d, entry, event)
+		p.releaseCacheLock(entry)
 	}
 	for i := range p.Pending {
 		pending := p.Pending[i]

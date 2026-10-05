@@ -38,6 +38,7 @@ func (p *Program) ruleDiagnostic(d diagnostic.Diagnostic, entry *instance) diagn
 }
 
 func (p *Program) failRule(c *core.EngineContext, index int, d diagnostic.Diagnostic) {
+	p.releaseCacheLock(&p.Instances[index])
 	c.Fail(p.ruleDiagnostic(d, &p.Instances[index]))
 }
 

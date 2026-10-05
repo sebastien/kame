@@ -2,6 +2,7 @@ package posix
 
 import (
 	"kame/host"
+	"solod.dev/so/c"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 	"solod.dev/so/slices"
@@ -124,6 +125,16 @@ func (h *Host) Mkdir(name string, perm uint32) error {
 func (h *Host) Remove(name string) error {
 	_ = h
 	return os.Remove(name)
+}
+
+func (h *Host) LockCache(name string, stripe int) bool {
+	return h != nil && h.native != nil && km_host_cache_lock(h.native, name, c.Int(stripe)) == 0
+}
+
+func (h *Host) UnlockCache(stripe int) {
+	if h != nil && h.native != nil {
+		km_host_cache_unlock(h.native, c.Int(stripe))
+	}
 }
 
 func (h *Host) Now() int64 {

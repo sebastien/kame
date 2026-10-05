@@ -340,6 +340,16 @@ func (p *Program) cachePath(entry *instance) string {
 	return result
 }
 
+func (p *Program) cacheLockPath(key []byte) string {
+	const digits = "0123456789abcdef"
+	name := slices.Make[byte](p.Alloc, 2)
+	name[0], name[1] = digits[key[0]>>4], digits[key[0]&15]
+	stripe := string(name)
+	result := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/locks", stripe+".lock")
+	mem.FreeString(p.Alloc, stripe)
+	return result
+}
+
 // cacheKey returns the identity digest that names a cached task's record. The
 // host treats it as an opaque byte key, so the same key selects the same record
 // on the file host and on a forwarding host.

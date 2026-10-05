@@ -83,9 +83,25 @@ func TestFingerprintValueTagVectors(t *testing.T) {
 	mem.FreeSlice(a,left);mem.FreeSlice(a,right)
 }
 
+func cleanupFingerprintSubdir(a mem.Allocator, subdir string) {
+	entries,err:=os.ReadDir(a,subdir)
+	if err==nil { for i:=range entries { _=os.Remove(subdir+"/"+entries[i].Name) };os.FreeDirEntry(a,entries) }
+	_ = os.Remove(subdir)
+}
+
+func cleanupFingerprintVector(a mem.Allocator) {
+	const dir="/tmp/kame-cache-fingerprint-vector"
+	cleanupFingerprintSubdir(a,dir+"/.kame/cache/tasks")
+	cleanupFingerprintSubdir(a,dir+"/.kame/cache/locks")
+	_ = os.Remove(dir+"/.kame/cache")
+	_ = os.Remove(dir+"/.kame")
+	_ = os.Remove(dir)
+}
+
 func TestCompleteTaskFingerprintVector(t *testing.T) {
 	a:=t.Allocator()
 	const dir="/tmp/kame-cache-fingerprint-vector"
+	cleanupFingerprintVector(a)
 	if os.Mkdir(dir,0o755)!=nil { t.Fatal("cannot create fingerprint vector directory");return }
 	parsed:=script.Parse(a,"vector.kmk","task cache-vector :\n\tprintf vector\n")
 	registry:=eval.NewRegistry(a)
@@ -108,10 +124,7 @@ func TestCompleteTaskFingerprintVector(t *testing.T) {
 	compiled.Program.Free();compiled.Free(a);parsed.Free();registry.Free()
 	entries,err=os.ReadDir(a,dir+"/.kame/cache/tasks")
 	if err==nil { for i:=range entries { _=os.Remove(dir+"/.kame/cache/tasks/"+entries[i].Name) };os.FreeDirEntry(a,entries) }
-	_ = os.Remove(dir+"/.kame/cache/tasks")
-	_ = os.Remove(dir+"/.kame/cache")
-	_ = os.Remove(dir+"/.kame")
-	_ = os.Remove(dir)
+	cleanupFingerprintVector(a)
 }
 
 func TestCachedTaskHits(t *testing.T) {
@@ -913,7 +926,7 @@ func TestCachePathIgnoresRawTargetText(t *testing.T) {
 	}
 	os.FreeDirEntry(a, entries)
 	cacheEntries, cacheErr := os.ReadDir(a, dir+"/.kame/cache")
-	if cacheErr != nil || len(cacheEntries) != 1 || cacheEntries[0].Name != "tasks" { t.Error("cache directory contains a path derived from raw target text") }
+	if cacheErr != nil || len(cacheEntries) != 2 || cacheEntries[0].Name != "locks" || cacheEntries[1].Name != "tasks" { t.Error("cache directory contains a path derived from raw target text") }
 	if cacheErr == nil { os.FreeDirEntry(a, cacheEntries) }
 	rootEntries, rootErr := os.ReadDir(a, dir+"/.kame")
 	if rootErr != nil || len(rootEntries) != 1 || rootEntries[0].Name != "cache" { t.Error("kame directory contains a path derived from raw target text") }

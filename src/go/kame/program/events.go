@@ -54,6 +54,9 @@ func (p *Program) observeInstances() {
 		if kind < 0 {
 			continue
 		}
+		if kind == TargetCompleted || kind == TargetFailed || kind == TargetCancelled {
+			p.releaseCacheLock(entry)
+		}
 		event := Event{Kind: kind, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: node.HostRequestID}
 		if node.Diagnostic.Code != "" {
 			event.Diagnostic = node.Diagnostic.Clone(p.Alloc)

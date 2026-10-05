@@ -199,6 +199,10 @@ func (h *MemoryHost) Remove(name string) error {
 	return nil
 }
 
+func (h *MemoryHost) LockCache(path string, stripe int) bool { _, _, _ = h, path, stripe; return true }
+
+func (h *MemoryHost) UnlockCache(stripe int) { _, _ = h, stripe }
+
 func (h *MemoryHost) Now() int64 {
 	if h == nil {
 		return 0

@@ -263,6 +263,10 @@ both hosts.
 oldest-first eviction at the 1024-record bound, and cleanup, including that
 both eviction and cleanup leave symlinks and their targets intact.
 
+`T010-29-cache-locking.sh` starts separate native CLI processes against a cold
+task identity, verifies only one recipe execution, and confirms publication
+releases the striped lock while the owning process continues other work.
+
 The shared `watch-runtime.py` suite, run by T009-14 and T010-23, also changes an
 included module list while watching a generated target family. It verifies the
 new generated target runs and the retained root rebuilds against the replacement

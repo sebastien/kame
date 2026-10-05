@@ -44,6 +44,8 @@ int km_host_cancel(km_host *, int64_t, bool);
 int km_host_stop(km_host *, int64_t, int64_t);
 void km_host_cancel_all(km_host *);
 int km_host_active(km_host *);
+int km_host_cache_lock(km_host *, so_String, int);
+void km_host_cache_unlock(km_host *, int);
 void km_host_force_waitpid_failure(km_host *);
 void km_event_free(km_event *);
 void km_host_free(km_host *);

@@ -9,6 +9,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
+#include <sys/file.h>
 #include <sys/wait.h>
 #include <signal.h>
 #include <time.h>
@@ -56,7 +57,12 @@ struct km_host {
     int len, cap;
     km_event_node *first, *last;
     bool force_waitpid_failure;
+    unsigned cache_lock_refs[256];
 };
+
+static int km_cache_lock_fd[256];
+static unsigned km_cache_lock_refs[256];
+static bool km_cache_lock_initialized;
 
 static volatile sig_atomic_t km_cli_signal = 0;
 static volatile sig_atomic_t km_cli_signal_count = 0;
@@ -290,7 +296,47 @@ static int km_set_nonblock(int fd) {
     return flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 ? -1 : 0;
 }
 
-km_host *km_host_new(void) { return calloc(1, sizeof(km_host)); }
+km_host *km_host_new(void) {
+    km_host *host = calloc(1, sizeof(km_host));
+    if (!host) return NULL;
+    if (!km_cache_lock_initialized) {
+        for (int i = 0; i < 256; i++) km_cache_lock_fd[i] = -1;
+        km_cache_lock_initialized = true;
+    }
+    return host;
+}
+
+int km_host_cache_lock(km_host *host, so_String name, int stripe) {
+    if (!host || stripe < 0 || stripe >= 256) return -1;
+    if (km_cache_lock_refs[stripe] != 0) {
+        host->cache_lock_refs[stripe]++;
+        km_cache_lock_refs[stripe]++;
+        return 0;
+    }
+    char *path = km_cstring(name);
+    if (!path) return -1;
+    int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+    free(path);
+    if (fd < 0) return -1;
+    while (flock(fd, LOCK_EX) != 0) {
+        if (errno == EINTR) continue;
+        close(fd);
+        return -1;
+    }
+    host->cache_lock_refs[stripe] = 1;
+    km_cache_lock_fd[stripe] = fd;
+    km_cache_lock_refs[stripe] = 1;
+    return 0;
+}
+
+void km_host_cache_unlock(km_host *host, int stripe) {
+    if (!host || stripe < 0 || stripe >= 256 || host->cache_lock_refs[stripe] == 0 || km_cache_lock_refs[stripe] == 0) return;
+    host->cache_lock_refs[stripe]--;
+    if (--km_cache_lock_refs[stripe] != 0) return;
+    int fd = km_cache_lock_fd[stripe];
+    km_cache_lock_fd[stripe] = -1;
+    if (fd >= 0) { flock(fd, LOCK_UN); close(fd); }
+}
 
 static int km_spawn_failed(km_host *host, int64_t id, const char *message) {
     km_event event = {.kind = KM_TERMINAL, .id = id, .outcome = KM_FAILED};
@@ -698,6 +744,16 @@ void km_host_free(km_host *host) {
             else while (waitpid(p->pid, NULL, 0) < 0 && errno == EINTR) {}
         }
         km_release_process(p);
+    }
+    for (int i = 0; i < 256; i++) {
+        while (host->cache_lock_refs[i] != 0 && km_cache_lock_refs[i] != 0) {
+            host->cache_lock_refs[i]--;
+            if (--km_cache_lock_refs[i] == 0) {
+                int fd = km_cache_lock_fd[i];
+                km_cache_lock_fd[i] = -1;
+                if (fd >= 0) { flock(fd, LOCK_UN); close(fd); }
+            }
+        }
     }
     free(host->processes);
     while (host->first) { km_event_node *node = host->first; host->first = node->next; km_free_event(&node->event); free(node); }

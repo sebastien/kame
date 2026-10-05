@@ -160,9 +160,12 @@ temporary file in the cache directory, syncs it as supported, and atomically
 renames it over the previous record. A crash must leave either the old valid
 record or no valid record, never a valid-looking partial record.
 
-Concurrent production of one task is already deduplicated by the engine.
-Cross-process cache locking is deferred. Concurrent Kame processes may
-both execute a miss, but each atomic successful record remains readable.
+Concurrent production of one task is deduplicated by the engine. Native
+processes acquire one of 256 advisory lock stripes derived from the cache key
+before reading a task record and retain it until the target completes. This
+second read under the lock prevents duplicate cold execution across processes.
+POSIX process exit releases held advisory locks even after a crash. Stripe
+collisions only serialize unrelated keys; lock files are fixed in count.
 
 ## Invalidations
 
@@ -210,6 +213,8 @@ share the host backend's limit.
 - Cached stdout and stderr replay separately with truncation flags.
 - A truncated or malformed record is a miss and never crashes the runtime.
 - Concurrent atomic writers leave a complete readable record.
+- Separate native processes execute one cold cache miss once and release the
+  lock after publication.
 - Fingerprint encoding is identical across two native runs and matches checked-in
   hexadecimal vectors for every value tag and one complete task record.
 - SHA-256 tests use standard empty, short-string, and multi-block vectors.

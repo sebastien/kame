@@ -41,4 +41,5 @@ func (p *Program) cacheCommit(entry *instance, stdout []byte, stderr []byte, std
 	}
 	p.cacheSave(entry, &record)
 	record.Free(p.Alloc)
+	p.releaseCacheLock(entry)
 }

@@ -86,7 +86,10 @@ func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []
 }
 
 //so:extern
-func km_event_stage_field(event *nativeEvent, index c.Int, field c.Int) c.Int { _, _, _ = event, index, field; return 0 }
+func km_event_stage_field(event *nativeEvent, index c.Int, field c.Int) c.Int {
+	_, _, _ = event, index, field
+	return 0
+}
 
 //so:extern
 func km_host_pump(h *nativeHost, waitMS c.Int) c.Int { _, _ = h, waitMS; return 0 }
@@ -105,6 +108,15 @@ func km_host_cancel_all(h *nativeHost) { _ = h }
 
 //so:extern
 func km_host_active(h *nativeHost) c.Int { _ = h; return 0 }
+
+//so:extern nodecay
+func km_host_cache_lock(h *nativeHost, path string, stripe c.Int) c.Int {
+	_, _, _ = h, path, stripe
+	return -1
+}
+
+//so:extern
+func km_host_cache_unlock(h *nativeHost, stripe c.Int) { _, _ = h, stripe }
 
 //so:extern
 func km_host_force_waitpid_failure(h *nativeHost) { _ = h }
@@ -150,7 +162,9 @@ func New(a mem.Allocator) *Host {
 // Start queues a failed terminal event when the host rejects the request. A
 // nil host cannot queue anything and returns false without an event.
 func (h *Host) Start(request host.ProcessRequest) bool {
-	if request.Directory == "" { request.Directory = "." }
+	if request.Directory == "" {
+		request.Directory = "."
+	}
 	if h == nil || h.native == nil {
 		return false
 	}
@@ -162,9 +176,13 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		var timeouts []int64
 		for i := range request.Stages {
 			lengths = slices.Append(h.Alloc, lengths, len(request.Stages[i].Argv))
-			for j := range request.Stages[i].Argv { arguments = slices.Append(h.Alloc, arguments, request.Stages[i].Argv[j]) }
+			for j := range request.Stages[i].Argv {
+				arguments = slices.Append(h.Alloc, arguments, request.Stages[i].Argv[j])
+			}
 			directory := request.Stages[i].Directory
-			if directory == "" { directory = request.Directory }
+			if directory == "" {
+				directory = request.Directory
+			}
 			directories = slices.Append(h.Alloc, directories, directory)
 			timeouts = slices.Append(h.Alloc, timeouts, request.Stages[i].TimeoutMS)
 			start := len(environment)
@@ -174,11 +192,17 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				for k := range request.Stages[i].Environment {
 					replacement := request.Stages[i].Environment[k]
 					at := strings.IndexByte(replacement, '=')
-					if at > 0 && strings.HasPrefix(entry, replacement[:at+1]) { overridden = true }
+					if at > 0 && strings.HasPrefix(entry, replacement[:at+1]) {
+						overridden = true
+					}
 				}
-				if !overridden { environment = slices.Append(h.Alloc, environment, entry) }
+				if !overridden {
+					environment = slices.Append(h.Alloc, environment, entry)
+				}
 			}
-			for j := range request.Stages[i].Environment { environment = slices.Append(h.Alloc, environment, request.Stages[i].Environment[j]) }
+			for j := range request.Stages[i].Environment {
+				environment = slices.Append(h.Alloc, environment, request.Stages[i].Environment[j])
+			}
 			environmentLengths = slices.Append(h.Alloc, environmentLengths, len(environment)-start)
 		}
 		ok := km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append) == 0
@@ -191,7 +215,9 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		return ok
 	}
 	argv, direct := request.Shell, false
-	if len(request.Argv) != 0 { argv, direct = request.Argv, true }
+	if len(request.Argv) != 0 {
+		argv, direct = request.Argv, true
+	}
 	return km_host_start(h.native, request.ID, argv, request.Script, request.Directory, request.Environment, request.TimeoutMS, request.RetainBytes, direct) == 0
 }
 

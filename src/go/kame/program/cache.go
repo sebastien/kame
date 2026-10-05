@@ -218,7 +218,9 @@ func resourceKindName(kind core.ResourceKind) string {
 	if kind == core.ResourceGlob {
 		return "glob"
 	}
-	if kind == core.ResourceTool { return "tool" }
+	if kind == core.ResourceTool {
+		return "tool"
+	}
 	return "environment"
 }
 
@@ -485,7 +487,22 @@ type cacheLookupResult struct {
 // cache request kinds.
 func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLookupResult {
 	if !p.Forwarding {
+		key := p.cacheKey(entry)
+		stripe := int(key[0])
+		lockPath := p.cacheLockPath(key)
+		mem.FreeSlice(p.Alloc, key)
+		locked := p.mkdirParent(lockPath) && p.Host.LockCache(lockPath, stripe)
+		mem.FreeString(p.Alloc, lockPath)
+		if !locked {
+			entry.CacheReady = false
+			p.cacheWarning(entry, "CACHE_LOCK", "cache miss lock unavailable; running without cache coordination")
+			return cacheLookupResult{}
+		}
+		entry.cacheLockHeld, entry.cacheLockStripe = true, stripe
 		record := p.cacheLoad(entry, entry.CacheFingerprint[:])
+		if record.Identity != "" {
+			p.releaseCacheLock(entry)
+		}
 		return cacheLookupResult{Record: record, Hit: record.Identity != ""}
 	}
 	if entry.cachePending {
@@ -515,6 +532,14 @@ func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLooku
 	c.Submit(p.nextRequest)
 	entry.cachePending = true
 	return cacheLookupResult{Waiting: true}
+}
+
+func (p *Program) releaseCacheLock(entry *instance) {
+	if entry == nil || !entry.cacheLockHeld {
+		return
+	}
+	p.Host.UnlockCache(entry.cacheLockStripe)
+	entry.cacheLockHeld = false
 }
 
 func (p *Program) cacheWarning(entry *instance, code string, message string) {

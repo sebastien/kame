@@ -24,6 +24,8 @@ type ProgramHost interface {
 	WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error
 	Mkdir(name string, perm uint32) error
 	Remove(name string) error
+	LockCache(path string, stripe int) bool
+	UnlockCache(stripe int)
 	Now() int64
 	Monotonic() int64
 }
