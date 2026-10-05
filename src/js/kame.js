@@ -19,6 +19,7 @@ import process, { argv, env, stderr, stdout } from 'node:process';
 // Children run in their own process group so a signal terminates the whole
 // tree, and a forced termination reports 128 plus the signal number.
 const activeChildren = new Set();
+const activeProcessGroups = new Map();
 const invocationCancellations = new Set();
 const invocationDisposals = new Set();
 let interruptedStatus = 0;
@@ -47,9 +48,23 @@ function installSignals() {
   }
 }
 
-function track(child) {
+function track(child, request = undefined) {
   activeChildren.add(child);
-  child.once('close', () => activeChildren.delete(child));
+  if (request !== undefined) activeProcessGroups.set(request.toString(), child);
+  child.once('close', () => {
+    activeChildren.delete(child);
+    if (request !== undefined && activeProcessGroups.get(request.toString()) === child) activeProcessGroups.delete(request.toString());
+  });
+}
+
+function cancelProcessGroup(request) {
+  const child = activeProcessGroups.get(request.toString());
+  if (!child || child.pid === undefined) return;
+  try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
+  const timer = setTimeout(() => {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+  }, 5000);
+  timer.unref();
 }
 
 // A blocked public sink must stop every publishing child pipe. One pair of
@@ -865,6 +880,25 @@ class Module {
 
   async dispatch(instance, request, kind, payload, data, context, key, record) {
     const grants = context.grants;
+    if (kind === 22) {
+      const milliseconds = Number(payload);
+      if (!Number.isSafeInteger(milliseconds) || milliseconds < 0 || milliseconds > 60000) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid service timer');
+      if (context.signal?.aborted) return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'invocation cancelled');
+      await new Promise((resolveTimer) => {
+        let timer;
+        const cancelled = () => { clearTimeout(timer); resolveTimer(); };
+        timer = setTimeout(() => { context.signal?.removeEventListener('abort', cancelled); resolveTimer(); }, milliseconds);
+        context.signal?.addEventListener('abort', cancelled, { once: true });
+      });
+      if (context.signal?.aborted) return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'invocation cancelled');
+      return this.exports.kame_wasm_complete_nil(instance, request);
+    }
+    if (kind === 23) {
+      let processRequest;
+      try { processRequest = BigInt(payload); } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process cancellation request'); }
+      cancelProcessGroup(processRequest);
+      return this.exports.kame_wasm_complete_nil(instance, request);
+    }
     if (kind === 19) return this.completeJSON(instance, request, existsSync(payload));
     if (kind === 18) {
       const resolved = resolveTool(payload, [], context.toolCache);
@@ -933,6 +967,7 @@ class Module {
     if (kind === 13 || kind === 14 || kind === 15) {
       if (!grants.run) return this.deny(instance, request);
       const decoded = JSON.parse(payload);
+      const serviceReadyProbe = kind === 15 && decoded.serviceReady === true;
       const stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
       const redirections = kind === 15 ? decoded : { input: '', output: '', append: false };
       for (const [field, capability] of [['input', 'read'], ['output', 'write']]) {
@@ -948,7 +983,7 @@ class Module {
         }
       }
       const detached = context.concurrent === true;
-      const completion = await runArgvCapture(stages, { ...context, ...redirections, onStarted: () => { this.processStarted(instance, detached ? request : undefined); this.drainEvents(instance, context); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
+      const completion = await runArgvCapture(stages, { ...context, ...redirections, request: detached ? request : undefined, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); this.drainEvents(instance, context); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout);
@@ -1577,7 +1612,7 @@ function runArgvCapture(stages, context) {
         const child = spawn(executables[i], args.slice(1), { argv0: args[0], shell: false, stdio: [i === 0 ? input ?? 'ignore' : pipes[i - 1].read, i === stages.length - 1 ? output ?? 'pipe' : pipes[i].write, 'pipe'], env: configuration.env, cwd: configuration.cwd, detached: true });
         children.push(child);
         remaining++;
-        track(child);
+        track(child, context.request);
         if (i === 0 && context.onStarted) publish(() => context.onStarted());
         const cancel = configuration.timeoutMS > 0 ? processDeadline(configuration.timeoutMS, () => stop('RECIPE_TIMEOUT', 'stage timed out')) : () => {};
         timers.push(cancel);
@@ -1590,8 +1625,9 @@ function runArgvCapture(stages, context) {
           finish();
         });
         if (i === stages.length - 1 && child.stdout !== null) {
-          const receive = (chunk) => {
-            if (context.stream) { publish(context.onStdout, chunk); return; }
+        const receive = (chunk) => {
+          if (context.stream) { publish(context.onStdout, chunk); return; }
+          if (context.discardStdout) return;
             length += chunk.length;
             if (length > limit) stop('CAPTURE_LIMIT', 'command substitution exceeded capture limit');
             else if (failure === null) chunks.push(chunk);
@@ -1713,7 +1749,7 @@ function runProcessAttempt(module, instance, script, context, request) {
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
     }
     const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, detached: true });
-    track(child);
+    track(child, request);
     const out = [];
     const err = [];
     let outLength = 0;

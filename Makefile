@@ -78,6 +78,9 @@ test-wasm: wasm-check
 	tests/T010-21-wasm-build-effects.sh
 	tests/T010-22-wasm-memory.sh
 	tests/T010-23-wasm-watch.sh
+	tests/T010-24-wasm-target-arguments.sh
+	tests/T010-25-wasm-watch-abi.sh
+	tests/T010-26-wasm-service-readiness.sh
 	tests/T014-02-patterns-ergonomics.sh
 	tests/T016-01-cli-render.sh
 	tests/T017-02-wasm-capture.sh

@@ -123,6 +123,77 @@ func ArgvPayload(a mem.Allocator, argv []core.Value) core.Value {
 	return payload
 }
 
+// ServiceProbePayload carries a direct-argv readiness probe and its execution
+// setup through the same structured process boundary used by native hosts.
+func ServiceProbePayload(a mem.Allocator, argv []string, cwd string, timeout int64, environment []string) core.Value {
+	var arguments []core.Value
+	for i := range argv { arguments = slices.Append(a, arguments, core.NewString(a, argv[i])) }
+	var envValues []core.Value
+	for i := range environment { envValues = slices.Append(a, envValues, core.NewString(a, environment[i])) }
+	setup := StageSetupPayload(a, cwd, timeout, envValues)
+	var setups []core.Value
+	setups = slices.Append(a, setups, setup)
+	b := strings.NewBuilder(a)
+	e := json.NewEncoder(&b)
+	e.BeginObject()
+	e.Str("serviceReady"); e.Bool(true)
+	e.Str("stages"); e.BeginArray(); e.BeginArray()
+	for i := range argv { e.Str(argv[i]) }
+	e.EndArray(); e.EndArray()
+	e.Str(FieldInput); e.Str("")
+	e.Str(FieldOutput); e.Str("")
+	e.Str(FieldAppend); e.Bool(false)
+	e.Str(FieldSetup); e.BeginArray(); e.BeginObject()
+	e.Str(FieldCwd); e.Str(cwd)
+	e.Str(FieldTimeout); e.Int(timeout)
+	e.Str(FieldEnvironment); e.BeginArray()
+	for i := range environment { e.Str(environment[i]) }
+	e.EndArray(); e.EndObject(); e.EndArray()
+	e.EndObject(); e.Flush()
+	fields := []core.RecordField{
+		{Key: FieldArgv, Value: core.NewList(a, arguments)},
+		{Key: FieldSetup, Value: core.NewList(a, setups)},
+		{Key: FieldData, Value: core.NewString(a, b.String())},
+		{Key: FieldPath, Value: core.NewString(a, argv[0])},
+	}
+	payload := core.NewRecord(a, fields)
+	for i := range fields { fields[i].Value.Free(a) }
+	setup.Free(a)
+	slices.Free(a, setups)
+	for i := range arguments { arguments[i].Free(a) }
+	slices.Free(a, arguments)
+	for i := range envValues { envValues[i].Free(a) }
+	slices.Free(a, envValues)
+	b.Free()
+	return payload
+}
+
+func ServiceTimerPayload(a mem.Allocator, milliseconds int64) core.Value {
+	b := strings.NewBuilder(a)
+	e := json.NewEncoder(&b)
+	e.Int(milliseconds)
+	e.Flush()
+	payload := core.NewRecord(a, []core.RecordField{
+		{Key: FieldOp, Value: core.NewString(a, "service-timer")},
+		{Key: FieldData, Value: core.NewString(a, b.String())},
+	})
+	b.Free()
+	return payload
+}
+
+func ServiceCancelPayload(a mem.Allocator, processID int64) core.Value {
+	b := strings.NewBuilder(a)
+	e := json.NewEncoder(&b)
+	e.Int(processID)
+	e.Flush()
+	payload := core.NewRecord(a, []core.RecordField{
+		{Key: FieldOp, Value: core.NewString(a, "service-cancel")},
+		{Key: FieldData, Value: core.NewString(a, b.String())},
+	})
+	b.Free()
+	return payload
+}
+
 // PayloadArgv returns a borrowed argv list, or nil for legacy shell requests.
 func PayloadArgv(payload core.Value) []core.Value {
 	for i := range payload.Record { if payload.Record[i].Key == FieldArgv { return payload.Record[i].Value.List } }

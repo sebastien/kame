@@ -182,9 +182,11 @@ func (p *Program) serviceSpawned(entry *instance) {
 		p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
 		return
 	}
-	if p.Host == nil {
+	if p.Forwarding {
+		p.requestServiceClock(entry)
 		return
 	}
+	if p.Host == nil { return }
 	entry.ServiceReadyDeadline = p.Host.Monotonic() + entry.Service.ReadyTimeout*1000000
 	p.startServiceReadyProbe(entry)
 }
@@ -198,11 +200,59 @@ func (p *Program) serviceProbeForRequest(id int64) *instance {
 	return nil
 }
 
-func (p *Program) startServiceReadyProbe(entry *instance) {
-	if p.Host == nil || entry.ServiceReady || entry.ServiceProbeID != 0 || entry.ServiceReadyDeadline == 0 {
+func (p *Program) serviceClockForRequest(id int64) *instance {
+	for i := range p.Instances { if p.Instances[i].ServiceClockID == id { return &p.Instances[i] } }
+	return nil
+}
+
+func (p *Program) serviceTimerForRequest(id int64) *instance {
+	for i := range p.Instances { if p.Instances[i].ServiceTimerID == id { return &p.Instances[i] } }
+	return nil
+}
+
+func (p *Program) requestServiceClock(entry *instance) {
+	if entry == nil || entry.ServiceClockID != 0 { return }
+	p.nextRequest++
+	id := p.nextRequest
+	entry.ServiceClockID = id
+	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestMonotonicTime})
+}
+
+func (p *Program) requestServiceTimer(entry *instance) {
+	if entry == nil || entry.ServiceTimerID != 0 { return }
+	p.nextRequest++
+	id := p.nextRequest
+	entry.ServiceTimerID = id
+	payload := host.ServiceTimerPayload(p.Alloc, entry.Service.ReadyInterval)
+	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestTimer, Payload: payload})
+}
+
+func (p *Program) completeServiceClock(entry *instance, now int64) {
+	entry.ServiceClockID = 0
+	if entry.ServiceReadyDeadline == 0 {
+		entry.ServiceReadyDeadline = now + entry.Service.ReadyTimeout*1000000
+	}
+	if now >= entry.ServiceReadyDeadline {
+		p.failServiceReady(entry)
 		return
 	}
-	now := p.Host.Monotonic()
+	p.startServiceReadyProbeAt(entry, now)
+}
+
+func (p *Program) startServiceReadyProbe(entry *instance) {
+	if entry.ServiceReady || entry.ServiceProbeID != 0 || entry.ServiceReadyDeadline == 0 {
+		return
+	}
+	if p.Forwarding {
+		p.requestServiceClock(entry)
+		return
+	}
+	if p.Host == nil { return }
+	p.startServiceReadyProbeAt(entry, p.Host.Monotonic())
+}
+
+func (p *Program) startServiceReadyProbeAt(entry *instance, now int64) {
+	if entry.ServiceReady || entry.ServiceProbeID != 0 || entry.ServiceReadyDeadline == 0 { return }
 	remaining := entry.ServiceReadyDeadline - now
 	if remaining <= 0 {
 		p.failServiceReady(entry)
@@ -211,6 +261,14 @@ func (p *Program) startServiceReadyProbe(entry *instance) {
 	p.nextRequest++
 	id := p.nextRequest
 	argv := cloneStrings(p.Alloc, entry.Service.ReadyArgv)
+	if p.Forwarding {
+		payload := host.ServiceProbePayload(p.Alloc, argv, p.Options.Directory, (remaining+999999)/1000000, entry.Environment)
+		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestProcess, Payload: payload})
+		entry.ServiceProbeID = id
+		freeStrings(p.Alloc, argv)
+		return
+	}
+	if p.Host == nil { freeStrings(p.Alloc, argv); return }
 	request := host.ProcessRequest{ID: id, Argv: argv, Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: (remaining + 999999) / 1000000}
 	started := p.Host.Start(request)
 	freeStrings(p.Alloc, argv)
@@ -228,6 +286,15 @@ func (p *Program) completeServiceReadyProbe(entry *instance, event host.ProcessE
 		p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
 		return
 	}
+	if event.Outcome == host.ProcessTimedOut {
+		p.failServiceReady(entry)
+		return
+	}
+	if p.Forwarding {
+		p.requestServiceTimer(entry)
+		return
+	}
+	if p.Host == nil { return }
 	now := p.Host.Monotonic()
 	if now >= entry.ServiceReadyDeadline {
 		p.failServiceReady(entry)
@@ -262,7 +329,7 @@ func (p *Program) failServiceReady(entry *instance) {
 		p.Host.Cancel(entry.ServiceProbeID)
 		entry.ServiceProbeID = 0
 	}
-	entry.ServiceReadyDeadline, entry.ServiceNextProbe = 0, 0
+	entry.ServiceReadyDeadline, entry.ServiceNextProbe, entry.ServiceTimerID, entry.ServiceClockID = 0, 0, 0, 0
 	p.Engine.Fail(entry.Node, failure(p.Alloc, "SERVICE_READY_TIMEOUT", "service did not become ready before timeout"))
 	p.drainCancellations()
 }
@@ -422,12 +489,56 @@ func (p *Program) Complete(request host.Request, value core.Value, diagnostic di
 		diagnostic.Free(mem.System)
 		return
 	}
+	if entry := p.serviceProbeForRequest(request.ID); entry != nil {
+		event := host.ProcessEvent{Kind: host.ProcessTerminal, ID: request.ID, Outcome: host.ProcessExited}
+		if diagnostic.Code == "RECIPE_TIMEOUT" { event.Outcome = host.ProcessTimedOut
+		} else if diagnostic.Code != "" { event.Outcome = host.ProcessFailed
+		} else if value.Kind == core.Record {
+			for i := range value.Record {
+				if value.Record[i].Key == "status" { event.Status = int(value.Record[i].Value.Int) }
+				if value.Record[i].Key == "signal" { event.Signal = int(value.Record[i].Value.Int) }
+			}
+		} else if value.Kind != core.String {
+			event.Status = 1
+		}
+		value.Free(p.Alloc); diagnostic.Free(p.Alloc)
+		p.completeServiceReadyProbe(entry, event)
+		return
+	}
+	if entry := p.serviceTimerForRequest(request.ID); entry != nil {
+		entry.ServiceTimerID = 0
+		value.Free(p.Alloc)
+		if diagnostic.Code == "" { p.requestServiceClock(entry)
+		} else { diagnostic.Free(p.Alloc); p.failServiceHost(entry) }
+		return
+	}
+	if entry := p.serviceClockForRequest(request.ID); entry != nil {
+		if diagnostic.Code != "" || value.Kind != core.Int {
+			value.Free(p.Alloc); diagnostic.Free(p.Alloc); p.failServiceHost(entry)
+			return
+		}
+		now := value.Int
+		value.Free(p.Alloc); diagnostic.Free(p.Alloc)
+		p.completeServiceClock(entry, now)
+		return
+	}
+	if request.Kind == host.RequestTimer || request.Kind == host.RequestProcessCancel {
+		value.Free(p.Alloc); diagnostic.Free(p.Alloc)
+		return
+	}
 	if request.Kind == host.RequestProcess && (len(host.PayloadArgv(request.Payload)) != 0 || len(host.PayloadStages(request.Payload)) != 0) {
 		if entry := p.streamInstance(request.NodeID); entry != nil {
 			p.emitProcess(entry, ProcessExited, request.ID)
 		}
 	}
 	p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Value: value, HasValue: diagnostic.Code == "", Diagnostic: diagnostic})
+}
+
+func (p *Program) failServiceHost(entry *instance) {
+	if entry == nil || entry.Node.State == core.NodeFailed || entry.Node.State == core.NodeCancelled || entry.Node.State == core.NodeComplete { return }
+	entry.ServiceReadyDeadline, entry.ServiceNextProbe, entry.ServiceTimerID, entry.ServiceClockID = 0, 0, 0, 0
+	p.Engine.Fail(entry.Node, failure(p.Alloc, "HOST_FAIL", "service host request failed"))
+	p.drainCancellations()
 }
 
 func (p *Program) completeRequest(request host.Request) {
@@ -472,20 +583,33 @@ func (p *Program) drainCancellations() {
 		if cancellation.RequestID == 0 {
 			return
 		}
+		probeID := int64(0)
 		for i := range p.Instances {
 			entry := &p.Instances[i]
 			if entry.Node.ID == cancellation.NodeID && entry.ServiceProbeID != 0 {
-				if p.Host != nil { p.Host.Cancel(entry.ServiceProbeID) }
+				probeID = entry.ServiceProbeID
 				entry.ServiceProbeID = 0
 			}
 			if entry.Node.ID == cancellation.NodeID {
 				entry.ServiceReadyDeadline, entry.ServiceNextProbe = 0, 0
+				entry.ServiceClockID, entry.ServiceTimerID = 0, 0
 			}
 		}
-		if p.Host != nil {
+		if p.Forwarding {
+			p.queueProcessCancellation(cancellation.NodeID, cancellation.Generation, cancellation.Attempt, cancellation.RequestID)
+			if probeID != 0 { p.queueProcessCancellation(cancellation.NodeID, cancellation.Generation, cancellation.Attempt, probeID) }
+		} else if p.Host != nil {
 			p.Host.Cancel(cancellation.RequestID)
+			if probeID != 0 { p.Host.Cancel(probeID) }
 		}
 	}
+}
+
+func (p *Program) queueProcessCancellation(nodeID int64, generation int64, attempt int64, processID int64) {
+	p.nextRequest++
+	id := p.nextRequest
+	payload := host.ServiceCancelPayload(p.Alloc, processID)
+	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: nodeID, Generation: generation, Attempt: attempt, Kind: host.RequestProcessCancel, Payload: payload})
 }
 
 func (p *Program) complete(event host.ProcessEvent) {

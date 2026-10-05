@@ -302,6 +302,8 @@ type instance struct {
 	ServiceReadyDeadline int64
 	ServiceNextProbe int64
 	ServiceProbeID int64
+	ServiceClockID int64
+	ServiceTimerID int64
 	Shell []string
 	Kash bool
 	ScopedShell bool

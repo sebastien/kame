@@ -281,6 +281,9 @@ static so_String kame_wasm_request_payload(host_Request request) {
     if (host_PayloadArgv(request.Payload).len != 0) return host_PayloadText(request.Payload, so_str("data"));
     return host_PayloadText(request.Payload, so_str("script"));
   }
+  if (request.Kind == host_RequestTimer || request.Kind == host_RequestProcessCancel) {
+    return host_PayloadText(request.Payload, so_str("data"));
+  }
   return host_PayloadPath(request.Payload);
 }
 
@@ -337,6 +340,10 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       return 12u;
     case host_RequestPrepareOutputs:
       return 21u;
+    case host_RequestTimer:
+      return 22u;
+    case host_RequestProcessCancel:
+      return 23u;
     default:
       return (uint32_t)request.Kind;
   }

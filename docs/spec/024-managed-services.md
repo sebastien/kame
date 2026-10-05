@@ -125,12 +125,15 @@ without leaving a process group alive.
 
 The runtime currently starts a service body as a persistent process and
 publishes readiness either at spawn or after a direct-argv readiness probe
-succeeds. Dependent rules proceed while the process remains active. A
-readiness timeout fails the service and cancels its process. Releasing the
-final dependent cancels it.
+succeeds. Native hosts run probes directly; forwarded WASM hosts receive
+correlated monotonic-clock, timer, probe, and process-cancellation requests.
+Dependent rules proceed while the process remains active. A readiness timeout
+fails the service and cancels its process. Releasing the final dependent
+cancels it.
 Embedding callers can use `Start` and `Handle.PollReady` to observe root-service
 readiness while retaining the handle; freeing or canceling that handle releases
-the service.
+the service. Forwarded readiness is implemented by the JavaScript CLI; public
+embedding hosts still need to service the timer, clock, probe and cancellation
+request kinds themselves.
 Health probes, restart policy, grace-period shutdown, bounded service log
-retention, and lifecycle event parity remain open. Forwarded readiness probes,
-health checks, and restarts still report `FEATURE_UNSUP`.
+retention, and full lifecycle event parity remain open.

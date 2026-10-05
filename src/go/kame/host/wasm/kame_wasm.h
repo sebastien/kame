@@ -61,7 +61,9 @@ enum kame_wasm_request_kind {
   // JSON canonical path array; completion is ordered decimal timestamp strings/null.
   KAME_WASM_REQUEST_FILE_TIMES = 20,
   // Recipe descriptor with outputs; prepares parents before structured execution.
-  KAME_WASM_REQUEST_PREPARE_OUTPUTS = 21
+  KAME_WASM_REQUEST_PREPARE_OUTPUTS = 21,
+  KAME_WASM_REQUEST_TIMER = 22,
+  KAME_WASM_REQUEST_PROCESS_CANCEL = 23
 };
 
 /* Terminal process outcomes reported by kame_wasm_process_terminal. */

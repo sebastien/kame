@@ -250,6 +250,10 @@ registration under AddressSanitizer.
 named values, defaults, dependency and recipe scope, distinct task identity,
 plan JSON, multiple target requests and invalid assignments on both hosts.
 
+`T010-26-wasm-service-readiness.sh` verifies that forwarded WASM service
+probes gate dependents, and that a readiness timeout cancels the service and
+reports `SERVICE_READY_TIMEOUT`.
+
 The Go CLI unit-test sanitizer command uses `GOGC=off`. Solod 0.4.0's Go
 compatibility allocator stores structs in unscanned byte slices, while its Go
 `slices.Append` stub uses ordinary Go append. A slice reachable only through such
