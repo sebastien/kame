@@ -4,10 +4,9 @@
 functions as a Kame value program?
 
 These `.kash` sources follow [the Kash specification](../../docs/spec/017-kash.md).
-The CLI now accepts standalone Kash through `do run`, but these complete lessons
-remain staged: `01-values.kash` currently reports `EXEC_CANCELLED` when reusing
-lazy definitions across statements. Do not execute them with Bash. No build
-file or publication project is required.
+The CLI accepts standalone Kash through `do run`. Run the three lessons with
+Kame; do not execute them with Bash. T013-04 runs them from isolated copies.
+No build file or publication project is required.
 
 The invocation for these lessons is:
 

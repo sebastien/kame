@@ -51,6 +51,8 @@ output, lifecycle order, four-stage truncation, JSON-only stdout and explicit
 color/`NO_COLOR` behavior for redirected progress. `TestPipelineProcessDisplayIsBoundedToFourStages`
 also verifies the four-stage cap, explicit truncation and argument/byte bounds.
 `tests/T009-01-cli-help.sh` executes the value, wildcard and pattern commands
-from the idioms guide in a clean temporary project. `tests/T010-14-wasm-json.sh`
-compares bounded pipeline process events between native and WASM and validates
-WASM runtime types. Remaining lesson examples outside the idioms guide are open.
+from the idioms guide in a clean temporary project. `tests/T013-04-meta-layer-examples.sh`
+executes the independent value, rule and process lessons plus the composed Kash
+publication lesson from isolated copies. `tests/T010-14-wasm-json.sh` compares
+bounded pipeline process events between native and WASM and validates WASM
+runtime types. The documented idioms and runnable examples are covered.

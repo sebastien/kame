@@ -17,10 +17,29 @@ cp -R "$CLI_ROOT/examples/expressions" ./expressions
 mkdir -p ./rules ./composition
 cp -R "$CLI_ROOT/examples/rules/publication" ./rules/publication
 cp -R "$CLI_ROOT/examples/composition/publication" ./composition/publication
+cp -R "$CLI_ROOT/examples/composition/publication" ./composition-kash
+cp -R "$CLI_ROOT/examples/shell" ./shell
 # A user may have run the lesson already. Remove only copied generated outputs.
 rm -rf ./rules/publication/public ./rules/publication/.kame
 rm -rf ./composition/publication/public ./composition/publication/.kame
+rm -rf ./composition-kash/public ./composition-kash/.kame
+rm -f ./shell/report.txt
 test-ok "isolated example copies"
+
+test-step "standalone Kash process lessons execute from isolated copies"
+(
+	cd shell
+	cli_run -- do run ./01-values.kash
+	cli_expect_status 0
+	cli_expect_stdout $'Little publication\n[hello world.txt]\n[second.txt]\n[HELLO WORLD.TXT]\n[SECOND.TXT]\nHELLO\n'
+	cli_run -- do run ./02-pipelines.kash
+	cli_expect_status 0
+	cli_expect_stdout $'hello\nworld\nhello\nworld\n12\nhello\nworld\n'
+	cli_expect_file ./report.txt $'hello\nworld\n'
+	cli_run -- do run ./03-recovery.kash
+	cli_expect_status 0
+	cli_expect_stdout $'continued after an accepted non-match\nno needle in the sample\nno result\npreview only\n'
+)
 
 test-step "value programs, functions, pipes, discovery and lazy failure"
 (
@@ -159,6 +178,18 @@ test-step "native source composition reuses the value program unchanged"
 	else
 		test-fail "including the value program changed its result"
 	fi
+)
+
+test-step "composed Kash lesson invokes Kame subprocesses from PATH"
+(
+	cd composition-kash
+	mkdir -p ./bin
+	ln -s "$CLI_ROOT/build/kame.debug" ./bin/kame
+	PATH="$PWD/bin:$PATH"
+	export PATH
+	cli_run -- do run ./publish.kash
+	cli_expect_status 0
+	cli_expect_stdout_contains 'Publication files: 3' 'COMPUTATIONS COMPOSE' 'HELLO FROM KAME'
 )
 
 test-step "available Kash boundary: typed argv, capture, explicit grants"

@@ -7,7 +7,7 @@ different aspects of the same work?
 | --- | --- | --- |
 | `publication.km` | The publication's source and output sets | Runnable through `-f` |
 | `Makefile.kmk` | How the requested files are produced | Runnable |
-| `publish.kash` | Build, validate, and summarize with processes | Staged; standalone Kash required |
+| `publish.kash` | Build, validate, and summarize with processes | Runnable with standalone Kash and `kame` on PATH |
 
 Commands run from this directory with `kame` on PATH, or the absolute path to
 the repository's `build/kame.debug`.
@@ -46,7 +46,7 @@ determines which computations must be orchestrated.
 
 ## Finally, orchestrate processes
 
-Read `publish.kash`. Once standalone Kash is supported, its invocation will be:
+Run `publish.kash` after placing Kame on PATH:
 
 ```sh
 kame do run ./publish.kash

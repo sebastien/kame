@@ -1,4 +1,4 @@
-# Staged: requires the standalone Kash runner; kame must also be on PATH.
+# Requires standalone Kash and kame on PATH.
 # This is an explicit subprocess boundary, not a shared in-process build graph.
 kame -f ./Makefile.kmk
 kame -f ./Makefile.kmk check

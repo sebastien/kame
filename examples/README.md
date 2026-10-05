@@ -9,8 +9,8 @@ the computation they describe together.**
 | --- | --- | --- | --- |
 | [Expressions](expressions/README.md) | What value do I want? | `.km` | Runnable directly or via `do run` / `-f FILE NAME` |
 | [Rules](rules/README.md) | What must exist, and what does it depend on? | `.kmk` | Runnable |
-| [Kash](shell/README.md) | How should processes cooperate? | `.kash` | Standalone sources staged; embedded capture runnable |
-| [Composition](composition/publication/README.md) | How do the descriptions fit together? | All three | Values and rules runnable; Kash entry staged |
+| [Kash](shell/README.md) | How should processes cooperate? | `.kash` | Standalone sources runnable |
+| [Composition](composition/publication/README.md) | How do the descriptions fit together? | All three | Values, rules, and subprocess orchestration runnable |
 | [Reactivity](reactive/README.md) | How does a requested computation stay current? | Persistent engine | Engine demo runnable; live publication runner future work |
 
 Follow the rows in order for the guided path, or enter through whichever layer
