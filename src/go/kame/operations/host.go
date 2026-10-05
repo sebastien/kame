@@ -294,6 +294,62 @@ func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text))
 }
 
+func opShellTemplate(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	if c.Phase != eval.EvaluatePhase {
+		c.MarkPhaseInvalid()
+		freeArgCallables(c, v)
+		return failure("PHASE_INVALID", "shell-template is invalid outside evaluation")
+	}
+	if v[0].Kind != core.List {
+		return invalidArgument(c, v, 0, "list of strings")
+	}
+	if v[1].Kind != core.List {
+		return invalidArgument(c, v, 1, "list of strings")
+	}
+	if len(v[0].List) != len(v[1].List)+1 {
+		freeArgCallables(c, v)
+		return failure("EXPR_INVALID", "shell-template requires one more fragment than value")
+	}
+	for i := range v[0].List {
+		if v[0].List[i].Kind != core.String {
+			freeArgCallables(c, v)
+			return failure("EXPR_INVALID", "shell-template fragments must be strings")
+		}
+	}
+	for i := range v[1].List {
+		if v[1].List[i].Kind != core.String {
+			freeArgCallables(c, v)
+			return failure("EXPR_INVALID", "shell-template values must be strings")
+		}
+	}
+	if c.Program != nil && c.Program.DryRun {
+		return eval.Result{Value: core.NewString(c.Run, "")}
+	}
+	b := strings.NewBuilder(c.Run)
+	defer b.Free()
+	for i := range v[0].List {
+		b.WriteString(v[0].List[i].Text)
+		if i == len(v[1].List) {
+			break
+		}
+		b.WriteByte('\'')
+		value := v[1].List[i].Text
+		for j := 0; j < len(value); j++ {
+			if value[j] == '\'' {
+				b.WriteString("'\\''")
+			} else {
+				b.WriteByte(value[j])
+			}
+		}
+		b.WriteByte('\'')
+	}
+	if c.HasEnvironment {
+		return request(c, host.RequestProcess, host.ScopedProcessPayload(c.Run, b.String(), c.Environment))
+	}
+	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, b.String()))
+}
+
 // opNow reads the host wall clock as nanoseconds since the Unix epoch. Clocks
 // are impure, so they are invalid while planning or resolving a graph; the
 // request stays a host operation rather than a cached value.

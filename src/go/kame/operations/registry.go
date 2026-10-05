@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v8"
+const version = "v9"
 
 // Register installs every standard operation. Registration stays declarative
 // so operation implementations can be organized by domain independently.
@@ -50,6 +50,7 @@ func Register(r *eval.Registry) bool {
 		addCapability(r, "shell", opShell, 1, 2, eval.Run) &&
 		addCapability(r, "sh", opShell, 1, 2, eval.Run) &&
 		addCapability(r, "shellrun", opShell, 1, 2, eval.Run) &&
+		addCapability(r, "shell-template", opShellTemplate, 2, 2, eval.Run) &&
 		add(r, "out", opOut, 1, -1) && add(r, "err", opErr, 1, -1) &&
 		add(r, "yield", opYield, 1, -1) && add(r, "nop", opNop, 0, -1) &&
 		add(r, "now", opNow, 0, 0) && add(r, "monotonic", opMonotonic, 0, 0)

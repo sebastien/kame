@@ -251,8 +251,25 @@ when bound to a target, their collected shell calls inherit its environment and
 retain the invocation run policy. Declaration registration never launches them.
 
 `shell`, `sh`, and `shellrun` are aliases with the same script/options
-signature, collected result, run capability, and phase restrictions. Tagged
-template shell helpers remain deferred.
+signature, collected result, run capability, and phase restrictions.
+
+`shell-template FRAGMENTS VALUES` is the tagged-template form for constructing
+a shell script from trusted source and dynamic string values. Both arguments
+are lists of strings, and `FRAGMENTS` must contain exactly one more item than
+`VALUES`. The operation concatenates each source fragment with the
+corresponding value enclosed in POSIX single quotes; an embedded single quote
+is emitted by closing the quoted value, writing an escaped quote, and reopening
+the quote. The final fragment follows the last value. Static fragments remain
+executable shell syntax and should come from authored source; dynamic values
+cannot introduce shell syntax. Quoting does not prevent a value from being
+interpreted as an option or path by the invoked program.
+
+The constructed script is submitted and collected like `shell`: it requires
+`run`, returns the same status/stdout/stderr record, inherits a target's
+environment, and is invalid during planning and direct build-template
+rendering. Dry-run submits no process and returns an empty string. Invalid
+list types, non-string elements, or fragment/value count mismatch return
+`EXPR_INVALID` without submitting a process.
 
 ## Clock Operations
 
@@ -311,6 +328,10 @@ executable metadata checks do not grant access to user read operations.
 - `shell` captures status and separate byte-bounded stdout/stderr.
 - `sh` and `shellrun` match `shell` in result, run-capability enforcement, and
   phase restrictions.
+- `shell-template` requires one more trusted fragment than dynamic string
+  values, quotes dynamic values safely under POSIX `sh`, preserves the
+  collected result, and is verified against command-substitution injection on
+  native and WASM hosts.
 - Terminal style functions wrap strings with their documented ANSI sequences,
   compose using selective reset codes, reject nonstrings, and leave canonical
   value display unchanged.
