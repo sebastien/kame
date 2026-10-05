@@ -307,7 +307,9 @@ existing build rules.
 
 ## Deferred
 
-- A native Windows CLI rather than the current Node/WASM launcher.
+- A native Windows CLI rather than the current Node/WASM launcher. See
+  `docs/spec/035-native-windows-cli.md` for the host contract and acceptance
+  gates.
 - Windows-host launcher and process lifecycle conformance; a cross-compiled PE
   file alone is not host execution evidence.
 - Maintained Homebrew tap and Scoop bucket repositories with automated
