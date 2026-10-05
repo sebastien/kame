@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--signing-key", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
-    assets = ("kame.com", "kame.js", "kame.wasm", "bin/kame")
+    assets = ("kame.com", "kame.js", "kame.wasm", "bin/kame", "Makefile.bootstrap")
     for name in assets:
         if not (args.directory / name).is_file():
             parser.error(f"missing release asset: {name}")

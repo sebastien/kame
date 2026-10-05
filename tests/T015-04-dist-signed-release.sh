@@ -25,7 +25,7 @@ rows = {}
 for line in (root / "SHA256SUMS").read_text().splitlines():
     digest, name = line.split("  ", 1)
     rows[name] = digest
-assert set(rows) == {"PROVENANCE.json", "bin/kame", "kame.com", "kame.js", "kame.wasm"}
+assert set(rows) == {"PROVENANCE.json", "Makefile.bootstrap", "bin/kame", "kame.com", "kame.js", "kame.wasm"}
 provenance = json.loads((root / "PROVENANCE.json").read_text())
 assert provenance["schema"] == 1 and provenance["sourceRevision"] == "test-fixture"
 assert all(rows[item["name"]] == item["sha256"] for item in provenance["subjects"])
@@ -38,6 +38,16 @@ mkdir -p "$project"
 printf 'task signed-release :\n\t@(out "signed-release-ok")\n' >"$project/Makefile.kmk"
 out="$(cd "$project" && KAME_HOME="$root/cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$release/bin/kame" signed-release)"
 if [ "$out" = "signed-release-ok" ]; then test-ok "release launcher verifies and runs signed WASM assets"; else test-fail "signed release output: $out"; fi
+
+init_project="$root/init"
+mkdir -p "$init_project"
+init_out="$(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/bin/kame" init)"
+if [ "$init_out" = "Created Makefile.bootstrap for Kame $(cat VERSION). Use make -f Makefile.bootstrap [targets]." ] && \
+	grep -qx "KAME_VERSION ?= $(cat VERSION)" "$init_project/Makefile.bootstrap"; then
+	test-ok "actual signed release initializes a pinned bootstrap sidecar"
+else
+	test-fail "signed release init: $init_out"
+fi
 
 test-step "tampered and wrong-key manifests fail closed"
 tampered="$root/tampered"

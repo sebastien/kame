@@ -162,6 +162,7 @@ dist-release: dist/kame.com dist/kame.wasm dist/kame.js
 	cp dist/kame.com dist/release/kame.com
 	cp dist/kame.wasm dist/release/kame.wasm
 	cp dist/kame.js dist/release/kame.js
+	cp Makefile.bootstrap dist/release/Makefile.bootstrap
 	public_key_b64=$$(openssl pkey -pubin -in "$(KAME_RELEASE_PUBLIC_KEY)" -outform DER | openssl base64 -A); \
 	sed -e "s|^KAME_STAMP=.*|KAME_STAMP=\"$$(cat VERSION)\"|" \
 	    -e "s|^KAME_RELEASE_PUBKEY_B64=.*|KAME_RELEASE_PUBKEY_B64=\"$$public_key_b64\"|" \

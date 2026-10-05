@@ -39,7 +39,7 @@ adapters and integration evidence rather than placeholder methods.
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
 | D16 | Platform execution | In progress: the Node/WASM host now has Windows stream pipelines and process-tree termination, with a Windows-only descendant test; Windows-native launch, native-host lifecycle, and APE conformance on advertised non-Linux hosts remain. |
-| D17 | Distribution tooling | Explicit update/latest selection alongside pinned defaults; native platform artifacts; package-manager integration; `kame init` without overwriting existing project files; provisioning/integrity tests. |
+| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap` release asset and non-overwriting `kame init` are specified and covered. Update/latest selection, native platform artifacts and package-manager integration remain. |
 | D18 | Remaining library/ergonomic extensions | In progress: equality-value `filter`/`filter-out` and `sh`/`shellrun` aliases now have specified semantics and T007 coverage. Tagged-template shell helpers, terminal color functions, dependency sequencing and alternative build syntax remain. |
 
 The explicit boundaries in this table are a finite work inventory. General
@@ -126,3 +126,8 @@ and phase behavior; T007-06 covers allowed and denied execution. The same test
 also verifies native captured-script completion. Tagged-template shell helpers,
 terminal color functions, dependency sequencing and alternative build syntax
 remain open.
+D17 now packages `Makefile.bootstrap` inside the signed release manifest.
+`kame init` verifies that asset, creates a pinned sidecar atomically, preserves
+an existing `Makefile`, and refuses to replace an existing sidecar. T015-01
+covers successful, repeated, and concurrent initialization; T015-04 exercises
+init against the actual signed release. The remaining D17 items are still open.

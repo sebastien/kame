@@ -25,6 +25,7 @@ release publishes these flat assets under the base URL
 | `kame.wasm` | `make wasm` | freestanding module |
 | `kame.js` | packaged JS CLI | Node CLI wrapper for `kame.wasm` (`010-wasm.md`) |
 | `bin/kame` | stamped launcher | host provisioning and dispatch |
+| `Makefile.bootstrap` | bootstrap template | project-local make delegation and `kame init` |
 | `PROVENANCE.json` | release builder | version, source revision and asset digests |
 | `SHA256SUMS` | checksums | signed integrity manifest |
 | `SHA256SUMS.sig` | release signer | Ed25519 signature over the exact manifest bytes |
@@ -49,7 +50,9 @@ cached artifact, and cached artifacts are checked again before reuse.
 
 ## Version Pinning
 
-The launcher is pinned to one version. It resolves that version in order:
+The launcher is pinned to one version. Valid version labels contain only ASCII
+letters, digits, `.`, `+`, and `-`, preventing cache paths from escaping their
+per-version root. It resolves that version in order:
 
 1. `KAME_VERSION` when set and nonempty.
 2. An embedded stamp present in the released `bin/kame` asset.
@@ -152,9 +155,13 @@ unavailable, or download failed.
 
 ## Bootstrap Makefile
 
-A release ships a `Makefile.bootstrap` template. A project that wants Kame
-without installing it copies the template to `Makefile` or includes it. The
-template contract:
+A release ships a signed `Makefile.bootstrap` template. `kame init` verifies
+and copies it to the current directory as a sidecar. It never changes
+`Makefile`, `Makefile.kmk`, or another project file. If `Makefile.bootstrap`
+already exists, init exits 1 and leaves it byte-for-byte unchanged. The
+command pins `KAME_VERSION` to the launcher's resolved version. Projects can
+run `make -f Makefile.bootstrap TARGET...` without changing an existing
+Makefile, or inspect/include the sidecar themselves. The template contract:
 
 - Variables: `KAME_VERSION` (default: the stamped version), `KAME_HOME` and
   `KAME_RELEASE_URL` (optional), and `KAME` (default `./bin/kame`).
@@ -167,6 +174,9 @@ template contract:
 - The delegate's exit status is the build's exit status.
 - The template is self-contained POSIX `make` and `sh`; it needs only the same
   downloader and verifier tools as the launcher.
+- `kame init` needs a verified cache/release manifest, creates its sidecar
+  atomically without clobbering a concurrent or pre-existing path, and reports
+  the make command needed to use it.
 
 Documented limitations:
 
@@ -205,6 +215,9 @@ existing build rules.
 - A second invocation with a populated cache performs no network access.
 - `KAME_NO_DOWNLOAD=1` fails when the artifact is absent.
 - A lone `--version` prints `kame VERSION` and provisions nothing.
+- An invalid version override fails before creating or accessing a cache path.
+- `kame init` writes a correctly stamped bootstrap sidecar, preserves an
+  existing `Makefile`, and refuses a second write without changing either file.
 - Concurrent first invocations install exactly one verified artifact.
 - The bootstrap Makefile provisions once and forwards single, multiple, and
   default goals in order with the delegate's exit status.
@@ -216,4 +229,3 @@ existing build rules.
 - Native per-platform release binaries.
 - Windows-native (`cmd.exe`, PowerShell) launcher.
 - Package-manager integrations.
-- `kame init` generating or integrating the bootstrap Makefile.

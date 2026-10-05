@@ -43,6 +43,9 @@ if [ -z "$version" ]; then
 	done
 fi
 [ -n "$version" ] || die "cannot determine version"
+case $version in
+*[!A-Za-z0-9.+-]*) die "invalid version" ;;
+esac
 
 # --- A lone version request is answered without provisioning. ---
 if [ "$#" -eq 1 ] && { [ "$1" = "-V" ] || [ "$1" = "--version" ]; }; then
@@ -51,7 +54,7 @@ if [ "$#" -eq 1 ] && { [ "$1" = "-V" ] || [ "$1" = "--version" ]; }; then
 fi
 
 # --- KAME_BIN bypasses detection and download entirely. ---
-if [ -n "${KAME_BIN:-}" ]; then
+if [ "${1:-}" != "init" ] && [ -n "${KAME_BIN:-}" ]; then
 	[ -x "$KAME_BIN" ] || die "KAME_BIN is not executable: $KAME_BIN"
 	exec "$KAME_BIN" "$@"
 fi
@@ -247,6 +250,26 @@ install_ape() {
 	rmdir "$staging"
 }
 
+install_bootstrap_template() {
+	ensure_manifest
+	template="$cache/Makefile.bootstrap"
+	asset="Makefile.bootstrap"
+	hex=$(manifest_entry "$cache/SHA256SUMS" "$asset") || die "missing manifest entry: $asset"
+	if [ -f "$template" ]; then
+		verify "$template" "$hex" || die "checksum mismatch: cached $asset"
+		return 0
+	fi
+	[ "${KAME_NO_DOWNLOAD:-0}" != "1" ] || die "missing cached $asset (download disabled)"
+	staging="$cache/.bootstrap.$$"
+	rm -f "$staging"
+	fetch "${release_base}${asset}" "$staging"
+	verify "$staging" "$hex" || {
+		rm -f "$staging"
+		die "checksum mismatch: $asset"
+	}
+	mv "$staging" "$template"
+}
+
 ape_host() {
 	kame_os=$(uname -s 2>/dev/null || true)
 	kame_arch=$(uname -m 2>/dev/null || true)
@@ -305,6 +328,31 @@ select_backend() {
 	write_backend "$backend"
 	printf '%s' "$backend"
 }
+
+if [ "${1:-}" = "init" ]; then
+	[ "$#" -eq 1 ] || die "usage: kame init"
+	trap release_lock EXIT INT TERM
+	acquire_lock
+	install_bootstrap_template
+	release_lock
+	trap - EXIT INT TERM
+	template_tmp=".Makefile.bootstrap.tmp.$$"
+	(umask 077; set -C; : >"$template_tmp") 2>/dev/null || die "cannot stage Makefile.bootstrap"
+	while IFS= read -r line || [ -n "$line" ]; do
+		case $line in
+		'KAME_VERSION ?= @KAME_VERSION@') printf 'KAME_VERSION ?= %s\n' "$version" ;;
+		*) printf '%s\n' "$line" ;;
+		esac
+	done <"$cache/Makefile.bootstrap" >"$template_tmp"
+	chmod 644 "$template_tmp"
+	if ln "$template_tmp" Makefile.bootstrap 2>/dev/null; then
+		rm -f "$template_tmp"
+		printf 'Created Makefile.bootstrap for Kame %s. Use make -f Makefile.bootstrap [targets].\n' "$version"
+		exit 0
+	fi
+	rm -f "$template_tmp"
+	die "refusing to overwrite Makefile.bootstrap"
+fi
 
 trap release_lock EXIT INT TERM
 acquire_lock
