@@ -17,15 +17,20 @@ chmod +x "$work_path/kame.com"
 ape_path=$work_path/kame.com
 ape_shell=${KAME_APE_SHELL:-bash}
 ape_host=$(uname -s)
+report_phase() {
+	printf 'APE conformance phase: %s\n' "$1" >&2
+}
 
 # Assimilation selects the host's native executable format when available. It
 # also avoids depending on shell-specific parsing of the binary polyglot.
 if [ "$ape_host" = OpenBSD ]; then
+	report_phase "prepare OpenBSD shell fallback"
 	mkdir "$work_path/bin"
 	ln -s "$(command -v gdd)" "$work_path/bin/dd"
 	PATH=$work_path/bin:$PATH
 	export PATH
 else
+	report_phase "assimilate APE"
 	"$ape_shell" "$ape_path" --assimilate
 fi
 
@@ -37,6 +42,7 @@ run_ape() {
 	fi
 }
 
+report_phase "run version command"
 version=$(run_ape --version)
 case "$version" in
 	"kame "*) ;;
@@ -57,6 +63,7 @@ task platform-timeout :
 EOF
 
 cd "$work_path"
+report_phase "run host environment task"
 output=$(run_ape --env KAME_PLATFORM_ENV=passed -f Makefile.kmk platform-smoke)
 if [ "$output" != "platform-smoke-ok" ]; then
 	echo "APE task output mismatch: $output" >&2
@@ -68,6 +75,7 @@ if [ "$(cat platform-env.txt)" != passed ]; then
 fi
 
 set +e
+report_phase "run timeout task"
 run_ape --timeout 100 -f Makefile.kmk platform-timeout \
 	>"$work_path/timeout.out" 2>"$work_path/timeout.err"
 timeout_status=$?
