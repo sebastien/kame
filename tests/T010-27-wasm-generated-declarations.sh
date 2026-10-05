@@ -6,7 +6,7 @@ set -euo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 
-test-start "T010-27 generated declarations"
+test-start "T010-27 wasm generated declarations"
 cd "$CLI_ROOT"
 
 test-step "build native and WASM CLIs"

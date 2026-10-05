@@ -22,6 +22,12 @@ The local backend encodes this identity into a safe path below:
 .kame/cache/tasks/
 ```
 
+`kame do cache list` prints a JSON array of managed regular files across the
+task, host, and file-context cache directories. Each entry has `backend`,
+`key`, and `bytes` fields. `kame do cache clean` removes regular record files
+from those directories. Both commands accept `-C DIR` or `--directory DIR` to
+select the project root; symlinks and subdirectories are left untouched.
+
 User target text is not used directly as an unchecked filesystem path.
 
 ## Fingerprint
@@ -192,6 +198,8 @@ garbage collection in the initial implementation.
 - A bare task dependency prevents a cache hit.
 - A failed task reruns and does not replace an earlier successful record for a
   different fingerprint.
+- `kame do cache list` reports managed records consistently on native and WASM.
+- `kame do cache clean` removes regular records and preserves symlinks.
 - Cancellation leaves the previous record intact.
 - Cached stdout and stderr replay separately with truncation flags.
 - A truncated or malformed record is a miss and never crashes the runtime.

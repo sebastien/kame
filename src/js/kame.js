@@ -8,7 +8,7 @@
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
 import { mkdir, mkdtemp, open, readFile, rename, rm, stat } from 'node:fs/promises';
-import { accessSync, closeSync, constants as fsConstants, existsSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
+import { accessSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -423,6 +423,7 @@ function usage() {
   stdout.write('  do fmt          format source in place (-i) or check it (-n)\n');
   stdout.write('  do render       render a document template (--define, --comment, --check)\n');
   stdout.write('  do cat TARGET   materialize one target and print its artifact\n');
+  stdout.write('  do cache        inspect or remove cache records\n');
   stdout.write('  do help         show this help\n\n');
   stdout.write('Options: -f FILE  -c TEXT  -C DIR  -j N  -n  --force  --define NAME=VALUE  --tool NAME=PATH  -h  -V\n');
   stdout.write('Later-stage behavior reports FEATURE_UNSUP.\n');
@@ -2407,6 +2408,7 @@ async function dispatch(module, inv, noArguments) {
     usage();
     return 0;
   }
+  if (inv.name === 'cache') return runCache(inv);
   if (inv.name === 'run' || inv.name === 'render') return runSession(module, inv, sourceDirectory);
   if (inv.name === 'parse') return runParse(module, inv);
   if (inv.name === 'fmt') return runFmt(module, inv);
@@ -2422,6 +2424,47 @@ async function dispatch(module, inv, noArguments) {
     return runSession(module, { ...inv, name: 'run', inputs: [input] }, sourceDirectory);
   }
   return runPrimary(module, inv, noArguments === true, sourceDirectory);
+}
+
+function runCache(inv) {
+  const action = inv.args?.[0];
+  if (action !== 'list' && action !== 'clean') throw Object.assign(new Error('cache requires the list or clean action'), { code: 'OPT_VALUE_INVALID' });
+  const buckets = [['tasks', '.kame/cache/tasks'], ['host', '.kame/cache/host'], ['file-context', '.kame/cache/file-context']];
+  if (action === 'list') {
+    const records = [];
+    for (const [backend, relative] of buckets) {
+      const directory = join(process.cwd(), relative);
+      let names;
+      try { names = readdirSync(directory).sort(); }
+      catch (error) { if (error.code === 'ENOENT') continue; throw Object.assign(new Error(`cannot inspect cache directory: ${error.message}`), { code: 'FS_ERR' }); }
+      for (const key of names) {
+        try {
+          const info = lstatSync(join(directory, key));
+          if (info.isFile()) records.push({ backend, key, bytes: info.size });
+        } catch (error) {
+          if (error.code !== 'ENOENT') throw Object.assign(new Error(`cannot inspect cache record: ${error.message}`), { code: 'FS_ERR' });
+        }
+      }
+    }
+    stdout.write(`${JSON.stringify(records)}\n`);
+    return 0;
+  }
+  let removed = 0;
+  for (const [, relative] of buckets) {
+    const directory = join(process.cwd(), relative);
+    let names;
+    try { names = readdirSync(directory).sort(); }
+    catch (error) { if (error.code === 'ENOENT') continue; throw Object.assign(new Error(`cannot inspect cache directory: ${error.message}`), { code: 'FS_ERR' }); }
+    for (const key of names) {
+      try {
+        if (lstatSync(join(directory, key)).isFile()) { unlinkSync(join(directory, key)); removed++; }
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw Object.assign(new Error(`cannot remove cache record: ${error.message}`), { code: 'FS_ERR' });
+      }
+    }
+  }
+  stdout.write(`Removed ${removed} cache records\n`);
+  return 0;
 }
 
 async function main() {

@@ -61,6 +61,9 @@ tests/T010-16-wasm-cancellation.sh	010	wasm	dist/kame.js forwards SIGINT/SIGTERM
 tests/T010-17-wasm-human-output.sh	010	wasm	dist/kame.js primary progress, stream forwarding, diagnostics, and summary match native
 tests/T010-18-wasm-clock.sh	010	wasm	dist/kame.js services now/monotonic host requests with integer nanoseconds and no grant
 tests/T010-19-wasm-cache.sh	010	wasm	dist/kame.js persists and replays cached tasks through cache get/put host requests
+tests/T010-26-wasm-service-readiness.sh	010	wasm	Forwarded service readiness probes gate dependents, timeout cleanup and configured zero stop grace
+tests/T010-27-wasm-generated-declarations.sh	010	wasm	Generated declaration planning, provenance, materialization and native/WASM parity
+tests/T010-28-cache-management.sh	010	cache	Native and WASM cache listing and cleanup report regular records and preserve symlinks
 tests/T011-01-diag-format.sh	011	diag	Diagnostic layout, notes, human/JSON equivalence
 tests/T011-02-diag-integrity.sh	011	diag	Codes, severities, non-empty printable messages
 tests/T011-03-diag-context.sh	011	diag	Operand contracts and spans, nested targets, included sources, target-scoped tools checks

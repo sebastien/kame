@@ -5,8 +5,8 @@
 package cli
 
 import (
-	"kame/lang/eval"
 	"kame/lang/definition"
+	"kame/lang/eval"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
@@ -62,7 +62,9 @@ type Invocation struct {
 // Free releases all parser-owned backing arrays. Option values borrow argv
 // storage; consumers clone what they retain.
 func (inv *Invocation) Free() {
-	for i := range inv.Inputs { slices.Free(mem.System, inv.Inputs[i].Entries) }
+	for i := range inv.Inputs {
+		slices.Free(mem.System, inv.Inputs[i].Entries)
+	}
 	slices.Free(mem.System, inv.Inputs)
 	for i := range inv.Grants {
 		for j := range inv.Grants[i].Names {
@@ -97,10 +99,20 @@ func Parse(command string, args []string) Invocation {
 		inv.fail("CMD_UNKNOWN", message)
 		return inv
 	}
-	if command == "run" { return ParseRun(args) }
-	if command == "" && SelectsRun(args) { return ParseRun(args) }
-	if command == "" && AppendsCommands(args) { return parseRun(args, true) }
+	if command == "run" {
+		return ParseRun(args)
+	}
 	inv := Invocation{Name: command, Directory: ".", Jobs: 1, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
+	if command == "cache" {
+		parseCache(&inv, args)
+		return inv
+	}
+	if command == "" && SelectsRun(args) {
+		return ParseRun(args)
+	}
+	if command == "" && AppendsCommands(args) {
+		return parseRun(args, true)
+	}
 	if !isCommand(command) {
 		inv.fail("CMD_UNKNOWN", "unknown command: "+command)
 		return inv
@@ -109,7 +121,10 @@ func Parse(command string, args []string) Invocation {
 		parseBuild(&inv, args)
 		return inv
 	}
-	if command == "render" { parseRender(&inv, args); return inv }
+	if command == "render" {
+		parseRender(&inv, args)
+		return inv
+	}
 	if command == "fmt" {
 		parseFormat(&inv, args)
 		return inv
@@ -132,13 +147,17 @@ func Parse(command string, args []string) Invocation {
 }
 
 func isCommand(command string) bool {
-	return command == "" || command == "build" || command == "help" || command == "run" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt" || command == "render"
+	return command == "" || command == "build" || command == "help" || command == "run" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt" || command == "render" || command == "cache"
 }
 
 // RemovedCommandMessage keeps native/WASM migration diagnostics identical.
 func RemovedCommandMessage(command string) string {
-	if command == "expr" { return "do expr was removed; use kame do run --lang expr -c TEXT (or - for stdin)" }
-	if command == "kash" { return "do kash was removed; use kame do run FILE.kash" }
+	if command == "expr" {
+		return "do expr was removed; use kame do run --lang expr -c TEXT (or - for stdin)"
+	}
+	if command == "kash" {
+		return "do kash was removed; use kame do run FILE.kash"
+	}
 	return ""
 }
 
@@ -199,10 +218,10 @@ func parseBuild(inv *Invocation, args []string) {
 		inv.Targets = slices.Append(mem.System, inv.Targets, arg)
 	}
 	if inv.Watch && inv.Name != "" && inv.Name != "build" {
-        inv.fail("OPT_CONFLICT", "--watch is supported only for builds")
-        return
-    }
-    if inv.File != "" && inv.Command != "" {
+		inv.fail("OPT_CONFLICT", "--watch is supported only for builds")
+		return
+	}
+	if inv.File != "" && inv.Command != "" {
 		inv.fail("OPT_CONFLICT", "--file and --command cannot be used together")
 		return
 	}
@@ -210,8 +229,12 @@ func parseBuild(inv *Invocation, args []string) {
 }
 
 func isBuildValueOption(arg string) bool {
-	if arg == "--define" || arg == "--tool" { return true }
-	if arg == "--capture-limit" { return true }
+	if arg == "--define" || arg == "--tool" {
+		return true
+	}
+	if arg == "--capture-limit" {
+		return true
+	}
 	if arg == "-f" || arg == "--file" || arg == "-c" || arg == "--command" || arg == "-C" || arg == "--directory" || arg == "-j" || arg == "--jobs" || arg == "--shell" || arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--env" || arg == "--color" || arg == "--diagnostic-format" {
 		return true
 	}
@@ -232,15 +255,31 @@ func equalsValue(arg string, name string, inv *Invocation) bool {
 func assignBuildOption(inv *Invocation, option string, value string) bool {
 	if option == "--tool" {
 		equal := -1
-		for i := range value { if value[i] == '=' { equal = i; break } }
-		if equal <= 0 || equal+1 == len(value) { inv.fail("OPT_VALUE_INVALID", "tool must be NAME=PATH with a nonempty path"); return false }
+		for i := range value {
+			if value[i] == '=' {
+				equal = i
+				break
+			}
+		}
+		if equal <= 0 || equal+1 == len(value) {
+			inv.fail("OPT_VALUE_INVALID", "tool must be NAME=PATH with a nonempty path")
+			return false
+		}
 		inv.ToolOverrides = slices.Append(mem.System, inv.ToolOverrides, value)
 		return true
 	}
 	if option == "--define" {
 		equal := -1
-		for i := range value { if value[i] == '=' { equal = i; break } }
-		if equal <= 0 || !definition.ValidName(value[:equal]) { inv.fail("OPT_VALUE_INVALID", "define must be NAME=VALUE with a valid name"); return false }
+		for i := range value {
+			if value[i] == '=' {
+				equal = i
+				break
+			}
+		}
+		if equal <= 0 || !definition.ValidName(value[:equal]) {
+			inv.fail("OPT_VALUE_INVALID", "define must be NAME=VALUE with a valid name")
+			return false
+		}
 		inv.Defines = slices.Append(mem.System, inv.Defines, value)
 		return true
 	}
@@ -301,7 +340,10 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 		return false
 	}
 	if option == "--capture-limit" {
-		if number <= 0 { inv.fail("OPT_VALUE_INVALID", "capture limit must be positive"); return false }
+		if number <= 0 {
+			inv.fail("OPT_VALUE_INVALID", "capture limit must be positive")
+			return false
+		}
 		inv.CaptureLimit = number
 		return true
 	}

@@ -255,9 +255,12 @@ probes gate dependents, and that a readiness timeout cancels the service and
 reports `SERVICE_READY_TIMEOUT`. It also checks that a configured zero stop
 grace period is honored by the JavaScript host.
 
-`T010-27-generated-declarations.sh` compares native and WASM generated-rule
+`T010-27-wasm-generated-declarations.sh` compares native and WASM generated-rule
 plan JSON, including generator provenance, and materializes generated tasks on
 both hosts.
+
+`T010-28-cache-management.sh` verifies native and WASM cache inspection JSON
+and cleanup, including that cleanup leaves symlinks and their targets intact.
 
 The shared `watch-runtime.py` suite, run by T009-14 and T010-23, also changes an
 included module list while watching a generated target family. It verifies the

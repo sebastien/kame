@@ -219,6 +219,7 @@ const (
 	commandRun
 	commandRender
 	commandHelp
+	commandCache
 )
 
 type commandSpec struct {
@@ -231,13 +232,14 @@ type commandSpec struct {
 
 var doCommands = []commandSpec{
 	{Name: "render", TopSummary: "render a document template", DoSummary: "render a document template", Help: "Usage: kame do render [-c TEXT | FILE] [--define NAME=VALUE]... [--comment STYLE] [--check] [--allow-read[=PATH]]\nRenders raw text without an added newline. No file reads stdin. Template reads need an explicit grant.\n", Action: commandRender},
- 	{Name: "run", TopSummary: "execute ordered source fragments in one session", DoSummary: "execute ordered source fragments in one session", Help: runHelpText, Action: commandRun},
+	{Name: "run", TopSummary: "execute ordered source fragments in one session", DoSummary: "execute ordered source fragments in one session", Help: runHelpText, Action: commandRun},
 	{Name: "plan", TopSummary: "print the resolved plan without executing", DoSummary: "print the resolved plan without executing", Help: planHelpText, Action: commandPlan},
 	{Name: "cat", TopSummary: "materialize one target and print its artifact", DoSummary: "materialize one target and print its artifact", Help: catHelpText, Action: commandCat},
 	{Name: "inputs", TopSummary: "list declared input paths", DoSummary: "list declared input paths (--depth N)", Help: inputsHelpText, Action: commandInputs},
 	{Name: "outputs", TopSummary: "list declared output paths", DoSummary: "list declared output paths (--depth N)", Help: outputsHelpText, Action: commandOutputs},
 	{Name: "span", TopSummary: "show transitive inputs and outputs", DoSummary: "show transitive inputs and outputs (--expand, --depth N)", Help: spanHelpText, Action: commandSpan},
 	{Name: "tools", TopSummary: "list globally referenced build tools", DoSummary: "list globally referenced build tools", Help: toolsHelpText, Action: commandTools},
+	{Name: "cache", TopSummary: "inspect or remove cache records", DoSummary: "inspect or remove cache records", Help: "Usage: kame do cache list|clean [-C DIR]\nlist prints managed cache records as JSON. clean removes record files from this directory's caches.\n", Action: commandCache},
 	{Name: "parse", TopSummary: "parse a language file and print a JSON AST", DoSummary: "parse a language file and print a JSON AST (--lang LANG)", Help: parseHelpText, Action: commandParse},
 	{Name: "fmt", TopSummary: "format source in place or check it", DoSummary: "format source in place (-i) or check it (-n)", Help: fmtHelpText, Action: commandFormat},
 	{Name: "help", DoSummary: "show this help, or help for one COMMAND", Action: commandHelp},

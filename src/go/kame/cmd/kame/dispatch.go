@@ -37,12 +37,16 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 			return runDoCommand(spec.Action, args[2:], in, out, errOut)
 		}
 		message := cli.RemovedCommandMessage(args[1])
-		if message == "" { message = "unknown command: "+args[1] }
+		if message == "" {
+			message = "unknown command: " + args[1]
+		}
 		cliError(errOut, "CMD_UNKNOWN", message)
 		io.WriteString(errOut, "run 'kame do --help' to list commands\n")
 		return 2
 	}
-	if cli.SelectsRun(args) || cli.AppendsCommands(args) { return runPrimarySession(args, in, out, errOut) }
+	if cli.SelectsRun(args) || cli.AppendsCommands(args) {
+		return runPrimarySession(args, in, out, errOut)
+	}
 	return runBuild(args, out, errOut, false)
 }
 
@@ -121,8 +125,12 @@ func freePresentationArgs(args []string) {
 }
 
 func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
-	if action == commandRender { return runRender(args, in, out, errOut) }
-	if action == commandRun { return runSession(args, in, out, errOut) }
+	if action == commandRender {
+		return runRender(args, in, out, errOut)
+	}
+	if action == commandRun {
+		return runSession(args, in, out, errOut)
+	}
 	if action == commandPlan {
 		return runPlan(args, out, errOut)
 	}
@@ -138,7 +146,12 @@ func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writ
 	if action == commandSpan {
 		return runGraph(args, out, errOut, "span")
 	}
-	if action == commandTools { return runTools(args, out, errOut) }
+	if action == commandTools {
+		return runTools(args, out, errOut)
+	}
+	if action == commandCache {
+		return runCache(args, out, errOut)
+	}
 	if action == commandParse {
 		return runParse(args, in, out, errOut)
 	}
@@ -149,7 +162,7 @@ func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writ
 }
 
 func runRender(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
- inv := cli.Parse("render", args)
- defer inv.Free()
- return runParsedSession(inv, in, out, errOut)
+	inv := cli.Parse("render", args)
+	defer inv.Free()
+	return runParsedSession(inv, in, out, errOut)
 }
