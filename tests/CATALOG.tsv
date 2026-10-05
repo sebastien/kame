@@ -27,7 +27,7 @@ tests/T007-02-lib-collections.sh	007	lib	map, flatmap, predicate and equality-va
 tests/T007-03-lib-text.sh	007	lib	join, split, strip, replace, membership, case conversion
 tests/T007-04-lib-path.sh	007	lib	basename, dirname, splitext, ext, joinpath, relpath, abspath
 tests/T007-05-lib-fs.sh	007	lib	read, exists?, stat, wildcard and missing-path failures
-tests/T007-06-lib-grants.sh	007	lib	Capability denial, rooted grants, environment names, shell capture
+tests/T007-06-lib-grants.sh	007	lib	Capability denial, rooted grants, environment names, shell/sh/shellrun capture and capability parity
 tests/T007-07-lib-errors.sh	007	lib	Operation arity and kind failures carry messages
 tests/T008-01-cache-hit.sh	008	cache	Record creation, cache hits, --force, input and environment invalidation
 tests/T008-02-cache-records.sh	008	cache	Corrupted records are misses and are rewritten

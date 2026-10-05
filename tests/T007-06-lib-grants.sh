@@ -16,7 +16,7 @@ cli_build
 operation_fixture_copy lib-grants lib-grants
 
 test-step "capabilities are denied by default"
-for expr in '(read "a.txt")' '(write "x.txt" "x")' '(env "HOME")' '(shell "true")'; do
+for expr in '(read "a.txt")' '(write "x.txt" "x")' '(env "HOME")' '(shell "true")' '(sh "true")' '(shellrun "true")'; do
 	cli_run --dir lib-grants -- do run --lang expr -c "$expr"
 	cli_expect_status 1 "$expr"
 	cli_expect_stderr_contains 'CAP_DENIED'
@@ -82,6 +82,14 @@ cli_expect_status 0
 cli_expect_stdout_contains 'status: 3' 'stdout: out' 'stderr: err'
 
 cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shell "echo ok")'
+cli_expect_status 0
+cli_expect_stdout_contains 'status: 0' 'stdout: ok'
+
+cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(sh "echo ok")'
+cli_expect_status 0
+cli_expect_stdout_contains 'status: 0' 'stdout: ok'
+
+cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shellrun "echo ok")'
 cli_expect_status 0
 cli_expect_stdout_contains 'status: 0' 'stdout: ok'
 

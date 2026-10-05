@@ -96,6 +96,7 @@ environment values can invalidate a consumer.
 | `write` | `(write PATH VALUE)` | write | Bytes write raw; other coercible values render as with `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
 | `env` | `(env NAME)` | env | Environment value. |
 | `shell` | `(shell COMMAND [OPTIONS])` | run | Runs a collected command only in standalone expression evaluation. Invalid during planning or recipe rendering. |
+| `sh`, `shellrun` | Same as `shell` | run | Aliases with identical result and phase behavior. |
 
 Standalone `kame do expr` denies these capabilities by default; grant only the
 needed roots, names, or process access with its `--allow-*` options.

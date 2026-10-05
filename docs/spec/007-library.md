@@ -243,8 +243,9 @@ Demanded lazy values and Kash recipe expressions evaluate in their runtime phase
 when bound to a target, their collected shell calls inherit its environment and
 retain the invocation run policy. Declaration registration never launches them.
 
-Tagged-template shell helpers and multiple aliases such as legacy `sh` and
-`shellrun` are deferred.
+`shell`, `sh`, and `shellrun` are aliases with the same script/options
+signature, collected result, run capability, and phase restrictions. Tagged
+template shell helpers remain deferred.
 
 ## Clock Operations
 
@@ -301,6 +302,8 @@ executable metadata checks do not grant access to user read operations.
 - Denied read, write, run, or environment access performs no host action.
 - Deferred `out`, `err`, `yield`, and `write` effects commit once after rerender.
 - `shell` captures status and separate byte-bounded stdout/stderr.
+- `sh` and `shellrun` match `shell` in result, run-capability enforcement, and
+  phase restrictions.
 - Pattern `replace` matches anchored, expands references, returns `:nil`
   without a match, and accepts a section through `map` and pipes.
 - Operation tests using `mem.Tracker` leak no returned container or string.

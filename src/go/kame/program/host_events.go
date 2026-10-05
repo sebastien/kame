@@ -119,6 +119,19 @@ func (p *Program) drainRequests() {
 				retain = cacheLogDefault
 			}
 			capture := len(argv) != 0 || len(stages) != 0
+			recipe := false
+			for i := range request.Payload.Record {
+				if request.Payload.Record[i].Key == host.FieldOp && request.Payload.Record[i].Value.Text == "recipe" {
+					recipe = true
+					break
+				}
+			}
+			// The collected shell operation carries only a script field, while
+			// recipe payloads identify themselves with op=recipe. Capture the
+			// former's output; recipes publish their streams as process events.
+			if script != "" && !recipe {
+				capture = true
+			}
 			stream := false
 			for i := range request.Payload.Record {
 				if request.Payload.Record[i].Key == "stream" {
