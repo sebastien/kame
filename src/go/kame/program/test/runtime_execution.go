@@ -562,18 +562,6 @@ func TestYieldRejectsShellCommand(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
-func TestServiceHealthChecksAreExplicitlyUnsupported(t *testing.T) {
-	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "service daemon : ; [health: [argv: [\"./daemon\" \"health\"]]]\n\ttrue\n")
-	registry := eval.NewRegistry(a)
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
-	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
-	result := compiled.Program.Materialize("daemon")
-	if result.Diagnostic.Code != "FEATURE_UNSUP" { t.Errorf("service diagnostic = %s", result.Diagnostic.Code) }
-	result.Free(a)
-	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
-}
-
 func TestServicePublishesOnSpawnAndKeepsPrerequisiteAlive(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)
@@ -641,6 +629,95 @@ func TestServiceStopUsesConfiguredGracePeriod(t *testing.T) {
 	if host.Active() != 0 { t.Error("zero grace period did not force service process cleanup") }
 	started.Handle.Free()
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestServiceRestartsAfterFailedStartup(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-restart-")
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
+	defer os.Remove(dir)
+	source := "service daemon : ; [ready: [argv: [\"test\" \"-f\" \"ready\"] interval-ms: 10 timeout-ms: 1000] restart: [attempts: 1 backoff-ms: 10]]\n\tif [ ! -f first ]; then touch first; exit 1; fi; touch ready; while :; do sleep 1; done\n"
+	parsed := script.Parse(a, "service.kmk", source)
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
+	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
+		t.Fatal("compile failed")
+		return
+	}
+	started := compiled.Program.Start("daemon")
+	if started.Diagnostic.Code != "" || started.Handle == nil {
+		t.Fatal("service start failed")
+		return
+	}
+	ready := false
+	for i := 0; i < 300 && !ready; i++ {
+		result := started.Handle.PollReady()
+		ready = result.Done && result.Result.Diagnostic.Code == ""
+		if result.Done && result.Result.Diagnostic.Code != "" {
+			t.Error("restarted service failed readiness: " + result.Result.Diagnostic.Code)
+		}
+		result.Result.Free(a)
+		if !ready {
+			compiled.Program.Tick(10)
+		}
+	}
+	if !ready {
+		t.Error("service did not become ready after a failed first start")
+	}
+	starts, readErr := os.ReadFile(a, dir+"/first")
+	if readErr != nil {
+		t.Error("first startup marker was not created")
+	}
+	mem.FreeSlice(a, starts)
+	started.Handle.Cancel()
+	for i := 0; i < 30 && compiled.Program.Host.Active() != 0; i++ {
+		compiled.Program.Tick(10)
+	}
+	started.Handle.Free()
+	compiled.Program.Free()
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
+}
+
+func TestServiceHealthFailureRestartsAndResumesConsumer(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-health-")
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
+	defer os.Remove(dir)
+	source := "service daemon : ; [ready: [argv: [\"test\" \"-f\" \"ready\"] interval-ms: 10 timeout-ms: 1000] health: [argv: [\"test\" \"-f\" \"healthy\"] interval-ms: 10 failures: 1] restart: [attempts: 1 backoff-ms: 10]]\n\tif [ ! -f started ]; then touch started; else touch healthy; fi; touch ready; while :; do sleep 1; done\nconsumer : daemon\n\tprintf c >> consumers; sleep 0.1\n"
+	parsed := script.Parse(a, "service.kmk", source)
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
+	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
+		t.Fatal("compile failed")
+		return
+	}
+	result := compiled.Program.Materialize("consumer")
+	if result.Diagnostic.Code != "" {
+		t.Error("consumer failed across health restart: " + result.Diagnostic.Code)
+	}
+	result.Free(a)
+	consumers, readErr := os.ReadFile(a, dir+"/consumers")
+	if readErr != nil || string(consumers) != "cc" {
+		t.Error("consumer did not resume after service readiness was restored")
+	}
+	mem.FreeSlice(a, consumers)
+	for i := 0; i < 30 && compiled.Program.Host.Active() != 0; i++ {
+		compiled.Program.Tick(10)
+	}
+	compiled.Program.Free()
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
 }
 
 func TestServiceReadinessProbeGatesDependents(t *testing.T) {

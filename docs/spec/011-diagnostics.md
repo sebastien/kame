@@ -124,6 +124,9 @@ meaning by themselves.
 | `RECIPE_TIMEOUT` | error | Recipe process timed out |
 | `SERVICE_READY_TIMEOUT` | error | Service did not become ready before its timeout |
 | `SERVICE_START_FAILED` | error | Service exited before becoming ready |
+| `SERVICE_EXITED` | error | Service exited unexpectedly after becoming ready |
+| `SERVICE_UNHEALTHY` | error | Service failed its configured health checks |
+| `SERVICE_RESTART_EXHAUSTED` | error | Service restart attempts were exhausted |
 | `EXEC_CANCELLED` | error | Execution was cancelled |
 | `HOST_FAIL` | error | Host request, spawn, pipe, wait, or signal failure |
 | `FS_ERR` | error | Filesystem read, write, stat, or glob failure |

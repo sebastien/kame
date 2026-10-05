@@ -307,6 +307,7 @@ func (p *Program) Tick(wait int) {
 	p.tickServiceReadiness()
 	p.pump(wait)
 	p.tickServiceReadiness()
+	p.tickServiceRestartTimers()
 	p.drainRequests()
 	p.Engine.DrainCompletions()
 	jobs := p.Options.Jobs

@@ -25,7 +25,7 @@ func (p *Program) pump(wait int) {
 			if event.Kind == host.ProcessTerminal {
 				p.completeServiceReadyProbe(entry, event)
 			}
-		event.Free(p.Alloc)
+			event.Free(p.Alloc)
 			continue
 		}
 		entry := p.instanceForRequest(event.ID)
@@ -132,7 +132,9 @@ func (p *Program) drainRequests() {
 			for i := range request.Payload.Record {
 				if request.Payload.Record[i].Key == host.FieldEnvironment {
 					values := request.Payload.Record[i].Value.List
-					for j := range values { scopedEnvironment = slices.Append(p.Alloc, scopedEnvironment, values[j].Text) }
+					for j := range values {
+						scopedEnvironment = slices.Append(p.Alloc, scopedEnvironment, values[j].Text)
+					}
 					environment = scopedEnvironment
 				}
 			}
@@ -178,15 +180,16 @@ func (p *Program) serviceSpawned(entry *instance) {
 		return
 	}
 	if len(entry.Service.ReadyArgv) == 0 {
-		entry.ServiceReady = true
-		p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
+		p.publishServiceReady(entry)
 		return
 	}
 	if p.Forwarding {
 		p.requestServiceClock(entry)
 		return
 	}
-	if p.Host == nil { return }
+	if p.Host == nil {
+		return
+	}
 	entry.ServiceReadyDeadline = p.Host.Monotonic() + entry.Service.ReadyTimeout*1000000
 	p.startServiceReadyProbe(entry)
 }
@@ -201,17 +204,27 @@ func (p *Program) serviceProbeForRequest(id int64) *instance {
 }
 
 func (p *Program) serviceClockForRequest(id int64) *instance {
-	for i := range p.Instances { if p.Instances[i].ServiceClockID == id { return &p.Instances[i] } }
+	for i := range p.Instances {
+		if p.Instances[i].ServiceClockID == id {
+			return &p.Instances[i]
+		}
+	}
 	return nil
 }
 
 func (p *Program) serviceTimerForRequest(id int64) *instance {
-	for i := range p.Instances { if p.Instances[i].ServiceTimerID == id { return &p.Instances[i] } }
+	for i := range p.Instances {
+		if p.Instances[i].ServiceTimerID == id {
+			return &p.Instances[i]
+		}
+	}
 	return nil
 }
 
 func (p *Program) requestServiceClock(entry *instance) {
-	if entry == nil || entry.ServiceClockID != 0 { return }
+	if entry == nil || entry.ServiceClockID != 0 {
+		return
+	}
 	p.nextRequest++
 	id := p.nextRequest
 	entry.ServiceClockID = id
@@ -219,16 +232,26 @@ func (p *Program) requestServiceClock(entry *instance) {
 }
 
 func (p *Program) requestServiceTimer(entry *instance) {
-	if entry == nil || entry.ServiceTimerID != 0 { return }
+	if entry == nil || entry.ServiceTimerID != 0 {
+		return
+	}
 	p.nextRequest++
 	id := p.nextRequest
 	entry.ServiceTimerID = id
-	payload := host.ServiceTimerPayload(p.Alloc, entry.Service.ReadyInterval)
+	delay := entry.Service.ReadyInterval
+	if entry.ServiceReady {
+		delay = entry.Service.HealthInterval
+	}
+	payload := host.ServiceTimerPayload(p.Alloc, delay)
 	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestTimer, Payload: payload})
 }
 
 func (p *Program) completeServiceClock(entry *instance, now int64) {
 	entry.ServiceClockID = 0
+	if entry.ServiceReady {
+		p.startServiceHealthProbeAt(entry, now)
+		return
+	}
 	if entry.ServiceReadyDeadline == 0 {
 		entry.ServiceReadyDeadline = now + entry.Service.ReadyTimeout*1000000
 	}
@@ -239,6 +262,21 @@ func (p *Program) completeServiceClock(entry *instance, now int64) {
 	p.startServiceReadyProbeAt(entry, now)
 }
 
+func (p *Program) publishServiceReady(entry *instance) {
+	entry.ServiceReady, entry.ServiceReadyDeadline, entry.ServiceNextProbe = true, 0, 0
+	p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
+	if len(entry.Service.HealthArgv) == 0 {
+		return
+	}
+	if p.Forwarding {
+		p.requestServiceTimer(entry)
+		return
+	}
+	if p.Host != nil {
+		entry.ServiceNextHealth = p.Host.Monotonic() + entry.Service.HealthInterval*1000000
+	}
+}
+
 func (p *Program) startServiceReadyProbe(entry *instance) {
 	if entry.ServiceReady || entry.ServiceProbeID != 0 || entry.ServiceReadyDeadline == 0 {
 		return
@@ -247,43 +285,81 @@ func (p *Program) startServiceReadyProbe(entry *instance) {
 		p.requestServiceClock(entry)
 		return
 	}
-	if p.Host == nil { return }
+	if p.Host == nil {
+		return
+	}
 	p.startServiceReadyProbeAt(entry, p.Host.Monotonic())
 }
 
 func (p *Program) startServiceReadyProbeAt(entry *instance, now int64) {
-	if entry.ServiceReady || entry.ServiceProbeID != 0 || entry.ServiceReadyDeadline == 0 { return }
+	p.startServiceProbeAt(entry, now, false)
+}
+
+func (p *Program) startServiceHealthProbeAt(entry *instance, now int64) {
+	p.startServiceProbeAt(entry, now, true)
+}
+
+func (p *Program) startServiceProbeAt(entry *instance, now int64, health bool) {
+	if entry.ServiceProbeID != 0 || (health && (!entry.ServiceReady || len(entry.Service.HealthArgv) == 0)) || (!health && (entry.ServiceReady || entry.ServiceReadyDeadline == 0)) {
+		return
+	}
 	remaining := entry.ServiceReadyDeadline - now
-	if remaining <= 0 {
+	if !health && remaining <= 0 {
 		p.failServiceReady(entry)
 		return
 	}
 	p.nextRequest++
 	id := p.nextRequest
-	argv := cloneStrings(p.Alloc, entry.Service.ReadyArgv)
+	argv := entry.Service.ReadyArgv
+	timeout := (remaining + 999999) / 1000000
+	if health {
+		argv, timeout = entry.Service.HealthArgv, 0
+	}
+	argv = cloneStrings(p.Alloc, argv)
 	if p.Forwarding {
-		payload := host.ServiceProbePayload(p.Alloc, argv, p.Options.Directory, (remaining+999999)/1000000, entry.Environment)
+		payload := host.ServiceProbePayload(p.Alloc, argv, p.Options.Directory, timeout, entry.Environment)
 		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, Kind: host.RequestProcess, Payload: payload})
-		entry.ServiceProbeID = id
+		entry.ServiceProbeID, entry.ServiceProbeHealth = id, health
 		freeStrings(p.Alloc, argv)
 		return
 	}
-	if p.Host == nil { freeStrings(p.Alloc, argv); return }
-	request := host.ProcessRequest{ID: id, Argv: argv, Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: (remaining + 999999) / 1000000}
+	if p.Host == nil {
+		freeStrings(p.Alloc, argv)
+		return
+	}
+	request := host.ProcessRequest{ID: id, Argv: argv, Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: timeout}
 	started := p.Host.Start(request)
 	freeStrings(p.Alloc, argv)
 	if !started {
-		entry.ServiceNextProbe = now + entry.Service.ReadyInterval*1000000
+		if health {
+			p.serviceHealthFailure(entry, now)
+		} else {
+			entry.ServiceNextProbe = now + entry.Service.ReadyInterval*1000000
+		}
 		return
 	}
-	entry.ServiceProbeID = id
+	entry.ServiceProbeID, entry.ServiceProbeHealth = id, health
 }
 
 func (p *Program) completeServiceReadyProbe(entry *instance, event host.ProcessEvent) {
+	health := entry.ServiceProbeHealth
 	entry.ServiceProbeID = 0
+	entry.ServiceProbeHealth = false
 	if event.Outcome == host.ProcessExited && event.Status == 0 && event.Signal == 0 {
-		entry.ServiceReady, entry.ServiceReadyDeadline, entry.ServiceNextProbe = true, 0, 0
-		p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
+		if health {
+			entry.ServiceHealthFailures = 0
+			p.scheduleServiceHealth(entry)
+		} else {
+			p.publishServiceReady(entry)
+		}
+		return
+	}
+	if health {
+		now := int64(0)
+		if p.Host != nil {
+			now = p.Host.Monotonic()
+		}
+		p.serviceHealthFailure(entry, now)
 		return
 	}
 	if event.Outcome == host.ProcessTimedOut {
@@ -294,13 +370,51 @@ func (p *Program) completeServiceReadyProbe(entry *instance, event host.ProcessE
 		p.requestServiceTimer(entry)
 		return
 	}
-	if p.Host == nil { return }
+	if p.Host == nil {
+		return
+	}
 	now := p.Host.Monotonic()
 	if now >= entry.ServiceReadyDeadline {
 		p.failServiceReady(entry)
 		return
 	}
 	entry.ServiceNextProbe = now + entry.Service.ReadyInterval*1000000
+}
+
+func (p *Program) scheduleServiceHealth(entry *instance) {
+	if entry == nil || len(entry.Service.HealthArgv) == 0 {
+		return
+	}
+	if p.Forwarding {
+		p.requestServiceTimer(entry)
+		return
+	}
+	if p.Host != nil {
+		entry.ServiceNextHealth = p.Host.Monotonic() + entry.Service.HealthInterval*1000000
+	}
+}
+
+func (p *Program) serviceHealthFailure(entry *instance, now int64) {
+	entry.ServiceHealthFailures++
+	if entry.ServiceHealthFailures >= entry.Service.HealthFailures {
+		if p.prepareServiceRestart(entry) {
+			p.Engine.Invalidate(entry.Node)
+			p.drainCancellations()
+			return
+		}
+		message, code := "service failed its health checks", "SERVICE_UNHEALTHY"
+		if entry.ServiceRestartCount > 0 {
+			message, code = "service restart attempts were exhausted", "SERVICE_RESTART_EXHAUSTED"
+		}
+		p.Engine.Fail(entry.Node, failure(p.Alloc, code, message))
+		p.drainCancellations()
+		return
+	}
+	if p.Forwarding {
+		p.requestServiceTimer(entry)
+	} else {
+		entry.ServiceNextHealth = now + entry.Service.HealthInterval*1000000
+	}
 }
 
 func (p *Program) tickServiceReadiness() {
@@ -310,7 +424,16 @@ func (p *Program) tickServiceReadiness() {
 	now := p.Host.Monotonic()
 	for i := range p.Instances {
 		entry := &p.Instances[i]
-		if entry.Rule.Kind != rule.ServiceRule || entry.ServiceReady || entry.ServiceReadyDeadline == 0 || entry.ServiceProbeID != 0 {
+		if entry.Rule.Kind != rule.ServiceRule || entry.ServiceProbeID != 0 {
+			continue
+		}
+		if entry.ServiceReady {
+			if len(entry.Service.HealthArgv) != 0 && entry.ServiceNextHealth != 0 && now >= entry.ServiceNextHealth {
+				p.startServiceHealthProbeAt(entry, now)
+			}
+			continue
+		}
+		if entry.ServiceReadyDeadline == 0 {
 			continue
 		}
 		if now >= entry.ServiceReadyDeadline {
@@ -329,8 +452,17 @@ func (p *Program) failServiceReady(entry *instance) {
 		p.Host.Cancel(entry.ServiceProbeID)
 		entry.ServiceProbeID = 0
 	}
-	entry.ServiceReadyDeadline, entry.ServiceNextProbe, entry.ServiceTimerID, entry.ServiceClockID = 0, 0, 0, 0
-	p.Engine.Fail(entry.Node, failure(p.Alloc, "SERVICE_READY_TIMEOUT", "service did not become ready before timeout"))
+	if p.prepareServiceRestart(entry) {
+		p.Engine.Invalidate(entry.Node)
+		p.drainCancellations()
+		return
+	}
+	entry.ServiceReadyDeadline, entry.ServiceNextProbe, entry.ServiceNextHealth, entry.ServiceTimerID, entry.ServiceClockID = 0, 0, 0, 0, 0
+	code, message := "SERVICE_READY_TIMEOUT", "service did not become ready before timeout"
+	if entry.ServiceRestartCount > 0 {
+		code, message = "SERVICE_RESTART_EXHAUSTED", "service restart attempts were exhausted"
+	}
+	p.Engine.Fail(entry.Node, failure(p.Alloc, code, message))
 	p.drainCancellations()
 }
 
@@ -491,39 +623,66 @@ func (p *Program) Complete(request host.Request, value core.Value, diagnostic di
 	}
 	if entry := p.serviceProbeForRequest(request.ID); entry != nil {
 		event := host.ProcessEvent{Kind: host.ProcessTerminal, ID: request.ID, Outcome: host.ProcessExited}
-		if diagnostic.Code == "RECIPE_TIMEOUT" { event.Outcome = host.ProcessTimedOut
-		} else if diagnostic.Code != "" { event.Outcome = host.ProcessFailed
+		if diagnostic.Code == "RECIPE_TIMEOUT" {
+			event.Outcome = host.ProcessTimedOut
+		} else if diagnostic.Code != "" {
+			event.Outcome = host.ProcessFailed
 		} else if value.Kind == core.Record {
 			for i := range value.Record {
-				if value.Record[i].Key == "status" { event.Status = int(value.Record[i].Value.Int) }
-				if value.Record[i].Key == "signal" { event.Signal = int(value.Record[i].Value.Int) }
+				if value.Record[i].Key == "status" {
+					event.Status = int(value.Record[i].Value.Int)
+				}
+				if value.Record[i].Key == "signal" {
+					event.Signal = int(value.Record[i].Value.Int)
+				}
 			}
 		} else if value.Kind != core.String {
 			event.Status = 1
 		}
-		value.Free(p.Alloc); diagnostic.Free(p.Alloc)
+		value.Free(p.Alloc)
+		diagnostic.Free(p.Alloc)
 		p.completeServiceReadyProbe(entry, event)
 		return
 	}
 	if entry := p.serviceTimerForRequest(request.ID); entry != nil {
 		entry.ServiceTimerID = 0
 		value.Free(p.Alloc)
-		if diagnostic.Code == "" { p.requestServiceClock(entry)
-		} else { diagnostic.Free(p.Alloc); p.failServiceHost(entry) }
+		if diagnostic.Code == "" {
+			p.requestServiceClock(entry)
+		} else {
+			diagnostic.Free(p.Alloc)
+			p.failServiceHost(entry)
+		}
+		return
+	}
+	if entry := p.serviceRestartTimerForRequest(request.ID); entry != nil {
+		entry.ServiceRestartTimerID, entry.ServiceRestartDeadline = 0, 0
+		if diagnostic.Code != "" {
+			value.Free(p.Alloc)
+			p.failServiceHost(entry)
+			diagnostic.Free(p.Alloc)
+			return
+		}
+		entry.ServiceRestartPending = false
+		p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Value: value, HasValue: true, Diagnostic: diagnostic})
 		return
 	}
 	if entry := p.serviceClockForRequest(request.ID); entry != nil {
 		if diagnostic.Code != "" || value.Kind != core.Int {
-			value.Free(p.Alloc); diagnostic.Free(p.Alloc); p.failServiceHost(entry)
+			value.Free(p.Alloc)
+			diagnostic.Free(p.Alloc)
+			p.failServiceHost(entry)
 			return
 		}
 		now := value.Int
-		value.Free(p.Alloc); diagnostic.Free(p.Alloc)
+		value.Free(p.Alloc)
+		diagnostic.Free(p.Alloc)
 		p.completeServiceClock(entry, now)
 		return
 	}
 	if request.Kind == host.RequestTimer || request.Kind == host.RequestProcessCancel {
-		value.Free(p.Alloc); diagnostic.Free(p.Alloc)
+		value.Free(p.Alloc)
+		diagnostic.Free(p.Alloc)
 		return
 	}
 	if request.Kind == host.RequestProcess && (len(host.PayloadArgv(request.Payload)) != 0 || len(host.PayloadStages(request.Payload)) != 0) {
@@ -535,7 +694,9 @@ func (p *Program) Complete(request host.Request, value core.Value, diagnostic di
 }
 
 func (p *Program) failServiceHost(entry *instance) {
-	if entry == nil || entry.Node.State == core.NodeFailed || entry.Node.State == core.NodeCancelled || entry.Node.State == core.NodeComplete { return }
+	if entry == nil || entry.Node.State == core.NodeFailed || entry.Node.State == core.NodeCancelled || entry.Node.State == core.NodeComplete {
+		return
+	}
 	entry.ServiceReadyDeadline, entry.ServiceNextProbe, entry.ServiceTimerID, entry.ServiceClockID = 0, 0, 0, 0
 	p.Engine.Fail(entry.Node, failure(p.Alloc, "HOST_FAIL", "service host request failed"))
 	p.drainCancellations()
@@ -592,20 +753,31 @@ func (p *Program) drainCancellations() {
 				entry.ServiceProbeID = 0
 			}
 			if entry.Node.ID == cancellation.NodeID {
-				if entry.Rule.Kind == rule.ServiceRule { serviceGrace = entry.Service.StopGrace }
+				if entry.Rule.Kind == rule.ServiceRule {
+					serviceGrace = entry.Service.StopGrace
+				}
 				entry.ServiceReadyDeadline, entry.ServiceNextProbe = 0, 0
 				entry.ServiceClockID, entry.ServiceTimerID = 0, 0
 			}
 		}
 		if p.Forwarding {
 			grace := serviceGrace
-			if grace < 0 { grace = 5000 }
+			if grace < 0 {
+				grace = 5000
+			}
 			p.queueProcessCancellation(cancellation.NodeID, cancellation.Generation, cancellation.Attempt, cancellation.RequestID, grace)
-			if probeID != 0 { p.queueProcessCancellation(cancellation.NodeID, cancellation.Generation, cancellation.Attempt, probeID, 0) }
+			if probeID != 0 {
+				p.queueProcessCancellation(cancellation.NodeID, cancellation.Generation, cancellation.Attempt, probeID, 0)
+			}
 		} else if p.Host != nil {
-			if serviceGrace >= 0 { p.Host.Stop(cancellation.RequestID, serviceGrace)
-			} else { p.Host.Cancel(cancellation.RequestID) }
-			if probeID != 0 { p.Host.Cancel(probeID) }
+			if serviceGrace >= 0 {
+				p.Host.Stop(cancellation.RequestID, serviceGrace)
+			} else {
+				p.Host.Cancel(cancellation.RequestID)
+			}
+			if probeID != 0 {
+				p.Host.Cancel(probeID)
+			}
 		}
 	}
 }
@@ -637,6 +809,26 @@ func (p *Program) complete(event host.ProcessEvent) {
 	}
 	if entry != nil && entry.Rule.Kind == rule.ServiceRule && !entry.ServiceReady {
 		entry.ServiceReadyDeadline, entry.ServiceNextProbe = 0, 0
+	}
+	if entry != nil && entry.Rule.Kind == rule.ServiceRule && event.ID == entry.Node.HostRequestID {
+		if d.Code == "" {
+			d = failure(p.Alloc, "SERVICE_EXITED", "service exited unexpectedly")
+		}
+		if p.prepareServiceRestart(entry) {
+			d.Free(p.Alloc)
+			p.Engine.Invalidate(entry.Node)
+			p.drainCancellations()
+			return
+		}
+		d.Free(p.Alloc)
+		message, code := "service exited before becoming ready", "SERVICE_START_FAILED"
+		if entry.ServiceReady {
+			message, code = "service exited unexpectedly", "SERVICE_EXITED"
+		}
+		if entry.ServiceRestartCount > 0 {
+			message, code = "service restart attempts were exhausted", "SERVICE_RESTART_EXHAUSTED"
+		}
+		d = failure(p.Alloc, code, message)
 	}
 	if d.Code != "" {
 		p.attachProcessContext(&d, entry, event)

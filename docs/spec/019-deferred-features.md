@@ -82,7 +82,9 @@ membership-addition/removal and watch-update checks on native and WASM. D02's
 typed lifecycle metadata is parsed and bounded before dependency recipes run;
 native and forwarded readiness probes gate dependents, readiness timeouts tear
 down the service, and configured SIGTERM-to-SIGKILL grace periods are honored
-by native and JavaScript CLI hosts. Go tests and T010-26 cover those paths.
-Health checks, restart policy, bounded log retention and full embedding lifecycle
-parity remain open under 024. D03–D05 and D08–D18 remain open. The preceding
+by native and JavaScript CLI hosts. Native and forwarded health probes now
+restart unhealthy services within configured bounds, and startup failures
+retry before dependents resume; Go tests and T010-26 cover these paths.
+Bounded log retention and full embedding lifecycle parity remain open under
+024. D03–D05 and D08–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.

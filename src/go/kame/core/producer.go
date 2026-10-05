@@ -14,6 +14,7 @@ const (
 	ProducerSubmitted
 	ProducerActive
 	ProducerFailed
+	ProducerRestart
 )
 
 // Producer never mutates a node directly. Its context is valid only for its call.

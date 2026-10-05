@@ -368,6 +368,7 @@ func (e *Engine) run(n *Node) *Node {
 	result := n.Producer(c, n.ID)
 	if n.State == NodeComplete || n.State == NodeFailed { return n }
 	if n.materializer != nil && result == ProducerActive { return e.run(n) }
+	if result == ProducerRestart { e.Invalidate(n); return n }
 	if result == ProducerCompleted { n.complete(e, Diagnostic{})
 	} else if result == ProducerFailed { n.complete(e, Diagnostic{Code: DiagnosticHostFailure})
 	} else if result == ProducerWaiting || result == ProducerSubmitted {

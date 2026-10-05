@@ -8,7 +8,7 @@ import (
 	"kame/lang/rule"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
- "solod.dev/so/strings"
+	"solod.dev/so/strings"
 )
 
 // produce advances one rule instance through dependency resolution, rendering,
@@ -27,13 +27,21 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		entry.cachePending = false
 		entry.KashRunning = false
 		entry.KashPrepared, entry.KashPreparing = false, false
-		if entry.KashContext != nil { p.freeKashContext(entry.KashContext); entry.KashContext = nil }
+		if entry.KashContext != nil {
+			p.freeKashContext(entry.KashContext)
+			entry.KashContext = nil
+		}
 		entry.EnvironmentConflict = false
 		entry.ServiceReady = false
 		entry.ServiceReadyDeadline, entry.ServiceNextProbe, entry.ServiceProbeID = 0, 0, 0
 		entry.ServiceClockID, entry.ServiceTimerID = 0, 0
+		entry.ServiceProbeHealth, entry.ServiceNextHealth, entry.ServiceHealthFailures = false, 0, 0
+		entry.ServiceRestartTimerID = 0
+		if !entry.ServiceRestartPending {
+			entry.ServiceRestartCount = 0
+		}
 		p.freeNewerInputs(entry.NewerInputs)
- entry.NewerInputs = nil
+		entry.NewerInputs = nil
 		p.freeFileContext(entry.FileContext)
 		entry.FileContext = nil
 		entry.FileContextReady, entry.FileContextWanted = false, false
@@ -52,10 +60,6 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.emitNode(entry.Node, entry.Plan.Target, TargetStarted, diagnostic.Span{}, nil)
 		entry.started, entry.startedGeneration, entry.terminalEmitted = true, c.Generation(), false
 	}
-	if entry.Rule.Kind == rule.ServiceRule && (len(entry.Service.HealthArgv) != 0 || entry.Service.RestartAttempts != 0 || entry.Kash) {
-		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service health checks, restarts, and kash services are not supported yet"))
-		return core.ProducerFailed
-	}
 	if entry.FileContext != nil {
 		return p.continueFileContext(c, state.Index)
 	}
@@ -65,10 +69,32 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	if entry.ForwardEffects != nil {
 		return p.continueForwardEffects(c, state.Index)
 	}
-	if entry.KashRunning { return p.continueKashRecipe(c, state.Index) }
+	if entry.KashRunning {
+		return p.continueKashRecipe(c, state.Index)
+	}
 	if c.Completion().RequestID != 0 && entry.Script != "" {
 		mem.FreeString(p.Alloc, entry.Script)
 		entry.Script = ""
+		if entry.Rule.Kind == rule.ServiceRule {
+			completion := c.Completion()
+			message := "service exited before becoming ready"
+			code := "SERVICE_START_FAILED"
+			if entry.ServiceReady {
+				message, code = "service exited unexpectedly", "SERVICE_EXITED"
+			}
+			if p.prepareServiceRestart(entry) {
+				completion.Value.Free(p.Alloc)
+				completion.Diagnostic.Free(p.Alloc)
+				return core.ProducerRestart
+			}
+			completion.Value.Free(p.Alloc)
+			completion.Diagnostic.Free(p.Alloc)
+			if entry.ServiceRestartCount > 0 {
+				message, code = "service restart attempts were exhausted", "SERVICE_RESTART_EXHAUSTED"
+			}
+			p.failRule(c, state.Index, failure(p.Alloc, code, message))
+			return core.ProducerFailed
+		}
 		if c.Completion().Diagnostic.Code != "" {
 			p.failRule(c, state.Index, c.Completion().Diagnostic)
 			return core.ProducerFailed
@@ -101,7 +127,9 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	}
 	for i := range entry.SettingsDependencies {
 		dependency := p.Eval.Definition(entry.SettingsDependencies[i])
-		if dependency != nil && !p.addPurposeDependency(c, entry, dependency, false) { return core.ProducerWaiting }
+		if dependency != nil && !p.addPurposeDependency(c, entry, dependency, false) {
+			return core.ProducerWaiting
+		}
 	}
 	resolvedInputs := p.resolveInputs(c, entry)
 	inputs, resourceInputs := resolvedInputs.Inputs, resolvedInputs.ResourceInputs
@@ -122,7 +150,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	for i := range inputs {
 		input := inputs[i]
 		kind := core.ResourceTarget
-  ordered := i < len(resourceInputs) && resourceInputs[i].OrderOnly
+		ordered := i < len(resourceInputs) && resourceInputs[i].OrderOnly
 		if i < len(resourceInputs) {
 			kind = resourceInputs[i].Key.Kind
 		}
@@ -190,12 +218,14 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		}
 	}
 	entry = &p.Instances[state.Index]
- // Scan the combined source so selectors used through definitions are covered.
- // False positives only add metadata reads; literal source is never evaluated.
- if entry.Rule.Kind == rule.FileRule && strings.Contains(p.Parsed.Source.Text, "@<?") {
-  prepared := p.prepareNewerInputs(c, state.Index, inputs, resourceInputs)
-  if prepared != core.ProducerCompleted { return prepared }
- }
+	// Scan the combined source so selectors used through definitions are covered.
+	// False positives only add metadata reads; literal source is never evaluated.
+	if entry.Rule.Kind == rule.FileRule && strings.Contains(p.Parsed.Source.Text, "@<?") {
+		prepared := p.prepareNewerInputs(c, state.Index, inputs, resourceInputs)
+		if prepared != core.ProducerCompleted {
+			return prepared
+		}
+	}
 	rendered := p.render(c, entry, inputs)
 	// Rendering may discover a file producer and grow the instance slice.
 	entry = &p.Instances[state.Index]
@@ -226,7 +256,11 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		return core.ProducerFailed
 	}
 	if entry.Kash {
-		if parsed := p.validateRenderedKash(index, commands); parsed.Code != "" { mem.FreeString(p.Alloc, commands); p.failRule(c, index, parsed); return core.ProducerFailed }
+		if parsed := p.validateRenderedKash(index, commands); parsed.Code != "" {
+			mem.FreeString(p.Alloc, commands)
+			p.failRule(c, index, parsed)
+			return core.ProducerFailed
+		}
 	}
 	if entry.Rule.Kind == rule.FileRule {
 		if !entry.FileContextReady {
@@ -239,7 +273,9 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 			entry.Plan.Freshness = Stale
 		}
 
-  if entry.Node.InvalidatedForOrderOnly { entry.Plan.Freshness = beforeInvalidation }
+		if entry.Node.InvalidatedForOrderOnly {
+			entry.Plan.Freshness = beforeInvalidation
+		}
 		if hasYield(effects) && len(entry.Plan.Outputs) == 1 && !p.Forwarding && !entry.FileContextWanted && !entry.Rule.Always {
 			entry.Plan.Freshness = p.yieldFreshness(entry, effects)
 		}
@@ -266,6 +302,10 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 			}
 			lookup.Record.Free(p.Alloc)
 		}
+	}
+	if entry.Rule.Kind == rule.ServiceRule && entry.ServiceRestartPending && entry.ServiceRestartTimerID == 0 {
+		mem.FreeString(p.Alloc, commands)
+		return p.waitServiceRestart(c, entry)
 	}
 	if entry.Plan.Freshness == Fresh && !p.Options.Force && !p.Options.DryRun {
 		mem.FreeString(p.Alloc, commands)
@@ -404,6 +444,11 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 		return core.ProducerSubmitted
 	}
 	if p.Host == nil || !p.Host.Start(request) {
+		if entry.Rule.Kind == rule.ServiceRule && p.prepareServiceRestart(entry) {
+			mem.FreeString(p.Alloc, entry.Script)
+			entry.Script = ""
+			return core.ProducerRestart
+		}
 		p.failRule(c, index, failure(p.Alloc, "HOST_FAIL", "cannot start recipe"))
 		return core.ProducerFailed
 	}

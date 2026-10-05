@@ -45,6 +45,30 @@ else
 fi
 
 cat >"$work/Makefile.kmk" <<'EOF'
+service daemon : ; [ready: [argv: ["test" "-f" "ready-marker"] interval-ms: 10 timeout-ms: 3000] restart: [attempts: 1 backoff-ms: 10]]
+	if [ ! -f first-start ]; then touch first-start; exit 1; fi; touch ready-marker; while :; do sleep 1; done
+consumer : daemon
+	test -f ready-marker
+EOF
+if (cd "$work" && timeout 10 node "$cli" consumer >out 2>err) && [ -f "$work/first-start" ] && [ -f "$work/ready-marker" ]; then
+	test-ok "forwarded startup failure restarts the service and releases its dependent"
+else
+	test-fail "forwarded service restart did not recover: status=$? err=$(cat "$work/err")"
+fi
+
+cat >"$work/Makefile.kmk" <<'EOF'
+service daemon : ; [ready: [argv: ["test" "-f" "ready-marker"] interval-ms: 10 timeout-ms: 3000] health: [argv: ["test" "-f" "healthy-marker"] interval-ms: 10 failures: 1] restart: [attempts: 1 backoff-ms: 10]]
+	if [ ! -f first-start ]; then touch first-start; else touch healthy-marker; fi; touch ready-marker; while :; do sleep 1; done
+consumer : daemon
+	test -f ready-marker
+EOF
+if (cd "$work" && timeout 10 node "$cli" consumer >out 2>err) && [ -f "$work/healthy-marker" ]; then
+	test-ok "forwarded health failure restarts the service and releases its dependent"
+else
+	test-fail "forwarded health restart did not recover: status=$? err=$(cat "$work/err")"
+fi
+
+cat >"$work/Makefile.kmk" <<'EOF'
 service daemon : ; [stop: [grace-ms: 0]]
 	trap '' TERM; while :; do sleep 1; done
 consumer : daemon
