@@ -121,7 +121,7 @@ static int64_t km_windows_job_create(void) {
 static bool km_windows_job_assign(int64_t job, pid_t pid) {
     if (!km_windows_jobs_needed()) return true;
     if (!job || !km_load_windows_job_api()) return false;
-    int64_t process = OpenProcess(0x0100u | 0x0001u, 0, (uint32_t)pid);
+    int64_t process = OpenProcess(0x1000u | 0x0100u | 0x0001u, 0, (uint32_t)pid);
     if (!process || process == -1) return false;
     bool assigned = km_assign_process_to_job_object(job, process) != 0;
     if (getenv("KAME_DEBUG_WINDOWS_JOBS")) {
