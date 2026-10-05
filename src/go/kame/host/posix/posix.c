@@ -20,6 +20,7 @@
 #include "libc/nt/dll.h"
 #include "libc/nt/process.h"
 #include "libc/nt/runtime.h"
+#include "libc/proc/proc.h"
 #include "libc/nt/thunk/msabi.h"
 #endif
 
@@ -133,6 +134,30 @@ static bool km_windows_job_assign(int64_t job, pid_t pid) {
     return assigned;
 }
 
+// Cosmopolitan's Windows execve replaces its tracked process handle with a
+// separately created native process. Bind that replacement to the job before
+// publishing the started event, so timeout cleanup reaches the requested exe.
+static bool km_windows_job_assign_exec(int64_t job, pid_t pid) {
+    if (!km_windows_jobs_needed()) return true;
+    if (!job || !km_load_windows_job_api() || !km_get_process_id) return false;
+    int64_t process = 0;
+    uint32_t native_pid = 0;
+    for (int attempt = 0; attempt < 500; attempt++) {
+        process = __proc_search((int)pid);
+        if (!process) return true; // The executable already exited and was reaped.
+        native_pid = process ? km_get_process_id(process) : 0;
+        if (native_pid && native_pid != (uint32_t)pid) {
+            bool assigned = km_assign_process_to_job_object(job, process) != 0;
+            int32_t in_job = 0;
+            bool verified = km_is_process_in_job && km_is_process_in_job(process, job, &in_job) && in_job;
+            if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job assign exec: job=%lld posix_pid=%d native_pid=%u process=%lld assigned=%d verified=%d\n", (long long)job, (int)pid, native_pid, (long long)process, assigned, verified);
+            return assigned && verified;
+        }
+        poll(NULL, 0, 1);
+    }
+    return false;
+}
+
 static bool km_windows_job_terminate(int64_t job, int sig) {
     if (!job || !km_windows_jobs_needed()) return true;
     if (!km_load_windows_job_api()) return false;
@@ -149,6 +174,7 @@ static void km_windows_job_close(int64_t *job) {
 static bool km_windows_jobs_needed(void) { return false; }
 static int64_t km_windows_job_create(void) { return 0; }
 static bool km_windows_job_assign(int64_t job, pid_t pid) { (void)job; (void)pid; return true; }
+static bool km_windows_job_assign_exec(int64_t job, pid_t pid) { (void)job; (void)pid; return true; }
 static bool km_windows_job_terminate(int64_t job, int sig) { (void)job; (void)sig; return true; }
 static void km_windows_job_close(int64_t *job) { if (job) *job = 0; }
 #endif
@@ -724,6 +750,13 @@ static void km_exec_ready(km_host *host, km_process *p) {
     if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) return;
     if (n == 0) {
         if (!km_close_checked(&p->execfd)) { km_fail(host, p, "exec pipe close failed"); return; }
+        if (km_windows_jobs_needed()) {
+            bool assigned = true;
+            if (p->stage_count) {
+                for (int i = 0; assigned && i < p->stage_count; i++) assigned = km_windows_job_assign_exec(p->stages[i].job, p->stages[i].pid);
+            } else assigned = km_windows_job_assign_exec(p->job, p->pid);
+            if (!assigned) { km_fail(host, p, "Windows process job setup failed"); return; }
+        }
         p->started = true;
         km_push(host, p, (km_event){.kind = KM_STARTED, .id = p->id, .pid = p->pid, .pgid = p->pid});
         return;
