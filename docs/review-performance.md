@@ -19,6 +19,40 @@ commands and release-artifact checks.
 
 ## Measured results
 
+### Runtime workload measurements, 2026-10-06
+
+Five checked CLI samples were collected for each workload on Linux x86-64 with
+Node v24.18.0. Each sample includes process startup, source loading, execution,
+and teardown. These workloads exercise parsing 512 definitions, lookup in one
+wide scope with 1,000 bindings, lookup through 16 nested scopes, planning one
+resource from a 512-task graph, and a selective wildcard over 128 sibling
+directories. The harness checks the selected definition, value, plan target, or
+match count before recording time.
+
+| Workload | Native median (ms) | Native range (ms) | WASM median (ms) | WASM range (ms) |
+| --- | ---: | ---: | ---: | ---: |
+| Parse 512 definitions | 3.01 | 2.98–5.95 | 264.57 | 190.60–282.75 |
+| Wide scope, 1,000 bindings | 13.58 | 12.83–15.12 | 418.06 | 355.14–548.27 |
+| Deep scope, 16 levels | 11.46 | 11.32–11.62 | 216.99 | 203.55–283.08 |
+| Graph lookup, 512 resources | 6.38 | 5.56–7.64 | 1,578.34 | 1,413.57–1,783.72 |
+| Selective glob, 128 directories | 43.35 | 42.50–45.43 | 225.83 | 202.02–273.00 |
+
+The native binary SHA-256 is
+`9b72e08fc45585c42e3d3eaaa799ae828f1a506b62b52a57a3d22a192619cdbc`; the JS
+wrapper is `f61b2dd0c1a6327ce6bfe7085aa307f9cf6050bbd25d9f118aa76a3f58d8033e`,
+and the WASM module is
+`500b360fd9c626f6734e2b77623f9d27c93f406f10c0dfc615ef923f985119f9`.
+The WASM values include Node and runtime startup and vary substantially under
+load. They are host-specific observations, not portable performance targets.
+The suite also confirms that 10,000 parsed definitions and 256 nested scopes
+exceed the current WASM instance limits, so it uses the largest smaller cases
+that complete on both hosts. Tracker allocation comparison remains focused on
+owning versus borrowed parsing; wide-scope and graph lookup allocation totals
+are still outstanding.
+
+Reproduce with `python3 tools/benchmark-cli.py --samples 5` after building the
+debug CLI and WASM distribution.
+
 | Workload | Native before (median ms) | Native after (median ms) | WASM after (median ms) |
 | --- | ---: | ---: | ---: |
 | `(count [1 2 3])` through expression runner | 115.38 | 11.32 | 267.24 |

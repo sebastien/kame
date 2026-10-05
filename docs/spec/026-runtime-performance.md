@@ -44,12 +44,13 @@ host-backed values, and denied effects.
 
 ## Measurements
 
-The acceptance suite reports tracker total allocations and workload elapsed
-time for source parsing, deep and wide scope lookup, graph lookup over many
-resource keys, and wildcard traversal with irrelevant directory trees. Memory
-and traversal-count assertions are deterministic gates. Wall-clock measurements
-are reported as repeated medians and are informational, not brittle pass/fail
-thresholds. Native and portable-runtime results are recorded separately.
+The acceptance suite records tracker total allocations for ownership-sensitive
+paths and deterministic workload elapsed times for source parsing, deep and
+wide scope lookup, graph lookup over many resource keys, and wildcard traversal
+with irrelevant directory trees. Memory and traversal-count assertions are
+deterministic gates. Wall-clock measurements are reported as repeated medians
+and are informational, not brittle pass/fail thresholds. Native and
+portable-runtime results are recorded separately.
 
 `D08` remains open until each section above has implementation and focused
 native/WASM or portable-runtime evidence, and the complete measurement workload
@@ -59,5 +60,7 @@ Current evidence includes `TestBorrowedParseMatchesOwningParseWithFewerAllocatio
 `TestEngineResourceIndexKeepsNodeIdentity`, `TestLexicalFunctionAndOperationShadowing`,
 `TestPureExpressionUsesPortableEvaluator`, and
 `TestWildcardTraversalPrunesUnrelatedSubtrees`. The repeatable deep-tree gate
-counts enumerated entries against a full recursive walk; broad scope/graph
-workloads and timing reports remain outstanding.
+counts enumerated entries against a full recursive walk. `tools/benchmark-cli.py`
+reports five-sample native/WASM measurements for all four runtime workloads and
+large-source parsing; broad scope/graph tracker-allocation totals remain
+outstanding. See `docs/review-performance.md` for the 2026-10-06 run and limits.
