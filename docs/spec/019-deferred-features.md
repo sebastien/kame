@@ -25,7 +25,7 @@ adapters and integration evidence rather than placeholder methods.
 | --- | --- | --- |
 | D01 | WASM watch | Complete: retained graph roots, file/glob invalidation during active work, source reload and repair, shared roots, grants, stream publication, cancellation and disposal; native/WASM public conformance. See 020. |
 | D02 | Managed services and provisioning | Typed service configuration; start/readiness/health/restart/stop ownership; prerequisite lifetime; bounded logs; interruption and process-tree cleanup on native and WASM. See 024. |
-| D03 | Generated declarations | Bounded typed batches; complete validation before registration; generator dependency tracking; deterministic replacement; authored diagnostics; native/WASM parity and failure cleanup. |
+| D03 | Generated declarations | Complete: bounded typed batches; full validation before registration; generator provenance and dependencies; deterministic watch replacement; authored diagnostics; native/WASM parity; cycle, limit, and failure-cleanup coverage. See 025, T010-27, T009-14 and T010-23. |
 | D04 | Cache lifecycle and backends | Cross-process miss locking, failure/crash recovery, bounded eviction and explicit inspection/cleanup; local and second concrete backend; identity and atomic-publication conformance. |
 | D05 | Release integrity | Pinned and verified compiler provisioning (021); signed manifests and provenance creation/verification; tamper/wrong-key rejection; actual staged release tests. Keys are provided by the release operator, never committed. |
 | D06 | Target arguments | Required `{name}` and optional `{name=value}` standalone arguments; typed binding/defaults, capture distinction, identity, planning and execution parity. See 022. |

@@ -51,8 +51,9 @@ generate module-checks = (map ([module] [kind: "task" target: (join (list "check
 The runtime evaluates and validates every batch before adding any generated
 rule to target selection. It checks duplicate targets both within a batch and
 against ordinary rules and other batches. It enforces bounded record counts,
-field sizes, and total retained batch bytes. If any batch fails, compilation
-returns an authored diagnostic and exposes no executable program.
+list item counts, field sizes, and total retained batch bytes. If any batch
+fails, compilation returns an authored diagnostic and exposes no executable
+program.
 
 Generator identity, the referenced definitions, and each emitted rule's full
 kind, target, inputs, ordering inputs, and recipe are retained for inspection

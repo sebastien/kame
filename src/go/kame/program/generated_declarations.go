@@ -13,10 +13,11 @@ import (
 )
 
 const (
-	generatedBatchLimit  = 4096
-	generatedDataLimit   = 1 << 20
-	generatedFieldLimit  = 64 << 10
-	generatedRecipeLimit = 256
+	generatedBatchLimit    = 4096
+	generatedDataLimit     = 1 << 20
+	generatedFieldLimit    = 64 << 10
+	generatedRecipeLimit   = 256
+	generatedListItemLimit = 4096
 )
 
 type generatedEvaluation struct {
@@ -100,8 +101,9 @@ func (p *Program) compileGeneratedDeclarations() diagnostic.Diagnostic {
 			return d
 		}
 		batchBytes := 0
+		batchItems := 0
 		for j := range value.Value.List {
-			lowered := p.lowerGeneratedRule(item, value.Value.List[j], &batchBytes)
+			lowered := p.lowerGeneratedRule(item, value.Value.List[j], &batchBytes, &batchItems)
 			if lowered.Diagnostic.Code != "" {
 				d := lowered.Diagnostic
 				lowered.Diagnostic = diagnostic.Diagnostic{}
@@ -168,7 +170,7 @@ func freeGeneratedRule(a mem.Allocator, generated *rule.Rule) {
 	rule.FreeRule(a, generated)
 }
 
-func (p *Program) lowerGeneratedRule(item script.ScriptItem, value core.Value, total *int) generatedRuleResult {
+func (p *Program) lowerGeneratedRule(item script.ScriptItem, value core.Value, total *int, itemCount *int) generatedRuleResult {
 	if value.Kind != core.Record {
 		return generatedRuleResult{Diagnostic: generatedDiagnostic(p, item, "EXPR_INVALID", "generated rule must be a record", "")}
 	}
@@ -209,6 +211,10 @@ func (p *Program) lowerGeneratedRule(item script.ScriptItem, value core.Value, t
 		} else {
 			if field.Value.Kind != core.List {
 				return generatedRuleResult{Diagnostic: generatedDiagnostic(p, item, "EXPR_INVALID", "generated rule field must be a list: "+field.Key, target)}
+			}
+			*itemCount += len(field.Value.List)
+			if *itemCount > generatedListItemLimit {
+				return generatedRuleResult{Diagnostic: generatedDiagnostic(p, item, "EXPR_INVALID", "generated batch exceeds its list item limit", target)}
 			}
 			values := make([]string, 0, len(field.Value.List))
 			for j := range field.Value.List {

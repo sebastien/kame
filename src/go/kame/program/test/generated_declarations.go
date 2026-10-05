@@ -13,6 +13,7 @@ import (
 )
 
 const generatedRecordLimitForTest = 4096
+const generatedListItemLimitForTest = 4096
 
 func TestGeneratedTargetsPlanAndMaterializeWithDefinitionDependencies(t *testing.T) {
 	a := t.Allocator()
@@ -207,6 +208,29 @@ func TestGeneratedDeclarationEnforcesBatchRecordLimit(t *testing.T) {
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
 	if compiled.Program != nil || len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "EXPR_INVALID" {
 		t.Error("generated declaration batch exceeded the record limit without rejection")
+	}
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
+}
+
+func TestGeneratedDeclarationEnforcesBatchListItemLimit(t *testing.T) {
+	a := t.Allocator()
+	text := strings.NewBuilder(a)
+	text.WriteString("generate too-many = [[kind: \"task\" target: \"task\" inputs: [")
+	for i := 0; i <= generatedListItemLimitForTest; i++ {
+		if i != 0 {
+			text.WriteString(" ")
+		}
+		text.WriteString("\"\"")
+	}
+	text.WriteString("] order-only: [] recipe: [\"true\"]]]\n")
+	parsed := script.Parse(a, "too-many-generated-items.kmk", text.String())
+	text.Free()
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
+	if compiled.Program != nil || len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "EXPR_INVALID" {
+		t.Error("generated declaration batch exceeded its item limit without rejection")
 	}
 	compiled.Free(a)
 	parsed.Free()

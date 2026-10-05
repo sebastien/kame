@@ -55,7 +55,7 @@ design boundaries rather than placeholder behavior.
 | Alternative `<-` build syntax | Design proposal, not a correctness gap. Evaluate readability and formatter compatibility before changing existing rules. |
 | Dependency sequencing with `,` | Define whether ordering is an edge or effect sequence; preserve parallel independence and failure propagation. Kash statement sequencing already has different semantics. |
 | Learnability | Finish idioms/gotchas and independent value/rule/process lessons with executable smoke coverage. |
-| Metaprogramming | A4 declaration selection, defaults, and literal CLI/environment overrides are implemented; computed record lookup uses `get`. D03 generated declarations remain open; `declaration-generation-design.md` and spec 025 define the executable bounded-batch prototype and its remaining acceptance coverage. Headers compose expressions and interpolated paths. |
+| Metaprogramming | A4 declaration selection, defaults, and literal CLI/environment overrides are implemented; computed record lookup uses `get`. D03 generated declarations now support bounded typed batches, authored diagnostics, provenance and watch replacement on native/WASM. Headers compose expressions and interpolated paths. |
 | Error taxonomy | Existing codes are registered and machine-readable. Add actionable messages rather than speculative taxonomy churn. |
 
 ## Build-port gaps

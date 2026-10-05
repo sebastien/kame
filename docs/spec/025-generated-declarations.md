@@ -36,8 +36,9 @@ follow the ordinary rule path and resource interpretation. Recipe lines use
 the same template parser and execution rules as authored recipe lines.
 
 Generation limits are 4096 records per batch, 1 MiB of retained UTF-8 data per
-batch, 64 KiB per field, and 256 recipe lines per rule. Limits are checked before
-the generated rules become visible.
+batch, 64 KiB per field, 4096 combined input/order-only/recipe list items per
+batch, and 256 recipe lines per rule. Limits are checked before the generated
+rules become visible.
 
 ## Registration and ownership
 
@@ -77,3 +78,13 @@ Acceptance coverage must include generated tasks and file rules, pure computed
 targets, definition dependencies, duplicate and malformed batches, dynamic
 source replacement, native/WASM parity, deterministic planning, and allocator
 cleanup on rejected batches.
+
+## Implementation status
+
+D03 is complete. Program tests cover generated task/file execution, computed
+targets and recipes, definition provenance, duplicate literal and pattern
+targets, malformed batches, definition cycles, record and list-item bounds,
+effect rejection, and cleanup after rejected compilation. T010-27 compares
+native/WASM plan output and runs generated tasks on both hosts. The shared
+T009-14/T010-23 watch suite changes an included module list and verifies that
+both hosts rebuild against the replacement generated target set.
