@@ -53,6 +53,54 @@ ordinary values implicitly. A valid string without groups may be constructed
 as a pattern, though operations requiring a matcher or expansion group may
 reject it for that use.
 
+## Regular-expression capture groups
+
+A matcher group may use `{name:~REGEX}` or `{~REGEX}`. The optional name follows
+the existing pattern-name grammar. A regex matcher occupies one positional
+capture slot; named occurrences retain the existing equality constraint, and
+unnamed occurrences are independent. Regex matching is against the complete
+capture, which is non-empty. The surrounding pattern remains anchored and
+leftmost-shortest, including when several regex captures can divide the same
+subject in multiple ways.
+
+The portable regex grammar is byte-oriented ASCII syntax: literal bytes;
+`.`, matching any byte except `/`; bracket classes `[abc]`, ranges `[a-z]`,
+and negation `[!abc]`; grouping with `(...)`; alternation with `|`; and the
+quantifiers `?`, `*`, and `+`. A backslash quotes the next byte. Empty
+alternatives, empty groups, stacked quantifiers, lookaround, backreferences,
+Unicode properties, and counted repetition are invalid. The regex group itself
+must be non-empty even when its expression could match the empty string.
+Evaluation has a fixed portable step budget derived from expression and input
+length; exceeding it fails with `PAT_LIMIT` rather than consuming unbounded
+time. Parser diagnostics point to the authored regex byte that is invalid.
+
+## Regex operations and processors
+
+`(regex-match PATTERN SUBJECT)` requires a pattern value containing at least one
+regex matcher and a string subject. It returns `:nil` on no match, otherwise a
+record with `text` (the complete matched subject), `captures` (a list of every
+capture in source order), and `named` (a record mapping each distinct named
+capture to its text). Captures are strings; empty named values are not possible
+because captures are non-empty. Repeated named matchers contribute each source
+slot to `captures`, while `named` contains their single equality-checked value.
+
+`(capture INDEX MATCH)` selects a positional entry from the `captures` list,
+where `INDEX` must be an integer. A negative or out-of-range index returns
+`:nil`; a non-integer index or non-match input is invalid. `(capture NAME
+MATCH)` selects from the `named` record; an absent name returns `:nil`, and a
+non-string name or non-match input is invalid. These processors do not coerce
+their index, name, or match result.
+
+`(regex-replace MATCH-PATTERN EXPANSION SUBJECT)` uses the same expansion
+pattern rules as `replace`: a string expansion is constant, while a pattern
+value must contain references and no matchers. The subject must be a string or
+a list of strings. A non-matching scalar or list item produces `:nil`, missing
+references fail with `PAT_INVALID`, and invalid kinds fail with `EXPR_INVALID`.
+All results and retained captures are invocation-owned and released on success,
+diagnostic, cancellation and list-item failure. The regex parser and matcher
+are shared portable code; diagnostics, capture ordering, formatting and
+replacement results must agree across native, WASM CLI and evaluator tests.
+
 ## Acceptance
 
 - `./{**}/{*}.c` parses, formats idempotently, and matches `./src/demo.c` with
@@ -72,11 +120,9 @@ reject it for that use.
 
 ## Remaining D11 clauses
 
-- Regular-expression groups have an anchored, portable grammar with explicit
-  named and positional captures; malformed expressions produce source-aware
-  diagnostics on both hosts.
-- Regex matching, replacement and capture-processing operations specify their
-  accepted value kinds, return shapes, coercions, missing-capture behavior,
-  bounds and allocation ownership.
-- Native, WASM CLI and evaluator results agree for captures, replacements,
+- Implement the regex group grammar, bounded portable matcher and source-aware
+  diagnostics above.
+- Implement `regex-match`, `capture` and `regex-replace` with the specified
+  kinds, return shapes, missing-capture behavior, bounds and ownership.
+- Verify native, WASM CLI and evaluator parity for captures, replacements,
   formatting and diagnostics.
