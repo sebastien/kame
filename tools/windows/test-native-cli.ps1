@@ -78,11 +78,17 @@ task native-cache :
 		if ($LASTEXITCODE -ne 0 -or ($wildcardOutput -join "`n") -notmatch 'native-child.kmk' -or ($wildcardOutput -join "`n") -notmatch 'Makefile.kmk') {
 			throw "Native wildcard operation failed: exit=$LASTEXITCODE output=$($wildcardOutput -join ' | ')"
 		}
-		$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-cwd 2>&1
+		Push-Location $env:TEMP
+		try {
+			$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-cwd 2>&1
+			$cwdStatus = $LASTEXITCODE
+		} finally {
+			Pop-Location
+		}
 		$actualCwd = if (Test-Path (Join-Path $project 'native-cwd.txt')) { (Get-Content (Join-Path $project 'native-cwd.txt') -Raw).TrimEnd([char[]]@('\', '/')) } else { '' }
 		$actualCwdLeaf = if ($actualCwd) { $actualCwd.Split([char[]]@('\', '/'))[-1] } else { '' }
-		if ($LASTEXITCODE -ne 0 -or $actualCwdLeaf -ne (Split-Path -Leaf $project)) {
-			throw "Native CLI working-directory selection failed: exit=$LASTEXITCODE actual=$actualCwd output=$($output -join ' | ')"
+		if ($cwdStatus -ne 0 -or $actualCwdLeaf -ne (Split-Path -Leaf $project)) {
+			throw "Native CLI working-directory selection failed: exit=$cwdStatus actual=$actualCwd output=$($output -join ' | ')"
 		}
 		$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-included 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch 'native-include-ok') {
