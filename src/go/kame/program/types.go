@@ -141,6 +141,11 @@ type Event struct {
 	DependencyKey core.ResourceKey
 	Effect        string
 	State         string
+	Program       string
+	Argv          []string
+	RuntimeMS     int64
+	HasRuntime    bool
+	DisplayTruncated bool
 	Span          diagnostic.Span
 	Data          []byte
 	Value         core.Value
@@ -179,6 +184,8 @@ func (e *Event) Free(a mem.Allocator) {
 	if e.DependencyKey.Name != "" {
 		e.DependencyKey.Free(a)
 	}
+	mem.FreeString(a, e.Program)
+	freeStrings(a, e.Argv)
 	slices.Free(a, e.Data)
 	e.Value.Free(a)
 	e.Diagnostic.Free(a)
@@ -275,6 +282,11 @@ type Program struct {
 type pendingRequest struct {
 	Capture    bool
 	Stream     bool
+	Program    string
+	Argv       []string
+	DisplayTruncated bool
+	Started    bool
+	StartedNS  int64
 	ID         int64
 	NodeID     int64
 	Generation int64

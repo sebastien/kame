@@ -9,6 +9,8 @@ import (
 
 func (p *Program) emit(event Event) {
 	event.Target = cloneText(p.Alloc, event.Target)
+	event.Program = cloneText(p.Alloc, event.Program)
+	event.Argv = cloneStrings(p.Alloc, event.Argv)
 	if event.Key.Name != "" {
 		event.Key = event.Key.Clone(p.Alloc)
 	}

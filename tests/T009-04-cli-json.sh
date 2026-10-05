@@ -39,6 +39,11 @@ test-step "file rules emit lifecycle events in order"
 	cli_expect_event "$CLI_OUT" 'target-started' '.target == "./text.out"'
 	cli_expect_event "$CLI_OUT" 'process-started' '.target == "./text.out"'
 	cli_expect_event "$CLI_OUT" 'process-exited' '.target == "./text.out"'
+	if jq -e -s 'any(.[]; .type == "process-started" and (.program | type == "string") and (.argv | type == "array") and (.argv | length <= 8) and ((.program | utf8bytelength) + ([.argv[] | utf8bytelength] | add // 0) <= 160) and (.environment == null)) and any(.[]; .type == "process-exited" and (.runtimeMS | type == "number") and .runtimeMS >= 0)' "$CLI_OUT" >/dev/null; then
+		test-ok "process display is bounded and runtime is numeric without environment data"
+	else
+		test-fail "process display bounds or runtime field were wrong"
+	fi
 	cli_expect_event "$CLI_OUT" 'target-completed' '.target == "./text.out"'
 	sequence="$(jq -r 'select(.target == "./text.out") | .type' "$CLI_OUT" | tr '\n' ' ')"
 	case "$sequence" in
@@ -49,6 +54,19 @@ test-step "file rules emit lifecycle events in order"
 		test-fail "unexpected file rule sequence: $sequence"
 		;;
 	esac
+)
+
+test-step "human progress displays the bounded process command and runtime"
+(
+	cd json-events
+	rm -f ./text.out
+	cli_run ./text.out
+	cli_expect_status 0
+	if grep -Eq 'process.*printf' "$CLI_ERR" && grep -Eq 'process finished in [0-9]+ms' "$CLI_ERR"; then
+		test-ok "stderr shows process command and runtime"
+	else
+		test-fail "stderr is missing process command or runtime"
+	fi
 )
 
 test-step "process stdout and stderr become distinct events"

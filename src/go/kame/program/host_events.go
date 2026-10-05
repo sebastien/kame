@@ -77,6 +77,11 @@ func (p *Program) drainRequests() {
 		}
 		request := next.Request
 		if p.Forwarding {
+			if request.Kind == host.RequestProcess {
+				display := processDisplayFromPayload(p.Alloc, request.Payload, p.Options.Shell)
+				pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated}
+				p.Pending = slices.Append(p.Alloc, p.Pending, pending)
+			}
 			// Ownership transfers to the outbound queue; the embedding host
 			// frees the request when it completes it.
 			p.Outbound = slices.Append(p.Alloc, p.Outbound, request)
@@ -138,10 +143,13 @@ func (p *Program) drainRequests() {
 					environment = scopedEnvironment
 				}
 			}
-			if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}) {
+			processRequest := host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+			if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(processRequest) {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else {
-				p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0, Capture: capture, Stream: stream})
+				display := processDisplayFromHost(p.Alloc, processRequest)
+				pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0, Capture: capture, Stream: stream, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated}
+				p.Pending = slices.Append(p.Alloc, p.Pending, pending)
 			}
 			slices.Free(p.Alloc, scopedEnvironment)
 			slices.Free(p.Alloc, argv)
@@ -857,14 +865,21 @@ func (p *Program) complete(event host.ProcessEvent) {
 		p.attachProcessContext(&d, entry, event)
 		p.releaseCacheLock(entry)
 	}
+	var completedPending pendingRequest
+	hasPending := false
 	for i := range p.Pending {
 		pending := p.Pending[i]
 		if pending.ID != event.ID {
 			continue
 		}
+		completedPending, hasPending = pending, true
+		freePendingRequest(p.Alloc, &p.Pending[i])
 		copy(p.Pending[i:], p.Pending[i+1:])
 		p.Pending = p.Pending[:len(p.Pending)-1]
-		if pending.Capture && event.StdoutTruncated {
+		break
+	}
+	if hasPending && (completedPending.Capture || completedPending.Stream) {
+		if completedPending.Capture && event.StdoutTruncated {
 			d.Free(p.Alloc)
 			d = failure(p.Alloc, "CAPTURE_LIMIT", "command substitution exceeded capture limit")
 		}
@@ -872,12 +887,10 @@ func (p *Program) complete(event host.ProcessEvent) {
 			d.Free(p.Alloc)
 			d = diagnostic.Diagnostic{}
 		}
-		completion := core.Completion{NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: event.ID, Diagnostic: d}
+		completion := core.Completion{NodeID: completedPending.NodeID, Generation: completedPending.Generation, Attempt: completedPending.Attempt, RequestID: event.ID, Diagnostic: d}
 		if d.Code == "" {
 			completion.Value, completion.HasValue = shellValue(p.Alloc, event), true
-			if pending.Capture || pending.Stream {
-				completion.Value.Record = slices.Append(p.Alloc, completion.Value.Record, core.RecordField{Key: cloneText(p.Alloc, "signal"), Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}})
-			}
+			completion.Value.Record = slices.Append(p.Alloc, completion.Value.Record, core.RecordField{Key: cloneText(p.Alloc, "signal"), Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}})
 		}
 		p.Engine.Complete(completion)
 		return
@@ -894,6 +907,8 @@ func (p *Program) complete(event host.ProcessEvent) {
 		if p.Host != nil && p.Host.Start(request) {
 			entry.retryCount++
 			node.HostRequestID = retryID
+			display := processDisplayFromHost(p.Alloc, request)
+			p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: retryID, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
 			d.Free(p.Alloc)
 			return
 		}
@@ -1085,5 +1100,104 @@ func (p *Program) serviceForProcessRequest(id int64) *instance {
 
 func (p *Program) emitProcess(entry *instance, kind EventKind, requestID int64) {
 	node := entry.Node
-	p.emit(Event{Kind: kind, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: requestID})
+	event := Event{Kind: kind, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: requestID}
+	for i := range p.Pending {
+		pending := &p.Pending[i]
+		if pending.ID != requestID { continue }
+		event.Program, event.Argv, event.DisplayTruncated = pending.Program, pending.Argv, pending.DisplayTruncated
+		if kind == ProcessStarted {
+			pending.Started, pending.StartedNS = true, 0
+			if p.Host != nil { pending.StartedNS = p.Host.Monotonic() }
+		} else if kind == ProcessExited && pending.Started && p.Host != nil {
+			finished := p.Host.Monotonic()
+			if finished >= pending.StartedNS { event.RuntimeMS, event.HasRuntime = (finished-pending.StartedNS)/1000000, true }
+		}
+		break
+	}
+	p.emit(event)
+}
+
+func freePendingRequest(a mem.Allocator, pending *pendingRequest) {
+	if pending == nil { return }
+	mem.FreeString(a, pending.Program)
+	freeStrings(a, pending.Argv)
+	*pending = pendingRequest{}
+}
+
+type processDisplay struct { Program string; Argv []string; Truncated bool }
+
+func processDisplayFromPayload(a mem.Allocator, payload core.Value, shell []string) processDisplay {
+	var raw []string
+	argv := host.PayloadArgv(payload)
+	if len(argv) != 0 {
+		for i := range argv { raw = slices.Append(a, raw, argv[i].Text) }
+	} else {
+		stages := host.PayloadStages(payload)
+		if len(stages) != 0 {
+			for i := range stages {
+				if i != 0 { raw = slices.Append(a, raw, "|") }
+				for j := range stages[i].List { raw = slices.Append(a, raw, stages[i].List[j].Text) }
+			}
+		} else {
+			shellArgv := host.PayloadList(payload, "shell")
+			if len(shellArgv) == 0 { for i := range shell { raw = slices.Append(a, raw, shell[i]) }
+			} else { for i := range shellArgv { raw = slices.Append(a, raw, shellArgv[i].Text) } }
+			script := host.PayloadText(payload, host.FieldScript)
+			if script != "" { raw = slices.Append(a, raw, script) }
+		}
+	}
+	display := boundedProcessDisplay(a, raw)
+	slices.Free(a, raw)
+	return display
+}
+
+func processDisplayFromHost(a mem.Allocator, request host.ProcessRequest) processDisplay {
+	var raw []string
+	if len(request.Argv) != 0 {
+		for i := range request.Argv { raw = slices.Append(a, raw, request.Argv[i]) }
+	} else if len(request.Stages) != 0 {
+		for i := range request.Stages {
+			if i != 0 { raw = slices.Append(a, raw, "|") }
+			for j := range request.Stages[i].Argv { raw = slices.Append(a, raw, request.Stages[i].Argv[j]) }
+		}
+	} else {
+		for i := range request.Shell { raw = slices.Append(a, raw, request.Shell[i]) }
+		if len(request.Script) != 0 { raw = slices.Append(a, raw, string(request.Script)) }
+	}
+	display := boundedProcessDisplay(a, raw)
+	slices.Free(a, raw)
+	return display
+}
+
+func boundedProcessDisplay(a mem.Allocator, raw []string) processDisplay {
+	const maxBytes = 160
+	const maxArgs = 8
+	display := processDisplay{}
+	if len(raw) == 0 { return display }
+	program := raw[0]
+	if len(program) > maxBytes { program = truncateProcessText(a, program, maxBytes); display.Truncated = true
+	} else { program = cloneText(a, program) }
+	display.Program = program
+	used := len(program)
+	for i := 1; i < len(raw); i++ {
+		if len(display.Argv) == maxArgs { display.Truncated = true; break }
+		remaining := maxBytes-used
+		if remaining <= 0 { display.Truncated = true; break }
+		value := raw[i]
+		if len(value) > remaining { value = truncateProcessText(a, value, remaining); display.Truncated = true
+		} else { value = cloneText(a, value) }
+		display.Argv = slices.Append(a, display.Argv, value)
+		used += len(value)
+		if display.Truncated { break }
+	}
+	return display
+}
+
+func truncateProcessText(a mem.Allocator, value string, limit int) string {
+	if limit <= 0 { return cloneText(a, "") }
+	if limit <= 3 { return cloneText(a, "..."[:limit]) }
+	end := limit-3
+	if end > len(value) { end = len(value) }
+	for end > 0 && end < len(value) && value[end]&0xc0 == 0x80 { end-- }
+	return cloneText(a, value[:end]+"...")
 }

@@ -213,6 +213,10 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			out.Write(event.Data)
 		} else if event.Kind == program.Stderr {
 			errOut.Write(event.Data)
+		} else if event.Kind == program.ProcessStarted {
+			writeProcessStarted(errOut, event)
+		} else if event.Kind == program.ProcessExited {
+			if event.HasRuntime { fmt.Fprintf(errOut, "[%s] process finished in %dms\n", event.Target, event.RuntimeMS) }
 		} else if event.Kind == program.TargetStarted {
 			progress.Active++
 			fmt.Fprintf(errOut, "[%s] started (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
@@ -241,6 +245,14 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 		}
 		event.Free(mem.System)
 	}
+}
+
+func writeProcessStarted(out io.Writer, event program.Event) {
+	if event.Program == "" { return }
+	fmt.Fprintf(out, "[%s] process %s", event.Target, event.Program)
+	for i := range event.Argv { fmt.Fprintf(out, " %s", event.Argv[i]) }
+	if event.DisplayTruncated { io.WriteString(out, " …") }
+	io.WriteString(out, "\n")
 }
 
 func emitDiagnostic(out io.Writer, d diagnostic.Diagnostic, json bool, src *source.Source) {

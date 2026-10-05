@@ -446,6 +446,8 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 		} else {
 			payload = host.ProcessPayload(p.Alloc, entry.Script)
 		}
+		display := processDisplayFromPayload(p.Alloc, payload, entry.Shell)
+		p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
 		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestProcess, Payload: payload})
 		c.Submit(request.ID)
 		return core.ProducerSubmitted
@@ -459,6 +461,8 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 		p.failRule(c, index, failure(p.Alloc, "HOST_FAIL", "cannot start recipe"))
 		return core.ProducerFailed
 	}
+	display := processDisplayFromHost(p.Alloc, request)
+	p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
 	c.Submit(request.ID)
 	return core.ProducerSubmitted
 }

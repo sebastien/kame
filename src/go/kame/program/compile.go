@@ -353,9 +353,11 @@ func (p *Program) Free() {
 	slices.Free(p.Alloc, p.Options.Environment)
 	slices.Free(p.Alloc, p.Options.Grants)
 	slices.Free(p.Alloc, p.Instances)
+	for i := range p.Events { p.Events[i].Free(p.Alloc) }
 	slices.Free(p.Alloc, p.Events)
 	slices.Free(p.Alloc, p.Rules)
 	slices.Free(p.Alloc, p.Tools)
+	for i := range p.Pending { freePendingRequest(p.Alloc, &p.Pending[i]) }
 	slices.Free(p.Alloc, p.Pending)
 	for i := range p.Outbound {
 		p.Outbound[i].Free(p.Alloc)

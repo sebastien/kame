@@ -81,6 +81,20 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 		e.Str("state")
 		e.Str(event.State)
 	}
+	if event.Program != "" {
+		e.Str("program")
+		e.Str(event.Program)
+		e.Str("argv")
+		encodeStringArray(&e, event.Argv)
+	}
+	if event.HasRuntime {
+		e.Str("runtimeMS")
+		e.Int(event.RuntimeMS)
+	}
+	if event.DisplayTruncated {
+		e.Str("displayTruncated")
+		e.Bool(true)
+	}
 	if event.Span.Start != 0 || event.Span.End != 0 {
 		encodeSpan(&e, event.Span)
 	}
