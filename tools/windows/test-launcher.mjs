@@ -66,7 +66,11 @@ try {
   await mkdir(workspace);
   await writeFile(
     path.join(workspace, 'Windows.kmk'),
-    `task windows-launcher :\r\n\tnode -p process.env.KAME_WINDOWS_TEST\r\n`,
+    'task windows-launcher :\r\n\tnode write-env.js\r\n',
+  );
+  await writeFile(
+    path.join(workspace, 'write-env.js'),
+    "require('node:fs').writeFileSync('host-env.txt', process.env.KAME_WINDOWS_TEST || 'missing');\n",
   );
   const build = await run(
     launcher,
@@ -79,7 +83,7 @@ try {
   );
   assert.equal(build.timedOut, false, 'bundled CLI build timed out');
   assert.equal(build.code, 0, `bundled CLI build failed: ${build.stderr}`);
-  assert.match(build.stdout, /from-host/);
+  assert.equal(await readFile(path.join(workspace, 'host-env.txt'), 'utf8'), 'from-host');
 
   const timeoutWorkspace = path.join(temporary, 'timeout-workspace');
   await mkdir(timeoutWorkspace);
