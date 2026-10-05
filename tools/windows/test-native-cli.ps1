@@ -12,6 +12,7 @@ if ($LASTEXITCODE -ne 0 -or $version -notmatch '^kame \S+') {
 
 $project = Join-Path $env:TEMP ("kame-native-windows-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $project | Out-Null
+$shell = (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe').Replace('\', '/')
 try {
 	@'
 include ./native-child.kmk
@@ -27,6 +28,11 @@ task native-cwd :
 task native-included :
 	Write-Output 'native-include-ok'
 '@ | Set-Content -Encoding ascii (Join-Path $project 'native-child.kmk')
+	$pipeline = @'
+task native-pipeline :
+	@(out (pipe (run "__SHELL__" "-NoProfile" "-NonInteractive" "-Command" "$b=New-Object byte[] 2097152; [Console]::OpenStandardOutput().Write($b,0,$b.Length)") (run "__SHELL__" "-NoProfile" "-NonInteractive" "-Command" "$s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r }; [Console]::Write($n)")))
+'@
+	$pipeline.Replace('__SHELL__', $shell) | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :
 	Set-Content recipe-pid $PID
@@ -38,7 +44,6 @@ task native-timeout :
 	Start-Sleep -Seconds 30
 	Set-Content parent-marker late
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
-	$shell = (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe').Replace('\', '/')
 	Push-Location $project
 	try {
 		$env:KAME_NATIVE_ENV = 'inherited'
@@ -56,6 +61,10 @@ task native-timeout :
 		$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-included 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch 'native-include-ok') {
 			throw "Native source include check failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
+		}
+		$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline 2>&1
+		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch '2097152') {
+			throw "Native binary pipeline failed to transfer 2 MiB through both stages: exit=$LASTEXITCODE output=$($output -join ' | ')"
 		}
 		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
