@@ -165,6 +165,7 @@ dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zi
 	cp dist/kame-windows-x64.zip dist/release/kame-windows-x64.zip
 	cp VERSION dist/release/VERSION
 	cp Makefile.bootstrap dist/release/Makefile.bootstrap
+	python3 tools/release_package_manifests.py --directory dist/release --version "$$(cat VERSION)"
 	public_key_b64=$$(openssl pkey -pubin -in "$(KAME_RELEASE_PUBLIC_KEY)" -outform DER | openssl base64 -A); \
 	sed -e "s|^KAME_STAMP=.*|KAME_STAMP=\"$$(cat VERSION)\"|" \
 	    -e "s|^KAME_RELEASE_PUBKEY_B64=.*|KAME_RELEASE_PUBKEY_B64=\"$$public_key_b64\"|" \

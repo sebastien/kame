@@ -28,6 +28,8 @@ release publishes these flat assets under the base URL
 | `bin/kame` | stamped launcher | host provisioning and dispatch |
 | `Makefile.bootstrap` | bootstrap template | project-local make delegation and `kame init` |
 | `VERSION` | release tree | signed version selector for the explicit latest channel |
+| `Formula/kame.rb` | release builder | version-pinned Homebrew formula for the APE |
+| `kame.json` | release builder | version-pinned Scoop manifest for the Windows x64 bundle |
 | `PROVENANCE.json` | release builder | version, source revision and asset digests |
 | `SHA256SUMS` | checksums | signed integrity manifest |
 | `SHA256SUMS.sig` | release signer | Ed25519 signature over the exact manifest bytes |
@@ -35,6 +37,10 @@ release publishes these flat assets under the base URL
 Asset filenames carry no version; the release tag does. The Windows bundle is a
 native executable launcher for the Node/WASM CLI and requires Node 18 or later.
 The Cosmopolitan APE remains the full native CLI for its supported hosts.
+The generated package-manager manifests embed the exact release version and
+asset digest. They can be installed directly with Homebrew or Scoop from the
+release URL; each release carries new pinned manifests. Publishing maintained
+Homebrew taps or Scoop buckets remains an external hosting step.
 
 `SHA256SUMS` contains one `<64-hex-lowercase>  <asset>` line per asset, sorted
 by asset name, using the conventional two-space separator.
@@ -222,8 +228,20 @@ Release assets are built with these targets, additive to the existing
 - `dist/kame.js` packages the JS CLI source.
 - `bin/kame` is the checked-in launcher; a source checkout resolves its
   version from `VERSION`.
-- `release` stages `dist/release/` with the exact asset names and a generated
-  `SHA256SUMS`. Publishing is a manual, out-of-band step.
+- `dist-release` stages `dist/release/` with the exact asset names, generated
+  Homebrew and Scoop manifests, and a signed `SHA256SUMS`. Publishing is a
+  manual, out-of-band step.
+
+Install the pinned package definitions directly from a release:
+
+```sh
+brew install https://github.com/sebastien/kame/releases/download/vVERSION/Formula/kame.rb
+scoop install https://github.com/sebastien/kame/releases/download/vVERSION/kame.json
+```
+
+Replace `VERSION` with the desired release version. The Homebrew formula
+installs the APE as `kame`; the Scoop manifest adds `kame.exe` to the user's
+path. These release-pinned definitions do not publish or update a tap/bucket.
 
 The JS CLI source lives in the repository and is copied unchanged to
 `dist/kame.js`. Command execution keeps the absolute-path discipline of the
