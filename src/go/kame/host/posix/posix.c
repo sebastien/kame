@@ -18,6 +18,7 @@
 #define _COSMO_SOURCE
 #include "libc/dce.h"
 #include "libc/nt/dll.h"
+#include "libc/nt/files.h"
 #include "libc/nt/process.h"
 #include "libc/nt/runtime.h"
 #include "libc/proc/proc.h"
@@ -47,7 +48,7 @@ typedef struct km_process {
     int outfd, errfd, execfd;
     bool started, reaped, terminating, killed, terminal;
     int outcome, status, signal;
-    int64_t started_at, deadline, kill_deadline;
+    int64_t deadline, kill_deadline;
     int queued;
     so_byte *stdout_data, *stderr_data;
     int stdout_len, stderr_len, retain, stdout_cap, stderr_cap;
@@ -92,7 +93,6 @@ static bool km_windows_job_api_loaded;
 static bool km_windows_jobs_needed(void) {
     bool windows = IsWindows();
     intptr_t kernel = windows ? GetModuleHandle("kernel32.dll") : 0;
-    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job host detection: windows=%d kernel=%lld\n", windows, (long long)kernel);
     return windows && kernel != 0;
 }
 
@@ -115,7 +115,6 @@ static int64_t km_windows_job_create(void) {
     if (!km_windows_jobs_needed()) return 0;
     if (!km_load_windows_job_api()) return -1;
     int64_t job = km_create_job_object(NULL, NULL);
-    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job create: handle=%lld\n", (long long)job);
     return job && job != -1 ? job : -1;
 }
 
@@ -125,11 +124,6 @@ static bool km_windows_job_assign(int64_t job, pid_t pid) {
     int64_t process = OpenProcess(0x1000u | 0x0100u | 0x0001u, 0, (uint32_t)pid);
     if (!process || process == -1) return false;
     bool assigned = km_assign_process_to_job_object(job, process) != 0;
-    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) {
-        int32_t in_job = -1;
-        bool queried = km_is_process_in_job && km_is_process_in_job(process, job, &in_job);
-        fprintf(stderr, "job assign: job=%lld posix_pid=%d native_pid=%u process=%lld assigned=%d membership_query=%d in_job=%d\n", (long long)job, (int)pid, km_get_process_id ? km_get_process_id(process) : 0, (long long)process, assigned, queried, in_job);
-    }
     CloseHandle(process);
     return assigned;
 }
@@ -143,16 +137,21 @@ static bool km_windows_job_assign_exec(int64_t job, pid_t pid) {
     int64_t process = 0;
     uint32_t native_pid = 0;
     for (int attempt = 0; attempt < 500; attempt++) {
-        process = __proc_search((int)pid);
-        if (!process) return true; // The executable already exited and was reaped.
-        native_pid = process ? km_get_process_id(process) : 0;
+        int64_t tracked = __proc_search((int)pid);
+        if (!tracked) return true; // The executable already exited and was reaped.
+        if (!DuplicateHandle(-1, tracked, -1, &process, 0, 0, 2)) {
+            poll(NULL, 0, 1);
+            continue;
+        }
+        native_pid = km_get_process_id(process);
         if (native_pid && native_pid != (uint32_t)pid) {
             bool assigned = km_assign_process_to_job_object(job, process) != 0;
             int32_t in_job = 0;
             bool verified = km_is_process_in_job && km_is_process_in_job(process, job, &in_job) && in_job;
-            if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job assign exec: job=%lld posix_pid=%d native_pid=%u process=%lld assigned=%d verified=%d\n", (long long)job, (int)pid, native_pid, (long long)process, assigned, verified);
+            CloseHandle(process);
             return assigned && verified;
         }
+        CloseHandle(process);
         poll(NULL, 0, 1);
     }
     return false;
@@ -162,7 +161,6 @@ static bool km_windows_job_terminate(int64_t job, int sig) {
     if (!job || !km_windows_jobs_needed()) return true;
     if (!km_load_windows_job_api()) return false;
     bool terminated = km_terminate_job_object(job, (uint32_t)(128 + sig)) != 0;
-    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "job terminate: job=%lld signal=%d result=%d\n", (long long)job, sig, terminated);
     return terminated;
 }
 
@@ -594,7 +592,7 @@ int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so
         host->processes = processes; host->cap = cap;
     }
     km_process *p = &host->processes[host->len++];
-    memset(p, 0, sizeof(*p)); p->id = id; p->pid = pid; p->job = job; p->outfd = out[0]; p->errfd = err[0]; p->execfd = execerr[0]; p->retain = retain; p->started_at = km_now(); p->deadline = timeout ? p->started_at + timeout : 0;
+    memset(p, 0, sizeof(*p)); p->id = id; p->pid = pid; p->job = job; p->outfd = out[0]; p->errfd = err[0]; p->execfd = execerr[0]; p->retain = retain; p->deadline = timeout ? km_now() + timeout : 0;
     p->direct = direct;
     return 0;
 fail:
@@ -734,7 +732,7 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
         free(p.stages); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]);
         return km_spawn_failed(host, id, "graph spawn failed");
     }
-    p.outfd = out[0]; p.errfd = err[0]; p.execfd = execerr[0]; p.started_at = km_now(); p.deadline = timeout ? p.started_at + timeout : 0;
+    p.outfd = out[0]; p.errfd = err[0]; p.execfd = execerr[0]; p.deadline = timeout ? km_now() + timeout : 0;
     host->processes[host->len++] = p;
     return 0;
 }
@@ -823,7 +821,6 @@ static void km_reap(km_host *host, km_process *p) {
 
 static void km_terminate(km_host *host, km_process *p, int outcome, int64_t grace_ms) {
     if (p->terminal || p->terminating) return;
-    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "terminate request: id=%lld age_ms=%lld deadline=%lld outcome=%d\n", (long long)p->id, (long long)(km_now() - p->started_at), (long long)p->deadline, outcome);
     for (int i = 0; i < p->stage_count; i++) if (!p->stages[i].reaped) p->stages[i].outcome = outcome;
     if (km_signal(p, SIGTERM) < 0) { km_fail(host, p, "SIGTERM failed"); return; }
     if (grace_ms < 0) grace_ms = 0;
