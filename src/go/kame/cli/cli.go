@@ -438,11 +438,11 @@ func parseDepth(value string) (int, bool) {
 func parseFormat(inv *Invocation, args []string) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "-i" {
+		if arg == "-i" || arg == "--in-place" {
 			inv.InPlace = true
 			continue
 		}
-		if arg == "-n" {
+		if arg == "-n" || arg == "--check" {
 			inv.Check = true
 			continue
 		}

@@ -51,6 +51,22 @@ for host in native wasm; do
 	else
 		test-fail "$host template format: $(cat "$TMPDIR/$host.format.err") $(cat "$TMPDIR/$host.format.out")"
 	fi
+	printf '%s' "$format_source" >"$TMPDIR/$host.format.km"
+	status=0
+	"${runner[@]}" do fmt --lang template --comment plain --check "$TMPDIR/$host.format.km" >"$TMPDIR/$host.check.out" 2>"$TMPDIR/$host.check.err" || status=$?
+	if [ "$status" -eq 1 ] && grep -Fq "$TMPDIR/$host.format.km" "$TMPDIR/$host.check.out"; then
+		test-ok "$host check detects noncanonical template input"
+	else
+		test-fail "$host template format check: $(cat "$TMPDIR/$host.check.err") $(cat "$TMPDIR/$host.check.out")"
+	fi
+	"${runner[@]}" do fmt --lang template --comment plain --in-place "$TMPDIR/$host.format.km" >"$TMPDIR/$host.in-place.out" 2>"$TMPDIR/$host.in-place.err"
+	status=0
+	"${runner[@]}" do fmt --lang template --comment plain --check "$TMPDIR/$host.format.km" >"$TMPDIR/$host.check.out" 2>"$TMPDIR/$host.check.err" || status=$?
+	if [ "$status" -eq 0 ] && [ "$(cat "$TMPDIR/$host.format.km")" = 'hello @if(:true)yes@end(if) world' ]; then
+		test-ok "$host in-place template formatting is canonical"
+	else
+		test-fail "$host template in-place format: $(cat "$TMPDIR/$host.in-place.err") $(cat "$TMPDIR/$host.check.err")"
+	fi
 	"${runner[@]}" do render --comment plain -c "$match_source" >"$TMPDIR/$host.match.out" 2>"$TMPDIR/$host.match.err"
 	if [ "$(cat "$TMPDIR/$host.match.out")" = "demo" ]; then
 		test-ok "$host matches a template clause and binds named captures"

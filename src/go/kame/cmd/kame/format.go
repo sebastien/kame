@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strconv"
-
 	"kame/cli"
 	"kame/lang/format"
 	"kame/lang/source"
@@ -10,6 +8,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 	"solod.dev/so/slices"
+	"solod.dev/so/strconv"
 )
 
 type formatArguments struct {
@@ -108,9 +107,10 @@ func formatSource(lang string, name string, text string, indentStyle string, ind
 		position := src.Position(result.Span.Start)
 		io.WriteString(errOut, name)
 		io.WriteString(errOut, ":")
-		io.WriteString(errOut, strconv.Itoa(position.Line))
+		var positionText [strconv.MaxIntBase10Len]byte
+		io.WriteString(errOut, strconv.Itoa(positionText[:], position.Line))
 		io.WriteString(errOut, ":")
-		io.WriteString(errOut, strconv.Itoa(position.Column))
+		io.WriteString(errOut, strconv.Itoa(positionText[:], position.Column))
 		io.WriteString(errOut, ": error ")
 		io.WriteString(errOut, result.Code)
 		io.WriteString(errOut, ": ")
