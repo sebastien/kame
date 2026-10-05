@@ -38,8 +38,8 @@ adapters and integration evidence rather than placeholder methods.
 | D13 | Resource protocols | Complete: canonical `file:` and `mem:` identity, scoped grants, dependency invalidation, URI-aware filesystem traversal, native/POSIX and WASM host mappings, and portable memory storage; native/WASM CLI acceptance in T031-01 plus host, evaluator and program suites. See 031. |
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
-| D16 | Platform execution | In progress: the Node/WASM host has Windows stream pipelines and process-tree termination; a native Windows x64 launcher is built and packaged. POSIX lifecycle coverage passes on the current Linux host. Windows runtime, APE and native POSIX host workflows now target Windows, Darwin and BSD; successful host runs are still required. |
-| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, Windows x64 launcher bundle, Linux/macOS x64 and ARM64 plus BSD x64 native build workflows, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. Hosted BSD artifact runs, a native Windows CLI, and maintained tap/bucket publication remain. |
+| D16 | Platform execution | In progress: the Windows launcher runtime and process-tree acceptance pass on Windows; Linux/macOS x64 and ARM64 plus FreeBSD/NetBSD/OpenBSD native host and artifact workflows pass. APE conformance passes on Linux, macOS, FreeBSD and NetBSD; OpenBSD APE execution still aborts after assimilation. |
+| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, Windows x64 launcher bundle, Linux/macOS x64 and ARM64 plus BSD x64 native builds, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. Maintained tap/bucket publication and final cross-host release assembly remain. |
 | D18 | Remaining library/ergonomic extensions | Complete: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, safely quoted `shell-template` interpolation, and comma-separated prerequisite sequencing have specified semantics and native/WASM acceptance coverage. |
 
 The explicit boundaries in this table are a finite work inventory. General
@@ -109,31 +109,30 @@ supports both callbacks and direct-argv native processes; T033-01 covers every
 canonical value kind, identity and protocol rejection, limits, process
 termination, cancellation, disposal, and evaluate/build/watch configuration.
 The core codec and plugin registry tests also verify allocator ownership and
-version-sensitive operation identity. D16–D17 remain open. The
-Node's Windows host path now connects pipeline stages with child streams, uses
-`taskkill /T /F` for process-tree cancellation, and waits for tree-stop and
-direct-child completion. T033-01 retains a Windows-only descendant cleanup
-case; this workspace has no Windows runner, so that case is not yet execution
-evidence. The Windows bundle acceptance now also times out a recipe with a
-grandchild and checks that the process tree is gone. D16 now cross-compiles a
-native Windows x64 launcher that starts the adjacent Node/WASM CLI; T015-05
-verifies argv, exit status and the PE bundle on the current host.
-`tools/windows/test-launcher.mjs` now exercises the actual
-bundle and launcher process contract on Windows. The new
-`.github/workflows/windows-launcher.yml` builds the bundle on Linux and runs the
-test on `windows-latest`; a successful Windows run is still required before
-claiming runtime conformance. The native POSIX host suite passes on this Linux
-host: 24 host package tests, T003-01 (17/17), and T003-02 (11/11). Windows-host
-lifecycle coverage and Darwin/BSD native-host runs remain open. The new
-`tools/platform/test-ape.sh` checks APE version, recipe process execution,
-environment forwarding, timeout and reaping; `.github/workflows/ape-platforms.yml`
-runs one built APE on Linux, Darwin, Windows POSIX, FreeBSD, NetBSD and OpenBSD.
-Non-Linux workflow results are still needed to claim APE conformance.
-`.github/workflows/native-artifacts.yml` and
-`.github/workflows/native-bsd-artifacts.yml` also run the native package/host
-tests and build an executable CLI on Linux, macOS and the BSD hosts; hosted
-results remain pending. The initial-contract audit remains historical
-evidence, not completion of this work.
+version-sensitive operation identity. D16–D17 remain open. The Node Windows
+host connects pipeline stages with child streams, uses `taskkill /T /F` for
+process-tree cancellation, and waits for tree-stop and direct-child completion.
+The Windows launcher workflow now runs the packaged CLI and verifies recipe
+environment forwarding and timeout cleanup of a grandchild on `windows-latest`.
+T033-01 retains a Windows-only descendant-cleanup case, while the bundle
+acceptance verifies the shipped launcher path. The native Windows x64 launcher
+starts the adjacent Node/WASM CLI; T015-05 covers its argv, exit status and PE
+bundle.
+
+The cross-host runs at [37429595307](https://github.com/sebastien/kame/actions/runs/37429595307),
+[37429595405](https://github.com/sebastien/kame/actions/runs/37429595405), and
+[37429595285](https://github.com/sebastien/kame/actions/runs/37429595285) passed
+native package/host tests and artifact builds on Linux x64/ARM64, macOS
+x64/ARM64, FreeBSD, NetBSD and OpenBSD, plus the packaged Windows launcher
+runtime. APE acceptance passed on Linux, Darwin, FreeBSD and NetBSD. The
+OpenBSD APE run at
+[37430137971](https://github.com/sebastien/kame/actions/runs/37430137971)
+still exits 134 after the assimilation attempt; OpenBSD APE execution remains
+unverified. The APE workflow tests the supported POSIX hosts; the Windows
+launcher runtime is covered by its native Windows workflow. Maintained
+Homebrew tap and Scoop bucket publication, along with final cross-host release
+assembly, remain open. The initial-contract audit remains historical evidence,
+not completion of this work.
 D18's equality-value shorthand is implemented: `(filter LIST VALUE)` retains
 strict scalar-equal items, and `filter-out` removes them with the same numeric,
 cross-kind, and invalid-composite rules as `eq`. T007-02 now covers both
