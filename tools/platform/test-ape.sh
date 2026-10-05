@@ -52,9 +52,15 @@ run_binary() {
 }
 
 report_phase "run minimal Cosmopolitan APE smoke program"
-smoke_output=$(run_binary "$smoke_path")
-if [ "$smoke_output" != "APE bootstrap smoke passed" ]; then
-	echo "APE bootstrap smoke output mismatch: $smoke_output" >&2
+if run_binary "$smoke_path" >"$work_path/ape-smoke.out" 2>"$work_path/ape-smoke.err"; then
+	smoke_status=0
+	else
+	smoke_status=$?
+	fi
+smoke_output=$(cat "$work_path/ape-smoke.out")
+if [ "$smoke_status" -ne 0 ] || [ "$smoke_output" != "APE bootstrap smoke passed" ]; then
+	echo "APE bootstrap smoke failed: exit=$smoke_status output=$smoke_output" >&2
+	cat "$work_path/ape-smoke.err" >&2
 	exit 1
 fi
 
