@@ -49,7 +49,7 @@ design boundaries rather than placeholder behavior.
 | File templating | Implemented through spec 016. Verify dependency capture, include cycles, source diagnostics, and native/WASM render parity. |
 | Parser zero-copy | Partial borrowing, not zero-copy: `source.New` clones source name/text, decoded strings and target literals own buffers. Consider an explicit adopted/borrowed source API and measure allocations before changing ownership. |
 | Jobs/program/argv/runtime display | Existing progress reports activity and totals. Per-job argv/timing presentation needs bounded storage, clear stream behavior, and no leakage into JSON diagnostics. |
-| Terminal color functions | Optional library feature; CLI presentation already has a color policy. Avoid mixing terminal escapes into canonical value display. |
+| Terminal color functions | Implemented as explicit ANSI string wrappers; canonical value display remains unchanged. T007-03 covers emitted sequences and nonstring rejection. |
 | JavaScript API | The module ABI and JS loader exist. A documented embedding API should expose disposal, copied buffers, grants, host completion, and cancellation; CLI internals are not an API contract. |
 | Python API | Research item; choose binding/transport and ownership model after the embedding contract is stable. |
 | Alternative `<-` build syntax | Implemented as an alternate rule separator with identical dependency semantics; canonical formatting emits `:`. T004-09 verifies native/WASM planning and execution. |

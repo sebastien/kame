@@ -131,6 +131,13 @@ The initial text operations are:
 | `replace` | Replace literal occurrences, or match and expand pattern arguments per `014-patterns.md` |
 | `uppercase` | Unicode uppercase conversion supported by Solod |
 | `lowercase` | Unicode lowercase conversion supported by Solod |
+| `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` | Wrap one string in the matching ANSI foreground sequence |
+| `bold`, `dim` | Wrap one string in the ANSI bold or dim sequence |
+
+Terminal style operations are pure string functions. They always include their
+ANSI start and reset sequences; they do not inspect whether stdout is a TTY.
+Use them only when the resulting string is intended for a terminal. Canonical
+value display and ordinary text conversion never add terminal escapes.
 
 Regular-expression operations are deferred.
 
@@ -304,6 +311,9 @@ executable metadata checks do not grant access to user read operations.
 - `shell` captures status and separate byte-bounded stdout/stderr.
 - `sh` and `shellrun` match `shell` in result, run-capability enforcement, and
   phase restrictions.
+- Terminal style functions wrap strings with their documented ANSI sequences,
+  compose using selective reset codes, reject nonstrings, and leave canonical
+  value display unchanged.
 - Pattern `replace` matches anchored, expands references, returns `:nil`
   without a match, and accepts a section through `map` and pipes.
 - Operation tests using `mem.Tracker` leak no returned container or string.

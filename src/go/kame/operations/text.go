@@ -135,6 +135,42 @@ func opLowercase(c *eval.Context, s any, v []core.Value) eval.Result {
 	return eval.Result{Value: core.Value{Kind: core.String, Text: strings.ToLower(c.Run, value)}}
 }
 
+func opTerminalStyle(c *eval.Context, state any, v []core.Value) eval.Result {
+	_ = state
+	start, end := "", ""
+	switch c.OperationName {
+	case "black":
+		start, end = "\x1b[30m", "\x1b[39m"
+	case "red":
+		start, end = "\x1b[31m", "\x1b[39m"
+	case "green":
+		start, end = "\x1b[32m", "\x1b[39m"
+	case "yellow":
+		start, end = "\x1b[33m", "\x1b[39m"
+	case "blue":
+		start, end = "\x1b[34m", "\x1b[39m"
+	case "magenta":
+		start, end = "\x1b[35m", "\x1b[39m"
+	case "cyan":
+		start, end = "\x1b[36m", "\x1b[39m"
+	case "white":
+		start, end = "\x1b[37m", "\x1b[39m"
+	case "bold":
+		start, end = "\x1b[1m", "\x1b[22m"
+	case "dim":
+		start, end = "\x1b[2m", "\x1b[22m"
+	}
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
+	}
+	b := strings.NewBuilder(c.Run)
+	defer b.Free()
+	b.WriteString(start)
+	b.WriteString(v[0].Text)
+	b.WriteString(end)
+	return eval.Result{Value: core.NewString(c.Run, b.String())}
+}
+
 func opCat(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	b := strings.NewBuilder(c.Run)
