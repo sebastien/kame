@@ -344,6 +344,10 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       return 22u;
     case host_RequestProcessCancel:
       return 23u;
+    case host_RequestCacheLock:
+      return 24u;
+    case host_RequestCacheUnlock:
+      return 25u;
     default:
       return (uint32_t)request.Kind;
   }
@@ -1064,7 +1068,7 @@ uint32_t kame_wasm_request_data_copy(uint64_t handle, uint32_t dst, uint32_t dst
 }
 
 static bool kame_wasm_is_cache_request(host_RequestKind kind) {
-  return kind == host_RequestCacheGet || kind == host_RequestCachePut || kind == host_RequestCacheDelete;
+  return kind == host_RequestCacheGet || kind == host_RequestCachePut || kind == host_RequestCacheDelete || kind == host_RequestCacheLock || kind == host_RequestCacheUnlock;
 }
 
 /* Copy the opaque cache key of a pinned cache request. */

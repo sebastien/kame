@@ -367,6 +367,7 @@ type instance struct {
 	CacheReady           bool
 	cacheStartedAt       int64
 	cachePending         bool
+	cacheWaitingLock     bool
 	cacheLockHeld        bool
 	cacheLockStripe      int
 	retryCount           int

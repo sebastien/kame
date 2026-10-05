@@ -66,6 +66,7 @@ tests/T010-26-wasm-service-readiness.sh	010	wasm	Forwarded service readiness pro
 tests/T010-27-wasm-generated-declarations.sh	010	wasm	Generated declaration planning, provenance, materialization and native/WASM parity
 tests/T010-28-cache-management.sh	010	cache	Native and WASM cache listing, 1024-record eviction and cleanup preserve symlinks
 tests/T010-29-cache-locking.sh	010	cache	Separate native processes serialize cold misses and release published cache locks
+tests/T010-30-wasm-cache-locking.sh	010	cache	Separate Node hosts serialize forwarded WASM cache misses; stale-owner recovery and failure/interruption release
 tests/T011-01-diag-format.sh	011	diag	Diagnostic layout, notes, human/JSON equivalence
 tests/T011-02-diag-integrity.sh	011	diag	Codes, severities, non-empty printable messages
 tests/T011-03-diag-context.sh	011	diag	Operand contracts and spans, nested targets, included sources, target-scoped tools checks

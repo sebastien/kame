@@ -8,11 +8,11 @@
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
 import { mkdir, mkdtemp, open, readFile, rename, rm, stat } from 'node:fs/promises';
-import { accessSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
+import { accessSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { constants as osConstants, tmpdir } from 'node:os';
 import process, { argv, env, stderr, stdout } from 'node:process';
 
@@ -22,6 +22,7 @@ const activeChildren = new Set();
 const activeProcessGroups = new Map();
 const invocationCancellations = new Set();
 const invocationDisposals = new Set();
+const activeCacheLocks = new Set();
 let interruptedStatus = 0;
 
 function installSignals() {
@@ -32,6 +33,7 @@ function installSignals() {
       syncOutputReaders();
       const reaped = [...activeChildren].map((child) => new Promise((resolve) => child.once('close', resolve)));
       for (const cancellation of invocationCancellations) cancellation.abort();
+      const cacheReleases = [...activeCacheLocks].map((release) => release());
       for (const child of activeChildren) {
         try {
           process.kill(-child.pid, 'SIGKILL');
@@ -43,7 +45,7 @@ function installSignals() {
           }
         }
       }
-      Promise.all([...reaped, ...invocationDisposals]).then(() => process.exit(interruptedStatus));
+      Promise.all([...reaped, ...invocationDisposals, ...cacheReleases]).then(() => process.exit(interruptedStatus));
     });
   }
 }
@@ -155,6 +157,82 @@ function resolveColor(color, format) {
 // root, keyed by the runtime's opaque byte key.
 function cacheEntryPath(key) {
   return join(process.cwd(), '.kame', 'cache', 'host', Buffer.from(key).toString('hex'));
+}
+
+function cacheLockPath(key) {
+  return join(process.cwd(), '.kame', 'cache', 'locks', `host-${Buffer.from(key).toString('hex')}.lock`);
+}
+
+function lockOwnerAlive(owner) {
+  if (!Number.isSafeInteger(owner?.pid) || owner.pid <= 0) return false;
+  try { process.kill(owner.pid, 0); return true; }
+  catch (error) { return error.code === 'EPERM'; }
+}
+
+async function waitForCacheLock(signal) {
+  if (signal?.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
+  await new Promise((resolveWait, rejectWait) => {
+    let timer;
+    const finish = (error) => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancelled);
+      if (error) rejectWait(error); else resolveWait();
+    };
+    const cancelled = () => finish(Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' }));
+    timer = setTimeout(() => finish(), 20);
+    signal?.addEventListener('abort', cancelled, { once: true });
+  });
+}
+
+async function acquireCacheLock(key, signal) {
+  const lock = cacheLockPath(key);
+  await mkdir(dirname(lock), { recursive: true });
+  const ownerFile = join(lock, 'owner.json');
+  const token = randomBytes(16).toString('hex');
+  for (;;) {
+    if (signal?.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
+    try {
+      mkdirSync(lock);
+      try {
+        writeFileSync(ownerFile, JSON.stringify({ pid: process.pid, token }), { flag: 'wx', mode: 0o600 });
+      } catch (error) {
+        rmSync(lock, { recursive: true, force: true });
+        throw error;
+      }
+      let released = false;
+      const release = async () => {
+        if (released) return;
+        released = true;
+        try {
+          const owner = JSON.parse(await readFile(ownerFile, 'utf8'));
+          if (owner.pid === process.pid && owner.token === token) await rm(lock, { recursive: true, force: true });
+        } catch (error) {
+          if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+        } finally {
+          activeCacheLocks.delete(release);
+        }
+      };
+      activeCacheLocks.add(release);
+      return release;
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      let stale = false;
+      try {
+        const owner = JSON.parse(await readFile(ownerFile, 'utf8'));
+        stale = !lockOwnerAlive(owner);
+      } catch (ownerError) {
+        if (ownerError.code === 'ENOENT' || ownerError instanceof SyntaxError) {
+          try { stale = Date.now() - statSync(lock).mtimeMs > 2000; } catch (statError) { if (statError.code === 'ENOENT') stale = true; else throw statError; }
+        } else if (ownerError.code === 'ENOENT') stale = true;
+        else throw ownerError;
+      }
+      if (stale) {
+        await rm(lock, { recursive: true, force: true });
+        continue;
+      }
+      await waitForCacheLock(signal);
+    }
+  }
 }
 
 const cacheRecordsPerBackend = 1024;
@@ -720,6 +798,8 @@ class Module {
     this.exports = exports;
     this.path = wasmPath;
     this.scratchBuffers = new Map();
+    this.cacheLeases = new Map();
+    this.cacheWrites = new Map();
   }
 
   static async load() {
@@ -884,7 +964,7 @@ class Module {
     }
     let key = null;
     let record = null;
-    if (kind === 10 || kind === 11 || kind === 12) {
+    if (kind === 10 || kind === 11 || kind === 12 || kind === 24 || kind === 25) {
       const keyLength = this.exports.kame_wasm_next_request_key_length(instance);
       const keyPointer = this.allocate(keyLength || 1);
       if (this.exports.kame_wasm_request_key_copy(instance, keyPointer, keyLength) !== 0) throw Object.assign(new Error('cache key copy failed'), { code: 'HOST_FAIL' });
@@ -905,6 +985,18 @@ class Module {
 
   async dispatch(instance, request, kind, payload, data, context, key, record) {
     const grants = context.grants;
+    if (kind === 24) {
+      const owner = this.cacheLeaseKey(instance, key);
+      if (!this.cacheLeases.has(owner)) {
+        try { this.cacheLeases.set(owner, await acquireCacheLock(key, context.signal)); }
+        catch (error) { return this.completeFailure(instance, request, error.code ?? 'FS_ERR', `cannot acquire cache lock: ${error.message}`); }
+      }
+      return this.exports.kame_wasm_complete_nil(instance, request);
+    }
+    if (kind === 25) {
+      await this.releaseCacheLease(instance, key);
+      return this.exports.kame_wasm_complete_nil(instance, request);
+    }
     if (kind === 22) {
       const milliseconds = Number(payload);
       if (!Number.isSafeInteger(milliseconds) || milliseconds < 0 || milliseconds > 60000) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid service timer');
@@ -1080,12 +1172,19 @@ class Module {
       return this.exports.kame_wasm_complete_bytes(instance, request, pointer, bytes.length);
     }
     if (kind === 11) {
-      try {
+      const owner = this.cacheLeaseKey(instance, key);
+      const writing = (async () => {
         const path = cacheEntryPath(key);
         await writeFileAtomic(path, record, true);
         pruneCacheDirectory(dirname(path));
+      })();
+      this.cacheWrites.set(owner, writing);
+      try {
+        await writing;
       } catch (error) {
         return this.completeFailure(instance, request, 'FS_ERR', `cannot write cache record: ${error.message}`);
+      } finally {
+        if (this.cacheWrites.get(owner) === writing) this.cacheWrites.delete(owner);
       }
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
@@ -1098,6 +1197,20 @@ class Module {
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
     return this.completeFailure(instance, request, 'FEATURE_UNSUP', `host request kind ${kind} is not implemented in this stage`);
+  }
+
+  cacheLeaseKey(instance, key) {
+    return `${instance}:${Buffer.from(key).toString('hex')}`;
+  }
+
+  async releaseCacheLease(instance, key) {
+    const owner = this.cacheLeaseKey(instance, key);
+    const writing = this.cacheWrites.get(owner);
+    if (writing) { try { await writing; } catch {} }
+    const release = this.cacheLeases.get(owner);
+    if (!release) return;
+    this.cacheLeases.delete(owner);
+    await release();
   }
 
   deny(instance, request, capability) {

@@ -124,6 +124,12 @@ or reject them with a capability diagnostic. A process request is semantic, not
 POSIX-specific: the host streams stdout/stderr chunks and terminal status back
 using the same request ID.
 
+Cached-task hosts also receive ABI kinds 24 and 25 to acquire and release an
+opaque cache-key lock. The host completes kind 24 only after exclusive
+ownership is established. Kind 25 is idempotent so cancellation can release a
+pending or acquired lease. Cache get occurs after lock acquisition; cache put
+completes before the runtime releases the lock.
+
 Each host request includes the originating node, generation, and attempt.
 
 Late completion for a cancelled or superseded generation is accepted by the
@@ -291,7 +297,8 @@ The wrapper services host requests with JavaScript host capabilities:
   signal forwarding, and cancellation.
 - time maps to the JavaScript wall and monotonic clocks.
 - cache get, put, and delete map to opaque records under a per-project cache
-  root; the runtime owns key construction and record validation.
+  root; cache lock/unlock serialize misses through publication; the runtime
+  owns key construction and record validation.
 
 Capability grants follow `009-cli.md`: sessions beginning with value/expression
 fragments deny host capabilities by default; sessions beginning with rule/Kash

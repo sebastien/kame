@@ -511,19 +511,54 @@ func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLooku
 		if completion.RequestID == 0 {
 			return cacheLookupResult{Waiting: true}
 		}
+		if entry.cacheWaitingLock {
+			entry.cacheWaitingLock = false
+			if completion.Diagnostic.Code != "" {
+				completion.Diagnostic.Free(p.Alloc)
+				completion.Value.Free(p.Alloc)
+				p.releaseCacheLock(entry)
+				entry.CacheReady = false
+				return cacheLookupResult{}
+			}
+			completion.Diagnostic.Free(p.Alloc)
+			completion.Value.Free(p.Alloc)
+			return p.cacheLookupForwarded(c, entry)
+		}
 		if completion.Diagnostic.Code != "" {
 			completion.Diagnostic.Free(p.Alloc)
+			completion.Value.Free(p.Alloc)
+			p.releaseCacheLock(entry)
+			entry.CacheReady = false
+			return cacheLookupResult{}
+		}
+		if completion.Value.Kind == core.Nil {
 			completion.Value.Free(p.Alloc)
 			return cacheLookupResult{}
 		}
 		if completion.Value.Kind != core.Bytes {
 			completion.Value.Free(p.Alloc)
+			p.releaseCacheLock(entry)
+			entry.CacheReady = false
 			return cacheLookupResult{}
 		}
 		record := p.validateRecord(entry, entry.CacheFingerprint[:], completion.Value.Bytes)
 		completion.Value.Free(p.Alloc)
+		if record.Identity != "" {
+			p.releaseCacheLock(entry)
+		}
 		return cacheLookupResult{Record: record, Hit: record.Identity != ""}
 	}
+	key := p.cacheKey(entry)
+	p.nextRequest++
+	entry.cacheLockStripe = int(key[0])
+	entry.cacheLockHeld, entry.cachePending, entry.cacheWaitingLock = true, true, true
+	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestCacheLock, Payload: host.CacheGetPayload(p.Alloc, key)})
+	mem.FreeSlice(p.Alloc, key)
+	c.Submit(p.nextRequest)
+	return cacheLookupResult{Waiting: true}
+}
+
+func (p *Program) cacheLookupForwarded(c *core.EngineContext, entry *instance) cacheLookupResult {
 	key := p.cacheKey(entry)
 	payload := host.CacheGetPayload(p.Alloc, key)
 	mem.FreeSlice(p.Alloc, key)
@@ -538,7 +573,15 @@ func (p *Program) releaseCacheLock(entry *instance) {
 	if entry == nil || !entry.cacheLockHeld {
 		return
 	}
-	p.Host.UnlockCache(entry.cacheLockStripe)
+	if p.Forwarding {
+		key := p.cacheKey(entry)
+		payload := host.CacheGetPayload(p.Alloc, key)
+		mem.FreeSlice(p.Alloc, key)
+		p.nextRequest++
+		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCacheUnlock, Payload: payload})
+	} else {
+		p.Host.UnlockCache(entry.cacheLockStripe)
+	}
 	entry.cacheLockHeld = false
 }
 

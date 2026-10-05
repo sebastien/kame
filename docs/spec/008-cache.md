@@ -172,6 +172,12 @@ second read under the lock prevents duplicate cold execution across processes.
 POSIX process exit releases held advisory locks even after a crash. Stripe
 collisions only serialize unrelated keys; lock files are fixed in count.
 
+Forwarded JavaScript hosts acquire a per-key lock directory under
+`.kame/cache/locks/` before the cache read and keep it through execution and
+atomic publication. The owner PID allows a later host to reclaim a lock left
+by an exited process. Hits, failures, and host interruption release the lock;
+lock waiters can be cancelled with the invocation.
+
 ## Invalidations
 
 These changes must cause a miss:
@@ -220,6 +226,11 @@ share the host backend's limit.
 - Concurrent atomic writers leave a complete readable record.
 - Separate native processes execute one cold cache miss once and release the
   lock after publication.
+- Separate forwarded Node hosts execute one cold WASM cache miss once and
+  release the lock after publication.
+- Failed and interrupted forwarded recipes release their locks; a cancelled
+  waiter leaves the owner undisturbed; an exited owner is reclaimed before
+  lookup resumes.
 - The portable in-memory host publishes complete records and reuses them with
   the same task identity and hit validation as the local filesystem backend.
 - Fingerprint encoding is identical across two native runs and matches checked-in

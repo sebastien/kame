@@ -126,7 +126,7 @@ Current coverage:
 | 007 | 10 suites; sequences 01, 02, 03, 04, 05, 06, 07, 09, 10, 11 | All standard operations, grants, wildcard unions, record lookup and declared tool policy |
 | 008 | 4 suites; sequences 01, 02, 03, 04 | Cached task identity, invalidation, corrupt-record recovery and portable in-memory backend |
 | 009 | 13 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 11, 12, 13, 14, 15 | Help, discovery, targets, JSON, inspection, configuration, native watch and target arguments |
-| 010 | 25 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25 | Public ABI, embedding services, metadata/effect publication, native parity, OOM recovery, retained watch, target arguments and watch ABI conformance |
+| 010 | 30 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30 | Public ABI, embedding services, metadata/effect publication, native parity, OOM recovery, retained watch, target arguments and watch ABI conformance |
 | 011 | 3 suites; sequences 01, 02, 03 | Code registry, source layout, structured context and process cause policy |
 | 012 | 4 suites; sequences 01, 02, 03, 04 | Protocol/event ownership, live output, large captures and public backpressure |
 | 013 | 5 suites; sequences 01, 02, 03, 04, 05 | Catalog, fixture hygiene, binary contract, graph growth and artifact build modes |
@@ -266,6 +266,11 @@ both eviction and cleanup leave symlinks and their targets intact.
 `T010-29-cache-locking.sh` starts separate native CLI processes against a cold
 task identity, verifies only one recipe execution, and confirms publication
 releases the striped lock while the owning process continues other work.
+
+`T010-30-wasm-cache-locking.sh` starts separate Node hosts against a cold
+forwarded task identity and verifies they share one execution, receive the same
+replayed result, reclaim stale locks, and release owner or waiter locks on
+failure and interruption.
 
 `T008-04-cache-memory-backend.sh` exercises the portable memory host through
 the task runtime and verifies complete record publication and a validated cache hit.

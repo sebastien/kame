@@ -31,6 +31,8 @@ const (
 	RequestPrepareOutputs
 	RequestTimer
 	RequestProcessCancel
+	RequestCacheLock
+	RequestCacheUnlock
 )
 
 // Request owns Payload until it is popped or the queue is freed.
