@@ -38,8 +38,8 @@ release publishes these flat assets under the base URL
 Asset filenames carry no version; the release tag does. The Windows bundle is a
 native executable launcher for the Node/WASM CLI and requires Node 18 or later.
 The Cosmopolitan APE remains the full native CLI for its supported hosts.
-The native-artifact workflow builds a host binary on Linux and macOS and stores
-it as `dist/native/PLATFORM/kame`. Before signing a multi-platform release,
+The native-artifact workflow builds host binaries for Linux and macOS on x64
+and ARM64 and stores each as `dist/native/PLATFORM/kame`. Before signing a multi-platform release,
 collect each workflow artifact under `dist/native/` and run `dist-release`;
 staging flattens them to `kame-PLATFORM`, and the checksum manifest and
 provenance include every staged native binary. The release signer should stage
@@ -245,7 +245,7 @@ Release assets are built with these targets, additive to the existing
   manual, out-of-band step.
 - `dist-native` builds the current host's full native CLI and places it at
   `dist/native/PLATFORM/kame`; `.github/workflows/native-artifacts.yml` uploads
-  Linux and macOS host builds for later release staging.
+  Linux and macOS x64/ARM64 host builds for later release staging.
 
 Install the pinned package definitions directly from a release:
 
@@ -299,8 +299,9 @@ existing build rules.
 
 ## Deferred
 
-- Full native per-platform CLI binaries beyond the Linux and macOS builds,
-  including a native Windows CLI rather than the current Node/WASM launcher.
+- Full native per-platform CLI binaries beyond Linux and macOS x64/ARM64,
+  including BSD builds and a native Windows CLI rather than the current
+  Node/WASM launcher.
 - Windows-host launcher and process lifecycle conformance; a cross-compiled PE
   file alone is not host execution evidence.
 - Package-manager integrations.
