@@ -464,13 +464,63 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 		nln := scanLine(p.s.Text, body.Next, end)
 		nextPos = nln.LineEnd
 	}
-	// ([params] bodyCat)
+	// The lowering-only template-items operation supplies index, key and value
+	// in a record. The callback binds that record with `with`, then invokes the
+	// original parameter list with the loop value as its one map argument.
+	inner := mem.Alloc[expr.Expr](p.a)
+	inner.Kind = expr.Lambda
+	inner.Span = head.Span
+	inner.Parameters = lambdaParams(p.a, head.Args[0])
+	inner.Body = slices.Append(p.a, inner.Body, bodyCat)
+	getApp := templateItemField(p.a, "__template_item", "value", head.Span)
+	argsApp := mem.Alloc[expr.Expr](p.a)
+	argsApp.Kind = expr.Application
+	argsApp.Span = head.Span
+	argsHead := mem.Alloc[expr.Expr](p.a)
+	argsHead.Kind = expr.Name
+	argsHead.Text = "list"
+	argsHead.Span = head.Span
+	argsApp.Items = slices.Append(p.a, argsApp.Items, argsHead)
+	argsApp.Items = slices.Append(p.a, argsApp.Items, getApp)
+	applyApp := mem.Alloc[expr.Expr](p.a)
+	applyApp.Kind = expr.Application
+	applyApp.Span = head.Span
+	applyHead := mem.Alloc[expr.Expr](p.a)
+	applyHead.Kind = expr.Name
+	applyHead.Text = "template-apply"
+	applyHead.Span = head.Span
+	applyApp.Items = slices.Append(p.a, applyApp.Items, applyHead)
+	applyApp.Items = slices.Append(p.a, applyApp.Items, inner)
+	applyApp.Items = slices.Append(p.a, applyApp.Items, argsApp)
+	withApp := mem.Alloc[expr.Expr](p.a)
+	withApp.Kind = expr.Application
+	withApp.Span = head.Span
+	withHead := mem.Alloc[expr.Expr](p.a)
+	withHead.Kind = expr.Name
+	withHead.Text = "with"
+	withHead.Span = head.Span
+	withApp.Items = slices.Append(p.a, withApp.Items, withHead)
+	bindings := mem.Alloc[expr.Expr](p.a)
+	bindings.Kind = expr.Record
+	bindings.Span = head.Span
+	bindings.Fields = slices.Append(p.a, bindings.Fields, expr.Field{Key: "index", Span: head.Span, Value: templateItemField(p.a, "__template_item", "index", head.Span)})
+	bindings.Fields = slices.Append(p.a, bindings.Fields, expr.Field{Key: "key", Span: head.Span, Value: templateItemField(p.a, "__template_item", "key", head.Span)})
+	withApp.Items = slices.Append(p.a, withApp.Items, bindings)
+	withApp.Items = slices.Append(p.a, withApp.Items, applyApp)
 	lam := mem.Alloc[expr.Expr](p.a)
 	lam.Kind = expr.Lambda
 	lam.Span = head.Span
-	params := lambdaParams(p.a, head.Args[0])
-	lam.Parameters = params
-	lam.Body = slices.Append(p.a, lam.Body, bodyCat)
+	lam.Parameters = slices.Append(p.a, lam.Parameters, expr.Parameter{Name: "__template_item", Span: head.Span})
+	lam.Body = slices.Append(p.a, lam.Body, withApp)
+	itemsApp := mem.Alloc[expr.Expr](p.a)
+	itemsApp.Kind = expr.Application
+	itemsApp.Span = head.Span
+	itemsHead := mem.Alloc[expr.Expr](p.a)
+	itemsHead.Kind = expr.Name
+	itemsHead.Text = "template-items"
+	itemsHead.Span = head.Span
+	itemsApp.Items = slices.Append(p.a, itemsApp.Items, itemsHead)
+	itemsApp.Items = slices.Append(p.a, itemsApp.Items, head.Args[1])
 	// (map lam xs)
 	mapApp := mem.Alloc[expr.Expr](p.a)
 	mapApp.Kind = expr.Application
@@ -481,7 +531,7 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	mapHead.Text = "map"
 	mapApp.Items = slices.Append(p.a, mapApp.Items, mapHead)
 	mapApp.Items = slices.Append(p.a, mapApp.Items, lam)
-	mapApp.Items = slices.Append(p.a, mapApp.Items, head.Args[1])
+	mapApp.Items = slices.Append(p.a, mapApp.Items, itemsApp)
 	// (join mapApp sep)
 	joinApp := mem.Alloc[expr.Expr](p.a)
 	joinApp.Kind = expr.Application
@@ -501,6 +551,24 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	slices.Free(p.a, head.Args)
 	joinApp.Span.End = nextPos
 	return pairRes{Expr: joinApp, Next: nextPos}
+}
+
+func templateItemField(a mem.Allocator, rowName string, field string, span source.Span) *expr.Expr {
+	app := mem.Alloc[expr.Expr](a)
+	app.Kind = expr.Application
+	app.Span = span
+	head := mem.Alloc[expr.Expr](a)
+	head.Kind = expr.Name
+	head.Text = "get"
+	head.Span = span
+	row := mem.Alloc[expr.Expr](a)
+	row.Kind = expr.Name
+	row.Text = rowName
+	row.Span = span
+	app.Items = slices.Append(a, app.Items, head)
+	app.Items = slices.Append(a, app.Items, row)
+	app.Items = slices.Append(a, app.Items, newStringLit(a, field, span))
+	return app
 }
 
 func (p *docParser) parseWith(head dirOut, bodyPos int, end int) pairRes {

@@ -494,6 +494,43 @@ func TestDocumentMatchRendersNamedCaptureAndFallback(t *testing.T) {
 	registry.Free()
 }
 
+func TestDocumentForBindsIndexKeyAndValue(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Error("library registration failed") }
+	parsed := script.Parse(a, "document-for", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	templateText := `(cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n")`
+	result := evaluate(t, program, `(render `+templateText+` [xs: ["a" "b"]] "plain")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "0::a;\n1::b;\n" {
+		t.Error("list loop did not bind its zero-based index, nil key and item value")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestTemplateItemsOwnsInputRows(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Error("library registration failed") }
+	parsed := script.Parse(a, "template-items", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, `(template-items ["a" "b"])`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 {
+		t.Error("template-items did not return one row per list item")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func regexTestField(record core.Value, key string) core.Value {
 	for i := range record.Record { if record.Record[i].Key == key { return record.Record[i].Value } }
 	return core.Value{Kind: core.Nil}

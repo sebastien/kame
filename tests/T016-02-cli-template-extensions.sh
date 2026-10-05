@@ -3,7 +3,7 @@
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 
-test-start "T016-01 template extensions"
+test-start "T016-02 template extensions"
 test-step "build native and WASM runners"
 cli_build
 cd "$CLI_ROOT"
@@ -28,6 +28,8 @@ batch_source='REM @if(:true)
 yes
 :: @end(if)
 '
+list_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: ["a" "b"]] "plain")'
+record_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: [first: "A" second: "B"]] "plain")'
 
 for host in native wasm; do
 	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
@@ -55,6 +57,18 @@ for host in native wasm; do
 		test-ok "$host parses batch comment directives"
 	else
 		test-fail "$host batch comments: $(cat "$TMPDIR/$host.batch.err")"
+	fi
+	"${runner[@]}" do run --lang expr -c "$list_loop" >"$TMPDIR/$host.list-loop.out" 2>"$TMPDIR/$host.list-loop.err"
+	if [ "$(cat "$TMPDIR/$host.list-loop.out")" = '"0::a;\n1::b;\n"' ]; then
+		test-ok "$host binds loop indices and nil list keys"
+	else
+		test-fail "$host list loop bindings: $(cat "$TMPDIR/$host.list-loop.err") $(cat "$TMPDIR/$host.list-loop.out")"
+	fi
+	"${runner[@]}" do run --lang expr -c "$record_loop" >"$TMPDIR/$host.record-loop.out" 2>"$TMPDIR/$host.record-loop.err"
+	if [ "$(cat "$TMPDIR/$host.record-loop.out")" = '"0:first:A;\n1:second:B;\n"' ]; then
+		test-ok "$host binds record loop keys in source order"
+	else
+		test-fail "$host record loop bindings: $(cat "$TMPDIR/$host.record-loop.err") $(cat "$TMPDIR/$host.record-loop.out")"
 	fi
 done
 

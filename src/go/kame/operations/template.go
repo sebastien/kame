@@ -251,6 +251,49 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	return res
 }
 
+// opTemplateItems gives document loops stable positional and key metadata.
+// It is used by the template lowering rather than authored directly.
+func opTemplateItems(c *eval.Context, state any, values []core.Value) eval.Result {
+	_ = state
+	input := values[0]
+	count := 0
+	if input.Kind == core.List { count = len(input.List) } else if input.Kind == core.Record { count = len(input.Record) } else {
+		return invalidArgument(c, values, 0, "list or record")
+	}
+	items := slices.Make[core.Value](c.Run, count)
+	for i := 0; i < count; i++ {
+		index := core.Value{Kind: core.Int, Int: int64(i)}
+		key := core.Value{Kind: core.Nil}
+		value := core.Value{Kind: core.Nil}
+		if input.Kind == core.List {
+			value = input.List[i].Clone(c.Run)
+		} else {
+			key = core.NewString(c.Run, input.Record[i].Key)
+			value = input.Record[i].Value.Clone(c.Run)
+		}
+		var fields []core.RecordField
+		fields = slices.Append(c.Run, fields, core.RecordField{Key: "index", Value: index})
+		fields = slices.Append(c.Run, fields, core.RecordField{Key: "key", Value: key})
+		fields = slices.Append(c.Run, fields, core.RecordField{Key: "value", Value: value})
+		items[i] = core.NewRecord(c.Run, fields)
+		key.Free(c.Run)
+		value.Free(c.Run)
+		slices.Free(c.Run, fields)
+	}
+	return eval.Result{Value: core.Value{Kind: core.List, List: items}}
+}
+
+// opTemplateApply splats the already-built positional argument list. It keeps
+// document loop calls distinct from apply's legacy single-list argument rule.
+func opTemplateApply(c *eval.Context, state any, values []core.Value) eval.Result {
+	_ = state
+	if values[0].Kind != core.Callable { return invalidArgument(c, values, 0, "callable") }
+	if values[1].Kind != core.List { return invalidArgument(c, values, 1, "list") }
+	result := c.Call(values[0], values[1].List)
+	c.FreeCallable(&values[0])
+	return result
+}
+
 func popRenderStack(c *eval.Context) {
 	if len(c.RenderStack) == 0 {
 		return
