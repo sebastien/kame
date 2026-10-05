@@ -48,9 +48,14 @@ task native-timeout :
 	Set-Content parent-marker late
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
-task native-cache :
+task native-cache : ./cache-input.txt
 	Add-Content -Path cache-runs.txt -Value ran
 	Write-Output 'native-cache-ok'
+
+task native-concurrent-cache : ./cache-input.txt
+	Start-Sleep -Seconds 2
+	Add-Content -Path concurrent-runs.txt -Value ran
+	Write-Output 'native-concurrent-cache-ok'
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	Push-Location $project
 	try {
@@ -107,7 +112,8 @@ task native-cache :
 		if ($pipelineStatus -ne 0 -or $pipelineOutput -notmatch '2097152' -or $pipelineOutput -notmatch '"stages":\[\{[^}]*"status":0\},\{[^}]*"status":0\}\]' -or $pipelineError -notmatch 'native-pipeline-stderr') {
 			throw "Native binary pipeline failed to preserve 2 MiB flow, per-stage status, or stream separation: exit=$pipelineStatus stdout=$pipelineOutput stderr=$pipelineError"
 		}
-		$cacheArgs = @('--json', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-cache')
+	Set-Content -Path (Join-Path $project 'cache-input.txt') -Value 'initial'
+	$cacheArgs = @('--json', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-cache')
 		$null = & $exe @cacheArgs 2>&1
 		if ($LASTEXITCODE -ne 0 -or !(Test-Path (Join-Path $project 'cache-runs.txt'))) {
 			throw "Native cache miss failed: exit=$LASTEXITCODE"
@@ -116,6 +122,30 @@ task native-cache :
 		$cacheRuns = @(Get-Content (Join-Path $project 'cache-runs.txt'))
 		if ($LASTEXITCODE -ne 0 -or $cacheRuns.Count -ne 1 -or ($cacheOutput -join "`n") -notmatch '"cached":true') {
 			throw "Native cache hit failed: exit=$LASTEXITCODE runs=$($cacheRuns.Count) output=$($cacheOutput -join ' | ')"
+		}
+		Set-Content -Path (Join-Path $project 'cache-input.txt') -Value 'changed'
+		$cacheOutput = & $exe @cacheArgs 2>&1
+		$cacheRuns = @(Get-Content (Join-Path $project 'cache-runs.txt'))
+		if ($LASTEXITCODE -ne 0 -or $cacheRuns.Count -ne 2 -or ($cacheOutput -join "`n") -match '"cached":true') {
+			throw "Native cache input invalidation failed: exit=$LASTEXITCODE runs=$($cacheRuns.Count) output=$($cacheOutput -join ' | ')"
+		}
+		$concurrentArgs = @('--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-concurrent-cache')
+		$firstOutput = Join-Path $project 'concurrent-1.out'
+		$firstError = Join-Path $project 'concurrent-1.err'
+		$secondOutput = Join-Path $project 'concurrent-2.out'
+		$secondError = Join-Path $project 'concurrent-2.err'
+		$firstRun = Start-Process -FilePath $exe -ArgumentList $concurrentArgs -PassThru -NoNewWindow -RedirectStandardOutput $firstOutput -RedirectStandardError $firstError
+		$secondRun = Start-Process -FilePath $exe -ArgumentList $concurrentArgs -PassThru -NoNewWindow -RedirectStandardOutput $secondOutput -RedirectStandardError $secondError
+		if (!$firstRun.WaitForExit(30000) -or !$secondRun.WaitForExit(30000)) {
+			Stop-Process -Id $firstRun.Id, $secondRun.Id -Force -ErrorAction SilentlyContinue
+			throw 'Native concurrent cache miss did not finish within 30 seconds.'
+		}
+		if ($firstRun.ExitCode -ne 0 -or $secondRun.ExitCode -ne 0) {
+			throw "Native concurrent cache commands failed: exits=$($firstRun.ExitCode),$($secondRun.ExitCode) errors=$(Get-Content -Raw $firstError),$(Get-Content -Raw $secondError)"
+		}
+		$concurrentRuns = @(Get-Content (Join-Path $project 'concurrent-runs.txt'))
+		if ($concurrentRuns.Count -ne 1) {
+			throw "Native concurrent cache misses were not serialized: runs=$($concurrentRuns.Count)"
 		}
 		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
