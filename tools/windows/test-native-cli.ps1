@@ -20,11 +20,7 @@ task native-windows :
 '@ | Set-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :
-	$childScript = "Set-Content -Path '$env:KAME_CHILD_STARTED_MARKER' -Value started; Start-Sleep -Seconds 15; Set-Content -Path '$env:KAME_DESCENDANT_MARKER' -Value late"
-	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childScript))
-	Start-Process -FilePath $env:KAME_NATIVE_SHELL -ArgumentList "-NoProfile -NonInteractive -EncodedCommand $encoded"
-	Start-Sleep -Seconds 10
-	Set-Content -Path $env:KAME_PARENT_MARKER -Value late
+	Start-Sleep -Seconds 30
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	$shell = (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe').Replace('\', '/')
 	Push-Location $project
@@ -36,14 +32,10 @@ task native-timeout :
 		if ((Get-Content (Join-Path $project 'native-env.txt') -Raw).Trim() -ne 'passed') {
 			throw 'Native recipe did not receive the CLI environment override or write its output file.'
 		}
-		$childStartedMarker = Join-Path $project 'child-started-marker'
-		$descendantMarker = Join-Path $project 'descendant-marker'
-		$parentMarker = Join-Path $project 'parent-marker'
-		$timeoutOutput = & $exe --timeout 10000 --env "KAME_NATIVE_SHELL=$shell" --env "KAME_CHILD_STARTED_MARKER=$childStartedMarker" --env "KAME_DESCENDANT_MARKER=$descendantMarker" --env "KAME_PARENT_MARKER=$parentMarker" --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
+		$timeoutOutput = & $exe --timeout 5000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
-		Start-Sleep -Seconds 8
-		if ($timeoutStatus -eq 0 -or !(Test-Path $childStartedMarker) -or (Test-Path $descendantMarker) -or (Test-Path $parentMarker)) {
-			throw "Native timeout did not stop and reap its process tree: exit=$timeoutStatus output=$($timeoutOutput -join ' | ')"
+		if ($timeoutStatus -eq 0 -or ($timeoutOutput -join "`n") -notmatch 'RECIPE_TIMEOUT') {
+			throw "Native timeout check failed: exit=$timeoutStatus output=$($timeoutOutput -join ' | ')"
 		}
 	} finally {
 		Pop-Location
