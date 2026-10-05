@@ -15,17 +15,20 @@ root="$TMPDIR/t015-signing"
 release_test_keys "$root/keys"
 
 test-step "stage actual release artifacts with operator supplied keys"
+make dist-native >/dev/null
 make dist-release KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
 	KAME_RELEASE_SIGNING_KEY="$root/keys/signing.pem" KAME_RELEASE_REVISION=test-fixture >/dev/null
 release="$CLI_ROOT/dist/release"
-if python3 - "$release" <<'PY'
+if python3 - "$release" <<'PY'; then test-ok "staged assets have signed-manifest provenance"; else test-fail "release provenance is incomplete"; fi
 import hashlib, json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 rows = {}
 for line in (root / "SHA256SUMS").read_text().splitlines():
     digest, name = line.split("  ", 1)
     rows[name] = digest
-assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "Formula/kame.rb", "bin/kame", "kame.com", "kame.js", "kame.json", "kame.wasm", "kame-windows-x64.zip"}
+platform = __import__("subprocess").check_output([sys.executable, "tools/platform_id.py"], text=True).strip()
+native = f"kame-{platform}"
+assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "Formula/kame.rb", "bin/kame", "kame.com", "kame.js", "kame.json", "kame.wasm", "kame-windows-x64.zip", native}
 provenance = json.loads((root / "PROVENANCE.json").read_text())
 assert provenance["schema"] == 1 and provenance["sourceRevision"] == "test-fixture"
 assert all(rows[item["name"]] == item["sha256"] for item in provenance["subjects"])
@@ -36,9 +39,8 @@ version = (root / "VERSION").read_text().strip()
 assert f'version "{version}"' in formula and rows["kame.com"] in formula
 assert scoop["version"] == version and scoop["hash"] == rows["kame-windows-x64.zip"]
 assert scoop["url"].endswith(f"/v{version}/kame-windows-x64.zip") and scoop["bin"] == ["kame.exe"]
+assert native in rows and rows[native] == hashlib.sha256((root / native).read_bytes()).hexdigest()
 PY
-then test-ok "staged assets have signed-manifest provenance"; else test-fail "release provenance is incomplete"; fi
-
 project="$root/project"
 mkdir -p "$project"
 printf 'task signed-release :\n\t@(out "signed-release-ok")\n' >"$project/Makefile.kmk"
@@ -62,7 +64,7 @@ fi
 init_project="$root/init"
 mkdir -p "$init_project"
 init_out="$(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/bin/kame" init)"
-if [ "$init_out" = "Created Makefile.bootstrap for Kame $(cat VERSION). Use make -f Makefile.bootstrap [targets]." ] && \
+if [ "$init_out" = "Created Makefile.bootstrap for Kame $(cat VERSION). Use make -f Makefile.bootstrap [targets]." ] &&
 	grep -qx "KAME_VERSION ?= $(cat VERSION)" "$init_project/Makefile.bootstrap"; then
 	test-ok "actual signed release initializes a pinned bootstrap sidecar"
 else
@@ -78,7 +80,7 @@ set +e
 KAME_HOME="$root/tamper-cache" KAME_RELEASE_URL="file://$tampered" KAME_BACKEND=wasm "$release/bin/kame" signed-release >"$root/out" 2>"$root/err"
 tamper_status=$?
 KAME_RELEASE_PUBKEY_B64_OVERRIDE="$(openssl genpkey -algorithm ED25519 | openssl pkey -pubout -outform DER | openssl base64 -A)" \
-	KAME_HOME="$root/wrong-key-cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm \
+KAME_HOME="$root/wrong-key-cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm \
 	"$release/bin/kame" signed-release >"$root/out-wrong" 2>"$root/err-wrong"
 wrong_status=$?
 set -e

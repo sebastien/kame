@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -23,7 +24,16 @@ def main():
     parser.add_argument("--signing-key", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
-    assets = ("VERSION", "kame.com", "kame.js", "kame.wasm", "kame-windows-x64.zip", "bin/kame", "Makefile.bootstrap", "Formula/kame.rb", "kame.json")
+    assets = ["VERSION", "kame.com", "kame.js", "kame.wasm", "kame-windows-x64.zip", "bin/kame", "Makefile.bootstrap", "Formula/kame.rb", "kame.json"]
+    for path in sorted(args.directory.glob("kame-*")):
+        if path.name == "kame-windows-x64.zip" or not path.is_file():
+            continue
+        if path.is_symlink() or not re.fullmatch(
+            r"kame-(?:linux|darwin|freebsd|netbsd|openbsd)-(?:x86_64|arm64)",
+            path.name,
+        ):
+            parser.error(f"unexpected native release asset: {path.name}")
+        assets.append(path.name)
     for name in assets:
         if not (args.directory / name).is_file():
             parser.error(f"missing release asset: {name}")

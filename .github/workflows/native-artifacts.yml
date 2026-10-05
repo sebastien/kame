@@ -1,0 +1,47 @@
+name: Native CLI artifacts
+
+on:
+  push:
+    paths:
+      - '.github/workflows/native-artifacts.yml'
+      - 'Makefile'
+      - 'src/go/kame/**'
+      - 'tools/platform_id.py'
+  pull_request:
+    paths:
+      - '.github/workflows/native-artifacts.yml'
+      - 'Makefile'
+      - 'src/go/kame/**'
+      - 'tools/platform_id.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: src/go/kame/go.mod
+      - name: Install Solod compiler
+        shell: bash
+        run: |
+          go install solod.dev/cmd/so@v0.4.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Build host-native CLI
+        run: make dist-native
+      - name: Run host-native CLI
+        shell: bash
+        run: "./dist/native/$(python3 tools/platform_id.py)/kame --version"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ runner.os }}-${{ runner.arch }}
+          path: dist/native/
+          if-no-files-found: error

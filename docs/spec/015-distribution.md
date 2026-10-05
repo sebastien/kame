@@ -25,6 +25,7 @@ release publishes these flat assets under the base URL
 | `kame.wasm` | `make wasm` | freestanding module |
 | `kame.js` | packaged JS CLI | Node CLI wrapper for `kame.wasm` (`010-wasm.md`) |
 | `kame-windows-x64.zip` | `make dist-windows` | Windows x64 `kame.exe` launcher with colocated Node/WASM CLI assets |
+| `kame-PLATFORM` | `make dist-native` on each build host | Host-native CLI binary, named with the `OS-ARCH` platform key |
 | `bin/kame` | stamped launcher | host provisioning and dispatch |
 | `Makefile.bootstrap` | bootstrap template | project-local make delegation and `kame init` |
 | `VERSION` | release tree | signed version selector for the explicit latest channel |
@@ -37,6 +38,12 @@ release publishes these flat assets under the base URL
 Asset filenames carry no version; the release tag does. The Windows bundle is a
 native executable launcher for the Node/WASM CLI and requires Node 18 or later.
 The Cosmopolitan APE remains the full native CLI for its supported hosts.
+The native-artifact workflow builds a host binary on Linux and macOS and stores
+it as `dist/native/PLATFORM/kame`. Before signing a multi-platform release,
+collect each workflow artifact under `dist/native/` and run `dist-release`;
+staging flattens them to `kame-PLATFORM`, and the checksum manifest and
+provenance include every staged native binary. The release signer should stage
+only outputs from trusted builds of the tagged source revision.
 The generated package-manager manifests embed the exact release version and
 asset digest. They can be installed directly with Homebrew or Scoop from the
 release URL; each release carries new pinned manifests. Publishing maintained
@@ -236,6 +243,9 @@ Release assets are built with these targets, additive to the existing
 - `dist-release` stages `dist/release/` with the exact asset names, generated
   Homebrew and Scoop manifests, and a signed `SHA256SUMS`. Publishing is a
   manual, out-of-band step.
+- `dist-native` builds the current host's full native CLI and places it at
+  `dist/native/PLATFORM/kame`; `.github/workflows/native-artifacts.yml` uploads
+  Linux and macOS host builds for later release staging.
 
 Install the pinned package definitions directly from a release:
 
@@ -289,8 +299,8 @@ existing build rules.
 
 ## Deferred
 
-- Full native per-platform CLI binaries beyond the Cosmopolitan APE and the
-  Windows launcher for the Node/WASM CLI.
+- Full native per-platform CLI binaries beyond the Linux and macOS builds,
+  including a native Windows CLI rather than the current Node/WASM launcher.
 - Windows-host launcher and process lifecycle conformance; a cross-compiled PE
   file alone is not host execution evidence.
 - Package-manager integrations.

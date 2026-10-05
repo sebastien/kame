@@ -39,7 +39,7 @@ adapters and integration evidence rather than placeholder methods.
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
 | D16 | Platform execution | In progress: the Node/WASM host has Windows stream pipelines and process-tree termination; a native Windows x64 launcher is built and packaged. POSIX lifecycle coverage passes on the current Linux host. Windows runtime and APE host workflows now target Windows, Darwin and BSD; successful host runs are still required. |
-| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, Windows x64 launcher bundle, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. Full native platform artifacts and maintained tap/bucket publication remain. |
+| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, Windows x64 launcher bundle, Linux/macOS native build artifacts, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. Native Windows CLI support and maintained tap/bucket publication remain. |
 | D18 | Remaining library/ergonomic extensions | Complete: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, safely quoted `shell-template` interpolation, and comma-separated prerequisite sequencing have specified semantics and native/WASM acceptance coverage. |
 
 The explicit boundaries in this table are a finite work inventory. General
@@ -162,5 +162,8 @@ tampering. T015-04 exercises launcher handoff against the actual signed
 release. T015-05 builds the Windows x64 launcher bundle; the signed manifest
 includes that bundle. T015-04 checks the generated Homebrew formula and Scoop
 manifest against their release asset digests and verifies their inclusion in
-signed provenance. The definitions support direct pinned installation; full
-native platform artifacts and maintained tap/bucket publication remain open.
+signed provenance. `make dist-native` builds a host-native binary under a
+stable OS/architecture key; the native-artifact workflow builds Linux and
+macOS outputs, and `dist-release` includes any collected outputs in its signed
+manifest and provenance. Native Windows CLI support and maintained tap/bucket
+publication remain open.
