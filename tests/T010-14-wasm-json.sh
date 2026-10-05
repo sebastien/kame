@@ -24,7 +24,11 @@ cat >"$project/Makefile.kmk" <<'EOF'
 EOF
 
 normalize() {
-	jq -c 'del(.node,.request,.generation,.attempt)' | sort
+	jq -c 'del(.node,.request,.generation,.attempt,.runtimeMS)' | sort
+}
+
+normalizeProcessDisplay() {
+	jq -c 'select(.type == "process-started" or .type == "process-exited") | del(.node,.request,.generation,.attempt,.runtimeMS)' | sort
 }
 
 test-step "a successful primary build streams native JSON Lines"
@@ -35,10 +39,29 @@ if [ ! -s "$project/wasm.err" ] && normalize <"$project/wasm.jsonl" >"$project/w
 else
 	test-fail "wasm --json: err=$(cat "$project/wasm.err")"
 fi
+if jq -e -s 'all(.[] | select(.type == "process-started"); (.program | type == "string") and (.argv | type == "array") and (.argv | length <= 8) and ((.program | utf8bytelength) + ([.argv[] | utf8bytelength] | add // 0) <= 160)) and all(.[] | select(.type == "process-exited"); (.runtimeMS | type == "number") and .runtimeMS >= 0)' "$project/wasm.jsonl" >/dev/null; then
+	test-ok "WASM process display and runtime fields are bounded"
+else
+	test-fail "WASM process display or runtime fields exceeded their contract"
+fi
 if jq -e -s 'all(.[]; .schema == 1 and (.type | type == "string"))' "$project/wasm.jsonl" >/dev/null; then
 	test-ok "every line is a schema-1 JSON object"
 else
 	test-fail "stdout was not valid JSON Lines"
+fi
+
+test-step "direct-argv pipeline display matches native"
+cat >>"$project/Makefile.kmk" <<'EOF'
+
+task pipeline :
+	@(out (pipe (run "printf" "one") (run "cat") (run "cat") (run "cat") (run "cat")))
+EOF
+(cd "$project" && node "$CLI_ROOT/dist/kame.js" --json pipeline) >"$project/pipeline.wasm.jsonl" 2>"$project/pipeline.wasm.err"
+(cd "$project" && "$CLI_BIN" --json pipeline) >"$project/pipeline.native.jsonl" 2>"$project/pipeline.native.err"
+if [ ! -s "$project/pipeline.wasm.err" ] && [ ! -s "$project/pipeline.native.err" ] && normalizeProcessDisplay <"$project/pipeline.wasm.jsonl" >"$project/pipeline.wasm.norm" && normalizeProcessDisplay <"$project/pipeline.native.jsonl" >"$project/pipeline.native.norm" && cmp -s "$project/pipeline.wasm.norm" "$project/pipeline.native.norm" && jq -e -s 'any(.[]; .type == "process-started" and .displayTruncated == true and ([.argv[] | select(. == "|")] | length <= 3))' "$project/pipeline.wasm.jsonl" >/dev/null; then
+	test-ok "native and WASM preserve bounded pipeline display"
+else
+	test-fail "pipeline process events differ: wasm=$(cat "$project/pipeline.wasm.err") native=$(cat "$project/pipeline.native.err")"
 fi
 
 test-step "a failing build stays valid JSON Lines with status 1"

@@ -32,7 +32,8 @@ optional and bounded. Environment values are never included.
 with 011, including `NO_COLOR`, `CLICOLOR_FORCE`, and non-terminal output. JSON
 and plain diagnostic output contain no ANSI escapes. Help and documentation
 examples that advertise executable commands are exercised by acceptance tests
-from a clean temporary project.
+from a clean temporary project. T009-01 is the executable lesson set for the
+documented idioms guide and command help matrix.
 
 ## Acceptance
 
@@ -49,4 +50,7 @@ verifies bounded process fields, nonnegative runtime, human command/runtime
 output, lifecycle order, four-stage truncation, JSON-only stdout and explicit
 color/`NO_COLOR` behavior for redirected progress. `TestPipelineProcessDisplayIsBoundedToFourStages`
 also verifies the four-stage cap, explicit truncation and argument/byte bounds.
-Executable-lesson coverage and cross-host output comparison remain open.
+`tests/T009-01-cli-help.sh` executes the value, wildcard and pattern commands
+from the idioms guide in a clean temporary project. `tests/T010-14-wasm-json.sh`
+compares bounded pipeline process events between native and WASM and validates
+WASM runtime types. Remaining lesson examples outside the idioms guide are open.

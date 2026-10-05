@@ -186,6 +186,17 @@ func (p *Program) ProcessStarted(request host.Request) {
 	p.serviceSpawned(entry)
 }
 
+// ProcessExited publishes a forwarded process terminal event without completing
+// its request. Expression operations complete separately with their structured
+// result, after the host reports this lifecycle event.
+func (p *Program) ProcessExited(request host.Request) {
+	if p.serviceProbeForRequest(request.ID) != nil { return }
+	entry := p.instanceForRequest(request.ID)
+	if entry == nil { entry = p.serviceForProcessRequest(request.ID) }
+	if entry == nil { entry = p.streamInstance(request.NodeID) }
+	if entry != nil { p.emitProcess(entry, ProcessExited, request.ID) }
+}
+
 func (p *Program) serviceSpawned(entry *instance) {
 	if entry == nil || entry.Rule.Kind != rule.ServiceRule || entry.ServiceReady {
 		return

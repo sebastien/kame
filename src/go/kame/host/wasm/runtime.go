@@ -527,6 +527,12 @@ func (r *Runtime) ProcessStarted(request host.Request) {
 	}
 }
 
+func (r *Runtime) ProcessExited(request host.Request) {
+	if r != nil && r.Program != nil {
+		r.Program.ProcessExited(request)
+	}
+}
+
 func (r *Runtime) ProcessStream(request host.Request, stderr bool, data []byte) {
 	if r != nil && r.Program != nil {
 		r.Program.ProcessStream(request, stderr, data)

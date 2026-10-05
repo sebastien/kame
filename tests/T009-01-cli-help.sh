@@ -68,6 +68,24 @@ for command in plan cat inputs outputs span parse fmt run; do
 	cli_expect_stderr_empty
 done
 
+test-step "documented idiom commands execute from a clean project"
+lesson="$TEST_PATH/idioms"
+mkdir -p "$lesson/docs"
+printf 'one\n' >"$lesson/docs/a.md"
+printf 'two\n' >"$lesson/docs/b.md"
+cli_run --dir "$lesson" -- do run --lang expr -c '(join ["a" "b"] "-")'
+cli_expect_status 0
+cli_expect_stdout '"a-b"'
+cli_run --dir "$lesson" -- do run --lang expr -c '(count [1 2 3])'
+cli_expect_status 0
+cli_expect_stdout '3'
+cli_run --dir "$lesson" -- do run --lang expr --allow-read=. -c '(wildcard ./docs/*.md)'
+cli_expect_status 0
+cli_expect_stdout '["./docs/a.md" "./docs/b.md"]'
+cli_run --dir "$lesson" -- do run --lang expr -c '(replace ./src/{name:*}.c "1" "./src/demo.c")'
+cli_expect_status 0
+cli_expect_stdout '"1"'
+
 test-step "unknown do command is a usage error with a hint"
 cli_run -- do bogus
 cli_expect_status 2

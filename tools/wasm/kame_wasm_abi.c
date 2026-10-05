@@ -1252,6 +1252,17 @@ uint32_t kame_wasm_process_started_request(uint64_t handle, uint64_t request) {
   return KAME_WASM_HANDLE_INVALID;
 }
 
+__attribute__((export_name("kame_wasm_process_exited_request")))
+uint32_t kame_wasm_process_exited_request(uint64_t handle, uint64_t request) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (!instance || !instance->runtime) return KAME_WASM_STATE_INVALID;
+  for (kame_wasm_parked_request *saved = instance->parked; saved; saved = saved->next) {
+    if (saved->request == request) { wasm_Runtime_ProcessExited(instance->runtime, saved->pending); return KAME_WASM_OK; }
+  }
+  return KAME_WASM_HANDLE_INVALID;
+}
+
 uint32_t kame_wasm_complete_bytes(uint64_t handle, uint64_t request, uint32_t data, uint32_t data_len) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);

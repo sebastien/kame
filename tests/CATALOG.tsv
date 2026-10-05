@@ -33,7 +33,7 @@ tests/T008-01-cache-hit.sh	008	cache	Record creation, cache hits, --force, input
 tests/T008-02-cache-records.sh	008	cache	Corrupted records are misses and are rewritten
 tests/T008-03-cache-fingerprint.sh	008	cache	Glob membership, bare-dependency blocking, and rule body invalidation
 tests/T008-04-cache-memory-backend.sh	008	cache	Portable in-memory task cache publication, shared identity, and validated hits
-tests/T009-01-cli-help.sh	009	cli	Help, version, do namespace, bare-invocation overview
+tests/T009-01-cli-help.sh	009	cli	Help and version plus executable docs/idioms-and-gotchas.md value, wildcard, and pattern examples
 tests/T009-02-cli-source.sh	009	cli	Source discovery order, -f/-c/-C, option validation
 tests/T009-03-cli-targets.sh	009	cli	Target selection, default resolution, sharing, definitions, ambiguity
 tests/T009-04-cli-json.sh	009	cli	JSON Lines schema, lifecycle events, encodings, failures
@@ -56,7 +56,7 @@ tests/T010-10-wasm-fmt.sh	010	wasm	dist/kame.js do fmt matches native canonical 
 tests/T010-11-wasm-plan.sh	010	wasm	dist/kame.js do plan JSON matches native for captures, dynamic inputs, and missing targets
 tests/T010-12-wasm-graph.sh	010	wasm	dist/kame.js do inputs/outputs/span match native for depths, expansion, and errors
 tests/T010-13-wasm-tools.sh	010	wasm	Tool listing/check parity, host-dependent plans, multiple read/glob requests, repeated queries, capability/phase failures, and no recipe execution
-tests/T010-14-wasm-json.sh	010	wasm	dist/kame.js --json primary streams native JSON Lines and keeps failures valid
+tests/T010-14-wasm-json.sh	010	wasm	dist/kame.js JSON Lines, bounded native/WASM process display and runtime, and failure diagnostics
 tests/T010-15-wasm-process-control.sh	010	wasm	dist/kame.js --timeout kills an overrunning recipe and --retry reruns a failed one
 tests/T010-16-wasm-cancellation.sh	010	wasm	dist/kame.js forwards SIGINT/SIGTERM to the recipe process group and exits 128 plus the signal
 tests/T010-17-wasm-human-output.sh	010	wasm	dist/kame.js primary progress, stream forwarding, diagnostics, and summary match native

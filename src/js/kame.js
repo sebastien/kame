@@ -784,6 +784,7 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_result_kind',
   'kame_wasm_target_event',
   'kame_wasm_process_started',
+  'kame_wasm_process_exited_request',
   'kame_wasm_process_retain_limit',
   'kame_wasm_process_stream',
   'kame_wasm_process_terminal',
@@ -1110,7 +1111,12 @@ class Module {
         }
       }
       const detached = context.concurrent === true;
-      const completion = await runArgvCapture(stages, { ...context, ...redirections, request: detached ? request : undefined, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); this.drainEvents(instance, context); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
+      let processStarted = false;
+      const completion = await runArgvCapture(stages, { ...context, ...redirections, request: detached ? request : undefined, discardStdout: serviceReadyProbe, onStarted: () => { processStarted = true; this.processStarted(instance, detached ? request : undefined); this.drainEvents(instance, context); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
+      if (detached && processStarted) {
+        this.processExited(instance, request);
+        this.drainEvents(instance, context);
+      }
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout);
@@ -1398,6 +1404,12 @@ class Module {
 
   processStarted(instance, request) {
     const status = request === undefined ? this.exports.kame_wasm_process_started(instance) : this.exports.kame_wasm_process_started_request(instance, request);
+    if (status !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
+  }
+
+  processExited(instance, request) {
+    if (request === undefined) return;
+    const status = this.exports.kame_wasm_process_exited_request(instance, request);
     if (status !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
   }
 
