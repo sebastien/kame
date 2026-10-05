@@ -46,8 +46,9 @@ Node/WASM launcher is a separate fallback.
 ## Acceptance
 
 The Windows-host suite builds and runs the actual native PE, not a cross-compile
-or the Node/WASM launcher. The first smoke already verifies version output and a
-PowerShell recipe. The suite must additionally verify:
+or the Node/WASM launcher. The native PE smoke verifies version output, a
+PowerShell recipe, environment forwarding, file output, and a timeout diagnostic.
+It does not establish descendant cleanup. The suite must additionally verify:
 
 - version output, command parsing, native target execution, file reads and
   writes, and include/source discovery;
