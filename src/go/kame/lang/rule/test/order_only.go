@@ -37,3 +37,24 @@ func TestOrderOnlySeparatorRejectsEmptyAndRepeatedSections(t *testing.T) {
 		result.Free()
 	}
 }
+
+func TestAlternativeBuildSeparatorParsesAndFormatsCanonically(t *testing.T) {
+	a := t.Allocator()
+	result := rule.ParseRule(a, "arrow.kmk", "./out <- ./input | prepare\n\tcat @<* > @>\n")
+	if len(result.Diagnostics) != 0 || len(result.Rule.Outputs) != 1 || len(result.Rule.Inputs) != 2 || !result.Rule.Inputs[1].OrderOnly {
+		t.Fatal("alternative rule separator failed to preserve rule structure")
+		result.Free()
+		return
+	}
+	formatted := rule.FormatRule(a, result.Rule)
+	if formatted != "./out : ./input | prepare\n\tcat @<* > @>" {
+		t.Error("formatter did not canonicalize the alternative separator")
+	}
+	colon := rule.ParseRule(a, "colon.kmk", formatted)
+	if len(colon.Diagnostics) != 0 || len(colon.Rule.Inputs) != len(result.Rule.Inputs) {
+		t.Error("canonical rule did not round-trip")
+	}
+	colon.Free()
+	mem.FreeString(a, formatted)
+	result.Free()
+}

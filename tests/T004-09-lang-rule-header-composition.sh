@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spec: docs/spec/004-language.md — composed rule input tokens
+# Spec: docs/spec/004-language.md — composed inputs and alternative rule separator
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T004-09 rule header composition"
@@ -18,7 +18,7 @@ printf spaced >"$project/src dir/space.txt"
 cat >"$project/Makefile.kmk" <<'KMK'
 root = "./src"
 left = (wildcard ./src/*.go)
-./out : @(left) ./literal @(wildcard ./src/*.c) @(root)/extra.h
+./out <- @(left) ./literal @(wildcard ./src/*.c) @(root)/extra.h
 	cat @<* > @>
 quoted : "./src dir/space.txt" "@(root)/a.go"
 KMK

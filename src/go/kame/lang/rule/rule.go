@@ -142,6 +142,11 @@ func ParseRuleRange(a mem.Allocator, s *source.Source, start int, end int) Part 
 	return Part{Rule: p.rule(), Diagnostics: p.diags}
 }
 
+// HasRuleSeparator reports whether text has a top-level rule separator.
+func HasRuleSeparator(text string) bool {
+	return topLevel(text, ':') >= 0 || topLevelArrow(text) >= 0
+}
+
 func FreeRule(a mem.Allocator, r *Rule) {
 	if r == nil {
 		return
@@ -209,14 +214,20 @@ func (p *parser) rule() *Rule {
 	headerStart, headerEnd := trim(p.s.Text, p.start, lineEnd)
 	r := mem.Alloc[Rule](p.a)
 	r.Header, r.Span = source.Span{Start: headerStart, End: headerEnd}, source.Span{Start: p.start, End: lineEnd}
-	colon := topLevel(p.s.Text[headerStart:headerEnd], ':')
-	if colon < 0 {
-		p.error(headerStart, headerEnd, "expected rule colon")
+	header := p.s.Text[headerStart:headerEnd]
+	colon := topLevel(header, ':')
+	arrow := topLevelArrow(header)
+	separator, separatorWidth := colon, 1
+	if arrow >= 0 && (separator < 0 || arrow < separator) {
+		separator, separatorWidth = arrow, 2
+	}
+	if separator < 0 {
+		p.error(headerStart, headerEnd, "expected rule separator ':' or '<-'")
 		return r
 	}
-	colon += headerStart
-	leftStart, leftEnd := trim(p.s.Text, headerStart, colon)
-	rightStart, rightEnd := trim(p.s.Text, colon+1, headerEnd)
+	separator += headerStart
+	leftStart, leftEnd := trim(p.s.Text, headerStart, separator)
+	rightStart, rightEnd := trim(p.s.Text, separator+separatorWidth, headerEnd)
 	p.ruleTargets(r, leftStart, leftEnd)
 	metadata := topLevel(p.s.Text[rightStart:rightEnd], ';')
 	if metadata >= 0 {
@@ -574,6 +585,30 @@ func topLevel(text string, want byte) int {
 		} else if text[i] == ')' || text[i] == ']' || text[i] == '}' {
 			depth--
 		} else if text[i] == want && depth == 0 {
+			return i
+		}
+	}
+	return -1
+}
+
+func topLevelArrow(text string) int {
+	depth, quote := 0, false
+	for i := 0; i+1 < len(text); i++ {
+		if quote {
+			if text[i] == '\\' {
+				i++
+			} else if text[i] == '"' {
+				quote = false
+			}
+			continue
+		}
+		if text[i] == '"' {
+			quote = true
+		} else if text[i] == '(' || text[i] == '[' || text[i] == '{' {
+			depth++
+		} else if text[i] == ')' || text[i] == ']' || text[i] == '}' {
+			depth--
+		} else if text[i] == '<' && text[i+1] == '-' && depth == 0 {
 			return i
 		}
 	}

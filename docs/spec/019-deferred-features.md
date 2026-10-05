@@ -40,7 +40,7 @@ adapters and integration evidence rather than placeholder methods.
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
 | D16 | Platform execution | In progress: the Node/WASM host now has Windows stream pipelines and process-tree termination, with a Windows-only descendant test; Windows-native launch, native-host lifecycle, and APE conformance on advertised non-Linux hosts remain. |
 | D17 | Distribution tooling | In progress: signed `Makefile.bootstrap` release asset and non-overwriting `kame init` are specified and covered. Update/latest selection, native platform artifacts and package-manager integration remain. |
-| D18 | Remaining library/ergonomic extensions | In progress: equality-value `filter`/`filter-out` and `sh`/`shellrun` aliases now have specified semantics and T007 coverage. Tagged-template shell helpers, terminal color functions, dependency sequencing and alternative build syntax remain. |
+| D18 | Remaining library/ergonomic extensions | In progress: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, and the `<-` alternative rule separator now have specified semantics and acceptance coverage. Tagged-template shell helpers, terminal color functions and dependency sequencing remain. |
 
 The explicit boundaries in this table are a finite work inventory. General
 phrases such as "library breadth" do not authorize an unspecified infinite API.
@@ -123,9 +123,10 @@ cross-kind, and invalid-composite rules as `eq`. T007-02 now covers both
 operations, numeric int/float equivalence, kind mismatch, and invalid list
 values. `sh` and `shellrun` now alias `shell` with the same run grant, result,
 and phase behavior; T007-06 covers allowed and denied execution. The same test
-also verifies native captured-script completion. Tagged-template shell helpers,
-terminal color functions, dependency sequencing and alternative build syntax
-remain open.
+also verifies native captured-script completion. The alternative `<-` build
+separator has the same dependency semantics as `:` and canonicalizes to `:`;
+T004-09 verifies planning and execution parity on native and WASM. Tagged-template
+shell helpers, terminal color functions and dependency sequencing remain open.
 D17 now packages `Makefile.bootstrap` inside the signed release manifest.
 `kame init` verifies that asset, creates a pinned sidecar atomically, preserves
 an existing `Makefile`, and refuses to replace an existing sidecar. T015-01

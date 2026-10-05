@@ -52,7 +52,7 @@ design boundaries rather than placeholder behavior.
 | Terminal color functions | Optional library feature; CLI presentation already has a color policy. Avoid mixing terminal escapes into canonical value display. |
 | JavaScript API | The module ABI and JS loader exist. A documented embedding API should expose disposal, copied buffers, grants, host completion, and cancellation; CLI internals are not an API contract. |
 | Python API | Research item; choose binding/transport and ownership model after the embedding contract is stable. |
-| Alternative `<-` build syntax | Design proposal, not a correctness gap. Evaluate readability and formatter compatibility before changing existing rules. |
+| Alternative `<-` build syntax | Implemented as an alternate rule separator with identical dependency semantics; canonical formatting emits `:`. T004-09 verifies native/WASM planning and execution. |
 | Dependency sequencing with `,` | Define whether ordering is an edge or effect sequence; preserve parallel independence and failure propagation. Kash statement sequencing already has different semantics. |
 | Learnability | Finish idioms/gotchas and independent value/rule/process lessons with executable smoke coverage. |
 | Metaprogramming | A4 declaration selection, defaults, and literal CLI/environment overrides are implemented; computed record lookup uses `get`. D03 generated declarations now support bounded typed batches, authored diagnostics, provenance and watch replacement on native/WASM. Headers compose expressions and interpolated paths. |

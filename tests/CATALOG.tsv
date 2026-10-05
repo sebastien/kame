@@ -100,7 +100,7 @@ tests/T017-17-eval-process-expressions.sh	017	eval	Expression run/pipe graphs, s
 tests/T017-18-kash-async.sh	017	kash	Async graph ownership, lazy handles, repeat-safe await, joins, cancellation and native/WASM parity
 tests/T010-20-wasm-build-includes.sh	010	cli	Build and inspection includes, nested source loading, cycles, duplicate declarations and authored diagnostic parity
 tests/T007-09-lib-wildcard-union.sh	007	lib	Sorted multi-pattern unions, deduplication, independent dependency membership and native/WASM file input parity
-tests/T004-09-lang-rule-header-composition.sh	004	lang	Mixed expression and interpolated rule inputs, quoted paths, expanded inspection and native/WASM ordering
+tests/T004-09-lang-rule-header-composition.sh	004	lang	Mixed expression and interpolated inputs, quoted paths, alternative <- rule separator, expanded inspection and native/WASM ordering
 tests/T010-21-wasm-build-effects.sh	010	cli	Isolated binary yield and write publication, dependent recipe ordering, missing outputs, shell parent directories, failures and atomic staging cleanup
 tests/T014-02-patterns-ergonomics.sh	014	lang	Leading pattern captures, numeric and boolean expansions, bare targets, exact precedence and template ambiguity on native/WASM
 tests/T014-03-runtime-pattern-construction.sh	014	lang	Explicit runtime pattern construction and malformed-pattern diagnostics on native/WASM

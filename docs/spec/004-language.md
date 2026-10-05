@@ -448,6 +448,9 @@ A rule has a header and zero or more indented body lines:
 ./output : ./input
 	command @< @>
 
+./other <- ./input
+	command @< @>
+
 default : ./output
 
 task cached-name : dependency
@@ -456,6 +459,12 @@ task cached-name : dependency
 service server : ./output
 	command --watch
 ```
+
+The top-level rule separator may be `:` or `<-`; both declare the same output
+and prerequisite lists. `<-` is an alternative spelling for authors who prefer
+to read a rule as “output is built from inputs.” The formatter emits canonical
+`:` syntax. Separators inside quoted text or nested expressions are not rule
+separators.
 
 ```text
 RULE = (PREFIXED-RULE | ALWAYS-RULE | UNPREFIXED-RULE) ENVIRONMENT?
@@ -608,7 +617,7 @@ authoring conventions; the formatter must not rename or reorder source items.
 Formatting is AST-based and canonical:
 
 - `LF` line endings.
-- One space around definition `=` and rule `:`.
+- One space around definition `=` and canonical rule `:`.
 - One tab before recipe content; blank recipe lines carry no indentation.
 - Two-space indentation inside multiline expressions.
 - No trailing whitespace.

@@ -150,7 +150,7 @@ func parseScript(s *Script, offset int) {
 			pos = nextLine(text, definitionEnd)
 			continue
 		}
-		if topLevel(text[start:end], ':') >= 0 {
+		if rule.HasRuleSeparator(text[start:end]) {
 			part := rule.ParseRuleRange(a, s.Source, start, len(text))
 			s.takeDiagnostics(part.Diagnostics)
 			if part.Rule == nil {
