@@ -39,7 +39,7 @@ adapters and integration evidence rather than placeholder methods.
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
 | D16 | Platform execution | In progress: the Windows launcher runtime and process-tree acceptance pass on Windows; Linux/macOS x64 and ARM64 plus FreeBSD/NetBSD/OpenBSD native host and artifact workflows pass. APE conformance passes on Linux, macOS, FreeBSD and NetBSD; OpenBSD APE execution still aborts after assimilation. |
-| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, Windows x64 launcher bundle, Linux/macOS x64 and ARM64 plus BSD x64 native builds, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. Maintained tap/bucket publication and final cross-host release assembly remain. |
+| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, Windows x64 launcher bundle, Linux/macOS x64 and ARM64 plus BSD x64 native builds, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. A native Windows CLI, maintained tap/bucket publication and final cross-host release assembly remain. |
 | D18 | Remaining library/ergonomic extensions | Complete: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, safely quoted `shell-template` interpolation, and comma-separated prerequisite sequencing have specified semantics and native/WASM acceptance coverage. |
 
 The explicit boundaries in this table are a finite work inventory. General
@@ -129,9 +129,10 @@ OpenBSD APE run at
 [37430137971](https://github.com/sebastien/kame/actions/runs/37430137971)
 still exits 134 after the assimilation attempt; OpenBSD APE execution remains
 unverified. The APE workflow tests the supported POSIX hosts; the Windows
-launcher runtime is covered by its native Windows workflow. Maintained
-Homebrew tap and Scoop bucket publication, along with final cross-host release
-assembly, remain open. The initial-contract audit remains historical evidence,
+launcher runtime is covered by its native Windows workflow. The shipped Windows
+package still runs the Node/WASM CLI; a host-native Windows CLI, maintained
+Homebrew tap and Scoop bucket publication, and final cross-host release
+assembly remain open. The initial-contract audit remains historical evidence,
 not completion of this work.
 D18's equality-value shorthand is implemented: `(filter LIST VALUE)` retains
 strict scalar-equal items, and `filter-out` removes them with the same numeric,
