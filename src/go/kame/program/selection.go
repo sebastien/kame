@@ -98,6 +98,12 @@ func (p *Program) selectRule(target string) selection {
                 if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
 				continue
 			}
+			if match.Limited {
+				match.Free(p.Alloc)
+				if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
+				if file { mem.FreeString(p.Alloc, target) }
+				return selection{Diagnostic: diagnostic.Diagnostic{Source: cloneText(p.Alloc, p.Parsed.Source.Name), Code: cloneText(p.Alloc, "PAT_LIMIT"), Severity: diagnostic.Error, Message: cloneText(p.Alloc, "regular-expression match exceeded its step budget"), Span: diagnostic.Span{Start: output.Span.Start, End: output.Span.End}, Target: cloneText(p.Alloc, selectedTarget), Owned: true}}
+			}
 			if matched != nil {
 				if matched != r || !sameCaptures(captures, match.Captures) {
 					match.Free(p.Alloc)

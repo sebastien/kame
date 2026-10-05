@@ -4,6 +4,8 @@ import (
 	"kame/lang/expr"
 	"kame/lang/source"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
+	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
 
@@ -315,6 +317,23 @@ func TestPatternPathsClassify(t *testing.T) {
 	plain := parse(t, "./src/main.c")
 	defer plain.Free()
 	if plain.Expr == nil || plain.Expr.Pattern != nil { t.Error("plain path became a pattern") }
+	regex := parse(t, `(str ./{name:~[a-z]+}.txt)`)
+	defer regex.Free()
+	if regex.Expr == nil || len(regex.Diagnostics) != 0 || len(regex.Expr.Items) != 2 || regex.Expr.Items[1].Pattern == nil || regex.Expr.Items[1].Pattern.Matchers != 1 {
+		t.Error("regex path pattern did not stay within one expression atom")
+	} else {
+		formatted := expr.Format(t.Allocator(), regex.Expr)
+		if formatted != `(str ./{name:~[a-z]+}.txt)` { t.Error("regex path expression formatting changed") }
+		mem.FreeString(t.Allocator(), formatted)
+	}
+	invalidRegex := expr.Parse(t.Allocator(), "regex.km", `(str ./{name:~(a|)}.txt)`)
+	if len(invalidRegex.Diagnostics) != 1 { t.Error("malformed regex path did not report one source diagnostic") }
+	if len(invalidRegex.Diagnostics) != 0 && invalidRegex.Diagnostics[0].Span.Start != 16 { t.Error("malformed regex path diagnostic start was shifted") }
+	if len(invalidRegex.Diagnostics) != 0 && invalidRegex.Diagnostics[0].Span.End != 17 { t.Error("malformed regex path diagnostic end was shifted") }
+	invalidRegex.Free()
+	invalidRegexString := expr.Parse(t.Allocator(), "regex.km", `"x\n{name:~(a|)}"`)
+	if len(invalidRegexString.Diagnostics) != 1 || !sameSpan(invalidRegexString.Diagnostics[0].Span, 13, 14) { t.Error("malformed regex string lost its authored source span after escapes") }
+	invalidRegexString.Free()
 	escaped := parse(t, "./a\\{b}.c")
 	defer escaped.Free()
 	if escaped.Expr == nil || escaped.Expr.Pattern != nil || escaped.Expr.Text != "./a\\{b}.c" { t.Error("escaped brace path became a pattern") }
@@ -337,6 +356,44 @@ func TestPatternStringsClassifyAndFormat(t *testing.T) {
 	interp := parse(t, "\"{(count files)}/*.c\"")
 	defer interp.Free()
 	if interp.Expr == nil || interp.Expr.Pattern != nil { t.Error("interpolated string became a pattern") }
+}
+
+func TestPortableRegexPatternsAndBudget(t *testing.T) {
+	a := t.Allocator()
+	parsed := expr.ParsePatternText(a, "{name:~[a-z]+}-{~(ab|cd)+}", 0)
+	if len(parsed.Diagnostics) != 0 { t.Error("valid portable regex pattern did not parse") }
+	formatted := expr.CanonicalPattern(a, parsed.Pattern)
+	if formatted != "{name:~[a-z]+}-{~(ab|cd)+}" { t.Error("regex pattern formatting changed its spelling") }
+	matched := parsed.Pattern.MatchText(a, "demo-abcd")
+	if !matched.Matched || len(matched.Captures) != 2 || matched.Captures[0] != "demo" || matched.Captures[1] != "abcd" { t.Error("regex pattern did not return positional captures") }
+	slices.Free(a, matched.Captures)
+	mem.FreeString(a, formatted)
+	parsed.Pattern.Free(a)
+	slices.Free(a, parsed.Diagnostics)
+
+	invalid := expr.ParsePatternText(a, "x{name:~(a|)}", 5)
+	if len(invalid.Diagnostics) != 1 || !sameSpan(invalid.Diagnostics[0].Span, 15, 16) { t.Errorf("invalid regex diagnostic span = %v", invalid.Diagnostics) }
+	invalid.Pattern.Free(a)
+	slices.Free(a, invalid.Diagnostics)
+	invalidForms := []string{"{~a{2}}", "{~\\p{L}}", "{~[z-a]}"}
+	for i := range invalidForms {
+		invalid = expr.ParsePatternText(a, invalidForms[i], 0)
+		if len(invalid.Diagnostics) == 0 { t.Error("unsupported or malformed regex syntax was accepted") }
+		invalid.Pattern.Free(a)
+		slices.Free(a, invalid.Diagnostics)
+	}
+
+	bounded := expr.ParsePatternText(a, "{~a*}z", 0)
+	if len(bounded.Diagnostics) != 0 { t.Fatal("budget regex did not parse"); return }
+	var subject strings.Builder
+	subject = strings.NewBuilder(a)
+	for i := 0; i < 1600; i++ { subject.WriteByte('a') }
+	result := bounded.Pattern.MatchText(a, subject.String())
+	if !result.Limited || result.Matched { t.Error("regex state budget did not fail closed") }
+	slices.Free(a, result.Captures)
+	subject.Free()
+	bounded.Pattern.Free(a)
+	slices.Free(a, bounded.Diagnostics)
 }
 
 func TestMixedPatternGroupsAreRejected(t *testing.T) {

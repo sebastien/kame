@@ -76,6 +76,30 @@ func TestTargetMatchesLeftmostShortestCapture(t *testing.T) {
 	match.Free(t.Allocator())
 }
 
+func TestTargetRegexCaptureFormatsAndMatches(t *testing.T) {
+	a := t.Allocator()
+	target := template.ParseTarget(a, "test.km", "./{name:~[a-z]+}.txt")
+	defer target.Free()
+	if len(target.Diagnostics) != 0 || len(target.Parts) != 3 || target.Parts[1].Regex == nil {
+		t.Error("regex target capture did not parse")
+		return
+	}
+	formatted := template.FormatTarget(a, target)
+	if formatted != "./{name:~[a-z]+}.txt" { t.Error("regex target formatting changed its spelling") }
+	mem.FreeString(a, formatted)
+	match := target.MatchTarget(a, "./demo.txt")
+	if match == nil || len(match.Captures) != 1 || match.Captures[0].Name != "name" || match.Captures[0].Text != "demo" {
+		t.Error("regex target did not match and capture its name")
+		return
+	}
+	match.Free(a)
+	invalid := template.ParseTarget(a, "test.km", "./{name:~(a|)}.txt")
+	defer invalid.Free()
+	if len(invalid.Diagnostics) != 1 || !sameSpan(invalid.Diagnostics[0].Span, 11, 12) {
+		t.Error("invalid regex target diagnostic lost its authored byte span")
+	}
+}
+
 func TestTargetDoubleStarCrossesSlash(t *testing.T) {
 	target := template.ParseTarget(t.Allocator(), "test.km", "./{path:**}/{name:*}.c")
 	defer target.Free()

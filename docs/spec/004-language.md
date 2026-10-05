@@ -396,11 +396,9 @@ When adjacent variable-width groups can match, captures use leftmost-shortest
 matching. Reusing one capture name requires every occurrence to match the same
 text.
 
-Regular-expression groups and capture processors are deferred.
-Anonymous `{*}`/`{**}` output captures and positional rule input references
-`{_N}` are specified in `029-pattern-extensions.md`.
-Runtime construction of pattern values from computed text is specified there
-as well.
+Anonymous `{*}`/`{**}` output captures, positional rule input references
+`{_N}`, regular-expression capture groups, and runtime pattern construction are
+specified in `029-pattern-extensions.md`.
 
 Expression-language pattern literals use a related grammar with `{name}` as an
 expansion reference rather than a capture; see `014-patterns.md`.

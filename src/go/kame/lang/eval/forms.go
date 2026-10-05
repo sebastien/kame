@@ -448,6 +448,9 @@ func matchPattern(a mem.Allocator, subject string, pattern *core.Value, span sou
 				mem.FreeString(a, names[i])
 			}
 			slices.Free(a, names)
+			if res.Limited {
+				return matchOutcome{Diag: diagnostic.Diagnostic{Code: cloneFailureText(a, "PAT_LIMIT"), Severity: diagnostic.Error, Message: cloneFailureText(a, "regular-expression match exceeded its step budget"), Span: diagnostic.Span{Start: span.Start, End: span.End}, Owned: true}}
+			}
 			return matchOutcome{}
 		}
 		var captures []string

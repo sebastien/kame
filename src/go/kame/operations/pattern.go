@@ -170,6 +170,10 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 // replaceOne expands one subject. A subject without a match yields nil.
 func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Result {
 	matched := state.match.MatchText(c.Run, subject)
+	if matched.Limited {
+		slices.Free(c.Run, matched.Captures)
+		return ownedFailure(c.Run, "PAT_LIMIT", "regular-expression match exceeded its step budget")
+	}
 	if !matched.Matched {
 		slices.Free(c.Run, matched.Captures)
 		return eval.Result{Value: core.Value{Kind: core.Nil}}

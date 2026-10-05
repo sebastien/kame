@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v2"
+const version = "v3"
 
 // Register installs every standard operation. Registration stays declarative
 // so operation implementations can be organized by domain independently.
@@ -24,6 +24,7 @@ func Register(r *eval.Registry) bool {
 		add(r, "unique", opUnique, 1, 1) && add(r, "join", opJoin, 2, 2) &&
 		add(r, "split", opSplit, 2, 2) && add(r, "strip", opStrip, 1, 1) && add(r, "pattern", opPattern, 1, 1) &&
 		add(r, "replace", opReplace, 2, 3) && add(r, "includes?", opIncludes, 2, 2) &&
+		add(r, "regex-match", opRegexMatch, 2, 2) && add(r, "regex-replace", opRegexReplace, 3, 3) && add(r, "capture", opCapture, 2, 2) &&
 		add(r, "starts?", opStarts, 2, 2) && add(r, "ends?", opEnds, 2, 2) &&
 		add(r, "uppercase", opUppercase, 1, 1) && add(r, "lowercase", opLowercase, 1, 1) &&
 		add(r, "basename", opBasename, 1, 1) && add(r, "dirname", opDirname, 1, 1) &&

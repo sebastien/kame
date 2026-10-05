@@ -120,7 +120,7 @@ Current coverage:
 | Spec | Current CLI suites | Focus |
 | --- | --- | --- |
 | 003 | 2 suites; sequences 01, 02 | POSIX streams, shell, retries, timeout and process-group cleanup |
-| 004 | 14 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 09, 10, 11, 12, 13 | Parsers, formatting, headers, continuations, wildcard inputs and declaration selection |
+| 004 | 16 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 09, 10, 11, 12, 13, 14, 15 | Parsers, formatting, headers, continuations, wildcard inputs and declaration selection |
 | 005 | 5 suites; sequences 01, 02, 03, 04, 05 | Values, references, lexical forms, selectors and arguments |
 | 006 | 8 suites; sequences 01, 02, 03, 04, 04, 05, 06, 07 | Freshness, dependencies, always/order-only rules, deferred effects and target environments |
 | 007 | 10 suites; sequences 01, 02, 03, 04, 05, 06, 07, 09, 10, 11 | All standard operations, grants, wildcard unions, record lookup and declared tool policy |
@@ -130,7 +130,7 @@ Current coverage:
 | 011 | 3 suites; sequences 01, 02, 03 | Code registry, source layout, structured context and process cause policy |
 | 012 | 4 suites; sequences 01, 02, 03, 04 | Protocol/event ownership, live output, large captures and public backpressure |
 | 013 | 5 suites; sequences 01, 02, 03, 04, 05 | Catalog, fixture hygiene, binary contract, graph growth and artifact build modes |
-| 014 | 2 suites; sequences 01, 02 | Sections, pattern replace, bare captures and exact/template precedence |
+| 014 | 4 suites; sequences 01–04 | Sections, pattern replace, captures, runtime construction and portable regular-expression operations |
 | 015 | 4 suites; sequences 01, 02, 03, 04 | Launcher integrity, backend choice, provisioning, build metadata and signed release provenance |
 | 016 | 1 suite; sequences 01 | Template rendering, directives, includes, styles and check mode |
 | 017 | 19 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 | Kash processes/control, unified sessions, capabilities, async ownership and recipe interpreters |

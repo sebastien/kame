@@ -222,11 +222,9 @@ requires a pattern literal or a pattern value.
   `EXPR_INVALID`.
 - No match is not an error; the result is `:nil`.
 
-## Deferred
-
-- Regular-expression groups.
-
-Runtime pattern construction is specified in `029-pattern-extensions.md`.
+Regular-expression groups, capture processors, regex matching and replacement,
+and runtime pattern construction are specified in
+`029-pattern-extensions.md`.
 
 ## Acceptance Tests
 

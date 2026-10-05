@@ -258,7 +258,15 @@ func (p *parser) expression() *Expr {
 
 func (p *parser) path() *Expr {
 	start := p.pos
-	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos { p.pos++ }
+	patternDepth := 0
+	for p.pos < len(p.s.Text) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
+		b := p.s.Text[p.pos]
+		if b == '\\' && p.pos+1 < len(p.s.Text) { p.pos += 2; continue }
+		if b == '{' { patternDepth++; p.pos++; continue }
+		if b == '}' && patternDepth > 0 { patternDepth--; p.pos++; continue }
+		if isDelimiter(b) && (patternDepth == 0 || b == ' ' || b == '\t' || b == '\n' || b == '\r') { break }
+		p.pos++
+	}
 	e := p.node(Path, start)
 	e.Text = p.s.Text[start:p.pos]
 	p.classifyPathPattern(e, start)
@@ -350,7 +358,15 @@ func (p *parser) tplError(start int, end int, message string) {
 func (p *parser) classifyPathPattern(e *Expr, start int) {
 	if e.Text == "" || strings.IndexByte(e.Text, '{') < 0 { return }
 	parsed := ParsePatternText(p.a, e.Text, start)
-	if len(parsed.Diagnostics) != 0 || !HasGroups(parsed.Pattern) {
+	if len(parsed.Diagnostics) != 0 {
+		if containsRegexGroupMarker(e.Text) {
+			for i := range parsed.Diagnostics { p.diags = slices.Append(p.a, p.diags, parsed.Diagnostics[i]) }
+		}
+		parsed.Pattern.Free(p.a)
+		slices.Free(p.a, parsed.Diagnostics)
+		return
+	}
+	if !HasGroups(parsed.Pattern) {
 		parsed.Pattern.Free(p.a)
 		slices.Free(p.a, parsed.Diagnostics)
 		return
@@ -364,6 +380,18 @@ func (p *parser) classifyPathPattern(e *Expr, start int) {
 	e.TextOwned = true
 	e.Text = CanonicalPattern(p.a, parsed.Pattern)
 	e.Pattern = parsed.Pattern
+}
+
+func containsRegexGroupMarker(text string) bool {
+	for i := 0; i < len(text); i++ {
+		if text[i] == '\\' { i++; continue }
+		if text[i] != '{' { continue }
+		j := i + 1
+		if j < len(text) && text[j] == '~' { return true }
+		for j < len(text) && isNameContinue(text[j]) { j++ }
+		if j+1 < len(text) && text[j] == ':' && text[j+1] == '~' { return true }
+	}
+	return false
 }
 
 func isNameStart(b byte) bool { return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
@@ -968,9 +996,26 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 			part.Span = source.Span{Start: sourceStarts[part.Span.Start], End: sourceEnds[part.Span.End-1]}
 		}
 	}
+	for i := range parsed.Diagnostics {
+		span := parsed.Diagnostics[i].Span
+		if span.Start >= 0 && span.Start < len(sourceStarts) {
+			startAt := sourceStarts[span.Start]
+			endAt := startAt
+			if span.End > span.Start && span.End <= len(sourceEnds) { endAt = sourceEnds[span.End-1] }
+			parsed.Diagnostics[i].Span = source.Span{Start: startAt, End: endAt}
+		}
+	}
 	slices.Free(p.a, sourceStarts)
 	slices.Free(p.a, sourceEnds)
-	if len(parsed.Diagnostics) != 0 || !HasGroups(parsed.Pattern) {
+	if len(parsed.Diagnostics) != 0 {
+		if containsRegexGroupMarker(text) {
+			for i := range parsed.Diagnostics { p.diags = slices.Append(p.a, p.diags, parsed.Diagnostics[i]) }
+		}
+		parsed.Pattern.Free(p.a)
+		slices.Free(p.a, parsed.Diagnostics)
+		return
+	}
+	if !HasGroups(parsed.Pattern) {
 		parsed.Pattern.Free(p.a)
 		slices.Free(p.a, parsed.Diagnostics)
 		return

@@ -69,6 +69,7 @@ test-wasm: wasm-check
 	tests/T004-12-lang-optional-includes.sh
 	tests/T004-13-lang-declaration-conditions.sh
 	tests/T004-14-lang-rule-positional-captures.sh
+	tests/T004-15-lang-rule-regex-captures.sh
 	tests/T012-02-streams-live-cli.sh
 	tests/T012-03-streams-large-output.sh
 	tests/T012-04-streams-backpressure.sh
@@ -89,6 +90,7 @@ test-wasm: wasm-check
 	tests/T010-33-wasm-embedding-python.sh
 	tests/T014-02-patterns-ergonomics.sh
 	tests/T014-03-runtime-pattern-construction.sh
+	tests/T014-04-patterns-regex.sh
 	tests/T016-01-cli-render.sh
 	tests/T017-02-wasm-capture.sh
 	tests/T017-03-eval-pipelines.sh

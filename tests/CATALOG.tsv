@@ -104,6 +104,7 @@ tests/T004-09-lang-rule-header-composition.sh	004	lang	Mixed expression and inte
 tests/T010-21-wasm-build-effects.sh	010	cli	Isolated binary yield and write publication, dependent recipe ordering, missing outputs, shell parent directories, failures and atomic staging cleanup
 tests/T014-02-patterns-ergonomics.sh	014	lang	Leading pattern captures, numeric and boolean expansions, bare targets, exact precedence and template ambiguity on native/WASM
 tests/T014-03-runtime-pattern-construction.sh	014	lang	Explicit runtime pattern construction and malformed-pattern diagnostics on native/WASM
+tests/T014-04-patterns-regex.sh	014	lang	Portable regex groups, named and positional capture operations, replacement and malformed-pattern parity on native/WASM
 tests/T004-10-lang-line-continuations.sh	004	lang	Continued definitions and headers, recipe backslashes, multiline verbatim values and native/WASM format idempotence
 tests/T016-01-cli-render.sh	016	cli	Raw document rendering, repeated string payloads, comment inference, parse-only checks and capability parity on native/WASM
 tests/T007-10-lib-record-lookup.sh	007	lib	Computed record keys, nil/default contracts, callable transfer and configuration/input planning parity
@@ -127,6 +128,7 @@ tests/T010-24-wasm-target-arguments.sh	010	wasm	WASM target arguments in plan JS
 tests/T010-25-wasm-watch-abi.sh	010	wasm	Public watch ABI query/copy semantics, retained roots, file invalidation, malformed resource rejection, allocation failure, instance isolation and disposal
 tests/T004-13-lang-declaration-conditions.sh	004	lang	Pure when/otherwise/end declaration selection, gated includes, literal configuration, nested inactive branches, source/session parity and authored diagnostics
 tests/T004-14-lang-rule-positional-captures.sh	004	lang	Anonymous rule captures, positional input references, and scope bindings on native and WASM
+tests/T004-15-lang-rule-regex-captures.sh	004	lang	Regex output capture matching, named input rendering, positional recipe bindings and canonical formatting on native and WASM
 tests/T017-19-kash-recipes.sh	017	kash	Selected shell policies, structured recipe cache/retry/timeout, reusable scripts and invocation-owned callable lifetime on both hosts
 tests/T009-14-cli-watch.sh	009	cli	Native shared watch roots, scoped environments and grants across invalidation/source reload, preserved timestamps, malformed-source recovery, optional-include and failed-root repair, obsolete-input subscription cleanup, bounded unread watch output, idle settled roots, active recipe-child cleanup, changed graph, active-input invalidation and denied-effect protection
 tests/T009-15-cli-target-arguments.sh	009	cli	Native target arguments in plan JSON, defaults, dependency scope, identity, diagnostics, dry-run and watch invalidation

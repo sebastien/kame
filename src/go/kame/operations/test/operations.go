@@ -409,6 +409,68 @@ func TestRuntimePatternConstruction(t *testing.T) {
 	registry.Free()
 }
 
+func TestRegexCaptureOperations(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Error("library registration failed") }
+	parsed := script.Parse(a, "regex", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	match := `(regex-match (pattern (cat "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42")`
+	result := evaluate(t, program, match)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Record {
+		t.Error("regex-match did not return a match record")
+	} else {
+		captures := regexTestField(result.Value, "captures")
+		named := regexTestField(result.Value, "named")
+		if regexTestField(result.Value, "text").Text != "demo42" || captures.Kind != core.List || len(captures.List) != 2 || captures.List[0].Text != "demo" || captures.List[1].Text != "42" || regexTestField(named, "name").Text != "demo" {
+			t.Error("regex-match returned incorrect positional or named captures")
+		}
+	}
+	result.Free(a)
+	result = evaluate(t, program, `(capture 1 (regex-match (pattern (cat "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42"))`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "42" { t.Error("capture did not select the indexed value") }
+	result.Free(a)
+	result = evaluate(t, program, `(capture "name" (regex-match (pattern (cat "{" "name:~" "[a-z]+" "}")) "demo"))`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo" { t.Error("capture did not select the named value") }
+	result.Free(a)
+	result = evaluate(t, program, `(capture 1 (regex-match (pattern (cat "{" "name:~[a-z]+}" "-" "{" "name:~[a-z]+}")) "abc-abc"))`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "abc" { t.Error("repeated named regex groups did not populate each positional slot") }
+	result.Free(a)
+	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~" "[a-z]+" "}")) (pattern (cat "x{" "name" "}")) "demo")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "xdemo" { t.Error("regex-replace did not expand a named capture") }
+	result.Free(a)
+	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) (pattern (cat "x{" "name" "}")) ["demo" "42"])`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 || result.Value.List[0].Kind != core.String || result.Value.List[0].Text != "xdemo" || result.Value.List[1].Kind != core.Nil {
+		t.Error("regex-replace did not map captures over a list")
+	}
+	result.Free(a)
+	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) (pattern (cat "x{" "missing" "}")) "demo")`)
+	if result.Diagnostic.Code != "PAT_INVALID" { t.Error("regex-replace accepted a missing capture reference") }
+	result.Free(a)
+	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) "x" :nil)`)
+	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("regex-replace accepted a nil subject") }
+	result.Free(a)
+	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) "x" 42)`)
+	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("regex-replace accepted a non-string subject") }
+	result.Free(a)
+	result = evaluate(t, program, `(regex-match (pattern (cat "{" "~(ab|cd)+" "}")) "abcd")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Record { t.Error("regex groups, alternation or repetition did not match") }
+	result.Free(a)
+	result = evaluate(t, program, `(regex-match (pattern (cat "{" "~[" "}")) "a")`)
+	if result.Diagnostic.Code != "PAT_INVALID" { t.Error("malformed runtime regex was accepted") }
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func regexTestField(record core.Value, key string) core.Value {
+	for i := range record.Record { if record.Record[i].Key == key { return record.Record[i].Value } }
+	return core.Value{Kind: core.Nil}
+}
+
 func TestComputedRecordLookupTransfersSelectedCallables(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)

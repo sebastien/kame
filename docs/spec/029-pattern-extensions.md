@@ -2,12 +2,12 @@
 
 ## Purpose and status
 
-D11 extends the shared target and expression pattern machinery. The initial
-implementation adds anonymous captures to rule outputs and positional capture
-references to rule inputs. `(pattern TEXT)` explicitly constructs a validated
-pattern value from a runtime string. Regular-expression groups and operations,
-and capture processors remain explicit D11 work; this document will gain their
-grammar and acceptance cases before those portions are implemented.
+D11 extends the shared target and expression pattern machinery. It adds
+anonymous captures to rule outputs, positional capture references to rule
+inputs, and `(pattern TEXT)` construction from a runtime string. Portable
+regular-expression groups, bounded matching, capture processors, replacement,
+and native/WASM acceptance coverage are implemented. D11 remains in progress
+while edge-case ownership, diagnostics and final regression gates are reviewed.
 
 The extension preserves anchored, leftmost-shortest matching, non-empty
 captures, and the existing `*`, `**`, `?`, character-class, and named-capture
@@ -67,12 +67,15 @@ The portable regex grammar is byte-oriented ASCII syntax: literal bytes;
 `.`, matching any byte except `/`; bracket classes `[abc]`, ranges `[a-z]`,
 and negation `[!abc]`; grouping with `(...)`; alternation with `|`; and the
 quantifiers `?`, `*`, and `+`. A backslash quotes the next byte. Empty
-alternatives, empty groups, stacked quantifiers, lookaround, backreferences,
-Unicode properties, and counted repetition are invalid. The regex group itself
-must be non-empty even when its expression could match the empty string.
-Evaluation has a fixed portable step budget derived from expression and input
-length; exceeding it fails with `PAT_LIMIT` rather than consuming unbounded
-time. Parser diagnostics point to the authored regex byte that is invalid.
+alternatives, empty groups, stacked quantifiers, lookaround, counted
+repetition, and Unicode-property escapes such as `\p{Letter}` are invalid.
+Backslash quotes exactly the next byte, so `\1` matches a literal `1`; it does
+not introduce a backreference. The regex group itself must be non-empty even
+when its expression could match the empty string.
+Evaluation has a portable budget of 1,000,000 NFA state steps across one full
+pattern match, including candidate capture boundaries. Exceeding it fails with
+`PAT_LIMIT` rather than consuming unbounded time. Parser diagnostics point to
+the authored regex byte that is invalid.
 
 ## Regex operations and processors
 
@@ -117,12 +120,16 @@ replacement results must agree across native, WASM CLI and evaluator tests.
 - `(pattern (cat "./" "{" "name:*" "}.c"))` returns a pattern and can be
   passed to existing matching/replacement operations; malformed runtime
   patterns produce `PAT_INVALID`.
+- `{name:~[a-z]+}` and `{~(ab|cd)+}` parse in expression patterns and file-rule
+  outputs, preserve their spelling when formatted, and expose each non-empty
+  capture by name and source-order index.
+- `(regex-match PATTERN SUBJECT)`, `(capture INDEX-OR-NAME MATCH)`, and
+  `(regex-replace MATCH-PATTERN EXPANSION SUBJECT)` have identical capture,
+  replacement, invalid-input and budget behavior on native and WASM.
 
-## Remaining D11 clauses
+## Remaining D11 review
 
-- Implement the regex group grammar, bounded portable matcher and source-aware
-  diagnostics above.
-- Implement `regex-match`, `capture` and `regex-replace` with the specified
-  kinds, return shapes, missing-capture behavior, bounds and ownership.
-- Verify native, WASM CLI and evaluator parity for captures, replacements,
-  formatting and diagnostics.
+- Audit cleanup for success, malformed input, no-match, list-item failure and
+  budget exhaustion, including target selection and operation diagnostics.
+- Run the registered native and WASM suites, package checks and full final
+  regression gates from a stable revision before marking D11 complete.

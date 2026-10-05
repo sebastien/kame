@@ -25,6 +25,7 @@ type PatternPart struct {
 	Kind    PatternPartKind
 	Text    string
 	Pattern string
+	Regex   bool
 	Index   int
 	Span    source.Span
 }
@@ -148,6 +149,9 @@ func (p *patternParser) flushLiteral(pattern *Pattern, literal *strings.Builder,
 func (p *patternParser) group(pattern *Pattern) bool {
 	start := p.pos
 	p.pos++
+	if p.pos < len(p.text) && p.text[p.pos] == '~' {
+		return p.regexMatcher(pattern, "", start)
+	}
 	if p.pos < len(p.text) && p.text[p.pos] == '*' {
 		cross := p.pos+1 < len(p.text) && p.text[p.pos+1] == '*'
 		end := p.pos + 1
@@ -189,6 +193,9 @@ func (p *patternParser) group(pattern *Pattern) bool {
 	}
 	if p.pos < len(p.text) && p.text[p.pos] == ':' {
 		p.pos++
+		if p.pos < len(p.text) && p.text[p.pos] == '~' {
+			return p.regexMatcher(pattern, name, start)
+		}
 		patternStart := p.pos
 		for p.pos < len(p.text) && p.text[p.pos] != '}' {
 			if p.text[p.pos] == '\\' { p.pos++ }
@@ -211,6 +218,38 @@ func (p *patternParser) group(pattern *Pattern) bool {
 	pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternReference, Text: ownedText(p.a, name), Index: -1, Span: source.Span{Start: p.offset + start, End: p.offset + p.pos + 1}})
 	pattern.References++
 	p.pos++
+	return true
+}
+
+func (p *patternParser) regexMatcher(pattern *Pattern, name string, start int) bool {
+	p.pos++ // leading '~'
+	regexStart := p.pos
+	for p.pos < len(p.text) {
+		if p.text[p.pos] == '\\' {
+			if p.pos+1 == len(p.text) { p.pos = len(p.text); break }
+			p.pos += 2
+			continue
+		}
+		if p.text[p.pos] == '}' { break }
+		p.pos++
+	}
+	if p.pos == len(p.text) {
+		p.fail(start, p.pos, "unclosed regular-expression matcher")
+		return false
+	}
+	regex := p.text[regexStart:p.pos]
+	compiled := compileRegex(p.a, regex)
+	if !compiled.Valid {
+		p.fail(regexStart+compiled.ErrorOffset, regexStart+compiled.ErrorOffset+1, "invalid regular-expression matcher")
+		p.pos = len(p.text)
+		return false
+	}
+	compiled.Program.Free(p.a)
+	end := p.pos + 1
+	pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternMatcher, Text: ownedText(p.a, name), Pattern: ownedText(p.a, regex), Regex: true, Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + end}})
+	pattern.Names = slices.Append(p.a, pattern.Names, ownedText(p.a, name))
+	pattern.Matchers++
+	p.pos = end
 	return true
 }
 
@@ -252,6 +291,7 @@ func CanonicalPattern(a mem.Allocator, pattern *Pattern) string {
 		b.WriteByte('{')
 		if part.Kind == PatternMatcher {
 			if part.Text != "" { b.WriteString(part.Text); b.WriteByte(':') }
+			if part.Regex { b.WriteByte('~') }
 			b.WriteString(part.Pattern)
 		} else if part.Text != "" {
 			b.WriteString(part.Text)
@@ -272,28 +312,51 @@ func HasGroups(pattern *Pattern) bool { return pattern.Matchers != 0 || pattern.
 type MatchResult struct {
 	Captures []string
 	Matched  bool
+	Limited  bool
 }
 
 // MatchText matches the pattern against the complete subject. Matching is
 // anchored and leftmost-shortest. Captures borrow the subject and the caller
 // frees the slice.
 func (p *Pattern) MatchText(a mem.Allocator, subject string) MatchResult {
+	budget := maxRegexSteps
+	return p.MatchTextBudget(a, subject, &budget)
+}
+
+// MatchTextBudget matches with caller-owned step accounting. It lets larger
+// callers share one bound across repeated candidate-boundary checks.
+func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) MatchResult {
 	var slots []string
-	if !p.match(a, subject, 0, 0, &slots) {
+	programs := slices.Make[*regexProgram](a, p.Matchers)
+	for i := range p.Parts {
+		part := p.Parts[i]
+		if part.Kind != PatternMatcher || !part.Regex { continue }
+		compiled := compileRegex(a, part.Pattern)
+		if !compiled.Valid {
+			for j := range programs { if programs[j] != nil { programs[j].Free(a) } }
+			slices.Free(a, programs)
+			return MatchResult{}
+		}
+		programs[part.Index] = compiled.Program
+	}
+	matched, limited := p.match(a, subject, 0, 0, &slots, programs, budget)
+	for i := range programs { if programs[i] != nil { programs[i].Free(a) } }
+	slices.Free(a, programs)
+	if !matched {
 		slices.Free(a, slots)
-		return MatchResult{}
+		return MatchResult{Limited: limited}
 	}
 	return MatchResult{Captures: slots, Matched: true}
 }
 
-func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, slots *[]string) bool {
-	if part == len(p.Parts) { return offset == len(subject) }
+func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, slots *[]string, programs []*regexProgram, budget *int) (bool, bool) {
+	if part == len(p.Parts) { return offset == len(subject), false }
 	current := p.Parts[part]
 	if current.Kind == PatternLiteral {
-		if len(subject)-offset < len(current.Text) || subject[offset:offset+len(current.Text)] != current.Text { return false }
-		return p.match(a, subject, part+1, offset+len(current.Text), slots)
+		if len(subject)-offset < len(current.Text) || subject[offset:offset+len(current.Text)] != current.Text { return false, false }
+		return p.match(a, subject, part+1, offset+len(current.Text), slots, programs, budget)
 	}
-	if current.Kind == PatternReference { return false }
+	if current.Kind == PatternReference { return false, false }
 	previous, found := "", false
 	for i := range p.Names {
 		if p.Names[i] != "" && p.Names[i] == current.Text && i < len(*slots) { previous, found = (*slots)[i], true; break }
@@ -301,15 +364,19 @@ func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, s
 	for end := offset + 1; end <= len(subject); end++ {
 		value := subject[offset:end]
 		if found && value != previous { continue }
-		if !matchGlob(current.Pattern, value) { continue }
-		if !found {
-			for len(*slots) <= current.Index { *slots = slices.Append(a, *slots, "") }
-			(*slots)[current.Index] = value
-		}
-		if p.match(a, subject, part+1, end, slots) { return true }
-		if !found { (*slots)[current.Index] = "" }
+		if current.Regex {
+			matched, limited := regexFullMatch(a, programs[current.Index], value, budget)
+			if limited { return false, true }
+			if !matched { continue }
+		} else if !matchGlob(current.Pattern, value) { continue }
+		for len(*slots) <= current.Index { *slots = slices.Append(a, *slots, "") }
+		(*slots)[current.Index] = value
+		matched, limited := p.match(a, subject, part+1, end, slots, programs, budget)
+		if matched { return true, false }
+		if limited { return false, true }
+		(*slots)[current.Index] = ""
 	}
-	return false
+	return false, false
 }
 
 // Expansion carries the expanded text and the name of the first missing

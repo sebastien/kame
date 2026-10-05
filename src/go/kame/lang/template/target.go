@@ -2,6 +2,7 @@
 package template
 
 import (
+	"kame/lang/expr"
 	"kame/lang/source"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
@@ -20,6 +21,7 @@ type TargetPart struct {
 	Text    string
 	Name    string
 	Pattern string
+	Regex   *expr.Pattern
 	Span    source.Span
 }
 
@@ -38,6 +40,7 @@ func (t *Target) Free() {
 		if t.Parts[i].Kind == TargetLiteral {
 			mem.FreeString(t.Alloc, t.Parts[i].Text)
 		}
+		if t.Parts[i].Regex != nil { t.Parts[i].Regex.Free(t.Alloc) }
 	}
 	slices.Free(t.Alloc, t.Parts)
 	slices.Free(t.Alloc, t.Diagnostics)
@@ -69,6 +72,28 @@ func ParseTarget(a mem.Allocator, name string, text string) *Target {
 		}
 		groupStart := pos
 		pos++
+		if pos < len(text) && text[pos] == '~' {
+			regexStart := pos + 1
+			pos++
+			for pos < len(text) {
+				if text[pos] == '\\' {
+					if pos+1 >= len(text) { pos = len(text); break }
+					pos += 2
+					continue
+				}
+				if text[pos] == '}' { break }
+				pos++
+			}
+			if pos == len(text) {
+				t.Diagnostics = slices.Append(a, t.Diagnostics, parseDiagnostic(groupStart, pos, "unclosed regular-expression capture group"))
+				start = groupStart
+				break
+			}
+			appendRegexTargetPart(a, t, text, groupStart, regexStart, pos, "")
+			pos++
+			start = pos
+			continue
+		}
 		if pos < len(text) && text[pos] == '*' {
 			pattern := "*"
 			pos++
@@ -97,6 +122,28 @@ func ParseTarget(a mem.Allocator, name string, text string) *Target {
 		pattern := "*"
 		if pos < len(text) && text[pos] == ':' {
 			pos++
+			if pos < len(text) && text[pos] == '~' {
+				regexStart := pos + 1
+				pos++
+				for pos < len(text) {
+					if text[pos] == '\\' {
+						if pos+1 >= len(text) { pos = len(text); break }
+						pos += 2
+						continue
+					}
+					if text[pos] == '}' { break }
+					pos++
+				}
+				if pos == len(text) {
+					t.Diagnostics = slices.Append(a, t.Diagnostics, parseDiagnostic(groupStart, pos, "unclosed regular-expression capture group"))
+					start = groupStart
+					break
+				}
+				appendRegexTargetPart(a, t, text, groupStart, regexStart, pos, capture)
+				pos++
+				start = pos
+				continue
+			}
 			patternStart := pos
 			for pos < len(text) && text[pos] != '}' {
 				pos++
@@ -119,6 +166,19 @@ func ParseTarget(a mem.Allocator, name string, text string) *Target {
 		t.Parts = slices.Append(a, t.Parts, TargetPart{Kind: TargetLiteral, Text: targetLiteral(a, text[start:]), Span: source.Span{Start: start, End: len(text)}})
 	}
 	return t
+}
+
+func appendRegexTargetPart(a mem.Allocator, target *Target, text string, groupStart int, regexStart int, groupEnd int, name string) {
+	parsed := expr.ParsePatternText(a, text[groupStart:groupEnd+1], groupStart)
+	if len(parsed.Diagnostics) != 0 || parsed.Pattern.Matchers != 1 || parsed.Pattern.References != 0 {
+		for i := range parsed.Diagnostics { target.Diagnostics = slices.Append(a, target.Diagnostics, parsed.Diagnostics[i]) }
+		if len(parsed.Diagnostics) == 0 { target.Diagnostics = slices.Append(a, target.Diagnostics, parseDiagnostic(groupStart, groupEnd+1, "invalid regular-expression capture group")) }
+		parsed.Pattern.Free(a)
+		slices.Free(a, parsed.Diagnostics)
+		return
+	}
+	slices.Free(a, parsed.Diagnostics)
+	target.Parts = slices.Append(a, target.Parts, TargetPart{Kind: Capture, Name: name, Pattern: text[regexStart:groupEnd], Regex: parsed.Pattern, Span: source.Span{Start: groupStart, End: groupEnd+1}})
 }
 
 func targetLiteral(a mem.Allocator, text string) string {
@@ -217,7 +277,10 @@ type CaptureValue struct {
 	Text string
 }
 
-type Match struct{ Captures []CaptureValue }
+type Match struct {
+	Captures []CaptureValue
+	Limited  bool
+}
 
 func (m *Match) Free(a mem.Allocator) {
 	if m != nil {
@@ -229,7 +292,15 @@ func (m *Match) Free(a mem.Allocator) {
 // MatchTarget applies anchored, leftmost-shortest target matching.
 func (t *Target) MatchTarget(a mem.Allocator, target string) *Match {
 	var captures []CaptureValue
-	if !t.match(a, target, 0, 0, &captures) {
+	budget := expr.RegexStepLimit
+	matched, limited := t.match(a, target, 0, 0, &captures, &budget)
+	if limited {
+		slices.Free(a, captures)
+		m := mem.Alloc[Match](a)
+		m.Limited = true
+		return m
+	}
+	if !matched {
 		slices.Free(a, captures)
 		return nil
 	}
@@ -239,16 +310,16 @@ func (t *Target) MatchTarget(a mem.Allocator, target string) *Match {
 	return m
 }
 
-func (t *Target) match(a mem.Allocator, target string, part int, offset int, captures *[]CaptureValue) bool {
+func (t *Target) match(a mem.Allocator, target string, part int, offset int, captures *[]CaptureValue, budget *int) (bool, bool) {
 	if part == len(t.Parts) {
-		return offset == len(target)
+		return offset == len(target), false
 	}
 	p := t.Parts[part]
 	if p.Kind == TargetLiteral {
 		if len(target)-offset < len(p.Text) || target[offset:offset+len(p.Text)] != p.Text {
-			return false
+			return false, false
 		}
-		return t.match(a, target, part+1, offset+len(p.Text), captures)
+		return t.match(a, target, part+1, offset+len(p.Text), captures, budget)
 	}
 	previous := ""
 	found := false
@@ -265,16 +336,21 @@ func (t *Target) match(a mem.Allocator, target string, part int, offset int, cap
 		if found && value != previous {
 			continue
 		}
-		if !matchPattern(p.Pattern, value) {
+		if p.Regex != nil {
+			result := p.Regex.MatchTextBudget(a, value, budget)
+			slices.Free(a, result.Captures)
+			if result.Limited { return false, true }
+			if !result.Matched { continue }
+		} else if !matchPattern(p.Pattern, value) {
 			continue
 		}
 		*captures = slices.Append(a, *captures, CaptureValue{Name: p.Name, Text: value})
-		if t.match(a, target, part+1, end, captures) {
-			return true
-		}
+		matched, limited := t.match(a, target, part+1, end, captures, budget)
+		if matched { return true, false }
+		if limited { return false, true }
 		*captures = (*captures)[:len(*captures)-1]
 	}
-	return false
+	return false, false
 }
 
 func matchPattern(pattern string, value string) bool { return matchPatternAt(pattern, value, 0, 0) }
@@ -354,12 +430,16 @@ func FormatTarget(a mem.Allocator, t *Target) string {
 		}
 		b.WriteByte('{')
 		if part.Name == "" {
+			if part.Regex != nil { b.WriteByte('~') }
 			b.WriteString(part.Pattern)
 			b.WriteByte('}')
 			continue
 		}
 		b.WriteString(part.Name)
-		if part.Pattern != "*" {
+		if part.Regex != nil {
+			b.WriteString(":~")
+			b.WriteString(part.Pattern)
+		} else if part.Pattern != "*" {
 			b.WriteByte(':')
 			b.WriteString(part.Pattern)
 		}
