@@ -11,7 +11,7 @@ WASM_MAX_MEMORY ?= 67108864
 WASM_STACK_SIZE ?= 262144
 
 
-.PHONY: build dist dist-ape dist-release dist-wasm wasm wasm-check wasm-portable wasm-translate test-wasm version-source build/kame.debug build/kame.sanitize dist/kame dist/kame.com \
+.PHONY: build dist dist-ape dist-release dist-wasm dist-windows wasm wasm-check wasm-portable wasm-translate test-wasm version-source build/kame.debug build/kame.sanitize dist/kame dist/kame.com \
 	test test-so test-examples test-go test-cli test-all test-sanitize test-leaks fmt clean demo
 
 build: dist
@@ -155,13 +155,14 @@ dist/kame.js: src/js/kame.js
 KAME_RELEASE_PUBLIC_KEY ?=
 KAME_RELEASE_SIGNING_KEY ?=
 KAME_RELEASE_REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
-dist-release: dist/kame.com dist/kame.wasm dist/kame.js
+dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zip
 	test -n "$(KAME_RELEASE_PUBLIC_KEY)" -a -f "$(KAME_RELEASE_PUBLIC_KEY)"
 	test -n "$(KAME_RELEASE_SIGNING_KEY)" -a -f "$(KAME_RELEASE_SIGNING_KEY)"
 	mkdir -p dist/release/bin
 	cp dist/kame.com dist/release/kame.com
 	cp dist/kame.wasm dist/release/kame.wasm
 	cp dist/kame.js dist/release/kame.js
+	cp dist/kame-windows-x64.zip dist/release/kame-windows-x64.zip
 	cp VERSION dist/release/VERSION
 	cp Makefile.bootstrap dist/release/Makefile.bootstrap
 	public_key_b64=$$(openssl pkey -pubin -in "$(KAME_RELEASE_PUBLIC_KEY)" -outform DER | openssl base64 -A); \
@@ -172,6 +173,18 @@ dist-release: dist/kame.com dist/kame.wasm dist/kame.js
 	python3 tools/release_manifest.py --directory dist/release --version "$$(cat VERSION)" --revision "$(KAME_RELEASE_REVISION)" --public-key "$(KAME_RELEASE_PUBLIC_KEY)" --signing-key "$(KAME_RELEASE_SIGNING_KEY)"
 
 dist-ape: dist/kame.com
+
+dist/windows/kame.exe: $(wildcard $(KAME_DIR)/cmd/kame-launcher/*.go) dist/kame.js dist/kame.wasm
+	mkdir -p dist/windows
+	cd $(KAME_DIR) && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o ../../../dist/windows/kame.exe ./cmd/kame-launcher
+	cp dist/kame.js dist/windows/kame.js
+	cp dist/kame.wasm dist/windows/kame.wasm
+
+dist/kame-windows-x64.zip: dist/windows/kame.exe
+	rm -f $@
+	cd dist/windows && zip -q ../kame-windows-x64.zip kame.exe kame.js kame.wasm
+
+dist-windows: dist/kame-windows-x64.zip
 
 # The freestanding target begins with ABI primitives. It stays outside the
 # default build until the portable runtime no longer reaches hosted imports.

@@ -25,7 +25,7 @@ rows = {}
 for line in (root / "SHA256SUMS").read_text().splitlines():
     digest, name = line.split("  ", 1)
     rows[name] = digest
-assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "bin/kame", "kame.com", "kame.js", "kame.wasm"}
+assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "bin/kame", "kame.com", "kame.js", "kame.wasm", "kame-windows-x64.zip"}
 provenance = json.loads((root / "PROVENANCE.json").read_text())
 assert provenance["schema"] == 1 and provenance["sourceRevision"] == "test-fixture"
 assert all(rows[item["name"]] == item["sha256"] for item in provenance["subjects"])

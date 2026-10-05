@@ -38,8 +38,8 @@ adapters and integration evidence rather than placeholder methods.
 | D13 | Resource protocols | Complete: canonical `file:` and `mem:` identity, scoped grants, dependency invalidation, URI-aware filesystem traversal, native/POSIX and WASM host mappings, and portable memory storage; native/WASM CLI acceptance in T031-01 plus host, evaluator and program suites. See 031. |
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
-| D16 | Platform execution | In progress: the Node/WASM host now has Windows stream pipelines and process-tree termination, with a Windows-only descendant test; Windows-native launch, native-host lifecycle, and APE conformance on advertised non-Linux hosts remain. |
-| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap` and `VERSION` release assets, non-overwriting `kame init`, the opt-in `KAME_VERSION=latest` channel, and signed launcher handoff for newer selected releases are specified and covered. Native platform artifacts and package-manager integration remain. |
+| D16 | Platform execution | In progress: the Node/WASM host has Windows stream pipelines and process-tree termination; a native Windows x64 launcher is built and packaged. Windows-host execution/lifecycle evidence, native-host lifecycle coverage, and APE conformance on advertised non-Linux hosts remain. |
+| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, and Windows x64 launcher bundle assets; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are specified and covered. Full native platform artifacts and package-manager integration remain. |
 | D18 | Remaining library/ergonomic extensions | Complete: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, safely quoted `shell-template` interpolation, and comma-separated prerequisite sequencing have specified semantics and native/WASM acceptance coverage. |
 
 The explicit boundaries in this table are a finite work inventory. General
@@ -114,8 +114,11 @@ Node's Windows host path now connects pipeline stages with child streams, uses
 `taskkill /T /F` for process-tree cancellation, and waits for tree-stop and
 direct-child completion. T033-01 retains a Windows-only descendant cleanup
 case; this workspace has no Windows runner, so that case is not yet execution
-evidence. D16's native launcher, platform lifecycle matrix, and non-Linux APE
-verification remain open. The initial-contract audit remains historical
+evidence. D16 now cross-compiles a native Windows x64 launcher that starts the
+adjacent Node/WASM CLI; T015-05 verifies argv, exit status and the PE bundle on
+the current host. That is not Windows runtime evidence. Windows-host lifecycle
+coverage, the native-host platform matrix, and APE verification on advertised
+non-Linux hosts remain open. The initial-contract audit remains historical
 evidence, not completion of this work.
 D18's equality-value shorthand is implemented: `(filter LIST VALUE)` retains
 strict scalar-equal items, and `filter-out` removes them with the same numeric,
@@ -147,5 +150,6 @@ release's launcher and hands off to its pinned version before backend dispatch.
 T015-01 covers selector resolution, no-provisioning version output,
 disabled-download rejection, verified launcher handoff and cached-launcher
 tampering. T015-04 exercises launcher handoff against the actual signed
-release. Native platform artifacts and package-manager integration remain
-open.
+release. T015-05 builds the Windows x64 launcher bundle; the signed manifest
+includes that bundle. Full native platform artifacts and package-manager
+integration remain open.

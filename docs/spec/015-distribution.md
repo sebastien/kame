@@ -24,6 +24,7 @@ release publishes these flat assets under the base URL
 | `kame.com` | `make dist-ape` | Cosmopolitan APE, full native CLI |
 | `kame.wasm` | `make wasm` | freestanding module |
 | `kame.js` | packaged JS CLI | Node CLI wrapper for `kame.wasm` (`010-wasm.md`) |
+| `kame-windows-x64.zip` | `make dist-windows` | Windows x64 `kame.exe` launcher with colocated Node/WASM CLI assets |
 | `bin/kame` | stamped launcher | host provisioning and dispatch |
 | `Makefile.bootstrap` | bootstrap template | project-local make delegation and `kame init` |
 | `VERSION` | release tree | signed version selector for the explicit latest channel |
@@ -31,9 +32,9 @@ release publishes these flat assets under the base URL
 | `SHA256SUMS` | checksums | signed integrity manifest |
 | `SHA256SUMS.sig` | release signer | Ed25519 signature over the exact manifest bytes |
 
-Asset filenames carry no version; the release tag does. Native per-platform
-binaries are not published initially: the APE covers supported hosts and the
-WASM build covers JavaScript runtimes.
+Asset filenames carry no version; the release tag does. The Windows bundle is a
+native executable launcher for the Node/WASM CLI and requires Node 18 or later.
+The Cosmopolitan APE remains the full native CLI for its supported hosts.
 
 `SHA256SUMS` contains one `<64-hex-lowercase>  <asset>` line per asset, sorted
 by asset name, using the conventional two-space separator.
@@ -126,6 +127,11 @@ Darwin, FreeBSD, NetBSD, OpenBSD, and the Windows POSIX layers (`MINGW*`,
 
 The `wasm` backend requires a JavaScript runtime. `KAME_JS` names it;
 otherwise `node` is used. The runtime must be Node 18 or later.
+
+The Windows bundle's `kame.exe` locates `kame.js` beside itself and starts Node
+with the original argument vector, inherited standard streams, environment,
+working directory, and exit status. `KAME_NODE` may select a specific Node
+executable; by default the launcher resolves `node` through `PATH`.
 
 The launcher may cache its backend decision per version in `.backend` so an
 execution probe runs at most once. A cached decision whose artifact is missing
@@ -242,6 +248,10 @@ existing build rules.
 - `KAME_VERSION=latest` installs and hands off to the selected release's
   signed launcher before backend dispatch; cached launcher tampering fails
   closed, while pinned launches do not self-update.
+- `kame-windows-x64.zip` contains exactly `kame.exe`, `kame.js`, and
+  `kame.wasm`; the native launcher preserves argv, standard streams, working
+  directory, environment and the Node process exit status. Run its lifecycle
+  tests on Windows before claiming Windows-host conformance.
 - An invalid version override fails before creating or accessing a cache path.
 - `kame init` writes a correctly stamped bootstrap sidecar, preserves an
   existing `Makefile`, and refuses a second write without changing either file.
@@ -252,6 +262,8 @@ existing build rules.
 
 ## Deferred
 
-- Native per-platform release binaries.
-- Windows-native (`cmd.exe`, PowerShell) launcher.
+- Full native per-platform CLI binaries beyond the Cosmopolitan APE and the
+  Windows launcher for the Node/WASM CLI.
+- Windows-host launcher and process lifecycle conformance; a cross-compiled PE
+  file alone is not host execution evidence.
 - Package-manager integrations.
