@@ -12,8 +12,16 @@ ape_name=$(basename "$1")
 ape_path=$ape_directory/$ape_name
 work_path=$(mktemp -d "${TMPDIR:-/tmp}/kame-ape.XXXXXX")
 trap 'rm -rf "$work_path"' 0 HUP INT TERM
+cp "$ape_path" "$work_path/kame.com"
+chmod +x "$work_path/kame.com"
+ape_path=$work_path/kame.com
+ape_shell=${KAME_APE_SHELL:-bash}
 
-version=$(sh "$ape_path" --version)
+# Assimilation selects the host's native executable format when available. It
+# also avoids depending on shell-specific parsing of the binary polyglot.
+"$ape_shell" "$ape_path" --assimilate
+
+version=$("$ape_path" --version)
 case "$version" in
 	"kame "*) ;;
 	*)
@@ -33,7 +41,7 @@ task platform-timeout :
 EOF
 
 cd "$work_path"
-output=$(sh "$ape_path" --env KAME_PLATFORM_ENV=passed -f Makefile.kmk platform-smoke)
+output=$("$ape_path" --env KAME_PLATFORM_ENV=passed -f Makefile.kmk platform-smoke)
 if [ "$output" != "platform-smoke-ok" ]; then
 	echo "APE task output mismatch: $output" >&2
 	exit 1
@@ -44,7 +52,7 @@ if [ "$(cat platform-env.txt)" != passed ]; then
 fi
 
 set +e
-sh "$ape_path" --timeout 100 -f Makefile.kmk platform-timeout \
+"$ape_path" --timeout 100 -f Makefile.kmk platform-timeout \
 	>"$work_path/timeout.out" 2>"$work_path/timeout.err"
 timeout_status=$?
 set -e

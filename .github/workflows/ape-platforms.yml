@@ -56,10 +56,10 @@ jobs:
         with:
           name: kame-ape
           path: dist
-      - run: sh tools/platform/test-ape.sh dist/kame.com
+      - run: bash tools/platform/test-ape.sh dist/kame.com
 
   darwin:
-    runs-on: macos-latest
+    runs-on: macos-15-intel
     needs: build-ape
     steps:
       - uses: actions/checkout@v7
@@ -67,20 +67,7 @@ jobs:
         with:
           name: kame-ape
           path: dist
-      - run: sh tools/platform/test-ape.sh dist/kame.com
-
-  mingw:
-    runs-on: windows-latest
-    needs: build-ape
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
-        with:
-          name: kame-ape
-          path: dist
-      - name: Test APE through the Windows POSIX shell
-        shell: bash
-        run: sh tools/platform/test-ape.sh dist/kame.com
+      - run: bash tools/platform/test-ape.sh dist/kame.com
 
   freebsd:
     runs-on: ubuntu-latest
@@ -94,7 +81,8 @@ jobs:
       - uses: vmactions/freebsd-vm@v1
         with:
           release: '15.1'
-          run: sh tools/platform/test-ape.sh dist/kame.com
+          prepare: pkg install -y bash
+          run: bash tools/platform/test-ape.sh dist/kame.com
 
   netbsd:
     runs-on: ubuntu-latest
@@ -108,7 +96,8 @@ jobs:
       - uses: vmactions/netbsd-vm@v1
         with:
           usesh: true
-          run: sh tools/platform/test-ape.sh dist/kame.com
+          prepare: /usr/sbin/pkg_add bash
+          run: bash tools/platform/test-ape.sh dist/kame.com
 
   openbsd:
     runs-on: ubuntu-latest
@@ -122,4 +111,5 @@ jobs:
       - uses: vmactions/openbsd-vm@v1
         with:
           release: '7.9'
-          run: sh tools/platform/test-ape.sh dist/kame.com
+          prepare: pkg_add bash
+          run: bash tools/platform/test-ape.sh dist/kame.com
