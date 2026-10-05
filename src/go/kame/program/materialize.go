@@ -330,6 +330,21 @@ func (h *Handle) Cancel() {
 
 func (h *Handle) Poll() HandleResult { return h.poll(true) }
 
+// PollReady returns when a service root has published readiness while keeping
+// the root retained. The caller owns the handle until Free or Cancel releases
+// the service. For non-service targets it behaves like PollRetained.
+func (h *Handle) PollReady() HandleResult {
+	if h != nil && h.Program != nil && h.Node != nil {
+		index := h.Program.instanceIndex(h.Node)
+		if index >= 0 && h.Program.Instances[index].Rule.Kind == rule.ServiceRule && h.Program.Instances[index].ServiceReady {
+			if h.Node.State != core.NodeFailed && h.Node.State != core.NodeCancelled {
+				return HandleResult{Done: true, Result: Result{Value: h.Node.Latest.Clone(h.Program.Alloc)}}
+			}
+		}
+	}
+	return h.poll(false)
+}
+
 // PollRetained observes completion without dropping root interest. Watchers and
 // reactive hosts retain the root across subsequent invalidations.
 func (h *Handle) PollRetained() HandleResult { return h.poll(false) }

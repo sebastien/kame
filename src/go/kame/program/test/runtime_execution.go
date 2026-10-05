@@ -595,6 +595,29 @@ func TestServicePublishesOnSpawnAndKeepsPrerequisiteAlive(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestServiceRootCanWaitForReadinessAndRelease(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "test.kmk", "service daemon :\n\twhile :; do sleep 1; done\n")
+	registry := eval.NewRegistry(a)
+	host := posix.New(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: "."})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
+	started := compiled.Program.Start("daemon")
+	if started.Diagnostic.Code != "" || started.Handle == nil { t.Error("service start failed"); return }
+	ready := program.HandleResult{}
+	for attempt := 0; attempt < 20 && !ready.Done; attempt++ {
+		compiled.Program.Tick(10)
+		ready = started.Handle.PollReady()
+	}
+	if !ready.Done || ready.Result.Diagnostic.Code != "" { t.Error("service root did not publish readiness") }
+	ready.Result.Free(a)
+	if host.Active() != 1 { t.Error("ready service root did not retain its process") }
+	started.Handle.Free()
+	for attempt := 0; attempt < 20 && host.Active() != 0; attempt++ { compiled.Program.Tick(50) }
+	if host.Active() != 0 { t.Error("releasing service root did not stop its process") }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestInvalidServiceConfigFailsBeforeExecution(t *testing.T) {
 	invalid := []string{
 		"service daemon : ; [ready: [argv: [\"probe\"] interval-ms: :true]]\n\ttrue\n",

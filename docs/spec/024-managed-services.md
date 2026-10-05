@@ -126,7 +126,9 @@ without leaving a process group alive.
 The runtime currently starts a service body as a persistent process and
 publishes the default spawn-ready value, allowing dependent rules to proceed
 while the process remains active. Releasing the final dependent cancels it.
+Embedding callers can use `Start` and `Handle.PollReady` to observe root-service
+readiness while retaining the handle; freeing or canceling that handle releases
+the service.
 Typed readiness and health probes, restart policy, grace-period shutdown,
-bounded service log retention, explicit root-ready handles, and lifecycle event
-parity remain open; configured probes or restarts still report
-`FEATURE_UNSUP`.
+bounded service log retention, and lifecycle event parity remain open;
+configured probes or restarts still report `FEATURE_UNSUP`.
