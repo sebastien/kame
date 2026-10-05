@@ -93,5 +93,5 @@ eviction on successful publication. Native POSIX CLI processes also serialize
 cold task misses with bounded advisory-lock stripes and crash release. Forwarded
 host locking and remaining lifecycle checks are still open. The portable
 in-memory filesystem now stores complete task records and reuses them through
-the shared identity and validation path. D03 and D08–D18 remain open. The preceding
+the shared identity and validation path. D08–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.
