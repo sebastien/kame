@@ -1140,6 +1140,12 @@ func (p *docParser) isEndLine(lineStart int, contentEnd int) bool {
 }
 
 func isRawEndToken(text string) bool {
+	if len(text) != 0 && text[0] == '@' && len(text) > 1 && text[1] == '-' {
+		text = "@" + text[2:]
+	}
+	if len(text) != 0 && text[len(text)-1] == '-' {
+		text = text[:len(text)-1]
+	}
 	return text == "@end" || text == "@end(raw)"
 }
 

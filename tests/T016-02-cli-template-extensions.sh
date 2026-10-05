@@ -40,10 +40,17 @@ inline_match='(render (cat "x@match(path)@case(./{slug:*}.md)" "@" "(slug)" "@el
 inline_raw='(render (cat "a@raw " "@" "(name)" "@end(raw)c") "plain")'
 trim_markers='(render "left   @-if(:true)-  right  @-end(if)- \r\n\t tail" "plain")'
 trim_else='(render "A@if(:false) B@else-  C@end(if)D" "plain")'
+format_source='hello @if(:true)yes@end world'
 nested_loop='(render (cat "@for([group] groups)\nouter:" "@" "(index)" "[\n@for([item] group)\n" "@" "(index)" ":" "@" "(item)" ",\n@end(for)\n]" "@" "(index)" "\n@end(for)\n") [groups: [["a" "b"] ["c"]]] "plain")'
 
 for host in native wasm; do
 	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	printf '%s' "$format_source" | "${runner[@]}" do fmt --lang template --comment plain >"$TMPDIR/$host.format.out" 2>"$TMPDIR/$host.format.err"
+	if [ "$(cat "$TMPDIR/$host.format.out")" = 'hello @if(:true)yes@end(if) world' ]; then
+		test-ok "$host formats template directives canonically"
+	else
+		test-fail "$host template format: $(cat "$TMPDIR/$host.format.err") $(cat "$TMPDIR/$host.format.out")"
+	fi
 	"${runner[@]}" do render --comment plain -c "$match_source" >"$TMPDIR/$host.match.out" 2>"$TMPDIR/$host.match.err"
 	if [ "$(cat "$TMPDIR/$host.match.out")" = "demo" ]; then
 		test-ok "$host matches a template clause and binds named captures"

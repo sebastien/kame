@@ -468,6 +468,19 @@ func parseFormat(inv *Invocation, args []string) {
 			inv.Indent = args[i]
 			continue
 		}
+		if arg == "--comment" {
+			if i+1 == len(args) {
+				inv.fail("OPT_NO_VALUE", "missing value for --comment")
+				return
+			}
+			i++
+			inv.Comment = args[i]
+			continue
+		}
+		if len(arg) > len("--comment=") && arg[:len("--comment=")] == "--comment=" {
+			inv.Comment = arg[len("--comment="):]
+			continue
+		}
 		if len(arg) > len("--indent=") && arg[:len("--indent=")] == "--indent=" {
 			inv.Indent = arg[len("--indent="):]
 			continue
@@ -514,7 +527,20 @@ func parseFormat(inv *Invocation, args []string) {
 		inv.fail("OPT_VALUE_INVALID", "invalid indent style: "+inv.Indent)
 		return
 	}
+	if inv.Comment != "" && !isCommentStyle(inv.Comment) {
+		inv.fail("OPT_VALUE_INVALID", "invalid comment style: "+inv.Comment)
+		return
+	}
 	inv.OK = true
+}
+
+func isCommentStyle(value string) bool {
+	switch value {
+	case "auto", "plain", "none", "html", "c", "hash", "dash", "semi", "percent", "powershell", "batch":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseIndentWidth(value string) (int, bool) {

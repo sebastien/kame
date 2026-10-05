@@ -1,8 +1,11 @@
 package main
 
 import (
+	"strconv"
+
 	"kame/cli"
 	"kame/lang/format"
+	"kame/lang/source"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
@@ -13,6 +16,7 @@ type formatArguments struct {
 	Lang        string
 	Indent      string
 	IndentWidth int
+	Comment     string
 	InPlace     bool
 	Check       bool
 	Files       []string
@@ -36,7 +40,7 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 			cliError(errOut, "FS_ERR", "cannot read stdin")
 			return 1
 		}
-		formatted, ok := formatSource(parsed.Lang, "<stdin>", string(data), parsed.Indent, parsed.IndentWidth, errOut)
+		formatted, ok := formatSource(parsed.Lang, "<stdin>", string(data), parsed.Indent, parsed.IndentWidth, parsed.Comment, errOut)
 		if len(data) != 0 {
 			mem.FreeSlice(mem.System, data)
 		}
@@ -54,7 +58,7 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 			cliError(errOut, "FS_ERR", "cannot read source: "+parsed.Files[i])
 			return 1
 		}
-		formatted, ok := formatSource(parsed.Lang, parsed.Files[i], string(data), parsed.Indent, parsed.IndentWidth, errOut)
+		formatted, ok := formatSource(parsed.Lang, parsed.Files[i], string(data), parsed.Indent, parsed.IndentWidth, parsed.Comment, errOut)
 		changed := ok && string(data) != formatted
 		if len(data) != 0 {
 			mem.FreeSlice(mem.System, data)
@@ -94,13 +98,25 @@ func parseFormatArguments(args []string, errOut io.Writer) formatArguments {
 		inv.Free()
 		return formatArguments{}
 	}
-	return formatArguments{Lang: inv.Lang, Indent: inv.Indent, IndentWidth: inv.IndentWidth, InPlace: inv.InPlace, Check: inv.Check, Files: inv.Files, OK: inv.OK}
+	return formatArguments{Lang: inv.Lang, Indent: inv.Indent, IndentWidth: inv.IndentWidth, Comment: inv.Comment, InPlace: inv.InPlace, Check: inv.Check, Files: inv.Files, OK: inv.OK}
 }
 
-func formatSource(lang string, name string, text string, indentStyle string, indentWidth int, errOut io.Writer) (string, bool) {
-	result := format.Source(mem.System, lang, name, text, indentStyle, indentWidth)
+func formatSource(lang string, name string, text string, indentStyle string, indentWidth int, comment string, errOut io.Writer) (string, bool) {
+	result := format.SourceWithComment(mem.System, lang, name, text, indentStyle, indentWidth, comment)
 	if !result.OK {
-		cliError(errOut, result.Code, result.Message)
+		src := source.Borrow(mem.System, name, text)
+		position := src.Position(result.Span.Start)
+		io.WriteString(errOut, name)
+		io.WriteString(errOut, ":")
+		io.WriteString(errOut, strconv.Itoa(position.Line))
+		io.WriteString(errOut, ":")
+		io.WriteString(errOut, strconv.Itoa(position.Column))
+		io.WriteString(errOut, ": error ")
+		io.WriteString(errOut, result.Code)
+		io.WriteString(errOut, ": ")
+		io.WriteString(errOut, result.Message)
+		io.WriteString(errOut, "\n")
+		src.Free(mem.System)
 		mem.FreeString(mem.System, result.Code)
 		mem.FreeString(mem.System, result.Message)
 		return "", false

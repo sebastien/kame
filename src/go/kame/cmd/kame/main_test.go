@@ -160,6 +160,16 @@ func TestFormatCheckAndStandardInput(t *testing.T) {
 	if status := Run([]string{"do", "fmt"}, &input{text: "value=42\n"}, &out, &errOut); status != 0 || out.String() != "value = 42\n" {
 		t.Errorf("format stdin status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
+	out.Reset()
+	errOut.Reset()
+	if status := Run([]string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "hello @if(:true)yes@end world"}, &out, &errOut); status != 0 || out.String() != "hello @if(:true)yes@end(if) world" || errOut.Len() != 0 {
+		t.Errorf("template format stdin status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if status := Run([]string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "ok\n@end(if)"}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "<stdin>:2:1: error TPL_BLOCK:") {
+		t.Errorf("template format diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
 }
 
 func TestPlanDoesNotMaterializeRecipe(t *testing.T) {

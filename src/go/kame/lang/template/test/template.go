@@ -86,7 +86,9 @@ func TestTargetRegexCaptureFormatsAndMatches(t *testing.T) {
 		return
 	}
 	formatted := template.FormatTarget(a, target)
-	if formatted != "./{name:~[a-z]+}.txt" { t.Error("regex target formatting changed its spelling") }
+	if formatted != "./{name:~[a-z]+}.txt" {
+		t.Error("regex target formatting changed its spelling")
+	}
 	mem.FreeString(a, formatted)
 	match := target.MatchTarget(a, "./demo.txt")
 	if match == nil || len(match.Captures) != 1 || match.Captures[0].Name != "name" || match.Captures[0].Text != "demo" {
@@ -183,6 +185,29 @@ func TestFormatTemplateCanonicalizesEscapes(t *testing.T) {
 	mem.FreeString(t.Allocator(), formatted)
 }
 
+func TestFormatDocumentCanonicalizesInlineDirectives(t *testing.T) {
+	a := t.Allocator()
+	formatted := template.FormatDocument(a, "inline.tmpl", "hello @if(:true)yes@end world", "plain")
+	defer formatted.Free()
+	if !formatted.OK || formatted.Text != "hello @if(:true)yes@end(if) world" {
+		t.Errorf("FormatDocument() = %q, want canonical labels", formatted.Text)
+	}
+	again := template.FormatDocument(a, "inline.tmpl", formatted.Text, "plain")
+	defer again.Free()
+	if !again.OK || again.Text != formatted.Text {
+		t.Error("FormatDocument() was not idempotent")
+	}
+}
+
+func TestFormatDocumentCanonicalizesCommentWrappers(t *testing.T) {
+	a := t.Allocator()
+	formatted := template.FormatDocument(a, "inline.html", "a<!--   @if( :true )   -->b<!-- @end -->c", "html")
+	defer formatted.Free()
+	if !formatted.OK || formatted.Text != "a<!-- @if(:true) -->b<!-- @end(if) -->c" {
+		t.Errorf("FormatDocument() = %q, %s %s", formatted.Text, formatted.Code, formatted.Message)
+	}
+}
+
 func TestDocumentIfElseLowersWithoutBlankDebt(t *testing.T) {
 	doc := template.ParseDocument(t.Allocator(), "test.hash", "# @if(cond)\nyes\n# @else\nno\n# @end\n", "hash")
 	defer doc.Free()
@@ -275,8 +300,12 @@ func TestDocumentPowerShellAndBatchCommentStyles(t *testing.T) {
 	a := t.Allocator()
 	powershell := template.ParseDocument(a, "view.ps1", "<# @if(ok) #>\nyes\n<# @end(if) #>\n", "powershell")
 	defer powershell.Free()
-	if len(powershell.Diagnostics) != 0 { t.Error("PowerShell block comments were not recognized") }
+	if len(powershell.Diagnostics) != 0 {
+		t.Error("PowerShell block comments were not recognized")
+	}
 	batch := template.ParseDocument(a, "view.cmd", "REM @if(ok)\nyes\n:: @end(if)\n", "batch")
 	defer batch.Free()
-	if len(batch.Diagnostics) != 0 { t.Error("batch comment directives were not recognized") }
+	if len(batch.Diagnostics) != 0 {
+		t.Error("batch comment directives were not recognized")
+	}
 }

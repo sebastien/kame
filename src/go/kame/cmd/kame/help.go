@@ -191,13 +191,14 @@ Options:
   -h, --help        show this help
 `
 
-const fmtHelpText = `Usage: kame do fmt [--lang LANG] [--indent tabs|spaces] [--indent-width N] [-i | -n] [FILE...]
+const fmtHelpText = `Usage: kame do fmt [--lang LANG] [--comment STYLE] [--indent tabs|spaces] [--indent-width N] [-i | -n] [FILE...]
 
 Format source to stdout, or replace each FILE. With no FILE, read stdin (only
 without -i or -n). -n lists files that would change and exits 1 when any differ.
 
 Options:
   -l, --lang LANG   expr | template | rule | script | kash (default script)
+      --comment STYLE  template comment syntax; default auto for template sources
       --indent STYLE tabs (default) or spaces for rule bodies
       --indent-width N  spaces per indentation level (default 4, range 1-16)
   -i                replace files in place
