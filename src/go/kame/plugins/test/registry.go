@@ -24,6 +24,33 @@ func TestRegisterAddsVersionedOperations(t *testing.T) {
 	registry.Free()
 }
 
+func TestEitherPluginVersionChangesOperationIdentity(t *testing.T) {
+	a := t.Allocator()
+	firstRegistry := eval.NewRegistry(a)
+	first := []plugins.Plugin{{Name: "example", Version: "1", Operations: []plugins.Operation{{Name: "example-run", Version: "1", MinArity: 0, MaxArity: 0}}}}
+	if !plugins.Register(a, firstRegistry, first) { t.Fatal("initial plugin declaration was rejected"); return }
+	firstKey := firstRegistry.TaskKey(a, "task", "example-run")
+	if !firstKey.OK { t.Fatal("initial operation identity was not created"); firstRegistry.Free(); return }
+	firstRegistry.Free()
+
+	pluginRegistry := eval.NewRegistry(a)
+	pluginVersion := []plugins.Plugin{{Name: "example", Version: "2", Operations: []plugins.Operation{{Name: "example-run", Version: "1", MinArity: 0, MaxArity: 0}}}}
+	if !plugins.Register(a, pluginRegistry, pluginVersion) { t.Fatal("changed plugin version was rejected"); firstKey.Key.Free(a); pluginRegistry.Free(); return }
+	pluginKey := pluginRegistry.TaskKey(a, "task", "example-run")
+	if !pluginKey.OK || pluginKey.Key.Name == firstKey.Key.Name { t.Error("plugin version did not change operation identity") }
+	pluginKey.Key.Free(a)
+	pluginRegistry.Free()
+
+	operationRegistry := eval.NewRegistry(a)
+	operationVersion := []plugins.Plugin{{Name: "example", Version: "1", Operations: []plugins.Operation{{Name: "example-run", Version: "2", MinArity: 0, MaxArity: 0}}}}
+	if !plugins.Register(a, operationRegistry, operationVersion) { t.Fatal("changed operation version was rejected"); firstKey.Key.Free(a); operationRegistry.Free(); return }
+	operationKey := operationRegistry.TaskKey(a, "task", "example-run")
+	if !operationKey.OK || operationKey.Key.Name == firstKey.Key.Name { t.Error("operation version did not change operation identity") }
+	operationKey.Key.Free(a)
+	operationRegistry.Free()
+	firstKey.Key.Free(a)
+}
+
 func TestRegisteredOperationUsesCorrelatedPluginRequest(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
