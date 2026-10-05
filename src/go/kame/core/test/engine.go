@@ -70,6 +70,28 @@ func newCallableSource(a mem.Allocator, record *releaseRecord) *core.Source {
 	return core.NewSource(a, pollCallable, freeCallable, state)
 }
 
+func TestEngineResourceIndexKeepsNodeIdentity(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	defer engine.Free()
+	const count = 128
+	nodes := make([]*core.Node, count)
+	for i := range nodes {
+		name := "resource-" + string(byte('A'+i/26)) + string(byte('A'+i%26))
+		key := core.NewResourceKey(a, core.ResourceTask, name)
+		nodes[i] = engine.Add(key, nil, nil)
+		key.Free(a)
+		if nodes[i] == nil { t.Fatalf("resource %d was not registered", i); return }
+	}
+	for i := count - 1; i >= 0; i-- {
+		name := "resource-" + string(byte('A'+i/26)) + string(byte('A'+i%26))
+		key := core.NewResourceKey(a, core.ResourceTask, name)
+		found := engine.Lookup(key)
+		key.Free(a)
+		if found != nodes[i] { t.Errorf("lookup for resource %d returned a different node", i) }
+	}
+}
+
 type deriveState struct {
 	Alloc       mem.Allocator
 	Dependency  core.ResourceKey

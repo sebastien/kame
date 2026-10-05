@@ -116,7 +116,7 @@ func evaluateParsed(a mem.Allocator, parsed *script.Script, expression *expr.Exp
 	operations.Register(registry)
 	engine := core.NewEngine(a)
 	program := eval.Compile(a, engine, parsed, registry)
-	context := &eval.Context{Program: program, Scope: program.Scope, Run: a, ResolveDefinition: resolvePureDefinition, ResolverState: program}
+	context := &eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Read}}, ResolveDefinition: resolvePureDefinition, ResolverState: program}
 	result := program.EvaluateWith(expression, context)
 	if result.Waiting {
 		result.Free(a)

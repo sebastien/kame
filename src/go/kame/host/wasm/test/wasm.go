@@ -205,6 +205,10 @@ func TestPureExpressionUsesPortableEvaluator(t *testing.T) {
 		t.Errorf("source evaluation = %#v", fromSource)
 	}
 	fromSource.Free(a)
+	requiredHost := wasm.EvaluatePure(a, "(read \"./input.txt\")")
+	if !requiredHost.HostNeeded { t.Error("host-backed pure expression did not report a host request") }
+	if requiredHost.Code != "HOST_REQUIRED" { t.Error("host-backed pure expression code was " + requiredHost.Code) }
+	requiredHost.Free(a)
 }
 
 func TestRuntimeExpressionEffectsDrainInOrder(t *testing.T) {

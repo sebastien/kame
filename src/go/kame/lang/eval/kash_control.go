@@ -143,7 +143,7 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 			} else {
 				local := mem.Alloc[localDefinition](p.Alloc)
 				local.Expression, local.Scope = d.Items[0], state.Scope
-				state.Scope.Bindings = slices.Append(p.Alloc, state.Scope.Bindings, binding{Kind: bindingLocalDefinition, Name: owned(p.Alloc, d.Text), Local: local})
+				state.Scope.appendBinding(binding{Kind: bindingLocalDefinition, Name: owned(p.Alloc, d.Text), Local: local})
 			}
 		}
 	}

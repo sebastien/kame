@@ -12,7 +12,7 @@ func sameSpan(span source.Span, start int, end int) bool {
 }
 
 func TestScriptComposesPositionedLanguageForms(t *testing.T) {
-	text := "# setup\nvalue = 42\n./out : value\n\techo @<\n(name value)\n"
+	text := "# setup\nvalue = 42\n./out : value\n\techo @<\n(name value)\n\tstray\n"
 	s := script.Parse(t.Allocator(), "test.km", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 {
@@ -36,6 +36,53 @@ func TestScriptReportsOrphanedIndent(t *testing.T) {
 	defer s.Free()
 	if len(s.Diagnostics) != 1 || s.Diagnostics[0].Code != "PARSE_ERR" || !sameSpan(s.Diagnostics[0].Span, 0, 11) {
 		t.Error("orphaned indentation did not produce a positioned parse error")
+	}
+}
+
+func TestBorrowedParseMatchesOwningParseWithFewerAllocations(t *testing.T) {
+	a := t.Allocator()
+	tracker := a.(*mem.Tracker)
+	name := "borrowed.km"
+	text := "# setup\nvalue = 42\n./out : value\n\techo @<\n(name value)\n"
+
+	before := tracker.Stats().TotalAlloc
+	owned := script.Parse(a, name, text)
+	ownedAllocations := tracker.Stats().TotalAlloc - before
+	defer owned.Free()
+
+	before = tracker.Stats().TotalAlloc
+	borrowed := script.ParseBorrowed(a, name, text)
+	borrowedAllocations := tracker.Stats().TotalAlloc - before
+	defer borrowed.Free()
+
+	if owned.BorrowedSource || !borrowed.BorrowedSource || borrowed.Source.Name != name || borrowed.Source.Text != text {
+		t.Error("parse ownership or borrowed source content was not retained")
+	}
+	if len(owned.Items) != len(borrowed.Items) || len(owned.Diagnostics) != len(borrowed.Diagnostics) {
+		t.Error("borrowed parse changed item or diagnostic counts")
+		return
+	}
+	for i := range owned.Items {
+		if owned.Items[i].Kind != borrowed.Items[i].Kind || owned.Items[i].Text != borrowed.Items[i].Text || owned.Items[i].Span.Start != borrowed.Items[i].Span.Start || owned.Items[i].Span.End != borrowed.Items[i].Span.End {
+			t.Errorf("item %d differs between owning and borrowed parses", i)
+		}
+	}
+	for i := range owned.Diagnostics {
+		if owned.Diagnostics[i].Code != borrowed.Diagnostics[i].Code || owned.Diagnostics[i].Message != borrowed.Diagnostics[i].Message || owned.Diagnostics[i].Span.Start != borrowed.Diagnostics[i].Span.Start || owned.Diagnostics[i].Span.End != borrowed.Diagnostics[i].Span.End {
+			t.Errorf("diagnostic %d differs between owning and borrowed parses", i)
+		}
+	}
+	ownedText, borrowedText := script.Format(a, owned), script.Format(a, borrowed)
+	if ownedText != borrowedText {
+		t.Error("borrowed parse changed canonical formatting")
+	}
+	mem.FreeString(a, ownedText)
+	mem.FreeString(a, borrowedText)
+	if len(owned.Items) > 2 && (owned.Items[2].Rule == nil || borrowed.Items[2].Rule == nil || owned.Items[2].Rule.Span.Start != borrowed.Items[2].Rule.Span.Start || owned.Items[2].Rule.Span.End != borrowed.Items[2].Rule.Span.End) {
+		t.Error("borrowed parse changed rule spans")
+	}
+	if ownedAllocations < borrowedAllocations+uint64(len(text)) {
+		t.Errorf("owning parse allocated %d bytes and borrowed parse allocated %d, want at least %d bytes saved", ownedAllocations, borrowedAllocations, len(text))
 	}
 }
 

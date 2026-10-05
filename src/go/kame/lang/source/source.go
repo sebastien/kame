@@ -57,6 +57,14 @@ func New(a mem.Allocator, name string, text string) *Source {
 	return s
 }
 
+// Borrow creates a source view over caller-owned name and text strings. The
+// caller must keep both immutable until the Source is no longer in use.
+func Borrow(a mem.Allocator, name string, text string) *Source {
+	s := mem.Alloc[Source](a)
+	s.Name, s.Text = name, text
+	return s
+}
+
 func (s *Source) Free(a mem.Allocator) {
 	if s == nil {
 		return

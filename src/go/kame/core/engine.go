@@ -14,6 +14,7 @@ type Root struct {
 type Engine struct {
 	Alloc         mem.Allocator
 	nodes         []*Node
+	nodeIndex     []nodeIndexEntry
 	roots         []*Root
 	nextID        int64
 	cancellations []Cancellation
@@ -21,6 +22,8 @@ type Engine struct {
 	nextUpdate    int64
 	lastRun       *Node
 }
+
+type nodeIndexEntry struct { kind ResourceKind; name string; node *Node }
 
 func NewEngine(a mem.Allocator) *Engine {
 	e := mem.Alloc[Engine](a)
@@ -37,15 +40,12 @@ func canonicalName(a mem.Allocator, key ResourceKey) (string, bool) {
 
 func (e *Engine) find(key ResourceKey) *Node {
 	name, owned := canonicalName(e.Alloc, key)
-	for i := range e.nodes {
-		n := e.nodes[i]
-		if n.Key.Kind == key.Kind && n.Key.Name == name {
-			if owned { mem.FreeString(e.Alloc, name) }
-			return n
-		}
-	}
+	lo, hi := 0, len(e.nodeIndex)
+	for lo < hi { mid := lo + (hi-lo)/2; entry := e.nodeIndex[mid]; if entry.kind < key.Kind || (entry.kind == key.Kind && entry.name < name) { lo = mid+1 } else { hi = mid } }
+	var n *Node
+	if lo < len(e.nodeIndex) && e.nodeIndex[lo].kind == key.Kind && e.nodeIndex[lo].name == name { n = e.nodeIndex[lo].node }
 	if owned { mem.FreeString(e.Alloc, name) }
-	return nil
+	return n
 }
 
 func (e *Engine) node(key ResourceKey) *Node {
@@ -60,6 +60,11 @@ func (e *Engine) node(key ResourceKey) *Node {
 	if owned { mem.FreeString(e.Alloc, name) }
 	n.State = NodeIdle
 	e.nodes = slices.Append(e.Alloc, e.nodes, n)
+	lo, hi := 0, len(e.nodeIndex)
+	for lo < hi { mid := lo + (hi-lo)/2; entry := e.nodeIndex[mid]; if entry.kind < n.Key.Kind || (entry.kind == n.Key.Kind && entry.name < n.Key.Name) { lo = mid+1 } else { hi = mid } }
+	e.nodeIndex = slices.Append(e.Alloc, e.nodeIndex, nodeIndexEntry{kind: n.Key.Kind, name: n.Key.Name, node: n})
+	copy(e.nodeIndex[lo+1:], e.nodeIndex[lo:])
+	e.nodeIndex[lo] = nodeIndexEntry{kind: n.Key.Kind, name: n.Key.Name, node: n}
 	return n
 }
 
@@ -546,7 +551,7 @@ func (e *Engine) Free() {
 		n.Key.Free(e.Alloc); mem.Free(e.Alloc, n)
 	}
 	for i := range e.completions { e.completions[i].Value.Free(e.Alloc); e.completions[i].Diagnostic.Free(e.Alloc) }
-	slices.Free(e.Alloc, e.nodes); slices.Free(e.Alloc, e.cancellations); slices.Free(e.Alloc, e.completions); mem.Free(e.Alloc, e)
+	slices.Free(e.Alloc, e.nodes); slices.Free(e.Alloc, e.nodeIndex); slices.Free(e.Alloc, e.cancellations); slices.Free(e.Alloc, e.completions); mem.Free(e.Alloc, e)
 }
 
 // TrackedNodes returns a caller-owned slice of borrowed runtime nodes.

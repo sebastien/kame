@@ -75,6 +75,15 @@ func Parse(a mem.Allocator, name string, text string) *Script {
 	return s
 }
 
+// ParseBorrowed parses without copying name or text. The caller must keep both
+// strings alive and immutable until the returned Script is freed.
+func ParseBorrowed(a mem.Allocator, name string, text string) *Script {
+	s := mem.Alloc[Script](a)
+	s.Alloc, s.Source, s.BorrowedSource = a, source.Borrow(a, name, text), true
+	parseScript(s, 0)
+	return s
+}
+
 func parseScript(s *Script, offset int) {
 	a, text := s.Alloc, s.Source.Text
 	for pos := offset; pos < len(text); {

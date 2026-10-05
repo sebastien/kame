@@ -186,7 +186,7 @@ func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Va
 			} else {
 				local := mem.Alloc[localDefinition](p.Alloc)
 				local.Expression, local.Scope = d.Expression, state.Scope
-				state.Scope.Bindings = slices.Append(p.Alloc, state.Scope.Bindings, binding{Kind: bindingLocalDefinition, Name: owned(p.Alloc, d.Name), Local: local})
+				state.Scope.appendBinding(binding{Kind: bindingLocalDefinition, Name: owned(p.Alloc, d.Name), Local: local})
 			}
 		}
 		c.SetOperationState(state, freeKashInvocation)

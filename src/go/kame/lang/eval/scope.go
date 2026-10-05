@@ -26,11 +26,17 @@ type binding struct {
 	Local      *localDefinition
 }
 
+type bindingIndexEntry struct {
+	name  string
+	index int
+}
+
 type Scope struct {
-	Alloc      mem.Allocator
-	Parent     *Scope
-	Bindings   []binding
-	References int
+	Alloc        mem.Allocator
+	Parent       *Scope
+	Bindings     []binding
+	bindingIndex []bindingIndexEntry
+	References   int
 	// Section holds the positional arguments of an enclosing placeholder
 	// section call. The scope owns these values and frees them with itself.
 	Section []core.Value
@@ -64,7 +70,27 @@ func (s *Scope) setValue(name string, value core.Value) {
 	// Raw setValue performs no strand check. Form stores that can target an
 	// ancestor must go through trySetValue; fresh-child stores in callValues
 	// use this directly because a fresh child cannot be an ancestor.
-	s.Bindings = slices.Append(s.Alloc, s.Bindings, binding{Kind: bindingValue, Name: owned(s.Alloc, name), Value: value.Clone(s.Alloc)})
+	s.appendBinding(binding{Kind: bindingValue, Name: owned(s.Alloc, name), Value: value.Clone(s.Alloc)})
+}
+
+func (s *Scope) appendBinding(value binding) {
+	s.Bindings = slices.Append(s.Alloc, s.Bindings, value)
+	lo, hi := 0, len(s.bindingIndex)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if s.bindingIndex[mid].name < value.Name {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo < len(s.bindingIndex) && s.bindingIndex[lo].name == value.Name {
+		s.bindingIndex[lo].index = len(s.Bindings) - 1
+		return
+	}
+	s.bindingIndex = slices.Append(s.Alloc, s.bindingIndex, bindingIndexEntry{name: value.Name, index: len(s.Bindings) - 1})
+	copy(s.bindingIndex[lo+1:], s.bindingIndex[lo:])
+	s.bindingIndex[lo] = bindingIndexEntry{name: value.Name, index: len(s.Bindings) - 1}
 }
 
 // trySetValue stores value under name unless it would strand its capture.
@@ -80,7 +106,7 @@ func (s *Scope) trySetValue(name string, value core.Value) bool {
 }
 
 func (s *Scope) setFunction(name string, function *Function) {
-	s.Bindings = slices.Append(s.Alloc, s.Bindings, binding{Kind: bindingFunction, Name: owned(s.Alloc, name), Function: function})
+	s.appendBinding(binding{Kind: bindingFunction, Name: owned(s.Alloc, name), Function: function})
 }
 
 // RenderChildScope creates a child scope binding each record field as a name
@@ -99,15 +125,22 @@ func RenderChildScope(c *Context, parent *Scope, record core.Value) *Scope {
 
 func (s *Scope) setDefinition(name string) {
 	key := core.NewResourceKey(s.Alloc, core.ResourceDefinition, name)
-	s.Bindings = slices.Append(s.Alloc, s.Bindings, binding{Kind: bindingDefinition, Name: owned(s.Alloc, name), Definition: key})
+	s.appendBinding(binding{Kind: bindingDefinition, Name: owned(s.Alloc, name), Definition: key})
 }
 
 func (s *Scope) lookup(name string) *binding {
 	for current := s; current != nil; current = current.Parent {
-		for i := len(current.Bindings) - 1; i >= 0; i-- {
-			if current.Bindings[i].Name == name {
-				return &current.Bindings[i]
+		lo, hi := 0, len(current.bindingIndex)
+		for lo < hi {
+			mid := lo + (hi-lo)/2
+			if current.bindingIndex[mid].name < name {
+				lo = mid + 1
+			} else {
+				hi = mid
 			}
+		}
+		if lo < len(current.bindingIndex) && current.bindingIndex[lo].name == name {
+			return &current.Bindings[current.bindingIndex[lo].index]
 		}
 	}
 	return nil
@@ -164,6 +197,7 @@ func (s *Scope) Free() {
 	}
 	slices.Free(s.Alloc, s.Section)
 	slices.Free(s.Alloc, s.Bindings)
+	slices.Free(s.Alloc, s.bindingIndex)
 	parent := s.Parent
 	mem.Free(s.Alloc, s)
 	parent.Free()

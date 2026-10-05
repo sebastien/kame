@@ -11,6 +11,11 @@ import (
 )
 
 func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Result {
+	if c.Engine == nil && c.Requests == nil {
+		// Hostless synchronous evaluators surface the boundary without queueing work.
+		payload.Free(c.Run)
+		return eval.Result{Waiting: true}
+	}
 	if c.Engine != nil && c.Program != nil && (kind == host.RequestReadFile || kind == host.RequestEnvironment) {
 		return readRequest(c, kind, payload)
 	}
