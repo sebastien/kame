@@ -59,6 +59,22 @@ task native-cache :
 		if ((Get-Content (Join-Path $project 'native-env.txt') -Raw).Trim() -ne 'passed') {
 			throw 'Native recipe did not replace the inherited environment name case-insensitively or write its output file.'
 		}
+		$readOutput = & $exe do run --lang expr --allow-read -C $project -c '(read "native-env.txt")' 2>&1
+		if ($LASTEXITCODE -ne 0 -or ($readOutput -join "`n") -notmatch 'passed') {
+			throw "Native file read operation failed: exit=$LASTEXITCODE output=$($readOutput -join ' | ')"
+		}
+		$existsOutput = & $exe do run --lang expr --allow-read -C $project -c '(exists? "native-env.txt")' 2>&1
+		if ($LASTEXITCODE -ne 0 -or ($existsOutput -join "`n") -notmatch ':true') {
+			throw "Native file existence operation failed: exit=$LASTEXITCODE output=$($existsOutput -join ' | ')"
+		}
+		$statOutput = & $exe do run --lang expr --allow-read -C $project -c '(stat "native-env.txt")' 2>&1
+		if ($LASTEXITCODE -ne 0 -or ($statOutput -join "`n") -notmatch 'name: "native-env.txt"') {
+			throw "Native file stat operation failed: exit=$LASTEXITCODE output=$($statOutput -join ' | ')"
+		}
+		$wildcardOutput = & $exe do run --lang expr --allow-read -C $project -c '(wildcard "*.kmk")' 2>&1
+		if ($LASTEXITCODE -ne 0 -or ($wildcardOutput -join "`n") -notmatch 'native-child.kmk' -or ($wildcardOutput -join "`n") -notmatch 'Makefile.kmk') {
+			throw "Native wildcard operation failed: exit=$LASTEXITCODE output=$($wildcardOutput -join ' | ')"
+		}
 		$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-cwd 2>&1
 		if ($LASTEXITCODE -ne 0 -or (Get-Content (Join-Path $project 'native-cwd.txt') -Raw) -ne $project) {
 			throw "Native CLI working-directory selection failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
