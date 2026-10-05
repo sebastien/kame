@@ -10,6 +10,22 @@ import (
 	"solod.dev/so/strings"
 )
 
+// opPattern explicitly constructs a pattern value from validated runtime text.
+// Strings are otherwise never reclassified as patterns after evaluation.
+func opPattern(c *eval.Context, state any, values []core.Value) eval.Result {
+	_ = state
+	if values[0].Kind != core.String {
+		return invalidArgument(c, values, 0, "string")
+	}
+	parsed := expr.ParsePatternText(c.Run, values[0].Text, 0)
+	defer parsed.Pattern.Free(c.Run)
+	defer slices.Free(c.Run, parsed.Diagnostics)
+	if len(parsed.Diagnostics) != 0 || (parsed.Pattern.Matchers != 0 && parsed.Pattern.References != 0) {
+		return ownedFailure(c.Run, "PAT_INVALID", "invalid runtime pattern")
+	}
+	return eval.Result{Value: core.NewPattern(c.Run, values[0].Text)}
+}
+
 // replaceState holds the parsed patterns of one pattern replace. The state is
 // owned by the allocator that parsed it and freed by freeReplaceState.
 type replaceState struct {

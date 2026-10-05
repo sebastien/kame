@@ -224,8 +224,9 @@ requires a pattern literal or a pattern value.
 
 ## Deferred
 
-- Pattern construction from runtime text through an operation.
 - Regular-expression groups.
+
+Runtime pattern construction is specified in `029-pattern-extensions.md`.
 
 ## Acceptance Tests
 

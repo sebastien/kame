@@ -3,11 +3,11 @@
 ## Purpose and status
 
 D11 extends the shared target and expression pattern machinery. The initial
-implementation in this specification adds anonymous captures to rule outputs
-and positional capture references to rule inputs. Runtime pattern construction,
-regular-expression groups and operations, and capture processors remain
-explicit D11 work; this document will gain their grammar and acceptance cases
-before those portions are implemented.
+implementation adds anonymous captures to rule outputs and positional capture
+references to rule inputs. `(pattern TEXT)` explicitly constructs a validated
+pattern value from a runtime string. Regular-expression groups and operations,
+and capture processors remain explicit D11 work; this document will gain their
+grammar and acceptance cases before those portions are implemented.
 
 The extension preserves anchored, leftmost-shortest matching, non-empty
 captures, and the existing `*`, `**`, `?`, character-class, and named-capture
@@ -39,6 +39,16 @@ canonical decimal notation: `_0` is valid; `_00`, signs and non-digits are not
 positional forms. Such names remain available as ordinary named captures when
 declared in an output template.
 
+## Runtime construction
+
+`(pattern TEXT)` accepts one string and returns a pattern value containing its
+text. The string is parsed and rejected with `PAT_INVALID` if it contains
+malformed groups or mixes matcher and expansion references. Strings remain
+strings unless this operation is called; construction does not interpret
+ordinary values implicitly. A valid string without groups may be constructed
+as a pattern, though operations requiring a matcher or expansion group may
+reject it for that use.
+
 ## Acceptance
 
 - `./{**}/{*}.c` parses, formats idempotently, and matches `./src/demo.c` with
@@ -51,11 +61,12 @@ declared in an output template.
   and their indexes count repeated named groups as separate source positions.
 - Existing named-only rule matching, input rendering, cache identity, planning,
   diagnostics and source formatting remain stable.
+- `(pattern (cat "./" "{" "name:*" "}.c"))` returns a pattern and can be
+  passed to existing matching/replacement operations; malformed runtime
+  patterns produce `PAT_INVALID`.
 
 ## Remaining D11 clauses
 
-- A runtime operation constructs a pattern value from text without changing
-  ordinary runtime strings into patterns implicitly.
 - Regular-expression groups have an anchored, portable grammar with explicit
   named and positional captures; malformed expressions produce source-aware
   diagnostics on both hosts.

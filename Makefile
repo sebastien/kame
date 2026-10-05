@@ -88,6 +88,7 @@ test-wasm: wasm-check
 	tests/T010-32-embedding-js.sh
 	tests/T010-33-embedding-python.sh
 	tests/T014-02-patterns-ergonomics.sh
+	tests/T014-03-runtime-pattern-construction.sh
 	tests/T016-01-cli-render.sh
 	tests/T017-02-wasm-capture.sh
 	tests/T017-03-eval-pipelines.sh

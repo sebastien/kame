@@ -289,10 +289,14 @@ func TestPatternReplace(t *testing.T) {
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(replace {name:*}.c 1 \"hello.c\")")
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "1" { t.Error("leading pattern or integer expansion failed") }
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "1" {
+		t.Error("leading pattern or integer expansion failed")
+	}
 	result.Free(a)
 	result = evaluate(t, program, "(map (replace {*}.c :false) [\"a.c\" \"b.c\"])")
-	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "false" || result.Value.List[1].Text != "false" { t.Error("scalar replacement section failed") }
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "false" || result.Value.List[1].Text != "false" {
+		t.Error("scalar replacement section failed")
+	}
 	result.Free(a)
 	result = evaluate(t, program, "(replace ./src/{name:*}.c ./build/{name}.o \"./src/demo.c\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "./build/demo.o" {
@@ -380,34 +384,73 @@ func TestPatternReplace(t *testing.T) {
 	registry.Free()
 }
 
+func TestRuntimePatternConstruction(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "pattern", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, `(pattern (cat "./" "{" "name:*" "}.c"))`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Pattern || result.Value.Text != "./{name:*}.c" {
+		t.Error("runtime pattern construction did not return the validated pattern")
+	}
+	result.Free(a)
+	result = evaluate(t, program, `(pattern (cat "./" "{" "name:*" "}" "{" "_0" "}"))`)
+	if result.Diagnostic.Code != "PAT_INVALID" {
+		t.Error("runtime pattern construction accepted mixed matcher and reference groups")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func TestComputedRecordLookupTransfersSelectedCallables(t *testing.T) {
- a := t.Allocator()
- engine := core.NewEngine(a)
- defer engine.Free()
- registry := eval.NewRegistry(a)
- defer registry.Free()
- operations.Register(registry)
- parsed := script.Parse(a, "lookup", "")
- defer parsed.Free()
- p := eval.Compile(a, engine, parsed, registry)
- defer p.Free()
- samples := []string{
-  "(get [one: 1 two: 2] (cat \"t\" \"wo\"))",
-  "(get [one: 1] \"missing\" 7)",
-  "(get [one: 1] \"missing\")",
-  "(apply (get [used: ([x] (cat \"hello \" x)) unused: ([x] x)] \"used\" ([x] x)) [\"Ada\"])",
-  "(apply (get [unused: ([x] x)] \"missing\" ([x] (cat \"fallback \" x))) [\"Ada\"])",
-  "(get [one: 1] 1)",
- }
- for i := range samples {
-  r := evaluate(t, p, samples[i])
-  if i < 5 && r.Diagnostic.Code != "" { t.Error("valid computed lookup failed") }
-  if i == 0 && r.Value.Int != 2 { t.Error("computed key lost") }
-  if i == 1 && r.Value.Int != 7 { t.Error("missing-key default lost") }
-  if i == 2 && r.Value.Kind != core.Nil { t.Error("missing key must yield nil") }
-  if i == 3 && r.Value.Text != "hello Ada" { t.Error("selected callable did not survive lookup") }
-  if i == 4 && r.Value.Text != "fallback Ada" { t.Error("fallback callable did not survive lookup") }
-  if i == 5 && r.Diagnostic.Code != "EXPR_INVALID" { t.Error("invalid key type was accepted") }
-  r.Free(a)
- }
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	defer engine.Free()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	parsed := script.Parse(a, "lookup", "")
+	defer parsed.Free()
+	p := eval.Compile(a, engine, parsed, registry)
+	defer p.Free()
+	samples := []string{
+		"(get [one: 1 two: 2] (cat \"t\" \"wo\"))",
+		"(get [one: 1] \"missing\" 7)",
+		"(get [one: 1] \"missing\")",
+		"(apply (get [used: ([x] (cat \"hello \" x)) unused: ([x] x)] \"used\" ([x] x)) [\"Ada\"])",
+		"(apply (get [unused: ([x] x)] \"missing\" ([x] (cat \"fallback \" x))) [\"Ada\"])",
+		"(get [one: 1] 1)",
+	}
+	for i := range samples {
+		r := evaluate(t, p, samples[i])
+		if i < 5 && r.Diagnostic.Code != "" {
+			t.Error("valid computed lookup failed")
+		}
+		if i == 0 && r.Value.Int != 2 {
+			t.Error("computed key lost")
+		}
+		if i == 1 && r.Value.Int != 7 {
+			t.Error("missing-key default lost")
+		}
+		if i == 2 && r.Value.Kind != core.Nil {
+			t.Error("missing key must yield nil")
+		}
+		if i == 3 && r.Value.Text != "hello Ada" {
+			t.Error("selected callable did not survive lookup")
+		}
+		if i == 4 && r.Value.Text != "fallback Ada" {
+			t.Error("fallback callable did not survive lookup")
+		}
+		if i == 5 && r.Diagnostic.Code != "EXPR_INVALID" {
+			t.Error("invalid key type was accepted")
+		}
+		r.Free(a)
+	}
 }

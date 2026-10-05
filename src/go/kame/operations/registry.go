@@ -22,7 +22,7 @@ func Register(r *eval.Registry) bool {
 		add(r, "reduce", opReduce, 2, 3) && add(r, "concat", opConcat, 0, -1) &&
 		add(r, "slice", opSlice, 2, 3) && add(r, "sorted", opSorted, 1, 1) &&
 		add(r, "unique", opUnique, 1, 1) && add(r, "join", opJoin, 2, 2) &&
-		add(r, "split", opSplit, 2, 2) && add(r, "strip", opStrip, 1, 1) &&
+		add(r, "split", opSplit, 2, 2) && add(r, "strip", opStrip, 1, 1) && add(r, "pattern", opPattern, 1, 1) &&
 		add(r, "replace", opReplace, 2, 3) && add(r, "includes?", opIncludes, 2, 2) &&
 		add(r, "starts?", opStarts, 2, 2) && add(r, "ends?", opEnds, 2, 2) &&
 		add(r, "uppercase", opUppercase, 1, 1) && add(r, "lowercase", opLowercase, 1, 1) &&
