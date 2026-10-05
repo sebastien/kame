@@ -45,5 +45,8 @@ non-negativity rather than exact equality.
 
 Current evidence: `tests/T003-02-host-signals.sh` verifies human cancellation
 wording and JSON `target-cancelled` stream separation. `tests/T009-04-cli-json.sh`
-continues to verify the existing lifecycle event order and JSON-only stdout.
-Process display, runtime fields, and executable-lesson coverage remain open.
+verifies bounded process fields, nonnegative runtime, human command/runtime
+output, lifecycle order, four-stage truncation, JSON-only stdout and explicit
+color/`NO_COLOR` behavior for redirected progress. `TestPipelineProcessDisplayIsBoundedToFourStages`
+also verifies the four-stage cap, explicit truncation and argument/byte bounds.
+Executable-lesson coverage and cross-host output comparison remain open.

@@ -142,3 +142,34 @@ func TestTargetEventsCarrySharedIdentity(t *testing.T) {
 	if !started || !value || !completed { t.Error("target lifecycle events were incomplete") }
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
+
+func TestPipelineProcessDisplayIsBoundedToFourStages(t *testing.T) {
+	a := t.Allocator()
+	source := "run :\n\t@(out (pipe (run \"printf\" \"one\") (run \"cat\") (run \"cat\") (run \"cat\") (run \"cat\")))\n"
+	parsed := script.Parse(a, "test.kmk", source)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: ".", Grants: []eval.Grant{{Capability: eval.Run}}})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("run")
+	if result.Diagnostic.Code != "" { t.Errorf("pipeline failed: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	seen := false
+	for {
+		next := compiled.Program.NextEvent()
+		if !next.OK { break }
+		if next.Event.Kind == program.ProcessStarted && next.Event.Target == "run" {
+			seen = true
+			bytes, pipes := len(next.Event.Program), 0
+			for i := range next.Event.Argv {
+				bytes += len(next.Event.Argv[i])
+				if next.Event.Argv[i] == "|" { pipes++ }
+			}
+			if pipes > 3 || !next.Event.DisplayTruncated { t.Error("pipeline display did not cap at four stages with truncation") }
+			if len(next.Event.Argv) > 8 || bytes > 160 { t.Error("pipeline display exceeded argument or byte bounds") }
+		}
+		next.Event.Free(a)
+	}
+	if !seen { t.Error("pipeline did not emit a process-started event") }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}

@@ -168,6 +168,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 	}
 	if !json && progress.Completed+progress.Failed+progress.Cancelled != 0 {
 		elapsedMS := (time.Now().UnixNano() - startedAt) / 1000000
+		colored := startProgressColor(errOut)
 		if progress.Failed == 0 && progress.Cancelled == 0 {
 			fmt.Fprintf(errOut, "Summary: %d %s complete in %d.%03ds\n", progress.Completed, targetWord(progress.Completed), elapsedMS/1000, elapsedMS%1000)
 		} else if progress.Failed == 0 {
@@ -175,6 +176,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 		} else {
 			fmt.Fprintf(errOut, "Summary: %d complete, %d failed, %d cancelled in %d.%03ds\n", progress.Completed, progress.Failed, progress.Cancelled, elapsedMS/1000, elapsedMS%1000)
 		}
+		endProgressColor(errOut, colored)
 	}
 	if failed || cancelling {
 		return 1
@@ -214,37 +216,61 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 		} else if event.Kind == program.Stderr {
 			errOut.Write(event.Data)
 		} else if event.Kind == program.ProcessStarted {
+			colored := startProgressColor(errOut)
 			writeProcessStarted(errOut, event)
+			endProgressColor(errOut, colored)
 		} else if event.Kind == program.ProcessExited {
-			if event.HasRuntime { fmt.Fprintf(errOut, "[%s] process finished in %dms\n", event.Target, event.RuntimeMS) }
+			if event.HasRuntime { colored := startProgressColor(errOut); fmt.Fprintf(errOut, "[%s] process finished in %dms\n", event.Target, event.RuntimeMS); endProgressColor(errOut, colored) }
 		} else if event.Kind == program.TargetStarted {
 			progress.Active++
+			colored := startProgressColor(errOut)
 			fmt.Fprintf(errOut, "[%s] started (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
+			endProgressColor(errOut, colored)
 		} else if event.Kind == program.TargetCompleted {
 			if progress.Active != 0 {
 				progress.Active--
 			}
 			progress.Completed++
+			colored := startProgressColor(errOut)
 			fmt.Fprintf(errOut, "[%s] complete (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
+			endProgressColor(errOut, colored)
 		} else if event.Kind == program.TargetFailed {
 			if progress.Active != 0 {
 				progress.Active--
 			}
 			progress.Failed++
+			colored := startProgressColor(errOut)
 			fmt.Fprintf(errOut, "[%s] failed (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
+			endProgressColor(errOut, colored)
 		} else if event.Kind == program.TargetCancelled {
 			if progress.Active != 0 {
 				progress.Active--
 			}
 			progress.Cancelled++
+			colored := startProgressColor(errOut)
 			fmt.Fprintf(errOut, "[%s] cancelled (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
+			endProgressColor(errOut, colored)
 		} else if event.Kind == program.CacheWarning {
+			colored := startProgressColor(errOut)
 			fmt.Fprintf(errOut, "warning %s: %s\n", event.Diagnostic.Code, event.Diagnostic.Message)
+			endProgressColor(errOut, colored)
 		} else if event.Kind == program.ServiceState {
+			colored := startProgressColor(errOut)
 			fmt.Fprintf(errOut, "[%s] service %s (generation %d, attempt %d)\n", event.Target, event.State, event.Generation, event.Attempt)
+			endProgressColor(errOut, colored)
 		}
 		event.Free(mem.System)
 	}
+}
+
+func startProgressColor(out io.Writer) bool {
+	if diagnosticColor != "always" { return false }
+	io.WriteString(out, "\x1b[36m")
+	return true
+}
+
+func endProgressColor(out io.Writer, colored bool) {
+	if colored { io.WriteString(out, "\x1b[0m") }
 }
 
 func writeProcessStarted(out io.Writer, event program.Event) {

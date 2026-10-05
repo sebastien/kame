@@ -1126,45 +1126,66 @@ func freePendingRequest(a mem.Allocator, pending *pendingRequest) {
 
 type processDisplay struct { Program string; Argv []string; Truncated bool }
 
+const maxProcessDisplayStages = 4
+const maxProcessDisplayTokens = 32
+
+func appendProcessDisplayToken(a mem.Allocator, raw *[]string, value string, truncated *bool) {
+	if len(*raw) >= maxProcessDisplayTokens {
+		*truncated = true
+		return
+	}
+	*raw = slices.Append(a, *raw, value)
+}
+
 func processDisplayFromPayload(a mem.Allocator, payload core.Value, shell []string) processDisplay {
 	var raw []string
+	truncated := false
 	argv := host.PayloadArgv(payload)
 	if len(argv) != 0 {
-		for i := range argv { raw = slices.Append(a, raw, argv[i].Text) }
+		for i := range argv { appendProcessDisplayToken(a, &raw, argv[i].Text, &truncated) }
 	} else {
 		stages := host.PayloadStages(payload)
 		if len(stages) != 0 {
-			for i := range stages {
-				if i != 0 { raw = slices.Append(a, raw, "|") }
-				for j := range stages[i].List { raw = slices.Append(a, raw, stages[i].List[j].Text) }
+			if len(stages) > maxProcessDisplayStages { truncated = true }
+			stageCount := len(stages)
+			if stageCount > maxProcessDisplayStages { stageCount = maxProcessDisplayStages }
+			for i := 0; i < stageCount; i++ {
+				if i != 0 { appendProcessDisplayToken(a, &raw, "|", &truncated) }
+				for j := range stages[i].List { appendProcessDisplayToken(a, &raw, stages[i].List[j].Text, &truncated) }
 			}
 		} else {
 			shellArgv := host.PayloadList(payload, "shell")
-			if len(shellArgv) == 0 { for i := range shell { raw = slices.Append(a, raw, shell[i]) }
-			} else { for i := range shellArgv { raw = slices.Append(a, raw, shellArgv[i].Text) } }
+			if len(shellArgv) == 0 { for i := range shell { appendProcessDisplayToken(a, &raw, shell[i], &truncated) }
+			} else { for i := range shellArgv { appendProcessDisplayToken(a, &raw, shellArgv[i].Text, &truncated) } }
 			script := host.PayloadText(payload, host.FieldScript)
-			if script != "" { raw = slices.Append(a, raw, script) }
+			if script != "" { appendProcessDisplayToken(a, &raw, script, &truncated) }
 		}
 	}
 	display := boundedProcessDisplay(a, raw)
+	display.Truncated = display.Truncated || truncated
 	slices.Free(a, raw)
 	return display
 }
 
 func processDisplayFromHost(a mem.Allocator, request host.ProcessRequest) processDisplay {
 	var raw []string
+	truncated := false
 	if len(request.Argv) != 0 {
-		for i := range request.Argv { raw = slices.Append(a, raw, request.Argv[i]) }
+		for i := range request.Argv { appendProcessDisplayToken(a, &raw, request.Argv[i], &truncated) }
 	} else if len(request.Stages) != 0 {
-		for i := range request.Stages {
-			if i != 0 { raw = slices.Append(a, raw, "|") }
-			for j := range request.Stages[i].Argv { raw = slices.Append(a, raw, request.Stages[i].Argv[j]) }
+		if len(request.Stages) > maxProcessDisplayStages { truncated = true }
+		stageCount := len(request.Stages)
+		if stageCount > maxProcessDisplayStages { stageCount = maxProcessDisplayStages }
+		for i := 0; i < stageCount; i++ {
+			if i != 0 { appendProcessDisplayToken(a, &raw, "|", &truncated) }
+			for j := range request.Stages[i].Argv { appendProcessDisplayToken(a, &raw, request.Stages[i].Argv[j], &truncated) }
 		}
 	} else {
-		for i := range request.Shell { raw = slices.Append(a, raw, request.Shell[i]) }
-		if len(request.Script) != 0 { raw = slices.Append(a, raw, string(request.Script)) }
+		for i := range request.Shell { appendProcessDisplayToken(a, &raw, request.Shell[i], &truncated) }
+		if len(request.Script) != 0 { appendProcessDisplayToken(a, &raw, string(request.Script), &truncated) }
 	}
 	display := boundedProcessDisplay(a, raw)
+	display.Truncated = display.Truncated || truncated
 	slices.Free(a, raw)
 	return display
 }

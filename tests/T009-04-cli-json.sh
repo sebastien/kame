@@ -69,6 +69,39 @@ test-step "human progress displays the bounded process command and runtime"
 	fi
 )
 
+test-step "pipeline process display stops after four stages"
+(
+	cd json-events
+	cli_run -- --json pipeline
+	cli_expect_status 0
+	if jq -e -s 'any(.[]; .type == "process-started" and .displayTruncated == true and ([.argv[] | select(. == "|")] | length <= 3) and ((.program | utf8bytelength) + ([.argv[] | utf8bytelength] | add // 0) <= 160))' "$CLI_OUT" >/dev/null; then
+		test-ok "pipeline display is bounded to four stages"
+	else
+		test-fail "pipeline display exceeded four stages or display bounds"
+	fi
+)
+
+test-step "progress honors color policy"
+(
+	cd json-events
+	rm -f ./text.out
+	cli_run -- --color auto --diagnostic-format human ./text.out
+	cli_expect_status 0
+	if grep -q $'\033' "$CLI_ERR"; then
+		test-fail "auto color ignored NO_COLOR for redirected progress"
+	else
+		test-ok "auto color honors NO_COLOR for redirected progress"
+	fi
+	rm -f ./text.out
+	cli_run -- --color always --diagnostic-format human ./text.out
+	cli_expect_status 0
+	if grep -q $'\033' "$CLI_ERR"; then
+		test-ok "explicit color styles redirected progress"
+	else
+		test-fail "explicit color did not style redirected progress"
+	fi
+)
+
 test-step "process stdout and stderr become distinct events"
 (
 	cd json-events

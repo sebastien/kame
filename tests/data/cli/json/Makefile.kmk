@@ -13,3 +13,6 @@
 task speak :
 	echo to-stdout
 	echo to-stderr >&2
+
+task pipeline :
+	@(out (pipe (run "printf" "one") (run "cat") (run "cat") (run "cat") (run "cat")))
