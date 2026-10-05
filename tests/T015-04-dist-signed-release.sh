@@ -39,6 +39,20 @@ printf 'task signed-release :\n\t@(out "signed-release-ok")\n' >"$project/Makefi
 out="$(cd "$project" && KAME_HOME="$root/cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$release/bin/kame" signed-release)"
 if [ "$out" = "signed-release-ok" ]; then test-ok "release launcher verifies and runs signed WASM assets"; else test-fail "signed release output: $out"; fi
 
+test-step "latest updates an older launcher using the actual signed release"
+old_launcher="$root/old-kame"
+sed 's/^KAME_STAMP=.*/KAME_STAMP="0.0.0"/' "$release/bin/kame" >"$old_launcher"
+chmod +x "$old_launcher"
+out="$(cd "$project" && KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" \
+	KAME_HOME="$root/latest-cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm \
+	"$old_launcher" signed-release)"
+version=$(cat VERSION)
+if [ "$out" = "signed-release-ok" ] && [ -x "$root/latest-cache/$version/launcher/kame" ]; then
+	test-ok "latest installs and executes the actual manifest-verified launcher"
+else
+	test-fail "actual signed launcher update: out=$out"
+fi
+
 init_project="$root/init"
 mkdir -p "$init_project"
 init_out="$(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/bin/kame" init)"

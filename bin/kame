@@ -49,8 +49,10 @@ launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # --- Version resolution: KAME_VERSION, embedded stamp, then VERSION file. ---
 version=""
 requested_version=${KAME_VERSION:-}
+latest_channel=0
 if [ "$requested_version" = "latest" ] && [ -z "${KAME_BIN:-}" ]; then
 	[ "${KAME_NO_DOWNLOAD:-0}" != "1" ] || die "latest channel selection requires a download"
+	latest_channel=1
 	latest_url=${KAME_LATEST_URL:-https://github.com/sebastien/kame/releases/latest/download/VERSION}
 	version=$(fetch_text "$latest_url")
 	requested_version=""
@@ -289,6 +291,29 @@ install_bootstrap_template() {
 	mv "$staging" "$template"
 }
 
+install_launcher() {
+	ensure_manifest
+	asset="bin/kame"
+	hex=$(manifest_entry "$cache/SHA256SUMS" "$asset") || die "missing manifest entry: $asset"
+	launcher="$cache/launcher/kame"
+	if [ -x "$launcher" ]; then
+		verify "$launcher" "$hex" || die "checksum mismatch: cached $asset"
+		return 0
+	fi
+	[ "${KAME_NO_DOWNLOAD:-0}" != "1" ] || die "missing cached launcher (download disabled)"
+	staging="$cache/launcher/.kame.$$"
+	rm -f "$staging"
+	mkdir -p "$cache/launcher"
+	note "fetching $asset"
+	fetch "${release_base}${asset}" "$staging"
+	verify "$staging" "$hex" || {
+		rm -f "$staging"
+		die "checksum mismatch: $asset"
+	}
+	chmod +x "$staging"
+	mv -f "$staging" "$launcher"
+}
+
 ape_host() {
 	kame_os=$(uname -s 2>/dev/null || true)
 	kame_arch=$(uname -m 2>/dev/null || true)
@@ -375,6 +400,15 @@ fi
 
 trap release_lock EXIT INT TERM
 acquire_lock
+if [ "$latest_channel" = "1" ] && [ "$KAME_STAMP" != "$version" ]; then
+	install_launcher
+	updated_launcher="$cache/launcher/kame"
+	KAME_VERSION=$version
+	export KAME_VERSION
+	release_lock
+	trap - EXIT INT TERM
+	exec "$updated_launcher" "$@"
+fi
 backend=$(select_backend)
 case $backend in
 ape)

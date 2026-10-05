@@ -73,10 +73,23 @@ else
 	test-fail "offline latest lookup: status=$latest_offline_status out=$latest_offline_out"
 fi
 out="$(KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" KAME_RELEASE_URL="file://$release" KAME_HOME="$root/latest-cache" KAME_BACKEND=wasm "$launcher" latest)"
-if [ "$out" = "wasm:latest" ] && [ -f "$root/latest-cache/9.9.9/wasm/kame.js" ]; then
-	test-ok "latest selects and provisions the resolved immutable release"
+if [ "$out" = "wasm:latest" ] && [ -f "$root/latest-cache/9.9.9/wasm/kame.js" ] && \
+	[ -x "$root/latest-cache/9.9.9/launcher/kame" ]; then
+	test-ok "latest updates to its verified pinned launcher and provisions the selected release"
 else
 	test-fail "latest backend: out=$out"
+fi
+
+test-step "latest revalidates its cached launcher before handoff"
+printf 'tampered launcher\n' >"$root/latest-cache/9.9.9/launcher/kame"
+set +e
+latest_tamper_out="$(KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" KAME_RELEASE_URL="file://$release" KAME_HOME="$root/latest-cache" KAME_BACKEND=wasm "$launcher" latest 2>&1)"
+latest_tamper_status=$?
+set -e
+if [ "$latest_tamper_status" = 1 ] && grep -q 'checksum mismatch: cached bin/kame' <<<"$latest_tamper_out"; then
+	test-ok "tampered latest launcher is rejected before execution"
+else
+	test-fail "latest launcher tamper: status=$latest_tamper_status out=$latest_tamper_out"
 fi
 
 set +e
@@ -91,8 +104,9 @@ fi
 
 test-step "the wasm backend provisions, verifies, and dispatches"
 out="$(KAME_BACKEND=wasm "$launcher" alpha beta)"
-if [ "$out" = "wasm:alpha,beta" ] && [ -f "$cache/9.9.9/wasm/kame.js" ] && [ -f "$cache/9.9.9/wasm/kame.wasm" ]; then
-	test-ok "wasm artifacts installed and executed"
+if [ "$out" = "wasm:alpha,beta" ] && [ -f "$cache/9.9.9/wasm/kame.js" ] && \
+	[ -f "$cache/9.9.9/wasm/kame.wasm" ] && [ ! -e "$cache/9.9.9/launcher" ]; then
+	test-ok "pinned wasm artifacts installed and executed without launcher self-update"
 else
 	test-fail "wasm backend: out=$out"
 fi

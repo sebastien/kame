@@ -70,8 +70,18 @@ which immutable release to verify; it does not bypass signature or checksum
 verification. `KAME_RELEASE_URL` still controls the selected release's asset
 base URL. The latest selector requires downloads and fails when
 `KAME_NO_DOWNLOAD=1`. `--version` may fetch the selector but provisions no
-runtime artifacts. Concrete `KAME_VERSION` values and the launcher's stamped
-version remain pinned and perform no selector request.
+runtime or launcher artifacts. Concrete `KAME_VERSION` values and the
+launcher's stamped version remain pinned and perform no selector request.
+
+When the latest selector resolves to a version different from the running
+launcher's embedded stamp, the launcher verifies that release's signed manifest
+and provenance, installs the listed `bin/kame` asset into the version cache,
+then replaces itself with that pinned launcher before backend selection. The
+cached launcher is checked against the signed manifest on each latest-channel
+handoff. Installation uses a sibling temporary file and atomic rename; the
+currently running launcher is never overwritten. The handoff sets
+`KAME_VERSION` to the resolved concrete version, so it cannot select or update
+itself recursively. `KAME_BIN` bypasses this behavior.
 
 ## Cache
 
@@ -89,6 +99,7 @@ $CACHE/<version>/SHA256SUMS
 $CACHE/<version>/ape/kame.com
 $CACHE/<version>/wasm/kame.js
 $CACHE/<version>/wasm/kame.wasm
+$CACHE/<version>/launcher/kame
 $CACHE/<version>/.backend
 ```
 
@@ -228,6 +239,9 @@ existing build rules.
 - `KAME_VERSION=latest` resolves the selector, prints its concrete version
   without provisioning for `--version`, and provisions only that version for
   execution; disabled downloads fail before creating the cache.
+- `KAME_VERSION=latest` installs and hands off to the selected release's
+  signed launcher before backend dispatch; cached launcher tampering fails
+  closed, while pinned launches do not self-update.
 - An invalid version override fails before creating or accessing a cache path.
 - `kame init` writes a correctly stamped bootstrap sidecar, preserves an
   existing `Makefile`, and refuses a second write without changing either file.
@@ -238,8 +252,6 @@ existing build rules.
 
 ## Deferred
 
-- Automatic self-update; the explicit `latest` channel does not replace the
-  launcher itself, and pinned versions remain the default.
 - Native per-platform release binaries.
 - Windows-native (`cmd.exe`, PowerShell) launcher.
 - Package-manager integrations.
