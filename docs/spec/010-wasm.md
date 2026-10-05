@@ -254,8 +254,10 @@ implementation and exception tag, without host imports. Embedders therefore
 need WebAssembly exception-handling support.
 
 The JavaScript host preserves the diagnostic when an ABI process publisher
-fails. It stops and kills the affected shell or argv process groups, waits for
-all children to close, then rejects the host operation. Streaming callbacks
+fails. On POSIX it uses detached process groups and FIFO-backed pipeline
+connections. On Windows it connects pipeline stages with Node streams and uses
+`taskkill /T /F` to stop a child and its descendants; completion waits for the
+tree-stop request and every direct child to close. Streaming callbacks
 must not throw uncaught exceptions or retry an exhausted instance.
 
 ## JavaScript CLI Wrapper

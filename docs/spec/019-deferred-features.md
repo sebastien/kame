@@ -38,7 +38,7 @@ adapters and integration evidence rather than placeholder methods.
 | D13 | Resource protocols | Complete: canonical `file:` and `mem:` identity, scoped grants, dependency invalidation, URI-aware filesystem traversal, native/POSIX and WASM host mappings, and portable memory storage; native/WASM CLI acceptance in T031-01 plus host, evaluator and program suites. See 031. |
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
-| D16 | Platform execution | Windows process lifecycle and launcher; APE verification on the advertised non-Linux hosts; platform tests prove spawn, pipes, timeout and descendant cleanup. |
+| D16 | Platform execution | In progress: the Node/WASM host now has Windows stream pipelines and process-tree termination, with a Windows-only descendant test; Windows-native launch, native-host lifecycle, and APE conformance on advertised non-Linux hosts remain. |
 | D17 | Distribution tooling | Explicit update/latest selection alongside pinned defaults; native platform artifacts; package-manager integration; `kame init` without overwriting existing project files; provisioning/integrity tests. |
 | D18 | Remaining library/ergonomic extensions | Specified tagged shell helpers and aliases, equality-value filtering, terminal color functions, dependency sequencing and alternative build syntax; formatting and execution tests. |
 
@@ -109,5 +109,11 @@ supports both callbacks and direct-argv native processes; T033-01 covers every
 canonical value kind, identity and protocol rejection, limits, process
 termination, cancellation, disposal, and evaluate/build/watch configuration.
 The core codec and plugin registry tests also verify allocator ownership and
-version-sensitive operation identity. D16–D18 remain open. The preceding
-initial-contract audit remains historical evidence, not completion of this work.
+version-sensitive operation identity. D16–D18 remain open. The
+Node's Windows host path now connects pipeline stages with child streams, uses
+`taskkill /T /F` for process-tree cancellation, and waits for tree-stop and
+direct-child completion. T033-01 retains a Windows-only descendant cleanup
+case; this workspace has no Windows runner, so that case is not yet execution
+evidence. D16's native launcher, platform lifecycle matrix, and non-Linux APE
+verification remain open. The initial-contract audit remains historical
+evidence, not completion of this work.

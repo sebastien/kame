@@ -258,6 +258,39 @@ await assert.rejects(disposedInvocation, (error) => error.code === 'EXEC_CANCELL
 assert.equal(readFileSync(disposalStoppedPath, 'utf8'), 'stopped', 'program disposal did not reap its native plugin process');
 await disposalKame.dispose();
 rmSync(disposalDir, { recursive: true, force: true });
+
+if (process.platform === 'win32') {
+  const treeDir = mkdtempSync(join(tmpdir(), 'kame-plugin-tree-'));
+  const treeReady = join(treeDir, 'ready');
+  const treePid = join(treeDir, 'child.pid');
+  const treeKame = await Kame.create();
+  const treeProgram = await treeKame.compile('answer = 0\n', { name: 'plugin-tree.km' });
+  const treeDeclaration = declarations();
+  treeDeclaration[0].argv = [process.execPath, '-e', `
+const fs = require('node:fs');
+const { spawn } = require('node:child_process');
+const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+fs.writeFileSync(process.argv[1], String(descendant.pid));
+fs.writeFileSync(process.argv[2], 'ready');
+process.stdin.resume();
+setInterval(() => {}, 1000);`, treePid, treeReady];
+  const treeAbort = new AbortController();
+  const treeInvocation = treeProgram.evaluate('(example-run "tree")', { plugins: treeDeclaration, signal: treeAbort.signal });
+  while (!existsSync(treeReady)) await new Promise((resolve) => setTimeout(resolve, 1));
+  const descendantPid = Number(readFileSync(treePid, 'utf8'));
+  treeAbort.abort();
+  await assert.rejects(treeInvocation, (error) => error.code === 'EXEC_CANCELLED');
+  let descendantAlive = true;
+  for (let attempt = 0; attempt < 100 && descendantAlive; attempt++) {
+    try { process.kill(descendantPid, 0); }
+    catch { descendantAlive = false; break; }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.equal(descendantAlive, false, 'Windows cancellation left a plugin descendant running');
+  await treeProgram.dispose();
+  await treeKame.dispose();
+  rmSync(treeDir, { recursive: true, force: true });
+}
 NODE
 then
 	test-ok "callback and process adapters enforce identity, capability, bounds, timeout and failure contracts"

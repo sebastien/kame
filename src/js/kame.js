@@ -37,18 +37,8 @@ function installSignals() {
       const reaped = [...activeChildren].map((child) => new Promise((resolve) => child.once('close', resolve)));
       for (const cancellation of invocationCancellations) cancellation.abort();
       const cacheReleases = [...activeCacheLocks].map((release) => release());
-      for (const child of activeChildren) {
-        try {
-          process.kill(-child.pid, 'SIGKILL');
-        } catch {
-          try {
-            child.kill('SIGKILL');
-          } catch {
-            // already gone
-          }
-        }
-      }
-      Promise.all([...reaped, ...invocationDisposals, ...cacheReleases]).then(() => process.exit(interruptedStatus));
+      const treeStops = [...activeChildren].map((child) => signalProcessTree(child, 'SIGKILL'));
+      Promise.all([...reaped, ...treeStops, ...invocationDisposals, ...cacheReleases]).then(() => process.exit(interruptedStatus));
     });
   }
 }
@@ -62,12 +52,26 @@ function track(child, request = undefined) {
   });
 }
 
-function cancelProcessGroup(request, graceMS = 5000) {
+function signalProcessTree(child, signal = 'SIGKILL') {
+  if (!child || child.pid === undefined) return Promise.resolve();
+  if (process.platform === 'win32') {
+    const killer = spawn('taskkill.exe', ['/PID', `${child.pid}`, '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    return new Promise((resolve) => {
+      killer.once('error', () => { try { child.kill(signal); } catch {} resolve(); });
+      killer.once('close', resolve);
+    });
+  }
+  try { process.kill(-child.pid, signal); } catch { try { child.kill(signal); } catch {} }
+  return Promise.resolve();
+}
+
+async function cancelProcessGroup(request, graceMS = 5000) {
   const child = activeProcessGroups.get(request.toString());
   if (!child || child.pid === undefined) return;
-  try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
+  if (process.platform === 'win32') { await signalProcessTree(child, 'SIGKILL'); return; }
+  signalProcessTree(child, 'SIGTERM');
   const timer = setTimeout(() => {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+    signalProcessTree(child, 'SIGKILL');
   }, graceMS);
   timer.unref();
 }
@@ -1140,7 +1144,7 @@ class Module {
         graceMS = cancellation.graceMS;
       } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process cancellation request'); }
       if (!Number.isSafeInteger(graceMS) || graceMS < 0 || graceMS > 60000) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process cancellation grace period');
-      cancelProcessGroup(processRequest, graceMS);
+      await cancelProcessGroup(processRequest, graceMS);
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
     if (kind === 19) return this.completeJSON(instance, request, resourceExists(payload));
@@ -1969,9 +1973,10 @@ class Module {
 
 function terminatePluginChild(child) {
   if (!child || child.pid === undefined) return undefined;
-  try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
+  if (process.platform === 'win32') return signalProcessTree(child, 'SIGKILL');
+  signalProcessTree(child, 'SIGTERM');
   const timer = setTimeout(() => {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+    signalProcessTree(child, 'SIGKILL');
   }, 100);
   timer.unref();
   return timer;
@@ -1986,25 +1991,32 @@ function runPluginProcess(invocation, executable, responseLimit, signal) {
     let outputBytes = 0;
     let overflow = false;
     let forceKillTimer;
+    let killCompletion = Promise.resolve();
+    const stopChild = () => {
+      const stopping = terminatePluginChild(child);
+      if (stopping && typeof stopping.then === 'function') killCompletion = stopping;
+      else forceKillTimer ??= stopping;
+    };
     child.stdout.on('data', (chunk) => {
       outputBytes += chunk.length;
       if (outputBytes > responseLimit + 1) {
         overflow = true;
-        forceKillTimer ??= terminatePluginChild(child);
+        stopChild();
       } else output.push(Buffer.from(chunk));
     });
     // Drain stderr so a noisy plugin cannot block. It is deliberately omitted
     // from both the returned diagnostic and the public result.
     child.stderr.resume();
-    const abort = () => { forceKillTimer ??= terminatePluginChild(child); };
+    const abort = () => stopChild();
     signal.addEventListener('abort', abort, { once: true });
     child.once('error', () => {
       clearTimeout(forceKillTimer);
       signal.removeEventListener('abort', abort);
       rejectResponse(new Error('plugin process failed'));
     });
-    child.once('close', (code, signalName) => {
+    child.once('close', async (code, signalName) => {
       clearTimeout(forceKillTimer);
+      await killCompletion;
       signal.removeEventListener('abort', abort);
       if (signal.aborted) { rejectResponse(new Error('plugin process cancelled')); return; }
       if (overflow) { rejectResponse(Object.assign(new Error('plugin response too large'), { code: 'PLUGIN_LIMIT' })); return; }
@@ -2375,16 +2387,15 @@ function runArgvCapture(stages, context) {
     let length = 0;
     let failure = null;
     let publicationFailure = null;
+    let stopCompletion = Promise.resolve();
+    let finishing = false;
     const timers = [];
     let remaining = 0;
     let launched = false;
     const stop = (code, message) => {
       if (failure !== null) return;
       failure = { ok: false, code, message };
-      for (const child of children) {
-        if (child.pid === undefined) continue;
-        try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
-      }
+      stopCompletion = Promise.all(children.map((child) => signalProcessTree(child, 'SIGKILL')));
       syncOutputReaders();
     };
     const publish = (callback, chunk) => {
@@ -2396,7 +2407,11 @@ function runArgvCapture(stages, context) {
     context.signal?.addEventListener('abort', cancelled, { once: true });
     if (context.timeoutMS > 0) timers.push(processDeadline(context.timeoutMS, () => stop('RECIPE_TIMEOUT', 'process timed out')));
     const finish = () => {
-      if (!launched || remaining !== 0) return;
+      if (!launched || remaining !== 0 || finishing) return;
+      finishing = true;
+      void stopCompletion.then(() => {
+      finishing = false;
+      if (remaining !== 0) return;
       for (const cancel of timers) cancel();
       context.signal?.removeEventListener('abort', cancelled);
       if (publicationFailure !== null) { rejectRun(publicationFailure); return; }
@@ -2412,13 +2427,15 @@ function runArgvCapture(stages, context) {
       try { output = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)); }
       catch { resolveRun({ ok: false, code: 'CAPTURE_ENCODING', message: 'command substitution output is not valid UTF-8' }); return; }
       resolveRun({ ok: true, value: { status, signal, stages: results, stdout: output } });
+      });
     };
     try {
       for (let i = 0; i < stages.length; i++) {
         const args = stages[i];
         const configuration = configurations[i];
-        const child = spawn(executables[i], args.slice(1), { argv0: args[0], shell: false, stdio: [i === 0 ? input ?? 'ignore' : pipes[i - 1].read, i === stages.length - 1 ? output ?? 'pipe' : pipes[i].write, 'pipe'], env: configuration.env, cwd: configuration.cwd, detached: true });
+        const child = spawn(executables[i], args.slice(1), { argv0: args[0], shell: false, stdio: [i === 0 ? input ?? 'ignore' : process.platform === 'win32' ? children[i - 1].stdout : pipes[i - 1].read, i === stages.length - 1 ? output ?? 'pipe' : process.platform === 'win32' ? 'pipe' : pipes[i].write, 'pipe'], env: configuration.env, cwd: configuration.cwd, detached: true });
         children.push(child);
+        if (process.platform === 'win32' && i > 0) children[i - 1].stdout.pipe(child.stdin);
         remaining++;
         track(child, context.request);
         if (i === 0 && context.onStarted) publish(() => context.onStarted());
@@ -2463,6 +2480,7 @@ function runArgvCapture(stages, context) {
 // the children instead. mkfifo is a POSIX host utility, never a user shell.
 function pipelinePipes(count) {
   if (count === 0) return [];
+  if (process.platform === 'win32') return [];
   const directory = mkdtempSync(join(tmpdir(), 'kame-pipes-'));
   const names = Array.from({ length: count }, (_, index) => join(directory, String(index)));
   const pipes = [];
@@ -2566,10 +2584,12 @@ function runProcessAttempt(module, instance, script, context, request) {
     let publicationFailure = null;
     let timedOut = false;
     let timer = null;
+    let killCompletion = Promise.resolve();
+    const terminate = () => { killCompletion = Promise.resolve(signalProcessTree(child, 'SIGKILL')); };
     if (context.timeoutMS > 0) {
-      timer = setTimeout(() => { timedOut = true; try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } syncOutputReaders(); }, context.timeoutMS);
+      timer = setTimeout(() => { timedOut = true; terminate(); syncOutputReaders(); }, context.timeoutMS);
     }
-    const cancelled = () => { try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); } syncOutputReaders(); };
+    const cancelled = () => { terminate(); syncOutputReaders(); };
     const publish = (callback) => {
       if (publicationFailure !== null) return;
       try { callback(); }
@@ -2590,8 +2610,9 @@ function runProcessAttempt(module, instance, script, context, request) {
       module.drainEvents(instance, context);
     }), () => publicationFailure !== null || timedOut || context.signal?.aborted);
     child.once('error', (error) => { failure = error; });
-    child.once('close', (code, signalName) => {
+    child.once('close', async (code, signalName) => {
       if (timer !== null) clearTimeout(timer);
+      await killCompletion;
       context.signal?.removeEventListener('abort', cancelled);
       if (publicationFailure !== null) { rejectAttempt(publicationFailure); return; }
       const stdout = Buffer.concat(out);
