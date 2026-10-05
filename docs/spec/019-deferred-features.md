@@ -114,9 +114,11 @@ Node's Windows host path now connects pipeline stages with child streams, uses
 `taskkill /T /F` for process-tree cancellation, and waits for tree-stop and
 direct-child completion. T033-01 retains a Windows-only descendant cleanup
 case; this workspace has no Windows runner, so that case is not yet execution
-evidence. D16 now cross-compiles a native Windows x64 launcher that starts the
-adjacent Node/WASM CLI; T015-05 verifies argv, exit status and the PE bundle on
-the current host. `tools/windows/test-launcher.mjs` now exercises the actual
+evidence. The Windows bundle acceptance now also times out a recipe with a
+grandchild and checks that the process tree is gone. D16 now cross-compiles a
+native Windows x64 launcher that starts the adjacent Node/WASM CLI; T015-05
+verifies argv, exit status and the PE bundle on the current host.
+`tools/windows/test-launcher.mjs` now exercises the actual
 bundle and launcher process contract on Windows. The new
 `.github/workflows/windows-launcher.yml` builds the bundle on Linux and runs the
 test on `windows-latest`; a successful Windows run is still required before

@@ -288,7 +288,8 @@ existing build rules.
   `kame.wasm`; the native launcher preserves argv, standard streams, working
   directory, environment and the Node process exit status. On a Windows host,
   run `node tools/windows/test-launcher.mjs dist/windows` after
-  `make dist-windows`; it exercises the packaged CLI and the launcher contract.
+  `make dist-windows`; it exercises the packaged CLI, launcher contract, recipe
+  timeout and descendant-process reaping.
   `.github/workflows/windows-launcher.yml` builds the bundle and runs this test
   on `windows-latest`. Passing a cross-compile alone does not establish
   Windows-host conformance.

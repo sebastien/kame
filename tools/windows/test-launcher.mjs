@@ -2,7 +2,7 @@
 // Spec: docs/spec/015-distribution.md — Windows launcher runtime acceptance
 
 import assert from 'node:assert/strict';
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -81,6 +81,41 @@ try {
   assert.equal(build.code, 0, `bundled CLI build failed: ${build.stderr}`);
   assert.match(build.stdout, /KAME_WINDOWS_RUNTIME_OK/);
   assert.match(build.stdout, /from-host/);
+
+  const timeoutWorkspace = path.join(temporary, 'timeout-workspace');
+  await mkdir(timeoutWorkspace);
+  await writeFile(
+    path.join(timeoutWorkspace, 'Timeout.kmk'),
+    'task timeout-tree :\r\n\tnode child.js\r\n',
+  );
+  await writeFile(
+    path.join(timeoutWorkspace, 'child.js'),
+    `const { spawn } = require('node:child_process');
+const { writeFileSync } = require('node:fs');
+const child = spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('descendant.ready', 'ready'); setInterval(() => {}, 1000)"], { stdio: 'ignore' });
+if (!child.pid) throw new Error('descendant process did not start');
+writeFileSync('descendant.pid', String(child.pid));
+setInterval(() => {}, 1000);
+`,
+  );
+  const timeoutBuild = await run(
+    launcher,
+    ['--timeout', '5000', '-f', 'Timeout.kmk', 'timeout-tree'],
+    { cwd: timeoutWorkspace, timeout: 15000 },
+  );
+  assert.equal(timeoutBuild.timedOut, false, 'Kame timeout acceptance exceeded its outer deadline');
+  assert.notEqual(timeoutBuild.code, 0, 'Kame did not report the recipe timeout');
+  assert.equal(await readFile(path.join(timeoutWorkspace, 'descendant.ready'), 'utf8'), 'ready');
+  const descendantPid = (await readFile(path.join(timeoutWorkspace, 'descendant.pid'), 'utf8')).trim();
+  assert.match(descendantPid, /^\d+$/, 'recipe did not record a descendant PID');
+  const descendantDeadline = Date.now() + 5000;
+  let descendantAlive = true;
+  while (descendantAlive && Date.now() < descendantDeadline) {
+    const check = await run('tasklist.exe', ['/FI', `PID eq ${descendantPid}`, '/FO', 'CSV', '/NH']);
+    descendantAlive = check.stdout.includes(`"${descendantPid}"`);
+    if (descendantAlive) await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  assert.equal(descendantAlive, false, `Kame timeout left descendant process ${descendantPid} running`);
 
   const contract = path.join(temporary, 'launcher-contract');
   await mkdir(contract);
