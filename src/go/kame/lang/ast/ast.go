@@ -690,6 +690,10 @@ func (e *astEncoder) script(value *script.Script) {
 				e.Bool(true)
 			}
 		}
+		if item.Kind == script.Generate {
+			e.Str("name")
+			e.Str(item.GenerateName)
+		}
 		if item.Definition != nil {
 			e.Str("definition")
 			e.definition(item.Definition)
@@ -731,6 +735,9 @@ func scriptKind(k script.ScriptItemKind) string {
 	}
 	if k == script.Include {
 		return "include"
+	}
+	if k == script.Generate {
+		return "generate"
 	}
 	return "expression"
 }

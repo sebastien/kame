@@ -255,6 +255,10 @@ probes gate dependents, and that a readiness timeout cancels the service and
 reports `SERVICE_READY_TIMEOUT`. It also checks that a configured zero stop
 grace period is honored by the JavaScript host.
 
+`T010-27-generated-declarations.sh` compares native and WASM generated-rule
+plan JSON, including generator provenance, and materializes generated tasks on
+both hosts.
+
 The Go CLI unit-test sanitizer command uses `GOGC=off`. Solod 0.4.0's Go
 compatibility allocator stores structs in unscanned byte slices, while its Go
 `slices.Append` stub uses ordinary Go append. A slice reachable only through such

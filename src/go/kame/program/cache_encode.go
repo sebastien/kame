@@ -405,8 +405,12 @@ func appendCaptureSection(e *cacheEncoder, entry *instance) {
 func (p *Program) appendDynamicSection(e *cacheEncoder, entry *instance) {
 	at, start := e.beginSection("dynamic")
 	count := 0
- for i := range entry.Node.Dynamic { if !slices.Contains(entry.Node.OrderOnly, entry.Node.Dynamic[i]) { count++ } }
- e.appendU64(uint64(count))
+	for i := range entry.Node.Dynamic {
+		if !slices.Contains(entry.Node.OrderOnly, entry.Node.Dynamic[i]) {
+			count++
+		}
+	}
+	e.appendU64(uint64(count))
 	order := make([]int, len(entry.Node.Dynamic))
 	for i := range order {
 		order[i] = i
@@ -429,7 +433,9 @@ func (p *Program) appendDynamicSection(e *cacheEncoder, entry *instance) {
 			break
 		}
 		dependency := entry.Node.Dynamic[order[n]]
-  if slices.Contains(entry.Node.OrderOnly, dependency) { continue }
+		if slices.Contains(entry.Node.OrderOnly, dependency) {
+			continue
+		}
 		key := dependency.Key
 		e.appendByte(byte(key.Kind))
 		e.appendText(key.Name)
@@ -470,15 +476,23 @@ func (p *Program) appendDynamicSection(e *cacheEncoder, entry *instance) {
 
 func (p *Program) appendExecutionSection(e *cacheEncoder, entry *instance, script string) {
 	at, start := e.beginSection("execution")
-	if entry.Kash { e.appendByte(1) } else { e.appendByte(0) }
+	if entry.Kash {
+		e.appendByte(1)
+	} else {
+		e.appendByte(0)
+	}
 	e.appendU64(uint64(len(entry.Shell)))
 	for i := range entry.Shell {
 		e.appendText(entry.Shell[i])
 	}
-	if entry.Kash { e.appendText(p.Parsed.Source.Text) }
+	if entry.Kash {
+		e.appendText(p.Parsed.Source.Text)
+	}
 	e.appendText(p.Options.Directory)
 	e.appendU64(uint64(len(entry.Environment)))
- for i := range entry.Environment { e.appendText(entry.Environment[i]) }
+	for i := range entry.Environment {
+		e.appendText(entry.Environment[i])
+	}
 	e.appendText(script)
 	e.appendU64(uint64(p.Options.TimeoutMS))
 	e.appendU64(uint64(p.Options.RetryCount))
@@ -499,10 +513,16 @@ func (p *Program) appendInputSection(e *cacheEncoder, entry *instance) {
 		inputs, resources = entry.Plan.ResolvedInputs, entry.Plan.ResolvedResourceInputs
 	}
 	count := 0
- for i := range inputs { if i >= len(resources) || !resources[i].OrderOnly { count++ } }
- e.appendU64(uint64(count))
 	for i := range inputs {
-  if i < len(resources) && resources[i].OrderOnly { continue }
+		if i >= len(resources) || !resources[i].OrderOnly {
+			count++
+		}
+	}
+	e.appendU64(uint64(count))
+	for i := range inputs {
+		if i < len(resources) && resources[i].OrderOnly {
+			continue
+		}
 		if e.exceeded {
 			break
 		}
@@ -555,6 +575,14 @@ func appendOperationSection(e *cacheEncoder, entry *instance) {
 func appendRuleSection(e *cacheEncoder, entry *instance) {
 	at, start := e.beginSection("rule")
 	appendFormattedRule(e, entry.Rule)
+	if entry.Plan.Generator != "" {
+		e.appendByte('G')
+		e.appendText(entry.Plan.Generator)
+		e.appendU64(uint64(len(entry.Plan.GeneratorDependencies)))
+		for i := range entry.Plan.GeneratorDependencies {
+			e.appendText(entry.Plan.GeneratorDependencies[i])
+		}
+	}
 	e.patchU64(at, start)
 }
 
@@ -585,7 +613,11 @@ func (e *cacheEncoder) appendValue(value core.Value) {
 	if e.exceeded {
 		return
 	}
-	if value.Kind == core.Callable && value.CallableOwner != nil && value.Text == "kash" { e.appendByte(11); e.appendText("kash"); return }
+	if value.Kind == core.Callable && value.CallableOwner != nil && value.Text == "kash" {
+		e.appendByte(11)
+		e.appendText("kash")
+		return
+	}
 	if value.Kind == core.Nil {
 		e.appendByte(0)
 		return

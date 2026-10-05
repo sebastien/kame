@@ -23,17 +23,19 @@ const (
 	When
 	Otherwise
 	EndWhen
+	Generate
 )
 
 type ScriptItem struct {
-	Kind       ScriptItemKind
-	Span       source.Span
-	Text       string
-	Definition *definition.Definition
-	Rule       *rule.Rule
-	Expression *expr.Expr
-	Include    string
- OptionalInclude bool
+	Kind            ScriptItemKind
+	Span            source.Span
+	Text            string
+	Definition      *definition.Definition
+	Rule            *rule.Rule
+	Expression      *expr.Expr
+	Include         string
+	OptionalInclude bool
+	GenerateName    string
 }
 
 type Script struct {
@@ -56,7 +58,11 @@ func (s *Script) Free() {
 	}
 	slices.Free(s.Alloc, s.Items)
 	slices.Free(s.Alloc, s.Diagnostics)
-	if s.BorrowedSource { mem.Free(s.Alloc, s.Source) } else { s.Source.Free(s.Alloc) }
+	if s.BorrowedSource {
+		mem.Free(s.Alloc, s.Source)
+	} else {
+		s.Source.Free(s.Alloc)
+	}
 	a := s.Alloc
 	*s = Script{}
 	mem.Free(a, s)
@@ -80,7 +86,9 @@ func parseScript(s *Script, offset int) {
 		}
 		if comment(text, start, end) {
 			lineEnd = pos
-			for lineEnd < len(text) && text[lineEnd] != '\n' { lineEnd++ }
+			for lineEnd < len(text) && text[lineEnd] != '\n' {
+				lineEnd++
+			}
 			start, end = trim(text, pos, lineEnd)
 			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Comment, Text: text[start:end], Span: source.Span{Start: start, End: end}})
 			pos = nextLine(text, lineEnd)
@@ -95,6 +103,19 @@ func parseScript(s *Script, offset int) {
 		if includePath, ok := include(text[start:end]); ok {
 			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: start, End: end}, Include: includePath, OptionalInclude: strings.HasPrefix(text[start:end], "include?")})
 			pos = nextLine(text, lineEnd)
+			continue
+		}
+		generated := generatedHeader(text, start, end)
+		if generated.OK {
+			part := expr.ParsePrefix(a, s.Source, generated.ExpressionStart)
+			s.takeDiagnostics(part.Diagnostics)
+			if part.Expr == nil {
+				s.error(start, end, "generated declaration requires an expression")
+				pos = nextLine(text, lineEnd)
+				continue
+			}
+			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Generate, GenerateName: generated.Name, Expression: part.Expr, Span: source.Span{Start: start, End: part.End}})
+			pos = nextLine(text, part.End)
 			continue
 		}
 		if text[pos] == ' ' || text[pos] == '\t' {
@@ -150,6 +171,51 @@ func parseScript(s *Script, offset int) {
 	validateConditionals(s)
 }
 
+type generatedHeaderResult struct {
+	Name            string
+	ExpressionStart int
+	OK              bool
+}
+
+func generatedHeader(text string, start int, end int) generatedHeaderResult {
+	if end-start < len("generate ") || text[start:start+len("generate")] != "generate" || !space(text[start+len("generate")]) {
+		return generatedHeaderResult{}
+	}
+	declarationStart := trimStart(text, start+len("generate"), end)
+	equal := topLevel(text[declarationStart:end], '=')
+	if equal < 0 {
+		return generatedHeaderResult{}
+	}
+	nameStart, nameEnd := trim(text, declarationStart, declarationStart+equal)
+	name := text[nameStart:nameEnd]
+	if !validGeneratedName(name) {
+		return generatedHeaderResult{}
+	}
+	expressionStart, _ := trim(text, declarationStart+equal+1, end)
+	return generatedHeaderResult{Name: name, ExpressionStart: expressionStart, OK: true}
+}
+
+func validGeneratedName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := range name {
+		b := name[i]
+		if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_' || (i != 0 && ((b >= '0' && b <= '9') || b == '-')) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func trimStart(text string, start int, end int) int {
+	for start < end && space(text[start]) {
+		start++
+	}
+	return start
+}
+
 func (s *Script) takeDiagnostics(diags []source.Diagnostic) {
 	for i := range diags {
 		s.Diagnostics = slices.Append(s.Alloc, s.Diagnostics, diags[i])
@@ -182,8 +248,10 @@ func comment(text string, start int, end int) bool {
 }
 func include(text string) (string, bool) {
 	prefix := 7
- if strings.HasPrefix(text, "include?") { prefix = 8 }
- if len(text) < prefix+2 || text[:7] != "include" || !space(text[prefix]) {
+	if strings.HasPrefix(text, "include?") {
+		prefix = 8
+	}
+	if len(text) < prefix+2 || text[:7] != "include" || !space(text[prefix]) {
 		return "", false
 	}
 	path := text[prefix+1:]
@@ -259,8 +327,12 @@ func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEn
 	end := prefix.End
 	expr.Free(a, prefix.Expr)
 	slices.Free(a, prefix.Diagnostics)
-	if end < lineEnd { return lineEnd }
-	for end < len(text) && text[end] != '\n' { end++ }
+	if end < lineEnd {
+		return lineEnd
+	}
+	for end < len(text) && text[end] != '\n' {
+		end++
+	}
 	return end
 }
 
@@ -357,8 +429,22 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			continue
 		}
 		if item.Kind == Include {
-			if item.OptionalInclude { b.WriteString("include? ") } else { b.WriteString("include ") }
+			if item.OptionalInclude {
+				b.WriteString("include? ")
+			} else {
+				b.WriteString("include ")
+			}
 			b.WriteString(item.Include)
+			previousEnd = item.Span.End
+			continue
+		}
+		if item.Kind == Generate {
+			b.WriteString("generate ")
+			b.WriteString(item.GenerateName)
+			b.WriteString(" = ")
+			value := expr.FormatAt(a, item.Expression, len("generate ")+len(item.GenerateName)+3)
+			b.WriteString(value)
+			mem.FreeString(a, value)
 			previousEnd = item.Span.End
 			continue
 		}

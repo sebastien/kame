@@ -17,42 +17,57 @@ configuration = (get profiles profile)
 This is explicit configuration data. It does not execute strings as source or
 create new global names as a side effect of reading a value.
 
-## Proposed generated declarations
+## Generated declarations
 
-General rule emission remains a design proposal. It is optional beyond the
-minimum record lookup and has no currently accepted executable syntax. The
-proposal is a bounded declaration batch evaluated before target selection,
-under the same policy and planning phase as ordinary build configuration.
+`generate NAME = EXPR` is a top-level declaration. `EXPR` evaluates to a list
+of records before target selection. It can use ordinary pure Kame operations,
+functions, and earlier value definitions; it cannot run processes, write files,
+or issue host requests. A generated batch is data, not source text: Kame never
+parses a string returned by a generator as a declaration.
 
-A batch would contain records with a rule kind, target template, typed input
-list, recipe templates, and optional environment/ordering metadata. Targets and
-input paths would use the existing pattern and canonical-path rules. Recipes
-would remain authored templates; generation would construct declarations rather
-than invoke an `eval` operation over arbitrary source strings.
+Each record has these fields:
 
-The batch must be validated completely before registration: target shape,
-pattern captures, recipe types, duplicate literal targets, overlap checks where
-possible, and resource limits. A failed batch registers no partial declarations
-and performs no recipe effects. Host-dependent predicates may use authorized,
-dependency-tracked reads; they cannot run shell commands during planning.
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `kind` | string | `file`, `task`, or `cached-task` |
+| `target` | string | One concrete target name or path |
+| `inputs` | list of strings | Required targets or paths, in declaration order |
+| `order-only` | list of strings | Ordering prerequisites that do not affect freshness |
+| `recipe` | list of strings | Authored recipe template lines |
 
-Generated declarations must retain the source of the generator and each field's
-span. Diagnostics would point to the generator and identify the emitted target,
-so a bad target does not become an anonymous synthetic-source error. The program
-owns the retained values and lowered ASTs and frees them with ordinary parsed
-and materialized rules. Dependencies of a generator belong to the declaration
-batch, and changing them invalidates its target set before dependent work starts.
+`kind`, `target`, `inputs`, and `recipe` are required. Unknown fields, invalid
+types, empty targets, NUL bytes, invalid target forms, and unsupported rule
+kinds reject the complete batch. A generator name is unique within one source
+program. Generated targets retain the ordinary target selection and execution
+semantics; generated recipes use the normal Kame template syntax.
 
-The plan would expose the generator identity, its effective input values and
-resources, and every emitted rule. Cache fingerprints must include the emitted
-recipe, environment, inputs, and generator dependencies. Native and WASM must
-share validation, lowering, registration, diagnostics, and fingerprinting; hosts
-only service authorized reads.
+For example, a pure `map` can produce one task per configured module:
 
-Before implementing a syntax, acceptance coverage must pin all-or-nothing
-registration, authored diagnostics, deterministic target selection, dynamic
-membership changes, cycles, cancellation, limits, and freeing failure paths.
-Rule generation cannot silently enlarge grants or allow process execution in
-planning. This design is recorded so a future implementation can be reviewed
-against a concrete contract instead of introducing an unrestricted parse-time
-shell or string-evaluation escape hatch.
+```kame
+MODULES = ["core" "cli"]
+generate module-checks = (map ([module] [kind: "task" target: (join (list "check-" module) "") inputs: [] order-only: [] recipe: ["go test ./..."]) MODULES)
+```
+
+The runtime evaluates and validates every batch before adding any generated
+rule to target selection. It checks duplicate targets both within a batch and
+against ordinary rules and other batches. It enforces bounded record counts,
+field sizes, and total retained batch bytes. If any batch fails, compilation
+returns an authored diagnostic and exposes no executable program.
+
+Generator identity, the referenced definitions, and each emitted rule's full
+kind, target, inputs, ordering inputs, and recipe are retained for inspection
+and cache fingerprinting. File prerequisites are ordinary tracked build
+dependencies. When a referenced source definition changes during watch, the
+source program is recompiled and the generated target set is replaced as one
+unit. Native and WASM share parsing, evaluation, validation, lowering,
+registration, diagnostics, and fingerprinting.
+
+Diagnostics identify the generator declaration and name the emitted target
+when a record fails validation. The program owns generated records, lowered
+rules, and recipe templates, and releases them on every compile failure and
+program disposal path. No partial batch is observable after failure.
+
+Required acceptance coverage includes all-or-nothing registration, authored
+diagnostics, deterministic target selection, changed definition inputs and
+watch replacement, duplicate targets, cycles, limits, and allocation cleanup.
+Generation cannot enlarge grants or perform effects during compilation.

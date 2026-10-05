@@ -74,24 +74,61 @@ func TestContinuationsPreserveSourceSpansAndRecipeBackslashes(t *testing.T) {
 	text := "# comment \\\nwords = one \\\n  two \\\r\n  three\npaths = (list ./a \\\n ./b)\n./out : ./a \\\n ./b @(paths)\n\tprintf one \\\n\t two\n"
 	s := script.Parse(a, "continued.kmk", text)
 	defer s.Free()
-	if len(s.Diagnostics) != 0 || len(s.Items) != 4 || s.Source.Text != text { t.Error("continuation changed source or item boundaries"); return }
+	if len(s.Diagnostics) != 0 || len(s.Items) != 4 || s.Source.Text != text {
+		t.Error("continuation changed source or item boundaries")
+		return
+	}
 	words := s.Items[1].Definition.Words
-	if len(words) != 3 || words[0].Text != "one" || words[1].Text != "two" || words[2].Text != "three" { t.Error("continued definition did not split words"); return }
+	if len(words) != 3 || words[0].Text != "one" || words[1].Text != "two" || words[2].Text != "three" {
+		t.Error("continued definition did not split words")
+		return
+	}
 	position := s.Source.Position(words[2].Span.Start)
-	if position.Line != 4 || position.Column != 3 { t.Error("continuation lost authored position") }
+	if position.Line != 4 || position.Column != 3 {
+		t.Error("continuation lost authored position")
+	}
 	r := s.Items[3].Rule
-	if len(r.Inputs) != 3 || r.Inputs[0].Text != "./a" || r.Inputs[1].Text != "./b" || len(r.Body) != 2 || r.Body[0].Text != "printf one \\" { t.Error("continued header or shell backslash changed") }
+	if len(r.Inputs) != 3 || r.Inputs[0].Text != "./a" || r.Inputs[1].Text != "./b" || len(r.Body) != 2 || r.Body[0].Text != "printf one \\" {
+		t.Error("continued header or shell backslash changed")
+	}
 }
 
 func TestOptionalIncludesPreserveParsingAndFormatting(t *testing.T) {
- text := "include? ./optional.kmk\ninclude ./required.kmk\n"
- parsed := script.Parse(t.Allocator(), "test.kmk", text)
- defer parsed.Free()
- if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 || !parsed.Items[0].OptionalInclude || parsed.Items[1].OptionalInclude || parsed.Items[0].Include != "./optional.kmk" {
-  t.Error("optional include did not retain its path and required distinction")
-  return
- }
- formatted := script.Format(t.Allocator(), parsed)
- defer mem.FreeString(t.Allocator(), formatted)
- if formatted != text { t.Error("optional include formatting changed") }
+	text := "include? ./optional.kmk\ninclude ./required.kmk\n"
+	parsed := script.Parse(t.Allocator(), "test.kmk", text)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 || !parsed.Items[0].OptionalInclude || parsed.Items[1].OptionalInclude || parsed.Items[0].Include != "./optional.kmk" {
+		t.Error("optional include did not retain its path and required distinction")
+		return
+	}
+	formatted := script.Format(t.Allocator(), parsed)
+	defer mem.FreeString(t.Allocator(), formatted)
+	if formatted != text {
+		t.Error("optional include formatting changed")
+	}
+}
+
+func TestGeneratedDeclarationParsesFormatsAndRetainsName(t *testing.T) {
+	text := "MODULES = [\"core\" \"cli\"]\ngenerate checks = (map ([module] [kind: \"task\" target: (join (list \"check-\" module) \"\") inputs: [] order-only: [] recipe: [\"go test ./...\"]]) MODULES)\n"
+	parsed := script.Parse(t.Allocator(), "generated.kmk", text)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 {
+		message := ""
+		for i := range parsed.Diagnostics {
+			message += parsed.Diagnostics[i].Message + " "
+		}
+		t.Errorf("generated declaration parse shape: diagnostics=%d items=%d %s", len(parsed.Diagnostics), len(parsed.Items), message)
+		return
+	}
+	if parsed.Items[1].Kind != script.Generate || parsed.Items[1].GenerateName != "checks" || parsed.Items[1].Expression == nil {
+		t.Errorf("generated declaration item kind=%d name=%q", parsed.Items[1].Kind, parsed.Items[1].GenerateName)
+		return
+	}
+	formatted := script.Format(t.Allocator(), parsed)
+	defer mem.FreeString(t.Allocator(), formatted)
+	again := script.Parse(t.Allocator(), "generated.kmk", formatted)
+	defer again.Free()
+	if len(again.Diagnostics) != 0 || len(again.Items) != 2 || again.Items[1].Kind != script.Generate || again.Items[1].GenerateName != "checks" {
+		t.Error("generated declaration formatting changed its structure")
+	}
 }

@@ -22,16 +22,18 @@ const (
 )
 
 type Plan struct {
-	Target   string
-	Key      core.ResourceKey
-	Rule     *rule.Rule
-	RuleSpan diagnostic.Span
-	Body     []rule.RecipeLine
-	Captures []template.CaptureValue
-	Arguments []ArgumentValue
-	Configuration []string
-	Tools []Tool
-	Inputs   []string
+	Target                string
+	Key                   core.ResourceKey
+	Rule                  *rule.Rule
+	Generator             string
+	GeneratorDependencies []string
+	RuleSpan              diagnostic.Span
+	Body                  []rule.RecipeLine
+	Captures              []template.CaptureValue
+	Arguments             []ArgumentValue
+	Configuration         []string
+	Tools                 []Tool
+	Inputs                []string
 	// StaticInputs are literal and template inputs as authored.
 	StaticInputs []string
 	// DynamicInputs are the values resolved from expression-form rule inputs.
@@ -47,9 +49,9 @@ type Plan struct {
 }
 
 type PlanInput struct {
- OrderOnly bool
-	Display string
-	Key     core.ResourceKey
+	OrderOnly bool
+	Display   string
+	Key       core.ResourceKey
 }
 
 type PlanResult struct {
@@ -63,6 +65,8 @@ func (p *Plan) Free(a mem.Allocator) {
 		return
 	}
 	mem.FreeString(a, p.Target)
+	mem.FreeString(a, p.Generator)
+	freeStrings(a, p.GeneratorDependencies)
 	if p.Key.Name != "" {
 		p.Key.Free(a)
 	}
@@ -200,13 +204,13 @@ type Options struct {
 	// Host executes recipe scripts and services the runtime's filesystem and
 	// clock. Compile transfers ownership to the Program, which releases it
 	// during Program.Free.
-	Host        host.ProgramHost
-	Directory   string
-	Shell       []string
-	Environment []string
-	Defines     []string
+	Host          host.ProgramHost
+	Directory     string
+	Shell         []string
+	Environment   []string
+	Defines       []string
 	ToolOverrides []string
-	DryRun      bool
+	DryRun        bool
 	// Force bypasses file freshness checks and cached-task lookup for this run.
 	Force            bool
 	RetainBytes      int
@@ -233,35 +237,37 @@ type Options struct {
 
 // Tool records a globally declared command and its resolved executable path.
 type Tool struct {
-	Name string
-	Path string
-	Resolved bool
+	Name        string
+	Path        string
+	Resolved    bool
 	Declarative bool
 }
 
 type Program struct {
-	Alloc       mem.Allocator
-	Engine      *core.Engine
-	Eval        *eval.Program
-	Parsed      *script.Script
-	ParsedOwned bool
-	Host        host.ProgramHost
-	Options     Options
-	Rules       []registeredRule
-	Tools       []Tool
-	Configuration []string
-	Instances   []instance
-	Events      []Event
-	nextRequest int64
-	Pending     []pendingRequest
-	epoch       int64
+	Alloc             mem.Allocator
+	Engine            *core.Engine
+	Eval              *eval.Program
+	Parsed            *script.Script
+	ParsedOwned       bool
+	Host              host.ProgramHost
+	Options           Options
+	Rules             []registeredRule
+	GeneratedRules    []*rule.Rule
+	GeneratedRuleMeta []generatedRuleMeta
+	Tools             []Tool
+	Configuration     []string
+	Instances         []instance
+	Events            []Event
+	nextRequest       int64
+	Pending           []pendingRequest
+	epoch             int64
 	// Forwarding mirrors Options.ForwardRequests; Outbound holds requests an
 	// embedding host must service and complete.
 	InspectionWaiting bool
-	Forwarding bool
+	Forwarding        bool
 	// SessionPolicy makes legacy recipe launches inherit runner capability grants.
 	SessionPolicy bool
-	Outbound   []host.Request
+	Outbound      []host.Request
 }
 
 type pendingRequest struct {
@@ -277,16 +283,16 @@ type pendingRequest struct {
 // ServiceConfig owns the validated, bounded lifecycle policy for one service
 // rule. Empty probe argv means that probe is disabled.
 type ServiceConfig struct {
-	ReadyArgv []string
-	ReadyInterval int64
-	ReadyTimeout int64
-	HealthArgv []string
-	HealthInterval int64
-	HealthFailures int64
+	ReadyArgv       []string
+	ReadyInterval   int64
+	ReadyTimeout    int64
+	HealthArgv      []string
+	HealthInterval  int64
+	HealthFailures  int64
 	RestartAttempts int64
-	RestartBackoff int64
-	StopGrace int64
-	LogBytes int64
+	RestartBackoff  int64
+	StopGrace       int64
+	LogBytes        int64
 }
 
 func (c *ServiceConfig) Free(a mem.Allocator) {
@@ -296,54 +302,59 @@ func (c *ServiceConfig) Free(a mem.Allocator) {
 }
 
 type registeredRule struct{ Rule *rule.Rule }
+type generatedRuleMeta struct {
+	Rule         *rule.Rule
+	Name         string
+	Dependencies []string
+}
 type instance struct {
-	Service ServiceConfig
-	ServiceReady bool
-	ServiceReadyDeadline int64
-	ServiceNextProbe int64
-	ServiceProbeID int64
-	ServiceProbeHealth bool
-	ServiceClockID int64
-	ServiceTimerID int64
-	ServiceNextHealth int64
-	ServiceHealthFailures int64
-	ServiceRestartCount int64
-	ServiceRestartPending bool
+	Service                ServiceConfig
+	ServiceReady           bool
+	ServiceReadyDeadline   int64
+	ServiceNextProbe       int64
+	ServiceProbeID         int64
+	ServiceProbeHealth     bool
+	ServiceClockID         int64
+	ServiceTimerID         int64
+	ServiceNextHealth      int64
+	ServiceHealthFailures  int64
+	ServiceRestartCount    int64
+	ServiceRestartPending  bool
 	ServiceRestartDeadline int64
-	ServiceRestartTimerID int64
-	Shell []string
-	Kash bool
-	ScopedShell bool
-	MetadataEnvironment []string
-	SettingsDependencies []string
-	SettingsDiagnostic diagnostic.Diagnostic
-	KashRunning bool
-	KashContext *eval.Context
-	KashPrepared bool
-	KashPreparing bool
- // Environment owns the resolved child-process assignments.
- Environment []string
- EnvironmentClaimed bool
- ScopedEnvironment bool
- EnvironmentConflict bool
- NewerInputs *newerInputState
- FileContext *fileContextState
- FileContextReady bool
- FileContextWanted bool
- FileContextDigest [32]byte
- FileContextKey [32]byte
-	Rule     *rule.Rule
-	Captures []template.CaptureValue
-	Node     *core.Node
-	Plan     Plan
+	ServiceRestartTimerID  int64
+	Shell                  []string
+	Kash                   bool
+	ScopedShell            bool
+	MetadataEnvironment    []string
+	SettingsDependencies   []string
+	SettingsDiagnostic     diagnostic.Diagnostic
+	KashRunning            bool
+	KashContext            *eval.Context
+	KashPrepared           bool
+	KashPreparing          bool
+	// Environment owns the resolved child-process assignments.
+	Environment         []string
+	EnvironmentClaimed  bool
+	ScopedEnvironment   bool
+	EnvironmentConflict bool
+	NewerInputs         *newerInputState
+	FileContext         *fileContextState
+	FileContextReady    bool
+	FileContextWanted   bool
+	FileContextDigest   [32]byte
+	FileContextKey      [32]byte
+	Rule                *rule.Rule
+	Captures            []template.CaptureValue
+	Node                *core.Node
+	Plan                Plan
 	// Inspection instances resolve inputs for span --expand only. They must not
 	// satisfy normal target lookup or participate in build execution.
 	Inspection           bool
 	inspectionRoot       *core.Root
 	ForwardEffects       *forwardEffectsState
- VerifyOutputs bool
- VerifyPending bool
- VerifyIndex int
+	VerifyOutputs        bool
+	VerifyPending        bool
+	VerifyIndex          int
 	Script               string
 	LineSpans            []diagnostic.Span
 	Operations           []string
@@ -366,12 +377,12 @@ type instance struct {
 	runEpoch             int64
 }
 type selection struct {
-	Rule      *rule.Rule
-	Captures  []template.CaptureValue
-	Arguments []ArgumentValue
-	Target    string
+	Rule       *rule.Rule
+	Captures   []template.CaptureValue
+	Arguments  []ArgumentValue
+	Target     string
 	Diagnostic diagnostic.Diagnostic
-	Ambiguous bool
+	Ambiguous  bool
 }
 
 // ArgumentValue is a bound named target argument. It remains separate from

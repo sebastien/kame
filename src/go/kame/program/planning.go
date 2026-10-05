@@ -30,6 +30,13 @@ func (p *Program) Plan(target string) PlanResult {
 		return PlanResult{Diagnostic: failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+target)}
 	}
 	plan := Plan{Tools: p.plannedTools(), Configuration: cloneStrings(p.Alloc, p.Configuration), Target: cloneText(p.Alloc, target), Rule: selected.Rule, RuleSpan: diagnostic.Span{Start: selected.Rule.Span.Start, End: selected.Rule.Span.End}, Body: selected.Rule.Body, Captures: cloneCaptures(p.Alloc, selected.Captures), Arguments: cloneArguments(p.Alloc, selected.Arguments), Freshness: Unknown}
+	for i := range p.GeneratedRuleMeta {
+		if p.GeneratedRuleMeta[i].Rule == selected.Rule {
+			plan.Generator = cloneText(p.Alloc, p.GeneratedRuleMeta[i].Name)
+			plan.GeneratorDependencies = cloneStrings(p.Alloc, p.GeneratedRuleMeta[i].Dependencies)
+			break
+		}
+	}
 	defer freeCaptures(p.Alloc, selected.Captures)
 	defer freeArguments(p.Alloc, selected.Arguments)
 	defer mem.FreeString(p.Alloc, selected.Target)
@@ -63,7 +70,9 @@ func (p *Program) Plan(target string) PlanResult {
 				plan.Free(p.Alloc)
 				return PlanResult{Diagnostic: d}
 			}
-			for j := before; j < len(plan.ResourceInputs); j++ { plan.ResourceInputs[j].OrderOnly = input.OrderOnly }
+			for j := before; j < len(plan.ResourceInputs); j++ {
+				plan.ResourceInputs[j].OrderOnly = input.OrderOnly
+			}
 			for j := before; j < len(plan.Inputs); j++ {
 				plan.DynamicInputs = slices.Append(p.Alloc, plan.DynamicInputs, cloneText(p.Alloc, plan.Inputs[j]))
 			}
@@ -193,7 +202,7 @@ func expandPlanProduce(c *core.EngineContext, nodeID int64) core.ProducerResult 
 }
 
 func clonePlan(a mem.Allocator, plan Plan) Plan {
-	clone := Plan{Tools: cloneTools(a, plan.Tools), Configuration: cloneStrings(a, plan.Configuration), Target: cloneText(a, plan.Target), Key: plan.Key.Clone(a), Rule: plan.Rule, RuleSpan: plan.RuleSpan, Body: plan.Body, Captures: cloneCaptures(a, plan.Captures), Arguments: cloneArguments(a, plan.Arguments), Inputs: cloneStrings(a, plan.Inputs), StaticInputs: cloneStrings(a, plan.StaticInputs), DynamicInputs: cloneStrings(a, plan.DynamicInputs), ResourceInputs: clonePlanInputs(a, plan.ResourceInputs), ResolvedInputs: cloneStrings(a, plan.ResolvedInputs), ResolvedResourceInputs: clonePlanInputs(a, plan.ResolvedResourceInputs), Resolved: plan.Resolved, Outputs: cloneStrings(a, plan.Outputs), Freshness: plan.Freshness}
+	clone := Plan{Tools: cloneTools(a, plan.Tools), Configuration: cloneStrings(a, plan.Configuration), Target: cloneText(a, plan.Target), Generator: cloneText(a, plan.Generator), GeneratorDependencies: cloneStrings(a, plan.GeneratorDependencies), Key: plan.Key.Clone(a), Rule: plan.Rule, RuleSpan: plan.RuleSpan, Body: plan.Body, Captures: cloneCaptures(a, plan.Captures), Arguments: cloneArguments(a, plan.Arguments), Inputs: cloneStrings(a, plan.Inputs), StaticInputs: cloneStrings(a, plan.StaticInputs), DynamicInputs: cloneStrings(a, plan.DynamicInputs), ResourceInputs: clonePlanInputs(a, plan.ResourceInputs), ResolvedInputs: cloneStrings(a, plan.ResolvedInputs), ResolvedResourceInputs: clonePlanInputs(a, plan.ResolvedResourceInputs), Resolved: plan.Resolved, Outputs: cloneStrings(a, plan.Outputs), Freshness: plan.Freshness}
 	return clone
 }
 
@@ -207,9 +216,9 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	state := planResolverState{Program: p}
 	context := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.PlanningPhase, ResolveDefinition: resolvePlanDefinition, ResolverState: &state, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs}}}
 	scope := p.ruleScope(context, plan.Captures, plan.Arguments)
-    context.Scope = scope
-    result := p.evaluateInput(input, context)
-    scope.Free()
+	context.Scope = scope
+	result := p.evaluateInput(input, context)
+	scope.Free()
 	if state.Resolving != nil {
 		slices.Free(p.Alloc, state.Resolving)
 	}

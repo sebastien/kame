@@ -58,7 +58,9 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p.Options.ToolOverrides = cloneStrings(a, options.ToolOverrides)
 	p.Options.ResolveTool = options.ResolveTool
 	p.Options.CaptureLimit = options.CaptureLimit
-	if p.Options.CaptureLimit <= 0 { p.Options.CaptureLimit = 1024 * 1024 }
+	if p.Options.CaptureLimit <= 0 {
+		p.Options.CaptureLimit = 1024 * 1024
+	}
 	if p.Options.RetryCount < 0 {
 		p.Options.RetryCount = 0
 	}
@@ -123,6 +125,11 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		}
 	}
 	p.declareBuildTools(parsed)
+	if generated := p.compileGeneratedDeclarations(); generated.Code != "" {
+		result.Diagnostics = slices.Append(a, result.Diagnostics, generated)
+		p.Free()
+		return result
+	}
 	p.nextRequest = 1 << 32
 	result.Program = p
 	return result
@@ -303,14 +310,16 @@ func (p *Program) Free() {
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
 		p.Instances[i].Service.Free(p.Alloc)
-  freeStrings(p.Alloc, p.Instances[i].Environment)
-  freeStrings(p.Alloc, p.Instances[i].Shell)
-  freeStrings(p.Alloc, p.Instances[i].MetadataEnvironment)
-  freeStrings(p.Alloc, p.Instances[i].SettingsDependencies)
-  p.Instances[i].SettingsDiagnostic.Free(p.Alloc)
-  if p.Instances[i].KashContext != nil { p.freeKashContext(p.Instances[i].KashContext) }
-  p.freeFileContext(p.Instances[i].FileContext)
- p.freeNewerInputs(p.Instances[i].NewerInputs)
+		freeStrings(p.Alloc, p.Instances[i].Environment)
+		freeStrings(p.Alloc, p.Instances[i].Shell)
+		freeStrings(p.Alloc, p.Instances[i].MetadataEnvironment)
+		freeStrings(p.Alloc, p.Instances[i].SettingsDependencies)
+		p.Instances[i].SettingsDiagnostic.Free(p.Alloc)
+		if p.Instances[i].KashContext != nil {
+			p.freeKashContext(p.Instances[i].KashContext)
+		}
+		p.freeFileContext(p.Instances[i].FileContext)
+		p.freeNewerInputs(p.Instances[i].NewerInputs)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)
 		mem.FreeString(p.Alloc, p.Instances[i].Script)
 		p.freeForwardEffects(p.Instances[i].ForwardEffects)
@@ -357,6 +366,15 @@ func (p *Program) Free() {
 		p.Host.Free()
 	}
 	p.Engine.Free()
+	for i := range p.GeneratedRules {
+		freeGeneratedRule(p.Alloc, p.GeneratedRules[i])
+	}
+	for i := range p.GeneratedRuleMeta {
+		mem.FreeString(p.Alloc, p.GeneratedRuleMeta[i].Name)
+		freeStrings(p.Alloc, p.GeneratedRuleMeta[i].Dependencies)
+	}
+	slices.Free(p.Alloc, p.GeneratedRules)
+	slices.Free(p.Alloc, p.GeneratedRuleMeta)
 	p.Eval.Free()
 	if p.ParsedOwned && p.Parsed != nil {
 		p.Parsed.Free()
