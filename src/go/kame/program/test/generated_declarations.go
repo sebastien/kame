@@ -151,3 +151,76 @@ func TestGeneratedDeclarationsRejectBuildEffects(t *testing.T) {
 	parsed.Free()
 	registry.Free()
 }
+
+func TestGeneratedDeclarationRejectsDefinitionCycles(t *testing.T) {
+	a := t.Allocator()
+	text := "MODULES = (concat OTHER)\nOTHER = (concat MODULES)\ngenerate cycle = (map ([module] [kind: \"task\" target: module inputs: [] order-only: [] recipe: [\"true\"]]) MODULES)\n"
+	parsed := script.Parse(a, "cycle-generated.kmk", text)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Fatal("library registration failed")
+		return
+	}
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
+	if compiled.Program != nil || len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "DEP_CYCLE" {
+		message := ""
+		for i := range compiled.Diagnostics {
+			message += compiled.Diagnostics[i].Code + ":" + compiled.Diagnostics[i].Message + " "
+		}
+		t.Error("generated declaration did not reject a definition cycle: " + message)
+	}
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
+}
+
+func TestGeneratedTargetSetIsReplacedWhenSourceChanges(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Fatal("library registration failed")
+		return
+	}
+	firstSource := "MODULES = [\"first\"]\ngenerate modules = (map ([module] [kind: \"task\" target: module inputs: [] order-only: [] recipe: [\"true\"]]) MODULES)\n"
+	firstParsed := script.Parse(a, "first.kmk", firstSource)
+	first := program.Compile(a, firstParsed, registry, program.Options{Host: posix.New(a)})
+	if first.Program == nil || len(first.Diagnostics) != 0 {
+		t.Error("first generated source failed to compile")
+		first.Free(a)
+		firstParsed.Free()
+		registry.Free()
+		return
+	}
+	firstPlan := first.Program.Plan("first")
+	if firstPlan.Plan.Rule == nil || firstPlan.Diagnostic.Code != "" {
+		t.Error("first generated target is missing")
+	}
+	firstPlan.Plan.Free(a)
+	firstPlan.Diagnostic.Free(a)
+	first.Program.Free()
+	first.Free(a)
+	firstParsed.Free()
+	secondSource := "MODULES = [\"second\"]\ngenerate modules = (map ([module] [kind: \"task\" target: module inputs: [] order-only: [] recipe: [\"true\"]]) MODULES)\n"
+	secondParsed := script.Parse(a, "second.kmk", secondSource)
+	second := program.Compile(a, secondParsed, registry, program.Options{Host: posix.New(a)})
+	if second.Program == nil || len(second.Diagnostics) != 0 {
+		t.Error("replacement generated source failed to compile")
+		second.Free(a)
+		secondParsed.Free()
+		registry.Free()
+		return
+	}
+	secondPlan := second.Program.Plan("second")
+	oldPlan := second.Program.Plan("first")
+	if secondPlan.Plan.Rule == nil || secondPlan.Diagnostic.Code != "" || oldPlan.Diagnostic.Code != "TGT_NO_RULE" {
+		t.Error("recompiled program retained a stale generated target")
+	}
+	secondPlan.Plan.Free(a)
+	secondPlan.Diagnostic.Free(a)
+	oldPlan.Plan.Free(a)
+	oldPlan.Diagnostic.Free(a)
+	second.Program.Free()
+	second.Free(a)
+	secondParsed.Free()
+	registry.Free()
+}
