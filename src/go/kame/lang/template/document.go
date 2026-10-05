@@ -61,6 +61,15 @@ func normStyle(style string) string {
 	if eqFold(style, "percent") {
 		return "percent"
 	}
+	if eqFold(style, "powershell") {
+		return "powershell"
+	}
+	if eqFold(style, "batch") {
+		return "batch"
+	}
+	if eqFold(style, "auto") {
+		return "auto"
+	}
 	if eqFold(style, "plain") {
 		return "plain"
 	}
@@ -100,6 +109,13 @@ func ParseDocument(a mem.Allocator, name string, text string, style string) *Doc
 		d.Diagnostics = slices.Append(a, d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: 0, End: 0}, Message: "unknown comment style"})
 		return d
 	}
+	if norm == "auto" {
+		var ok bool
+		norm, ok = ResolveAutoStyle(name, text)
+		if !ok {
+			return styleErrorDocument(a, name, text, "ambiguous template comment style")
+		}
+	}
 	if norm == "" {
 		norm = "plain"
 	}
@@ -121,6 +137,17 @@ func ParseDocumentRange(a mem.Allocator, s *source.Source, start int, end int, s
 		d.Diagnostics = slices.Append(a, d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: start, End: start}, Message: "unknown comment style"})
 		return d
 	}
+	if norm == "auto" {
+		var ok bool
+		norm, ok = ResolveAutoStyle(s.Name, s.Text[start:end])
+		if !ok {
+			d := mem.Alloc[Document](a)
+			d.Alloc = a
+			d.Root = newCat(a, nil, source.Span{Start: start, End: start})
+			d.Diagnostics = slices.Append(a, d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: start, End: start}, Message: "ambiguous template comment style"})
+			return d
+		}
+	}
 	if norm == "" {
 		norm = "plain"
 	}
@@ -128,6 +155,15 @@ func ParseDocumentRange(a mem.Allocator, s *source.Source, start int, end int, s
 	root := p.parseRange(start, end)
 	d := mem.Alloc[Document](a)
 	d.Alloc, d.Root, d.Diagnostics = a, root, p.diags
+	return d
+}
+
+func styleErrorDocument(a mem.Allocator, name string, text string, message string) *Document {
+	s := source.New(a, name, text)
+	d := mem.Alloc[Document](a)
+	d.Alloc, d.Source, d.OwnSource = a, s, true
+	d.Root = newCat(a, nil, source.Span{Start: 0, End: 0})
+	d.Diagnostics = slices.Append(a, d.Diagnostics, source.Diagnostic{Code: "TPL_STYLE", Severity: source.Error, Span: source.Span{Start: 0, End: 0}, Message: message})
 	return d
 }
 
@@ -144,6 +180,8 @@ const (
 	dirEnd
 	dirEscape
 	dirError
+	dirMatch
+	dirCase
 )
 
 type docParser struct {
@@ -263,7 +301,7 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			cur = lineEnd
 			continue
 		}
-		if d.Kind == dirElif || d.Kind == dirElse || d.Kind == dirEnd {
+		if d.Kind == dirElif || d.Kind == dirElse || d.Kind == dirEnd || d.Kind == dirCase {
 			// Terminator for caller. Free nothing; caller owns TermArgs.
 			return blockOut{Items: items, Next: lineStart, Term: d.Kind, TermSpan: d.Span, TermArgs: d.Args, TermEnd: lineEnd}
 		}
@@ -335,6 +373,12 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			cur = r.Next
 			continue
 		}
+		if d.Kind == dirMatch {
+			r := p.parseMatch(d, lineEnd, end)
+			items = slices.Append(p.a, items, r.Expr)
+			cur = r.Next
+			continue
+		}
 		// Unknown: skip line.
 		cur = lineEnd
 	}
@@ -392,8 +436,6 @@ func (p *docParser) parseIf(head dirOut, bodyPos int, end int) ifRes {
 		curArgs = branch.TermArgs
 		curSpan = branch.TermSpan
 		_ = curSpan
-	} else {
-		freeArgs(p.a, curArgs)
 	}
 	if curTerm != dirEnd {
 		p.diag("TPL_BLOCK", head.Span, "unterminated @if block")
@@ -401,6 +443,7 @@ func (p *docParser) parseIf(head dirOut, bodyPos int, end int) ifRes {
 		return ifRes{Expr: app, Next: curPos, End: curEnd}
 	}
 	eln := scanLine(p.s.Text, curPos, end)
+	p.checkEndLabel(curArgs, "if", curSpan)
 	freeArgs(p.a, curArgs)
 	app.Span.End = eln.LineEnd
 	return ifRes{Expr: app, Next: eln.LineEnd, End: eln.LineEnd}
@@ -409,6 +452,9 @@ func (p *docParser) parseIf(head dirOut, bodyPos int, end int) ifRes {
 func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	body := p.parseBlock(bodyPos, end)
 	bodyCat := newCat(p.a, body.Items, source.Span{Start: bodyPos, End: body.Next})
+	if body.Term == dirEnd {
+		p.checkEndLabel(body.TermArgs, "for", body.TermSpan)
+	}
 	freeArgs(p.a, body.TermArgs)
 	if body.Term != dirEnd {
 		p.diag("TPL_BLOCK", head.Span, "unterminated @for block")
@@ -460,6 +506,9 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 func (p *docParser) parseWith(head dirOut, bodyPos int, end int) pairRes {
 	body := p.parseBlock(bodyPos, end)
 	bodyCat := newCat(p.a, body.Items, source.Span{Start: bodyPos, End: body.Next})
+	if body.Term == dirEnd {
+		p.checkEndLabel(body.TermArgs, "with", body.TermSpan)
+	}
 	freeArgs(p.a, body.TermArgs)
 	if body.Term != dirEnd {
 		p.diag("TPL_BLOCK", head.Span, "unterminated @with block")
@@ -483,6 +532,83 @@ func (p *docParser) parseWith(head dirOut, bodyPos int, end int) pairRes {
 	return pairRes{Expr: app, Next: nextPos}
 }
 
+func (p *docParser) parseMatch(head dirOut, bodyPos int, end int) pairRes {
+	app := mem.Alloc[expr.Expr](p.a)
+	app.Kind = expr.Application
+	app.Span = head.Span
+	matchHead := mem.Alloc[expr.Expr](p.a)
+	matchHead.Kind = expr.Name
+	matchHead.Text = "match"
+	matchHead.Span = head.Span
+	app.Items = slices.Append(p.a, app.Items, matchHead)
+	app.Items = slices.Append(p.a, app.Items, head.Args[0])
+	slices.Free(p.a, head.Args)
+	first := p.parseBlock(bodyPos, end)
+	if first.Term != dirCase || first.Next != bodyPos || len(first.TermArgs) != 1 {
+		p.diag("TPL_BLOCK", head.Span, "@match must begin with @case")
+		freeArgs(p.a, first.Items)
+		freeArgs(p.a, first.TermArgs)
+		return pairRes{Expr: app, Next: first.Next}
+	}
+	pattern := first.TermArgs[0]
+	slices.Free(p.a, first.TermArgs)
+	line := scanLine(p.s.Text, first.Next, end)
+	cur := line.LineEnd
+	for {
+		block := p.parseBlock(cur, end)
+		bodyCat := newCat(p.a, block.Items, source.Span{Start: cur, End: block.Next})
+		clause := mem.Alloc[expr.Expr](p.a)
+		clause.Kind = expr.List
+		clause.Span = source.Span{Start: pattern.Span.Start, End: block.Next}
+		clause.Items = slices.Append(p.a, clause.Items, pattern)
+		clause.Items = slices.Append(p.a, clause.Items, bodyCat)
+		app.Items = slices.Append(p.a, app.Items, clause)
+		if block.Term == dirCase {
+			pattern = block.TermArgs[0]
+			slices.Free(p.a, block.TermArgs)
+			line = scanLine(p.s.Text, block.Next, end)
+			cur = line.LineEnd
+			continue
+		}
+		if block.Term == dirElse {
+			freeArgs(p.a, block.TermArgs)
+			marker := mem.Alloc[expr.Expr](p.a)
+			marker.Kind = expr.Symbol
+			marker.Text = "else"
+			marker.Span = block.TermSpan
+			line = scanLine(p.s.Text, block.Next, end)
+			fallback := p.parseBlock(line.LineEnd, end)
+			if fallback.Term != dirEnd {
+				p.diag("TPL_BLOCK", block.TermSpan, "unterminated or invalid @match fallback")
+				freeArgs(p.a, fallback.Items)
+				freeArgs(p.a, fallback.TermArgs)
+				return pairRes{Expr: app, Next: fallback.Next}
+			}
+			elseClause := mem.Alloc[expr.Expr](p.a)
+			elseClause.Kind = expr.List
+			elseClause.Span = source.Span{Start: marker.Span.Start, End: fallback.Next}
+			elseClause.Items = slices.Append(p.a, elseClause.Items, marker)
+			elseClause.Items = slices.Append(p.a, elseClause.Items, newCat(p.a, fallback.Items, source.Span{Start: line.LineEnd, End: fallback.Next}))
+			app.Items = slices.Append(p.a, app.Items, elseClause)
+			p.checkEndLabel(fallback.TermArgs, "match", fallback.TermSpan)
+			line = scanLine(p.s.Text, fallback.Next, end)
+			freeArgs(p.a, fallback.TermArgs)
+			app.Span.End = line.LineEnd
+			return pairRes{Expr: app, Next: line.LineEnd}
+		}
+		if block.Term != dirEnd {
+			p.diag("TPL_BLOCK", head.Span, "unterminated @match block")
+			freeArgs(p.a, block.TermArgs)
+			return pairRes{Expr: app, Next: block.Next}
+		}
+		p.checkEndLabel(block.TermArgs, "match", block.TermSpan)
+		line = scanLine(p.s.Text, block.Next, end)
+		freeArgs(p.a, block.TermArgs)
+		app.Span.End = line.LineEnd
+		return pairRes{Expr: app, Next: line.LineEnd}
+	}
+}
+
 func (p *docParser) parseRaw(head dirOut, bodyPos int, end int) pairRes {
 	cur := bodyPos
 	for cur < end {
@@ -503,6 +629,15 @@ func (p *docParser) parseRaw(head dirOut, bodyPos int, end int) pairRes {
 	return pairRes{Expr: lit, Next: end}
 }
 
+func (p *docParser) checkEndLabel(args []*expr.Expr, expected string, span source.Span) {
+	if len(args) == 0 {
+		return
+	}
+	if len(args) != 1 || args[0].Kind != expr.Name || args[0].Text != expected {
+		p.diag("TPL_BLOCK", span, "template block end label does not match @"+expected)
+	}
+}
+
 // isEndLine reports whether the line is a valid bare @end directive in the
 // current style, without emitting diagnostics. Raw regions only recognize
 // @end; all other text is verbatim.
@@ -521,10 +656,7 @@ func (p *docParser) isEndLine(lineStart int, contentEnd int) bool {
 		for trimEnd > indentEnd && (text[trimEnd-1] == ' ' || text[trimEnd-1] == '\t') {
 			trimEnd--
 		}
-		if trimEnd-indentEnd != 4 {
-			return false
-		}
-		return text[indentEnd] == '@' && text[indentEnd+1] == 'e' && text[indentEnd+2] == 'n' && text[indentEnd+3] == 'd'
+		return isRawEndToken(text[indentEnd:trimEnd])
 	}
 	// Comment styles: extract inner without diagnostics.
 	var innerStart, innerEnd int
@@ -626,14 +758,37 @@ func (p *docParser) isEndLine(lineStart int, contentEnd int) bool {
 			innerEnd--
 		}
 		hasInner = true
+	case "powershell":
+		if hasPrefixAt(text, indentEnd, contentEnd, "<#") {
+			openEnd := indentEnd + 2
+			closeStart := findSuffix(text, openEnd, contentEnd, "#>")
+			if closeStart < 0 { return false }
+			for i := closeStart + 2; i < contentEnd; i++ { if text[i] != ' ' && text[i] != '\t' { return false } }
+			tr := trimRange(text, openEnd, closeStart)
+			innerStart, innerEnd, hasInner = tr.Start, tr.End, true
+		} else if hasPrefixAt(text, indentEnd, contentEnd, "#") {
+			innerStart = indentEnd + 1
+			for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') { innerStart++ }
+			innerEnd = contentEnd
+			for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') { innerEnd-- }
+			hasInner = true
+		}
+	case "batch":
+		innerStart = batchInnerStart(text, indentEnd, contentEnd)
+		if innerStart >= 0 {
+			innerEnd = contentEnd
+			for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') { innerEnd-- }
+			hasInner = true
+		}
 	}
 	if !hasInner {
 		return false
 	}
-	if innerEnd-innerStart != 4 {
-		return false
-	}
-	return text[innerStart] == '@' && text[innerStart+1] == 'e' && text[innerStart+2] == 'n' && text[innerStart+3] == 'd'
+	return isRawEndToken(text[innerStart:innerEnd])
+}
+
+func isRawEndToken(text string) bool {
+	return text == "@end" || text == "@end(raw)"
 }
 
 // scanLine splits one line: ContentEnd excludes \r\n, LineEnd includes \n.
@@ -769,8 +924,41 @@ func (p *docParser) directiveOnLine(lineStart int, contentEnd int) dirOut {
 			innerEnd--
 		}
 		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
+	case "powershell":
+		if hasPrefixAt(text, indentEnd, contentEnd, "<#") {
+			openEnd := indentEnd + 2
+			closeStart := findSuffix(text, openEnd, contentEnd, "#>")
+			if closeStart < 0 { return dirOut{Kind: dirNone} }
+			for i := closeStart + 2; i < contentEnd; i++ { if text[i] != ' ' && text[i] != '\t' { return dirOut{Kind: dirNone} } }
+			tr := trimRange(text, openEnd, closeStart)
+			return p.parseInner(tr.Start, tr.End, source.Span{Start: lineStart, End: contentEnd})
+		}
+		if !hasPrefixAt(text, indentEnd, contentEnd, "#") { return dirOut{Kind: dirNone} }
+		innerStart := indentEnd + 1
+		for innerStart < contentEnd && (text[innerStart] == ' ' || text[innerStart] == '\t') { innerStart++ }
+		innerEnd := contentEnd
+		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') { innerEnd-- }
+		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
+	case "batch":
+		innerStart := batchInnerStart(text, indentEnd, contentEnd)
+		if innerStart < 0 { return dirOut{Kind: dirNone} }
+		innerEnd := contentEnd
+		for innerEnd > innerStart && (text[innerEnd-1] == ' ' || text[innerEnd-1] == '\t') { innerEnd-- }
+		return p.parseInner(innerStart, innerEnd, source.Span{Start: lineStart, End: contentEnd})
 	}
 	return dirOut{Kind: dirNone}
+}
+
+func batchInnerStart(text string, start int, end int) int {
+	if hasPrefixAt(text, start, end, "::") {
+		pos := start + 2
+		for pos < end && (text[pos] == ' ' || text[pos] == '\t') { pos++ }
+		return pos
+	}
+	if end-start < 4 || !eqFold(text[start:start+3], "rem") || (text[start+3] != ' ' && text[start+3] != '\t') { return -1 }
+	pos := start + 4
+	for pos < end && (text[pos] == ' ' || text[pos] == '\t') { pos++ }
+	return pos
 }
 
 func hasPrefixAt(text string, pos int, end int, prefix string) bool {
@@ -839,6 +1027,10 @@ func keywordKind(word string) int {
 		return dirRaw
 	case "end":
 		return dirEnd
+	case "match":
+		return dirMatch
+	case "case":
+		return dirCase
 	}
 	return dirNone
 }
@@ -871,8 +1063,8 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 		return dirOut{Kind: dirNone}
 	}
 	span := source.Span{Start: innerStart, End: innerEnd}
-	// Bare keywords.
-	if kind == dirElse || kind == dirEnd || kind == dirRaw {
+	// Bare keywords; @end also accepts a block label.
+	if kind == dirElse || kind == dirRaw || (kind == dirEnd && kend == innerEnd) {
 		if kend == innerEnd {
 			return dirOut{Kind: kind, Span: lineSpan}
 		}
@@ -883,6 +1075,9 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 		_ = span
 		p.diag("TPL_PARSE", lineSpan, "malformed template directive")
 		return dirOut{Kind: dirError, Span: lineSpan}
+	}
+	if kind == dirEnd && (kend >= innerEnd || text[kend] != '(') {
+		return dirOut{Kind: dirNone}
 	}
 	// Args keywords need "(" adjacent.
 	if kend >= innerEnd || text[kend] != '(' {
@@ -911,7 +1106,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 	}
 	// Validate arity and shapes.
 	switch kind {
-	case dirIf, dirElif, dirWith:
+	case dirIf, dirElif, dirWith, dirMatch, dirCase:
 		if len(args) != 1 {
 			p.diag("TPL_PARSE", lineSpan, "malformed template directive")
 			for i := range args {
@@ -960,6 +1155,13 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
+			slices.Free(p.a, args)
+			return dirOut{Kind: dirError, Span: lineSpan}
+		}
+	case dirEnd:
+		if len(args) != 1 || args[0].Kind != expr.Name {
+			p.diag("TPL_PARSE", lineSpan, "malformed template block end label")
+			for i := range args { expr.Free(p.a, args[i]) }
 			slices.Free(p.a, args)
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}

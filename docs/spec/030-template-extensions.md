@@ -32,13 +32,14 @@ at the closing directive. Bare `@end` closes any block. `@raw` only recognizes
 
 `@match(EXPR)` evaluates its subject once. It accepts the same string, path or
 pattern values as the `(match ...)` expression form. A match block contains one
-or more `@case(PATTERN)` clauses and an optional terminal `@else` clause:
+or more `@case(PATTERN)` clauses and an optional terminal `@else` clause. The
+first directive after `@match` must be `@case`:
 
 ```html
 <!-- @match(post.path) -->
-<!-- @case(./posts/{slug}.md) -->
+<!-- @case(./posts/{slug:*}.md) -->
 <a href="@(slug)">@(post.title)</a>
-<!-- @case(./drafts/{slug}.md) -->
+<!-- @case(./drafts/{slug:*}.md) -->
 <span class="draft">@(slug)</span>
 <!-- @else -->
 <span>unclassified</span>

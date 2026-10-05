@@ -466,6 +466,34 @@ func TestRegexCaptureOperations(t *testing.T) {
 	registry.Free()
 }
 
+func TestDocumentMatchRendersNamedCaptureAndFallback(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) { t.Error("library registration failed") }
+	parsed := script.Parse(a, "document-match", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, `(match "./posts/demo.md" [./posts/{slug:*}.md slug] [:else "other"])`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo" {
+		t.Error("baseline expression match failed")
+	}
+	result.Free(a)
+	result = evaluate(t, program, `(render (cat "@match(\"./posts/demo.md\")\n@case(./posts/{slug:*}.md)\n@" "(slug)\n@else\nother\n@end(match)\n") "plain")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo\n" {
+		t.Error("document match selected capture mismatch: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
+	}
+	result.Free(a)
+	result = evaluate(t, program, `(render (cat "@match(\"./other.txt\")\n@case(./posts/{slug:*}.md)\n@" "(slug)\n@else\nother\n@end(match)\n") "plain")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "other\n" {
+		t.Error("document match fallback mismatch: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func regexTestField(record core.Value, key string) core.Value {
 	for i := range record.Record { if record.Record[i].Key == key { return record.Record[i].Value } }
 	return core.Value{Kind: core.Nil}

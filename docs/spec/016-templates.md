@@ -50,7 +50,7 @@ nothing may follow it except whitespace and the line ending.
 ```text
 directive = "@" keyword [ "(" argument+ ")" ]
 keyword   = "if" | "elif" | "else" | "for" | "with" | "let" | "include"
-          | "raw" | "end"
+          | "raw" | "match" | "case" | "end"
 ```
 
 The argument list is parsed by the expression parser, so it may contain nested
@@ -76,6 +76,8 @@ after the prefix.
 | `dash` | | `--` |
 | `semi` | | `;` |
 | `percent` | | `%` |
+| `powershell` | `<# @... #>` | `#` |
+| `batch` | | `REM`, `::` |
 | `plain` | none | none |
 | `none` | directives disabled; inline expansions only |
 
@@ -208,6 +210,8 @@ For a file path, the comment style is inferred from the extension:
 | `dash` | sql, lua, hs, elm, ada |
 | `semi` | lisp, clj, cljs, el, scm, asm |
 | `percent` | tex, erl, hrl, m |
+| `powershell` | ps1, psm1, psd1 |
+| `batch` | bat, cmd |
 
 A third `render` argument overrides the inferred style:
 

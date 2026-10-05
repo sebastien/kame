@@ -1,6 +1,7 @@
 package template_test
 
 import (
+	"kame/lang/expr"
 	"kame/lang/source"
 	"kame/lang/template"
 	"solod.dev/so/mem"
@@ -198,10 +199,84 @@ func TestDocumentStrayEndIsBlockError(t *testing.T) {
 	}
 }
 
+func TestDocumentBlockEndLabelsAreChecked(t *testing.T) {
+	a := t.Allocator()
+	valid := template.ParseDocument(a, "labels.tmpl", "@if(ok)\nyes\n@end(if)\n@for([x] xs)\n@(x)\n@end(for)\n", "plain")
+	defer valid.Free()
+	if len(valid.Diagnostics) != 0 {
+		t.Error("matching template block labels were rejected")
+	}
+	invalid := template.ParseDocument(a, "mismatch.tmpl", "@for([x] xs)\n@(x)\n@end(if)\n", "plain")
+	defer invalid.Free()
+	if len(invalid.Diagnostics) != 1 || invalid.Diagnostics[0].Code != "TPL_BLOCK" {
+		t.Error("mismatched template block label was not TPL_BLOCK")
+	}
+}
+
+func TestDocumentMatchClausesLowerToMatchForm(t *testing.T) {
+	doc := template.ParseDocument(t.Allocator(), "match.tmpl", "@match(path)\n@case(./posts/{slug}.md)\n@(slug)\n@else\nother\n@end(match)\n", "plain")
+	defer doc.Free()
+	if len(doc.Diagnostics) != 0 || doc.Root == nil || len(doc.Root.Items) != 2 {
+		t.Error("document match clauses did not parse and lower")
+		return
+	}
+	var match *expr.Expr
+	for i := range doc.Root.Items {
+		item := doc.Root.Items[i]
+		if item.Kind == expr.Application && len(item.Items) > 0 && item.Items[0].Kind == expr.Name && item.Items[0].Text == "match" {
+			match = item
+		}
+	}
+	if match == nil || len(match.Items) != 4 {
+		t.Error("document match directive did not lower to the match form")
+	}
+}
+
+func TestRawBlockAcceptsLabeledRawEnd(t *testing.T) {
+	doc := template.ParseDocument(t.Allocator(), "raw.tmpl", "@raw\n@not_a_directive\n@end(raw)\n", "plain")
+	defer doc.Free()
+	if len(doc.Diagnostics) != 0 {
+		t.Error("raw block did not accept its matching labeled end")
+	}
+}
+
 func TestDocumentUnknownStyleIsStyleError(t *testing.T) {
 	doc := template.ParseDocument(t.Allocator(), "test.tmpl", "hi\n", "unknown")
 	defer doc.Free()
 	if len(doc.Diagnostics) == 0 || doc.Diagnostics[0].Code != "TPL_STYLE" {
 		t.Error("unknown style was not TPL_STYLE")
 	}
+}
+
+func TestDocumentAutoStyleUsesExtensionAndContent(t *testing.T) {
+	a := t.Allocator()
+	if style, ok := template.ResolveAutoStyle("view.ps1", "# @if(ok)\nyes\n# @end(if)\n"); !ok || style != "powershell" {
+		t.Error("PowerShell extension did not select its comment style")
+	}
+	if style, ok := template.InferContentStyle("<!-- @if(ok) -->\nyes\n<!-- @end(if) -->\n"); !ok || style != "html" {
+		t.Error("HTML content style was not detected")
+	}
+	if _, ok := template.InferContentStyle("# @if(ok)\n<!-- @end(if) -->\n"); ok {
+		t.Error("mixed comment styles were not reported as ambiguous")
+	}
+	doc := template.ParseDocument(a, "view.unknown", "# @if(ok)\nyes\n# @end(if)\n", "auto")
+	defer doc.Free()
+	if len(doc.Diagnostics) != 0 {
+		t.Error("auto style did not use a unique content style")
+	}
+	ambiguous := template.ParseDocument(a, "view.unknown", "# @if(ok)\nyes\n<!-- @end(if) -->\n", "auto")
+	defer ambiguous.Free()
+	if len(ambiguous.Diagnostics) != 1 || ambiguous.Diagnostics[0].Code != "TPL_STYLE" {
+		t.Error("ambiguous auto style did not report TPL_STYLE")
+	}
+}
+
+func TestDocumentPowerShellAndBatchCommentStyles(t *testing.T) {
+	a := t.Allocator()
+	powershell := template.ParseDocument(a, "view.ps1", "<# @if(ok) #>\nyes\n<# @end(if) #>\n", "powershell")
+	defer powershell.Free()
+	if len(powershell.Diagnostics) != 0 { t.Error("PowerShell block comments were not recognized") }
+	batch := template.ParseDocument(a, "view.cmd", "REM @if(ok)\nyes\n:: @end(if)\n", "batch")
+	defer batch.Free()
+	if len(batch.Diagnostics) != 0 { t.Error("batch comment directives were not recognized") }
 }

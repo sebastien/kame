@@ -258,6 +258,9 @@ grace period is honored by the JavaScript host.
 `T010-31-wasm-service-events.sh` compares native and WASM lifecycle state
 events in JSON and human output, including generation/attempt correlation and
 provisioning, readiness, health, restart, stop, and terminal states.
+
+`T016-02-cli-template-extensions.sh` checks document match capture scopes, content
+style inference, and PowerShell/batch comment wrappers on native and WASM.
 `TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents` in the WASM host package
 drives the public embedding request/completion API through cancellation and
 terminal event delivery.
