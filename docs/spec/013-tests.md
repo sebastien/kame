@@ -259,6 +259,11 @@ grace period is honored by the JavaScript host.
 plan JSON, including generator provenance, and materializes generated tasks on
 both hosts.
 
+The shared `watch-runtime.py` suite, run by T009-14 and T010-23, also changes an
+included module list while watching a generated target family. It verifies the
+new generated target runs and the retained root rebuilds against the replacement
+set on native and WASM.
+
 The Go CLI unit-test sanitizer command uses `GOGC=off`. Solod 0.4.0's Go
 compatibility allocator stores structs in unscanned byte slices, while its Go
 `slices.Append` stub uses ordinary Go append. A slice reachable only through such

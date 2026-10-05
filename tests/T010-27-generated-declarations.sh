@@ -18,7 +18,7 @@ trap 'rm -rf "$work"' EXIT
 cli="$CLI_ROOT/dist/kame.js"
 cat >"$work/Makefile.kmk" <<'EOF'
 MODULES = ["core" "cli"]
-generate module-checks = (map ([module] [kind: "task" target: (join (list "check-" module) "") inputs: [] order-only: [] recipe: ["touch generated"]]) MODULES)
+generate module-checks = (map ([module] [kind: "task" target: (join (list "check-" module) "") inputs: [] order-only: [] recipe: (list (join (list "touch generated-" module) ""))]) MODULES)
 EOF
 
 test-step "plan output matches across hosts"
@@ -35,13 +35,13 @@ else
 fi
 
 test-step "generated rules materialize on both hosts"
-if (cd "$work" && node "$cli" check-core) && [ -f "$work/generated" ]; then
+if (cd "$work" && node "$cli" check-core) && [ -f "$work/generated-core" ]; then
 	test-ok "WASM generated task executes"
 else
 	test-fail "WASM generated task failed"
 fi
-rm -f "$work/generated"
-if (cd "$work" && "$CLI_BIN" check-cli) && [ -f "$work/generated" ]; then
+rm -f "$work/generated-core"
+if (cd "$work" && "$CLI_BIN" check-cli) && [ -f "$work/generated-cli" ]; then
 	test-ok "native generated task executes"
 else
 	test-fail "native generated task failed"

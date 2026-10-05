@@ -61,6 +61,24 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-generated-') as directory:
+    project = Path(directory)
+    source = project / 'Makefile.kmk'
+    values = project / 'modules.kmk'
+    source.write_text('include modules.kmk\ngenerate modules = (map ([module] [kind: "task" target: module inputs: [] order-only: [] recipe: (list (join (list "touch generated-" module) ""))]) MODULES)\nchosen : @((map ([module] module) MODULES))\n\tprintf x >> runs\n')
+    values.write_text('MODULES = ["alpha"]\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: (project / 'generated-alpha').exists() and read(project / 'runs') == 'x', error, 'initial generated target set')
+            values.write_text('MODULES = ["beta"]\n')
+            wait_for(process, lambda: (project / 'generated-beta').exists() and read(project / 'runs') == 'xx', error, 'generated target set replacement after include change')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 with tempfile.TemporaryDirectory(prefix='kame-watch-busy-') as directory:
     project = Path(directory)
     (project / 'input').write_text('before')

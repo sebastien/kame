@@ -8,19 +8,29 @@ import (
 	"kame/program"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
+	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
 
+const generatedRecordLimitForTest = 4096
+
 func TestGeneratedTargetsPlanAndMaterializeWithDefinitionDependencies(t *testing.T) {
 	a := t.Allocator()
-	source := "MODULES = [\"core\" \"cli\"]\ngenerate module-checks = (map ([module] [kind: \"task\" target: (join (list \"check-\" module) \"\") inputs: [] order-only: [] recipe: [\"true\"]]) MODULES)\n"
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-generated-task-")
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
+	defer os.Remove(dir)
+	source := "MODULES = [\"core\" \"cli\"]\ngenerate module-checks = (map ([module] [kind: \"task\" target: (join (list \"check-\" module) \"\") inputs: [] order-only: [] recipe: (list (join (list \"touch generated-\" module) \"\"))]) MODULES)\n"
 	parsed := script.Parse(a, "generated.kmk", source)
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("operation registration failed")
 		return
 	}
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
 		message := ""
 		for i := range compiled.Diagnostics {
@@ -43,6 +53,11 @@ func TestGeneratedTargetsPlanAndMaterializeWithDefinitionDependencies(t *testing
 		t.Error("generated task did not materialize: " + result.Diagnostic.Code)
 	}
 	result.Free(a)
+	data, readErr := os.ReadFile(a, dir+"/generated-cli")
+	if readErr != nil || len(data) != 0 {
+		t.Error("generated recipe did not retain its computed module value")
+	}
+	mem.FreeSlice(a, data)
 	compiled.Program.Free()
 	compiled.Free(a)
 	parsed.Free()
@@ -168,6 +183,30 @@ func TestGeneratedDeclarationRejectsDefinitionCycles(t *testing.T) {
 			message += compiled.Diagnostics[i].Code + ":" + compiled.Diagnostics[i].Message + " "
 		}
 		t.Error("generated declaration did not reject a definition cycle: " + message)
+	}
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
+}
+
+func TestGeneratedDeclarationEnforcesBatchRecordLimit(t *testing.T) {
+	a := t.Allocator()
+	text := strings.NewBuilder(a)
+	text.WriteString("generate too-many = [")
+	record := "[kind: \"task\" target: \"same\" inputs: [] order-only: [] recipe: [\"true\"]]"
+	for i := 0; i <= generatedRecordLimitForTest; i++ {
+		if i != 0 {
+			text.WriteString(" ")
+		}
+		text.WriteString(record)
+	}
+	text.WriteString("]\n")
+	parsed := script.Parse(a, "too-many-generated.kmk", text.String())
+	text.Free()
+	registry := eval.NewRegistry(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a)})
+	if compiled.Program != nil || len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "EXPR_INVALID" {
+		t.Error("generated declaration batch exceeded the record limit without rejection")
 	}
 	compiled.Free(a)
 	parsed.Free()
