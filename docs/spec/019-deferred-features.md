@@ -40,7 +40,7 @@ adapters and integration evidence rather than placeholder methods.
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
 | D16 | Platform execution | In progress: the Node/WASM host now has Windows stream pipelines and process-tree termination, with a Windows-only descendant test; Windows-native launch, native-host lifecycle, and APE conformance on advertised non-Linux hosts remain. |
 | D17 | Distribution tooling | In progress: signed `Makefile.bootstrap` and `VERSION` release assets, non-overwriting `kame init`, and the opt-in `KAME_VERSION=latest` channel are specified and covered. Automatic launcher updates, native platform artifacts and package-manager integration remain. |
-| D18 | Remaining library/ergonomic extensions | In progress: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, and safely quoted `shell-template` interpolation now have specified semantics and acceptance coverage. Dependency sequencing remains. |
+| D18 | Remaining library/ergonomic extensions | Complete: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, safely quoted `shell-template` interpolation, and comma-separated prerequisite sequencing have specified semantics and native/WASM acceptance coverage. |
 
 The explicit boundaries in this table are a finite work inventory. General
 phrases such as "library breadth" do not authorize an unspecified infinite API.
@@ -109,7 +109,7 @@ supports both callbacks and direct-argv native processes; T033-01 covers every
 canonical value kind, identity and protocol rejection, limits, process
 termination, cancellation, disposal, and evaluate/build/watch configuration.
 The core codec and plugin registry tests also verify allocator ownership and
-version-sensitive operation identity. D16–D18 remain open. The
+version-sensitive operation identity. D16–D17 remain open. The
 Node's Windows host path now connects pipeline stages with child streams, uses
 `taskkill /T /F` for process-tree cancellation, and waits for tree-stop and
 direct-child completion. T033-01 retains a Windows-only descendant cleanup
@@ -131,7 +131,11 @@ all styles, selective nesting resets, nonstring rejection, canonical value
 display and native/WASM output. `shell-template` combines trusted fragments
 with POSIX-quoted dynamic strings and shares the `shell` result and phase
 contract; T007-06 verifies injection resistance and result parity on native and
-WASM. Dependency sequencing remains open.
+WASM. Comma-separated prerequisite groups request later dependencies only when
+all earlier group members are current, while whitespace members remain parallel;
+T006-08 verifies ordering, parallel independence, failure blocking, and
+formatting on native and WASM. Sequence boundaries are part of cached-task
+identity and are exposed in plan JSON.
 D17 packages `Makefile.bootstrap` and `VERSION` inside the signed release
 manifest. `kame init` verifies the bootstrap asset, creates a pinned sidecar
 atomically, preserves an existing `Makefile`, and refuses to replace an

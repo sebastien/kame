@@ -17,7 +17,9 @@ func (p *Program) cacheBlockedByBareTask(entry *instance) bool {
 		inputs, resources = entry.Plan.ResolvedInputs, entry.Plan.ResolvedResourceInputs
 	}
 	for i := range inputs {
-  if i < len(resources) && resources[i].OrderOnly { continue }
+		if i < len(resources) && resources[i].OrderOnly {
+			continue
+		}
 		if i < len(resources) && resources[i].Key.Kind == core.ResourceFile {
 			continue
 		}
@@ -36,7 +38,9 @@ func (p *Program) cacheBlockedByBareTask(entry *instance) bool {
 	}
 	for i := range entry.Node.Dynamic {
 		dependency := entry.Node.Dynamic[i]
-  if slices.Contains(entry.Node.OrderOnly, dependency) { continue }
+		if slices.Contains(entry.Node.OrderOnly, dependency) {
+			continue
+		}
 		index := p.instanceIndex(dependency)
 		if index >= 0 && p.Instances[index].Rule.Kind == rule.TaskRule {
 			return true
@@ -145,7 +149,9 @@ func (p *Program) commitEffects(entry *instance, effects []eval.Effect, writePat
 }
 
 func effectName(kind eval.EffectKind) string {
-	if kind == eval.EffectProcessWrite { return "process-write" }
+	if kind == eval.EffectProcessWrite {
+		return "process-write"
+	}
 	if kind == eval.EffectOut {
 		return "out"
 	}
@@ -186,7 +192,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			if input.Kind == rule.InputPath {
 				kind = core.ResourceFile
 			}
-			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{OrderOnly: input.OrderOnly, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
+			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 			continue
 		}
 		if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil)) {
@@ -200,9 +206,9 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: entry.EnvironmentClaimed, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
 		p.bindDefinitionEnvironment(context)
 		scope := p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
-        context.Scope = scope
-        result := p.evaluateInput(input, context)
-        scope.Free()
+		context.Scope = scope
+		result := p.evaluateInput(input, context)
+		scope.Free()
 		freeValues(p.Alloc, values)
 		freeValues(p.Alloc, outputs)
 		if context.PhaseInvalid() || len(context.Effects) != 0 {
@@ -239,7 +245,9 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			return inputsResult{Diagnostic: failure(p.Alloc, "EXPR_INVALID", "rule input expression must produce strings, resources, lists, or nil")}
 		}
 		result.Value.Free(p.Alloc)
-		for j := before; j < len(resourceInputs); j++ { resourceInputs[j].OrderOnly = input.OrderOnly }
+		for j := before; j < len(resourceInputs); j++ {
+			resourceInputs[j].OrderOnly = input.OrderOnly
+		}
 		for j := before; j < len(inputs); j++ {
 			dynamicInputs = slices.Append(p.Alloc, dynamicInputs, cloneText(p.Alloc, inputs[j]))
 		}
@@ -298,7 +306,7 @@ func cloneStrings(a mem.Allocator, values []string) []string {
 func clonePlanInputs(a mem.Allocator, values []PlanInput) []PlanInput {
 	var out []PlanInput
 	for i := range values {
-		out = slices.Append(a, out, PlanInput{OrderOnly: values[i].OrderOnly, Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
+		out = slices.Append(a, out, PlanInput{OrderOnly: values[i].OrderOnly, SequenceEnd: values[i].SequenceEnd, Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
 	}
 	return out
 }
@@ -345,7 +353,9 @@ func (p *Program) mkdirParent(name string) bool {
 		return true
 	}
 	info := p.Host.Stat(parent)
- if info.Exists { return info.Info.IsDir }
+	if info.Exists {
+		return info.Info.IsDir
+	}
 	// The recursive walk is deliberately lexical; output paths have already been normalized.
 	if !p.mkdirParent(parent) {
 		return false
@@ -354,31 +364,46 @@ func (p *Program) mkdirParent(name string) bool {
 		return true
 	}
 	info = p.Host.Stat(parent)
- return info.Exists && info.Info.IsDir
+	return info.Exists && info.Info.IsDir
 }
 
 // Rendered bytes are authoritative for yielded files. Membership changes can
 // alter a document even when every remaining input predates its output.
 func (p *Program) yieldFreshness(entry *instance, effects []eval.Effect) Freshness {
-    name := p.canonicalTarget(entry.Plan.Outputs[0], true)
-    data, err := p.Host.ReadFile(p.Alloc, name)
-    mem.FreeString(p.Alloc, name)
-    if err != nil { return Stale }
-    total := 0
-    for i := range effects { if effects[i].Kind == eval.EffectYield { total += len(effects[i].Data) } }
-    if total != len(data) { mem.FreeSlice(p.Alloc, data); return Stale }
-    position := 0
-    equal := true
-    for i := range effects {
-        if effects[i].Kind != eval.EffectYield { continue }
-        for j := range effects[i].Data {
-            if data[position] != effects[i].Data[j] { equal = false }
-            position++
-        }
-    }
-    mem.FreeSlice(p.Alloc, data)
-    if equal { return Fresh }
-    return Stale
+	name := p.canonicalTarget(entry.Plan.Outputs[0], true)
+	data, err := p.Host.ReadFile(p.Alloc, name)
+	mem.FreeString(p.Alloc, name)
+	if err != nil {
+		return Stale
+	}
+	total := 0
+	for i := range effects {
+		if effects[i].Kind == eval.EffectYield {
+			total += len(effects[i].Data)
+		}
+	}
+	if total != len(data) {
+		mem.FreeSlice(p.Alloc, data)
+		return Stale
+	}
+	position := 0
+	equal := true
+	for i := range effects {
+		if effects[i].Kind != eval.EffectYield {
+			continue
+		}
+		for j := range effects[i].Data {
+			if data[position] != effects[i].Data[j] {
+				equal = false
+			}
+			position++
+		}
+	}
+	mem.FreeSlice(p.Alloc, data)
+	if equal {
+		return Fresh
+	}
+	return Stale
 }
 
 // Automatic input selectors expose content inputs only; order-only inputs still

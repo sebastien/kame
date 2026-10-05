@@ -53,7 +53,7 @@ design boundaries rather than placeholder behavior.
 | JavaScript API | The module ABI and JS loader exist. A documented embedding API should expose disposal, copied buffers, grants, host completion, and cancellation; CLI internals are not an API contract. |
 | Python API | Research item; choose binding/transport and ownership model after the embedding contract is stable. |
 | Alternative `<-` build syntax | Implemented as an alternate rule separator with identical dependency semantics; canonical formatting emits `:`. T004-09 verifies native/WASM planning and execution. |
-| Dependency sequencing with `,` | Define whether ordering is an edge or effect sequence; preserve parallel independence and failure propagation. Kash statement sequencing already has different semantics. |
+| Dependency sequencing with `,` | Implemented as graph-demand barriers between parallel prerequisite groups; later groups are not requested after failure. Plan JSON and cache identity preserve boundaries; T006-08 verifies both hosts. Kash statement sequencing remains separate. |
 | Learnability | Finish idioms/gotchas and independent value/rule/process lessons with executable smoke coverage. |
 | Metaprogramming | A4 declaration selection, defaults, and literal CLI/environment overrides are implemented; computed record lookup uses `get`. D03 generated declarations now support bounded typed batches, authored diagnostics, provenance and watch replacement on native/WASM. Headers compose expressions and interpolated paths. |
 | Error taxonomy | Existing codes are registered and machine-readable. Add actionable messages rather than speculative taxonomy churn. |

@@ -50,7 +50,8 @@ KMK
  if [ "$(cat "$project/cache-runs")" = c ]; then test-ok "$backend order-only tasks and content preserve cache"; else test-fail "$backend order-only cache identity"; fi
  test-step "$backend upgrades explicit reads to content dependencies"
  "${runner[@]}" -C "$project" ./read-out > "$project/log" 2> "$project/err"
- printf consumed > "$project/ordered"
+	printf consumed > "$project/ordered"
+	touch -d '2030-01-01 00:00:00 UTC' "$project/ordered"
  "${runner[@]}" -C "$project" ./read-out > "$project/log" 2> "$project/err"
  if [ "$(cat "$project/read-runs")" = rr ] && [ "$(cat "$project/read-out")" = consumed ]; then test-ok "$backend explicit read dominates ordering"; else test-fail "$backend order-only read upgrade"; fi
  test-step "$backend upgrades cached explicit reads to content dependencies"

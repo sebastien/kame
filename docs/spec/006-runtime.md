@@ -146,6 +146,15 @@ retain all prerequisites; plan JSON additionally reports `orderOnlyInputs`.
 Quoted pipe characters remain literal input text. Empty and repeated order-only
 sections are parse errors. Environment inheritance applies to both sections.
 
+Whitespace-separated prerequisites form a parallel scheduling group. A comma
+separates groups, for example `final : prepare index, compile, package`:
+`prepare` and `index` may run independently, then `compile` is requested after
+both finish, then `package` after `compile`. Comma groups are a graph-demand
+barrier, not an extra order-only edge or a recipe effect sequence. Each
+prerequisite retains its normal content or order-only semantics, and a failure
+in one group prevents later groups and the parent recipe from running. Kash
+statement sequencing remains separately defined in `017-kash.md`.
+
 An `always` file rule, for example `always ./stamp : ./input`, bypasses
 freshness every time it is reached from a new requested-root epoch. It remains
 a file resource: output paths, multi-output aliases, captures, publication
@@ -305,6 +314,9 @@ bytes is a separate operation used by `cat`.
 - Equivalent assignment order shares a prerequisite; changing inherited values
   invalidates a cached task while unchanged values reuse its record.
 - Bare tasks run every time; cached task syntax remains distinguishable.
+- Whitespace prerequisite groups schedule independently; comma-separated
+  groups wait for all prior prerequisites, preserve failure blocking, and retain
+  normal/order-only input semantics on native and WASM.
 - Requests for two sibling outputs share one rule-instance execution.
 - `yield` atomically writes one output and rejects tasks or multiple outputs.
 - `yield` combined with any nonempty rendered command returns `OUTPUT_CONFLICT`.

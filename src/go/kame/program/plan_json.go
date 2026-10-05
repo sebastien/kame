@@ -40,6 +40,20 @@ func WritePlan(out io.Writer, plan *Plan) {
 	}
 	e.Str("inputs")
 	writeStringArray(&e, plan.Inputs)
+	sequenceBoundaries := false
+	for i := range plan.ResourceInputs {
+		sequenceBoundaries = sequenceBoundaries || plan.ResourceInputs[i].SequenceEnd
+	}
+	if sequenceBoundaries {
+		e.Str("sequenceBoundaries")
+		e.BeginArray()
+		for i := range plan.ResourceInputs {
+			if plan.ResourceInputs[i].SequenceEnd {
+				e.Int(int64(i + 1))
+			}
+		}
+		e.EndArray()
+	}
 	ordered := false
 	for i := range plan.ResourceInputs {
 		if plan.ResourceInputs[i].OrderOnly {

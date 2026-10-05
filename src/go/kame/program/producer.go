@@ -150,6 +150,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.failRule(c, state.Index, resolvedInputs.Diagnostic)
 		return core.ProducerFailed
 	}
+	groupReady := true
 	for i := range inputs {
 		input := inputs[i]
 		kind := core.ResourceTarget
@@ -169,7 +170,13 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			if resolved.Node != nil {
 				resolved.Plan.Free(p.Alloc)
 				if !p.prepareDependency(c, state.Index, resolved.Node, ordered) {
-					return core.ProducerWaiting
+					groupReady = false
+				}
+				if i < len(resourceInputs) && resourceInputs[i].SequenceEnd {
+					if !groupReady {
+						return core.ProducerWaiting
+					}
+					groupReady = true
 				}
 				continue
 			}
@@ -182,14 +189,20 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				external.Program, external.Name = p, cloneText(p.Alloc, name)
 				dependency = p.Engine.AddOwned(key, produceExternalFile, external, freeExternalFileState)
 			}
-			if !p.prepareDependency(c, state.Index, dependency, ordered) {
-				mem.FreeString(p.Alloc, name)
-				return core.ProducerWaiting
+			ready := p.prepareDependency(c, state.Index, dependency, ordered)
+			if !ready {
+				groupReady = false
 			}
 			mem.FreeString(p.Alloc, name)
-			if !dependency.Current || dependency.Latest.Kind == core.Nil {
+			if ready && (!dependency.Current || dependency.Latest.Kind == core.Nil) {
 				p.failRule(c, state.Index, failure(p.Alloc, "TGT_NO_RULE", "required input does not exist: "+input))
 				return core.ProducerFailed
+			}
+			if i < len(resourceInputs) && resourceInputs[i].SequenceEnd {
+				if !groupReady {
+					return core.ProducerWaiting
+				}
+				groupReady = true
 			}
 			continue
 		}
@@ -199,7 +212,13 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		resolved.Plan.Free(p.Alloc)
 		if d.Code == "" && dep != nil {
 			if !p.prepareDependency(c, state.Index, dep, ordered) {
-				return core.ProducerWaiting
+				groupReady = false
+			}
+			if i < len(resourceInputs) && resourceInputs[i].SequenceEnd {
+				if !groupReady {
+					return core.ProducerWaiting
+				}
+				groupReady = true
 			}
 			continue
 		}
@@ -216,9 +235,21 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		definitionContext := &eval.Context{Environment: entry.Environment, HasEnvironment: entry.EnvironmentClaimed, Cwd: p.Options.Directory, Phase: eval.EvaluatePhase}
 		p.bindDefinitionEnvironment(definitionContext)
 		definitionNode := p.Eval.DefinitionWith(definition.Key.Name, definitionContext)
-		if definitionNode == nil || !p.addPurposeDependency(c, entry, definitionNode, ordered) {
+		if definitionNode == nil {
 			return core.ProducerWaiting
 		}
+		if !p.addPurposeDependency(c, entry, definitionNode, ordered) {
+			groupReady = false
+		}
+		if i < len(resourceInputs) && resourceInputs[i].SequenceEnd {
+			if !groupReady {
+				return core.ProducerWaiting
+			}
+			groupReady = true
+		}
+	}
+	if !groupReady {
+		return core.ProducerWaiting
 	}
 	entry = &p.Instances[state.Index]
 	// Scan the combined source so selectors used through definitions are covered.
@@ -441,7 +472,9 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	processDirectory, targetIdentity := p.Options.Directory, entry.Plan.Target
 	if entry.Executor != "" && entry.Executor != "local" {
 		processEnvironment, processDirectory = entry.MetadataEnvironment, "."
-		if len(entry.ExecutionOutputs) != 0 { targetIdentity = entry.ExecutionOutputs[0] }
+		if len(entry.ExecutionOutputs) != 0 {
+			targetIdentity = entry.ExecutionOutputs[0]
+		}
 	}
 	request := host.ProcessRequest{ID: p.nextRequest, Target: targetIdentity, Generation: c.Generation(), Attempt: c.Attempt(), Executor: entry.Executor, ExecutorVersion: entry.ExecutorVersion, Shell: entry.Shell, Script: []byte(entry.Script), Directory: processDirectory, Environment: processEnvironment, Inputs: entry.ExecutionInputs, Outputs: entry.ExecutionOutputs, TimeoutMS: timeout, RetainBytes: retain}
 	request.IdempotencyKey = entry.ExecutionKey

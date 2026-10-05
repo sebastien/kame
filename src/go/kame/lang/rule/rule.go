@@ -38,12 +38,13 @@ type Target struct {
 	TargetForm *template.Target
 }
 type Input struct {
-	OrderOnly  bool
-	Kind       InputKind
-	Text       string
-	Span       source.Span
-	Template   *template.String
-	TargetForm *template.Target
+	OrderOnly   bool
+	SequenceEnd bool
+	Kind        InputKind
+	Text        string
+	Span        source.Span
+	Template    *template.String
+	TargetForm  *template.Target
 }
 type RecipeLine struct {
 	Text     string
@@ -362,6 +363,27 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 	ordered := false
 	for i, span := range items {
 		text := p.s.Text[span.Start:span.End]
+		if text == "," {
+			if len(r.Inputs) == 0 || r.Inputs[len(r.Inputs)-1].SequenceEnd {
+				p.error(span.Start, span.End, "expected prerequisite before comma")
+				continue
+			}
+			last := &r.Inputs[len(r.Inputs)-1]
+			if last.Kind != InputName && last.Kind != InputPath {
+				p.error(span.Start, span.End, "sequenced prerequisites must be literal names or paths")
+				continue
+			}
+			last.SequenceEnd = true
+			continue
+		}
+		trailingComma := len(text) > 1 && text[len(text)-1] == ','
+		if trailingComma {
+			text = text[:len(text)-1]
+			if text[len(text)-1] == ',' {
+				p.error(span.Start, span.End, "invalid repeated prerequisite comma")
+				continue
+			}
+		}
 		if text == "|" {
 			if ordered || i == len(items)-1 {
 				p.error(span.Start, span.End, "expected one order-only prerequisite section")
@@ -397,7 +419,30 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 			slices.Free(p.a, input.Template.Diagnostics)
 			input.Template.Diagnostics = nil
 		}
+		if trailingComma {
+			if input.Kind != InputName && input.Kind != InputPath {
+				p.error(span.Start, span.End, "sequenced prerequisites must be literal names or paths")
+			} else {
+				input.SequenceEnd = true
+			}
+		}
 		r.Inputs = slices.Append(p.a, r.Inputs, input)
+	}
+	if len(r.Inputs) != 0 && r.Inputs[len(r.Inputs)-1].SequenceEnd {
+		last := r.Inputs[len(r.Inputs)-1]
+		p.error(last.Span.Start, last.Span.End, "expected prerequisite after comma")
+	}
+	hasSequence := false
+	for i := range r.Inputs {
+		hasSequence = hasSequence || r.Inputs[i].SequenceEnd
+	}
+	if hasSequence {
+		for i := range r.Inputs {
+			kind := r.Inputs[i].Kind
+			if kind == InputExpression || kind == InputString || kind == InputWildcard {
+				p.error(r.Inputs[i].Span.Start, r.Inputs[i].Span.End, "sequenced prerequisites cannot mix with dynamic inputs")
+			}
+		}
 	}
 	slices.Free(p.a, items)
 }
@@ -760,6 +805,9 @@ func FormatRuleWithIndent(a mem.Allocator, r *Rule, indent string) string {
 		}
 		b.WriteByte(' ')
 		b.WriteString(r.Inputs[i].Text)
+		if r.Inputs[i].SequenceEnd {
+			b.WriteByte(',')
+		}
 	}
 	for i := range r.Environment {
 		if i == 0 {

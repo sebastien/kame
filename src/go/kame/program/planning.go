@@ -82,7 +82,7 @@ func (p *Program) Plan(target string) PlanResult {
 			text := renderInput(p.Alloc, input, selected.Captures)
 			plan.Inputs = slices.Append(p.Alloc, plan.Inputs, text)
 			plan.StaticInputs = slices.Append(p.Alloc, plan.StaticInputs, cloneText(p.Alloc, text))
-			plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, text)})
+			plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, text)})
 			continue
 		}
 		text := cloneText(p.Alloc, input.Text)
@@ -92,7 +92,7 @@ func (p *Program) Plan(target string) PlanResult {
 		if input.Kind == rule.InputPath {
 			kind = core.ResourceFile
 		}
-		plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
+		plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 	}
 	if selected.Rule.Kind == rule.FileRule && len(selected.Rule.Body) == 0 {
 		plan.Freshness = p.freshness(&plan, nil)

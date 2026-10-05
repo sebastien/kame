@@ -49,9 +49,10 @@ type Plan struct {
 }
 
 type PlanInput struct {
-	OrderOnly bool
-	Display   string
-	Key       core.ResourceKey
+	OrderOnly   bool
+	SequenceEnd bool
+	Display     string
+	Key         core.ResourceKey
 }
 
 type PlanResult struct {
@@ -130,28 +131,28 @@ const (
 )
 
 type Event struct {
-	Kind          EventKind
-	Target        string
-	Key           core.ResourceKey
-	NodeID        int64
-	Generation    int64
-	Attempt       int64
-	RequestID     int64
-	DependencyID  int64
-	DependencyKey core.ResourceKey
-	Effect        string
-	State         string
-	Program       string
-	Argv          []string
-	RuntimeMS     int64
-	HasRuntime    bool
+	Kind             EventKind
+	Target           string
+	Key              core.ResourceKey
+	NodeID           int64
+	Generation       int64
+	Attempt          int64
+	RequestID        int64
+	DependencyID     int64
+	DependencyKey    core.ResourceKey
+	Effect           string
+	State            string
+	Program          string
+	Argv             []string
+	RuntimeMS        int64
+	HasRuntime       bool
 	DisplayTruncated bool
-	Span          diagnostic.Span
-	Data          []byte
-	Value         core.Value
-	Diagnostic    diagnostic.Diagnostic
-	Cached        bool
-	Truncated     bool
+	Span             diagnostic.Span
+	Data             []byte
+	Value            core.Value
+	Diagnostic       diagnostic.Diagnostic
+	Cached           bool
+	Truncated        bool
 }
 
 type EventResult struct {
@@ -213,14 +214,14 @@ type Options struct {
 	// Host executes recipe scripts and services the runtime's filesystem and
 	// clock. Compile transfers ownership to the Program, which releases it
 	// during Program.Free.
-	Host          host.ProgramHost
-	Directory     string
-	Shell         []string
-	Environment   []string
-	Defines       []string
-	ToolOverrides []string
+	Host            host.ProgramHost
+	Directory       string
+	Shell           []string
+	Environment     []string
+	Defines         []string
+	ToolOverrides   []string
 	RemoteExecutors []host.ExecutorDescriptor
-	DryRun        bool
+	DryRun          bool
 	// Force bypasses file freshness checks and cached-task lookup for this run.
 	Force            bool
 	RetainBytes      int
@@ -281,18 +282,18 @@ type Program struct {
 }
 
 type pendingRequest struct {
-	Capture    bool
-	Stream     bool
-	Program    string
-	Argv       []string
+	Capture          bool
+	Stream           bool
+	Program          string
+	Argv             []string
 	DisplayTruncated bool
-	Started    bool
-	StartedNS  int64
-	ID         int64
-	NodeID     int64
-	Generation int64
-	Attempt    int64
-	Retries    int
+	Started          bool
+	StartedNS        int64
+	ID               int64
+	NodeID           int64
+	Generation       int64
+	Attempt          int64
+	Retries          int
 }
 
 // ServiceConfig owns the validated, bounded lifecycle policy for one service

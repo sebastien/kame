@@ -466,14 +466,26 @@ to read a rule as “output is built from inputs.” The formatter emits canonic
 `:` syntax. Separators inside quoted text or nested expressions are not rule
 separators.
 
+Prerequisites separated only by whitespace form one parallel group. A comma
+ends that group and begins the next one: every prerequisite in a group must
+finish before the runtime requests the following group. Commas must follow a
+literal name or path prerequisite and must be followed by whitespace and the
+next group. A rule using comma sequencing cannot also
+declare expression, quoted-string, or wildcard prerequisites. Each prerequisite
+remains a normal content or order-only dependency according to its section;
+the comma adds a scheduling barrier and does not change input identity.
+Plan JSON exposes comma locations as one-based `sequenceBoundaries` indexes
+into the `inputs` array.
+
 ```text
 RULE = (PREFIXED-RULE | ALWAYS-RULE | UNPREFIXED-RULE) ENVIRONMENT?
 ENVIRONMENT = WS* ";" WS* "env" (WS+ QUOTED-ASSIGNMENT)+
 PREFIXED-RULE = ("task" | "service") WS+ NAME-TARGET WS* ":" (WS+ INPUTS)?
 ALWAYS-RULE = "always" WS+ OUTPUTS WS* ":" (WS+ INPUTS)?
 UNPREFIXED-RULE = OUTPUTS WS* ":" (WS+ INPUTS)?
+INPUTS = INPUT-GROUP (WS* "," WS+ INPUT-GROUP)*
+INPUT-GROUP = (WS+ INPUT)*
 OUTPUTS = OUTPUT-TARGET (WS+ OUTPUT-TARGET)*
-INPUTS = INPUT (WS+ INPUT)*
 OUTPUT-TARGET = NAME | PATH | TEMPLATE | QUOTED-PATH
 NAME-TARGET = NAME | NAME-TEMPLATE
 INPUT = NAME | PATH | WILDCARD-PATH | TEMPLATE | QUOTED-STRING | "@(" EXPRESSION ")" | INTERPOLATED-PATH

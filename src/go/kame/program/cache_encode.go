@@ -542,17 +542,24 @@ func (p *Program) appendInputSection(e *cacheEncoder, entry *instance) {
 			kind = resources[i].Key.Kind
 			name = resources[i].Key.Name
 		}
+		sequenceEnd := i < len(resources) && resources[i].SequenceEnd
 		file := kind == core.ResourceFile || (kind == core.ResourceTarget && isFileName(name))
 		if file {
 			canonical := p.canonicalTarget(name, true)
 			e.appendByte(byte(kind))
 			e.appendText(canonical)
 			p.appendLiveFile(e, canonical)
+			if sequenceEnd {
+				e.appendByte(0xff)
+			}
 			mem.FreeString(p.Alloc, canonical)
 			continue
 		}
 		e.appendByte(byte(kind))
 		e.appendText(name)
+		if sequenceEnd {
+			e.appendByte(0xff)
+		}
 	}
 	e.patchU64(at, start)
 }
