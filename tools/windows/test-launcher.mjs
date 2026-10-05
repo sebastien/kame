@@ -103,7 +103,10 @@ setInterval(() => {}, 1000);
   );
   const timeoutBuild = await run(
     launcher,
-    ['--timeout', '5000', '-f', 'Timeout.kmk', 'timeout-tree'],
+    [
+      '--shell', 'cmd.exe', '--shell', '/d', '--shell', '/c',
+      '--timeout', '5000', '-f', 'Timeout.kmk', 'timeout-tree',
+    ],
     { cwd: timeoutWorkspace, timeout: 15000 },
   );
   assert.equal(timeoutBuild.timedOut, false, 'Kame timeout acceptance exceeded its outer deadline');
