@@ -10,7 +10,7 @@ test-step "build the public WASM embedding"
 make dist-wasm >/dev/null
 test-ok "WASM plugin registration and callback exports are current"
 
-test-step "round-trip, identity checks, capability gates, limits, timeout and failure"
+test-step "round-trip all value kinds; verify identity, grants, bounds, timeout, cancellation and cleanup"
 if node --input-type=module <<'NODE'
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -33,6 +33,11 @@ async function call(expression, plugin, callback, options = {}) {
     await kame.dispose();
   }
 }
+const responseFor = (request) => ({
+  protocol: 1, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion,
+  operation: request.operation, operationVersion: request.operationVersion, generation: request.generation,
+  attempt: request.attempt, value: { kind: 'int', data: 37 },
+});
 
 let calls = 0;
 const roundTrip = await call('(example-run "hello")', declarations(), async (request, { signal }) => {
@@ -56,24 +61,30 @@ const allKinds = {
     { kind: 'resource', resourceKind: 'file', name: 'file:///work/input' },
     { kind: 'list', items: [{ kind: 'string', data: 'nested' }, { kind: 'bool', data: false }] },
     { kind: 'record', fields: [['field', { kind: 'string', data: 'record' }]] },
+    { kind: 'resource', resourceKind: 'definition', name: 'answer' },
+    { kind: 'resource', resourceKind: 'target', name: 'build' },
+    { kind: 'resource', resourceKind: 'task', name: 'test' },
+    { kind: 'resource', resourceKind: 'service', name: 'server' },
+    { kind: 'resource', resourceKind: 'glob', name: '*.km' },
+    { kind: 'resource', resourceKind: 'environment', name: 'PATH' },
     { kind: 'resource', resourceKind: 'tool', name: 'compiler' },
   ],
 };
-const allKindsDisplay = '[:nil :true -42 1.5 "text" "{name:*}" ABC file:///work/input ["nested" :false] [field: "record"] compiler]';
+const allKindsDisplay = '[:nil :true -42 1.5 "text" "{name:*}" ABC file:///work/input ["nested" :false] [field: "record"] answer build test server *.km PATH compiler]';
 const callbackKinds = await call('(example-run "all-kinds")', declarations(), async (request) => ({
   protocol: 1, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion,
   operation: request.operation, operationVersion: request.operationVersion, generation: request.generation,
   attempt: request.attempt, value: allKinds,
 }));
 assert.equal(callbackKinds, allKindsDisplay, 'JavaScript callback changed a canonical Kame value kind');
+for (let i = 0; i < 5; i++) {
+  assert.equal(await call('(example-run "repeat")', declarations(), async (request) => ({
+    ...responseFor(request), value: { kind: 'int', data: i },
+  })), String(i), 'repeated plugin invocation did not return its value');
+}
 
 const embeddingKame = await Kame.create();
 const embeddingProgram = await embeddingKame.compile('answer = (example-run "embedded")\n', { name: 'plugin-embedding.km' });
-const responseFor = (request) => ({
-  protocol: 1, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion,
-  operation: request.operation, operationVersion: request.operationVersion, generation: request.generation,
-  attempt: request.attempt, value: { kind: 'int', data: 37 },
-});
 let buildCalls = 0;
 await embeddingProgram.build('answer', {
   plugins: declarations(),
@@ -110,10 +121,19 @@ await assert.rejects(call('(example-run "x")', declarations(), async (request) =
 await assert.rejects(call('(example-run "x")', declarations(), async (request) => ({
   ...responseFor(request), operationVersion: 'stale',
 })), (error) => error.code === 'PLUGIN_PROTOCOL');
+await assert.rejects(call('(example-run "x")', declarations(), async (request) => ({
+  ...responseFor(request), unexpected: true,
+})), (error) => error.code === 'PLUGIN_PROTOCOL');
 await assert.rejects(call('(example-run "x")', declarations(), async (request) => {
   const { value, ...identity } = responseFor(request);
   return { ...identity, error: { code: 'PLUGIN_FAIL', message: 'failed', private: 'extra' } };
 }), (error) => error.code === 'PLUGIN_PROTOCOL');
+await assert.rejects(call('(example-run "x")', declarations(), async (request) => ({
+  ...responseFor(request), value: { kind: 'bytes', data: '%%%=' },
+})), (error) => error.code === 'PLUGIN_PROTOCOL');
+await assert.rejects(call('(example-run "x")', declarations(), async (request) => ({
+  ...responseFor(request), value: { kind: 'int', data: 'not-an-integer' },
+})), (error) => error.code === 'PLUGIN_PROTOCOL');
 
 let arityCalls = 0;
 await assert.rejects(call('(example-run "x")', declarations({ minArity: 2, maxArity: 2 }), async () => { arityCalls++; return {}; }), (error) => error.code === 'EXPR_INVALID');
@@ -137,15 +157,18 @@ await assert.rejects(call('(example-run "x")', declarations({ timeoutMS: 10 }), 
 await assert.rejects(call('(example-run "x")', declarations(), async () => { throw new Error('secret plugin details'); }), (error) => error.code === 'PLUGIN_FAIL' && !error.message.includes('secret'));
 
 let callbackSignal;
+let releaseLatePlugin;
 const abortController = new AbortController();
-const cancelled = call('(example-run "x")', declarations(), async (_request, { signal }) => {
+const cancelled = call('(example-run "x")', declarations(), async (request, { signal }) => {
   callbackSignal = signal;
-  return new Promise(() => {});
+  return new Promise((resolve) => { releaseLatePlugin = () => resolve(responseFor(request)); });
 }, { signal: abortController.signal });
 while (!callbackSignal) await new Promise((resolve) => setTimeout(resolve, 1));
 abortController.abort();
 await assert.rejects(cancelled, (error) => error.code === 'EXEC_CANCELLED');
 assert.equal(callbackSignal.aborted, true);
+releaseLatePlugin();
+await new Promise((resolve) => setTimeout(resolve, 5));
 
 await assert.rejects(call('(example-run "x")', declarations({ maxResponseBytes: 256 }), async (request) => ({
   protocol: 1, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion,
@@ -160,7 +183,7 @@ process.stdin.setEncoding('utf8');
 process.stdin.on('data', chunk => input += chunk);
 process.stdin.on('end', () => {
   const request = JSON.parse(input);
-  if (process.argv[2] !== 'literal;$(touch should-not-exist)') process.exit(7);
+  if (process.argv[2] !== 'literal;$(touch should-not-exist)' || request.protocol !== 1 || request.args.length !== 1 || request.args[0].data !== 'native' || !input.endsWith('\\n') || input.slice(0, -1).includes('\\n')) process.exit(7);
   process.stdout.write(JSON.stringify({ protocol: request.protocol, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion, operation: request.operation, operationVersion: request.operationVersion, generation: request.generation, attempt: request.attempt, value: JSON.parse(process.argv[1]) }) + '\\n');
 });`, JSON.stringify(allKinds), 'literal;$(touch should-not-exist)'];
 const nativeRoundTrip = await call('(example-run "native")', processDeclaration, undefined);
@@ -169,6 +192,22 @@ assert.equal(nativeRoundTrip, allKindsDisplay, 'native process changed a canonic
 const malformedProcess = declarations();
 malformedProcess[0].argv = [process.execPath, '-e', `process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('{}\\n{}\\n'));`];
 await assert.rejects(call('(example-run "x")', malformedProcess, undefined), (error) => error.code === 'PLUGIN_PROTOCOL');
+
+const wrongVersionProcess = declarations();
+wrongVersionProcess[0].argv = [process.execPath, '-e', `let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => { const request=JSON.parse(input); process.stdout.write(JSON.stringify({ protocol: 2, request: request.request, plugin: request.plugin, pluginVersion: request.pluginVersion, operation: request.operation, operationVersion: request.operationVersion, generation: request.generation, attempt: request.attempt, value: { kind: 'nil' } })+'\\n'); });`];
+await assert.rejects(call('(example-run "x")', wrongVersionProcess, undefined), (error) => error.code === 'PLUGIN_PROTOCOL');
+
+const staleRequestProcess = declarations();
+staleRequestProcess[0].argv = [process.execPath, '-e', `let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => { const request=JSON.parse(input); process.stdout.write(JSON.stringify({ ...request, request: 'stale', value: { kind: 'nil' } })+'\\n'); });`];
+await assert.rejects(call('(example-run "x")', staleRequestProcess, undefined), (error) => error.code === 'PLUGIN_PROTOCOL');
+
+const unknownFieldProcess = declarations();
+unknownFieldProcess[0].argv = [process.execPath, '-e', `let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => { const request=JSON.parse(input); process.stdout.write(JSON.stringify({ ...request, unexpected: true, value: { kind: 'nil' } })+'\\n'); });`];
+await assert.rejects(call('(example-run "x")', unknownFieldProcess, undefined), (error) => error.code === 'PLUGIN_PROTOCOL');
+
+const mistypedProcess = declarations();
+mistypedProcess[0].argv = [process.execPath, '-e', `let input=''; process.stdin.setEncoding('utf8'); process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => { const request=JSON.parse(input); process.stdout.write(JSON.stringify({ ...request, value: { kind: 'int', data: 'not-an-int' } })+'\\n'); });`];
+await assert.rejects(call('(example-run "x")', mistypedProcess, undefined), (error) => error.code === 'PLUGIN_PROTOCOL');
 
 const oversizedProcess = declarations({ maxResponseBytes: 256 });
 oversizedProcess[0].argv = [process.execPath, '-e', `process.stdin.resume(); process.stdin.on('end', () => process.stdout.write('x'.repeat(300)));`];
