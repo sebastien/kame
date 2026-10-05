@@ -20,7 +20,11 @@ task native-windows :
 '@ | Set-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :
+	$childScript = "Set-Content child-started started; Start-Sleep -Seconds 18; Set-Content descendant-marker late"
+	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childScript))
+	Start-Process -FilePath powershell.exe -ArgumentList "-NoProfile -NonInteractive -EncodedCommand $encoded" -WorkingDirectory (Get-Location)
 	Start-Sleep -Seconds 30
+	Set-Content parent-marker late
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	$shell = (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe').Replace('\', '/')
 	Push-Location $project
@@ -32,10 +36,11 @@ task native-timeout :
 		if ((Get-Content (Join-Path $project 'native-env.txt') -Raw).Trim() -ne 'passed') {
 			throw 'Native recipe did not receive the CLI environment override or write its output file.'
 		}
-		$timeoutOutput = & $exe --timeout 5000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
+		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
-		if ($timeoutStatus -eq 0 -or ($timeoutOutput -join "`n") -notmatch 'RECIPE_TIMEOUT') {
-			throw "Native timeout check failed: exit=$timeoutStatus output=$($timeoutOutput -join ' | ')"
+		Start-Sleep -Seconds 20
+		if ($timeoutStatus -eq 0 -or ($timeoutOutput -join "`n") -notmatch 'RECIPE_TIMEOUT' -or !(Test-Path (Join-Path $project 'child-started')) -or (Test-Path (Join-Path $project 'descendant-marker')) -or (Test-Path (Join-Path $project 'parent-marker'))) {
+			throw "Native timeout did not stop and reap its process tree: exit=$timeoutStatus output=$($timeoutOutput -join ' | ')"
 		}
 	} finally {
 		Pop-Location
