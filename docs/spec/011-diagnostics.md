@@ -122,6 +122,8 @@ meaning by themselves.
 | `DEP_CYCLE` | error | Dependency cycle |
 | `RECIPE_FAIL` | error | Recipe process exited unsuccessfully |
 | `RECIPE_TIMEOUT` | error | Recipe process timed out |
+| `SERVICE_READY_TIMEOUT` | error | Service did not become ready before its timeout |
+| `SERVICE_START_FAILED` | error | Service exited before becoming ready |
 | `EXEC_CANCELLED` | error | Execution was cancelled |
 | `HOST_FAIL` | error | Host request, spawn, pipe, wait, or signal failure |
 | `FS_ERR` | error | Filesystem read, write, stat, or glob failure |

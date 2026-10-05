@@ -218,6 +218,29 @@ func (e *Engine) Publish(n *Node, value Value) {
 	e.publish(n, value)
 }
 
+// Fail terminates a live node and requests cancellation of its outstanding
+// host operation, if any.
+func (e *Engine) Fail(n *Node, d Diagnostic) {
+	if n == nil || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
+		d.Free(e.Alloc)
+		return
+	}
+	if n.Submitted {
+		e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
+		n.Submitted, n.HostRequestID = false, 0
+	}
+	if n.materializer != nil {
+		n.materializer.Free()
+		n.materializer = nil
+	}
+	if n.HasCompletion {
+		n.Completion.Value.Free(e.Alloc)
+		n.Completion.Diagnostic.Free(e.Alloc)
+		n.Completion, n.HasCompletion = Completion{}, false
+	}
+	n.complete(e, d)
+}
+
 func (e *Engine) ready(n *Node) bool {
 	if n.Interest == 0 || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled || n.State == NodeWaiting { return false }
 	for i := range n.Static {

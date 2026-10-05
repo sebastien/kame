@@ -304,7 +304,9 @@ func (p *Program) instanceByTarget(name string) int {
 }
 
 func (p *Program) Tick(wait int) {
+	p.tickServiceReadiness()
 	p.pump(wait)
+	p.tickServiceReadiness()
 	p.drainRequests()
 	p.Engine.DrainCompletions()
 	jobs := p.Options.Jobs

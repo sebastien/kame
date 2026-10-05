@@ -21,6 +21,13 @@ func (p *Program) pump(wait int) {
 			break
 		}
 		event := next.Event
+		if entry := p.serviceProbeForRequest(event.ID); entry != nil {
+			if event.Kind == host.ProcessTerminal {
+				p.completeServiceReadyProbe(entry, event)
+			}
+		event.Free(p.Alloc)
+			continue
+		}
 		entry := p.instanceForRequest(event.ID)
 		if entry == nil && (event.Kind == host.ProcessStarted || event.Kind == host.ProcessTerminal) {
 			for i := range p.Pending {
@@ -152,6 +159,9 @@ func (p *Program) drainRequests() {
 // process request, emitting the same lifecycle events the native host would so
 // --json output stays comparable.
 func (p *Program) ProcessStarted(request host.Request) {
+	if p.serviceProbeForRequest(request.ID) != nil {
+		return
+	}
 	entry := p.instanceForRequest(request.ID)
 	if entry == nil {
 		entry = p.streamInstance(request.NodeID)
@@ -164,14 +174,103 @@ func (p *Program) ProcessStarted(request host.Request) {
 }
 
 func (p *Program) serviceSpawned(entry *instance) {
-	if entry == nil || entry.Rule.Kind != rule.ServiceRule || entry.ServiceReady || len(entry.Service.ReadyArgv) != 0 {
+	if entry == nil || entry.Rule.Kind != rule.ServiceRule || entry.ServiceReady {
 		return
 	}
-	entry.ServiceReady = true
-	p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
+	if len(entry.Service.ReadyArgv) == 0 {
+		entry.ServiceReady = true
+		p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
+		return
+	}
+	if p.Host == nil {
+		return
+	}
+	entry.ServiceReadyDeadline = p.Host.Monotonic() + entry.Service.ReadyTimeout*1000000
+	p.startServiceReadyProbe(entry)
+}
+
+func (p *Program) serviceProbeForRequest(id int64) *instance {
+	for i := range p.Instances {
+		if p.Instances[i].ServiceProbeID == id {
+			return &p.Instances[i]
+		}
+	}
+	return nil
+}
+
+func (p *Program) startServiceReadyProbe(entry *instance) {
+	if p.Host == nil || entry.ServiceReady || entry.ServiceProbeID != 0 || entry.ServiceReadyDeadline == 0 {
+		return
+	}
+	now := p.Host.Monotonic()
+	remaining := entry.ServiceReadyDeadline - now
+	if remaining <= 0 {
+		p.failServiceReady(entry)
+		return
+	}
+	p.nextRequest++
+	id := p.nextRequest
+	argv := cloneStrings(p.Alloc, entry.Service.ReadyArgv)
+	request := host.ProcessRequest{ID: id, Argv: argv, Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: (remaining + 999999) / 1000000}
+	started := p.Host.Start(request)
+	freeStrings(p.Alloc, argv)
+	if !started {
+		entry.ServiceNextProbe = now + entry.Service.ReadyInterval*1000000
+		return
+	}
+	entry.ServiceProbeID = id
+}
+
+func (p *Program) completeServiceReadyProbe(entry *instance, event host.ProcessEvent) {
+	entry.ServiceProbeID = 0
+	if event.Outcome == host.ProcessExited && event.Status == 0 && event.Signal == 0 {
+		entry.ServiceReady, entry.ServiceReadyDeadline, entry.ServiceNextProbe = true, 0, 0
+		p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
+		return
+	}
+	now := p.Host.Monotonic()
+	if now >= entry.ServiceReadyDeadline {
+		p.failServiceReady(entry)
+		return
+	}
+	entry.ServiceNextProbe = now + entry.Service.ReadyInterval*1000000
+}
+
+func (p *Program) tickServiceReadiness() {
+	if p.Host == nil {
+		return
+	}
+	now := p.Host.Monotonic()
+	for i := range p.Instances {
+		entry := &p.Instances[i]
+		if entry.Rule.Kind != rule.ServiceRule || entry.ServiceReady || entry.ServiceReadyDeadline == 0 || entry.ServiceProbeID != 0 {
+			continue
+		}
+		if now >= entry.ServiceReadyDeadline {
+			p.failServiceReady(entry)
+		} else if now >= entry.ServiceNextProbe {
+			p.startServiceReadyProbe(entry)
+		}
+	}
+}
+
+func (p *Program) failServiceReady(entry *instance) {
+	if entry == nil || entry.ServiceReady || entry.Node.State == core.NodeFailed || entry.Node.State == core.NodeCancelled || entry.Node.State == core.NodeComplete {
+		return
+	}
+	if entry.ServiceProbeID != 0 && p.Host != nil {
+		p.Host.Cancel(entry.ServiceProbeID)
+		entry.ServiceProbeID = 0
+	}
+	entry.ServiceReadyDeadline, entry.ServiceNextProbe = 0, 0
+	p.Engine.Fail(entry.Node, failure(p.Alloc, "SERVICE_READY_TIMEOUT", "service did not become ready before timeout"))
+	p.drainCancellations()
 }
 
 func (p *Program) ProcessStream(request host.Request, stderr bool, data []byte) {
+	if p.serviceProbeForRequest(request.ID) != nil {
+		return
+	}
 	for i := range request.Payload.Record {
 		if request.Payload.Record[i].Key == "stream" && request.Payload.Record[i].Value.Bool {
 			pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Stream: true}
@@ -226,6 +325,18 @@ func (p *Program) ProcessRetainLimit(request host.Request) int {
 // match the native path. Captured output is bounded like the native host and
 // copied into the program allocator because the caller's bytes are transient.
 func (p *Program) ProcessTerminal(request host.Request, stdout []byte, stderr []byte, status int, signal int, outcome int, code string, message string) {
+	if entry := p.serviceProbeForRequest(request.ID); entry != nil {
+		event := host.ProcessEvent{Kind: host.ProcessTerminal, ID: request.ID, Status: status, Signal: signal, Outcome: host.ProcessOutcome(outcome)}
+		if outcome == 1 {
+			event.Outcome = host.ProcessTimedOut
+		} else if outcome == 2 {
+			event.Outcome = host.ProcessCancelled
+		} else if outcome == 3 {
+			event.Outcome = host.ProcessFailed
+		}
+		p.completeServiceReadyProbe(entry, event)
+		return
+	}
 	entry := p.instanceForRequest(request.ID)
 	if entry == nil {
 		entry = p.streamInstance(request.NodeID)
@@ -361,6 +472,16 @@ func (p *Program) drainCancellations() {
 		if cancellation.RequestID == 0 {
 			return
 		}
+		for i := range p.Instances {
+			entry := &p.Instances[i]
+			if entry.Node.ID == cancellation.NodeID && entry.ServiceProbeID != 0 {
+				if p.Host != nil { p.Host.Cancel(entry.ServiceProbeID) }
+				entry.ServiceProbeID = 0
+			}
+			if entry.Node.ID == cancellation.NodeID {
+				entry.ServiceReadyDeadline, entry.ServiceNextProbe = 0, 0
+			}
+		}
 		if p.Host != nil {
 			p.Host.Cancel(cancellation.RequestID)
 		}
@@ -382,6 +503,12 @@ func (p *Program) complete(event host.ProcessEvent) {
 		}
 	}
 	entry := p.instanceForRequest(event.ID)
+	if entry != nil && entry.Rule.Kind == rule.ServiceRule && !entry.ServiceReady && d.Code == "" {
+		d = failure(p.Alloc, "SERVICE_START_FAILED", "service exited before becoming ready")
+	}
+	if entry != nil && entry.Rule.Kind == rule.ServiceRule && !entry.ServiceReady {
+		entry.ServiceReadyDeadline, entry.ServiceNextProbe = 0, 0
+	}
 	if d.Code != "" {
 		p.attachProcessContext(&d, entry, event)
 	}

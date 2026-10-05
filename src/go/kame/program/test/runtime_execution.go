@@ -562,9 +562,9 @@ func TestYieldRejectsShellCommand(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
-func TestServiceIsExplicitlyUnsupported(t *testing.T) {
+func TestServiceHealthChecksAreExplicitlyUnsupported(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "service daemon : ; [ready: [argv: [\"./daemon\" \"ready\"]]]\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "service daemon : ; [health: [argv: [\"./daemon\" \"health\"]]]\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
@@ -615,6 +615,44 @@ func TestServiceRootCanWaitForReadinessAndRelease(t *testing.T) {
 	started.Handle.Free()
 	for attempt := 0; attempt < 20 && host.Active() != 0; attempt++ { compiled.Program.Tick(50) }
 	if host.Active() != 0 { t.Error("releasing service root did not stop its process") }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestServiceReadinessProbeGatesDependents(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-ready-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "test.kmk", "service daemon : ; [ready: [argv: [\"test\" \"-f\" \"ready-marker\"] interval-ms: 10 timeout-ms: 3000]]\n\tsleep 0.1; touch ready-marker; while :; do sleep 1; done\nconsumer : daemon\n\ttest -f ready-marker\n")
+	registry := eval.NewRegistry(a)
+	host := posix.New(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: dir})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
+	result := compiled.Program.Materialize("consumer")
+	if result.Diagnostic.Code != "" { t.Errorf("consumer ran before readiness: %s", result.Diagnostic.Code) }
+	result.Free(a)
+	for attempt := 0; attempt < 20 && host.Active() != 0; attempt++ { compiled.Program.Tick(50) }
+	if host.Active() != 0 { t.Error("service remained active after consumer release") }
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestServiceReadinessTimeoutCancelsService(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-service-timeout-")
+	if err != nil { t.Fatal("temporary directory failed"); return }
+	defer os.Remove(dir)
+	parsed := script.Parse(a, "test.kmk", "service daemon : ; [ready: [argv: [\"false\"] interval-ms: 10 timeout-ms: 100]]\n\twhile :; do sleep 1; done\nconsumer : daemon\n\ttrue\n")
+	registry := eval.NewRegistry(a)
+	host := posix.New(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: dir})
+	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
+	result := compiled.Program.Materialize("consumer")
+	if result.Diagnostic.Code != "SERVICE_READY_TIMEOUT" { t.Errorf("readiness timeout diagnostic = %s", result.Diagnostic.Code) }
+	result.Free(a)
+	for attempt := 0; attempt < 20 && host.Active() != 0; attempt++ { compiled.Program.Tick(50) }
+	if host.Active() != 0 { t.Error("readiness timeout left a service process active") }
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 

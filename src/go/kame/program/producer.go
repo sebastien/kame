@@ -30,6 +30,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		if entry.KashContext != nil { p.freeKashContext(entry.KashContext); entry.KashContext = nil }
 		entry.EnvironmentConflict = false
 		entry.ServiceReady = false
+		entry.ServiceReadyDeadline, entry.ServiceNextProbe, entry.ServiceProbeID = 0, 0, 0
 		p.freeNewerInputs(entry.NewerInputs)
  entry.NewerInputs = nil
 		p.freeFileContext(entry.FileContext)
@@ -50,8 +51,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.emitNode(entry.Node, entry.Plan.Target, TargetStarted, diagnostic.Span{}, nil)
 		entry.started, entry.startedGeneration, entry.terminalEmitted = true, c.Generation(), false
 	}
-	if entry.Rule.Kind == rule.ServiceRule && (len(entry.Service.ReadyArgv) != 0 || len(entry.Service.HealthArgv) != 0 || entry.Service.RestartAttempts != 0 || entry.Kash) {
-		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service probes, restarts, and kash services are not supported yet"))
+	if entry.Rule.Kind == rule.ServiceRule && (len(entry.Service.HealthArgv) != 0 || entry.Service.RestartAttempts != 0 || entry.Kash || (p.Forwarding && len(entry.Service.ReadyArgv) != 0)) {
+		p.failRule(c, state.Index, failure(p.Alloc, "FEATURE_UNSUP", "service health checks, restarts, and forwarded probes are not supported yet"))
 		return core.ProducerFailed
 	}
 	if entry.FileContext != nil {

@@ -299,6 +299,9 @@ type registeredRule struct{ Rule *rule.Rule }
 type instance struct {
 	Service ServiceConfig
 	ServiceReady bool
+	ServiceReadyDeadline int64
+	ServiceNextProbe int64
+	ServiceProbeID int64
 	Shell []string
 	Kash bool
 	ScopedShell bool
