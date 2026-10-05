@@ -163,6 +163,8 @@ func New(a mem.Allocator) *Host {
 
 // Start queues a failed terminal event when the host rejects the request. A
 // nil host cannot queue anything and returns false without an event.
+func (h *Host) SupportsExecutor(name string, version string) bool { _, _ = h, version; return name == "" || name == "local" }
+
 func (h *Host) Start(request host.ProcessRequest) bool {
 	if request.Directory == "" {
 		request.Directory = "."

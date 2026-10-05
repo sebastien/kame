@@ -43,6 +43,10 @@ func resolveRecipeDefinition(value any, key core.ResourceKey, c *eval.Context) e
 // Registration remains pure; the producer later observes reached definitions.
 func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	entry := &p.Instances[index]
+	mem.FreeString(p.Alloc, entry.Executor)
+	mem.FreeString(p.Alloc, entry.ExecutorVersion)
+	entry.Executor = cloneText(p.Alloc, "local")
+	entry.ExecutorVersion = cloneText(p.Alloc, "local-v1")
 	state := recipeSettingsResolver{Program: p}
 	c := &eval.Context{Program: p.Eval, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.PlanningPhase, ResolveDefinition: resolveRecipeDefinition, ResolverState: &state}
 	scope := p.ruleScope(c, entry.Captures, entry.Plan.Arguments)
@@ -77,6 +81,33 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	explicit := false
 	for i := range metadata.Record {
 		field := metadata.Record[i]
+		if field.Key == "executor" {
+			if field.Value.Kind != core.String || strings.IndexByte(field.Value.Text, 0) >= 0 {
+				return failure(p.Alloc, "EXPR_INVALID", "executor metadata requires a local or registered remote executor string")
+			}
+			if field.Value.Text == "local" {
+				continue
+			}
+			if !strings.HasPrefix(field.Value.Text, "remote:") || len(field.Value.Text) == len("remote:") {
+				return failure(p.Alloc, "EXPR_INVALID", "executor metadata must be local or remote:NAME")
+			}
+			name := field.Value.Text[len("remote:"):]
+			found := false
+			for j := range p.Options.RemoteExecutors {
+				executor := p.Options.RemoteExecutors[j]
+				if executor.Name == name && executor.Version != "" {
+					mem.FreeString(p.Alloc, entry.Executor)
+					mem.FreeString(p.Alloc, entry.ExecutorVersion)
+					entry.Executor = cloneText(p.Alloc, executor.Name)
+					entry.ExecutorVersion = cloneText(p.Alloc, executor.Version)
+					found = true
+					break
+				}
+			}
+			if !found {
+				return failure(p.Alloc, "FEATURE_UNSUP", "remote executor is not configured: "+name)
+			}
+		}
 		if field.Key == "shell" {
 			shell, explicit = field.Value, true
 		}

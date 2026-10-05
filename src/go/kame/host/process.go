@@ -36,6 +36,14 @@ type ProcessDiagnostic struct {
 // its final argument.
 type ProcessRequest struct {
 	ID          int64
+	Target      string
+	Generation  int64
+	Attempt     int64
+	IdempotencyKey [32]byte
+	// Executor is "local" or a registered remote executor name. An empty value
+	// is interpreted as local for existing embedders.
+	Executor        string
+	ExecutorVersion string
 	Shell       []string
 	// Argv executes directly instead of appending Script to Shell.
 	// A nonempty Argv also closes stdin for command substitution.
@@ -47,8 +55,17 @@ type ProcessRequest struct {
 	Script      []byte
 	Directory   string
 	Environment []string
+	Inputs      []ExecutionArtifact
+	Outputs     []string
 	TimeoutMS   int64
 	RetainBytes int
+}
+
+// ExecutorDescriptor binds a stable remote executor name to its implementation
+// version for selection and cache identity.
+type ExecutorDescriptor struct {
+	Name    string
+	Version string
 }
 
 type ProcessStage struct {
@@ -83,6 +100,22 @@ type ProcessEvent struct {
 	// It lets diagnostics report whether retained process output was truncated.
 	RetainBytes int
 	Stages []ProcessStageResult
+	// Outputs carries remote artifact bytes. Local process hosts leave it empty.
+	Outputs []ExecutionArtifact
+}
+
+// ExecutionArtifact is a copied file at the remote workspace boundary.
+type ExecutionArtifact struct {
+	Name string
+	Data []byte
+	Mode uint32
+	Digest [32]byte
+}
+
+func (a *ExecutionArtifact) Free(allocator mem.Allocator) {
+	mem.FreeString(allocator, a.Name)
+	slices.Free(allocator, a.Data)
+	*a = ExecutionArtifact{}
 }
 
 func (e *ProcessEvent) Free(a mem.Allocator) {
@@ -90,6 +123,10 @@ func (e *ProcessEvent) Free(a mem.Allocator) {
 	slices.Free(a, e.Stdout)
 	slices.Free(a, e.Stderr)
 	slices.Free(a, e.Stages)
+	for i := range e.Outputs {
+		e.Outputs[i].Free(a)
+	}
+	slices.Free(a, e.Outputs)
 	mem.FreeString(a, e.Diagnostic.Code)
 	mem.FreeString(a, e.Diagnostic.Message)
 	*e = ProcessEvent{}
@@ -104,6 +141,7 @@ type ProcessEventResult struct {
 // scripts. Submitted request storage remains caller-owned until a terminal
 // event is received.
 type ProcessHost interface {
+	SupportsExecutor(name string, version string) bool
 	Start(ProcessRequest) bool
 	Pump(waitMS int) bool
 	Next() ProcessEventResult

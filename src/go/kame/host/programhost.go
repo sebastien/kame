@@ -9,6 +9,7 @@ import (
 // not support embedded interfaces, so every method is declared directly. It
 // lives in a file that orders after the process types it refers to.
 type ProgramHost interface {
+	SupportsExecutor(name string, version string) bool
 	Start(request ProcessRequest) bool
 	Pump(waitMS int) bool
 	Next() ProcessEventResult

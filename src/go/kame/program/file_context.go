@@ -70,6 +70,8 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 	identity.state.Sum(entry.FileContextKey[:])
 	context.appendText("kame-file-context-v1")
 	if entry.Kash { context.appendText("kash-v1"); context.appendText(p.Parsed.Source.Text) } else { context.appendText("shell-v1") }
+	context.appendText(entry.Executor)
+	context.appendText(entry.ExecutorVersion)
 	for i := range entry.Shell { context.appendText(entry.Shell[i]) }
 	for i := range entry.Environment {
 		context.appendText(entry.Environment[i])

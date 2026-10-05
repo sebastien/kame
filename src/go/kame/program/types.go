@@ -219,6 +219,7 @@ type Options struct {
 	Environment   []string
 	Defines       []string
 	ToolOverrides []string
+	RemoteExecutors []host.ExecutorDescriptor
 	DryRun        bool
 	// Force bypasses file freshness checks and cached-task lookup for this run.
 	Force            bool
@@ -341,6 +342,11 @@ type instance struct {
 	Shell                  []string
 	Kash                   bool
 	ScopedShell            bool
+	Executor               string
+	ExecutorVersion        string
+	ExecutionInputs        []host.ExecutionArtifact
+	ExecutionOutputs       []string
+	ExecutionKey           [32]byte
 	MetadataEnvironment    []string
 	SettingsDependencies   []string
 	SettingsDiagnostic     diagnostic.Diagnostic

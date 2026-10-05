@@ -840,6 +840,9 @@ func (p *Program) complete(event host.ProcessEvent) {
 		}
 	}
 	entry := p.instanceForRequest(event.ID)
+	if entry != nil && d.Code == "" && entry.Executor != "" && entry.Executor != "local" {
+		d = p.publishRemoteOutputs(entry, event.Outputs)
+	}
 	if entry == nil {
 		entry = p.serviceForProcessRequest(event.ID)
 	}
@@ -914,7 +917,14 @@ func (p *Program) complete(event host.ProcessEvent) {
 		if p.Options.CacheRetainBytes > retain {
 			retain = p.Options.CacheRetainBytes
 		}
-		request := host.ProcessRequest{ID: retryID, Shell: entry.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+		processEnvironment := entry.Environment
+		processDirectory, targetIdentity := p.Options.Directory, entry.Plan.Target
+		if entry.Executor != "" && entry.Executor != "local" {
+			processEnvironment, processDirectory = entry.MetadataEnvironment, "."
+			if len(entry.ExecutionOutputs) != 0 { targetIdentity = entry.ExecutionOutputs[0] }
+		}
+		request := host.ProcessRequest{ID: retryID, Target: targetIdentity, Generation: node.Generation, Attempt: node.Attempt, Executor: entry.Executor, ExecutorVersion: entry.ExecutorVersion, Shell: entry.Shell, Script: []byte(entry.Script), Directory: processDirectory, Environment: processEnvironment, Inputs: entry.ExecutionInputs, Outputs: entry.ExecutionOutputs, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+		request.IdempotencyKey = entry.ExecutionKey
 		if p.Host != nil && p.Host.Start(request) {
 			entry.retryCount++
 			node.HostRequestID = retryID
@@ -932,6 +942,7 @@ func (p *Program) complete(event host.ProcessEvent) {
 	} else {
 		d.Free(p.Alloc)
 	}
+	if entry != nil && entry.Rule.Kind == rule.FileRule { p.releaseRemoteExecution(entry) }
 }
 
 // attachProcessContext preserves the runtime diagnosis and carries only bounded

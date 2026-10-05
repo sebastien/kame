@@ -3,6 +3,7 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/script"
@@ -56,6 +57,9 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
 	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
 	p.Options.ToolOverrides = cloneStrings(a, options.ToolOverrides)
+	for i := range options.RemoteExecutors {
+		p.Options.RemoteExecutors = slices.Append(a, p.Options.RemoteExecutors, host.ExecutorDescriptor{Name: cloneText(a, options.RemoteExecutors[i].Name), Version: cloneText(a, options.RemoteExecutors[i].Version)})
+	}
 	p.Options.ResolveTool = options.ResolveTool
 	p.Options.CaptureLimit = options.CaptureLimit
 	if p.Options.CaptureLimit <= 0 {
@@ -307,11 +311,21 @@ func (p *Program) Free() {
 	p.Eval.CancelProcesses()
 	freeStrings(p.Alloc, p.Configuration)
 	freeStrings(p.Alloc, p.Options.ToolOverrides)
+	for i := range p.Options.RemoteExecutors {
+		mem.FreeString(p.Alloc, p.Options.RemoteExecutors[i].Name)
+		mem.FreeString(p.Alloc, p.Options.RemoteExecutors[i].Version)
+	}
+	slices.Free(p.Alloc, p.Options.RemoteExecutors)
 	for i := range p.Instances {
 		p.Instances[i].Plan.Free(p.Alloc)
 		p.Instances[i].Service.Free(p.Alloc)
 		freeStrings(p.Alloc, p.Instances[i].Environment)
 		freeStrings(p.Alloc, p.Instances[i].Shell)
+		mem.FreeString(p.Alloc, p.Instances[i].Executor)
+		mem.FreeString(p.Alloc, p.Instances[i].ExecutorVersion)
+		for j := range p.Instances[i].ExecutionInputs { p.Instances[i].ExecutionInputs[j].Free(p.Alloc) }
+		slices.Free(p.Alloc, p.Instances[i].ExecutionInputs)
+		freeStrings(p.Alloc, p.Instances[i].ExecutionOutputs)
 		freeStrings(p.Alloc, p.Instances[i].MetadataEnvironment)
 		freeStrings(p.Alloc, p.Instances[i].SettingsDependencies)
 		p.Instances[i].SettingsDiagnostic.Free(p.Alloc)

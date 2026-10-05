@@ -220,6 +220,8 @@ func (h *MemoryHost) Monotonic() int64 {
 	return h.Time
 }
 
+func (h *MemoryHost) SupportsExecutor(name string, version string) bool { _, _ = h, version; return name == "" || name == "local" }
+
 func (h *MemoryHost) Start(request host.ProcessRequest) bool {
 	_, _ = h, request
 	return false

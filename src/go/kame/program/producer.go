@@ -432,7 +432,19 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	}
 	entry.cacheStartedAt = p.Host.Now()
 	entry.retryCount = 0
-	request := host.ProcessRequest{ID: p.nextRequest, Shell: entry.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: timeout, RetainBytes: retain}
+	d := p.prepareRemoteExecution(entry)
+	if d.Code != "" {
+		p.failRule(c, index, d)
+		return core.ProducerFailed
+	}
+	processEnvironment := entry.Environment
+	processDirectory, targetIdentity := p.Options.Directory, entry.Plan.Target
+	if entry.Executor != "" && entry.Executor != "local" {
+		processEnvironment, processDirectory = entry.MetadataEnvironment, "."
+		if len(entry.ExecutionOutputs) != 0 { targetIdentity = entry.ExecutionOutputs[0] }
+	}
+	request := host.ProcessRequest{ID: p.nextRequest, Target: targetIdentity, Generation: c.Generation(), Attempt: c.Attempt(), Executor: entry.Executor, ExecutorVersion: entry.ExecutorVersion, Shell: entry.Shell, Script: []byte(entry.Script), Directory: processDirectory, Environment: processEnvironment, Inputs: entry.ExecutionInputs, Outputs: entry.ExecutionOutputs, TimeoutMS: timeout, RetainBytes: retain}
+	request.IdempotencyKey = entry.ExecutionKey
 	if entry.Rule.Kind == rule.ServiceRule {
 		entry.ServiceProcessID = request.ID
 		p.setServiceState(entry, "starting")
@@ -453,6 +465,7 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 		return core.ProducerSubmitted
 	}
 	if p.Host == nil || !p.Host.Start(request) {
+		p.releaseRemoteExecution(entry)
 		if entry.Rule.Kind == rule.ServiceRule && p.prepareServiceRestart(entry) {
 			mem.FreeString(p.Alloc, entry.Script)
 			entry.Script = ""

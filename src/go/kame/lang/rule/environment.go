@@ -16,7 +16,7 @@ func (p *parser) ruleMetadata(r *Rule, start int, end int) {
 	if parsed.End != end || r.Metadata == nil || r.Metadata.Kind != expr.Record { p.error(start, end, "rule metadata must be a record"); return }
 	for i := range r.Metadata.Fields {
 		field := r.Metadata.Fields[i]
-		if field.Key != "shell" && field.Key != "env" && !(r.Kind == ServiceRule && serviceMetadataField(field.Key)) { p.error(field.Span.Start, field.Span.End, "unknown rule metadata field") }
+		if field.Key != "shell" && field.Key != "env" && !(r.Kind == FileRule && field.Key == "executor") && !(r.Kind == ServiceRule && serviceMetadataField(field.Key)) { p.error(field.Span.Start, field.Span.End, "unknown rule metadata field") }
 		for j := 0; j < i; j++ { if r.Metadata.Fields[j].Key == field.Key { p.error(field.Span.Start, field.Span.End, "duplicate rule metadata field") } }
 	}
 }
