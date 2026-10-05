@@ -49,6 +49,19 @@ type ResourceURIResult struct {
 	Offset int
 }
 
+// IsResourceURIName reports whether a stored resource identity uses a supported
+// URI scheme prefix. Resource values are validated before they are created.
+func IsResourceURIName(name string) bool {
+	return hasResourceURIPrefix(name, "file://") || hasResourceURIPrefix(name, "mem://")
+}
+
+func hasResourceURIPrefix(text string, prefix string) bool {
+	if len(text) < len(prefix) {
+		return false
+	}
+	return text[:len(prefix)] == prefix
+}
+
 // ParseResourceURI accepts the file and mem protocols and normalizes URI path
 // segments before identity is used by the runtime.
 func ParseResourceURI(a mem.Allocator, text string) ResourceURIResult {

@@ -71,7 +71,10 @@ func (h *MemoryHost) isDir(name string) bool {
 			return true
 		}
 	}
-	prefix := name + "/"
+	prefix := name
+	if prefix[len(prefix)-1] != '/' {
+		prefix += "/"
+	}
 	for i := range h.Files {
 		if strings.HasPrefix(h.Files[i].Path, prefix) {
 			return true
@@ -114,7 +117,7 @@ func (h *MemoryHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, err
 	prefix := name
 	if prefix == "." || prefix == "" {
 		prefix = ""
-	} else {
+	} else if prefix[len(prefix)-1] != '/' {
 		prefix = prefix + "/"
 	}
 	var entries []host.DirEntry

@@ -122,25 +122,30 @@ func dependency(c *eval.Context, kind core.ResourceKind, name string) bool {
 	return current
 }
 func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
-	if value.Kind != core.String {
+	name := ""
+	if value.Kind == core.Resource && value.Resource.Kind == core.ResourceFile {
+		name = value.Resource.Name
+	} else if value.Kind == core.String {
+		name = value.Text
+	} else {
 		// value is a copy of the caller's element: releasing the single
 		// retain here is balanced, the caller's shallow free never touches it.
 		if value.Kind == core.Callable {
 			c.FreeCallable(&value)
 		}
-		return c.InvalidArgument(0, "string", value.Kind)
+		return c.InvalidArgument(0, "string or file resource", value.Kind)
 	}
-	if !c.Allows(eval.Read, value.Text) {
+	if !c.Allows(eval.Read, name) {
 		return failure("CAP_DENIED", "read access denied; grant the required path with --allow-read=ROOT")
 	}
 	kind := core.ResourceFile
 	if op == host.OpWildcard {
 		kind = core.ResourceGlob
 	}
-	if !c.DirectHostRequests && !dependency(c, kind, value.Text) {
+	if !c.DirectHostRequests && !dependency(c, kind, name) {
 		return eval.Result{Waiting: true}
 	}
-	return request(c, host.RequestReadFile, host.FilePayload(c.Run, op, value.Text))
+	return request(c, host.RequestReadFile, host.FilePayload(c.Run, op, name))
 }
 func opRead(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
@@ -205,21 +210,26 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opWrite(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[0].Kind != core.String {
-		return invalidArgument(c, v, 0, "string")
+	path := ""
+	if v[0].Kind == core.Resource && v[0].Resource.Kind == core.ResourceFile {
+		path = v[0].Resource.Name
+	} else if v[0].Kind == core.String {
+		path = v[0].Text
+	} else {
+		return invalidArgument(c, v, 0, "string or file resource")
 	}
-	if !c.Allows(eval.Write, v[0].Text) {
+	if !c.Allows(eval.Write, path) {
 		return failure("CAP_DENIED", "write access denied")
 	}
 	// Bytes write raw; every other coercible value renders as with str.
 	if v[1].Kind == core.Bytes {
-		return writeBytes(c, v[0].Text, v[1].Bytes)
+		return writeBytes(c, path, v[1].Bytes)
 	}
 	text, ok := stringValue(c.Run, v[1], false)
 	if !ok {
 		return invalidArgument(c, v, 1, "bytes or text-coercible value")
 	}
-	result := writeBytes(c, v[0].Text, []byte(text))
+	result := writeBytes(c, path, []byte(text))
 	mem.FreeString(c.Run, text)
 	return result
 }
@@ -278,7 +288,9 @@ func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 	if c.Program != nil && c.Program.DryRun {
 		return eval.Result{Value: core.NewString(c.Run, "")}
 	}
-	if c.HasEnvironment { return request(c, host.RequestProcess, host.ScopedProcessPayload(c.Run, v[0].Text, c.Environment)) }
+	if c.HasEnvironment {
+		return request(c, host.RequestProcess, host.ScopedProcessPayload(c.Run, v[0].Text, c.Environment))
+	}
 	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text))
 }
 

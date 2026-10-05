@@ -14,40 +14,40 @@ import (
 )
 
 type Context struct {
-	Program            *Program
-	Engine             *core.EngineContext
-	Scope              *Scope
-	Run                mem.Allocator
-	Requests           *host.Queue
-	Cwd                string
+	Program     *Program
+	Engine      *core.EngineContext
+	Scope       *Scope
+	Run         mem.Allocator
+	Requests    *host.Queue
+	Cwd         string
 	Environment []string
 	// HasEnvironment binds a complete snapshot, including an empty environment.
 	HasEnvironment bool
 	// DefinitionNamespace identifies an immutable runtime environment and phase.
-	DefinitionNamespace [32]byte
+	DefinitionNamespace    [32]byte
 	HasDefinitionNamespace bool
-	ScriptGroup int64
-	RecipeNode int64
-	TimeoutMS int64
-	Frames             []diagnostic.Frame
-	Source             string
-	Grants             []Grant
-	Inputs             []core.Value
-	Outputs            []core.Value
-	Args               []core.Value
-	HasArgs            bool
-	RuleFrames         []RuleFrame
-	Effects            []Effect
-	WritePaths         []string
-	Span               source.Span
-	OperationName      string
+	ScriptGroup            int64
+	RecipeNode             int64
+	TimeoutMS              int64
+	Frames                 []diagnostic.Frame
+	Source                 string
+	Grants                 []Grant
+	Inputs                 []core.Value
+	Outputs                []core.Value
+	Args                   []core.Value
+	HasArgs                bool
+	RuleFrames             []RuleFrame
+	Effects                []Effect
+	WritePaths             []string
+	Span                   source.Span
+	OperationName          string
 	// CallPath distinguishes repeated calls of the same authored AST on a node.
-	CallPath           string
-	operationArguments []*expr.Expr
-	Phase              Phase
-	ResolveDefinition  DefinitionResolver
-	ResolverState      any
-	DependencyObserver func(any, core.ResourceKey)
+	CallPath                  string
+	operationArguments        []*expr.Expr
+	Phase                     Phase
+	ResolveDefinition         DefinitionResolver
+	ResolverState             any
+	DependencyObserver        func(any, core.ResourceKey)
 	DependencyContextObserver func(any, core.ResourceKey, *Context)
 	// DirectHostRequests bypasses build-graph dependency discovery for host
 	// operations. Embedders with an explicit request/completion loop use it to
@@ -66,8 +66,8 @@ type Context struct {
 	operationStart     int
 	operationEnd       int
 	completionConsumed bool
-	RecoverFailures bool
-	ReserveEnv bool
+	RecoverFailures    bool
+	ReserveEnv         bool
 }
 
 type operationState struct {
@@ -178,7 +178,9 @@ func (c *Context) Emit(kind EffectKind, data []byte) {
 		c.phaseInvalid = true
 		return
 	}
-	if c.Program != nil && c.Program.DryRun && (kind == EffectOut || kind == EffectErr) { return }
+	if c.Program != nil && c.Program.DryRun && (kind == EffectOut || kind == EffectErr) {
+		return
+	}
 	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: kind, Data: slices.Clone(c.Run, data), Span: c.Span})
 }
 func (c *Context) EmitWrite(name string, data []byte) {
@@ -196,10 +198,10 @@ func (c *Context) MarkPhaseInvalid()  { c.phaseInvalid = true }
 // RuleFrame supplies the inputs and outputs for one enclosing rule evaluation.
 // Selectors use the most recently pushed frame.
 type RuleFrame struct {
- FileRule bool
- NewerInputs []core.Value
-	Inputs  []core.Value
-	Outputs []core.Value
+	FileRule    bool
+	NewerInputs []core.Value
+	Inputs      []core.Value
+	Outputs     []core.Value
 }
 
 func (c *Context) allowed(capability Capability) bool {
@@ -218,7 +220,7 @@ func (c *Context) Allows(capability Capability, name string) bool {
 	if a == nil {
 		a = mem.System
 	}
-	canonicalName := canonicalPath(a, c.Cwd, name)
+	canonicalName := canonicalGrantName(a, c.Cwd, name)
 	defer mem.FreeString(a, canonicalName)
 	for i := range c.Grants {
 		grant := c.Grants[i]
@@ -229,8 +231,8 @@ func (c *Context) Allows(capability Capability, name string) bool {
 			return true
 		}
 		for j := range grant.Names {
-			root := canonicalPath(a, c.Cwd, grant.Names[j])
-			allowed := canonicalName == root || (len(canonicalName) > len(root) && len(root) != 0 && canonicalName[:len(root)] == root && canonicalName[len(root)] == '/')
+			root := canonicalGrantName(a, c.Cwd, grant.Names[j])
+			allowed := canonicalName == root || (len(canonicalName) > len(root) && len(root) != 0 && canonicalName[:len(root)] == root && (root[len(root)-1] == '/' || canonicalName[len(root)] == '/'))
 			mem.FreeString(a, root)
 			if allowed {
 				return true
@@ -240,7 +242,37 @@ func (c *Context) Allows(capability Capability, name string) bool {
 	return false
 }
 
+// File URI grants and native path grants name the same filesystem objects.
+// Resource identity remains a URI in dependency keys; this conversion is only
+// for access-policy comparisons.
+func canonicalGrantName(a mem.Allocator, cwd string, name string) string {
+	if core.IsResourceURIName(name) {
+		parsed := core.ParseResourceURI(a, name)
+		if parsed.Error == "" {
+			if parsed.URI.Scheme == "file" {
+				canonical := path.Clean(a, parsed.URI.Path)
+				parsed.URI.Free()
+				return canonical
+			}
+			canonical := parsed.URI.Canonical(a)
+			parsed.URI.Free()
+			return canonical
+		}
+		parsed.URI.Free()
+	}
+	return canonicalPath(a, cwd, name)
+}
+
 func canonicalPath(a mem.Allocator, cwd string, name string) string {
+	if core.IsResourceURIName(name) {
+		parsed := core.ParseResourceURI(a, name)
+		if parsed.Error == "" {
+			canonical := parsed.URI.Canonical(a)
+			parsed.URI.Free()
+			return canonical
+		}
+		return owned(a, name)
+	}
 	if path.IsAbs(name) {
 		return path.Clean(a, name)
 	}
@@ -251,29 +283,37 @@ func canonicalPath(a mem.Allocator, cwd string, name string) string {
 }
 
 func (c *Context) Dependency(key core.ResourceKey) bool {
-    if c.Engine == nil { return false }
-    resourcePath := ""
-    if key.Kind == core.ResourceFile {
-        resourcePath = canonicalPath(c.Run, c.Cwd, key.Name)
-        key.Name = resourcePath
-    }
-    if c.DependencyContextObserver != nil { c.DependencyContextObserver(c.ResolverState, key, c) } else if c.DependencyObserver != nil { c.DependencyObserver(c.ResolverState, key) }
-    current := c.Engine.Dependency(key)
-    mem.FreeString(c.Run, resourcePath)
-    return current
+	if c.Engine == nil {
+		return false
+	}
+	resourcePath := ""
+	if key.Kind == core.ResourceFile {
+		resourcePath = canonicalPath(c.Run, c.Cwd, key.Name)
+		key.Name = resourcePath
+	}
+	if c.DependencyContextObserver != nil {
+		c.DependencyContextObserver(c.ResolverState, key, c)
+	} else if c.DependencyObserver != nil {
+		c.DependencyObserver(c.ResolverState, key)
+	}
+	current := c.Engine.Dependency(key)
+	mem.FreeString(c.Run, resourcePath)
+	return current
 }
 
 // Value returns a borrowed current dependency value after Dependency accepted it.
 func (c *Context) Value(key core.ResourceKey) core.CurrentValue {
-    if c.Engine == nil { return core.CurrentValue{} }
-    resourcePath := ""
-    if key.Kind == core.ResourceFile {
-        resourcePath = canonicalPath(c.Run, c.Cwd, key.Name)
-        key.Name = resourcePath
-    }
-    current := c.Engine.Value(key)
-    mem.FreeString(c.Run, resourcePath)
-    return current
+	if c.Engine == nil {
+		return core.CurrentValue{}
+	}
+	resourcePath := ""
+	if key.Kind == core.ResourceFile {
+		resourcePath = canonicalPath(c.Run, c.Cwd, key.Name)
+		key.Name = resourcePath
+	}
+	current := c.Engine.Value(key)
+	mem.FreeString(c.Run, resourcePath)
+	return current
 }
 
 // Submit queues an owned request and records its generated ID on the active
@@ -311,10 +351,14 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 	case host.RequestProcess:
 		capability = Run
 		input, output := host.PayloadText(payload, host.FieldInput), host.PayloadText(payload, host.FieldOutput)
-		if (input != "" && !c.Allows(Read, input)) || (output != "" && !c.Allows(Write, output)) { return false }
+		if (input != "" && !c.Allows(Read, input)) || (output != "" && !c.Allows(Write, output)) {
+			return false
+		}
 		stages := host.PayloadStages(payload)
 		for i := range stages {
-			if stages[i].Kind != core.List || len(stages[i].List) == 0 || stages[i].List[0].Kind != core.String || !authorizeExecutable(c, stages[i].List[0].Text) { return false }
+			if stages[i].Kind != core.List || len(stages[i].List) == 0 || stages[i].List[0].Kind != core.String || !authorizeExecutable(c, stages[i].List[0].Text) {
+				return false
+			}
 		}
 	case host.RequestEnvironment:
 		capability = Env
@@ -347,8 +391,8 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 
 // Resume binds a retained context to a new engine call and its completion.
 func (c *Context) Resume(engine *core.EngineContext) {
- c.Engine, c.Requests = engine, c.Program.Requests
- c.completionConsumed, c.denied, c.phaseInvalid = false, false, false
+	c.Engine, c.Requests = engine, c.Program.Requests
+	c.completionConsumed, c.denied, c.phaseInvalid = false, false, false
 }
 
 // Completion returns the host completion that resumed this evaluation, if any.

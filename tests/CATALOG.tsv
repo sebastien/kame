@@ -134,3 +134,4 @@ tests/T017-19-kash-recipes.sh	017	kash	Selected shell policies, structured recip
 tests/T009-14-cli-watch.sh	009	cli	Native shared watch roots, scoped environments and grants across invalidation/source reload, preserved timestamps, malformed-source recovery, optional-include and failed-root repair, obsolete-input subscription cleanup, bounded unread watch output, idle settled roots, active recipe-child cleanup, changed graph, active-input invalidation and denied-effect protection
 tests/T009-15-cli-target-arguments.sh	009	cli	Native target arguments in plan JSON, defaults, dependency scope, identity, diagnostics, dry-run and watch invalidation
 tests/T015-03-dist-cosmocc-integrity.sh	015	dist	Cosmocc provisioning pins a versioned archive, verifies its SHA-256 before extraction, and rejects mismatches
+tests/T031-01-runtime-resource-protocols.sh	031	runtime	File and memory resource URI grants, host mappings and namespace isolation on native and WASM CLI

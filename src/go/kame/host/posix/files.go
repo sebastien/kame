@@ -1,6 +1,7 @@
 package posix
 
 import (
+	"kame/core"
 	"kame/host"
 	"solod.dev/so/c"
 	"solod.dev/so/mem"
@@ -9,6 +10,35 @@ import (
 	"solod.dev/so/strings"
 	"solod.dev/so/time"
 )
+
+type hostPathResult struct {
+	Path  string
+	Owned bool
+}
+
+func isMemoryURI(name string) bool {
+	return len(name) >= 6 && name[:6] == "mem://"
+}
+
+func (h *Host) hostPath(name string) hostPathResult {
+	if len(name) < 7 || name[:7] != "file://" {
+		return hostPathResult{Path: name}
+	}
+	parsed := core.ParseResourceURI(h.Alloc, name)
+	if parsed.Error != "" || parsed.URI.Scheme != "file" {
+		parsed.URI.Free()
+		return hostPathResult{Path: name}
+	}
+	path := cloneText(h.Alloc, parsed.URI.Path)
+	parsed.URI.Free()
+	return hostPathResult{Path: path, Owned: true}
+}
+
+func (h *Host) freeHostPath(path hostPathResult) {
+	if path.Owned {
+		mem.FreeString(h.Alloc, path.Path)
+	}
+}
 
 func cloneText(a mem.Allocator, text string) string {
 	if text == "" {
@@ -30,40 +60,56 @@ func portableFileInfo(info os.FileInfo) host.FileInfo {
 }
 
 func (h *Host) Stat(name string) host.StatResult {
-	_ = h
-	info, err := os.Stat(name)
+	if isMemoryURI(name) {
+		return h.Memory.Stat(name)
+	}
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	info, err := os.Stat(path.Path)
 	if err != nil {
 		return host.StatResult{Failed: err != os.ErrNotExist}
 	}
 	result := portableFileInfo(info)
 	// Solod 0.4.0 drops stat nanoseconds. Preserve them for same-second builds.
-	if stamp := km_file_modtime(name, false); stamp != 0 {
+	if stamp := km_file_modtime(path.Path, false); stamp != 0 {
 		result.ModTime = stamp
 	}
 	return host.StatResult{Info: result, Exists: true}
 }
 
 func (h *Host) Lstat(name string) host.StatResult {
-	_ = h
-	info, err := os.Lstat(name)
+	if isMemoryURI(name) {
+		return h.Memory.Stat(name)
+	}
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	info, err := os.Lstat(path.Path)
 	if err != nil {
 		return host.StatResult{Failed: err != os.ErrNotExist}
 	}
 	result := portableFileInfo(info)
-	if stamp := km_file_modtime(name, true); stamp != 0 {
+	if stamp := km_file_modtime(path.Path, true); stamp != 0 {
 		result.ModTime = stamp
 	}
 	return host.StatResult{Info: result, Exists: true}
 }
 
 func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {
-	_ = h
-	return os.ReadFile(a, name)
+	if isMemoryURI(name) {
+		return h.Memory.ReadFile(a, name)
+	}
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	return os.ReadFile(a, path.Path)
 }
 
 func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
-	_ = h
-	entries, err := os.ReadDir(a, name)
+	if isMemoryURI(name) {
+		return h.Memory.ReadDir(a, name)
+	}
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	entries, err := os.ReadDir(a, path.Path)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +127,12 @@ func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
 // cannot share a staging file or follow a pre-created staging symlink. Durable
 // cache writes also sync before rename. Failures remove the temporary.
 func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error {
-	_ = h
+	if isMemoryURI(name) {
+		return h.Memory.WriteFileAtomic(name, data, perm, durable)
+	}
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	name = path.Path
 	separator := strings.LastIndexByte(name, '/')
 	directory := "."
 	if separator >= 0 {
@@ -118,13 +169,21 @@ func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bo
 }
 
 func (h *Host) Mkdir(name string, perm uint32) error {
-	_ = h
-	return os.Mkdir(name, os.FileMode(perm))
+	if isMemoryURI(name) {
+		return h.Memory.Mkdir(name, perm)
+	}
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	return os.Mkdir(path.Path, os.FileMode(perm))
 }
 
 func (h *Host) Remove(name string) error {
-	_ = h
-	return os.Remove(name)
+	if isMemoryURI(name) {
+		return h.Memory.Remove(name)
+	}
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	return os.Remove(path.Path)
 }
 
 func (h *Host) LockCache(name string, stripe int) bool {

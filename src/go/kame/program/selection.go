@@ -1,6 +1,7 @@
 package program
 
 import (
+	"kame/core"
 	"kame/diagnostic"
 	"kame/lang/rule"
 	"kame/lang/template"
@@ -14,6 +15,9 @@ func (p *Program) canonicalTarget(target string, file bool) string {
 	if !file {
 		return cloneText(p.Alloc, target)
 	}
+	if core.IsResourceURIName(target) {
+		return cloneText(p.Alloc, target)
+	}
 	if path.IsAbs(target) {
 		return path.Clean(p.Alloc, target)
 	}
@@ -25,18 +29,22 @@ func (p *Program) selectRule(target string) selection {
 	assignments := ""
 	if split := firstSpace(target); split >= 0 {
 		name := target[:split]
-	for i := range p.Rules {
-		candidate := p.Rules[i].Rule
-		if candidate == nil || len(candidate.Arguments) == 0 || candidate.Kind == rule.FileRule { continue }
-		for j := range candidate.Outputs {
-			if !candidate.Outputs[j].Template && candidate.Outputs[j].Text == name {
-				assignments = target[skipSpaces(target, split):]
-				target = name
+		for i := range p.Rules {
+			candidate := p.Rules[i].Rule
+			if candidate == nil || len(candidate.Arguments) == 0 || candidate.Kind == rule.FileRule {
+				continue
+			}
+			for j := range candidate.Outputs {
+				if !candidate.Outputs[j].Template && candidate.Outputs[j].Text == name {
+					assignments = target[skipSpaces(target, split):]
+					target = name
+					break
+				}
+			}
+			if target == name {
 				break
 			}
 		}
-		if target == name { break }
-	}
 	}
 	selectedTarget := target
 	file := isPath(target) || hasSlash(target)
@@ -89,25 +97,33 @@ func (p *Program) selectRule(target string) selection {
 				matchTarget = "./" + matchTarget
 			}
 			relativeOwned := false
-            if file && path.IsAbs(matchTarget) && !path.IsAbs(output.Text) {
-                matchTarget = p.relativePath(matchTarget)
-                relativeOwned = true
-            }
-            match := output.TargetForm.MatchTarget(p.Alloc, matchTarget)
-            if match == nil {
-                if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
+			if file && path.IsAbs(matchTarget) && !path.IsAbs(output.Text) {
+				matchTarget = p.relativePath(matchTarget)
+				relativeOwned = true
+			}
+			match := output.TargetForm.MatchTarget(p.Alloc, matchTarget)
+			if match == nil {
+				if relativeOwned {
+					mem.FreeString(p.Alloc, matchTarget)
+				}
 				continue
 			}
 			if match.Limited {
 				match.Free(p.Alloc)
-				if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
-				if file { mem.FreeString(p.Alloc, target) }
+				if relativeOwned {
+					mem.FreeString(p.Alloc, matchTarget)
+				}
+				if file {
+					mem.FreeString(p.Alloc, target)
+				}
 				return selection{Diagnostic: diagnostic.Diagnostic{Source: cloneText(p.Alloc, p.Parsed.Source.Name), Code: cloneText(p.Alloc, "PAT_LIMIT"), Severity: diagnostic.Error, Message: cloneText(p.Alloc, "regular-expression match exceeded its step budget"), Span: diagnostic.Span{Start: output.Span.Start, End: output.Span.End}, Target: cloneText(p.Alloc, selectedTarget), Owned: true}}
 			}
 			if matched != nil {
 				if matched != r || !sameCaptures(captures, match.Captures) {
 					match.Free(p.Alloc)
-                    if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
+					if relativeOwned {
+						mem.FreeString(p.Alloc, matchTarget)
+					}
 					freeCaptures(p.Alloc, captures)
 					if file {
 						mem.FreeString(p.Alloc, target)
@@ -115,12 +131,16 @@ func (p *Program) selectRule(target string) selection {
 					return selection{Ambiguous: true}
 				}
 				match.Free(p.Alloc)
-                if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
+				if relativeOwned {
+					mem.FreeString(p.Alloc, matchTarget)
+				}
 				continue
 			}
 			matched, captures = r, cloneCaptures(p.Alloc, match.Captures)
 			match.Free(p.Alloc)
-            if relativeOwned { mem.FreeString(p.Alloc, matchTarget) }
+			if relativeOwned {
+				mem.FreeString(p.Alloc, matchTarget)
+			}
 		}
 	}
 	if file {
@@ -131,39 +151,60 @@ func (p *Program) selectRule(target string) selection {
 
 func firstSpace(text string) int {
 	for i := range text {
-		if text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n' { return i }
+		if text[i] == ' ' || text[i] == '\t' || text[i] == '\r' || text[i] == '\n' {
+			return i
+		}
 	}
 	return -1
 }
 
 func skipSpaces(text string, at int) int {
-	for at < len(text) && (text[at] == ' ' || text[at] == '\t' || text[at] == '\r' || text[at] == '\n') { at++ }
+	for at < len(text) && (text[at] == ' ' || text[at] == '\t' || text[at] == '\r' || text[at] == '\n') {
+		at++
+	}
 	return at
 }
 
 type argumentBindingResult struct {
-	Values []ArgumentValue
+	Values     []ArgumentValue
 	Diagnostic diagnostic.Diagnostic
 }
 
 func (p *Program) bindTargetArguments(r *rule.Rule, input string) argumentBindingResult {
 	provided := make([]bool, len(r.Arguments))
 	values := make([]string, len(r.Arguments))
-	for i := range r.Arguments { if r.Arguments[i].Optional { values[i] = r.Arguments[i].Default } }
+	for i := range r.Arguments {
+		if r.Arguments[i].Optional {
+			values[i] = r.Arguments[i].Default
+		}
+	}
 	for at := 0; at < len(input); {
 		at = skipSpaces(input, at)
-		if at == len(input) { break }
+		if at == len(input) {
+			break
+		}
 		end := at
-		for end < len(input) && input[end] != ' ' && input[end] != '\t' && input[end] != '\r' && input[end] != '\n' { end++ }
+		for end < len(input) && input[end] != ' ' && input[end] != '\t' && input[end] != '\r' && input[end] != '\n' {
+			end++
+		}
 		item := input[at:end]
 		equal := strings.IndexByte(item, '=')
 		if equal <= 0 || strings.IndexByte(item, 0) >= 0 {
 			return argumentBindingResult{Diagnostic: failure(p.Alloc, "TGT_ARGUMENT", "malformed target argument assignment: "+item)}
 		}
 		index := -1
-		for i := range r.Arguments { if r.Arguments[i].Name == item[:equal] { index = i; break } }
-		if index < 0 { return argumentBindingResult{Diagnostic: failure(p.Alloc, "TGT_ARGUMENT", "unknown target argument: "+item[:equal])} }
-		if provided[index] { return argumentBindingResult{Diagnostic: failure(p.Alloc, "TGT_ARGUMENT", "duplicate target argument: "+item[:equal])} }
+		for i := range r.Arguments {
+			if r.Arguments[i].Name == item[:equal] {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			return argumentBindingResult{Diagnostic: failure(p.Alloc, "TGT_ARGUMENT", "unknown target argument: "+item[:equal])}
+		}
+		if provided[index] {
+			return argumentBindingResult{Diagnostic: failure(p.Alloc, "TGT_ARGUMENT", "duplicate target argument: "+item[:equal])}
+		}
 		provided[index], values[index] = true, item[equal+1:]
 		at = end
 	}
@@ -179,12 +220,17 @@ func (p *Program) bindTargetArguments(r *rule.Rule, input string) argumentBindin
 }
 
 func freeArguments(a mem.Allocator, arguments []ArgumentValue) {
-	for i := range arguments { mem.FreeString(a, arguments[i].Name); mem.FreeString(a, arguments[i].Value) }
+	for i := range arguments {
+		mem.FreeString(a, arguments[i].Name)
+		mem.FreeString(a, arguments[i].Value)
+	}
 	slices.Free(a, arguments)
 }
 
 func targetArgumentKey(a mem.Allocator, target string, arguments []ArgumentValue) string {
-	if len(arguments) == 0 { return cloneText(a, target) }
+	if len(arguments) == 0 {
+		return cloneText(a, target)
+	}
 	b := strings.NewBuilder(a)
 	defer b.Free()
 	b.WriteString(target)
@@ -204,7 +250,7 @@ func (p *Program) JoinTargetOperands(targets []string) []string {
 	var joined []string
 	for i := 0; i < len(targets); i++ {
 		name := targets[i]
-	if !p.hasNamedArgumentTarget(name) || i+1 == len(targets) || !isTargetAssignment(targets[i+1]) {
+		if !p.hasNamedArgumentTarget(name) || i+1 == len(targets) || !isTargetAssignment(targets[i+1]) {
 			joined = slices.Append(p.Alloc, joined, cloneText(p.Alloc, name))
 			continue
 		}
@@ -223,7 +269,9 @@ func (p *Program) JoinTargetOperands(targets []string) []string {
 
 func isTargetAssignment(text string) bool {
 	equal := strings.IndexByte(text, '=')
-	if equal <= 0 { return false }
+	if equal <= 0 {
+		return false
+	}
 	name := text[:equal]
 	return !isPath(name) && !hasSlash(name)
 }
@@ -231,8 +279,14 @@ func isTargetAssignment(text string) bool {
 func (p *Program) hasNamedArgumentTarget(name string) bool {
 	for i := range p.Rules {
 		r := p.Rules[i].Rule
-		if r == nil || len(r.Arguments) == 0 || r.Kind == rule.FileRule { continue }
-		for j := range r.Outputs { if !r.Outputs[j].Template && r.Outputs[j].Text == name { return true } }
+		if r == nil || len(r.Arguments) == 0 || r.Kind == rule.FileRule {
+			continue
+		}
+		for j := range r.Outputs {
+			if !r.Outputs[j].Template && r.Outputs[j].Text == name {
+				return true
+			}
+		}
 	}
 	return false
 }

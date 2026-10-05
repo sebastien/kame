@@ -1155,6 +1155,21 @@ func TestCapabilityRootsUseWholePathSegments(t *testing.T) {
 	if context.Allows(eval.Read, "../../secret.txt") {
 		t.Error("traversal escaped capability root")
 	}
+	resources := eval.Context{Run: t.Allocator(), Cwd: "/workspace/project", Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"mem://cache/"}}}}
+	if !resources.Allows(eval.Write, "mem://cache/output.bin") {
+		t.Error("trailing slash in resource namespace grant denied a child resource")
+	}
+	if resources.Allows(eval.Write, "mem://cache-other/output.bin") {
+		t.Error("resource namespace grant allowed a sibling namespace")
+	}
+	filePaths := eval.Context{Run: t.Allocator(), Cwd: "/workspace/project", Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"../src"}}}}
+	if !filePaths.Allows(eval.Read, "file:///workspace/src/main.km") {
+		t.Error("native filesystem grant denied an equivalent file URI")
+	}
+	fileURIs := eval.Context{Run: t.Allocator(), Cwd: "/workspace/project", Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"file:///workspace/src/"}}}}
+	if !fileURIs.Allows(eval.Read, "/workspace/src/main.km") {
+		t.Error("file URI grant denied an equivalent filesystem path")
+	}
 }
 
 func TestRestrictedHostRequestIsDeniedBeforeQueueing(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
+	"solod.dev/so/strings"
 )
 
 func (p *Program) fileCompletion(request host.Request, op string, name string) core.Completion {
@@ -93,6 +94,9 @@ func (p *Program) wildcard(pattern string) core.Value {
 }
 
 func (p *Program) relativePath(name string) string {
+	if core.IsResourceURIName(name) {
+		return cloneText(p.Alloc, name)
+	}
 	cwd := p.Options.Directory
 	if cwd == "." && !path.IsAbs(name) {
 		return cloneText(p.Alloc, "./"+name)
@@ -101,6 +105,42 @@ func (p *Program) relativePath(name string) string {
 		return cloneText(p.Alloc, "./"+name[len(cwd)+1:])
 	}
 	return cloneText(p.Alloc, name)
+}
+
+func joinFilesystemPath(a mem.Allocator, directory string, child string) string {
+	if !core.IsResourceURIName(directory) {
+		return path.Join(a, directory, child)
+	}
+	pathStart := -1
+	for i := 0; i+2 < len(directory); i++ {
+		if directory[i] == ':' && directory[i+1] == '/' && directory[i+2] == '/' {
+			pathStart = i + 3
+			break
+		}
+	}
+	if pathStart < 0 {
+		return path.Join(a, directory, child)
+	}
+	for pathStart < len(directory) && directory[pathStart] != '/' {
+		pathStart++
+	}
+	if pathStart == len(directory) {
+		b := strings.NewBuilder(a)
+		b.WriteString(directory)
+		b.WriteByte('/')
+		b.WriteString(child)
+		result := cloneText(a, b.String())
+		b.Free()
+		return result
+	}
+	joined := path.Join(a, directory[pathStart:], child)
+	defer mem.FreeString(a, joined)
+	b := strings.NewBuilder(a)
+	b.WriteString(directory[:pathStart])
+	b.WriteString(joined)
+	result := cloneText(a, b.String())
+	b.Free()
+	return result
 }
 
 func globRoot(a mem.Allocator, pattern string) string {
@@ -149,7 +189,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 			return
 		}
 		for i := range entries {
-			name := path.Join(p.Alloc, directory, entries[i].Name)
+			name := joinFilesystemPath(p.Alloc, directory, entries[i].Name)
 			mem.FreeString(p.Alloc, entries[i].Name)
 			if entries[i].IsDir {
 				p.collectGlob(pattern, pos, name, names)
@@ -167,7 +207,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 		}
 	}
 	if !meta {
-		name := path.Join(p.Alloc, directory, segment)
+		name := joinFilesystemPath(p.Alloc, directory, segment)
 		info := p.Host.Stat(name)
 		if !info.Exists {
 			mem.FreeString(p.Alloc, name)
@@ -186,7 +226,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 		return
 	}
 	for i := range entries {
-		name := path.Join(p.Alloc, directory, entries[i].Name)
+		name := joinFilesystemPath(p.Alloc, directory, entries[i].Name)
 		mem.FreeString(p.Alloc, entries[i].Name)
 		matched, matchErr := path.Match(segment, path.Base(name))
 		if matchErr == nil && matched {
@@ -208,7 +248,7 @@ func (p *Program) collectDescendants(directory string, names *[]string) {
 	}
 	defer slices.Free(p.Alloc, entries)
 	for i := range entries {
-		name := path.Join(p.Alloc, directory, entries[i].Name)
+		name := joinFilesystemPath(p.Alloc, directory, entries[i].Name)
 		mem.FreeString(p.Alloc, entries[i].Name)
 		*names = slices.Append(p.Alloc, *names, name)
 		if entries[i].IsDir {

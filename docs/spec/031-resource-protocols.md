@@ -55,11 +55,12 @@ escape the root.
 
 Resource access is checked after canonicalization and before host calls. File
 URIs use the existing filesystem read/write grants and path-prefix checks.
-Memory URIs require explicit `resource-read mem://NAME/` or
-`resource-write mem://NAME/` grants; granting one namespace does not grant
-another. Read, write, list, stat and glob operations each request the matching
-capability. Planning must not perform writes. Errors identify the canonical
-resource URI and operation while leaving host errors opaque.
+Memory URIs use those same capabilities with URI roots, for example
+`--allow-read=mem://NAME/` and `--allow-write=mem://NAME/`; granting one
+namespace does not grant another. An unrestricted read/write grant applies to
+all protocols. Read, write, list, stat and glob operations each request the
+matching capability. Planning must not perform writes. Errors identify the
+canonical resource URI and operation while leaving host errors opaque.
 
 The host protocol interface reports missing resources separately from host
 failures. A missing entry remains an ordinary absent dependency; malformed

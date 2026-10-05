@@ -23,6 +23,9 @@ const activeProcessGroups = new Map();
 const invocationCancellations = new Set();
 const invocationDisposals = new Set();
 const activeCacheLocks = new Set();
+const memoryResourceFiles = new Map();
+const memoryResourceDirectories = new Set();
+let memoryResourceClock = 0n;
 let interruptedStatus = 0;
 
 function installSignals() {
@@ -671,6 +674,110 @@ function collectPaths(directory, names) {
   }
 }
 
+function isMemoryResource(name) { return name.startsWith('mem://'); }
+function isFileResource(name) { return name.startsWith('file://'); }
+function filesystemPath(name) { return isFileResource(name) ? fileURLToPath(name) : name; }
+
+function memoryResourceExists(name) {
+  if (memoryResourceFiles.has(name) || memoryResourceDirectories.has(name)) return true;
+  let prefix = name;
+  if (!prefix.endsWith('/')) prefix += '/';
+  for (const path of memoryResourceFiles.keys()) if (path.startsWith(prefix)) return true;
+  for (const path of memoryResourceDirectories) if (path.startsWith(prefix)) return true;
+  return false;
+}
+
+function memoryResourceDirectory(name) {
+  if (memoryResourceDirectories.has(name)) return true;
+  let prefix = name;
+  if (!prefix.endsWith('/')) prefix += '/';
+  for (const path of memoryResourceFiles.keys()) if (path.startsWith(prefix)) return true;
+  for (const path of memoryResourceDirectories) if (path.startsWith(prefix)) return true;
+  return false;
+}
+
+function readResource(name) {
+  if (isMemoryResource(name)) {
+    const data = memoryResourceFiles.get(name);
+    if (!data) throw Object.assign(new Error('memory resource does not exist'), { code: 'ENOENT' });
+    return Promise.resolve(Buffer.from(data));
+  }
+  return readFile(filesystemPath(name));
+}
+
+function statResource(name, options) {
+	if (!isMemoryResource(name)) return stat(filesystemPath(name), options);
+  if (memoryResourceFiles.has(name)) {
+    const data = memoryResourceFiles.get(name);
+    const stamp = memoryResourceClock;
+    return Promise.resolve({
+      size: data.byteLength,
+      mode: 0o100644,
+      mtimeNs: stamp,
+      isFile: () => true,
+      isDirectory: () => false,
+    });
+  }
+  if (memoryResourceDirectory(name)) {
+    return Promise.resolve({ size: 0, mode: 0o040755, mtimeNs: memoryResourceClock, isFile: () => false, isDirectory: () => true });
+  }
+  throw Object.assign(new Error('memory resource does not exist'), { code: 'ENOENT' });
+}
+
+function memoryResourceEntries(directory) {
+  let prefix = directory;
+  if (!prefix.endsWith('/')) prefix += '/';
+  const entries = new Map();
+  for (const name of memoryResourceFiles.keys()) {
+    if (!name.startsWith(prefix)) continue;
+    const rest = name.slice(prefix.length);
+    if (!rest) continue;
+    const slash = rest.indexOf('/');
+    const child = slash < 0 ? rest : rest.slice(0, slash);
+    entries.set(child, entries.get(child) === true || slash >= 0);
+  }
+  for (const name of memoryResourceDirectories) {
+    if (!name.startsWith(prefix)) continue;
+    const rest = name.slice(prefix.length);
+    if (!rest) continue;
+    const slash = rest.indexOf('/');
+    const child = slash < 0 ? rest : rest.slice(0, slash);
+    entries.set(child, true);
+  }
+  return [...entries.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name]) => name);
+}
+
+function resourceExists(name) {
+  if (isMemoryResource(name)) return memoryResourceExists(name);
+  return existsSync(filesystemPath(name));
+}
+
+function resourceWildcard(pattern) {
+  if (isMemoryResource(pattern)) {
+    return [...memoryResourceFiles.keys()].filter((name) => matchSegments(pattern, 0, name, 0)).sort();
+  }
+  if (isFileResource(pattern)) {
+    return wildcardPaths(filesystemPath(pattern)).map((name) => pathToFileURL(name).href);
+  }
+  return wildcardPaths(pattern);
+}
+
+function writeResource(name, data) {
+  if (isMemoryResource(name)) {
+    memoryResourceClock++;
+    memoryResourceFiles.set(name, Buffer.from(data));
+    let parent = name.slice(0, name.lastIndexOf('/'));
+    while (parent.startsWith('mem://') && parent.length >= 'mem://x'.length) {
+      memoryResourceDirectories.add(parent);
+      const slash = parent.lastIndexOf('/');
+      if (slash <= parent.indexOf('://') + 2) break;
+      parent = parent.slice(0, slash);
+    }
+    return Promise.resolve();
+  }
+  return writeFileAtomic(filesystemPath(name), data);
+}
+
 function wildcardPaths(pattern) {
   while (pattern.startsWith('./')) pattern = pattern.slice(2);
   const names = [];
@@ -684,6 +791,7 @@ function wildcardPaths(pattern) {
 }
 
 async function writeFileAtomic(name, data, durable = false) {
+  name = filesystemPath(name);
   const directory = dirname(name);
   await mkdir(directory, { recursive: true });
   const staging = await mkdtemp(join(directory, '.kame-write-'));
@@ -1033,7 +1141,7 @@ class Module {
       cancelProcessGroup(processRequest, graceMS);
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
-    if (kind === 19) return this.completeJSON(instance, request, existsSync(payload));
+    if (kind === 19) return this.completeJSON(instance, request, resourceExists(payload));
     if (kind === 18) {
       const resolved = resolveTool(payload, [], context.toolCache);
       if (!resolved) return this.completeFailure(instance, request, 'TOOL_MISSING', `cannot resolve tool: ${payload}`);
@@ -1042,7 +1150,7 @@ class Module {
     if (kind === 1) {
       if (!grants.read) return this.deny(instance, request, 'read');
       try {
-        const bytes = await readFile(payload);
+        const bytes = await readResource(payload);
         const pointer = this.allocate(bytes.length || 1);
         new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
         return this.exports.kame_wasm_complete_bytes(instance, request, pointer, bytes.length);
@@ -1053,7 +1161,7 @@ class Module {
     if (kind === 5) {
       if (!grants.read) return this.deny(instance, request, 'read');
       try {
-        const info = await stat(payload);
+        const info = await statResource(payload);
         return this.completeJSON(instance, request, { name: payload, size: info.size, mode: info.mode, dir: info.isDirectory() });
       } catch (error) {
         return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot stat file' : `cannot stat file: ${error.message}`);
@@ -1065,23 +1173,23 @@ class Module {
       if (!Array.isArray(paths) || paths.some((name) => typeof name !== 'string' || name.includes('\0'))) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid file metadata paths');
       const times = [];
       for (const name of paths) {
-        try { times.push((await stat(name, { bigint: true })).mtimeNs.toString()); }
+        try { times.push((await statResource(name, { bigint: true })).mtimeNs.toString()); }
         catch { times.push(null); }
       }
       return this.completeJSON(instance, request, times);
     }
     if (kind === 7 || kind === 17) {
       if (kind === 7 && !grants.read) return this.deny(instance, request, 'read');
-      return this.completeJSON(instance, request, existsSync(payload));
+      return this.completeJSON(instance, request, resourceExists(payload));
     }
     if (kind === 6) {
       if (!grants.read) return this.deny(instance, request, 'read');
-      return this.completeJSON(instance, request, wildcardPaths(payload));
+      return this.completeJSON(instance, request, resourceWildcard(payload));
     }
     if (kind === 2) {
       if (!grants.write) return this.deny(instance, request);
       try {
-        await writeFileAtomic(payload, data);
+        await writeResource(payload, data);
         return this.exports.kame_wasm_complete_nil(instance, request);
       } catch (error) {
         return this.completeFailure(instance, request, 'FS_ERR', `cannot write file: ${error.message}`);
@@ -2675,9 +2783,9 @@ async function runCat(module, inv, sourceDirectory) {
 }
 
 async function watchFingerprint(kind, name) {
-  if (kind === 'glob') return JSON.stringify(wildcardPaths(name));
+  if (kind === 'glob') return JSON.stringify(resourceWildcard(name));
   try {
-    const bytes = await readFile(name);
+    const bytes = await readResource(name);
     return createHash('sha256').update(bytes).digest('hex');
   } catch (error) {
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return 'missing';

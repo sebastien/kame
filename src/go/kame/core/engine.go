@@ -23,7 +23,11 @@ type Engine struct {
 	lastRun       *Node
 }
 
-type nodeIndexEntry struct { kind ResourceKind; name string; node *Node }
+type nodeIndexEntry struct {
+	kind ResourceKind
+	name string
+	node *Node
+}
 
 func NewEngine(a mem.Allocator) *Engine {
 	e := mem.Alloc[Engine](a)
@@ -33,6 +37,9 @@ func NewEngine(a mem.Allocator) *Engine {
 
 func canonicalName(a mem.Allocator, key ResourceKey) (string, bool) {
 	if key.Kind == ResourceFile {
+		if IsResourceURIName(key.Name) {
+			return cloneResourceURIText(a, key.Name), true
+		}
 		return path.Clean(a, key.Name), true
 	}
 	return key.Name, false
@@ -41,10 +48,22 @@ func canonicalName(a mem.Allocator, key ResourceKey) (string, bool) {
 func (e *Engine) find(key ResourceKey) *Node {
 	name, owned := canonicalName(e.Alloc, key)
 	lo, hi := 0, len(e.nodeIndex)
-	for lo < hi { mid := lo + (hi-lo)/2; entry := e.nodeIndex[mid]; if entry.kind < key.Kind || (entry.kind == key.Kind && entry.name < name) { lo = mid+1 } else { hi = mid } }
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		entry := e.nodeIndex[mid]
+		if entry.kind < key.Kind || (entry.kind == key.Kind && entry.name < name) {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
 	var n *Node
-	if lo < len(e.nodeIndex) && e.nodeIndex[lo].kind == key.Kind && e.nodeIndex[lo].name == name { n = e.nodeIndex[lo].node }
-	if owned { mem.FreeString(e.Alloc, name) }
+	if lo < len(e.nodeIndex) && e.nodeIndex[lo].kind == key.Kind && e.nodeIndex[lo].name == name {
+		n = e.nodeIndex[lo].node
+	}
+	if owned {
+		mem.FreeString(e.Alloc, name)
+	}
 	return n
 }
 
@@ -57,11 +76,21 @@ func (e *Engine) node(key ResourceKey) *Node {
 	e.nextID++
 	n.ID = e.nextID
 	n.Key = NewResourceKey(e.Alloc, key.Kind, name)
-	if owned { mem.FreeString(e.Alloc, name) }
+	if owned {
+		mem.FreeString(e.Alloc, name)
+	}
 	n.State = NodeIdle
 	e.nodes = slices.Append(e.Alloc, e.nodes, n)
 	lo, hi := 0, len(e.nodeIndex)
-	for lo < hi { mid := lo + (hi-lo)/2; entry := e.nodeIndex[mid]; if entry.kind < n.Key.Kind || (entry.kind == n.Key.Kind && entry.name < n.Key.Name) { lo = mid+1 } else { hi = mid } }
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		entry := e.nodeIndex[mid]
+		if entry.kind < n.Key.Kind || (entry.kind == n.Key.Kind && entry.name < n.Key.Name) {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
 	e.nodeIndex = slices.Append(e.Alloc, e.nodeIndex, nodeIndexEntry{kind: n.Key.Kind, name: n.Key.Name, node: n})
 	copy(e.nodeIndex[lo+1:], e.nodeIndex[lo:])
 	e.nodeIndex[lo] = nodeIndexEntry{kind: n.Key.Kind, name: n.Key.Name, node: n}
@@ -85,29 +114,47 @@ func (e *Engine) AddOwned(key ResourceKey, producer Producer, context any, free 
 }
 
 func (e *Engine) AddStatic(n *Node, dependency *Node) bool {
-	if n != nil && (n.Requested || n.State != NodeIdle) { return false }
+	if n != nil && (n.Requested || n.State != NodeIdle) {
+		return false
+	}
 	if n == nil || dependency == nil || n == dependency || reaches(dependency, n) {
 		if n != nil {
 			n.complete(e, Diagnostic{Code: DiagnosticDependencyCycle})
 		}
 		return false
 	}
-	if slices.Contains(n.Static, dependency) { return true }
+	if slices.Contains(n.Static, dependency) {
+		return true
+	}
 	n.Static = slices.Append(e.Alloc, n.Static, dependency)
 	dependency.Dependents = slices.Append(e.Alloc, dependency.Dependents, n)
-	if n.Interest != 0 { e.interest(dependency, n.Interest) }
+	if n.Interest != 0 {
+		e.interest(dependency, n.Interest)
+	}
 	return true
 }
 
 func reaches(from *Node, want *Node) bool {
-	if from == want { return true }
-	for i := range from.Static { if reaches(from.Static[i], want) { return true } }
-	for i := range from.Dynamic { if reaches(from.Dynamic[i], want) { return true } }
+	if from == want {
+		return true
+	}
+	for i := range from.Static {
+		if reaches(from.Static[i], want) {
+			return true
+		}
+	}
+	for i := range from.Dynamic {
+		if reaches(from.Dynamic[i], want) {
+			return true
+		}
+	}
 	return false
 }
 
 func (e *Engine) RequestRoot(n *Node) *Root {
-	if n == nil { return nil }
+	if n == nil {
+		return nil
+	}
 	r := mem.Alloc[Root](e.Alloc)
 	r.node, r.live = n, true
 	e.roots = slices.Append(e.Alloc, e.roots, r)
@@ -127,12 +174,18 @@ func (e *Engine) Request(n *Node) {
 
 func request(n *Node) {
 	n.Requested = true
-	for i := range n.Static { request(n.Static[i]) }
-	for i := range n.Dynamic { request(n.Dynamic[i]) }
+	for i := range n.Static {
+		request(n.Static[i])
+	}
+	for i := range n.Dynamic {
+		request(n.Dynamic[i])
+	}
 }
 
 func (e *Engine) Release(r *Root) {
-	if r == nil || !r.live { return }
+	if r == nil || !r.live {
+		return
+	}
 	r.live = false
 	e.interest(r.node, -1)
 	for i := range e.roots {
@@ -147,22 +200,32 @@ func (e *Engine) Release(r *Root) {
 
 func (e *Engine) interest(n *Node, delta int64) {
 	n.Interest += delta
-	for i := range n.Static { e.interest(n.Static[i], delta) }
-	for i := range n.Dynamic { e.interest(n.Dynamic[i], delta) }
-	for i := range n.previousDynamic { e.interest(n.previousDynamic[i], delta) }
+	for i := range n.Static {
+		e.interest(n.Static[i], delta)
+	}
+	for i := range n.Dynamic {
+		e.interest(n.Dynamic[i], delta)
+	}
+	for i := range n.previousDynamic {
+		e.interest(n.previousDynamic[i], delta)
+	}
 	if n.Interest == 0 && !n.invalidating && n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled {
 		e.cancel(n)
 	}
 }
 
 func (e *Engine) Subscribe(n *Node) *Subscription {
-	if n == nil { return nil }
+	if n == nil {
+		return nil
+	}
 	s := mem.Alloc[Subscription](e.Alloc)
 	s.Alloc, s.Node = e.Alloc, n
 	n.Subs = slices.Append(e.Alloc, n.Subs, s)
 	e.interest(n, 1)
 	request(n)
-	if n.Current { s.pushValue(Event{Kind: UpdateValue, NodeID: n.ID, Value: n.Latest.Clone(e.Alloc), Revision: n.Revision}) }
+	if n.Current {
+		s.pushValue(Event{Kind: UpdateValue, NodeID: n.ID, Value: n.Latest.Clone(e.Alloc), Revision: n.Revision})
+	}
 	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
 		s.terminal = terminal(n)
 	}
@@ -171,7 +234,9 @@ func (e *Engine) Subscribe(n *Node) *Subscription {
 
 func (e *Engine) emit(n *Node, event Event) {
 	e.nextUpdate++
-	if event.NodeID == 0 { event.NodeID = n.ID }
+	if event.NodeID == 0 {
+		event.NodeID = n.ID
+	}
 	event.Order = e.nextUpdate
 	for i := range n.Subs {
 		s := n.Subs[i]
@@ -194,7 +259,9 @@ func (e *Engine) publish(n *Node, value Value) {
 		n.complete(e, Diagnostic{Code: DiagnosticExprValue})
 		return
 	}
-	if n.Current { n.Latest.Free(e.Alloc) }
+	if n.Current {
+		n.Latest.Free(e.Alloc)
+	}
 	n.Latest, n.Current = value.Clone(e.Alloc), true
 	value.Free(e.Alloc)
 	n.Revision++
@@ -203,10 +270,15 @@ func (e *Engine) publish(n *Node, value Value) {
 	dependents := slices.Clone(e.Alloc, n.Dependents)
 	for i := range dependents {
 		dependent := dependents[i]
-		if dependent.State != NodeWaiting { continue }
+		if dependent.State != NodeWaiting {
+			continue
+		}
 		// A host request was derived from an older dependency snapshot. Cancel it
 		// and restart from the newest values instead of accepting its completion.
-		if dependent.Submitted { e.restartFromPublication(dependent); continue }
+		if dependent.Submitted {
+			e.restartFromPublication(dependent)
+			continue
+		}
 		dependent.State = NodeReady
 	}
 	slices.Free(e.Alloc, dependents)
@@ -247,23 +319,33 @@ func (e *Engine) Fail(n *Node, d Diagnostic) {
 }
 
 func (e *Engine) ready(n *Node) bool {
-	if n.Interest == 0 || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled || n.State == NodeWaiting { return false }
+	if n.Interest == 0 || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled || n.State == NodeWaiting {
+		return false
+	}
 	for i := range n.Static {
 		dependency := n.Static[i]
 		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
 			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
 			return false
 		}
-		if dependency.State != NodeComplete { dependency.Requested = true; return false }
+		if dependency.State != NodeComplete {
+			dependency.Requested = true
+			return false
+		}
 	}
 	for i := range n.Dynamic {
 		dependency := n.Dynamic[i]
 		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
-			if slices.Contains(n.Observed, dependency) { continue }
+			if slices.Contains(n.Observed, dependency) {
+				continue
+			}
 			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
 			return false
 		}
-		if !dependency.Current { dependency.Requested = true; return false }
+		if !dependency.Current {
+			dependency.Requested = true
+			return false
+		}
 	}
 	return n.Requested
 }
@@ -273,11 +355,19 @@ func (e *Engine) choose() *Node {
 	var selected *Node
 	for i := range e.nodes {
 		n := e.nodes[i]
-		if !e.ready(n) || n.offered { continue }
-		if first == nil || lessNode(n, first) { first = n }
-		if e.lastRun != nil && lessNode(e.lastRun, n) && (selected == nil || lessNode(n, selected)) { selected = n }
+		if !e.ready(n) || n.offered {
+			continue
+		}
+		if first == nil || lessNode(n, first) {
+			first = n
+		}
+		if e.lastRun != nil && lessNode(e.lastRun, n) && (selected == nil || lessNode(n, selected)) {
+			selected = n
+		}
 	}
-	if selected != nil { return selected }
+	if selected != nil {
+		return selected
+	}
 	return first
 }
 
@@ -287,16 +377,24 @@ func lessNode(left *Node, right *Node) bool {
 
 // Ready returns up to capacity ready nodes in deterministic resource-key order.
 func (e *Engine) Ready(capacity int) []*Node {
-	if capacity <= 0 { return nil }
+	if capacity <= 0 {
+		return nil
+	}
 	var nodes []*Node
 	for len(nodes) < capacity {
 		var selected *Node
 		for i := range e.nodes {
 			n := e.nodes[i]
-			if !e.ready(n) || n.offered || slices.Contains(nodes, n) { continue }
-			if selected == nil || lessNode(n, selected) { selected = n }
+			if !e.ready(n) || n.offered || slices.Contains(nodes, n) {
+				continue
+			}
+			if selected == nil || lessNode(n, selected) {
+				selected = n
+			}
 		}
-		if selected == nil { break }
+		if selected == nil {
+			break
+		}
 		selected.offered = true
 		nodes = slices.Append(e.Alloc, nodes, selected)
 	}
@@ -305,14 +403,18 @@ func (e *Engine) Ready(capacity int) []*Node {
 
 // Dispatch starts one node returned by Ready. A claimed node starts once.
 func (e *Engine) Dispatch(n *Node) *Node {
-	if n == nil || !n.offered { return nil }
+	if n == nil || !n.offered {
+		return nil
+	}
 	return e.run(n)
 }
 
 // DispatchRoot starts a newly requested independent root without reentering
 // the scheduler (and therefore without redispatching the current producer).
 func (e *Engine) DispatchRoot(n *Node) *Node {
-	if n == nil || !e.ready(n) { return nil }
+	if n == nil || !e.ready(n) {
+		return nil
+	}
 	return e.run(n)
 }
 
@@ -325,13 +427,17 @@ func (e *Engine) Step() *Node {
 		return e.accept(c)
 	}
 	n := e.choose()
-	if n == nil { return nil }
+	if n == nil {
+		return nil
+	}
 	return e.run(n)
 }
 
 // DrainCompletions accepts queued host completions without starting ready work.
 func (e *Engine) DrainCompletions() {
-	for len(e.completions) != 0 { e.Step() }
+	for len(e.completions) != 0 {
+		e.Step()
+	}
 }
 
 func (e *Engine) run(n *Node) *Node {
@@ -340,7 +446,11 @@ func (e *Engine) run(n *Node) *Node {
 	if n.materializer != nil {
 		n.Attempt++
 		c := &EngineContext{engine: e, node: n}
-		if n.HasCompletion { c.completion = n.Completion; n.Completion = Completion{}; n.HasCompletion = false }
+		if n.HasCompletion {
+			c.completion = n.Completion
+			n.Completion = Completion{}
+			n.HasCompletion = false
+		}
 		result := n.materializer.Next(c)
 		// A dependency discovered while polling can fail this node immediately.
 		// Its terminal state and diagnostic already belong to the engine.
@@ -363,37 +473,70 @@ func (e *Engine) run(n *Node) *Node {
 			n.materializer.Free()
 			n.materializer = nil
 			n.complete(e, result.Diagnostic)
-		} else if result.Waiting { n.State = NodeWaiting } else { n.State = NodeReady }
+		} else if result.Waiting {
+			n.State = NodeWaiting
+		} else {
+			n.State = NodeReady
+		}
 		return n
 	}
-	if n.Producer == nil { n.complete(e, Diagnostic{Code: DiagnosticHostFailure}); return n }
+	if n.Producer == nil {
+		n.complete(e, Diagnostic{Code: DiagnosticHostFailure})
+		return n
+	}
 	n.Attempt++
 	c := &EngineContext{engine: e, node: n}
-	if n.HasCompletion { c.completion = n.Completion; n.Completion = Completion{}; n.HasCompletion = false }
+	if n.HasCompletion {
+		c.completion = n.Completion
+		n.Completion = Completion{}
+		n.HasCompletion = false
+	}
 	result := n.Producer(c, n.ID)
-	if n.State == NodeComplete || n.State == NodeFailed { return n }
-	if n.materializer != nil && result == ProducerActive { return e.run(n) }
-	if result == ProducerRestart { e.Invalidate(n); return n }
-	if result == ProducerCompleted { n.complete(e, Diagnostic{})
-	} else if result == ProducerFailed { n.complete(e, Diagnostic{Code: DiagnosticHostFailure})
+	if n.State == NodeComplete || n.State == NodeFailed {
+		return n
+	}
+	if n.materializer != nil && result == ProducerActive {
+		return e.run(n)
+	}
+	if result == ProducerRestart {
+		e.Invalidate(n)
+		return n
+	}
+	if result == ProducerCompleted {
+		n.complete(e, Diagnostic{})
+	} else if result == ProducerFailed {
+		n.complete(e, Diagnostic{Code: DiagnosticHostFailure})
 	} else if result == ProducerWaiting || result == ProducerSubmitted {
 		n.State = NodeWaiting
-		if result == ProducerSubmitted && !n.Submitted { n.complete(e, Diagnostic{Code: DiagnosticHostFailure}) }
-	} else { n.State = NodeReady }
+		if result == ProducerSubmitted && !n.Submitted {
+			n.complete(e, Diagnostic{Code: DiagnosticHostFailure})
+		}
+	} else {
+		n.State = NodeReady
+	}
 	return n
 }
 
 func (e *Engine) Complete(c Completion) {
 	queued := c
-	if c.HasValue { queued.Value = c.Value.Clone(e.Alloc); c.Value.Free(e.Alloc) }
+	if c.HasValue {
+		queued.Value = c.Value.Clone(e.Alloc)
+		c.Value.Free(e.Alloc)
+	}
 	e.completions = slices.Append(e.Alloc, e.completions, queued)
 }
 
 func (e *Engine) accept(c Completion) *Node {
 	for i := range e.nodes {
 		n := e.nodes[i]
-		if n.ID != c.NodeID { continue }
-		if !n.Submitted || n.Generation != c.Generation || n.Attempt != c.Attempt || n.HostRequestID != c.RequestID || n.State != NodeWaiting { c.Value.Free(e.Alloc); c.Diagnostic.Free(e.Alloc); return nil }
+		if n.ID != c.NodeID {
+			continue
+		}
+		if !n.Submitted || n.Generation != c.Generation || n.Attempt != c.Attempt || n.HostRequestID != c.RequestID || n.State != NodeWaiting {
+			c.Value.Free(e.Alloc)
+			c.Diagnostic.Free(e.Alloc)
+			return nil
+		}
 		n.Submitted = false
 		n.HostRequestID = 0
 		n.Completion, n.HasCompletion, n.State = c, true, NodeReady
@@ -404,9 +547,9 @@ func (e *Engine) accept(c Completion) *Node {
 }
 
 func (e *Engine) Invalidate(n *Node) {
- var reasons []*Node
- e.collectInvalidationReasons(n, false, &reasons)
- slices.Free(e.Alloc, reasons)
+	var reasons []*Node
+	e.collectInvalidationReasons(n, false, &reasons)
+	slices.Free(e.Alloc, reasons)
 	var seen []*Node
 	e.invalidate(n, &seen, false)
 	slices.Free(e.Alloc, seen)
@@ -433,8 +576,12 @@ func (e *Engine) collectInvalidationReasons(n *Node, ordered bool, seen *[]*Node
 }
 
 func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool) {
-	if n == nil { return }
-	if slices.Contains(*seen, n) { return }
+	if n == nil {
+		return
+	}
+	if slices.Contains(*seen, n) {
+		return
+	}
 	*seen = slices.Append(e.Alloc, *seen, n)
 	n.invalidating = true
 	// Invalidating a child can remove its dynamic reverse edge from this node.
@@ -446,25 +593,44 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool) {
 	n.Generation++
 	n.Submitted = false
 	n.HostRequestID = 0
-	if n.HasCompletion { n.Completion.Value.Free(e.Alloc); n.Completion = Completion{}; n.HasCompletion = false }
+	if n.HasCompletion {
+		n.Completion.Value.Free(e.Alloc)
+		n.Completion = Completion{}
+		n.HasCompletion = false
+	}
 	n.Diagnostic.Free(e.Alloc)
 	n.State, n.Requested, n.Diagnostic = NodeIdle, n.Interest != 0, Diagnostic{}
 	n.offered = false
-	if n.materializer != nil { n.materializer.Free(); n.materializer = nil }
-	if n.Current { n.Latest.Free(e.Alloc); n.Current = false }
+	if n.materializer != nil {
+		n.materializer.Free()
+		n.materializer = nil
+	}
+	if n.Current {
+		n.Latest.Free(e.Alloc)
+		n.Current = false
+	}
 	for i := range n.Dynamic {
 		d := n.Dynamic[i]
 		removeDependent(d, n)
 		if retain {
 			n.previousDynamic = slices.Append(e.Alloc, n.previousDynamic, d)
-		} else if n.Interest != 0 { e.interest(d, -n.Interest) }
+		} else if n.Interest != 0 {
+			e.interest(d, -n.Interest)
+		}
 	}
-	if !retain { e.releasePreviousDependencies(n) }
-	slices.Free(e.Alloc, n.Dynamic); n.Dynamic = nil
-	slices.Free(e.Alloc, n.Observed); n.Observed = nil
- slices.Free(e.Alloc, n.OrderOnly); n.OrderOnly = nil
+	if !retain {
+		e.releasePreviousDependencies(n)
+	}
+	slices.Free(e.Alloc, n.Dynamic)
+	n.Dynamic = nil
+	slices.Free(e.Alloc, n.Observed)
+	n.Observed = nil
+	slices.Free(e.Alloc, n.OrderOnly)
+	n.OrderOnly = nil
 	e.emit(n, Event{Kind: UpdateInvalidated})
-	for i := range dependents { e.invalidate(dependents[i], seen, retain) }
+	for i := range dependents {
+		e.invalidate(dependents[i], seen, retain)
+	}
 	slices.Free(e.Alloc, dependents)
 	n.invalidating = false
 }
@@ -473,25 +639,33 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool) {
 // its dependencies. Otherwise invalidating a sole consumer cancels the source
 // that is currently publishing the update which caused the restart.
 func (e *Engine) restartFromPublication(n *Node) {
- var seen []*Node
- e.collectInvalidationReasons(n, false, &seen)
- slices.Free(e.Alloc, seen)
- seen = nil
- e.invalidate(n, &seen, true)
- slices.Free(e.Alloc, seen)
+	var seen []*Node
+	e.collectInvalidationReasons(n, false, &seen)
+	slices.Free(e.Alloc, seen)
+	seen = nil
+	e.invalidate(n, &seen, true)
+	slices.Free(e.Alloc, seen)
 }
 
 func (e *Engine) releasePreviousDependencies(n *Node) {
- previous := n.previousDynamic
- n.previousDynamic = nil
- for i := range previous {
-  if n.Interest != 0 { e.interest(previous[i], -n.Interest) }
- }
- slices.Free(e.Alloc, previous)
+	previous := n.previousDynamic
+	n.previousDynamic = nil
+	for i := range previous {
+		if n.Interest != 0 {
+			e.interest(previous[i], -n.Interest)
+		}
+	}
+	slices.Free(e.Alloc, previous)
 }
 
 func removeDependent(n, dependent *Node) {
-	for i := range n.Dependents { if n.Dependents[i] == dependent { copy(n.Dependents[i:], n.Dependents[i+1:]); n.Dependents = n.Dependents[:len(n.Dependents)-1]; return } }
+	for i := range n.Dependents {
+		if n.Dependents[i] == dependent {
+			copy(n.Dependents[i:], n.Dependents[i+1:])
+			n.Dependents = n.Dependents[:len(n.Dependents)-1]
+			return
+		}
+	}
 }
 
 // Cancel removes the convenience Request interest. Roots use Release instead.
@@ -503,22 +677,40 @@ func (e *Engine) Cancel(n *Node) {
 }
 
 func (e *Engine) cancel(n *Node) {
-	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled { return }
-	if n.materializer != nil { n.materializer.Free(); n.materializer = nil }
-	if n.HasCompletion { n.Completion.Value.Free(e.Alloc); n.Completion = Completion{}; n.HasCompletion = false }
-	if n.Submitted { e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID}) }
+	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
+		return
+	}
+	if n.materializer != nil {
+		n.materializer.Free()
+		n.materializer = nil
+	}
+	if n.HasCompletion {
+		n.Completion.Value.Free(e.Alloc)
+		n.Completion = Completion{}
+		n.HasCompletion = false
+	}
+	if n.Submitted {
+		e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
+	}
 	n.Submitted = false
 	n.HostRequestID = 0
 	e.releasePreviousDependencies(n)
-	n.Generation++; n.Requested = false; n.State = NodeCancelled; n.Diagnostic = Diagnostic{Code: DiagnosticCancelled}
+	n.Generation++
+	n.Requested = false
+	n.State = NodeCancelled
+	n.Diagnostic = Diagnostic{Code: DiagnosticCancelled}
 	e.emit(n, terminal(n))
 	for i := range n.Dependents {
-		if n.Dependents[i].State == NodeWaiting { n.Dependents[i].State = NodeReady }
+		if n.Dependents[i].State == NodeWaiting {
+			n.Dependents[i].State = NodeReady
+		}
 	}
 }
 
 func (e *Engine) NextCancellation() Cancellation {
-	if len(e.cancellations) == 0 { return Cancellation{} }
+	if len(e.cancellations) == 0 {
+		return Cancellation{}
+	}
 	c := e.cancellations[0]
 	copy(e.cancellations, e.cancellations[1:])
 	e.cancellations = e.cancellations[:len(e.cancellations)-1]
@@ -526,32 +718,66 @@ func (e *Engine) NextCancellation() Cancellation {
 }
 
 func (e *Engine) Unsubscribe(s *Subscription) {
-	if s == nil || s.unsubbed { return }
+	if s == nil || s.unsubbed {
+		return
+	}
 	n := s.Node
-	for i := range n.Subs { if n.Subs[i] == s { copy(n.Subs[i:], n.Subs[i+1:]); n.Subs = n.Subs[:len(n.Subs)-1]; break } }
+	for i := range n.Subs {
+		if n.Subs[i] == s {
+			copy(n.Subs[i:], n.Subs[i+1:])
+			n.Subs = n.Subs[:len(n.Subs)-1]
+			break
+		}
+	}
 	e.interest(n, -1)
 	s.free()
 }
 
 func (e *Engine) Free() {
-	if e == nil { return }
-	for i := range e.roots { mem.Free(e.Alloc, e.roots[i]) }
+	if e == nil {
+		return
+	}
+	for i := range e.roots {
+		mem.Free(e.Alloc, e.roots[i])
+	}
 	slices.Free(e.Alloc, e.roots)
 	for i := range e.nodes {
 		n := e.nodes[i]
-		for j := range n.Subs { n.Subs[j].free() }
-		slices.Free(e.Alloc, n.Subs); slices.Free(e.Alloc, n.Static); slices.Free(e.Alloc, n.Dynamic); slices.Free(e.Alloc, n.previousDynamic); slices.Free(e.Alloc, n.Dependents)
+		for j := range n.Subs {
+			n.Subs[j].free()
+		}
+		slices.Free(e.Alloc, n.Subs)
+		slices.Free(e.Alloc, n.Static)
+		slices.Free(e.Alloc, n.Dynamic)
+		slices.Free(e.Alloc, n.previousDynamic)
+		slices.Free(e.Alloc, n.Dependents)
 		slices.Free(e.Alloc, n.Observed)
-  slices.Free(e.Alloc, n.OrderOnly)
-		if n.Current { n.Latest.Free(e.Alloc) }
-		if n.materializer != nil { n.materializer.Free() }
-		if n.ContextFree != nil { n.ContextFree(e.Alloc, n.Context) }
-		if n.HasCompletion { n.Completion.Value.Free(e.Alloc) }
+		slices.Free(e.Alloc, n.OrderOnly)
+		if n.Current {
+			n.Latest.Free(e.Alloc)
+		}
+		if n.materializer != nil {
+			n.materializer.Free()
+		}
+		if n.ContextFree != nil {
+			n.ContextFree(e.Alloc, n.Context)
+		}
+		if n.HasCompletion {
+			n.Completion.Value.Free(e.Alloc)
+		}
 		n.Diagnostic.Free(e.Alloc)
-		n.Key.Free(e.Alloc); mem.Free(e.Alloc, n)
+		n.Key.Free(e.Alloc)
+		mem.Free(e.Alloc, n)
 	}
-	for i := range e.completions { e.completions[i].Value.Free(e.Alloc); e.completions[i].Diagnostic.Free(e.Alloc) }
-	slices.Free(e.Alloc, e.nodes); slices.Free(e.Alloc, e.nodeIndex); slices.Free(e.Alloc, e.cancellations); slices.Free(e.Alloc, e.completions); mem.Free(e.Alloc, e)
+	for i := range e.completions {
+		e.completions[i].Value.Free(e.Alloc)
+		e.completions[i].Diagnostic.Free(e.Alloc)
+	}
+	slices.Free(e.Alloc, e.nodes)
+	slices.Free(e.Alloc, e.nodeIndex)
+	slices.Free(e.Alloc, e.cancellations)
+	slices.Free(e.Alloc, e.completions)
+	mem.Free(e.Alloc, e)
 }
 
 // TrackedNodes returns a caller-owned slice of borrowed runtime nodes.

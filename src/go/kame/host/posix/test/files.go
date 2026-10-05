@@ -44,6 +44,58 @@ func TestAtomicWriteIgnoresPredictableStagingSymlink(t *testing.T) {
 	}
 }
 
+func TestPosixHostServesMemoryResourceURIs(t *testing.T) {
+	h := posix.New(t.Allocator())
+	defer h.Free()
+	name := "mem://workspace/assets/site.css"
+	if h.WriteFileAtomic(name, []byte("body{}"), 0o644, false) != nil {
+		t.Fatal("memory URI write failed")
+		return
+	}
+	stat := h.Stat(name)
+	if !stat.Exists || stat.Info.Size != 6 || !stat.Info.Regular {
+		t.Error("memory URI stat returned incorrect metadata")
+	}
+	data, err := h.ReadFile(t.Allocator(), name)
+	if err != nil || string(data) != "body{}" {
+		t.Error("memory URI read returned incorrect content")
+	}
+	mem.FreeSlice(t.Allocator(), data)
+	entries, readErr := h.ReadDir(t.Allocator(), "mem://workspace/assets")
+	if readErr != nil || len(entries) != 1 || entries[0].Name != "site.css" {
+		t.Error("memory URI directory listing failed")
+	}
+	for i := range entries {
+		mem.FreeString(t.Allocator(), entries[i].Name)
+	}
+	mem.FreeSlice(t.Allocator(), entries)
+	if h.Remove(name) != nil || h.Stat(name).Exists {
+		t.Error("memory URI remove did not update stat")
+	}
+}
+
+func TestPosixHostMapsFileResourceURIs(t *testing.T) {
+	var buffer [os.MaxPathLen]byte
+	directory, err := os.MkdirTemp(buffer[:], "", "kame-file-uri-")
+	if err != nil {
+		t.Fatal("create URI test directory")
+		return
+	}
+	defer removeAtomicTestDirectory(directory)
+	h := posix.New(t.Allocator())
+	defer h.Free()
+	name := "file://" + directory + "/entry"
+	if h.WriteFileAtomic(name, []byte("uri"), 0o600, false) != nil {
+		t.Fatal("file URI write failed")
+		return
+	}
+	data, readErr := h.ReadFile(t.Allocator(), name)
+	if readErr != nil || string(data) != "uri" {
+		t.Error("file URI did not map to its absolute path")
+	}
+	mem.FreeSlice(t.Allocator(), data)
+}
+
 func TestAtomicWriteCleansFailedRenameAndDurableWrite(t *testing.T) {
 	var buffer [os.MaxPathLen]byte
 	directory, err := os.MkdirTemp(buffer[:], "", "kame-atomic-")

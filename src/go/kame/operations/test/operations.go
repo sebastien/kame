@@ -56,6 +56,16 @@ func TestPureOperations(t *testing.T) {
 		t.Error("count/list failed")
 	}
 	result.Free(a)
+	result = evaluate(t, program, `(resource "mem://workspace/a/./b")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Resource || result.Value.Resource.Kind != core.ResourceFile || result.Value.Resource.Name != "mem://workspace/a/b" {
+		t.Error("resource did not return a canonical resource identity")
+	}
+	result.Free(a)
+	result = evaluate(t, program, `(resource "mem://workspace/../../escape")`)
+	if result.Diagnostic.Code != "RES_INVALID" {
+		t.Error("resource accepted a URI that escapes its root")
+	}
+	result.Free(a)
 	result = evaluate(t, program, "(first (list \"first\" \"second\"))")
 	if result.Diagnostic.Code != "" || result.Value.Text != "first" {
 		t.Error("first failed")

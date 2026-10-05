@@ -148,6 +148,7 @@ func km_cli_environment_copy(out []byte) c.Int { _ = out; return 0 }
 type Host struct {
 	Alloc  mem.Allocator
 	native *nativeHost
+	Memory *host.MemoryResources
 	// start anchors the monotonic clock at host creation.
 	start time.Time
 }
@@ -155,6 +156,7 @@ type Host struct {
 func New(a mem.Allocator) *Host {
 	h := mem.Alloc[Host](a)
 	h.Alloc, h.native = a, km_host_new()
+	h.Memory = host.NewMemoryResources(a)
 	h.start = time.Now()
 	return h
 }
@@ -364,6 +366,10 @@ func (h *Host) Free() {
 	if h.native != nil {
 		km_host_free(h.native)
 		h.native = nil
+	}
+	if h.Memory != nil {
+		h.Memory.Free()
+		h.Memory = nil
 	}
 	mem.Free(h.Alloc, h)
 }
