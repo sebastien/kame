@@ -65,7 +65,7 @@ func TestPipelineRetainsEveryStageStatus(t *testing.T) {
 func TestPipelineStreamsBeyondCaptureLimit(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
-	stages := []host.ProcessStage{{Argv: []string{"/usr/bin/head", "-c", "4194304", "/dev/zero"}}, {Argv: []string{"/bin/sh", "-c", "wc -c | tr -d '[:space:]'"}}}
+	stages := []host.ProcessStage{{Argv: []string{"/bin/dd", "if=/dev/zero", "bs=4096", "count=1024"}}, {Argv: []string{"/bin/sh", "-c", "wc -c | tr -d '[:space:]'"}}}
 	r := host.ProcessRequest{ID: 72, Stages: stages, Directory: ".", Environment: []string{"PATH=/bin:/usr/bin"}, RetainBytes: 16}
 	if !h.Start(r) { t.Fatal("pipeline start failed"); return }
 	var terminal posix.Event
