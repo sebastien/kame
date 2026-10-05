@@ -255,6 +255,13 @@ probes gate dependents, and that a readiness timeout cancels the service and
 reports `SERVICE_READY_TIMEOUT`. It also checks that a configured zero stop
 grace period is honored by the JavaScript host.
 
+`T010-31-wasm-service-events.sh` compares native and WASM lifecycle state
+events in JSON and human output, including generation/attempt correlation and
+provisioning, readiness, health, restart, stop, and terminal states.
+`TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents` in the WASM host package
+drives the public embedding request/completion API through cancellation and
+terminal event delivery.
+
 `T010-27-wasm-generated-declarations.sh` compares native and WASM generated-rule
 plan JSON, including generator provenance, and materializes generated tasks on
 both hosts.

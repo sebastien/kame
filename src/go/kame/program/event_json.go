@@ -77,6 +77,10 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 		e.Str("effect")
 		e.Str(event.Effect)
 	}
+	if event.Kind == ServiceState {
+		e.Str("state")
+		e.Str(event.State)
+	}
 	if event.Span.Start != 0 || event.Span.End != 0 {
 		encodeSpan(&e, event.Span)
 	}
@@ -407,6 +411,9 @@ func eventType(kind EventKind) string {
 	}
 	if kind == TargetCancelled {
 		return "target-cancelled"
+	}
+	if kind == ServiceState {
+		return "service-state"
 	}
 	return "cache-warning"
 }

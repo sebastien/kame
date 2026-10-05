@@ -476,6 +476,10 @@ function humanEvent(bytes) {
     if (event.diagnostic) lastDiagnostic = event.diagnostic;
     return;
   }
+  if (event.type === 'service-state') {
+    stderr.write(`[${event.target}] service ${event.state} (generation ${event.generation}, attempt ${event.attempt})\n`);
+    return;
+  }
   if (event.type === 'cache-warning' && event.diagnostic) {
     stderr.write(`warning ${event.diagnostic.code}: ${event.diagnostic.message}\n`);
   }
@@ -1425,6 +1429,7 @@ class Module {
     context.concurrent = true;
     context.signal = cancellation.signal;
     let hostError;
+    let targetStarted = false;
     try {
       this.compileBuild(instance, source, name, context);
       for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
@@ -1441,6 +1446,7 @@ class Module {
       context.streaming = true;
       const encoded = this.write(target);
       if (this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length) !== 0) throw this.compileFailure(instance, 'TGT_NO_RULE');
+      targetStarted = true;
       for (;;) {
         await waitOutputReady(context.signal);
         const state = this.exports.kame_wasm_step(instance);
@@ -1461,6 +1467,7 @@ class Module {
     } finally {
       cancellation.abort();
       await Promise.all(pending);
+      if (targetStarted) this.drainEvents(instance, context);
       invocationCancellations.delete(cancellation);
       this.exports.kame_wasm_instance_free(instance);
     }

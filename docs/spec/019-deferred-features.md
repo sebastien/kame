@@ -24,7 +24,7 @@ adapters and integration evidence rather than placeholder methods.
 | ID | Feature | Completion evidence |
 | --- | --- | --- |
 | D01 | WASM watch | Complete: retained graph roots, file/glob invalidation during active work, source reload and repair, shared roots, grants, stream publication, cancellation and disposal; native/WASM public conformance. See 020. |
-| D02 | Managed services and provisioning | Typed service configuration; start/readiness/health/restart/stop ownership; prerequisite lifetime; bounded logs; interruption and process-tree cleanup on native and WASM. See 024. |
+| D02 | Managed services and provisioning | Complete: typed lifecycle metadata; prerequisite lifetime; readiness/health/restart/stop ownership; bounded logs; process-tree cleanup; correlated lifecycle event parity on native, WASM CLI, and the public Runtime embedding API. See 024, T010-31, and `TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents`. |
 | D03 | Generated declarations | Complete: bounded typed batches; full validation before registration; generator provenance and dependencies; deterministic watch replacement; authored diagnostics; native/WASM parity; cycle, limit, and failure-cleanup coverage. See 025, T010-27, T009-14 and T010-23. |
 | D04 | Cache lifecycle and backends | Complete: cross-process miss locking with failure, interruption and stale-owner recovery; bounded eviction and explicit inspection/cleanup; local and portable in-memory backends with identity and atomic-publication conformance. See T008-04 and T010-28 through T010-30. |
 | D05 | Release integrity | Complete: pinned and verified compiler provisioning (021); operator-key Ed25519 manifests; provenance creation and verification; tamper/wrong-key rejection; actual staged release tests. Keys are provided by the release operator, never committed. |
@@ -86,8 +86,12 @@ down the service, and configured SIGTERM-to-SIGKILL grace periods are honored
 by native and JavaScript CLI hosts. Native and forwarded health probes now
 restart unhealthy services within configured bounds, and startup failures
 retry before dependents resume. Per-service log retention is bounded on native
-and forwarded hosts; Go tests and T010-26 cover these paths. Full lifecycle
-event parity and embedding lifecycle parity remain open under 024. D04 now has
+and forwarded hosts; Go tests and T010-26 cover these paths. T010-31 now verifies
+correlated provisioning, start, readiness, health, stop, and terminal events,
+including matching human and JSON output across native and forwarded hosts.
+`TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents` exercises the public
+embedding request/completion contract through process start, target release,
+cancellation, reap, and terminal event delivery. D04 now has
 native and WASM `do cache list|clean` commands plus bounded 1024-record
 eviction on successful publication. Native POSIX CLI processes also serialize
 cold task misses with bounded advisory-lock stripes and crash release. Forwarded

@@ -33,6 +33,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		}
 		entry.EnvironmentConflict = false
 		entry.ServiceReady = false
+		entry.ServiceState = ""
+		entry.ServiceProcessID = 0
 		entry.ServiceReadyDeadline, entry.ServiceNextProbe, entry.ServiceProbeID = 0, 0, 0
 		entry.ServiceClockID, entry.ServiceTimerID = 0, 0
 		entry.ServiceProbeHealth, entry.ServiceNextHealth, entry.ServiceHealthFailures = false, 0, 0
@@ -59,6 +61,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		}
 		p.emitNode(entry.Node, entry.Plan.Target, TargetStarted, diagnostic.Span{}, nil)
 		entry.started, entry.startedGeneration, entry.terminalEmitted = true, c.Generation(), false
+		p.setServiceState(entry, "provisioning")
 	}
 	if entry.FileContext != nil {
 		return p.continueFileContext(c, state.Index)
@@ -430,6 +433,10 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	entry.cacheStartedAt = p.Host.Now()
 	entry.retryCount = 0
 	request := host.ProcessRequest{ID: p.nextRequest, Shell: entry.Shell, Script: []byte(entry.Script), Directory: p.Options.Directory, Environment: entry.Environment, TimeoutMS: timeout, RetainBytes: retain}
+	if entry.Rule.Kind == rule.ServiceRule {
+		entry.ServiceProcessID = request.ID
+		p.setServiceState(entry, "starting")
+	}
 	if p.Forwarding {
 		// The embedding host runs the recipe; correlation uses the node so the
 		// completion resumes this producer.

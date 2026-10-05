@@ -116,6 +116,8 @@ without leaving a process group alive.
   consumer performs graceful stop, forced escalation when needed, and reap.
 - Logs remain within the configured per-stream bound, report truncation, and do
   not leak into diagnostics.
+- Native and WASM CLI emit the same correlated lifecycle states in JSON and
+  human output; public embedding tests exercise those states through teardown.
 - Cancellation, timeout, host failure, invalidation, and instance disposal stop
   probes and process trees and reject late completions.
 - Native, WASM CLI, and public embedding tests cover lifecycle parity, repeated
@@ -144,4 +146,11 @@ failures and unexpected process exits invalidate
 the service and its dependents; bounded restart attempts repeat prerequisite
 checks, then publish fresh readiness or fail with a stable service diagnostic.
 Forwarded service timers and probe requests are supported by the JavaScript CLI.
-Full lifecycle event parity and full embedding lifecycle parity remain open.
+Native and WASM CLI lifecycle event parity is implemented: `service-state`
+records carry target, generation, attempt, and one of the lifecycle states, and
+both human renderers use the same state line. T010-31 compares JSON records and
+human transitions across both hosts. `TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents`
+drives the public Runtime embedding contract through service start, dependent
+completion, process cancellation, process terminal, and lifecycle event drain.
+Embedding hosts remain responsible for actually servicing timer, clock, probe,
+process, and cancellation requests, as defined by the host contract above.

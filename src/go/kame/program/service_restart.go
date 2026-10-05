@@ -13,6 +13,7 @@ func (p *Program) prepareServiceRestart(entry *instance) bool {
 	}
 	entry.ServiceRestartCount++
 	entry.ServiceRestartPending = true
+	p.setServiceState(entry, "restarting")
 	return true
 }
 

@@ -3,6 +3,7 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/lang/rule"
 	"solod.dev/so/slices"
 )
 
@@ -26,6 +27,15 @@ func (p *Program) emitNode(node *core.Node, target string, kind EventKind, span 
 		event.Data = slices.Clone(p.Alloc, data)
 	}
 	p.emit(event)
+}
+
+func (p *Program) setServiceState(entry *instance, state string) {
+	if entry == nil || entry.Rule.Kind != rule.ServiceRule || entry.ServiceState == state {
+		return
+	}
+	entry.ServiceState = state
+	node := entry.Node
+	p.emit(Event{Kind: ServiceState, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, State: state})
 }
 
 func (p *Program) observeInstances() {
@@ -53,6 +63,9 @@ func (p *Program) observeInstances() {
 		}
 		if kind < 0 {
 			continue
+		}
+		if entry.Rule.Kind == rule.ServiceRule {
+			p.setServiceState(entry, "terminal")
 		}
 		if kind == TargetCompleted || kind == TargetFailed || kind == TargetCancelled {
 			p.releaseCacheLock(entry)

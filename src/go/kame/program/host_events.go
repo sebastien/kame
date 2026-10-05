@@ -166,6 +166,9 @@ func (p *Program) ProcessStarted(request host.Request) {
 	}
 	entry := p.instanceForRequest(request.ID)
 	if entry == nil {
+		entry = p.serviceForProcessRequest(request.ID)
+	}
+	if entry == nil {
 		entry = p.streamInstance(request.NodeID)
 	}
 	if entry == nil {
@@ -183,6 +186,7 @@ func (p *Program) serviceSpawned(entry *instance) {
 		p.publishServiceReady(entry)
 		return
 	}
+	p.setServiceState(entry, "checking-ready")
 	if p.Forwarding {
 		p.requestServiceClock(entry)
 		return
@@ -264,6 +268,7 @@ func (p *Program) completeServiceClock(entry *instance, now int64) {
 
 func (p *Program) publishServiceReady(entry *instance) {
 	entry.ServiceReady, entry.ServiceReadyDeadline, entry.ServiceNextProbe = true, 0, 0
+	p.setServiceState(entry, "ready")
 	p.Engine.Publish(entry.Node, core.Value{Kind: core.Nil})
 	if len(entry.Service.HealthArgv) == 0 {
 		return
@@ -308,6 +313,11 @@ func (p *Program) startServiceProbeAt(entry *instance, now int64, health bool) {
 		p.failServiceReady(entry)
 		return
 	}
+	if health {
+		p.setServiceState(entry, "checking-health")
+	} else {
+		p.setServiceState(entry, "checking-ready")
+	}
 	p.nextRequest++
 	id := p.nextRequest
 	argv := entry.Service.ReadyArgv
@@ -348,6 +358,7 @@ func (p *Program) completeServiceReadyProbe(entry *instance, event host.ProcessE
 	if event.Outcome == host.ProcessExited && event.Status == 0 && event.Signal == 0 {
 		if health {
 			entry.ServiceHealthFailures = 0
+			p.setServiceState(entry, "ready")
 			p.scheduleServiceHealth(entry)
 		} else {
 			p.publishServiceReady(entry)
@@ -411,8 +422,10 @@ func (p *Program) serviceHealthFailure(entry *instance, now int64) {
 		return
 	}
 	if p.Forwarding {
+		p.setServiceState(entry, "ready")
 		p.requestServiceTimer(entry)
 	} else {
+		p.setServiceState(entry, "ready")
 		entry.ServiceNextHealth = now + entry.Service.HealthInterval*1000000
 	}
 }
@@ -500,7 +513,7 @@ func (p *Program) ProcessStream(request host.Request, stderr bool, data []byte) 
 // request. An embedding host may keep that prefix plus one sentinel byte, so
 // ProcessTerminal can detect truncation without receiving the entire stream.
 func (p *Program) ProcessRetainLimit(request host.Request) int {
-	isInstance := p.instanceForRequest(request.ID) != nil
+	isInstance := p.instanceForRequest(request.ID) != nil || p.serviceForProcessRequest(request.ID) != nil
 	retain := p.Options.RetainBytes
 	if isInstance {
 		// Recipes retain only what the native host would: nothing for a file
@@ -538,12 +551,15 @@ func (p *Program) ProcessTerminal(request host.Request, stdout []byte, stderr []
 	}
 	entry := p.instanceForRequest(request.ID)
 	if entry == nil {
+		entry = p.serviceForProcessRequest(request.ID)
+	}
+	if entry == nil {
 		entry = p.streamInstance(request.NodeID)
 	}
 	if entry != nil {
 		p.emitProcess(entry, ProcessExited, request.ID)
 	}
-	isInstance := p.instanceForRequest(request.ID) != nil
+	isInstance := p.instanceForRequest(request.ID) != nil || p.serviceForProcessRequest(request.ID) != nil
 	retain := p.ProcessRetainLimit(request)
 	event := host.ProcessEvent{Kind: host.ProcessTerminal, ID: request.ID, Status: status, Signal: signal, Outcome: host.ProcessExited, RetainBytes: retain}
 	if outcome == 1 {
@@ -755,6 +771,7 @@ func (p *Program) drainCancellations() {
 			if entry.Node.ID == cancellation.NodeID {
 				if entry.Rule.Kind == rule.ServiceRule {
 					serviceGrace = entry.Service.StopGrace
+					p.setServiceState(entry, "stopping")
 				}
 				entry.ServiceReadyDeadline, entry.ServiceNextProbe = 0, 0
 				entry.ServiceClockID, entry.ServiceTimerID = 0, 0
@@ -804,6 +821,12 @@ func (p *Program) complete(event host.ProcessEvent) {
 		}
 	}
 	entry := p.instanceForRequest(event.ID)
+	if entry == nil {
+		entry = p.serviceForProcessRequest(event.ID)
+	}
+	if entry != nil && entry.Rule.Kind == rule.ServiceRule && event.ID == entry.ServiceProcessID && entry.ServiceState == "stopping" {
+		p.setServiceState(entry, "terminal")
+	}
 	if entry != nil && entry.Rule.Kind == rule.ServiceRule && !entry.ServiceReady && d.Code == "" {
 		d = failure(p.Alloc, "SERVICE_START_FAILED", "service exited before becoming ready")
 	}
@@ -1045,6 +1068,15 @@ func (p *Program) recipeStream(entry *instance, kind EventKind, data []byte) {
 func (p *Program) instanceForRequest(id int64) *instance {
 	for i := range p.Instances {
 		if p.Instances[i].Node.HostRequestID == id && !p.Instances[i].KashRunning {
+			return &p.Instances[i]
+		}
+	}
+	return nil
+}
+
+func (p *Program) serviceForProcessRequest(id int64) *instance {
+	for i := range p.Instances {
+		if p.Instances[i].ServiceProcessID == id {
 			return &p.Instances[i]
 		}
 	}

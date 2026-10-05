@@ -149,6 +149,13 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			remaining--
 		}
 	}
+	// A completed target may have released its final service dependency. Keep
+	// pumping the host until graceful service teardown has reaped its process
+	// group so terminal lifecycle events are published before the CLI returns.
+	for p.Host != nil && p.Host.Active() != 0 {
+		p.Tick(10)
+		drainEvents(p, out, errOut, json, &progress)
+	}
 	drainEvents(p, out, errOut, json, &progress)
 	slices.Free(mem.System, handles)
 	// A second signal may arrive while the first cancellation reaps the final
@@ -190,10 +197,10 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 	for {
 		next := p.NextEvent()
 		if !next.OK {
-   // C stdio buffers redirected streams. Publish drained events while the
-   // process or watch session is still alive, including JSON records.
-   flushCLIOutput(out)
-   flushCLIOutput(errOut)
+	   // C stdio buffers redirected streams. Publish drained events while the
+	   // process or watch session is still alive, including JSON records.
+	   flushCLIOutput(out)
+	   flushCLIOutput(errOut)
 			return
 		}
 		event := next.Event
@@ -220,6 +227,8 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			fmt.Fprintf(errOut, "[%s] failed (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
 		} else if event.Kind == program.CacheWarning {
 			fmt.Fprintf(errOut, "warning %s: %s\n", event.Diagnostic.Code, event.Diagnostic.Message)
+		} else if event.Kind == program.ServiceState {
+			fmt.Fprintf(errOut, "[%s] service %s (generation %d, attempt %d)\n", event.Target, event.State, event.Generation, event.Attempt)
 		}
 		event.Free(mem.System)
 	}
@@ -542,5 +551,5 @@ func writeValue(out io.Writer, value core.Value) {
 }
 
 func flushCLIOutput(out io.Writer) {
- if file, ok := out.(*os.File); ok { _ = file.Sync() }
+	if file, ok := out.(*os.File); ok { _ = file.Sync() }
 }

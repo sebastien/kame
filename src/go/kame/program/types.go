@@ -126,6 +126,7 @@ const (
 	TargetFailed
 	TargetCancelled
 	CacheWarning
+	ServiceState
 )
 
 type Event struct {
@@ -139,6 +140,7 @@ type Event struct {
 	DependencyID  int64
 	DependencyKey core.ResourceKey
 	Effect        string
+	State         string
 	Span          diagnostic.Span
 	Data          []byte
 	Value         core.Value
@@ -309,6 +311,8 @@ type generatedRuleMeta struct {
 }
 type instance struct {
 	Service                ServiceConfig
+	ServiceState           string
+	ServiceProcessID       int64
 	ServiceReady           bool
 	ServiceReadyDeadline   int64
 	ServiceNextProbe       int64

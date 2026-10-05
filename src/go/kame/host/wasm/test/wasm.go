@@ -5,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"kame/host/wasm"
+	"solod.dev/so/strconv"
 	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
@@ -470,6 +471,109 @@ func TestRuntimeForwardsRuleRecipe(t *testing.T) {
 		t.Error("rule target path = " + result.Value.Text)
 	}
 	result.Free(a)
+}
+
+func TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "service daemon : ; [stop: [grace-ms: 0]]\n\twhile :; do sleep 1; done\ntask consumer : daemon\n\ttrue\n")
+	if started.Runtime == nil {
+		t.Fatal("runtime did not compile")
+		started.Result.Free(a)
+		return
+	}
+	r := started.Runtime
+	defer r.Free()
+	started.Result.Free(a)
+	if !r.SetForwarding(true) {
+		t.Fatal("forwarding was rejected")
+		return
+	}
+	if result := r.RequestTarget("consumer"); result.Code != "" {
+		t.Fatal("target request failed: " + result.Code)
+		result.Free(a)
+		return
+	} else {
+		result.Free(a)
+	}
+
+	var serviceRequest host.Request
+	targetDone, cancelDone := false, false
+	for i := 0; i < 128 && !(targetDone && cancelDone); i++ {
+		next := r.Step()
+		if next.OK {
+			request := next.Request
+			if request.Kind == host.RequestProcess {
+				script := host.PayloadText(request.Payload, host.FieldScript)
+				if strings.Contains(script, "while :") {
+					serviceRequest = request
+					r.ProcessStarted(request)
+				} else {
+					r.ProcessStarted(request)
+					r.ProcessTerminal(request, nil, nil, 0, 0, 0, "", "")
+					request.Free(a)
+				}
+			} else if request.Kind == host.RequestProcessCancel {
+				if serviceRequest.ID == 0 {
+					t.Error("service cancellation arrived before service start")
+				} else {
+					r.ProcessTerminal(serviceRequest, nil, nil, 0, 0, 2, "EXEC_CANCELLED", "service stopped")
+					serviceRequest.Free(a)
+					serviceRequest = host.Request{}
+				}
+				r.Complete(request, core.Value{Kind: core.Nil}, diagnostic.Diagnostic{})
+				request.Free(a)
+				cancelDone = true
+			} else if request.Kind == host.RequestCacheGet {
+				r.Complete(request, core.Value{Kind: core.Nil}, diagnostic.Diagnostic{})
+				request.Free(a)
+			} else if request.Kind == host.RequestCacheLock || request.Kind == host.RequestCachePut || request.Kind == host.RequestCacheUnlock {
+				r.Complete(request, core.Value{Kind: core.Nil}, diagnostic.Diagnostic{})
+				request.Free(a)
+			} else {
+				kind := request.Kind
+				request.Free(a)
+				var kindBuffer [16]byte
+				t.Error("unexpected embedding request kind " + strconv.Itoa(kindBuffer[:], int(kind)))
+			}
+		}
+		result := r.Result()
+		if result.Done && !targetDone {
+			if result.Diagnostic.Code != "" {
+				t.Error("target failed: " + result.Diagnostic.Code)
+			}
+			result.Free(a)
+			targetDone = true
+			if r.Handle != nil {
+				r.Handle.Free()
+				r.Handle = nil
+			}
+		} else {
+			result.Free(a)
+		}
+	}
+	if !targetDone || !cancelDone {
+		t.Fatal("embedding host did not complete service teardown")
+		return
+	}
+	states := []string{"provisioning", "starting", "ready", "stopping", "terminal"}
+	for r.NextEventJSON() {
+		length := r.EventJSONLength()
+		line := make([]byte, length)
+		if !r.EventJSONCopy(line) {
+			t.Fatal("service event copy failed")
+			return
+		}
+		for j := range states {
+			if strings.Contains(string(line), `"state":"`+states[j]+`"`) {
+				states[j] = ""
+			}
+		}
+	}
+	for i := range states {
+		if states[i] != "" {
+			t.Errorf("embedding lifecycle state was not emitted: " + states[i])
+		}
+	}
 }
 
 func TestRuntimeYieldsHostRequestAndResumes(t *testing.T) {
