@@ -20,9 +20,10 @@ task native-windows :
 '@ | Set-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :
-	$childScript = "Set-Content child-started started; Start-Sleep -Seconds 18; Set-Content descendant-marker late"
-	$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($childScript))
-	Start-Process -FilePath powershell.exe -ArgumentList "-NoProfile -NonInteractive -EncodedCommand $encoded" -WorkingDirectory (Get-Location)
+	Start-Process -FilePath cmd.exe -ArgumentList '/d /s /c "echo started > child-started & timeout /t 18 /nobreak >nul & echo late > descendant-marker"' -WorkingDirectory (Get-Location)
+	for ($attempt = 0; $attempt -lt 40 -and !(Test-Path child-started); $attempt++) { Start-Sleep -Milliseconds 100 }
+	if (!(Test-Path child-started)) { throw 'native timeout child did not start' }
+	Set-Content child-launched launched
 	Start-Sleep -Seconds 30
 	Set-Content parent-marker late
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
@@ -39,8 +40,12 @@ task native-timeout :
 		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
 		Start-Sleep -Seconds 20
-		if ($timeoutStatus -eq 0 -or ($timeoutOutput -join "`n") -notmatch 'RECIPE_TIMEOUT' -or !(Test-Path (Join-Path $project 'child-started')) -or (Test-Path (Join-Path $project 'descendant-marker')) -or (Test-Path (Join-Path $project 'parent-marker'))) {
-			throw "Native timeout did not stop and reap its process tree: exit=$timeoutStatus output=$($timeoutOutput -join ' | ')"
+		$childStarted = Test-Path (Join-Path $project 'child-started')
+		$childLaunched = Test-Path (Join-Path $project 'child-launched')
+		$descendantFinished = Test-Path (Join-Path $project 'descendant-marker')
+		$parentFinished = Test-Path (Join-Path $project 'parent-marker')
+		if ($timeoutStatus -eq 0 -or ($timeoutOutput -join "`n") -notmatch 'RECIPE_TIMEOUT' -or !$childStarted -or !$childLaunched -or $descendantFinished -or $parentFinished) {
+			throw "Native timeout did not stop and reap its process tree: exit=$timeoutStatus childStarted=$childStarted childLaunched=$childLaunched descendantFinished=$descendantFinished parentFinished=$parentFinished output=$($timeoutOutput -join ' | ')"
 		}
 	} finally {
 		Pop-Location
