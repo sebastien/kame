@@ -37,9 +37,11 @@ task native-timeout :
 		if ((Get-Content (Join-Path $project 'native-env.txt') -Raw).Trim() -ne 'passed') {
 			throw 'Native recipe did not receive the CLI environment override or write its output file.'
 		}
+		$env:KAME_DEBUG_WINDOWS_JOBS = '1'
 		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
 		Start-Sleep -Seconds 20
+		Write-Output ($timeoutOutput -join "`n")
 		$childStarted = Test-Path (Join-Path $project 'child-started')
 		$childLaunched = Test-Path (Join-Path $project 'child-launched')
 		$descendantFinished = Test-Path (Join-Path $project 'descendant-marker')
