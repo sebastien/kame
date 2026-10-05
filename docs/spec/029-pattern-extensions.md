@@ -6,8 +6,8 @@ D11 extends the shared target and expression pattern machinery. It adds
 anonymous captures to rule outputs, positional capture references to rule
 inputs, and `(pattern TEXT)` construction from a runtime string. Portable
 regular-expression groups, bounded matching, capture processors, replacement,
-and native/WASM acceptance coverage are implemented. D11 remains in progress
-while edge-case ownership, diagnostics and final regression gates are reviewed.
+and native/WASM acceptance coverage are implemented. D11 is complete;
+allocator-checked package tests and T004-15/T014-04 pass.
 
 The extension preserves anchored, leftmost-shortest matching, non-empty
 captures, and the existing `*`, `**`, `?`, character-class, and named-capture
@@ -126,10 +126,3 @@ replacement results must agree across native, WASM CLI and evaluator tests.
 - `(regex-match PATTERN SUBJECT)`, `(capture INDEX-OR-NAME MATCH)`, and
   `(regex-replace MATCH-PATTERN EXPANSION SUBJECT)` have identical capture,
   replacement, invalid-input and budget behavior on native and WASM.
-
-## Remaining D11 review
-
-- Audit cleanup for success, malformed input, no-match, list-item failure and
-  budget exhaustion, including target selection and operation diagnostics.
-- Run the registered native and WASM suites, package checks and full final
-  regression gates from a stable revision before marking D11 complete.
