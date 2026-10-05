@@ -120,13 +120,13 @@ tests/T012-04-streams-backpressure.sh	012	streams	Unread stdout/stderr/JSON/argv
 tests/T006-04-runtime-order-only.sh	006	runtime	Order-only scheduling and failures, freshness/cache exclusion, normal/read upgrades, expression inputs and metadata on both hosts
 tests/T006-07-runtime-newer-inputs.sh	006	runtime	Unique newer normal inputs, missing sibling outputs, scoped freshness, empty lists, captures, directories and context rejection on both hosts
 tests/T010-22-wasm-memory.sh	010	wasm	Allocation-free compile/completion/module exhaustion diagnostics, instance isolation and repeated reuse, with unrelated traps preserved; shell/argv stream publishers preserve diagnostics and reap children
-tests/T010-32-embedding-js.sh	010	wasm	Importable JS embedding compile/evaluate/build/watch, copied results, async host completion, grants and repeated deterministic disposal
-tests/T010-33-embedding-python.sh	010	wasm	Asynchronous Python embedding compile/evaluate/build/watch, copied results, grants, cancellation and repeated disposal
+tests/T010-32-wasm-embedding-js.sh	010	wasm	Importable JS embedding compile/evaluate/build/watch, copied results, async host completion, grants and repeated deterministic disposal
+tests/T010-33-wasm-embedding-python.sh	010	wasm	Asynchronous Python embedding compile/evaluate/build/watch, copied results, grants, cancellation and repeated disposal
 tests/T010-23-wasm-watch.sh	010	wasm	dist/kame.js retains shared watch roots, scoped environments and grants across invalidation/source reload, recovers repaired roots and optional includes, drops obsolete input subscriptions, bounds unread watch output, keeps settled roots idle, denies ungranted effects, and kills active recipe children on SIGINT
 tests/T010-24-wasm-target-arguments.sh	010	wasm	WASM target arguments in plan JSON, defaults, dependency scope, identity, diagnostics, dry-run and watch invalidation
 tests/T010-25-wasm-watch-abi.sh	010	wasm	Public watch ABI query/copy semantics, retained roots, file invalidation, malformed resource rejection, allocation failure, instance isolation and disposal
 tests/T004-13-lang-declaration-conditions.sh	004	lang	Pure when/otherwise/end declaration selection, gated includes, literal configuration, nested inactive branches, source/session parity and authored diagnostics
-tests/T004-14-lang-rule-positional-captures.sh	004	lang	Anonymous rule output captures and positional input references on native and WASM
+tests/T004-14-lang-rule-positional-captures.sh	004	lang	Anonymous rule captures, positional input references, and scope bindings on native and WASM
 tests/T017-19-kash-recipes.sh	017	kash	Selected shell policies, structured recipe cache/retry/timeout, reusable scripts and invocation-owned callable lifetime on both hosts
 tests/T009-14-cli-watch.sh	009	cli	Native shared watch roots, scoped environments and grants across invalidation/source reload, preserved timestamps, malformed-source recovery, optional-include and failed-root repair, obsolete-input subscription cleanup, bounded unread watch output, idle settled roots, active recipe-child cleanup, changed graph, active-input invalidation and denied-effect protection
 tests/T009-15-cli-target-arguments.sh	009	cli	Native target arguments in plan JSON, defaults, dependency scope, identity, diagnostics, dry-run and watch invalidation
