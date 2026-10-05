@@ -218,6 +218,7 @@ func (p *Program) SetGrants(grants []Grant) {
 		slices.Free(p.Alloc, p.Grants[i].Names)
 	}
 	slices.Free(p.Alloc, p.Grants)
+	p.Grants = nil
 	for i := range grants {
 		grant := Grant{Capability: grants[i].Capability, Names: slices.Clone(p.Alloc, grants[i].Names)}
 		p.Grants = slices.Append(p.Alloc, p.Grants, grant)

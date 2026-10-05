@@ -275,6 +275,7 @@ static kame_wasm_instance *kame_wasm_instance_get(uint64_t handle) {
 }
 
 static so_String kame_wasm_request_payload(host_Request request) {
+  if (request.Kind == host_RequestPlugin) return host_PayloadText(request.Payload, so_str("data"));
   if (request.Kind == host_RequestProcess || request.Kind == host_RequestPrepareOutputs) {
     if (host_PayloadText(request.Payload, so_str("data")).len != 0) return host_PayloadText(request.Payload, so_str("data"));
     if (host_PayloadStages(request.Payload).len != 0) return host_PayloadText(request.Payload, so_str("data"));
@@ -348,6 +349,8 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       return 24u;
     case host_RequestCacheUnlock:
       return 25u;
+    case host_RequestPlugin:
+      return 26u;
     default:
       return (uint32_t)request.Kind;
   }
@@ -570,6 +573,26 @@ uint32_t kame_wasm_session_compile(uint64_t handle, uint32_t data, uint32_t leng
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
   if (instance->runtime == NULL || instance->has_pending || instance->parked || (length && !data)) return KAME_WASM_STATE_INVALID;
   wasm_PureResult result = wasm_Runtime_PrepareSession(instance->runtime, (so_Slice){(so_byte *)(uintptr_t)data, length, length});
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic_span(instance, result.Code, result.Message, result.SpanStart, result.SpanEnd);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
+__attribute__((export_name("kame_wasm_register_plugins")))
+uint32_t kame_wasm_register_plugins(uint64_t handle, uint32_t data, uint32_t length) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || instance->has_pending || instance->parked || (length && !data)) return KAME_WASM_STATE_INVALID;
+  if (length > 1024u * 1024u) {
+    kame_wasm_instance_set_static_diagnostic(instance, "PLUGIN_CONFIG", "plugin declarations exceed their byte limit");
+    return KAME_WASM_NO_MEMORY;
+  }
+  wasm_PureResult result = wasm_Runtime_RegisterPluginsJSON(instance->runtime, (so_Slice){(so_byte *)(uintptr_t)data, length, length});
   if (result.Code.len != 0) {
     kame_wasm_instance_set_diagnostic_span(instance, result.Code, result.Message, result.SpanStart, result.SpanEnd);
     wasm_PureResult_Free(&result, instance->runtime->Alloc);

@@ -26,6 +26,7 @@ enum kame_wasm_status {
  * 3 process/rule (no implicit value display). Existing step/completion APIs
  * drive each work item on the same instance. */
 uint32_t kame_wasm_session_compile(uint64_t handle, uint32_t data, uint32_t length);
+uint32_t kame_wasm_register_plugins(uint64_t handle, uint32_t data, uint32_t length);
 uint32_t kame_wasm_session_work_count(uint64_t handle);
 uint32_t kame_wasm_session_work_kind(uint64_t handle, uint32_t index);
 uint32_t kame_wasm_session_work_begin(uint64_t handle, uint32_t index);
@@ -65,7 +66,8 @@ enum kame_wasm_request_kind {
   KAME_WASM_REQUEST_TIMER = 22,
   KAME_WASM_REQUEST_PROCESS_CANCEL = 23,
   KAME_WASM_REQUEST_CACHE_LOCK = 24,
-  KAME_WASM_REQUEST_CACHE_UNLOCK = 25
+  KAME_WASM_REQUEST_CACHE_UNLOCK = 25,
+  KAME_WASM_REQUEST_PLUGIN = 26
 };
 
 /* Terminal process outcomes reported by kame_wasm_process_terminal. */

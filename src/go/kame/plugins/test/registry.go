@@ -101,3 +101,17 @@ func TestRegisterRejectsWholeInvalidDeclarationSet(t *testing.T) {
 	}
 	registry.Free()
 }
+
+func TestRegisterJSONValidatesExplicitDeclarations(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	valid := `[{"name":"example","version":"1","operations":[{"name":"example-run","version":"1","minArity":0,"maxArity":0,"capabilities":["run"]}]}]`
+	if !plugins.RegisterJSON(a, registry, []byte(valid)) || !registry.HasOperation("example-run") {
+		t.Error("valid JSON plugin declarations were rejected")
+	}
+	invalid := `[{"name":"duplicate","version":"1","operations":[{"name":"first-run","version":"1","minArity":0,"maxArity":0}]},{"name":"duplicate","version":"1","operations":[{"name":"second-run","version":"1","minArity":0,"maxArity":0}]}]`
+	if plugins.RegisterJSON(a, registry, []byte(invalid)) || registry.HasOperation("first-run") || registry.HasOperation("second-run") {
+		t.Error("invalid JSON declarations were accepted or partially registered")
+	}
+	registry.Free()
+}

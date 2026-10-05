@@ -145,6 +145,13 @@ func invoke(c *eval.Context, value any, args []core.Value) eval.Result {
 			completion.Value.Free(c.Run)
 			return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin host omitted its result")
 		}
+		if completion.Value.Kind == core.String {
+			var decoded core.Value
+			valid := core.ParsePluginValueJSON(c.Run, []byte(completion.Value.Text), &decoded)
+			completion.Value.Free(c.Run)
+			if !valid { return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin returned an invalid value") }
+			return eval.Result{Value: decoded}
+		}
 		encoded := core.PluginValueJSON(c.Run, completion.Value)
 		completion.Value.Free(c.Run)
 		if encoded == nil { return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin returned an unsupported value") }
@@ -163,7 +170,9 @@ func invoke(c *eval.Context, value any, args []core.Value) eval.Result {
 		mem.FreeSlice(c.Run, encoded)
 		if requestBytes > state.MaxRequestBytes { return pluginFailure(c, "PLUGIN_LIMIT", "plugin request exceeds its byte limit") }
 	}
-	payload := host.PluginInvocationPayload(c.Run, state.Plugin, state.PluginVersion, state.Operation, state.OperationVersion, state.MaxRequestBytes, state.MaxResponseBytes, state.TimeoutMS, args)
+	generation, attempt := int64(0), int64(0)
+	if c.Engine != nil { generation, attempt = c.Engine.Generation(), c.Engine.Attempt() }
+	payload := host.PluginInvocationPayload(c.Run, state.Plugin, state.PluginVersion, state.Operation, state.OperationVersion, state.MaxRequestBytes, state.MaxResponseBytes, state.TimeoutMS, generation, attempt, args)
 	id := c.Submit(host.RequestPlugin, payload)
 	payload.Free(c.Run)
 	if id == 0 { return pluginFailure(c, "FEATURE_UNSUP", "plugin host request is unavailable") }

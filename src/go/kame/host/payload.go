@@ -80,8 +80,31 @@ func ScopedProcessPayload(a mem.Allocator, script string, environment []string) 
 // PluginInvocationPayload copies one operation call into a serializable host
 // request. The host owns the payload and must return one core value or a
 // diagnostic through the existing request correlation contract.
-func PluginInvocationPayload(a mem.Allocator, plugin string, pluginVersion string, operation string, operationVersion string, maxRequestBytes int, maxResponseBytes int, timeoutMS int64, args []core.Value) core.Value {
+func PluginInvocationPayload(a mem.Allocator, plugin string, pluginVersion string, operation string, operationVersion string, maxRequestBytes int, maxResponseBytes int, timeoutMS int64, generation int64, attempt int64, args []core.Value) core.Value {
 	values := core.NewList(a, args)
+	var encodedArgs []core.Value
+	for i := range args {
+		encoded := core.PluginValueJSON(a, args[i])
+		if encoded == nil { continue }
+		encodedArgs = slices.Append(a, encodedArgs, core.NewString(a, string(encoded)))
+		mem.FreeSlice(a, encoded)
+	}
+	wireValues := core.NewList(a, encodedArgs)
+	b := strings.NewBuilder(a)
+	e := json.NewEncoder(&b)
+	e.BeginObject()
+	e.Str("plugin"); e.Str(plugin)
+	e.Str("pluginVersion"); e.Str(pluginVersion)
+	e.Str("operation"); e.Str(operation)
+	e.Str("operationVersion"); e.Str(operationVersion)
+	e.Str("maxRequestBytes"); e.Int(int64(maxRequestBytes))
+	e.Str("maxResponseBytes"); e.Int(int64(maxResponseBytes))
+	e.Str("timeoutMS"); e.Int(timeoutMS)
+	e.Str("generation"); e.Int(generation)
+	e.Str("attempt"); e.Int(attempt)
+	e.Str("argsJSON"); e.BeginArray()
+	for i := range encodedArgs { e.Str(encodedArgs[i].Text) }
+	e.EndArray(); e.EndObject(); e.Flush()
 	fields := []core.RecordField{
 		{Key: "plugin", Value: core.NewString(a, plugin)},
 		{Key: "pluginVersion", Value: core.NewString(a, pluginVersion)},
@@ -90,10 +113,17 @@ func PluginInvocationPayload(a mem.Allocator, plugin string, pluginVersion strin
 		{Key: "maxRequestBytes", Value: core.Value{Kind: core.Int, Int: int64(maxRequestBytes)}},
 		{Key: "maxResponseBytes", Value: core.Value{Kind: core.Int, Int: int64(maxResponseBytes)}},
 		{Key: "timeoutMS", Value: core.Value{Kind: core.Int, Int: timeoutMS}},
+		{Key: "generation", Value: core.Value{Kind: core.Int, Int: generation}},
+		{Key: "attempt", Value: core.Value{Kind: core.Int, Int: attempt}},
 		{Key: "args", Value: values},
+		{Key: "argsJSON", Value: wireValues},
+		{Key: FieldData, Value: core.NewString(a, b.String())},
 	}
 	payload := core.NewRecord(a, fields)
 	for i := range fields { fields[i].Value.Free(a) }
+	b.Free()
+	for i := range encodedArgs { encodedArgs[i].Free(a) }
+	slices.Free(a, encodedArgs)
 	return payload
 }
 

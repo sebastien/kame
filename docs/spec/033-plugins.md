@@ -72,12 +72,28 @@ configuration data and are never interpolated into a shell command.
 
 ## JavaScript host adapter
 
-The JavaScript runtime accepts an explicit map of plugin identities to
-callbacks. It sends the same request object and validates the same response
-object and limits as the native adapter. Callback results may be promises.
-Rejected promises become `PLUGIN_FAIL`; expired calls become
-`PLUGIN_TIMEOUT`. The runtime copies the response before resuming Kame and
-ignores completion after cancellation or generation replacement.
+The Node.js embedding accepts declarations in `plugins` and an optional map of
+plugin names to callbacks in `pluginCallbacks` on each evaluate, build, or
+watch invocation. A declaration may provide `argv` for the native-process
+adapter; an explicit callback for the same plugin takes precedence. The process
+adapter passes argv directly to `spawn` with shell parsing disabled, writes one
+JSON request line to stdin, and accepts exactly one JSON response line from
+stdout. It drains but never exposes stderr, bounds stdout, and terminates the
+child process group on timeout or cancellation. A callback receives an object
+with `protocol`, `request`,
+`plugin`, `pluginVersion`, `operation`, `operationVersion`, `generation`,
+`attempt`, and a positional `args` array containing tagged Kame values. It also
+receives `{ signal }` as its second argument. The response repeats all request
+identity fields and contains exactly one tagged `value`, or an `error` with a
+stable code and bounded message. Unknown fields or mismatched identity fail
+with `PLUGIN_PROTOCOL`.
+
+Callback results may be promises. Rejected promises become `PLUGIN_FAIL`;
+expired calls become `PLUGIN_TIMEOUT`. The runtime aborts the callback signal
+on cancellation, timeout, or terminal completion, copies the response before
+resuming Kame, and ignores completion after cancellation or generation
+replacement. Request and full response envelope sizes are checked against the
+declared bounds.
 
 ## Failure, cancellation, and ownership
 

@@ -854,6 +854,7 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_instance_create',
   'kame_wasm_instance_free',
   'kame_wasm_source_compile',
+  'kame_wasm_register_plugins',
   'kame_wasm_set_source_name',
   'kame_wasm_parse',
   'kame_wasm_format',
@@ -1100,6 +1101,7 @@ class Module {
 
   async dispatch(instance, request, kind, payload, data, context, key, record) {
     const grants = context.grants;
+    if (kind === 26) return this.pluginCallback(instance, request, payload, context);
     if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18].includes(kind)) {
       const response = await this.customHostRequest(instance, request, kind, payload, data, context, key, record);
       if (response !== undefined) return response;
@@ -1323,6 +1325,121 @@ class Module {
     return this.completeFailure(instance, request, 'FEATURE_UNSUP', `host request kind ${kind} is not implemented in this stage`);
   }
 
+  registerPlugins(instance, context) {
+    const declarations = context.plugins ?? [];
+    if (!Array.isArray(declarations) || declarations.length === 0) return;
+    let encoded;
+    try { encoded = JSON.stringify(declarations); }
+    catch { throw Object.assign(new Error('plugin declarations must be JSON serializable'), { code: 'PLUGIN_CONFIG' }); }
+    const bytes = this.write(encoded);
+    if (this.exports.kame_wasm_register_plugins(instance, bytes.pointer, bytes.length) !== 0) throw this.compileFailure(instance, 'PLUGIN_CONFIG');
+  }
+
+  async pluginCallback(instance, request, payload, context) {
+    if (typeof payload === 'string') {
+      try { payload = JSON.parse(payload); }
+      catch { return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin request'); }
+    }
+    const identityFields = ['plugin', 'pluginVersion', 'operation', 'operationVersion'];
+    if (!payload || typeof payload !== 'object' || identityFields.some((field) => typeof payload[field] !== 'string') || !Number.isSafeInteger(payload.generation) || !Number.isSafeInteger(payload.attempt) || !Array.isArray(payload.argsJSON)) {
+      return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin request');
+    }
+    const callbacks = context.pluginCallbacks;
+    const callback = callbacks instanceof Map ? callbacks.get(payload.plugin) : callbacks?.[payload.plugin];
+    const declaration = context.plugins.find((plugin) => plugin?.name === payload.plugin);
+    const executable = declaration?.argv;
+    if (typeof callback !== 'function' && (!Array.isArray(executable) || executable.length === 0 || executable.some((part) => typeof part !== 'string' || part.length === 0))) return this.completeFailure(instance, request, 'FEATURE_UNSUP', 'plugin adapter is unavailable');
+    const maxRequestBytes = payload.maxRequestBytes;
+    const maxResponseBytes = payload.maxResponseBytes;
+    const timeoutMS = payload.timeoutMS;
+    if (![maxRequestBytes, maxResponseBytes, timeoutMS].every(Number.isSafeInteger) || maxRequestBytes < 1 || maxResponseBytes < 1 || timeoutMS < 1 || timeoutMS > 30000) {
+      return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin limits');
+    }
+    let args;
+    try {
+      args = payload.argsJSON.map((item) => {
+        if (typeof item !== 'string') throw new Error();
+        return JSON.parse(item);
+      });
+    } catch { return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin arguments'); }
+    const invocation = Object.freeze({
+      protocol: 1,
+      request: request.toString(),
+      plugin: payload.plugin,
+      pluginVersion: payload.pluginVersion,
+      operation: payload.operation,
+      operationVersion: payload.operationVersion,
+      generation: payload.generation,
+      attempt: payload.attempt,
+      args,
+    });
+    if (new TextEncoder().encode(JSON.stringify(invocation)).length > maxRequestBytes) return this.completeFailure(instance, request, 'PLUGIN_LIMIT', 'plugin request exceeds its byte limit');
+    if (context.signal?.aborted) return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'plugin call cancelled');
+    let timer;
+    let abortListener;
+    const nativeProcess = typeof callback !== 'function';
+    const pluginController = new AbortController();
+    const timeout = new Promise((resolveTimeout) => {
+      timer = setTimeout(() => {
+        stopReason = 'PLUGIN_TIMEOUT';
+        pluginController.abort();
+        if (!nativeProcess) resolveTimeout({ failure: 'PLUGIN_TIMEOUT' });
+      }, timeoutMS);
+    });
+    let stopReason = '';
+    const aborted = new Promise((resolveAbort) => {
+      if (!context.signal) return;
+      abortListener = () => {
+        stopReason = 'EXEC_CANCELLED';
+        pluginController.abort();
+        if (!nativeProcess) resolveAbort({ failure: 'EXEC_CANCELLED' });
+      };
+      context.signal.addEventListener('abort', abortListener, { once: true });
+    });
+    let response;
+    try {
+      const invoke = typeof callback === 'function'
+        ? Promise.resolve().then(() => callback(invocation, { signal: pluginController.signal }))
+        : runPluginProcess(invocation, executable, maxResponseBytes, pluginController.signal);
+      response = await Promise.race([invoke, timeout, aborted]);
+    }
+    catch (error) {
+      clearTimeout(timer);
+      if (abortListener) context.signal.removeEventListener('abort', abortListener);
+      pluginController.abort();
+      if (stopReason === 'PLUGIN_TIMEOUT') return this.completeFailure(instance, request, 'PLUGIN_TIMEOUT', 'plugin adapter timed out');
+      if (stopReason === 'EXEC_CANCELLED') return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'plugin call cancelled');
+      const code = error?.code === 'PLUGIN_LIMIT' || error?.code === 'PLUGIN_PROTOCOL' ? error.code : 'PLUGIN_FAIL';
+      const message = code === 'PLUGIN_LIMIT' ? 'plugin result exceeds its byte limit' : code === 'PLUGIN_PROTOCOL' ? 'invalid plugin response' : 'plugin adapter failed';
+      return this.completeFailure(instance, request, code, message);
+    }
+    clearTimeout(timer);
+    if (abortListener) context.signal.removeEventListener('abort', abortListener);
+    if (response?.failure === 'PLUGIN_TIMEOUT') { pluginController.abort(); return this.completeFailure(instance, request, 'PLUGIN_TIMEOUT', 'plugin callback timed out'); }
+    if (response?.failure === 'EXEC_CANCELLED' || context.signal?.aborted) { pluginController.abort(); return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'plugin call cancelled'); }
+    pluginController.abort();
+    const matches = response && response.protocol === 1 && response.request === invocation.request && response.plugin === invocation.plugin && response.pluginVersion === invocation.pluginVersion && response.operation === invocation.operation && response.operationVersion === invocation.operationVersion && response.generation === invocation.generation && response.attempt === invocation.attempt;
+    if (!matches) return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'plugin response identity mismatch');
+    const allowed = new Set(['protocol', 'request', 'plugin', 'pluginVersion', 'operation', 'operationVersion', 'generation', 'attempt', 'value', 'error']);
+    if (Object.keys(response).some((field) => !allowed.has(field)) || (Object.hasOwn(response, 'value') === Object.hasOwn(response, 'error'))) return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin response fields');
+    let encodedEnvelope;
+    try { encodedEnvelope = JSON.stringify(response); }
+    catch { return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin response'); }
+    if (new TextEncoder().encode(encodedEnvelope).length > maxResponseBytes) return this.completeFailure(instance, request, 'PLUGIN_LIMIT', 'plugin result exceeds its byte limit');
+    if (Object.hasOwn(response, 'error')) {
+      const error = response.error;
+      if (!error || typeof error.code !== 'string' || !/^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) || typeof error.message !== 'string' || new TextEncoder().encode(error.message).length > 256) return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin error response');
+      return this.completeFailure(instance, request, error.code, error.message);
+    }
+    let encoded;
+    try { encoded = JSON.stringify(response.value); }
+    catch { return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin result'); }
+    const bytes = new TextEncoder().encode(encoded);
+    const pointer = this.allocate(bytes.length || 1);
+    new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
+    return this.exports.kame_wasm_complete_text(instance, request, pointer, bytes.length);
+  }
+
   async customHostRequest(instance, request, kind, payload, data, context, key, record) {
     const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 ? 'read'
       : kind === 2 ? 'write'
@@ -1415,6 +1532,12 @@ class Module {
     try {
       const compiled = this.write(source);
       if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      this.registerPlugins(instance, context);
+      this.inspectionGrant(instance, '', '');
+      for (const grant of context.portableGrants ?? []) {
+        if (grant.names.length === 0) this.inspectionGrant(instance, grant.capability, '');
+        else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
+      }
       if (context.cwd) {
         const directory = this.write(context.cwd);
         if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
@@ -1635,6 +1758,7 @@ class Module {
     let targetStarted = false;
     try {
       this.compileBuild(instance, source, name, context);
+      this.registerPlugins(instance, context);
       for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
       const directoryBytes = this.write(context.cwd ?? process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directoryBytes.pointer, directoryBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
@@ -1696,6 +1820,7 @@ class Module {
     let hostError;
     try {
       this.compileBuild(instance, source, name, context);
+      this.registerPlugins(instance, context);
       for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
       const directory = this.write(context.cwd ?? process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
@@ -1771,6 +1896,7 @@ class Module {
     let hostError;
     try {
       if (this.exports.kame_wasm_source_compile(instance, 0, 0) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      this.registerPlugins(instance, context);
       const directory = this.write(process.cwd());
       if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       this.inspectionGrant(instance, '', '');
@@ -1841,6 +1967,57 @@ class Module {
   }
 }
 
+function terminatePluginChild(child) {
+  if (!child || child.pid === undefined) return;
+  try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
+  const timer = setTimeout(() => {
+    try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
+  }, 100);
+  timer.unref();
+}
+
+function runPluginProcess(invocation, executable, responseLimit, signal) {
+  return new Promise((resolveResponse, rejectResponse) => {
+    if (signal.aborted) { rejectResponse(new Error('cancelled')); return; }
+    const child = spawn(executable[0], executable.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], detached: true, shell: false });
+    track(child);
+    const output = [];
+    let outputBytes = 0;
+    let overflow = false;
+    child.stdout.on('data', (chunk) => {
+      outputBytes += chunk.length;
+      if (outputBytes > responseLimit + 1) {
+        overflow = true;
+        terminatePluginChild(child);
+      } else output.push(Buffer.from(chunk));
+    });
+    // Drain stderr so a noisy plugin cannot block. It is deliberately omitted
+    // from both the returned diagnostic and the public result.
+    child.stderr.resume();
+    const abort = () => terminatePluginChild(child);
+    signal.addEventListener('abort', abort, { once: true });
+    child.once('error', () => {
+      signal.removeEventListener('abort', abort);
+      rejectResponse(new Error('plugin process failed'));
+    });
+    child.once('close', (code, signalName) => {
+      signal.removeEventListener('abort', abort);
+      if (signal.aborted) { rejectResponse(new Error('plugin process cancelled')); return; }
+      if (overflow) { rejectResponse(Object.assign(new Error('plugin response too large'), { code: 'PLUGIN_LIMIT' })); return; }
+      if (code !== 0 || signalName !== null) { rejectResponse(new Error('plugin process failed')); return; }
+      const bytes = Buffer.concat(output);
+      let text;
+      try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
+      catch { rejectResponse(Object.assign(new Error('invalid plugin response encoding'), { code: 'PLUGIN_PROTOCOL' })); return; }
+      if (!text.endsWith('\n') || text.slice(0, -1).includes('\n') || text.endsWith('\n\n')) { rejectResponse(Object.assign(new Error('invalid plugin response record'), { code: 'PLUGIN_PROTOCOL' })); return; }
+      try { resolveResponse(JSON.parse(text.slice(0, -1))); }
+      catch { rejectResponse(Object.assign(new Error('invalid plugin response record'), { code: 'PLUGIN_PROTOCOL' })); }
+    });
+    child.stdin.once('error', () => {});
+    child.stdin.end(`${JSON.stringify(invocation)}\n`);
+  });
+}
+
 function apiContext(options, signal) {
   const cwd = resolve(options.cwd ?? process.cwd());
   const grants = { read: false, write: false, run: false, env: false };
@@ -1868,6 +2045,8 @@ function apiContext(options, signal) {
     runRoots: grantRoots('run'),
     environment: [...(options.environment ?? [])],
     shell: [...(options.shell ?? [])],
+    plugins: options.plugins ?? [],
+    pluginCallbacks: options.pluginCallbacks ?? {},
     toolCache: new Map(),
     events: [],
     signal,

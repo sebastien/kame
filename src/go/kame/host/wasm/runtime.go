@@ -202,6 +202,7 @@ func (r *Runtime) InspectionGrant(capability string, name string) bool {
 		slices.Free(r.Alloc, r.InspectionGrants)
 		r.InspectionGrants = nil
 		r.InspectionPolicy = true
+		if r.Eval != nil { r.Eval.SetGrants(nil) }
 		return true
 	}
 	grant := eval.Grant{}
@@ -222,6 +223,7 @@ func (r *Runtime) InspectionGrant(capability string, name string) bool {
 	}
 	r.InspectionGrants = slices.Append(r.Alloc, r.InspectionGrants, grant)
 	r.InspectionPolicy = true
+	if r.Eval != nil { r.Eval.SetGrants(r.InspectionGrants) }
 	return true
 }
 
@@ -559,6 +561,7 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	state := c.Context().(*runtimeState)
 	r := state.Runtime
 	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}}
+	if r.InspectionPolicy { grants = r.InspectionGrants }
 	context := &eval.Context{Program: r.Eval, Engine: c, Scope: r.Eval.Scope, Run: c.Allocator(), Grants: grants, DirectHostRequests: true}
 	result := r.Eval.EvaluateWith(r.Expr, context)
 	if result.Waiting {
