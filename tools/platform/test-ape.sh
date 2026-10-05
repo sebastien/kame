@@ -16,12 +16,28 @@ cp "$ape_path" "$work_path/kame.com"
 chmod +x "$work_path/kame.com"
 ape_path=$work_path/kame.com
 ape_shell=${KAME_APE_SHELL:-bash}
+ape_host=$(uname -s)
 
 # Assimilation selects the host's native executable format when available. It
 # also avoids depending on shell-specific parsing of the binary polyglot.
-"$ape_shell" "$ape_path" --assimilate
+if [ "$ape_host" = OpenBSD ]; then
+	mkdir "$work_path/bin"
+	ln -s "$(command -v gdd)" "$work_path/bin/dd"
+	PATH=$work_path/bin:$PATH
+	export PATH
+else
+	"$ape_shell" "$ape_path" --assimilate
+fi
 
-version=$("$ape_path" --version)
+run_ape() {
+	if [ "$ape_host" = OpenBSD ]; then
+		"$ape_shell" "$ape_path" "$@"
+	else
+		"$ape_path" "$@"
+	fi
+}
+
+version=$(run_ape --version)
 case "$version" in
 	"kame "*) ;;
 	*)
@@ -41,7 +57,7 @@ task platform-timeout :
 EOF
 
 cd "$work_path"
-output=$("$ape_path" --env KAME_PLATFORM_ENV=passed -f Makefile.kmk platform-smoke)
+output=$(run_ape --env KAME_PLATFORM_ENV=passed -f Makefile.kmk platform-smoke)
 if [ "$output" != "platform-smoke-ok" ]; then
 	echo "APE task output mismatch: $output" >&2
 	exit 1
@@ -52,7 +68,7 @@ if [ "$(cat platform-env.txt)" != passed ]; then
 fi
 
 set +e
-"$ape_path" --timeout 100 -f Makefile.kmk platform-timeout \
+run_ape --timeout 100 -f Makefile.kmk platform-timeout \
 	>"$work_path/timeout.out" 2>"$work_path/timeout.err"
 timeout_status=$?
 set -e

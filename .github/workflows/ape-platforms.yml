@@ -111,5 +111,5 @@ jobs:
       - uses: vmactions/openbsd-vm@v1
         with:
           release: '7.9'
-          prepare: pkg_add bash
+          prepare: pkg_add bash coreutils
           run: bash tools/platform/test-ape.sh dist/kame.com
