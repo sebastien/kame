@@ -32,8 +32,8 @@ test-step "large stdout streams without truncation"
 test-step "stdout and stderr stay on their streams"
 (
 	cd host-process
-	printf 'task streams :\n\techo to-stdout\n\techo to-stderr >&2\n' >Streams.kmk
-	cli_run -- -f Streams.kmk streams
+	printf 'task streams :\n\tprintf "%%s\\n" "$STREAM_OUT"\n\techo to-stderr >&2\n' >Streams.kmk
+	cli_run --env STREAM_OUT=to-stdout -- -f Streams.kmk streams
 	cli_expect_status 0
 	cli_expect_stdout "to-stdout
 "
