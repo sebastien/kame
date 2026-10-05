@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Spec: docs/spec/033-plugins.md — JavaScript callback adapter
+# Spec: docs/spec/033-plugins.md — callback and native-process adapters
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 
@@ -13,6 +13,9 @@ test-ok "WASM plugin registration and callback exports are current"
 test-step "round-trip, identity checks, capability gates, limits, timeout and failure"
 if node --input-type=module <<'NODE'
 import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { Kame } from './dist/kame.js';
 
 const declarations = (operation = {}) => [{
@@ -101,6 +104,24 @@ await assert.rejects(call('(example-run "x")', failedProcess, undefined), (error
 const timedProcess = declarations({ timeoutMS: 20 });
 timedProcess[0].argv = [process.execPath, '-e', `process.stdin.resume(); setInterval(() => {}, 1000);`];
 await assert.rejects(call('(example-run "x")', timedProcess, undefined), (error) => error.code === 'PLUGIN_TIMEOUT');
+
+const processDir = mkdtempSync(join(tmpdir(), 'kame-plugin-'));
+const readyPath = join(processDir, 'ready');
+const stoppedPath = join(processDir, 'stopped');
+const cancelProcess = declarations();
+cancelProcess[0].argv = [process.execPath, '-e', `
+const fs = require('node:fs');
+fs.writeFileSync(process.argv[1], 'ready');
+process.on('SIGTERM', () => { fs.writeFileSync(process.argv[2], 'stopped'); process.exit(0); });
+process.stdin.resume();
+setInterval(() => {}, 1000);`, readyPath, stoppedPath];
+const processAbortController = new AbortController();
+const cancelledProcess = call('(example-run "x")', cancelProcess, undefined, { signal: processAbortController.signal });
+while (!existsSync(readyPath)) await new Promise((resolve) => setTimeout(resolve, 1));
+processAbortController.abort();
+await assert.rejects(cancelledProcess, (error) => error.code === 'EXEC_CANCELLED');
+assert.equal(readFileSync(stoppedPath, 'utf8'), 'stopped');
+rmSync(processDir, { recursive: true, force: true });
 NODE
 then
 	test-ok "callback and process adapters enforce identity, capability, bounds, timeout and failure contracts"
