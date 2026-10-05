@@ -30,6 +30,7 @@ yes
 '
 list_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: ["a" "b"]] "plain")'
 record_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: [first: "A" second: "B"]] "plain")'
+nested_loop='(render (cat "@for([group] groups)\nouter:" "@" "(index)" "[\n@for([item] group)\n" "@" "(index)" ":" "@" "(item)" ",\n@end(for)\n]" "@" "(index)" "\n@end(for)\n") [groups: [["a" "b"] ["c"]]] "plain")'
 
 for host in native wasm; do
 	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
@@ -69,6 +70,12 @@ for host in native wasm; do
 		test-ok "$host binds record loop keys in source order"
 	else
 		test-fail "$host record loop bindings: $(cat "$TMPDIR/$host.record-loop.err") $(cat "$TMPDIR/$host.record-loop.out")"
+	fi
+	"${runner[@]}" do run --lang expr -c "$nested_loop" >"$TMPDIR/$host.nested-loop.out" 2>"$TMPDIR/$host.nested-loop.err"
+	if [ "$(cat "$TMPDIR/$host.nested-loop.out")" = '"outer:0[\n0:a,\n1:b,\n]0\nouter:1[\n0:c,\n]1\n"' ]; then
+		test-ok "$host restores outer loop indices after nested loops"
+	else
+		test-fail "$host nested loop bindings: $(cat "$TMPDIR/$host.nested-loop.err") $(cat "$TMPDIR/$host.nested-loop.out")"
 	fi
 done
 
