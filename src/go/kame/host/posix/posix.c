@@ -46,7 +46,7 @@ typedef struct km_process {
     int outfd, errfd, execfd;
     bool started, reaped, terminating, killed, terminal;
     int outcome, status, signal;
-    int64_t deadline, kill_deadline;
+    int64_t started_at, deadline, kill_deadline;
     int queued;
     so_byte *stdout_data, *stderr_data;
     int stdout_len, stderr_len, retain, stdout_cap, stderr_cap;
@@ -568,7 +568,7 @@ int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so
         host->processes = processes; host->cap = cap;
     }
     km_process *p = &host->processes[host->len++];
-    memset(p, 0, sizeof(*p)); p->id = id; p->pid = pid; p->job = job; p->outfd = out[0]; p->errfd = err[0]; p->execfd = execerr[0]; p->retain = retain; p->deadline = timeout ? km_now() + timeout : 0;
+    memset(p, 0, sizeof(*p)); p->id = id; p->pid = pid; p->job = job; p->outfd = out[0]; p->errfd = err[0]; p->execfd = execerr[0]; p->retain = retain; p->started_at = km_now(); p->deadline = timeout ? p->started_at + timeout : 0;
     p->direct = direct;
     return 0;
 fail:
@@ -708,7 +708,7 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
         free(p.stages); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]);
         return km_spawn_failed(host, id, "graph spawn failed");
     }
-    p.outfd = out[0]; p.errfd = err[0]; p.execfd = execerr[0]; p.deadline = timeout ? km_now() + timeout : 0;
+    p.outfd = out[0]; p.errfd = err[0]; p.execfd = execerr[0]; p.started_at = km_now(); p.deadline = timeout ? p.started_at + timeout : 0;
     host->processes[host->len++] = p;
     return 0;
 }
@@ -790,6 +790,7 @@ static void km_reap(km_host *host, km_process *p) {
 
 static void km_terminate(km_host *host, km_process *p, int outcome, int64_t grace_ms) {
     if (p->terminal || p->terminating) return;
+    if (getenv("KAME_DEBUG_WINDOWS_JOBS")) fprintf(stderr, "terminate request: id=%lld age_ms=%lld deadline=%lld outcome=%d\n", (long long)p->id, (long long)(km_now() - p->started_at), (long long)p->deadline, outcome);
     for (int i = 0; i < p->stage_count; i++) if (!p->stages[i].reaped) p->stages[i].outcome = outcome;
     if (km_signal(p, SIGTERM) < 0) { km_fail(host, p, "SIGTERM failed"); return; }
     if (grace_ms < 0) grace_ms = 0;
