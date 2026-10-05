@@ -13,6 +13,7 @@ type ProgramHost interface {
 	Pump(waitMS int) bool
 	Next() ProcessEventResult
 	Cancel(id int64) bool
+	Stop(id int64, graceMS int64) bool
 	CancelAll()
 	Active() int
 	Free()

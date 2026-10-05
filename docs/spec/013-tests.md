@@ -252,7 +252,8 @@ plan JSON, multiple target requests and invalid assignments on both hosts.
 
 `T010-26-wasm-service-readiness.sh` verifies that forwarded WASM service
 probes gate dependents, and that a readiness timeout cancels the service and
-reports `SERVICE_READY_TIMEOUT`.
+reports `SERVICE_READY_TIMEOUT`. It also checks that a configured zero stop
+grace period is honored by the JavaScript host.
 
 The Go CLI unit-test sanitizer command uses `GOGC=off`. Solod 0.4.0's Go
 compatibility allocator stores structs in unscanned byte slices, while its Go

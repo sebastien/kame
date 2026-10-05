@@ -46,6 +46,15 @@ func TestPayloadRecordsExposePathsAndScripts(t *testing.T) {
 	put.Free(a)
 }
 
+func TestServiceCancellationPayloadPreservesProcessIDAndGrace(t *testing.T) {
+	a := t.Allocator()
+	payload := host.ServiceCancelPayload(a, 9223372036854775000, 250)
+	if got := host.PayloadText(payload, host.FieldData); got != `{"id":"9223372036854775000","graceMS":250}` {
+		t.Error("service cancellation payload lost its exact process ID or grace period")
+	}
+	payload.Free(a)
+}
+
 func TestQueueReleasesRecordPayload(t *testing.T) {
 	a := t.Allocator()
 	queue := host.NewQueue(a)

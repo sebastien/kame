@@ -41,6 +41,7 @@ int km_event_stage_field(km_event *, int, int);
 int km_host_pump(km_host *, int);
 bool km_host_next(km_host *, km_event *);
 int km_host_cancel(km_host *, int64_t, bool);
+int km_host_stop(km_host *, int64_t, int64_t);
 void km_host_cancel_all(km_host *);
 int km_host_active(km_host *);
 void km_host_force_waitpid_failure(km_host *);

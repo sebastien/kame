@@ -98,6 +98,9 @@ func km_host_next(h *nativeHost, event *nativeEvent) bool { _, _ = h, event; ret
 func km_host_cancel(h *nativeHost, id int64, timeout bool) c.Int { _, _, _ = h, id, timeout; return 0 }
 
 //so:extern
+func km_host_stop(h *nativeHost, id int64, graceMS int64) c.Int { _, _, _ = h, id, graceMS; return 0 }
+
+//so:extern
 func km_host_cancel_all(h *nativeHost) { _ = h }
 
 //so:extern
@@ -247,6 +250,11 @@ func (h *Host) Next() host.ProcessEventResult {
 // Cancel requests process-group termination. Repeating it is harmless.
 func (h *Host) Cancel(id int64) bool {
 	return h != nil && h.native != nil && km_host_cancel(h.native, id, false) == 0
+}
+
+// Stop sends SIGTERM and escalates to SIGKILL after graceMS milliseconds.
+func (h *Host) Stop(id int64, graceMS int64) bool {
+	return h != nil && h.native != nil && km_host_stop(h.native, id, graceMS) == 0
 }
 
 // CancelAll requests termination for every active process group.

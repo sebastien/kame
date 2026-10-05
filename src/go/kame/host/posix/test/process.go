@@ -248,6 +248,31 @@ func TestCancellationAndTimeout(t *testing.T) {
 	h.Free()
 }
 
+func TestStopHonorsConfiguredGracePeriod(t *testing.T) {
+	a := t.Allocator()
+	h := posix.New(a)
+	r := request(a, 41, "trap '' TERM; printf READY; while :; do sleep 1; done")
+	if !h.Start(r) { t.Fatal("start failed"); return }
+	ready := false
+	for attempt := 0; attempt < 100 && !ready; attempt++ {
+		if !h.Pump(10) { t.Fatal("host pump failed"); return }
+		for {
+			result := h.Next()
+			if !result.OK { break }
+			if result.Event.Kind == posix.Stdout && string(result.Event.Data) == "READY" { ready = true }
+			result.Event.Free(a)
+		}
+	}
+	if !ready { t.Fatal("process did not install its TERM handler"); return }
+	if !h.Stop(41, 0) { t.Fatal("stop request was rejected"); return }
+	var terminal posix.Event
+	events := drain(t, h, &terminal)
+	if terminal.Outcome != posix.Cancelled || terminal.Signal != 9 { t.Error("zero grace period did not escalate to SIGKILL") }
+	freeEvents(a, events)
+	freeRequest(a, &r)
+	h.Free()
+}
+
 func TestRetainedPrefixAndBackpressure(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)

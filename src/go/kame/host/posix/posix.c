@@ -529,7 +529,7 @@ static void km_exec_ready(km_host *host, km_process *p) {
     km_push(host, p, event);
 }
 
-static void km_terminate(km_host *host, km_process *p, int outcome);
+static void km_terminate(km_host *host, km_process *p, int outcome, int64_t grace_ms);
 
 static void km_read(km_host *host, km_process *p, int *fd, int kind) {
     if (*fd < 0 || p->queued >= KM_QUEUE_LIMIT) return;
@@ -542,7 +542,7 @@ static void km_read(km_host *host, km_process *p, int *fd, int kind) {
     p->queued += (int)n;
     if (kind == KM_STDOUT) { if (!km_append(&p->stdout_data, &p->stdout_len, &p->stdout_cap, buffer, (int)n, p->retain, &p->stdout_truncated)) km_fail(host, p, "retained output allocation failed"); }
     else if (!km_append(&p->stderr_data, &p->stderr_len, &p->stderr_cap, buffer, (int)n, p->retain, &p->stderr_truncated)) km_fail(host, p, "retained output allocation failed");
-    if (p->direct && p->retain > 0 && p->stdout_truncated) km_terminate(host, p, KM_CANCELLED);
+    if (p->direct && p->retain > 0 && p->stdout_truncated) km_terminate(host, p, KM_CANCELLED, KM_GRACE_MS);
 }
 
 static void km_reap(km_host *host, km_process *p) {
@@ -578,22 +578,29 @@ static void km_reap(km_host *host, km_process *p) {
     if (WIFEXITED(status)) p->status = WEXITSTATUS(status); else if (WIFSIGNALED(status)) p->signal = WTERMSIG(status);
 }
 
-static void km_terminate(km_host *host, km_process *p, int outcome) {
+static void km_terminate(km_host *host, km_process *p, int outcome, int64_t grace_ms) {
     if (p->terminal || p->terminating) return;
     for (int i = 0; i < p->stage_count; i++) if (!p->stages[i].reaped) p->stages[i].outcome = outcome;
     if (km_signal(p, SIGTERM) < 0) { km_fail(host, p, "SIGTERM failed"); return; }
-    p->terminating = true; p->outcome = outcome; p->kill_deadline = km_now() + KM_GRACE_MS;
+    if (grace_ms < 0) grace_ms = 0;
+    p->terminating = true; p->outcome = outcome; p->kill_deadline = km_now() + grace_ms;
 }
 
 int km_host_cancel(km_host *host, int64_t id, bool timeout) {
     if (!host) return -1;
-    for (int i = 0; i < host->len; i++) if (host->processes[i].id == id) { km_terminate(host, &host->processes[i], timeout ? KM_TIMED_OUT : KM_CANCELLED); return 0; }
+    for (int i = 0; i < host->len; i++) if (host->processes[i].id == id) { km_terminate(host, &host->processes[i], timeout ? KM_TIMED_OUT : KM_CANCELLED, KM_GRACE_MS); return 0; }
+    return -1;
+}
+
+int km_host_stop(km_host *host, int64_t id, int64_t grace_ms) {
+    if (!host) return -1;
+    for (int i = 0; i < host->len; i++) if (host->processes[i].id == id) { km_terminate(host, &host->processes[i], KM_CANCELLED, grace_ms); return 0; }
     return -1;
 }
 
 void km_host_cancel_all(km_host *host) {
     if (!host) return;
-    for (int i = 0; i < host->len; i++) km_terminate(host, &host->processes[i], KM_CANCELLED);
+    for (int i = 0; i < host->len; i++) km_terminate(host, &host->processes[i], KM_CANCELLED, KM_GRACE_MS);
 }
 
 int km_host_pump(km_host *host, int wait) {
@@ -604,9 +611,9 @@ int km_host_pump(km_host *host, int wait) {
         if (!p->terminal && p->stage_count) km_reap(host, p);
         for (int j = 0; !p->terminal && !p->terminating && j < p->stage_count; j++) {
             km_stage *stage = &p->stages[j];
-            if (!stage->reaped && stage->deadline && now >= stage->deadline) km_terminate(host, p, KM_TIMED_OUT);
+            if (!stage->reaped && stage->deadline && now >= stage->deadline) km_terminate(host, p, KM_TIMED_OUT, KM_GRACE_MS);
         }
-        if (!p->terminal && p->deadline && now >= p->deadline) km_terminate(host, p, KM_TIMED_OUT);
+        if (!p->terminal && p->deadline && now >= p->deadline) km_terminate(host, p, KM_TIMED_OUT, KM_GRACE_MS);
         if (!p->terminal && p->terminating && !p->killed && now >= p->kill_deadline) { if (km_signal(p, SIGKILL) < 0) km_fail(host, p, "SIGKILL failed"); p->killed = true; }
     }
     int poll_wait = wait < 0 ? 0 : wait;

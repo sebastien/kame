@@ -6,6 +6,7 @@ import (
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strconv"
 	"solod.dev/so/strings"
 )
 
@@ -173,23 +174,31 @@ func ServiceTimerPayload(a mem.Allocator, milliseconds int64) core.Value {
 	e := json.NewEncoder(&b)
 	e.Int(milliseconds)
 	e.Flush()
-	payload := core.NewRecord(a, []core.RecordField{
+	fields := []core.RecordField{
 		{Key: FieldOp, Value: core.NewString(a, "service-timer")},
 		{Key: FieldData, Value: core.NewString(a, b.String())},
-	})
+	}
+	payload := core.NewRecord(a, fields)
+	for i := range fields { fields[i].Value.Free(a) }
 	b.Free()
 	return payload
 }
 
-func ServiceCancelPayload(a mem.Allocator, processID int64) core.Value {
+func ServiceCancelPayload(a mem.Allocator, processID int64, graceMS int64) core.Value {
 	b := strings.NewBuilder(a)
 	e := json.NewEncoder(&b)
-	e.Int(processID)
+	e.BeginObject()
+	var id [strconv.MaxIntBase10Len]byte
+	e.Str("id"); e.Str(strconv.FormatInt(id[:], processID, 10))
+	e.Str("graceMS"); e.Int(graceMS)
+	e.EndObject()
 	e.Flush()
-	payload := core.NewRecord(a, []core.RecordField{
+	fields := []core.RecordField{
 		{Key: FieldOp, Value: core.NewString(a, "service-cancel")},
 		{Key: FieldData, Value: core.NewString(a, b.String())},
-	})
+	}
+	payload := core.NewRecord(a, fields)
+	for i := range fields { fields[i].Value.Free(a) }
 	b.Free()
 	return payload
 }

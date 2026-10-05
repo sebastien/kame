@@ -132,8 +132,10 @@ fails the service and cancels its process. Releasing the final dependent
 cancels it.
 Embedding callers can use `Start` and `Handle.PollReady` to observe root-service
 readiness while retaining the handle; freeing or canceling that handle releases
-the service. Forwarded readiness is implemented by the JavaScript CLI; public
-embedding hosts still need to service the timer, clock, probe and cancellation
-request kinds themselves.
-Health probes, restart policy, grace-period shutdown, bounded service log
-retention, and full lifecycle event parity remain open.
+the service. Final release sends SIGTERM to the service process group and
+escalates to SIGKILL after `stop.grace-ms` on native and JavaScript CLI hosts.
+Forwarded readiness and stop requests are implemented by the JavaScript CLI;
+public embedding hosts still need to service the timer, clock, probe and
+cancellation request kinds themselves.
+Health probes, restart policy, bounded service log retention, and full lifecycle
+event parity remain open.

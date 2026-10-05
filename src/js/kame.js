@@ -57,13 +57,13 @@ function track(child, request = undefined) {
   });
 }
 
-function cancelProcessGroup(request) {
+function cancelProcessGroup(request, graceMS = 5000) {
   const child = activeProcessGroups.get(request.toString());
   if (!child || child.pid === undefined) return;
   try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
   const timer = setTimeout(() => {
     try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
-  }, 5000);
+  }, graceMS);
   timer.unref();
 }
 
@@ -895,8 +895,14 @@ class Module {
     }
     if (kind === 23) {
       let processRequest;
-      try { processRequest = BigInt(payload); } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process cancellation request'); }
-      cancelProcessGroup(processRequest);
+      let graceMS;
+      try {
+        const cancellation = JSON.parse(payload);
+        processRequest = BigInt(cancellation.id);
+        graceMS = cancellation.graceMS;
+      } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process cancellation request'); }
+      if (!Number.isSafeInteger(graceMS) || graceMS < 0 || graceMS > 60000) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process cancellation grace period');
+      cancelProcessGroup(processRequest, graceMS);
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
     if (kind === 19) return this.completeJSON(instance, request, existsSync(payload));

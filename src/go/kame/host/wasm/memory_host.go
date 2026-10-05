@@ -218,6 +218,11 @@ func (h *MemoryHost) Cancel(id int64) bool {
 	return false
 }
 
+func (h *MemoryHost) Stop(id int64, graceMS int64) bool {
+	_, _, _ = h, id, graceMS
+	return false
+}
+
 func (h *MemoryHost) CancelAll() { _ = h }
 
 func (h *MemoryHost) Active() int {

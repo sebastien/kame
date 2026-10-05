@@ -44,4 +44,16 @@ else
 	test-fail "forwarded readiness timeout: status=$status err=$(cat "$work/err")"
 fi
 
+cat >"$work/Makefile.kmk" <<'EOF'
+service daemon : ; [stop: [grace-ms: 0]]
+	trap '' TERM; while :; do sleep 1; done
+consumer : daemon
+	true
+EOF
+if (cd "$work" && timeout 3 node "$cli" consumer >out 2>err); then
+	test-ok "forwarded stop request applies the configured grace period"
+else
+	test-fail "forwarded service stop exceeded its zero grace period"
+fi
+
 test-end

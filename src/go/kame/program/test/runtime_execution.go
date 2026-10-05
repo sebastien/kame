@@ -618,6 +618,31 @@ func TestServiceRootCanWaitForReadinessAndRelease(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestServiceStopUsesConfiguredGracePeriod(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "service.kmk", "service daemon : ; [stop: [grace-ms: 0]]\n\ttrap '' TERM; while :; do sleep 1; done\n")
+	registry := eval.NewRegistry(a)
+	host := posix.New(a)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: host})
+	if compiled.Program == nil || len(compiled.Diagnostics) != 0 { t.Fatal("compile failed"); return }
+	started := compiled.Program.Start("daemon")
+	if started.Diagnostic.Code != "" || started.Handle == nil { t.Fatal("service did not start"); return }
+	ready := false
+	for i := 0; i < 20 && !ready; i++ {
+		result := started.Handle.PollReady()
+		ready = result.Done
+		result.Result.Free(a)
+		if !ready { compiled.Program.Tick(10) }
+	}
+	if !ready { t.Fatal("service did not become ready"); return }
+	if host.Active() != 1 { t.Fatal("service process was not retained") }
+	started.Handle.Cancel()
+	for i := 0; i < 30 && host.Active() != 0; i++ { compiled.Program.Tick(10) }
+	if host.Active() != 0 { t.Error("zero grace period did not force service process cleanup") }
+	started.Handle.Free()
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestServiceReadinessProbeGatesDependents(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)

@@ -584,6 +584,7 @@ func (p *Program) drainCancellations() {
 			return
 		}
 		probeID := int64(0)
+		serviceGrace := int64(-1)
 		for i := range p.Instances {
 			entry := &p.Instances[i]
 			if entry.Node.ID == cancellation.NodeID && entry.ServiceProbeID != 0 {
@@ -591,24 +592,28 @@ func (p *Program) drainCancellations() {
 				entry.ServiceProbeID = 0
 			}
 			if entry.Node.ID == cancellation.NodeID {
+				if entry.Rule.Kind == rule.ServiceRule { serviceGrace = entry.Service.StopGrace }
 				entry.ServiceReadyDeadline, entry.ServiceNextProbe = 0, 0
 				entry.ServiceClockID, entry.ServiceTimerID = 0, 0
 			}
 		}
 		if p.Forwarding {
-			p.queueProcessCancellation(cancellation.NodeID, cancellation.Generation, cancellation.Attempt, cancellation.RequestID)
-			if probeID != 0 { p.queueProcessCancellation(cancellation.NodeID, cancellation.Generation, cancellation.Attempt, probeID) }
+			grace := serviceGrace
+			if grace < 0 { grace = 5000 }
+			p.queueProcessCancellation(cancellation.NodeID, cancellation.Generation, cancellation.Attempt, cancellation.RequestID, grace)
+			if probeID != 0 { p.queueProcessCancellation(cancellation.NodeID, cancellation.Generation, cancellation.Attempt, probeID, 0) }
 		} else if p.Host != nil {
-			p.Host.Cancel(cancellation.RequestID)
+			if serviceGrace >= 0 { p.Host.Stop(cancellation.RequestID, serviceGrace)
+			} else { p.Host.Cancel(cancellation.RequestID) }
 			if probeID != 0 { p.Host.Cancel(probeID) }
 		}
 	}
 }
 
-func (p *Program) queueProcessCancellation(nodeID int64, generation int64, attempt int64, processID int64) {
+func (p *Program) queueProcessCancellation(nodeID int64, generation int64, attempt int64, processID int64, graceMS int64) {
 	p.nextRequest++
 	id := p.nextRequest
-	payload := host.ServiceCancelPayload(p.Alloc, processID)
+	payload := host.ServiceCancelPayload(p.Alloc, processID, graceMS)
 	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: id, NodeID: nodeID, Generation: generation, Attempt: attempt, Kind: host.RequestProcessCancel, Payload: payload})
 }
 
