@@ -1428,7 +1428,7 @@ class Module {
     if (new TextEncoder().encode(encodedEnvelope).length > maxResponseBytes) return this.completeFailure(instance, request, 'PLUGIN_LIMIT', 'plugin result exceeds its byte limit');
     if (Object.hasOwn(response, 'error')) {
       const error = response.error;
-      if (!error || typeof error.code !== 'string' || !/^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) || typeof error.message !== 'string' || new TextEncoder().encode(error.message).length > 256) return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin error response');
+      if (!error || typeof error !== 'object' || Array.isArray(error) || Object.keys(error).length !== 2 || Object.keys(error).some((field) => !['code', 'message'].includes(field)) || typeof error.code !== 'string' || !/^[A-Z][A-Z0-9_]{0,63}$/.test(error.code) || typeof error.message !== 'string' || new TextEncoder().encode(error.message).length > 256) return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin error response');
       return this.completeFailure(instance, request, error.code, error.message);
     }
     let encoded;
@@ -1968,12 +1968,13 @@ class Module {
 }
 
 function terminatePluginChild(child) {
-  if (!child || child.pid === undefined) return;
+  if (!child || child.pid === undefined) return undefined;
   try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch {} }
   const timer = setTimeout(() => {
     try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch {} }
   }, 100);
   timer.unref();
+  return timer;
 }
 
 function runPluginProcess(invocation, executable, responseLimit, signal) {
@@ -1984,23 +1985,26 @@ function runPluginProcess(invocation, executable, responseLimit, signal) {
     const output = [];
     let outputBytes = 0;
     let overflow = false;
+    let forceKillTimer;
     child.stdout.on('data', (chunk) => {
       outputBytes += chunk.length;
       if (outputBytes > responseLimit + 1) {
         overflow = true;
-        terminatePluginChild(child);
+        forceKillTimer ??= terminatePluginChild(child);
       } else output.push(Buffer.from(chunk));
     });
     // Drain stderr so a noisy plugin cannot block. It is deliberately omitted
     // from both the returned diagnostic and the public result.
     child.stderr.resume();
-    const abort = () => terminatePluginChild(child);
+    const abort = () => { forceKillTimer ??= terminatePluginChild(child); };
     signal.addEventListener('abort', abort, { once: true });
     child.once('error', () => {
+      clearTimeout(forceKillTimer);
       signal.removeEventListener('abort', abort);
       rejectResponse(new Error('plugin process failed'));
     });
     child.once('close', (code, signalName) => {
+      clearTimeout(forceKillTimer);
       signal.removeEventListener('abort', abort);
       if (signal.aborted) { rejectResponse(new Error('plugin process cancelled')); return; }
       if (overflow) { rejectResponse(Object.assign(new Error('plugin response too large'), { code: 'PLUGIN_LIMIT' })); return; }
