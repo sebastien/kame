@@ -354,7 +354,7 @@ static void km_fail(km_host *host, km_process *p, const char *diagnostic) {
         for (int i = 0; i < p->stage_count; i++) if (!p->stages[i].reaped && !p->terminating) p->stages[i].outcome = KM_FAILED;
         km_signal(p, SIGKILL); km_wait_graph(p);
     }
-    if (!p->reaped) kill(-p->pid, SIGKILL);
+    if (!p->reaped) km_signal(p, SIGKILL);
     km_close(&p->outfd); km_close(&p->errfd);
     km_emit_terminal(host, p, KM_FAILED, diagnostic);
 }
