@@ -26,7 +26,7 @@ jobs:
       - uses: vmactions/freebsd-vm@v1
         with:
           release: '15.1'
-          prepare: pkg install -y go gmake
+          prepare: pkg install -y go gmake bash python3
           run: |
             export PATH="$(go env GOPATH)/bin:$PATH"
             go install solod.dev/cmd/so@v0.4.0
@@ -47,9 +47,9 @@ jobs:
         with:
           release: '11.0'
           usesh: true
-          prepare: /usr/sbin/pkg_add go gmake
+          prepare: /usr/sbin/pkg_add go gmake bash python3
           run: |
-            export PATH="/usr/pkg/bin:$(go env GOPATH)/bin:$PATH"
+            export PATH="/usr/pkg/go/bin:/usr/pkg/bin:$(go env GOPATH)/bin:$PATH"
             go install solod.dev/cmd/so@v0.4.0
             /usr/pkg/bin/gmake test-so
             /usr/pkg/bin/gmake dist/native/netbsd-x86_64/kame
@@ -67,7 +67,7 @@ jobs:
       - uses: vmactions/openbsd-vm@v1
         with:
           release: '7.9'
-          prepare: pkg_add go gmake
+          prepare: pkg_add go gmake bash python3
           run: |
             export PATH="/usr/local/bin:$(go env GOPATH)/bin:$PATH"
             go install solod.dev/cmd/so@v0.4.0

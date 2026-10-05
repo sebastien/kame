@@ -66,7 +66,7 @@ try {
   await mkdir(workspace);
   await writeFile(
     path.join(workspace, 'Windows.kmk'),
-    'task windows-launcher :\r\n\techo KAME_WINDOWS_RUNTIME_OK\r\n\techo %KAME_WINDOWS_TEST%\r\n',
+    `task windows-launcher :\r\n\tnode -e "console.log('KAME_WINDOWS_RUNTIME_OK '+process.env.KAME_WINDOWS_TEST)"\r\n`,
   );
   const build = await run(
     launcher,

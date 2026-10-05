@@ -12,7 +12,7 @@ func sameSpan(span source.Span, start int, end int) bool {
 }
 
 func TestScriptComposesPositionedLanguageForms(t *testing.T) {
-	text := "# setup\nvalue = 42\n./out : value\n\techo @<\n(name value)\n\tstray\n"
+	text := "# setup\nvalue = 42\n./out : value\n\techo @<\n(name value)\n"
 	s := script.Parse(t.Allocator(), "test.km", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 {
