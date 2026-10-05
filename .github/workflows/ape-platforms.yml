@@ -1,0 +1,125 @@
+name: APE host conformance
+
+on:
+  push:
+    paths:
+      - '.github/workflows/ape-platforms.yml'
+      - 'Makefile'
+      - 'mise.toml'
+      - 'src/go/kame/**'
+      - 'tests/T015-03-dist-self-build.sh'
+      - 'tools/platform/**'
+      - 'tools/provision-cosmocc.sh'
+      - 'tools/generate-version.sh'
+  pull_request:
+    paths:
+      - '.github/workflows/ape-platforms.yml'
+      - 'Makefile'
+      - 'mise.toml'
+      - 'src/go/kame/**'
+      - 'tests/T015-03-dist-self-build.sh'
+      - 'tools/platform/**'
+      - 'tools/provision-cosmocc.sh'
+      - 'tools/generate-version.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-ape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: src/go/kame/go.mod
+      - name: Install Solod compiler
+        shell: bash
+        run: |
+          go install solod.dev/cmd/so@v0.4.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - name: Build Cosmopolitan APE
+        run: make dist-ape
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kame-ape
+          path: dist/kame.com
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    needs: build-ape
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: kame-ape
+          path: dist
+      - run: sh tools/platform/test-ape.sh dist/kame.com
+
+  darwin:
+    runs-on: macos-latest
+    needs: build-ape
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: kame-ape
+          path: dist
+      - run: sh tools/platform/test-ape.sh dist/kame.com
+
+  mingw:
+    runs-on: windows-latest
+    needs: build-ape
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: kame-ape
+          path: dist
+      - name: Test APE through the Windows POSIX shell
+        shell: bash
+        run: sh tools/platform/test-ape.sh dist/kame.com
+
+  freebsd:
+    runs-on: ubuntu-latest
+    needs: build-ape
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: kame-ape
+          path: dist
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          release: '15.1'
+          run: sh tools/platform/test-ape.sh dist/kame.com
+
+  netbsd:
+    runs-on: ubuntu-latest
+    needs: build-ape
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: kame-ape
+          path: dist
+      - uses: vmactions/netbsd-vm@v1
+        with:
+          usesh: true
+          run: sh tools/platform/test-ape.sh dist/kame.com
+
+  openbsd:
+    runs-on: ubuntu-latest
+    needs: build-ape
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: kame-ape
+          path: dist
+      - uses: vmactions/openbsd-vm@v1
+        with:
+          release: '7.9'
+          run: sh tools/platform/test-ape.sh dist/kame.com

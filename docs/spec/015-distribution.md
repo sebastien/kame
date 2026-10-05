@@ -130,6 +130,11 @@ no download. A `KAME_BIN` that is not executable is fatal.
 APE hosts are the `uname -s`/`uname -m` pairs Cosmopolitan supports: Linux,
 Darwin, FreeBSD, NetBSD, OpenBSD, and the Windows POSIX layers (`MINGW*`,
 `MSYS*`, `CYGWIN*`), on `x86_64`/`amd64` and `aarch64`/`arm64`.
+`tools/platform/test-ape.sh` runs the APE through the POSIX shell adapter,
+checks version output, executes a recipe with an explicit environment, and
+checks timeout cleanup. `.github/workflows/ape-platforms.yml` runs that test
+against one artifact on Linux, Darwin, Windows POSIX, FreeBSD, NetBSD and
+OpenBSD.
 
 The `wasm` backend requires a JavaScript runtime. `KAME_JS` names it;
 otherwise `node` is used. The runtime must be Node 18 or later.
