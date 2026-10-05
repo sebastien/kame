@@ -271,7 +271,9 @@ existing build rules.
   directory, environment and the Node process exit status. On a Windows host,
   run `node tools/windows/test-launcher.mjs dist/windows` after
   `make dist-windows`; it exercises the packaged CLI and the launcher contract.
-  Passing a cross-compile alone does not establish Windows-host conformance.
+  `.github/workflows/windows-launcher.yml` builds the bundle and runs this test
+  on `windows-latest`. Passing a cross-compile alone does not establish
+  Windows-host conformance.
 - An invalid version override fails before creating or accessing a cache path.
 - `kame init` writes a correctly stamped bootstrap sidecar, preserves an
   existing `Makefile`, and refuses a second write without changing either file.

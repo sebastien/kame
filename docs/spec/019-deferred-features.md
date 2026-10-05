@@ -117,13 +117,14 @@ case; this workspace has no Windows runner, so that case is not yet execution
 evidence. D16 now cross-compiles a native Windows x64 launcher that starts the
 adjacent Node/WASM CLI; T015-05 verifies argv, exit status and the PE bundle on
 the current host. `tools/windows/test-launcher.mjs` now exercises the actual
-bundle and launcher process contract on Windows, but this Linux workspace
-cannot run it, so Windows runtime evidence is still missing. The native POSIX
-host suite passes on this Linux host: 24 host package tests, T003-01 (17/17), and
-T003-02 (11/11). Windows-host lifecycle coverage, Darwin/BSD native-host runs,
-and APE verification on advertised non-Linux hosts remain open. The
-initial-contract audit remains historical evidence, not completion of this
-work.
+bundle and launcher process contract on Windows. The new
+`.github/workflows/windows-launcher.yml` builds the bundle on Linux and runs the
+test on `windows-latest`; a successful Windows run is still required before
+claiming runtime conformance. The native POSIX host suite passes on this Linux
+host: 24 host package tests, T003-01 (17/17), and T003-02 (11/11). Windows-host
+lifecycle coverage, Darwin/BSD native-host runs, and APE verification on
+advertised non-Linux hosts remain open. The initial-contract audit remains
+historical evidence, not completion of this work.
 D18's equality-value shorthand is implemented: `(filter LIST VALUE)` retains
 strict scalar-equal items, and `filter-out` removes them with the same numeric,
 cross-kind, and invalid-composite rules as `eq`. T007-02 now covers both
