@@ -44,6 +44,11 @@ task native-timeout :
 	Start-Sleep -Seconds 30
 	Set-Content parent-marker late
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
+	@'
+task native-cache :
+	Add-Content -Path cache-runs.txt -Value ran
+	Write-Output 'native-cache-ok'
+'@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	Push-Location $project
 	try {
 		$env:KAME_NATIVE_ENV = 'inherited'
@@ -65,6 +70,16 @@ task native-timeout :
 		$output = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch '2097152') {
 			throw "Native binary pipeline failed to transfer 2 MiB through both stages: exit=$LASTEXITCODE output=$($output -join ' | ')"
+		}
+		$cacheArgs = @('--json', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-cache')
+		$null = & $exe @cacheArgs 2>&1
+		if ($LASTEXITCODE -ne 0 -or !(Test-Path (Join-Path $project 'cache-runs.txt'))) {
+			throw "Native cache miss failed: exit=$LASTEXITCODE"
+		}
+		$cacheOutput = & $exe @cacheArgs 2>&1
+		$cacheRuns = @(Get-Content (Join-Path $project 'cache-runs.txt'))
+		if ($LASTEXITCODE -ne 0 -or $cacheRuns.Count -ne 1 -or ($cacheOutput -join "`n") -notmatch '"cached":true') {
+			throw "Native cache hit failed: exit=$LASTEXITCODE runs=$($cacheRuns.Count) output=$($cacheOutput -join ' | ')"
 		}
 		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
