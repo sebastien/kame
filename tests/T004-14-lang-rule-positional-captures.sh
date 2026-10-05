@@ -15,6 +15,8 @@ mkdir -p "$project/src"
 cat >"$project/Makefile.kmk" <<'KMK'
 ./{**}/{*}.c : ./{_0}/{_1}.h
 	cat @< > @>
+./{*}.name :
+	printf '%s' @(_0) > @>
 KMK
 printf 'positional-capture-ok\n' >"$project/src/demo.h"
 
@@ -24,6 +26,11 @@ for host in native wasm; do
 		test-ok "$host matched anonymous captures and rendered positional input references"
 	else
 		test-fail "$host positional capture mapping: $(cat "$work/$host.err")"
+	fi
+	if (cd "$project" && "${runner[@]}" ./demo.name) >"$work/$host.name.out" 2>"$work/$host.name.err" && [ "$(cat "$project/demo.name")" = "demo" ]; then
+		test-ok "$host binds anonymous captures under positional names in recipe expressions"
+	else
+		test-fail "$host positional capture scope: $(cat "$work/$host.name.err")"
 	fi
 	if [ "$host" = native ]; then rm -f "$project/src/demo.c"; fi
 done

@@ -19,6 +19,10 @@ Rule output templates accept `{*}` and `{**}` as anonymous captures. They match
 one or more non-`/` bytes and one or more bytes including `/`, respectively.
 Each anonymous group occupies its source-order position and does not create a
 named value in the rule scope.
+Every output capture is also bound in the rule scope as `_0`, `_1`, and so on,
+in source order. A named capture keeps its named binding too. If a named
+capture uses a name that collides with a positional binding, the named binding
+takes precedence.
 
 Named captures keep their existing equality rule: repeated occurrences of a
 name must match the same text. Anonymous groups are independent, even when
@@ -59,6 +63,7 @@ reject it for that use.
   `./src/demo.c` to input `./src/demo.h` on native and WASM hosts.
 - Positional references work when the corresponding output captures are named,
   and their indexes count repeated named groups as separate source positions.
+- Recipe and input expressions can refer to anonymous captures through `_N`.
 - Existing named-only rule matching, input rendering, cache identity, planning,
   diagnostics and source formatting remain stable.
 - `(pattern (cat "./" "{" "name:*" "}.c"))` returns a pattern and can be
