@@ -1,15 +1,17 @@
 # Native Windows CLI
 
 This specification closes the native-Windows CLI deferral in
-`docs/spec/015-distribution.md`. A Windows PE that only launches Node and the
-WASM module is the Windows launcher, not the native CLI.
+`docs/spec/015-distribution.md`. The initial implementation reuses the
+Cosmopolitan APE's native Windows PE entry and the existing C-backed process
+host. It is accepted only after the Windows-host checks below pass; the
+Node/WASM launcher is a separate fallback.
 
 ## Requirements
 
-1. `kame.exe` is a self-contained native CLI build of the same Kame evaluator,
-   command grammar, operations, and program runtime used by the POSIX CLI. It
-   does not require Node, a WASM module, a bundled runtime directory, or network
-   access to execute an already installed command.
+1. `kame-windows-x64.exe` is a self-contained native CLI build of the same Kame
+   evaluator, command grammar, operations, and program runtime used by the
+   POSIX CLI. It does not require Node, a WASM module, a bundled runtime
+   directory, or network access to execute an already installed command.
 2. The command surface and observable results match the shared CLI contract in
    specs 005, 009, 015, and 027: target selection, `do` commands, diagnostics,
    human and JSON events, streams, exit codes, environment overrides, working
@@ -44,7 +46,8 @@ WASM module is the Windows launcher, not the native CLI.
 ## Acceptance
 
 The Windows-host suite builds and runs the actual native PE, not a cross-compile
-or the Node/WASM launcher. It verifies:
+or the Node/WASM launcher. The first smoke already verifies version output and a
+PowerShell recipe. The suite must additionally verify:
 
 - version output, command parsing, native target execution, file reads and
   writes, and include/source discovery;

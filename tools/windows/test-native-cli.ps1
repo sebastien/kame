@@ -16,13 +16,17 @@ try {
 	@'
 task native-windows :
 	Write-Output 'native-windows-recipe-ok'
+	Set-Content -Path native-env.txt -Value $env:KAME_NATIVE_ENV
 '@ | Set-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	$shell = (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe').Replace('\', '/')
 	Push-Location $project
 	try {
-		$output = & $exe --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-windows 2>&1
+		$output = & $exe --env KAME_NATIVE_ENV=passed --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-windows 2>&1
 		if ($LASTEXITCODE -ne 0 -or ($output -join "`n") -notmatch 'native-windows-recipe-ok') {
 			throw "Native recipe check failed: exit=$LASTEXITCODE output=$($output -join ' | ')"
+		}
+		if ((Get-Content (Join-Path $project 'native-env.txt') -Raw).Trim() -ne 'passed') {
+			throw 'Native recipe did not receive the CLI environment override or write its output file.'
 		}
 	} finally {
 		Pop-Location

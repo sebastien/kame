@@ -24,9 +24,9 @@ def main():
     parser.add_argument("--signing-key", required=True, type=pathlib.Path)
     args = parser.parse_args()
 
-    assets = ["VERSION", "kame.com", "kame.js", "kame.wasm", "kame-windows-x64.zip", "bin/kame", "Makefile.bootstrap", "kame.rb", "kame.json"]
+    assets = ["VERSION", "kame.com", "kame.js", "kame.wasm", "kame-windows-x64.zip", "kame-windows-x64.exe", "bin/kame", "Makefile.bootstrap", "kame.rb", "kame.json"]
     for path in sorted(args.directory.glob("kame-*")):
-        if path.name == "kame-windows-x64.zip" or not path.is_file():
+        if path.name in {"kame-windows-x64.zip", "kame-windows-x64.exe"} or not path.is_file():
             continue
         if path.is_symlink() or not re.fullmatch(
             r"kame-(?:linux|darwin|freebsd|netbsd|openbsd)-(?:x86_64|arm64)",

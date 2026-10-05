@@ -24,20 +24,22 @@ release publishes these flat assets under the base URL
 | `kame.com` | `make dist-ape` | Cosmopolitan APE, full native CLI |
 | `kame.wasm` | `make wasm` | freestanding module |
 | `kame.js` | packaged JS CLI | Node CLI wrapper for `kame.wasm` (`010-wasm.md`) |
+| `kame-windows-x64.exe` | `make dist-windows` | Windows x64 PE entry for the native CLI |
 | `kame-windows-x64.zip` | `make dist-windows` | Windows x64 `kame.exe` launcher with colocated Node/WASM CLI assets |
 | `kame-PLATFORM` | `make dist-native` on each build host | Host-native CLI binary, named with the `OS-ARCH` platform key |
 | `bin/kame` | stamped launcher | host provisioning and dispatch |
 | `Makefile.bootstrap` | bootstrap template | project-local make delegation and `kame init` |
 | `VERSION` | release tree | signed version selector for the explicit latest channel |
 | `kame.rb` | release builder | version-pinned Homebrew formula for the APE |
-| `kame.json` | release builder | version-pinned Scoop manifest for the Windows x64 bundle |
+| `kame.json` | release builder | version-pinned Scoop manifest for the native Windows CLI |
 | `PROVENANCE.json` | release builder | version, source revision and asset digests |
 | `SHA256SUMS` | checksums | signed integrity manifest |
 | `SHA256SUMS.sig` | release signer | Ed25519 signature over the exact manifest bytes |
 
-Asset filenames carry no version; the release tag does. The Windows bundle is a
-native executable launcher for the Node/WASM CLI and requires Node 18 or later.
-The Cosmopolitan APE remains the full native CLI for its supported hosts.
+Asset filenames carry no version; the release tag does. The standalone Windows
+PE runs the native CLI without Node or a colocated runtime. The Windows ZIP
+retains the Node/WASM launcher as a separate fallback and requires Node 18 or
+later. The Cosmopolitan APE provides the native CLI on its supported hosts.
 The native-artifact workflows build Linux and macOS binaries on x64 and ARM64,
 plus x64 binaries on FreeBSD, NetBSD and OpenBSD. Each is stored as
 `dist/native/PLATFORM/kame`. Before signing a multi-platform release, collect
@@ -258,8 +260,8 @@ scoop install https://github.com/sebastien/kame/releases/download/vVERSION/kame.
 ```
 
 Replace `VERSION` with the desired release version. The Homebrew formula
-installs the APE as `kame`; the Scoop manifest adds `kame.exe` to the user's
-path. These release-pinned definitions do not publish or update a tap/bucket.
+installs the APE as `kame`; the Scoop manifest exposes the native Windows PE as
+`kame`. These release-pinned definitions do not publish or update a tap/bucket.
 
 The JS CLI source lives in the repository and is copied unchanged to
 `dist/kame.js`. Command execution keeps the absolute-path discipline of the
@@ -293,6 +295,9 @@ existing build rules.
   `.github/workflows/windows-launcher.yml` builds the bundle and runs this test
   on `windows-latest`. Passing a cross-compile alone does not establish
   Windows-host conformance.
+- `kame-windows-x64.exe` runs directly on `windows-latest` and passes the native
+  CLI version and PowerShell recipe checks without Node. The complete host
+  semantics remain gated by spec 035.
 - An invalid version override fails before creating or accessing a cache path.
 - `kame init` writes a correctly stamped bootstrap sidecar, preserves an
   existing `Makefile`, and refuses a second write without changing either file.
@@ -310,10 +315,7 @@ existing build rules.
 
 ## Deferred
 
-- A native Windows CLI rather than the current Node/WASM launcher. See
-  `docs/spec/035-native-windows-cli.md` for the host contract and acceptance
-  gates.
-- Windows-host launcher and process lifecycle conformance; a cross-compiled PE
-  file alone is not host execution evidence.
+- Full native Windows host conformance beyond the initial APE version/recipe
+  smoke. See `docs/spec/035-native-windows-cli.md` for the remaining gates.
 - Maintained Homebrew tap and Scoop bucket repositories with automated
   manifest publication.

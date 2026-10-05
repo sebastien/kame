@@ -165,7 +165,7 @@ dist/kame.js: src/js/kame.js
 KAME_RELEASE_PUBLIC_KEY ?=
 KAME_RELEASE_SIGNING_KEY ?=
 KAME_RELEASE_REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
-dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zip
+dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zip dist/kame-windows-x64.exe
 	test -n "$(KAME_RELEASE_PUBLIC_KEY)" -a -f "$(KAME_RELEASE_PUBLIC_KEY)"
 	test -n "$(KAME_RELEASE_SIGNING_KEY)" -a -f "$(KAME_RELEASE_SIGNING_KEY)"
 	rm -rf dist/release
@@ -174,6 +174,7 @@ dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zi
 	cp dist/kame.wasm dist/release/kame.wasm
 	cp dist/kame.js dist/release/kame.js
 	cp dist/kame-windows-x64.zip dist/release/kame-windows-x64.zip
+	cp dist/kame-windows-x64.exe dist/release/kame-windows-x64.exe
 	if test -d dist/native; then for artifact in dist/native/*/kame; do \
 		if test -f "$$artifact"; then platform=$$(basename "$$(dirname "$$artifact")"); \
 			cp "$$artifact" "dist/release/kame-$$platform"; fi; \
@@ -204,7 +205,10 @@ dist/kame-windows-x64.zip: dist/windows/kame.exe
 	rm -f $@
 	cd dist/windows && zip -q ../kame-windows-x64.zip kame.exe kame.js kame.wasm
 
-dist-windows: dist/kame-windows-x64.zip
+dist/kame-windows-x64.exe: dist/kame.com
+	cp dist/kame.com $@
+
+dist-windows: dist/kame-windows-x64.zip dist/kame-windows-x64.exe
 
 # The freestanding target begins with ABI primitives. It stays outside the
 # default build until the portable runtime no longer reaches hosted imports.

@@ -45,9 +45,9 @@ end
         "version": version,
         "description": "Build tool for projects described with Kame",
         "homepage": "https://github.com/sebastien/kame",
-        "url": f"{base}/kame-windows-x64.zip",
-        "hash": sha256(root / "kame-windows-x64.zip"),
-        "bin": ["kame.exe"],
+        "url": f"{base}/kame-windows-x64.exe",
+        "hash": sha256(root / "kame-windows-x64.exe"),
+        "bin": [["kame-windows-x64.exe", "kame"]],
     }
     (root / "kame.json").write_text(
         json.dumps(scoop, sort_keys=True, indent=2) + "\n", encoding="utf-8"

@@ -24,15 +24,13 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Build Windows launcher bundle
         run: |
-          make dist-windows dist-ape
-          mkdir -p dist/native-windows
-          cp dist/kame.com dist/native-windows/kame.exe
+          make dist-windows
       - uses: actions/upload-artifact@v4
         with:
           name: windows-kame-bundle
           path: |
             dist/windows
-            dist/native-windows/kame.exe
+            dist/kame-windows-x64.exe
           if-no-files-found: error
 
   windows-runtime:
@@ -51,4 +49,4 @@ jobs:
         run: node tools/windows/test-launcher.mjs dist/windows
       - name: Test standalone native Windows CLI on Windows
         shell: pwsh
-        run: ./tools/windows/test-native-cli.ps1 dist/native-windows/kame.exe
+        run: ./tools/windows/test-native-cli.ps1 dist/kame-windows-x64.exe
