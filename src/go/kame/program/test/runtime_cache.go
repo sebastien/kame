@@ -3,6 +3,7 @@ package program_test
 import (
 	"kame/core"
 	"kame/host/posix"
+	"kame/host/wasm"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
@@ -145,6 +146,59 @@ func TestCachedTaskHits(t *testing.T) {
 	if readErr != nil || string(data) != "x" { t.Error("cached task did not hit") }
 	mem.FreeSlice(a, data)
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
+func TestCachedTaskUsesPortableMemoryBackend(t *testing.T) {
+	a := t.Allocator()
+	host := wasm.NewMemoryHost(a)
+	parsed := script.Parse(a, "memory-cache.kmk", "task cached :\n\t@(out \"memory-hit\")\n")
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Fatal("library registration failed")
+		return
+	}
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: "."})
+	if compiled.Program == nil {
+		t.Fatal("memory-backed program compile failed")
+		return
+	}
+	first := compiled.Program.Materialize("cached")
+	first.Free(a)
+	for {
+		next := compiled.Program.NextEvent()
+		if !next.OK {
+			break
+		}
+		next.Event.Free(a)
+	}
+	second := compiled.Program.Materialize("cached")
+	second.Free(a)
+	cachedOutput := false
+	for {
+		next := compiled.Program.NextEvent()
+		if !next.OK {
+			break
+		}
+		if next.Event.Cached && next.Event.Kind == program.Stdout && string(next.Event.Data) == "memory-hit" {
+			cachedOutput = true
+		}
+		next.Event.Free(a)
+	}
+	entries, err := host.ReadDir(a, ".kame/cache/tasks")
+	if err != nil || len(entries) != 1 {
+		t.Error("portable in-memory backend did not publish one task record")
+	}
+	for i := range entries {
+		mem.FreeString(a, entries[i].Name)
+	}
+	mem.FreeSlice(a, entries)
+	if !cachedOutput {
+		t.Error("portable in-memory backend did not return the completed cache record")
+	}
+	compiled.Program.Free()
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
 }
 
 func TestCachedTaskInvalidatesForDeclaredFile(t *testing.T) {

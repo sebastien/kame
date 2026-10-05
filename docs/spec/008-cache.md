@@ -22,6 +22,11 @@ The local backend encodes this identity into a safe path below:
 .kame/cache/tasks/
 ```
 
+The portable in-memory host implements the same file operations and atomic
+replacement contract with ephemeral memory. It uses the same portable key and
+record formats, so cache identity and hit validation do not depend on storage.
+Its records last only as long as the memory host instance.
+
 `kame do cache list` prints a JSON array of managed regular files across the
 task, host, and file-context cache directories. Each entry has `backend`,
 `key`, and `bytes` fields. `kame do cache clean` removes regular record files
@@ -215,6 +220,8 @@ share the host backend's limit.
 - Concurrent atomic writers leave a complete readable record.
 - Separate native processes execute one cold cache miss once and release the
   lock after publication.
+- The portable in-memory host publishes complete records and reuses them with
+  the same task identity and hit validation as the local filesystem backend.
 - Fingerprint encoding is identical across two native runs and matches checked-in
   hexadecimal vectors for every value tag and one complete task record.
 - SHA-256 tests use standard empty, short-string, and multi-block vectors.

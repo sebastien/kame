@@ -32,6 +32,7 @@ tests/T007-07-lib-errors.sh	007	lib	Operation arity and kind failures carry mess
 tests/T008-01-cache-hit.sh	008	cache	Record creation, cache hits, --force, input and environment invalidation
 tests/T008-02-cache-records.sh	008	cache	Corrupted records are misses and are rewritten
 tests/T008-03-cache-fingerprint.sh	008	cache	Glob membership, bare-dependency blocking, and rule body invalidation
+tests/T008-04-cache-memory-backend.sh	008	cache	Portable in-memory task cache publication, shared identity, and validated hits
 tests/T009-01-cli-help.sh	009	cli	Help, version, do namespace, bare-invocation overview
 tests/T009-02-cli-source.sh	009	cli	Source discovery order, -f/-c/-C, option validation
 tests/T009-03-cli-targets.sh	009	cli	Target selection, default resolution, sharing, definitions, ambiguity

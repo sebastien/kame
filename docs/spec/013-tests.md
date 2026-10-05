@@ -124,7 +124,7 @@ Current coverage:
 | 005 | 5 suites; sequences 01, 02, 03, 04, 05 | Values, references, lexical forms, selectors and arguments |
 | 006 | 8 suites; sequences 01, 02, 03, 04, 04, 05, 06, 07 | Freshness, dependencies, always/order-only rules, deferred effects and target environments |
 | 007 | 10 suites; sequences 01, 02, 03, 04, 05, 06, 07, 09, 10, 11 | All standard operations, grants, wildcard unions, record lookup and declared tool policy |
-| 008 | 3 suites; sequences 01, 02, 03 | Cached task identity, invalidation and corrupt-record recovery |
+| 008 | 4 suites; sequences 01, 02, 03, 04 | Cached task identity, invalidation, corrupt-record recovery and portable in-memory backend |
 | 009 | 13 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 11, 12, 13, 14, 15 | Help, discovery, targets, JSON, inspection, configuration, native watch and target arguments |
 | 010 | 25 suites; sequences 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25 | Public ABI, embedding services, metadata/effect publication, native parity, OOM recovery, retained watch, target arguments and watch ABI conformance |
 | 011 | 3 suites; sequences 01, 02, 03 | Code registry, source layout, structured context and process cause policy |
@@ -266,6 +266,9 @@ both eviction and cleanup leave symlinks and their targets intact.
 `T010-29-cache-locking.sh` starts separate native CLI processes against a cold
 task identity, verifies only one recipe execution, and confirms publication
 releases the striped lock while the owning process continues other work.
+
+`T008-04-cache-memory-backend.sh` exercises the portable memory host through
+the task runtime and verifies complete record publication and a validated cache hit.
 
 The shared `watch-runtime.py` suite, run by T009-14 and T010-23, also changes an
 included module list while watching a generated target family. It verifies the

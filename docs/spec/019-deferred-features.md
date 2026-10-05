@@ -26,7 +26,7 @@ adapters and integration evidence rather than placeholder methods.
 | D01 | WASM watch | Complete: retained graph roots, file/glob invalidation during active work, source reload and repair, shared roots, grants, stream publication, cancellation and disposal; native/WASM public conformance. See 020. |
 | D02 | Managed services and provisioning | Typed service configuration; start/readiness/health/restart/stop ownership; prerequisite lifetime; bounded logs; interruption and process-tree cleanup on native and WASM. See 024. |
 | D03 | Generated declarations | Complete: bounded typed batches; full validation before registration; generator provenance and dependencies; deterministic watch replacement; authored diagnostics; native/WASM parity; cycle, limit, and failure-cleanup coverage. See 025, T010-27, T009-14 and T010-23. |
-| D04 | Cache lifecycle and backends | Cross-process miss locking, failure/crash recovery, bounded eviction and explicit inspection/cleanup; local and second concrete backend; identity and atomic-publication conformance. |
+| D04 | Cache lifecycle and backends | Cross-process miss locking, failure/crash recovery, bounded eviction and explicit inspection/cleanup; local and portable in-memory backends with identity and atomic-publication conformance. |
 | D05 | Release integrity | Complete: pinned and verified compiler provisioning (021); operator-key Ed25519 manifests; provenance creation and verification; tamper/wrong-key rejection; actual staged release tests. Keys are provided by the release operator, never committed. |
 | D06 | Target arguments | Required `{name}` and optional `{name=value}` standalone arguments; typed binding/defaults, capture distinction, identity, planning and execution parity. See 022. |
 | D07 | Wildcard expressions and sources | Explicit unquoted expression paths expand globs; quoted text stays literal; singleton dependency sources track membership and future updates. See 023. |
@@ -91,6 +91,7 @@ event parity and embedding lifecycle parity remain open under 024. D04 now has
 native and WASM `do cache list|clean` commands plus bounded 1024-record
 eviction on successful publication. Native POSIX CLI processes also serialize
 cold task misses with bounded advisory-lock stripes and crash release. Forwarded
-host locking, the portable in-memory backend and remaining lifecycle checks are
-still open. D03 and D08–D18 remain open. The preceding
+host locking and remaining lifecycle checks are still open. The portable
+in-memory filesystem now stores complete task records and reuses them through
+the shared identity and validation path. D03 and D08–D18 remain open. The preceding
 initial-contract audit remains historical evidence, not completion of this work.
