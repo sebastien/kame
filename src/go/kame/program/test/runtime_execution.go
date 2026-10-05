@@ -5,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"kame/host/posix"
+	"kame/host/wasm"
 	"kame/operations"
 	"kame/lang/eval"
 	"kame/lang/script"
@@ -13,6 +14,64 @@ import (
 	"solod.dev/so/os"
 	"solod.dev/so/testing"
 )
+
+type countingReadDirHost struct {
+	memory    *wasm.MemoryHost
+	entries   int
+	rootReads int
+	deepReads int
+}
+
+func (h *countingReadDirHost) Start(request host.ProcessRequest) bool { return h.memory.Start(request) }
+func (h *countingReadDirHost) Pump(waitMS int) bool { return h.memory.Pump(waitMS) }
+func (h *countingReadDirHost) Next() host.ProcessEventResult { return h.memory.Next() }
+func (h *countingReadDirHost) Cancel(id int64) bool { return h.memory.Cancel(id) }
+func (h *countingReadDirHost) Stop(id int64, graceMS int64) bool { return h.memory.Stop(id, graceMS) }
+func (h *countingReadDirHost) CancelAll() { h.memory.CancelAll() }
+func (h *countingReadDirHost) Active() int { return h.memory.Active() }
+func (h *countingReadDirHost) Free() { h.memory.Free() }
+func (h *countingReadDirHost) Stat(name string) host.StatResult { return h.memory.Stat(name) }
+func (h *countingReadDirHost) Lstat(name string) host.StatResult { return h.memory.Lstat(name) }
+func (h *countingReadDirHost) ReadFile(a mem.Allocator, name string) ([]byte, error) { return h.memory.ReadFile(a, name) }
+func (h *countingReadDirHost) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error { return h.memory.WriteFileAtomic(name, data, perm, durable) }
+func (h *countingReadDirHost) Mkdir(name string, perm uint32) error { return h.memory.Mkdir(name, perm) }
+func (h *countingReadDirHost) Remove(name string) error { return h.memory.Remove(name) }
+func (h *countingReadDirHost) LockCache(path string, stripe int) bool { return h.memory.LockCache(path, stripe) }
+func (h *countingReadDirHost) UnlockCache(stripe int) { h.memory.UnlockCache(stripe) }
+func (h *countingReadDirHost) Now() int64 { return h.memory.Now() }
+func (h *countingReadDirHost) Monotonic() int64 { return h.memory.Monotonic() }
+
+func (h *countingReadDirHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
+	if name == "src" { h.rootReads++ }
+	if name == "src/noise/deep" || name == "src/noise/deep/level" { h.deepReads++ }
+	entries, err := h.memory.ReadDir(a, name)
+	h.entries += len(entries)
+	return entries, err
+}
+
+func TestWildcardTraversalPrunesUnrelatedSubtrees(t *testing.T) {
+	a := t.Allocator()
+	memory := wasm.NewMemoryHost(a)
+	memory.SetFile("src/keep/one.go", []byte("keep"))
+	memory.SetFile("src/noise/deep/level/file.txt", []byte("noise"))
+	host := &countingReadDirHost{memory: memory}
+	parsed := script.Parse(a, "glob.kmk", "./output :\n\t@(yield (str (wildcard \"./src/*/*.go\")))\n")
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
+	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	result := compiled.Program.Materialize("./output")
+	if result.Diagnostic.Code != "" { t.Error("wildcard materialization failed: " + result.Diagnostic.Code) }
+	result.Free(a)
+	data, err := memory.ReadFile(a, "output")
+	if err != nil || string(data) != "[\"./src/keep/one.go\"]" { t.Error("pruned wildcard returned: " + string(data)) }
+	mem.FreeSlice(a, data)
+	if host.rootReads == 0 || host.entries >= host.rootReads*6 || host.deepReads != 0 { t.Error("wildcard traversal did not prune the unrelated deep subtree") }
+	compiled.Program.Free()
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
+}
 
 func TestMaterializeWritesOutput(t *testing.T) {
 	a := t.Allocator()

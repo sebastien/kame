@@ -54,3 +54,10 @@ thresholds. Native and portable-runtime results are recorded separately.
 `D08` remains open until each section above has implementation and focused
 native/WASM or portable-runtime evidence, and the complete measurement workload
 has been rerun after the changes.
+
+Current evidence includes `TestBorrowedParseMatchesOwningParseWithFewerAllocations`,
+`TestEngineResourceIndexKeepsNodeIdentity`, `TestLexicalFunctionAndOperationShadowing`,
+`TestPureExpressionUsesPortableEvaluator`, and
+`TestWildcardTraversalPrunesUnrelatedSubtrees`. The repeatable deep-tree gate
+counts enumerated entries against a full recursive walk; broad scope/graph
+workloads and timing reports remain outstanding.

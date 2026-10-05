@@ -53,15 +53,19 @@ func (p *Program) wildcard(pattern string) core.Value {
 	root := globRoot(p.Alloc, pattern)
 	defer mem.FreeString(p.Alloc, root)
 	var names []string
-	p.collectPaths(root, &names)
+	start := 0
+	if len(root) > 0 && len(pattern) >= len(root) && pattern[:len(root)] == root {
+		start = len(root)
+		if start < len(pattern) && pattern[start] == '/' {
+			start++
+		}
+	}
+	p.collectGlob(pattern, start, root, &names)
 	var values []core.Value
 	for i := range names {
-		matched, err := globMatches(pattern, names[i])
-		if err == nil && matched {
-			relative := p.relativePath(names[i])
-			values = slices.Append(p.Alloc, values, core.NewString(p.Alloc, relative))
-			mem.FreeString(p.Alloc, relative)
-		}
+		relative := p.relativePath(names[i])
+		values = slices.Append(p.Alloc, values, core.NewString(p.Alloc, relative))
+		mem.FreeString(p.Alloc, relative)
 		mem.FreeString(p.Alloc, names[i])
 	}
 	slices.Free(p.Alloc, names)
@@ -70,6 +74,16 @@ func (p *Program) wildcard(pattern string) core.Value {
 			values[j], values[j-1] = values[j-1], values[j]
 		}
 	}
+	unique := 0
+	for i := range values {
+		if unique > 0 && values[i].Text == values[unique-1].Text {
+			values[i].Free(p.Alloc)
+			continue
+		}
+		values[unique] = values[i]
+		unique++
+	}
+	values = values[:unique]
 	result := core.NewList(p.Alloc, values)
 	for i := range values {
 		values[i].Free(p.Alloc)
@@ -112,7 +126,82 @@ func globRoot(a mem.Allocator, pattern string) string {
 	return cloneText(a, pattern[:cut-1])
 }
 
-func (p *Program) collectPaths(directory string, names *[]string) {
+func (p *Program) collectGlob(pattern string, pos int, directory string, names *[]string) {
+	if pos >= len(pattern) {
+		return
+	}
+	end := pos
+	for end < len(pattern) && pattern[end] != '/' {
+		end++
+	}
+	segment, next := pattern[pos:end], end
+	if next < len(pattern) {
+		next++
+	}
+	if segment == "**" {
+		if end == len(pattern) {
+			p.collectDescendants(directory, names)
+			return
+		}
+		p.collectGlob(pattern, next, directory, names)
+		entries, err := p.Host.ReadDir(p.Alloc, directory)
+		if err != nil {
+			return
+		}
+		for i := range entries {
+			name := path.Join(p.Alloc, directory, entries[i].Name)
+			mem.FreeString(p.Alloc, entries[i].Name)
+			if entries[i].IsDir {
+				p.collectGlob(pattern, pos, name, names)
+			}
+			mem.FreeString(p.Alloc, name)
+		}
+		slices.Free(p.Alloc, entries)
+		return
+	}
+	meta := false
+	for i := range segment {
+		if segment[i] == '*' || segment[i] == '?' || segment[i] == '[' {
+			meta = true
+			break
+		}
+	}
+	if !meta {
+		name := path.Join(p.Alloc, directory, segment)
+		info := p.Host.Stat(name)
+		if !info.Exists {
+			mem.FreeString(p.Alloc, name)
+			return
+		}
+		if end == len(pattern) {
+			*names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, name))
+		} else if info.Info.IsDir {
+			p.collectGlob(pattern, next, name, names)
+		}
+		mem.FreeString(p.Alloc, name)
+		return
+	}
+	entries, err := p.Host.ReadDir(p.Alloc, directory)
+	if err != nil {
+		return
+	}
+	for i := range entries {
+		name := path.Join(p.Alloc, directory, entries[i].Name)
+		mem.FreeString(p.Alloc, entries[i].Name)
+		matched, matchErr := path.Match(segment, path.Base(name))
+		if matchErr == nil && matched {
+			if end == len(pattern) {
+				*names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, name))
+			} else if entries[i].IsDir {
+				p.collectGlob(pattern, next, name, names)
+			}
+		}
+		mem.FreeString(p.Alloc, name)
+	}
+	slices.Free(p.Alloc, entries)
+}
+
+func (p *Program) collectDescendants(directory string, names *[]string) {
 	entries, err := p.Host.ReadDir(p.Alloc, directory)
 	if err != nil {
 		return
@@ -123,57 +212,7 @@ func (p *Program) collectPaths(directory string, names *[]string) {
 		mem.FreeString(p.Alloc, entries[i].Name)
 		*names = slices.Append(p.Alloc, *names, name)
 		if entries[i].IsDir {
-			p.collectPaths(name, names)
+			p.collectDescendants(name, names)
 		}
 	}
-}
-
-func globMatches(pattern string, name string) (bool, error) {
-	return matchSegments(pattern, 0, name, 0)
-}
-
-func matchSegments(pattern string, pi int, name string, ni int) (bool, error) {
-	if pi == len(pattern) {
-		return ni == len(name), nil
-	}
-	pend := pi
-	for pend < len(pattern) && pattern[pend] != '/' {
-		pend++
-	}
-	nend := ni
-	for nend < len(name) && name[nend] != '/' {
-		nend++
-	}
-	segment := pattern[pi:pend]
-	if segment == "**" {
-		if ok, err := matchSegments(pattern, nextSegment(pattern, pend), name, ni); ok || err != nil {
-			return ok, err
-		}
-		for cursor := ni; cursor < len(name); cursor++ {
-			if name[cursor] == '/' {
-				if ok, err := matchSegments(pattern, nextSegment(pattern, pend), name, cursor+1); ok || err != nil {
-					return ok, err
-				}
-			}
-		}
-		return false, nil
-	}
-	if ni == len(name) {
-		return false, nil
-	}
-	ok, err := path.Match(segment, name[ni:nend])
-	if err != nil || !ok {
-		return false, err
-	}
-	if pend == len(pattern) || nend == len(name) {
-		return pend == len(pattern) && nend == len(name), nil
-	}
-	return matchSegments(pattern, pend+1, name, nend+1)
-}
-
-func nextSegment(value string, end int) int {
-	if end < len(value) {
-		return end + 1
-	}
-	return end
 }
