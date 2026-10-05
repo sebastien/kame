@@ -28,12 +28,12 @@ for line in (root / "SHA256SUMS").read_text().splitlines():
     rows[name] = digest
 platform = __import__("subprocess").check_output([sys.executable, "tools/platform_id.py"], text=True).strip()
 native = f"kame-{platform}"
-assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "Formula/kame.rb", "bin/kame", "kame.com", "kame.js", "kame.json", "kame.wasm", "kame-windows-x64.zip", native}
+assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "kame.rb", "bin/kame", "kame.com", "kame.js", "kame.json", "kame.wasm", "kame-windows-x64.zip", native}
 provenance = json.loads((root / "PROVENANCE.json").read_text())
 assert provenance["schema"] == 1 and provenance["sourceRevision"] == "test-fixture"
 assert all(rows[item["name"]] == item["sha256"] for item in provenance["subjects"])
 assert hashlib.sha256((root / "PROVENANCE.json").read_bytes()).hexdigest() == rows["PROVENANCE.json"]
-formula = (root / "Formula/kame.rb").read_text()
+formula = (root / "kame.rb").read_text()
 scoop = json.loads((root / "kame.json").read_text())
 version = (root / "VERSION").read_text().strip()
 assert f'version "{version}"' in formula and rows["kame.com"] in formula

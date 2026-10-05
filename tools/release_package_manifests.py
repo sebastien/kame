@@ -36,8 +36,10 @@ def main():
   end
 end
 '''
-    (root / "Formula").mkdir(parents=True, exist_ok=True)
-    (root / "Formula/kame.rb").write_text(formula, encoding="utf-8")
+    # Release assets have one flat asset name. Keep the formula at the release
+    # root so its download URL is stable; a tap publisher can copy it into its
+    # own Formula/kame.rb path.
+    (root / "kame.rb").write_text(formula, encoding="utf-8")
 
     scoop = {
         "version": version,

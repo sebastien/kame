@@ -29,7 +29,7 @@ release publishes these flat assets under the base URL
 | `bin/kame` | stamped launcher | host provisioning and dispatch |
 | `Makefile.bootstrap` | bootstrap template | project-local make delegation and `kame init` |
 | `VERSION` | release tree | signed version selector for the explicit latest channel |
-| `Formula/kame.rb` | release builder | version-pinned Homebrew formula for the APE |
+| `kame.rb` | release builder | version-pinned Homebrew formula for the APE |
 | `kame.json` | release builder | version-pinned Scoop manifest for the Windows x64 bundle |
 | `PROVENANCE.json` | release builder | version, source revision and asset digests |
 | `SHA256SUMS` | checksums | signed integrity manifest |
@@ -253,7 +253,7 @@ Release assets are built with these targets, additive to the existing
 Install the pinned package definitions directly from a release:
 
 ```sh
-brew install https://github.com/sebastien/kame/releases/download/vVERSION/Formula/kame.rb
+brew install https://github.com/sebastien/kame/releases/download/vVERSION/kame.rb
 scoop install https://github.com/sebastien/kame/releases/download/vVERSION/kame.json
 ```
 
