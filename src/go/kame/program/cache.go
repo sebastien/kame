@@ -10,6 +10,7 @@ import (
 	"kame/host"
 	"solod.dev/so/math/bits"
 	"solod.dev/so/mem"
+	"solod.dev/so/path"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 )
@@ -17,6 +18,54 @@ import (
 const cacheFormat byte = 1
 const cacheLogDefault = 64 * 1024
 const cacheManifestMax = 16 * 1024 * 1024
+const cacheRecordsPerBackend = 1024
+
+type retainedCacheFile struct {
+	Name string
+	Time int64
+}
+
+// pruneCacheDirectory bounds persistent records by removing the least recently
+// published regular files. Directory entries are sorted as a stable tie-break
+// for hosts whose filesystem timestamps have coarse resolution.
+func (p *Program) pruneCacheDirectory(directory string) {
+	entries, err := p.Host.ReadDir(p.Alloc, directory)
+	if err != nil {
+		return
+	}
+	var records []retainedCacheFile
+	for i := range entries {
+		if entries[i].IsDir || strings.HasPrefix(entries[i].Name, ".kame-write-") {
+			continue
+		}
+		name := path.Join(p.Alloc, directory, entries[i].Name)
+		info := p.Host.Lstat(name)
+		mem.FreeString(p.Alloc, name)
+		if info.Exists && info.Info.Regular {
+			records = slices.Append(p.Alloc, records, retainedCacheFile{Name: entries[i].Name, Time: info.Info.ModTime})
+		}
+	}
+	for i := 1; i < len(records); i++ {
+		value := records[i]
+		j := i
+		for j > 0 && (records[j-1].Time > value.Time || (records[j-1].Time == value.Time && records[j-1].Name > value.Name)) {
+			records[j] = records[j-1]
+			j--
+		}
+		records[j] = value
+	}
+	remove := len(records) - cacheRecordsPerBackend
+	for i := 0; i < remove; i++ {
+		name := path.Join(p.Alloc, directory, records[i].Name)
+		_ = p.Host.Remove(name)
+		mem.FreeString(p.Alloc, name)
+	}
+	slices.Free(p.Alloc, records)
+	for i := range entries {
+		mem.FreeString(p.Alloc, entries[i].Name)
+	}
+	slices.Free(p.Alloc, entries)
+}
 
 type cacheRecord struct {
 	Identity        string
@@ -498,5 +547,10 @@ func (p *Program) cacheSave(entry *instance, r *cacheRecord) bool {
 	ok := p.Host.WriteFileAtomic(name, data, 0o644, true) == nil
 	mem.FreeSlice(mem.System, data)
 	mem.FreeString(p.Alloc, name)
+	if ok {
+		directory := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/tasks")
+		p.pruneCacheDirectory(directory)
+		mem.FreeString(p.Alloc, directory)
+	}
 	return ok
 }

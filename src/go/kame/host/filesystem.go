@@ -44,6 +44,7 @@ type FileSystem interface {
 	// non-durable form and the cache uses the durable form.
 	WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error
 	Mkdir(name string, perm uint32) error
+	Remove(name string) error
 	// Now returns wall-clock unix nanoseconds for cache retention accounting.
 	Now() int64
 }

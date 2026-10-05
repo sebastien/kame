@@ -17,10 +17,10 @@ cli_build
 prepare_project() {
   local project="$1"
   mkdir -p "$project"
-  printf 'task cached :\n\techo run >> runs.log\n\t@(out "cached-output")\n' >"$project/Makefile.kmk"
+  printf 'task cached :\n\techo run >> runs.log\n\t@(out "cached-output")\n\ntask other :\n\techo other >> runs.log\n\t@(out "other-output")\n' >"$project/Makefile.kmk"
 }
-run_native() { (cd "$1" && "$CLI_BIN" cached) >/dev/null 2>&1; }
-run_wasm() { (cd "$1" && node "$CLI_ROOT/dist/kame.js" cached) >/dev/null 2>&1; }
+run_native() { (cd "$1" && "$CLI_BIN" "${2:-cached}") >/dev/null 2>&1; }
+run_wasm() { (cd "$1" && node "$CLI_ROOT/dist/kame.js" "${2:-cached}") >/dev/null 2>&1; }
 cache_command() {
   local host="$1" project="$2" action="$3"
   if [ "$host" = native ]; then
@@ -49,6 +49,27 @@ for path in sys.argv[1:]:
     assert {row["backend"] for row in rows} <= {"tasks", "host", "file-context"}
 PY
 then test-ok "native and wasm list managed record metadata"; else test-fail "cache list JSON is invalid"; fi
+
+test-step "successful publication evicts oldest records at the backend bound"
+for host_project in "native:$native" "wasm:$wasm"; do
+  host="${host_project%%:*}"
+  project="${host_project#*:}"
+  if [ "$host" = native ]; then bucket="$project/.kame/cache/tasks"; else bucket="$project/.kame/cache/host"; fi
+  printf link-safe >"$project/marker"
+  ln -sf "$project/marker" "$bucket/keep-link"
+  for i in $(seq -w 1 1024); do printf x >"$bucket/old-$i"; done
+  touch -d '2 days ago' "$bucket"/old-*
+  if [ "$host" = native ]; then run_native "$project" other; else run_wasm "$project" other; fi
+  count="$(find "$bucket" -maxdepth 1 -type f | wc -l)"
+  [ "$count" -eq 1024 ]
+  [ -L "$bucket/keep-link" ] && [ "$(cat "$project/marker")" = link-safe ]
+  if [ "$host" = native ]; then run_native "$project" other; else run_wasm "$project" other; fi
+done
+if [ "$(wc -l <"$native/runs.log")" -eq 2 ] && [ "$(wc -l <"$wasm/runs.log")" -eq 2 ]; then
+  test-ok "native and wasm retain the newest record and evict to 1024"
+else
+  test-fail "eviction removed a new record or retained too many files"
+fi
 
 test-step "clean removes files but preserves symlinks"
 for project in "$native" "$wasm"; do

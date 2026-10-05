@@ -184,6 +184,21 @@ func (h *MemoryHost) Mkdir(name string, perm uint32) error {
 	return nil
 }
 
+func (h *MemoryHost) Remove(name string) error {
+	if h == nil {
+		return errors.New("host unavailable")
+	}
+	i := h.findFile(name)
+	if i < 0 {
+		return errors.New("file does not exist")
+	}
+	mem.FreeString(h.Alloc, h.Files[i].Path)
+	slices.Free(h.Alloc, h.Files[i].Data)
+	copy(h.Files[i:], h.Files[i+1:])
+	h.Files = h.Files[:len(h.Files)-1]
+	return nil
+}
+
 func (h *MemoryHost) Now() int64 {
 	if h == nil {
 		return 0

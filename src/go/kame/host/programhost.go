@@ -23,6 +23,7 @@ type ProgramHost interface {
 	ReadDir(a mem.Allocator, name string) ([]DirEntry, error)
 	WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error
 	Mkdir(name string, perm uint32) error
+	Remove(name string) error
 	Now() int64
 	Monotonic() int64
 }

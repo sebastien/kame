@@ -184,8 +184,12 @@ do not participate.
 ## Limits
 
 Default retained stdout and stderr are each limited to 64 KiB by bytes. The
-runtime may configure a different positive limit. The cache has no eviction or
-garbage collection in the initial implementation.
+runtime may configure a different positive limit. Each local cache backend
+retains at most 1024 regular records. A successful publication prunes the
+oldest records by modification time; equal timestamps are ordered by key bytes.
+Symlinks, directories, and atomic-write staging files are not eviction
+candidates. On the JavaScript host, forwarded task and file-context records
+share the host backend's limit.
 
 ## Acceptance Tests
 
@@ -200,6 +204,8 @@ garbage collection in the initial implementation.
   different fingerprint.
 - `kame do cache list` reports managed records consistently on native and WASM.
 - `kame do cache clean` removes regular records and preserves symlinks.
+- Publishing above the backend limit evicts oldest regular records on native
+  and WASM while preserving the newest record and symlinks.
 - Cancellation leaves the previous record intact.
 - Cached stdout and stderr replay separately with truncation flags.
 - A truncated or malformed record is a miss and never crashes the runtime.

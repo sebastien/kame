@@ -157,6 +157,30 @@ function cacheEntryPath(key) {
   return join(process.cwd(), '.kame', 'cache', 'host', Buffer.from(key).toString('hex'));
 }
 
+const cacheRecordsPerBackend = 1024;
+function pruneCacheDirectory(directory) {
+  let names;
+  try { names = readdirSync(directory).sort(); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  const records = [];
+  for (const name of names) {
+    if (name.startsWith('.kame-write-')) continue;
+    try {
+      const info = lstatSync(join(directory, name), { bigint: true });
+      if (!info.isFile()) continue;
+      records.push({ name, time: info.mtimeNs });
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+  records.sort((a, b) => a.time < b.time ? -1 : a.time > b.time ? 1 : a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const remove = records.length - cacheRecordsPerBackend;
+  for (let i = 0; i < remove; i++) {
+    try { unlinkSync(join(directory, records[i].name)); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+}
+
 function displayWidth(code) {  if ((code >= 0x0300 && code <= 0x036f) || (code >= 0x1ab0 && code <= 0x1aff) || (code >= 0x1dc0 && code <= 0x1dff) || (code >= 0x20d0 && code <= 0x20ff) || (code >= 0xfe00 && code <= 0xfe0f) || (code >= 0xfe20 && code <= 0xfe2f)) return 0;
   if (code >= 0x1100 && (code <= 0x115f || code === 0x2329 || code === 0x232a || (code >= 0x2e80 && code <= 0xa4cf) || (code >= 0xac00 && code <= 0xd7a3) || (code >= 0xf900 && code <= 0xfaff) || (code >= 0xfe10 && code <= 0xfe19) || (code >= 0xfe30 && code <= 0xfe6f) || (code >= 0xff00 && code <= 0xff60) || (code >= 0xffe0 && code <= 0xffe6) || (code >= 0x20000 && code <= 0x3fffd))) return 2;
   return 1;
@@ -1059,6 +1083,7 @@ class Module {
       try {
         const path = cacheEntryPath(key);
         await writeFileAtomic(path, record, true);
+        pruneCacheDirectory(dirname(path));
       } catch (error) {
         return this.completeFailure(instance, request, 'FS_ERR', `cannot write cache record: ${error.message}`);
       }

@@ -303,7 +303,11 @@ func (p *Program) saveNativeFileContext(entry *instance) {
 	}
 	name := p.fileContextPath(entry)
 	if p.mkdirParent(name) {
-		_ = p.Host.WriteFileAtomic(name, digest[:], 0o644, true)
+		if p.Host.WriteFileAtomic(name, digest[:], 0o644, true) == nil {
+			directory := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/file-context")
+			p.pruneCacheDirectory(directory)
+			mem.FreeString(p.Alloc, directory)
+		}
 	}
 	mem.FreeString(p.Alloc, name)
 }

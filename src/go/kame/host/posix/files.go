@@ -121,6 +121,11 @@ func (h *Host) Mkdir(name string, perm uint32) error {
 	return os.Mkdir(name, os.FileMode(perm))
 }
 
+func (h *Host) Remove(name string) error {
+	_ = h
+	return os.Remove(name)
+}
+
 func (h *Host) Now() int64 {
 	_ = h
 	return time.Now().UnixNano()

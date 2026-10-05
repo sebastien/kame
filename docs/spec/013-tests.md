@@ -259,8 +259,9 @@ grace period is honored by the JavaScript host.
 plan JSON, including generator provenance, and materializes generated tasks on
 both hosts.
 
-`T010-28-cache-management.sh` verifies native and WASM cache inspection JSON
-and cleanup, including that cleanup leaves symlinks and their targets intact.
+`T010-28-cache-management.sh` verifies native and WASM cache inspection JSON,
+oldest-first eviction at the 1024-record bound, and cleanup, including that
+both eviction and cleanup leave symlinks and their targets intact.
 
 The shared `watch-runtime.py` suite, run by T009-14 and T010-23, also changes an
 included module list while watching a generated target family. It verifies the
