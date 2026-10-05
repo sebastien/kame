@@ -30,6 +30,8 @@ yes
 '
 list_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: ["a" "b"]] "plain")'
 record_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: [first: "A" second: "B"]] "plain")'
+inline_plain='(render "Hi @if(:true)there@end!" "plain")'
+inline_html='(render "a<!-- @if(:true) -->b<!-- @end(if) -->c" "html")'
 nested_loop='(render (cat "@for([group] groups)\nouter:" "@" "(index)" "[\n@for([item] group)\n" "@" "(index)" ":" "@" "(item)" ",\n@end(for)\n]" "@" "(index)" "\n@end(for)\n") [groups: [["a" "b"] ["c"]]] "plain")'
 
 for host in native wasm; do
@@ -58,6 +60,18 @@ for host in native wasm; do
 		test-ok "$host parses batch comment directives"
 	else
 		test-fail "$host batch comments: $(cat "$TMPDIR/$host.batch.err")"
+	fi
+	"${runner[@]}" do run --lang expr -c "$inline_plain" >"$TMPDIR/$host.inline-plain.out" 2>"$TMPDIR/$host.inline-plain.err"
+	if [ "$(cat "$TMPDIR/$host.inline-plain.out")" = '"Hi there!"' ]; then
+		test-ok "$host renders plain inline blocks across text boundaries"
+	else
+		test-fail "$host plain inline block: $(cat "$TMPDIR/$host.inline-plain.err") $(cat "$TMPDIR/$host.inline-plain.out")"
+	fi
+	"${runner[@]}" do run --lang expr -c "$inline_html" >"$TMPDIR/$host.inline-html.out" 2>"$TMPDIR/$host.inline-html.err"
+	if [ "$(cat "$TMPDIR/$host.inline-html.out")" = '"abc"' ]; then
+		test-ok "$host renders HTML inline blocks across text boundaries"
+	else
+		test-fail "$host HTML inline block: $(cat "$TMPDIR/$host.inline-html.err") $(cat "$TMPDIR/$host.inline-html.out")"
 	fi
 	"${runner[@]}" do run --lang expr -c "$list_loop" >"$TMPDIR/$host.list-loop.out" 2>"$TMPDIR/$host.list-loop.err"
 	if [ "$(cat "$TMPDIR/$host.list-loop.out")" = '"0::a;\n1::b;\n"' ]; then

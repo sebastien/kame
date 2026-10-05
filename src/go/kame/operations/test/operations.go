@@ -413,7 +413,9 @@ func TestRegexCaptureOperations(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	if !operations.Register(registry) { t.Error("library registration failed") }
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
 	parsed := script.Parse(a, "regex", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	match := `(regex-match (pattern (cat "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42")`
@@ -429,16 +431,24 @@ func TestRegexCaptureOperations(t *testing.T) {
 	}
 	result.Free(a)
 	result = evaluate(t, program, `(capture 1 (regex-match (pattern (cat "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42"))`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "42" { t.Error("capture did not select the indexed value") }
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "42" {
+		t.Error("capture did not select the indexed value")
+	}
 	result.Free(a)
 	result = evaluate(t, program, `(capture "name" (regex-match (pattern (cat "{" "name:~" "[a-z]+" "}")) "demo"))`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo" { t.Error("capture did not select the named value") }
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo" {
+		t.Error("capture did not select the named value")
+	}
 	result.Free(a)
 	result = evaluate(t, program, `(capture 1 (regex-match (pattern (cat "{" "name:~[a-z]+}" "-" "{" "name:~[a-z]+}")) "abc-abc"))`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "abc" { t.Error("repeated named regex groups did not populate each positional slot") }
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "abc" {
+		t.Error("repeated named regex groups did not populate each positional slot")
+	}
 	result.Free(a)
 	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~" "[a-z]+" "}")) (pattern (cat "x{" "name" "}")) "demo")`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "xdemo" { t.Error("regex-replace did not expand a named capture") }
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "xdemo" {
+		t.Error("regex-replace did not expand a named capture")
+	}
 	result.Free(a)
 	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) (pattern (cat "x{" "name" "}")) ["demo" "42"])`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 || result.Value.List[0].Kind != core.String || result.Value.List[0].Text != "xdemo" || result.Value.List[1].Kind != core.Nil {
@@ -446,19 +456,29 @@ func TestRegexCaptureOperations(t *testing.T) {
 	}
 	result.Free(a)
 	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) (pattern (cat "x{" "missing" "}")) "demo")`)
-	if result.Diagnostic.Code != "PAT_INVALID" { t.Error("regex-replace accepted a missing capture reference") }
+	if result.Diagnostic.Code != "PAT_INVALID" {
+		t.Error("regex-replace accepted a missing capture reference")
+	}
 	result.Free(a)
 	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) "x" :nil)`)
-	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("regex-replace accepted a nil subject") }
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("regex-replace accepted a nil subject")
+	}
 	result.Free(a)
 	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) "x" 42)`)
-	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("regex-replace accepted a non-string subject") }
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("regex-replace accepted a non-string subject")
+	}
 	result.Free(a)
 	result = evaluate(t, program, `(regex-match (pattern (cat "{" "~(ab|cd)+" "}")) "abcd")`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.Record { t.Error("regex groups, alternation or repetition did not match") }
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Record {
+		t.Error("regex groups, alternation or repetition did not match")
+	}
 	result.Free(a)
 	result = evaluate(t, program, `(regex-match (pattern (cat "{" "~[" "}")) "a")`)
-	if result.Diagnostic.Code != "PAT_INVALID" { t.Error("malformed runtime regex was accepted") }
+	if result.Diagnostic.Code != "PAT_INVALID" {
+		t.Error("malformed runtime regex was accepted")
+	}
 	result.Free(a)
 	engine.Free()
 	program.Free()
@@ -470,7 +490,9 @@ func TestDocumentMatchRendersNamedCaptureAndFallback(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	if !operations.Register(registry) { t.Error("library registration failed") }
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
 	parsed := script.Parse(a, "document-match", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, `(match "./posts/demo.md" [./posts/{slug:*}.md slug] [:else "other"])`)
@@ -498,7 +520,9 @@ func TestDocumentForBindsIndexKeyAndValue(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	if !operations.Register(registry) { t.Error("library registration failed") }
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
 	parsed := script.Parse(a, "document-for", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	templateText := `(cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n")`
@@ -513,11 +537,38 @@ func TestDocumentForBindsIndexKeyAndValue(t *testing.T) {
 	registry.Free()
 }
 
+func TestDocumentInlineBlocksRenderAcrossTextBoundaries(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
+	parsed := script.Parse(a, "document-inline", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	result := evaluate(t, program, `(render "Hi @if(:true)there@end!" "plain")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "Hi there!" {
+		t.Error("plain inline if block did not preserve text around the block")
+	}
+	result.Free(a)
+	result = evaluate(t, program, `(render "a<!-- @if(:true) -->b<!-- @end(if) -->c" "html")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "abc" {
+		t.Error("HTML inline if block did not preserve text around the block")
+	}
+	result.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func TestTemplateItemsOwnsInputRows(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	if !operations.Register(registry) { t.Error("library registration failed") }
+	if !operations.Register(registry) {
+		t.Error("library registration failed")
+	}
 	parsed := script.Parse(a, "template-items", "")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, `(template-items ["a" "b"])`)
@@ -532,7 +583,11 @@ func TestTemplateItemsOwnsInputRows(t *testing.T) {
 }
 
 func regexTestField(record core.Value, key string) core.Value {
-	for i := range record.Record { if record.Record[i].Key == key { return record.Record[i].Value } }
+	for i := range record.Record {
+		if record.Record[i].Key == key {
+			return record.Record[i].Value
+		}
+	}
 	return core.Value{Kind: core.Nil}
 }
 
