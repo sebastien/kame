@@ -111,7 +111,7 @@ task native-concurrent-cache : ./cache-input.txt
 		}
 		$pipelineOutputPath = Join-Path $project 'pipeline.out'
 		$pipelineErrorPath = Join-Path $project 'pipeline.err'
-		$null = & $exe --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline 1> $pipelineOutputPath 2> $pipelineErrorPath
+		$null = & $exe --timeout 10000 --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline 1> $pipelineOutputPath 2> $pipelineErrorPath
 		$pipelineStatus = $LASTEXITCODE
 		$pipelineOutput = Get-Content -Raw $pipelineOutputPath
 		$pipelineError = Get-Content -Raw $pipelineErrorPath
