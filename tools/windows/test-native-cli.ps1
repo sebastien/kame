@@ -125,13 +125,14 @@ task native-concurrent-cache : ./cache-input.txt
 		$pipelineErrorPath = Join-Path $project 'pipeline.err'
 		$eofOutputPath = Join-Path $project 'pipeline-eof.out'
 		$eofErrorPath = Join-Path $project 'pipeline-eof.err'
-		$null = & $exe --timeout 5000 --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline-eof 1> $eofOutputPath 2> $eofErrorPath
+		$null = & $exe --strace --timeout 5000 --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline-eof 1> $eofOutputPath 2> $eofErrorPath
 		$eofStatus = $LASTEXITCODE
 		$eofOutput = Get-Content -Raw $eofOutputPath
 		$eofError = Get-Content -Raw $eofErrorPath
 		if ($eofStatus -ne 0 -or $eofOutput -notmatch '-1' -or !(Test-Path (Join-Path $project 'pipeline-eof-producer-done')) -or !(Test-Path (Join-Path $project 'pipeline-eof-consumer-read'))) {
 			$eofMarkers = @('pipeline-eof-producer-started', 'pipeline-eof-producer-done', 'pipeline-eof-consumer-started', 'pipeline-eof-consumer-read') | ForEach-Object { "$_=$(if (Test-Path (Join-Path $project $_)) { (Get-Content -Raw (Join-Path $project $_)).Trim() } else { 'missing' })" }
-			$pipelineFailure = "Native EOF-only pipeline failed: exit=$eofStatus markers=$($eofMarkers -join ',') stdout=$eofOutput stderr=$eofError"
+			$eofTrace = @($eofError -split '\r?\n' | Where-Object { $_ -match 'spawnfds_|posix_spawn|pipe2?\(|dup2\(|CreateProcess|GetStdHandle' } | Select-Object -Last 80) -join "`n"
+			$pipelineFailure = "Native EOF-only pipeline failed: exit=$eofStatus markers=$($eofMarkers -join ',') stdout=$eofOutput stderr=$eofError trace=$eofTrace"
 		}
 		$null = & $exe --timeout 30000 --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline 1> $pipelineOutputPath 2> $pipelineErrorPath
 		$pipelineStatus = $LASTEXITCODE
