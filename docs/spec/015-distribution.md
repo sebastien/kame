@@ -53,8 +53,17 @@ provenance include every staged native binary. The release signer should stage
 only outputs from trusted builds of the tagged source revision.
 The generated package-manager manifests embed the exact release version and
 asset digest. They can be installed directly with Homebrew or Scoop from the
-release URL; each release carries new pinned manifests. Publishing maintained
-Homebrew taps or Scoop buckets remains an external hosting step.
+release URL; each release carries new pinned manifests. The
+`publish-package-manifests` workflow also publishes them to maintained package
+repositories after release publication. It clones the configured Homebrew tap
+and Scoop bucket, revalidates each manifest against the release assets, then
+commits only `Formula/kame.rb` and `bucket/kame.json` respectively. The
+workflow can also be dispatched manually for an already published version.
+Configure repository variables `KAME_HOMEBREW_TAP_REPOSITORY` and
+`KAME_SCOOP_BUCKET_REPOSITORY` as `owner/name`, and secret
+`KAME_PACKAGE_PUBLISH_TOKEN` with read access to this repository and write
+access to both package repositories. A manual dispatch can override either
+repository variable.
 
 `SHA256SUMS` contains one `<64-hex-lowercase>  <asset>` line per asset, sorted
 by asset name, using the conventional two-space separator.
@@ -250,8 +259,9 @@ Release assets are built with these targets, additive to the existing
   Homebrew and Scoop manifests, and a signed `SHA256SUMS`. Before staging, it
   requires native binaries for Linux x64/ARM64, macOS x64/ARM64, FreeBSD x64,
   NetBSD x64 and OpenBSD x64; an incomplete platform set fails before the
-  existing release directory is removed. Publishing is a manual, out-of-band
-  step.
+  existing release directory is removed. Release publication triggers the
+  package-manifest workflow when its destination repositories and token are
+  configured.
 - `dist-native` builds the current host's full native CLI and places it at
   `dist/native/PLATFORM/kame`; `.github/workflows/native-artifacts.yml` uploads
   Linux and macOS x64/ARM64 host builds, and
