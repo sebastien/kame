@@ -16,6 +16,29 @@ release_test_keys "$root/keys"
 
 test-step "stage actual release artifacts with operator supplied keys"
 make dist-native >/dev/null
+missing_platform="openbsd-x86_64"
+missing_artifact="dist/native/$missing_platform/kame"
+saved_native="$root/saved-$missing_platform"
+if [ -f "$missing_artifact" ]; then mv "$missing_artifact" "$saved_native"; fi
+set +e
+make dist-release KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
+	KAME_RELEASE_SIGNING_KEY="$root/keys/signing.pem" >"$root/missing-native.out" 2>&1
+missing_status=$?
+set -e
+if [ -f "$saved_native" ]; then mv "$saved_native" "$missing_artifact"; fi
+if [ "$missing_status" -ne 0 ] && grep -q 'missing native release artifact:' "$root/missing-native.out"; then
+	test-ok "release assembly refuses an incomplete cross-host native set"
+else
+	test-fail "release assembly accepted a missing native artifact: status=$missing_status output=$(cat "$root/missing-native.out")"
+fi
+fixture_platforms=()
+for platform in linux-x86_64 linux-arm64 darwin-x86_64 darwin-arm64 freebsd-x86_64 netbsd-x86_64 openbsd-x86_64; do
+	if [ ! -f "dist/native/$platform/kame" ]; then
+		mkdir -p "dist/native/$platform"
+		printf 'fixture artifact for %s\n' "$platform" >"dist/native/$platform/kame"
+		fixture_platforms+=("$platform")
+	fi
+done
 make dist-release KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
 	KAME_RELEASE_SIGNING_KEY="$root/keys/signing.pem" KAME_RELEASE_REVISION=test-fixture >/dev/null
 release="$CLI_ROOT/dist/release"
@@ -26,9 +49,9 @@ rows = {}
 for line in (root / "SHA256SUMS").read_text().splitlines():
     digest, name = line.split("  ", 1)
     rows[name] = digest
-platform = __import__("subprocess").check_output([sys.executable, "tools/platform_id.py"], text=True).strip()
-native = f"kame-{platform}"
-assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "kame.rb", "bin/kame", "kame.com", "kame.js", "kame.json", "kame.wasm", "kame-windows-x64.exe", "kame-windows-x64.zip", native}
+platforms = ("linux-x86_64", "linux-arm64", "darwin-x86_64", "darwin-arm64", "freebsd-x86_64", "netbsd-x86_64", "openbsd-x86_64")
+natives = {f"kame-{platform}" for platform in platforms}
+assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "kame.rb", "bin/kame", "kame.com", "kame.js", "kame.json", "kame.wasm", "kame-windows-x64.exe", "kame-windows-x64.zip", *natives}
 provenance = json.loads((root / "PROVENANCE.json").read_text())
 assert provenance["schema"] == 1 and provenance["sourceRevision"] == "test-fixture"
 assert all(rows[item["name"]] == item["sha256"] for item in provenance["subjects"])
@@ -39,7 +62,7 @@ version = (root / "VERSION").read_text().strip()
 assert f'version "{version}"' in formula and rows["kame.com"] in formula
 assert scoop["version"] == version and scoop["hash"] == rows["kame-windows-x64.exe"]
 assert scoop["url"].endswith(f"/v{version}/kame-windows-x64.exe") and scoop["bin"] == [["kame-windows-x64.exe", "kame"]]
-assert native in rows and rows[native] == hashlib.sha256((root / native).read_bytes()).hexdigest()
+assert all(rows[name] == hashlib.sha256((root / name).read_bytes()).hexdigest() for name in natives)
 PY
 project="$root/project"
 mkdir -p "$project"
@@ -108,5 +131,10 @@ if [ "$prov_status" = 1 ] && grep -q 'checksum mismatch: PROVENANCE.json' "$root
 else
 	test-fail "cached provenance status=$prov_status err=$(cat "$root/err-prov")"
 fi
+
+for platform in "${fixture_platforms[@]}"; do
+	rm -f "dist/native/$platform/kame"
+	rmdir "dist/native/$platform" 2>/dev/null || true
+done
 
 test-end

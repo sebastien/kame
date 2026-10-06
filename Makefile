@@ -165,9 +165,15 @@ dist/kame.js: src/js/kame.js
 KAME_RELEASE_PUBLIC_KEY ?=
 KAME_RELEASE_SIGNING_KEY ?=
 KAME_RELEASE_REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+RELEASE_NATIVE_PLATFORMS := linux-x86_64 linux-arm64 darwin-x86_64 darwin-arm64 freebsd-x86_64 netbsd-x86_64 openbsd-x86_64
 dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zip dist/kame-windows-x64.exe
 	test -n "$(KAME_RELEASE_PUBLIC_KEY)" -a -f "$(KAME_RELEASE_PUBLIC_KEY)"
 	test -n "$(KAME_RELEASE_SIGNING_KEY)" -a -f "$(KAME_RELEASE_SIGNING_KEY)"
+	@for platform in $(RELEASE_NATIVE_PLATFORMS); do \
+		if test ! -f "dist/native/$$platform/kame"; then \
+			echo "missing native release artifact: $$platform" >&2; exit 1; \
+		fi; \
+	done
 	rm -rf dist/release
 	mkdir -p dist/release/bin
 	cp dist/kame.com dist/release/kame.com
