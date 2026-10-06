@@ -1251,12 +1251,7 @@ class Module {
         }
       }
       const detached = context.concurrent === true;
-      let processStarted = false;
-      const completion = await runArgvCapture(stages, { ...context, ...redirections, request: detached ? request : undefined, discardStdout: serviceReadyProbe, onStarted: () => { processStarted = true; this.processStarted(instance, detached ? request : undefined); this.drainEvents(instance, context); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
-      if (detached && processStarted) {
-        this.processExited(instance, request);
-        this.drainEvents(instance, context);
-      }
+      const completion = await runArgvCapture(stages, { ...context, ...redirections, request: detached ? request : undefined, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); this.drainEvents(instance, context); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout);
@@ -3196,22 +3191,16 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
   context.human = inv.json !== true;
   const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
   if (inv.dryRun) {
-    let failed = false;
-    for (const target of targets) {
-      try {
-        await module.planJSON(source.compiled, target, false, source.name);
-      } catch (error) {
-        failed = true;
-        if (error.diagnostics) {
-          for (const detail of error.diagnostics) stderr.write(renderDiagnostic(detail, source, 80));
-        } else {
-          const detail = lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
-          if (!detail.target) detail.target = target;
-          stderr.write(renderDiagnostic(detail, source, 80));
-        }
-      }
-    }
-    return failed ? 1 : 0;
+    const parts = Array.isArray(source.compiled) ? source.compiled : source.compiled?.parts;
+    const sourceParts = parts?.length ? parts : [{ name: source.name, text: source.text }];
+    const fragments = sourceParts.map((part, index) => ({
+      name: part.name ?? source.name,
+      text: part.text,
+      lang: 'kmk',
+      entries: index + 1 === sourceParts.length ? targets : [],
+      inline: index + 1 === sourceParts.length ? 0 : 1,
+    }));
+    return module.runSession(fragments, inv, context);
   }
   let failed = false;
   for (const target of targets) {
