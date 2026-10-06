@@ -5,6 +5,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $exe = (Resolve-Path $Executable).Path
+function Get-RunCount([string] $Path) {
+	try {
+		if (!(Test-Path $Path)) { return 0 }
+		return @(Get-Content -Path $Path).Count
+	} catch {
+		return 0
+	}
+}
 $version = & $exe --version
 if ($LASTEXITCODE -ne 0 -or $version -notmatch '^kame \S+') {
 	throw "Native kame.exe version check failed: exit=$LASTEXITCODE output=$version"
@@ -208,20 +216,21 @@ task native-concurrent-cache : ./cache-input.txt
 			}
 			Set-Content -Path (Join-Path $project 'native-watch-inputs/b.txt') -Value b
 			$deadline = [DateTime]::UtcNow.AddSeconds(15)
-			while ([DateTime]::UtcNow -lt $deadline -and @(Get-Content (Join-Path $project 'native-watch-glob-runs.txt')).Count -lt 2) {
+			$globRunPath = Join-Path $project 'native-watch-glob-runs.txt'
+			while ([DateTime]::UtcNow -lt $deadline -and (Get-RunCount $globRunPath) -lt 2) {
 				if ($watch.HasExited) { throw "Native watch exited before glob addition: code=$($watch.ExitCode) stderr=$(Get-Content -Raw $watchStderr)" }
 				Start-Sleep -Milliseconds 100
 			}
-			$globRuns = @(Get-Content (Join-Path $project 'native-watch-glob-runs.txt'))
-			if ($globRuns.Count -ne 2) { throw "Native watch did not rebuild after glob membership addition: runs=$($globRuns.Count) stderr=$(Get-Content -Raw $watchStderr)" }
+			$globRuns = Get-RunCount $globRunPath
+			if ($globRuns -ne 2) { throw "Native watch did not rebuild after glob membership addition: runs=$globRuns stderr=$(Get-Content -Raw $watchStderr)" }
 			Remove-Item (Join-Path $project 'native-watch-inputs/b.txt')
 			$deadline = [DateTime]::UtcNow.AddSeconds(15)
-			while ([DateTime]::UtcNow -lt $deadline -and @(Get-Content (Join-Path $project 'native-watch-glob-runs.txt')).Count -lt 3) {
+			while ([DateTime]::UtcNow -lt $deadline -and (Get-RunCount $globRunPath) -lt 3) {
 				if ($watch.HasExited) { throw "Native watch exited before glob removal: code=$($watch.ExitCode) stderr=$(Get-Content -Raw $watchStderr)" }
 				Start-Sleep -Milliseconds 100
 			}
-			$globRuns = @(Get-Content (Join-Path $project 'native-watch-glob-runs.txt'))
-			if ($globRuns.Count -ne 3) { throw "Native watch did not rebuild after glob membership removal: runs=$($globRuns.Count) stderr=$(Get-Content -Raw $watchStderr)" }
+			$globRuns = Get-RunCount $globRunPath
+			if ($globRuns -ne 3) { throw "Native watch did not rebuild after glob membership removal: runs=$globRuns stderr=$(Get-Content -Raw $watchStderr)" }
 		} finally {
 			if (!$watch.HasExited) { Stop-Process -Id $watch.Id -Force }
 		}
