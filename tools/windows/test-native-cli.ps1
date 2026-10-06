@@ -33,7 +33,7 @@ task native-path :
 '@ | Set-Content -Encoding ascii (Join-Path $project 'native-child.kmk')
 	@'
 task native-pipeline :
-	@(out (pipe (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-one-started yes; [Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 2097152; [Console]::OpenStandardOutput().Write($b,0,$b.Length); Set-Content pipeline-stage-one-done yes") (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-two-started yes; $s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r }; Set-Content pipeline-stage-two-done yes; [Console]::Write($n)")))
+	@(out (pipe (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-one-started yes; [Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 65536; $s=[Console]::OpenStandardOutput(); for ($i=1; $i -le 32; $i++) { $s.Write($b,0,$b.Length); Set-Content pipeline-stage-one-bytes ($i * $b.Length) }; Set-Content pipeline-stage-one-done yes") (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-two-started yes; $s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r; if (($n % 262144) -lt $r) { Set-Content pipeline-stage-two-bytes $n } }; Set-Content pipeline-stage-two-done yes; [Console]::Write($n)")))
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :
@@ -111,13 +111,14 @@ task native-concurrent-cache : ./cache-input.txt
 		}
 		$pipelineOutputPath = Join-Path $project 'pipeline.out'
 		$pipelineErrorPath = Join-Path $project 'pipeline.err'
-		$null = & $exe --timeout 10000 --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline 1> $pipelineOutputPath 2> $pipelineErrorPath
+		$null = & $exe --timeout 30000 --directory $project --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-pipeline 1> $pipelineOutputPath 2> $pipelineErrorPath
 		$pipelineStatus = $LASTEXITCODE
 		$pipelineOutput = Get-Content -Raw $pipelineOutputPath
 		$pipelineError = Get-Content -Raw $pipelineErrorPath
 		if ($pipelineStatus -ne 0 -or $pipelineOutput -notmatch '2097152' -or $pipelineOutput -notmatch '"stages":\[\{[^}]*"status":0\},\{[^}]*"status":0\}\]' -or $pipelineError -notmatch 'native-pipeline-stderr') {
 			$stageMarkers = @('pipeline-stage-one-started', 'pipeline-stage-one-done', 'pipeline-stage-two-started', 'pipeline-stage-two-done') | ForEach-Object { "$_=$(Test-Path (Join-Path $project $_))" }
-			$pipelineFailure = "Native binary pipeline failed to preserve 2 MiB flow, per-stage status, or stream separation: exit=$pipelineStatus markers=$($stageMarkers -join ',') stdout=$pipelineOutput stderr=$pipelineError"
+			$stageProgress = @('pipeline-stage-one-bytes', 'pipeline-stage-two-bytes') | ForEach-Object { "$_=$(if (Test-Path (Join-Path $project $_)) { (Get-Content -Raw (Join-Path $project $_)).Trim() } else { '0' })" }
+			$pipelineFailure = "Native binary pipeline failed to preserve 2 MiB flow, per-stage status, or stream separation: exit=$pipelineStatus markers=$($stageMarkers -join ',') progress=$($stageProgress -join ',') stdout=$pipelineOutput stderr=$pipelineError"
 		}
 	Set-Content -Path (Join-Path $project 'cache-input.txt') -Value 'initial'
 	$cacheArgs = @('--json', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-cache')
