@@ -44,7 +44,7 @@ cli_expect_stdout '(join [a b] ",")'
 printf 'echo @(count [a b])' >template.km
 cli_run --stdin template.km -- do fmt --lang template
 cli_expect_status 0
-cli_expect_stdout 'echo @((count [a b]))'
+cli_expect_stdout 'echo @(count [a b])'
 
 test-step "-n lists changed files and exits 1"
 fixture_copy fmt fmt-modes

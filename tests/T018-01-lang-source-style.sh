@@ -53,7 +53,7 @@ cases = [
     ('expr', f'(f {huge})', f'(f\n  {huge})'),
     ('expr', '[]', '[]'),
     ('expr', f'"@(f {long} x)"', f'"@(f {long} x)"'),
-    ('template', f'text @(f {long} x) end', f'text @((f {long} x)) end'),
+    ('template', f'text @(f {long} x) end', f'text @(f {long} x) end'),
     ('kash', f'value = (f {long} x)\necho @(value)\n',
      f'value = (f {long} x)\n"echo" @(value)\n'),
 ]
