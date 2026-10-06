@@ -920,7 +920,6 @@ func (p *Program) complete(event host.ProcessEvent) {
 		completion := core.Completion{NodeID: completedPending.NodeID, Generation: completedPending.Generation, Attempt: completedPending.Attempt, RequestID: event.ID, Diagnostic: d}
 		if d.Code == "" {
 			completion.Value, completion.HasValue = shellValue(p.Alloc, event), true
-			completion.Value.Record = slices.Append(p.Alloc, completion.Value.Record, core.RecordField{Key: cloneText(p.Alloc, "signal"), Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}})
 		}
 		p.Engine.Complete(completion)
 		return
@@ -1050,7 +1049,7 @@ func processProgram(p *Program) string {
 }
 
 func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
-	fields := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(event.Status)}}, {Key: "stdout", Value: core.NewBytes(a, event.Stdout)}, {Key: "stderr", Value: core.NewBytes(a, event.Stderr)}}
+	fields := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(event.Status)}}, {Key: "stdout", Value: core.NewBytes(a, event.Stdout)}, {Key: "stderr", Value: core.NewBytes(a, event.Stderr)}, {Key: "signal", Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}}}
 	value := core.NewRecord(a, fields)
 	for i := range fields {
 		fields[i].Value.Free(a)
