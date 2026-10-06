@@ -31,11 +31,10 @@ task native-included :
 task native-path :
 	@(out (run "cmd.exe" "/c" "echo native-path-ok"))
 '@ | Set-Content -Encoding ascii (Join-Path $project 'native-child.kmk')
-	$pipeline = @'
+	@'
 task native-pipeline :
-	@(out (pipe (run "__SHELL__" "-NoProfile" "-NonInteractive" "-Command" "[Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 2097152; [Console]::OpenStandardOutput().Write($b,0,$b.Length)") (run "__SHELL__" "-NoProfile" "-NonInteractive" "-Command" "$s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r }; [Console]::Write($n)")))
-'@
-	$pipeline.Replace('__SHELL__', $shell) | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
+	@(out (pipe (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "[Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 2097152; [Console]::OpenStandardOutput().Write($b,0,$b.Length)") (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "$s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r }; [Console]::Write($n)")))
+'@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :
 	Set-Content recipe-pid $PID
