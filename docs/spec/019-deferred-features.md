@@ -38,7 +38,7 @@ adapters and integration evidence rather than placeholder methods.
 | D13 | Resource protocols | Complete: canonical `file:` and `mem:` identity, scoped grants, dependency invalidation, URI-aware filesystem traversal, native/POSIX and WASM host mappings, and portable memory storage; native/WASM CLI acceptance in T031-01 plus host, evaluator and program suites. See 031. |
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
-| D16 | Platform execution | In progress: Linux/macOS x64 and ARM64 plus FreeBSD/NetBSD/OpenBSD native host and artifact workflows pass. Native Windows conformance reaches a 2 MiB PowerShell pipeline, but its consumer does not observe EOF before the 10-second timeout; the later timeout-tree acceptance has not run in that invocation. APE conformance passes on Linux, macOS, FreeBSD and NetBSD; the minimal APE bootstrap aborts on OpenBSD before Kame starts. |
+| D16 | Platform execution | In progress: Linux/macOS x64 and ARM64 plus FreeBSD/NetBSD/OpenBSD native host and artifact workflows pass. Native Windows conformance stalls in a 2 MiB PowerShell pipeline: both stages start, but the deadline fires either during the producer write or while the consumer waits for EOF. The later timeout-tree acceptance has not run. APE conformance passes on Linux, macOS, FreeBSD and NetBSD; the minimal APE bootstrap aborts on OpenBSD before Kame starts. |
 | D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, the Windows x64 launcher bundle and standalone native CLI PE, Linux/macOS x64 and ARM64 plus BSD x64 native builds, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. `dist-release` refuses an incomplete seven-platform native artifact set, and a signed release assembled from the hosted platform artifacts verified 18 assets and all seven native binaries on 2026-10-06. Full Windows host conformance (specified in 035) and maintained tap/bucket publication remain. |
 | D18 | Remaining library/ergonomic extensions | Complete: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, safely quoted `shell-template` interpolation, and comma-separated prerequisite sequencing have specified semantics and native/WASM acceptance coverage. |
 
@@ -132,9 +132,10 @@ minimal APE bootstrap on OpenBSD still exits 134 before Kame starts in
 The Windows workflow executes the native PE for version output, a PowerShell
 recipe, environment forwarding, file output and timeout diagnostics in
 [run 37437405672](https://github.com/sebastien/kame/actions/runs/37437405672).
-The current extended Windows acceptance reaches both stages of a 2 MiB
-PowerShell pipeline, but the consumer does not observe EOF before the bounded
-timeout in [run 37450925106](https://github.com/sebastien/kame/actions/runs/37450925106).
+The extended Windows acceptance reaches both stages of a 2 MiB PowerShell
+pipeline, but stalls either during the producer write or before the consumer
+observes EOF in [run 37450925106](https://github.com/sebastien/kame/actions/runs/37450925106)
+and [run 37451340583](https://github.com/sebastien/kame/actions/runs/37451340583).
 The timeout-tree case later in that script therefore remains unverified.
 Full Windows host conformance and maintained Homebrew tap and Scoop bucket
 publication remain open. A signed release assembled from the hosted platform

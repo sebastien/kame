@@ -117,7 +117,7 @@ task native-concurrent-cache : ./cache-input.txt
 		$pipelineError = Get-Content -Raw $pipelineErrorPath
 		if ($pipelineStatus -ne 0 -or $pipelineOutput -notmatch '2097152' -or $pipelineOutput -notmatch '"stages":\[\{[^}]*"status":0\},\{[^}]*"status":0\}\]' -or $pipelineError -notmatch 'native-pipeline-stderr') {
 			$stageMarkers = @('pipeline-stage-one-started', 'pipeline-stage-one-done', 'pipeline-stage-two-started', 'pipeline-stage-two-done') | ForEach-Object { "$_=$(Test-Path (Join-Path $project $_))" }
-			throw "Native binary pipeline failed to preserve 2 MiB flow, per-stage status, or stream separation: exit=$pipelineStatus markers=$($stageMarkers -join ',') stdout=$pipelineOutput stderr=$pipelineError"
+			$pipelineFailure = "Native binary pipeline failed to preserve 2 MiB flow, per-stage status, or stream separation: exit=$pipelineStatus markers=$($stageMarkers -join ',') stdout=$pipelineOutput stderr=$pipelineError"
 		}
 	Set-Content -Path (Join-Path $project 'cache-input.txt') -Value 'initial'
 	$cacheArgs = @('--json', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-cache')
@@ -212,6 +212,7 @@ task native-concurrent-cache : ./cache-input.txt
 		if ($timeoutStatus -eq 0 -or ($timeoutOutput -join "`n") -notmatch 'RECIPE_TIMEOUT' -or $recipePid -eq 'missing' -or !$childStarted -or !$childLaunched -or $descendantFinished -or $parentFinished) {
 			throw "Native timeout did not stop and reap its process tree: exit=$timeoutStatus recipePid=$recipePid childStarted=$childStarted childLaunched=$childLaunched descendantFinished=$descendantFinished parentFinished=$parentFinished output=$($timeoutOutput -join ' | ')"
 		}
+		if ($pipelineFailure) { throw $pipelineFailure }
 	} finally {
 		Pop-Location
 	}
