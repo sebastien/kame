@@ -187,8 +187,9 @@ creates output parent directories before launch. Existing recipe descriptors
 without a shell field retain the invocation shell policy. A present `environment`
 is an exact snapshot, including an empty array; an omitted field retains the host
 invocation environment. Collected shell calls bound to a target use the same kind
-16 descriptor with empty `outputs`, preserving the runtime environment without
-introducing file publication.
+16 descriptor with empty `outputs` and `capture: true`. The marker keeps the
+request as a captured shell-operation result, distinct from a recipe even though
+both carry an exact target environment.
 Kash file recipes request output-parent preparation separately through ABI kind
 21: the same recipe descriptor with an empty `script`. The host validates
 `outputs`, creates their parent directories, and completes with nil before any

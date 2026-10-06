@@ -53,8 +53,8 @@ enum kame_wasm_request_kind {
   KAME_WASM_REQUEST_PIPELINE = 14,
   // JSON {stages, input, output, append, setup}; per-stage cwd/env/timeout.
   KAME_WASM_REQUEST_REDIRECTED_GRAPH = 15,
-  // JSON {script, outputs, environment?, shell?}; supplied environment is exact.
-  // Target-bound collected shell calls declare an empty outputs array.
+  // JSON {script, outputs, environment?, shell?, capture?}; supplied environment is exact.
+  // Target-bound collected shell calls declare empty outputs and capture=true.
   KAME_WASM_REQUEST_RECIPE = 16,
   KAME_WASM_REQUEST_OUTPUT_EXISTS = 17,
   KAME_WASM_REQUEST_RESOLVE_TOOL = 18,

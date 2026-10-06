@@ -29,11 +29,17 @@ func TestCollectedShellForwardsAnExplicitEmptySnapshot(t *testing.T) {
             if next.Request.Kind == host.RequestProcess {
                 processes++
                 found := false
+                capture := false
                 for i := range next.Request.Payload.Record {
                     field := next.Request.Payload.Record[i]
                     if field.Key == host.FieldEnvironment && field.Value.Kind == core.List && len(field.Value.List) == 0 { found = true }
                 }
-                if !found || host.PayloadText(next.Request.Payload, host.FieldOp) != "recipe" || host.PayloadText(next.Request.Payload, host.FieldScript) != "true" {
+                var decoded core.Value
+                if core.ParseJSON(r.Alloc, []byte(host.PayloadText(next.Request.Payload, host.FieldData)), &decoded) {
+                    for i := range decoded.Record { if decoded.Record[i].Key == host.FieldCapture && decoded.Record[i].Value.Kind == core.Bool && decoded.Record[i].Value.Bool { capture = true } }
+                    decoded.Free(r.Alloc)
+                }
+                if !found || !capture || host.PayloadText(next.Request.Payload, host.FieldOp) != "recipe" || host.PayloadText(next.Request.Payload, host.FieldScript) != "true" {
                     t.Error("collected shell did not carry exact empty snapshot")
                 }
                 r.ProcessTerminal(next.Request, nil, nil, 0, 0, 0, "", "")

@@ -21,6 +21,7 @@ const (
 	FieldInput = "input"
 	FieldOutput = "output"
 	FieldAppend = "append"
+	FieldCapture = "capture"
 	FieldSetup = "setup"
 	FieldCwd = "cwd"
 	FieldTimeout = "timeoutMS"
@@ -68,13 +69,14 @@ func RecipeEnvironmentPayload(a mem.Allocator, script string, outputs []string, 
 
 // RecipeExecutionPayload carries the selected rule shell argv as well as its environment.
 func RecipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string) core.Value {
- return recipeExecutionPayload(a, script, outputs, environment, shell, environment != nil)
+ return recipeExecutionPayload(a, script, outputs, environment, shell, environment != nil, false)
 }
 
 // ScopedProcessPayload carries an exact environment for a collected shell call,
-// including an explicitly empty snapshot. It declares no file outputs.
+// including an explicitly empty snapshot. It declares no file outputs and
+// marks stdout/stderr/status as a captured operation result, not recipe streams.
 func ScopedProcessPayload(a mem.Allocator, script string, environment []string) core.Value {
- return recipeExecutionPayload(a, script, nil, environment, nil, true)
+ return recipeExecutionPayload(a, script, nil, environment, nil, true, true)
 }
 
 // PluginInvocationPayload copies one operation call into a serializable host
@@ -127,7 +129,7 @@ func PluginInvocationPayload(a mem.Allocator, plugin string, pluginVersion strin
 	return payload
 }
 
-func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string, includeEnvironment bool) core.Value {
+func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, environment []string, shell []string, includeEnvironment bool, capture bool) core.Value {
  b := strings.NewBuilder(a)
  e := json.NewEncoder(&b)
  e.BeginObject(); e.Str("script"); e.Str(script); e.Str("outputs"); e.BeginArray()
@@ -143,9 +145,11 @@ func recipeExecutionPayload(a mem.Allocator, script string, outputs []string, en
   for i := range shell { e.Str(shell[i]) }
   e.EndArray()
  }
+ if capture { e.Str("capture"); e.Bool(true) }
  e.EndObject(); e.Flush()
  fields := []core.RecordField{{Key: FieldOp, Value: core.NewString(a, "recipe")}, {Key: FieldScript, Value: core.NewString(a, script)}, {Key: FieldData, Value: core.NewString(a, b.String())}}
  payload := core.NewRecord(a, fields)
+ if capture { payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, FieldCapture).Text, Value: core.Value{Kind: core.Bool, Bool: true}}) }
  if includeEnvironment {
   var values []core.Value
   for i := range environment { values = slices.Append(a, values, core.NewString(a, environment[i])) }
