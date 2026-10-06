@@ -19,7 +19,7 @@ mkdir -p "$project"
 
 # The summary duration is wall-clock; normalize it before comparing.
 normalize() {
-	sed -E 's/in [0-9]+\.[0-9]{3}s/in T/'
+	sed -E 's/in [0-9]+\.[0-9]{3}s/in T/; s/process finished in [0-9]+ms/process finished in Tms/'
 }
 
 compare() {

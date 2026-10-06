@@ -465,6 +465,17 @@ function humanEvent(bytes) {
   const event = JSON.parse(new TextDecoder().decode(bytes));
   if (event.type === 'stdout') { stdout.write(eventData(event)); return; }
   if (event.type === 'stderr') { stderr.write(eventData(event)); return; }
+  if (event.type === 'process-started') {
+    if (event.program) {
+      const argv = Array.isArray(event.argv) ? event.argv : [];
+      stderr.write(`[${event.target}] process ${event.program}${argv.length ? ` ${argv.join(' ')}` : ''}${event.displayTruncated ? ' …' : ''}\n`);
+    }
+    return;
+  }
+  if (event.type === 'process-exited') {
+    if (event.runtimeMS !== undefined) stderr.write(`[${event.target}] process finished in ${event.runtimeMS}ms\n`);
+    return;
+  }
   if (event.type === 'target-started') {
     buildProgress.active++;
     stderr.write(`[${event.target}] started (${buildProgress.active} active, ${buildProgress.completed} complete)\n`);
@@ -476,10 +487,17 @@ function humanEvent(bytes) {
     stderr.write(`[${event.target}] complete (${buildProgress.active} active, ${buildProgress.completed} complete)\n`);
     return;
   }
-  if (event.type === 'target-failed' || event.type === 'target-cancelled') {
+  if (event.type === 'target-failed') {
     if (buildProgress.active !== 0) buildProgress.active--;
     buildProgress.failed++;
     stderr.write(`[${event.target}] failed (${buildProgress.active} active, ${buildProgress.completed} complete)\n`);
+    if (event.diagnostic) lastDiagnostic = event.diagnostic;
+    return;
+  }
+  if (event.type === 'target-cancelled') {
+    if (buildProgress.active !== 0) buildProgress.active--;
+    buildProgress.cancelled++;
+    stderr.write(`[${event.target}] cancelled (${buildProgress.active} active, ${buildProgress.completed} complete)\n`);
     if (event.diagnostic) lastDiagnostic = event.diagnostic;
     return;
   }
@@ -504,10 +522,12 @@ function formatSeconds(elapsedMS) {
 
 function printSummary() {
   const elapsedMS = Date.now() - buildStartedAt;
-  if (buildProgress.failed === 0) {
+  if (buildProgress.failed === 0 && buildProgress.cancelled === 0) {
     stderr.write(`Summary: ${buildProgress.completed} ${buildProgress.completed === 1 ? 'target' : 'targets'} complete in ${formatSeconds(elapsedMS)}\n`);
+  } else if (buildProgress.failed === 0) {
+    stderr.write(`Summary: ${buildProgress.completed} complete, ${buildProgress.cancelled} cancelled in ${formatSeconds(elapsedMS)}\n`);
   } else {
-    stderr.write(`Summary: ${buildProgress.completed} complete, ${buildProgress.failed} failed in ${formatSeconds(elapsedMS)}\n`);
+    stderr.write(`Summary: ${buildProgress.completed} complete, ${buildProgress.failed} failed, ${buildProgress.cancelled} cancelled in ${formatSeconds(elapsedMS)}\n`);
   }
 }
 
@@ -2763,7 +2783,7 @@ async function runSession(module, inv, sourceDirectory) {
     const input = inv.inputs[0];
     if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'command' ? '<command:1>' : fragments[0].name, file: input.kind === 'file' ? resolve(sourceDirectory, fragments[0].name) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false, sourceDirectory);
   }
-  buildProgress = { active: 0, completed: 0, failed: 0 };
+  buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
   buildStartedAt = Date.now();
   return module.runSession(fragments, inv, contextFor(inv));
 }
@@ -3040,7 +3060,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   };
   const compile = async () => {
     watchedSources.clear();
-    buildProgress = { active: 0, completed: 0, failed: 0 };
+    buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
     buildStartedAt = Date.now();
     try {
       source = await discoverBuildSource(module, inv, sourceDirectory, watchedSources);
@@ -3170,7 +3190,7 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
     return failure('BUILD_NO_SOURCE', 'no build source found');
   }
   primarySource = source;
-  buildProgress = { active: 0, completed: 0, failed: 0 };
+  buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
   buildStartedAt = Date.now();
   const context = contextFor(inv);
   context.human = inv.json !== true;
@@ -3212,7 +3232,7 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
       stderr.write(renderDiagnostic(detail, primarySource, 80));
     }
   }
-  if (inv.json !== true && buildProgress.completed + buildProgress.failed !== 0) printSummary();
+  if (inv.json !== true && buildProgress.completed + buildProgress.failed + buildProgress.cancelled !== 0) printSummary();
   return failed ? 1 : 0;
 }
 
@@ -3354,7 +3374,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
         const detail = error.diagnostics?.[0] ?? lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message };
         if (!error.diagnostics && !lastDiagnostic && error.span !== undefined && primarySource) { detail.source = primarySource.name; detail.span = error.span; }
         stderr.write(renderDiagnostic(detail, primarySource, 80));
-        if (buildProgress !== null && buildProgress.completed + buildProgress.failed !== 0) printSummary();
+        if (buildProgress !== null && buildProgress.completed + buildProgress.failed + buildProgress.cancelled !== 0) printSummary();
       }
       process.exitCode = 1;
     },
