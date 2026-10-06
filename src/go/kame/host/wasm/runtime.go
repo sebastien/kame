@@ -562,7 +562,7 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	r := state.Runtime
 	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}}
 	if r.InspectionPolicy { grants = r.InspectionGrants }
-	context := &eval.Context{Program: r.Eval, Engine: c, Scope: r.Eval.Scope, Run: c.Allocator(), Grants: grants, DirectHostRequests: true}
+	context := &eval.Context{Program: r.Eval, Engine: c, Scope: r.Eval.Scope, Run: c.Allocator(), Cwd: r.Directory, Grants: grants, DirectHostRequests: true}
 	result := r.Eval.EvaluateWith(r.Expr, context)
 	if result.Waiting {
 		eval.FreeEffects(c.Allocator(), context.Effects)

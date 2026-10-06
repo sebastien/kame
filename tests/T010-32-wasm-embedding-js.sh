@@ -33,7 +33,7 @@ assert.equal(deniedCalls, 0, 'denied host request reached the callback');
 let callbackCalls = 0;
 const bytes = new TextEncoder().encode('copied host value');
 const value = await program.evaluate('value', {
-  grants: [{ capability: 'read', names: ['.'] }],
+  grants: [{ capability: 'read', names: ['data.txt'] }],
   hostRequest: async (request) => {
     callbackCalls++;
     assert.equal(request.kind, 1);
@@ -53,7 +53,7 @@ const hostStarted = new Promise((resolve) => { markHostStarted = resolve; });
 let releaseLateHost;
 const abortController = new AbortController();
 const cancelled = program.evaluate('value', {
-  grants: [{ capability: 'read', names: ['.'] }],
+  grants: [{ capability: 'read', names: ['data.txt'] }],
   signal: abortController.signal,
   hostRequest: async () => {
     markHostStarted();
