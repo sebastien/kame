@@ -56,6 +56,9 @@ task native-concurrent-cache : ./cache-input.txt
 	Start-Sleep -Seconds 2
 	Add-Content -Path concurrent-runs.txt -Value ran
 	Write-Output 'native-concurrent-cache-ok'
+
+./native-watch-output.txt : ./native-watch-input.txt
+	Copy-Item -LiteralPath @< -Destination @>
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	Push-Location $project
 	try {
@@ -146,6 +149,33 @@ task native-concurrent-cache : ./cache-input.txt
 		$concurrentRuns = @(Get-Content (Join-Path $project 'concurrent-runs.txt'))
 		if ($concurrentRuns.Count -ne 1) {
 			throw "Native concurrent cache misses were not serialized: runs=$($concurrentRuns.Count)"
+		}
+		Set-Content -Path (Join-Path $project 'native-watch-input.txt') -Value 'watch-before'
+		$watchArgs = @('--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '--watch', './native-watch-output.txt')
+		$watchStdout = Join-Path $project 'watch.out'
+		$watchStderr = Join-Path $project 'watch.err'
+		$watch = Start-Process -FilePath $exe -ArgumentList $watchArgs -PassThru -NoNewWindow -RedirectStandardOutput $watchStdout -RedirectStandardError $watchStderr
+		try {
+			$watchOutput = Join-Path $project 'native-watch-output.txt'
+			$deadline = [DateTime]::UtcNow.AddSeconds(15)
+			while ([DateTime]::UtcNow -lt $deadline -and (!(Test-Path $watchOutput) -or (Get-Content -Raw $watchOutput).Trim() -ne 'watch-before')) {
+				if ($watch.HasExited) { throw "Native watch exited before its initial build: code=$($watch.ExitCode) stderr=$(Get-Content -Raw $watchStderr)" }
+				Start-Sleep -Milliseconds 100
+			}
+			if (!(Test-Path $watchOutput) -or (Get-Content -Raw $watchOutput).Trim() -ne 'watch-before') {
+				throw "Native watch did not publish its initial output: stderr=$(Get-Content -Raw $watchStderr)"
+			}
+			Set-Content -Path (Join-Path $project 'native-watch-input.txt') -Value 'watch-after'
+			$deadline = [DateTime]::UtcNow.AddSeconds(15)
+			while ([DateTime]::UtcNow -lt $deadline -and (Get-Content -Raw $watchOutput).Trim() -ne 'watch-after') {
+				if ($watch.HasExited) { throw "Native watch exited before input invalidation: code=$($watch.ExitCode) stderr=$(Get-Content -Raw $watchStderr)" }
+				Start-Sleep -Milliseconds 100
+			}
+			if ((Get-Content -Raw $watchOutput).Trim() -ne 'watch-after') {
+				throw "Native watch did not rebuild after input invalidation: stderr=$(Get-Content -Raw $watchStderr)"
+			}
+		} finally {
+			if (!$watch.HasExited) { Stop-Process -Id $watch.Id -Force }
 		}
 		$timeoutOutput = & $exe --timeout 15000 --shell $shell --shell -NoProfile --shell -NonInteractive --shell -Command -f Makefile.kmk native-timeout 2>&1
 		$timeoutStatus = $LASTEXITCODE
