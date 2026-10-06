@@ -12,25 +12,30 @@ const (
 )
 
 type Node struct {
-	ID              int64
-	Key             ResourceKey
-	Producer        Producer
-	Context         any
-	ContextFree     ContextFree
-	Latest          Value
-	Current         bool
-	Requested       bool
-	State           NodeState
-	Revision        int64
-	Generation      int64
-	Attempt         int64
-	Diagnostic      Diagnostic
-	Static          []*Node
-	Dynamic         []*Node
+	ID           int64
+	Key          ResourceKey
+	Producer     Producer
+	Context      any
+	ContextFree  ContextFree
+	Latest       Value
+	Signature    Signature
+	Observations []Observation
+	Current      bool
+	// ValidationPending keeps accepted state while dependencies are refreshed.
+	ValidationPending bool
+	DisableReuse      bool
+	Requested         bool
+	State             NodeState
+	Revision          int64
+	Generation        int64
+	Attempt           int64
+	Diagnostic        Diagnostic
+	Static            []*Node
+	Dynamic           []*Node
 	// Retain old dependency interest while a reactive invocation rebinds edges.
 	previousDynamic []*Node
 	// OrderOnly edges schedule work without consuming prerequisite contents.
-	OrderOnly []*Node
+	OrderOnly               []*Node
 	InvalidatedForOrderOnly bool
 	// Observed failures wake the producer instead of failing it transitively.
 	Observed        []*Node
@@ -52,12 +57,24 @@ type Node struct {
 func (n *Node) HasActiveSource() bool { return n != nil && n.materializer != nil }
 
 func (n *Node) complete(e *Engine, diagnostic Diagnostic) {
-	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled { return }
+	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
+		return
+	}
 	n.Diagnostic = diagnostic
-	if diagnostic.Code == "" { n.State = NodeComplete } else { n.State = NodeFailed; if n.Current { n.Latest.Free(e.Alloc); n.Current = false } }
+	if diagnostic.Code == "" {
+		n.State = NodeComplete
+	} else {
+		n.State = NodeFailed
+		if n.Current {
+			n.Latest.Free(e.Alloc)
+			n.Current = false
+		}
+	}
 	e.releasePreviousDependencies(n)
 	e.emit(n, terminal(n))
 	for i := range n.Dependents {
-		if n.Dependents[i].State == NodeWaiting { n.Dependents[i].State = NodeReady }
+		if n.Dependents[i].State == NodeWaiting && !n.Dependents[i].ValidationPending {
+			n.Dependents[i].State = NodeReady
+		}
 	}
 }

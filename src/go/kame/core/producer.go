@@ -53,6 +53,16 @@ func (c *EngineContext) Publish(value Value) {
 	c.engine.publish(c.node, value)
 }
 
+// PublishSigned separates a resource's public value (for example a file path)
+// from its semantic identity (the file's contents).
+func (c *EngineContext) PublishSigned(value Value, signature Signature) {
+	if c.node.State == NodeComplete || c.node.State == NodeFailed || c.node.State == NodeCancelled {
+		value.Free(c.engine.Alloc)
+		return
+	}
+	c.engine.publishSigned(c.node, value, signature)
+}
+
 func (c *EngineContext) Fail(d Diagnostic) { c.node.complete(c.engine, d) }
 
 // Dependency adds one generation-owned edge and returns whether it is current.
@@ -81,7 +91,11 @@ func (c *EngineContext) TryDependency(key ResourceKey) bool { return c.dependenc
 // DependencyDiagnostic returns a borrowed diagnostic for an observed edge.
 func (c *EngineContext) DependencyDiagnostic(key ResourceKey) Diagnostic {
 	dep := c.engine.find(key)
-	if dep != nil && slices.Contains(c.node.Observed, dep) && (dep.State == NodeFailed || dep.State == NodeCancelled) { return dep.Diagnostic }
+	if dep != nil && slices.Contains(c.node.Observed, dep) && (dep.State == NodeFailed || dep.State == NodeCancelled) {
+		// Recovery consumed an error, not a missing resource or an ordinary value.
+		c.Observe(dep.Key, Signature{})
+		return dep.Diagnostic
+	}
 	return Diagnostic{}
 }
 
@@ -100,7 +114,9 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 	}
 	if !slices.Contains(c.node.Dynamic, dep) {
 		c.node.Dynamic = slices.Append(c.engine.Alloc, c.node.Dynamic, dep)
-		if observed { c.node.Observed = slices.Append(c.engine.Alloc, c.node.Observed, dep) }
+		if observed {
+			c.node.Observed = slices.Append(c.engine.Alloc, c.node.Observed, dep)
+		}
 		dep.Dependents = slices.Append(c.engine.Alloc, dep.Dependents, c.node)
 		c.engine.emit(c.node, Event{Kind: UpdateDependency, DependencyID: dep.ID})
 		held := false
@@ -116,22 +132,30 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 			c.engine.interest(dep, c.node.Interest)
 		}
 	}
- for i := range c.node.OrderOnly {
-  if c.node.OrderOnly[i] == dep {
-   copy(c.node.OrderOnly[i:], c.node.OrderOnly[i+1:])
-   c.node.OrderOnly = c.node.OrderOnly[:len(c.node.OrderOnly)-1]
-   break
-  }
- }
-	if !observed {
-		for i := range c.node.Observed { if c.node.Observed[i] == dep { copy(c.node.Observed[i:], c.node.Observed[i+1:]); c.node.Observed = c.node.Observed[:len(c.node.Observed)-1]; break } }
+	for i := range c.node.OrderOnly {
+		if c.node.OrderOnly[i] == dep {
+			copy(c.node.OrderOnly[i:], c.node.OrderOnly[i+1:])
+			c.node.OrderOnly = c.node.OrderOnly[:len(c.node.OrderOnly)-1]
+			break
+		}
 	}
-	if observed && (dep.State == NodeFailed || dep.State == NodeCancelled) { return true }
+	if !observed {
+		for i := range c.node.Observed {
+			if c.node.Observed[i] == dep {
+				copy(c.node.Observed[i:], c.node.Observed[i+1:])
+				c.node.Observed = c.node.Observed[:len(c.node.Observed)-1]
+				break
+			}
+		}
+	}
+	if observed && (dep.State == NodeFailed || dep.State == NodeCancelled) {
+		return true
+	}
 	if !observed && (dep.State == NodeFailed || dep.State == NodeCancelled) {
 		c.node.complete(c.engine, dep.Diagnostic.Clone(c.engine.Alloc))
 		return false
 	}
-	if !dep.Current || dep.State == NodeFailed || dep.State == NodeCancelled {
+	if !dep.Current || dep.ValidationPending || dep.State == NodeFailed || dep.State == NodeCancelled {
 		request(dep)
 		return false
 	}
@@ -141,9 +165,10 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 // CurrentValue is the borrowed current value of a dependency, when present.
 // Clone Value before retaining it beyond the active producer call.
 type CurrentValue struct {
-	Value Value
-	Revision int64
-	OK    bool
+	Value     Value
+	Signature Signature
+	Revision  int64
+	OK        bool
 }
 
 // Value returns the current value of a dependency without adding an edge. It
@@ -151,10 +176,11 @@ type CurrentValue struct {
 // value.
 func (c *EngineContext) Value(key ResourceKey) CurrentValue {
 	dep := c.engine.find(key)
-	if dep == nil || dep == c.node || (!slices.Contains(c.node.Static, dep) && !slices.Contains(c.node.Dynamic, dep)) || !dep.Current {
+	if dep == nil || dep == c.node || (!slices.Contains(c.node.Static, dep) && !slices.Contains(c.node.Dynamic, dep)) || !dep.Current || dep.ValidationPending {
 		return CurrentValue{}
 	}
-	return CurrentValue{Value: dep.Latest, Revision: dep.Revision, OK: true}
+	c.Observe(dep.Key, dep.Signature)
+	return CurrentValue{Value: dep.Latest, Signature: dep.Signature, Revision: dep.Revision, OK: true}
 }
 
 func (c *EngineContext) Completion() Completion { return c.completion }
@@ -162,15 +188,17 @@ func (c *EngineContext) Completion() Completion { return c.completion }
 func (c *EngineContext) Context() any { return c.node.Context }
 
 func (c *EngineContext) Allocator() mem.Allocator { return c.engine.Alloc }
-func (c *EngineContext) NodeID() int64 { return c.node.ID }
+func (c *EngineContext) NodeID() int64            { return c.node.ID }
 
 // RetainRoot pins the demanding generation for invocation-owned handles.
 func (c *EngineContext) RetainRoot() *Root { return c.engine.RequestRoot(c.node) }
 func (c *EngineContext) Generation() int64 { return c.node.Generation }
-func (c *EngineContext) Attempt() int64 { return c.node.Attempt }
-func (c *EngineContext) Failed() bool { return c.node.State == NodeFailed || c.node.State == NodeCancelled }
+func (c *EngineContext) Attempt() int64    { return c.node.Attempt }
+func (c *EngineContext) Failed() bool {
+	return c.node.State == NodeFailed || c.node.State == NodeCancelled
+}
 func (c *EngineContext) Diagnostic() Diagnostic { return c.node.Diagnostic }
-func (c *EngineContext) Submitted() bool { return c.node.Submitted }
+func (c *EngineContext) Submitted() bool        { return c.node.Submitted }
 
 // Submit records the host request that will later resume this invocation.
 func (c *EngineContext) Submit(requestID int64) {
@@ -184,7 +212,9 @@ func (c *EngineContext) Submit(requestID int64) {
 
 // AttachSource transfers source ownership to the active producer generation.
 func (c *EngineContext) AttachSource(source *Source) bool {
-	if source == nil || c.node.materializer != nil { return false }
+	if source == nil || c.node.materializer != nil {
+		return false
+	}
 	c.node.materializer = NewMaterializer(c.engine.Alloc, source)
 	return true
 }

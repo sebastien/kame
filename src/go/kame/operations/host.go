@@ -86,7 +86,7 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 	}
 	if state.Done {
 		payload.Free(c.Run)
-		return eval.Result{Value: state.Value.Clone(c.Run)}
+		return readRequestValue(c, state)
 	}
 	if state.ID != 0 {
 		payload.Free(c.Run)
@@ -95,6 +95,7 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 		}
 		completion := c.TakeCompletion()
 		if completion.Diagnostic.Code != "" {
+			observeReadRequest(c, state, core.Signature{})
 			result := eval.Result{Diagnostic: completion.Diagnostic.Clone(c.Run)}
 			completion.Diagnostic.Free(c.Run)
 			completion.Value.Free(c.Run)
@@ -102,11 +103,12 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 		}
 		if !completion.HasValue {
 			completion.Value.Free(c.Run)
+			observeReadRequest(c, state, core.Signature{})
 			return c.InvalidOperation("host completion omitted its result")
 		}
 		state.Value, state.Done = completion.Value.Clone(state.Alloc), true
 		completion.Value.Free(c.Run)
-		return eval.Result{Value: state.Value.Clone(c.Run)}
+		return readRequestValue(c, state)
 	}
 	state.ID = c.Submit(kind, payload)
 	payload.Free(c.Run)
@@ -115,6 +117,35 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 	}
 	return eval.Result{Waiting: true}
 }
+
+func readRequestValue(c *eval.Context, state *readRequestState) eval.Result {
+	signature := core.ValueSignature(state.Value)
+	if state.Kind == host.RequestReadFile && state.Op == host.OpRead {
+		if state.Value.Kind == core.Bytes {
+			signature = core.ContentSignature(state.Value.Bytes)
+		} else {
+			signature = core.Signature{}
+		}
+	}
+	observeReadRequest(c, state, signature)
+	return eval.Result{Value: state.Value.Clone(c.Run)}
+}
+
+func observeReadRequest(c *eval.Context, state *readRequestState, signature core.Signature) {
+	key := core.ResourceKey{Kind: core.ResourceFile, Name: state.Name}
+	aspect := core.ObservationContent
+	if state.Kind == host.RequestEnvironment {
+		key.Kind, aspect = core.ResourceEnvironment, core.ObservationValue
+	} else if state.Op == host.OpExists {
+		aspect = core.ObservationExistence
+	} else if state.Op == host.OpStat {
+		aspect = core.ObservationMetadata
+	} else if state.Op == host.OpWildcard {
+		key.Kind, aspect = core.ResourceGlob, core.ObservationValue
+	}
+	c.Observe(key, aspect, signature)
+}
+
 func dependency(c *eval.Context, kind core.ResourceKind, name string) bool {
 	key := core.NewResourceKey(c.Run, kind, name)
 	current := c.Dependency(key)
@@ -256,14 +287,19 @@ func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 		return failure("CAP_DENIED", "environment access denied")
 	}
 	if c.HasEnvironment {
-		// Target environments already participate in recipe fingerprints. Do not
-		// attach a shared ambient node to a target-local value.
+		// The snapshot supplies the value; only the requested name is observed.
 		for i := range c.Environment {
 			assignment := c.Environment[i]
 			equal := strings.IndexByte(assignment, '=')
 			if equal >= 0 && assignment[:equal] == v[0].Text {
+				if c.Engine != nil {
+					c.Engine.Observe(core.ResourceKey{Kind: core.ResourceEnvironment, Name: v[0].Text}, core.ValueSignature(core.Value{Kind: core.String, Text: assignment[equal+1:]}))
+				}
 				return eval.Result{Value: core.NewString(c.Run, assignment[equal+1:])}
 			}
+		}
+		if c.Engine != nil {
+			c.Engine.Observe(core.ResourceKey{Kind: core.ResourceEnvironment, Name: v[0].Text}, core.ValueSignature(core.Value{Kind: core.Nil}))
 		}
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}

@@ -210,6 +210,7 @@ func pluginResourceKind(kind ResourceKind) string {
 	case ResourceGlob: return "glob"
 	case ResourceEnvironment: return "environment"
 	case ResourceTool: return "tool"
+	case ResourceOperation: return "operation"
 	}
 	return "unknown"
 }
@@ -224,6 +225,7 @@ func parsePluginResourceKind(text string) ResourceKind {
 	case "glob": return ResourceGlob
 	case "environment": return ResourceEnvironment
 	case "tool": return ResourceTool
+	case "operation": return ResourceOperation
 	}
 	return -1
 }

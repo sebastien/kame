@@ -254,6 +254,10 @@ func (e *Engine) emit(n *Node, event Event) {
 }
 
 func (e *Engine) publish(n *Node, value Value) {
+	e.publishSigned(n, value, ValueSignature(value))
+}
+
+func (e *Engine) publishSigned(n *Node, value Value, signature Signature) {
 	if value.HasTransientCallable() {
 		value.Free(e.Alloc)
 		n.complete(e, Diagnostic{Code: DiagnosticExprValue})
@@ -263,6 +267,7 @@ func (e *Engine) publish(n *Node, value Value) {
 		n.Latest.Free(e.Alloc)
 	}
 	n.Latest, n.Current = value.Clone(e.Alloc), true
+	n.Signature = signature
 	value.Free(e.Alloc)
 	n.Revision++
 	e.releasePreviousDependencies(n)
@@ -270,7 +275,7 @@ func (e *Engine) publish(n *Node, value Value) {
 	dependents := slices.Clone(e.Alloc, n.Dependents)
 	for i := range dependents {
 		dependent := dependents[i]
-		if dependent.State != NodeWaiting {
+		if dependent.State != NodeWaiting || dependent.ValidationPending {
 			continue
 		}
 		// A host request was derived from an older dependency snapshot. Cancel it
@@ -319,6 +324,12 @@ func (e *Engine) Fail(n *Node, d Diagnostic) {
 }
 
 func (e *Engine) ready(n *Node) bool {
+	if n.ValidationPending {
+		e.validatePending(n)
+		if n.ValidationPending {
+			return false
+		}
+	}
 	if n.Interest == 0 || n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled || n.State == NodeWaiting {
 		return false
 	}
@@ -328,7 +339,7 @@ func (e *Engine) ready(n *Node) bool {
 			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
 			return false
 		}
-		if dependency.State != NodeComplete {
+		if dependency.State != NodeComplete || dependency.ValidationPending {
 			dependency.Requested = true
 			return false
 		}
@@ -342,7 +353,7 @@ func (e *Engine) ready(n *Node) bool {
 			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
 			return false
 		}
-		if !dependency.Current {
+		if !dependency.Current || dependency.ValidationPending {
 			dependency.Requested = true
 			return false
 		}
@@ -551,7 +562,7 @@ func (e *Engine) Invalidate(n *Node) {
 	e.collectInvalidationReasons(n, false, &reasons)
 	slices.Free(e.Alloc, reasons)
 	var seen []*Node
-	e.invalidate(n, &seen, false)
+	e.invalidate(n, &seen, false, true)
 	slices.Free(e.Alloc, seen)
 }
 
@@ -575,7 +586,7 @@ func (e *Engine) collectInvalidationReasons(n *Node, ordered bool, seen *[]*Node
 	}
 }
 
-func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool) {
+func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool) {
 	if n == nil {
 		return
 	}
@@ -591,10 +602,12 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool) {
 		e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 	}
 	n.Generation++
+	n.ValidationPending = false
 	n.Submitted = false
 	n.HostRequestID = 0
 	if n.HasCompletion {
 		n.Completion.Value.Free(e.Alloc)
+		n.Completion.Diagnostic.Free(e.Alloc)
 		n.Completion = Completion{}
 		n.HasCompletion = false
 	}
@@ -627,9 +640,13 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool) {
 	n.Observed = nil
 	slices.Free(e.Alloc, n.OrderOnly)
 	n.OrderOnly = nil
+	FreeObservations(e.Alloc, n.Observations)
+	n.Observations = nil
 	e.emit(n, Event{Kind: UpdateInvalidated})
 	for i := range dependents {
-		e.invalidate(dependents[i], seen, retain)
+		if recursive {
+			e.invalidate(dependents[i], seen, retain, true)
+		}
 	}
 	slices.Free(e.Alloc, dependents)
 	n.invalidating = false
@@ -643,7 +660,7 @@ func (e *Engine) restartFromPublication(n *Node) {
 	e.collectInvalidationReasons(n, false, &seen)
 	slices.Free(e.Alloc, seen)
 	seen = nil
-	e.invalidate(n, &seen, true)
+	e.invalidate(n, &seen, true, true)
 	slices.Free(e.Alloc, seen)
 }
 
@@ -753,6 +770,7 @@ func (e *Engine) Free() {
 		slices.Free(e.Alloc, n.Dependents)
 		slices.Free(e.Alloc, n.Observed)
 		slices.Free(e.Alloc, n.OrderOnly)
+		FreeObservations(e.Alloc, n.Observations)
 		if n.Current {
 			n.Latest.Free(e.Alloc)
 		}
