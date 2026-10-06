@@ -567,11 +567,10 @@ static void km_exec_argv(char **argv, char **envp) {
     errno = saved;
 }
 
-// On Windows, launch a pipeline command beneath its job-contained stage
-// process. The spawned command inherits the stage's remapped standard handles
-// and job membership; the wrapper preserves the existing waitpid lifecycle.
-static int km_spawn_argv(pid_t *pid, char **argv, char **envp) {
-    if (strchr(argv[0], '/')) return posix_spawn(pid, argv[0], NULL, NULL, argv, envp);
+// Resolve PATH using the request environment and launch through Cosmopolitan's
+// file-action path, which maps pipe descriptors into native child handles.
+static int km_spawn_argv(pid_t *pid, char **argv, char **envp, posix_spawn_file_actions_t *actions, posix_spawnattr_t *attr) {
+    if (strchr(argv[0], '/')) return posix_spawn(pid, argv[0], actions, attr, argv, envp);
     const char *paths = "/bin:/usr/bin";
     for (char **entry = envp; *entry; entry++) if (strncmp(*entry, "PATH=", 5) == 0) { paths = *entry + 5; break; }
     int saved = ENOENT;
@@ -584,7 +583,7 @@ static int km_spawn_argv(pid_t *pid, char **argv, char **envp) {
         if (!path) return ENOMEM;
         if (n) { memcpy(path, part, n); path[n] = '/'; memcpy(path + n + 1, argv[0], name_len + 1); }
         else memcpy(path, argv[0], name_len + 1);
-        int error = posix_spawn(pid, path, NULL, NULL, argv, envp);
+        int error = posix_spawn(pid, path, actions, attr, argv, envp);
         free(path);
         if (!error) return 0;
         if (error != ENOENT && error != ENOTDIR && error != EACCES) return error;
@@ -594,18 +593,31 @@ static int km_spawn_argv(pid_t *pid, char **argv, char **envp) {
     }
 }
 
-static void km_spawn_wait(char **argv, char **envp, int execfd) {
-    pid_t child = -1;
-    int error = km_spawn_argv(&child, argv, envp);
-    if (error) { write(execfd, &error, sizeof(error)); _exit(127); }
-    close(execfd);
-    int status;
-    pid_t result;
-    do { result = waitpid(child, &status, 0); } while (result < 0 && errno == EINTR);
-    if (result != child) _exit(127);
-    if (WIFEXITED(status)) _exit(WEXITSTATUS(status));
-    if (WIFSIGNALED(status)) _exit(128 + WTERMSIG(status));
-    _exit(127);
+static int km_spawn_graph_stage(pid_t *pid, char **argv, char **envp, char *cwd, int input, int output, int error_output, int out[2], int err[2], int execerr[2], int *edges, int edge_count, int inputfd, int outputfd) {
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attr;
+    int error = posix_spawn_file_actions_init(&actions);
+    if (error) return error;
+    error = posix_spawnattr_init(&attr);
+    if (error) { posix_spawn_file_actions_destroy(&actions); return error; }
+    if ((error = posix_spawn_file_actions_adddup2(&actions, input, STDIN_FILENO)) ||
+        (error = posix_spawn_file_actions_adddup2(&actions, output, STDOUT_FILENO)) ||
+        (error = posix_spawn_file_actions_adddup2(&actions, error_output, STDERR_FILENO)) ||
+        (error = posix_spawn_file_actions_addchdir_np(&actions, cwd))) goto done;
+    int close_fds[8] = {out[0], out[1], err[0], err[1], execerr[0], execerr[1], inputfd, outputfd};
+    for (int i = 0; i < 8 + edge_count; i++) {
+        int fd = i < 8 ? close_fds[i] : edges[i - 8];
+        if (fd < 0 || fd <= STDERR_FILENO) continue;
+        error = posix_spawn_file_actions_addclose(&actions, fd);
+        if (error) goto done;
+    }
+    error = posix_spawnattr_setpgroup(&attr, 0);
+    if (!error) error = posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
+    if (!error) error = km_spawn_argv(pid, argv, envp, &actions, &attr);
+done:
+    posix_spawnattr_destroy(&attr);
+    posix_spawn_file_actions_destroy(&actions);
+    return error;
 }
 
 int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so_String directory, so_Slice environment, int64_t timeout, so_int retain, bool direct) {
@@ -768,16 +780,40 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
     // source cannot truncate the destination. Evaluator grants precede this call.
     if (ok && input_name[0]) { inputfd = open(input_name, O_RDONLY); if (inputfd < 0) ok = false; }
     if (ok && output_name[0]) { outputfd = open(output_name, O_WRONLY | O_CREAT | (append_output ? O_APPEND : O_TRUNC), 0666); if (outputfd < 0) ok = false; }
+    if (ok && km_windows_jobs_needed() && inputfd < 0) { inputfd = open("/dev/null", O_RDONLY); if (inputfd < 0) ok = false; }
     for (int i = 0; ok && i < n; i++) {
-        int ready[2] = {-1, -1};
         if (km_windows_jobs_needed()) {
             p.stages[i].job = km_windows_job_create();
-            if (p.stages[i].job < 0 || pipe(ready)) {
-                km_windows_job_close(&p.stages[i].job);
-                ok = false;
-                break;
+            if (p.stages[i].job < 0) { ok = false; break; }
+            int input = i ? edges[(i - 1) * 2] : inputfd;
+            int output = i == n - 1 ? (outputfd >= 0 ? outputfd : out[1]) : edges[i * 2 + 1];
+            pid_t pid = -1;
+            int error = km_spawn_graph_stage(&pid, argv[i], envp[i], cwd[i], input, output, err[1], out, err, execerr, edges, (n - 1) * 2, inputfd, outputfd);
+            if (error) { km_windows_job_close(&p.stages[i].job); ok = false; break; }
+            p.stages[i].pid = pid;
+            p.stages[i].deadline = stage_timeouts[i] ? km_now() + stage_timeouts[i] : 0;
+            setpgid(pid, pid);
+            if (i == 0) p.pid = pid;
+            bool assigned = km_windows_job_assign(p.stages[i].job, pid);
+            if (!assigned) {
+                int status = 0;
+                pid_t result = waitpid(pid, &status, WNOHANG);
+                if (result == pid) {
+                    p.stages[i].reaped = true;
+                    if (WIFEXITED(status)) p.stages[i].status = WEXITSTATUS(status);
+                    else if (WIFSIGNALED(status)) p.stages[i].signal = WTERMSIG(status);
+                    assigned = true;
+                } else {
+                    kill(pid, SIGKILL);
+                    do { result = waitpid(pid, &status, 0); } while (result < 0 && errno == EINTR);
+                    p.stages[i].reaped = result == pid;
+                }
             }
+            if (!assigned) { ok = false; break; }
+            p.stages[i].spawned_in_job = true;
+            continue;
         }
+        int ready[2] = {-1, -1};
         pid_t pid = fork();
         if (pid < 0) { km_close(&ready[0]); km_close(&ready[1]); ok = false; break; }
         if (pid == 0) {
@@ -799,7 +835,6 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
                 close(ready[0]);
                 if (nread != 1 || token != 1) _exit(126);
             }
-            if (km_windows_jobs_needed()) km_spawn_wait(argv[i], envp[i], execerr[1]);
             km_exec_argv(argv[i], envp[i]);
             int error = errno; write(execerr[1], &error, sizeof(error)); _exit(127);
         }
