@@ -12,7 +12,9 @@
 #include <sys/file.h>
 #include <sys/wait.h>
 #include <signal.h>
+#if defined(__COSMOPOLITAN__)
 #include <spawn.h>
+#endif
 #include <time.h>
 #include <unistd.h>
 #if defined(__COSMOPOLITAN__)
@@ -569,6 +571,7 @@ static void km_exec_argv(char **argv, char **envp) {
 
 // Resolve PATH using the request environment and launch through Cosmopolitan's
 // file-action path, which maps pipe descriptors into native child handles.
+#if defined(__COSMOPOLITAN__)
 static int km_spawn_argv(pid_t *pid, char **argv, char **envp, posix_spawn_file_actions_t *actions, posix_spawnattr_t *attr) {
     if (strchr(argv[0], '/')) return posix_spawn(pid, argv[0], actions, attr, argv, envp);
     const char *paths = "/bin:/usr/bin";
@@ -619,6 +622,7 @@ done:
     posix_spawn_file_actions_destroy(&actions);
     return error;
 }
+#endif
 
 int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so_String directory, so_Slice environment, int64_t timeout, so_int retain, bool direct) {
     if (!host) return -1;
@@ -782,6 +786,7 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
     if (ok && output_name[0]) { outputfd = open(output_name, O_WRONLY | O_CREAT | (append_output ? O_APPEND : O_TRUNC), 0666); if (outputfd < 0) ok = false; }
     if (ok && km_windows_jobs_needed() && inputfd < 0) { inputfd = open("/dev/null", O_RDONLY); if (inputfd < 0) ok = false; }
     for (int i = 0; ok && i < n; i++) {
+#if defined(__COSMOPOLITAN__)
         if (km_windows_jobs_needed()) {
             p.stages[i].job = km_windows_job_create();
             if (p.stages[i].job < 0) { ok = false; break; }
@@ -813,6 +818,7 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
             p.stages[i].spawned_in_job = true;
             continue;
         }
+#endif
         int ready[2] = {-1, -1};
         pid_t pid = fork();
         if (pid < 0) { km_close(&ready[0]); km_close(&ready[1]); ok = false; break; }
