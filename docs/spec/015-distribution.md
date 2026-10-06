@@ -244,8 +244,11 @@ Release assets are built with these targets, additive to the existing
 - `bin/kame` is the checked-in launcher; a source checkout resolves its
   version from `VERSION`.
 - `dist-release` stages `dist/release/` with the exact asset names, generated
-  Homebrew and Scoop manifests, and a signed `SHA256SUMS`. Publishing is a
-  manual, out-of-band step.
+  Homebrew and Scoop manifests, and a signed `SHA256SUMS`. Before staging, it
+  requires native binaries for Linux x64/ARM64, macOS x64/ARM64, FreeBSD x64,
+  NetBSD x64 and OpenBSD x64; an incomplete platform set fails before the
+  existing release directory is removed. Publishing is a manual, out-of-band
+  step.
 - `dist-native` builds the current host's full native CLI and places it at
   `dist/native/PLATFORM/kame`; `.github/workflows/native-artifacts.yml` uploads
   Linux and macOS x64/ARM64 host builds, and
