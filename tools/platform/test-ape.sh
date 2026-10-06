@@ -27,9 +27,7 @@ report_phase() {
 	printf 'APE conformance phase: %s\n' "$1" >&2
 }
 
-# Assimilation selects the host's native executable format when available. It
-# also avoids depending on shell-specific parsing of the binary polyglot.
-report_phase "assimilate APE for native execution"
+report_phase "prepare APE shell adapter"
 "$ape_shell" "$ape_path" --assimilate
 "$ape_shell" "$smoke_path" --assimilate
 
