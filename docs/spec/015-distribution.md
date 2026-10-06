@@ -53,22 +53,9 @@ provenance include every staged native binary. The release signer should stage
 only outputs from trusted builds of the tagged source revision.
 The generated package-manager manifests embed the exact release version and
 asset digest. They can be installed directly with Homebrew or Scoop from the
-release URL; each release carries new pinned manifests. The
-`publish-package-manifests` workflow also publishes them to maintained package
-repositories after release publication. It clones the configured Homebrew tap
-and Scoop bucket, revalidates each manifest against the release assets, then
-commits only `Formula/kame.rb` and `bucket/kame.json` respectively. The
-workflow can also be dispatched manually for an already published version.
-Configure repository variables `KAME_HOMEBREW_TAP_REPOSITORY` and
-`KAME_SCOOP_BUCKET_REPOSITORY` as `owner/name`, and secret
-`KAME_PACKAGE_PUBLISH_TOKEN` with a fine-grained token restricted to
-`sebastien/homebrew-kame` and `sebastien/scoop-kame`, granting Contents
-read/write. The workflow uses its built-in read-only `GITHUB_TOKEN` to download
-release assets from `sebastien/kame`, so the personal token needs no access to
-the source repository. A manual dispatch can override either repository
-variable. The maintained targets are
-`sebastien/homebrew-kame` and `sebastien/scoop-kame`; the first receives
-`Formula/kame.rb`, and the second receives `bucket/kame.json`.
+release URL; each release carries new pinned manifests. The Homebrew formula
+and Scoop manifest are release assets and are not maintained in separate
+package repositories.
 
 `SHA256SUMS` contains one `<64-hex-lowercase>  <asset>` line per asset, sorted
 by asset name, using the conventional two-space separator.
@@ -337,9 +324,3 @@ existing build rules.
   before the Kame CLI checks, so loader failures are distinct from application
   startup failures on each tested host. OpenBSD is covered by native artifact
   tests because Cosmopolitan 4.0.2 APEs fail OpenBSD syscall pinning.
-
-## Deferred
-
-- Verify the hosted manifest publisher on the first actual signed release. The
-  maintained repositories and publication variables are configured; the
-  fine-grained token and release signing key remain operator-provided.

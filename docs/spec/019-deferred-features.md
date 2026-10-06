@@ -39,7 +39,7 @@ adapters and integration evidence rather than placeholder methods.
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
 | D16 | Platform execution | Complete: Linux/macOS x64 and ARM64 plus FreeBSD/NetBSD/OpenBSD native host and artifact workflows pass. Native Windows CLI file/env/path/include, cache locking, file/glob watch, descendant cleanup, EOF closure and 2 MiB pipeline transfer pass in run 37471661368 with 64 KiB producer writes. Cosmopolitan 4.0.2 APE execution is not supported on OpenBSD 7.5+: its loader violates syscall pinning; OpenBSD remains covered by native artifacts, and `auto` falls back to WASM when its APE probe fails. |
-| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, the Windows x64 launcher bundle and standalone native CLI PE, Linux/macOS x64 and ARM64 plus BSD x64 native builds, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; signed launcher handoff; and release-triggered Homebrew/Scoop manifest publication automation are covered. `dist-release` refuses an incomplete seven-platform native artifact set, and a signed release assembled from the hosted platform artifacts verified 18 assets and all seven native binaries on 2026-10-06. The maintained targets now exist as `sebastien/homebrew-kame` and `sebastien/scoop-kame`, and both repository variables are configured. The publisher uses the built-in read-only token for source release downloads and a scoped token with Contents read/write only on the package repositories. The first actual signed GitHub release and verification of its hosted manifest publication remain open. |
+| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, the Windows x64 launcher bundle and standalone native CLI PE, Linux/macOS x64 and ARM64 plus BSD x64 native builds, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. `dist-release` refuses an incomplete seven-platform native artifact set, and a signed release assembled from the hosted platform artifacts verified 18 assets and all seven native binaries on 2026-10-06. The first actual signed GitHub release remains open. |
 | D18 | Remaining library/ergonomic extensions | Complete: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, safely quoted `shell-template` interpolation, and comma-separated prerequisite sequencing have specified semantics and native/WASM acceptance coverage. |
 
 The explicit boundaries in this table are a finite work inventory. General
@@ -159,12 +159,7 @@ anonymous pipes for stage-to-stage edges while retaining overlapped captured
 stdout/stderr. Run [37471661368](https://github.com/sebastien/kame/actions/runs/37471661368)
 passed the EOF-only probe and the 2 MiB transfer with the original 64 KiB
 PowerShell producer writes, then continued through cache, watch and
-descendant-cleanup checks. The `publish-package-manifests` workflow validates
-release-pinned manifests and commits only `Formula/kame.rb` to the configured
-Homebrew tap and `bucket/kame.json` to the configured Scoop bucket. T015-06
-covers local staging and rejection of invalid release assets. The destination
-repositories and publication token are not configured, so hosted publication
-remains open. A signed release
+descendant-cleanup checks. A signed release
 assembled from the hosted platform artifacts verified 18 assets and all seven
 native binaries on 2026-10-06.
 The
@@ -204,7 +199,7 @@ release. T015-05 builds the Windows x64 launcher bundle; the signed manifest
 includes that bundle and the standalone native Windows PE. T015-04 checks the
 generated Homebrew formula and Scoop manifest against their release asset
 digests and verifies their inclusion in signed provenance; Scoop selects the
-native PE. T015-06 verifies staging for both package repositories.
+native PE.
 `make dist-native` builds a host-native binary under a stable OS/architecture
 key; native-artifact workflows target Linux and macOS
 x64/ARM64 plus x64 FreeBSD, NetBSD and OpenBSD. `dist-release` includes
@@ -212,5 +207,4 @@ collected outputs in its signed manifest and provenance. Hosted BSD artifact
 runs and signed cross-host release assembly are verified. Native Windows
 conformance passes the pipeline EOF/backpressure probes. OpenBSD 7.5 and later
 use the native OpenBSD artifact because the pinned APE runtime violates
-syscall-pinning policy. Hosted package publication remains open pending
-destination and token configuration and a successful release run.
+syscall-pinning policy.
