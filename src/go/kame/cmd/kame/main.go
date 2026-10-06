@@ -42,7 +42,8 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 		return session.Status
 	}
 	targets := selectTargets(session.Program, parsed.Targets)
-	parsed.Targets = targets
+	parsed.Targets = nil
+	defer program.FreeStrings(mem.System, targets)
 	if len(targets) == 0 {
 		return reportNoDefault(session.Program, out, errOut, parsed.JSON)
 	}

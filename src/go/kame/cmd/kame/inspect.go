@@ -23,15 +23,16 @@ func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 		return session.Status
 	}
 	targets := selectTargets(session.Program, parsed.Targets)
-	parsed.Targets = targets
+	parsed.Targets = nil
+	defer program.FreeStrings(mem.System, targets)
 	if len(targets) == 0 {
 		return reportNoDefault(session.Program, out, errOut, parsed.JSON)
 	}
 	failed := false
-	for i := range parsed.Targets {
-		result := session.Program.Plan(parsed.Targets[i])
+	for i := range targets {
+		result := session.Program.Plan(targets[i])
 		if result.Diagnostic.Code != "" {
-			annotateTargetDiagnostic(&result.Diagnostic, parsed.Targets[i])
+			annotateTargetDiagnostic(&result.Diagnostic, targets[i])
 			emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), result.Diagnostic, parsed.JSON, session.Parsed.Source)
 			result.Diagnostic.Free(mem.System)
 			failed = true
@@ -70,8 +71,11 @@ func runTools(args []string, out io.Writer, errOut io.Writer) int {
 		return session.Status
 	}
 	if check {
-		parsed.Targets = selectTargets(session.Program, parsed.Targets)
-		return checkTargetTools(session.Program, parsed, out, errOut)
+		targets := selectTargets(session.Program, parsed.Targets)
+		parsed.Targets = nil
+		status := checkTargetTools(session.Program, parsed.JSON, targets, out, errOut)
+		program.FreeStrings(mem.System, targets)
+		return status
 	}
 	e := json.NewEncoder(out)
 	e.BeginArray()
@@ -89,12 +93,12 @@ func runTools(args []string, out io.Writer, errOut io.Writer) int {
 	return 0
 }
 
-func checkTargetTools(p *program.Program, parsed buildArguments, out io.Writer, errOut io.Writer) int {
+func checkTargetTools(p *program.Program, json bool, targets []string, out io.Writer, errOut io.Writer) int {
 	failed := false
-	for i := range parsed.Targets {
-		result := p.RequiredTools(parsed.Targets[i])
+	for i := range targets {
+		result := p.RequiredTools(targets[i])
 		if result.Diagnostic.Code != "" {
-			emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), result.Diagnostic, parsed.JSON, p.Parsed.Source)
+			emitDiagnostic(diagnosticWriter(out, errOut, json), result.Diagnostic, json, p.Parsed.Source)
 			failed = true
 		} else {
 			for j := range result.Uses {
@@ -103,7 +107,7 @@ func checkTargetTools(p *program.Program, parsed buildArguments, out io.Writer, 
 					continue
 				}
 				d := diagnostic.Diagnostic{Code: "TOOL_MISSING", Severity: diagnostic.Error, Message: "required tool not found or not executable: " + use.Name, Source: use.Source, Span: use.Span, Target: use.Target, TargetStack: use.TargetStack, Tips: []string{"install the tool or add its executable directory to PATH"}}
-				emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), d, parsed.JSON, p.Parsed.Source)
+				emitDiagnostic(diagnosticWriter(out, errOut, json), d, json, p.Parsed.Source)
 				failed = true
 			}
 		}
@@ -131,25 +135,26 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 		return session.Status
 	}
 	targets := selectTargets(session.Program, parsed.Targets)
-	parsed.Targets = targets
+	parsed.Targets = nil
+	defer program.FreeStrings(mem.System, targets)
 	if len(targets) == 0 {
 		return reportNoDefault(session.Program, out, errOut, parsed.JSON)
 	}
-	if len(parsed.Targets) != 1 {
+	if len(targets) != 1 {
 		cliError(errOut, "OPT_VALUE_INVALID", "cat requires exactly one target")
 		return 2
 	}
-	started := session.Program.Start(parsed.Targets[0])
+	started := session.Program.Start(targets[0])
 	if started.Diagnostic.Code != "" {
 		// Materializing an existing file target needs no rule (006): cat prints
 		// its exact bytes instead of reporting TGT_NO_RULE.
 		if started.Diagnostic.Code == "TGT_NO_RULE" {
-			name := parsed.Targets[0]
+			name := targets[0]
 			if !path.IsAbs(name) {
 				name = path.Join(mem.System, parsed.Directory, name)
 			}
 			data, readErr := os.ReadFile(mem.System, name)
-			if name != parsed.Targets[0] {
+			if name != targets[0] {
 				mem.FreeString(mem.System, name)
 			}
 			if readErr == nil {
@@ -161,7 +166,7 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 				return 0
 			}
 		}
-		annotateTargetDiagnostic(&started.Diagnostic, parsed.Targets[0])
+		annotateTargetDiagnostic(&started.Diagnostic, targets[0])
 		emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), started.Diagnostic, parsed.JSON, session.Parsed.Source)
 		started.Diagnostic.Free(mem.System)
 		return 1
@@ -231,22 +236,23 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 		return session.Status
 	}
 	targets := selectTargets(session.Program, graph.Build.Targets)
-	graph.Build.Targets = targets
+	graph.Build.Targets = nil
+	defer program.FreeStrings(mem.System, targets)
 	if len(targets) == 0 {
 		return reportNoDefault(session.Program, out, errOut, graph.Build.JSON)
 	}
-	if len(graph.Build.Targets) != 1 {
+	if len(targets) != 1 {
 		cliError(errOut, "OPT_VALUE_INVALID", kind+" requires exactly one target")
 		return 2
 	}
 	var graphDiagnostic diagnostic.Diagnostic
 	if kind == "inputs" || kind == "outputs" {
-		graphDiagnostic = session.Program.WriteGraph(out, graph.Build.Targets[0], graph.Depth, kind)
+		graphDiagnostic = session.Program.WriteGraph(out, targets[0], graph.Depth, kind)
 	} else {
-		graphDiagnostic = session.Program.WriteSpan(out, graph.Build.Targets[0], graph.Depth, graph.Expand)
+		graphDiagnostic = session.Program.WriteSpan(out, targets[0], graph.Depth, graph.Expand)
 	}
 	if graphDiagnostic.Code != "" {
-		annotateTargetDiagnostic(&graphDiagnostic, graph.Build.Targets[0])
+		annotateTargetDiagnostic(&graphDiagnostic, targets[0])
 		emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), graphDiagnostic, graph.Build.JSON, session.Parsed.Source)
 		graphDiagnostic.Free(mem.System)
 		return 1
