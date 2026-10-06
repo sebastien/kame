@@ -13,6 +13,32 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 	completion := core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID}
 	filename := p.canonicalTarget(name, true)
 	defer mem.FreeString(p.Alloc, filename)
+	if op == host.OpFileContent || op == host.OpToolContent || op == host.OpOutputContent {
+		result := p.Host.Stat(filename)
+		if result.Failed {
+			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot stat file")
+			return completion
+		}
+		completion.HasValue = true
+		if !result.Exists {
+			return completion
+		}
+		// A present non-regular or unreadable path has no reusable content
+		// identity. Do not read devices/FIFOs, or turn read failure into absence.
+		completion.Value = core.Value{Kind: core.Bool, Bool: result.Info.Regular}
+		if !result.Info.Regular {
+			return completion
+		}
+		// ponytail: the existing ReadFile contract buffers whole files; use
+		// chunked host reads when large-resource memory becomes a measured limit.
+		data, err := p.Host.ReadFile(p.Alloc, filename)
+		if err != nil {
+			return completion
+		}
+		completion.Value = core.NewBytes(p.Alloc, data)
+		mem.FreeSlice(p.Alloc, data)
+		return completion
+	}
 	if op == host.OpRead {
 		data, err := p.Host.ReadFile(p.Alloc, filename)
 		if err != nil {
@@ -24,7 +50,12 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 		return completion
 	}
 	if op == host.OpExists {
-		completion.Value, completion.HasValue = core.Value{Kind: core.Bool, Bool: p.Host.Stat(filename).Exists}, true
+		result := p.Host.Stat(filename)
+		if result.Failed {
+			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot stat file")
+			return completion
+		}
+		completion.Value, completion.HasValue = core.Value{Kind: core.Bool, Bool: result.Exists}, true
 		return completion
 	}
 	if op == host.OpStat {

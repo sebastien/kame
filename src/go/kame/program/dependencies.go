@@ -6,11 +6,11 @@ import (
 )
 
 func (p *Program) prepareDependency(c *core.EngineContext, index int, dependency *core.Node, ordered bool) bool {
- child := p.instanceIndex(dependency)
- if child >= 0 && !p.claimEnvironment(child, p.Instances[index].Environment) {
-  p.failRule(c, index, p.environmentFailure(child, "shared prerequisite has a different recipe environment"))
-  return false
- }
+	child := p.instanceIndex(dependency)
+	if child >= 0 && !p.claimEnvironment(child, p.Instances[index].Environment) {
+		p.failRule(c, index, p.environmentFailure(child, "shared prerequisite has a different recipe environment"))
+		return false
+	}
 	p.adoptTask(dependency, p.Instances[index].runEpoch)
 	return p.addPurposeDependency(c, &p.Instances[index], dependency, ordered)
 }
@@ -36,6 +36,9 @@ func (p *Program) addPurposeDependency(c *core.EngineContext, entry *instance, d
 		current = c.OrderDependency(dependency.Key)
 	} else {
 		current = c.Dependency(dependency.Key)
+		if current {
+			c.Value(dependency.Key)
+		}
 	}
 	if !existed && slices.Contains(entry.Node.Dynamic, dependency) {
 		event := Event{Kind: DependencyDiscovered, Target: entry.Plan.Target, Key: entry.Node.Key, NodeID: entry.Node.ID, Generation: entry.Node.Generation, Attempt: entry.Node.Attempt, DependencyID: dependency.ID, DependencyKey: dependency.Key}

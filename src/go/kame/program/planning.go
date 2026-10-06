@@ -94,11 +94,8 @@ func (p *Program) Plan(target string) PlanResult {
 		}
 		plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 	}
-	if selected.Rule.Kind == rule.FileRule && len(selected.Rule.Body) == 0 {
-		plan.Freshness = p.freshness(&plan, nil)
-	} else {
-		plan.Freshness = Unknown
-	}
+	// Planning does not validate accepted records or resource bytes.
+	plan.Freshness = Unknown
 	return PlanResult{Plan: plan}
 }
 

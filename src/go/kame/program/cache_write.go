@@ -19,6 +19,11 @@ func (p *Program) cacheAppend(dst *[]byte, truncated *bool, data []byte, limit i
 
 func (p *Program) cacheCommit(entry *instance, stdout []byte, stderr []byte, stdoutTruncated bool, stderrTruncated bool) {
 	if p.cacheBlockedByBareTask(entry) {
+		p.releaseCacheLock(entry)
+		return
+	}
+	if !p.cacheFingerprint(entry, "") {
+		p.releaseCacheLock(entry)
 		return
 	}
 	p.cacheAppend(&entry.CacheStdout, &entry.CacheStdoutTruncated, stdout, p.Options.CacheRetainBytes)

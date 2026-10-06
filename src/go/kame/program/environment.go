@@ -34,7 +34,12 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 		environment[j] = value
 	}
 	entry := &p.Instances[index]
-	if entry.EnvironmentClaimed && !sameEnvironment(entry.Environment, environment) {
+	if entry.EnvironmentClaimed {
+		// Suspended Kash contexts borrow this snapshot; an equal claim must keep it alive.
+		if sameEnvironment(entry.Environment, environment) {
+			slices.Free(p.Alloc, environment)
+			return true
+		}
 		if entry.Node.Interest > 0 {
 			slices.Free(p.Alloc, environment)
 			return false

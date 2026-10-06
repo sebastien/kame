@@ -128,7 +128,6 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	freeStrings(p.Alloc, entry.Shell)
 	entry.Shell = nil
 	entry.Kash = false
-	entry.ScopedShell = explicit
 	if explicit {
 		if p.Eval.IsKashConstructor(shell) {
 			entry.Kash = true

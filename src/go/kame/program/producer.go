@@ -46,7 +46,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		entry.NewerInputs = nil
 		p.freeFileContext(entry.FileContext)
 		entry.FileContext = nil
-		entry.FileContextReady, entry.FileContextWanted = false, false
+		entry.FileContextReady = false
 		p.freeForwardEffects(entry.ForwardEffects)
 		entry.ForwardEffects = nil
 		entry.VerifyOutputs, entry.VerifyPending, entry.VerifyIndex = false, false, 0
@@ -102,30 +102,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			p.failRule(c, state.Index, c.Completion().Diagnostic)
 			return core.ProducerFailed
 		}
-		if entry.Rule.Kind == rule.FileRule && p.Forwarding {
-			entry.VerifyOutputs = true
-			return p.verifyForwardOutputs(c, state.Index)
-		}
-		// When requests are forwarded, the embedding host owns the filesystem and
-		// reports recipe failures through the completion; the local synchronous
-		// output check cannot see files the host wrote.
-		if entry.Rule.Kind == rule.FileRule && !p.Forwarding {
-			for i := range entry.Plan.Outputs {
-				name := p.canonicalTarget(entry.Plan.Outputs[i], true)
-				result := p.Host.Stat(name)
-				mem.FreeString(p.Alloc, name)
-				if !result.Exists {
-					p.failRule(c, state.Index, failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
-					return core.ProducerFailed
-				}
-			}
-		}
 		if entry.Rule.Kind == rule.FileRule {
-			p.saveNativeFileContext(entry)
-			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
-		} else {
-			c.Publish(core.Value{Kind: core.Nil})
+			return p.beginVerifyFileOutputs(c, state.Index)
 		}
+		c.Publish(core.Value{Kind: core.Nil})
 		return core.ProducerCompleted
 	}
 	for i := range entry.SettingsDependencies {
@@ -268,7 +248,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 
 func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered renderResult) core.ProducerResult {
 	entry := &p.Instances[index]
-	if entry.Rule.Kind == rule.FileRule && !rendered.Waiting && rendered.Diagnostic.Code == "" && !entry.EnvironmentConflict && !entry.FileContextReady && !p.Options.DryRun {
+	if (entry.Rule.Kind == rule.FileRule || (entry.Rule.Kind == rule.CachedTaskRule && !p.Options.CacheDisabled && !p.Options.Force)) && !rendered.Waiting && rendered.Diagnostic.Code == "" && !entry.EnvironmentConflict && !entry.FileContextReady && !p.Options.DryRun {
 		return p.beginFileContext(c, index, rendered)
 	}
 	commands, effects, writePaths, d := rendered.Commands, rendered.Effects, rendered.WritePaths, rendered.Diagnostic
@@ -296,46 +276,8 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 			return core.ProducerFailed
 		}
 	}
-	if entry.Rule.Kind == rule.FileRule {
-		if !entry.FileContextReady {
-			entry.Plan.Freshness = p.freshness(&entry.Plan, entry.Node)
-		}
-		beforeInvalidation := entry.Plan.Freshness
-		// Invalidation records an observed change even if an output was written
-		// later by a recipe that had already read the previous input contents.
-		if entry.Node.Generation > 0 {
-			entry.Plan.Freshness = Stale
-		}
-
-		if entry.Node.InvalidatedForOrderOnly {
-			entry.Plan.Freshness = beforeInvalidation
-		}
-		if hasYield(effects) && len(entry.Plan.Outputs) == 1 && !p.Forwarding && !entry.FileContextWanted && !entry.Rule.Always {
-			entry.Plan.Freshness = p.yieldFreshness(entry, effects)
-		}
-	} else {
+	if !entry.FileContextReady {
 		entry.Plan.Freshness = Stale
-	}
-	if entry.Rule.Kind == rule.CachedTaskRule && !p.Options.CacheDisabled && !p.Options.Force && !p.Options.DryRun {
-		entry.CacheReady = p.cacheFingerprint(entry, commands)
-		if !p.cacheBlockedByBareTask(entry) {
-			lookup := p.cacheLookup(c, entry)
-			if lookup.Waiting {
-				mem.FreeString(p.Alloc, commands)
-				return core.ProducerSubmitted
-			}
-			if lookup.Hit {
-				record := lookup.Record
-				entry.Plan.Freshness = Fresh
-				p.emitCachedLog(entry, Stdout, record.Stdout, record.StdoutTruncated)
-				p.emitCachedLog(entry, Stderr, record.Stderr, record.StderrTruncated)
-				record.Free(p.Alloc)
-				mem.FreeString(p.Alloc, commands)
-				c.Publish(core.Value{Kind: core.Nil})
-				return core.ProducerCompleted
-			}
-			lookup.Record.Free(p.Alloc)
-		}
 	}
 	if entry.Rule.Kind == rule.ServiceRule && entry.ServiceRestartPending && entry.ServiceRestartTimerID == 0 {
 		mem.FreeString(p.Alloc, commands)
@@ -344,7 +286,7 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 	if entry.Plan.Freshness == Fresh && !p.Options.Force && !p.Options.DryRun {
 		mem.FreeString(p.Alloc, commands)
 		if entry.Rule.Kind == rule.FileRule {
-			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
+			c.PublishSigned(core.NewString(c.Allocator(), entry.Plan.Outputs[0]), fileResultSignature(&entry.AcceptedRecord))
 		} else {
 			c.Publish(core.Value{Kind: core.Nil})
 		}
@@ -399,34 +341,16 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 }
 
 func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string, yielded bool) core.ProducerResult {
+	_ = yielded
 	entry := &p.Instances[index]
 	if commands == "" {
-		if entry.Rule.Kind == rule.FileRule && p.Forwarding {
-			entry.VerifyOutputs = true
-			return p.verifyForwardOutputs(c, index)
-		}
-		if entry.Rule.Kind == rule.FileRule && !yielded && !p.Forwarding {
-			for i := range entry.Plan.Outputs {
-				name := p.canonicalTarget(entry.Plan.Outputs[i], true)
-				result := p.Host.Stat(name)
-				mem.FreeString(p.Alloc, name)
-				if !result.Exists {
-					p.failRule(c, index, failure(p.Alloc, "OUTPUT_MISSING", "recipe omitted declared output: "+entry.Plan.Outputs[i]))
-					return core.ProducerFailed
-				}
-			}
+		if entry.Rule.Kind == rule.FileRule {
+			return p.beginVerifyFileOutputs(c, index)
 		}
 		if entry.Rule.Kind == rule.CachedTaskRule && entry.CacheReady && !p.Options.CacheDisabled {
 			p.cacheCommit(entry, nil, nil, false, false)
 		}
-		if entry.Rule.Kind == rule.FileRule && !p.Forwarding {
-			p.saveNativeFileContext(entry)
-		}
-		if entry.Rule.Kind == rule.FileRule {
-			c.Publish(core.NewString(c.Allocator(), entry.Plan.Outputs[0]))
-		} else {
-			c.Publish(core.Value{Kind: core.Nil})
-		}
+		c.Publish(core.Value{Kind: core.Nil})
 		return core.ProducerCompleted
 	}
 	if entry.Rule.Kind == rule.FileRule && !p.Forwarding {
@@ -485,12 +409,7 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	if p.Forwarding {
 		// The embedding host runs the recipe; correlation uses the node so the
 		// completion resumes this producer.
-		payload := core.Value{}
-		if entry.Rule.Kind == rule.FileRule || entry.ScopedEnvironment || entry.ScopedShell {
-			payload = host.RecipeExecutionPayload(p.Alloc, entry.Script, entry.Plan.Outputs, entry.Environment, entry.Shell)
-		} else {
-			payload = host.ProcessPayload(p.Alloc, entry.Script)
-		}
+		payload := host.RecipeExecutionPayload(p.Alloc, entry.Script, entry.Plan.Outputs, entry.Environment, entry.Shell)
 		display := processDisplayFromPayload(p.Alloc, payload, entry.Shell)
 		p.Pending = slices.Append(p.Alloc, p.Pending, pendingRequest{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated})
 		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: request.ID, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestProcess, Payload: payload})

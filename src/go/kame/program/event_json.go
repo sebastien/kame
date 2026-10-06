@@ -148,6 +148,7 @@ func eventResourceKind(kind core.ResourceKind) string {
 		return "glob"
 	}
 	if kind == core.ResourceTool { return "tool" }
+	if kind == core.ResourceOperation { return "operation" }
 	return "environment"
 }
 

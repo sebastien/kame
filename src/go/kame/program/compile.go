@@ -333,6 +333,7 @@ func (p *Program) Free() {
 			p.freeKashContext(p.Instances[i].KashContext)
 		}
 		p.freeFileContext(p.Instances[i].FileContext)
+		p.Instances[i].AcceptedRecord.Free(p.Alloc)
 		p.freeNewerInputs(p.Instances[i].NewerInputs)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)
 		mem.FreeString(p.Alloc, p.Instances[i].Script)

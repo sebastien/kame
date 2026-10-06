@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/host"
 	"kame/lang/eval"
+	"kame/lang/rule"
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/mem"
 	"solod.dev/so/path"
@@ -12,16 +13,18 @@ import (
 	"solod.dev/so/strings"
 )
 
-// A context record names the physical output set, independently of the rule's
-// environment. Its digest binds execution context to the successful output times.
-// Hosts transport facts and opaque bytes; the portable runtime decides freshness.
+// File reuse and publication use one accepted signature record. The host only
+// transports resource facts and opaque record bytes, never freshness decisions.
 type fileContextState struct {
-	Rendered renderResult
-	Paths    []string
-	Outputs  int
-	Phase    int
-	Times    core.Value
- DigestValid bool
+	Cached        cacheRecord
+	Rendered      renderResult
+	Stored        core.SignatureRecord
+	Phase         int
+	Index         int
+	Pending       bool
+	PendingKey    core.ResourceKey
+	PendingAspect core.ObservationAspect
+	Checkpoint    core.DependencyCheckpoint
 }
 
 func (p *Program) freeFileContext(state *fileContextState) {
@@ -33,122 +36,419 @@ func (p *Program) freeFileContext(state *fileContextState) {
 	freeStrings(p.Alloc, state.Rendered.WritePaths)
 	slices.Free(p.Alloc, state.Rendered.LineSpans)
 	state.Rendered.Diagnostic.Free(p.Alloc)
-	freeStrings(p.Alloc, state.Paths)
-	state.Times.Free(p.Alloc)
+	state.Stored.Free(p.Alloc)
+	state.Cached.Free(p.Alloc)
+	state.PendingKey.Free(p.Alloc)
+	state.Checkpoint.Free(p.Alloc)
 	mem.Free(p.Alloc, state)
+}
+
+func appendAcceptedObservation(a mem.Allocator, values []core.Observation, item core.Observation) []core.Observation {
+	for i := range values {
+		if values[i].Key.Kind == item.Key.Kind && values[i].Key.Name == item.Key.Name && values[i].Aspect == item.Aspect {
+			if !values[i].Signature.Equal(item.Signature) {
+				values[i].Signature = core.Signature{}
+			}
+			return values
+		}
+	}
+	item.Key = item.Key.Clone(a)
+	return slices.Append(a, values, item)
+}
+
+func (p *Program) collectAcceptedInputs(node *core.Node, values *[]core.Observation, seen *[]*core.Node) {
+	if slices.Contains(*seen, node) {
+		return
+	}
+	*seen = slices.Append(p.Alloc, *seen, node)
+	for i := range node.Observations {
+		item := node.Observations[i]
+		if item.Key.Kind == core.ResourceDefinition {
+			item.Key.Name = eval.AuthoredDefinitionName(item.Key.Name)
+		}
+		*values = appendAcceptedObservation(p.Alloc, *values, item)
+	}
+	for i := range node.Dynamic {
+		// A generated prerequisite is consumed through its published artifact
+		// signature, not through the producer's own implementation and inputs.
+		if !slices.Contains(node.OrderOnly, node.Dynamic[i]) && p.instanceIndex(node.Dynamic[i]) < 0 {
+			p.collectAcceptedInputs(node.Dynamic[i], values, seen)
+		}
+	}
+	for i := range node.Static {
+		if p.instanceIndex(node.Static[i]) < 0 {
+			p.collectAcceptedInputs(node.Static[i], values, seen)
+		}
+	}
+}
+
+func (p *Program) acceptedInputs(entry *instance) []core.Observation {
+	var inputs []core.Observation
+	var seen []*core.Node
+	p.collectAcceptedInputs(entry.Node, &inputs, &seen)
+	slices.Free(p.Alloc, seen)
+	return inputs
+}
+
+func (p *Program) fileImplementation(entry *instance, rendered renderResult) core.Signature {
+	var sink hashSink
+	sink.state = newSHA256()
+	sink.appendText("kame-file-signatures-v1")
+	sink.appendText(entry.Executor)
+	sink.appendText(entry.ExecutorVersion)
+	sink.appendU64(uint64(len(entry.Shell)))
+	for i := range entry.Shell {
+		sink.appendText(entry.Shell[i])
+	}
+	// Authored assignments are explicit execution inputs, unlike unread
+	// ambient environment entries.
+	sink.appendU64(uint64(len(entry.MetadataEnvironment)))
+	for i := range entry.MetadataEnvironment {
+		sink.appendText(entry.MetadataEnvironment[i])
+	}
+	sink.appendU64(uint64(len(entry.Rule.Environment)))
+	for i := range entry.Rule.Environment {
+		sink.appendText(entry.Rule.Environment[i].Value)
+	}
+	// Inherited rule-authored overrides remain explicit execution inputs.
+	var assignments []string
+	for i := range entry.Environment {
+		if !slices.Contains(p.Options.Environment, entry.Environment[i]) {
+			assignments = slices.Append(p.Alloc, assignments, entry.Environment[i])
+		}
+	}
+	sink.appendU64(uint64(len(assignments)))
+	for i := range assignments {
+		sink.appendText(assignments[i])
+	}
+	slices.Free(p.Alloc, assignments)
+	sink.appendU64(uint64(p.Options.TimeoutMS))
+	sink.appendU64(uint64(p.Options.RetryCount))
+	if entry.Kash || entry.NewerInputs != nil {
+		// Kash evaluates values during execution; newer-input command text is
+		// intentionally transient. Their stable implementation is authored source.
+		sink.appendU64(uint64(len(entry.Rule.Body)))
+		for i := range entry.Rule.Body {
+			sink.appendText(entry.Rule.Body[i].Text)
+		}
+	} else {
+		sink.appendText(rendered.Commands)
+		sink.appendU64(uint64(len(rendered.Effects)))
+		for i := range rendered.Effects {
+			sink.appendU64(uint64(rendered.Effects[i].Kind))
+			sink.appendU64(uint64(len(rendered.Effects[i].Data)))
+			sink.state.Write(rendered.Effects[i].Data)
+		}
+		sink.appendU64(uint64(len(rendered.WritePaths)))
+		for i := range rendered.WritePaths {
+			sink.appendText(rendered.WritePaths[i])
+		}
+	}
+	signature := core.Signature{Mode: core.SignatureContent}
+	sink.state.Sum(signature.Digest[:])
+	return signature
 }
 
 func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered renderResult) core.ProducerResult {
 	entry := &p.Instances[index]
 	state := mem.Alloc[fileContextState](p.Alloc)
-	state.Rendered, state.Outputs, state.DigestValid = rendered, len(entry.Plan.Outputs), true
-	for i := range entry.Plan.Outputs {
-		state.Paths = slices.Append(p.Alloc, state.Paths, p.canonicalTarget(entry.Plan.Outputs[i], true))
+	state.Rendered = rendered
+	state.Checkpoint = c.CheckpointDependencies()
+	entry.AcceptedRecord.Free(p.Alloc)
+	entry.AcceptedRecord.Implementation = p.fileImplementation(entry, rendered)
+	if entry.Rule.Kind == rule.CachedTaskRule {
+		entry.FileContext = state
+		state.Phase = -1
+		entry.CacheReady = true
+		return p.continueFileContext(c, index)
 	}
-	inputs := entry.Plan.Inputs
-	if entry.Plan.Resolved {
-		inputs = entry.Plan.ResolvedInputs
-	}
- resources := entry.Plan.ResourceInputs
- if entry.Plan.Resolved { resources = entry.Plan.ResolvedResourceInputs }
-	for i := range inputs {
-  if i < len(resources) && resources[i].OrderOnly { continue }
-		if isFileName(inputs[i]) {
-			p.appendContextPath(state, inputs[i])
-		}
-	}
-	for i := range entry.Node.Dynamic {
-  if slices.Contains(entry.Node.OrderOnly, entry.Node.Dynamic[i]) { continue }
-		if entry.Node.Dynamic[i].Key.Kind == core.ResourceFile {
-			p.appendContextPath(state, entry.Node.Dynamic[i].Key.Name)
-		}
-	}
-	var identity, context hashSink
-	identity.state, context.state = newSHA256(), newSHA256()
+	var identity hashSink
+	identity.state = newSHA256()
 	identity.appendText("kame-file-context-v1")
-	identity.appendText(state.Paths[0])
+	name := p.canonicalTarget(entry.Plan.Outputs[0], true)
+	identity.appendText(name)
+	mem.FreeString(p.Alloc, name)
 	identity.state.Sum(entry.FileContextKey[:])
-	context.appendText("kame-file-context-v1")
-	if entry.Kash { context.appendText("kash-v1"); context.appendText(p.Parsed.Source.Text) } else { context.appendText("shell-v1") }
-	context.appendText(entry.Executor)
-	context.appendText(entry.ExecutorVersion)
-	for i := range entry.Shell { context.appendText(entry.Shell[i]) }
-	for i := range entry.Environment {
-		context.appendText(entry.Environment[i])
-	}
- if entry.NewerInputs != nil {
-  // The selector changes after publication. Hash its stable authored context,
-  // rather than commands containing the transient newer-input subset.
-  context.appendText("newer-input-context-v1")
-  context.appendText(p.Parsed.Source.Text)
-  context.appendU64(uint64(len(p.Configuration)))
-  for i := range p.Configuration { context.appendText(p.Configuration[i]) }
-  context.appendU64(uint64(len(p.Options.Shell)))
-  for i := range p.Options.Shell { context.appendText(p.Options.Shell[i]) }
-  context.appendU64(uint64(len(p.Eval.DefinitionArgs)))
-  for i := range p.Eval.DefinitionArgs {
-   encoded := EncodeFingerprintValue(p.Alloc, p.Eval.DefinitionArgs[i])
-   if len(encoded) == 0 { state.DigestValid = false }
-   context.appendU64(uint64(len(encoded)))
-   context.state.Write(encoded)
-   slices.Free(p.Alloc, encoded)
-  }
- } else {
-	context.appendText(rendered.Commands)
-	for i := range rendered.Effects {
-		context.appendU64(uint64(rendered.Effects[i].Kind))
-		context.appendU64(uint64(len(rendered.Effects[i].Data)))
-		context.state.Write(rendered.Effects[i].Data)
-	}
-	for i := range rendered.WritePaths {
-		context.appendText(rendered.WritePaths[i])
-	}
- }
-	for i := range state.Paths {
-		context.appendText(state.Paths[i])
-	}
-	context.state.Sum(entry.FileContextDigest[:])
-	entry.FileContextWanted = entry.ScopedEnvironment || len(entry.Rule.Environment) != 0 || entry.Rule.Metadata != nil || entry.ScopedShell
 	entry.FileContext = state
-	if !p.Forwarding {
-		var times []core.Value
-		for i := range state.Paths {
-			result := p.Host.Stat(state.Paths[i])
-			value := core.Value{Kind: core.Nil}
-			if result.Exists {
-				value.Kind, value.Int = core.Int, result.Info.ModTime
+	if p.Forwarding {
+		p.submitFileContextRequest(c, host.RequestCacheGet, host.CacheGetPayload(p.Alloc, entry.FileContextKey[:]))
+		return core.ProducerSubmitted
+	}
+	name = p.fileContextPath(entry)
+	data, err := p.Host.ReadFile(p.Alloc, name)
+	mem.FreeString(p.Alloc, name)
+	if err == nil {
+		core.DecodeSignatureRecord(p.Alloc, data, &state.Stored)
+	}
+	mem.FreeSlice(p.Alloc, data)
+	state.Phase = 1
+	return p.continueFileContext(c, index)
+}
+
+func (p *Program) submitFileContextRequest(c *core.EngineContext, kind host.RequestKind, payload core.Value) {
+	p.nextRequest++
+	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: kind, Payload: payload})
+	c.Submit(p.nextRequest)
+}
+
+func contentObservation(value core.Value) core.Signature {
+	if value.Kind == core.Bytes {
+		return core.ContentSignature(value.Bytes)
+	}
+	if value.Kind == core.Nil {
+		return core.Signature{Mode: core.SignatureMissing}
+	}
+	return core.Signature{}
+}
+
+func hasAcceptedObservation(values []core.Observation, item core.Observation) bool {
+	for i := range values {
+		if values[i].Key.Kind == item.Key.Kind && values[i].Key.Name == item.Key.Name && values[i].Aspect == item.Aspect {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *Program) continueFileContext(c *core.EngineContext, index int) core.ProducerResult {
+	state := p.Instances[index].FileContext
+	if state.Phase == -1 {
+		lookup := p.cacheLookup(c, &p.Instances[index])
+		if lookup.Waiting {
+			return core.ProducerSubmitted
+		}
+		state.Cached = lookup.Record
+		if lookup.Hit {
+			core.DecodeSignatureRecord(p.Alloc, lookup.Record.Manifest, &state.Stored)
+		}
+		state.Phase = 1
+	}
+	if state.Phase == 2 {
+		return p.observeFileOutputs(c, index, false)
+	}
+	if state.Phase == 0 {
+		completion := c.Completion()
+		if completion.RequestID == 0 {
+			return core.ProducerWaiting
+		}
+		if completion.Diagnostic.Code == "" && completion.Value.Kind == core.Bytes {
+			core.DecodeSignatureRecord(p.Alloc, completion.Value.Bytes, &state.Stored)
+		}
+		completion.Value.Free(p.Alloc)
+		completion.Diagnostic.Free(p.Alloc)
+		state.Phase = 1
+	}
+	if state.Pending {
+		completion := c.Completion()
+		if completion.RequestID == 0 {
+			return core.ProducerWaiting
+		}
+		signature := core.Signature{}
+		if completion.Diagnostic.Code == "" {
+			if state.PendingAspect == core.ObservationContent {
+				signature = contentObservation(completion.Value)
+			} else {
+				signature = core.ValueSignature(completion.Value)
 			}
-			times = slices.Append(p.Alloc, times, value)
 		}
-		state.Times = core.NewList(p.Alloc, times)
-		slices.Free(p.Alloc, times)
-		name := p.fileContextPath(entry)
-		bytes, err := p.Host.ReadFile(p.Alloc, name)
-		mem.FreeString(p.Alloc, name)
-		record := core.Value{Kind: core.Nil}
-		if err == nil {
-			record = core.NewBytes(p.Alloc, bytes)
-			entry.FileContextWanted = true
+		c.ObserveAspect(state.PendingKey, state.PendingAspect, signature)
+		completion.Value.Free(p.Alloc)
+		completion.Diagnostic.Free(p.Alloc)
+		state.PendingKey.Free(p.Alloc)
+		state.Pending = false
+		state.Index++
+	}
+	// Restore previously consumed execution-time resources before deciding reuse.
+	// Changed implementations do not restore obsolete branch dependencies.
+	if state.Phase == 1 && state.Stored.Implementation.Equal(p.Instances[index].AcceptedRecord.Implementation) {
+		for state.Index < len(state.Stored.Inputs) {
+			item := state.Stored.Inputs[state.Index]
+			inputs := p.acceptedInputs(&p.Instances[index])
+			present := hasAcceptedObservation(inputs, item)
+			core.FreeObservations(p.Alloc, inputs)
+			if present {
+				state.Index++
+				continue
+			}
+			if item.Key.Kind == core.ResourceOperation {
+				signature := core.Signature{}
+				for i := range p.Eval.Registry.Items {
+					operation := p.Eval.Registry.Items[i]
+					if operation.Name == item.Key.Name {
+						signature = core.ValueSignature(core.Value{Kind: core.String, Text: operation.Version})
+						break
+					}
+				}
+				c.ObserveAspect(item.Key, item.Aspect, signature)
+				state.Index++
+				continue
+			}
+			if item.Key.Kind == core.ResourceEnvironment {
+				value := core.Value{Kind: core.Nil}
+				for i := range p.Instances[index].Environment {
+					assignment := p.Instances[index].Environment[i]
+					equal := strings.IndexByte(assignment, '=')
+					if equal >= 0 && assignment[:equal] == item.Key.Name {
+						value = core.Value{Kind: core.String, Text: assignment[equal+1:]}
+						break
+					}
+				}
+				c.ObserveAspect(item.Key, item.Aspect, core.ValueSignature(value))
+				state.Index++
+				continue
+			}
+			if item.Key.Kind == core.ResourceDefinition {
+				context := p.kashContext(c, index)
+				dependency := p.Eval.DefinitionWith(eval.AuthoredDefinitionName(item.Key.Name), context)
+				p.freeKashContext(context)
+				if dependency == nil {
+					c.ObserveAspect(item.Key, item.Aspect, core.Signature{})
+				} else {
+					if !c.TryDependency(dependency.Key) {
+						return core.ProducerWaiting
+					}
+					if c.DependencyDiagnostic(dependency.Key).Code == "" {
+						c.Value(dependency.Key)
+					}
+				}
+				state.Index++
+				continue
+			}
+			if item.Key.Kind != core.ResourceFile && item.Key.Kind != core.ResourceGlob && item.Key.Kind != core.ResourceTool {
+				// Opaque or no-longer-resolvable execution reads cannot prove reuse.
+				c.ObserveAspect(item.Key, item.Aspect, core.Signature{})
+				state.Index++
+				continue
+			}
+			observeDefinitionDependency(p, item.Key)
+			if !c.TryDependency(item.Key) {
+				return core.ProducerWaiting
+			}
+			if c.DependencyDiagnostic(item.Key).Code != "" {
+				c.ObserveAspect(item.Key, item.Aspect, core.Signature{})
+				state.Index++
+				continue
+			}
+			if item.Aspect == core.ObservationValue && (item.Key.Kind == core.ResourceFile || item.Key.Kind == core.ResourceTool) {
+				c.Value(item.Key)
+				state.Index++
+				continue
+			}
+			op := host.OpFileContent
+			if item.Aspect == core.ObservationExistence {
+				op = host.OpExists
+			}
+			if item.Aspect == core.ObservationMetadata {
+				op = host.OpStat
+			}
+			if item.Key.Kind == core.ResourceGlob {
+				op = host.OpWildcard
+			}
+			if p.Forwarding {
+				state.Pending, state.PendingAspect = true, item.Aspect
+				state.PendingKey = item.Key.Clone(p.Alloc)
+				p.submitFileContextRequest(c, host.RequestReadFile, host.FilePayload(p.Alloc, op, item.Key.Name))
+				return core.ProducerSubmitted
+			}
+			completion := p.fileCompletion(host.Request{}, op, item.Key.Name)
+			signature := core.Signature{}
+			if completion.Diagnostic.Code == "" {
+				if item.Aspect == core.ObservationContent {
+					signature = contentObservation(completion.Value)
+				} else {
+					signature = core.ValueSignature(completion.Value)
+				}
+			}
+			c.ObserveAspect(item.Key, item.Aspect, signature)
+			completion.Value.Free(p.Alloc)
+			completion.Diagnostic.Free(p.Alloc)
+			state.Index++
 		}
-		mem.FreeSlice(p.Alloc, bytes)
-		p.decideFileContext(entry, state, record)
-		record.Free(p.Alloc)
+	}
+	entry := &p.Instances[index]
+	entry.Plan.Freshness = Stale
+	entry.AcceptedRecord.Inputs = p.acceptedInputs(entry)
+	if entry.Rule.Kind == rule.CachedTaskRule {
 		return p.finishFileContext(c, index)
 	}
-	p.submitFileTimes(c, state.Paths)
-	return core.ProducerSubmitted
+	state.Phase = 2
+	// The same output observer is used before reuse and after execution.
+	entry.VerifyIndex, entry.VerifyPending = 0, false
+	return p.observeFileOutputs(c, index, false)
 }
 
-func (p *Program) appendContextPath(state *fileContextState, name string) {
-	canonical := p.canonicalTarget(name, true)
-	// Outputs remain a prefix even when a dependency happens to name one.
-	if slices.Contains(state.Paths[state.Outputs:], canonical) {
-		mem.FreeString(p.Alloc, canonical)
+func (p *Program) finishFileContext(c *core.EngineContext, index int) core.ProducerResult {
+	entry := &p.Instances[index]
+	state := entry.FileContext
+	if !entry.Rule.Always && !p.Options.Force && !p.cacheBlockedByBareTask(entry) && state.Stored.Matches(&entry.AcceptedRecord) {
+		entry.Plan.Freshness = Fresh
+		if entry.Rule.Kind == rule.CachedTaskRule {
+			p.emitCachedLog(entry, Stdout, state.Cached.Stdout, state.Cached.StdoutTruncated)
+			p.emitCachedLog(entry, Stderr, state.Cached.Stderr, state.Cached.StderrTruncated)
+			p.releaseCacheLock(entry)
+		}
+	}
+	if entry.Plan.Freshness != Fresh {
+		c.RestoreDependencies(&state.Checkpoint)
+		core.FreeObservations(p.Alloc, entry.AcceptedRecord.Inputs)
+		entry.AcceptedRecord.Inputs = p.acceptedInputs(entry)
+	}
+	rendered := state.Rendered
+	state.Rendered = renderResult{}
+	p.freeFileContext(state)
+	entry.FileContext, entry.FileContextReady = nil, true
+	return p.finishRenderedRule(c, index, rendered)
+}
+
+func (p *Program) fileContextPath(entry *instance) string {
+	hex := cacheHex(p.Alloc, entry.FileContextKey[:])
+	root := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/file-context")
+	name := path.Join(p.Alloc, root, hex)
+	mem.FreeString(p.Alloc, hex)
+	mem.FreeString(p.Alloc, root)
+	return name
+}
+
+func (p *Program) saveAcceptedFileRecord(entry *instance) {
+	core.FreeObservations(p.Alloc, entry.AcceptedRecord.Inputs)
+	entry.AcceptedRecord.Inputs = p.acceptedInputs(entry)
+	data := core.EncodeSignatureRecord(p.Alloc, &entry.AcceptedRecord)
+	if len(data) == 0 {
 		return
 	}
-	state.Paths = slices.Append(p.Alloc, state.Paths, canonical)
+	if p.Forwarding {
+		p.nextRequest++
+		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, Kind: host.RequestCachePut, Payload: host.CachePutPayload(p.Alloc, entry.FileContextKey[:], data)})
+	} else {
+		name := p.fileContextPath(entry)
+		if p.mkdirParent(name) {
+			_ = p.Host.WriteFileAtomic(name, data, 0o644, true)
+		}
+		mem.FreeString(p.Alloc, name)
+	}
+	slices.Free(p.Alloc, data)
 }
 
+func fileResultSignature(record *core.SignatureRecord) core.Signature {
+	if len(record.Outputs) == 1 {
+		return record.Outputs[0].Signature
+	}
+	d := core.NewDigest()
+	d.Text("kame-file-output-set-v1")
+	for i := range record.Outputs {
+		if !record.Outputs[i].Signature.Equal(record.Outputs[i].Signature) {
+			return core.Signature{}
+		}
+		d.Text(record.Outputs[i].Key.Name)
+		d.Write(record.Outputs[i].Signature.Digest[:])
+	}
+	s := core.Signature{Mode: core.SignatureContent}
+	d.Sum(s.Digest[:])
+	return s
+}
+
+// Timestamp observations remain only for the intentional newer-input selector,
+// not for deciding whether a computation or artifact can be reused.
 func (p *Program) submitFileTimes(c *core.EngineContext, names []string) {
 	b := strings.NewBuilder(p.Alloc)
 	e := json.NewEncoder(&b)
@@ -160,38 +460,7 @@ func (p *Program) submitFileTimes(c *core.EngineContext, names []string) {
 	e.Flush()
 	payload := host.FilePayload(p.Alloc, host.OpFileTimes, b.String())
 	b.Free()
-	p.nextRequest++
-	p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestReadFile, Payload: payload})
-	c.Submit(p.nextRequest)
-}
-
-func (p *Program) continueFileContext(c *core.EngineContext, index int) core.ProducerResult {
-	entry := &p.Instances[index]
-	state := entry.FileContext
-	completion := c.Completion()
-	if completion.RequestID == 0 {
-		return core.ProducerWaiting
-	}
-	if state.Phase == 0 {
-		state.Times = completion.Value
-		completion.Diagnostic.Free(p.Alloc)
-		state.Phase = 1
-		payload := host.CacheGetPayload(p.Alloc, entry.FileContextKey[:])
-		p.nextRequest++
-		p.Outbound = slices.Append(p.Alloc, p.Outbound, host.Request{ID: p.nextRequest, NodeID: c.NodeID(), Generation: c.Generation(), Attempt: c.Attempt(), Kind: host.RequestCacheGet, Payload: payload})
-		c.Submit(p.nextRequest)
-		return core.ProducerSubmitted
-	}
-	if completion.Diagnostic.Code != "" {
-		entry.FileContextWanted = true
-	}
-	if completion.Value.Kind == core.Bytes {
-		entry.FileContextWanted = true
-	}
-	p.decideFileContext(entry, state, completion.Value)
-	completion.Value.Free(p.Alloc)
-	completion.Diagnostic.Free(p.Alloc)
-	return p.finishFileContext(c, index)
+	p.submitFileContextRequest(c, host.RequestReadFile, payload)
 }
 
 func contextTime(value core.Value, out *int64) bool {
@@ -208,108 +477,4 @@ func contextTime(value core.Value, out *int64) bool {
 	}
 	*out = n
 	return true
-}
-
-func contextRecord(base []byte, times []core.Value, outputs int, digest []byte) bool {
-	if len(times) < outputs {
-		return false
-	}
-	var sink hashSink
-	sink.state = newSHA256()
-	sink.state.Write(base)
-	for i := 0; i < outputs; i++ {
-		var timestamp int64
-		if !contextTime(times[i], &timestamp) {
-			return false
-		}
-		sink.appendU64(uint64(timestamp))
-	}
-	sink.state.Sum(digest)
-	return true
-}
-
-func (p *Program) decideFileContext(entry *instance, state *fileContextState, record core.Value) {
-	_ = p
-	entry.Plan.Freshness = Stale
-	if !state.DigestValid || entry.Rule.Always || state.Times.Kind != core.List || len(state.Times.List) != len(state.Paths) || len(state.Paths) <= state.Outputs {
-		return
-	}
-	var oldest int64
-	for i := 0; i < state.Outputs; i++ {
-		var timestamp int64
-		if !contextTime(state.Times.List[i], &timestamp) {
-			return
-		}
-		if i == 0 || timestamp < oldest {
-			oldest = timestamp
-		}
-	}
-	for i := state.Outputs; i < len(state.Times.List); i++ {
-		var timestamp int64
-		if !contextTime(state.Times.List[i], &timestamp) || timestamp > oldest {
-			return
-		}
-	}
-	if entry.FileContextWanted {
-		var digest [32]byte
-		if record.Kind != core.Bytes || len(record.Bytes) != 32 || !contextRecord(entry.FileContextDigest[:], state.Times.List, state.Outputs, digest[:]) {
-			return
-		}
-		for i := range digest {
-			if digest[i] != record.Bytes[i] {
-				return
-			}
-		}
-	}
-	entry.Plan.Freshness = Fresh
-}
-
-func (p *Program) finishFileContext(c *core.EngineContext, index int) core.ProducerResult {
-	state := p.Instances[index].FileContext
-	rendered := state.Rendered
-	state.Rendered = renderResult{}
-	p.freeFileContext(state)
-	p.Instances[index].FileContext, p.Instances[index].FileContextReady = nil, true
-	return p.finishRenderedRule(c, index, rendered)
-}
-
-func (p *Program) fileContextPath(entry *instance) string {
-	hex := cacheHex(p.Alloc, entry.FileContextKey[:])
-	root := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/file-context")
-	name := path.Join(p.Alloc, root, hex)
-	mem.FreeString(p.Alloc, hex)
-	mem.FreeString(p.Alloc, root)
-	return name
-}
-
-func (p *Program) saveNativeFileContext(entry *instance) {
-	if !entry.FileContextWanted {
-		return
-	}
-	var values []core.Value
-	for i := range entry.Plan.Outputs {
-		name := p.canonicalTarget(entry.Plan.Outputs[i], true)
-		result := p.Host.Stat(name)
-		mem.FreeString(p.Alloc, name)
-		value := core.Value{Kind: core.Nil}
-		if result.Exists {
-			value.Kind, value.Int = core.Int, result.Info.ModTime
-		}
-		values = slices.Append(p.Alloc, values, value)
-	}
-	var digest [32]byte
-	ok := contextRecord(entry.FileContextDigest[:], values, len(entry.Plan.Outputs), digest[:])
-	slices.Free(p.Alloc, values)
-	if !ok {
-		return
-	}
-	name := p.fileContextPath(entry)
-	if p.mkdirParent(name) {
-		if p.Host.WriteFileAtomic(name, digest[:], 0o644, true) == nil {
-			directory := path.Join(p.Alloc, p.Options.Directory, ".kame/cache/file-context")
-			p.pruneCacheDirectory(directory)
-			mem.FreeString(p.Alloc, directory)
-		}
-	}
-	mem.FreeString(p.Alloc, name)
 }

@@ -120,7 +120,7 @@ func TestCompleteTaskFingerprintVector(t *testing.T) {
 	fingerprintAt:=13+int(identityLength)
 	if fingerprintAt+32>len(data) { mem.FreeSlice(a,data);t.Fatal("record fingerprint is truncated");return }
 	fingerprint:=program.FingerprintHex(data[fingerprintAt:fingerprintAt+32])
-	if fingerprint!="3473ede1d722e4e6472667839964f86b68e4ab6102f41613cf51b76fa3644345" { t.Errorf("complete task fingerprint = %s",fingerprint) }
+	if fingerprint!="12dc773b40a1a2ebf34af4ec7cddb3a179f879f7e6cbb2fdce2b39d5e9bd1003" { t.Errorf("complete task fingerprint = %s",fingerprint) }
 	mem.FreeString(mem.System,fingerprint);mem.FreeSlice(a,data)
 	compiled.Program.Free();compiled.Free(a);parsed.Free();registry.Free()
 	entries,err=os.ReadDir(a,dir+"/.kame/cache/tasks")
@@ -273,7 +273,7 @@ func TestCachedTaskRechecksFileAfterMtimeOnlyChange(t *testing.T) {
 	if second.Diagnostic.Code != "" { t.Errorf("mtime-only rerun failed: %s", second.Diagnostic.Code) }
 	second.Free(a)
 	data, readErr := os.ReadFile(a, dir+"/task-log")
-	if readErr != nil || string(data) != "xx" { t.Errorf("mtime-only change did not safely recompute the input fingerprint: %s", string(data)) }
+	if readErr != nil || string(data) != "x" { t.Errorf("mtime-only change reran unchanged input bytes: %s", string(data)) }
 	mem.FreeSlice(a, data)
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
@@ -443,21 +443,23 @@ func TestCachedTaskInvalidatesForExecutionEnvironment(t *testing.T) {
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-env-")
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "task run :\n\tprintf '%s' \\\"$KM_CACHE_VALUE\\\" >> task-log\n")
+	parsed := script.Parse(a, "test.kmk", "task run :\n\tprintf '%s' @(env \"KM_CACHE_VALUE\") >> task-log\n")
 	registry := eval.NewRegistry(a)
-	firstProgram := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "KM_CACHE_VALUE=one"}})
+	operations.Register(registry)
+	grant := []eval.Grant{{Capability: eval.Env, Names: []string{"KM_CACHE_VALUE"}}}
+	firstProgram := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "KM_CACHE_VALUE=one"}, Grants: grant})
 	if firstProgram.Program == nil { t.Fatal("first compile failed"); return }
 	first := firstProgram.Program.Materialize("run")
 	if first.Diagnostic.Code != "" { t.Error("first cached task failed") }
 	first.Free(a)
 	firstProgram.Program.Free(); firstProgram.Free(a)
-	secondProgram := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "KM_CACHE_VALUE=two"}})
+	secondProgram := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "KM_CACHE_VALUE=two"}, Grants: grant})
 	if secondProgram.Program == nil { t.Fatal("second compile failed"); return }
 	second := secondProgram.Program.Materialize("run")
 	if second.Diagnostic.Code != "" { t.Error("second cached task failed") }
 	second.Free(a)
 	data, readErr := os.ReadFile(a, dir+"/task-log")
-	if readErr != nil || string(data) != `"one""two"` { t.Errorf("execution environment did not invalidate cache: %s", string(data)) }
+	if readErr != nil || string(data) != "onetwo" { t.Errorf("consumed environment did not invalidate cache: %s", string(data)) }
 	mem.FreeSlice(a, data)
 	secondProgram.Program.Free(); secondProgram.Free(a); parsed.Free(); registry.Free()
 }
@@ -906,10 +908,10 @@ func TestCachedTaskMissingPathInvalidatesWhenItAppears(t *testing.T) {
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-missing-")
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "missing.kmk", "task run :\n\t@(observe-file \"./absent\")\n\tprintf x >> task-log\n")
+	parsed := script.Parse(a, "missing.kmk", "task run :\n\t@(out (str (exists? \"./absent\")))\n\tprintf x >> task-log\n")
 	registry := eval.NewRegistry(a)
-	if !registry.Add(eval.Operation{Name: "observe-file", Call: observeFileDependency, MinArity: 1, MaxArity: 1}) { t.Fatal("operation registration failed"); return }
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Verbose: true})
+	operations.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Verbose: true, Grants: []eval.Grant{{Capability: eval.Read}}})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
 	first := compiled.Program.Materialize("run")
 	second := compiled.Program.Materialize("run")
@@ -923,10 +925,14 @@ func TestCachedTaskMissingPathInvalidatesWhenItAppears(t *testing.T) {
 	data, readErr := os.ReadFile(a, dir+"/task-log")
 	if readErr != nil || string(data) != "xx" { t.Errorf("missing path appearance did not invalidate the cache: %s", string(data)) }
 	mem.FreeSlice(a, data)
+	if os.WriteFile(dir+"/absent", []byte("other bytes"), 0o644) != nil { t.Fatal("present path rewrite failed"); return }
+	fourth := compiled.Program.Materialize("run")
+	if fourth.Diagnostic.Code != "" || !fourth.Fresh { t.Error("existence-only read consumed unread content") }
+	fourth.Free(a)
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
-func TestCachedTaskSymlinkDependencyIsUnusable(t *testing.T) {
+func TestCachedTaskSymlinkDependencyUsesResolvedContent(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-symlink-")
@@ -941,17 +947,24 @@ func TestCachedTaskSymlinkDependencyIsUnusable(t *testing.T) {
 	first := compiled.Program.Materialize("run")
 	if first.Diagnostic.Code != "" { t.Fatalf("symlink task failed: %s", first.Diagnostic.Code) }
 	first.Free(a)
-	if warnings := cacheWarningCount(a, compiled.Program); warnings != 1 { t.Errorf("symlink warning count = %d, want 1", warnings) }
+	if warnings := cacheWarningCount(a, compiled.Program); warnings != 0 { t.Errorf("symlink warning count = %d, want 0", warnings) }
 	second := compiled.Program.Materialize("run")
 	if second.Diagnostic.Code != "" { t.Errorf("second symlink run failed: %s", second.Diagnostic.Code) }
 	second.Free(a)
-	if warnings := cacheWarningCount(a, compiled.Program); warnings != 1 { t.Errorf("second symlink warning count = %d, want 1", warnings) }
+	if warnings := cacheWarningCount(a, compiled.Program); warnings != 0 { t.Errorf("second symlink warning count = %d, want 0", warnings) }
 	data, readErr := os.ReadFile(a, dir+"/task-log")
-	if readErr != nil || string(data) != "xx" { t.Errorf("symlink dependency reused a cache result: %s", string(data)) }
+	if readErr != nil || string(data) != "x" { t.Errorf("unchanged resolved symlink content did not reuse cache: %s", string(data)) }
+	mem.FreeSlice(a, data)
+	if os.WriteFile(dir+"/target", []byte("changed"), 0o644) != nil { t.Fatal("symlink target change failed"); return }
+	third := compiled.Program.Materialize("run")
+	if third.Diagnostic.Code != "" { t.Error("changed symlink target failed") }
+	third.Free(a)
+	data, readErr = os.ReadFile(a, dir+"/task-log")
+	if readErr != nil || string(data) != "xx" { t.Error("changed resolved symlink bytes did not invalidate") }
 	mem.FreeSlice(a, data)
 	entries, listErr := os.ReadDir(a, dir+"/.kame/cache/tasks")
 	if listErr == nil {
-		if len(entries) != 0 { t.Error("symlink dependency wrote a cache record") }
+		if len(entries) != 1 { t.Error("symlink dependency did not write one accepted record") }
 		os.FreeDirEntry(a, entries)
 	}
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()

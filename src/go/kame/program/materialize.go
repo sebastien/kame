@@ -84,8 +84,10 @@ func produceExternalFile(c *core.EngineContext, nodeID int64) core.ProducerResul
 	if state.Program.Forwarding {
 		completion := c.Completion()
 		if completion.RequestID == 0 {
-			op := host.OpExists
-			if state.Tool { op = "tool-exists" }
+			op := host.OpFileContent
+			if state.Tool {
+				op = host.OpToolContent
+			}
 			payload := host.FilePayload(c.Allocator(), op, state.Name)
 			id := state.Program.Eval.Requests.Submit(c.NodeID(), c.Generation(), c.Attempt(), host.RequestReadFile, payload)
 			payload.Free(c.Allocator())
@@ -97,30 +99,35 @@ func produceExternalFile(c *core.EngineContext, nodeID int64) core.ProducerResul
 			c.Fail(completion.Diagnostic)
 			return core.ProducerFailed
 		}
-		exists := completion.HasValue && completion.Value.Kind == core.Bool && completion.Value.Bool
-		completion.Value.Free(c.Allocator())
-		if exists {
-			c.Publish(core.NewString(c.Allocator(), state.Name))
-		} else {
-			c.Publish(core.Value{Kind: core.Nil})
-		}
-		return core.ProducerCompleted
+		return publishExternalContent(c, state, completion)
 	}
-	name := state.Program.canonicalTarget(state.Name, true)
-	result := state.Program.Host.Stat(name)
-	mem.FreeString(state.Program.Alloc, name)
-	// A missing path is an observed dependency, not a failed producer. Declared
-	// inputs still fail before execution. The cache records an explicit missing
-	// marker and invalidates when the path later appears.
-	if result.Failed {
-		c.Fail(failure(state.Program.Alloc, "TGT_NO_RULE", "required input does not exist: "+state.Name))
+	completion := state.Program.fileCompletion(host.Request{}, host.OpFileContent, state.Name)
+	if completion.Diagnostic.Code != "" {
+		completion.Value.Free(c.Allocator())
+		c.Fail(completion.Diagnostic)
 		return core.ProducerFailed
 	}
-	if !result.Exists {
-		c.Publish(core.Value{Kind: core.Nil})
-		return core.ProducerCompleted
+	return publishExternalContent(c, state, completion)
+}
+
+func publishExternalContent(c *core.EngineContext, state *externalFileState, completion core.Completion) core.ProducerResult {
+	if !completion.HasValue || (completion.Value.Kind != core.Nil && completion.Value.Kind != core.Bytes && completion.Value.Kind != core.Bool) {
+		completion.Value.Free(c.Allocator())
+		c.Fail(failure(c.Allocator(), "HOST_FAIL", "invalid file content observation"))
+		return core.ProducerFailed
 	}
-	c.Publish(core.NewString(c.Allocator(), state.Name))
+	signature := core.Signature{}
+	value := core.Value{Kind: core.Nil}
+	if completion.Value.Kind == core.Nil {
+		signature.Mode = core.SignatureMissing
+	} else {
+		value = core.NewString(c.Allocator(), state.Name)
+		if completion.Value.Kind == core.Bytes {
+			signature = core.ContentSignature(completion.Value.Bytes)
+		}
+	}
+	completion.Value.Free(c.Allocator())
+	c.PublishSigned(value, signature)
 	return core.ProducerCompleted
 }
 func produceExternalValue(c *core.EngineContext, nodeID int64) core.ProducerResult {
@@ -183,10 +190,22 @@ func (p *Program) Start(target string) HandleStart {
 	}
 	plan.Free(p.Alloc)
 	index := p.instanceIndex(node)
+	if index >= 0 && node.Interest == 0 {
+		// A new root validates resources through their producers on both hosts.
+		// Retained watch roots are invalidated by their resource notifications.
+		nodes := p.Engine.TrackedNodes()
+		for i := range nodes {
+			resource := nodes[i]
+			if resource.Interest == 0 && resource.Current && (resource.Key.Kind == core.ResourceFile || resource.Key.Kind == core.ResourceGlob || resource.Key.Kind == core.ResourceTool) {
+				p.Engine.Invalidate(resource)
+			}
+		}
+		slices.Free(p.Alloc, nodes)
+	}
 	if index >= 0 {
-  if !p.claimEnvironment(index, p.Options.Environment) {
-   return HandleStart{Diagnostic: p.environmentFailure(index, "active target has a different recipe environment")}
-  }
+		if !p.claimEnvironment(index, p.Options.Environment) {
+			return HandleStart{Diagnostic: p.environmentFailure(index, "active target has a different recipe environment")}
+		}
 		p.epoch++
 		p.Instances[index].runEpoch = p.epoch
 		p.invalidateStaleBareTasks(index, p.epoch)
@@ -194,10 +213,7 @@ func (p *Program) Start(target string) HandleStart {
 	if index >= 0 && taskTerminal(node.State) {
 		entry := &p.Instances[index]
 		if entry.Rule.Kind == rule.FileRule && node.State == core.NodeComplete {
-			entry.Plan.Freshness = p.freshness(&entry.Plan, node)
-			if p.Options.Force || entry.Plan.Freshness == Stale {
-				p.Engine.Invalidate(node)
-			}
+			p.Engine.Invalidate(node)
 		} else if entry.Rule.Kind == rule.TaskRule || entry.Rule.Kind == rule.CachedTaskRule {
 			p.Engine.Invalidate(node)
 		}
@@ -356,6 +372,9 @@ func (h *Handle) poll(release bool) HandleResult {
 	if h == nil || h.Program == nil || h.Node == nil {
 		return HandleResult{Done: true, Result: Result{Diagnostic: failure(mem.System, "TGT_NO_RULE", "invalid handle")}}
 	}
+	if h.Node.ValidationPending {
+		return HandleResult{}
+	}
 	if h.Definition && h.Node.Current && h.Node.State != core.NodeFailed && h.Node.State != core.NodeCancelled {
 		value := h.Node.Latest.Clone(h.Program.Alloc)
 		if release && h.Root != nil {
@@ -419,6 +438,7 @@ func (p *Program) instanceFor(target string) instanceResult {
 		return instanceResult{Diagnostic: failure(p.Alloc, "TGT_AMBIG", "duplicate rule instance")}
 	}
 	p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: plan.Rule, Captures: cloneCaptures(p.Alloc, plan.Captures), Node: node, Plan: plan})
+	node.DisableReuse = plan.Rule.Always || plan.Rule.Kind == rule.TaskRule || p.Options.Force
 	return instanceResult{Node: node}
 }
 
@@ -435,7 +455,13 @@ func sameCaptures(left, right []template.CaptureValue) bool {
 }
 
 func sameArguments(left, right []ArgumentValue) bool {
-	if len(left) != len(right) { return false }
-	for i := range left { if left[i].Name != right[i].Name || left[i].Value != right[i].Value { return false } }
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i].Name != right[i].Name || left[i].Value != right[i].Value {
+			return false
+		}
+	}
 	return true
 }

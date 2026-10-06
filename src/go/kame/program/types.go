@@ -342,7 +342,6 @@ type instance struct {
 	ServiceRestartTimerID  int64
 	Shell                  []string
 	Kash                   bool
-	ScopedShell            bool
 	Executor               string
 	ExecutorVersion        string
 	ExecutionInputs        []host.ExecutionArtifact
@@ -363,9 +362,8 @@ type instance struct {
 	NewerInputs         *newerInputState
 	FileContext         *fileContextState
 	FileContextReady    bool
-	FileContextWanted   bool
-	FileContextDigest   [32]byte
 	FileContextKey      [32]byte
+	AcceptedRecord      core.SignatureRecord
 	Rule                *rule.Rule
 	Captures            []template.CaptureValue
 	Node                *core.Node
