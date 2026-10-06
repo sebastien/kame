@@ -152,18 +152,14 @@ targets, Kame must produce the same:
 Parallel completion timing may interleave events differently across independent
 nodes. Events from one node and one process stream retain their original order.
 
-## Deferred Boundaries
+## Boundaries Added After the Initial Architecture
 
-The initial architecture contains no abstraction for:
-
-- Remote execution.
-- General plugin loading.
-- Multiple cache backends.
-- Filesystem watching.
-- Windows process management.
-- Arbitrary resource URI protocols.
-
-Add one only when its specification and second implementation exist.
+The initial implementation deferred several host boundaries. They now have
+concrete specifications and implementations: filesystem watching (020), cache
+backends (008), remote execution (032), plugin operations (033), Windows
+process management (035), and resource URI protocols (031). Each remains behind
+the portable interfaces and host capability checks described by its
+specification.
 
 ## Acceptance Tests
 

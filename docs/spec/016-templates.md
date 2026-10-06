@@ -344,21 +344,18 @@ verbatim literal is idempotent.
 
 ## Related Specifications
 
-- `004-language.md`: add the `if`, `and`, `or`, `match`, and `with` special
-  forms, the comparison operator atoms, the recipe directive pointer, and the
-  verbatim multi-line string literal.
-- `005-evaluation.md`: specify lazy `if`, `and`, `or`, and `match`, scope-binding
-  `with`, and the dependency behavior of `render`.
-- `007-library.md`: add `cat`, `text`, and `render`.
-- `009-cli.md`: add the `do render` command.
-- `011-diagnostics.md`: register the codes above.
+The earlier cross-spec features referenced by this template work are now
+specified and implemented: `004-language.md` defines the control forms and
+syntax, `005-evaluation.md` defines lazy evaluation and scope/dependency
+behavior, `007-library.md` defines `cat`, `text`, and `render`, `009-cli.md`
+defines `do render`, and `011-diagnostics.md` registers the diagnostic codes.
 
-## Deferred
+## Completed Deferred Extensions
 
-The D12 extensions are specified in `030-template-extensions.md`: labeled
-block endings, pattern matching blocks, trim markers, inline blocks,
-content-based style inference, PowerShell and batch comment conventions,
-canonical formatting, and loop index/key bindings.
+The features originally deferred here are specified and implemented in
+`030-template-extensions.md`: labeled block endings, pattern matching blocks,
+trim markers, inline blocks, content-based style inference, PowerShell and
+batch comment conventions, canonical formatting, and loop index/key bindings.
 
 ## Acceptance Tests
 

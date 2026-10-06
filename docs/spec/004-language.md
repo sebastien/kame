@@ -109,8 +109,9 @@ the grammar of `014-patterns.md` claims them.
 A path is explicit when it begins with `/`, `./`, or `../`. No other string is
 classified as a filesystem path in the initial language.
 
-Protocol paths are deferred. In particular, `name:value` is not initially a
-resource URI.
+Protocol resources are explicit values constructed with `(resource URI)`; their
+syntax and canonical identity are specified in `031-resource-protocols.md`.
+Ordinary strings are not silently reclassified as resource URIs.
 
 ### Symbols
 

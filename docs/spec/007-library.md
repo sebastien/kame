@@ -139,7 +139,8 @@ ANSI start and reset sequences; they do not inspect whether stdout is a TTY.
 Use them only when the resulting string is intended for a terminal. Canonical
 value display and ordinary text conversion never add terminal escapes.
 
-Regular-expression operations are deferred.
+Portable regular-expression matching and replacement are specified in
+`029-pattern-extensions.md`.
 
 ### Pattern Replace
 

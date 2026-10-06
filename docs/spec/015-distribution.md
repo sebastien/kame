@@ -338,5 +338,6 @@ existing build rules.
 
 ## Deferred
 
-- Maintained Homebrew tap and Scoop bucket repositories with automated
-  manifest publication.
+- Verify the hosted manifest publisher on the first actual signed release. The
+  maintained repositories and publication variables are configured; the
+  fine-grained token and release signing key remain operator-provided.

@@ -7,7 +7,8 @@ the entire process group. Solod's standard library does not provide child
 process creation, waiting, signals, or process groups, so this package uses a
 small C interop layer.
 
-The first implementation targets hosted POSIX systems. Windows is deferred.
+This specification defines the hosted POSIX adapter. Native Windows process
+management is specified separately in `035-native-windows-cli.md`.
 
 ## Process Request
 
