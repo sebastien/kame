@@ -52,8 +52,9 @@ task native-cache : ./cache-input.txt
 	Write-Output 'native-cache-ok'
 
 task native-concurrent-cache : ./cache-input.txt
-	Start-Sleep -Seconds 2
 	Add-Content -Path concurrent-runs.txt -Value ran
+	Set-Content concurrent-first-started yes
+	Start-Sleep -Seconds 5
 	Write-Output 'native-concurrent-cache-ok'
 
 ./native-watch-output.txt : ./native-watch-input.txt
@@ -137,12 +138,21 @@ task native-concurrent-cache : ./cache-input.txt
 		if ($LASTEXITCODE -ne 0 -or $cacheRuns.Count -ne 2 -or ($cacheOutput -join "`n") -match '"cached":true') {
 			throw "Native cache input invalidation failed: exit=$LASTEXITCODE runs=$($cacheRuns.Count) output=$($cacheOutput -join ' | ')"
 		}
-		$concurrentArgs = @('--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-concurrent-cache')
+		$concurrentArgs = @('--json', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-concurrent-cache')
 		$firstOutput = Join-Path $project 'concurrent-1.out'
 		$firstError = Join-Path $project 'concurrent-1.err'
 		$secondOutput = Join-Path $project 'concurrent-2.out'
 		$secondError = Join-Path $project 'concurrent-2.err'
 		$firstRun = Start-Process -FilePath $exe -ArgumentList $concurrentArgs -PassThru -NoNewWindow -RedirectStandardOutput $firstOutput -RedirectStandardError $firstError
+		$lockDeadline = [DateTime]::UtcNow.AddSeconds(15)
+		while ([DateTime]::UtcNow -lt $lockDeadline -and !(Test-Path (Join-Path $project 'concurrent-first-started'))) {
+			if ($firstRun.HasExited) { throw "Native first concurrent cache recipe exited before its lock handshake: code=$($firstRun.ExitCode) stdout=$(Get-Content -Raw $firstOutput) stderr=$(Get-Content -Raw $firstError)" }
+			Start-Sleep -Milliseconds 50
+		}
+		if (!(Test-Path (Join-Path $project 'concurrent-first-started'))) {
+			Stop-Process -Id $firstRun.Id -Force -ErrorAction SilentlyContinue
+			throw 'Native first concurrent cache recipe did not enter before the lock handshake deadline.'
+		}
 		$secondRun = Start-Process -FilePath $exe -ArgumentList $concurrentArgs -PassThru -NoNewWindow -RedirectStandardOutput $secondOutput -RedirectStandardError $secondError
 		if (!$firstRun.WaitForExit(30000) -or !$secondRun.WaitForExit(30000)) {
 			Stop-Process -Id $firstRun.Id, $secondRun.Id -Force -ErrorAction SilentlyContinue
@@ -153,7 +163,7 @@ task native-concurrent-cache : ./cache-input.txt
 		}
 		$concurrentRuns = @(Get-Content (Join-Path $project 'concurrent-runs.txt'))
 		if ($concurrentRuns.Count -ne 1) {
-			throw "Native concurrent cache misses were not serialized: runs=$($concurrentRuns.Count)"
+			throw "Native concurrent cache misses were not serialized: runs=$($concurrentRuns.Count) first=stdout:$(Get-Content -Raw $firstOutput) stderr:$(Get-Content -Raw $firstError) second=stdout:$(Get-Content -Raw $secondOutput) stderr:$(Get-Content -Raw $secondError)"
 		}
 		Set-Content -Path (Join-Path $project 'native-watch-input.txt') -Value 'watch-before'
 		New-Item -ItemType Directory -Path (Join-Path $project 'native-watch-inputs') | Out-Null
