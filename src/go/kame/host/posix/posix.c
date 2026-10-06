@@ -20,9 +20,12 @@
 #include <unistd.h>
 #if defined(__COSMOPOLITAN__)
 #define _COSMO_SOURCE
+#include "libc/calls/internal.h"
+#include "libc/calls/state.internal.h"
 #include "libc/dce.h"
 #include "libc/nt/dll.h"
 #include "libc/nt/files.h"
+#include "libc/nt/ipc.h"
 #include "libc/nt/process.h"
 #include "libc/nt/runtime.h"
 #include "libc/proc/proc.h"
@@ -107,6 +110,40 @@ static bool km_windows_jobs_needed(void) {
     bool windows = IsWindows();
     intptr_t kernel = windows ? GetModuleHandle("kernel32.dll") : 0;
     return windows && kernel != 0;
+}
+
+// Pipeline edge descriptors are only inherited by child processes; Kame does
+// not poll them. Use synchronous Win32 pipe handles here so non-Cosmopolitan
+// children can safely use them as ordinary standard streams. The captured
+// stdout/stderr pipes remain Cosmopolitan's overlapped pipes for nonblocking
+// reads in the host event loop.
+static int km_windows_sync_pipe(int pipefd[2]) {
+    int64_t read_handle = -1, write_handle = -1;
+    int reader = -1, writer = -1;
+    if (!CreatePipe(&read_handle, &write_handle, NULL, 65536)) { errno = EIO; return -1; }
+    __fds_lock();
+    reader = __reservefd_unlocked(-1);
+    if (reader >= 0) writer = __reservefd_unlocked(-1);
+    __fds_unlock();
+    if (reader < 0 || writer < 0) {
+        if (reader >= 0) __releasefd(reader);
+        if (writer >= 0) __releasefd(writer);
+        CloseHandle(read_handle);
+        CloseHandle(write_handle);
+        errno = EMFILE;
+        return -1;
+    }
+    g_fds.p[reader].kind = kFdFile;
+    g_fds.p[reader].flags = O_RDONLY | O_CLOEXEC;
+    g_fds.p[reader].mode = 0010444;
+    g_fds.p[reader].handle = read_handle;
+    g_fds.p[writer].kind = kFdFile;
+    g_fds.p[writer].flags = O_WRONLY | O_CLOEXEC;
+    g_fds.p[writer].mode = 0010222;
+    g_fds.p[writer].handle = write_handle;
+    pipefd[0] = reader;
+    pipefd[1] = writer;
+    return 0;
 }
 
 static bool km_load_windows_job_api(void) {
@@ -214,6 +251,7 @@ static void km_windows_job_close(int64_t *job) {
 }
 #else
 static bool km_windows_jobs_needed(void) { return false; }
+static int km_windows_sync_pipe(int pipefd[2]) { (void)pipefd; errno = ENOSYS; return -1; }
 static int64_t km_windows_job_create(void) { return 0; }
 static bool km_windows_job_assign(int64_t job, pid_t pid) { (void)job; (void)pid; return true; }
 static bool km_windows_job_assign_exec(int64_t job, pid_t pid) { (void)job; (void)pid; return true; }
@@ -781,7 +819,10 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
         for (int j = 0; j < envcounts[i]; j++) { envp[i][j] = km_cstring(envs[envat++]); if (!envp[i][j]) { ok = false; break; } }
     }
     if (ok && (pipe(out) || pipe(err) || pipe(execerr))) ok = false;
-    for (int i = 0; ok && i < n - 1; i++) if (pipe(edges + i * 2)) ok = false;
+    for (int i = 0; ok && i < n - 1; i++) {
+        int pipe_status = km_windows_jobs_needed() ? km_windows_sync_pipe(edges + i * 2) : pipe(edges + i * 2);
+        if (pipe_status) ok = false;
+    }
     // Exec closes every unused descriptor, including the shared launch channel.
     for (int i = 0; ok && i < (n - 1) * 2; i++) if (fcntl(edges[i], F_SETFD, FD_CLOEXEC) < 0) ok = false;
     if (ok && (fcntl(execerr[1], F_SETFD, FD_CLOEXEC) < 0 || km_set_nonblock(out[0]) || km_set_nonblock(err[0]) || km_set_nonblock(execerr[0]))) ok = false;
