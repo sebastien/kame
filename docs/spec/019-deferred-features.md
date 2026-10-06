@@ -38,8 +38,8 @@ adapters and integration evidence rather than placeholder methods.
 | D13 | Resource protocols | Complete: canonical `file:` and `mem:` identity, scoped grants, dependency invalidation, URI-aware filesystem traversal, native/POSIX and WASM host mappings, and portable memory storage; native/WASM CLI acceptance in T031-01 plus host, evaluator and program suites. See 031. |
 | D14 | Remote execution | Complete: explicit per-file-rule executor selection; versioned host capability checks; workspace-relative input/output artifacts with SHA-256 input digests; retry-stable idempotency; scoped environment; validated output publication; failure, timeout, cancellation and truncation handling. Unsupported forwarded transport fails closed. See 032 and seven remote cases in `program` tests. |
 | D15 | Plugins | Complete: explicit versioned operation registrations, canonical bounded-value JSON, Node native-process and JavaScript-callback adapters, capability policy, and cancellation/ownership rules. See 033, T033-01, codec tests, registry identity tests, and the WASM runtime request test. |
-| D16 | Platform execution | In progress: Linux/macOS x64 and ARM64 plus FreeBSD/NetBSD/OpenBSD native host and artifact workflows pass. Native Windows CLI file/env/path/include, cache locking, file/glob watch, and descendant cleanup pass. The EOF-only PowerShell pipeline is intermittent: it stalled in run 37464239439 and passed in 37465681482. Both runs timed out on the 2 MiB pipeline; run 37464239439 moved 8 KiB to stage two after stage one wrote 64 KiB, while run 37465681482 recorded no byte progress. APE conformance passes on Linux, macOS, FreeBSD and NetBSD; the minimal APE bootstrap aborts on OpenBSD before Kame starts. |
-| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, the Windows x64 launcher bundle and standalone native CLI PE, Linux/macOS x64 and ARM64 plus BSD x64 native builds, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. `dist-release` refuses an incomplete seven-platform native artifact set, and a signed release assembled from the hosted platform artifacts verified 18 assets and all seven native binaries on 2026-10-06. The Windows pipeline stall is the remaining native CLI conformance failure (035); maintained tap/bucket publication also remains. |
+| D16 | Platform execution | Complete: Linux/macOS x64 and ARM64 plus FreeBSD/NetBSD/OpenBSD native host and artifact workflows pass. Native Windows CLI file/env/path/include, cache locking, file/glob watch, descendant cleanup, EOF closure and 2 MiB pipeline transfer pass in run 37471661368 with 64 KiB producer writes. Cosmopolitan 4.0.2 APE execution is not supported on OpenBSD 7.5+: its loader violates syscall pinning; OpenBSD remains covered by native artifacts, and `auto` falls back to WASM when its APE probe fails. |
+| D17 | Distribution tooling | In progress: signed `Makefile.bootstrap`, `VERSION`, the Windows x64 launcher bundle and standalone native CLI PE, Linux/macOS x64 and ARM64 plus BSD x64 native builds, and pinned Homebrew/Scoop manifests; non-overwriting `kame init`; the opt-in `KAME_VERSION=latest` channel; and signed launcher handoff are covered. `dist-release` refuses an incomplete seven-platform native artifact set, and a signed release assembled from the hosted platform artifacts verified 18 assets and all seven native binaries on 2026-10-06. Maintained tap/bucket publication remains open. |
 | D18 | Remaining library/ergonomic extensions | Complete: equality-value `filter`/`filter-out`, `sh`/`shellrun` aliases, the `<-` alternative rule separator, ANSI terminal style functions, safely quoted `shell-template` interpolation, and comma-separated prerequisite sequencing have specified semantics and native/WASM acceptance coverage. |
 
 The explicit boundaries in this table are a finite work inventory. General
@@ -109,7 +109,7 @@ supports both callbacks and direct-argv native processes; T033-01 covers every
 canonical value kind, identity and protocol rejection, limits, process
 termination, cancellation, disposal, and evaluate/build/watch configuration.
 The core codec and plugin registry tests also verify allocator ownership and
-version-sensitive operation identity. D16–D17 remain open. The Node Windows
+version-sensitive operation identity. D17 remains open. The Node Windows
 host connects pipeline stages with child streams, uses `taskkill /T /F` for
 process-tree cancellation, and waits for tree-stop and direct-child completion.
 The Windows launcher workflow now runs the packaged CLI and verifies recipe
@@ -126,9 +126,13 @@ The cross-host runs at [37429595307](https://github.com/sebastien/kame/actions/r
 [37429595285](https://github.com/sebastien/kame/actions/runs/37429595285) passed
 native package/host tests and artifact builds on Linux x64/ARM64, macOS
 x64/ARM64, FreeBSD, NetBSD and OpenBSD, plus the packaged Windows launcher
-runtime. APE acceptance passed on Linux, Darwin, FreeBSD and NetBSD. The
-minimal APE bootstrap on OpenBSD still exits 134 before Kame starts in
-[run 37433667481](https://github.com/sebastien/kame/actions/runs/37433667481).
+runtime. APE acceptance passes on Linux, Darwin, FreeBSD and NetBSD. On
+OpenBSD 7.9, both the APE loader and the assimilated Cosmopolitan executable
+abort under `pinsyscalls`; the trace identifies unpinned syscall entry points
+before Kame starts in [run 37473143209](https://github.com/sebastien/kame/actions/runs/37473143209).
+An OpenBSD 7.4 attempt through the base shell instead fails its required
+`prot_exec` pledge, so OpenBSD is excluded from the APE conformance matrix.
+The native OpenBSD artifact workflow remains covered separately.
 The Windows workflow executes the native PE for version output, a PowerShell
 recipe, environment forwarding, file output and timeout diagnostics in
 [run 37437405672](https://github.com/sebastien/kame/actions/runs/37437405672).
@@ -150,9 +154,12 @@ the same probe passed. Both runs timed out on the 2 MiB pipeline: the first
 recorded 8 KiB consumed by stage two and 64 KiB written by stage one, while the
 second recorded no byte progress. An intermittent short-lived process job-assignment
 failure was also seen in [run 37452192006](https://github.com/sebastien/kame/actions/runs/37452192006),
-but did not recur in the latest run. Native Windows conformance therefore
-remains open for pipeline stream closure and transfer.
-Maintained Homebrew tap and Scoop bucket publication remain open. A signed release
+but did not recur in the latest run. The Windows pipeline fix uses synchronous
+anonymous pipes for stage-to-stage edges while retaining overlapped captured
+stdout/stderr. Run [37471661368](https://github.com/sebastien/kame/actions/runs/37471661368)
+passed the EOF-only probe and the 2 MiB transfer with the original 64 KiB
+PowerShell producer writes, then continued through cache, watch and
+descendant-cleanup checks. Maintained Homebrew tap and Scoop bucket publication remain open. A signed release
 assembled from the hosted platform artifacts verified 18 assets and all seven
 native binaries on 2026-10-06.
 The
@@ -197,5 +204,6 @@ stable OS/architecture key; native-artifact workflows target Linux and macOS
 x64/ARM64 plus x64 FreeBSD, NetBSD and OpenBSD. `dist-release` includes
 collected outputs in its signed manifest and provenance. Hosted BSD artifact
 runs and signed cross-host release assembly are verified. Native Windows
-conformance has one outstanding pipeline EOF/backpressure failure; maintained
-tap/bucket publication also remains open.
+conformance passes the pipeline EOF/backpressure probes. OpenBSD 7.5 and later
+use the native OpenBSD artifact because the pinned APE runtime violates
+syscall-pinning policy. Maintained tap/bucket publication remains open.

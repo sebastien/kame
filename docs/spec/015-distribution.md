@@ -40,6 +40,10 @@ Asset filenames carry no version; the release tag does. The standalone Windows
 PE runs the native CLI without Node or a colocated runtime. The Windows ZIP
 retains the Node/WASM launcher as a separate fallback and requires Node 18 or
 later. The Cosmopolitan APE provides the native CLI on its supported hosts.
+The pinned Cosmopolitan 4.0.2 loader is incompatible with OpenBSD 7.5 and later:
+its syscall entry points are rejected by `pinsyscalls(2)`. Those OpenBSD
+releases use the native `kame-openbsd-x64` artifact; `auto` falls back to WASM
+when its APE probe fails.
 The native-artifact workflows build Linux and macOS binaries on x64 and ARM64,
 plus x64 binaries on FreeBSD, NetBSD and OpenBSD. Each is stored as
 `dist/native/PLATFORM/kame`. Before signing a multi-platform release, collect
@@ -138,13 +142,12 @@ no download. A `KAME_BIN` that is not executable is fatal.
   execution probe fails, `auto` proceeds to `wasm`.
 
 APE hosts are the `uname -s`/`uname -m` pairs Cosmopolitan supports: Linux,
-Darwin, FreeBSD, NetBSD, OpenBSD, and the Windows POSIX layers (`MINGW*`,
+Darwin, FreeBSD, NetBSD, and the Windows POSIX layers (`MINGW*`,
 `MSYS*`, `CYGWIN*`), on `x86_64`/`amd64` and `aarch64`/`arm64`.
 `tools/platform/test-ape.sh` runs the APE through the POSIX shell adapter,
 checks version output, executes a recipe with an explicit environment, and
 checks timeout cleanup. `.github/workflows/ape-platforms.yml` runs that test
-against one artifact on Linux, Darwin, Windows POSIX, FreeBSD, NetBSD and
-OpenBSD.
+against one artifact on Linux, Darwin, Windows POSIX, FreeBSD and NetBSD.
 
 The `wasm` backend requires a JavaScript runtime. `KAME_JS` names it;
 otherwise `node` is used. The runtime must be Node 18 or later.
@@ -299,8 +302,11 @@ existing build rules.
   on `windows-latest`. Passing a cross-compile alone does not establish
   Windows-host conformance.
 - `kame-windows-x64.exe` runs directly on `windows-latest` and passes the native
-  CLI version and PowerShell recipe checks without Node. The complete host
-  semantics remain gated by spec 035.
+  CLI version and PowerShell recipe checks without Node. The full native host
+  suite, including 64 KiB pipeline writes, EOF closure, 2 MiB transfer, cache,
+  watch and descendant cleanup, passed in
+  [run 37471661368](https://github.com/sebastien/kame/actions/runs/37471661368);
+  see spec 035.
 - An invalid version override fails before creating or accessing a cache path.
 - `kame init` writes a correctly stamped bootstrap sidecar, preserves an
   existing `Makefile`, and refuses a second write without changing either file.
@@ -314,11 +320,10 @@ existing build rules.
   evidence.
 - APE host conformance runs a minimal standalone Cosmopolitan executable
   before the Kame CLI checks, so loader failures are distinct from application
-  startup failures on each tested host.
+  startup failures on each tested host. OpenBSD is covered by native artifact
+  tests because Cosmopolitan 4.0.2 APEs fail OpenBSD syscall pinning.
 
 ## Deferred
 
-- Full native Windows host conformance beyond the initial APE version/recipe
-  smoke. See `docs/spec/035-native-windows-cli.md` for the remaining gates.
 - Maintained Homebrew tap and Scoop bucket repositories with automated
   manifest publication.

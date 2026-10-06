@@ -1,5 +1,12 @@
 # Native Windows CLI
 
+Status: complete. The Windows-host acceptance suite passed on 2026-10-06 in
+[run 37471661368](https://github.com/sebastien/kame/actions/runs/37471661368),
+including the native pipeline, cache, watch and descendant-cleanup checks. A
+signed staged release containing the Windows PE and all seven native platform
+artifacts also passed; see the D17 evidence in
+`docs/spec/019-deferred-features.md`.
+
 This specification closes the native-Windows CLI deferral in
 `docs/spec/015-distribution.md`. The initial implementation reuses the
 Cosmopolitan APE's native Windows PE entry and the existing C-backed process
@@ -68,5 +75,5 @@ It does not establish descendant cleanup. The suite must additionally verify:
 
 Cross-compilation, launcher contract tests, and Node/WASM behavior are useful
 supporting checks, but none proves this specification's native-runtime
-requirements. Keep this feature open until the Windows-host suite and staged
-native release package pass.
+requirements. The hosted run and staged signed release above provide the
+required evidence.
