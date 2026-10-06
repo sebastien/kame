@@ -1,0 +1,91 @@
+name: Publish package manifests
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published Kame release version
+        required: true
+        type: string
+      homebrew_tap_repository:
+        description: Owner/repository for the Homebrew tap (defaults to repository variable)
+        required: false
+        type: string
+      scoop_bucket_repository:
+        description: Owner/repository for the Scoop bucket (defaults to repository variable)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.KAME_PACKAGE_PUBLISH_TOKEN }}
+      HOMEBREW_TAP_REPOSITORY: ${{ inputs.homebrew_tap_repository || vars.KAME_HOMEBREW_TAP_REPOSITORY }}
+      SCOOP_BUCKET_REPOSITORY: ${{ inputs.scoop_bucket_repository || vars.KAME_SCOOP_BUCKET_REPOSITORY }}
+      RELEASE_VERSION: ${{ inputs.version || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+      - name: Validate publication configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN" || { echo "KAME_PACKAGE_PUBLISH_TOKEN is required" >&2; exit 1; }
+          test -n "$HOMEBREW_TAP_REPOSITORY" || { echo "Set KAME_HOMEBREW_TAP_REPOSITORY or dispatch input" >&2; exit 1; }
+          test -n "$SCOOP_BUCKET_REPOSITORY" || { echo "Set KAME_SCOOP_BUCKET_REPOSITORY or dispatch input" >&2; exit 1; }
+          gh auth setup-git
+      - name: Download signed release package assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$RELEASE_VERSION"
+          [[ "$tag" == v* ]] || tag="v$tag"
+          mkdir -p "$RUNNER_TEMP/kame-release"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+            --dir "$RUNNER_TEMP/kame-release" \
+            --pattern kame.rb --pattern kame.json \
+            --pattern kame.com --pattern kame-windows-x64.exe
+      - name: Clone package repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh repo clone "$HOMEBREW_TAP_REPOSITORY" "$RUNNER_TEMP/homebrew-tap"
+          gh repo clone "$SCOOP_BUCKET_REPOSITORY" "$RUNNER_TEMP/scoop-bucket"
+      - name: Validate and stage manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/publish_package_manifests.py \
+            --release-directory "$RUNNER_TEMP/kame-release" \
+            --version "$RELEASE_VERSION" \
+            --homebrew-tap "$RUNNER_TEMP/homebrew-tap" \
+            --scoop-bucket "$RUNNER_TEMP/scoop-bucket"
+      - name: Commit and publish manifest updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repository in homebrew-tap scoop-bucket; do
+            path="$RUNNER_TEMP/$repository"
+            if [[ "$repository" == homebrew-tap ]]; then
+              files=(Formula/kame.rb)
+            else
+              files=(bucket/kame.json)
+            fi
+            git -C "$path" add -- "${files[@]}"
+            if git -C "$path" diff --cached --quiet; then
+              echo "$repository already has the requested manifest"
+              continue
+            fi
+            git -C "$path" -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -m "Publish Kame ${RELEASE_VERSION} package manifest"
+            git -C "$path" push
+          done

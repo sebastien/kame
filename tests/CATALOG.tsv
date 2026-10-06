@@ -81,6 +81,7 @@ tests/T015-02-dist-launcher-backends.sh	015	dist	Launcher APE probe fallback, fo
 tests/T015-03-dist-self-build.sh	015	dist	Generated version metadata stability, incremental self-build input declaration, and fresh-skip behavior
 tests/T015-04-dist-signed-release.sh	015	dist	Operator-supplied Ed25519 signing keys, generated pinned Homebrew/Scoop manifests, authenticated launcher/bootstrap/VERSION assets, latest-channel handoff, checksums, provenance and tamper rejection
 tests/T015-05-dist-windows-launcher.sh	015	dist	Windows x64 native launcher, argv and exit-status fidelity, and colocated Node/WASM runtime bundle
+tests/T015-06-dist-package-manifest-publication.sh	015	dist	Release-pinned Homebrew and Scoop manifests publish to the correct repository paths without overwriting sibling files
 tests/T017-01-eval-capture.sh	017	eval	Embedded Kash atoms, direct argv, quoting, list splicing, capture, lazy execution and capabilities
 tests/T017-02-wasm-capture.sh	017	wasm	Native/WASM capture, argv, scope, failure, grant, AST and formatting parity
 tests/T017-03-eval-pipelines.sh	017	eval	Streaming Kash pipelines, stage statuses, failure cleanup, grants and native/WASM parity
