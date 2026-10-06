@@ -63,7 +63,9 @@ Configure repository variables `KAME_HOMEBREW_TAP_REPOSITORY` and
 `KAME_SCOOP_BUCKET_REPOSITORY` as `owner/name`, and secret
 `KAME_PACKAGE_PUBLISH_TOKEN` with read access to this repository and write
 access to both package repositories. A manual dispatch can override either
-repository variable.
+repository variable. The maintained targets are `sebastien/homebrew-kame` and
+`sebastien/scoop-kame`; the first receives `Formula/kame.rb`, and the second
+receives `bucket/kame.json`.
 
 `SHA256SUMS` contains one `<64-hex-lowercase>  <asset>` line per asset, sorted
 by asset name, using the conventional two-space separator.
