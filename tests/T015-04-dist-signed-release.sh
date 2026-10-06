@@ -20,11 +20,12 @@ missing_platform="openbsd-x86_64"
 missing_artifact="dist/native/$missing_platform/kame"
 saved_native="$root/saved-$missing_platform"
 if [ -f "$missing_artifact" ]; then mv "$missing_artifact" "$saved_native"; fi
-set +e
-make dist-release KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
-	KAME_RELEASE_SIGNING_KEY="$root/keys/signing.pem" >"$root/missing-native.out" 2>&1
-missing_status=$?
-set -e
+if make dist-release KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
+	KAME_RELEASE_SIGNING_KEY="$root/keys/signing.pem" >"$root/missing-native.out" 2>&1; then
+	missing_status=0
+else
+	missing_status=$?
+fi
 if [ -f "$saved_native" ]; then mv "$saved_native" "$missing_artifact"; fi
 if [ "$missing_status" -ne 0 ] && grep -q 'missing native release artifact:' "$root/missing-native.out"; then
 	test-ok "release assembly refuses an incomplete cross-host native set"
