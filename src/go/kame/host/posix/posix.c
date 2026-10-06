@@ -73,6 +73,9 @@ struct km_host {
 };
 
 static int km_cache_lock_fd[256];
+#if defined(__COSMOPOLITAN__)
+static int64_t km_cache_lock_mutex[256];
+#endif
 static unsigned km_cache_lock_refs[256];
 static bool km_cache_lock_initialized;
 
@@ -82,12 +85,18 @@ typedef int32_t (__msabi *km_assign_process_to_job_object_fn)(int64_t, int64_t);
 typedef int32_t (__msabi *km_terminate_job_object_fn)(int64_t, uint32_t);
 typedef uint32_t (__msabi *km_get_process_id_fn)(int64_t);
 typedef int32_t (__msabi *km_is_process_in_job_fn)(int64_t, int64_t, int32_t *);
+typedef int64_t (__msabi *km_create_mutex_fn)(void *, int32_t, const char16_t *);
+typedef uint32_t (__msabi *km_wait_single_object_fn)(int64_t, uint32_t);
+typedef int32_t (__msabi *km_release_mutex_fn)(int64_t);
 
 static km_create_job_object_fn km_create_job_object;
 static km_assign_process_to_job_object_fn km_assign_process_to_job_object;
 static km_terminate_job_object_fn km_terminate_job_object;
 static km_get_process_id_fn km_get_process_id;
 static km_is_process_in_job_fn km_is_process_in_job;
+static km_create_mutex_fn km_create_mutex;
+static km_wait_single_object_fn km_wait_single_object;
+static km_release_mutex_fn km_release_mutex;
 static bool km_windows_job_api_loaded;
 
 static bool km_windows_jobs_needed(void) {
@@ -109,6 +118,37 @@ static bool km_load_windows_job_api(void) {
         km_windows_job_api_loaded = true;
     }
     return km_create_job_object && km_assign_process_to_job_object && km_terminate_job_object;
+}
+
+static bool km_windows_cache_lock(int stripe) {
+    intptr_t kernel = GetModuleHandle("kernel32.dll");
+    if (!kernel) return false;
+    if (!km_create_mutex) km_create_mutex = (km_create_mutex_fn)GetProcAddress(kernel, "CreateMutexW");
+    if (!km_wait_single_object) km_wait_single_object = (km_wait_single_object_fn)GetProcAddress(kernel, "WaitForSingleObject");
+    if (!km_release_mutex) km_release_mutex = (km_release_mutex_fn)GetProcAddress(kernel, "ReleaseMutex");
+    if (!km_create_mutex || !km_wait_single_object || !km_release_mutex) return false;
+    char16_t name[48] = {'L','o','c','a','l','\\','K','a','m','e','C','a','c','h','e','L','o','c','k','_'};
+    int digits[3] = {stripe / 100, (stripe / 10) % 10, stripe % 10};
+    int at = 20;
+    if (digits[0]) name[at++] = (char16_t)('0' + digits[0]);
+    if (digits[0] || digits[1]) name[at++] = (char16_t)('0' + digits[1]);
+    name[at++] = (char16_t)('0' + digits[2]);
+    name[at] = 0;
+    int64_t mutex = km_create_mutex(NULL, 0, name);
+    if (!mutex || mutex == -1) return false;
+    uint32_t result = km_wait_single_object(mutex, UINT32_MAX);
+    if (result != 0 && result != 0x80) { CloseHandle(mutex); return false; }
+    km_cache_lock_mutex[stripe] = mutex;
+    return true;
+}
+
+static void km_windows_cache_unlock(int stripe) {
+    int64_t mutex = km_cache_lock_mutex[stripe];
+    km_cache_lock_mutex[stripe] = 0;
+    if (mutex) {
+        if (km_release_mutex) km_release_mutex(mutex);
+        CloseHandle(mutex);
+    }
 }
 
 static int64_t km_windows_job_create(void) {
@@ -173,6 +213,8 @@ static bool km_windows_jobs_needed(void) { return false; }
 static int64_t km_windows_job_create(void) { return 0; }
 static bool km_windows_job_assign(int64_t job, pid_t pid) { (void)job; (void)pid; return true; }
 static bool km_windows_job_assign_exec(int64_t job, pid_t pid) { (void)job; (void)pid; return true; }
+static bool km_windows_cache_lock(int stripe) { (void)stripe; return false; }
+static void km_windows_cache_unlock(int stripe) { (void)stripe; }
 static bool km_windows_job_terminate(int64_t job, int sig) { (void)job; (void)sig; return true; }
 static void km_windows_job_close(int64_t *job) { if (job) *job = 0; }
 #endif
@@ -447,6 +489,12 @@ int km_host_cache_lock(km_host *host, so_String name, int stripe) {
         km_cache_lock_refs[stripe]++;
         return 0;
     }
+    if (km_windows_jobs_needed()) {
+        if (!km_windows_cache_lock(stripe)) return -1;
+        host->cache_lock_refs[stripe] = 1;
+        km_cache_lock_refs[stripe] = 1;
+        return 0;
+    }
     char *path = km_cstring(name);
     if (!path) return -1;
     int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
@@ -467,6 +515,7 @@ void km_host_cache_unlock(km_host *host, int stripe) {
     if (!host || stripe < 0 || stripe >= 256 || host->cache_lock_refs[stripe] == 0 || km_cache_lock_refs[stripe] == 0) return;
     host->cache_lock_refs[stripe]--;
     if (--km_cache_lock_refs[stripe] != 0) return;
+    if (km_windows_jobs_needed()) { km_windows_cache_unlock(stripe); return; }
     int fd = km_cache_lock_fd[stripe];
     km_cache_lock_fd[stripe] = -1;
     if (fd >= 0) { flock(fd, LOCK_UN); close(fd); }
@@ -949,14 +998,7 @@ void km_host_free(km_host *host) {
         km_release_process(p);
     }
     for (int i = 0; i < 256; i++) {
-        while (host->cache_lock_refs[i] != 0 && km_cache_lock_refs[i] != 0) {
-            host->cache_lock_refs[i]--;
-            if (--km_cache_lock_refs[i] == 0) {
-                int fd = km_cache_lock_fd[i];
-                km_cache_lock_fd[i] = -1;
-                if (fd >= 0) { flock(fd, LOCK_UN); close(fd); }
-            }
-        }
+        while (host->cache_lock_refs[i] != 0 && km_cache_lock_refs[i] != 0) km_host_cache_unlock(host, i);
     }
     free(host->processes);
     while (host->first) { km_event_node *node = host->first; host->first = node->next; km_free_event(&node->event); free(node); }
