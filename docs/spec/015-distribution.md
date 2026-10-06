@@ -61,11 +61,12 @@ commits only `Formula/kame.rb` and `bucket/kame.json` respectively. The
 workflow can also be dispatched manually for an already published version.
 Configure repository variables `KAME_HOMEBREW_TAP_REPOSITORY` and
 `KAME_SCOOP_BUCKET_REPOSITORY` as `owner/name`, and secret
-`KAME_PACKAGE_PUBLISH_TOKEN` with read access to this repository and write
-access to both package repositories. A manual dispatch can override either
-repository variable. The maintained targets are `sebastien/homebrew-kame` and
-`sebastien/scoop-kame`; the first receives `Formula/kame.rb`, and the second
-receives `bucket/kame.json`.
+`KAME_PACKAGE_PUBLISH_TOKEN` with a fine-grained token restricted to these
+three repositories. Grant Contents read access to `sebastien/kame` and Contents
+read/write access only to the package repositories. A manual dispatch can
+override either repository variable. The maintained targets are
+`sebastien/homebrew-kame` and `sebastien/scoop-kame`; the first receives
+`Formula/kame.rb`, and the second receives `bucket/kame.json`.
 
 `SHA256SUMS` contains one `<64-hex-lowercase>  <asset>` line per asset, sorted
 by asset name, using the conventional two-space separator.
