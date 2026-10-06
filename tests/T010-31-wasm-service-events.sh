@@ -60,7 +60,8 @@ else
 	test-fail "native and WASM human lifecycle output differs"
 fi
 
-if ! grep -q 'ready-marker' "$work/native.jsonl" && ! grep -q 'ready-marker' "$work/wasm.jsonl"; then
+if jq -s -e 'all(.[]; (has("environment") or has("stdout") or has("stderr") or has("output")) | not)' "$work/native.jsonl" >/dev/null \
+	&& jq -s -e 'all(.[]; (has("environment") or has("stdout") or has("stderr") or has("output")) | not)' "$work/wasm.jsonl" >/dev/null; then
 	test-ok "service events omit process environment and output data"
 else
 	test-fail "service lifecycle events leaked process data"
