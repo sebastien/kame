@@ -33,7 +33,7 @@ task native-path :
 '@ | Set-Content -Encoding ascii (Join-Path $project 'native-child.kmk')
 	@'
 task native-pipeline :
-	@(out (pipe (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "[Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 2097152; [Console]::OpenStandardOutput().Write($b,0,$b.Length)") (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "$s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r }; [Console]::Write($n)")))
+	@(out (pipe (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-one-started yes; [Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 2097152; [Console]::OpenStandardOutput().Write($b,0,$b.Length); Set-Content pipeline-stage-one-done yes") (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-two-started yes; $s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r }; Set-Content pipeline-stage-two-done yes; [Console]::Write($n)")))
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :
@@ -116,7 +116,8 @@ task native-concurrent-cache : ./cache-input.txt
 		$pipelineOutput = Get-Content -Raw $pipelineOutputPath
 		$pipelineError = Get-Content -Raw $pipelineErrorPath
 		if ($pipelineStatus -ne 0 -or $pipelineOutput -notmatch '2097152' -or $pipelineOutput -notmatch '"stages":\[\{[^}]*"status":0\},\{[^}]*"status":0\}\]' -or $pipelineError -notmatch 'native-pipeline-stderr') {
-			throw "Native binary pipeline failed to preserve 2 MiB flow, per-stage status, or stream separation: exit=$pipelineStatus stdout=$pipelineOutput stderr=$pipelineError"
+			$stageMarkers = @('pipeline-stage-one-started', 'pipeline-stage-one-done', 'pipeline-stage-two-started', 'pipeline-stage-two-done') | ForEach-Object { "$_=$(Test-Path (Join-Path $project $_))" }
+			throw "Native binary pipeline failed to preserve 2 MiB flow, per-stage status, or stream separation: exit=$pipelineStatus markers=$($stageMarkers -join ',') stdout=$pipelineOutput stderr=$pipelineError"
 		}
 	Set-Content -Path (Join-Path $project 'cache-input.txt') -Value 'initial'
 	$cacheArgs = @('--json', '--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '-f', 'Makefile.kmk', 'native-cache')
