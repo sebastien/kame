@@ -33,9 +33,12 @@ build_release() {
 	chmod +x "$dir/kame.com"
 	printf 'const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$dir/kame.js"
 	printf 'dummy-wasm' >"$dir/kame.wasm"
+	printf 'fixture Windows launcher bundle' >"$dir/kame-windows-x64.zip"
+	printf 'fixture native Windows CLI' >"$dir/kame-windows-x64.exe"
 	printf '9.9.9\n' >"$dir/VERSION"
 	cp "$CLI_ROOT/Makefile.bootstrap" "$dir/Makefile.bootstrap"
 	release_test_stamp_launcher "$launcher" "$dir/bin/kame" 9.9.9
+	python3 tools/release_package_manifests.py --directory "$dir" --version 9.9.9
 	release_test_sign "$dir" 9.9.9 fixture "$root/keys"
 }
 
