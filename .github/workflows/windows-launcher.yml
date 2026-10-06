@@ -49,4 +49,5 @@ jobs:
         run: node tools/windows/test-launcher.mjs dist/windows
       - name: Test standalone native Windows CLI on Windows
         shell: pwsh
+        timeout-minutes: 5
         run: ./tools/windows/test-native-cli.ps1 dist/kame-windows-x64.exe

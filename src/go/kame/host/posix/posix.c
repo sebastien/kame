@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <poll.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
@@ -572,6 +573,13 @@ static void km_exec_argv(char **argv, char **envp) {
 // Resolve PATH using the request environment and launch through Cosmopolitan's
 // file-action path, which maps pipe descriptors into native child handles.
 #if defined(__COSMOPOLITAN__)
+static bool km_spawn_trace_enabled(char **envp) {
+    for (char **entry = envp; *entry; entry++) {
+        if (strcmp(*entry, "KAME_WINDOWS_SPAWN_TRACE=1") == 0) return true;
+    }
+    return false;
+}
+
 static int km_spawn_argv(pid_t *pid, char **argv, char **envp, posix_spawn_file_actions_t *actions, posix_spawnattr_t *attr) {
     if (strchr(argv[0], '/')) return posix_spawn(pid, argv[0], actions, attr, argv, envp);
     const char *paths = "/bin:/usr/bin";
@@ -597,12 +605,14 @@ static int km_spawn_argv(pid_t *pid, char **argv, char **envp, posix_spawn_file_
 }
 
 static int km_spawn_graph_stage(pid_t *pid, char **argv, char **envp, char *cwd, int input, int output, int error_output, int out[2], int err[2], int execerr[2], int *edges, int edge_count, int inputfd, int outputfd) {
+    bool trace = km_spawn_trace_enabled(envp);
     posix_spawn_file_actions_t actions;
     posix_spawnattr_t attr;
     int error = posix_spawn_file_actions_init(&actions);
     if (error) return error;
     error = posix_spawnattr_init(&attr);
     if (error) { posix_spawn_file_actions_destroy(&actions); return error; }
+    if (trace) fprintf(stderr, "[windows-spawn] begin argv=%s stdin=%d stdout=%d stderr=%d cwd=%s inputfd=%d outputfd=%d\n", argv[0], input, output, error_output, cwd, inputfd, outputfd);
     if ((error = posix_spawn_file_actions_adddup2(&actions, input, STDIN_FILENO)) ||
         (error = posix_spawn_file_actions_adddup2(&actions, output, STDOUT_FILENO)) ||
         (error = posix_spawn_file_actions_adddup2(&actions, error_output, STDERR_FILENO)) ||
@@ -618,6 +628,7 @@ static int km_spawn_graph_stage(pid_t *pid, char **argv, char **envp, char *cwd,
     if (!error) error = posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
     if (!error) error = km_spawn_argv(pid, argv, envp, &actions, &attr);
 done:
+    if (trace) fprintf(stderr, "[windows-spawn] done argv=%s error=%d pid=%d\n", argv[0], error, (int)*pid);
     posix_spawnattr_destroy(&attr);
     posix_spawn_file_actions_destroy(&actions);
     return error;
