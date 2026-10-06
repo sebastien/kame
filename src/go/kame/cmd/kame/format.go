@@ -103,7 +103,8 @@ func parseFormatArguments(args []string, errOut io.Writer) formatArguments {
 func formatSource(lang string, name string, text string, indentStyle string, indentWidth int, comment string, errOut io.Writer) (string, bool) {
 	result := format.SourceWithComment(mem.System, lang, name, text, indentStyle, indentWidth, comment)
 	if !result.OK {
-		src := source.Borrow(mem.System, name, text)
+		src := mem.Alloc[source.Source](mem.System)
+		src.Name, src.Text = name, text
 		position := src.Position(result.Span.Start)
 		io.WriteString(errOut, name)
 		io.WriteString(errOut, ":")
@@ -116,7 +117,7 @@ func formatSource(lang string, name string, text string, indentStyle string, ind
 		io.WriteString(errOut, ": ")
 		io.WriteString(errOut, result.Message)
 		io.WriteString(errOut, "\n")
-		src.Free(mem.System)
+		mem.Free(mem.System, src)
 		mem.FreeString(mem.System, result.Code)
 		mem.FreeString(mem.System, result.Message)
 		return "", false
