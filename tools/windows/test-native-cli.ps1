@@ -59,6 +59,10 @@ task native-concurrent-cache : ./cache-input.txt
 
 ./native-watch-output.txt : ./native-watch-input.txt
 	Copy-Item -LiteralPath @< -Destination @>
+
+./native-watch-glob-output.txt : ./native-watch-inputs/*.txt
+	Add-Content -Path native-watch-glob-runs.txt -Value ran
+	Set-Content -Path @> -Value done
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	Push-Location $project
 	try {
@@ -151,18 +155,21 @@ task native-concurrent-cache : ./cache-input.txt
 			throw "Native concurrent cache misses were not serialized: runs=$($concurrentRuns.Count)"
 		}
 		Set-Content -Path (Join-Path $project 'native-watch-input.txt') -Value 'watch-before'
-		$watchArgs = @('--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '--watch', './native-watch-output.txt')
+		New-Item -ItemType Directory -Path (Join-Path $project 'native-watch-inputs') | Out-Null
+		Set-Content -Path (Join-Path $project 'native-watch-inputs/a.txt') -Value a
+		$watchArgs = @('--directory', $project, '--shell', $shell, '--shell', '-NoProfile', '--shell', '-NonInteractive', '--shell', '-Command', '--watch', './native-watch-output.txt', './native-watch-glob-output.txt')
 		$watchStdout = Join-Path $project 'watch.out'
 		$watchStderr = Join-Path $project 'watch.err'
 		$watch = Start-Process -FilePath $exe -ArgumentList $watchArgs -PassThru -NoNewWindow -RedirectStandardOutput $watchStdout -RedirectStandardError $watchStderr
 		try {
 			$watchOutput = Join-Path $project 'native-watch-output.txt'
+			$globOutput = Join-Path $project 'native-watch-glob-output.txt'
 			$deadline = [DateTime]::UtcNow.AddSeconds(15)
-			while ([DateTime]::UtcNow -lt $deadline -and (!(Test-Path $watchOutput) -or (Get-Content -Raw $watchOutput).Trim() -ne 'watch-before')) {
+			while ([DateTime]::UtcNow -lt $deadline -and (!(Test-Path $watchOutput) -or (Get-Content -Raw $watchOutput).Trim() -ne 'watch-before' -or !(Test-Path $globOutput))) {
 				if ($watch.HasExited) { throw "Native watch exited before its initial build: code=$($watch.ExitCode) stderr=$(Get-Content -Raw $watchStderr)" }
 				Start-Sleep -Milliseconds 100
 			}
-			if (!(Test-Path $watchOutput) -or (Get-Content -Raw $watchOutput).Trim() -ne 'watch-before') {
+			if (!(Test-Path $watchOutput) -or (Get-Content -Raw $watchOutput).Trim() -ne 'watch-before' -or !(Test-Path $globOutput)) {
 				throw "Native watch did not publish its initial output: stderr=$(Get-Content -Raw $watchStderr)"
 			}
 			Set-Content -Path (Join-Path $project 'native-watch-input.txt') -Value 'watch-after'
@@ -174,6 +181,22 @@ task native-concurrent-cache : ./cache-input.txt
 			if ((Get-Content -Raw $watchOutput).Trim() -ne 'watch-after') {
 				throw "Native watch did not rebuild after input invalidation: stderr=$(Get-Content -Raw $watchStderr)"
 			}
+			Set-Content -Path (Join-Path $project 'native-watch-inputs/b.txt') -Value b
+			$deadline = [DateTime]::UtcNow.AddSeconds(15)
+			while ([DateTime]::UtcNow -lt $deadline -and @(Get-Content (Join-Path $project 'native-watch-glob-runs.txt')).Count -lt 2) {
+				if ($watch.HasExited) { throw "Native watch exited before glob addition: code=$($watch.ExitCode) stderr=$(Get-Content -Raw $watchStderr)" }
+				Start-Sleep -Milliseconds 100
+			}
+			$globRuns = @(Get-Content (Join-Path $project 'native-watch-glob-runs.txt'))
+			if ($globRuns.Count -ne 2) { throw "Native watch did not rebuild after glob membership addition: runs=$($globRuns.Count) stderr=$(Get-Content -Raw $watchStderr)" }
+			Remove-Item (Join-Path $project 'native-watch-inputs/b.txt')
+			$deadline = [DateTime]::UtcNow.AddSeconds(15)
+			while ([DateTime]::UtcNow -lt $deadline -and @(Get-Content (Join-Path $project 'native-watch-glob-runs.txt')).Count -lt 3) {
+				if ($watch.HasExited) { throw "Native watch exited before glob removal: code=$($watch.ExitCode) stderr=$(Get-Content -Raw $watchStderr)" }
+				Start-Sleep -Milliseconds 100
+			}
+			$globRuns = @(Get-Content (Join-Path $project 'native-watch-glob-runs.txt'))
+			if ($globRuns.Count -ne 3) { throw "Native watch did not rebuild after glob membership removal: runs=$($globRuns.Count) stderr=$(Get-Content -Raw $watchStderr)" }
 		} finally {
 			if (!$watch.HasExited) { Stop-Process -Id $watch.Id -Force }
 		}
