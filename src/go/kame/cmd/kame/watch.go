@@ -55,6 +55,7 @@ func addWatchResource(items *[]watchResource, p *program.Program, key core.Resou
 	stamp := watchStamp(p, key, source)
 	if !source && p != nil && key.Kind == core.ResourceFile {
 		if node := p.Engine.Lookup(key); node != nil && node.Current && node.Latest.Kind == core.Nil {
+			mem.FreeString(mem.System, stamp)
 			stamp = cloneCommandText("missing")
 		}
 	}

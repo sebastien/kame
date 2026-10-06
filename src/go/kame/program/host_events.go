@@ -210,6 +210,15 @@ func (p *Program) ProcessExited(request host.Request) {
 	entry := p.instanceForRequest(request.ID)
 	if entry == nil { entry = p.serviceForProcessRequest(request.ID) }
 	if entry == nil { entry = p.streamInstance(request.NodeID) }
+	if entry == nil && p.Eval != nil {
+		nodeID := p.Eval.ProcessRecipeNode(request.NodeID)
+		for i := range p.Instances {
+			if p.Instances[i].Node.ID == nodeID {
+				entry = &p.Instances[i]
+				break
+			}
+		}
+	}
 	if entry != nil { p.emitProcess(entry, ProcessExited, request.ID) }
 }
 
@@ -736,8 +745,22 @@ func (p *Program) Complete(request host.Request, value core.Value, diagnostic di
 		diagnostic.Free(p.Alloc)
 		return
 	}
-	if request.Kind == host.RequestProcess && (len(host.PayloadArgv(request.Payload)) != 0 || len(host.PayloadStages(request.Payload)) != 0) {
-		if entry := p.streamInstance(request.NodeID); entry != nil {
+	started := false
+	for i := range p.Pending {
+		if p.Pending[i].ID == request.ID {
+			started = p.Pending[i].Started
+			break
+		}
+	}
+	if started {
+		entry := p.instanceForRequest(request.ID)
+		if entry == nil {
+			entry = p.serviceForProcessRequest(request.ID)
+		}
+		if entry == nil {
+			entry = p.streamInstance(request.NodeID)
+		}
+		if entry != nil {
 			p.emitProcess(entry, ProcessExited, request.ID)
 		}
 	}

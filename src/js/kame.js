@@ -1255,7 +1255,10 @@ class Module {
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout);
-          return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
+          const status = this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
+          if (status !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
+          this.drainEvents(instance, context);
+          return status;
         }
         return this.completeJSON(instance, request, completion.value);
       }
