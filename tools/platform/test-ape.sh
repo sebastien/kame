@@ -29,26 +29,14 @@ report_phase() {
 
 # Assimilation selects the host's native executable format when available. It
 # also avoids depending on shell-specific parsing of the binary polyglot.
-if [ "$ape_host" = OpenBSD ]; then
-	report_phase "prepare OpenBSD shell fallback"
-	mkdir "$work_path/bin"
-	ln -s "$(command -v gdd)" "$work_path/bin/dd"
-	PATH=$work_path/bin:$PATH
-	export PATH
-else
-	report_phase "assimilate APE"
-	"$ape_shell" "$ape_path" --assimilate
-	"$ape_shell" "$smoke_path" --assimilate
-fi
+report_phase "assimilate APE for native execution"
+"$ape_shell" "$ape_path" --assimilate
+"$ape_shell" "$smoke_path" --assimilate
 
 run_binary() {
 	binary=$1
 	shift
-	if [ "$ape_host" = OpenBSD ]; then
-		"$ape_shell" "$binary" "$@"
-	else
-		"$binary" "$@"
-	fi
+	"$binary" "$@"
 }
 
 report_phase "run minimal Cosmopolitan APE smoke program"

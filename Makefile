@@ -200,7 +200,6 @@ dist-ape: dist/kame.com dist/ape-smoke.com
 dist/ape-smoke.com: tools/platform/ape-smoke.c build/tools/cosmocc-4.0.2/bin/cosmocc
 	mkdir -p $(@D)
 	build/tools/cosmocc-4.0.2/bin/cosmocc -O2 -o $@ tools/platform/ape-smoke.c
-
 dist/windows/kame.exe: $(wildcard $(KAME_DIR)/cmd/kame-launcher/*.go) dist/kame.js dist/kame.wasm
 	mkdir -p dist/windows
 	cd $(KAME_DIR) && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o ../../../dist/windows/kame.exe ./cmd/kame-launcher
