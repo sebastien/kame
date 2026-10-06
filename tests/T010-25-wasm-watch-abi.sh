@@ -62,7 +62,7 @@ const advanceWatch = (handle) => {
     const header = alloc(48, 8);
     assert.equal(e.kame_wasm_next_event_header(handle, header, 48), 0);
     const request = new DataView(e.memory.buffer, header, 48).getBigUint64(20, true);
-    if (kind === 1) {
+    if (kind === 1 || kind === 27) {
       const [data, length] = write(fileContent);
       assert.equal(e.kame_wasm_complete_bytes(handle, request, data, length), 0);
     } else if (kind === 7) {
@@ -77,7 +77,7 @@ const advanceWatch = (handle) => {
 
 const constrained = e.kame_wasm_instance_create();
 assert.notEqual(constrained, 0n);
-assert.equal(e.kame_wasm_instance_set_heap_limit(constrained, 15000), 0);
+assert.equal(e.kame_wasm_instance_set_heap_limit(constrained, 15500), 0);
 compile(constrained, 'VALUE = 1\n');
 const [constrainedTargets, constrainedTargetsLength] = write('["VALUE"]');
 assert.equal(e.kame_wasm_watch_begin(constrained, constrainedTargets, constrainedTargetsLength), 0);

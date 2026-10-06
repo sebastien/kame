@@ -37,7 +37,8 @@ KMK
  test-step "$backend keeps scoped file fresh after newer subset changes"
  "${runner[@]}" -C "$project" ./out > "$project/log" 2> "$project/err"
  if [ "$(cat "$project/runs")" = x ]; then test-ok "$backend selector transition preserves scoped freshness"; else test-fail "$backend selector caused redundant rebuild"; fi
- test-step "$backend selects only inputs strictly newer than output"
+  test-step "$backend selects only inputs strictly newer than output"
+  printf changed > "$project/b"
  python3 - "$project" <<'PY'
 import os, sys
 root = sys.argv[1]
@@ -53,7 +54,8 @@ PY
  "${runner[@]}" -C "$project" ./multi-a > "$project/log" 2> "$project/err"
  printf './a\n./b\n' > "$project/expected"
  if cmp -s "$project/multi-selected" "$project/expected" && [ -f "$project/multi-b" ]; then test-ok "$backend missing sibling selects all inputs"; else test-fail "$backend multiple-output selection"; fi
- test-step "$backend compares against the oldest existing output"
+  test-step "$backend compares against the oldest existing output"
+  printf changed > "$project/a"
  python3 - "$project" <<'PYTIMES'
 import os, sys
 root = sys.argv[1]

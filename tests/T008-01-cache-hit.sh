@@ -75,14 +75,14 @@ test-step "environment changes invalidate the record"
 (
 	cd cache-hit
 	rm -rf .kame runs.log
-	cli_run -- --env CACHE_VALUE=one env-report
+	cli_run -- --allow-run --allow-env=CACHE_VALUE -f Makefile.kmk --env CACHE_VALUE=one env-report
 	cli_expect_status 0
-	cli_run -- --json --env CACHE_VALUE=one env-report
+	cli_run -- --json --allow-run --allow-env=CACHE_VALUE -f Makefile.kmk --env CACHE_VALUE=one env-report
 	cli_expect_status 0
 	cli_expect_event "$CLI_OUT" 'stdout' '.cached == true'
-	cli_run -- --env CACHE_VALUE=two env-report
+	cli_run -- --allow-run --allow-env=CACHE_VALUE -f Makefile.kmk --env CACHE_VALUE=two env-report
 	cli_expect_status 0
-	cli_run -- --json --env CACHE_VALUE=two env-report
+	cli_run -- --json --allow-run --allow-env=CACHE_VALUE -f Makefile.kmk --env CACHE_VALUE=two env-report
 	cli_expect_status 0
 	cli_expect_event "$CLI_OUT" 'stdout' '.cached == true'
 	if [ "$(run_count ./runs.log)" = 2 ]; then

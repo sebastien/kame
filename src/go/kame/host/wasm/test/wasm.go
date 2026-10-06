@@ -206,8 +206,12 @@ func TestPureExpressionUsesPortableEvaluator(t *testing.T) {
 	}
 	fromSource.Free(a)
 	requiredHost := wasm.EvaluatePure(a, "(read \"./input.txt\")")
-	if !requiredHost.HostNeeded { t.Error("host-backed pure expression did not report a host request") }
-	if requiredHost.Code != "HOST_REQUIRED" { t.Error("host-backed pure expression code was " + requiredHost.Code) }
+	if !requiredHost.HostNeeded {
+		t.Error("host-backed pure expression did not report a host request")
+	}
+	if requiredHost.Code != "HOST_REQUIRED" {
+		t.Error("host-backed pure expression code was " + requiredHost.Code)
+	}
 	requiredHost.Free(a)
 }
 
@@ -448,9 +452,10 @@ func TestRuntimeForwardsRuleRecipe(t *testing.T) {
 				runtime.Complete(next.Request, core.NewString(a, ""), diagnostic.Diagnostic{})
 			} else if next.Request.Kind == host.RequestCacheGet {
 				runtime.Complete(next.Request, core.Value{Kind: core.Nil}, diagnostic.Diagnostic{})
-			} else if next.Request.Kind == host.RequestReadFile && host.PayloadText(next.Request.Payload, host.FieldOp) == host.OpFileTimes {
-				items := []core.Value{{Kind: core.Int, Int: 1}}
-				runtime.Complete(next.Request, core.NewList(a, items), diagnostic.Diagnostic{})
+			} else if next.Request.Kind == host.RequestCachePut {
+				// Opaque accepted records are published without a node completion.
+			} else if next.Request.Kind == host.RequestReadFile && host.PayloadText(next.Request.Payload, host.FieldOp) == host.OpOutputContent {
+				runtime.Complete(next.Request, core.NewBytes(a, []byte("written")), diagnostic.Diagnostic{})
 			} else {
 				next.Request.Free(a)
 				t.Error("unexpected forwarded recipe request")

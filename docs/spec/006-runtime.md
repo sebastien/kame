@@ -113,32 +113,112 @@ request. There is no separate standalone-expression recipe syntax.
 Rendering may add dynamic dependency edges. If a newly discovered dependency is
 not current, rendering suspends and restarts for the latest generation after
 that dependency completes. Effects are committed only by execution, so a
-discarded render has no external effect. Once rendering converges, freshness is
-computed from declared and discovered dependencies. Rendering always precedes
-the final freshness decision in the initial implementation.
+discarded render has no external effect.
+
+A file rule is a function of its declared inputs and of the dependencies
+discovered while rendering and executing it. Naming an interpreter does not
+widen that set. `SHELL = kash`, `SHELL = /bin/bash`, a per-rule `shell`, and
+the implicit `/bin/sh -c` use one dependency rule.
+
+An unread environment variable is not a dependency. The process environment is
+not a fingerprint. A name becomes a dependency only when rendering or execution
+reads it, through `(env "NAME")`, a Kash `env.NAME` access, or the same
+operation reached from a definition. The recorded value is the value read, not
+the rest of the environment.
+
+The interpreter is an execution dependency, not a render input. Changing it
+requires execution. It does not by itself require rendering, and it does not
+add environment names. Rendered command text and yielded bytes are results, not
+dependencies. A later invocation must not render in order to decide whether to
+render.
+
+Rendering and execution append to the dependency set. A successful run persists
+that set with the outputs:
+
+- A header input or `@(expression)` result records the resolved file path set.
+- `(read PATH)`, `(render PATH)`, and a template include record that file.
+- `(wildcard PATTERN)` and any glob evaluated while rendering record the pattern
+  and the sorted member paths.
+- An environment read records the name and the value read.
+- A tool lookup records the tool name and the content digest of the resolved
+  executable.
+- Handing the recipe to an interpreter records that interpreter's identity:
+  `kash`, or the argv used.
+
+Order-only inputs stay out of the set unless a read or a normal edge upgrades
+them. A discovered file that is itself a build output is demanded before the
+result is reused. A rule with no declared or discovered dependency is always
+stale.
+
+A shell script that expands `$HOME` or opens a path never named in the recipe
+is not a Kame dependency. Kame records operations it evaluates. It does not
+infer reads inside an opaque shell script. Kash `env.NAME` is visible because
+it is a Kame operation, as specified in `017-kash.md`.
+
+## Content identity
+
+A regular file dependency is its canonical path and the SHA-256 of its
+contents. Size and modification time cannot prove that previously observed
+bytes remain unchanged. Modification time is not part of content identity.
+
+A missing path is a distinct identity. Appearance, disappearance, or replacement
+by a non-regular file invalidates. Content reads follow ordinary host symlink
+resolution; unreadable or non-regular content cannot prove reuse. A glob records
+the pattern and sorted membership; member content is consumed only when read
+or required. Existence and intentional metadata observations remain distinct.
+
+Each successful output is recorded the same way. The next invocation reuses it
+when that digest still matches. An external rewrite invalidates even when the
+new timestamp is older. A timestamp update that leaves the bytes alone does not.
+
+Engine hashing is incremental; current host transport buffers a whole file.
+
+## When to render
+
+Do not render when all of the following hold:
+
+- The rule has no `always` prefix and the invocation is not `--force`.
+- The recipe source that determines the dependency set is unchanged.
+- Every recorded file still has its recorded content digest.
+- Declared path sets and glob memberships are unchanged, and each member's
+  content digest matches.
+- Every recorded environment name still has the value that was read.
+- Every recorded tool still has the recorded executable content digest.
+- Every output exists and still has the content digest written by the successful
+  run.
+
+Otherwise render. A newly discovered dependency that is not current suspends
+rendering until it completes. A successful result replaces the record. A missing
+record renders once. Dry-run renders so the recipe remains visible.
+
+## When to execute
+
+Do not execute when the rendered recipe text is unchanged and the interpreter
+dependency is unchanged. Skipping the render implies both, so a fresh record
+does not start a process. If rendering ran and produced the same command text,
+and the interpreter dependency is unchanged, do not execute either. `always`
+and `--force` execute.
 
 Operations that cannot be deferred, including collected `shell`, are invalid in
 planning or rendering and return `PHASE_INVALID`.
 
 ## File Rules
 
-A file rule is fresh when:
+A file rule is fresh when the saved dependency set matches:
 
 - It has no `always` prefix.
+- It has at least one output, and every output's content digest matches the
+  successful run.
+- Every declared and discovered file input exists and its content digest matches.
+- Declared membership and recorded globs match.
 
-- It has at least one output.
-- Every output exists.
-- Every declared and discovered file input exists.
-- The oldest output modification time is not older than the newest input
-  modification time.
-
-Freshness is evaluated after dependency-discovering render. A file rule with no
-declared or discovered input is always stale.
+A missing record is evaluated after dependency-discovering render. A file rule
+with no declared or discovered dependency is always stale.
 
 A standalone `|` separates order-only prerequisites, for example
 `./out : ./input | prepare ./directory`. Both sections must finish before the
 recipe runs, and failures in either section block execution. Order-only inputs
-are excluded from timestamp freshness, cached-task content manifests and input
+are excluded from accepted content observations and input
 selectors such as `@<*`. An explicit expression read or a normal occurrence of
 the same dependency makes it a content dependency. Ordering alone does not
 satisfy the file-input requirement for freshness. Plans and graph inspection
@@ -239,7 +319,10 @@ including environment values in its diagnostic. A released instance can bind a
 new environment for a later root; unrelated roots retain their own environments.
 Native recipe retries and forwarded WASM recipes receive the same values.
 
-Cached-task execution fingerprints include the complete effective environment.
+Execution reuse records include authored environment assignments as explicit
+inputs and named environment reads as observations, not the complete ambient
+environment. Interpreter identity is the effective selection, independent of
+whether it was selected explicitly or implicitly.
 Plan and AST JSON expose authored assignments, without publishing the ambient
 environment. This surface scopes shell/Kash recipes and their prerequisite
 recipes. Direct `env` reads in recipe templates and structured recipes use the
@@ -259,13 +342,23 @@ as specified in 007/009; a recipe PATH assignment changes child command lookup.
 Assignments do not introduce undeclared Kame variables or perform evaluation
 during registration.
 
-File recipes with declared or inherited scoped values persist a fingerprint of
-the effective environment, rendered recipe and dependency paths. Records bind
-the fingerprint to the successful output timestamps, so changed settings,
-removed scope, missing records and externally replaced outputs require a rebuild.
-Unchanged scoped outputs skip execution when every file input is older. Hosts
-supply timestamps and opaque record storage; the portable runtime decides
-freshness. Records contain digests rather than environment values.
+Inherited environment values are what the child process receives. They are not
+dependencies until a read records the name. File freshness follows the
+dependency rule above: an unread inherited value does not invalidate, and a
+recorded environment read invalidates only when that value changes. Selecting a
+shell does not snapshot the process environment. Hosts supply resource bytes
+and states; the portable engine computes digests and decides freshness.
+Accepted file records validate both consumed inputs and physical output bytes;
+timestamps alone cannot prove reuse. Corrupt records are cache misses.
+Filesystem notifications first refresh the resource. Current consumers retain
+their accepted state while the engine validates dependencies bottom-up; reads
+and retained-root polling wait for that validation. Equal observed signatures
+preserve the consumer generation, including when an upstream recipe rebuilds
+to identical output bytes. Unavailable signatures cannot prove equality.
+Always/forced consumers still restart. In-flight host work uses cancellation-first
+invalidation rather than accepting a completion derived from an old snapshot.
+Records contain digests rather than
+unread environment values.
 The repository build
 uses compiler-bound artifact modes and target-independent generated metadata,
 so that separate A3 build-mode acceptance is covered by T013-05.
@@ -295,11 +388,25 @@ bytes is a separate operation used by `cat`.
 - Bare symbolic dependencies select rules before definitions with the same
   name; explicit definition evaluation remains available through `@(...)`.
 - A diamond dependency graph executes its shared node once.
-- Existing fresh file outputs are skipped; older or missing outputs rebuild.
+- Existing fresh file outputs are skipped; missing outputs and changed content
+  rebuild. A modification-time update that leaves the bytes alone does not.
+- A later invocation does not render or execute a fresh file rule when the saved
+  dependency set is unchanged, whether the interpreter is Kash or a shell.
+- An unread environment variable changing between invocations does not render
+  or execute. A read of one name invalidates when that value changes, and does
+  not invalidate when another name changes.
+- Changing file bytes without changing the modification time renders and
+  executes. Replacing an output's bytes invalidates even when the new timestamp
+  is older.
+- A changed discovered input, a changed declared-input membership, a removed
+  glob member, or a changed recipe source renders again. Changing only the
+  interpreter executes again and does not add environment dependencies.
+  `always` and `--force` render and execute.
 - `always` file outputs rerun on sequential roots and invocations, while shared
   diamond dependencies execute once per root; artifact/output verification remains.
 - A rule with a dynamic body dependency renders before its first freshness
-  decision; plan reports `unknown` before that render.
+  decision; plan reports `unknown` before that render. A later invocation uses
+  the saved dependency set and does not render when those inputs are unchanged.
 - Independent prerequisites can execute concurrently while one recipe remains
   one shell process.
 - Dynamic dependencies discovered during render are scheduled before the final
@@ -309,8 +416,9 @@ bytes is a separate operation used by `cat`.
 - Successful commands that omit a declared output fail with `OUTPUT_MISSING`.
 - Scoped recipe environments inherit through prerequisites, apply local/last
   overrides, isolate roots, and reject conflicting active shared contexts.
-- Equivalent assignment order shares a prerequisite; changing inherited values
-  invalidates a cached task while unchanged values reuse its record.
+- Equivalent assignment order shares a prerequisite. Changing a recorded
+  environment dependency invalidates a cached task; an unread inherited value
+  does not. Unchanged recorded values reuse the record.
 - Bare tasks run every time; cached task syntax remains distinguishable.
 - Whitespace prerequisite groups schedule independently; comma-separated
   groups wait for all prior prerequisites, preserve failure blocking, and retain
@@ -326,21 +434,19 @@ bytes is a separate operation used by `cat`.
 ## Newer-input selection
 
 In a file recipe, `@<?` is the list of unique normal declared file inputs whose
-modification times are strictly newer than the oldest declared output. If any
-output is absent, it selects all normal file inputs. It preserves input order
-and authored path spelling; order-only prerequisites and named tasks are omitted.
-A recipe with no normal file inputs gets an empty list. Forced execution does
-not invent newer inputs. Input planning rejects this selector with `PHASE_INVALID`;
-a task recipe or evaluation without a file-rule frame gets `SEL_NO_CONTEXT`.
+content digest differs from the digest recorded for the successful run. If any
+output is absent, or no record exists, it selects all normal file inputs. It
+preserves input order and authored path spelling; order-only prerequisites and
+named tasks are omitted. A recipe with no normal file inputs gets an empty list.
+Forced execution does not invent changed inputs. Input planning rejects this
+selector with `PHASE_INVALID`; a task recipe or evaluation without a file-rule
+frame gets `SEL_NO_CONTEXT`.
 
 The snapshot is taken after prerequisites finish and before rendering; repeated
-references, including references through definitions, share it. Hosts supply
-nanosecond timestamps through the same metadata transport used for freshness.
-For scoped file contexts using this selector, the persisted fingerprint covers
-the authored combined source, configuration, invocation arguments, shell,
-environment and dependency paths rather than the changing rendered subset.
-Consequently a successful build may skip its next invocation; changing unrelated
-authored source can conservatively rebuild a scoped artifact in that source.
+references, including references through definitions, share it. Identity is the
+content digest from Content identity, not modification time. A successful build
+may skip its next invocation. Changing the recipe source renders again so a new
+read can be discovered. An unread environment value does not.
 
 Make's `$?` maps to `@<?`. Pattern stems use explicit captures, for example
 `./build/{stem}.o` and `@(stem)` in its recipe. Output and first-input directories

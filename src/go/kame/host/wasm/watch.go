@@ -114,7 +114,19 @@ func (r *Runtime) WatchStateJSON() PureResult {
 		e.Str("name")
 		e.Str(keys[i].Name)
 		if keys[i].Kind == core.ResourceFile {
+			e.Str("metadata")
+			e.Bool(r.Program.ResourceMetadataObserved(keys[i]))
 			node := r.Program.Engine.Lookup(keys[i])
+			if node != nil && node.Current && node.Signature.Mode == core.SignatureContent {
+				const hex = "0123456789abcdef"
+				var bytes [64]byte
+				for j := range node.Signature.Digest {
+					bytes[j*2] = hex[node.Signature.Digest[j]>>4]
+					bytes[j*2+1] = hex[node.Signature.Digest[j]&15]
+				}
+				e.Str("signature")
+				e.Str(string(bytes[:]))
+			}
 			if node != nil && node.Current {
 				e.Str("missing")
 				e.Bool(node.Latest.Kind == core.Nil)

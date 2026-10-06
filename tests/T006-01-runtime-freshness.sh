@@ -36,20 +36,20 @@ test-step "missing and fresh outputs"
 	fi
 )
 
-test-step "an older output rebuilds"
+test-step "output metadata changes preserve accepted content"
 (
 	cd freshness
 	set_mtime ./out.txt 1000000000
 	cli_run -- ./out.txt
 	cli_expect_status 0
-	if [ "$(run_count ./runs.log)" = 2 ]; then
-		test-ok "older output rebuilt"
+	if [ "$(run_count ./runs.log)" = 1 ]; then
+		test-ok "older output with identical bytes was reused"
 	else
 		test-fail "older output runs: $(run_count ./runs.log)"
 	fi
 )
 
-test-step "a newer input rebuilds"
+test-step "changed input bytes rebuild"
 (
 	cd freshness
 	cli_run -- ./out.txt
@@ -58,7 +58,7 @@ test-step "a newer input rebuilds"
 	set_mtime ./in.txt 2000000000
 	cli_run -- ./out.txt
 	cli_expect_status 0
-	if [ "$(run_count ./runs.log)" = 3 ]; then
+	if [ "$(run_count ./runs.log)" = 2 ]; then
 		test-ok "newer input rebuilt"
 	else
 		test-fail "newer input runs: $(run_count ./runs.log)"
@@ -70,7 +70,7 @@ test-step "--force rebuilds a fresh output"
 	cd freshness
 	cli_run -- --force ./out.txt
 	cli_expect_status 0
-	if [ "$(run_count ./runs.log)" = 4 ]; then
+	if [ "$(run_count ./runs.log)" = 3 ]; then
 		test-ok "force rebuilt the fresh output"
 	else
 		test-fail "force runs: $(run_count ./runs.log)"
@@ -83,7 +83,7 @@ test-step "a missing output rebuilds"
 	rm -f ./out.txt
 	cli_run -- ./out.txt
 	cli_expect_status 0
-	if [ "$(run_count ./runs.log)" = 5 ]; then
+	if [ "$(run_count ./runs.log)" = 4 ]; then
 		test-ok "missing output rebuilt"
 	else
 		test-fail "missing output runs: $(run_count ./runs.log)"

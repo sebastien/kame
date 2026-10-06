@@ -83,7 +83,17 @@ const run = (source, service) => {
     if (state === 1) {
       requests++;
       const request = requestHandle();
-      if (requestKind() === 7) {
+      if (requestKind() === 27) {
+        const name = payloadText();
+        if (!existsSync(name)) {
+          if (exports.kame_wasm_complete_nil(handle, request) !== 0) throw new Error('missing file content completion failed');
+        } else {
+          const data = readFileSync(name);
+          const pointer = alloc(data.length || 1);
+          new Uint8Array(exports.memory.buffer, pointer, data.length).set(data);
+          if (exports.kame_wasm_complete_bytes(handle, request, pointer, data.length) !== 0) throw new Error('file content completion failed');
+        }
+      } else if (requestKind() === 7) {
         const [pointer, length] = write(JSON.stringify(existsSync(payloadText())));
         if (exports.kame_wasm_complete_json(handle, request, pointer, length) !== 0) throw new Error('file existence completion failed');
       } else service(handle, request);

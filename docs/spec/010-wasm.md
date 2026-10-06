@@ -212,6 +212,17 @@ for the earlier individual existence request. Embedding hosts must service
 kind 20 and cache requests when forwarding file rules. These metadata checks do
 not evaluate a user library read or broaden expression grants.
 
+External file observations use ABI kind 27 (`file-content`), with a canonical
+path payload. Complete with bytes for a readable regular file, nil for a missing
+path, false for a present non-regular path, or true for a present regular file
+whose bytes could not be read. A stat failure other than absence is a diagnostic.
+The engine hashes the transported bytes; neither boolean state supplies a
+reusable signature. Kind 29 (`output-content`) uses the same protocol for declared
+build outputs, under internal build authority rather than expression read grants.
+Kind 28 (`tool-content`) uses the same protocol for resolved
+executable dependencies, without requiring an additional user read grant.
+Embedding hosts must service these requests as well as user file reads.
+
 Structured process requests distinguish direct argv (ABI kind 13, a JSON argv
 array) from pipelines (kind 14, a JSON array of stage argv arrays) and redirected
 configured graphs (kind 15, a JSON object with `stages`, `input`, `output`,

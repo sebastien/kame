@@ -69,7 +69,10 @@ The entire rendered script is parsed before any of its statements execute.
 Statements share rule inputs, outputs, captures, build definitions and invocation
 arguments. Each rule joins its asynchronous work before verifying file outputs
 or publishing completion. Timeouts cover the whole recipe; retries start a fresh
-script invocation. Interpreter identity participates in cache and file freshness.
+script invocation. Interpreter identity is an execution dependency, as specified
+in `006-runtime.md`. It participates in cache and file freshness only as that
+dependency. Selecting Kash or a shell does not make the recipe depend on the
+process environment. Environment dependencies are the names actually read.
 
 `(kash TEXT)` parses text without running commands and returns an immutable,
 invocation-owned callable that retains its construction scope:

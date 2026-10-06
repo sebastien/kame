@@ -6,5 +6,5 @@ task report : ./config.txt
 task default : report
 
 task env-report :
-	echo "env=${CACHE_VALUE:-unset}" >> ./runs.log
-	@(out "env=${CACHE_VALUE:-unset}\n")
+	echo 'env=@(env "CACHE_VALUE")' >> ./runs.log
+	@(out (cat "env=" (env "CACHE_VALUE") "\n"))

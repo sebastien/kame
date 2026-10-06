@@ -50,8 +50,14 @@ A task fingerprint is a canonical binary encoding of:
 - Shell path, working directory, and explicit execution options affecting the
   result.
 
-The canonical encoding begins with ASCII `LMKF` and byte version `1`. Each value
-uses a one-byte tag followed by payload:
+Tasks and file rules use the engine's accepted `SignatureRecord`, encoded with
+the `KSR1` header, implementation signature, input/output observation sets, and
+a trailing SHA-256 checksum. The surrounding task record retains replayable
+stdout/stderr and timing. Each observation names a canonical resource, its
+observed aspect, and a typed signature. Duplicate, unavailable, corrupt, or
+truncated observations cannot prove reuse.
+
+Canonical value encoding uses a one-byte tag followed by payload:
 
 | Tag | Value | Payload |
 | --- | --- | --- |
@@ -66,9 +72,7 @@ uses a one-byte tag followed by payload:
 | 9 | resource reference | kind string followed by canonical-name string |
 
 NaN values use one canonical quiet-NaN bit pattern and negative zero is encoded
-as positive zero. Fingerprint sections are records with fixed keys `format`,
-`task`, `captures`, `rule`, `inputs`, `dynamic`, `operations`, and `execution`;
-missing sections encode as nil. Record fields are sorted by raw UTF-8 key bytes.
+as positive zero. Value record fields are sorted by raw UTF-8 key bytes.
 No fingerprint depends on pointers, map iteration order, build timestamps, or
 formatter whitespace.
 
@@ -84,42 +88,46 @@ its prerequisite syntax.
 
 ## Dependency Fingerprints
 
-- File dependency: canonical path, kind, size, modification time, and SHA-256
-  content digest.
+- File dependency: canonical path and SHA-256 content digest. Kind and size may
+  accompany the digest. Modification time is not part of the identity.
 - Missing path dependency: canonical path and explicit missing marker.
 
-Only a regular file is a cacheable present file. Its fingerprint uses `Lstat`,
-so a symlink is not treated as the file it points to, and symlinks are not
-followed. The present-file payload is the existing tagged 32-byte digest. The
-digest's kind byte is `1` for a regular file, followed by size, modification
-time, and an incremental content hash.
-
-A missing path is `Lstat` returning not-found. After the canonical path, the
-manifest stores one `0` byte and no content digest. A later appearance of that
-path is a different fingerprint and invalidates the task. A dangling symlink is
-not missing.
-
-Directories, symlinks, fifos, sockets, devices, and any other non-regular type
-are uncacheable. So is any stat, open, or read error other than not-found. The
-task still executes, no successful record is written, and verbose mode emits
-one `CACHE_UNUSABLE` warning. Those inputs never share the regular-file marker.
-- Glob dependency: pattern plus sorted matched path and file fingerprints.
+Content observations follow the host's ordinary read semantics, including
+symlinks resolving to readable regular files. Resolved bytes determine identity.
+Metadata alone never proves content equality. Non-regular or unreadable content
+has an unavailable signature, not the missing marker. An existence-only read
+does not consume content; intentional metadata reads have their own aspect.
+- Glob dependency: pattern plus sorted matched path membership. Matched file
+  contents become dependencies only when explicitly required or read.
 - Definition dependency: canonical encoded current value and its dependency
   fingerprints.
 - Cached task dependency: successful record fingerprint.
-- Environment dependency: variable name plus present/missing marker and value.
-- Recipe execution: shell identity, script, working directory, complete process
-  environment, timeout, retry settings, and invoked operation versions.
+- Environment dependency: a name that rendering or execution actually read, plus
+  a present/missing marker and the value read. Unread names are not dependencies.
+- Recipe execution: interpreter identity, rendered script, working directory,
+  recorded environment dependencies, timeout, retry settings, and invoked
+  operation versions. The process environment is not fingerprinted wholesale.
 
 An ordinary bare task is never a cacheable dependency. A cached task depending
 on one is therefore always stale.
 
-Hashing is incremental and never requires loading a complete file into memory.
-A dependency manifest is limited to 16 MiB of encoded entries. That cap applies
-while constructing the identity, rule text, nested definition values, and the
-final encoding; construction does not allocate past the cap and releases the
-partial buffer on overflow. Exceeding that limit makes the task uncacheable for
-that run and emits `CACHE_UNUSABLE` as a warning; execution itself may continue.
+Engine hashing is incremental; current host content transport buffers a whole
+file. Accepted records are limited to 16 MiB of encoded observations. Exceeding
+that limit makes the task uncacheable for that run and emits `CACHE_UNUSABLE` as
+a warning; execution itself may continue.
+
+Records are published after execution, so they include execution-time reads.
+Reuse restores discovered resource edges and validates through the actual host,
+not a forwarding runtime's in-memory filesystem. The cache miss lock remains
+held through validation and successful publication. Logs are replayed only after
+the accepted signature record matches.
+Restoration is speculative: a failed old dependency forces a cache miss rather
+than failing the new invocation. On a miss, restored edges and observations are
+discarded before execution; the next record contains only the new branch's reads.
+Persisted definition observations use authored names, not environment-snapshot
+graph identities. Validation rebinds each name to the current invocation's
+environment and explicit overrides, then consumes its published value signature.
+Unread ambient changes therefore do not invalidate otherwise equal definitions.
 
 ## Records
 
@@ -187,13 +195,13 @@ These changes must cause a miss:
 - Declared dependency content or identity.
 - Dynamic dependency set or content.
 - Invoked operation version.
-- Explicit shell, cwd, environment dependency, timeout, or retry settings.
-- Any value in the complete process environment used by the recipe. This includes
-  inherited and rule-local `; env` assignments, after overrides and canonical
-  ordering.
+- Explicit shell, cwd, timeout, or retry settings.
+- A recorded environment dependency's name or value. An unread inherited value
+  does not invalidate. Selecting a shell does not snapshot the process
+  environment.
 
 The process host has no implicit ambient environment. Kame display options
-do not participate.
+do not participate. File and environment identity follow `006-runtime.md`.
 
 ## Limits
 
@@ -211,8 +219,8 @@ share the host backend's limit.
 - Two template capture values create distinct cache identities.
 - Rule body, declared file content, glob membership, environment dependency,
   operation version, and shell changes each invalidate a record.
-- File mtime changes without content changes retain the same content digest but
-  still recompute safely.
+- A modification-time change that leaves the bytes alone does not invalidate.
+  A content change invalidates even when the modification time is unchanged.
 - A bare task dependency prevents a cache hit.
 - A failed task reruns and does not replace an earlier successful record for a
   different fingerprint.

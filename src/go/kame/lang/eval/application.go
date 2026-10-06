@@ -122,6 +122,9 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	if context.OperationObserver != nil {
 		context.OperationObserver(context.ResolverState, operation.Name, operation.Version)
 	}
+	if context.Engine != nil {
+		context.Engine.Observe(core.ResourceKey{Kind: core.ResourceOperation, Name: operation.Name}, core.ValueSignature(core.Value{Kind: core.String, Text: operation.Version}))
+	}
 	for i := range operation.Capabilities {
 		if !context.allowed(operation.Capabilities[i]) {
 			message := "`"+operation.Name+"` requires a capability that was not granted"

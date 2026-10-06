@@ -31,10 +31,14 @@ func TestForwardedDeclaredFileInputsUseEmbeddingFilesystem(t *testing.T) {
 			next := r.Step()
 			if next.OK {
 				requests++
-				if next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, "op") != host.OpExists {
-					t.Error("declared file did not request host existence")
+				if next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, "op") != host.OpFileContent {
+					t.Error("declared file did not request host content")
 				}
-				r.Complete(next.Request, core.Value{Kind: core.Bool, Bool: scenario == 0}, diagnostic.Diagnostic{})
+				value := core.Value{Kind: core.Nil}
+				if scenario == 0 {
+					value = core.NewBytes(a, []byte("input"))
+				}
+				r.Complete(next.Request, value, diagnostic.Diagnostic{})
 				next.Request.Free(a)
 			}
 			probe := r.Result()

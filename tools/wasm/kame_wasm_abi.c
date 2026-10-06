@@ -311,6 +311,9 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       if (kame_wasm_string_eq(op, "tool-exists")) return 19u;
       if (kame_wasm_string_eq(op, "output-exists")) return 17u;
       if (kame_wasm_string_eq(op, "file-times")) return 20u;
+      if (kame_wasm_string_eq(op, "file-content")) return 27u;
+      if (kame_wasm_string_eq(op, "tool-content")) return 28u;
+      if (kame_wasm_string_eq(op, "output-content")) return 29u;
       if (kame_wasm_string_eq(op, "exists")) return 7u;
       if (kame_wasm_string_eq(op, "stat")) return 5u;
       if (kame_wasm_string_eq(op, "wildcard")) return 6u;

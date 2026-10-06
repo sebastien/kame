@@ -161,9 +161,182 @@ KMK
  if [ "$(cat "$project/file-runs")" = xxxx ] && [ "$(cat "$project/output")" = ambient ]; then test-ok "$backend replaced output invalidates context stamp"; else test-fail "$backend replacement context freshness"; fi
  test-step "$backend rebuilds with a corrupt context record"
  if [ "$backend" = native ]; then record_dir="$project/.kame/cache/file-context"; else record_dir="$project/.kame/cache/host"; fi
- for record in "$record_dir"/*; do if [ "$(wc -c < "$record")" -eq 32 ]; then printf corrupt > "$record"; fi; done
+  for record in "$record_dir"/*; do if [ -f "$record" ]; then printf corrupt > "$record"; fi; done
  MODE=ambient "${runner[@]}" -C "$project" ./output > "$project/out" 2> "$project/err"
- if [ "$(cat "$project/file-runs")" = xxxxx ]; then test-ok "$backend corrupt context stamp rebuilds"; else test-fail "$backend corrupt context accepted"; fi
+  if [ "$(cat "$project/file-runs")" = xxxxx ]; then test-ok "$backend corrupt context stamp rebuilds"; else test-fail "$backend corrupt context accepted"; fi
+  test-step "$backend validates file bytes rather than timestamps"
+  signatures="$project/signatures"
+  mkdir -p "$signatures"
+  cat > "$signatures/Makefile.kmk" <<'KMK'
+SHELL = /bin/sh
+VALUE ?= baseline
+CONTENT = (text (read "./definition-input"))
+./output : ./input
+	cp @< @>; printf x >> runs
+./override : ./input
+	printf %s @(VALUE) > @>
+./discovered : ./input ; [shell: kash]
+	@(yield (text (read "./extra")))
+./constant : ./input
+	printf fixed > @>; printf x >> child-runs
+./downstream : ./constant
+	cp @< @>; printf x >> parent-runs
+task read-task : ./input ; [shell: kash]
+	printf %s \@(text (read "./extra")) > task-output
+	printf x >> task-runs
+task branch-task : ; [shell: kash]
+	printf %s \@(text (read (text (read "./selection")))) > branch-output
+	printf x >> branch-runs
+./branch-file : ; [shell: kash]
+	printf %s \@(text (read (text (read "./selection")))) > branch-file
+	printf x >> branch-file-runs
+task definition-task : ; [shell: kash]
+	printf %s \@(CONTENT) > definition-output
+	printf x >> definition-runs
+./definition-file : ; [shell: kash]
+	printf %s \@(CONTENT) > definition-file
+	printf x >> definition-file-runs
+KMK
+  printf A > "$signatures/input"
+  printf A > "$signatures/extra"
+  "${runner[@]}" -C "$signatures" ./output > "$project/out" 2> "$project/err"
+  touch "$signatures/input"
+  UNREAD_SIGNATURE_ENV=changed "${runner[@]}" -C "$signatures" ./output > "$project/out" 2> "$project/err"
+  if [ "$(cat "$signatures/runs")" = x ]; then test-ok "$backend metadata touches and unread environment preserve reuse"; else test-fail "$backend metadata or unread environment reran recipe"; fi
+  cp -p "$signatures/input" "$signatures/stamp"
+  printf B > "$signatures/input"
+  touch -r "$signatures/stamp" "$signatures/input"
+  "${runner[@]}" -C "$signatures" ./output > "$project/out" 2> "$project/err"
+  if [ "$(cat "$signatures/runs")" = xx ] && [ "$(cat "$signatures/output")" = B ]; then test-ok "$backend preserved-metadata input edits rebuild"; else test-fail "$backend preserved-metadata input edit stayed fresh"; fi
+  cp -p "$signatures/output" "$signatures/stamp"
+  printf X > "$signatures/output"
+  touch -r "$signatures/stamp" "$signatures/output"
+  "${runner[@]}" -C "$signatures" ./output > "$project/out" 2> "$project/err"
+  if [ "$(cat "$signatures/runs")" = xxx ] && [ "$(cat "$signatures/output")" = B ]; then test-ok "$backend preserved-metadata output tampering rebuilds"; else test-fail "$backend tampered output stayed fresh"; fi
+  test-step "$backend reuses consumers when generated input results are equal"
+  "${runner[@]}" -C "$signatures" ./downstream > "$project/out" 2> "$project/err"
+  printf D > "$signatures/input"
+  "${runner[@]}" -C "$signatures" ./downstream > "$project/out" 2> "$project/err"
+  if [ "$(cat "$signatures/child-runs")" = xx ] && [ "$(cat "$signatures/parent-runs")" = x ]; then test-ok "$backend equal generated results suppress downstream recipe execution"; else test-fail "$backend consumer tracked producer inputs instead of results"; fi
+  test-step "$backend watch suppresses unchanged downstream generations"
+  "${runner[@]}" --watch -C "$signatures" ./downstream > "$project/equal-watch-out" 2> "$project/equal-watch-err" &
+  watch_pid=$!
+  for attempt in {1..100}; do
+    if rg -q '\[./downstream\] complete \(' "$project/equal-watch-err"; then break; fi
+    sleep 0.05
+  done
+  printf F > "$signatures/input"
+  for attempt in {1..100}; do
+    if [ "$(cat "$signatures/child-runs")" = xxx ] && [ "$(rg -c '\[./constant\] complete \(' "$project/equal-watch-err")" -ge 2 ]; then break; fi
+    sleep 0.05
+  done
+  kill -TERM "$watch_pid" 2>/dev/null || true
+  wait "$watch_pid" 2>/dev/null || true
+  if [ "$(cat "$signatures/child-runs")" = xxx ] && [ "$(cat "$signatures/parent-runs")" = x ] && [ "$(rg -c '\[./downstream\] started' "$project/equal-watch-err")" = 1 ]; then test-ok "$backend equal result preserved the downstream generation"; else test-fail "$backend equal result restarted a downstream generation"; fi
+  test-step "$backend validates consumed override values"
+  KAME_VALUE=first "${runner[@]}" -C "$signatures" ./override > "$project/out" 2> "$project/err"
+  KAME_VALUE=second "${runner[@]}" -C "$signatures" ./override > "$project/out" 2> "$project/err"
+  if [ "$(cat "$signatures/override")" = second ]; then test-ok "$backend consumed override changes rebuild"; else test-fail "$backend consumed override stayed fresh"; fi
+  test-step "$backend restores execution-time read observations"
+  "${runner[@]}" -C "$signatures" ./discovered > "$project/out" 2> "$project/err"
+  cp -p "$signatures/extra" "$signatures/stamp"
+  printf B > "$signatures/extra"
+  touch -r "$signatures/stamp" "$signatures/extra"
+  "${runner[@]}" -C "$signatures" ./discovered > "$project/out" 2> "$project/err"
+  if [ "$(cat "$signatures/discovered")" = B ]; then test-ok "$backend execution-time read bytes invalidate reuse"; else test-fail "$backend execution-time read stayed fresh"; fi
+  test-step "$backend warm watch restores discovered edges and notices byte edits"
+  "${runner[@]}" --watch -C "$signatures" ./discovered > "$project/watch-out" 2> "$project/watch-err" &
+  watch_pid=$!
+  for attempt in {1..100}; do
+    if rg -q 'complete \(' "$project/watch-err"; then break; fi
+    sleep 0.05
+  done
+  cp -p "$signatures/extra" "$signatures/stamp"
+  printf C > "$signatures/extra"
+  touch -r "$signatures/stamp" "$signatures/extra"
+  for attempt in {1..100}; do
+    if [ "$(cat "$signatures/discovered")" = C ]; then break; fi
+    sleep 0.05
+  done
+  kill -TERM "$watch_pid" 2>/dev/null || true
+  wait "$watch_pid" 2>/dev/null || true
+  if [ "$(cat "$signatures/discovered")" = C ]; then test-ok "$backend warm watch tracks restored execution-time reads"; else test-fail "$backend warm watch lost discovered dependency"; fi
+  test-step "$backend cached tasks validate post-execution observations"
+  "${runner[@]}" -C "$signatures" read-task > "$project/out" 2> "$project/err"
+  touch "$signatures/input"
+  UNREAD_SIGNATURE_ENV=task-change "${runner[@]}" -C "$signatures" read-task > "$project/out" 2> "$project/err"
+  if [ "$(cat "$signatures/task-runs")" = x ]; then test-ok "$backend task reuse ignores metadata touches and unread environment"; else test-fail "$backend task reuse hashed unread inputs"; fi
+  cp -p "$signatures/extra" "$signatures/stamp"
+  printf D > "$signatures/extra"
+  touch -r "$signatures/stamp" "$signatures/extra"
+  "${runner[@]}" -C "$signatures" read-task > "$project/out" 2> "$project/err"
+  if [ "$(cat "$signatures/task-runs")" = xx ] && [ "$(cat "$signatures/task-output")" = D ]; then test-ok "$backend task execution-time read invalidates cache"; else test-fail "$backend task execution-time read was not persisted"; fi
+  test-step "$backend warm task watch restores execution-time dependencies"
+  "${runner[@]}" --watch -C "$signatures" read-task > "$project/task-watch-out" 2> "$project/task-watch-err" &
+  watch_pid=$!
+  for attempt in {1..100}; do
+    if rg -q 'complete \(' "$project/task-watch-err"; then break; fi
+    sleep 0.05
+  done
+  cp -p "$signatures/extra" "$signatures/stamp"
+  printf E > "$signatures/extra"
+  touch -r "$signatures/stamp" "$signatures/extra"
+  for attempt in {1..100}; do
+    if [ "$(cat "$signatures/task-output")" = E ] && [ "$(cat "$signatures/task-runs")" = xxx ]; then break; fi
+    sleep 0.05
+  done
+  kill -TERM "$watch_pid" 2>/dev/null || true
+  wait "$watch_pid" 2>/dev/null || true
+  if [ "$(cat "$signatures/task-output")" = E ] && [ "$(cat "$signatures/task-runs")" = xxx ]; then test-ok "$backend warm task watch tracks accepted execution reads"; else test-fail "$backend warm task watch lost execution reads"; fi
+  test-step "$backend cache misses discard obsolete branch observations"
+  for target in branch-task ./branch-file; do
+    rm -f "$signatures/left"
+    printf L > "$signatures/left"
+    printf R > "$signatures/right"
+    printf ./left > "$signatures/selection"
+    "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
+    rm "$signatures/left"
+    printf ./right > "$signatures/selection"
+    "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
+    "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
+    printf obsolete > "$signatures/left"
+    "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
+  done
+  if [ "$(cat "$signatures/branch-output")" = R ] && [ "$(cat "$signatures/branch-file")" = R ] && [ "$(cat "$signatures/branch-runs")" = xx ] && [ "$(cat "$signatures/branch-file-runs")" = xx ]; then test-ok "$backend file and task records retain only the executed branch"; else test-fail "$backend rejected reuse retained obsolete branch reads"; fi
+  test-step "$backend restores execution-time definitions in the current snapshot"
+  printf one > "$signatures/definition-input"
+  for target in definition-task ./definition-file; do
+    "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
+    UNREAD_SIGNATURE_ENV=definition-change "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
+  done
+  if [ "$(cat "$signatures/definition-runs")" = x ] && [ "$(cat "$signatures/definition-file-runs")" = x ]; then test-ok "$backend unread environment does not change accepted definition identity"; else test-fail "$backend execution-time definition could not be reused"; fi
+  printf two > "$signatures/definition-input"
+  for target in definition-task ./definition-file; do
+    "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
+    "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
+  done
+  if [ "$(cat "$signatures/definition-output")" = two ] && [ "$(cat "$signatures/definition-file")" = two ] && [ "$(cat "$signatures/definition-runs")" = xx ] && [ "$(cat "$signatures/definition-file-runs")" = xx ]; then test-ok "$backend definition reads invalidate and then reuse"; else test-fail "$backend definition observations did not follow current bytes"; fi
+  test-step "$backend warm watch restores definition resource edges"
+  "${runner[@]}" --watch -C "$signatures" definition-task > "$project/definition-watch-out" 2> "$project/definition-watch-err" &
+  watch_pid=$!
+  for attempt in {1..100}; do
+    if rg -q 'complete \(' "$project/definition-watch-err"; then break; fi
+    sleep 0.05
+  done
+  printf three > "$signatures/definition-input"
+  for attempt in {1..100}; do
+    if [ "$(cat "$signatures/definition-output")" = three ] && [ "$(cat "$signatures/definition-runs")" = xxx ]; then break; fi
+    sleep 0.05
+  done
+  kill -TERM "$watch_pid" 2>/dev/null || true
+  wait "$watch_pid" 2>/dev/null || true
+  if [ "$(cat "$signatures/definition-output")" = three ] && [ "$(cat "$signatures/definition-runs")" = xxx ]; then test-ok "$backend warm definition cache hit retains file reads"; else test-fail "$backend warm definition watch lost resource interest"; fi
+  test-step "$backend restores consumed execution-time definition overrides"
+  for value in first second; do
+    KAME_CONTENT="$value" "${runner[@]}" -C "$signatures" definition-task > "$project/out" 2> "$project/err"
+    KAME_CONTENT="$value" UNREAD_SIGNATURE_ENV=override-change "${runner[@]}" -C "$signatures" definition-task > "$project/out" 2> "$project/err"
+  done
+  if [ "$(cat "$signatures/definition-output")" = second ] && [ "$(cat "$signatures/definition-runs")" = xxxxx ]; then test-ok "$backend execution-time overrides invalidate only when consumed values change"; else test-fail "$backend execution-time override restoration was stale or nonreusable"; fi
  test-step "$backend inherits through dynamically discovered file producers"
  MODE=ambient "${runner[@]}" -C "$project" dynamic-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/dynamic-log")" = dynamic ]; then test-ok "$backend dynamic file producer inherits environment"; else test-fail "$backend dynamic producer environment"; fi

@@ -316,6 +316,20 @@ func (c *Context) Value(key core.ResourceKey) core.CurrentValue {
 	return current
 }
 
+// Observe records a host read using the same path identity as graph edges.
+func (c *Context) Observe(key core.ResourceKey, aspect core.ObservationAspect, signature core.Signature) {
+	if c.Engine == nil {
+		return
+	}
+	resourcePath := ""
+	if key.Kind == core.ResourceFile {
+		resourcePath = canonicalPath(c.Run, c.Cwd, key.Name)
+		key.Name = resourcePath
+	}
+	c.Engine.ObserveAspect(key, aspect, signature)
+	mem.FreeString(c.Run, resourcePath)
+}
+
 // Submit queues an owned request and records its generated ID on the active
 // engine node. The host completes it using the request correlation data.
 func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {

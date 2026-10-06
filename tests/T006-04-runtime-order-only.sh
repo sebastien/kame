@@ -13,13 +13,14 @@ for backend in native wasm; do
  mkdir -p "$project"
  if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
  printf source > "$project/input"
+ printf ordered > "$project/ordered-source"
  cat > "$project/Makefile.kmk" <<'KMK'
 ./out : ./input | prepare ./ordered
 	cat @<* > @>; printf x >> runs
 prepare :
 	printf p >> prepares
-./ordered : ./input
-	printf ordered > @>
+./ordered : ./ordered-source
+	cat @< > @>
 task cached : ./input | prepare ./ordered
 	printf c >> cache-runs
 ./read-out : ./input | ./ordered
@@ -40,30 +41,33 @@ KMK
  "${runner[@]}" -C "$project" ./out > "$project/log" 2> "$project/err"
  if cmp -s "$project/input" "$project/out" && [ "$(cat "$project/runs")" = x ] && [ "$(cat "$project/prepares")" = pp ] && [ -f "$project/ordered" ]; then test-ok "$backend order-only work runs before a fresh artifact"; else test-fail "$backend order-only scheduling or selector"; fi
  test-step "$backend ignores newer order-only timestamps"
- printf changed > "$project/ordered"
+ printf changed > "$project/ordered-source"
  "${runner[@]}" -C "$project" ./out > "$project/log" 2> "$project/err"
  if [ "$(cat "$project/runs")" = x ]; then test-ok "$backend order-only changes leave file fresh"; else test-fail "$backend order-only timestamp rebuilt artifact"; fi
  test-step "$backend excludes order-only values and bare tasks from cache identity"
  "${runner[@]}" -C "$project" cached > "$project/log" 2> "$project/err"
- printf another > "$project/ordered"
+ printf another > "$project/ordered-source"
  "${runner[@]}" -C "$project" cached > "$project/log" 2> "$project/err"
  if [ "$(cat "$project/cache-runs")" = c ]; then test-ok "$backend order-only tasks and content preserve cache"; else test-fail "$backend order-only cache identity"; fi
  test-step "$backend upgrades explicit reads to content dependencies"
  "${runner[@]}" -C "$project" ./read-out > "$project/log" 2> "$project/err"
-	printf consumed > "$project/ordered"
-	touch -d '2030-01-01 00:00:00 UTC' "$project/ordered"
+	printf consumed > "$project/ordered-source"
  "${runner[@]}" -C "$project" ./read-out > "$project/log" 2> "$project/err"
  if [ "$(cat "$project/read-runs")" = rr ] && [ "$(cat "$project/read-out")" = consumed ]; then test-ok "$backend explicit read dominates ordering"; else test-fail "$backend order-only read upgrade"; fi
  test-step "$backend upgrades cached explicit reads to content dependencies"
  "${runner[@]}" -C "$project" read-cached > "$project/log" 2> "$project/err"
- printf cached-consumed > "$project/ordered"
+ printf cached-consumed > "$project/ordered-source"
  "${runner[@]}" -C "$project" read-cached > "$project/log" 2> "$project/err"
  if [ "$(cat "$project/cached-read-runs")" = qq ] && [ "$(cat "$project/cached-read")" = cached-consumed ]; then test-ok "$backend cached read dominates ordering"; else test-fail "$backend cached order-only read upgrade"; fi
  test-step "$backend normal duplicates dominate order-only occurrences"
  "${runner[@]}" -C "$project" ./duplicate > "$project/log" 2> "$project/err"
- printf duplicate > "$project/ordered"
+ printf duplicate > "$project/ordered-source"
  "${runner[@]}" -C "$project" ./duplicate > "$project/log" 2> "$project/err"
- if [ "$(cat "$project/duplicate-runs")" = dd ] && [ "$(cat "$project/duplicate")" = duplicate ]; then test-ok "$backend normal duplicate remains content input"; else test-fail "$backend duplicate purpose"; fi
+  if [ "$(cat "$project/duplicate-runs")" = dd ] && [ "$(cat "$project/duplicate")" = duplicate ]; then test-ok "$backend normal duplicate remains content input"; else test-fail "$backend duplicate purpose"; fi
+  test-step "$backend repairs generated input tampering before comparing consumed bytes"
+  printf tampered > "$project/ordered"
+  "${runner[@]}" -C "$project" ./duplicate > "$project/log" 2> "$project/err"
+  if [ "$(cat "$project/ordered")" = duplicate ] && [ "$(cat "$project/duplicate-runs")" = dd ]; then test-ok "$backend repaired equal artifact preserves downstream reuse"; else test-fail "$backend generated tampering was consumed before repair"; fi
  test-step "$backend blocks on failed order-only prerequisites"
  if "${runner[@]}" -C "$project" ./blocked > "$project/log" 2> "$project/err"; then test-fail "$backend accepted failed ordering work"; elif [ ! -e "$project/forbidden" ]; then test-ok "$backend order-only failure blocks recipe"; else test-fail "$backend blocked recipe executed"; fi
  test-step "$backend resolves expression order-only prerequisites"

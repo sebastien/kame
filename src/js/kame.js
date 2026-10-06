@@ -1167,6 +1167,23 @@ class Module {
       await cancelProcessGroup(processRequest, graceMS);
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
+    if (kind === 27 || kind === 28 || kind === 29) {
+      if (kind === 27 && !grants.read) return this.deny(instance, request, 'read');
+      let info;
+      try { info = await statResource(payload); }
+      catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return this.exports.kame_wasm_complete_nil(instance, request);
+        return this.completeFailure(instance, request, 'FS_ERR', 'cannot stat file');
+      }
+      if (!info.isFile()) return this.completeJSON(instance, request, false);
+      // Transport bytes, not a host-chosen freshness decision or metadata hash.
+      let bytes;
+      try { bytes = await readResource(payload); }
+      catch { return this.completeJSON(instance, request, true); }
+      const pointer = this.allocate(bytes.length || 1);
+      new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
+      return this.exports.kame_wasm_complete_bytes(instance, request, pointer, bytes.length);
+    }
     if (kind === 19) return this.completeJSON(instance, request, resourceExists(payload));
     if (kind === 18) {
       const resolved = resolveTool(payload, [], context.toolCache);
@@ -1206,7 +1223,13 @@ class Module {
     }
     if (kind === 7 || kind === 17) {
       if (kind === 7 && !grants.read) return this.deny(instance, request, 'read');
-      return this.completeJSON(instance, request, resourceExists(payload));
+      try {
+        await statResource(payload);
+        return this.completeJSON(instance, request, true);
+      } catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return this.completeJSON(instance, request, false);
+        return this.completeFailure(instance, request, 'FS_ERR', 'cannot stat file');
+      }
     }
     if (kind === 6) {
       if (!grants.read) return this.deny(instance, request, 'read');
@@ -1463,12 +1486,12 @@ class Module {
   }
 
   async customHostRequest(instance, request, kind, payload, data, context, key, record) {
-    const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 ? 'read'
+    const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 ? 'read'
       : kind === 2 ? 'write'
         : kind === 4 ? 'env'
           : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 ? 'run' : null;
     if (capability && !context.grants[capability]) return this.deny(instance, request, capability);
-    if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 2) && typeof payload === 'string') {
+    if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 2) && typeof payload === 'string') {
       const grantKind = kind === 2 ? 'write' : 'read';
       const roots = context[`${grantKind}Roots`];
       let names = [payload];
@@ -3004,11 +3027,14 @@ async function runCat(module, inv, sourceDirectory) {
   }
 }
 
-async function watchFingerprint(kind, name) {
+async function watchFingerprint(kind, name, metadata = false) {
   if (kind === 'glob') return JSON.stringify(resourceWildcard(name));
   try {
     const bytes = await readResource(name);
-    return createHash('sha256').update(bytes).digest('hex');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    if (!metadata) return hash;
+    const info = await statResource(name);
+    return `${hash}:${JSON.stringify({ size: info.size, mode: info.mode, dir: info.isDirectory() })}`;
   } catch (error) {
     if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return 'missing';
     return `error:${error.code ?? error.message}`;
@@ -3089,7 +3115,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       active.add(key);
       const tracked = fingerprints.get(key);
       if (!tracked || tracked.stamp === null) {
-        const stamp = resource.missing === true ? 'missing' : await watchFingerprint(resource.kind, resource.name);
+        const stamp = resource.missing === true ? 'missing' : resource.metadata ? 'unobserved' : resource.signature ?? await watchFingerprint(resource.kind, resource.name);
         if (!tracked) fingerprints.set(key, { ...resource, stamp, source: false });
         else tracked.stamp = stamp;
       }
@@ -3125,7 +3151,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       if (now - lastScan >= 200) {
         await seedSources();
         for (const [key, record] of fingerprints) {
-          const stamp = await watchFingerprint(record.kind, record.name);
+          const stamp = await watchFingerprint(record.kind, record.name, record.metadata);
           if (record.stamp === null) { record.stamp = stamp; continue; }
           if (stamp !== record.stamp) {
             record.stamp = stamp;
