@@ -48,7 +48,7 @@ sweep_dir diag-sweep TGT_NO_DEFAULT
 sweep_dir diag-sweep TGT_NO_RULE ./no-such.txt
 sweep_dir diag-sweep TGT_AMBIG ./amb-q.c
 sweep_dir diag-sweep DEP_CYCLE ./cycle.out
-sweep_dir diag-sweep FEATURE_UNSUP serve
+sweep_dir diag-sweep FEATURE_UNSUP ./unsupported.out
 
 test-step "execution diagnostics"
 sweep_dir diag-sweep RECIPE_FAIL ./failing.out

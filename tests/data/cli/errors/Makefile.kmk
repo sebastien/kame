@@ -32,5 +32,8 @@ B = "@(A)"
 service serve : ./dep-fails.out
 	sleep 1
 
+./unsupported.out : ; [executor: "remote:missing"]
+	true
+
 task noart :
 	true

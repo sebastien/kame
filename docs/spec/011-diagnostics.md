@@ -165,7 +165,8 @@ meaning by themselves.
   definition/rule codes and source spans; diagnostics identify the originating
   file or distinct inline fragment rather than a flattened synthetic source.
 - Malformed cache data is a miss and `CACHE_UNUSABLE` warning, never a fatal error.
-- Unsupported service execution uses `FEATURE_UNSUP`.
+- An unavailable requested remote executor uses `FEATURE_UNSUP` before a
+  process starts.
 - Malformed pattern group syntax is `PARSE_ERR`; pattern misuse detected at
   evaluation, such as a missing capture reference or an invalid argument
   combination, uses `PAT_INVALID`.
