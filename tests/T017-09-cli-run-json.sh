@@ -18,8 +18,8 @@ parity() {
 	local native=0 wasm=0
 	"$CLI_BIN" do run --json "$@" >"$work/native" 2>"$work/native.err" || native=$?
 	node "$CLI_ROOT/dist/kame.js" do run --json "$@" >"$work/wasm" 2>"$work/wasm.err" || wasm=$?
-	jq -cS 'del(.node,.request,.generation,.attempt)' "$work/native" >"$work/native.norm"
-	jq -cS 'del(.node,.request,.generation,.attempt)' "$work/wasm" >"$work/wasm.norm"
+	jq -cS 'del(.node,.request,.generation,.attempt,.runtimeMS)' "$work/native" >"$work/native.norm"
+	jq -cS 'del(.node,.request,.generation,.attempt,.runtimeMS)' "$work/wasm" >"$work/wasm.norm"
 	if [ "$native" = "$expected" ] && [ "$wasm" = "$expected" ] && [ ! -s "$work/native.err" ] && [ ! -s "$work/wasm.err" ] && cmp -s "$work/native.norm" "$work/wasm.norm"; then test-ok "$*"; else test-fail "JSON parity: native=$native wasm=$wasm"; diff -u "$work/native.norm" "$work/wasm.norm" || true; cat "$work/native.err" "$work/wasm.err"; fi
 	if jq -e -s 'all(.schema == 1 and (.type | type == "string"))' "$work/native" >/dev/null; then test-ok "schema-1 JSON Lines only"; else test-fail "raw output escaped the event stream"; fi
 }
