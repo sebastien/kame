@@ -12,6 +12,7 @@
 #include <sys/file.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <spawn.h>
 #include <time.h>
 #include <unistd.h>
 #if defined(__COSMOPOLITAN__)
@@ -38,7 +39,7 @@ typedef struct km_stage {
     int64_t job;
     int64_t deadline;
     int status, signal, outcome;
-    bool reaped;
+    bool reaped, spawned_in_job;
 } km_stage;
 
 typedef struct km_process {
@@ -566,6 +567,47 @@ static void km_exec_argv(char **argv, char **envp) {
     errno = saved;
 }
 
+// On Windows, launch a pipeline command beneath its job-contained stage
+// process. The spawned command inherits the stage's remapped standard handles
+// and job membership; the wrapper preserves the existing waitpid lifecycle.
+static int km_spawn_argv(pid_t *pid, char **argv, char **envp) {
+    if (strchr(argv[0], '/')) return posix_spawn(pid, argv[0], NULL, NULL, argv, envp);
+    const char *paths = "/bin:/usr/bin";
+    for (char **entry = envp; *entry; entry++) if (strncmp(*entry, "PATH=", 5) == 0) { paths = *entry + 5; break; }
+    int saved = ENOENT;
+    const char *part = paths;
+    for (;;) {
+        const char *end = strchr(part, ':');
+        size_t n = end ? (size_t)(end - part) : strlen(part);
+        size_t name_len = strlen(argv[0]);
+        char *path = malloc(n + name_len + 2);
+        if (!path) return ENOMEM;
+        if (n) { memcpy(path, part, n); path[n] = '/'; memcpy(path + n + 1, argv[0], name_len + 1); }
+        else memcpy(path, argv[0], name_len + 1);
+        int error = posix_spawn(pid, path, NULL, NULL, argv, envp);
+        free(path);
+        if (!error) return 0;
+        if (error != ENOENT && error != ENOTDIR && error != EACCES) return error;
+        if (error == EACCES) saved = EACCES;
+        if (!end) return saved;
+        part = end + 1;
+    }
+}
+
+static void km_spawn_wait(char **argv, char **envp, int execfd) {
+    pid_t child = -1;
+    int error = km_spawn_argv(&child, argv, envp);
+    if (error) { write(execfd, &error, sizeof(error)); _exit(127); }
+    close(execfd);
+    int status;
+    pid_t result;
+    do { result = waitpid(child, &status, 0); } while (result < 0 && errno == EINTR);
+    if (result != child) _exit(127);
+    if (WIFEXITED(status)) _exit(WEXITSTATUS(status));
+    if (WIFSIGNALED(status)) _exit(128 + WTERMSIG(status));
+    _exit(127);
+}
+
 int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so_String directory, so_Slice environment, int64_t timeout, so_int retain, bool direct) {
     if (!host) return -1;
     // Every rejected request emits exactly one failed terminal event.
@@ -757,6 +799,7 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
                 close(ready[0]);
                 if (nread != 1 || token != 1) _exit(126);
             }
+            if (km_windows_jobs_needed()) km_spawn_wait(argv[i], envp[i], execerr[1]);
             km_exec_argv(argv[i], envp[i]);
             int error = errno; write(execerr[1], &error, sizeof(error)); _exit(127);
         }
@@ -768,6 +811,7 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
             km_close(&ready[0]);
             bool assigned = km_windows_job_assign(p.stages[i].job, pid);
             if (assigned) {
+                p.stages[i].spawned_in_job = true;
                 char token = 1;
                 ssize_t written;
                 do { written = write(ready[1], &token, 1); } while (written < 0 && errno == EINTR);
@@ -808,7 +852,7 @@ static void km_exec_ready(km_host *host, km_process *p) {
         if (km_windows_jobs_needed()) {
             bool assigned = true;
             if (p->stage_count) {
-                for (int i = 0; assigned && i < p->stage_count; i++) assigned = km_windows_job_assign_exec(p->stages[i].job, p->stages[i].pid);
+                for (int i = 0; assigned && i < p->stage_count; i++) if (!p->stages[i].spawned_in_job) assigned = km_windows_job_assign_exec(p->stages[i].job, p->stages[i].pid);
             } else assigned = km_windows_job_assign_exec(p->job, p->pid);
             if (!assigned) { km_fail(host, p, "Windows process job setup failed"); return; }
         }
