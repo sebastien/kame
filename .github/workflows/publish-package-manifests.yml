@@ -44,6 +44,8 @@ jobs:
           gh auth setup-git
       - name: Download signed release package assets
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="$RELEASE_VERSION"
