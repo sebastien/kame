@@ -126,7 +126,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			// the node open for future invalidations. A CLI target request consumes
 			// that first value rather than waiting for a terminal state.
 			if handles[i].Definition && handles[i].Node.Current {
-				writeValue(out, handles[i].Node.Latest)
+				if json { p.ObserveDefinition(handles[i]) } else { writeValue(out, handles[i].Node.Latest) }
 				handles[i].Free()
 				handles[i] = nil
 				remaining--
@@ -140,7 +140,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 				annotateTargetDiagnostic(&polled.Result.Diagnostic, targets[i])
 				emitDiagnostic(diagnosticWriter(out, errOut, json), polled.Result.Diagnostic, json, p.Parsed.Source)
 				failed = true
-			} else if polled.Result.Value.Kind != core.Nil {
+			} else if !json && polled.Result.Value.Kind != core.Nil {
 				writeValue(out, polled.Result.Value)
 			}
 			polled.Result.Free(mem.System)

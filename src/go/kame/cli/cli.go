@@ -194,6 +194,10 @@ func parseBuild(inv *Invocation, args []string) {
 			inv.Verbose = true
 			continue
 		}
+		if runGrant(inv, arg) {
+			if inv.Error.Code != "" { return }
+			continue
+		}
 		if isBuildValueOption(arg) {
 			if i+1 == len(args) {
 				inv.fail("OPT_NO_VALUE", "missing value for "+arg)
@@ -519,7 +523,7 @@ func parseFormat(inv *Invocation, args []string) {
 		inv.fail("OPT_CONFLICT", "-i and -n cannot be used together")
 		return
 	}
-	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "kash" {
+	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kmk" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
 		return
 	}
@@ -601,7 +605,7 @@ func parseParse(inv *Invocation, args []string) {
 		inv.fail("OPT_NO_VALUE", "missing required --lang")
 		return
 	}
-	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "kash" {
+	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kmk" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
 		return
 	}

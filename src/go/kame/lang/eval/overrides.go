@@ -72,6 +72,7 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 	state := mem.Alloc[definitionState](p.Alloc)
 	state.Program, state.Definition, state.Scoped = p, authored, true
 	state.Namespace, state.Phase = context.DefinitionNamespace, context.Phase
+	for i := range context.RuleFrames { if context.RuleFrames[i].ServiceRule { state.ServiceRule = true } }
 	for i := range context.Environment {
 		state.Environment = slices.Append(p.Alloc, state.Environment, owned(p.Alloc, context.Environment[i]))
 	}

@@ -181,6 +181,7 @@ func (r *Runtime) Prepare() PureResult {
 	}
 	r.Host = nil
 	r.Program = compiled.Program
+	r.Program.Eval.SetDefinitionEffectSink(program.DefinitionEventEffect, r.Program)
 	compiled.Free(r.Alloc)
 	r.applyToolPaths()
 	return PureResult{}
@@ -713,6 +714,7 @@ func (r *Runtime) Result() RuntimeResult {
 			r.Session.Observe(r.Handle)
 		}
 		if r.Handle.Definition && r.Handle.Node != nil && r.Handle.Node.Current {
+			if r.Session == nil { r.Program.ObserveDefinition(r.Handle) }
 			return RuntimeResult{Value: r.Handle.Node.Latest.Clone(r.Alloc), Done: true}
 		}
 		poll := r.Handle.Poll()

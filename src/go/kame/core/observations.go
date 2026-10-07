@@ -23,6 +23,10 @@ type Observation struct {
 	Signature Signature
 }
 
+// AcceptedObservations returns a borrowed view of the active generation's facts.
+// Callers retaining it across evaluation must clone its keys and slice.
+func (c *EngineContext) AcceptedObservations() []Observation { return c.node.Observations }
+
 func FreeObservations(a mem.Allocator, values []Observation) {
 	for i := range values {
 		values[i].Key.Free(a)

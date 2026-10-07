@@ -98,7 +98,7 @@ environment values can invalidate a consumer.
 | `shell` | `(shell COMMAND [OPTIONS])` | run | Runs a collected command only in standalone expression evaluation. Invalid during planning or recipe rendering. |
 | `sh`, `shellrun` | Same as `shell` | run | Aliases with identical result and phase behavior. |
 
-Standalone `kame do expr` denies these capabilities by default; grant only the
+Standalone `kame do run --lang expr` denies these capabilities by default; grant only the
 needed roots, names, or process access with its `--allow-*` options.
 
 ## Build effects

@@ -98,11 +98,17 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		if item.Kind != script.Rule || item.Rule == nil {
 			continue
 		}
-		if duplicateLiteral(p, item.Rule) {
+		resolved := p.resolveOutputs(item.Rule)
+		if resolved.Diagnostic.Code != "" {
+			result.Diagnostics = slices.Append(a, result.Diagnostics, resolved.Diagnostic)
+			continue
+		}
+		candidate := resolved.Rule
+		if duplicateLiteral(p, candidate) {
 			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Source: parsed.Source.Name, Code: "TGT_AMBIG", Severity: diagnostic.Error, Message: "duplicate literal rule target", Span: diagnostic.Span{Start: item.Rule.Header.Start, End: item.Rule.Header.End}})
 			continue
 		}
-		p.Rules = slices.Append(a, p.Rules, registeredRule{Rule: item.Rule})
+		p.Rules = slices.Append(a, p.Rules, registeredRule{Rule: candidate})
 		for j := range item.Rule.Arguments {
 			argument := item.Rule.Arguments[j]
 			if p.Eval.Definition(argument.Name) != nil {
@@ -386,6 +392,10 @@ func (p *Program) Free() {
 	for i := range p.GeneratedRules {
 		freeGeneratedRule(p.Alloc, p.GeneratedRules[i])
 	}
+	for i := range p.ResolvedRules {
+		freeResolvedRule(p.Alloc, p.ResolvedRules[i])
+	}
+	slices.Free(p.Alloc, p.ResolvedRules)
 	for i := range p.GeneratedRuleMeta {
 		mem.FreeString(p.Alloc, p.GeneratedRuleMeta[i].Name)
 		freeStrings(p.Alloc, p.GeneratedRuleMeta[i].Dependencies)

@@ -117,9 +117,11 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	slices.Free(mem.System, values)
 	// A single rule source keeps the established build presentation, parallel
 	// target handling, JSON events, freshness and cache path unchanged.
+	output := exprEffectOutput{Out: out, Err: errOut}
+	if inv.JSON { session.SetJSON(true) } else { p.Eval.SetDefinitionEffectSink(writeExprEffect, &output) }
 	workStart := 0
 	startedAt := time.Now().UnixNano()
-	if len(inv.Inputs) == 1 && inv.Inputs[0].Lang == "kmk" {
+	if len(inv.Inputs) == 1 && inv.Inputs[0].Lang == "kmk" && inv.TimeoutMS == 0 {
 		var targets []string
 		for i := range session.Work { targets = slices.Append(mem.System, targets, session.Work[i].Target) }
 		status := materializeTargets(p, targets, out, errOut, inv.JSON)
@@ -127,8 +129,6 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		if status != 0 { return status }
 		workStart = len(session.Work) // Recipes ran already; only owned async joins remain.
 	}
-	output := exprEffectOutput{Out: out, Err: errOut}
-	if inv.JSON { session.SetJSON(true) } else { p.Eval.SetDefinitionEffectSink(writeExprEffect, &output) }
 	var last core.Value
 	hasLast := false
 	defer last.Free(mem.System)

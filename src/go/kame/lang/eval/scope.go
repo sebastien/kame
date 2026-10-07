@@ -37,6 +37,8 @@ type Scope struct {
 	Bindings     []binding
 	bindingIndex []bindingIndexEntry
 	References   int
+	// Mutable scopes cannot reuse expressions that might have changed bindings.
+	Mutable bool
 	// Section holds the positional arguments of an enclosing placeholder
 	// section call. The scope owns these values and frees them with itself.
 	Section []core.Value

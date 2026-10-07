@@ -72,7 +72,19 @@ assert.equal(built.results.length, 1);
 assert.equal(built.results[0].target, 'answer');
 assert.ok(Array.isArray(built.events));
 built.events.push({ type: 'caller-mutation' });
-assert.deepEqual((await answer.build('answer')).events, []);
+assert.equal((await answer.build('answer')).events.some((event) => event.type === 'caller-mutation'), false);
+await assert.rejects(kame.compile('x = 1\nx = 2\n'), (error) => ['DEF_INVALID', 'PARSE_ERR'].includes(error.code));
+const shared = await kame.compile('a : shared\nb : shared\nshared :\n\t@(out "once")\n', { name: 'shared.kmk' });
+const sharedBuild = await shared.build(['a', 'b']);
+assert.equal(sharedBuild.events.filter((event) => event.type === 'target-started' && event.target === 'shared').length, 1);
+assert.deepEqual(sharedBuild.results.map((result) => result.target), ['a', 'b']);
+const abortedBuild = new AbortController();
+abortedBuild.abort();
+await assert.rejects(shared.build(['a', 'b'], { signal: abortedBuild.signal }), (error) => error.code === 'EXEC_CANCELLED');
+const values = await kame.compile('a = 1\nb = 2\n');
+assert.deepEqual((await values.build(['a', 'b'])).results.map((result) => result.value), ['"1"', '"2"']);
+await shared.dispose();
+await values.dispose();
 
 const watch = await answer.watch('answer');
 const first = await Promise.race([
@@ -84,7 +96,48 @@ assert.ok(first.value.snapshot);
 first.value.snapshot.resources?.push({ name: 'caller-mutation' });
 assert.equal(watch.snapshot().resources?.some((resource) => resource.name === 'caller-mutation'), false);
 await watch.close();
+
+// Reserve the program while watch creation is pending, not just once published.
+const beginWatch = answer.module.beginWatch.bind(answer.module);
+let releaseCreation;
+const creationGate = new Promise((resolve) => { releaseCreation = resolve; });
+answer.module.beginWatch = async (...args) => { await creationGate; return beginWatch(...args); };
+const pendingWatch = answer.watch('answer');
+await assert.rejects(answer.watch('answer'), (error) => error.code === 'BUSY');
+await assert.rejects(answer.build('answer'), (error) => error.code === 'BUSY');
+releaseCreation();
+await (await pendingWatch).close();
 await answer.dispose();
+
+for (const disposeOwner of [false, true]) {
+  const owner = await Kame.create();
+  const pendingProgram = await owner.compile('answer = 42\n');
+  const module = pendingProgram.module;
+  const begin = module.beginWatch.bind(module);
+  let markCreated, release;
+  const created = new Promise((resolve) => { markCreated = resolve; });
+  const gate = new Promise((resolve) => { release = resolve; });
+  let closed = 0;
+  const close = module.disposeWatch.bind(module);
+  module.disposeWatch = async (watch) => { closed++; return close(watch); };
+  module.beginWatch = async (...args) => {
+    const watch = await begin(...args);
+    markCreated();
+    await gate;
+    return watch;
+  };
+  const pending = pendingProgram.watch('answer');
+  const rejected = assert.rejects(pending, (error) => error.code === 'EXEC_CANCELLED');
+  await created;
+  const disposing = disposeOwner ? owner.dispose() : pendingProgram.dispose();
+  release();
+  await Promise.all([disposing, rejected]);
+  assert.equal(closed, 1, 'pending watch leaked during disposal');
+  assert.equal(owner.watches.size, 0);
+  assert.equal(owner.operations.size, 0);
+  assert.equal(pendingProgram.module, null);
+  await owner.dispose();
+}
 
 for (let i = 0; i < 100; i++) {
   const cycle = await kame.compile(`value = ${i}\n`, { name: `cycle-${i}.km` });

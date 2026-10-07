@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (project / 'emit.py').write_text(
         "import os,pathlib\n"
         "pathlib.Path('ready').touch()\n"
-        f"for _ in range({1000000 if endless else 128}): os.write({channel},b'Z'*65536)\n"
+        f"for _ in range({1000000 if endless else 16 if case == 'cache' else 128}): os.write({channel},b'Z'*65536)\n"
         "pathlib.Path('done').touch()\n"
     )
     # Cover direct argv publication as well as legacy shell recipes.
@@ -68,11 +68,18 @@ with tempfile.TemporaryDirectory() as temporary:
     blocked_stderr = case == 'stderr'
     cached = case == 'cache'
     if cached:
-        (project / 'Makefile.kmk').write_text('task emit :\n\tpython3 emit.py\nmarker :\n\ttouch proceeded\n')
+        # Distinct cached tasks in a dependency chain: repeated target arguments
+        # share one root, and one 64 KiB prefix can fit in the OS pipe buffer.
+        rules = []
+        for index in range(16):
+            prerequisite = f'emit{index - 1}' if index else ''
+            rules.append(f'task emit{index} : {prerequisite}\n\tpython3 emit.py\n')
+        (project / 'Makefile.kmk').write_text(''.join(rules) + 'marker : emit15\n\ttouch proceeded\n')
+        command[-1] = 'emit15'
         subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=15)
         (project / 'ready').unlink()
         (project / 'done').unlink()
-        command += ['emit'] * 15 + ['marker']
+        command += ['marker']
     process = subprocess.Popen(command,
         stdout=subprocess.DEVNULL if blocked_stderr else subprocess.PIPE,
         stderr=subprocess.PIPE if blocked_stderr else subprocess.DEVNULL)
@@ -113,7 +120,7 @@ with tempfile.TemporaryDirectory() as temporary:
             total = drain(pipe, case == 'json')
             assert process.wait(timeout=15) == 0, 'resumed CLI failed'
             assert (project / ('proceeded' if cached else 'done')).exists(), 'work did not finish after public drain'
-            expected = 16 * 65536 if cached else 8 * 1024 * 1024
+            expected = 1048576 if cached else 8 * 1024 * 1024
             assert total == expected, f'published byte count {total}'
     finally:
         if process.poll() is None:

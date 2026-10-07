@@ -14,6 +14,12 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 	p.Instances[index].SettingsDiagnostic.Free(p.Alloc)
 	p.Instances[index].SettingsDiagnostic = d
 	if d.Code != "" { return false }
+	entry := &p.Instances[index]
+	// The common inherited snapshot is already canonical and owned. Keep it
+	// instead of reconstructing it on every dependency-validation attempt.
+	if entry.EnvironmentClaimed && len(entry.Rule.Environment) == 0 && len(entry.MetadataEnvironment) == 0 && sameEnvironment(entry.Environment, inherited) {
+		return true
+	}
 	var environment []string
 	for i := range inherited {
 		environment = p.setEnvironment(environment, inherited[i])
@@ -33,7 +39,7 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 		}
 		environment[j] = value
 	}
-	entry := &p.Instances[index]
+	entry = &p.Instances[index]
 	if entry.EnvironmentClaimed {
 		// Suspended Kash contexts borrow this snapshot; an equal claim must keep it alive.
 		if sameEnvironment(entry.Environment, environment) {
@@ -75,6 +81,11 @@ func sameEnvironment(left []string, right []string) bool {
 	if len(left) != len(right) {
 		return false
 	}
+	ordered := true
+	for i := range left {
+		if left[i] != right[i] { ordered = false; break }
+	}
+	if ordered { return true }
 	for i := range left {
 		found := false
 		for j := range right {
@@ -99,7 +110,8 @@ func (p *Program) bindDefinitionEnvironment(context *eval.Context) {
     identity.state = newSHA256()
     identity.appendText("kame-definition-environment-v1")
     identity.appendText(context.Cwd)
-    identity.appendU64(uint64(context.Phase))
+     identity.appendU64(uint64(context.Phase))
+     for i := range context.RuleFrames { if context.RuleFrames[i].ServiceRule { identity.appendText("service-no-file-outputs") } }
     for i := range context.Environment { identity.appendText(context.Environment[i]) }
     identity.state.Sum(context.DefinitionNamespace[:])
     context.HasDefinitionNamespace = true

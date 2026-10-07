@@ -134,16 +134,9 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 			return failure(context.Run, "CAP_DENIED", span, message)
 		}
 	}
-	values := slices.Make[core.Value](context.Run, len(arguments))
-	for i := range arguments {
-		r := p.evaluate(context.Engine, context.Scope, arguments[i], context)
-		if r.Waiting || r.Diagnostic.Code != "" {
-			// Discard: no Call ran, so no callee freed consumed callables.
-			freeValuesWithCallables(context.Run, values)
-			return r
-		}
-		values[i] = r.Value
-	}
+	operands := p.argumentValues(scope, arguments, context, span)
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	values := operands.Values
 	previousCapabilities, previousSpan, previousStart, previousEnd := context.activeCapabilities, context.Span, context.operationStart, context.operationEnd
 	previousName, previousArguments := context.OperationName, context.operationArguments
 	context.OperationName, context.operationArguments = operation.Name, arguments
@@ -177,17 +170,9 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 
 func (p *Program) call(function *Function, arguments []*expr.Expr, context *Context, span source.Span) Result {
 	scope := context.Scope
-	values := slices.Make[core.Value](context.Run, len(arguments))
-	for i := range arguments {
-		r := p.evaluate(context.Engine, scope, arguments[i], context)
-		if r.Waiting || r.Diagnostic.Code != "" {
-			// Discard: arguments never reached callValues, so no child scope
-			// shares their callable storage.
-			freeValuesWithCallables(context.Run, values)
-			return r
-		}
-		values[i] = r.Value
-	}
+	operands := p.argumentValues(scope, arguments, context, span)
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	values := operands.Values
 	// Argument expressions may enter temporary scopes. Native constructors
 	// capture the application scope, which must still be alive after arguments.
 	context.Scope = scope

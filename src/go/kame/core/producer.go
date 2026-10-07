@@ -70,6 +70,12 @@ func (c *EngineContext) Dependency(key ResourceKey) bool {
 	return c.dependency(key, false)
 }
 
+// HasDependency checks an existing edge without scheduling or observing it.
+func (c *EngineContext) HasDependency(key ResourceKey) bool {
+	dependency := c.engine.find(key)
+	return dependency != nil && (slices.Contains(c.node.Static, dependency) || slices.Contains(c.node.Dynamic, dependency))
+}
+
 // OrderDependency schedules a hard prerequisite without consuming its contents.
 // A normal edge already present cannot be downgraded to order-only.
 func (c *EngineContext) OrderDependency(key ResourceKey) bool {

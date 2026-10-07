@@ -112,8 +112,10 @@ does not consume content; intentional metadata reads have their own aspect.
 - Environment dependency: a name that rendering or execution actually read, plus
   a present/missing marker and the value read. Unread names are not dependencies.
 - Recipe execution: interpreter identity, rendered script, working directory,
-  recorded environment dependencies, timeout, retry settings, and invoked
-  operation versions. The process environment is not fingerprinted wholesale.
+  the complete effective child environment after overrides, recorded named
+  environment reads, timeout, retry settings, and invoked operation versions.
+  Environment snapshots use canonical assignment order and are stored as digests.
+  Pure/declarative tasks consume only their direct and indirect Kame environment reads.
 
 An ordinary bare task is never a cacheable dependency. A cached task depending
 on one is therefore always stale.
@@ -134,7 +136,8 @@ discarded before execution; the next record contains only the new branch's reads
 Persisted definition observations use authored names, not environment-snapshot
 graph identities. Validation rebinds each name to the current invocation's
 environment and explicit overrides, then consumes its published value signature.
-Unread ambient changes therefore do not invalidate otherwise equal definitions.
+Unread ambient changes do not invalidate otherwise equal pure definitions;
+process-executing consumers additionally validate their child environment snapshot.
 
 ## Records
 
@@ -203,9 +206,10 @@ These changes must cause a miss:
 - Dynamic dependency set or content.
 - Invoked operation version.
 - Explicit shell, cwd, timeout, or retry settings.
-- A recorded environment dependency's name or value. An unread inherited value
-  does not invalidate. Selecting a shell does not snapshot the process
-  environment.
+- A recorded environment dependency's name or value, or any entry added,
+  removed or changed in a consumed effective child environment. Unread names
+  do not invalidate pure/declarative tasks. Merely selecting a shell does not
+  consume a process environment snapshot.
 
 The process host has no implicit ambient environment. Kame display options
 do not participate. File and environment identity follow `006-runtime.md`.

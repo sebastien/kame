@@ -53,6 +53,33 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
             await pending
         self.assertFalse(program._processes)
 
+    async def test_rule_compile_parses_the_entire_source(self):
+        with self.assertRaises(KameError):
+            await self.client.compile('default :\nbroken = (\n', name='invalid.kmk')
+        program = await self.client.compile('first :\n\t@(out "first")\nsecond :\n\t@(out "second")\n', name='rules.kmk')
+        self.assertEqual(len(program.ast['ast']['items']), 2)
+
+    async def test_watch_preserves_cwd_and_grants(self):
+        (self.root / 'data.txt').write_text('watched bytes', encoding='utf-8')
+        program = await self.client.compile('./output : ./data.txt\n\t@(yield (read "./data.txt"))\n', name='watch.kmk')
+        watch = await program.watch('./output', grants={'read': ['.'], 'write': ['.']})
+        while True:
+            event = await asyncio.wait_for(watch.__anext__(), timeout=5)
+            if event['type'] == 'target-completed':
+                break
+        self.assertEqual((self.root / 'output').read_text(), 'watched bytes')
+        self.assertFalse(Path(program._tempdir, 'output').exists())
+        await watch.close()
+        denied = await self.client.compile('./denied :\n\t@(yield (read "./data.txt"))\n', name='denied.kmk')
+        watch = await denied.watch('./denied', grants={'write': ['.']})
+        while True:
+            event = await asyncio.wait_for(watch.__anext__(), timeout=5)
+            if event['type'] == 'target-failed':
+                self.assertEqual(event['diagnostic']['code'], 'CAP_DENIED')
+                break
+        self.assertFalse((self.root / 'denied').exists())
+        await watch.close()
+
     async def test_cancelled_request_reaps_process_group(self):
         task = asyncio.create_task(self.client.evaluate('(shell "sleep 10")', grants={"run": True}))
         await asyncio.sleep(0.15)

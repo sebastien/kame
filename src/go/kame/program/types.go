@@ -166,6 +166,7 @@ type Handle struct {
 	Node       *core.Node
 	Target     string
 	Definition bool
+	valueRevision int64
 }
 
 type HandleResult struct {
@@ -264,6 +265,7 @@ type Program struct {
 	Options           Options
 	Rules             []registeredRule
 	GeneratedRules    []*rule.Rule
+	ResolvedRules     []*rule.Rule
 	GeneratedRuleMeta []generatedRuleMeta
 	Tools             []Tool
 	Configuration     []string

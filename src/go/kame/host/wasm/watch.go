@@ -70,6 +70,7 @@ func (r *Runtime) WatchStateJSON() PureResult {
 	for i := 0; i <= len(r.WatchHandles); i++ {
 		h := r.watchHandle(i)
 		polled := h.PollRetained()
+		r.Program.ObserveDefinition(h)
 		if !polled.Done {
 			busy = true
 		}
@@ -93,7 +94,12 @@ func (r *Runtime) WatchStateJSON() PureResult {
 			e.Str("value")
 			e.Str(text)
 			mem.FreeString(r.Alloc, text)
+		} else if polled.Done && polled.Result.Path != "" {
+			e.Str("value")
+			e.Str(polled.Result.Path)
 		}
+		e.Str("kind")
+		if h.Definition { e.Int(1) } else if polled.Result.Path != "" { e.Int(2) } else { e.Int(0) }
 		e.EndObject()
 		polled.Result.Free(r.Alloc)
 	}

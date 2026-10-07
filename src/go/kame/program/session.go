@@ -49,10 +49,11 @@ type Session struct {
 // JSON sessions share the build event encoder, including binary-safe streams.
 func (s *Session) SetJSON(enabled bool) {
 	s.JSON = enabled
-	if enabled { s.Program.Eval.SetDefinitionEffectSink(sessionEventEffect, s.Program) }
+	if enabled { s.Program.Eval.SetDefinitionEffectSink(DefinitionEventEffect, s.Program) }
 }
 
-func sessionEventEffect(state any, effect eval.Effect) {
+// DefinitionEventEffect routes selected definition effects through build events.
+func DefinitionEventEffect(state any, effect eval.Effect) {
 	p := state.(*Program)
 	kind := Stdout
 	if effect.Kind == eval.EffectErr { kind = Stderr } else if effect.Kind != eval.EffectOut && effect.Kind != eval.EffectYield { return }
@@ -173,6 +174,10 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		for i := range fragments { p.Eval.AddSourcePart(fragments[i].Name, offsets[i], offsets[i]+len(fragments[i].Text), fragments[i].Offset) }
 		// Reject unknown static value entries before any prior statement executes.
 		for i := range work {
+			if work[i].Target != "" && p.Eval.Definition(work[i].Target) != nil {
+				work[i].Value = true
+				work[i].Selected = !work[i].ImplicitDefault
+			}
 			if work[i].Target != "" && work[i].Value && p.Eval.Definition(work[i].Target) == nil {
 				function := false
 				for j := range parsed.Items {

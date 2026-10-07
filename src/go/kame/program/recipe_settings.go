@@ -230,7 +230,7 @@ func (p *Program) kashContext(c *core.EngineContext, index int) *eval.Context {
 	state := mem.Alloc[renderDependencyState](p.Alloc)
 	*state = renderDependencyState{Program: p, Index: index}
 	frames := slices.Make[eval.RuleFrame](p.Alloc, 1)
-	frames[0] = eval.RuleFrame{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule}
+	frames[0] = eval.RuleFrame{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, ServiceRule: entry.Rule.Kind == rule.ServiceRule}
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Environment: entry.Environment, HasEnvironment: true, TimeoutMS: p.Options.TimeoutMS, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.EvaluatePhase, ResolverState: state, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: frames}
 	p.bindDefinitionEnvironment(context)

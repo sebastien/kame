@@ -86,8 +86,9 @@ Primary options:
 
 Recipes receive an explicit complete environment. The CLI starts from its
 environment and applies `--env` replacements; cache fingerprints include the
-authored environment assignments and named environment reads, not the entire
-ambient environment. An unread inherited value changing does not invalidate reuse.
+authored environment assignments and named environment reads. Rules that execute
+processes also fingerprint the complete effective child environment after overrides;
+pure/declarative rules ignore unread inherited values.
 
 ## Inspect before executing
 

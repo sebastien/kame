@@ -123,8 +123,8 @@ Kash fragments: run statements in source order. Direct
 and explicit execution share the same parser, engine, process ownership, and
 policy; they are not shell-launching shortcuts. `009-cli.md` owns dispatch and
 option validation. The previously specified `do kash` command is replaced by
-`do run`, as is the separate `do expr` execution path. `do expr` remains only
-as a deprecated alias for `do run --lang expr` (with implicit stdin).
+`do run`, as is the separate `do expr` execution path. Both removed command
+names report `CMD_UNKNOWN` with migration guidance; neither remains an alias.
 Async work belongs to the combined invocation: a source boundary does not join
 it, later fragments may await shared handles, and normal session completion joins
 outstanding graphs. Failure or cancellation stops the remaining session and

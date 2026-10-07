@@ -134,6 +134,23 @@ with tempfile.TemporaryDirectory() as temporary:
     stamp = (project / 'consumer').stat().st_mtime_ns
     run(generated, ['./consumer'])
     assert (project / 'consumer').stat().st_mtime_ns == stamp
+    # Completed operands retain their staged effects and reconstructed scopes.
+    (project / 'late').write_text('B')
+    staged = 'SHELL = kash\n./staged : ./input\n\t@(yield (join (list (let [] (out "once") "A") (text (read "./late"))) ""))\n'
+    run(staged, ['./staged'], expected='once')
+    assert (project / 'staged').read_text() == 'AB'
+    run(staged, ['--force', './staged'], expected='once')
+    nested = 'SHELL = kash\n./nested : ./input\n\t@(yield (cat (let [] (out "a") "A") (cat (let [] (out "b") "B") (text (read "./late")))))\n'
+    run(nested, ['./nested'], expected='ab')
+    assert (project / 'nested').read_text() == 'ABB'
+    (project / 'first').write_text('A')
+    (project / 'second').write_text('C')
+    callbacks = 'SHELL = kash\n./callbacks : ./input\n\t@(yield (join (map ([file] (cat (text (read file)) (text (read "./late")))) [./first ./second]) "|"))\n'
+    run(callbacks, ['./callbacks'])
+    assert (project / 'callbacks').read_text() == 'AB|CB'
+    mutable = 'SHELL = kash\n./mutable : ./input\n\t@(yield (let [value "A"] (def value "C") (cat value (text (read "./late")))))\n'
+    run(mutable, ['./mutable'])
+    assert (project / 'mutable').read_text() == 'CB'
     run('SHELL = "/missing-shell"\nchosen : ; [shell: "/bin/sh"]\n\tprintf override\n', expected='override')
     run('mode = "configured"\nchosen : ; [env: [MODE: mode]]\n\tprintf %s "$MODE"\n', expected='configured')
     run('chosen : ; [shell: kash env: [MODE: "scoped"]]\n\t/usr/bin/printenv MODE\n', expected='scoped\n')

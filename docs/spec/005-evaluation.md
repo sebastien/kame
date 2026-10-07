@@ -42,6 +42,18 @@ and explicit environment lookups require their own grants. Capability denial
 and cancellation are not recoverable through Kash fallback operators. Existing
 Kame `?` continues to handle only `REF_MISSING`.
 
+## Output Registration Context
+
+Computed rule outputs (`004-language.md`) are demanded before target selection
+in a pure context, like generated declarations. They may use lexical definitions,
+pure operations/functions, and configured overrides, but cannot issue host
+requests or effects, even when invocation grants would otherwise permit them.
+Restrictions propagate through lazy definitions and helper calls. Unrelated
+unused definitions remain lazy. Current-rule captures, target arguments, and
+input/output selectors are unavailable: the target index must exist before
+those bindings can be established. Output-resolution failures reject
+registration before recipe effects and retain the authored output location.
+
 ## Scope
 
 A scope is a parent-linked map of names to bindings. A binding is a value,
@@ -118,7 +130,7 @@ parallel.
 
 ## Value Display
 
-When a materialized value is written to stdout — a `do run`/`do expr` result, a
+When a materialized value is written to stdout — a `do run` result, a
 definition value selected as a target, or a `do cat` definition value — it uses
 one canonical notation that is also a valid Kame expression:
 

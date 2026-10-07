@@ -94,7 +94,7 @@ func (p *Program) acceptedInputs(entry *instance) []core.Observation {
 func (p *Program) fileImplementation(entry *instance, rendered renderResult) core.Signature {
 	var sink hashSink
 	sink.state = newSHA256()
-	sink.appendText("kame-file-signatures-v1")
+	sink.appendText("kame-file-signatures-v2")
 	sink.appendText(entry.Executor)
 	sink.appendText(entry.ExecutorVersion)
 	sink.appendU64(uint64(len(entry.Shell)))
@@ -302,6 +302,13 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 				continue
 			}
 			if item.Key.Kind == core.ResourceEnvironment {
+				if item.Key.Name == eval.ProcessEnvironmentName {
+					environment := p.Instances[index].Environment
+					if p.Instances[index].Executor != "" && p.Instances[index].Executor != "local" { environment = p.Instances[index].MetadataEnvironment }
+					c.ObserveAspect(item.Key, item.Aspect, eval.ProcessEnvironmentSignature(p.Alloc, environment))
+					state.Index++
+					continue
+				}
 				value := core.Value{Kind: core.Nil}
 				for i := range p.Instances[index].Environment {
 					assignment := p.Instances[index].Environment[i]

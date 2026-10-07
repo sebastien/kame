@@ -100,8 +100,23 @@ PYTIME
 	reject CAPTURE_LIMIT do run --allow-run --capture-limit 1 -l expr -c '$(printf abc)'
 	reject RECIPE_FAIL do run -l expr --allow-run -c '"must-not-print"' -l kash -c '/bin/sh -c "exit 7"'
 	reject PARSE_ERR do run -l expr -c '(cat "a"' -c '"b")'
+	test-step "$backend single-source invocation deadline and service output restrictions"
+	reject RECIPE_TIMEOUT do run --timeout 250 -l kmk -c $'default : second\nfirst :\n\tsleep 0.15\nsecond : first\n\tsleep 0.15\n' default
+	reject EXPR_INVALID do run -C "$work/cwd" -l kmk -c $'service daemon :\n\t@(write "./forbidden-service-output" "payload")\n' daemon
+	reject EXPR_INVALID do run -C "$work/cwd" -l kmk -c $'BAD = (write "./forbidden-service-output" "payload")\nservice daemon :\n\t@(BAD)\n' daemon
+	reject EXPR_INVALID do run -C "$work/cwd" -l kmk -c $'service daemon : ; [shell: kash]\n\t\\@(write "./forbidden-service-output" "payload")\n' daemon
+	if [ ! -e "$work/cwd/forbidden-service-output" ]; then test-ok "$backend service writes rejected before host publication"; else test-fail "$backend service published file output"; fi
 	check '"Hello Ada"' do run -C "$work/cwd" "$work/functions.km" -c 'name = "Ada"' -c '(greet name)'
 	test-step "$backend rule and value composition"
+	"${command[@]}" do run --json -l kmk -c 'value = 42' value > "$work/values-json" 2> "$work/err"
+	if jq -e -s 'all(.[]; .schema == 1) and any(.[]; .type == "target-value" and .target == "value" and .value.data == "42") and any(.[]; .type == "target-completed" and .target == "value")' "$work/values-json" >/dev/null; then test-ok "$backend single-source selected values emit schema-1 JSON events"; else test-fail "$backend leaked raw value output into JSON"; fi
+	"${command[@]}" do run --timeout 1000 --json -l kmk -c 'value = 42' value > "$work/timed-values-json" 2> "$work/err"
+	if jq -e -s 'any(.[]; .type == "target-value" and .target == "value" and .value.data == "42")' "$work/timed-values-json" >/dev/null; then test-ok "$backend timed sessions preserve selected value JSON"; else test-fail "$backend timed session omitted selected values"; fi
+	"${command[@]}" do run --json -l kmk -c $'a : shared\nb : shared\nshared :\n\t@(out "once")\n' a b > "$work/shared-json" 2> "$work/err"
+	if jq -e -s '[.[] | select(.type == "target-started" and .target == "shared")] | length == 1' "$work/shared-json" >/dev/null; then test-ok "$backend multi-target build retains one shared prerequisite"; else test-fail "$backend multi-target build duplicated shared work"; fi
+	printf 'value = 42\n' | "${command[@]}" do parse --lang kmk > "$work/alias-ast" 2> "$work/err"
+	printf 'value=42\n' | "${command[@]}" do fmt --lang km > "$work/alias-format" 2> "$work/err"
+	if jq -e '.ast.items | length == 1' "$work/alias-ast" >/dev/null && grep -q 'value = 42' "$work/alias-format"; then test-ok "$backend parse/format accept source language aliases"; else test-fail "$backend source language aliases failed"; fi
 	check 'rule"Ada"' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
 	check 'leafruleleaf"done"' do run "$work/arguments.kmk" build -c '"done"' -- leaf
 	test-step "$backend discovered build plus inline work"

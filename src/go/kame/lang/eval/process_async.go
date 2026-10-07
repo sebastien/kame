@@ -41,7 +41,7 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	for i := range c.Inputs { task.Context.Inputs = slices.Append(p.Alloc, task.Context.Inputs, c.Inputs[i].Clone(p.Alloc)) }
 	for i := range c.Outputs { task.Context.Outputs = slices.Append(p.Alloc, task.Context.Outputs, c.Outputs[i].Clone(p.Alloc)) }
 	for i := range c.RuleFrames {
-		frame := RuleFrame{FileRule: c.RuleFrames[i].FileRule}
+		frame := RuleFrame{FileRule: c.RuleFrames[i].FileRule, ServiceRule: c.RuleFrames[i].ServiceRule}
 		for j := range c.RuleFrames[i].Inputs { frame.Inputs = slices.Append(p.Alloc, frame.Inputs, c.RuleFrames[i].Inputs[j].Clone(p.Alloc)) }
         for j := range c.RuleFrames[i].NewerInputs { frame.NewerInputs = slices.Append(p.Alloc, frame.NewerInputs, c.RuleFrames[i].NewerInputs[j].Clone(p.Alloc)) }
 		for j := range c.RuleFrames[i].Outputs { frame.Outputs = slices.Append(p.Alloc, frame.Outputs, c.RuleFrames[i].Outputs[j].Clone(p.Alloc)) }

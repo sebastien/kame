@@ -69,6 +69,7 @@ type Context struct {
 	completionConsumed bool
 	RecoverFailures    bool
 	ReserveEnv         bool
+	DisableMemo        bool
 }
 
 type operationState struct {
@@ -209,6 +210,7 @@ func (c *Context) MarkPhaseInvalid()  { c.phaseInvalid = true }
 // RuleFrame supplies the inputs and outputs for one enclosing rule evaluation.
 // Selectors use the most recently pushed frame.
 type RuleFrame struct {
+	ServiceRule bool
 	FileRule    bool
 	NewerInputs []core.Value
 	Inputs      []core.Value
@@ -364,6 +366,9 @@ func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 		c.UnvalidatedRead()
 	}
 	if id != 0 {
+		if kind == host.RequestProcess {
+			c.Observe(core.ResourceKey{Kind: core.ResourceEnvironment, Name: ProcessEnvironmentName}, core.ObservationValue, ProcessEnvironmentSignature(c.Run, c.Environment))
+		}
 		c.Engine.Submit(id)
 	}
 	return id

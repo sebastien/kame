@@ -30,6 +30,7 @@ type Program struct {
 	Nodes           []definitionNode
 	Diagnostics     []diagnostic.Diagnostic
 	OperationStates []operationState
+	OperationMemos []*operationMemo
 	Processes []*processTask
 	SourceParts     []SourcePart
 	// Grants provide the ambient capability policy for lazy definitions. Rule
@@ -190,6 +191,8 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.Nodes)
 	slices.Free(p.Alloc, p.OperationStates)
+	for i := range p.OperationMemos { p.freeOperationMemo(p.OperationMemos[i]) }
+	slices.Free(p.Alloc, p.OperationMemos)
 	p.freeKashFunctions()
 	slices.Free(p.Alloc, p.Definitions)
 	for i := range p.Diagnostics {
@@ -286,6 +289,7 @@ type definitionState struct {
 	Environment []string
 	Namespace [32]byte
 	Scoped bool
+	ServiceRule bool
 	Phase Phase
 }
 
@@ -389,6 +393,7 @@ func (p *Program) definition(engine *core.EngineContext, state *definitionState)
 		context.Environment, context.HasEnvironment = state.Environment, true
 		context.DefinitionNamespace, context.HasDefinitionNamespace = state.Namespace, true
 		context.Phase = state.Phase
+		if state.ServiceRule { context.RuleFrames = []RuleFrame{{ServiceRule: true}} }
 		context.DependencyContextObserver = p.DefinitionDependencyContextObserver
 		// Lazy values may perform evaluation-only host operations during render.
 		// Dynamic prerequisite resolution remains read-only.

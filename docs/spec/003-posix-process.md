@@ -26,8 +26,9 @@ host reports terminal completion.
 
 The child receives exactly the request environment. The host does not implicitly
 inherit its own environment. The CLI may copy its ambient environment into the
-request. Cache identity follows `008-cache.md`: authored assignments and observed
-environment reads are dependencies, not the complete ambient environment.
+request. Cache identity follows `008-cache.md`: process-executing rules consume
+the complete effective request environment after overrides, as well as named
+Kame environment reads. The host's unsupplied ambient environment is not an input.
 
 ## Spawn Contract
 

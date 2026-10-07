@@ -119,7 +119,7 @@ class Kame(_ProcessOwner):
         run_lang = language or {".km": "km", ".kmk": "kmk", ".kash": "kash", ".ksh": "kash"}.get(suffix)
         if run_lang is None:
             raise ValueError(f"cannot infer Kame language from {name!r}")
-        parse_lang = {"km": "script", "kmk": "rule", "kash": "kash"}.get(run_lang, run_lang)
+        parse_lang = {"km": "script", "kmk": "script", "kash": "kash"}.get(run_lang, run_lang)
         tempdir = tempfile.mkdtemp(prefix="kame-embed-")
         source_filename = "Makefile.kmk" if run_lang == "kmk" else (os.path.basename(name) or f"source{suffix}")
         source_path = os.path.join(tempdir, source_filename)
@@ -228,9 +228,9 @@ class KameProgram(_ProcessOwner):
         if self.language != "kmk":
             raise KameError("watch requires a .kmk rule program")
         selected = [targets] if isinstance(targets, str) else list(targets)
-        args = ["--watch", "--json", *selected]
+        args = ["--watch", "--json", "-f", self._source_path, *selected]
         argv = [self._owner.executable, *_grant_args(self._owner.grants if grants is None else grants), *args]
-        process = await self._start(argv, cwd=self._tempdir, env=self._owner.env)
+        process = await self._start(argv, cwd=self._owner.cwd, env=self._owner.env)
         watch = KameWatch(self, process)
         self._watches.add(watch)
         return watch

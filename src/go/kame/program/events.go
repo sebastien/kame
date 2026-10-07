@@ -20,6 +20,15 @@ func (p *Program) emit(event Event) {
 	p.Events = slices.Append(p.Alloc, p.Events, event)
 }
 
+// ObserveDefinition reports selected value roots; rule roots report themselves.
+func (p *Program) ObserveDefinition(h *Handle) {
+	if h == nil || !h.Definition || !h.Node.Current || h.valueRevision == h.Node.Revision { return }
+	n := h.Node
+	p.emit(Event{Kind: TargetValue, Target: h.Target, Key: n.Key, NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, Value: n.Latest.Clone(p.Alloc)})
+	p.emitNode(n, h.Target, TargetCompleted, diagnostic.Span{}, nil)
+	h.valueRevision = n.Revision
+}
+
 func (p *Program) emitNode(node *core.Node, target string, kind EventKind, span diagnostic.Span, data []byte) {
 	if node == nil {
 		return

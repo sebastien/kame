@@ -23,6 +23,7 @@ func ParseRun(args []string) Invocation {
 // AppendsCommands identifies discovered-build invocations with trailing inline
 // work. Source/option values and operands after -- are never inspected as flags.
 func AppendsCommands(args []string) bool {
+	if selectsWatch(args) { return false }
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if arg == "--" { return false }
@@ -131,6 +132,7 @@ func runLanguage(name string) string {
 // SelectsRun distinguishes explicit source execution from ordinary build
 // targets, without consulting the filesystem. Options never become operands.
 func SelectsRun(args []string) bool {
+	if selectsWatch(args) { return false }
 	language := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -146,6 +148,17 @@ func SelectsRun(args []string) bool {
 		return language || runLanguage(arg) != ""
 	}
 	return language
+}
+
+// Watch owns one rule source through the build grammar, even with -f or -c.
+func selectsWatch(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" { return false }
+		if arg == "--watch" { return true }
+		if arg == "-l" || arg == "--lang" || arg == "--entry" || isBuildValueOption(arg) { i++ }
+	}
+	return false
 }
 
 func runFile(inv *Invocation, name string, language string, stdin *bool) bool {

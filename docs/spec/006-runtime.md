@@ -115,16 +115,26 @@ not current, rendering suspends and restarts for the latest generation after
 that dependency completes. Effects are committed only by execution, so a
 discarded render has no external effect.
 
+Within a generation, ordinary operation and function applications retain
+completed operands when a later operand suspends. Resumption reuses those values
+and their staged effects while the consumed observations, dependency edges,
+lexical bindings and invocation policy remain valid. A new generation or a
+changed proof discards the retained prefix. Mutable scopes, unhashable captured
+values and dynamically parsed `eval` expressions use ordinary reevaluation.
+
 A file rule is a function of its declared inputs and of the dependencies
 discovered while rendering and executing it. Naming an interpreter does not
 widen that set. `SHELL = kash`, `SHELL = /bin/bash`, a per-rule `shell`, and
 the implicit `/bin/sh -c` use one dependency rule.
 
-An unread environment variable is not a dependency. The process environment is
-not a fingerprint. A name becomes a dependency only when rendering or execution
-reads it, through `(env "NAME")`, a Kash `env.NAME` access, or the same
-operation reached from a definition. The recorded value is the value read, not
-the rest of the environment.
+Pure/declarative rules depend only on environment names read by Kame, through
+`(env "NAME")`, Kash `env.NAME`, or the same operation reached indirectly from
+a definition or function. Process-executing rules additionally consume the complete
+effective child environment after rule overrides. This includes `PATH`, loader
+variables such as `LD_LIBRARY_PATH` and `LD_PRELOAD`, `LANG`, `LC_ALL`, `LC_*`,
+`TZ`, and application-specific variables. Kash can track its own reads, but cannot
+infer environment reads inside invoked binaries; opaque shell recipes are not parsed
+to infer reads. Environment snapshots are persisted as digests, never plaintext.
 
 The interpreter is an execution dependency, not a render input. Changing it
 requires execution. It does not by itself require rendering, and it does not
@@ -150,10 +160,11 @@ them. A discovered file that is itself a build output is demanded before the
 result is reused. A rule with no declared or discovered dependency is always
 stale.
 
-A shell script that expands `$HOME` or opens a path never named in the recipe
-is not a Kame dependency. Kame records operations it evaluates. It does not
-infer reads inside an opaque shell script. Kash `env.NAME` is visible because
-it is a Kame operation, as specified in `017-kash.md`.
+A shell script that opens a path never named in the recipe does not introduce
+a Kame file dependency. Kame does not infer filesystem reads inside opaque shell
+scripts or binaries. Environment access is covered conservatively by the complete
+child snapshot; Kash `env.NAME` additionally records its named read as a Kame
+operation, as specified in `017-kash.md`.
 
 ## Content identity
 
@@ -182,7 +193,8 @@ Do not render when all of the following hold:
 - Every recorded file still has its recorded content digest.
 - Declared path sets and glob memberships are unchanged, and each member's
   content digest matches.
-- Every recorded environment name still has the value that was read.
+- Every recorded environment name still has the value that was read, and any
+  consumed process environment snapshot is unchanged.
 - Every recorded tool still has the recorded executable content digest.
 - Every output exists and still has the content digest written by the successful
   run.
@@ -323,8 +335,9 @@ new environment for a later root; unrelated roots retain their own environments.
 Native recipe retries and forwarded WASM recipes receive the same values.
 
 Execution reuse records include authored environment assignments as explicit
-inputs and named environment reads as observations, not the complete ambient
-environment. Interpreter identity is the effective selection, independent of
+inputs and named environment reads as observations. Executing a process also
+records the complete effective child environment as a digest observation.
+Interpreter identity is the effective selection, independent of
 whether it was selected explicitly or implicitly.
 Plan and AST JSON expose authored assignments, without publishing the ambient
 environment. This surface scopes shell/Kash recipes and their prerequisite
@@ -345,11 +358,11 @@ as specified in 007/009; a recipe PATH assignment changes child command lookup.
 Assignments do not introduce undeclared Kame variables or perform evaluation
 during registration.
 
-Inherited environment values are what the child process receives. They are not
-dependencies until a read records the name. File freshness follows the
-dependency rule above: an unread inherited value does not invalidate, and a
-recorded environment read invalidates only when that value changes. Selecting a
-shell does not snapshot the process environment. Hosts supply resource bytes
+Inherited environment values are what the child process receives. Changing that
+effective snapshot invalidates a process-executing rule, including when no Kame
+expression reads the changed name. Pure/declarative rules retain selective
+tracking: an unread inherited value does not invalidate them. Selecting a shell
+without executing a process does not consume the snapshot. Hosts supply resource bytes
 and states; the portable engine computes digests and decides freshness.
 Accepted file records validate both consumed inputs and physical output bytes;
 timestamps alone cannot prove reuse. Corrupt records are cache misses.
@@ -394,9 +407,10 @@ bytes is a separate operation used by `cat`.
   rebuild. A modification-time update that leaves the bytes alone does not.
 - A later invocation does not render or execute a fresh file rule when the saved
   dependency set is unchanged, whether the interpreter is Kash or a shell.
-- An unread environment variable changing between invocations does not render
-  or execute. A read of one name invalidates when that value changes, and does
-  not invalidate when another name changes.
+- Changes to the effective child environment invalidate process-executing rules
+  on native and WASM, including shell and Kash recipes. Pure/declarative rules
+  ignore unread names; direct and indirect named reads invalidate when their
+  observed value changes. Equivalent environment assignment order preserves reuse.
 - Changing file bytes without changing the modification time renders and
   executes. Replacing an output's bytes invalidates even when the new timestamp
   is older.
@@ -419,8 +433,8 @@ bytes is a separate operation used by `cat`.
 - Scoped recipe environments inherit through prerequisites, apply local/last
   overrides, isolate roots, and reject conflicting active shared contexts.
 - Equivalent assignment order shares a prerequisite. Changing a recorded
-  environment dependency invalidates a cached task; an unread inherited value
-  does not. Unchanged recorded values reuse the record.
+  environment read or consumed child snapshot invalidates a cached task.
+  Unchanged recorded values reuse the record.
 - Bare tasks run every time; cached task syntax remains distinguishable.
 - Whitespace prerequisite groups schedule independently; comma-separated
   groups wait for all prior prerequisites, preserve failure blocking, and retain
@@ -448,7 +462,8 @@ The snapshot is taken after prerequisites finish and before rendering; repeated
 references, including references through definitions, share it. Identity is the
 content digest from Content identity, not modification time. A successful build
 may skip its next invocation. Changing the recipe source renders again so a new
-read can be discovered. An unread environment value does not.
+read can be discovered. An unread environment value only invalidates when the
+rule consumes a process environment snapshot.
 
 Make's `$?` maps to `@<?`. Pattern stems use explicit captures, for example
 `./build/{stem}.o` and `@(stem)` in its recipe. Output and first-input directories

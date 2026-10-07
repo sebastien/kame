@@ -11,7 +11,9 @@ make dist-wasm >/dev/null
 for backend in native wasm; do
  project="$TMPDIR/$backend"
  mkdir -p "$project"
- if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+  # Bash supplies different '_' and SHLVL values for foreground/background commands.
+  # Keep the child environment equal when comparing a warm build with a watch.
+  if [ "$backend" = native ]; then runner=(env _=kame-environment-test SHLVL=1 "$CLI_BIN"); else runner=(env _=kame-environment-test SHLVL=1 node "$CLI_ROOT/dist/kame.js"); fi
  cat > "$project/Makefile.kmk" <<'KMK'
 root : child local ; env "MODE=first" "MODE=debug" "MESSAGE=spaces; equal=ok"
 child :
@@ -201,8 +203,8 @@ KMK
   printf A > "$signatures/extra"
   "${runner[@]}" -C "$signatures" ./output > "$project/out" 2> "$project/err"
   touch "$signatures/input"
-  UNREAD_SIGNATURE_ENV=changed "${runner[@]}" -C "$signatures" ./output > "$project/out" 2> "$project/err"
-  if [ "$(cat "$signatures/runs")" = x ]; then test-ok "$backend metadata touches and unread environment preserve reuse"; else test-fail "$backend metadata or unread environment reran recipe"; fi
+   "${runner[@]}" -C "$signatures" ./output > "$project/out" 2> "$project/err"
+   if [ "$(cat "$signatures/runs")" = x ]; then test-ok "$backend metadata touches preserve reuse"; else test-fail "$backend metadata touch reran recipe"; fi
   cp -p "$signatures/input" "$signatures/stamp"
   printf B > "$signatures/input"
   touch -r "$signatures/stamp" "$signatures/input"
@@ -232,7 +234,10 @@ KMK
   done
   kill -TERM "$watch_pid" 2>/dev/null || true
   wait "$watch_pid" 2>/dev/null || true
-  if [ "$(cat "$signatures/child-runs")" = xxx ] && [ "$(cat "$signatures/parent-runs")" = x ] && [ "$(rg -c '\[./downstream\] started' "$project/equal-watch-err")" = 1 ]; then test-ok "$backend equal result preserved the downstream generation"; else test-fail "$backend equal result restarted a downstream generation"; fi
+   if [ "$(cat "$signatures/child-runs")" = xxx ] && [ "$(cat "$signatures/parent-runs")" = x ] && [ "$(rg -c '\[./downstream\] started' "$project/equal-watch-err")" = 1 ]; then test-ok "$backend equal result preserved the downstream generation"; else
+     cat "$project/equal-watch-err" >&2
+     test-fail "$backend equal result restarted a downstream generation (child=$(cat "$signatures/child-runs"), parent=$(cat "$signatures/parent-runs"))"
+   fi
   test-step "$backend validates consumed override values"
   KAME_VALUE=first "${runner[@]}" -C "$signatures" ./override > "$project/out" 2> "$project/err"
   KAME_VALUE=second "${runner[@]}" -C "$signatures" ./override > "$project/out" 2> "$project/err"
@@ -264,8 +269,8 @@ KMK
   test-step "$backend cached tasks validate post-execution observations"
   "${runner[@]}" -C "$signatures" read-task > "$project/out" 2> "$project/err"
   touch "$signatures/input"
-  UNREAD_SIGNATURE_ENV=task-change "${runner[@]}" -C "$signatures" read-task > "$project/out" 2> "$project/err"
-  if [ "$(cat "$signatures/task-runs")" = x ]; then test-ok "$backend task reuse ignores metadata touches and unread environment"; else test-fail "$backend task reuse hashed unread inputs"; fi
+   "${runner[@]}" -C "$signatures" read-task > "$project/out" 2> "$project/err"
+   if [ "$(cat "$signatures/task-runs")" = x ]; then test-ok "$backend task reuse ignores metadata touches"; else test-fail "$backend task reuse hashed metadata"; fi
   cp -p "$signatures/extra" "$signatures/stamp"
   printf D > "$signatures/extra"
   touch -r "$signatures/stamp" "$signatures/extra"
@@ -307,9 +312,9 @@ KMK
   printf one > "$signatures/definition-input"
   for target in definition-task ./definition-file; do
     "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
-    UNREAD_SIGNATURE_ENV=definition-change "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
+     "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
   done
-  if [ "$(cat "$signatures/definition-runs")" = x ] && [ "$(cat "$signatures/definition-file-runs")" = x ]; then test-ok "$backend unread environment does not change accepted definition identity"; else test-fail "$backend execution-time definition could not be reused"; fi
+   if [ "$(cat "$signatures/definition-runs")" = x ] && [ "$(cat "$signatures/definition-file-runs")" = x ]; then test-ok "$backend unchanged execution-time definitions reuse their records"; else test-fail "$backend execution-time definition could not be reused"; fi
   printf two > "$signatures/definition-input"
   for target in definition-task ./definition-file; do
     "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
@@ -334,10 +339,74 @@ KMK
   test-step "$backend restores consumed execution-time definition overrides"
   for value in first second; do
     KAME_CONTENT="$value" "${runner[@]}" -C "$signatures" definition-task > "$project/out" 2> "$project/err"
-    KAME_CONTENT="$value" UNREAD_SIGNATURE_ENV=override-change "${runner[@]}" -C "$signatures" definition-task > "$project/out" 2> "$project/err"
+     KAME_CONTENT="$value" "${runner[@]}" -C "$signatures" definition-task > "$project/out" 2> "$project/err"
   done
   if [ "$(cat "$signatures/definition-output")" = second ] && [ "$(cat "$signatures/definition-runs")" = xxxxx ]; then test-ok "$backend execution-time overrides invalidate only when consumed values change"; else test-fail "$backend execution-time override restoration was stale or nonreusable"; fi
- test-step "$backend inherits through dynamically discovered file producers"
+  test-step "$backend fingerprints binary environment reads for shell and Kash"
+  child_env="$project/child-environment"
+  mkdir -p "$child_env"
+  cat > "$child_env/Makefile.kmk" <<'KMK'
+./shell-file : ./input
+	printf %s "$ENV_SIGNATURE_BINARY" > @>; printf x >> shell-file-runs
+task shell-task : ./input
+	printf %s "$ENV_SIGNATURE_BINARY" > shell-task; printf x >> shell-task-runs
+./kash-file : ./input ; [shell: kash]
+	sh ./binary-read kash-file kash-file-runs
+task kash-task : ./input ; [shell: kash]
+	sh ./binary-read kash-task kash-task-runs
+task pure-task : ./input
+	@(out "pure")
+./pure-file : ./input
+	@(yield "pure")
+./overridden : ./input ; env "ENV_SIGNATURE_BINARY=fixed"
+	printf %s "$ENV_SIGNATURE_BINARY" > @>; printf x >> overridden-runs
+READ_ENV = (env "ENV_SIGNATURE_BINARY")
+(indirect-env) = (str READ_ENV)
+task pure-read-task : ./input
+	@(out (indirect-env))
+./pure-read-file : ./input
+	@(yield (indirect-env))
+KMK
+  cat > "$child_env/binary-read" <<'SH'
+printf %s "$ENV_SIGNATURE_BINARY" > "$1"
+printf x >> "$2"
+SH
+  printf input > "$child_env/input"
+  for target in ./shell-file shell-task ./kash-file kash-task; do
+    for value in first first second second; do
+      ENV_SIGNATURE_BINARY="$value" "${runner[@]}" -C "$child_env" "$target" > "$project/out" 2> "$project/err"
+    done
+    output="${target#./}"
+    if [ "$(cat "$child_env/$output")" = second ] && [ "$(cat "$child_env/$output-runs")" = xx ]; then test-ok "$backend $target tracks binary getenv without a Kame read"; else test-fail "$backend $target ignored or failed to reuse its child snapshot"; fi
+  done
+  test-step "$backend tracks loader, PATH and locale inputs"
+  for assignment in "PATH=$PATH:/unused-signature-path" "LD_LIBRARY_PATH=/unused-signature-library" "LC_ALL=C" "LANG=C"; do
+    for repeat in 1 2; do
+      env ENV_SIGNATURE_BINARY=second "$assignment" "${runner[@]}" -C "$child_env" ./shell-file > "$project/out" 2> "$project/err"
+    done
+  done
+  if [ "$(cat "$child_env/shell-file-runs")" = xxxxxx ]; then test-ok "$backend execution environment changes invalidate once each"; else test-fail "$backend loader, locale or PATH snapshot was missing or unstable"; fi
+  test-step "$backend pure/declarative rules ignore unread environment changes"
+  for value in first second; do
+    ENV_SIGNATURE_BINARY="$value" "${runner[@]}" --json -C "$child_env" pure-task > "$project/pure-task-json" 2> "$project/err"
+    ENV_SIGNATURE_BINARY="$value" "${runner[@]}" --json -C "$child_env" ./pure-file > "$project/pure-file-json" 2> "$project/err"
+    ENV_SIGNATURE_BINARY="$value" "${runner[@]}" -C "$child_env" ./overridden > "$project/out" 2> "$project/err"
+  done
+  if jq -e -s 'any(.[]; .cached == true)' "$project/pure-task-json" >/dev/null && ! jq -e -s 'any(.[]; .type == "effect")' "$project/pure-file-json" >/dev/null && [ "$(cat "$child_env/overridden-runs")" = x ]; then test-ok "$backend selective pure reuse and effective overrides"; else test-fail "$backend fingerprinted an unconsumed or overridden environment"; fi
+  test-step "$backend pure rules track indirect named environment reads"
+  for value in first second; do
+    for target in pure-read-task ./pure-read-file; do
+      ENV_SIGNATURE_BINARY="$value" "${runner[@]}" --allow-env=ENV_SIGNATURE_BINARY --allow-read --allow-write -C "$child_env" -f Makefile.kmk "$target" > "$project/out" 2> "$project/err"
+      if [ "$target" = pure-read-task ] && [ "$(cat "$project/out")" != "$value" ]; then test-fail "$backend indirect read task returned stale value"; fi
+      ENV_SIGNATURE_BINARY="$value" UNREAD_SIGNATURE_ENV=changed "${runner[@]}" --allow-env=ENV_SIGNATURE_BINARY --allow-read --allow-write --json -C "$child_env" -f Makefile.kmk "$target" > "$project/pure-read-json" 2> "$project/err"
+      if [ "$target" = pure-read-task ]; then
+        if jq -e -s 'any(.[]; .cached == true)' "$project/pure-read-json" >/dev/null; then test-ok "$backend indirect read task reuses $value despite unread change"; else test-fail "$backend pure indirect read task widened environment tracking"; fi
+      else
+        if [ "$(cat "$child_env/pure-read-file")" = "$value" ] && ! jq -e -s 'any(.[]; .type == "effect")' "$project/pure-read-json" >/dev/null; then test-ok "$backend indirect read file tracks $value and ignores unread change"; else test-fail "$backend pure indirect read file was stale or nonreusable"; fi
+      fi
+    done
+  done
+  test-step "$backend inherits through dynamically discovered file producers"
  MODE=ambient "${runner[@]}" -C "$project" dynamic-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/dynamic-log")" = dynamic ]; then test-ok "$backend dynamic file producer inherits environment"; else test-fail "$backend dynamic producer environment"; fi
  test-step "$backend preserves scoped values through process retries"
