@@ -15,7 +15,7 @@ cli_build
 test-step "help prints the overview on stdout and exits 0"
 cli_run -- --help
 cli_expect_status 0
-cli_expect_stdout_contains "Usage:" "kame do COMMAND" "Build options:" "Commands (kame do COMMAND):"
+cli_expect_stdout_contains "Usage:" "kame do COMMAND" "Build options:" "Commands:"
 cli_expect_stderr_empty
 
 test-step "short help flag"

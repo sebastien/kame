@@ -862,7 +862,7 @@ uint32_t kame_wasm_set_tool_path(uint64_t handle, uint32_t name, uint32_t name_l
       (so_String){(const char *)(uintptr_t)path, (so_int)path_len}) ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
 }
 
-uint32_t kame_wasm_tools_check(uint64_t handle, uint32_t target, uint32_t target_len, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+static uint32_t kame_wasm_tools_check_query(uint64_t handle, uint32_t target, uint32_t target_len, uint32_t dst, uint32_t dst_len, uint32_t out_len, bool report) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
@@ -870,7 +870,8 @@ uint32_t kame_wasm_tools_check(uint64_t handle, uint32_t target, uint32_t target
   *(uint32_t *)(uintptr_t)out_len = 0u;
   if (instance->has_pending) return KAME_WASM_HOST_NEEDED;
   instance->diagnostic_len = 0u;
-  wasm_PureResult result = wasm_Runtime_ToolsCheckJSON(instance->runtime, (so_String){(const char *)(uintptr_t)target, (so_int)target_len});
+  so_String name = (so_String){(const char *)(uintptr_t)target, (so_int)target_len};
+  wasm_PureResult result = report ? wasm_Runtime_ToolsCheckReportJSON(instance->runtime, name) : wasm_Runtime_ToolsCheckJSON(instance->runtime, name);
   if (result.HostNeeded) {
     wasm_PureResult_Free(&result, instance->runtime->Alloc);
     return KAME_WASM_HOST_NEEDED;
@@ -893,6 +894,15 @@ uint32_t kame_wasm_tools_check(uint64_t handle, uint32_t target, uint32_t target
   for (uint32_t i = 0; i < needed; i++) ((uint8_t *)(uintptr_t)dst)[i] = (uint8_t)result.Text.ptr[i];
   wasm_PureResult_Free(&result, instance->runtime->Alloc);
   return KAME_WASM_OK;
+}
+
+uint32_t kame_wasm_tools_check(uint64_t handle, uint32_t target, uint32_t target_len, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  return kame_wasm_tools_check_query(handle, target, target_len, dst, dst_len, out_len, false);
+}
+
+__attribute__((export_name("kame_wasm_tools_check_report")))
+uint32_t kame_wasm_tools_check_report(uint64_t handle, uint32_t target, uint32_t target_len, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  return kame_wasm_tools_check_query(handle, target, target_len, dst, dst_len, out_len, true);
 }
 
 uint32_t kame_wasm_inspection_grant(uint64_t handle, uint32_t capability, uint32_t capability_len, uint32_t name, uint32_t name_len) {

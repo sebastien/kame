@@ -52,8 +52,10 @@ cp "$CLI_OUT" events-a.jsonl
 cli_run --dir deterministic-b -- --json ./build/app
 cli_expect_status 0
 cp "$CLI_OUT" events-b.jsonl
-if diff -u <(jq -cS 'del(.node, .request, .generation, .attempt) | {type, target, data}' events-a.jsonl) \
-	<(jq -cS 'del(.node, .request, .generation, .attempt) | {type, target, data}' events-b.jsonl) >/dev/null; then
+# Independent targets may deliver completions in different orders. Preserve each
+# target's lifecycle ordering and stream payloads, not cross-target interleaving.
+if diff -u <(jq -csS 'group_by(.target) | map(map({type, target, data}))' events-a.jsonl) \
+	<(jq -csS 'group_by(.target) | map(map({type, target, data}))' events-b.jsonl); then
 	test-ok "normalized event streams match"
 else
 	test-fail "event streams differ between fresh copies"

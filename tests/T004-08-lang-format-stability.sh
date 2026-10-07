@@ -20,7 +20,7 @@ fmt_stable_ast() {
 	local file
 	for file in "$dir"/*.km; do
 		[ -e "$file" ] || continue
-		cli_run -- do parse --lang "$lang" "$file"
+		cli_run -- do parse --json --lang "$lang" "$file"
 		if [ "$CLI_STATUS" != 0 ]; then
 			test-fail "parse $(test-relpath "$file") exited $CLI_STATUS"
 			continue
@@ -32,7 +32,7 @@ fmt_stable_ast() {
 			continue
 		fi
 		cp "$CLI_OUT" formatted.km
-		cli_run -- do parse --lang "$lang" formatted.km
+		cli_run -- do parse --json --lang "$lang" formatted.km
 		if [ "$CLI_STATUS" != 0 ]; then
 			test-fail "parse formatted $(test-relpath "$file") exited $CLI_STATUS"
 			continue

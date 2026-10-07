@@ -34,7 +34,7 @@ while IFS=$'\t' read -r name code severity recovery; do
 		;;
 	esac
 	path="$(lang_fixture "invalid/$name")"
-	cli_run -- do parse --lang "$lang" "$path"
+	cli_run -- do parse --json --lang "$lang" "$path"
 	count=$((count + 1))
 	want_status=1
 	if [ "$severity" = "warning" ]; then
@@ -45,10 +45,8 @@ while IFS=$'\t' read -r name code severity recovery; do
 		continue
 	fi
 	if jq -e --arg code "$code" --arg sev "$severity" '
-		((.diagnostics | length) > 0)
-		and (.diagnostics[0].code == $code)
-		and (.diagnostics[0].severity == $sev)
-		and ((.diagnostics[0].message | length) > 0)
+		(if type == "array" then .[0].diagnostic elif has("diagnostic") then .diagnostic else .diagnostics[0] end) as $d |
+		($d.code == $code) and ($d.severity == $sev) and (($d.message | length) > 0)
 	' "$CLI_OUT" >/dev/null 2>&1; then
 		test-ok "$name ($code/$severity)"
 	else
@@ -62,7 +60,7 @@ else
 fi
 
 test-step "invalid diagnostics are printable"
-cli_run -- do parse --lang expr "$(lang_fixture invalid/expr-empty-application.km)"
+cli_run -- do parse --json --lang expr "$(lang_fixture invalid/expr-empty-application.km)"
 cli_expect_status 1
 cli_expect_printable "$CLI_OUT"
 

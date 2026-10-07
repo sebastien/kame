@@ -17,13 +17,13 @@ test-step "explicit target materializes its file rule through the default task"
 fixture_copy basic basic
 (
 	cd basic
-	cli_run -- default
+	cli_run -- --output text default
 	cli_expect_status 0
 	cli_expect_stdout "default done
 "
 	cli_expect_file ./out/greeting.txt "hello
 "
-	cli_expect_stderr_contains "[default] started" "[default] complete"
+	cli_expect_stderr_contains "started [default]" "[default] complete"
 )
 
 test-step "implicit default target"
@@ -46,9 +46,9 @@ test-step "multiple targets run in argument order"
 (
 	cd basic
 	rm -f ./out/greeting.txt
-	cli_run -- touch-only ./out/greeting.txt
+	cli_run -- --output text touch-only ./out/greeting.txt
 	cli_expect_status 0
-	cli_expect_stderr_contains "[touch-only] started" "[touch-only] complete" "[./out/greeting.txt] started" "[./out/greeting.txt] complete"
+	cli_expect_stderr_contains "started [touch-only]" "[touch-only] complete" "started [./out/greeting.txt]" "[./out/greeting.txt] complete"
 	cli_expect_file ./out/greeting.txt "hello
 "
 )

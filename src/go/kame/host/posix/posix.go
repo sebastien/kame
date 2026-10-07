@@ -142,6 +142,12 @@ func km_cli_stderr_is_terminal() c.Int { return 0 }
 func km_cli_stderr_width() c.Int { return 0 }
 
 //so:extern
+func km_cli_stdout_is_terminal() c.Int { return 0 }
+
+//so:extern
+func km_cli_stderr_height() c.Int { return 0 }
+
+//so:extern
 func km_cli_environment_size() c.Int { return 0 }
 
 //so:extern
@@ -320,6 +326,10 @@ func StderrIsTerminal() bool { return km_cli_stderr_is_terminal() != 0 }
 // StderrWidth returns terminal columns, or zero when the stream has no known
 // width (including redirected output).
 func StderrWidth() int { return int(km_cli_stderr_width()) }
+
+func StdoutIsTerminal() bool { return km_cli_stdout_is_terminal() != 0 }
+
+func StderrHeight() int { return int(km_cli_stderr_height()) }
 
 // Environment returns a complete owned snapshot of the process environment.
 func Environment(a mem.Allocator) []string {

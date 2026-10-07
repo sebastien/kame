@@ -74,6 +74,6 @@ for backend in native wasm; do
 	if [ ! -s "$work/err" ] && jq -e -s 'all(.schema == 1 and .type != "diagnostic")' "$work/$backend.jsonl" >/dev/null; then test-ok "$backend structured JSON result"; else test-fail "$backend process JSON"; fi
 done
 test-step "portable process result events"
-for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
+for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt,.elapsedMS)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
 if cmp -s "$work/native.norm" "$work/wasm.norm"; then test-ok "process expression event parity"; else test-fail "process events differ"; diff -u "$work/native.norm" "$work/wasm.norm" || true; fi
 test-end

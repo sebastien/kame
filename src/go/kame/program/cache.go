@@ -317,7 +317,7 @@ func parseRecord(a mem.Allocator, data []byte) cacheRecord {
 	return r
 }
 
-func (p *Program) cacheLoad(entry *instance, fingerprint []byte) cacheRecord {
+func (p *Program) cacheLoad(entry *instance, fingerprint []byte) cacheLookupResult {
 	name := p.cachePath(entry)
 	info := p.Host.Stat(name)
 	maxLog := p.Options.CacheRetainBytes
@@ -327,17 +327,20 @@ func (p *Program) cacheLoad(entry *instance, fingerprint []byte) cacheRecord {
 	maxRecord := int64(cacheManifestMax) + int64(maxLog)*2 + 1024*1024
 	if !info.Exists {
 		mem.FreeString(p.Alloc, name)
-		return cacheRecord{}
+		if info.Failed {
+			return cacheLookupResult{MissReason: "proof-unverifiable"}
+		}
+		return cacheLookupResult{MissReason: "record-missing"}
 	}
 	if info.Info.Size < 0 || info.Info.Size > maxRecord {
 		p.cacheWarning(entry, "CACHE_RECORD", "cache record exceeds the supported size")
 		mem.FreeString(p.Alloc, name)
-		return cacheRecord{}
+		return cacheLookupResult{MissReason: "record-invalid"}
 	}
 	data, err := p.Host.ReadFile(p.Alloc, name)
 	mem.FreeString(p.Alloc, name)
 	if err != nil {
-		return cacheRecord{}
+		return cacheLookupResult{MissReason: "proof-unverifiable"}
 	}
 	r := p.validateRecord(entry, fingerprint, data)
 	mem.FreeSlice(p.Alloc, data)
@@ -345,13 +348,12 @@ func (p *Program) cacheLoad(entry *instance, fingerprint []byte) cacheRecord {
 }
 
 // validateRecord parses and validates one encoded cache record. A malformed,
-// stale, or mismatched record is freed and returns a zero record, which callers
-// treat as a miss.
-func (p *Program) validateRecord(entry *instance, fingerprint []byte, data []byte) cacheRecord {
+// stale, or mismatched record is freed, preserving the established miss reason.
+func (p *Program) validateRecord(entry *instance, fingerprint []byte, data []byte) cacheLookupResult {
 	r := parseRecord(p.Alloc, data)
 	if r.Identity == "" {
 		p.cacheWarning(entry, "CACHE_RECORD", "malformed or unsupported cache record")
-		return r
+		return cacheLookupResult{MissReason: "record-invalid"}
 	}
 	identity := p.cacheIdentity(entry)
 	var digest [32]byte
@@ -361,9 +363,11 @@ func (p *Program) validateRecord(entry *instance, fingerprint []byte, data []byt
 	_ = fingerprint
 	if r.Identity == "" || r.Identity != identity || string(r.Fingerprint[:]) != string(digest[:]) {
 		r.Free(p.Alloc)
+		mem.FreeString(p.Alloc, identity)
+		return cacheLookupResult{MissReason: "record-invalid"}
 	}
 	mem.FreeString(p.Alloc, identity)
-	return r
+	return cacheLookupResult{Record: r, Hit: true}
 }
 
 // cacheLookupResult reports a cached record, a hit, or a pending forwarded
@@ -372,6 +376,8 @@ type cacheLookupResult struct {
 	Record  cacheRecord
 	Hit     bool
 	Waiting bool
+	// MissReason borrows a stable code; classification adds no host observations.
+	MissReason string
 }
 
 // cacheLookup returns the cached record for a task, or reports that a forwarded
@@ -389,11 +395,10 @@ func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLooku
 		if !locked {
 			entry.CacheReady = false
 			p.cacheWarning(entry, "CACHE_LOCK", "cache miss lock unavailable; running without cache coordination")
-			return cacheLookupResult{}
+			return cacheLookupResult{MissReason: "proof-unverifiable"}
 		}
 		entry.cacheLockHeld, entry.cacheLockStripe = true, stripe
-		record := p.cacheLoad(entry, entry.CacheFingerprint[:])
-		return cacheLookupResult{Record: record, Hit: record.Identity != ""}
+		return p.cacheLoad(entry, entry.CacheFingerprint[:])
 	}
 	if entry.cachePending {
 		entry.cachePending = false
@@ -408,7 +413,7 @@ func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLooku
 				completion.Value.Free(p.Alloc)
 				p.releaseCacheLock(entry)
 				entry.CacheReady = false
-				return cacheLookupResult{}
+				return cacheLookupResult{MissReason: "proof-unverifiable"}
 			}
 			completion.Diagnostic.Free(p.Alloc)
 			completion.Value.Free(p.Alloc)
@@ -419,21 +424,21 @@ func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLooku
 			completion.Value.Free(p.Alloc)
 			p.releaseCacheLock(entry)
 			entry.CacheReady = false
-			return cacheLookupResult{}
+			return cacheLookupResult{MissReason: "proof-unverifiable"}
 		}
 		if completion.Value.Kind == core.Nil {
 			completion.Value.Free(p.Alloc)
-			return cacheLookupResult{}
+			return cacheLookupResult{MissReason: "record-missing"}
 		}
 		if completion.Value.Kind != core.Bytes {
 			completion.Value.Free(p.Alloc)
 			p.releaseCacheLock(entry)
 			entry.CacheReady = false
-			return cacheLookupResult{}
+			return cacheLookupResult{MissReason: "proof-unverifiable"}
 		}
-		record := p.validateRecord(entry, entry.CacheFingerprint[:], completion.Value.Bytes)
+		result := p.validateRecord(entry, entry.CacheFingerprint[:], completion.Value.Bytes)
 		completion.Value.Free(p.Alloc)
-		return cacheLookupResult{Record: record, Hit: record.Identity != ""}
+		return result
 	}
 	key := p.cacheKey(entry)
 	p.nextRequest++

@@ -68,6 +68,6 @@ for backend in native wasm; do
 	if [ ! -s "$work/$backend.json.err" ] && jq -e -s 'all(.schema == 1 and .type != "stdout" and .type != "stderr" and .type != "process-started")' "$work/$backend.jsonl" >/dev/null; then test-ok "$backend JSON reports planning without live effects"; else test-fail "$backend JSON dry-run"; fi
 done
 test-step "portable dry-run event parity"
-for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
+for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt,.elapsedMS)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
 if cmp -s "$work/native.norm" "$work/wasm.norm"; then test-ok "dry-run JSON event parity"; else test-fail "dry-run JSON differs"; diff -u "$work/native.norm" "$work/wasm.norm" || true; fi
 test-end

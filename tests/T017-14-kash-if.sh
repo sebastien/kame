@@ -64,7 +64,7 @@ for backend in native wasm; do
 	if [ ! -s "$work/err" ] && jq -e -s 'all(.schema == 1 and .type != "diagnostic")' "$work/$backend.jsonl" >/dev/null && ! grep -q forbidden "$work/$backend.jsonl"; then test-ok "$backend selected JSON effects"; else test-fail "$backend conditional JSON"; fi
 done
 test-step "portable conditional events"
-for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
+for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt,.elapsedMS)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
 if cmp -s "$work/native.norm" "$work/wasm.norm"; then test-ok "conditional event parity"; else test-fail "conditional events differ"; diff -u "$work/native.norm" "$work/wasm.norm" || true; fi
 test-step "conditional AST and canonical formatting parity"
 printf '%s\n' 'if @(:true)' '  (f X) = X' '  if false' '    printf no' '  else' '    printf "%s" @(f "yes")' >"$work/source.kash"

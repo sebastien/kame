@@ -31,7 +31,7 @@ for backend in native wasm; do
  if [ "$(cat "$project/value")" = '@(missing)=literal' ]; then test-ok "$backend repeated CLI precedence and literal data"; else test-fail "$backend precedence"; fi
  "${runner[@]}" do cat -C "$project" --define normal=override normal >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = '"override"' ]; then test-ok "$backend ordinary definition override"; else test-fail "$backend value override"; fi
- "${runner[@]}" do plan -C "$project" --define SDK=/opt/wasi-sdk default >"$project/plan" 2>"$project/error"
+  "${runner[@]}" do plan --json -C "$project" --define SDK=/opt/wasi-sdk default >"$project/plan" 2>"$project/error"
  if python3 - "$project/plan" <<'PY'
 import json,sys
 assert json.load(open(sys.argv[1]))['configuration']['SDK'] == '/opt/wasi-sdk'

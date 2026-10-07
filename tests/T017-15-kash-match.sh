@@ -55,7 +55,7 @@ for backend in native wasm; do
 	if [ ! -s "$work/err" ] && jq -e -s 'all(.schema == 1 and .type != "diagnostic")' "$work/$backend.jsonl" >/dev/null && ! grep -q forbidden "$work/$backend.jsonl"; then test-ok "$backend selected-arm JSON"; else test-fail "$backend match JSON"; fi
 done
 test-step "portable match events, AST and canonical formatting"
-for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
+for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt,.elapsedMS)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
 if cmp -s "$work/native.norm" "$work/wasm.norm"; then test-ok "match event parity"; else test-fail "match events differ"; diff -u "$work/native.norm" "$work/wasm.norm" || true; fi
 printf '%s\n' 'if @(:true)' '  match $(printf main.c)' '    # arm comment' '    case "{name:*}.c"' '      local = name' '      printf "%s" $local' '    else' '      printf no' >"$work/source.kash"
 for operation in parse fmt; do

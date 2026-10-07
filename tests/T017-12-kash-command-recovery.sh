@@ -57,7 +57,7 @@ for backend in native wasm; do
 done
 
 test-step "portable recovery events, AST and canonical formatting"
-for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
+for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt,.elapsedMS)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
 if cmp -s "$work/native.norm" "$work/wasm.norm"; then test-ok "recovery event parity"; else test-fail "recovery events differ"; diff -u "$work/native.norm" "$work/wasm.norm" || true; fi
 printf '%s\n' 'false | cat ? false ? printf $(false ? printf fallback)?' >"$work/source.kash"
 for operation in parse fmt; do

@@ -16,6 +16,7 @@ import (
 // File reuse and publication use one accepted signature record. The host only
 // transports resource facts and opaque record bytes, never freshness decisions.
 type fileContextState struct {
+	RecordReason string
 	Cached        cacheRecord
 	Rendered      renderResult
 	Stored        core.SignatureRecord
@@ -187,6 +188,7 @@ func (p *Program) fileImplementation(entry *instance, rendered renderResult) cor
 func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered renderResult, preflight bool) core.ProducerResult {
 	entry := &p.Instances[index]
 	state := mem.Alloc[fileContextState](p.Alloc)
+	state.RecordReason = "record-missing"
 	state.Rendered = rendered
 	state.Preflight = preflight
 	state.Checkpoint = c.CheckpointDependencies()
@@ -217,7 +219,11 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 	data, err := p.Host.ReadFile(p.Alloc, name)
 	mem.FreeString(p.Alloc, name)
 	if err == nil {
-		core.DecodeSignatureRecord(p.Alloc, data, &state.Stored)
+		state.RecordReason = "record-invalid"
+		if core.DecodeSignatureRecord(p.Alloc, data, &state.Stored) { state.RecordReason = "" }
+	} else {
+		// The portable host returns an opaque read error, not an absence fact.
+		state.RecordReason = "proof-unverifiable"
 	}
 	mem.FreeSlice(p.Alloc, data)
 	state.Phase = 1
@@ -257,8 +263,10 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			return core.ProducerSubmitted
 		}
 		state.Cached = lookup.Record
+		state.RecordReason = lookup.MissReason
 		if lookup.Hit {
-			core.DecodeSignatureRecord(p.Alloc, lookup.Record.Manifest, &state.Stored)
+			state.RecordReason = "record-invalid"
+			if core.DecodeSignatureRecord(p.Alloc, lookup.Record.Manifest, &state.Stored) { state.RecordReason = "" }
 		}
 		state.Phase = 1
 	}
@@ -271,7 +279,10 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			return core.ProducerWaiting
 		}
 		if completion.Diagnostic.Code == "" && completion.Value.Kind == core.Bytes {
-			core.DecodeSignatureRecord(p.Alloc, completion.Value.Bytes, &state.Stored)
+			state.RecordReason = "record-invalid"
+			if core.DecodeSignatureRecord(p.Alloc, completion.Value.Bytes, &state.Stored) { state.RecordReason = "" }
+		} else if completion.Diagnostic.Code != "" {
+			state.RecordReason = "proof-unverifiable"
 		}
 		completion.Value.Free(p.Alloc)
 		completion.Diagnostic.Free(p.Alloc)
@@ -299,6 +310,14 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 	}
 	if state.Preflight {
 		if !state.Stored.Guard.Equal(p.Instances[index].AcceptedRecord.Guard) {
+			entry := &p.Instances[index]
+			if state.RecordReason != "" {
+				p.recordReason(entry, state, "reevaluate")
+			} else if state.Stored.Guard.Mode == core.SignatureUnavailable {
+				p.reason(entry, "reevaluate", "proof-unverifiable", "source/context guard unavailable", core.ResourceKey{}, "")
+			} else {
+				p.reason(entry, "reevaluate", "guard-changed", "source/context guard changed", core.ResourceKey{}, "")
+			}
 			return p.preflightMiss(c, index)
 		}
 		p.Instances[index].AcceptedRecord.Implementation = state.Stored.Implementation
@@ -462,6 +481,17 @@ func (p *Program) finishFileContext(c *core.EngineContext, index int) core.Produ
 		}
 	}
 	if entry.Plan.Freshness != Fresh {
+		decision := "execute"
+		if state.Preflight { decision = "reevaluate" }
+		if p.Options.Force {
+			p.reason(entry, decision, "forced", "forced execution", core.ResourceKey{}, "")
+		} else if entry.Rule.Always {
+			p.reason(entry, decision, "always", "always rule", core.ResourceKey{}, "")
+		} else if !material || p.cacheBlockedByBareTask(entry) {
+			p.reason(entry, decision, "proof-unverifiable", "rule has no reusable material input proof", core.ResourceKey{}, "")
+		} else {
+			p.recordReason(entry, state, decision)
+		}
 		if state.Preflight {
 			return p.preflightMiss(c, index)
 		}

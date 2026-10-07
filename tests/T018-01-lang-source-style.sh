@@ -98,7 +98,8 @@ cases.append(('script', 'when (shell "touch formatter-forbidden")\nV = 1\nend\n'
 def run(runner, command, lang, text):
     file = work / 'style.km'
     file.write_text(text)
-    result = subprocess.run(runner + ['do', command, '--lang', lang, str(file)],
+    options = ['--json'] if command == 'parse' else []
+    result = subprocess.run(runner + ['do', command, *options, '--lang', lang, str(file)],
                             capture_output=True, text=True)
     assert result.returncode == 0, (command, lang, text, result.stderr)
     return result.stdout

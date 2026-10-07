@@ -15,8 +15,8 @@ The interface answers:
 - What concrete action can the user take next?
 
 This specification supersedes presentation rules in
-[009 CLI](docs/spec/009-cli.md), [011 Diagnostics](docs/spec/011-diagnostics.md),
-and [027 Job presentation](docs/spec/027-job-presentation.md) where they differ.
+[009 CLI](009-cli.md), [011 Diagnostics](011-diagnostics.md),
+and [027 Job presentation](027-job-presentation.md) where they differ.
 Those specifications continue to own command semantics, stable diagnostic codes,
 process-display bounds, and change-reason codes. Execution, capability grants,
 freshness, caching, cancellation, and exit statuses are unchanged.
@@ -120,7 +120,7 @@ In human modes:
   output. Diagnostics remain available on stderr.
 - `do fmt` emits canonical source, not highlighted source.
 - `do render` emits the rendered document, not a decorated preview.
-- Value output retains [005 Evaluation](docs/spec/005-evaluation.md).
+- Value output retains [005 Evaluation](005-evaluation.md).
 - Child streams are not prefixed, recolored, line-reassembled, or truncated by
   the presenter. Existing capture limits do not limit live publication.
 - Raw payloads may themselves contain terminal controls. The presenter does not
@@ -175,20 +175,35 @@ stdout/stderr is not retained or replayed inside diagnostic causes.
 
 The upper region is an append-only event log preserved in scrollback. It contains:
 
-- Runtime-established reevaluation and execution reasons.
 - Warnings, diagnostics, notes, and recovery help.
-- Important lifecycle transitions, such as service restart and cancellation.
-- Completion messages and command results appropriate to the command.
+- Terminal target outcomes: successful completion, failure, and cancellation.
+- Command results appropriate to the command.
+
+ANSI target rows lead with `[target-name]`, without redundant `done` or `error`
+prefixes. Successful rows align the measured target duration and `✓` at the right
+edge, for example `40.8s - ✓`, matching the tally's `ELAPSED - STATUS` order.
+All native ANSI durations use seconds with one decimal place, including worker,
+target, cycle, and invocation durations. Duration spans the target lifecycle, including
+dependency work and reuse validation, not just a child's runtime. Missing timing
+is omitted rather than fabricated. Only the outcome
+is green for success or red for failure. Named targets are purple; paths have a
+muted directory prefix and only their basename in bold. Worker tools use gold,
+and warnings/retries use amber. No whole-line color. Long subjects are clipped at grapheme boundaries rather
+than wrapping the outcome. Redirected output keeps unpadded, complete subjects.
+Failure details immediately below the target row include the diagnostic code,
+message, and established exit status or signal.
 
 Reasons retain specification 027's stable codes, certainty, privacy, and
 per-generation deduplication. A reevaluation decision is not a claim that a
 process ran. Resuming an attempt or redrawing a frame never repeats a message.
 
-ANSI may represent routine start/process transitions in live rows instead of also
-logging them. Text logs transitions once because it has no replaceable region.
+ANSI represents routine start/process/service transitions only in live rows, never
+in the persistent log, including when live rendering is unavailable. Routine
+execution reasons are omitted in ANSI. Text logs transitions and reasons once
+because it has no replaceable region.
 Detailed dependency, effect, and process-transition logging belongs under the
 existing verbose policy. Both human modes preserve warnings, diagnostics, and
-default-visible change explanations.
+terminal outcome explanations.
 
 Raw child streams remain separate from structured Kame messages. The CLI does not
 pretend they have target labels when none were emitted by the child.
@@ -197,11 +212,24 @@ pretend they have target labels when none were emitted by the child.
 
 Below the log, the replaceable region contains:
 
-1. An invocation heading: operation, bounded requested targets or source, state,
-   elapsed time, and watch cycle when applicable.
-2. One row per active execution worker, with an optional continuation for bounded
-   command details.
-3. A compact aggregate line, separated by a muted rule when space permits.
+1. A muted separator naming the invocation and its active worker count,
+   for example `build default · workers: 2`.
+2. Only active worker slots, with aligned subject, state, tool, and elapsed fields.
+   Worker durations use the shared decimal-seconds format and align at the right
+   edge, including compact layouts where the tool column is omitted.
+   Completed work disappears; historical idle slots never consume visible rows.
+   Ready services are summarized separately, not shown as occupied workers.
+3. The requested end target/rule immediately above the tally, separate from
+   the dependency targets currently occupying workers. Use the same named-target
+   or path styling as worker subjects, and keep this row visible in compact layouts.
+4. Aggregate build progress below the workers, with `ELAPSED - STATUS` aligned at
+   the right edge of that same line. Empty process counts are omitted; global
+   `building` status does not claim that a child process is currently running.
+
+The native presenter retains its previous frame and overwrites only changed rows.
+Timer updates never erase and rebuild the entire pane. Log batches and their
+replacement footer are published together, with synchronized terminal updates
+where supported; there must be no timed interval with a blank status pane.
 
 Do not repeat version, working directory, source details, or configuration on
 every update. Those details belong in a report or diagnostic when relevant.
@@ -223,8 +251,14 @@ active and may be reused after completion.
 | Attempt | Retry attempt when greater than the initial attempt |
 
 A target-started event alone does not establish an occupied execution worker.
-Waiting parents are summarized as waiting targets, not shown as fake running
-workers. Where execution phase is not observable, use a qualified active state
+The native CLI observes actual scheduler dispatch so synchronous Kame evaluation,
+rendering, and declarative effects can occupy a worker even without a child
+process. It draws the owning target before dispatch, labels it `evaluating` with
+tool `kame`, and releases the slot as soon as that dispatch returns. This observer
+does not claim queued parents are running and does not change scheduling.
+Waiting parents are not shown as fake running workers. A started target may be
+evaluating or validating reuse rather than queued: never infer a waiting tally by
+subtracting process workers from started targets. Where execution phase is not observable, use a qualified active state
 rather than inventing a tool or phase. Additional phase observations must not
 change execution policy.
 

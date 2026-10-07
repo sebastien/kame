@@ -92,8 +92,8 @@ for backend in native wasm; do
         if python3 - "$work/err" <<'PYTIME'
 import re, sys
 text = open(sys.argv[1]).read()
-match = re.search(r'Summary: .* in ([0-9.]+)s', text)
-sys.exit(0 if match and 0 <= float(match.group(1)) < 60 else 1)
+match = re.search(r'(?:done|error|cancelled) run .* ([0-9]+)ms', text)
+sys.exit(0 if match and 0 <= float(match.group(1)) < 60000 else 1)
 PYTIME
         then test-ok "WASM mixed-session failure summary uses invocation elapsed time"; else test-fail "WASM mixed-session summary clock"; fi
     fi
@@ -102,10 +102,18 @@ PYTIME
 	reject PARSE_ERR do run -l expr -c '(cat "a"' -c '"b")'
 	test-step "$backend single-source invocation deadline and service output restrictions"
 	reject RECIPE_TIMEOUT do run --timeout 250 -l kmk -c $'default : second\nfirst :\n\tsleep 0.15\nsecond : first\n\tsleep 0.15\n' default
-	reject EXPR_INVALID do run -C "$work/cwd" -l kmk -c $'service daemon :\n\t@(write "./forbidden-service-output" "payload")\n' daemon
-	reject EXPR_INVALID do run -C "$work/cwd" -l kmk -c $'BAD = (write "./forbidden-service-output" "payload")\nservice daemon :\n\t@(BAD)\n' daemon
-	reject EXPR_INVALID do run -C "$work/cwd" -l kmk -c $'service daemon : ; [shell: kash]\n\t\\@(write "./forbidden-service-output" "payload")\n' daemon
-	if [ ! -e "$work/cwd/forbidden-service-output" ]; then test-ok "$backend service writes rejected before host publication"; else test-fail "$backend service published file output"; fi
+	service_case=0
+	for service_source in \
+		$'service daemon :\n\t@(write "./forbidden-service-output" "payload")\n' \
+		$'BAD = (write "./forbidden-service-output" "payload")\nservice daemon :\n\t@(BAD)\n' \
+		$'service daemon : ; [shell: kash]\n\t\\@(write "./forbidden-service-output" "payload")\n'; do
+		service_case=$((service_case + 1))
+		service_directory="$work/service-$backend-$service_case"
+		mkdir -p "$service_directory"
+		cp "$work/cwd/Makefile.kmk" "$service_directory/Makefile.kmk"
+		reject EXPR_INVALID do run -C "$service_directory" -l kmk -c "$service_source" daemon
+		if [ ! -e "$service_directory/forbidden-service-output" ]; then test-ok "$backend service case $service_case rejects writes before publication"; else test-fail "$backend service case $service_case published file output"; fi
+	done
 	check '"Hello Ada"' do run -C "$work/cwd" "$work/functions.km" -c 'name = "Ada"' -c '(greet name)'
 	test-step "$backend rule and value composition"
 	"${command[@]}" do run --json -l kmk -c 'value = 42' value > "$work/values-json" 2> "$work/err"
@@ -114,7 +122,7 @@ PYTIME
 	if jq -e -s 'any(.[]; .type == "target-value" and .target == "value" and .value.data == "42")' "$work/timed-values-json" >/dev/null; then test-ok "$backend timed sessions preserve selected value JSON"; else test-fail "$backend timed session omitted selected values"; fi
 	"${command[@]}" do run --json -l kmk -c $'a : shared\nb : shared\nshared :\n\t@(out "once")\n' a b > "$work/shared-json" 2> "$work/err"
 	if jq -e -s '[.[] | select(.type == "target-started" and .target == "shared")] | length == 1' "$work/shared-json" >/dev/null; then test-ok "$backend multi-target build retains one shared prerequisite"; else test-fail "$backend multi-target build duplicated shared work"; fi
-	printf 'value = 42\n' | "${command[@]}" do parse --lang kmk > "$work/alias-ast" 2> "$work/err"
+	printf 'value = 42\n' | "${command[@]}" do parse --json --lang kmk > "$work/alias-ast" 2> "$work/err"
 	printf 'value=42\n' | "${command[@]}" do fmt --lang km > "$work/alias-format" 2> "$work/err"
 	if jq -e '.ast.items | length == 1' "$work/alias-ast" >/dev/null && grep -q 'value = 42' "$work/alias-format"; then test-ok "$backend parse/format accept source language aliases"; else test-fail "$backend source language aliases failed"; fi
 	check 'rule"Ada"' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'

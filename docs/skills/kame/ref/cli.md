@@ -76,7 +76,8 @@ Primary options:
 | `-j`, `--jobs N` | Limit concurrent graph nodes; `N` must be positive. |
 | `-n`, `--dry-run` | Render without writing effects or starting processes. |
 | `--force` | Bypass file freshness and cached-task hits. |
-| `--json` | Emit JSON Lines events rather than human output. |
+| `-o`, `--output ansi|text|json` | Select presentation for every command; ANSI is the default and falls back on redirected or limited terminals. |
+| `--json` | Alias for `--output json`; execution uses JSON Lines, static inspection uses its established JSON document. |
 | `--verbose` | Report cache decisions and warnings. |
 | `--shell SHELL` | Set recipe shell executable/arguments; repeatable. |
 | `--env NAME=VALUE` | Add or replace a recipe environment entry; repeatable. |
@@ -106,10 +107,10 @@ kame -n ./build/app
 
 | Command | Output and behavior |
 | --- | --- |
-| `do plan [TARGET...]` | JSON plan(s): selected rule, captures, declared inputs, outputs, and freshness. Does not evaluate body effects or run processes. |
-| `do inputs [--depth N] [TARGET]` | JSON array of input edges. |
-| `do outputs [--depth N] [TARGET]` | JSON array of output edges. |
-| `do span [--expand] [--depth N] [TARGET]` | JSON separating static inputs/outputs from evaluation-dependent inputs. `--expand` evaluates dynamic definitions without executing recipes. |
+| `do plan [TARGET...]` | Human plan(s): selected rule, source, captures, declared inputs, outputs, and freshness; `--json` retains plan records. Does not evaluate body effects or run processes. |
+| `do inputs [--depth N] [TARGET]` | Human input-edge report; `--json` retains the edge array. |
+| `do outputs [--depth N] [TARGET]` | Human output-edge report; `--json` retains the edge array. |
+| `do span [--expand] [--depth N] [TARGET]` | Separate static inputs/outputs from evaluation-dependent inputs; `--json` retains the span document. `--expand` evaluates dynamic definitions without executing recipes. |
 | `do cat [TARGET]` | Materialize one target, then write its exact file bytes or definition value without a newline. |
 
 Depth `0` returns no edges, `1` returns direct edges, and `-1` traverses without
@@ -127,11 +128,10 @@ kame do parse --lang script Makefile.kmk
 ```
 
 `do fmt` defaults to `script` language. `--lang` (`-l`) also accepts `expr`,
-`template`, `rule`, and `kash`. The specified `km`/`kmk` aliases are not accepted
-by current parse/format tools. Use `script` for rule programs and `expr` for
+`template`, `rule`, `km`, `kmk`, and `kash`. Use `script` for rule programs and `expr` for
 individual expressions. Use an explicit mode rather than
-assuming filename inference in language tools. `do parse` prints a stable JSON
-AST with spans. `template` handles inline template syntax, not host-document
+assuming filename inference in language tools. `do parse` prints a human AST tree
+with spans; add `--json` for the stable AST document. `template` handles inline template syntax, not host-document
 formatting; do not apply the source formatter to HTML/config templates.
 
 ## Evaluate a standalone expression

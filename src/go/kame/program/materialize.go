@@ -336,7 +336,16 @@ func (p *Program) Tick(wait int) {
 	}
 	ready := p.Engine.Ready(jobs)
 	for i := range ready {
+		target := ""
+		if p.ObserveWork != nil {
+			index := p.instanceIndex(ready[i])
+			if index >= 0 && !p.Instances[index].Inspection {
+				target = p.Instances[index].Plan.Target
+				p.ObserveWork(ready[i], target, true)
+			}
+		}
 		p.Engine.Dispatch(ready[i])
+		if p.ObserveWork != nil && target != "" { p.ObserveWork(ready[i], target, false) }
 	}
 	slices.Free(p.Alloc, ready)
 	p.observeInstances()

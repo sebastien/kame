@@ -57,9 +57,9 @@ cli_expect_stdout ''
 test-step "explicit checks report the tool reference without executing recipes"
 cli_run -- do tools check --json -c "$tools" root
 cli_expect_status 1
-cli_expect_json_query "$CLI_OUT" '.diagnostic.code' 'TOOL_MISSING'
-cli_expect_json_query "$CLI_OUT" '.diagnostic.target' 'bad'
-if jq -e '.diagnostic.targetStack == ["root", "bad"] and .diagnostic.source == "<command>" and (.diagnostic.tips | length) == 1' "$CLI_OUT" >/dev/null; then
+cli_expect_json_query "$CLI_OUT" 'select(.type == "diagnostic") | .diagnostic.code' 'TOOL_MISSING'
+cli_expect_json_query "$CLI_OUT" 'select(.type == "diagnostic") | .diagnostic.target' 'bad'
+if jq -e -s 'map(select(.type == "diagnostic"))[0] | .diagnostic.targetStack == ["root", "bad"] and .diagnostic.source == "<command>" and (.diagnostic.tips | length) == 1' "$CLI_OUT" >/dev/null; then
 	test-ok "tool check retains the dependency path and recovery action"
 else
 	test-fail "tool check omitted context"

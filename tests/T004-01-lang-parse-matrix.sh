@@ -22,7 +22,7 @@ parse_matrix() {
 	for file in "$dir"/*.km; do
 		[ -e "$file" ] || continue
 		size="$(wc -c <"$file")"
-		cli_run -- do parse --lang "$lang" "$file"
+		cli_run -- do parse --json --lang "$lang" "$file"
 		if [ "$CLI_STATUS" != 0 ]; then
 			test-fail "parse $(test-relpath "$file") exited $CLI_STATUS: $(test_fmt_line "$(cat "$CLI_ERR")")"
 			continue

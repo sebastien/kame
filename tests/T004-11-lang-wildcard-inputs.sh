@@ -20,7 +20,7 @@ KMK
 for backend in native wasm; do
  test-step "$backend wildcard header inputs track files and membership"
  if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
- "${runner[@]}" do parse --lang script "$project/Makefile.kmk" >"$project/ast" 2>"$project/error"
+  "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" >"$project/ast" 2>"$project/error"
  if grep -q '"kind":"wildcard"' "$project/ast"; then test-ok "$backend marks wildcard inputs"; else test-fail "$backend wildcard AST"; fi
  "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" >"$project/fmt" 2>"$project/error"
  if cmp -s "$project/Makefile.kmk" "$project/fmt"; then test-ok "$backend preserves authored wildcard format"; else test-fail "$backend wildcard format"; fi

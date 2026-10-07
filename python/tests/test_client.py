@@ -43,9 +43,10 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         program = await self.client.compile("answer :\n\tprintf hi > answer\n", name="watch.kmk")
         watch = await program.watch("answer")
         events = []
-        while not any(event["type"] == "target-completed" for event in events):
+        while not any(event["type"] == "watch-idle" for event in events):
             events.append(await asyncio.wait_for(watch.__anext__(), timeout=5))
         self.assertTrue(any(event["type"] == "target-started" for event in events))
+        self.assertTrue(any(event["type"] == "target-completed" for event in events))
         pending = asyncio.create_task(watch.__anext__())
         await asyncio.sleep(0.02)
         await watch.close()
@@ -54,7 +55,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(program._processes)
 
     async def test_rule_compile_parses_the_entire_source(self):
-        with self.assertRaises(KameError):
+        with self.assertRaisesRegex(KameError, 'PARSE_ERR'):
             await self.client.compile('default :\nbroken = (\n', name='invalid.kmk')
         program = await self.client.compile('first :\n\t@(out "first")\nsecond :\n\t@(out "second")\n', name='rules.kmk')
         self.assertEqual(len(program.ast['ast']['items']), 2)

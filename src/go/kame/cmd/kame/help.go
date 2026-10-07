@@ -1,210 +1,10 @@
 package main
 
 import (
+	"kame/cli"
+	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
 )
-
-// topHelpBeforeCommands and topHelpAfterCommands bracket the command list,
-// which is rendered from doCommands so dispatch and help share one registry.
-const topHelpBeforeCommands = `kame - a modern build system in the spirit of GNU Make, with a Lisp-like language and a streaming incremental engine that should cover all your needs.
-
-Usage:
-  kame [OPTIONS] [TARGET...]
-  kame [OPTIONS] INPUT... [-- ARG...]
-  kame do COMMAND [OPTIONS] [ARG...]
-  kame -h | --help
-  kame -V | --version
-
-Builds TARGET using rules from a Kame source. With no TARGET, the
-default target is built when defined; otherwise the invocation fails and
-reports the available targets. Source discovery tries Makefile.kmk, then
-make.kmk, then src/kmk/main.kmk. A target-led invocation such as build -c TEXT
-appends inline work to that discovered source; a source-led invocation uses
-only its explicit files and commands.
-
-Build options:
-  -f, --file FILE        append a file source (repeatable)
-  -c, --command TEXT     append Kame source (repeatable; --lang overrides)
-  -C, --directory DIR    set the working directory
-  -j, --jobs N           maximum concurrent nodes (N > 0, default 1)
-  -n, --dry-run          plan and render without executing effects
-      --force            ignore freshness and cached-task hits
-      --watch            poll tracked inputs and rebuild affected roots (native)
-	      --json             emit machine-readable JSON Lines
-	      --color MODE       diagnostic colour: auto, always, or never
-	      --diagnostic-format FORMAT
-	                         diagnostic presentation: human or plain
-      --verbose          report cache decisions and warnings
-      --shell SHELL      recipe shell executable (repeatable)
-      --env NAME=VALUE   add a recipe environment entry (repeatable)
-      --tool NAME=PATH   select an executable for a declared tool (repeatable)
-      --define NAME=VALUE override a declared value with literal text (repeatable)
-      --timeout MS       per-command timeout in milliseconds
-      --retry N          retry failed commands N times
-      --log-limit N      maximum captured bytes per step
-      --capture-limit N  maximum stdout bytes per Kash substitution
-  -h, --help             show this help
-  -V, --version          show the version
-
-Commands (kame do COMMAND):
-
-`
-
-const topHelpAfterCommands = `
-
-Examples:
-  kame                          build the default target
-  kame build test               build several targets
-  kame -f Build.kmk dist        use a specific build file
-  kame do plan dist             inspect a target plan
-  kame do fmt -i Makefile.kmk   format a build file in place
-  kame do run --lang expr -c '(join ["a" "b"] ",")'
-  kame do run Makefile.kmk -c '(out some-symbol)'
-  kame build -c '(report some-symbol)'
-  kame --help                   show the overview
-  kame --version                show the version
-
-Run 'kame do COMMAND --help' for command-specific help.
-`
-
-const doHelpBeforeCommands = `kame do COMMAND [OPTIONS] [ARG...]
-
-Commands for running, inspecting, and working with Kame sources. Direct file
-execution and do run compose ordered files and inline fragments in one session.
-
-Commands:
-
-`
-
-const doHelpAfterCommands = `
-
-Run 'kame do COMMAND --help' for command-specific help.
-`
-
-const planHelpText = `Usage: kame do plan [OPTIONS] [TARGET...]
-
-Print the selected rule, captures, declared inputs and outputs, and freshness
-for each TARGET, without evaluating effects or running processes. Emits one
-JSON object per target. With no TARGET, the default target is selected; when
-it is not defined the command fails and reports the available targets.
-
-Options:
-  -f, --file FILE        use one build file
-  -c, --command TEXT     use inline build source
-  -C, --directory DIR    set the working directory
-      --json             emit machine-readable diagnostics
-  -h, --help             show this help
-`
-
-const catHelpText = `Usage: kame do cat [OPTIONS] [TARGET]
-
-Materialize exactly one TARGET and write its file bytes or definition value to
-stdout without a trailing newline. A task without an artifact fails with
-NO_ARTIFACT. With no TARGET, the default target is selected; when it is not
-defined the command fails and reports the available targets.
-
-Options:
-  -f, --file FILE        use one build file
-  -c, --command TEXT     use inline build source
-  -C, --directory DIR    set the working directory
-      --json             emit machine-readable diagnostics
-  -h, --help             show this help
-`
-
-const inputsHelpText = `Usage: kame do inputs [--depth N] [OPTIONS] [TARGET]
-
-List the declared input paths of one TARGET as a JSON array. --depth 0 returns
-no edges, 1 (the default) returns direct edges, and -1 is unlimited. With no
-TARGET, the default target is selected; when it is not defined the command
-fails and reports the available targets.
-
-Options:
-      --depth N          edge depth: -1, 0, or a positive integer
-  -f, --file FILE        use one build file
-  -c, --command TEXT     use inline build source
-  -C, --directory DIR    set the working directory
-  -h, --help             show this help
-`
-
-const outputsHelpText = `Usage: kame do outputs [--depth N] [OPTIONS] [TARGET]
-
-List the declared output paths of one TARGET as a JSON array. --depth 0 returns
-no edges, 1 (the default) returns direct edges, and -1 is unlimited. With no
-TARGET, the default target is selected; when it is not defined the command
-fails and reports the available targets.
-
-Options:
-      --depth N          edge depth: -1, 0, or a positive integer
-  -f, --file FILE        use one build file
-  -c, --command TEXT     use inline build source
-  -C, --directory DIR    set the working directory
-  -h, --help             show this help
-`
-
-const spanHelpText = `Usage: kame do span [--expand] [--depth N] [OPTIONS] [TARGET]
-
-Show statically known and evaluation-dependent inputs and outputs for one
-TARGET as JSON. --expand evaluates dynamic definitions without running recipes.
-With no TARGET, the default target is selected; when it is not defined the
-command fails and reports the available targets.
-
-Options:
-      --expand           evaluate dynamic definitions
-      --depth N          edge depth: -1, 0, or a positive integer
-  -f, --file FILE        use one build file
-  -c, --command TEXT     use inline build source
-  -C, --directory DIR    set the working directory
-  -h, --help             show this help
-`
-
-const toolsHelpText = `Usage: kame do tools [OPTIONS]
-	   kame do tools check [OPTIONS] TARGETS...
-
-List globally referenced @(x/NAME) tools and their resolved paths.
-Missing tools are reported with an empty path; recipes are never executed.
-Use check to validate only tools in the selected targets' dependency plans.
-Read-only dynamic inputs may be resolved; recipes are never executed.
-`
-
-const runHelpText = `Usage: kame do run [OPTIONS] INPUT... [-- ARG...]
-
-Compose source files and repeated inline fragments in one execution session.
-
-  -f, --file FILE   append a source file
-  -c, --command TEXT append inline source (default km)
-  -l, --lang LANG   forward-scoped parser: km | kmk | kash | expr
-      --entry NAME  select an entry on the preceding km/kmk fragment
-  -C, --directory DIR evaluation working directory
-      --allow-read[=PATH] | --allow-write[=PATH] | --allow-run[=PATH]
-      --allow-env[=NAME]  configure invocation capabilities
-      --capture-limit N  maximum captured substitution bytes
-      --timeout MS   bound the entire invocation
-`
-
-const parseHelpText = `Usage: kame do parse --lang LANG [FILE]
-
-Parse FILE, or stdin when FILE is omitted, and print a stable JSON AST. Source
-spans are included; allocator and pointer details are not.
-
-Options:
-  -l, --lang LANG   required: expr | template | rule | script | kash
-  -h, --help        show this help
-`
-
-const fmtHelpText = `Usage: kame do fmt [--lang LANG] [--comment STYLE] [--indent tabs|spaces] [--indent-width N] [-i | -n] [FILE...]
-
-Format source to stdout, or replace each FILE. With no FILE, read stdin (only
-without -i or -n). -n lists files that would change and exits 1 when any differ.
-
-Options:
-  -l, --lang LANG   expr | template | rule | script | kash (default script)
-      --comment STYLE  template comment syntax; default auto for template sources
-      --indent STYLE tabs (default) or spaces for rule bodies
-      --indent-width N  spaces per indentation level (default 4, range 1-16)
-  -i                replace files in place
-  -n                check for differences without writing
-  -h, --help        show this help
-`
 
 type commandAction int
 
@@ -224,59 +24,49 @@ const (
 )
 
 type commandSpec struct {
-	Name       string
-	TopSummary string
-	DoSummary  string
-	Help       string
-	Action     commandAction
+	Name   string
+	Action commandAction
 }
 
-var doCommands = []commandSpec{
-	{Name: "render", TopSummary: "render a document template", DoSummary: "render a document template", Help: "Usage: kame do render [-c TEXT | FILE] [--define NAME=VALUE]... [--comment STYLE] [--check] [--allow-read[=PATH]]\nRenders raw text without an added newline. No file reads stdin. Template reads need an explicit grant.\n", Action: commandRender},
-	{Name: "run", TopSummary: "execute ordered source fragments in one session", DoSummary: "execute ordered source fragments in one session", Help: runHelpText, Action: commandRun},
-	{Name: "plan", TopSummary: "print the resolved plan without executing", DoSummary: "print the resolved plan without executing", Help: planHelpText, Action: commandPlan},
-	{Name: "cat", TopSummary: "materialize one target and print its artifact", DoSummary: "materialize one target and print its artifact", Help: catHelpText, Action: commandCat},
-	{Name: "inputs", TopSummary: "list declared input paths", DoSummary: "list declared input paths (--depth N)", Help: inputsHelpText, Action: commandInputs},
-	{Name: "outputs", TopSummary: "list declared output paths", DoSummary: "list declared output paths (--depth N)", Help: outputsHelpText, Action: commandOutputs},
-	{Name: "span", TopSummary: "show transitive inputs and outputs", DoSummary: "show transitive inputs and outputs (--expand, --depth N)", Help: spanHelpText, Action: commandSpan},
-	{Name: "tools", TopSummary: "list globally referenced build tools", DoSummary: "list globally referenced build tools", Help: toolsHelpText, Action: commandTools},
-	{Name: "cache", TopSummary: "inspect or remove cache records", DoSummary: "inspect or remove cache records", Help: "Usage: kame do cache list|clean [-C DIR]\nlist prints managed cache records as JSON. clean removes record files from this directory's caches.\n", Action: commandCache},
-	{Name: "parse", TopSummary: "parse a language file and print a JSON AST", DoSummary: "parse a language file and print a JSON AST (--lang LANG)", Help: parseHelpText, Action: commandParse},
-	{Name: "fmt", TopSummary: "format source in place or check it", DoSummary: "format source in place (-i) or check it (-n)", Help: fmtHelpText, Action: commandFormat},
-	{Name: "help", DoSummary: "show this help, or help for one COMMAND", Action: commandHelp},
+var doCommands = [12]commandSpec{
+	{Name: "render", Action: commandRender},
+	{Name: "run", Action: commandRun},
+	{Name: "plan", Action: commandPlan},
+	{Name: "cat", Action: commandCat},
+	{Name: "inputs", Action: commandInputs},
+	{Name: "outputs", Action: commandOutputs},
+	{Name: "span", Action: commandSpan},
+	{Name: "tools", Action: commandTools},
+	{Name: "cache", Action: commandCache},
+	{Name: "parse", Action: commandParse},
+	{Name: "fmt", Action: commandFormat},
+	{Name: "help", Action: commandHelp},
 }
 
-func writeCommandList(out io.Writer, top bool) {
-	for i := range doCommands {
-		summary := doCommands[i].DoSummary
-		if top {
-			summary = doCommands[i].TopSummary
-		}
-		if summary == "" {
-			continue
-		}
-		io.WriteString(out, "  ")
-		io.WriteString(out, doCommands[i].Name)
-		for n := len(doCommands[i].Name); n < 8; n++ {
-			io.WriteString(out, " ")
-		}
-		io.WriteString(out, " ")
-		io.WriteString(out, summary)
-		io.WriteString(out, "\n")
-	}
-}
+func writeTopHelp(out io.Writer) { cli.WriteHelp(out, "", cliDiagnosticJSON, stdoutColor) }
+func writeDoHelp(out io.Writer)  { cli.WriteHelp(out, "do", cliDiagnosticJSON, stdoutColor) }
 
-func writeTopHelp(out io.Writer) {
-	io.WriteString(out, topHelpBeforeCommands)
-	writeCommandList(out, true)
-	io.WriteString(out, topHelpAfterCommands)
-}
-func writeDoHelp(out io.Writer) {
-	io.WriteString(out, doHelpBeforeCommands)
-	writeCommandList(out, false)
-	io.WriteString(out, doHelpAfterCommands)
-}
 func writeVersion(out io.Writer) {
+	if cliDiagnosticJSON {
+		e := json.NewEncoder(out)
+		e.BeginObject()
+		e.Str("schema")
+		e.Int(1)
+		e.Str("type")
+		e.Str("version")
+		e.Str("version")
+		e.Str(version)
+		e.Str("buildID")
+		e.Str(buildID)
+		e.Str("buildTime")
+		e.Str(buildTime)
+		e.Str("buildMode")
+		e.Str(buildMode())
+		e.EndObject()
+		e.Flush()
+		io.WriteString(out, "\n")
+		return
+	}
 	io.WriteString(out, "kame "+version+" ("+buildID+"; "+buildTime+"; "+buildMode()+")\n")
 }
 
@@ -289,22 +79,18 @@ func findCommand(name string) *commandSpec {
 	return nil
 }
 
-// writeCommandHelp prints help for one do command and reports whether the
-// command is known.
 func writeCommandHelp(out io.Writer, command string) bool {
-	spec := findCommand(command)
-	if spec == nil {
+	if findCommand(command) == nil {
 		return false
 	}
-	if spec.Name == "help" {
+	if command == "help" {
 		writeDoHelp(out)
-		return true
+	} else {
+		cli.WriteHelp(out, command, cliDiagnosticJSON, stdoutColor)
 	}
-	io.WriteString(out, spec.Help)
 	return true
 }
 
-// runHelpCommand implements 'kame do help [COMMAND]'.
 func runHelpCommand(args []string, out io.Writer, errOut io.Writer) int {
 	if len(args) != 0 && args[0] == "--" {
 		args = args[1:]
@@ -317,94 +103,26 @@ func runHelpCommand(args []string, out io.Writer, errOut io.Writer) int {
 		return 0
 	}
 	cliError(errOut, "CMD_UNKNOWN", "unknown command: "+args[0])
-	io.WriteString(errOut, "run 'kame do --help' to list commands\n")
+	if !cliDiagnosticJSON {
+		io.WriteString(errOut, "help: run 'kame do --help' to list commands\n")
+	}
 	return 2
 }
 
-// earlyAction selects an action requested before normal dispatch.
-type earlyAction struct {
-	Kind    int
-	Command string
-	Do      bool
-}
-
-const (
-	actionNone = iota
-	actionHelp
-	actionVersion
-)
-
-// detectEarlyAction scans arguments before a "--" separator for -h/--help or
-// -V/--version. It skips the value of every option that takes one, so a help
-// or version token used as an option value is not mistaken for a request.
-func detectEarlyAction(args []string) earlyAction {
-	help := false
-	version := false
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			break
-		}
-		if arg == "-h" || arg == "--help" {
-			help = true
-			continue
-		}
-		if arg == "-V" || arg == "--version" {
-			version = true
-			continue
-		}
-		if optionTakesValue(arg) {
-			i++
-			continue
-		}
-	}
-	if help {
-		return earlyAction{Kind: actionHelp, Command: helpTopic(args), Do: len(args) != 0 && args[0] == "do"}
-	}
-	if version {
-		return earlyAction{Kind: actionVersion}
-	}
-	return earlyAction{}
-}
-
-// helpTopic returns the do command a help request refers to, if any.
-func helpTopic(args []string) string {
-	if len(args) > 1 && args[0] == "do" && args[1] != "help" && len(args[1]) != 0 && args[1][0] != '-' {
-		return args[1]
-	}
-	return ""
-}
-
-// optionTakesValue reports whether arg is an option that consumes the next
-// argument as its value. It covers the union of value options across the CLI.
-func optionTakesValue(arg string) bool {
-	return arg == "-f" || arg == "--file" ||
-		arg == "-c" || arg == "--command" ||
-		arg == "-C" || arg == "--directory" ||
-		arg == "-j" || arg == "--jobs" ||
-		arg == "--shell" || arg == "--env" || arg == "--define" || arg == "--tool" || arg == "--comment" ||
-		arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--capture-limit" ||
-		arg == "-l" || arg == "--lang" || arg == "--entry" || arg == "--depth"
-}
-
-// handleHelpAndVersion writes help or version output when requested. It reports
-// whether it handled the invocation so the caller can skip normal dispatch.
-// Help takes precedence over version.
-func handleHelpAndVersion(args []string, out io.Writer) (bool, int) {
-	action := detectEarlyAction(args)
-	if action.Kind == actionVersion {
+func handleHelpAndVersion(presentation cli.Invocation, out io.Writer) (bool, int) {
+	if presentation.EarlyAction == "version" {
 		writeVersion(out)
 		return true, 0
 	}
-	if action.Kind == actionHelp {
-		if action.Command != "" && writeCommandHelp(out, action.Command) {
+	if presentation.EarlyAction == "help" {
+		if presentation.HelpTopic != "" && writeCommandHelp(out, presentation.HelpTopic) {
 			return true, 0
 		}
-		if action.Do {
+		if presentation.HelpTopic != "" {
 			writeDoHelp(out)
-			return true, 0
+		} else {
+			writeTopHelp(out)
 		}
-		writeTopHelp(out)
 		return true, 0
 	}
 	return false, 0

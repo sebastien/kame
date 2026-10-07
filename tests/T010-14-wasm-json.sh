@@ -24,7 +24,9 @@ cat >"$project/Makefile.kmk" <<'EOF'
 EOF
 
 normalize() {
-	jq -c 'del(.node,.request,.generation,.attempt,.runtimeMS)' | sort
+	# Hosts have different clocks and establish distinct cache-miss qualifications.
+	jq -c 'del(.node,.request,.generation,.attempt,.runtimeMS,.elapsedMS) |
+		if .type == "target-reason" and (.message == "saved record unavailable" or .message == "saved record missing") then .reason = "not-reusable" | .message = "saved record not reusable" else . end' | sort
 }
 
 normalizeProcessDisplay() {

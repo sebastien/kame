@@ -36,7 +36,7 @@ for backend in native wasm; do
 	rm -f "$project/out"
 	"${runner[@]}" -C "$project" default >"$project/$backend.value" 2>"$project/error"
 	if [ "$(cat "$project/$backend.value")" = one,two,three ] && [ "$(cat "$project/out")" = aba ]; then test-ok "$backend continuation values and shell-owned recipe backslashes"; else test-fail "$backend continuation execution"; fi
-	"${runner[@]}" do plan -C "$project" -f Makefile.kmk ./out >"$project/$backend.plan" 2>"$project/error"
+	"${runner[@]}" do plan --json -C "$project" -f Makefile.kmk ./out >"$project/$backend.plan" 2>"$project/error"
 	if jq -e '.inputs == ["./a","./b","./a"]' "$project/$backend.plan" >/dev/null; then test-ok "$backend continued header plan"; else test-fail "$backend header split"; fi
 	"${runner[@]}" do cat -C "$project" -f Makefile.kmk raw >"$project/raw" 2>"$project/error"
 	if [ "$(cat "$project/raw")" = '"first\nsecond"' ]; then test-ok "$backend existing multiline verbatim definition"; else test-fail "$backend multiline raw definition"; fi

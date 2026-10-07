@@ -45,7 +45,7 @@ test-step "file rules emit lifecycle events in order"
 		test-fail "process display bounds or runtime field were wrong"
 	fi
 	cli_expect_event "$CLI_OUT" 'target-completed' '.target == "./text.out"'
-	sequence="$(jq -r 'select(.target == "./text.out") | .type' "$CLI_OUT" | tr '\n' ' ')"
+	sequence="$(jq -r 'select(.target == "./text.out" and .type != "target-reason") | .type' "$CLI_OUT" | tr '\n' ' ')"
 	case "$sequence" in
 	*"target-started process-started process-exited target-value target-completed "*)
 		test-ok "file rule lifecycle sequence"
@@ -56,13 +56,13 @@ test-step "file rules emit lifecycle events in order"
 	esac
 )
 
-test-step "human progress displays the bounded process command and runtime"
+test-step "text progress displays the bounded process command and runtime"
 (
 	cd json-events
 	rm -f ./text.out
-	cli_run ./text.out
+	cli_run -- --output text ./text.out
 	cli_expect_status 0
-	if grep -Eq 'process.*printf' "$CLI_ERR" && grep -Eq 'process finished in [0-9]+ms' "$CLI_ERR"; then
+	if grep -Eq 'process.*printf' "$CLI_ERR" && grep -Eq 'process.*finished in [0-9]+ms' "$CLI_ERR"; then
 		test-ok "stderr shows process command and runtime"
 	else
 		test-fail "stderr is missing process command or runtime"

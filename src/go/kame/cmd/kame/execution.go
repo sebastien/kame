@@ -2,18 +2,19 @@
 package main
 
 import (
+	"kame/cli"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host/posix"
 	"kame/lang/eval"
 	"kame/lang/source"
 	"kame/program"
+	"solod.dev/so/bytes"
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 	"solod.dev/so/slices"
-	"solod.dev/so/time"
 	"solod.dev/so/unicode/utf8"
 )
 
@@ -33,21 +34,34 @@ func configureDiagnosticPresentation(options buildArguments) {
 	if options.DiagnosticFormat != "" {
 		format = options.DiagnosticFormat
 	}
+	if format == "" {
+		format = "plain"
+		if selectedOutput == "ansi" {
+			format = "human"
+		}
+	}
 	diagnosticFormat = format
 	environment := posix.Environment(mem.System)
-	diagnosticColor = resolveDiagnosticColor(color, format, posix.StderrIsTerminal(), environment)
+	diagnosticColor = resolveDiagnosticColor(color, "human", posix.StderrIsTerminal(), environment)
+	stdoutColor = resolveDiagnosticColor(color, "human", posix.StdoutIsTerminal(), environment) == "always"
 	posix.FreeEnvironment(mem.System, environment)
 	diagnosticWidth = posix.StderrWidth()
+	if diagnosticFormat == "plain" {
+		diagnosticWidth = 80
+	}
 	if diagnosticWidth < 20 {
 		diagnosticWidth = 80
 	}
 }
 
-func setDiagnosticColor(color string) {
-	requestedDiagnosticColor = color
+func terminalDashboardAvailable() bool {
+	environment := posix.Environment(mem.System)
+	dumb := environmentValue(environment, "TERM") == "dumb"
+	posix.FreeEnvironment(mem.System, environment)
+	return posix.StderrIsTerminal() && !dumb && posix.StderrWidth() >= 40 && posix.StderrHeight() >= 4
 }
 
-func setDiagnosticFormat(format string) { requestedDiagnosticFormat = format }
+func dashboardDimensions() (int, int) { return posix.StderrWidth(), posix.StderrHeight() }
 
 func resolveDiagnosticColor(color string, format string, terminal bool, environment []string) string {
 	if format != "human" || color == "never" {
@@ -80,7 +94,9 @@ func environmentValue(values []string, name string) string {
 }
 
 func materializeTargets(p *program.Program, targets []string, out io.Writer, errOut io.Writer, json bool) int {
-	startedAt := time.Now().UnixNano()
+	if len(targets) != 0 {
+		setDashboardSubject(targets[0])
+	}
 	var handles []*program.Handle
 	failed := false
 	progress := buildProgress{}
@@ -116,7 +132,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 				}
 			}
 		}
-		p.Tick(10)
+		tickCLIProgram(p, 10, errOut, json)
 		drainEvents(p, out, errOut, json, &progress)
 		for i := range handles {
 			if handles[i] == nil {
@@ -126,7 +142,11 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			// the node open for future invalidations. A CLI target request consumes
 			// that first value rather than waiting for a terminal state.
 			if handles[i].Definition && handles[i].Node.Current {
-				if json { p.ObserveDefinition(handles[i]) } else { writeValue(out, handles[i].Node.Latest) }
+				if json {
+					p.ObserveDefinition(handles[i])
+				} else {
+					writeValue(out, handles[i].Node.Latest)
+				}
 				handles[i].Free()
 				handles[i] = nil
 				remaining--
@@ -153,7 +173,7 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 	// pumping the host until graceful service teardown has reaped its process
 	// group so terminal lifecycle events are published before the CLI returns.
 	for p.Host != nil && p.Host.Active() != 0 {
-		p.Tick(10)
+		tickCLIProgram(p, 10, errOut, json)
 		drainEvents(p, out, errOut, json, &progress)
 	}
 	drainEvents(p, out, errOut, json, &progress)
@@ -166,29 +186,10 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			return 128 - signal
 		}
 	}
-	if !json && progress.Completed+progress.Failed+progress.Cancelled != 0 {
-		elapsedMS := (time.Now().UnixNano() - startedAt) / 1000000
-		colored := startProgressColor(errOut)
-		if progress.Failed == 0 && progress.Cancelled == 0 {
-			fmt.Fprintf(errOut, "Summary: %d %s complete in %d.%03ds\n", progress.Completed, targetWord(progress.Completed), elapsedMS/1000, elapsedMS%1000)
-		} else if progress.Failed == 0 {
-			fmt.Fprintf(errOut, "Summary: %d complete, %d cancelled in %d.%03ds\n", progress.Completed, progress.Cancelled, elapsedMS/1000, elapsedMS%1000)
-		} else {
-			fmt.Fprintf(errOut, "Summary: %d complete, %d failed, %d cancelled in %d.%03ds\n", progress.Completed, progress.Failed, progress.Cancelled, elapsedMS/1000, elapsedMS%1000)
-		}
-		endProgressColor(errOut, colored)
-	}
 	if failed || cancelling {
 		return 1
 	}
 	return 0
-}
-
-func targetWord(count int) string {
-	if count == 1 {
-		return "target"
-	}
-	return "targets"
 }
 
 type buildProgress struct {
@@ -199,89 +200,189 @@ type buildProgress struct {
 }
 
 func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool, progress *buildProgress) {
+	var messages = bytes.NewBuffer(mem.System, nil)
+	destination := errOut
+	if !json && dashboardLive {
+		errOut = &messages
+	}
 	for {
 		next := p.NextEvent()
 		if !next.OK {
-	   // C stdio buffers redirected streams. Publish drained events while the
-	   // process or watch session is still alive, including JSON records.
-	   flushCLIOutput(out)
-	   flushCLIOutput(errOut)
+			redrawDashboard(errOut, progress)
+			publishDashboard(destination, messages.Bytes())
+			messages.Free()
+			// C stdio buffers redirected streams. Publish drained events while the
+			// process or watch session is still alive, including JSON records.
+			flushCLIOutput(out)
+			flushCLIOutput(destination)
 			return
 		}
 		event := next.Event
+		observeWorker(event)
+		observeOutcome(event, progress)
+		invocationCounts = *progress
+		// Routine activity belongs only in the ANSI footer, even in fallback mode.
+		if !json && selectedOutput == "ansi" && (event.Kind == program.ProcessStarted || event.Kind == program.ProcessExited || event.Kind == program.TargetStarted || event.Kind == program.TargetReason || event.Kind == program.ServiceState) {
+			event.Free(mem.System)
+			continue
+		}
 		if json {
 			writeJSONEvent(out, event)
 		} else if event.Kind == program.Stdout {
+			// Preserve event ordering before an independent terminal stream writes.
+			publishDashboard(destination, messages.Bytes())
+			messages.Reset()
+			dashboardRaw(errOut, event.Data, posix.StdoutIsTerminal())
+			publishDashboard(destination, messages.Bytes())
+			messages.Reset()
 			out.Write(event.Data)
 		} else if event.Kind == program.Stderr {
+			dashboardRaw(errOut, event.Data, posix.StderrIsTerminal())
 			errOut.Write(event.Data)
 		} else if event.Kind == program.ProcessStarted {
-			colored := startProgressColor(errOut)
+			clearDashboard(errOut)
+			if dashboardCanDraw() {
+				event.Free(mem.System)
+				continue
+			}
+			cli.Style(errOut, "status.running", "process ", diagnosticColor == "always")
 			writeProcessStarted(errOut, event)
-			endProgressColor(errOut, colored)
 		} else if event.Kind == program.ProcessExited {
-			if event.HasRuntime { colored := startProgressColor(errOut); fmt.Fprintf(errOut, "[%s] process finished in %dms\n", event.Target, event.RuntimeMS); endProgressColor(errOut, colored) }
+			if event.HasRuntime {
+				clearDashboard(errOut)
+				fmt.Fprintf(errOut, "process [%s] finished in %dms\n", event.Target, event.RuntimeMS)
+			}
 		} else if event.Kind == program.TargetStarted {
-			progress.Active++
-			colored := startProgressColor(errOut)
-			fmt.Fprintf(errOut, "[%s] started (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
-			endProgressColor(errOut, colored)
+			clearDashboard(errOut)
+			if dashboardCanDraw() {
+				event.Free(mem.System)
+				continue
+			}
+			fmt.Fprintf(errOut, "started [%s]\n", event.Target)
 		} else if event.Kind == program.TargetCompleted {
-			if progress.Active != 0 {
-				progress.Active--
-			}
-			progress.Completed++
-			colored := startProgressColor(errOut)
-			fmt.Fprintf(errOut, "[%s] complete (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
-			endProgressColor(errOut, colored)
+			writeTargetOutcome(errOut, event, "done", "status.success")
 		} else if event.Kind == program.TargetFailed {
-			if progress.Active != 0 {
-				progress.Active--
-			}
-			progress.Failed++
-			colored := startProgressColor(errOut)
-			fmt.Fprintf(errOut, "[%s] failed (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
-			endProgressColor(errOut, colored)
+			writeTargetOutcome(errOut, event, "error", "status.failed")
 		} else if event.Kind == program.TargetCancelled {
-			if progress.Active != 0 {
-				progress.Active--
-			}
-			progress.Cancelled++
-			colored := startProgressColor(errOut)
-			fmt.Fprintf(errOut, "[%s] cancelled (%d active, %d complete)\n", event.Target, progress.Active, progress.Completed)
-			endProgressColor(errOut, colored)
+			writeTargetOutcome(errOut, event, "cancelled", "status.cancelled")
 		} else if event.Kind == program.CacheWarning {
-			colored := startProgressColor(errOut)
-			fmt.Fprintf(errOut, "warning %s: %s\n", event.Diagnostic.Code, event.Diagnostic.Message)
-			endProgressColor(errOut, colored)
+			emitDiagnostic(errOut, event.Diagnostic, false, p.Parsed.Source)
 		} else if event.Kind == program.ServiceState {
-			colored := startProgressColor(errOut)
-			fmt.Fprintf(errOut, "[%s] service %s (generation %d, attempt %d)\n", event.Target, event.State, event.Generation, event.Attempt)
-			endProgressColor(errOut, colored)
+			clearDashboard(errOut)
+			fmt.Fprintf(errOut, "info [%s] service %s (generation %d, attempt %d)\n", event.Target, event.State, event.Generation, event.Attempt)
+		} else if event.Kind == program.TargetReason {
+			clearDashboard(errOut)
+			cli.Style(errOut, "message.info", "info ", diagnosticColor == "always")
+			fmt.Fprintf(errOut, "[%s] %s: %s", event.Target, event.Decision, event.Message)
+			if event.DependencyKey.Name != "" {
+				fmt.Fprintf(errOut, ": %s", event.DependencyKey.Name)
+			}
+			io.WriteString(errOut, "\n")
 		}
 		event.Free(mem.System)
 	}
 }
 
-func startProgressColor(out io.Writer) bool {
-	if diagnosticColor != "always" { return false }
-	io.WriteString(out, "\x1b[36m")
-	return true
+func writeTargetOutcome(out io.Writer, event program.Event, label string, token string) {
+	clearDashboard(out)
+	if selectedOutput == "ansi" {
+		status := "✓"
+		var timing = bytes.NewBuffer(mem.System, nil)
+		if event.Kind == program.TargetFailed {
+			status = "failed"
+		} else if event.Kind == program.TargetCancelled {
+			status = "cancelled"
+		}
+		for i := range outcomes {
+			if outcomes[i].Node == event.NodeID && outcomes[i].Generation == event.Generation && outcomes[i].Kind == event.Key.Kind && outcomes[i].Name == event.Key.Name && outcomes[i].HasTiming {
+				writeDuration(&timing, outcomes[i].ElapsedMS)
+				io.WriteString(&timing, " - ")
+				break
+			}
+		}
+		io.WriteString(&timing, status)
+		width := 0
+		if posix.StderrIsTerminal() {
+			width = posix.StderrWidth() - 2
+		}
+		writeOutcomeRow(out, event.Target, timing.String(), token, width)
+		timing.Free()
+		if event.Diagnostic.Code != "" {
+			fmt.Fprintf(out, "  %s: %s", event.Diagnostic.Code, event.Diagnostic.Message)
+			if event.Diagnostic.Cause.HasStatus {
+				fmt.Fprintf(out, " (status %d)", event.Diagnostic.Cause.Status)
+			}
+			if event.Diagnostic.Cause.HasSignal {
+				fmt.Fprintf(out, " (signal %d)", event.Diagnostic.Cause.Signal)
+			}
+			io.WriteString(out, "\n")
+		}
+		return
+	}
+	var line = bytes.NewBuffer(mem.System, nil)
+	fmt.Fprintf(&line, "%s [%s]", label, event.Target)
+	if event.Kind == program.TargetCompleted {
+		io.WriteString(&line, " complete")
+	} else if event.Kind == program.TargetFailed {
+		io.WriteString(&line, " failed")
+	} else {
+		io.WriteString(&line, " cancelled")
+	}
+	if event.Diagnostic.Code != "" {
+		fmt.Fprintf(&line, " %s: %s", event.Diagnostic.Code, event.Diagnostic.Message)
+		if event.Diagnostic.Cause.HasStatus {
+			fmt.Fprintf(&line, " (status %d)", event.Diagnostic.Cause.Status)
+		}
+		if event.Diagnostic.Cause.HasSignal {
+			fmt.Fprintf(&line, " (signal %d)", event.Diagnostic.Cause.Signal)
+		}
+	}
+	cli.Style(out, token, line.String(), diagnosticColor == "always")
+	io.WriteString(out, "\n")
+	line.Free()
 }
 
-func endProgressColor(out io.Writer, colored bool) {
-	if colored { io.WriteString(out, "\x1b[0m") }
+func writeOutcomeRow(out io.Writer, target string, status string, token string, width int) {
+	statusWidth := measureDashboardText(status, len(status)*2).Cells
+	var subject = bytes.NewBuffer(mem.System, nil)
+	io.WriteString(&subject, "[")
+	if width >= 20 {
+		writeTargetField(&subject, target, width-statusWidth-4)
+	} else {
+		io.WriteString(&subject, target)
+	}
+	io.WriteString(&subject, "]")
+	writeStyledSubject(out, subject.String())
+	cells := measureDashboardText(subject.String(), len(subject.String())*2).Cells
+	padding := width - cells - statusWidth
+	if padding < 1 {
+		padding = 1
+	}
+	for i := 0; i < padding; i++ {
+		io.WriteString(out, " ")
+	}
+	writeStatusField(out, status, token)
+	io.WriteString(out, "\n")
+	subject.Free()
 }
 
 func writeProcessStarted(out io.Writer, event program.Event) {
-	if event.Program == "" { return }
+	if event.Program == "" {
+		return
+	}
 	fmt.Fprintf(out, "[%s] process %s", event.Target, event.Program)
-	for i := range event.Argv { fmt.Fprintf(out, " %s", event.Argv[i]) }
-	if event.DisplayTruncated { io.WriteString(out, " …") }
+	for i := range event.Argv {
+		fmt.Fprintf(out, " %s", event.Argv[i])
+	}
+	if event.DisplayTruncated {
+		io.WriteString(out, " …")
+	}
 	io.WriteString(out, "\n")
 }
 
 func emitDiagnostic(out io.Writer, d diagnostic.Diagnostic, json bool, src *source.Source) {
+	invocationHadDiagnostic = true
+	clearDashboard(out)
 	if d.Code == "NO_MEMORY" {
 		writeEmergencyDiagnostic(out, json)
 		return
@@ -314,16 +415,17 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 		width = 80
 	}
 	renderSource, loaded := diagnosticSource(d.Source, src)
-	if diagnosticColor == "always" {
-		if d.Severity == diagnostic.Warning {
-			io.WriteString(out, "\x1b[33m")
-		} else {
-			io.WriteString(out, "\x1b[31m")
-		}
+	styled := diagnosticColor == "always" && diagnosticFormat == "human"
+	token := "message.error"
+	if d.Severity == diagnostic.Warning {
+		token = "message.warning"
+	} else if d.Severity == diagnostic.Fatal {
+		token = "message.fatal"
 	}
 	if d.Target != "" {
 		if diagnosticFormat == "human" {
-			fmt.Fprintf(out, "✗ %s failed · %s\n", d.Target, d.Code)
+			cli.Style(out, token, diagnosticSeverity(d.Severity), styled)
+			fmt.Fprintf(out, " [%s] %s\n", d.Target, d.Code)
 		} else {
 			fmt.Fprintf(out, "%s failed: %s\n", d.Target, d.Code)
 		}
@@ -331,11 +433,7 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 			io.WriteString(out, "  required by ")
 			for i := range d.TargetStack {
 				if i != 0 {
-					if diagnosticFormat == "human" {
-						io.WriteString(out, " → ")
-					} else {
-						io.WriteString(out, " -> ")
-					}
+					io.WriteString(out, " -> ")
 				}
 				io.WriteString(out, d.TargetStack[i])
 			}
@@ -344,7 +442,8 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 	}
 	if d.Source != "" && renderSource != nil && d.Source == renderSource.Name {
 		position := renderSource.Position(d.Span.Start)
-		fmt.Fprintf(out, "%s:%d:%d: %s %s: %s\n", d.Source, position.Line, position.Column, diagnosticSeverity(d.Severity), d.Code, d.Message)
+		fmt.Fprintf(out, "%s:%d:%d: ", d.Source, position.Line, position.Column)
+		writeDiagnosticMessage(out, d, token, styled)
 		start := d.Span.Start
 		if start < 0 {
 			start = 0
@@ -355,9 +454,10 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 		lineStart, lineEnd := renderSource.LineBounds(start)
 		writeWrappedExcerpt(out, renderSource.Text, lineStart, lineEnd, start, d.Span.End, width)
 	} else if d.Source != "" {
-		fmt.Fprintf(out, "%s: %s %s: %s\n", d.Source, diagnosticSeverity(d.Severity), d.Code, d.Message)
+		io.WriteString(out, d.Source+": ")
+		writeDiagnosticMessage(out, d, token, styled)
 	} else {
-		fmt.Fprintf(out, "%s %s: %s\n", diagnosticSeverity(d.Severity), d.Code, d.Message)
+		writeDiagnosticMessage(out, d, token, styled)
 	}
 	for i := range d.Notes {
 		io.WriteString(out, "note: ")
@@ -402,12 +502,16 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 		}
 		io.WriteString(out, "\n")
 	}
-	if diagnosticColor == "always" {
-		io.WriteString(out, "\x1b[0m")
-	}
 	if loaded {
 		renderSource.Free(mem.System)
 	}
+}
+
+func writeDiagnosticMessage(out io.Writer, d diagnostic.Diagnostic, token string, styled bool) {
+	cli.Style(out, token, diagnosticSeverity(d.Severity), styled)
+	io.WriteString(out, " ")
+	cli.Style(out, "diagnostic.code", d.Code, styled)
+	io.WriteString(out, ": "+d.Message+"\n")
 }
 
 // diagnosticSource uses the already parsed source when possible. A different
@@ -598,5 +702,7 @@ func writeValue(out io.Writer, value core.Value) {
 }
 
 func flushCLIOutput(out io.Writer) {
-	if file, ok := out.(*os.File); ok { _ = file.Sync() }
+	if file, ok := out.(*os.File); ok {
+		_ = file.Sync()
+	}
 }

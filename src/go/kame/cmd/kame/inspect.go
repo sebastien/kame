@@ -2,9 +2,13 @@ package main
 
 import (
 	"kame/cli"
+	"kame/core"
 	"kame/diagnostic"
+	"kame/lang/source"
 	"kame/program"
+	"solod.dev/so/bytes"
 	"solod.dev/so/encoding/json"
+	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
@@ -38,7 +42,38 @@ func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 			failed = true
 			continue
 		}
-		writePlan(out, result.Plan)
+		if parsed.JSON {
+			writePlan(out, result.Plan)
+		} else {
+			var buffer = bytes.NewBuffer(mem.System, nil)
+			writePlan(&buffer, result.Plan)
+			cli.WriteReport(out, "plan "+result.Plan.Target, buffer.String(), stdoutColor)
+			if result.Plan.Rule != nil && session.Program.Parsed.Source != nil {
+				src := session.Program.Parsed.Source
+				location := session.Program.Eval.LocateSource(src.Name, source.Span{Start: result.Plan.RuleSpan.Start, End: result.Plan.RuleSpan.End})
+				authored, loaded := diagnosticSource(location.Source, src)
+				if authored != nil {
+					position := authored.Position(location.Span.Start)
+					fmt.Fprintf(out, "  source: %s:%d:%d\n", location.Source, position.Line, position.Column)
+				} else {
+					io.WriteString(out, "  source: "+location.Source+"\n")
+				}
+				if loaded {
+					authored.Free(mem.System)
+				}
+				start, end := result.Plan.RuleSpan.Start, result.Plan.RuleSpan.End
+				if start >= 0 && end <= len(src.Text) && end >= start {
+					for j := start; j < end; j++ {
+						if src.Text[j] == '\n' {
+							end = j
+							break
+						}
+					}
+					io.WriteString(out, "  rule: "+src.Text[start:end]+"\n")
+				}
+			}
+			buffer.Free()
+		}
 		result.Plan.Free(mem.System)
 	}
 	if failed {
@@ -77,7 +112,9 @@ func runTools(args []string, out io.Writer, errOut io.Writer) int {
 		program.FreeStrings(mem.System, targets)
 		return status
 	}
-	e := json.NewEncoder(out)
+	var buffer = bytes.NewBuffer(mem.System, nil)
+	defer buffer.Free()
+	e := json.NewEncoder(&buffer)
 	e.BeginArray()
 	for i := range session.Program.Tools {
 		e.BeginObject()
@@ -89,16 +126,22 @@ func runTools(args []string, out io.Writer, errOut io.Writer) int {
 	}
 	e.EndArray()
 	e.Flush()
-	io.WriteString(out, "\n")
+	if parsed.JSON {
+		io.WriteString(out, buffer.String())
+		io.WriteString(out, "\n")
+	} else {
+		cli.WriteReport(out, "tools", buffer.String(), stdoutColor)
+	}
 	return 0
 }
 
-func checkTargetTools(p *program.Program, json bool, targets []string, out io.Writer, errOut io.Writer) int {
+func checkTargetTools(p *program.Program, machine bool, targets []string, out io.Writer, errOut io.Writer) int {
 	failed := false
 	for i := range targets {
 		result := p.RequiredTools(targets[i])
+		available := true
 		if result.Diagnostic.Code != "" {
-			emitDiagnostic(diagnosticWriter(out, errOut, json), result.Diagnostic, json, p.Parsed.Source)
+			emitDiagnostic(diagnosticWriter(out, errOut, machine), result.Diagnostic, machine, p.Parsed.Source)
 			failed = true
 		} else {
 			for j := range result.Uses {
@@ -107,9 +150,16 @@ func checkTargetTools(p *program.Program, json bool, targets []string, out io.Wr
 					continue
 				}
 				d := diagnostic.Diagnostic{Code: "TOOL_MISSING", Severity: diagnostic.Error, Message: "required tool not found or not executable: " + use.Name, Source: use.Source, Span: use.Span, Target: use.Target, TargetStack: use.TargetStack, Tips: []string{"install the tool or add its executable directory to PATH"}}
-				emitDiagnostic(diagnosticWriter(out, errOut, json), d, json, p.Parsed.Source)
+				emitDiagnostic(diagnosticWriter(out, errOut, machine), d, machine, p.Parsed.Source)
 				failed = true
+				available = false
 			}
+		}
+		if machine {
+			p.WriteToolsCheckResult(out, targets[i], result.Uses)
+		} else if available && result.Diagnostic.Code == "" {
+			cli.Style(errOut, "status.success", "done ", diagnosticColor == "always")
+			io.WriteString(errOut, "tools check "+targets[i]+"\n")
 		}
 		result.Free(mem.System)
 	}
@@ -158,10 +208,8 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 				mem.FreeString(mem.System, name)
 			}
 			if readErr == nil {
-				out.Write(data)
-				if len(data) != 0 {
-					mem.FreeSlice(mem.System, data)
-				}
+				writeArtifact(out, targets[0], data)
+				mem.FreeSlice(mem.System, data)
 				started.Diagnostic.Free(mem.System)
 				return 0
 			}
@@ -177,7 +225,11 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 		session.Program.Tick(10)
 		discardEvents(session.Program)
 		if handle.Definition && handle.Node.Current {
-			writeValue(out, handle.Node.Latest)
+			if parsed.JSON {
+				program.WriteJSONEvent(out, program.Event{Kind: program.TargetValue, Target: targets[0], NodeID: handle.Node.ID, Generation: handle.Node.Generation, Attempt: handle.Node.Attempt, Key: handle.Node.Key, Value: handle.Node.Latest})
+			} else {
+				writeValue(out, handle.Node.Latest)
+			}
 			return 0
 		}
 		result := handle.Poll()
@@ -207,10 +259,8 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 			cliError(errOut, "FS_ERR", "cannot read artifact")
 			return 1
 		}
-		out.Write(data)
-		if len(data) != 0 {
-			mem.FreeSlice(mem.System, data)
-		}
+		writeArtifact(out, targets[0], data)
+		mem.FreeSlice(mem.System, data)
 		return 0
 	}
 }
@@ -246,10 +296,12 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 		return 2
 	}
 	var graphDiagnostic diagnostic.Diagnostic
+	var buffer = bytes.NewBuffer(mem.System, nil)
+	defer buffer.Free()
 	if kind == "inputs" || kind == "outputs" {
-		graphDiagnostic = session.Program.WriteGraph(out, targets[0], graph.Depth, kind)
+		graphDiagnostic = session.Program.WriteGraph(&buffer, targets[0], graph.Depth, kind)
 	} else {
-		graphDiagnostic = session.Program.WriteSpan(out, targets[0], graph.Depth, graph.Expand)
+		graphDiagnostic = session.Program.WriteSpan(&buffer, targets[0], graph.Depth, graph.Expand)
 	}
 	if graphDiagnostic.Code != "" {
 		annotateTargetDiagnostic(&graphDiagnostic, targets[0])
@@ -257,7 +309,43 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 		graphDiagnostic.Free(mem.System)
 		return 1
 	}
+	if graph.Build.JSON {
+		io.WriteString(out, buffer.String())
+	} else {
+		var heading = bytes.NewBuffer(mem.System, nil)
+		fmt.Fprintf(&heading, "%s %s · depth %d", kind, targets[0], graph.Depth)
+		cli.WriteReport(out, heading.String(), buffer.String(), stdoutColor)
+		heading.Free()
+	}
 	return 0
+}
+
+func writeArtifact(out io.Writer, target string, data []byte) {
+	if !cliDiagnosticJSON {
+		out.Write(data)
+		return
+	}
+	if len(data) == 0 {
+		program.WriteDataResult(out, "artifact", "", target, "", false, nil, true)
+		return
+	}
+	for start := 0; start < len(data); start += 32768 {
+		end := start + 32768
+		if end > len(data) {
+			end = len(data)
+		}
+		program.WriteDataResult(out, "artifact", "", target, "", false, data[start:end], true)
+	}
+}
+
+// Field borrows a JSON record field; it must not be freed independently.
+func documentField(value core.Value, name string) core.Value {
+	for i := range value.Record {
+		if value.Record[i].Key == name {
+			return value.Record[i].Value
+		}
+	}
+	return core.Value{}
 }
 
 func parseGraphArguments(args []string, errOut io.Writer, allowExpand bool) graphArguments {
@@ -266,6 +354,7 @@ func parseGraphArguments(args []string, errOut io.Writer, allowExpand bool) grap
 		command = "span"
 	}
 	inv := cli.Parse(command, args)
+	applyInvocationPresentation(&inv)
 	if !inv.OK {
 		cliError(errOut, inv.Error.Code, inv.Error.Message)
 		inv.Free()

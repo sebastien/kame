@@ -69,7 +69,7 @@ func TestParseASTGoldens(t *testing.T) {
 
 func TestParseDiagnosticsAndUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if status := Run([]string{"do", "parse", "--lang", "expr"}, &input{text: "["}, &out, &errOut); status != 1 || !strings.Contains(out.String(), "PARSE_ERR") {
+	if status := Run([]string{"do", "parse", "--lang", "expr"}, &input{text: "["}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "PARSE_ERR") || out.Len() != 0 {
 		t.Errorf("invalid source: status=%d output=%q", status, out.String())
 	}
 	out.Reset()
@@ -116,7 +116,7 @@ func TestParseASTPreservesNestedTemplateSpans(t *testing.T) {
 func TestPrimaryInvocationMaterializesInlineSource(t *testing.T) {
 	var out, errOut bytes.Buffer
 	status := Run([]string{"-n", "-l", "kmk", "-c", "task default :\n\techo ignored"}, &input{}, &out, &errOut)
-	if status != 0 || !strings.Contains(errOut.String(), "[default] complete") {
+	if status != 0 || !strings.Contains(errOut.String(), "[default]") || !strings.Contains(errOut.String(), " - ✓") {
 		t.Errorf("primary invocation status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -141,9 +141,9 @@ func TestTargetTakingCommandsSelectDefault(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"do", "plan", "-c", "task default : ./dep\n\techo ignored\ntask dep :\n\techo ignored"}, `"target":"default"`},
+		{[]string{"do", "plan", "--json", "-c", "task default : ./dep\n\techo ignored\ntask dep :\n\techo ignored"}, `"target":"default"`},
 		{[]string{"do", "cat", "-c", `default = "value"`}, "value"},
-		{[]string{"do", "inputs", "-c", "task default : dep\n\techo ignored\ntask dep :\n\techo ignored"}, `["dep"]`},
+		{[]string{"do", "inputs", "--json", "-c", "task default : dep\n\techo ignored\ntask dep :\n\techo ignored"}, `["dep"]`},
 	}
 	for _, test := range tests {
 		var out, errOut bytes.Buffer
@@ -176,7 +176,7 @@ func TestFormatCheckAndStandardInput(t *testing.T) {
 
 func TestPlanDoesNotMaterializeRecipe(t *testing.T) {
 	var out, errOut bytes.Buffer
-	status := Run([]string{"do", "plan", "-c", "task build :\n\techo should-not-run", "build"}, &input{}, &out, &errOut)
+	status := Run([]string{"do", "plan", "--json", "-c", "task build :\n\techo should-not-run", "build"}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(out.String(), "\"type\":\"plan\"") || errOut.Len() != 0 {
 		t.Errorf("plan status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -189,18 +189,18 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "inputs", "-c", "task build : input\n\techo ignored", "build"}, &input{}, &out, &errOut); status != 0 || out.String() != "[\"input\"]\n" {
+	if status := Run([]string{"do", "inputs", "--json", "-c", "task build : input\n\techo ignored", "build"}, &input{}, &out, &errOut); status != 0 || out.String() != "[\"input\"]\n" {
 		t.Errorf("inputs status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
 	graphSource := "task root : middle\n\techo root\ntask middle : leaf\n\techo middle\ntask leaf :\n\techo leaf"
-	if status := Run([]string{"do", "inputs", "--depth", "2", "-c", graphSource, "root"}, &input{}, &out, &errOut); status != 0 || out.String() != "[\"middle\",\"leaf\"]\n" {
+	if status := Run([]string{"do", "inputs", "--json", "--depth", "2", "-c", graphSource, "root"}, &input{}, &out, &errOut); status != 0 || out.String() != "[\"middle\",\"leaf\"]\n" {
 		t.Errorf("recursive inputs status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "outputs", "--depth", "-1", "-c", graphSource, "root"}, &input{}, &out, &errOut); status != 0 || out.String() != "[\"root\",\"middle\",\"leaf\"]\n" {
+	if status := Run([]string{"do", "outputs", "--json", "--depth", "-1", "-c", graphSource, "root"}, &input{}, &out, &errOut); status != 0 || out.String() != "[\"root\",\"middle\",\"leaf\"]\n" {
 		t.Errorf("recursive outputs status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -228,7 +228,7 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {
 	var out, errOut bytes.Buffer
 	source := "task build :\n\t@(x/sh) -c 'true'\n"
-	status := Run([]string{"do", "tools", "-c", source}, &input{}, &out, &errOut)
+	status := Run([]string{"do", "tools", "--json", "-c", source}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(out.String(), `"name":"sh"`) || !strings.Contains(out.String(), `"path":"`) {
 		t.Errorf("tools status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -237,7 +237,7 @@ func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {
 func TestBuildOptionsValidateAndReachRuntime(t *testing.T) {
 	var out, errOut bytes.Buffer
 	status := Run([]string{"-n", "-l", "kmk", "--timeout", "100", "--retry=1", "--log-limit", "8", "--env", "KM_TEST=value", "--shell", "/bin/sh", "--shell", "-c", "-c", "task default :\n\techo ignored", "default"}, &input{}, &out, &errOut)
-	if status != 0 || !strings.Contains(errOut.String(), "[default] complete") {
+	if status != 0 || !strings.Contains(errOut.String(), "[default]") || !strings.Contains(errOut.String(), " - ✓") {
 		t.Errorf("run options status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	if status := Run([]string{"--env", "invalid", "-c", "task default :", "default"}, &input{}, &out, &errOut); status != 2 {
@@ -251,10 +251,13 @@ func TestHelpAndVersion(t *testing.T) {
 		want string
 	}{
 		{[]string{"--help"}, "Usage:"},
-		{[]string{"-h"}, "Commands (kame do COMMAND):"},
+		{[]string{"-h"}, "Commands:"},
 		{[]string{"--version"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode() + ")\n"},
 		{[]string{"-V"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode() + ")\n"},
 		{[]string{"--version", "--help"}, "Usage:"},
+		{[]string{"--help", "--version"}, "Usage:"},
+		{[]string{"-c", "--help", "--version"}, "kame " + version + " ("},
+		{[]string{"-c", "--version", "--help"}, "Usage:"},
 	}
 	for _, test := range tests {
 		var out, errOut bytes.Buffer
@@ -274,6 +277,7 @@ func TestDoNamespaceHelp(t *testing.T) {
 		{[]string{"do", "help"}, "Commands:"},
 		{[]string{"do", "plan", "--help"}, "Usage: kame do plan"},
 		{[]string{"do", "run", "--lang", "expr", "-h"}, "Usage: kame do run"},
+		{[]string{"do", "bogus", "--help"}, "Commands:"},
 	}
 	for _, test := range tests {
 		var out, errOut bytes.Buffer
@@ -362,11 +366,15 @@ func TestJSONEventIncludesStructuredRuntimeContext(t *testing.T) {
 	writeJSONEvent(&out, program.Event{Kind: program.DependencyDiscovered, Target: "build", Key: core.ResourceKey{Kind: core.ResourceTask, Name: "build"}, DependencyID: 9, DependencyKey: core.ResourceKey{Kind: core.ResourceFile, Name: "./input"}})
 	text := out.String()
 	for _, field := range []string{`"resource":{"kind":"task","name":"build"}`, `"dependency":{"node":9,"resource":{"kind":"file","name":"./input"}}`} {
-		if !strings.Contains(text, field) { t.Errorf("JSON event missing %s: %s", field, text) }
+		if !strings.Contains(text, field) {
+			t.Errorf("JSON event missing %s: %s", field, text)
+		}
 	}
 	out.Reset()
 	writeJSONEvent(&out, program.Event{Kind: program.TargetValue, Target: "result", Value: core.Value{Kind: core.String, Text: "value"}})
-	if !strings.Contains(out.String(), `"value":{"kind":"string","data":"value"}`) { t.Errorf("JSON target value = %s", out.String()) }
+	if !strings.Contains(out.String(), `"value":{"kind":"string","data":"value"}`) {
+		t.Errorf("JSON target value = %s", out.String())
+	}
 }
 
 func TestEmptyLongOptionValuesAreInvalid(t *testing.T) {
@@ -404,7 +412,7 @@ func TestSpanExpandReportsExpressionInputs(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
 	source := "SOURCE = ./input\ntask build : @(SOURCE)\n\ttrue\n"
-	if status := Run([]string{"do", "span", "--expand", "-c", source, "build"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), `"static":{"inputs":[],"outputs":["build"]}`) || !strings.Contains(out.String(), `"dynamic":["./input"]`) || !strings.Contains(out.String(), `"expanded":true`) {
+	if status := Run([]string{"do", "span", "--json", "--expand", "-c", source, "build"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), `"static":{"inputs":[],"outputs":["build"]}`) || !strings.Contains(out.String(), `"dynamic":["./input"]`) || !strings.Contains(out.String(), `"expanded":true`) {
 		t.Errorf("expanded span status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }

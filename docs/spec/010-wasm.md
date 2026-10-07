@@ -67,6 +67,11 @@ forward a filesystem or environment request to the embedding host; the host
 steps, services the request, and retries the query, which resumes the same
 resolver rather than restarting it.
 
+The additive `kame_wasm_tools_check_report` query has the same inspection and
+resumption policy, and includes a `tools-check-result` record with required tools
+and their availability after the diagnostics. The CLI uses this report query;
+the original diagnostic-only `kame_wasm_tools_check` contract remains unchanged.
+
 Exact symbol names are implementation details, but the ABI must use fixed-width
 integers, pointer-plus-length byte strings, and caller-owned output buffers.
 No C struct layout containing pointers is exposed directly to JavaScript.

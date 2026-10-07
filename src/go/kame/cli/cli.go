@@ -7,6 +7,7 @@ package cli
 import (
 	"kame/lang/definition"
 	"kame/lang/eval"
+	"solod.dev/so/bytes"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
@@ -30,6 +31,12 @@ type Invocation struct {
 	Watch            bool
 	Force            bool
 	JSON             bool
+	Output           string
+	EarlyAction      string
+	HelpTopic        string
+	// HelpResult owns the rendered response of the internal @help query.
+	// Command and all other option strings continue to borrow argv.
+	HelpResult       string
 	Verbose          bool
 	Color            string
 	DiagnosticFormat string
@@ -59,9 +66,10 @@ type Invocation struct {
 	Error            Diagnostic
 }
 
-// Free releases all parser-owned backing arrays. Option values borrow argv
+// Free releases parser-owned arrays and HelpResult. Option values borrow argv
 // storage; consumers clone what they retain.
 func (inv *Invocation) Free() {
+	mem.FreeString(mem.System, inv.HelpResult)
 	for i := range inv.Inputs {
 		slices.Free(mem.System, inv.Inputs[i].Entries)
 	}
@@ -92,23 +100,52 @@ func (inv *Invocation) fail(code string, message string) {
 }
 
 // Parse parses one command's arguments. command is "" for the primary
-// invocation or the name after "do".
+// invocation or the name after "do". Frontends handle EarlyAction from
+// Presentation before choosing a command; command parsing does not execute it.
 func Parse(command string, args []string) Invocation {
+	options := Presentation(args)
+	if !options.OK || command == "@presentation" {
+		return options
+	}
+	if command == "@help" {
+		topic := ""
+		if len(options.Args) != 0 {
+			topic = options.Args[0]
+		}
+		var buffer = bytes.NewBuffer(mem.System, nil)
+		WriteHelp(&buffer, topic, options.JSON, false)
+		options.Name, options.HelpResult = "@help", cloneText(buffer.String())
+		buffer.Free()
+		return options
+	}
+	inv := parseCommand(command, options.Args)
+	inv.Output, inv.JSON = options.Output, options.JSON
+	inv.Color, inv.DiagnosticFormat = options.Color, options.DiagnosticFormat
+	options.Free()
+	return inv
+}
+
+func parseCommand(command string, args []string) Invocation {
 	if message := RemovedCommandMessage(command); message != "" {
 		inv := Invocation{Name: command}
 		inv.fail("CMD_UNKNOWN", message)
 		return inv
 	}
 	if command == "run" {
-		return ParseRun(args)
+		return parseRun(args, false)
 	}
 	inv := Invocation{Name: command, Directory: ".", Jobs: 1, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
+	if command == "help" {
+		inv.Args = slices.Clone(mem.System, args)
+		inv.OK = true
+		return inv
+	}
 	if command == "cache" {
 		parseCache(&inv, args)
 		return inv
 	}
 	if command == "" && SelectsRun(args) {
-		return ParseRun(args)
+		return parseRun(args, false)
 	}
 	if command == "" && AppendsCommands(args) {
 		return parseRun(args, true)
@@ -195,7 +232,9 @@ func parseBuild(inv *Invocation, args []string) {
 			continue
 		}
 		if runGrant(inv, arg) {
-			if inv.Error.Code != "" { return }
+			if inv.Error.Code != "" {
+				return
+			}
 			continue
 		}
 		if isBuildValueOption(arg) {
@@ -233,6 +272,9 @@ func parseBuild(inv *Invocation, args []string) {
 }
 
 func isBuildValueOption(arg string) bool {
+	if arg == "-o" || arg == "--output" {
+		return true
+	}
 	if arg == "--define" || arg == "--tool" {
 		return true
 	}

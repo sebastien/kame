@@ -31,7 +31,7 @@ def main():
 
         expression = root / 'rules-512.kmk'
         expression.write_text(''.join(f'v{i} = {i}\n' for i in range(512)) + 'task default :\n\t@(out "ok")\n')
-        workloads['parse-512-definitions'] = (['do', 'parse', '--lang', 'script', str(expression)], lambda p: b'v511' in p.stdout)
+        workloads['parse-512-definitions'] = (['do', 'parse', '--json', '--lang', 'script', str(expression)], lambda p: b'v511' in p.stdout)
 
         wide = ' '.join(f'v{i} {i}' for i in range(1000))
         workloads['scope-wide-1000'] = (['do', 'run', '--lang', 'expr', '-c', f'(let [{wide}] v999)'], lambda p: p.stdout == b'999')
@@ -40,7 +40,7 @@ def main():
 
         graph = root / 'graph-512.kmk'
         graph.write_text(''.join(f'task target{i} :\n\t@(out "ok")\n' for i in range(512)))
-        workloads['graph-lookup-512'] = (['do', 'plan', '-f', str(graph), 'target511'], lambda p: json.loads(p.stdout)['target'] == 'target511')
+        workloads['graph-lookup-512'] = (['do', 'plan', '--json', '-f', str(graph), 'target511'], lambda p: json.loads(p.stdout)['target'] == 'target511')
 
         tree = root / 'tree'
         for i in range(128):

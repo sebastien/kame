@@ -64,7 +64,7 @@ PYTIME
  then test-ok "$backend always yields bypass content freshness"; else test-fail "$backend equal always yield was skipped"; fi
  test-step "$backend preserves planning and authored syntax"
  "${runner[@]}" do plan -C "$project" --json ./output >"$project/plan" 2>"$project/err"
- "${runner[@]}" do parse --lang script "$project/Makefile.kmk" >"$project/ast" 2>"$project/err"
+  "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" >"$project/ast" 2>"$project/err"
  "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" >"$project/formatted" 2>"$project/err"
  if jq -e '.always == true and .outputs == ["./output"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.always? == true)' "$project/ast" >/dev/null && rg -q '^always ./one ./two :' "$project/formatted"; then test-ok "$backend plan, AST and formatter preserve always"; else test-fail "$backend always inspection"; fi
  test-step "$backend still verifies output publication"

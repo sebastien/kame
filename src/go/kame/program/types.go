@@ -128,9 +128,14 @@ const (
 	TargetCancelled
 	CacheWarning
 	ServiceState
+	TargetReason
 )
 
 type Event struct {
+	Decision string
+	Reason string
+	Message string
+	Aspect string
 	Kind             EventKind
 	Target           string
 	Key              core.ResourceKey
@@ -146,6 +151,9 @@ type Event struct {
 	Argv             []string
 	RuntimeMS        int64
 	HasRuntime       bool
+	// Native presentation timing; not part of the structured event schema.
+	MonotonicNS      int64
+	HasMonotonic     bool
 	DisplayTruncated bool
 	Span             diagnostic.Span
 	Data             []byte
@@ -179,6 +187,10 @@ type HandleStart struct {
 }
 
 func (e *Event) Free(a mem.Allocator) {
+	mem.FreeString(a, e.Decision)
+	mem.FreeString(a, e.Reason)
+	mem.FreeString(a, e.Message)
+	mem.FreeString(a, e.Aspect)
 	mem.FreeString(a, e.Target)
 	if e.Key.Name != "" {
 		e.Key.Free(a)
@@ -272,6 +284,8 @@ type Program struct {
 	SourceSignature   core.Signature
 	Instances         []instance
 	Events            []Event
+	// Optional observation around actual scheduler dispatch, never a work request.
+	ObserveWork       func(*core.Node, string, bool)
 	nextRequest       int64
 	Pending           []pendingRequest
 	epoch             int64
@@ -327,6 +341,7 @@ type generatedRuleMeta struct {
 	Dependencies []string
 }
 type instance struct {
+	Reasons []Event
 	Service                ServiceConfig
 	ServiceState           string
 	ServiceProcessID       int64

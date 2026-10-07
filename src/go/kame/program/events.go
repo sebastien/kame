@@ -8,6 +8,13 @@ import (
 )
 
 func (p *Program) emit(event Event) {
+	if p.Host != nil && (event.Kind == TargetStarted || event.Kind == TargetCompleted || event.Kind == TargetFailed || event.Kind == TargetCancelled) {
+		event.MonotonicNS, event.HasMonotonic = p.Host.Monotonic(), true
+	}
+	event.Decision = cloneText(p.Alloc, event.Decision)
+	event.Reason = cloneText(p.Alloc, event.Reason)
+	event.Message = cloneText(p.Alloc, event.Message)
+	event.Aspect = cloneText(p.Alloc, event.Aspect)
 	event.Target = cloneText(p.Alloc, event.Target)
 	event.Program = cloneText(p.Alloc, event.Program)
 	event.Argv = cloneStrings(p.Alloc, event.Argv)

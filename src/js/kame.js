@@ -32,6 +32,7 @@ function installSignals() {
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {
       if (interruptedStatus) return;
+      clearDashboard();
       interruptedStatus = 128 + (osConstants.signals[signal] ?? 0);
       syncOutputReaders();
       const reaped = [...activeChildren].map((child) => new Promise((resolve) => child.once('close', resolve)));
@@ -127,6 +128,22 @@ function version() {
 }
 
 let jsonMode = false;
+let outputMode = 'ansi';
+let outputColor = false;
+let presentationCommand = 'build';
+let presentationSubject = '';
+let invocationHadDiagnostic = false;
+let cliWorkers = [];
+let dashboardRows = 0;
+let dashboardWidth = 0, dashboardHeight = 0;
+let dashboardUnsafe = false;
+let dashboardPending = false;
+let dashboardLast = 0;
+let terminalOutcomes = new Set();
+let startedOutcomes = new Set();
+let formatCounts = { completed: 0, failed: 0, cancelled: 0 };
+let watchIdle = false;
+let watchCycle = 0, watchCycleStatus = '', watchCycleElapsed = 0;
 // lastDiagnostic holds the rich diagnostic from the most recent failed target
 // event, so the trailing --json diagnostic matches the native duplicate.
 let lastDiagnostic = null;
@@ -142,22 +159,156 @@ let primarySource = null;
 const sourceTexts = new Map();
 
 function diagnostic(code, message) {
+  invocationHadDiagnostic = true;
+  clearDashboard();
   if (jsonMode) {
     const detail = lastDiagnostic ?? { code, severity: 'error', message };
     stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
     return;
   }
-  stderr.write(`error ${code}: ${message}\n`);
+  stderr.write(renderDiagnostic({ code, severity: 'error', message }, primarySource, 80));
 }
 
 // resolveColor mirrors the native CLI: color only applies to the human format
 // and respects NO_COLOR, CLICOLOR, CLICOLOR_FORCE, TERM, and a TTY check.
-function resolveColor(color, format) {
+function resolveColor(color, format, destination = stderr) {
   if (format !== 'human' || color === 'never') return false;
   if (color === 'always') return true;
   if (env.NO_COLOR || env.CLICOLOR === '0' || env.TERM === 'dumb') return false;
   if (env.CLICOLOR_FORCE && env.CLICOLOR_FORCE !== '0') return true;
-  return stderr.isTTY === true;
+  return destination.isTTY === true;
+}
+
+const semanticStyles = {
+  heading: '1', 'value.target': '1', 'value.symbol': '1', 'value.tool': '1', 'value.option': '1', 'diagnostic.code': '1',
+  'value.path': '36', location: '36', 'message.info': '36', 'status.running': '36', 'progress.complete': '36',
+  'message.tip': '1;36', 'message.warning': '93', 'status.retrying': '93', 'status.cancelled': '33',
+  'message.error': '1;31', 'message.fatal': '1;31', 'status.failed': '1;31',
+  'status.success': '32', 'status.reused': '32', 'status.ready': '32', 'text.muted': '2', structure: '2',
+};
+function styled(token, text, enabled = diagnosticColor) {
+  const code = enabled && semanticStyles[token];
+  return code ? `\x1b[${code}m${text}\x1b[0m` : text;
+}
+function configurePresentation(inv) {
+  outputMode = inv.output || 'ansi';
+  jsonMode = outputMode === 'json' || inv.json === true;
+  diagnosticFormat = inv.diagnosticFormat || (outputMode === 'ansi' ? 'human' : 'plain');
+  diagnosticColor = resolveColor(inv.color, 'human');
+  outputColor = resolveColor(inv.color, 'human', stdout);
+}
+function writeReport(heading, document) {
+  const data = typeof document === 'string' || Buffer.isBuffer(document) || document instanceof Uint8Array ? JSON.parse(Buffer.from(document).toString('utf8')) : document;
+  if (jsonMode) { stdout.write(`${JSON.stringify(data)}\n`); return; }
+  stdout.write(`${styled('heading', heading, outputColor)}\n`);
+  const write = (value, label = '', depth = 1, root = false) => {
+    if (value && typeof value === 'object') {
+      if (label) { stdout.write(`${'  '.repeat(depth)}${styled('value.symbol', label, outputColor)}\n`); depth++; }
+      if (Array.isArray(value)) {
+        if (!value.length) stdout.write(`${'  '.repeat(depth)}${depth === 1 ? heading === 'tools' ? 'no referenced tools' : heading === 'cache list' ? 'no managed records' : heading.startsWith('inputs ') ? 'no inputs' : heading.startsWith('outputs ') ? 'no outputs' : 'no entries' : '(none)'}\n`);
+        for (const item of value) write(item, '', depth);
+      } else for (const [key, item] of Object.entries(value)) { if (!root || (key !== 'schema' && key !== 'type')) write(item, key, depth); }
+      return;
+    }
+    const plain = ['', 'source', 'path', 'target', 'name', 'kind', 'freshness', 'backend', 'key'].includes(label) && value !== '' && !/[\s\x00-\x1f\x7f]/u.test(value);
+    let text = value === null ? ':nil' : typeof value === 'boolean' ? value ? ':true' : ':false' : typeof value === 'string' ? plain ? value : JSON.stringify(value) : String(value);
+    if (label === 'path' && value === '') text = 'unavailable';
+    stdout.write(`${'  '.repeat(depth)}${label ? `${styled('value.symbol', label, outputColor)}: ` : ''}${styled(['source', 'path', 'target', ''].includes(label) ? 'value.path' : 'value.literal', text, outputColor)}\n`);
+  };
+  write(data, '', 1, true);
+}
+function writeDataResult(type, fields, bytes, includeData = true) {
+  const record = { schema: 1, type, ...fields };
+  if (includeData) {
+    const data = Buffer.from(bytes ?? '');
+    const text = data.toString('utf8');
+    const valid = Buffer.from(text, 'utf8').equals(data);
+    record.data = valid ? text : data.toString('base64'); record.encoding = valid ? 'utf-8' : 'base64';
+  }
+  stdout.write(`${JSON.stringify(record)}\n`);
+}
+function liveDashboard() {
+  return !jsonMode && outputMode === 'ansi' && stderr.isTTY === true && env.TERM !== 'dumb' && stderr.columns >= 40 && stderr.rows >= 4 && !dashboardUnsafe && !dashboardPending;
+}
+function clearDashboard() {
+  if (dashboardRows && (stderr.columns !== dashboardWidth || stderr.rows !== dashboardHeight)) {
+    // Reflow makes the old region's coordinates unsafe to erase.
+    dashboardRows = 0; dashboardUnsafe = true; stderr.write('\n'); return;
+  }
+  if (dashboardRows) stderr.write('\x1b[1A\r\x1b[2K'.repeat(dashboardRows));
+  dashboardRows = 0;
+}
+function rawPublication(destination, bytes) {
+  if (destination.isTTY) {
+    clearDashboard();
+    const data = Buffer.from(bytes);
+    if (data.includes(27) || data.includes(13)) dashboardUnsafe = true;
+    if (data.length) dashboardPending = data.at(-1) !== 10;
+  }
+  destination.write(bytes);
+}
+function shortField(text, width) {
+  if (/[\x00-\x1f\x7f]/u.test(text)) return '(see log)';
+  const segments = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map(({ segment }) => ({
+    segment, size: /[\ufe0f\u{1f1e6}-\u{1f1ff}]/u.test(segment) ? 2 : Math.max(...[...segment].map((rune) => displayWidth(rune.codePointAt(0)))),
+  }));
+  if (segments.reduce((total, item) => total + item.size, 0) <= width) return text;
+  let result = '', cells = 0;
+  for (const { segment, size } of segments) {
+    if (cells + size > width - 1) break;
+    result += segment; cells += size;
+  }
+  return `${result}…`;
+}
+function redrawDashboard() {
+  if (dashboardRows && (stderr.columns !== dashboardWidth || stderr.rows !== dashboardHeight)) { clearDashboard(); return; }
+  if (!liveDashboard()) { clearDashboard(); return; }
+  if (!buildProgress || stdout.writableNeedDrain || stderr.writableNeedDrain) return;
+  if (watchIdle && dashboardRows) return;
+  const now = performance.now();
+  if (now - dashboardLast < 100) return;
+  dashboardLast = now;
+  const erase = '\x1b[1A\r\x1b[2K'.repeat(dashboardRows);
+  const width = stderr.columns, height = stderr.rows;
+  dashboardWidth = width; dashboardHeight = height;
+  const heading = `${presentationCommand}${presentationSubject ? ` ${shortField(presentationSubject, Math.floor(width / 3))}` : ''}${watchCycle ? ` · cycle ${watchCycle}` : ''}`;
+  const lines = [styled('heading', shortField(watchIdle ? `${heading} · waiting · ${watchCycleStatus} · ${watchCycleElapsed}ms` : `${heading} · active · ${Math.max(0, Math.floor(performance.now() - buildStartedAt))}ms`, width - 2))];
+  let running = 0, ready = 0, hidden = 0;
+  for (let i = 0; i < cliWorkers.length; i++) {
+    const worker = cliWorkers[i];
+    if (!worker) continue;
+    if (worker.ready) { ready++; continue; }
+    running++;
+    if (lines.length >= height - 3) { hidden++; continue; }
+    lines.push(shortField(`  ${i}  ${shortField(worker.target, Math.floor(width / 2) - 8)}  ${worker.state || 'running'}${width >= 80 ? `  ${shortField(worker.program, Math.floor(width / 4) - 8)}  ${Math.max(0, Math.floor(now - worker.started))}ms` : ''}`, width - 2));
+  }
+  lines.push(shortField(`${running} running · ${Math.max(0, buildProgress.active - running - ready)} waiting · ${buildProgress.completed} done · ${buildProgress.failed} failed`, width - 2));
+  if (hidden || ready) lines.push(shortField(`${hidden} hidden active · ${ready} ready services`, width - 2));
+  stderr.write(`${erase}${lines.join('\n')}\n`); dashboardRows = lines.length;
+}
+function observeCLIEvent(event) {
+  if (!buildProgress) buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
+  const identity = `${event.resource?.kind}:${event.resource?.name ?? event.target}:${event.node}:${event.generation}`;
+  if (event.type === 'target-started' && !startedOutcomes.has(identity) && !terminalOutcomes.has(identity)) { startedOutcomes.add(identity); buildProgress.active++; }
+  if (['target-completed', 'target-failed', 'target-cancelled'].includes(event.type)) {
+    if (!terminalOutcomes.has(identity)) {
+      terminalOutcomes.add(identity);
+      if (startedOutcomes.has(identity) && buildProgress.active) buildProgress.active--;
+      buildProgress[event.type === 'target-completed' ? 'completed' : event.type === 'target-failed' ? 'failed' : 'cancelled']++;
+    }
+  }
+  if (event.type === 'process-started' && event.program) {
+    if (cliWorkers.some((worker) => worker && worker.node === event.node && worker.target === event.target && worker.request === event.request && worker.generation === event.generation && worker.attempt === event.attempt && worker.program === event.program)) return;
+    let slot = cliWorkers.findIndex((worker) => !worker);
+    if (slot < 0) slot = cliWorkers.length;
+    cliWorkers[slot] = { node: event.node, target: event.target, generation: event.generation, attempt: event.attempt, request: event.request, program: event.program, started: performance.now(), ready: false };
+  }
+  for (let i = 0; i < cliWorkers.length; i++) {
+    const worker = cliWorkers[i];
+    if (!worker || worker.node !== event.node || worker.target !== event.target || worker.generation !== event.generation || event.attempt < worker.attempt) continue;
+    if (event.type === 'service-state') { worker.ready = ['ready', 'checking-health'].includes(event.state); worker.state = ['stopping', 'restarting'].includes(event.state) ? event.state === 'stopping' ? 'stopping' : 'retrying' : ''; }
+    if ((event.type === 'process-exited' && (event.request === undefined || worker.request === event.request)) || ['target-completed', 'target-failed', 'target-cancelled'].includes(event.type)) cliWorkers[i] = null;
+  }
 }
 
 // cacheEntryPath stores one opaque host cache record under the project cache
@@ -385,12 +536,14 @@ function renderDiagnostic(d, source, width) {
   if (width < 20) width = 80;
   let out = '';
   const renderSource = diagnosticSource(d.source, source);
-  if (diagnosticColor) out += d.severity === 'warning' ? '\x1b[33m' : '\x1b[31m';
+  const style = diagnosticColor && diagnosticFormat === 'human';
+  const label = styled(`message.${severityName(d.severity)}`, severityName(d.severity), style);
+  const code = styled('diagnostic.code', d.code, style);
   if (d.target) {
-    if (diagnosticFormat === 'human') out += `✗ ${d.target} failed · ${d.code}\n`;
+    if (diagnosticFormat === 'human') out += `${label} [${d.target}] ${code}\n`;
     else out += `${d.target} failed: ${d.code}\n`;
     if (d.targetStack && d.targetStack.length > 1) {
-      out += `  required by ${d.targetStack.join(diagnosticFormat === 'human' ? ' → ' : ' -> ')}\n`;
+      out += `  required by ${d.targetStack.join(' -> ')}\n`;
     }
   }
   const span = d.span ?? { start: 0, end: 0 };
@@ -398,16 +551,16 @@ function renderDiagnostic(d, source, width) {
     const sourceStart = sourceIndex(renderSource.text, span.start);
     const sourceEnd = sourceIndex(renderSource.text, span.end);
     const pos = sourcePosition(renderSource.text, sourceStart);
-    out += `${d.source}:${pos.line}:${pos.column}: ${severityName(d.severity)} ${d.code}: ${d.message}\n`;
+    out += `${d.source}:${pos.line}:${pos.column}: ${label} ${code}: ${d.message}\n`;
     let start = sourceStart;
     if (start < 0) start = 0;
     if (start > renderSource.text.length) start = renderSource.text.length;
     const [lineStart, lineEnd] = lineBounds(renderSource.text, start);
     out += wrappedExcerpt(renderSource.text, lineStart, lineEnd, start, sourceEnd, width);
   } else if (d.source) {
-    out += `${d.source}: ${severityName(d.severity)} ${d.code}: ${d.message}\n`;
+    out += `${d.source}: ${label} ${code}: ${d.message}\n`;
   } else {
-    out += `${severityName(d.severity)} ${d.code}: ${d.message}\n`;
+    out += `${label} ${code}: ${d.message}\n`;
   }
   for (const note of d.notes ?? []) out += `note: ${note}\n`;
   for (const related of d.related ?? []) {
@@ -445,7 +598,6 @@ function renderDiagnostic(d, source, width) {
     if (d.cause.signal !== undefined) out += ` (signal ${d.cause.signal})`;
     out += '\n';
   }
-  if (diagnosticColor) out += '\x1b[0m';
   return out;
 }
 
@@ -464,51 +616,59 @@ function diagnosticSource(name, primary) {
 function humanEvent(bytes) {
   const event = JSON.parse(new TextDecoder().decode(bytes));
   if (event.type === 'target-completed' && event.resource?.kind === 'definition') return;
-  if (event.type === 'stdout') { stdout.write(eventData(event)); return; }
-  if (event.type === 'stderr') { stderr.write(eventData(event)); return; }
+  if (event.type === 'stdout') { rawPublication(stdout, eventData(event)); return; }
+  if (event.type === 'stderr') { rawPublication(stderr, eventData(event)); return; }
+  if (outputMode === 'ansi' && ['target-reason', 'process-started', 'process-exited', 'target-started', 'service-state'].includes(event.type)) return;
+  if (!['target-reason', 'process-started', 'process-exited', 'target-started', 'target-completed', 'target-failed', 'target-cancelled', 'service-state', 'cache-warning'].includes(event.type)) return;
+  clearDashboard();
+  if (event.type === 'target-reason') {
+    stderr.write(`${styled('message.info', 'info')} [${event.target}] ${event.decision}: ${event.message}${event.dependency?.resource?.name ? `: ${event.dependency.resource.name}` : ''}\n`);
+    return;
+  }
   if (event.type === 'process-started') {
+    if (liveDashboard()) return;
     if (event.program) {
       const argv = Array.isArray(event.argv) ? event.argv : [];
-      stderr.write(`[${event.target}] process ${event.program}${argv.length ? ` ${argv.join(' ')}` : ''}${event.displayTruncated ? ' …' : ''}\n`);
+      stderr.write(`${styled('status.running', 'process')} [${event.target}] process ${event.program}${argv.length ? ` ${argv.join(' ')}` : ''}${event.displayTruncated ? ' …' : ''}\n`);
     }
     return;
   }
   if (event.type === 'process-exited') {
-    if (event.runtimeMS !== undefined) stderr.write(`[${event.target}] process finished in ${event.runtimeMS}ms\n`);
+    if (event.runtimeMS !== undefined) stderr.write(`process [${event.target}] finished in ${event.runtimeMS}ms\n`);
     return;
   }
   if (event.type === 'target-started') {
-    buildProgress.active++;
-    stderr.write(`[${event.target}] started (${buildProgress.active} active, ${buildProgress.completed} complete)\n`);
+    if (liveDashboard()) return;
+    stderr.write(`started [${event.target}]\n`);
     return;
   }
   if (event.type === 'target-completed') {
-    if (buildProgress.active !== 0) buildProgress.active--;
-    buildProgress.completed++;
-    stderr.write(`[${event.target}] complete (${buildProgress.active} active, ${buildProgress.completed} complete)\n`);
+    stderr.write(`${styled('status.success', `done [${event.target}] complete`)}\n`);
     return;
   }
   if (event.type === 'target-failed') {
-    if (buildProgress.active !== 0) buildProgress.active--;
-    buildProgress.failed++;
-    stderr.write(`[${event.target}] failed (${buildProgress.active} active, ${buildProgress.completed} complete)\n`);
+    stderr.write(`${styled('status.failed', `error [${event.target}] failed${outcomeCause(event.diagnostic)}`)}\n`);
     if (event.diagnostic) lastDiagnostic = event.diagnostic;
     return;
   }
   if (event.type === 'target-cancelled') {
-    if (buildProgress.active !== 0) buildProgress.active--;
-    buildProgress.cancelled++;
-    stderr.write(`[${event.target}] cancelled (${buildProgress.active} active, ${buildProgress.completed} complete)\n`);
+    stderr.write(`${styled('status.cancelled', `cancelled [${event.target}] cancelled${outcomeCause(event.diagnostic)}`)}\n`);
     if (event.diagnostic) lastDiagnostic = event.diagnostic;
     return;
   }
   if (event.type === 'service-state') {
-    stderr.write(`[${event.target}] service ${event.state} (generation ${event.generation}, attempt ${event.attempt})\n`);
+    stderr.write(`info [${event.target}] service ${event.state} (generation ${event.generation}, attempt ${event.attempt})\n`);
     return;
   }
   if (event.type === 'cache-warning' && event.diagnostic) {
-    stderr.write(`warning ${event.diagnostic.code}: ${event.diagnostic.message}\n`);
+    stderr.write(renderDiagnostic(event.diagnostic, primarySource, 80));
   }
+}
+
+function outcomeCause(diagnostic) {
+  if (!diagnostic?.code) return '';
+  const cause = diagnostic.cause;
+  return ` ${diagnostic.code}: ${diagnostic.message}${cause?.status !== undefined ? ` (status ${cause.status})` : ''}${cause?.signal !== undefined ? ` (signal ${cause.signal})` : ''}`;
 }
 
 function eventData(event) {
@@ -517,19 +677,10 @@ function eventData(event) {
   return event.data;
 }
 
-function formatSeconds(elapsedMS) {
-  return `${Math.floor(elapsedMS / 1000)}.${String(elapsedMS % 1000).padStart(3, '0')}s`;
-}
-
-function printSummary() {
-  const elapsedMS = Date.now() - buildStartedAt;
-  if (buildProgress.failed === 0 && buildProgress.cancelled === 0) {
-    stderr.write(`Summary: ${buildProgress.completed} ${buildProgress.completed === 1 ? 'target' : 'targets'} complete in ${formatSeconds(elapsedMS)}\n`);
-  } else if (buildProgress.failed === 0) {
-    stderr.write(`Summary: ${buildProgress.completed} complete, ${buildProgress.cancelled} cancelled in ${formatSeconds(elapsedMS)}\n`);
-  } else {
-    stderr.write(`Summary: ${buildProgress.completed} complete, ${buildProgress.failed} failed, ${buildProgress.cancelled} cancelled in ${formatSeconds(elapsedMS)}\n`);
-  }
+function printSummary(counts = buildProgress, status = 0, elapsedMS = performance.now() - buildStartedAt, command = presentationCommand) {
+  clearDashboard();
+  const label = status >= 128 || (counts.cancelled && !counts.failed && status) ? 'cancelled' : status && (presentationCommand !== 'fmt' || invocationHadDiagnostic) ? 'error' : 'done';
+  stderr.write(`${styled(label === 'done' ? 'status.success' : label === 'error' ? 'status.failed' : 'status.cancelled', label)} ${command} · ${counts.completed} ${presentationCommand === 'fmt' ? 'files' : 'targets'} complete · ${counts.failed} failed · ${counts.cancelled} cancelled · ${Math.max(0, Math.floor(elapsedMS))}ms\n`);
 }
 
 function diagnosticError(text, fallbackCode) {
@@ -539,28 +690,6 @@ function diagnosticError(text, fallbackCode) {
     return Object.assign(new Error(text), { code: fallbackCode });
   }
   return Object.assign(new Error(fallbackCode), { code: fallbackCode });
-}
-
-function usage() {
-  stdout.write('kame - a modern build system in the spirit of GNU Make.\n\n');
-  stdout.write('Usage:\n');
-  stdout.write('  kame [OPTIONS] [TARGET...]\n');
-  stdout.write('  kame do COMMAND [OPTIONS] [ARG...]\n\n');
-  stdout.write('Commands:\n');
-  stdout.write('  do run          execute ordered source fragments in one session\n');
-  stdout.write('  do plan         print the resolved plan as JSON\n');
-  stdout.write('  do inputs       list declared input paths (--depth N)\n');
-  stdout.write('  do outputs      list declared output paths (--depth N)\n');
-  stdout.write('  do span         show transitive inputs and outputs (--expand, --depth N)\n');
-  stdout.write('  do tools        list globally referenced build tools\n');
-  stdout.write('  do parse        parse a language file and print a JSON AST\n');
-  stdout.write('  do fmt          format source in place (-i) or check it (-n)\n');
-  stdout.write('  do render       render a document template (--define, --comment, --check)\n');
-  stdout.write('  do cat TARGET   materialize one target and print its artifact\n');
-  stdout.write('  do cache        inspect or remove cache records\n');
-  stdout.write('  do help         show this help\n\n');
-  stdout.write('Options: -f FILE  -c TEXT  -C DIR  -j N  -n  --force  --define NAME=VALUE  --tool NAME=PATH  -h  -V\n');
-  stdout.write('Later-stage behavior reports FEATURE_UNSUP.\n');
 }
 
 function encodeJSON(value) {
@@ -1728,7 +1857,9 @@ class Module {
   async toolsCheck(source, target, name, context) {
     return this.prepared(source, (instance) => {
       const t = this.write(target);
-      return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_tools_check(handle, t.pointer, t.length, dst, dstLen, lengthPointer);
+      const query = context?.cliReport ? this.exports.kame_wasm_tools_check_report : this.exports.kame_wasm_tools_check;
+      if (!query) throw Object.assign(new Error('tool-check presentation query unavailable'), { code: 'FEATURE_UNSUP' });
+      return (handle, dst, dstLen, lengthPointer) => query(handle, t.pointer, t.length, dst, dstLen, lengthPointer);
     }, name, context);
   }
 
@@ -1743,19 +1874,23 @@ class Module {
       const query = this.exports.kame_wasm_target_event(instance, 0, 0, lengthPointer);
       if (query !== 0 && query !== 3) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       const length = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
-      if (length === 0) return;
+      if (length === 0) { if (context.api !== true) redrawDashboard(); return; }
       const output = this.scratch('eventOutput', length || 1);
       if (this.exports.kame_wasm_target_event(instance, output, length, lengthPointer) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       const bytes = new Uint8Array(this.exports.memory.buffer, output, length).slice();
       for (const line of this.decode0(bytes).trim().split('\n')) {
         const event = JSON.parse(line);
+        if (context.render && event.type === 'target-value') {
+          context.renderData = Buffer.from(event.value?.data ?? '', event.value?.encoding === 'base64' ? 'base64' : 'utf8');
+        }
+        if (context.api !== true && (json || human)) observeCLIEvent(event);
         if (event.diagnostic && (event.type === 'target-failed' || event.type === 'target-cancelled')) lastDiagnostic = event.diagnostic;
         context.events?.push(event);
       }
       if (context.api === true) {
         continue;
       } else if (json) {
-        stdout.write(bytes);
+        if (!context.render || !['target-value', 'target-completed'].includes(JSON.parse(this.decode0(bytes)).type)) stdout.write(bytes);
       } else if (human) {
         humanEvent(bytes);
       }
@@ -1995,6 +2130,7 @@ class Module {
       }
       context.streaming = true;
       context.human = !inv.json;
+      context.render = inv.name === 'render';
       let last;
       const deadline = inv.timeoutMS > 0 ? performance.now() + inv.timeoutMS : Infinity;
       const count = this.exports.kame_wasm_session_work_count(instance);
@@ -2022,7 +2158,11 @@ class Module {
         if (!inv.json && !inv.dryRun && kind === 2) stdout.write(bytes);
         else if (!inv.json && !inv.dryRun && kind === 1) last = bytes;
       }
-      if (last !== undefined) stdout.write(last);
+      if (inv.name === 'render') {
+        if (jsonMode) writeDataResult('render-result', { source: fragments[0]?.name ?? '<stdin>', action: inv.check ? 'check' : 'render' }, context.renderData, !inv.check);
+        else if (inv.check) stderr.write(`${styled('status.success', 'done')} render check ${fragments[0]?.name ?? '<stdin>'}\n`);
+        else if (last !== undefined) rawPublication(stdout, last);
+      } else if (last !== undefined) rawPublication(stdout, last);
       return 0;
     } catch (error) {
       if (inv.json && lastDiagnostic !== null) return 1;
@@ -2825,9 +2965,13 @@ async function runParse(module, inv) {
     text = await readStdin();
   }
   const bytes = await module.parse(inv.lang, name, text);
-  stdout.write(bytes);
   const document = JSON.parse(new TextDecoder().decode(bytes));
-  return document.diagnostics && document.diagnostics.some((entry) => entry.severity === 'error') ? 1 : 0;
+  if (document.diagnostics?.some((entry) => entry.severity === 'error')) {
+    primarySource = { name, text };
+    throw Object.assign(new Error('source has errors'), { diagnostics: document.diagnostics.map((entry) => ({ code: entry.code, severity: entry.severity, message: entry.message, source: name, span: entry.span })) });
+  }
+  writeReport(`parse ${name} · ${inv.lang}`, bytes);
+  return 0;
 }
 
 async function runSession(module, inv, sourceDirectory) {
@@ -2858,7 +3002,7 @@ async function runSession(module, inv, sourceDirectory) {
     if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'command' ? '<command:1>' : fragments[0].name, file: input.kind === 'file' ? resolve(sourceDirectory, fragments[0].name) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false, sourceDirectory);
   }
   buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
-  buildStartedAt = Date.now();
+  buildStartedAt = performance.now();
   return module.runSession(fragments, inv, contextFor(inv));
 }
 
@@ -2945,8 +3089,17 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
 
 async function runFmt(module, inv) {
   if (inv.files.length === 0) {
-    stdout.write(await module.format(inv.lang, '<stdin>', await readStdin(), inv.indent, inv.indentWidth));
-    return 0;
+    const text = await readStdin();
+    const bytes = await module.format(inv.lang, '<stdin>', text, inv.indent, inv.indentWidth, inv.comment);
+    const changed = Buffer.from(bytes).toString('utf8') !== text;
+    const action = inv.check ? 'check' : 'format';
+    if (jsonMode) writeDataResult('format-result', { source: '<stdin>', action, changed }, bytes, action === 'format');
+    else if (inv.check) {
+      if (changed) stdout.write('<stdin>\n');
+      stderr.write(`${styled('status.success', 'done')} fmt <stdin> · ${changed ? 'would change' : 'unchanged'}\n`);
+    } else stdout.write(bytes);
+    formatCounts.completed++;
+    return inv.check && changed ? 1 : 0;
   }
   let different = false;
   for (const file of inv.files) {
@@ -2956,22 +3109,25 @@ async function runFmt(module, inv) {
     } catch (error) {
       return failure('FS_ERR', `cannot read source: ${file}`);
     }
-    const bytes = await module.format(inv.lang, file, text, inv.indent, inv.indentWidth);
-    if ((inv.check || inv.inPlace) && new TextDecoder().decode(bytes) === text) continue;
-    if (inv.check) {
-      stdout.write(`${file}\n`);
-      different = true;
-      continue;
-    }
-    if (inv.inPlace) {
+    primarySource = { name: file, text };
+    const bytes = await module.format(inv.lang, file, text, inv.indent, inv.indentWidth, inv.comment);
+    const changed = new TextDecoder().decode(bytes) !== text;
+    if (inv.check && changed) different = true;
+    if (inv.inPlace && changed) {
       try {
         await writeFileAtomic(file, bytes);
       } catch (error) {
         return failure('FS_ERR', `cannot replace source: ${file}`);
       }
-      continue;
     }
-    stdout.write(bytes);
+    const action = inv.check ? 'check' : inv.inPlace ? 'in-place' : 'format';
+    if (jsonMode) writeDataResult('format-result', { source: file, action, changed }, bytes, action === 'format');
+    else if (action === 'format') stdout.write(bytes);
+    else {
+      if (inv.check && changed) stdout.write(`${file}\n`);
+      stderr.write(`${styled('status.success', 'done')} fmt ${file} · ${changed ? inv.check ? 'would change' : 'formatted' : 'unchanged'}\n`);
+    }
+    formatCounts.completed++;
   }
   return different ? 1 : 0;
 }
@@ -2993,7 +3149,25 @@ async function runPlan(module, inv, sourceDirectory) {
   primarySource = source;
   const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
   for (const target of targets) {
-    stdout.write(await module.planJSON(source.compiled, target, false, source.name));
+    const bytes = await module.planJSON(source.compiled, target, false, source.name);
+    writeReport(`plan ${target}`, bytes);
+    if (!jsonMode) {
+      const plan = JSON.parse(Buffer.from(bytes).toString('utf8'));
+      if (plan.rule) {
+        const parts = Array.isArray(source.compiled) ? source.compiled : [{ name: source.name, text: source.text, offset: 0 }];
+        let start = 0, location;
+        for (const part of parts) {
+          const length = Buffer.byteLength(part.text);
+          if (plan.rule.start >= start && plan.rule.start <= start + length) location = { name: part.name, offset: plan.rule.start - start + (part.offset || 0) };
+          start += length + 1;
+        }
+        if (location && sourceTexts.has(location.name)) {
+          const text = sourceTexts.get(location.name), index = sourceIndex(text, location.offset), position = sourcePosition(text, index);
+          stdout.write(`  source: ${shortReportField(location.name)}:${position.line}:${position.column}\n`);
+          stdout.write(`  rule: ${shortReportField(text.slice(index).split('\n')[0])}\n`);
+        }
+      }
+    }
   }
   return 0;
 }
@@ -3013,8 +3187,12 @@ async function runGraph(module, inv, sourceDirectory) {
     context.grants.run = false;
     context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }];
   }
-  stdout.write(await module.graphJSON(source.compiled, targets[0], inv.depth, kind, inv.expand, source.name, context));
+  writeReport(`${inv.name} ${targets[0]} · depth ${inv.depth}`, await module.graphJSON(source.compiled, targets[0], inv.depth, kind, inv.expand, source.name, context));
   return 0;
+}
+
+function shortReportField(text) {
+  return /[\x00-\x1f\x7f]/u.test(text) ? JSON.stringify(text) : text;
 }
 
 async function runTools(module, inv, sourceDirectory) {
@@ -3029,22 +3207,28 @@ async function runTools(module, inv, sourceDirectory) {
     let failed = false;
     for (const target of targets) {
       const context = contextFor(inv);
+      context.cliReport = true;
       context.inspection = true;
       context.grants.write = false;
       context.grants.run = false;
       context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
       const text = module.decode0(await module.toolsCheck(source.compiled, target, source.name, context));
+      let targetFailed = false;
       for (const line of text.split('\n').filter(Boolean)) {
         const event = JSON.parse(line);
+        if (event.type === 'tools-check-result') { if (inv.json) stdout.write(`${line}\n`); continue; }
         if (inv.json) stdout.write(`${line}\n`);
-        else stderr.write(renderDiagnostic(event.diagnostic, source, 80));
+        else { clearDashboard(); stderr.write(renderDiagnostic(event.diagnostic, source, 80)); }
         failed = true;
+        targetFailed = true;
+        invocationHadDiagnostic = true;
       }
+      if (!jsonMode && !targetFailed) stderr.write(`${styled('status.success', 'done')} tools check ${target}\n`);
     }
     return failed ? 1 : 0;
   }
   const names = await module.toolNames(source.compiled, source.name);
-  stdout.write(`${JSON.stringify(names.map((name) => ({ name, path: resolveTool(name, inv.toolOverrides) })))}\n`);
+  writeReport('tools', names.map((name) => ({ name, path: resolveTool(name, inv.toolOverrides) })));
   return 0;
 }
 
@@ -3056,15 +3240,20 @@ async function runCat(module, inv, sourceDirectory) {
   if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', 'cat requires exactly one target');
   const target = targets[0];
   try {
-    const { kind, bytes } = await module.materialize(source.compiled, target, contextFor(inv), source.name);
+    const context = { ...contextFor(inv), api: true, events: [] };
+    const { kind, bytes, events } = await module.materialize(source.compiled, target, context, source.name);
     if (kind === 1) {
-      stdout.write(bytes);
+      if (jsonMode) {
+        const value = events.findLast((event) => event.type === 'target-value' && event.target === target);
+        if (!value) throw Object.assign(new Error('typed artifact value unavailable'), { code: 'HOST_FAIL' });
+        stdout.write(`${JSON.stringify(value)}\n`);
+      } else stdout.write(bytes);
       return 0;
     }
     if (kind === 2) {
       const name = new TextDecoder().decode(bytes);
       try {
-        stdout.write(await readFile(name));
+        writeArtifact(target, await readFile(name));
         return 0;
       } catch (error) {
         return failure('FS_ERR', `cannot read artifact: ${error.message}`);
@@ -3073,11 +3262,17 @@ async function runCat(module, inv, sourceDirectory) {
     return failure('NO_ARTIFACT', 'target has no readable artifact');
   } catch (error) {
     if (error.code === 'TGT_NO_RULE' && isPathTarget(target) && existsSync(target)) {
-      stdout.write(await readFile(target));
+      writeArtifact(target, await readFile(target));
       return 0;
     }
     throw error;
   }
+}
+
+function writeArtifact(target, bytes) {
+  if (!jsonMode) { stdout.write(bytes); return; }
+  if (!bytes.length) writeDataResult('artifact', { target }, bytes);
+  for (let start = 0; start < bytes.length; start += 32768) writeDataResult('artifact', { target }, bytes.subarray(start, start + 32768));
 }
 
 async function watchFingerprint(kind, name, metadata = false) {
@@ -3127,6 +3322,28 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   let lastChange = 0;
   let reported = new Set();
   let status = 0;
+  let cycle = 0, cycleFinished = false, cycleFailed = false, cycleStarted = performance.now();
+  const startCycle = () => {
+    clearDashboard(); cycle++; cycleStarted = performance.now(); cycleFinished = false; cycleFailed = false; watchIdle = false;
+    watchCycle = cycle;
+    buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 }; terminalOutcomes.clear(); startedOutcomes.clear();
+    buildStartedAt = cycleStarted;
+    if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'watch-cycle-started', cycle })}\n`);
+  };
+  const finishCycle = () => {
+    if (cycleFinished) return;
+    clearDashboard();
+    const outcome = cycleFailed || buildProgress.failed ? 'failure' : 'success';
+    watchCycleStatus = outcome; watchCycleElapsed = Math.max(0, Math.floor(performance.now() - cycleStarted));
+    if (jsonMode) {
+      stdout.write(`${JSON.stringify({ schema: 1, type: 'watch-cycle-finished', cycle, status: outcome, elapsedMS: Math.max(0, Math.floor(performance.now() - cycleStarted)), completed: buildProgress.completed, failed: buildProgress.failed, cancelled: buildProgress.cancelled })}\n`);
+      stdout.write(`${JSON.stringify({ schema: 1, type: 'watch-idle', cycle, status: outcome })}\n`);
+    } else {
+      printSummary(buildProgress, outcome === 'failure' ? 1 : 0, watchCycleElapsed, `watch cycle ${cycle}`);
+      stderr.write(`watch · waiting for changes · last cycle ${outcome} · Ctrl+C to stop\n`);
+    }
+    cycleFinished = true; watchIdle = true;
+  };
   if (!inv.json) stderr.write('Watching filesystem resources (200ms polling; 100ms debounce)\n');
 
   const seedSources = async () => {
@@ -3137,11 +3354,11 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   };
   const compile = async () => {
     watchedSources.clear();
-    buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
-    buildStartedAt = Date.now();
+    startCycle();
     try {
       source = await discoverBuildSource(module, inv, sourceDirectory, watchedSources);
       if (source === null) {
+        cycleFailed = true;
         if (!noArguments) reportWatchError(Object.assign(new Error('no build source found'), { code: 'BUILD_NO_SOURCE' }), null);
         await seedSources();
         return false;
@@ -3156,6 +3373,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       await seedSources();
       return true;
     } catch (error) {
+      cycleFailed = true;
       reportWatchError(error, source);
       await seedSources();
       return false;
@@ -3193,12 +3411,15 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
           const key = `${root.index}:${root.revision}:${root.generation}`;
           if (reported.has(key)) continue;
           reported.add(key);
+          cycleFailed = true;
           const encoded = JSON.parse(root.diagnosticJSON);
           const detail = encoded.diagnostic ?? encoded;
           if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
           else stderr.write(renderDiagnostic(detail, source, 80));
         }
+        if (!snapshot.busy) finishCycle();
       }
+      if (!active) finishCycle();
 
       const now = Date.now();
       if (now - lastScan >= 200) {
@@ -3207,6 +3428,8 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
           const stamp = await watchFingerprint(record.kind, record.name, record.metadata);
           if (record.stamp === null) { record.stamp = stamp; continue; }
           if (stamp !== record.stamp) {
+            clearDashboard();
+            if (!jsonMode) stderr.write(`info watch: change queued: ${record.name}\n`);
             record.stamp = stamp;
             pending.set(key, { kind: record.kind, name: record.name });
             if (record.source) pending.set(`source\0${record.name}`, { kind: 'source', name: record.name });
@@ -3231,6 +3454,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
           active = await compile();
           lastScan = Date.now();
         } else {
+          startCycle();
           const resources = [...pending.values()].filter((item) => item.kind === 'file' || item.kind === 'glob');
           if (resources.length) module.invalidateWatch(watch, resources);
           pending.clear();
@@ -3261,14 +3485,15 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) {
     if (noArguments) {
-      usage();
+      const help = await module.parseCLI('@help', ['--output', outputMode]);
+      stdout.write(help.help);
       return 0;
     }
     return failure('BUILD_NO_SOURCE', 'no build source found');
   }
   primarySource = source;
   buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
-  buildStartedAt = Date.now();
+  buildStartedAt = performance.now();
   const context = contextFor(inv);
   context.human = inv.json !== true;
   const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
@@ -3301,22 +3526,61 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
     if (!detail.target && detail.code !== 'PARSE_ERR') detail.target = targets[0];
     stderr.write(renderDiagnostic(detail, primarySource, 80));
   }
-  if (inv.json !== true && buildProgress.completed + buildProgress.failed + buildProgress.cancelled !== 0) printSummary();
   return failed ? 1 : 0;
 }
 
 async function dispatch(module, inv, noArguments) {
-  jsonMode = inv.json === true;
+  configurePresentation(inv);
+  if (noArguments && !['Makefile.kmk', 'make.kmk', 'src/kmk/main.kmk'].some((name) => existsSync(name))) {
+    const help = await module.parseCLI('@help', ['--output', outputMode]);
+    stdout.write(help.help); return 0;
+  }
+  presentationCommand = inv.name || 'build';
+  presentationSubject = inv.targets[0] || (inv.inputs?.[0]?.kind === 'file' ? inv.inputs[0].value : inv.inputs?.length ? '<command:1>' : 'default');
+  invocationHadDiagnostic = false;
+  cliWorkers = []; terminalOutcomes = new Set(); startedOutcomes = new Set(); dashboardRows = 0; dashboardUnsafe = false; dashboardPending = false; dashboardLast = 0;
+  watchIdle = false;
+  watchCycle = 0; watchCycleStatus = ''; watchCycleElapsed = 0;
+  formatCounts = { completed: 0, failed: 0, cancelled: 0 };
+  const started = performance.now();
+  if (inv.dryRun && !jsonMode) stderr.write(`info ${presentationCommand}: dry-run · no effects or processes\n`);
+  const streaming = ['', 'run', 'render', 'cat', 'fmt'].includes(inv.name) || (inv.name === 'cache' && inv.args[0] === 'clean') || (inv.name === 'tools' && inv.targets[0] === 'check');
+  if (streaming && jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'invocation-started', command: presentationCommand, ...(inv.dryRun ? { dryRun: true } : {}) })}\n`);
+  let status;
+  try { status = await dispatchCommand(module, inv, noArguments); }
+  catch (error) {
+    invocationHadDiagnostic = true; clearDashboard();
+    const details = error.diagnostics ?? [lastDiagnostic ?? { code: error.code ?? 'HOST_FAIL', severity: 'error', message: error.message, ...(error.span !== undefined && primarySource ? { source: primarySource.name, span: error.span } : {}) }];
+    if (jsonMode) {
+      const records = details.map((detail) => ({ schema: 1, type: 'diagnostic', diagnostic: detail }));
+      if (streaming || inv.name === 'plan') for (const record of records) stdout.write(`${JSON.stringify(record)}\n`);
+      else stdout.write(`${JSON.stringify(records.length === 1 ? records[0] : records)}\n`);
+    } else for (const detail of details) stderr.write(renderDiagnostic(detail, primarySource, diagnosticFormat === 'human' ? stderr.columns || 80 : 80));
+    status = interruptedStatus || 1;
+  }
+  clearDashboard();
+  if (inv.name === 'fmt' && status && invocationHadDiagnostic) formatCounts.failed++;
+  if (streaming && jsonMode) {
+    const outcome = interruptedStatus || (buildProgress?.cancelled && !buildProgress.failed && status) ? 'cancelled' : status === 0 ? 'success' : inv.name === 'fmt' && !invocationHadDiagnostic ? 'different' : 'failure';
+    const counts = inv.name === 'fmt' ? formatCounts : ['', 'run'].includes(inv.name) ? { completed: buildProgress?.completed ?? 0, failed: buildProgress?.failed ?? 0, cancelled: buildProgress?.cancelled ?? 0 } : {};
+    stdout.write(`${JSON.stringify({ schema: 1, type: 'summary', command: presentationCommand, status: outcome, exitStatus: status, elapsedMS: Math.max(0, Math.floor(performance.now() - started)), ...counts })}\n`);
+  }
+  const humanCounts = inv.name === 'fmt' ? formatCounts : buildProgress;
+  if (!jsonMode && (inv.name !== 'fmt' || inv.check || (inv.inPlace && inv.files.length)) && humanCounts && humanCounts.completed + humanCounts.failed + humanCounts.cancelled !== 0) printSummary(humanCounts, status, performance.now() - started);
+  return status;
+}
+
+async function dispatchCommand(module, inv, noArguments) {
   lastDiagnostic = null;
   buildProgress = null;
   primarySource = null;
   sourceTexts.clear();
-  diagnosticFormat = inv.diagnosticFormat === 'human' ? 'human' : 'plain';
-  diagnosticColor = resolveColor(inv.color, diagnosticFormat);
   const sourceDirectory = process.cwd();
   applyDirectory(inv);
   if (inv.name === 'help') {
-    usage();
+    const topic = inv.args[0] || 'do';
+    const help = await module.parseCLI('@help', [topic, '--output', outputMode]);
+    stdout.write(help.help);
     return 0;
   }
   if (inv.name === 'cache') return runCache(inv);
@@ -3357,7 +3621,7 @@ function runCache(inv) {
         }
       }
     }
-    stdout.write(`${JSON.stringify(records)}\n`);
+  writeReport('cache list', records);
     return 0;
   }
   let removed = 0;
@@ -3374,22 +3638,15 @@ function runCache(inv) {
       }
     }
   }
-  stdout.write(`Removed ${removed} cache records\n`);
+  if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'cache-clean-result', removed })}\n`);
+  else stderr.write(`${styled('status.success', 'done')} cache clean · removed ${removed} cache records\n`);
   return 0;
 }
 
 async function main() {
-  const args = argv.slice(2);
+  let args = argv.slice(2);
   const first = args[0];
 
-  if (first === '-V' || first === '--version') {
-    stdout.write(`kame ${version()}\n`);
-    return 0;
-  }
-  if (first === '-h' || first === '--help') {
-    usage();
-    return 0;
-  }
   if (first === '--wasm-abi-info') {
     stdout.write(`${JSON.stringify((await Module.load()).abiInfo())}\n`);
     return 0;
@@ -3401,20 +3658,45 @@ async function main() {
 
   installSignals();
   const module = await Module.load();
-  if (first === 'do') {
+  const presentation = await module.parseCLI('@presentation', args);
+  configurePresentation(presentation);
+  if (!presentation.ok) { diagnostic(presentation.error.code, presentation.error.message); return 2; }
+  args = presentation.args;
+  if (presentation.earlyAction === 'version') {
+    if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'version', version: version(), buildID: 'unknown', buildTime: 'unknown', buildMode: 'wasm' })}\n`);
+    else stdout.write(`kame ${version()}\n`);
+    return 0;
+  }
+  const helpData = await module.parseCLI('@help', ['--output=json']);
+  const commands = JSON.parse(helpData.help).commands.map((command) => command.name);
+  const showHelp = async (topic) => {
+    if (topic && topic !== 'do' && !commands.includes(topic)) { diagnostic('CMD_UNKNOWN', `unknown command: ${topic}`); return 2; }
+    const help = await module.parseCLI('@help', [topic || '', '--output', outputMode]);
+    if (jsonMode) stdout.write(help.help);
+    else {
+      const lines = help.help.split('\n');
+      stdout.write(lines.map((line, i) => styled(i === 0 || line.endsWith(':') ? 'heading' : 'text.primary', line, outputColor)).join('\n'));
+    }
+    return 0;
+  };
+  if (presentation.earlyAction === 'help') return showHelp(presentation.helpTopic && presentation.helpTopic !== 'do' && !commands.includes(presentation.helpTopic) ? 'do' : presentation.helpTopic);
+  if (args[0] === 'do') {
     const command = args[1];
     if (command === undefined) {
-      usage();
-      return 0;
+      return showHelp('do');
     }
-    const inv = await module.parseCLI(command, args.slice(2));
+    if (command === 'help') return showHelp(args[2] || 'do');
+    if (!commands.includes(command)) {
+      const inv = await module.parseCLI(command, args.slice(2)); diagnostic(inv.error.code || 'CMD_UNKNOWN', inv.error.message || `unknown command: ${command}`); return 2;
+    }
+    const inv = { ...await module.parseCLI(command, args.slice(2)), output: presentation.output, json: presentation.json, color: presentation.color, diagnosticFormat: presentation.diagnosticFormat };
     if (!inv.ok) {
       diagnostic(inv.error.code, inv.error.message);
       return 2;
     }
     return dispatch(module, inv);
   }
-  const inv = await module.parseCLI('', args);
+  const inv = { ...await module.parseCLI('', args), output: presentation.output, json: presentation.json, color: presentation.color, diagnosticFormat: presentation.diagnosticFormat };
   if (!inv.ok) {
     diagnostic(inv.error.code, inv.error.message);
     return 2;

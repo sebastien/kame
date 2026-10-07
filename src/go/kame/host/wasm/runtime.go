@@ -258,6 +258,15 @@ func (r *Runtime) applyToolPaths() {
 // ToolsCheckJSON returns schema-1 diagnostic events, or empty text on success.
 // The dependency traversal is shared with the native CLI and never runs recipes.
 func (r *Runtime) ToolsCheckJSON(target string) PureResult {
+	return r.toolsCheckJSON(target, false)
+}
+
+// ToolsCheckReportJSON adds the CLI result without changing the legacy query.
+func (r *Runtime) ToolsCheckReportJSON(target string) PureResult {
+	return r.toolsCheckJSON(target, true)
+}
+
+func (r *Runtime) toolsCheckJSON(target string, report bool) PureResult {
 	if r == nil || r.Program == nil {
 		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no compiled build source")}
 	}
@@ -279,6 +288,7 @@ func (r *Runtime) ToolsCheckJSON(target string) PureResult {
 			program.WriteJSONDiagnostic(&buffer, d)
 		}
 	}
+	if report { r.Program.WriteToolsCheckResult(&buffer, target, result.Uses) }
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Free()
 	result.Free(r.Alloc)

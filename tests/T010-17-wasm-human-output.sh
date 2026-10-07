@@ -17,21 +17,29 @@ cli_build
 project="$TMPDIR/wasm-human"
 mkdir -p "$project"
 
-# The summary duration is wall-clock; normalize it before comparing.
+# Elapsed durations are host-dependent; normalize them before comparing.
 normalize() {
-	sed -E 's/in [0-9]+\.[0-9]{3}s/in T/; s/process finished in [0-9]+ms/process finished in Tms/'
+	# Native and forwarded caches establish different miss facts.
+	sed -E 's/[0-9]+ms/Tms/g; s/saved record (unavailable|missing)/saved record not reusable/'
 }
 
 compare() {
 	local label="$1"
+	local native_status=0 wasm_status=0
 	shift
-	(cd "$project" && "$CLI_BIN" "$@" >"$project/native.out" 2>"$project/native.err") || true
-	(cd "$project" && node "$CLI_ROOT/dist/kame.js" "$@" >"$project/wasm.out" 2>"$project/wasm.err") || true
-	if normalize <"$project/native.err" >"$project/native.err.n" && normalize <"$project/wasm.err" >"$project/wasm.err.n" && cmp -s "$project/native.err.n" "$project/wasm.err.n" && cmp -s "$project/native.out" "$project/wasm.out"; then
+	# Each backend starts without the output left by the other backend.
+	rm -f "$project/out.txt" "$project/bad.txt"
+	(cd "$project" && "$CLI_BIN" --output text --color never "$@" >"$project/native.out" 2>"$project/native.err") || native_status=$?
+	rm -f "$project/out.txt" "$project/bad.txt"
+	(cd "$project" && node "$CLI_ROOT/dist/kame.js" --output text --color never "$@" >"$project/wasm.out" 2>"$project/wasm.err") || wasm_status=$?
+	normalize <"$project/native.err" >"$project/native.err.n"
+	normalize <"$project/wasm.err" >"$project/wasm.err.n"
+	if [ "$native_status" = "$wasm_status" ] && cmp -s "$project/native.err.n" "$project/wasm.err.n" && cmp -s "$project/native.out" "$project/wasm.out"; then
 		test-ok "$label"
 	else
-		test-fail "$label: $(diff "$project/native.err.n" "$project/wasm.err.n" | head -6) $(diff "$project/native.out" "$project/wasm.out" | head -4)"
+		test-fail "$label (native=$native_status wasm=$wasm_status): $(diff "$project/native.err.n" "$project/wasm.err.n" | head -6) $(diff "$project/native.out" "$project/wasm.out" | head -4)"
 	fi
+	if { [ "$label" = success ] && [ "$native_status" = 0 ]; } || { [ "$label" != success ] && [ "$native_status" != 0 ]; }; then test-ok "$label exit status"; else test-fail "$label unexpected exit status $native_status"; fi
 }
 
 cat >"$project/Makefile.kmk" <<'EOF'
@@ -44,6 +52,7 @@ EOF
 test-step "a successful primary build matches native progress and streams"
 rm -f "$project/out.txt"
 compare "success" ./out.txt
+if [ "$(cat "$project/wasm.out")" = recipe-stdout ] && grep -qx recipe-stderr "$project/wasm.err" && grep -qx 'started \[./out.txt\]' "$project/wasm.err" && grep -qx 'done \[./out.txt\] complete' "$project/wasm.err" && grep -q '^done build · .* targets complete · 0 failed · 0 cancelled · [0-9]*ms$' "$project/wasm.err" && ! grep -q $'\033' "$project/wasm.err"; then test-ok "text lifecycle, summary and separate recipe streams"; else test-fail "text lifecycle or stream separation"; fi
 
 test-step "a recipe failure matches native diagnostic and summary"
 cat >"$project/Makefile.kmk" <<'EOF'

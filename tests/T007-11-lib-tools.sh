@@ -34,7 +34,7 @@ for backend in native wasm; do
  if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
  "${runner[@]}" -C "$project" --tool kame-test-compiler=./tool-a default >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = tool-atool-a ]; then test-ok "$backend literal and computed tool reuse"; else test-fail "$backend tool recipe"; fi
- "${runner[@]}" do plan -C "$project" --tool kame-test-compiler=./tool-a default >"$project/plan" 2>"$project/error"
+  "${runner[@]}" do plan --json -C "$project" --tool kame-test-compiler=./tool-a default >"$project/plan" 2>"$project/error"
  if python3 - "$project/plan" "$project/tool-a" <<'PY'
 import json,sys
 assert json.load(open(sys.argv[1]))['tools']['kame-test-compiler'] == sys.argv[2]

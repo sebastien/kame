@@ -81,6 +81,12 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 		e.Str("state")
 		e.Str(event.State)
 	}
+	if event.Kind == TargetReason {
+		e.Str("decision"); e.Str(event.Decision)
+		e.Str("reason"); e.Str(event.Reason)
+		e.Str("message"); e.Str(event.Message)
+		if event.Aspect != "" { e.Str("aspect"); e.Str(event.Aspect) }
+	}
 	if event.Program != "" {
 		e.Str("program")
 		e.Str(event.Program)
@@ -394,6 +400,7 @@ func encodeCause(e *json.Encoder, cause diagnostic.Cause) {
 }
 
 func eventType(kind EventKind) string {
+	if kind == TargetReason { return "target-reason" }
 	if kind == TargetStarted {
 		return "target-started"
 	}

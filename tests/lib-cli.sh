@@ -384,10 +384,18 @@ function cli_expect_stdout_contains { # PATTERN… [MESSAGE]
 }
 
 # Function: cli_expect_printable FILE
-# Fails when FILE contains non-printable bytes (freed-memory regression guard).
+# Reject invalid UTF-8 and non-printable controls; human presentation permits Unicode.
 function cli_expect_printable {
 	local file="$1"
-	if LC_ALL=C grep -q '[^[:print:][:space:]]' "$file"; then
+	if ! python3 - "$file" <<'PYPRINT'
+import pathlib, sys
+try:
+    text = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8')
+except UnicodeDecodeError:
+    sys.exit(1)
+sys.exit(0 if all(char.isprintable() or char in '\t\r\n' for char in text) else 1)
+PYPRINT
+	then
 		test-fail "$(test-relpath "$file") contains non-printable bytes"
 	else
 		test-ok "$(test-relpath "$file") is printable"

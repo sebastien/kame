@@ -24,9 +24,9 @@ run_wasm() { (cd "$1" && node "$CLI_ROOT/dist/kame.js" "${2:-cached}") >/dev/nul
 cache_command() {
   local host="$1" project="$2" action="$3"
   if [ "$host" = native ]; then
-    (cd "$project" && "$CLI_BIN" do cache "$action")
+    (cd "$project" && "$CLI_BIN" do cache "$action" --json)
   else
-    (cd "$project" && node "$CLI_ROOT/dist/kame.js" do cache "$action")
+    (cd "$project" && node "$CLI_ROOT/dist/kame.js" do cache "$action" --json)
   fi
 }
 

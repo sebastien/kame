@@ -31,14 +31,16 @@ KASH
 
 test-step "schema, parser ownership and byte-for-byte backend parity"
 for operation in parse fmt; do
-	"$CLI_BIN" do "$operation" --lang kash "$work/source.kash" >"$work/native.$operation"
-	node "$CLI_ROOT/dist/kame.js" do "$operation" --lang kash "$work/source.kash" >"$work/wasm.$operation"
+	presentation=(); if [ "$operation" = parse ]; then presentation=(--json); fi
+	"$CLI_BIN" do "$operation" "${presentation[@]}" --lang kash "$work/source.kash" >"$work/native.$operation"
+	node "$CLI_ROOT/dist/kame.js" do "$operation" "${presentation[@]}" --lang kash "$work/source.kash" >"$work/wasm.$operation"
 	if cmp -s "$work/native.$operation" "$work/wasm.$operation"; then test-ok "$operation source parity"; else test-fail "$operation source parity"; fi
 done
 test-step "short language option is identical on both hosts"
 for operation in parse fmt; do
-	"$CLI_BIN" do "$operation" -l kash "$work/source.kash" >"$work/short.native"
-	node "$CLI_ROOT/dist/kame.js" do "$operation" -l kash "$work/source.kash" >"$work/short.wasm"
+	presentation=(); if [ "$operation" = parse ]; then presentation=(--json); fi
+	"$CLI_BIN" do "$operation" "${presentation[@]}" -l kash "$work/source.kash" >"$work/short.native"
+	node "$CLI_ROOT/dist/kame.js" do "$operation" "${presentation[@]}" -l kash "$work/source.kash" >"$work/short.wasm"
 	if cmp -s "$work/native.$operation" "$work/short.native" && cmp -s "$work/native.$operation" "$work/short.wasm"; then test-ok "$operation -l parity"; else test-fail "$operation -l parity"; fi
 done
 if grep -q '"command-graph"' "$work/native.parse" && grep -q '"command-setup"' "$work/native.parse" && grep -q '"command-redirection"' "$work/native.parse" && grep -q '"command-capture"' "$work/native.parse"; then test-ok "AST retains delegated process boundaries"; else test-fail "AST omitted process boundaries"; fi
@@ -47,7 +49,7 @@ if grep -q '"kind":"command"' "$work/native.parse" && grep -q '"valueKind":"expr
 for backend in native wasm; do
 	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
 	test-step "$backend: stdin, suffix aliases and canonical formatting"
-	"${command[@]}" do parse --lang kash <"$work/source.kash" >"$work/stdin"
+	"${command[@]}" do parse --json --lang kash <"$work/source.kash" >"$work/stdin"
 	if grep -q '"source":"<stdin>"' "$work/stdin"; then test-ok "$backend stdin source identity"; else test-fail "$backend stdin source identity"; fi
 	cp "$work/native.fmt" "$work/formatted.ksh"
 	"${command[@]}" do fmt --lang kash "$work/formatted.ksh" >"$work/again"
@@ -68,7 +70,7 @@ for backend in native wasm; do
 		printf '%s\n' "$text" >"$work/invalid.kash"
 		cp "$work/invalid.kash" "$work/original"
 		parse_status=0
-		"${command[@]}" do parse --lang kash "$work/invalid.kash" >"$work/invalid.json" 2>"$work/parse.err" || parse_status=$?
+		"${command[@]}" do parse --json --lang kash "$work/invalid.kash" >"$work/invalid.json" 2>"$work/parse.err" || parse_status=$?
 		fmt_status=0
 		"${command[@]}" do fmt --lang kash -i "$work/invalid.kash" >"$work/stdout" 2>"$work/fmt.err" || fmt_status=$?
 		if [ "$parse_status" = 1 ] && [ "$fmt_status" = 1 ] && grep -q PARSE_ERR "$work/invalid.json" && cmp -s "$work/original" "$work/invalid.kash"; then test-ok "$backend rejects without rewriting: $text"; else test-fail "$backend accepted or rewrote invalid source: $text"; fi

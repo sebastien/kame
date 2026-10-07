@@ -21,9 +21,9 @@ mkdir -p "$work"
 test-step "plan JSON matches native"
 for target in default ./artifact.txt ./capture-x.o ./dynamic.out; do
 	set +e
-	(cd "$fixture" && node "$CLI_ROOT/dist/kame.js" do plan "$target") >"$work/wasm.json" 2>"$work/wasm.err"
+	(cd "$fixture" && node "$CLI_ROOT/dist/kame.js" do plan --json "$target") >"$work/wasm.json" 2>"$work/wasm.err"
 	wasm_status=$?
-	(cd "$fixture" && "$CLI_BIN" do plan "$target") >"$work/native.json" 2>"$work/native.err"
+	(cd "$fixture" && "$CLI_BIN" do plan --json "$target") >"$work/native.json" 2>"$work/native.err"
 	native_status=$?
 	set -e
 	if [ "$wasm_status" = "$native_status" ] && cmp -s "$work/wasm.json" "$work/native.json"; then

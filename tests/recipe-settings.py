@@ -12,11 +12,11 @@ command = [binary] if backend == 'native' else ['node', str(root / 'dist/kame.js
 cases = 0
 with tempfile.TemporaryDirectory() as temporary:
     project = Path(temporary)
-    def run(text, arguments=None, expected=None, code=None):
+    def run(text, arguments=None, expected=None, code=None, environment=None):
         global cases
         (project / 'Makefile.kmk').write_text(text)
         result = subprocess.run(command + (arguments or ['chosen']), cwd=project,
-            env=dict(os.environ, MODE='ambient'), text=True, capture_output=True, timeout=15)
+            env=dict(os.environ, MODE='ambient', **(environment or {})), text=True, capture_output=True, timeout=15)
         if code:
             assert result.returncode == 1 and code in result.stdout + result.stderr, (text, result)
         else:
@@ -25,6 +25,16 @@ with tempfile.TemporaryDirectory() as temporary:
                 assert result.stdout == expected, (text, result)
         cases += 1
         return result
+    def reasons(result):
+        assert result.stderr == '', result
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        selected = [event for event in events if event['type'] == 'target-reason']
+        identities = [(e['node'], e['generation'], e['decision'], e['reason'],
+                       json.dumps(e.get('dependency'), sort_keys=True), e.get('aspect')) for e in selected]
+        assert len(identities) == len(set(identities)), selected
+        assert all(e['decision'] in ('reevaluate', 'execute') and e['target'] and e['resource'] for e in selected)
+        assert all(not {'before', 'after', 'environment', 'fingerprint'} & e.keys() for e in selected)
+        return selected
     run('chosen : ; [shell: kash]\n\t/usr/bin/printf hello\n', expected='hello')
     cached = 'task chosen : ; [shell: kash]\n\t/bin/sh -c "printf x >> cache-runs; printf cached; printf warning >&2"\n'
     first = run(cached, ['--json', 'chosen'])
@@ -74,13 +84,16 @@ with tempfile.TemporaryDirectory() as temporary:
     run(guarded, ['./guarded'])
     stamp = (project / 'guarded').stat().st_mtime_ns
     warm = run(guarded, ['--json', './guarded'])
+    assert not reasons(warm)
     events = [json.loads(line) for line in warm.stdout.splitlines()]
     assert not any(e['type'] == 'process-started' for e in events)
     assert not any(e['type'] == 'dependency' and e['dependency']['resource']['kind'] == 'definition' for e in events)
     assert (project / 'guarded').stat().st_mtime_ns == stamp
     # An unrelated source edit falls back once, without rewriting equal bytes.
     guarded += 'UNUSED = "unrelated"\n'
-    run(guarded, ['./guarded'])
+    changed = reasons(run(guarded, ['--json', './guarded']))
+    assert any(e['reason'] == 'guard-changed' and e['decision'] == 'reevaluate' for e in changed), changed
+    assert not any(e['decision'] == 'execute' for e in changed), changed
     assert (project / 'guarded').stat().st_mtime_ns == stamp
     warm = run(guarded, ['--json', './guarded'])
     events = [json.loads(line) for line in warm.stdout.splitlines()]
@@ -89,13 +102,16 @@ with tempfile.TemporaryDirectory() as temporary:
     metadata = (project / 'extra.json').stat()
     (project / 'extra.json').write_text('"B"')
     os.utime(project / 'extra.json', ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
-    run(guarded, ['./guarded'])
+    changed = reasons(run(guarded, ['--json', './guarded']))
+    assert any(e['reason'] == 'input-changed' for e in changed), changed
     assert (project / 'guarded').read_text() == 'B'
     (project / 'guarded').write_text('tampered')
-    run(guarded, ['./guarded'])
+    changed = reasons(run(guarded, ['--json', './guarded']))
+    assert any(e['reason'] == 'output-changed' for e in changed), changed
     assert (project / 'guarded').read_text() == 'B'
     (project / 'guarded').unlink()
-    run(guarded, ['./guarded'])
+    changed = reasons(run(guarded, ['--json', './guarded']))
+    assert any(e['reason'] == 'output-missing' for e in changed), changed
     assert (project / 'guarded').read_text() == 'B'
     for value in ('A', 'B'):
         helper = f'SHELL = kash\n(payload) = "{value}"\n./helper : ./input\n\t@(yield (payload))\n'
@@ -176,4 +192,48 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run('chosen : ; [shell: kash]\n\t/usr/bin/printf hello\n', ['--json', 'chosen'])
     events = [json.loads(line) for line in result.stdout.splitlines()]
     assert ''.join(event['data'] for event in events if event['type'] == 'stdout') == 'hello'
+    # A child snapshot is aggregate evidence, not evidence about particular names.
+    explain = 'SHELL = /bin/sh\n./explained : ./input\n\tcp input explained\n'
+    first = reasons(run(explain, ['--json', './explained']))
+    assert any(e['reason'] in ('record-missing', 'proof-unverifiable') for e in first), first
+    stamp = (project / 'explained').stat().st_mtime_ns
+    assert not reasons(run(explain, ['--json', './explained']))
+    assert (project / 'explained').stat().st_mtime_ns == stamp
+    secret = 'do-not-display-this-value'
+    changed = run(explain, ['--json', './explained'], environment={'REASON_TEST': secret})
+    selected = reasons(changed)
+    assert any(e['reason'] == 'process-environment-changed' and 'dependency' not in e for e in selected), selected
+    assert secret not in changed.stdout + changed.stderr
+    assert not reasons(run(explain, ['--json', './explained'], environment={'REASON_TEST': secret}))
+    forced = reasons(run(explain, ['--json', '--force', './explained']))
+    assert any(e['reason'] == 'forced' and e['decision'] == 'execute' for e in forced), forced
+    human = run(explain, ['--output', 'text', '--force', './explained'])
+    assert human.stdout == '' and '[./explained] execute: forced execution' in human.stderr, human
+    always = 'SHELL = kash\nalways ./explained : ./input\n\t@(yield "always")\n'
+    selected = reasons(run(always, ['--json', './explained']))
+    assert any(e['reason'] == 'always' for e in selected), selected
+    named = 'SHELL = kash\n./named-env : ./input\n\t@(yield (env "REASON_NAMED"))\n'
+    named_args = ['do', 'run', '--json', '--allow-read', '--allow-write', '--allow-env=REASON_NAMED', 'Makefile.kmk', '--entry', './named-env']
+    run(named, named_args, environment={'REASON_NAMED': 'before-secret'})
+    selected = reasons(run(named, named_args, environment={'REASON_NAMED': 'after-secret'}))
+    assert any(e['reason'] == 'environment-changed' and e['dependency']['resource']['name'] == 'REASON_NAMED' for e in selected), selected
+    assert 'before-secret' not in json.dumps(selected) and 'after-secret' not in json.dumps(selected)
+    # Corrupt records must explain a bad proof, not claim an input changed.
+    for record in (project / '.kame/cache').rglob('*'):
+        if record.is_file():
+            record.write_bytes(b'corrupt')
+    selected = reasons(run(explain, ['--json', './explained']))
+    assert any(e['reason'] == 'record-invalid' for e in selected), selected
+    # Cached-task lookup must retain the same missing/invalid distinction.
+    cached_reason = 'task reason-cached :\n\t@(out "cached reason")\n'
+    selected = reasons(run(cached_reason, ['--json', 'reason-cached']))
+    assert [e['reason'] for e in selected] == ['record-missing'], selected
+    assert not reasons(run(cached_reason, ['--json', 'reason-cached']))
+    cache_bucket = 'tasks' if backend == 'native' else 'host'
+    for record in (project / '.kame/cache' / cache_bucket).iterdir():
+        if record.is_file():
+            record.write_bytes(b'corrupt')
+    selected = reasons(run(cached_reason, ['--json', 'reason-cached']))
+    assert [e['reason'] for e in selected] == ['record-invalid'], selected
+    assert not reasons(run(cached_reason, ['--json', 'reason-cached']))
 print(f'{backend}: {cases} selected recipe policy cases passed')

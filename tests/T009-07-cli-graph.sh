@@ -17,13 +17,13 @@ fixture_copy project graph
 test-step "inputs and outputs return stable JSON arrays of direct edges"
 (
 	cd graph
-	cli_run -- do inputs ./build/app
+	cli_run -- do inputs --json ./build/app
 	cli_expect_status 0
 	cli_expect_stdout '["./build/main.o","./build/util.o"]
 '
 	cli_expect_stderr_empty
 
-	cli_run -- do outputs ./build/app
+	cli_run -- do outputs --json ./build/app
 	cli_expect_status 0
 	cli_expect_stdout '["./build/app"]
 '
@@ -32,22 +32,22 @@ test-step "inputs and outputs return stable JSON arrays of direct edges"
 test-step "depth controls edge traversal"
 (
 	cd graph
-	cli_run -- do inputs --depth 0 ./build/app
+	cli_run -- do inputs --json --depth 0 ./build/app
 	cli_expect_status 0
 	cli_expect_stdout '[]
 '
 
-	cli_run -- do inputs --depth 1 ./build/app
+	cli_run -- do inputs --json --depth 1 ./build/app
 	cli_expect_status 0
 	cli_expect_stdout '["./build/main.o","./build/util.o"]
 '
 
-	cli_run -- do inputs --depth -1 ./build/app
+	cli_run -- do inputs --json --depth -1 ./build/app
 	cli_expect_status 0
 	cli_expect_stdout '["./build/main.o","./build/util.o","./src/main.c","./src/util.c"]
 '
 
-	cli_run -- do outputs --depth 2 ./build/app
+	cli_run -- do outputs --json --depth 2 ./build/app
 	cli_expect_status 0
 	cli_expect_stdout '["./build/app","./build/main.o","./build/util.o"]
 '
@@ -56,7 +56,7 @@ test-step "depth controls edge traversal"
 test-step "span separates static and dynamic resources"
 (
 	cd graph
-	cli_run -- do span ./build/app
+	cli_run -- do span --json ./build/app
 	cli_expect_status 0
 	cli_expect_jsonl "$CLI_OUT"
 	cli_expect_json_query "$CLI_OUT" '.schema' '1'
@@ -67,16 +67,16 @@ test-step "span separates static and dynamic resources"
 	cli_expect_json_query "$CLI_OUT" '.expanded' 'false'
 	cli_expect_stderr_empty
 
-	cli_run -- do span --expand ./build/app
+	cli_run -- do span --json --expand ./build/app
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.expanded' 'true'
 
-	cli_run -- do span --expand -c $'SOURCE = ./src/main.c\ntask inspect : @(SOURCE)\n\ttrue\n' inspect
+	cli_run -- do span --json --expand -c $'SOURCE = ./src/main.c\ntask inspect : @(SOURCE)\n\ttrue\n' inspect
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.static.inputs | length' '0'
 	cli_expect_json_query "$CLI_OUT" '.dynamic | join(",")' './src/main.c'
 
-	cli_run -- do span --expand --depth 2 -c $'SOURCE = ./src/main.c\ntask child : @(SOURCE)\n\ttrue\ntask inspect : child\n\ttrue\n' inspect
+	cli_run -- do span --json --expand --depth 2 -c $'SOURCE = ./src/main.c\ntask child : @(SOURCE)\n\ttrue\ntask inspect : child\n\ttrue\n' inspect
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.static.inputs | join(",")' 'child'
 	cli_expect_json_query "$CLI_OUT" '.dynamic | join(",")' './src/main.c'
@@ -85,17 +85,17 @@ test-step "span separates static and dynamic resources"
 	touch expanded/src/one.c expanded/src/two.c
 	(
 		cd expanded
-		cli_run -- do span --expand -c $'task inspect : @((wildcard ./src/*.c))\n\tfalse\n' inspect
+		cli_run -- do span --json --expand -c $'task inspect : @((wildcard ./src/*.c))\n\tfalse\n' inspect
 		cli_expect_status 0
 		cli_expect_json_query "$CLI_OUT" '.dynamic | join(",")' './src/one.c,./src/two.c'
 	)
 
-	cli_run -- do span --depth 0 ./build/app
+	cli_run -- do span --json --depth 0 ./build/app
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.static.inputs | length' '0'
 	cli_expect_json_query "$CLI_OUT" '.static.outputs | length' '0'
 
-	cli_run -- do span --depth -1 ./build/app
+	cli_run -- do span --json --depth -1 ./build/app
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.static.inputs | index("./src/main.c") != null' 'true'
 	cli_expect_json_query "$CLI_OUT" '.static.outputs | index("./build/main.o") != null' 'true'
@@ -124,11 +124,11 @@ test-step "graph commands validate depth and arity"
 test-step "graph commands select the default target when none is given"
 (
 	cd graph
-	cli_run -- do inputs
+	cli_run -- do inputs --json
 	cli_expect_status 0
 	cli_expect_stdout '["./build/app"]
 '
-	cli_run -- do span
+	cli_run -- do span --json
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.static.inputs | join(",")' './build/app'
 	cli_expect_json_query "$CLI_OUT" '.static.outputs | join(",")' 'default'

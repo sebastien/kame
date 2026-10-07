@@ -61,7 +61,7 @@ for backend in native wasm; do
 	if [ ! -s "$work/err" ] && jq -e -s 'all(.type != "diagnostic") and any(.type == "target-value" and .value.data == "fallback")' "$work/$backend.jsonl" >/dev/null; then test-ok "$backend recovered JSON value"; else test-fail "$backend recovery JSON"; fi
 done
 test-step "portable recovered value events"
-for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
+for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt,.elapsedMS)' "$work/$backend.jsonl" >"$work/$backend.norm"; done
 if cmp -s "$work/native.norm" "$work/wasm.norm"; then test-ok "recovery JSON parity"; else test-fail "recovery JSON differs"; diff -u "$work/native.norm" "$work/wasm.norm" || true; fi
 test-step "value recovery AST and formatting parity"
 printf '%s\n' 'value = $(false) ?? missing ?? "fallback"' >"$work/source.kash"

@@ -18,10 +18,10 @@ fixture_copy json dry-run
 test-step "dry-run builds no files and writes no effects"
 (
 	cd dry-run
-	cli_run -- -n ./text.out
+	cli_run -- --output text -n ./text.out
 	cli_expect_status 0
 	cli_expect_no_file ./text.out
-	cli_expect_stderr_contains '[./text.out] started' '[./text.out] complete'
+	cli_expect_stderr_contains 'started [./text.out]' '[./text.out] complete'
 
 	cli_run -- -n speak
 	cli_expect_status 0

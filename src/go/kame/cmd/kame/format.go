@@ -2,13 +2,14 @@ package main
 
 import (
 	"kame/cli"
+	"kame/diagnostic"
 	"kame/lang/format"
 	"kame/lang/source"
+	"kame/program"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
 )
 
 type formatArguments struct {
@@ -29,43 +30,55 @@ func (options *formatArguments) Free() {
 
 func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	parsed := parseFormatArguments(args, errOut)
+	formatHasResults = parsed.Check || parsed.InPlace
 	defer parsed.Free()
 	if !parsed.OK {
 		return 2
 	}
 	if len(parsed.Files) == 0 {
+		// Stdin has no file to replace; in-place retains ordinary stdout output.
+		parsed.InPlace = false
+		formatHasResults = parsed.Check
 		data, readErr := io.ReadAll(mem.System, in)
 		if readErr != nil {
+			invocationCounts.Failed++
 			cliError(errOut, "FS_ERR", "cannot read stdin")
 			return 1
 		}
 		formatted, ok := formatSource(parsed.Lang, "<stdin>", string(data), parsed.Indent, parsed.IndentWidth, parsed.Comment, errOut)
-		if len(data) != 0 {
-			mem.FreeSlice(mem.System, data)
-		}
+		changed := string(data) != formatted
+		mem.FreeSlice(mem.System, data)
 		if !ok {
+			invocationCounts.Failed++
 			return 1
 		}
-		io.WriteString(out, formatted)
+		writeFormattedResult(out, errOut, "<stdin>", parsed, formatted, changed)
+		invocationCounts.Completed++
 		mem.FreeString(mem.System, formatted)
+		if parsed.Check && changed {
+			if !cliDiagnosticJSON {
+				io.WriteString(out, "<stdin>\n")
+			}
+			return 1
+		}
 		return 0
 	}
 	different := false
 	for i := range parsed.Files {
 		data, readErr := os.ReadFile(mem.System, parsed.Files[i])
 		if readErr != nil {
+			invocationCounts.Failed++
 			cliError(errOut, "FS_ERR", "cannot read source: "+parsed.Files[i])
 			return 1
 		}
 		formatted, ok := formatSource(parsed.Lang, parsed.Files[i], string(data), parsed.Indent, parsed.IndentWidth, parsed.Comment, errOut)
 		changed := ok && string(data) != formatted
-		if len(data) != 0 {
-			mem.FreeSlice(mem.System, data)
-		}
+		mem.FreeSlice(mem.System, data)
 		if !ok {
+			invocationCounts.Failed++
 			return 1
 		}
-		if parsed.Check && changed {
+		if parsed.Check && changed && !cliDiagnosticJSON {
 			io.WriteString(out, parsed.Files[i])
 			io.WriteString(out, "\n")
 			different = true
@@ -73,21 +86,51 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 		if parsed.InPlace && changed {
 			temporary := parsed.Files[i] + ".kame-fmt.tmp"
 			if os.WriteFile(temporary, []byte(formatted), 0o644) != nil || os.Rename(temporary, parsed.Files[i]) != nil {
+				invocationCounts.Failed++
 				os.Remove(temporary)
 				mem.FreeString(mem.System, formatted)
 				cliError(errOut, "FS_ERR", "cannot replace source: "+parsed.Files[i])
 				return 1
 			}
 		}
-		if !parsed.InPlace && !parsed.Check {
-			io.WriteString(out, formatted)
+		if changed && parsed.Check {
+			different = true
 		}
+		writeFormattedResult(out, errOut, parsed.Files[i], parsed, formatted, changed)
+		invocationCounts.Completed++
 		mem.FreeString(mem.System, formatted)
 	}
 	if different {
 		return 1
 	}
 	return 0
+}
+
+func writeFormattedResult(out io.Writer, errOut io.Writer, sourceName string, options formatArguments, text string, changed bool) {
+	action := "format"
+	if options.Check {
+		action = "check"
+	}
+	if options.InPlace {
+		action = "in-place"
+	}
+	if cliDiagnosticJSON {
+		program.WriteDataResult(out, "format-result", sourceName, "", action, changed, []byte(text), action == "format")
+		return
+	}
+	if action == "format" {
+		io.WriteString(out, text)
+		return
+	}
+	cli.Style(errOut, "status.success", "done ", diagnosticColor == "always")
+	io.WriteString(errOut, "fmt "+sourceName+" · ")
+	if !changed {
+		io.WriteString(errOut, "unchanged\n")
+	} else if options.Check {
+		io.WriteString(errOut, "would change\n")
+	} else {
+		io.WriteString(errOut, "formatted\n")
+	}
 }
 
 func parseFormatArguments(args []string, errOut io.Writer) formatArguments {
@@ -103,21 +146,9 @@ func parseFormatArguments(args []string, errOut io.Writer) formatArguments {
 func formatSource(lang string, name string, text string, indentStyle string, indentWidth int, comment string, errOut io.Writer) (string, bool) {
 	result := format.SourceWithComment(mem.System, lang, name, text, indentStyle, indentWidth, comment)
 	if !result.OK {
-		src := mem.Alloc[source.Source](mem.System)
-		src.Name, src.Text = name, text
-		position := src.Position(result.Span.Start)
-		io.WriteString(errOut, name)
-		io.WriteString(errOut, ":")
-		var positionText [strconv.MaxIntBase10Len]byte
-		io.WriteString(errOut, strconv.Itoa(positionText[:], position.Line))
-		io.WriteString(errOut, ":")
-		io.WriteString(errOut, strconv.Itoa(positionText[:], position.Column))
-		io.WriteString(errOut, ": error ")
-		io.WriteString(errOut, result.Code)
-		io.WriteString(errOut, ": ")
-		io.WriteString(errOut, result.Message)
-		io.WriteString(errOut, "\n")
-		mem.Free(mem.System, src)
+		src := source.New(mem.System, name, text)
+		emitDiagnostic(diagnosticWriter(cliDiagnosticOut, errOut, cliDiagnosticJSON), diagnostic.Diagnostic{Code: result.Code, Severity: diagnostic.Error, Message: result.Message, Source: name, Span: diagnostic.Span{Start: result.Span.Start, End: result.Span.End}}, cliDiagnosticJSON, src)
+		src.Free(mem.System)
 		mem.FreeString(mem.System, result.Code)
 		mem.FreeString(mem.System, result.Message)
 		return "", false

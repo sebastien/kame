@@ -32,7 +32,7 @@ for backend in native wasm; do
  if [ "$status" = 1 ] && grep -q EXPR_INVALID "$project/error"; then test-ok "$backend invalid key contract"; else test-fail "$backend invalid key accepted"; fi
  "${runner[@]}" -C "$project" default >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = -O2 ]; then test-ok "$backend computed configuration reaches recipe"; else test-fail "$backend computed definition"; fi
- "${runner[@]}" do plan -C "$project" default >"$project/plan" 2>"$project/error"
+  "${runner[@]}" do plan --json -C "$project" default >"$project/plan" 2>"$project/error"
  if grep -q release.txt "$project/plan" && ! grep -q debug.txt "$project/plan"; then test-ok "$backend computed input reaches planning"; else test-fail "$backend computed input plan"; fi
 done
 test-end

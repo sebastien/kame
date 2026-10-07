@@ -76,7 +76,7 @@ KMK
  if [ "$(cat "$project/computed-runs")" = e ] && cmp -s "$project/input" "$project/computed"; then test-ok "$backend computed order-only edges preserve freshness"; else test-fail "$backend computed order-only inputs"; fi
  test-step "$backend reports and formats ordering metadata"
  "${runner[@]}" do plan --json -C "$project" ./out > "$project/plan" 2> "$project/err"
- "${runner[@]}" do parse --lang script "$project/Makefile.kmk" > "$project/ast" 2> "$project/err"
+  "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" > "$project/ast" 2> "$project/err"
  "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" > "$project/fmt" 2> "$project/err"
  if jq -e '.orderOnlyInputs == ["prepare", "./ordered"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.orderOnly? == true)' "$project/ast" >/dev/null && rg -q '^./out : ./input \| prepare ./ordered$' "$project/fmt"; then test-ok "$backend ordering metadata preserved"; else test-fail "$backend ordering inspection"; fi
 done

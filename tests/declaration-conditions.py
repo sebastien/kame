@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert json.loads(plan.stdout)['target'] == 'chosen'
     run(['do', 'plan', 'debug-only'])
     run(['do', 'plan', 'release-only'], code='TGT_NO_RULE')
-    ast = json.loads(run(['do', 'parse', '--lang', 'script', 'Makefile.kmk']).stdout)
+    ast = json.loads(run(['do', 'parse', '--json', '--lang', 'script', 'Makefile.kmk']).stdout)
     kinds = [item['kind'] for item in ast['ast']['items']]
     assert kinds.count('when') == 3 and 'otherwise' in kinds and kinds.count('end-when') == 3
     formatted = run(['do', 'fmt', '--lang', 'script', 'Makefile.kmk']).stdout

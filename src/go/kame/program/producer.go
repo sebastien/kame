@@ -21,6 +21,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	p := state.Program
 	entry := &p.Instances[state.Index]
 	if !entry.started || entry.startedGeneration != c.Generation() {
+		p.clearReasons(entry)
 		slices.Free(p.Alloc, entry.CacheStdout)
 		slices.Free(p.Alloc, entry.CacheStderr)
 		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false
@@ -320,6 +321,15 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		mem.FreeString(p.Alloc, commands)
 		c.Publish(core.Value{Kind: core.Nil})
 		return core.ProducerCompleted
+	}
+	if p.Options.Force {
+		p.reason(entry, "execute", "forced", "forced execution", core.ResourceKey{}, "")
+	} else if entry.Rule.Always {
+		p.reason(entry, "execute", "always", "always rule", core.ResourceKey{}, "")
+	} else if entry.Rule.Kind == rule.TaskRule {
+		p.reason(entry, "execute", "uncached-task", "uncached task", core.ResourceKey{}, "")
+	} else if entry.Rule.Kind == rule.CachedTaskRule && p.Options.CacheDisabled {
+		p.reason(entry, "execute", "proof-unverifiable", "cache disabled", core.ResourceKey{}, "")
 	}
 	if p.SessionPolicy && commands != "" && !entry.Kash {
 		allowed := false

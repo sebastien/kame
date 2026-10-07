@@ -26,9 +26,9 @@ EOF
 
 test-step "tools JSON matches native including unresolved names"
 set +e
-(cd "$project" && node "$CLI_ROOT/dist/kame.js" do tools) >"$project/wasm.json" 2>"$project/wasm.err"
+(cd "$project" && node "$CLI_ROOT/dist/kame.js" do tools --json) >"$project/wasm.json" 2>"$project/wasm.err"
 wasm_status=$?
-(cd "$project" && "$CLI_BIN" do tools) >"$project/native.json" 2>"$project/native.err"
+(cd "$project" && "$CLI_BIN" do tools --json) >"$project/native.json" 2>"$project/native.err"
 native_status=$?
 set -e
 if [ "$wasm_status" = "$native_status" ] && cmp -s "$project/wasm.json" "$project/native.json"; then
@@ -68,6 +68,13 @@ compare_check() {
 	(cd "$project" && "$CLI_BIN" do tools check "$@") >"$project/native.json" 2>"$project/native.err"
 	native_status=$?
 	set -e
+	# Invocation summaries use host elapsed time, not a parity golden.
+	if [[ " $* " == *" --json "* ]]; then
+		jq -c 'del(.elapsedMS)' "$project/wasm.json" >"$project/wasm.normalized"
+		jq -c 'del(.elapsedMS)' "$project/native.json" >"$project/native.normalized"
+		mv "$project/wasm.normalized" "$project/wasm.json"
+		mv "$project/native.normalized" "$project/native.json"
+	fi
 	if [ "$wasm_status" = "$native_status" ] && cmp -s "$project/wasm.json" "$project/native.json" && cmp -s "$project/wasm.err" "$project/native.err"; then
 		test-ok "tools check parity: $*"
 	else

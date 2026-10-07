@@ -336,7 +336,7 @@ func TestMalformedCacheRecordIsMiss(t *testing.T) {
 	data, dataErr := os.ReadFile(a, dir+"/task-log")
 	if dataErr != nil || string(data) != "xx" { t.Error("malformed cache record was not treated as a miss") }
 	mem.FreeSlice(a, data)
-	// A malformed record is silent unless verbose diagnostics were requested.
+	// Low-level cache warnings require verbose mode; reuse reasons do not.
 	compiled.Program.Free(); compiled.Free(a)
 	entries, readErr = os.ReadDir(a, dir+"/.kame/cache/tasks")
 	if readErr != nil || len(entries)!=1 { t.Fatal("cache record was not replaced"); return }
@@ -359,7 +359,18 @@ func TestMalformedCacheRecordIsMiss(t *testing.T) {
 	quiet := program.Compile(a,parsed,registry,program.Options{Host: posix.New(a), Directory:dir})
 	if quiet.Program==nil { t.Fatal("quiet compile failed"); return }
 	quietResult:=quiet.Program.Materialize("run");quietResult.Free(a)
-	for { next:=quiet.Program.NextEvent();if !next.OK{break};if next.Event.Kind==program.CacheWarning{t.Error("default mode emitted cache warning")};next.Event.Free(a) }
+	invalidReason := false
+	for {
+		next := quiet.Program.NextEvent()
+		if !next.OK { break }
+		if next.Event.Kind == program.CacheWarning { t.Error("default mode emitted cache warning") }
+		if next.Event.Kind == program.TargetReason {
+			if next.Event.Reason == "record-invalid" { invalidReason = true }
+			if next.Event.Reason == "record-missing" { t.Error("malformed cache record was described as missing") }
+		}
+		next.Event.Free(a)
+	}
+	if !invalidReason { t.Error("default mode omitted the malformed-record reason") }
 	quiet.Program.Free();quiet.Free(a)
 	compiled = program.Compile(a,parsed,registry,program.Options{Host: posix.New(a), Directory:dir})
 	if compiled.Program==nil { t.Fatal("final compile failed");return }

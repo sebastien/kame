@@ -22,9 +22,9 @@ compare() {
 	local kind="$1"
 	shift
 	set +e
-	(cd "$fixture" && node "$CLI_ROOT/dist/kame.js" do "$kind" "$@") >"$work/wasm.out" 2>"$work/wasm.err"
+	(cd "$fixture" && node "$CLI_ROOT/dist/kame.js" do "$kind" --json "$@") >"$work/wasm.out" 2>"$work/wasm.err"
 	local wasm_status=$?
-	(cd "$fixture" && "$CLI_BIN" do "$kind" "$@") >"$work/native.out" 2>"$work/native.err"
+	(cd "$fixture" && "$CLI_BIN" do "$kind" --json "$@") >"$work/native.out" 2>"$work/native.err"
 	local native_status=$?
 	set -e
 	if [ "$wasm_status" = "$native_status" ] && cmp -s "$work/wasm.out" "$work/native.out"; then

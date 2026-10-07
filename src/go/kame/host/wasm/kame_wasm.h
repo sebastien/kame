@@ -210,6 +210,9 @@ uint32_t kame_wasm_set_tool_path(uint64_t instance, uint32_t name, uint32_t name
  * HOST_NEEDED means step/service a forwarded request, then retry this query. */
 uint32_t kame_wasm_tools_check(uint64_t instance, uint32_t target, uint32_t target_len,
                               uint32_t dst, uint32_t dst_len, uint32_t out_len);
+/* Additive CLI query: same traversal/framing, plus a tools-check-result record. */
+uint32_t kame_wasm_tools_check_report(uint64_t instance, uint32_t target, uint32_t target_len,
+                                     uint32_t dst, uint32_t dst_len, uint32_t out_len);
 /* Configure inspection grants before prepare; empty capability clears defaults. */
 uint32_t kame_wasm_inspection_grant(uint64_t instance, uint32_t capability, uint32_t capability_len,
                                    uint32_t name, uint32_t name_len);

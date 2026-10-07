@@ -2,6 +2,7 @@ package main
 
 import (
 	"kame/cli"
+	"solod.dev/so/bytes"
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -71,7 +72,8 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 			os.FreeDirEntry(mem.System, entries)
 			mem.FreeString(mem.System, name)
 		}
-		e := json.NewEncoder(out)
+		var buffer = bytes.NewBuffer(mem.System, nil)
+		e := json.NewEncoder(&buffer)
 		e.BeginArray()
 		for i := range records {
 			e.BeginObject()
@@ -85,7 +87,13 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 		}
 		e.EndArray()
 		e.Flush()
-		io.WriteString(out, "\n")
+		if cliDiagnosticJSON {
+			io.WriteString(out, buffer.String())
+			io.WriteString(out, "\n")
+		} else {
+			cli.WriteReport(out, "cache list", buffer.String(), stdoutColor)
+		}
+		buffer.Free()
 		freeCacheList(records)
 		return 0
 	}
@@ -129,7 +137,22 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 		mem.FreeString(mem.System, name)
 	}
 	buffer := make([]byte, 24)
-	io.WriteString(out, "Removed "+strconv.Itoa(buffer, removed)+" cache records\n")
+	if cliDiagnosticJSON {
+		e := json.NewEncoder(out)
+		e.BeginObject()
+		e.Str("schema")
+		e.Int(1)
+		e.Str("type")
+		e.Str("cache-clean-result")
+		e.Str("removed")
+		e.Int(int64(removed))
+		e.EndObject()
+		e.Flush()
+		io.WriteString(out, "\n")
+	} else {
+		cli.Style(errOut, "status.success", "done ", diagnosticColor == "always")
+		io.WriteString(errOut, "cache clean · removed "+strconv.Itoa(buffer, removed)+" cache records\n")
+	}
 	return 0
 }
 

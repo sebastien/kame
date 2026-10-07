@@ -31,13 +31,15 @@ def check(command: list[str], source: str, target: str, *,
 			return subprocess.run(command + arguments, cwd=project, env=environment,
 				text=True, capture_output=True, timeout=20)
 
-		arguments = ['do', 'plan', *(overrides or []), target]
+		arguments = ['do', 'plan', '--json', *(overrides or []), target]
 		result = run(arguments)
 		if code is not None:
 			codes = (code,) if isinstance(code, str) else code
 			assert result.returncode == 1, (result.returncode, result.stdout, result.stderr)
 			assert any(item in result.stdout + result.stderr for item in codes), (code, result.stdout, result.stderr)
-			assert 'Makefile.kmk:' in result.stderr, result.stderr
+			assert not result.stderr, result.stderr
+			assert any(json.loads(line).get('diagnostic', {}).get('source', '').endswith('Makefile.kmk')
+				for line in result.stdout.splitlines()), result.stdout
 			built = run([target])
 			assert built.returncode == 1, (built.returncode, built.stdout, built.stderr)
 			assert any(item in built.stdout + built.stderr for item in codes), built.stderr
@@ -56,7 +58,7 @@ def check(command: list[str], source: str, target: str, *,
 			(project / 'formatted.kmk').write_text(formatted.stdout)
 			again = run(['do', 'fmt', '--lang', 'script', 'formatted.kmk'])
 			assert again.returncode == 0 and again.stdout == formatted.stdout, again.stderr
-			replanned = run(['do', 'plan', '-f', 'formatted.kmk', *(overrides or []), target])
+			replanned = run(['do', 'plan', '--json', '-f', 'formatted.kmk', *(overrides or []), target])
 			assert replanned.returncode == 0, replanned.stderr
 			assert json.loads(replanned.stdout)['outputs'] == outputs
 		if build:

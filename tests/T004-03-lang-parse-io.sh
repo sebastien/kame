@@ -14,19 +14,19 @@ cli_build
 
 test-step "missing file reads stdin and reports <stdin>"
 printf ':true\n' >expr.km
-cli_run --stdin expr.km -- do parse --lang expr
+cli_run --stdin expr.km -- do parse --json --lang expr
 cli_expect_status 0
 cli_expect_json_query "$CLI_OUT" '.source' '<stdin>'
 cli_expect_json_query "$CLI_OUT" '.ast.value' 'true'
 cli_expect_stderr_empty
 
-test-step "empty stdin is a parse error with a null AST"
+test-step "empty stdin is a diagnostic document without a partial AST"
 : >empty.km
-cli_run --stdin empty.km -- do parse --lang expr
+cli_run --stdin empty.km -- do parse --json --lang expr
 cli_expect_status 1
-cli_expect_json_query "$CLI_OUT" '.ast' 'null'
-cli_expect_json_query "$CLI_OUT" '.diagnostics[0].code' 'PARSE_ERR'
-cli_expect_json_query "$CLI_OUT" '.diagnostics[0].severity' 'error'
+cli_expect_json_query "$CLI_OUT" '.type' 'diagnostic'
+cli_expect_json_query "$CLI_OUT" '.diagnostic.code' 'PARSE_ERR'
+cli_expect_json_query "$CLI_OUT" '.diagnostic.severity' 'error'
 
 test-step "a missing explicit file is FS_ERR"
 cli_run -- do parse --lang expr missing.km

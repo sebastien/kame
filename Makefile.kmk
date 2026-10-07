@@ -149,6 +149,9 @@ test-examples :
 test-go : ./src/go/kame/cmd/kame/version_generated.go
 	cd @(KAME_DIR) && go test ./cmd/kame
 
+test-presentation : ./build/kame.debug dist-wasm
+	./tests/T036-01-cli-presentation.sh
+
 test-cli : ./build/kame.debug
 	./tests/harness.sh
 

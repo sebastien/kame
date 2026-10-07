@@ -113,6 +113,7 @@ test-wasm: wasm-check
 	tests/T017-17-eval-process-expressions.sh
 	tests/T017-18-kash-async.sh
 	tests/T017-19-kash-recipes.sh
+	tests/T036-01-cli-presentation.sh
 
 test-all: test test-leaks
 

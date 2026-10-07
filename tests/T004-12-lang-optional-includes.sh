@@ -23,7 +23,7 @@ for backend in native wasm; do
  if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
  "${runner[@]}" -C "$project" default >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = hello ]; then test-ok "$backend optional includes expand in order"; else test-fail "$backend optional includes"; fi
- "${runner[@]}" do parse --lang script "$project/Makefile.kmk" >"$project/ast" 2>"$project/error"
+  "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" >"$project/ast" 2>"$project/error"
  if grep -q '"optional":true' "$project/ast"; then test-ok "$backend AST preserves optional flag"; else test-fail "$backend optional AST"; fi
  "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" >"$project/fmt" 2>"$project/error"
  if cmp -s "$project/Makefile.kmk" "$project/fmt"; then test-ok "$backend optional include formatting"; else test-fail "$backend optional format"; fi

@@ -297,6 +297,13 @@ int km_cli_take_signal(void) {
 }
 
 int km_cli_stderr_is_terminal(void) { return isatty(STDERR_FILENO); }
+int km_cli_stdout_is_terminal(void) { return isatty(STDOUT_FILENO); }
+
+int km_cli_stderr_height(void) {
+    struct winsize size;
+    if (ioctl(STDERR_FILENO, TIOCGWINSZ, &size) != 0) return 0;
+    return (int)size.ws_row;
+}
 
 int km_cli_stderr_width(void) {
     struct winsize size;

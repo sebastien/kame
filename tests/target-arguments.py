@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory(prefix='kame-target-arguments-') as directory:
     def run(*args):
         return subprocess.run([*runner, *args], cwd=project, text=True, capture_output=True)
 
-    parsed = run('do', 'parse', '--lang', 'script', 'Makefile.kmk')
+    parsed = run('do', 'parse', '--json', '--lang', 'script', 'Makefile.kmk')
     assert parsed.returncode == 0, parsed.stderr
     rule = json.loads(parsed.stdout)['ast']['items'][0]['rule']
     assert [(item['name'], item['optional'], item.get('default')) for item in rule['arguments']] == [
@@ -34,17 +34,17 @@ with tempfile.TemporaryDirectory(prefix='kame-target-arguments-') as directory:
 
     missing_required = run('do', 'plan', 'required')
     assert missing_required.returncode == 1 and 'TGT_ARGUMENT' in missing_required.stderr, missing_required.stderr
-    required_plan = run('do', 'plan', 'required', 'environment=production')
+    required_plan = run('do', 'plan', '--json', 'required', 'environment=production')
     assert required_plan.returncode == 0, required_plan.stderr
     assert json.loads(required_plan.stdout)['arguments'] == {'environment': 'production'}
 
-    planned = run('do', 'plan', 'deploy', 'region=east', 'zone=eu')
+    planned = run('do', 'plan', '--json', 'deploy', 'region=east', 'zone=eu')
     assert planned.returncode == 0, planned.stderr
     plan = json.loads(planned.stdout)
     assert plan['arguments'] == {'region': 'east', 'zone': 'eu'}, plan
     assert plan['inputs'] == ['prepare region=east zone=eu'], plan
 
-    default_plan = run('do', 'plan', 'deploy')
+    default_plan = run('do', 'plan', '--json', 'deploy')
     assert default_plan.returncode == 0, default_plan.stderr
     assert json.loads(default_plan.stdout)['arguments'] == {'region': 'west', 'zone': 'global'}
     assert not (project / 'dependency-log').exists(), 'planning ran a dependency recipe'

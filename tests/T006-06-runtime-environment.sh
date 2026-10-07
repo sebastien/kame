@@ -8,6 +8,17 @@ cli_require_tools
 cli_build
 cd "$CLI_ROOT"
 make dist-wasm >/dev/null
+wait_watch_idle() {
+  local events="$1" target="$2"
+  for attempt in {1..100}; do
+    if jq -e -s --arg target "$target" 'any(.[]; .type == "target-completed" and .target == $target) and any(.[]; .type == "watch-idle" and .cycle == 1 and .status == "success")' "$events" >/dev/null 2>&1; then return; fi
+    sleep 0.05
+  done
+  kill -TERM "$watch_pid" 2>/dev/null || true
+  wait "$watch_pid" 2>/dev/null || true
+  cat "$events" >&2
+  test-fatal "$backend watch did not complete its initial cycle for $target"
+}
 for backend in native wasm; do
  project="$TMPDIR/$backend"
  mkdir -p "$project"
@@ -221,20 +232,18 @@ KMK
   "${runner[@]}" -C "$signatures" ./downstream > "$project/out" 2> "$project/err"
   if [ "$(cat "$signatures/child-runs")" = xx ] && [ "$(cat "$signatures/parent-runs")" = x ]; then test-ok "$backend equal generated results suppress downstream recipe execution"; else test-fail "$backend consumer tracked producer inputs instead of results"; fi
   test-step "$backend watch suppresses unchanged downstream generations"
-  "${runner[@]}" --watch -C "$signatures" ./downstream > "$project/equal-watch-out" 2> "$project/equal-watch-err" &
-  watch_pid=$!
-  for attempt in {1..100}; do
-    if rg -q '\[./downstream\] complete \(' "$project/equal-watch-err"; then break; fi
-    sleep 0.05
-  done
+   "${runner[@]}" --output json --watch -C "$signatures" ./downstream > "$project/equal-watch-out" 2> "$project/equal-watch-err" &
+   watch_pid=$!
+   wait_watch_idle "$project/equal-watch-out" ./downstream
   printf F > "$signatures/input"
   for attempt in {1..100}; do
-    if [ "$(cat "$signatures/child-runs")" = xxx ] && [ "$(rg -c '\[./constant\] complete \(' "$project/equal-watch-err")" -ge 2 ]; then break; fi
+     if [ "$(cat "$signatures/child-runs")" = xxx ] && jq -e -s '[.[] | select(.type == "target-completed" and .target == "./constant")] | length >= 2' "$project/equal-watch-out" >/dev/null 2>&1; then break; fi
     sleep 0.05
   done
   kill -TERM "$watch_pid" 2>/dev/null || true
   wait "$watch_pid" 2>/dev/null || true
-   if [ "$(cat "$signatures/child-runs")" = xxx ] && [ "$(cat "$signatures/parent-runs")" = x ] && [ "$(rg -c '\[./downstream\] started' "$project/equal-watch-err")" = 1 ]; then test-ok "$backend equal result preserved the downstream generation"; else
+     if [ "$(cat "$signatures/child-runs")" = xxx ] && [ "$(cat "$signatures/parent-runs")" = x ] && jq -e -s '([.[] | select(.type == "target-started" and .target == "./downstream")] | length == 1) and ([.[] | select(.type == "target-completed" and .target == "./constant")] | length >= 2)' "$project/equal-watch-out" >/dev/null; then test-ok "$backend equal result preserved the downstream generation"; else
+      cat "$project/equal-watch-out" >&2
      cat "$project/equal-watch-err" >&2
      test-fail "$backend equal result restarted a downstream generation (child=$(cat "$signatures/child-runs"), parent=$(cat "$signatures/parent-runs"))"
    fi
@@ -250,12 +259,9 @@ KMK
   "${runner[@]}" -C "$signatures" ./discovered > "$project/out" 2> "$project/err"
   if [ "$(cat "$signatures/discovered")" = B ]; then test-ok "$backend execution-time read bytes invalidate reuse"; else test-fail "$backend execution-time read stayed fresh"; fi
   test-step "$backend warm watch restores discovered edges and notices byte edits"
-  "${runner[@]}" --watch -C "$signatures" ./discovered > "$project/watch-out" 2> "$project/watch-err" &
-  watch_pid=$!
-  for attempt in {1..100}; do
-    if rg -q 'complete \(' "$project/watch-err"; then break; fi
-    sleep 0.05
-  done
+   "${runner[@]}" --output json --watch -C "$signatures" ./discovered > "$project/watch-out" 2> "$project/watch-err" &
+   watch_pid=$!
+   wait_watch_idle "$project/watch-out" ./discovered
   cp -p "$signatures/extra" "$signatures/stamp"
   printf C > "$signatures/extra"
   touch -r "$signatures/stamp" "$signatures/extra"
@@ -277,12 +283,9 @@ KMK
   "${runner[@]}" -C "$signatures" read-task > "$project/out" 2> "$project/err"
   if [ "$(cat "$signatures/task-runs")" = xx ] && [ "$(cat "$signatures/task-output")" = D ]; then test-ok "$backend task execution-time read invalidates cache"; else test-fail "$backend task execution-time read was not persisted"; fi
   test-step "$backend warm task watch restores execution-time dependencies"
-  "${runner[@]}" --watch -C "$signatures" read-task > "$project/task-watch-out" 2> "$project/task-watch-err" &
-  watch_pid=$!
-  for attempt in {1..100}; do
-    if rg -q 'complete \(' "$project/task-watch-err"; then break; fi
-    sleep 0.05
-  done
+   "${runner[@]}" --output json --watch -C "$signatures" read-task > "$project/task-watch-out" 2> "$project/task-watch-err" &
+   watch_pid=$!
+   wait_watch_idle "$project/task-watch-out" read-task
   cp -p "$signatures/extra" "$signatures/stamp"
   printf E > "$signatures/extra"
   touch -r "$signatures/stamp" "$signatures/extra"
@@ -322,12 +325,9 @@ KMK
   done
   if [ "$(cat "$signatures/definition-output")" = two ] && [ "$(cat "$signatures/definition-file")" = two ] && [ "$(cat "$signatures/definition-runs")" = xx ] && [ "$(cat "$signatures/definition-file-runs")" = xx ]; then test-ok "$backend definition reads invalidate and then reuse"; else test-fail "$backend definition observations did not follow current bytes"; fi
   test-step "$backend warm watch restores definition resource edges"
-  "${runner[@]}" --watch -C "$signatures" definition-task > "$project/definition-watch-out" 2> "$project/definition-watch-err" &
-  watch_pid=$!
-  for attempt in {1..100}; do
-    if rg -q 'complete \(' "$project/definition-watch-err"; then break; fi
-    sleep 0.05
-  done
+   "${runner[@]}" --output json --watch -C "$signatures" definition-task > "$project/definition-watch-out" 2> "$project/definition-watch-err" &
+   watch_pid=$!
+   wait_watch_idle "$project/definition-watch-out" definition-task
   printf three > "$signatures/definition-input"
   for attempt in {1..100}; do
     if [ "$(cat "$signatures/definition-output")" = three ] && [ "$(cat "$signatures/definition-runs")" = xxx ]; then break; fi
@@ -414,7 +414,7 @@ SH
  if [ "$(cat "$project/retry-log")" = retryretry ]; then test-ok "$backend retried recipe keeps its environment"; else test-fail "$backend retry environment"; fi
  test-step "$backend reports authored environment metadata"
  "${runner[@]}" do plan --json -C "$project" root > "$project/plan" 2> "$project/err"
- "${runner[@]}" do parse --lang script "$project/Makefile.kmk" > "$project/ast" 2> "$project/err"
+  "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" > "$project/ast" 2> "$project/err"
  "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" > "$project/fmt" 2> "$project/err"
  if jq -e '.environment == ["MODE=first", "MODE=debug", "MESSAGE=spaces; equal=ok"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.environment? == ["MODE=first", "MODE=debug", "MESSAGE=spaces; equal=ok"])' "$project/ast" >/dev/null && rg -q '; env "MODE=release"' "$project/fmt"; then test-ok "$backend plan, AST and format environment metadata"; else test-fail "$backend environment inspection"; fi
  test-step "$backend validates assignments before effects"

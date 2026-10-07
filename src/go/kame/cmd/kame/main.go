@@ -28,7 +28,9 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 	if !parsed.OK {
 		return 2
 	}
-	if parsed.Watch { return runWatch(parsed, out, errOut) }
+	if parsed.Watch {
+		return runWatch(parsed, out, errOut)
+	}
 	// A bare primary invocation with no build source is a discoverability
 	// opportunity: present the overview instead of a terse diagnostic.
 	bare := len(args) == 0 && !toolRun
@@ -193,7 +195,9 @@ func resolveTool(name, cwd string, environment []string) string {
 	}
 	if strings.IndexByte(name, '/') >= 0 {
 		candidate := path.Join(mem.System, cwd, name)
-		if executableFile(candidate) { return candidate }
+		if executableFile(candidate) {
+			return candidate
+		}
 		mem.FreeString(mem.System, candidate)
 		return ""
 	}
@@ -255,6 +259,7 @@ func (s *buildSession) Free() {
 
 func parseBuildArguments(args []string, errOut io.Writer) buildArguments {
 	inv := cli.Parse("build", args)
+	applyInvocationPresentation(&inv)
 	if !inv.OK {
 		cliError(errOut, inv.Error.Code, inv.Error.Message)
 		inv.Free()

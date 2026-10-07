@@ -53,6 +53,8 @@ int km_cli_install_signals(void);
 int km_cli_take_signal(void);
 int km_cli_stderr_is_terminal(void);
 int km_cli_stderr_width(void);
+int km_cli_stdout_is_terminal(void);
+int km_cli_stderr_height(void);
 int km_cli_environment_size(void);
 int km_cli_environment_copy(so_Slice);
 bool km_cli_environment_names_case_insensitive(void);

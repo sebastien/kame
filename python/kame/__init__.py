@@ -126,7 +126,7 @@ class Kame(_ProcessOwner):
         Path(source_path).write_text(source, encoding="utf-8")
         program = KameProgram(self, source_path, tempdir, run_lang, name)
         try:
-            parse = await self._run(["do", "parse", "--lang", parse_lang, source_path], grants={})
+            parse = await self._run(["do", "parse", "--json", "--lang", parse_lang, source_path], grants={})
             program.ast = json.loads(parse)
         except BaseException:
             shutil.rmtree(tempdir, ignore_errors=True)
@@ -155,7 +155,15 @@ class Kame(_ProcessOwner):
                 self._requests.discard(task)
             self._forget(process)
         if process.returncode:
-            message = stderr.decode("utf-8", "replace").strip() or f"Kame exited with status {process.returncode}"
+            message = stderr.decode("utf-8", "replace").strip()
+            if not message and args[:2] == ["do", "parse"] and "--json" in args and stdout:
+                try:
+                    document = json.loads(stdout)
+                    records = document if isinstance(document, list) else [document]
+                    message = "\n".join(f"{record['diagnostic']['code']}: {record['diagnostic']['message']}" for record in records)
+                except (ValueError, KeyError, TypeError):
+                    pass
+            message = message or f"Kame exited with status {process.returncode}"
             raise KameError(message, returncode=process.returncode, stderr=stderr.decode("utf-8", "replace"))
         return stdout.decode("utf-8", "replace").rstrip("\n")
 
