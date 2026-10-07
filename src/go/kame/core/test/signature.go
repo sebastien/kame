@@ -270,7 +270,7 @@ func TestAcceptedSignatureRecordRoundTripAndCorruption(t *testing.T) {
 	s := core.ContentSignature([]byte("implementation"))
 	inputs := []core.Observation{{Key: core.ResourceKey{Kind: core.ResourceFile, Name: "input"}, Aspect: core.ObservationContent, Signature: core.ContentSignature([]byte("bytes"))}, {Key: core.ResourceKey{Kind: core.ResourceEnvironment, Name: "MISSING"}, Signature: core.Signature{Mode: core.SignatureMissing}}}
 	outputs := []core.Observation{{Key: core.ResourceKey{Kind: core.ResourceFile, Name: "output"}, Aspect: core.ObservationContent, Signature: core.ContentSignature(nil)}}
-	record := core.SignatureRecord{Implementation: s, Inputs: inputs, Outputs: outputs}
+	record := core.SignatureRecord{Implementation: s, Guard: core.ContentSignature([]byte("source")), Inputs: inputs, Outputs: outputs}
 	data := core.EncodeSignatureRecord(a, &record)
 	if len(data) == 0 {
 		t.Fatal("valid accepted record was not encoded")
@@ -279,6 +279,13 @@ func TestAcceptedSignatureRecordRoundTripAndCorruption(t *testing.T) {
 	var decoded core.SignatureRecord
 	if !core.DecodeSignatureRecord(a, data, &decoded) || !record.Matches(&decoded) {
 		t.Error("accepted record did not round trip")
+	}
+	if !record.Guard.Equal(decoded.Guard) {
+		t.Error("pre-render guard did not round trip")
+	}
+	decoded.Guard = core.ContentSignature([]byte("different source"))
+	if !record.Matches(&decoded) {
+		t.Error("fast-path guard changed semantic result equality")
 	}
 	decoded.Free(a)
 	for n := 0; n < len(data); n++ {

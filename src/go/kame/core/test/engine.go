@@ -151,8 +151,10 @@ func TestLazyDuplicateRequestAndReadyCapacity(t *testing.T) {
 	state := mem.Alloc[producerState](a)
 	state.Alloc, state.Text = a, "once"
 	n := e.Add(core.ResourceKey{Kind: core.ResourceDefinition, Name: "node"}, publishOnce, state)
+	if e.HasWork() { t.Error("undemanded node reported runnable work") }
 	if e.Step() != nil || state.Runs != 0 { t.Error("lazy node started before request") }
 	e.Request(n); e.Request(n)
+	if !e.HasWork() || state.Runs != 0 { t.Error("runnable-work check dispatched or missed requested work") }
 	e.Step()
 	if state.Runs != 1 { t.Error("duplicate request started producer twice") }
 	first := addSource(e, "a", newSequence(a, nil))
@@ -160,6 +162,7 @@ func TestLazyDuplicateRequestAndReadyCapacity(t *testing.T) {
 	e.Request(first); e.Request(second)
 	ready := e.Ready(2)
 	if len(ready) != 2 || ready[0] != first || ready[1] != second { t.Error("independent ready nodes were not offered in key order") }
+	if e.HasWork() { t.Error("host-claimed nodes reported unclaimed runnable work") }
 	if e.Step() != nil { t.Error("Step dispatched host-claimed ready work") }
 	slices.Free(a, ready)
 	if len(e.Ready(2)) != 0 { t.Error("ready node was offered twice before dispatch") }

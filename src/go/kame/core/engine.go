@@ -386,6 +386,19 @@ func lessNode(left *Node, right *Node) bool {
 	return left.Key.Name < right.Key.Name || (left.Key.Name == right.Key.Name && left.Key.Kind < right.Key.Kind)
 }
 
+// HasWork reports local work that must run before waiting for host events.
+func (e *Engine) HasWork() bool {
+	if len(e.completions) != 0 {
+		return true
+	}
+	for i := range e.nodes {
+		if !e.nodes[i].offered && e.ready(e.nodes[i]) {
+			return true
+		}
+	}
+	return false
+}
+
 // Ready returns up to capacity ready nodes in deterministic resource-key order.
 func (e *Engine) Ready(capacity int) []*Node {
 	if capacity <= 0 {

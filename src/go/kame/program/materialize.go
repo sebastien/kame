@@ -321,6 +321,10 @@ func (p *Program) instanceByTarget(name string) int {
 
 func (p *Program) Tick(wait int) {
 	p.tickServiceReadiness()
+	// Host polling must not sleep between runnable dependency evaluations.
+	if p.Engine.HasWork() {
+		wait = 0
+	}
 	p.pump(wait)
 	p.tickServiceReadiness()
 	p.tickServiceRestartTimers()

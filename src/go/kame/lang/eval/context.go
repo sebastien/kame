@@ -16,6 +16,7 @@ import (
 type Context struct {
 	Program     *Program
 	Engine      *core.EngineContext
+	TrackUnvalidatedReads bool
 	Scope       *Scope
 	Run         mem.Allocator
 	Requests    *host.Queue
@@ -133,6 +134,16 @@ func (c *Context) ClearOperationState() {
 }
 
 type Phase int
+
+// UntrackedHostRead marks computations whose external results cannot be
+// revalidated from a file/environment manifest alone.
+const UntrackedHostRead = "\x00untracked-host-read"
+
+func (c *Context) UnvalidatedRead() {
+	if c.Engine != nil {
+		c.Engine.Observe(core.ResourceKey{Kind: core.ResourceOperation, Name: UntrackedHostRead}, core.ContentSignature([]byte("untracked-host-read-v1")))
+	}
+}
 
 const (
 	EvaluatePhase Phase = iota
@@ -349,6 +360,9 @@ func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 		return 0
 	}
 	id := c.Requests.Submit(c.Engine.NodeID(), c.Engine.Generation(), c.Engine.Attempt(), kind, payload)
+	if id != 0 && (c.TrackUnvalidatedReads || kind != host.RequestProcess) && kind != host.RequestReadFile && kind != host.RequestEnvironment {
+		c.UnvalidatedRead()
+	}
 	if id != 0 {
 		c.Engine.Submit(id)
 	}

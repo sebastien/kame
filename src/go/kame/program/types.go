@@ -267,6 +267,7 @@ type Program struct {
 	GeneratedRuleMeta []generatedRuleMeta
 	Tools             []Tool
 	Configuration     []string
+	SourceSignature   core.Signature
 	Instances         []instance
 	Events            []Event
 	nextRequest       int64
@@ -362,6 +363,7 @@ type instance struct {
 	NewerInputs         *newerInputState
 	FileContext         *fileContextState
 	FileContextReady    bool
+	PreflightChecked    bool
 	FileContextKey      [32]byte
 	AcceptedRecord      core.SignatureRecord
 	Rule                *rule.Rule

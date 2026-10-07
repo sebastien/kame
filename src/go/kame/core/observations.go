@@ -66,6 +66,9 @@ func (c *EngineContext) ObserveAspect(key ResourceKey, aspect ObservationAspect,
 // artifacts. Hosts obtain observations; neither host chooses freshness policy.
 type SignatureRecord struct {
 	Implementation Signature
+	// Guard proves that recorded derived values can be reused without evaluation.
+	// It is a fast-path condition, not part of semantic result equality.
+	Guard          Signature
 	Inputs         []Observation
 	Outputs        []Observation
 }

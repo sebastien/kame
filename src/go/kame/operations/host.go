@@ -19,6 +19,9 @@ func request(c *eval.Context, kind host.RequestKind, payload core.Value) eval.Re
 	if c.Engine != nil && c.Program != nil && (kind == host.RequestReadFile || kind == host.RequestEnvironment) {
 		return readRequest(c, kind, payload)
 	}
+	if kind != host.RequestReadFile && kind != host.RequestEnvironment {
+		c.UnvalidatedRead()
+	}
 	completion := c.TakeCompletion()
 	if completion.RequestID != 0 {
 		// Resume does not submit, so the freshly built payload is still owned here.
@@ -53,6 +56,7 @@ type readRequestState struct {
 	Op    string
 	ID    int64
 	Value core.Value
+	Signature core.Signature
 	Done  bool
 }
 
@@ -107,6 +111,11 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 			return c.InvalidOperation("host completion omitted its result")
 		}
 		state.Value, state.Done = completion.Value.Clone(state.Alloc), true
+		if state.Kind == host.RequestReadFile && state.Op == host.OpRead {
+			if state.Value.Kind == core.Bytes { state.Signature = core.ContentSignature(state.Value.Bytes) }
+		} else {
+			state.Signature = core.ValueSignature(state.Value)
+		}
 		completion.Value.Free(c.Run)
 		return readRequestValue(c, state)
 	}
@@ -119,15 +128,7 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 }
 
 func readRequestValue(c *eval.Context, state *readRequestState) eval.Result {
-	signature := core.ValueSignature(state.Value)
-	if state.Kind == host.RequestReadFile && state.Op == host.OpRead {
-		if state.Value.Kind == core.Bytes {
-			signature = core.ContentSignature(state.Value.Bytes)
-		} else {
-			signature = core.Signature{}
-		}
-	}
-	observeReadRequest(c, state, signature)
+	observeReadRequest(c, state, state.Signature)
 	return eval.Result{Value: state.Value.Clone(c.Run)}
 }
 

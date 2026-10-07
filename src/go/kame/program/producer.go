@@ -47,6 +47,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.freeFileContext(entry.FileContext)
 		entry.FileContext = nil
 		entry.FileContextReady = false
+		entry.PreflightChecked = false
 		p.freeForwardEffects(entry.ForwardEffects)
 		entry.ForwardEffects = nil
 		entry.VerifyOutputs, entry.VerifyPending, entry.VerifyIndex = false, false, 0
@@ -110,7 +111,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	}
 	for i := range entry.SettingsDependencies {
 		dependency := p.Eval.Definition(entry.SettingsDependencies[i])
-		if dependency != nil && !p.addPurposeDependency(c, entry, dependency, false) {
+		// Resolved settings are fingerprinted by fileImplementation. Scheduling
+		// their definitions is order-only: constructors can be unhashable, and
+		// an unobserved normal edge would prevent equal-result watch revalidation.
+		if dependency != nil && !c.OrderDependency(dependency.Key) {
 			return core.ProducerWaiting
 		}
 	}
@@ -232,6 +236,9 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerWaiting
 	}
 	entry = &p.Instances[state.Index]
+	if entry.Rule.Kind == rule.FileRule && !entry.PreflightChecked && !entry.Rule.Always && !p.Options.Force && !p.Options.DryRun {
+		return p.beginFileContext(c, state.Index, renderResult{}, true)
+	}
 	// Scan the combined source so selectors used through definitions are covered.
 	// False positives only add metadata reads; literal source is never evaluated.
 	if entry.Rule.Kind == rule.FileRule && strings.Contains(p.Parsed.Source.Text, "@<?") {
@@ -249,7 +256,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered renderResult) core.ProducerResult {
 	entry := &p.Instances[index]
 	if (entry.Rule.Kind == rule.FileRule || (entry.Rule.Kind == rule.CachedTaskRule && !p.Options.CacheDisabled && !p.Options.Force)) && !rendered.Waiting && rendered.Diagnostic.Code == "" && !entry.EnvironmentConflict && !entry.FileContextReady && !p.Options.DryRun {
-		return p.beginFileContext(c, index, rendered)
+		return p.beginFileContext(c, index, rendered, false)
 	}
 	commands, effects, writePaths, d := rendered.Commands, rendered.Effects, rendered.WritePaths, rendered.Diagnostic
 	slices.Free(p.Alloc, entry.LineSpans)

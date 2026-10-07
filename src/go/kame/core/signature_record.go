@@ -51,7 +51,7 @@ func (c *signatureRecordCodec) readSignature() Signature {
 	c.At++
 	copy(s.Digest[:], c.Data[c.At:c.At+32])
 	c.At += 32
-	if s.Mode < SignatureContent || s.Mode > SignatureMissing {
+	if s.Mode < SignatureUnavailable || s.Mode > SignatureMissing {
 		c.Failed = true
 	}
 	return s
@@ -98,10 +98,10 @@ func (c *signatureRecordCodec) readObservations(a mem.Allocator) []Observation {
 }
 
 func EncodeSignatureRecord(a mem.Allocator, record *SignatureRecord) []byte {
-	if !record.Matches(record) {
+	if !record.Matches(record) || (record.Guard.Mode != SignatureUnavailable && record.Guard.Mode != SignatureContent) {
 		return nil
 	}
-	n := 4 + 33 + 8 + 32
+	n := 4 + 66 + 8 + 32
 	for i := range record.Inputs {
 		length := len(record.Inputs[i].Key.Name)
 		if length > SignatureRecordMax-n-39 {
@@ -117,8 +117,9 @@ func EncodeSignatureRecord(a mem.Allocator, record *SignatureRecord) []byte {
 		n += 39 + length
 	}
 	c := signatureRecordCodec{Data: slices.Make[byte](a, n), At: 4}
-	copy(c.Data[:4], "KSR1")
+	copy(c.Data[:4], "KSR2")
 	c.writeSignature(record.Implementation)
+	c.writeSignature(record.Guard)
 	c.writeObservations(record.Inputs)
 	c.writeObservations(record.Outputs)
 	digest := ContentSignature(c.Data[:c.At])
@@ -129,7 +130,7 @@ func EncodeSignatureRecord(a mem.Allocator, record *SignatureRecord) []byte {
 // DecodeSignatureRecord leaves out untouched on failure. Success transfers
 // allocator-owned keys and slices to the caller.
 func DecodeSignatureRecord(a mem.Allocator, data []byte, out *SignatureRecord) bool {
-	if len(data) < 77 || len(data) > SignatureRecordMax || string(data[:4]) != "KSR1" {
+	if len(data) < 110 || len(data) > SignatureRecordMax || string(data[:4]) != "KSR2" {
 		return false
 	}
 	end := len(data) - 32
@@ -141,6 +142,10 @@ func DecodeSignatureRecord(a mem.Allocator, data []byte, out *SignatureRecord) b
 	}
 	c := signatureRecordCodec{Data: data[:end], At: 4}
 	r := SignatureRecord{Implementation: c.readSignature()}
+	r.Guard = c.readSignature()
+	if r.Guard.Mode != SignatureUnavailable && r.Guard.Mode != SignatureContent {
+		c.Failed = true
+	}
 	r.Inputs = c.readObservations(a)
 	if !c.Failed {
 		r.Outputs = c.readObservations(a)

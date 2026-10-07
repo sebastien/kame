@@ -52,6 +52,88 @@ with tempfile.TemporaryDirectory() as temporary:
     run('chosen : ; [shell: "/bin/sh"]\n\tprintf shell\n', expected='shell')
     run('chosen : ; [shell: ["/bin/sh" "-c"]]\n\tprintf argv\n', expected='argv')
     run('SHELL = (first (list kash))\nchosen :\n\t/usr/bin/printf global\n', expected='global')
+    # Interpreter constructors are settings, not unhashable artifact inputs.
+    (project / 'input').write_text('unchanged')
+    for setting in ('kash', '(first (list kash))'):
+        text = f'SHELL = {setting}\n./reused : ./input\n\t/bin/sh -c "printf x >> file-runs; cp input reused"\n'
+        (project / 'file-runs').write_text('')
+        run(text, ['./reused'])
+        runs = (project / 'file-runs').read_text()
+        stamp = (project / 'reused').stat().st_mtime_ns
+        run(text, ['./reused'])
+        assert (project / 'file-runs').read_text() == runs
+        assert (project / 'reused').stat().st_mtime_ns == stamp
+        (project / 'input').write_text(setting)
+        run(text, ['./reused'])
+        assert (project / 'reused').read_text() == setting
+        run(text, ['./reused'])
+        assert (project / 'file-runs').read_text() == runs + 'x'
+    # Guarded reuse must skip derived-value evaluation, not merely publication.
+    (project / 'extra.json').write_text('"A"')
+    guarded = 'SHELL = kash\nPAYLOAD = (parse-json (text (read "./extra.json")))\n./guarded : ./input\n\t@(yield PAYLOAD)\n'
+    run(guarded, ['./guarded'])
+    stamp = (project / 'guarded').stat().st_mtime_ns
+    warm = run(guarded, ['--json', './guarded'])
+    events = [json.loads(line) for line in warm.stdout.splitlines()]
+    assert not any(e['type'] == 'process-started' for e in events)
+    assert not any(e['type'] == 'dependency' and e['dependency']['resource']['kind'] == 'definition' for e in events)
+    assert (project / 'guarded').stat().st_mtime_ns == stamp
+    # An unrelated source edit falls back once, without rewriting equal bytes.
+    guarded += 'UNUSED = "unrelated"\n'
+    run(guarded, ['./guarded'])
+    assert (project / 'guarded').stat().st_mtime_ns == stamp
+    warm = run(guarded, ['--json', './guarded'])
+    events = [json.loads(line) for line in warm.stdout.splitlines()]
+    assert not any(e['type'] == 'dependency' and e['dependency']['resource']['kind'] == 'definition' for e in events)
+    # Content identity must detect edits with identical size and timestamps.
+    metadata = (project / 'extra.json').stat()
+    (project / 'extra.json').write_text('"B"')
+    os.utime(project / 'extra.json', ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
+    run(guarded, ['./guarded'])
+    assert (project / 'guarded').read_text() == 'B'
+    (project / 'guarded').write_text('tampered')
+    run(guarded, ['./guarded'])
+    assert (project / 'guarded').read_text() == 'B'
+    (project / 'guarded').unlink()
+    run(guarded, ['./guarded'])
+    assert (project / 'guarded').read_text() == 'B'
+    for value in ('A', 'B'):
+        helper = f'SHELL = kash\n(payload) = "{value}"\n./helper : ./input\n\t@(yield (payload))\n'
+        run(helper, ['./helper'])
+        assert (project / 'helper').read_text() == value
+        stamp = (project / 'helper').stat().st_mtime_ns
+        run(helper, ['./helper'])
+        assert (project / 'helper').stat().st_mtime_ns == stamp
+        # Calls inside Kash execute later than recipe template rendering.
+        execution = f'SHELL = kash\n(payload) = "{value}"\nPAYLOAD = (payload)\n./executed : ./input\n\t/usr/bin/printf %s $PAYLOAD > ./executed\n'
+        run(execution, ['./executed'])
+        assert (project / 'executed').read_text() == value
+    # Membership is itself a dependency, including appearance and disappearance.
+    (project / 'members').mkdir()
+    (project / 'members/a').write_text('A')
+    membership = 'SHELL = kash\nMEMBERS = (wildcard ./members/*)\n./membership : ./input\n\t@(yield (join (map ([file] (text (read file))) MEMBERS) ""))\n'
+    for expected in ('A', 'AB', 'B'):
+        run(membership, ['./membership'])
+        assert (project / 'membership').read_text() == expected
+        if expected == 'A':
+            (project / 'members/b').write_text('B')
+        elif expected == 'AB':
+            (project / 'members/a').unlink()
+    # A clock/process-backed definition has no revalidatable leaf manifest.
+    volatile = 'SHELL = kash\nPAYLOAD = (shell "printf x >> volatile-runs; printf payload")\n./volatile : ./input\n\t@(yield PAYLOAD.stdout)\n'
+    run(volatile, ['./volatile'])
+    run(volatile, ['./volatile'])
+    assert (project / 'volatile-runs').read_text() == 'xx'
+    (project / 'seed').write_text('first')
+    generated = './generated : ./seed\n\tcp @< @>\n./consumer : ./input\n\t@(yield (text (read "./generated")))\n'
+    run(generated, ['./consumer'])
+    (project / 'seed').write_text('second')
+    run(generated, ['./consumer'])
+    assert (project / 'generated').read_text() == 'second'
+    assert (project / 'consumer').read_text() == 'second'
+    stamp = (project / 'consumer').stat().st_mtime_ns
+    run(generated, ['./consumer'])
+    assert (project / 'consumer').stat().st_mtime_ns == stamp
     run('SHELL = "/missing-shell"\nchosen : ; [shell: "/bin/sh"]\n\tprintf override\n', expected='override')
     run('mode = "configured"\nchosen : ; [env: [MODE: mode]]\n\tprintf %s "$MODE"\n', expected='configured')
     run('chosen : ; [shell: kash env: [MODE: "scoped"]]\n\t/usr/bin/printenv MODE\n', expected='scoped\n')

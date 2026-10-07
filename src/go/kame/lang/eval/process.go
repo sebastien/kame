@@ -327,6 +327,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if r.Diagnostic.Code == "" { state.Value, state.Done = r.Value.Clone(state.Alloc), true }
 		return r
 	}
+	if e.Kind == expr.CommandCapture { c.UnvalidatedRead() }
 	state.ID = c.Submit(host.RequestProcess, payload)
 	payload.Free(c.Run)
 	if state.ID == 0 {

@@ -385,6 +385,7 @@ func (p *Program) definition(engine *core.EngineContext, state *definitionState)
 	d := state.Definition
 	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState, DirectHostRequests: p.DirectHostRequests}
 	if state.Scoped {
+		context.TrackUnvalidatedReads = true
 		context.Environment, context.HasEnvironment = state.Environment, true
 		context.DefinitionNamespace, context.HasDefinitionNamespace = state.Namespace, true
 		context.Phase = state.Phase

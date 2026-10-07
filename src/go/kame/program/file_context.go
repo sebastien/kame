@@ -25,6 +25,7 @@ type fileContextState struct {
 	PendingKey    core.ResourceKey
 	PendingAspect core.ObservationAspect
 	Checkpoint    core.DependencyCheckpoint
+	Preflight     bool
 }
 
 func (p *Program) freeFileContext(state *fileContextState) {
@@ -131,31 +132,42 @@ func (p *Program) fileImplementation(entry *instance, rendered renderResult) cor
 		for i := range entry.Rule.Body {
 			sink.appendText(entry.Rule.Body[i].Text)
 		}
+		if entry.Kash && rendered.Commands != "" {
+			// Kash evaluates helper calls while executing. Until their code has
+			// individual observations, code edits must not reuse opaque commands.
+			source := p.sourceSignature()
+			sink.state.Write(source.Digest[:])
+		}
 	} else {
 		sink.appendText(rendered.Commands)
-		sink.appendU64(uint64(len(rendered.Effects)))
-		for i := range rendered.Effects {
-			sink.appendU64(uint64(rendered.Effects[i].Kind))
-			sink.appendU64(uint64(len(rendered.Effects[i].Data)))
-			sink.state.Write(rendered.Effects[i].Data)
-		}
-		sink.appendU64(uint64(len(rendered.WritePaths)))
-		for i := range rendered.WritePaths {
-			sink.appendText(rendered.WritePaths[i])
-		}
+	}
+	// Template effects are evaluated before either interpreter is handed a recipe.
+	sink.appendU64(uint64(len(rendered.Effects)))
+	for i := range rendered.Effects {
+		sink.appendU64(uint64(rendered.Effects[i].Kind))
+		sink.appendU64(uint64(len(rendered.Effects[i].Data)))
+		sink.state.Write(rendered.Effects[i].Data)
+	}
+	sink.appendU64(uint64(len(rendered.WritePaths)))
+	for i := range rendered.WritePaths {
+		sink.appendText(rendered.WritePaths[i])
 	}
 	signature := core.Signature{Mode: core.SignatureContent}
 	sink.state.Sum(signature.Digest[:])
 	return signature
 }
 
-func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered renderResult) core.ProducerResult {
+func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered renderResult, preflight bool) core.ProducerResult {
 	entry := &p.Instances[index]
 	state := mem.Alloc[fileContextState](p.Alloc)
 	state.Rendered = rendered
+	state.Preflight = preflight
 	state.Checkpoint = c.CheckpointDependencies()
 	entry.AcceptedRecord.Free(p.Alloc)
 	entry.AcceptedRecord.Implementation = p.fileImplementation(entry, rendered)
+	if entry.Rule.Kind == rule.FileRule {
+		entry.AcceptedRecord.Guard = p.fileGuard(entry)
+	}
 	if entry.Rule.Kind == rule.CachedTaskRule {
 		entry.FileContext = state
 		state.Phase = -1
@@ -258,6 +270,12 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 		state.Pending = false
 		state.Index++
 	}
+	if state.Preflight {
+		if !state.Stored.Guard.Equal(p.Instances[index].AcceptedRecord.Guard) {
+			return p.preflightMiss(c, index)
+		}
+		p.Instances[index].AcceptedRecord.Implementation = state.Stored.Implementation
+	}
 	// Restore previously consumed execution-time resources before deciding reuse.
 	// Changed implementations do not restore obsolete branch dependencies.
 	if state.Phase == 1 && state.Stored.Implementation.Equal(p.Instances[index].AcceptedRecord.Implementation) {
@@ -298,6 +316,13 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 				continue
 			}
 			if item.Key.Kind == core.ResourceDefinition {
+				if state.Preflight {
+					// The guard covers code/overrides; transitive resource leaves below
+					// prove derived values unchanged without parsing or rendering them.
+					c.ObserveAspect(item.Key, item.Aspect, item.Signature)
+					state.Index++
+					continue
+				}
 				context := p.kashContext(c, index)
 				dependency := p.Eval.DefinitionWith(eval.AuthoredDefinitionName(item.Key.Name), context)
 				p.freeKashContext(context)
@@ -321,6 +346,12 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 				continue
 			}
 			observeDefinitionDependency(p, item.Key)
+			if dependency := p.instanceIndex(p.Engine.Lookup(item.Key)); dependency >= 0 {
+				if !p.claimEnvironment(dependency, p.Instances[index].Environment) {
+					p.failRule(c, index, p.environmentFailure(dependency, "restored prerequisite has a different recipe environment"))
+					return core.ProducerFailed
+				}
+			}
 			if !c.TryDependency(item.Key) {
 				return core.ProducerWaiting
 			}
@@ -333,6 +364,13 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 				c.Value(item.Key)
 				state.Index++
 				continue
+			}
+			if item.Aspect == core.ObservationContent || item.Key.Kind == core.ResourceGlob {
+				if signature := p.dependencyContentSignature(item.Key); signature.Mode != core.SignatureUnavailable {
+					c.ObserveAspect(item.Key, item.Aspect, signature)
+					state.Index++
+					continue
+				}
 			}
 			op := host.OpFileContent
 			if item.Aspect == core.ObservationExistence {
@@ -389,9 +427,17 @@ func (p *Program) finishFileContext(c *core.EngineContext, index int) core.Produ
 		}
 	}
 	if entry.Plan.Freshness != Fresh {
+		if state.Preflight {
+			return p.preflightMiss(c, index)
+		}
 		c.RestoreDependencies(&state.Checkpoint)
 		core.FreeObservations(p.Alloc, entry.AcceptedRecord.Inputs)
 		entry.AcceptedRecord.Inputs = p.acceptedInputs(entry)
+	}
+	if entry.Plan.Freshness == Fresh && entry.Rule.Kind == rule.FileRule && !state.Stored.Guard.Equal(entry.AcceptedRecord.Guard) {
+		// A conservative source miss can still yield the same implementation.
+		// Refresh its guard so the next invocation need not render again.
+		p.saveAcceptedFileRecord(entry)
 	}
 	rendered := state.Rendered
 	state.Rendered = renderResult{}
@@ -412,6 +458,11 @@ func (p *Program) fileContextPath(entry *instance) string {
 func (p *Program) saveAcceptedFileRecord(entry *instance) {
 	core.FreeObservations(p.Alloc, entry.AcceptedRecord.Inputs)
 	entry.AcceptedRecord.Inputs = p.acceptedInputs(entry)
+	for i := range entry.AcceptedRecord.Inputs {
+		if entry.AcceptedRecord.Inputs[i].Key.Name == eval.UntrackedHostRead {
+			entry.AcceptedRecord.Guard = core.Signature{}
+		}
+	}
 	data := core.EncodeSignatureRecord(p.Alloc, &entry.AcceptedRecord)
 	if len(data) == 0 {
 		return
