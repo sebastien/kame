@@ -11,6 +11,23 @@ func sameSpan(span source.Span, start int, end int) bool {
 	return span.Start == start && span.End == end
 }
 
+func TestComputedOutputsPreserveExpressionsAndFormatting(t *testing.T) {
+	a := t.Allocator()
+	text := "@(ROOT)/{name}.o @(OUTPUTS) : ./seed\n\tcat @< > @>"
+	parsed := rule.ParseRule(a, "computed.kmk", text)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Outputs) != 2 {
+		t.Error("computed outputs did not parse")
+		return
+	}
+	if parsed.Rule.Outputs[0].Kind != rule.TargetString || parsed.Rule.Outputs[1].Kind != rule.TargetExpression || parsed.Rule.Outputs[0].Expansion == nil || parsed.Rule.Outputs[1].Expansion == nil {
+		t.Error("output interpolation and list-splicing expressions were not distinguished")
+	}
+	formatted := rule.FormatRule(a, parsed.Rule)
+	if formatted != text { t.Error("formatting changed authored output expressions") }
+	mem.FreeString(a, formatted)
+}
+
 func TestFileRuleParsesRecipeIndentation(t *testing.T) {
 	result := rule.ParseRule(t.Allocator(), "test.km", "./out : ./in dep\n\tcommand @< @>\n\t  nested")
 	defer result.Free()

@@ -37,6 +37,25 @@ with preserved timestamps. The first run establishes a successful record, and
 a file rule without declared or discovered dependencies is always stale.
 `always ./output : ./input` and `--force` bypass reuse.
 
+Outputs may also use `@(EXPRESSION)` or interpolated tokens:
+
+```kame
+PATH_BUILD = "./build"
+@(PATH_BUILD)/{name}.o : ./src/{name}.c
+
+OUTPUTS = [./build/one [./build/two :nil]]
+@(OUTPUTS) : ./seed
+```
+
+Outputs resolve purely before target selection. Explicit path prefixes are
+checked after expansion; `"build"` is not a replacement for `"./build"`.
+Resolved capture syntax becomes active. Standalone expressions flatten nested
+lists; nil and empty lists contribute nothing, but a rule must retain at least
+one output. Interpolated tokens render one target. Computed logical names obey
+the ordinary task/service limits. Host reads, processes, writes, and references
+to this rule's captures, arguments or selectors are unavailable during output
+resolution.
+
 Inputs may be logical targets, paths, target templates, quoted values, or
 `@(EXPRESSION)` expansions. Lists from input expressions flatten recursively:
 

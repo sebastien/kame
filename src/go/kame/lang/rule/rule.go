@@ -16,6 +16,8 @@ const (
 	TargetName TargetKind = iota
 	TargetPath
 	TargetTemplate
+	TargetExpression
+	TargetString
 )
 
 type InputKind int
@@ -36,6 +38,7 @@ type Target struct {
 	Path       bool
 	Template   bool
 	TargetForm *template.Target
+	Expansion  *template.String
 }
 type Input struct {
 	OrderOnly   bool
@@ -155,6 +158,7 @@ func FreeRule(a mem.Allocator, r *Rule) {
 	expr.Free(a, r.Metadata)
 	for i := range r.Outputs {
 		r.Outputs[i].TargetForm.Free()
+		r.Outputs[i].Expansion.Free()
 	}
 	slices.Free(a, r.Outputs)
 	for i := range r.Inputs {
@@ -289,7 +293,13 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 	}
 	defer slices.Free(p.a, words)
 	if r.Kind == CachedTaskRule || r.Kind == ServiceRule {
-		if len(words) != 1 {
+		computed := false
+		for i := range words {
+			if strings.Index(p.s.Text[words[i].Start:words[i].End], "@(") >= 0 {
+				computed = true
+			}
+		}
+		if len(words) != 1 && !computed {
 			p.error(start, end, "prefixed rule needs one target")
 		}
 	}
@@ -297,6 +307,23 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 		span := words[i]
 		text := p.s.Text[span.Start:span.End]
 		value := targetValue(text)
+		if strings.Index(value, "@(") >= 0 {
+			start, end := span.Start, span.End
+			if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
+				start++
+				end--
+			}
+			expansion := template.ParseStringRange(p.a, p.s, start, end)
+			for j := range expansion.Diagnostics {
+				p.diags = slices.Append(p.a, p.diags, expansion.Diagnostics[j])
+			}
+			kind := TargetString
+			if text[0] != '"' && len(expansion.Parts) == 1 && expansion.Parts[0].Kind == template.Expression {
+				kind = TargetExpression
+			}
+			r.Outputs = slices.Append(p.a, r.Outputs, Target{Kind: kind, Text: text, Span: span, Expansion: expansion})
+			continue
+		}
 		path, templated := explicitPath(value), hasTemplate(value)
 		if !path && !templated && !validName(value) {
 			p.error(span.Start, span.End, "invalid rule target; use ./ for a file path")
@@ -448,6 +475,11 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 }
 
 func (p *parser) classify(r *Rule) {
+	for i := range r.Outputs {
+		if r.Outputs[i].Expansion != nil {
+			return
+		}
+	}
 	if len(r.Outputs) == 0 {
 		return
 	}
@@ -473,6 +505,46 @@ func (p *parser) classify(r *Rule) {
 	} else {
 		p.error(r.Header.Start, r.Header.End, "named rules have one output")
 	}
+}
+
+// ResolveOutputs validates expanded text without a second interpolation pass.
+// Inputs and recipe remain borrowed from the authored rule.
+func ResolveOutputs(a mem.Allocator, s *source.Source, authored *Rule, outputs []Target) Part {
+	r := mem.Alloc[Rule](a)
+	*r = *authored
+	r.Outputs = nil
+	p := parser{a: a, s: s}
+	for i := range outputs {
+		output := outputs[i]
+		value := targetValue(output.Text)
+		output.Path, output.Template = explicitPath(value), hasTemplate(value)
+		output.Kind = TargetName
+		if output.Path {
+			output.Kind = TargetPath
+		} else if output.Template {
+			output.Kind = TargetTemplate
+		}
+		if !output.Path && ((!output.Template && !validName(value)) || strings.IndexByte(value, '/') >= 0) {
+			p.error(output.Span.Start, output.Span.End, "invalid rule target; use ./ for a file path")
+		}
+		if output.Template {
+			output.TargetForm = template.ParseTarget(a, s.Name, value)
+			for j := range output.TargetForm.Diagnostics {
+				p.error(output.Span.Start, output.Span.End, output.TargetForm.Diagnostics[j].Message)
+			}
+		}
+		for j := range r.Outputs {
+			if targetValue(r.Outputs[j].Text) == value {
+				p.error(output.Span.Start, output.Span.End, "duplicate rule output")
+			}
+		}
+		r.Outputs = slices.Append(a, r.Outputs, output)
+	}
+	if (r.Kind == CachedTaskRule || r.Kind == ServiceRule) && len(r.Outputs) != 1 {
+		p.error(r.Header.Start, r.Header.End, "prefixed rule needs one target")
+	}
+	p.classify(r)
+	return Part{Rule: r, Diagnostics: p.diags}
 }
 
 func (p *parser) recipe(r *Rule, lineEnd int) {

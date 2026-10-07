@@ -526,6 +526,10 @@ func (e *astEncoder) rule(value *rule.Rule) {
 		e.Str(o.Text)
 		e.Str("span")
 		e.span(o.Span)
+		if o.Expansion != nil {
+			e.Str("template")
+			e.template(o.Expansion)
+		}
 		if o.TargetForm != nil {
 			e.Str("template")
 			offset := o.Span.Start
@@ -612,6 +616,12 @@ func ruleKind(k rule.Kind) string {
 	return "service"
 }
 func targetKind(k rule.TargetKind) string {
+	if k == rule.TargetExpression {
+		return "expression"
+	}
+	if k == rule.TargetString {
+		return "string"
+	}
 	if k == rule.TargetName {
 		return "name"
 	}

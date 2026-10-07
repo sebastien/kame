@@ -487,8 +487,8 @@ UNPREFIXED-RULE = OUTPUTS WS* ":" (WS+ INPUTS)?
 INPUTS = INPUT-GROUP (WS* "," WS+ INPUT-GROUP)*
 INPUT-GROUP = (WS+ INPUT)*
 OUTPUTS = OUTPUT-TARGET (WS+ OUTPUT-TARGET)*
-OUTPUT-TARGET = NAME | PATH | TEMPLATE | QUOTED-PATH
-NAME-TARGET = NAME | NAME-TEMPLATE
+OUTPUT-TARGET = NAME | PATH | TEMPLATE | QUOTED-PATH | "@(" EXPRESSION ")" | INTERPOLATED-TARGET
+NAME-TARGET = NAME | NAME-TEMPLATE | "@(" EXPRESSION ")" | INTERPOLATED-TARGET
 INPUT = NAME | PATH | WILDCARD-PATH | TEMPLATE | QUOTED-STRING | "@(" EXPRESSION ")" | INTERPOLATED-PATH
 ```
 
@@ -510,9 +510,63 @@ watch invalidation updates its membership and retained consumers. See
 A file rule may have multiple outputs. Phony tasks, cached tasks,
 and services have exactly one output target. `task` and `service` are reserved at
 the start of a header and the prefixed form is tested before the unprefixed form.
-A quoted output is valid only when its decoded value begins with an explicit
-path prefix. `NAME-TEMPLATE` contains a target capture and no explicit path
-prefix.
+A literal quoted output is valid only when its decoded value begins with an
+explicit path prefix. Computed outputs, including quoted interpolated tokens,
+are classified after resolution. `NAME-TEMPLATE` contains a target capture and
+no explicit path prefix.
+
+### Computed outputs
+
+Output expressions resolve in pure registration context before target selection
+(`005-evaluation.md`). All outputs resolve and validate before any rule becomes
+available or any recipe executes. Configured definitions and overrides apply.
+Resolution does not depend on the requested target, that rule's captures, target
+arguments, or input/output selectors. Host requests, reads, process execution,
+and effects are forbidden, including through lazy definitions and helpers.
+
+Each standalone `@(EXPRESSION)` contributes strings or pattern values; nested
+lists flatten recursively in authored order. Nil and empty lists contribute no
+outputs. Other types, empty strings, and a complete empty output set are
+`EXPR_INVALID` errors. An interpolated token, quoted or unquoted, renders one
+target string through the shared template engine, without list splicing.
+
+Expand expressions first, then parse each resolved value as a target pattern,
+classify it, validate the complete output set, and register the rule. Capture
+syntax supplied by expression results is active, not escaped literal text.
+No second expression-interpolation pass is performed on computed text.
+
+```kame
+PATH_BUILD = "./build"
+@(PATH_BUILD)/{name}.o : ./src/{name}.c
+
+OUTPUTS = [./build/one [./build/two :nil] []]
+@(OUTPUTS) : ./seed
+
+NAME = "chosen"
+task @(NAME) :
+```
+
+The first output resolves to the file pattern `./build/{name}.o`. Explicit
+prefixes remain mandatory: `PATH_BUILD = "build"` does not make
+`@(PATH_BUILD)/{name}.o` a file pattern. Invalid resolved path/name shapes and
+malformed target patterns use `PARSE_ERR` with the authored output span.
+File, bare task, cached task, service, and `always` restrictions apply to the
+resolved output set. Mixing file and logical outputs remains invalid.
+
+Duplicate resolved outputs within a rule use `PARSE_ERR`. Duplicate literal targets
+across authored and generated rules use `TGT_AMBIG`; existing pattern matching
+precedence and ambiguity rules are unchanged. Diagnostics retain authored
+source/spans rather than reporting synthetic expanded source locations.
+Formatting and parse ASTs retain authored expressions; plans and graph
+inspection expose resolved outputs. Watch recompilation resolves a fresh target
+set using the same pure policy and configured overrides.
+
+Acceptance must cover computed paths and logical names, explicit-prefix
+validation, quoted interpolation, expression-supplied captures, nested lists,
+nil and empty outputs, cardinality and mixed-kind errors, duplicate targets,
+configured overrides, indirect forbidden operations, unavailable rule-local
+bindings, authored diagnostics, formatting idempotence, watch recompilation,
+and native/WASM parity.
 
 Headers are classified as:
 

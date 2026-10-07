@@ -202,6 +202,7 @@ test-wasm : wasm-check
 	./tests/T004-11-lang-wildcard-inputs.sh
 	./tests/T004-12-lang-optional-includes.sh
 	./tests/T004-13-lang-declaration-conditions.sh
+	./tests/T004-16-lang-computed-outputs.sh
 	./tests/T012-02-streams-live-cli.sh
 	./tests/T012-03-streams-large-output.sh
 	./tests/T012-04-streams-backpressure.sh

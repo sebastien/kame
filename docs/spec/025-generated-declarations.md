@@ -45,7 +45,10 @@ rules become visible.
 All batches are evaluated and validated before any generated rule is
 registered. A batch failure rejects compilation and leaves no executable
 program. Target names must be unique within a generator and across generated
-and authored rules. Generated declarations participate in the same target
+and authored rules, including literal targets obtained by computed-output
+resolution. Authored outputs resolve before collision validation and visibility;
+neither a failed output expansion nor a failed batch leaves executable rules.
+Generated declarations participate in the same target
 selection, dependency planning, freshness, caching, and execution as authored
 rules.
 
