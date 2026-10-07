@@ -3,10 +3,8 @@
 ## Purpose
 
 This specification defines the portable stream protocol used by the reactive
-engine. It replaces the legacy asynchronous iterator implementation with an
-explicit resumable state machine suitable for Solod. It also resolves the
-legacy ambiguity around `EOB`: a batch is materialized as an immutable list,
-not as a nil update.
+engine. Sources use an explicit resumable state machine suitable for Solod. A
+batch is materialized as an immutable list, not as a nil update.
 
 This specification amends `002-engine.md`. Where they differ, this document
 wins for source, batch, and stream behavior.
@@ -213,5 +211,3 @@ CLI stream publication must remain observable while the process is running.
 Native C stdio streams are flushed after event drains, including JSON records.
 WASM host callbacks drain copied ABI stream events during awaited host requests;
 waiting for terminal completion before publishing chunks violates this contract.
-`T012-02-streams-live-cli.sh` holds a recipe until its markers are observed and
-also checks declarative native watch output while the session remains alive.

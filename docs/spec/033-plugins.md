@@ -2,7 +2,7 @@
 
 ## Purpose and boundary
 
-D15 adds explicitly loaded operations implemented by a trusted native plugin
+Explicitly loaded operations run through a trusted native plugin
 process or a JavaScript host callback. Plugins extend the operation registry;
 they do not add syntax, definitions, rules, or host capabilities. Kame values
 cross the plugin boundary as bounded canonical JSON. Go pointers, allocator
@@ -122,11 +122,3 @@ disposal.
   and disposal each produce one terminal result and clean up their resources.
 - Repeated bounded calls leave no allocator-owned values, child processes, or
   pending JavaScript callbacks behind.
-
-T033-01 covers callback and native-process adapters across all canonical value
-kinds, declaration modes, identity and type failures, arity and capability
-denials, limits, timeout, cancellation, disposal, stale completion, and
-process-group cleanup. `TestPluginValueJSONRoundTripsSupportedKinds`,
-`TestEitherPluginVersionChangesOperationIdentity`, and the WASM runtime
-registration test cover portable encoding, cache identity, and request
-correlation.

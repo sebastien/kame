@@ -78,13 +78,3 @@ Acceptance coverage must include generated tasks and file rules, pure computed
 targets, definition dependencies, duplicate and malformed batches, dynamic
 source replacement, native/WASM parity, deterministic planning, and allocator
 cleanup on rejected batches.
-
-## Implementation status
-
-D03 is complete. Program tests cover generated task/file execution, computed
-targets and recipes, definition provenance, duplicate literal and pattern
-targets, malformed batches, definition cycles, record and list-item bounds,
-effect rejection, and cleanup after rejected compilation. T010-27 compares
-native/WASM plan output and runs generated tasks on both hosts. The shared
-T009-14/T010-23 watch suite changes an included module list and verifies that
-both hosts rebuild against the replacement generated target set.

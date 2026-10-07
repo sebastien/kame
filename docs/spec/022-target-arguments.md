@@ -58,7 +58,7 @@ Bound arguments are immutable string symbols in the selected rule's scope. They
 are available while resolving dependencies, rendering inputs and outputs,
 selecting tools, computing cache identity and evaluating the recipe. A local
 argument shadows a global definition only when the declaration explicitly uses
-the same name; that collision is rejected in the initial version to keep
+the same name; that collision is rejected to keep
 configuration unambiguous. File-pattern captures and named target arguments
 remain separate maps and are both visible in plans and diagnostics.
 
@@ -89,7 +89,3 @@ without exposing unrelated environment values.
 - Native and WASM execution, watch invalidation and JSON output agree.
 - Native and WASM watch preserve argument values across invalidation; dry-run
   and plan JSON report or validate the same bindings without effects.
-
-`T009-15` and `T010-24` cover plan JSON, defaults, dependency and recipe scope,
-argument-order-independent identity, multiple targets, invalid JSON diagnostics,
-dry-run and watch invalidation on native and WASM.

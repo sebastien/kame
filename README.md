@@ -22,9 +22,31 @@
 * **Saner syntax**: `make` really wanted to have Lisp as the expression language, and Bash as the rule language. `kame` sports a Lisp-like language for expressions, non-clashing expansion using `@(…)` syntax in rules, and first-class representation of paths vs symbols. No more `.ONESHELL`, and composable languages.
 * **Powerful model**: we read the [Build Systems à La Carte](https://dl.acm.org/doi/10.1145/3236774 "https://dl.acm.org/doi/10.1145/3236774") paper. `kame` sports an incremental, streaming, lazy reactive pipeline, with a virtual file system model for heterogeneous resource access. That gives you dynamic dependency resolution and lazy materialization of values.
 
-Here's what `kame` looks like
+## Get started
 
+Build from this checkout with GNU Make, Clang and the Solod 0.4.0 `so` toolchain
+installed:
+
+```sh
+CC=clang make dist
+export PATH="$PWD/dist:$PATH"
+kame --version
+kame do run --lang expr -c '(join ["hello" "world"] " ")'
+# "hello world"
 ```
+
+Save the build example below as `Makefile.kmk`, then run `kame -n` to inspect
+the commands or `kame` to build. It expects C sources under `src/`, headers
+under `src/`, and an include directory at `lib/h/`.
+
+See the [documentation index](docs/README.md) for tutorials, language references,
+specifications. Remaining work is consolidated in [TODO.md](TODO.md). Start with
+[Make migration](docs/skills/kame/ref/make-migration.md) or
+[idioms and gotchas](docs/idioms-and-gotchas.md).
+
+## Build example
+
+```kame
 # Symbols are aliases to expressions/values
 cc = "gcc"
 include-path = ./lib/h
@@ -33,11 +55,11 @@ include-path = ./lib/h
 sources-c = (wildcard ./src/**/*.c)
 headers = (wildcard ./src/**/*.h)
 
-# Space separated references automatically create a flattened list
-sources = sources-c headers
+# Use an expression to combine referenced lists; bare RHS words are text
+sources = (concat sources-c headers)
 
 # Pattern replace remaps paths, and map applies it to every source
-objects = (map sources-c (replace ./src/{path:**}/{name:*}.c ./build/{path}/{name}.o))
+objects = (map sources-c (replace ./src/{path:**}.c ./build/{path}.o))
 
 # Default rule will be triggered when no argument is given
 default : build
@@ -47,7 +69,7 @@ build : @(objects)
 	echo @(count objects) products built from @(count sources) inputs
 
 # Target templates capture the matching target and expand it in inputs
-./build/{path:**}/{name:*}.o : ./src/{path}/{name}.c @(headers)
+./build/{path:**}.o : ./src/{path}.c @(headers)
 	# No clash with the shell's $, more natural shorthands @< inputs @> outputs.
 	@(cc) -I @(include-path) -c @< -o @>
 	echo compiled @< to @>
@@ -61,7 +83,7 @@ stats :
 	echo @(count sources) source files
 	du -shc @(sources)
 	echo @(count objects) object files
-	du -shc @(filter ((exists? _)) objects)
+	du -shc @(filter ([path] (exists? path)) objects)
 ```
 
 ## Why?
@@ -89,4 +111,3 @@ What we want `kame` to bring:
 * **Reliability**: while `make` is a reliable tool, its usage can get unreliable due to its limitations, in particular stale builds, cache contamination that can lead to builds that won't reproduce. Note that we're not aiming for full reproducibility, as this is solved by a combination of environment and build system.
 
 The name `kame` is *verlan* for `make`, a nod to the process of starting from the result (a makefile without the quirks), and building the language/system to support it.
-

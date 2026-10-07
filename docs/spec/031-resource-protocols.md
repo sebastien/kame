@@ -2,11 +2,9 @@
 
 ## Purpose
 
-D13 adds explicit resource URIs to Kame's filesystem-oriented build model. It
-keeps relative and absolute paths working as they do today while allowing a
-program to name a resource independently of its host representation. The first
-release supports `file:` and `mem:` protocols through the existing portable
-host boundary.
+Explicit resource URIs let a program name a resource independently of its host
+representation while preserving relative and absolute filesystem paths. The
+`file:` and `mem:` protocols use the portable host boundary.
 
 ## URI syntax and canonical identity
 

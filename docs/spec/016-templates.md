@@ -344,16 +344,14 @@ verbatim literal is idempotent.
 
 ## Related Specifications
 
-The earlier cross-spec features referenced by this template work are now
-specified and implemented: `004-language.md` defines the control forms and
+`004-language.md` defines the control forms and
 syntax, `005-evaluation.md` defines lazy evaluation and scope/dependency
 behavior, `007-library.md` defines `cat`, `text`, and `render`, `009-cli.md`
 defines `do render`, and `011-diagnostics.md` registers the diagnostic codes.
 
-## Completed Deferred Extensions
+## Template Extensions
 
-The features originally deferred here are specified and implemented in
-`030-template-extensions.md`: labeled block endings, pattern matching blocks,
+`030-template-extensions.md` defines labeled block endings, pattern matching blocks,
 trim markers, inline blocks, content-based style inference, PowerShell and
 batch comment conventions, canonical formatting, and loop index/key bindings.
 

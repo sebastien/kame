@@ -11,7 +11,7 @@ threads or perform operating-system work.
 
 ## Values
 
-The runtime value model is a closed tagged union with these initial kinds:
+The runtime value model is a closed tagged union with these kinds:
 
 - Nil.
 - Boolean.
@@ -36,7 +36,7 @@ publication.
 
 ## Resources
 
-A resource key contains a kind and canonical name. Initial kinds are:
+A resource key contains a kind and canonical name. Resource kinds include:
 
 - `definition` for lazy named values.
 - `target` for phony named rules.
@@ -44,7 +44,7 @@ A resource key contains a kind and canonical name. Initial kinds are:
 - `task` for cached named rules.
 - `service` for long-running actions.
 
-The same canonical key identifies a node within one engine. The initial engine
+The same canonical key identifies a node within one engine. The engine
 does not support arbitrary URI schemes. Source syntax has one namespace for bare
 names, but rule resolution selects `target`, `task`, or `service` before falling
 back to `definition`; these resource keys never collide internally.

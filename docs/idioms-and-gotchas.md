@@ -28,6 +28,9 @@ strings. Bytes print directly. Do not infer string splitting from display.
 `./output.txt` names a file artifact; `output.txt` without an explicit path is
 not automatically a file rule. A bare task runs when requested; `task NAME` is
 a cached task. Use `--force` to bypass freshness/cache decisions for an invocation.
+File reuse compares recorded input/output content digests, not timestamps:
+touching unchanged bytes preserves reuse; changing bytes invalidates even with
+preserved metadata. A first successful run establishes the record.
 For a persistent file-rule override, write `always ./output : ./input`. It keeps
 file artifacts and output checks, and reruns whenever a new root reaches it.
 Shared prerequisites still run once within a diamond or concurrent root batch.
@@ -44,7 +47,9 @@ kame do run --lang expr --allow-read=. -c '(wildcard ./docs/*.md)'
 
 Read, write, run, and environment authority are separate. Later fragments do not
 implicitly broaden the first fragment's policy. Filesystem roots are lexical
-checks, with the symlink boundary described in [the security review](review-security.md).
+checks, with the symlink boundary described in
+[the capability contract](spec/005-evaluation.md#capabilities). Grants do not
+contain a child process's filesystem, network or environment access.
 
 ## Build expressions and shell recipes
 
@@ -52,8 +57,9 @@ A `.kmk` recipe is one shell script. Shell variables and `cd` persist between
 its lines. Port Make recipes that relied on one shell per line carefully.
 
 Kame selectors use `@>` for outputs, `@<` for the first input, and `@<*` for
-all normal inputs. `@<?` selects unique normal file inputs strictly newer than
-the oldest output, or all normal file inputs when any output is missing. It
+all normal inputs. `@<?` selects unique normal file inputs whose content digest
+changed since the successful run, or all normal file inputs when any output or
+the record is missing. Forced execution does not invent changed inputs. It
 excludes order-only prerequisites and is available only inside file recipes.
 Use explicit `{stem}` pattern captures for stems, `@(dirname @>)` for the output
 directory and `@(dirname @<)` for the first input directory.
@@ -99,7 +105,7 @@ patterns distinct; their capture/reference groups have different roles.
 Patterns can start with a capture, and bare targets can capture: `{name:*}`
 or `aws-shell@{role-account}`. Exact targets win over templates; two matching
 templates remain ambiguous. Required/optional standalone target arguments are
-a separate remaining request in [TODO-GAPS.md](../TODO-GAPS.md).
+implemented separately from captures; see [spec 022](spec/022-target-arguments.md).
 
 ## Inspection and reproducibility
 

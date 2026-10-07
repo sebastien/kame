@@ -18,6 +18,7 @@ Before editing, classify every Make target:
 | Expensive task whose result can be reused | `task NAME : ...`; Kame caches a successful result using rule, inputs, dynamic dependencies, and execution configuration |
 | First Make target / `.DEFAULT_GOAL` | A literal Kame target named `default` |
 | Prerequisite | Rule input after `:` |
+| Order-only prerequisite | Input after `|`; schedules normally but does not establish content freshness |
 | Pattern rule | Rule header with named captures such as `{name}` |
 | Recipe | Indented Kame rule body, rendered as one shell script |
 
@@ -37,8 +38,10 @@ the available literal targets.
 | `$(VAR)` in a recipe | `@(VAR)` | Evaluates and renders a Kame definition. |
 | `$@` | `@>` | First output. |
 | `$<` | `@<` | First input. |
-| `$^` | `@<*` | All inputs, rendered space-separated. |
-| `$?`, `$*`, `$(@D)`, `$(<D)` | No general direct equivalent | Model the required path/capture explicitly; do not paste Make automatic variables into a Kame recipe. |
+| `$^` | `@<*` | All normal inputs, rendered space-separated. |
+| `$?` | `@<?` | Changed normal file inputs by content digest, not timestamp; missing outputs/records select all. |
+| `$*` | `@(stem)` | Name an explicit target capture such as `{stem}`. |
+| `$(@D)`, `$(<D)` | `@(dirname @>)`, `@(dirname @<)` | Output and first-input directories. |
 | `out: in` | `./out : ./in` | Filesystem paths must be explicit. |
 | `%.o: %.c` | `./build/{name}.o : ./src/{name}.c` | The same named capture must match consistently. |
 | `make target` | `kame target` | Multiple targets can be requested in one invocation. |
@@ -96,8 +99,9 @@ include ./rules/platform.kmk
 ```
 
 Kame merges the included definitions and rules into the caller's program.
-Unlike GNU Make, repeated inclusion is an error rather than an implicit
-idempotent no-op; organize common declarations behind one shared fragment.
+Repeated nonrecursive inclusion expands again; duplicate declarations still
+fail registration. Active-ancestry include cycles are errors. Use `include?`
+for an optional file and `when`/`otherwise`/`end` for declaration selection.
 
 ## Convert incrementally
 
@@ -119,26 +123,31 @@ idempotent no-op; organize common declarations behind one shared fragment.
    ```
 
 5. Run the target, then run it again. A file rule with current outputs should
-   skip; a bare task should run again. Use `--force` only when intentionally
-   bypassing freshness and cached-task hits.
+    skip; a bare task should run again. Use `--force` only when intentionally
+    bypassing freshness and cached-task hits. File reuse compares content digests:
+    a metadata-only touch does not rebuild, while changed bytes invalidate even
+    with preserved timestamps. A first run establishes the successful record.
 6. Add patterns, generated inputs, and cached tasks only after the direct
    graph is correct.
 
 ## Redesign rather than transliterate
 
-The following GNU Make constructs have no initial Kame equivalent and should
-be redesigned:
+Do not copy GNU Make syntax for these constructs; use the Kame-specific model:
 
-- `-include`, `define`, `eval`, and Make-generated rule syntax;
+- `define`, `eval`, and Make-generated source text: use value definitions and
+  bounded typed [generated declarations](../../../spec/025-generated-declarations.md);
 - built-in implicit rules, suffix rules, and Make's rule-search algorithm;
-- order-only prerequisites (`|`), target-specific variables, and Make exports;
+- target-specific variables and Make exports: use scoped environment metadata
+  for recipe inheritance, and `?=`/`--define` for configuration defaults;
 - `$(shell ...)` and other Make functions that execute during parsing;
 - assumptions that each recipe line starts a separate shell.
 
 Use Kame definitions and expression operations for deterministic build data;
 use explicit prerequisite rules to generate files; and use the normal rule
-recipe as the process interface. A collected `shell` expression is available
-only for standalone expression execution, not during normal build rendering.
+recipe as the process interface. Collected `shell` calls are invalid during
+planning and direct template rendering. Demanded lazy values and Kash recipe
+expressions may call `shell` in their runtime phase, subject to run grants and
+the target environment. Compilation never launches them.
 
 For dynamic source discovery, prefer an explicit definition:
 
@@ -146,7 +155,7 @@ For dynamic source discovery, prefer an explicit definition:
 SOURCES = (wildcard ./src/*.c)
 
 ./build/sources.txt : @(SOURCES)
-	printf '%s\n' @<* > @>
+	printf '%s\n' @(SOURCES) > @>
 ```
 
 `wildcard` records a dependency on the glob result, so later membership changes

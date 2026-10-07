@@ -2,7 +2,7 @@
 
 ## Scope
 
-D08 is limited to the measured parser and runtime costs listed here. Existing
+This contract covers the parser and runtime costs listed here. Existing
 owning APIs keep their ownership guarantees; faster APIs state when the caller
 must retain storage. Optimizations preserve authored byte spans, lexical
 shadowing, graph identity, glob ordering, diagnostics, and native/WASM results.
@@ -52,19 +52,6 @@ deterministic gates. Wall-clock measurements are reported as repeated medians
 and are informational, not brittle pass/fail thresholds. Native and
 portable-runtime results are recorded separately.
 
-Completion evidence: each section has implementation and focused native/WASM or
-portable-runtime coverage; the complete five-sample measurement workload was
-rerun after the final test changes on 2026-10-06. The results are recorded in
-`docs/review-performance.md`.
-
-Current evidence includes `TestBorrowedParseMatchesOwningParseWithFewerAllocations`,
-`TestEngineResourceIndexKeepsNodeIdentity`, `TestLexicalFunctionAndOperationShadowing`,
-`TestPureExpressionUsesPortableEvaluator`, and
-`TestWildcardTraversalPrunesUnrelatedSubtrees`. The repeatable deep-tree gate
-counts enumerated entries against a full recursive walk. `tools/benchmark-cli.py`
-reports five-sample native/WASM measurements for all four runtime workloads and
-large-source parsing. `TestWideAndDeepScopeLookupAllocatesNoTrackedMemory` and
-`TestEngineResourceIndexKeepsNodeIdentity` verify that already-built scopes and
-resource indexes resolve 512-entry/deep lookups with zero tracked allocation;
-`TestBorrowedParseMatchesOwningParseWithFewerAllocations` pins the source-copy
-savings. See `docs/review-performance.md` for the 2026-10-06 run and limits.
+Prepared lexical scopes and resource indexes resolve repeated lookups without
+tracked allocation. Allocation checks cover both wide and deep scopes and at
+least 512 indexed resource lookups, preserving lexical shadowing and node identity.

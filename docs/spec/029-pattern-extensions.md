@@ -1,13 +1,11 @@
 # Pattern extensions
 
-## Purpose and status
+## Purpose
 
-D11 extends the shared target and expression pattern machinery. It adds
-anonymous captures to rule outputs, positional capture references to rule
-inputs, and `(pattern TEXT)` construction from a runtime string. Portable
-regular-expression groups, bounded matching, capture processors, replacement,
-and native/WASM acceptance coverage are implemented. D11 is complete;
-allocator-checked package tests and T004-15/T014-04 pass.
+The shared target and expression pattern machinery supports anonymous rule-output
+captures, positional rule-input references, `(pattern TEXT)` construction from
+runtime strings, regular-expression groups, bounded matching, capture processors
+and replacement. These operations have the same behavior on native and WASM.
 
 The extension preserves anchored, leftmost-shortest matching, non-empty
 captures, and the existing `*`, `**`, `?`, character-class, and named-capture

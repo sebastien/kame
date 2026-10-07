@@ -6,9 +6,9 @@ The standard library provides ordinary operations over materialized values.
 Reactive lifting, dependency tracking, authorization, and stream scheduling are
 provided by the evaluator, not reimplemented by every operation.
 
-The initial library covers operations needed by practical build files and the
-legacy `examples/core-make.example.lm`. Breadth beyond this specification is
-deferred.
+The library covers the operations defined here for values, templates and build
+programs. Additional operations require an explicit contract; an unspecified
+notion of library breadth does not define behavior.
 
 ## Operation Contract
 
@@ -30,7 +30,7 @@ the context.
 
 ## General Operations
 
-The initial general operations are:
+The general operations are:
 
 | Name | Contract |
 | --- | --- |
@@ -89,7 +89,7 @@ only numbers and strings; a mixed-kind or non-scalar argument is
 
 ## Collection Operations
 
-The initial collection operations are:
+The collection operations are:
 
 | Name | Contract |
 | --- | --- |
@@ -113,12 +113,12 @@ items equal to `VALUE`, respectively, using `eq`'s strict scalar semantics:
 integers and floats compare numerically, different kinds are unequal, and
 list, record, bytes, or pattern values are `EXPR_INVALID`.
 
-`unique` initially supports nil, boolean, number, and string values. Sorting
+`unique` supports nil, boolean, number, and string values. Sorting
 mixed kinds is invalid.
 
 ## Text Operations
 
-The initial text operations are:
+The text operations are:
 
 | Name | Contract |
 | --- | --- |
@@ -292,7 +292,7 @@ two readings are meaningful. Neither requires a capability grant.
 
 An `env` operation requires the `env` capability and reads one named variable.
 It registers the variable name and observed value as a dynamic dependency.
-Reading the entire environment at once is not supported initially.
+Reading the entire environment at once is not a supported operation.
 
 ## Tool configuration
 
@@ -318,8 +318,8 @@ executable metadata checks do not grant access to user read operations.
 - `filter` and `filter-out` accept both callback orders and the `(LIST VALUE)`
   equality shorthand, including mixed-kind inequality and numeric int/float
   equality; nonscalar equality values are `EXPR_INVALID`.
-- The expressions on lines 18-41 of legacy `core-make.example.lm` parse and
-  evaluate unchanged against a fixture source tree.
+- Composed path, collection and filesystem expressions parse and evaluate
+  against a fixture source tree with tracked resource dependencies.
 - Path operations handle root, dotfiles, trailing separators, and relative
   normalization without filesystem access.
 - Wildcard results are sorted and recursive `**` crosses directories.

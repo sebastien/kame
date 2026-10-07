@@ -1,68 +1,44 @@
-Porting references: [TODO-GAPS.md](TODO-GAPS.md) (capability gaps blocking a GNU Make port) and [KAME-BUGS.md](KAME-BUGS.md) (verified defects with repros).
+# Remaining work
 
-Improve:
-- [x] Operation diagnostics name the offending operand, its kind, and the expected types (e.g. `(first 1)` reports `first` argument 1 expects list; got int). `(out 10)` accepts integer-to-text coercion.
-- [x] Native `@(x/cmd)` resolution is target-scoped; missing tools in unused rules do not block planning or execution.
-- [x] Native `kame do tools check TARGETS...` checks selected dependency plans without executing recipes and fails if tools are unmet.
-- [x] WASM tool paths and static/pure-computed `tools check` plans match native diagnostics; unavailable tools in unused rules do not block execution.
-- [x] Omit captured process output from diagnostic causes; preserve status/signal and truncation metadata without changing live recipe streams.
-- [x] Host-dependent WASM tool inspection services read-only host requests and preserves native diagnostic context without executing recipes.
-- `./src/**/*.km` should really be a path marked as a wildcard, there should be no need for `(wildcard ./src/**/*.km)`
-- Ensure that wildcards are lazily resolved to singleton sources, and that they can stream updates -- it doesn't need to work right away, as we'll add live updates later on.
-- Support capture in target names, like `aws-shell@{role-account}`
-- Support arguments in target names, like `deploy {env=ENVIRONMENT}` (an argument is a standalone capture block `{name}` (required) or `{name=value}` (optional), these then become symbols available in the dependencies and rule.
-- Conditional forms
-- Improved templates (```...```, proc`....`)
-- Rename errors to be super clear and intuitive, maybe from UPPER_CASE to PascalCaseWithExplanation
+This is the single consolidated backlog. Specs in [docs/spec](docs/spec/README.md)
+define intended behavior and acceptance criteria, not implementation progress.
+Completed work and historical audit results are not retained here.
 
-Validate:
-- Streaming capabilities of standard library
-- [ ] security model of process execution, hopefully uses groups, etc
+## Release
 
-- [x] Watch detect source changes to Kame's build graph
+- [ ] Publish the first actual signed GitHub release. Staged-release checks do
+  not complete publication. Include the pinned bootstrap and launcher, native
+  platform artifacts (including Windows PE and OpenBSD native), WASM bundle,
+  package-manager manifests, signed checksums and provenance required by
+  [distribution](docs/spec/015-distribution.md). Verify installation and execution
+  from the published assets, including offline reuse and integrity rejection.
+- [ ] Before release, rerun native, leak and WASM gates at a stable revision:
+  `CC=clang CFLAGS=-O0 make test`, `CC=clang CFLAGS=-O0 make test-leaks`, and
+  `CC=clang CFLAGS=-O0 make test-wasm`. Verify sanitizer instrumentation survives
+  harness rebuilds and rerun artifact/build-mode checks without changing Git HEAD.
+  Historical passes predate the latest signature/revalidation changes and do not
+  establish current-tree conformance. See [test requirements](docs/spec/013-tests.md).
 
-Research:
-- We really need to design a nice CLI experience, it's quite bare bones for now
-- How do we do live updates (incremental builds as things get loaded)
-- How do we manage services running/provisioning
-- Using kame as a general scripting language (view of replacing shell, so that you just get kame)
-- File templating is also a common use case: replacing, repeating, etc.
-- Having a cli that shows number of jobs, for each job what the program is, its arguments and its running time.
+## Optional language and diagnostics decisions
 
-Consider:
-- Terminal colors easy functions
-- A JavaScript API?
-- A python API?
-- <- for stuff that builds (as opposed to targets)
-- , for sequencing in dependencies
+- [ ] Decide whether unquoted wildcard paths in expressions should be shorthand
+  for `(wildcard PATTERN)`. Literal rule-input expansion already exists; broader
+  expression shorthand is not a current conformance requirement. Specify quoting,
+  lazy dependency tracking and watch updates before adding it.
+- [ ] Review concrete confusing diagnostic messages and add actionable tips with
+  regression coverage. Preserve stable registered codes; any public-code rename
+  needs an explicit compatibility decision and coordinated spec/fixture changes.
 
-Improve:
-- Learnability
-- Embrace metaprogramming, kame is made for that
-- The error taxonomy (TGT_NO_RULE, TGT_AMBIG, REF_MISSING, SEL_NO_CONTEXT, …) is better than Make's, even if a few messages are cryptic.
+## Performance research
 
-Feedback
+Measure before optimizing; these are profiling tasks, not established defects.
 
-
-(llm porting sdk.mk)
-
-What's rough (bugs aside — those are in [KAME-BUGS.md](KAME-BUGS.md); capability gaps in [TODO-GAPS.md](TODO-GAPS.md))
-- The language is under-powered for meta-builds. No if, no defined?, no lambdas, single-assignment definitions, no ?=. Individually defensible; together they force "always run, no-op when empty" logic and push configuration into recipes. The port is arguably more verbose than the Make original in places.
-- No dynamic definition lookup ($($(VAR))) and no generated rules ($(eval)/include-time loops). That's the real fidelity cliff: AWS_ENV_<tenancy>_<environment> and per-tool/per-dependency rule generation simply cannot be expressed. I had to hardcode every module include too, losing SDK_MODULES composition.
-- Pattern ergonomics. Header-path interpolation is disallowed while recipes allow it; leading {capture} patterns don't parse; bare targets can't capture. These feel like parser gaps, not principles, and they block otherwise natural designs.
-- @(x/NAME) is a trap. The idea is great; global preflight makes it unusable for anything optional, which is most of an integration SDK. I dropped it entirely.
-- CLI/do expr inconsistencies. -C ignoring relative -f, capability-gated wildcard in do expr, and the concat deadlock all cost time. (The concat deadlock is now fixed — see KAME-BUGS.md KB-1.)
-- Docs omit the gotchas. $$, [a b]-are-references, empty-definition parse errors, "patterns must start with a literal" — a one-page idioms/gotchas section would have saved hours.
-Design decisions I'd push back on
-1. Global tool preflight — should be per-target or opt-in, otherwise optional tools are impossible.
-2. Single-assignment, no overrides — a config-file layering or ?=-like mechanism is needed for the "consumer overrides the framework" pattern that build frameworks depend on.
-3. No conditionals/includes gating — even a minimal if/when and conditional include would restore a lot of composability.
-
-Compared to GNU Make
-Make's superpower here was metaprogramming: computed variable names, ?= overrides, $(shell) at parse, generated rules. Kame trades that away for a legible graph and correct incrementality. For a greenfield project with mostly-static configuration, I'd pick Kame. For a framework whose purpose is dynamic, project-owned configuration (this SDK), Make currently expresses more — at the cost of being much harder to debug. The honest summary: Kame made the graph better and the metaprogramming worse, and this port needed both.
-
-- Per-target (or opt-in) tool resolution, not global preflight.
-- A small conditional/when plus conditional include, and any form of definition override.
-- Fix/allow: leading-capture patterns, @(…) in header paths, literal wildcard, and the (now-fixed) do expr concat hang.
-- A documented "idioms and gotchas" page (the skill's current docs skip everything that bit me).
-- Optional: bare-target parameters, so tf-plan@ws-style ergonomics don't require file-target workarounds.
+- [ ] Separate WASM CLI startup from reused embedding-instance evaluation costs.
+- [ ] Profile large reused engines and wide/deep lexical scopes independently of
+  parsing and CLI startup; prepared indexed lookups already avoid tracked allocation.
+- [ ] Profile large recursive wildcard traversal independently of startup;
+  selective-subtree pruning is already implemented.
+- [ ] Benchmark cold/warm cache throughput and bytes hashed with content signatures,
+  plus retained watch invalidation costs. Keep cache hit/miss and file-rule reuse
+  workloads distinct. `tools/benchmark-cli.py --samples 5` provides the existing
+  CLI baseline; dedicated workloads are needed for retained instances and watch.

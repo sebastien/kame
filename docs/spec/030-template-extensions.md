@@ -1,13 +1,12 @@
 # Template Extensions
 
-## Purpose and status
+## Purpose
 
-D12 completes the explicit extensions deferred by 016: matched block labels,
+The template language supports matched block labels,
 pattern matching, whitespace trim markers, inline blocks, content-based style
 inference, more host comment conventions, canonical template formatting, and
 loop position/key bindings. This specification defines their syntax and
-acceptance behavior. Implementation and native/WASM validation are complete;
-T016-02 covers the acceptance cases listed below.
+acceptance behavior on native and WASM.
 
 Existing template behavior remains the default. In particular, document text
 without an explicit style still uses `plain`; inference is requested with the

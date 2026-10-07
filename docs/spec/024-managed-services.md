@@ -87,6 +87,11 @@ Service lifecycle events identify target, generation, attempt, and state. They
 never include environment values or unbounded process output. Logs are emitted
 as bounded stdout/stderr events and retain independent per-stream truncation
 markers. JSON and human output report the same lifecycle transitions.
+JSON uses `service-state` records carrying target, generation, attempt and state.
+
+Embedding callers use `Start` and `Handle.PollReady` to observe root-service
+readiness while retaining the handle. Freeing or cancelling that handle releases
+the service through the same last-interest teardown path.
 
 ## Host contract
 
@@ -122,35 +127,3 @@ without leaving a process group alive.
   probes and process trees and reject late completions.
 - Native, WASM CLI, and public embedding tests cover lifecycle parity, repeated
   start/stop, shared prerequisites, restart recovery, health failure and cleanup.
-
-## Implementation status
-
-The runtime currently starts a service body as a persistent process and
-publishes readiness either at spawn or after a direct-argv readiness probe
-succeeds. Native hosts run probes directly; forwarded WASM hosts receive
-correlated monotonic-clock, timer, probe, and process-cancellation requests.
-Dependent rules proceed while the process remains active. A readiness timeout
-fails the service and cancels its process. Releasing the final dependent
-cancels it.
-Embedding callers can use `Start` and `Handle.PollReady` to observe root-service
-readiness while retaining the handle; freeing or canceling that handle releases
-the service. Final release sends SIGTERM to the service process group and
-escalates to SIGKILL after `stop.grace-ms` on native and JavaScript CLI hosts.
-Forwarded readiness and stop requests are implemented by the JavaScript CLI;
-public embedding hosts still need to service the timer, clock, probe and
-cancellation request kinds themselves.
-Native process requests and forwarded host completions retain at most the
-configured `log-bytes` prefix per stream. Native and forwarded hosts run
-configured health probes while a service is retained. Consecutive probe
-failures and unexpected process exits invalidate
-the service and its dependents; bounded restart attempts repeat prerequisite
-checks, then publish fresh readiness or fail with a stable service diagnostic.
-Forwarded service timers and probe requests are supported by the JavaScript CLI.
-Native and WASM CLI lifecycle event parity is implemented: `service-state`
-records carry target, generation, attempt, and one of the lifecycle states, and
-both human renderers use the same state line. T010-31 compares JSON records and
-human transitions across both hosts. `TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents`
-drives the public Runtime embedding contract through service start, dependent
-completion, process cancellation, process terminal, and lifecycle event drain.
-Embedding hosts remain responsible for actually servicing timer, clock, probe,
-process, and cancellation requests, as defined by the host contract above.

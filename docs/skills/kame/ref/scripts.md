@@ -69,8 +69,9 @@ default : ./build/app
 
 Paths resolve relative to the containing file, not evaluation cwd. Includes
 expand depth-first at their declaration position and share scope/source order.
-Repeated or cyclic inclusion is an error. Inline `-c` sources have no include
-base and cannot include files. Value programs cannot introduce rules through
+Active-ancestry cycles are errors. Repeated nonrecursive includes expand again;
+ordinary registration still rejects duplicate declarations. Inline `-c` sources
+have no include base and cannot include files. Value programs cannot introduce rules through
 includes; Kash inclusion is not provided by this directive.
 
 ## Shared execution sessions

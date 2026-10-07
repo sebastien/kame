@@ -6,8 +6,6 @@ The WebAssembly target embeds the portable engine and languages in browser or
 server JavaScript. JavaScript supplies host capabilities; the module does not
 pretend that browsers provide POSIX files or processes.
 
-Implementation begins only after the native vertical slice passes.
-
 ## Build Boundary
 
 The WebAssembly module targets `wasm32-freestanding`. It includes:
@@ -109,7 +107,7 @@ list through the target-event query, including in non-JSON presentation modes.
 
 ## Host Requests
 
-Initial request kinds are:
+Host request kinds include:
 
 - Read file.
 - Write file.
@@ -145,7 +143,7 @@ Events use a stable versioned binary envelope containing:
 - Generation and revision.
 - Payload length.
 
-Payloads initially use canonical JSON for structured values and raw bytes for
+Payloads use canonical JSON for structured values and raw bytes for
 process/file chunks. The host queries required payload length, then copies into
 its buffer. Querying pins that event until copy or explicit discard, so another
 step cannot replace it. Completion input bytes are copied synchronously before
@@ -155,7 +153,7 @@ allocate.
 
 ## Memory
 
-The initial module uses a fixed-size arena allocated on first source compilation
+The module uses a fixed-size arena allocated on first source compilation
 and reused by that instance slot. The freestanding ABI reserves 16 MiB per
 compiled slot on demand, rather than reserving memory for every possible slot.
 This accommodates the default 1 MiB Kash capture plus evaluator allocation and
@@ -207,8 +205,8 @@ updated records through cache-put.
 After successful process completion, or a recipe containing no shell/yield,
 the engine verifies every declared output through a separate kind-20 request.
 It reports `OUTPUT_MISSING` and withholds dependent execution when an output is
-absent; a host verification failure remains a failure. Kind 17 remains reserved
-for the earlier individual existence request. Embedding hosts must service
+absent; a host verification failure remains a failure. Kind 17 is reserved and
+is not the output-verification request. Embedding hosts must service
 kind 20 and cache requests when forwarding file rules. These metadata checks do
 not evaluate a user library read or broaden expression grants.
 
@@ -337,21 +335,12 @@ final portable invocation join, and cancels/reaps every owned process group on
 failure or interruption before releasing the instance. A later fragment can
 await a shared process handle, but handles cannot escape into another invocation.
 
-### Staged Coverage
+### Host Capability Requirements
 
-The ABI and host services arrive in stages, and the wrapper reports coverage
-honestly rather than faking effects:
-
-| Stage | ABI available | CLI coverage |
-| --- | --- | --- |
-| 0 | pure evaluation, instance create/free, source compile | `--version`, `-h`/`--help`, `do help`, pure inline/stdin `do run --lang expr`, and pure parse and format of stdin |
-| 1 | step, event, completion, and read/stat/glob/write host requests | source discovery and inspection: `do plan`, `do inputs`, `do outputs`, `do span`, and `do cat` for values and files |
-| 2 | process host requests | primary materialization, recipe execution, retries, timeouts, and cancellation |
-| 3 | full ABI, including cache | full `009-cli.md` parity, including `--json` event streams |
-
-An invocation whose selected work requires a capability the current stage does
-not provide fails with `FEATURE_UNSUP`. The wrapper does not skip or approximate
-the effect.
+The wrapper follows the full CLI contract in `009-cli.md`, including JSON event
+streams, inspection, materialization, process control and caching. When a selected
+host lacks a capability required by the invocation, it fails with `FEATURE_UNSUP`
+rather than skipping, approximating or pretending to perform the effect.
 
 ### Wrapper Rules
 

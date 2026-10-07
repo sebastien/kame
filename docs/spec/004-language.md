@@ -7,8 +7,8 @@ and rules. Template, expression, and rule syntax must each be independently
 parseable and formattable. Script parsing composes those parsers rather than
 creating a second representation.
 
-This specification preserves the tested legacy language while resolving its
-documented contradictions.
+The grammar and classification rules below define the language independently of
+any parser implementation.
 
 ## Source Model
 
@@ -107,7 +107,7 @@ the grammar of `014-patterns.md` claims them.
 ### Paths
 
 A path is explicit when it begins with `/`, `./`, or `../`. No other string is
-classified as a filesystem path in the initial language.
+classified as a filesystem path. Resource URI syntax follows `031-resource-protocols.md`.
 
 Protocol resources are explicit values constructed with `(resource URI)`; their
 syntax and canonical identity are specified in `031-resource-protocols.md`.
@@ -385,7 +385,7 @@ GLOB-ITEM = "*" | "**" | "?" | CLASS | ESCAPED | LITERAL
 followed by one byte. A character class is an optional leading `!` followed by
 one or more literal bytes or ascending `a-z` ranges and a closing `]`.
 
-Initial groups are `{name}`, `{name:*}`, `{name:**}`, and groups containing glob
+Groups include `{name}`, `{name:*}`, `{name:**}`, and groups containing glob
 `?` or character classes. `{name}` is equivalent to `{name:*}`. `*` matches one
 or more non-`/` bytes, `?` matches exactly one non-`/` byte, and `**` matches one
 or more bytes including `/`. Character classes use `[abc]`, `[a-z]`, and
@@ -575,7 +575,7 @@ string-template meaning. Text that is not a directive line remains opaque shell.
 ## Scripts
 
 A script contains comments, blank lines, definitions, rules, and top-level
-expressions. Imports are not part of the initial script language.
+expressions. Dynamic module imports are not part of the script language.
 
 The parser uses line context to distinguish a rule header from expression and
 record punctuation. Indented text without a preceding rule is `PARSE_ERR`.
@@ -702,5 +702,5 @@ expression definitions and verbatim string definitions remain supported.
 - Selectors retain their exact source spans.
 - Recipe lines format with tabs and preserve additional shell indentation.
 - Script formatting is idempotent and preserves comment order.
-- Golden fixtures cover the compatible syntax from the legacy parser and
-  formatter tests.
+- Golden fixtures cover the independently usable expression, template, rule and
+  script grammars and their canonical formatting.

@@ -86,6 +86,46 @@ cli_run --dir "$lesson" -- do run --lang expr -c '(replace ./src/{name:*}.c "1" 
 cli_expect_status 0
 cli_expect_stdout '"1"'
 
+test-step "README build example executes and reuses unchanged file outputs"
+readme_project="$TEST_PATH/readme"
+mkdir -p "$readme_project/src/demo" "$readme_project/lib/h" "$readme_project/bin"
+awk '/^```kame$/ { code = 1; next } code && /^```$/ { exit } code { print }' \
+	"$CLI_ROOT/README.md" >"$readme_project/Makefile.kmk"
+printf 'main\n' >"$readme_project/src/main.c"
+printf 'util\n' >"$readme_project/src/demo/util.c"
+printf 'header\n' >"$readme_project/src/demo/common.h"
+cat >"$readme_project/bin/gcc" <<'SH'
+#!/bin/sh
+set -eu
+while [ "$#" -gt 0 ]; do
+	if [ "$1" = -o ]; then
+		printf 'object\n' >"$2"
+		printf '%s\n' "$2" >>compiled.log
+		exit 0
+	fi
+	shift
+done
+exit 1
+SH
+chmod +x "$readme_project/bin/gcc"
+cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" -- -n
+cli_expect_status 0
+cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" --
+cli_expect_status 0
+cli_expect_stdout_contains "2 products built from 3 inputs"
+cli_expect_file "$readme_project/build/main.o"
+cli_expect_file "$readme_project/build/demo/util.o"
+cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" --
+cli_expect_status 0
+if [ "$(wc -l <"$readme_project/compiled.log")" -eq 2 ]; then
+	test-ok "unchanged README artifacts do not recompile"
+else
+	test-fail "README artifacts recompiled despite unchanged inputs"
+fi
+cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" -- stats
+cli_expect_status 0
+cli_expect_stdout_contains "3 source files" "2 object files"
+
 test-step "unknown do command is a usage error with a hint"
 cli_run -- do bogus
 cli_expect_status 2

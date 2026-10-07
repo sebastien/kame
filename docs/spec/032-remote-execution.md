@@ -2,7 +2,7 @@
 
 ## Purpose
 
-D14 lets an explicitly selected executor run a file rule away from the local
+An explicitly selected executor may run a file rule away from the local
 host while preserving Kame's declared dependency graph, process events,
 cancellation and output publication. Executor selection is portable policy;
 network configuration and credentials belong to the embedding host.

@@ -7,9 +7,15 @@ language and a streaming incremental engine that should cover all your needs.
 The implementation must not make the engine depend on build files, shells,
 or a particular host platform.
 
+The expression, template and rule languages are independently usable. The engine
+is lazy, incremental and stream-aware, with host requests for native and
+freestanding WebAssembly execution. Source/API compatibility with legacy
+TypeScript packages, JavaScript promises/thenables, unbounded stream history,
+C-style calls, arrow lambdas and JavaScript object syntax are not language goals.
+
 ## Package Boundaries
 
-The initial package layout is:
+The package boundaries are:
 
 ```text
 src/go/kame/core/             values, graph, scheduler, updates
@@ -26,6 +32,7 @@ src/go/kame/operations/       standard operations
 src/go/kame/program/          planning, resources, execution
 src/go/kame/host/             portable request contracts
 src/go/kame/host/posix/       native filesystem and process execution
+src/go/kame/host/wasm/        freestanding host request/completion ABI
 src/go/kame/cmd/kame/         CLI executable
 ```
 
@@ -34,8 +41,7 @@ at the repository root. `examples/` is a separate module (`kame/examples`) that
 consumes the module through a local `replace` directive, so the examples
 compile against the same packages an external caller would import.
 
-`host/wasm` is added only when `010-wasm.md` begins. Packages named `utils` or
-`tools` must not be created without at least two concrete consumers.
+Packages named `utils` or `tools` require at least two concrete consumers.
 
 ## Dependency Direction
 
@@ -152,14 +158,12 @@ targets, Kame must produce the same:
 Parallel completion timing may interleave events differently across independent
 nodes. Events from one node and one process stream retain their original order.
 
-## Boundaries Added After the Initial Architecture
+## Host Boundaries
 
-The initial implementation deferred several host boundaries. They now have
-concrete specifications and implementations: filesystem watching (020), cache
-backends (008), remote execution (032), plugin operations (033), Windows
-process management (035), and resource URI protocols (031). Each remains behind
-the portable interfaces and host capability checks described by its
-specification.
+Filesystem watching (020), cache backends (008), remote execution (032), plugin
+operations (033), Windows process management (035), and resource URI protocols
+(031) use portable interfaces and host capability checks. Each boundary follows
+its own specification; no host adapter owns graph policy.
 
 ## Acceptance Tests
 

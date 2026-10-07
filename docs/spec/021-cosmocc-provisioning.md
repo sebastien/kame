@@ -26,4 +26,4 @@ versioned destination to avoid reusing the previous mutable-download cache.
 - Both Makefile build descriptions use the versioned destination and compiler.
 
 This specification covers compiler archive provisioning. Signed release
-manifests and provenance attestations remain part of deferred item D05.
+manifests and provenance attestations follow `015-distribution.md`.

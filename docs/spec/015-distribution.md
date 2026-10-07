@@ -303,12 +303,10 @@ existing build rules.
   `.github/workflows/windows-launcher.yml` builds the bundle and runs this test
   on `windows-latest`. Passing a cross-compile alone does not establish
   Windows-host conformance.
-- `kame-windows-x64.exe` runs directly on `windows-latest` and passes the native
-  CLI version and PowerShell recipe checks without Node. The full native host
-  suite, including 64 KiB pipeline writes, EOF closure, 2 MiB transfer, cache,
-  watch and descendant cleanup, passed in
-  [run 37471661368](https://github.com/sebastien/kame/actions/runs/37471661368);
-  see spec 035.
+- `kame-windows-x64.exe` runs directly on Windows without Node and satisfies
+  the native CLI contract in 035. Acceptance includes version and PowerShell
+  recipes, 64 KiB pipeline writes, EOF closure, 2 MiB transfer, cache, watch and
+  descendant cleanup on an actual Windows host.
 - An invalid version override fails before creating or accessing a cache path.
 - `kame init` writes a correctly stamped bootstrap sidecar, preserves an
   existing `Makefile`, and refuses a second write without changing either file.

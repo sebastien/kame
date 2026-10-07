@@ -107,12 +107,14 @@ text, with recipe-local state persisting between lines.
 
 ```sh
 kame do run --lang expr --allow-read -c '(render ./page.html [title: "Hello"])'
+kame do render --define title=Hello ./page.html
+kame do render --check ./page.html
 printf '%s\n' 'Hello @(name)' | kame do parse --lang template
 ```
 
 `--lang template` tools handle the inline template grammar, not arbitrary
 host-language document files. `do fmt` must not rewrite document templates;
-verbatim literal contents are preserved. The specified `kame do render`
-command is not currently registered; use `(render ...)` through the runner
-or a rule instead. Do not promise its `--define`, `--comment`, or `--check`
-options until the installed CLI supports them.
+verbatim literal contents are preserved. `kame do render` renders documents;
+repeatable `--define NAME=VALUE` supplies literal string payload fields,
+`--comment STYLE` selects the directive comment style, and `--check` validates
+syntax without evaluating directives or opening includes.

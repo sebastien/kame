@@ -225,9 +225,7 @@ evaluating its body. Invalid names or parameter lists are `DEF_INVALID`.
 ### Eval
 
 `(eval text)` parses and evaluates expression text in the current lexical scope.
-The initial implementation does not load filesystem paths or complete scripts.
-Those capabilities may be added with explicit host requests after the native
-vertical slice.
+`eval` does not load filesystem paths or complete scripts.
 
 ### If
 
@@ -317,7 +315,7 @@ Path authorization resolves relative paths against the evaluation working
 directory and rejects traversal outside granted roots after normalization.
 This check is lexical and is not a filesystem sandbox: symlinks may resolve
 outside an allowed root. Untrusted build execution requires host-level
-containment, which is outside the initial implementation.
+containment, which is outside the language capability model.
 
 ## Acceptance Tests
 

@@ -1,17 +1,9 @@
 # Native Windows CLI
 
-Status: complete. The Windows-host acceptance suite passed on 2026-10-06 in
-[run 37471661368](https://github.com/sebastien/kame/actions/runs/37471661368),
-including the native pipeline, cache, watch and descendant-cleanup checks. A
-signed staged release containing the Windows PE and all seven native platform
-artifacts also passed; see the D17 evidence in
-`docs/spec/019-deferred-features.md`.
-
-This specification closes the native-Windows CLI deferral in
-`docs/spec/015-distribution.md`. The initial implementation reuses the
-Cosmopolitan APE's native Windows PE entry and the existing C-backed process
-host. It is accepted only after the Windows-host checks below pass; the
-Node/WASM launcher is a separate fallback.
+The native Windows CLI follows the shared language, runtime and distribution
+contracts without requiring Node or WASM. Its PE entry uses the native process
+host; the Node/WASM launcher is a separate fallback, not a substitute for native
+runtime conformance.
 
 ## Requirements
 
@@ -52,10 +44,9 @@ Node/WASM launcher is a separate fallback.
 
 ## Acceptance
 
-The Windows-host suite builds and runs the actual native PE, not a cross-compile
-or the Node/WASM launcher. The native PE smoke verifies version output, a
-PowerShell recipe, environment forwarding, file output, and a timeout diagnostic.
-It does not establish descendant cleanup. The suite must additionally verify:
+Conformance requires execution of the actual native PE on Windows, not only
+cross-compilation or Node/WASM launcher checks. Version and single-recipe smoke
+tests alone do not establish descendant cleanup. Acceptance covers:
 
 - version output, command parsing, native target execution, file reads and
   writes, and include/source discovery;
@@ -75,5 +66,4 @@ It does not establish descendant cleanup. The suite must additionally verify:
 
 Cross-compilation, launcher contract tests, and Node/WASM behavior are useful
 supporting checks, but none proves this specification's native-runtime
-requirements. The hosted run and staged signed release above provide the
-required evidence.
+requirements.

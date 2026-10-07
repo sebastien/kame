@@ -1,6 +1,6 @@
 # Job and CLI presentation contract
 
-This specification completes D09 from 019. A job is a requested target; a
+A job is a requested target; a
 process is one host execution performed while a job is active. Presentation is
 observational and must not alter scheduling, cancellation, or process policy.
 
@@ -32,8 +32,7 @@ optional and bounded. Environment values are never included.
 with 011, including `NO_COLOR`, `CLICOLOR_FORCE`, and non-terminal output. JSON
 and plain diagnostic output contain no ANSI escapes. Help and documentation
 examples that advertise executable commands are exercised by acceptance tests
-from a clean temporary project. T009-01 is the executable lesson set for the
-documented idioms guide and command help matrix.
+from a clean temporary project.
 
 ## Acceptance
 
@@ -43,16 +42,3 @@ stream separation and schema stability, color environment behavior, and the
 documented lessons. Native and WASM CLI output is compared where both expose the
 same host event data; host-specific timing values are checked for type and
 non-negativity rather than exact equality.
-
-Current evidence: `tests/T003-02-host-signals.sh` verifies human cancellation
-wording and JSON `target-cancelled` stream separation. `tests/T009-04-cli-json.sh`
-verifies bounded process fields, nonnegative runtime, human command/runtime
-output, lifecycle order, four-stage truncation, JSON-only stdout and explicit
-color/`NO_COLOR` behavior for redirected progress. `TestPipelineProcessDisplayIsBoundedToFourStages`
-also verifies the four-stage cap, explicit truncation and argument/byte bounds.
-`tests/T009-01-cli-help.sh` executes the value, wildcard and pattern commands
-from the idioms guide in a clean temporary project. `tests/T013-04-meta-layer-examples.sh`
-executes the independent value, rule and process lessons plus the composed Kash
-publication lesson from isolated copies. `tests/T010-14-wasm-json.sh` compares
-bounded pipeline process events between native and WASM and validates WASM
-runtime types. The documented idioms and runnable examples are covered.

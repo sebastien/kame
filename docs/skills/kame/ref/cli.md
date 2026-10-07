@@ -17,8 +17,9 @@ working directory.
 
 File-backed Kame sources can use `include PATH` to merge shared definitions and
 rules. Relative include paths are resolved from the including source, expanded
-depth-first, and reject repeated or cyclic inclusion. Inline `-c` / `--command`
-sources cannot use includes.
+depth-first, and reject active-ancestry cycles. Repeated nonrecursive includes
+expand again; duplicate declarations still fail registration. Inline `-c` /
+`--command` sources cannot use includes.
 
 ## Execute values, rules, and processes
 
@@ -49,10 +50,8 @@ use the selected working directory. Includes remain source-relative. Later
 fragments share the first fragment's capability policy, not implicit new grants.
 
 The unified runner supersedes the specified `do expr`/`do kash` execution
-interfaces. Transitional binaries may still expose `do expr`; prefer `do run
---lang expr` for new examples. Check `kame do run --help` and smoke-test on the
-selected backend. Current native runner sessions reject `--json` with
-`FEATURE_UNSUP`; build/inspection JSON support does not imply runner support.
+interfaces. Use `do run --lang expr` for expressions. Native and WASM runner
+sessions support `--json` JSON Lines events for values, processes and diagnostics.
 
 ## Build targets
 
@@ -87,7 +86,8 @@ Primary options:
 
 Recipes receive an explicit complete environment. The CLI starts from its
 environment and applies `--env` replacements; cache fingerprints include the
-process environment and other execution inputs that affect results.
+authored environment assignments and named environment reads, not the entire
+ambient environment. An unread inherited value changing does not invalidate reuse.
 
 ## Inspect before executing
 
@@ -126,10 +126,9 @@ kame do parse --lang script Makefile.kmk
 ```
 
 `do fmt` defaults to `script` language. `--lang` (`-l`) also accepts `expr`,
-`template`, `rule`, and `kash`. The specified `km`/`kmk` aliases are not yet
-accepted by current parse/format tooling, which can also lag `.km` expression
-statement support. Verify individual expressions with `expr` and value programs
-with the runner. Use an explicit mode rather than
+`template`, `rule`, and `kash`. The specified `km`/`kmk` aliases are not accepted
+by current parse/format tools. Use `script` for rule programs and `expr` for
+individual expressions. Use an explicit mode rather than
 assuming filename inference in language tools. `do parse` prints a stable JSON
 AST with spans. `template` handles inline template syntax, not host-document
 formatting; do not apply the source formatter to HTML/config templates.
@@ -164,8 +163,9 @@ Render a document with `(render SOURCE [PAYLOAD] [STYLE])`, for example:
 kame do run --lang expr --allow-read -c '(render ./page.html [title: "Hello"])'
 ```
 
-The standalone `do render` command is specified but not currently registered;
-do not assume its options exist. See [Templates](./templates.md).
+`do render` renders document files directly and supports parse-only `--check`:
+see [Templates](./templates.md) and `kame do render --help` for payload and style
+options. Document rendering is not source formatting.
 
 ## Automation and diagnostics
 

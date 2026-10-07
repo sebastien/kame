@@ -6,7 +6,7 @@ The program runtime compiles scripts, selects rules, builds dynamic dependency
 graphs, determines freshness, renders recipes, and executes requested targets.
 It composes the engine, language evaluator, library, and host.
 
-The runtime has explicit phases to avoid the legacy ambiguity around `make`:
+The runtime has explicit phases:
 
 ```text
 compile -> plan -> schedule -> render -> execute
@@ -34,7 +34,7 @@ is `TGT_AMBIG` during compilation. A definition may share that name because it
 uses a distinct `definition` key; rule lookup wins and `@(NAME)` explicitly
 evaluates the definition. Overlapping templates remain a selection-time error.
 
-Imports and dynamic modules are not initially supported.
+Dynamic module imports are not supported.
 
 ## Target Names
 
@@ -200,7 +200,11 @@ and the interpreter dependency is unchanged, do not execute either. `always`
 and `--force` execute.
 
 Operations that cannot be deferred, including collected `shell`, are invalid in
-planning or rendering and return `PHASE_INVALID`.
+planning and direct build-template rendering and return `PHASE_INVALID`.
+Demanded lazy values and Kash recipe expressions evaluate in their runtime
+phase, where collected shell calls may execute with the target environment and
+invocation run grants, as specified in 007. Dynamic prerequisites retain their
+read-only phase; registration never launches these calls.
 
 ## File Rules
 
@@ -254,9 +258,8 @@ Missing output is `OUTPUT_MISSING`.
 A bare task is always stale and executes whenever reached from a requested root.
 It may have dependencies but no file artifact.
 
-A `task` rule is cached according to `008-cache.md`. Until that specification is
-implemented it behaves as a bare task; parsing must still retain its cached
-kind.
+A `task` rule is cached according to `008-cache.md`. Parsing preserves its
+cached kind; it must not silently execute with bare-task reuse semantics.
 
 Services parse into plans and use the managed lifecycle contract in
 `024-managed-services.md`; they are not ordinary task rules.
@@ -359,9 +362,8 @@ Always/forced consumers still restart. In-flight host work uses cancellation-fir
 invalidation rather than accepting a completion derived from an old snapshot.
 Records contain digests rather than
 unread environment values.
-The repository build
-uses compiler-bound artifact modes and target-independent generated metadata,
-so that separate A3 build-mode acceptance is covered by T013-05.
+Repository artifacts use compiler-bound modes and target-independent generated
+metadata. Switching a mode alone must not rewrite shared version metadata.
 
 ## Failure and Cancellation
 
@@ -428,8 +430,8 @@ bytes is a separate operation used by `cat`.
 - `yield` combined with any nonempty rendered command returns `OUTPUT_CONFLICT`.
 - Command failure prevents dependent execution and carries mapped source span.
 - Cancelling a target leaves no process group running.
-- The equivalent of `deps/littlemake-legacy/Makefile.lmk` builds and then skips
-  its fresh file target.
+- A representative project builds and then skips its unchanged file target on
+  the next invocation.
 
 ## Newer-input selection
 

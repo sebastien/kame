@@ -19,6 +19,9 @@ of the same pattern share that source. A source update uses ordinary graph
 invalidation and does not start an unrelated recipe or poll from inside the
 portable runtime.
 
-Acceptance is covered by `T004-11` for recursive and empty patterns, quoted
-literal paths, sorted expansion and membership invalidation, and by `T009-14`
-and `T010-23` for membership changes while roots remain watched.
+## Acceptance
+
+- Recursive and empty patterns retain one shared lazy dependency source.
+- Quoted paths remain literal; unquoted wildcard inputs expand in sorted order.
+- Membership additions and removals invalidate retained consumers on native and
+  WASM watch sessions without starting unrelated recipes.

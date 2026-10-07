@@ -2,7 +2,7 @@
 
 ## Scope
 
-D10 adds importable JavaScript and Python interfaces for Kame without changing
+Importable JavaScript and Python interfaces expose Kame without changing
 the CLI grammar. The APIs cover source compilation, expression evaluation,
 builds and watches; copy all values and events that cross an API boundary; and
 provide explicit grants, cancellation and deterministic disposal.
@@ -96,7 +96,7 @@ the WASM runtime.
 - Repeated compile/evaluate/build/dispose cycles do not retain ABI instances,
   callback buffers, watches, child processes, or temporary source files.
 
-## Acceptance evidence
+## Acceptance
 
 - Node can import the library without running CLI dispatch.
 - Native CLI and JavaScript API agree on parse diagnostics and pure evaluation
@@ -114,6 +114,4 @@ the WASM runtime.
 - At least 100 repeated JS and Python lifecycle cycles leave no active instance,
   child process, temporary file or watch.
 
-`D10` is complete when both public APIs, these lifecycle rules, and the tests
-above are shipped and run from a clean checkout. The Node import tests and the
-Python package tests are registered in the CLI catalog and normal test gates.
+Both public APIs must satisfy these lifecycle rules from a clean checkout.

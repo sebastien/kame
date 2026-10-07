@@ -51,11 +51,18 @@ A task fingerprint is a canonical binary encoding of:
   result.
 
 Tasks and file rules use the engine's accepted `SignatureRecord`, encoded with
-the `KSR1` header, implementation signature, input/output observation sets, and
+the `KSR2` header, implementation signature, a pre-render validity guard,
+input/output observation sets, and
 a trailing SHA-256 checksum. The surrounding task record retains replayable
 stdout/stderr and timing. Each observation names a canonical resource, its
 observed aspect, and a typed signature. Duplicate, unavailable, corrupt, or
 truncated observations cannot prove reuse.
+
+The guard covers authored source and invocation context. A matching guard permits
+validation of recorded resource leaves without reevaluating derived definitions
+or rendering recipes. A missing or changed guard falls back to ordinary evaluation;
+it is not part of semantic result equality. Unverifiable host computations cannot
+use the pre-render shortcut. Older record formats are treated as misses.
 
 Canonical value encoding uses a one-byte tag followed by payload:
 

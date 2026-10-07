@@ -15,8 +15,7 @@ This specification defines two distinct contracts:
   The formatter does not rename identifiers or rearrange declarations.
 
 This specification extends the formatting contract in
-[004-language.md](004-language.md#formatting). It specifies the intended standard,
-not a claim that all layouts are already implemented.
+[004-language.md](004-language.md#formatting).
 
 ## Naming Conventions
 

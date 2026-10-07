@@ -20,16 +20,22 @@ clean :
 
 | Header | Kind | Freshness |
 | --- | --- | --- |
-| `./output : ./input` | File rule | Current when outputs exist and are at least as new as file inputs. |
+| `./output : ./input` | File rule | Reuses a successful record when input/output content digests and recorded dependencies match. |
 | `name : dependency` | Bare task | Always stale; runs whenever reached. |
 | `task name : dependency` | Cached task | Reuses success when its fingerprint matches. |
-| `service name : dependency` | Service | Parses/plans; do not assume execution support. |
+| `service name : dependency` | Managed service | Runs while required; readiness, health, restart and cleanup follow [spec 024](../../../spec/024-managed-services.md). |
 
 Paths must start with `./`, `../`, or `/`. `out.o` is not a file target;
 `./out.o` is. Quoted output paths must retain an explicit prefix. File rules
 can have multiple outputs; logical task/service rules have exactly one.
 Do not mix path and name outputs. With no selected target, request literal
 `default`, not the first rule.
+
+File freshness uses content, not modification time. Touching unchanged bytes
+does not rebuild; changing an input or output's bytes invalidates reuse even
+with preserved timestamps. The first run establishes a successful record, and
+a file rule without declared or discovered dependencies is always stale.
+`always ./output : ./input` and `--force` bypass reuse.
 
 Inputs may be logical targets, paths, target templates, quoted values, or
 `@(EXPRESSION)` expansions. Lists from input expressions flatten recursively:
@@ -64,10 +70,14 @@ pattern expansion semantics.
 Canonical recipe indentation is one tab; additional shell indentation survives.
 The first body line establishes the prefix shared by nonblank body lines.
 All rendered lines execute as one shell script, so `cd`, variables, and shell
-control flow persist. Recipes are not parsed as Kash and interpolation does
-not automatically shell-quote values.
+control flow persist. Shell recipes are opaque text; selecting `[shell: kash]`
+uses the Kash parser after template expansion. Interpolation does not
+automatically shell-quote values.
 
-Use `@<`, `@<*`, and `@>` for first input, all inputs, and first output.
+Use `@<`, `@<*`, and `@>` for first normal input, all normal inputs, and first
+output. In file recipes, `@<?` selects normal file inputs whose content changed
+since the successful run; missing outputs or records select all normal file
+inputs. Order-only prerequisites after `|` are excluded from input selectors.
 See [Templates](./templates.md) for selectors, inline expressions, and recipe
 document directives.
 
