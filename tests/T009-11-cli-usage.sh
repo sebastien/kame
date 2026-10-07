@@ -80,22 +80,24 @@ fixture_copy errors errors
 	cli_expect_stderr_contains "RECIPE_FAIL"
 )
 
-test-step "-j 1 is deterministic across runs"
+test-step "-j 1 keeps recipe execution order deterministic across runs"
 fixture_copy project project
 (
 	cd project
 	cli_run -- -j 1 ./build/main.o ./build/util.o
 	cli_expect_status 0
 	first_out="$(cat "$CLI_OUT")"
-	first_err="$(sed 's/[0-9]\+/N/g' "$CLI_ERR")"
+	first_order="$(cat ./runs.log)"
+	: >./runs.log
 	cli_run -- -j 1 --force ./build/main.o ./build/util.o
 	cli_expect_status 0
 	second_out="$(cat "$CLI_OUT")"
-	second_err="$(sed 's/[0-9]\+/N/g' "$CLI_ERR")"
-	if [ "$first_out" = "$second_out" ] && [ "$first_err" = "$second_err" ]; then
-		test-ok "-j 1 output is deterministic"
+	second_order="$(cat ./runs.log)"
+	# Progress timing/interleaving can differ; the recipes' execution order cannot.
+	if [ "$first_out" = "$second_out" ] && [ "$first_order" = "$second_order" ] && [ "$(printf '%s\n' "$first_order" | wc -l)" = 2 ]; then
+		test-ok "-j 1 recipe execution order and stdout are deterministic"
 	else
-		test-fail "-j 1 output differs between runs"
+		test-fail "-j 1 recipe execution order or stdout differs between runs"
 	fi
 )
 

@@ -19,20 +19,6 @@ Completed work and historical audit results are not retained here.
   Historical passes predate the latest signature/revalidation changes and do not
   establish current-tree conformance. See [test requirements](docs/spec/013-tests.md).
 
-## CLI parity
-
-- [ ] Forward `--log-limit` through WASM primary build/watch compilation. The
-  parsed limit currently does not reach `program.Options.RetainBytes`; cached
-  stdout replay remains at the default 64 KiB even with `--log-limit 1048576`.
-  Cover cold retention and warm replay on both backends.
-
-## Runtime freshness
-
-- [ ] Keep Kash file rules with no material inputs stale across invocations.
-  `tests/T017-19-kash-recipes.sh` fails because an inputless Kash recipe runs
-  only once; a clean HEAD build reproduces the same reuse. Implicit process
-  dependencies must not establish material-input freshness by themselves.
-
 ## Optional language and diagnostics decisions
 
 - [ ] Decide whether unquoted wildcard paths in expressions should be shorthand

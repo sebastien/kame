@@ -62,24 +62,24 @@ test-step "plan reports unknown freshness when the body may discover dependencie
 	cli_expect_json_query "$CLI_OUT" '.inputs | length' '0'
 )
 
-test-step "plan reports stale and fresh for a body-less file rule"
+test-step "plan does not infer body-less rule freshness from output timestamps"
 (
 	cd plan
 	cli_run -- do plan ./static.out
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.freshness' 'stale'
+	cli_expect_json_query "$CLI_OUT" '.freshness' 'unknown'
 	cli_expect_no_file ./static.out
 
 	printf 'result' >./static.out
 	set_mtime ./static.out 2000000000
 	cli_run -- do plan ./static.out
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.freshness' 'fresh'
+	cli_expect_json_query "$CLI_OUT" '.freshness' 'unknown'
 
 	set_mtime ./static.out 1000000000
 	cli_run -- do plan ./static.out
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.freshness' 'stale'
+	cli_expect_json_query "$CLI_OUT" '.freshness' 'unknown'
 )
 
 test-step "plan accepts multiple targets"

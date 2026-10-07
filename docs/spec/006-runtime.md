@@ -157,8 +157,11 @@ that set with the outputs:
 
 Order-only inputs stay out of the set unless a read or a normal edge upgrades
 them. A discovered file that is itself a build output is demanded before the
-result is reused. A rule with no declared or discovered dependency is always
-stale.
+result is reused. A file rule with no normal declared or discovered data
+dependency is always stale. Implicit interpreter, executable, operation identity,
+and whole-child-environment observations do not by themselves make an inputless
+recipe reusable. Explicitly consumed definitions and named environment reads
+remain data dependencies.
 
 A shell script that opens a path never named in the recipe does not introduce
 a Kame file dependency. Kame does not infer filesystem reads inside opaque shell
@@ -387,6 +390,53 @@ Cancelling a root propagates through engine interest and the POSIX process
 contract. A runtime does not report completion until active process groups for
 that root have terminated or remain required by another root.
 
+## Detected Changes and Reuse Decisions
+
+When materialization rejects reuse or deliberately bypasses it, the runtime
+reports the reason established by that decision. Explanations distinguish a
+detected change from the absence of a reusable proof and from an explicit
+execution policy. A target being visited, a dependency notification, or a
+timestamp changing is not by itself evidence of changed consumed content.
+
+Reasons cover:
+
+- Missing, invalid, or incompatible saved records; observations that cannot be
+  validated are reported as an unverifiable proof, not as changed content.
+- Changed consumed input signatures, including content, existence, metadata
+  when actually observed, selected definition values, tool or operation identity,
+  and dependency membership.
+- Missing or modified declared outputs.
+- Changed implementation or source/context guards, resolved settings, and
+  recorded environment dependencies.
+- Explicit bypasses such as `--force`, `always`, and uncached tasks.
+
+A source/context guard mismatch explains why reevaluation is needed; it does not
+assert that recipe behavior or output changed. Reevaluation may establish an
+unchanged result and reuse the artifact. Likewise, a changed prerequisite that
+publishes the same consumed value does not imply a downstream rebuild. Reasons
+identify whether the decision requires reevaluation or execution; execution and
+completion remain separate lifecycle events.
+
+Explanations use the observations and comparisons already required for the
+decision. They must not evaluate additional expressions, run processes, read
+extra resources, or enlarge the dependency set merely to obtain a reason. The
+runtime need not enumerate every possible mismatch after finding enough evidence
+to reject reuse, but must not claim unexamined dependencies changed.
+
+For a whole-child-environment digest mismatch, the reason is `process environment
+changed`. It must not name particular changed variables unless existing evidence
+establishes them. A named environment observation may identify its variable name.
+Neither explanation exposes values or old/new fingerprints. Aggregate evidence
+does not justify guessing that a profiler variable or other incidental name was
+responsible. Reporting does not exclude or normalize any environment variable,
+nor change the environment dependency contract above.
+
+Reasons are emitted once per distinct decision, reason, and affected resource in
+a target generation, not repeatedly on resumed attempts. Shared prerequisites
+report under their own target identity. Unchanged reuse emits no change reason.
+Presentation, privacy, and JSON transport follow `027-job-presentation.md` and
+`009-cli.md`.
+
 ## Materialization Result
 
 Materializing a file target returns its path and status; it does not read the
@@ -395,6 +445,19 @@ task returns status and retained execution metadata. Reading exact artifact
 bytes is a separate operation used by `cat`.
 
 ## Acceptance Tests
+
+- Reuse rejection reports its established reason for changed inputs, membership,
+  outputs, implementation/guards, settings, and environment observations;
+  unavailable proofs and explicit policy bypasses are distinguished from changes.
+- Guard-triggered reevaluation with an unchanged result does not claim execution;
+  equal-result dependency revalidation and successful no-op reuse emit no false
+  downstream change reasons.
+- Resumption does not duplicate a reason within a target generation; later
+  generations can report the same reason again.
+- Explanations preserve dependency sets, freshness results, process counts, and
+  output timestamps, and perform no additional host reads or evaluation.
+- Native and WASM report equivalent reasons and omit environment values, source
+  contents, captured process data, and old/new fingerprints.
 
 - Compilation performs no filesystem or process operation.
 - A literal rule wins over a matching template rule.
