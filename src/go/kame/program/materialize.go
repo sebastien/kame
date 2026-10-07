@@ -259,7 +259,7 @@ func (p *Program) claimStaleTask(node *core.Node, epoch int64) {
 		if state == core.NodeComplete && !p.cacheBlockedByBareTask(&p.Instances[index]) {
 			return
 		}
-	} else if kind != rule.TaskRule && !(kind == rule.FileRule && p.Instances[index].Rule.Always) {
+	} else if kind != rule.TaskRule && !(kind == rule.FileRule && (p.Instances[index].Rule.Always || !fileHasMaterialInputs(&p.Instances[index]))) {
 		return
 	}
 	p.Instances[index].satisfiedEpoch = epoch

@@ -91,4 +91,55 @@ for backend, runner in [('native', [native]), ('wasm', ['node', wasm])]:
     assert (work / 'runs').read_text() == 'run\n', backend
 PYCACHE
 then test-ok "both hosts replay only the 64 KiB cache prefix with truncation"; else test-fail "bounded cache output retention"; fi
+test-step "configured log limits reach primary builds and sessions"
+if python3 - "$project" "$CLI_BIN" "$CLI_ROOT/dist/kame.js" <<'PYLIMIT'
+import json, os, signal, subprocess, sys, time
+from pathlib import Path
+folder, native, wasm = sys.argv[1:]
+source = 'failed :\n\thead -c 8192 /dev/zero; head -c 8192 /dev/zero >&2; exit 3\n'
+for backend, runner in [('native', [native]), ('wasm', ['node', wasm])]:
+    work = Path(folder) / f'{backend}-limits'
+    work.mkdir()
+    (work / 'Makefile.kmk').write_text(source)
+    for invocation in ['primary', 'batch', 'session']:
+        args = (['do', 'run', '--timeout', '5000', '-l', 'kmk', '-c', source, 'failed']
+                if invocation == 'session' else ['failed'] * (2 if invocation == 'batch' else 1))
+        for limit in [1024, 16384]:
+            options = ['--json', '-C', str(work), '--log-limit', str(limit)]
+            command = runner + (args[:2] + options + args[2:] if invocation == 'session' else options + args)
+            result = subprocess.run(command,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
+            assert result.returncode == 1 and not result.stderr, (backend, invocation, result)
+            events = [json.loads(line) for line in result.stdout.splitlines()]
+            failed = next(event for event in events if event['type'] == 'target-failed')
+            cause = failed['diagnostic']['cause']
+            assert cause['stdoutLimit'] == cause['stderrLimit'] == limit, (backend, invocation, cause)
+            assert cause['stdoutTruncated'] == cause['stderrTruncated'] == (limit < 8192), cause
+            assert 'stdout' not in cause and 'stderr' not in cause, 'retention leaked process data'
+            for kind in ['stdout', 'stderr']:
+                assert sum(len(event['data']) for event in events if event['type'] == kind) == 8192
+    # A retained watch uses the same configured limit.
+    with (work / 'watch.json').open('w+') as out, (work / 'watch.err').open('w+') as err:
+        process = subprocess.Popen(runner + ['--watch', '--json', '-C', str(work), '--log-limit', '1024', 'failed'],
+                                   stdout=out, stderr=err, start_new_session=True)
+        try:
+            deadline = time.monotonic() + 15
+            while True:
+                out.seek(0)
+                lines = out.read().splitlines(keepends=True)
+                events = [json.loads(line) for line in lines if line.endswith('\n')]
+                failed = [event for event in events if event['type'] == 'target-failed']
+                if failed:
+                    assert failed[0]['diagnostic']['cause']['stdoutLimit'] == 1024, failed[0]
+                    break
+                assert process.poll() is None and time.monotonic() < deadline, 'watch limit test did not fail its target'
+                time.sleep(.02)
+        finally:
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=5)
+        err.seek(0)
+        assert not err.read(), 'JSON watch wrote human diagnostics'
+PYLIMIT
+then test-ok "native/WASM retention limits preserve live streams and diagnostic privacy"; else test-fail "configured log-limit transport"; fi
 test-end

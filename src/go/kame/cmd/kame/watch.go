@@ -134,7 +134,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
     progress := buildProgress{}
     lastScan, lastChange := int64(0), int64(0)
     recompile, reported := false, false
-    io.WriteString(errOut, "Watching filesystem resources (200ms polling; 100ms debounce)\n")
+    if !options.JSON { io.WriteString(errOut, "Watching filesystem resources (200ms polling; 100ms debounce)\n") }
     status := 0
     for {
         signal := posix.TakeSignal()

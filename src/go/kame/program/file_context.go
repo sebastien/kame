@@ -91,6 +91,33 @@ func (p *Program) acceptedInputs(entry *instance) []core.Observation {
 	return inputs
 }
 
+// Process/tool identity proves how a recipe ran, not that an inputless file
+// recipe has become declarative. Actual consumed files and globs do qualify.
+func fileHasMaterialInputs(entry *instance) bool {
+	inputs, resources := entry.Plan.Inputs, entry.Plan.ResourceInputs
+	if entry.Plan.Resolved {
+		inputs, resources = entry.Plan.ResolvedInputs, entry.Plan.ResolvedResourceInputs
+	}
+	for i := range inputs {
+		if i >= len(resources) || !resources[i].OrderOnly {
+			return true
+		}
+	}
+	for i := range entry.AcceptedRecord.Inputs {
+		key := entry.AcceptedRecord.Inputs[i].Key
+		if key.Kind == core.ResourceFile || key.Kind == core.ResourceGlob || key.Kind == core.ResourceDefinition || (key.Kind == core.ResourceEnvironment && key.Name != eval.ProcessEnvironmentName) {
+			return true
+		}
+	}
+	for i := range entry.Node.Dynamic {
+		dependency := entry.Node.Dynamic[i]
+		if !slices.Contains(entry.Node.OrderOnly, dependency) && (dependency.Key.Kind == core.ResourceFile || dependency.Key.Kind == core.ResourceGlob) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *Program) fileImplementation(entry *instance, rendered renderResult) core.Signature {
 	var sink hashSink
 	sink.state = newSHA256()
@@ -425,7 +452,8 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 func (p *Program) finishFileContext(c *core.EngineContext, index int) core.ProducerResult {
 	entry := &p.Instances[index]
 	state := entry.FileContext
-	if !entry.Rule.Always && !p.Options.Force && !p.cacheBlockedByBareTask(entry) && state.Stored.Matches(&entry.AcceptedRecord) {
+	material := entry.Rule.Kind != rule.FileRule || fileHasMaterialInputs(entry)
+	if material && !entry.Rule.Always && !p.Options.Force && !p.cacheBlockedByBareTask(entry) && state.Stored.Matches(&entry.AcceptedRecord) {
 		entry.Plan.Freshness = Fresh
 		if entry.Rule.Kind == rule.CachedTaskRule {
 			p.emitCachedLog(entry, Stdout, state.Cached.Stdout, state.Cached.StdoutTruncated)

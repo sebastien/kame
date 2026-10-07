@@ -69,11 +69,13 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 	r.BuildForce = host.PayloadInt(descriptor, "force") != 0
 	r.BuildTimeoutMS = host.PayloadInt(descriptor, "timeoutMS")
 	r.BuildRetryCount = int(host.PayloadInt(descriptor, "retryCount"))
+	r.BuildRetainBytes = int(host.PayloadInt(descriptor, "retainBytes"))
 	return PureResult{}
 }
 
 func (r *Runtime) freeBuildSources() {
- r.BuildForce = false
+  r.BuildForce = false
+	r.BuildRetainBytes = 0
 	for i := range r.BuildSources {
 		mem.FreeString(r.Alloc, r.BuildSources[i].Name)
 		mem.FreeString(r.Alloc, r.BuildSources[i].Text)
@@ -91,6 +93,7 @@ func (r *Runtime) freeBuildSources() {
 func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 	options.Force = r.BuildForce
 	options.TimeoutMS, options.RetryCount = r.BuildTimeoutMS, r.BuildRetryCount
+	options.RetainBytes = r.BuildRetainBytes
 	options.Defines = r.BuildDefines
 	options.ToolOverrides = r.BuildToolOverrides
 	var environment []string

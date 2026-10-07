@@ -1680,7 +1680,7 @@ class Module {
     if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     if (Array.isArray(source)) {
       if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
-      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0 }));
+      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0 }));
       if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
   }
@@ -1988,7 +1988,7 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0 }));
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }));
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');
@@ -2756,6 +2756,7 @@ function contextFor(inv) {
     timeoutMS: inv.timeoutMS ?? 0,
     captureLimit: inv.captureLimit ?? 0,
     retryCount: inv.retryCount ?? 0,
+    logLimit: inv.logLimit ?? 0,
   };
 }
 
@@ -3126,7 +3127,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   let lastChange = 0;
   let reported = new Set();
   let status = 0;
-  stderr.write('Watching filesystem resources (200ms polling; 100ms debounce)\n');
+  if (!inv.json) stderr.write('Watching filesystem resources (200ms polling; 100ms debounce)\n');
 
   const seedSources = async () => {
     for (const name of watchedSources) {
