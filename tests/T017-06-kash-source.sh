@@ -29,6 +29,51 @@ echo joined \
 // literal-command
 KASH
 
+cat >"$work/words.kash" <<'KASH'
+"echo" "hello" "--flag=value" "./file.txt" "*.c"
+echo $files "$files" prefix=$name ${name}.c
+echo "$name"suffix "$name".c "$name"! "$name"".c file"
+echo "" "two words" "literal?" "a|b" "\$name" "\@literal" "#comment"
+"if" hello
+":cwd" hello
+echo "=" value
+:cwd ./build :timeout @(1) :MODE production cat < ./input | cat >> ./output ?
+capture = $("printf" "%s" "hello" | "cat")
+echo @(cat "a" "b") $(printf hello) ? echo fallback
+echo hello &
+if test -f ./input
+	echo yes
+else
+	echo no
+match @(name)
+	case "a"
+		echo a
+	else
+		echo other
+KASH
+cat >"$work/words.expected" <<'KASH'
+echo hello --flag=value ./file.txt *.c
+echo $files "$files" prefix=$name ${name}.c
+echo "$name"suffix "$name".c "$name"! "$name"".c file"
+echo "" "two words" "literal?" "a|b" "\$name" "\@literal" "#comment"
+"if" hello
+":cwd" hello
+echo "=" value
+:cwd ./build :timeout @(1) :MODE production cat < ./input | cat >> ./output ?
+capture = $(printf %s hello | cat)
+echo @((cat "a" "b")) $(printf hello) ? echo fallback
+echo hello &
+if test -f ./input
+	echo yes
+else
+	echo no
+match @(name)
+	case "a"
+		echo a
+	else
+		echo other
+KASH
+
 test-step "schema, parser ownership and byte-for-byte backend parity"
 for operation in parse fmt; do
 	presentation=(); if [ "$operation" = parse ]; then presentation=(--json); fi
@@ -48,6 +93,18 @@ if grep -q '"kind":"command"' "$work/native.parse" && grep -q '"valueKind":"expr
 
 for backend in native wasm; do
 	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	test-step "$backend: natural command words preserve the AST"
+	"${command[@]}" do fmt --lang kash "$work/words.kash" >"$work/words.formatted"
+	if cmp -s "$work/words.expected" "$work/words.formatted"; then test-ok "$backend quotes only where needed"; else test-fail "$backend command word spelling"; fi
+	for version in kash formatted; do
+		"${command[@]}" do parse --json --lang kash "$work/words.$version" |
+			jq -S 'walk(if type == "object" then del(.span, .start, .end) else . end) | del(.source)' >"$work/words.$version.json"
+	done
+	if cmp -s "$work/words.kash.json" "$work/words.formatted.json"; then test-ok "$backend word formatting preserves the AST"; else test-fail "$backend word formatting changed the AST"; fi
+	"${command[@]}" do fmt --lang kash "$work/words.formatted" >"$work/words.again"
+	if cmp -s "$work/words.formatted" "$work/words.again"; then test-ok "$backend natural formatting is idempotent"; else test-fail "$backend natural formatting changed on second pass"; fi
+	"${command[@]}" do fmt --lang kash -n "$work/words.expected" >/dev/null
+	test-ok "$backend check accepts natural source"
 	test-step "$backend: stdin, suffix aliases and canonical formatting"
 	"${command[@]}" do parse --json --lang kash <"$work/source.kash" >"$work/stdin"
 	if grep -q '"source":"<stdin>"' "$work/stdin"; then test-ok "$backend stdin source identity"; else test-fail "$backend stdin source identity"; fi

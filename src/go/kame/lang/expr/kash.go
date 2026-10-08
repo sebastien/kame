@@ -358,13 +358,39 @@ func (p *parser) expressionBoundary() *Expr {
 	return p.paren()
 }
 
+// Bool records typed substitution semantics, not whether a literal needs quotes.
+func commandWordNeedsQuotes(e *Expr) bool {
+	if e.Bool { return false }
+	if len(e.Parts) == 0 { return true }
+	if len(e.Parts) == 1 && e.Parts[0].Expr != nil { return true }
+	for i := range e.Parts {
+		part := e.Parts[i]
+		if part.Expr != nil { continue }
+		// Keep grammar-sensitive literals quoted even outside executable position.
+		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case") { return true }
+		if i == 0 && len(part.Text) != 0 && (part.Text[0] == ':' || part.Text[0] == '#') { return true }
+		for j := 0; j < len(part.Text); j++ {
+			c := part.Text[j]
+			if commandWhitespace(c) || commandOperator(c) || c == ')' || c == '"' || c == '\\' || c == '$' || c == '@' { return true }
+		}
+	}
+	return false
+}
+
 func writeCommandWord(b *strings.Builder, e *Expr) {
-	if !e.Bool {
+	quoted := commandWordNeedsQuotes(e)
+	if quoted {
 		b.WriteByte('"')
 	}
 	for i := range e.Parts {
 		part := e.Parts[i]
 		if part.Expr != nil {
+			boundary := false
+			if part.Form == "$" && i+1 < len(e.Parts) && len(e.Parts[i+1].Text) != 0 {
+				c := e.Parts[i+1].Text[0]
+				boundary = isNameContinue(c) || c == '.' || c == '?' || c == '!'
+			}
+			if boundary && !quoted { b.WriteByte('"') }
 			if part.Form == "$(" {
 				writeExpr(b, part.Expr)
 			} else if part.Form == "@" {
@@ -377,6 +403,10 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 				if part.Form == "${" {
 					b.WriteByte('}')
 				}
+			}
+			// Literal suffixes must not become reference names, fields or flags.
+			if boundary {
+				if quoted { b.WriteString("\"\"") } else { b.WriteByte('"') }
 			}
 			continue
 		}
@@ -396,7 +426,7 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 			}
 		}
 	}
-	if !e.Bool {
+	if quoted {
 		b.WriteByte('"')
 	}
 }

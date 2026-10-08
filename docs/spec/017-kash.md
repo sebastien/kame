@@ -732,6 +732,9 @@ Formatting must preserve the parser boundary:
 - Command substitutions embedded in Kame expressions also delegate their
   contents to the Kash formatter and preserve their enclosing expression spans.
 - Formatter output is idempotent and reparses to an equivalent Kash AST.
+- Command words use bare spelling when safe; quotes remain for empty words,
+  whitespace, literal syntax characters, grammar-sensitive words, and scalar
+  substitutions whose unquoted spelling would enable list splicing.
 
 Malformed references are Kame reference errors, malformed `@(...)` contents are
 Kame expression errors, and malformed `$(...)` contents are Kash command errors.

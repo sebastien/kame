@@ -30,7 +30,7 @@ func TestCommandAcceptanceOwnsWholePipelineAndSurvivesClone(t *testing.T) {
 	defer expr.Free(a, copy)
 	formatted := expr.Format(a, copy)
 	defer mem.FreeString(a, formatted)
-	if formatted != "$(\"printf\" \"literal?\" | \"cat\" ?)" { t.Error("acceptance or literal suffix lost in canonical format") }
+	if formatted != "$(printf \"literal?\" | cat ?)" { t.Error("acceptance or literal suffix lost in canonical format") }
 	again := parse(t, formatted)
 	defer again.Free()
 	if !again.Expr.AcceptExit { t.Error("formatting changed accepted exit policy") }
@@ -112,6 +112,37 @@ func TestCommandCaptureRejectsUnsupportedAndMalformedSyntax(t *testing.T) {
 	plain := parse(t, "\"$(echo literal)\"")
 	if plain.Expr.Kind != expr.String || len(plain.Expr.Parts) != 1 || plain.Expr.Parts[0].Expr != nil { t.Error("plain expression string executed a substitution") }
 	plain.Free()
+}
+
+func TestCommandWordFormattingUsesSafeBareWords(t *testing.T) {
+	inputs := []string{
+		"$(\"echo\" \"hello\" \"--flag=value\" \"./file.txt\" \"*.c\")",
+		"$(echo $files \"$files\" prefix=$name ${name}.c)",
+		"$(echo \"$name\"suffix \"$name\".c \"$name\"! \"$name\"\".c file\")",
+		"$(echo \"\" \"two words\" \"literal?\" \"a|b\" \"\\$name\" \"\\@literal\")",
+		"$(\":cwd\" \"=\" \"if\" \"elif\" \"else\" \"match\" \"case\" \"#comment\")",
+		"$(:cwd ./build :timeout @(1) :MODE production cat < ./input | cat >> ./output ?)",
+	}
+	want := []string{
+		"$(echo hello --flag=value ./file.txt *.c)",
+		"$(echo $files \"$files\" prefix=$name ${name}.c)",
+		"$(echo \"$name\"suffix \"$name\".c \"$name\"! \"$name\"\".c file\")",
+		"$(echo \"\" \"two words\" \"literal?\" \"a|b\" \"\\$name\" \"\\@literal\")",
+		"$(\":cwd\" \"=\" \"if\" \"elif\" \"else\" \"match\" \"case\" \"#comment\")",
+		"$(:cwd ./build :timeout @(1) :MODE production cat < ./input | cat >> ./output ?)",
+	}
+	for i := range inputs {
+		r := parse(t, inputs[i])
+		formatted := expr.Format(t.Allocator(), r.Expr)
+		if formatted != want[i] { t.Error("command word formatting added unnecessary quotes or lost required quotes") }
+		copy := parse(t, formatted)
+		again := expr.Format(t.Allocator(), copy.Expr)
+		if formatted != again { t.Error("safe bare word formatting is not idempotent") }
+		mem.FreeString(t.Allocator(), again)
+		mem.FreeString(t.Allocator(), formatted)
+		copy.Free()
+		r.Free()
+	}
 }
 
 func TestKashExpressionBoundaryUsesKameValues(t *testing.T) {
