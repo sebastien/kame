@@ -54,8 +54,8 @@ tests/
 
 ## Harness contract
 
-- `tests/harness.sh [FILE...]` runs every `tests/**/*.sh` except `lib-*.sh`,
-  `harness.sh`, and anything under `tests/data/`.
+- `tests/harness.sh [-q|-v] [FILE...]` runs every `tests/**/*.sh` except
+  `lib-*.sh`, `harness.sh`, and anything under `tests/data/`.
 - Each test is a separate process started from the repository root.
 - `test-start` creates a scratch directory under `build/tests/`, exports it as
   `TMPDIR`, and changes into it; `test-end` reports and removes it.
@@ -64,6 +64,30 @@ tests/
 - Test scripts source `tests/lib-bootstrap.sh` (which loads `lib-testing.sh`
   and `lib-cli.sh`), call `test-start`, run steps and assertions, and finish
   with `test-end`.
+
+### Human output levels
+
+`KAME_TEST_VERBOSITY` selects the human output level, inherited by nested test
+processes; `harness.sh -q` and `-v` are equivalents. The level changes only
+human stdout/stderr, never the append-only result log or exit codes.
+
+| Level | Direct suite output |
+| --- | --- |
+| `quiet` | Same per-step tallies as `compact`; intended for harness invocation |
+| `compact` (default) | One line per step with a pass tally (`N✓`), plus every failure with full detail |
+| `verbose` | One line per passing assertion (historical behavior) |
+
+- Passing assertions are never dropped from the result log; compact and quiet
+  fold them into a per-step tally. A failing assertion always reveals its step
+  and prints its message, diff, or diagnostic regardless of level.
+- In both `compact` and `quiet`, `harness.sh` runs each test with output captured
+  under `build/tests/logs/`
+  and prints one line per file (`EOK`/`EFAIL`, elapsed, path). On failure it
+  replays the captured log, so a red test remains fully debuggable while a
+  passing suite stays small. In `verbose`, it streams suite output instead.
+- Incidental helper traces (`test_log_message`, expected-failure command echo,
+  CLI build output) are verbose-only; the CLI build log is retained and shown
+  if the build fails.
 
 ## Binary contract (`tests/lib-cli.sh`)
 
@@ -92,7 +116,8 @@ Helper surface: `cli_require_tools`, `cli_build`, `cli_run`, `cli_spawn`,
 `cli_expect_file_bytes`, `cli_expect_no_file`, `cli_expect_dir`,
 `cli_expect_jsonl`, `cli_json_types`, `cli_expect_json_query`,
 `cli_expect_event`, `cli_expect_diagnostic`, `fixture_copy`, `fixture_path`,
-`lang_fixture`, `tests_data_path`, `set_mtime`, `run_count`, `kill_tree`.
+`lang_fixture`, `tests_data_path`, `set_mtime`, `run_count`, `kill_tree`,
+`test_set_verbosity`.
 
 ## Fixture contract
 

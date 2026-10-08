@@ -96,6 +96,11 @@ function cli_build {
 	local lock="$CLI_ROOT/build/.kame.debug.lock"
 	mkdir -p "$CLI_ROOT/build"
 	test_log_message "building CLI: $(test-relpath "$CLI_BIN")"
+	# Keep compiler noise out of compact output; show it only on failure.
+	local build_log="/dev/stderr"
+	if [ "${TEST_VERBOSE:-0}" != 1 ] && [ -n "${TEST_PATH:-}" ]; then
+		build_log="$TEST_PATH/cli-build.log"
+	fi
 	# Serialize concurrent suite runs; the build takes ~25s.
 	if ! (
 		flock -x 9 || exit 1
@@ -112,7 +117,10 @@ function cli_build {
 				so build -check=warn -o "$CLI_BIN" ./cmd/kame >&2 || exit 1
 			fi
 		fi
-	) 9>"$lock"; then
+	) 9>"$lock" 2>"$build_log"; then
+		if [ "$build_log" != "/dev/stderr" ] && [ -s "$build_log" ]; then
+			test_log "$(cat "$build_log")"
+		fi
 		test-fail "cannot build the CLI binary"
 		exit 1
 	fi

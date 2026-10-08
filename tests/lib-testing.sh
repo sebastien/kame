@@ -67,8 +67,6 @@ TEST_CURRENT_STEP=""
 # (e.g. to precede a failure).
 TEST_STEP_PENDING=""
 TEST_STEP_REVEALED=0
-TEST_STEP_OKS=0
-TEST_STEP_FAILS=0
 
 # Variable(internal): TEST_EXPECT_FAILURE
 # Set when the test is expected to fail
@@ -76,8 +74,8 @@ TEST_EXPECT_FAILURE=""
 
 # Variable: KAME_TEST_VERBOSITY
 # Human output level, inherited by nested test processes:
-#   quiet    one summary line per test plus failures
-#   compact  one line per step with a pass tally, plus failures (default)
+#   quiet/compact  direct suites: per-step tallies plus failures; harness:
+#                  one summary per file and captured logs on failure (default compact)
 #   verbose  one line per assertion (historical behavior)
 KAME_TEST_VERBOSITY="${KAME_TEST_VERBOSITY:-compact}"
 
@@ -233,8 +231,6 @@ function test-start {
 	TEST_CURRENT_STEP=""
 	TEST_STEP_PENDING=""
 	TEST_STEP_REVEALED=0
-	TEST_STEP_OKS=0
-	TEST_STEP_FAILS=0
 	mkdir -p "$ORIGINAL_PATH/build/tests"
 	TEST_PATH="$(realpath "$(mktemp -d -p "$ORIGINAL_PATH/build/tests" -t tmp.testing.XXX)")"
 	TMPDIR="$TEST_PATH"
@@ -449,7 +445,6 @@ function test-ok {
 	if [ "$TEST_VERBOSE" = 1 ] && [ -n "$*" ]; then
 		test_log_success "$*"
 	fi
-	TEST_STEP_OKS=$((TEST_STEP_OKS + 1))
 	TEST_LOG+=("${GREEN}✓")
 	TEST_OKS+=("$(test_step_id)")
 	if [ -n "${TEST_RESULTS:-}" ]; then
@@ -460,7 +455,6 @@ function test-ok {
 function test-fail {
 	test_step_reveal
 	test_log_error "FAIL $*"
-	TEST_STEP_FAILS=$((TEST_STEP_FAILS + 1))
 	TEST_LOG+=("${RED}×")
 	TEST_ERRORS+=("[$(test_step_id)] ×←- ${TEST_STEP_NAME} $*")
 	if [ -n "${TEST_RESULTS:-}" ]; then
@@ -478,6 +472,7 @@ function test_fmt_result {
 # Fatal error, aborts everything
 function test-fatal {
 	if [ -z "$TEST_EXPECT_FAILURE" ]; then
+		test_step_reveal
 		test_log_error "Fatal failure $*"
 		TEST_LOG+=("${RED}×")
 		TEST_ERRORS+=("[$(test_step_id)] ×←- ${TEST_STEP_NAME} $*")
@@ -488,6 +483,7 @@ function test-fatal {
 # Function: test-abort
 # Aborts the entire test, triggering a test end
 function test-abort {
+	test_step_reveal
 	if [ -n "${1:-}" ]; then
 		test_log_error "ABRT $*"
 	fi
@@ -740,10 +736,15 @@ function test_id {
 }
 
 function test_step_id {
-	printf "%03d.%03d" "$TEST_CURRENT" "$TEST_CURRENT_STEP"
+	printf "%03d.%03d" "${TEST_CURRENT:-0}" "${TEST_CURRENT_STEP:-0}"
 }
 
 function test_prefix {
+	# Compact/quiet print the test identity once in the banner; per-line
+	# prefixes are verbose-only.
+	if [ "$TEST_VERBOSE" != 1 ]; then
+		return 0
+	fi
 	local prefix
 	if [ -z "${TEST_CURRENT}" ]; then
 		prefix="-"
@@ -777,10 +778,12 @@ function test_log_separator {
 }
 
 function test_log_message {
+	[ "$TEST_VERBOSE" = 1 ] || return 0
 	test_log "${BLUE}... ${DIM}$*"
 }
 
 function test_log_output {
+	[ "$TEST_VERBOSE" = 1 ] || return 0
 	test_log "${GRAY} =  ${DIM}$*"
 }
 
