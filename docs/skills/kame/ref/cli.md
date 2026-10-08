@@ -45,8 +45,8 @@ Arguments after `--` are program arguments; in discovered build mode they are
 literal target operands instead. To build an artifact ending in a program
 suffix, use `kame -- ./output.km` or an explicit rule source and `--entry`.
 
-Source filenames resolve against original cwd before `-C`; evaluation resources
-use the selected working directory. Includes remain source-relative. Later
+Relative source filenames and evaluation resources resolve beneath the selected
+`-C` directory, independent of option order. Includes remain source-relative. Later
 fragments share the first fragment's capability policy, not implicit new grants.
 
 The unified runner supersedes the specified `do expr`/`do kash` execution
@@ -81,9 +81,19 @@ Primary options:
 | `--verbose` | Report cache decisions and warnings. |
 | `--shell SHELL` | Set recipe shell executable/arguments; repeatable. |
 | `--env NAME=VALUE` | Add or replace a recipe environment entry; repeatable. |
-| `--timeout MS` | Set per-command timeout in milliseconds. |
+| `--timeout MS` | Set process timeout in milliseconds; runner sessions also share one invocation deadline across fragments. |
 | `--retry N` | Retry failed commands up to `N` times. |
 | `--log-limit N` | Limit captured bytes per process stream. |
+| `--capture-limit N` | Limit each command substitution's captured stdout; default 1 MiB, independent of retained recipe logs. |
+| `--watch` | Rebuild tracked inputs; primary build mode only, not `do run`. |
+| `--define NAME=VALUE` | Override a declared definition with literal string data. |
+| `--tool NAME=PATH` | Override executable resolution for a declared tool. |
+
+`env.NAME=VALUE` is shorthand for a process environment override. Bare
+`NAME=VALUE` overrides a declared global or binds a declared named-target argument.
+For example, `deploy {environment} {region=us-east} :` accepts
+`kame deploy environment=production`. Arguments are literal strings without
+whitespace; program arguments after `--` are a separate mechanism.
 
 Recipes receive an explicit complete environment. The CLI starts from its
 environment and applies `--env` replacements; cache fingerprints include the
@@ -107,16 +117,26 @@ kame -n ./build/app
 
 | Command | Output and behavior |
 | --- | --- |
-| `do plan [TARGET...]` | Human plan(s): selected rule, source, captures, declared inputs, outputs, and freshness; `--json` retains plan records. Does not evaluate body effects or run processes. |
-| `do inputs [--depth N] [TARGET]` | Human input-edge report; `--json` retains the edge array. |
-| `do outputs [--depth N] [TARGET]` | Human output-edge report; `--json` retains the edge array. |
+| `do plan [--depth N] [TARGET...]` | Recursive resources, producers, bindings, freshness, and dependency-ordered stages; shared graph for multiple roots. |
+| `do inputs [--depth N] [TARGET]` | Reachable input files and separately labeled logical/configuration prerequisites. |
+| `do outputs [--depth N] [TARGET]` | Reachable declared artifacts and their producers, including intermediate and sibling outputs. |
 | `do span [--expand] [--depth N] [TARGET]` | Separate static inputs/outputs from evaluation-dependent inputs; `--json` retains the span document. `--expand` evaluates dynamic definitions without executing recipes. |
 | `do cat [TARGET]` | Materialize one target, then write its exact file bytes or definition value without a newline. |
 
-Depth `0` returns no edges, `1` returns direct edges, and `-1` traverses without
-a depth limit. Use `span` when a rule uses `wildcard`, `read`, or other
-expression-driven dependency discovery; use `inputs` for the resolved planned
-input graph.
+`plan`, `inputs`, and `outputs` default to depth `-1` (unlimited); `span` defaults
+to `1`. Depth `0` returns no dependency inventory; `1` reports direct resources.
+Read-only computed inputs resolve automatically in the recursive commands:
+`span --expand` is not a prerequisite. Inspection never renders recipes, runs
+producers, or writes artifacts/cache records. Deferred generated-input,
+runtime-discovery, and opaque-process-I/O boundaries are reported explicitly.
+Artifact status is `built`, `outdated`, `missing`, or `unknown`; existence alone
+does not prove reuse.
+
+Under `--json`, `plan`, `inputs`, and `outputs` emit one schema-2 document with
+`targets`, `depth`, `scope`, `truncated`, `resources`, `producers`, `dependencies`,
+`stages`, and `deferred`; input/output inventories also have resource-ID `items`.
+This replaces old plan records and string edge arrays. `span` retains schema 1.
+See [Build inspection](../../../spec/037-build-inspection.md).
 
 ## Format and parse Kame sources
 
@@ -131,8 +151,10 @@ kame do parse --lang script Makefile.kmk
 `template`, `rule`, `km`, `kmk`, and `kash`. Use `script` for rule programs and `expr` for
 individual expressions. Use an explicit mode rather than
 assuming filename inference in language tools. `do parse` prints a human AST tree
-with spans; add `--json` for the stable AST document. `template` handles inline template syntax, not host-document
-formatting; do not apply the source formatter to HTML/config templates.
+with spans; add `--json` for the stable AST document. Parsing `template` inspects
+inline syntax. Formatting `template` handles document directives with
+`--comment STYLE` and preserves non-directive bytes; never format an HTML/config
+template in `script` mode.
 
 ## Evaluate a standalone expression
 
@@ -157,6 +179,11 @@ Arguments after `--` are available to the expression as `args`. These grants
 apply to standalone expression execution; normal builds grant recipe execution
 and working-directory read/write access, while language-level environment reads
 and access outside the working directory remain denied without explicit grants.
+Explicit grant options belong to `do run`/explicit source sessions, not discovered
+primary builds; `do render` also accepts them. Scoped run grants require explicit
+executable paths for direct argv processes; legacy shell-text operations require
+an unrestricted run grant.
+Grants do not sandbox a launched executable's internal filesystem access.
 
 Render a document with `(render SOURCE [PAYLOAD] [STYLE])`, for example:
 
@@ -170,8 +197,9 @@ options. Document rendering is not source formatting.
 
 ## Automation and diagnostics
 
-- `--json` emits one JSON object per line. It includes execution events and
-  diagnostics; do not mix it with a human-output parser.
+- `--json` execution emits JSON Lines events/diagnostics. Static inspection,
+  AST, tool, and cache lists emit JSON documents; do not assume one framing for
+  every command or parse human output for automation.
 - Human recipe stdout and stderr retain their corresponding streams. Successful
   definition targets print their value; file contents are retrieved with
   `kame do cat`.

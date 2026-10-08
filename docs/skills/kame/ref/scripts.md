@@ -25,6 +25,9 @@ default = (greet "Ada")
 A value header is `NAME = RHS`; a function header is `(NAME PARAM...) = RHS`.
 A final `rest...` parameter collects remaining arguments. Definitions are
 demanded on reference, not executed as sequential shell assignments.
+`NAME ?= RHS` supplies a lazy default if the name is not already configured;
+`?=` must be contiguous. `--define NAME=VALUE` overrides a declared definition
+with literal string data, not expression source.
 
 RHS classification matters:
 
@@ -74,6 +77,13 @@ ordinary registration still rejects duplicate declarations. Inline `-c` sources
 have no include base and cannot include files. Value programs cannot introduce rules through
 includes; Kash inclusion is not provided by this directive.
 
+`include? PATH` skips an absent optional file, not other loading errors.
+`when PREDICATE` / `otherwise` / `end` selects declarations before registration;
+only selected includes are loaded. Predicates use pure configuration values,
+not host reads, processes, writes, or rule-local bindings. Typed rule generation
+uses `generate NAME = EXPRESSION`; see
+[Generated declarations](../../../spec/025-generated-declarations.md).
+
 ## Shared execution sessions
 
 ```sh
@@ -95,7 +105,8 @@ Use the unified runner where supported:
   an entry resembling a source filename. Kash/expr fragments have no entries.
 - Arguments after `--` bind the shared `args` frame. Recipe-local `cd`, shell
   variables, or exports never mutate the parent Kame session.
-- Source filenames resolve before `-C`; resource paths use evaluation cwd.
+- Relative source filenames and resource paths resolve under the selected `-C`
+  directory, regardless of option order; includes remain source-relative.
   Do not assume execution changes directory to the source file's location.
 
 ## Verify
@@ -106,10 +117,9 @@ kame do parse --lang script ./Makefile.kmk
 kame do fmt --lang script -n ./Makefile.kmk
 ```
 
-Current parse/format tools accept `script`, not the specified `km`/`kmk`
-aliases, and may reject value-program expression statements. For these,
-parse/format individual expressions with `--lang expr` and smoke-test `.km`
-execution with the runner rather than rewriting it as a rule program.
+Parse/format tools accept `km`, `kmk`, and `script`, including value-program
+expression statements. Use `--lang km` to inspect a value-only program and
+`--lang expr` for an individual expression; execution still uses the runner.
 
 For rule execution, follow [Rules](./rules.md); for command statements, follow
 [Kash](./kash.md). See [CLI](./cli.md) for defaults and backend support caveats.

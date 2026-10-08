@@ -2,6 +2,7 @@
 
 `rule` parses one header and its indented recipe. `.kmk` programs compose
 rules and lazy definitions; see [Scripts](./scripts.md).
+`<-` is also accepted as a header separator; formatting canonicalizes it to `:`.
 
 ```kame
 default : ./build/app
@@ -83,6 +84,19 @@ captures cannot be empty, and repeated names must match identical text.
 Adjacent variable-width captures use leftmost-shortest matching. Input
 templates reuse the captured text; these are not Make stems or expression
 pattern expansion semantics.
+Anonymous output captures `{*}`/`{**}` bind positional `_0`, `_1`, etc.; inputs
+can reuse them as `{_0}`/`{_1}`. Named captures also occupy positional slots.
+Regex captures `{name:~REGEX}` and `{~REGEX}` use the portable bounded matcher;
+see [Pattern extensions](../../../spec/029-pattern-extensions.md).
+
+Single named tasks can declare required/defaulted arguments:
+`deploy {environment} {region=us-east} :`. Invoke with
+`kame deploy environment=production`; these string bindings are distinct from
+file-pattern captures and participate in rule-instance/cache identity.
+
+`|` introduces order-only inputs, excluded from normal input selectors and
+content freshness. Commas separate input sequence groups: later groups are
+requested after earlier groups complete, not a global barrier across targets.
 
 ## Recipes and effects
 
@@ -92,6 +106,9 @@ All rendered lines execute as one shell script, so `cd`, variables, and shell
 control flow persist. Shell recipes are opaque text; selecting `[shell: kash]`
 uses the Kash parser after template expansion. Interpolation does not
 automatically shell-quote values.
+Header settings `; [shell: kash env: [MODE: mode]]` resolve purely before
+prerequisite execution; `shell` overrides build-wide `SHELL`. The legacy suffix
+`; env "MODE=release"` is an alternative, not an additional metadata record.
 
 Use `@<`, `@<*`, and `@>` for first normal input, all normal inputs, and first
 output. In file recipes, `@<?` selects normal file inputs whose content changed

@@ -122,8 +122,9 @@ for an optional file and `when`/`otherwise`/`end` for declaration selection.
    kame -n ./build/app
    ```
 
-5. Run the target, then run it again. A file rule with current outputs should
-    skip; a bare task should run again. Use `--force` only when intentionally
+5. Run the target, then run it again. A file rule with accepted current outputs
+    and real declared/discovered dependencies should skip; an inputless file
+    rule or bare task should run again. Use `--force` only when intentionally
     bypassing freshness and cached-task hits. File reuse compares content digests:
     a metadata-only touch does not rebuild, while changed bytes invalidate even
     with preserved timestamps. A first run establishes the successful record.
@@ -144,7 +145,8 @@ Do not copy GNU Make syntax for these constructs; use the Kame-specific model:
 
 Use Kame definitions and expression operations for deterministic build data;
 use explicit prerequisite rules to generate files; and use the normal rule
-recipe as the process interface. Collected `shell` calls are invalid during
+recipe as the process interface (shell by default, or explicitly selected Kash).
+Collected `shell` calls are invalid during
 planning and direct template rendering. Demanded lazy values and Kash recipe
 expressions may call `shell` in their runtime phase, subject to run grants and
 the target environment. Compilation never launches them.

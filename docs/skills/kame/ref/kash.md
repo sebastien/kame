@@ -2,7 +2,8 @@
 
 Kash (`.kash`, or equivalent `.ksh`) is a process language, not a system shell
 or KornShell. It embeds Kame expressions and values without converting them
-to shell text. Existing `.kmk` recipes remain shell scripts, not Kash.
+to shell text. `.kmk` recipes default to shell scripts; `SHELL = kash` or
+header metadata `; [shell: kash]` explicitly selects Kash after template expansion.
 
 Native and WASM execution implement definitions, command words, substitutions,
 pipelines, redirections, stage setup, control blocks, recovery, and invocation-owned

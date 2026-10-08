@@ -14,6 +14,8 @@ scripts, templates, rule expansions, and Kash boundaries.
 - Bare names are references; use `"app"` or `:app` for literal text. Symbols
   other than `:true`, `:false`, and `:nil` evaluate to their name without `:`.
 - Paths start with `./`, `../`, or `/`; they are not implicit filesystem reads.
+  `(resource "file:///absolute/path")` or `(resource "mem://workspace/path")`
+  constructs an explicit protocol resource; a quoted URI alone is ordinary text.
 - References support fields (`project.name`), indexes (`files.0`, `files.-1`),
   half-open slices (`files.1..4`), and selections (`config.{host,port}`).
 - Only `:nil` and `:false` are false; zero, empty strings, and empty lists are true.
@@ -71,6 +73,11 @@ Expression match patterns use `{*}`, `{**}`, `{name:*}`, or `{name:**}`;
 expansion patterns use `{name}` or `{_N}`. The pattern form of `replace` with
 two arguments produces a callable; a non-match returns nil. Rule captures
 have a related but distinct grammar; see [Rules](./rules.md).
+`(pattern TEXT)` constructs and validates a pattern from runtime text. Regex
+matcher groups are `{name:~REGEX}` or `{~REGEX}`; `regex-match`, `capture`, and
+`regex-replace` expose bounded matching and capture processing. Regex syntax is
+portable and byte-oriented, not PCRE; see
+[Pattern extensions](../../../spec/029-pattern-extensions.md).
 
 `$(printf "hello\n")` is an expression atom whose contents parse as Kash.
 It captures UTF-8 stdout exactly, including trailing newlines; it does not

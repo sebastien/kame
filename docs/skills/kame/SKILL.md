@@ -18,7 +18,7 @@ not need a build file.
 | `expr` | Exactly one value, application, lambda, reference, or value pipe | [Expressions](./ref/expressions.md) |
 | `km` / `.km` | Lazy definitions and top-level expression statements | [Scripts](./ref/scripts.md) |
 | `script` / `kmk` / `.kmk` | Definitions and build rules; `script` is the general parse/format mode | [Scripts](./ref/scripts.md) |
-| `template` | Inline text expansions; document templates add whole-line directives | [Templates](./ref/templates.md) |
+| `template` | Inline expansions and document directives; parse inspects inline syntax, fmt formats documents | [Templates](./ref/templates.md) |
 | `rule` | One rule header and its recipe, including target captures | [Rules](./ref/rules.md) |
 | `kash` / `.kash` / `.ksh` | Typed command arguments, streaming pipelines, process control | [Kash](./ref/kash.md) |
 
@@ -35,14 +35,16 @@ a rule program. See [CLI](./ref/cli.md) for invocation and capability policy.
    script, render one template, or inspect one rule before expanding it.
 3. **Keep language boundaries explicit.** Use expressions for values, document
    directives for text structure, rule headers for dependencies, and Kash for
-   direct process graphs. Existing rule recipes remain shell text, not Kash.
+   direct process graphs. Recipes default to shell text; `SHELL = kash` or
+   `; [shell: kash]` explicitly selects Kash after template expansion.
 4. **Compose without erasing context.** File-backed `include ./path.km` or
    `include ./path.kmk` is relative to its containing source. `do run` can share
    definitions across ordered fragments; changing parsers must not add grants.
 5. **Validate without effects first.** Use `do parse --lang LANG` and
    `do fmt --lang LANG -n FILE`. For rules, inspect `do plan`, `do inputs`, and
    `do span --expand`, then dry-run with `-n` before materializing. Document
-   templates are data: do not run the source formatter over HTML/config files.
+   templates are data: use only `do fmt --lang template --comment STYLE` to
+   format their directives while preserving other document bytes.
 6. **Check the installed command surface.** Use command-specific help and a
    small smoke test; specifications may describe work not yet implemented on
    the selected backend. Do not substitute a system shell for unsupported Kash.
@@ -95,21 +97,22 @@ Keep these boundaries distinct:
 
 - Expression strings support `{(EXPRESSION)}` and `@(EXPRESSION)`; verbatim
   `"""..."""` strings stay raw until explicitly passed to `render`.
-- Document templates use whole-line `@if`, `@for`, `@with`, `@let`, `@include`,
-  `@raw`, and `@end` directives, optionally inside host-language comments.
+- Document templates use `@if`, `@for`, `@with`, `@let`, `@include`, `@match`,
+  `@case`, `@raw`, and `@end` directives, optionally inside host-language comments.
+  Blocks can also be inline; labeled endings such as `@end(for)` are supported.
 - Kash `$name` looks up a Kame value; `@(EXPRESSION)` computes a typed argument;
   `$(COMMAND)` captures a Kash process's stdout. Lists splice argv only as
   standalone unquoted substitutions; no implicit shell splitting or globbing.
 - `$(COMMAND)` is also an expression atom, but requires process authority and
   an allowed execution phase. Plain Kame strings keep it literal; raw recipe
-  text leaves it to the recipe shell.
+  text leaves it to the selected recipe interpreter.
 - `@<` and `@>` need rule context. Target captures `{name}` in rule headers
   are not document interpolation or expression-pattern expansion rules.
 
 Do not assume GNU Make compatibility beyond the documented mappings. In
-particular, imports, implicit rules, order-only prerequisites, `eval`,
-`define`, target-specific variables, and Make's function language are
-not replacements for Kame features. Redesign those cases deliberately.
+particular, imports, implicit rules, `eval`, `define`, target-specific variables,
+and Make's function language are not interchangeable with Kame features.
+Kame does support order-only inputs after `|`; redesign other cases deliberately.
 
 ## References
 
