@@ -2,7 +2,6 @@ package main
 
 import (
 	"kame/cli"
-	"kame/core"
 	"kame/diagnostic"
 	"kame/lang/source"
 	"kame/program"
@@ -14,6 +13,13 @@ import (
 	"solod.dev/so/os"
 	"solod.dev/so/path"
 )
+
+type graphArguments struct {
+	Build  buildArguments
+	Depth  int
+	Expand bool
+	OK     bool
+}
 
 func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 	parsed := parseBuildArguments(args, errOut)
@@ -156,7 +162,7 @@ func checkTargetTools(p *program.Program, machine bool, targets []string, out io
 			}
 		}
 		if machine {
-			p.WriteToolsCheckResult(out, targets[i], result.Uses)
+			cli.WriteToolsCheckResult(out, p, targets[i], result.Uses)
 		} else if available && result.Diagnostic.Code == "" {
 			cli.Style(errOut, "status.success", "done ", diagnosticColor == "always")
 			io.WriteString(errOut, "tools check "+targets[i]+"\n")
@@ -265,13 +271,6 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 	}
 }
 
-type graphArguments struct {
-	Build  buildArguments
-	Depth  int
-	Expand bool
-	OK     bool
-}
-
 func (arguments *graphArguments) Free() { arguments.Build.Free(); *arguments = graphArguments{} }
 
 func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
@@ -326,7 +325,7 @@ func writeArtifact(out io.Writer, target string, data []byte) {
 		return
 	}
 	if len(data) == 0 {
-		program.WriteDataResult(out, "artifact", "", target, "", false, nil, true)
+		cli.WriteDataResult(out, "artifact", "", target, "", false, nil, true)
 		return
 	}
 	for start := 0; start < len(data); start += 32768 {
@@ -334,18 +333,8 @@ func writeArtifact(out io.Writer, target string, data []byte) {
 		if end > len(data) {
 			end = len(data)
 		}
-		program.WriteDataResult(out, "artifact", "", target, "", false, data[start:end], true)
+		cli.WriteDataResult(out, "artifact", "", target, "", false, data[start:end], true)
 	}
-}
-
-// Field borrows a JSON record field; it must not be freed independently.
-func documentField(value core.Value, name string) core.Value {
-	for i := range value.Record {
-		if value.Record[i].Key == name {
-			return value.Record[i].Value
-		}
-	}
-	return core.Value{}
 }
 
 func parseGraphArguments(args []string, errOut io.Writer, allowExpand bool) graphArguments {

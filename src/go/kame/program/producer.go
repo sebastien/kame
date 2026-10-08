@@ -21,7 +21,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	p := state.Program
 	entry := &p.Instances[state.Index]
 	if !entry.started || entry.startedGeneration != c.Generation() {
-		p.clearReasons(entry)
+		p.clearReasonIdentities(entry)
 		slices.Free(p.Alloc, entry.CacheStdout)
 		slices.Free(p.Alloc, entry.CacheStderr)
 		entry.CacheStdout, entry.CacheStderr, entry.CacheStdoutTruncated, entry.CacheStderrTruncated, entry.CacheReady = nil, nil, false, false, false

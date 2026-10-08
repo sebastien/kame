@@ -5,7 +5,6 @@ import (
 	"kame/diagnostic"
 	"kame/lang/format"
 	"kame/lang/source"
-	"kame/program"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
@@ -115,7 +114,7 @@ func writeFormattedResult(out io.Writer, errOut io.Writer, sourceName string, op
 		action = "in-place"
 	}
 	if cliDiagnosticJSON {
-		program.WriteDataResult(out, "format-result", sourceName, "", action, changed, []byte(text), action == "format")
+		cli.WriteDataResult(out, "format-result", sourceName, "", action, changed, []byte(text), action == "format")
 		return
 	}
 	if action == "format" {

@@ -12,7 +12,7 @@ WASM_STACK_SIZE ?= 262144
 
 
 .PHONY: build dist dist-native dist-ape dist-release dist-wasm dist-windows wasm wasm-check wasm-portable wasm-translate test-wasm version-source build/kame.debug build/kame.sanitize dist/kame dist/kame.com \
-	test test-so test-examples test-go test-cli test-all test-sanitize test-leaks fmt clean demo
+	test test-so test-examples test-go test-cli test-presentation test-reuse-reasons test-all test-sanitize test-leaks fmt clean demo
 
 build: dist
 
@@ -29,6 +29,13 @@ test-go: $(KAME_DIR)/cmd/kame/version_generated.go
 
 test-cli: build/kame.debug
 	tests/harness.sh
+
+test-presentation: build/kame.debug dist-wasm
+	tests/T036-01-cli-presentation.sh
+	tests/T036-02-cli-reuse-reasons.sh
+
+test-reuse-reasons: build/kame.debug dist-wasm
+	tests/T036-02-cli-reuse-reasons.sh
 
 wasm-portable:
 	tools/wasm/check-portable.sh
@@ -114,6 +121,7 @@ test-wasm: wasm-check
 	tests/T017-18-kash-async.sh
 	tests/T017-19-kash-recipes.sh
 	tests/T036-01-cli-presentation.sh
+	tests/T036-02-cli-reuse-reasons.sh
 
 test-all: test test-leaks
 

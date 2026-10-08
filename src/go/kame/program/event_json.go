@@ -6,8 +6,6 @@ import (
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
-	"solod.dev/so/strings"
-	"solod.dev/so/unicode/utf8"
 )
 
 func diagnosticSeverity(severity diagnostic.Severity) string {
@@ -51,18 +49,7 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 		e.Int(event.RequestID)
 	}
 	if len(event.Data) != 0 {
-		e.Str("data")
-		if utf8.Valid(event.Data) {
-			e.Str(string(event.Data))
-			e.Str("encoding")
-			e.Str("utf-8")
-		} else {
-			encoded := base64Text(a, event.Data)
-			e.Str(encoded)
-			mem.FreeString(a, encoded)
-			e.Str("encoding")
-			e.Str("base64")
-		}
+		core.WriteJSONData(a, &e, event.Data)
 	}
 	if event.DependencyKey.Name != "" {
 		e.Str("dependency")
@@ -179,18 +166,7 @@ func encodeValue(a mem.Allocator, e *json.Encoder, value core.Value) {
 		e.Str(value.Text)
 	}
 	if value.Kind == core.Bytes {
-		e.Str("data")
-		if utf8.Valid(value.Bytes) {
-			e.Str(string(value.Bytes))
-			e.Str("encoding")
-			e.Str("utf-8")
-		} else {
-			encoded := base64Text(a, value.Bytes)
-			e.Str(encoded)
-			mem.FreeString(a, encoded)
-			e.Str("encoding")
-			e.Str("base64")
-		}
+		core.WriteJSONData(a, e, value.Bytes)
 	}
 	if value.Kind == core.List {
 		e.Str("items")
@@ -438,32 +414,4 @@ func eventType(kind EventKind) string {
 		return "service-state"
 	}
 	return "cache-warning"
-}
-
-func base64Text(a mem.Allocator, data []byte) string {
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	b := strings.NewBuilder(a)
-	defer b.Free()
-	for i := 0; i < len(data); i += 3 {
-		value := int(data[i]) << 16
-		if i+1 < len(data) {
-			value |= int(data[i+1]) << 8
-		}
-		if i+2 < len(data) {
-			value |= int(data[i+2])
-		}
-		b.WriteByte(alphabet[(value>>18)&63])
-		b.WriteByte(alphabet[(value>>12)&63])
-		if i+1 < len(data) {
-			b.WriteByte(alphabet[(value>>6)&63])
-		} else {
-			b.WriteByte('=')
-		}
-		if i+2 < len(data) {
-			b.WriteByte(alphabet[value&63])
-		} else {
-			b.WriteByte('=')
-		}
-	}
-	return strings.Clone(a, b.String())
 }

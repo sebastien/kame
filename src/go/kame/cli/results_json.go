@@ -1,10 +1,14 @@
-package program
+package cli
+
+// Command-result envelopes belong to CLI presentation, not runtime scheduling.
+// Runtime lifecycle events remain encoded by program.WriteJSONEvent.
 
 import (
+	"kame/core"
+	"kame/program"
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
-	"solod.dev/so/unicode/utf8"
 )
 
 func WriteInvocation(out io.Writer, command string, dryRun bool) {
@@ -25,7 +29,7 @@ func WriteInvocation(out io.Writer, command string, dryRun bool) {
 	io.WriteString(out, "\n")
 }
 
-func (p *Program) WriteToolsCheckResult(out io.Writer, target string, uses []ToolUse) {
+func WriteToolsCheckResult(out io.Writer, p *program.Program, target string, uses []program.ToolUse) {
 	e := json.NewEncoder(out)
 	e.BeginObject()
 	e.Str("schema")
@@ -139,18 +143,7 @@ func WriteDataResult(out io.Writer, kind string, source string, target string, a
 		e.Bool(changed)
 	}
 	if includeData {
-		e.Str("data")
-		if utf8.Valid(data) {
-			e.Str(string(data))
-			e.Str("encoding")
-			e.Str("utf-8")
-		} else {
-			encoded := base64Text(mem.System, data)
-			e.Str(encoded)
-			mem.FreeString(mem.System, encoded)
-			e.Str("encoding")
-			e.Str("base64")
-		}
+		core.WriteJSONData(mem.System, &e, data)
 	}
 	e.EndObject()
 	e.Flush()

@@ -6,14 +6,16 @@ import (
 	"kame/diagnostic"
 	"kame/lang/source"
 	"solod.dev/so/bytes"
-	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 )
 
-var cliDiagnosticOut io.Writer
-var cliDiagnosticJSON bool
+type parseArgumentResult struct {
+	Lang string
+	File string
+	OK   bool
+}
 
 func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	parsed := parseArguments(args, errOut)
@@ -67,12 +69,6 @@ func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int 
 	return status
 }
 
-type parseArgumentResult struct {
-	Lang string
-	File string
-	OK   bool
-}
-
 func parseArguments(args []string, errOut io.Writer) parseArgumentResult {
 	inv := cli.Parse("parse", args)
 	defer inv.Free()
@@ -83,26 +79,12 @@ func parseArguments(args []string, errOut io.Writer) parseArgumentResult {
 	return parseArgumentResult{Lang: inv.Lang, File: inv.File, OK: inv.OK}
 }
 
-func cliError(out io.Writer, code string, message string) {
-	invocationHadDiagnostic = true
-	clearDashboard(out)
-	if code == "NO_MEMORY" {
-		writeEmergencyDiagnostic(out, cliDiagnosticJSON)
-		return
+// documentField borrows a JSON record field; it must not be freed independently.
+func documentField(value core.Value, name string) core.Value {
+	for i := range value.Record {
+		if value.Record[i].Key == name {
+			return value.Record[i].Value
+		}
 	}
-	if cliDiagnosticJSON && cliDiagnosticOut != nil {
-		writeJSONDiagnostic(cliDiagnosticOut, diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message})
-		return
-	}
-	fmt.Fprintf(out, "error %s: %s\n", code, message)
-}
-
-// writeEmergencyDiagnostic allocates no diagnostic text, allowing the CLI to
-// report allocator exhaustion instead of failing silently while formatting it.
-func writeEmergencyDiagnostic(out io.Writer, json bool) {
-	if json && cliDiagnosticOut != nil {
-		io.WriteString(cliDiagnosticOut, "{\"schema\":1,\"type\":\"diagnostic\",\"diagnostic\":{\"code\":\"NO_MEMORY\",\"severity\":\"fatal\",\"message\":\"memory exhausted\"}}\n")
-		return
-	}
-	io.WriteString(out, "fatal NO_MEMORY: memory exhausted\n")
+	return core.Value{}
 }

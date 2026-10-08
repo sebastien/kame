@@ -4,7 +4,6 @@ package main
 import (
 	"kame/cli"
 	"kame/host/posix"
-	"kame/program"
 	"solod.dev/so/bytes"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -32,15 +31,15 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	}
 	args = presentation.Args
 	invocationCounts = buildProgress{}
-	resetDashboard(errOut)
-	defer freeDashboard(errOut)
+	resetInvocationPresentation(errOut)
+	defer freeInvocationPresentation(errOut)
 	startedAt := time.Now()
 	command := streamCommand(args)
 	dashboardCommand = command
 	dryRun := (command == "build" || command == "run") && hasDryRun(args)
 	dashboardDryRun = dryRun
 	if command != "" && cliDiagnosticJSON {
-		program.WriteInvocation(out, command, dryRun)
+		cli.WriteInvocation(out, command, dryRun)
 	} else if dryRun {
 		io.WriteString(errOut, "info "+command+": dry-run · no effects or processes\n")
 	}
@@ -65,7 +64,7 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 		if command == "build" || command == "run" || command == "fmt" {
 			count = invocationCounts.Completed
 		}
-		program.WriteSummary(out, command, status, command == "fmt" && status == 1 && !invocationHadDiagnostic, int64(time.Since(startedAt))/1000000, count, invocationCounts.Failed, invocationCounts.Cancelled)
+		cli.WriteSummary(out, command, status, command == "fmt" && status == 1 && !invocationHadDiagnostic, int64(time.Since(startedAt))/1000000, count, invocationCounts.Failed, invocationCounts.Cancelled)
 	}
 	if !cliDiagnosticJSON && command != "" && (command != "fmt" || formatHasResults) && (invocationCounts.Completed+invocationCounts.Failed+invocationCounts.Cancelled != 0) {
 		writeHumanSummary(errOut, command, status, int64(time.Since(startedAt))/1000000, invocationCounts)
@@ -108,8 +107,8 @@ func runCommand(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 			writeDoHelp(out)
 			return 0
 		}
-		if spec := findCommand(args[1]); spec != nil {
-			return runDoCommand(spec.Action, args[2:], in, out, errOut)
+		if isDoCommand(args[1]) {
+			return runDoCommand(args[1], args[2:], in, out, errOut)
 		}
 		message := cli.RemovedCommandMessage(args[1])
 		if message == "" {
@@ -127,38 +126,38 @@ func runCommand(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 	return runBuild(args, out, errOut, false)
 }
 
-func runDoCommand(action commandAction, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
-	if action == commandRender {
+func runDoCommand(command string, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
+	if command == "render" {
 		return runRender(args, in, out, errOut)
 	}
-	if action == commandRun {
+	if command == "run" {
 		return runSession(args, in, out, errOut)
 	}
-	if action == commandPlan {
+	if command == "plan" {
 		return runPlan(args, out, errOut)
 	}
-	if action == commandCat {
+	if command == "cat" {
 		return runCat(args, out, errOut)
 	}
-	if action == commandInputs {
+	if command == "inputs" {
 		return runGraph(args, out, errOut, "inputs")
 	}
-	if action == commandOutputs {
+	if command == "outputs" {
 		return runGraph(args, out, errOut, "outputs")
 	}
-	if action == commandSpan {
+	if command == "span" {
 		return runGraph(args, out, errOut, "span")
 	}
-	if action == commandTools {
+	if command == "tools" {
 		return runTools(args, out, errOut)
 	}
-	if action == commandCache {
+	if command == "cache" {
 		return runCache(args, out, errOut)
 	}
-	if action == commandParse {
+	if command == "parse" {
 		return runParse(args, in, out, errOut)
 	}
-	if action == commandFormat {
+	if command == "fmt" {
 		return runFormat(args, in, out, errOut)
 	}
 	return runHelpCommand(args, out, errOut)

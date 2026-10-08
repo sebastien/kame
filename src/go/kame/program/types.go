@@ -341,7 +341,7 @@ type generatedRuleMeta struct {
 	Dependencies []string
 }
 type instance struct {
-	Reasons []Event
+	ReasonIdentities []reasonIdentity
 	Service                ServiceConfig
 	ServiceState           string
 	ServiceProcessID       int64

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"kame/cli"
 	"kame/core"
 	"kame/host/posix"
 	"kame/program"
@@ -164,7 +165,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 	cycle, cycleStarted := 1, time.Now()
 	dashboardCycle = cycle
 	if options.JSON {
-		program.WriteWatchTransition(out, "watch-cycle-started", cycle, "", 0, 0, 0, 0)
+		cli.WriteWatchTransition(out, "watch-cycle-started", cycle, "", 0, 0, 0, 0)
 	}
 	session := openBuildSession(options, errOut, true)
 	handles := startWatchHandles(&session, options, out, errOut)
@@ -221,8 +222,8 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			elapsed := int64(time.Since(cycleStarted)) / 1000000
 			dashboardCycleStatus, dashboardCycleElapsed = outcome, elapsed
 			if options.JSON {
-				program.WriteWatchTransition(out, "watch-cycle-finished", cycle, outcome, elapsed, progress.Completed, progress.Failed, progress.Cancelled)
-				program.WriteWatchTransition(out, "watch-idle", cycle, outcome, 0, 0, 0, 0)
+				cli.WriteWatchTransition(out, "watch-cycle-finished", cycle, outcome, elapsed, progress.Completed, progress.Failed, progress.Cancelled)
+				cli.WriteWatchTransition(out, "watch-idle", cycle, outcome, 0, 0, 0, 0)
 			} else {
 				cycleStatus := 0
 				if outcome == "failure" {
@@ -267,7 +268,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			freeOutcomes()
 			dashboardStarted = presentationNow()
 			if options.JSON {
-				program.WriteWatchTransition(out, "watch-cycle-started", cycle, "", 0, 0, 0, 0)
+				cli.WriteWatchTransition(out, "watch-cycle-started", cycle, "", 0, 0, 0, 0)
 			}
 			if recompile || session.Program == nil {
 				freeWatchHandles(handles)

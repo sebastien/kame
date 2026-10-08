@@ -34,7 +34,7 @@ func AppendsCommands(args []string) bool {
 		if arg == "-c" || arg == "--command" || (len(arg) >= 10 && arg[:10] == "--command=") {
 			return true
 		}
-		if arg == "-l" || arg == "--lang" || arg == "--entry" || isBuildValueOption(arg) {
+		if OptionTakesValue(arg) {
 			i++
 		}
 	}
@@ -129,10 +129,6 @@ func parseRun(args []string, discover bool) Invocation {
 		}
 		if arg == "--force" {
 			inv.Force, ruleOptions = true, true
-			continue
-		}
-		if arg == "--json" {
-			inv.JSON = true
 			continue
 		}
 		if arg == "--verbose" {
@@ -235,7 +231,7 @@ func SelectsRun(args []string) bool {
 		if arg == "-" {
 			return true
 		}
-		if arg == "--entry" || isBuildValueOption(arg) {
+		if OptionTakesValue(arg) {
 			i++
 			continue
 		}
@@ -257,7 +253,7 @@ func selectsWatch(args []string) bool {
 		if arg == "--watch" {
 			return true
 		}
-		if arg == "-l" || arg == "--lang" || arg == "--entry" || isBuildValueOption(arg) {
+		if OptionTakesValue(arg) {
 			i++
 		}
 	}

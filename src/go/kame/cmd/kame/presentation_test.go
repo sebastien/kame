@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"kame/cli"
 	"kame/core"
 	"kame/program"
 	"strings"
@@ -11,8 +12,8 @@ import (
 
 func TestDashboardLayoutAndGraphemeBounds(t *testing.T) {
 	var out bytes.Buffer
-	resetDashboard(&out)
-	defer freeDashboard(&out)
+	resetInvocationPresentation(&out)
+	defer freeInvocationPresentation(&out)
 	diagnosticColor, dashboardCommand = "never", "build"
 	observeWorker(program.Event{Kind: program.ProcessStarted, Target: "./build/main.o", Program: "cc", RequestID: 7, Generation: 1})
 	workers[0].Started = 0
@@ -22,7 +23,7 @@ func TestDashboardLayoutAndGraphemeBounds(t *testing.T) {
 		t.Fatalf("layout:\n%s", out.String())
 	}
 	workerLine := strings.Split(out.String(), "\n")[1]
-	if measureDashboardText(workerLine, 1000).Cells != 78 || !strings.HasSuffix(workerLine, "1.2s") {
+	if measureDisplayText(workerLine, 1000).Cells != 78 || !strings.HasSuffix(workerLine, "1.2s") {
 		t.Fatalf("worker duration not right-aligned: %q", workerLine)
 	}
 	clearDashboard(&out)
@@ -32,7 +33,7 @@ func TestDashboardLayoutAndGraphemeBounds(t *testing.T) {
 		t.Fatalf("collapsed layout: %q", out.String())
 	}
 	workerLine = strings.Split(out.String(), "\n")[1]
-	if measureDashboardText(workerLine, 1000).Cells != 38 || !strings.HasSuffix(workerLine, "1.2s") {
+	if measureDisplayText(workerLine, 1000).Cells != 38 || !strings.HasSuffix(workerLine, "1.2s") {
 		t.Fatalf("compact worker duration not right-aligned: %q", workerLine)
 	}
 	for _, text := range []string{"e\u0301", "界", "👩‍💻", "🇫🇷"} {
@@ -75,8 +76,8 @@ func TestDashboardLayoutAndGraphemeBounds(t *testing.T) {
 
 func TestActiveWorkersSurviveHistoricalSlots(t *testing.T) {
 	var out bytes.Buffer
-	resetDashboard(&out)
-	defer freeDashboard(&out)
+	resetInvocationPresentation(&out)
+	defer freeInvocationPresentation(&out)
 	diagnosticColor, dashboardCommand = "never", "build"
 	for i := 0; i < 37; i++ {
 		// Distinct live requests grow the slot table before all complete.
@@ -100,8 +101,8 @@ func TestActiveWorkersSurviveHistoricalSlots(t *testing.T) {
 
 func TestDashboardEndTargetAtBottom(t *testing.T) {
 	var out bytes.Buffer
-	resetDashboard(&out)
-	defer freeDashboard(&out)
+	resetInvocationPresentation(&out)
+	defer freeInvocationPresentation(&out)
 	diagnosticColor, dashboardCommand = "never", "build"
 	setDashboardSubject("default")
 	observeWorker(program.Event{Kind: program.ProcessStarted, Target: "./build/main.o", Program: "cc", RequestID: 1})
@@ -119,8 +120,8 @@ func TestDashboardEndTargetAtBottom(t *testing.T) {
 
 func TestDashboardUpdatesOnlyChangedRows(t *testing.T) {
 	var out bytes.Buffer
-	resetDashboard(&out)
-	defer freeDashboard(&out)
+	resetInvocationPresentation(&out)
+	defer freeInvocationPresentation(&out)
 	first := "workers\n  1 [compile] cc\n8 complete · 0 failed\n"
 	paintDashboard(&out, first, 0, 3)
 	out.Reset()
@@ -141,7 +142,7 @@ func TestOutcomeColumnsAndRestrainedColor(t *testing.T) {
 		out.Reset()
 		writeOutcomeRow(&out, target, "0.1s - ✓", "status.success", 38)
 		line := strings.TrimSuffix(out.String(), "\n")
-		if measureDashboardText(line, 1000).Cells != 38 || !strings.HasSuffix(line, "0.1s - ✓") || !strings.HasPrefix(line, "[") {
+		if measureDisplayText(line, 1000).Cells != 38 || !strings.HasSuffix(line, "0.1s - ✓") || !strings.HasPrefix(line, "[") {
 			t.Fatalf("misaligned outcome: %q", line)
 		}
 	}
@@ -156,8 +157,8 @@ func TestOutcomeColumnsAndRestrainedColor(t *testing.T) {
 
 func TestTargetDurationUsesLifecycleClock(t *testing.T) {
 	var out bytes.Buffer
-	resetDashboard(&out)
-	defer freeDashboard(&out)
+	resetInvocationPresentation(&out)
+	defer freeInvocationPresentation(&out)
 	selectedOutput, diagnosticColor = "ansi", "never"
 	progress := buildProgress{}
 	event := program.Event{Kind: program.TargetStarted, Target: "target", Key: core.ResourceKey{Name: "target"}, NodeID: 7, Generation: 1, HasMonotonic: true, MonotonicNS: 1000000000}
@@ -188,12 +189,12 @@ func TestDurationAndPathTheme(t *testing.T) {
 	}
 	out.Reset()
 	writeOutcomeRow(&out, "default", "40.8s - ✓", "status.success", 78)
-	if !strings.HasSuffix(out.String(), "40.8s - ✓\n") || measureDashboardText(strings.TrimSuffix(out.String(), "\n"), 1000).Cells != 78 {
+	if !strings.HasSuffix(out.String(), "40.8s - ✓\n") || measureDisplayText(strings.TrimSuffix(out.String(), "\n"), 1000).Cells != 78 {
 		t.Fatal(out.String())
 	}
 	out.Reset()
 	writeBuildTally(&out, buildProgress{Completed: 122}, 0, 40840, "✓", "status.success", 78)
-	if !strings.HasSuffix(out.String(), "40.8s - ✓\n") || measureDashboardText(strings.TrimSuffix(out.String(), "\n"), 1000).Cells != 78 {
+	if !strings.HasSuffix(out.String(), "40.8s - ✓\n") || measureDisplayText(strings.TrimSuffix(out.String(), "\n"), 1000).Cells != 78 {
 		t.Fatal(out.String())
 	}
 	out.Reset()
@@ -205,15 +206,15 @@ func TestDurationAndPathTheme(t *testing.T) {
 	out.Reset()
 	diagnosticColor = "never"
 	writeTargetField(&out, "./very/long/directory/page.html", 16)
-	if !strings.HasSuffix(out.String(), "/page.html") || measureDashboardText(out.String(), 1000).Cells > 16 {
+	if !strings.HasSuffix(out.String(), "/page.html") || measureDisplayText(out.String(), 1000).Cells > 16 {
 		t.Fatal(out.String())
 	}
 }
 
 func TestOutcomeIdentityCountsOnce(t *testing.T) {
 	var out bytes.Buffer
-	resetDashboard(&out)
-	defer freeDashboard(&out)
+	resetInvocationPresentation(&out)
+	defer freeInvocationPresentation(&out)
 	progress := buildProgress{}
 	event := program.Event{Kind: program.TargetStarted, Target: "default", NodeID: 3, Generation: 1, Key: core.ResourceKey{Name: "default"}}
 	observeOutcome(event, &progress)
@@ -233,7 +234,7 @@ func TestOutcomeIdentityCountsOnce(t *testing.T) {
 
 func TestFailureSummaryDoesNotBecomeCancellation(t *testing.T) {
 	var out bytes.Buffer
-	program.WriteSummary(&out, "build", 1, false, 24, 8, 1, 2)
+	cli.WriteSummary(&out, "build", 1, false, 24, 8, 1, 2)
 	if !strings.Contains(out.String(), `"status":"failure"`) {
 		t.Fatal(out.String())
 	}
@@ -267,8 +268,8 @@ func TestEarlyPresentationDoesNotEmitStreamRecords(t *testing.T) {
 
 func TestOutcomeCleanupAllowsSameIdentityInNextCycle(t *testing.T) {
 	var out bytes.Buffer
-	resetDashboard(&out)
-	defer freeDashboard(&out)
+	resetInvocationPresentation(&out)
+	defer freeInvocationPresentation(&out)
 	event := program.Event{Kind: program.TargetCompleted, NodeID: 3, Generation: 1, Key: core.ResourceKey{Name: "default"}}
 	progress := buildProgress{}
 	observeOutcome(event, &progress)
@@ -282,7 +283,7 @@ func TestOutcomeCleanupAllowsSameIdentityInNextCycle(t *testing.T) {
 	if progress.Completed != 1 {
 		t.Fatal(progress)
 	}
-	freeDashboard(&out)
+	freeInvocationPresentation(&out)
 	if outcomes != nil {
 		t.Fatal("dashboard retained outcomes")
 	}

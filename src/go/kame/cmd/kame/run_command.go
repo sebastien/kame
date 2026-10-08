@@ -270,7 +270,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 			if last.Kind == core.String {
 				data = []byte(last.Text)
 			}
-			program.WriteDataResult(out, "render-result", name, "", action, false, data, !inv.Check)
+			cli.WriteDataResult(out, "render-result", name, "", action, false, data, !inv.Check)
 		} else if inv.Check {
 			io.WriteString(errOut, "done render check "+name+"\n")
 		} else if hasLast {

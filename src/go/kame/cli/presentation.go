@@ -51,7 +51,7 @@ func Presentation(args []string) Invocation {
 					return inv
 				}
 				selected, inv.Output, inv.JSON = value, value, value == "json"
-			} else if !assignBuildOption(&inv, name, value) {
+			} else if !assignPresentationOption(&inv, name, value) {
 				inv.JSON = requestedJSON
 				return inv
 			}
@@ -109,7 +109,25 @@ func requestsJSON(args []string) bool {
 // OptionTakesValue is shared with help/source dispatch. Never inspect the next
 // argv token for global controls when it belongs to one of these options.
 func OptionTakesValue(arg string) bool {
-	return isBuildValueOption(arg) || arg == "-l" || arg == "--lang" ||
+	return isBuildValueOption(arg) || arg == "-o" || arg == "--output" ||
+		arg == "--color" || arg == "--diagnostic-format" || arg == "-l" || arg == "--lang" ||
 		arg == "--entry" || arg == "--depth" || arg == "--indent" ||
 		arg == "--indent-width" || arg == "--comment"
+}
+
+func assignPresentationOption(inv *Invocation, option string, value string) bool {
+	if option == "--color" {
+		if value != "auto" && value != "always" && value != "never" {
+			inv.fail("OPT_VALUE_INVALID", "color must be auto, always, or never")
+			return false
+		}
+		inv.Color = value
+		return true
+	}
+	if value != "human" && value != "plain" {
+		inv.fail("OPT_VALUE_INVALID", "diagnostic format must be human or plain")
+		return false
+	}
+	inv.DiagnosticFormat = value
+	return true
 }

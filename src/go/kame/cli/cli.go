@@ -1,7 +1,7 @@
-// Package cli is the portable command grammar shared by the native CLI and the
-// freestanding JavaScript wrapper. It parses argv into a normalized Invocation
-// and performs no I/O, so both front-ends accept the same options, defaults,
-// conflicts, and usage diagnostics.
+// Package cli provides portable command grammar and presentation shared by the
+// native CLI and freestanding JavaScript wrapper. Parsing normalizes argv into
+// an Invocation; presentation writes help, reports, and command-result envelopes
+// to explicit writers. Host adapters own terminal probing and process I/O.
 package cli
 
 import (
@@ -223,10 +223,6 @@ func parseBuild(inv *Invocation, args []string) {
 			inv.Force = true
 			continue
 		}
-		if arg == "--json" {
-			inv.JSON = true
-			continue
-		}
 		if arg == "--verbose" {
 			inv.Verbose = true
 			continue
@@ -248,7 +244,7 @@ func parseBuild(inv *Invocation, args []string) {
 			}
 			continue
 		}
-		if equalsValue(arg, "--tool", inv) || equalsValue(arg, "--define", inv) || equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) || equalsValue(arg, "--color", inv) || equalsValue(arg, "--diagnostic-format", inv) {
+		if equalsValue(arg, "--tool", inv) || equalsValue(arg, "--define", inv) || equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) {
 			if inv.Error.Code != "" {
 				return
 			}
@@ -272,16 +268,13 @@ func parseBuild(inv *Invocation, args []string) {
 }
 
 func isBuildValueOption(arg string) bool {
-	if arg == "-o" || arg == "--output" {
-		return true
-	}
 	if arg == "--define" || arg == "--tool" {
 		return true
 	}
 	if arg == "--capture-limit" {
 		return true
 	}
-	if arg == "-f" || arg == "--file" || arg == "-c" || arg == "--command" || arg == "-C" || arg == "--directory" || arg == "-j" || arg == "--jobs" || arg == "--shell" || arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--env" || arg == "--color" || arg == "--diagnostic-format" {
+	if arg == "-f" || arg == "--file" || arg == "-c" || arg == "--command" || arg == "-C" || arg == "--directory" || arg == "-j" || arg == "--jobs" || arg == "--shell" || arg == "--timeout" || arg == "--retry" || arg == "--log-limit" || arg == "--env" {
 		return true
 	}
 	return false
@@ -362,22 +355,6 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 			return false
 		}
 		inv.Environment = slices.Append(mem.System, inv.Environment, value)
-		return true
-	}
-	if option == "--color" {
-		if value != "auto" && value != "always" && value != "never" {
-			inv.fail("OPT_VALUE_INVALID", "color must be auto, always, or never")
-			return false
-		}
-		inv.Color = value
-		return true
-	}
-	if option == "--diagnostic-format" {
-		if value != "human" && value != "plain" {
-			inv.fail("OPT_VALUE_INVALID", "diagnostic format must be human or plain")
-			return false
-		}
-		inv.DiagnosticFormat = value
 		return true
 	}
 	number, convertErr := strconv.Atoi(value)

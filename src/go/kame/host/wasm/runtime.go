@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"kame/cli"
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
@@ -288,7 +289,7 @@ func (r *Runtime) toolsCheckJSON(target string, report bool) PureResult {
 			program.WriteJSONDiagnostic(&buffer, d)
 		}
 	}
-	if report { r.Program.WriteToolsCheckResult(&buffer, target, result.Uses) }
+	if report { cli.WriteToolsCheckResult(&buffer, r.Program, target, result.Uses) }
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Free()
 	result.Free(r.Alloc)

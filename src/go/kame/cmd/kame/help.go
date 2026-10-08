@@ -6,43 +6,6 @@ import (
 	"solod.dev/so/io"
 )
 
-type commandAction int
-
-const (
-	commandPlan commandAction = iota
-	commandCat
-	commandInputs
-	commandOutputs
-	commandSpan
-	commandTools
-	commandParse
-	commandFormat
-	commandRun
-	commandRender
-	commandHelp
-	commandCache
-)
-
-type commandSpec struct {
-	Name   string
-	Action commandAction
-}
-
-var doCommands = [12]commandSpec{
-	{Name: "render", Action: commandRender},
-	{Name: "run", Action: commandRun},
-	{Name: "plan", Action: commandPlan},
-	{Name: "cat", Action: commandCat},
-	{Name: "inputs", Action: commandInputs},
-	{Name: "outputs", Action: commandOutputs},
-	{Name: "span", Action: commandSpan},
-	{Name: "tools", Action: commandTools},
-	{Name: "cache", Action: commandCache},
-	{Name: "parse", Action: commandParse},
-	{Name: "fmt", Action: commandFormat},
-	{Name: "help", Action: commandHelp},
-}
-
 func writeTopHelp(out io.Writer) { cli.WriteHelp(out, "", cliDiagnosticJSON, stdoutColor) }
 func writeDoHelp(out io.Writer)  { cli.WriteHelp(out, "do", cliDiagnosticJSON, stdoutColor) }
 
@@ -70,17 +33,17 @@ func writeVersion(out io.Writer) {
 	io.WriteString(out, "kame "+version+" ("+buildID+"; "+buildTime+"; "+buildMode()+")\n")
 }
 
-func findCommand(name string) *commandSpec {
-	for i := range doCommands {
-		if doCommands[i].Name == name {
-			return &doCommands[i]
+func isDoCommand(name string) bool {
+	for i := range cli.Commands {
+		if cli.Commands[i].Name == name {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
 func writeCommandHelp(out io.Writer, command string) bool {
-	if findCommand(command) == nil {
+	if !isDoCommand(command) {
 		return false
 	}
 	if command == "help" {

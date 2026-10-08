@@ -3,22 +3,36 @@ package program
 import (
 	"kame/core"
 	"kame/lang/eval"
+	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 )
 
-func (p *Program) clearReasons(entry *instance) {
-	for i := range entry.Reasons {
-		entry.Reasons[i].Free(p.Alloc)
+// reasonIdentity owns only the fields needed for generation-local deduplication.
+// Published Event records have a separate lifetime in the program event queue.
+type reasonIdentity struct {
+	Decision string
+	Code string
+	Dependency core.ResourceKey
+	Aspect string
+}
+
+func (p *Program) clearReasonIdentities(entry *instance) {
+	for i := range entry.ReasonIdentities {
+		identity := &entry.ReasonIdentities[i]
+		mem.FreeString(p.Alloc, identity.Decision)
+		mem.FreeString(p.Alloc, identity.Code)
+		identity.Dependency.Free(p.Alloc)
+		mem.FreeString(p.Alloc, identity.Aspect)
 	}
-	slices.Free(p.Alloc, entry.Reasons)
-	entry.Reasons = nil
+	slices.Free(p.Alloc, entry.ReasonIdentities)
+	entry.ReasonIdentities = nil
 }
 
 // Reasons only explain an existing decision; never request more evidence.
 func (p *Program) reason(entry *instance, decision string, code string, message string, key core.ResourceKey, aspect string) {
-	for i := range entry.Reasons {
-		previous := entry.Reasons[i]
-		if previous.Decision == decision && previous.Reason == code && previous.DependencyKey.Kind == key.Kind && previous.DependencyKey.Name == key.Name && previous.Aspect == aspect {
+	for i := range entry.ReasonIdentities {
+		previous := entry.ReasonIdentities[i]
+		if previous.Decision == decision && previous.Code == code && previous.Dependency.Kind == key.Kind && previous.Dependency.Name == key.Name && previous.Aspect == aspect {
 			return
 		}
 	}
@@ -26,7 +40,7 @@ func (p *Program) reason(entry *instance, decision string, code string, message 
 	event := Event{Kind: TargetReason, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, Decision: decision, Reason: code, Message: message, DependencyKey: key, Aspect: aspect}
 	p.emit(event)
 	// Only the deduplication identity is retained after the event is drained.
-	entry.Reasons = slices.Append(p.Alloc, entry.Reasons, Event{Decision: cloneText(p.Alloc, decision), Reason: cloneText(p.Alloc, code), DependencyKey: key.Clone(p.Alloc), Aspect: cloneText(p.Alloc, aspect)})
+	entry.ReasonIdentities = slices.Append(p.Alloc, entry.ReasonIdentities, reasonIdentity{Decision: cloneText(p.Alloc, decision), Code: cloneText(p.Alloc, code), Dependency: key.Clone(p.Alloc), Aspect: cloneText(p.Alloc, aspect)})
 }
 
 func reasonAspect(aspect core.ObservationAspect) string {

@@ -1,6 +1,7 @@
 # CLI conformance test catalog. One row per test script.
 # Columns: file<TAB>spec<TAB>category<TAB>covers
 tests/T036-01-cli-presentation.sh	036	cli	Native/WASM presentation modes, global options, exact bytes, JSON results, static errors, watch boundaries and terminal fallback
+tests/T036-02-cli-reuse-reasons.sh	036	cli	Native/WASM file and task reuse reasons, missing/corrupt records, guard/input/output/configuration/environment changes, force/always, deduplication and privacy
 tests/T004-16-lang-computed-outputs.sh	004	lang	Pure computed output paths and names, captures, list flattening, overrides, validation, diagnostics, formatting and native/WASM parity
 tests/T018-01-lang-source-style.sh	018	lang	Canonical structural layouts, 80-column Unicode/tab boundaries, definitions, literals, AST stability and native/WASM parity
 tests/T013-04-meta-layer-examples.sh	013	meta	Runnable value/rule/Kash lessons, source composition, selective rebuilding, graph growth and embedded Kash arguments

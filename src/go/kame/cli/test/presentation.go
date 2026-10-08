@@ -62,3 +62,21 @@ func TestPresentationRespectsValuesAndLiteralTail(t *testing.T) {
 		t.Error("global failure ignored later JSON selection")
 	}
 }
+
+func TestPresentationOptionsStayOutOfSourceSelection(t *testing.T) {
+	options := []string{"-o", "--output", "--color", "--diagnostic-format"}
+	for i := range options {
+		if !cli.OptionTakesValue(options[i]) { t.Error("global value option missing from dispatch grammar") }
+		if cli.AppendsCommands([]string{options[i], "-c", "chosen"}) {
+			t.Error("global option value was mistaken for inline source")
+		}
+		if cli.SelectsRun([]string{options[i], "source.km", "chosen"}) {
+			t.Error("global option value was mistaken for a value source")
+		}
+	}
+	inv := cli.Parse("build", []string{"--output", "text", "--color=never", "--diagnostic-format", "plain", "chosen"})
+	if !inv.OK || inv.Output != "text" || inv.Color != "never" || inv.DiagnosticFormat != "plain" || inv.RetainBytes != 0 || len(inv.Targets) != 1 {
+		t.Error("global controls leaked into build-option assignments")
+	}
+	inv.Free()
+}

@@ -335,7 +335,7 @@ func (p *Program) Free() {
 		freeStrings(p.Alloc, p.Instances[i].MetadataEnvironment)
 		freeStrings(p.Alloc, p.Instances[i].SettingsDependencies)
 		p.Instances[i].SettingsDiagnostic.Free(p.Alloc)
-		p.clearReasons(&p.Instances[i])
+		p.clearReasonIdentities(&p.Instances[i])
 		if p.Instances[i].KashContext != nil {
 			p.freeKashContext(p.Instances[i].KashContext)
 		}
