@@ -65,7 +65,7 @@ its late result is ignored and its promise does not hold disposal open. A
 
 ## Python contract
 
-The `python/kame` package exports an async context-managed `Kame` client. It
+The `src/py/kame.py` module exports an async context-managed `Kame` client. It
 accepts an executable path, a working directory and explicit capability
 grants. `compile`, `evaluate`, and `build` return copied Python strings,
 records, and event objects. `watch` is an async iterator. Each request starts a

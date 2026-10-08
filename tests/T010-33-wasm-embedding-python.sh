@@ -8,7 +8,7 @@ test-step "Python client compiles, evaluates, builds and watches through the CLI
 cd "$CLI_ROOT"
 cli_require_tools
 cli_build
-if KAME_TEST_CLI="$CLI_BIN" PYTHONPATH="$CLI_ROOT/python" python3 -m unittest discover -s python/tests -v; then
+if KAME_TEST_CLI="$CLI_BIN" PYTHONPATH="$CLI_ROOT/src/py" python3 -m unittest discover -s src/py -p 'test_kame.py' -v; then
 	test-ok "Python embedding API passes parse, grants, build, watch, cancellation, and 100 lifecycle cycles"
 else
 	test-fail "Python embedding API conformance failed"

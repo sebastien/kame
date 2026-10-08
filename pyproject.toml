@@ -10,4 +10,5 @@ requires-python = ">=3.11"
 dependencies = []
 
 [tool.setuptools]
-packages = ["kame"]
+package-dir = {"" = "src/py"}
+py-modules = ["kame"]
