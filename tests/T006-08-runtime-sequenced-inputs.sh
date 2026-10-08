@@ -63,7 +63,7 @@ KMK
 
 	"${runner[@]}" do fmt --lang script "$project/Makefile.kmk" >"$project/formatted" 2>"$project/err"
 	"${runner[@]}" do plan --json -C "$project" sequenced >"$project/plan" 2>"$project/err"
-	if rg -q '^sequenced : first, second$' "$project/formatted" && jq -e '.inputs == ["first", "second"] and .sequenceBoundaries == [1]' "$project/plan" >/dev/null; then test-ok "$backend formatter and plan preserve sequencing boundaries"; else test-fail "$backend sequencing inspection lost a boundary"; fi
+	if rg -q '^sequenced : first, second$' "$project/formatted" && jq -e '[.dependencies[] | select(.producer == 1 and .group != null) | .group] == [1, 2]' "$project/plan" >/dev/null; then test-ok "$backend formatter and plan preserve sequencing boundaries"; else test-fail "$backend sequencing inspection lost a boundary"; fi
 done
 
 test-end

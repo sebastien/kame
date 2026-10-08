@@ -58,9 +58,9 @@ reject() {
 test-step "discovery and every inspection surface expand nested includes"
 compare -C "$work/project" default
 compare -C "$work/project" -f Makefile.kmk default
-compare do plan -C "$work/project" -f Makefile.kmk default
-compare do inputs -C "$work/project" -f Makefile.kmk default
-compare do outputs -C "$work/project" -f Makefile.kmk default
+compare do plan --json -C "$work/project" -f Makefile.kmk default
+compare do inputs --json -C "$work/project" -f Makefile.kmk default
+compare do outputs --json -C "$work/project" -f Makefile.kmk default
 compare do span -C "$work/project" -f Makefile.kmk default
 compare do tools -C "$work/project" -f Makefile.kmk
 compare do tools check -C "$work/project" -f Makefile.kmk tooled
@@ -71,7 +71,7 @@ test-step "relative -C labels and include paths resolve from original cwd"
 (
 	cd "$work"
 	compare -C project default
-	compare do plan -C project -f Makefile.kmk default
+	compare do plan --json -C project -f Makefile.kmk default
 )
 
 test-step "included evaluation diagnostics retain authored source and spans"

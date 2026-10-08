@@ -153,6 +153,9 @@ test-presentation : ./build/kame.debug dist-wasm
 	./tests/T036-01-cli-presentation.sh
 	./tests/T036-02-cli-reuse-reasons.sh
 
+test-inspection : ./build/kame.debug dist-wasm
+	./tests/T037-01-cli-build-inspection.sh
+
 test-reuse-reasons : ./build/kame.debug dist-wasm
 	./tests/T036-02-cli-reuse-reasons.sh
 

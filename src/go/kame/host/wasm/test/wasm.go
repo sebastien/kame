@@ -100,6 +100,129 @@ func TestToolInspectionYieldsHostRequestsWithoutRunningRecipes(t *testing.T) {
 	r.Free()
 }
 
+func TestPlanInspectionUsesSchemaTwoAndStableReadOnlyQueries(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "default : build\nbuild : ./output\n./output : @((wildcard ./src/*.txt))\n\ttouch forbidden\n")
+	if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
+	r := started.Runtime
+	unprepared := r.PlanRootsJSON("[\"default\"]", -1)
+	if unprepared.Code != "PHASE_INVALID" { t.Error("unprepared plan query was accepted") }
+	unprepared.Free(a)
+	r.SetFile("src/one.txt", []byte("one"))
+	r.InspectionGrant("read", "")
+	prepared := r.Prepare()
+	if prepared.Code != "" { t.Error("prepare failed") }
+	prepared.Free(a)
+	first := r.PlanJSON("default", false)
+	second := r.PlanJSON("default", true)
+	roots := r.PlanRootsJSON("[\"default\"]", -1)
+	if roots.Code != "" || roots.Text != first.Text { t.Error("shared-root plan changed the legacy plan payload") }
+	roots.Free(a)
+	if first.Code != "" || first.HostNeeded || first.Text != second.Text || !strings.Contains(first.Text, "\"schema\":2") || !strings.Contains(first.Text, "\"display\":\"./src/one.txt\"") {
+		t.Error("schema, recursive automatic discovery, or query stability lost")
+	}
+	first.Free(a); second.Free(a)
+	if pending := r.Step(); pending.OK { t.Error("inspection queued an effect"); pending.Request.Free(a) }
+	r.Free()
+}
+
+func TestTargetOperandsUseCompiledDeclarations(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "")
+	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
+	r := started.Runtime
+	unprepared := r.TargetOperandsJSON("[]")
+	if unprepared.Code != "PHASE_INVALID" { t.Error("unprepared operand query was accepted") }
+	unprepared.Free(a)
+	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"included.kmk","text":"CONFIG = \"original\"\n./artifact :\nplain :\n"},{"name":"main.kmk","text":"default {region=west} :\ndeploy {region=west} :\n"}],"parameters":["CONFIG=changed"]}`))
+	if configured.Code != "" { t.Error("build descriptor failed"); configured.Free(a); r.Free(); return }
+	configured.Free(a)
+	prepared := r.Prepare()
+	if prepared.Code != "" { t.Error("prepare failed: " + prepared.Code + " " + prepared.Message); prepared.Free(a); r.Free(); return }
+	prepared.Free(a)
+	inputs := []string{"[]", "[\"CONFIG=changed\"]", "[\"region=east\"]", "[\"deploy\",\"CONFIG=changed\",\"region=east\"]", "[\"plain\",\"./artifact\"]", "[\"deploy\",\"./artifact\"]"}
+	expected := []string{"[\"default\"]", "[\"default\"]", "[\"default region=east\"]", "[\"deploy region=east\"]", "[\"plain\",\"./artifact\"]", "[\"deploy\",\"./artifact\"]"}
+	for i := range inputs {
+		result := r.TargetOperandsJSON(inputs[i])
+		if result.Code != "" || result.Text != expected[i] { t.Error("target operands lost declaration-sensitive selection") }
+		result.Free(a)
+	}
+	invalid := r.TargetOperandsJSON("[1]")
+	if invalid.Code != "OPT_VALUE_INVALID" { t.Error("invalid operands were accepted") }
+	invalid.Free(a)
+	if pending := r.Step(); pending.OK { t.Error("operand selection queued host work"); pending.Request.Free(a) }
+	r.Free()
+	started = wasm.NewRuntime(a, "plain :\n")
+	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
+	r = started.Runtime
+	prepared = r.Prepare()
+	if prepared.Code != "" { t.Error("prepare failed") }
+	prepared.Free(a)
+	result := r.TargetOperandsJSON("[]")
+	if result.Code != "" || result.Text != "[]" { t.Error("selection invented an undeclared default") }
+	result.Free(a)
+	r.Free()
+}
+
+func TestInspectionDisposalReclaimsRetainedRootsAndHostRequests(t *testing.T) {
+	a := t.Allocator()
+	// Dispose with a queued request, a host-owned request, and a nested read
+	// after completing the first request. The test allocator checks all owners.
+	for phase := 0; phase < 3; phase++ {
+		started := wasm.NewRuntime(a, "inputs = (read (read \"./inputs.txt\"))\nroot : @((split inputs \"\\n\"))\n\ttouch forbidden\n")
+		if started.Runtime == nil {
+			t.Error("runtime did not compile")
+			started.Result.Free(a)
+			return
+		}
+		r := started.Runtime
+		r.SetForwarding(true)
+		r.InspectionGrant("", "")
+		r.InspectionGrant("read", "")
+		prepared := r.Prepare()
+		if prepared.Code != "" { t.Error("prepare failed") }
+		prepared.Free(a)
+		query := r.PlanJSON("root", false)
+		if !query.HostNeeded || query.Code != "" { t.Error("inspection did not suspend") }
+		query.Free(a)
+		if phase > 0 {
+			next := r.Step()
+			if !next.OK || next.Request.Kind != host.RequestReadFile {
+				t.Error("inspection did not expose its read request")
+			}
+			if phase == 2 && next.OK {
+				r.Complete(next.Request, core.NewBytes(a, []byte("./leaf.txt")), diagnostic.Diagnostic{})
+			}
+			if next.OK { next.Request.Free(a) }
+			if phase == 2 {
+				query = r.PlanJSON("root", false)
+				if !query.HostNeeded || query.Code != "" { t.Error("nested inspection read did not suspend: " + query.Code + " " + query.Text) }
+				query.Free(a)
+			}
+		}
+		r.Free()
+	}
+}
+
+func TestArtifactStatusInspectionDisposalReclaimsPendingRead(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "./result : ./seed\n\ttouch forbidden\n")
+	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
+	r := started.Runtime
+	r.SetForwarding(true)
+	r.InspectionGrant("", "")
+	r.InspectionGrant("read", "")
+	prepared := r.Prepare()
+	prepared.Free(a)
+	query := r.PlanJSON("./result", false)
+	if !query.HostNeeded || query.Code != "" { t.Error("artifact status did not yield a read") }
+	query.Free(a)
+	next := r.Step()
+	if !next.OK || next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, host.FieldOp) != host.OpFileContent { t.Error("artifact status requested an effect instead of content") }
+	if next.OK { next.Request.Free(a) }
+	r.Free()
+}
+
 func TestHandlesRejectStaleAndForeignOwners(t *testing.T) {
 	table := wasm.NewTable(t.Allocator())
 	handle := table.Add(1, 42)
@@ -701,42 +824,3 @@ func TestRuntimeCancellationIgnoresLateCompletion(t *testing.T) {
 	}
 	result.Free(a)
 }
-
-func TestTargetOperandsUseCompiledDeclarations(t *testing.T) {
-	a := t.Allocator()
-	started := wasm.NewRuntime(a, "")
-	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
-	r := started.Runtime
-	unprepared := r.TargetOperandsJSON("[]")
-	if unprepared.Code != "PHASE_INVALID" { t.Error("unprepared operand query was accepted") }
-	unprepared.Free(a)
-	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"included.kmk","text":"CONFIG = \"original\"\n./artifact :\nplain :\n"},{"name":"main.kmk","text":"default {region=west} :\ndeploy {region=west} :\n"}],"parameters":["CONFIG=changed"]}`))
-	if configured.Code != "" { t.Error("build descriptor failed"); configured.Free(a); r.Free(); return }
-	configured.Free(a)
-	prepared := r.Prepare()
-	if prepared.Code != "" { t.Error("prepare failed: " + prepared.Code + " " + prepared.Message); prepared.Free(a); r.Free(); return }
-	prepared.Free(a)
-	inputs := []string{"[]", "[\"CONFIG=changed\"]", "[\"region=east\"]", "[\"deploy\",\"CONFIG=changed\",\"region=east\"]", "[\"plain\",\"./artifact\"]", "[\"deploy\",\"./artifact\"]"}
-	expected := []string{"[\"default\"]", "[\"default\"]", "[\"default region=east\"]", "[\"deploy region=east\"]", "[\"plain\",\"./artifact\"]", "[\"deploy\",\"./artifact\"]"}
-	for i := range inputs {
-		result := r.TargetOperandsJSON(inputs[i])
-		if result.Code != "" || result.Text != expected[i] { t.Error("target operands lost declaration-sensitive selection") }
-		result.Free(a)
-	}
-	invalid := r.TargetOperandsJSON("[1]")
-	if invalid.Code != "OPT_VALUE_INVALID" { t.Error("invalid operands were accepted") }
-	invalid.Free(a)
-	if pending := r.Step(); pending.OK { t.Error("operand selection queued host work"); pending.Request.Free(a) }
-	r.Free()
-	started = wasm.NewRuntime(a, "plain :\n")
-	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
-	r = started.Runtime
-	prepared = r.Prepare()
-	if prepared.Code != "" { t.Error("prepare failed") }
-	prepared.Free(a)
-	result := r.TargetOperandsJSON("[]")
-	if result.Code != "" || result.Text != "[]" { t.Error("selection invented an undeclared default") }
-	result.Free(a)
-	r.Free()
-}
-

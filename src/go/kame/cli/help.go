@@ -15,9 +15,9 @@ type CommandInfo struct {
 
 var Commands = [12]CommandInfo{
 	{Name: "run", Usage: "kame do run [OPTIONS] INPUT... [-- ARG...]", Summary: "execute ordered source fragments in one session"},
-	{Name: "plan", Usage: "kame do plan [OPTIONS] [TARGET...]", Summary: "inspect rule, inputs, outputs, captures, tools, and freshness without execution"},
-	{Name: "inputs", Usage: "kame do inputs [--depth N] [OPTIONS] [TARGET]", Summary: "list declared input edges"},
-	{Name: "outputs", Usage: "kame do outputs [--depth N] [OPTIONS] [TARGET]", Summary: "list declared output edges"},
+	{Name: "plan", Usage: "kame do plan [--depth N] [OPTIONS] [TARGET...]", Summary: "inspect the recursive build graph, resources, and dependency stages without execution"},
+	{Name: "inputs", Usage: "kame do inputs [--depth N] [OPTIONS] [TARGET]", Summary: "list all reachable input files and logical prerequisites"},
+	{Name: "outputs", Usage: "kame do outputs [--depth N] [OPTIONS] [TARGET]", Summary: "list all reachable artifacts and their producers"},
 	{Name: "span", Usage: "kame do span [--expand] [--depth N] [OPTIONS] [TARGET]", Summary: "separate static and evaluation-dependent resources"},
 	{Name: "tools", Usage: "kame do tools [OPTIONS]\nkame do tools check [OPTIONS] TARGETS...", Summary: "list referenced tools or check tools required by selected targets"},
 	{Name: "parse", Usage: "kame do parse --lang LANG [FILE]", Summary: "inspect a language AST; omitted FILE reads stdin"},
@@ -88,8 +88,9 @@ func HelpText(topic string) string {
 		if topic == "render" {
 			b.WriteString("--define NAME=VALUE supplies literal payload; template reads need an explicit grant.\n--comment STYLE selects template comment syntax; --check emits no document.\n")
 		}
-		if topic == "inputs" || topic == "outputs" || topic == "span" {
+		if topic == "plan" || topic == "inputs" || topic == "outputs" || topic == "span" {
 			b.WriteString("--depth 0: no edges; 1: direct edges; -1: unlimited. --expand is span-only.\n")
+			if topic != "span" { b.WriteString("Default depth: unlimited. Read-only computed inputs resolve automatically. JSON: one schema-2 inspection document.\n") }
 		}
 		if topic == "plan" || topic == "cat" || topic == "tools" || topic == "inputs" || topic == "outputs" || topic == "span" {
 			b.WriteString("Source: -f FILE or -c TEXT; -C DIR, --define NAME=VALUE, --tool NAME=PATH.\nWith no target, select default. Unknown targets fail without execution.\n")

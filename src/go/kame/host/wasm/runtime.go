@@ -297,41 +297,34 @@ func (r *Runtime) toolsCheckJSON(target string, report bool) PureResult {
 	return PureResult{Text: text}
 }
 
-// PlanJSON resolves one target plan (optionally expanding expression inputs)
-// and returns its schema-1 JSON document.
+// PlanJSON returns the recursive schema-2 plan. expand is retained in the ABI;
+// read-only input discovery is now automatic.
 func (r *Runtime) PlanJSON(target string, expand bool) PureResult {
+	_ = expand
 	if r == nil || r.Program == nil {
 		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no compiled build source")}
 	}
-	var result program.PlanResult
-	if expand {
-		result = r.Program.ExpandPlan(target)
-	} else {
-		result = r.Program.Plan(target)
-	}
-	if result.Diagnostic.Code != "" {
-		out := PureResult{Code: pureText(r.Alloc, result.Diagnostic.Code), Message: pureText(r.Alloc, result.Diagnostic.Message)}
-		result.Diagnostic.Free(r.Alloc)
-		return out
-	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
-	program.WritePlan(&buffer, &result.Plan)
+	targets := []string{target}
+	d := r.Program.WriteInspection(&buffer, targets, -1, "plan")
+	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
+	if d.Code != "" { program.WriteJSONDiagnostic(&buffer, d); d.Free(r.Alloc) }
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Free()
-	result.Plan.Free(r.Alloc)
 	return PureResult{Text: text}
 }
 
-// GraphJSON walks one target's declared inputs or outputs and returns the JSON
-// array. kind is "inputs" or "outputs".
+// GraphJSON returns a schema-2 input or output inventory.
 func (r *Runtime) GraphJSON(target string, depth int, kind string) PureResult {
 	if r == nil || r.Program == nil {
 		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no compiled build source")}
 	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
 	d := r.Program.WriteGraph(&buffer, target, depth, kind)
+	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
 	if d.Code != "" {
-		out := PureResult{Code: pureText(r.Alloc, d.Code), Message: pureText(r.Alloc, d.Message)}
+		program.WriteJSONDiagnostic(&buffer, d)
+		out := PureResult{Text: pureText(r.Alloc, buffer.String())}
 		d.Free(r.Alloc)
 		buffer.Free()
 		return out
@@ -339,6 +332,32 @@ func (r *Runtime) GraphJSON(target string, depth int, kind string) PureResult {
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Free()
 	return PureResult{Text: text}
+}
+
+// PlanRootsJSON accepts a JSON root array so multiple CLI roots share one plan query.
+func (r *Runtime) PlanRootsJSON(encoded string, depth int) PureResult {
+	if r == nil || r.Program == nil {
+		a := mem.System
+		if r != nil { a = r.Alloc }
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
+	}
+	var value core.Value
+	if !core.ParseJSON(r.Alloc, []byte(encoded), &value) { return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "invalid inspection roots")} }
+	defer value.Free(r.Alloc)
+	if value.Kind != core.List || len(value.List) == 0 { return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be a nonempty string array")} }
+	targets := slices.Make[string](r.Alloc, len(value.List))
+	defer slices.Free(r.Alloc, targets)
+	for i := range value.List {
+		if value.List[i].Kind != core.String || value.List[i].Text == "" { return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be nonempty strings")} }
+		targets[i] = value.List[i].Text
+	}
+	var buffer = bytes.NewBuffer(r.Alloc, nil)
+	d := r.Program.WriteInspection(&buffer, targets, depth, "plan")
+	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
+	if d.Code != "" { program.WriteJSONDiagnostic(&buffer, d); d.Free(r.Alloc) }
+	out := PureResult{Text: pureText(r.Alloc, buffer.String())}
+	buffer.Free()
+	return out
 }
 
 // SpanJSON walks one target's static (and optionally expanded) edges and

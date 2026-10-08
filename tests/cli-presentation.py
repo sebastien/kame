@@ -126,11 +126,11 @@ def check_host(host: list[str], root: Path) -> None:
 		assert not plan.stderr, plan.stderr
 		if mode == "json":
 			document = json.loads(plan.stdout)
-			assert document["schema"] == 1 and document["type"] == "plan", document
-			assert document["configuration"] == {"type": "release", "schema": "v2"}, document
+			assert document["schema"] == 2 and document["type"] == "plan", document
+			assert document["producers"][0]["configuration"] == {"type": "release", "schema": "v2"}, document
 		else:
 			text = re.sub(rb"\x1b\[[0-9;]*m", b"", plan.stdout)
-			assert b'    type: "release"\n' in text and b'    schema: "v2"\n' in text, text
+			assert b'        type: "release"\n' in text and b'        schema: "v2"\n' in text, text
 			assert b"  schema: 1\n" not in text and b'  type: "plan"\n' not in text, text
 		for command in ["plan", "inputs", "outputs", "span", "tools"]:
 			result = invoke(host, args + ["do", command], project)

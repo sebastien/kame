@@ -51,6 +51,8 @@ type Plan struct {
 type PlanInput struct {
 	OrderOnly   bool
 	SequenceEnd bool
+	// Computed distinguishes expression-origin inputs from coincident literals.
+	Computed bool
 	Display     string
 	Key         core.ResourceKey
 }
@@ -389,9 +391,10 @@ type instance struct {
 	Captures            []template.CaptureValue
 	Node                *core.Node
 	Plan                Plan
-	// Inspection instances resolve inputs for span --expand only. They must not
+	// Inspection instances resolve read-only inputs, definitions, or artifact status. They must not
 	// satisfy normal target lookup or participate in build execution.
 	Inspection           bool
+	InspectionStatus *inspectionStatusState
 	inspectionRoot       *core.Root
 	ForwardEffects       *forwardEffectsState
 	VerifyOutputs        bool

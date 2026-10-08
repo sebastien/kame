@@ -296,8 +296,14 @@ The wrapper reproduces the invocation model of `009-cli.md`: the same options
 and commands, the same stream separation (normal output and JSON on stdout,
 progress and human diagnostics on stderr), and the same exit statuses (0 for
 success, 1 for parse, evaluation, build, or cache failure, 2 for usage errors,
-and 128 plus the signal number for forced termination). `--json` emits JSON
-Lines with `schema: 1`. `-V` and `--version` print `kame VERSION`; the launcher
+and 128 plus the signal number for forced termination). `--json` emits execution
+JSON Lines with `schema: 1`; static inspection uses its command-specific framing.
+`plan`, `inputs`, and `outputs` follow the recursive, read-only schema-2 contract
+in `037-build-inspection.md`, including stages and explicit deferred discovery.
+Host-backed resolution resumes through the inspection host protocol, never an
+empty memory-filesystem substitute or execution of an artifact producer. Repeated
+size/copy queries preserve identities and release inspection interest on failure
+or cancellation. `-V` and `--version` print `kame VERSION`; the launcher
 may answer that request without loading the module (`015-distribution.md`).
 
 For ABI conformance testing, the wrapper also accepts `--wasm-abi-info` and
@@ -383,7 +389,9 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
   prevents earlier effects; fragment boundaries retain authored source spans.
   Missing backend support
   reports `FEATURE_UNSUP`; removed command names are not wrapper-only aliases.
-- `--json` output is valid JSON Lines on stdout and leaves stderr unused.
+- Execution `--json` output is valid JSON Lines on stdout and leaves stderr unused;
+  static inspection follows its specified document framing, including schema-2
+  build inspection parity in `037-build-inspection.md`.
 - Exit statuses and stream separation match `009-cli.md`.
 - An invocation that needs a capability absent from the current stage reports
   `FEATURE_UNSUP`.
@@ -395,9 +403,11 @@ Build source descriptors are bounded to 512 KiB of encoded JSON and 64 KiB
 of combined source text, matching the single-source text capacity. Oversize
 input returns `NO_MEMORY`; offsets must fit a nonnegative 32-bit span.
 
-Expanded span queries service read-only host requests through the same pending
-query protocol as tool inspection: `HOST_NEEDED` means step, complete the yielded
-request, and retry the query. Static queries perform no host effects.
+Build-inspection and expanded span queries service read-only host requests through
+the same pending query protocol as tool inspection: `HOST_NEEDED` means step,
+complete the yielded request, and retry the query. Read-only inspection never
+starts artifact producers or commits effects. Parsing and unexpanded authored
+span queries perform no host effects.
 
 Forwarded build effects publish explicit writes and concatenated yields through
 write requests. The target waits for host completion, preserves authored effect

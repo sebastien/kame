@@ -416,7 +416,7 @@ SH
  "${runner[@]}" do plan --json -C "$project" root > "$project/plan" 2> "$project/err"
   "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" > "$project/ast" 2> "$project/err"
  "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" > "$project/fmt" 2> "$project/err"
- if jq -e '.environment == ["MODE=first", "MODE=debug", "MESSAGE=spaces; equal=ok"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.environment? == ["MODE=first", "MODE=debug", "MESSAGE=spaces; equal=ok"])' "$project/ast" >/dev/null && rg -q '; env "MODE=release"' "$project/fmt"; then test-ok "$backend plan, AST and format environment metadata"; else test-fail "$backend environment inspection"; fi
+  if jq -e '.producers[0].environment == ["MODE=first", "MODE=debug", "MESSAGE=spaces; equal=ok"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.environment? == ["MODE=first", "MODE=debug", "MESSAGE=spaces; equal=ok"])' "$project/ast" >/dev/null && rg -q '; env "MODE=release"' "$project/fmt"; then test-ok "$backend plan, AST and format environment metadata"; else test-fail "$backend environment inspection"; fi
  test-step "$backend validates assignments before effects"
  printf 'bad : ; env "1MODE=debug"\n\ttouch forbidden\n' > "$project/bad.kmk"
  if "${runner[@]}" -C "$project" -f bad.kmk bad > "$project/out" 2> "$project/err"; then test-fail "$backend accepted invalid environment"; elif rg -q PARSE_ERR "$project/err" && [ ! -e "$project/forbidden" ]; then test-ok "$backend invalid assignment has no effects"; else test-fail "$backend assignment validation"; fi

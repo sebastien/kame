@@ -56,6 +56,11 @@ func WriteReport(out io.Writer, heading string, data string, styled bool) bool {
 	}
 	Style(out, "heading", heading, styled)
 	io.WriteString(out, "\n")
+	if reportField(value, "schema").Int == 2 {
+		writeInspectionReport(out, value, styled)
+		value.Free(mem.System)
+		return true
+	}
 	if value.Kind == core.List && len(value.List) == 0 {
 		text := "no entries"
 		if heading == "tools" {

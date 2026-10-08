@@ -16,6 +16,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { constants as osConstants, tmpdir } from 'node:os';
 import process, { argv, env, stderr, stdout } from 'node:process';
 
+// Numeric graph kinds are part of the stable WASM ABI.
+const graphKinds = Object.freeze({ inputs: 0, outputs: 1, span: 2, planRoots: 3 });
+
 // Children run in their own process group so a signal terminates the whole
 // tree, and a forced termination reports 128 plus the signal number.
 const activeChildren = new Set();
@@ -215,7 +218,54 @@ function writeReport(heading, document) {
     if (label === 'path' && value === '') text = 'unavailable';
     stdout.write(`${'  '.repeat(depth)}${label ? `${styled('value.symbol', label, outputColor)}: ` : ''}${styled(['source', 'path', 'target', ''].includes(label) ? 'value.path' : 'value.literal', text, outputColor)}\n`);
   };
-  write(data, '', 1, true);
+  if (data.schema === 2) writeInspectionReport(data, write);
+  else write(data, '', 1, true);
+}
+
+function writeInspectionReport(doc, write) {
+  const resources = doc.resources, producers = doc.producers;
+  const producer = (id) => producers.find((p) => p.id === id);
+  const text = (value, token = 'value.path') => styled(token, shortReportField(value), outputColor);
+  stdout.write('  scope: declared and read-only resolved\n');
+  for (let section = 0; section < 3; section++) {
+    const label = section === 1 ? 'configuration' : section === 2 ? 'logical / value / service resources' : doc.type === 'outputs' ? 'artifacts' : doc.type === 'plan' ? 'files' : 'file inputs';
+    stdout.write(`  ${styled('heading', label, outputColor)}\n`);
+    let count = 0;
+    if (doc.depth !== 0) for (const r of resources) {
+      const file = r.key.kind === 'file', config = r.roles.includes('configuration');
+      const include = section === 1 ? config : section === 2 ? !file && !config : file && !config && (doc.type === 'plan' || r.roles.includes(doc.type === 'outputs' ? 'artifact' : 'input'));
+      if (!include) continue;
+      count++;
+      const references = new Set(doc.dependencies.filter((d) => d.resource === r.id).map((d) => d.producer));
+      if (producer(r.producer)) references.add(r.producer);
+      stdout.write(`    ${text(r.display)} [${references.size}]${r.status ? ` · ${r.status}` : ''}\n`);
+    }
+    if (!count) stdout.write(`    ${section === 0 && doc.truncated ? 'not expanded at requested depth' : section === 0 && doc.deferred.length ? 'unresolved discovery; see boundaries below' : section === 0 && doc.type === 'inputs' ? 'no inputs' : section === 0 && doc.type === 'outputs' ? 'no declared artifacts' : '(none)'}\n`);
+  }
+  if (doc.type === 'plan') {
+    stdout.write('  producers\n');
+    for (const p of producers) {
+      stdout.write(`    ${text(p.target, 'value.target')} · ${p.kind}\n`);
+      for (const [key, value] of Object.entries(p)) if (!['id', 'resource', 'target', 'kind', 'outputs'].includes(key)) write(value, key, 3);
+    }
+    stdout.write(`  stages · dependency ordering, not global barriers${doc.truncated || doc.deferred.length ? ' · partial' : ''}\n`);
+    for (const stage of doc.stages) {
+      stdout.write(`    stage ${stage.number}${stage.producers.length > 1 ? ' · parallel eligible' : ''}\n`);
+      for (const id of stage.producers) stdout.write(`      ${text(producer(id).target, 'value.target')}\n`);
+    }
+    for (const d of doc.dependencies.filter((d) => d.group > 1)) stdout.write(`    sequence barrier: ${text(producer(d.producer).target, 'value.target')} · group ${d.group} follows earlier groups\n`);
+  }
+  if (doc.truncated) stdout.write('  truncated: deeper producer inputs omitted\n');
+  if (doc.deferred.length) {
+    stdout.write('  discovery boundaries\n');
+    const boundaries = new Map();
+    for (const d of doc.deferred) {
+      const path = resources.find((r) => r.id === (d.resource || producer(d.producer)?.resource)).display;
+      if (!boundaries.has(path)) boundaries.set(path, new Set());
+      boundaries.get(path).add(d.reason);
+    }
+    for (const [path, attributes] of boundaries) stdout.write(`    ${text(path)} · ${[...attributes].join(' · ')}\n`);
+  }
 }
 function writeDataResult(type, fields, bytes, includeData = true) {
   const record = { schema: 1, type, ...fields };
@@ -1188,9 +1238,19 @@ class Module {
 
   async copyInspectionQuery(call, instance, context) {
     const lengthPointer = this.allocate(4, 4);
+    let output = 0, capacity = 0;
     for (;;) {
-      const query = call(instance, 0, 0, lengthPointer);
-      if (query !== 6) return this.copyQuery(call, instance);
+      const query = call(instance, output, capacity, lengthPointer);
+      if (query === 0) {
+        const length = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
+        return new Uint8Array(this.exports.memory.buffer, output, length).slice();
+      }
+      if (query === 3) {
+        capacity = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
+        output = this.allocate(capacity || 1);
+        continue;
+      }
+      if (query !== 6) throw diagnosticError(this.instanceDiagnostic(instance), `inspection query failed (${query})`);
       if (this.exports.kame_wasm_step(instance) !== 1) throw Object.assign(new Error('inspection host request unavailable'), { code: 'HOST_FAIL' });
       if (await this.service(instance, context) !== 0) throw Object.assign(new Error('inspection host completion failed'), { code: 'HOST_FAIL' });
     }
@@ -1828,12 +1888,12 @@ class Module {
     return JSON.parse(this.decode0(bytes));
   }
 
-  async planJSON(source, target, expand, name) {
+  async planJSON(source, target, expand, name, context) {
     return this.prepared(source, (instance) => {
       const targetBytes = this.write(target);
       const flag = expand ? 1 : 0;
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_plan(handle, targetBytes.pointer, targetBytes.length, flag, dst, dstLen, lengthPointer);
-    }, name);
+    }, name, context);
   }
 
   async graphJSON(source, target, depth, kind, expand, name, context) {
@@ -3149,32 +3209,7 @@ async function runFmt(module, inv) {
 }
 
 async function runPlan(module, inv, sourceDirectory) {
-  const source = await discoverBuildSource(module, inv, sourceDirectory);
-  if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
-  primarySource = source;
-  const targets = source.targets;
-  for (const target of targets) {
-    const bytes = await module.planJSON(source.compiled, target, false, source.name);
-    writeReport(`plan ${target}`, bytes);
-    if (!jsonMode) {
-      const plan = JSON.parse(Buffer.from(bytes).toString('utf8'));
-      if (plan.rule) {
-        const parts = Array.isArray(source.compiled) ? source.compiled : [{ name: source.name, text: source.text, offset: 0 }];
-        let start = 0, location;
-        for (const part of parts) {
-          const length = Buffer.byteLength(part.text);
-          if (plan.rule.start >= start && plan.rule.start <= start + length) location = { name: part.name, offset: plan.rule.start - start + (part.offset || 0) };
-          start += length + 1;
-        }
-        if (location && sourceTexts.has(location.name)) {
-          const text = sourceTexts.get(location.name), index = sourceIndex(text, location.offset), position = sourcePosition(text, index);
-          stdout.write(`  source: ${shortReportField(location.name)}:${position.line}:${position.column}\n`);
-          stdout.write(`  rule: ${shortReportField(text.slice(index).split('\n')[0])}\n`);
-        }
-      }
-    }
-  }
-  return 0;
+  return runGraph(module, inv, sourceDirectory);
 }
 
 async function runGraph(module, inv, sourceDirectory) {
@@ -3182,17 +3217,27 @@ async function runGraph(module, inv, sourceDirectory) {
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
   const targets = source.targets;
-  if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', `${inv.name} requires exactly one target`);
-  const kind = inv.name === 'inputs' ? 0 : inv.name === 'outputs' ? 1 : 2;
+  if (inv.name !== 'plan' && targets.length !== 1) return usageError('OPT_VALUE_INVALID', `${inv.name} requires exactly one target`);
+  const kind = inv.name === 'plan' ? graphKinds.planRoots : graphKinds[inv.name];
   let context;
-  if (inv.expand) {
+  if (inv.expand || inv.name !== 'span') {
     context = contextFor(inv);
     context.inspection = true;
     context.grants.write = false;
     context.grants.run = false;
-    context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }];
+    // Match the build context's proof identity. Resolving-phase evaluation and
+    // the host's inspection policy still prohibit writes and process execution.
+    context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
   }
-  writeReport(`${inv.name} ${targets[0]} · depth ${inv.depth}`, await module.graphJSON(source.compiled, targets[0], inv.depth, kind, inv.expand, source.name, context));
+  const queryTarget = inv.name === 'plan' ? JSON.stringify(targets) : targets[0];
+  const bytes = await module.graphJSON(source.compiled, queryTarget, inv.depth, kind, inv.expand, source.name, context);
+  const result = JSON.parse(Buffer.from(bytes).toString('utf8'));
+  if (result.type === 'diagnostic') {
+    if (jsonMode) stdout.write(`${JSON.stringify(result)}\n`);
+    else stderr.write(renderDiagnostic(result.diagnostic, source, 80));
+    return 1;
+  }
+  writeReport(`${inv.name} ${targets.join(' ')} · depth ${inv.depth}`, result);
   return 0;
 }
 

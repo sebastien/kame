@@ -204,6 +204,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		values, outputs := makeRuleInputValues(p.Alloc, inputs, resourceInputs), makeValues(p.Alloc, entry.Plan.Outputs)
 		dependencyState := renderDependencyState{Program: p, Index: index, Inspection: entry.Inspection}
 		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: entry.EnvironmentClaimed, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
+		if entry.Inspection { context.Environment, context.HasEnvironment = p.Options.Environment, p.Options.Environment != nil }
 		p.bindDefinitionEnvironment(context)
 		scope := p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
 		context.Scope = scope
@@ -247,6 +248,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		result.Value.Free(p.Alloc)
 		for j := before; j < len(resourceInputs); j++ {
 			resourceInputs[j].OrderOnly = input.OrderOnly
+			resourceInputs[j].Computed = true
 		}
 		for j := before; j < len(inputs); j++ {
 			dynamicInputs = slices.Append(p.Alloc, dynamicInputs, cloneText(p.Alloc, inputs[j]))
@@ -306,7 +308,7 @@ func cloneStrings(a mem.Allocator, values []string) []string {
 func clonePlanInputs(a mem.Allocator, values []PlanInput) []PlanInput {
 	var out []PlanInput
 	for i := range values {
-		out = slices.Append(a, out, PlanInput{OrderOnly: values[i].OrderOnly, SequenceEnd: values[i].SequenceEnd, Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
+		out = slices.Append(a, out, PlanInput{OrderOnly: values[i].OrderOnly, SequenceEnd: values[i].SequenceEnd, Computed: values[i].Computed, Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
 	}
 	return out
 }

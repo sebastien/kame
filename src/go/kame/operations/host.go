@@ -2,6 +2,7 @@ package operations
 
 import (
 	"kame/core"
+	"kame/diagnostic"
 	"kame/host"
 	"kame/lang/eval"
 	"solod.dev/so/mem"
@@ -177,7 +178,20 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 	if !c.DirectHostRequests && !dependency(c, kind, name) {
 		return eval.Result{Waiting: true}
 	}
-	return request(c, host.RequestReadFile, host.FilePayload(c.Run, op, name))
+	result := request(c, host.RequestReadFile, host.FilePayload(c.Run, op, name))
+	if result.Diagnostic.Code != "" {
+		if !result.Diagnostic.Owned {
+			owned := result.Diagnostic.Clone(c.Run)
+			result.Diagnostic.Free(c.Run)
+			result.Diagnostic = owned
+		}
+		// Keep the failing resource identity, not file contents. Inspection can
+		// then distinguish proven generated absence from an unrelated read error.
+		label := core.NewString(c.Run, name)
+		kind := core.NewString(c.Run, "resource")
+		result.Diagnostic.Frames = slices.Append(c.Run, result.Diagnostic.Frames, diagnostic.Frame{Kind: kind.Text, Label: label.Text})
+	}
+	return result
 }
 func opRead(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s

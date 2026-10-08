@@ -47,9 +47,12 @@ def check(command: list[str], source: str, target: str, *,
 			return
 		assert result.returncode == 0, (arguments, result.stdout, result.stderr)
 		plan = json.loads(result.stdout)
-		assert plan['outputs'] == outputs, plan
+		resources = {resource['id']: resource for resource in plan['resources']}
+		assert [resources[item]['display'] for item in plan['producers'][0]['outputs']] == outputs, plan
+		assert plan['producers'][0]['target'] == target, plan
 		if inputs is not None:
-			assert plan['inputs'] == inputs, plan
+			assert [resources[edge['resource']]['display'] for edge in plan['dependencies']
+				if edge['producer'] == 1 and edge.get('group')] == inputs, plan
 		assert not (project / 'forbidden').exists(), 'planning ran a recipe'
 		if formatting:
 			formatted = run(['do', 'fmt', '--lang', 'script', 'Makefile.kmk'])
@@ -60,7 +63,9 @@ def check(command: list[str], source: str, target: str, *,
 			assert again.returncode == 0 and again.stdout == formatted.stdout, again.stderr
 			replanned = run(['do', 'plan', '--json', '-f', 'formatted.kmk', *(overrides or []), target])
 			assert replanned.returncode == 0, replanned.stderr
-			assert json.loads(replanned.stdout)['outputs'] == outputs
+			replanned_doc = json.loads(replanned.stdout)
+			replanned_resources = {resource['id']: resource for resource in replanned_doc['resources']}
+			assert [replanned_resources[item]['display'] for item in replanned_doc['producers'][0]['outputs']] == outputs
 		if build:
 			built = run([*(overrides or []), target])
 			assert built.returncode == 0, (built.stdout, built.stderr)
@@ -124,11 +129,11 @@ def main() -> None:
 		('nested list order and omissions', 'OUTPUTS = [./one [./two :nil] []]\n@(OUTPUTS) ./three : ./src/demo.c\n\tcat @< > ./one\n\tcat @< > ./two\n\tcat @< > ./three\n', './two',
 			dict(outputs=['./one', './two', './three'], build=True)),
 		('nil beside literal', '@(:nil) ./one :\n', './one', dict(outputs=['./one'])),
-		('computed bare task', 'NAME = "chosen"\n@(NAME) :\n\ttouch forbidden\n', 'chosen', dict(outputs=['chosen'])),
-		('computed cached task', 'NAME = "chosen"\ntask @(NAME) :\n', 'chosen', dict(outputs=['chosen'])),
-		('nil beside cached task', 'task @(:nil) chosen :\n', 'chosen', dict(outputs=['chosen'])),
+		('computed bare task', 'NAME = "chosen"\n@(NAME) :\n\ttouch forbidden\n', 'chosen', dict(outputs=[])),
+		('computed cached task', 'NAME = "chosen"\ntask @(NAME) :\n', 'chosen', dict(outputs=[])),
+		('nil beside cached task', 'task @(:nil) chosen :\n', 'chosen', dict(outputs=[])),
 		('pure helper output', '(output name) = (cat "./" name)\n@(output "one") :\n', './one', dict(outputs=['./one'])),
-		('computed service', 'NAME = "chosen"\nservice @(NAME) :\n', 'chosen', dict(outputs=['chosen'])),
+		('computed service', 'NAME = "chosen"\nservice @(NAME) :\n', 'chosen', dict(outputs=[])),
 		('always file', 'ROOT = "./build"\nalways @(ROOT)/demo.o :\n', './build/demo.o', dict(outputs=['./build/demo.o'])),
 		('configured override', 'ROOT = "./old"\n@(ROOT)/{name}.o :\n', './new/demo.o',
 			dict(outputs=['./new/demo.o'], overrides=['--define', 'ROOT=./new'])),

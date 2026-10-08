@@ -3,7 +3,6 @@ package main
 import (
 	"kame/cli"
 	"kame/diagnostic"
-	"kame/lang/source"
 	"kame/program"
 	"solod.dev/so/bytes"
 	"solod.dev/so/encoding/json"
@@ -22,70 +21,7 @@ type graphArguments struct {
 }
 
 func runPlan(args []string, out io.Writer, errOut io.Writer) int {
-	parsed := parseBuildArguments(args, errOut)
-	defer parsed.Free()
-	if !parsed.OK {
-		return 2
-	}
-	session := openBuildSession(parsed, errOut, true)
-	defer session.Free()
-	if session.Status != 0 {
-		return session.Status
-	}
-	targets := selectTargets(session.Program, parsed.Targets)
-	parsed.Targets = nil
-	defer program.FreeStrings(mem.System, targets)
-	if len(targets) == 0 {
-		return reportNoDefault(session.Program, out, errOut, parsed.JSON)
-	}
-	failed := false
-	for i := range targets {
-		result := session.Program.Plan(targets[i])
-		if result.Diagnostic.Code != "" {
-			annotateTargetDiagnostic(&result.Diagnostic, targets[i])
-			emitDiagnostic(diagnosticWriter(out, errOut, parsed.JSON), result.Diagnostic, parsed.JSON, session.Parsed.Source)
-			result.Diagnostic.Free(mem.System)
-			failed = true
-			continue
-		}
-		if parsed.JSON {
-			writePlan(out, result.Plan)
-		} else {
-			var buffer = bytes.NewBuffer(mem.System, nil)
-			writePlan(&buffer, result.Plan)
-			cli.WriteReport(out, "plan "+result.Plan.Target, buffer.String(), stdoutColor)
-			if result.Plan.Rule != nil && session.Program.Parsed.Source != nil {
-				src := session.Program.Parsed.Source
-				location := session.Program.Eval.LocateSource(src.Name, source.Span{Start: result.Plan.RuleSpan.Start, End: result.Plan.RuleSpan.End})
-				authored, loaded := diagnosticSource(location.Source, src)
-				if authored != nil {
-					position := authored.Position(location.Span.Start)
-					fmt.Fprintf(out, "  source: %s:%d:%d\n", location.Source, position.Line, position.Column)
-				} else {
-					io.WriteString(out, "  source: "+location.Source+"\n")
-				}
-				if loaded {
-					authored.Free(mem.System)
-				}
-				start, end := result.Plan.RuleSpan.Start, result.Plan.RuleSpan.End
-				if start >= 0 && end <= len(src.Text) && end >= start {
-					for j := start; j < end; j++ {
-						if src.Text[j] == '\n' {
-							end = j
-							break
-						}
-					}
-					io.WriteString(out, "  rule: "+src.Text[start:end]+"\n")
-				}
-			}
-			buffer.Free()
-		}
-		result.Plan.Free(mem.System)
-	}
-	if failed {
-		return 1
-	}
-	return 0
+	return runGraph(args, out, errOut, "plan")
 }
 
 func runTools(args []string, out io.Writer, errOut io.Writer) int {
@@ -173,10 +109,6 @@ func checkTargetTools(p *program.Program, machine bool, targets []string, out io
 		return 1
 	}
 	return 0
-}
-
-func writePlan(out io.Writer, plan program.Plan) {
-	program.WritePlan(out, &plan)
 }
 
 func runCat(args []string, out io.Writer, errOut io.Writer) int {
@@ -274,7 +206,7 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 func (arguments *graphArguments) Free() { arguments.Build.Free(); *arguments = graphArguments{} }
 
 func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
-	graph := parseGraphArguments(args, errOut, kind == "span")
+	graph := parseGraphArguments(args, errOut, kind)
 	defer graph.Free()
 	if !graph.OK {
 		return 2
@@ -290,15 +222,15 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	if len(targets) == 0 {
 		return reportNoDefault(session.Program, out, errOut, graph.Build.JSON)
 	}
-	if len(targets) != 1 {
+	if kind != "plan" && len(targets) != 1 {
 		cliError(errOut, "OPT_VALUE_INVALID", kind+" requires exactly one target")
 		return 2
 	}
 	var graphDiagnostic diagnostic.Diagnostic
 	var buffer = bytes.NewBuffer(mem.System, nil)
 	defer buffer.Free()
-	if kind == "inputs" || kind == "outputs" {
-		graphDiagnostic = session.Program.WriteGraph(&buffer, targets[0], graph.Depth, kind)
+	if kind != "span" {
+		graphDiagnostic = session.Program.WriteInspection(&buffer, targets, graph.Depth, kind)
 	} else {
 		graphDiagnostic = session.Program.WriteSpan(&buffer, targets[0], graph.Depth, graph.Expand)
 	}
@@ -312,7 +244,9 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 		io.WriteString(out, buffer.String())
 	} else {
 		var heading = bytes.NewBuffer(mem.System, nil)
-		fmt.Fprintf(&heading, "%s %s · depth %d", kind, targets[0], graph.Depth)
+		fmt.Fprintf(&heading, "%s", kind)
+		for i := range targets { io.WriteString(&heading, " "+targets[i]) }
+		fmt.Fprintf(&heading, " · depth %d", graph.Depth)
 		cli.WriteReport(out, heading.String(), buffer.String(), stdoutColor)
 		heading.Free()
 	}
@@ -337,11 +271,7 @@ func writeArtifact(out io.Writer, target string, data []byte) {
 	}
 }
 
-func parseGraphArguments(args []string, errOut io.Writer, allowExpand bool) graphArguments {
-	command := "inputs"
-	if allowExpand {
-		command = "span"
-	}
+func parseGraphArguments(args []string, errOut io.Writer, command string) graphArguments {
 	inv := cli.Parse(command, args)
 	applyInvocationPresentation(&inv)
 	if !inv.OK {

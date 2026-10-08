@@ -15,20 +15,20 @@ cli_build
 
 fixture_copy plan plan
 
-test-step "plan emits one JSON object per target and runs nothing"
+test-step "plan emits a schema-2 graph and runs nothing"
 (
 	cd plan
 	cli_run -- do plan --json ./artifact.txt
 	cli_expect_status 0
 	cli_expect_jsonl "$CLI_OUT"
-	cli_expect_json_query "$CLI_OUT" '.schema' '1'
+	cli_expect_json_query "$CLI_OUT" '.schema' '2'
 	cli_expect_json_query "$CLI_OUT" '.type' 'plan'
-	cli_expect_json_query "$CLI_OUT" '.target' './artifact.txt'
-	cli_expect_json_query "$CLI_OUT" '.inputs | join(",")' './input.txt'
-	cli_expect_json_query "$CLI_OUT" '.outputs | join(",")' './artifact.txt'
-	cli_expect_json_query "$CLI_OUT" '.captures | length' '0'
-	cli_expect_json_query "$CLI_OUT" '.freshness' 'unknown'
-	cli_expect_json_query "$CLI_OUT" '.rule.start | type' 'number'
+	cli_expect_json_query "$CLI_OUT" '.targets[0]' './artifact.txt'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("input")) | select(.roles | index("configuration") | not) | .display] | join(",")' './input.txt'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | join(",")' './artifact.txt'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].captures | length' '0'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].freshness' 'unknown'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].rule.start | type' 'number'
 	cli_expect_stderr_empty
 	cli_expect_no_file ./runs.log
 )
@@ -38,10 +38,10 @@ test-step "plan renders capture bindings for template targets"
 	cd plan
 	cli_run -- do plan --json ./capture-one.o
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.captures[0].name' 'name'
-	cli_expect_json_query "$CLI_OUT" '.captures[0].value' 'one'
-	cli_expect_json_query "$CLI_OUT" '.inputs | join(",")' './src/one.c'
-	cli_expect_json_query "$CLI_OUT" '.outputs | join(",")' './capture-one.o'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].captures[0].name' 'name'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].captures[0].value' 'one'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("input")) | select(.roles | index("configuration") | not) | .display] | join(",")' './src/one.c'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | join(",")' './capture-one.o'
 )
 
 test-step "plan describes a task and its dependency"
@@ -49,8 +49,8 @@ test-step "plan describes a task and its dependency"
 	cd plan
 	cli_run -- do plan --json default
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.outputs | join(",")' 'default'
-	cli_expect_json_query "$CLI_OUT" '.inputs | join(",")' './artifact.txt'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].outputs | length' '0'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | join(",")' './artifact.txt'
 )
 
 test-step "plan reports unknown freshness when the body may discover dependencies"
@@ -58,8 +58,8 @@ test-step "plan reports unknown freshness when the body may discover dependencie
 	cd plan
 	cli_run -- do plan --json ./dynamic.out
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.freshness' 'unknown'
-	cli_expect_json_query "$CLI_OUT" '.inputs | length' '0'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].freshness' 'unknown'
+	cli_expect_json_query "$CLI_OUT" '.deferred[0].reason' 'runtime-discovery'
 )
 
 test-step "plan does not infer body-less rule freshness from output timestamps"
@@ -67,19 +67,19 @@ test-step "plan does not infer body-less rule freshness from output timestamps"
 	cd plan
 	cli_run -- do plan --json ./static.out
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.freshness' 'unknown'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].freshness' 'unknown'
 	cli_expect_no_file ./static.out
 
 	printf 'result' >./static.out
 	set_mtime ./static.out 2000000000
 	cli_run -- do plan --json ./static.out
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.freshness' 'unknown'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].freshness' 'unknown'
 
 	set_mtime ./static.out 1000000000
 	cli_run -- do plan --json ./static.out
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.freshness' 'unknown'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].freshness' 'unknown'
 )
 
 test-step "plan accepts multiple targets"
@@ -88,8 +88,8 @@ test-step "plan accepts multiple targets"
 	cli_run -- do plan --json ./artifact.txt ./capture-one.o
 	cli_expect_status 0
 	cli_expect_jsonl "$CLI_OUT"
-	if [ "$(jq -s -r '[.[].target] | join(",")' "$CLI_OUT")" = "./artifact.txt,./capture-one.o" ]; then
-		test-ok "two plan objects in target order"
+	if [ "$(jq -s -r 'length == 1 and (.[0].targets | join(",") == "./artifact.txt,./capture-one.o")' "$CLI_OUT")" = "true" ]; then
+		test-ok "one shared graph in target order"
 	else
 		test-fail "plan targets were not emitted in order"
 	fi
@@ -100,9 +100,9 @@ test-step "plan selects the default target when none is given"
 	cd plan
 	cli_run -- do plan --json
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '.target' 'default'
-	cli_expect_json_query "$CLI_OUT" '.outputs | join(",")' 'default'
-	cli_expect_json_query "$CLI_OUT" '.inputs | join(",")' './artifact.txt'
+	cli_expect_json_query "$CLI_OUT" '.targets[0]' 'default'
+	cli_expect_json_query "$CLI_OUT" '.producers[0].outputs | length' '0'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | join(",")' './artifact.txt'
 	cli_expect_stderr_empty
 )
 

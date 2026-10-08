@@ -14,19 +14,17 @@ cli_build
 
 fixture_copy project graph
 
-test-step "inputs and outputs return stable JSON arrays of direct edges"
+test-step "inputs and outputs return recursive resource inventories"
 (
 	cd graph
 	cli_run -- do inputs --json ./build/app
 	cli_expect_status 0
-	cli_expect_stdout '["./build/main.o","./build/util.o"]
-'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("input")) | select(.roles | index("configuration") | not) | .display] | join(",")' './build/main.o,./build/util.o,./src/main.c,./src/util.c'
 	cli_expect_stderr_empty
 
 	cli_run -- do outputs --json ./build/app
 	cli_expect_status 0
-	cli_expect_stdout '["./build/app"]
-'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | join(",")' './build/app,./build/main.o,./build/util.o'
 )
 
 test-step "depth controls edge traversal"
@@ -34,23 +32,20 @@ test-step "depth controls edge traversal"
 	cd graph
 	cli_run -- do inputs --json --depth 0 ./build/app
 	cli_expect_status 0
-	cli_expect_stdout '[]
-'
+	cli_expect_json_query "$CLI_OUT" '.items | length' '0'
 
 	cli_run -- do inputs --json --depth 1 ./build/app
 	cli_expect_status 0
-	cli_expect_stdout '["./build/main.o","./build/util.o"]
-'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("input")) | select(.roles | index("configuration") | not) | .display] | join(",")' './build/main.o,./build/util.o'
+	cli_expect_json_query "$CLI_OUT" '.truncated' 'true'
 
 	cli_run -- do inputs --json --depth -1 ./build/app
 	cli_expect_status 0
-	cli_expect_stdout '["./build/main.o","./build/util.o","./src/main.c","./src/util.c"]
-'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("input")) | select(.roles | index("configuration") | not) | .display] | join(",")' './build/main.o,./build/util.o,./src/main.c,./src/util.c'
 
 	cli_run -- do outputs --json --depth 2 ./build/app
 	cli_expect_status 0
-	cli_expect_stdout '["./build/app","./build/main.o","./build/util.o"]
-'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | join(",")' './build/app,./build/main.o,./build/util.o'
 )
 
 test-step "span separates static and dynamic resources"
@@ -126,8 +121,8 @@ test-step "graph commands select the default target when none is given"
 	cd graph
 	cli_run -- do inputs --json
 	cli_expect_status 0
-	cli_expect_stdout '["./build/app"]
-'
+	cli_expect_json_query "$CLI_OUT" '.targets[0]' 'default'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("input")) | select(.roles | index("configuration") | not) | .display] | join(",")' './build/app,./build/main.o,./build/util.o,./src/main.c,./src/util.c'
 	cli_run -- do span --json
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '.static.inputs | join(",")' './build/app'

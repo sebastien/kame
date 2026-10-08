@@ -45,3 +45,5 @@ host-specific boundaries remain explicit.
 | [032 Remote execution](032-remote-execution.md) | Executor selection, artifacts, publication and cancellation |
 | [033 Plugins](033-plugins.md) | Registration, value protocol, adapters and lifetime |
 | [035 Native Windows CLI](035-native-windows-cli.md) | Native PE behavior and Windows-host conformance |
+| [036 CLI presentation](036-cli_ansi.md) | ANSI, text and JSON presentation, progress and diagnostics |
+| [037 Build inspection](037-build-inspection.md) | Recursive resource inventories, producer provenance, dependency stages and completeness |

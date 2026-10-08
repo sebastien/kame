@@ -37,6 +37,10 @@ test-presentation: build/kame.debug dist-wasm
 test-reuse-reasons: build/kame.debug dist-wasm
 	tests/T036-02-cli-reuse-reasons.sh
 
+.PHONY: test-inspection
+test-inspection: build/kame.debug dist-wasm
+	tests/T037-01-cli-build-inspection.sh
+
 wasm-portable:
 	tools/wasm/check-portable.sh
 

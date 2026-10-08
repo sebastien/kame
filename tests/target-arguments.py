@@ -36,17 +36,17 @@ with tempfile.TemporaryDirectory(prefix='kame-target-arguments-') as directory:
     assert missing_required.returncode == 1 and 'TGT_ARGUMENT' in missing_required.stderr, missing_required.stderr
     required_plan = run('do', 'plan', '--json', 'required', 'environment=production')
     assert required_plan.returncode == 0, required_plan.stderr
-    assert json.loads(required_plan.stdout)['arguments'] == {'environment': 'production'}
+    assert json.loads(required_plan.stdout)['producers'][0]['arguments'] == {'environment': 'production'}
 
     planned = run('do', 'plan', '--json', 'deploy', 'region=east', 'zone=eu')
     assert planned.returncode == 0, planned.stderr
     plan = json.loads(planned.stdout)
-    assert plan['arguments'] == {'region': 'east', 'zone': 'eu'}, plan
-    assert plan['inputs'] == ['prepare region=east zone=eu'], plan
+    assert plan['producers'][0]['arguments'] == {'region': 'east', 'zone': 'eu'}, plan
+    assert any(resource['display'] == 'prepare region=east zone=eu' for resource in plan['resources']), plan
 
     default_plan = run('do', 'plan', '--json', 'deploy')
     assert default_plan.returncode == 0, default_plan.stderr
-    assert json.loads(default_plan.stdout)['arguments'] == {'region': 'west', 'zone': 'global'}
+    assert json.loads(default_plan.stdout)['producers'][0]['arguments'] == {'region': 'west', 'zone': 'global'}
     assert not (project / 'dependency-log').exists(), 'planning ran a dependency recipe'
     dry_run = run('--dry-run', 'deploy', 'region=north', 'zone=ap')
     assert dry_run.returncode == 0, dry_run.stderr

@@ -22,6 +22,13 @@ enum kame_wasm_status {
   KAME_WASM_HOST_NEEDED = 6
 };
 
+enum kame_wasm_graph_kind {
+  KAME_WASM_GRAPH_INPUTS = 0,
+  KAME_WASM_GRAPH_OUTPUTS = 1,
+  KAME_WASM_GRAPH_SPAN = 2,
+  KAME_WASM_GRAPH_PLAN_ROOTS = 3
+};
+
 /* Normalize a JSON string array against prepared build declarations. */
 uint32_t kame_wasm_target_operands(uint64_t instance, uint32_t data, uint32_t data_len,
                                   uint32_t dst, uint32_t dst_len, uint32_t out_len);
@@ -193,14 +200,16 @@ uint32_t kame_wasm_watch_invalidate(uint64_t instance, uint32_t data, uint32_t l
 uint32_t kame_wasm_watch_state(uint64_t instance, uint32_t dst, uint32_t dst_len,
                                uint32_t out_len);
 uint32_t kame_wasm_watch_cancel(uint64_t instance);
-/* Compile the instance source for planning, then resolve one target plan into
- * caller-owned schema-1 JSON. expand resolves expression-form inputs. */
+/* Compile the instance source, then query one recursive schema-2 inspection
+ * plan. Read-only discovery is automatic; expand is retained but ignored.
+ * HOST_NEEDED requires servicing the request and retrying the query. */
 uint32_t kame_wasm_prepare(uint64_t instance);
 uint32_t kame_wasm_plan(uint64_t instance, uint32_t target, uint32_t target_len,
                         uint32_t expand, uint32_t dst, uint32_t dst_len,
                         uint32_t out_len);
-/* Walk a target graph. kind 0=inputs, 1=outputs, 2=span. depth -1 is unbounded;
- * expand (span only) resolves expression-form inputs. */
+/* kind 0=inputs, 1=outputs (schema 2), 2=span (schema 1), 3=plan (schema 2).
+ * For kind 3 target is a JSON string array of roots; otherwise it is one target.
+ * depth -1 is unbounded; expand applies only to span. */
 uint32_t kame_wasm_graph(uint64_t instance, uint32_t target, uint32_t target_len,
                          int32_t depth, uint32_t kind, uint32_t expand,
                          uint32_t dst, uint32_t dst_len, uint32_t out_len);

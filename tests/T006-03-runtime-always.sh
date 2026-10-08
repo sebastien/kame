@@ -66,7 +66,7 @@ PYTIME
  "${runner[@]}" do plan -C "$project" --json ./output >"$project/plan" 2>"$project/err"
   "${runner[@]}" do parse --json --lang script "$project/Makefile.kmk" >"$project/ast" 2>"$project/err"
  "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" >"$project/formatted" 2>"$project/err"
- if jq -e '.always == true and .outputs == ["./output"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.always? == true)' "$project/ast" >/dev/null && rg -q '^always ./one ./two :' "$project/formatted"; then test-ok "$backend plan, AST and formatter preserve always"; else test-fail "$backend always inspection"; fi
+ if jq -e '.producers[0].always == true and [.resources[] | select(.roles | index("artifact")) | .display] == ["./output"]' "$project/plan" >/dev/null && jq -e '.. | objects | select(.always? == true)' "$project/ast" >/dev/null && rg -q '^always ./one ./two :' "$project/formatted"; then test-ok "$backend plan, AST and formatter preserve always"; else test-fail "$backend always inspection"; fi
  test-step "$backend still verifies output publication"
  if "${runner[@]}" --json -C "$project" ./missing >"$project/out" 2>"$project/err"; then test-fail "$backend accepted missing output"; elif rg -q OUTPUT_MISSING "$project/out"; then test-ok "$backend missing output is diagnosed"; else test-fail "$backend missing-output diagnostic"; fi
  test-step "$backend preserves the ordinary target named always"

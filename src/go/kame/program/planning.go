@@ -72,6 +72,7 @@ func (p *Program) Plan(target string) PlanResult {
 			}
 			for j := before; j < len(plan.ResourceInputs); j++ {
 				plan.ResourceInputs[j].OrderOnly = input.OrderOnly
+				plan.ResourceInputs[j].Computed = true
 			}
 			for j := before; j < len(plan.Inputs); j++ {
 				plan.DynamicInputs = slices.Append(p.Alloc, plan.DynamicInputs, cloneText(p.Alloc, plan.Inputs[j]))
@@ -109,19 +110,18 @@ func (p *Program) ExpandPlan(target string) PlanResult {
 // expandPlan may yield to an embedding host while retaining inspection interest.
 // Retrying the query resumes the same node; no recipe producer is instantiated.
 func (p *Program) expandPlan(target string, yield bool) PlanResult {
+	return p.expandReadOnlyPlan(target, yield, false)
+}
+
+func (p *Program) expandReadOnlyPlan(target string, yield bool, definitions bool) PlanResult {
 	result := p.Plan(target)
-	if result.Diagnostic.Code != "" || result.Plan.Rule == nil || !hasExpressionInput(result.Plan.Rule) {
+	if result.Diagnostic.Code != "" || (result.Plan.Rule == nil && !definitions) || (result.Plan.Rule != nil && !hasExpressionInput(result.Plan.Rule)) {
 		return result
 	}
-	// Definitions reached while expanding an input must resolve filesystem
-	// resources as external values, never by instantiating rule producers.
-	previousObserver, previousState := p.Eval.DefinitionDependencyObserver, p.Eval.DefinitionDependencyState
-	p.Eval.SetDefinitionDependencyObserver(observeInspectionDependency, p)
-	defer p.Eval.SetDefinitionDependencyObserver(previousObserver, previousState)
 	index := len(p.Instances)
 	var node *core.Node
 	for i := range p.Instances {
-		if p.Instances[i].Inspection && p.Instances[i].Plan.Target == target {
+		if p.Instances[i].Inspection && p.Instances[i].InspectionStatus == nil && sameInspectionPlan(p.Instances[i].Plan, result.Plan) {
 			index, node = i, p.Instances[i].Node
 			break
 		}
@@ -129,7 +129,7 @@ func (p *Program) expandPlan(target string, yield bool) PlanResult {
 	if node == nil {
 		state := mem.Alloc[instanceState](p.Alloc)
 		state.Program, state.Index = p, index
-		keyName := "\x00span:" + target
+		keyName := "\x00inspection-input:" + target
 		key := core.NewResourceKey(p.Alloc, core.ResourceTarget, keyName)
 		node = p.Engine.AddOwned(key, expandPlanProduce, state, freeInstanceState)
 		key.Free(p.Alloc)
@@ -140,7 +140,7 @@ func (p *Program) expandPlan(target string, yield bool) PlanResult {
 		}
 		p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: result.Plan.Rule, Captures: cloneCaptures(p.Alloc, result.Plan.Captures), Node: node, Plan: clonePlan(p.Alloc, result.Plan), Inspection: true})
 	}
-	if p.Instances[index].inspectionRoot == nil {
+	if p.Instances[index].inspectionRoot == nil && node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
 		p.Instances[index].inspectionRoot = p.Engine.RequestRoot(node)
 	}
 	for node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
@@ -150,14 +150,22 @@ func (p *Program) expandPlan(target string, yield bool) PlanResult {
 			return PlanResult{Waiting: true}
 		}
 	}
-	p.Engine.Release(p.Instances[index].inspectionRoot)
-	p.Instances[index].inspectionRoot = nil
+	if p.Instances[index].inspectionRoot != nil {
+		p.Engine.Release(p.Instances[index].inspectionRoot)
+		p.Instances[index].inspectionRoot = nil
+	}
 	if node.State != core.NodeComplete {
 		result.Plan.Free(p.Alloc)
 		return PlanResult{Diagnostic: node.Diagnostic.Clone(p.Alloc)}
 	}
 	freeStrings(p.Alloc, result.Plan.DynamicInputs)
 	result.Plan.DynamicInputs = cloneStrings(p.Alloc, p.Instances[index].Plan.DynamicInputs)
+	if result.Plan.Rule != nil {
+		freeStrings(p.Alloc, result.Plan.Inputs)
+		freePlanInputs(p.Alloc, result.Plan.ResourceInputs, true)
+		result.Plan.Inputs = cloneStrings(p.Alloc, p.Instances[index].Plan.ResolvedInputs)
+		result.Plan.ResourceInputs = clonePlanInputs(p.Alloc, p.Instances[index].Plan.ResolvedResourceInputs)
+	}
 	result.Plan.Freshness = Unknown
 	freeTools(p.Alloc, result.Plan.Tools)
 	result.Plan.Tools = p.plannedTools()
@@ -173,6 +181,12 @@ func hasExpressionInput(r *rule.Rule) bool {
 	return false
 }
 
+func sameInspectionPlan(left, right Plan) bool {
+	if left.Rule != right.Rule { return false }
+	if left.Rule == nil { return left.Key.Name == right.Key.Name }
+	return sameCaptures(left.Captures, right.Captures) && sameArguments(left.Arguments, right.Arguments)
+}
+
 func expandPlanProduce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	_ = nodeID
 	state := c.Context().(*instanceState)
@@ -180,6 +194,14 @@ func expandPlanProduce(c *core.EngineContext, nodeID int64) core.ProducerResult 
 	if state.Index < 0 || state.Index >= len(p.Instances) {
 		c.Fail(failure(p.Alloc, "HOST_FAIL", "input resolver instance disappeared"))
 		return core.ProducerFailed
+	}
+	if p.Instances[state.Index].Rule == nil {
+		context := eval.Context{Phase: eval.ResolvingPhase, Cwd: p.Options.Directory, Environment: p.Options.Environment, HasEnvironment: p.Options.Environment != nil}
+		p.bindDefinitionEnvironment(&context)
+		definition := p.Eval.DefinitionWith(p.Instances[state.Index].Plan.Target, &context)
+		if definition == nil { c.Fail(failure(p.Alloc, "TGT_NO_RULE", "no definition")); return core.ProducerFailed }
+		if !c.Dependency(definition.Key) { return core.ProducerWaiting }
+		return core.ProducerCompleted
 	}
 	resolved := p.resolveInputs(c, &p.Instances[state.Index])
 	if resolved.Waiting {
@@ -196,6 +218,20 @@ func expandPlanProduce(c *core.EngineContext, nodeID int64) core.ProducerResult 
 	freeStrings(p.Alloc, resolved.DynamicInputs)
 	freePlanInputs(p.Alloc, resolved.ResourceInputs, resolved.Owned)
 	return core.ProducerCompleted
+}
+
+func restoreInspectionContextObserver(p *Program, observer func(any, core.ResourceKey, *eval.Context)) {
+	p.Eval.DefinitionDependencyContextObserver = observer
+}
+
+func (p *Program) tickInspection(wait int) {
+	previousObserver, previousState := p.Eval.DefinitionDependencyObserver, p.Eval.DefinitionDependencyState
+	previousContextObserver := p.Eval.DefinitionDependencyContextObserver
+	p.Eval.SetDefinitionDependencyObserver(observeInspectionDependency, p)
+	p.Eval.DefinitionDependencyContextObserver = nil
+	defer p.Eval.SetDefinitionDependencyObserver(previousObserver, previousState)
+	defer restoreInspectionContextObserver(p, previousContextObserver)
+	p.tick(wait)
 }
 
 func clonePlan(a mem.Allocator, plan Plan) Plan {
@@ -252,7 +288,10 @@ func resolvePlanDefinition(value any, key core.ResourceKey, context *eval.Contex
 	state := value.(*planResolverState)
 	for i := range state.Resolving {
 		if state.Resolving[i] == key.Name {
-			return eval.Result{Diagnostic: failure(state.Program.Alloc, "DEP_CYCLE", "definition cycle")}
+			d := failure(state.Program.Alloc, "DEP_CYCLE", "definition cycle")
+			for j := i; j < len(state.Resolving); j++ { d.TargetStack = slices.Append(state.Program.Alloc, d.TargetStack, cloneText(state.Program.Alloc, state.Resolving[j])) }
+			d.TargetStack = slices.Append(state.Program.Alloc, d.TargetStack, cloneText(state.Program.Alloc, key.Name))
+			return eval.Result{Diagnostic: d}
 		}
 	}
 	state.Resolving = slices.Append(state.Program.Alloc, state.Resolving, key.Name)

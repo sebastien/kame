@@ -300,7 +300,7 @@ func TestPresentationDefaultAndStructuredResults(t *testing.T) {
 			t.Fatalf("%s: status=%d err=%q", mode, status, errOut.String())
 		}
 		if mode == "json" {
-			if out.String() != "[]\n" {
+			if !strings.Contains(out.String(), `"schema":2`) || !strings.Contains(out.String(), `"items":[]`) {
 				t.Fatal(out.String())
 			}
 		} else if !strings.Contains(out.String(), "no inputs") || strings.Contains(out.String(), "\x1b[") {

@@ -320,6 +320,18 @@ func (p *Program) instanceByTarget(name string) int {
 }
 
 func (p *Program) Tick(wait int) {
+	// Read-only authority survives embedding-host yields, including work resumed
+	// by a generic step call rather than by the inspection query itself.
+	for i := range p.Instances {
+		if p.Instances[i].Inspection && p.Instances[i].inspectionRoot != nil {
+			p.tickInspection(wait)
+			return
+		}
+	}
+	p.tick(wait)
+}
+
+func (p *Program) tick(wait int) {
 	p.tickServiceReadiness()
 	// Host polling must not sleep between runnable dependency evaluations.
 	if p.Engine.HasWork() {

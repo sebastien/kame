@@ -26,14 +26,14 @@ for backend in native wasm; do
 	test-step "$backend mixes expression values, literal paths and interpolated paths"
 	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
 	"${runner[@]}" do plan --json -C "$project" -f Makefile.kmk ./out >"$project/$backend.plan" 2>"$project/error"
-	if jq -e '.inputs == ["./literal","./src/extra.h"]' "$project/$backend.plan" >/dev/null; then test-ok "$backend plan renders pure path token"; else test-fail "$backend plan inputs"; fi
+	if jq -e '[.resources[] | select(.key.kind == "file" and (.roles | index("configuration") | not) and (.roles | index("input"))) | .display] == ["./src/a.go","./literal","./src/b.c","./src/extra.h"]' "$project/$backend.plan" >/dev/null; then test-ok "$backend plan resolves every input expression"; else test-fail "$backend plan inputs"; fi
 	"${runner[@]}" do span --json --expand -C "$project" -f Makefile.kmk ./out >"$project/$backend.inputs" 2>"$project/error"
 	if grep -q './src/a.go' "$project/$backend.inputs" && grep -q './src/b.c' "$project/$backend.inputs" && grep -q './src/extra.h' "$project/$backend.inputs"; then test-ok "$backend expands each header expression"; else test-fail "$backend missing expression input"; fi
 	rm -f "$project/out"
 	"${runner[@]}" -C "$project" ./out >"$project/value" 2>"$project/error"
 	if [ "$(cat "$project/out")" = aliteralbc ]; then test-ok "$backend executes flattened inputs in order"; else test-fail "$backend input order"; fi
 	"${runner[@]}" do plan --json -C "$project" -f Makefile.kmk quoted >"$project/quoted.plan" 2>"$project/error"
-	if jq -e '.inputs == ["./src dir/space.txt","./src/a.go"]' "$project/quoted.plan" >/dev/null; then test-ok "$backend quoted input tokens render without quotes"; else test-fail "$backend quoted paths"; fi
+	if jq -e '[.resources[] | select(.key.kind == "file" and (.roles | index("configuration") | not) and (.roles | index("input"))) | .display] == ["./src dir/space.txt","./src/a.go"]' "$project/quoted.plan" >/dev/null; then test-ok "$backend quoted input tokens render without quotes"; else test-fail "$backend quoted paths"; fi
 done
 if cmp -s "$project/native.plan" "$project/wasm.plan" && cmp -s "$project/native.inputs" "$project/wasm.inputs"; then test-ok "native/WASM composed header inspection bytes match"; else test-fail "composed header parity"; fi
 test-end

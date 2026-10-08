@@ -176,11 +176,12 @@ func parseCommand(command string, args []string) Invocation {
 		parseGraph(&inv, args, true)
 		return inv
 	}
-	if command == "inputs" || command == "outputs" {
+	if command == "inputs" || command == "outputs" || command == "plan" {
+		inv.Depth = -1
 		parseGraph(&inv, args, false)
 		return inv
 	}
-	// plan, cat, tools accept the common build options only.
+	// cat and tools accept the common build options only.
 	parseBuild(&inv, args)
 	return inv
 }

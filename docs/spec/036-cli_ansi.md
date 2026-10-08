@@ -419,33 +419,46 @@ padding or wrapping. Styling changes only attributes, not wording or ordering.
 ### Inspection
 
 ```text
-plan ./build/main.o
+plan ./build/main.o · depth unlimited · declared and read-only resolved
 
   rule        ./build/{name}.o : ./src/{name}.c
   source      Makefile.kmk:8:1
   captures    name = "main"
-  inputs      ./src/main.c
-  outputs     ./build/main.o
+  input       ./src/main.c       source file · persistent
+  config      ./Makefile.kmk     configuration input · persistent
+  output      ./build/main.o     artifact · product · persistent
   tools       cc -> /usr/bin/cc
-  freshness   stale
+  freshness   unknown
+  stages      partial · runtime discovery not evaluated
+  stage 1     ./build/main.o     execution/reuse not established
+  discovery boundaries
+    ./build/main.o · runtime-discovery · opaque-process-io
 ```
 
-Human plans also expose sequence boundaries, order-only inputs, arguments, and
-dynamic dependencies when applicable. Distinguish `unknown` freshness from
-`stale`; a plan does not claim execution.
+Human plans expose the full reachable build by default, with producer provenance,
+resource kind/role/lifetime, sequence groups, order-only inputs, arguments, and
+read-only computed dependencies. Dependency stages identify parallel eligibility
+and local barriers, not an execution timeline or new global barriers. Distinguish
+`unknown` freshness from `stale`, and label truncated/deferred stage views as
+partial. The normative inspection contract is `037-build-inspection.md`.
 
 ```text
-inputs ./build/app · depth 1
-  ./build/main.o
-  ./build/util.o
+inputs ./build/app · depth 1 · declared and read-only resolved
+  file inputs
+    ./build/main.o [1]
+    ./build/util.o [1]
+  configuration
+    ./Makefile.kmk [1]
+  truncated          deeper producer inputs omitted
 
 tools
   cc       /usr/bin/cc    available
   strip    —             unavailable
 ```
 
-Empty reports say `no inputs`, `no referenced tools`, or `no managed records`,
-not unexplained blank output. Listing an unavailable tool remains successful;
+Known empty reports say `no inputs`, `no referenced tools`, or `no managed records`,
+not unexplained blank output. Deferred input discovery is a labeled partial set,
+never `no inputs`. Listing an unavailable tool remains successful;
 `tools check` fails only when the selected work requires unavailable tools.
 
 ## Standard value presentation
@@ -565,8 +578,10 @@ Pure data does not require replacing every existing JSON shape. Preserve existin
 machine payloads and explicitly document framing:
 
 - Build/run and streaming payload commands use schema-versioned JSON Lines.
-- Plan retains schema-1 plan records, one per selected target.
-- Graph, tool-list, cache-list, and AST commands retain their established single
+- `plan`, `inputs`, and `outputs` use one schema-2 build-inspection document per
+  invocation, including shared roots, typed resources, provenance, stages, and
+  completeness, as defined by `037-build-inspection.md`.
+- `span`, tool-list, cache-list, and AST commands retain their established single
   JSON document/array payloads.
 - Static-document commands assemble a complete result before publication. On
   failure they emit one diagnostic object, or one array of diagnostic objects
@@ -643,8 +658,8 @@ command's JSON framing. Direct invocation and `do run` remain equivalent. Remove
 | Direct execution / `do run` | Same policy; exact value/effect output | Values, streams, diagnostics, session completion |
 | Build dry-run | Explicit dry-run identity and rendered planned work; no claim of execution | Plans/rendered work explicitly marked dry-run |
 | Build watch | Per-cycle dashboard, persistent history, idle state | Cycle boundaries, changes, results |
-| `do plan` | Rule, source, captures, inputs/outputs, tools, freshness, sequencing | Existing plan records |
-| `do inputs` / `outputs` | Direction, requested depth, edge list, explicit empty state | Existing graph document |
+| `do plan` | Recursive producer/resource graph, rule provenance, kind/role/lifetime, dependency stages and barriers, freshness, completeness | Schema-2 inspection document |
+| `do inputs` / `outputs` | Recursive file inventory, consumers/producers, separate logical resources, depth and completeness | Schema-2 inspection document |
 | `do span` | Separate static and evaluation-dependent resources; expansion state | Existing span document |
 | `do tools` | Tool/path/status table; unavailable tools do not fail listing | Existing tool array |
 | `do tools check` | Required-tool results and established success/failure | Check results and diagnostics |
@@ -670,7 +685,10 @@ workers when processing is sequential.
 Changing inspection commands from implicit JSON to human output is an intentional
 compatibility change. Scripts request `--output json` or `--json` explicitly.
 Exact-output commands keep their existing human byte contracts. Existing JSON
-payload shapes and exit-status meanings remain stable.
+payload shapes and exit-status meanings remain stable except for the explicitly
+versioned build-inspection replacement in `037-build-inspection.md`. Its static
+reports list every discovered file; terminal size does not silently hide inventory
+entries, and deferred discovery is not rendered as an empty set.
 
 ## Terminal resilience and rendering
 
@@ -730,9 +748,10 @@ payload shapes and exit-status meanings remain stable.
   service cleanup retain correct ownership and disjoint terminal counts.
 - Watch resets cycle counts, retains failed outcomes, reports queued changes and
   source-repair states, and produces no repeated idle output.
-- JSON framing and each new record have golden fixtures. Existing payload shapes
-  remain stable. Usage failures stay machine-readable with empty stderr. Binary
-  payloads decode to their original bytes.
+- JSON framing and each new record have golden fixtures. Build-inspection
+  replacements carry schema 2; unrelated payload shapes remain stable. Usage
+  failures stay machine-readable with empty stderr. Binary payloads decode to
+  their original bytes.
 - Live human/JSON output is observable before process completion and remains
   bounded under blocked sinks, cancellation, and cached replay.
 - Layout goldens use fixed terminal sizes and an injected clock. Tests include

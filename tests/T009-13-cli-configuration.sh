@@ -69,7 +69,7 @@ for backend in native wasm; do
   "${runner[@]}" do plan --json -C "$project" --define SDK=/opt/wasi-sdk default >"$project/plan" 2>"$project/error"
  if python3 - "$project/plan" <<'PY'
 import json,sys
-assert json.load(open(sys.argv[1]))['configuration']['SDK'] == '/opt/wasi-sdk'
+assert json.load(open(sys.argv[1]))['producers'][0]['configuration']['SDK'] == '/opt/wasi-sdk'
 PY
  then test-ok "$backend effective plan value"; else test-fail "$backend plan configuration"; fi
  "${runner[@]}" do cat -C "$project" --define SDK= SDK >"$project/value" 2>"$project/error"

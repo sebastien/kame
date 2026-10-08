@@ -40,6 +40,15 @@ func TestReportPreservesNestedEnvelopeNames(t *testing.T) {
 	}
 }
 
+func TestInspectionBoundariesGroupDistinctAttributesByPath(t *testing.T) {
+	document := `{"schema":2,"type":"outputs","depth":1,"resources":[{"id":1,"key":{"kind":"file"},"display":"./result","roles":["artifact"],"status":"missing"}],"producers":[{"id":1,"resource":1}],"dependencies":[],"deferred":[{"producer":1,"reason":"runtime-discovery"},{"resource":1,"producer":1,"reason":"opaque-process-io"},{"resource":1,"producer":1,"reason":"runtime-discovery"}]}`
+	var out strings.Builder
+	if !cli.WriteReport(&out, "outputs", document, false) || !strings.Contains(out.String(), "  discovery boundaries\n    ./result · runtime-discovery · opaque-process-io\n") {
+		t.Error("boundary attributes were not grouped and deduplicated by path")
+	}
+	out.Free()
+}
+
 func TestPresentationRespectsValuesAndLiteralTail(t *testing.T) {
 	inv := cli.Presentation([]string{"-c", "--json", "--define", "--output", "--indent", "--json", "-o", "text", "--", "--json"})
 	defer inv.Free()

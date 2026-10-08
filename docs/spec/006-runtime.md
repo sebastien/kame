@@ -82,6 +82,13 @@ flattens the definition value into concrete inputs. Nil contributes no input.
 Values other than strings, resource references, lists, or nil are invalid rule
 inputs.
 
+Build inspection composes the selected producer plans into the recursively
+reachable resource graph defined by `037-build-inspection.md`. It resolves
+authorized read-only computed prerequisites and follows their producers, retains
+typed resource and rule-instance identity, and reports unresolved runtime discovery
+without rendering recipes or materializing missing generated inputs. This graph
+is distinct from one producer's plan and from the live execution graph.
+
 ## Scheduling
 
 Scheduling recursively plans inputs that have producing rules and adds graph
@@ -94,6 +101,11 @@ The engine detects cycles and exposes ready nodes. Dependencies execute before
 dependents. Independent ready nodes may execute concurrently.
 
 Multiple requested roots share dependency nodes and in-flight work.
+
+Inspection stages summarize known dependency ordering and consumer-local sequence
+gates. They are not runtime phases, watch cycles, or new scheduler barriers;
+independent work starts when its own prerequisites permit, regardless of unrelated
+work in an earlier displayed stage. Partial graphs identify partial stage views.
 
 ## Rendering
 
@@ -241,7 +253,8 @@ are excluded from accepted content observations and input
 selectors such as `@<*`. An explicit expression read or a normal occurrence of
 the same dependency makes it a content dependency. Ordering alone does not
 satisfy the file-input requirement for freshness. Plans and graph inspection
-retain all prerequisites; plan JSON additionally reports `orderOnlyInputs`.
+retain all prerequisites; schema-2 inspection dependency records carry their
+`orderOnly` purpose as defined by `037-build-inspection.md`.
 Quoted pipe characters remain literal input text. Empty and repeated order-only
 sections are parse errors. Environment inheritance applies to both sections.
 

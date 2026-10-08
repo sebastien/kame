@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory() as temporary:
     run(['--define', 'unknown=value', 'chosen'], code='DEF_INVALID')
     # Inspection sees only the selected rule set and never runs its recipes.
     plan = run(['do', 'plan', '--json', 'chosen'])
-    assert json.loads(plan.stdout)['target'] == 'chosen'
+    assert json.loads(plan.stdout)['producers'][0]['target'] == 'chosen'
     run(['do', 'plan', 'debug-only'])
     run(['do', 'plan', 'release-only'], code='TGT_NO_RULE')
     ast = json.loads(run(['do', 'parse', '--json', '--lang', 'script', 'Makefile.kmk']).stdout)

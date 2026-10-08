@@ -230,8 +230,8 @@ func resolveRenderTool(value any, name string) (string, bool) {
 	return state.Program.toolPath(name)
 }
 
-// observeInspectionDependency provides only external resources to span
-// expansion. In particular it never calls instanceFor: discovering a file
+// observeInspectionDependency provides only external resources to read-only
+// inspection. In particular it never calls instanceFor: discovering a file
 // rule here would turn a read-only inspection into recipe execution.
 func observeInspectionDependency(value any, key core.ResourceKey) {
 	p := value.(*Program)

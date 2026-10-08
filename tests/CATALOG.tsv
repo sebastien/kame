@@ -57,6 +57,7 @@ tests/T010-08-wasm-glob.sh	010	wasm	Wildcard host requests match native output b
 tests/T010-09-wasm-parse.sh	010	wasm	dist/kame.js do parse matches native AST JSON for all languages, stdin, and errors
 tests/T010-10-wasm-fmt.sh	010	wasm	dist/kame.js do fmt matches native canonical output, check, in-place, stdin, and usage errors
 tests/T010-11-wasm-plan.sh	010	wasm	dist/kame.js do plan JSON matches native for captures, dynamic inputs, and missing targets
+tests/T037-01-cli-build-inspection.sh	037	cli	Recursive resource inventories, shared producers, stages, deferred discovery and native/WASM parity
 tests/T010-12-wasm-graph.sh	010	wasm	dist/kame.js do inputs/outputs/span match native for depths, expansion, and errors
 tests/T010-13-wasm-tools.sh	010	wasm	Tool listing/check parity, host-dependent plans, multiple read/glob requests, repeated queries, capability/phase failures, and no recipe execution
 tests/T010-14-wasm-json.sh	010	wasm	dist/kame.js JSON Lines, bounded native/WASM process display and runtime, and failure diagnostics

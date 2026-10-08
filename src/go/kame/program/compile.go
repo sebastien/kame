@@ -324,6 +324,7 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.Options.RemoteExecutors)
 	for i := range p.Instances {
+		if p.Instances[i].InspectionStatus != nil { p.Instances[i].InspectionStatus.free(p.Alloc) }
 		p.Instances[i].Plan.Free(p.Alloc)
 		p.Instances[i].Service.Free(p.Alloc)
 		freeStrings(p.Alloc, p.Instances[i].Environment)

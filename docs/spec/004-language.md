@@ -475,8 +475,10 @@ next group. A rule using comma sequencing cannot also
 declare expression, quoted-string, or wildcard prerequisites. Each prerequisite
 remains a normal content or order-only dependency according to its section;
 the comma adds a scheduling barrier and does not change input identity.
-Plan JSON exposes comma locations as one-based `sequenceBoundaries` indexes
-into the `inputs` array.
+Schema-2 build inspection exposes each prerequisite's one-based sequence group
+and displays the consumer-local barriers and dependency stages defined by
+`037-build-inspection.md`. Sequencing is preserved independently of normal versus
+order-only purpose.
 
 ```text
 RULE = (PREFIXED-RULE | ALWAYS-RULE | UNPREFIXED-RULE) ENVIRONMENT?

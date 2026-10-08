@@ -143,7 +143,7 @@ func TestTargetTakingCommandsSelectDefault(t *testing.T) {
 	}{
 		{[]string{"do", "plan", "--json", "-c", "task default : ./dep\n\techo ignored\ntask dep :\n\techo ignored"}, `"target":"default"`},
 		{[]string{"do", "cat", "-c", `default = "value"`}, "value"},
-		{[]string{"do", "inputs", "--json", "-c", "task default : dep\n\techo ignored\ntask dep :\n\techo ignored"}, `["dep"]`},
+		{[]string{"do", "inputs", "--json", "-c", "task default : dep\n\techo ignored\ntask dep :\n\techo ignored"}, `"display":"dep"`},
 	}
 	for _, test := range tests {
 		var out, errOut bytes.Buffer
@@ -189,18 +189,18 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "inputs", "--json", "-c", "task build : input\n\techo ignored", "build"}, &input{}, &out, &errOut); status != 0 || out.String() != "[\"input\"]\n" {
+	if status := Run([]string{"do", "inputs", "--json", "-c", "task build : ./input\n\techo ignored", "build"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), `"display":"./input"`) {
 		t.Errorf("inputs status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
 	graphSource := "task root : middle\n\techo root\ntask middle : leaf\n\techo middle\ntask leaf :\n\techo leaf"
-	if status := Run([]string{"do", "inputs", "--json", "--depth", "2", "-c", graphSource, "root"}, &input{}, &out, &errOut); status != 0 || out.String() != "[\"middle\",\"leaf\"]\n" {
+	if status := Run([]string{"do", "inputs", "--json", "--depth", "2", "-c", graphSource, "root"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), `"items":[2,3]`) {
 		t.Errorf("recursive inputs status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "outputs", "--json", "--depth", "-1", "-c", graphSource, "root"}, &input{}, &out, &errOut); status != 0 || out.String() != "[\"root\",\"middle\",\"leaf\"]\n" {
+	if status := Run([]string{"do", "outputs", "--json", "--depth", "-1", "-c", graphSource, "root"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), `"items":[]`) {
 		t.Errorf("recursive outputs status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
