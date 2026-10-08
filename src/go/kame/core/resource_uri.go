@@ -52,7 +52,11 @@ type ResourceURIResult struct {
 // IsResourceURIName reports whether a stored resource identity uses a supported
 // URI scheme prefix. Resource values are validated before they are created.
 func IsResourceURIName(name string) bool {
-	return hasResourceURIPrefix(name, "file://") || hasResourceURIPrefix(name, "mem://")
+	return IsMemoryResourceURIName(name) || hasResourceURIPrefix(name, "file://")
+}
+
+func IsMemoryResourceURIName(name string) bool {
+	return hasResourceURIPrefix(name, "mem://")
 }
 
 func hasResourceURIPrefix(text string, prefix string) bool {

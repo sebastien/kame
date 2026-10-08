@@ -16,10 +16,6 @@ type hostPathResult struct {
 	Owned bool
 }
 
-func isMemoryURI(name string) bool {
-	return len(name) >= 6 && name[:6] == "mem://"
-}
-
 func (h *Host) hostPath(name string) hostPathResult {
 	if len(name) < 7 || name[:7] != "file://" {
 		return hostPathResult{Path: name}
@@ -60,7 +56,7 @@ func portableFileInfo(info os.FileInfo) host.FileInfo {
 }
 
 func (h *Host) Stat(name string) host.StatResult {
-	if isMemoryURI(name) {
+	if core.IsMemoryResourceURIName(name) {
 		return h.Memory.Stat(name)
 	}
 	path := h.hostPath(name)
@@ -78,7 +74,7 @@ func (h *Host) Stat(name string) host.StatResult {
 }
 
 func (h *Host) Lstat(name string) host.StatResult {
-	if isMemoryURI(name) {
+	if core.IsMemoryResourceURIName(name) {
 		return h.Memory.Stat(name)
 	}
 	path := h.hostPath(name)
@@ -95,7 +91,7 @@ func (h *Host) Lstat(name string) host.StatResult {
 }
 
 func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {
-	if isMemoryURI(name) {
+	if core.IsMemoryResourceURIName(name) {
 		return h.Memory.ReadFile(a, name)
 	}
 	path := h.hostPath(name)
@@ -104,7 +100,7 @@ func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 }
 
 func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
-	if isMemoryURI(name) {
+	if core.IsMemoryResourceURIName(name) {
 		return h.Memory.ReadDir(a, name)
 	}
 	path := h.hostPath(name)
@@ -127,7 +123,7 @@ func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
 // cannot share a staging file or follow a pre-created staging symlink. Durable
 // cache writes also sync before rename. Failures remove the temporary.
 func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error {
-	if isMemoryURI(name) {
+	if core.IsMemoryResourceURIName(name) {
 		return h.Memory.WriteFileAtomic(name, data, perm, durable)
 	}
 	path := h.hostPath(name)
@@ -169,7 +165,7 @@ func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bo
 }
 
 func (h *Host) Mkdir(name string, perm uint32) error {
-	if isMemoryURI(name) {
+	if core.IsMemoryResourceURIName(name) {
 		return h.Memory.Mkdir(name, perm)
 	}
 	path := h.hostPath(name)
@@ -178,7 +174,7 @@ func (h *Host) Mkdir(name string, perm uint32) error {
 }
 
 func (h *Host) Remove(name string) error {
-	if isMemoryURI(name) {
+	if core.IsMemoryResourceURIName(name) {
 		return h.Memory.Remove(name)
 	}
 	path := h.hostPath(name)

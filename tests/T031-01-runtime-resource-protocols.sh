@@ -15,13 +15,18 @@ file_root="file://$TMPDIR/"
 
 for host in native wasm; do
 	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
-	"${runner[@]}" do run --lang expr --allow-write=mem://workspace/ --allow-read=mem://workspace/ \
+	mkdir -p "$TMPDIR/$host-work"
+	if (cd "$TMPDIR/$host-work" && "${runner[@]}" do run --lang expr --allow-write=mem://workspace/ --allow-read=mem://workspace/ \
 		-c '(write (resource "mem://workspace/out.txt") "memory-uri")' \
-		-c '(read (resource "mem://workspace/out.txt"))' >"$TMPDIR/$host.memory.out" 2>"$TMPDIR/$host.memory.err"
-	if [ "$(cat "$TMPDIR/$host.memory.out")" = 'memory-uri' ]; then
-		test-ok "$host reads a memory URI after publishing it"
+		-c '(read (resource "mem://workspace/out.txt"))' >"$TMPDIR/$host.memory.out" 2>"$TMPDIR/$host.memory.err"); then
+		:
 	else
 		test-fail "$host memory URI round trip: $(cat "$TMPDIR/$host.memory.err") $(cat "$TMPDIR/$host.memory.out")"
+	fi
+	if [ "$(cat "$TMPDIR/$host.memory.out")" = 'memory-uri' ] && [ ! -e "$TMPDIR/$host-work/mem:" ]; then
+		test-ok "$host reads a memory URI after publishing it"
+	else
+		test-fail "$host memory URI must not create a local mem: path"
 	fi
 	"${runner[@]}" do run --lang expr --allow-write=mem://glob/ --allow-read=mem://glob/ \
 		-c '(write (resource "mem://glob/a.txt") "a")' \

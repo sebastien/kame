@@ -347,6 +347,9 @@ func freePlanInputs(a mem.Allocator, values []PlanInput, owned bool) {
 }
 
 func (p *Program) mkdirParent(name string) bool {
+	if core.IsMemoryResourceURIName(name) {
+		return true
+	}
 	parent := path.Dir(mem.System, name)
 	defer mem.FreeString(mem.System, parent)
 	if parent == "." || parent == "/" {
