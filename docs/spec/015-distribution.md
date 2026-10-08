@@ -145,7 +145,7 @@ no download. A `KAME_BIN` that is not executable is fatal.
 APE hosts are the `uname -s`/`uname -m` pairs Cosmopolitan supports: Linux,
 Darwin, FreeBSD, NetBSD, and the Windows POSIX layers (`MINGW*`,
 `MSYS*`, `CYGWIN*`), on `x86_64`/`amd64` and `aarch64`/`arm64`.
-`tools/platform/test-ape.sh` runs the APE through the POSIX shell adapter,
+`src/sh/test-ape.sh` runs the APE through the POSIX shell adapter,
 checks version output, executes a recipe with an explicit environment, and
 checks timeout cleanup. `.github/workflows/ape-platforms.yml` runs that test
 against one artifact on Linux, Darwin, Windows POSIX, FreeBSD and NetBSD.
@@ -279,6 +279,37 @@ installs the APE as `kame`; the Scoop manifest exposes the native Windows PE as
 The JS CLI source lives in the repository and is copied unchanged to
 `dist/kame.js`. Command execution keeps the absolute-path discipline of the
 existing build rules.
+
+Source-tree helper scripts live under `src/sh/`: build and provisioning helpers
+(`generate-version.sh`, `provision-cosmocc.sh`, `build-ape.sh`,
+`check-portable.sh`), release helpers (`platform_id.py`, `release_manifest.py`,
+`release_package_manifests.py`, `release.sh`) and harness helpers
+(`benchmark-cli.py`, `test-ape.sh`). The Go/WASM/C and Node tools stay under
+`tools/`.
+
+## Manual Publication
+
+Publishing is an explicit operator step; no workflow publishes a release.
+`src/sh/release.sh` wraps `dist-release` and the GitHub CLI:
+
+```sh
+KAME_RELEASE_PUBLIC_KEY=verification.pem \
+KAME_RELEASE_SIGNING_KEY=signing.pem \
+  src/sh/release.sh
+```
+
+It refuses to reuse an existing tag or release, stages and signs
+`dist/release/`, creates a draft release for the `VERSION` tag, uploads every
+asset, renames the launcher back to `bin/kame` if GitHub renamed it, verifies
+that every manifest asset is present, and only then publishes. `--repo` selects
+another repository and `--notes-file` supplies release notes in place of
+generated notes. The signing key material is supplied out of band and is never
+stored in the repository.
+
+`src/sh/build-ape.sh` builds `dist/kame.com` without GNU Make by wrapping the
+pinned Cosmocc provisioning and the release build flags. It is a bootstrap path
+for a checkout with no working `make`; the `Makefile`/`Makefile.kmk` rules remain
+the canonical build.
 
 ## Acceptance Tests
 

@@ -16,17 +16,17 @@ sha() {
 archive_hash=$(sha "$TMPDIR/cosmocc.zip")
 
 test-step "a verified archive installs atomically and reuses its pin"
-COSMOCC_URL="file://$TMPDIR/cosmocc.zip" COSMOCC_SHA256="$archive_hash" tools/provision-cosmocc.sh "$fixture/verified"
+COSMOCC_URL="file://$TMPDIR/cosmocc.zip" COSMOCC_SHA256="$archive_hash" src/sh/provision-cosmocc.sh "$fixture/verified"
 if [ -x "$fixture/verified/bin/cosmocc" ] && [ "$(cat "$fixture/verified/.archive-sha256")" = "$archive_hash" ]; then
 	test-ok "verified cosmocc archive installed with its digest marker"
 else
 	test-fail "verified archive was not installed"
 fi
-COSMOCC_URL="file://$TMPDIR/does-not-exist.zip" COSMOCC_SHA256="$archive_hash" tools/provision-cosmocc.sh "$fixture/verified"
+COSMOCC_URL="file://$TMPDIR/does-not-exist.zip" COSMOCC_SHA256="$archive_hash" src/sh/provision-cosmocc.sh "$fixture/verified"
 test-ok "verified installation is reused without another download"
 
 test-step "a mismatch fails before extraction or installation"
-if COSMOCC_URL="file://$TMPDIR/cosmocc.zip" COSMOCC_SHA256="$(printf '%064d' 0)" tools/provision-cosmocc.sh "$fixture/rejected" >"$TMPDIR/out" 2>"$TMPDIR/err"; then
+if COSMOCC_URL="file://$TMPDIR/cosmocc.zip" COSMOCC_SHA256="$(printf '%064d' 0)" src/sh/provision-cosmocc.sh "$fixture/rejected" >"$TMPDIR/out" 2>"$TMPDIR/err"; then
 	status=0
 else
 	status=$?

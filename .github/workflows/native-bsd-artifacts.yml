@@ -6,13 +6,13 @@ on:
       - '.github/workflows/native-bsd-artifacts.yml'
       - 'Makefile'
       - 'src/go/kame/**'
-      - 'tools/platform_id.py'
+      - 'src/sh/**'
   pull_request:
     paths:
       - '.github/workflows/native-bsd-artifacts.yml'
       - 'Makefile'
       - 'src/go/kame/**'
-      - 'tools/platform_id.py'
+      - 'src/sh/**'
   workflow_dispatch:
 
 permissions:

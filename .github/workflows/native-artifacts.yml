@@ -6,13 +6,13 @@ on:
       - '.github/workflows/native-artifacts.yml'
       - 'Makefile'
       - 'src/go/kame/**'
-      - 'tools/platform_id.py'
+      - 'src/sh/**'
   pull_request:
     paths:
       - '.github/workflows/native-artifacts.yml'
       - 'Makefile'
       - 'src/go/kame/**'
-      - 'tools/platform_id.py'
+      - 'src/sh/**'
   workflow_dispatch:
 
 permissions:
@@ -41,7 +41,7 @@ jobs:
         run: make dist-native
       - name: Run host-native CLI
         shell: bash
-        run: "./dist/native/$(python3 tools/platform_id.py)/kame --version"
+        run: "./dist/native/$(python3 src/sh/platform_id.py)/kame --version"
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ runner.os }}-${{ runner.arch }}

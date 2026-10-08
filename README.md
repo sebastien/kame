@@ -35,6 +35,19 @@ kame do run --lang expr -c '(join ["hello" "world"] " ")'
 # "hello world"
 ```
 
+A release ships a standalone `kame.com` Actually Portable Executable that runs
+the full native CLI with no Node, no WASM runtime and no `make`. Provision it
+through the launcher (`bin/kame`) or the bootstrap `Makefile`, or build it
+directly from a checkout that has no working `make`:
+
+```sh
+src/sh/build-ape.sh            # writes dist/kame.com
+dist/kame.com -f Makefile.kmk  # drive a project without make
+```
+
+Releases are published manually by an operator; see
+[distribution](docs/spec/015-distribution.md#manual-publication).
+
 Save the build example below as `Makefile.kmk`, then run `kame -n` to inspect
 the commands or `kame` to build. It expects C sources under `src/`, headers
 under `src/`, and an include directory at `lib/h/`.

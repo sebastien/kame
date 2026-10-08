@@ -19,7 +19,7 @@ release_test_stamp_launcher() {
 
 release_test_sign() {
 	local directory="$1" version="$2" revision="$3" keys="$4"
-	python3 "$CLI_ROOT/tools/release_manifest.py" --directory "$directory" \
+	python3 "$CLI_ROOT/src/sh/release_manifest.py" --directory "$directory" \
 		--version "$version" --revision "$revision" \
 		--public-key "$keys/verification.pem" --signing-key "$keys/signing.pem"
 }

@@ -65,8 +65,8 @@ dist : ./build/kame.debug ./dist/kame
 #
 # generate-version.sh rewrites the file only when its content changes, so it is
 # a normal file rule rather than an always-run prerequisite.
-./src/go/kame/cmd/kame/version_generated.go : ./VERSION ./tools/generate-version.sh
-	./tools/generate-version.sh
+./src/go/kame/cmd/kame/version_generated.go : ./VERSION ./src/sh/generate-version.sh
+	./src/sh/generate-version.sh
 
 version-source : ./src/go/kame/cmd/kame/version_generated.go
 
@@ -88,8 +88,8 @@ version-source : ./src/go/kame/cmd/kame/version_generated.go
 
 # --- Cosmopolitan / APE -----------------------------------------------------
 
-./build/tools/cosmocc-4.0.2/bin/cosmocc : ./tools/provision-cosmocc.sh
-	./tools/provision-cosmocc.sh ./build/tools/cosmocc-4.0.2
+./build/tools/cosmocc-4.0.2/bin/cosmocc : ./src/sh/provision-cosmocc.sh
+	./src/sh/provision-cosmocc.sh ./build/tools/cosmocc-4.0.2
 
 ./dist/kame.com : ./build/tools/cosmocc-4.0.2/bin/cosmocc @(KAME_INPUTS)
 	mkdir -p ./dist
@@ -175,7 +175,7 @@ test-leaks : ./build/kame.sanitize
 	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 CLI_BIN="@(abspath ./build/kame.sanitize)" ./tests/harness.sh $(find ./tests -type f -name 'T*.sh' ! -name 'T013-03-meta-binary.sh')
 
 wasm-portable :
-	./tools/wasm/check-portable.sh
+	./src/sh/check-portable.sh
 
 wasm-check : wasm wasm-portable
 	node ./tools/wasm/check-imports.mjs ./build/wasm/kame.wasm

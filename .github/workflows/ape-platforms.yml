@@ -7,20 +7,18 @@ on:
       - 'Makefile'
       - 'mise.toml'
       - 'src/go/kame/**'
+      - 'src/sh/**'
       - 'tests/T015-03-dist-self-build.sh'
       - 'tools/platform/**'
-      - 'tools/provision-cosmocc.sh'
-      - 'tools/generate-version.sh'
   pull_request:
     paths:
       - '.github/workflows/ape-platforms.yml'
       - 'Makefile'
       - 'mise.toml'
       - 'src/go/kame/**'
+      - 'src/sh/**'
       - 'tests/T015-03-dist-self-build.sh'
       - 'tools/platform/**'
-      - 'tools/provision-cosmocc.sh'
-      - 'tools/generate-version.sh'
   workflow_dispatch:
 
 permissions:
@@ -58,7 +56,7 @@ jobs:
         with:
           name: kame-ape
           path: dist
-      - run: bash tools/platform/test-ape.sh dist/kame.com dist/ape-smoke.com
+      - run: bash src/sh/test-ape.sh dist/kame.com dist/ape-smoke.com
 
   darwin:
     runs-on: macos-15-intel
@@ -69,7 +67,7 @@ jobs:
         with:
           name: kame-ape
           path: dist
-      - run: bash tools/platform/test-ape.sh dist/kame.com dist/ape-smoke.com
+      - run: bash src/sh/test-ape.sh dist/kame.com dist/ape-smoke.com
 
   freebsd:
     runs-on: ubuntu-latest
@@ -84,7 +82,7 @@ jobs:
         with:
           release: '15.1'
           prepare: pkg install -y bash
-          run: bash tools/platform/test-ape.sh dist/kame.com dist/ape-smoke.com
+          run: bash src/sh/test-ape.sh dist/kame.com dist/ape-smoke.com
 
   netbsd:
     runs-on: ubuntu-latest
@@ -99,4 +97,4 @@ jobs:
         with:
           usesh: true
           prepare: /usr/sbin/pkg_add bash
-          run: bash tools/platform/test-ape.sh dist/kame.com dist/ape-smoke.com
+          run: bash src/sh/test-ape.sh dist/kame.com dist/ape-smoke.com

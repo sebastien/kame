@@ -90,5 +90,5 @@ Measure before optimizing; these are profiling tasks, not established defects.
   selective-subtree pruning is already implemented.
 - [ ] Benchmark cold/warm cache throughput and bytes hashed with content signatures,
   plus retained watch invalidation costs. Keep cache hit/miss and file-rule reuse
-  workloads distinct. `tools/benchmark-cli.py --samples 5` provides the existing
+  workloads distinct. `src/sh/benchmark-cli.py --samples 5` provides the existing
   CLI baseline; dedicated workloads are needed for retained instances and watch.

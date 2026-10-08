@@ -42,7 +42,7 @@ test-inspection: build/kame.debug dist-wasm
 	tests/T037-01-cli-build-inspection.sh
 
 wasm-portable:
-	tools/wasm/check-portable.sh
+	src/sh/check-portable.sh
 
 wasm-check: wasm wasm-portable
 	node tools/wasm/check-imports.mjs build/wasm/kame.wasm
@@ -167,7 +167,7 @@ dist: build/kame.debug dist/kame
 
 # Preserve a host-native CLI under a stable release platform identifier. A
 # release operator can collect these outputs from native CI jobs before signing.
-KAME_PLATFORM ?= $(shell python3 tools/platform_id.py)
+KAME_PLATFORM ?= $(shell python3 src/sh/platform_id.py)
 dist-native: dist/native/$(KAME_PLATFORM)/kame
 
 dist/native/$(KAME_PLATFORM)/kame: dist/kame
@@ -214,13 +214,13 @@ dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zi
 	done; fi
 	cp VERSION dist/release/VERSION
 	cp Makefile.bootstrap dist/release/Makefile.bootstrap
-	python3 tools/release_package_manifests.py --directory dist/release --version "$$(cat VERSION)"
+	python3 src/sh/release_package_manifests.py --directory dist/release --version "$$(cat VERSION)"
 	public_key_b64=$$(openssl pkey -pubin -in "$(KAME_RELEASE_PUBLIC_KEY)" -outform DER | openssl base64 -A); \
 	sed -e "s|^KAME_STAMP=.*|KAME_STAMP=\"$$(cat VERSION)\"|" \
 	    -e "s|^KAME_RELEASE_PUBKEY_B64=.*|KAME_RELEASE_PUBKEY_B64=\"$$public_key_b64\"|" \
 	    bin/kame > dist/release/bin/kame
 	chmod +x dist/release/bin/kame
-	python3 tools/release_manifest.py --directory dist/release --version "$$(cat VERSION)" --revision "$(KAME_RELEASE_REVISION)" --public-key "$(KAME_RELEASE_PUBLIC_KEY)" --signing-key "$(KAME_RELEASE_SIGNING_KEY)"
+	python3 src/sh/release_manifest.py --directory dist/release --version "$$(cat VERSION)" --revision "$(KAME_RELEASE_REVISION)" --public-key "$(KAME_RELEASE_PUBLIC_KEY)" --signing-key "$(KAME_RELEASE_SIGNING_KEY)"
 
 dist-ape: dist/kame.com dist/ape-smoke.com
 
@@ -262,8 +262,8 @@ build/wasm/kame.wasm: $(WASM_SOURCES) Makefile
 	cd $(KAME_DIR) && so translate -o ../../../build/wasm/c ./host/wasm
 	$(WASM_CC) --target=wasm32-unknown-unknown -ffreestanding -nostdlib -mexception-handling -mllvm -wasm-enable-sjlj -include tools/wasm/kame_wasm_panic.h -DSO_HEAP_SIZE=8388608 -fuse-ld=$(WASM_LD) -I build/wasm/c -I $(KAME_DIR)/host/wasm -Wl,--no-entry -Wl,--export-memory -Wl,-z,stack-size=$(WASM_STACK_SIZE) -Wl,--initial-memory=$(WASM_INITIAL_MEMORY) -Wl,--max-memory=$(WASM_MAX_MEMORY) -Wl,--export=kame_wasm_abi_version -Wl,--export=kame_wasm_alloc -Wl,--export=kame_wasm_free -Wl,--export=kame_wasm_event_header -Wl,--export=kame_wasm_copy -Wl,--export=kame_wasm_cli -Wl,--export=kame_wasm_eval_pure -Wl,--export=kame_wasm_parse -Wl,--export=kame_wasm_format -Wl,--export=kame_wasm_eval_source_pure -Wl,--export=kame_wasm_declaration_predicate -Wl,--export=kame_wasm_instance_create -Wl,--export=kame_wasm_instance_free -Wl,--export=kame_wasm_source_compile -Wl,--export=kame_wasm_register_plugins -Wl,--export=kame_wasm_set_source_name -Wl,--export=kame_wasm_expression_request -Wl,--export=kame_wasm_set_forwarding -Wl,--export=kame_wasm_set_directory -Wl,--export=kame_wasm_host_set_file -Wl,--export=kame_wasm_host_set_env -Wl,--export=kame_wasm_target_begin -Wl,--export=kame_wasm_watch_begin -Wl,--export=kame_wasm_watch_state -Wl,--export=kame_wasm_watch_invalidate -Wl,--export=kame_wasm_watch_cancel -Wl,--export=kame_wasm_prepare -Wl,--export=kame_wasm_plan -Wl,--export=kame_wasm_graph -Wl,--export=kame_wasm_tools -Wl,--export=kame_wasm_set_tool_path -Wl,--export=kame_wasm_tools_check -Wl,--export=kame_wasm_inspection_grant -Wl,--export=kame_wasm_target_event -Wl,--export=kame_wasm_process_started -Wl,--export=kame_wasm_process_stream -Wl,--export=kame_wasm_process_terminal -Wl,--export=kame_wasm_expression_begin -Wl,--export=kame_wasm_expression_cancel -Wl,--export=kame_wasm_expression_effect_kind -Wl,--export=kame_wasm_expression_effect_length -Wl,--export=kame_wasm_expression_effect_copy -Wl,--export=kame_wasm_step -Wl,--export=kame_wasm_next_event_header -Wl,--export=kame_wasm_next_request_kind -Wl,--export=kame_wasm_next_request_data_length -Wl,--export=kame_wasm_next_request_key_length -Wl,--export=kame_wasm_request_key_copy -Wl,--export=kame_wasm_next_request_record_length -Wl,--export=kame_wasm_request_record_copy -Wl,--export=kame_wasm_request_data_copy -Wl,--export=kame_wasm_event_payload_copy -Wl,--export=kame_wasm_event_discard -Wl,--export=kame_wasm_complete_bytes -Wl,--export=kame_wasm_complete_text -Wl,--export=kame_wasm_complete_nil -Wl,--export=kame_wasm_complete_json -Wl,--export=kame_wasm_complete_failure -Wl,--export=kame_wasm_result_copy -Wl,--export=kame_wasm_result_kind -Wl,--export=kame_wasm_diagnostic_length -Wl,--export=kame_wasm_diagnostic_copy -Wl,--export=kame_wasm_instance_diagnostic_length -Wl,--export=kame_wasm_instance_diagnostic_copy -Wl,--export=kame_wasm_instance_diagnostic_span $$(find build/wasm/c -name '*.c' -print) tools/wasm/kame_wasm_abi.c tools/wasm/kame_wasm_jump.c -o build/wasm/kame.wasm
 
-$(KAME_DIR)/cmd/kame/version_generated.go: VERSION tools/generate-version.sh
-	tools/generate-version.sh
+$(KAME_DIR)/cmd/kame/version_generated.go: VERSION src/sh/generate-version.sh
+	src/sh/generate-version.sh
 
 version-source: $(KAME_DIR)/cmd/kame/version_generated.go
 
@@ -282,8 +282,8 @@ dist/kame: $(KAME_BUILD_INPUTS)
 	mkdir -p dist
 	cd $(KAME_DIR) && CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
 
-build/tools/cosmocc-4.0.2/bin/cosmocc: tools/provision-cosmocc.sh
-	tools/provision-cosmocc.sh build/tools/cosmocc-4.0.2
+build/tools/cosmocc-4.0.2/bin/cosmocc: src/sh/provision-cosmocc.sh
+	src/sh/provision-cosmocc.sh build/tools/cosmocc-4.0.2
 
 dist/kame.com: build/tools/cosmocc-4.0.2/bin/cosmocc $(KAME_BUILD_INPUTS)
 	mkdir -p dist

@@ -44,7 +44,7 @@ printf 'fixture native Windows CLI' >"$release/kame-windows-x64.exe"
 printf '9.9.9\n' >"$release/VERSION"
 cp "$CLI_ROOT/Makefile.bootstrap" "$release/Makefile.bootstrap"
 release_test_stamp_launcher "$launcher" "$release/bin/kame" 9.9.9
-python3 tools/release_package_manifests.py --directory "$release" --version 9.9.9
+python3 src/sh/release_package_manifests.py --directory "$release" --version 9.9.9
 release_test_sign "$release" 9.9.9 fixture "$root/keys"
 
 export KAME_VERSION=9.9.9

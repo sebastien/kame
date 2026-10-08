@@ -26,8 +26,8 @@ test-step "switching mode does not rewrite shared generated metadata"
 metadata="$CLI_ROOT/src/go/kame/cmd/kame/version_generated.go"
 before="$(stat -c %y "$metadata")"
 cp "$metadata" "$TMPDIR/version-before"
-KAME_BUILD_MODE=debug "$CLI_ROOT/tools/generate-version.sh"
-KAME_BUILD_MODE=release "$CLI_ROOT/tools/generate-version.sh"
+KAME_BUILD_MODE=debug "$CLI_ROOT/src/sh/generate-version.sh"
+KAME_BUILD_MODE=release "$CLI_ROOT/src/sh/generate-version.sh"
 if cmp -s "$metadata" "$TMPDIR/version-before" && [ "$(stat -c %y "$metadata")" = "$before" ] && ! rg -q 'const buildMode' "$metadata"; then test-ok "shared version source is independent of artifact mode"; else test-fail "mode switch rewrote generated source"; fi
 
 test-step "establish successful artifact execution contexts"

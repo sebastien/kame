@@ -17,8 +17,8 @@ fi
 test-step "version metadata is stable across invocations"
 version_file="$CLI_ROOT/src/go/kame/cmd/kame/version_generated.go"
 before="$(sha256sum "$version_file")"
-"$CLI_ROOT/tools/generate-version.sh"
-"$CLI_ROOT/tools/generate-version.sh"
+"$CLI_ROOT/src/sh/generate-version.sh"
+"$CLI_ROOT/src/sh/generate-version.sh"
 after="$(sha256sum "$version_file")"
 if [ "$before" = "$after" ]; then
 	test-ok "version metadata did not change"
