@@ -60,9 +60,44 @@ TEST_STEP_COUNT=${TEST_STEP_COUNT:-0}
 TEST_CURRENT=""
 TEST_CURRENT_STEP=""
 
+# Variable(internal): per-step roll-up state
+# In compact/quiet modes individual passing assertions are folded into one
+# line per step. TEST_STEP_PENDING marks a step whose summary is not yet
+# printed; TEST_STEP_REVEALED marks a step whose header was already printed
+# (e.g. to precede a failure).
+TEST_STEP_PENDING=""
+TEST_STEP_REVEALED=0
+TEST_STEP_OKS=0
+TEST_STEP_FAILS=0
+
 # Variable(internal): TEST_EXPECT_FAILURE
 # Set when the test is expected to fail
 TEST_EXPECT_FAILURE=""
+
+# Variable: KAME_TEST_VERBOSITY
+# Human output level, inherited by nested test processes:
+#   quiet    one summary line per test plus failures
+#   compact  one line per step with a pass tally, plus failures (default)
+#   verbose  one line per assertion (historical behavior)
+KAME_TEST_VERBOSITY="${KAME_TEST_VERBOSITY:-compact}"
+
+# Variable(internal): TEST_VERBOSE
+# 1 when KAME_TEST_VERBOSITY is verbose.
+TEST_VERBOSE=0
+
+# Function: test_set_verbosity LEVEL
+# Validates and applies a human output level, updating TEST_VERBOSE.
+function test_set_verbosity {
+	case "${1:-}" in
+	quiet | compact | verbose) KAME_TEST_VERBOSITY="$1" ;;
+	*) return 1 ;;
+	esac
+	export KAME_TEST_VERBOSITY
+	TEST_VERBOSE=0
+	[ "$KAME_TEST_VERBOSITY" = "verbose" ] && TEST_VERBOSE=1
+	return 0
+}
+test_set_verbosity "$KAME_TEST_VERBOSITY" || test_set_verbosity compact
 
 # --
 # ## Color library
@@ -137,6 +172,51 @@ function test-init {
 	trap test-end EXIT INT TERM ERR
 }
 
+# Function(internal): test_step_reveal
+# Compact/quiet modes defer the step header so the pass tally can share its
+# line. A failure or message that must appear under the step reveals it first.
+function test_step_reveal {
+	[ "$TEST_VERBOSE" = 1 ] && return 0
+	[ -n "$TEST_STEP_PENDING" ] || return 0
+	[ "$TEST_STEP_REVEALED" = 1 ] && return 0
+	test_log "${BLUE}--→ ${BOLD}${TEST_STEP_NAME}${RESET}"
+	TEST_STEP_REVEALED=1
+}
+
+# Function(internal): test_step_tally STEP_ID
+# Counts OK/FAIL rows for STEP_ID in the append-only result log and prints
+# "N✓" / "N✓ M×".
+function test_step_tally {
+	local id="$1"
+	local sn=0
+	local en=0
+	if [ -n "${TEST_RESULTS:-}" ] && [ -f "$TEST_RESULTS" ]; then
+		sn=$(awk -F'\t' -v id="$id" '$1 == "OK" && $2 == id' "$TEST_RESULTS" | wc -l)
+		en=$(awk -F'\t' -v id="$id" '$1 == "FAIL" && $2 == id' "$TEST_RESULTS" | wc -l)
+	fi
+	local tally="${GREEN}${sn}✓${RESET}"
+	if [ "$en" -gt 0 ]; then
+		tally="$tally ${RED}${en}×${RESET}"
+	fi
+	printf '%b' "$tally"
+}
+
+# Function(internal): test_step_flush
+# Closes the current step. In verbose mode the header was printed at step
+# start; compact/quiet emit one line per step with a pass tally.
+function test_step_flush {
+	[ -n "$TEST_STEP_PENDING" ] || return 0
+	if [ "$TEST_VERBOSE" = 1 ]; then
+		:
+	elif [ "$TEST_STEP_REVEALED" = 1 ]; then
+		test_log "${DIM}   ↳ $(test_step_tally "$(test_step_id)")${RESET}"
+	else
+		test_log "${BLUE}--→ ${BOLD}${TEST_STEP_NAME}${RESET} ${DIM}…${RESET} $(test_step_tally "$(test_step_id)")"
+	fi
+	TEST_STEP_PENDING=""
+	TEST_STEP_REVEALED=0
+}
+
 # --
 # Starts the test, running the test in a new temporary
 # directory set to `TEST_PATH`
@@ -151,13 +231,21 @@ function test-start {
 	((TEST_COUNT += 1))
 	TEST_CURRENT=$TEST_COUNT
 	TEST_CURRENT_STEP=""
+	TEST_STEP_PENDING=""
+	TEST_STEP_REVEALED=0
+	TEST_STEP_OKS=0
+	TEST_STEP_FAILS=0
 	mkdir -p "$ORIGINAL_PATH/build/tests"
 	TEST_PATH="$(realpath "$(mktemp -d -p "$ORIGINAL_PATH/build/tests" -t tmp.testing.XXX)")"
 	TMPDIR="$TEST_PATH"
 	export TMPDIR
 	TEST_NAME="${1:-$TEST_NAME}"
 	TEST_NAME="${TEST_NAME:-$FILENAME}"
-	test_log "${BLUE}>>> ${YELLOW}${BOLD}${TEST_NAME} ${RESET}${BLUE}${DIM}in '${TEST_PATH}'${RESET}"
+	if [ "$TEST_VERBOSE" = 1 ]; then
+		test_log "${BLUE}>>> ${YELLOW}${BOLD}${TEST_NAME} ${RESET}${BLUE}${DIM}in '${TEST_PATH}'${RESET}"
+	else
+		test_log "${BLUE}>>> ${YELLOW}${BOLD}${TEST_NAME}${RESET}"
+	fi
 	if [ -z "$TEST_PATH" ] || [ ! -d "$TEST_PATH" ]; then
 		test_log_error "Path empty or does not exists: '$TEST_PATH'"
 		test_cleanup
@@ -173,6 +261,7 @@ function test-start {
 # Ends the current test (see `TEST_PATH`) and outputs a report
 function test-end {
 	local res=0
+	test_step_flush
 	TEST_CURRENT_STEP=""
 	local sn=0
 	local en=0
@@ -208,7 +297,11 @@ function test-end {
 				COLOR="$ORANGE"
 			fi
 		fi
-		test_log "${COLOR}LOG   (${BOLD}$tn${RESET}${COLOR}=${GREEN}$sn${COLOR}+${RED}$en${COLOR}) ${TEST_LOG[*]}${RESET}"
+		if [ "$TEST_VERBOSE" = 1 ]; then
+			test_log "${COLOR}LOG   (${BOLD}$tn${RESET}${COLOR}=${GREEN}$sn${COLOR}+${RED}$en${COLOR}) ${TEST_LOG[*]}${RESET}"
+		else
+			test_log "${COLOR}LOG   ${BOLD}$tn${RESET}${COLOR} = ${GREEN}$sn✓${COLOR} + ${RED}$en×${RESET}"
+		fi
 		# Detail of errors
 		if [ "$en" != 0 ]; then
 			if [ -n "${TEST_RESULTS:-}" ] && [ -f "$TEST_RESULTS" ]; then
@@ -289,10 +382,15 @@ function test-case {
 }
 
 function test-step {
+	test_step_flush
 	((TEST_STEP_COUNT += 1))
 	TEST_CURRENT_STEP=$TEST_STEP_COUNT
-	test_log "${BLUE}--→ ${BOLD}$*${RESET}"
 	TEST_STEP_NAME="$*"
+	TEST_STEP_PENDING=1
+	TEST_STEP_REVEALED=0
+	if [ "$TEST_VERBOSE" = 1 ]; then
+		test_log "${BLUE}--→ ${BOLD}$*${RESET}"
+	fi
 	# FIXME: Not sure about that
 	# if [ "$TEST_CURRENT" != "$TEST_COUNT" ]; then
 	# 	if [ "$TEST_CURRENT_ERRORS" != "${#TEST_ERRORS[*]}" ]; then
@@ -348,9 +446,10 @@ function test_log_run {
 }
 
 function test-ok {
-	if [ -n "$*" ]; then
+	if [ "$TEST_VERBOSE" = 1 ] && [ -n "$*" ]; then
 		test_log_success "$*"
 	fi
+	TEST_STEP_OKS=$((TEST_STEP_OKS + 1))
 	TEST_LOG+=("${GREEN}✓")
 	TEST_OKS+=("$(test_step_id)")
 	if [ -n "${TEST_RESULTS:-}" ]; then
@@ -359,7 +458,9 @@ function test-ok {
 }
 
 function test-fail {
+	test_step_reveal
 	test_log_error "FAIL $*"
+	TEST_STEP_FAILS=$((TEST_STEP_FAILS + 1))
 	TEST_LOG+=("${RED}×")
 	TEST_ERRORS+=("[$(test_step_id)] ×←- ${TEST_STEP_NAME} $*")
 	if [ -n "${TEST_RESULTS:-}" ]; then
@@ -443,8 +544,12 @@ function test-expect-failure {
 		set +e # Disable errexit
 	fi
 
-	test_log "${BLUE}>>> Expected to fail:${DIM} [$(test_fmt_line "$*")]"
-	test_log_run "${ORANGE}${DIM}>>>" "$@"
+	if [ "$TEST_VERBOSE" = 1 ]; then
+		test_log "${BLUE}>>> Expected to fail:${DIM} [$(test_fmt_line "$*")]"
+		test_log_run "${ORANGE}${DIM}>>>" "$@"
+	else
+		"$@" >/dev/null 2>&1
+	fi
 	local res=$?
 
 	if [[ "$has_errexit" == true ]]; then
