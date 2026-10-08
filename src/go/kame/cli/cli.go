@@ -55,6 +55,7 @@ type Invocation struct {
 	Check            bool
 	Comment          string
 	Defines          []string
+	Parameters       []string
 	ToolOverrides    []string
 	Depth            int
 	Expand           bool
@@ -87,6 +88,7 @@ func (inv *Invocation) Free() {
 	slices.Free(mem.System, inv.Files)
 	slices.Free(mem.System, inv.Args)
 	slices.Free(mem.System, inv.Defines)
+	slices.Free(mem.System, inv.Parameters)
 	slices.Free(mem.System, inv.ToolOverrides)
 	mem.FreeString(mem.System, inv.Error.Message)
 	*inv = Invocation{}
@@ -254,6 +256,10 @@ func parseBuild(inv *Invocation, args []string) {
 			inv.fail("OPT_UNKNOWN", "unknown option: "+arg)
 			return
 		}
+		if assignmentOperand(inv, arg) {
+			if inv.Error.Code != "" { return }
+			if len(arg) >= 4 && arg[:4] == "env." { continue }
+		}
 		inv.Targets = slices.Append(mem.System, inv.Targets, arg)
 	}
 	if inv.Watch && inv.Name != "" && inv.Name != "build" {
@@ -265,6 +271,28 @@ func parseBuild(inv *Invocation, args []string) {
 		return
 	}
 	inv.OK = true
+}
+
+// assignmentOperand records literal shorthand without deciding whether a name
+// is a definition or a task argument; that requires the compiled declarations.
+func assignmentOperand(inv *Invocation, arg string) bool {
+	for i := range arg {
+		if arg[i] != '=' { continue }
+		if len(arg) >= 4 && arg[:4] == "env." {
+			if i <= 4 || !definition.ValidName(arg[4:i]) {
+				inv.fail("OPT_VALUE_INVALID", "environment assignment must be env.NAME=VALUE")
+				return true
+			}
+			assignBuildOption(inv, "--env", arg[4:])
+			return true
+		}
+		if i > 0 && definition.ValidName(arg[:i]) {
+			inv.Parameters = slices.Append(mem.System, inv.Parameters, arg)
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 func isBuildValueOption(arg string) bool {

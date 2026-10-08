@@ -107,3 +107,13 @@ func TestBuildDefinitionOverrideGrammar(t *testing.T) {
  if inv.OK || inv.Error.Code != "OPT_VALUE_INVALID" { t.Error("malformed override accepted") }
  inv.Free()
 }
+
+func TestAssignmentShorthand(t *testing.T) {
+ inv := cli.Parse("build", []string{"env.HOST=0.0.0.0", "port=8000", "env.EMPTY=", "env.TOKEN=a=b", "--", "env.LITERAL=value"})
+ if !inv.OK || len(inv.Environment) != 3 || inv.Environment[0] != "HOST=0.0.0.0" || inv.Environment[1] != "EMPTY=" || inv.Environment[2] != "TOKEN=a=b" || len(inv.Parameters) != 1 || inv.Parameters[0] != "port=8000" || len(inv.Targets) != 2 || inv.Targets[1] != "env.LITERAL=value" { t.Error("assignment shorthand lost environment, literal values, or delimiter policy") }
+ inv.Free()
+ inv = cli.Parse("build", []string{"env.=bad"})
+ if inv.OK || inv.Error.Code != "OPT_VALUE_INVALID" { t.Error("empty environment name accepted") }
+ inv.Free()
+ if !cli.SelectsRun([]string{"env.HOST=local", "port=8000", "source.kmk"}) { t.Error("leading assignments hid an explicit source") }
+}

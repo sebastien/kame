@@ -247,10 +247,27 @@ func targetArgumentKey(a mem.Allocator, target string, arguments []ArgumentValue
 // declared named task target. Returned strings are owned by the Program's
 // allocator; unconsumed targets are copied unchanged.
 func (p *Program) JoinTargetOperands(targets []string) []string {
+	var operands []string
+	for i := range targets {
+		configured := false
+		for j := range p.ParameterDefinitions {
+			if targets[i] == p.ParameterDefinitions[j] { configured = true; break }
+		}
+		if !configured { operands = slices.Append(p.Alloc, operands, targets[i]) }
+	}
+	defer slices.Free(p.Alloc, operands)
+	if (len(operands) == 0 || (isTargetAssignment(operands[0]) && !p.HasTarget(operands[0]))) && p.HasTarget("default") {
+		var defaults []string
+		defaults = slices.Append(p.Alloc, defaults, "default")
+		for i := range operands { defaults = slices.Append(p.Alloc, defaults, operands[i]) }
+		slices.Free(p.Alloc, operands)
+		operands = defaults
+	}
+	targets = operands
 	var joined []string
 	for i := 0; i < len(targets); i++ {
 		name := targets[i]
-		if !p.hasNamedArgumentTarget(name) || i+1 == len(targets) || !isTargetAssignment(targets[i+1]) {
+		if i+1 == len(targets) || !isTargetAssignment(targets[i+1]) || (!p.hasNamedArgumentTarget(name) && p.HasTarget(targets[i+1])) {
 			joined = slices.Append(p.Alloc, joined, cloneText(p.Alloc, name))
 			continue
 		}

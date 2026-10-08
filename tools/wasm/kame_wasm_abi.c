@@ -955,6 +955,37 @@ uint32_t kame_wasm_graph(uint64_t handle, uint32_t target, uint32_t target_len, 
   return KAME_WASM_OK;
 }
 
+/* Normalize CLI targets using the prepared program, not host-side syntax guesses. */
+__attribute__((export_name("kame_wasm_target_operands")))
+uint32_t kame_wasm_target_operands(uint64_t handle, uint32_t data, uint32_t data_len, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime == NULL || out_len == 0u || (data_len != 0u && data == 0u)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
+  wasm_PureResult result = wasm_Runtime_TargetOperandsJSON(instance->runtime,
+      (so_String){(const char *)(uintptr_t)data, (so_int)data_len});
+  if (result.Code.len != 0) {
+    kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_DIAGNOSTIC;
+  }
+  uint32_t needed = (uint32_t)result.Text.len;
+  *(uint32_t *)(uintptr_t)out_len = needed;
+  if (dst_len < needed) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_BUFFER_TOO_SMALL;
+  }
+  if (needed != 0u && dst == 0u) {
+    wasm_PureResult_Free(&result, instance->runtime->Alloc);
+    return KAME_WASM_STATE_INVALID;
+  }
+  for (uint32_t i = 0; i < needed; i++) ((uint8_t *)(uintptr_t)dst)[i] = (uint8_t)result.Text.ptr[i];
+  wasm_PureResult_Free(&result, instance->runtime->Alloc);
+  return KAME_WASM_OK;
+}
+
 /* Compile the instance source into a build runtime for planning/inspection. */
 uint32_t kame_wasm_prepare(uint64_t handle) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);

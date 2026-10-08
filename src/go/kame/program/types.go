@@ -232,6 +232,7 @@ type Options struct {
 	Shell           []string
 	Environment     []string
 	Defines         []string
+	Parameters      []string
 	ToolOverrides   []string
 	RemoteExecutors []host.ExecutorDescriptor
 	DryRun          bool
@@ -281,6 +282,7 @@ type Program struct {
 	GeneratedRuleMeta []generatedRuleMeta
 	Tools             []Tool
 	Configuration     []string
+	ParameterDefinitions []string
 	SourceSignature   core.Signature
 	Instances         []instance
 	Events            []Event

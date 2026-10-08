@@ -46,7 +46,12 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	for i := range fields { tools = slices.Append(r.Alloc, tools, fields[i].Text) }
 	options := program.Options{TimeoutMS: host.PayloadInt(value, "timeoutMS"), RetryCount: int(host.PayloadInt(value, "retryCount")), ToolOverrides: tools, Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0, Force: host.PayloadInt(value, "force") != 0}
 	options.RetainBytes = int(host.PayloadInt(value, "retainBytes"))
+	var parameters []string
+	fields = host.PayloadList(value, "parameters")
+	for i := range fields { parameters = slices.Append(r.Alloc, parameters, fields[i].Text) }
+	options.Parameters = parameters
 	compiled := program.CompileSession(r.Alloc, fragments, r.Registry, options)
+	slices.Free(r.Alloc, parameters)
 	slices.Free(r.Alloc, tools); slices.Free(r.Alloc, overrides); slices.Free(r.Alloc, environment)
 	r.Host = nil
 	for i := range fragments { slices.Free(r.Alloc, fragments[i].Entries); slices.Free(r.Alloc, fragments[i].Defines) }

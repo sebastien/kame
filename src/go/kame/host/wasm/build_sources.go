@@ -62,6 +62,11 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 		r.BuildDefines = slices.Append(r.Alloc, r.BuildDefines, pureText(r.Alloc, defines[i].Text))
 	}
 	environment := host.PayloadList(descriptor, "environment")
+	parameters := host.PayloadList(descriptor, "parameters")
+	for i := range parameters {
+		if parameters[i].Kind != core.String { r.freeBuildSources(); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid parameter override")} }
+		r.BuildParameters = slices.Append(r.Alloc, r.BuildParameters, pureText(r.Alloc, parameters[i].Text))
+	}
 	for i := range environment {
 		if environment[i].Kind != core.String { r.freeBuildSources(); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build environment")} }
 		r.BuildEnvironment = slices.Append(r.Alloc, r.BuildEnvironment, pureText(r.Alloc, environment[i].Text))
@@ -85,6 +90,8 @@ func (r *Runtime) freeBuildSources() {
 	for i := range r.BuildToolOverrides { mem.FreeString(r.Alloc, r.BuildToolOverrides[i]) }
 	slices.Free(r.Alloc, r.BuildToolOverrides); r.BuildToolOverrides = nil
 	for i := range r.BuildDefines { mem.FreeString(r.Alloc, r.BuildDefines[i]) }
+	for i := range r.BuildParameters { mem.FreeString(r.Alloc, r.BuildParameters[i]) }
+	slices.Free(r.Alloc, r.BuildParameters); r.BuildParameters = nil
 	for i := range r.BuildEnvironment { mem.FreeString(r.Alloc, r.BuildEnvironment[i]) }
 	slices.Free(r.Alloc, r.BuildDefines); r.BuildDefines = nil
 	slices.Free(r.Alloc, r.BuildEnvironment); r.BuildEnvironment = nil
@@ -95,6 +102,7 @@ func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 	options.TimeoutMS, options.RetryCount = r.BuildTimeoutMS, r.BuildRetryCount
 	options.RetainBytes = r.BuildRetainBytes
 	options.Defines = r.BuildDefines
+	options.Parameters = r.BuildParameters
 	options.ToolOverrides = r.BuildToolOverrides
 	var environment []string
 	for i := range options.Environment { environment = slices.Append(r.Alloc, environment, options.Environment[i]) }

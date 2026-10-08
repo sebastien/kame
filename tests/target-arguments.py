@@ -76,24 +76,34 @@ with tempfile.TemporaryDirectory(prefix='kame-target-argument-watch-') as direct
     project = Path(directory)
     (project / 'input').write_text('before')
     (project / 'Makefile.kmk').write_text(
+        'label ?= "authored"\n'
         'deploy {region=west} : ./input\n'
-        '\tprintf @(region): >> watch-log; cat ./input >> watch-log\n'
+        '\tprintf \'%s:%s:%s:\' \'@(region)\' \'@(label)\' "$HOST" >> watch-log; cat ./input >> watch-log\n'
     )
-    process = subprocess.Popen([*runner, '--watch', 'deploy', 'region=east'], cwd=project, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen([*runner, '--watch', 'deploy', 'region=east', 'label=override', 'env.HOST=local'], cwd=project, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         deadline = time.monotonic() + 8
-        while time.monotonic() < deadline and (not (project / 'watch-log').exists() or (project / 'watch-log').read_text() != 'east:before'):
+        while time.monotonic() < deadline and (not (project / 'watch-log').exists() or (project / 'watch-log').read_text() != 'east:override:local:before'):
             if process.poll() is not None:
                 raise AssertionError(f'watch exited early: {process.stderr.read()}')
             time.sleep(0.02)
-        assert (project / 'watch-log').exists() and (project / 'watch-log').read_text() == 'east:before', 'watch did not bind the target argument initially'
+        assert (project / 'watch-log').exists() and (project / 'watch-log').read_text() == 'east:override:local:before', 'watch did not bind the parameter and environment overrides initially'
         (project / 'input').write_text('after')
         deadline = time.monotonic() + 8
-        while time.monotonic() < deadline and (project / 'watch-log').read_text() != 'east:beforeeast:after':
+        while time.monotonic() < deadline and (project / 'watch-log').read_text() != 'east:override:local:beforeeast:override:local:after':
             if process.poll() is not None:
                 raise AssertionError(f'watch exited before invalidation: {process.stderr.read()}')
             time.sleep(0.02)
-        assert (project / 'watch-log').read_text() == 'east:beforeeast:after', 'watch lost the target argument on invalidation'
+        assert (project / 'watch-log').read_text() == 'east:override:local:beforeeast:override:local:after', 'watch lost parameter or environment overrides on invalidation'
+        source = project / 'Makefile.kmk'
+        source.write_text(source.read_text().replace("'%s:%s:%s:'", "'reload:%s:%s:%s:'"))
+        expected = 'east:override:local:beforeeast:override:local:afterreload:east:override:local:after'
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline and (project / 'watch-log').read_text() != expected:
+            if process.poll() is not None:
+                raise AssertionError(f'watch exited during source reload: {process.stderr.read()}')
+            time.sleep(0.02)
+        assert (project / 'watch-log').read_text() == expected, 'watch lost parameter or environment overrides on source reload'
     finally:
         if process.poll() is None:
             process.send_signal(signal.SIGINT)

@@ -45,7 +45,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	p := mem.Alloc[Program](a)
 	p.Alloc, p.Engine, p.Eval, p.Parsed, p.Host = a, engine, compiled.Program, parsed, options.Host
-	configurationError := p.configureDefinitions(options.Defines, options.Environment)
+	configurationError := p.configureParameters(options.Defines, options.Parameters, options.Environment)
 	if configurationError.Code != "" {
 		result.Diagnostics = slices.Append(a, result.Diagnostics, configurationError)
 		p.Free()
@@ -316,6 +316,7 @@ func (p *Program) Free() {
 	}
 	p.Eval.CancelProcesses()
 	freeStrings(p.Alloc, p.Configuration)
+	freeStrings(p.Alloc, p.ParameterDefinitions)
 	freeStrings(p.Alloc, p.Options.ToolOverrides)
 	for i := range p.Options.RemoteExecutors {
 		mem.FreeString(p.Alloc, p.Options.RemoteExecutors[i].Name)

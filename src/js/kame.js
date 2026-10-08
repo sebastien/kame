@@ -1013,6 +1013,7 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_parse',
   'kame_wasm_format',
   'kame_wasm_cli',
+  'kame_wasm_target_operands',
   'kame_wasm_expression_begin',
   'kame_wasm_expression_cancel',
   'kame_wasm_expression_effect_kind',
@@ -1809,7 +1810,7 @@ class Module {
     if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     if (Array.isArray(source)) {
       if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
-      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0 }));
+      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, parameters: source.parameters, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0 }));
       if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
   }
@@ -1817,6 +1818,14 @@ class Module {
   setSourceName(instance, name) {
     const bytes = this.write(name);
     if (this.exports.kame_wasm_set_source_name(instance, bytes.pointer, bytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
+  }
+
+  async targetOperands(source, targets, name) {
+    const bytes = await this.prepared(source, () => {
+      const operands = this.write(JSON.stringify(targets));
+      return (handle, dst, capacity, length) => this.exports.kame_wasm_target_operands(handle, operands.pointer, operands.length, dst, capacity, length);
+    }, name, undefined, false);
+    return JSON.parse(this.decode0(bytes));
   }
 
   async planJSON(source, target, expand, name) {
@@ -2123,7 +2132,7 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }));
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }));
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');
@@ -2976,7 +2985,7 @@ async function runParse(module, inv) {
 
 async function runSession(module, inv, sourceDirectory) {
   const fragments = [];
-  const selection = { defines: inv.defines, environment: [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment], parts: [] };
+  const selection = { defines: [...inv.defines, ...inv.parameters], environment: [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment], parts: [] };
   for (let i = 0; i < inv.inputs.length; i++) {
     const input = inv.inputs[i];
     let name = `<command:${i + 1}>`, text = input.value;
@@ -3021,12 +3030,19 @@ async function discoverBuildSource(module, inv, sourceDirectory, watchedSources 
   const name = inv.sourceName ?? (inv.command ? source.name : isAbsolute(source.name) ? normalize(source.name) : normalize(join(inv.directory || '.', source.name)));
   watchedSources?.add(resolve(sourceDirectory, name));
   const environment = [...Object.entries(process.env).map(([name, value]) => `${name}=${value}`), ...inv.environment];
-  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, true, { defines: inv.defines, environment, parts: [], watchedSources });
+  const selection = { defines: [...inv.defines, ...inv.parameters], environment, parts: [], watchedSources };
+  const parts = await expandSessionIncludes(module, sourceDirectory, name, source.text, 'kmk', [], !inv.command, true, selection);
   parts.defines = inv.defines;
+  parts.parameters = inv.parameters;
   parts.toolOverrides = inv.toolOverrides;
   parts.force = inv.force ? 1 : 0;
   parts.environment = environment;
-  return { name, text: source.text, compiled: parts.length === 1 && !inv.defines.length && !inv.toolOverrides.length && !environment.length && !inv.force ? source.text : parts };
+  const compiled = parts.length === 1 && !inv.defines.length && !inv.parameters.length && !inv.toolOverrides.length && !environment.length && !inv.force ? source.text : parts;
+  // Tools has a command operand ("check"), not a target; normalize its roots
+  // only after the caller strips that operand. Sessions normalize in Go.
+  const targets = inv.name === 'tools' ? inv.targets : await module.targetOperands(compiled, inv.targets, name);
+  if (inv.name !== 'tools' && targets.length === 0) throw Object.assign(new Error('no target was requested and no default target is defined'), { code: 'TGT_NO_DEFAULT' });
+  return { name, text: source.text, compiled, targets };
 }
 
 // Syntax and byte spans come from the portable parser, not a second JS grammar.
@@ -3132,22 +3148,11 @@ async function runFmt(module, inv) {
   return different ? 1 : 0;
 }
 
-function joinTargetArguments(targets) {
-  const joined = [];
-  for (const target of targets) {
-    const equal = target.indexOf('=');
-    const assignment = equal > 0 && !target.slice(0, equal).includes('/');
-    if (assignment && joined.length !== 0) joined[joined.length - 1] += ` ${target}`;
-    else joined.push(target);
-  }
-  return joined;
-}
-
 async function runPlan(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
-  const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
+  const targets = source.targets;
   for (const target of targets) {
     const bytes = await module.planJSON(source.compiled, target, false, source.name);
     writeReport(`plan ${target}`, bytes);
@@ -3176,7 +3181,7 @@ async function runGraph(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
-  const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
+  const targets = source.targets;
   if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', `${inv.name} requires exactly one target`);
   const kind = inv.name === 'inputs' ? 0 : inv.name === 'outputs' ? 1 : 2;
   let context;
@@ -3197,13 +3202,15 @@ function shortReportField(text) {
 
 async function runTools(module, inv, sourceDirectory) {
   const check = inv.targets[0] === 'check';
-  const targets = joinTargetArguments(check ? inv.targets.slice(1) : inv.targets);
+  let targets = check ? inv.targets.slice(1) : inv.targets;
   if (!check && targets.length !== 0) return usageError('OPT_VALUE_INVALID', 'tools does not accept targets');
   if (check && targets.length === 0) return usageError('OPT_VALUE_INVALID', 'tools check requires at least one target');
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
   if (check) {
+    targets = await module.targetOperands(source.compiled, targets, source.name);
+    if (targets.length === 0) return usageError('OPT_VALUE_INVALID', 'tools check requires at least one target');
     let failed = false;
     for (const target of targets) {
       const context = contextFor(inv);
@@ -3236,7 +3243,7 @@ async function runCat(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
-  const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
+  const targets = source.targets;
   if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', 'cat requires exactly one target');
   const target = targets[0];
   try {
@@ -3310,7 +3317,6 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   let finishDisposal;
   const disposal = new Promise((resolveDisposal) => { finishDisposal = resolveDisposal; });
   invocationDisposals.add(disposal);
-  const targets = joinTargetArguments(inv.targets.length ? inv.targets : ['default']);
   const context = contextFor(inv);
   context.human = inv.json !== true;
   const watchedSources = new Set();
@@ -3365,6 +3371,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       }
       primarySource = source;
       lastDiagnostic = null;
+      const targets = source.targets;
       watch = await module.beginWatch(source.compiled, targets, source.name, { ...context, signal: cancellation.signal });
       cancellation.signal.addEventListener('abort', () => watch?.cancellation.abort(), { once: true });
       invocationCancellations.add(watch.cancellation);
@@ -3496,7 +3503,7 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
   buildStartedAt = performance.now();
   const context = contextFor(inv);
   context.human = inv.json !== true;
-  const targets = joinTargetArguments(inv.targets.length !== 0 ? inv.targets : ['default']);
+  const targets = source.targets;
   if (inv.dryRun) {
     const parts = Array.isArray(source.compiled) ? source.compiled : source.compiled?.parts;
     const sourceParts = parts?.length ? parts : [{ name: source.name, text: source.text }];

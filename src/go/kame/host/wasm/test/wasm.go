@@ -701,3 +701,42 @@ func TestRuntimeCancellationIgnoresLateCompletion(t *testing.T) {
 	}
 	result.Free(a)
 }
+
+func TestTargetOperandsUseCompiledDeclarations(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "")
+	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
+	r := started.Runtime
+	unprepared := r.TargetOperandsJSON("[]")
+	if unprepared.Code != "PHASE_INVALID" { t.Error("unprepared operand query was accepted") }
+	unprepared.Free(a)
+	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"included.kmk","text":"CONFIG = \"original\"\n./artifact :\nplain :\n"},{"name":"main.kmk","text":"default {region=west} :\ndeploy {region=west} :\n"}],"parameters":["CONFIG=changed"]}`))
+	if configured.Code != "" { t.Error("build descriptor failed"); configured.Free(a); r.Free(); return }
+	configured.Free(a)
+	prepared := r.Prepare()
+	if prepared.Code != "" { t.Error("prepare failed: " + prepared.Code + " " + prepared.Message); prepared.Free(a); r.Free(); return }
+	prepared.Free(a)
+	inputs := []string{"[]", "[\"CONFIG=changed\"]", "[\"region=east\"]", "[\"deploy\",\"CONFIG=changed\",\"region=east\"]", "[\"plain\",\"./artifact\"]", "[\"deploy\",\"./artifact\"]"}
+	expected := []string{"[\"default\"]", "[\"default\"]", "[\"default region=east\"]", "[\"deploy region=east\"]", "[\"plain\",\"./artifact\"]", "[\"deploy\",\"./artifact\"]"}
+	for i := range inputs {
+		result := r.TargetOperandsJSON(inputs[i])
+		if result.Code != "" || result.Text != expected[i] { t.Error("target operands lost declaration-sensitive selection") }
+		result.Free(a)
+	}
+	invalid := r.TargetOperandsJSON("[1]")
+	if invalid.Code != "OPT_VALUE_INVALID" { t.Error("invalid operands were accepted") }
+	invalid.Free(a)
+	if pending := r.Step(); pending.OK { t.Error("operand selection queued host work"); pending.Request.Free(a) }
+	r.Free()
+	started = wasm.NewRuntime(a, "plain :\n")
+	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
+	r = started.Runtime
+	prepared = r.Prepare()
+	if prepared.Code != "" { t.Error("prepare failed") }
+	prepared.Free(a)
+	result := r.TargetOperandsJSON("[]")
+	if result.Code != "" || result.Text != "[]" { t.Error("selection invented an undeclared default") }
+	result.Free(a)
+	r.Free()
+}
+

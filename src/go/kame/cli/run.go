@@ -135,6 +135,15 @@ func parseRun(args []string, discover bool) Invocation {
 			inv.Verbose = true
 			continue
 		}
+		if assignmentOperand(&inv, arg) {
+			if inv.Error.Code != "" { return inv }
+			if len(arg) >= 4 && arg[:4] == "env." {
+				processOptions = true
+				continue
+			}
+			if !discover && len(inv.Inputs) == 0 { continue }
+			if !discover && inv.Inputs[len(inv.Inputs)-1].Lang != "kmk" { continue }
+		}
 		if !discover && (arg == "-" || runLanguage(arg) != "") {
 			if !runFile(&inv, arg, language, &stdin) {
 				return inv
@@ -238,6 +247,9 @@ func SelectsRun(args []string) bool {
 		if len(arg) > 0 && arg[0] == '-' {
 			continue
 		}
+		assignment := false
+		for j := range arg { if arg[j] == '=' { assignment = true; break } }
+		if assignment { continue }
 		return language || runLanguage(arg) != ""
 	}
 	return language

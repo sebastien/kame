@@ -22,6 +22,10 @@ enum kame_wasm_status {
   KAME_WASM_HOST_NEEDED = 6
 };
 
+/* Normalize a JSON string array against prepared build declarations. */
+uint32_t kame_wasm_target_operands(uint64_t instance, uint32_t data, uint32_t data_len,
+                                  uint32_t dst, uint32_t dst_len, uint32_t out_len);
+
 /* Ordered session descriptor; work kind: 1 implicit value, 2 selected value,
  * 3 process/rule (no implicit value display). Existing step/completion APIs
  * drive each work item on the same instance. */

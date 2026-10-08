@@ -165,6 +165,31 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		freeSessionWork(a, work)
 	} else {
 		p.ParsedOwned = true
+		// Normalize entry operands after declaration registration, so literal
+		// definition overrides are not requested as entries or rule arguments.
+		var normalized []SessionWork
+		for i := 0; i < len(work); i++ {
+			if work[i].Target == "" { normalized = slices.Append(a, normalized, work[i]); continue }
+			var entries []string
+			start := i
+			for i < len(work) && work[i].Target != "" && work[i].Value == work[start].Value {
+				entries = slices.Append(a, entries, work[i].Target)
+				i++
+			}
+			selected := p.JoinTargetOperands(entries)
+			if len(selected) == 0 { selected = slices.Append(a, selected, cloneText(a, "default")) }
+			slices.Free(a, entries)
+			for j := range selected {
+				entry := work[start]
+				entry.Target = selected[j]
+				normalized = slices.Append(a, normalized, entry)
+			}
+			slices.Free(a, selected)
+			for j := start; j < i; j++ { mem.FreeString(a, work[j].Target) }
+			i--
+		}
+		slices.Free(a, work)
+		work = normalized
 		p.SessionPolicy = true
 		if len(fragments) == 1 {
 			mem.FreeString(a, parsed.Source.Name)

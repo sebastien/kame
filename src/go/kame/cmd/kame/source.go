@@ -62,8 +62,10 @@ func loadBuildSource(options buildArguments, errOut io.Writer, reportMissing boo
 }
 
 func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportMissing bool, prefix string) buildSource {
+	defines := selectionOverrides(options.Defines, options.Parameters)
+	defer slices.Free(mem.System, defines)
 	if options.Command != "" {
-		result := buildSource{JSON: options.JSON, SelectionPrefix: prefix, SelectionDefines: options.Defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), options.Environment)}
+		result := buildSource{JSON: options.JSON, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), options.Environment)}
 		result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: "<command>", Text: options.Command, Parent: -1})
 		if !expandIncludesLanguage(&result, 0, errOut, "kmk") {
 			result.Status = 1
@@ -74,10 +76,10 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 	if options.File != "" {
 		name := options.File
 		if path.IsAbs(name) {
-			return readRunSourceConfigured(name, errOut, "kmk", options.JSON, options.Defines, options.Environment, prefix)
+			return readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix)
 		}
 		name = path.Join(mem.System, options.Directory, name)
-		result := readRunSourceConfigured(name, errOut, "kmk", options.JSON, options.Defines, options.Environment, prefix)
+		result := readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix)
 		mem.FreeString(mem.System, name)
 		return result
 	}
@@ -86,7 +88,7 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 		candidate := path.Join(mem.System, options.Directory, candidates[i])
 		_, statErr := os.Stat(candidate)
 		if statErr == nil {
-			result := readRunSourceConfigured(candidate, errOut, "kmk", options.JSON, options.Defines, options.Environment, prefix)
+			result := readRunSourceConfigured(candidate, errOut, "kmk", options.JSON, defines, options.Environment, prefix)
 			mem.FreeString(mem.System, candidate)
 			return result
 		}

@@ -82,6 +82,8 @@ func WriteJSON(out io.Writer, inv *Invocation) {
 	e.Str(inv.Comment)
 	e.Str("defines")
 	writeStrings(&e, inv.Defines)
+	e.Str("parameters")
+	writeStrings(&e, inv.Parameters)
 	e.Str("check")
 	e.Bool(inv.Check)
 	e.Str("depth")

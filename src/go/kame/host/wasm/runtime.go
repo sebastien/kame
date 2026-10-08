@@ -35,6 +35,7 @@ type Runtime struct {
 	Session            *program.Session
 	BuildSources       []program.CompileSource
 	BuildDefines       []string
+	BuildParameters    []string
 	BuildToolOverrides []string
 	BuildEnvironment   []string
 	BuildForce         bool

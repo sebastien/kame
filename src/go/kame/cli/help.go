@@ -48,6 +48,8 @@ const BuildHelp = `  -f, --file FILE         select/append source (repeatable in
       --tool NAME=PATH    select a declared executable
       --shell SHELL       recipe shell executable/arguments (repeatable)
       --env NAME=VALUE    replace a process environment entry
+      env.NAME=VALUE     shorthand for --env NAME=VALUE
+      NAME=VALUE         override a declared value or bind a task argument
       --timeout MS        timeout in milliseconds
       --retry N           retry failed commands
       --log-limit N       retained recipe bytes per stream

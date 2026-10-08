@@ -73,25 +73,37 @@ func selectionPrefix(fragments []program.Fragment) string {
 	return cloneCommandText(b.String())
 }
 
+// selectionOverrides returns an owned slice of borrowed declaration-selection
+// operands. Definitions and ambiguous shorthand remain distinct in Invocation.
+func selectionOverrides(defines []string, parameters []string) []string {
+	values := slices.Clone(mem.System, defines)
+	for i := range parameters { values = slices.Append(mem.System, values, parameters[i]) }
+	return values
+}
+
 func loadRunSourceInput(inv cli.Invocation, input cli.RunInput, fragments []program.Fragment, out io.Writer) buildSource {
+	defines := selectionOverrides(inv.Defines, inv.Parameters)
+	defer slices.Free(mem.System, defines)
 	prefix := selectionPrefix(fragments)
 	defer mem.FreeString(mem.System, prefix)
 	if input.Kind == "discover" {
-		return loadBuildSourceWithPrefix(buildArguments{Directory: inv.Directory, JSON: inv.JSON, Defines: inv.Defines, Environment: inv.Environment}, out, true, prefix)
+		return loadBuildSourceWithPrefix(buildArguments{Directory: inv.Directory, JSON: inv.JSON, Defines: defines, Environment: inv.Environment}, out, true, prefix)
 	}
 	name := input.Value
 	if path.IsAbs(name) {
-		return readRunSourceConfigured(name, out, input.Lang, inv.JSON, inv.Defines, inv.Environment, prefix)
+		return readRunSourceConfigured(name, out, input.Lang, inv.JSON, defines, inv.Environment, prefix)
 	}
 	resolved := path.Join(mem.System, inv.Directory, name)
 	defer mem.FreeString(mem.System, resolved)
-	return readRunSourceConfigured(resolved, out, input.Lang, inv.JSON, inv.Defines, inv.Environment, prefix)
+	return readRunSourceConfigured(resolved, out, input.Lang, inv.JSON, defines, inv.Environment, prefix)
 }
 
 func inlineRunSourceInput(inv cli.Invocation, name string, text string, lang string, fragments []program.Fragment, out io.Writer) buildSource {
+	defines := selectionOverrides(inv.Defines, inv.Parameters)
+	defer slices.Free(mem.System, defines)
 	prefix := selectionPrefix(fragments)
 	defer mem.FreeString(mem.System, prefix)
-	return inlineRunSource(name, text, lang, inv.JSON, inv.Defines, inv.Environment, out, prefix)
+	return inlineRunSource(name, text, lang, inv.JSON, defines, inv.Environment, out, prefix)
 }
 
 // Predicate configuration consists only of declarations. Value statements and

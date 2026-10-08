@@ -36,6 +36,11 @@ kame deploy environment=production region=eu-west
 kame deploy environment=production
 ```
 
+An assignment-only primary invocation selects `default` and binds its declared
+arguments. `env.NAME=value` is an explicit CLI process-environment override,
+not a task argument; a bare assignment naming a global definition overrides
+that definition rather than becoming a task argument.
+
 Each assignment must name an argument declared by the selected rule and may
 appear at most once. Missing required arguments, unknown names, duplicate
 assignments and malformed assignments fail before any dependency or recipe
