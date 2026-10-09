@@ -16,7 +16,7 @@ selected targets, not top-level expressions as an alternate entry mechanism.
 
 ```kame
 VERSION = "1.2.3"
-FLAGS = -Wall -Wextra
+FLAGS = ["-Wall" "-Wextra"]
 SOURCES = (wildcard ./src/*.c)
 (greet name) = (cat "Hello, " name)
 default = (greet "Ada")
@@ -29,17 +29,17 @@ demanded on reference, not executed as sequential shell assignments.
 `?=` must be contiguous. `--define NAME=VALUE` overrides a declared definition
 with literal string data, not expression source.
 
-RHS classification matters:
+Every RHS is one expression: `alias = other` references a value, `number = 42`
+is numeric, text requires quotes, and lists require brackets. This applies to
+function bodies too. Kash retains its reference wrappers and value recovery.
+Parse failures never fall back to text; unused definitions remain unevaluated.
 
-1. Leading `(`, `[`, or `$(`: one expression value; failure does not fall back
-   to text.
-2. Leading `"`: one quoted string template (or a raw verbatim string).
-3. Otherwise: whitespace-separated unquoted string templates; one is a scalar,
-   several form a list.
-
-Thus `number = 42` uses textual RHS classification, while the statement `42`
-is an integer. Use `number = (nop 42)` when a typed scalar definition is needed.
-Kash definitions instead take expression operands, not word-list RHSs.
+To migrate, quote bare textual values and bracket word lists. Explicit paths
+such as `./file` remain valid atoms. Quoted values now use expression-string
+escapes/interpolation and pattern syntax; use verbatim strings for inert data.
+`SHELL = kash` remains the
+built-in constructor reference; use `SHELL = "bash"` or
+`SHELL = ["/bin/bash" "-eu"]` for external shells. CLI overrides remain literal.
 
 ## Value entry points
 

@@ -1,7 +1,6 @@
 package script_test
 
 import (
-	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"solod.dev/so/mem"
@@ -14,7 +13,7 @@ func TestKashSourceKeepsCommandAndValueBoundaries(t *testing.T) {
 	s := script.ParseKash(a, "test.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 9 { t.Error("valid Kash statements did not parse"); return }
-	if s.Items[1].Definition.ValueKind != definition.ValueExpression || s.Items[1].Definition.Expression.Kind != expr.String || s.Items[2].Definition.Expression.Kind != expr.Integer { t.Error("Kash definitions inherited build word/template semantics") }
+	if s.Items[1].Definition.Expression.Kind != expr.String || s.Items[2].Definition.Expression.Kind != expr.Integer { t.Error("Kash definitions lost expression semantics") }
 	if s.Items[3].Kind != script.Command || s.Items[3].Expression.Kind != expr.CommandGraph || len(s.Items[3].Expression.Items[0].Items) != 2 { t.Error("command '=' was mistaken for a definition") }
 	if !s.Items[5].Definition.Function || s.Items[6].Definition.Expression.Kind != expr.Name || s.Items[7].Definition.Expression.Kind != expr.Path { t.Error("Kame header/value or Kash wrappers were not delegated") }
 	graph := s.Items[8].Expression

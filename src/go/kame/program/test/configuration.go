@@ -3,7 +3,7 @@ package program_test
 import (
 	"kame/core"
 	"kame/host/posix"
-	"kame/lang/definition"
+	"kame/lang/expr"
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
@@ -36,7 +36,7 @@ func TestBuildConfigurationOverridesAreLiteralOwnedAndVisible(t *testing.T) {
 		t.Error("effective configuration missing from plan")
 	}
 	plan.Plan.Free(a)
-	if parsed.Items[0].Definition.ValueKind != definition.ValueTemplate || !parsed.Items[0].Definition.Default {
+	if parsed.Items[0].Definition.Expression.Kind != expr.String || !parsed.Items[0].Definition.Default {
 		t.Error("override mutated authored definition")
 	}
 	p.Free()

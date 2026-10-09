@@ -27,7 +27,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await program.evaluate("(count [1 2 3])"), "3")
         built = await program.build("answer")
         self.assertEqual(built["results"][0]["target"], "answer")
-        self.assertEqual(built["results"][0]["value"]["data"], "42")
+        self.assertEqual(built["results"][0]["value"]["data"], 42)
         self.assertTrue(any(event["type"] == "target-completed" for event in built["events"]))
         built["events"].clear()
         self.assertTrue((await program.build("answer"))["events"])
@@ -100,7 +100,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_repeated_compile_and_disposal(self):
         for index in range(100):
             program = await self.client.compile(f"value = {index}\n", name=f"cycle-{index}.km")
-            self.assertEqual(json.loads(await program.evaluate("value")), str(index))
+            self.assertEqual(json.loads(await program.evaluate("value")), index)
             source_path = program._source_path
             await program.close()
             self.assertFalse(Path(source_path).exists())

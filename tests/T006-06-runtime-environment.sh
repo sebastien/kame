@@ -182,7 +182,7 @@ KMK
   mkdir -p "$signatures"
   cat > "$signatures/Makefile.kmk" <<'KMK'
 SHELL = /bin/sh
-VALUE ?= baseline
+VALUE ?= "baseline"
 CONTENT = (text (read "./definition-input"))
 ./output : ./input
 	cp @< @>; printf x >> runs

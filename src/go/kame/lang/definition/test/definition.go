@@ -4,7 +4,6 @@ import (
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
-	"kame/lang/template"
 	"solod.dev/so/mem"
 	"solod.dev/so/testing"
 )
@@ -16,7 +15,7 @@ func sameSpan(span source.Span, start int, end int) bool {
 func TestDefinitionClassifiesExpressionAndSpans(t *testing.T) {
 	result := definition.Parse(t.Allocator(), "test.km", "build = [name: \"app\"]")
 	defer result.Free()
-	if len(result.Diagnostics) != 0 || result.Definition == nil || result.Definition.ValueKind != definition.ValueExpression || result.Definition.Expression.Kind != expr.Record {
+	if len(result.Diagnostics) != 0 || result.Definition == nil || result.Definition.Expression.Kind != expr.Record {
 		t.Error("definition did not classify record RHS as an expression")
 		return
 	}
@@ -33,43 +32,90 @@ func TestFunctionDefinitionRetainsRestParameter(t *testing.T) {
 	}
 }
 
-func TestRangeKeepsCallerSourceAndQuotedTemplate(t *testing.T) {
+func TestRangeKeepsCallerSourceAndInterpolatedString(t *testing.T) {
 	s := source.New(t.Allocator(), "test.km", "prefix\nvalue = \"hello @(name)\"")
 	defer s.Free(t.Allocator())
 	part := definition.ParseRange(t.Allocator(), s, 7, len(s.Text))
 	defer part.Free(t.Allocator())
 	d := part.Definition
-	if len(part.Diagnostics) != 0 || d == nil || d.ValueKind != definition.ValueTemplate || len(d.Template.Parts) != 2 || d.Template.Parts[1].Kind != template.Expression || !sameSpan(d.Template.Parts[1].Span, 22, 29) {
-		t.Error("quoted RHS did not retain a positioned template")
+	if len(part.Diagnostics) != 0 || d == nil || d.Expression.Kind != expr.String || len(d.Expression.Parts) != 2 || d.Expression.Parts[1].Expr == nil || !sameSpan(d.Expression.Parts[1].Expr.Span, 24, 28) {
+		t.Error("quoted RHS did not retain a positioned expression string")
 	}
 }
 
 func TestFormatDefinitionCanonicalizesWhitespace(t *testing.T) {
-	result := definition.Parse(t.Allocator(), "test.km", "value   =   words  @(name)")
+	result := definition.Parse(t.Allocator(), "test.km", "value   =   [\"words\"  name]")
 	defer result.Free()
-	if result.Definition.ValueKind != definition.ValueWords || result.Definition.Words[1].Template.Parts[0].Kind != template.Expression {
-		t.Error("unquoted RHS did not parse template words")
+	if len(result.Diagnostics) != 0 || result.Definition.Expression.Kind != expr.List || result.Definition.Expression.Items[1].Kind != expr.Name {
+		t.Error("RHS did not parse list expressions")
 		return
 	}
 	formatted := definition.Format(t.Allocator(), result.Definition)
-	if formatted != "value = words @(name)" {
+	if formatted != "value = [\"words\" name]" {
 		t.Errorf("Format() = %q", formatted)
 	}
 	mem.FreeString(t.Allocator(), formatted)
 }
 
+func TestDefinitionAtomsUseExpressionGrammar(t *testing.T) {
+	texts := []string{"alias = other", "number = 42", "flag = :false", "nothing = :nil", "path = ./file", "shell = kash", "(identity value) = value"}
+	kinds := []expr.Kind{expr.Name, expr.Integer, expr.Boolean, expr.Nil, expr.Path, expr.Name, expr.Name}
+	for i := range texts {
+		result := definition.Parse(t.Allocator(), "test.km", texts[i])
+		if len(result.Diagnostics) != 0 || result.Definition == nil || result.Definition.Expression == nil || result.Definition.Expression.Kind != kinds[i] {
+			t.Error("definition did not parse expression atom: " + texts[i])
+		}
+		result.Free()
+	}
+}
+
+func TestDefinitionRejectsTextAndMultipleExpressions(t *testing.T) {
+	texts := []string{"value = one two", "value = \"one\" \"two\"", "value = -Wall -Wextra", "value = [", "value =", "value = (broken"}
+	for i := range texts {
+		result := definition.Parse(t.Allocator(), "test.km", texts[i])
+		if len(result.Diagnostics) == 0 {
+			t.Error("invalid RHS fell back to text: " + texts[i])
+		}
+		result.Free()
+	}
+}
+
+func TestDefinitionRangeBoundsExpressionAndAllowsTrailingContinuation(t *testing.T) {
+	a := t.Allocator()
+	s := source.New(a, "test.km", "value = 42ignored")
+	part := definition.ParseRange(a, s, 0, 10)
+	if len(part.Diagnostics) != 0 || part.Definition == nil || part.Definition.Expression.Kind != expr.Integer {
+		t.Error("definition expression crossed its source range")
+	}
+	part.Free(a)
+	s.Free(a)
+	result := definition.Parse(a, "test.km", "value = 42 \\\n  ")
+	if len(result.Diagnostics) != 0 {
+		t.Error("trailing continuation became extra expression data")
+	}
+	result.Free()
+}
+
 func TestDefaultDefinitionPreservesSpansAndFormatting(t *testing.T) {
- a := t.Allocator()
- result := definition.Parse(a, "test.km", "value ?= words")
- defer result.Free()
- if len(result.Diagnostics) != 0 || result.Definition == nil || !result.Definition.Default || !sameSpan(result.Definition.NameSpan, 0, 5) { t.Error("default definition lost name/span"); return }
- formatted := definition.Format(a, result.Definition)
- if formatted != "value ?= words" { t.Error("default definition formatting lost operator") }
- mem.FreeString(a, formatted)
+	a := t.Allocator()
+	result := definition.Parse(a, "test.km", "value ?= words")
+	defer result.Free()
+	if len(result.Diagnostics) != 0 || result.Definition == nil || !result.Definition.Default || !sameSpan(result.Definition.NameSpan, 0, 5) {
+		t.Error("default definition lost name/span")
+		return
+	}
+	formatted := definition.Format(a, result.Definition)
+	if formatted != "value ?= words" {
+		t.Error("default definition formatting lost operator")
+	}
+	mem.FreeString(a, formatted)
 }
 
 func TestQuestionMarkNameIsNotDefaultOperator(t *testing.T) {
- result := definition.Parse(t.Allocator(), "test.km", "name? = \"name?\"")
- defer result.Free()
- if len(result.Diagnostics) != 0 || result.Definition == nil || result.Definition.Default || result.Definition.Name != "name?" { t.Error("question-mark name became a default") }
+	result := definition.Parse(t.Allocator(), "test.km", "name? = \"name?\"")
+	defer result.Free()
+	if len(result.Diagnostics) != 0 || result.Definition == nil || result.Definition.Default || result.Definition.Name != "name?" {
+		t.Error("question-mark name became a default")
+	}
 }
+

@@ -35,7 +35,6 @@ func (p *Program) OverrideDefinition(name, text string) bool {
 func (p *Program) literalDefinition(original *definition.Definition, text string) *definition.Definition {
 	replacement := mem.Alloc[definition.Definition](p.Alloc)
 	replacement.Name, replacement.NameSpan, replacement.Span, replacement.Default = original.Name, original.NameSpan, original.Span, original.Default
-	replacement.ValueKind = definition.ValueExpression
 	replacement.Expression = mem.Alloc[expr.Expr](p.Alloc)
 	replacement.Expression.Kind, replacement.Expression.Text, replacement.Expression.TextOwned, replacement.Expression.Span = expr.Symbol, owned(p.Alloc, text), true, original.Span
 	return replacement

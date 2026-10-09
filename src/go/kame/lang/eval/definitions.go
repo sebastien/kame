@@ -426,32 +426,7 @@ func (p *Program) definition(engine *core.EngineContext, state *definitionState)
 }
 
 func (p *Program) definitionValue(engine *core.EngineContext, d *definition.Definition, scope *Scope, context *Context) Result {
-	if d.ValueKind == definition.ValueExpression {
-		return p.evaluate(engine, scope, d.Expression, context)
-	}
-	if d.ValueKind == definition.ValueTemplate {
-		return p.Render(context.Run, d.Template, scope, context)
-	}
-	values := slices.Make[core.Value](context.Run, len(d.Words))
-	for i := range d.Words {
-		r := p.Render(context.Run, d.Words[i].Template, scope, context)
-		if r.Waiting || r.Diagnostic.Code != "" {
-			// Render yields strings only, so no callable shares storage here,
-			// but discard deeply for uniformity with other discard paths.
-			freeValuesWithCallables(context.Run, values)
-			return r
-		}
-		values[i] = r.Value
-	}
-	if len(values) == 1 {
-		result := Result{Value: values[0]}
-		values[0] = core.Value{}
-		slices.Free(context.Run, values)
-		return result
-	}
-	result := Result{Value: core.NewList(context.Run, values)}
-	freeValues(context.Run, values)
-	return result
+	return p.evaluate(engine, scope, d.Expression, context)
 }
 
 func convertParameters(a mem.Allocator, values []definition.Parameter) []expr.Parameter {

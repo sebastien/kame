@@ -96,12 +96,12 @@ func TestParseCLIUsageErrors(t *testing.T) {
 	}
 }
 
-func TestParseASTPreservesNestedTemplateSpans(t *testing.T) {
+func TestParseASTPreservesTemplateAndExpressionSpans(t *testing.T) {
 	tests := []struct {
 		lang, text, want string
 	}{
 		{"rule", "\"./{x}\" : input", "\"span\":{\"start\":3,\"end\":6}"},
-		{"script", "value = \"\"", "\"template\":{\"kind\":\"template\",\"span\":{\"start\":9,\"end\":9},\"parts\":[]}"},
+		{"script", "value = \"\"", "\"expression\":{\"kind\":\"string\",\"span\":{\"start\":8,\"end\":10},\"parts\":[]}"},
 	}
 	for _, test := range tests {
 		t.Run(test.lang, func(t *testing.T) {

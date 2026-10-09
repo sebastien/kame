@@ -19,8 +19,8 @@ cat $files | wc -l
 echo revision=$revision
 ```
 
-Definitions/functions are lazy. Their RHS is an expression/substitution, not
-`.kmk` whitespace-separated template words; Kash RHSs additionally accept
+Definitions/functions are lazy. Their RHS uses the same expression grammar as
+`.km`/`.kmk`; Kash RHSs additionally accept
 `??` compositions.
 Statements run in source order; newlines or `;` separate them. Word-start `#`
 introduces a comment; `//` is literal. Branch-local definitions do not escape.

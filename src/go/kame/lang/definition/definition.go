@@ -4,25 +4,11 @@ package definition
 import (
 	"kame/lang/expr"
 	"kame/lang/source"
-	"kame/lang/template"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 )
 
-type ValueKind int
-
-const (
-	ValueWords ValueKind = iota
-	ValueExpression
-	ValueTemplate
-)
-
-type Word struct {
-	Text     string
-	Span     source.Span
-	Template *template.String
-}
 type Parameter struct {
 	Name string
 	Span source.Span
@@ -30,16 +16,13 @@ type Parameter struct {
 }
 
 type Definition struct {
-	Span       source.Span
-	Name       string
-	NameSpan   source.Span
-	Function   bool
-	Default    bool
+	Span         source.Span
+	Name         string
+	NameSpan     source.Span
+	Function     bool
+	Default      bool
 	Parameters []Parameter
-	ValueKind  ValueKind
 	Expression *expr.Expr
-	Template   *template.String
-	Words      []Word
 }
 
 type Result struct {
@@ -95,12 +78,7 @@ func Free(a mem.Allocator, d *Definition) {
 		return
 	}
 	expr.Free(a, d.Expression)
-	d.Template.Free()
 	slices.Free(a, d.Parameters)
-	for i := range d.Words {
-		d.Words[i].Template.Free()
-	}
-	slices.Free(a, d.Words)
 	mem.Free(a, d)
 }
 
@@ -110,7 +88,7 @@ type parser struct {
 	start int
 	end   int
 	diags []source.Diagnostic
-	kash bool
+	kash  bool
 }
 
 // KashHeaderEnd recognizes only a valid header followed by standalone '='.
@@ -186,7 +164,9 @@ func (p *parser) definition() *Definition {
 		return d
 	}
 	if p.s.Text[lhsStart] == '(' {
-		if d.Default { p.error(lhsStart, lhsEnd, "default definitions must name a value") }
+		if d.Default {
+			p.error(lhsStart, lhsEnd, "default definitions must name a value")
+		}
 		d.Function = true
 		p.functionLHS(d, lhsStart, lhsEnd)
 	} else {
@@ -197,16 +177,21 @@ func (p *parser) definition() *Definition {
 			d.Name, d.NameSpan = name.Text, source.Span{Start: lhsStart, End: lhsEnd}
 		}
 	}
-	rhsStart, rhsEnd := trim(p.s.Text, equals+1, p.end)
+	rhsStart, _ := trim(p.s.Text, equals+1, p.end)
+	rhsEnd := p.end
 	for rhsStart < rhsEnd {
 		next := source.ContinuationEnd(p.s.Text, rhsStart, rhsEnd)
-		if next == rhsStart { break }
-		rhsStart, rhsEnd = trim(p.s.Text, next, rhsEnd)
+		if next == rhsStart {
+			break
+		}
+		rhsStart, _ = trim(p.s.Text, next, rhsEnd)
 	}
 	if p.kash {
 		prefix := expr.ParseKashValuePrefix(p.a, p.s, rhsStart)
-		d.Expression, d.ValueKind, d.Span.End = prefix.Expr, ValueExpression, prefix.End
-		for i := range prefix.Diagnostics { p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i]) }
+		d.Expression, d.Span.End = prefix.Expr, prefix.End
+		for i := range prefix.Diagnostics {
+			p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
+		}
 		slices.Free(p.a, prefix.Diagnostics)
 		return d
 	}
@@ -214,69 +199,31 @@ func (p *parser) definition() *Definition {
 		p.error(equals+1, rhsEnd, "expected definition value")
 		return d
 	}
-	if p.s.Text[rhsStart:rhsEnd] == "kash" || p.s.Text[rhsStart] == '(' || p.s.Text[rhsStart] == '[' || (rhsStart+1 < rhsEnd && p.s.Text[rhsStart:rhsStart+2] == "$(") {
-		prefix := expr.ParsePrefix(p.a, p.s, rhsStart)
-		d.Expression, d.ValueKind = prefix.Expr, ValueExpression
-		for i := range prefix.Diagnostics {
-			p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
-		}
-		slices.Free(p.a, prefix.Diagnostics)
-		if prefix.End != rhsEnd {
-			p.error(prefix.End, rhsEnd, "unexpected definition value")
-		}
-		return d
+	// Bound the parser to this definition: malformed values cannot consume the
+	// next declaration or another source fragment. The script boundary probe
+	// determines rhsEnd; this parse retains the AST and validates the whole RHS.
+	bounded := *p.s
+	bounded.Text = p.s.Text[:rhsEnd]
+	prefix := expr.ParsePrefix(p.a, &bounded, rhsStart)
+	d.Expression = prefix.Expr
+	for i := range prefix.Diagnostics {
+		p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
 	}
-	if p.s.Text[rhsStart] == '"' {
-		// Verbatim multi-line literal (3+ quotes) is raw: parse as expression
-		// so @(...) inside stays literal until render. Single-quote strings
-		// keep template semantics.
-		n := 0
-		for rhsStart+n < rhsEnd && p.s.Text[rhsStart+n] == '"' {
-			n++
+	slices.Free(p.a, prefix.Diagnostics)
+	end := prefix.End
+	for end < rhsEnd {
+		next := source.ContinuationEnd(p.s.Text, end, rhsEnd)
+		if next != end {
+			end = next
+			continue
 		}
-		if n >= 3 {
-			prefix := expr.ParsePrefix(p.a, p.s, rhsStart)
-			d.Expression, d.ValueKind = prefix.Expr, ValueExpression
-			for i := range prefix.Diagnostics {
-				p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
-			}
-			slices.Free(p.a, prefix.Diagnostics)
-			if prefix.Expr == nil || prefix.End != rhsEnd {
-				p.error(rhsStart, rhsEnd, "malformed verbatim literal")
-			}
-			return d
+		if !space(p.s.Text[end]) {
+			break
 		}
-		if rhsEnd-rhsStart < 2 || p.s.Text[rhsEnd-1] != '"' {
-			p.error(rhsStart, rhsEnd, "unclosed template string")
-			return d
-		}
-		d.Template, d.ValueKind = template.ParseStringRange(p.a, p.s, rhsStart+1, rhsEnd-1), ValueTemplate
-		for i := range d.Template.Diagnostics {
-			p.diags = slices.Append(p.a, p.diags, d.Template.Diagnostics[i])
-		}
-		slices.Free(p.a, d.Template.Diagnostics)
-		d.Template.Diagnostics = nil
-		return d
+		end++
 	}
-	d.ValueKind = ValueWords
-	for pos := rhsStart; pos < rhsEnd; {
-		start := pos
-		for pos < rhsEnd && !space(p.s.Text[pos]) && source.ContinuationEnd(p.s.Text, pos, rhsEnd) == pos {
-			pos++
-		}
-		word := template.ParseStringRange(p.a, p.s, start, pos)
-		for i := range word.Diagnostics {
-			p.diags = slices.Append(p.a, p.diags, word.Diagnostics[i])
-		}
-		slices.Free(p.a, word.Diagnostics)
-		word.Diagnostics = nil
-		d.Words = slices.Append(p.a, d.Words, Word{Text: p.s.Text[start:pos], Span: source.Span{Start: start, End: pos}, Template: word})
-		for pos < rhsEnd {
-			next := source.ContinuationEnd(p.s.Text, pos, rhsEnd)
-			if next != pos { pos = next; continue }
-			if !space(p.s.Text[pos]) { break }
-			pos++
-		}
+	if len(p.diags) == 0 && end != rhsEnd {
+		p.error(end, rhsEnd, "expected one definition expression; quote text and bracket lists")
 	}
 	return d
 }
@@ -448,42 +395,21 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 		b.WriteString(" =")
 	}
 	v := strings.NewBuilder(a)
-	if d.ValueKind == ValueExpression {
-		value := expr.Compact(a, d.Expression)
-		v.WriteString(value)
-		mem.FreeString(a, value)
-	} else if d.ValueKind == ValueTemplate {
-		v.WriteByte('"')
-		value := template.FormatString(a, d.Template)
-		v.WriteString(value)
-		mem.FreeString(a, value)
-		v.WriteByte('"')
-	} else {
-		for i := range d.Words {
-			if i != 0 {
-				v.WriteByte(' ')
-			}
-			value := template.FormatString(a, d.Words[i].Template)
-			v.WriteString(value)
-			mem.FreeString(a, value)
-		}
-	}
+	value := expr.Compact(a, d.Expression)
+	v.WriteString(value)
+	mem.FreeString(a, value)
 	column := expr.Columns(b.String(), 0) + 1
 	if compact || (!expandedHeader && expr.Fits(v.String(), column)) {
 		b.WriteByte(' ')
 		b.WriteString(v.String())
 	} else {
 		b.WriteString("\n  ")
-		if d.ValueKind == ValueExpression {
-			formatted := expr.FormatAt(a, d.Expression, 2)
-			b.WriteString(formatted)
-			mem.FreeString(a, formatted)
-		} else {
-			b.WriteString(v.String())
-		}
+		formatted := expr.FormatAt(a, d.Expression, 2)
+		b.WriteString(formatted)
+		mem.FreeString(a, formatted)
 	}
 	v.Free()
-	value := owned(a, b.String())
+	value = owned(a, b.String())
 	b.Free()
 	return value
 }

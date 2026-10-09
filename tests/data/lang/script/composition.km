@@ -1,5 +1,5 @@
 VERSION = "1.0"
-SOURCES = ./src/a.c ./src/b.c
+SOURCES = [./src/a.c ./src/b.c]
 
 default : ./app
 

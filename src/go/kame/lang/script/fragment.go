@@ -4,9 +4,9 @@ import (
 	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
- "solod.dev/so/strings"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strings"
 )
 
 // ParseFragment parses only this bounded range, in the selected language. The
@@ -18,28 +18,52 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 	s.Source = mem.Alloc[source.Source](a)
 	*s.Source = *original
 	s.Source.Text = original.Text[:end]
-	if lang == "kash" { parseKash(s, start); return s }
-	if lang == "kmk" { parseScript(s, start); return s }
+	if lang == "kash" {
+		parseKash(s, start)
+		return s
+	}
+	if lang == "kmk" {
+		parseScript(s, start)
+		return s
+	}
 	if lang == "expr" {
-		for start < end && (space(original.Text[start]) || original.Text[start] == '\n') { start++ }
+		for start < end && (space(original.Text[start]) || original.Text[start] == '\n') {
+			start++
+		}
 		part := expr.ParsePrefix(a, s.Source, start)
 		s.takeDiagnostics(part.Diagnostics)
 		s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: part.End}, Expression: part.Expr})
-		for part.End < end && (space(original.Text[part.End]) || original.Text[part.End] == '\n') { part.End++ }
-		if part.End != end { s.error(part.End, end, "expected exactly one expression") }
+		for part.End < end && (space(original.Text[part.End]) || original.Text[part.End] == '\n') {
+			part.End++
+		}
+		if part.End != end {
+			s.error(part.End, end, "expected exactly one expression")
+		}
 		return s
 	}
-	// Value programs retain Kame's definition RHS classification, but top-level
-	// statements are expressions (including atoms) and never recipe syntax.
+	// Definitions and top-level statements share expression grammar, never
+	// recipe syntax.
 	text := s.Source.Text
 	for pos := start; pos < end; {
-		for pos < end && (space(text[pos]) || text[pos] == '\n') { pos++ }
-		if pos == end { break }
+		for pos < end && (space(text[pos]) || text[pos] == '\n') {
+			pos++
+		}
+		if pos == end {
+			break
+		}
 		from := pos
 		lineEnd := pos
-		for lineEnd < end && text[lineEnd] != '\n' { lineEnd++ }
-		if comment(text, pos, lineEnd) { pos = nextLine(text, lineEnd); continue }
-		if following := parseConditional(s, pos, lineEnd); following != 0 { pos = following; continue }
+		for lineEnd < end && text[lineEnd] != '\n' {
+			lineEnd++
+		}
+		if comment(text, pos, lineEnd) {
+			pos = nextLine(text, lineEnd)
+			continue
+		}
+		if following := parseConditional(s, pos, lineEnd); following != 0 {
+			pos = following
+			continue
+		}
 		if name, ok := include(text[pos:lineEnd]); ok {
 			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: pos, End: lineEnd}, Include: name, OptionalInclude: strings.HasPrefix(text[pos:lineEnd], "include?")})
 			pos = nextLine(text, lineEnd)
@@ -47,11 +71,15 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		}
 		headerEnd := definition.ValueHeaderEnd(a, s.Source, pos)
 		if headerEnd != 0 {
-			if headerEnd > lineEnd { lineEnd = source.LogicalLineEnd(text, headerEnd) }
+			if headerEnd > lineEnd {
+				lineEnd = source.LogicalLineEnd(text, headerEnd)
+			}
 			definitionEnd := multilineDefinitionEnd(a, s.Source, pos, lineEnd)
 			part := definition.ParseRange(a, s.Source, pos, definitionEnd)
 			s.takeDiagnostics(part.Diagnostics)
-			if part.Definition == nil { break }
+			if part.Definition == nil {
+				break
+			}
 			pos = part.Definition.Span.End
 			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Definition, Span: part.Definition.Span, Definition: part.Definition})
 		} else {
@@ -60,9 +88,15 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 			pos = part.End
 			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: from, End: pos}, Expression: part.Expr})
 		}
-		for pos < end && space(text[pos]) { pos++ }
-		if pos < end && text[pos] != '\n' { s.error(pos, pos+1, "expected statement separator") }
-		if len(s.Diagnostics) != 0 || pos <= from { break }
+		for pos < end && space(text[pos]) {
+			pos++
+		}
+		if pos < end && text[pos] != '\n' {
+			s.error(pos, pos+1, "expected statement separator")
+		}
+		if len(s.Diagnostics) != 0 || pos <= from {
+			break
+		}
 	}
 	validateConditionals(s)
 	return s

@@ -34,7 +34,7 @@ the available literal targets.
 
 | GNU Make | Kame | Notes |
 | --- | --- | --- |
-| `VAR = value` / `VAR := value` | `VAR = value` | Kame definitions are lazy. Use Kame expressions where computation is needed; do not assume Make's recursive versus immediate expansion distinction. |
+| `VAR = value` / `VAR := value` | `VAR = "value"` | Kame RHSs are expressions and definitions are lazy: bare names reference values, numbers are typed, text requires quotes, and lists require brackets. Do not assume Make's recursive versus immediate expansion distinction. |
 | `$(VAR)` in a recipe | `@(VAR)` | Evaluates and renders a Kame definition. |
 | `$@` | `@>` | First output. |
 | `$<` | `@<` | First input. |

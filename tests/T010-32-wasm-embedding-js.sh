@@ -39,7 +39,7 @@ const value = await program.evaluate('value', {
     assert.equal(request.kind, 1);
     const independent = await Kame.create();
     const independentProgram = await independent.compile('other = 9\n', { name: 'other.km' });
-    assert.equal(JSON.parse(await independentProgram.evaluate('other')), '9');
+    assert.equal(JSON.parse(await independentProgram.evaluate('other')), 9);
     await independent.dispose();
     return { type: 'bytes', value: bytes };
   },
@@ -82,7 +82,7 @@ const abortedBuild = new AbortController();
 abortedBuild.abort();
 await assert.rejects(shared.build(['a', 'b'], { signal: abortedBuild.signal }), (error) => error.code === 'EXEC_CANCELLED');
 const values = await kame.compile('a = 1\nb = 2\n');
-assert.deepEqual((await values.build(['a', 'b'])).results.map((result) => result.value), ['"1"', '"2"']);
+assert.deepEqual((await values.build(['a', 'b'])).results.map((result) => result.value), ['1', '2']);
 await shared.dispose();
 await values.dispose();
 
@@ -141,7 +141,7 @@ for (const disposeOwner of [false, true]) {
 
 for (let i = 0; i < 100; i++) {
   const cycle = await kame.compile(`value = ${i}\n`, { name: `cycle-${i}.km` });
-  assert.equal(JSON.parse(await cycle.evaluate('value')), String(i));
+  assert.equal(JSON.parse(await cycle.evaluate('value')), i);
   await cycle.dispose();
 }
 

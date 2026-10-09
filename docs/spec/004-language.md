@@ -318,9 +318,10 @@ specified in `014-patterns.md`. Rule target templates are unchanged.
 
 ## String Templates
 
-String templates are parsed by the template parser. They appear as definition
-right-hand sides that begin with `"`, as recipe text, and as standalone template
-sources. They contain literal segments and expansions:
+String templates are parsed by the template parser. They appear as external-shell
+recipe text and standalone template sources, or as data explicitly passed to
+`render`. Quoted definition values are expression strings, not implicit template
+sources. String templates contain literal segments and expansions:
 
 - `@(expression)` evaluates an expression, including a reference expression.
 - `@<`, `@>`, and argument forms resolve contextual selectors.
@@ -431,15 +432,56 @@ A function definition is:
 
 A rest parameter ends in `...`, appears once, and must be last.
 
-Definition right-hand sides are classified as follows:
+Every definition right-hand side is exactly one expression, for both values and
+functions in `.km` and `.kmk`. Kash uses the same expression grammar with its
+existing reference wrappers and value recovery. Parse failure never falls back
+to textual data. Definitions remain lazy as specified in `005-evaluation.md`:
+aliases retain the referenced value's kind and dependencies, forward references
+are valid, and cycles fail when demanded. Unused definitions and skipped defaults
+are not evaluated.
 
-1. A leading `(`, `[`, or `$(` is parsed as one expression value.
-2. A leading `"` is parsed as one quoted string template.
-3. Otherwise top-level whitespace separates one or more unquoted string
-   templates; one item is a scalar and multiple items form a list.
+```kame
+A = B
+B = 42
+TEXT = "hello"
+FLAGS = ["-Wall" "-Wextra"]
+FILES = [./src/a.c ./src/b.c]
+(identity value) = value
+SHELL = kash
+```
 
-Once classified as an expression, parse failure does not fall back to a string.
-Definitions are lazy as specified in `005-evaluation.md`.
+### Migrating textual definition values
+
+- Quote former bare text: `NAME = build` becomes `NAME = "build"`. A bare name
+  now references a binding, including in a function body.
+- Bracket former word lists: `FLAGS = -Wall -O2` becomes
+  `FLAGS = ["-Wall" "-O2"]`. Quote textual items; explicit paths such as `./file`
+  are already expression atoms.
+- Numeric, boolean, and nil atoms are typed: `N = 42` is numeric. Use `N = "42"`
+  when text is intended. An evaluation wrapper such as `(nop B)` is unnecessary
+  for an alias; write `A = B`.
+- Quoted values use ordinary expression-string escapes and interpolation
+  (`@(...)` and `{(...)}`); verbatim strings remain inert until explicitly
+  rendered. Interpolation-free quoted strings also retain expression-pattern
+  semantics: use `DATA = """{name}"""` for literal pattern-looking data.
+  Former unquoted template text must be quoted. Template-only
+  directives and compact selectors in text require explicit `render`, rather
+  than implicit definition-template parsing.
+- `SHELL = kash` remains valid: `kash` references the built-in constructor
+  callable, not literal text. External shell names require quotes, for example
+  `SHELL = "bash"`; shell argv require brackets, for example
+  `SHELL = ["/bin/bash" "-eu"]`. `SHELL = /bin/sh` remains an explicit path.
+- `?=` remains a lazy default in value/build sources. CLI and environment
+  configuration overrides remain literal string data, not expression source.
+
+This migration also affects CLI and embedding results: `value = 42` publishes
+an integer (`value.data: 42` in JSON target events), not the former string
+(`value.data: "42"`). Use `value = "42"` to preserve textual data. The AST keeps
+the schema-1 `valueKind` field as a compatibility tag, always `"expression"`;
+the value itself is described by `expression.kind`.
+
+Paths must be explicit expression atoms: former textual `bin/kame` becomes
+`./bin/kame` when it denotes a path, or `"bin/kame"` when it denotes string data.
 
 ## Rules
 
@@ -654,8 +696,8 @@ The source suffix names the independently usable outer language:
 `.km` composes the existing definition and expression parsers; it does not
 introduce another expression grammar or reinterpret expressions as shell text.
 Rule headers and recipe bodies are invalid in a value program. Definitions
-retain their documented RHS classification and lazy semantics; top-level
-expression statements always use expression parsing, never RHS classification.
+and top-level statements share expression grammar; definitions retain lazy
+semantics.
 Thus a statement `42` is an integer and a statement `:nil` is nil. Balanced
 expressions may span lines, and comments/blank lines do not become statements.
 
@@ -730,8 +772,8 @@ expression definitions and verbatim string definitions remain supported.
 - Empty captures and malformed character classes are rejected.
 - File rules require explicit path outputs; `output.o : input.c` is not treated
   as a file rule.
-- Scalar, list, and function definitions follow deterministic RHS
-  classification.
+- Scalar, list, and function definitions follow the shared expression grammar,
+  including typed atoms and lazy aliases, without a textual fallback.
 - Command-substitution atoms delegate to Kash, retain embedded source spans,
   and parse/format without performing host effects. A leading `$(` definition
   RHS is an expression, while `$(...)` in plain quoted strings remains literal.

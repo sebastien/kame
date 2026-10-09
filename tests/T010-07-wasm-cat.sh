@@ -15,7 +15,7 @@ make dist-wasm >/dev/null
 project="$TMPDIR/wasm-cat"
 mkdir -p "$project/out"
 cat >"$project/Makefile.kmk" <<'EOF'
-GREETING = hello
+GREETING = "hello"
 SHELLVAL = (shell "printf hi")
 ./out/greeting.txt :
 	printf hello > out/greeting.txt
@@ -96,7 +96,7 @@ else
 	test-fail "cat -C: status=$status out=$(cat "$project/out.txt")"
 fi
 wasm do cat -c 'value = 7' value
-if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '"7"' ]; then
+if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '7' ]; then
 	test-ok "cat uses an inline source"
 else
 	test-fail "cat -c: status=$status out=$(cat "$project/out.txt")"

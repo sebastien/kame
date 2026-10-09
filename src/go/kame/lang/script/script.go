@@ -297,41 +297,10 @@ func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEn
 	if pos > lineEnd {
 		lineEnd = source.LogicalLineEnd(text, pos)
 	}
-	if text[pos] == '"' {
-		// Verbatim multi-line literal: 3+ quotes open raw until same-length run.
-		n := 0
-		for pos+n < len(text) && text[pos+n] == '"' {
-			n++
-		}
-		if n >= 3 {
-			cur := pos + n
-			for cur < len(text) {
-				if text[cur] != '"' {
-					cur++
-					continue
-				}
-				run := 0
-				for cur+run < len(text) && text[cur+run] == '"' {
-					run++
-				}
-				if run == n {
-					cur += n
-					for cur < len(text) && text[cur] != '\n' {
-						cur++
-					}
-					return cur
-				}
-				cur += run
-			}
-			return lineEnd
-		}
-		return lineEnd
-	}
-	if text[pos] != '(' && text[pos] != '[' && !(pos+1 < len(text) && text[pos:pos+2] == "$(") {
-		return lineEnd
-	}
-	// Delegate nested delimiter ownership to the expression/process parsers;
-	// shell-like escaped parentheses are not expression delimiters.
+	// Let the expression parser own all value boundaries, including multiline
+	// strings and nested process captures, without another RHS classifier.
+	// This probe discovers the range and discards its AST/diagnostics; definition
+	// parsing then enforces exactly one expression inside that bounded range.
 	prefix := expr.ParsePrefix(a, s, pos)
 	end := prefix.End
 	expr.Free(a, prefix.Expr)

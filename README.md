@@ -55,7 +55,7 @@ include-path = ./lib/h
 sources-c = (wildcard ./src/**/*.c)
 headers = (wildcard ./src/**/*.h)
 
-# Use an expression to combine referenced lists; bare RHS words are text
+# Every definition RHS is an expression; combine referenced lists explicitly
 sources = (concat sources-c headers)
 
 # Pattern replace remaps paths, and map applies it to every source

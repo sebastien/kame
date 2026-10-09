@@ -14,9 +14,9 @@ printf a >"$project/a"
 printf b >"$project/b"
 cat >"$project/Makefile.kmk" <<'KMK'
 # A comment ending with backslash stays one physical line \
-words = one \
-  two \
-  three
+words = ["one" \
+  "two" \
+  "three"]
 paths = (list ./a \
   ./b)
 dir = \

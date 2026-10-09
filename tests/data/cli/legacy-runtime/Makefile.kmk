@@ -1,5 +1,5 @@
-ENTRY = bin/kame
-OUTPUT = dist/kame
+ENTRY = ./bin/kame
+OUTPUT = ./dist/kame
 
 ./dist/kame : ./bin/kame
 	mkdir -p dist

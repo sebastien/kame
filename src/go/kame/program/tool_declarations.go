@@ -50,8 +50,6 @@ func (p *Program) declareBuildTools(parsed *script.Script) {
   p.declareExpressionTools(item.Expression)
   if item.Definition != nil {
    p.declareExpressionTools(item.Definition.Expression)
-   p.declareTemplateTools(item.Definition.Template)
-   for j := range item.Definition.Words { p.declareTemplateTools(item.Definition.Words[j].Template) }
   }
   if item.Rule != nil {
    for j := range item.Rule.Inputs { p.declareTemplateTools(item.Rule.Inputs[j].Template) }

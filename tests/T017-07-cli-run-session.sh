@@ -117,9 +117,9 @@ PYTIME
 	check '"Hello Ada"' do run -C "$work/cwd" "$work/functions.km" -c 'name = "Ada"' -c '(greet name)'
 	test-step "$backend rule and value composition"
 	"${command[@]}" do run --json -l kmk -c 'value = 42' value > "$work/values-json" 2> "$work/err"
-	if jq -e -s 'all(.[]; .schema == 1) and any(.[]; .type == "target-value" and .target == "value" and .value.data == "42") and any(.[]; .type == "target-completed" and .target == "value")' "$work/values-json" >/dev/null; then test-ok "$backend single-source selected values emit schema-1 JSON events"; else test-fail "$backend leaked raw value output into JSON"; fi
+	if jq -e -s 'all(.[]; .schema == 1) and any(.[]; .type == "target-value" and .target == "value" and .value.data == 42) and any(.[]; .type == "target-completed" and .target == "value")' "$work/values-json" >/dev/null; then test-ok "$backend single-source selected values emit schema-1 JSON events"; else test-fail "$backend leaked raw value output into JSON"; fi
 	"${command[@]}" do run --timeout 1000 --json -l kmk -c 'value = 42' value > "$work/timed-values-json" 2> "$work/err"
-	if jq -e -s 'any(.[]; .type == "target-value" and .target == "value" and .value.data == "42")' "$work/timed-values-json" >/dev/null; then test-ok "$backend timed sessions preserve selected value JSON"; else test-fail "$backend timed session omitted selected values"; fi
+	if jq -e -s 'any(.[]; .type == "target-value" and .target == "value" and .value.data == 42)' "$work/timed-values-json" >/dev/null; then test-ok "$backend timed sessions preserve selected value JSON"; else test-fail "$backend timed session omitted selected values"; fi
 	"${command[@]}" do run --json -l kmk -c $'a : shared\nb : shared\nshared :\n\t@(out "once")\n' a b > "$work/shared-json" 2> "$work/err"
 	if jq -e -s '[.[] | select(.type == "target-started" and .target == "shared")] | length == 1' "$work/shared-json" >/dev/null; then test-ok "$backend multi-target build retains one shared prerequisite"; else test-fail "$backend multi-target build duplicated shared work"; fi
 	printf 'value = 42\n' | "${command[@]}" do parse --json --lang kmk > "$work/alias-ast" 2> "$work/err"

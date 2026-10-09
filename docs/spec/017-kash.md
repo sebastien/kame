@@ -184,8 +184,8 @@ wrappers, and recovery separators. `$REFERENCE`, `${REFERENCE}`, Kash's `@(...)`
 shorthand, and infix `??` are not added to ordinary Kame expressions: use
 `(cat "Hello, " WHO)`, not `(cat "Hello, " $WHO)`. Existing Kame template
 expansions and expression-string interpolation retain their own rules. Functions
-retain Kame parameter and lazy evaluation semantics. Kash does not inherit
-`.kmk` word-list or recipe-template RHS syntax.
+retain Kame parameter and lazy evaluation semantics. All definition surfaces
+use expressions rather than word-list or recipe-template RHS syntax.
 
 Definitions in a statement sequence are registered lazily before that sequence
 runs. Duplicate names in one sequence are errors. Each selected control branch

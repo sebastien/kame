@@ -21,7 +21,7 @@ func TestDeclarationPredicateUsesLiteralOverridesAndLazyDefinitions(t *testing.T
 
 func TestDeclarationPredicateRejectsCyclesEffectsAndNonBooleanValues(t *testing.T) {
  a := t.Allocator()
- prefixes := []string{"a = @(b)\nb = @(a)\n", "", "", "", "", ""}
+ prefixes := []string{"a = b\nb = a\n", "", "", "", "", ""}
  predicates := []string{"a", "42", "(shell \"never execute\")", "(out \"never publish\")", "(read \"never read\")", "(eq missing 1)"}
  codes := []string{"DEP_CYCLE", "EXPR_INVALID", "CAP_DENIED", "PHASE_INVALID", "CAP_DENIED", "REF_MISSING"}
  for i := range prefixes {

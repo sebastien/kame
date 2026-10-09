@@ -981,7 +981,7 @@ func TestLiftedDefinitionReevaluatesAfterDependencyInvalidation(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	state := &operationState{}
 	registry.Add(eval.Operation{Name: "count-op", Call: countOperation, Context: state, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "test", "first = \"input\"\nsecond = (count-op first)")
+	parsed := script.Parse(a, "test", "first = \"input\"\nalias = first\nsecond = (count-op alias)")
 	program := eval.Compile(a, engine, parsed, registry)
 	first, second := program.Definition("first"), program.Definition("second")
 	engine.Request(second)
@@ -1415,7 +1415,7 @@ func TestDefinitionCycleFailsThroughEngine(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "a = \"@(b)\"\nb = \"@(a)\"")
+	parsed := script.Parse(a, "test", "a = b\nb = a")
 	program := eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("a")
 	engine.Request(node)
@@ -1449,20 +1449,20 @@ func TestDefinitionCannotPublishCallable(t *testing.T) {
 	registry.Free()
 }
 
-func TestFunctionDefinitionsRenderWordAndTemplateRHS(t *testing.T) {
+func TestFunctionDefinitionsEvaluateExpressionStrings(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "(prefix value) = pre-@{value}\n(quoted value) = \"@{value}!\"")
+	parsed := script.Parse(a, "test", "(prefix value) = \"pre-@(value)\"\n(quoted value) = \"@(value)!\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(prefix \"fix\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "pre-fix" {
-		t.Error("word function RHS was not rendered")
+		t.Error("function expression-string prefix was not evaluated")
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(quoted \"ok\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "ok!" {
-		t.Error("template function RHS was not rendered")
+		t.Error("function expression-string suffix was not evaluated")
 	}
 	result.Free(a)
 	engine.Free()

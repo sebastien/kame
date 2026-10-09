@@ -780,40 +780,12 @@ func (e *astEncoder) definition(value *definition.Definition) {
 		e.EndObject()
 	}
 	e.EndArray()
+	// Schema-1 compatibility tag, not a separate RHS classification.
 	e.Str("valueKind")
-	e.Str(definitionKind(value.ValueKind))
+	e.Str("expression")
 	if value.Expression != nil {
 		e.Str("expression")
 		e.expr(value.Expression)
 	}
-	if value.Template != nil {
-		e.Str("template")
-		e.template(value.Template)
-	}
-	if len(value.Words) != 0 {
-		e.Str("words")
-		e.BeginArray()
-		for i := range value.Words {
-			word := value.Words[i]
-			e.BeginObject()
-			e.Str("text")
-			e.Str(word.Text)
-			e.Str("span")
-			e.span(word.Span)
-			e.Str("template")
-			e.template(word.Template)
-			e.EndObject()
-		}
-		e.EndArray()
-	}
 	e.EndObject()
-}
-func definitionKind(k definition.ValueKind) string {
-	if k == definition.ValueWords {
-		return "words"
-	}
-	if k == definition.ValueExpression {
-		return "expression"
-	}
-	return "template"
 }

@@ -71,7 +71,7 @@ compare "missing target" ./nope.txt
 
 test-step "a parse error matches native diagnostic and excerpt"
 cat >"$project/Makefile.kmk" <<'EOF'
-GREETING = hello
+GREETING = "hello"
 this is not valid
 EOF
 compare "parse error" ./out.txt

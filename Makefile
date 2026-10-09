@@ -82,6 +82,7 @@ test-wasm: wasm-check
 	tests/T004-14-lang-rule-positional-captures.sh
 	tests/T004-15-lang-rule-regex-captures.sh
 	tests/T004-16-lang-computed-outputs.sh
+	tests/T004-17-lang-definition-expressions.sh
 	tests/T012-02-streams-live-cli.sh
 	tests/T012-03-streams-large-output.sh
 	tests/T012-04-streams-backpressure.sh
