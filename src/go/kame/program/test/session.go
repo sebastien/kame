@@ -61,6 +61,84 @@ func TestSessionCannotCompleteSyntaxAcrossFragments(t *testing.T) {
 	if compiled.Session != nil || len(compiled.Diagnostics) == 0 { t.Error("fragment syntax was combined and reparsed") }
 }
 
+func TestSessionEntryPoliciesStayWithTheirFragments(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	for order := 0; order < 2; order++ {
+		fragments := []program.Fragment{
+			{Name: "explicit.kmk", Lang: "kmk", Text: "chosen = 2\n", Entries: []string{"chosen"}},
+			{Name: "implicit.kmk", Lang: "kmk", Text: "default = 1\n"},
+		}
+		if order == 1 { first := fragments[0]; fragments[0] = fragments[1]; fragments[1] = first }
+		compiled := program.CompileSession(a, fragments, registry, program.Options{})
+		if compiled.Session == nil { compiled.Free(a); t.Fatal("entry policy session compilation failed"); return }
+		s := compiled.Session
+		if len(s.Work) != 2 { t.Error("fragment entries were merged") } else {
+			for i := range s.Work {
+				implicit := len(fragments[i].Entries) == 0
+				target := "chosen"
+				if implicit { target = "default" }
+				w := s.Work[i]
+				if w.Target != target || w.ImplicitDefault != implicit || w.Selected == implicit || !w.Value || w.Raw {
+					t.Error("normalization lost explicit or implicit entry policy")
+				}
+			}
+		}
+		s.Free()
+		compiled.Free(a)
+	}
+}
+
+func TestSessionImplicitDefaultDiagnosticSurvivesAdjacentExplicitEntry(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	for order := 0; order < 2; order++ {
+		fragments := []program.Fragment{
+			{Name: "explicit.kmk", Lang: "kmk", Text: "chosen :\n", Entries: []string{"chosen"}},
+			{Name: "implicit.kmk", Lang: "kmk", Text: ""},
+		}
+		if order == 1 { first := fragments[0]; fragments[0] = fragments[1]; fragments[1] = first }
+		compiled := program.CompileSession(a, fragments, registry, program.Options{})
+		if compiled.Session != nil { compiled.Session.Free(); t.Error("missing implicit default was accepted") }
+		if len(compiled.Diagnostics) != 1 { t.Error("missing implicit default diagnostic was lost") } else {
+			d := compiled.Diagnostics[0]
+			if d.Code != "TGT_NO_DEFAULT" || d.Message != "no target was requested and no default target is defined" || len(d.Notes) == 0 {
+				t.Error("implicit default became an explicit target diagnostic")
+			}
+		}
+		compiled.Free(a)
+	}
+}
+
+func TestSessionTargetAssignmentsJoinOnlyWithinTheirFragment(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	for joined := 0; joined < 2; joined++ {
+		entries := []string{"deploy", "region=west"}
+		expected := "deploy"
+		if joined == 1 { expected = "deploy region=west" } else { entries = entries[:1] }
+		fragments := []program.Fragment{
+			{Name: "target.kmk", Lang: "kmk", Text: "deploy {region=original} :\ndefault {region=original} :\n", Entries: entries},
+			{Name: "assignment.kmk", Lang: "kmk", Text: "", Entries: []string{"region=east"}},
+		}
+		compiled := program.CompileSession(a, fragments, registry, program.Options{})
+		if compiled.Session == nil { compiled.Free(a); t.Fatal("fragment-local target arguments failed compilation"); return }
+		s := compiled.Session
+		if len(s.Work) != 2 { t.Error("target and assignment fragments were merged") } else {
+			if s.Work[0].Target != expected || s.Work[1].Target != "default region=east" { t.Error("assignment joined a target from another fragment") }
+			for i := range s.Work {
+				w := s.Work[i]
+				if w.Selected || w.ImplicitDefault || w.Value || w.Raw { t.Error("rule entry policy changed during normalization") }
+			}
+		}
+		s.Free()
+		compiled.Free(a)
+	}
+}
+
 func TestSessionDryRunEvaluatesWithoutEffectRequests(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)

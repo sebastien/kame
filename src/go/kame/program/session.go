@@ -34,6 +34,7 @@ type SessionWork struct {
 	Value bool
  Raw bool
 	ImplicitDefault bool
+	entryGroup int
 }
 
 // Session owns one compiled program; work is sequenced by its host driver.
@@ -151,8 +152,8 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		part.Free()
 		if f.Lang == "kash" { kashFragments = true }
 		if f.Lang == "kmk" { ruleFragments = true }
-		for j := range f.Entries { work = slices.Append(a, work, SessionWork{Target: cloneText(a, f.Entries[j]), Selected: f.Lang == "km", Value: f.Lang == "km"}) }
-		if f.Lang == "kmk" && !f.Inline && len(f.Entries) == 0 { work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), ImplicitDefault: true}) }
+		for j := range f.Entries { work = slices.Append(a, work, SessionWork{Target: cloneText(a, f.Entries[j]), Selected: f.Lang == "km", Value: f.Lang == "km", entryGroup: i+1}) }
+		if f.Lang == "kmk" && !f.Inline && len(f.Entries) == 0 { work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), ImplicitDefault: true, entryGroup: i+1}) }
 	}
 	if len(work) == 0 && (ruleFragments || (valueDefinitions && !kashFragments)) { work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), Value: !ruleFragments, ImplicitDefault: true}) }
 	compiled := Compile(a, parsed, registry, options)
@@ -172,7 +173,8 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 			if work[i].Target == "" { normalized = slices.Append(a, normalized, work[i]); continue }
 			var entries []string
 			start := i
-			for i < len(work) && work[i].Target != "" && work[i].Value == work[start].Value {
+			// Only operands authored in the same fragment share entry policy.
+			for i < len(work) && work[i].Target != "" && work[i].entryGroup == work[start].entryGroup {
 				entries = slices.Append(a, entries, work[i].Target)
 				i++
 			}
