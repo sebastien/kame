@@ -47,3 +47,4 @@ host-specific boundaries remain explicit.
 | [035 Native Windows CLI](035-native-windows-cli.md) | Native PE behavior and Windows-host conformance |
 | [036 CLI presentation](036-cli_ansi.md) | ANSI, text and JSON presentation, progress and diagnostics |
 | [037 Build inspection](037-build-inspection.md) | Recursive resource inventories, producer provenance, dependency stages and completeness |
+| [038 Direct Kash and values](038-direct-kash-and-values.md) | Direct recipe ASTs, expression statements, tracked command heads, text/JSON separation, interpolated paths, wildcard kind flags and action names |

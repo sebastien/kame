@@ -455,7 +455,7 @@ func TestCaptureRedirectionDependenciesAndEffects(t *testing.T) {
 		return
 	}
 	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}}
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: grants})
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: posix.ResolveTool, Directory: dir, Grants: grants})
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
 		t.Fatal("compile failed")
 		return

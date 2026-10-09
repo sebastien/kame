@@ -74,6 +74,14 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			end := p.Pos
 			for end < len(text) && space(text[end]) { end++ }
 			if end < len(text) && text[end] != '\n' && text[end] != ';' && text[end] != '#' { s.error(end, end+1, "unexpected Kash definition value; expected statement separator") }
+		} else if text[start] == '(' {
+			part := expr.ParseKashValuePrefix(s.Alloc, s.Source, start)
+			s.takeDiagnostics(part.Diagnostics)
+			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: part.End}, Expression: part.Expr})
+			p.Pos = part.End
+			end := p.Pos
+			for end < len(text) && space(text[end]) { end++ }
+			if end < len(text) && text[end] != '\n' && text[end] != ';' && text[end] != '#' { s.error(end, end+1, "expression statement requires a statement separator") }
 		} else {
 			part := expr.ParseCommandPrefix(s.Alloc, s.Source, start)
 			s.takeDiagnostics(part.Diagnostics)
@@ -126,7 +134,10 @@ func (p *kashParser) ifBlock(level int, start int) *expr.Expr {
 				*view = *s.Source
 				view.Text = text[:end]
 				var condition expr.Prefix
-				if valueStart+1 < end && text[valueStart:valueStart+2] == "@(" { condition = expr.ParseKashValuePrefix(s.Alloc, view, valueStart) } else {
+				if text[valueStart] == '(' {
+					condition = expr.ParseKashValuePrefix(s.Alloc, s.Source, valueStart)
+					if condition.End > end { end = condition.End; for end < len(text) && text[end] != '\n' { end++ } }
+				} else {
 					condition = expr.ParseCommandPrefix(s.Alloc, view, valueStart)
 					condition.Expr.Kind = expr.CommandTest
 					if condition.Expr.Async || condition.Expr.AcceptExit || len(condition.Expr.Body) != 0 || (valueStart+1 < end && text[valueStart:valueStart+2] == "$(") { s.error(valueStart, end, "command conditions cannot use async, capture, acceptance or recovery") }
@@ -186,9 +197,19 @@ func (p *kashParser) matchBlock(level int, start int, wordEnd int) *expr.Expr {
 	for end < len(text) && text[end] != '\n' { end++ }
 	valueStart := wordEnd
 	for valueStart < end && space(text[valueStart]) { valueStart++ }
-	if valueStart+1 >= end || (text[valueStart:valueStart+2] != "@(" && text[valueStart:valueStart+2] != "$(") { s.error(valueStart, end, "match subject requires @(...) or $(...)") } else {
+	if valueStart >= end { s.error(valueStart, end, "match subject requires a Kame expression, reference or capture") } else {
+		if text[valueStart] == '(' {
+			value := expr.ParseKashValuePrefix(s.Alloc, s.Source, valueStart)
+			s.takeDiagnostics(value.Diagnostics)
+			e.Body = slices.Append(s.Alloc, e.Body, value.Expr)
+			if value.End > end { end = value.End; for end < len(text) && text[end] != '\n' { end++ } }
+			following := value.End
+			for following < end && space(text[following]) { following++ }
+			if following < end && text[following] != '#' { s.error(following, end, "control header requires exactly one expression") }
+		} else {
 		subject := p.valueHeader(valueStart, end, true)
 		e.Body = slices.Append(s.Alloc, e.Body, subject)
+		}
 	}
 	p.Pos = nextLine(text, end)
 	seenElse := false

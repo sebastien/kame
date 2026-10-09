@@ -22,8 +22,10 @@ This specification extends the formatting contract in
 - Named value declarations use `UPPER_CASE`: `PAGE_NAMES`, `BUILD_DIR`.
 - Functions, parameters, and local bindings use `lower-kebab-case`.
 - Effectful functions end in `!`: `publish-page!`, `write-report!`. This includes
-  functions that perform effects indirectly through other functions. Pure
-  transformations do not use the suffix.
+  functions that perform actions indirectly through other functions. Tracked
+  observations and pure transformations do not use the suffix. Control effects
+  such as `fail!` do. `038-direct-kash-and-values.md` defines the categories;
+  naming does not replace runtime effect or capability tracking.
 - Predicates end in `?`: `valid-page?`, `contains?`. Their result answers a
   yes-or-no question; a function that returns the matching item is not a predicate.
 - Record keys use `lower-kebab-case` unless an external data format requires

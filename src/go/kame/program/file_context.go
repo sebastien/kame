@@ -92,7 +92,7 @@ func (p *Program) acceptedInputs(entry *instance) []core.Observation {
 
 // Process/tool identity proves how a recipe ran, not that an inputless file
 // recipe has become declarative. Actual consumed files and globs do qualify.
-func fileHasMaterialInputs(entry *instance) bool {
+func (p *Program) fileHasMaterialInputs(entry *instance) bool {
 	inputs, resources := entry.Plan.Inputs, entry.Plan.ResourceInputs
 	if entry.Plan.Resolved {
 		inputs, resources = entry.Plan.ResolvedInputs, entry.Plan.ResolvedResourceInputs
@@ -103,17 +103,25 @@ func fileHasMaterialInputs(entry *instance) bool {
 		}
 	}
 	for i := range entry.AcceptedRecord.Inputs {
-		key := entry.AcceptedRecord.Inputs[i].Key
+		item := entry.AcceptedRecord.Inputs[i]
+		key := item.Key
+		if key.Kind == core.ResourceFile && item.Aspect == core.ObservationValue && p.isToolPath(key.Name) { continue }
 		if key.Kind == core.ResourceFile || key.Kind == core.ResourceGlob || key.Kind == core.ResourceDefinition || (key.Kind == core.ResourceEnvironment && key.Name != eval.ProcessEnvironmentName) {
 			return true
 		}
 	}
 	for i := range entry.Node.Dynamic {
 		dependency := entry.Node.Dynamic[i]
+		if dependency.Key.Kind == core.ResourceFile && p.isToolPath(dependency.Key.Name) { continue }
 		if !slices.Contains(entry.Node.OrderOnly, dependency) && (dependency.Key.Kind == core.ResourceFile || dependency.Key.Kind == core.ResourceGlob) {
 			return true
 		}
 	}
+	return false
+}
+
+func (p *Program) isToolPath(name string) bool {
+	for i := range p.Tools { if p.Tools[i].Resolved && p.Tools[i].Path == name { return true } }
 	return false
 }
 
@@ -472,7 +480,7 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 func (p *Program) finishFileContext(c *core.EngineContext, index int) core.ProducerResult {
 	entry := &p.Instances[index]
 	state := entry.FileContext
-	material := entry.Rule.Kind != rule.FileRule || fileHasMaterialInputs(entry)
+	material := entry.Rule.Kind != rule.FileRule || p.fileHasMaterialInputs(entry)
 	if material && !entry.Rule.Always && !p.Options.Force && !p.cacheBlockedByBareTask(entry) && state.Stored.Matches(&entry.AcceptedRecord) {
 		entry.Plan.Freshness = Fresh
 		if entry.Rule.Kind == rule.CachedTaskRule {

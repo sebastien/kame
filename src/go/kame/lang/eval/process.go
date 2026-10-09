@@ -214,6 +214,10 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				return r
 			}
 			rememberArgumentEffects(state, c, before, beforePaths)
+			if len(state.Argv) == 0 && (r.Value.Kind != core.String || r.Value.Text == "" || strings.IndexByte(r.Value.Text, 0) >= 0) {
+				r.Free(c.Run)
+				return failure(c.Run, "EXPR_INVALID", word.Span, "executable requires one nonempty string or path without NUL")
+			}
 			if r.Value.Kind == core.List {
 				if len(state.Argv) == 0 {
 					r.Free(c.Run)
@@ -237,10 +241,21 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		}
 		cwd := state.Cwd
 		if cwd == "" { cwd = c.Cwd }
-		if strings.IndexByte(state.Argv[0].Text, '/') >= 0 {
+		if state.Argv[0].ToolName == "" && strings.IndexByte(state.Argv[0].Text, '/') >= 0 {
 			resolved := canonicalPath(state.Alloc, cwd, state.Argv[0].Text)
 			state.Argv[0].Free(state.Alloc)
 			state.Argv[0] = core.Value{Kind: core.String, Text: resolved}
+		}
+		headSpan := stage.Span
+		for i := range stage.Items { if stage.Items[i].Kind == expr.CommandWord { headSpan = stage.Items[i].Span; break } }
+		if !p.DryRun {
+			toolName := state.Argv[0].ToolName
+			if toolName == "" { toolName = state.Argv[0].Text }
+			tool := c.TrackedTool(toolName, headSpan)
+			if tool.Waiting { return tool }
+			if tool.Diagnostic.Code != "" { return p.captureRecovery(e, c, state, tool) }
+			state.Argv[0].Free(state.Alloc)
+			state.Argv[0] = tool.Value
 		}
 		if !authorizeExecutable(c, state.Argv[0].Text) {
 			return failure(c.Run, "CAP_DENIED", stage.Span, "executable access denied; PATH lookup requires unrestricted run capability")
@@ -346,7 +361,7 @@ func rememberArgumentEffects(state *captureState, c *Context, before int, before
 // Only a completed process failure selects the fallback. Argument evaluation,
 // authorization, and waiting never reach this recovery boundary.
 func (p *Program) captureRecovery(e *expr.Expr, c *Context, state *captureState, r Result) Result {
-	if len(e.Body) == 0 || (r.Diagnostic.Code != "RECIPE_FAIL" && r.Diagnostic.Code != "HOST_FAIL" && r.Diagnostic.Code != "RECIPE_TIMEOUT") { return r }
+	if len(e.Body) == 0 || (r.Diagnostic.Code != "RECIPE_FAIL" && r.Diagnostic.Code != "HOST_FAIL" && r.Diagnostic.Code != "TOOL_MISSING" && r.Diagnostic.Code != "RECIPE_TIMEOUT") { return r }
 	state.Recovering = true
 	r.Free(c.Run)
 	return p.capture(e.Body[0], c)
@@ -390,7 +405,9 @@ func appendArgument(state *captureState, value core.Value) bool {
 		mem.FreeString(state.Alloc, text)
 		return false
 	}
-	state.Argv = slices.Append(state.Alloc, state.Argv, core.Value{Kind: core.String, Text: text})
+	argument := core.Value{Kind: core.String, Text: text}
+	if len(state.Argv) == 0 && value.ToolName != "" { argument.ToolName = owned(state.Alloc, value.ToolName) }
+	state.Argv = slices.Append(state.Alloc, state.Argv, argument)
 	return true
 }
 

@@ -60,7 +60,7 @@ func materializeNewerKash(t *testing.T, directory string, text string) string {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: directory, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}, {Capability: eval.Write, Names: []string{"."}}, {Capability: eval.Run}}})
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: posix.ResolveTool, Directory: directory, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}, {Capability: eval.Write, Names: []string{"."}}, {Capability: eval.Run}}})
 	defer compiled.Free(a)
 	if compiled.Program == nil { t.Fatal("Kash fixture did not compile"); return "COMPILE_FAILED" }
 	defer compiled.Program.Free()

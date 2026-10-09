@@ -36,14 +36,14 @@ for backend in native wasm; do
 	check '"fallback"' do run --allow-run -l expr -c $'$(false\n?\n printf fallback)'
 	check 'nested' do run -l kash -c 'printf "%s" $(false ? printf nested)'
 	check 'accepted' do run -l kash -c 'false ? false?; printf accepted'
-	check 'lazy' do run -l kash -c 'printf lazy ? printf @([invalid: 1])'
+	check 'lazy' do run -l kash -c 'printf lazy ? printf (nop [invalid: 1])'
 	check 'fallback' do run -l kash -c 'value = $(false ? printf fallback); printf "%s" $value'
-	check 'abab' do run -l kash -c '(recover X) = $(false ? printf "%s" $X); value = @(cat (recover "a") (recover "b") (recover "a") (recover "b")); printf "%s" $value'
+	check 'abab' do run -l kash -c '(recover X) = $(false ? printf "%s" $X); value = (cat (recover "a") (recover "b") (recover "a") (recover "b")); printf "%s" $value'
 	test-step "$backend does not recover argument, authority, capture or fallback failures"
-	reject EXPR_INVALID do run -l kash -c 'printf @([invalid: 1]) ? printf forbidden'
+	reject EXPR_INVALID do run -l kash -c 'printf (nop [invalid: 1]) ? printf forbidden'
 	reject CAP_DENIED do run -c '$(false ? printf forbidden)'
 	reject RECIPE_FAIL do run -l kash -c 'false ? false'
-	reject HOST_FAIL do run -l kash -c 'false ? kame-missing-recovery-command'
+	reject TOOL_MISSING do run -l kash -c 'false ? kame-missing-recovery-command'
 	reject CAPTURE_LIMIT do run --allow-run --capture-limit 1 -l expr -c '$(printf too-long ? printf x)'
 	reject CAPTURE_ENCODING do run --allow-run -l expr -c '$(printf "\\377" ? printf forbidden)'
 	for text in 'false? printf forbidden' 'false ?printf forbidden' 'false ?? printf forbidden' 'false ? | cat'; do reject PARSE_ERR do run -l kash -c "$text"; done

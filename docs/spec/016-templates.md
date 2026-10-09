@@ -11,15 +11,16 @@ text from data. It adds:
   inclusion without leaving the file's own format.
 - **A runtime `render` operation** that parses and evaluates a template value
   or file against a record payload.
-- **Supporting primitives**: the `cat` and `text` operations and the `if` and
+- **Supporting primitives**: the `str` and `text` operations and the `if` and
   `with` special forms.
 - **A `kame do render` command** for standalone rendering.
 
 Document templates lower to the expression language: every directive compiles
-to `if`, `map`, `join`, `let`, `with`, `cat`, or `render`. There is no second
+to `if`, `map`, `join`, `let`, `with`, `str`, or `render`. There is no second
 evaluator, so templates share laziness, capabilities, and dynamic dependencies
-with the rest of Kame. Inline `@(...)` and selectors remain the native template
-form used by recipes and definitions.
+with the rest of Kame. Inline `@(...)` and selectors remain native template
+forms for external-shell recipes and template-valued definitions. Kash recipes
+are direct programs under `038-direct-kash-and-values.md`.
 
 ## Relationship to Kash
 
@@ -28,12 +29,13 @@ directives and inline `@(EXPRESSION)` forms, both of which use Kame expression
 syntax. `$REFERENCE`, `${REFERENCE}`, and `$(COMMAND)` are Kash-only forms and
 are emitted literally in document text.
 
-The `@(EXPRESSION)` syntax is shared with Kash: it parses and evaluates the
-same Kame expression. Its result context differs: a document template renders
-the result as text, while Kash supplies it as a typed command argument. Template
-directives such as `@if` and `@for` are keyword-gated, whole-line constructs;
-they are not Kash meta-programming forms. Likewise, Kash `@NAME` and
-`@tmpl(...)` are not recognized in document templates.
+Templates use `@(EXPRESSION)` to render a Kame value as text. Kash embeds
+parenthesized Kame expressions directly as typed values and is not implicitly
+rendered as a template. The parsers share the Kame expression grammar, not a
+common outer interpolation syntax. Kash interpolated path atoms are separately
+defined in `038-direct-kash-and-values.md`. Template directives such as `@if`
+and `@for` are not Kash meta-programming forms; `@NAME` and `@tmpl(...)` are
+not document-template macro forms.
 
 ## Document Templates
 

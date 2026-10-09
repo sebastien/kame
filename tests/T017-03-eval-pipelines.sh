@@ -49,9 +49,9 @@ grep -q 'status 141' "$work/native.err"
 grep -q 'status 141' "$work/wasm.err"
 parity '$(printf "\\377" | cat)' 1 CAPTURE_ENCODING
 parity '$(head -c 33 /dev/zero | cat)' 1 CAPTURE_LIMIT
-parity '$(sleep 30 | no-such-kash-executable)' 1 HOST_FAIL
-parity '$(no-such-kash-executable | sleep 30)' 1 HOST_FAIL
-parity '$(sleep 30 | no-such-kash-executable | sleep 30)' 1 HOST_FAIL
+parity '$(sleep 30 | no-such-kash-executable)' 1 TOOL_MISSING
+parity '$(no-such-kash-executable | sleep 30)' 1 TOOL_MISSING
+parity '$(sleep 30 | no-such-kash-executable | sleep 30)' 1 TOOL_MISSING
 
 test-step "every stage's stderr is live and stdout is captured once"
 parity '$(sh -c "printf one >&2; printf x" | sh -c "printf two >&2; cat")' 0
@@ -62,7 +62,7 @@ done
 
 test-step "invalid arguments and denied later stages launch nothing"
 marker="$work/should-not-exist"
-expression="\$(sh -c \"touch '$marker'\" | printf @([invalid: 1]))"
+expression="\$(sh -c \"touch '$marker'\" | printf (nop [invalid: 1]))"
 parity "$expression" 1 EXPR_INVALID
 if [ ! -e "$marker" ]; then test-ok "all argv validated before launch"; else test-fail "invalid later stage launched earlier work"; fi
 for backend in native wasm; do
@@ -75,7 +75,7 @@ for backend in native wasm; do
 done
 
 test-step "pipeline syntax and formatting parity"
-printf '%s\n' '$(printf "a|b"|tr @("a" | uppercase) X|cat)' >"$work/expression.km"
+printf '%s\n' '$(printf "a|b"|tr ("a" | uppercase) X|cat)' >"$work/expression.km"
 for operation in parse fmt; do
 	"$CLI_BIN" do "$operation" --lang expr "$work/expression.km" >"$work/native.out"
 	node "$CLI_ROOT/dist/kame.js" do "$operation" --lang expr "$work/expression.km" >"$work/wasm.out"

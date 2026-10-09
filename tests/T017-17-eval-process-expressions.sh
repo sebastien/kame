@@ -51,7 +51,7 @@ for backend in native wasm; do
 	if [ "$(cat "$work/attempts")" = x ]; then test-ok "$backend completed graph is not replayed across a later wait"; else test-fail "$backend replayed graph"; fi
 	rm "$work/attempts"
 	check ':nil' '(if :false (run "touch" "forbidden") :nil)'
-	"${command[@]}" do run --allow-run -C "$work" -l kash -c $'if true\n\tresult = @(pipe (run "printf" "branch") (run "cat"))\n\tprintf "%s" $result.status\nprintf done' >"$work/out" 2>"$work/err"
+	"${command[@]}" do run --allow-run -C "$work" -l kash -c $'if true\n\tresult = (pipe (run "printf" "branch") (run "cat"))\n\tprintf "%s" $result.status\nprintf done' >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = branch0done ]; then test-ok "$backend lexical Kash definitions share the graph executor"; else test-fail "$backend Kash process expressions"; fi
 	test-step "$backend rejects malformed whole graphs before evaluating stages"
 	for text in '(run)' '(run :cwd)' '(run :cwd ./sub)' '(run :cwd ./sub :cwd ./sub "true")' '(run :bad-key "x" "true")' '(pipe (run "true"))' '(pipe (run $(touch forbidden)) 1)' '(pipe (run $(touch forbidden)) (run :async :false "true"))' '(run ["true"])' '(run "printf" ["ok" ["nested"]])' '(run :cwd ["sub"] "true")' '(run :timeout 0 "true")' '(run :async 1 "true")' '(run "printf" (run "true"))'; do reject EXPR_INVALID "$text"; done
@@ -60,7 +60,7 @@ for backend in native wasm; do
 	reject RECIPE_FAIL '(pipe (run "false") (run "true"))'
 	reject RECIPE_FAIL '(pipe (run "sh" "-c" "exit 3") (run "sh" "-c" "exit 7"))'
 	if grep -q 'status 7' "$work/err"; then test-ok "$backend selects the rightmost failure"; else test-fail "$backend aggregate status"; fi
-	reject HOST_FAIL '(run "kame-missing-process-expression")'
+	reject TOOL_MISSING '(run "kame-missing-process-expression")'
 	reject RECIPE_TIMEOUT '(run :timeout 0.05 "sleep" "30")'
 	status=0
 	"${command[@]}" do run --allow-run=/bin/printf -l expr -c '(run "printf" "forbidden")' >"$work/out" 2>"$work/err" || status=$?

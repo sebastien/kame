@@ -99,6 +99,7 @@ func placeholder(scope *Scope, expression *expr.Expr, context *Context) Result {
 }
 
 func name(scope *Scope, name string, span source.Span, context *Context) Result {
+	if len(name) > 2 && name[:2] == "x/" { return context.TrackedTool(name[2:], span) }
 	b := scope.lookup(name)
 	if b == nil {
 		if name == "kash" && context.Program != nil { return Result{Value: context.Program.KashConstructor()} }

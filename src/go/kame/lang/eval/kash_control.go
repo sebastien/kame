@@ -158,7 +158,8 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		p.retainControlEffects(state, c, state.Scope, before)
 		for i := range state.Scope.Bindings { b := state.Scope.Bindings[i]; if b.Kind == bindingLocalDefinition && b.Local.Done { b.Local.EffectsHeld = true } }
 		state.Value.Free(p.Alloc)
-		state.Value = r.Value.Clone(p.Alloc)
+		state.Value = core.Value{}
+		if statement.Kind == expr.CommandGraph || statement.Kind == expr.KashIf || statement.Kind == expr.KashMatch { state.Value = r.Value.Clone(p.Alloc) }
 		r.Free(c.Run)
 		state.Index++
 	}

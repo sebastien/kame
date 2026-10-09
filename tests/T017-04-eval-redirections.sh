@@ -56,10 +56,10 @@ for backend in native wasm; do
 	printf '%s' sentinel >"$output"
 	check "\$(printf denied > \"$output\")" 1 '' CAP_DENIED "--allow-read=$work"
 	check "\$(cat < \"$work/input\" > \"$output\")" 1 '' CAP_DENIED "--allow-write=$work"
-	check "\$(printf invalid @([bad: 1]) > \"$output\")" 1 '' EXPR_INVALID "${grants[@]}"
+	check "\$(printf invalid (nop [bad: 1]) > \"$output\")" 1 '' EXPR_INVALID "${grants[@]}"
 	check "\$(printf invalid > \"$output\" | cat)" 1 '' PARSE_ERR "${grants[@]}"
 	check "\$(cat < \"$work/missing\" > \"$output\")" 1 '' HOST_FAIL "${grants[@]}"
-	check "\$(printf invalid > @([\"$output\"]))" 1 '' EXPR_INVALID "${grants[@]}"
+	check "\$(printf invalid > (nop [\"$output\"]))" 1 '' EXPR_INVALID "${grants[@]}"
 	check '$(printf invalid > "")' 1 '' EXPR_INVALID "${grants[@]}"
 	check "\$(printf denied > \"$output\")" 1 '' CAP_DENIED "--allow-write=$work/other"
 	set +e
@@ -78,7 +78,7 @@ for backend in native wasm; do
 done
 
 test-step "redirection AST and formatting match across backends"
-printf '%s\n' '$(< ${input} cat | cat >> @(output))' >"$work/expression.km"
+printf '%s\n' '$(< ${input} cat | cat >> $output)' >"$work/expression.km"
 for operation in parse fmt; do
 	"$CLI_BIN" do "$operation" --lang expr "$work/expression.km" >"$work/native"
 	node "$CLI_ROOT/dist/kame.js" do "$operation" --lang expr "$work/expression.km" >"$work/wasm"

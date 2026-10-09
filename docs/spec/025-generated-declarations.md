@@ -29,11 +29,12 @@ these required fields:
 | `target` | non-empty string | One concrete target name or path |
 | `inputs` | list of strings | Prerequisites that affect freshness |
 | `order-only` | list of strings | Prerequisites that affect ordering only |
-| `recipe` | list of strings | Kame recipe template lines |
+| `recipe` | list of strings | Recipe source lines interpreted according to the resolved shell |
 
 Unknown fields and values of the wrong type are errors. Input and target strings
 follow the ordinary rule path and resource interpretation. Recipe lines use
-the same template parser and execution rules as authored recipe lines.
+the same parser and execution rules as authored recipes: direct Kash ASTs for
+Kash, recipe templates for external shells. See `038-direct-kash-and-values.md`.
 
 Generation limits are 4096 records per batch, 1 MiB of retained UTF-8 data per
 batch, 64 KiB per field, 4096 combined input/order-only/recipe list items per

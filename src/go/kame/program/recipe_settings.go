@@ -148,6 +148,12 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	} else {
 		entry.Shell = cloneStrings(p.Alloc, p.Options.Shell)
 	}
+	if !entry.Kash {
+		for i := range entry.Rule.RecipeDiagnostics {
+			d := entry.Rule.RecipeDiagnostics[i]
+			if d.Severity >= source.Error { return failureAt(p.Alloc, d.Code, diagnostic.Span{Start: d.Span.Start, End: d.Span.End}, d.Message) }
+		}
+	}
 	freeStrings(p.Alloc, entry.MetadataEnvironment)
 	entry.MetadataEnvironment = nil
 	for i := range metadata.Record {
@@ -217,8 +223,7 @@ func (p *Program) environmentFailure(index int, message string) diagnostic.Diagn
 	return failure(p.Alloc, "ENV_CONFLICT", message)
 }
 
-// Context construction is shared with recipe execution so rule frames survive
-// template expansion into a structured script.
+// Recipe execution retains its rule frame across structured evaluation.
 func (p *Program) kashContext(c *core.EngineContext, index int) *eval.Context {
 	entry := &p.Instances[index]
 	names, resources := entry.Plan.Inputs, entry.Plan.ResourceInputs
@@ -258,32 +263,42 @@ func (p *Program) freeKashContext(context *eval.Context) {
 	mem.Free(p.Alloc, context)
 }
 
-// Translate rendered Kash offsets to the closest authored recipe line.
+// Direct Kash offsets map exactly back to the authored recipe bytes.
 func (p *Program) kashDiagnostic(index int, d diagnostic.Diagnostic) diagnostic.Diagnostic {
 	return p.kashDiagnosticText(index, p.Instances[index].Script, d)
 }
 
 func (p *Program) kashDiagnosticText(index int, text string, d diagnostic.Diagnostic) diagnostic.Diagnostic {
+	if d.Source != "" && d.Source != "<recipe>" { return d }
 	entry := &p.Instances[index]
-	line, offset := 0, 0
-	for offset < len(text) && offset < d.Span.Start {
-		if text[offset] == '\n' {
-			line++
-		}
-		offset++
+	d.Span = diagnostic.Span{Start: kashAuthoredOffset(entry, text, d.Span.Start), End: kashAuthoredOffset(entry, text, d.Span.End)}
+	for i := range d.Frames {
+		frame := &d.Frames[i]
+		if frame.Source != "<recipe>" { continue }
+		frame.Span = diagnostic.Span{Start: kashAuthoredOffset(entry, text, frame.Span.Start), End: kashAuthoredOffset(entry, text, frame.Span.End)}
+		location := p.Eval.LocateSource(p.Parsed.Source.Name, source.Span{Start: frame.Span.Start, End: frame.Span.End})
+		if d.Owned { mem.FreeString(p.Alloc, frame.Source) }
+		frame.Source = cloneText(p.Alloc, location.Source)
+		frame.Span = diagnostic.Span{Start: location.Span.Start, End: location.Span.End}
 	}
-	span := entry.Rule.Header
-	if line < len(entry.LineSpans) {
-		authored := entry.LineSpans[line]
-		span = source.Span{Start: authored.Start, End: authored.End}
-	}
-	d.Span = diagnostic.Span{Start: span.Start, End: span.End}
 	if d.Owned {
 		mem.FreeString(p.Alloc, d.Source)
 	}
 	d.Source = ""
 	p.locateDiagnostic(&d, d.Span)
 	return d
+}
+
+func kashAuthoredOffset(entry *instance, text string, offset int) int {
+	line, start := 0, 0
+	for i := 0; i < len(text) && i < offset; i++ {
+		if text[i] == '\n' { line++; start = i+1 }
+	}
+	if line >= len(entry.LineSpans) { return entry.Rule.Header.End }
+	span := entry.LineSpans[line]
+	position := span.Start+offset-start
+	if position > span.End { position = span.End }
+	return position
 }
 
 func (p *Program) validateRenderedKash(index int, text string) diagnostic.Diagnostic {

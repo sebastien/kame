@@ -103,12 +103,12 @@ func TestSharedDynamicReadPreservesSuspendedKashEnvironment(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "shared-environment.kmk", "SHELL = kash\ndefault : ./value reader\n./value :\n\tsleep 0.05\n\tprintenv MODE > ./value\nreader :\n\t@(out (text (read ./value)))\n")
+	parsed := script.Parse(a, "shared-environment.kmk", "SHELL = kash\ndefault : ./value reader\n./value :\n\tsleep 0.05\n\tprintenv MODE > ./value\nreader :\n\t(out (text (read ./value)))\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "MODE=preserved"}, Grants: []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}}})
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: posix.ResolveTool, Directory: dir, Environment: []string{"PATH=/usr/bin:/bin", "MODE=preserved"}, Grants: []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}}})
 	defer compiled.Free(a)
 	if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
 		t.Fatal("compile failed")

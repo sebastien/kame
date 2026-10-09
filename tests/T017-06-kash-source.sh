@@ -15,13 +15,13 @@ cat >"$work/source.kash" <<'KASH'
 name = "World"; count = 42; flag = :true;
 (banner WHO) = (cat "Hello, " WHO)
 alias = ${name}
-values = @([name count])
+values = (nop [name count])
 literal = "$(printf not-executed)"
-capture = $(printf "%s" @(banner name) | cat)
-:cwd . :timeout @(1) :MODE test printf "%s" $values | cat > "output file"
+capture = $(printf "%s" (banner name) | cat)
+:cwd . :timeout (nop 1) :MODE test printf "%s" $values | cat > "output file"
 echo revision=$name # inline comment
 printf "%s" "semicolon;in word"; echo escaped\;separator
-printf "%s" @(cat
+printf "%s" (cat
     "multiline;"
     "expression")
 echo joined \
@@ -37,15 +37,15 @@ echo "" "two words" "literal?" "a|b" "\$name" "\@literal" "#comment"
 "if" hello
 ":cwd" hello
 echo "=" value
-:cwd ./build :timeout @(1) :MODE production cat < ./input | cat >> ./output ?
+:cwd ./build :timeout (nop 1) :MODE production cat < ./input | cat >> ./output ?
 capture = $("printf" "%s" "hello" | "cat")
-echo @(cat "a" "b") $(printf hello) ? echo fallback
+echo (cat "a" "b") $(printf hello) ? echo fallback
 echo hello &
 if test -f ./input
 	echo yes
 else
 	echo no
-match @(name)
+match $name
 	case "a"
 		echo a
 	else
@@ -59,15 +59,15 @@ echo "" "two words" "literal?" "a|b" "\$name" "\@literal" "#comment"
 "if" hello
 ":cwd" hello
 echo "=" value
-:cwd ./build :timeout @(1) :MODE production cat < ./input | cat >> ./output ?
+:cwd ./build :timeout (nop 1) :MODE production cat < ./input | cat >> ./output ?
 capture = $(printf %s hello | cat)
-echo @((cat "a" "b")) $(printf hello) ? echo fallback
+echo (cat "a" "b") $(printf hello) ? echo fallback
 echo hello &
 if test -f ./input
 	echo yes
 else
 	echo no
-match @(name)
+match $name
 	case "a"
 		echo a
 	else

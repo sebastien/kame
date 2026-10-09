@@ -67,7 +67,14 @@ func TestInvalidFixture(t *testing.T) {
 		} else if strings.HasPrefix(name, "template-target-") {
 			parsed := template.ParseTarget(t.Allocator(), name, text); count = len(parsed.Diagnostics); if count != 0 { diagnostic = parsed.Diagnostics[0] }; parsed.Free()
 		} else {
-			parsed := script.Parse(t.Allocator(), name, text); count = len(parsed.Diagnostics); if count != 0 { diagnostic = parsed.Diagnostics[0] }; parsed.Free()
+			parsed := script.Parse(t.Allocator(), name, text)
+			count = len(parsed.Diagnostics)
+			if count != 0 { diagnostic = parsed.Diagnostics[0] }
+			for j := range parsed.Items {
+				r := parsed.Items[j].Rule
+				if r != nil && len(r.RecipeDiagnostics) != 0 { if count == 0 { diagnostic = r.RecipeDiagnostics[0] }; count += len(r.RecipeDiagnostics) }
+			}
+			parsed.Free()
 		}
 		mem.FreeString(t.Allocator(), text)
 		if count == 0 { t.Errorf("%s: expected diagnostic", path); continue }

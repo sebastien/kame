@@ -35,8 +35,8 @@ parity '(let [files ["a b" "c"]] $(printf "[%s]" $files))' 0 --allow-run
 parity '(map ["a" "b"] ([x] $(printf "%s" $x)))' 0 --allow-run
 parity '(let [f ([x] $(printf "%s" $x))] (cat (f "a") (f "b")))' 0 --allow-run
 parity '$(printf "%s" $(printf nested))' 0 --allow-run
-parity '$(printf "[%s]" @(["a b" "c"]))' 0 --allow-run
-parity '$(printf "%s" @("a" | uppercase))' 0 --allow-run
+parity '$(printf "[%s]" (nop ["a b" "c"]))' 0 --allow-run
+parity '$(printf "%s" ("a" | uppercase))' 0 --allow-run
 parity '"$(printf literal)"' 0
 
 test-step "capabilities, exit failures, invalid encoding, capture overflow"
@@ -80,7 +80,8 @@ grep -q live "$work/wasm.err"
 parity '$(printf "\\377")' 1 --allow-run
 parity '$(head -c 1048577 /dev/zero)' 1 --allow-run
 parity '$(no-such-executable-kash)' 1 --allow-run
-parity '$(printf denied)' 1 --allow-run=/usr/bin
+parity '$(printf denied)' 1 --allow-run="$work"
+parity '$(printf granted)' 0 --allow-run=/usr/bin --tool printf=/usr/bin/printf
 parity '$(/usr/bin/printf granted)' 0 --allow-run=/usr/bin
 
 test-step "neither backend implicitly treats executable text as shell code"
@@ -89,7 +90,7 @@ chmod +x "$work/no-shebang"
 parity "\$($work/no-shebang)" 1 --allow-run
 
 test-step "AST and formatter parity with nested substitutions"
-printf '%s\n' '(cat $(printf "%s" ${project.name}) [$(printf @(cat "a" "b"))])' >"$work/expression.km"
+printf '%s\n' '(cat $(printf "%s" ${project.name}) [$(printf (cat "a" "b"))])' >"$work/expression.km"
 for command in parse fmt; do
 	"$CLI_BIN" do "$command" --lang expr "$work/expression.km" >"$work/native.out"
 	node "$CLI_ROOT/dist/kame.js" do "$command" --lang expr "$work/expression.km" >"$work/wasm.out"

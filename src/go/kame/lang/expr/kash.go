@@ -154,7 +154,7 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 			if op == "<" && (input || len(e.Items) != 1) { p.error(from, p.pos, "stdin redirection conflicts with pipeline input or earlier redirection"); break }
 			if op != "<" && output { p.error(from, p.pos, "duplicate stdout redirection"); break }
 			p.commandSpace(capture)
-			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || commandOperator(p.s.Text[p.pos]) { p.error(from, p.pos, "expected redirection path"); break }
+			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') { p.error(from, p.pos, "expected redirection path"); break }
 			redirection := p.node(CommandRedirection, from)
 			redirection.Text = op
 			redirection.Items = slices.Append(p.a, redirection.Items, p.commandWord())
@@ -175,7 +175,7 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 			for i := range stage.Items { if stage.Items[i].Kind == CommandSetup && stage.Items[i].Text == key { duplicate = true } }
 			if duplicate { p.error(from, p.pos, "duplicate Kash stage setup key"); break }
 			p.commandSpace(capture)
-			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || commandOperator(p.s.Text[p.pos]) { p.error(from, p.pos, "expected Kash stage setup value"); break }
+			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') { p.error(from, p.pos, "expected Kash stage setup value"); break }
 			setup := p.node(CommandSetup, from)
 			setup.Text = key
 			setup.Items = slices.Append(p.a, setup.Items, p.commandWord())
@@ -232,6 +232,18 @@ func commandOperator(b byte) bool {
 func (p *parser) commandWord() *Expr {
 	start := p.pos
 	e := p.node(CommandWord, start)
+	if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '(' {
+		previousKash := p.kash
+		p.kash = true
+		inner := p.expression()
+		p.kash = previousKash
+		e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "(", Span: source.Span{Start: start, End: p.pos}})
+		e.Bool, e.Span.End = true, p.pos
+		if p.pos < len(p.s.Text) && !commandWhitespace(p.s.Text[p.pos]) && p.s.Text[p.pos] != ')' && !commandOperator(p.s.Text[p.pos]) {
+			p.error(start, p.pos, "parenthesized argument requires a word boundary")
+		}
+		return e
+	}
 	text := strings.NewBuilder(p.a)
 	quoted, hadQuote := false, false
 	partStart := start
@@ -249,6 +261,10 @@ func (p *parser) commandWord() *Expr {
 		if b == '\\' {
 			from := p.pos
 			p.pos++
+			if !quoted && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos:p.pos+2] == "@(" {
+				p.error(from, p.pos+2, "Kash has no template layer; use (function arguments...) instead of escaped @(...)")
+				break
+			}
 			if p.pos == len(p.s.Text) {
 				p.error(from, p.pos, "unfinished Kash escape")
 				break
@@ -277,16 +293,27 @@ func (p *parser) commandWord() *Expr {
 			p.pos++
 			continue
 		}
-		if b == '$' || (b == '@' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(') {
+		if !quoted && b == '@' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
+			p.error(p.pos, p.pos+2, "legacy Kash @(...) is invalid; use (function arguments...) instead")
+			break
+		}
+		if !quoted && b == '@' && p.pos == start {
+			if p.pos+1 < len(p.s.Text) && isNameStart(p.s.Text[p.pos+1]) {
+				p.error(p.pos, p.pos+2, "template directives are invalid in Kash; use Kash if/match or an explicit render expression")
+				break
+			}
+			inner := p.selector()
+			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "selector", Span: source.Span{Start: start, End: p.pos}})
+			partStart = p.pos
+			if len(p.diags) != 0 { break }
+			continue
+		}
+		if b == '$' {
 			p.addTextPart(e, &text, partStart, p.pos)
 			from := p.pos
 			form := "$"
 			var inner *Expr
-			if b == '@' {
-				form = "@"
-				p.pos++
-				inner = p.expressionBoundary()
-			} else if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
+			if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
 				form = "$("
 				inner = p.commandCapture()
 			} else {
@@ -336,28 +363,6 @@ func (p *parser) commandWord() *Expr {
 	return e
 }
 
-// The boundary's parentheses are not necessarily application parentheses:
-// @([1 2]) is one list value, while @([x] x) delegates to Kame's lambda parser.
-func (p *parser) expressionBoundary() *Expr {
-	open := p.pos
-	p.pos++
-	p.skipSpace()
-	first := p.expression()
-	if first == nil {
-		return nil
-	}
-	p.skipSpace()
-	if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' {
-		p.pos++
-		return first
-	}
-	// Multiple expressions and pipes belong to the existing parenthesized-form
-	// grammar. Reparse that form on the same Source without translating text.
-	freeExpr(p.a, first)
-	p.pos = open
-	return p.paren()
-}
-
 // Bool records typed substitution semantics, not whether a literal needs quotes.
 func commandWordNeedsQuotes(e *Expr) bool {
 	if e.Bool { return false }
@@ -393,10 +398,8 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 			if boundary && !quoted { b.WriteByte('"') }
 			if part.Form == "$(" {
 				writeExpr(b, part.Expr)
-			} else if part.Form == "@" {
-				b.WriteString("@(")
+			} else if part.Form == "(" || part.Form == "selector" {
 				writeExpr(b, part.Expr)
-				b.WriteByte(')')
 			} else {
 				b.WriteString(part.Form)
 				writeExpr(b, part.Expr)

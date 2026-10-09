@@ -55,7 +55,7 @@ for backend in native wasm; do
 	"${command[@]}" do run -n -C "$work" "$work/rules.kmk" build -c '(first 1)' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q EXPR_INVALID "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend does not skip pure expression validation"; else test-fail "$backend skipped pure expression"; fi
 	status=0
-	"${command[@]}" do run -n -C "$work" "$work/rules.kmk" build -l kash -c 'printf @([bad: 1])' >"$work/out" 2>"$work/err" || status=$?
+	"${command[@]}" do run -n -C "$work" "$work/rules.kmk" build -l kash -c 'printf (nop [bad: 1])' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q EXPR_INVALID "$work/err"; then test-ok "$backend validates typed argv without launching"; else test-fail "$backend skipped argv validation"; fi
 	status=0
 	"${command[@]}" do run -n -C "$work" -c '$(touch denied)' "$work/rules.kmk" build >"$work/out" 2>"$work/err" || status=$?

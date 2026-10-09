@@ -67,6 +67,8 @@ type Value struct {
 	Int      int64
 	Float    float64
 	Text     string
+	// ToolName retains executable lookup provenance on resolved string values.
+	ToolName string
 	Bytes    []byte
 	List     []Value
 	Record   []RecordField
@@ -129,6 +131,7 @@ func (v *Value) Clone(a mem.Allocator) Value {
 	switch v.Kind {
 	case String:
 		copy = NewString(a, v.Text)
+		copy.ToolName = NewString(a, v.ToolName).Text
 	case Bytes:
 		copy = NewBytes(a, v.Bytes)
 	case List:
@@ -175,6 +178,7 @@ func (v *Value) Free(a mem.Allocator) {
 	switch v.Kind {
 	case String:
 		mem.FreeString(a, v.Text)
+		mem.FreeString(a, v.ToolName)
 	case Bytes:
 		slices.Free(a, v.Bytes)
 	case List:

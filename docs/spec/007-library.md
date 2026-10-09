@@ -2,6 +2,10 @@
 
 ## Purpose
 
+`038-direct-kash-and-values.md` refines standard operation contracts and owns
+canonical action names, text/JSON separation, and wildcard kind filters. Those
+requirements take precedence over older operation spellings below.
+
 The standard library provides ordinary operations over materialized values.
 Reactive lifting, dependency tracking, authorization, and stream scheduling are
 provided by the evaluator, not reimplemented by every operation.
@@ -36,7 +40,8 @@ The general operations are:
 | --- | --- |
 | `not` | Boolean negation using language truth rules |
 | `bool` | Convert to language truth value |
-| `str` | Convert scalar to text; encode lists/records canonically |
+| `str` | Concatenate zero or more scalar textual values; reject implicit collection serialization |
+| `json` | Encode exactly one JSON-compatible value, including quoted scalar strings |
 | `count` | Length of string code points, bytes, list, or record |
 | `get` | `(get RECORD KEY [DEFAULT])`: computed string key; missing keys return nil or DEFAULT |
 | `first` | First list item or nil |
@@ -44,9 +49,10 @@ The general operations are:
 | `apply` | Call a function with a list of arguments |
 | `list` | Return arguments as a list |
 
-`str` uses canonical JSON-like text for lists and records with stable record key
-order; it is distinct from the Kame value display of `005-evaluation.md`. Bytes
-require explicit text or hexadecimal conversion and are not silently decoded.
+`json` uses deterministic JSON for compatible scalars, lists and records with
+stable record key order. `str` performs textual conversion/concatenation only;
+both are distinct from the Kame value display of `005-evaluation.md`. Bytes
+require explicit decoding and are not silently converted or JSON-encoded.
 
 `get` uses byte-exact string keys and returns the selected value with its type
 and callable ownership intact. An invalid record/key type is `EXPR_INVALID`.

@@ -20,9 +20,9 @@ evaluates '$(printf "%s" "John Smith")' '"John Smith"'
 evaluates '$(printf "[%s]" "" "*.go" "a; echo injected")' '"[][*.go][a; echo injected]"'
 evaluates '(let [files ["a b" "c"]] $(printf "[%s]" $files))' '"[a b][c]"'
 evaluates '(let [name "unit"] $(printf "%s" ${name}.c))' '"unit.c"'
-evaluates '$(printf "%s" @(cat "a" "b"))' '"ab"'
-evaluates '$(printf "[%s]" @(["a b" "c"]))' '"[a b][c]"'
-evaluates '$(printf "%s" @("a" | uppercase))' '"A"'
+evaluates '$(printf "%s" (cat "a" "b"))' '"ab"'
+evaluates '$(printf "[%s]" (nop ["a b" "c"]))' '"[a b][c]"'
+evaluates '$(printf "%s" ("a" | uppercase))' '"A"'
 evaluates '$(printf "%s" $(printf nested))' '"nested"'
 evaluates '(cat $(printf a) $(printf b))' '"ab"'
 evaluates '(cat (eval "$(printf a)") (eval "$(printf b)"))' '"ab"'
@@ -46,7 +46,7 @@ cli_expect_stderr_contains diagnostic
 cli_expect_stderr_contains RECIPE_FAIL
 cli_run -- do run --lang expr --allow-run -c '$(no-such-executable-kash)'
 cli_expect_status 1
-cli_expect_stderr_contains HOST_FAIL
+cli_expect_stderr_contains TOOL_MISSING
 cli_run -- do run --lang expr --allow-run -c '(let [files ["a"]] $(printf "%s" "$files"))'
 cli_expect_status 1
 cli_expect_stderr_contains EXPR_INVALID

@@ -10,7 +10,7 @@ import (
 
 func TestKashSourceKeepsCommandAndValueBoundaries(t *testing.T) {
 	a := t.Allocator()
-	text := "# source\nname = \"world\"; number = 1;\necho revision=$name # inline\n(banner WHO) = (cat \"hi \" WHO)\ncopy = ${name}; files = ./output;\n:cwd . printf \"%s\" @(banner name) | cat > \"output file\"\n"
+	text := "# source\nname = \"world\"; number = 1;\necho revision=$name # inline\n(banner WHO) = (cat \"hi \" WHO)\ncopy = ${name}; files = ./output;\n:cwd . printf \"%s\" (banner name) | cat > \"output file\"\n"
 	s := script.ParseKash(a, "test.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 9 { t.Error("valid Kash statements did not parse"); return }
@@ -65,7 +65,7 @@ func TestKashValueRecoveryKeepsExpressionBoundary(t *testing.T) {
 
 func TestKashIfRetainsNestedBodiesAndLocalDefinitions(t *testing.T) {
 	a := t.Allocator()
-	s := script.ParseKash(a, "control.kash", "if @(:true)\n  name = \"inner\"\n  if false\n    printf no\n  else\n    printf $name\nelif true\n  printf fallback\nelse\n  printf no\nprintf after\n")
+	s := script.ParseKash(a, "control.kash", "if (nop :true)\n  name = \"inner\"\n  if false\n    printf no\n  else\n    printf $name\nelif true\n  printf fallback\nelse\n  printf no\nprintf after\n")
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 2 { t.Fatal("nested conditional did not parse"); return }
 	e := s.Items[0].Expression
@@ -78,6 +78,25 @@ func TestKashIfRetainsNestedBodiesAndLocalDefinitions(t *testing.T) {
 	canonical := script.Format(a, again)
 	defer mem.FreeString(a, canonical)
 	if formatted != canonical { t.Error("control formatting changed block nesting") }
+}
+
+func TestDirectKashExpressionsKeepAuthoredBoundaries(t *testing.T) {
+	a := t.Allocator()
+	text := "(nop [result: :nil])\nprintf \"%s\" (join\n [\"a\" \"b\"] \"-\")\nif (=\n 1 1)\n  (nop :nil)\nmatch (nop\n \"value\")\n  case \"value\"\n    printf yes\n"
+	s := script.ParseKash(a, "direct.kash", text)
+	defer s.Free()
+	if len(s.Diagnostics) != 0 || len(s.Items) != 4 { t.Fatal("direct multiline expressions failed to parse"); return }
+	if s.Items[0].Kind != script.Expression || s.Items[0].Expression.Kind != expr.Application { t.Error("expression statement became a command") }
+	word := s.Items[1].Expression.Items[0].Items[2]
+	if !word.Bool || word.Parts[0].Expr.Kind != expr.Application || word.Parts[0].Form != "(" { t.Error("typed argument lost its expression boundary") }
+	formatted := script.Format(a, s)
+	defer mem.FreeString(a, formatted)
+	copy := script.ParseKash(a, "canonical.kash", formatted)
+	defer copy.Free()
+	if len(copy.Diagnostics) != 0 { t.Fatal("canonical direct Kash does not parse"); return }
+	again := script.Format(a, copy)
+	defer mem.FreeString(a, again)
+	if formatted != again { t.Error("direct Kash formatting is not idempotent") }
 }
 
 func TestKashMatchRetainsSubjectAndArmBoundaries(t *testing.T) {

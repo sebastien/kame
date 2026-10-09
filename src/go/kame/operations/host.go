@@ -283,7 +283,7 @@ func writeBytes(c *eval.Context, path string, data []byte) eval.Result {
 	for i := range c.RuleFrames {
 		if c.RuleFrames[i].ServiceRule { return failure("EXPR_INVALID", "services cannot publish file outputs") }
 	}
-	if c.Phase == eval.RenderingPhase {
+	if c.Phase == eval.RenderingPhase || (c.RecipeNode != 0 && len(c.RuleFrames) != 0) {
 		c.EmitWrite(path, data)
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}

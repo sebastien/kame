@@ -87,6 +87,10 @@ literal text with an `PARSE_ERR` warning.
 
 ## Common Atoms
 
+`038-direct-kash-and-values.md` extends path atoms with structurally parsed
+interpolation and admits signed symbols `:+NAME` and `:-NAME`. These extensions
+are shared by Kame expressions and the embedded expression parser in Kash.
+
 ### Names
 
 A name begins with an ASCII letter or `_` and continues with ASCII letters,

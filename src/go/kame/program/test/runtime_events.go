@@ -149,7 +149,7 @@ func TestPipelineProcessDisplayIsBoundedToFourStages(t *testing.T) {
 	parsed := script.Parse(a, "test.kmk", source)
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: ".", Grants: []eval.Grant{{Capability: eval.Run}}})
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: posix.ResolveTool, Directory: ".", Grants: []eval.Grant{{Capability: eval.Run}}})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Fatal("compile failed"); return }
 	result := compiled.Program.Materialize("run")
 	if result.Diagnostic.Code != "" { t.Errorf("pipeline failed: %s", result.Diagnostic.Code) }

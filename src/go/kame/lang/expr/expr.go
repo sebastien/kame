@@ -561,6 +561,15 @@ func validNumber(text string) bool {
 func (p *parser) reference() *Expr {
 	start := p.pos
 	name := p.name()
+	if name.Text == "x" && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '/' {
+		p.pos++
+		toolStart := p.pos
+		for p.pos < len(p.s.Text) && (isNameContinue(p.s.Text[p.pos]) || p.s.Text[p.pos] == '.') { p.pos++ }
+		if p.pos == toolStart { p.error(toolStart, p.pos, "x/ requires a tool name") }
+		e := p.node(Name, start)
+		e.Text = p.s.Text[start:p.pos]
+		return e
+	}
 	if p.pos == len(p.s.Text) || p.s.Text[p.pos] != '.' {
 		e := p.node(Name, start); e.Text = name.Text; return e
 	}

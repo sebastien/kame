@@ -17,7 +17,7 @@ func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
 	if e.Kind == KashMatch {
 		for j := 0; j < level; j++ { b.WriteString(indent) }
 		b.WriteString("match ")
-		if e.Body[0].Kind == CommandCapture { writeExpr(b, e.Body[0]) } else { b.WriteString("@("); writeExpr(b, e.Body[0]); b.WriteByte(')') }
+		writeKashValue(b, e.Body[0])
 		level++
 		for i := 1; i < len(e.Body); i++ { b.WriteByte('\n'); for j := 0; j < level; j++ { b.WriteString(indent) }; b.WriteString(e.Body[i].Text) }
 		b.WriteByte('\n')
@@ -29,7 +29,7 @@ func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
 		b.WriteString(branch.Text)
 		if len(branch.Items) != 0 {
 			b.WriteByte(' ')
-			if e.Kind == KashMatch { writeExpr(b, branch.Items[0]) } else if branch.Items[0].Kind == CommandTest { writeProcess(b, branch.Items[0]) } else { b.WriteString("@("); writeExpr(b, branch.Items[0]); b.WriteByte(')') }
+			if e.Kind == KashMatch { writeExpr(b, branch.Items[0]) } else if branch.Items[0].Kind == CommandTest { writeProcess(b, branch.Items[0]) } else { writeExpr(b, branch.Items[0]) }
 		}
 		for j := range branch.Body {
 			statement := branch.Body[j]
@@ -46,4 +46,9 @@ func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
 			} else { writeExpr(b, statement) }
 		}
 	}
+}
+
+func writeKashValue(b *strings.Builder, e *Expr) {
+	if e.Kind == Name || e.Kind == Reference || e.Kind == EnvironmentReference { b.WriteByte('$') }
+	writeExpr(b, e)
 }

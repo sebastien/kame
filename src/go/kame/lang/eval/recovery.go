@@ -11,7 +11,7 @@ type valueRecoveryState struct { Fallback bool }
 func freeValueRecoveryState(a mem.Allocator, value any) { mem.Free(a, value.(*valueRecoveryState)) }
 
 func recoverableValue(code string) bool {
-	return code == "REF_MISSING" || code == "FS_ERR" || code == "HOST_FAIL" || code == "RECIPE_FAIL" || code == "RECIPE_TIMEOUT" || code == "CAPTURE_LIMIT" || code == "CAPTURE_ENCODING"
+	return code == "REF_MISSING" || code == "FS_ERR" || code == "HOST_FAIL" || code == "TOOL_MISSING" || code == "RECIPE_FAIL" || code == "RECIPE_TIMEOUT" || code == "CAPTURE_LIMIT" || code == "CAPTURE_ENCODING"
 }
 
 func (p *Program) recoverValue(scope *Scope, e *expr.Expr, c *Context) Result {

@@ -1,5 +1,10 @@
 # Wildcard dependency sources
 
+`038-direct-kash-and-values.md` extends this contract with interpolated glob
+atoms and signed entry-kind filters. Filter masks participate in consumer
+identity, and entry-kind changes invalidate filtered membership even when path
+names are unchanged. Symlinks are classified without following their targets.
+
 An unquoted explicit path input containing `*`, `?`, or `[` is a wildcard
 source. The rule parser lowers it to the same dependency-tracked filesystem
 operation as `(wildcard PATTERN)`. Quoted paths preserve wildcard characters

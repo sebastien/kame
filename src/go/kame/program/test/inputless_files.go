@@ -22,7 +22,7 @@ func TestInputlessFileMaterializeRunsForEachRootEpoch(t *testing.T) {
 	parsed := script.Parse(a, "inputless.kmk", "SHELL = kash\n./out :\n\tsh -c \"printf x >> runs; printf result > out\"\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}}})
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: posix.ResolveTool, Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}}})
 	if compiled.Program == nil {
 		t.Error("inputless file rule did not compile")
 	} else {

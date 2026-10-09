@@ -36,16 +36,16 @@ for backend in native wasm; do
 	check "\$(:cwd \"$work/left\" cat < input | :cwd \"$work/right\" cat > output)" 0 '""' ''
 	if [ "$(cat "$work/right/output")" = left ]; then test-ok "$backend uses each endpoint cwd"; else test-fail "$backend ignored stage cwd"; fi
 	check "\$(< input :cwd \"$work/right\" cat)" 0 '"right"' ''
-	check "(let [dir \"$work/left\"] \$(:cwd \$dir :PATH bin stage-print found))" 0 '"found"' ''
+	check "(let [dir \"$work/left\"] \$(:cwd \$dir :PATH bin ./bin/stage-print found))" 0 '"found"' ''
 	check '$(:KASH_SETUP_VALUE hello /usr/bin/printenv KASH_SETUP_VALUE)' 0 '"hello\n"' ''
 	check '$(:KASH_SETUP_VALUE left /usr/bin/printenv KASH_SETUP_VALUE | :KASH_SETUP_VALUE right /bin/sh -c "cat; printenv KASH_SETUP_VALUE")' 0 '"left\nright\n"' ''
 	check '(cat $(:KASH_SETUP_VALUE one printenv KASH_SETUP_VALUE) $(:KASH_SETUP_VALUE two printenv KASH_SETUP_VALUE))' 0 '"one\ntwo\n"' ''
-	check '$(:KASH_SETUP_VALUE @(:false) printenv KASH_SETUP_VALUE)' 0 '"false\n"' ''
+	check '$(:KASH_SETUP_VALUE (nop :false) printenv KASH_SETUP_VALUE)' 0 '"false\n"' ''
 	check '$(:KASH_SETUP_VALUE "" printenv KASH_SETUP_VALUE)' 0 '"\n"' ''
 	check '$(printf "%s" :cwd :timeout :KASH_SETUP_VALUE)' 0 '":cwd:timeout:KASH_SETUP_VALUE"' ''
 
 	test-step "$backend: validation and unchanged grants"
-	for expression in '$(:cwd "" pwd)' '$(:timeout 0 true)' '$(:timeout -1 true)' '$(:timeout NaN true)' '$(:timeout Infinity true)' '$(:timeout @([1]) true)' '$(:X @([1]) true)'; do
+	for expression in '$(:cwd "" pwd)' '$(:timeout 0 true)' '$(:timeout -1 true)' '$(:timeout NaN true)' '$(:timeout Infinity true)' '$(:timeout (nop [1]) true)' '$(:X (nop [1]) true)'; do
 		check "$expression" 1 '' EXPR_INVALID
 	done
 	for expression in '$(:cwd . :cwd . pwd)' '$(:X a :X b true)' '$(:async true true)'; do check "$expression" 1 '' PARSE_ERR; done
@@ -79,7 +79,7 @@ for backend in native wasm; do
 done
 
 test-step "setup parsing and formatting parity"
-printf '%s\n' '$(:cwd ${directory} :timeout @(0.1) :MODE production cat | :MODE test cat :ordinary)' >"$work/expression.km"
+printf '%s\n' '$(:cwd ${directory} :timeout (nop 0.1) :MODE production cat | :MODE test cat :ordinary)' >"$work/expression.km"
 for operation in parse fmt; do
 	"$CLI_BIN" do "$operation" --lang expr "$work/expression.km" >"$work/native"
 	node "$CLI_ROOT/dist/kame.js" do "$operation" --lang expr "$work/expression.km" >"$work/wasm"

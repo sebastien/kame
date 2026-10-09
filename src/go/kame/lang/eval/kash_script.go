@@ -122,7 +122,7 @@ func freeKashInvocation(a mem.Allocator, value any) {
 	mem.Free(a, state)
 }
 
-// RunKash executes rendered recipe text in the current engine and policy.
+// RunKash parses authored recipe text once and retains its AST across suspension.
 func (p *Program) RunKash(text string, c *Context, span source.Span) Result {
 	previousStart, previousEnd := c.operationStart, c.operationEnd
 	c.operationStart, c.operationEnd = span.Start, span.End
@@ -196,8 +196,8 @@ func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Va
 	previousTimeout := c.TimeoutMS
 	c.Args, c.HasArgs, c.Scope, c.ScriptGroup = args, true, state.Scope, state.Group
 	c.CallPath = invocationPath(c.Run, previousPath, -1, int(state.Group))
-	// Constructed scripts have independent authored spans; recipe text keeps its
-	// source name so the build runtime can map rendered offsets to recipe lines.
+	// Constructed scripts have independent authored spans; direct recipe offsets
+	// are mapped back to their source by the build runtime.
 	c.Source = parsed.Source.Name
 	r := p.advanceKash(state, c)
 	mem.FreeString(c.Run, c.CallPath)
@@ -251,7 +251,13 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 		}
 		freeCallables(p.Alloc, &state.Value)
 		state.Value.Free(p.Alloc)
-		state.Value = r.Value
+		if item.Kind == script.Expression {
+			freeCallables(p.Alloc, &r.Value)
+			r.Value.Free(p.Alloc)
+			state.Value = core.Value{}
+		} else {
+			state.Value = r.Value
+		}
 		state.Index++
 	}
 	joined := p.joinProcesses(c)

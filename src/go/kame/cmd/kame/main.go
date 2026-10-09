@@ -175,61 +175,9 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	return session
 }
 
-func resolveTool(name, cwd string, environment []string) string {
-	if name == "" {
-		return ""
-	}
-	if name[0] == '/' {
-		if executableFile(name) {
-			return cloneCommandText(name)
-		}
-		return ""
-	}
-	if strings.IndexByte(name, '/') >= 0 {
-		candidate := path.Join(mem.System, cwd, name)
-		if executableFile(candidate) {
-			return candidate
-		}
-		mem.FreeString(mem.System, candidate)
-		return ""
-	}
-	pathValue := environmentValue(environment, "PATH")
-	for start := 0; start <= len(pathValue); {
-		end := start
-		for end < len(pathValue) && pathValue[end] != ':' {
-			end++
-		}
-		directory := pathValue[start:end]
-		candidate := ""
-		if path.IsAbs(directory) {
-			candidate = path.Join(mem.System, directory, name)
-		} else {
-			candidate = path.Join(mem.System, cwd, directory, name)
-		}
-		if executableFile(candidate) {
-			return candidate
-		}
-		mem.FreeString(mem.System, candidate)
-		if end == len(pathValue) {
-			break
-		}
-		start = end + 1
-	}
-	return ""
-}
-
 func resolveBuildTool(a mem.Allocator, name string, cwd string, environment []string) string {
-	_ = a           // The native CLI and its Program both use mem.System.
 	_ = environment // Tool references use startup PATH, not recipe --env overrides.
-	startup := posix.Environment(mem.System)
-	resolved := resolveTool(name, cwd, startup)
-	posix.FreeEnvironment(mem.System, startup)
-	return resolved
-}
-
-func executableFile(name string) bool {
-	info, err := os.Stat(name)
-	return err == nil && info.Mode().IsRegular() && info.Mode()&0111 != 0
+	return posix.ResolveTool(a, name, cwd, nil)
 }
 
 func (s *buildSession) Free() {

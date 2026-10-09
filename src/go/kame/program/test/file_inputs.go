@@ -243,7 +243,7 @@ func TestFileInputsSkipKashYield(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "SHELL = kash\n./output : ./input\n\t@(yield (text (read \"./extra\")))\n"
+	source := "SHELL = kash\n./output : ./input\n\t(yield (text (read \"./extra\")))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("kash yield failed: " + code)
 		return

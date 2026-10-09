@@ -2,6 +2,11 @@
 
 ## Purpose
 
+`038-direct-kash-and-values.md` refines this contract: Kash recipes parse
+directly, parenthesized Kame expressions replace `@(...)` boundaries, and every
+reached command head resolves as a tracked tool. Its action names and syntax
+take precedence over older spellings in the examples below.
+
 Kash is Kame's command and process language. It makes command-oriented programs
 read like shell scripts while retaining Kame's typed values, lazy evaluation, and
 explicit dependency model.
@@ -37,9 +42,8 @@ expression extension in the user-facing sense: every Kash value computation
 delegates to the existing Kame expression grammar and evaluator rather than a
 second value language.
 
-Rule bodies expand through the existing recipe template engine before their
-selected interpreter receives the resulting script. Without an explicit
-interpreter setting, existing shell recipe behavior is preserved.
+Rule bodies selected for Kash are parsed directly without recipe-template
+expansion. External-shell recipes retain their existing template behavior.
 
 ### Recipe interpreters and reusable scripts
 
@@ -62,9 +66,9 @@ selection does not propagate to prerequisites. An absent `SHELL` uses the
 invocation's configured shell, defaulting to `/bin/sh -c`. Bare `kash` as a
 complete definition value denotes the constructor; quote it to obtain a string.
 
-Kash recipes use **template expansion, then Kash parsing**, just as external
-shells receive expanded recipe text. This preserves template metaprogramming;
-escape an `@` through the template layer when an expansion must reach Kash.
+Kash recipes use **direct Kash parsing** under `038-direct-kash-and-values.md`.
+Template metaprogramming is explicit through `render` and a constructed Kash
+callable, not an implicit layer requiring escaped expression boundaries.
 The entire rendered script is parsed before any of its statements execute.
 Statements share rule inputs, outputs, captures, build definitions and invocation
 arguments. Each rule joins its asynchronous work before verifying file outputs

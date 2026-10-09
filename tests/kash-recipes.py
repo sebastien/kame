@@ -31,9 +31,9 @@ with tempfile.TemporaryDirectory() as temporary:
     def expression(text, expected=None, code=None, args=None):
         return invoke(['do', 'run', '--allow-run', '--allow-read', '--allow-write', '-c', text] + (args or []), expected, code)
 
-    # Templates expand before Kash parsing, including generated statements.
-    recipe('SHELL = kash\ncommand = "printf generated"\nchosen :\n\t@(command)\n', expected='generated')
-    recipe('SHELL = kash\nname = "build value"\nchosen :\n\tprintf %s "@(name)"\n', expected='build value')
+    # Authored recipes are direct Kash; constructing source is explicit.
+    recipe('SHELL = kash\ncommand = (kash "printf generated")\nchosen :\n\t(command)\n', expected='generated')
+    recipe('SHELL = kash\nname = "build value"\nchosen :\n\tprintf %s "$name"\n', expected='build value')
     recipe('SHELL = kash\nchosen :\n\tprintf %s $(printf captured)\n', expected='captured')
     recipe('SHELL = kash\nchosen :\n\tprintf %s $(printf value)\n\tprintf %s $(printf value)\n', expected='valuevalue')
     recipe('SHELL = kash\nchosen :\n\tprintf first\n\tprintf second | cat\n', expected='firstsecond')
@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory() as temporary:
     expression('(let [script (kash "touch forbidden")] (out "constructed"))', expected='constructed"constructed"')
     assert not (project / 'forbidden').exists()
     expression('(let [name "lexical" script (kash "printf %s $name")] (let [name "caller"] (script)) (out "done"))', expected='lexicaldone"done"')
-    expression('(let [script (kash """printf %s @(join @* "-")""")] (script "one" "two") (out "done"))', expected='one-twodone"done"')
+    expression('(let [script (kash """printf %s (join @* "-")""")] (script "one" "two") (out "done"))', expected='one-twodone"done"')
     expression('(let [script (kash "printf x; sleep .01; printf y")] (script) (script) (out "done"))', expected='xyxydone"done"')
     expression('(let [script (kash "value = 42; printf %s $value")] (script) (script) (out "done"))', expected='4242done"done"')
     expression('(let [script (kash "printf x &; printf y")] (script) (out "done"))')

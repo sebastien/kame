@@ -37,6 +37,10 @@ func TestStructuredRecipeAsyncUsesInstanceHeap(t *testing.T) {
 			if next.Request.Kind == host.RequestProcess {
 				processes++
 				r.ProcessTerminal(next.Request, nil, nil, 0, 0, 0, "", "")
+			} else if next.Request.Kind == host.RequestReadFile && host.PayloadText(next.Request.Payload, host.FieldOp) == "resolve-tool" {
+				r.Complete(next.Request, core.NewString(r.Alloc, "/bin/sh"), diagnostic.Diagnostic{})
+			} else if next.Request.Kind == host.RequestReadFile && host.PayloadText(next.Request.Payload, host.FieldOp) == host.OpToolContent {
+				r.Complete(next.Request, core.NewBytes(r.Alloc, []byte("executable identity")), diagnostic.Diagnostic{})
 			} else {
 				r.Complete(next.Request, core.Value{Kind: core.Nil}, diagnostic.Diagnostic{})
 			}

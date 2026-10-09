@@ -109,6 +109,12 @@ work in an earlier displayed stage. Partial graphs identify partial stage views.
 
 ## Rendering
 
+Kash interpreters follow `038-direct-kash-and-values.md`: their recipe bodies
+are parsed directly and evaluated as typed process/expression ASTs. They do not
+render command text through the document-template engine. The template-rendering
+contract below applies to external-shell interpreters. Both paths retain dynamic
+dependencies, source provenance, publication, and suspension guarantees.
+
 Rendering evaluates recipe string templates in source order with rule inputs,
 outputs, and captures in scope. It records:
 
@@ -118,9 +124,10 @@ outputs, and captures in scope. It records:
 - Dynamic dependencies from library operations.
 - Source mapping from generated shell lines to recipe body spans.
 
-Every body line renders to command text, possibly empty after an effect
-expansion. Nonempty command lines are joined with `\n` and sent as one process
-request. There is no separate standalone-expression recipe syntax.
+For external-shell recipes, every body line renders to command text, possibly
+empty after an effect expansion. Nonempty lines are joined with `\n` and sent
+as one process request. Direct Kash recipes instead support ordinary expression
+statements and structured process graphs without text generation.
 
 Rendering may add dynamic dependency edges. If a newly discovered dependency is
 not current, rendering suspends and restarts for the latest generation after

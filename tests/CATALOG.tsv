@@ -142,3 +142,4 @@ tests/T009-14-cli-watch.sh	009	cli	Native shared watch roots, scoped environment
 tests/T009-15-cli-target-arguments.sh	009	cli	Native target arguments in plan JSON, defaults, dependency scope, identity, diagnostics, dry-run and watch invalidation
 tests/T015-03-dist-cosmocc-integrity.sh	015	dist	Cosmocc provisioning pins a versioned archive, verifies its SHA-256 before extraction, and rejects mismatches
 tests/T031-01-runtime-resource-protocols.sh	031	runtime	File and memory resource URI grants, host mappings and namespace isolation on native and WASM CLI
+tests/T038-01-kash-direct-recipes.sh	038	kash	Direct authored and generated recipes, parenthesized statements and arguments, rule frames, migration diagnostics, data isolation and native/WASM formatting parity

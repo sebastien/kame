@@ -16,7 +16,7 @@ cat >"$work/functions.km" <<'KM'
 (greet WHO) = (cat "Hello " WHO)
 KM
 cat >"$work/process.kash" <<'KASH'
-printf "%s\n" @(greet name) | cat
+printf "%s\n" (greet name) | cat
 KASH
 cat >"$work/definitions.kash" <<'KASH'
 unused = $(touch should-not-exist)
@@ -106,7 +106,7 @@ PYTIME
 	for service_source in \
 		$'service daemon :\n\t@(write "./forbidden-service-output" "payload")\n' \
 		$'BAD = (write "./forbidden-service-output" "payload")\nservice daemon :\n\t@(BAD)\n' \
-		$'service daemon : ; [shell: kash]\n\t\\@(write "./forbidden-service-output" "payload")\n'; do
+		$'service daemon : ; [shell: kash]\n\t(write "./forbidden-service-output" "payload")\n'; do
 		service_case=$((service_case + 1))
 		service_directory="$work/service-$backend-$service_case"
 		mkdir -p "$service_directory"

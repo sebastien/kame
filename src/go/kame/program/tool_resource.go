@@ -33,14 +33,20 @@ func produceTool(c *core.EngineContext, nodeID int64) core.ProducerResult {
    c.Submit(id)
    return core.ProducerSubmitted
   }
-  if completion.Diagnostic.Code != "" {
-   completion.Value.Free(c.Allocator()); c.Fail(completion.Diagnostic); return core.ProducerFailed
+   if completion.Diagnostic.Code != "" {
+    if completion.Diagnostic.Code == "TOOL_MISSING" {
+     completion.Value.Free(c.Allocator())
+     completion.Diagnostic.Free(c.Allocator())
+     c.Publish(core.Value{Kind: core.Nil})
+     return core.ProducerCompleted
+    }
+    completion.Value.Free(c.Allocator()); c.Fail(completion.Diagnostic); return core.ProducerFailed
   }
   if completion.HasValue && completion.Value.Kind == core.String { p.SetToolPath(state.Name, completion.Value.Text) }
   completion.Value.Free(c.Allocator())
  }
  resolved, ok := p.toolPath(state.Name)
- if !ok { c.Fail(failure(p.Alloc, "TOOL_MISSING", "cannot resolve tool: "+state.Name)); return core.ProducerFailed }
+ if !ok { c.Publish(core.Value{Kind: core.Nil}); return core.ProducerCompleted }
  file := mem.Alloc[externalFileState](p.Alloc)
  file.Program, file.Name, file.Tool = p, cloneText(p.Alloc, resolved), true
  if p.Engine.AddOwned(core.ResourceKey{Kind: core.ResourceFile, Name: resolved}, produceExternalFile, file, freeExternalFileState) == nil { freeExternalFileState(p.Alloc, file) }

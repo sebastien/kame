@@ -199,7 +199,7 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 		s.Index++
 	}
 	entry.AcceptedRecord.Inputs = s.Stored.Inputs
-	material := fileHasMaterialInputs(entry)
+	material := p.fileHasMaterialInputs(entry)
 	entry.AcceptedRecord.Inputs = nil
 	status := "built"
 	if s.Unknown { status = "unknown" }

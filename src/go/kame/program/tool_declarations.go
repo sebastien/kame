@@ -11,6 +11,15 @@ import (
 
 func (p *Program) declareExpressionTools(value *expr.Expr) {
  if value == nil { return }
+ if value.Kind == expr.Name && strings.HasPrefix(value.Text, "x/") { p.declareTool(value.Text[2:]) }
+ if value.Kind == expr.CommandStage {
+  for i := range value.Items {
+   word := value.Items[i]
+   if word.Kind != expr.CommandWord { continue }
+   if len(word.Parts) == 1 && word.Parts[0].Expr == nil { p.declareTool(word.Parts[0].Text) }
+   break
+  }
+ }
  if value.Kind == expr.Application && len(value.Items) == 2 && value.Items[0].Kind == expr.Name && value.Items[0].Text == "tool" {
   argument := value.Items[1]
   if argument.Kind == expr.Symbol || argument.Kind == expr.Path { p.declareTool(argument.Text) }

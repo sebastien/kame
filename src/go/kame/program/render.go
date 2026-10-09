@@ -25,6 +25,19 @@ type renderDependencyState struct {
 }
 
 func (p *Program) render(c *core.EngineContext, entry *instance, names []string) renderResult {
+	if entry.Kash {
+		b := strings.NewBuilder(p.Alloc)
+		var spans []diagnostic.Span
+		for i := range entry.Rule.Body {
+			line := entry.Rule.Body[i]
+			if i != 0 { b.WriteByte('\n') }
+			b.WriteString(line.Text)
+			spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: line.Span.Start, End: line.Span.End})
+		}
+		result := renderResult{Commands: cloneText(p.Alloc, b.String()), LineSpans: spans}
+		b.Free()
+		return result
+	}
 	body := entry.Rule.Body
  resources := entry.Plan.ResourceInputs
  if entry.Plan.Resolved { resources = entry.Plan.ResolvedResourceInputs }

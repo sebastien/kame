@@ -91,6 +91,8 @@ type Rule struct {
 	Inputs  []Input
 	Body    []RecipeLine
 	BodyDoc *template.Document
+	// Recipe diagnostics are deferred until the computed interpreter is selected.
+	RecipeDiagnostics []source.Diagnostic
 }
 
 type Result struct {
@@ -133,6 +135,7 @@ type parser struct {
 	start int
 	end   int
 	diags []source.Diagnostic
+	deferRecipeDiagnostics bool
 }
 
 func ParseRule(a mem.Allocator, name string, text string) *Result {
@@ -143,6 +146,11 @@ func ParseRule(a mem.Allocator, name string, text string) *Result {
 
 func ParseRuleRange(a mem.Allocator, s *source.Source, start int, end int) Part {
 	p := parser{a: a, s: s, start: start, end: end}
+	return Part{Rule: p.rule(), Diagnostics: p.diags}
+}
+
+func ParseRuleRangeDeferred(a mem.Allocator, s *source.Source, start int, end int) Part {
+	p := parser{a: a, s: s, start: start, end: end, deferRecipeDiagnostics: true}
 	return Part{Rule: p.rule(), Diagnostics: p.diags}
 }
 
@@ -179,6 +187,7 @@ func FreeRule(a mem.Allocator, r *Rule) {
 		r.Body[i].Template.Free()
 	}
 	slices.Free(a, r.Body)
+	slices.Free(a, r.RecipeDiagnostics)
 	if r.BodyDoc != nil {
 		r.BodyDoc.Free()
 		r.BodyDoc = nil
@@ -599,7 +608,7 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 		bodyStart := lineStart + len(indent)
 		line := template.ParseStringRange(p.a, p.s, bodyStart, contentEnd)
 		for i := range line.Diagnostics {
-			p.diags = slices.Append(p.a, p.diags, line.Diagnostics[i])
+			if p.deferRecipeDiagnostics { r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, line.Diagnostics[i]) } else { p.diags = slices.Append(p.a, p.diags, line.Diagnostics[i]) }
 		}
 		slices.Free(p.a, line.Diagnostics)
 		line.Diagnostics = nil
@@ -669,7 +678,7 @@ func (p *parser) recipeDocument(r *Rule, indent string) {
 	lastEnd := r.Body[len(r.Body)-1].Span.End
 	doc := template.ParseDocumentRange(p.a, p.s, firstStart, lastEnd, "plain")
 	for i := range doc.Diagnostics {
-		p.diags = slices.Append(p.a, p.diags, doc.Diagnostics[i])
+		if p.deferRecipeDiagnostics { r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, doc.Diagnostics[i]) } else { p.diags = slices.Append(p.a, p.diags, doc.Diagnostics[i]) }
 	}
 	r.BodyDoc = doc
 }

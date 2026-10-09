@@ -151,7 +151,7 @@ func parseScript(s *Script, offset int) {
 			continue
 		}
 		if rule.HasRuleSeparator(text[start:end]) {
-			part := rule.ParseRuleRange(a, s.Source, start, len(text))
+			part := rule.ParseRuleRangeDeferred(a, s.Source, start, len(text))
 			s.takeDiagnostics(part.Diagnostics)
 			if part.Rule == nil {
 				pos = nextLine(text, lineEnd)

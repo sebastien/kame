@@ -60,7 +60,7 @@ func TestCommandRecoveryIsRightAssociative(t *testing.T) {
 
 func TestEnvironmentNamespaceIsConfinedToKashSyntax(t *testing.T) {
 	a := t.Allocator()
-	r := parse(t, "(cat env.NAME $(printf $env.NAME @(env.OTHER)))")
+	r := parse(t, "(cat env.NAME $(printf $env.NAME $env.OTHER))")
 	defer r.Free()
 	if r.Expr.Items[1].Kind != expr.Reference { t.Error("ordinary Kame env reference was changed") }
 	stage := r.Expr.Items[2].Items[0]
@@ -121,7 +121,7 @@ func TestCommandWordFormattingUsesSafeBareWords(t *testing.T) {
 		"$(echo \"$name\"suffix \"$name\".c \"$name\"! \"$name\"\".c file\")",
 		"$(echo \"\" \"two words\" \"literal?\" \"a|b\" \"\\$name\" \"\\@literal\")",
 		"$(\":cwd\" \"=\" \"if\" \"elif\" \"else\" \"match\" \"case\" \"#comment\")",
-		"$(:cwd ./build :timeout @(1) :MODE production cat < ./input | cat >> ./output ?)",
+		"$(:cwd ./build :timeout (nop 1) :MODE production cat < ./input | cat >> ./output ?)",
 	}
 	want := []string{
 		"$(echo hello --flag=value ./file.txt *.c)",
@@ -129,7 +129,7 @@ func TestCommandWordFormattingUsesSafeBareWords(t *testing.T) {
 		"$(echo \"$name\"suffix \"$name\".c \"$name\"! \"$name\"\".c file\")",
 		"$(echo \"\" \"two words\" \"literal?\" \"a|b\" \"\\$name\" \"\\@literal\")",
 		"$(\":cwd\" \"=\" \"if\" \"elif\" \"else\" \"match\" \"case\" \"#comment\")",
-		"$(:cwd ./build :timeout @(1) :MODE production cat < ./input | cat >> ./output ?)",
+		"$(:cwd ./build :timeout (nop 1) :MODE production cat < ./input | cat >> ./output ?)",
 	}
 	for i := range inputs {
 		r := parse(t, inputs[i])
@@ -146,8 +146,8 @@ func TestCommandWordFormattingUsesSafeBareWords(t *testing.T) {
 }
 
 func TestKashExpressionBoundaryUsesKameValues(t *testing.T) {
-	inputs := []string{"$(echo @([1 2]))", "$(echo @([name: \"app\"]))", "$(echo @([x] x))", "$(echo @((cat \"a\" \"b\")))", "$(echo @(name))", "$(echo @(name | str))", "$(echo @(((cat _ \"!\"))))"}
-	kinds := []expr.Kind{expr.List, expr.Record, expr.Lambda, expr.Application, expr.Name, expr.Application, expr.Section}
+	inputs := []string{"$(echo (nop [1 2]))", "$(echo (nop [name: \"app\"]))", "$(echo ([x] x))", "$(echo (cat \"a\" \"b\"))", "$(echo $name)", "$(echo (name | str))", "$(echo ((cat _ \"!\")))"}
+	kinds := []expr.Kind{expr.Application, expr.Application, expr.Lambda, expr.Application, expr.Name, expr.Application, expr.Section}
 	for i := range inputs {
 		r := parse(t, inputs[i])
 		if len(r.Diagnostics) == 0 && r.Expr.Items[0].Items[1].Parts[0].Expr.Kind != kinds[i] { t.Error("Kash boundary changed the Kame value grammar") }
@@ -164,7 +164,7 @@ func TestKashExpressionBoundaryUsesKameValues(t *testing.T) {
 }
 
 func TestCommandPipelineParserBoundaries(t *testing.T) {
-	r := parse(t, "$(printf \"a|b\"|tr @(\"a\" | uppercase) X | cat)")
+	r := parse(t, "$(printf \"a|b\"|tr (\"a\" | uppercase) X | cat)")
 	if len(r.Expr.Items) != 3 || r.Expr.Items[0].Kind != expr.CommandStage || r.Expr.Items[0].Items[1].Parts[0].Text != "a|b" { t.Error("pipeline stage or quoted operator boundary was lost") }
 	formatted := expr.Format(t.Allocator(), r.Expr)
 	copy := parse(t, formatted)
@@ -177,7 +177,7 @@ func TestCommandPipelineParserBoundaries(t *testing.T) {
 }
 
 func TestCommandRedirectionsRetainBoundaries(t *testing.T) {
-	r := parse(t, "$(< ${input} cat | cat >> @(output))")
+	r := parse(t, "$(< ${input} cat | cat >> $output)")
 	if len(r.Expr.Items) != 2 || r.Expr.Items[0].Items[0].Kind != expr.CommandRedirection || r.Expr.Items[1].Items[1].Text != ">>" { t.Error("redirection syntax was not retained in its stage") }
 	formatted := expr.Format(t.Allocator(), r.Expr)
 	copy := parse(t, formatted)
@@ -195,7 +195,7 @@ func TestCommandRedirectionsRetainBoundaries(t *testing.T) {
 }
 
 func TestCommandSetupParserAndFormatter(t *testing.T) {
-	r := parse(t, "$(:cwd ${directory} :timeout @(0.1) :MODE production cat | :MODE test cat :ordinary)")
+	r := parse(t, "$(:cwd ${directory} :timeout (nop 0.1) :MODE production cat | :MODE test cat :ordinary)")
 	if r.Expr.Items[0].Items[0].Kind != expr.CommandSetup || r.Expr.Items[0].Items[0].Text != "cwd" || r.Expr.Items[1].Items[2].Kind != expr.CommandWord { t.Error("stage setup lost its syntax boundary") }
 	formatted := expr.Format(t.Allocator(), r.Expr)
 	copy := parse(t, formatted)
