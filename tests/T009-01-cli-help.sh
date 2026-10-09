@@ -24,16 +24,28 @@ cli_expect_status 0
 cli_expect_stdout_contains "Usage:"
 cli_expect_stderr_empty
 
-test-step "version prints 'kame VERSION (BUILD_ID; BUILD_TIME; BUILD_MODE)' on stdout and exits 0"
+test-step "version prints build metadata and runtime on stdout and exits 0"
 cli_run -- --version
 cli_expect_status 0
-cli_expect_stdout_matches "^kame $(<"$CLI_ROOT/VERSION") \([^;]*; [^;]*; [^;]*\)$"
+cli_expect_stdout_matches "^kame $(<"$CLI_ROOT/VERSION") \([^;]*; [^;]*; [^;]*; (C|Go)\)$"
 cli_expect_stderr_empty
 
 test-step "short version flag"
 cli_run -- -V
 cli_expect_status 0
-cli_expect_stdout_matches "^kame $(<"$CLI_ROOT/VERSION") \([^;]*; [^;]*; [^;]*\)$"
+cli_expect_stdout_matches "^kame $(<"$CLI_ROOT/VERSION") \([^;]*; [^;]*; [^;]*; (C|Go)\)$"
+
+test-step "version JSON keeps runtime separate from build mode"
+cli_run -- --json --version
+cli_expect_status 0
+cli_expect_stderr_empty
+if jq -es 'length == 1 and (.[0] | .schema == 1 and .type == "version" and
+    (.runtime == "C" or .runtime == "Go") and
+    (.buildMode == "debug" or .buildMode == "sanitize" or .buildMode == "release" or .buildMode == "development"))' "$CLI_OUT" >/dev/null; then
+	test-ok "version JSON has canonical runtime and artifact mode"
+else
+	test-fail "version JSON: $(cat "$CLI_OUT")"
+fi
 
 test-step "help takes precedence over version"
 cli_run -- --version --help

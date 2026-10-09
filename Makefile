@@ -279,4 +279,4 @@ build/tools/cosmocc-4.0.2/bin/cosmocc: tools/provision-cosmocc.sh
 
 dist/kame.com: build/tools/cosmocc-4.0.2/bin/cosmocc $(KAME_BUILD_INPUTS)
 	mkdir -p dist
-	cd $(KAME_DIR) && CC=$(CURDIR)/build/tools/cosmocc-4.0.2/bin/cosmocc CFLAGS="-O3 -s -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
+	cd $(KAME_DIR) && CC=$(CURDIR)/build/tools/cosmocc-4.0.2/bin/cosmocc CFLAGS="-O3 -s -DKAME_BUILD_MODE_RELEASE -DKAME_RUNTIME_APE" so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame

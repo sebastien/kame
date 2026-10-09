@@ -252,8 +252,8 @@ func TestHelpAndVersion(t *testing.T) {
 	}{
 		{[]string{"--help"}, "Usage:"},
 		{[]string{"-h"}, "Commands:"},
-		{[]string{"--version"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode() + ")\n"},
-		{[]string{"-V"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode() + ")\n"},
+		{[]string{"--version"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode() + "; " + buildRuntime() + ")\n"},
+		{[]string{"-V"}, "kame " + version + " (" + buildID + "; " + buildTime + "; " + buildMode() + "; " + buildRuntime() + ")\n"},
 		{[]string{"--version", "--help"}, "Usage:"},
 		{[]string{"--help", "--version"}, "Usage:"},
 		{[]string{"-c", "--help", "--version"}, "kame " + version + " ("},

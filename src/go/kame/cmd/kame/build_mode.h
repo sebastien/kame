@@ -19,4 +19,14 @@ static inline so_String kame_build_mode(void) {
     return (so_String){.ptr = KAME_ARTIFACT_MODE, .len = sizeof(KAME_ARTIFACT_MODE) - 1};
 }
 
+#if defined(KAME_RUNTIME_APE)
+#define KAME_ARTIFACT_RUNTIME "APE"
+#else
+#define KAME_ARTIFACT_RUNTIME "C"
+#endif
+
+static inline so_String kame_build_runtime(void) {
+    return (so_String){.ptr = KAME_ARTIFACT_RUNTIME, .len = sizeof(KAME_ARTIFACT_RUNTIME) - 1};
+}
+
 #endif

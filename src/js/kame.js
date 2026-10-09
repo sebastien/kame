@@ -3691,9 +3691,21 @@ function runCache(inv) {
   return 0;
 }
 
+function writeVersion(asJSON) {
+  if (asJSON) stdout.write(`${JSON.stringify({ schema: 1, type: 'version', version: version(), buildID: 'unknown', buildTime: 'unknown', buildMode: 'wasm', runtime: 'WASM' })}\n`);
+  else stdout.write(`kame ${version()} (runtime=WASM)\n`);
+}
+
 async function main() {
   let args = argv.slice(2);
   const first = args[0];
+
+  // Keep simple version requests usable before the WASM module is provisioned.
+  if ((args.length === 1 || (args.length === 2 && args.includes('--json'))) &&
+      args.some((arg) => arg === '-V' || arg === '--version')) {
+    writeVersion(args.includes('--json'));
+    return 0;
+  }
 
   if (first === '--wasm-abi-info') {
     stdout.write(`${JSON.stringify((await Module.load()).abiInfo())}\n`);
@@ -3711,8 +3723,7 @@ async function main() {
   if (!presentation.ok) { diagnostic(presentation.error.code, presentation.error.message); return 2; }
   args = presentation.args;
   if (presentation.earlyAction === 'version') {
-    if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'version', version: version(), buildID: 'unknown', buildTime: 'unknown', buildMode: 'wasm' })}\n`);
-    else stdout.write(`kame ${version()}\n`);
+    writeVersion(jsonMode);
     return 0;
   }
   const helpData = await module.parseCLI('@help', ['--output=json']);

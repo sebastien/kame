@@ -52,16 +52,18 @@ export KAME_RELEASE_URL="file://$release"
 export KAME_HOME="$cache"
 
 test-step "a lone version request provisions nothing"
-out="$("$launcher" --version)"
-if [ "$out" = "kame 9.9.9" ] && [ ! -e "$cache" ]; then
-	test-ok "--version answers without provisioning"
-else
-	test-fail "--version: out=$out cache-exists=$([ -e "$cache" ] && echo yes || echo no)"
-fi
+for flag in --version -V; do
+	out="$(KAME_NO_DOWNLOAD=1 KAME_BACKEND=invalid KAME_JS=/nonexistent "$launcher" "$flag")"
+	if [ "$out" = "kame 9.9.9 (runtime=unknown)" ] && [ ! -e "$cache" ]; then
+		test-ok "$flag answers without backend selection or provisioning"
+	else
+		test-fail "$flag: out=$out cache-exists=$([ -e "$cache" ] && echo yes || echo no)"
+	fi
+done
 
 test-step "the explicit latest channel resolves a release version without provisioning"
 out="$(KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" KAME_HOME="$root/latest-version-cache" "$launcher" --version)"
-if [ "$out" = "kame 9.9.9" ] && [ ! -e "$root/latest-version-cache" ]; then
+if [ "$out" = "kame 9.9.9 (runtime=unknown)" ] && [ ! -e "$root/latest-version-cache" ]; then
 	test-ok "latest resolves its signed-release version asset before --version"
 else
 	test-fail "latest version lookup: out=$out"

@@ -191,9 +191,14 @@ After resolving the program, the launcher replaces itself with it:
 group, and passes its signals and exit status through unchanged.
 
 A lone `-V` or `--version` argument is answered by the launcher from the pinned
-version as `kame VERSION` on stdout with status 0, without provisioning. Any
+version as `kame VERSION (runtime=unknown)` on stdout with status 0, without
+selecting or provisioning a backend. Any
 other argument, including a `--version` used after `--` or as an option value,
 is forwarded.
+The spelling `unknown` follows the [canonical runtime table](009-cli.md#runtime-names)
+and means no backend was selected, not an unknown artifact build mode. This
+short format is an intentional no-provision exception to native version output;
+combined options such as `--json --version` are forwarded to the selected CLI.
 
 ## Launcher Failures
 
@@ -287,7 +292,7 @@ existing build rules.
   no installed artifact.
 - A second invocation with a populated cache performs no network access.
 - `KAME_NO_DOWNLOAD=1` fails when the artifact is absent.
-- A lone `--version` prints `kame VERSION` and provisions nothing.
+- A lone `--version` prints `kame VERSION (runtime=unknown)` and provisions nothing.
 - `KAME_VERSION=latest` resolves the selector, prints its concrete version
   without provisioning for `--version`, and provisions only that version for
   execution; disabled downloads fail before creating the cache.

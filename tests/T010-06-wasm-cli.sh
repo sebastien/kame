@@ -51,13 +51,22 @@ for args in first last absolute discover plan; do
 	fi
 done
 
-test-step "version and help do not require the module"
-run --version
-if [ "$status" = 0 ] && [ "$(cat "$work/out")" = "kame $(cat "$CLI_ROOT/VERSION")" ] && [ ! -s "$work/err" ]; then
-	test-ok "--version prints kame VERSION on stdout"
+test-step "version does not require the module"
+for flag in --version -V; do
+	KAME_WASM="$work/missing.wasm" run "$flag"
+	if [ "$status" = 0 ] && [ "$(cat "$work/out")" = "kame $(cat "$CLI_ROOT/VERSION") (runtime=WASM)" ] && [ ! -s "$work/err" ]; then
+		test-ok "$flag prints WASM runtime without loading the module"
+	else
+		test-fail "$flag: status=$status out=$(cat "$work/out") err=$(cat "$work/err")"
+	fi
+done
+KAME_WASM="$work/missing.wasm" run --json --version
+if [ "$status" = 0 ] && [ ! -s "$work/err" ] && node -e 'const i=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); if(i.schema!==1||i.type!=="version"||i.runtime!=="WASM"||i.buildMode!=="wasm")process.exit(1)' "$work/out"; then
+	test-ok "version JSON reports WASM runtime without loading the module"
 else
-	test-fail "--version: status=$status out=$(cat "$work/out") err=$(cat "$work/err")"
+	test-fail "version JSON: status=$status out=$(cat "$work/out") err=$(cat "$work/err")"
 fi
+test-step "help prints usage"
 run --help
 if [ "$status" = 0 ] && [ -s "$work/out" ]; then
 	test-ok "--help prints usage and exits 0"

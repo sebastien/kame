@@ -25,12 +25,14 @@ func writeVersion(out io.Writer) {
 		e.Str(buildTime)
 		e.Str("buildMode")
 		e.Str(buildMode())
+		e.Str("runtime")
+		e.Str(buildRuntime())
 		e.EndObject()
 		e.Flush()
 		io.WriteString(out, "\n")
 		return
 	}
-	io.WriteString(out, "kame "+version+" ("+buildID+"; "+buildTime+"; "+buildMode()+")\n")
+	io.WriteString(out, "kame "+version+" ("+buildID+"; "+buildTime+"; "+buildMode()+"; "+buildRuntime()+")\n")
 }
 
 func isDoCommand(name string) bool {

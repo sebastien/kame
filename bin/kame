@@ -80,7 +80,7 @@ esac
 
 # --- A lone version request is answered without provisioning. ---
 if [ "$#" -eq 1 ] && { [ "$1" = "-V" ] || [ "$1" = "--version" ]; }; then
-	printf 'kame %s\n' "$version"
+	printf 'kame %s (runtime=unknown)\n' "$version"
 	exit 0
 fi
 

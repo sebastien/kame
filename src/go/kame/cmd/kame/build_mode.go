@@ -8,4 +8,8 @@ var build_mode_h string
 //so:extern
 func kame_build_mode() string { return "development" }
 
+//so:extern
+func kame_build_runtime() string { return "Go" }
+
 func buildMode() string { return kame_build_mode() }
+func buildRuntime() string { return kame_build_runtime() }

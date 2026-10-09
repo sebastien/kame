@@ -303,8 +303,12 @@ in `037-build-inspection.md`, including stages and explicit deferred discovery.
 Host-backed resolution resumes through the inspection host protocol, never an
 empty memory-filesystem substitute or execution of an artifact producer. Repeated
 size/copy queries preserve identities and release inspection interest on failure
-or cancellation. `-V` and `--version` print `kame VERSION`; the launcher
+or cancellation. `-V` and `--version` print `kame VERSION (runtime=WASM)`; the launcher
 may answer that request without loading the module (`015-distribution.md`).
+Runtime spelling and its distinction from `buildMode` are defined by the
+[canonical runtime table](009-cli.md#runtime-names). This short human format is
+an intentional exception to the native four-field format; `--json --version`
+includes `runtime: "WASM"` and `buildMode: "wasm"` without loading the module.
 
 For ABI conformance testing, the wrapper also accepts `--wasm-abi-info` and
 `--wasm-self-test`, which print ABI exports and self-test results as JSON.
@@ -381,7 +385,7 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 - An undersized heap produces a diagnostic rather than memory corruption.
 - The JavaScript wrapper copies payloads before further allocation and rejects
   use after disposal.
-- `node dist/kame.js --version` prints `kame VERSION` and exits 0.
+- `node dist/kame.js --version` prints `kame VERSION (runtime=WASM)` and exits 0.
 - `do run --lang expr` output matches native output byte-for-byte for pure expressions.
 - Direct `.km`/`.kmk`/`.kash`/`.ksh` execution and `do run` share native dispatch,
   ordered multi-source compilation, shared scope/engine, first-fragment policy,
