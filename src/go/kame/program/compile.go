@@ -140,6 +140,11 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		p.Free()
 		return result
 	}
+	if invalid := p.validateParameters(options.Parameters); invalid.Code != "" {
+		result.Diagnostics = slices.Append(a, result.Diagnostics, invalid)
+		p.Free()
+		return result
+	}
 	p.nextRequest = 1 << 32
 	result.Program = p
 	return result
@@ -377,7 +382,6 @@ func (p *Program) Free() {
 	slices.Free(p.Alloc, p.Options.Environment)
 	slices.Free(p.Alloc, p.Options.Grants)
 	slices.Free(p.Alloc, p.Instances)
-	for i := range p.Events { p.Events[i].Free(p.Alloc) }
 	slices.Free(p.Alloc, p.Events)
 	slices.Free(p.Alloc, p.Rules)
 	slices.Free(p.Alloc, p.Tools)

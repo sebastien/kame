@@ -233,7 +233,10 @@ type Options struct {
 	Directory       string
 	Shell           []string
 	Environment     []string
+	// Defines explicitly overrides declared values with literal NAME=VALUE text.
 	Defines         []string
+	// Parameters is authored shorthand: definition overrides, target arguments,
+	// or assignment-shaped targets, classified against registered declarations.
 	Parameters      []string
 	ToolOverrides   []string
 	RemoteExecutors []host.ExecutorDescriptor
@@ -283,7 +286,10 @@ type Program struct {
 	ResolvedRules     []*rule.Rule
 	GeneratedRuleMeta []generatedRuleMeta
 	Tools             []Tool
+	// Configuration owns the effective literal definition overrides.
 	Configuration     []string
+	// ParameterDefinitions owns shorthand operands consumed as definition
+	// overrides, so target normalization can omit them; these are not declarations.
 	ParameterDefinitions []string
 	SourceSignature   core.Signature
 	Instances         []instance

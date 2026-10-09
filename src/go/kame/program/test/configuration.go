@@ -64,3 +64,83 @@ func TestBuildConfigurationOverridesAreLiteralOwnedAndVisible(t *testing.T) {
 	parsed.Free()
 	registry.Free()
 }
+
+func TestAssignmentShapedTargetsValidateAfterRegistration(t *testing.T) {
+	a := t.Allocator()
+	fixtures := []string{
+		"@(\"./mode=debug\") :\n\ttrue\n",
+		"generate outputs = [[kind: \"file\" target: \"./mode=debug\" inputs: [] order-only: [] recipe: [\"true\"]]]\n",
+	}
+	for i := range fixtures {
+		parsed := script.Parse(a, "assignment-target.kmk", fixtures[i])
+		registry := eval.NewRegistry(a)
+		operations.Register(registry)
+		compiled := program.Compile(a, parsed, registry, program.Options{Parameters: []string{"./mode=debug"}})
+		if compiled.Program == nil {
+			t.Error("assignment-shaped target rejected: " + fixtures[i])
+		} else {
+			joined := compiled.Program.JoinTargetOperands([]string{"./mode=debug"})
+			if len(joined) != 1 || joined[0] != "./mode=debug" {
+				t.Error("assignment-shaped target was consumed as configuration")
+			}
+			program.FreeStrings(a, joined)
+			planned := compiled.Program.Plan("./mode=debug")
+			if planned.Diagnostic.Code != "" || len(planned.Plan.Outputs) != 1 || planned.Plan.Outputs[0] != "./mode=debug" {
+				t.Error("registered assignment-shaped target did not plan")
+			}
+			planned.Plan.Free(a)
+			planned.Diagnostic.Free(a)
+			compiled.Program.Free()
+		}
+		compiled.Free(a)
+		parsed.Free()
+		registry.Free()
+	}
+}
+
+func TestParameterOverridesApplyBeforeOutputAndGeneratorEvaluation(t *testing.T) {
+	a := t.Allocator()
+	fixtures := []string{
+		"@(cat \"./mode=\" mode) :\n\ttrue\n",
+		"generate outputs = [[kind: \"file\" target: (cat \"./mode=\" mode) inputs: [] order-only: [] recipe: [\"true\"]]]\n",
+	}
+	for i := range fixtures {
+		parsed := script.Parse(a, "parameter-generation.kmk", "mode = (read \"not-evaluated\")\n"+fixtures[i])
+		registry := eval.NewRegistry(a)
+		operations.Register(registry)
+		parameters := []string{"mode=debug", "./mode=debug"}
+		compiled := program.Compile(a, parsed, registry, program.Options{Defines: []string{"mode=explicit"}, Environment: []string{"KAME_mode=environment"}, Parameters: parameters})
+		if compiled.Program == nil {
+			t.Error("definition parameter was not applied before rule registration")
+		} else {
+			p := compiled.Program
+			if !p.HasTarget("./mode=debug") || len(p.Configuration) != 1 || p.Configuration[0] != "mode=debug" {
+				t.Error("definition parameter precedence was not visible during registration")
+			}
+			joined := p.JoinTargetOperands(parameters)
+			if len(joined) != 1 || joined[0] != "./mode=debug" {
+				t.Error("definition override and target operands were not separated")
+			}
+			program.FreeStrings(a, joined)
+			p.Free()
+		}
+		compiled.Free(a)
+		parsed.Free()
+		registry.Free()
+	}
+}
+
+func TestUnknownParameterFailsCompilationAfterGeneration(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "unknown-parameter.kmk", "mode = (read \"not-evaluated\")\ngenerate outputs = [[kind: \"file\" target: (cat \"./mode=\" mode) inputs: [] order-only: [] recipe: [\"exit 99\"]]]\n")
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Parameters: []string{"mode=debug", "./mode=debug", "unknown=value"}})
+	if compiled.Program != nil || len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "TGT_ARGUMENT" || compiled.Diagnostics[0].Message != "unknown parameter: unknown" {
+		t.Error("unknown parameter did not fail before exposing an executable program")
+	}
+	if compiled.Program != nil { compiled.Program.Free() }
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
+}
