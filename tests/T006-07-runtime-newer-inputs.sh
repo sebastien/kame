@@ -17,6 +17,8 @@ for backend in native wasm; do
  printf ordered > "$project/order"
  cat > "$project/Makefile.kmk" <<'KMK'
 (newer UNUSED) = @<?
+(kash-newer UNUSED) = (if (read "./order") @<? @<?)
+KASH_NEWER = (kash-newer :nil)
 ./out : ./a ./b ./a | ./order ; env "MODE=stable"
 	printf '%s\n' @(newer :nil) > selected; cat @<* > @>; printf x >> runs
 ./multi-a ./multi-b : ./a ./b
@@ -25,6 +27,17 @@ for backend in native wasm; do
 	printf '%s' @(count @<?) > @>
 ./force : ./a ./b
 	printf '%s' @(count @<?) > @>
+./guard : ./a ./b
+	printf '%s' @(count @<?) > @>
+always ./always : ./a ./b
+	printf '%s' @(count @<?) > @>
+./unrecorded : ./a named ./b ./a | ./order
+	printf '%s\n' @<? > @>
+named :
+	true
+./kash-out : ./a ./b ./a | ./order ; [shell: kash]
+	printf "%s\n" $KASH_NEWER > ./kash-selected
+	touch ./kash-out
 ./capture/{stem}.out : ./a
 	printf '%s\n' @(stem) @(dirname @>) @(dirname @<) > @>
 bad-task :
@@ -36,45 +49,77 @@ KMK
  if cmp -s "$project/selected" "$project/expected"; then test-ok "$backend first build selects both unique inputs"; else test-fail "$backend missing-output selection"; fi
  test-step "$backend keeps scoped file fresh after newer subset changes"
  "${runner[@]}" -C "$project" ./out > "$project/log" 2> "$project/err"
- if [ "$(cat "$project/runs")" = x ]; then test-ok "$backend selector transition preserves scoped freshness"; else test-fail "$backend selector caused redundant rebuild"; fi
-  test-step "$backend selects only inputs strictly newer than output"
-  printf changed > "$project/b"
- python3 - "$project" <<'PY'
+  if [ "$(cat "$project/runs")" = x ]; then test-ok "$backend selector transition preserves scoped freshness"; else test-fail "$backend selector caused redundant rebuild"; fi
+	 test-step "$backend retains input digests across a source-guard miss"
+	 "${runner[@]}" -C "$project" ./guard > "$project/log" 2> "$project/err"
+	 python3 - "$project/Makefile.kmk" <<'PYGUARD'
+import pathlib, sys
+source = pathlib.Path(sys.argv[1])
+text = source.read_text()
+old = "./guard : ./a ./b\n\tprintf '%s' @(count @<?) > @>"
+new = "./guard : ./a ./b\n\tprintf 'guard-change' >&2; printf '%s' @(count @<?) > @>"
+assert old in text
+source.write_text(text.replace(old, new))
+PYGUARD
+	 "${runner[@]}" -C "$project" ./guard > "$project/log" 2> "$project/err"
+	 if [ "$(cat "$project/guard")" = 0 ]; then test-ok "$backend source edits do not invent changed inputs"; else test-fail "$backend source guard discarded input digests"; fi
+	 test-step "$backend always execution retains the successful content record"
+	 "${runner[@]}" -C "$project" ./always > "$project/log" 2> "$project/err"
+	 "${runner[@]}" -C "$project" ./always > "$project/log" 2> "$project/err"
+	 if [ "$(cat "$project/always")" = 0 ]; then test-ok "$backend always execution does not invent changed inputs"; else test-fail "$backend always discarded input digests"; fi
+  test-step "$backend selects changed content with unchanged mtime"
+  python3 - "$project" <<'PY'
 import os, sys
 root = sys.argv[1]
-for name, stamp in [('a', 1000000000), ('out', 2000000000), ('b', 3000000000), ('order', 4000000000)]:
-    os.utime(os.path.join(root, name), ns=(stamp, stamp))
+name = os.path.join(root, 'b')
+stat = os.stat(name)
+with open(name, 'w') as stream:
+    stream.write('changed')
+os.utime(name, ns=(stat.st_atime_ns, stat.st_mtime_ns))
 PY
  "${runner[@]}" -C "$project" ./out > "$project/log" 2> "$project/err"
  printf './b\n' > "$project/expected"
- if cmp -s "$project/selected" "$project/expected" && [ "$(cat "$project/runs")" = xx ]; then test-ok "$backend newer subset excludes older and ordering inputs"; else test-fail "$backend newer subset"; fi
- test-step "$backend uses oldest output and all inputs when any output is absent"
+  if cmp -s "$project/selected" "$project/expected" && [ "$(cat "$project/runs")" = xx ]; then test-ok "$backend digest subset ignores unchanged mtime and ordering inputs"; else test-fail "$backend unchanged-mtime subset"; fi
+  test-step "$backend selects all inputs when any output is absent"
  "${runner[@]}" -C "$project" ./multi-a > "$project/log" 2> "$project/err"
  rm "$project/multi-b"
  "${runner[@]}" -C "$project" ./multi-a > "$project/log" 2> "$project/err"
  printf './a\n./b\n' > "$project/expected"
  if cmp -s "$project/multi-selected" "$project/expected" && [ -f "$project/multi-b" ]; then test-ok "$backend missing sibling selects all inputs"; else test-fail "$backend multiple-output selection"; fi
-  test-step "$backend compares against the oldest existing output"
+  test-step "$backend selects changed bytes despite older input mtime"
   printf changed > "$project/a"
  python3 - "$project" <<'PYTIMES'
 import os, sys
 root = sys.argv[1]
-for name, stamp in [('a', 3000000000), ('b', 1000000000), ('multi-a', 4000000000), ('multi-b', 2000000000)]:
+for name, stamp in [('a', 1000000000), ('b', 1000000000), ('multi-a', 4000000000), ('multi-b', 2000000000)]:
     os.utime(os.path.join(root, name), ns=(stamp, stamp))
 PYTIMES
  "${runner[@]}" -C "$project" ./multi-a > "$project/log" 2> "$project/err"
  printf './a\n' > "$project/expected"
- if cmp -s "$project/multi-selected" "$project/expected"; then test-ok "$backend oldest sibling determines newer inputs"; else test-fail "$backend oldest-output comparison"; fi
- test-step "$backend excludes equal timestamps even when forced"
+  if cmp -s "$project/multi-selected" "$project/expected"; then test-ok "$backend older changed input is selected"; else test-fail "$backend older-mtime content selection"; fi
+  test-step "$backend ignores newer mtime for unchanged bytes even when forced"
  "${runner[@]}" -C "$project" ./force > "$project/log" 2> "$project/err"
  python3 - "$project" <<'PYTIMES'
 import os, sys
 root = sys.argv[1]
-for name in ['a', 'b', 'force']:
-    os.utime(os.path.join(root, name), ns=(5000000000, 5000000000))
+for name, stamp in [('a', 6000000000), ('b', 7000000000), ('force', 5000000000)]:
+    os.utime(os.path.join(root, name), ns=(stamp, stamp))
 PYTIMES
  "${runner[@]}" -C "$project" --force ./force > "$project/log" 2> "$project/err"
- if [ "$(cat "$project/force")" = 0 ]; then test-ok "$backend equal inputs remain absent during forced execution"; else test-fail "$backend force invented newer inputs"; fi
+  if [ "$(cat "$project/force")" = 0 ]; then test-ok "$backend unchanged bytes remain absent during forced execution"; else test-fail "$backend force invented changed inputs"; fi
+  test-step "$backend selects all inputs with existing output but no successful record"
+  printf preexisting > "$project/unrecorded"
+  "${runner[@]}" -C "$project" ./unrecorded > "$project/log" 2> "$project/err"
+  printf './a\n./b\n' > "$project/expected"
+  if cmp -s "$project/unrecorded" "$project/expected"; then test-ok "$backend missing record selects unique files and omits tasks"; else test-fail "$backend existing-output missing-record selection"; fi
+  test-step "$backend retains Kash selector context through a suspended helper read"
+  "${runner[@]}" -C "$project" ./kash-out > "$project/log" 2> "$project/err"
+  if cmp -s "$project/kash-selected" "$project/expected"; then test-ok "$backend Kash helper sees initial digest snapshot"; else test-fail "$backend Kash helper selector context"; fi
+  printf kash-change > "$project/b"
+  "${runner[@]}" -C "$project" ./kash-out > "$project/log" 2> "$project/err"
+  printf './b\n' > "$project/expected"
+  if cmp -s "$project/kash-selected" "$project/expected"; then test-ok "$backend Kash helper sees changed digest subset after suspension"; else test-fail "$backend Kash resumed selector snapshot"; fi
+  printf changed > "$project/b"
  test-step "$backend carries force through mixed runner sessions"
  printf session > "$project/force"
  "${runner[@]}" do run -C "$project" --allow-run --allow-read=. --allow-write=. --force -c 'ignored = :nil' Makefile.kmk ./force > "$project/log" 2> "$project/err"

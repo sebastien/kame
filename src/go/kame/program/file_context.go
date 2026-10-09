@@ -5,11 +5,9 @@ import (
 	"kame/host"
 	"kame/lang/eval"
 	"kame/lang/rule"
-	"solod.dev/so/encoding/json"
 	"solod.dev/so/mem"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
-	"solod.dev/so/strconv"
 	"solod.dev/so/strings"
 )
 
@@ -153,7 +151,7 @@ func (p *Program) fileImplementation(entry *instance, rendered renderResult) cor
 	slices.Free(p.Alloc, assignments)
 	sink.appendU64(uint64(p.Options.TimeoutMS))
 	sink.appendU64(uint64(p.Options.RetryCount))
-	if entry.Kash || entry.NewerInputs != nil {
+	if entry.Kash || p.needsNewerInputs(entry) {
 		// Kash evaluates values during execution; newer-input command text is
 		// intentionally transient. Their stable implementation is authored source.
 		sink.appendU64(uint64(len(entry.Rule.Body)))
@@ -318,9 +316,12 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			} else {
 				p.reason(entry, "reevaluate", "guard-changed", "source/context guard changed", core.ResourceKey{}, "")
 			}
-			return p.preflightMiss(c, index)
+			if !p.needsNewerInputs(entry) { return p.preflightMiss(c, index) }
+			// Even a changed source/context needs the stored input digests and
+			// current outputs before rendering a newer-input selector.
+		} else {
+			p.Instances[index].AcceptedRecord.Implementation = state.Stored.Implementation
 		}
-		p.Instances[index].AcceptedRecord.Implementation = state.Stored.Implementation
 	}
 	// Restore previously consumed execution-time resources before deciding reuse.
 	// Changed implementations do not restore obsolete branch dependencies.
@@ -561,36 +562,4 @@ func fileResultSignature(record *core.SignatureRecord) core.Signature {
 	s := core.Signature{Mode: core.SignatureContent}
 	d.Sum(s.Digest[:])
 	return s
-}
-
-// Timestamp observations remain only for the intentional newer-input selector,
-// not for deciding whether a computation or artifact can be reused.
-func (p *Program) submitFileTimes(c *core.EngineContext, names []string) {
-	b := strings.NewBuilder(p.Alloc)
-	e := json.NewEncoder(&b)
-	e.BeginArray()
-	for i := range names {
-		e.Str(names[i])
-	}
-	e.EndArray()
-	e.Flush()
-	payload := host.FilePayload(p.Alloc, host.OpFileTimes, b.String())
-	b.Free()
-	p.submitFileContextRequest(c, host.RequestReadFile, payload)
-}
-
-func contextTime(value core.Value, out *int64) bool {
-	if value.Kind == core.Int {
-		*out = value.Int
-		return true
-	}
-	if value.Kind != core.String {
-		return false
-	}
-	n, err := strconv.ParseInt(value.Text, 10, 64)
-	if err != nil {
-		return false
-	}
-	*out = n
-	return true
 }

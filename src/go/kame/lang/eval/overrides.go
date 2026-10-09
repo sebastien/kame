@@ -47,11 +47,38 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 	if key.Kind != core.ResourceDefinition {
 		return nil
 	}
+	// The environment namespace alone cannot distinguish rule-local selectors.
+	// Keep the original namespace in state so nested definitions bind identically.
+	namespace := context.DefinitionNamespace
+	invalidFrames := false
+	if len(context.RuleFrames) != 0 {
+		identity := core.NewDigest()
+		identity.Write(namespace[:])
+		identity.Uint64(uint64(len(context.RuleFrames)))
+		for i := range context.RuleFrames {
+			frame := context.RuleFrames[i]
+			flags := uint64(0)
+			if frame.FileRule { flags |= 1 }
+			if frame.ServiceRule { flags |= 2 }
+			identity.Uint64(flags)
+			inputs := core.ValueSignature(core.Value{Kind: core.List, List: frame.Inputs})
+			outputs := core.ValueSignature(core.Value{Kind: core.List, List: frame.Outputs})
+			newer := core.ValueSignature(core.Value{Kind: core.List, List: frame.NewerInputs})
+			if inputs.Mode == core.SignatureUnavailable || outputs.Mode == core.SignatureUnavailable || newer.Mode == core.SignatureUnavailable { invalidFrames = true }
+			identity.Uint64(uint64(inputs.Mode))
+			identity.Uint64(uint64(outputs.Mode))
+			identity.Uint64(uint64(newer.Mode))
+			identity.Write(inputs.Digest[:])
+			identity.Write(outputs.Digest[:])
+			identity.Write(newer.Digest[:])
+		}
+		identity.Sum(namespace[:])
+	}
 	var digest [64]byte
 	const hex = "0123456789abcdef"
-	for i := range context.DefinitionNamespace {
-		digest[i*2] = hex[context.DefinitionNamespace[i]>>4]
-		digest[i*2+1] = hex[context.DefinitionNamespace[i]&15]
+	for i := range namespace {
+		digest[i*2] = hex[namespace[i]>>4]
+		digest[i*2+1] = hex[namespace[i]&15]
 	}
 	name := "\x00definition:" + string(digest[:]) + ":" + key.Name
 	scopedKey := core.ResourceKey{Kind: core.ResourceDefinition, Name: name}
@@ -72,7 +99,16 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 	state := mem.Alloc[definitionState](p.Alloc)
 	state.Program, state.Definition, state.Scoped = p, authored, true
 	state.Namespace, state.Phase = context.DefinitionNamespace, context.Phase
-	for i := range context.RuleFrames { if context.RuleFrames[i].ServiceRule { state.ServiceRule = true } }
+	state.InvalidRuleFrames = invalidFrames
+	// Opaque or over-depth values cannot define a stable cached context. Reject
+	// them on evaluation rather than sharing zero digests or retaining processes.
+	for i := 0; !invalidFrames && i < len(context.RuleFrames); i++ {
+		frame := RuleFrame{FileRule: context.RuleFrames[i].FileRule, ServiceRule: context.RuleFrames[i].ServiceRule}
+		for j := range context.RuleFrames[i].Inputs { frame.Inputs = slices.Append(p.Alloc, frame.Inputs, context.RuleFrames[i].Inputs[j].Clone(p.Alloc)) }
+		for j := range context.RuleFrames[i].Outputs { frame.Outputs = slices.Append(p.Alloc, frame.Outputs, context.RuleFrames[i].Outputs[j].Clone(p.Alloc)) }
+		for j := range context.RuleFrames[i].NewerInputs { frame.NewerInputs = slices.Append(p.Alloc, frame.NewerInputs, context.RuleFrames[i].NewerInputs[j].Clone(p.Alloc)) }
+		state.RuleFrames = slices.Append(p.Alloc, state.RuleFrames, frame)
+	}
 	for i := range context.Environment {
 		state.Environment = slices.Append(p.Alloc, state.Environment, owned(p.Alloc, context.Environment[i]))
 	}

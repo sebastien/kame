@@ -231,6 +231,11 @@ func (p *Program) kashContext(c *core.EngineContext, index int) *eval.Context {
 	*state = renderDependencyState{Program: p, Index: index}
 	frames := slices.Make[eval.RuleFrame](p.Alloc, 1)
 	frames[0] = eval.RuleFrame{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, ServiceRule: entry.Rule.Kind == rule.ServiceRule}
+	if entry.NewerInputs != nil {
+		for i := range entry.NewerInputs.Values {
+			frames[0].NewerInputs = slices.Append(p.Alloc, frames[0].NewerInputs, entry.NewerInputs.Values[i].Clone(p.Alloc))
+		}
+	}
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Environment: entry.Environment, HasEnvironment: true, TimeoutMS: p.Options.TimeoutMS, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.EvaluatePhase, ResolverState: state, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: frames}
 	p.bindDefinitionEnvironment(context)
@@ -244,6 +249,7 @@ func (p *Program) freeKashContext(context *eval.Context) {
 	for i := range context.RuleFrames {
 		freeValues(p.Alloc, context.RuleFrames[i].Inputs)
 		freeValues(p.Alloc, context.RuleFrames[i].Outputs)
+		freeValues(p.Alloc, context.RuleFrames[i].NewerInputs)
 	}
 	slices.Free(p.Alloc, context.RuleFrames)
 	eval.FreeEffects(p.Alloc, context.Effects)

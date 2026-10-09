@@ -289,7 +289,8 @@ type definitionState struct {
 	Environment []string
 	Namespace [32]byte
 	Scoped bool
-	ServiceRule bool
+	RuleFrames []RuleFrame
+	InvalidRuleFrames bool
 	Phase Phase
 }
 
@@ -298,6 +299,12 @@ func freeDefinitionState(a mem.Allocator, value any) {
 	if state.Owned { definition.Free(a, state.Definition) }
 	for i := range state.Environment { mem.FreeString(a, state.Environment[i]) }
 	slices.Free(a, state.Environment)
+	for i := range state.RuleFrames {
+		freeValues(a, state.RuleFrames[i].Inputs)
+		freeValues(a, state.RuleFrames[i].Outputs)
+		freeValues(a, state.RuleFrames[i].NewerInputs)
+	}
+	slices.Free(a, state.RuleFrames)
 	mem.Free(a, state)
 }
 
@@ -393,13 +400,18 @@ func (p *Program) definition(engine *core.EngineContext, state *definitionState)
 		context.Environment, context.HasEnvironment = state.Environment, true
 		context.DefinitionNamespace, context.HasDefinitionNamespace = state.Namespace, true
 		context.Phase = state.Phase
-		if state.ServiceRule { context.RuleFrames = []RuleFrame{{ServiceRule: true}} }
+		context.RuleFrames = state.RuleFrames
 		context.DependencyContextObserver = p.DefinitionDependencyContextObserver
 		// Lazy values may perform evaluation-only host operations during render.
 		// Dynamic prerequisite resolution remains read-only.
 		if context.Phase == RenderingPhase { context.Phase = EvaluatePhase }
 	}
-	result := p.definitionValue(engine, d, p.Scope, context)
+	result := Result{}
+	if state.InvalidRuleFrames {
+		result = failure(p.Alloc, "EXPR_INVALID", d.Span, "rule frame values require stable content signatures")
+	} else {
+		result = p.definitionValue(engine, d, p.Scope, context)
+	}
 	if engine == nil || !engine.Failed() {
 		attachNamedFrame(&result, context, d.Span, "definition", d.Name)
 	}

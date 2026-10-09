@@ -8,7 +8,6 @@ import (
 	"kame/lang/rule"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
-	"solod.dev/so/strings"
 )
 
 // produce advances one rule instance through dependency resolution, rendering,
@@ -237,12 +236,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		return core.ProducerWaiting
 	}
 	entry = &p.Instances[state.Index]
-	if entry.Rule.Kind == rule.FileRule && !entry.PreflightChecked && !entry.Rule.Always && !p.Options.Force && !p.Options.DryRun {
+	if entry.Rule.Kind == rule.FileRule && !entry.PreflightChecked && ((!entry.Rule.Always && !p.Options.Force) || p.needsNewerInputs(entry)) && !p.Options.DryRun {
 		return p.beginFileContext(c, state.Index, renderResult{}, true)
 	}
-	// Scan the combined source so selectors used through definitions are covered.
-	// False positives only add metadata reads; literal source is never evaluated.
-	if entry.Rule.Kind == rule.FileRule && strings.Contains(p.Parsed.Source.Text, "@<?") {
+	if p.needsNewerInputs(entry) {
 		prepared := p.prepareNewerInputs(c, state.Index, inputs, resourceInputs)
 		if prepared != core.ProducerCompleted {
 			return prepared

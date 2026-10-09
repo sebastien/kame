@@ -2,17 +2,23 @@ package program
 
 import (
 	"kame/core"
+	"kame/lang/rule"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strings"
 )
 
-// One timestamp snapshot serves every newer-input selector in a rule render.
+// One accepted content snapshot serves every newer-input selector in a rule render.
 type newerInputState struct {
 	Paths   []string
 	Names   []string
-	Outputs int
 	Ready   bool
 	Values  []core.Value
+}
+
+// Scan authored source so selectors reached through helpers share the snapshot.
+func (p *Program) needsNewerInputs(entry *instance) bool {
+	return entry.Rule.Kind == rule.FileRule && strings.Contains(p.Parsed.Source.Text, "@<?")
 }
 
 func (p *Program) freeNewerInputs(state *newerInputState) {
@@ -29,96 +35,61 @@ func (p *Program) prepareNewerInputs(c *core.EngineContext, index int, names []s
 	entry := &p.Instances[index]
 	state := entry.NewerInputs
 	if state != nil {
-		if state.Ready {
-			return core.ProducerCompleted
-		}
-		completion := c.Completion()
-		if completion.RequestID == 0 {
-			return core.ProducerWaiting
-		}
-		if completion.Diagnostic.Code != "" {
-			completion.Value.Free(p.Alloc)
-			p.failRule(c, index, completion.Diagnostic)
-			return core.ProducerFailed
-		}
-		ok := p.selectNewerInputs(state, completion.Value)
-		completion.Value.Free(p.Alloc)
-		if !ok {
-			p.failRule(c, index, failure(p.Alloc, "HOST_FAIL", "invalid newer-input timestamp response"))
-			return core.ProducerFailed
+		for i := range state.Paths {
+			key := core.ResourceKey{Kind: core.ResourceFile, Name: state.Paths[i]}
+			c.ObserveAspect(key, core.ObservationContent, p.dependencyContentSignature(key))
 		}
 		return core.ProducerCompleted
 	}
 	state = mem.Alloc[newerInputState](p.Alloc)
-	state.Outputs = len(entry.Plan.Outputs)
-	for i := range entry.Plan.Outputs {
-		state.Paths = slices.Append(p.Alloc, state.Paths, p.canonicalTarget(entry.Plan.Outputs[i], true))
-	}
 	for i := range names {
 		if (i < len(resources) && resources[i].OrderOnly) || !isFileName(names[i]) {
 			continue
 		}
 		canonical := p.canonicalTarget(names[i], true)
-		if slices.Contains(state.Paths[state.Outputs:], canonical) {
+		if slices.Contains(state.Paths, canonical) {
 			mem.FreeString(p.Alloc, canonical)
 			continue
 		}
 		state.Paths = slices.Append(p.Alloc, state.Paths, canonical)
 		state.Names = slices.Append(p.Alloc, state.Names, cloneText(p.Alloc, names[i]))
+		key := core.ResourceKey{Kind: core.ResourceFile, Name: canonical}
+		c.ObserveAspect(key, core.ObservationContent, p.dependencyContentSignature(key))
 	}
 	entry.NewerInputs = state
-	if p.Forwarding {
-		p.submitFileTimes(c, state.Paths)
-		return core.ProducerSubmitted
+	var stored *core.SignatureRecord
+	if entry.FileContext != nil && entry.FileContext.RecordReason == "" {
+		stored = &entry.FileContext.Stored
 	}
-	var times []core.Value
-	for i := range state.Paths {
-		stat := p.Host.Stat(state.Paths[i])
-		value := core.Value{Kind: core.Nil}
-		if stat.Exists {
-			value.Kind, value.Int = core.Int, stat.Info.ModTime
-		}
-		times = slices.Append(p.Alloc, times, value)
-	}
-	value := core.NewList(p.Alloc, times)
-	slices.Free(p.Alloc, times)
-	ok := p.selectNewerInputs(state, value)
-	value.Free(p.Alloc)
-	if !ok {
-		p.failRule(c, index, failure(p.Alloc, "HOST_FAIL", "cannot inspect newer inputs"))
-		return core.ProducerFailed
-	}
+	p.selectNewerInputs(state, stored, entry.AcceptedRecord.Outputs, len(entry.Plan.Outputs))
 	return core.ProducerCompleted
 }
 
-func (p *Program) selectNewerInputs(state *newerInputState, times core.Value) bool {
-	if times.Kind != core.List || len(times.List) != len(state.Paths) {
-		return false
-	}
-	missing := false
-	var oldest int64
-	for i := 0; i < state.Outputs; i++ {
-		var timestamp int64
-		if times.List[i].Kind == core.Nil {
-			missing = true
-			continue
-		}
-		if !contextTime(times.List[i], &timestamp) {
-			return false
-		}
-		if i == 0 || timestamp < oldest {
-			oldest = timestamp
+func (p *Program) selectNewerInputs(state *newerInputState, stored *core.SignatureRecord, outputs []core.Observation, outputCount int) {
+	all := stored == nil || len(outputs) != outputCount
+	for i := range outputs {
+		if outputs[i].Signature.Mode == core.SignatureMissing {
+			all = true
 		}
 	}
 	for i := range state.Names {
-		var timestamp int64
-		if !contextTime(times.List[state.Outputs+i], &timestamp) {
-			return false
+		key := core.ResourceKey{Kind: core.ResourceFile, Name: state.Paths[i]}
+		current := p.dependencyContentSignature(key)
+		previous := core.Signature{}
+		if stored != nil {
+			for j := range stored.Inputs {
+				item := stored.Inputs[j]
+				if item.Key.Kind == key.Kind && item.Key.Name == key.Name && (item.Aspect == core.ObservationContent || item.Aspect == core.ObservationValue) {
+					previous = item.Signature
+					if item.Aspect == core.ObservationContent {
+						break
+					}
+				}
+			}
 		}
-		if missing || timestamp > oldest {
+		if all || !current.Equal(previous) {
 			state.Values = slices.Append(p.Alloc, state.Values, core.NewString(p.Alloc, state.Names[i]))
 		}
 	}
 	state.Ready = true
-	return true
 }
