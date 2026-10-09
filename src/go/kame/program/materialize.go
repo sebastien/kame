@@ -4,7 +4,6 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
-	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/template"
 	"solod.dev/so/mem"
@@ -33,27 +32,6 @@ type instanceResult struct {
 	Node       *core.Node
 	Plan       Plan
 	Diagnostic diagnostic.Diagnostic
-}
-type renderResult struct {
-	Commands   string
-	Effects    []eval.Effect
-	WritePaths []string
-	LineSpans  []diagnostic.Span
-	Waiting    bool
-	Diagnostic diagnostic.Diagnostic
-}
-type inputsResult struct {
-	Inputs         []string
-	DynamicInputs  []string
-	ResourceInputs []PlanInput
-	Owned          bool
-	Waiting        bool
-	Diagnostic     diagnostic.Diagnostic
-}
-type renderDependencyState struct {
-	Program    *Program
-	Index      int
-	Inspection bool
 }
 type externalFileState struct {
 	Program *Program

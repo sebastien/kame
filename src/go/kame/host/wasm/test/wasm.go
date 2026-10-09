@@ -5,10 +5,127 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"kame/host/wasm"
+	"solod.dev/so/mem"
 	"solod.dev/so/strconv"
 	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
+
+func TestNilRuntimePhaseFailuresUseSystemAllocator(t *testing.T) {
+	var r *wasm.Runtime
+	results := []wasm.PureResult{
+		r.RequestExpression("1"),
+		r.Prepare(),
+		r.RequestTarget("root"),
+		r.ToolsCheckJSON("root"),
+		r.ToolsCheckReportJSON("root"),
+		r.PlanJSON("root", false),
+		r.PlanRootsJSON("[\"root\"]", -1),
+		r.GraphJSON("root", -1, "inputs"),
+		r.SpanJSON("root", -1, false),
+		r.ToolNames(),
+		r.TargetOperandsJSON("[]"),
+	}
+	for i := range results {
+		message := "no compiled build source"
+		if i == 0 {
+			message = "runtime already has an active expression"
+		} else if i == 1 || i == 2 {
+			message = "runtime already has an active root"
+		}
+		if results[i].Code != "PHASE_INVALID" || results[i].Message != message || results[i].Text != "" || results[i].HostNeeded {
+			t.Error("nil runtime changed its phase failure contract")
+		}
+		results[i].Free(mem.System)
+	}
+	if r.ProcessRetainLimit(host.Request{}) != 64*1024 {
+		t.Error("nil runtime changed its default process retain limit")
+	}
+	d := diagnostic.Diagnostic{Code: "TEST", Message: "discarded"}
+	r.Complete(host.Request{}, core.NewString(mem.System, "discarded"), d.Clone(mem.System))
+}
+
+func TestRuntimePhaseFailuresUseRuntimeAllocator(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "root :\n")
+	if started.Runtime == nil {
+		t.Error("runtime did not compile")
+		started.Result.Free(a)
+		return
+	}
+	r := started.Runtime
+	defer r.Free()
+	results := []wasm.PureResult{
+		r.ToolsCheckJSON("root"),
+		r.ToolsCheckReportJSON("root"),
+		r.PlanJSON("root", false),
+		r.PlanRootsJSON("[\"root\"]", -1),
+		r.GraphJSON("root", -1, "inputs"),
+		r.SpanJSON("root", -1, false),
+		r.ToolNames(),
+		r.TargetOperandsJSON("[]"),
+	}
+	for i := range results {
+		if results[i].Code != "PHASE_INVALID" || results[i].Message != "no compiled build source" || results[i].Text != "" || results[i].HostNeeded {
+			t.Error("unprepared runtime changed its phase failure contract")
+		}
+		results[i].Free(a)
+	}
+	scheduled := r.RequestExpression("1")
+	if scheduled.Code != "" {
+		t.Error("expression could not be scheduled")
+		scheduled.Free(a)
+		return
+	}
+	scheduled.Free(a)
+	results = []wasm.PureResult{r.RequestExpression("2"), r.Prepare(), r.RequestTarget("root")}
+	for i := range results {
+		message := "runtime already has an active root"
+		if i == 0 {
+			message = "runtime already has an active expression"
+		}
+		if results[i].Code != "PHASE_INVALID" || results[i].Message != message || results[i].Text != "" || results[i].HostNeeded {
+			t.Error("active runtime changed its phase failure contract")
+		}
+		results[i].Free(a)
+	}
+}
+
+func TestPreparedRuntimePhaseFailuresUseRuntimeAllocator(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "root :\n")
+	if started.Runtime == nil {
+		t.Error("runtime did not compile")
+		started.Result.Free(a)
+		return
+	}
+	r := started.Runtime
+	defer r.Free()
+	prepared := r.Prepare()
+	if prepared.Code != "" {
+		t.Error("prepare failed")
+		prepared.Free(a)
+		return
+	}
+	prepared.Free(a)
+	results := []wasm.PureResult{r.Prepare(), r.RequestTarget("root")}
+	for i := range results {
+		if results[i].Code != "PHASE_INVALID" || results[i].Message != "runtime already has an active root" || results[i].Text != "" || results[i].HostNeeded {
+			t.Error("prepared runtime changed its phase failure contract")
+		}
+		results[i].Free(a)
+	}
+}
+
+func TestRuntimeWithoutEngineDiscardsCompletionsWithRuntimeAllocator(t *testing.T) {
+	a := t.Allocator()
+	r := wasm.Runtime{Alloc: a}
+	d := diagnostic.Diagnostic{Code: "TEST", Message: "discarded"}
+	r.Complete(host.Request{}, core.NewString(a, "discarded"), d.Clone(a))
+	if r.ProcessRetainLimit(host.Request{}) != 64*1024 {
+		t.Error("unprepared runtime changed its default process retain limit")
+	}
+}
 
 func TestToolChecksRetainPathsAndAllowRepeatedComputedPlans(t *testing.T) {
 	a := t.Allocator()

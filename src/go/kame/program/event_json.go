@@ -115,13 +115,13 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 func encodeResourceKey(e *json.Encoder, key core.ResourceKey) {
 	e.BeginObject()
 	e.Str("kind")
-	e.Str(eventResourceKind(key.Kind))
+	e.Str(resourceKindName(key.Kind))
 	e.Str("name")
 	e.Str(key.Name)
 	e.EndObject()
 }
 
-func eventResourceKind(kind core.ResourceKind) string {
+func resourceKindName(kind core.ResourceKind) string {
 	if kind == core.ResourceDefinition {
 		return "definition"
 	}

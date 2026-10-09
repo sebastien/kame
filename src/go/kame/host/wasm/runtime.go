@@ -73,6 +73,13 @@ type RuntimeStart struct {
 	Result  PureResult
 }
 
+func runtimeAllocator(r *Runtime) mem.Allocator {
+	if r != nil {
+		return r.Alloc
+	}
+	return mem.System
+}
+
 func (r *RuntimeResult) Free(a mem.Allocator) {
 	r.Value.Free(a)
 	r.Diagnostic.Free(a)
@@ -140,7 +147,8 @@ func newRuntime(a mem.Allocator, arena *Heap, name string, source string) Runtim
 // initial runner; callers must observe its terminal result before replacing it.
 func (r *Runtime) RequestExpression(text string) PureResult {
 	if r == nil || r.Node != nil {
-		return PureResult{Code: pureText(mem.System, "PHASE_INVALID"), Message: pureText(mem.System, "runtime already has an active expression")}
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "runtime already has an active expression")}
 	}
 	parsed := script.Parse(r.Alloc, "<wasm-expr>", text)
 	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 1 || parsed.Items[0].Expression == nil {
@@ -165,7 +173,8 @@ func (r *Runtime) RequestExpression(text string) PureResult {
 // expression and target roots.
 func (r *Runtime) Prepare() PureResult {
 	if r == nil || r.Program != nil || r.Node != nil {
-		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "runtime already has an active root")}
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "runtime already has an active root")}
 	}
 	if r.Host == nil {
 		r.Host = NewMemoryHost(r.Alloc)
@@ -270,7 +279,8 @@ func (r *Runtime) ToolsCheckReportJSON(target string) PureResult {
 
 func (r *Runtime) toolsCheckJSON(target string, report bool) PureResult {
 	if r == nil || r.Program == nil {
-		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no compiled build source")}
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
 	result := r.Program.RequiredTools(target)
 	if result.Waiting {
@@ -302,7 +312,8 @@ func (r *Runtime) toolsCheckJSON(target string, report bool) PureResult {
 func (r *Runtime) PlanJSON(target string, expand bool) PureResult {
 	_ = expand
 	if r == nil || r.Program == nil {
-		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no compiled build source")}
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
 	targets := []string{target}
@@ -317,7 +328,8 @@ func (r *Runtime) PlanJSON(target string, expand bool) PureResult {
 // GraphJSON returns a schema-2 input or output inventory.
 func (r *Runtime) GraphJSON(target string, depth int, kind string) PureResult {
 	if r == nil || r.Program == nil {
-		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no compiled build source")}
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
 	d := r.Program.WriteGraph(&buffer, target, depth, kind)
@@ -337,8 +349,7 @@ func (r *Runtime) GraphJSON(target string, depth int, kind string) PureResult {
 // PlanRootsJSON accepts a JSON root array so multiple CLI roots share one plan query.
 func (r *Runtime) PlanRootsJSON(encoded string, depth int) PureResult {
 	if r == nil || r.Program == nil {
-		a := mem.System
-		if r != nil { a = r.Alloc }
+		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
 	var value core.Value
@@ -364,7 +375,8 @@ func (r *Runtime) PlanRootsJSON(encoded string, depth int) PureResult {
 // returns the span JSON document.
 func (r *Runtime) SpanJSON(target string, depth int, expand bool) PureResult {
 	if r == nil || r.Program == nil {
-		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no compiled build source")}
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
 	d := r.Program.WriteSpan(&buffer, target, depth, expand)
@@ -387,7 +399,8 @@ func (r *Runtime) SpanJSON(target string, depth int, expand bool) PureResult {
 // resolution belongs to the embedding host, which knows its own PATH.
 func (r *Runtime) ToolNames() PureResult {
 	if r == nil || r.Program == nil {
-		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "no compiled build source")}
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
 	e := json.NewEncoder(&buffer)
@@ -448,7 +461,8 @@ func (r *Runtime) SetEnvironment(name string, value string) bool {
 // in-memory host. Only one root, expression or target, is active at a time.
 func (r *Runtime) RequestTarget(target string) PureResult {
 	if r == nil || r.Node != nil || r.Program != nil {
-		return PureResult{Code: pureText(r.Alloc, "PHASE_INVALID"), Message: pureText(r.Alloc, "runtime already has an active root")}
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "runtime already has an active root")}
 	}
 	if r.Host == nil {
 		r.Host = NewMemoryHost(r.Alloc)
@@ -575,7 +589,7 @@ func (r *Runtime) ProcessStream(request host.Request, stderr bool, data []byte) 
 }
 
 func (r *Runtime) ProcessRetainLimit(request host.Request) int {
-	if r.Program != nil {
+	if r != nil && r.Program != nil {
 		return r.Program.ProcessRetainLimit(request)
 	}
 	return 64 * 1024
@@ -699,8 +713,8 @@ func (r *Runtime) Complete(request host.Request, value core.Value, diagnostic di
 		return
 	}
 	if r.Engine == nil {
-		value.Free(mem.System)
-		diagnostic.Free(mem.System)
+		value.Free(r.Alloc)
+		diagnostic.Free(r.Alloc)
 		return
 	}
 	r.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Value: value, HasValue: diagnostic.Code == "", Diagnostic: diagnostic})

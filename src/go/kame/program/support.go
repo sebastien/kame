@@ -26,6 +26,12 @@ func cloneText(a mem.Allocator, text string) string {
 	copy(b, []byte(text))
 	return string(b)
 }
+func appendUniqueString(a mem.Allocator, values *[]string, value string) {
+	if slices.Contains(*values, value) {
+		return
+	}
+	*values = slices.Append(a, *values, cloneText(a, value))
+}
 func cloneCaptures(a mem.Allocator, in []template.CaptureValue) []template.CaptureValue {
 	var out []template.CaptureValue
 	for i := range in {

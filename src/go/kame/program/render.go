@@ -10,6 +10,20 @@ import (
 	"solod.dev/so/strings"
 )
 
+type renderResult struct {
+	Commands   string
+	Effects    []eval.Effect
+	WritePaths []string
+	LineSpans  []diagnostic.Span
+	Waiting    bool
+	Diagnostic diagnostic.Diagnostic
+}
+type renderDependencyState struct {
+	Program    *Program
+	Index      int
+	Inspection bool
+}
+
 func (p *Program) render(c *core.EngineContext, entry *instance, names []string) renderResult {
 	body := entry.Rule.Body
  resources := entry.Plan.ResourceInputs
@@ -131,12 +145,12 @@ func (p *Program) renderDocument(entry *instance, context *eval.Context) renderR
 		result.Value.Free(p.Alloc)
 		// Strip a trailing \r for CRLF bodies.
 		if len(trimmed) != 0 && trimmed[len(trimmed)-1] == '\r' {
-			rerim := ""
+			retrimmed := ""
 			if len(trimmed)-1 != 0 {
-				rerim = cloneText(p.Alloc, trimmed[:len(trimmed)-1])
+				retrimmed = cloneText(p.Alloc, trimmed[:len(trimmed)-1])
 			}
 			mem.FreeString(p.Alloc, trimmed)
-			trimmed = rerim
+			trimmed = retrimmed
 		}
 		script = trimmed
 		// Transfer: script now owns trimmed storage; prevent double free below.

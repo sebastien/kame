@@ -8,6 +8,7 @@ import (
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 )
 
@@ -62,13 +63,13 @@ func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind
 		e.Str("id"); e.Int(int64(i+1))
 		e.Str("resource"); e.Int(int64(entry.Resource))
 		e.Str("target"); e.Str(plan.Target)
-		e.Str("kind"); e.Str(eventResourceKind(plan.Key.Kind))
+		e.Str("kind"); e.Str(resourceKindName(plan.Key.Kind))
 		e.Str("outputs"); e.BeginArray()
 		for j := range entry.Outputs { e.Int(int64(entry.Outputs[j])) }
 		e.EndArray()
 		// Retain established single-producer plan details, not its old untyped
 		// input/output arrays or a claim of established freshness.
-		writeInspectionDetails(g.Program, &e, &plan)
+		encodeInspectionDetails(g.Program, &e, &plan)
 		e.EndObject()
 	}
 	e.EndArray()
@@ -120,7 +121,7 @@ func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind
 	io.WriteString(out, "\n")
 }
 
-func writeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
+func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 	e.Str("freshness"); e.Str("unknown")
 	e.Str("captures"); e.BeginArray()
 	for i := range plan.Captures { e.BeginObject(); e.Str("name"); e.Str(plan.Captures[i].Name); e.Str("value"); e.Str(plan.Captures[i].Text); e.EndObject() }
@@ -183,7 +184,7 @@ func writeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 	e.Str("tools"); e.BeginObject()
 	var names []string
 	for i := range plan.Tools {
-		graphAppend(p.Alloc, &names, plan.Tools[i].Name)
+		appendUniqueString(p.Alloc, &names, plan.Tools[i].Name)
 		e.Str(plan.Tools[i].Name); e.Str(plan.Tools[i].Path)
 	}
 	for i := range plan.Rule.Body {
@@ -191,11 +192,11 @@ func writeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 		if t == nil { continue }
 		for j := range t.Parts {
 			part := t.Parts[j]
-			if part.Kind != template.Tool || graphContains(names, part.Text) { continue }
-			graphAppend(p.Alloc, &names, part.Text)
+			if part.Kind != template.Tool || slices.Contains(names, part.Text) { continue }
+			appendUniqueString(p.Alloc, &names, part.Text)
 			e.Str(part.Text); e.Str(p.ResolveTool(part.Text))
 		}
 	}
-	FreeStrings(p.Alloc, names)
+	freeStrings(p.Alloc, names)
 	e.EndObject()
 }

@@ -11,6 +11,15 @@ import (
 	"solod.dev/so/slices"
 )
 
+type inputsResult struct {
+	Inputs         []string
+	DynamicInputs  []string
+	ResourceInputs []PlanInput
+	Owned          bool
+	Waiting        bool
+	Diagnostic     diagnostic.Diagnostic
+}
+
 func (p *Program) cacheBlockedByBareTask(entry *instance) bool {
 	inputs, resources := entry.Plan.Inputs, entry.Plan.ResourceInputs
 	if entry.Plan.Resolved {
@@ -166,14 +175,7 @@ func effectName(kind eval.EffectKind) string {
 
 func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsResult {
 	index := p.instanceIndex(entry.Node)
-	hasExpression := false
-	for i := range entry.Rule.Inputs {
-		if entry.Rule.Inputs[i].Kind == rule.InputExpression || entry.Rule.Inputs[i].Kind == rule.InputString || entry.Rule.Inputs[i].Kind == rule.InputWildcard {
-			hasExpression = true
-			break
-		}
-	}
-	if !hasExpression {
+	if !hasExpressionInput(entry.Rule) {
 		return inputsResult{Inputs: entry.Plan.Inputs, ResourceInputs: entry.Plan.ResourceInputs}
 	}
 	var inputs []string

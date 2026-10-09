@@ -431,12 +431,19 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 	return true
 }
 
-// parseGraph mirrors do inputs/outputs/span. Graph options are recognized
-// anywhere, then the remaining tokens use the build grammar.
+// parseGraph extracts inspection options without inspecting build-option
+// values or the literal tail, then applies the shared build grammar.
 func parseGraph(inv *Invocation, args []string, allowExpand bool) {
 	var remaining []string
+	defer slices.Free(mem.System, remaining)
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			for ; i < len(args); i++ {
+				remaining = slices.Append(mem.System, remaining, args[i])
+			}
+			break
+		}
 		if arg == "--expand" {
 			if !allowExpand {
 				inv.fail("OPT_UNKNOWN", "unknown option: --expand")
@@ -470,9 +477,12 @@ func parseGraph(inv *Invocation, args []string, allowExpand bool) {
 			continue
 		}
 		remaining = slices.Append(mem.System, remaining, arg)
+		if OptionTakesValue(arg) && i+1 < len(args) {
+			i++
+			remaining = slices.Append(mem.System, remaining, args[i])
+		}
 	}
 	parseBuild(inv, remaining)
-	slices.Free(mem.System, remaining)
 }
 
 func parseDepth(value string) (int, bool) {

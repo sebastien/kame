@@ -2416,25 +2416,21 @@ export class Kame {
     const language = options.language ?? 'script';
     return this.operation(null, options, async () => {
       const module = await Module.load(this.module.path);
-      try {
-        const bytes = await module.parse(language, name, source);
-        const ast = JSON.parse(module.decode0(bytes));
-        if (['script', 'km', 'kmk'].includes(language)) {
-          const instance = module.exports.kame_wasm_instance_create();
-          if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
-          try {
-            module.compileBuild(instance, source, name);
-            if (module.exports.kame_wasm_prepare(instance) !== 0) throw module.compileFailure(instance, 'PARSE_ERR');
-          } finally {
-            module.exports.kame_wasm_instance_free(instance);
-          }
+      const bytes = await module.parse(language, name, source);
+      const ast = JSON.parse(module.decode0(bytes));
+      if (['script', 'km', 'kmk'].includes(language)) {
+        const instance = module.exports.kame_wasm_instance_create();
+        if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
+        try {
+          module.compileBuild(instance, source, name);
+          if (module.exports.kame_wasm_prepare(instance) !== 0) throw module.compileFailure(instance, 'PARSE_ERR');
+        } finally {
+          module.exports.kame_wasm_instance_free(instance);
         }
-        const program = new KameProgram(this, module, source, name, language, ast);
-        this.programs.add(program);
-        return program;
-      } catch (error) {
-        throw error;
       }
+      const program = new KameProgram(this, module, source, name, language, ast);
+      this.programs.add(program);
+      return program;
     });
   }
 

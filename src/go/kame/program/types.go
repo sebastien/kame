@@ -439,10 +439,6 @@ type ArgumentValue struct {
 	Name  string
 	Value string
 }
-type planResolverState struct {
-	Program   *Program
-	Resolving []string
-}
 
 type CompileResult struct {
 	Program     *Program

@@ -59,6 +59,7 @@ func inlineRunSource(name string, text string, lang string, json bool, defines [
 		result.Status = 1
 	}
 	result.SelectionPrefix = ""
+	result.SelectionDefines = nil
 	return result
 }
 

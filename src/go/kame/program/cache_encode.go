@@ -395,7 +395,7 @@ func (e *cacheEncoder) appendValue(value core.Value) {
 	}
 	if value.Kind == core.Resource {
 		e.appendByte(9)
-		e.appendText(resourceKindName(value.Resource.Kind))
+		e.appendText(cacheResourceKindName(value.Resource.Kind))
 		e.appendText(value.Resource.Name)
 		return
 	}

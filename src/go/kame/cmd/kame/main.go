@@ -52,17 +52,9 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 	return materializeTargets(session.Program, targets, out, errOut, parsed.JSON)
 }
 
-// selectTargets applies the uniform target selection shared by the primary
-// invocation and every target-taking command: explicit targets pass through,
-// and otherwise "default" is selected when the program defines it. An empty
-// result means no target was selected because no default is defined.
+// selectTargets consumes the borrowed-operand slice and returns owned strings
+// after shared assignment normalization and implicit default selection.
 func selectTargets(p *program.Program, targets []string) []string {
-	if len(targets) == 0 && p.HasTarget("default") {
-		// Append through the allocator: a Go slice literal here would transpile
-		// to a block-scoped C compound literal that dies before the caller reads
-		// the result.
-		targets = slices.Append(mem.System, targets, "default")
-	}
 	joined := p.JoinTargetOperands(targets)
 	slices.Free(mem.System, targets)
 	return joined

@@ -125,7 +125,7 @@ func appendU64(out []byte, n uint64) []byte {
 	return out
 }
 
-func resourceKindName(kind core.ResourceKind) string {
+func cacheResourceKindName(kind core.ResourceKind) string {
 	if kind == core.ResourceDefinition {
 		return "definition"
 	}

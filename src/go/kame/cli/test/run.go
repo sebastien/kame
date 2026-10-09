@@ -61,6 +61,31 @@ func TestLanguageShortAliasForInspection(t *testing.T) {
 	}
 }
 
+func TestInspectionOptionsRespectBuildValuesAndLiteralTail(t *testing.T) {
+	commands := []string{"plan", "inputs", "outputs", "span"}
+	for i := range commands {
+		inv := cli.Parse(commands[i], []string{"--depth", "2", "--", "--depth", "0", "--expand"})
+		if !inv.OK || inv.Depth != 2 || inv.Expand || len(inv.Targets) != 3 || inv.Targets[0] != "--depth" || inv.Targets[1] != "0" || inv.Targets[2] != "--expand" {
+			t.Error("inspection options consumed literal targets")
+		}
+		inv.Free()
+		inv = cli.Parse(commands[i], []string{"-c", "--depth", "default"})
+		if !inv.OK || inv.Command != "--depth" || inv.Expand || len(inv.Targets) != 1 || inv.Targets[0] != "default" {
+			t.Error("inspection options consumed a build-option value")
+		}
+		inv.Free()
+		inv = cli.Parse(commands[i], []string{"-f", "--expand", "default"})
+		if !inv.OK || inv.File != "--expand" || inv.Expand { t.Error("inspection expansion consumed a build-option value") }
+		inv.Free()
+		invalid := [][]string{{"default", "--depth"}, {"default", "--depth", "invalid"}, {"default", "--depth=invalid"}}
+		for j := range invalid {
+			inv = cli.Parse(commands[i], invalid[j])
+			if inv.OK || inv.Error.Code == "" { t.Error("invalid inspection depth was accepted") }
+			inv.Free()
+		}
+	}
+}
+
 func TestPrimaryRunSelectionDoesNotProbeFilesystem(t *testing.T) {
 	runner := [][]string{{"missing.kash"}, {"-l", "expr", "source.txt"}, {"--lang=km", "-"}, {"-c", "42"}, {"-f", "missing.kmk"}, {"-l"}}
 	for i := range runner { if !cli.SelectsRun(runner[i]) { t.Error("explicit runner source was sent to build discovery") } }

@@ -35,6 +35,7 @@ type buildSource struct {
 	Missing              bool
 	Status               int
 	JSON                 bool
+	// Borrowed configuration used only while expanding includes/branches.
 	SelectionPrefix      string
 	SelectionDefines     []string
 	SelectionEnvironment []string
@@ -71,6 +72,7 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 			result.Status = 1
 		}
 		result.SelectionPrefix = ""
+		result.SelectionDefines = nil
 		return result
 	}
 	if options.File != "" {
@@ -163,6 +165,7 @@ func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bo
 		result.Status = 1
 	}
 	result.SelectionPrefix = ""
+	result.SelectionDefines = nil
 	return result
 }
 

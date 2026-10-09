@@ -49,9 +49,9 @@ func (p *Program) WriteSpan(out io.Writer, target string, depth int, expand bool
 	e.EndObject()
 	e.Flush()
 	io.WriteString(out, "\n")
-	FreeStrings(p.Alloc, span.Static)
-	FreeStrings(p.Alloc, span.Dynamic)
-	FreeStrings(p.Alloc, span.Outputs)
+	freeStrings(p.Alloc, span.Static)
+	freeStrings(p.Alloc, span.Dynamic)
+	freeStrings(p.Alloc, span.Outputs)
 	return diagnostic.Diagnostic{}
 }
 
@@ -68,7 +68,7 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 	result := spanResult{}
 	for cursor := 0; cursor < len(pending); cursor++ {
 		node := pending[cursor]
-		if graphContains(visited, node.Target) {
+		if slices.Contains(visited, node.Target) {
 			mem.FreeString(p.Alloc, node.Target)
 			continue
 		}
@@ -76,10 +76,10 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 		planned := p.Plan(node.Target)
 		if planned.Diagnostic.Code != "" {
 			if node.Depth == 0 {
-				FreeStrings(p.Alloc, result.Static)
-				FreeStrings(p.Alloc, result.Dynamic)
-				FreeStrings(p.Alloc, result.Outputs)
-				FreeStrings(p.Alloc, visited)
+				freeStrings(p.Alloc, result.Static)
+				freeStrings(p.Alloc, result.Dynamic)
+				freeStrings(p.Alloc, result.Outputs)
+				freeStrings(p.Alloc, visited)
 				slices.Free(p.Alloc, pending)
 				return spanResult{Diagnostic: planned.Diagnostic}
 			}
@@ -90,20 +90,20 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 			planned.Plan.Free(p.Alloc)
 			planned = p.expandPlan(node.Target, p.Forwarding)
 			if planned.Waiting {
-				FreeStrings(p.Alloc, result.Static)
-				FreeStrings(p.Alloc, result.Dynamic)
-				FreeStrings(p.Alloc, result.Outputs)
-				FreeStrings(p.Alloc, visited)
+				freeStrings(p.Alloc, result.Static)
+				freeStrings(p.Alloc, result.Dynamic)
+				freeStrings(p.Alloc, result.Outputs)
+				freeStrings(p.Alloc, visited)
 				for i := cursor+1; i < len(pending); i++ { mem.FreeString(p.Alloc, pending[i].Target) }
 				slices.Free(p.Alloc, pending)
 				return spanResult{Waiting: true}
 			}
 			if planned.Diagnostic.Code != "" {
 				if node.Depth == 0 {
-					FreeStrings(p.Alloc, result.Static)
-					FreeStrings(p.Alloc, result.Dynamic)
-					FreeStrings(p.Alloc, result.Outputs)
-					FreeStrings(p.Alloc, visited)
+					freeStrings(p.Alloc, result.Static)
+					freeStrings(p.Alloc, result.Dynamic)
+					freeStrings(p.Alloc, result.Outputs)
+					freeStrings(p.Alloc, visited)
 					slices.Free(p.Alloc, pending)
 					return spanResult{Diagnostic: planned.Diagnostic}
 				}
@@ -113,19 +113,19 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 		}
 		plan := planned.Plan
 		for i := range plan.StaticInputs {
-			graphAppend(p.Alloc, &result.Static, plan.StaticInputs[i])
+			appendUniqueString(p.Alloc, &result.Static, plan.StaticInputs[i])
 		}
 		if expand {
 			for i := range plan.DynamicInputs {
-				graphAppend(p.Alloc, &result.Dynamic, plan.DynamicInputs[i])
+				appendUniqueString(p.Alloc, &result.Dynamic, plan.DynamicInputs[i])
 			}
 		}
 		for i := range plan.Outputs {
-			graphAppend(p.Alloc, &result.Outputs, plan.Outputs[i])
+			appendUniqueString(p.Alloc, &result.Outputs, plan.Outputs[i])
 		}
 		if depth == -1 || node.Depth+1 < depth {
 			for i := range plan.StaticInputs {
-				if !p.HasTarget(plan.StaticInputs[i]) || graphContains(visited, plan.StaticInputs[i]) {
+				if !p.HasTarget(plan.StaticInputs[i]) || slices.Contains(visited, plan.StaticInputs[i]) {
 					continue
 				}
 				pending = slices.Append(p.Alloc, pending, spanNode{Target: cloneText(p.Alloc, plan.StaticInputs[i]), Depth: node.Depth + 1})
@@ -134,22 +134,6 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 		plan.Free(p.Alloc)
 	}
 	slices.Free(p.Alloc, pending)
-	FreeStrings(p.Alloc, visited)
+	freeStrings(p.Alloc, visited)
 	return result
-}
-
-func graphContains(values []string, value string) bool {
-	for i := range values {
-		if values[i] == value {
-			return true
-		}
-	}
-	return false
-}
-
-func graphAppend(a mem.Allocator, values *[]string, value string) {
-	if graphContains(*values, value) {
-		return
-	}
-	*values = slices.Append(a, *values, cloneText(a, value))
 }

@@ -10,6 +10,11 @@ import (
 	"solod.dev/so/slices"
 )
 
+type planResolverState struct {
+	Program   *Program
+	Resolving []string
+}
+
 func (p *Program) Plan(target string) PlanResult {
 	selected := p.selectRule(target)
 	if selected.Diagnostic.Code != "" {
@@ -131,7 +136,7 @@ func (p *Program) expandReadOnlyPlan(target string, yield bool, definitions bool
 		state.Program, state.Index = p, index
 		keyName := "\x00inspection-input:" + target
 		key := core.NewResourceKey(p.Alloc, core.ResourceTarget, keyName)
-		node = p.Engine.AddOwned(key, expandPlanProduce, state, freeInstanceState)
+		node = p.Engine.AddOwned(key, produceInspectionInputs, state, freeInstanceState)
 		key.Free(p.Alloc)
 		if node == nil {
 			mem.Free(p.Alloc, state)
@@ -187,7 +192,7 @@ func sameInspectionPlan(left, right Plan) bool {
 	return sameCaptures(left.Captures, right.Captures) && sameArguments(left.Arguments, right.Arguments)
 }
 
-func expandPlanProduce(c *core.EngineContext, nodeID int64) core.ProducerResult {
+func produceInspectionInputs(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	_ = nodeID
 	state := c.Context().(*instanceState)
 	p := state.Program
@@ -276,7 +281,7 @@ func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.D
 	if result.Diagnostic.Code != "" {
 		return result.Diagnostic
 	}
-	if !appendPlanInputValue(p.Alloc, plan, result.Value) {
+	if !appendInputValue(p.Alloc, &plan.Inputs, &plan.ResourceInputs, result.Value) {
 		result.Value.Free(p.Alloc)
 		return failure(p.Alloc, "EXPR_INVALID", "rule input expression must produce strings, resources, lists, or nil")
 	}
@@ -298,33 +303,6 @@ func resolvePlanDefinition(value any, key core.ResourceKey, context *eval.Contex
 	result := state.Program.Eval.EvaluateDefinition(key, context)
 	state.Resolving = state.Resolving[:len(state.Resolving)-1]
 	return result
-}
-
-func appendPlanInputValue(a mem.Allocator, plan *Plan, value core.Value) bool {
-	if value.Kind == core.Nil {
-		return true
-	}
-	if value.Kind == core.String || value.Kind == core.Pattern {
-		text := cloneText(a, value.Text)
-		plan.Inputs = slices.Append(a, plan.Inputs, text)
-		plan.ResourceInputs = slices.Append(a, plan.ResourceInputs, PlanInput{Display: cloneText(a, text), Key: core.NewResourceKey(a, core.ResourceTarget, text)})
-		return true
-	}
-	if value.Kind == core.Resource {
-		text := cloneText(a, value.Resource.Name)
-		plan.Inputs = slices.Append(a, plan.Inputs, text)
-		plan.ResourceInputs = slices.Append(a, plan.ResourceInputs, PlanInput{Display: cloneText(a, text), Key: value.Resource.Clone(a)})
-		return true
-	}
-	if value.Kind != core.List {
-		return false
-	}
-	for i := range value.List {
-		if !appendPlanInputValue(a, plan, value.List[i]) {
-			return false
-		}
-	}
-	return true
 }
 
 func resourceKind(r *rule.Rule) core.ResourceKind {
