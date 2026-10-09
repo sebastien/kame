@@ -58,6 +58,14 @@ for backend in native wasm; do
 	reject DEP_CYCLE do run -c $'a = b\nb = a\na'
 	reject REF_MISSING do run -c $'text = unbound\ntext'
 	reject DEF_INVALID do run -c $'x = 1\nx = 2\nx'
+	cat >"$work/callable.kmk" <<'KMK'
+BUILD_JSON = (replace ./{prefix:**}/{name:*}.txto ./build/{prefix}/{name}.json)
+KMK
+	local_status=0
+	timeout 20 "${runner[@]}" do cat -f "$work/callable.kmk" BUILD_JSON >"$work/out" 2>"$work/err" || local_status=$?
+	location_ok=1
+	if [ "$backend" = native ]; then grep -q 'callable.kmk:1:' "$work/err" || location_ok=0; fi
+	if [ "$local_status" = 1 ] && grep -q EXPR_INVALID "$work/err" && grep -q 'invocation-scoped' "$work/err" && grep -q 'map' "$work/err" && [ "$location_ok" = 1 ]; then test-ok "$backend explains invocation-scoped callable definitions"; else test-fail "$backend callable boundary diagnostic"; cat "$work/out" "$work/err"; fi
 	for lang in km kmk kash; do
 		for rhs in 'one two' '"one" "two"' '-Wall -O2' '(broken'; do
 			reject PARSE_ERR do run --lang "$lang" -c "value = $rhs"

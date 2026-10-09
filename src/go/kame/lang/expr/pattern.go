@@ -358,8 +358,8 @@ func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, s
 	}
 	if current.Kind == PatternReference { return false, false }
 	previous, found := "", false
-	for i := range p.Names {
-		if p.Names[i] != "" && p.Names[i] == current.Text && i < len(*slots) { previous, found = (*slots)[i], true; break }
+	for i := 0; i < current.Index && i < len(p.Names) && i < len(*slots); i++ {
+		if p.Names[i] != "" && p.Names[i] == current.Text { previous, found = (*slots)[i], true; break }
 	}
 	for end := offset + 1; end <= len(subject); end++ {
 		value := subject[offset:end]

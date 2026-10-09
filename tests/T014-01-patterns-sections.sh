@@ -46,6 +46,7 @@ evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c "./a/b/x.c")' '"./build/a/b
 evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c "./a.c")' ':nil'
 evaluates '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c ["./a.c" "./x/y.c" "./no.obj"])' '[:nil "./build/x/y.c" :nil]'
 evaluates '(replace ./src/{name:*}.c ./build/{name}.o "./src/demo.c")' '"./build/demo.o"'
+evaluates '(replace ./src/txto/{prefix:**}.txto ./build/data/{prefix}.json "./src/txto/blog/2026/deep/post.txto")' '"./build/data/blog/2026/deep/post.json"'
 evaluates '(map (replace ./{**}/{*}.c ./build/{_0}.o) ["./a.c" "./x/y.c"])' '[:nil "./build/x.o"]'
 evaluates '(replace ./{**}/{*}.c ./x/{_0}.o "./a/b.c")' '"./x/a.o"'
 evaluates '(replace ./{**}/{*}.c ./x/{_1}.o "./a/b.c")' '"./x/b.o"'

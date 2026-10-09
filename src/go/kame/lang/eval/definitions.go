@@ -395,8 +395,9 @@ func pollDefinition(c *core.EngineContext, source *core.Source, atom *core.Atom)
 	if result.Value.HasTransientCallable() {
 		freeCallables(state.Alloc, &result.Value)
 		result.Value.Free(state.Alloc)
+		location := definition.Program.LocateSource(definition.Program.Script.Source.Name, definition.Definition.Expression.Span)
 		atom.Kind = core.AtomFailed
-		atom.Diagnostic = diagnostic.Diagnostic{Code: "EXPR_INVALID", Severity: diagnostic.Error, Message: "callable cannot cross evaluation boundary"}
+		atom.Diagnostic = diagnostic.Diagnostic{Source: location.Source, Code: "EXPR_INVALID", Severity: diagnostic.Error, Message: "callable is invocation-scoped and cannot be stored as a definition; apply it immediately (for example, with map)", Span: diagnostic.Span{Start: location.Span.Start, End: location.Span.End}}
 		return core.PollEmitted
 	}
 	atom.Kind, atom.Value, atom.Wait = core.AtomValue, result.Value, true
