@@ -450,6 +450,42 @@ FILES = [./src/a.c ./src/b.c]
 SHELL = kash
 ```
 
+### Declarative list contributions
+
+`NAME += EXPRESSION` contributes a list to a value binding in `.km` and `.kmk`.
+The `+=` operator is contiguous. It is not a sequential assignment: registration
+collects all selected contributions before evaluation, and ordinary `=` bindings
+remain immutable.
+
+```kame
+CHECKS ?= []
+CHECKS += [./tests/unit ./tests/integration]
+CHECKS += EXTRA_CHECKS
+EXTRA_CHECKS = [./tests/smoke]
+```
+
+- An earlier `=` or selected `?=` provides the base. Without one, the implicit
+  base is `[]`. A contribution registers the name, so subsequent `?=` defaults
+  are skipped; subsequent `=` declarations still fail `DEF_INVALID`.
+- Base and contribution expressions must evaluate to lists. Concatenation is
+  shallow, preserves duplicates and item kinds, and follows source/session
+  order, with includes expanded depth-first at their declaration location.
+  Strings, numbers, records and other non-list operands fail `EXPR_INVALID` at
+  the offending operand; no coercion or arithmetic accumulation is provided.
+- The aggregate is evaluated only when demanded. Forward references, dependency
+  tracking, suspension, invalidation and capability policy are the same as for
+  ordinary definitions. Unused aggregates and skipped defaults do not evaluate.
+  Conditional source predicates see only contributions selected before them.
+- Literal CLI `--define NAME=VALUE`, operand `NAME=VALUE`, and `KAME_NAME`
+  configuration replace the whole aggregate under existing override precedence;
+  they do not append or evaluate its original operands, and remain strings.
+- Self-reference (`CHECKS += CHECKS`) and indirect dependency cycles fail
+  `DEP_CYCLE` when demanded. A contribution refers to the final binding, never
+  to a previous accumulator value. Use another binding for reusable lists.
+- Function contributions, contributions to function bindings, and Kash `+=`
+  declarations are invalid. AST JSON retains each authored contribution as a
+  definition with `contribution: true`; formatting preserves `+=`.
+
 ### Migrating textual definition values
 
 - Quote former bare text: `NAME = build` becomes `NAME = "build"`. A bare name

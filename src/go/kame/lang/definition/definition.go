@@ -21,6 +21,9 @@ type Definition struct {
 	NameSpan     source.Span
 	Function     bool
 	Default      bool
+	Contribution bool
+	// Aggregate is evaluator-owned; Expression holds ordered operand expressions.
+	Aggregate  bool
 	Parameters []Parameter
 	Expression *expr.Expr
 }
@@ -91,8 +94,8 @@ type parser struct {
 	kash  bool
 }
 
-// KashHeaderEnd recognizes only a valid header followed by standalone '='.
-// Command words containing '=' never become definitions by accident.
+// KashHeaderEnd recognizes standalone '=' and contribution headers so unsupported
+// Kash contributions receive an authored diagnostic, not a missing-tool error.
 func KashHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
 	return headerEnd(a, s, start, false)
 }
@@ -104,31 +107,53 @@ func ValueHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
 
 func headerEnd(a mem.Allocator, s *source.Source, start int, defaults bool) int {
 	text := s.Text
-	if start >= len(text) { return 0 }
+	if start >= len(text) {
+		return 0
+	}
 	end := start
 	if text[start] == '(' {
-		for end < len(text) && text[end] != ')' && (defaults || text[end] != '\n') { end++ }
-		if end == len(text) || text[end] != ')' { return 0 }
+		for end < len(text) && text[end] != ')' && (defaults || text[end] != '\n') {
+			end++
+		}
+		if end == len(text) || text[end] != ')' {
+			return 0
+		}
 		end++
 		p := parser{a: a, s: s}
 		d := Definition{}
 		p.functionLHS(&d, start, end)
 		valid := len(p.diags) == 0
-		slices.Free(a, d.Parameters); slices.Free(a, p.diags)
-		if !valid { return 0 }
+		slices.Free(a, d.Parameters)
+		slices.Free(a, p.diags)
+		if !valid {
+			return 0
+		}
 	} else {
 		name := scanName(text, start)
-		if !name.OK { return 0 }
+		if !name.OK {
+			return 0
+		}
 		end = name.End
 	}
 	pos := end
-	for pos < len(text) && space(text[pos]) { pos++ }
-	defaultOp := false
-	if defaults && pos+1 < len(text) && text[pos] == '?' && text[pos+1] == '=' { defaultOp = true; pos++ }
-	if defaults && pos == end && pos < len(text) && text[pos] == '=' && end > start && text[end-1] == '?' { defaultOp = true }
-	if (pos == end && !defaultOp) || pos == len(text) || text[pos] != '=' { return 0 }
-	if pos+1 < len(text) && !space(text[pos+1]) && text[pos+1] != '\n' && text[pos+1] != ';' { return 0 }
-	return pos+1
+	for pos < len(text) && space(text[pos]) {
+		pos++
+	}
+	compoundOp := false
+	if pos+1 < len(text) && (text[pos] == '+' || (defaults && text[pos] == '?')) && text[pos+1] == '=' {
+		compoundOp = true
+		pos++
+	}
+	if defaults && pos == end && pos < len(text) && text[pos] == '=' && end > start && text[end-1] == '?' {
+		compoundOp = true
+	}
+	if (pos == end && !compoundOp) || pos == len(text) || text[pos] != '=' {
+		return 0
+	}
+	if pos+1 < len(text) && !space(text[pos+1]) && text[pos+1] != '\n' && text[pos+1] != ';' {
+		return 0
+	}
+	return pos + 1
 }
 
 // ParseKashPrefix uses Kame's header and expression grammar with Kash value
@@ -159,6 +184,13 @@ func (p *parser) definition() *Definition {
 		d.Default = true
 		lhsStart, lhsEnd = trim(p.s.Text, lhsStart, lhsEnd-1)
 	}
+	if equals > lhsStart && p.s.Text[equals-1] == '+' {
+		d.Contribution = true
+		lhsStart, lhsEnd = trim(p.s.Text, lhsStart, lhsEnd-1)
+		if p.kash {
+			p.error(lhsStart, equals+1, "+= contributions require a .km or .kmk source, not Kash")
+		}
+	}
 	if lhsStart == lhsEnd {
 		p.error(p.start, equals, "expected definition name")
 		return d
@@ -166,6 +198,9 @@ func (p *parser) definition() *Definition {
 	if p.s.Text[lhsStart] == '(' {
 		if d.Default {
 			p.error(lhsStart, lhsEnd, "default definitions must name a value")
+		}
+		if d.Contribution {
+			p.error(lhsStart, lhsEnd, "contributions must name a value, not a function")
 		}
 		d.Function = true
 		p.functionLHS(d, lhsStart, lhsEnd)
@@ -391,6 +426,8 @@ func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
 	}
 	if d.Default {
 		b.WriteString(" ?=")
+	} else if d.Contribution {
+		b.WriteString(" +=")
 	} else {
 		b.WriteString(" =")
 	}

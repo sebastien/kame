@@ -41,6 +41,23 @@ escapes/interpolation and pattern syntax; use verbatim strings for inert data.
 built-in constructor reference; use `SHELL = "bash"` or
 `SHELL = ["/bin/bash" "-eu"]` for external shells. CLI overrides remain literal.
 
+## Declarative contributions
+
+```kame
+CHECKS ?= []
+CHECKS += [./tests/unit]
+CHECKS += EXTRA_CHECKS
+EXTRA_CHECKS = [./tests/smoke]
+```
+
+In `.km`/`.kmk`, `+=` lazily concatenates lists in source/include/session order,
+without flattening nested items or removing duplicates. An earlier `=`/`?=` is
+the base; otherwise the base is `[]`. Later `?=` is skipped, and later `=` is
+still a duplicate error. Non-list bases/contributions fail `EXPR_INVALID`.
+CLI/environment overrides replace the whole aggregate with literal string data.
+Self/indirect references to the final aggregate fail `DEP_CYCLE` when demanded;
+there is no previous-accumulator value. Functions and Kash do not support `+=`.
+
 ## Value entry points
 
 ```kame

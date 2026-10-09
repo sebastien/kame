@@ -14,32 +14,36 @@ import (
 )
 
 type Program struct {
-	KashFunctions []*Function
-	NextScriptGroup int64
+	KashFunctions      []*Function
+	NextScriptGroup    int64
 	// DryRun suppresses invocation-owned process, write and output effects.
-	DryRun bool
-	Alloc           mem.Allocator
-	Engine          *core.Engine
-	Script          *script.Script
-	Registry        *Registry
-	Requests        *host.Queue
-	Scope           *Scope
+	DryRun   bool
+	Alloc    mem.Allocator
+	Engine   *core.Engine
+	Script   *script.Script
+	Registry *Registry
+	Requests *host.Queue
+	Scope    *Scope
 	// Explicit CLI definition overrides take precedence over target KAME_NAME values.
 	explicitDefinitionOverrides []string
-	Definitions     []*definition.Definition
+	// Definitions is the canonical lookup list, borrowing authored ASTs, aggregates,
+	// or literal replacements owned by their engine-node states.
+	Definitions []*definition.Definition
+	// Aggregates retains ownership even when a literal replaces the canonical AST.
+	Aggregates      []*definition.Definition
 	Nodes           []definitionNode
 	Diagnostics     []diagnostic.Diagnostic
 	OperationStates []operationState
-	OperationMemos []*operationMemo
-	Processes []*processTask
+	OperationMemos  []*operationMemo
+	Processes       []*processTask
 	SourceParts     []SourcePart
 	// Grants provide the ambient capability policy for lazy definitions. Rule
 	// rendering supplies its own context policy from the runtime.
 	Grants []Grant
 	// DefinitionDependencyObserver installs runtime resources needed by lazy
 	// definitions evaluated as standalone engine nodes.
-	DefinitionDependencyObserver func(any, core.ResourceKey)
-	DefinitionDependencyState    any
+	DefinitionDependencyObserver        func(any, core.ResourceKey)
+	DefinitionDependencyState           any
 	DefinitionDependencyContextObserver func(any, core.ResourceKey, *Context)
 	// DefinitionEffectSink receives successful standalone-definition effects.
 	// Rule rendering keeps effects on its Context for the build runtime instead.
@@ -81,7 +85,7 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 		}
 		result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: parsed.Diagnostics[i].Code, Severity: diagnostic.Error, Message: parsed.Diagnostics[i].Message, Span: diagnostic.Span{Start: parsed.Diagnostics[i].Span.Start, End: parsed.Diagnostics[i].Span.End}})
 	}
-	var names []string
+	var names []*definition.Definition
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
@@ -91,18 +95,23 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 		if item.Kind != script.Definition || item.Definition == nil {
 			continue
 		}
-		duplicate := false
+		var previous *definition.Definition
 		for j := range names {
-			if names[j] == item.Definition.Name {
-				duplicate = true
+			if names[j].Name == item.Definition.Name {
+				previous = names[j]
 				break
 			}
 		}
-		if duplicate {
-			if item.Definition.Default { continue }
+		if previous != nil {
+			if item.Definition.Default {
+				continue
+			}
+			if item.Definition.Contribution && !previous.Function {
+				continue
+			}
 			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: "DEF_INVALID", Severity: diagnostic.Error, Message: "duplicate definition", Span: diagnostic.Span{Start: item.Definition.NameSpan.Start, End: item.Definition.NameSpan.End}})
 		} else {
-			names = slices.Append(a, names, item.Definition.Name)
+			names = slices.Append(a, names, item.Definition)
 		}
 	}
 	slices.Free(a, names)
@@ -143,8 +152,14 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			continue
 		}
 		d := item.Definition
+		if d.Contribution {
+			p.registerContribution(d)
+			continue
+		}
 		if p.Scope.lookup(d.Name) != nil {
-			if d.Default { continue }
+			if d.Default {
+				continue
+			}
 			p.Valid = false
 			p.Diagnostics = slices.Append(a, p.Diagnostics, diagnostic.Diagnostic{Code: "DEF_INVALID", Severity: diagnostic.Error, Message: "duplicate definition", Span: diagnostic.Span{Start: d.NameSpan.Start, End: d.NameSpan.End}})
 			continue
@@ -172,10 +187,14 @@ func (p *Program) Free() {
 	if p == nil {
 		return
 	}
-	for i := range p.explicitDefinitionOverrides { mem.FreeString(p.Alloc, p.explicitDefinitionOverrides[i]) }
+	for i := range p.explicitDefinitionOverrides {
+		mem.FreeString(p.Alloc, p.explicitDefinitionOverrides[i])
+	}
 	slices.Free(p.Alloc, p.explicitDefinitionOverrides)
 	p.freeSourceParts()
-	for i := range p.Processes { freeProcessTask(p.Alloc, p.Processes[i]) }
+	for i := range p.Processes {
+		freeProcessTask(p.Alloc, p.Processes[i])
+	}
 	slices.Free(p.Alloc, p.Processes)
 	p.Processes = nil
 	p.Scope.Free()
@@ -191,9 +210,15 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.Nodes)
 	slices.Free(p.Alloc, p.OperationStates)
-	for i := range p.OperationMemos { p.freeOperationMemo(p.OperationMemos[i]) }
+	for i := range p.OperationMemos {
+		p.freeOperationMemo(p.OperationMemos[i])
+	}
 	slices.Free(p.Alloc, p.OperationMemos)
 	p.freeKashFunctions()
+	for i := range p.Aggregates {
+		definition.Free(p.Alloc, p.Aggregates[i])
+	}
+	slices.Free(p.Alloc, p.Aggregates)
 	slices.Free(p.Alloc, p.Definitions)
 	for i := range p.Diagnostics {
 		p.Diagnostics[i].Free(p.Alloc)
@@ -283,21 +308,25 @@ func (p *Program) Definition(name string) *core.Node {
 }
 
 type definitionState struct {
-	Program    *Program
-	Definition *definition.Definition
-	Owned      bool
-	Environment []string
-	Namespace [32]byte
-	Scoped bool
-	RuleFrames []RuleFrame
+	Program           *Program
+	Definition        *definition.Definition
+	Owned             bool
+	Environment       []string
+	Namespace         [32]byte
+	Scoped            bool
+	RuleFrames        []RuleFrame
 	InvalidRuleFrames bool
-	Phase Phase
+	Phase             Phase
 }
 
 func freeDefinitionState(a mem.Allocator, value any) {
 	state := value.(*definitionState)
-	if state.Owned { definition.Free(a, state.Definition) }
-	for i := range state.Environment { mem.FreeString(a, state.Environment[i]) }
+	if state.Owned {
+		definition.Free(a, state.Definition)
+	}
+	for i := range state.Environment {
+		mem.FreeString(a, state.Environment[i])
+	}
 	slices.Free(a, state.Environment)
 	for i := range state.RuleFrames {
 		freeValues(a, state.RuleFrames[i].Inputs)
@@ -404,7 +433,9 @@ func (p *Program) definition(engine *core.EngineContext, state *definitionState)
 		context.DependencyContextObserver = p.DefinitionDependencyContextObserver
 		// Lazy values may perform evaluation-only host operations during render.
 		// Dynamic prerequisite resolution remains read-only.
-		if context.Phase == RenderingPhase { context.Phase = EvaluatePhase }
+		if context.Phase == RenderingPhase {
+			context.Phase = EvaluatePhase
+		}
 	}
 	result := Result{}
 	if state.InvalidRuleFrames {
@@ -426,6 +457,13 @@ func (p *Program) definition(engine *core.EngineContext, state *definitionState)
 }
 
 func (p *Program) definitionValue(engine *core.EngineContext, d *definition.Definition, scope *Scope, context *Context) Result {
+	if d.Aggregate {
+		previous := context.Engine
+		context.Engine = engine
+		result := p.aggregateValue(d, scope, context)
+		context.Engine = previous
+		return result
+	}
 	return p.evaluate(engine, scope, d.Expression, context)
 }
 

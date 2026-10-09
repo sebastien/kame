@@ -4,6 +4,7 @@ tests/T036-01-cli-presentation.sh	036	cli	Native/WASM presentation modes, global
 tests/T036-02-cli-reuse-reasons.sh	036	cli	Native/WASM file and task reuse reasons, missing/corrupt records, guard/input/output/configuration/environment changes, force/always, deduplication and privacy
 tests/T004-16-lang-computed-outputs.sh	004	lang	Pure computed output paths and names, captures, list flattening, overrides, validation, diagnostics, formatting and native/WASM parity
 tests/T004-17-lang-definition-expressions.sh	004	lang	Expression RHSs across km/kmk/Kash, typed atoms, aliases, function bodies, laziness, defaults, cycles, literal overrides, migration errors and formatting parity
+tests/T004-18-lang-contributions.sh	004	lang	Ordered lazy list contributions, includes and sessions, defaults, literal overrides, scoped environments, cycles, immutable definitions, type diagnostics and AST/format parity
 tests/T018-01-lang-source-style.sh	018	lang	Canonical structural layouts, 80-column Unicode/tab boundaries, definitions, literals, AST stability and native/WASM parity
 tests/T013-04-meta-layer-examples.sh	013	meta	Runnable value/rule/Kash lessons, source composition, selective rebuilding, graph growth and embedded Kash arguments
 tests/T003-01-host-process.sh	003	host	Process streaming, exit codes, retry, shell, environment, cwd

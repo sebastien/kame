@@ -64,6 +64,13 @@ Lookup searches the current scope and then parents. Unknown lookup is
 operation registry. A known non-callable head is `EXPR_INVALID`; an absent operation
 is `OP_UNKNOWN`.
 
+Contribution diagnostics follow the same syntax/registration/demand boundaries
+as ordinary definitions: malformed headers, function-shaped `+=` headers and
+Kash `+=` are parse errors; contributing to an existing function or redeclaring
+a registered value fails `DEF_INVALID` during registration. Non-list operands
+fail `EXPR_INVALID`, and cycles fail `DEP_CYCLE`, only when the aggregate is
+demanded. Registration never evaluates operands merely to validate their kinds.
+
 Top-level value definitions are lazy. First access starts one engine node for
 the definition, and concurrent accesses share it. Definition cycles are
 reported as dependency cycles. Invalidation clears the definition generation,

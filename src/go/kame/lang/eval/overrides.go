@@ -57,13 +57,19 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 		for i := range context.RuleFrames {
 			frame := context.RuleFrames[i]
 			flags := uint64(0)
-			if frame.FileRule { flags |= 1 }
-			if frame.ServiceRule { flags |= 2 }
+			if frame.FileRule {
+				flags |= 1
+			}
+			if frame.ServiceRule {
+				flags |= 2
+			}
 			identity.Uint64(flags)
 			inputs := core.ValueSignature(core.Value{Kind: core.List, List: frame.Inputs})
 			outputs := core.ValueSignature(core.Value{Kind: core.List, List: frame.Outputs})
 			newer := core.ValueSignature(core.Value{Kind: core.List, List: frame.NewerInputs})
-			if inputs.Mode == core.SignatureUnavailable || outputs.Mode == core.SignatureUnavailable || newer.Mode == core.SignatureUnavailable { invalidFrames = true }
+			if inputs.Mode == core.SignatureUnavailable || outputs.Mode == core.SignatureUnavailable || newer.Mode == core.SignatureUnavailable {
+				invalidFrames = true
+			}
 			identity.Uint64(uint64(inputs.Mode))
 			identity.Uint64(uint64(outputs.Mode))
 			identity.Uint64(uint64(newer.Mode))
@@ -85,9 +91,9 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 		return node
 	}
 	var authored *definition.Definition
-	for i := range p.Script.Items {
-		d := p.Script.Items[i].Definition
-		if d != nil && !d.Function && d.Name == key.Name {
+	for i := range p.Definitions {
+		d := p.Definitions[i]
+		if d.Name == key.Name {
 			authored = d
 			break
 		}
@@ -103,9 +109,15 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 	// them on evaluation rather than sharing zero digests or retaining processes.
 	for i := 0; !invalidFrames && i < len(context.RuleFrames); i++ {
 		frame := RuleFrame{FileRule: context.RuleFrames[i].FileRule, ServiceRule: context.RuleFrames[i].ServiceRule}
-		for j := range context.RuleFrames[i].Inputs { frame.Inputs = slices.Append(p.Alloc, frame.Inputs, context.RuleFrames[i].Inputs[j].Clone(p.Alloc)) }
-		for j := range context.RuleFrames[i].Outputs { frame.Outputs = slices.Append(p.Alloc, frame.Outputs, context.RuleFrames[i].Outputs[j].Clone(p.Alloc)) }
-		for j := range context.RuleFrames[i].NewerInputs { frame.NewerInputs = slices.Append(p.Alloc, frame.NewerInputs, context.RuleFrames[i].NewerInputs[j].Clone(p.Alloc)) }
+		for j := range context.RuleFrames[i].Inputs {
+			frame.Inputs = slices.Append(p.Alloc, frame.Inputs, context.RuleFrames[i].Inputs[j].Clone(p.Alloc))
+		}
+		for j := range context.RuleFrames[i].Outputs {
+			frame.Outputs = slices.Append(p.Alloc, frame.Outputs, context.RuleFrames[i].Outputs[j].Clone(p.Alloc))
+		}
+		for j := range context.RuleFrames[i].NewerInputs {
+			frame.NewerInputs = slices.Append(p.Alloc, frame.NewerInputs, context.RuleFrames[i].NewerInputs[j].Clone(p.Alloc))
+		}
 		state.RuleFrames = slices.Append(p.Alloc, state.RuleFrames, frame)
 	}
 	for i := range context.Environment {
@@ -124,8 +136,13 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 			text, provided = p.explicitDefinitionOverrides[i][len(prefix):], true
 		}
 	}
+	canonical := p.Definition(key.Name).Context.(*definitionState)
 	if provided {
 		state.Definition, state.Owned = p.literalDefinition(authored, text), true
+	} else if canonical.Owned {
+		// Canonical literals belong to the unscoped node and can be replaced again
+		// before demand. Keep this scoped snapshot independent of that lifetime.
+		state.Definition, state.Owned = p.literalDefinition(authored, authored.Expression.Text), true
 	}
 	node := p.Engine.AddOwned(scopedKey, evaluateDefinition, state, freeDefinitionState)
 	if node == nil {

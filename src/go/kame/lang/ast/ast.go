@@ -764,6 +764,10 @@ func (e *astEncoder) definition(value *definition.Definition) {
 		e.Str("default")
 		e.Bool(true)
 	}
+	if value.Contribution {
+		e.Str("contribution")
+		e.Bool(true)
+	}
 	e.Str("nameSpan")
 	e.span(value.NameSpan)
 	e.Str("parameters")

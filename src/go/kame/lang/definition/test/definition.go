@@ -119,3 +119,22 @@ func TestQuestionMarkNameIsNotDefaultOperator(t *testing.T) {
 	}
 }
 
+func TestContributionDefinitionPreservesSpansAndFormatting(t *testing.T) {
+	a := t.Allocator()
+	result := definition.Parse(a, "test.km", "items += [1 2]")
+	defer result.Free()
+	d := result.Definition
+	if len(result.Diagnostics) != 0 || d == nil || !d.Contribution || d.Default || !sameSpan(d.NameSpan, 0, 5) || !sameSpan(d.Expression.Span, 9, 14) {
+		t.Fatal("contribution lost operator or spans")
+	}
+	formatted := definition.Format(a, d)
+	if formatted != "items += [1 2]" {
+		t.Error("contribution formatting lost operator")
+	}
+	mem.FreeString(a, formatted)
+	invalid := definition.Parse(a, "test.km", "(items x) += [x]")
+	if len(invalid.Diagnostics) == 0 || invalid.Diagnostics[0].Code != "PARSE_ERR" {
+		t.Error("function contribution must fail during parsing")
+	}
+	invalid.Free()
+}
