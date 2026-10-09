@@ -23,6 +23,19 @@ types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 
 Only `:false` and `:nil` are false. Other values are true.
 
+## Equality
+
+`eq`/`=` and `is`/`==` are identical value-equality operations; `ne`/`!=` negates
+their result. Supported values are nil, booleans, numbers, strings, bytes, lists,
+and records. Lists compare in order; records compare by key/value regardless of
+field order. Bytes compare byte-for-byte and never equal strings. Different
+supported kinds are unequal, except exact integer/float numeric equality.
+Patterns, resources, processes, callables, duplicate record keys, and values at
+depth 256 are invalid, even nested behind an earlier mismatch.
+
+Use `(eq A B)`, not `(eq (str A) (str B))`. `filter`/`filter-out` equality shorthand
+uses this same contract. Ordering and `unique` remain scalar-only.
+
 ## Collections
 
 Callbacks run in input order. `map`, `flatmap`, `filter`, and `filter-out`

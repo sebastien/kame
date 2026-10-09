@@ -69,7 +69,7 @@ The operation is pure and works in definitions, input headers, and planning.
 
 ## Comparison Operations
 
-Comparison operations compare materialized scalars. The spelled names are
+Comparison operations compare materialized values. The spelled names are
 canonical; the symbolic aliases are equivalent and parse as expression atoms per
 `004-language.md`.
 
@@ -83,15 +83,44 @@ canonical; the symbolic aliases are equivalent and parse as expression atoms per
 | `gte` | `>=` | Order at or after |
 | `lte` | `<=` | Order at or before |
 
-`eq` supports nil, boolean, number, and string. Values of different kinds are
-unequal rather than an error; `:nil` and `:false` are distinct, and a number is
-never equal to a string. Number equality and ordering are numeric across integer
-and float; string equality is exact byte equality and string ordering compares
-UTF-8 bytes. Lists, records, bytes, and patterns are `EXPR_INVALID` and must be
-converted or compared explicitly. Ordering (`lt`, `gt`, `gte`, `lte`) accepts
-only numbers and strings; a mixed-kind or non-scalar argument is
-`EXPR_INVALID`. Boolean negation remains the general `not` operation, and
-`ne`/`!=` is equality negation, not a synonym for `not`.
+`eq`, `is`, and `ne` support nil, boolean, number, string, bytes, lists, and
+records. `is` remains an equality synonym, not reference identity; no new `is?`
+spelling is provided. The contract is recursive:
+
+- Nil and booleans compare by value; `:nil` and `:false` are distinct.
+- Integers compare exactly, even outside the exact `float64` integer range.
+  Integer/float equality requires an exactly matching integral float:
+  `9007199254740993` does not equal `9007199254740992.0`. Floats use IEEE equality:
+  NaN is unequal to everything, equal infinities compare equal, and signed zeros
+  compare equal.
+- Strings compare exact bytes without Unicode normalization. Bytes compare
+  length and every byte, including NUL and invalid UTF-8. Bytes and strings are
+  different kinds and are never implicitly converted for comparison.
+- Lists compare length and corresponding items, recursively and in order.
+- Records compare the same key set and recursively equal field values;
+  authored/insertion order does not affect equality. Iteration and display order
+  are unchanged. Duplicate keys in a host-created record are invalid.
+- Different supported kinds are unequal, except numeric int/float equality.
+  Empty lists and empty records are distinct.
+- Patterns, resources, processes, and all callables (including operation values)
+  are unsupported, rather than compared by text or identity. Both complete
+  operands must be comparable: nested unsupported values produce `EXPR_INVALID`
+  even when lengths, keys, kinds, or an earlier item differ. Values at depth 256
+  or deeper are rejected (the operand root has depth 0), consistent with portable
+  parsing/signature limits. Cyclic host-created containers are therefore rejected
+  rather than compared as cyclic graphs.
+
+Comparison never serializes or mutates the data. Replace textual workarounds
+such as `(eq (str A) (str B))` with `(eq A B)` to preserve kinds and binary data.
+Reordered records now compare equal, unlike their printed representations.
+`ne`/`!=` negates successful equality; unsupported-value errors still propagate.
+Boolean negation remains `not`.
+
+Ordering (`lt`, `gt`, `gte`, `lte`) is unchanged: only numbers and strings are
+accepted; mixed-kind or non-scalar arguments are `EXPR_INVALID`. Number ordering
+uses the existing float64 numeric comparison across integer/float, rather than
+the exact integer equality contract above; string ordering compares UTF-8 bytes. Bytes
+and collections have equality but no ordering.
 
 ## Collection Operations
 
@@ -115,9 +144,8 @@ in parallel, but the resulting list preserves input order.
 
 `filter` and `filter-out` accept a callable predicate in either argument order,
 or `(LIST VALUE)` as an equality shorthand. The shorthand retains or removes
-items equal to `VALUE`, respectively, using `eq`'s strict scalar semantics:
-integers and floats compare numerically, different kinds are unequal, and
-list, record, bytes, or pattern values are `EXPR_INVALID`.
+items equal to `VALUE`, respectively, using the same recursive equality contract
+as `eq`, including bytes, lists, and records. Unsupported values remain errors.
 
 `unique` supports nil, boolean, number, and string values. Sorting
 mixed kinds is invalid.
@@ -323,7 +351,8 @@ executable metadata checks do not grant access to user read operations.
 - Collection callbacks preserve input order.
 - `filter` and `filter-out` accept both callback orders and the `(LIST VALUE)`
   equality shorthand, including mixed-kind inequality and numeric int/float
-  equality; nonscalar equality values are `EXPR_INVALID`.
+  equality, binary equality, and recursive list/record equality; opaque values
+  remain `EXPR_INVALID`, including behind an earlier mismatch.
 - Composed path, collection and filesystem expressions parse and evaluate
   against a fixture source tree with tracked resource dependencies.
 - Path operations handle root, dotfiles, trailing separators, and relative

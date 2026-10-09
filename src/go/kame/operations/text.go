@@ -21,6 +21,7 @@ func opJoin(c *eval.Context, s any, v []core.Value) eval.Result {
 	defer b.Free()
 	for i := range v[0].List {
 		if v[0].List[i].Kind != core.String {
+			discardArgCallables(c, v)
 			return c.InvalidElement(0, i, "string", v[0].List[i].Kind)
 		}
 		if i != 0 {
@@ -66,7 +67,7 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 	if v[0].Kind != core.Pattern {
 		// Legacy literal form: replace occurrences of one plain string.
 		if len(v) != 3 || v[0].Kind != core.String || v[1].Kind != core.String || v[2].Kind != core.String {
-			freeArgCallables(c, v)
+			discardArgCallables(c, v)
 			return failure("PAT_INVALID", "invalid replace arguments")
 		}
 		value := strings.ReplaceAll(c.Run, v[0].Text, v[1].Text, v[2].Text)
@@ -75,7 +76,7 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 	var state *replaceState
 	parsed := parseReplaceState(c, v[0], v[1], &state)
 	if parsed.Diagnostic.Code != "" {
-		freeArgCallables(c, v)
+		discardArgCallables(c, v)
 		return parsed
 	}
 	if len(v) == 2 {
@@ -193,7 +194,7 @@ func opText(c *eval.Context, s any, v []core.Value) eval.Result {
 		return eval.Result{Value: v[0].Clone(c.Run)}
 	case core.Bytes:
 		if !utf8.Valid(v[0].Bytes) {
-			freeArgCallables(c, v)
+			discardArgCallables(c, v)
 			return c.InvalidOperation("argument 1 contains bytes that are not valid UTF-8")
 		}
 		// Copy bytes as a string; Bytes holds binary, String holds UTF-8 text.

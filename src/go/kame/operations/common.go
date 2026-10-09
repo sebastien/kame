@@ -13,19 +13,16 @@ func failure(code string, message string) eval.Result {
 }
 func invalidArgument(c *eval.Context, values []core.Value, index int, expected string) eval.Result {
 	result := c.InvalidArgument(index, expected, values[index].Kind)
-	freeArgCallables(c, values)
+	discardArgCallables(c, values)
 	return result
 }
 
-// freeArgCallables releases top-level callables in rejected arguments. The
-// caller shallow-frees v afterwards, so wrappers must be freed here or they
-// leak their scope retain. Nested shares are untouched: derived results may
-// still own them, and nested rejects cannot be freed from this package.
-func freeArgCallables(c *eval.Context, v []core.Value) {
+// discardArgCallables releases rejected arguments' callable ownership, including
+// nested closures, while preserving binding-owned shares. The caller frees
+// container storage afterwards. Do not use after transfer into results or state.
+func discardArgCallables(c *eval.Context, v []core.Value) {
 	for i := range v {
-		if v[i].Kind == core.Callable {
-			c.FreeCallable(&v[i])
-		}
+		c.DiscardCallables(&v[i])
 	}
 }
 func text(v core.Value) (string, bool) {

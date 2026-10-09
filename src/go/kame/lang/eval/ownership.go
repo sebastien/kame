@@ -57,7 +57,7 @@ const (
 	// function). The scope owns the Function struct plus owned AST slices;
 	// values carrying it are borrowed and must not free the struct.
 	FunctionDefinition
-	// FunctionInvocation is immutable and owned by Program until shutdown.
+	// FunctionInvocation is an immutable Kash callable owned by Program until shutdown.
 	FunctionInvocation
 	// FunctionOperation is an immutable registry callable owned by Program.
 	FunctionOperation
@@ -66,9 +66,9 @@ const (
 type Function struct {
 	Owner *Program
 	// OperationName is the registry key for FunctionOperation, not a discriminator.
-	OperationName string
-	KashConstructor bool
-	KashScript *script.Script
+	OperationName       string
+	KashConstructor     bool
+	KashScript          *script.Script
 	Kind                FunctionKind
 	Parameters          []expr.Parameter
 	Body                []*expr.Expr
@@ -105,6 +105,58 @@ func borrowFunction(a mem.Allocator, source *Function) *Function {
 		wrapper.Scope.Retain()
 	}
 	return wrapper
+}
+
+// DiscardCallables releases rejected argument closures, including fresh nested
+// closures. Container clones can share binding-owned functions; those must stay
+// alive until their lexical binding is released, unlike value-owned wrappers.
+func (c *Context) DiscardCallables(value *core.Value) {
+	c.discardArgumentCallables(value, 0)
+}
+
+func (c *Context) discardArgumentCallables(value *core.Value, depth int) {
+	// Rejecting malformed host graphs must not recurse through cycles forever.
+	if depth >= 256 {
+		return
+	}
+	if value.Kind == core.Callable {
+		for scope := c.Scope; scope != nil; scope = scope.Parent {
+			for i := range scope.Bindings {
+				if containsCallable(scope.Bindings[i].Value, value.Callable, 0) {
+					value.Callable = nil
+					return
+				}
+			}
+		}
+		freeCallables(c.Run, value)
+		return
+	}
+	for i := range value.List {
+		c.discardArgumentCallables(&value.List[i], depth+1)
+	}
+	for i := range value.Record {
+		c.discardArgumentCallables(&value.Record[i].Value, depth+1)
+	}
+}
+
+func containsCallable(value core.Value, function any, depth int) bool {
+	if depth >= 256 {
+		return false
+	}
+	if value.Kind == core.Callable {
+		return value.Callable == function
+	}
+	for i := range value.List {
+		if containsCallable(value.List[i], function, depth+1) {
+			return true
+		}
+	}
+	for i := range value.Record {
+		if containsCallable(value.Record[i].Value, function, depth+1) {
+			return true
+		}
+	}
+	return false
 }
 
 func freeCallables(a mem.Allocator, value *core.Value) {

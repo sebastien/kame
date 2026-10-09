@@ -148,22 +148,21 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 		for i := range subject.List {
 			if subject.List[i].Kind != core.String {
 				freeValues(c, out)
+				c.DiscardCallables(&subject)
 				return c.InvalidOperation("replace subject list must contain only strings; got " + core.KindName(subject.List[i].Kind))
 			}
 			one := replaceOne(c, state, subject.List[i].Text)
 			if one.Diagnostic.Code != "" {
 				freeValues(c, out)
+				c.DiscardCallables(&subject)
 				return one
 			}
 			out[i] = one.Value
 		}
 		return eval.Result{Value: core.Value{Kind: core.List, List: out}}
 	}
-	// subject is a copy of the caller's element: releasing the single retain
-	// here is balanced, the caller's shallow free never touches it.
-	if subject.Kind == core.Callable {
-		c.FreeCallable(&subject)
-	}
+	// No ownership transfers on rejection; the caller frees storage only.
+	c.DiscardCallables(&subject)
 	return c.InvalidOperation("replace subject expects string, list of strings, or nil; got " + core.KindName(subject.Kind))
 }
 

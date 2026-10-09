@@ -119,6 +119,7 @@ tests/T007-10-lib-record-lookup.sh	007	lib	Computed record keys, nil/default con
 tests/T009-13-cli-configuration.sh	009	cli	Build defaults, CLI and environment override precedence, literal values, effective plans and authored formatting on native/WASM
 tests/T007-11-lib-tools.sh	007	lib	Shared executable resolution, computed tool names, repeatable host overrides, plan visibility, startup PATH policy under target overrides and missing-tool failure on native/WASM
 tests/T007-12-lib-operation-values.sh	007	lib	First-class operation callbacks, aliases and containers, lexical precedence, comparison aliases, host suspension, build planning, capabilities, arity and special-form distinction
+tests/T007-13-lib-structural-equality.sh	007	lib	Bytewise and recursive equality, aliases, record-order independence, kind sensitivity, exact numeric equality, filter shorthand, host-backed binary data and unsupported-value diagnostics
 tests/T004-11-lang-wildcard-inputs.sh	004	lang	Literal wildcard rule inputs, recursive membership dependencies, authored formatting and quoted literals on native/WASM
 tests/T004-12-lang-optional-includes.sh	004	lang	Optional include absence, present declarations, value fragments, formatting, malformed sources, cycles and read failures on native/WASM
 tests/T012-02-streams-live-cli.sh	012	streams	Human/JSON chunks reach pipes before recipe completion on native/WASM, and native watch flushes declarative stdout

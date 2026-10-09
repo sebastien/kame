@@ -93,11 +93,8 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 		if flatten {
 			if result.Value.Kind != core.List {
 				d := c.InvalidOperation("callback must return list; got " + core.KindName(result.Value.Kind))
-				// The callback returned a scalar: nothing shares it, so
-				// release a bare wrapper before the shallow free.
-				if result.Value.Kind == core.Callable {
-					c.FreeCallable(&result.Value)
-				}
+				// No callback-result ownership transfers on this rejection.
+				c.DiscardCallables(&result.Value)
 				result.Value.Free(c.Run)
 				discardCallback(c, state)
 				return d
@@ -139,7 +136,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 		} else {
 			target = &v[1]
 			if _, ok := compareEq(*target, *target); !ok {
-				return invalidArgument(c, v, 1, "scalar equality value")
+				return invalidArgument(c, v, 1, "equality-comparable value")
 			}
 		}
 	} else {
@@ -152,8 +149,10 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 			var ok bool
 			keep, ok = compareEq(values[state.Index], *target)
 			if !ok {
+				result := equalityFailure(c, values[state.Index], *target)
 				discardCallback(c, state)
-				return c.InvalidOperation("cannot compare equality of " + core.KindName(values[state.Index].Kind) + " and " + core.KindName(target.Kind) + "; expects scalar values (nil, bool, int, float, or string)")
+				discardArgCallables(c, v)
+				return result
 			}
 		} else {
 			result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
@@ -264,6 +263,7 @@ func opSlice(c *eval.Context, s any, v []core.Value) eval.Result {
 		end += length
 	}
 	if start < 0 || end < start || end > length {
+		discardArgCallables(c, v)
 		return c.InvalidOperation("slice bounds must satisfy 0 <= start <= end <= length after resolving negative indices")
 	}
 	if v[0].Kind == core.List {
@@ -321,6 +321,7 @@ func opSorted(c *eval.Context, s any, v []core.Value) eval.Result {
 			order := compare(out.List[j-1], out.List[j])
 			if order == 2 {
 				out.Free(c.Run)
+				discardArgCallables(c, v)
 				return c.InvalidOperation("argument 1 must contain comparable values of the same kind (nil, bool, int, float, or string)")
 			}
 			if order <= 0 {
@@ -343,6 +344,7 @@ func opUnique(c *eval.Context, s any, v []core.Value) eval.Result {
 			order := compare(out[j], v[0].List[i])
 			if order == 2 {
 				freeValues(c, out)
+				discardArgCallables(c, v)
 				return c.InvalidOperation("argument 1 must contain comparable values of the same kind (nil, bool, int, float, or string)")
 			}
 			if order == 0 {

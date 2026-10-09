@@ -14,7 +14,7 @@ import (
 func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if len(v) < 1 || len(v) > 3 {
-		freeArgCallables(c, v)
+		discardArgCallables(c, v)
 		return c.InvalidOperation("expects 1 to 3 arguments")
 	}
 	// Split PAYLOAD vs STYLE for 2-arg form: record is payload, string is style.
@@ -54,17 +54,17 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	var isFile bool
 	if src.Kind == core.Bytes {
 		if styleArg == nil {
-			freeArgCallables(c, v)
+			discardArgCallables(c, v)
 			return styledFailure(c, "TPL_STYLE", "bytes template needs an explicit style")
 		}
 		norm, ok := template.NormalizeStyle(styleArg.Text)
 		if !ok {
-			freeArgCallables(c, v)
+			discardArgCallables(c, v)
 			return styledFailure(c, "TPL_STYLE", "unknown comment style")
 		}
 		style = norm
 		if !utf8.Valid(src.Bytes) {
-			freeArgCallables(c, v)
+			discardArgCallables(c, v)
 			return c.InvalidOperation("argument 1 contains bytes that are not valid UTF-8")
 		}
 		if len(src.Bytes) != 0 {
@@ -80,12 +80,12 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 			// Cycle check before reading.
 			for i := range c.RenderStack {
 				if c.RenderStack[i] == filePath {
-					freeArgCallables(c, v)
+					discardArgCallables(c, v)
 					return styledFailure(c, "TPL_CYCLE", "recursive template inclusion")
 				}
 			}
 			if !c.Allows(eval.Read, filePath) {
-				freeArgCallables(c, v)
+				discardArgCallables(c, v)
 				return failure("CAP_DENIED", "read access denied")
 			}
 			if !c.DirectHostRequests {
@@ -93,13 +93,13 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 				current := c.Dependency(key)
 				key.Free(c.Run)
 				if !current {
-					freeArgCallables(c, v)
+					discardArgCallables(c, v)
 					return eval.Result{Waiting: true}
 				}
 			}
 			got := readFileBytes(c, filePath)
 			if got.Waiting || got.Diagnostic.Code != "" {
-				freeArgCallables(c, v)
+				discardArgCallables(c, v)
 				if contentOwned {
 					mem.FreeString(c.Run, content)
 				}
@@ -108,7 +108,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 			if got.Value.Kind == core.Bytes {
 				if !utf8.Valid(got.Value.Bytes) {
 					got.Value.Free(c.Run)
-					freeArgCallables(c, v)
+					discardArgCallables(c, v)
 					return c.InvalidOperation("template file contains bytes that are not valid UTF-8")
 				}
 				if len(got.Value.Bytes) != 0 {
@@ -128,7 +128,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 				got.Value = core.Value{}
 			} else {
 				got.Value.Free(c.Run)
-				freeArgCallables(c, v)
+				discardArgCallables(c, v)
 				if contentOwned {
 					mem.FreeString(c.Run, content)
 				}
@@ -137,7 +137,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 			if styleArg != nil {
 				norm, ok := template.NormalizeStyle(styleArg.Text)
 				if !ok {
-					freeArgCallables(c, v)
+					discardArgCallables(c, v)
 					if contentOwned {
 						mem.FreeString(c.Run, content)
 					}
@@ -147,7 +147,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 			} else {
 				inferred, ok := template.InferStyle(filePath)
 				if !ok {
-					freeArgCallables(c, v)
+					discardArgCallables(c, v)
 					if contentOwned {
 						mem.FreeString(c.Run, content)
 					}
@@ -161,7 +161,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 			if styleArg != nil {
 				norm, ok := template.NormalizeStyle(styleArg.Text)
 				if !ok {
-					freeArgCallables(c, v)
+					discardArgCallables(c, v)
 					return styledFailure(c, "TPL_STYLE", "unknown comment style")
 				}
 				style = norm
@@ -204,7 +204,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		if pushed {
 			popRenderStack(c)
 		}
-		freeArgCallables(c, v)
+		discardArgCallables(c, v)
 		return renderFailure(c, code, srcName, span.Start, span.End, msg)
 	}
 	// Evaluate with payload scope and template source.
@@ -221,7 +221,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 			if pushed {
 				popRenderStack(c)
 			}
-			freeArgCallables(c, v)
+			discardArgCallables(c, v)
 			return c.InvalidOperation("cannot create template payload scope")
 		}
 		evalScope = child
@@ -238,7 +238,8 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	if pushed {
 		popRenderStack(c)
 	}
-	freeArgCallables(c, v)
+	// Payload callables transferred into the child scope above; only the caller's
+	// shallow argument-storage free remains, even if evaluation failed or waited.
 	if res.Waiting || res.Diagnostic.Code != "" {
 		res.Value.Free(c.Run)
 		return res

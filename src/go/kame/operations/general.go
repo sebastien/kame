@@ -219,7 +219,7 @@ func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 	//
 	// Frees are explicit, never deferred: Solod emits textually-prior defers
 	// at every later return, so conditional defers would also run on paths
-	// whose branch never executed (double free with freeArgCallables below).
+	// whose branch never executed (double free with rejected-argument cleanup).
 	if v[0].Kind == core.List && v[1].Kind == core.Callable {
 		arguments := applyArguments(c.Run, v[0], v[1])
 		result := c.Call(v[1], arguments.Values)

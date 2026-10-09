@@ -73,7 +73,7 @@ func opCapture(c *eval.Context, state any, values []core.Value) eval.Result {
 		index := values[0].Int
 		if index < 0 { return eval.Result{Value: core.Value{Kind: core.Nil}} }
 		list := regexRecordValue(c.Run, values[1], "captures")
-		if list.Kind != core.List { list.Free(c.Run); return c.InvalidOperation("capture expects a regex match record") }
+		if list.Kind != core.List { list.Free(c.Run); discardArgCallables(c, values); return c.InvalidOperation("capture expects a regex match record") }
 		if index >= int64(len(list.List)) { list.Free(c.Run); return eval.Result{Value: core.Value{Kind: core.Nil}} }
 		selected := list.List[index].Clone(c.Run)
 		list.Free(c.Run)
@@ -81,7 +81,7 @@ func opCapture(c *eval.Context, state any, values []core.Value) eval.Result {
 	}
 	if values[0].Kind == core.String {
 		named := regexRecordValue(c.Run, values[1], "named")
-		if named.Kind != core.Record { named.Free(c.Run); return c.InvalidOperation("capture expects a regex match record") }
+		if named.Kind != core.Record { named.Free(c.Run); discardArgCallables(c, values); return c.InvalidOperation("capture expects a regex match record") }
 		for i := range named.Record {
 			if named.Record[i].Key == values[0].Text {
 				selected := named.Record[i].Value.Clone(c.Run)
@@ -109,9 +109,10 @@ func opRegexReplace(c *eval.Context, state any, values []core.Value) eval.Result
 	if values[2].Kind != core.String && values[2].Kind != core.List { return invalidArgument(c, values, 2, "string or list of strings") }
 	var replace *replaceState
 	parsed := parseReplaceState(c, values[0], values[1], &replace)
-	if parsed.Diagnostic.Code != "" { return parsed }
+	if parsed.Diagnostic.Code != "" { discardArgCallables(c, values); return parsed }
 	if !hasRegexMatcher(replace.match) {
 		freeReplaceState(c.Run, replace)
+		discardArgCallables(c, values)
 		return ownedFailure(c.Run, "PAT_INVALID", "regex-replace needs a regex matcher")
 	}
 	result := replaceApply(c, replace, values[2])

@@ -80,7 +80,9 @@ Use a lambda when adapting one to a callback. In addition to the forms below,
 | `(eval SOURCE)` | Evaluate expression text or an explicitly loaded script; not a replacement for native source composition. |
 
 Comparison heads `=`, `==`, `!=`, `<`, `>`, `<=`, `>=` alias `eq`, `is`, `ne`,
-`lt`, `gt`, `lte`, `gte`. Equality is strict and kind-aware. These are prefix
+`lt`, `gt`, `lte`, `gte`. Equality is kind-aware and recursive for bytes, lists,
+and records (record field order is ignored); `is` remains identical to `eq`.
+Opaque values are not comparable. These are prefix
 calls, not infix operators.
 
 ## Patterns and processes

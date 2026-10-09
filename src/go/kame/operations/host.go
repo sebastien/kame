@@ -161,11 +161,8 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 	} else if value.Kind == core.String {
 		name = value.Text
 	} else {
-		// value is a copy of the caller's element: releasing the single
-		// retain here is balanced, the caller's shallow free never touches it.
-		if value.Kind == core.Callable {
-			c.FreeCallable(&value)
-		}
+		// No ownership transfers on rejection; the caller frees storage only.
+		c.DiscardCallables(&value)
 		return c.InvalidArgument(0, "string or file resource", value.Kind)
 	}
 	if !c.Allows(eval.Read, name) {
@@ -330,7 +327,7 @@ func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if c.Phase != eval.EvaluatePhase {
 		c.MarkPhaseInvalid()
-		freeArgCallables(c, v)
+		discardArgCallables(c, v)
 		return failure("PHASE_INVALID", "shell is invalid outside evaluation")
 	}
 	if v[0].Kind != core.String {
@@ -352,7 +349,7 @@ func opShellTemplate(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if c.Phase != eval.EvaluatePhase {
 		c.MarkPhaseInvalid()
-		freeArgCallables(c, v)
+		discardArgCallables(c, v)
 		return failure("PHASE_INVALID", "shell-template is invalid outside evaluation")
 	}
 	if v[0].Kind != core.List {
@@ -362,18 +359,18 @@ func opShellTemplate(c *eval.Context, s any, v []core.Value) eval.Result {
 		return invalidArgument(c, v, 1, "list of strings")
 	}
 	if len(v[0].List) != len(v[1].List)+1 {
-		freeArgCallables(c, v)
+		discardArgCallables(c, v)
 		return failure("EXPR_INVALID", "shell-template requires one more fragment than value")
 	}
 	for i := range v[0].List {
 		if v[0].List[i].Kind != core.String {
-			freeArgCallables(c, v)
+			discardArgCallables(c, v)
 			return failure("EXPR_INVALID", "shell-template fragments must be strings")
 		}
 	}
 	for i := range v[1].List {
 		if v[1].List[i].Kind != core.String {
-			freeArgCallables(c, v)
+			discardArgCallables(c, v)
 			return failure("EXPR_INVALID", "shell-template values must be strings")
 		}
 	}
