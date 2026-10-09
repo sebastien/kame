@@ -103,6 +103,14 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	b := scope.lookup(name)
 	if b == nil {
 		if name == "kash" && context.Program != nil { return Result{Value: context.Program.KashConstructor()} }
+		if IsSpecialForm(name) { return failure(context.Run, "EXPR_INVALID", span, "special form is not a callable value: "+name) }
+		if context.Program != nil {
+			canonical := name
+			if alias, ok := comparisonAlias(name); ok { canonical = alias }
+			if operation := context.Program.Registry.lookup(canonical); operation != nil {
+				return Result{Value: context.Program.newOperationCallable(operation.Name)}
+			}
+		}
 		return failure(context.Run, "REF_MISSING", span, "unknown reference: "+name)
 	}
 	if b.Kind == bindingValue {

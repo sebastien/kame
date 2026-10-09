@@ -59,10 +59,30 @@ registration before recipe effects and retain the authored output location.
 A scope is a parent-linked map of names to bindings. A binding is a value,
 lexical function, operation, or lazy definition.
 
-Lookup searches the current scope and then parents. Unknown lookup is
-`REF_MISSING`. Application heads use the same lexical lookup first, then the
-operation registry. A known non-callable head is `EXPR_INVALID`; an absent operation
-is `OP_UNKNOWN`.
+Lookup searches the current scope and then parents, then the operation registry.
+Ordinary registered operations are callable values, including plugin operations:
+`(map uppercase ["a" "b"])`, `(filter exists? FILES)`, and
+`predicate = exists?` need no lambda wrapper. Lexical bindings shadow operation
+names. Comparison aliases (`=`, `==`, `!=`, `<`, `>`, `<=`, `>=`) also resolve to
+their canonical operation callables; their existing application-head syntax is
+unchanged. Unknown lookup is `REF_MISSING`; a missing application-head operation
+is `OP_UNKNOWN`, and a known non-callable head is `EXPR_INVALID`.
+
+Operation callables are immutable, invocation-owned references. They may appear
+in lazy definitions, lists, records, and local bindings, without capturing a
+lexical scope. Resolving one does not invoke it or require capabilities. Calling
+one, directly or through a collection callback, uses the caller's scope, phase,
+grants and engine context, and preserves arity checks, operation-version
+observations, dependency tracking, effects, diagnostics and host suspension.
+They cannot be invoked through another program or serialized as persistent
+cache values; ordinary closure publication restrictions remain unchanged.
+
+Special forms consume expression syntax, not already-evaluated arguments:
+`?`, `let`, `def`, `eval`, `if`, `and`, `or`, `with`, `match`, `run`, `pipe`, and
+`await`. They are not registry operations or callable values. Referencing an
+unbound special form as a value fails `EXPR_INVALID`; use a lambda to adapt its
+syntax. Registry/plugin registration rejects these reserved operation names.
+The built-in `kash` constructor remains an ordinary invocation-owned callable.
 
 Contribution diagnostics follow the same syntax/registration/demand boundaries
 as ordinary definitions: malformed headers, function-shaped `+=` headers and

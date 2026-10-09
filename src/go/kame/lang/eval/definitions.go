@@ -14,6 +14,7 @@ import (
 )
 
 type Program struct {
+	OperationFunctions []*Function
 	KashFunctions      []*Function
 	NextScriptGroup    int64
 	// DryRun suppresses invocation-owned process, write and output effects.
@@ -215,6 +216,10 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.OperationMemos)
 	p.freeKashFunctions()
+	for i := range p.OperationFunctions {
+		mem.Free(p.Alloc, p.OperationFunctions[i])
+	}
+	slices.Free(p.Alloc, p.OperationFunctions)
 	for i := range p.Aggregates {
 		definition.Free(p.Alloc, p.Aggregates[i])
 	}

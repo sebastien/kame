@@ -32,8 +32,8 @@ import (
 //     Scope.trySetValue wrapper used by let/def value forms; raw setValue
 //     stays for fresh-child stores in callValues that cannot strand.
 //
-// FunctionKind replaces the former Temporary/Borrowed/Owned/ScopeRetained
-// bool matrix with one explicit lifetime.
+// FunctionKind records closure lifetimes and distinguishes the two kinds of
+// immutable, invocation-owned callable: Kash scripts/constructors and operations.
 type FunctionKind int
 
 const (
@@ -59,10 +59,14 @@ const (
 	FunctionDefinition
 	// FunctionInvocation is immutable and owned by Program until shutdown.
 	FunctionInvocation
+	// FunctionOperation is an immutable registry callable owned by Program.
+	FunctionOperation
 )
 
 type Function struct {
 	Owner *Program
+	// OperationName is the registry key for FunctionOperation, not a discriminator.
+	OperationName string
 	KashConstructor bool
 	KashScript *script.Script
 	Kind                FunctionKind
@@ -91,7 +95,9 @@ type Function struct {
 // that retains the captured Scope. The wrapper shares parameters, body, and
 // Native state with its source.
 func borrowFunction(a mem.Allocator, source *Function) *Function {
-	if source.Kind == FunctionInvocation { return source }
+	if source.Kind == FunctionInvocation || source.Kind == FunctionOperation {
+		return source
+	}
 	wrapper := mem.Alloc[Function](a)
 	*wrapper = *source
 	wrapper.Kind = FunctionBorrowed
@@ -155,7 +161,9 @@ func freeBorrowedWrapper(a mem.Allocator, function *Function) {
 func wouldStrandCapture(scope *Scope, value core.Value) bool {
 	if value.Kind == core.Callable {
 		function := value.Callable.(*Function)
-		if function != nil && function.Kind == FunctionInvocation { return false }
+		if function != nil && (function.Kind == FunctionInvocation || function.Kind == FunctionOperation) {
+			return false
+		}
 		if function == nil || function.Scope == nil || function.Scope == scope {
 			return false
 		}

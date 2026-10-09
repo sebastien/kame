@@ -12,6 +12,16 @@ import (
 
 const defEscapeMessage = "function value escapes its scope; define it with (def name [params] body) instead"
 
+// IsSpecialForm distinguishes syntax that consumes unevaluated expressions from
+// ordinary registry operations. Special forms cannot be registered as operations.
+func IsSpecialForm(name string) bool {
+	switch name {
+	case "?", "let", "def", "eval", "if", "and", "or", "with", "match", "run", "pipe", "await":
+		return true
+	}
+	return false
+}
+
 // rejectStrandedCapture discards a value that would strand its capture and
 // reports DEF_ESCAPE. The value is freed deeply so the reject path stays
 // Tracker-clean by construction.

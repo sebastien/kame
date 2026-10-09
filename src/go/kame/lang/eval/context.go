@@ -443,7 +443,7 @@ func (c *Context) TakeCompletion() core.Completion {
 	return completion
 }
 
-// Call invokes a lexical function with already evaluated values.
+// Call invokes a closure, operation, or Kash callable with already evaluated values.
 func (c *Context) Call(callable core.Value, values []core.Value) Result {
 	if c == nil {
 		return failure(mem.System, "EXPR_INVALID", source.Span{}, "expected a function")

@@ -44,7 +44,28 @@ where to insert the value. This is value transformation, not a process pipe.
 See [Library](./library.md) for operation signatures; do not infer operand
 order from another language.
 
+## Operation values
+
+Ordinary registered operations are first-class callables:
+
+```kame
+predicate = exists?
+(filter predicate FILES)
+(map uppercase ["a" "b"])
+(let [size count] (size [1 2 3]))
+```
+
+Names resolve lexically before the operation registry. Operation values may be
+aliased, passed to functions, or stored in lists/records. Lookup alone performs
+no effects; invocation retains ordinary arity, capability, phase, dependency,
+version-tracking and suspension behavior. This also applies to plugin operations
+and comparison aliases. Callables are invocation-owned, not serialized code.
+
 ## Special forms
+
+Special forms are syntax-only, not callable values or plugin operation names.
+Use a lambda when adapting one to a callback. In addition to the forms below,
+`run`, `pipe`, and `await` are process special forms.
 
 | Form | Behavior |
 | --- | --- |

@@ -72,7 +72,7 @@ func NewRegistry(a mem.Allocator) *Registry {
 }
 
 func (r *Registry) Add(operation Operation) bool {
-	if r == nil || operation.Name == "" || operation.Call == nil || r.lookup(operation.Name) != nil {
+	if r == nil || operation.Name == "" || operation.Call == nil || IsSpecialForm(operation.Name) || r.lookup(operation.Name) != nil {
 		return false
 	}
 	operation.Name = owned(r.Alloc, operation.Name)

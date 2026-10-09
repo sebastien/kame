@@ -67,7 +67,7 @@ func Register(a mem.Allocator, registry *eval.Registry, declarations []Plugin) b
 			if op.MaxRequestBytes < 0 || op.MaxRequestBytes > DefaultMaxRequestBytes || op.MaxResponseBytes < 0 || op.MaxResponseBytes > DefaultMaxResponseBytes || op.TimeoutMS < 0 || op.TimeoutMS > DefaultTimeoutMS { return false }
 			if (p.MaxRequestBytes != 0 && op.MaxRequestBytes > p.MaxRequestBytes) || (p.MaxResponseBytes != 0 && op.MaxResponseBytes > p.MaxResponseBytes) || (p.TimeoutMS != 0 && op.TimeoutMS > p.TimeoutMS) { return false }
 			for k := 0; k < len(op.Capabilities); k++ { if op.Capabilities[k] < eval.Read || op.Capabilities[k] > eval.Env { return false } }
-			if registry.HasOperation(op.Name) { return false }
+			if eval.IsSpecialForm(op.Name) || registry.HasOperation(op.Name) { return false }
 			for pj := 0; pj <= i; pj++ {
 				end := len(declarations[pj].Operations)
 				if pj == i { end = j }

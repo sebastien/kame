@@ -63,7 +63,9 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 	}
 	callee := p.evaluate(context.Engine, scope, head, context)
 	if callee.Waiting || callee.Diagnostic.Code != "" {
-		if callee.Diagnostic.Code == "REF_MISSING" && head.Kind == expr.Name && p.Registry != nil {
+		if callee.Diagnostic.Code == "REF_MISSING" && head.Kind == expr.Name && scope.lookup(head.Text) == nil && p.Registry != nil {
+			// Kash reserves bare env for its namespace, but (env NAME) remains
+			// an ordinary operation call as before.
 			operation := p.Registry.lookup(head.Text)
 			callee.Diagnostic.Free(context.Run)
 			if operation != nil {
@@ -109,15 +111,26 @@ func comparisonAlias(name string) (string, bool) {
 }
 
 func (p *Program) operation(scope *Scope, operation *Operation, arguments []*expr.Expr, context *Context, span source.Span) Result {
-	_, _ = p, scope
+	ready := p.prepareOperation(operation, len(arguments), context, span)
+	if ready.Waiting || ready.Diagnostic.Code != "" { return ready }
+	operands := p.argumentValues(scope, arguments, context, span)
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	result := p.invokeOperation(operation, operands.Values, arguments, context, span)
+	// Operations release consumed callable wrappers; release only value storage.
+	freeValues(context.Run, operands.Values)
+	return result
+}
+
+func (p *Program) prepareOperation(operation *Operation, count int, context *Context, span source.Span) Result {
+	_ = p
 	// A dependency may publish while a host operation is outstanding. Keep its
 	// single request active until the engine supplies the matching completion;
 	// the resumed evaluation then snapshots every dependency at its latest value.
 	if context.Engine != nil && context.Engine.Submitted() && context.Completion().RequestID == 0 {
 		return Result{Waiting: true}
 	}
-	if len(arguments) < operation.MinArity || (operation.MaxArity >= 0 && len(arguments) > operation.MaxArity) {
-		return arityFailure(context.Run, span, operation.Name, len(arguments), operation.MinArity, operation.MaxArity)
+	if count < operation.MinArity || (operation.MaxArity >= 0 && count > operation.MaxArity) {
+		return arityFailure(context.Run, span, operation.Name, count, operation.MinArity, operation.MaxArity)
 	}
 	if context.OperationObserver != nil {
 		context.OperationObserver(context.ResolverState, operation.Name, operation.Version)
@@ -134,9 +147,11 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 			return failure(context.Run, "CAP_DENIED", span, message)
 		}
 	}
-	operands := p.argumentValues(scope, arguments, context, span)
-	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
-	values := operands.Values
+	return Result{}
+}
+
+func (p *Program) invokeOperation(operation *Operation, values []core.Value, arguments []*expr.Expr, context *Context, span source.Span) Result {
+	_ = p
 	previousCapabilities, previousSpan, previousStart, previousEnd := context.activeCapabilities, context.Span, context.operationStart, context.operationEnd
 	previousName, previousArguments := context.OperationName, context.operationArguments
 	context.OperationName, context.operationArguments = operation.Name, arguments
@@ -158,9 +173,6 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 	}
 	context.OperationName, context.operationArguments = previousName, previousArguments
 	context.activeCapabilities, context.Span, context.operationStart, context.operationEnd = previousCapabilities, previousSpan, previousStart, previousEnd
-	// Transfer: the operation freed consumed callables through FreeCallable;
-	// release only storage here so shared wrappers are not freed twice.
-	freeValues(context.Run, values)
 	if context.denied {
 		result.Free(context.Run)
 		return failure(context.Run, "CAP_DENIED", span, "`"+operation.Name+"` requires a capability that was not granted")
@@ -169,6 +181,13 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 }
 
 func (p *Program) call(function *Function, arguments []*expr.Expr, context *Context, span source.Span) Result {
+	if function.Kind == FunctionOperation {
+		operation := p.operationForCallable(function)
+		if operation == nil { return failure(context.Run, "EXPR_INVALID", span, "operation callable unavailable or belongs to another invocation") }
+		result := p.operation(context.Scope, operation, arguments, context, span)
+		attachNamedFrame(&result, context, span, "operation", function.OperationName)
+		return result
+	}
 	scope := context.Scope
 	operands := p.argumentValues(scope, arguments, context, span)
 	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
@@ -184,6 +203,14 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 }
 
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
+	if function.Kind == FunctionOperation {
+		operation := p.operationForCallable(function)
+		if operation == nil { return failure(context.Run, "EXPR_INVALID", span, "operation callable unavailable or belongs to another invocation") }
+		result := p.prepareOperation(operation, len(values), context, span)
+		if !result.Waiting && result.Diagnostic.Code == "" { result = p.invokeOperation(operation, values, nil, context, span) }
+		attachNamedFrame(&result, context, span, "operation", function.OperationName)
+		return result
+	}
 	if function.Kind == FunctionInvocation {
 		if function.Owner != p { return failure(context.Run, "EXPR_INVALID", span, "Kash callable belongs to another invocation") }
 		previousStart, previousEnd := context.operationStart, context.operationEnd

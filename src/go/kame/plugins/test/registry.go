@@ -52,12 +52,20 @@ func TestEitherPluginVersionChangesOperationIdentity(t *testing.T) {
 }
 
 func TestRegisteredOperationUsesCorrelatedPluginRequest(t *testing.T) {
+	checkPluginRequest(t, "result = (example-run \"hello\")")
+}
+
+func TestAliasedPluginOperationUsesCorrelatedRequest(t *testing.T) {
+	checkPluginRequest(t, "callback = example-run\nresult = (callback \"hello\")")
+}
+
+func checkPluginRequest(t *testing.T, text string) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
 	declarations := []plugins.Plugin{{Name: "example", Version: "2", Operations: []plugins.Operation{{Name: "example-run", Version: "3", MinArity: 1, MaxArity: 1}}}}
 	if !plugins.Register(a, registry, declarations) { t.Error("plugin registration failed") }
 	engine := core.NewEngine(a)
-	parsed := script.Parse(a, "plugin.km", "result = (example-run \"hello\")")
+	parsed := script.Parse(a, "plugin.km", text)
 	program := eval.Compile(a, engine, parsed, registry)
 	definition := program.Definition("result")
 	if definition == nil { t.Error("plugin test definition did not compile") }
@@ -126,6 +134,9 @@ func TestRegisterRejectsWholeInvalidDeclarationSet(t *testing.T) {
 	if plugins.Register(a, registry, invalid) || registry.HasOperation("first-run") || registry.HasOperation("second-run") {
 		t.Error("an oversized declaration was accepted or partially registered")
 	}
+	invalid[1].Operations[0].MaxResponseBytes = 0
+	invalid[1].Operations[0].Name = "if"
+	if plugins.Register(a, registry, invalid) || registry.HasOperation("first-run") { t.Error("special form plugin name was accepted or partially registered") }
 	registry.Free()
 }
 
