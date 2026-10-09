@@ -21,6 +21,9 @@ continue to identify filesystem resources and keep their current path rules;
 they are not silently interpreted as URIs. Canonical identity is the tuple
 `(scheme, authority, normalized path)`, so equivalent spellings share one
 reactive resource node and cache identity. Display retains the canonical URI.
+The canonical URI re-escapes literal `%`, `?`, and `#` path bytes so parsing it
+again preserves the normalized path. Host filesystem mapping uses that decoded
+path, not a second decoding of it; invalid URIs never become ordinary filenames.
 
 `mem://NAME/path` names an entry in a host-provided, namespace-scoped memory
 filesystem. The host owns contents and mutation; Kame owns URI parsing,

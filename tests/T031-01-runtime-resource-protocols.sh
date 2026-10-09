@@ -28,6 +28,14 @@ for host in native wasm; do
 	else
 		test-fail "$host memory URI must not create a local mem: path"
 	fi
+	"${runner[@]}" do run --lang expr --allow-write=mem://workspace/ --allow-read=mem://workspace/ \
+		-c '(write (resource "mem://workspace/entry%252F%23%3f") "escaped-memory")' \
+		-c '(read (resource "mem://workspace/entry%252F%23%3F"))' >"$TMPDIR/$host.escaped-memory.out" 2>"$TMPDIR/$host.escaped-memory.err"
+	if [ "$(cat "$TMPDIR/$host.escaped-memory.out")" = 'escaped-memory' ]; then
+		test-ok "$host preserves percent, hash, and question characters in memory URI identity"
+	else
+		test-fail "$host escaped memory URI round trip: $(cat "$TMPDIR/$host.escaped-memory.err")"
+	fi
 	"${runner[@]}" do run --lang expr --allow-write=mem://glob/ --allow-read=mem://glob/ \
 		-c '(write (resource "mem://glob/a.txt") "a")' \
 		-c '(write (resource "mem://glob/sub/b.txt") "b")' \
@@ -44,6 +52,27 @@ for host in native wasm; do
 		test-ok "$host maps a file URI through filesystem read grants"
 	else
 		test-fail "$host file URI read: $(cat "$TMPDIR/$host.file.err") $(cat "$TMPDIR/$host.file.out")"
+	fi
+	escaped_file_uri="file://$TMPDIR/$host-entry%252F%23%3F"
+	"${runner[@]}" do run --lang expr "--allow-write=$file_root" "--allow-read=$file_root" \
+		-c "(write (resource \"$escaped_file_uri\") \"escaped-file\")" \
+		-c "(read (resource \"$escaped_file_uri\"))" >"$TMPDIR/$host.escaped-file.out" 2>"$TMPDIR/$host.escaped-file.err"
+	if [ "$(cat "$TMPDIR/$host.escaped-file.out")" = 'escaped-file' ] && [ "$(cat "$TMPDIR/$host-entry%2F#?")" = 'escaped-file' ]; then
+		test-ok "$host preserves percent, hash, and question characters in file URI paths"
+	else
+		test-fail "$host escaped file URI round trip: $(cat "$TMPDIR/$host.escaped-file.err")"
+	fi
+	file_glob="file://$TMPDIR/$host-glob/**/*.txt"
+	mkdir -p "$TMPDIR/$host-glob/a%#?"
+	printf 'escaped-glob' >"$TMPDIR/$host-glob/a%#?/entry%#?.txt"
+	"${runner[@]}" do run --lang expr "--allow-read=$file_root" \
+		-c "(map ([name] (read (resource name))) (wildcard (resource \"$file_glob\")))" \
+		>"$TMPDIR/$host.escaped-glob.out" 2>"$TMPDIR/$host.escaped-glob.err"
+	# read returns bytes, displayed without string quotes inside the list.
+	if [ "$(cat "$TMPDIR/$host.escaped-glob.out")" = '[escaped-glob]' ]; then
+		test-ok "$host recursively globs and reads escaped file URI names"
+	else
+		test-fail "$host escaped recursive glob: $(cat "$TMPDIR/$host.escaped-glob.err")"
 	fi
 
 	status=0

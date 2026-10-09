@@ -1,6 +1,7 @@
 package posix_test
 
 import (
+	"kame/core"
 	"kame/host/posix"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
@@ -84,7 +85,14 @@ func TestPosixHostMapsFileResourceURIs(t *testing.T) {
 	defer removeAtomicTestDirectory(directory)
 	h := posix.New(t.Allocator())
 	defer h.Free()
-	name := "file://" + directory + "/entry"
+	parsed := core.ParseResourceURI(t.Allocator(), "file://"+directory+"/entry%252F%23%3f%20%C3%A9")
+	if parsed.Error != "" {
+		t.Fatal("parse file URI")
+		return
+	}
+	defer parsed.URI.Free()
+	name := parsed.URI.Canonical(t.Allocator())
+	defer mem.FreeString(t.Allocator(), name)
 	if h.WriteFileAtomic(name, []byte("uri"), 0o600, false) != nil {
 		t.Fatal("file URI write failed")
 		return
@@ -94,6 +102,55 @@ func TestPosixHostMapsFileResourceURIs(t *testing.T) {
 		t.Error("file URI did not map to its absolute path")
 	}
 	mem.FreeSlice(t.Allocator(), data)
+	data, readErr = os.ReadFile(t.Allocator(), directory+"/entry%2F#? é")
+	if readErr != nil || string(data) != "uri" {
+		t.Error("file URI write did not preserve the decoded filename")
+	}
+	mem.FreeSlice(t.Allocator(), data)
+	stat := h.Stat(name)
+	link := h.Lstat(name)
+	if !stat.Exists || !link.Exists || stat.Info.Size != 3 {
+		t.Error("file URI stat did not preserve the decoded filename")
+	}
+	if h.Remove(name) != nil || h.Stat(name).Exists {
+		t.Error("file URI remove failed")
+	}
+}
+
+func TestPosixHostRejectsInvalidFileResourceURIs(t *testing.T) {
+	a := t.Allocator()
+	h := posix.New(a)
+	defer h.Free()
+	invalid := []string{"file://host/path", "file:///../../escape", "file:///bad%Q0", "file:///path?query", "file:///path#fragment"}
+	for _, name := range invalid {
+		parsed := core.ParseResourceURI(a, name)
+		if parsed.Error == "" { t.Error("invalid URI fixture was accepted: " + name) }
+		stat := h.Stat(name)
+		link := h.Lstat(name)
+		if stat.Exists || !stat.Failed || link.Exists || !link.Failed {
+			t.Error("invalid file URI was treated as a filesystem path by stat: " + name)
+		}
+		data, readErr := h.ReadFile(a, name)
+		mem.FreeSlice(a, data)
+		if readErr == nil || readErr.Error() != "invalid file resource URI" {
+			t.Error("invalid file URI did not return a rejection from read: " + name)
+		}
+		entries, dirErr := h.ReadDir(a, name)
+		for i := range entries {
+			mem.FreeString(a, entries[i].Name)
+		}
+		mem.FreeSlice(a, entries)
+		if dirErr == nil || dirErr.Error() != "invalid file resource URI" {
+			t.Error("invalid file URI did not return a rejection from readdir: " + name)
+		}
+		writeErr := h.WriteFileAtomic(name, []byte("invalid"), 0o600, false)
+		mkdirErr := h.Mkdir(name, 0o700)
+		removeErr := h.Remove(name)
+		if writeErr == nil || writeErr.Error() != "invalid file resource URI" || mkdirErr == nil || mkdirErr.Error() != "invalid file resource URI" || removeErr == nil || removeErr.Error() != "invalid file resource URI" {
+			t.Error("invalid file URI did not return a rejection from mutation: " + name)
+		}
+		parsed.URI.Free()
+	}
 }
 
 func TestAtomicWriteCleansFailedRenameAndDurableWrite(t *testing.T) {

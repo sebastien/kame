@@ -142,6 +142,22 @@ func joinFilesystemPath(a mem.Allocator, directory string, child string) string 
 	if !core.IsResourceURIName(directory) {
 		return path.Join(a, directory, child)
 	}
+	if strings.HasPrefix(directory, "file://") {
+		// POSIX directory entries are decoded names. Join in path space, then
+		// serialize once; memory-host entries already use canonical URI spelling.
+		name := directory
+		if name == "file://" { name = "file:///" }
+		parsed := core.ParseResourceURI(a, name)
+		if parsed.Error == "" {
+			joined := path.Join(a, parsed.URI.Path, child)
+			mem.FreeString(a, parsed.URI.Path)
+			parsed.URI.Path = joined
+			result := parsed.URI.Canonical(a)
+			parsed.URI.Free()
+			return result
+		}
+		parsed.URI.Free()
+	}
 	pathStart := -1
 	for i := 0; i+2 < len(directory); i++ {
 		if directory[i] == ':' && directory[i+1] == '/' && directory[i+2] == '/' {

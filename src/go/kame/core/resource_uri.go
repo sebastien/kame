@@ -35,7 +35,19 @@ func (u *ResourceURI) Canonical(a mem.Allocator) string {
 	out.WriteString(u.Scheme)
 	out.WriteString("://")
 	out.WriteString(u.Authority)
-	out.WriteString(u.Path)
+	// Path stays decoded for host access; escape syntax before reparsing it.
+	for i := 0; i < len(u.Path); i++ {
+		b := u.Path[i]
+		if b == '%' {
+			out.WriteString("%25")
+		} else if b == '?' {
+			out.WriteString("%3F")
+		} else if b == '#' {
+			out.WriteString("%23")
+		} else {
+			out.WriteByte(b)
+		}
+	}
 	text := cloneResourceURIText(a, out.String())
 	out.Free()
 	return text

@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/host"
 	"solod.dev/so/c"
+	"solod.dev/so/errors"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 	"solod.dev/so/slices"
@@ -11,9 +12,12 @@ import (
 	"solod.dev/so/time"
 )
 
+var errInvalidFileResourceURI = errors.New("invalid file resource URI")
+
 type hostPathResult struct {
 	Path  string
 	Owned bool
+	Error error
 }
 
 func (h *Host) hostPath(name string) hostPathResult {
@@ -21,9 +25,9 @@ func (h *Host) hostPath(name string) hostPathResult {
 		return hostPathResult{Path: name}
 	}
 	parsed := core.ParseResourceURI(h.Alloc, name)
-	if parsed.Error != "" || parsed.URI.Scheme != "file" {
+	if parsed.Error != "" {
 		parsed.URI.Free()
-		return hostPathResult{Path: name}
+		return hostPathResult{Error: errInvalidFileResourceURI}
 	}
 	path := cloneText(h.Alloc, parsed.URI.Path)
 	parsed.URI.Free()
@@ -61,6 +65,9 @@ func (h *Host) Stat(name string) host.StatResult {
 	}
 	path := h.hostPath(name)
 	defer h.freeHostPath(path)
+	if path.Error != nil {
+		return host.StatResult{Failed: true}
+	}
 	info, err := os.Stat(path.Path)
 	if err != nil {
 		return host.StatResult{Failed: err != os.ErrNotExist}
@@ -79,6 +86,9 @@ func (h *Host) Lstat(name string) host.StatResult {
 	}
 	path := h.hostPath(name)
 	defer h.freeHostPath(path)
+	if path.Error != nil {
+		return host.StatResult{Failed: true}
+	}
 	info, err := os.Lstat(path.Path)
 	if err != nil {
 		return host.StatResult{Failed: err != os.ErrNotExist}
@@ -96,6 +106,9 @@ func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 	}
 	path := h.hostPath(name)
 	defer h.freeHostPath(path)
+	if path.Error != nil {
+		return nil, path.Error
+	}
 	return os.ReadFile(a, path.Path)
 }
 
@@ -105,6 +118,9 @@ func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
 	}
 	path := h.hostPath(name)
 	defer h.freeHostPath(path)
+	if path.Error != nil {
+		return nil, path.Error
+	}
 	entries, err := os.ReadDir(a, path.Path)
 	if err != nil {
 		return nil, err
@@ -128,6 +144,9 @@ func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bo
 	}
 	path := h.hostPath(name)
 	defer h.freeHostPath(path)
+	if path.Error != nil {
+		return path.Error
+	}
 	name = path.Path
 	separator := strings.LastIndexByte(name, '/')
 	directory := "."
@@ -170,6 +189,9 @@ func (h *Host) Mkdir(name string, perm uint32) error {
 	}
 	path := h.hostPath(name)
 	defer h.freeHostPath(path)
+	if path.Error != nil {
+		return path.Error
+	}
 	return os.Mkdir(path.Path, os.FileMode(perm))
 }
 
@@ -179,6 +201,9 @@ func (h *Host) Remove(name string) error {
 	}
 	path := h.hostPath(name)
 	defer h.freeHostPath(path)
+	if path.Error != nil {
+		return path.Error
+	}
 	return os.Remove(path.Path)
 }
 

@@ -18,6 +18,9 @@ func TestResourceURICanonicalization(t *testing.T) {
 		{"file:///a/%2e/b/%2E%2e/c", "file:///a/c"},
 		{"mem://workspace/a/./b/../item%20one", "mem://workspace/a/item one"},
 		{"mem://Other/", "mem://Other/"},
+		{"file:///a/%25/%252e%252e/%23/%3f", "file:///a/%25/%252e%252e/%23/%3F"},
+		{"mem://workspace/%252F/%2541%23%3F", "mem://workspace/%252F/%2541%23%3F"},
+		{"file:///a/%20/%C3%A9", "file:///a/ /é"},
 	}
 	for _, test := range cases {
 		result := core.ParseResourceURI(a, test.input)
@@ -29,6 +32,11 @@ func TestResourceURICanonicalization(t *testing.T) {
 		if canonical != test.want {
 			t.Errorf("ParseResourceURI(%q) = %q, want %q", test.input, canonical, test.want)
 		}
+		reparsed := core.ParseResourceURI(a, canonical)
+		if reparsed.Error != "" || reparsed.URI.Scheme != result.URI.Scheme || reparsed.URI.Authority != result.URI.Authority || reparsed.URI.Path != result.URI.Path {
+			t.Errorf("canonical URI %q did not reparse to the same decoded components", canonical)
+		}
+		reparsed.URI.Free()
 		mem.FreeString(a, canonical)
 		result.URI.Free()
 	}
@@ -63,11 +71,13 @@ func TestResourceURIParserReleasesTemporaryStorage(t *testing.T) {
 	tracker := a.(*mem.Tracker)
 	before := tracker.Stats().Alloc
 	for i := 0; i < 100; i++ {
-		result := core.ParseResourceURI(a, "mem://workspace/a/b/../file%20name")
+		result := core.ParseResourceURI(a, "mem://workspace/a/b/../file%20name%25%23%3F")
 		if result.Error != "" {
 			t.Fatal("valid URI failed to parse")
 			return
 		}
+		canonical := result.URI.Canonical(a)
+		mem.FreeString(a, canonical)
 		result.URI.Free()
 	}
 	if got := tracker.Stats().Alloc - before; got != 0 {
