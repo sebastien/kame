@@ -100,6 +100,11 @@ func (h *MemoryHost) Lstat(name string) host.StatResult {
 	return h.Stat(name)
 }
 
+func (h *MemoryHost) Readlink(a mem.Allocator, name string) host.LinkResult {
+	_, _, _ = h, a, name
+	return host.LinkResult{Failed: true}
+}
+
 func (h *MemoryHost) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 	if h == nil {
 		return nil, errors.New("host unavailable")

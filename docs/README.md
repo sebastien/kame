@@ -7,6 +7,7 @@
 - [Migrating from GNU Make](skills/kame/ref/make-migration.md)
 - [Idioms and gotchas](idioms-and-gotchas.md)
 - [Glossary](glossary.md)
+- [XML extraction requirements scope](xml-extraction-scope.md)
 
 ## Language and CLI references
 

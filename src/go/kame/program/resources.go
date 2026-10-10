@@ -48,27 +48,28 @@ func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 		return stamp
 	}
 	name := p.canonicalTarget(key.Name, true)
+	metadataObserved := p.ResourceMetadataObserved(key)
 	completion := p.fileCompletion(host.Request{}, host.OpFileContent, name)
 	signature := contentObservation(completion.Value)
 	completion.Value.Free(p.Alloc)
 	if completion.Diagnostic.Code != "" {
 		completion.Diagnostic.Free(p.Alloc)
-		mem.FreeString(p.Alloc, name)
-		return cloneText(p.Alloc, "unavailable")
+		if !metadataObserved { mem.FreeString(p.Alloc, name); return cloneText(p.Alloc, "unavailable") }
 	}
-	if signature.Mode == core.SignatureMissing {
+	if signature.Mode == core.SignatureMissing && !metadataObserved {
 		mem.FreeString(p.Alloc, name)
 		return cloneText(p.Alloc, "missing")
 	}
-	if !p.ResourceMetadataObserved(key) {
+	if !metadataObserved {
 		mem.FreeString(p.Alloc, name)
 		return cacheHex(p.Alloc, signature.Digest[:])
 	}
 	digest := core.NewDigest()
 	digest.Uint64(uint64(signature.Mode))
 	digest.Write(signature.Digest[:])
-	if p.ResourceMetadataObserved(key) {
-		completion = p.fileCompletion(host.Request{}, host.OpStat, name)
+	ops := []string{host.OpStat, host.OpLstat, host.OpReadlink}
+	for i := range ops {
+		completion = p.fileCompletion(host.Request{}, ops[i], name)
 		metadata := core.ValueSignature(completion.Value)
 		digest.Uint64(uint64(metadata.Mode))
 		digest.Write(metadata.Digest[:])
@@ -113,7 +114,7 @@ func (p *Program) ResourceMetadataObserved(key core.ResourceKey) bool {
 		}
 		for j := range nodes[i].Observations {
 			item := nodes[i].Observations[j]
-			if item.Key.Kind == key.Kind && item.Key.Name == key.Name && item.Aspect == core.ObservationMetadata {
+			if item.Key.Kind == key.Kind && item.Key.Name == key.Name && item.Aspect >= core.ObservationMetadata {
 				observed = true
 				break
 			}

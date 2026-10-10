@@ -441,6 +441,8 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			if item.Aspect == core.ObservationMetadata {
 				op = host.OpStat
 			}
+			if item.Aspect == core.ObservationLinkMetadata { op = host.OpLstat }
+			if item.Aspect == core.ObservationLinkTarget { op = host.OpReadlink }
 			if item.Key.Kind == core.ResourceGlob {
 				op = host.OpWildcard
 			}

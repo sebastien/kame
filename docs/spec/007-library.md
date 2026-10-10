@@ -48,6 +48,11 @@ The general operations are:
 | `nth` | Indexed list or string item with negative indexes |
 | `apply` | Call a function with a list of arguments |
 | `list` | Return arguments as a list |
+| `items` | `(items RECORD)`: ordered `[key: STRING value: VALUE]` entries |
+| `set-field` | `(set-field RECORD KEY VALUE)`: immutable field replacement/insertion |
+| `merge` | `(merge RECORD...)`: shallow, right-biased immutable record merge |
+| `record?` / `list?` / `string?` | Exact kind tests on one value, without serialization |
+| `digest` | `(digest ALGORITHM BYTES-OR-STRING)`: raw SHA digest as lowercase hexadecimal |
 
 `json` uses deterministic JSON for compatible scalars, lists and records with
 stable record key order. `str` performs textual conversion/concatenation only;
@@ -66,6 +71,52 @@ flags = (get modes selected)
 ```
 
 The operation is pure and works in definitions, input headers, and planning.
+
+### Typed record traversal and updates
+
+`items` returns a list in stored field order, not sorted or serialized order.
+Each entry contains exactly `key` and `value`. Empty records yield an empty list;
+`[]` remains a list and is not accepted as a record. `set-field` requires a string
+key: replacement preserves the field's position; a new key appends. An empty key
+is valid, and setting nil stores a present nil field rather than removing it.
+
+`merge` processes records left to right. The last value for a repeated key wins,
+while the key retains its first-seen position. The merge is shallow: a nested
+record is replaced, not recursively combined. Zero arguments produce an empty
+record. These operations do not mutate their operands and preserve all nested
+value kinds, including bytes, resources and callable ownership. Invalid operand
+types and records with duplicate keys produce `EXPR_INVALID`. They replace
+JSON/template round trips:
+
+```kame
+settings = [version: "old" nested: [enabled: :true]]
+updated = (set-field settings "version" "new")
+entries = (items updated)
+combined = (merge settings [version: "new" extra: 3])
+```
+
+The three predicates return booleans for every value, including empty data, and
+inspect only the outer kind. A pattern is not a string, bytes are not strings,
+and a record/list containing callables remains a record/list. No JSON-prefix
+test, truth conversion, or implicit parsing occurs. SDK `object?` and `array?`
+wrappers can delegate to `record?` and `list?`; local serialization-based `items`,
+`set-field`, and `string?` definitions should be removed to expose native calls.
+
+### Raw digests
+
+The algorithm is exactly `"sha1"`, `"sha256"`, or `"sha512"`; there is no default,
+alias normalization, or platform-dependent selection. Unknown algorithms and
+non-string algorithm arguments produce `EXPR_INVALID`. The input is bytes or
+the exact UTF-8 bytes of a string, including NUL and trailing newlines. No
+decoding, normalization, trimming, value framing, or build-fingerprint salt is
+applied. Results have respectively 40, 64, or 128 lowercase hexadecimal digits.
+
+`digest` is pure and identical on native and WASM hosts. Hashing a file composes
+with a tracked read: `(digest "sha512" (read ./asset))`. The read retains its
+ordinary capability, phase, and dependency rules; hashing does not bypass them.
+Do not substitute resource/value/build fingerprints for these interoperable
+digests. SHA-1 is only for legacy compatibility identifiers, not a
+collision-resistant security claim or password derivation.
 
 ## Comparison Operations
 
@@ -215,11 +266,42 @@ Filesystem operations issue host requests and require capabilities:
 | `write` | `write` | Atomically write bytes or UTF-8 text |
 | `exists?` | `read` | Return whether a path exists |
 | `stat` | `read` | Return stable metadata record |
+| `lstat` | `read` | Inspect the final path component without following its symlink |
+| `readlink` | `read` | Return the final symlink's exact UTF-8 target text, without resolving it |
 | `wildcard` | `read` | Return the sorted, duplicate-free union of one or more filesystem patterns |
 
 `read`, `stat`, and `wildcard` register file or glob dependencies before
 returning. `exists?` also registers a dependency so creation or removal can
 invalidate its consumer.
+
+`stat` follows the final symlink and returns `name`, `size`, `mode`, and `dir`.
+`lstat` returns those fields plus `link`; size and mode describe the link itself
+when `link` is true. A symlink to a directory therefore has `dir: false` under
+`lstat`. Mode is the host's metadata integer; use `link`, not platform mode bits,
+for portable classification. Dangling and looping final links are inspectable
+without reading their referent. Parent path components still follow ordinary
+filesystem resolution: these calls are not a directory-traversal sandbox.
+
+`readlink` preserves relative segments, spelling and whitespace. It does not
+resolve the target against cwd or the link's parent, follow it, or require that
+it exists. Missing paths, non-links, host failures, invalid UTF-8 target text,
+and targets of 65536 bytes or more report `FS_ERR`; no truncated or
+replacement-decoded target is returned. `mem://` resources have no symlinks:
+`lstat` classifies ordinary memory resources, while `readlink` fails.
+
+Both operations accept a string or file resource and require read authorization
+for the inspected path, not authorization to read the target. They remain
+forbidden in pure registration and permitted in read-only input discovery.
+Followed metadata, no-follow metadata, and link target are separate accepted
+observations. Retargeting invalidates consumers even when referent bytes are
+equal, or both referents are missing. Hosts/watchers must retain these views and
+promote already-discovered content watches when a later metadata fact arrives.
+
+Inspection does not make deletion safe. Checking `lstat`/`readlink` and then
+removing a path has a time-of-check/time-of-use race; it is not proof of producer
+ownership. Safe cleanup requires a validated owned-member manifest plus a
+separate race-resistant filesystem primitive/descriptor-relative operation.
+Never infer ownership from symlink target text or recursively delete shared roots.
 
 Every reached glob pattern is represented by one shared lazy dependency source,
 including when its current result is empty. The dependency tracks membership,

@@ -175,7 +175,7 @@ func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bo
 		if fact.Key.Kind != item.Key.Kind || fact.Key.Name != item.Key.Name || fact.Aspect != item.Aspect || !fact.Signature.Equal(item.Signature) {
 			return false
 		}
-		if !item.Signature.Equal(item.Signature) || item.Aspect == core.ObservationMetadata {
+		if !item.Signature.Equal(item.Signature) || item.Aspect >= core.ObservationMetadata {
 			return false
 		}
 		node := p.Engine.Lookup(item.Key)

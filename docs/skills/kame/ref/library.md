@@ -20,8 +20,18 @@ types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 | `list` | `(list VALUE...)` | A list containing the arguments. |
 | `nop` | `(nop VALUE...)` | Last argument, or `:nil` with no arguments. |
 | `apply` | `(apply LIST FUNCTION)` or `(apply FUNCTION LIST)` | Calls a function with list arguments. A one-argument function receives the list itself for legacy compatibility. |
+| `items` | `(items RECORD)` | Ordered records `[key: STRING value: VALUE]`, preserving typed nested data. |
+| `set-field` | `(set-field RECORD KEY VALUE)` | Replace at the existing position, or append a new string key; nil is a value, not deletion. |
+| `merge` | `(merge RECORD...)` | Shallow right-biased merge; first-seen key order; no arguments return an empty record. |
+| `record?`, `list?`, `string?` | `(PREDICATE VALUE)` | Exact outer-kind boolean, including empty data; patterns/bytes are not strings. |
+| `digest` | `(digest ALGORITHM BYTES-OR-STRING)` | Raw bytes/UTF-8 SHA-1/256/512 digest, lowercase hex, without build fingerprint framing. SHA-1 is legacy-only. |
 
 Only `:false` and `:nil` are false. Other values are true.
+
+Use native `items`/`set-field`/`merge` instead of JSON/template round trips and
+kind predicates instead of JSON-prefix tests. Remove same-named local wrappers
+to expose the native operations. `(digest "sha512" (read ./file))` hashes a tracked
+read, including every trailing newline and binary byte.
 
 ## Equality
 
@@ -117,6 +127,8 @@ environment values can invalidate a consumer.
 | `read` | `(read PATH)` | read | File bytes. |
 | `exists?` | `(exists? PATH)` | read | Whether a path exists. |
 | `stat` | `(stat PATH)` | read | Stable file metadata. |
+| `lstat` | `(lstat PATH)` | read | No-follow final-component metadata, with a portable `link` boolean; parents still follow links. |
+| `readlink` | `(readlink PATH)` | read | Exact UTF-8 target text; relative targets stay relative, dangling links work; invalid text/absent paths/non-links report `FS_ERR`. |
 | `wildcard` | `(wildcard PATTERN...)` | read | Sorted, duplicate-free union of one or more patterns; each tracks its own membership. |
 | `write` | `(write PATH VALUE)` | write | Bytes write raw; other coercible values render as with `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
 | `env` | `(env NAME)` | env | Environment value. |

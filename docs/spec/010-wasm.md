@@ -218,13 +218,36 @@ not evaluate a user library read or broaden expression grants.
 External file observations use ABI kind 27 (`file-content`), with a canonical
 path payload. Complete with bytes for a readable regular file, nil for a missing
 path, false for a present non-regular path, or true for a present regular file
-whose bytes could not be read. A stat failure other than absence is a diagnostic.
+whose bytes could not be read. A stat failure other than absence is a diagnostic,
+except kind 27 may return false when no-follow inspection proves a symbolic link
+whose target cannot be followed. Its link views remain inspectable; this does not
+supply a reusable content signature.
 The engine hashes the transported bytes; neither boolean state supplies a
 reusable signature. Kind 29 (`output-content`) uses the same protocol for declared
 build outputs, under internal build authority rather than expression read grants.
 Kind 28 (`tool-content`) uses the same protocol for resolved
 executable dependencies, without requiring an additional user read grant.
 Embedding hosts must service these requests as well as user file reads.
+
+No-follow user filesystem requests are ABI kinds 30 (`lstat`) and 31 (`readlink`),
+using a canonical path payload and read capability checks. Kind 30 completes with
+the metadata record defined in `007-library.md`, including `link`; kind 31 with
+the exact validated UTF-8 target string. Failures complete with `FS_ERR`, never
+nil, truncated targets, or replacement-decoded text. Memory resources have no
+symlinks. Parent components still follow filesystem resolution.
+
+The portable `FileSystem` and flattened `ProgramHost` interfaces include
+`Readlink(allocator, name) LinkResult`: successful target strings are owned by
+the caller's allocator and `Failed` reports unavailable/invalid targets. Native
+hosts retain a `Symlink` flag in no-follow `FileInfo`. Embedding hosts must add
+handlers for the two new wire kinds; the operation names are not serialized as
+generic file reads.
+
+Accepted file observations distinguish followed metadata, no-follow metadata,
+and target text. A watch resource's `metadata` flag covers all three views and
+can become true after a suspended host request completes. Existing content-only
+watches must then be promoted rather than retaining their initial flag. A
+metadata watch must detect retargeting even when both referents are absent.
 
 Structured process requests distinguish direct argv (ABI kind 13, a JSON argv
 array) from pipelines (kind 14, a JSON array of stage argv arrays) and redirected

@@ -16,6 +16,12 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 	if op == host.OpFileContent || op == host.OpToolContent || op == host.OpOutputContent {
 		result := p.Host.Stat(filename)
 		if result.Failed {
+			// A link can be inspected even when following it fails (e.g. a loop).
+			// Its content is unavailable, not a failed no-follow metadata view.
+			if op == host.OpFileContent {
+				link := p.Host.Lstat(filename)
+				if link.Exists && link.Info.Symlink { completion.Value, completion.HasValue = core.Value{Kind: core.Bool}, true; return completion }
+			}
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot stat file")
 			return completion
 		}
@@ -58,13 +64,22 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 		completion.Value, completion.HasValue = core.Value{Kind: core.Bool, Bool: result.Exists}, true
 		return completion
 	}
-	if op == host.OpStat {
-		result := p.Host.Stat(filename)
+	if op == host.OpReadlink {
+		result := p.Host.Readlink(p.Alloc, filename)
+		if result.Failed { mem.FreeString(p.Alloc, result.Target); completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot read symbolic link"); return completion }
+		completion.Value, completion.HasValue = core.NewString(p.Alloc, result.Target), true
+		mem.FreeString(p.Alloc, result.Target)
+		return completion
+	}
+	if op == host.OpStat || op == host.OpLstat {
+		var result host.StatResult
+		if op == host.OpLstat { result = p.Host.Lstat(filename) } else { result = p.Host.Stat(filename) }
 		if !result.Exists {
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot stat file")
 			return completion
 		}
-		fields := []core.RecordField{{Key: "name", Value: core.NewString(p.Alloc, name)}, {Key: "size", Value: core.Value{Kind: core.Int, Int: result.Info.Size}}, {Key: "mode", Value: core.Value{Kind: core.Int, Int: int64(result.Info.Mode)}}, {Key: "dir", Value: core.Value{Kind: core.Bool, Bool: result.Info.IsDir}}}
+		fields := []core.RecordField{{Key: "name", Value: core.NewString(p.Alloc, name)}, {Key: "size", Value: core.Value{Kind: core.Int, Int: result.Info.Size}}, {Key: "mode", Value: core.Value{Kind: core.Int, Int: int64(result.Info.Mode)}}, {Key: "dir", Value: core.Value{Kind: core.Bool, Bool: result.Info.IsDir}}, {Key: "link", Value: core.Value{Kind: core.Bool, Bool: result.Info.Symlink}}}
+		if op == host.OpStat { fields = fields[:4] }
 		completion.Value, completion.HasValue = core.NewRecord(p.Alloc, fields), true
 		for i := range fields {
 			fields[i].Value.Free(p.Alloc)

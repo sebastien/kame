@@ -13,6 +13,7 @@ type FileInfo struct {
 	ModTime int64
 	IsDir   bool
 	Regular bool
+	Symlink bool
 }
 
 // StatResult is a single-return stat outcome. Solod cannot wrap a struct and an
@@ -22,6 +23,12 @@ type FileInfo struct {
 type StatResult struct {
 	Info   FileInfo
 	Exists bool
+	Failed bool
+}
+
+// LinkResult owns Target on success. Readlink never resolves the returned text.
+type LinkResult struct {
+	Target string
 	Failed bool
 }
 
@@ -37,6 +44,7 @@ type DirEntry struct {
 type FileSystem interface {
 	Stat(name string) StatResult
 	Lstat(name string) StatResult
+	Readlink(a mem.Allocator, name string) LinkResult
 	ReadFile(a mem.Allocator, name string) ([]byte, error)
 	ReadDir(a mem.Allocator, name string) ([]DirEntry, error)
 	// WriteFileAtomic writes a sibling temporary and renames it into place. A

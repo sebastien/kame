@@ -10,6 +10,7 @@ import (
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 	"solod.dev/so/time"
+	"solod.dev/so/unicode/utf8"
 )
 
 var errInvalidFileResourceURI = errors.New("invalid file resource URI")
@@ -56,6 +57,7 @@ func portableFileInfo(info os.FileInfo) host.FileInfo {
 		ModTime: info.ModTime().UnixNano(),
 		IsDir:   info.IsDir(),
 		Regular: info.Mode().IsRegular(),
+		Symlink: info.Mode()&os.ModeSymlink != 0,
 	}
 }
 
@@ -110,6 +112,28 @@ func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 		return nil, path.Error
 	}
 	return os.ReadFile(a, path.Path)
+}
+
+func (h *Host) Readlink(a mem.Allocator, name string) host.LinkResult {
+	if core.IsMemoryResourceURIName(name) { return host.LinkResult{Failed: true} }
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	if path.Error != nil { return host.LinkResult{Failed: true} }
+	// Solod Readlink silently truncates a full buffer. Grow until completeness is
+	// proven, never return a truncated target as an ownership check.
+	for size := 256; size <= 65536; size *= 2 {
+		buffer := slices.Make[byte](a, size)
+		text, err := os.Readlink(buffer, path.Path)
+		if err != nil { slices.Free(a, buffer); return host.LinkResult{Failed: true} }
+		if len(text) < size {
+			if !utf8.ValidString(text) { slices.Free(a, buffer); return host.LinkResult{Failed: true} }
+			result := host.LinkResult{Target: cloneText(a, text)}
+			slices.Free(a, buffer)
+			return result
+		}
+		slices.Free(a, buffer)
+	}
+	return host.LinkResult{Failed: true}
 }
 
 func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {

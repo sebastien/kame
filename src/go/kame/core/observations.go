@@ -13,6 +13,8 @@ const (
 	ObservationContent
 	ObservationExistence
 	ObservationMetadata
+	ObservationLinkMetadata
+	ObservationLinkTarget
 )
 
 // Observation is a generation's accepted resource identity. It is independent
@@ -85,7 +87,7 @@ func sameObservations(left []Observation, right []Observation) bool {
 		if left[i].Key.Kind < ResourceDefinition || left[i].Key.Kind > ResourceOperation || right[i].Key.Kind < ResourceDefinition || right[i].Key.Kind > ResourceOperation || left[i].Key.Name == "" || right[i].Key.Name == "" {
 			return false
 		}
-		if left[i].Aspect < ObservationValue || left[i].Aspect > ObservationMetadata || right[i].Aspect < ObservationValue || right[i].Aspect > ObservationMetadata {
+		if left[i].Aspect < ObservationValue || left[i].Aspect > ObservationLinkTarget || right[i].Aspect < ObservationValue || right[i].Aspect > ObservationLinkTarget {
 			return false
 		}
 		// Persisted records are untrusted sets, not lists with multiplicity.

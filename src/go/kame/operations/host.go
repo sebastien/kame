@@ -142,6 +142,10 @@ func observeReadRequest(c *eval.Context, state *readRequestState, signature core
 		aspect = core.ObservationExistence
 	} else if state.Op == host.OpStat {
 		aspect = core.ObservationMetadata
+	} else if state.Op == host.OpLstat {
+		aspect = core.ObservationLinkMetadata
+	} else if state.Op == host.OpReadlink {
+		aspect = core.ObservationLinkTarget
 	} else if state.Op == host.OpWildcard {
 		key.Kind, aspect = core.ResourceGlob, core.ObservationValue
 	}
@@ -201,6 +205,14 @@ func opExists(c *eval.Context, s any, v []core.Value) eval.Result {
 func opStat(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	return fileRequest(c, host.OpStat, v[0])
+}
+func opLstat(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	return fileRequest(c, host.OpLstat, v[0])
+}
+func opReadlink(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	return fileRequest(c, host.OpReadlink, v[0])
 }
 func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s

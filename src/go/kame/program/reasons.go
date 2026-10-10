@@ -53,6 +53,8 @@ func reasonAspect(aspect core.ObservationAspect) string {
 	if aspect == core.ObservationMetadata {
 		return "metadata"
 	}
+	if aspect == core.ObservationLinkMetadata { return "link-metadata" }
+	if aspect == core.ObservationLinkTarget { return "link-target" }
 	return "value"
 }
 

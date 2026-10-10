@@ -187,6 +187,8 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 			if toolMetadata { op = host.OpToolContent }
 			if item.Aspect == core.ObservationExistence { op = host.OpExists }
 			if item.Aspect == core.ObservationMetadata { op = host.OpStat }
+			if item.Aspect == core.ObservationLinkMetadata { op = host.OpLstat }
+			if item.Aspect == core.ObservationLinkTarget { op = host.OpReadlink }
 			if item.Key.Kind == core.ResourceGlob { op = host.OpWildcard }
 			reply := p.inspectionStatusRead(c, index, host.RequestReadFile, op, item.Key.Name)
 			if reply.Waiting { return core.ProducerSubmitted }

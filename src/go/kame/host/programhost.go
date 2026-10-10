@@ -20,6 +20,7 @@ type ProgramHost interface {
 	Free()
 	Stat(name string) StatResult
 	Lstat(name string) StatResult
+	Readlink(a mem.Allocator, name string) LinkResult
 	ReadFile(a mem.Allocator, name string) ([]byte, error)
 	ReadDir(a mem.Allocator, name string) ([]DirEntry, error)
 	WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error

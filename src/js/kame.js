@@ -7,7 +7,7 @@
 // is parsed by the shared portable `cli` package inside the module via
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
-import { mkdir, mkdtemp, open, readFile, rename, rm, stat } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, open, readFile, readlink, rename, rm, stat } from 'node:fs/promises';
 import { accessSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
@@ -909,8 +909,8 @@ function readResource(name) {
   return readFile(filesystemPath(name));
 }
 
-function statResource(name, options) {
-	if (!isMemoryResource(name)) return stat(filesystemPath(name), options);
+function statResource(name, options, noFollow = false) {
+	if (!isMemoryResource(name)) return (noFollow ? lstat : stat)(filesystemPath(name), options);
   if (memoryResourceFiles.has(name)) {
     const data = memoryResourceFiles.get(name);
     const stamp = memoryResourceClock;
@@ -920,10 +920,11 @@ function statResource(name, options) {
       mtimeNs: stamp,
       isFile: () => true,
       isDirectory: () => false,
+      isSymbolicLink: () => false,
     });
   }
   if (memoryResourceDirectory(name)) {
-    return Promise.resolve({ size: 0, mode: 0o040755, mtimeNs: memoryResourceClock, isFile: () => false, isDirectory: () => true });
+    return Promise.resolve({ size: 0, mode: 0o040755, mtimeNs: memoryResourceClock, isFile: () => false, isDirectory: () => true, isSymbolicLink: () => false });
   }
   throw Object.assign(new Error('memory resource does not exist'), { code: 'ENOENT' });
 }
@@ -1367,6 +1368,9 @@ class Module {
       try { info = await statResource(payload); }
       catch (error) {
         if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return this.exports.kame_wasm_complete_nil(instance, request);
+        if (kind === 27) {
+          try { if ((await statResource(payload, undefined, true)).isSymbolicLink()) return this.completeJSON(instance, request, false); } catch {}
+        }
         return this.completeFailure(instance, request, 'FS_ERR', 'cannot stat file');
       }
       if (!info.isFile()) return this.completeJSON(instance, request, false);
@@ -1395,14 +1399,26 @@ class Module {
         return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot read file' : `cannot read file: ${error.message}`);
       }
     }
-    if (kind === 5) {
+    if (kind === 5 || kind === 30) {
       if (!grants.read) return this.deny(instance, request, 'read');
       try {
-        const info = await statResource(payload);
-        return this.completeJSON(instance, request, { name: payload, size: info.size, mode: info.mode, dir: info.isDirectory() });
+        const info = await statResource(payload, undefined, kind === 30);
+        const result = { name: payload, size: info.size, mode: info.mode, dir: info.isDirectory() };
+        if (kind === 30) result.link = info.isSymbolicLink();
+        return this.completeJSON(instance, request, result);
       } catch (error) {
         return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot stat file' : `cannot stat file: ${error.message}`);
       }
+    }
+    if (kind === 31) {
+      if (!grants.read) return this.deny(instance, request, 'read');
+      try {
+        if (isMemoryResource(payload)) throw new Error('memory resources have no links');
+        const bytes = await readlink(filesystemPath(payload), { encoding: 'buffer' });
+        if (bytes.length >= 65536) throw new Error('link target too large');
+        const target = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+        return this.completeJSON(instance, request, target);
+      } catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot read symbolic link'); }
     }
     if (kind === 20) {
       let paths;
@@ -1680,12 +1696,12 @@ class Module {
   }
 
   async customHostRequest(instance, request, kind, payload, data, context, key, record) {
-    const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 ? 'read'
+    const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 ? 'read'
       : kind === 2 ? 'write'
         : kind === 4 ? 'env'
           : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 ? 'run' : null;
     if (capability && !context.grants[capability]) return this.deny(instance, request, capability);
-    if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 2) && typeof payload === 'string') {
+    if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 || kind === 2) && typeof payload === 'string') {
       const grantKind = kind === 2 ? 'write' : 'read';
       const roots = context[`${grantKind}Roots`];
       let names = [payload];
@@ -3325,16 +3341,24 @@ function writeArtifact(target, bytes) {
 
 async function watchFingerprint(kind, name, metadata = false) {
   if (kind === 'glob') return JSON.stringify(resourceWildcard(name));
+  let content;
   try {
     const bytes = await readResource(name);
-    const hash = createHash('sha256').update(bytes).digest('hex');
-    if (!metadata) return hash;
-    const info = await statResource(name);
-    return `${hash}:${JSON.stringify({ size: info.size, mode: info.mode, dir: info.isDirectory() })}`;
+    content = createHash('sha256').update(bytes).digest('hex');
   } catch (error) {
-    if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return 'missing';
-    return `error:${error.code ?? error.message}`;
+    content = error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 'missing' : `error:${error.code ?? error.message}`;
   }
+  if (!metadata) return content;
+  const views = [content];
+  for (const noFollow of [false, true]) {
+    try {
+      const info = await statResource(name, undefined, noFollow);
+      views.push({ size: info.size, mode: info.mode, dir: info.isDirectory(), link: noFollow && info.isSymbolicLink() });
+    } catch (error) { views.push(`error:${error.code ?? error.message}`); }
+  }
+  try { views.push(isMemoryResource(name) ? null : (await readlink(filesystemPath(name), { encoding: 'buffer' })).toString('hex')); }
+  catch (error) { views.push(`error:${error.code ?? error.message}`); }
+  return JSON.stringify(views);
 }
 
 function watchKey(kind, name) { return `${kind}\0${name}`; }
@@ -3433,8 +3457,14 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       const key = watchKey(resource.kind, resource.name);
       active.add(key);
       const tracked = fingerprints.get(key);
+      // The resource node can appear before the suspended operation accepts its
+      // metadata/link observation. Promote the live watch when that view arrives.
+      if (tracked && resource.metadata && !tracked.metadata) {
+        tracked.metadata = true;
+        tracked.stamp = 'unobserved';
+      }
       if (!tracked || tracked.stamp === null) {
-        const stamp = resource.missing === true ? 'missing' : resource.metadata ? 'unobserved' : resource.signature ?? await watchFingerprint(resource.kind, resource.name);
+        const stamp = resource.metadata ? 'unobserved' : resource.missing === true ? 'missing' : resource.signature ?? await watchFingerprint(resource.kind, resource.name);
         if (!tracked) fingerprints.set(key, { ...resource, stamp, source: false });
         else tracked.stamp = stamp;
       }

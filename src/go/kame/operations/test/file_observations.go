@@ -40,7 +40,7 @@ func TestFileReadsObserveContentExistenceAndMetadataSeparately(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	document := expr.Parse(a, "test", "[(read \"./input\") (exists? \"input\") (stat \"./input\")]")
+	document := expr.Parse(a, "test", "[(read \"./input\") (exists? \"input\") (stat \"./input\") (lstat \"./input\") (readlink \"./input\")]")
 	state := mem.Alloc[observedFileState](a)
 	state.Program, state.Expression = program, document.Expr
 	node := engine.Add(core.ResourceKey{Kind: core.ResourceTask, Name: "files"}, evaluateObservedFile, state)
@@ -60,6 +60,8 @@ func TestFileReadsObserveContentExistenceAndMetadataSeparately(t *testing.T) {
 		if op == host.OpStat {
 			value = core.NewRecord(a, []core.RecordField{{Key: "size", Value: core.Value{Kind: core.Int, Int: 1}}})
 		}
+		if op == host.OpLstat { value = core.NewRecord(a, []core.RecordField{{Key: "link", Value: core.Value{Kind: core.Bool, Bool: true}}}) }
+		if op == host.OpReadlink { value = core.NewString(a, "target") }
 		engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, HasValue: true, Value: value})
 		request.Free(a)
 	}
@@ -67,6 +69,7 @@ func TestFileReadsObserveContentExistenceAndMetadataSeparately(t *testing.T) {
 		t.Error("file observations did not complete")
 	}
 	content, existence, metadata := false, false, false
+	linkMetadata, linkTarget := false, false
 	for i := range node.Observations {
 		item := node.Observations[i]
 		if item.Key.Kind != core.ResourceFile {
@@ -87,8 +90,10 @@ func TestFileReadsObserveContentExistenceAndMetadataSeparately(t *testing.T) {
 		if item.Aspect == core.ObservationMetadata {
 			metadata = true
 		}
+		if item.Aspect == core.ObservationLinkMetadata { linkMetadata = true }
+		if item.Aspect == core.ObservationLinkTarget { linkTarget = true }
 	}
-	if !content || !existence || !metadata {
+	if !content || !existence || !metadata || !linkMetadata || !linkTarget {
 		t.Error("consumed file view was not observed")
 	}
 	engine.Free()

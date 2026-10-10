@@ -316,6 +316,8 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       if (kame_wasm_string_eq(op, "output-content")) return 29u;
       if (kame_wasm_string_eq(op, "exists")) return 7u;
       if (kame_wasm_string_eq(op, "stat")) return 5u;
+      if (kame_wasm_string_eq(op, "lstat")) return 30u;
+      if (kame_wasm_string_eq(op, "readlink")) return 31u;
       if (kame_wasm_string_eq(op, "wildcard")) return 6u;
       return 1u;
     }

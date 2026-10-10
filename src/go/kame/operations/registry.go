@@ -21,6 +21,9 @@ func Register(r *eval.Registry) bool {
 		add(r, "template-trim-end", opTemplateTrimEnd, 1, 1) &&
 		add(r, "tool", opTool, 1, 1) && add(r, "get", opGet, 2, 3) && add(r, "first", opFirst, 1, 1) && add(r, "nth", opNth, 2, 2) &&
 		add(r, "apply", opApply, 2, 2) && add(r, "list", opList, 0, -1) &&
+		add(r, "items", opItems, 1, 1) && add(r, "set-field", opSetField, 3, 3) && add(r, "merge", opMerge, 0, -1) &&
+		add(r, "record?", opKindPredicate, 1, 1) && add(r, "list?", opKindPredicate, 1, 1) && add(r, "string?", opKindPredicate, 1, 1) &&
+		add(r, "digest", opDigest, 2, 2) &&
 		add(r, "map", opMap, 2, 2) && add(r, "flatmap", opFlatMap, 2, 2) &&
 		add(r, "filter", opFilter, 2, 2) && add(r, "filter-out", opFilterOut, 2, 2) &&
 		add(r, "reduce", opReduce, 2, 3) && add(r, "concat", opConcat, 0, -1) &&
@@ -44,6 +47,7 @@ func Register(r *eval.Registry) bool {
 		addCapability(r, "read", opRead, 1, 1, eval.Read) &&
 		addCapability(r, "exists?", opExists, 1, 1, eval.Read) &&
 		addCapability(r, "stat", opStat, 1, 1, eval.Read) &&
+		addCapability(r, "lstat", opLstat, 1, 1, eval.Read) && addCapability(r, "readlink", opReadlink, 1, 1, eval.Read) &&
 		addCapability(r, "wildcard", opWildcard, 1, -1, eval.Read) &&
 		addCapability(r, "write", opWrite, 2, 2, eval.Write) &&
 		addCapability(r, "env", opEnv, 1, 1, eval.Env) &&

@@ -119,7 +119,7 @@ func consumedDependencyUnchanged(consumer *Node, dependency *Node) bool {
 		signature := dependency.Signature
 		if item.Aspect == ObservationExistence {
 			signature = ValueSignature(Value{Kind: Bool, Bool: dependency.Latest.Kind != Nil})
-		} else if item.Aspect == ObservationMetadata {
+		} else if item.Aspect >= ObservationMetadata {
 			// A content result cannot prove an intentionally consumed stat view.
 			return false
 		}

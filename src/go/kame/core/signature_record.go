@@ -86,7 +86,7 @@ func (c *signatureRecordCodec) readObservations(a mem.Allocator) []Observation {
 		c.At += 2
 		s := c.readSignature()
 		length := c.get()
-		if c.Failed || uint64(length) > uint64(len(c.Data)-c.At) || kind < ResourceDefinition || kind > ResourceOperation || aspect < ObservationValue || aspect > ObservationMetadata {
+		if c.Failed || uint64(length) > uint64(len(c.Data)-c.At) || kind < ResourceDefinition || kind > ResourceOperation || aspect < ObservationValue || aspect > ObservationLinkTarget {
 			c.Failed = true
 			break
 		}

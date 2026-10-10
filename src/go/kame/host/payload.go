@@ -36,6 +36,8 @@ const (
 	OpOutputExists   = "output-exists"
 	OpFileTimes      = "file-times"
 	OpStat           = "stat"
+	OpLstat          = "lstat"
+	OpReadlink       = "readlink"
 	OpWildcard       = "wildcard"
 )
 

@@ -93,6 +93,7 @@ func (h *fakeRemoteHost) CancelAll() { h.base.CancelAll() }
 func (h *fakeRemoteHost) Free() { h.base.Free() }
 func (h *fakeRemoteHost) Stat(name string) host.StatResult { return h.base.Stat(name) }
 func (h *fakeRemoteHost) Lstat(name string) host.StatResult { return h.base.Lstat(name) }
+func (h *fakeRemoteHost) Readlink(a mem.Allocator, name string) host.LinkResult { return h.base.Readlink(a, name) }
 func (h *fakeRemoteHost) ReadFile(a mem.Allocator, name string) ([]byte, error) { return h.base.ReadFile(a, name) }
 func (h *fakeRemoteHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) { return h.base.ReadDir(a, name) }
 func (h *fakeRemoteHost) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error { return h.base.WriteFileAtomic(name, data, perm, durable) }
@@ -114,6 +115,7 @@ func (h *countingReadDirHost) Active() int                            { return h
 func (h *countingReadDirHost) Free()                                  { h.memory.Free() }
 func (h *countingReadDirHost) Stat(name string) host.StatResult       { return h.memory.Stat(name) }
 func (h *countingReadDirHost) Lstat(name string) host.StatResult      { return h.memory.Lstat(name) }
+func (h *countingReadDirHost) Readlink(a mem.Allocator, name string) host.LinkResult { return h.memory.Readlink(a, name) }
 func (h *countingReadDirHost) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 	return h.memory.ReadFile(a, name)
 }
