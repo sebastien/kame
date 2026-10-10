@@ -11,6 +11,19 @@ import (
 	"solod.dev/so/testing"
 )
 
+func TestDefaultTargetNormalizationOwnsReplacementOperands(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "<test>", "task default {mode=debug} :\n")
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{})
+	if compiled.Program == nil { t.Error("compile failed"); compiled.Free(a); parsed.Free(); registry.Free(); return }
+	targets := compiled.Program.NormalizeTargetOperands([]string{"mode=release"})
+	if len(targets) != 1 || targets[0] != "default mode=release" { t.Error("assignment-only invocation did not normalize to default") }
+	program.FreeStrings(a, targets)
+	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+}
+
 func TestBuildConfigurationOverridesAreLiteralOwnedAndVisible(t *testing.T) {
 	a := t.Allocator()
 	parsed := script.Parse(a, "config.kmk", "mode ?= \"default\"\nmode ?= (read \"not-evaluated\")\ntask default :\n\t@(out mode)\n")
@@ -79,7 +92,7 @@ func TestAssignmentShapedTargetsValidateAfterRegistration(t *testing.T) {
 		if compiled.Program == nil {
 			t.Error("assignment-shaped target rejected: " + fixtures[i])
 		} else {
-			joined := compiled.Program.JoinTargetOperands([]string{"./mode=debug"})
+			joined := compiled.Program.NormalizeTargetOperands([]string{"./mode=debug"})
 			if len(joined) != 1 || joined[0] != "./mode=debug" {
 				t.Error("assignment-shaped target was consumed as configuration")
 			}
@@ -117,7 +130,7 @@ func TestParameterOverridesApplyBeforeOutputAndGeneratorEvaluation(t *testing.T)
 			if !p.HasTarget("./mode=debug") || len(p.Configuration) != 1 || p.Configuration[0] != "mode=debug" {
 				t.Error("definition parameter precedence was not visible during registration")
 			}
-			joined := p.JoinTargetOperands(parameters)
+			joined := p.NormalizeTargetOperands(parameters)
 			if len(joined) != 1 || joined[0] != "./mode=debug" {
 				t.Error("definition override and target operands were not separated")
 			}

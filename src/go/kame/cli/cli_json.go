@@ -90,6 +90,8 @@ func WriteJSON(out io.Writer, inv *Invocation) {
 	e.Int(int64(inv.Depth))
 	e.Str("expand")
 	e.Bool(inv.Expand)
+	e.Str("affected")
+	e.Bool(inv.Affected)
 	e.Str("targets")
 	writeStrings(&e, inv.Targets)
 	e.Str("files")

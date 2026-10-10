@@ -178,7 +178,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 				entries = slices.Append(a, entries, work[i].Target)
 				i++
 			}
-			selected := p.JoinTargetOperands(entries)
+			selected := p.NormalizeTargetOperands(entries)
 			if len(selected) == 0 { selected = slices.Append(a, selected, cloneText(a, "default")) }
 			slices.Free(a, entries)
 			for j := range selected {

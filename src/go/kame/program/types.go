@@ -304,6 +304,7 @@ type Program struct {
 	// Forwarding mirrors Options.ForwardRequests; Outbound holds requests an
 	// embedding host must service and complete.
 	InspectionWaiting bool
+	pendingInspection any
 	Forwarding        bool
 	// SessionPolicy makes legacy recipe launches inherit runner capability grants.
 	SessionPolicy bool

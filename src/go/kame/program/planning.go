@@ -150,12 +150,14 @@ func (p *Program) expandReadOnlyPlan(target string, yield bool, definitions bool
 		}
 		p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: result.Plan.Rule, Captures: cloneCaptures(p.Alloc, result.Plan.Captures), Node: node, Plan: clonePlan(p.Alloc, result.Plan), Inspection: true})
 	}
+	if node.State == core.NodeCancelled || node.State == core.NodeFailed { p.restartInspectionNode(node) }
 	if p.Instances[index].inspectionRoot == nil && node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
 		p.Instances[index].inspectionRoot = p.Engine.RequestRoot(node)
 	}
 	for node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
 		p.Tick(0)
-		if yield && len(p.Outbound) != 0 {
+		if yield { p.drainRequests() }
+		if yield && (len(p.Outbound) != 0 || !p.Engine.HasWork()) && node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
 			result.Plan.Free(p.Alloc)
 			return PlanResult{Waiting: true}
 		}

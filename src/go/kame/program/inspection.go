@@ -3,6 +3,7 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/template"
@@ -43,6 +44,7 @@ type inspectionDependency struct {
 	Origin string
 	OrderOnly bool
 	Group int
+	Potential bool
 }
 
 type inspectionDeferred struct {
@@ -59,10 +61,21 @@ type inspectionGraph struct {
 	Deferred []inspectionDeferred
 	Truncated bool
 	Waiting bool
+	Downstream bool
+	QueryTargets []string
+	QueryKind string
+	QueryDepth int
+	ConsumerSeeded bool
+	ConsumerCursor int
+	ConsumerReady bool
+	ConsumerFailures []inspectionConsumerFailure
 }
 
 func (g *inspectionGraph) free() {
 	a := g.Program.Alloc
+	freeStrings(a, g.QueryTargets)
+	mem.FreeString(a, g.QueryKind)
+	g.freeConsumerFailures()
 	for i := range g.Resources {
 		g.Resources[i].Key.Free(a)
 		mem.FreeString(a, g.Resources[i].Display)
@@ -85,26 +98,57 @@ func (p *Program) WriteGraph(out io.Writer, target string, depth int, kind strin
 }
 
 // WriteInspection is the common read-only graph query for both CLI hosts.
-// Host yields replay traversal, reusing completed resolvers. Never create a
+// Downstream host yields retain their catalogue cursor. Never create a
 // normal rule instance just to determine a resource's producer.
 func (p *Program) WriteInspection(out io.Writer, targets []string, depth int, kind string) diagnostic.Diagnostic {
 	p.InspectionWaiting = false
-	if depth < -1 || (kind != "plan" && kind != "inputs" && kind != "outputs") || len(targets) == 0 {
+	defer p.finishInspection()
+	if depth < -1 || (kind != "plan" && kind != "affected" && kind != "inputs" && kind != "outputs") || len(targets) == 0 {
+		p.clearInspection()
 		return failure(p.Alloc, "OPT_VALUE_INVALID", "invalid inspection query")
 	}
 	g := inspectionGraph{Program: p}
 	defer g.free()
-	for i := range targets {
-		key := p.inspectionKey(core.ResourceTarget, targets[i])
-		id := g.resource(key, targets[i], 0)
-		key.Free(p.Alloc)
-		g.Resources[id-1].Root = true
+	var pending *inspectionGraph
+	if p.pendingInspection != nil { pending = p.pendingInspection.(*inspectionGraph) }
+	resumed := pending != nil && pending.sameQuery(targets, depth, kind)
+	if resumed {
+		g = *pending
+		mem.Free(p.Alloc, pending)
+		p.pendingInspection = nil
+		g.Waiting = false
+		// Upstream traversal restarts from its cached resolvers; unlike consumer
+		// discovery, visit has no cursor for partially expanded producers.
+		if kind == "plan" || kind == "inputs" {
+			g.free()
+			g = inspectionGraph{Program: p}
+		}
+	} else {
+		p.clearInspection()
 	}
-	// Breadth-first traversal gives shared resources their shortest root distance.
-	for cursor := 0; cursor < len(g.Resources); cursor++ {
-		if g.Resources[cursor].Configuration { continue }
-		if d := g.visit(cursor+1, depth); d.Code != "" { return d }
-		if g.Waiting { p.InspectionWaiting = true; return diagnostic.Diagnostic{} }
+	if len(g.QueryTargets) == 0 {
+		g.QueryTargets, g.QueryKind, g.QueryDepth = cloneStrings(p.Alloc, targets), cloneText(p.Alloc, kind), depth
+		for i := range targets {
+			key := p.inspectionKey(core.ResourceTarget, targets[i])
+			id := g.resource(key, targets[i], 0)
+			key.Free(p.Alloc)
+			g.Resources[id-1].Root = true
+		}
+	}
+	if kind == "outputs" || kind == "affected" {
+		if !g.ConsumerReady {
+			if d := g.discoverConsumers(); d.Code != "" { return d }
+			if g.Waiting { p.retainInspection(&g); return diagnostic.Diagnostic{} }
+			g.selectConsumers(depth)
+			g.ConsumerReady = true
+		}
+	} else {
+		// Breadth-first traversal gives shared resources their shortest root distance.
+		for cursor := 0; cursor < len(g.Resources); cursor++ {
+			if g.Resources[cursor].Configuration { continue }
+			if d := g.visit(cursor+1, depth); d.Code != "" { return d }
+			if g.Waiting { p.retainInspection(&g); return diagnostic.Diagnostic{} }
+		}
 	}
 	for i := range g.Producers {
 		if d := g.stage(i+1, nil); d.Code != "" { return d }
@@ -122,7 +166,10 @@ func (p *Program) WriteInspection(out io.Writer, targets []string, depth int, ki
 	for i := range g.Producers {
 		if len(g.Producers[i].Outputs) == 0 { continue }
 		result := p.inspectArtifactStatus(g.Producers[i].Plan)
-		if result.Waiting { p.InspectionWaiting = true; return diagnostic.Diagnostic{} }
+		if result.Waiting {
+			p.retainInspection(&g)
+			return diagnostic.Diagnostic{}
+		}
 		for j := range g.Producers[i].Outputs {
 			status := result.State.Statuses[j]
 			if g.Producers[i].ContextUnknown && status != "missing" { status = "unknown" }
@@ -136,7 +183,7 @@ func (p *Program) WriteInspection(out io.Writer, targets []string, depth int, ki
 			d := g.Dependencies[i]
 			if d.Origin == "configuration" || d.OrderOnly { continue }
 			r := g.Resources[d.Resource-1]
-			if r.Producer == 0 { continue }
+			if r.Producer == 0 && !r.Potential { continue }
 			if r.Artifact && r.Status == "built" { continue }
 			for j := range g.Producers[d.Producer-1].Outputs {
 				output := &g.Resources[g.Producers[d.Producer-1].Outputs[j]-1]
@@ -156,6 +203,107 @@ func (p *Program) WriteInspection(out io.Writer, targets []string, depth int, ki
 	}
 	g.write(out, targets, depth, kind)
 	return diagnostic.Diagnostic{}
+}
+
+// CancelInspection releases suspended read-only query work without cancelling
+// other roots that share the same observations.
+func (p *Program) CancelInspection() {
+	p.clearInspection()
+}
+
+func (g *inspectionGraph) sameQuery(targets []string, depth int, kind string) bool {
+	if g.QueryDepth != depth || g.QueryKind != kind || len(g.QueryTargets) != len(targets) { return false }
+	for i := range targets { if g.QueryTargets[i] != targets[i] { return false } }
+	return true
+}
+
+func (p *Program) retainInspection(g *inspectionGraph) {
+	p.InspectionWaiting = true
+	pending := mem.Alloc[inspectionGraph](p.Alloc)
+	*pending = *g
+	p.pendingInspection = pending
+	*g = inspectionGraph{Program: p}
+}
+
+func (p *Program) clearInspection() {
+	p.releaseInspectionRoots()
+	p.InspectionWaiting = false
+	if p.pendingInspection == nil { return }
+	pending := p.pendingInspection.(*inspectionGraph)
+	pending.free()
+	mem.Free(p.Alloc, pending)
+	p.pendingInspection = nil
+}
+
+func (p *Program) finishInspection() {
+	if !p.InspectionWaiting { p.releaseInspectionRoots() }
+}
+
+// Release only our resolver interests: shared host observations remain alive
+// while another root needs them. clearInspection must also call this on disposal.
+func (p *Program) releaseInspectionRoots() {
+	var nodes []*core.Node
+	for i := range p.Instances {
+		entry := &p.Instances[i]
+		if !entry.Inspection { continue }
+		if !slices.Contains(nodes, entry.Node) { nodes = slices.Append(p.Alloc, nodes, entry.Node) }
+	}
+	if len(nodes) == 0 { p.drainCancellations(); return }
+	for cursor := 0; cursor < len(nodes); cursor++ {
+		node := nodes[cursor]
+		for i := range node.Static { if !slices.Contains(nodes, node.Static[i]) { nodes = slices.Append(p.Alloc, nodes, node.Static[i]) } }
+		for i := range node.Dynamic { if !slices.Contains(nodes, node.Dynamic[i]) { nodes = slices.Append(p.Alloc, nodes, node.Dynamic[i]) } }
+	}
+	// Move queued evaluator requests into the normal forwarding queue before
+	// releasing their owners, so abandoned requests can be discarded below.
+	if p.Forwarding { p.drainRequests() }
+	for i := range p.Instances {
+		if !p.Instances[i].Inspection || p.Instances[i].inspectionRoot == nil { continue }
+		p.Engine.Release(p.Instances[i].inspectionRoot)
+		p.Instances[i].inspectionRoot = nil
+	}
+	for i := 0; i < len(p.Outbound); {
+		if p.Outbound[i].Kind == host.RequestProcessCancel { i++; continue }
+		abandoned := false
+		for j := range nodes {
+			node := nodes[j]
+			if p.Outbound[i].NodeID == node.ID && node.Interest == 0 && node.State == core.NodeCancelled { abandoned = true; break }
+		}
+		if !abandoned { i++; continue }
+		p.Outbound[i].Free(p.Alloc)
+		copy(p.Outbound[i:], p.Outbound[i+1:])
+		p.Outbound = p.Outbound[:len(p.Outbound)-1]
+	}
+	p.drainCancellations()
+	// Preserve a failure until the query reports it, then let a later query
+	// retry its unowned observations instead of inheriting a cached error.
+	for i := len(nodes)-1; i >= 0; i-- {
+		if nodes[i].Interest == 0 && nodes[i].State == core.NodeFailed { p.Engine.Invalidate(nodes[i]) }
+	}
+	// Direct status reads are not engine dependency edges. Refresh them for a
+	// new query, but retain completed status work while the current query yields.
+	for i := range p.Instances {
+		entry := &p.Instances[i]
+		if entry.InspectionStatus != nil && entry.Node.Interest == 0 && entry.Node.State == core.NodeComplete { p.Engine.Invalidate(entry.Node) }
+	}
+	slices.Free(p.Alloc, nodes)
+}
+
+// Cancellation is terminal in the engine. A new inspection may retry its own
+// resolver and abandoned observations, without invalidating shared live work.
+func (p *Program) restartInspectionNode(node *core.Node) {
+	var nodes []*core.Node
+	nodes = slices.Append(p.Alloc, nodes, node)
+	for cursor := 0; cursor < len(nodes); cursor++ {
+		current := nodes[cursor]
+		for i := range current.Static { if !slices.Contains(nodes, current.Static[i]) { nodes = slices.Append(p.Alloc, nodes, current.Static[i]) } }
+		for i := range current.Dynamic { if !slices.Contains(nodes, current.Dynamic[i]) { nodes = slices.Append(p.Alloc, nodes, current.Dynamic[i]) } }
+	}
+	for i := len(nodes)-1; i >= 0; i-- {
+		current := nodes[i]
+		if current.Interest == 0 && (current.State == core.NodeCancelled || current.State == core.NodeFailed) { p.Engine.Invalidate(current) }
+	}
+	slices.Free(p.Alloc, nodes)
 }
 
 func (p *Program) inspectionKey(kind core.ResourceKind, name string) core.ResourceKey {
@@ -240,7 +388,7 @@ func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
 	}
 	base := p.Plan(r.Request)
 	if base.Diagnostic.Code != "" {
-		if base.Diagnostic.Code == "TGT_NO_RULE" && r.Key.Kind == core.ResourceFile && !r.Root { base.Diagnostic.Free(p.Alloc); return diagnostic.Diagnostic{} }
+		if base.Diagnostic.Code == "TGT_NO_RULE" && r.Key.Kind == core.ResourceFile { base.Diagnostic.Free(p.Alloc); g.Resources[resource-1].Input = true; return diagnostic.Diagnostic{} }
 		return g.contextDiagnostic(base.Diagnostic, resource)
 	}
 	for i := range g.Producers {

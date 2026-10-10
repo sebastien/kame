@@ -86,6 +86,21 @@ func TestInspectionOptionsRespectBuildValuesAndLiteralTail(t *testing.T) {
 	}
 }
 
+func TestAffectedPlanOptionIsPlanOnly(t *testing.T) {
+	inv := cli.Parse("plan", []string{"--affected", "src/one.c"})
+	if !inv.OK || !inv.Affected { t.Error("affected plan option missing") }
+	inv.Free()
+	commands := []string{"inputs", "outputs", "span"}
+	for i := range commands {
+		inv = cli.Parse(commands[i], []string{"--affected"})
+		if inv.OK || inv.Error.Code != "OPT_UNKNOWN" { t.Error("affected option accepted outside plan") }
+		inv.Free()
+	}
+	inv = cli.Parse("plan", []string{"-f", "--affected", "--", "--affected"})
+	if !inv.OK || inv.Affected || inv.File != "--affected" || len(inv.Targets) != 1 { t.Error("affected consumed source value or literal operand") }
+	inv.Free()
+}
+
 func TestPrimaryRunSelectionDoesNotProbeFilesystem(t *testing.T) {
 	runner := [][]string{{"missing.kash"}, {"-l", "expr", "source.txt"}, {"--lang=km", "-"}, {"-c", "42"}, {"-f", "missing.kmk"}, {"-l"}}
 	for i := range runner { if !cli.SelectsRun(runner[i]) { t.Error("explicit runner source was sent to build discovery") } }

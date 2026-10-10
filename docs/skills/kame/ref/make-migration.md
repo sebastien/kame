@@ -118,7 +118,7 @@ for an optional file and `when`/`otherwise`/`end` for declaration selection.
    kame do fmt -n Makefile.kmk
    kame do plan ./build/app
    kame do inputs --depth -1 ./build/app
-   kame do outputs --depth -1 ./build/app
+   kame do outputs --depth -1 src/main.c
    kame -n ./build/app
    ```
 

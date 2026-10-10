@@ -22,9 +22,9 @@ test-step "inputs and outputs return recursive resource inventories"
 	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("input")) | select(.roles | index("configuration") | not) | .display] | join(",")' './build/main.o,./build/util.o,./src/main.c,./src/util.c'
 	cli_expect_stderr_empty
 
-	cli_run -- do outputs --json ./build/app
+	cli_run -- do outputs --json src/main.c
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | join(",")' './build/app,./build/main.o,./build/util.o'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | sort | join(",")' './build/app,./build/main.o'
 )
 
 test-step "depth controls edge traversal"
@@ -43,9 +43,10 @@ test-step "depth controls edge traversal"
 	cli_expect_status 0
 	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("input")) | select(.roles | index("configuration") | not) | .display] | join(",")' './build/main.o,./build/util.o,./src/main.c,./src/util.c'
 
-	cli_run -- do outputs --json --depth 2 ./build/app
+	cli_run -- do outputs --json --depth 1 src/main.c
 	cli_expect_status 0
-	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | join(",")' './build/app,./build/main.o,./build/util.o'
+	cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.roles | index("artifact")) | .display] | join(",")' './build/main.o'
+	cli_expect_json_query "$CLI_OUT" '.truncated' 'true'
 )
 
 test-step "span separates static and dynamic resources"
@@ -142,7 +143,7 @@ cli_expect_stderr_contains "TGT_NO_DEFAULT" "available targets: first"
 test-step "graph commands report unknown targets"
 (
 	cd graph
-	cli_run -- do inputs ./missing.txt
+	cli_run -- do inputs missing-target
 	cli_expect_status 1
 	cli_expect_stderr_contains "TGT_NO_RULE"
 

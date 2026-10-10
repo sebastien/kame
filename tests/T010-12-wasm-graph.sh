@@ -46,7 +46,7 @@ compare span --expand --depth -1 default
 test-step "graph option and target errors"
 compare inputs --expand ./artifact.txt
 set +e
-(cd "$fixture" && node "$CLI_ROOT/dist/kame.js" do inputs ./no-such-target) >"$work/out" 2>"$work/err"
+(cd "$fixture" && node "$CLI_ROOT/dist/kame.js" do inputs no-such-target) >"$work/out" 2>"$work/err"
 status=$?
 set -e
 if [ "$status" = 1 ] && grep -q 'TGT_NO_RULE' "$work/err"; then

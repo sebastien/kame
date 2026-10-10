@@ -26,6 +26,7 @@ func inspectionLifetime(key core.ResourceKey) string {
 }
 
 func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind string) {
+	if kind == "affected" { kind = "plan" }
 	e := json.NewEncoder(out)
 	e.BeginObject()
 	e.Str("schema"); e.Int(2)
@@ -33,6 +34,7 @@ func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind
 	e.Str("targets"); encodeStringArray(&e, targets)
 	e.Str("depth"); e.Int(int64(depth))
 	e.Str("scope"); e.Str("declared-and-read-only")
+	e.Str("direction"); if g.Downstream { e.Str("downstream") } else { e.Str("upstream") }
 	e.Str("truncated"); e.Bool(g.Truncated)
 	e.Str("resources"); e.BeginArray()
 	for i := range g.Resources {
@@ -41,6 +43,7 @@ func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind
 		e.Str("id"); e.Int(int64(i+1))
 		e.Str("key"); encodeResourceKey(&e, r.Key)
 		e.Str("display"); e.Str(r.Display)
+		if r.Root { e.Str("root"); e.Bool(true) }
 		e.Str("roles"); e.BeginArray()
 		if r.Input { e.Str("input") }
 		if r.Artifact { e.Str("artifact") }
@@ -81,6 +84,7 @@ func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind
 		e.Str("resource"); e.Int(int64(d.Resource))
 		e.Str("origin"); e.Str(d.Origin)
 		e.Str("orderOnly"); e.Bool(d.OrderOnly)
+		if d.Potential { e.Str("potential"); e.Bool(true) }
 		if d.Group != 0 { e.Str("group"); e.Int(int64(d.Group)) }
 		e.EndObject()
 	}

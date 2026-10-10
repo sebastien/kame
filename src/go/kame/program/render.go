@@ -265,6 +265,9 @@ func observeInspectionDependency(value any, key core.ResourceKey) {
 	if key.Name == "" {
 		return
 	}
+	if node := p.Engine.Lookup(key); node != nil && node.Interest == 0 && node.State == core.NodeCancelled {
+		p.restartInspectionNode(node)
+	}
 	if key.Kind == core.ResourceTool {
 		p.observeToolDependency(key)
 		return

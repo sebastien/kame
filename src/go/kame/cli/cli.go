@@ -59,6 +59,7 @@ type Invocation struct {
 	ToolOverrides    []string
 	Depth            int
 	Expand           bool
+	Affected         bool
 	Targets          []string
 	Files            []string
 	Args             []string
@@ -450,6 +451,11 @@ func parseGraph(inv *Invocation, args []string, allowExpand bool) {
 				return
 			}
 			inv.Expand = true
+			continue
+		}
+		if arg == "--affected" {
+			if inv.Name != "plan" { inv.fail("OPT_UNKNOWN", "unknown option: --affected"); return }
+			inv.Affected = true
 			continue
 		}
 		if arg == "--depth" {

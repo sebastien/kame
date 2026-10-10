@@ -49,6 +49,15 @@ func TestInspectionBoundariesGroupDistinctAttributesByPath(t *testing.T) {
 	out.Free()
 }
 
+func TestDownstreamReportKeepsLogicalImpactRelationships(t *testing.T) {
+	document := `{"schema":2,"type":"outputs","depth":-1,"direction":"downstream","resources":[{"id":1,"key":{"kind":"file"},"display":"./seed","root":true,"roles":["input"]},{"id":2,"key":{"kind":"target"},"display":"middle","producer":1,"roles":[]},{"id":3,"key":{"kind":"file"},"display":"./out","producer":2,"roles":["artifact"]},{"id":4,"key":{"kind":"file"},"display":"./context","roles":["input"]}],"producers":[{"id":1,"resource":2,"target":"middle"},{"id":2,"resource":3,"target":"./out"}],"dependencies":[{"producer":1,"resource":1},{"producer":2,"resource":2},{"producer":2,"resource":4}],"deferred":[]}`
+	var out strings.Builder
+	if !cli.WriteReport(&out, "outputs", document, false) || !strings.Contains(out.String(), "./seed → middle") || !strings.Contains(out.String(), "middle → ./out") || strings.Contains(out.String(), "./context → ./out") {
+		t.Error("logical impact chain was omitted or unaffected context was included")
+	}
+	out.Free()
+}
+
 func TestPresentationRespectsValuesAndLiteralTail(t *testing.T) {
 	inv := cli.Presentation([]string{"-c", "--json", "--define", "--output", "--indent", "--json", "-o", "text", "--", "--json"})
 	defer inv.Free()

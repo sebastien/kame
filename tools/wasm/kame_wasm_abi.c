@@ -905,7 +905,8 @@ uint32_t kame_wasm_graph(uint64_t handle, uint32_t target, uint32_t target_len, 
   if (kind == KAME_WASM_GRAPH_SPAN) {
     result = wasm_Runtime_SpanJSON(instance->runtime, name, (so_int)depth, expand != 0u);
   } else if (kind == KAME_WASM_GRAPH_PLAN_ROOTS) {
-    result = wasm_Runtime_PlanRootsJSON(instance->runtime, name, (so_int)depth);
+    const bool affected = expand != 0u;
+    result = wasm_Runtime_PlanQueryJSON(instance->runtime, name, (so_int)depth, affected);
   } else {
     result = wasm_Runtime_GraphJSON(instance->runtime, name, (so_int)depth, kind == KAME_WASM_GRAPH_INPUTS ? so_str("inputs") : so_str("outputs"));
   }

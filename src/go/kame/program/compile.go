@@ -327,6 +327,7 @@ func (p *Program) Free() {
 		return
 	}
 	p.Eval.CancelProcesses()
+	p.clearInspection()
 	freeStrings(p.Alloc, p.Configuration)
 	freeStrings(p.Alloc, p.ParameterDefinitions)
 	freeStrings(p.Alloc, p.Options.ToolOverrides)

@@ -57,14 +57,18 @@ func reportBoundaryPath(boundary, resources, producers core.Value) string {
 		p := reportID(producers, reportField(boundary, "producer").Int)
 		r = reportID(resources, reportField(p, "resource").Int)
 	}
-	return reportField(r, "display").Text
+	text := reportField(r, "display").Text
+	if text == "" { return "consumer discovery" }
+	return text
 }
 
 func writeInspectionReport(out io.Writer, doc core.Value, styled bool) {
 	resources, producers := reportField(doc, "resources"), reportField(doc, "producers")
 	dependencies, deferred := reportField(doc, "dependencies"), reportField(doc, "deferred")
 	kind, depth := reportField(doc, "type").Text, reportField(doc, "depth").Int
+	downstream := reportField(doc, "direction").Text == "downstream"
 	io.WriteString(out, "  scope: declared and read-only resolved\n")
+	if downstream { io.WriteString(out, "  direction: downstream · potentially affected, not guaranteed to rebuild\n") }
 	for section := 0; section < 3; section++ {
 		label := "file inputs"
 		if kind == "outputs" { label = "artifacts" } else if kind == "plan" { label = "files" }
@@ -88,6 +92,26 @@ func writeInspectionReport(out io.Writer, doc core.Value, styled bool) {
 		} }
 		if count == 0 {
 			if section == 0 && reportField(doc, "truncated").Bool { io.WriteString(out, "    not expanded at requested depth\n") } else if section == 0 && len(deferred.List) != 0 { io.WriteString(out, "    unresolved discovery; see boundaries below\n") } else if section == 0 && kind == "inputs" { io.WriteString(out, "    no inputs\n") } else if section == 0 && kind == "outputs" { io.WriteString(out, "    no declared artifacts\n") } else { io.WriteString(out, "    (none)\n") }
+		}
+	}
+	if downstream && len(producers.List) != 0 {
+		io.WriteString(out, "  affected relationships\n")
+		for i := range dependencies.List {
+			d := dependencies.List[i]
+			if reportField(d, "orderOnly").Bool { continue }
+			duplicate := false
+			for j := 0; j < i; j++ {
+				previous := dependencies.List[j]
+				if !reportField(previous, "orderOnly").Bool && reportField(previous, "resource").Int == reportField(d, "resource").Int && reportField(previous, "producer").Int == reportField(d, "producer").Int { duplicate = true; break }
+			}
+			if duplicate { continue }
+			r := reportID(resources, reportField(d, "resource").Int)
+			if !reportField(r, "root").Bool && !reportHas(reportField(r, "roles"), "artifact") && reportField(r, "producer").Int == 0 { continue }
+			p := reportID(producers, reportField(d, "producer").Int)
+			io.WriteString(out, "    "); reportText(out, reportField(r, "display").Text, "value.path", styled)
+			io.WriteString(out, " → "); reportText(out, reportField(p, "target").Text, "value.target", styled)
+			if reportField(d, "potential").Bool { io.WriteString(out, " · potential glob member") }
+			io.WriteString(out, "\n")
 		}
 	}
 	if kind == "plan" {
@@ -120,7 +144,9 @@ func writeInspectionReport(out io.Writer, doc core.Value, styled bool) {
 			fmt.Fprintf(out, " · group %d follows earlier groups\n", reportField(d, "group").Int)
 		}
 	}
-	if reportField(doc, "truncated").Bool { io.WriteString(out, "  truncated: deeper producer inputs omitted\n") }
+	if reportField(doc, "truncated").Bool {
+		if downstream { io.WriteString(out, "  truncated: deeper consumers omitted\n") } else { io.WriteString(out, "  truncated: deeper producer inputs omitted\n") }
+	}
 	if len(deferred.List) != 0 {
 		io.WriteString(out, "  discovery boundaries\n")
 		for i := range deferred.List {

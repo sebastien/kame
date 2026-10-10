@@ -109,7 +109,8 @@ guessing how Kame selected it:
 ```sh
 kame do plan ./build/app
 kame do inputs --depth -1 ./build/app
-kame do outputs --depth -1 ./build/app
+kame do outputs --depth -1 src/main.c
+kame do plan --affected src/main.c
 kame do span --depth -1 ./build/app
 kame do span --expand --depth -1 ./build/app
 kame -n ./build/app
@@ -117,14 +118,23 @@ kame -n ./build/app
 
 | Command | Output and behavior |
 | --- | --- |
-| `do plan [--depth N] [TARGET...]` | Recursive resources, producers, bindings, freshness, and dependency-ordered stages; shared graph for multiple roots. |
+| `do plan [--affected] [--depth N] [RESOURCE...]` | Upstream prerequisites by default; `--affected` shows downstream potential rebuild work and stages. Shared graph for multiple roots. |
 | `do inputs [--depth N] [TARGET]` | Reachable input files and separately labeled logical/configuration prerequisites. |
-| `do outputs [--depth N] [TARGET]` | Reachable declared artifacts and their producers, including intermediate and sibling outputs. |
+| `do outputs [--depth N] [RESOURCE]` | Downstream declared outputs potentially affected by a resource change, including intermediate and sibling outputs; excludes the resource's own producer. |
 | `do span [--expand] [--depth N] [TARGET]` | Separate static inputs/outputs from evaluation-dependent inputs; `--json` retains the span document. `--expand` evaluates dynamic definitions without executing recipes. |
 | `do cat [TARGET]` | Materialize one target, then write its exact file bytes or definition value without a newline. |
 
 `plan`, `inputs`, and `outputs` default to depth `-1` (unlimited); `span` defaults
 to `1`. Depth `0` returns no dependency inventory; `1` reports direct resources.
+For outputs/affected plans, depth counts consumer hops. Source file roots need
+no producing rule. CLI file operands may omit `./`; exact declared logical names
+and definitions take precedence. Rule-source paths still need explicit prefixes.
+Downstream queries discover consumers across loaded rules, infer concrete pattern
+instances from inputs, and account for potential generated glob members even
+before artifacts exist. Unbound patterns/arguments and runtime discovery are
+reported as incomplete boundaries. This is potential impact, not a guarantee
+that a producer will run or its bytes will change. Order-only edges alone do not
+propagate change impact. Use `plan TARGET` for the old upstream artifact inventory.
 Read-only computed inputs resolve automatically in the recursive commands:
 `span --expand` is not a prerequisite. Inspection never renders recipes, runs
 producers, or writes artifacts/cache records. Deferred generated-input,
@@ -134,7 +144,7 @@ does not prove reuse.
 
 Under `--json`, `plan`, `inputs`, and `outputs` emit one schema-2 document with
 `targets`, `depth`, `scope`, `truncated`, `resources`, `producers`, `dependencies`,
-`stages`, and `deferred`; input/output inventories also have resource-ID `items`.
+`direction`, `stages`, and `deferred`; input/output inventories also have resource-ID `items`.
 This replaces old plan records and string edge arrays. `span` retains schema 1.
 See [Build inspection](../../../spec/037-build-inspection.md).
 

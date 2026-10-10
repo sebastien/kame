@@ -55,7 +55,7 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 // selectTargets consumes the borrowed-operand slice and returns owned strings
 // after shared assignment normalization and implicit default selection.
 func selectTargets(p *program.Program, targets []string) []string {
-	joined := p.JoinTargetOperands(targets)
+	joined := p.NormalizeTargetOperands(targets)
 	slices.Free(mem.System, targets)
 	return joined
 }

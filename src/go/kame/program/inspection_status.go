@@ -10,6 +10,7 @@ import (
 )
 
 type inspectionStatusState struct {
+	Generation int64
 	Stored core.SignatureRecord
 	Outputs []core.Signature
 	Statuses []string
@@ -54,9 +55,16 @@ func (p *Program) inspectArtifactStatus(plan Plan) inspectionStatusResult {
 		p.Instances[index].inspectionRoot = p.Engine.RequestRoot(node)
 	}
 	node := p.Instances[index].Node
+	if node.State == core.NodeCancelled || node.State == core.NodeFailed {
+		p.restartInspectionNode(node)
+	}
+	if p.Instances[index].inspectionRoot == nil && node.State != core.NodeComplete {
+		p.Instances[index].inspectionRoot = p.Engine.RequestRoot(node)
+	}
 	for node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
 		p.Tick(0)
-		if p.Forwarding && len(p.Outbound) != 0 { return inspectionStatusResult{Waiting: true} }
+		if p.Forwarding { p.drainRequests() }
+		if p.Forwarding && (len(p.Outbound) != 0 || !p.Engine.HasWork()) && node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled { return inspectionStatusResult{Waiting: true} }
 	}
 	if p.Instances[index].inspectionRoot != nil {
 		p.Engine.Release(p.Instances[index].inspectionRoot)
@@ -108,6 +116,12 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 	p, index := owner.Program, owner.Index
 	entry := &p.Instances[index]
 	s := entry.InspectionStatus
+	if s.Generation != c.Generation() {
+		s.free(p.Alloc)
+		s = mem.Alloc[inspectionStatusState](p.Alloc)
+		s.Generation = c.Generation()
+		entry.InspectionStatus = s
+	}
 	context := eval.Context{Run: p.Alloc, Cwd: p.Options.Directory, Grants: p.Options.Grants}
 	for s.Phase == 0 && s.Index < len(entry.Plan.Outputs) {
 		name := p.canonicalTarget(entry.Plan.Outputs[s.Index], true)

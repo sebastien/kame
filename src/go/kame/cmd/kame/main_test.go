@@ -433,11 +433,11 @@ func TestZeroWidthSourceDiagnosticRendersEOFLocation(t *testing.T) {
 	}
 }
 
-func TestUnknownPathTargetSuggestsExplicitPrefix(t *testing.T) {
+func TestInspectionPathOperandAcceptsExternalFile(t *testing.T) {
 	var out, errOut bytes.Buffer
 	status := Run([]string{"do", "plan", "-c", "task build :", "missing.txt"}, &input{}, &out, &errOut)
-	if status != 1 || !strings.Contains(errOut.String(), "note: did you mean ./missing.txt?") {
-		t.Errorf("suggestion status=%d stderr=%q", status, errOut.String())
+	if status != 0 || !strings.Contains(out.String(), "./missing.txt") || errOut.Len() != 0 {
+		t.Errorf("external file status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
 

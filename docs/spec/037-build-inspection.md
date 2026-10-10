@@ -2,8 +2,9 @@
 
 ## Purpose
 
-`do plan`, `do inputs`, and `do outputs` describe the build reachable from the
-selected roots, not just one rule header. They share resource identity,
+`do plan` and `do inputs` describe prerequisites reachable upstream from selected
+roots. `do outputs` and `do plan --affected` describe consumers reachable
+downstream from changed resources. They share resource identity,
 read-only dependency resolution, classification, provenance, and completeness
 rules. Native and WASM hosts expose the same information.
 
@@ -14,15 +15,26 @@ that every reachable producer will execute.
 ## Selection and traversal
 
 ```text
-kame do plan [--depth N] [TARGET...]
+kame do plan [--affected] [--depth N] [RESOURCE...]
 kame do inputs [--depth N] [TARGET]
-kame do outputs [--depth N] [TARGET]
+kame do outputs [--depth N] [RESOURCE]
 ```
 
 All three commands default to unlimited depth (`-1`). Target selection,
 configuration, captures, and target arguments follow the ordinary build rules.
 `plan` accepts multiple roots in one shared graph; `inputs` and `outputs` accept
 one root. Without operands, select `default` or report `TGT_NO_DEFAULT`.
+
+CLI operands may omit `./`: resolve ordinary relative path spellings against
+the selected `-C` directory, even for missing generated outputs. Exact declared
+logical names and definitions take precedence. Slash-containing names, filename
+spellings containing a dot, and known file targets/literal file prerequisites
+resolve as paths when no exact logical declaration exists. Explicit `./`, `../`,
+absolute paths and resource URIs remain explicit. This does not relax the
+mandatory path prefixes in rule source. External file roots need no producer,
+including missing paths; unknown logical names remain errors.
+
+The following depth rules describe upstream queries:
 
 - Depth `0` reports root identities only, with no dependency edges or input/output
   inventory. Depth `1` reports the selected producers' direct inputs and outputs.
@@ -44,6 +56,31 @@ one root. Without operands, select `default` or report `TGT_NO_DEFAULT`.
 - A path without a producer is an external input. An unknown logical prerequisite,
   ambiguous producer, invalid expression, denied read, or failed host operation
   remains an error; traversal must not discard descendant diagnostics.
+
+For downstream queries, depth counts consumer hops: `0` reports only changed
+resources, `1` reports direct consumers and all their sibling outputs, and `-1`
+follows consumers transitively. Exclude the seed's producer and unrelated
+prerequisite producers. Retain prerequisite identities, normal/order-only edges,
+and configuration provenance as context for selected consumers. Order-only
+edges alone do not propagate change impact. A logical consumer can propagate
+impact to further consumers without itself becoming a file artifact.
+
+Discover consumers across loaded declarations, not only the default target.
+Seed concrete outputs and infer concrete pattern instances by matching known
+file or logical inputs against input templates and rendering fully bound output
+captures. Inversion honors named and positional capture references using the
+same bindings as forward rule selection. Use forward rule selection to validate
+inferred targets. Read-only computed
+inputs and observed glob memberships participate in discovery. A declared or
+inferred file matching an observed glob is a potential computed dependency even
+if the file is not yet present: do not fabricate its bytes or expression value.
+The resulting report is conservative potential impact, not guaranteed execution
+or changed output bytes. Uninstantiated patterns are not literal file artifacts.
+
+An unrelated declaration's input-resolution failure does not fail a downstream
+query. Preserve diagnostics for selected affected consumers; failures that prevent
+consumer discovery are explicit completeness boundaries. Do not resolve the
+excluded seed producer's inputs merely to inspect downstream impact.
 
 A finite depth is an explicitly truncated view. Report the requested depth and
 truncation when a known dependency branch extends beyond it. Do not represent an
@@ -90,11 +127,12 @@ in separate labeled sections, not as filenames. Include known build sources,
 selected includes, and generator/configuration resources that influence the
 selected graph, labeled as configuration rather than recipe file inputs.
 
-`outputs` inventories every reachable declared artifact, including intermediate
-and sibling outputs. Identify each producer and distinguish products from
-intermediates. Show reached logical targets, cached tasks, services, and
-definitions separately. For an aggregate such as `default : build`, traverse
-through `build` to its artifacts; neither name is itself an artifact.
+`outputs` inventories declared artifacts of downstream consumers, including
+intermediate and sibling outputs. Exclude the selected resource itself unless
+it is also produced by an affected consumer in a dependency cycle (which remains
+an error). Show affected logical targets, cached tasks, services, and definitions
+separately. `outputs default` does not inventory `default`'s prerequisites; use
+`plan default` for that upstream artifact inventory.
 
 The inventory includes products that may be reused. A declaration is not proof
 that an output exists or that a producer will run. Freshness stays `unknown`
@@ -121,6 +159,9 @@ declared outputs, resolved prerequisites, freshness, and known reuse policy.
 Unrendered recipe text may be shown as source, not as an executed or fully
 expanded command. Metadata and generator provenance retain their established
 meaning.
+
+`plan --affected` uses the downstream projection and orders affected producers
+only. Unaffected prerequisites remain resource context, not proposed work.
 
 Show numbered **stages** of dependency-ordered producer work. External file
 leaves are inputs, not executable stages. Shared and multi-output producers
@@ -165,6 +206,14 @@ not successful execution or a suppressed diagnostic. Where a producer has an
 opaque process recipe, the report notes that its undeclared I/O is unknown;
 known declared inputs and outputs remain in the inventory.
 
+Consumer discovery also reports `target-arguments-required` for unknown required
+argument bindings, `pattern-captures-unbound` when an input does not determine
+all output captures, `consumer-inputs-unavailable` when an unselected declaration's
+failed input resolution prevents complete discovery, and `consumer-instance-limit` if the catalogue exceeds
+16,384 resources (recursive patterns can describe infinitely many instances).
+These global boundaries remain visible even when no concrete affected instance
+could be inferred. Explicit argument-bound roots/dependencies remain inspectable.
+
 An absent declared external input can be listed without probing it. When an
 inspection expression requires a read, propagate the read diagnostic unless the
 absence is established to be an unavailable generated input. Other failures,
@@ -193,6 +242,8 @@ describe the inspected graph, not omitted or deferred references.
 Do not append classification metadata or nested producer/consumer details to
 inventory entries. Detailed target information remains available through
 `do plan TARGET`, and full classification and relationships remain in JSON.
+Downstream human reports additionally show affected `input → consumer`
+relationships in a separate section, without expanding inventory entries.
 Discovery boundaries use the same path-first layout: one line per affected
 resource, followed by its distinct attributes in discovery order (for example,
 `./build/app · runtime-discovery · opaque-process-io`). When no specific resource
@@ -207,6 +258,8 @@ reevaluation. Existence and timestamps alone never establish `built`.
 Verification may read existing proof records and resource bytes, but must not
 render recipes, execute producers, or update proof/cache records. Generated
 prerequisites with unresolved freshness prevent a `built` claim downstream.
+This includes prerequisite producers omitted from the affected-work projection;
+matching their current output bytes does not verify those producers' freshness.
 Schema-2 artifact resources expose the same value in their `status` field.
 Unknown lifetime or freshness in detailed plans is written as unknown, not
 fabricated from naming conventions.
@@ -236,6 +289,7 @@ Each successful invocation publishes one complete JSON document with:
 | `targets` | Selected root request strings; resolved bindings are retained in producer records |
 | `depth` | Requested depth, default `-1` |
 | `scope` | `declared-and-read-only` |
+| `direction` | `upstream` for inputs/ordinary plans, `downstream` for outputs/affected plans |
 | `truncated` | Whether known branches were omitted by depth |
 | `resources` | Typed resource records with document-local `id`, canonical `key`, `display`, `roles`, `lifetime`, and artifact `status` |
 | `producers` | Selected producer records with document-local `id`, `kind`, target identity, output resource IDs, and established plan/source/binding details |
@@ -253,6 +307,7 @@ remain available even when a resource is not in the requested inventory.
 Resource `key` records contain `kind` and canonical `name`. Producer records use
 `target` for the request identity, `resource` for their representative resource
 ID, and `outputs` for declared file-output IDs (empty for logical/value producers).
+Resources selected as changed/requested roots include `root: true`.
 Their `kind` is `file`, `target`, `task`, `service`, or `definition`. Retain
 `source`, `rule`, `captures`, `arguments`, `configuration`, `tools`, `metadata`,
 `environment`, `generator`, and `always` when established, with the existing
@@ -260,7 +315,8 @@ plan-data meanings. File producers include `freshness`, using `unknown` when
 unverified. A resource's optional `producer` field references its producer ID.
 
 Dependency records use `producer`, `resource`, `origin`, `orderOnly`, and optional
-`group`. Configuration provenance has no sequence group and does not participate
+`group`. Potential inferred glob membership additionally uses `potential: true`,
+distinct from a concretely resolved expression input. Configuration provenance has no sequence group and does not participate
 in stage scheduling. Deferred records use `reason` and the affected `producer`
 or `resource`, with optional source location. Empty collections are explicit;
 unavailable optional details are omitted. `plan` omits `items`.
@@ -285,14 +341,25 @@ The WASM `kame_wasm_plan` query returns the same recursive schema-2 document;
 its retained `expand` argument does not disable automatic discovery. The graph
 query uses kind `0` for inputs, `1` for outputs, `2` for unchanged schema-1 span,
 and `3` for plan. Kind `3` receives a JSON string array of roots in the target
-buffer so multiple roots share one graph. Inspection queries may return
+buffer so multiple roots share one graph; its `expand` argument selects
+`plan --affected`. Inspection queries may return
 `HOST_NEEDED`; service only the authorized read-only request and retry. A size
 probe or buffer-too-small retry is not a new inspection or permission to execute.
+Downstream queries retain their catalogue cursor across host yields rather than
+rebuilding all consumer discovery per file observation. This transient state is
+released on completion, failure, query replacement, or runtime disposal.
 
 ## Acceptance criteria
 
-- Default recursive reports cross multiple aggregate targets and enumerate the
+- Default upstream reports cross multiple aggregate targets and enumerate the
   concrete computed source set, generated intermediates, and their producer inputs.
+- Unprefixed CLI paths resolve like explicit paths, including missing generated
+  outputs; exact logical names and argument assignments retain their meaning.
+- Source roots need no producer. Downstream outputs include direct/transitive
+  consumers, computed inputs, inferred pattern instances, sibling outputs and
+  potential missing glob members; exclude unrelated prerequisite producers.
+- `plan --affected` shares multiple change roots and orders affected work.
+  Consumer-hop depth and order-only exclusions have matching host behavior.
 - Literal, wildcard, computed, generated, pattern, URI, order-only, and sequenced
   dependencies preserve classification and provenance on both hosts.
 - Multi-output producers and diamonds appear once per identity, retain all

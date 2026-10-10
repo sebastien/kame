@@ -244,10 +244,10 @@ func targetArgumentKey(a mem.Allocator, target string, arguments []ArgumentValue
 	return cloneText(a, b.String())
 }
 
-// JoinTargetOperands combines CLI assignment operands with the preceding
-// declared named task target. Returned strings are owned by the Program's
-// allocator; unconsumed targets are copied unchanged.
-func (p *Program) JoinTargetOperands(targets []string) []string {
+// NormalizeTargetOperands removes definition overrides, joins named target
+// arguments, and resolves CLI file spellings against compiled declarations.
+// Returned strings are owned by the Program's allocator.
+func (p *Program) NormalizeTargetOperands(targets []string) []string {
 	var operands []string
 	for i := range targets {
 		configured := false
@@ -256,7 +256,6 @@ func (p *Program) JoinTargetOperands(targets []string) []string {
 		}
 		if !configured { operands = slices.Append(p.Alloc, operands, targets[i]) }
 	}
-	defer slices.Free(p.Alloc, operands)
 	if (len(operands) == 0 || (isTargetAssignment(operands[0]) && !p.HasTarget(operands[0]))) && p.HasTarget("default") {
 		var defaults []string
 		defaults = slices.Append(p.Alloc, defaults, "default")
@@ -264,12 +263,13 @@ func (p *Program) JoinTargetOperands(targets []string) []string {
 		slices.Free(p.Alloc, operands)
 		operands = defaults
 	}
+	defer slices.Free(p.Alloc, operands)
 	targets = operands
 	var joined []string
 	for i := 0; i < len(targets); i++ {
 		name := targets[i]
 		if i+1 == len(targets) || !isTargetAssignment(targets[i+1]) || (!p.hasNamedArgumentTarget(name) && p.HasTarget(targets[i+1])) {
-			joined = slices.Append(p.Alloc, joined, cloneText(p.Alloc, name))
+			joined = slices.Append(p.Alloc, joined, p.cliTarget(name))
 			continue
 		}
 		b := strings.NewBuilder(p.Alloc)
@@ -283,6 +283,35 @@ func (p *Program) JoinTargetOperands(targets []string) []string {
 		b.Free()
 	}
 	return joined
+}
+
+// JoinTargetOperands is retained for embedding callers.
+// Deprecated: use NormalizeTargetOperands; operands are normalized, not just joined.
+func (p *Program) JoinTargetOperands(targets []string) []string {
+	return p.NormalizeTargetOperands(targets)
+}
+
+// CLI conveniences do not change the explicit path grammar in rule sources.
+func (p *Program) cliTarget(name string) string {
+	if isPath(name) || strings.HasPrefix(name, "../") || core.IsResourceURIName(name) || p.hasLogicalTarget(name) { return cloneText(p.Alloc, name) }
+	if !isTargetAssignment(name) && (hasSlash(name) || strings.Contains(name, ".") || p.HasTarget("./"+name)) { return cloneText(p.Alloc, "./"+name) }
+	for i := range p.Rules {
+		for j := range p.Rules[i].Rule.Inputs {
+			input := p.Rules[i].Rule.Inputs[j]
+			if input.Kind == rule.InputPath && input.Text == "./"+name { return cloneText(p.Alloc, "./"+name) }
+		}
+	}
+	return cloneText(p.Alloc, name)
+}
+
+func (p *Program) hasLogicalTarget(name string) bool {
+	if isPath(name) || strings.HasPrefix(name, "../") || core.IsResourceURIName(name) { return false }
+	for i := range p.Rules {
+		r := p.Rules[i].Rule
+		if r.Kind == rule.FileRule { continue }
+		for j := range r.Outputs { if !r.Outputs[j].Template && r.Outputs[j].Text == name { return true } }
+	}
+	return p.Eval.Definition(name) != nil
 }
 
 func isTargetAssignment(text string) bool {

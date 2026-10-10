@@ -24,8 +24,25 @@ type spanResult struct {
 // WriteSpan emits the span JSON object for one target.
 func (p *Program) WriteSpan(out io.Writer, target string, depth int, expand bool) diagnostic.Diagnostic {
 	p.InspectionWaiting = false
+	defer p.finishInspection()
+	if depth < -1 { p.clearInspection(); return failure(p.Alloc, "OPT_VALUE_INVALID", "invalid span depth") }
+	targets := []string{target}
+	kind := "span"
+	if expand { kind = "expanded-span" }
+	g := inspectionGraph{Program: p}
+	defer g.free()
+	var pending *inspectionGraph
+	if p.pendingInspection != nil { pending = p.pendingInspection.(*inspectionGraph) }
+	if pending != nil && pending.sameQuery(targets, depth, kind) {
+		g = *pending
+		mem.Free(p.Alloc, pending)
+		p.pendingInspection = nil
+	} else {
+		p.clearInspection()
+		g.QueryTargets, g.QueryKind, g.QueryDepth = cloneStrings(p.Alloc, targets), cloneText(p.Alloc, kind), depth
+	}
 	span := p.spanValues(target, depth, expand)
-	if span.Waiting { p.InspectionWaiting = true; return diagnostic.Diagnostic{} }
+	if span.Waiting { p.retainInspection(&g); return diagnostic.Diagnostic{} }
 	if span.Diagnostic.Code != "" {
 		return span.Diagnostic
 	}

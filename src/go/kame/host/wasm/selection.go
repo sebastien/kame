@@ -33,7 +33,7 @@ func (r *Runtime) TargetOperandsJSON(encoded string) PureResult {
 		}
 		operands[i] = value.List[i].Text
 	}
-	targets := r.Program.JoinTargetOperands(operands)
+	targets := r.Program.NormalizeTargetOperands(operands)
 	defer program.FreeStrings(r.Alloc, targets)
 	buffer := bytes.NewBuffer(r.Alloc, nil)
 	e := json.NewEncoder(&buffer)

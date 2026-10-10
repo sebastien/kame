@@ -230,7 +230,9 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	var buffer = bytes.NewBuffer(mem.System, nil)
 	defer buffer.Free()
 	if kind != "span" {
-		graphDiagnostic = session.Program.WriteInspection(&buffer, targets, graph.Depth, kind)
+		query := kind
+		if graph.Build.Affected { query = "affected" }
+		graphDiagnostic = session.Program.WriteInspection(&buffer, targets, graph.Depth, query)
 	} else {
 		graphDiagnostic = session.Program.WriteSpan(&buffer, targets[0], graph.Depth, graph.Expand)
 	}

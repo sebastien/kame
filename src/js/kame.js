@@ -224,9 +224,11 @@ function writeReport(heading, document) {
 
 function writeInspectionReport(doc, write) {
   const resources = doc.resources, producers = doc.producers;
+  const downstream = doc.direction === 'downstream';
   const producer = (id) => producers.find((p) => p.id === id);
   const text = (value, token = 'value.path') => styled(token, shortReportField(value), outputColor);
   stdout.write('  scope: declared and read-only resolved\n');
+  if (downstream) stdout.write('  direction: downstream · potentially affected, not guaranteed to rebuild\n');
   for (let section = 0; section < 3; section++) {
     const label = section === 1 ? 'configuration' : section === 2 ? 'logical / value / service resources' : doc.type === 'outputs' ? 'artifacts' : doc.type === 'plan' ? 'files' : 'file inputs';
     stdout.write(`  ${styled('heading', label, outputColor)}\n`);
@@ -242,6 +244,18 @@ function writeInspectionReport(doc, write) {
     }
     if (!count) stdout.write(`    ${section === 0 && doc.truncated ? 'not expanded at requested depth' : section === 0 && doc.deferred.length ? 'unresolved discovery; see boundaries below' : section === 0 && doc.type === 'inputs' ? 'no inputs' : section === 0 && doc.type === 'outputs' ? 'no declared artifacts' : '(none)'}\n`);
   }
+  if (downstream && producers.length) {
+    stdout.write('  affected relationships\n');
+    const seen = new Set();
+    for (const d of doc.dependencies) {
+      if (d.orderOnly) continue;
+      const r = resources.find((r) => r.id === d.resource);
+      const key = `${d.resource}:${d.producer}`;
+      if (seen.has(key) || (!r.root && !r.roles.includes('artifact') && !r.producer)) continue;
+      seen.add(key);
+      stdout.write(`    ${text(r.display)} → ${text(producer(d.producer).target, 'value.target')}${d.potential ? ' · potential glob member' : ''}\n`);
+    }
+  }
   if (doc.type === 'plan') {
     stdout.write('  producers\n');
     for (const p of producers) {
@@ -255,12 +269,12 @@ function writeInspectionReport(doc, write) {
     }
     for (const d of doc.dependencies.filter((d) => d.group > 1)) stdout.write(`    sequence barrier: ${text(producer(d.producer).target, 'value.target')} · group ${d.group} follows earlier groups\n`);
   }
-  if (doc.truncated) stdout.write('  truncated: deeper producer inputs omitted\n');
+  if (doc.truncated) stdout.write(`  truncated: deeper ${downstream ? 'consumers' : 'producer inputs'} omitted\n`);
   if (doc.deferred.length) {
     stdout.write('  discovery boundaries\n');
     const boundaries = new Map();
     for (const d of doc.deferred) {
-      const path = resources.find((r) => r.id === (d.resource || producer(d.producer)?.resource)).display;
+      const path = resources.find((r) => r.id === (d.resource || producer(d.producer)?.resource))?.display || 'consumer discovery';
       if (!boundaries.has(path)) boundaries.set(path, new Set());
       boundaries.get(path).add(d.reason);
     }
@@ -1912,10 +1926,11 @@ class Module {
     }, name, context);
   }
 
-  async graphJSON(source, target, depth, kind, expand, name, context) {
+  async graphJSON(source, target, depth, kind, queryOption, name, context) {
     return this.prepared(source, (instance) => {
       const targetBytes = this.write(target);
-      const flag = expand ? 1 : 0;
+      // The legacy ABI slot expands span queries or selects affected plans.
+      const flag = queryOption ? 1 : 0;
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_graph(handle, targetBytes.pointer, targetBytes.length, depth, kind, flag, dst, dstLen, lengthPointer);
     }, name, context);
   }
@@ -3242,7 +3257,7 @@ async function runGraph(module, inv, sourceDirectory) {
     context.inspectionGrants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
   }
   const queryTarget = inv.name === 'plan' ? JSON.stringify(targets) : targets[0];
-  const bytes = await module.graphJSON(source.compiled, queryTarget, inv.depth, kind, inv.expand, source.name, context);
+  const bytes = await module.graphJSON(source.compiled, queryTarget, inv.depth, kind, inv.name === 'plan' ? inv.affected : inv.expand, source.name, context);
   const result = JSON.parse(Buffer.from(bytes).toString('utf8'));
   if (result.type === 'diagnostic') {
     if (jsonMode) stdout.write(`${JSON.stringify(result)}\n`);

@@ -209,7 +209,7 @@ uint32_t kame_wasm_plan(uint64_t instance, uint32_t target, uint32_t target_len,
                         uint32_t out_len);
 /* kind 0=inputs, 1=outputs (schema 2), 2=span (schema 1), 3=plan (schema 2).
  * For kind 3 target is a JSON string array of roots; otherwise it is one target.
- * depth -1 is unbounded; expand applies only to span. */
+ * depth -1 is unbounded; expand expands span or selects affected plan roots. */
 uint32_t kame_wasm_graph(uint64_t instance, uint32_t target, uint32_t target_len,
                          int32_t depth, uint32_t kind, uint32_t expand,
                          uint32_t dst, uint32_t dst_len, uint32_t out_len);

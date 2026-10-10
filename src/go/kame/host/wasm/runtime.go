@@ -348,22 +348,29 @@ func (r *Runtime) GraphJSON(target string, depth int, kind string) PureResult {
 
 // PlanRootsJSON accepts a JSON root array so multiple CLI roots share one plan query.
 func (r *Runtime) PlanRootsJSON(encoded string, depth int) PureResult {
+	return r.PlanQueryJSON(encoded, depth, false)
+}
+
+// PlanQueryJSON shares one upstream or affected plan across a JSON root array.
+func (r *Runtime) PlanQueryJSON(encoded string, depth int, affected bool) PureResult {
 	if r == nil || r.Program == nil {
 		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
 	var value core.Value
-	if !core.ParseJSON(r.Alloc, []byte(encoded), &value) { return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "invalid inspection roots")} }
+	if !core.ParseJSON(r.Alloc, []byte(encoded), &value) { r.Program.CancelInspection(); return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "invalid inspection roots")} }
 	defer value.Free(r.Alloc)
-	if value.Kind != core.List || len(value.List) == 0 { return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be a nonempty string array")} }
+	if value.Kind != core.List || len(value.List) == 0 { r.Program.CancelInspection(); return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be a nonempty string array")} }
 	targets := slices.Make[string](r.Alloc, len(value.List))
 	defer slices.Free(r.Alloc, targets)
 	for i := range value.List {
-		if value.List[i].Kind != core.String || value.List[i].Text == "" { return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be nonempty strings")} }
+		if value.List[i].Kind != core.String || value.List[i].Text == "" { r.Program.CancelInspection(); return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be nonempty strings")} }
 		targets[i] = value.List[i].Text
 	}
 	var buffer = bytes.NewBuffer(r.Alloc, nil)
-	d := r.Program.WriteInspection(&buffer, targets, depth, "plan")
+	kind := "plan"
+	if affected { kind = "affected" }
+	d := r.Program.WriteInspection(&buffer, targets, depth, kind)
 	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
 	if d.Code != "" { program.WriteJSONDiagnostic(&buffer, d); d.Free(r.Alloc) }
 	out := PureResult{Text: pureText(r.Alloc, buffer.String())}
