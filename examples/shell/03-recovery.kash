@@ -13,7 +13,7 @@ echo $result
 
 # Selecting a branch does not demand computations in the other branch.
 mode = "preview"
-if @(eq mode "preview")
+if (eq mode "preview")
     echo "preview only"
 else
     no-such-publication-command

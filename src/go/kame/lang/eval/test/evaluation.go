@@ -179,6 +179,42 @@ func TestEvaluatesContainersReferencesAndSpecialForms(t *testing.T) {
 	registry.Free()
 }
 
+func TestBindingNamesUseDefinitionGrammar(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	invalid := []string{
+		"(let [module/value 42] module/value)",
+		"(let [inputs/changed 42] inputs/changed)",
+		"(def module/value 42)",
+		"(def module/function [value] value)",
+		"(def invalid [module/value] module/value)",
+		"(def invalid [valid module/value] module/value)",
+	}
+	for i := range invalid {
+		result := evaluate(t, program, invalid[i])
+		if result.Diagnostic.Code != "DEF_INVALID" { t.Error("namespaced reference was accepted as a binding name or parameter") }
+		result.Free(a)
+	}
+	valid := []string{
+		"(let [inputs 42] inputs)",
+		"(let [value-name? 42] value-name?)",
+		"(def value-name! 42)",
+		"(let [] (def identity? [value-name!] value-name!) (identity? 42))",
+	}
+	for i := range valid {
+		result := evaluate(t, program, valid[i])
+		if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 { t.Error("ordinary binding name or parameter was rejected") }
+		result.Free(a)
+	}
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func TestIfAndOrWithMatchFormsAreLazy(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)

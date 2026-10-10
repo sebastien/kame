@@ -18,7 +18,7 @@ type newerInputState struct {
 
 // Scan authored source so selectors reached through helpers share the snapshot.
 func (p *Program) needsNewerInputs(entry *instance) bool {
-	return entry.Rule.Kind == rule.FileRule && strings.Contains(p.Parsed.Source.Text, "@<?")
+	return entry.Rule.Kind == rule.FileRule && (strings.Contains(p.Parsed.Source.Text, "@<?") || strings.Contains(p.Parsed.Source.Text, "inputs/changed"))
 }
 
 func (p *Program) freeNewerInputs(state *newerInputState) {

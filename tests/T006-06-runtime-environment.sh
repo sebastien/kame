@@ -82,10 +82,10 @@ task collected-cached :
 	printf %s @(COLLECTED_VALUE) > collected-log; printf x >> collected-runs
 kash-collected : ; [shell: kash env: [MODE: "kash"]]
 	value = (shell "printf %s \"$MODE\"")
-	printf %s \@(text (get value "stdout"))
+	printf %s (text (get value "stdout"))
 collected-denied : ; [shell: kash env: [MODE: "secret"]]
 	value = (shell "touch forbidden-collected")
-	\@(out (get value "status"))
+	(out (get value "status"))
 BAD = (shell "touch forbidden-phase")
 definition-phase : @(BAD) ; env "MODE=debug"
 CYCLE = (str CYCLE)
@@ -189,25 +189,25 @@ CONTENT = (text (read "./definition-input"))
 ./override : ./input
 	printf %s @(VALUE) > @>
 ./discovered : ./input ; [shell: kash]
-	@(yield (text (read "./extra")))
+	(yield (text (read "./extra")))
 ./constant : ./input
 	printf fixed > @>; printf x >> child-runs
 ./downstream : ./constant
 	cp @< @>; printf x >> parent-runs
 task read-task : ./input ; [shell: kash]
-	printf %s \@(text (read "./extra")) > task-output
+	printf %s (text (read "./extra")) > task-output
 	printf x >> task-runs
 task branch-task : ; [shell: kash]
-	printf %s \@(text (read (text (read "./selection")))) > branch-output
+	printf %s (text (read (text (read "./selection")))) > branch-output
 	printf x >> branch-runs
 ./branch-file : ; [shell: kash]
-	printf %s \@(text (read (text (read "./selection")))) > branch-file
+	printf %s (text (read (text (read "./selection")))) > branch-file
 	printf x >> branch-file-runs
 task definition-task : ; [shell: kash]
-	printf %s \@(CONTENT) > definition-output
+	printf %s $CONTENT > definition-output
 	printf x >> definition-runs
 ./definition-file : ; [shell: kash]
-	printf %s \@(CONTENT) > definition-file
+	printf %s $CONTENT > definition-file
 	printf x >> definition-file-runs
 KMK
   printf A > "$signatures/input"

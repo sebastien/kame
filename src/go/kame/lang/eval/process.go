@@ -162,11 +162,31 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		for state.Index < len(stage.Items) {
 			word := stage.Items[state.Index]
 			if word.Kind == expr.CommandSetup {
+				// Computed environments may fetch credentials. A dry-run defers
+				// this runtime boundary instead of demanding or fabricating a record.
+				if word.Text == "env" && p.DryRun { state.Index++; continue }
 				before := len(c.Effects)
 				beforePaths := len(c.WritePaths)
 				r := p.commandWord(word.Items[0], c)
 				if r.Waiting || r.Diagnostic.Code != "" { return r }
 				rememberArgumentEffects(state, c, before, beforePaths)
+				if word.Text == "env" {
+					if r.Value.Kind != core.Record { r.Free(c.Run); return failure(c.Run, "EXPR_INVALID", word.Span, "stage env requires a record of valid environment names and string values without NUL") }
+					for i := range r.Value.Record {
+						field := r.Value.Record[i]
+						if !processSetupKey(field.Key) || field.Value.Kind != core.String || strings.IndexByte(field.Value.Text, 0) >= 0 {
+							r.Free(c.Run)
+							return failure(c.Run, "EXPR_INVALID", word.Span, "stage env requires a record of valid environment names and string values without NUL")
+						}
+					}
+					for i := range r.Value.Record {
+						field := r.Value.Record[i]
+						state.Environment = slices.Append(state.Alloc, state.Environment, core.NewString(state.Alloc, field.Key+"="+field.Value.Text))
+					}
+					r.Free(c.Run)
+					state.Index++
+					continue
+				}
 				if word.Text == "async" {
 					if r.Value.Kind != core.Bool { r.Free(c.Run); return failure(c.Run, "EXPR_INVALID", word.Span, "async setup requires a boolean") }
 					async := r.Value.Bool

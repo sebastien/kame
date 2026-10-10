@@ -45,6 +45,8 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	p := mem.Alloc[Program](a)
 	p.Alloc, p.Engine, p.Eval, p.Parsed, p.Host = a, engine, compiled.Program, parsed, options.Host
+	// Build invocations have an argument frame even when no operands were given.
+	p.Eval.SetDefinitionArgs(nil)
 	configurationError := p.configureParameters(options.Defines, options.Parameters, options.Environment)
 	if configurationError.Code != "" {
 		result.Diagnostics = slices.Append(a, result.Diagnostics, configurationError)

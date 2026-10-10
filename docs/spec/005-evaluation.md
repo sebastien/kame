@@ -34,6 +34,34 @@ definition nodes use their owning program's explicitly configured policy, never
 an unrelated caller's broader grants. Unselected or unused computations perform
 no host effects.
 
+### Named execution context
+
+The ordinary names `inputs`, `outputs`, `inputs/changed`, and `args` expose typed
+lists from the current evaluation context. Lexical bindings take precedence,
+preserving existing user definitions and parameters with these names. Without
+a lexical binding they are aliases of `@<*`, `@>*`, `@<?`, and `@*`, respectively.
+Their availability, ordering, nearest-frame selection, and errors are identical
+to those selectors; they do not read files or launch processes by themselves.
+
+`inputs` includes normal prerequisites, excluding order-only prerequisites.
+`outputs` includes declared output identities, including a named task's logical
+output name, not just file artifacts. Both require a rule frame. `inputs/changed`
+requires a file-rule frame at recipe evaluation/rendering time; it is unavailable
+during planning/resolution or in task/service frames. Unavailable context reports
+`SEL_NO_CONTEXT`, and changed-input access in a disallowed phase reports
+`PHASE_INVALID`. Empty available lists are values, not missing context.
+
+`args` is the nearest function/Kash-call argument list, or the script invocation's
+literal operands when outside a call. Build invocations without operands expose
+an empty argument list. Named target parameters remain their existing bindings;
+they are not silently converted into `args`. Pure expression evaluators without
+an argument frame report `SEL_NO_CONTEXT`. Named values support ordinary list
+references such as `args.0` and `inputs/changed.0` with normal index diagnostics.
+
+Slash-separated reference names such as `inputs/changed` are not paths. Filesystem
+paths still require `/`, `./`, or `../`. Lazy scoped definitions and suspended or
+async evaluations retain the same frames as compact selectors.
+
 Parsing is context-independent. A demanded process substitution requires both
 a phase permitting process execution and the applicable run grant. Planning or
 resolution fails with `PHASE_INVALID`; absent grants fail with `CAP_DENIED`;

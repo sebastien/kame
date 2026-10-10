@@ -80,7 +80,7 @@ type StringPart struct {
 	Span source.Span
 	Expr *Expr
 	Brace bool
-	// Form retains Kash's parser boundary: $, ${, @, or $(.
+	// Form retains Kash's parser boundary: $, ${, (, selector, or $(.
 	Form string
 }
 
@@ -569,6 +569,14 @@ func (p *parser) reference() *Expr {
 		e := p.node(Name, start)
 		e.Text = p.s.Text[start:p.pos]
 		return e
+	}
+	// Slash-separated references are names, not implicit filesystem paths.
+	// Keep x/ tool names above on their existing dotted-name grammar.
+	for p.pos < len(p.s.Text) && p.s.Text[p.pos] == '/' {
+		p.pos++
+		segment := p.name()
+		if !segment.OK { p.error(start, p.pos, "expected reference name after /"); break }
+		name.Text, name.Span.End = p.s.Text[start:p.pos], p.pos
 	}
 	if p.pos == len(p.s.Text) || p.s.Text[p.pos] != '.' {
 		e := p.node(Name, start); e.Text = name.Text; return e

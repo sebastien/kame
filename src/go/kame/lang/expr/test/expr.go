@@ -114,6 +114,28 @@ func TestCommandCaptureRejectsUnsupportedAndMalformedSyntax(t *testing.T) {
 	plain.Free()
 }
 
+func TestNamespacedReferencesRemainDistinctFromPaths(t *testing.T) {
+	inputs := []string{"inputs/changed", "inputs/changed.0", "module/value", "./inputs/changed", "../inputs/changed", "/inputs/changed", "x/tool.name", "$(printf $inputs/changed)"}
+	kinds := []expr.Kind{expr.Name, expr.Reference, expr.Name, expr.Path, expr.Path, expr.Path, expr.Name, expr.CommandCapture}
+	for i := range inputs {
+		r := parse(t, inputs[i])
+		if len(r.Diagnostics) != 0 || r.Expr.Kind != kinds[i] { t.Error("namespaced reference changed path classification") }
+		formatted := expr.Format(t.Allocator(), r.Expr)
+		if formatted != inputs[i] { t.Error("formatting changed namespaced reference") }
+		copy := parse(t, formatted)
+		if len(copy.Diagnostics) != 0 || copy.Expr.Kind != kinds[i] { t.Error("namespaced reference failed to reparse") }
+		copy.Free()
+		mem.FreeString(t.Allocator(), formatted)
+		r.Free()
+	}
+	invalid := []string{"inputs/", "inputs//changed", "inputs/42"}
+	for i := range invalid {
+		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
+		if len(r.Diagnostics) == 0 { t.Error("invalid namespace segment was accepted") }
+		r.Free()
+	}
+}
+
 func TestCommandWordFormattingUsesSafeBareWords(t *testing.T) {
 	inputs := []string{
 		"$(\"echo\" \"hello\" \"--flag=value\" \"./file.txt\" \"*.c\")",
@@ -142,6 +164,31 @@ func TestCommandWordFormattingUsesSafeBareWords(t *testing.T) {
 		mem.FreeString(t.Allocator(), formatted)
 		copy.Free()
 		r.Free()
+	}
+}
+
+func TestCommandWordFormattingPreservesLiteralSlashSuffix(t *testing.T) {
+	a := t.Allocator()
+	inputs := []string{"$(echo \"$name\"/suffix)", "$(echo \"$name\"/)", "$(echo \"$inputs/changed\"/suffix)", "$(echo \"$name\"\"/suffix file\")"}
+	for i := range inputs {
+		parsed := parse(t, inputs[i])
+		formatted := expr.Format(a, parsed.Expr)
+		copy := expr.Parse(a, "formatted.km", formatted)
+		if len(copy.Diagnostics) != 0 {
+			t.Error("formatting made a literal slash suffix invalid")
+		} else {
+			before := parsed.Expr.Items[0].Items[1]
+			after := copy.Expr.Items[0].Items[1]
+			if after.Bool || len(after.Parts) != 2 || after.Parts[0].Expr == nil || after.Parts[0].Expr.Text != before.Parts[0].Expr.Text || after.Parts[1].Text != before.Parts[1].Text {
+				t.Error("formatting merged a slash suffix into a reference or enabled list splicing")
+			}
+			again := expr.Format(a, copy.Expr)
+			if formatted != again { t.Error("slash suffix formatting is not idempotent") }
+			mem.FreeString(a, again)
+		}
+		copy.Free()
+		mem.FreeString(a, formatted)
+		parsed.Free()
 	}
 }
 

@@ -43,8 +43,9 @@ interpreter is Kash. Generation still cannot perform host requests.
 Kash recipe scope includes build definitions, target arguments, target captures,
 and its rule input/output frame. Definitions and branch scopes retain ordinary
 lazy semantics. Rule selectors continue to resolve against that frame when used
-as expression atoms; they are not document-template expansions. Named selector
-aliases are not introduced by this specification.
+as expression atoms; they are not document-template expansions. The named context
+aliases `inputs`, `outputs`, `inputs/changed`, and `args` follow the selector
+contracts in `005-evaluation.md`.
 
 Authored text, expression results, argv values, and captured output must never
 be implicitly reparsed as source. There is no template layer to escape through:

@@ -54,8 +54,12 @@ cases = [
     ('expr', '[]', '[]'),
     ('expr', f'"@(f {long} x)"', f'"@(f {long} x)"'),
     ('template', f'text @(f {long} x) end', f'text @(f {long} x) end'),
-    ('kash', f'value = (f {long} x)\necho @(value)\n',
-     f'value = (f {long} x)\n"echo" @(value)\n'),
+    ('kash', f'value = (f {long} x)\necho $value\n',
+     f'value = (f {long} x)\necho $value\n'),
+    ('expr', '$(echo "$name"/suffix)', '$(echo "$name"/suffix)'),
+    ('expr', '$(echo "$name"/)', '$(echo "$name"/)'),
+    ('kash', 'echo "$inputs/changed"/suffix\n', 'echo "$inputs/changed"/suffix\n'),
+    ('kash', 'echo "$name""/suffix file"\n', 'echo "$name""/suffix file"\n'),
 ]
 # Exact 80/81 columns, Unicode, definition prefixes and nested closing delimiters.
 for char in ('a', 'é'):

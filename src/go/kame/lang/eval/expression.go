@@ -102,6 +102,10 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	if len(name) > 2 && name[:2] == "x/" { return context.TrackedTool(name[2:], span) }
 	b := scope.lookup(name)
 	if b == nil {
+		if name == "inputs" { return context.Program.selector("@<*", span, context) }
+		if name == "outputs" { return context.Program.selector("@>*", span, context) }
+		if name == "inputs/changed" { return context.Program.selector("@<?", span, context) }
+		if name == "args" { return context.Program.selector("@*", span, context) }
 		if name == "kash" && context.Program != nil { return Result{Value: context.Program.KashConstructor()} }
 		if IsSpecialForm(name) { return failure(context.Run, "EXPR_INVALID", span, "special form is not a callable value: "+name) }
 		if context.Program != nil {

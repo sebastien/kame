@@ -103,9 +103,10 @@ requested after earlier groups complete, not a global barrier across targets.
 Canonical recipe indentation is one tab; additional shell indentation survives.
 The first body line establishes the prefix shared by nonblank body lines.
 All rendered lines execute as one shell script, so `cd`, variables, and shell
-control flow persist. Shell recipes are opaque text; selecting `[shell: kash]`
-uses the Kash parser after template expansion. Interpolation does not
-automatically shell-quote values.
+control flow persist. System-shell recipes retain document-template expansion;
+interpolation does not automatically shell-quote values. Selecting `[shell: kash]`
+or `SHELL = kash` parses the authored body directly as Kash. Use `$reference`
+and `(EXPRESSION)` for typed argv, without serialization or template escaping.
 Header settings `; [shell: kash env: [MODE: mode]]` resolve purely before
 prerequisite execution; `shell` overrides build-wide `SHELL`. The legacy suffix
 `; env "MODE=release"` is an alternative, not an additional metadata record.
@@ -116,6 +117,12 @@ since the successful run; missing outputs or records select all normal file
 inputs. Order-only prerequisites after `|` are excluded from input selectors.
 See [Templates](./templates.md) for selectors, inline expressions, and recipe
 document directives.
+
+The ordinary names `inputs`, `outputs`, and `inputs/changed` expose the lists
+corresponding to `@<*`, `@>*`, and `@<?`. `outputs` includes logical task names,
+not just file artifacts. Lexical bindings take precedence; missing rule context
+and disallowed changed-input access retain selector diagnostics. Use `$inputs`
+and `(first outputs)` in direct Kash, or `@(inputs)` in external-shell templates.
 
 | Expression while rendering | Build behavior |
 | --- | --- |

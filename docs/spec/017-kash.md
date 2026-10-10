@@ -5,7 +5,7 @@
 `038-direct-kash-and-values.md` refines this contract: Kash recipes parse
 directly, parenthesized Kame expressions replace `@(...)` boundaries, and every
 reached command head resolves as a tracked tool. Its action names and syntax
-take precedence over older spellings in the examples below.
+take precedence over action spellings in the examples below.
 
 Kash is Kame's command and process language. It makes command-oriented programs
 read like shell scripts while retaining Kame's typed values, lazy evaluation, and
@@ -54,7 +54,7 @@ A rule may override that selection with a metadata record:
 SHELL = kash
 
 build : ./input ; [env: [MODE: mode]]
-	printf '%s\n' "@(mode)"
+	printf "%s\n" $mode
 
 legacy : ; [shell: ["/bin/sh" "-c"]]
 	printf '%s\n' "$MODE"
@@ -69,7 +69,7 @@ complete definition value denotes the constructor; quote it to obtain a string.
 Kash recipes use **direct Kash parsing** under `038-direct-kash-and-values.md`.
 Template metaprogramming is explicit through `render` and a constructed Kash
 callable, not an implicit layer requiring escaped expression boundaries.
-The entire rendered script is parsed before any of its statements execute.
+The entire authored script is parsed before any of its statements execute.
 Statements share rule inputs, outputs, captures, build definitions and invocation
 arguments. Each rule joins its asynchronous work before verifying file outputs
 or publishing completion. Timeouts cover the whole recipe; retries start a fresh
@@ -174,14 +174,14 @@ definition. A definition right-hand side is one Kame expression, one Kash
 substitution, or a `??` composition of those operands:
 
 ```text
-VALUE = EXPRESSION | $REFERENCE | ${REFERENCE} | @(BOUNDARY)
+VALUE = EXPRESSION | $REFERENCE | ${REFERENCE}
 RHS = VALUE ("??" RHS)?
 ```
 
 The expression parser owns each `EXPRESSION` operand, including command
 substitution atoms; Kash owns their process contents, the other substitution
-wrappers, and recovery separators. `$REFERENCE`, `${REFERENCE}`, Kash's `@(...)`
-shorthand, and infix `??` are not added to ordinary Kame expressions: use
+wrappers, and recovery separators. `$REFERENCE`, `${REFERENCE}`,
+and infix `??` are not added to ordinary Kame expressions: use
 `(cat "Hello, " WHO)`, not `(cat "Hello, " $WHO)`. Existing Kame template
 expansions and expression-string interpolation retain their own rules. Functions
 retain Kame parameter and lazy evaluation semantics. All definition surfaces
@@ -202,13 +202,13 @@ the end of the line. `//` is literal command text, not a Kash comment.
 
 ## Expansion boundary
 
-Kash has four distinct substitutions:
+Kash has these explicit value/process boundaries:
 
 | Form | Parser | Meaning |
 | --- | --- | --- |
 | `$REFERENCE` | Kame reference parser | Resolve and insert a value from the current Kame scope. |
 | `${REFERENCE}` | Kame reference parser | Braced spelling of `$REFERENCE`. |
-| `@(EXPRESSION)` | Kame expression parser | Evaluate an arbitrary Kame expression and insert its value. |
+| `(EXPRESSION)` | Kame expression parser | Evaluate an ordinary parenthesized Kame expression and insert its typed value. |
 | `$(COMMAND)` | Kash statement parser | Run a Kash command or pipeline and capture its standard output. |
 
 ### References
@@ -230,7 +230,7 @@ operator or a braced reference to disambiguate.
 A `$` lookup never falls back to the operating-system environment. `$PATH` looks
 up the Kame binding `PATH`; it is an unknown reference when no such binding
 exists. Environment access remains explicit through `env.`, for example
-`$env.PATH` or `@(env.PATH)`.
+`$env.PATH` or `(nop env.PATH)`.
 
 `env` is a reserved, lazy environment namespace in Kash. Accessing a named field
 performs the corresponding Kame environment operation with its capability check
@@ -240,43 +240,25 @@ and captures may not bind `env`. No other name has an environment fallback.
 
 ### Kame expressions
 
-`@(EXPRESSION)` is Kash's explicit entry into Kame's expression and
-meta-programming layer. The boundary supports application shorthand without
-introducing new expression operators. Its contents are parsed as a
-whitespace-separated sequence of complete Kame expressions:
-
-- One expression evaluates directly: `@(options.release)`, `@([1 2])`, and
-  `@((map sources inspect))` evaluate that expression.
-- Two or more expressions use Kame's parenthesized-form parser, with parentheses
-  supplied by the boundary: `@(map sources inspect)` means `(map sources inspect)`.
-  Lambda and section recognition follow that parser's existing rules.
-- A top-level value pipe uses Kame's existing parenthesized pipe parser:
-  `@(sources | map render)` means `(sources | map render)`.
-- Empty contents are an error. Delimiters, strings, lambdas, patterns, sections,
-  and application/pipe rules otherwise remain those of Kame. `$(COMMAND)` is
-  allowed as a Kame expression atom; `$REFERENCE`, `${REFERENCE}`, nested Kash
-  boundary shorthand, and infix `??` are not Kame expression syntax.
-
-This wrapper composes existing expression and application parsers, not a second
-value grammar. It is the form for calls, functions, lists, records,
-patterns, templates, and transformations that are more than direct lookup:
+Parenthesized expressions delegate directly to the ordinary Kame expression
+parser; there is no wrapper shorthand or second value grammar. Use `$value`
+for a reference, `(nop [1 2])` for an inline list argument, and ordinary calls
+or value pipes for transformations. Expressions use Kame names, not `$` wrappers:
 
 ```kash
-emit @(replace source ".c" ".o")
-report @(map sources inspect)
+emit (replace source ".c" ".o")
+report (map sources inspect)
 ```
 
-`@(...)` does not create a Kash value model or evaluator. It evaluates to an
-ordinary Kame value and carries normal Kame dependencies, capabilities, failures,
-and source spans.
+Values carry ordinary Kame dependencies, capabilities, failures, and authored
+source spans. A statement-leading expression evaluates for effects and discards
+the result. Use a reference at the command head for a computed executable.
 
-`@NAME` and `@tmpl(...)` are reserved Kash meta-programming forms for generated
-syntax and templates. They are not value substitutions and do not change the
-meaning of `$REFERENCE`, `@(EXPRESSION)`, or `$(COMMAND)`. Their quoting and
-hygiene rules require a separate macro/template specification.
-
-Until that specification exists, unquoted `@NAME` and `@tmpl(...)` produce a
-reserved-syntax diagnostic. Quote or escape a literal `@` to pass it to a command.
+Legacy unquoted `@(...)`, escaped `\@(...)`, and template directives are invalid
+Kash syntax, with no compatibility alias. Quoted interpolation-looking argument
+data remains inert. Kame expression strings and document/path templates retain
+their separate interpolation contracts. Explicit generated Kash uses `(kash TEXT)`,
+optionally with `render`; argv values and captured output are never compiled.
 
 ### Command substitution
 
@@ -348,7 +330,7 @@ Kash command arguments are typed value positions, not shell word-expansion
 positions. A string expansion supplies one argument even when it contains
 whitespace. Expansions are not re-split, implicitly globbed, or reparsed as
 shell syntax. A raw `*.go` is therefore literal; a filesystem wildcard is an
-explicit Kame value, such as `@(wildcard ./src/**/*.go)`.
+explicit Kame value, such as `(wildcard ./src/**/*.go)`.
 
 ### Words, quoting, and argv conversion
 
@@ -363,7 +345,7 @@ newline continues the statement without inserting text. Inside double quotes,
 `\"`, `\\`, `\n`, `\r`, `\t`, `\$`, and `\@` are supported; other escapes
 are errors. Quoted or escaped operators are literal. Command quotes are Kash
 word syntax, not expression strings: `{(...)}` has no interpolation meaning.
-Inside `@(...)`, the existing Kame string and escape rules apply instead.
+Inside Kame expressions, the existing Kame string and escape rules apply instead.
 
 A word consisting solely of an unquoted substitution preserves its typed value
 until argv conversion:
@@ -388,9 +370,10 @@ it has one item. Executables, arguments, environment entries, and filesystem
 paths must be free of NUL bytes. Processes execute argv directly, using host
 PATH lookup for an executable without a path separator; no shell interprets it.
 
-Executable PATH resolution uses the stage's configured environment, not a Kame
-binding named `PATH`. Choosing a process environment is distinct from reading
-an environment variable into a Kame value.
+Executable resolution uses the driver's startup PATH and tool overrides, not
+stage environment PATH changes or a Kame binding named `PATH`, as specified by
+`038-direct-kash-and-values.md`. Choosing a child environment is distinct from
+reading an environment variable into a Kame value.
 
 A command may use `run` setup keys for process configuration:
 
@@ -404,10 +387,10 @@ arguments.
 In raw Kash, setup keys precede the executable and use `:KEY VALUE` pairs:
 
 ```kash
-:cwd $build-dir :timeout @(10) :NODE_ENV production npm test
+:cwd $build-dir :timeout (nop 10) :NODE_ENV production npm test
 ```
 
-Each setup value is one scalar word or substitution, never a list splice.
+Except for `:env`, each setup value is one scalar word or substitution, never a list splice.
 `:cwd` is a directory relative to the invocation directory, `:timeout` is a
 positive number of seconds, and other keys matching `[A-Za-z_][A-Za-z0-9_]*`
 are environment overrides. Duplicate keys are errors. The process environment
@@ -416,6 +399,46 @@ lookup still requires `env` access. Quoted or escaped leading colons are literal
 After the executable, colon-prefixed words are ordinary arguments. Each pipeline
 stage has independent setup keys. Reserved setup keys are not environment
 overrides. Invalid paths, keys, values, and missing executables are errors.
+
+### Computed stage environments
+
+`:env VALUE` accepts a typed record of environment assignments:
+
+```kash
+exports = [TOKEN: (env "DEPLOY_TOKEN") MODE: "release"]
+:env $exports :MODE preview deploy
+```
+
+Expression-level process applications share the same contract, for example
+`(run :env exports "deploy")`. The record is evaluated only when that stage is
+reached at execution time, under ordinary capabilities and phase checks. Parsing,
+planning, dry-run, construction, and unselected branches do not fetch secrets or
+execute its effects. Reading values through `env` still requires the relevant
+environment grant; supplying a record does not grant read or run authority.
+
+Keys must match `[A-Za-z_][A-Za-z0-9_]*`, and values must be strings without NUL.
+Empty strings are valid; nil, numbers, booleans, collections, bytes, and callables
+are not implicitly converted. An empty record is a no-op, not an empty child
+environment; construct one with `(parse-json "{}")`. Validate the entire record
+before consuming any assignments or launching the graph. Invalid values report
+`EXPR_INVALID` at the authored setup boundary, never with evaluated record data.
+
+The child starts with the inherited invocation/rule environment. Apply `:env`
+record entries and ordinary `:KEY` overrides in authored setup order; the last
+assignment to a name wins. Duplicate authored setup keys, including two `:env`
+keys in one stage, remain syntax errors. Record keys such as `cwd` and `timeout`
+are environment names, not process settings. Overrides belong only to that
+stage: they do not change later statements, other pipeline stages, Kame's `env`
+namespace, executable lookup, or parent/rule context.
+
+Suspension retains evaluated assignments and their effects without replay;
+dependency tracking retains the computations/observations used to obtain them
+for freshness and watch invalidation. Environment payloads are sent to the host
+for launch, but computed values are omitted from diagnostic messages and normal
+human/JSON lifecycle traces. Do not embed evaluated records in error causes.
+Authored source excerpts, explicit output, argv values, and child output are not
+secret channels and are not automatically redacted; callers must not print or
+place secrets in those channels.
 
 The expression-level `run` additionally accepts `:async` with a boolean value;
 true returns a process handle instead of awaiting completion. This key is
@@ -479,11 +502,11 @@ rollback or atomic-output guarantee is implied.
 Kame's value pipe remains distinct and is used inside an expression boundary:
 
 ```kash
-emit @(sources | map render)
+emit (sources | map render)
 ```
 
 The pipe between raw command stages is a process stream; the pipe inside
-`@(...)` has the value-pipe semantics specified by `004-language.md`.
+Parenthesized expressions have the value-pipe semantics specified by `004-language.md`.
 
 ## Process lifecycle and recovery
 
@@ -510,8 +533,8 @@ or value operands; terminal `&` is not a definition RHS. A handle can be bound
 using an explicit Kame process operation instead:
 
 ```kash
-job = @(run :async :true "watch-assets")
-completion = @(await job)
+job = (run :async :true "watch-assets")
+completion = (await job)
 ```
 
 Both definitions remain lazy: defining `job` does not start it, and defining
@@ -555,7 +578,7 @@ These forms are deliberately distinct. `CMD?` accepts a process exit;
 expression.
 
 `??` is valid only in Kash value compositions, including definition RHSs; it is
-not a raw-command operator or an operator inside `@(...)`. It handles ordinary
+not a raw-command operator or an operator inside Kame expressions. It handles ordinary
 evaluation failures, including unknown references, host read failures, and
 substitution exit/launch/timeout/capture failures, but never capability denial,
 cancellation, or source/argument validation errors. Waiting for a host result is
@@ -601,7 +624,7 @@ headers cannot share a line with another statement.
 
 `if` selects a branch. Its condition is either a raw command — evaluated for its
 exit status, where zero is true and non-zero is false — or an explicit Kame
-expression in `@(...)`, evaluated with Kame's truth rules. A command condition
+parenthesized expression, evaluated with Kame's truth rules. A command condition
 does not emit a failure diagnostic for a non-zero status; that is an implicit
 `CMD?` scoped to the condition. `$(...)` is not a valid condition, because every
 non-nil string is true under Kame truth, so it would always be true.
@@ -617,20 +640,20 @@ suspension and resumption for host requests.
 ```kash
 if test -f ./build/app
 	gcc -o build/app src/app.c
-elif @(options.release)
+elif (nop options.release)
 	gcc -O2 -o build/app src/app.c
 else
 	report "nothing to build"
 ```
 
 `match` selects a branch by pattern, reusing the pattern clauses of the Kame
-`match` form in `004-language.md`. Its subject is a value — `@(...)` or
+`match` form in `004-language.md`. Its subject is a value — a Kame expression or
 `$(...)` — and each `case` names a match pattern. The first matching case runs
 and its named captures bind as `$name` references within that arm; `else` is the
 optional fallback.
 
 ```kash
-match @(target)
+match $target
 	case ./src/{name:*}.c
 		cc -c ${name}.c
 	else
@@ -713,7 +736,7 @@ AST node and source span. Lowering Kash nodes to `run`, `pipe`, and associated
 process operations must preserve Kame's laziness, capability checks, dynamic
 dependencies, and diagnostics. Block control statements lower to the Kame `if`
 and `match` special forms: a command condition lowers to a process-status
-predicate, an `@(...)` condition to the Kame expression, a `match` subject to a
+predicate, a parenthesized condition to the Kame expression, a `match` subject to a
 value, and each branch body to a nested Kash statement sequence.
 
 Pipeline lowering is descriptive, not eager evaluation of independent `run`
@@ -726,11 +749,11 @@ owning execution and generation; stale completions cannot satisfy a newer run.
 
 Formatting must preserve the parser boundary:
 
-- `$REFERENCE`, `${REFERENCE}`, `@(EXPRESSION)`, and `$(COMMAND)` retain their
+- `$REFERENCE`, `${REFERENCE}`, `(EXPRESSION)`, and `$(COMMAND)` retain their
   distinct forms.
 - Block keywords `if`, `elif`, `else`, `match`, and `case` remain on their own
   line, and each nested block is one tab deeper than its keyword.
-- A Kame expression inside `@(...)` is formatted by the Kame expression
+- A parenthesized Kame expression is formatted by the Kame expression
   formatter, preserving the single-expression versus parenthesized-form boundary.
 - A nested command substitution is formatted by the Kash formatter.
 - Command substitutions embedded in Kame expressions also delegate their
@@ -740,7 +763,7 @@ Formatting must preserve the parser boundary:
   whitespace, literal syntax characters, grammar-sensitive words, and scalar
   substitutions whose unquoted spelling would enable list splicing.
 
-Malformed references are Kame reference errors, malformed `@(...)` contents are
+Malformed references are Kame reference errors, malformed parenthesized expressions are
 Kame expression errors, and malformed `$(...)` contents are Kash command errors.
 Diagnostics must identify the enclosing Kash source and the precise embedded
 span.
@@ -757,17 +780,17 @@ live forwarding and explicit capture remain separate channels.
 
 - `$name`, `$project.name`, and `${name}` resolve the same Kame bindings.
 - `$PATH` does not read the environment, while `$env.PATH` does.
-- `@(EXPRESSION)` accepts the complete Kame expression grammar and preserves
+- Parenthesized expressions use the Kame expression grammar and preserve
   values without string splitting.
 - `$(COMMAND)` captures stdout and does not parse its contents as Kame syntax.
 - Command arguments containing whitespace remain one argument.
-- A raw wildcard is literal; `@(wildcard PATH)` is evaluated as a Kame wildcard.
-- Raw command pipelines stream process data; expression pipes inside `@(...)`
+- A raw wildcard is literal; `(wildcard PATH)` is evaluated as a Kame wildcard.
+- Raw command pipelines stream process data; parenthesized expression pipes
   use Kame value-pipe behavior.
 - `CMD?` retains diagnostics for accepted non-zero exits.
 - `LEFT ?? RIGHT` evaluates the fallback only for a nil or failed left side.
 - An `if` command condition is true on exit zero and false on a non-zero exit
-  without a failure diagnostic; an `@(...)` condition uses Kame truth.
+  without a failure diagnostic; a parenthesized condition uses Kame truth.
 - `match`/`case` selects the first matching pattern, binds named captures as
   `$name` in that arm, and falls to `else` when nothing matches.
 - Only the selected control-statement branch runs; an unselected branch's

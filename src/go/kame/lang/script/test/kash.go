@@ -98,6 +98,27 @@ func TestDirectKashExpressionsKeepAuthoredBoundaries(t *testing.T) {
 	if formatted != again { t.Error("direct Kash formatting is not idempotent") }
 }
 
+func TestKashRejectsLegacyBoundariesButKeepsQuotedData(t *testing.T) {
+	a := t.Allocator()
+	invalid := []string{"printf @(name)", "printf \\@(name)", "@(out \"bad\")", "value = @(name)", "if @(name)\n  printf bad", "match @(name)\n  case \"x\"\n    printf bad", "printf > @(name)", ":cwd @(name) printf bad", "@if(:true)"}
+	for i := range invalid {
+		s := script.ParseKash(a, "legacy.kash", invalid[i])
+		if len(s.Diagnostics) == 0 { t.Error("legacy Kash boundary was accepted") }
+		s.Free()
+	}
+	text := "printf \"@(missing) {(missing)}\" \"\\@(missing)\"\n"
+	s := script.ParseKash(a, "data.kash", text)
+	defer s.Free()
+	if len(s.Diagnostics) != 0 { t.Fatal("quoted interpolation-looking data failed to parse"); return }
+	words := s.Items[0].Expression.Items[0].Items
+	if len(words[1].Parts) != 1 || words[1].Parts[0].Expr != nil || words[1].Parts[0].Text != "@(missing) {(missing)}" { t.Error("quoted data became an expression") }
+	formatted := script.Format(a, s)
+	defer mem.FreeString(a, formatted)
+	copy := script.ParseKash(a, "canonical.kash", formatted)
+	defer copy.Free()
+	if len(copy.Diagnostics) != 0 || copy.Items[0].Expression.Items[0].Items[1].Parts[0].Text != words[1].Parts[0].Text { t.Error("formatting changed inert argument data") }
+}
+
 func TestKashMatchRetainsSubjectAndArmBoundaries(t *testing.T) {
 	a := t.Allocator()
 	s := script.ParseKash(a, "match.kash", "match $(printf main.c)\n  case \"{name:*}.c\"\n    local = name\n    printf $local\n  else\n    printf no\nprintf after\n")

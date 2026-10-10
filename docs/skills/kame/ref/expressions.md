@@ -44,6 +44,13 @@ where to insert the value. This is value transformation, not a process pipe.
 See [Library](./library.md) for operation signatures; do not infer operand
 order from another language.
 
+Named execution context is available where a matching frame exists: `args` is
+the nearest argument list, while `inputs`, `outputs`, and `inputs/changed` expose
+the rule lists corresponding to `@<*`, `@>*`, and `@<?`. Lexical bindings take
+precedence. Unavailable access reports `SEL_NO_CONTEXT`; changed inputs are
+runtime-only for file rules. `args.0` and `inputs/changed.0` use normal references.
+Names containing slash-separated segments are not implicit filesystem paths.
+
 ## Operation values
 
 Ordinary registered operations are first-class callables:

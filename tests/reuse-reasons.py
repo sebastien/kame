@@ -35,7 +35,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (project / 'input').write_text('unchanged')
     # Guarded reuse must skip derived-value evaluation, not merely publication.
     (project / 'extra.json').write_text('"A"')
-    guarded = 'SHELL = kash\nPAYLOAD = (parse-json (text (read "./extra.json")))\n./guarded : ./input\n\t@(yield PAYLOAD)\n'
+    guarded = 'SHELL = /bin/sh\nPAYLOAD = (parse-json (text (read "./extra.json")))\n./guarded : ./input\n\t@(yield PAYLOAD)\n'
     first = reasons(run(guarded, ['--json', './guarded']))
     # Native file-context reads expose an opaque failure; forwarding establishes absence.
     assert any(e['reason'] in ('record-missing', 'proof-unverifiable') for e in first), first
@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not any(e['type'] == 'process-started' for e in events)
     assert not any(e['type'] == 'dependency' and e['dependency']['resource']['kind'] == 'definition' for e in events)
     assert (project / 'guarded').stat().st_mtime_ns == stamp
-    # An unrelated source edit falls back once, without rewriting equal bytes.
+    # A template recipe can reevaluate without executing or rewriting equal bytes.
     guarded += 'UNUSED = "unrelated"\n'
     changed = reasons(run(guarded, ['--json', './guarded']))
     assert any(e['reason'] == 'guard-changed' and e['decision'] == 'reevaluate' for e in changed), changed
@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (project / 'guarded').read_text() == 'B'
 
     # Effective configuration changes invalidate the guard without leaking values.
-    configured = 'SHELL = kash\nPAYLOAD ?= "default"\n./configured : ./input\n\t@(yield PAYLOAD)\n'
+    configured = 'SHELL = kash\nPAYLOAD ?= "default"\n./configured : ./input\n\t(yield PAYLOAD)\n'
     config_args = ['--json', '--define', 'PAYLOAD=before-config', './configured']
     run(configured, config_args)
     assert not reasons(run(configured, config_args))
@@ -104,10 +104,10 @@ with tempfile.TemporaryDirectory() as temporary:
     assert any(e['reason'] == 'forced' and e['decision'] == 'execute' for e in forced), forced
     human = run(explain, ['--output', 'text', '--force', './explained'])
     assert human.stdout == '' and '[./explained] execute: forced execution' in human.stderr, human
-    always = 'SHELL = kash\nalways ./explained : ./input\n\t@(yield "always")\n'
+    always = 'SHELL = kash\nalways ./explained : ./input\n\t(yield "always")\n'
     selected = reasons(run(always, ['--json', './explained']))
     assert any(e['reason'] == 'always' for e in selected), selected
-    named = 'SHELL = kash\n./named-env : ./input\n\t@(yield (env "REASON_NAMED"))\n'
+    named = 'SHELL = kash\n./named-env : ./input\n\t(yield (env "REASON_NAMED"))\n'
     named_args = ['do', 'run', '--json', '--allow-read', '--allow-write', '--allow-env=REASON_NAMED', 'Makefile.kmk', '--entry', './named-env']
     run(named, named_args, environment={'REASON_NAMED': 'before-secret'})
     changed = run(named, named_args, environment={'REASON_NAMED': 'after-secret'})

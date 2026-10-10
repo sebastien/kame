@@ -1,5 +1,6 @@
 # CLI conformance test catalog. One row per test script.
 # Columns: file<TAB>spec<TAB>category<TAB>covers
+tests/T017-20-kash-context-environment.sh	017	kash	Expression statements, computed stage env records, ordered local overrides, validation and secret-safe traces, named args/inputs/outputs/changed inputs, rule-frame retention and native/WASM formatting parity
 tests/T036-01-cli-presentation.sh	036	cli	Native/WASM presentation modes, global options, exact bytes, JSON results, static errors, watch boundaries and terminal fallback
 tests/T036-02-cli-reuse-reasons.sh	036	cli	Native/WASM file and task reuse reasons, missing/corrupt records, guard/input/output/configuration/environment changes, force/always, deduplication and privacy
 tests/T004-16-lang-computed-outputs.sh	004	lang	Pure computed output paths and names, captures, list flattening, overrides, validation, diagnostics, formatting and native/WASM parity

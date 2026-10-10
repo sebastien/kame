@@ -4,6 +4,7 @@ package eval
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
 	"solod.dev/so/mem"
@@ -65,7 +66,7 @@ func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span 
 	defer child.Free()
 	for i := 0; i < len(values[0].Items); i += 2 {
 		name := values[0].Items[i]
-		if name.Kind != expr.Name {
+		if name.Kind != expr.Name || !definition.ValidName(name.Text) {
 			return failure(context.Run, "DEF_INVALID", name.Span, "let binding needs a name")
 		}
 		if context.ReserveEnv && name.Text == "env" { return failure(context.Run, "DEF_INVALID", name.Span, "env is reserved in Kash") }
@@ -83,7 +84,7 @@ func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span 
 
 func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
 	scope.Mutable = true
-	if len(values) < 2 || values[0].Kind != expr.Name {
+	if len(values) < 2 || values[0].Kind != expr.Name || !definition.ValidName(values[0].Text) {
 		return failure(context.Run, "DEF_INVALID", span, "def needs a name and value")
 	}
 	if context.ReserveEnv && values[0].Text == "env" { return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash") }
@@ -92,7 +93,7 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 		parameters := slices.Make[expr.Parameter](context.Run, len(values[1].Items))
 		for i := range values[1].Items {
 			parameter := values[1].Items[i]
-			if parameter.Kind != expr.Name || (parameter.Rest && i != len(values[1].Items)-1) {
+			if parameter.Kind != expr.Name || !definition.ValidName(parameter.Text) || (parameter.Rest && i != len(values[1].Items)-1) {
 				for j := 0; j < i; j++ {
 					mem.FreeString(context.Run, parameters[j].Name)
 				}

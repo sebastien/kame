@@ -120,8 +120,10 @@ Use the unified runner where supported:
   duplicate top-level definitions are errors, not reassignment.
 - Entries belong to the preceding `km`/`kmk` fragment; use `--entry NAME` for
   an entry resembling a source filename. Kash/expr fragments have no entries.
-- Arguments after `--` bind the shared `args` frame. Recipe-local `cd`, shell
-  variables, or exports never mutate the parent Kame session.
+- Arguments after `--` bind the shared `args` list (`@*`), with indexed access
+  through `args.0`. Function/Kash-call arguments temporarily supply the nearest
+  argument frame. Builds with no operands expose `[]`. Recipe-local `cd`, shell
+  variables, or stage environment overrides never mutate the parent session.
 - Relative source filenames and resource paths resolve under the selected `-C`
   directory, regardless of option order; includes remain source-relative.
   Do not assume execution changes directory to the source file's location.

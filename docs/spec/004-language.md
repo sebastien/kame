@@ -108,6 +108,11 @@ Runs of underscores and underscore-prefixed digit names such as `_`, `__`, and
 `_0` remain ordinary names everywhere except inside placeholder sections, where
 the grammar of `014-patterns.md` claims them.
 
+A reference's root may contain slash-separated name segments, for example
+`inputs/changed` or `inputs/changed.0`. Each segment follows `NAME`; the slash
+does not make the reference a path. `x/NAME` retains its dedicated tool-name
+grammar. Definitions and parameters retain their ordinary `NAME` grammar.
+
 ### Paths
 
 A path is explicit when it begins with `/`, `./`, or `../`. No other string is
@@ -700,10 +705,15 @@ that prefix and preserves further indentation; a shorter or different prefix
 ends the rule or reports `PARSE_ERR` when still indented. Canonical formatting
 uses one tab for each recipe line.
 
-All rendered body lines become one shell script. The parser does not parse shell
-syntax.
+For external shells, all rendered body lines become one shell script. Kame does
+not parse that shell syntax. `SHELL = kash` or per-rule `[shell: kash]` instead
+selects direct Kash parsing under `038-direct-kash-and-values.md`: the entire
+authored body is parsed before execution, with no document-template pass. Kash
+uses `$reference` and `(EXPRESSION)` for typed values; legacy `@(...)` and
+`\@(...)` structural boundaries are invalid. Generated Kash is explicit through
+`(kash TEXT)`. Argument values remain inert data.
 
-A recipe body is a `plain`-style document template (`016-templates.md`). A
+An external-shell recipe body is a `plain`-style document template (`016-templates.md`). A
 whole-line, keyword-gated directive (`@if`, `@elif`, `@else`, `@for`, `@with`,
 `@let`, `@include`, `@raw`, `@end`) is removed together with its rule indent and
 line ending and contributes no shell text; the selected body lines render as

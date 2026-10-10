@@ -55,6 +55,28 @@ KMK
 	check '' ./nested/output
 	if [ "$(cat "$work/nested/output")" = artifact ] && [ ! -e "$work/forbidden" ]; then test-ok "$backend data is never reparsed and selectors retain the frame"; else test-fail "$backend direct data or publication"; fi
 	check 'generated-direct' generated
+	test-step "$backend typed argv needs no source serialization or escaping"
+	cat >"$work/Makefile.kmk" <<'KMK'
+SHELL = kash
+data = ["" "two words" "line\nbreak" "\"quotes\"" """$missing @(missing) {(missing)}""" """\@(missing)"""]
+script = (kash """printf "<%s>" $data""")
+chosen :
+	printf "<%s>" $data
+	printf "<%s>" (nop data)
+	printf "<%s>" "@(missing) {(missing)}"
+captured :
+	printf "<%s>" $(printf "%s" "@(missing) {(missing)}")
+callable :
+	(script)
+explicit :
+	generated = (kash (render """printf "%s" "@(name)" """ [name: "explicit"] "plain"))
+	(generated)
+KMK
+	argv_expected=$'<><two words><line\nbreak><"quotes"><$missing @(missing) {(missing)}><\\@(missing)>'
+	check "${argv_expected}${argv_expected}<@(missing) {(missing)}>" chosen
+	check '<@(missing) {(missing)}>' captured
+	check "$argv_expected" callable
+	check explicit explicit
 	test-step "$backend selected syntax is checked before any statement executes"
 	cat >"$work/Makefile.kmk" <<'KMK'
 SHELL = kash
@@ -66,9 +88,10 @@ KMK
 	reject PARSE_ERR chosen
 	reject PARSE_ERR --dry-run chosen
 	test-step "$backend migration diagnostics and external-shell templates"
-	for source in 'printf @(name)' '\@(out "forbidden")' '@if(:true)'; do
+	for source in 'printf @(name)' '\@(out "forbidden")' 'name = @(out "forbidden")' ':cwd @(name) printf forbidden' 'printf forbidden > @(name)' '@if(:true)'; do
 		printf 'SHELL = kash\nchosen :\n\t%s\n' "$source" >"$work/Makefile.kmk"
 		reject PARSE_ERR chosen
+		reject PARSE_ERR do run --allow-run --lang kash -c "$source"
 	done
 	cat >"$work/Makefile.kmk" <<'KMK'
 name = "external"

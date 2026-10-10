@@ -5,11 +5,11 @@ names = ["world" "hello" "hello"]
 printf "%s\n" $names | sort | uniq
 
 # The inner pipe transforms a Kame value before starting a process.
-printf "%s\n" @(names | unique | sorted)
+printf "%s\n" (names | unique | sorted)
 
 # The result is captured as one string, with its trailing newlines preserved.
 listing = $(printf "%s\n" $names | sort | uniq)
-echo @(count listing)
+echo (count listing)
 
 # Writing the report is explicit, not an effect of computing its path.
 report = ./report.txt

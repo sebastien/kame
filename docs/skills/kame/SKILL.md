@@ -36,7 +36,7 @@ a rule program. See [CLI](./ref/cli.md) for invocation and capability policy.
 3. **Keep language boundaries explicit.** Use expressions for values, document
    directives for text structure, rule headers for dependencies, and Kash for
    direct process graphs. Recipes default to shell text; `SHELL = kash` or
-   `; [shell: kash]` explicitly selects Kash after template expansion.
+   `; [shell: kash]` selects direct Kash parsing, without template expansion.
 4. **Compose without erasing context.** File-backed `include ./path.km` or
    `include ./path.kmk` is relative to its containing source. `do run` can share
    definitions across ordered fragments; changing parsers must not add grants.
@@ -100,7 +100,7 @@ Keep these boundaries distinct:
 - Document templates use `@if`, `@for`, `@with`, `@let`, `@include`, `@match`,
   `@case`, `@raw`, and `@end` directives, optionally inside host-language comments.
   Blocks can also be inline; labeled endings such as `@end(for)` are supported.
-- Kash `$name` looks up a Kame value; `@(EXPRESSION)` computes a typed argument;
+- Kash `$name` looks up a Kame value; `(EXPRESSION)` computes a typed argument;
   `$(COMMAND)` captures a Kash process's stdout. Lists splice argv only as
   standalone unquoted substitutions; no implicit shell splitting or globbing.
 - `$(COMMAND)` is also an expression atom, but requires process authority and
@@ -108,6 +108,10 @@ Keep these boundaries distinct:
   text leaves it to the selected recipe interpreter.
 - `@<` and `@>` need rule context. Target captures `{name}` in rule headers
   are not document interpolation or expression-pattern expansion rules.
+- `inputs`, `outputs`, `inputs/changed`, and `args` name the typed lists behind
+  `@<*`, `@>*`, `@<?`, and `@*`; lexical bindings may shadow them. Slash-separated
+  references are names, not paths. `:env $EXPORTS` supplies a stage-local string
+  record, evaluated at runtime, not during loading or dry-run.
 
 Do not assume GNU Make compatibility beyond the documented mappings. In
 particular, imports, implicit rules, `eval`, `define`, target-specific variables,

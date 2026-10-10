@@ -24,7 +24,7 @@ func ParseCommandPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
-// ParseKashValuePrefix adds Kash's standalone value wrappers, not word-list RHSs.
+// ParseKashValuePrefix adds Kash's reference wrappers, not word-list RHSs.
 func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	// Kash owns top-level semicolons. Bound an atom's source view so number and
 	// path scanners keep Kame's grammar without swallowing the next statement.
@@ -42,7 +42,10 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	}
 	p := parser{a: a, s: bounded, pos: start, kash: true}
 	var e *Expr
-	if start < len(s.Text) && ((s.Text[start] == '$' && (start+1 == len(s.Text) || s.Text[start+1] != '(')) || (start+1 < len(s.Text) && s.Text[start:start+2] == "@(")) {
+	if start+1 < len(s.Text) && s.Text[start:start+2] == "@(" {
+		p.error(start, start+2, "legacy Kash @(...) is invalid; use (function arguments...) instead")
+		p.pos += 2
+	} else if start < len(s.Text) && s.Text[start] == '$' && (start+1 == len(s.Text) || s.Text[start+1] != '(') {
 		word := p.commandWord()
 		if word.Bool {
 			e = word.Parts[0].Expr
@@ -393,7 +396,7 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 			boundary := false
 			if part.Form == "$" && i+1 < len(e.Parts) && len(e.Parts[i+1].Text) != 0 {
 				c := e.Parts[i+1].Text[0]
-				boundary = isNameContinue(c) || c == '.' || c == '?' || c == '!'
+				boundary = isNameContinue(c) || c == '/' || c == '.' || c == '?' || c == '!'
 			}
 			if boundary && !quoted { b.WriteByte('"') }
 			if part.Form == "$(" {
@@ -407,7 +410,7 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 					b.WriteByte('}')
 				}
 			}
-			// Literal suffixes must not become reference names, fields or flags.
+			// Literal suffixes must not become reference namespaces, names, fields or flags.
 			if boundary {
 				if quoted { b.WriteString("\"\"") } else { b.WriteByte('"') }
 			}
