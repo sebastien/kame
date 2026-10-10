@@ -23,7 +23,7 @@ var Commands = [12]CommandInfo{
 	{Name: "parse", Usage: "kame do parse --lang LANG [FILE]", Summary: "inspect a language AST; omitted FILE reads stdin"},
 	{Name: "fmt", Usage: "kame do fmt [--lang LANG] [--indent tabs|spaces] [--indent-width N] [-i | -n] [FILE...]", Summary: "format exact source, replace files atomically, or check differences"},
 	{Name: "render", Usage: "kame do render [-c TEXT | FILE] [--define NAME=VALUE]... [--comment STYLE] [--check]", Summary: "render exact document bytes or check template syntax"},
-	{Name: "cat", Usage: "kame do cat [OPTIONS] [TARGET]", Summary: "materialize one artifact and print its exact bytes without an added newline"},
+	{Name: "cat", Usage: "kame do cat [OPTIONS] [TARGET]", Summary: "materialize one target and print file bytes or a definition value (text raw, other values as JSON) without an added newline"},
 	{Name: "cache", Usage: "kame do cache list|clean [-C DIR]", Summary: "inspect or remove managed cache records"},
 	{Name: "help", Usage: "kame do help [COMMAND]", Summary: "show the overview or command-specific help"},
 }

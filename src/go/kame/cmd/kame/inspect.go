@@ -2,6 +2,7 @@ package main
 
 import (
 	"kame/cli"
+	"kame/core"
 	"kame/diagnostic"
 	"kame/program"
 	"solod.dev/so/bytes"
@@ -165,8 +166,8 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 		if handle.Definition && handle.Node.Current {
 			if parsed.JSON {
 				program.WriteJSONEvent(out, program.Event{Kind: program.TargetValue, Target: targets[0], NodeID: handle.Node.ID, Generation: handle.Node.Generation, Attempt: handle.Node.Attempt, Key: handle.Node.Key, Value: handle.Node.Latest})
-			} else {
-				writeValue(out, handle.Node.Latest)
+			} else if !writeCatValue(out, errOut, handle.Node.Latest) {
+				return 1
 			}
 			return 0
 		}
@@ -271,6 +272,29 @@ func writeArtifact(out io.Writer, target string, data []byte) {
 		}
 		cli.WriteDataResult(out, "artifact", "", target, "", false, data[start:end], true)
 	}
+}
+
+// writeCatValue prints a definition value for human `do cat`: text and bytes
+// stay raw so pipelines receive exact content, while every other JSON-native
+// value prints as plain JSON without an added newline. Values without a JSON
+// representation fail with VAL_NOT_JSON instead of an invented encoding.
+func writeCatValue(out io.Writer, errOut io.Writer, value core.Value) bool {
+	if value.Kind == core.String {
+		out.Write([]byte(value.Text))
+		return true
+	}
+	if value.Kind == core.Bytes {
+		out.Write(value.Bytes)
+		return true
+	}
+	var data []byte
+	if !core.CatValueJSON(mem.System, value, &data) {
+		cliError(errOut, "VAL_NOT_JSON", "definition value has no JSON representation")
+		return false
+	}
+	out.Write(data)
+	mem.FreeSlice(mem.System, data)
+	return true
 }
 
 func parseGraphArguments(args []string, errOut io.Writer, command string) graphArguments {

@@ -33,7 +33,7 @@ wasm() {
 
 test-step "do cat prints definition values and file artifacts"
 wasm do cat GREETING
-if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '"hello"' ] && [ ! -s "$project/err.txt" ]; then
+if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = 'hello' ] && [ ! -s "$project/err.txt" ]; then
 	test-ok "cat definition value"
 else
 	test-fail "cat GREETING: status=$status out=$(cat "$project/out.txt")"
@@ -64,13 +64,18 @@ else
 	test-fail "cat arity: status=$status"
 fi
 
-test-step "cat prints a collected shell definition as a status record"
+test-step "cat prints a collected shell definition as JSON"
 (cd "$project" && "$CLI_BIN" do cat SHELLVAL) >"$project/native.shell" 2>/dev/null
 wasm do cat SHELLVAL
 if [ "$status" = 0 ] && cmp -s "$project/out.txt" "$project/native.shell"; then
 	test-ok "cat shell definition matches native status record"
 else
 	test-fail "cat shell: wasm=$(cat "$project/out.txt") native=$(cat "$project/native.shell")"
+fi
+if [ "$status" = 0 ] && python3 -c 'import json,sys; assert json.load(open(sys.argv[1])) == {"status":0,"stdout":"hi","stderr":"","signal":0}' "$project/out.txt"; then
+	test-ok "cat shell definition is JSON"
+else
+	test-fail "cat shell JSON: $(cat "$project/out.txt")"
 fi
 
 test-step "primary invocation prints definition values and builds files quietly"
@@ -90,7 +95,7 @@ fi
 
 test-step "source discovery honors -C and -c"
 wasm do cat -C "$project" GREETING
-if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '"hello"' ]; then
+if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = 'hello' ]; then
 	test-ok "cat resolves the source and target under -C"
 else
 	test-fail "cat -C: status=$status out=$(cat "$project/out.txt")"
@@ -100,6 +105,12 @@ if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '7' ]; then
 	test-ok "cat uses an inline source"
 else
 	test-fail "cat -c: status=$status out=$(cat "$project/out.txt")"
+fi
+wasm do cat -c 'value = ["alpha" "beta"]' value
+if [ "$status" = 0 ] && [ "$(cat "$project/out.txt")" = '["alpha","beta"]' ]; then
+	test-ok "cat prints lists as JSON"
+else
+	test-fail "cat list: status=$status out=$(cat "$project/out.txt")"
 fi
 
 test-end

@@ -143,6 +143,7 @@ meaning by themselves.
 | `OPT_VALUE_INVALID` | error | Invalid CLI option value |
 | `BUILD_NO_SOURCE` | error | No build source was found |
 | `NO_ARTIFACT` | error | Requested target has no readable artifact |
+| `VAL_NOT_JSON` | error | Human `do cat` definition value has no plain JSON representation |
 
 ## Rules
 

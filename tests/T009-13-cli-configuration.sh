@@ -65,7 +65,7 @@ for backend in native wasm; do
  KAME_SDK=environment "${runner[@]}" -C "$project" --define SDK=first --define='SDK=@(missing)=literal' default >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = '@(missing)=literal' ]; then test-ok "$backend repeated CLI precedence and literal data"; else test-fail "$backend precedence"; fi
  "${runner[@]}" do cat -C "$project" --define normal=override normal >"$project/value" 2>"$project/error"
- if [ "$(cat "$project/value")" = '"override"' ]; then test-ok "$backend ordinary definition override"; else test-fail "$backend value override"; fi
+ if [ "$(cat "$project/value")" = 'override' ]; then test-ok "$backend ordinary definition override"; else test-fail "$backend value override"; fi
   "${runner[@]}" do plan --json -C "$project" --define SDK=/opt/wasi-sdk default >"$project/plan" 2>"$project/error"
  if python3 - "$project/plan" <<'PY'
 import json,sys
@@ -73,7 +73,7 @@ assert json.load(open(sys.argv[1]))['producers'][0]['configuration']['SDK'] == '
 PY
  then test-ok "$backend effective plan value"; else test-fail "$backend plan configuration"; fi
  "${runner[@]}" do cat -C "$project" --define SDK= SDK >"$project/value" 2>"$project/error"
- if [ "$(cat "$project/value")" = '""' ]; then test-ok "$backend empty string override"; else test-fail "$backend empty override"; fi
+ if [ ! -s "$project/value" ]; then test-ok "$backend empty string override"; else test-fail "$backend empty override"; fi
  status=0
  "${runner[@]}" -C "$project" --define missing=value default >"$project/value" 2>"$project/error" || status=$?
  if [ "$status" = 1 ] && grep -q DEF_INVALID "$project/error" && [ ! -s "$project/value" ]; then test-ok "$backend unknown override before effects"; else test-fail "$backend unknown override"; fi

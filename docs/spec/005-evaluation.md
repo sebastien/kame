@@ -185,8 +185,8 @@ parallel.
 
 ## Value Display
 
-When a materialized value is written to stdout — a `do run` result, a
-definition value selected as a target, or a `do cat` definition value — it uses
+When a materialized value is written to stdout — a `do run` result or a
+definition value selected as a target — it uses
 one canonical notation that is also a valid Kame expression:
 
 | Kind | Notation |
@@ -210,7 +210,9 @@ Bytes are written raw and resources as their name; the grammar has no literal
 for either, so they are outside the notation. This notation is distinct from the
 `str` operation (`007-library.md`), which encodes lists and records as JSON-like
 text. `--json` emits structured values in its event schema instead of this
-notation.
+notation. Human `do cat` definition values use a different contract
+(`009-cli.md`): text and bytes stay raw while every other JSON-native value
+prints as plain JSON, so other programs can parse `cat` output directly.
 
 ## Functions
 

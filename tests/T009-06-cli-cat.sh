@@ -33,11 +33,11 @@ test-step "cat writes definition values without a trailing newline"
 	cd cat-basic
 	cli_run -- do cat GREETING
 	cli_expect_status 0
-	cli_expect_stdout '"hello"' 
+	cli_expect_stdout 'hello'
 
 	cli_run -- do cat LIST
 	cli_expect_status 0
-	cli_expect_stdout '["alpha" "beta" "gamma"]'
+	cli_expect_stdout '["alpha","beta","gamma"]'
 )
 
 test-step "cat prints an existing file that has no rule"
@@ -67,7 +67,7 @@ test-step "cat rejects a task without an artifact"
 test-step "cat selects the default target when none is given"
 cli_run -- do cat -c 'default = "value"'
 cli_expect_status 0
-cli_expect_stdout '"value"'
+cli_expect_stdout 'value'
 
 test-step "cat without a default fails with the available targets"
 cli_run -- do cat -c 'task first :'
@@ -99,5 +99,25 @@ test-step "cat adds no newline for artifact bytes"
 	cli_expect_status 0
 	cli_expect_stdout "no-newline-here"
 )
+
+test-step "cat prints non-text values as JSON without a trailing newline"
+cli_run -- do cat -c 'value = :true' value
+cli_expect_status 0
+cli_expect_stdout 'true'
+cli_run -- do cat -c 'value = :nil' value
+cli_expect_status 0
+cli_expect_stdout 'null'
+cli_run -- do cat -c 'value = 7' value
+cli_expect_status 0
+cli_expect_stdout '7'
+cli_run -- do cat -c 'value = [name: "value" count: 2]' value
+cli_expect_status 0
+cli_expect_stdout '{"name":"value","count":2}'
+
+test-step "cat rejects values without a JSON representation"
+cli_run -- do cat -c 'value = ./{name:*}.c' value
+cli_expect_status 1
+cli_expect_stderr_contains "VAL_NOT_JSON"
+cli_expect_stdout_empty
 
 test-end

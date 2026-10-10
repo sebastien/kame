@@ -3326,7 +3326,13 @@ async function runCat(module, inv, sourceDirectory) {
         const value = events.findLast((event) => event.type === 'target-value' && event.target === target);
         if (!value) throw Object.assign(new Error('typed artifact value unavailable'), { code: 'HOST_FAIL' });
         stdout.write(`${JSON.stringify(value)}\n`);
-      } else stdout.write(bytes);
+      } else {
+        const value = events.findLast((event) => event.type === 'target-value' && event.target === target);
+        if (!value) throw Object.assign(new Error('typed artifact value unavailable'), { code: 'HOST_FAIL' });
+        const output = catHumanOutput(value.value);
+        if (output === undefined) return failure('VAL_NOT_JSON', 'definition value has no JSON representation');
+        stdout.write(output);
+      }
       return 0;
     }
     if (kind === 2) {
@@ -3352,6 +3358,63 @@ function writeArtifact(target, bytes) {
   if (!jsonMode) { stdout.write(bytes); return; }
   if (!bytes.length) writeDataResult('artifact', { target }, bytes);
   for (let start = 0; start < bytes.length; start += 32768) writeDataResult('artifact', { target }, bytes.subarray(start, start + 32768));
+}
+
+// catHumanOutput renders a typed target-value for human `do cat`: text and
+// bytes stay raw so pipelines receive exact content, while every other
+// JSON-native value prints as plain JSON. Values without a JSON
+// representation yield undefined so the caller fails with VAL_NOT_JSON.
+function catHumanOutput(typed) {
+  if (!typed || typeof typed.kind !== 'string') return undefined;
+  if (typed.kind === 'string') return typed.data ?? '';
+  if (typed.kind === 'bytes') {
+    if (typed.encoding === 'base64') return Buffer.from(typed.data ?? '', 'base64');
+    return typed.data ?? '';
+  }
+  const plain = catPlainJSON(typed);
+  if (plain === undefined) return undefined;
+  return JSON.stringify(plain);
+}
+
+function catPlainJSON(typed, depth = 0) {
+  if (!typed || depth >= 256) return undefined;
+  switch (typed.kind) {
+    case 'nil': return null;
+    case 'bool': return !!typed.data;
+    case 'int': return typed.data;
+    case 'float': {
+      const n = typed.data;
+      if (typeof n !== 'number' || !Number.isFinite(n)) return undefined;
+      return Object.is(n, -0) ? 0 : n;
+    }
+    case 'string': return typed.data ?? '';
+    case 'bytes': {
+      // Nested bytes only survive as UTF-8 text; binary has no plain JSON form.
+      if (typed.encoding === 'base64') return undefined;
+      return typed.data ?? '';
+    }
+    case 'list': {
+      if (!Array.isArray(typed.items)) return undefined;
+      const out = [];
+      for (const item of typed.items) {
+        const v = catPlainJSON(item, depth + 1);
+        if (v === undefined) return undefined;
+        out.push(v);
+      }
+      return out;
+    }
+    case 'record': {
+      if (!Array.isArray(typed.fields)) return undefined;
+      const out = {};
+      for (const field of typed.fields) {
+        const v = catPlainJSON(field.value, depth + 1);
+        if (v === undefined) return undefined;
+        out[field.name] = v;
+      }
+      return out;
+    }
+    default: return undefined;
+  }
 }
 
 async function watchFingerprint(kind, name, metadata = false) {

@@ -122,7 +122,7 @@ kame -n ./build/app
 | `do inputs [--depth N] [TARGET]` | Reachable input files and separately labeled logical/configuration prerequisites. |
 | `do outputs [--depth N] [RESOURCE]` | Downstream declared outputs potentially affected by a resource change, including intermediate and sibling outputs; excludes the resource's own producer. |
 | `do span [--expand] [--depth N] [TARGET]` | Separate static inputs/outputs from evaluation-dependent inputs; `--json` retains the span document. `--expand` evaluates dynamic definitions without executing recipes. |
-| `do cat [TARGET]` | Materialize one target, then write its exact file bytes or definition value without a newline. |
+| `do cat [TARGET]` | Materialize one target, then write exact file bytes or a definition value (text raw, other JSON-native values as plain JSON) without a newline. |
 
 `plan`, `inputs`, and `outputs` default to depth `-1` (unlimited); `span` defaults
 to `1`. Depth `0` returns no dependency inventory; `1` reports direct resources.

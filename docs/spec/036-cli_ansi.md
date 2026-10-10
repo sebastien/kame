@@ -120,7 +120,9 @@ In human modes:
   output. Diagnostics remain available on stderr.
 - `do fmt` emits canonical source, not highlighted source.
 - `do render` emits the rendered document, not a decorated preview.
-- Value output retains [005 Evaluation](005-evaluation.md).
+- Value output retains [005 Evaluation](005-evaluation.md), except human `do cat`
+  definition values: text and bytes stay raw while every other JSON-native
+  value prints as plain JSON (`009-cli.md`).
 - Child streams are not prefixed, recolored, line-reassembled, or truncated by
   the presenter. Existing capture limits do not limit live publication.
 - Raw payloads may themselves contain terminal controls. The presenter does not
@@ -669,7 +671,7 @@ command's JSON framing. Direct invocation and `do run` remain equivalent. Remove
 | `do fmt --in-place` | Per-file results and summary on stderr | Actual replacement results |
 | `do render` | Exact rendered bytes | Encoded document payload |
 | `do render --check` | Validation result; no rendered document | Validation result |
-| `do cat` | Exact artifact/value; quiet materialization | Encoded artifact or typed value; no raw interleaving |
+| `do cat` | Exact artifact bytes; definition text/bytes raw, other JSON-native values as plain JSON; quiet materialization | Encoded artifact or typed value; no raw interleaving |
 | `do cache list` | Backend/key/size table and explicit empty state | Existing managed-record array |
 | `do cache clean` | Actual removals and summary; only managed records | Removal result and summary |
 | Help, `do`, command help | Headings, options, examples; no progress | Structured help metadata |

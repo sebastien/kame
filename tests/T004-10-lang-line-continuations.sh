@@ -39,7 +39,7 @@ for backend in native wasm; do
 	"${runner[@]}" do plan --json -C "$project" -f Makefile.kmk ./out >"$project/$backend.plan" 2>"$project/error"
 	if jq -e '[.resources[] | select(.key.kind == "file" and (.roles | index("configuration") | not) and (.roles | index("input"))) | .display] == ["./a","./b"]' "$project/$backend.plan" >/dev/null; then test-ok "$backend continued header plan deduplicates resources"; else test-fail "$backend header split"; fi
 	"${runner[@]}" do cat -C "$project" -f Makefile.kmk raw >"$project/raw" 2>"$project/error"
-	if [ "$(cat "$project/raw")" = '"first\nsecond"' ]; then test-ok "$backend existing multiline verbatim definition"; else test-fail "$backend multiline raw definition"; fi
+	if [ "$(cat "$project/raw")" = "$(printf 'first\nsecond')" ]; then test-ok "$backend existing multiline verbatim definition"; else test-fail "$backend multiline raw definition"; fi
 	"${runner[@]}" do fmt "$project/Makefile.kmk" >"$project/$backend.fmt" 2>"$project/error"
 	"${runner[@]}" do fmt --lang script "$project/$backend.fmt" >"$project/$backend.fmt.again" 2>"$project/error"
 	if cmp -s "$project/$backend.fmt" "$project/$backend.fmt.again"; then test-ok "$backend continued format is idempotent"; else test-fail "$backend continuation format"; fi
