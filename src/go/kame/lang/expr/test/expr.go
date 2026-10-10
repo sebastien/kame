@@ -323,8 +323,27 @@ func TestSelectorsAndBraceInterpolationRetainSpans(t *testing.T) {
 		t.Error("brace interpolation was not retained")
 	}
 	formatted := expr.Format(t.Allocator(), string.Expr)
-	if formatted != "\"Bundle {(count files)}\"" { t.Errorf("Format() = %s", formatted) }
+	if formatted != "\"Bundle @(count files)\"" { t.Errorf("Format() = %s", formatted) }
 	mem.FreeString(t.Allocator(), formatted)
+}
+
+func TestInterpolationMigrationPreservesRawAndEscapedData(t *testing.T) {
+	a := t.Allocator()
+	inputs := []string{`"outer {(cat "x" "y")} end"`, `"\@(missing) \{(missing)}"`, `"""@(missing) {(missing)}"""`, `"nested {(cat "x{(count files)}y")} end"`, `"\@(missing){name:*}"`}
+	expected := []string{`"outer @(cat "x" "y") end"`, `"\@(missing) \{(missing)}"`, `"""@(missing) {(missing)}"""`, `"nested @(cat "x@(count files)y") end"`, `"\@(missing){name:*}"`}
+	for i := range inputs {
+		parsed := expr.Parse(a, "migration.km", inputs[i])
+		if len(parsed.Diagnostics) != 0 { t.Error("migration input did not parse") }
+		formatted := expr.Format(a, parsed.Expr)
+		if formatted != expected[i] { t.Errorf("canonical interpolation = %q, want %q", formatted, expected[i]) }
+		copy := expr.Parse(a, "canonical.km", formatted)
+		again := expr.Format(a, copy.Expr)
+		if len(copy.Diagnostics) != 0 || again != formatted { t.Error("interpolation migration was not idempotent") }
+		mem.FreeString(a, again)
+		copy.Free()
+		mem.FreeString(a, formatted)
+		parsed.Free()
+	}
 }
 
 func TestValidSelectorRequiresCompleteSelector(t *testing.T) {

@@ -109,6 +109,7 @@ test-wasm: wasm-check
 	tests/T014-03-runtime-pattern-construction.sh
 	tests/T014-04-patterns-regex.sh
 	tests/T016-02-cli-template-extensions.sh
+	tests/T016-03-lang-template-boundaries.sh
 	tests/T016-01-cli-render.sh
 	tests/T017-02-wasm-capture.sh
 	tests/T017-03-eval-pipelines.sh

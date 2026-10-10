@@ -20,7 +20,7 @@ manifest = (map
 
 bundle = (apply
   SOURCE_FILES
-  ([files] "Bundle of {(count files)} files")
+  ([files] "Bundle of @(count files) files")
 )
 
 default:

@@ -79,6 +79,8 @@ type StringPart struct {
 	Text string
 	Span source.Span
 	Expr *Expr
+	// Brace retains deprecated {(EXPR)} input spelling for source inspection.
+	// Formatting always emits the canonical @(EXPR) boundary.
 	Brace bool
 	// Form retains Kash's parser boundary: $, ${, (, selector, or $(.
 	Form string
@@ -940,7 +942,7 @@ func (p *parser) quoted() *Expr {
 			if escaped == 'n' { text.WriteByte('\n')
 			} else if escaped == 'r' { text.WriteByte('\r')
 			} else if escaped == 't' { text.WriteByte('\t')
-			} else if escaped == '"' || escaped == '\\' || escaped == '{' { text.WriteByte(escaped)
+			} else if escaped == '"' || escaped == '\\' || escaped == '{' || escaped == '@' { text.WriteByte(escaped)
 			} else { p.error(p.pos-1, p.pos+1, "invalid string escape"); text.WriteByte(escaped) }
 			p.pos++; continue
 		}
@@ -964,7 +966,7 @@ func (p *parser) quoted() *Expr {
 				slices.Free(p.a, items)
 			} else if len(items) > 1 { application := p.node(Application, innerStart); application.Items = items; inner = application
 			} else { slices.Free(p.a, items) }
-			if inner == nil || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || (brace && (p.pos+1 == len(p.s.Text) || p.s.Text[p.pos+1] != '}')) { p.error(open, p.pos, "unclosed string interpolation"); break }
+			if inner == nil || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || (brace && (p.pos+1 == len(p.s.Text) || p.s.Text[p.pos+1] != '}')) { freeExpr(p.a, inner); p.error(open, p.pos, "unclosed string interpolation"); break }
 			p.pos++
 			if brace { p.pos++ }
 		e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Brace: brace, Span: source.Span{Start: open, End: p.pos}}); partStart = p.pos; continue
@@ -1141,6 +1143,7 @@ func writeString(b *strings.Builder, e *Expr) {
 			} else if c == '\n' { b.WriteString("\\n")
 			} else if c == '\r' { b.WriteString("\\r")
 			} else if c == '\t' { b.WriteString("\\t")
+			} else if c == '@' && j+1 < len(e.Text) && e.Text[j+1] == '(' { b.WriteString("\\@")
 			} else { b.WriteByte(c) }
 		}
 		b.WriteByte('"')
@@ -1148,7 +1151,7 @@ func writeString(b *strings.Builder, e *Expr) {
 	}
 	for i := range e.Parts {
 		part := e.Parts[i]
-		if part.Expr != nil { if part.Brace { b.WriteString("{(") } else { b.WriteString("@(") }; writeEmbedded(b, part.Expr); b.WriteByte(')'); if part.Brace { b.WriteByte('}') }; continue }
+		if part.Expr != nil { b.WriteString("@("); writeEmbedded(b, part.Expr); b.WriteByte(')'); continue }
 		for j := 0; j < len(part.Text); j++ {
 			c := part.Text[j]
 			if c == '"' { b.WriteString("\\\"")
@@ -1156,6 +1159,7 @@ func writeString(b *strings.Builder, e *Expr) {
 			} else if c == '\n' { b.WriteString("\\n")
 			} else if c == '\r' { b.WriteString("\\r")
 			} else if c == '\t' { b.WriteString("\\t")
+			} else if (c == '@' || c == '{') && j+1 < len(part.Text) && part.Text[j+1] == '(' { b.WriteByte('\\'); b.WriteByte(c)
 			} else { b.WriteByte(c) }
 		}
 	}

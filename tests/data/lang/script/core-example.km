@@ -19,7 +19,7 @@ manifest = (map
   SOURCE_FILES
 )
 
-bundle = (([files] "Bundle of {(count files)} files") SOURCE_FILES)
+bundle = (([files] "Bundle of @(count files) files") SOURCE_FILES)
 
 default :
 	echo @(bundle)

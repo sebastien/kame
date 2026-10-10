@@ -54,7 +54,7 @@ the native, CLI, and wasm golden tests can consume the same bytes.
 
 - `expr/`: literals, all number forms (`0`, integer, negative, underscore,
   binary, octal, hex, float, signed exponent), string escapes and interpolation
-  (`@(...)`, `{(...)}`, nested interpolation, escaped braces), lists, records,
+  (`@(...)`, deprecated `{(...)}` input, nested interpolation, escaped braces), lists, records,
   names (`?`, `!`, leading `_`), references (index, negative index, slice, open
   slice, mixed components, selection), applications, lambdas (plain, no-arg,
   rest), pipes (deferred and placeholder), and the `?` (`special-optional`),

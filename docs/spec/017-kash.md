@@ -291,7 +291,7 @@ Evaluation requires a context permitting process execution, as defined below.
 
 Kame quoted strings do not gain implicit command interpolation: `"$(git status)"`
 is literal text. Existing expression interpolation can explicitly evaluate a
-substitution, for example `"Revision: {(cat $(git rev-parse --short HEAD))}"`.
+substitution, for example `"Revision: @(cat $(git rev-parse --short HEAD))"`.
 Kash command-word double quotes still allow substitutions as specified below.
 Opaque `.kmk` recipe text remains shell text: a raw recipe `$(...)` is interpreted
 by the recipe's shell, not Kash. A substitution inside an explicit Kame recipe

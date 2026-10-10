@@ -190,28 +190,40 @@ are not thereby added to the Kame expression grammar.
 ### Strings
 
 Expression strings use double quotes. They support `\"`, `\\`, `\n`, `\r`,
-and `\t`. A quoted string may contain expression interpolation:
+`\t`, `\@`, and `\{`. A quoted string may contain expression interpolation:
 
 ```kame
-"Bundle of {(count files)} files"
+"Bundle of @(count files) files"
 ```
 
-Within a quoted expression string, `{(` opens interpolation and the matching
-`)}` closes it. Parentheses and quoted strings inside the expression are
-balanced normally. `\{` produces a literal `{`. An unclosed interpolation is
-`PARSE_ERR`; it does not use recipe recovery. `@(expression)` is also accepted
-inside quoted strings and has the same value semantics.
+Within a quoted expression string, `@(` opens interpolation and the matching
+`)` closes it. One contained expression is a value/reference; multiple expressions
+form an application. Parentheses and quoted strings inside the expression are
+balanced normally. `\@` produces a literal `@`; `\{` produces a literal `{`.
+An unclosed interpolation is `PARSE_ERR`; it does not use recipe recovery.
+`@(expression)` is the canonical expansion shared with string templates (see
+String Templates); contextual selectors are not expression-string syntax.
 
-Expression strings are parsed by the expression parser. `{(...)}` interpolation
-and the `\{` escape are specific to expression strings. `@(expression)` is the
-one expansion shared with string templates (see String Templates); contextual
-selectors are not expression-string syntax.
+#### Migrating brace interpolation
+
+`{(...)}` in expression strings is deprecated input syntax, retained with its
+existing value semantics for migration. All expression/script formatters emit
+`@(...)`, including nested interpolated strings. Run
+`kame do fmt --lang km --in-place FILE` (or `expr`, `kmk`, `kash` as appropriate) to migrate parsed
+expression strings; `--check` detects remaining noncanonical input. This is an
+input-only compatibility period: new sources and examples use `@(...)`. Removal
+of brace-input support is deferred to a separately announced breaking change.
+
+Do not blindly replace text: document templates never interpret `{(...)}`, and
+verbatim literals, `@raw` bodies, escaped `\{(...)}`, and raw Kash argument data
+remain literal. Formatting preserves those distinctions and escapes literal
+interpolation openers when needed so reparsing cannot activate them.
 
 Single quote is reserved and is not an alternative string delimiter.
 
 Plain `$(...)` inside a quoted expression string is literal text. To execute a
 Kash process there, use existing expression interpolation, for example
-`"Revision: {(cat $(git rev-parse --short HEAD))}"`. This does not change the
+`"Revision: @(cat $(git rev-parse --short HEAD))"`. This does not change the
 ownership of opaque recipe text by its shell.
 
 ### References
@@ -333,7 +345,8 @@ sources. String templates contain literal segments and expansions:
 - A backslash escapes `@` and `\`.
 
 `@(expression)` is shared with expression strings (see Strings); contextual
-selectors are template-only, while `{(...)}` interpolation is expression-string-only.
+selectors are template-only. Deprecated `{(...)}` input remains specific to
+expression strings; it is literal in document templates.
 
 Malformed `@(` expansions remain literal and produce an `PARSE_ERR` warning. A
 well-delimited but invalid contained expression is an error.
@@ -502,7 +515,8 @@ EXTRA_CHECKS = [./tests/smoke]
   when text is intended. An evaluation wrapper such as `(nop B)` is unnecessary
   for an alias; write `A = B`.
 - Quoted values use ordinary expression-string escapes and interpolation
-  (`@(...)` and `{(...)}`); verbatim strings remain inert until explicitly
+  (`@(...)`, with deprecated `{(...)}` accepted on input); verbatim strings
+  remain inert until explicitly
   rendered. Interpolation-free quoted strings also retain expression-pattern
   semantics: use `DATA = """{name}"""` for literal pattern-looking data.
   Former unquoted template text must be quoted. Template-only
@@ -824,8 +838,9 @@ expression definitions and verbatim string definitions remain supported.
   and parse/format without performing host effects. A leading `$(` definition
   RHS is an expression, while `$(...)` in plain quoted strings remains literal.
 - A target template with no capture group parses as a literal target.
-- Expression-string `{(...)}` interpolation and template `@(...)` expansions
-  are parsed by their respective packages.
+- Expression strings and templates use canonical `@(...)` expansions, parsed
+  by their respective packages. Deprecated brace input formats to `@(...)`
+  without activating escaped or verbatim content.
 - `def` distinguishes value and function bindings by the number of operands
   after the bound name.
 - `if`, `and`, `or`, and `match` are special forms: each operand is evaluated

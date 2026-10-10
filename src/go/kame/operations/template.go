@@ -172,6 +172,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	// Push cycle entry for files.
 	pushed := false
+	previousStack := c.RenderStack
 	if isFile {
 		owned := ""
 		if len(filePath) != 0 {
@@ -179,7 +180,11 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 			copy(b, []byte(filePath))
 			owned = string(b)
 		}
-		c.RenderStack = slices.Append(c.Run, c.RenderStack, owned)
+		// Context copies borrow their caller's stack. Own only this frame's
+		// storage and final string; never reallocate a borrowed backing slice.
+		c.RenderStack = slices.Make[string](c.Run, len(previousStack)+1)
+		copy(c.RenderStack, previousStack)
+		c.RenderStack[len(previousStack)] = owned
 		pushed = true
 	}
 	// Parse.
@@ -202,7 +207,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		srcName := sourceName
 		doc.Free()
 		if pushed {
-			popRenderStack(c)
+			popRenderStack(c, previousStack)
 		}
 		discardArgCallables(c, v)
 		return renderFailure(c, code, srcName, span.Start, span.End, msg)
@@ -219,7 +224,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 			c.Source = prevSource
 			doc.Free()
 			if pushed {
-				popRenderStack(c)
+				popRenderStack(c, previousStack)
 			}
 			discardArgCallables(c, v)
 			return c.InvalidOperation("cannot create template payload scope")
@@ -236,7 +241,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	doc.Free()
 	if pushed {
-		popRenderStack(c)
+		popRenderStack(c, previousStack)
 	}
 	// Payload callables transferred into the child scope above; only the caller's
 	// shallow argument-storage free remains, even if evaluation failed or waited.
@@ -335,13 +340,14 @@ func isTemplateWhitespace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\r' || b == '\n'
 }
 
-func popRenderStack(c *eval.Context) {
+func popRenderStack(c *eval.Context, previous []string) {
 	if len(c.RenderStack) == 0 {
 		return
 	}
 	last := len(c.RenderStack) - 1
 	mem.FreeString(c.Run, c.RenderStack[last])
-	c.RenderStack = c.RenderStack[:last]
+	slices.Free(c.Run, c.RenderStack)
+	c.RenderStack = previous
 }
 
 func styledFailure(c *eval.Context, code string, msg string) eval.Result {

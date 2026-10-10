@@ -60,6 +60,30 @@ parentheses, brackets, lists, records, strings, and lambdas. `@`, the keyword,
 and `(` must be adjacent; `@ if` and `@if (` are not directives. Directives with
 no arguments are written bare: `@else`, `@end`, `@raw`.
 
+### Expression boundaries
+
+Single-expression directives `@if`, `@elif`, `@with`, `@match`, and `@case`
+use the same boundary convention as `@(EXPR)`: one contained expression is
+evaluated as-is, while multiple whitespace-separated expressions form one
+application. Thus `@if(exists? ./file)` and `@if((exists? ./file))` are equivalent;
+`@if(enabled)` still reads a value, not a zero-argument call. Write
+`@if((predicate))` to call a function without arguments. Nested expressions,
+lists, records, and lambdas retain ordinary Kame syntax. Adjacent expressions
+without whitespace are malformed, not silently separated.
+
+Multi-argument directives retain explicit argument slots: `@for([item] LIST SEP)`,
+`@let(NAME EXPR)`, and `@include(PATH PAYLOAD)`. Applications in these slots still
+need their own parentheses, for example `@for([item] (wildcard ./src/*.c))`,
+`@let(name (cat first last))`, or `@include((cat ./pages/ name) payload)`.
+Unparenthesized tokens are never guessed to be a computed list/path plus optional
+separator/payload. `@end(KIND)` is a literal block label, not an expression call.
+
+Formatting removes redundant application parentheses only for single-expression
+directives with arguments. Zero-argument calls, lambda delimiters, explicit
+multi-argument slots, and references are preserved. The rule is identical in
+plain/host-comment templates, inline blocks, runtime `render`, and external-shell
+recipes. It does not add template directives to direct Kash.
+
 Recognition is keyword-gated and whole-line. A comment line that carries no
 known keyword is ordinary text and is emitted unchanged. This keeps host text
 such as `@media`, `@override`, and `@example.com` untouched without escaping.

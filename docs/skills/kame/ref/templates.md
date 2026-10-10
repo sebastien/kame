@@ -25,8 +25,10 @@ nil renders empty. Records and bytes require explicit conversion (`str` or
 Function selectors are `@_` (first argument), `@*` (all), `@#` (count), and
 `@N` (index). Indexes are zero-based; negative indexes count from the end.
 Missing context and invalid bounds produce diagnostics, not empty text.
-Expression strings also allow `{(EXPRESSION)}` interpolation, but selectors
-are template-only. Backslash can escape `@` and `\` in string templates.
+Expression strings use `@(EXPRESSION)` too; deprecated `{(EXPRESSION)}` input
+is migrated by expression/script formatting. Selectors are template-only.
+Backslash can escape `@` and `\` in string templates, and `\@`/`\{` keep
+interpolation openers inert in expression strings. Raw regions remain unchanged.
 
 ## Document directives
 
@@ -34,6 +36,14 @@ Document templates add keyword-gated directives in plain text or host-language
 comments. Whole-line directives remove their surrounding whitespace and newline;
 block directives can also appear inline using complete comment wrappers.
 `@if (` and `@ if` are not directives; `@if(...)` is.
+
+Single-expression `if`, `elif`, `with`, `match`, and `case` directives accept
+application shorthand: `@if(exists? ./file)` equals `@if((exists? ./file))`.
+`@if(enabled)` reads a value; `@if((predicate))` calls without arguments.
+Formatters prefer the shorthand. Multi-argument `for`, `let`, and `include`
+keep explicit slots, so applications there need parentheses:
+`@for([item] (wildcard ./src/*.c))`, `@let(name (cat first last))`, and
+`@include((cat ./pages/ name) payload)`. No optional-slot guessing is performed.
 
 ```html
 <h1>@(title)</h1>

@@ -95,11 +95,14 @@ clean :
 
 Keep these boundaries distinct:
 
-- Expression strings support `{(EXPRESSION)}` and `@(EXPRESSION)`; verbatim
+- Expression strings use `@(EXPRESSION)`; deprecated `{(EXPRESSION)}` input
+  is migrated by formatting. `\@`/`\{` preserve literal openers, and verbatim
   `"""..."""` strings stay raw until explicitly passed to `render`.
 - Document templates use `@if`, `@for`, `@with`, `@let`, `@include`, `@match`,
   `@case`, `@raw`, and `@end` directives, optionally inside host-language comments.
   Blocks can also be inline; labeled endings such as `@end(for)` are supported.
+  Single-expression directives accept `@if(exists? ./file)` shorthand; multi-slot
+  `for`, `let`, and `include` arguments keep nested applications parenthesized.
 - Kash `$name` looks up a Kame value; `(EXPRESSION)` computes a typed argument;
   `$(COMMAND)` captures a Kash process's stdout. Lists splice argv only as
   standalone unquoted substitutions; no implicit shell splitting or globbing.

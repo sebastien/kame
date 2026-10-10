@@ -315,6 +315,8 @@ func (p *docParser) nextInlineBlockDirective(start int, end int) int {
 	for i := start; i < end; i++ {
 		innerStart, innerEnd := -1, -1
 		if p.style == "plain" {
+			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') { i++; continue }
+			if text[i] == '@' && i+1 < end && text[i+1] == '@' { i++; continue }
 			if text[i] != '@' || i+1 >= end || text[i+1] == '(' || text[i+1] == '@' {
 				continue
 			}
@@ -1543,6 +1545,13 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 	// Validate arity and shapes.
 	switch kind {
 	case dirIf, dirElif, dirWith, dirMatch, dirCase:
+		// A single-expression directive owns its boundary, like @(EXPR):
+		// one item is a value/reference; multiple items form an application.
+		if len(args) > 1 {
+			app := mem.Alloc[expr.Expr](p.a)
+			app.Kind, app.Span, app.Items = expr.Application, source.Span{Start: args[0].Span.Start, End: args[len(args)-1].Span.End}, args
+			args = slices.Append(p.a, []*expr.Expr(nil), app)
+		}
 		if len(args) != 1 {
 			p.diag("TPL_PARSE", lineSpan, "malformed template directive")
 			for i := range args {
@@ -1659,6 +1668,10 @@ func (p *docParser) parseArgs(pos int, innerEnd int) argsRes {
 		slices.Free(p.a, prefix.Diagnostics)
 		args = slices.Append(p.a, args, prefix.Expr)
 		cur = prefix.End
+		if cur < innerEnd && text[cur] != ')' && text[cur] != ' ' && text[cur] != '\t' {
+			freeArgs(p.a, args)
+			return argsRes{End: cur, OK: false}
+		}
 	}
 }
 

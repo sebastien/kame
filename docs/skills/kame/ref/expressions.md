@@ -21,7 +21,9 @@ scripts, templates, rule expansions, and Kash boundaries.
 - Only `:nil` and `:false` are false; zero, empty strings, and empty lists are true.
 
 Expression strings use double quotes with `\"`, `\\`, `\n`, `\r`, and `\t`.
-Interpolation is `"Count: {(count files)}"` or `"Count: @(count files)"`.
+Interpolation is `"Count: @(count files)"`. Deprecated `{(...)}` input is still
+evaluated but formatting migrates it to `@(...)`, including nested strings.
+Use `\@`/`\{` for literal openers; verbatim literals remain untouched.
 Single quotes are not string delimiters. Verbatim strings with matching runs
 of three or more double quotes preserve raw multiline content.
 

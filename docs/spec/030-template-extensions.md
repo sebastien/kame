@@ -101,8 +101,11 @@ Other input kinds are `EXPR_INVALID`.
 `kame do fmt --lang template [--comment STYLE] [FILE]` formats directive
 syntax while preserving every non-directive byte. It canonicalizes directive
 keyword spelling, expression argument spacing, block labels, comment wrappers,
-and trim marker placement, and is idempotent. It reports source-located
-diagnostics without writing a partially formatted file. `--check` validates
+and trim marker placement, and is idempotent.
+Single-expression directives use the application shorthand from 016, for example
+`@if(exists? ./file)`; zero-argument calls and multi-slot applications retain their
+parentheses. Escaped directives and raw body text remain unchanged. It reports
+source-located diagnostics without writing a partially formatted file. `--check` validates
 canonical form without output; `--in-place` writes only after the whole source
 parses successfully. Inferred style follows the `auto` rules above.
 
