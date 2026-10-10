@@ -66,8 +66,11 @@ func (p *Program) Plan(target string) PlanResult {
 			}
 		}
 	}
+	group := 1
 	for i := range selected.Rule.Inputs {
 		input := selected.Rule.Inputs[i]
+		inputGroup := group
+		if input.SequenceEnd { group++ }
 		if input.Kind == rule.InputExpression || input.Kind == rule.InputString || input.Kind == rule.InputWildcard {
 			plan.Freshness = Unknown
 			before := len(plan.Inputs)
@@ -78,7 +81,9 @@ func (p *Program) Plan(target string) PlanResult {
 			for j := before; j < len(plan.ResourceInputs); j++ {
 				plan.ResourceInputs[j].OrderOnly = input.OrderOnly
 				plan.ResourceInputs[j].Computed = true
+				plan.ResourceInputs[j].Group = inputGroup
 			}
+			if input.SequenceEnd && len(plan.ResourceInputs) > before { plan.ResourceInputs[len(plan.ResourceInputs)-1].SequenceEnd = true }
 			for j := before; j < len(plan.Inputs); j++ {
 				plan.DynamicInputs = slices.Append(p.Alloc, plan.DynamicInputs, cloneText(p.Alloc, plan.Inputs[j]))
 			}
@@ -88,7 +93,7 @@ func (p *Program) Plan(target string) PlanResult {
 			text := renderInput(p.Alloc, input, selected.Captures)
 			plan.Inputs = slices.Append(p.Alloc, plan.Inputs, text)
 			plan.StaticInputs = slices.Append(p.Alloc, plan.StaticInputs, cloneText(p.Alloc, text))
-			plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, text)})
+			plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: inputGroup, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, core.ResourceTarget, text)})
 			continue
 		}
 		text := cloneText(p.Alloc, input.Text)
@@ -98,7 +103,7 @@ func (p *Program) Plan(target string) PlanResult {
 		if input.Kind == rule.InputPath {
 			kind = core.ResourceFile
 		}
-		plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
+		plan.ResourceInputs = slices.Append(p.Alloc, plan.ResourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: inputGroup, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 	}
 	// Planning does not validate accepted records or resource bytes.
 	plan.Freshness = Unknown

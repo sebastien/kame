@@ -23,6 +23,22 @@ func TestLiteralSelectionAndFreshness(t *testing.T) {
 	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 }
 
+func TestAmbiguousPatternsReportBothProducers(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "collision.kmk", "./out/{name}.o : ./src/{name}.c\n\ttrue\n./out/{name}.o : ./src/{name}.cpp\n\ttrue\n")
+	defer parsed.Free()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
+	defer compiled.Free(a)
+	if compiled.Program == nil { t.Error("pattern registration failed"); return }
+	defer compiled.Program.Free()
+	plan := compiled.Program.Plan("out/demo.o")
+	defer plan.Diagnostic.Free(a)
+	if plan.Diagnostic.Code != "TGT_AMBIG" || plan.Diagnostic.Target != "out/demo.o" || len(plan.Diagnostic.Related) != 1 { t.Error("ambiguity lost target or competing producer"); return }
+	if plan.Diagnostic.Source != "collision.kmk" || plan.Diagnostic.Related[0].Source != "collision.kmk" || plan.Diagnostic.Span.Start <= plan.Diagnostic.Related[0].Span.Start { t.Error("ambiguity lost distinct declaration locations") }
+}
+
 func TestTemplateCapturesRenderInputsAndOutputs(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)

@@ -181,8 +181,24 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 	var inputs []string
 	var dynamicInputs []string
 	var resourceInputs []PlanInput
-	for i := range entry.Rule.Inputs {
-		input := entry.Rule.Inputs[i]
+	authored := entry.Rule
+	group := 1
+	for i := range authored.Inputs {
+		if i > 0 && authored.Inputs[i-1].SequenceEnd {
+			group++
+			if !p.Instances[index].Inspection {
+				requested := p.requestInputs(c, index, inputs, resourceInputs)
+				if requested.Waiting || requested.Diagnostic.Code != "" {
+					freeStrings(p.Alloc, inputs)
+					freeStrings(p.Alloc, dynamicInputs)
+					freePlanInputs(p.Alloc, resourceInputs, true)
+					return requested
+				}
+			}
+		}
+		// A prior expression/barrier can grow the instance slice.
+		entry = &p.Instances[index]
+		input := authored.Inputs[i]
 		if input.Kind != rule.InputExpression && input.Kind != rule.InputString && input.Kind != rule.InputWildcard {
 			if input.Kind == rule.InputTemplate {
 				inputs = slices.Append(p.Alloc, inputs, renderInput(p.Alloc, input, entry.Captures))
@@ -194,7 +210,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			if input.Kind == rule.InputPath {
 				kind = core.ResourceFile
 			}
-			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
+			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: group, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 			continue
 		}
 		if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil)) {
@@ -251,7 +267,9 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		for j := before; j < len(resourceInputs); j++ {
 			resourceInputs[j].OrderOnly = input.OrderOnly
 			resourceInputs[j].Computed = true
+			resourceInputs[j].Group = group
 		}
+		if input.SequenceEnd && len(resourceInputs) > before { resourceInputs[len(resourceInputs)-1].SequenceEnd = true }
 		for j := before; j < len(inputs); j++ {
 			dynamicInputs = slices.Append(p.Alloc, dynamicInputs, cloneText(p.Alloc, inputs[j]))
 		}
@@ -310,7 +328,7 @@ func cloneStrings(a mem.Allocator, values []string) []string {
 func clonePlanInputs(a mem.Allocator, values []PlanInput) []PlanInput {
 	var out []PlanInput
 	for i := range values {
-		out = slices.Append(a, out, PlanInput{OrderOnly: values[i].OrderOnly, SequenceEnd: values[i].SequenceEnd, Computed: values[i].Computed, Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
+		out = slices.Append(a, out, PlanInput{OrderOnly: values[i].OrderOnly, SequenceEnd: values[i].SequenceEnd, Group: values[i].Group, Computed: values[i].Computed, Display: cloneText(a, values[i].Display), Key: values[i].Key.Clone(a)})
 	}
 	return out
 }

@@ -134,105 +134,12 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.failRule(c, state.Index, resolvedInputs.Diagnostic)
 		return core.ProducerFailed
 	}
-	groupReady := true
-	for i := range inputs {
-		input := inputs[i]
-		kind := core.ResourceTarget
-		ordered := i < len(resourceInputs) && resourceInputs[i].OrderOnly
-		if i < len(resourceInputs) {
-			kind = resourceInputs[i].Key.Kind
-		}
-		if kind == core.ResourceFile || (kind == core.ResourceTarget && isFileName(input)) {
-			resolved := p.instanceFor(input)
-			entry = &p.Instances[state.Index]
-			if resolved.Diagnostic.Code != "" && resolved.Diagnostic.Code != "TGT_NO_RULE" {
-				resolved.Plan.Free(p.Alloc)
-				p.failRule(c, state.Index, resolved.Diagnostic)
-				return core.ProducerFailed
-			}
-			resolved.Diagnostic.Free(p.Alloc)
-			if resolved.Node != nil {
-				resolved.Plan.Free(p.Alloc)
-				if !p.prepareDependency(c, state.Index, resolved.Node, ordered) {
-					groupReady = false
-				}
-				if i < len(resourceInputs) && resourceInputs[i].SequenceEnd {
-					if !groupReady {
-						return core.ProducerWaiting
-					}
-					groupReady = true
-				}
-				continue
-			}
-			resolved.Plan.Free(p.Alloc)
-			name := p.canonicalTarget(input, true)
-			key := core.ResourceKey{Kind: core.ResourceFile, Name: name}
-			dependency := p.Engine.Lookup(key)
-			if dependency == nil {
-				external := mem.Alloc[externalFileState](p.Alloc)
-				external.Program, external.Name = p, cloneText(p.Alloc, name)
-				dependency = p.Engine.AddOwned(key, produceExternalFile, external, freeExternalFileState)
-			}
-			ready := p.prepareDependency(c, state.Index, dependency, ordered)
-			if !ready {
-				groupReady = false
-			}
-			mem.FreeString(p.Alloc, name)
-			if ready && (!dependency.Current || dependency.Latest.Kind == core.Nil) {
-				p.failRule(c, state.Index, failure(p.Alloc, "TGT_NO_RULE", "required input does not exist: "+input))
-				return core.ProducerFailed
-			}
-			if i < len(resourceInputs) && resourceInputs[i].SequenceEnd {
-				if !groupReady {
-					return core.ProducerWaiting
-				}
-				groupReady = true
-			}
-			continue
-		}
-		resolved := p.instanceFor(input)
-		entry = &p.Instances[state.Index]
-		dep, d := resolved.Node, resolved.Diagnostic
-		resolved.Plan.Free(p.Alloc)
-		if d.Code == "" && dep != nil {
-			if !p.prepareDependency(c, state.Index, dep, ordered) {
-				groupReady = false
-			}
-			if i < len(resourceInputs) && resourceInputs[i].SequenceEnd {
-				if !groupReady {
-					return core.ProducerWaiting
-				}
-				groupReady = true
-			}
-			continue
-		}
-		if d.Code != "" && d.Code != "TGT_NO_RULE" {
-			p.failRule(c, state.Index, d)
-			return core.ProducerFailed
-		}
-		d.Free(p.Alloc)
-		definition := p.Eval.Definition(input)
-		if definition == nil {
-			p.failRule(c, state.Index, failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+input))
-			return core.ProducerFailed
-		}
-		definitionContext := &eval.Context{Environment: entry.Environment, HasEnvironment: entry.EnvironmentClaimed, Cwd: p.Options.Directory, Phase: eval.EvaluatePhase}
-		p.bindDefinitionEnvironment(definitionContext)
-		definitionNode := p.Eval.DefinitionWith(definition.Key.Name, definitionContext)
-		if definitionNode == nil {
-			return core.ProducerWaiting
-		}
-		if !p.addPurposeDependency(c, entry, definitionNode, ordered) {
-			groupReady = false
-		}
-		if i < len(resourceInputs) && resourceInputs[i].SequenceEnd {
-			if !groupReady {
-				return core.ProducerWaiting
-			}
-			groupReady = true
-		}
+	requested := p.requestInputs(c, state.Index, inputs, resourceInputs)
+	if requested.Diagnostic.Code != "" {
+		p.failRule(c, state.Index, requested.Diagnostic)
+		return core.ProducerFailed
 	}
-	if !groupReady {
+	if requested.Waiting {
 		return core.ProducerWaiting
 	}
 	entry = &p.Instances[state.Index]

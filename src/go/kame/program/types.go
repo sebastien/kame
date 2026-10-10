@@ -51,6 +51,8 @@ type Plan struct {
 type PlanInput struct {
 	OrderOnly   bool
 	SequenceEnd bool
+	// Group is the authored one-based group, including gaps from empty expansions.
+	Group int
 	// Computed distinguishes expression-origin inputs from coincident literals.
 	Computed bool
 	Display     string

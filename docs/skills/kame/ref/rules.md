@@ -96,7 +96,9 @@ file-pattern captures and participate in rule-instance/cache identity.
 
 `|` introduces order-only inputs, excluded from normal input selectors and
 content freshness. Commas separate input sequence groups: later groups are
-requested after earlier groups complete, not a global barrier across targets.
+evaluated and requested after earlier groups complete, not a global barrier across
+targets. `a : @(PREP), @(BUILD)` splices computed lists into authored groups;
+empty expansions preserve barriers. Output registration remains pure.
 
 ## Recipes and effects
 
@@ -134,6 +136,12 @@ and `(first outputs)` in direct Kash, or `@(inputs)` in external-shell templates
 
 `yield` requires exactly one file output. Do not combine it with nonempty
 shell commands; Kame reports a producer conflict.
+
+Known sibling artifacts belong in one grouped declaration, for example
+`./out/{name}.js ./out/{name}.map : ./src/{name}.ts`. Configured output lists
+must be pure. A directory or manifest does not claim its contents as outputs,
+and removing a configured member does not delete its file. See
+[output ownership](../../../spec/039-output-ownership.md).
 
 Planning resolves headers, not body effects or commands. Rendering may discover
 dependencies that must complete before final freshness and recipe execution.

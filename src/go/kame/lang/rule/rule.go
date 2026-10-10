@@ -405,16 +405,13 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 				continue
 			}
 			last := &r.Inputs[len(r.Inputs)-1]
-			if last.Kind != InputName && last.Kind != InputPath {
-				p.error(span.Start, span.End, "sequenced prerequisites must be literal names or paths")
-				continue
-			}
 			last.SequenceEnd = true
 			continue
 		}
 		trailingComma := len(text) > 1 && text[len(text)-1] == ','
 		if trailingComma {
 			text = text[:len(text)-1]
+			span.End--
 			if text[len(text)-1] == ',' {
 				p.error(span.Start, span.End, "invalid repeated prerequisite comma")
 				continue
@@ -456,29 +453,13 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 			input.Template.Diagnostics = nil
 		}
 		if trailingComma {
-			if input.Kind != InputName && input.Kind != InputPath {
-				p.error(span.Start, span.End, "sequenced prerequisites must be literal names or paths")
-			} else {
-				input.SequenceEnd = true
-			}
+			input.SequenceEnd = true
 		}
 		r.Inputs = slices.Append(p.a, r.Inputs, input)
 	}
 	if len(r.Inputs) != 0 && r.Inputs[len(r.Inputs)-1].SequenceEnd {
 		last := r.Inputs[len(r.Inputs)-1]
 		p.error(last.Span.Start, last.Span.End, "expected prerequisite after comma")
-	}
-	hasSequence := false
-	for i := range r.Inputs {
-		hasSequence = hasSequence || r.Inputs[i].SequenceEnd
-	}
-	if hasSequence {
-		for i := range r.Inputs {
-			kind := r.Inputs[i].Kind
-			if kind == InputExpression || kind == InputString || kind == InputWildcard {
-				p.error(r.Inputs[i].Span.Start, r.Inputs[i].Span.End, "sequenced prerequisites cannot mix with dynamic inputs")
-			}
-		}
 	}
 	slices.Free(p.a, items)
 }

@@ -24,6 +24,7 @@ def check(command: list[str], source: str, target: str, *,
 		(project / 'src').mkdir()
 		(project / 'src/demo.c').write_text('computed-output-ok')
 		(project / 'seed').write_text('seed')
+		(project / 'included.kmk').write_text('./out/{name}.o : ./src/{name}.c\n\ttouch forbidden\n')
 		environment = {key: value for key, value in os.environ.items()
 			if not key.startswith('KAME_')}
 
@@ -40,10 +41,20 @@ def check(command: list[str], source: str, target: str, *,
 			assert not result.stderr, result.stderr
 			assert any(json.loads(line).get('diagnostic', {}).get('source', '').endswith('Makefile.kmk')
 				for line in result.stdout.splitlines()), result.stdout
-			built = run([target])
+			built = run([*(overrides or []), target])
 			assert built.returncode == 1, (built.returncode, built.stdout, built.stderr)
 			assert any(item in built.stdout + built.stderr for item in codes), built.stderr
 			assert not (project / 'forbidden').exists(), 'registration performed an effect'
+			if 'TGT_AMBIG' in codes:
+				diagnostics = [json.loads(line)['diagnostic'] for line in result.stdout.splitlines()
+					if json.loads(line).get('diagnostic', {}).get('code') == 'TGT_AMBIG']
+				assert diagnostics and diagnostics[0].get('related'), result.stdout
+				assert diagnostics[0]['related'][0].get('source'), result.stdout
+				if source.startswith('include '):
+					assert diagnostics[0]['related'][0]['source'].endswith('included.kmk'), result.stdout
+			if 'PHASE_INVALID' in codes:
+				assert any(json.loads(line).get('diagnostic', {}).get('tips')
+					for line in result.stdout.splitlines()), result.stdout
 			return
 		assert result.returncode == 0, (arguments, result.stdout, result.stderr)
 		plan = json.loads(result.stdout)
@@ -110,6 +121,35 @@ def check_watch(command: list[str]) -> None:
 					process.wait(timeout=5)
 
 
+def check_output_membership(command: list[str]) -> None:
+	with tempfile.TemporaryDirectory() as temporary:
+		project = Path(temporary)
+		(project / 'seed').write_text('owned')
+		(project / 'unrelated').write_text('preserve')
+		environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_')}
+		def source(members: str) -> None:
+			(project / 'Makefile.kmk').write_text(f'OUTPUTS = [{members}]\n@(OUTPUTS) : ./seed\n\tfor path in @>*; do cat @< > "$path"; done\n\tprintf x >> runs\n')
+		def build() -> None:
+			result = subprocess.run(command + ['./a'], cwd=project, env=environment, text=True, capture_output=True, timeout=20)
+			assert result.returncode == 0, (result.stdout, result.stderr)
+		source('./a ./b')
+		build()
+		build()
+		assert (project / 'runs').read_text() == 'x'
+		(project / 'b').unlink()
+		build()
+		assert (project / 'b').read_text() == 'owned'
+		(project / 'b').write_text('tampered')
+		build()
+		assert (project / 'b').read_text() == 'owned'
+		assert (project / 'runs').read_text() == 'xxx'
+		source('./a ./c')
+		build()
+		assert (project / 'c').read_text() == 'owned'
+		assert (project / 'b').read_text() == 'owned', 'removed member was implicitly deleted'
+		assert (project / 'unrelated').read_text() == 'preserve'
+
+
 # Function: main
 # Exercise both successful expansion and registration failures before effects.
 def main() -> None:
@@ -164,6 +204,12 @@ def main() -> None:
 	for name, source, code in invalid:
 		cases.append((name, source + 'sentinel :\n\ttouch forbidden\n', 'sentinel', dict(code=code)))
 	failures = []
+	cases.extend([
+		('lazy read output alias', 'OUTPUTS = (text (read ./seed))\n@(OUTPUTS) :\n\ttouch forbidden\n', 'default', {'code': ('PHASE_INVALID', 'CAP_DENIED'), 'overrides': ['--allow-read=.']}),
+		('included producer location', 'include ./included.kmk\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
+		('competing source patterns', './out/{name}.o : ./src/{name}.c\n\ttouch forbidden\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
+		('canonical duplicate outputs', './out/../same :\n\ttouch forbidden\n./same :\n\ttouch forbidden\n', 'same', {'code': 'TGT_AMBIG'}),
+	])
 	for name, source, target, options in cases:
 		try:
 			check(command, source, target, **options)
@@ -175,7 +221,12 @@ def main() -> None:
 	except (AssertionError, subprocess.TimeoutExpired) as error:
 		failures.append('watch target replacement')
 		print(f'{backend}: FAIL watch target replacement: {error}', file=sys.stderr)
-	print(f'{backend}: {len(cases) + 1 - len(failures)}/{len(cases) + 1} computed output cases passed')
+	try:
+		check_output_membership(command)
+	except (AssertionError, subprocess.TimeoutExpired) as error:
+		failures.append('output membership')
+		print(f'{backend}: FAIL output membership: {error}', file=sys.stderr)
+	print(f'{backend}: {len(cases) + 2 - len(failures)}/{len(cases) + 2} computed output cases passed')
 	if failures:
 		raise SystemExit(1)
 

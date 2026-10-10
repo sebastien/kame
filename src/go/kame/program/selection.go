@@ -52,6 +52,7 @@ func (p *Program) selectRule(target string) selection {
 		target = p.canonicalTarget(target, true)
 	}
 	var matched *rule.Rule
+	var matchedOutput rule.Target
 	var captures []template.CaptureValue
 	for i := range p.Rules {
 		r := p.Rules[i].Rule
@@ -128,7 +129,7 @@ func (p *Program) selectRule(target string) selection {
 					if file {
 						mem.FreeString(p.Alloc, target)
 					}
-					return selection{Ambiguous: true}
+					return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, matchedOutput, output)}
 				}
 				match.Free(p.Alloc)
 				if relativeOwned {
@@ -136,7 +137,7 @@ func (p *Program) selectRule(target string) selection {
 				}
 				continue
 			}
-			matched, captures = r, cloneCaptures(p.Alloc, match.Captures)
+			matched, matchedOutput, captures = r, output, cloneCaptures(p.Alloc, match.Captures)
 			match.Free(p.Alloc)
 			if relativeOwned {
 				mem.FreeString(p.Alloc, matchTarget)

@@ -18,6 +18,33 @@ order after ordinary value definitions and before rule selection. It may use
 pure Kame operations and functions. Process execution, writes, and host requests
 are invalid during generation.
 
+## Choosing a producer without host reads
+
+Registration is deliberately pure: neither generated declarations nor computed
+outputs may read files, inspect directories/environment, or run processes, even
+when the caller grants those capabilities. Lazy aliases do not bypass this phase.
+Pass configuration as pure values instead. Use a source-independent pattern for
+a target family and discover membership in computed prerequisites:
+
+```kame
+./build/{name}.o : ./src/{name}.c
+	cc -c @< -o @>
+sources : @(wildcard ./src/*.c)
+```
+
+For a compiler with known sibling outputs, declare them together:
+
+```kame
+./build/{name}.js ./build/{name}.map : ./src/{name}.ts
+	compiler @< --output @>
+```
+
+One invocation owns both artifacts. Do not declare overlapping `.c` and `.cpp`
+patterns for the same object output and ask Kame to choose by source existence:
+both are producers, so selection fails with `TGT_AMBIG` and both locations.
+Use distinct output names or pure configuration choosing one producer family.
+See [output ownership](039-output-ownership.md) for variable membership limits.
+
 ## Batch schema
 
 The expression must return a list of records. Each record contains exactly

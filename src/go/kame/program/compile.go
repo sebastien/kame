@@ -106,8 +106,8 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 			continue
 		}
 		candidate := resolved.Rule
-		if duplicateLiteral(p, candidate) {
-			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Source: parsed.Source.Name, Code: "TGT_AMBIG", Severity: diagnostic.Error, Message: "duplicate literal rule target", Span: diagnostic.Span{Start: item.Rule.Header.Start, End: item.Rule.Header.End}})
+		if collision := duplicateLiteral(p, candidate); collision.Code != "" {
+			result.Diagnostics = slices.Append(a, result.Diagnostics, collision)
 			continue
 		}
 		p.Rules = slices.Append(a, p.Rules, registeredRule{Rule: candidate})
@@ -297,7 +297,7 @@ func CompileMany(a mem.Allocator, sources []CompileSource, registry *eval.Regist
 	return result
 }
 
-func duplicateLiteral(p *Program, candidate *rule.Rule) bool {
+func duplicateLiteral(p *Program, candidate *rule.Rule) diagnostic.Diagnostic {
 	for i := range candidate.Outputs {
 		if candidate.Outputs[i].Template {
 			continue
@@ -308,13 +308,18 @@ func duplicateLiteral(p *Program, candidate *rule.Rule) bool {
 				continue
 			}
 			for k := range other.Outputs {
-				if !other.Outputs[k].Template && other.Outputs[k].Text == candidate.Outputs[i].Text {
-					return true
+				if !other.Outputs[k].Template {
+					first := p.canonicalTarget(other.Outputs[k].Text, candidate.Kind == rule.FileRule)
+					second := p.canonicalTarget(candidate.Outputs[i].Text, candidate.Kind == rule.FileRule)
+					equal := first == second
+					mem.FreeString(p.Alloc, first)
+					mem.FreeString(p.Alloc, second)
+					if equal { return p.producerAmbiguity(candidate.Outputs[i].Text, other.Outputs[k], candidate.Outputs[i]) }
 				}
 			}
 		}
 	}
-	return false
+	return diagnostic.Diagnostic{}
 }
 
 func (p *Program) Free() {

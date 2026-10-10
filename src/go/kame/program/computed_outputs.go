@@ -84,6 +84,7 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 			d = p.appendOutput(result.Value, output.Span, &outputs)
 		}
 		result.Free(p.Alloc)
+		if d.Code == "PHASE_INVALID" || d.Code == "CAP_DENIED" { p.registrationTip(&d) }
 		if d.Code != "" {
 			break
 		}

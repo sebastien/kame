@@ -11,6 +11,18 @@ func sameSpan(span source.Span, start int, end int) bool {
 	return span.Start == start && span.End == end
 }
 
+func TestComputedSequenceGroups(t *testing.T) {
+	a := t.Allocator()
+	text := "a : @(PREP), @(BUILD) | @(TOOLS), ./ready"
+	parsed := rule.ParseRule(a, "groups.kmk", text)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 4 { t.Error("computed sequence did not parse"); return }
+	if !parsed.Rule.Inputs[0].SequenceEnd || parsed.Rule.Inputs[1].SequenceEnd || !parsed.Rule.Inputs[2].SequenceEnd || !parsed.Rule.Inputs[3].OrderOnly { t.Error("computed sequence lost boundaries/purpose") }
+	formatted := rule.FormatRule(a, parsed.Rule)
+	if formatted != text { t.Error("computed sequence did not round trip") }
+	mem.FreeString(a, formatted)
+}
+
 func TestComputedOutputsPreserveExpressionsAndFormatting(t *testing.T) {
 	a := t.Allocator()
 	text := "@(ROOT)/{name}.o @(OUTPUTS) : ./seed\n\tcat @< > @>"

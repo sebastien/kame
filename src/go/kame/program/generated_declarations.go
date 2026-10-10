@@ -80,12 +80,14 @@ func (p *Program) compileGeneratedDeclarations() diagnostic.Diagnostic {
 			freeStrings(p.Alloc, state.Stack)
 			freeStrings(p.Alloc, state.Dependencies)
 			d := generatedDiagnostic(p, item, "PHASE_INVALID", "generated declarations must be a complete pure value", "")
+			p.registrationTip(&d)
 			freeGeneratedBatch(p.Alloc, rules, metadata, names)
 			return d
 		}
 		eval.FreeEffects(p.Alloc, context.Effects)
 		if value.Diagnostic.Code != "" {
 			d := diagnosticFailureClone(p.Alloc, value.Diagnostic)
+			if d.Code == "PHASE_INVALID" || d.Code == "CAP_DENIED" { p.registrationTip(&d) }
 			value.Free(p.Alloc)
 			freeStrings(p.Alloc, state.Stack)
 			freeStrings(p.Alloc, state.Dependencies)
@@ -113,8 +115,7 @@ func (p *Program) compileGeneratedDeclarations() diagnostic.Diagnostic {
 				freeGeneratedBatch(p.Alloc, rules, metadata, names)
 				return d
 			}
-			if p.generatedTargetExists(lowered.Rule, rules) {
-				d := generatedDiagnostic(p, item, "TGT_AMBIG", "generated target duplicates an existing rule", lowered.Rule.Outputs[0].Text)
+			if d := p.generatedCollision(lowered.Rule, rules); d.Code != "" {
 				freeGeneratedRule(p.Alloc, lowered.Rule)
 				value.Free(p.Alloc)
 				freeStrings(p.Alloc, state.Stack)
@@ -330,16 +331,25 @@ func (p *Program) lowerGeneratedRule(item script.ScriptItem, value core.Value, t
 	return generatedRuleResult{Rule: generated}
 }
 
-func (p *Program) generatedTargetExists(candidate *rule.Rule, pending []*rule.Rule) bool {
+func (p *Program) generatedCollision(candidate *rule.Rule, pending []*rule.Rule) diagnostic.Diagnostic {
 	target := candidate.Outputs[0]
 	selected := p.selectRule(target.Text)
-	exists := selected.Rule != nil || selected.Ambiguous
 	mem.FreeString(p.Alloc, selected.Target)
-	freeCaptures(p.Alloc, selected.Captures)
 	freeArguments(p.Alloc, selected.Arguments)
-	selected.Diagnostic.Free(p.Alloc)
-	if exists {
-		return true
+	defer freeCaptures(p.Alloc, selected.Captures)
+	if selected.Diagnostic.Code != "" { return selected.Diagnostic }
+	if selected.Rule != nil {
+		for i := range selected.Rule.Outputs {
+			output := selected.Rule.Outputs[i]
+			rendered := renderTarget(p.Alloc, output, selected.Captures)
+			first := p.canonicalTarget(rendered, target.Path)
+			second := p.canonicalTarget(target.Text, target.Path)
+			equal := first == second
+			mem.FreeString(p.Alloc, rendered)
+			mem.FreeString(p.Alloc, first)
+			mem.FreeString(p.Alloc, second)
+			if equal { return p.producerAmbiguity(target.Text, output, target) }
+		}
 	}
 	key := cloneText(p.Alloc, target.Text)
 	file := target.Path
@@ -366,7 +376,7 @@ func (p *Program) generatedTargetExists(candidate *rule.Rule, pending []*rule.Ru
 				mem.FreeString(p.Alloc, other)
 			}
 			if equal {
-				return true
+				return p.producerAmbiguity(target.Text, output, target)
 			}
 		}
 	}
@@ -382,11 +392,11 @@ func (p *Program) generatedTargetExists(candidate *rule.Rule, pending []*rule.Ru
 				mem.FreeString(p.Alloc, other)
 			}
 			if equal {
-				return true
+				return p.producerAmbiguity(target.Text, output, target)
 			}
 		}
 	}
-	return false
+	return diagnostic.Diagnostic{}
 }
 
 func generatedDiagnostic(p *Program, item script.ScriptItem, code string, message string, target string) diagnostic.Diagnostic {

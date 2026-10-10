@@ -233,7 +233,7 @@ func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
 		freeCaptures(p.Alloc, selected.Captures); freeArguments(p.Alloc, selected.Arguments)
 		mem.FreeString(p.Alloc, selected.Target)
 		d := selected.Diagnostic
-		if selected.Ambiguous { d.Free(p.Alloc); d = failure(p.Alloc, "TGT_AMBIG", "multiple rules match target") }
+		if selected.Ambiguous && d.Code == "" { d = failure(p.Alloc, "TGT_AMBIG", "multiple rules match target") }
 		if d.Code == "" && !g.Resources[resource-1].Potential && r.Key.Kind != core.ResourceFile && p.Eval.Definition(r.Request) == nil { d = failure(p.Alloc, "TGT_NO_RULE", "no rule for target: "+r.Request) }
 		if d.Code != "" { return g.contextDiagnostic(d, resource) }
 		return d
@@ -281,6 +281,7 @@ func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
 	group := 1
 	for i := range plan.ResourceInputs {
 		input := plan.ResourceInputs[i]
+		if input.Group != 0 { group = input.Group }
 		key := p.inspectionKey(input.Key.Kind, input.Display)
 		id := g.resource(key, input.Display, r.Depth+1)
 		key.Free(p.Alloc)

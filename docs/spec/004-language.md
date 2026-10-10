@@ -570,10 +570,14 @@ separators.
 
 Prerequisites separated only by whitespace form one parallel group. A comma
 ends that group and begins the next one: every prerequisite in a group must
-finish before the runtime requests the following group. Commas must follow a
-literal name or path prerequisite and must be followed by whitespace and the
-next group. A rule using comma sequencing cannot also
-declare expression, quoted-string, or wildcard prerequisites. Each prerequisite
+finish before the runtime evaluates or requests the following group. Commas may
+follow literal, expression, quoted-string, template, or wildcard prerequisites
+and must be followed by whitespace and the next group. Computed lists splice
+into their authored group; nil and empty lists contribute no dependencies but
+retain the barrier between surrounding groups. Input discovery remains read-only;
+sequencing does not permit host reads or processes during output registration.
+Read-only inspection can resolve available membership but never executes a
+prerequisite to cross a barrier. Each prerequisite
 remains a normal content or order-only dependency according to its section;
 the comma adds a scheduling barrier and does not change input identity.
 Schema-2 build inspection exposes each prerequisite's one-based sequence group

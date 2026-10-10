@@ -36,6 +36,15 @@ later :
 	touch later-ran
 blocked : broken, later
 	touch forbidden
+PREP = ["first"]
+BUILD = ["second"]
+computed : @(PREP), @(BUILD)
+computed-parallel : @(["parallel-a" "parallel-b"])
+empty-middle : @(PREP), @([]), @(BUILD)
+./membership :
+	printf second > @>
+discovered : @([./membership]), @(text (read ./membership))
+computed-blocked : @(["broken"]), @(text (read ./must-not-read))
 KMK
 
 	test-step "$backend keeps whitespace dependencies parallel"
@@ -45,6 +54,22 @@ KMK
 	test-step "$backend waits at comma sequencing boundaries"
 	"${runner[@]}" -C "$project" sequenced >"$project/out" 2>"$project/err"
 	if [ -e "$project/first-done" ] && [ -e "$project/second-done" ]; then test-ok "$backend completed each sequence group in order"; else test-fail "$backend comma groups did not complete in order: $(cat "$project/err")"; fi
+
+	test-step "$backend computed groups and generated membership"
+	for target in computed empty-middle discovered; do
+		rm -f "$project/first-done" "$project/second-done"
+		if [ "$target" = discovered ]; then touch "$project/first-done"; fi
+		"${runner[@]}" -C "$project" "$target" >"$project/out" 2>"$project/err"
+		if [ -e "$project/second-done" ]; then test-ok "$backend $target completed in order"; else test-fail "$backend $target lost computed members"; fi
+	done
+	rm -f "$project/ready"
+	"${runner[@]}" -C "$project" computed-parallel >"$project/out" 2>"$project/err"
+	if [ -e "$project/ready" ]; then test-ok "$backend computed list members remain parallel"; else test-fail "$backend serialized computed list members"; fi
+	"${runner[@]}" do plan --json -C "$project" empty-middle >"$project/empty-plan" 2>"$project/err"
+	if jq -e '[.dependencies[] | select(.producer == 1 and .group != null) | .group] == [1, 3]' "$project/empty-plan" >/dev/null; then test-ok "$backend retains authored groups across empty expansion"; else test-fail "$backend lost empty expansion barrier"; fi
+	if "${runner[@]}" -C "$project" computed-blocked >"$project/out" 2>"$project/err"; then test-fail "$backend accepted failed computed group";
+	elif ! grep -q 'must-not-read' "$project/err"; then test-ok "$backend did not evaluate the later group after failure";
+	else test-fail "$backend evaluated a later group before the barrier"; fi
 
 	test-step "$backend cache identity includes sequence boundaries"
 	"${runner[@]}" -C "$project" cache-sequence >"$project/out" 2>"$project/err"
