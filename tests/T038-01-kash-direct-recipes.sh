@@ -31,6 +31,13 @@ for backend in native wasm; do
 		timeout 15 "${invocation[@]}" -C "$work" "$@" >"$work/out" 2>"$work/err" || status=$?
 		if [ "$status" = 1 ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend rejects $code before effects"; else test-fail "$backend rejection ($status)"; cat "$work/out" "$work/err"; fi
 	}
+	test-step "$backend signed symbols are ordinary text values"
+	check '["+files" "-symlinks" "+true" "-nil"]' do run --lang expr -c '[:+files :-symlinks :+true :-nil]'
+	check '["+files" "-dir"]' do run --print-result --lang km -c $'flags = [:+files :-dir]\nflags'
+	check '+files|-symlinks' do run --allow-run --lang kash -c 'printf "%s|%s" (nop :+files) (nop :-symlinks)'
+	for symbol in ':+ ' ':-1' ':++files' ':--files'; do
+		reject PARSE_ERR do run --lang expr -c "$symbol"
+	done
 	test-step "$backend expression statements and typed arguments"
 	check '' do run --lang kash -c '(nop [status: 0])'
 	check '' do run --lang kash -c $'if (nop :true)\n\t(nop [status: 0])'

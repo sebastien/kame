@@ -418,8 +418,11 @@ func (p *parser) name() nameResult {
 func (p *parser) symbol() *Expr {
 	start := p.pos
 	p.pos++
+	nameStart := p.pos
+	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '+' || p.s.Text[p.pos] == '-') { p.pos++ }
 	name := p.name()
 	if !name.OK { p.error(start, p.pos, "expected symbol name"); return nil }
+	if nameStart != name.Span.Start { e := p.node(Symbol, start); e.Text = p.s.Text[nameStart:p.pos]; return e }
 	if name.Text == "true" || name.Text == "false" {
 		e := p.node(Boolean, start); e.Bool = name.Text == "true"; return e
 	}
