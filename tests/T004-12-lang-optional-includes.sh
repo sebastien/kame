@@ -27,7 +27,7 @@ for backend in native wasm; do
  if grep -q '"optional":true' "$project/ast"; then test-ok "$backend AST preserves optional flag"; else test-fail "$backend optional AST"; fi
  "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" >"$project/fmt" 2>"$project/error"
  if cmp -s "$project/Makefile.kmk" "$project/fmt"; then test-ok "$backend optional include formatting"; else test-fail "$backend optional format"; fi
- "${runner[@]}" -C "$project" ./value.km >"$project/value" 2>"$project/error"
+  "${runner[@]}" --print-result -C "$project" ./value.km >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = '"okay"' ]; then test-ok "$backend value source optional include"; else test-fail "$backend optional value fragment"; fi
  printf 'later :\n\t@(out "loaded")\n' >"$project/missing.kmk"
  "${runner[@]}" -C "$project" later >"$project/value" 2>"$project/error"

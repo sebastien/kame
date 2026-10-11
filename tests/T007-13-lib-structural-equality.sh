@@ -34,21 +34,21 @@ for backend in native wasm; do
 	}
 	test-step "$backend ordered lists, unordered records and kind sensitivity"
 	for op in eq is '=' '=='; do
-		check ':true' do run -c "($op [1 [2 :nil] [a: 3 b: [4]]] [1.0 [2 :nil] [b: [4] a: 3]])"
-		check ':false' do run -c "($op [1 2] [2 1])"
-		check ':false' do run -c "($op [a: 1] [b: 1])"
-		check ':false' do run -c "($op [] (parse-json \"{}\"))"
+		check ':true' do run --lang expr -c "($op [1 [2 :nil] [a: 3 b: [4]]] [1.0 [2 :nil] [b: [4] a: 3]])"
+		check ':false' do run --lang expr -c "($op [1 2] [2 1])"
+		check ':false' do run --lang expr -c "($op [a: 1] [b: 1])"
+		check ':false' do run --lang expr -c "($op [] (parse-json \"{}\"))"
 	done
-	for op in ne '!='; do check ':true' do run -c "($op [1] [\"1\"])"; done
-	check ':true' do run -c '(eq (parse-json "{}") (parse-json "{}"))'
-	check '[[a: 1 b: 2] [b: 2 a: 1]]' do run -c '(filter [[a: 1 b: 2] [a: 2] [b: 2 a: 1]] [b: 2 a: 1])'
-	check '[[2]]' do run -c '(filter-out [[1] [2] [1.0]] [1])'
-	check ':false' do run -c '(eq 9007199254740992 9007199254740993)'
-	check ':false' do run -c '(eq 9007199254740993 9007199254740992.0)'
-	check ':true' do run -c '(eq 9007199254740992 9007199254740992.0)'
-	check ':false' do run -c '(eq 9223372036854775807 9223372036854775808.0)'
-	check ':true' do run -c '(eq -9223372036854775808 -9223372036854775808.0)'
-	check ':false' do run -c '(eq :nil :false)'
+	for op in ne '!='; do check ':true' do run --lang expr -c "($op [1] [\"1\"])"; done
+	check ':true' do run --lang expr -c '(eq (parse-json "{}") (parse-json "{}"))'
+	check '[[a: 1 b: 2] [b: 2 a: 1]]' do run --lang expr -c '(filter [[a: 1 b: 2] [a: 2] [b: 2 a: 1]] [b: 2 a: 1])'
+	check '[[2]]' do run --lang expr -c '(filter-out [[1] [2] [1.0]] [1])'
+	check ':false' do run --lang expr -c '(eq 9007199254740992 9007199254740993)'
+	check ':false' do run --lang expr -c '(eq 9007199254740993 9007199254740992.0)'
+	check ':true' do run --lang expr -c '(eq 9007199254740992 9007199254740992.0)'
+	check ':false' do run --lang expr -c '(eq 9223372036854775807 9223372036854775808.0)'
+	check ':true' do run --lang expr -c '(eq -9223372036854775808 -9223372036854775808.0)'
+	check ':false' do run --lang expr -c '(eq :nil :false)'
 	check '[:true :true :true :true :true :true 2]' do run --allow-read -C "$work" bytes.km result
 	check '[true,false]' do run --lang kash -c '(out [(eq [1] [1.0]) (is [1] [2])])'
 	test-step "$backend opaque values are errors even behind mismatches"

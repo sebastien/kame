@@ -76,6 +76,7 @@ test-wasm: wasm-check
 	tests/T007-13-lib-structural-equality.sh
 	tests/T007-14-lib-native-data.sh
 	tests/T009-13-cli-configuration.sh
+	tests/T009-16-cli-script-output.sh
 	tests/T009-14-cli-watch.sh
 	tests/T004-09-lang-rule-header-composition.sh
 	tests/T004-10-lang-line-continuations.sh

@@ -57,7 +57,7 @@ for backend in native wasm; do
 	if [ "$(cat "$work/attempts")" = x ]; then test-ok "$backend replay-safe value recovery"; else test-fail "$backend replayed failed left"; fi
 	rm "$work/attempts"
 	test-step "$backend JSON reports the recovered value, not an unhandled failure"
-	"${command[@]}" do run --json -C "$work" -l kash -c 'broken = $(false); value = broken ?? "fallback"' -l km -c 'value' >"$work/$backend.jsonl" 2>"$work/err"
+	"${command[@]}" do run --json --print-result -C "$work" -l kash -c 'broken = $(false); value = broken ?? "fallback"' -l km -c 'value' >"$work/$backend.jsonl" 2>"$work/err"
 	if [ ! -s "$work/err" ] && jq -e -s 'all(.type != "diagnostic") and any(.type == "target-value" and .value.data == "fallback")' "$work/$backend.jsonl" >/dev/null; then test-ok "$backend recovered JSON value"; else test-fail "$backend recovery JSON"; fi
 done
 test-step "portable recovered value events"

@@ -2223,7 +2223,7 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }));
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }));
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');

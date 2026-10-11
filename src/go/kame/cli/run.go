@@ -135,6 +135,10 @@ func parseRun(args []string, discover bool) Invocation {
 			inv.Verbose = true
 			continue
 		}
+		if arg == "--print-result" {
+			inv.PrintResult = true
+			continue
+		}
 		if assignmentOperand(&inv, arg) {
 			if inv.Error.Code != "" { return inv }
 			if len(arg) >= 4 && arg[:4] == "env." {
@@ -143,6 +147,11 @@ func parseRun(args []string, discover bool) Invocation {
 			}
 			if !discover && len(inv.Inputs) == 0 { continue }
 			if !discover && inv.Inputs[len(inv.Inputs)-1].Lang != "kmk" { continue }
+			// Keep task arguments as entries, never reinterpret their value as a file.
+			if discover {
+				inv.Inputs[0].Entries = slices.Append(mem.System, inv.Inputs[0].Entries, arg)
+			} else if !runEntry(&inv, arg) { return inv }
+			continue
 		}
 		if !discover && (arg == "-" || runLanguage(arg) != "") {
 			if !runFile(&inv, arg, language, &stdin) {

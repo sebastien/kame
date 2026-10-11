@@ -29,7 +29,7 @@ with tempfile.TemporaryDirectory() as temporary:
         (project / 'Makefile.kmk').write_text(text)
         return invoke(args or ['chosen'], expected, code)
     def expression(text, expected=None, code=None, args=None):
-        return invoke(['do', 'run', '--allow-run', '--allow-read', '--allow-write', '-c', text] + (args or []), expected, code)
+        return invoke(['do', 'run', '--print-result', '--allow-run', '--allow-read', '--allow-write', '-c', text] + (args or []), expected, code)
 
     # Authored recipes are direct Kash; constructing source is explicit.
     recipe('SHELL = kash\ncommand = (kash "printf generated")\nchosen :\n\t(command)\n', expected='generated')

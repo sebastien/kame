@@ -55,12 +55,12 @@ for backend in native wasm; do
 		if [ "$status" = 1 ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend rejects $code before effects"; else test-fail "$backend include rejection (status $status)"; cat "$work/err"; fi
 	}
 	test-step "$backend includes preserve scope, order, byte offsets and entry selection"
-	check '界childafter"Ada!"' do run "$work/main.km"
+	check '界childafter' do run "$work/main.km"
 	check '"Ada"' do run "$work/main.km" name
-	check '界childafter"Ada!"' do run -C "$work/cwd" "$work/main.km"
-	check '42' do run "$work/repeated.km"
-	check '"Ada"' do run "$work/absolute.km"
-	check 'childmain"Ada"' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
+	check '界childafter"Ada!"' do run --print-result -C "$work/cwd" "$work/main.km"
+	check '42' do run --print-result "$work/repeated.km"
+	check '"Ada"' do run --print-result "$work/absolute.km"
+	check 'childmain' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
 	check 'childmain' do run "$work/rules.kmk" build
 	reject DEP_CYCLE do run "$work/cycle.km"
 	reject FS_ERR do run -c '(out "must-not-run")' "$work/missing.km"

@@ -38,6 +38,7 @@ type Invocation struct {
 	// Command and all other option strings continue to borrow argv.
 	HelpResult       string
 	Verbose          bool
+	PrintResult      bool
 	Color            string
 	DiagnosticFormat string
 	Grants           []eval.Grant

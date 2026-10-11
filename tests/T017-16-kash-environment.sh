@@ -61,7 +61,7 @@ for backend in native wasm; do
 	for text in 'printf (let [env 1] "forbidden")' 'printf (def env "forbidden")' 'printf (with [env: 1] "forbidden")'; do reject DEF_INVALID "$text"; done
 	reject DEF_INVALID $'match (nop "x")\n\tcase "{env:*}"\n\t\tprintf forbidden'
 	reject DEF_INVALID 'printf (match "x" ["{env:*}" "forbidden"])'
-	"${command[@]}" do run -l km -c $'env = [VALUE: "Kame"]\nenv.VALUE' >"$work/out" 2>"$work/err"
+	"${command[@]}" do run --print-result -l km -c $'env = [VALUE: "Kame"]\nenv.VALUE' >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = '"Kame"' ]; then test-ok "$backend leaves Kame reference semantics unchanged"; else test-fail "$backend rewrote plain Kame env"; fi
 	"${command[@]}" do run --allow-run --allow-env=KASH_TEST_ENV -l expr -c '$(printf "%s" $env.KASH_TEST_ENV)' >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = '"host value with spaces"' ]; then test-ok "$backend embedded captures delegate env lookup to Kash"; else test-fail "$backend embedded env lookup"; fi

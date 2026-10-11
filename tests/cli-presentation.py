@@ -167,8 +167,8 @@ def check_host(host: list[str], root: Path) -> None:
 			rows = records(effects)
 			assert payload_bytes(rows, "stdout") == b"raw-out" and payload_bytes(rows, "stderr") == b"raw-err", rows
 		else:
-			# err returns its argument; the session also prints that final value.
-			assert effects.stdout == b'raw-out"raw-err"' and effects.stderr == b"raw-err", effects
+			# Script results do not leak into either explicit output stream.
+			assert effects.stdout == b'raw-out' and effects.stderr == b"raw-err", effects
 	rows = records(invoke(host, ["do", "cat", "--json", "-c", 'default = "hello"'], project))
 	assert payload(rows, "target-value")["value"] == {"kind": "string", "data": "hello"}
 	rows = records(invoke(host, ["do", "fmt", "--json", "--check", "source.kmk"], project, status=1))

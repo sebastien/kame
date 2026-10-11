@@ -45,7 +45,7 @@ PY
  status=0
  "${runner[@]}" -C "$project" default >"$project/value" 2>"$project/error" || status=$?
  if [ "$status" = 1 ] && grep -q TOOL_MISSING "$project/error" && [ ! -s "$project/value" ]; then test-ok "$backend missing tool fails before process"; else test-fail "$backend missing tool"; fi
- "${runner[@]}" do run --allow-run -l km -c 'selected = "kame-test-compiler"' -c '(tool selected)' --tool "kame-test-compiler=$project/tool-a" >"$project/value" 2>"$project/error"
+ "${runner[@]}" do run --print-result --allow-run -l km -c 'selected = "kame-test-compiler"' -c '(tool selected)' --tool "kame-test-compiler=$project/tool-a" >"$project/value" 2>"$project/error"
  if python3 - "$project/value" "$project/tool-a" <<'PY'
 import json,sys
 assert json.load(open(sys.argv[1])) == sys.argv[2]

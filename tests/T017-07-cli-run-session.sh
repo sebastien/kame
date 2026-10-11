@@ -54,26 +54,28 @@ for backend in native wasm; do
 		if [ "$status" = 1 ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend rejects before effects: $code"; else test-fail "$backend expected $code (status $status)"; cat "$work/err"; fi
 	}
 	test-step "$backend shared values, entries, forward references and final result"
-	check '"Hello Ada"' do run "$work/functions.km" -c '(greet name)' -c 'name = "Ada"'
+	check '' do run "$work/functions.km" -c '(greet name)' -c 'name = "Ada"'
+	check '"Hello Ada"' do run --print-result "$work/functions.km" -c '(greet name)' -c 'name = "Ada"'
 	check '"Ada"' do run "$work/values.km" name
-	check 'Hello Ada"Hello Ada"' do run -c '(out "Hello ")' -c '(out "Ada")' -c '"Hello Ada"'
-	# The output effects above precede the one final implicit value.
+	check 'Hello Ada' do run -c '(out "Hello ")' -c '(out "Ada")' -c '"Hello Ada"'
+	check 'Hello Ada"Hello Ada"' do run --print-result -c '(out "Hello ")' -c '(out "Ada")' -c '"Hello Ada"'
+	# Explicit display never depends on whether out executed.
 	check 'firstsecond42' do run -c '(out "first")' -c '(out "second")' -l expr -c '42'
 	check '["one two" "--help"]' do run -l expr -c '@*' -- 'one two' --help
 	check ':nil' do run -l expr -c ':nil'
 	check '' do run -c ''
 	check '' do run "$work/definitions.kash"
 	check '"Ada"' "$work/values.km" name
-	check '"Hello Ada"' -c 'name = "Ada"' -c '(cat "Hello " name)'
+	check '"Hello Ada"' --print-result -c 'name = "Ada"' -c '(cat "Hello " name)'
 	printf 'printf stdin' | "${command[@]}" -l kash - >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = stdin ]; then test-ok "$backend explicit stdin source"; else test-fail "$backend stdin source"; fi
 
 	test-step "$backend Kash streams, capture isolation and fragment replay"
-	check $'Hello Ada\n"done"' do run --allow-run "$work/functions.km" "$work/process.kash" -c 'name = "Ada"' -c '"done"'
+	check $'Hello Ada\n' do run --allow-run "$work/functions.km" "$work/process.kash" -c 'name = "Ada"' -c '"done"'
 	check $'Hello Ada\n' --allow-run "$work/functions.km" -c 'name = "Ada"' "$work/process.kash"
-	check 'AB"C"' do run -l kash -c 'printf A; printf B' -l km -c '"C"'
-	check 'once"later"' do run -l kash -c 'printf once' -l km -c '$(printf later)'
-	check '"nested"' do run --allow-run -c 'capture = $(printf nested)' -c 'capture'
+	check 'AB' do run -l kash -c 'printf A; printf B' -l km -c '"C"'
+	check 'once"later"' do run --print-result -l kash -c 'printf once' -l km -c '$(printf later)'
+	check '"nested"' do run --allow-run --print-result -c 'capture = $(printf nested)' -c 'capture'
 	check '' do run -l kash -c 'unused = $(touch should-not-exist)'
 	check 'abc' do run --capture-limit 1 -l kash -c 'printf abc | cat'
 	"${command[@]}" do run -l kash -c 'printf "\\377"' >"$work/binary" 2>"$work/err"
@@ -114,7 +116,7 @@ PYTIME
 		reject EXPR_INVALID do run -C "$service_directory" -l kmk -c "$service_source" daemon
 		if [ ! -e "$service_directory/forbidden-service-output" ]; then test-ok "$backend service case $service_case rejects writes before publication"; else test-fail "$backend service case $service_case published file output"; fi
 	done
-	check '"Hello Ada"' do run -C "$work/cwd" "$work/functions.km" -c 'name = "Ada"' -c '(greet name)'
+	check '"Hello Ada"' do run --print-result -C "$work/cwd" "$work/functions.km" -c 'name = "Ada"' -c '(greet name)'
 	test-step "$backend rule and value composition"
 	"${command[@]}" do run --json -l kmk -c 'value = 42' value > "$work/values-json" 2> "$work/err"
 	if jq -e -s 'all(.[]; .schema == 1) and any(.[]; .type == "target-value" and .target == "value" and .value.data == 42) and any(.[]; .type == "target-completed" and .target == "value")' "$work/values-json" >/dev/null; then test-ok "$backend single-source selected values emit schema-1 JSON events"; else test-fail "$backend leaked raw value output into JSON"; fi
@@ -125,11 +127,11 @@ PYTIME
 	printf 'value = 42\n' | "${command[@]}" do parse --json --lang kmk > "$work/alias-ast" 2> "$work/err"
 	printf 'value=42\n' | "${command[@]}" do fmt --lang km > "$work/alias-format" 2> "$work/err"
 	if jq -e '.ast.items | length == 1' "$work/alias-ast" >/dev/null && grep -q 'value = 42' "$work/alias-format"; then test-ok "$backend parse/format accept source language aliases"; else test-fail "$backend source language aliases failed"; fi
-	check 'rule"Ada"' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
-	check 'leafruleleaf"done"' do run "$work/arguments.kmk" build -c '"done"' -- leaf
+	check 'rule' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
+	check 'leafruleleaf' do run "$work/arguments.kmk" build -c '"done"' -- leaf
 	test-step "$backend discovered build plus inline work"
-	check 'ruleAda"Ada"' -C "$work/cwd" build -c '(report name)'
-	check 'rulefirstAda"Ada"' -C "$work/cwd" build -c '(out "first")' -c '(report name)'
+	check 'ruleAda' -C "$work/cwd" build -c '(report name)'
+	check 'rulefirstAda' -C "$work/cwd" build -c '(out "first")' -c '(report name)'
 	reject PARSE_ERR -C "$work/cwd" build -c '['
 	reject DEF_INVALID -C "$work/cwd" build -c 'name = "duplicate"'
 	test-step "$backend removed commands give migration help"

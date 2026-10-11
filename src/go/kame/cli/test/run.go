@@ -157,3 +157,16 @@ func TestAssignmentShorthand(t *testing.T) {
  inv.Free()
  if !cli.SelectsRun([]string{"env.HOST=local", "port=8000", "source.kmk"}) { t.Error("leading assignments hid an explicit source") }
 }
+
+func TestRunAssignmentsPrecedeSourceSuffixes(t *testing.T) {
+	values := []string{"/missing/sdk.km", "/missing/sdk.kmk", "/missing/sdk.kash", "/missing/sdk.ksh", "@(missing)=$(printf injected).km"}
+	for i := range values {
+		assignment := "SDK_PATH=" + values[i]
+		inv := cli.ParseRun([]string{"rules.kmk", "default", assignment, "--print-result", "-c", "42"})
+		if !inv.OK || !inv.PrintResult || len(inv.Inputs) != 2 || len(inv.Parameters) != 1 || inv.Parameters[0] != assignment || len(inv.Inputs[0].Entries) != 2 || inv.Inputs[0].Entries[1] != assignment {
+			t.Error("literal assignment was reclassified as a source")
+		}
+		inv.Free()
+		if cli.SelectsRun([]string{assignment}) { t.Error("assignment suffix selected execution instead of a discovered build") }
+	}
+}

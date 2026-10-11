@@ -55,10 +55,10 @@ for backend in native wasm; do
 	test-step "$backend order, include expansion, defaults and forward references"
 	check '[0 1 2 3 3 4 [5]]' do run "$work/main.km" items
 	check '[0,1,2,3,3,4,[5]]' do cat -f "$work/main.kmk" items
-	check '[1 2]' do run -c 'items += [1]' -c 'items += [2]' -c items
-	check '[1 2]' do run -c $'items = [1]\nitems+= [2]\nitems'
-	check '[]' do run -c $'items += []\nitems ?= missing\nitems'
-	check '[1 2]' do run -c $'items += [1]\nwhen (eq (count items) 1)\nitems += [2]\notherwise\nitems += missing\nend\nitems'
+	check '[1 2]' do run --print-result -c 'items += [1]' -c 'items += [2]' -c items
+	check '[1 2]' do run --print-result -c $'items = [1]\nitems+= [2]\nitems'
+	check '[]' do run --print-result -c $'items += []\nitems ?= missing\nitems'
+	check '[1 2]' do run --print-result -c $'items += [1]\nwhen (eq (count items) 1)\nitems += [2]\notherwise\nitems += missing\nend\nitems'
 	test-step "$backend overrides replace all operands and retain literal data"
 	check '"@(missing)=literal"' do run -c $'items += missing\nitems += items' items --define 'items=@(missing)=literal'
 	check '"operand"' do run "$work/main.km" items items=operand

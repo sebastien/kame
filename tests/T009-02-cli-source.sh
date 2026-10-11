@@ -110,11 +110,11 @@ cli_expect_stdout "inline
 test-step "--file and --command compose in input order"
 cli_run -- -f explicit/make.kmk where -c '(out "after")'
 cli_expect_status 0
-cli_expect_stdout $'make.kmk\nafter"after"'
+cli_expect_stdout $'make.kmk\nafter'
 
 cli_run -- --allow-run -c 'name = "shared"' --file=explicit/make.kmk where -c 'name'
 cli_expect_status 0
-cli_expect_stdout $'make.kmk\n"shared"'
+cli_expect_stdout $'make.kmk\n'
 
 test-step "-C discovers beneath the given directory"
 mkdir -p elsewhere

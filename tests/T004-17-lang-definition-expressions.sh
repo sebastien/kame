@@ -53,8 +53,8 @@ for backend in native wasm; do
 	check 42 do cat -f "$work/values.kmk" fallback
 	check "$kash_expected" do run "$work/values.kash"
 	check '"@(missing)=literal"' do run "$work/values.km" number --define 'number=@(missing)=literal'
-	check 7 do run -c $'x ?= 7\nx ?= missing\nx'
-	check 42 do run -c 'alias = later' -c 'later = 42' -c alias
+	check 7 do run --print-result -c $'x ?= 7\nx ?= missing\nx'
+	check 42 do run --print-result -c 'alias = later' -c 'later = 42' -c alias
 	reject DEP_CYCLE do run -c $'a = b\nb = a\na'
 	reject REF_MISSING do run -c $'text = unbound\ntext'
 	reject DEF_INVALID do run -c $'x = 1\nx = 2\nx'

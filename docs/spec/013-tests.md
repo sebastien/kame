@@ -159,9 +159,13 @@ Native/WASM conformance covers:
   without replay or rollback. Verify distinct inline source spans and forward
   references across file/inline boundaries.
 - Named value entries, forward lazy definitions, top-level expression sequencing,
-  definitions-only defaults, empty programs, and final-value presentation.
+  definitions-only defaults, empty programs, explicit script output, optional
+  `--print-result`, and retained expr/selected-entry display. Verify exact
+  machine-readable stdout and JSON Lines with and without result display.
 - Explicit source sequencing, discovered-build append behavior, and literal
   target escapes/`--entry` selection for program-like suffixes.
+- Literal `NAME=VALUE` classification before source suffixes, including after
+  rule fragments and when VALUE contains interpolation/process-looking data.
 - Source resolution before `-C`, with no implicit change to the source directory.
 - Program arguments after `--`, including empty frames and whitespace-bearing values.
 - Language-specific defaults and rejection of inappropriate options before effects.

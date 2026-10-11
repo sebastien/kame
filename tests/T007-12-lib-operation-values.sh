@@ -49,12 +49,12 @@ for backend in native wasm; do
 	}
 	test-step "$backend pure callbacks, lazy aliases and lexical precedence"
 	check '[2 [1 2] "ab"]' do run "$work/values.km" result
-	check '["A" "B"]' do run -c '(map uppercase ["a" "b"])'
-	check 3 do run -c '(let [f count] (f [1 2 3]))'
-	check 7 do run -c '(let [count ([x] 7)] (count []))'
-	check 2 do run -c '(let [ops [f: count]] (ops.f [1 2]))'
-	check '[1 2]' do run -c '(let [ops [count uppercase]] (map ops.0 [[1] [2 3]]))'
-	check ':true' do run -c '(let [same =] (same 1 1))'
+	check '["A" "B"]' do run --lang expr -c '(map uppercase ["a" "b"])'
+	check 3 do run --lang expr -c '(let [f count] (f [1 2 3]))'
+	check 7 do run --lang expr -c '(let [count ([x] 7)] (count []))'
+	check 2 do run --lang expr -c '(let [ops [f: count]] (ops.f [1 2]))'
+	check '[1 2]' do run --lang expr -c '(let [ops [count uppercase]] (map ops.0 [[1] [2 3]]))'
+	check ':true' do run --lang expr -c '(let [same =] (same 1 1))'
 	check '<operation:count>' do run "$work/values.km" size
 	check '2["A","B"]' do run "$work/values.kash"
 	MODE=local check local do run --lang kash --allow-env=MODE -c '(out (env "MODE"))'
@@ -73,8 +73,8 @@ for backend in native wasm; do
 	reject REF_MISSING do run -c unknown
 	reject OP_UNKNOWN do run -c '(unknown)'
 	for form in if let def eval and or with match run pipe await '?'; do reject EXPR_INVALID do run -c "(map $form [])"; done
-	check 1 do run -c '(if :true 1 missing)'
-	check 2 do run -c '(let [x 2] x)'
-	check 3 do run -c '(? missing 3)'
+	check 1 do run --lang expr -c '(if :true 1 missing)'
+	check 2 do run --lang expr -c '(let [x 2] x)'
+	check 3 do run --lang expr -c '(? missing 3)'
 done
 test-end

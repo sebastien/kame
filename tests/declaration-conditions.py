@@ -80,19 +80,19 @@ with tempfile.TemporaryDirectory() as temporary:
     # Selected declarations enter the shared scope; inactive duplicates do not.
     value = 'mode = "debug"\nwhen (eq mode "debug")\nanswer = (first (list 42))\notherwise\nanswer = (first (list 0))\nend\nanswer\n'
     (project / 'value.km').write_text(value)
-    run(['do', 'run', '-f', 'value.km'], '42')
-    run(['do', 'run', '-l', 'km', '-c', value], '42')
-    run(['do', 'run', '-l', 'km', '-f', '-'], '42', input_text=value)
+    run(['do', 'run', '--print-result', '-f', 'value.km'], '42')
+    run(['do', 'run', '--print-result', '-l', 'km', '-c', value], '42')
+    run(['do', 'run', '--print-result', '-l', 'km', '-f', '-'], '42', input_text=value)
     (project / 'first.km').write_text('mode = "debug"\n')
     second = ':true\nwhen (eq mode "debug")\n42\notherwise\n0\nend\n'
     (project / 'second.km').write_text(second)
-    run(['do', 'run', '-f', 'first.km', '-f', 'second.km'], '42')
-    run(['do', 'run', '-f', 'first.km', '-l', 'km', '-c', second], '42')
+    run(['do', 'run', '--print-result', '-f', 'first.km', '-f', 'second.km'], '42')
+    run(['do', 'run', '--print-result', '-f', 'first.km', '-l', 'km', '-c', second], '42')
     inline_build = 'when :true\nchosen :\n\tprintf inline\notherwise\nchosen :\n\tprintf wrong\nend\n'
     run(['do', 'run', '-l', 'kmk', '-c', inline_build, 'chosen'], 'inline')
     # Includes require a file-backed source, even when conditionally reached.
     run(['do', 'run', '-l', 'km', '-c', 'when :true\ninclude missing.km\nend\n'], code='FEATURE_UNSUP')
-    run(['do', 'run', '-l', 'km', '-c', 'when :false\ninclude missing.km\nend\n42\n'], '42')
+    run(['do', 'run', '--print-result', '-l', 'km', '-c', 'when :false\ninclude missing.km\nend\n42\n'], '42')
     (project / 'bad-predicate.kmk').write_text('# é keeps byte offsets honest\nwhen (eq missing 1)\nchosen :\n\ttrue\nend\n')
     result = run(['--json', '-f', 'bad-predicate.kmk', 'chosen'], code='REF_MISSING')
     diagnostic = [json.loads(line)['diagnostic'] for line in result.stdout.splitlines() if json.loads(line).get('type') == 'diagnostic'][0]

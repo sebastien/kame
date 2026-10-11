@@ -43,7 +43,7 @@ for backend in native wasm; do
 	check "${work}/sub"$'\n0' '(let [r (run :cwd ./sub "pwd")] r.status)'
 	check 'CHILD0' '(let [r (pipe (run :VALUE "child" "sh" "-c" "printf \"$VALUE\"") (run "tr" "a-z" "A-Z"))] r.status)'
 	test-step "$backend lazy process definitions and stable call identities"
-	"${command[@]}" do run --allow-run -C "$work" -l km -c $'unused = (run "touch" "forbidden")\n(f X) = (run "sh" "-c" "printf x >> attempts")\na = (f 1)\nb = (f 1)\n[count: (count [a b]) status: a.status]' >"$work/out" 2>"$work/err"
+	"${command[@]}" do run --print-result --allow-run -C "$work" -l km -c $'unused = (run "touch" "forbidden")\n(f X) = (run "sh" "-c" "printf x >> attempts")\na = (f 1)\nb = (f 1)\n[count: (count [a b]) status: a.status]' >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = '[count: 2 status: 0]' ] && [ "$(cat "$work/attempts")" = xx ] && [ ! -e "$work/forbidden" ]; then test-ok "$backend lazy run calls are correlated"; else test-fail "$backend lazy run replay"; fi
 	rm "$work/attempts"
 	check 'firstsecond0' '(let [r (run "printf" "%s%s" $(printf first) $(printf second))] r.status)'

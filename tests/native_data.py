@@ -22,7 +22,7 @@ def main():
 			return subprocess.run(command + list(args), cwd=project, env=environment, text=True, capture_output=True, timeout=20)
 		def value(expression, expected, *flags):
 			nonlocal checks
-			result = run('do', 'run', *flags, '-c', expression)
+			result = run('do', 'run', '--print-result', *flags, '-c', expression)
 			assert result.returncode == 0 and result.stdout.strip() == expected, (expression, result.stdout, result.stderr)
 			checks += 1
 		def reject(expression, code='EXPR_INVALID', *flags):

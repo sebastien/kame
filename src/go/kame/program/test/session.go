@@ -61,6 +61,29 @@ func TestSessionCannotCompleteSyntaxAcrossFragments(t *testing.T) {
 	if compiled.Session != nil || len(compiled.Diagnostics) == 0 { t.Error("fragment syntax was combined and reparsed") }
 }
 
+func TestSessionScriptDisplayIsExplicit(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	for display := 0; display < 2; display++ {
+		fragments := []program.Fragment{
+			{Name: "script.km", Lang: "km", Text: "(out 42)\n42"},
+			{Name: "expression", Lang: "expr", Text: "42"},
+			{Name: "entry.km", Lang: "km", Text: "answer = 42", Entries: []string{"answer"}},
+		}
+		compiled := program.CompileSession(a, fragments, registry, program.Options{PrintResult: display != 0})
+		if compiled.Session == nil { compiled.Free(a); t.Fatal("display session compilation failed"); return }
+		s := compiled.Session
+		if len(s.Work) != 4 { t.Error("display policy changed execution work") } else {
+			if s.Work[0].Display != (display != 0) || s.Work[1].Display != (display != 0) { t.Error("script display depended on out rather than explicit selection") }
+			if !s.Work[2].Display || !s.Work[3].Display || !s.Work[3].Selected { t.Error("expression or explicit entry lost value display") }
+		}
+		s.Free()
+		compiled.Free(a)
+	}
+}
+
 func TestSessionEntryPoliciesStayWithTheirFragments(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)

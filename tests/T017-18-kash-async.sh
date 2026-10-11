@@ -61,7 +61,7 @@ for backend in native wasm; do
 	for text in 'printf hello && printf world' 'printf $(true &)' 'job = true &' $'if true &\n\tprintf forbidden' 'true & false'; do reject PARSE_ERR "$text"; done
 	test-step "$backend owned async work survives ordered fragment boundaries"
 	"${command[@]}" do run --allow-run -C "$work" -l kash -c 'job = (run :async :true "sh" "-c" "while test ! -f gate; do sleep .01; done; printf async"); printf "%s" (bool job)' -l km -c $'(run "printf" "next")\n(run "touch" "gate")\ncompletion = (await job)\ncompletion.status' >"$work/out" 2>"$work/err"
-	if [ "$(cat "$work/out")" = truenextasync0 ]; then test-ok "$backend shared handle ownership"; else test-fail "$backend fragment-local handle"; cat "$work/err"; fi
+	if [ "$(cat "$work/out")" = truenextasync ]; then test-ok "$backend shared handle ownership"; else test-fail "$backend fragment-local handle"; cat "$work/err"; fi
 	rm "$work/gate"
 	timeout 10 "${command[@]}" do run -C "$work" -l kash -c 'sh -c "while test ! -f gate; do sleep .01; done; printf async" &' -l kmk -f "$work/policy.kmk" open-gate >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = async ]; then test-ok "$backend legacy recipe and background graph share invocation ownership"; else test-fail "$backend recipe blocked background dispatch"; fi

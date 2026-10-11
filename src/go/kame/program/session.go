@@ -32,6 +32,7 @@ type SessionWork struct {
 	Target string
 	Selected bool
 	Value bool
+	Display bool // Presentation policy, independent of value evaluation/entry validation.
  Raw bool
 	ImplicitDefault bool
 	entryGroup int
@@ -76,7 +77,7 @@ func (s *Session) Observe(h *Handle) {
 		if n.State == core.NodeCancelled { e.Kind = TargetCancelled }
 		e.Diagnostic = n.Diagnostic.Clone(p.Alloc)
 	} else {
-		if s.active < len(s.Work) && s.Work[s.active].Value && !p.Options.DryRun {
+		if s.active < len(s.Work) && s.Work[s.active].Display && !p.Options.DryRun {
 			value := e
 			value.Kind, value.Value = TargetValue, n.Latest.Clone(p.Alloc)
 			p.emit(value)
@@ -130,7 +131,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
    root := templateBindings(a, doc.Root, f.Defines)
    doc.Root = nil; doc.Free()
    parsed.Items = slices.Append(a, parsed.Items, script.ScriptItem{Kind: script.Expression, Expression: root, Span: root.Span})
-   if !f.Check { work = slices.Append(a, work, SessionWork{Expression: root, Value: true, Raw: true}) }
+   if !f.Check { work = slices.Append(a, work, SessionWork{Expression: root, Value: true, Display: true, Raw: true}) }
    continue
   }
 		part := script.ParseFragment(a, parsed.Source, f.Lang, offsets[i], offsets[i]+len(f.Text))
@@ -143,7 +144,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 			if item.Kind == script.Include { parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, source.Diagnostic{Code: "FEATURE_UNSUP", Severity: source.Error, Span: item.Span, Message: "includes in runner sessions are not yet supported"}) }
 			if item.Kind == script.Definition && f.Lang == "km" { valueDefinitions = true }
 			if len(f.Entries) == 0 && !f.SkipStatements && f.Lang != "kmk" && (item.Kind == script.Expression || item.Kind == script.Command) {
-				work = slices.Append(a, work, SessionWork{Expression: item.Expression, Value: f.Lang != "kash"})
+				work = slices.Append(a, work, SessionWork{Expression: item.Expression, Value: f.Lang != "kash", Display: f.Lang == "expr" || (f.Lang == "km" && options.PrintResult)})
 			}
 		}
 		// Transfer child ownership while retaining the original source storage.
@@ -152,10 +153,10 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		part.Free()
 		if f.Lang == "kash" { kashFragments = true }
 		if f.Lang == "kmk" { ruleFragments = true }
-		for j := range f.Entries { work = slices.Append(a, work, SessionWork{Target: cloneText(a, f.Entries[j]), Selected: f.Lang == "km", Value: f.Lang == "km", entryGroup: i+1}) }
-		if f.Lang == "kmk" && !f.Inline && len(f.Entries) == 0 { work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), ImplicitDefault: true, entryGroup: i+1}) }
+		for j := range f.Entries { work = slices.Append(a, work, SessionWork{Target: cloneText(a, f.Entries[j]), Selected: f.Lang == "km", Value: f.Lang == "km", Display: true, entryGroup: i+1}) }
+		if f.Lang == "kmk" && !f.Inline && len(f.Entries) == 0 { work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), Display: true, ImplicitDefault: true, entryGroup: i+1}) }
 	}
-	if len(work) == 0 && (ruleFragments || (valueDefinitions && !kashFragments)) { work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), Value: !ruleFragments, ImplicitDefault: true}) }
+	if len(work) == 0 && (ruleFragments || (valueDefinitions && !kashFragments)) { work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), Value: !ruleFragments, Display: ruleFragments || options.PrintResult, ImplicitDefault: true}) }
 	compiled := Compile(a, parsed, registry, options)
 	p := compiled.Program
 	result := SessionCompile{}

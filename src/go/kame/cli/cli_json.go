@@ -39,6 +39,8 @@ func WriteJSON(out io.Writer, inv *Invocation) {
 	e.Str(inv.HelpResult)
 	e.Str("verbose")
 	e.Bool(inv.Verbose)
+	e.Str("printResult")
+	e.Bool(inv.PrintResult)
 	e.Str("color")
 	e.Str(inv.Color)
 	e.Str("diagnosticFormat")

@@ -75,6 +75,7 @@ func HelpText(topic string) string {
 		}
 		if topic == "run" {
 			b.WriteString("-l, --lang km|kmk|kash|expr; --entry NAME selects the preceding source entry.\nFiles/-f and -c compose ordered fragments; inline input defaults to km.\n")
+			b.WriteString("km scripts emit explicit out/err effects; --print-result also displays their final value.\nexpr and explicitly selected value entries retain result display.\nArguments after -- bind args (@*); each operand remains one literal string.\nNAME=VALUE is literal configuration, even when VALUE ends in a source suffix.\n")
 		}
 		if topic == "run" || topic == "render" {
 			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")

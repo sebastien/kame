@@ -46,6 +46,7 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	for i := range fields { tools = slices.Append(r.Alloc, tools, fields[i].Text) }
 	options := program.Options{TimeoutMS: host.PayloadInt(value, "timeoutMS"), RetryCount: int(host.PayloadInt(value, "retryCount")), ToolOverrides: tools, Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0, Force: host.PayloadInt(value, "force") != 0}
 	options.RetainBytes = int(host.PayloadInt(value, "retainBytes"))
+	options.PrintResult = host.PayloadInt(value, "printResult") != 0
 	var parameters []string
 	fields = host.PayloadList(value, "parameters")
 	for i := range fields { parameters = slices.Append(r.Alloc, parameters, fields[i].Text) }
@@ -89,8 +90,8 @@ func (r *Runtime) SessionWorkCount() int {
 func (r *Runtime) SessionWorkKind(index int) uint32 {
 	if r.Session == nil || index < 0 || index >= len(r.Session.Work) { return 0 }
 	w := r.Session.Work[index]
-	if w.Selected { return 2 }
-	if w.Value { return 1 }
+	if w.Selected && w.Display { return 2 }
+	if w.Value && w.Display { return 1 }
 	return 3
 }
 

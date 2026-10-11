@@ -28,7 +28,7 @@ kame do run --lang expr -c '(join ["a" "b"] ",")'
 kame do run ./values.km result
 kame do run ./Makefile.kmk check
 kame do run ./publish.kash -- preview
-kame do run -c 'name = "Ada"' -c '(uppercase name)'
+kame do run -c 'name = "Ada"' -c '(out (uppercase name))'
 ```
 
 Direct source execution is shorthand for `do run`. Execution accepts ordered,
@@ -49,9 +49,15 @@ Relative source filenames and evaluation resources resolve beneath the selected
 `-C` directory, independent of option order. Includes remain source-relative. Later
 fragments share the first fragment's capability policy, not implicit new grants.
 
-The unified runner supersedes the specified `do expr`/`do kash` execution
-interfaces. Use `do run --lang expr` for expressions. Native and WASM runner
+Use `do run --lang expr` for expressions and `do run --lang kash` for processes.
+Native and WASM runner
 sessions support `--json` JSON Lines events for values, processes and diagnostics.
+
+`.km` scripts emit only explicit `out`/`err` effects by default, including inline
+`-c` scripts and implicit `default` definitions. `--print-result` also displays
+the final script value; `expr` and explicitly selected entries retain canonical
+result display. This never depends on whether `out` ran. Migrate implicit-display
+scripts with `(out VALUE)` for exact data, a named entry, or `--print-result`.
 
 ## Build targets
 
@@ -87,13 +93,17 @@ Primary options:
 | `--capture-limit N` | Limit each command substitution's captured stdout; default 1 MiB, independent of retained recipe logs. |
 | `--watch` | Rebuild tracked inputs; primary build mode only, not `do run`. |
 | `--define NAME=VALUE` | Override a declared definition with literal string data. |
+| `--print-result` | In execution sessions, opt into final `.km` result display. |
 | `--tool NAME=PATH` | Override executable resolution for a declared tool. |
 
 `env.NAME=VALUE` is shorthand for a process environment override. Bare
 `NAME=VALUE` overrides a declared global or binds a declared named-target argument.
 For example, `deploy {environment} {region=us-east} :` accepts
-`kame deploy environment=production`. Arguments are literal strings without
-whitespace; program arguments after `--` are a separate mechanism.
+`kame deploy environment=production`. Assignments are classified before source
+suffixes: `SDK_PATH=/path/sdk.km` is literal configuration, never a source file.
+Values remain literal even when they contain interpolation or process syntax;
+quote the whole operand at the host shell when it contains whitespace.
+Program arguments after `--` are a separate mechanism.
 
 Recipes receive an explicit complete environment. The CLI starts from its
 environment and applies `--env` replacements; cache fingerprints include the
@@ -185,7 +195,9 @@ Grant only what the expression needs:
 | `--allow-run[=ROOTS]` | Process execution, optionally restricted by executable path. Does not override phase restrictions. |
 | `--allow-env[=NAMES]` | Reads of named environment variables. |
 
-Arguments after `--` are available to the expression as `args`. These grants
+Arguments after `--` are available as the same typed list through `args` and
+`@*` in km, expr, Kash, and session rule work; `args.0` selects the first operand.
+Each operand is one literal string, and no operands means `[]`. These grants
 apply to standalone expression execution; normal builds grant recipe execution
 and working-directory read/write access, while language-level environment reads
 and access outside the working directory remain denied without explicit grants.

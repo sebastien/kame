@@ -228,6 +228,7 @@ func (h *Handle) Free() {
 }
 
 type Options struct {
+	PrintResult bool
 	// Host executes recipe scripts and services the runtime's filesystem and
 	// clock. Compile transfers ownership to the Program, which releases it
 	// during Program.Free.
