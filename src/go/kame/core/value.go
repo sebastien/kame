@@ -69,6 +69,8 @@ type Value struct {
 	Text     string
 	// ToolName retains executable lookup provenance on resolved string values.
 	ToolName string
+	// GlobPattern preserves literal interpolation bytes when used by wildcard.
+	GlobPattern string
 	Bytes    []byte
 	List     []Value
 	Record   []RecordField
@@ -132,6 +134,7 @@ func (v *Value) Clone(a mem.Allocator) Value {
 	case String:
 		copy = NewString(a, v.Text)
 		copy.ToolName = NewString(a, v.ToolName).Text
+		copy.GlobPattern = NewString(a, v.GlobPattern).Text
 	case Bytes:
 		copy = NewBytes(a, v.Bytes)
 	case List:
@@ -179,6 +182,7 @@ func (v *Value) Free(a mem.Allocator) {
 	case String:
 		mem.FreeString(a, v.Text)
 		mem.FreeString(a, v.ToolName)
+		mem.FreeString(a, v.GlobPattern)
 	case Bytes:
 		slices.Free(a, v.Bytes)
 	case List:

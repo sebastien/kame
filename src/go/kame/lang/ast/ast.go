@@ -155,7 +155,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("value")
 		e.Float(value.Float)
 	}
-	if value.Kind == expr.String || value.Kind == expr.CommandWord {
+	if value.Kind == expr.String || value.Kind == expr.CommandWord || (value.Kind == expr.Path && len(value.Parts) != 0) {
 		if value.Kind == expr.CommandWord {
 			e.Str("splice")
 			e.Bool(value.Bool)

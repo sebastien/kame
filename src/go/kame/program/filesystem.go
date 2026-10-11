@@ -208,7 +208,7 @@ func joinFilesystemPath(a mem.Allocator, directory string, child string) string 
 func globRoot(a mem.Allocator, pattern string) string {
 	cut := -1
 	for i := range pattern {
-		if pattern[i] == '*' || pattern[i] == '?' || pattern[i] == '[' {
+		if pattern[i] == '*' || pattern[i] == '?' || pattern[i] == '[' || pattern[i] == '\\' {
 			cut = i
 			break
 		}
@@ -263,7 +263,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 	}
 	meta := false
 	for i := range segment {
-		if segment[i] == '*' || segment[i] == '?' || segment[i] == '[' {
+		if segment[i] == '*' || segment[i] == '?' || segment[i] == '[' || segment[i] == '\\' {
 			meta = true
 			break
 		}

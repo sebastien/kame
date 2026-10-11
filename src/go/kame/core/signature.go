@@ -172,6 +172,7 @@ func (s *Digest) value(v Value, depth int) bool {
 		s.Uint64(n)
 	case String, Pattern:
 		s.Text(v.Text)
+		if v.Kind == String && v.GlobPattern != "" { s.Text("glob-pattern"); s.Text(v.GlobPattern) }
 	case Bytes:
 		s.Uint64(uint64(len(v.Bytes)))
 		s.Write(v.Bytes)

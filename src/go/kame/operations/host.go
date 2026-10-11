@@ -201,6 +201,7 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 	kind := core.ResourceFile
 	if op == host.OpWildcard {
 		kind = core.ResourceGlob
+		if value.GlobPattern != "" { name = value.GlobPattern }
 	}
 	if !c.DirectHostRequests && !dependency(c, kind, name) {
 		return eval.Result{Waiting: true}

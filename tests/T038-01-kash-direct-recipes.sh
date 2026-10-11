@@ -7,7 +7,7 @@ test-step "build native and WASM artifacts"
 cd "$CLI_ROOT"
 make dist-wasm >/dev/null
 cli_build
-printf '%s\n' '(nop [status: 0])' 'if (= 1 1)' '  printf "%s" (join ["a" "b"] "-")' >"$TMPDIR/source.kash"
+printf '%s\n' '(nop [status: 0])' 'if (= 1 1)' '  printf "%s" (join ["a" "b"] "-")' 'printf "%s" ./@(join ["two" "words"] " ")/file' >"$TMPDIR/source.kash"
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
@@ -38,6 +38,31 @@ for backend in native wasm; do
 	for symbol in ':+ ' ':-1' ':++files' ':--files'; do
 		reject PARSE_ERR do run --lang expr -c "$symbol"
 	done
+	test-step "$backend structural path interpolation preserves data and glob provenance"
+	check '"./two words/file"' do run --lang expr -c '@(nop "./two words")/file'
+	check '"./build/a b/main.js"' do run --lang expr -c './build/@(join ["a" "b"] " ")/main.js'
+	check './two words/file' do run --allow-run --lang kash -c 'printf "%s" @(nop "./two words")/file'
+	check './two words/file' do run --allow-run --lang kash -c 'printf "%s" ./@(join ["two" "words"] " ")/file'
+	data=$'$(touch forbidden) @(missing) {(missing)} "quotes"\nline'
+	printf 'name = """%s"""\nresult = ./@(name)/file\n' "$data" >"$work/path-data.km"
+	check "$(jq -cn --arg name "./$data/file" '$name')" do run path-data.km result
+	if [ ! -e "$work/forbidden" ]; then test-ok "$backend interpolated path bytes are never source"; else test-fail "$backend interpolated path executed data"; fi
+	for value in ':nil' ':true' '42' '[]' '[a: 1]' '([x] x)'; do
+		reject EXPR_INVALID do run --lang expr -c "./@($value)/file"
+	done
+	reject EXPR_INVALID do run --lang expr -c '@(nop "src")/file'
+	mkdir -p "$work/literal*?[x]\\name" "$work/literalZZxname"
+	printf literal >"$work/literal*?[x]\\name/a.txt"
+	printf decoy >"$work/literalZZxname/a.txt"
+	cat >"$work/path-glob.km" <<'KM'
+root = "./literal*?[x]\\name"
+matches = (wildcard @(root)/*.txt)
+KM
+	check '["./literal*?[x]\\name/a.txt"]' do run --allow-read="$work/literal*?[x]\\name" path-glob.km matches
+	reject CAP_DENIED do run --allow-read="$work/literalZZxname" path-glob.km matches
+	check '["./literal*?[x]\\name/a.txt"]' do run --allow-read --lang expr -c '(let [root "./literal*?[x]\\name"] (wildcard (nop @(root)/*.txt)))'
+	printf '%s\n' './@(join ["a" "b"] " ")/file' | "${runner[@]}" do parse --lang expr --json >"$work/path-ast.json"
+	if jq -e '.ast.kind == "path" and (.ast.parts | length) == 3 and .ast.parts[1].expression.kind == "application"' "$work/path-ast.json" >/dev/null; then test-ok "$backend path AST exposes interpolation children"; else test-fail "$backend path AST lost children"; cat "$work/path-ast.json"; fi
 	test-step "$backend expression statements and typed arguments"
 	check '' do run --lang kash -c '(nop [status: 0])'
 	check '' do run --lang kash -c $'if (nop :true)\n\t(nop [status: 0])'
@@ -206,4 +231,5 @@ test-step "native/WASM parse and format parity"
 for kind in ast fmt; do
 	if cmp -s "$TMPDIR/native.$kind" "$TMPDIR/wasm.$kind"; then test-ok "$kind parity"; else test-fail "$kind parity"; fi
 done
+if cmp -s "$TMPDIR/native/path-ast.json" "$TMPDIR/wasm/path-ast.json"; then test-ok "interpolated path AST parity"; else test-fail "interpolated path AST parity"; fi
 test-end

@@ -241,6 +241,7 @@ func (p *parser) expression() *Expr {
 	case ':':
 		return p.symbol()
 	case '@':
+		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' { return p.path() }
 		return p.selector()
 	case '$':
 		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' { return p.commandCapture() }
@@ -259,19 +260,37 @@ func (p *parser) expression() *Expr {
 }
 
 func (p *parser) path() *Expr {
+	return p.pathAtom(false)
+}
+
+func (p *parser) pathAtom(command bool) *Expr {
 	start := p.pos
+	e := p.node(Path, start)
+	partStart := start
 	patternDepth := 0
 	for p.pos < len(p.s.Text) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
 		b := p.s.Text[p.pos]
+		if b == '@' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
+			if partStart < p.pos { e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}}) }
+			open := p.pos
+			inner := p.interpolation(false, "path")
+			if inner == nil { break }
+			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Span: source.Span{Start: open, End: p.pos}})
+			partStart = p.pos
+			if open == start && (p.pos == len(p.s.Text) || p.s.Text[p.pos] != '/') { p.error(start, p.pos, "standalone @(...) is invalid; use (function arguments...) or follow the interpolation with / for a path"); break }
+			continue
+		}
 		if b == '\\' && p.pos+1 < len(p.s.Text) { p.pos += 2; continue }
+		if command && commandOperator(b) { break }
 		if b == '{' { patternDepth++; p.pos++; continue }
 		if b == '}' && patternDepth > 0 { patternDepth--; p.pos++; continue }
 		if isDelimiter(b) && (patternDepth == 0 || b == ' ' || b == '\t' || b == '\n' || b == '\r') { break }
 		p.pos++
 	}
-	e := p.node(Path, start)
+	if len(e.Parts) != 0 && partStart < p.pos { e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}}) }
+	e.Span.End = p.pos
 	e.Text = p.s.Text[start:p.pos]
-	p.classifyPathPattern(e, start)
+	if len(e.Parts) == 0 && !command { p.classifyPathPattern(e, start) }
 	return e
 }
 
@@ -951,32 +970,47 @@ func (p *parser) quoted() *Expr {
 		}
 		if (b == '@' || b == '{') && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
 			p.addTextPart(e, &text, partStart, p.pos)
-			open, brace := p.pos, b == '{'; p.pos += 2
-			innerStart := p.pos
-			inner := p.expression()
-			var items []*Expr
-			if inner != nil { items = slices.Append(p.a, items, inner) }
-			for inner != nil {
-				space := p.skipSpace()
-				if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' { break }
-				if space == 0 { p.error(p.pos, p.pos+1, "interpolation expressions need whitespace"); inner = nil; break }
-				next := p.expression()
-				if next == nil { inner = nil; break }
-				items = slices.Append(p.a, items, next)
-			}
-			if inner == nil {
-				for i := range items { freeExpr(p.a, items[i]) }
-				slices.Free(p.a, items)
-			} else if len(items) > 1 { application := p.node(Application, innerStart); application.Items = items; inner = application
-			} else { slices.Free(p.a, items) }
-			if inner == nil || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || (brace && (p.pos+1 == len(p.s.Text) || p.s.Text[p.pos+1] != '}')) { freeExpr(p.a, inner); p.error(open, p.pos, "unclosed string interpolation"); break }
-			p.pos++
-			if brace { p.pos++ }
+			open, brace := p.pos, b == '{'
+			inner := p.interpolation(brace, "string")
+			if inner == nil { break }
 		e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Brace: brace, Span: source.Span{Start: open, End: p.pos}}); partStart = p.pos; continue
 		}
 		text.WriteByte(b); p.pos++
 	}
 	text.Free(); p.error(start, p.pos, "unclosed string"); return e
+}
+
+func (p *parser) interpolation(brace bool, kind string) *Expr {
+	open := p.pos
+	p.pos += 2
+	p.skipSpace()
+	innerStart := p.pos
+	inner := p.expression()
+	var items []*Expr
+	if inner != nil { items = slices.Append(p.a, items, inner) }
+	for inner != nil {
+		space := p.skipSpace()
+		if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' { break }
+		if space == 0 { p.error(p.pos, p.pos+1, "interpolation expressions need whitespace"); inner = nil; break }
+		next := p.expression()
+		if next == nil { inner = nil; break }
+		items = slices.Append(p.a, items, next)
+	}
+	if inner == nil {
+		for i := range items { freeExpr(p.a, items[i]) }
+		slices.Free(p.a, items)
+	} else if len(items) > 1 { application := p.node(Application, innerStart); application.Items = items; inner = application
+	} else { slices.Free(p.a, items) }
+	if inner == nil || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || (brace && (p.pos+1 == len(p.s.Text) || p.s.Text[p.pos+1] != '}')) {
+		freeExpr(p.a, inner)
+		message := "unclosed string interpolation"
+		if kind == "path" { message = "unclosed path interpolation" }
+		p.error(open, p.pos, message)
+		return nil
+	}
+	p.pos++
+	if brace { p.pos++ }
+	return inner
 }
 
 func (p *parser) addTextPart(e *Expr, text *strings.Builder, start int, end int) {
@@ -1103,7 +1137,14 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		return
 	}
 	if e.Kind == Section { b.WriteByte('('); writeExpr(b, e.Body[0]); b.WriteByte(')'); return }
-	if e.Kind == Path { b.WriteString(e.Text); return }
+	if e.Kind == Path {
+		if len(e.Parts) == 0 { b.WriteString(e.Text); return }
+		for i := range e.Parts {
+			part := e.Parts[i]
+			if part.Expr == nil { b.WriteString(part.Text) } else { b.WriteString("@("); writeEmbedded(b, part.Expr); b.WriteByte(')') }
+		}
+		return
+	}
 	if e.Kind == Selector { b.WriteString(e.Text); return }
 	if e.Kind == Reference || e.Kind == EnvironmentReference { writeReference(b, e); return }
 	if e.Kind == String { writeString(b, e); return }

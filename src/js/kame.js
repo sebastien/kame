@@ -778,6 +778,11 @@ function matchSegment(pattern, name) {
   let star = -1;
   let mark = 0;
   while (ni < name.length) {
+    if (pattern[pi] === '\\' && pi + 1 < pattern.length) {
+      if (pattern[pi + 1] === name[ni]) { pi += 2; ni++; continue; }
+      if (star >= 0) { pi = star + 1; ni = ++mark; continue; }
+      return false;
+    }
     if (pi < pattern.length && pattern[pi] === '*') {
       star = pi++;
       mark = ni;
@@ -869,7 +874,7 @@ function matchSegments(pattern, pi, name, ni) {
 function globRoot(pattern) {
   let cut = -1;
   for (let i = 0; i < pattern.length; i++) {
-    if (pattern[i] === '*' || pattern[i] === '?' || pattern[i] === '[') { cut = i; break; }
+    if (pattern[i] === '*' || pattern[i] === '?' || pattern[i] === '[' || pattern[i] === '\\') { cut = i; break; }
   }
   if (cut < 0) return pattern;
   while (cut > 0 && pattern[cut - 1] !== '/') cut--;
@@ -1718,7 +1723,7 @@ class Module {
     if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 || kind === 2) && typeof payload === 'string') {
       const grantKind = kind === 2 ? 'write' : 'read';
       const roots = context[`${grantKind}Roots`];
-      let names = [payload];
+      let names = [kind === 6 ? payload.replace(/\\(.)/gs, '$1') : payload];
       if (kind === 20) {
         try { names = JSON.parse(payload); } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid file metadata paths'); }
         if (!Array.isArray(names) || names.some((name) => typeof name !== 'string')) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid file metadata paths');

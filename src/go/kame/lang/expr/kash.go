@@ -235,6 +235,19 @@ func commandOperator(b byte) bool {
 func (p *parser) commandWord() *Expr {
 	start := p.pos
 	e := p.node(CommandWord, start)
+	if strings.HasPrefix(p.s.Text[start:], "/") || strings.HasPrefix(p.s.Text[start:], "./") || strings.HasPrefix(p.s.Text[start:], "../") || strings.HasPrefix(p.s.Text[start:], "@(") {
+		inner := p.pathAtom(true)
+		if len(inner.Parts) != 0 {
+			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "path", Span: inner.Span})
+			e.Bool, e.Span.End = true, p.pos
+			if p.pos < len(p.s.Text) && !commandWhitespace(p.s.Text[p.pos]) && p.s.Text[p.pos] != ')' && !commandOperator(p.s.Text[p.pos]) {
+				p.error(start, p.pos, "interpolated path requires a word boundary")
+			}
+			return e
+		}
+		freeExpr(p.a, inner)
+		p.pos = start
+	}
 	if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '(' {
 		previousKash := p.kash
 		p.kash = true
@@ -401,7 +414,7 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 			if boundary && !quoted { b.WriteByte('"') }
 			if part.Form == "$(" {
 				writeExpr(b, part.Expr)
-			} else if part.Form == "(" || part.Form == "selector" {
+			} else if part.Form == "(" || part.Form == "selector" || part.Form == "path" {
 				writeExpr(b, part.Expr)
 			} else {
 				b.WriteString(part.Form)

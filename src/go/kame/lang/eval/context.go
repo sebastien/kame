@@ -11,6 +11,7 @@ import (
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
+	"solod.dev/so/strings"
 )
 
 type Context struct {
@@ -419,6 +420,21 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 			}
 		}
 		return false
+	}
+	if kind == host.RequestReadFile && host.PayloadText(payload, host.FieldOp) == host.OpWildcard && strings.IndexByte(name, '\\') >= 0 {
+		// Escapes encode matching provenance, not different filesystem authority.
+		a := c.Run
+		if a == nil { a = mem.System }
+		decoded := slices.Clone(a, []byte(name))
+		n := 0
+		for i := 0; i < len(name); i++ {
+			if name[i] == '\\' && i+1 < len(name) { i++ }
+			decoded[n] = name[i]
+			n++
+		}
+		allowed := c.Allows(capability, string(decoded[:n]))
+		slices.Free(a, decoded)
+		return allowed
 	}
 	return c.Allows(capability, name)
 }
