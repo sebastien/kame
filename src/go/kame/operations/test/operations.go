@@ -285,6 +285,42 @@ func TestMapResumesWithoutRepeatingCallbacks(t *testing.T) {
 	registry.Free()
 }
 
+func waitWithoutEngine(context *eval.Context, state any, values []core.Value) eval.Result {
+	_ = state
+	if values[0].Text == "wait" {
+		return eval.Result{Waiting: true}
+	}
+	return eval.Result{Value: values[0].Clone(context.Run)}
+}
+
+func TestUntrackedCallbackSuspensionReleasesProgress(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	registry.Add(eval.Operation{Name: "untracked-wait", Call: waitWithoutEngine, MinArity: 1, MaxArity: 1})
+	parsed := script.Parse(a, "test", "")
+	program := eval.Compile(a, engine, parsed, registry)
+	texts := []string{
+		`(map untracked-wait ["first" "wait"])`,
+		`(flatmap ([x] (list (untracked-wait x))) ["first" "wait"])`,
+		`(filter untracked-wait ["first" "wait"])`,
+		`(filter-out untracked-wait ["first" "wait"])`,
+		`(reduce ([acc x] (untracked-wait x)) ["first" "wait"] "initial")`,
+	}
+	for i := range texts {
+		result := evaluate(t, program, texts[i])
+		if !result.Waiting || result.Diagnostic.Code != "" {
+			t.Error("untracked callback did not suspend: " + texts[i])
+		}
+		result.Free(a)
+	}
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func TestPatternReplace(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)

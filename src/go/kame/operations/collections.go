@@ -57,6 +57,12 @@ func discardCallback(c *eval.Context, state *callbackState) {
 		freeCallbackState(c.Run, state)
 	}
 }
+func suspendCallback(c *eval.Context, state *callbackState) {
+	// Without an engine state slot, retries restart the collection operation.
+	if !state.Tracked {
+		freeCallbackState(c.Run, state)
+	}
+}
 func finishCallback(c *eval.Context, state *callbackState) core.Value {
 	result := core.NewList(c.Run, state.Values)
 	discardCallback(c, state)
@@ -84,6 +90,7 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 	for state.Index < len(values) {
 		result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
 		if result.Waiting {
+			suspendCallback(c, state)
 			return result
 		}
 		if result.Diagnostic.Code != "" {
@@ -157,6 +164,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 		} else {
 			result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
 			if result.Waiting {
+				suspendCallback(c, state)
 				freeOptionalCallable(c, callback)
 				return result
 			}
@@ -206,6 +214,7 @@ func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 		args := []core.Value{state.Accumulator, v[1].List[state.Index]}
 		result := c.CallAt(v[0], args, state.Index)
 		if result.Waiting {
+			suspendCallback(c, state)
 			return result
 		}
 		state.Accumulator.Free(c.Run)
