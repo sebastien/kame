@@ -9,6 +9,7 @@
 #include <sys/file.h>
 #include <unistd.h>
 #if defined(__COSMOPOLITAN__)
+#define _COSMO_SOURCE
 #include "libc/dce.h"
 #endif
 
