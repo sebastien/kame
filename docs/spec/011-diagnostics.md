@@ -106,6 +106,7 @@ meaning by themselves.
 | `TOOL_UNKNOWN` | error | Tool reference used without a tool resolver |
 | `TOOL_MISSING` | error | Referenced tool was not found or is not executable |
 | `EXPR_INVALID` | error | Invalid expression value, type, or arity |
+| `EVAL_DEPTH` | error | Recursive evaluation exceeds the 32-expression stack-depth limit |
 | `DEF_INVALID` | error | Invalid definition or binding form |
 | `DEF_ESCAPE` | error | function value escapes its scope; define it with (def name [params] body) instead |
 | `PAT_INVALID` | error | Invalid pattern combination or missing pattern capture reference |

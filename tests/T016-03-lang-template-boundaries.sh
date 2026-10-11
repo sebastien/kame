@@ -78,6 +78,10 @@ for backend in native wasm; do
 		if cmp -s "$work/formatted" "$work/expected" && cmp -s "$work/formatted" "$work/again"; then test-ok "$backend $style canonical directive"; else test-fail "$backend $style formatting"; fi
 	done
 	test-step "$backend interpolation migration and inert text"
+	check '" (str [VALUE]) "' do run --lang expr -c '(cat "@(" (str [VALUE]) ")")'
+	check '"@(hello)"' do run --lang expr -c '(cat """@(""" "hello" ")")'
+	reject PARSE_ERR do run --lang expr -c '"@("'
+	reject EVAL_DEPTH do run -c '(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))' -c '(character TEXT) = (walk (slice TEXT 1))' -c '(walk (reduce ([TEXT STEP] (cat TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))'
 	check '"value=xy"' do run --lang expr -c '"value=@(join ["x" "y"] "")"'
 	check '"value=xy"' do run --lang expr -c '"value={(join ["x" "y"] "")}"'
 	check value=xy do run --lang kash -c 'value = "value={(join ["x" "y"] "")}"; printf "%s" $value'

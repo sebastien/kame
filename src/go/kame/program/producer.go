@@ -187,6 +187,11 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		p.failRule(c, index, d)
 		return core.ProducerFailed
 	}
+	if p.Options.DryRun && rendered.Deferred {
+		mem.FreeString(p.Alloc, commands)
+		c.Publish(core.Value{Kind: core.Nil})
+		return core.ProducerCompleted
+	}
 	if entry.Kash {
 		if parsed := p.validateRenderedKash(index, commands); parsed.Code != "" {
 			mem.FreeString(p.Alloc, commands)

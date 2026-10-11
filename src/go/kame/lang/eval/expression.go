@@ -8,13 +8,23 @@ import (
 	"solod.dev/so/mem"
 )
 
+// Keep recursive evaluation within the native and WASM stack budgets.
+const MaxEvaluationDepth = 32
+
 func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression *expr.Expr, context *Context) Result {
+	if context.evaluationDepth >= MaxEvaluationDepth {
+		span := source.Span{}
+		if expression != nil { span = expression.Span }
+		return failure(context.Run, "EVAL_DEPTH", span, "evaluation depth limit exceeded")
+	}
+	context.evaluationDepth++
 	previousEnv := context.ReserveEnv
 	previousEngine, previousScope, previousRequests := context.Engine, context.Scope, context.Requests
 	if expression != nil { context.ReserveEnv = expression.Kash }
 	result := p.evaluateExpression(engine, scope, expression, context)
 	context.ReserveEnv = previousEnv
 	context.Engine, context.Scope, context.Requests = previousEngine, previousScope, previousRequests
+	context.evaluationDepth--
 	attachSource(&result, context)
 	return result
 }
@@ -148,7 +158,9 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	}
 	ready := false
 	if context.Engine != nil {
-		if context.RecoverFailures {
+		if context.RecoverFailures || context.Program.DryRun {
+			// Dry-run recipes must receive a lazy definition's deferred-read
+			// diagnostic before the engine propagates it as a target failure.
 			ready = context.Engine.TryDependency(key)
 			d := context.Engine.DependencyDiagnostic(key)
 			if d.Code != "" { return Result{Diagnostic: d.Clone(context.Run)} }

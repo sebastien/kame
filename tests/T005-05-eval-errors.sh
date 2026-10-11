@@ -50,6 +50,12 @@ diag '(env "HOME")' 'CAP_DENIED'
 diag '(shell "true")' 'CAP_DENIED'
 diag '(write "x" "y")' 'CAP_DENIED'
 
+test-step "deep mutual recursion reports a diagnostic instead of crashing"
+cli_run -- do run -c '(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))' -c '(character TEXT) = (walk (slice TEXT 1))' -c '(walk (reduce ([TEXT STEP] (cat TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))'
+cli_expect_status 1
+cli_expect_stderr_contains EVAL_DEPTH
+cli_expect_stdout_empty
+
 test-step "failures write nothing to stdout"
 cli_run -- do run --lang expr -c 'unknown-name'
 cli_expect_stdout_empty

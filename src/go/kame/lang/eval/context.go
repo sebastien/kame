@@ -70,6 +70,7 @@ type Context struct {
 	RecoverFailures    bool
 	ReserveEnv         bool
 	DisableMemo        bool
+	evaluationDepth int
 }
 
 type operationState struct {

@@ -1507,6 +1507,34 @@ func TestFunctionDefinitionsEvaluateExpressionStrings(t *testing.T) {
 	registry.Free()
 }
 
+func TestRecursiveEvaluationDepthIsBoundedAndRestored(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	parsed := script.Parse(a, "depth.km", `(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))
+(character TEXT) = (walk (slice TEXT 1))`)
+	program := eval.Compile(a, engine, parsed, registry)
+	context := eval.Context{Program: program, Scope: program.Scope, Run: a}
+	texts := []string{`(walk "x,y\n")`, `(walk (reduce ([TEXT STEP] (cat TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))`, `(walk "x,y\n")`, `(count (reduce ([TEXT STEP] (cat TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))`}
+	for i := range texts {
+		expression := expr.Parse(a, "call.km", texts[i])
+		if len(expression.Diagnostics) != 0 { t.Error("depth fixture failed to parse") }
+		result := program.EvaluateWith(expression.Expr, &context)
+		if i == 1 {
+			if result.Diagnostic.Code != "EVAL_DEPTH" { t.Error("deep recursion did not report EVAL_DEPTH") }
+		} else if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || (i == 3 && result.Value.Int != 4096) || (i != 3 && result.Value.Int != 0) {
+			t.Error("bounded recursion/fold failed or depth was not restored")
+		}
+		result.Free(a)
+		expression.Free()
+	}
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
+}
+
 func TestZeroArgumentScriptFunctionIsCallable(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)

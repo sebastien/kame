@@ -303,6 +303,24 @@ func TestStringInterpolationAndRoundTrip(t *testing.T) {
 	mem.FreeString(t.Allocator(), formatted)
 }
 
+func TestStringInterpolationQuoteBoundaries(t *testing.T) {
+	a := t.Allocator()
+	// Quotes inside interpolation start nested expressions, not the outer close.
+	r := parse(t, `(cat "@(" (str [VALUE]) ")")`)
+	defer r.Free()
+	if r.Expr == nil || len(r.Expr.Items) != 2 { t.Fatal("nested quote boundary changed"); return }
+	value := r.Expr.Items[1]
+	if len(value.Parts) != 1 || value.Parts[0].Expr == nil { t.Fatal("missing interpolation"); return }
+	inner := value.Parts[0].Expr
+	if inner.Kind != expr.String || len(inner.Parts) != 1 || inner.Parts[0].Text != " (str [VALUE]) " { t.Error("nested expression string parsed incorrectly") }
+	invalid := []string{`"@("`, `"@(name"`, `"@(cat "x" "y")`}
+	for i := range invalid {
+		bad := expr.Parse(a, "boundary.km", invalid[i])
+		if len(bad.Diagnostics) == 0 { t.Error("unterminated interpolation/string accepted") }
+		bad.Free()
+	}
+}
+
 func TestInvalidNumberReportsParseSpan(t *testing.T) {
 	r := expr.Parse(t.Allocator(), "test.km", "1_")
 	defer r.Free()

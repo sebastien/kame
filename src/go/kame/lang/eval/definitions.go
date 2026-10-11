@@ -19,6 +19,9 @@ type Program struct {
 	NextScriptGroup    int64
 	// DryRun suppresses invocation-owned process, write and output effects.
 	DryRun   bool
+	// GeneratedFile identifies reads that may be deferred during dry-run.
+	GeneratedFile func(any, string) bool
+	GeneratedFileState any
 	Alloc    mem.Allocator
 	Engine   *core.Engine
 	Script   *script.Script

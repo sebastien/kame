@@ -88,6 +88,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	p.Eval.SetGrants(p.Options.Grants)
 	p.Eval.DryRun = options.DryRun
+	p.Eval.GeneratedFile, p.Eval.GeneratedFileState = generatedFile, p
 	p.Eval.SetDefinitionCwd(p.Options.Directory)
 	p.Eval.SetDefinitionDependencyObserver(observeDefinitionDependency, p)
 	p.Eval.DefinitionDependencyContextObserver = observeScopedDefinitionDependency

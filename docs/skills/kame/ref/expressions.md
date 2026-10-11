@@ -3,6 +3,11 @@
 `expr` parses exactly one Kame expression. It is the shared value language of
 scripts, templates, rule expansions, and Kash boundaries.
 
+Evaluation is bounded to 32 simultaneously active expressions, including
+function bodies and their operands. Deeper recursion reports `EVAL_DEPTH`
+instead of exhausting the native/WASM stack. Iterative `map`/`reduce` callbacks
+do not accumulate depth across items.
+
 ## Values and references
 
 ```kame

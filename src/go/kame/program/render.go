@@ -16,6 +16,7 @@ type renderResult struct {
 	WritePaths []string
 	LineSpans  []diagnostic.Span
 	Waiting    bool
+	Deferred   bool
 	Diagnostic diagnostic.Diagnostic
 }
 type renderDependencyState struct {
@@ -61,6 +62,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	b := strings.NewBuilder(p.Alloc)
 	defer b.Free()
 	var spans []diagnostic.Span
+	deferred := false
 	for i := range body {
 		if body[i].Template == nil {
 			continue
@@ -74,6 +76,11 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 			return renderResult{Waiting: true}
 		}
 		if result.Diagnostic.Code != "" {
+			if p.Options.DryRun && result.Diagnostic.Code == "READ_DEFERRED" {
+				result.Free(p.Alloc)
+				deferred = true
+				continue
+			}
 			slices.Free(p.Alloc, spans)
 			eval.FreeEffects(p.Alloc, context.Effects)
 			freeStrings(p.Alloc, context.WritePaths)
@@ -108,7 +115,7 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 		mem.FreeString(p.Alloc, context.WritePaths[i])
 	}
 	slices.Free(p.Alloc, context.WritePaths)
-	result := renderResult{Commands: cloneText(p.Alloc, b.String()), Effects: effects, WritePaths: writePaths, LineSpans: spans}
+	result := renderResult{Commands: cloneText(p.Alloc, b.String()), Effects: effects, WritePaths: writePaths, LineSpans: spans, Deferred: deferred}
 	mem.Free(p.Alloc, context)
 	return result
 }
@@ -138,6 +145,10 @@ func (p *Program) renderDocument(entry *instance, context *eval.Context) renderR
 		eval.FreeEffects(p.Alloc, context.Effects)
 		freeStrings(p.Alloc, context.WritePaths)
 		mem.Free(p.Alloc, context)
+		if p.Options.DryRun && result.Diagnostic.Code == "READ_DEFERRED" {
+			result.Free(p.Alloc)
+			return renderResult{Deferred: true}
+		}
 		return renderResult{Diagnostic: result.Diagnostic}
 	}
 	if result.Value.Kind != core.String {
@@ -201,6 +212,14 @@ func (p *Program) renderDocument(entry *instance, context *eval.Context) renderR
 	result.Value.Free(p.Alloc)
 	mem.Free(p.Alloc, context)
 	return out
+}
+
+func generatedFile(value any, name string) bool {
+	p := value.(*Program)
+	canonical := p.canonicalTarget(name, true)
+	index := p.instanceIndex(p.Engine.Lookup(core.ResourceKey{Kind: core.ResourceFile, Name: canonical}))
+	mem.FreeString(p.Alloc, canonical)
+	return index >= 0 && p.Instances[index].Rule.Kind == rule.FileRule
 }
 
 func observeRenderDependency(value any, key core.ResourceKey) {

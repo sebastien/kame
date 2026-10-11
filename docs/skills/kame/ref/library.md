@@ -77,7 +77,7 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 | `join` | `(join LIST SEPARATOR)` | Joins a list of strings. |
 | `split` | `(split TEXT SEPARATOR)` | Splits text on a nonempty literal separator. |
 | `strip` | `(strip TEXT)` | Removes leading and trailing Unicode whitespace. |
-| `replace` | `(replace FROM TO TEXT)` | Replaces all literal `FROM` occurrences. |
+| `replace` | `(replace TEXT FROM TO)` | Replaces all literal `FROM` occurrences. |
 | `replace` | `(replace MATCH-PATTERN EXPANSION [TEXT])` | Pattern replacement. Without `TEXT`, returns a one-argument callable suitable for `map`. A non-match returns `:nil`. |
 | `includes?` | `(includes? TEXT PART)` | Literal substring test. |
 | `starts?` | `(starts? TEXT PREFIX)` | Literal prefix test. |
