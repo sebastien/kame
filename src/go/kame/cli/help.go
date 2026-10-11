@@ -13,7 +13,7 @@ type CommandInfo struct {
 	Summary string
 }
 
-var Commands = [12]CommandInfo{
+var Commands = [13]CommandInfo{
 	{Name: "run", Usage: "kame do run [OPTIONS] INPUT... [-- ARG...]", Summary: "execute ordered source fragments in one session"},
 	{Name: "plan", Usage: "kame do plan [--affected] [--depth N] [OPTIONS] [RESOURCE...]", Summary: "inspect prerequisites, or affected consumers, and dependency stages without execution"},
 	{Name: "inputs", Usage: "kame do inputs [--depth N] [OPTIONS] [TARGET]", Summary: "list all reachable input files and logical prerequisites"},
@@ -25,6 +25,7 @@ var Commands = [12]CommandInfo{
 	{Name: "render", Usage: "kame do render [-c TEXT | FILE] [--define NAME=VALUE]... [--comment STYLE] [--check]", Summary: "render exact document bytes or check template syntax"},
 	{Name: "cat", Usage: "kame do cat [OPTIONS] [TARGET]", Summary: "materialize one target and print file bytes or a definition value (text raw, other values as JSON) without an added newline"},
 	{Name: "cache", Usage: "kame do cache list|clean [-C DIR]", Summary: "inspect or remove managed cache records"},
+	{Name: "clean", Usage: "kame do clean [-C DIR] [--dry-run]\nkame do clean [-C DIR] --keep|--release PATH...", Summary: "clean unchanged historical outputs; protect paths or release ownership without deletion"},
 	{Name: "help", Usage: "kame do help [COMMAND]", Summary: "show the overview or command-specific help"},
 }
 

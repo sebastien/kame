@@ -148,6 +148,10 @@ func parseCommand(command string, args []string) Invocation {
 		parseCache(&inv, args)
 		return inv
 	}
+	if command == "clean" {
+		parseClean(&inv, args)
+		return inv
+	}
 	if command == "" && SelectsRun(args) {
 		return parseRun(args, false)
 	}

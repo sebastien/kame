@@ -43,6 +43,10 @@ func (p *Program) observeFileOutputs(c *core.EngineContext, index int, executed 
 	if !executed {
 		return p.finishFileContext(c, index)
 	}
+	if d := p.commitOwnership(entry); d.Code != "" {
+		p.failRule(c, index, d)
+		return core.ProducerFailed
+	}
 	p.saveAcceptedFileRecord(entry)
 	entry.VerifyOutputs = false
 	c.PublishSigned(core.NewString(c.Allocator(), entry.Plan.Outputs[0]), fileResultSignature(&entry.AcceptedRecord))

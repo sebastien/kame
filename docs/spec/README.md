@@ -49,3 +49,4 @@ host-specific boundaries remain explicit.
 | [037 Build inspection](037-build-inspection.md) | Recursive resource inventories, producer provenance, dependency stages and completeness |
 | [038 Direct Kash and values](038-direct-kash-and-values.md) | Direct recipe ASTs, expression statements, tracked command heads, text/JSON separation, interpolated paths, wildcard kind flags and action names |
 | [039 Output ownership](039-output-ownership.md) | Grouped artifacts, configured membership, manifests, directory boundaries and safe cleanup |
+| [040 Automatic clean](040-automatic-clean.md) | Historical output ledger, conservative deletion authority, protection, rule-change boundaries and race-resistant cleanup |

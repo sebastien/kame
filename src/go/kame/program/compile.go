@@ -63,6 +63,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		p.Options.RemoteExecutors = slices.Append(a, p.Options.RemoteExecutors, host.ExecutorDescriptor{Name: cloneText(a, options.RemoteExecutors[i].Name), Version: cloneText(a, options.RemoteExecutors[i].Version)})
 	}
 	p.Options.ResolveTool = options.ResolveTool
+	p.Options.Ownership, p.Options.OwnershipState = options.Ownership, options.OwnershipState
 	p.Options.CaptureLimit = options.CaptureLimit
 	if p.Options.CaptureLimit <= 0 {
 		p.Options.CaptureLimit = 1024 * 1024
@@ -148,6 +149,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		p.Free()
 		return result
 	}
+	if options.AutomaticClean != nil { p.EnableAutomaticClean(options.AutomaticClean, options.AutomaticCleanState) }
 	p.nextRequest = 1 << 32
 	result.Program = p
 	return result
@@ -219,7 +221,7 @@ func (p *Program) NamedTargets() []string {
 	var targets []string
 	for i := range p.Rules {
 		r := p.Rules[i].Rule
-		if r == nil || r.Kind == rule.FileRule {
+		if r == nil || r.Kind == rule.FileRule || r == p.automaticCleanRule {
 			continue
 		}
 		for j := range r.Outputs {
@@ -328,6 +330,7 @@ func (p *Program) Free() {
 		return
 	}
 	p.Eval.CancelProcesses()
+	rule.FreeRule(p.Alloc, p.automaticCleanRule)
 	p.clearInspection()
 	freeStrings(p.Alloc, p.Configuration)
 	freeStrings(p.Alloc, p.ParameterDefinitions)
@@ -357,6 +360,7 @@ func (p *Program) Free() {
 			p.freeKashContext(p.Instances[i].KashContext)
 		}
 		p.freeFileContext(p.Instances[i].FileContext)
+		freeStrings(p.Alloc, p.Instances[i].OwnershipPaths)
 		p.Instances[i].AcceptedRecord.Free(p.Alloc)
 		p.freeNewerInputs(p.Instances[i].NewerInputs)
 		freeCaptures(p.Alloc, p.Instances[i].Captures)

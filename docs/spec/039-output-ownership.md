@@ -43,10 +43,13 @@ or changes according to which source happens to exist.
 
 ## Cleanup and runtime output-set boundaries
 
-Kame does not garbage-collect outputs removed from a configured group. Cleanup is
-an explicit recipe: restrict it to previously owned, validated member paths;
-preserve unrelated files and reject paths outside the producer's designated root.
-Do not recursively delete a shared directory or infer ownership from a glob.
+Changing a configured group does not garbage-collect removed outputs.
+[Automatic clean](040-automatic-clean.md) records historical production separately
+and requires renewed deletion authority; changed rules or output membership
+withhold automatic removal. Authored cleanup recipes must likewise restrict
+removal to previously owned, validated member paths, preserve unrelated files
+and reject paths outside the producer's designated root. Do not recursively
+delete a shared directory or infer ownership from a glob.
 
 Neither manifests nor directory paths define runtime output sets. An API claiming
 runtime output ownership must define a persisted producer/member inventory, canonical collision

@@ -795,10 +795,18 @@ func (p *Program) completeRequest(request host.Request) {
 	} else if request.Kind == host.RequestWriteFile {
 		filename := p.canonicalTarget(name, true)
 		data := host.PayloadBytes(request.Payload, host.FieldData)
-		ok := p.mkdirParent(filename) && p.Host.WriteFileAtomic(filename, data, 0o644, false) == nil
+		index := -1
+		for i := range p.Instances { if p.Instances[i].Node.ID == request.NodeID { index = i; break } }
+		if p.Options.Ownership != nil {
+			if index >= 0 {
+				completion.Diagnostic = p.beginOwnership(&p.Instances[index], "", nil, []string{filename})
+			} else { completion.Diagnostic = p.Options.Ownership(p.Options.OwnershipState, p, []string{filename}, "tracked-write", false) }
+		}
+		ok := completion.Diagnostic.Code == "" && p.mkdirParent(filename) && p.Host.WriteFileAtomic(filename, data, 0o644, false) == nil
 		if !ok {
-			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot write file")
+			if completion.Diagnostic.Code == "" { completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot write file") }
 		} else {
+			if p.Options.Ownership != nil && index < 0 { completion.Diagnostic = p.Options.Ownership(p.Options.OwnershipState, p, []string{filename}, "tracked-write", true) }
 			completion.Value, completion.HasValue = core.Value{Kind: core.Nil}, true
 		}
 		mem.FreeString(p.Alloc, filename)

@@ -9,6 +9,7 @@ import (
 	"kame/lang/eval"
 	"kame/lang/script"
 	"kame/operations"
+	"kame/ownership"
 	"kame/program"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -42,6 +43,14 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 			return 0
 		}
 		return session.Status
+	}
+	if len(parsed.Targets) == 1 && parsed.Targets[0] == "clean" && !session.Program.HasTarget("clean") {
+		cleanArgs := []string{"-C", parsed.Directory}
+		if parsed.DryRun { cleanArgs = slices.Append(mem.System, slices.Clone(mem.System, cleanArgs), "--dry-run") } else { cleanArgs = slices.Clone(mem.System, cleanArgs) }
+		if parsed.JSON { cleanArgs = slices.Append(mem.System, cleanArgs, "--json") }
+		status := runClean(cleanArgs, out, errOut)
+		slices.Free(mem.System, cleanArgs)
+		return status
 	}
 	targets := selectTargets(session.Program, parsed.Targets)
 	parsed.Targets = nil
@@ -85,6 +94,7 @@ func reportNoDefault(p *program.Program, out io.Writer, errOut io.Writer, json b
 }
 
 type buildSession struct {
+	Ledger         *outputLedger
 	Source         buildSource
 	Registry       *eval.Registry
 	Parsed         *script.Script
@@ -137,7 +147,16 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	if len(session.Source.Files) != 0 {
 		session.Parsed = script.Parse(mem.System, session.Source.Files[0].Name, session.Source.Files[0].Text)
 	}
-	compiled := program.CompileMany(mem.System, sources, session.Registry, program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, Defines: options.Defines, Parameters: options.Parameters, ToolOverrides: options.ToolOverrides, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, CaptureLimit: options.CaptureLimit, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool})
+	programOptions := program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, Defines: options.Defines, Parameters: options.Parameters, ToolOverrides: options.ToolOverrides, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, CaptureLimit: options.CaptureLimit, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool}
+	if ownership.Supported() {
+		session.Ledger = mem.Alloc[outputLedger](mem.System)
+		session.Ledger.Source = cleanupSource(&session.Source)
+		session.Ledger.Store = ownership.New(mem.System, options.Directory)
+		session.Ledger.Out, session.Ledger.Err, session.Ledger.JSON = cliDiagnosticOut, errOut, options.JSON
+		programOptions.Ownership, programOptions.OwnershipState = recordProduction, session.Ledger
+		programOptions.AutomaticClean, programOptions.AutomaticCleanState = automaticClean, session.Ledger
+	}
+	compiled := program.CompileMany(mem.System, sources, session.Registry, programOptions)
 	slices.Free(mem.System, sources)
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
@@ -187,6 +206,7 @@ func (s *buildSession) Free() {
 	if s.Program != nil {
 		s.Program.Free()
 	}
+	if s.Ledger != nil { s.Ledger.Store.Free(); mem.Free(mem.System, s.Ledger) }
 	if s.Parsed != nil && !s.ParsedBorrowed {
 		s.Parsed.Free()
 	}

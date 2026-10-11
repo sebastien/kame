@@ -8,6 +8,7 @@ import (
 	"kame/lang/eval"
 	"kame/lang/source"
 	"kame/operations"
+	"kame/ownership"
 	"kame/program"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
@@ -139,7 +140,18 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	if inv.Name == "render" {
 		defines = nil
 	}
-	compiled := program.CompileSession(mem.System, fragments, registry, program.Options{Host: posix.New(mem.System), Directory: directory, Environment: environment, Defines: defines, Parameters: inv.Parameters, ToolOverrides: inv.ToolOverrides, Shell: inv.Shell, Grants: grants, Jobs: inv.Jobs, CaptureLimit: inv.CaptureLimit, TimeoutMS: inv.TimeoutMS, DryRun: inv.DryRun, Force: inv.Force, CacheDisabled: inv.Force, RetryCount: inv.RetryCount, RetainBytes: inv.RetainBytes, ResolveTool: resolveBuildTool, PrintResult: inv.PrintResult})
+	programOptions := program.Options{Host: posix.New(mem.System), Directory: directory, Environment: environment, Defines: defines, Parameters: inv.Parameters, ToolOverrides: inv.ToolOverrides, Shell: inv.Shell, Grants: grants, Jobs: inv.Jobs, CaptureLimit: inv.CaptureLimit, TimeoutMS: inv.TimeoutMS, DryRun: inv.DryRun, Force: inv.Force, CacheDisabled: inv.Force, RetryCount: inv.RetryCount, RetainBytes: inv.RetainBytes, ResolveTool: resolveBuildTool, PrintResult: inv.PrintResult}
+	var ledger *outputLedger
+	if ownership.Supported() {
+		ledger = mem.Alloc[outputLedger](mem.System)
+		ledger.Store = ownership.New(mem.System, directory)
+		if len(loaded) == 1 { ledger.Source = cleanupSource(&loaded[0]) }
+		ledger.Out, ledger.Err, ledger.JSON = out, errOut, inv.JSON
+		programOptions.Ownership, programOptions.OwnershipState = recordProduction, ledger
+		programOptions.AutomaticClean, programOptions.AutomaticCleanState = automaticClean, ledger
+	}
+	defer freeOutputLedger(ledger)
+	compiled := program.CompileSession(mem.System, fragments, registry, programOptions)
 	posix.FreeEnvironment(mem.System, environment)
 	defer compiled.Free(mem.System)
 	if compiled.Session == nil {
@@ -149,8 +161,8 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		return 1
 	}
 	session := compiled.Session
-	defer session.Free()
 	p := session.Program
+	defer session.Free()
 	values := slices.Make[core.Value](mem.System, len(inv.Args))
 	for i := range inv.Args {
 		values[i] = core.NewString(mem.System, inv.Args[i])

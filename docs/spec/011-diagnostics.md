@@ -134,6 +134,8 @@ meaning by themselves.
 | `OUTPUT_MISSING` | error | Successful recipe omitted a declared output |
 | `OUTPUT_CONFLICT` | error | Declarative yield conflicts with a shell command |
 | `CACHE_UNUSABLE` | warning | Cache record or manifest cannot be used |
+| `CLEAN_STATE` | error/warning | Output ownership cannot be persisted or cleanup requires safety/recovery review; uncertain production is a warning when ordinary publication remains valid |
+| `CLEAN_BUSY` | error | A cooperating producer, service or cleanup operation holds the project cleanup boundary |
 | `FEATURE_UNSUP` | error | Valid but unsupported feature on this target |
 | `NO_MEMORY` | fatal | Allocator or fixed arena exhausted |
 | `HANDLE_INVALID` | error | Invalid, stale, or foreign ABI handle |

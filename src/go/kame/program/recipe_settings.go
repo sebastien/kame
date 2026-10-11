@@ -388,6 +388,12 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 		entry.ForwardEffects = pending
 		return p.continueForwardEffects(c, index)
 	}
+	if len(context.WritePaths) != 0 || hasYield(context.Effects) {
+		if d := p.beginOwnership(entry, "", context.Effects, context.WritePaths); d.Code != "" {
+			p.failRule(c, index, d)
+			return core.ProducerFailed
+		}
+	}
 	if d := p.commitEffects(entry, context.Effects, context.WritePaths, false); d.Code != "" {
 		p.failRule(c, index, d)
 		return core.ProducerFailed

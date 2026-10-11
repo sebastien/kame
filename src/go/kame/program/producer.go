@@ -20,6 +20,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	p := state.Program
 	entry := &p.Instances[state.Index]
 	if !entry.started || entry.startedGeneration != c.Generation() {
+		freeStrings(p.Alloc, entry.OwnershipPaths)
+		entry.OwnershipPaths = nil
 		p.clearReasonIdentities(entry)
 		slices.Free(p.Alloc, entry.CacheStdout)
 		slices.Free(p.Alloc, entry.CacheStderr)
@@ -63,6 +65,22 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		p.emitNode(entry.Node, entry.Plan.Target, TargetStarted, diagnostic.Span{}, nil)
 		entry.started, entry.startedGeneration, entry.terminalEmitted = true, c.Generation(), false
 		p.setServiceState(entry, "provisioning")
+		// Hold the project boundary for tasks/services too: their opaque recipes
+		// may touch an older tracked artifact without declaring that destination.
+		if entry.Rule != p.automaticCleanRule && !p.Options.DryRun && p.Options.Ownership != nil {
+			if d := p.Options.Ownership(p.Options.OwnershipState, p, nil, entry.Plan.Target, false); d.Code != "" {
+				p.failRule(c, state.Index, d)
+				return core.ProducerFailed
+			}
+		}
+	}
+	if entry.Rule == p.automaticCleanRule && p.AutomaticClean != nil {
+		if d := p.AutomaticClean(p.AutomaticCleanState, p); d.Code != "" {
+			p.failRule(c, state.Index, d)
+			return core.ProducerFailed
+		}
+		c.Publish(core.Value{Kind: core.Nil})
+		return core.ProducerCompleted
 	}
 	if entry.FileContext != nil {
 		return p.continueFileContext(c, state.Index)
@@ -105,6 +123,10 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		}
 		if entry.Rule.Kind == rule.FileRule {
 			return p.beginVerifyFileOutputs(c, state.Index)
+		}
+		if d := p.commitOwnership(entry); d.Code != "" {
+			p.failRule(c, state.Index, d)
+			return core.ProducerFailed
 		}
 		c.Publish(core.Value{Kind: core.Nil})
 		return core.ProducerCompleted
@@ -264,6 +286,11 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		entry.ForwardEffects = pending
 		return p.continueForwardEffects(c, index)
 	}
+	if d := p.beginOwnership(entry, commands, effects, writePaths); d.Code != "" {
+		mem.FreeString(p.Alloc, commands)
+		p.failRule(c, index, d)
+		return core.ProducerFailed
+	}
 	if effectDiagnostic := p.commitEffects(entry, effects, writePaths, false); effectDiagnostic.Code != "" {
 		mem.FreeString(p.Alloc, commands)
 		p.failRule(c, index, effectDiagnostic)
@@ -278,6 +305,10 @@ func (p *Program) finishRecipe(c *core.EngineContext, index int, commands string
 	if commands == "" {
 		if entry.Rule.Kind == rule.FileRule {
 			return p.beginVerifyFileOutputs(c, index)
+		}
+		if d := p.commitOwnership(entry); d.Code != "" {
+			p.failRule(c, index, d)
+			return core.ProducerFailed
 		}
 		if entry.Rule.Kind == rule.CachedTaskRule && entry.CacheReady && !p.Options.CacheDisabled {
 			p.cacheCommit(entry, nil, nil, false, false)

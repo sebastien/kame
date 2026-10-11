@@ -266,6 +266,12 @@ type Options struct {
 	// ResolveTool returns an allocator-owned executable path when a reached
 	// recipe references a tool. A nil callback uses paths supplied by the host.
 	ResolveTool func(mem.Allocator, string, string, []string) string
+	// Ownership records actual production before effects and after successful
+	// publication. The caller owns State and its project lock until shutdown.
+	Ownership func(any, *Program, []string, string, bool) diagnostic.Diagnostic
+	OwnershipState any
+	AutomaticClean func(any, *Program) diagnostic.Diagnostic
+	AutomaticCleanState any
 }
 
 // Tool records a globally declared command and its resolved executable path.
@@ -277,6 +283,9 @@ type Tool struct {
 }
 
 type Program struct {
+	AutomaticClean func(any, *Program) diagnostic.Diagnostic
+	AutomaticCleanState any
+	automaticCleanRule *rule.Rule
 	Alloc             mem.Allocator
 	Engine            *core.Engine
 	Eval              *eval.Program
@@ -356,6 +365,7 @@ type generatedRuleMeta struct {
 }
 type instance struct {
 	Artifacts []*core.Node
+	OwnershipPaths []string
 	ReasonIdentities []reasonIdentity
 	Service                ServiceConfig
 	ServiceState           string

@@ -3740,6 +3740,15 @@ async function dispatchCommand(module, inv, noArguments) {
     return 0;
   }
   if (inv.name === 'cache') return runCache(inv);
+  if (inv.name === 'clean') {
+    // Node's path-based fs APIs cannot bind ownership validation and removal
+    // to a captured object or participate in the native descriptor project lock.
+    // Never substitute lstat/hash/unlink, even when the ledger appears empty.
+    const result = { schema: 1, type: 'clean-result', entries: [{ path: '', producer: '', state: 'error', reason: 'unsafe-or-unsupported-host-operation' }], removed: 0, preserved: 0, missing: 0, wouldRemove: 0, status: 1 };
+    if (jsonMode) stdout.write(`${JSON.stringify(result)}\n`);
+    else stderr.write('error clean: descriptor-relative output ownership is unavailable on this host\n');
+    return 1;
+  }
   if (inv.name === 'run' || inv.name === 'render') return runSession(module, inv, sourceDirectory);
   if (inv.name === 'parse') return runParse(module, inv);
   if (inv.name === 'fmt') return runFmt(module, inv);

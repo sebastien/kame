@@ -42,6 +42,12 @@ order, without weakening its acceptance criteria:
 
 ## Optional language and diagnostics decisions
 
+- [ ] Update `tests/T009-05-cli-plan.sh` missing external-file root assertions
+  for specification 037: explicit/unprefixed file roots need no producer, even
+  when absent. Its nine `TGT_NO_RULE`/diagnostic-envelope assertions fail on
+  parent `0a378e15` too; preserve errors for unknown logical names and cover
+  external seed identity and zero execution instead.
+
 - [ ] Amend specifications 004/005 to support `(include PATH)` as a
   composition-only special form within existing `if` expressions. Preserve
   pure configuration predicates, source-relative paths, selected-branch-only

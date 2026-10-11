@@ -154,6 +154,9 @@ func runDoCommand(command string, args []string, in io.Reader, out io.Writer, er
 	if command == "cache" {
 		return runCache(args, out, errOut)
 	}
+	if command == "clean" {
+		return runClean(args, out, errOut)
+	}
 	if command == "parse" {
 		return runParse(args, in, out, errOut)
 	}
