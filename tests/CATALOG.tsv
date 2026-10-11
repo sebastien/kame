@@ -151,3 +151,4 @@ tests/T015-03-dist-cosmocc-integrity.sh	015	dist	Cosmocc provisioning pins a ver
 tests/T031-01-runtime-resource-protocols.sh	031	runtime	File and memory resource URI grants, host mappings and namespace isolation on native and WASM CLI
 tests/T038-01-kash-direct-recipes.sh	038	kash	Direct authored and generated recipes, parenthesized statements and arguments, rule frames, migration diagnostics, data isolation and native/WASM formatting parity
 tests/T009-16-cli-script-output.sh	009	cli	Explicit script output, optional result display, expr and selected-entry display, JSON Lines, shared args and literal suffix-looking assignments on native and WASM
+tests/T005-06-eval-truth-capture.sh	005	eval	Nil/false-only truth, empty bytes/records/text/lists, explicit count checks, operand-preserving short-circuiting, exact capture and opt-in LF framing on native and WASM

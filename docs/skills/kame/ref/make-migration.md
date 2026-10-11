@@ -133,6 +133,12 @@ for an optional file and `when`/`otherwise`/`end` for declaration selection.
 
 ## Redesign rather than transliterate
 
+For SDK ports, keep vendor CLIs and installation/release/Terraform/HTML policy
+in workflow code. Do not add mutable Bash sessions, sourcing, or traps to Kash
+merely to copy a shell library. See [SDK migration boundaries](../../../sdk-migration-boundaries.md)
+for concrete cleanup cases and the capabilities that would justify a separate
+language request.
+
 Do not copy GNU Make syntax for these constructs; use the Kame-specific model:
 
 - `define`, `eval`, and Make-generated source text: use value definitions and

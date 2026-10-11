@@ -82,6 +82,20 @@ input/output selectors are unavailable: the target index must exist before
 those bindings can be established. Output-resolution failures reject
 registration before recipe effects and retain the authored output location.
 
+## Truth and emptiness
+
+Only nil and boolean false are false. Integer/float zero and empty strings,
+bytes, lists, and records are true. Expression conditions, `bool`/`not`, and
+predicate filtering use this same truth contract. `and`/`or` short-circuit and
+return the deciding operand without boolean coercion. Process exit status and
+boolean-only declaration predicates retain their separate contracts.
+
+Emptiness must be tested explicitly with `count` on strings, bytes, lists, or
+records; zero count does not make the original value false. Missing optional
+data must be checked for nil before counting it. Numeric zero comparisons are
+not collection emptiness checks. Whitespace, nil-valued list items, and
+nil-valued record fields still count as data.
+
 ## Scope
 
 A scope is a parent-linked map of names to bindings. A binding is a value,

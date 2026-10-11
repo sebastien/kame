@@ -27,6 +27,10 @@ types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 | `digest` | `(digest ALGORITHM BYTES-OR-STRING)` | Raw bytes/UTF-8 SHA-1/256/512 digest, lowercase hex, without build fingerprint framing. SHA-1 is legacy-only. |
 
 Only `:false` and `:nil` are false. Other values are true.
+Truth conversion is not an emptiness test: zero and empty strings, bytes, lists,
+and records are true. Use `(> (count VALUE) 0)` for a nonempty collection/text;
+nil, booleans, and numbers are not valid `count` inputs. A nil-valued list item or
+record field still contributes to the count. See [Expressions](./expressions.md).
 
 Use native `items`/`set-field`/`merge` instead of JSON/template round trips and
 kind predicates instead of JSON-prefix tests. Remove same-named local wrappers
@@ -87,6 +91,12 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 | `regex-match` | `(regex-match PATTERN SUBJECT)` | Regex-pattern match record (`text`, `captures`, `named`), or nil. |
 | `capture` | `(capture INDEX-OR-NAME MATCH)` | Select a match capture, or nil when absent. |
 | `regex-replace` | `(regex-replace MATCH-PATTERN EXPANSION SUBJECT)` | Anchored regex-pattern replacement on a string or string list; non-matches yield nil. |
+
+`strip` is an explicit broad-whitespace conversion, not command-capture framing.
+To remove one known terminal LF while preserving other whitespace and earlier
+newlines, use `(if (ends? TEXT "\n") (slice TEXT 0 -1) TEXT)`. Do not infer a
+CRLF terminator or remove all terminal newlines unless the producer's protocol
+requires it. Capture itself is lossless; see [Kash](./kash.md).
 
 See [Templates](./templates.md) for document directives, source resolution,
 comment styles, and payload scopes. Lazy `if`, `and`, `or`, `match`, and `with`

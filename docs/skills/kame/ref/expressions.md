@@ -20,6 +20,13 @@ scripts, templates, rule expansions, and Kash boundaries.
   half-open slices (`files.1..4`), and selections (`config.{host,port}`).
 - Only `:nil` and `:false` are false; zero, empty strings, and empty lists are true.
 
+Empty records and bytes are also true. For strings, bytes, lists, or records,
+use `(= (count VALUE) 0)` for emptiness and `(> (count VALUE) 0)` for nonemptiness;
+`count` does not accept nil, booleans, or numbers. Test absence with
+`(= VALUE :nil)` and numeric zero with `(= VALUE 0)` instead. Whitespace is data.
+`and`/`or` retain the deciding operand, so `(or "" "fallback")` returns `""`.
+Declaration `when` requires an actual boolean, not a truthy collection.
+
 Expression strings use double quotes with `\"`, `\\`, `\n`, `\r`, and `\t`.
 Interpolation is `"Count: @(count files)"`. Deprecated `{(...)}` input is still
 evaluated but formatting migrates it to `@(...)`, including nested strings.

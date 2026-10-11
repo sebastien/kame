@@ -301,6 +301,12 @@ Substitution captures only the final stage's stdout and does not also forward it
 to the enclosing stdout. Stderr remains live. The result is a Kame string:
 stdout must be valid UTF-8 and is preserved exactly, including trailing newlines
 and an empty result. No newline stripping or whitespace splitting occurs.
+Leading/trailing spaces and tabs, embedded line endings, CRLF, and newline-only
+stdout retain every byte. Identifier/path conversion belongs to an explicit
+consumer expression: `strip` removes all surrounding Unicode whitespace, while
+an `ends?`/`slice` expression can remove exactly one known terminal LF. The
+consumer must not infer a terminator that could be part of the payload. Any
+newline-removal helper remains opt-in and cannot change substitution framing.
 Binary capture is outside this specification.
 
 The default capture limit is 1 MiB of stdout per substitution. `--capture-limit`

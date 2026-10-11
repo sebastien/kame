@@ -122,6 +122,12 @@ newlines; stderr remains live. Capture is limited (default 1 MiB), never silentl
 truncated. Pipelines fail on any stage's nonzero/signal exit, including SIGPIPE;
 aggregate status is the rightmost failure. Failures/cancellation reap owned work.
 
+Spaces, tabs, embedded line endings, CRLF, and every terminal newline are data.
+Use `strip` explicitly only when an identifier's contract permits removing all
+surrounding whitespace. For a producer with one terminal LF, use
+`(if (ends? TEXT "\n") (slice TEXT 0 -1) TEXT)` to remove only that byte. Captured
+paths may themselves end in whitespace/newlines; do not trim them implicitly.
+
 ## Named execution context
 
 | Name | Compact form | Value |
@@ -184,6 +190,14 @@ scoped to the selected arm.
   source failure/interruption cancels and reaps every outstanding graph.
 - `&&`, `||`, shell subshell grouping, and single-quoted shell strings are not
   supported. Use Kash control statements or Kame special forms.
+
+Cancellation/process reaping is not filesystem or remote rollback. `if` and
+fallback handle recoverable process failure, not cancellation or capability
+denial; they are not general finalizers. A `clean` target is explicit work, not
+an automatic cleanup callback. Ownership-safe temporary files and stale artifact
+cleanup need a separate contract before adding structured cleanup syntax. See
+[SDK migration boundaries](../../../sdk-migration-boundaries.md) for concrete
+use cases and the division between language capabilities and SDK/vendor policy.
 
 ## Run and inspect
 

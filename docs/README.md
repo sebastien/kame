@@ -8,6 +8,7 @@
 - [Idioms and gotchas](idioms-and-gotchas.md)
 - [Glossary](glossary.md)
 - [XML extraction requirements scope](xml-extraction-scope.md)
+- [SDK migration boundaries](sdk-migration-boundaries.md): truth/emptiness, lossless capture, cleanup ownership, and vendor/workflow scope
 
 ## Language and CLI references
 

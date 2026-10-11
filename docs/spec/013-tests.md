@@ -148,6 +148,13 @@ coalescing, fairness, ownership and retained interest through reactive rebinding
 
 Native/WASM conformance covers:
 
+- Nil/false-only truth across boolean operations, expression conditions and
+  filtering, including zero and empty text/bytes/lists/records. Explicit count
+  checks distinguish emptiness from absence and preserve nil-valued members.
+- Lossless capture of whitespace, embedded line endings, CRLF, newline-only and
+  empty stdout; typed reuse adds no splitting/reparse. Consumer conversion tests
+  distinguish broad `strip` from removal of exactly one known terminal LF.
+
 - Direct `.km`, `.kmk`, `.kash`, and `.ksh` execution versus `do run` equivalence.
 - Inline/stdin language selection and unknown-suffix validation without effects.
 - Repeated/interleaved files and `-c` fragments: compile the whole sequence before

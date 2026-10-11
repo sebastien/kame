@@ -31,6 +31,20 @@ Program operands after `--` are literal strings in `args` (`@*`), with indexed
 access through `args.0`. A quoted `NAME=VALUE` is literal configuration even
 when VALUE ends in a source suffix or contains expression-looking text.
 
+## Truth, emptiness, and captured identifiers
+
+Only nil and false are false; zero and empty text, bytes, lists, and records are
+true. Use `(> (count FILES) 0)` for a nonempty collection, `(= VALUE :nil)` for
+absence, and `(= NUMBER 0)` for zero. `count` is not valid on nil or numbers.
+`(or "" "fallback")` returns the empty string; it is not an emptiness default.
+
+Command capture preserves stdout, including every trailing newline. `(strip
+$(git rev-parse HEAD))` is an explicit identifier conversion, not a capture
+default. For a path tool promising one terminal LF, remove exactly that byte
+with `ends?`/`slice`, preserving whitespace/newlines belonging to the path.
+See [SDK migration boundaries](sdk-migration-boundaries.md) for the helper
+assessment, concrete failure-cleanup cases, and vendor/SDK workflow boundaries.
+
 ## Paths, sources, and authority
 
 `./output.txt` names a file artifact; `output.txt` without an explicit path is
