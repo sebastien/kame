@@ -8,6 +8,13 @@ execution. Their content signatures and ordered output-set signature participate
 in reuse: missing or modified siblings invalidate reuse even when a different
 sibling was requested. Downstream rules can depend on any declared sibling.
 
+Producer reuse validates the whole group; consumer reuse observes only the
+content of each artifact actually declared or read. Re-executing the producer,
+or changing another sibling, does not invalidate a consumer of byte-identical
+output. All siblings still share one execution, and publication waits for every
+declared output to be readable. Discovered reads use the same per-artifact
+boundary as explicit prerequisites.
+
 Computed output expressions are evaluated during pure registration. They can
 splice a configured list of paths into a grouped producer; they cannot discover
 membership by reading a directory, manifest, or running a compiler. A changed

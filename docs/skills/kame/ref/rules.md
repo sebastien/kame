@@ -143,6 +143,10 @@ must be pure. A directory or manifest does not claim its contents as outputs,
 and removing a configured member does not delete its file. See
 [output ownership](../../../spec/039-output-ownership.md).
 
+Group reuse validates every sibling, but downstream freshness observes each
+consumed artifact independently. A sibling change or producer rerun does not
+rebuild a consumer whose declared/read output remains byte-identical.
+
 Planning resolves headers, not body effects or commands. Rendering may discover
 dependencies that must complete before final freshness and recipe execution.
 Do not demand process substitutions or writes during planning, even with grants.

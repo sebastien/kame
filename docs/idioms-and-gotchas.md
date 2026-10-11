@@ -57,6 +57,12 @@ For a persistent file-rule override, write `always ./output : ./input`. It keeps
 file artifacts and output checks, and reruns whenever a new root reaches it.
 Shared prerequisites still run once within a diamond or concurrent root batch.
 
+Grouped file outputs share one recipe and must all be present after execution.
+A consumer of one sibling observes only that artifact's bytes: changes to other
+siblings, or repairs that restore identical bytes, preserve its reuse. A missing
+or invalid cache record can require rebuilding to establish trustworthy facts;
+the following unchanged invocation should reuse them.
+
 `-C project -f Makefile.kmk` selects `project/Makefile.kmk`, independent of
 option order. Absolute source paths stay absolute. Includes are relative to
 the containing source, while evaluation paths use the selected working directory.
@@ -129,12 +135,32 @@ or `aws-shell@{role-account}`. Exact targets win over templates; two matching
 templates remain ambiguous. Required/optional standalone target arguments are
 implemented separately from captures; see [spec 022](spec/022-target-arguments.md).
 
+Three-argument pattern replacement accepts a string or any list of strings,
+including a filtered wildcard result. `**` captures can backtrack across path
+segments. Anchor the source prefix to avoid copying it into the destination:
+
+```kame
+SOURCES = (filter-out ([x] (includes? x "draft")) (wildcard ./src/**/*.txto))
+OUTPUTS = (replace ./src/{path:**}.txto ./build/{path}.json SOURCES)
+```
+
+With two arguments, `replace` returns an invocation-owned callable for `map`,
+not printable data for `do cat`. Nonmatching list members become `:nil`; guard
+them before calling string operations, or remove them with `(filter-out LIST
+:nil)`. `string?` is available for explicit kind checks.
+
 ## Inspection and reproducibility
 
 Use `do plan TARGET` to inspect a declaration and `-n TARGET` to render a dry run.
 A plan can report unknown freshness before dynamic inputs or body dependencies
 resolve. `do tools check TARGET` checks selected plans without running recipes;
 a missing executable in an unrelated rule should not block that target.
+
+`do fmt` prints the whole canonical source, including line wrapping and header
+spacing. `do fmt -n FILE` reports whether that source differs; neither mode
+rewrites FILE. Only `do fmt -i FILE` replaces it. Review canonical output before
+applying it to a hand-formatted file. Formatting must preserve the parsed AST,
+and ordinary inspection/build commands must leave authored source bytes intact.
 
 Dynamic discovery is only correct when the aggregate actually rebuilds after
 input membership changes. Keep a source-addition check immediately after a build,

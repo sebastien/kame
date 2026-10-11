@@ -15,9 +15,13 @@ with tempfile.TemporaryDirectory() as temporary:
     def run(text, arguments, environment=None):
         global cases
         (project / 'Makefile.kmk').write_text(text)
-        result = subprocess.run(command + arguments, cwd=project,
-            env=dict(os.environ, MODE='ambient', **(environment or {})),
-            text=True, capture_output=True, timeout=15)
+        try:
+            result = subprocess.run(command + arguments, cwd=project,
+                env=dict(os.environ, MODE='ambient', **(environment or {})),
+                text=True, capture_output=True, timeout=15)
+        except subprocess.TimeoutExpired as error:
+            raise AssertionError((arguments, (error.stdout or b'')[-8000:],
+                                  error.stderr)) from error
         assert result.returncode == 0, (text, result)
         cases += 1
         return result
@@ -136,5 +140,85 @@ with tempfile.TemporaryDirectory() as temporary:
     selected = reasons(run(cached_reason, ['--json', 'reason-cached']))
     assert [e['reason'] for e in selected] == ['record-invalid'], selected
     assert not reasons(run(cached_reason, ['--json', 'reason-cached']))
+    # A grouped producer owns all siblings, but consumers observe individual bytes.
+    (project / 'variable').write_text('A1')
+    (project / 'constant').write_text('B')
+    (project / 'trigger').write_text('one')
+    grouped = '''SHELL = kash
+default : ./consumeA ./consumeB ./readB ./both ./ordered cache-b
+./A ./B : ./variable ./constant ./trigger
+	cp ./variable @>
+	cp ./constant ./B
+	printf x >> producer.log
+./consumeA : ./A
+	cp @< @>
+	printf x >> consumeA.log
+./consumeB : ./B
+	cp @< @>
+	printf x >> consumeB.log
+./readB : ./constant
+	(yield (text (read "./B")))
+./both : ./A ./B
+	cat @<* > @>
+	printf x >> both.log
+./ordered : ./constant | ./A
+	cp ./constant @>
+task cache-b : ./B
+	printf x >> cacheB.log
+'''
+    def executions():
+        return [(project / (name + '.log')).read_text().count('x')
+                for name in ('producer', 'consumeA', 'consumeB', 'both')]
+    run(grouped, ['--json', 'default'])
+    assert executions() == [1, 1, 1, 1], executions()
+    read_stamp = (project / 'readB').stat().st_mtime_ns
+    ordered_stamp = (project / 'ordered').stat().st_mtime_ns
+    assert (project / 'readB').read_text() == 'B'
+    run(grouped, ['--json', 'default'])
+    assert executions() == [1, 1, 1, 1], executions()
+    (project / 'trigger').write_text('two')
+    run(grouped, ['--json', 'default'])
+    assert executions() == [2, 1, 1, 1], executions()
+    (project / 'variable').write_text('A2')
+    run(grouped, ['--json', 'default'])
+    assert executions() == [3, 2, 1, 2], executions()
+    assert (project / 'readB').stat().st_mtime_ns == read_stamp
+    assert (project / 'ordered').stat().st_mtime_ns == ordered_stamp
+    assert (project / 'cacheB.log').read_text() == 'x'
+    # Repairs execute the producer without invalidating equal final artifacts.
+    (project / 'B').write_text('tampered')
+    run(grouped, ['--json', 'default'])
+    assert executions() == [4, 2, 1, 2], executions()
+    (project / 'B').unlink()
+    run(grouped, ['--json', 'default'])
+    assert executions() == [5, 2, 1, 2], executions()
+    (project / 'constant').write_text('B2')
+    run(grouped, ['--json', 'default'])
+    assert executions() == [6, 2, 2, 3], executions()
+    assert (project / 'readB').read_text() == 'B2'
+    assert (project / 'cacheB.log').read_text() == 'xx'
+    # Selecting a sibling first must not change the shared instance or its identity.
+    run(grouped, ['--json', './B', './A', 'default'])
+    assert executions() == [6, 2, 2, 3], executions()
+    # Lost proofs legitimately rebuild; acceptance must then settle immediately.
+    records = [record for record in (project / '.kame/cache').rglob('*') if record.is_file()]
+    for record in records:
+        record.write_bytes(b'corrupt')
+    run(grouped, ['--json', 'default'])
+    assert executions() == [7, 3, 3, 4], executions()
+    run(grouped, ['--json', 'default'])
+    assert executions() == [7, 3, 3, 4], executions()
+    (project / 'variable').write_text('A3')
+    run(grouped, ['--json', 'default'])
+    assert executions() == [8, 4, 3, 5], executions()
+    assert (project / 'cacheB.log').read_text() == 'xxx'
+    # Missing siblings prevent publication and all downstream recipe execution.
+    (project / 'B').unlink()
+    broken = grouped.replace('\tcp ./constant ./B\n', '')
+    (project / 'Makefile.kmk').write_text(broken)
+    result = subprocess.run(command + ['--json', 'default'], cwd=project,
+                            text=True, capture_output=True, timeout=15)
+    assert result.returncode == 1 and 'OUTPUT_MISSING' in result.stdout, result
+    assert executions() == [9, 4, 3, 5], executions()
 print(f'{backend}: {cases} reuse-reason cases passed')
 # EOF

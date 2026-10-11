@@ -308,4 +308,40 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-grants-') as directory:
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-siblings-') as directory:
+    project = Path(directory)
+    (project / 'variable').write_text('A1')
+    (project / 'constant').write_text('B')
+    (project / 'Makefile.kmk').write_text('''SHELL = kash
+default : ./consumeA ./consumeB
+./A ./B : ./variable ./constant
+	cp ./variable @>
+	cp ./constant ./B
+./consumeA : ./A
+	cp @< @>
+	printf x >> consumeA.log
+./consumeB : ./B
+	cp @< @>
+	printf x >> consumeB.log
+''')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch', 'default'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: read(project / 'consumeA.log') == 'x' and read(project / 'consumeB.log') == 'x', error, 'initial sibling consumers')
+            (project / 'variable').write_text('A2')
+            wait_for(process, lambda: read(project / 'consumeA.log') == 'xx', error, 'changed sibling consumer')
+            assert read(project / 'consumeB.log') == 'x', error.read_text()
+            # A second edit catches inconsistent first-generation acceptance.
+            (project / 'variable').write_text('A3')
+            wait_for(process, lambda: read(project / 'consumeA.log') == 'xxx', error, 'second sibling edit')
+            assert read(project / 'consumeB.log') == 'x', error.read_text()
+            (project / 'constant').write_text('B2')
+            wait_for(process, lambda: read(project / 'consumeB.log') == 'xx', error, 'other sibling consumer')
+            assert read(project / 'consumeA.log') == 'xxx', error.read_text()
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 print(f'{cases} watch scenarios passed')

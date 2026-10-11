@@ -355,6 +355,7 @@ type generatedRuleMeta struct {
 	Dependencies []string
 }
 type instance struct {
+	Artifacts []*core.Node
 	ReasonIdentities []reasonIdentity
 	Service                ServiceConfig
 	ServiceState           string

@@ -33,6 +33,23 @@ for expression in '(wildcard "*.md")' '(wildcard "src/**/*.km")' '(wildcard "src
 	fi
 done
 
+test-step "recursive discovery does not follow encountered directory symlinks"
+mkdir -p "$project/real/deep" "$project/links"
+touch "$project/real/deep/file.js"
+ln -s ../real "$project/links/alias"
+ln -s .. "$project/links/cycle"
+ln -s ../absent "$project/links/dangling"
+for backend in native wasm; do
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	for sample in \
+		'(wildcard ./links/alias/**/*.js)|["./links/alias/deep/file.js"]' \
+		'(wildcard ./links/alias/*/*.js)|["./links/alias/deep/file.js"]' \
+		'(wildcard ./links/**/*.js)|[]'; do
+		(cd "$project" && "${runner[@]}" do run --lang expr --allow-read -c "${sample%|*}") >"$project/value"
+		if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend ${sample%|*}"; else test-fail "$backend symlink glob result: $(cat "$project/value")"; fi
+	done
+done
+
 test-step "wildcard needs a read grant"
 set +e
 (cd "$project" && node "$CLI_ROOT/dist/kame.js" do run --lang expr -c '(wildcard "*.md")') >"$project/out.txt" 2>"$project/err.txt"

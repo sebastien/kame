@@ -27,6 +27,7 @@ func (r *Result) Free(a mem.Allocator) {
 type instanceState struct {
 	Program *Program
 	Index   int
+	Artifact string
 }
 type instanceResult struct {
 	Node       *core.Node
@@ -44,7 +45,11 @@ type externalValueState struct {
 	Kind    core.ResourceKind
 }
 
-func freeInstanceState(a mem.Allocator, value any) { mem.Free(a, value.(*instanceState)) }
+func freeInstanceState(a mem.Allocator, value any) {
+	state := value.(*instanceState)
+	mem.FreeString(a, state.Artifact)
+	mem.Free(a, state)
+}
 func freeExternalFileState(a mem.Allocator, value any) {
 	state := value.(*externalFileState)
 	mem.FreeString(a, state.Name)
@@ -153,7 +158,7 @@ func (p *Program) Materialize(target string) Result {
 }
 
 func (p *Program) Start(target string) HandleStart {
-	resolved := p.instanceFor(target)
+	resolved := p.producerFor(target)
 	node, plan, d := resolved.Node, resolved.Plan, resolved.Diagnostic
 	if d.Code != "" {
 		return HandleStart{Diagnostic: d}
@@ -413,12 +418,59 @@ func (p *Program) instanceIndex(node *core.Node) int {
 		if p.Instances[i].Node == node {
 			return i
 		}
+		if slices.Contains(p.Instances[i].Artifacts, node) {
+			return i
+		}
 	}
 	return -1
 }
 func isPathTarget(target string) bool { return isPath(target) || hasSlash(target) }
 
 func (p *Program) instanceFor(target string) instanceResult {
+	resolved := p.producerFor(target)
+	index := p.instanceIndex(resolved.Node)
+	if index < 0 || len(p.Instances[index].Plan.Outputs) < 2 {
+		return resolved
+	}
+	name := p.canonicalTarget(target, true)
+	key := core.ResourceKey{Kind: core.ResourceFile, Name: name}
+	node := p.Engine.Lookup(key)
+	if node == nil {
+		state := mem.Alloc[instanceState](p.Alloc)
+		state.Program, state.Index = p, index
+		state.Artifact = cloneText(p.Alloc, name)
+		node = p.Engine.AddOwned(key, produceArtifact, state, freeInstanceState)
+		p.Instances[index].Artifacts = slices.Append(p.Alloc, p.Instances[index].Artifacts, node)
+	}
+	mem.FreeString(p.Alloc, name)
+	resolved.Node = node
+	return resolved
+}
+
+// A group executes and validates once, but every declared artifact publishes its
+// own content identity. Both explicit prerequisites and discovered reads use it.
+func produceArtifact(c *core.EngineContext, nodeID int64) core.ProducerResult {
+	_ = nodeID
+	state := c.Context().(*instanceState)
+	p := state.Program
+	producer := p.Instances[state.Index].Node
+	if !c.Dependency(producer.Key) {
+		return core.ProducerWaiting
+	}
+	entry := &p.Instances[state.Index]
+	for i := range entry.AcceptedRecord.Outputs {
+		output := entry.AcceptedRecord.Outputs[i]
+		if output.Key.Name == state.Artifact {
+			c.PublishSigned(core.NewString(c.Allocator(), output.Key.Name), output.Signature)
+			return core.ProducerCompleted
+		}
+	}
+	// Planning/dry-run can complete without materialized output observations.
+	c.Publish(core.Value{Kind: core.Nil})
+	return core.ProducerCompleted
+}
+
+func (p *Program) producerFor(target string) instanceResult {
 	planned := p.Plan(target)
 	plan, d := planned.Plan, planned.Diagnostic
 	if d.Code != "" {
@@ -435,7 +487,14 @@ func (p *Program) instanceFor(target string) instanceResult {
 	}
 	state := mem.Alloc[instanceState](p.Alloc)
 	state.Program, state.Index = p, len(p.Instances)
-	node := p.Engine.AddOwned(plan.Key, produce, state, freeInstanceState)
+	key := plan.Key
+	if len(plan.Outputs) > 1 {
+		name := p.canonicalTarget(plan.Outputs[0], true)
+		key = core.NewResourceKey(p.Alloc, core.ResourceTarget, "\x00file-group:"+name)
+		mem.FreeString(p.Alloc, name)
+	}
+	node := p.Engine.AddOwned(key, produce, state, freeInstanceState)
+	if len(plan.Outputs) > 1 { key.Free(p.Alloc) }
 	if node == nil {
 		plan.Free(p.Alloc)
 		return instanceResult{Diagnostic: failure(p.Alloc, "TGT_AMBIG", "duplicate rule instance")}

@@ -315,6 +315,13 @@ a string pattern and retains its own glob dependency, including empty members.
 For example, `(wildcard ./src/**/*.go ./glue/**/*.c ./glue/**/*.h)`
 combines source extensions without shell discovery.
 
+Recursive discovery does not descend into directory symlinks encountered among
+directory entries. An explicitly named directory symlink in the literal prefix
+is traversed, so `./linked/**/*.js` can enumerate its target, while
+`./**/*.js` does not discover files by descending through `./linked`. Results
+retain the authored lexical path. This prevents recursive symlink cycles; name
+linked roots explicitly rather than expanding recursive traversal implicitly.
+
 `write` is immediate only in explicit expression execution. During build
 rendering it becomes a deferred effect committed during execution. It is
 invalid during planning.

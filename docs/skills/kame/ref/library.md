@@ -105,6 +105,10 @@ are special forms, not eager library operations; see [Expressions](./expressions
 Pattern replacement uses Kame pattern literals such as `./src/{name:*}.c` and
 expansion references such as `./build/{name}.o`. Invalid matcher/expansion
 combinations or missing captures report `PAT_INVALID`.
+The subject may be any list of strings, including a filtered wildcard result;
+replacement preserves order and produces `:nil` for each nonmatching member.
+Recursive captures backtrack across segments. Two-argument replacement creates
+an invocation-owned callable, not printable/serializable definition data.
 Regex grammar and matching budgets are defined in
 [Pattern extensions](../../../spec/029-pattern-extensions.md).
 `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `bold`,
@@ -158,6 +162,10 @@ neither needs a grant, but both are invalid during planning/output resolution.
 
 Standalone `kame do run --lang expr` denies these capabilities by default; grant only the
 needed roots, names, or process access with its `--allow-*` options.
+
+Recursive wildcards do not descend into directory symlinks discovered during
+enumeration. Name a linked directory in the literal prefix (`./linked/**/*.js`)
+to traverse it explicitly; results retain that lexical prefix.
 
 ## Build effects
 
