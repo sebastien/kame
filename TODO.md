@@ -42,6 +42,29 @@ order, without weakening its acceptance criteria:
 
 ## Optional language and diagnostics decisions
 
+- [ ] Update `T013-05-meta-build-mode.sh` version assertions for the runtime
+  suffix (`; debug; C)` / `; release; C)`) instead of requiring the mode to be
+  the final field. Continue checking independent debug/release/sanitize modes
+  and no-relink behavior.
+- [ ] Resolve parser/formatter baseline conformance gaps in `T004-02`, `T004-08`,
+  `T004-09` and `T018-01`; distinguish malformed interpolation diagnostics,
+  AST-preserving canonicalization and composed-header parity. They reproduce
+  without automatic cleanup on isolated parent `0a378e15`.
+- [ ] Align legacy presentation/inspection assertions in `T006-02`, `T006-04`,
+  `T010-11` and `T011-01` with current target-status and external-root contracts,
+  while retaining real execution-failure and unknown-logical-name coverage.
+- [ ] Resolve the baseline WASM watch-ABI/embedding expectations in `T010-25`
+  and `T010-33`, and the pipeline-overflow cleanup failure in `T017-03`. All
+  three reproduce on isolated parent `0a378e15`; rerun after grouped-artifact
+  fixes before changing their expected results.
+
+- [ ] Fix the retained `callbackProgress` allocation in
+  `src/go/kame/operations/collections.go` during host-backed `filter` evaluation
+  of computed rule inputs. `T007-12-lib-operation-values.sh` leaks 256 bytes
+  under LeakSanitizer; the same minimal direct-Kash fixture leaks on isolated
+  parent `0a378e15`. Cover suspended callback teardown without broadening
+  cleanup changes into evaluator fixes.
+
 - [ ] Amend specifications 004/005 to support `(include PATH)` as a
   composition-only special form within existing `if` expressions. Preserve
   pure configuration predicates, source-relative paths, selected-branch-only
