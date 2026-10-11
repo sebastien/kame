@@ -218,7 +218,7 @@ class KameProgram(_ProcessOwner):
         if self.language != "km":
             raise KameError("expression evaluation is supported for .km programs")
         return await self._run(
-            ["do", "run", "--lang", "km", "-f", self._source_path, "-c", expression],
+            ["do", "run", "--lang", "km", "-f", self._source_path, "--lang", "expr", "-c", expression],
             grants=grants,
         )
 
