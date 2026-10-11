@@ -14,12 +14,12 @@ fi
 test-step "debug and release artifacts report independent modes"
 "$CLI_ROOT/build/kame.debug" --version > "$TMPDIR/debug-version"
 "$CLI_ROOT/dist/kame" --version > "$TMPDIR/release-version"
-if rg -q '; debug\)$' "$TMPDIR/debug-version" && rg -q '; release\)$' "$TMPDIR/release-version"; then test-ok "debug and release modes belong to their artifacts"; else test-fail "native artifact build modes"; fi
+if rg -q '; debug; C\)$' "$TMPDIR/debug-version" && rg -q '; release; C\)$' "$TMPDIR/release-version"; then test-ok "debug and release modes belong to their artifacts"; else test-fail "native artifact build modes"; fi
 
 test-step "the instrumented CLI reports sanitize when selected"
 if [ "$CLI_BIN" = "$CLI_ROOT/build/kame.sanitize" ]; then
  "$CLI_BIN" --version > "$TMPDIR/sanitize-version"
- if rg -q '; sanitize\)$' "$TMPDIR/sanitize-version"; then test-ok "sanitizer artifact reports sanitize"; else test-fail "sanitizer artifact mode"; fi
+ if rg -q '; sanitize; C\)$' "$TMPDIR/sanitize-version"; then test-ok "sanitizer artifact reports sanitize"; else test-fail "sanitizer artifact mode"; fi
 fi
 
 test-step "switching mode does not rewrite shared generated metadata"

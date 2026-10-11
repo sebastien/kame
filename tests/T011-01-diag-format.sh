@@ -54,30 +54,29 @@ fi
 
 test-step "suggestions are separate note lines"
 (
-	cd diag-format
-	cli_run -- do plan nope.txt
+	cli_run -- do plan -c 'task first :'
 	cli_expect_status 1
-	cli_expect_stderr_contains 'TGT_NO_RULE' 'note: did you mean ./nope.txt?'
+	cli_expect_stderr_contains 'TGT_NO_DEFAULT' 'note: available targets: first'
 
-	cli_run -- do plan ./nope.txt
+	cli_run --dir diag-format -- do plan unknown
 	cli_expect_status 1
 	cli_expect_stderr_contains 'TGT_NO_RULE'
 	if grep -q 'note:' "$CLI_ERR"; then
-		test-fail "explicit ./ targets must not suggest ./"
+		test-fail "unknown logical targets must not suggest ./"
 	else
-		test-ok "no suggestion for explicit ./ targets"
+		test-ok "no path suggestion for unknown logical targets"
 	fi
 )
 
 test-step "human and JSON diagnostics describe the same failure"
 (
 	cd diag-format
-	cli_run -- do plan nope.txt
+	cli_run -- do plan unknown
 	human="$(cat "$CLI_ERR")"
-	cli_run -- do plan --json nope.txt
+	cli_run -- do plan --json unknown
 	cli_expect_status 1
 	cli_expect_json_query "$CLI_OUT" '.diagnostic.code' 'TGT_NO_RULE'
-	cli_expect_json_query "$CLI_OUT" '.diagnostic.notes[0]' 'did you mean ./nope.txt?'
+	cli_expect_json_query "$CLI_OUT" '.diagnostic.target' 'unknown'
 	message="$(jq -r '.diagnostic.message' "$CLI_OUT")"
 	if printf '%s' "$human" | grep -Fq "$message"; then
 		test-ok "JSON message appears in the human diagnostic"

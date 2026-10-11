@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Spec: docs/spec/009-cli.md — Plan
 # Spec: docs/spec/006-runtime.md — Planning
+# Spec: docs/spec/037-build-inspection.md — External file roots
 # Spec: docs/spec/013-tests.md — T009-05-cli-plan
 set -euo pipefail
 
@@ -119,18 +120,36 @@ cli_expect_json_query "$CLI_OUT" '.type' 'diagnostic'
 cli_expect_json_query "$CLI_OUT" '.diagnostic.code' 'TGT_NO_DEFAULT'
 cli_expect_json_query "$CLI_OUT" '.diagnostic.notes[0]' 'available targets: first'
 
-test-step "plan usage and failure diagnostics"
+test-step "plan accepts existing and missing external file roots without effects"
 (
 	cd plan
-	cli_run -- do plan ./nope.txt
+	for target in ./input.txt input.txt ./nope.txt nope.txt; do
+		cli_run -- do plan --json "$target"
+		cli_expect_status 0
+		cli_expect_jsonl "$CLI_OUT"
+		cli_expect_json_query "$CLI_OUT" '.type' 'plan'
+		cli_expect_json_query "$CLI_OUT" '.targets[0]' "./${target#./}"
+		cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.root)] | length' '1'
+		cli_expect_json_query "$CLI_OUT" '.resources[0].key.kind' 'file'
+		cli_expect_json_query "$CLI_OUT" '.resources[0].key.name' "$PWD/${target#./}"
+		cli_expect_json_query "$CLI_OUT" '.resources[0].roles | join(",")' 'input'
+		cli_expect_json_query "$CLI_OUT" '[.producers, .dependencies, .stages] | map(length) | join(",")' '0,0,0'
+		cli_expect_stderr_empty
+	done
+	cli_expect_no_file ./nope.txt
+	cli_expect_no_file ./runs.log
+	cli_expect_no_file ./.kame
+)
+
+test-step "plan reports unknown logical roots as errors"
+(
+	cd plan
+	cli_run -- do plan unknown
 	cli_expect_status 1
+	cli_expect_stdout_empty
 	cli_expect_stderr_contains "TGT_NO_RULE"
 
-	cli_run -- do plan nope.txt
-	cli_expect_status 1
-	cli_expect_stderr_contains "TGT_NO_RULE" "note: did you mean ./nope.txt?"
-
-	cli_run -- do plan --json ./nope.txt
+	cli_run -- do plan --json unknown
 	cli_expect_status 1
 	cli_expect_jsonl "$CLI_OUT"
 	cli_expect_stderr_empty

@@ -92,13 +92,14 @@ for backend in native wasm; do
 	for scenario in timeout overflow; do
 		first="$work/$backend-$scenario-first.pid"
 		last="$work/$backend-$scenario-last.pid"
-		if [ "$scenario" = timeout ]; then producer='sleep 30'; code=RECIPE_TIMEOUT; else producer=yes; code=CAPTURE_LIMIT; fi
+		# Overflow must reach capture processing before the invocation deadline.
+		if [ "$scenario" = timeout ]; then producer='sleep 30'; code=RECIPE_TIMEOUT; budget=200; else producer=yes; code=CAPTURE_LIMIT; budget=5000; fi
 		printf '%s\n' "result = \$(sh -c \"printf '%s' $pid_token > '$first'; exec $producer\" | sh -c \"printf '%s' $pid_token > '$last'; exec cat\")" >"$work/cleanup.kmk"
 		set +e
-		"${command[@]}" --timeout 200 --capture-limit 32 -f "$work/cleanup.kmk" result >"$work/$backend.out" 2>"$work/$backend.err"
+		"${command[@]}" --timeout "$budget" --capture-limit 32 -f "$work/cleanup.kmk" result >"$work/$backend.out" 2>"$work/$backend.err"
 		status=$?
 		set -e
-		if [ "$status" = 1 ] && grep -q "$code" "$work/$backend.err"; then test-ok "$backend $scenario reports $code"; else test-fail "$backend $scenario cleanup failed"; fi
+		if [ "$status" = 1 ] && grep -q "$code" "$work/$backend.err"; then test-ok "$backend $scenario reports $code"; else test-fail "$backend $scenario cleanup failed: $(cat "$work/$backend.err")"; fi
 		for file in "$first" "$last"; do
 			if [ ! -e "$file" ] || ! kill -0 "$(cat "$file")" 2>/dev/null; then test-ok "$backend stage is reaped"; else test-fail "$backend left stage running"; fi
 		done

@@ -48,6 +48,9 @@ for dir in "$(tests_data_path cases)"/*; do
 	if [ -f "$dir/stdout_contains" ]; then
 		patterns=()
 		while IFS= read -r line || [ -n "$line" ]; do
+			if [ "$name" = version ] && [ "$line" = 'kame VERSION' ]; then
+				line="kame $(<"$CLI_ROOT/VERSION")"
+			fi
 			patterns+=("$line")
 		done <"$dir/stdout_contains"
 		cli_expect_stdout_contains ${patterns[@]+"${patterns[@]}"}

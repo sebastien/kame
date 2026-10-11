@@ -18,10 +18,10 @@ fixture_copy effects yield
 test-step "yield writes its declared output"
 (
 	cd yield
-	cli_run -- ./yield.out
+	cli_run -- --json ./yield.out
 	cli_expect_status 0
 	cli_expect_file ./yield.out 'declared content'
-	cli_expect_stderr_contains '[./yield.out] complete'
+	cli_expect_event "$CLI_OUT" target-completed '.target == "./yield.out"'
 )
 
 test-step "yield may compute its content from dynamic dependencies"

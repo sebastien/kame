@@ -13,7 +13,7 @@ cli_require_tools
 cli_build
 
 # Function: fmt_stable_ast DIR LANG
-# Formatting must preserve the AST apart from spans and the source path.
+# Formatting preserves semantic AST; legacy interpolation spelling is migrated.
 fmt_stable_ast() {
 	local dir="$1"
 	local lang="$2"
@@ -25,7 +25,7 @@ fmt_stable_ast() {
 			test-fail "parse $(test-relpath "$file") exited $CLI_STATUS"
 			continue
 		fi
-		jq -S 'walk(if type == "object" then del(.span, .start, .end) else . end) | del(.source)' "$CLI_OUT" >before.json
+		jq -S 'walk(if type == "object" then del(.span, .start, .end, .brace) else . end) | del(.source)' "$CLI_OUT" >before.json
 		cli_run -- do fmt --lang "$lang" "$file"
 		if [ "$CLI_STATUS" != 0 ]; then
 			test-fail "fmt $(test-relpath "$file") exited $CLI_STATUS"
@@ -37,7 +37,7 @@ fmt_stable_ast() {
 			test-fail "parse formatted $(test-relpath "$file") exited $CLI_STATUS"
 			continue
 		fi
-		jq -S 'walk(if type == "object" then del(.span, .start, .end) else . end) | del(.source)' "$CLI_OUT" >after.json
+		jq -S 'walk(if type == "object" then del(.span, .start, .end, .brace) else . end) | del(.source)' "$CLI_OUT" >after.json
 		if cmp -s before.json after.json; then
 			test-ok "AST stable $(basename "$file")"
 		else

@@ -22,6 +22,10 @@ while IFS=$'\t' read -r name code severity recovery; do
 	fi
 	lang=script
 	case "$name" in
+	rule-recipe-*)
+		# Script loading defers recipe diagnostics until the interpreter is known.
+		lang=rule
+		;;
 	expr-*)
 		lang=expr
 		;;

@@ -132,7 +132,7 @@ for runner in ([native], ['node', wasm]):
     output = run(runner, 'fmt', 'script', text)
     file = work / 'execute.km'
     file.write_text(output)
-    result = subprocess.run(runner + ['do', 'run', str(file)], capture_output=True, text=True)
+    result = subprocess.run(runner + ['do', 'run', '--print-result', str(file)], capture_output=True, text=True)
     assert result.returncode == 0 and result.stdout == '42', (runner, result)
 assert not (work / 'formatter-forbidden').exists()
 assert not (pathlib.Path.cwd() / 'formatter-forbidden').exists()

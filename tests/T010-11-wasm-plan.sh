@@ -19,7 +19,7 @@ work="$TMPDIR/wasm-plan"
 mkdir -p "$work"
 
 test-step "plan JSON matches native"
-for target in default ./artifact.txt ./capture-x.o ./dynamic.out; do
+for target in default ./artifact.txt ./capture-x.o ./dynamic.out ./input.txt input.txt ./nope.txt nope.txt; do
 	set +e
 	(cd "$fixture" && node "$CLI_ROOT/dist/kame.js" do plan --json "$target") >"$work/wasm.json" 2>"$work/wasm.err"
 	wasm_status=$?
@@ -31,13 +31,25 @@ for target in default ./artifact.txt ./capture-x.o ./dynamic.out; do
 	else
 		test-fail "parity: $target (wasm=$wasm_status native=$native_status)"
 	fi
+	if [[ "$target" == *input.txt || "$target" == *nope.txt ]]; then
+		if [ "$native_status" = 0 ] && [ ! -s "$work/native.err" ] && [ ! -s "$work/wasm.err" ] && jq -e --arg name "$fixture/${target#./}" '
+			.type == "plan" and (.resources | length == 1) and
+			.resources[0].key == {kind: "file", name: $name} and
+			.resources[0].root and .resources[0].roles == ["input"] and
+			([.producers, .dependencies, .stages] | map(length)) == [0,0,0]
+		' "$work/native.json" >/dev/null; then
+			test-ok "external file root: $target"
+		else
+			test-fail "external file root: $target"
+		fi
+	fi
 done
 
-test-step "a missing target fails with status 1"
+test-step "an unknown logical target fails with status 1"
 set +e
-(cd "$fixture" && node "$CLI_ROOT/dist/kame.js" do plan ./no-such-target) >"$work/wasm.out" 2>"$work/wasm.err"
+(cd "$fixture" && node "$CLI_ROOT/dist/kame.js" do plan no-such-target) >"$work/wasm.out" 2>"$work/wasm.err"
 wasm_status=$?
-(cd "$fixture" && "$CLI_BIN" do plan ./no-such-target) >"$work/native.out" 2>"$work/native.err"
+(cd "$fixture" && "$CLI_BIN" do plan no-such-target) >"$work/native.out" 2>"$work/native.err"
 native_status=$?
 set -e
 if [ "$wasm_status" = 1 ] && [ "$native_status" = 1 ] && grep -q 'TGT_NO_RULE' "$work/wasm.err"; then

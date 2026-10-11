@@ -31,9 +31,9 @@ test-step "a failed dependency blocks its dependent's recipe"
 fixture_copy errors deps-fail
 (
 	cd deps-fail
-	cli_run -- ./direct.out
+	cli_run -- --json ./direct.out
 	cli_expect_status 1
-	cli_expect_stderr_contains '[./dep-fails.out] failed'
+	cli_expect_event "$CLI_OUT" target-failed '.target == "./dep-fails.out"'
 	if grep -q 'dependent' "$CLI_OUT" "$CLI_ERR"; then
 		test-fail "dependent recipe ran after its dependency failed"
 	else
