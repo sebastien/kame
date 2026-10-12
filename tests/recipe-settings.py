@@ -69,7 +69,7 @@ with tempfile.TemporaryDirectory() as temporary:
         run(text, ['./reused'])
         assert (project / 'file-runs').read_text() == runs + 'x'
     for value in ('A', 'B'):
-        helper = f'SHELL = kash\n(payload) = "{value}"\n./helper : ./input\n\t(yield (payload))\n'
+        helper = f'SHELL = kash\n(payload) = "{value}"\n./helper : ./input\n\t(yield! (payload))\n'
         run(helper, ['./helper'])
         assert (project / 'helper').read_text() == value
         stamp = (project / 'helper').stat().st_mtime_ns
