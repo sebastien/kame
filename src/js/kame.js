@@ -8,7 +8,7 @@
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
 import { lstat, mkdir, mkdtemp, open, readFile, readlink, rename, rm, stat } from 'node:fs/promises';
-import { accessSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -3929,7 +3929,7 @@ async function main() {
   return dispatch(module, inv, args.length === 0);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().then(
     (status) => { process.exitCode = status; },
     (error) => {

@@ -74,6 +74,15 @@ else
 	test-fail "--help: status=$status"
 fi
 
+test-step "CLI starts when invoked through an npm-style bin symlink"
+ln -s "$CLI_ROOT/dist/kame.js" "$work/kame"
+node "$work/kame" --version >"$work/out" 2>"$work/err"
+if [ "$(cat "$work/out")" = "kame $(cat "$CLI_ROOT/VERSION") (runtime=WASM)" ] && [ ! -s "$work/err" ]; then
+	test-ok "main-module detection follows the bin symlink"
+else
+	test-fail "bin symlink invocation: out=$(cat "$work/out") err=$(cat "$work/err")"
+fi
+
 test-step "do run --lang expr matches native output byte-for-byte"
 for expression in '(count [1 2 3])' '(join ["a" "b"] ":")' '(uppercase "kame")' '(let [a 10] (out "hello" a))' '(yield "generated")'; do
 	node "$CLI_ROOT/dist/kame.js" do run --lang expr -c "$expression" >"$work/wasm.out"
