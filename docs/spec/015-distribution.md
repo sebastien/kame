@@ -66,7 +66,10 @@ Every downloaded asset is verified against `SHA256SUMS` before it is installed
 or executed. The launcher first verifies the detached Ed25519 signature using a
 public key embedded in the stamped launcher, then checks the provenance file
 and selected assets against that manifest. The release operator supplies both
-key files to `make dist-release`; neither is stored in the repository. A
+key files to `make dist-release`; neither is stored in the repository. The
+GitHub release helper fetches `package.signing.pem` and
+`package.verification.pem` with littlesecrets when key-path environment
+overrides are not supplied. A
 missing signature verifier, invalid signature, missing manifest entry, or
 checksum mismatch is fatal. A partial or unverified download never replaces a
 cached artifact, and cached artifacts are checked again before reuse.

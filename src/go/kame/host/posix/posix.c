@@ -392,6 +392,41 @@ int64_t km_file_modtime(so_String name, bool link) {
 #endif
 }
 
+// A polling hint, not a content identity. Do not include atime: our own reads
+// must not invalidate it. Following and no-follow views cover symlink changes.
+// Two 49-byte views: presence plus six little-endian uint64 fields.
+bool km_file_watch_stamp(so_String name, so_Slice data) {
+#if defined(__COSMOPOLITAN__)
+    if (IsWindows()) return false; // Windows ctime is not a change timestamp.
+#endif
+    if (data.len != 98) return false;
+    char *path = km_cstring(name);
+    if (!path) return false;
+    unsigned char *out = data.ptr;
+    memset(out, 0, 98);
+    for (int link = 0; link < 2; ++link) {
+        struct stat info;
+        int result = link ? lstat(path, &info) : stat(path, &info);
+        if (result != 0) {
+            if (errno == ENOENT || errno == ENOTDIR) continue;
+            free(path); return false;
+        }
+#if defined(__APPLE__)
+        int64_t mtime = (int64_t)info.st_mtimespec.tv_sec * 1000000000LL + info.st_mtimespec.tv_nsec;
+        int64_t ctime = (int64_t)info.st_ctimespec.tv_sec * 1000000000LL + info.st_ctimespec.tv_nsec;
+#else
+        int64_t mtime = (int64_t)info.st_mtim.tv_sec * 1000000000LL + info.st_mtim.tv_nsec;
+        int64_t ctime = (int64_t)info.st_ctim.tv_sec * 1000000000LL + info.st_ctim.tv_nsec;
+#endif
+        uint64_t fields[] = {info.st_dev, info.st_ino, info.st_mode, info.st_size, mtime, ctime};
+        out[link * 49] = 1;
+        for (int i = 0; i < 6; ++i)
+            for (int j = 0; j < 8; ++j)
+                out[link * 49 + 1 + i * 8 + j] = fields[i] >> (j * 8);
+    }
+    free(path); return true;
+}
+
 static void km_free_strings(char **strings, int count) {
     if (!strings) return;
     for (int i = 0; i < count; i++) free(strings[i]);

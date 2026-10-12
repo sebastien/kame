@@ -123,7 +123,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-missing-source-') as directo
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
         try:
-            wait_for(process, lambda: 'BUILD_NO_SOURCE' in error.read_text(), error, 'missing source diagnostic')
+            wait_for(process, lambda: 'BUILD_NO_SOURCE' in error.read_text() and 'waiting for changes' in error.read_text(), error, 'missing source diagnostic and watch readiness')
             (project / 'Makefile.kmk').write_text('chosen :\n\tprintf appeared > source-created\n')
             wait_for(process, lambda: read(project / 'source-created') == 'appeared', error, 'creation of discovered source')
             cases += 1
@@ -344,4 +344,114 @@ default : ./consumeA ./consumeB
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-preserved-input-') as directory:
+	project = Path(directory)
+	input_file = project / 'input'
+	input_file.write_text('alpha')
+	(project / 'Makefile.kmk').write_text('chosen : ./input\n\tcat @< > copy; printf x >> runs\n')
+	error = project / 'stderr'
+	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+		try:
+			wait_for(process, lambda: read(project / 'copy') == 'alpha', error, 'initial cached input')
+			time.sleep(.5)
+			stamp = input_file.stat()
+			input_file.write_text('bravo')
+			os.utime(input_file, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+			wait_for(process, lambda: read(project / 'copy') == 'bravo', error, 'same-size preserved-mtime input edit')
+			time.sleep(.5)
+			replacement = project / 'replacement'
+			replacement.write_text('delta')
+			os.utime(replacement, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+			os.replace(replacement, input_file)
+			wait_for(process, lambda: read(project / 'copy') == 'delta', error, 'preserved-mtime inode replacement')
+			time.sleep(.5)
+			target = project / 'target'
+			target.write_text('echo!')
+			input_file.unlink()
+			input_file.symlink_to(target.name)
+			wait_for(process, lambda: read(project / 'copy') == 'echo!', error, 'replacement symlink')
+			time.sleep(.5)
+			stamp = target.stat()
+			target.write_text('foxt!')
+			os.utime(target, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+			wait_for(process, lambda: read(project / 'copy') == 'foxt!', error, 'preserved-mtime symlink target edit')
+			time.sleep(.5)
+			target.unlink()
+			wait_for(process, lambda: 'TGT_NO_RULE' in error.read_text(), error, 'cached input removal')
+			target.write_text('again')
+			wait_for(process, lambda: read(project / 'copy') == 'again', error, 'cached input recreation')
+			cases += 1
+		finally:
+			stop(process)
+	assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-cached-metadata-') as directory:
+	project = Path(directory)
+	input_file = project / 'input'
+	input_file.write_text('unchanged')
+	input_file.chmod(0o600)
+	(project / 'Makefile.kmk').write_text('MODE = (get (stat ./input) "mode")\nchosen :\n\tprintf %s @(MODE) > mode; printf x >> runs\n')
+	error = project / 'stderr'
+	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+		try:
+			wait_for(process, lambda: read(project / 'runs') == 'x', error, 'initial metadata observation')
+			time.sleep(.5)
+			before = read(project / 'mode')
+			runs = read(project / 'runs')
+			input_file.chmod(0o644)
+			wait_for(process, lambda: read(project / 'mode') != before and len(read(project / 'runs')) > len(runs), error, 'cached metadata-only change')
+			# Neither symlink target exists: only the no-follow view can change.
+			link = project / 'link'
+			link.symlink_to('absent')
+			(project / 'Makefile.kmk').write_text('LINK = (readlink ./link)\nchosen :\n\tprintf %s @(LINK) > seen\n')
+			wait_for(process, lambda: read(project / 'seen') == 'absent', error, 'initial dangling symlink observation')
+			time.sleep(.5)
+			link.unlink()
+			link.symlink_to('other-absent')
+			wait_for(process, lambda: read(project / 'seen') == 'other-absent', error, 'cached dangling symlink retarget')
+			cases += 1
+		finally:
+			stop(process)
+	assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+# Linux exposes actual read volume: gate repeated file reads, not wall-clock CPU.
+if sys.platform == 'linux':
+	with tempfile.TemporaryDirectory(prefix='kame-watch-large-tool-') as directory:
+		project = Path(directory)
+		tool = project / 'tool'
+		# Keep tool bytes within the WASM instance's 8 MiB arena, including copies.
+		binary = b'#!/bin/sh\ntouch ready\nsleep 60\n#'
+		size = 1024 * 1024
+		tool.write_bytes(binary + b'x' * (size - len(binary)))
+		tool.chmod(0o755)
+		(project / 'Makefile.kmk').write_text('SHELL = kash\nserver :\n\t./tool\n')
+		error = project / 'stderr'
+		with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+			process = subprocess.Popen([*runner, '-C', directory, '--watch', 'server'], stdout=stdout, stderr=stderr)
+			try:
+				wait_for(process, lambda: (project / 'ready').exists(), error, 'large executable recipe readiness')
+				time.sleep(1)
+				io = Path(f'/proc/{process.pid}/io')
+				before = int(io.read_text().split('rchar: ')[1].splitlines()[0])
+				time.sleep(1)
+				after = int(io.read_text().split('rchar: ')[1].splitlines()[0])
+				assert after - before < size, f'unchanged executable reread {after - before} bytes'
+				# Replace a running executable safely; its change queues until exit.
+				stamp = tool.stat()
+				replacement = project / 'replacement'
+				replacement.write_bytes(binary + b'x' * (size - len(binary) - 1) + b'y')
+				replacement.chmod(0o755)
+				os.utime(replacement, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+				os.replace(replacement, tool)
+				wait_for(process, lambda: f'change queued: {tool}' in error.read_text(), error, 'large executable replacement while busy')
+				cases += 1
+			finally:
+				if process.poll() is None:
+					stop(process)
+		assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 print(f'{cases} watch scenarios passed')
+
+# EOF

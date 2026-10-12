@@ -76,6 +76,9 @@ func km_host_new() *nativeHost { return nil }
 func km_file_modtime(name string, link bool) int64 { _, _ = name, link; return 0 }
 
 //so:extern nodecay
+func km_file_watch_stamp(name string, data []byte) bool { _, _ = name, data; return false }
+
+//so:extern nodecay
 func km_host_start(h *nativeHost, id int64, shell []string, script []byte, directory string, environment []string, timeoutMS int64, retainBytes int, direct bool) c.Int {
 	_, _, _, _, _, _, _, _, _ = h, id, shell, script, directory, environment, timeoutMS, retainBytes, direct
 	return 0

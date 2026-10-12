@@ -13,6 +13,14 @@ sources are compared by bytes, including when timestamps and lengths are
 unchanged. Discovered source candidates and attempted includes are observed so
 missing sources and optional includes can appear later.
 
+On hosts with reliable change timestamps, unchanged external files reuse their
+content fingerprints between scans. The polling hint includes device/inode,
+mode, size, and nanosecond modification/change timestamps for both following and
+no-follow path views. It is not a content identity: the first scan still checks
+accepted bytes, metadata-view promotion forces a check, and changes during a
+read force another check. Missing/error transitions remain observable. Sources,
+memory resources and hosts without reliable change timestamps retain full checks.
+
 The scanner runs while recipes execute. Input changes queue until the current
 build settles, then invalidate the affected resource keys in the retained engine.
 A recipe publishing output newer than its changed input still reruns: timestamp
@@ -53,6 +61,9 @@ poll. The JS host owns polling, source loading and signals.
 - Multiple roots share a prerequisite; idle watch does not rerun settled tasks.
 - Glob additions/removals, absent optional includes and missing source creation
   trigger the appropriate work. Produced outputs do not trigger rebuild loops.
+- Unchanged large tool executables are not reread each polling interval on
+  change-timestamp-capable hosts. Same-size edits with restored mtime, inode
+  replacement, symlink-target edits and metadata-only changes remain observable.
 - Root failure can recover after dependency repair; subscriptions from obsolete
   branches stop triggering work.
 - Grants and scoped environments survive invalidation and source reload; denied

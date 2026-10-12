@@ -34,32 +34,41 @@ else
 	test-fail "unknown argument: status=$status err=$(cat "$TMPDIR/err")"
 fi
 
-test-step "release requires both keys before any staging"
+test-step "release retrieves the verification key from littlesecrets"
+secret_bin="$TMPDIR/secret-bin"
+mkdir -p "$secret_bin"
+cat >"$secret_bin/littlesecrets" <<'SH'
+#!/bin/sh
+printf '%s\n' "$*" >>"$LITTLESECRETS_LOG"
+exit 1
+SH
+chmod +x "$secret_bin/littlesecrets"
 status=0
 env -u KAME_RELEASE_PUBLIC_KEY -u KAME_RELEASE_SIGNING_KEY \
+	PATH="$secret_bin:$PATH" LITTLESECRETS_LOG="$TMPDIR/secrets.log" \
 	"$release" >"$TMPDIR/out" 2>"$TMPDIR/err" || status=$?
-if [ "$status" = 1 ] && grep -q 'set KAME_RELEASE_PUBLIC_KEY' "$TMPDIR/err"; then
-	test-ok "missing public key fails before staging"
+if [ "$status" = 1 ] && grep -qx -- '-q get package.verification.pem' "$TMPDIR/secrets.log"; then
+	test-ok "release asks littlesecrets for the verification key before staging"
 else
-	test-fail "missing public key: status=$status err=$(cat "$TMPDIR/err")"
+	test-fail "verification key lookup: status=$status err=$(cat "$TMPDIR/err")"
 fi
 status=0
 KAME_RELEASE_PUBLIC_KEY="$TMPDIR/none.pem" KAME_RELEASE_SIGNING_KEY="$TMPDIR/none.pem" \
 	"$release" >"$TMPDIR/out" 2>"$TMPDIR/err" || status=$?
-if [ "$status" = 1 ] && grep -q 'set KAME_RELEASE_PUBLIC_KEY' "$TMPDIR/err"; then
+if [ "$status" = 1 ] && grep -q 'verification key file is missing' "$TMPDIR/err"; then
 	test-ok "absent key file is rejected before staging"
 else
 	test-fail "absent key file: status=$status err=$(cat "$TMPDIR/err")"
 fi
 
 test-step "release parses --repo and --notes-file before validating keys"
-# Both flags are accepted by the parser; the run then stops at the key guard
-# rather than an unknown-argument error.
+# Both flags are accepted by the parser; the run then reaches key retrieval.
 status=0
 env -u KAME_RELEASE_PUBLIC_KEY -u KAME_RELEASE_SIGNING_KEY \
+	PATH="$secret_bin:$PATH" LITTLESECRETS_LOG="$TMPDIR/secrets.log" \
 	"$release" --repo owner/repo --notes-file "$TMPDIR/notes" >"$TMPDIR/out" 2>"$TMPDIR/err" || status=$?
-if [ "$status" = 1 ] && grep -q 'set KAME_RELEASE_PUBLIC_KEY' "$TMPDIR/err"; then
-	test-ok "--repo and --notes-file reach the key guard"
+if [ "$status" = 1 ] && grep -qx -- '-q get package.verification.pem' "$TMPDIR/secrets.log"; then
+	test-ok "--repo and --notes-file reach key retrieval"
 else
 	test-fail "flag parsing: status=$status err=$(cat "$TMPDIR/err")"
 fi

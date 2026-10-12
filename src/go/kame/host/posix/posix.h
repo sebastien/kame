@@ -59,5 +59,6 @@ int km_cli_environment_size(void);
 int km_cli_environment_copy(so_Slice);
 bool km_cli_environment_names_case_insensitive(void);
 int64_t km_file_modtime(so_String, bool);
+bool km_file_watch_stamp(so_String, so_Slice);
 
 #endif

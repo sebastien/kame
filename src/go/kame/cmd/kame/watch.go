@@ -14,16 +14,19 @@ import (
 )
 
 type watchResource struct {
-	Key    core.ResourceKey
-	Stamp  string
-	Source bool
-	Seen   bool
+	Key      core.ResourceKey
+	Stamp    string
+	Probe    string
+	Metadata bool
+	Source   bool
+	Seen     bool
 }
 
 func freeWatchResources(items []watchResource) {
 	for i := range items {
 		items[i].Key.Free(mem.System)
 		mem.FreeString(mem.System, items[i].Stamp)
+		mem.FreeString(mem.System, items[i].Probe)
 	}
 	slices.Free(mem.System, items)
 }
@@ -55,6 +58,45 @@ func posixReadWatchFile(name string) ([]byte, error) {
 	return data, err
 }
 
+func watchProbe(p *program.Program, key core.ResourceKey) string {
+	name := key.Name
+	owned := false
+	if !core.IsResourceURIName(name) && !path.IsAbs(name) {
+		name = path.Join(mem.System, p.Options.Directory, name)
+		owned = true
+	}
+	h := posix.New(mem.System)
+	stamp := h.WatchStamp(name)
+	h.Free()
+	if owned {
+		mem.FreeString(mem.System, name)
+	}
+	return stamp
+}
+
+func scanWatchStamp(p *program.Program, item *watchResource) string {
+	if p == nil || item.Source || item.Key.Kind != core.ResourceFile {
+		return watchStamp(p, item.Key, item.Source)
+	}
+	probe := watchProbe(p, item.Key)
+	metadata := p.ResourceMetadataObserved(item.Key)
+	if probe != "" && probe == item.Probe && metadata == item.Metadata {
+		mem.FreeString(mem.System, probe)
+		return cloneCommandText(item.Stamp)
+	}
+	stamp := watchStamp(p, item.Key, false)
+	// An edit during the read must force another content check next scan.
+	after := watchProbe(p, item.Key)
+	mem.FreeString(mem.System, item.Probe)
+	item.Probe, item.Metadata = "", metadata
+	if probe != "" && probe == after {
+		item.Probe = cloneCommandText(probe)
+	}
+	mem.FreeString(mem.System, probe)
+	mem.FreeString(mem.System, after)
+	return stamp
+}
+
 func addWatchResource(items *[]watchResource, p *program.Program, key core.ResourceKey, source bool) {
 	for i := range *items {
 		if (*items)[i].Key.Kind == key.Kind && (*items)[i].Key.Name == key.Name {
@@ -63,10 +105,11 @@ func addWatchResource(items *[]watchResource, p *program.Program, key core.Resou
 			return
 		}
 	}
-	stamp := watchStamp(p, key, source)
+	stamp := ""
 	if !source && p != nil {
-		mem.FreeString(mem.System, stamp)
 		stamp = p.ResourceAcceptedFingerprint(key)
+	} else {
+		stamp = watchStamp(p, key, source)
 	}
 	if !source && p != nil && key.Kind == core.ResourceFile {
 		if node := p.Engine.Lookup(key); node != nil && node.Current && node.Latest.Kind == core.Nil {
@@ -121,6 +164,7 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 		} else {
 			(*items)[i].Key.Free(mem.System)
 			mem.FreeString(mem.System, (*items)[i].Stamp)
+			mem.FreeString(mem.System, (*items)[i].Probe)
 		}
 	}
 	slices.Free(mem.System, *items)
@@ -241,7 +285,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 		if now-lastScan >= 200 {
 			refreshWatchResources(&resources, &session, options)
 			for i := range resources {
-				stamp := watchStamp(session.Program, resources[i].Key, resources[i].Source)
+				stamp := scanWatchStamp(session.Program, &resources[i])
 				if stamp != resources[i].Stamp {
 					clearDashboard(errOut)
 					if !options.JSON {

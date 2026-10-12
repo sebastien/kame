@@ -3455,6 +3455,33 @@ async function watchFingerprint(kind, name, metadata = false) {
 
 function watchKey(kind, name) { return `${kind}\0${name}`; }
 
+async function watchProbe(name) {
+  // Windows ctime is creation time, not a reliable change timestamp.
+  if (process.platform === 'win32' || isMemoryResource(name)) return null;
+  const views = [];
+  for (const noFollow of [false, true]) {
+    try {
+      const info = await statResource(name, { bigint: true }, noFollow);
+      views.push([info.dev, info.ino, info.mode, info.size, info.mtimeNs, info.ctimeNs].map(String));
+    } catch (error) {
+      if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') return null;
+      views.push('missing');
+    }
+  }
+  return JSON.stringify(views);
+}
+
+async function scanWatchFingerprint(record) {
+  if (record.source || record.kind !== 'file') return watchFingerprint(record.kind, record.name, record.metadata);
+  const probe = await watchProbe(record.name);
+  if (probe !== null && probe === record.probe && record.probeMetadata === !!record.metadata) return record.stamp;
+  const stamp = await watchFingerprint(record.kind, record.name, record.metadata);
+  const after = await watchProbe(record.name);
+  record.probe = probe !== null && probe === after ? probe : null;
+  record.probeMetadata = !!record.metadata;
+  return stamp;
+}
+
 function reportWatchError(error, source) {
   if (error.diagnostics?.length) {
     for (const detail of error.diagnostics) {
@@ -3595,7 +3622,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       if (now - lastScan >= 200) {
         await seedSources();
         for (const [key, record] of fingerprints) {
-          const stamp = await watchFingerprint(record.kind, record.name, record.metadata);
+          const stamp = await scanWatchFingerprint(record);
           if (record.stamp === null) { record.stamp = stamp; continue; }
           if (stamp !== record.stamp) {
             clearDashboard();

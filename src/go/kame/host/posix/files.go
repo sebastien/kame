@@ -102,6 +102,25 @@ func (h *Host) Lstat(name string) host.StatResult {
 	return host.StatResult{Info: result, Exists: true}
 }
 
+// WatchStamp owns a cheap polling hint; empty means full content checks are
+// required. Memory resources have no OS change timestamp.
+func (h *Host) WatchStamp(name string) string {
+	if core.IsMemoryResourceURIName(name) {
+		return ""
+	}
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	if path.Error != nil {
+		return ""
+	}
+	data := slices.Make[byte](h.Alloc, 98)
+	if !km_file_watch_stamp(path.Path, data) {
+		slices.Free(h.Alloc, data)
+		return ""
+	}
+	return string(data)
+}
+
 func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 	if core.IsMemoryResourceURIName(name) {
 		return h.Memory.ReadFile(a, name)

@@ -16,9 +16,10 @@ usage() {
 Stage and publish a signed Kame release on GitHub (manual operator step).
 
 Usage:
-  KAME_RELEASE_PUBLIC_KEY=verification.pem \
-  KAME_RELEASE_SIGNING_KEY=signing.pem \
-    src/sh/release.sh [--repo OWNER/REPO] [--notes-file FILE]
+  src/sh/release.sh [--repo OWNER/REPO] [--notes-file FILE]
+
+  Key paths may be supplied with KAME_RELEASE_PUBLIC_KEY and
+  KAME_RELEASE_SIGNING_KEY; otherwise they are fetched from littlesecrets.
 
   --repo OWNER/REPO   publish to another repository (default: current)
   --notes-file FILE   use FILE as release notes instead of generated notes
@@ -59,12 +60,30 @@ done
 
 public_key=${KAME_RELEASE_PUBLIC_KEY:-}
 signing_key=${KAME_RELEASE_SIGNING_KEY:-}
+if [ -z "$public_key" ] || [ -z "$signing_key" ]; then
+	command -v littlesecrets >/dev/null 2>&1 || {
+		printf 'release: set both key paths or install littlesecrets to retrieve package signing keys\n' >&2
+		exit 1
+	}
+	umask 077
+	key_dir=$(mktemp -d "${TMPDIR:-/tmp}/kame-release-keys.XXXXXX")
+	chmod 700 "$key_dir"
+	trap 'rm -rf "$key_dir"' EXIT
+	if [ -z "$public_key" ]; then
+		public_key=$key_dir/verification.pem
+		littlesecrets -q get package.verification.pem >"$public_key"
+	fi
+	if [ -z "$signing_key" ]; then
+		signing_key=$key_dir/signing.pem
+		littlesecrets -q get package.signing.pem >"$signing_key"
+	fi
+fi
 [ -n "$public_key" ] && [ -f "$public_key" ] || {
-	printf 'release: set KAME_RELEASE_PUBLIC_KEY to the verification key file\n' >&2
+	printf 'release: verification key file is missing\n' >&2
 	exit 1
 }
 [ -n "$signing_key" ] && [ -f "$signing_key" ] || {
-	printf 'release: set KAME_RELEASE_SIGNING_KEY to the signing key file\n' >&2
+	printf 'release: signing key file is missing\n' >&2
 	exit 1
 }
 command -v gh >/dev/null 2>&1 || {
