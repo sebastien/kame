@@ -11,7 +11,7 @@ make dist-wasm >/dev/null
 
 for host in native wasm; do
 	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
-	"${runner[@]}" do run --lang expr -c '(str (pattern (cat "./" "{" "name:*" "}.c")))' >"$TMPDIR/$host.out" 2>"$TMPDIR/$host.err"
+	"${runner[@]}" do run --lang expr -c '(pattern (str "./" "{" "name:*" "}.c"))' >"$TMPDIR/$host.out" 2>"$TMPDIR/$host.err"
 	if [ "$(cat "$TMPDIR/$host.out")" = '"./{name:*}.c"' ]; then
 		test-ok "$host explicitly constructs a pattern value"
 	else

@@ -18,7 +18,7 @@ cli_run -- do run --lang expr -c '(join @* "-")' -- a b c
 cli_expect_status 0
 cli_expect_stdout '"a-b-c"'
 
-cli_run -- do run --lang expr -c '(str @#)' -- a b c
+cli_run -- do run --lang expr -c '(json @#)' -- a b c
 cli_expect_status 0
 cli_expect_stdout '"3"'
 

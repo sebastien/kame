@@ -48,7 +48,7 @@ for backend in native wasm; do
 	check $'default\n"default\\n"' --print-result "$work/default.km"
 	check $'default\n"default\\n"' "$work/default.km" default
 	check '["one two" "--help" "x.km"]' do run --lang expr -c 'args' -- 'one two' --help x.km
-	check '["one two","--help"]' do run -c '(out (str args))' -- 'one two' --help
+	check '["one two","--help"]' do run -c '(out (json args))' -- 'one two' --help
 	check '[]' do run --lang expr -c 'args'
 	check '"one two"' do run --lang expr -c 'args.0' -- 'one two'
 	status=0

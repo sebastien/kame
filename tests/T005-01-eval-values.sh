@@ -51,8 +51,8 @@ evaluates '"outer {(join ["x" "y"] "")} end"' '"outer xy end"'
 test-step "lists and records"
 evaluates '(list 1 "a" :true)' '[1 "a" :true]'
 evaluates '(list)' '[]'
-evaluates '(str [b: 2 a: "x"])' '"{\"a\":\"x\",\"b\":2}"'
-evaluates '(str [a: 1])' '"{\"a\":1}"'
+evaluates '(json [b: 2 a: "x"])' '"{\"a\":\"x\",\"b\":2}"'
+evaluates '(json [a: 1])' '"{\"a\":1}"'
 
 test-step "list rendering joins items with spaces in the canonical notation"
 evaluates '(list "a" "b" "c")' '["a" "b" "c"]'

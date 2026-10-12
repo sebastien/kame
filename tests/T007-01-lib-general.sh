@@ -35,8 +35,8 @@ evaluates '(str 1.5)' '"1.5"'
 evaluates '(str :true)' '"true"'
 evaluates '(str :nil)' '"nil"'
 evaluates '(str "text")' '"text"'
-evaluates '(str (list 1 "a"))' '"[1,\"a\"]"'
-evaluates '(str [b: 2 a: "x"])' '"{\"a\":\"x\",\"b\":2}"'
+evaluates '(json (list 1 "a"))' '"[1,\"a\"]"'
+evaluates '(json [b: 2 a: "x"])' '"{\"a\":\"x\",\"b\":2}"'
 
 test-step "count uses code points, item counts, and field counts"
 evaluates '(count "héllo")' '5'

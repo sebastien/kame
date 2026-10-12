@@ -50,7 +50,7 @@ evaluates '(replace ./src/txto/{prefix:**}.txto ./build/data/{prefix}.json "./sr
 evaluates '(map (replace ./{**}/{*}.c ./build/{_0}.o) ["./a.c" "./x/y.c"])' '[:nil "./build/x.o"]'
 evaluates '(replace ./{**}/{*}.c ./x/{_0}.o "./a/b.c")' '"./x/a.o"'
 evaluates '(replace ./{**}/{*}.c ./x/{_1}.o "./a/b.c")' '"./x/b.o"'
-evaluates '(str ./{**}/{*}.c)' '"./{**}/{*}.c"'
+diag '(str ./{**}/{*}.c)' 'EXPR_INVALID'
 evaluates '(replace "banana" "a" "b")' '"bbnbnb"'
 
 test-step "invalid pattern combinations"
