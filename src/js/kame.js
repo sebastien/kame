@@ -1542,7 +1542,9 @@ class Module {
         payload = recipe.script;
         if (recipe.shell !== undefined) {
           if (!Array.isArray(recipe.shell) || recipe.shell.length === 0 || recipe.shell.some((argument) => typeof argument !== 'string' || argument.includes('\0')) || recipe.shell[0] === '') return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe shell argv');
-          context = { ...context, shell: recipe.shell };
+          const defaultPosixShell = recipe.shell.length === 2 && recipe.shell[0] === '/bin/sh' && recipe.shell[1] === '-c';
+          const shell = defaultPosixShell ? context.shell.length !== 0 ? context.shell : defaultShell() : recipe.shell;
+          context = { ...context, shell };
         }
         if (recipe.environment !== undefined) {
           if (!Array.isArray(recipe.environment) || recipe.environment.some((entry) => typeof entry !== 'string' || entry.includes('\0') || entry.indexOf('=') < 1)) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid recipe environment');
@@ -2645,7 +2647,7 @@ export class KameWatch {
 // expression evaluation, which has no target program to emit events for.
 function runProcessDirect(script, context) {
   return new Promise((resolveRun) => {
-    const shell = context.shell.length !== 0 ? context.shell : ['/bin/sh', '-c'];
+    const shell = context.shell.length !== 0 ? context.shell : defaultShell();
     const childEnv = context.environmentExact ? {} : { ...process.env };
     for (const entry of context.environment) {
       const at = entry.indexOf('=');
@@ -2664,6 +2666,12 @@ function runProcessDirect(script, context) {
       else resolveRun({ ok: true, text: Buffer.concat(out).toString('utf8') });
     });
   });
+}
+
+function defaultShell() {
+  return process.platform === 'win32'
+    ? [env.ComSpec || 'cmd.exe', '/d', '/s', '/c']
+    : ['/bin/sh', '-c'];
 }
 
 // Structured requests never cross a shell-text boundary. Captured stdout is
@@ -2909,7 +2917,7 @@ function runProcessAttempt(module, instance, script, context, request) {
   const retain = module.exports.kame_wasm_process_retain_limit(instance, request ?? 0n);
   if (retain === 0xffffffff) throw new Error('process retention budget unavailable');
   return new Promise((resolveAttempt, rejectAttempt) => {
-    const shell = context.shell.length !== 0 ? context.shell : ['/bin/sh', '-c'];
+    const shell = context.shell.length !== 0 ? context.shell : defaultShell();
     const childEnv = context.environmentExact ? {} : { ...process.env };
     for (const entry of context.environment) {
       const at = entry.indexOf('=');

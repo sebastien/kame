@@ -103,6 +103,18 @@ else
 	test-fail "do run --lang expr FILE: wasm=$(cat "$work/wasm.expr") native=$(cat "$work/native.expr")"
 fi
 
+test-step "--shell selects the recipe shell on the wasm host"
+cat >"$work/Shell.kmk" <<'EOF'
+task shell-choice :
+	echo should-not-run
+EOF
+run --shell "$work/missing-shell" --shell -c -f "$work/Shell.kmk" shell-choice
+if [ "$status" = 1 ] && grep -q 'spawn .*missing-shell.*ENOENT' "$work/err"; then
+	test-ok "recipe execution uses the selected shell"
+else
+	test-fail "selected shell ignored: status=$status out=$(cat "$work/out") err=$(cat "$work/err")"
+fi
+
 test-step "capability grants are denied by default"
 run do run --lang expr -c '(read "VERSION")'
 if [ "$status" = 1 ] && [ ! -s "$work/out" ] && grep -q 'CAP_DENIED' "$work/err"; then
