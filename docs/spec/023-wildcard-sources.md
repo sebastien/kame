@@ -5,11 +5,27 @@ atoms and signed entry-kind filters. Filter masks participate in consumer
 identity, and entry-kind changes invalidate filtered membership even when path
 names are unchanged. Symlinks are classified without following their targets.
 
-An unquoted explicit path input containing `*`, `?`, or `[` is a wildcard
-source. The rule parser lowers it to the same dependency-tracked filesystem
-operation as `(wildcard PATTERN)`. Quoted paths preserve wildcard characters
-literally. This applies to rule inputs; Kash command arguments retain their
-existing literal semantics unless Kame evaluates an explicit expression.
+An unquoted explicit path containing authored, unescaped `*`, `?`, or a bracket
+character class is a glob expression wherever Kame accepts an expression, not
+only in rule inputs (`004-language.md`). Valid capture/expansion pattern groups
+take precedence and never initiate filesystem enumeration. Quoted paths and
+wildcard bytes contributed by interpolation remain literal data. Raw Kash
+command words retain their literal semantics; Kash definition values and
+embedded Kame expressions use ordinary glob-expression evaluation.
+
+```kame
+SOURCES_JOURNAL = ./journal/*
+PRODUCT_BY_NAME = (map (replace ./journal/{name:*} "@(name)") SOURCES_JOURNAL)
+```
+
+Glob expressions and explicit `wildcard` calls use the same dependency-tracked
+filesystem source. A glob expression always produces a list: zero matches give
+`[]`, and one match remains a one-item list. `(wildcard ./journal/*)` accepts
+the already-expanded list without interpreting its filenames as new patterns.
+All reached scans retain ordinary read authorization, phase policy and authored
+diagnostic spans; glob syntax does not confer host authority. Parsing and
+formatting never scan, and unused definitions or unselected branches do not
+request a source.
 
 Each authored pattern has one shared glob resource key in the program engine,
 including patterns whose current result is empty. Evaluation is lazy: a source
@@ -27,6 +43,13 @@ portable runtime.
 ## Acceptance
 
 - Recursive and empty patterns retain one shared lazy dependency source.
-- Quoted paths remain literal; unquoted wildcard inputs expand in sorted order.
+- Glob expressions expand in definitions, application arguments, containers and
+  rule inputs, preserving empty/singleton list shape and sorted order.
+- Quoted/escaped wildcard bytes and dynamic interpolation bytes remain literal;
+  capture patterns do not scan, and parse/format performs no filesystem access.
+- Explicit `wildcard` calls preserve equivalent membership and flags without
+  re-globbing already-expanded filenames.
+- Denied or phase-forbidden glob reads issue no host request; unused definitions
+  and unselected branches acquire no glob dependency.
 - Membership additions and removals invalidate retained consumers on native and
   WASM watch sessions without starting unrelated recipes.

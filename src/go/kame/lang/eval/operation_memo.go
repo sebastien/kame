@@ -214,6 +214,10 @@ func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bo
 }
 
 func (p *Program) argumentValues(scope *Scope, arguments []*expr.Expr, c *Context, span source.Span) argumentResult {
+	return p.argumentValuesMode(scope, arguments, c, span, false)
+}
+
+func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Context, span source.Span, deferReplacement bool) argumentResult {
 	effects, paths := len(c.Effects), len(c.WritePaths)
 	state := p.findArgumentMemo(c, span)
 	var values []core.Value
@@ -237,6 +241,7 @@ func (p *Program) argumentValues(scope *Scope, arguments []*expr.Expr, c *Contex
 		values = slices.Make[core.Value](c.Run, len(arguments))
 	}
 	for i := next; i < len(arguments); i++ {
+		if deferReplacement && i == 1 && values[0].Kind == core.Pattern { continue }
 		facts, completedEffects, completedPaths := 0, len(c.Effects), len(c.WritePaths)
 		if c.Engine != nil {
 			facts = len(c.Engine.AcceptedObservations())
@@ -250,6 +255,13 @@ func (p *Program) argumentValues(scope *Scope, arguments []*expr.Expr, c *Contex
 			return argumentResult{Result: r}
 		}
 		values[i] = r.Value
+		if deferReplacement && i == 0 && r.Value.Kind == core.Pattern {
+			pattern := expr.ParsePatternText(c.Run, r.Value.Text, arguments[0].Span.Start)
+			invalid := len(pattern.Diagnostics) != 0 || pattern.Pattern.Matchers == 0 || pattern.Pattern.References != 0
+			pattern.Pattern.Free(c.Run)
+			slices.Free(c.Run, pattern.Diagnostics)
+			if invalid { freeValuesWithCallables(c.Run, values); return argumentResult{Result: failure(c.Run, "PAT_INVALID", arguments[0].Span, "match pattern needs a matcher group")} }
+		}
 	}
 	return argumentResult{Values: values}
 }

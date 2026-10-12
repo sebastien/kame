@@ -30,9 +30,68 @@ SECTION = (replace ./src/txto/{prefix:**}/{name:*}.txto ./build/data/{prefix}/{n
 	@(yield (join BUILD_JSON "\n"))
 KMK
 cp "$project/replace.kmk" "$project/replace.original"
+mkdir -p "$project/journal"
+touch "$project/journal/a" "$project/journal/b" "$project/journal/star*"
+cat >"$project/globs.km" <<'KM'
+SOURCES_JOURNAL = ./journal/*
+PRODUCT_BY_NAME = (map (replace ./journal/{name:*} "@(name)") SOURCES_JOURNAL)
+PRODUCT_PATHS = (replace ./journal/{name:*} ./{name} SOURCES_JOURNAL)
+KM
 for backend in native wasm; do
 	test-step "$backend leading expression patterns and scalar expansions"
 	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	test-step "$backend glob expressions and capture-scoped replacements"
+	for sample in \
+		'(map (replace ./journal/{name:*} "@(name)") ./journal/*)|["a" "b" "star*"]' \
+		'(map (replace ./journal/{name:*} name) ./journal/*)|["a" "b" "star*"]' \
+		'(replace ./journal/{name:*} ./{name} ./journal/*)|["./a" "./b" "./star*"]' \
+		'(wildcard ./journal/*)|["./journal/a" "./journal/b" "./journal/star*"]' \
+		'(wildcard :+files ./journal/*)|["./journal/a" "./journal/b" "./journal/star*"]' \
+		'./journal/[ab]|["./journal/a" "./journal/b"]' \
+		'./journal/[a\]]|["./journal/a"]' \
+		'(let [name "b"] ./journal/[a@(name)])|["./journal/a" "./journal/b"]' \
+		'./journal/a*|["./journal/a"]' \
+		'./absent/*|[]' \
+		'"./journal/*"|"./journal/*"' \
+		'./journal/star\*|"./journal/star*"' \
+		'(wildcard ./journal/star\*)|["./journal/star*"]' \
+		'(let [name "star*"] ./journal/@(name))|"./journal/star*"' \
+		'(let [name "outer"] [(replace ./journal/{name:*} name "./journal/a") name])|["a" "outer"]' \
+		'(replace ./journal/{name:*} missing "./other/a")|:nil' \
+		'(replace ./journal/{name:*} missing [])|[]'; do
+		"${runner[@]}" do run --lang expr --allow-read -C "$project" -c "${sample%|*}" >"$project/value"
+		if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend ${sample%|*}"; else test-fail "$backend glob/capture result"; fi
+	done
+	"${runner[@]}" do run --lang expr --allow-read -C "$project" -c '(replace ./journal/{name:*} (text (read ./journal/@(name))) ./journal/*)' >"$project/value"
+	if [ "$(cat "$project/value")" = '["" "" ""]' ]; then test-ok "$backend suspended capture reads"; else test-fail "$backend captured read replay"; fi
+	"${runner[@]}" do run --lang expr --allow-read -C "$project" -c '(replace ./journal/{name:*} (nop (out name) (text (read ./journal/@(name)))) ./journal/*)' >"$project/value"
+	if [ "$(cat "$project/value")" = 'abstar*["" "" ""]' ]; then test-ok "$backend replacement effects survive host yields once"; else test-fail "$backend replacement effect replay: $(cat "$project/value")"; fi
+	"${runner[@]}" do run --lang expr --allow-read -C "$project" -c '(map (replace ./journal/{name:*} (nop (out name) (text (read ./journal/@(name))))) ./journal/*)' >"$project/value"
+	if [ "$(cat "$project/value")" = 'abstar*["" "" ""]' ]; then test-ok "$backend mapped replacement effects survive host yields once"; else test-fail "$backend mapped replacement effect replay: $(cat "$project/value")"; fi
+	for sample in \
+		'(filter (replace ./journal/{name:*} (nop (out name) (text (read ./journal/@(name))))) ./journal/*)|abstar*["./journal/a" "./journal/b" "./journal/star*"]' \
+		'(filter-out (replace ./journal/{name:*} (nop (out name) (text (read ./journal/@(name))))) ./journal/*)|abstar*[]' \
+		'(reduce ([acc subject] (nop (replace ./journal/{name:*} (nop (out name) (text (read ./journal/@(name)))) subject) acc)) ./journal/* "")|abstar*""'; do
+		"${runner[@]}" do run --lang expr --allow-read -C "$project" -c "${sample%|*}" >"$project/value"
+		if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend callback effects survive host yields once"; else test-fail "$backend callback effect replay: $(cat "$project/value")"; fi
+	done
+	status=0
+	"${runner[@]}" do run --lang expr --allow-read -C "$project" -c './journal/[@(missing)]' >"$project/value" 2>"$project/error" || status=$?
+	if [ "$status" = 1 ] && grep -q REF_MISSING "$project/error"; then test-ok "$backend class interpolation demands its reference"; else test-fail "$backend class interpolation skipped missing reference"; fi
+	"${runner[@]}" do run --allow-read -C "$project" "$project/globs.km" PRODUCT_BY_NAME >"$project/value"
+	touch "$project/journal/new"
+	"${runner[@]}" do run --allow-read -C "$project" "$project/globs.km" PRODUCT_BY_NAME >"$project/value"
+	if [ "$(cat "$project/value")" = '["a" "b" "new" "star*"]' ]; then test-ok "$backend added glob member"; else test-fail "$backend glob membership addition"; fi
+	rm "$project/journal/new"
+	"${runner[@]}" do run --allow-read -C "$project" "$project/globs.km" PRODUCT_BY_NAME >"$project/value"
+	if [ "$(cat "$project/value")" = '["a" "b" "star*"]' ]; then test-ok "$backend lazy glob definition"; else test-fail "$backend glob definition"; fi
+	"${runner[@]}" do run --lang expr -C "$project" -c '(if :false ./journal/* "skipped")' >"$project/value"
+	if [ "$(cat "$project/value")" = '"skipped"' ]; then test-ok "$backend unreached glob needs no read grant"; else test-fail "$backend glob eagerly demanded"; fi
+	status=0
+	"${runner[@]}" do run --lang expr -C "$project" -c './journal/*' >"$project/value" 2>"$project/error" || status=$?
+	if [ "$status" = 1 ] && grep -q CAP_DENIED "$project/error"; then test-ok "$backend reached glob enforces read grant"; else test-fail "$backend unauthorized glob read"; fi
+	"${runner[@]}" do run --lang kash --allow-run -C "$project" -c 'printf "%s" ./journal/*' >"$project/value"
+	if [ "$(cat "$project/value")" = './journal/*' ]; then test-ok "$backend raw Kash glob word stays literal"; else test-fail "$backend raw Kash word expanded"; fi
 	for sample in '(replace {name:*}.c 1 "hello.c")|"1"' '(replace {*}.c :false "a.c")|"false"' '(replace {*}.c -2.5 "a.c")|"-2.5"' '(replace {*}.c 1 "a.h")|:nil' '(map (replace {*}.c :true) ["a.c" "b.c"])|["true" "true"]' '(replace {name:*}.c {name}.o "hello.c")|"hello.o"'; do
 		expression="${sample%|*}"
 		expected="${sample##*|}"

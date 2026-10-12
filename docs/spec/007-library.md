@@ -28,6 +28,11 @@ An operation receives evaluated arguments and an evaluation context. It returns
 a value, a host request, or a structured diagnostic. Returned owned values use
 the run allocator unless explicitly transferred to the engine.
 
+An explicitly specified staged operand is the exception: pattern `replace`
+retains its replacement expression for evaluation after matching, as defined in
+`014-patterns.md` and `005-evaluation.md`. This does not make `replace` a reserved
+special form or change ordinary literal-string replacement.
+
 Pure operations must not read clocks, environment, global mutable state, files,
 or processes. Effectful operations register dependencies and effects through
 the context.
@@ -213,7 +218,7 @@ The text operations are:
 | `includes?` | Literal substring membership |
 | `starts?` | Literal prefix test |
 | `ends?` | Literal suffix test |
-| `replace` | Replace literal occurrences, or match and expand pattern arguments per `014-patterns.md` |
+| `replace` | Replace literal occurrences, or evaluate a replacement expression with pattern captures in scope per `014-patterns.md` |
 | `uppercase` | Unicode uppercase conversion supported by Solod |
 | `lowercase` | Unicode lowercase conversion supported by Solod |
 | `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` | Wrap one string in the matching ANSI foreground sequence |
@@ -229,14 +234,18 @@ Portable regular-expression matching and replacement are specified in
 
 ### Pattern Replace
 
-`replace` accepts two or three arguments. Two plain strings replace literal
-occurrences and behave exactly as before. A match pattern as the first argument
-selects anchored matching; the second argument is the constant or expansion
-replacement. Two pattern arguments return a callable section of arity one, so
-`map` and pipes apply it per item. A string subject produces the expanded
-string or `:nil` on no match; a list subject maps in order and retains `:nil`
-entries. Invalid pattern combinations and missing capture references are
-`PAT_INVALID`. Full semantics are specified in `014-patterns.md`.
+`replace` accepts two or three arguments. `(replace TEXT FROM TO)` with plain
+strings replaces literal occurrences and retains ordinary eager evaluation.
+A match pattern as the first argument selects anchored matching. Its second
+operand is a replacement expression evaluated only after a match, with named
+captures bound locally; `./{name}`, `"@(name)"`, `name`, and `(uppercase name)`
+can all use `{name:*}`. With two operands it returns a callable of arity one
+that defers the replacement until applied by `map`, a pipe, or a direct call.
+A string subject produces the replacement string or `:nil` on no match; a list
+subject maps in order and retains `:nil` entries. Invalid pattern combinations
+and missing expansion-pattern capture references are `PAT_INVALID`; unknown
+ordinary names in a selected expression retain `REF_MISSING`. Full semantics
+are specified in `014-patterns.md`.
 
 ## Path Operations
 
@@ -311,10 +320,21 @@ is added or removed. See `023-wildcard-sources.md`.
 
 Relative paths resolve against evaluation cwd. `wildcard` supports `*`, `?`,
 character classes, and recursive `**`. Results are canonical cwd-relative paths
-with `./` prefixes where possible, sorted by raw UTF-8 bytes. Each argument is
-a string pattern and retains its own glob dependency, including empty members.
+with `./` prefixes where possible, sorted by raw UTF-8 bytes. String pattern
+operands each retain their own glob dependency, including empty members.
 For example, `(wildcard ./src/**/*.go ./glue/**/*.c ./glue/**/*.h)`
 combines source extensions without shell discovery.
+
+Unquoted path globs are themselves list-valued expressions (`004-language.md`).
+`wildcard` also accepts flat lists of path strings as already-expanded members,
+so `(wildcard ./journal/*)` remains valid and can be combined with quoted or
+computed string patterns. Lists are unioned without globbing their member text
+again; filenames containing metacharacters remain data. An empty list is valid
+and contributes no members; nested lists and non-string members are
+`EXPR_INVALID`. Originating glob dependencies remain tracked, and
+entry-kind flags apply to the combined matches under
+`038-direct-kash-and-values.md`. This changes neither `map`'s list requirement
+nor the literal semantics of quoted strings outside `wildcard`.
 
 Recursive discovery does not descend into directory symlinks encountered among
 directory entries. An explicitly named directory symlink in the literal prefix
@@ -448,6 +468,9 @@ executable metadata checks do not grant access to user read operations.
 - Path operations handle root, dotfiles, trailing separators, and relative
   normalization without filesystem access.
 - Wildcard results are sorted and recursive `**` crosses directories.
+- Unquoted glob expressions and explicit `wildcard` calls agree for empty,
+  singleton and multiple matches; unioning expanded lists never re-globs their
+  filenames or loses their membership dependencies.
 - Reads and globs register canonical dynamic dependencies.
 - Denied read, write, run, or environment access performs no host action.
 - Deferred `out`, `err`, `yield`, and `write` effects commit once after rerender.
@@ -463,6 +486,9 @@ executable metadata checks do not grant access to user read operations.
   value display unchanged.
 - Pattern `replace` matches anchored, expands references, returns `:nil`
   without a match, and accepts a section through `map` and pipes.
+- Pattern replacement expressions resolve captures as local names, skip all
+  replacement dependencies/effects on nonmatches, and leave literal-string
+  replacement unchanged.
 - Operation tests using `mem.Tracker` leak no returned container or string.
 - `eq`/`=` and `is`/`==` share one strict, kind-aware comparison; `ne`/`!=` is
   its negation and `not` remains boolean negation.

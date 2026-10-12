@@ -193,9 +193,25 @@ Evaluation uses the value kinds from `002-engine.md`. Only false and nil are
 false in predicates. Zero, empty strings, empty lists, and empty records are
 true.
 
-Arguments evaluate left-to-right for deterministic diagnostics and effects.
+Unless an operation contract explicitly defers an operand, arguments evaluate
+left-to-right for deterministic diagnostics and effects.
 Independent dependency nodes discovered by those arguments may execute in
 parallel.
+
+### Glob expressions
+
+A demanded unquoted path glob (`004-language.md`) evaluates through the same
+tracked filesystem source as `wildcard`, producing a list even for zero or one
+match. It uses evaluation cwd, read authorization, phase policy, and ordinary
+host suspension. It is forbidden wherever host reads are forbidden, including
+pure output registration and source-selection predicates. Parsing, unused
+definitions, and unselected branches do not request a glob or acquire its edges.
+
+The current node retains the pattern's membership dependency, including an
+empty result. Invalidation and resumed evaluation observe the latest accepted
+membership under `023-wildcard-sources.md`. Matching does not implicitly read
+the returned files' contents. Strings, including computed strings and literal
+interpolation values, are never retrospectively treated as glob expressions.
 
 ## Value Display
 
@@ -259,13 +275,29 @@ An operation registry entry contains:
 The evaluator validates arity and capability before calling an operation.
 Operation failures attach the current expression and call frames.
 
+Pattern `replace` has staged operand evaluation (`014-patterns.md`): evaluate
+the match operand, retain the replacement expression without evaluating it,
+and evaluate that expression in a capture child scope only after a successful
+subject match. A two-argument call retains the expression and enclosing lexical
+scope in its invocation-owned callable. Capture scopes, reached dependencies,
+and accepted operands/effects follow ordinary suspension and cancellation
+ownership; resumption must not replay a completed replacement or its effects.
+
+This policy belongs to the selected built-in operation, including expression
+calls through an operation alias; a user binding named `replace` still follows
+normal lexical lookup. `replace` is not a reserved special form. Calls with
+already-materialized arguments use constant or expansion-pattern values and
+cannot retroactively defer earlier argument evaluation.
+
 ## Reactive Lifting
 
-Operation authors consume ordinary materialized arguments. The evaluator lifts
-an application over reactive inputs:
+Ordinary operation authors consume materialized arguments. The evaluator lifts
+an application over reactive inputs; explicitly deferred operands, such as a
+pattern replacement expression, are demanded only when their contract selects
+them:
 
-1. Request every argument node.
-2. Wait until each argument has a current value or terminal state.
+1. Request every currently demanded argument node.
+2. Wait until each demanded argument has a current value or terminal state.
 3. Invoke the operation once with the current argument values.
 4. Publish its result.
 5. Reinvoke when one or more arguments publish newer revisions, coalescing all
@@ -410,6 +442,11 @@ containment, which is outside the language capability model.
   definition named `_0` does not shadow a placeholder.
 - Lexical names override operation names only within their scope.
 - Arguments produce deterministic left-to-right diagnostics.
+- Glob expressions retain read/phase checks, empty membership dependencies and
+  lazy selection; multiple consumers share their source on native and WASM.
+- Pattern replacement binds captures only while evaluating its selected
+  replacement, including aliased calls, and retains scope and once-only effects
+  across suspension without leaking bindings or replaying completed list items.
 - A lifted operation reruns once with the newest arguments after coalesced
   updates.
 - A stale operation completion is not published.

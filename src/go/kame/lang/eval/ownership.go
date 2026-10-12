@@ -73,6 +73,8 @@ type Function struct {
 	Parameters          []expr.Parameter
 	Body                []*expr.Expr
 	Expression          *expr.Expr
+	ExpressionOwned     bool
+	DeferredReplacement bool
 	Scope               *Scope
 	ParametersOwned     bool
 	ParameterNamesOwned bool
@@ -187,6 +189,7 @@ func freeTemporaryFunction(a mem.Allocator, function *Function) {
 		function.NativeFree(a, function.Native)
 		function.Native = nil
 	}
+	if function.ExpressionOwned { expr.Free(a, function.Expression) }
 	function.Scope.Free()
 	mem.Free(a, function)
 }

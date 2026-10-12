@@ -335,6 +335,25 @@ func TestPatternReplace(t *testing.T) {
 		t.Error("pattern replace did not expand positional captures")
 	}
 	result.Free(a)
+	captureExpressions := []string{
+		`(replace ./journal/{name:*} "@(name)" "./journal/demo")`,
+		`(replace ./journal/{name:*} name "./journal/demo")`,
+		`(let [r replace name "outer"] (r ./journal/{name:*} name "./journal/demo"))`,
+		`(let [r (replace ./journal/{name:*} name)] (r "./journal/demo"))`,
+		`((let [prefix ""] (replace ./journal/{name:*} (str prefix name))) "./journal/demo")`,
+		`((eval """(replace ./journal/{name:*} (get [value: name] "value"))""") "./journal/demo")`,
+	}
+	for i := range captureExpressions {
+		result = evaluate(t, program, captureExpressions[i])
+		if result.Diagnostic.Code != "" || result.Value.Text != "demo" { t.Error("capture expression failed: " + captureExpressions[i]) }
+		result.Free(a)
+	}
+	result = evaluate(t, program, `(replace ./journal/{name:*} missing "./other/demo")`)
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Nil { t.Error("nonmatch evaluated replacement") }
+	result.Free(a)
+	result = evaluate(t, program, `(map (replace ./journal/{name:*} (uppercase name)) ["./journal/a" "./journal/b"])`)
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "A" || result.Value.List[1].Text != "B" { t.Error("deferred captures did not bind per item") }
+	result.Free(a)
 	result = evaluate(t, program, "(replace {name:*}.c 1 \"hello.c\")")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "1" {
 		t.Error("leading pattern or integer expansion failed")

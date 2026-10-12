@@ -122,6 +122,40 @@ Protocol resources are explicit values constructed with `(resource URI)`; their
 syntax and canonical identity are specified in `031-resource-protocols.md`.
 Ordinary strings are not silently reclassified as resource URIs.
 
+#### Glob expressions
+
+An unquoted explicit path atom containing authored, unescaped `*`, `?`, or a
+bracket character class is a filesystem glob expression, not a literal string.
+Recursive `**` follows the `wildcard` matching contract in `007-library.md`.
+Bracket classes belong to the path atom; their delimiters must not be mistaken
+for a surrounding list's delimiters. Valid expression-pattern groups take
+precedence: `./journal/{name:*}` is a match pattern, not a filesystem glob.
+
+```kame
+SOURCES_JOURNAL = ./journal/*
+(map basename ./journal/*)
+```
+
+A demanded glob evaluates to a sorted, duplicate-free list of matching paths.
+Zero matches produce `[]`, and one match still produces a one-item list. This
+applies wherever an expression is accepted, including definition right-hand
+sides, application arguments, and list/record values. Ordinary container
+evaluation does not implicitly splice the resulting list. A path without glob
+syntax retains its existing literal value semantics.
+
+Quoted `"./journal/*"` and escaped wildcard bytes remain literal; runtime
+strings are never implicitly reclassified as globs. Interpolated paths recognize
+glob syntax only in authored static fragments, not in inserted values
+(`038-direct-kash-and-values.md`). Parsing and formatting never enumerate files.
+Evaluation retains the read authority, phase restrictions, lazy dependency
+tracking, and watch lifecycle of `wildcard` (`023-wildcard-sources.md`). The
+explicit `(wildcard ./journal/*)` spelling remains valid.
+
+Raw Kash command words are not Kame expression atoms and retain their literal
+wildcard semantics. Kash definition values and embedded Kame expressions use
+the glob-expression contract; evaluated lists splice into argv only at existing
+standalone expression/reference boundaries.
+
 ### Symbols
 
 Symbols begin with `:`. The symbols `:true`, `:false`, and `:nil` evaluate to
@@ -332,6 +366,11 @@ pattern groups is a pattern value. Groups with glob content (`{*}`, `{**}`,
 `{name:*}`, `{name:**}`) are matchers; `{name}` and `{_N}` are expansion
 references. Pattern values, matching, and the pattern form of `replace` are
 specified in `014-patterns.md`. Rule target templates are unchanged.
+
+Pattern `replace` evaluates its replacement expression only after matching,
+with named captures available as local string bindings. Both `./{name}` and
+`"@(name)"` can therefore use a `{name:*}` capture. This staged operation
+evaluation is distinct from the reserved special forms above.
 
 ## String Templates
 
@@ -830,6 +869,11 @@ expression definitions and verbatim string definitions remain supported.
   at the script edges; whitespace-only blank lines are canonicalized.
 - Expression parse/format/parse covers literals, lists, records, lambdas,
   references, selectors, and pipes.
+- Unquoted path globs parse as expressions in definitions, applications and
+  containers, including bracket classes adjacent to list delimiters; quoted
+  and escaped wildcard bytes remain literal.
+- Glob formatting preserves authored syntax without filesystem access, and
+  capture-pattern groups are never classified as filesystem globs.
 - Target templates match `./archive.o` against `./{stem:*}.o` with
   `stem=archive`.
 - `*` does not cross `/`, while `**` does.

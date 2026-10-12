@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v12"
+const version = "v13"
 
 // Register installs every standard operation. Registration stays declarative
 // so operation implementations can be organized by domain independently.
@@ -61,9 +61,11 @@ func Register(r *eval.Registry) bool {
 }
 
 func add(r *eval.Registry, name string, call eval.OperationCall, min int, max int) bool {
-	return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Version: version})
+	return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Version: version, DeferredReplacement: name == "replace"})
 }
 
 func addCapability(r *eval.Registry, name string, call eval.OperationCall, min int, max int, capability eval.Capability) bool {
-	return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Capabilities: []eval.Capability{capability}, Version: version})
+	operation := eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Capabilities: []eval.Capability{capability}, Version: version}
+	if name == "wildcard" { operation.Preflight = wildcardPreflight }
+	return r.Add(operation)
 }

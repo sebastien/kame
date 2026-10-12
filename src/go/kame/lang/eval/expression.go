@@ -51,11 +51,10 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 	case expr.Symbol:
 		return Result{Value: core.NewString(context.Run, expression.Text)}
 	case expr.Path:
-		if len(expression.Parts) != 0 { return p.pathValue(scope, expression, context) }
 		if expression.Pattern != nil {
 			return Result{Value: core.NewPattern(context.Run, expression.Text)}
 		}
-		return Result{Value: core.NewString(context.Run, expression.Text)}
+		return p.pathExpression(scope, expression, context)
 	case expr.Name:
 		if expression.Kash && expression.Text == "env" { return failure(context.Run, "REF_MISSING", expression.Span, "environment namespace requires a named variable") }
 		return name(scope, expression.Text, expression.Span, context)

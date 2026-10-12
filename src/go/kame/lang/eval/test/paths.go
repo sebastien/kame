@@ -16,13 +16,13 @@ func TestInterpolatedPathsValidateTextAndRetainGlobProvenance(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "paths.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	texts := []string{`./@(nop "a *?[\\]")/*.txt`, `@(nop "../two words")/file`, `./@(:nil)/file`, `./@(42)/file`, `./@([])/file`, `./@([a: 1])/file`, `@(nop "src")/file`, `./@(:true)/file`, `./@(([x] x))/file`, "./@(nop \"\x00\")/file"}
+	texts := []string{`./@(nop "a *?[\\]")/file.txt`, `@(nop "../two words")/file`, `./@(:nil)/file`, `./@(42)/file`, `./@([])/file`, `./@([a: 1])/file`, `@(nop "src")/file`, `./@(:true)/file`, `./@(([x] x))/file`, "./@(nop \"\x00\")/file"}
 	for i := range texts {
 		e := expr.Parse(a, "path.km", texts[i])
 		if len(e.Diagnostics) != 0 { t.Error("path did not parse") }
 		r := p.Evaluate(a, e.Expr, p.Scope)
 		if i == 0 {
-			if r.Diagnostic.Code != "" || r.Value.Text != "./a *?[\\]/*.txt" || r.Value.GlobPattern != "./a \\*\\?\\[\\\\]/*.txt" { t.Error("dynamic glob bytes lost literal provenance") }
+			if r.Diagnostic.Code != "" || r.Value.Text != "./a *?[\\]/file.txt" || r.Value.GlobPattern != "./a \\*\\?\\[\\\\]/file.txt" { t.Error("dynamic glob bytes lost literal provenance") }
 			copy := r.Value.Clone(a)
 			if copy.GlobPattern != r.Value.GlobPattern || core.ValueSignature(copy).Equal(core.ValueSignature(core.Value{Kind: core.String, Text: copy.Text})) { t.Error("path clone or signature lost glob provenance") }
 			copy.Free(a)

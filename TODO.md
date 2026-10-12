@@ -71,10 +71,6 @@ order, without weakening its acceptance criteria:
   loading, cycle detection, authored diagnostics and watch tracking. Decide
   compatibility/deprecation for existing `include` and `when` directives;
   update parsing, formatting, examples and native/WASM conformance tests.
-- [ ] Decide whether unquoted wildcard paths in expressions should be shorthand
-  for `(wildcard PATTERN)`. Literal rule-input expansion already exists; broader
-  expression shorthand is not a current conformance requirement. Specify quoting,
-  lazy dependency tracking and watch updates before adding it.
 - [ ] Review concrete confusing diagnostic messages and add actionable tips with
   regression coverage. Preserve stable registered codes; any public-code rename
   needs an explicit compatibility decision and coordinated spec/fixture changes.

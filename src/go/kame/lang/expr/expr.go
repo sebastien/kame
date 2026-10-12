@@ -96,6 +96,7 @@ type Expr struct {
 	Span       source.Span
 	Text       string
 	TextOwned  bool
+	NamesOwned bool
 	Bool       bool
 	Rest       bool
 	Int        int64
@@ -110,6 +111,7 @@ type Expr struct {
 	// Body holds callable expressions, or one right-associative process fallback.
 	Body       []*Expr
 	Pattern    *Pattern
+	LiteralPath bool
 }
 
 type Result struct {
@@ -150,10 +152,14 @@ func freeExpr(a mem.Allocator, e *Expr) {
 	for i := range e.Body { freeExpr(a, e.Body[i]) }
 	// Section parameters are synthesized ("_0", ...) and allocator-owned;
 	// lambda parameters borrow source text and stay unfreed.
-	if e.Kind == Section {
+	if e.Kind == Section || e.NamesOwned {
 		for i := range e.Parameters {
 			mem.FreeString(a, e.Parameters[i].Name)
 		}
+	}
+	if e.NamesOwned {
+		for i := range e.Reference { mem.FreeString(a, e.Reference[i].Text) }
+		for i := range e.Fields { mem.FreeString(a, e.Fields[i].Key) }
 	}
 	slices.Free(a, e.Parts)
 	slices.Free(a, e.Reference)
@@ -266,8 +272,10 @@ func (p *parser) path() *Expr {
 func (p *parser) pathAtom(command bool) *Expr {
 	start := p.pos
 	e := p.node(Path, start)
+	e.LiteralPath = command
 	partStart := start
 	patternDepth := 0
+	characterClass := false
 	for p.pos < len(p.s.Text) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
 		b := p.s.Text[p.pos]
 		if b == '@' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
@@ -281,12 +289,20 @@ func (p *parser) pathAtom(command bool) *Expr {
 			continue
 		}
 		if b == '\\' && p.pos+1 < len(p.s.Text) { p.pos += 2; continue }
+		if characterClass {
+			if b == '\n' || b == '\r' { break }
+			if b == ']' { characterClass = false }
+			p.pos++
+			continue
+		}
+		if b == '[' && !command && patternDepth == 0 { characterClass = true; p.pos++; continue }
 		if command && commandOperator(b) { break }
 		if b == '{' { patternDepth++; p.pos++; continue }
 		if b == '}' && patternDepth > 0 { patternDepth--; p.pos++; continue }
 		if isDelimiter(b) && (patternDepth == 0 || b == ' ' || b == '\t' || b == '\n' || b == '\r') { break }
 		p.pos++
 	}
+	if characterClass { p.error(start, p.pos, "unclosed glob character class") }
 	if len(e.Parts) != 0 && partStart < p.pos { e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}}) }
 	e.Span.End = p.pos
 	e.Text = p.s.Text[start:p.pos]
@@ -895,6 +911,7 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	if original == nil { return nil }
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
+	copy.NamesOwned = true
 	if original.Text != "" { copy.Text, copy.TextOwned = sourceText(a, original.Text), true }
 	copy.Parts, copy.Reference, copy.Items, copy.Fields, copy.Parameters, copy.Body, copy.Pattern = nil, nil, nil, nil, nil, nil, nil
 	if original.Pattern != nil { copy.Pattern = original.Pattern.Clone(a) }
@@ -904,12 +921,13 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 		copy.Parts = slices.Append(a, copy.Parts, part)
 	}
 	copy.Reference = slices.Clone(a, original.Reference)
+	for i := range copy.Reference { copy.Reference[i].Text = sourceText(a, original.Reference[i].Text) }
 	for i := range original.Items { copy.Items = slices.Append(a, copy.Items, cloneExpr(a, original.Items[i])) }
-	for i := range original.Fields { field := original.Fields[i]; field.Value = cloneExpr(a, field.Value); copy.Fields = slices.Append(a, copy.Fields, field) }
+	for i := range original.Fields { field := original.Fields[i]; field.Key = sourceText(a, field.Key); field.Value = cloneExpr(a, field.Value); copy.Fields = slices.Append(a, copy.Fields, field) }
 	copy.Parameters = slices.Clone(a, original.Parameters)
-	// Section parameters are owned (see classifySection); duplicate them so
-	// the clone frees independently. Lambda parameters stay borrowed.
-	if original.Kind == Section {
+	// Cloned parameter names must outlive the original source, just like
+	// reference components and record keys.
+	if len(copy.Parameters) != 0 {
 		for i := range copy.Parameters {
 			copy.Parameters[i].Name = sourceText(a, copy.Parameters[i].Name)
 		}

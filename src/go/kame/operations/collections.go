@@ -19,6 +19,8 @@ type callbackState struct {
 	Accumulator    core.Value
 	HasAccumulator bool
 	Tracked        bool
+	Effects        []eval.Effect
+	WritePaths     []string
 }
 
 func freeCallbackState(a mem.Allocator, value any) {
@@ -32,6 +34,9 @@ func freeCallbackState(a mem.Allocator, value any) {
 		state.Values[i].Free(a)
 	}
 	slices.Free(a, state.Values)
+	eval.FreeEffects(a, state.Effects)
+	for i := range state.WritePaths { mem.FreeString(a, state.WritePaths[i]) }
+	slices.Free(a, state.WritePaths)
 	if state.HasAccumulator {
 		state.Accumulator.Free(a)
 	}
@@ -40,7 +45,14 @@ func freeCallbackState(a mem.Allocator, value any) {
 func callbackProgress(c *eval.Context) *callbackState {
 	existing := c.OperationState()
 	if existing != nil {
-		return existing.(*callbackState)
+		state := existing.(*callbackState)
+		for i := range state.Effects {
+			effect := state.Effects[i]
+			effect.Data = slices.Clone(c.Run, effect.Data)
+			c.Effects = slices.Append(c.Run, c.Effects, effect)
+		}
+		for i := range state.WritePaths { c.WritePaths = slices.Append(c.Run, c.WritePaths, cloneText(c.Run, state.WritePaths[i])) }
+		return state
 	}
 	state := mem.Alloc[callbackState](c.Run)
 	state.Alloc = c.Run
@@ -49,6 +61,15 @@ func callbackProgress(c *eval.Context) *callbackState {
 		c.SetOperationState(state, freeCallbackState)
 	}
 	return state
+}
+
+func rememberCallbackEffects(c *eval.Context, state *callbackState, effects int, paths int) {
+	for i := effects; i < len(c.Effects); i++ {
+		effect := c.Effects[i]
+		effect.Data = slices.Clone(c.Run, effect.Data)
+		state.Effects = slices.Append(c.Run, state.Effects, effect)
+	}
+	for i := paths; i < len(c.WritePaths); i++ { state.WritePaths = slices.Append(c.Run, state.WritePaths, cloneText(c.Run, c.WritePaths[i])) }
 }
 func discardCallback(c *eval.Context, state *callbackState) {
 	if state.Tracked {
@@ -88,6 +109,7 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 	defer c.FreeCallable(callback)
 	state := callbackProgress(c)
 	for state.Index < len(values) {
+		effects, paths := len(c.Effects), len(c.WritePaths)
 		result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
 		if result.Waiting {
 			suspendCallback(c, state)
@@ -114,6 +136,7 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 			state.Values = slices.Append(c.Run, state.Values, result.Value.Clone(c.Run))
 			result.Value.Free(c.Run)
 		}
+		rememberCallbackEffects(c, state, effects, paths)
 		state.Index++
 	}
 	return eval.Result{Value: finishCallback(c, state)}
@@ -162,6 +185,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 				return result
 			}
 		} else {
+			effects, paths := len(c.Effects), len(c.WritePaths)
 			result := c.CallAt(*callback, values[state.Index:state.Index+1], state.Index)
 			if result.Waiting {
 				suspendCallback(c, state)
@@ -180,6 +204,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 				c.FreeCallable(&result.Value)
 			}
 			result.Value.Free(c.Run)
+			rememberCallbackEffects(c, state, effects, paths)
 		}
 		if keep != invert {
 			state.Values = slices.Append(c.Run, state.Values, values[state.Index].Clone(c.Run))
@@ -212,6 +237,7 @@ func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	for state.Index < len(v[1].List) {
 		args := []core.Value{state.Accumulator, v[1].List[state.Index]}
+		effects, paths := len(c.Effects), len(c.WritePaths)
 		result := c.CallAt(v[0], args, state.Index)
 		if result.Waiting {
 			suspendCallback(c, state)
@@ -223,6 +249,7 @@ func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 			return result
 		}
 		state.Accumulator = result.Value
+		rememberCallbackEffects(c, state, effects, paths)
 		state.Index++
 	}
 	result := state.Accumulator.Clone(c.Run)

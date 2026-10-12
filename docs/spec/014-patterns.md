@@ -129,16 +129,22 @@ Group forms are:
 | `{_N}` | reference | positional expansion reference, N canonical decimal |
 
 `\` escapes the following byte inside a pattern literal; `\{` and `\}` produce
-literal braces. A path or string containing no brace is never pattern-parsed
-and keeps its existing meaning. A pattern mixing matcher groups and reference
-groups is a `PARSE_ERR`. Character classes require quoted string patterns:
-`[` and `]` delimit list expressions, so a bare path atom ends before them.
+literal braces. A path or string containing no brace is never expression-pattern
+parsed; unquoted paths may instead be filesystem glob expressions under
+`004-language.md`. A pattern mixing matcher groups and reference groups is a
+`PARSE_ERR`. Character classes in expression-pattern literals require quoted
+string patterns. This restriction does not apply to group-free filesystem glob
+atoms, whose character classes follow `004-language.md`.
 
 Classification:
 
 - One or more matcher groups and no reference groups: a match pattern.
 - One or more reference groups and no matcher groups: an expansion pattern.
-- No groups: a plain path or string, exactly as before.
+- No groups: a plain string/path, or a list-valued unquoted filesystem glob per
+  `004-language.md`.
+
+Expression-pattern groups take precedence over filesystem glob syntax.
+`./journal/{name:*}` and `./{name}` are pattern values; neither enumerates files.
 
 `{name}` is a reference in expression patterns; this differs from rule target
 templates, where `{name}` is equivalent to `{name:*}`. Rule target templates
@@ -174,25 +180,80 @@ text and are cache-safe. Operations that expect strings reject patterns with
 
 ## Replace
 
-`replace` accepts two or three arguments:
+`replace` has two modes:
 
-| Match argument | Expansion argument | Behavior |
-| --- | --- | --- |
-| string | string | literal replace of all occurrences, unchanged |
-| match pattern | string | anchored match; expansion is the constant replacement |
-| match pattern | expansion pattern | anchored match; references resolve to captures |
-| any other combination | | `PAT_INVALID` |
+- `(replace TEXT FROM TO)` with plain strings replaces every literal `FROM`
+  occurrence in `TEXT` with `TO`. All three operands evaluate normally in
+  caller scope, left to right; this mode is unchanged.
+- `(replace MATCH-PATTERN REPLACEMENT [SUBJECT])` performs anchored pattern
+  matching and evaluates `REPLACEMENT` with the successful match's named
+  captures in scope. It is not an eager evaluation of every operand.
 
-With three arguments the third is the subject:
+Pattern mode first evaluates and validates `MATCH-PATTERN` in caller scope;
+it must be a pattern value with matcher groups and no expansion references.
+With three operands, it next evaluates `SUBJECT` in caller scope, without any
+new capture bindings. The subject contract is:
 
 - A string subject produces a string on match and `:nil` on no match.
 - A list subject maps over its items in order and produces a list of the same
   length; non-matching items produce `:nil` entries.
 - A nil subject produces nil.
 
-With two pattern arguments `replace` returns a callable section of arity one
-that applies the match/expand behavior to its argument, so both of these
-rewrite each source path:
+### Capture-scoped replacement expressions
+
+For each successful subject match, create a child of the enclosing lexical
+scope and bind each distinct named capture to its matched string. Captures
+shadow enclosing bindings only while evaluating `REPLACEMENT`; they do not
+leak into the caller, another list item, or a later invocation. Repeated names
+retain their equality constraint. Anonymous captures remain accessible through
+positional expansion references such as `{_0}` and do not introduce lexical
+names.
+
+Only then evaluate `REPLACEMENT`, including its expression-string/path
+interpolations, in that scope. Ordinary names and composed expressions can use
+captures, and unrelated names follow normal lexical lookup. The canonical
+expression-string expansion is `@(name)`, not `@{name}`:
+
+```kame
+(replace ./journal/{name:*} ./{name} "./journal/demo")
+(replace ./journal/{name:*} "@(name)" "./journal/demo")
+(replace ./journal/{name:*} name "./journal/demo")
+(replace ./journal/{name:*} (uppercase name) "./journal/demo")
+```
+
+These return `"./demo"`, `"demo"`, `"demo"`, and `"DEMO"`, respectively.
+
+The selected replacement value determines rendering:
+
+| Replacement value | Result |
+| --- | --- |
+| string | Return its text, including interpolations already evaluated in capture scope |
+| expansion pattern | Expand its references against this match's captures |
+| integer, float, boolean | Convert to ordinary scalar `str` text |
+| any other kind, or a pattern with matcher groups | `PAT_INVALID` |
+
+No match returns `:nil` without evaluating the replacement or acquiring its
+dependencies/effects. Nil subjects and empty subject lists likewise do not
+evaluate it. Syntax is still parsed in every operand. Unknown ordinary names
+in a selected expression report `REF_MISSING`; missing capture references in
+an expansion pattern remain `PAT_INVALID`.
+
+Replacement results are data, not new expression/template/glob source. In
+particular, captured metacharacters in `./{name}` or `"./@(name)"` do not start
+filesystem enumeration. Reached replacement reads and effects retain the
+caller's capabilities, phase restrictions, suspension and publication policy.
+
+### Deferred replacement callables
+
+With two pattern-mode operands, `replace` returns a callable of arity one that
+retains the match pattern, the unevaluated replacement expression, and its
+enclosing lexical scope. It must not look up capture names, evaluate replacement
+helpers, or acquire replacement dependencies merely to construct the callable.
+Each invocation applies the same capture-scoped behavior to its subject. The
+callable is invocation-owned and follows ordinary closure lifetime/publication
+restrictions in `005-evaluation.md`.
+
+Both of these rewrite each source path:
 
 ```kame
 (map (replace ./{**}/{*}.c ./build/{_0}/{_1}.c) sources)
@@ -205,7 +266,17 @@ Named references use capture names:
 (replace ./src/{name:*}.c ./build/{name}.o "./src/demo.c")
 ```
 
-produces `./build/demo.o`.
+produces `./build/demo.o`. Capture names are equally available in a deferred
+expression replacement:
+
+```kame
+SOURCES_JOURNAL = ./journal/*
+PRODUCT_BY_NAME = (map (replace ./journal/{name:*} "@(name)") SOURCES_JOURNAL)
+PRODUCT_PATHS = (replace ./journal/{name:*} ./{name} SOURCES_JOURNAL)
+```
+
+An explicit lambda must pass its subject when applying a replacement:
+`(map ([J] (replace ./journal/{name:*} name J)) SOURCES_JOURNAL)`.
 
 Runtime strings used as the match argument never become patterns; matching
 requires a pattern literal or a pattern value.
@@ -215,8 +286,9 @@ requires a pattern literal or a pattern value.
 - A pattern that parses cleanly but mixes matcher and reference groups is
   `PARSE_ERR`.
 - Structurally invalid group syntax, such as unclosed or empty groups,
-  leaves the token a plain path or string with its braces literal. This
-  preserves the legacy meaning of braces in paths and strings.
+  leaves the token a non-pattern path or string with its braces literal.
+  Unquoted paths still follow ordinary filesystem glob classification in
+  `004-language.md`; malformed regex groups retain their specified diagnostics.
 - Invalid argument combinations and expansion references to missing captures
   are `PAT_INVALID`; patterns passed to string-expecting operations are
   `EXPR_INVALID`.
@@ -243,15 +315,27 @@ and runtime pattern construction are specified in
 - Two-argument pattern `replace` returns a callable section usable directly
   and through a pipe.
 - `(replace ./src/{name:*}.c ./build/{name}.o "./src/demo.c")` is `./build/demo.o`.
+- Named captures resolve in bare-name, interpolated string/path and composed
+  replacement expressions, for both direct calls and deferred callables.
+- Captures shadow enclosing names only in the replacement, not the subject,
+  and never leak across list items or repeated invocations; nested replacements
+  restore the outer capture bindings.
+- A nonmatch, nil subject and empty subject list skip a replacement containing
+  a missing name, failing read or effect; callable construction also skips it.
+- Each successful list item evaluates its own replacement once; suspension and
+  cancellation retain/release scopes and do not replay accepted effects.
+- Replacement results containing braces or glob metacharacters remain data;
+  `./{name}` expansion and canonical `"@(name)"` interpolation both work without
+  implicit filesystem access.
+- String, expansion-pattern and numeric/boolean replacements preserve existing
+  rendering; invalid selected values are `PAT_INVALID`, while missing ordinary
+  expression names retain `REF_MISSING`.
 - Literal string `replace` behaves exactly as before.
 - Mixing matcher and reference groups is `PARSE_ERR`; structurally invalid
-  groups leave a plain path or string; both-match and
-  match-string/expansion-pattern combinations are `PAT_INVALID`.
+  groups leave a non-pattern path or string under ordinary atom classification.
+  Selected matcher-pattern replacements and literal-string calls with pattern
+  operands are `PAT_INVALID`.
 - A pattern renders as its text in recipes, rule inputs, and `str`.
 - A string operation given a pattern is `EXPR_INVALID`.
 - Formatting sections and patterns is idempotent and preserves section form.
 - Pattern and section tests under `mem.Tracker` leak no values.
-
-Pattern replacement expansions also accept integer, float and boolean values,
-converted to their ordinary `str` text. Collections, bytes, callable values and
-nil remain invalid expansions. This coercion does not alter literal string replace.

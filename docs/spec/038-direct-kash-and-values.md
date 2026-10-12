@@ -195,7 +195,8 @@ An explicit path atom beginning with `/`, `./`, or `../` may contain
 immediately by a path separator is also an interpolated path atom:
 
 ```kame
-SOURCES = (wildcard :+files :-symlinks @(PATH_SRC)/sh/**/*.sh)
+SOURCES = @(PATH_SRC)/sh/**/*.sh
+FILTERED_SOURCES = (wildcard :+files :-symlinks @(PATH_SRC)/sh/**/*.sh)
 OUTPUT = (nop ./build/@(component)/main.js)
 ```
 
@@ -217,10 +218,19 @@ not a reintroduction of Kash's standalone `@(...)` expression boundary.
 In a wildcard interpolated path, glob metacharacters in authored static
 fragments retain pattern meaning. Metacharacters contributed by expression
 values are literal filename data, not additional glob syntax. This provenance
-must survive until matching. A caller can deliberately supply a complete
-string pattern to `wildcard`; that argument retains its ordinary pattern-string
-contract. Rule headers retain their separate template/capture grammar; this
-extension applies to expression and Kash path atoms.
+must survive until matching. When evaluated as a Kame expression, an unquoted
+path with authored glob syntax produces a tracked path list without requiring a
+`wildcard` wrapper (`004-language.md`, `023-wildcard-sources.md`). A path with
+no authored glob syntax remains a literal path even if an inserted value
+contains metacharacters. Capture-pattern groups retain their distinct grammar.
+
+A caller can deliberately supply a complete string pattern to `wildcard`; that
+argument retains its ordinary pattern-string contract. `wildcard` also accepts
+already-expanded path lists without interpreting their member text again, and
+applies its kind flags to the combined matches. Rule headers retain their
+separate template/capture grammar. Structural path interpolation applies to
+expression and Kash path atoms; implicit glob evaluation applies to Kame
+expressions, not raw Kash command words.
 
 ## Signed symbol flags and wildcard kinds
 
@@ -230,7 +240,8 @@ the colon: `+files`, `-files`, and so on. They are ordinary values, not global
 side effects or arbitrary keyword arguments. Operations declare which signed
 flags they accept. ASTs and formatting preserve their signed spelling.
 
-`wildcard` accepts one or more patterns and these operation-wide flags:
+`wildcard` accepts one or more string patterns or expanded path lists and these
+operation-wide flags:
 
 | Flag | Meaning |
 | --- | --- |
@@ -243,7 +254,8 @@ unfiltered wildcard, including other filesystem entry kinds. With positive
 flags, selection starts with the union of positively named kinds. Negative
 flags subtract named kinds. Flag position does not matter; duplicate identical
 flags are idempotent. Opposite flags for the same kind and unknown signed flags
-report `EXPR_INVALID`. A call without any pattern is invalid. Computed flag
+report `EXPR_INVALID`. A call without any pattern or path-list operand is
+invalid. Flags are scalar operands, not reinterpreted list members. Computed flag
 values follow the same validation as authored flags. Since ordinary symbols
 materialize as text, whole argument values beginning with `+` or `-` are reserved
 for flag validation; a filename/pattern with that initial character must use
@@ -358,6 +370,9 @@ publication or retry.
   quotes scalars and round-trips nested JSON-compatible values.
 - Interpolated paths remain one atom, preserve spans/dependencies, accept roots
   containing spaces, and distinguish literal dynamic glob metacharacters.
+- Unquoted interpolated globs evaluate to tracked lists without a wrapper;
+  explicit `wildcard` retains union/kind-filter behavior without re-globbing
+  dynamic filename bytes, and raw Kash words remain literal.
 - Filter tests cover positive/negative combinations, contradictory/unknown flags,
   duplicates, empty matches, symlink targets/dangling links, traversal, entry-kind
   changes, and shared-source filtered watch invalidation.

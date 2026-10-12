@@ -7,6 +7,7 @@ import (
 	"kame/lang/expr"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strconv"
 	"solod.dev/so/strings"
 )
 
@@ -32,6 +33,8 @@ type replaceState struct {
 	match    *expr.Pattern
 	expand   *expr.Pattern
 	constant core.Value
+	replacement core.Value
+	scope *eval.Scope
 }
 
 func ownedFailure(run mem.Allocator, code string, message string) eval.Result {
@@ -74,6 +77,15 @@ func parseReplaceState(c *eval.Context, match core.Value, expansion core.Value, 
 	state.match = parsed.Pattern
 	state.constant = core.Value{Kind: core.Nil}
 	slices.Free(c.Run, parsed.Diagnostics)
+	if expansion.Kind == core.Callable {
+		function := expansion.Callable.(*eval.Function)
+		if function.DeferredReplacement {
+			state.replacement = expansion
+			state.scope = function.Scope
+			*out = state
+			return eval.Result{}
+		}
+	}
 	if expansion.Kind == core.String {
 		state.constant = expansion.Clone(c.Run)
 		*out = state
@@ -110,6 +122,7 @@ func freeReplaceState(a mem.Allocator, state *replaceState) {
 		state.expand.Free(a)
 	}
 	state.constant.Free(a)
+	eval.ReleaseCallable(a, &state.replacement)
 	mem.Free(a, state)
 }
 
@@ -132,6 +145,13 @@ func replaceSection(c *eval.Context, state *replaceState) eval.Result {
 	function.Native = state
 	function.NativeCall = replaceCall
 	function.NativeFree = replaceNativeFree
+	if state.replacement.Kind == core.Callable {
+		operand := state.replacement.Callable.(*eval.Function)
+		// Transfer the scope hold to the returned callable so lexical cycle
+		// breaking and borrowed wrappers can see its ownership.
+		function.Scope = operand.Scope
+		operand.Scope = nil
+	}
 	return eval.Result{Value: core.Value{Kind: core.Callable, Callable: function}}
 }
 
@@ -144,22 +164,33 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 		return replaceOne(c, state, subject.Text)
 	}
 	if subject.Kind == core.List {
-		out := slices.Make[core.Value](c.Run, len(subject.List))
-		for i := range subject.List {
+		progress := callbackProgress(c)
+		for progress.Index < len(subject.List) {
+			i := progress.Index
 			if subject.List[i].Kind != core.String {
-				freeValues(c, out)
+				discardCallback(c, progress)
 				c.DiscardCallables(&subject)
 				return c.InvalidOperation("replace subject list must contain only strings; got " + core.KindName(subject.List[i].Kind))
 			}
+			previous := c.CallPath
+			var digits [32]byte
+			identity := core.NewString(c.Run, previous + "/replace-item:" + strconv.Itoa(digits[:], i))
+			c.CallPath = identity.Text
+			effects, paths := len(c.Effects), len(c.WritePaths)
 			one := replaceOne(c, state, subject.List[i].Text)
+			c.CallPath = previous
+			identity.Free(c.Run)
+			if one.Waiting { suspendCallback(c, progress); return one }
 			if one.Diagnostic.Code != "" {
-				freeValues(c, out)
+				discardCallback(c, progress)
 				c.DiscardCallables(&subject)
 				return one
 			}
-			out[i] = one.Value
+			progress.Values = slices.Append(c.Run, progress.Values, one.Value)
+			rememberCallbackEffects(c, progress, effects, paths)
+			progress.Index++
 		}
-		return eval.Result{Value: core.Value{Kind: core.List, List: out}}
+		return eval.Result{Value: finishCallback(c, progress)}
 	}
 	// No ownership transfers on rejection; the caller frees storage only.
 	c.DiscardCallables(&subject)
@@ -176,6 +207,43 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 	if !matched.Matched {
 		slices.Free(c.Run, matched.Captures)
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
+	}
+	if state.replacement.Kind == core.Callable {
+		var fields []core.RecordField
+		for i := range state.match.Names {
+			if state.match.Names[i] != "" { fields = slices.Append(c.Run, fields, core.RecordField{Key: state.match.Names[i], Value: core.NewString(c.Run, matched.Captures[i])}) }
+		}
+		captures := core.NewRecord(c.Run, fields)
+		for i := range fields { fields[i].Value.Free(c.Run) }
+		slices.Free(c.Run, fields)
+		result := c.EvaluateReplacement(state.replacement, captures, state.scope)
+		captures.Free(c.Run)
+		if result.Waiting || result.Diagnostic.Code != "" { slices.Free(c.Run, matched.Captures); return result }
+		if result.Value.Kind == core.Pattern {
+			expansion := expr.ParsePatternText(c.Run, result.Value.Text, 0)
+			result.Free(c.Run)
+			invalid := len(expansion.Diagnostics) != 0 || expansion.Pattern.Matchers != 0 || expansion.Pattern.References == 0
+			slices.Free(c.Run, expansion.Diagnostics)
+			if invalid {
+				expansion.Pattern.Free(c.Run)
+				slices.Free(c.Run, matched.Captures)
+				return ownedFailure(c.Run, "PAT_INVALID", "expansion pattern needs reference groups")
+			}
+			expanded := expansion.Pattern.ExpandText(c.Run, state.match, matched.Captures)
+			expansion.Pattern.Free(c.Run)
+			slices.Free(c.Run, matched.Captures)
+			if expanded.Missing != "" { return missingReferenceFailure(c.Run, expanded.Missing) }
+			return eval.Result{Value: core.Value{Kind: core.String, Text: expanded.Text}}
+		}
+		slices.Free(c.Run, matched.Captures)
+		if result.Value.Kind != core.String && result.Value.Kind != core.Int && result.Value.Kind != core.Float && result.Value.Kind != core.Bool {
+			result.Free(c.Run)
+			return ownedFailure(c.Run, "PAT_INVALID", "expansion must be a string, number, bool, or expansion pattern")
+		}
+		text, ok := stringValue(c.Run, result.Value, false)
+		result.Free(c.Run)
+		if !ok { return ownedFailure(c.Run, "PAT_INVALID", "invalid expansion") }
+		return eval.Result{Value: core.Value{Kind: core.String, Text: text}}
 	}
 	if state.expand == nil {
 		slices.Free(c.Run, matched.Captures)

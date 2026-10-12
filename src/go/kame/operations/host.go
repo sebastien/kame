@@ -5,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
@@ -241,6 +242,23 @@ func opReadlink(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	return fileRequest(c, host.OpReadlink, v[0])
 }
+// Reject authored invalid flags before argument glob expressions can issue reads.
+func wildcardPreflight(c *eval.Context, arguments []*expr.Expr) eval.Result {
+	positive, negative := 0, 0
+	for i := range arguments {
+		e := arguments[i]
+		text := ""
+		if e.Kind == expr.Symbol { text = e.Text }
+		if e.Kind == expr.String && e.Pattern == nil && len(e.Parts) == 1 && e.Parts[0].Expr == nil { text = e.Parts[0].Text }
+		if len(text) == 0 || (text[0] != '+' && text[0] != '-') { continue }
+		bit := wildcardKindFlag(text[1:])
+		if bit == 0 { return c.InvalidOperation("unknown wildcard kind flag: " + text) }
+		if text[0] == '+' { positive |= bit } else { negative |= bit }
+		if positive & negative != 0 { return c.InvalidOperation("opposite wildcard kind flags are invalid") }
+	}
+	return eval.Result{}
+}
+
 func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	var patterns []core.Value
@@ -253,7 +271,9 @@ func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 			if value.Text[0] == '+' { positive |= bit } else { negative |= bit }
 			if positive & negative != 0 { slices.Free(c.Run, patterns); discardArgCallables(c, v); return c.InvalidOperation("opposite wildcard kind flags are invalid") }
 		} else {
-			if value.Kind != core.String && !(value.Kind == core.Resource && value.Resource.Kind == core.ResourceFile) {
+			if value.Kind == core.List {
+				for j := range value.List { if value.List[j].Kind != core.String { slices.Free(c.Run, patterns); return invalidArgument(c, v, i, "flat list of path strings") } }
+			} else if value.Kind != core.String && !(value.Kind == core.Resource && value.Resource.Kind == core.ResourceFile) {
 				slices.Free(c.Run, patterns)
 				return invalidArgument(c, v, i, "string")
 			}
@@ -316,7 +336,7 @@ func filterWildcardKinds(c *eval.Context, matches core.Value, mask int) eval.Res
 }
 
 func wildcardUnion(c *eval.Context, v []core.Value) eval.Result {
-	if len(v) == 1 {
+	if len(v) == 1 && v[0].Kind != core.List {
 		return fileRequest(c, host.OpWildcard, v[0])
 	}
 	// Each union member has its own replay identity, so a later suspension
@@ -328,7 +348,8 @@ func wildcardUnion(c *eval.Context, v []core.Value) eval.Result {
 		index := strconv.Itoa(digits[:], i)
 		member := core.NewString(c.Run, previous+"/wildcard:"+index)
 		c.CallPath = member.Text
-		result := fileRequest(c, host.OpWildcard, v[i])
+		result := eval.Result{}
+		if v[i].Kind == core.List { result.Value = v[i].Clone(c.Run) } else { result = fileRequest(c, host.OpWildcard, v[i]) }
 		c.CallPath = previous
 		member.Free(c.Run)
 		if result.Waiting || result.Diagnostic.Code != "" {

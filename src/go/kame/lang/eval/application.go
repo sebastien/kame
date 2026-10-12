@@ -113,13 +113,45 @@ func comparisonAlias(name string) (string, bool) {
 func (p *Program) operation(scope *Scope, operation *Operation, arguments []*expr.Expr, context *Context, span source.Span) Result {
 	ready := p.prepareOperation(operation, len(arguments), context, span)
 	if ready.Waiting || ready.Diagnostic.Code != "" { return ready }
-	operands := p.argumentValues(scope, arguments, context, span)
+	if operation.Preflight != nil {
+		previousName, previousSpan, previousArguments := context.OperationName, context.Span, context.operationArguments
+		context.OperationName, context.Span, context.operationArguments = operation.Name, span, arguments
+		checked := operation.Preflight(context, arguments)
+		context.OperationName, context.Span, context.operationArguments = previousName, previousSpan, previousArguments
+		if checked.Waiting || checked.Diagnostic.Code != "" { return checked }
+	}
+	operands := p.argumentValuesMode(scope, arguments, context, span, operation.DeferredReplacement)
 	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	if operation.DeferredReplacement && operands.Values[0].Kind == core.Pattern {
+		function := mem.Alloc[Function](context.Run)
+		function.Kind, function.Scope, function.Expression = FunctionTemporary, scope, expr.Clone(context.Run, arguments[1])
+		function.ExpressionOwned = true
+		function.DeferredReplacement = true
+		scope.Retain()
+		operands.Values[1] = core.Value{Kind: core.Callable, Callable: function}
+	}
+	context.Scope = scope
 	result := p.invokeOperation(operation, operands.Values, arguments, context, span)
 	// Operations release consumed callable wrappers; release only value storage.
 	freeValues(context.Run, operands.Values)
 	return result
 }
+
+// EvaluateReplacement evaluates a retained operand in a match-local scope.
+func (c *Context) EvaluateReplacement(value core.Value, captures core.Value, parent *Scope) Result {
+	if c.ReserveEnv {
+		for i := range captures.Record { if captures.Record[i].Key == "env" { return failure(c.Run, "DEF_INVALID", c.Span, "env is reserved in Kash") } }
+	}
+	function := value.Callable.(*Function)
+	child := RenderChildScope(c, parent, captures)
+	if child == nil { return failure(c.Run, "EXPR_INVALID", c.Span, "invalid capture scope") }
+	result := c.Program.evaluate(c.Engine, child, function.Expression, c)
+	child.Free()
+	return result
+}
+
+// ReleaseCallable releases a retained operand using its owning allocator.
+func ReleaseCallable(a mem.Allocator, value *core.Value) { freeCallables(a, value) }
 
 func (p *Program) prepareOperation(operation *Operation, count int, context *Context, span source.Span) Result {
 	_ = p
