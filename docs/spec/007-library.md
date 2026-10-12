@@ -21,8 +21,32 @@ Each operation declares:
 - Public name.
 - Named call function and context pointer.
 - Arity.
-- Capability requirements.
+- Unconditional and argument-dependent capability requirements.
+- Direct category: computation, tracked observation, output/publication,
+  process action, control effect, or volatile observation.
+- Allowed evaluation phases and dependency/effect behavior.
 - Stable implementation version.
+
+Standard registrations must have complete, valid descriptions, including aliases
+and template primitives. A suffix is not evidence of a category or authority.
+Registry validation rejects partial descriptions and category/behavior conflicts.
+Unannotated custom registrations retain their existing runtime authorization;
+they are not implicitly classified as pure standard operations.
+
+Phase metadata is an upper bound, not permission to bypass contextual checks.
+For example, an inline `render` can compute text without a read grant, while a
+file template or nested include requires scoped read authority. An environment
+snapshot can supply a requested value without a new host request. Pure planning
+still cannot submit host requests merely because the enclosing operation permits
+inline evaluation in that phase. Tool metadata tracking does not confer user
+read authority. Service, dry-run, and publication restrictions remain independent.
+
+Callback-bearing operations (`apply`, `map`, `flatmap`, `filter`, `filter-out`,
+`reduce`, and template application) explicitly propagate reached callable
+behavior; their computation category does not declare those callbacks pure.
+`render` also evaluates template expressions under the caller's authority and
+phase. Processes and `await` implemented as syntax obey the same contracts even
+though they are not ordinary registry calls.
 
 An operation receives evaluated arguments and an evaluation context. It returns
 a value, a host request, or a structured diagnostic. Returned owned values use
