@@ -15,7 +15,7 @@ func TestSessionSharesLazyDefinitionsAndKeepsParserBoundaries(t *testing.T) {
 	operations.Register(registry)
 	fragments := []program.Fragment{
 		{Name: "first.km", Lang: "km", Text: "(greet name)\n"},
-		{Name: "functions.km", Lang: "km", Text: "(greet WHO) = (cat \"Hello \" WHO)\n"},
+		{Name: "functions.km", Lang: "km", Text: "(greet WHO) = (str \"Hello \" WHO)\n"},
 		{Name: "values.km", Lang: "km", Text: "name = \"Ada\"\nunused = $(printf unused)\n"},
 		{Name: "typed.kash", Lang: "kash", Text: "number = 42\n"},
 		{Name: "last", Lang: "expr", Text: "number"},
@@ -55,7 +55,7 @@ func TestSessionCannotCompleteSyntaxAcrossFragments(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
-	fragments := []program.Fragment{{Name: "one", Lang: "expr", Text: "(cat \"one\""}, {Name: "two", Lang: "expr", Text: "\"two\")"}}
+	fragments := []program.Fragment{{Name: "one", Lang: "expr", Text: "(str \"one\""}, {Name: "two", Lang: "expr", Text: "\"two\")"}}
 	compiled := program.CompileSession(a, fragments, registry, program.Options{})
 	defer compiled.Free(a)
 	if compiled.Session != nil || len(compiled.Diagnostics) == 0 { t.Error("fragment syntax was combined and reparsed") }

@@ -39,8 +39,8 @@ func TestComputedOutputFailureCleanup(t *testing.T) {
 		"@([./one ./one]) :\n",
 		"@([]) :\n",
 		"ROOT = (out \"forbidden\")\n@(ROOT)/out :\n",
-		"@(cat \"./one\") :\n./one :\n",
-		"@(cat \"./\" \"{\" \"name\") :\n",
+		"@(str \"./one\") :\n./one :\n",
+		"@(str \"./\" \"{\" \"name\") :\n",
 	}
 	for i := range fixtures {
 		parsed := script.Parse(a, "invalid.kmk", fixtures[i])

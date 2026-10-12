@@ -18,7 +18,7 @@ selected targets, not top-level expressions as an alternate entry mechanism.
 VERSION = "1.2.3"
 FLAGS = ["-Wall" "-Wextra"]
 SOURCES = (wildcard ./src/*.c)
-(greet name) = (cat "Hello, " name)
+(greet name) = (str "Hello, " name)
 default = (greet "Ada")
 ```
 
@@ -62,7 +62,7 @@ there is no previous-accumulator value. Functions and Kash do not support `+=`.
 
 ```kame
 name = "Ada"
-(out (cat "Hello, " name))
+(out (str "Hello, " name))
 ```
 
 ```sh

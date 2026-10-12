@@ -10,7 +10,8 @@ types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 | --- | --- | --- |
 | `not` | `(not VALUE)` | Language boolean negation. |
 | `bool` | `(bool VALUE)` | Language truth value. |
-| `str` | `(str VALUE)` | Text form; lists and records use stable JSON-like syntax. |
+| `str` | `(str VALUE...)` | Concatenate textual scalars without separators; reject collections. |
+| `json` | `(json VALUE)` | Encode JSON-compatible values with stable lexical record key order. |
 | `parse-json` | `(parse-json TEXT)` | Parse JSON into typed Kame values; malformed input reports `JSON_INVALID`. |
 | `fail` | `(fail MESSAGE)` | Raise `USER_ERROR` with an explicit string message. |
 | `count` | `(count VALUE)` | Number of string code points, bytes, list items, or record fields. |
@@ -84,7 +85,7 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 | `ends?` | `(ends? TEXT SUFFIX)` | Literal suffix test. |
 | `uppercase` | `(uppercase TEXT)` | Unicode uppercase conversion. |
 | `lowercase` | `(lowercase TEXT)` | Unicode lowercase conversion. |
-| `cat` | `(cat VALUE...)` | Concatenate renderable scalars/lists; nil is empty. Records/bytes require explicit conversion. |
+| `template-cat` | Lowering primitive | Document rendering only: nil is empty and lists join with spaces. Not scalar conversion. |
 | `text` | `(text VALUE)` | Convert UTF-8 bytes to a string, or return a string unchanged. |
 | `render` | `(render SOURCE [PAYLOAD] [STYLE])` | Render a document template; a string second argument is style-only. File sources require read capability; bytes need explicit style. |
 | `pattern` | `(pattern TEXT)` | Construct and validate a pattern from runtime text. |

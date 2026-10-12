@@ -42,7 +42,7 @@ func TestInspectionSharingSequencesAndRepeatQueries(t *testing.T) {
 
 func TestInspectionBoundArgumentsAndCycles(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "task build {flavor=debug} : @(cat \"./\" flavor)\ndefault : \"build flavor=one\" \"build flavor=two\"\ncycle : loop\nloop : cycle\n")
+	parsed := script.Parse(a, "<test>", "task build {flavor=debug} : @(str \"./\" flavor)\ndefault : \"build flavor=one\" \"build flavor=two\"\ncycle : loop\nloop : cycle\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})

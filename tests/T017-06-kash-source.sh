@@ -13,7 +13,7 @@ mkdir -p "$work"
 cat >"$work/source.kash" <<'KASH'
 # source comment
 name = "World"; count = 42; flag = :true;
-(banner WHO) = (cat "Hello, " WHO)
+(banner WHO) = (str "Hello, " WHO)
 alias = ${name}
 values = (nop [name count])
 literal = "$(printf not-executed)"
@@ -39,7 +39,7 @@ echo "" "two words" "literal?" "a|b" "\$name" "\@literal" "#comment"
 echo "=" value
 :cwd ./build :timeout (nop 1) :MODE production cat < ./input | cat >> ./output ?
 capture = $("printf" "%s" "hello" | "cat")
-echo (cat "a" "b") $(printf hello) ? echo fallback
+echo (str "a" "b") $(printf hello) ? echo fallback
 echo hello &
 if test -f ./input
 	echo yes
@@ -61,7 +61,7 @@ echo "" "two words" "literal?" "a|b" "\$name" "\@literal" "#comment"
 echo "=" value
 :cwd ./build :timeout (nop 1) :MODE production cat < ./input | cat >> ./output ?
 capture = $(printf %s hello | cat)
-echo (cat "a" "b") $(printf hello) ? echo fallback
+echo (str "a" "b") $(printf hello) ? echo fallback
 echo hello &
 if test -f ./input
 	echo yes

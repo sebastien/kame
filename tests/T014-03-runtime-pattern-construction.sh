@@ -17,14 +17,14 @@ for host in native wasm; do
 	else
 		test-fail "$host runtime pattern result: $(cat "$TMPDIR/$host.err")"
 	fi
-	"${runner[@]}" do run --lang expr -c '(replace (pattern (cat "./src/" "{" "name:*" "}.c")) (pattern (cat "./build/" "{" "name" "}.o")) "./src/demo.c")' >"$TMPDIR/$host.replace.out" 2>"$TMPDIR/$host.replace.err"
+	"${runner[@]}" do run --lang expr -c '(replace (pattern (str "./src/" "{" "name:*" "}.c")) (pattern (str "./build/" "{" "name" "}.o")) "./src/demo.c")' >"$TMPDIR/$host.replace.out" 2>"$TMPDIR/$host.replace.err"
 	if [ "$(cat "$TMPDIR/$host.replace.out")" = '"./build/demo.o"' ]; then
 		test-ok "$host applies runtime match and expansion patterns"
 	else
 		test-fail "$host runtime pattern replacement: $(cat "$TMPDIR/$host.replace.err")"
 	fi
 	status=0
-	"${runner[@]}" do run --lang expr -c '(pattern (cat "./" "{" "name:*" "}" "{" "_0" "}"))' >"$TMPDIR/$host.invalid.out" 2>"$TMPDIR/$host.invalid.err" || status=$?
+	"${runner[@]}" do run --lang expr -c '(pattern (str "./" "{" "name:*" "}" "{" "_0" "}"))' >"$TMPDIR/$host.invalid.out" 2>"$TMPDIR/$host.invalid.err" || status=$?
 	if [ "$status" = 1 ] && grep -q PAT_INVALID "$TMPDIR/$host.invalid.err"; then
 		test-ok "$host rejects invalid runtime pattern composition"
 	else

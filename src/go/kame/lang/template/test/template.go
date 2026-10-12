@@ -213,12 +213,12 @@ func TestDirectiveExpressionShorthandAndCanonicalFormatting(t *testing.T) {
 	inputs := []string{
 		"@if(eq name \"Ada\")\nyes\n@elif(eq name \"Lin\")\nother\n@end(if)\n",
 		"@with(nop [name: \"Ada\"])\n@(name)\n@end(with)\n",
-		"@match(cat \"./\" name)\n@case(nop ./Ada)\nyes\n@end(match)\n",
+		"@match(str \"./\" name)\n@case(nop ./Ada)\nyes\n@end(match)\n",
 		"@if(cond)yes@end(if)",
 		"@if((predicate))yes@end(if)",
 		"@for([item] (list \"a\" \"b\") \",\")\n@(item)\n@end(for)\n",
-		"@let(name (cat \"A\" \"da\"))\n@(name)\n",
-		"@include((cat \"./\" name) [name: \"Ada\"])\n",
+		"@let(name (str \"A\" \"da\"))\n@(name)\n",
+		"@include((str \"./\" name) [name: \"Ada\"])\n",
 		"@if(([x] (eq x \"Ada\")) name)yes@end(if)",
 	}
 	for i := range inputs {

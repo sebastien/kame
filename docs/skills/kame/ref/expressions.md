@@ -43,14 +43,14 @@ of three or more double quotes preserve raw multiline content.
 
 ```kame
 (join ["a" "b"] ",")
-([name] (cat "Hello, " name))
+([name] (str "Hello, " name))
 (let [names ["Ada" "Lin"]]
   (names | map ([name] (uppercase name)) | join ", "))
 ```
 
 Applications are `(FUNCTION ARG...)`; `()` is invalid. Lambdas begin with a
 parameter list; a single final `rest...` parameter collects remaining arguments.
-`((cat "prefix-" _))` is a placeholder section equivalent to a one-argument
+`((str "prefix-" _))` is a placeholder section equivalent to a one-argument
 lambda. Outside sections, underscore names remain ordinary names.
 
 `(value | transform a)` becomes `(transform a value)`; `_` on the right chooses

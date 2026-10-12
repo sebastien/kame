@@ -28,12 +28,12 @@ parity() {
 }
 
 test-step "captured values and distinct function/callback execution"
-parity '(cat $(printf a) $(printf b))' 0 --allow-run
-parity '(cat (eval "$(printf a)") (eval "$(printf b)"))' 0 --allow-run
+parity '(str $(printf a) $(printf b))' 0 --allow-run
+parity '(str (eval "$(printf a)") (eval "$(printf b)"))' 0 --allow-run
 parity '$(printf "one\ntwo\n")' 0 --allow-run
 parity '(let [files ["a b" "c"]] $(printf "[%s]" $files))' 0 --allow-run
 parity '(map ["a" "b"] ([x] $(printf "%s" $x)))' 0 --allow-run
-parity '(let [f ([x] $(printf "%s" $x))] (cat (f "a") (f "b")))' 0 --allow-run
+parity '(let [f ([x] $(printf "%s" $x))] (str (f "a") (f "b")))' 0 --allow-run
 parity '$(printf "%s" $(printf nested))' 0 --allow-run
 parity '$(printf "[%s]" (nop ["a b" "c"]))' 0 --allow-run
 parity '$(printf "%s" ("a" | uppercase))' 0 --allow-run
@@ -44,7 +44,7 @@ parity '$(printf abc)' 0 --allow-run --capture-limit 3
 parity '$(printf abcd)' 1 --allow-run --capture-limit=3
 grep -q CAPTURE_LIMIT "$work/native.err"
 grep -q CAPTURE_LIMIT "$work/wasm.err"
-parity '(cat $(printf abc) $(printf def))' 0 --allow-run --capture-limit=3
+parity '(str $(printf abc) $(printf def))' 0 --allow-run --capture-limit=3
 parity '$(printf "%s" $(printf abcd))' 1 --allow-run --capture-limit=3
 parity '$(printf "é")' 0 --allow-run --capture-limit=2
 parity '$(printf "é")' 1 --allow-run --capture-limit=1
@@ -90,7 +90,7 @@ chmod +x "$work/no-shebang"
 parity "\$($work/no-shebang)" 1 --allow-run
 
 test-step "AST and formatter parity with nested substitutions"
-printf '%s\n' '(cat $(printf "%s" ${project.name}) [$(printf (cat "a" "b"))])' >"$work/expression.km"
+printf '%s\n' '(str $(printf "%s" ${project.name}) [$(printf (str "a" "b"))])' >"$work/expression.km"
 for command in parse fmt; do
 	"$CLI_BIN" do "$command" --lang expr "$work/expression.km" >"$work/native.out"
 	node "$CLI_ROOT/dist/kame.js" do "$command" --lang expr "$work/expression.km" >"$work/wasm.out"

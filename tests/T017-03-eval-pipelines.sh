@@ -33,7 +33,7 @@ grep -q '"ABC' "$work/native.out"
 parity '$(printf "a|b" | cat)' 0
 parity '$(printf "%s" $(printf nested | tr a-z A-Z) | cat)' 0
 parity '(map ["a" "b"] ([x] $(printf "%s" $x | tr a-z A-Z)))' 0
-parity '(cat $(printf a | cat) $(printf b | cat))' 0
+parity '(str $(printf a | cat) $(printf b | cat))' 0
 
 test-step "all stages contribute to failure"
 parity '$(sh -c "exit 7" | cat)' 1 RECIPE_FAIL

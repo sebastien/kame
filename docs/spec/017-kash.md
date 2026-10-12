@@ -148,7 +148,7 @@ have the same shape and lazy semantics as Kame definitions:
 
 ```kash
 name = "John Smith"
-(banner WHO) = (cat "Hello, " WHO)
+(banner WHO) = (str "Hello, " WHO)
 ```
 
 A non-definition statement is a Kash command expression, including a pipeline,
@@ -182,7 +182,7 @@ The expression parser owns each `EXPRESSION` operand, including command
 substitution atoms; Kash owns their process contents, the other substitution
 wrappers, and recovery separators. `$REFERENCE`, `${REFERENCE}`,
 and infix `??` are not added to ordinary Kame expressions: use
-`(cat "Hello, " WHO)`, not `(cat "Hello, " $WHO)`. Existing Kame template
+`(str "Hello, " WHO)`, not `(str "Hello, " $WHO)`. Existing Kame template
 expansions and expression-string interpolation retain their own rules. Functions
 retain Kame parameter and lazy evaluation semantics. All definition surfaces
 use expressions rather than word-list or recipe-template RHS syntax.
@@ -280,7 +280,7 @@ definitions:
 
 ```kame
 revision = $(git rev-parse --short HEAD)
-banner = (cat "Revision: " $(git rev-parse --short HEAD))
+banner = (str "Revision: " $(git rev-parse --short HEAD))
 ```
 
 The outer expression parser retains a command-substitution node and delegates
@@ -291,7 +291,7 @@ Evaluation requires a context permitting process execution, as defined below.
 
 Kame quoted strings do not gain implicit command interpolation: `"$(git status)"`
 is literal text. Existing expression interpolation can explicitly evaluate a
-substitution, for example `"Revision: @(cat $(git rev-parse --short HEAD))"`.
+substitution, for example `"Revision: @(str $(git rev-parse --short HEAD))"`.
 Kash command-word double quotes still allow substitutions as specified below.
 Opaque `.kmk` recipe text remains shell text: a raw recipe `$(...)` is interpreted
 by the recipe's shell, not Kash. A substitution inside an explicit Kame recipe

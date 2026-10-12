@@ -38,7 +38,7 @@ for backend in native wasm; do
 	check 'accepted' do run -l kash -c 'false ? false?; printf accepted'
 	check 'lazy' do run -l kash -c 'printf lazy ? printf (nop [invalid: 1])'
 	check 'fallback' do run -l kash -c 'value = $(false ? printf fallback); printf "%s" $value'
-	check 'abab' do run -l kash -c '(recover X) = $(false ? printf "%s" $X); value = (cat (recover "a") (recover "b") (recover "a") (recover "b")); printf "%s" $value'
+	check 'abab' do run -l kash -c '(recover X) = $(false ? printf "%s" $X); value = (str (recover "a") (recover "b") (recover "a") (recover "b")); printf "%s" $value'
 	test-step "$backend does not recover argument, authority, capture or fallback failures"
 	reject EXPR_INVALID do run -l kash -c 'printf (nop [invalid: 1]) ? printf forbidden'
 	reject CAP_DENIED do run -c '$(false ? printf forbidden)'

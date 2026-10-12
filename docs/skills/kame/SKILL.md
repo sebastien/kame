@@ -59,7 +59,7 @@ Values use whitespace-separated lists and records, not comma-separated items:
 
 ```kame
 (let [project [name: "app" files: [./src/main.c ./src/util.c]]]
-  (cat project.name ": " (count project.files)))
+  (str project.name ": " (count project.files)))
 ```
 
 `(operation args...)` is an application; `([args...] body...)` is a lambda.

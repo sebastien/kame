@@ -28,20 +28,20 @@ batch_source='REM @if(:true)
 yes
 :: @end(if)
 '
-list_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: ["a" "b"]] "plain")'
-record_loop='(render (cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: [first: "A" second: "B"]] "plain")'
+list_loop='(render (str "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: ["a" "b"]] "plain")'
+record_loop='(render (str "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n") [xs: [first: "A" second: "B"]] "plain")'
 inline_plain='(render "Hi @if(:true)there@end!" "plain")'
 inline_html='(render "a<!-- @if(:true) -->b<!-- @end(if) -->c" "html")'
 inline_c='(render "x/* @if(:true) */y/* @end(if) */z" "c")'
 inline_powershell='(render "x<# @if(:true) #>y<# @end(if) #>z" "powershell")'
-inline_for='(render (cat "<@for([item] xs)" "@" "(item)" "@end(for)>!") [xs: ["x" "y"]] "plain")'
-inline_with='(render (cat "x@with([name: " "\"A\"" "])@" "(name)" "@end(with)z") "plain")'
-inline_match='(render (cat "x@match(path)@case(./{slug:*}.md)" "@" "(slug)" "@else other@end(match)z") [path: "./a.md"] "plain")'
-inline_raw='(render (cat "a@raw " "@" "(name)" "@end(raw)c") "plain")'
+inline_for='(render (str "<@for([item] xs)" "@" "(item)" "@end(for)>!") [xs: ["x" "y"]] "plain")'
+inline_with='(render (str "x@with([name: " "\"A\"" "])@" "(name)" "@end(with)z") "plain")'
+inline_match='(render """x@match(path)@case(./{slug:*}.md)@(slug)@else other@end(match)z""" [path: "./a.md"] "plain")'
+inline_raw='(render (str "a@raw " "@" "(name)" "@end(raw)c") "plain")'
 trim_markers='(render "left   @-if(:true)-  right  @-end(if)- \r\n\t tail" "plain")'
 trim_else='(render "A@if(:false) B@else-  C@end(if)D" "plain")'
 format_source='hello @if(:true)yes@end world'
-nested_loop='(render (cat "@for([group] groups)\nouter:" "@" "(index)" "[\n@for([item] group)\n" "@" "(index)" ":" "@" "(item)" ",\n@end(for)\n]" "@" "(index)" "\n@end(for)\n") [groups: [["a" "b"] ["c"]]] "plain")'
+nested_loop='(render (str "@for([group] groups)\nouter:" "@" "(index)" "[\n@for([item] group)\n" "@" "(index)" ":" "@" "(item)" ",\n@end(for)\n]" "@" "(index)" "\n@end(for)\n") [groups: [["a" "b"] ["c"]]] "plain")'
 
 for host in native wasm; do
 	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi

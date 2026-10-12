@@ -289,12 +289,12 @@ func TestComparisonsCatAndText(t *testing.T) {
 		t.Error("mixed ordering was not rejected")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(cat \"a\" :nil 1)")
+	result = evaluate(t, program, "(template-cat \"a\" :nil 1)")
 	if result.Diagnostic.Code != "" || result.Value.Text != "a1" {
 		t.Error("cat did not concatenate")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(cat [a: 1])")
+	result = evaluate(t, program, "(template-cat [a: 1])")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("cat accepted a record")
 	}
@@ -1516,7 +1516,7 @@ func TestRecursiveEvaluationDepthIsBoundedAndRestored(t *testing.T) {
 (character TEXT) = (walk (slice TEXT 1))`)
 	program := eval.Compile(a, engine, parsed, registry)
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a}
-	texts := []string{`(walk "x,y\n")`, `(walk (reduce ([TEXT STEP] (cat TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))`, `(walk "x,y\n")`, `(count (reduce ([TEXT STEP] (cat TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))`}
+	texts := []string{`(walk "x,y\n")`, `(walk (reduce ([TEXT STEP] (str TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))`, `(walk "x,y\n")`, `(count (reduce ([TEXT STEP] (str TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))`}
 	for i := range texts {
 		expression := expr.Parse(a, "call.km", texts[i])
 		if len(expression.Diagnostics) != 0 { t.Error("depth fixture failed to parse") }

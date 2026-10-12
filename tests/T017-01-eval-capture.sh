@@ -20,13 +20,13 @@ evaluates '$(printf "%s" "John Smith")' '"John Smith"'
 evaluates '$(printf "[%s]" "" "*.go" "a; echo injected")' '"[][*.go][a; echo injected]"'
 evaluates '(let [files ["a b" "c"]] $(printf "[%s]" $files))' '"[a b][c]"'
 evaluates '(let [name "unit"] $(printf "%s" ${name}.c))' '"unit.c"'
-evaluates '$(printf "%s" (cat "a" "b"))' '"ab"'
+evaluates '$(printf "%s" (str "a" "b"))' '"ab"'
 evaluates '$(printf "[%s]" (nop ["a b" "c"]))' '"[a b][c]"'
 evaluates '$(printf "%s" ("a" | uppercase))' '"A"'
 evaluates '$(printf "%s" $(printf nested))' '"nested"'
-evaluates '(cat $(printf a) $(printf b))' '"ab"'
-evaluates '(cat (eval "$(printf a)") (eval "$(printf b)"))' '"ab"'
-evaluates '(let [f ([x] $(printf "%s" $x))] (cat (f "a") (f "b")))' '"ab"'
+evaluates '(str $(printf a) $(printf b))' '"ab"'
+evaluates '(str (eval "$(printf a)") (eval "$(printf b)"))' '"ab"'
+evaluates '(let [f ([x] $(printf "%s" $x))] (str (f "a") (f "b")))' '"ab"'
 evaluates '(map ["a" "b"] ([x] $(printf "%s" $x)))' '["a" "b"]'
 evaluates '[name: $(printf record)]' '[name: "record"]'
 evaluates '"$(printf literal)"' '"$(printf literal)"'
@@ -65,7 +65,7 @@ cli_run -- do run --lang expr --allow-run --capture-limit=3 -c '$(printf abcd)'
 cli_expect_status 1
 cli_expect_stdout ''
 cli_expect_stderr_contains CAPTURE_LIMIT
-cli_run -- do run --lang expr --allow-run --capture-limit=3 -c '(cat $(printf abc) $(printf def))'
+cli_run -- do run --lang expr --allow-run --capture-limit=3 -c '(str $(printf abc) $(printf def))'
 cli_expect_status 0
 cli_expect_stdout '"abcdef"'
 cli_run -- do run --lang expr --allow-run --capture-limit=3 -c '$(printf "%s" $(printf abcd))'
@@ -92,7 +92,7 @@ cli_expect_stderr_contains OPT_NO_VALUE
 
 test-step "multiple substitutions are executed exactly once"
 marker="$TMPDIR/capture-marker"
-expression="(cat \$(sh -c \"printf x >> '$marker'; printf a\") \$(printf b))"
+expression="(str \$(sh -c \"printf x >> '$marker'; printf a\") \$(printf b))"
 evaluates "$expression" '"ab"'
 if [ "$(cat "$marker")" = x ]; then test-ok "completed substitution was not replayed"; else test-fail "substitution was replayed"; fi
 expression="(map [1 1] ([x] \$(sh -c \"printf x >> '$marker'; printf a\")))"

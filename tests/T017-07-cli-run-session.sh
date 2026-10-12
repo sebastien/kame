@@ -10,10 +10,10 @@ work="$TMPDIR/session"
 mkdir -p "$work/cwd"
 cat >"$work/values.km" <<'KM'
 name = "Ada"
-(cat "ignored" name)
+(str "ignored" name)
 KM
 cat >"$work/functions.km" <<'KM'
-(greet WHO) = (cat "Hello " WHO)
+(greet WHO) = (str "Hello " WHO)
 KM
 cat >"$work/process.kash" <<'KASH'
 printf "%s\n" (greet name) | cat
@@ -66,7 +66,7 @@ for backend in native wasm; do
 	check '' do run -c ''
 	check '' do run "$work/definitions.kash"
 	check '"Ada"' "$work/values.km" name
-	check '"Hello Ada"' --print-result -c 'name = "Ada"' -c '(cat "Hello " name)'
+	check '"Hello Ada"' --print-result -c 'name = "Ada"' -c '(str "Hello " name)'
 	printf 'printf stdin' | "${command[@]}" -l kash - >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = stdin ]; then test-ok "$backend explicit stdin source"; else test-fail "$backend stdin source"; fi
 
@@ -101,7 +101,7 @@ PYTIME
     fi
 	reject CAPTURE_LIMIT do run --allow-run --capture-limit 1 -l expr -c '$(printf abc)'
 	reject RECIPE_FAIL do run -l expr --allow-run -c '"must-not-print"' -l kash -c '/bin/sh -c "exit 7"'
-	reject PARSE_ERR do run -l expr -c '(cat "a"' -c '"b")'
+	reject PARSE_ERR do run -l expr -c '(str "a"' -c '"b")'
 	test-step "$backend single-source invocation deadline and service output restrictions"
 	reject RECIPE_TIMEOUT do run --timeout 250 -l kmk -c $'default : second\nfirst :\n\tsleep 0.15\nsecond : first\n\tsleep 0.15\n' default
 	service_case=0

@@ -21,7 +21,7 @@ legacy = (shell "touch shell-ran")
 (out "value-out")
 (err "value-err")
 (write "protected" "value-write")
-(cat capture legacy)
+(str capture legacy)
 KM
 cat >"$work/process.kash" <<'KASH'
 printf changed > protected

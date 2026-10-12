@@ -28,32 +28,32 @@ for host in native wasm; do
 	else
 		test-fail "$host malformed regex diagnostic: $(cat "$TMPDIR/$host.regex.invalid.err")"
 	fi
-	"${runner[@]}" do run --lang expr -c '(str (capture 1 (regex-match (pattern (cat "{" "name:~[a-z]+" "}" "{" "~[0-9]+" "}")) "demo42")))' >"$TMPDIR/$host.capture.out" 2>"$TMPDIR/$host.capture.err"
+	"${runner[@]}" do run --lang expr -c '(str (capture 1 (regex-match (pattern (str "{" "name:~[a-z]+" "}" "{" "~[0-9]+" "}")) "demo42")))' >"$TMPDIR/$host.capture.out" 2>"$TMPDIR/$host.capture.err"
 	if [ "$(cat "$TMPDIR/$host.capture.out")" = '"42"' ]; then
 		test-ok "$host returns positional regex captures"
 	else
 		test-fail "$host positional capture: $(cat "$TMPDIR/$host.capture.err")"
 	fi
-	"${runner[@]}" do run --lang expr -c '(str (capture "name" (regex-match (pattern (cat "{" "name:~[a-z]+" "}")) "demo")))' >"$TMPDIR/$host.named.out" 2>"$TMPDIR/$host.named.err"
+	"${runner[@]}" do run --lang expr -c '(str (capture "name" (regex-match (pattern (str "{" "name:~[a-z]+" "}")) "demo")))' >"$TMPDIR/$host.named.out" 2>"$TMPDIR/$host.named.err"
 	if [ "$(cat "$TMPDIR/$host.named.out")" = '"demo"' ]; then
 		test-ok "$host returns named regex captures"
 	else
 		test-fail "$host named capture: $(cat "$TMPDIR/$host.named.err")"
 	fi
-	"${runner[@]}" do run --lang expr -c '(str (capture 0 (regex-match (pattern (cat "{" "~(ab|cd)+" "}x")) "abcdx")))' >"$TMPDIR/$host.group.out" 2>"$TMPDIR/$host.group.err"
+	"${runner[@]}" do run --lang expr -c '(str (capture 0 (regex-match (pattern (str "{" "~(ab|cd)+" "}x")) "abcdx")))' >"$TMPDIR/$host.group.out" 2>"$TMPDIR/$host.group.err"
 	if [ "$(cat "$TMPDIR/$host.group.out")" = '"abcd"' ]; then
 		test-ok "$host supports grouping, alternation and repetition"
 	else
 		test-fail "$host group and alternation: $(cat "$TMPDIR/$host.group.err")"
 	fi
-	"${runner[@]}" do run --lang expr -c '(str (regex-replace (pattern (cat "{" "name:~[a-z]+" "}")) (pattern (cat "pre{" "name" "}post")) "demo"))' >"$TMPDIR/$host.replace.out" 2>"$TMPDIR/$host.replace.err"
+	"${runner[@]}" do run --lang expr -c '(str (regex-replace (pattern (str "{" "name:~[a-z]+" "}")) (pattern (str "pre{" "name" "}post")) "demo"))' >"$TMPDIR/$host.replace.out" 2>"$TMPDIR/$host.replace.err"
 	if [ "$(cat "$TMPDIR/$host.replace.out")" = '"predemopost"' ]; then
 		test-ok "$host replaces using named regex captures"
 	else
 		test-fail "$host regex replacement: $(cat "$TMPDIR/$host.replace.err")"
 	fi
 	status=0
-	"${runner[@]}" do run --lang expr -c '(pattern (cat "{" "~[" "}"))' >"$TMPDIR/$host.invalid.out" 2>"$TMPDIR/$host.invalid.err" || status=$?
+	"${runner[@]}" do run --lang expr -c '(pattern (str "{" "~[" "}"))' >"$TMPDIR/$host.invalid.out" 2>"$TMPDIR/$host.invalid.err" || status=$?
 	if [ "$status" = 1 ] && grep -q PAT_INVALID "$TMPDIR/$host.invalid.err"; then
 		test-ok "$host rejects malformed regex patterns"
 	else

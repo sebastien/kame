@@ -1933,7 +1933,7 @@ func newCat(a mem.Allocator, items []*expr.Expr, span source.Span) *expr.Expr {
 	head := mem.Alloc[expr.Expr](a)
 	head.Kind = expr.Name
 	head.Span = span
-	head.Text = "cat"
+	head.Text = "template-cat"
 	e.Items = slices.Append(a, e.Items, head)
 	for i := range items {
 		e.Items = slices.Append(a, e.Items, items[i])

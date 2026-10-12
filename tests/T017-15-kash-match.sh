@@ -34,8 +34,8 @@ for backend in native wasm; do
 	check 'subjectbody' $'match (let [ignored (out "subject")] "x")\n\tcase "x"\n\t\tprintf "%s" $(printf body)'
 	check waiting $'match (nop "waiting.c")\n\tcase (let [ignored $(printf ready)] "{name:*}.c")\n\t\tprintf "%s" $name'
 	test-step "$backend captures bind lazy definitions, functions and nested controls"
-	check main $'match (nop "./main.c")\n\tcase ./{name:*}.c\n\t\tvalue = $(printf "%s" $name)\n\t\tunused = $(touch forbidden)\n\t\t(f X) = (cat name X)\n\t\tif (nop :true)\n\t\t\tprintf "%s" $value'
-	check 'main.c' $'match (nop "main.c")\n\tcase "{name:*}.c"\n\t\t(f X) = (cat name X)\n\t\tprintf "%s" (f ".c")'
+	check main $'match (nop "./main.c")\n\tcase ./{name:*}.c\n\t\tvalue = $(printf "%s" $name)\n\t\tunused = $(touch forbidden)\n\t\t(f X) = (str name X)\n\t\tif (nop :true)\n\t\t\tprintf "%s" $value'
+	check 'main.c' $'match (nop "main.c")\n\tcase "{name:*}.c"\n\t\t(f X) = (str name X)\n\t\tprintf "%s" (f ".c")'
 	check 'outerinnerouter' $'match (nop "outer")\n\tcase "{name:*}"\n\t\tprintf "%s" $name\n\t\tmatch (nop "inner")\n\t\t\tcase "{name:*}"\n\t\t\t\tprintf "%s" $name\n\t\tprintf "%s" $name'
 	check done $'match $(/bin/sh -c "printf x >> attempts; printf subject")\n\tcase "subject"\n\t\tprintf "%s" $(printf done)'
 	if [ "$(cat "$work/attempts")" = x ] && [ ! -e "$work/forbidden" ]; then test-ok "$backend subject runs once and unused definitions stay lazy"; else test-fail "$backend subject replay or eager definition"; fi

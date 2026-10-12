@@ -152,7 +152,7 @@ func TestLibraryLiftsMapFilterFlatmapOverCompleteBatches(t *testing.T) {
 }
 
 func TestLibraryLiftsReduceAndResumesOuterNestedSource(t *testing.T) {
-	checkLibraryPublications(t, 2, "(reduce ([a b] (cat a (str b))) feed \"\")", []string{"12", "", "34", "9"})
+	checkLibraryPublications(t, 2, "(reduce ([a b] (str a b)) feed \"\")", []string{"12", "", "34", "9"})
 }
 
 func TestStreamUpdateCancelsPendingLibraryCallback(t *testing.T) {
@@ -246,7 +246,7 @@ func TestLibraryCoalescesTwoStreamInputsBeforeInvocation(t *testing.T) {
 	defer registry.Free()
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "fixture-stream", Call: libraryStreamOperation, Context: streamRecord, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "coalesced.km", "left = (fixture-stream)\nright = (fixture-stream)\nresult = (out (cat (uppercase left) (uppercase right)))\n")
+	parsed := script.Parse(a, "coalesced.km", "left = (fixture-stream)\nright = (fixture-stream)\nresult = (out (str (uppercase left) (uppercase right)))\n")
 	defer parsed.Free()
 	program := eval.Compile(a, engine, parsed, registry)
 	defer program.Free()

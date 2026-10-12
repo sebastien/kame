@@ -172,7 +172,8 @@ func opTerminalStyle(c *eval.Context, state any, v []core.Value) eval.Result {
 	return eval.Result{Value: core.NewString(c.Run, b.String())}
 }
 
-func opCat(c *eval.Context, s any, v []core.Value) eval.Result {
+// opTemplateCat is the document-lowering primitive, not scalar conversion.
+func opTemplateCat(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	b := strings.NewBuilder(c.Run)
 	defer b.Free()

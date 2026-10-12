@@ -12,7 +12,7 @@ cat >"$work/main.km" <<'KM'
 (out "界")
 include ./nested/child.km
 (out "after")
-(cat name "!")
+(str name "!")
 KM
 cat >"$work/nested/child.km" <<'KM'
 include ./values.km

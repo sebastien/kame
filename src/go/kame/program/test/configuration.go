@@ -114,8 +114,8 @@ func TestAssignmentShapedTargetsValidateAfterRegistration(t *testing.T) {
 func TestParameterOverridesApplyBeforeOutputAndGeneratorEvaluation(t *testing.T) {
 	a := t.Allocator()
 	fixtures := []string{
-		"@(cat \"./mode=\" mode) :\n\ttrue\n",
-		"generate outputs = [[kind: \"file\" target: (cat \"./mode=\" mode) inputs: [] order-only: [] recipe: [\"true\"]]]\n",
+		"@(str \"./mode=\" mode) :\n\ttrue\n",
+		"generate outputs = [[kind: \"file\" target: (str \"./mode=\" mode) inputs: [] order-only: [] recipe: [\"true\"]]]\n",
 	}
 	for i := range fixtures {
 		parsed := script.Parse(a, "parameter-generation.kmk", "mode = (read \"not-evaluated\")\n"+fixtures[i])
@@ -145,7 +145,7 @@ func TestParameterOverridesApplyBeforeOutputAndGeneratorEvaluation(t *testing.T)
 
 func TestUnknownParameterFailsCompilationAfterGeneration(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "unknown-parameter.kmk", "mode = (read \"not-evaluated\")\ngenerate outputs = [[kind: \"file\" target: (cat \"./mode=\" mode) inputs: [] order-only: [] recipe: [\"exit 99\"]]]\n")
+	parsed := script.Parse(a, "unknown-parameter.kmk", "mode = (read \"not-evaluated\")\ngenerate outputs = [[kind: \"file\" target: (str \"./mode=\" mode) inputs: [] order-only: [] recipe: [\"exit 99\"]]]\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Parameters: []string{"mode=debug", "./mode=debug", "unknown=value"}})

@@ -20,7 +20,7 @@ record = [size: count]
 files = [./first ./missing ./second]
 selected = (filter predicate files)
 contents = (map read selected)
-result = [(size [1 2]) (map count [[1] [2 3]]) (reduce cat ["a" "b"] "")]
+result = [(size [1 2]) (map count [[1] [2 3]]) (reduce str ["a" "b"] "")]
 KM
 cat >"$work/values.kash" <<'KASH'
 size = count

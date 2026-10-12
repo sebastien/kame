@@ -151,7 +151,7 @@ func TestWildcardTraversalPrunesUnrelatedSubtrees(t *testing.T) {
 	memory.SetFile("src/keep/one.go", []byte("keep"))
 	memory.SetFile("src/noise/deep/level/file.txt", []byte("noise"))
 	host := &countingReadDirHost{memory: memory}
-	parsed := script.Parse(a, "glob.kmk", "./output :\n\t@(yield (str (wildcard \"./src/*/*.go\")))\n")
+	parsed := script.Parse(a, "glob.kmk", "./output :\n\t@(yield (json (wildcard \"./src/*/*.go\")))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -1989,7 +1989,7 @@ func TestWildcardRelativePathDoesNotLeak(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield (str (wildcard \"./*\")))\n")
+	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield (json (wildcard \"./*\")))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})

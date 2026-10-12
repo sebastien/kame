@@ -7,4 +7,4 @@ task default : report
 
 task env-report :
 	echo 'env=@(env "CACHE_VALUE")' >> ./runs.log
-	@(out (cat "env=" (env "CACHE_VALUE") "\n"))
+	@(out (str "env=" (env "CACHE_VALUE") "\n"))

@@ -115,7 +115,7 @@ replacement results must agree across native, WASM CLI and evaluator tests.
 - Recipe and input expressions can refer to anonymous captures through `_N`.
 - Existing named-only rule matching, input rendering, cache identity, planning,
   diagnostics and source formatting remain stable.
-- `(pattern (cat "./" "{" "name:*" "}.c"))` returns a pattern and can be
+- `(pattern (str "./" "{" "name:*" "}.c"))` returns a pattern and can be
   passed to existing matching/replacement operations; malformed runtime
   patterns produce `PAT_INVALID`.
 - `{name:~[a-z]+}` and `{~(ab|cd)+}` parse in expression patterns and file-rule

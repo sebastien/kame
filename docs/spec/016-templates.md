@@ -74,7 +74,7 @@ without whitespace are malformed, not silently separated.
 Multi-argument directives retain explicit argument slots: `@for([item] LIST SEP)`,
 `@let(NAME EXPR)`, and `@include(PATH PAYLOAD)`. Applications in these slots still
 need their own parentheses, for example `@for([item] (wildcard ./src/*.c))`,
-`@let(name (cat first last))`, or `@include((cat ./pages/ name) payload)`.
+`@let(name (str first last))`, or `@include((str ./pages/ name) payload)`.
 Unparenthesized tokens are never guessed to be a computed list/path plus optional
 separator/payload. `@end(KIND)` is a literal block label, not an expression call.
 
@@ -153,7 +153,7 @@ without an open block.
 A body is a sequence of literal text, inline expansions, and nested blocks.
 Write `L(x)` for the lowering of `x`. Literal text lowers to a string literal,
 and an inline `@(E)` lowers to `E`. A reference is written as an expression, for
-example `@(post.title)`. A body `B1 ... Bn` lowers to `(cat L(B1) ... L(Bn))`,
+example `@(post.title)`. A body `B1 ... Bn` lowers to `(template-cat L(B1) ... L(Bn))`,
 and an empty body lowers to `(cat)`, the empty string.
 Blocks lower as follows:
 
@@ -267,13 +267,17 @@ they complete; nested dynamic dependencies are honored, not dropped.
 
 ## Primitives
 
-### cat
+### template-cat
 
-`(cat VALUE...)` stringifies each argument with the rendering rules of
+The lowering-only `(template-cat VALUE...)` primitive stringifies each argument with the rendering rules of
 `005-evaluation.md` (scalars and lists; a list joins its items with one ASCII
 space; `:nil` is empty) and concatenates the results. A record or `Bytes`
 argument is `EXPR_INVALID`, matching inline template rendering. The result is a
 `String`; zero arguments produce the empty string.
+
+This rendering primitive is distinct from scalar `str` conversion in spec 038.
+`cat` is not a registered Kame string operation; Kash command-position `cat`
+continues to name the external executable.
 
 ### text
 
@@ -407,7 +411,7 @@ batch comment conventions, canonical formatting, and loop index/key bindings.
   a dependency; a `Bytes` source requires an explicit style.
 - Extension inference selects `html`, `c`, `hash`, `dash`, `semi`, and `percent`;
   an unknown extension without an override is `TPL_STYLE`.
-- `(cat "a" :nil 1)` is `a1`; a record or `Bytes` argument is `EXPR_INVALID`.
+- `(template-cat "a" :nil 1)` is `a1`; a record or `Bytes` argument is `EXPR_INVALID`.
 - `(text (read ./page.html))` yields its UTF-8 string; invalid UTF-8 is
   `EXPR_INVALID`.
 - `(if c a b)` evaluates only the selected branch.

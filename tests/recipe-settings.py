@@ -111,15 +111,15 @@ with tempfile.TemporaryDirectory() as temporary:
     run(staged, ['./staged'], expected='once')
     assert (project / 'staged').read_text() == 'AB'
     run(staged, ['--force', './staged'], expected='once')
-    nested = 'SHELL = kash\n./nested : ./input\n\t(yield (cat (let [] (out "a") "A") (cat (let [] (out "b") "B") (text (read "./late")))))\n'
+    nested = 'SHELL = kash\n./nested : ./input\n\t(yield (str (let [] (out "a") "A") (str (let [] (out "b") "B") (text (read "./late")))))\n'
     run(nested, ['./nested'], expected='ab')
     assert (project / 'nested').read_text() == 'ABB'
     (project / 'first').write_text('A')
     (project / 'second').write_text('C')
-    callbacks = 'SHELL = kash\n./callbacks : ./input\n\t(yield (join (map ([file] (cat (text (read file)) (text (read "./late")))) [./first ./second]) "|"))\n'
+    callbacks = 'SHELL = kash\n./callbacks : ./input\n\t(yield (join (map ([file] (str (text (read file)) (text (read "./late")))) [./first ./second]) "|"))\n'
     run(callbacks, ['./callbacks'])
     assert (project / 'callbacks').read_text() == 'AB|CB'
-    mutable = 'SHELL = kash\n./mutable : ./input\n\t(yield (let [value "A"] (def value "C") (cat value (text (read "./late")))))\n'
+    mutable = 'SHELL = kash\n./mutable : ./input\n\t(yield (let [value "A"] (def value "C") (str value (text (read "./late")))))\n'
     run(mutable, ['./mutable'])
     assert (project / 'mutable').read_text() == 'CB'
     run('SHELL = "/missing-shell"\nchosen : ; [shell: "/bin/sh"]\n\tprintf override\n', expected='override')

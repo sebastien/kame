@@ -34,12 +34,12 @@ for backend in native wasm; do
 	check yes do render --comment plain -c '@if(:false)no@elif(eq "x" "x")yes@end(if)'
 	check yes do render --comment plain -c '@if(([x] (eq x "yes")) "yes")yes@end(if)'
 	check Ada do render --comment plain -c '@with(nop [name: "Ada"])@(name)@end(with)'
-	check yes do render --comment plain -c '@match(cat "a" "b")@case(cat "a" "b")yes@else no@end(match)'
+	check yes do render --comment plain -c '@match(str "a" "b")@case(str "a" "b")yes@else no@end(match)'
 	check_bytes $'a\nb\n' do render --comment plain -c $'@for([item] (list "a" "b"))\n@(item)\n@end(for)'
 	check_bytes $'a\n,b\n' do render --comment plain -c $'@for([item] (list "a" "b") ",")\n@(item)\n@end(for)'
-	check Ada do render --comment plain -c $'@let(name (cat "A" "da"))\n@(name)'
+	check Ada do render --comment plain -c $'@let(name (str "A" "da"))\n@(name)'
 	printf '@(name)' >"$work/child.md"
-	check Ada do render --comment plain --allow-read -c "@include((cat \"$work/\" \"child.md\") [name: \"Ada\"])"
+	check Ada do render --comment plain --allow-read -c "@include((str \"$work/\" \"child.md\") [name: \"Ada\"])"
 	printf '<!-- @include("%s/child.md") -->\n' "$work" >"$work/second.md"
 	printf '<!-- @include("%s/second.md") -->\n' "$work" >"$work/first.md"
 	check Ada do render --comment plain --allow-read -c "@include(\"$work/first.md\" [name: \"Ada\"])"
@@ -78,14 +78,14 @@ for backend in native wasm; do
 		if cmp -s "$work/formatted" "$work/expected" && cmp -s "$work/formatted" "$work/again"; then test-ok "$backend $style canonical directive"; else test-fail "$backend $style formatting"; fi
 	done
 	test-step "$backend interpolation migration and inert text"
-	check '" (str [VALUE]) "' do run --lang expr -c '(cat "@(" (str [VALUE]) ")")'
-	check '"@(hello)"' do run --lang expr -c '(cat """@(""" "hello" ")")'
+	check '" (str [VALUE]) "' do run --lang expr -c '(str "@(" (str [VALUE]) ")")'
+	check '"@(hello)"' do run --lang expr -c '(str """@(""" "hello" ")")'
 	reject PARSE_ERR do run --lang expr -c '"@("'
-	reject EVAL_DEPTH do run -c '(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))' -c '(character TEXT) = (walk (slice TEXT 1))' -c '(walk (reduce ([TEXT STEP] (cat TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))'
+	reject EVAL_DEPTH do run -c '(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))' -c '(character TEXT) = (walk (slice TEXT 1))' -c '(walk (reduce ([TEXT STEP] (str TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))'
 	check '"value=xy"' do run --lang expr -c '"value=@(join ["x" "y"] "")"'
 	check '"value=xy"' do run --lang expr -c '"value={(join ["x" "y"] "")}"'
 	check value=xy do run --lang kash -c 'value = "value={(join ["x" "y"] "")}"; printf "%s" $value'
-	check '"outer x2y end"' do run --lang expr -c '"outer {(cat "x{(count [1 2])}y")} end"'
+	check '"outer x2y end"' do run --lang expr -c '"outer {(str "x{(count [1 2])}y")} end"'
 	check '"@(missing) {(missing)}"' do run --lang expr -c '"\@(missing) \{(missing)}"'
 	check '"@(missing) {(missing)}"' do run --lang expr -c '"""@(missing) {(missing)}"""'
 	check '@(missing) {(missing)}' do render --comment plain -c $'@raw\n@(missing) {(missing)}\n@end(raw)'
@@ -95,12 +95,12 @@ for backend in native wasm; do
 	printf '%s\n' '@@if((eq "x" "x"))' '\@if(eq "x" "x")' '@raw' '@(missing) {(missing)} @if((eq "x" "x"))' '@end(raw)' >"$work/raw.tmpl"
 	"${runner[@]}" do fmt --lang template --comment plain "$work/raw.tmpl" >"$work/raw.formatted"
 	if cmp -s "$work/raw.tmpl" "$work/raw.formatted"; then test-ok "$backend formatting preserves raw and escaped directives"; else test-fail "$backend raw formatting"; fi
-	reject PARSE_ERR do run --lang expr -c '"bad @(cat "x""y")"'
+	reject PARSE_ERR do run --lang expr -c '"bad @(str "x""y")"'
 	reject PARSE_ERR do run --lang expr -c '"bad {(count [1 2])"'
-	printf '%s\n' 'VALUE = "outer {(cat "x{(count [1 2])}y")} end"' 'RAW = """@(missing) {(missing)}"""' 'ESCAPED = "\@(missing) \{(missing)}"' >"$work/migration.km"
+	printf '%s\n' 'VALUE = "outer {(str "x{(count [1 2])}y")} end"' 'RAW = """@(missing) {(missing)}"""' 'ESCAPED = "\@(missing) \{(missing)}"' >"$work/migration.km"
 	"${runner[@]}" do fmt --lang km "$work/migration.km" >"$TMPDIR/$backend.migrated"
 	"${runner[@]}" do fmt --lang km "$TMPDIR/$backend.migrated" >"$work/again"
-	if grep -Fq 'VALUE = "outer @(cat "x@(count [1 2])y") end"' "$TMPDIR/$backend.migrated" && grep -Fq 'ESCAPED = "\@(missing) \{(missing)}"' "$TMPDIR/$backend.migrated" && cmp -s "$TMPDIR/$backend.migrated" "$work/again"; then test-ok "$backend interpolation migration is idempotent"; else test-fail "$backend interpolation migration"; cat "$TMPDIR/$backend.migrated"; fi
+	if grep -Fq 'VALUE = "outer @(str "x@(count [1 2])y") end"' "$TMPDIR/$backend.migrated" && grep -Fq 'ESCAPED = "\@(missing) \{(missing)}"' "$TMPDIR/$backend.migrated" && cmp -s "$TMPDIR/$backend.migrated" "$work/again"; then test-ok "$backend interpolation migration is idempotent"; else test-fail "$backend interpolation migration"; cat "$TMPDIR/$backend.migrated"; fi
 	check '"outer x2y end"' do run --lang km -f "$TMPDIR/$backend.migrated" VALUE
 	for lang in kmk kash; do
 		"${runner[@]}" do fmt --lang "$lang" "$work/migration.km" >"$work/$lang.migrated"

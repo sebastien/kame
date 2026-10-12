@@ -23,7 +23,7 @@ printf release >"$project/release.txt"
 for backend in native wasm; do
  test-step "$backend computed lookup and defaults"
  if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
- for sample in '(get [one: 1 two: 2] (cat "t" "wo"))|2' '(get [one: 1] "missing")|:nil' '(get [one: 1] "missing" :false)|:false' '(get [one: [a: 3]] "one")|[a: 3]' '(apply (get [used: ([x] (cat "hello " x)) unused: ([x] x)] "used" ([x] x)) ["Ada"])|"hello Ada"'; do
+ for sample in '(get [one: 1 two: 2] (str "t" "wo"))|2' '(get [one: 1] "missing")|:nil' '(get [one: 1] "missing" :false)|:false' '(get [one: [a: 3]] "one")|[a: 3]' '(apply (get [used: ([x] (str "hello " (join x " "))) unused: ([x] x)] "used" ([x] x)) ["Ada"])|"hello Ada"'; do
   "${runner[@]}" do run --lang expr -c "${sample%|*}" >"$project/value" 2>"$project/error"
   if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend ${sample%|*}"; else test-fail "$backend record lookup"; fi
  done

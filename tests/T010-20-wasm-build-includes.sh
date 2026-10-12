@@ -16,7 +16,7 @@ include ./nested/rules.kmk
 default : leaf
 	@(out "@(message)\n")
 KMK
-printf 'include ./base.kmk\nmessage = (cat greeting " include")\n' >"$work/project/nested/values.kmk"
+printf 'include ./base.kmk\nmessage = (str greeting " include")\n' >"$work/project/nested/values.kmk"
 printf 'greeting = "nested"\n' >"$work/project/nested/base.kmk"
 cat >"$work/project/nested/rules.kmk" <<'KMK'
 leaf :

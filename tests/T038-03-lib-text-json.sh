@@ -26,6 +26,8 @@ for backend in native wasm; do
 	check '"{\"a\":[true,null],\"z\":2}"' '(json [z: 2 a: [:true :nil]])'
 	check ':true' '(eq (parse-json (json [z: 2 a: [:true :nil]])) [a: [:true :nil] z: 2])'
 	check ':true' '(eq (parse-json (json "a\n\t\\\"")) "a\n\t\\\"")'
+	check '"a1 2b"' '(render """a@(:nil)@([1 2])b""" "plain")'
+	reject '(cat "a" "b")' OP_UNKNOWN
 	for operation in str json; do
 		for value in '([x] x)' './path/{*}' '(resource "mem://x/file")' '[bad: ([x] x)]'; do reject "($operation $value)" EXPR_INVALID; done
 	done

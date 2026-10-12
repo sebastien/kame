@@ -39,7 +39,7 @@ for backend in native wasm; do
 	check "(let [dir \"$work/left\"] \$(:cwd \$dir :PATH bin ./bin/stage-print found))" 0 '"found"' ''
 	check '$(:KASH_SETUP_VALUE hello /usr/bin/printenv KASH_SETUP_VALUE)' 0 '"hello\n"' ''
 	check '$(:KASH_SETUP_VALUE left /usr/bin/printenv KASH_SETUP_VALUE | :KASH_SETUP_VALUE right /bin/sh -c "cat; printenv KASH_SETUP_VALUE")' 0 '"left\nright\n"' ''
-	check '(cat $(:KASH_SETUP_VALUE one printenv KASH_SETUP_VALUE) $(:KASH_SETUP_VALUE two printenv KASH_SETUP_VALUE))' 0 '"one\ntwo\n"' ''
+	check '(str $(:KASH_SETUP_VALUE one printenv KASH_SETUP_VALUE) $(:KASH_SETUP_VALUE two printenv KASH_SETUP_VALUE))' 0 '"one\ntwo\n"' ''
 	check '$(:KASH_SETUP_VALUE (nop :false) printenv KASH_SETUP_VALUE)' 0 '"false\n"' ''
 	check '$(:KASH_SETUP_VALUE "" printenv KASH_SETUP_VALUE)' 0 '"\n"' ''
 	check '$(printf "%s" :cwd :timeout :KASH_SETUP_VALUE)' 0 '":cwd:timeout:KASH_SETUP_VALUE"' ''

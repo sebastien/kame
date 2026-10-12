@@ -440,12 +440,12 @@ func TestRuntimePatternConstruction(t *testing.T) {
 	}
 	parsed := script.Parse(a, "pattern", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, `(pattern (cat "./" "{" "name:*" "}.c"))`)
+	result := evaluate(t, program, `(pattern (str "./" "{" "name:*" "}.c"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Pattern || result.Value.Text != "./{name:*}.c" {
 		t.Error("runtime pattern construction did not return the validated pattern")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(pattern (cat "./" "{" "name:*" "}" "{" "_0" "}"))`)
+	result = evaluate(t, program, `(pattern (str "./" "{" "name:*" "}" "{" "_0" "}"))`)
 	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("runtime pattern construction accepted mixed matcher and reference groups")
 	}
@@ -465,7 +465,7 @@ func TestRegexCaptureOperations(t *testing.T) {
 	}
 	parsed := script.Parse(a, "regex", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	match := `(regex-match (pattern (cat "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42")`
+	match := `(regex-match (pattern (str "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42")`
 	result := evaluate(t, program, match)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Record {
 		t.Error("regex-match did not return a match record")
@@ -477,52 +477,52 @@ func TestRegexCaptureOperations(t *testing.T) {
 		}
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(capture 1 (regex-match (pattern (cat "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42"))`)
+	result = evaluate(t, program, `(capture 1 (regex-match (pattern (str "{" "name:~" "[a-z]+" "}" "{" "~" "[0-9]+" "}")) "demo42"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "42" {
 		t.Error("capture did not select the indexed value")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(capture "name" (regex-match (pattern (cat "{" "name:~" "[a-z]+" "}")) "demo"))`)
+	result = evaluate(t, program, `(capture "name" (regex-match (pattern (str "{" "name:~" "[a-z]+" "}")) "demo"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo" {
 		t.Error("capture did not select the named value")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(capture 1 (regex-match (pattern (cat "{" "name:~[a-z]+}" "-" "{" "name:~[a-z]+}")) "abc-abc"))`)
+	result = evaluate(t, program, `(capture 1 (regex-match (pattern (str "{" "name:~[a-z]+}" "-" "{" "name:~[a-z]+}")) "abc-abc"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "abc" {
 		t.Error("repeated named regex groups did not populate each positional slot")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~" "[a-z]+" "}")) (pattern (cat "x{" "name" "}")) "demo")`)
+	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~" "[a-z]+" "}")) (pattern (str "x{" "name" "}")) "demo")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "xdemo" {
 		t.Error("regex-replace did not expand a named capture")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) (pattern (cat "x{" "name" "}")) ["demo" "42"])`)
+	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~[a-z]+}")) (pattern (str "x{" "name" "}")) ["demo" "42"])`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 || result.Value.List[0].Kind != core.String || result.Value.List[0].Text != "xdemo" || result.Value.List[1].Kind != core.Nil {
 		t.Error("regex-replace did not map captures over a list")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) (pattern (cat "x{" "missing" "}")) "demo")`)
+	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~[a-z]+}")) (pattern (str "x{" "missing" "}")) "demo")`)
 	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("regex-replace accepted a missing capture reference")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) "x" :nil)`)
+	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~[a-z]+}")) "x" :nil)`)
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("regex-replace accepted a nil subject")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (cat "{" "name:~[a-z]+}")) "x" 42)`)
+	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~[a-z]+}")) "x" 42)`)
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("regex-replace accepted a non-string subject")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-match (pattern (cat "{" "~(ab|cd)+" "}")) "abcd")`)
+	result = evaluate(t, program, `(regex-match (pattern (str "{" "~(ab|cd)+" "}")) "abcd")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.Record {
 		t.Error("regex groups, alternation or repetition did not match")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-match (pattern (cat "{" "~[" "}")) "a")`)
+	result = evaluate(t, program, `(regex-match (pattern (str "{" "~[" "}")) "a")`)
 	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("malformed runtime regex was accepted")
 	}
@@ -547,12 +547,12 @@ func TestDocumentMatchRendersNamedCaptureAndFallback(t *testing.T) {
 		t.Error("baseline expression match failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(render (cat "@match(\"./posts/demo.md\")\n@case(./posts/{slug:*}.md)\n@" "(slug)\n@else\nother\n@end(match)\n") "plain")`)
+	result = evaluate(t, program, `(render (str "@match(\"./posts/demo.md\")\n@case(./posts/" "{" "slug:*" "}.md)\n@" "(slug)\n@else\nother\n@end(match)\n") "plain")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo\n" {
 		t.Error("document match selected capture mismatch: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(render (cat "@match(\"./other.txt\")\n@case(./posts/{slug:*}.md)\n@" "(slug)\n@else\nother\n@end(match)\n") "plain")`)
+	result = evaluate(t, program, `(render (str "@match(\"./other.txt\")\n@case(./posts/" "{" "slug:*" "}.md)\n@" "(slug)\n@else\nother\n@end(match)\n") "plain")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "other\n" {
 		t.Error("document match fallback mismatch: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
 	}
@@ -572,7 +572,7 @@ func TestDocumentForBindsIndexKeyAndValue(t *testing.T) {
 	}
 	parsed := script.Parse(a, "document-for", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	templateText := `(cat "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n")`
+	templateText := `(str "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n")`
 	result := evaluate(t, program, `(render `+templateText+` [xs: ["a" "b"]] "plain")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "0::a;\n1::b;\n" {
 		t.Error("list loop did not bind its zero-based index, nil key and item value")
@@ -675,11 +675,11 @@ func TestComputedRecordLookupTransfersSelectedCallables(t *testing.T) {
 	p := eval.Compile(a, engine, parsed, registry)
 	defer p.Free()
 	samples := []string{
-		"(get [one: 1 two: 2] (cat \"t\" \"wo\"))",
+		"(get [one: 1 two: 2] (str \"t\" \"wo\"))",
 		"(get [one: 1] \"missing\" 7)",
 		"(get [one: 1] \"missing\")",
-		"(apply (get [used: ([x] (cat \"hello \" x)) unused: ([x] x)] \"used\" ([x] x)) [\"Ada\"])",
-		"(apply (get [unused: ([x] x)] \"missing\" ([x] (cat \"fallback \" x))) [\"Ada\"])",
+		"(apply (get [used: ([x] (str \"hello \" (join x \" \"))) unused: ([x] x)] \"used\" ([x] x)) [\"Ada\"])",
+		"(apply (get [unused: ([x] x)] \"missing\" ([x] (str \"fallback \" (join x \" \")))) [\"Ada\"])",
 		"(get [one: 1] 1)",
 	}
 	for i := range samples {

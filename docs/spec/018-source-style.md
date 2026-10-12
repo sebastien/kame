@@ -234,7 +234,7 @@ Short named values and function definitions remain inline:
 
 ```kame
 PAGE_NAMES = (map page-name PAGES)
-(page-url name) = (cat "/" name "/")
+(page-url name) = (str "/" name "/")
 ```
 
 If a definition does not fit inline, put its value below the operator and
@@ -283,7 +283,7 @@ PAGE_NAMES = (map ([page] page.name) PAGES)
 NAVIGATION = (map navigation-item PAGES)
 
 # Page transformations
-(page-url name) = (cat "/" name "/")
+(page-url name) = (str "/" name "/")
 (publishable? page) = (not page.draft)
 
 (navigation-item page) = [label: page.title href: (page-url page.name)]

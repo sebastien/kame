@@ -223,7 +223,7 @@ Single quote is reserved and is not an alternative string delimiter.
 
 Plain `$(...)` inside a quoted expression string is literal text. To execute a
 Kash process there, use existing expression interpolation, for example
-`"Revision: @(cat $(git rev-parse --short HEAD))"`. This does not change the
+`"Revision: @(str $(git rev-parse --short HEAD))"`. This does not change the
 ownership of opaque recipe text by its shell.
 
 ### References

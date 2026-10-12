@@ -42,8 +42,8 @@ application shorthand: `@if(exists? ./file)` equals `@if((exists? ./file))`.
 `@if(enabled)` reads a value; `@if((predicate))` calls without arguments.
 Formatters prefer the shorthand. Multi-argument `for`, `let`, and `include`
 keep explicit slots, so applications there need parentheses:
-`@for([item] (wildcard ./src/*.c))`, `@let(name (cat first last))`, and
-`@include((cat ./pages/ name) payload)`. No optional-slot guessing is performed.
+`@for([item] (wildcard ./src/*.c))`, `@let(name (str first last))`, and
+`@include((str ./pages/ name) payload)`. No optional-slot guessing is performed.
 
 ```html
 <h1>@(title)</h1>

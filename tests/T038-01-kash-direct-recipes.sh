@@ -144,7 +144,7 @@ SHELL = kash
 ./published : ./input
 	value = (let [] (out "once") "A")
 	(write ./side-output "staged")
-	(yield (cat value (text (read ./late))))
+	(yield (str value (text (read ./late))))
 ./late : ./input ; [shell: "/bin/sh"]
 	printf B > @>
 ./failed : ./input
