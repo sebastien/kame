@@ -275,7 +275,8 @@ returning. `exists?` also registers a dependency so creation or removal can
 invalidate its consumer.
 
 `stat` follows the final symlink and returns `name`, `size`, `mode`, and `dir`.
-`lstat` returns those fields plus `link`; size and mode describe the link itself
+`lstat` returns those fields plus `link` and `regular`; `regular` identifies a
+regular-file entry without interpreting platform mode bits. Size and mode describe the link itself
 when `link` is true. A symlink to a directory therefore has `dir: false` under
 `lstat`. Mode is the host's metadata integer; use `link`, not platform mode bits,
 for portable classification. Dangling and looping final links are inspectable

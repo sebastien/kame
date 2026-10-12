@@ -859,6 +859,7 @@ function matchSegments(pattern, pi, name, ni) {
   while (nend < name.length && name[nend] !== '/') nend++;
   const segment = pattern.slice(pi, pend);
   if (segment === '**') {
+    if (pend === pattern.length) return true;
     if (matchSegments(pattern, nextSegment(pattern, pend), name, ni)) return true;
     for (let cursor = ni; cursor < name.length; cursor++) {
       if (name[cursor] === '/' && matchSegments(pattern, nextSegment(pattern, pend), name, cursor + 1)) return true;
@@ -887,7 +888,8 @@ function collectPaths(directory, names) {
   let entries;
   try {
     entries = readdirSync(directory, { withFileTypes: true });
-  } catch {
+  } catch (error) {
+    if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
     return;
   }
   for (const entry of entries) {
@@ -978,7 +980,7 @@ function resourceExists(name) {
 
 function resourceWildcard(pattern) {
   if (isMemoryResource(pattern)) {
-    return [...memoryResourceFiles.keys()].filter((name) => matchSegments(pattern, 0, name, 0)).sort();
+    return [...new Set([...memoryResourceFiles.keys(), ...memoryResourceDirectories])].filter((name) => matchSegments(pattern, 0, name, 0)).sort();
   }
   if (isFileResource(pattern)) {
     return wildcardPaths(filesystemPath(pattern)).map((name) => pathToFileURL(name).href);
@@ -1005,7 +1007,11 @@ function writeResource(name, data) {
 function wildcardPaths(pattern) {
   while (pattern.startsWith('./')) pattern = pattern.slice(2);
   const names = [];
-  collectPaths(globRoot(pattern), names);
+  const root = globRoot(pattern);
+  if (root === pattern) {
+    try { lstatSync(root); names.push(root); }
+    catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+  } else collectPaths(root, names);
   const matches = [];
   for (const name of names) {
     if (matchSegments(pattern, 0, name, 0)) matches.push(name.startsWith('/') ? name : `./${name}`);
@@ -1423,7 +1429,7 @@ class Module {
       try {
         const info = await statResource(payload, undefined, kind === 30);
         const result = { name: payload, size: info.size, mode: info.mode, dir: info.isDirectory() };
-        if (kind === 30) result.link = info.isSymbolicLink();
+        if (kind === 30) { result.link = info.isSymbolicLink(); result.regular = info.isFile(); }
         return this.completeJSON(instance, request, result);
       } catch (error) {
         return this.completeFailure(instance, request, 'FS_ERR', context.inspection ? 'cannot stat file' : `cannot stat file: ${error.message}`);
@@ -1462,7 +1468,8 @@ class Module {
     }
     if (kind === 6) {
       if (!grants.read) return this.deny(instance, request, 'read');
-      return this.completeJSON(instance, request, resourceWildcard(payload));
+      try { return this.completeJSON(instance, request, resourceWildcard(payload)); }
+      catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot traverse wildcard path'); }
     }
     if (kind === 2) {
       if (!grants.write) return this.deny(instance, request);
@@ -3423,7 +3430,9 @@ function catPlainJSON(typed, depth = 0) {
 }
 
 async function watchFingerprint(kind, name, metadata = false) {
-  if (kind === 'glob') return JSON.stringify(resourceWildcard(name));
+  if (kind === 'glob') {
+    try { return JSON.stringify(resourceWildcard(name)); } catch { return 'unavailable'; }
+  }
   let content;
   try {
     const bytes = await readResource(name);

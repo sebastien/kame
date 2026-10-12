@@ -36,7 +36,9 @@ func (p *Program) InvalidateResource(key core.ResourceKey) {
 // does not change graph state or evaluate definitions.
 func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 	if key.Kind == core.ResourceGlob {
-		value := p.wildcard(key.Name)
+		result := p.wildcard(key.Name)
+		if result.Diagnostic.Code != "" { result.Diagnostic.Free(p.Alloc); return cloneText(p.Alloc, "unavailable") }
+		value := result.Value
 		b := strings.NewBuilder(p.Alloc)
 		for i := range value.List {
 			b.WriteString(value.List[i].Text)

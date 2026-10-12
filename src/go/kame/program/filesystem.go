@@ -78,7 +78,7 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot stat file")
 			return completion
 		}
-		fields := []core.RecordField{{Key: "name", Value: core.NewString(p.Alloc, name)}, {Key: "size", Value: core.Value{Kind: core.Int, Int: result.Info.Size}}, {Key: "mode", Value: core.Value{Kind: core.Int, Int: int64(result.Info.Mode)}}, {Key: "dir", Value: core.Value{Kind: core.Bool, Bool: result.Info.IsDir}}, {Key: "link", Value: core.Value{Kind: core.Bool, Bool: result.Info.Symlink}}}
+		fields := []core.RecordField{{Key: "name", Value: core.NewString(p.Alloc, name)}, {Key: "size", Value: core.Value{Kind: core.Int, Int: result.Info.Size}}, {Key: "mode", Value: core.Value{Kind: core.Int, Int: int64(result.Info.Mode)}}, {Key: "dir", Value: core.Value{Kind: core.Bool, Bool: result.Info.IsDir}}, {Key: "link", Value: core.Value{Kind: core.Bool, Bool: result.Info.Symlink}}, {Key: "regular", Value: core.Value{Kind: core.Bool, Bool: result.Info.Regular}}}
 		if op == host.OpStat { fields = fields[:4] }
 		completion.Value, completion.HasValue = core.NewRecord(p.Alloc, fields), true
 		for i := range fields {
@@ -87,14 +87,15 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 		return completion
 	}
 	if op == host.OpWildcard {
-		completion.Value, completion.HasValue = p.wildcard(name), true
+		result := p.wildcard(name)
+		completion.Value, completion.HasValue, completion.Diagnostic = result.Value, result.HasValue, result.Diagnostic
 		return completion
 	}
 	completion.Diagnostic = failure(p.Alloc, "HOST_FAIL", "unknown filesystem request")
 	return completion
 }
 
-func (p *Program) wildcard(pattern string) core.Value {
+func (p *Program) wildcard(pattern string) core.Completion {
 	pattern = p.canonicalTarget(pattern, true)
 	defer mem.FreeString(p.Alloc, pattern)
 	root := globRoot(p.Alloc, pattern)
@@ -107,7 +108,13 @@ func (p *Program) wildcard(pattern string) core.Value {
 			start++
 		}
 	}
-	p.collectGlob(pattern, start, root, &names)
+	failed := false
+	p.collectGlob(pattern, start, root, &names, &failed)
+	if failed {
+		for i := range names { mem.FreeString(p.Alloc, names[i]) }
+		slices.Free(p.Alloc, names)
+		return core.Completion{Diagnostic: failure(p.Alloc, "FS_ERR", "cannot traverse wildcard path")}
+	}
 	var values []core.Value
 	for i := range names {
 		relative := p.relativePath(names[i])
@@ -136,7 +143,7 @@ func (p *Program) wildcard(pattern string) core.Value {
 		values[i].Free(p.Alloc)
 	}
 	slices.Free(p.Alloc, values)
-	return result
+	return core.Completion{Value: result, HasValue: true}
 }
 
 func (p *Program) relativePath(name string) string {
@@ -228,8 +235,11 @@ func globRoot(a mem.Allocator, pattern string) string {
 	return cloneText(a, pattern[:cut-1])
 }
 
-func (p *Program) collectGlob(pattern string, pos int, directory string, names *[]string) {
+func (p *Program) collectGlob(pattern string, pos int, directory string, names *[]string, failed *bool) {
+	if *failed { return }
 	if pos >= len(pattern) {
+		info := p.Host.Lstat(directory)
+		if info.Failed { *failed = true } else if info.Exists { *names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, directory)) }
 		return
 	}
 	end := pos
@@ -242,19 +252,20 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 	}
 	if segment == "**" {
 		if end == len(pattern) {
-			p.collectDescendants(directory, names)
+			p.collectDescendants(directory, names, failed)
 			return
 		}
-		p.collectGlob(pattern, next, directory, names)
+		p.collectGlob(pattern, next, directory, names, failed)
 		entries, err := p.Host.ReadDir(p.Alloc, directory)
 		if err != nil {
+			*failed = *failed || p.globDirectoryFailed(directory)
 			return
 		}
 		for i := range entries {
 			name := joinFilesystemPath(p.Alloc, directory, entries[i].Name)
 			mem.FreeString(p.Alloc, entries[i].Name)
 			if entries[i].IsDir {
-				p.collectGlob(pattern, pos, name, names)
+				p.collectGlob(pattern, pos, name, names, failed)
 			}
 			mem.FreeString(p.Alloc, name)
 		}
@@ -270,21 +281,24 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 	}
 	if !meta {
 		name := joinFilesystemPath(p.Alloc, directory, segment)
-		info := p.Host.Stat(name)
+		var info host.StatResult
+		if end == len(pattern) { info = p.Host.Lstat(name) } else { info = p.Host.Stat(name) }
 		if !info.Exists {
+			if info.Failed { *failed = true }
 			mem.FreeString(p.Alloc, name)
 			return
 		}
 		if end == len(pattern) {
 			*names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, name))
 		} else if info.Info.IsDir {
-			p.collectGlob(pattern, next, name, names)
+			p.collectGlob(pattern, next, name, names, failed)
 		}
 		mem.FreeString(p.Alloc, name)
 		return
 	}
 	entries, err := p.Host.ReadDir(p.Alloc, directory)
 	if err != nil {
+		*failed = *failed || p.globDirectoryFailed(directory)
 		return
 	}
 	for i := range entries {
@@ -295,7 +309,7 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 			if end == len(pattern) {
 				*names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, name))
 			} else if entries[i].IsDir {
-				p.collectGlob(pattern, next, name, names)
+				p.collectGlob(pattern, next, name, names, failed)
 			}
 		}
 		mem.FreeString(p.Alloc, name)
@@ -303,9 +317,16 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 	slices.Free(p.Alloc, entries)
 }
 
-func (p *Program) collectDescendants(directory string, names *[]string) {
+func (p *Program) globDirectoryFailed(directory string) bool {
+	info := p.Host.Stat(directory)
+	return info.Failed || (info.Exists && info.Info.IsDir)
+}
+
+func (p *Program) collectDescendants(directory string, names *[]string, failed *bool) {
+	if *failed { return }
 	entries, err := p.Host.ReadDir(p.Alloc, directory)
 	if err != nil {
+		*failed = *failed || p.globDirectoryFailed(directory)
 		return
 	}
 	defer slices.Free(p.Alloc, entries)
@@ -314,7 +335,7 @@ func (p *Program) collectDescendants(directory string, names *[]string) {
 		mem.FreeString(p.Alloc, entries[i].Name)
 		*names = slices.Append(p.Alloc, *names, name)
 		if entries[i].IsDir {
-			p.collectDescendants(name, names)
+			p.collectDescendants(name, names, failed)
 		}
 	}
 }

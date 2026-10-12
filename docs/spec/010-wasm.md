@@ -231,7 +231,7 @@ Embedding hosts must service these requests as well as user file reads.
 
 No-follow user filesystem requests are ABI kinds 30 (`lstat`) and 31 (`readlink`),
 using a canonical path payload and read capability checks. Kind 30 completes with
-the metadata record defined in `007-library.md`, including `link`; kind 31 with
+the metadata record defined in `007-library.md`, including `link` and `regular`; kind 31 with
 the exact validated UTF-8 target string. Failures complete with `FS_ERR`, never
 nil, truncated targets, or replacement-decoded text. Memory resources have no
 symlinks. Parent components still follow filesystem resolution.

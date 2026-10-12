@@ -243,13 +243,81 @@ func opReadlink(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
+	var patterns []core.Value
+	positive, negative := 0, 0
+	for i := range v {
+		value := v[i]
+		if value.Kind == core.String && len(value.Text) != 0 && (value.Text[0] == '+' || value.Text[0] == '-') {
+			bit := wildcardKindFlag(value.Text[1:])
+			if bit == 0 { slices.Free(c.Run, patterns); discardArgCallables(c, v); return c.InvalidOperation("unknown wildcard kind flag: " + value.Text) }
+			if value.Text[0] == '+' { positive |= bit } else { negative |= bit }
+			if positive & negative != 0 { slices.Free(c.Run, patterns); discardArgCallables(c, v); return c.InvalidOperation("opposite wildcard kind flags are invalid") }
+		} else {
+			if value.Kind != core.String && !(value.Kind == core.Resource && value.Resource.Kind == core.ResourceFile) {
+				slices.Free(c.Run, patterns)
+				return invalidArgument(c, v, i, "string")
+			}
+			patterns = slices.Append(c.Run, patterns, value)
+		}
+	}
+	if len(patterns) == 0 { slices.Free(c.Run, patterns); return c.InvalidOperation("wildcard requires at least one pattern") }
+	mask := positive
+	if mask == 0 { mask = 15 }
+	mask &= ^negative
+	previous := c.CallPath
+	var digits [32]byte
+	identity := core.NewString(c.Run, previous + "/wildcard-mask:" + strconv.Itoa(digits[:], mask))
+	c.CallPath = identity.Text
+	result := wildcardUnion(c, patterns)
+	if !result.Waiting && result.Diagnostic.Code == "" && (positive != 0 || negative != 0) { result = filterWildcardKinds(c, result.Value, mask) }
+	c.CallPath = previous
+	identity.Free(c.Run)
+	slices.Free(c.Run, patterns)
+	return result
+}
+
+func wildcardKindFlag(name string) int {
+	if name == "files" { return 1 }
+	if name == "dir" { return 2 }
+	if name == "symlinks" { return 4 }
+	return 0
+}
+
+func filterWildcardKinds(c *eval.Context, matches core.Value, mask int) eval.Result {
+	defer matches.Free(c.Run)
+	var values []core.Value
+	for i := range matches.List {
+		previous := c.CallPath
+		var digits [32]byte
+		identity := core.NewString(c.Run, previous + "/wildcard-kind:" + strconv.Itoa(digits[:], i))
+		c.CallPath = identity.Text
+		result := fileRequest(c, host.OpLstat, matches.List[i])
+		c.CallPath = previous
+		identity.Free(c.Run)
+		if result.Waiting || result.Diagnostic.Code != "" { freeValues(c, values); return result }
+		bit := 8 // Other filesystem entries remain in the default selection.
+		regular, directory, link := false, false, false
+		fields := 0
+		for j := range result.Value.Record {
+			field := result.Value.Record[j]
+			if field.Value.Kind != core.Bool { continue }
+			if field.Key == "regular" { regular = field.Value.Bool; fields++ }
+			if field.Key == "dir" { directory = field.Value.Bool; fields++ }
+			if field.Key == "link" { link = field.Value.Bool; fields++ }
+		}
+		result.Value.Free(c.Run)
+		if fields != 3 { freeValues(c, values); return failure("HOST_FAIL", "wildcard kind filtering requires normalized lstat regular, dir and link fields") }
+		if link { bit = 4 } else if directory { bit = 2 } else if regular { bit = 1 }
+		if mask & bit != 0 { values = slices.Append(c.Run, values, matches.List[i].Clone(c.Run)) }
+	}
+	value := core.NewList(c.Run, values)
+	freeValues(c, values)
+	return eval.Result{Value: value}
+}
+
+func wildcardUnion(c *eval.Context, v []core.Value) eval.Result {
 	if len(v) == 1 {
 		return fileRequest(c, host.OpWildcard, v[0])
-	}
-	for i := range v {
-		if v[i].Kind != core.String {
-			return invalidArgument(c, v, i, "string")
-		}
 	}
 	// Each union member has its own replay identity, so a later suspension
 	// neither repeats earlier host reads nor consumes their completions.

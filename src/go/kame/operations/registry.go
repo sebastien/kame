@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v9"
+const version = "v10"
 
 // Register installs every standard operation. Registration stays declarative
 // so operation implementations can be organized by domain independently.

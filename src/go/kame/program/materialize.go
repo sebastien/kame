@@ -124,7 +124,9 @@ func produceExternalValue(c *core.EngineContext, nodeID int64) core.ProducerResu
 			c.Publish(core.Value{Kind: core.Nil})
 		}
 	} else if state.Kind == core.ResourceGlob {
-		c.Publish(state.Program.wildcard(state.Name))
+		result := state.Program.wildcard(state.Name)
+		if result.Diagnostic.Code != "" { c.Fail(result.Diagnostic); return core.ProducerFailed }
+		c.Publish(result.Value)
 	} else {
 		c.Fail(failure(state.Program.Alloc, "HOST_FAIL", "invalid external resource"))
 		return core.ProducerFailed
