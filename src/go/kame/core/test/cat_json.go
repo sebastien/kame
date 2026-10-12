@@ -2,10 +2,31 @@ package core_test
 
 import (
 	"kame/core"
+	"solod.dev/so/math"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/testing"
 )
+
+func TestValueJSONStrictKindsOrderingAndEscapes(t *testing.T) {
+	a := t.Allocator()
+	var value core.Value
+	core.ParseJSON(a, []byte(`{"z":null,"a":[true,"\u0001\n\"\\"]}`), &value)
+	var data []byte
+	if !core.ValueJSON(a, value, &data) || string(data) != `{"a":[true,"\u0001\n\"\\"],"z":null}` { t.Error("JSON key order or control escaping failed") }
+	slices.Free(a, data)
+	value.Free(a)
+	invalidUTF8 := []byte{0xff}
+	values := []core.Value{{Kind: core.Bytes, Bytes: []byte("text")}, {Kind: core.Float, Float: math.Inf(1)}, {Kind: core.Float, Float: math.Inf(-1)}, {Kind: core.Float, Float: math.NaN()}, {Kind: core.String, Text: string(invalidUTF8)}}
+	for i := range values {
+		data = nil
+		if core.ValueJSON(a, values[i], &data) { t.Error("non-JSON value accepted"); slices.Free(a, data) }
+		nested := core.NewList(a, []core.Value{values[i]})
+		data = nil
+		if core.ValueJSON(a, nested, &data) { t.Error("nested non-JSON value accepted"); slices.Free(a, data) }
+		nested.Free(a)
+	}
+}
 
 func TestCatValueJSONEncodesNativeValues(t *testing.T) {
 	a := t.Allocator()

@@ -135,6 +135,7 @@ test-wasm: wasm-check
 	tests/T017-20-kash-context-environment.sh
 	tests/T038-01-kash-direct-recipes.sh
 	tests/T038-02-lib-wildcard-kinds.sh
+	tests/T038-03-lib-text-json.sh
 	tests/T040-01-cli-automatic-clean.sh
 	tests/T036-01-cli-presentation.sh
 	tests/T036-02-cli-reuse-reasons.sh

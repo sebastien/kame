@@ -21,13 +21,28 @@ func opBool(c *eval.Context, s any, v []core.Value) eval.Result {
 
 func opStr(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	value, ok := stringValue(c.Run, v[0], false)
-	if !ok {
-		return invalidArgument(c, v, 0, "text-coercible value (nil, bool, int, float, string, pattern, list, or record)")
+	b := strings.NewBuilder(c.Run)
+	defer b.Free()
+	for i := range v {
+		kind := v[i].Kind
+		if kind != core.Nil && kind != core.Bool && kind != core.Int && kind != core.Float && kind != core.String {
+			return invalidArgument(c, v, i, "textual scalar (nil, bool, int, float, or string); use json for collections")
+		}
+		value, ok := stringValue(c.Run, v[i], false)
+		if !ok { return invalidArgument(c, v, i, "textual scalar") }
+		b.WriteString(value)
+		mem.FreeString(c.Run, value)
 	}
-	result := eval.Result{Value: core.NewString(c.Run, value)}
-	mem.FreeString(c.Run, value)
-	return result
+	return eval.Result{Value: core.NewString(c.Run, b.String())}
+}
+
+func opJSON(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	var data []byte
+	if !core.ValueJSON(c.Run, v[0], &data) { return invalidArgument(c, v, 0, "JSON-compatible value without bytes, nonfinite numbers, patterns, resources, or callables") }
+	value := core.NewString(c.Run, string(data))
+	slices.Free(c.Run, data)
+	return eval.Result{Value: value}
 }
 
 func stringValue(a mem.Allocator, v core.Value, quoted bool) (string, bool) {

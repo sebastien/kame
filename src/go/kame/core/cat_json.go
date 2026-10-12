@@ -3,6 +3,7 @@ package core
 import (
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 	"solod.dev/so/unicode/utf8"
 )
@@ -15,9 +16,18 @@ import (
 // (patterns, resources, callables, processes, binary bytes, and non-finite
 // floats) reports false, leaving out untouched.
 func CatValueJSON(a mem.Allocator, value Value, out *[]byte) bool {
+	return valueJSON(a, value, out, true)
+}
+
+// ValueJSON encodes JSON-native values only, with lexical record key order.
+func ValueJSON(a mem.Allocator, value Value, out *[]byte) bool {
+	return valueJSON(a, value, out, false)
+}
+
+func valueJSON(a mem.Allocator, value Value, out *[]byte, allowBytes bool) bool {
 	var builder strings.Builder
 	e := json.NewEncoder(&builder)
-	if !encodeCatValue(&e, value, 0) {
+	if !encodeCatValue(a, &e, value, 0, allowBytes) {
 		builder.Free()
 		return false
 	}
@@ -30,7 +40,9 @@ func CatValueJSON(a mem.Allocator, value Value, out *[]byte) bool {
 	return true
 }
 
-func encodeCatValue(e *json.Encoder, value Value, depth int) bool {
+func encodeCatValue(a mem.Allocator, e *json.Encoder, value Value, depth int, allowBytes bool) bool {
+	var order []int
+	defer slices.Free(a, order)
 	if depth >= 256 {
 		return false
 	}
@@ -54,25 +66,34 @@ func encodeCatValue(e *json.Encoder, value Value, depth int) bool {
 			e.Float(value.Float)
 		}
 	case String:
+		if !allowBytes && !utf8.Valid([]byte(value.Text)) { return false }
 		e.Str(value.Text)
 	case Bytes:
-		if !utf8.Valid(value.Bytes) {
+		if !allowBytes || !utf8.Valid(value.Bytes) {
 			return false
 		}
 		e.Str(string(value.Bytes))
 	case List:
 		e.BeginArray()
 		for i := range value.List {
-			if !encodeCatValue(e, value.List[i], depth+1) {
+			if !encodeCatValue(a, e, value.List[i], depth+1, allowBytes) {
 				return false
 			}
 		}
 		e.EndArray()
 	case Record:
+		order = slices.Make[int](a, len(value.Record))
+		for i := range order {
+			order[i] = i
+			if !allowBytes {
+				for j := i; j > 0 && value.Record[order[j]].Key < value.Record[order[j-1]].Key; j-- { order[j], order[j-1] = order[j-1], order[j] }
+			}
+		}
 		e.BeginObject()
-		for i := range value.Record {
+		for _, i := range order {
+			if !allowBytes && !utf8.Valid([]byte(value.Record[i].Key)) { return false }
 			e.Str(value.Record[i].Key)
-			if !encodeCatValue(e, value.Record[i].Value, depth+1) {
+			if !encodeCatValue(a, e, value.Record[i].Value, depth+1, allowBytes) {
 				return false
 			}
 		}
