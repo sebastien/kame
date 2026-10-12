@@ -94,6 +94,16 @@ command -v openssl >/dev/null 2>&1 || {
 	printf 'release: openssl is required to sign the manifest\n' >&2
 	exit 1
 }
+command -v npm >/dev/null 2>&1 || {
+	printf 'release: npm is required to publish the runtime package\n' >&2
+	exit 1
+}
+
+package_version=$(cd "$root" && node -p "require('./package.json').version")
+[ "$package_version" = "$version" ] || {
+	printf 'release: package.json version (%s) does not match VERSION (%s)\n' "$package_version" "$version" >&2
+	exit 1
+}
 
 # Refuse to clobber a published tag or release.
 if git -C "$root" rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
@@ -178,4 +188,6 @@ done <"$release_dir/SHA256SUMS"
 
 printf 'release: publishing %s\n' "$tag"
 gh release edit "$tag" --draft=false --latest ${repo_args[@]+"${repo_args[@]}"}
-printf 'release: published %s\n' "$tag"
+printf 'release: published %s; publishing @ssebastien/kame to npm\n' "$tag"
+(cd "$root" && npm publish --access public)
+printf 'release: published %s and @ssebastien/kame@%s\n' "$tag" "$version"

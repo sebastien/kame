@@ -60,7 +60,7 @@ try {
   const version = await run(launcher, ['--version'], { cwd: temporary });
   assert.equal(version.timedOut, false, '--version timed out');
   assert.equal(version.code, 0, `--version failed: ${version.stderr}`);
-  assert.match(version.stdout.trim(), /^kame \S+$/);
+  assert.match(version.stdout.trim(), /^kame \S+ \(runtime=WASM\)$/);
 
   const workspace = path.join(temporary, 'workspace');
   await mkdir(workspace);

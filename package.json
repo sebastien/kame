@@ -1,0 +1,17 @@
+{
+  "name": "@ssebastien/kame",
+  "version": "0.2.0",
+  "description": "Build tool for projects described with Kame",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "bin": {
+    "kame": "dist/kame.js"
+  },
+  "files": [
+    "dist/kame.js",
+    "dist/kame.wasm"
+  ]
+}
