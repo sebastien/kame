@@ -12,13 +12,13 @@ project="$TMPDIR/project"
 mkdir -p "$project"
 cat >"$project/Makefile.kmk" <<'KMK'
 {name:*} :
-	@(out name)
+	@(out! name)
 exact :
-	@(out "literal")
+	@(out! "literal")
 aws-shell@{role-account} :
-	@(out role-account)
+	@(out! role-account)
 KMK
-printf 'aws-shell@{role-account} :\n\t@(out role-account)\n' >"$project/named.kmk"
+printf 'aws-shell@{role-account} :\n\t@(out! role-account)\n' >"$project/named.kmk"
 mkdir -p "$project/src/txto/blog/2026/deep"
 touch "$project/src/txto/blog/foo.txto" "$project/src/txto/blog/2026/deep/foo.txto" "$project/src/txto/blog/skip.txto"
 cat >"$project/replace.kmk" <<'KMK'
@@ -27,7 +27,7 @@ FILTERED = (filter-out ([x] (includes? x "skip")) SOURCES_TXTO)
 BUILD_JSON = (replace ./src/txto/{prefix:**}/{name:*}.txto ./build/data/{prefix}/{name}.json FILTERED)
 SECTION = (replace ./src/txto/{prefix:**}/{name:*}.txto ./build/data/{prefix}/{name}.json)
 ./result : @(SOURCES_TXTO)
-	@(yield (join BUILD_JSON "\n"))
+	@(yield! (join BUILD_JSON "\n"))
 KMK
 cp "$project/replace.kmk" "$project/replace.original"
 for backend in native wasm; do

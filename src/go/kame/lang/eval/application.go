@@ -18,7 +18,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 	head := expression.Items[0]
 	if head.Kind == expr.Name {
 		if head.Text == "await" { return p.awaitProcess(expression, context) }
-		if head.Text == "run" || head.Text == "pipe" {
+		if head.Text == "run!" || head.Text == "pipe!" {
 			return p.processExpression(expression, context)
 		}
 		if head.Text == "?" {
@@ -58,7 +58,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 					return result
 				}
 			}
-			return failure(context.Run, "OP_UNKNOWN", head.Span, "unknown operation: "+head.Text)
+			return missingOperation(context, head.Text, head.Span, false)
 		}
 	}
 	callee := p.evaluate(context.Engine, scope, head, context)
@@ -73,7 +73,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 				attachNamedFrame(&result, context, expression.Span, "operation", head.Text)
 				return result
 			}
-			return failure(context.Run, "OP_UNKNOWN", head.Span, "unknown operation: "+head.Text)
+			return missingOperation(context, head.Text, head.Span, false)
 		}
 		return callee
 	}

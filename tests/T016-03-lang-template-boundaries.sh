@@ -55,7 +55,7 @@ for backend in native wasm; do
 	reject TPL_PARSE do render --comment plain -c $'@for([item] (list "a") "," extra)\nyes\n@end'
 	reject TPL_BLOCK do render --comment plain -c $'@if(eq "a" "b")\nyes'
 	reject TPL_PARSE do render --comment plain -c $'@end(if extra)'
-	check safe do render --comment plain -c '@if(:false)@if(fail "unselected")bad@end(if)@else-safe@end(if)'
+	check safe do render --comment plain -c '@if(:false)@if(fail! "unselected")bad@end(if)@else-safe@end(if)'
 	check $'@if (eq "x" "x")\n@media literal' do render --comment plain -c $'@if (eq "x" "x")\n@media literal'
 	test-step "$backend host comment styles and canonical formatting"
 	for style in plain html c hash dash semi percent powershell batch; do

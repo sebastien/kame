@@ -17,7 +17,7 @@ mkdir -p fingerprint/globs
 test-step "glob membership invalidates the record"
 (
 	cd fingerprint
-	printf 'task g :\n\techo run >> runs.log\n\t@(out (str (count (wildcard ./globs/*))))\n' >G.kmk
+	printf 'task g :\n\techo run >> runs.log\n\t@(out! (str (count (wildcard ./globs/*))))\n' >G.kmk
 	cli_run -- -f G.kmk g
 	cli_expect_status 0
 	cli_expect_stdout "0"
@@ -42,7 +42,7 @@ test-step "glob membership invalidates the record"
 test-step "a bare dependency blocks cache commits"
 (
 	cd fingerprint
-	printf 'task outer : bare\n\techo outer >> outer.log\n\t@(out "outer\\n")\nbare :\n\ttrue\n' >B.kmk
+	printf 'task outer : bare\n\techo outer >> outer.log\n\t@(out! "outer\\n")\nbare :\n\ttrue\n' >B.kmk
 	cli_run -- -f B.kmk outer
 	cli_expect_status 0
 	cli_run -- -f B.kmk outer
@@ -57,7 +57,7 @@ test-step "a bare dependency blocks cache commits"
 test-step "rule body changes invalidate the record"
 (
 	cd fingerprint
-	printf 'task body :\n\techo run >> body.log\n\t@(out "one\\n")\n' >C.kmk
+	printf 'task body :\n\techo run >> body.log\n\t@(out! "one\\n")\n' >C.kmk
 	cli_run -- -f C.kmk body
 	cli_expect_status 0
 	cli_run -- -f C.kmk body
@@ -67,7 +67,7 @@ test-step "rule body changes invalidate the record"
 	else
 		test-fail "unchanged body runs: $(run_count ./body.log)"
 	fi
-	printf 'task body :\n\techo run >> body.log\n\t@(out "two")\n' >C.kmk
+	printf 'task body :\n\techo run >> body.log\n\t@(out! "two")\n' >C.kmk
 	cli_run -- -f C.kmk body
 	cli_expect_status 0
 	cli_expect_stdout "two"
@@ -81,7 +81,7 @@ test-step "rule body changes invalidate the record"
 test-step "template-named tasks are distinct instances"
 (
 	cd fingerprint
-	printf 'task run-{name} :\n\techo @> >> names.log\n\t@(out "ran\\n")\n' >T.kmk
+	printf 'task run-{name} :\n\techo @> >> names.log\n\t@(out! "ran\\n")\n' >T.kmk
 	cli_run -- -f T.kmk run-alpha
 	cli_expect_status 0
 	cli_run -- -f T.kmk run-alpha
@@ -100,7 +100,7 @@ test-step "template-named tasks are distinct instances"
 test-step "retry policy participates in the fingerprint"
 (
 	cd fingerprint
-	printf 'task retried :\n\techo run >> retry.log\n\t@(out "ok\\n")\n' >R.kmk
+	printf 'task retried :\n\techo run >> retry.log\n\t@(out! "ok\\n")\n' >R.kmk
 	cli_run -- -f R.kmk --retry 0 retried
 	cli_expect_status 0
 	cli_run -- -f R.kmk --retry 0 retried

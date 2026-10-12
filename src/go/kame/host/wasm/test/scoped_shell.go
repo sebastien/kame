@@ -14,7 +14,7 @@ func TestCollectedShellForwardsAnExplicitEmptySnapshot(t *testing.T) {
     buffer := slices.Make[byte](a, 1024*1024)
     defer slices.Free(a, buffer)
     heap := wasm.NewHeap(buffer)
-    started := wasm.NewRuntimeWithHeap(&heap, "scoped.kmk", "VALUE = (shell \"true\")\nchosen :\n\t@(out (get VALUE \"status\"))\n")
+    started := wasm.NewRuntimeWithHeap(&heap, "scoped.kmk", "VALUE = (shell! \"true\")\nchosen :\n\t@(out! (get VALUE \"status\"))\n")
     if started.Runtime == nil { t.Fatal("compile collected shell"); return }
     r := started.Runtime
     defer r.Free()

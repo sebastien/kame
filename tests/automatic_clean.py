@@ -380,7 +380,7 @@ def main(binary: str) -> None:
 		assert (root / "build/out").exists()
 
 		root = base / "yield-and-write"
-		project(root, 'default : ./empty\n./empty : ./input\n\t@(write "./side" "side")\n\t@(yield "")\n')
+		project(root, 'default : ./empty\n./empty : ./input\n\t@(write! "./side" "side")\n\t@(yield! "")\n')
 		run(binary, root)
 		assert (root / "empty").stat().st_size == 0 and (root / "side").read_text() == "side"
 		assert len(records(root)) == 2

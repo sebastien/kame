@@ -14,19 +14,19 @@ include ./nested/values.kmk
 include ./nested/rules.kmk
 
 default : leaf
-	@(out "@(message)\n")
+	@(out! "@(message)\n")
 KMK
 printf 'include ./base.kmk\nmessage = (str greeting " include")\n' >"$work/project/nested/values.kmk"
 printf 'greeting = "nested"\n' >"$work/project/nested/base.kmk"
 cat >"$work/project/nested/rules.kmk" <<'KMK'
 leaf :
-	@(out "leaf\n")
+	@(out! "leaf\n")
 ./artifact.txt :
-	@(yield message)
+	@(yield! message)
 tooled :
 	@(x/sh) -c true
 broken :
-	@(out missing)
+	@(out! missing)
 KMK
 
 compare() {
@@ -88,7 +88,7 @@ printf 'include ./nested/invalid.kmk\n' >"$work/project/invalid.kmk"
 printf 'name = [\n' >"$work/project/nested/invalid.kmk"
 printf 'include ./nested/duplicate.kmk\ninclude ./nested/duplicate.kmk\n' >"$work/project/duplicate.kmk"
 printf 'name = "duplicate"\n' >"$work/project/nested/duplicate.kmk"
-printf 'include ./empty.kmk\ninclude ./empty.kmk\ndefault :\n\t@(out "ok")\n' >"$work/project/repeated.kmk"
+printf 'include ./empty.kmk\ninclude ./empty.kmk\ndefault :\n\t@(out! "ok")\n' >"$work/project/repeated.kmk"
 : >"$work/project/empty.kmk"
 test-step "include preflight rejects cycles, missing and malformed sources, and duplicates"
 reject DEP_CYCLE -C "$work/project" -f cycle.kmk

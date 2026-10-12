@@ -3,10 +3,10 @@ GREETING = "hello"
 LIST = (list "alpha" "beta" "gamma")
 
 default : ./out/greeting.txt
-	@(out "default done\n")
+	@(out! "default done\n")
 
 ./out/greeting.txt :
 	printf '%s\n' @(GREETING) > @>
 
 task touch-only :
-	@(out "task done\n")
+	@(out! "task done\n")

@@ -17,7 +17,7 @@ const defEscapeMessage = "function value escapes its scope; define it with (def 
 // ordinary registry operations. Special forms cannot be registered as operations.
 func IsSpecialForm(name string) bool {
 	switch name {
-	case "?", "let", "def", "eval", "if", "and", "or", "with", "match", "run", "pipe", "await":
+	case "?", "let", "def", "eval", "if", "and", "or", "with", "match", "run!", "pipe!", "await":
 		return true
 	}
 	return false

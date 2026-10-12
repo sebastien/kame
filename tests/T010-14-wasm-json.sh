@@ -56,7 +56,7 @@ test-step "direct-argv pipeline display matches native"
 cat >>"$project/Makefile.kmk" <<'EOF'
 
 task pipeline :
-	@(out (pipe (run "printf" "one") (run "cat") (run "cat") (run "cat") (run "cat")))
+	@(out! (pipe! (run! "printf" "one") (run! "cat") (run! "cat") (run! "cat") (run! "cat")))
 EOF
 (cd "$project" && node "$CLI_ROOT/dist/kame.js" --json pipeline) >"$project/pipeline.wasm.jsonl" 2>"$project/pipeline.wasm.err"
 (cd "$project" && "$CLI_BIN" --json pipeline) >"$project/pipeline.native.jsonl" 2>"$project/pipeline.native.err"

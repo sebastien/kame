@@ -42,17 +42,17 @@ for backend in native wasm; do
 	check '[:true :true :false :false :false :false :false :false]' do run -C "$work" --allow-read=. semantics.km negation
 	check '6' do run -C "$work" --allow-read=. semantics.km filtered-count
 	check '[:false :false :false :false :true :true :true :true]' do run -C "$work" --allow-read=. semantics.km nonempty-values
-	check '""' do run --lang expr -c '(or "" (fail "empty text became false"))'
-	check '[]' do run --lang expr -c '(or [] (fail "empty list became false"))'
+	check '""' do run --lang expr -c '(or "" (fail! "empty text became false"))'
+	check '[]' do run --lang expr -c '(or [] (fail! "empty list became false"))'
 	check '0' do run --lang expr -c '(and "" [] (parse-json "{}") 0)'
-	check ':nil' do run --lang expr -c '(and :nil (fail "nil did not short-circuit"))'
+	check ':nil' do run --lang expr -c '(and :nil (fail! "nil did not short-circuit"))'
 	check 'selected' do run --lang kash -c $'if (nop 0)\n\tprintf selected\nelse\n\tprintf forbidden'
 	check '"selected"' do run --lang expr -c '(render "@if(0)selected@else forbidden@end" (parse-json "{}") "plain")'
 
 	test-step "$backend exact stdout, typed capture reuse and opt-in conversion"
-	check $' \té\nbody  \r\n\n' do run --allow-run -c '(out $(printf " \té\nbody  \r\n\n"))'
-	check $'\n\n' do run --allow-run -c '(out $(printf "\n\n"))'
-	check '' do run --allow-run -c '(out $(printf ""))'
+	check $' \té\nbody  \r\n\n' do run --allow-run -c '(out! $(printf " \té\nbody  \r\n\n"))'
+	check $'\n\n' do run --allow-run -c '(out! $(printf "\n\n"))'
+	check '' do run --allow-run -c '(out! $(printf ""))'
 	check $'<a b\n\n>' do run --lang kash -c $'captured = $(printf "a b\\n\\n")\nprintf "<%s>" $captured'
 	check '<>' do run --lang kash -c $'captured = $(printf "")\nprintf "<%s>" $captured'
 	check '"release"' do run --allow-run --lang expr -c '(strip $(printf " release\n"))'

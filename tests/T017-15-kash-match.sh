@@ -31,7 +31,7 @@ for backend in native wasm; do
 	check literal $'match (nop "*.txt")\n\tcase "*.txt"\n\t\tprintf literal'
 	check branch $'match $(printf subject)\n\tcase "subject"\n\t\tprintf branch'
 	check bound $'pattern = "{name:*}.c"\nmatch (nop "bound.c")\n\tcase pattern\n\t\tprintf "%s" $name'
-	check 'subjectbody' $'match (let [ignored (out "subject")] "x")\n\tcase "x"\n\t\tprintf "%s" $(printf body)'
+	check 'subjectbody' $'match (let [ignored (out! "subject")] "x")\n\tcase "x"\n\t\tprintf "%s" $(printf body)'
 	check waiting $'match (nop "waiting.c")\n\tcase (let [ignored $(printf ready)] "{name:*}.c")\n\t\tprintf "%s" $name'
 	test-step "$backend captures bind lazy definitions, functions and nested controls"
 	check main $'match (nop "./main.c")\n\tcase ./{name:*}.c\n\t\tvalue = $(printf "%s" $name)\n\t\tunused = $(touch forbidden)\n\t\t(f X) = (str name X)\n\t\tif (nop :true)\n\t\t\tprintf "%s" $value'

@@ -17,7 +17,7 @@ func TestBuildSourceDescriptorCopiesBytesAndMapsAuthoredSpans(t *testing.T) {
 	}
 	r := start.Runtime
 	defer r.Free()
-	data := slices.Clone(a, []byte(`{"sources":[{"name":"main.kmk","text":"","offset":0},{"name":"child.kmk","text":"task child :\n\t@(out \"ok\")\n","offset":42}]}`))
+	data := slices.Clone(a, []byte(`{"sources":[{"name":"main.kmk","text":"","offset":0},{"name":"child.kmk","text":"task child :\n\t@(out! \"ok\")\n","offset":42}]}`))
 	defer slices.Free(a, data)
 	configured := r.SetBuildSources(data)
 	if configured.Code != "" {

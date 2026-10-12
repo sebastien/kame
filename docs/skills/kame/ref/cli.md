@@ -28,7 +28,7 @@ kame do run --lang expr -c '(join ["a" "b"] ",")'
 kame do run ./values.km result
 kame do run ./Makefile.kmk check
 kame do run ./publish.kash -- preview
-kame do run -c 'name = "Ada"' -c '(out (uppercase name))'
+kame do run -c 'name = "Ada"' -c '(out! (uppercase name))'
 ```
 
 Direct source execution is shorthand for `do run`. Execution accepts ordered,
@@ -57,7 +57,7 @@ sessions support `--json` JSON Lines events for values, processes and diagnostic
 `-c` scripts and implicit `default` definitions. `--print-result` also displays
 the final script value; `expr` and explicitly selected entries retain canonical
 result display. This never depends on whether `out` ran. Migrate implicit-display
-scripts with `(out VALUE)` for exact data, a named entry, or `--print-result`.
+scripts with `(out! VALUE)` for exact data, a named entry, or `--print-result`.
 
 ## Build targets
 

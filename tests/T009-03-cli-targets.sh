@@ -119,7 +119,7 @@ fixture_copy errors errors
 )
 
 test-step "a target named do is requested after --"
-DO_SOURCE=$'task do :\n\t@(out "do-target\\n")'
+DO_SOURCE=$'task do :\n\t@(out! "do-target\\n")'
 cli_run -- -l kmk -c "$DO_SOURCE" do
 cli_expect_status 0
 cli_expect_stdout "do-target

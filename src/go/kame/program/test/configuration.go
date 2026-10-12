@@ -26,7 +26,7 @@ func TestDefaultTargetNormalizationOwnsReplacementOperands(t *testing.T) {
 
 func TestBuildConfigurationOverridesAreLiteralOwnedAndVisible(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "config.kmk", "mode ?= \"default\"\nmode ?= (read \"not-evaluated\")\ntask default :\n\t@(out mode)\n")
+	parsed := script.Parse(a, "config.kmk", "mode ?= \"default\"\nmode ?= (read \"not-evaluated\")\ntask default :\n\t@(out! mode)\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	overrides := []string{"mode=first", "mode=@(missing)=literal"}

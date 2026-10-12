@@ -8,7 +8,7 @@ const version = "v12"
 // the operation itself; callable/template effects still propagate dynamically.
 func Register(r *eval.Registry) bool {
 	return pure(r, "not", opNot, 1, 1) && pure(r, "bool", opBool, 1, 1) &&
-		contract(r, "fail", opFail, 1, 1, eval.ControlOperation, eval.AllPhases, eval.RaisesFailure) &&
+		contract(r, "fail!", opFail, 1, 1, eval.ControlOperation, eval.AllPhases, eval.RaisesFailure) &&
 		pure(r, "parse-json", opParseJSON, 1, 1) && pure(r, "str", opStr, 0, -1) && pure(r, "json", opJSON, 1, 1) && pure(r, "count", opCount, 1, 1) &&
 		pure(r, "eq", opEq, 2, 2) && pure(r, "is", opIs, 2, 2) &&
 		pure(r, "ne", opNe, 2, 2) && pure(r, "lt", opLt, 2, 2) &&
@@ -44,11 +44,11 @@ func Register(r *eval.Registry) bool {
 		observation(r, "stat", opStat, 1, 1, eval.Read) && observation(r, "lstat", opLstat, 1, 1, eval.Read) &&
 		observation(r, "readlink", opReadlink, 1, 1, eval.Read) && observation(r, "wildcard", opWildcard, 1, -1, eval.Read) &&
 		registerWrite(r) && observation(r, "env", opEnv, 1, 1, eval.Env) &&
-		process(r, "shell", opShell, 1, 2) && process(r, "sh", opShell, 1, 2) && process(r, "shellrun", opShell, 1, 2) &&
-		process(r, "shell-template", opShellTemplate, 2, 2) &&
-		contract(r, "out", opOut, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.EmitsOutput) &&
-		contract(r, "err", opErr, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.EmitsOutput) &&
-		contract(r, "yield", opYield, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.PublishesFile) &&
+		process(r, "shell!", opShell, 1, 2) && process(r, "sh!", opShell, 1, 2) && process(r, "shellrun!", opShell, 1, 2) &&
+		process(r, "shell-template!", opShellTemplate, 2, 2) &&
+		contract(r, "out!", opOut, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.EmitsOutput) &&
+		contract(r, "err!", opErr, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.EmitsOutput) &&
+		contract(r, "yield!", opYield, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.PublishesFile) &&
 		pure(r, "nop", opNop, 0, -1) &&
 		contract(r, "now", opNow, 0, 0, eval.VolatileOperation, eval.RuntimePhases, eval.ReadsClock) &&
 		contract(r, "monotonic", opMonotonic, 0, 0, eval.VolatileOperation, eval.RuntimePhases, eval.ReadsClock)
@@ -79,5 +79,5 @@ func registerRender(r *eval.Registry) bool {
 }
 
 func registerWrite(r *eval.Registry) bool {
-	return r.Add(eval.Operation{Name: "write", Call: opWrite, MinArity: 2, MaxArity: 2, Capabilities: []eval.Capability{eval.Write}, Category: eval.OutputOperation, Phases: eval.RuntimePhases, Behavior: eval.PublishesFile, Version: version})
+	return r.Add(eval.Operation{Name: "write!", Call: opWrite, MinArity: 2, MaxArity: 2, Capabilities: []eval.Capability{eval.Write}, Category: eval.OutputOperation, Phases: eval.RuntimePhases, Behavior: eval.PublishesFile, Version: version})
 }

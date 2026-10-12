@@ -14,7 +14,7 @@ cat >"$project/Makefile.kmk" <<'KMK'
 include? ./missing.kmk
 include? ./present.kmk
 default :
-	@(out GREETING)
+	@(out! GREETING)
 KMK
 printf 'GREETING = "hello"\n' >"$project/present.kmk"
 printf 'include? ./absent.km\n"okay"\n' >"$project/value.km"
@@ -29,7 +29,7 @@ for backend in native wasm; do
  if cmp -s "$project/Makefile.kmk" "$project/fmt"; then test-ok "$backend optional include formatting"; else test-fail "$backend optional format"; fi
   "${runner[@]}" --print-result -C "$project" ./value.km >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = '"okay"' ]; then test-ok "$backend value source optional include"; else test-fail "$backend optional value fragment"; fi
- printf 'later :\n\t@(out "loaded")\n' >"$project/missing.kmk"
+ printf 'later :\n\t@(out! "loaded")\n' >"$project/missing.kmk"
  "${runner[@]}" -C "$project" later >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = loaded ]; then test-ok "$backend newly present optional include registers declarations"; else test-fail "$backend newly present include"; fi
  printf '(\n' >"$project/missing.kmk"

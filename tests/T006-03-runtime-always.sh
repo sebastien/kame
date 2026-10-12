@@ -22,7 +22,7 @@ always ./one ./two : ./input
 always ./capture/{name}.txt : ./input
 	printf %s @(name) > @>; printf c >> ./capture-runs
 always ./yielded : ./input
-	@(yield "constant")
+	@(yield! "constant")
 always ./missing : ./input
 	true
 always :

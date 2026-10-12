@@ -18,16 +18,16 @@ flag = :true
 nothing = :nil
 text = "line\n\"quoted\" @(number)"
 raw = """@(missing) {(missing)}"""
-unused = (fail "unused definition evaluated")
+unused = (fail! "unused definition evaluated")
 fallback ?= number
-fallback ?= (fail "skipped default evaluated")
+fallback ?= (fail! "skipped default evaluated")
 (identity value) = value
 result = [(identity alias) fraction flag nothing ["word" alias] [answer: fallback] text raw]
 KM
 cp "$work/values.km" "$work/values.kmk"
 # Kash retains its existing standalone '=' header grammar.
 sed '/fallback ?=/d' "$work/values.km" >"$work/values.kash"
-printf '\nfallback = number\n(out result)\n' >>"$work/values.kash"
+printf '\nfallback = number\n(out! result)\n' >>"$work/values.kash"
 expected='[42 1.5 :true :nil ["word" 42] [answer: 42] "line\n\"quoted\" 42" "@(missing) {(missing)}"]'
 kash_expected='[42,1.5,true,nil,["word",42],{"answer":42},"line\n\"quoted\" 42","@(missing) {(missing)}"]'
 for backend in native wasm; do

@@ -7,7 +7,7 @@
 	exit 3
 
 ./conflict.out :
-	@(yield "declared")
+	@(yield! "declared")
 	echo command
 
 A = "@(B)"

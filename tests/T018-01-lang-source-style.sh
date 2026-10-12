@@ -96,8 +96,8 @@ for size in (69, 70):
     want = text if size == 69 else f'when (f\n       "{"a" * size}")\nV = 1\nend\n'
     cases.append(('script', text, want))
 # Formatting preserves effectful syntax without invoking it.
-cases.append(('script', 'when (shell "touch formatter-forbidden")\nV = 1\nend\n',
-              'when (shell "touch formatter-forbidden")\nV = 1\nend\n'))
+cases.append(('script', 'when (shell! "touch formatter-forbidden")\nV = 1\nend\n',
+              'when (shell! "touch formatter-forbidden")\nV = 1\nend\n'))
 
 def run(runner, command, lang, text):
     file = work / 'style.km'

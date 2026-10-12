@@ -26,9 +26,9 @@ for backend in native wasm; do
 		if [ "$status" = 1 ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend rejects $code"; else test-fail "$backend rejection ($status)"; cat "$work/out" "$work/err"; fi
 	}
 	test-step "$backend expression statements discard all result kinds and propagate failure"
-	check '' do run --allow-run --lang kash -c $'(nop :nil)\n(nop [status: 0])\n(run "true")'
-	check effect do run --lang kash -c $'(out "effect")\n(nop :nil)'
-	reject USER_ERROR do run --allow-run --lang kash -c $'(fail "intentional")\nprintf forbidden'
+	check '' do run --allow-run --lang kash -c $'(nop :nil)\n(nop [status: 0])\n(run! "true")'
+	check effect do run --lang kash -c $'(out! "effect")\n(nop :nil)'
+	reject USER_ERROR do run --allow-run --lang kash -c $'(fail! "intentional")\nprintf forbidden'
 	reject PARSE_ERR do run --allow-run --lang kash -c '(nop "printf") forbidden'
 	check computed do run --allow-run --lang kash -c $'executable = (first ["printf"])\n$executable "%s" "computed"'
 	test-step "$backend computed stage environments retain data and ordered overrides"
@@ -40,10 +40,10 @@ for backend in native wasm; do
 	check '' do run --allow-run --lang kash -c ':env (nop [MODE: ""]) printenv MODE'
 	check $'left\nright' do run --allow-run --lang kash -c ':env (nop [MODE: "left"]) printenv MODE | :env (nop [MODE: "right"]) sh -c "cat; printenv MODE"'
 	check 'parent' do run --allow-run --env MODE=parent --lang kash -c $':env (parse-json "{}") true\nprintenv MODE'
-	check 'lowered' do run --allow-run --lang kash -c '(run :env [MODE: "lowered"] "printenv" "MODE")'
+	check 'lowered' do run --allow-run --lang kash -c '(run! :env [MODE: "lowered"] "printenv" "MODE")'
 	check safe do run --allow-run --lang kash -c $'if (nop :false)\n\t:env (nop [TOKEN: (env "K07_SECRET")]) printf forbidden\nelse\n\tprintf safe'
 	check '' do run --dry-run --allow-run --lang kmk -c 'dry :' dry --lang kash -c ':env (nop [TOKEN: (env "K07_SECRET")]) printf forbidden'
-	check '' do run --dry-run --allow-run --lang kmk -c 'dry :' dry --lang kash -c '(run :env [TOKEN: (env "K07_SECRET")] "true")'
+	check '' do run --dry-run --allow-run --lang kmk -c 'dry :' dry --lang kash -c '(run! :env [TOKEN: (env "K07_SECRET")] "true")'
 	for value in ':nil' '"text"' '["list"]' '[MODE: 1]' '[MODE: :nil]' '[MODE: ["nested"]]' '(parse-json "{\"bad=name\":\"secret\"}")' '(parse-json "{\"1BAD\":\"secret\"}")'; do
 		reject EXPR_INVALID do run --allow-run --lang kash -c ":env (nop $value) printf forbidden"
 	done
@@ -71,7 +71,7 @@ KMK
 	cat >"$work/Makefile.kmk" <<'KMK'
 SHELL = kash
 chosen :
-	exports = (let [] (out "once") [TOKEN: (text (read ./late))])
+	exports = (let [] (out! "once") [TOKEN: (text (read ./late))])
 	:env $exports printenv TOKEN
 ./late :
 	printf payload > @>
@@ -103,17 +103,17 @@ SHELL = kash
 (selected-files UNUSED) = inputs/changed
 selected = (selected-files :nil)
 ./output : ./input ./other | prepare
-	(if (eq inputs @<*) :nil (fail "inputs differ"))
-	(if (eq outputs @>*) :nil (fail "outputs differ"))
-	(if (eq inputs/changed @<?) :nil (fail "changed inputs differ"))
-	(if (eq selected inputs/changed) :nil (fail "lazy frame differs"))
+	(if (eq inputs @<*) :nil (fail! "inputs differ"))
+	(if (eq outputs @>*) :nil (fail! "outputs differ"))
+	(if (eq inputs/changed @<?) :nil (fail! "changed inputs differ"))
+	(if (eq selected inputs/changed) :nil (fail! "lazy frame differs"))
 	printf "<%s>" (map basename inputs) > (first outputs)
 	printf "<%s>" (map basename inputs/changed) > ./changed
 prepare :
 	(nop args)
 empty :
-	(if (eq inputs []) :nil (fail "task inputs not empty"))
-	(if (eq outputs ["empty"]) :nil (fail "task output name lost"))
+	(if (eq inputs []) :nil (fail! "task inputs not empty"))
+	(if (eq outputs ["empty"]) :nil (fail! "task output name lost"))
 invalid :
 	(nop inputs/changed)
 KMK

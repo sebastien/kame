@@ -28,7 +28,7 @@ second"""
 	cat @<* \
 	 > @>
 default : ./out
-	@(out (join words ","))
+	@(out! (join words ","))
 KMK
 for backend in native wasm; do
 	test-step "$backend continued definitions, expressions and headers"

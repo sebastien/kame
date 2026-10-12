@@ -462,7 +462,7 @@ func TestInspectionReplacementReusesCancelledSharedRead(t *testing.T) {
 
 func TestInspectionRecordedToolResolutionPublishesHostRequest(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "./result : ./seed\n\t@(yield (if x/test-tool (read ./seed) \"\"))\n")
+	started := wasm.NewRuntime(a, "./result : ./seed\n\t@(yield! (if x/test-tool (read ./seed) \"\"))\n")
 	if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
 	r := started.Runtime
 	defer r.Free()
@@ -787,7 +787,7 @@ func TestRuntimeExpressionEffectsDrainInOrder(t *testing.T) {
 	}
 	runtime := started.Runtime
 	defer runtime.Free()
-	if request := runtime.RequestExpression("(out \"one\" 2)"); request.Code != "" {
+	if request := runtime.RequestExpression("(out! \"one\" 2)"); request.Code != "" {
 		t.Fatalf("request expression failed: %s", request.Code)
 		return
 	}
@@ -1157,7 +1157,7 @@ func TestRuntimeYieldsHostRequestAndResumes(t *testing.T) {
 	}
 	runtime := started.Runtime
 	defer runtime.Free()
-	request := runtime.RequestExpression("(shell \"echo wasm\")")
+	request := runtime.RequestExpression("(shell! \"echo wasm\")")
 	if request.Code != "" {
 		t.Fatalf("request expression failed: %s", request.Code)
 		return
@@ -1245,7 +1245,7 @@ func TestRuntimeCancellationIgnoresLateCompletion(t *testing.T) {
 	}
 	runtime := started.Runtime
 	defer runtime.Free()
-	if request := runtime.RequestExpression("(shell \"echo wasm\")"); request.Code != "" {
+	if request := runtime.RequestExpression("(shell! \"echo wasm\")"); request.Code != "" {
 		t.Fatalf("request expression failed: %s", request.Code)
 		return
 	}

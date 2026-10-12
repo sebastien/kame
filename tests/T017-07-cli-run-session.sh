@@ -33,7 +33,7 @@ build : @((first @*))
 KMK
 cat >"$work/cwd/Makefile.kmk" <<'KMK'
 name = "Ada"
-(report value) = (out value)
+(report value) = (out! value)
 build :
 	printf rule
 KMK
@@ -57,10 +57,10 @@ for backend in native wasm; do
 	check '' do run "$work/functions.km" -c '(greet name)' -c 'name = "Ada"'
 	check '"Hello Ada"' do run --print-result "$work/functions.km" -c '(greet name)' -c 'name = "Ada"'
 	check '"Ada"' do run "$work/values.km" name
-	check 'Hello Ada' do run -c '(out "Hello ")' -c '(out "Ada")' -c '"Hello Ada"'
-	check 'Hello Ada"Hello Ada"' do run --print-result -c '(out "Hello ")' -c '(out "Ada")' -c '"Hello Ada"'
+	check 'Hello Ada' do run -c '(out! "Hello ")' -c '(out! "Ada")' -c '"Hello Ada"'
+	check 'Hello Ada"Hello Ada"' do run --print-result -c '(out! "Hello ")' -c '(out! "Ada")' -c '"Hello Ada"'
 	# Explicit display never depends on whether out executed.
-	check 'firstsecond42' do run -c '(out "first")' -c '(out "second")' -l expr -c '42'
+	check 'firstsecond42' do run -c '(out! "first")' -c '(out! "second")' -l expr -c '42'
 	check '["one two" "--help"]' do run -l expr -c '@*' -- 'one two' --help
 	check ':nil' do run -l expr -c ':nil'
 	check '' do run -c ''
@@ -83,10 +83,10 @@ for backend in native wasm; do
 	if cmp -s "$work/binary" "$work/expected"; then test-ok "$backend streams non-UTF8 without capture decoding"; else test-fail "$backend decoded statement stdout"; fi
 
 	test-step "$backend preflight and invocation policy"
-	reject PARSE_ERR do run -c '(out "must-not-print")' -l expr -c '['
-	reject DEF_INVALID do run -c '(out "must-not-print")' -c 'name = 1' -c 'name = 2'
-	reject FS_ERR do run -c '(out "must-not-print")' "$work/missing.kash"
-	reject TGT_NO_RULE do run -c '(out "must-not-print")' "$work/values.km" missing
+	reject PARSE_ERR do run -c '(out! "must-not-print")' -l expr -c '['
+	reject DEF_INVALID do run -c '(out! "must-not-print")' -c 'name = 1' -c 'name = 2'
+	reject FS_ERR do run -c '(out! "must-not-print")' "$work/missing.kash"
+	reject TGT_NO_RULE do run -c '(out! "must-not-print")' "$work/values.km" missing
 	reject CAP_DENIED do run -c 'name = "Ada"' "$work/process.kash" "$work/functions.km"
 	reject CAP_DENIED do run -c '$(printf denied)'
 	reject CAP_DENIED do run -c 'name = "Ada"' "$work/rules.kmk" build
@@ -106,9 +106,9 @@ PYTIME
 	reject RECIPE_TIMEOUT do run --timeout 250 -l kmk -c $'default : second\nfirst :\n\tsleep 0.15\nsecond : first\n\tsleep 0.15\n' default
 	service_case=0
 	for service_source in \
-		$'service daemon :\n\t@(write "./forbidden-service-output" "payload")\n' \
-		$'BAD = (write "./forbidden-service-output" "payload")\nservice daemon :\n\t@(BAD)\n' \
-		$'service daemon : ; [shell: kash]\n\t(write "./forbidden-service-output" "payload")\n'; do
+		$'service daemon :\n\t@(write! "./forbidden-service-output" "payload")\n' \
+		$'BAD = (write! "./forbidden-service-output" "payload")\nservice daemon :\n\t@(BAD)\n' \
+		$'service daemon : ; [shell: kash]\n\t(write! "./forbidden-service-output" "payload")\n'; do
 		service_case=$((service_case + 1))
 		service_directory="$work/service-$backend-$service_case"
 		mkdir -p "$service_directory"
@@ -122,7 +122,7 @@ PYTIME
 	if jq -e -s 'all(.[]; .schema == 1) and any(.[]; .type == "target-value" and .target == "value" and .value.data == 42) and any(.[]; .type == "target-completed" and .target == "value")' "$work/values-json" >/dev/null; then test-ok "$backend single-source selected values emit schema-1 JSON events"; else test-fail "$backend leaked raw value output into JSON"; fi
 	"${command[@]}" do run --timeout 1000 --json -l kmk -c 'value = 42' value > "$work/timed-values-json" 2> "$work/err"
 	if jq -e -s 'any(.[]; .type == "target-value" and .target == "value" and .value.data == 42)' "$work/timed-values-json" >/dev/null; then test-ok "$backend timed sessions preserve selected value JSON"; else test-fail "$backend timed session omitted selected values"; fi
-	"${command[@]}" do run --json -l kmk -c $'a : shared\nb : shared\nshared :\n\t@(out "once")\n' a b > "$work/shared-json" 2> "$work/err"
+	"${command[@]}" do run --json -l kmk -c $'a : shared\nb : shared\nshared :\n\t@(out! "once")\n' a b > "$work/shared-json" 2> "$work/err"
 	if jq -e -s '[.[] | select(.type == "target-started" and .target == "shared")] | length == 1' "$work/shared-json" >/dev/null; then test-ok "$backend multi-target build retains one shared prerequisite"; else test-fail "$backend multi-target build duplicated shared work"; fi
 	printf 'value = 42\n' | "${command[@]}" do parse --json --lang kmk > "$work/alias-ast" 2> "$work/err"
 	printf 'value=42\n' | "${command[@]}" do fmt --lang km > "$work/alias-format" 2> "$work/err"
@@ -131,7 +131,7 @@ PYTIME
 	check 'leafruleleaf' do run "$work/arguments.kmk" build -c '"done"' -- leaf
 	test-step "$backend discovered build plus inline work"
 	check 'ruleAda' -C "$work/cwd" build -c '(report name)'
-	check 'rulefirstAda' -C "$work/cwd" build -c '(out "first")' -c '(report name)'
+	check 'rulefirstAda' -C "$work/cwd" build -c '(out! "first")' -c '(report name)'
 	reject PARSE_ERR -C "$work/cwd" build -c '['
 	reject DEF_INVALID -C "$work/cwd" build -c 'name = "duplicate"'
 	test-step "$backend removed commands give migration help"

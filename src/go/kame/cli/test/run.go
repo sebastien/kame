@@ -7,7 +7,7 @@ import (
 )
 
 func TestRunInputsRetainOrderAndForwardLanguage(t *testing.T) {
-	args := []string{"values.km", "answer", "-c", "(out answer)", "-l", "kash", "-c", "echo hello", "--lang=kmk", "-f", "script.mk", "build", "--entry=check", "--lang", "km", "functions.km", "-c", "(report answer)", "--", "-l", "--help", "argument.kash"}
+	args := []string{"values.km", "answer", "-c", "(out! answer)", "-l", "kash", "-c", "echo hello", "--lang=kmk", "-f", "script.mk", "build", "--entry=check", "--lang", "km", "functions.km", "-c", "(report answer)", "--", "-l", "--help", "argument.kash"}
 	inv := cli.ParseRun(args)
 	defer inv.Free()
 	if !inv.OK || len(inv.Inputs) != 6 { t.Error("ordered runner input parse failed"); return }
@@ -109,12 +109,12 @@ func TestPrimaryRunSelectionDoesNotProbeFilesystem(t *testing.T) {
 }
 
 func TestDiscoveredBuildAppendsCommandsWithoutReinterpretingTargets(t *testing.T) {
-	inv := cli.Parse("", []string{"build", "-c", "(out name)", "./output.km", "--command=42", "--", "--help"})
+	inv := cli.Parse("", []string{"build", "-c", "(out! name)", "./output.km", "--command=42", "--", "--help"})
 	defer inv.Free()
 	if !inv.OK || inv.Name != "run" || len(inv.Inputs) != 3 { t.Error("discovered build did not compose its inline fragments"); return }
 	input := inv.Inputs[0]
 	if input.Kind != "discover" || input.Lang != "kmk" || len(input.Entries) != 3 || input.Entries[0] != "build" || input.Entries[1] != "./output.km" || input.Entries[2] != "--help" { t.Error("discovered build targets changed meaning") }
-	if inv.Inputs[1].Value != "(out name)" || inv.Inputs[2].Value != "42" || inv.Inputs[1].Lang != "km" || inv.NoDefaultGrants || len(inv.Args) != 0 { t.Error("appended command order, language or build policy changed") }
+	if inv.Inputs[1].Value != "(out! name)" || inv.Inputs[2].Value != "42" || inv.Inputs[1].Lang != "km" || inv.NoDefaultGrants || len(inv.Args) != 0 { t.Error("appended command order, language or build policy changed") }
 	if cli.AppendsCommands([]string{"build", "--env", "-c", "--", "-c"}) { t.Error("option values or literal targets became commands") }
 }
 

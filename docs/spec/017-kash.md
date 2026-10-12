@@ -113,7 +113,7 @@ kame do run [OPTIONS] --lang kash - [-- ARG...]
 The file forms also accept `.ksh` and may append other files or repeated `-c`
 fragments as defined by `009-cli.md`. Parse all fragments before execution;
 share top-level definitions, one engine, and one invocation policy. A trailing
-`-c '(out name)'` uses Kame syntax by default and can refer to a definition in
+`-c '(out! name)'` uses Kame syntax by default and can refer to a definition in
 the Kash source. It is not raw Kash command text unless a forward-scoped
 `--lang kash` explicitly selects that parser.
 
@@ -329,7 +329,7 @@ git status --short
 It lowers conceptually to a Kame process operation:
 
 ```kame
-(run "git" "status" "--short")
+(run! "git" "status" "--short")
 ```
 
 Kash command arguments are typed value positions, not shell word-expansion
@@ -384,7 +384,7 @@ reading an environment variable into a Kame value.
 A command may use `run` setup keys for process configuration:
 
 ```kame
-(run :cwd build-dir :timeout 10 :NODE_ENV "production" "npm" "test")
+(run! :cwd build-dir :timeout 10 :NODE_ENV "production" "npm" "test")
 ```
 
 The keys configure the process; remaining expressions form its executable and
@@ -416,7 +416,7 @@ exports = [TOKEN: (env "DEPLOY_TOKEN") MODE: "release"]
 ```
 
 Expression-level process applications share the same contract, for example
-`(run :env exports "deploy")`. The record is evaluated only when that stage is
+`(run! :env exports "deploy")`. The record is evaluated only when that stage is
 reached at execution time, under ordinary capabilities and phase checks. Parsing,
 planning, dry-run, construction, and unselected branches do not fetch secrets or
 execute its effects. Reading values through `env` still requires the relevant
@@ -466,7 +466,7 @@ compile >> output.log
 It lowers conceptually to a Kame streaming graph:
 
 ```kame
-(pipe (run "generate") (run "transform") (run "publish"))
+(pipe! (run! "generate") (run! "transform") (run! "publish"))
 ```
 
 Kash connects command stages through that graph rather than eagerly buffering
@@ -539,7 +539,7 @@ or value operands; terminal `&` is not a definition RHS. A handle can be bound
 using an explicit Kame process operation instead:
 
 ```kash
-job = (run :async :true "watch-assets")
+job = (run! :async :true "watch-assets")
 completion = (await job)
 ```
 

@@ -57,8 +57,8 @@ for backend in native wasm; do
 	for expression in '(wildcard :+files)' '(wildcard :-dir :-symlinks)' '(wildcard :+files :-files ./assets/*)' '(wildcard :-symlinks :+symlinks ./assets/*)' '(wildcard "+unknown" ./assets/*)' '(wildcard "-unknown" ./assets/*)' '(wildcard "+files/child")'; do reject EXPR_INVALID "$expression"; done
 	reject FS_ERR '(wildcard :+files ./assets/loop/*)'
 	test-step "$backend memory resources expose normalized entry kinds"
-	check '["mem://masks/root"]' '(wildcard :+dir (resource "mem://masks/*"))' --allow-read=mem://masks/ --allow-write=mem://masks/ -c '(write (resource "mem://masks/root/input") "x")'
-	check '["mem://masks/root/input"]' '(wildcard :+files (resource "mem://masks/**"))' --allow-read=mem://masks/ --allow-write=mem://masks/ -c '(write (resource "mem://masks/root/input") "x")'
+	check '["mem://masks/root"]' '(wildcard :+dir (resource "mem://masks/*"))' --allow-read=mem://masks/ --allow-write=mem://masks/ -c '(write! (resource "mem://masks/root/input") "x")'
+	check '["mem://masks/root/input"]' '(wildcard :+files (resource "mem://masks/**"))' --allow-read=mem://masks/ --allow-write=mem://masks/ -c '(write! (resource "mem://masks/root/input") "x")'
 	test-step "$backend kind changes invalidate shared filtered watch consumers"
 	mkdir -p "$work/watch/items/slot"
 	printf x >"$work/watch/seed"
@@ -67,8 +67,8 @@ SHELL = kash
 FILES = (wildcard :+files ./items/*)
 DIRS = (wildcard :+dir ./items/*)
 report :
-	(write ./file-report (join FILES ","))
-	(write ./dir-report (join DIRS ","))
+	(write! ./file-report (join FILES ","))
+	(write! ./dir-report (join DIRS ","))
 KMK
 	settled() {
 		local files="$1" dirs="$2" cycles="$3"

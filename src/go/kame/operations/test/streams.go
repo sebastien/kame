@@ -246,7 +246,7 @@ func TestLibraryCoalescesTwoStreamInputsBeforeInvocation(t *testing.T) {
 	defer registry.Free()
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "fixture-stream", Call: libraryStreamOperation, Context: streamRecord, MinArity: 0, MaxArity: 0})
-	parsed := script.Parse(a, "coalesced.km", "left = (fixture-stream)\nright = (fixture-stream)\nresult = (out (str (uppercase left) (uppercase right)))\n")
+	parsed := script.Parse(a, "coalesced.km", "left = (fixture-stream)\nright = (fixture-stream)\nresult = (out! (str (uppercase left) (uppercase right)))\n")
 	defer parsed.Free()
 	program := eval.Compile(a, engine, parsed, registry)
 	defer program.Free()

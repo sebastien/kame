@@ -17,7 +17,7 @@ for host in native wasm; do
 	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
 	mkdir -p "$TMPDIR/$host-work"
 	if (cd "$TMPDIR/$host-work" && "${runner[@]}" do run --lang expr --allow-write=mem://workspace/ --allow-read=mem://workspace/ \
-		-c '(write (resource "mem://workspace/out.txt") "memory-uri")' \
+		-c '(write! (resource "mem://workspace/out.txt") "memory-uri")' \
 		-c '(read (resource "mem://workspace/out.txt"))' >"$TMPDIR/$host.memory.out" 2>"$TMPDIR/$host.memory.err"); then
 		:
 	else
@@ -29,7 +29,7 @@ for host in native wasm; do
 		test-fail "$host memory URI must not create a local mem: path"
 	fi
 	"${runner[@]}" do run --lang expr --allow-write=mem://workspace/ --allow-read=mem://workspace/ \
-		-c '(write (resource "mem://workspace/entry%252F%23%3f") "escaped-memory")' \
+		-c '(write! (resource "mem://workspace/entry%252F%23%3f") "escaped-memory")' \
 		-c '(read (resource "mem://workspace/entry%252F%23%3F"))' >"$TMPDIR/$host.escaped-memory.out" 2>"$TMPDIR/$host.escaped-memory.err"
 	if [ "$(cat "$TMPDIR/$host.escaped-memory.out")" = 'escaped-memory' ]; then
 		test-ok "$host preserves percent, hash, and question characters in memory URI identity"
@@ -37,8 +37,8 @@ for host in native wasm; do
 		test-fail "$host escaped memory URI round trip: $(cat "$TMPDIR/$host.escaped-memory.err")"
 	fi
 	"${runner[@]}" do run --lang expr --allow-write=mem://glob/ --allow-read=mem://glob/ \
-		-c '(write (resource "mem://glob/a.txt") "a")' \
-		-c '(write (resource "mem://glob/sub/b.txt") "b")' \
+		-c '(write! (resource "mem://glob/a.txt") "a")' \
+		-c '(write! (resource "mem://glob/sub/b.txt") "b")' \
 		-c '(wildcard (resource "mem://glob/**/*.txt"))' >"$TMPDIR/$host.glob.out" 2>"$TMPDIR/$host.glob.err"
 	if [ "$(cat "$TMPDIR/$host.glob.out")" = '["mem://glob/a.txt" "mem://glob/sub/b.txt"]' ]; then
 		test-ok "$host lists sorted recursive memory URI matches"
@@ -55,7 +55,7 @@ for host in native wasm; do
 	fi
 	escaped_file_uri="file://$TMPDIR/$host-entry%252F%23%3F"
 	"${runner[@]}" do run --lang expr "--allow-write=$file_root" "--allow-read=$file_root" \
-		-c "(write (resource \"$escaped_file_uri\") \"escaped-file\")" \
+		-c "(write! (resource \"$escaped_file_uri\") \"escaped-file\")" \
 		-c "(read (resource \"$escaped_file_uri\"))" >"$TMPDIR/$host.escaped-file.out" 2>"$TMPDIR/$host.escaped-file.err"
 	if [ "$(cat "$TMPDIR/$host.escaped-file.out")" = 'escaped-file' ] && [ "$(cat "$TMPDIR/$host-entry%2F#?")" = 'escaped-file' ]; then
 		test-ok "$host preserves percent, hash, and question characters in file URI paths"
@@ -77,7 +77,7 @@ for host in native wasm; do
 
 	status=0
 	"${runner[@]}" do run --lang expr --allow-write=mem://workspace/ \
-		-c '(write (resource "mem://other/out.txt") "denied")' \
+		-c '(write! (resource "mem://other/out.txt") "denied")' \
 		>"$TMPDIR/$host.denied.out" 2>"$TMPDIR/$host.denied.err" || status=$?
 	if [ "$status" -ne 0 ] && grep -Fq 'CAP_DENIED' "$TMPDIR/$host.denied.err"; then
 		test-ok "$host keeps memory namespace grants isolated"
@@ -102,7 +102,7 @@ for runner in ([native], ['node', wasm]):
         uri = 'file://' + str(source)
         (work / 'Makefile.kmk').write_text(
             f'./output : @((list (resource "{uri}")))\n'
-            f'\t@(yield (read (resource "{uri}")))\n')
+            f'\t@(yield! (read (resource "{uri}")))\n')
         process = subprocess.Popen(
             runner + ['-C', directory, '--watch', './output'],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

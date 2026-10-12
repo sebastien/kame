@@ -145,7 +145,7 @@ and the consequent by four spaces:
 (if
   (valid-page? page)
     (page-output page)
-  (fail "Invalid page"))
+  (fail! "Invalid page"))
 ```
 
 Each branch retains its own nested layout. An omitted alternative introduces

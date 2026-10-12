@@ -25,7 +25,7 @@ parity() {
 }
 
 test-step "values, selected definitions, output effects and process streams"
-parity 0 -c 'name = "Ada"' -c '(out "notice")' -c '(err "warning")' -c 'name'
+parity 0 -c 'name = "Ada"' -c '(out! "notice")' -c '(err! "warning")' -c 'name'
 parity 0 "$work/values.km" name name
 parity 0 -l kash -c 'printf bytes' -l km -c '42'
 parity 0 -l kash -c 'printf "\\377"' -l expr -c ':nil'
@@ -40,8 +40,8 @@ parity 1 -c '$(printf denied)'
 parity 1 --allow-run --capture-limit 1 -c '$(printf abc)'
 
 test-step "preflight errors stay on stdout and run no earlier effects"
-parity 1 -c '(out "must-not-run")' -l expr -c '['
-parity 1 -c '(out "must-not-run")' -c 'name = 1' -c 'name = 2'
-parity 1 -c '(out "must-not-run")' "$work/invalid.km"
-parity 1 -c '(out "must-not-run")' "$work/missing.km"
+parity 1 -c '(out! "must-not-run")' -l expr -c '['
+parity 1 -c '(out! "must-not-run")' -c 'name = 1' -c 'name = 2'
+parity 1 -c '(out! "must-not-run")' "$work/invalid.km"
+parity 1 -c '(out! "must-not-run")' "$work/missing.km"
 test-end

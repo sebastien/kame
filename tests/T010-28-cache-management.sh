@@ -17,7 +17,7 @@ cli_build
 prepare_project() {
   local project="$1"
   mkdir -p "$project"
-  printf 'task cached :\n\techo run >> runs.log\n\t@(out "cached-output")\n\ntask other :\n\techo other >> runs.log\n\t@(out "other-output")\n' >"$project/Makefile.kmk"
+  printf 'task cached :\n\techo run >> runs.log\n\t@(out! "cached-output")\n\ntask other :\n\techo other >> runs.log\n\t@(out! "other-output")\n' >"$project/Makefile.kmk"
 }
 run_native() { (cd "$1" && "$CLI_BIN" "${2:-cached}") >/dev/null 2>&1; }
 run_wasm() { (cd "$1" && node "$CLI_ROOT/dist/kame.js" "${2:-cached}") >/dev/null 2>&1; }

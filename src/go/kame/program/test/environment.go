@@ -103,7 +103,7 @@ func TestSharedDynamicReadPreservesSuspendedKashEnvironment(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "shared-environment.kmk", "SHELL = kash\ndefault : ./value reader\n./value :\n\tsleep 0.05\n\tprintenv MODE > ./value\nreader :\n\t(out (text (read ./value)))\n")
+	parsed := script.Parse(a, "shared-environment.kmk", "SHELL = kash\ndefault : ./value reader\n./value :\n\tsleep 0.05\n\tprintenv MODE > ./value\nreader :\n\t(out! (text (read ./value)))\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()

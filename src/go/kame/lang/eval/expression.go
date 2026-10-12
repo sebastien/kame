@@ -126,7 +126,7 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 				return Result{Value: context.Program.newOperationCallable(operation.Name)}
 			}
 		}
-		return failure(context.Run, "REF_MISSING", span, "unknown reference: "+name)
+		return missingOperation(context, name, span, true)
 	}
 	if b.Kind == bindingValue {
 		if b.Value.CallableOwner != nil { return Result{Value: b.Value.Clone(context.Run)} }

@@ -1,2 +1,2 @@
 task where :
-	@(out "src/kmk/main.kmk\n")
+	@(out! "src/kmk/main.kmk\n")

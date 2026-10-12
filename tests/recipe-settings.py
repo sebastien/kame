@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory() as temporary:
     # Membership is itself a dependency, including appearance and disappearance.
     (project / 'members').mkdir()
     (project / 'members/a').write_text('A')
-    membership = 'SHELL = kash\nMEMBERS = (wildcard ./members/*)\n./membership : ./input\n\t(yield (join (map ([file] (text (read file))) MEMBERS) ""))\n'
+    membership = 'SHELL = kash\nMEMBERS = (wildcard ./members/*)\n./membership : ./input\n\t(yield! (join (map ([file] (text (read file))) MEMBERS) ""))\n'
     for expected in ('A', 'AB', 'B'):
         run(membership, ['./membership'])
         assert (project / 'membership').read_text() == expected
@@ -91,12 +91,12 @@ with tempfile.TemporaryDirectory() as temporary:
         elif expected == 'AB':
             (project / 'members/a').unlink()
     # A clock/process-backed definition has no revalidatable leaf manifest.
-    volatile = 'SHELL = kash\nPAYLOAD = (shell "printf x >> volatile-runs; printf payload")\n./volatile : ./input\n\t(yield PAYLOAD.stdout)\n'
+    volatile = 'SHELL = kash\nPAYLOAD = (shell! "printf x >> volatile-runs; printf payload")\n./volatile : ./input\n\t(yield! PAYLOAD.stdout)\n'
     run(volatile, ['./volatile'])
     run(volatile, ['./volatile'])
     assert (project / 'volatile-runs').read_text() == 'xx'
     (project / 'seed').write_text('first')
-    generated = './generated : ./seed\n\tcp @< @>\n./consumer : ./input ; [shell: kash]\n\t(yield (text (read "./generated")))\n'
+    generated = './generated : ./seed\n\tcp @< @>\n./consumer : ./input ; [shell: kash]\n\t(yield! (text (read "./generated")))\n'
     run(generated, ['./consumer'])
     (project / 'seed').write_text('second')
     run(generated, ['./consumer'])
@@ -107,19 +107,19 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (project / 'consumer').stat().st_mtime_ns == stamp
     # Completed operands retain their staged effects and reconstructed scopes.
     (project / 'late').write_text('B')
-    staged = 'SHELL = kash\n./staged : ./input\n\t(yield (join (list (let [] (out "once") "A") (text (read "./late"))) ""))\n'
+    staged = 'SHELL = kash\n./staged : ./input\n\t(yield! (join (list (let [] (out! "once") "A") (text (read "./late"))) ""))\n'
     run(staged, ['./staged'], expected='once')
     assert (project / 'staged').read_text() == 'AB'
     run(staged, ['--force', './staged'], expected='once')
-    nested = 'SHELL = kash\n./nested : ./input\n\t(yield (str (let [] (out "a") "A") (str (let [] (out "b") "B") (text (read "./late")))))\n'
+    nested = 'SHELL = kash\n./nested : ./input\n\t(yield! (str (let [] (out! "a") "A") (str (let [] (out! "b") "B") (text (read "./late")))))\n'
     run(nested, ['./nested'], expected='ab')
     assert (project / 'nested').read_text() == 'ABB'
     (project / 'first').write_text('A')
     (project / 'second').write_text('C')
-    callbacks = 'SHELL = kash\n./callbacks : ./input\n\t(yield (join (map ([file] (str (text (read file)) (text (read "./late")))) [./first ./second]) "|"))\n'
+    callbacks = 'SHELL = kash\n./callbacks : ./input\n\t(yield! (join (map ([file] (str (text (read file)) (text (read "./late")))) [./first ./second]) "|"))\n'
     run(callbacks, ['./callbacks'])
     assert (project / 'callbacks').read_text() == 'AB|CB'
-    mutable = 'SHELL = kash\n./mutable : ./input\n\t(yield (let [value "A"] (def value "C") (str value (text (read "./late")))))\n'
+    mutable = 'SHELL = kash\n./mutable : ./input\n\t(yield! (let [value "A"] (def value "C") (str value (text (read "./late")))))\n'
     run(mutable, ['./mutable'])
     assert (project / 'mutable').read_text() == 'CB'
     run('SHELL = "/missing-shell"\nchosen : ; [shell: "/bin/sh"]\n\tprintf override\n', expected='override')
@@ -133,8 +133,8 @@ with tempfile.TemporaryDirectory() as temporary:
         assert not (project / 'forbidden').exists()
     run('chosen : ; [env: 42]\n\ttouch forbidden\n', code='EXPR_INVALID')
     run('chosen : ; [env: [MODE: 42]]\n\ttouch forbidden\n', code='EXPR_INVALID')
-    run('chosen : ; [shell: (out "forbidden")]\n\ttouch forbidden\n', code='PHASE_INVALID')
-    run('chosen : ; [shell: (shell "touch forbidden")]\n\ttouch forbidden\n', code='PHASE_INVALID')
+    run('chosen : ; [shell: (out! "forbidden")]\n\ttouch forbidden\n', code='PHASE_INVALID')
+    run('chosen : ; [shell: (shell! "touch forbidden")]\n\ttouch forbidden\n', code='PHASE_INVALID')
     assert not (project / 'forbidden').exists()
     run('./out : ; [shell: kash]\n\t/usr/bin/printf artifact > ./out\n', ['./out'])
     assert (project / 'out').read_text() == 'artifact'

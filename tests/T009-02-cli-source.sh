@@ -60,7 +60,7 @@ fixture_copy discovery explicit
 )
 
 test-step "inline source with -c and --command="
-INLINE=$'task hi :\n\t@(out "inline\\n")'
+INLINE=$'task hi :\n\t@(out! "inline\\n")'
 cli_run -- -l kmk -c "$INLINE" hi
 cli_expect_status 0
 cli_expect_stdout "inline
@@ -71,12 +71,12 @@ mkdir -p includes
 cat > includes/child.kmk <<'EOF'
 name = "included"
 task child :
-	@(out "child\n")
+	@(out! "child\n")
 EOF
 cat > includes/Makefile.kmk <<'EOF'
 include ./child.kmk
 task default : child
-	@(out "@(name)\n")
+	@(out! "@(name)\n")
 EOF
 (
 	cd includes
@@ -108,7 +108,7 @@ cli_expect_stdout "inline
 "
 
 test-step "--file and --command compose in input order"
-cli_run -- -f explicit/make.kmk where -c '(out "after")'
+cli_run -- -f explicit/make.kmk where -c '(out! "after")'
 cli_expect_status 0
 cli_expect_stdout $'make.kmk\nafter'
 

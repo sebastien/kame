@@ -2,4 +2,4 @@
 OUTPUT = ./dist/app
 
 // Function definition
-(build target) = (run make target)
+(build target) = (run! make target)

@@ -26,7 +26,7 @@ func TestToolResolverIsSharedTrackedAndRecordedInPlans(t *testing.T) {
  a := t.Allocator()
  toolResolveCalls = 0
  toolResolveName = ""
- parsed := script.Parse(a, "tools.kmk", "compiler = (tool \"chosen\")\ntask default :\n\t@(out compiler)\n")
+ parsed := script.Parse(a, "tools.kmk", "compiler = (tool \"chosen\")\ntask default :\n\t@(out! compiler)\n")
  registry := eval.NewRegistry(a)
  operations.Register(registry)
  compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ResolveTool: countedToolResolver, ToolOverrides: []string{"chosen=/bin/sh"}})
