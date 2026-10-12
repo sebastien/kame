@@ -227,10 +227,10 @@ const stoppedPath = join(processDir, 'stopped');
 const cancelProcess = declarations();
 cancelProcess[0].argv = [process.execPath, '-e', `
 const fs = require('node:fs');
-fs.writeFileSync(process.argv[1], 'ready');
 process.on('SIGTERM', () => { fs.writeFileSync(process.argv[2], 'stopped'); process.exit(0); });
 process.stdin.resume();
-setInterval(() => {}, 1000);`, readyPath, stoppedPath];
+setInterval(() => {}, 1000);
+fs.writeFileSync(process.argv[1], 'ready');`, readyPath, stoppedPath];
 const processAbortController = new AbortController();
 const cancelledProcess = call('(example-run "x")', cancelProcess, undefined, { signal: processAbortController.signal });
 while (!existsSync(readyPath)) await new Promise((resolve) => setTimeout(resolve, 1));
@@ -247,10 +247,10 @@ const disposalProgram = await disposalKame.compile('answer = (example-run "dispo
 const disposalPlugin = declarations();
 disposalPlugin[0].argv = [process.execPath, '-e', `
 const fs = require('node:fs');
-fs.writeFileSync(process.argv[1], 'ready');
 process.on('SIGTERM', () => { fs.writeFileSync(process.argv[2], 'stopped'); process.exit(0); });
 process.stdin.resume();
-setInterval(() => {}, 1000);`, disposalReadyPath, disposalStoppedPath];
+setInterval(() => {}, 1000);
+fs.writeFileSync(process.argv[1], 'ready');`, disposalReadyPath, disposalStoppedPath];
 const disposedInvocation = disposalProgram.evaluate('answer', { plugins: disposalPlugin });
 while (!existsSync(disposalReadyPath)) await new Promise((resolve) => setTimeout(resolve, 1));
 await disposalProgram.dispose();
