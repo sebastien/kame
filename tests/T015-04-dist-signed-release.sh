@@ -52,7 +52,8 @@ for line in (root / "SHA256SUMS").read_text().splitlines():
     rows[name] = digest
 platforms = ("linux-x86_64", "linux-arm64", "darwin-x86_64", "darwin-arm64", "freebsd-x86_64", "netbsd-x86_64", "openbsd-x86_64")
 natives = {f"kame-{platform}" for platform in platforms}
-assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "kame.rb", "bin/kame", "kame.com", "kame.js", "kame.json", "kame.wasm", "kame-windows-x64.exe", "kame-windows-x64.zip", *natives}
+assert set(rows) == {"PROVENANCE.json", "VERSION", "Makefile.bootstrap", "kame.rb", "kame", "kame.com", "kame.js", "kame.json", "kame.wasm", "kame-windows-x64.exe", "kame-windows-x64.zip", *natives}
+assert all(path.is_file() for path in root.iterdir()), "release assets must be flat"
 provenance = json.loads((root / "PROVENANCE.json").read_text())
 assert provenance["schema"] == 1 and provenance["sourceRevision"] == "test-fixture"
 assert all(rows[item["name"]] == item["sha256"] for item in provenance["subjects"])
@@ -68,12 +69,12 @@ PY
 project="$root/project"
 mkdir -p "$project"
 printf 'task signed-release :\n\t@(out! "signed-release-ok")\n' >"$project/Makefile.kmk"
-out="$(cd "$project" && KAME_HOME="$root/cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$release/bin/kame" signed-release)"
+out="$(cd "$project" && KAME_HOME="$root/cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$release/kame" signed-release)"
 if [ "$out" = "signed-release-ok" ]; then test-ok "release launcher verifies and runs signed WASM assets"; else test-fail "signed release output: $out"; fi
 
 test-step "latest updates an older launcher using the actual signed release"
 old_launcher="$root/old-kame"
-sed 's/^KAME_STAMP=.*/KAME_STAMP="0.0.0"/' "$release/bin/kame" >"$old_launcher"
+sed 's/^KAME_STAMP=.*/KAME_STAMP="0.0.0"/' "$release/kame" >"$old_launcher"
 chmod +x "$old_launcher"
 out="$(cd "$project" && KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" \
 	KAME_HOME="$root/latest-cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm \
@@ -87,7 +88,7 @@ fi
 
 init_project="$root/init"
 mkdir -p "$init_project"
-init_out="$(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/bin/kame" init)"
+init_out="$(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init)"
 if [ "$init_out" = "Created Makefile.bootstrap for Kame $(cat VERSION). Use make -f Makefile.bootstrap [targets]." ] &&
 	grep -qx "KAME_VERSION ?= $(cat VERSION)" "$init_project/Makefile.bootstrap"; then
 	test-ok "actual signed release initializes a pinned bootstrap sidecar"
@@ -101,11 +102,11 @@ cp -R "$release" "$tampered"
 printf '\n# tampered\n' >>"$tampered/SHA256SUMS"
 version=$(cat VERSION)
 set +e
-KAME_HOME="$root/tamper-cache" KAME_RELEASE_URL="file://$tampered" KAME_BACKEND=wasm "$release/bin/kame" signed-release >"$root/out" 2>"$root/err"
+KAME_HOME="$root/tamper-cache" KAME_RELEASE_URL="file://$tampered" KAME_BACKEND=wasm "$release/kame" signed-release >"$root/out" 2>"$root/err"
 tamper_status=$?
 KAME_RELEASE_PUBKEY_B64_OVERRIDE="$(openssl genpkey -algorithm ED25519 | openssl pkey -pubout -outform DER | openssl base64 -A)" \
 KAME_HOME="$root/wrong-key-cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm \
-	"$release/bin/kame" signed-release >"$root/out-wrong" 2>"$root/err-wrong"
+	"$release/kame" signed-release >"$root/out-wrong" 2>"$root/err-wrong"
 wrong_status=$?
 set -e
 if [ "$tamper_status" = 1 ] && grep -q 'manifest signature is invalid' "$root/err" && [ ! -d "$root/tamper-cache/$version/wasm" ]; then
@@ -121,10 +122,10 @@ fi
 
 test-step "cached provenance is checked against the signed manifest"
 cached="$root/provenance-cache"
-(cd "$project" && KAME_HOME="$cached" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$release/bin/kame" signed-release >/dev/null)
+(cd "$project" && KAME_HOME="$cached" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$release/kame" signed-release >/dev/null)
 printf 'tampered' >"$cached/$version/PROVENANCE.json"
 set +e
-(cd "$project" && KAME_HOME="$cached" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$release/bin/kame" signed-release >"$root/out-prov" 2>"$root/err-prov")
+(cd "$project" && KAME_HOME="$cached" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$release/kame" signed-release >"$root/out-prov" 2>"$root/err-prov")
 prov_status=$?
 set -e
 if [ "$prov_status" = 1 ] && grep -q 'checksum mismatch: PROVENANCE.json' "$root/err-prov"; then

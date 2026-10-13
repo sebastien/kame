@@ -44,7 +44,7 @@ fetch_text() {
 	fi
 }
 
-launcher_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+launcher_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 
 # --- Version resolution: KAME_VERSION, embedded stamp, then VERSION file. ---
 version=""
@@ -293,7 +293,7 @@ install_bootstrap_template() {
 
 install_launcher() {
 	ensure_manifest
-	asset="bin/kame"
+	asset="kame"
 	hex=$(manifest_entry "$cache/SHA256SUMS" "$asset") || die "missing manifest entry: $asset"
 	launcher="$cache/launcher/kame"
 	if [ -x "$launcher" ]; then

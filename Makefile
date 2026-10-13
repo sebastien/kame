@@ -203,7 +203,7 @@ dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zi
 		fi; \
 	done
 	rm -rf dist/release
-	mkdir -p dist/release/bin
+	mkdir -p dist/release
 	cp dist/kame.com dist/release/kame.com
 	cp dist/kame.wasm dist/release/kame.wasm
 	cp dist/kame.js dist/release/kame.js
@@ -219,8 +219,8 @@ dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zi
 	public_key_b64=$$(openssl pkey -pubin -in "$(KAME_RELEASE_PUBLIC_KEY)" -outform DER | openssl base64 -A); \
 	sed -e "s|^KAME_STAMP=.*|KAME_STAMP=\"$$(cat VERSION)\"|" \
 	    -e "s|^KAME_RELEASE_PUBKEY_B64=.*|KAME_RELEASE_PUBKEY_B64=\"$$public_key_b64\"|" \
-	    bin/kame > dist/release/bin/kame
-	chmod +x dist/release/bin/kame
+	    bin/kame > dist/release/kame
+	chmod +x dist/release/kame
 	python3 src/sh/release_manifest.py --directory dist/release --version "$$(cat VERSION)" --revision "$(KAME_RELEASE_REVISION)" --public-key "$(KAME_RELEASE_PUBLIC_KEY)" --signing-key "$(KAME_RELEASE_SIGNING_KEY)"
 
 dist-ape: dist/kame.com dist/ape-smoke.com

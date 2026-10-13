@@ -27,7 +27,7 @@ release publishes these flat assets under the base URL
 | `kame-windows-x64.exe` | `make dist-windows` | Windows x64 PE entry for the native CLI |
 | `kame-windows-x64.zip` | `make dist-windows` | Windows x64 `kame.exe` launcher with colocated Node/WASM CLI assets |
 | `kame-PLATFORM` | `make dist-native` on each build host | Host-native CLI binary, named with the `OS-ARCH` platform key |
-| `bin/kame` | stamped launcher | host provisioning and dispatch |
+| `kame` | stamped launcher | host provisioning and dispatch (installed locally as `bin/kame`) |
 | `Makefile.bootstrap` | bootstrap template | project-local make delegation and `kame init` |
 | `VERSION` | release tree | signed version selector for the explicit latest channel |
 | `kame.rb` | release builder | version-pinned Homebrew formula for the APE |
@@ -81,7 +81,7 @@ only ASCII letters, digits, `.`, `+`, and `-`, preventing cache paths from
 escaping their per-version root. It resolves that version in order:
 
 1. `KAME_VERSION` when set to a concrete version.
-2. An embedded stamp present in the released `bin/kame` asset.
+2. An embedded stamp present in the released `kame` asset.
 3. A `VERSION` file in the launcher's directory or its parent, used for a
   source checkout.
 
@@ -100,7 +100,7 @@ launcher's stamped version remain pinned and perform no selector request.
 
 When the latest selector resolves to a version different from the running
 launcher's embedded stamp, the launcher verifies that release's signed manifest
-and provenance, installs the listed `bin/kame` asset into the version cache,
+and provenance, installs the listed `kame` asset into the version cache,
 then replaces itself with that pinned launcher before backend selection. The
 cached launcher is checked against the signed manifest on each latest-channel
 handoff. Installation uses a sibling temporary file and atomic rename; the
@@ -301,13 +301,19 @@ KAME_RELEASE_SIGNING_KEY=signing.pem \
   src/sh/release.sh
 ```
 
-It refuses to reuse an existing tag or release, stages and signs
-`dist/release/`, creates a draft release for the `VERSION` tag, uploads every
-asset, renames the launcher back to `bin/kame` if GitHub renamed it, verifies
-that every manifest asset is present, and only then publishes. `--repo` selects
+Before retrieving signing keys or building, it requires a clean tracked tree,
+checks that the exact HEAD commit exists in the target GitHub repository, and
+refuses to reuse an existing local/remote tag or release. The operator must push
+the commit first, including when releasing from a detached HEAD; the script
+never pushes code automatically. Authentication/API failures stop preflight.
+It stages and signs `dist/release/`, creates a draft release for the `VERSION`
+tag, uploads every flat asset (including `kame`), verifies that every manifest
+asset is present, and only then publishes. `--repo` selects
 another repository and `--notes-file` supplies release notes in place of
 generated notes. The signing key material is supplied out of band and is never
 stored in the repository.
+
+The `Makefile.kmk` staging task delegates to the same signed GNU Make recipe.
 
 `src/sh/build-ape.sh` builds `dist/kame.com` without GNU Make by wrapping the
 pinned Cosmocc provisioning and the release build flags. It is a bootstrap path

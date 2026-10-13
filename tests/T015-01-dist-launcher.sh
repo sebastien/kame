@@ -24,7 +24,7 @@ sha() {
 root="$TMPDIR/t015"
 release="$root/release"
 cache="$root/cache"
-mkdir -p "$release/bin"
+mkdir -p "$release"
 release_test_keys "$root/keys"
 export KAME_RELEASE_PUBKEY_B64_OVERRIDE="$RELEASE_TEST_KEY_B64"
 
@@ -43,7 +43,7 @@ printf 'fixture Windows launcher bundle' >"$release/kame-windows-x64.zip"
 printf 'fixture native Windows CLI' >"$release/kame-windows-x64.exe"
 printf '9.9.9\n' >"$release/VERSION"
 cp "$CLI_ROOT/Makefile.bootstrap" "$release/Makefile.bootstrap"
-release_test_stamp_launcher "$launcher" "$release/bin/kame" 9.9.9
+release_test_stamp_launcher "$launcher" "$release/kame" 9.9.9
 python3 src/sh/release_package_manifests.py --directory "$release" --version 9.9.9
 release_test_sign "$release" 9.9.9 fixture "$root/keys"
 
@@ -91,7 +91,7 @@ set +e
 latest_tamper_out="$(KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" KAME_RELEASE_URL="file://$release" KAME_HOME="$root/latest-cache" KAME_BACKEND=wasm "$launcher" latest 2>&1)"
 latest_tamper_status=$?
 set -e
-if [ "$latest_tamper_status" = 1 ] && grep -q 'checksum mismatch: cached bin/kame' <<<"$latest_tamper_out"; then
+if [ "$latest_tamper_status" = 1 ] && grep -q 'checksum mismatch: cached kame' <<<"$latest_tamper_out"; then
 	test-ok "tampered latest launcher is rejected before execution"
 else
 	test-fail "latest launcher tamper: status=$latest_tamper_status out=$latest_tamper_out"
@@ -140,17 +140,17 @@ fi
 
 test-step "a checksum mismatch fails closed and installs nothing"
 bad="$root/bad"
-mkdir -p "$bad/bin"
+mkdir -p "$bad"
 cp "$release/kame.com" "$release/kame.js" "$release/kame.wasm" "$release/VERSION" "$bad/"
 cp "$release/Makefile.bootstrap" "$bad/"
 cp "$release/PROVENANCE.json" "$bad/"
-cp "$release/bin/kame" "$bad/bin/kame"
+cp "$release/kame" "$bad/kame"
 {
 	echo "$(sha "$bad/kame.com")  kame.com"
 	printf '%064d  kame.js\n' 0
 echo "$(sha "$bad/kame.wasm")  kame.wasm"
 echo "$(sha "$bad/VERSION")  VERSION"
-echo "$(sha "$bad/bin/kame")  bin/kame"
+echo "$(sha "$bad/kame")  kame"
 echo "$(sha "$bad/Makefile.bootstrap")  Makefile.bootstrap"
 } | sort -k2 >"$bad/SHA256SUMS"
 echo "$(sha "$bad/PROVENANCE.json")  PROVENANCE.json" >>"$bad/SHA256SUMS"
@@ -203,7 +203,7 @@ init_project="$root/init-project"
 mkdir -p "$init_project"
 printf 'all:\n\t@echo project-makefile\n' >"$init_project/Makefile"
 before_makefile=$(sha "$init_project/Makefile")
-out="$(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/bin/kame" init)"
+out="$(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init)"
 if [ "$out" = "Created Makefile.bootstrap for Kame 9.9.9. Use make -f Makefile.bootstrap [targets]." ] && \
 	grep -qx 'KAME_VERSION ?= 9.9.9' "$init_project/Makefile.bootstrap" && \
 	[ "$(sha "$init_project/Makefile")" = "$before_makefile" ]; then
@@ -212,7 +212,7 @@ else
 	test-fail "init output or project preservation: out=$out"
 fi
 set +e
-(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/bin/kame" init >"$root/init-out" 2>"$root/init-err")
+(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init >"$root/init-out" 2>"$root/init-err")
 status=$?
 set -e
 if [ "$status" = 1 ] && grep -q 'refusing to overwrite Makefile.bootstrap' "$root/init-err" && \
@@ -225,9 +225,9 @@ fi
 race_project="$root/init-race"
 mkdir -p "$race_project"
 set +e
-(cd "$race_project" && KAME_HOME="$root/init-race-cache" KAME_RELEASE_URL="file://$release" "$release/bin/kame" init >"$root/race1-out" 2>"$root/race1-err") &
+(cd "$race_project" && KAME_HOME="$root/init-race-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init >"$root/race1-out" 2>"$root/race1-err") &
 race1=$!
-(cd "$race_project" && KAME_HOME="$root/init-race-cache" KAME_RELEASE_URL="file://$release" "$release/bin/kame" init >"$root/race2-out" 2>"$root/race2-err") &
+(cd "$race_project" && KAME_HOME="$root/init-race-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init >"$root/race2-out" 2>"$root/race2-err") &
 race2=$!
 wait "$race1"
 race1_status=$?
@@ -247,7 +247,7 @@ fi
 offline_project="$root/init-offline"
 mkdir -p "$offline_project"
 set +e
-(cd "$offline_project" && KAME_HOME="$root/init-offline-cache" KAME_RELEASE_URL="file://$release" KAME_NO_DOWNLOAD=1 "$release/bin/kame" init >"$root/offline-out" 2>"$root/offline-err")
+(cd "$offline_project" && KAME_HOME="$root/init-offline-cache" KAME_RELEASE_URL="file://$release" KAME_NO_DOWNLOAD=1 "$release/kame" init >"$root/offline-out" 2>"$root/offline-err")
 status=$?
 set -e
 if [ "$status" = 1 ] && grep -q 'download disabled' "$root/offline-err" && \
