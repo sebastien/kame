@@ -38,7 +38,7 @@ func TestComputedOutputFailureCleanup(t *testing.T) {
 	fixtures := []string{
 		"@([./one ./one]) :\n",
 		"@([]) :\n",
-		"ROOT = (out \"forbidden\")\n@(ROOT)/out :\n",
+		"ROOT = (out! \"forbidden\")\n@(ROOT)/out :\n",
 		"@(str \"./one\") :\n./one :\n",
 		"@(str \"./\" \"{\" \"name\") :\n",
 	}

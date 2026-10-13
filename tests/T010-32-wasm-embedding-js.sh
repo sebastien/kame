@@ -74,7 +74,7 @@ assert.ok(Array.isArray(built.events));
 built.events.push({ type: 'caller-mutation' });
 assert.equal((await answer.build('answer')).events.some((event) => event.type === 'caller-mutation'), false);
 await assert.rejects(kame.compile('x = 1\nx = 2\n'), (error) => ['DEF_INVALID', 'PARSE_ERR'].includes(error.code));
-const shared = await kame.compile('a : shared\nb : shared\nshared :\n\t@(out "once")\n', { name: 'shared.kmk' });
+const shared = await kame.compile('a : shared\nb : shared\nshared :\n\t@(out! "once")\n', { name: 'shared.kmk' });
 const sharedBuild = await shared.build(['a', 'b']);
 assert.equal(sharedBuild.events.filter((event) => event.type === 'target-started' && event.target === 'shared').length, 1);
 assert.deepEqual(sharedBuild.results.map((result) => result.target), ['a', 'b']);

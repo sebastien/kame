@@ -1,2 +1,2 @@
 task where :
-	@(out "Makefile.kmk\n")
+	@(out! "Makefile.kmk\n")

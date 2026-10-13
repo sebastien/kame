@@ -11,7 +11,7 @@ func TestTargetSnapshotReadsUseExplicitCapabilityPolicy(t *testing.T) {
 	buffer := slices.Make[byte](a, 1024*1024)
 	defer slices.Free(a, buffer)
 	heap := wasm.NewHeap(buffer)
-	started := wasm.NewRuntimeWithHeap(&heap, "policy.kmk", "chosen :\n\t@(out (env \"MODE\"))\n")
+	started := wasm.NewRuntimeWithHeap(&heap, "policy.kmk", "chosen :\n\t@(out! (env \"MODE\"))\n")
 	if started.Runtime == nil {
 		t.Fatal("compile policy recipe")
 		return

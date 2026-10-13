@@ -149,7 +149,7 @@ func TestGeneratedTargetCannotOverlapAnAuthoredPattern(t *testing.T) {
 
 func TestGeneratedDeclarationsRejectBuildEffects(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "effect-generated.kmk", "generate forbidden = (write \"generated.txt\" \"content\")\n")
+	parsed := script.Parse(a, "effect-generated.kmk", "generate forbidden = (write! \"generated.txt\" \"content\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")

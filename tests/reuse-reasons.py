@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (project / 'input').write_text('unchanged')
     # Guarded reuse must skip derived-value evaluation, not merely publication.
     (project / 'extra.json').write_text('"A"')
-    guarded = 'SHELL = /bin/sh\nPAYLOAD = (parse-json (text (read "./extra.json")))\n./guarded : ./input\n\t@(yield PAYLOAD)\n'
+    guarded = 'SHELL = /bin/sh\nPAYLOAD = (parse-json (text (read "./extra.json")))\n./guarded : ./input\n\t@(yield! PAYLOAD)\n'
     first = reasons(run(guarded, ['--json', './guarded']))
     # Native file-context reads expose an opaque failure; forwarding establishes absence.
     assert any(e['reason'] in ('record-missing', 'proof-unverifiable') for e in first), first
@@ -76,7 +76,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (project / 'guarded').read_text() == 'B'
 
     # Effective configuration changes invalidate the guard without leaking values.
-    configured = 'SHELL = kash\nPAYLOAD ?= "default"\n./configured : ./input\n\t(yield PAYLOAD)\n'
+    configured = 'SHELL = kash\nPAYLOAD ?= "default"\n./configured : ./input\n\t(yield! PAYLOAD)\n'
     config_args = ['--json', '--define', 'PAYLOAD=before-config', './configured']
     run(configured, config_args)
     assert not reasons(run(configured, config_args))
@@ -108,10 +108,10 @@ with tempfile.TemporaryDirectory() as temporary:
     assert any(e['reason'] == 'forced' and e['decision'] == 'execute' for e in forced), forced
     human = run(explain, ['--output', 'text', '--force', './explained'])
     assert human.stdout == '' and '[./explained] execute: forced execution' in human.stderr, human
-    always = 'SHELL = kash\nalways ./explained : ./input\n\t(yield "always")\n'
+    always = 'SHELL = kash\nalways ./explained : ./input\n\t(yield! "always")\n'
     selected = reasons(run(always, ['--json', './explained']))
     assert any(e['reason'] == 'always' for e in selected), selected
-    named = 'SHELL = kash\n./named-env : ./input\n\t(yield (env "REASON_NAMED"))\n'
+    named = 'SHELL = kash\n./named-env : ./input\n\t(yield! (env "REASON_NAMED"))\n'
     named_args = ['do', 'run', '--json', '--allow-read', '--allow-write', '--allow-env=REASON_NAMED', 'Makefile.kmk', '--entry', './named-env']
     run(named, named_args, environment={'REASON_NAMED': 'before-secret'})
     changed = run(named, named_args, environment={'REASON_NAMED': 'after-secret'})
@@ -128,7 +128,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not any(e['reason'] == 'input-changed' for e in selected), selected
     assert not reasons(run(explain, ['--json', './explained']))
     # Cached-task lookup must retain the same missing/invalid distinction.
-    cached_reason = 'task reason-cached :\n\t@(out "cached reason")\n'
+    cached_reason = 'task reason-cached :\n\t@(out! "cached reason")\n'
     selected = reasons(run(cached_reason, ['--json', 'reason-cached']))
     assert [e['reason'] for e in selected] == ['record-missing'], selected
     assert not reasons(run(cached_reason, ['--json', 'reason-cached']))
@@ -157,7 +157,7 @@ default : ./consumeA ./consumeB ./readB ./both ./ordered cache-b
 	cp @< @>
 	printf x >> consumeB.log
 ./readB : ./constant
-	(yield (text (read "./B")))
+	(yield! (text (read "./B")))
 ./both : ./A ./B
 	cat @<* > @>
 	printf x >> both.log

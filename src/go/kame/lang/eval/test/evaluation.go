@@ -1235,7 +1235,7 @@ func TestCommandCaptureExecutionPolicy(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	forms := []string{"$(printf hello)", "(run \"printf\" \"hello\")", "(pipe (run \"printf\" \"hello\") (run \"cat\"))"}
+	forms := []string{"$(printf hello)", "(run! \"printf\" \"hello\")", "(pipe! (run! \"printf\" \"hello\") (run! \"cat\"))"}
 	for i := range forms {
 		expression := expr.Parse(a, "test", forms[i])
 		context := eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Run}}}

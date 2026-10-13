@@ -21,8 +21,32 @@ Each operation declares:
 - Public name.
 - Named call function and context pointer.
 - Arity.
-- Capability requirements.
+- Unconditional and argument-dependent capability requirements.
+- Direct category: computation, tracked observation, output/publication,
+  process action, control effect, or volatile observation.
+- Allowed evaluation phases and dependency/effect behavior.
 - Stable implementation version.
+
+Standard registrations must have complete, valid descriptions, including aliases
+and template primitives. A suffix is not evidence of a category or authority.
+Registry validation rejects partial descriptions and category/behavior conflicts.
+Unannotated custom registrations retain their existing runtime authorization;
+they are not implicitly classified as pure standard operations.
+
+Phase metadata is an upper bound, not permission to bypass contextual checks.
+For example, an inline `render` can compute text without a read grant, while a
+file template or nested include requires scoped read authority. An environment
+snapshot can supply a requested value without a new host request. Pure planning
+still cannot submit host requests merely because the enclosing operation permits
+inline evaluation in that phase. Tool metadata tracking does not confer user
+read authority. Service, dry-run, and publication restrictions remain independent.
+
+Callback-bearing operations (`apply`, `map`, `flatmap`, `filter`, `filter-out`,
+`reduce`, and template application) explicitly propagate reached callable
+behavior; their computation category does not declare those callbacks pure.
+`render` also evaluates template expressions under the caller's authority and
+phase. Processes and `await` implemented as syntax obey the same contracts even
+though they are not ordinary registry calls.
 
 An operation receives evaluated arguments and an evaluation context. It returns
 a value, a host request, or a structured diagnostic. Returned owned values use
@@ -272,7 +296,7 @@ Filesystem operations issue host requests and require capabilities:
 | Name | Capability | Contract |
 | --- | --- | --- |
 | `read` | `read` | Return file bytes or explicitly decoded text |
-| `write` | `write` | Atomically write bytes or UTF-8 text |
+| `write!` | `write` | Atomically write bytes or UTF-8 text |
 | `exists?` | `read` | Return whether a path exists |
 | `stat` | `read` | Return stable metadata record |
 | `lstat` | `read` | Inspect the final path component without following its symlink |
@@ -343,7 +367,7 @@ is traversed, so `./linked/**/*.js` can enumerate its target, while
 retain the authored lexical path. This prevents recursive symlink cycles; name
 linked roots explicitly rather than expanding recursive traversal implicitly.
 
-`write` is immediate only in explicit expression execution. During build
+`write!` is immediate only in explicit expression execution. During build
 rendering it becomes a deferred effect committed during execution. It is
 invalid during planning.
 
@@ -351,16 +375,16 @@ invalid during planning.
 
 | Name | Contract |
 | --- | --- |
-| `out` | Defer values for stdout |
-| `err` | Defer values for stderr |
-| `yield` | Append bytes or text to one declarative file output |
+| `out!` | Defer values for stdout |
+| `err!` | Defer values for stderr |
+| `yield!` | Append bytes or text to one declarative file output |
 | `nop` | Return its final argument, or nil |
 
-During standalone evaluation, `out` and `err` both emit their arguments and
-return their concatenated output (text unless any argument is bytes). `yield`
+During standalone evaluation, `out!` and `err!` both emit their arguments and
+return their concatenated output (text unless any argument is bytes). `yield!`
 emits to the evaluation output context and returns nil. During rule rendering,
 all three retain their nil result so an effect expression contributes no shell
-command text; `yield` remains the declarative file-output effect.
+command text; `yield!` remains the declarative file-output effect.
 
 Effects record their source position. Evaluating or rerendering an effect does
 not perform it. The runtime commits it once for the accepted generation.
@@ -379,7 +403,7 @@ including an empty path for an unavailable tool. `kame do tools check TARGETS...
 validates tools in selected dependency plans without executing recipes.
 Ordinary command names remain shell-resolved.
 
-Normal recipes are the primary shell interface. One explicit `shell` operation
+Normal recipes are the primary shell interface. One explicit `shell!` operation
 is provided for expressions that need collected process results. It requires
 `run`, submits a process through `003-posix-process.md`, and returns:
 
@@ -389,16 +413,16 @@ is provided for expressions that need collected process results. It requires
 
 Its arguments are a script string and optional option record. Streaming process
 events remain available through runtime execution, not as a list accumulated by
-the operation. `shell` is allowed in explicit expression execution but is
+the operation. `shell!` is allowed in explicit expression execution but is
 invalid during planning and direct build-template rendering with `PHASE_INVALID`.
 Demanded lazy values and Kash recipe expressions evaluate in their runtime phase;
 when bound to a target, their collected shell calls inherit its environment and
 retain the invocation run policy. Declaration registration never launches them.
 
-`shell`, `sh`, and `shellrun` are aliases with the same script/options
+`shell!`, `sh!`, and `shellrun!` are aliases with the same script/options
 signature, collected result, run capability, and phase restrictions.
 
-`shell-template FRAGMENTS VALUES` is the tagged-template form for constructing
+`shell-template! FRAGMENTS VALUES` is the tagged-template form for constructing
 a shell script from trusted source and dynamic string values. Both arguments
 are lists of strings, and `FRAGMENTS` must contain exactly one more item than
 `VALUES`. The operation concatenates each source fragment with the
@@ -409,7 +433,7 @@ executable shell syntax and should come from authored source; dynamic values
 cannot introduce shell syntax. Quoting does not prevent a value from being
 interpreted as an option or path by the invoked program.
 
-The constructed script is submitted and collected like `shell`: it requires
+The constructed script is submitted and collected like `shell!`: it requires
 `run`, returns the same status/stdout/stderr record, inherits a target's
 environment, and is invalid during planning and direct build-template
 rendering. Dry-run submits no process and returns an empty string. Invalid
@@ -473,11 +497,11 @@ executable metadata checks do not grant access to user read operations.
   filenames or loses their membership dependencies.
 - Reads and globs register canonical dynamic dependencies.
 - Denied read, write, run, or environment access performs no host action.
-- Deferred `out`, `err`, `yield`, and `write` effects commit once after rerender.
-- `shell` captures status and separate byte-bounded stdout/stderr.
-- `sh` and `shellrun` match `shell` in result, run-capability enforcement, and
+- Deferred `out!`, `err!`, `yield!`, and `write!` effects commit once after rerender.
+- `shell!` captures status and separate byte-bounded stdout/stderr.
+- `sh!` and `shellrun!` match `shell!` in result, run-capability enforcement, and
   phase restrictions.
-- `shell-template` requires one more trusted fragment than dynamic string
+- `shell-template!` requires one more trusted fragment than dynamic string
   values, quotes dynamic values safely under POSIX `sh`, preserves the
   collected result, and is verified against command-substitution injection on
   native and WASM hosts.

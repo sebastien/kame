@@ -109,7 +109,7 @@ func TestFileInputsRebuildYieldDespiteOldDiscoveredMtime(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./output : ./input\n\t@(yield (text (read \"./extra\")))\n"
+	source := "./output : ./input\n\t@(yield! (text (read \"./extra\")))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first yield failed: " + code)
 		return
@@ -145,7 +145,7 @@ func TestFileInputsRebuildWhenDiscoveredInputChanges(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./output : ./input\n\t@(yield (text (read \"./extra\")))\n"
+	source := "./output : ./input\n\t@(yield! (text (read \"./extra\")))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first yield failed: " + code)
 		return
@@ -180,7 +180,7 @@ func TestFileInputsRebuildWhenMembershipChanges(t *testing.T) {
 		t.Fatal("source setup failed")
 		return
 	}
-	source := "./output : @((wildcard ./src/*))\n\t@(yield (str (count @<*)))\n"
+	source := "./output : @((wildcard ./src/*))\n\t@(yield! (str (count @<*)))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first membership build failed: " + code)
 		return
@@ -243,7 +243,7 @@ func TestFileInputsSkipKashYield(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "SHELL = kash\n./output : ./input\n\t(yield (text (read \"./extra\")))\n"
+	source := "SHELL = kash\n./output : ./input\n\t(yield! (text (read \"./extra\")))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("kash yield failed: " + code)
 		return
@@ -310,7 +310,7 @@ func TestFileInputsDemandDiscoveredGeneratedInput(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	source := "./extra : ./seed\n\tcp @< @>\n./output : ./input\n\t@(yield (text (read \"./extra\")))\n"
+	source := "./extra : ./seed\n\tcp @< @>\n./output : ./input\n\t@(yield! (text (read \"./extra\")))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first generated dependency build failed: " + code)
 		return

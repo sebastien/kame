@@ -32,8 +32,8 @@ with tempfile.TemporaryDirectory() as temporary:
         return result
 
     (project / 'config.kmk').write_text('(selected wanted) = (eq mode wanted)\n')
-    (project / 'debug.kmk').write_text('label = "debug"\nchosen :\n\t@(out label)\ndebug-only :\n')
-    (project / 'release.kmk').write_text('label = "release"\nchosen :\n\t@(out label)\nrelease-only :\n')
+    (project / 'debug.kmk').write_text('label = "debug"\nchosen :\n\t@(out! label)\ndebug-only :\n')
+    (project / 'release.kmk').write_text('label = "release"\nchosen :\n\t@(out! label)\nrelease-only :\n')
     build = ('mode ?= "debug"\ninclude config.kmk\n'
         'when (selected "debug")\ninclude debug.kmk\notherwise\ninclude release.kmk\nend\n'
         'when :false\ninclude missing.kmk\ninclude Makefile.kmk\n'
@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory() as temporary:
         (project / 'invalid.kmk').write_text(text)
         run(['-f', 'invalid.kmk'], code='PARSE_ERR')
     # Predicates have no host authority; registration failures precede effects.
-    for predicate, code in [('42', 'EXPR_INVALID'), ('(shell "touch forbidden")', 'CAP_DENIED'), ('(read "forbidden")', 'CAP_DENIED'), ('(out "forbidden")', 'PHASE_INVALID')]:
+    for predicate, code in [('42', 'EXPR_INVALID'), ('(shell! "touch forbidden")', 'CAP_DENIED'), ('(read "forbidden")', 'CAP_DENIED'), ('(out! "forbidden")', 'PHASE_INVALID')]:
         (project / 'unsafe.kmk').write_text(f'when {predicate}\nchosen :\n\ttouch should-not-run\nend\n')
         result = run(['-f', 'unsafe.kmk', 'chosen'], code=code)
         assert 'unsafe.kmk:1:' in result.stderr, result.stderr

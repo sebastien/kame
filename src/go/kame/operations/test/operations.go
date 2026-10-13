@@ -132,7 +132,7 @@ func TestOperationDiagnosticsRetainOperandAndContract(t *testing.T) {
 		{Text: "(join [1] \"-\")", Message: "`join` argument 1 item 1 expects string; got int", Operand: "[1]"},
 		{Text: "(first)", Message: "`first` expects 1 argument; got 0", Operand: "(first)"},
 		{Text: "(slice)", Message: "`slice` expects 2 to 3 arguments; got 0", Operand: "(slice)"},
-		{Text: "(out)", Message: "`out` expects at least 1 argument; got 0", Operand: "(out)"},
+		{Text: "(out!)", Message: "`out!` expects at least 1 argument; got 0", Operand: "(out!)"},
 	}
 	for i := range cases {
 		parsed := expr.Parse(a, "expr.km", cases[i].Text)
@@ -166,12 +166,12 @@ func TestOutRejectsCallable(t *testing.T) {
 	}
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, "(out (replace ./{*} ./out/{_0}))")
+	result := evaluate(t, program, "(out! (replace ./{*} ./out/{_0}))")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("out accepted a callable")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(err (replace ./{*} ./out/{_0}))")
+	result = evaluate(t, program, "(err! (replace ./{*} ./out/{_0}))")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("err accepted a callable")
 	}
@@ -191,7 +191,7 @@ func TestOutputEffectsReturnCombinedStandaloneValue(t *testing.T) {
 	}
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	expression := expr.Parse(a, "test", "(out \"hello\" 10)")
+	expression := expr.Parse(a, "test", "(out! \"hello\" 10)")
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a}
 	result := program.EvaluateWith(expression.Expr, &context)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "hello10" {
@@ -215,7 +215,7 @@ func TestDefinitionOutputFlushesOnlyAfterSuccessfulResume(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	registry.Add(eval.Operation{Name: "wait-each", Call: waitEach, MinArity: 1, MaxArity: 1})
-	parsed := script.Parse(a, "test", "result = (list (out \"once\") (wait-each \"done\"))")
+	parsed := script.Parse(a, "test", "result = (list (out! \"once\") (wait-each \"done\"))")
 	program := eval.Compile(a, engine, parsed, registry)
 	state := &outputState{}
 	program.SetDefinitionEffectSink(captureOutput, state)

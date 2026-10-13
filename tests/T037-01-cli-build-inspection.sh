@@ -108,7 +108,7 @@ KMK
   if grep -q '^    ./manifest · generated-input-unavailable' "$project/deferred-text"; then test-ok "$backend generated boundary names the affected file"; else test-fail "$backend missing generated boundary path"; fi
   if ! grep -q 'no inputs' "$project/deferred-text"; then test-ok "$backend partial is not empty"; else test-fail "$backend misleading empty inventory"; fi
   test-step "$backend read denials and invalid phases remain errors"
-  for expression in '(text (read ../blocked))' '(out "forbidden-effect")'; do
+  for expression in '(text (read ../blocked))' '(out! "forbidden-effect")'; do
     status=0
     "${runner[@]}" do plan --json -C "$project" -c "default : @($expression)" >"$project/failure" 2>"$project/error" || status=$?
     if [ "$status" = 1 ] && jq -e '.type == "diagnostic" and (.diagnostic.code == "CAP_DENIED" or .diagnostic.code == "PHASE_INVALID")' "$project/failure" >/dev/null; then test-ok "$backend read-only authority"; else test-fail "$backend authority failure hidden"; fi
@@ -126,7 +126,7 @@ KMK
   status_project="$TMPDIR/status-$backend"
   mkdir -p "$status_project"
   printf one >"$status_project/seed"
-  printf './result : ./seed\n\t@(yield (read ./seed))\n' >"$status_project/Makefile.kmk"
+  printf './result : ./seed\n\t@(yield! (read ./seed))\n' >"$status_project/Makefile.kmk"
   "${runner[@]}" do plan --json -C "$status_project" ./result >"$project/status" 2>"$project/error"
   if jq -e 'any(.resources[]; .display == "./result" and .status == "missing")' "$project/status" >/dev/null; then test-ok "$backend absent artifact is missing"; else test-fail "$backend missing status"; fi
   "${runner[@]}" -C "$status_project" ./result >"$project/value" 2>"$project/error"
@@ -239,9 +239,9 @@ KMK
   printf one >"$freshness/source"
   cat >"$freshness/Makefile.kmk" <<'KMK'
 ./generated : ./source
-	@(yield (read ./source))
+	@(yield! (read ./source))
 ./out : ./trigger ./generated
-	@(yield (read ./generated))
+	@(yield! (read ./generated))
 KMK
   "${runner[@]}" -C "$freshness" ./out >"$project/value" 2>"$project/error"
   printf two >"$freshness/source"

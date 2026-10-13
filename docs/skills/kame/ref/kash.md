@@ -103,7 +103,7 @@ dependency; an input redirection does. Grants do not sandbox an executable's
 internal filesystem access.
 
 `:env $EXPORTS` or `:env (EXPRESSION)` supplies a typed environment record,
-also accepted by `(run :env EXPORTS ...)`. Keys must match
+also accepted by `(run! :env EXPORTS ...)`. Keys must match
 `[A-Za-z_][A-Za-z0-9_]*`; values must be strings without NUL. Empty strings are
 valid, and an empty record (for example `(parse-json "{}")`) leaves inheritance
 unchanged. No scalar conversion or list splicing is performed. The entire record
@@ -181,9 +181,9 @@ scoped to the selected arm.
 - Recovery never suppresses capability denial or cancellation.
 - Terminal `&` starts the entire graph asynchronously; normal session completion
   joins outstanding work. It is not daemonization or detachment.
-- To bind a handle, use `job = (run :async :true "worker")`, then demand
+- To bind a handle, use `job = (run! :async :true "worker")`, then demand
   `(await job)` as appropriate. Definitions remain lazy.
-- Expression-level `(run "command" args...)` and `(pipe (run ...) (run ...))`
+- Expression-level `(run! "command" args...)` and `(pipe! (run! ...) (run! ...))`
   use the same graph executor. Synchronous results expose `status`, `signal`,
   `stages`, `stdoutCaptured`, and `stderrCaptured`; streams are live, not retained.
 - `await` is repeat-safe. Unobserved async failures fail the final invocation join;

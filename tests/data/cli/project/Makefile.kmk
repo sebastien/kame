@@ -12,13 +12,13 @@ default : ./build/app
 	sh tools/compile @> @<
 
 ./build/version.txt :
-	@(yield (join ["version " VERSION] ""))
+	@(yield! (join ["version " VERSION] ""))
 
 task bundle : ./build/app
 	sh tools/link ./build/bundle.tar @<
 
 task report :
-	@(out "sources=@(count SOURCES)\n")
+	@(out! "sources=@(count SOURCES)\n")
 
 task clean :
 	rm -rf ./build

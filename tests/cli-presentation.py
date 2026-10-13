@@ -162,7 +162,7 @@ def check_host(host: list[str], root: Path) -> None:
 					assert sum(row.get("type") == kind for row in rows) > 1, rows
 			else:
 				assert result.stdout == expected and not result.stderr, result
-		effects = invoke(host, args + ["do", "run", "-c", '(out "raw-out")', "-c", '(err "raw-err")'], project)
+		effects = invoke(host, args + ["do", "run", "-c", '(out! "raw-out")', "-c", '(err! "raw-err")'], project)
 		if mode == "json":
 			rows = records(effects)
 			assert payload_bytes(rows, "stdout") == b"raw-out" and payload_bytes(rows, "stderr") == b"raw-err", rows

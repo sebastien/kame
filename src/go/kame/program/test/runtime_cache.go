@@ -151,7 +151,7 @@ func TestCachedTaskHits(t *testing.T) {
 func TestCachedTaskUsesPortableMemoryBackend(t *testing.T) {
 	a := t.Allocator()
 	host := wasm.NewMemoryHost(a)
-	parsed := script.Parse(a, "memory-cache.kmk", "task cached :\n\t@(out \"memory-hit\")\n")
+	parsed := script.Parse(a, "memory-cache.kmk", "task cached :\n\t@(out! \"memory-hit\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -303,7 +303,7 @@ func TestCachedTaskCachesDeferredOutput(t *testing.T) {
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-")
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "task run :\n\t@(out \"out\")\n\t@(err \"err\")\n")
+	parsed := script.Parse(a, "test.kmk", "task run :\n\t@(out! \"out\")\n\t@(err! \"err\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
@@ -481,7 +481,7 @@ func TestCachedTaskInvalidatesForDeclaredEnvironmentDependency(t *testing.T) {
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-envdep-")
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "task run :\n\t@(out (str (env \"KM_CACHE_VALUE\")))\n")
+	parsed := script.Parse(a, "test.kmk", "task run :\n\t@(out! (str (env \"KM_CACHE_VALUE\")))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	grant := []eval.Grant{{Capability: eval.Env, Names: []string{"KM_CACHE_VALUE"}}}
@@ -656,7 +656,7 @@ func TestCachedTaskInvalidatesWhenGlobMembershipChanges(t *testing.T) {
 	defer os.Remove(dir)
 	if os.Mkdir(dir+"/src", 0o755) != nil { t.Fatal("source directory failed"); return }
 	if os.WriteFile(dir+"/src/one", []byte("1"), 0o644) != nil { t.Fatal("source write failed"); return }
-	parsed := script.Parse(a, "test.kmk", "task run :\n\t@(out (str (count (wildcard \"./src/*\"))))\n")
+	parsed := script.Parse(a, "test.kmk", "task run :\n\t@(out! (str (count (wildcard \"./src/*\"))))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	options := program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}}
@@ -919,7 +919,7 @@ func TestCachedTaskMissingPathInvalidatesWhenItAppears(t *testing.T) {
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-missing-")
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "missing.kmk", "task run :\n\t@(out (str (exists? \"./absent\")))\n\tprintf x >> task-log\n")
+	parsed := script.Parse(a, "missing.kmk", "task run :\n\t@(out! (str (exists? \"./absent\")))\n\tprintf x >> task-log\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Verbose: true, Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -1019,7 +1019,7 @@ func TestYieldBufferFreedWhenLaterWriteFails(t *testing.T) {
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
 	if os.WriteFile(dir+"/not-a-dir", []byte("file"), 0o644) != nil { t.Fatal("blocker write failed"); return }
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield \"data\")\n\t@(write \"./not-a-dir/child\" \"x\")\n")
+	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield! \"data\")\n\t@(write! \"./not-a-dir/child\" \"x\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})

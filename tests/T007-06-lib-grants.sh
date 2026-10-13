@@ -16,7 +16,7 @@ cli_build
 operation_fixture_copy lib-grants lib-grants
 
 test-step "capabilities are denied by default"
-for expr in '(read "a.txt")' '(write "x.txt" "x")' '(env "HOME")' '(shell "true")' '(sh "true")' '(shellrun "true")' '(shell-template ["true " ""] ["x"])'; do
+for expr in '(read "a.txt")' '(write! "x.txt" "x")' '(env "HOME")' '(shell! "true")' '(sh! "true")' '(shellrun! "true")' '(shell-template! ["true " ""] ["x"])'; do
 	cli_run --dir lib-grants -- do run --lang expr -c "$expr"
 	cli_expect_status 1 "$expr"
 	cli_expect_stderr_contains 'CAP_DENIED'
@@ -28,7 +28,7 @@ cli_expect_status 0
 cli_expect_stdout "alpha
 "
 
-cli_run --dir lib-grants -- do run --lang expr --allow-write -c '(write "written.txt" "data")'
+cli_run --dir lib-grants -- do run --lang expr --allow-write -c '(write! "written.txt" "data")'
 cli_expect_status 0
 cli_expect_file lib-grants/written.txt 'data'
 
@@ -42,10 +42,10 @@ cli_run --dir lib-grants -- do run --lang expr "--allow-read=$PWD/lib-grants" -c
 cli_expect_status 1
 cli_expect_stderr_contains 'CAP_DENIED'
 
-cli_run --dir lib-grants -- do run --lang expr "--allow-write=$PWD/lib-grants" -c '(write "ok.txt" "ok")'
+cli_run --dir lib-grants -- do run --lang expr "--allow-write=$PWD/lib-grants" -c '(write! "ok.txt" "ok")'
 cli_expect_status 0
 
-cli_run --dir lib-grants -- do run --lang expr "--allow-write=$PWD/lib-grants" -c '(write "../outside.txt" "no")'
+cli_run --dir lib-grants -- do run --lang expr "--allow-write=$PWD/lib-grants" -c '(write! "../outside.txt" "no")'
 cli_expect_status 1
 cli_expect_stderr_contains 'CAP_DENIED'
 
@@ -77,24 +77,24 @@ cli_expect_status 1
 cli_expect_stderr_contains 'CAP_DENIED'
 
 test-step "shell captures status and separate streams"
-cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shell "echo out; echo err >&2; exit 3")'
+cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shell! "echo out; echo err >&2; exit 3")'
 cli_expect_status 0
 cli_expect_stdout_contains 'status: 3' 'stdout: out' 'stderr: err'
 
-cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shell "echo ok")'
+cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shell! "echo ok")'
 cli_expect_status 0
 cli_expect_stdout_contains 'status: 0' 'stdout: ok'
 
-cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(sh "echo ok")'
+cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(sh! "echo ok")'
 cli_expect_status 0
 cli_expect_stdout_contains 'status: 0' 'stdout: ok'
 
-cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shellrun "echo ok")'
+cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shellrun! "echo ok")'
 cli_expect_status 0
 cli_expect_stdout_contains 'status: 0' 'stdout: ok'
 
 test-step "shell-template quotes interpolated values as one shell argument"
-template_expr='(shell-template ["printf %s " ""] ["a'"'"'b; touch injected; #"])'
+template_expr='(shell-template! ["printf %s " ""] ["a'"'"'b; touch injected; #"])'
 cli_run --dir lib-grants -- do run --lang expr --allow-run -c "$template_expr"
 cli_expect_status 0
 cli_expect_stdout_contains "status: 0" "stdout: a'b; touch injected; #"
@@ -113,12 +113,12 @@ else
 	test-fail "WASM shell-template failed: $(cat "$wasm_out" "$wasm_err")"
 fi
 
-cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shell-template ["echo " ""] ["x" "y"])'
+cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shell-template! ["echo " ""] ["x" "y"])'
 cli_expect_status 1
 cli_expect_stderr_contains 'EXPR_INVALID'
 
 test-step "shell is denied without the run capability"
-cli_run --dir lib-grants -- do run --lang expr -c '(shell "echo hi")'
+cli_run --dir lib-grants -- do run --lang expr -c '(shell! "echo hi")'
 cli_expect_status 1
 cli_expect_stderr_contains 'CAP_DENIED'
 

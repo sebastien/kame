@@ -10,17 +10,17 @@ work="$TMPDIR/dry-run"
 mkdir -p "$work"
 cat >"$work/rules.kmk" <<'KMK'
 build :
-	@(out "rule-out")
-	@(err "rule-err")
-	@(write "protected" "rule-write")
+	@(out! "rule-out")
+	@(err! "rule-err")
+	@(write! "protected" "rule-write")
 	touch recipe-ran
 KMK
 cat >"$work/values.km" <<'KM'
 capture = $(touch capture-ran)
-legacy = (shell "touch shell-ran")
-(out "value-out")
-(err "value-err")
-(write "protected" "value-write")
+legacy = (shell! "touch shell-ran")
+(out! "value-out")
+(err! "value-err")
+(write! "protected" "value-write")
 (str capture legacy)
 KM
 cat >"$work/process.kash" <<'KASH'
@@ -74,14 +74,14 @@ for backend in native wasm; do
 	cat >"$generated/Makefile.kmk" <<'KMK'
 default : ./second
 ./first : ./seed
-	@(yield (read @<))
+	@(yield! (read @<))
 ./second : ./first
-	@(yield (read @<))
+	@(yield! (read @<))
 GENERATED = (read ./first)
 lazy : ./first
 	@(nop GENERATED "")
 bad : ./first
-	@(yield (read @<))
+	@(yield! (read @<))
 	@(read ./unrelated-missing)
 KMK
 	status=0

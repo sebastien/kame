@@ -113,7 +113,7 @@ CARD = """
 default : ./build/page.html
 
 ./build/page.html : ./page.html
-	@(yield (render ./page.html [title: "Hello"]))
+	@(yield! (render ./page.html [title: "Hello"]))
 ```
 
 The literal's content is untouched until `render`; a longer quote delimiter

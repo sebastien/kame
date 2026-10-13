@@ -9,14 +9,14 @@ cli_build
 work="$TMPDIR/includes"
 mkdir -p "$work/nested" "$work/cwd"
 cat >"$work/main.km" <<'KM'
-(out "界")
+(out! "界")
 include ./nested/child.km
-(out "after")
+(out! "after")
 (str name "!")
 KM
 cat >"$work/nested/child.km" <<'KM'
 include ./values.km
-(out "child")
+(out! "child")
 KM
 printf 'name = "Ada"\n' >"$work/nested/values.km"
 cat >"$work/rules.kmk" <<'KMK'
@@ -29,7 +29,7 @@ child :
 	printf child
 KMK
 cat >"$work/cycle.km" <<'KM'
-(out "must-not-run")
+(out! "must-not-run")
 include ./nested/cycle.km
 KM
 printf 'include ../cycle.km\n' >"$work/nested/cycle.km"
@@ -63,7 +63,7 @@ for backend in native wasm; do
 	check 'childmain' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
 	check 'childmain' do run "$work/rules.kmk" build
 	reject DEP_CYCLE do run "$work/cycle.km"
-	reject FS_ERR do run -c '(out "must-not-run")' "$work/missing.km"
-	reject PARSE_ERR do run -c '(out "must-not-run")' "$work/invalid.km"
+	reject FS_ERR do run -c '(out! "must-not-run")' "$work/missing.km"
+	reject PARSE_ERR do run -c '(out! "must-not-run")' "$work/invalid.km"
 done
 test-end

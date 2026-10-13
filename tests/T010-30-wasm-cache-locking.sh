@@ -19,7 +19,7 @@ cat >"$project/Makefile.kmk" <<'EOF_MAKE'
 task cached :
 	sleep 0.4
 	echo run >> runs.log
-	@(out "locked-output")
+	@(out! "locked-output")
 EOF_MAKE
 
 # Start two independent Node hosts against the same cold identity.
@@ -110,7 +110,7 @@ cat >"$waiters/Makefile.kmk" <<'EOF_WAITERS'
 task cached :
 	sleep 1
 	echo run >> runs.log
-	@(out "waiter-output")
+	@(out! "waiter-output")
 EOF_WAITERS
 (cd "$waiters" && node "$CLI_ROOT/dist/kame.js" cached) >"$waiters/owner.out" 2>"$waiters/owner.err" &
 owner_pid=$!

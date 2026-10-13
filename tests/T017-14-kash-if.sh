@@ -40,9 +40,9 @@ for backend in native wasm; do
 	check fallback $'if true\n\tbroken = $(false)\n\tvalue = broken ?? "fallback"\n\tprintf "%s" $value'
 	check '' $'if false\n\tprintf $(touch forbidden)\n\tbad = (first 1)'
 	check 'firstsecond' $'if true\n\tprintf first\n\tprintf "%s" $(printf second)'
-	check 'conditionbody' $'if (let [ignored (out "condition")] :true)\n\tprintf "%s" $(printf body)'
-	check 'localvalueaftervalue' $'if true\n\tname = (let [ignored (out "local")] "value")\n\tprintf "%s" $name $(printf after)\n\tprintf "%s" $name'
-	check 'valueafterfunction' $'if true\n\t(f X) = (let [ignored (out "function")] X)\n\tprintf "%s" (f "value") $(printf after)'
+	check 'conditionbody' $'if (let [ignored (out! "condition")] :true)\n\tprintf "%s" $(printf body)'
+	check 'localvalueaftervalue' $'if true\n\tname = (let [ignored (out! "local")] "value")\n\tprintf "%s" $name $(printf after)\n\tprintf "%s" $name'
+	check 'valueafterfunction' $'if true\n\t(f X) = (let [ignored (out! "function")] X)\n\tprintf "%s" (f "value") $(printf after)'
 	check done $'if /bin/sh -c "printf x >> attempts"\n\tprintf "%s" $(printf done)'
 	if [ "$(cat "$work/attempts")" = x ] && [ ! -e "$work/forbidden" ]; then test-ok "$backend conditions do not replay and unused work stays lazy"; else test-fail "$backend condition replay or branch effects"; fi
 	rm "$work/attempts"
@@ -60,7 +60,7 @@ for backend in native wasm; do
 	test-step "$backend rejects malformed indentation and headers"
 	for text in $'if true\nprintf no' $'else\n\tprintf no' $'if true; printf no\n\tprintf no' $'if $(true)\n\tprintf no' $'if true?\n\tprintf no' $'if true ? false\n\tprintf no' $'if true\n \tprintf no' $'if true\n  printf no\n   printf no' $'if true\n\tprintf no\nelse\n\tprintf no\nelif true\n\tprintf no'; do reject PARSE_ERR "$text"; done
 	test-step "$backend JSON retains only selected effects"
-	"${command[@]}" do run --json -l kash -c $'if false\n\tprintf forbidden\nelif (nop :true)\n\tlocal = (out "selected")\n\tprintf "%s" (str local)\nelse\n\tprintf forbidden' >"$work/$backend.jsonl" 2>"$work/err"
+	"${command[@]}" do run --json -l kash -c $'if false\n\tprintf forbidden\nelif (nop :true)\n\tlocal = (out! "selected")\n\tprintf "%s" (str local)\nelse\n\tprintf forbidden' >"$work/$backend.jsonl" 2>"$work/err"
 	if [ ! -s "$work/err" ] && jq -e -s 'all(.schema == 1 and .type != "diagnostic")' "$work/$backend.jsonl" >/dev/null && ! grep -q forbidden "$work/$backend.jsonl"; then test-ok "$backend selected JSON effects"; else test-fail "$backend conditional JSON"; fi
 done
 test-step "portable conditional events"

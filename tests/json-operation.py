@@ -28,9 +28,9 @@ with tempfile.TemporaryDirectory(prefix='kame-json-') as directory:
     project = Path(directory)
     (project / 'Makefile.kmk').write_text('''default : ./page.html
 ./data.json :
-	@(yield "{\\\"title\\\":\\\"Generated\\\"}")
+	@(yield! "{\\\"title\\\":\\\"Generated\\\"}")
 ./page.html :
-	@(yield (let [data (parse-json (text (read ./data.json)))] data.title))
+	@(yield! (let [data (parse-json (text (read ./data.json)))] data.title))
 ''')
     result = subprocess.run([str(native)], cwd=project, capture_output=True)
     assert result.returncode == 0, result.stderr
@@ -38,9 +38,9 @@ with tempfile.TemporaryDirectory(prefix='kame-json-') as directory:
     # Absolute requests must select relative template producers too.
     (project / 'Makefile.kmk').write_text('''default : ./page.html
 ./{name:*}.json :
-	@(yield "{\\\"title\\\":\\\"Template\\\"}")
+	@(yield! "{\\\"title\\\":\\\"Template\\\"}")
 ./page.html :
-	@(yield (let [data (parse-json (text (read ./other.json)))] data.title))
+	@(yield! (let [data (parse-json (text (read ./other.json)))] data.title))
 ''')
     result = subprocess.run([str(native)], cwd=project, capture_output=True)
     assert result.returncode == 0, result.stderr

@@ -17,12 +17,12 @@ cat >"$project/Makefile.kmk" <<'SRC'
 task cached :
 	echo cached >> runs.log
 	sleep 0.6
-	@(out "cached-result")
+	@(out! "cached-result")
 
 task slow :
 	echo slow >> slow.log
 	sleep 1
-	@(out "slow-result")
+	@(out! "slow-result")
 SRC
 
 # Two independent processes see the same cold identity. The second must wait

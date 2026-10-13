@@ -26,7 +26,7 @@ strings. Bytes print directly. Do not infer string splitting from display.
 `.km` scripts emit only explicit `out`/`err` output, not their final value.
 Use `--print-result` for canonical result display, or select a named entry.
 `expr` still displays its result even when it also calls `out`; no output-call
-heuristic changes the framing. Machine-readable scripts should use `(out DATA)`.
+heuristic changes the framing. Machine-readable scripts should use `(out! DATA)`.
 Program operands after `--` are literal strings in `args` (`@*`), with indexed
 access through `args.0`. A quoted `NAME=VALUE` is literal configuration even
 when VALUE ends in a source suffix or contains expression-looking text.

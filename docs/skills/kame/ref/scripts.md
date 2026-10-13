@@ -62,7 +62,7 @@ there is no previous-accumulator value. Functions and Kash do not support `+=`.
 
 ```kame
 name = "Ada"
-(out (str "Hello, " name))
+(out! (str "Hello, " name))
 ```
 
 ```sh
@@ -80,7 +80,7 @@ A definitions-only value session falls back to the combined `default` when
 there is no other executable work; without it, it reports `TGT_NO_DEFAULT`.
 A definitions-only fragment may simply supply bindings for a later fragment.
 An implicit `default` is evaluated but not displayed unless `--print-result`
-is selected. To migrate machine-readable utilities, use `(out VALUE)` rather
+is selected. To migrate machine-readable utilities, use `(out! VALUE)` rather
 than suppressing an implicit result with `(nop OPERATION "")`.
 
 ## File-backed includes
@@ -110,8 +110,8 @@ uses `generate NAME = EXPRESSION`; see
 
 ```sh
 kame do run ./values.km ./functions.km -c '(report version)'
-kame do run ./Makefile.kmk check -c '(out VERSION)'
-kame do run --lang kmk -f ./custom.build --lang km -c '(out VERSION)'
+kame do run ./Makefile.kmk check -c '(out! VERSION)'
+kame do run --lang kmk -f ./custom.build --lang km -c '(out! VERSION)'
 ```
 
 Use the unified runner where supported:

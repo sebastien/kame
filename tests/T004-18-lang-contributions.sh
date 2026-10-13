@@ -31,13 +31,13 @@ items ?= []
 items += [(env "MODE")]
 items += ["tail"]
 scoped : ; env "MODE=local"
-	(out items)
+	(out! items)
 configured : ; env "KAME_items=scoped-override"
-	(out items)
+	(out! items)
 outputs += ["computed"]
 inputs += ["prerequisite"]
 @(outputs) : @(inputs)
-	(out "computed")
+	(out! "computed")
 prerequisite :
 KMK
 for backend in native wasm; do

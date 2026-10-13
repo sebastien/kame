@@ -128,9 +128,9 @@ and `(first outputs)` in direct Kash, or `@(inputs)` in external-shell templates
 
 | Expression while rendering | Build behavior |
 | --- | --- |
-| `(out VALUE...)` / `(err VALUE...)` | Defer stdout/stderr output. |
-| `(yield VALUE...)` | Atomically supply one declared file output's content. |
-| `(write PATH VALUE)` | Defer an atomic write. |
+| `(out! VALUE...)` / `(err! VALUE...)` | Defer stdout/stderr output. |
+| `(yield! VALUE...)` | Atomically supply one declared file output's content. |
+| `(write! PATH VALUE)` | Defer an atomic write. |
 | `(wildcard PATTERN)` / `(read PATH)` | Discover a dependency. |
 | `(render PATH PAYLOAD)` | Read/render a tracked template with tracked expression dependencies. |
 

@@ -31,23 +31,23 @@ for backend in native wasm; do
 	check nextfallback 'false ? sh -c "while test ! -f gate; do sleep .01; done; printf fallback" &; printf next; touch gate'
 	rm "$work/gate"
 	check next 'false ? &; printf next'
-	check '' 'unused = (run :async :true "touch" "forbidden")'
+	check '' 'unused = (run! :async :true "touch" "forbidden")'
 	if [ ! -e "$work/forbidden" ]; then test-ok "$backend unused handle definitions stay lazy"; else test-fail "$backend eager async definition"; fi
 	test-step "$backend demands handles lazily, supports repeat-safe await and accounts for observed failures"
-	check true0 'job = (run :async :true "true"); printf "%s" (bool job); completion = (await job); printf "%s" $completion.status'
-	check 00 'job = (run :async :true "sh" "-c" "printf x >> attempts"); first = (await job); second = (await job); printf "%s%s" $first.status $second.status'
+	check true0 'job = (run! :async :true "true"); printf "%s" (bool job); completion = (await job); printf "%s" $completion.status'
+	check 00 'job = (run! :async :true "sh" "-c" "printf x >> attempts"); first = (await job); second = (await job); printf "%s%s" $first.status $second.status'
 	if [ "$(cat "$work/attempts")" = x ]; then test-ok "$backend repeated awaits never relaunch"; else test-fail "$backend await replay"; fi
 	rm "$work/attempts"
-	check handledhandled 'job = (run :async :true "false"); first = (await job) ?? "handled"; second = (await job) ?? "handled"; printf "%s%s" $first $second'
-	check handled 'job = (run :async :true "kame-missing-async-executable"); completion = (await job) ?? "handled"; printf "%s" $completion'
+	check handledhandled 'job = (run! :async :true "false"); first = (await job) ?? "handled"; second = (await job) ?? "handled"; printf "%s%s" $first $second'
+	check handled 'job = (run! :async :true "kame-missing-async-executable"); completion = (await job) ?? "handled"; printf "%s" $completion'
 	reject RECIPE_FAIL 'false &; printf foreground'
-	reject RECIPE_FAIL 'job = (run :async :true "false"); printf "%s" (bool job)'
-	reject RECIPE_FAIL 'job = (run :async :true "false"); printf "%s" (await job)'
+	reject RECIPE_FAIL 'job = (run! :async :true "false"); printf "%s" (bool job)'
+	reject RECIPE_FAIL 'job = (run! :async :true "false"); printf "%s" (await job)'
 	reject TOOL_MISSING 'kame-missing-async-executable &'
 	reject RECIPE_TIMEOUT ':timeout .05 sleep 30 &' --timeout 2000
 	reject RECIPE_TIMEOUT 'sleep 30 &' --timeout 100
 	reject EXPR_INVALID 'printf "%s" (await 1)'
-	reject EXPR_INVALID 'job = (run :async :true "true"); printf "%s" (str job)'
+	reject EXPR_INVALID 'job = (run! :async :true "true"); printf "%s" (str job)'
 	test-step "$backend cancellation reaps background groups on source failure"
 	reject REF_MISSING 'sh -c "sleep 30; touch forbidden" &; printf "%s" $missing'
 	if [ ! -e "$work/forbidden" ]; then test-ok "$backend failed source cancelled background effects"; else test-fail "$backend background escaped invocation"; fi
@@ -55,12 +55,12 @@ for backend in native wasm; do
 	status=0
 	"${command[@]}" do run --allow-run=/bin/printf -l kash -c 'true &' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/err"; then test-ok "$backend async preserves scoped run grants"; else test-fail "$backend async authority"; fi
-	check '' 'job = (run :async :true "touch" "forbidden"); completion = (await job); printf "%s" (str completion)' -n "$work/policy.kmk" noop
+	check '' 'job = (run! :async :true "touch" "forbidden"); completion = (await job); printf "%s" (str completion)' -n "$work/policy.kmk" noop
 	if [ ! -e "$work/forbidden" ]; then test-ok "$backend dry-run validates handles without launch"; else test-fail "$backend dry-run async"; fi
 	test-step "$backend rejects async outside complete command statements"
 	for text in 'printf hello && printf world' 'printf $(true &)' 'job = true &' $'if true &\n\tprintf forbidden' 'true & false'; do reject PARSE_ERR "$text"; done
 	test-step "$backend owned async work survives ordered fragment boundaries"
-	"${command[@]}" do run --allow-run -C "$work" -l kash -c 'job = (run :async :true "sh" "-c" "while test ! -f gate; do sleep .01; done; printf async"); printf "%s" (bool job)' -l km -c $'(run "printf" "next")\n(run "touch" "gate")\ncompletion = (await job)\ncompletion.status' >"$work/out" 2>"$work/err"
+	"${command[@]}" do run --allow-run -C "$work" -l kash -c 'job = (run! :async :true "sh" "-c" "while test ! -f gate; do sleep .01; done; printf async"); printf "%s" (bool job)' -l km -c $'(run! "printf" "next")\n(run! "touch" "gate")\ncompletion = (await job)\ncompletion.status' >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = truenextasync ]; then test-ok "$backend shared handle ownership"; else test-fail "$backend fragment-local handle"; cat "$work/err"; fi
 	rm "$work/gate"
 	timeout 10 "${command[@]}" do run -C "$work" -l kash -c 'sh -c "while test ! -f gate; do sleep .01; done; printf async" &' -l kmk -f "$work/policy.kmk" open-gate >"$work/out" 2>"$work/err"
@@ -91,7 +91,7 @@ for backend in native wasm; do
 	timeout 10 "${command[@]}" -C "$work" "$work/direct.ksh" >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = nextasync ]; then test-ok "$backend direct .ksh joins graphs"; else test-fail "$backend direct async dispatch"; fi
 	rm "$work/gate"
-	timeout 10 "${command[@]}" do run --lang expr --allow-run -c '(let [job (run :async :true "true")] (await job))' >"$work/out" 2>"$work/err"
+	timeout 10 "${command[@]}" do run --lang expr --allow-run -c '(let [job (run! :async :true "true")] (await job))' >"$work/out" 2>"$work/err"
 	if grep -q 'status: 0' "$work/out"; then test-ok "$backend deprecated expression spelling uses shared await"; else test-fail "$backend separate expression executor"; fi
 done
 test-step "async parser and canonical formatter parity"

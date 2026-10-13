@@ -78,7 +78,7 @@ const advanceWatch = (handle) => {
 const constrained = e.kame_wasm_instance_create();
 assert.notEqual(constrained, 0n);
 // Fit compilation/watch setup, but leave too little for a retained snapshot.
-assert.equal(e.kame_wasm_instance_set_heap_limit(constrained, 17000), 0);
+assert.equal(e.kame_wasm_instance_set_heap_limit(constrained, 21000), 0);
 compile(constrained, 'VALUE = 1\n');
 const [constrainedTargets, constrainedTargetsLength] = write('["VALUE"]');
 assert.equal(e.kame_wasm_watch_begin(constrained, constrainedTargets, constrainedTargetsLength), 0);

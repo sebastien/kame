@@ -47,8 +47,8 @@ diag '(eval 42)' 'EXPR_INVALID'
 test-step "capability failures"
 diag '(read "x")' 'CAP_DENIED'
 diag '(env "HOME")' 'CAP_DENIED'
-diag '(shell "true")' 'CAP_DENIED'
-diag '(write "x" "y")' 'CAP_DENIED'
+diag '(shell! "true")' 'CAP_DENIED'
+diag '(write! "x" "y")' 'CAP_DENIED'
 
 test-step "deep mutual recursion reports a diagnostic instead of crashing"
 cli_run -- do run -c '(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))' -c '(character TEXT) = (walk (slice TEXT 1))' -c '(walk (reduce ([TEXT STEP] (str TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))'

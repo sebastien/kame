@@ -66,7 +66,7 @@ KM
 	test-step "$backend expression statements and typed arguments"
 	check '' do run --lang kash -c '(nop [status: 0])'
 	check '' do run --lang kash -c $'if (nop :true)\n\t(nop [status: 0])'
-	check 'a-bvalue' do run --allow-run --lang kash -c $'(nop :nil)\nprintf "%s" (join\n ["a" "b"] "-")\nif (=\n 1 1)\n\tprintf "%s" (nop "value")\nelse\n\t(fail "unselected")'
+	check 'a-bvalue' do run --allow-run --lang kash -c $'(nop :nil)\nprintf "%s" (join\n ["a" "b"] "-")\nif (=\n 1 1)\n\tprintf "%s" (nop "value")\nelse\n\t(fail! "unselected")'
 	check 'captured' do run --allow-run --lang kash -c $'name = $(printf captured)\nmatch $name\n\tcase "captured"\n\t\tprintf "%s" $name'
 	check 'expression' do run --allow-run --lang kash -c $':MODE (nop "expression") printenv MODE'
 	test-step "$backend direct recipes preserve data, selectors and rule arguments"
@@ -77,7 +77,7 @@ chosen {mode=sso} :
 	if (= mode "sso")
 		printf "%s" $data
 	else
-		(fail "unselected")
+		(fail! "unselected")
 ./nested/output :
 	printf "%s" "artifact" > @>
 generated-source = """printf "%s" (join ["generated" "direct"] "-")"""
@@ -120,7 +120,7 @@ KMK
 	reject PARSE_ERR chosen
 	reject PARSE_ERR --dry-run chosen
 	test-step "$backend migration diagnostics and external-shell templates"
-	for source in 'printf @(name)' '\@(out "forbidden")' 'name = @(out "forbidden")' ':cwd @(name) printf forbidden' 'printf forbidden > @(name)' '@if(:true)'; do
+	for source in 'printf @(name)' '\@(out! "forbidden")' 'name = @(out! "forbidden")' ':cwd @(name) printf forbidden' 'printf forbidden > @(name)' '@if(:true)'; do
 		printf 'SHELL = kash\nchosen :\n\t%s\n' "$source" >"$work/Makefile.kmk"
 		reject PARSE_ERR chosen
 		reject PARSE_ERR do run --allow-run --lang kash -c "$source"
@@ -142,14 +142,14 @@ KMK
 	cat >"$work/Makefile.kmk" <<'KMK'
 SHELL = kash
 ./published : ./input
-	value = (let [] (out "once") "A")
-	(write ./side-output "staged")
-	(yield (str value (text (read ./late))))
+	value = (let [] (out! "once") "A")
+	(write! ./side-output "staged")
+	(yield! (str value (text (read ./late))))
 ./late : ./input ; [shell: "/bin/sh"]
 	printf B > @>
 ./failed : ./input
-	(write ./failed-side "must-not-publish")
-	(fail "intentional")
+	(write! ./failed-side "must-not-publish")
+	(fail! "intentional")
 KMK
 	check once ./published
 	if [ "$(cat "$work/published")" = AB ] && [ "$(cat "$work/side-output")" = staged ]; then test-ok "$backend suspended effects publish once"; else test-fail "$backend suspension or publication"; fi

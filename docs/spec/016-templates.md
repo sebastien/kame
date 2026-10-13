@@ -327,7 +327,7 @@ CARD = """
 default : ./build/post.html
 
 ./build/post.html :
-	@(yield (render CARD [post: [title: "Hello, world" pinned: :true]] "html"))
+	@(yield! (render CARD [post: [title: "Hello, world" pinned: :true]] "html"))
 ```
 
 The content between the opening and closing runs of `"""` is raw: no escape

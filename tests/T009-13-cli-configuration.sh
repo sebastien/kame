@@ -31,7 +31,7 @@ SDK ?= "./default"
 SDK ?= (read "must-not-be-read")
 normal = "authored"
 default :
-	@(out SDK)
+	@(out! SDK)
 KMK
 for backend in native wasm; do
  test-step "$backend build defaults and literal overrides"

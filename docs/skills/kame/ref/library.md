@@ -13,7 +13,7 @@ types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 | `str` | `(str VALUE...)` | Concatenate textual scalars without separators; reject collections. |
 | `json` | `(json VALUE)` | Encode JSON-compatible values with stable lexical record key order. |
 | `parse-json` | `(parse-json TEXT)` | Parse JSON into typed Kame values; malformed input reports `JSON_INVALID`. |
-| `fail` | `(fail MESSAGE)` | Raise `USER_ERROR` with an explicit string message. |
+| `fail!` | `(fail! MESSAGE)` | Raise `USER_ERROR` with an explicit string message. |
 | `count` | `(count VALUE)` | Number of string code points, bytes, list items, or record fields. |
 | `get` | `(get RECORD KEY [DEFAULT])` | Computed string-key lookup; missing keys return nil or DEFAULT. DEFAULT is evaluated eagerly. |
 | `first` | `(first LIST)` | First item, or `:nil` for an empty list. |
@@ -145,11 +145,11 @@ environment values can invalidate a consumer.
 | `lstat` | `(lstat PATH)` | read | No-follow final-component metadata, with a portable `link` boolean; parents still follow links. |
 | `readlink` | `(readlink PATH)` | read | Exact UTF-8 target text; relative targets stay relative, dangling links work; invalid text/absent paths/non-links report `FS_ERR`. |
 | `wildcard` | `(wildcard PATTERN...)` | read | Sorted, duplicate-free union of one or more patterns; each tracks its own membership. |
-| `write` | `(write PATH VALUE)` | write | Bytes write raw; other coercible values render as with `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
+| `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other coercible values render as with `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
 | `env` | `(env NAME)` | env | Environment value. |
-| `shell` | `(shell COMMAND [OPTIONS])` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
+| `shell!` | `(shell! COMMAND [OPTIONS])` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
 | `sh`, `shellrun` | Same as `shell` | run | Aliases with identical result and phase behavior. |
-| `shell-template` | `(shell-template FRAGMENTS VALUES)` | run | Collected shell call with POSIX-quoted dynamic strings; FRAGMENTS has one more string than VALUES. Same phase policy as shell. |
+| `shell-template!` | `(shell-template! FRAGMENTS VALUES)` | run | Collected shell call with POSIX-quoted dynamic strings; FRAGMENTS has one more string than VALUES. Same phase policy as shell!. |
 
 `(resource URI)` constructs a validated `file:`/`mem:` resource value for file
 operations and rule inputs. Memory resources are host-scoped, not durable disk
@@ -178,9 +178,9 @@ still report `EXPR_INVALID`.
 
 | Operation | Signature | Effect |
 | --- | --- | --- |
-| `out` | `(out VALUE...)` | In a rule, defers bytes to the target's stdout. Standalone evaluation writes to stdout and returns the combined output. |
-| `err` | `(err VALUE...)` | In a rule, defers bytes to the target's stderr. Standalone evaluation writes to stderr and returns the combined output. |
-| `yield` | `(yield VALUE...)` | Supplies the bytes for a declared file output. Standalone evaluation writes to stdout and returns nil. It is valid only for a file rule with one output. |
+| `out!` | `(out! VALUE...)` | In a rule, defers bytes to the target's stdout. Standalone evaluation writes to stdout and returns the combined output. |
+| `err!` | `(err! VALUE...)` | In a rule, defers bytes to the target's stderr. Standalone evaluation writes to stderr and returns the combined output. |
+| `yield!` | `(yield! VALUE...)` | Supplies the bytes for a declared file output. Standalone evaluation writes to stdout and returns nil. It is valid only for a file rule with one output. |
 
 Do not combine a nonempty shell recipe with `yield`; Kame reports an output
 conflict rather than choosing a producer.

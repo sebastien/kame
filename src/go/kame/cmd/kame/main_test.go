@@ -210,17 +210,17 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(let [a 10] (out \"hello\" a))"}, &input{}, &out, &errOut); status != 0 || out.String() != "hello10\"hello10\"" || errOut.Len() != 0 {
+	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(let [a 10] (out! \"hello\" a))"}, &input{}, &out, &errOut); status != 0 || out.String() != "hello10\"hello10\"" || errOut.Len() != 0 {
 		t.Errorf("expr out status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(err \"notice\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"notice\"" || errOut.String() != "notice" {
+	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(err! \"notice\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"notice\"" || errOut.String() != "notice" {
 		t.Errorf("expr err status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(yield \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generated:nil" || errOut.Len() != 0 {
+	if status := Run([]string{"do", "run", "--lang", "expr", "-c", "(yield! \"generated\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "generated:nil" || errOut.Len() != 0 {
 		t.Errorf("expr yield status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }

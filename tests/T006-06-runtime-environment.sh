@@ -74,19 +74,19 @@ definition-generated-root : ; env "MODE=generated"
 	printf %s @(GENERATED) > definition-generated-log
 ./definition-input :
 	printf %s "$MODE" > @>
-COLLECTED = (shell "printf %s \"$MODE\"; printf captured-error >&2")
+COLLECTED = (shell! "printf %s \"$MODE\"; printf captured-error >&2")
 COLLECTED_VALUE = (text (get COLLECTED "stdout"))
 collected-root : collected-cached ; env "MODE=debug"
 collected-release-root : collected-cached ; env "MODE=release"
 task collected-cached :
 	printf %s @(COLLECTED_VALUE) > collected-log; printf x >> collected-runs
 kash-collected : ; [shell: kash env: [MODE: "kash"]]
-	value = (shell "printf %s \"$MODE\"")
+	value = (shell! "printf %s \"$MODE\"")
 	printf %s (text (get value "stdout"))
 collected-denied : ; [shell: kash env: [MODE: "secret"]]
-	value = (shell "touch forbidden-collected")
-	(out (get value "status"))
-BAD = (shell "touch forbidden-phase")
+	value = (shell! "touch forbidden-collected")
+	(out! (get value "status"))
+BAD = (shell! "touch forbidden-phase")
 definition-phase : @(BAD) ; env "MODE=debug"
 CYCLE = (str CYCLE)
 definition-cycle :
@@ -189,7 +189,7 @@ CONTENT = (text (read "./definition-input"))
 ./override : ./input
 	printf %s @(VALUE) > @>
 ./discovered : ./input ; [shell: kash]
-	(yield (text (read "./extra")))
+	(yield! (text (read "./extra")))
 ./constant : ./input
 	printf fixed > @>; printf x >> child-runs
 ./downstream : ./constant
@@ -355,17 +355,17 @@ task shell-task : ./input
 task kash-task : ./input ; [shell: kash]
 	sh ./binary-read kash-task kash-task-runs
 task pure-task : ./input
-	@(out "pure")
+	@(out! "pure")
 ./pure-file : ./input
-	@(yield "pure")
+	@(yield! "pure")
 ./overridden : ./input ; env "ENV_SIGNATURE_BINARY=fixed"
 	printf %s "$ENV_SIGNATURE_BINARY" > @>; printf x >> overridden-runs
 READ_ENV = (env "ENV_SIGNATURE_BINARY")
 (indirect-env) = (str READ_ENV)
 task pure-read-task : ./input
-	@(out (indirect-env))
+	@(out! (indirect-env))
 ./pure-read-file : ./input
-	@(yield (indirect-env))
+	@(yield! (indirect-env))
 KMK
   cat > "$child_env/binary-read" <<'SH'
 printf %s "$ENV_SIGNATURE_BINARY" > "$1"

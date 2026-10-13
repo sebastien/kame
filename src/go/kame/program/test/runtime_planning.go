@@ -116,7 +116,7 @@ func TestDefinitionExpressionSuppliesInput(t *testing.T) {
 
 func TestBuildEffectInExpressionInputIsPhaseInvalid(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "NAME = ./input\n./output : @(out NAME)\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "NAME = ./input\n./output : @(out! NAME)\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})

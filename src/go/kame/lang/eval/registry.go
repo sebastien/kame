@@ -34,6 +34,10 @@ type Operation struct {
 	MinArity     int
 	MaxArity     int // -1 accepts any remaining arguments.
 	Capabilities []Capability
+	ConditionalCapabilities []Capability
+	Category     OperationCategory
+	Phases       PhaseMask
+	Behavior     OperationBehavior
 	Version      string
 	// DeferredReplacement retains operand 2 only when operand 1 is a pattern.
 	DeferredReplacement bool
@@ -78,12 +82,13 @@ func NewRegistry(a mem.Allocator) *Registry {
 
 func (r *Registry) Add(operation Operation) bool {
 	if operation.DeferredReplacement && (operation.MinArity != 2 || operation.MaxArity != 3) { return false }
-	if r == nil || operation.Name == "" || operation.Call == nil || IsSpecialForm(operation.Name) || r.lookup(operation.Name) != nil {
+	if r == nil || operation.Name == "" || operation.Call == nil || IsSpecialForm(operation.Name) || r.lookup(operation.Name) != nil || !operation.ValidContract() {
 		return false
 	}
 	operation.Name = owned(r.Alloc, operation.Name)
 	operation.Version = owned(r.Alloc, operation.Version)
 	operation.Capabilities = slices.Clone(r.Alloc, operation.Capabilities)
+	operation.ConditionalCapabilities = slices.Clone(r.Alloc, operation.ConditionalCapabilities)
 	r.Items = slices.Append(r.Alloc, r.Items, operation)
 	return true
 }
@@ -115,6 +120,7 @@ func (r *Registry) Free() {
 		mem.FreeString(r.Alloc, o.Name)
 		mem.FreeString(r.Alloc, o.Version)
 		slices.Free(r.Alloc, o.Capabilities)
+		slices.Free(r.Alloc, o.ConditionalCapabilities)
 	}
 	slices.Free(r.Alloc, r.Items)
 	mem.Free(r.Alloc, r)

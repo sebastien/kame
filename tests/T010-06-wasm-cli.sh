@@ -27,7 +27,7 @@ test-step "-C resolves relative explicit files in both option orders"
 mkdir -p "$work/project"
 cat > "$work/project/Makefile.kmk" <<'EOF'
 task default :
-	@(out "directory-ok\n")
+	@(out! "directory-ok\n")
 EOF
 for args in first last absolute discover plan; do
 	case "$args" in
@@ -84,7 +84,7 @@ else
 fi
 
 test-step "do run --lang expr matches native output byte-for-byte"
-for expression in '(count [1 2 3])' '(join ["a" "b"] ":")' '(uppercase "kame")' '(let [a 10] (out "hello" a))' '(yield "generated")'; do
+for expression in '(count [1 2 3])' '(join ["a" "b"] ":")' '(uppercase "kame")' '(let [a 10] (out! "hello" a))' '(yield! "generated")'; do
 	node "$CLI_ROOT/dist/kame.js" do run --lang expr -c "$expression" >"$work/wasm.out"
 	"$CLI_BIN" do run --lang expr -c "$expression" >"$work/native.out"
 	if cmp -s "$work/wasm.out" "$work/native.out"; then
@@ -93,11 +93,11 @@ for expression in '(count [1 2 3])' '(join ["a" "b"] ":")' '(uppercase "kame")' 
 		test-fail "parity: $expression (wasm=$(cat "$work/wasm.out") native=$(cat "$work/native.out"))"
 	fi
 done
-run do run --lang expr -c '(err "notice")'
+run do run --lang expr -c '(err! "notice")'
 wasm_status=$status
 cp "$work/out" "$work/wasm.err-effect.out"
 cp "$work/err" "$work/wasm.err-effect.err"
-"$CLI_BIN" do run --lang expr -c '(err "notice")' >"$work/native.err-effect.out" 2>"$work/native.err-effect.err"
+"$CLI_BIN" do run --lang expr -c '(err! "notice")' >"$work/native.err-effect.out" 2>"$work/native.err-effect.err"
 if [ "$wasm_status" = 0 ] && cmp -s "$work/wasm.err-effect.out" "$work/native.err-effect.out" && cmp -s "$work/wasm.err-effect.err" "$work/native.err-effect.err"; then
 	test-ok "parity: err preserves stdout and stderr"
 else
@@ -137,7 +137,7 @@ if [ "$status" = 0 ] && [ "$(cat "$work/out")" = "$(cat "$CLI_ROOT/VERSION")" ];
 else
 	test-fail "read with grant failed: status=$status out=$(cat "$work/out")"
 fi
-run do run --lang expr --allow-run -c '(shell "printf run-ok")'
+run do run --lang expr --allow-run -c '(shell! "printf run-ok")'
 if [ "$status" = 0 ] && [ "$(cat "$work/out")" = '[status: 0 stdout: run-ok stderr:  signal: 0]' ]; then
 	test-ok "shell with --allow-run succeeds"
 else

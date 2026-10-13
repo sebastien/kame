@@ -15,12 +15,12 @@ func (p *Program) processExpression(e *expr.Expr, c *Context) Result {
 	graph := mem.Alloc[expr.Expr](c.Run)
 	graph.Kind, graph.Span = expr.CommandResult, e.Span
 	defer expr.Free(c.Run, graph)
-	if e.Items[0].Text == "run" {
+	if e.Items[0].Text == "run!" {
 		graph.Items = slices.Append(c.Run, graph.Items, mem.Alloc[expr.Expr](c.Run))
 		r := lowerProcessStage(c, graph.Items[0], e, false)
 		if r.Diagnostic.Code != "" { return r }
 	} else {
-		if len(e.Items) < 3 { return failure(c.Run, "EXPR_INVALID", e.Span, "pipe requires at least two run stages") }
+		if len(e.Items) < 3 { return failure(c.Run, "EXPR_INVALID", e.Span, "pipe! requires at least two run! stages") }
 		for i := 1; i < len(e.Items); i++ {
 			stage := mem.Alloc[expr.Expr](c.Run)
 			graph.Items = slices.Append(c.Run, graph.Items, stage)
@@ -33,8 +33,8 @@ func (p *Program) processExpression(e *expr.Expr, c *Context) Result {
 
 func lowerProcessStage(c *Context, stage *expr.Expr, e *expr.Expr, pipeline bool) Result {
 	stage.Kind, stage.Span = expr.CommandStage, e.Span
-	if e.Kind != expr.Application || len(e.Items) == 0 || e.Items[0].Kind != expr.Name || e.Items[0].Text != "run" {
-		return failure(c.Run, "EXPR_INVALID", e.Span, "pipe stages must be run applications")
+	if e.Kind != expr.Application || len(e.Items) == 0 || e.Items[0].Kind != expr.Name || e.Items[0].Text != "run!" {
+		return failure(c.Run, "EXPR_INVALID", e.Span, "pipe! stages must be run! applications")
 	}
 	i := 1
 	for i < len(e.Items) && e.Items[i].Kind == expr.Symbol {
@@ -50,7 +50,7 @@ func lowerProcessStage(c *Context, stage *expr.Expr, e *expr.Expr, pipeline bool
 		stage.Items = slices.Append(c.Run, stage.Items, setup)
 		i += 2
 	}
-	if i == len(e.Items) { return failure(c.Run, "EXPR_INVALID", e.Span, "run requires an executable") }
+	if i == len(e.Items) { return failure(c.Run, "EXPR_INVALID", e.Span, "run! requires an executable") }
 	for ; i < len(e.Items); i++ { stage.Items = slices.Append(c.Run, stage.Items, processExpressionWord(c.Run, e.Items[i])) }
 	return Result{}
 }

@@ -30,7 +30,7 @@ def main():
         workloads = {}
 
         expression = root / 'rules-512.kmk'
-        expression.write_text(''.join(f'v{i} = {i}\n' for i in range(512)) + 'task default :\n\t@(out "ok")\n')
+        expression.write_text(''.join(f'v{i} = {i}\n' for i in range(512)) + 'task default :\n\t@(out! "ok")\n')
         workloads['parse-512-definitions'] = (['do', 'parse', '--json', '--lang', 'script', str(expression)], lambda p: b'v511' in p.stdout)
 
         wide = ' '.join(f'v{i} {i}' for i in range(1000))

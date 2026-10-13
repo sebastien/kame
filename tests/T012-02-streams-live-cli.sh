@@ -70,7 +70,7 @@ from pathlib import Path
 import selectors, signal, subprocess, sys
 folder = Path(sys.argv[1]) / 'watch'
 folder.mkdir()
-(folder / 'Makefile.kmk').write_text('default :\n\t@(out "watch-marker")\n')
+(folder / 'Makefile.kmk').write_text('default :\n\t@(out! "watch-marker")\n')
 process = subprocess.Popen([sys.argv[2], '-C', str(folder), '--watch', 'default'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 selector = selectors.DefaultSelector()
 selector.register(process.stdout, selectors.EVENT_READ)

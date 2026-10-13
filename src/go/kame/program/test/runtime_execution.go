@@ -151,7 +151,7 @@ func TestWildcardTraversalPrunesUnrelatedSubtrees(t *testing.T) {
 	memory.SetFile("src/keep/one.go", []byte("keep"))
 	memory.SetFile("src/noise/deep/level/file.txt", []byte("noise"))
 	host := &countingReadDirHost{memory: memory}
-	parsed := script.Parse(a, "glob.kmk", "./output :\n\t@(yield (json (wildcard \"./src/*/*.go\")))\n")
+	parsed := script.Parse(a, "glob.kmk", "./output :\n\t@(yield! (json (wildcard \"./src/*/*.go\")))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -1222,7 +1222,7 @@ func TestYieldWritesFileOutput(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield \"yielded\")\n")
+	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield! \"yielded\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1251,7 +1251,7 @@ func TestYieldWritesFileOutput(t *testing.T) {
 
 func TestYieldRejectsShellCommand(t *testing.T) {
 	a := t.Allocator()
-	source := "./output :\n\t@(yield \"content\")\n\ttrue\n"
+	source := "./output :\n\t@(yield! \"content\")\n\ttrue\n"
 	parsed := script.Parse(a, "test.kmk", source)
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
@@ -1804,7 +1804,7 @@ func TestResourceURIInputUsesCanonicalMemoryIdentity(t *testing.T) {
 	a := t.Allocator()
 	memory := wasm.NewMemoryHost(a)
 	inputURI := "mem://workspace/src/input.txt"
-	parsed := script.Parse(a, "resource.kmk", "./output : @((list (resource \"mem://workspace/src/./input.txt\")))\n\t@(yield (read (resource \"mem://workspace/src/input.txt\")))\n")
+	parsed := script.Parse(a, "resource.kmk", "./output : @((list (resource \"mem://workspace/src/./input.txt\")))\n\t@(yield! (read (resource \"mem://workspace/src/input.txt\")))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1882,7 +1882,7 @@ func TestWriteOperationDefersUntilExecution(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(write \"./output\" \"written\")\n")
+	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(write! \"./output\" \"written\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
@@ -1915,7 +1915,7 @@ func TestWriteOperationCoercesValue(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(write \"./output\" 42)\n")
+	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(write! \"./output\" 42)\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
@@ -1952,7 +1952,7 @@ func TestReadOperationResumesDuringRendering(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield (str (count (read \"./input\"))))\n")
+	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield! (str (count (read \"./input\"))))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
@@ -1989,7 +1989,7 @@ func TestWildcardRelativePathDoesNotLeak(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield (json (wildcard \"./*\")))\n")
+	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield! (json (wildcard \"./*\")))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
@@ -2026,7 +2026,7 @@ func TestRenderFreesLineSpansWhenLaterLineWaits(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output :\n\tkept\n\t@(yield (str (count (read \"./input\"))))\n")
+	parsed := script.Parse(a, "test.kmk", "./output :\n\tkept\n\t@(yield! (str (count (read \"./input\"))))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})

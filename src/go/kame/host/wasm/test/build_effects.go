@@ -11,7 +11,7 @@ import (
 func TestForwardedBuildWritesWaitForHostAndPreserveBytes(t *testing.T) {
 	a := t.Allocator()
 	for scenario := 0; scenario < 2; scenario++ {
-		started := wasm.NewRuntime(a, "./out :\n\t@(write \"./side\" \"side\")\n\t@(yield \"one\")\n\t@(yield \"two\")\n")
+		started := wasm.NewRuntime(a, "./out :\n\t@(write! \"./side\" \"side\")\n\t@(yield! \"one\")\n\t@(yield! \"two\")\n")
 		if started.Runtime == nil {
 			t.Fatal("create runtime")
 			return
@@ -88,7 +88,7 @@ func TestForwardedFileRecipesVerifyOutputsBeforeCompletion(t *testing.T) {
 	for scenario := 0; scenario < 4; scenario++ {
 		text := "./out :\n\ttrue\n"
 		if scenario == 0 {
-			text = "./out :\n\t@(out \"\")\n"
+			text = "./out :\n\t@(out! \"\")\n"
 		}
 		started := wasm.NewRuntime(a, text)
 		if started.Runtime == nil {

@@ -43,7 +43,7 @@ for backend in native wasm; do
 	check "(let [name \"$output\"] \$(printf typed > \$name))" 0 '""' '' "${grants[@]}"
 	check "(str \$(printf a >> \"$output\") \$(printf b >> \"$output\"))" 0 '""' '' "${grants[@]}"
 	if [ "$(cat "$output")" = typedab ]; then test-ok "$backend redirects exactly once across suspension"; else test-fail "$backend replayed append"; fi
-	check "(count [\$(printf x > \"$output\") (out \"after\")])" 0 'after2' '' "${grants[@]}"
+	check "(count [\$(printf x > \"$output\") (out! \"after\")])" 0 'after2' '' "${grants[@]}"
 	check '$(printf "%s" "a>b" "c<d")' 0 '"a>bc<d"' '' "${grants[@]}"
 
 	test-step "$backend: redirected binary data is not captured or decoded"

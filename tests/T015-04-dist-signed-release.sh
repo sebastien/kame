@@ -67,7 +67,7 @@ assert all(rows[name] == hashlib.sha256((root / name).read_bytes()).hexdigest() 
 PY
 project="$root/project"
 mkdir -p "$project"
-printf 'task signed-release :\n\t@(out "signed-release-ok")\n' >"$project/Makefile.kmk"
+printf 'task signed-release :\n\t@(out! "signed-release-ok")\n' >"$project/Makefile.kmk"
 out="$(cd "$project" && KAME_HOME="$root/cache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm "$release/bin/kame" signed-release)"
 if [ "$out" = "signed-release-ok" ]; then test-ok "release launcher verifies and runs signed WASM assets"; else test-fail "signed release output: $out"; fi
 

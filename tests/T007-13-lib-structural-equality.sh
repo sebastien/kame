@@ -50,7 +50,7 @@ for backend in native wasm; do
 	check ':true' do run --lang expr -c '(eq -9223372036854775808 -9223372036854775808.0)'
 	check ':false' do run --lang expr -c '(eq :nil :false)'
 	check '[:true :true :true :true :true :true 2]' do run --allow-read -C "$work" bytes.km result
-	check '[true,false]' do run --lang kash -c '(out [(eq [1] [1.0]) (is [1] [2])])'
+	check '[true,false]' do run --lang kash -c '(out! [(eq [1] [1.0]) (is [1] [2])])'
 	test-step "$backend opaque values are errors even behind mismatches"
 	for text in '(eq count count)' '(ne count :nil)' '(eq [0 count] [1])' '(is [] [count])' '(eq [f: count] [other: 1])' '(eq ./a/{name} "a")' '(eq (resource "mem://test/a") :nil)' '(filter [[count]] [])' '(eq [([x] x)] [])' '(lt [] [])' '(eq [1] [1] [1])'; do reject "$text"; done
 done

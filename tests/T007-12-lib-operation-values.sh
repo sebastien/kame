@@ -24,8 +24,8 @@ result = [(size [1 2]) (map count [[1] [2 3]]) (reduce str ["a" "b"] "")]
 KM
 cat >"$work/values.kash" <<'KASH'
 size = count
-(out (size [1 2]))
-(out (map uppercase ["a" "b"]))
+(out! (size [1 2]))
+(out! (map uppercase ["a" "b"]))
 KASH
 cat >"$work/Makefile.kmk" <<'KMK'
 SHELL = kash
@@ -33,7 +33,7 @@ predicate = exists?
 files = [./first ./missing ./second]
 inputs = (filter predicate files)
 default : @(inputs)
-	(out (map uppercase ["a" "b"]))
+	(out! (map uppercase ["a" "b"]))
 KMK
 for backend in native wasm; do
 	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
@@ -57,7 +57,7 @@ for backend in native wasm; do
 	check ':true' do run --lang expr -c '(let [same =] (same 1 1))'
 	check '<operation:count>' do run "$work/values.km" size
 	check '2["A","B"]' do run "$work/values.kash"
-	MODE=local check local do run --lang kash --allow-env=MODE -c '(out (env "MODE"))'
+	MODE=local check local do run --lang kash --allow-env=MODE -c '(out! (env "MODE"))'
 	test-step "$backend host-backed callbacks and build planning"
 	check '["./first" "./second"]' do run --allow-read -C "$work" values.km selected
 	check '[first second]' do run --allow-read -C "$work" values.km contents
@@ -72,7 +72,7 @@ for backend in native wasm; do
 	reject REF_MISSING do run -c $'count = missing\n(count [])'
 	reject REF_MISSING do run -c unknown
 	reject OP_UNKNOWN do run -c '(unknown)'
-	for form in if let def eval and or with match run pipe await '?'; do reject EXPR_INVALID do run -c "(map $form [])"; done
+	for form in if let def eval and or with match run! pipe! await '?'; do reject EXPR_INVALID do run -c "(map $form [])"; done
 	check 1 do run --lang expr -c '(if :true 1 missing)'
 	check 2 do run --lang expr -c '(let [x 2] x)'
 	check 3 do run --lang expr -c '(? missing 3)'

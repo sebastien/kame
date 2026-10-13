@@ -11,7 +11,7 @@ import (
 func TestForwardedDeclaredFileInputsUseEmbeddingFilesystem(t *testing.T) {
 	a := t.Allocator()
 	for scenario := 0; scenario < 2; scenario++ {
-		started := wasm.NewRuntime(a, "default : ./input\n\t@(out \"ok\")\n")
+		started := wasm.NewRuntime(a, "default : ./input\n\t@(out! \"ok\")\n")
 		if started.Runtime == nil {
 			t.Fatal("create runtime")
 			return

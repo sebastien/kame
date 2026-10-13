@@ -64,7 +64,7 @@ func TestOperationValuesCannotBypassContractsOrBecomeSpecialForms(t *testing.T) 
 	operations.Register(registry)
 	parsed := script.Parse(a, "operations.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	sources := []string{"(let [f count] (f))", "(map count [1])", "(let [f read] (f missing))", "(map read [\"blocked\"])", "if", "run", "(map if [])", "unknown", "(unknown)"}
+	sources := []string{"(let [f count] (f))", "(map count [1])", "(let [f read] (f missing))", "(map read [\"blocked\"])", "if", "run!", "(map if [])", "unknown", "(unknown)"}
 	codes := []string{"EXPR_INVALID", "EXPR_INVALID", "CAP_DENIED", "CAP_DENIED", "EXPR_INVALID", "EXPR_INVALID", "EXPR_INVALID", "REF_MISSING", "OP_UNKNOWN"}
 	for i := range sources {
 		r := evaluate(t, p, sources[i])
@@ -73,7 +73,7 @@ func TestOperationValuesCannotBypassContractsOrBecomeSpecialForms(t *testing.T) 
 		}
 		r.Free(a)
 	}
-	specialForms := []string{"?", "let", "def", "eval", "if", "and", "or", "with", "match", "run", "pipe", "await"}
+	specialForms := []string{"?", "let", "def", "eval", "if", "and", "or", "with", "match", "run!", "pipe!", "await"}
 	for i := range specialForms {
 		if !eval.IsSpecialForm(specialForms[i]) || registry.Add(eval.Operation{Name: specialForms[i], Call: countOperation}) {
 			t.Errorf("special form accepted as operation: %s", specialForms[i])
