@@ -452,6 +452,126 @@ if sys.platform == 'linux':
 					stop(process)
 		assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-watch-notification-tree-') as directory:
+	project = Path(directory)
+	(project / 'src').mkdir()
+	(project / 'src' / 'first.txt').write_text('first')
+	(project / 'Makefile.kmk').write_text('chosen : ./src/**/*.txt\n\tcat @<* > joined; printf x >> runs\n')
+	error = project / 'stderr'
+	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+		try:
+			wait_for(process, lambda: read(project / 'joined') == 'first', error, 'initial recursive glob')
+			nested = project / 'src' / 'new' / 'nested'
+			nested.mkdir(parents=True)
+			(nested / 'second.txt').write_text('second')
+			wait_for(process, lambda: 'second' in read(project / 'joined'), error, 'new recursive glob directories')
+			(nested / 'second.txt').write_text('edited')
+			wait_for(process, lambda: 'edited' in read(project / 'joined'), error, 'subscription in new subtree')
+			time.sleep(.5)
+			before = read(project / 'runs')
+			(nested / 'second.txt').write_text('edited')
+			time.sleep(.5)
+			assert read(project / 'runs') == before, 'unchanged bytes triggered a rebuild'
+			(project / 'src').rename(project / 'old-src')
+			(project / 'src').mkdir()
+			(project / 'src' / 'replacement.txt').write_text('replacement')
+			wait_for(process, lambda: read(project / 'joined') == 'replacement', error, 'glob root replacement')
+			(project / 'src' / 'replacement.txt').write_text('rebound')
+			wait_for(process, lambda: read(project / 'joined') == 'rebound', error, 'rebound root subscription')
+			cases += 1
+		finally:
+			stop(process)
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-notification-missing-') as directory:
+	project = Path(directory)
+	(project / 'Makefile.kmk').write_text('chosen : ./missing/nested/input\n\tcat @< > copy\n')
+	error = project / 'stderr'
+	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+		try:
+			wait_for(process, lambda: 'waiting for changes' in error.read_text(), error, 'missing ancestor readiness')
+			(project / 'missing' / 'nested').mkdir(parents=True)
+			(project / 'missing' / 'nested' / 'input').write_text('created')
+			wait_for(process, lambda: read(project / 'copy') == 'created', error, 'missing ancestor creation')
+			(project / 'missing' / 'nested' / 'input').write_text('updated')
+			wait_for(process, lambda: read(project / 'copy') == 'updated', error, 'advanced ancestor subscription')
+			cases += 1
+		finally:
+			stop(process)
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-notification-link-') as directory:
+	base = Path(directory)
+	project = base / 'project'
+	project.mkdir()
+	outside = base / 'outside'
+	outside.mkdir()
+	target = outside / 'input'
+	(project / 'input').symlink_to(target)
+	(project / 'Makefile.kmk').write_text('chosen : ./input\n\tcat @< > copy\n')
+	error = project / 'stderr'
+	grants = [f'--allow-read={directory}', f'--allow-write={directory}', '--allow-run']
+	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+		process = subprocess.Popen([*runner, '-C', str(project), *grants, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+		try:
+			wait_for(process, lambda: 'waiting for changes' in error.read_text(), error, 'external dangling link readiness')
+			target.write_text('created')
+			wait_for(process, lambda: read(project / 'copy') == 'created', error, 'external dangling target creation')
+			target.write_text('updated')
+			wait_for(process, lambda: read(project / 'copy') == 'updated', error, 'external symlink target update')
+			failures = error.read_text().count('TGT_NO_RULE')
+			target.unlink()
+			wait_for(process, lambda: error.read_text().count('TGT_NO_RULE') > failures, error, 'external symlink target deletion')
+			target.write_text('recreated')
+			wait_for(process, lambda: read(project / 'copy') == 'recreated', error, 'external symlink target recreation')
+			cases += 1
+		finally:
+			stop(process)
+
+# Source files are deliberately read on each scan. Large source comments expose
+# regular scans in /proc without fragile CPU or notification-latency thresholds.
+if sys.platform == 'linux':
+	for fallback in (False, True):
+		with tempfile.TemporaryDirectory(prefix='kame-watch-notification-idle-') as directory:
+			project = Path(directory)
+			(project / 'input').write_text('initial')
+			source = '# ' + 'x' * (16 * 1024) + '\n'
+			if fallback:
+				source += 'MARK = (exists? (resource "mem://watch/missing"))\n'
+				source += 'chosen : ./input\n\tprintf %s @(MARK) > exists; cat @< > copy\n'
+			else:
+				source += 'chosen : ./input\n\tcat @< > copy\n'
+			(project / 'Makefile.kmk').write_text(source)
+			error = project / 'stderr'
+			grants = [f'--allow-read={directory}', '--allow-read=mem://watch/', f'--allow-write={directory}', '--allow-run'] if fallback else []
+			with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+				process = subprocess.Popen([*runner, '-C', directory, *grants, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
+				try:
+					wait_for(process, lambda: read(project / 'copy') == 'initial', error, 'idle watch readiness')
+					time.sleep(1)
+					io = Path(f'/proc/{process.pid}/io')
+					before = int(io.read_text().split('rchar: ')[1].splitlines()[0])
+					time.sleep(1)
+					after = int(io.read_text().split('rchar: ')[1].splitlines()[0])
+					if fallback:
+						assert after - before >= len(source), 'unwatchable resource did not enable polling fallback'
+					else:
+						assert after - before < len(source), f'idle watch kept scanning: {after - before} bytes'
+					(project / 'input').write_text('changed')
+					wait_for(process, lambda: read(project / 'copy') == 'changed', error, 'idle wake or fallback update')
+					if not fallback:
+						fds = Path(f'/proc/{process.pid}/fd')
+						before_fds = len(list(fds.iterdir()))
+						for generation in range(6):
+							reloaded = source.replace('cat @< > copy', f'cat @< > copy; printf {generation} > generation')
+							(project / 'Makefile.kmk').write_text(reloaded)
+							wait_for(process, lambda: read(project / 'generation') == str(generation), error, 'subscription refresh on source reload')
+							time.sleep(.2)
+						assert len(list(fds.iterdir())) <= before_fds + 4, 'source reload leaked notification descriptors'
+					cases += 1
+				finally:
+					stop(process)
+
 print(f'{cases} watch scenarios passed')
 
 # EOF

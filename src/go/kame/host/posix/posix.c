@@ -18,6 +18,29 @@
 #endif
 #include <time.h>
 #include <unistd.h>
+#include <dirent.h>
+#if defined(__linux__) && !defined(__COSMOPOLITAN__)
+#include <sys/inotify.h>
+#endif
+#if defined(__COSMOPOLITAN__)
+// Cosmocc 4.0.2 ships the syscall stubs but no public inotify header/wrappers.
+// These Linux-only calls are guarded by IsLinux() below; never use syscall(),
+// whose Cosmopolitan numbering is not Linux's syscall numbering.
+extern int sys_inotify_init1(int);
+extern int sys_inotify_add_watch(int, const char *, uint32_t);
+#define inotify_init1 sys_inotify_init1
+#define inotify_add_watch sys_inotify_add_watch
+#define IN_NONBLOCK 0x800
+#define IN_CLOEXEC 0x80000
+#define IN_MODIFY 0x2
+#define IN_ATTRIB 0x4
+#define IN_MOVED_FROM 0x40
+#define IN_MOVED_TO 0x80
+#define IN_CREATE 0x100
+#define IN_DELETE 0x200
+#define IN_DELETE_SELF 0x400
+#define IN_MOVE_SELF 0x800
+#endif
 #if defined(__COSMOPOLITAN__)
 #define _COSMO_SOURCE
 #include "libc/calls/internal.h"
@@ -425,6 +448,153 @@ bool km_file_watch_stamp(so_String name, so_Slice data) {
                 out[link * 49 + 1 + i * 8 + j] = fields[i] >> (j * 8);
     }
     free(path); return true;
+}
+
+// Notifications are hints only. Replace subscriptions before fingerprinting,
+// retaining events on the new descriptor during the scan.
+struct km_watch { int fd, next; bool complete; };
+
+km_watch *km_watch_new(void) {
+    km_watch *w = calloc(1, sizeof(*w));
+    if (w) w->fd = w->next = -1;
+    return w;
+}
+
+void km_watch_begin(km_watch *w) {
+    if (!w) return;
+    if (w->next >= 0) close(w->next);
+    w->next = -1;
+#if defined(__linux__) || defined(__COSMOPOLITAN__)
+#if defined(__COSMOPOLITAN__)
+    if (IsLinux())
+#endif
+    w->next = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+#endif
+    w->complete = w->next >= 0;
+}
+
+static bool km_watch_directory(km_watch *w, const char *path, bool recursive, int depth) {
+#if defined(__linux__) || defined(__COSMOPOLITAN__)
+    if (w->next < 0 || depth > 128) return false;
+    if (inotify_add_watch(w->next, path, IN_MODIFY | IN_ATTRIB | IN_CREATE | IN_DELETE |
+                         IN_MOVED_FROM | IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF) < 0) return false;
+    if (!recursive) return true;
+    // ponytail: subscribe the whole glob-root subtree; prune by pattern if watch
+    // limits or traversal cost become material. Failed coverage enables polling.
+    DIR *dir = opendir(path);
+    if (!dir) return false;
+    bool ok = true;
+    struct dirent *entry;
+    while ((entry = readdir(dir))) {
+        if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")) continue;
+        size_t size = strlen(path) + strlen(entry->d_name) + 2;
+        char *child = malloc(size);
+        if (!child) { ok = false; break; }
+        snprintf(child, size, "%s/%s", path, entry->d_name);
+        struct stat info;
+        if (lstat(child, &info) != 0) ok = false;
+        else if (S_ISDIR(info.st_mode)) ok = km_watch_directory(w, child, true, depth + 1) && ok;
+        free(child);
+    }
+    closedir(dir);
+    return ok;
+#else
+    (void)w; (void)path; (void)recursive; (void)depth;
+    return false;
+#endif
+}
+
+static void km_watch_parent(char *path) {
+    char *slash = strrchr(path, '/');
+    if (!slash) strcpy(path, ".");
+    else if (slash == path) path[1] = 0;
+    else *slash = 0;
+}
+
+static bool km_watch_existing(km_watch *w, char *path, bool recursive) {
+    struct stat info;
+    while (stat(path, &info) != 0 || !S_ISDIR(info.st_mode)) {
+        if (!strcmp(path, "/") || !strcmp(path, ".")) return false;
+        km_watch_parent(path);
+        // A missing subtree only needs its nearest existing ancestor.
+        recursive = false;
+    }
+    return km_watch_directory(w, path, recursive, 0);
+}
+
+bool km_watch_add(km_watch *w, so_String name, bool glob) {
+    if (!w || w->next < 0) return false;
+    if (name.len <= 0) { w->complete = false; return false; }
+    char *path = km_cstring(name);
+    if (!path) { w->complete = false; return false; }
+    bool ok = true;
+    if (glob) {
+        char *meta = strpbrk(path, "*?[\\");
+        if (meta) *meta = 0;
+        km_watch_parent(path);
+        ok = km_watch_existing(w, path, true);
+    } else {
+        // Follow existing symlinks to cover target edits outside the link's parent.
+        char *target = realpath(path, NULL);
+        if (target) {
+            km_watch_parent(target);
+            ok = km_watch_existing(w, target, false);
+            free(target);
+        }
+        // A dangling symlink may point outside the link's directory, too.
+        char link[PATH_MAX + 1];
+        ssize_t length = readlink(path, link, PATH_MAX);
+        if (length >= 0) {
+            link[length] = 0;
+            char *base = strdup(path);
+            if (!base) ok = false;
+            else {
+                km_watch_parent(base);
+                size_t size = strlen(base) + (size_t)length + 2;
+                char *destination = malloc(size);
+                if (!destination) ok = false;
+                else {
+                    if (link[0] == '/') snprintf(destination, size, "%s", link);
+                    else snprintf(destination, size, "%s/%s", base, link);
+                    km_watch_parent(destination);
+                    ok = km_watch_existing(w, destination, false) && ok;
+                    free(destination);
+                }
+                free(base);
+            }
+        }
+        km_watch_parent(path);
+        ok = km_watch_existing(w, path, false) && ok;
+    }
+    free(path);
+    w->complete = w->complete && ok;
+    return ok;
+}
+
+bool km_watch_commit(km_watch *w) {
+    if (!w) return false;
+    if (w->fd >= 0) close(w->fd);
+    w->fd = w->next; w->next = -1;
+    return w->complete;
+}
+
+int km_watch_wait(km_watch *w, int wait) {
+    struct pollfd fd = { .fd = w ? w->fd : -1, .events = POLLIN };
+    int result = poll(&fd, 1, wait);
+    if (result < 0) return errno == EINTR ? 0 : -1;
+    if (!result) return 0;
+    if (fd.revents & (POLLERR | POLLHUP | POLLNVAL)) return -1;
+    // Drain the entire queue; overflow and lost subscriptions also cause rescan.
+    char data[16384];
+    while (read(fd.fd, data, sizeof(data)) > 0) {}
+    return 1;
+}
+
+void km_watch_free(km_watch *w) {
+    if (!w) return;
+    if (w->fd >= 0) close(w->fd);
+    if (w->next >= 0) close(w->next);
+    free(w);
 }
 
 static void km_free_strings(char **strings, int count) {

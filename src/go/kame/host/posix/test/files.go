@@ -9,6 +9,23 @@ import (
 	"solod.dev/so/time"
 )
 
+func TestWatchRejectsEmptyNames(t *testing.T) {
+	h := posix.New(t.Allocator())
+	defer h.Free()
+	w := posix.NewWatcher()
+	defer w.Free()
+	globs := []bool{false, true}
+	for _, glob := range globs {
+		w.Begin()
+		if h.AddWatch(w, "", glob) {
+			t.Error("empty watch name was accepted")
+		}
+		if w.Commit() {
+			t.Error("rejected watch name did not enable polling fallback")
+		}
+	}
+}
+
 func TestAtomicWriteIgnoresPredictableStagingSymlink(t *testing.T) {
 	var buffer [os.MaxPathLen]byte
 	directory, err := os.MkdirTemp(buffer[:], "", "kame-atomic-")

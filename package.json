@@ -1,6 +1,6 @@
 {
 	"name": "@ssebastien/kame",
-	"version": "0.2.2",
+	"version": "0.2.3",
 	"description": "Build tool for projects described with Kame",
 	"license": "MIT",
 	"type": "module",

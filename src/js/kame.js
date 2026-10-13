@@ -8,7 +8,7 @@
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
 import { lstat, mkdir, mkdtemp, open, readFile, readlink, rename, rm, stat } from 'node:fs/promises';
-import { accessSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, closeSync, constants as fsConstants, existsSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -3503,6 +3503,95 @@ function reportWatchError(error, source) {
   else stderr.write(renderDiagnostic(detail, source, 80));
 }
 
+// CLI-only subscriptions. The embedded API retains explicit invalidation for
+// custom hosts. Directory events are hints; existing fingerprints decide changes.
+class WatchNotifications {
+  constructor(signal) {
+    this.signal = signal;
+    this.watchers = [];
+    this.dirty = true;
+    this.complete = false;
+    this.wake = null;
+    this.abort = () => this.wake?.();
+    signal.addEventListener('abort', this.abort);
+  }
+
+  changed() { this.dirty = true; this.wake?.(); }
+
+  sync(records) {
+    const directories = new Set();
+    const traversed = new Set();
+    let complete = true;
+    const add = (directory, recursive = false, depth = 0) => {
+      if (depth > 128) { complete = false; return; }
+      directory = resolve(directory);
+      while (true) {
+        try { if (statSync(directory).isDirectory()) break; }
+        catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') complete = false; }
+        const parent = dirname(directory);
+        if (parent === directory) { complete = false; return; }
+        directory = parent;
+        recursive = false;
+      }
+      directories.add(directory);
+      if (!recursive || traversed.has(directory)) return;
+      // ponytail: cover the whole glob-root subtree; prune by pattern if watch
+      // limits or traversal cost become material. Failed coverage enables polling.
+      traversed.add(directory);
+      try {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+          if (entry.isDirectory()) add(join(directory, entry.name), true, depth + 1);
+        }
+      } catch { complete = false; }
+    };
+    for (const record of records) {
+      if (isMemoryResource(record.name)) { complete = false; continue; }
+      const rawName = filesystemPath(record.name);
+      const name = process.platform === 'win32' ? rawName.replaceAll('\\', '/') : rawName;
+      if (record.kind === 'glob') {
+        const root = globRoot(name);
+        add(root === name ? dirname(name) : root, true);
+      } else {
+        add(dirname(name));
+        try { add(dirname(realpathSync(name))); } catch {}
+        // Also observe creation of a dangling symlink's target.
+        try { add(dirname(resolve(dirname(name), readlinkSync(name)))); } catch {}
+      }
+    }
+    const next = [];
+    for (const directory of directories) {
+      try {
+        const watcher = fsWatch(directory, () => this.changed());
+        watcher.on('error', () => { this.complete = false; this.changed(); watcher.close(); });
+        next.push(watcher);
+      } catch { complete = false; }
+    }
+    for (const watcher of this.watchers) watcher.close();
+    this.watchers = next;
+    this.complete = complete;
+  }
+
+  async wait(milliseconds) {
+    if (this.signal.aborted) return;
+    // Yield to I/O even when another scan is already queued (host requests and
+    // signal callbacks must not be starved by a chain of resolved promises).
+    if (this.dirty) milliseconds = 0;
+    await new Promise((done) => {
+      const timer = setTimeout(finish, milliseconds);
+      const self = this;
+      function finish() { clearTimeout(timer); self.wake = null; done(); }
+      this.wake = finish;
+    });
+  }
+
+  close() {
+    for (const watcher of this.watchers) watcher.close();
+    this.watchers = [];
+    this.signal.removeEventListener('abort', this.abort);
+    this.wake?.();
+  }
+}
+
 async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   const cancellation = new AbortController();
   invocationCancellations.add(cancellation);
@@ -3510,6 +3599,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   const disposal = new Promise((resolveDisposal) => { finishDisposal = resolveDisposal; });
   invocationDisposals.add(disposal);
   const context = contextFor(inv);
+  const notifications = new WatchNotifications(cancellation.signal);
   context.human = inv.json !== true;
   const watchedSources = new Set();
   let source = null;
@@ -3542,12 +3632,15 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
     }
     cycleFinished = true; watchIdle = true;
   };
-  if (!inv.json) stderr.write('Watching filesystem resources (200ms polling; 100ms debounce)\n');
+  if (!inv.json) stderr.write('Watching filesystem resources (OS notifications; 10s reconciliation; 200ms polling fallback; 100ms debounce)\n');
 
   const seedSources = async () => {
     for (const name of watchedSources) {
       const key = watchKey('file', name);
-      if (!fingerprints.has(key)) fingerprints.set(key, { kind: 'file', name, stamp: await watchFingerprint('file', name), source: true });
+      if (!fingerprints.has(key)) {
+        notifications.changed();
+        fingerprints.set(key, { kind: 'file', name, stamp: await watchFingerprint('file', name), source: true });
+      }
     }
   };
   const compile = async () => {
@@ -3587,29 +3680,33 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       // The resource node can appear before the suspended operation accepts its
       // metadata/link observation. Promote the live watch when that view arrives.
       if (tracked && resource.metadata && !tracked.metadata) {
+        notifications.changed();
         tracked.metadata = true;
         tracked.stamp = 'unobserved';
       }
       if (!tracked || tracked.stamp === null) {
+        notifications.changed();
         const stamp = resource.metadata ? 'unobserved' : resource.missing === true ? 'missing' : resource.signature ?? await watchFingerprint(resource.kind, resource.name);
         if (!tracked) fingerprints.set(key, { ...resource, stamp, source: false });
         else tracked.stamp = stamp;
       }
     }
     for (const [key, record] of fingerprints) {
-      if (!record.source && !active.has(key)) fingerprints.delete(key);
+      if (!record.source && !active.has(key)) { fingerprints.delete(key); notifications.changed(); }
     }
   };
 
   try {
     let active = await compile();
     while (!cancellation.signal.aborted) {
+      let busy = false;
       if (active) {
         await waitOutputReady(cancellation.signal);
         const step = module.drainWatch(watch);
         if (step === 1) module.serviceWatchRequest(watch);
         if (watch.hostError) throw watch.hostError;
         const snapshot = module.watchSnapshot(watch);
+        busy = snapshot.busy;
         await syncWatchResources(snapshot);
         for (const root of snapshot.roots ?? []) {
           if (!root.done || !root.diagnosticJSON) continue;
@@ -3627,8 +3724,10 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       if (!active) finishCycle();
 
       const now = Date.now();
-      if (now - lastScan >= 200) {
+      if (notifications.dirty || now - lastScan >= (notifications.complete ? 10000 : 200)) {
         await seedSources();
+        notifications.dirty = false;
+        notifications.sync(fingerprints.values());
         for (const [key, record] of fingerprints) {
           const stamp = await scanWatchFingerprint(record);
           if (record.stamp === null) { record.stamp = stamp; continue; }
@@ -3665,8 +3764,11 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
           pending.clear();
           reported = new Set();
         }
+        notifications.changed();
       }
-      await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+      const interval = notifications.complete ? 10000 : 200;
+      const scanDue = Math.max(1, interval - (Date.now() - lastScan));
+      await notifications.wait(Math.min(busy ? 10 : 1000, pending.size ? 100 : scanDue, scanDue));
     }
   } catch (error) {
     if (!cancellation.signal.aborted) {
@@ -3674,6 +3776,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       status = 1;
     } else if (interruptedStatus) status = interruptedStatus;
   } finally {
+    notifications.close();
     if (watch) {
       invocationCancellations.delete(watch.cancellation);
       try { await module.disposeWatch(watch); } catch { status = status || 1; }

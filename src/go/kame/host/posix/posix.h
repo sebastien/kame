@@ -60,5 +60,12 @@ int km_cli_environment_copy(so_Slice);
 bool km_cli_environment_names_case_insensitive(void);
 int64_t km_file_modtime(so_String, bool);
 bool km_file_watch_stamp(so_String, so_Slice);
+typedef struct km_watch km_watch;
+km_watch *km_watch_new(void);
+void km_watch_begin(km_watch *);
+bool km_watch_add(km_watch *, so_String, bool);
+bool km_watch_commit(km_watch *);
+int km_watch_wait(km_watch *, int);
+void km_watch_free(km_watch *);
 
 #endif

@@ -14,12 +14,13 @@ import (
 )
 
 type watchResource struct {
-	Key      core.ResourceKey
-	Stamp    string
-	Probe    string
-	Metadata bool
-	Source   bool
-	Seen     bool
+	Key        core.ResourceKey
+	Stamp      string
+	Probe      string
+	Metadata   bool
+	Source     bool
+	Seen       bool
+	Registered bool
 }
 
 func freeWatchResources(items []watchResource) {
@@ -203,6 +204,29 @@ func startWatchHandles(session *buildSession, options buildArguments, out io.Wri
 	return handles
 }
 
+func syncWatchNotifications(w *posix.Watcher, p *program.Program, items []watchResource) bool {
+	w.Begin()
+	h := posix.New(mem.System)
+	complete := true
+	for i := range items {
+		name := items[i].Key.Name
+		owned := false
+		if p != nil && !items[i].Source && !core.IsResourceURIName(name) && !path.IsAbs(name) {
+			name = path.Join(mem.System, p.Options.Directory, name)
+			owned = true
+		}
+		if !h.AddWatch(w, name, items[i].Key.Kind == core.ResourceGlob) {
+			complete = false
+		}
+		if owned {
+			mem.FreeString(mem.System, name)
+		}
+		items[i].Registered = true
+	}
+	h.Free()
+	return w.Commit() && complete
+}
+
 // One host loop scans while recipes run. It queues changes until the current
 // build settles, then invalidates the retained roots' affected dependencies.
 func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
@@ -216,11 +240,19 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 	var resources []watchResource
 	var pending []core.ResourceKey
 	refreshWatchResources(&resources, &session, options)
+	watcher := posix.NewWatcher()
+	notifications := syncWatchNotifications(watcher, session.Program, resources)
 	progress := buildProgress{}
 	lastScan, lastChange := int64(0), int64(0)
+	lastRefresh := int64(0)
+	dirty := true
 	recompile, reported := false, false
 	if !options.JSON {
-		io.WriteString(errOut, "Watching filesystem resources (200ms polling; 100ms debounce)\n")
+		if notifications {
+			io.WriteString(errOut, "Watching filesystem resources (OS notifications; 10s reconciliation; 100ms debounce)\n")
+		} else {
+			io.WriteString(errOut, "Watching filesystem resources (200ms polling fallback; 100ms debounce)\n")
+		}
 	}
 	status := 0
 	cycleFinished, cycleFailed := false, session.Status != 0 || invocationHadDiagnostic
@@ -257,6 +289,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			}
 		}
 		if !busy && !cycleFinished {
+			lastRefresh = 0 // Observe dependencies published by the final build tick.
 			clearDashboard(errOut)
 			invocationCounts = progress
 			outcome := "success"
@@ -282,8 +315,23 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			flushCLIOutput(errOut)
 		}
 		now := time.Now().UnixNano() / 1000000
-		if now-lastScan >= 200 {
+		if (busy && now-lastRefresh >= 200) || (!busy && lastRefresh == 0) {
+			count := len(resources)
 			refreshWatchResources(&resources, &session, options)
+			dirty = dirty || count != len(resources)
+			for i := range resources {
+				dirty = dirty || !resources[i].Registered
+			}
+			lastRefresh = now
+		}
+		interval := int64(10000)
+		if !notifications {
+			interval = 200
+		}
+		if dirty || now-lastScan >= interval {
+			refreshWatchResources(&resources, &session, options)
+			notifications = syncWatchNotifications(watcher, session.Program, resources)
+			dirty = false
 			for i := range resources {
 				stamp := scanWatchStamp(session.Program, &resources[i])
 				if stamp != resources[i].Stamp {
@@ -331,8 +379,21 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			slices.Free(mem.System, pending)
 			pending = nil
 			recompile, reported = false, false
+			dirty = true
 		}
-		time.Sleep(10 * time.Millisecond)
+		wait := 1000
+		if busy || dirty {
+			wait = 10
+		}
+		if !notifications && wait > 200 {
+			wait = 200
+		}
+		if len(pending) != 0 && wait > 100 {
+			wait = 100
+		}
+		if watcher.Wait(wait) != 0 {
+			dirty = true
+		}
 	}
 	freeWatchHandles(handles)
 	if session.Program != nil {
@@ -342,6 +403,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 		}
 	}
 	session.Free()
+	watcher.Free()
 	freeWatchResources(resources)
 	for i := range pending {
 		pending[i].Free(mem.System)
