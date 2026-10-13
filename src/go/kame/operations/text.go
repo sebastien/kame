@@ -79,6 +79,7 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 		discardArgCallables(c, v)
 		return parsed
 	}
+	state.preserveNonmatches = true
 	if len(v) == 2 {
 		return replaceSection(c, state)
 	}

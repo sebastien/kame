@@ -109,13 +109,15 @@ calls, not infix operators.
 ## Patterns and processes
 
 ```kame
-(map (replace ./src/{name:*}.c ./build/{name}.o)
+(map (sub ./src/{name:*}.c ./build/{name}.o)
   [./src/main.c ./src/util.c])
 ```
 
 Expression match patterns use `{*}`, `{**}`, `{name:*}`, or `{name:**}`;
-expansion patterns use `{name}` or `{_N}`. The pattern form of `replace` with
-two arguments produces a callable; a non-match returns nil. Rule captures
+expansion patterns use `{name}` or `{_N}`. The pattern form of `sub` with
+two arguments produces a callable; nonmatches remain unchanged. `replace` is a
+deprecated alias. `(match? PATTERN [TEXT])` tests a full-string match, returning
+a unary predicate when `TEXT` is omitted. Use it for filtering. Rule captures
 have a related but distinct grammar; see [Rules](./rules.md).
 `(pattern TEXT)` constructs and validates a pattern from runtime text. Regex
 matcher groups are `{name:~REGEX}` or `{~REGEX}`; `regex-match`, `capture`, and

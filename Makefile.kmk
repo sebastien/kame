@@ -51,7 +51,7 @@ KAME_INPUTS =
 # plus the handwritten ABI glue listed in the rule header. cmd/kame is excluded
 # because its generated version file would relink the module on every build.
 WASM_SOURCES =
-  (filter-out (replace ./src/go/kame/cmd/{rest:**} "1") KAME_SOURCES)
+  (filter-out (match? ./src/go/kame/cmd/{rest:**}) KAME_SOURCES)
 
 # --- Aggregate targets ------------------------------------------------------
 

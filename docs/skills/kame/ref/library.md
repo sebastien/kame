@@ -78,8 +78,10 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 | `join` | `(join LIST SEPARATOR)` | Joins a list of strings. |
 | `split` | `(split TEXT SEPARATOR)` | Splits text on a nonempty literal separator. |
 | `strip` | `(strip TEXT)` | Removes leading and trailing Unicode whitespace. |
-| `replace` | `(replace TEXT FROM TO)` | Replaces all literal `FROM` occurrences. |
-| `replace` | `(replace MATCH-PATTERN EXPANSION [TEXT])` | Pattern replacement. Without `TEXT`, returns a one-argument callable suitable for `map`. A non-match returns `:nil`. |
+| `sub` | `(sub TEXT FROM TO)` | Replaces all literal `FROM` occurrences. |
+| `sub` | `(sub MATCH-PATTERN EXPANSION [TEXT])` | Pattern substitution. Without `TEXT`, returns a one-argument callable suitable for `map`. Nonmatches remain unchanged. |
+| `replace` | Same signatures as `sub` | Deprecated alias with identical behavior; no runtime warning. |
+| `match?` | `(match? MATCH-PATTERN [TEXT])` | Anchored boolean match; without `TEXT`, returns a unary predicate suitable for `filter`/`filter-out`. Subjects must be strings. |
 | `includes?` | `(includes? TEXT PART)` | Literal substring test. |
 | `starts?` | `(starts? TEXT PREFIX)` | Literal prefix test. |
 | `ends?` | `(ends? TEXT SUFFIX)` | Literal suffix test. |
@@ -107,11 +109,14 @@ Pattern replacement uses Kame pattern literals such as `./src/{name:*}.c` and
 expansion references such as `./build/{name}.o`. Invalid matcher/expansion
 combinations or missing captures report `PAT_INVALID`.
 The subject may be any list of strings, including a filtered wildcard result;
-replacement preserves order and produces `:nil` for each nonmatching member.
+substitution preserves order and retains each nonmatching member unchanged.
 Recursive captures backtrack across segments. Two-argument replacement creates
 an invocation-owned callable, not printable/serializable definition data.
 Regex grammar and matching budgets are defined in
 [Pattern extensions](../../../spec/029-pattern-extensions.md).
+Use `match?`, not substitution, as a filtering predicate: unchanged strings are
+truthy. `regex-replace` retains its separate nil-on-nonmatch contract. See
+[Pattern predicates and substitution](../../../spec/041-pattern-predicates-and-substitution.md).
 `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `bold`,
 and `dim` each wrap one string in ANSI styling unconditionally; they do not
 inspect the terminal. Use only for terminal-bound strings.

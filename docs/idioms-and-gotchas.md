@@ -124,11 +124,13 @@ A replacement expansion may be a string, a number, a boolean, or an expansion
 pattern. Scalar expansions convert to text:
 
 ```sh
-kame do run --lang expr -c '(replace ./src/{name:*}.c "1" "./src/demo.c")'
+kame do run --lang expr -c '(sub ./src/{name:*}.c "1" "./src/demo.c")'
 # "1"
 ```
 
-A missing pattern match returns `:nil`. Keep match patterns and expansion
+A nonmatching subject remains unchanged under `sub` (or its deprecated alias
+`replace`). Use `(match? PATTERN TEXT)` for a boolean test, or `(match? PATTERN)`
+as a predicate for `filter`/`filter-out`. Keep match patterns and expansion
 patterns distinct; their capture/reference groups have different roles.
 Patterns can start with a capture, and bare targets can capture: `{name:*}`
 or `aws-shell@{role-account}`. Exact targets win over templates; two matching
@@ -141,13 +143,14 @@ segments. Anchor the source prefix to avoid copying it into the destination:
 
 ```kame
 SOURCES = (filter-out ([x] (includes? x "draft")) (wildcard ./src/**/*.txto))
-OUTPUTS = (replace ./src/{path:**}.txto ./build/{path}.json SOURCES)
+OUTPUTS = (sub ./src/{path:**}.txto ./build/{path}.json SOURCES)
 ```
 
-With two arguments, `replace` returns an invocation-owned callable for `map`,
-not printable data for `do cat`. Nonmatching list members become `:nil`; guard
-them before calling string operations, or remove them with `(filter-out LIST
-:nil)`. `string?` is available for explicit kind checks.
+With two arguments, `sub` returns an invocation-owned callable for `map`,
+not printable data for `do cat`. Nonmatching list members remain unchanged;
+filter with `match?` first if only matching sources should be retained.
+Substitution is not a matching predicate: unchanged strings are truthy.
+`regex-replace` retains its separate nil-on-nonmatch behavior.
 
 ## Inspection and reproducibility
 

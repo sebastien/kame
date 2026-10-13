@@ -242,7 +242,9 @@ The text operations are:
 | `includes?` | Literal substring membership |
 | `starts?` | Literal prefix test |
 | `ends?` | Literal suffix test |
-| `replace` | Replace literal occurrences, or evaluate a replacement expression with pattern captures in scope per `014-patterns.md` |
+| `sub` | Substitute literal occurrences, or evaluate a capture-scoped expansion while preserving nonmatches per `041-pattern-predicates-and-substitution.md` |
+| `replace` | Deprecated alias for `sub`, with identical behavior |
+| `match?` | Anchored boolean pattern matching, directly or as a unary predicate |
 | `uppercase` | Unicode uppercase conversion supported by Solod |
 | `lowercase` | Unicode lowercase conversion supported by Solod |
 | `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` | Wrap one string in the matching ANSI foreground sequence |
@@ -256,18 +258,23 @@ value display and ordinary text conversion never add terminal escapes.
 Portable regular-expression matching and replacement are specified in
 `029-pattern-extensions.md`.
 
-### Pattern Replace
+### Pattern Substitution
 
-`replace` accepts two or three arguments. `(replace TEXT FROM TO)` with plain
+Per `041-pattern-predicates-and-substitution.md`, `sub` is canonical, `replace` is
+a deprecated alias, nonmatching strings are preserved, and `match?` provides
+boolean pattern predicates.
+
+`sub` accepts two or three arguments. `(sub TEXT FROM TO)` with plain
 strings replaces literal occurrences and retains ordinary eager evaluation.
 A match pattern as the first argument selects anchored matching. Its second
 operand is a replacement expression evaluated only after a match, with named
 captures bound locally; `./{name}`, `"@(name)"`, `name`, and `(uppercase name)`
 can all use `{name:*}`. With two operands it returns a callable of arity one
 that defers the replacement until applied by `map`, a pipe, or a direct call.
-A string subject produces the replacement string or `:nil` on no match; a list
-subject maps in order and retains `:nil` entries. Invalid pattern combinations
-and missing expansion-pattern capture references are `PAT_INVALID`; unknown
+A string subject produces the replacement string or the original string on no
+match; a list subject maps in order and preserves nonmatching entries. Invalid
+pattern combinations and missing expansion-pattern capture references are
+`PAT_INVALID`; unknown
 ordinary names in a selected expression retain `REF_MISSING`. Full semantics
 are specified in `014-patterns.md`.
 

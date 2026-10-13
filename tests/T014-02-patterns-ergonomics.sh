@@ -57,16 +57,16 @@ for backend in native wasm; do
 		'(wildcard ./journal/star\*)|["./journal/star*"]' \
 		'(let [name "star*"] ./journal/@(name))|"./journal/star*"' \
 		'(let [name "outer"] [(replace ./journal/{name:*} name "./journal/a") name])|["a" "outer"]' \
-		'(replace ./journal/{name:*} missing "./other/a")|:nil' \
+		'(replace ./journal/{name:*} missing "./other/a")|"./other/a"' \
 		'(replace ./journal/{name:*} missing [])|[]'; do
 		"${runner[@]}" do run --lang expr --allow-read -C "$project" -c "${sample%|*}" >"$project/value"
 		if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend ${sample%|*}"; else test-fail "$backend glob/capture result"; fi
 	done
-	"${runner[@]}" do run --lang expr --allow-read -C "$project" -c '(replace ./journal/{name:*} (text (read ./journal/@(name))) ./journal/*)' >"$project/value"
+	"${runner[@]}" do run --lang expr --allow-read -C "$project" -c '(sub ./journal/{name:*} (text (read ./journal/@(name))) ./journal/*)' >"$project/value"
 	if [ "$(cat "$project/value")" = '["" "" ""]' ]; then test-ok "$backend suspended capture reads"; else test-fail "$backend captured read replay"; fi
 	"${runner[@]}" do run --lang expr --allow-read -C "$project" -c '(replace ./journal/{name:*} (nop (out! name) (text (read ./journal/@(name)))) ./journal/*)' >"$project/value"
 	if [ "$(cat "$project/value")" = 'abstar*["" "" ""]' ]; then test-ok "$backend replacement effects survive host yields once"; else test-fail "$backend replacement effect replay: $(cat "$project/value")"; fi
-	"${runner[@]}" do run --lang expr --allow-read -C "$project" -c '(map (replace ./journal/{name:*} (nop (out! name) (text (read ./journal/@(name))))) ./journal/*)' >"$project/value"
+	"${runner[@]}" do run --lang expr --allow-read -C "$project" -c '(map (sub ./journal/{name:*} (nop (out! name) (text (read ./journal/@(name))))) ./journal/*)' >"$project/value"
 	if [ "$(cat "$project/value")" = 'abstar*["" "" ""]' ]; then test-ok "$backend mapped replacement effects survive host yields once"; else test-fail "$backend mapped replacement effect replay: $(cat "$project/value")"; fi
 	for sample in \
 		'(filter (replace ./journal/{name:*} (nop (out! name) (text (read ./journal/@(name))))) ./journal/*)|abstar*["./journal/a" "./journal/b" "./journal/star*"]' \
@@ -92,7 +92,7 @@ for backend in native wasm; do
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$project/error"; then test-ok "$backend reached glob enforces read grant"; else test-fail "$backend unauthorized glob read"; fi
 	"${runner[@]}" do run --lang kash --allow-run -C "$project" -c 'printf "%s" ./journal/*' >"$project/value"
 	if [ "$(cat "$project/value")" = './journal/*' ]; then test-ok "$backend raw Kash glob word stays literal"; else test-fail "$backend raw Kash word expanded"; fi
-	for sample in '(replace {name:*}.c 1 "hello.c")|"1"' '(replace {*}.c :false "a.c")|"false"' '(replace {*}.c -2.5 "a.c")|"-2.5"' '(replace {*}.c 1 "a.h")|:nil' '(map (replace {*}.c :true) ["a.c" "b.c"])|["true" "true"]' '(replace {name:*}.c {name}.o "hello.c")|"hello.o"'; do
+	for sample in '(replace {name:*}.c 1 "hello.c")|"1"' '(replace {*}.c :false "a.c")|"false"' '(replace {*}.c -2.5 "a.c")|"-2.5"' '(replace {*}.c 1 "a.h")|"a.h"' '(map (replace {*}.c :true) ["a.c" "b.c"])|["true" "true"]' '(replace {name:*}.c {name}.o "hello.c")|"hello.o"'; do
 		expression="${sample%|*}"
 		expected="${sample##*|}"
 		"${runner[@]}" do run --lang expr -c "$expression" >"$project/value" 2>"$project/error"
@@ -110,7 +110,7 @@ for backend in native wasm; do
 		'(map (replace ./src/txto/{prefix:**}/{name:*}.txto ./build/data/{prefix}/{name}.json) ["./src/txto/blog/2026/deep/foo.txto"])|["./build/data/blog/2026/deep/foo.json"]' \
 		'(replace ./src/txto/{prefix:**}.txto ./build/data/{prefix}.json ["./src/txto/root.txto" "./src/txto/blog/foo.txto"])|["./build/data/root.json" "./build/data/blog/foo.json"]' \
 		'(replace ./{name:*}.txto ./{name}.json [])|[]' \
-		'(replace ./{name:*}.txto ./{name}.json ["./a.txto" "./b.js"])|["./a.json" :nil]'; do
+		'(replace ./{name:*}.txto ./{name}.json ["./a.txto" "./b.js"])|["./a.json" "./b.js"]'; do
 		"${runner[@]}" do run --lang expr -c "${sample%|*}" >"$project/value"
 		if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend ${sample%|*}"; else test-fail "$backend replacement result: $(cat "$project/value")"; fi
 	done

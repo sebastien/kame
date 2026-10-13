@@ -35,6 +35,7 @@ type replaceState struct {
 	constant core.Value
 	replacement core.Value
 	scope *eval.Scope
+	preserveNonmatches bool
 }
 
 func ownedFailure(run mem.Allocator, code string, message string) eval.Result {
@@ -197,7 +198,7 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 	return c.InvalidOperation("replace subject expects string, list of strings, or nil; got " + core.KindName(subject.Kind))
 }
 
-// replaceOne expands one subject. A subject without a match yields nil.
+// replaceOne expands one subject; regex-replace alone drops nonmatches.
 func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Result {
 	matched := state.match.MatchText(c.Run, subject)
 	if matched.Limited {
@@ -206,6 +207,7 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 	}
 	if !matched.Matched {
 		slices.Free(c.Run, matched.Captures)
+		if state.preserveNonmatches { return eval.Result{Value: core.NewString(c.Run, subject)} }
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
 	if state.replacement.Kind == core.Callable {

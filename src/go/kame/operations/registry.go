@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v13"
+const version = "v14"
 
 // Register describes every standard operation explicitly. Categories describe
 // the operation itself; callable/template effects still propagate dynamically.
@@ -28,7 +28,7 @@ func Register(r *eval.Registry) bool {
 		pure(r, "concat", opConcat, 0, -1) && pure(r, "slice", opSlice, 2, 3) && pure(r, "sorted", opSorted, 1, 1) &&
 		pure(r, "unique", opUnique, 1, 1) && pure(r, "join", opJoin, 2, 2) && pure(r, "resource", opResource, 1, 1) &&
 		pure(r, "split", opSplit, 2, 2) && pure(r, "strip", opStrip, 1, 1) && pure(r, "pattern", opPattern, 1, 1) &&
-		pure(r, "replace", opReplace, 2, 3) && pure(r, "includes?", opIncludes, 2, 2) &&
+		pure(r, "sub", opReplace, 2, 3) && pure(r, "replace", opReplace, 2, 3) && pure(r, "match?", opMatch, 1, 2) && pure(r, "includes?", opIncludes, 2, 2) &&
 		pure(r, "regex-match", opRegexMatch, 2, 2) && pure(r, "regex-replace", opRegexReplace, 3, 3) && pure(r, "capture", opCapture, 2, 2) &&
 		pure(r, "starts?", opStarts, 2, 2) && pure(r, "ends?", opEnds, 2, 2) &&
 		pure(r, "black", opTerminalStyle, 1, 1) && pure(r, "red", opTerminalStyle, 1, 1) &&
@@ -55,7 +55,7 @@ func Register(r *eval.Registry) bool {
 }
 
 func contract(r *eval.Registry, name string, call eval.OperationCall, min int, max int, category eval.OperationCategory, phases eval.PhaseMask, behavior eval.OperationBehavior) bool {
-	return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Category: category, Phases: phases, Behavior: behavior, Version: version, DeferredReplacement: name == "replace"})
+	return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Category: category, Phases: phases, Behavior: behavior, Version: version, DeferredReplacement: name == "replace" || name == "sub"})
 }
 
 func pure(r *eval.Registry, name string, call eval.OperationCall, min int, max int) bool {

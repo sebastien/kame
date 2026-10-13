@@ -2,6 +2,10 @@
 
 ## Purpose
 
+`041-pattern-predicates-and-substitution.md` refines this specification:
+`sub` is the canonical substitution name, `replace` is a deprecated alias,
+nonmatches preserve their original strings, and `match?` provides predicates.
+
 This specification adds two expression-language features that remove common
 boilerplate from build scripts:
 
@@ -194,9 +198,9 @@ it must be a pattern value with matcher groups and no expansion references.
 With three operands, it next evaluates `SUBJECT` in caller scope, without any
 new capture bindings. The subject contract is:
 
-- A string subject produces a string on match and `:nil` on no match.
+- A string subject produces the expansion string on match and the original string on no match.
 - A list subject maps over its items in order and produces a list of the same
-  length; non-matching items produce `:nil` entries.
+  length; non-matching items remain unchanged.
 - A nil subject produces nil.
 
 ### Capture-scoped replacement expressions
@@ -232,7 +236,7 @@ The selected replacement value determines rendering:
 | integer, float, boolean | Convert to ordinary scalar `str` text |
 | any other kind, or a pattern with matcher groups | `PAT_INVALID` |
 
-No match returns `:nil` without evaluating the replacement or acquiring its
+No match returns the original string without evaluating the replacement or acquiring its
 dependencies/effects. Nil subjects and empty subject lists likewise do not
 evaluate it. Syntax is still parsed in every operand. Unknown ordinary names
 in a selected expression report `REF_MISSING`; missing capture references in
@@ -292,7 +296,7 @@ requires a pattern literal or a pattern value.
 - Invalid argument combinations and expansion references to missing captures
   are `PAT_INVALID`; patterns passed to string-expecting operations are
   `EXPR_INVALID`.
-- No match is not an error; the result is `:nil`.
+- No match is not an error; substitution preserves the original string.
 
 Regular-expression groups, capture processors, regex matching and replacement,
 and runtime pattern construction are specified in
@@ -310,8 +314,8 @@ and runtime pattern construction are specified in
 - `./{**}/{*}.c` classifies as a match pattern with two positional captures;
   `./build/{_0}/{_1}.c` classifies as an expansion pattern.
 - `(replace ./{**}/{*}.c ./build/{_0}/{_1}.c "./a/b/x.c")` is
-  `./build/a/b/x.c`; a non-matching subject is nil.
-- A list subject maps in order and retains nil entries.
+  `./build/a/b/x.c`; a non-matching subject is unchanged.
+- A list subject maps in order and retains nonmatching strings.
 - Two-argument pattern `replace` returns a callable section usable directly
   and through a pipe.
 - `(replace ./src/{name:*}.c ./build/{name}.o "./src/demo.c")` is `./build/demo.o`.

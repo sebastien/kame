@@ -338,6 +338,9 @@ func TestPatternReplace(t *testing.T) {
 	captureExpressions := []string{
 		`(replace ./journal/{name:*} "@(name)" "./journal/demo")`,
 		`(replace ./journal/{name:*} name "./journal/demo")`,
+		`(sub ./journal/{name:*} name "./journal/demo")`,
+		`(let [r sub name "outer"] (r ./journal/{name:*} name "./journal/demo"))`,
+		`((let [prefix ""] (sub ./journal/{name:*} (str prefix name))) "./journal/demo")`,
 		`(let [r replace name "outer"] (r ./journal/{name:*} name "./journal/demo"))`,
 		`(let [r (replace ./journal/{name:*} name)] (r "./journal/demo"))`,
 		`((let [prefix ""] (replace ./journal/{name:*} (str prefix name))) "./journal/demo")`,
@@ -349,7 +352,7 @@ func TestPatternReplace(t *testing.T) {
 		result.Free(a)
 	}
 	result = evaluate(t, program, `(replace ./journal/{name:*} missing "./other/demo")`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.Nil { t.Error("nonmatch evaluated replacement") }
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "./other/demo" { t.Error("nonmatch evaluated replacement or lost subject") }
 	result.Free(a)
 	result = evaluate(t, program, `(map (replace ./journal/{name:*} (uppercase name)) ["./journal/a" "./journal/b"])`)
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "A" || result.Value.List[1].Text != "B" { t.Error("deferred captures did not bind per item") }
@@ -370,17 +373,17 @@ func TestPatternReplace(t *testing.T) {
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(replace ./{**}/{*}.c ./build/{_0}/{_1}.c \"./no-match.txt\")")
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.Nil {
-		t.Error("pattern replace did not return nil without a match")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "./no-match.txt" {
+		t.Error("pattern replace did not preserve a nonmatch")
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(replace ./{**}/{*}.c ./build/{_0}.o (list \"./a.c\" \"./x/y.c\" \"./z.obj\"))")
-	if result.Diagnostic.Code != "" || len(result.Value.List) != 3 || result.Value.List[0].Kind != core.Nil || result.Value.List[1].Text != "./build/x.o" || result.Value.List[2].Kind != core.Nil {
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 3 || result.Value.List[0].Text != "./a.c" || result.Value.List[1].Text != "./build/x.o" || result.Value.List[2].Text != "./z.obj" {
 		t.Error("pattern replace did not map a list subject in order")
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(map (replace ./{**}/{*}.c ./build/{_0}.o) (list \"./a.c\" \"./x/y.c\"))")
-	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Kind != core.Nil || result.Value.List[1].Text != "./build/x.o" {
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "./a.c" || result.Value.List[1].Text != "./build/x.o" {
 		t.Error("pattern replace section did not work through map")
 	}
 	result.Free(a)
