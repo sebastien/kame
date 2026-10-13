@@ -50,3 +50,4 @@ host-specific boundaries remain explicit.
 | [038 Direct Kash and values](038-direct-kash-and-values.md) | Direct recipe ASTs, expression statements, tracked command heads, text/JSON separation, interpolated paths, wildcard kind flags and action names |
 | [039 Output ownership](039-output-ownership.md) | Grouped artifacts, configured membership, manifests, directory boundaries and safe cleanup |
 | [040 Automatic clean](040-automatic-clean.md) | Historical output ledger, conservative deletion authority, protection, rule-change boundaries and race-resistant cleanup |
+| [041 Pattern predicates and substitution](041-pattern-predicates-and-substitution.md) | Boolean matching, nonmatch-preserving substitution, deprecated replace alias and migration |

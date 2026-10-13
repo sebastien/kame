@@ -59,7 +59,11 @@ git -C "$fixture" checkout -q --detach
 revision=$(git -C "$fixture" rev-parse HEAD)
 release="$fixture/src/sh/release.sh"
 export MOCK_REVISION="$revision" MOCK_REPO=owner/repo MOCK_ROOT="$fixture"
-export MOCK_LOG="$TMPDIR/commands.log" MOCK_ASSETS="$TMPDIR/assets.log"
+export MOCK_LOG="$TMPDIR/commands.log" MOCK_ASSETS="$TMPDIR/assets.log" MOCK_NPM_MARKER="$TMPDIR/npm-published"
+export MOCK_NPM_CHECKS="$TMPDIR/npm-checks"
+MOCK_VERSION=$(cat VERSION)
+MOCK_PACKAGE=$(node -p "require('./package.json').name")
+export MOCK_VERSION MOCK_PACKAGE MOCK_NPM_STATE=missing
 export LITTLESECRETS_LOG="$TMPDIR/secrets.log" MOCK_MODE=ok
 cat >"$mock_bin/gh" <<'SH'
 #!/usr/bin/env bash
@@ -79,7 +83,8 @@ repo\ view*)
 	;;
 "api --paginate repos/$MOCK_REPO/releases "*)
 	[ "$MOCK_MODE" != api_failure ] || { echo 'HTTP 500' >&2; exit 1; }
-	if [ "$MOCK_MODE" = existing_release ]; then echo 123; fi
+	if [ "$MOCK_MODE" = existing_release ]; then echo draft; fi
+	if [ "$MOCK_MODE" = published_release ]; then echo published; fi
 	;;
 "api repos/$MOCK_REPO/git/matching-refs/tags/"*)
 	if [ "$MOCK_MODE" = existing_tag ]; then echo refs/tags/existing; fi
@@ -102,6 +107,22 @@ release\ upload*)
 	;;
 release\ view*) cat "$MOCK_ASSETS" ;;
 release\ edit*) [[ "$*" == *"--repo $MOCK_REPO"* && "$*" == *--draft=false* ]] ;;
+release\ download*)
+	[[ "$*" == *"--repo $MOCK_REPO"* ]] || exit 1
+	while [ "$1" != --dir ]; do shift; done
+	mkdir -p "$2"
+	printf 'released JS\n' >"$2/kame.js"
+	printf 'released WASM\n' >"$2/kame.wasm"
+	;;
+"api -H Accept: application/vnd.github.raw+json repos/$MOCK_REPO/contents/package.json?ref="*)
+	if [ "$MOCK_NPM_STATE" = metadata_mismatch ]; then
+		printf '{"name":"wrong-package","version":"0.0.0"}\n'
+	else
+		cat "$MOCK_ROOT/package.json"
+	fi
+	;;
+"api -H Accept: application/vnd.github.raw+json repos/$MOCK_REPO/contents/README.md?ref="* | \
+"api -H Accept: application/vnd.github.raw+json repos/$MOCK_REPO/contents/LICENSE.md?ref="*) echo 'tagged fixture' ;;
 *) echo "unexpected GitHub call: $*" >&2; exit 1 ;;
 esac
 SH
@@ -116,21 +137,66 @@ sha256sum kame >SHA256SUMS
 printf 'signature fixture\n' >SHA256SUMS.sig
 SH
 cat >"$mock_bin/npm" <<'SH'
-#!/bin/sh
+#!/usr/bin/env bash
+set -eu
 printf 'npm %s\n' "$*" >>"$MOCK_LOG"
+case "$*" in
+"view $MOCK_PACKAGE@$MOCK_VERSION version --json --registry https://registry.npmjs.org/")
+	if [ "$MOCK_NPM_STATE" = api_failure ]; then
+		echo '{"error":{"code":"E401"}}'
+		echo 'registry authentication failure' >&2
+		exit 1
+	fi
+	if [ "$MOCK_NPM_STATE" = verification_failure ] && [ -f "$MOCK_NPM_MARKER" ]; then
+		echo '{"error":{"code":"E404"}}'
+		exit 1
+	fi
+	if [ "$MOCK_NPM_STATE" = delayed ] && [ -f "$MOCK_NPM_MARKER" ]; then
+		echo check >>"$MOCK_NPM_CHECKS"
+		if [ "$(wc -l <"$MOCK_NPM_CHECKS")" -lt 3 ]; then
+			echo '{"error":{"code":"E404"}}'
+			exit 1
+		fi
+	fi
+	if [ "$MOCK_NPM_STATE" = verification_auth_failure ] && [ -f "$MOCK_NPM_MARKER" ]; then
+		echo '{"error":{"code":"E401"}}'
+		echo 'registry authentication failure' >&2
+		exit 1
+	fi
+	if [ "$MOCK_NPM_STATE" = present ] || [ -f "$MOCK_NPM_MARKER" ]; then
+		printf '"%s"\n' "$MOCK_VERSION"
+	else
+		echo '{"error":{"code":"E404"}}'
+		exit 1
+	fi
+	;;
+"publish --access public --registry https://registry.npmjs.org/")
+	[ "$MOCK_NPM_STATE" != publish_failure ] || { echo 'npm authentication expired' >&2; exit 1; }
+	[ "$PWD" != "$MOCK_ROOT" ] && [ -f package.json ] || exit 1
+	grep -qx 'released JS' dist/kame.js && grep -qx 'released WASM' dist/kame.wasm || exit 1
+	touch "$MOCK_NPM_MARKER"
+	;;
+*) echo "unexpected npm call: $*" >&2; exit 1 ;;
+esac
+SH
+cat >"$mock_bin/sleep" <<'SH'
+#!/bin/sh
+printf 'sleep %s\n' "$*" >>"$MOCK_LOG"
 SH
 cat >"$mock_bin/littlesecrets" <<'SH'
 #!/bin/sh
 printf '%s\n' "$*" >>"$LITTLESECRETS_LOG"
 exit 1
 SH
-chmod +x "$mock_bin/gh" "$mock_bin/make" "$mock_bin/npm" "$mock_bin/littlesecrets"
+chmod +x "$mock_bin/gh" "$mock_bin/make" "$mock_bin/npm" "$mock_bin/littlesecrets" "$mock_bin/sleep"
 export PATH="$mock_bin:$PATH"
 unset KAME_RELEASE_PUBLIC_KEY KAME_RELEASE_SIGNING_KEY
 run_release() {
 	: >"$MOCK_LOG"
 	: >"$MOCK_ASSETS"
 	: >"$LITTLESECRETS_LOG"
+	: >"$MOCK_NPM_CHECKS"
+	rm -f "$MOCK_NPM_MARKER"
 	status=0
 	"$release" "$@" >"$TMPDIR/out" 2>"$TMPDIR/err" || status=$?
 }
@@ -158,11 +224,11 @@ for mode in api_failure existing_release existing_tag; do
 done
 MOCK_MODE=ok
 
-test-step "dirty tracked sources and local tags stop before GitHub or keys"
+test-step "dirty tracked sources and local tags stop before builds or keys"
 printf '\n' >>"$fixture/VERSION"
 run_release
 if [ "$status" = 1 ] && grep -q 'uncommitted tracked changes' "$TMPDIR/err" &&
-	[ ! -s "$MOCK_LOG" ] && [ ! -s "$LITTLESECRETS_LOG" ]; then
+	! grep -Eq '^(make|npm|gh release)' "$MOCK_LOG" && [ ! -s "$LITTLESECRETS_LOG" ]; then
 	test-ok "dirty checkout fails locally"
 else
 	test-fail "dirty checkout: status=$status err=$(cat "$TMPDIR/err")"
@@ -170,7 +236,7 @@ fi
 cp "$CLI_ROOT/VERSION" "$fixture/VERSION"
 git -C "$fixture" tag "v$(cat "$fixture/VERSION")"
 run_release
-if [ "$status" = 1 ] && grep -q 'tag .* already exists' "$TMPDIR/err" && [ ! -s "$MOCK_LOG" ]; then
+if [ "$status" = 1 ] && grep -q 'tag .* already exists' "$TMPDIR/err" && ! grep -Eq '^(make|npm|gh release)' "$MOCK_LOG"; then
 	test-ok "existing local tag fails locally"
 else
 	test-fail "local tag: status=$status err=$(cat "$TMPDIR/err")"
@@ -207,7 +273,7 @@ export KAME_RELEASE_PUBLIC_KEY="$TMPDIR/verification.pem" KAME_RELEASE_SIGNING_K
 run_release --repo "$MOCK_REPO" --notes-file "$TMPDIR/notes"
 if [ "$status" = 0 ] && grep -qx kame "$MOCK_ASSETS" &&
 	grep -q '^gh release edit .*--draft=false' "$MOCK_LOG" &&
-	grep -qx 'npm publish --access public' "$MOCK_LOG" &&
+	grep -qx 'npm publish --access public --registry https://registry.npmjs.org/' "$MOCK_LOG" &&
 	! grep -q 'bin/kame\|PATCH' "$MOCK_LOG"; then
 	test-ok "flat assets verify before GitHub and npm publication"
 else
@@ -219,7 +285,7 @@ test-step "relative operator paths work when invoked outside the checkout"
 	run_release --notes-file notes)
 if grep -q -- "--notes-file $TMPDIR/notes" "$MOCK_LOG" &&
 	grep -q "KAME_RELEASE_PUBLIC_KEY=$TMPDIR/verification.pem" "$MOCK_LOG" &&
-	grep -qx 'npm publish --access public' "$MOCK_LOG"; then
+	grep -qx 'npm publish --access public --registry https://registry.npmjs.org/' "$MOCK_LOG"; then
 	test-ok "relative key and note paths remain relative to the caller"
 else
 	test-fail "relative paths: err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
@@ -235,6 +301,78 @@ for mode in create_failure missing_asset; do
 		test-fail "$mode: status=$status err=$(cat "$TMPDIR/err")"
 	fi
 done
+
+test-step "a published GitHub release retries only missing npm publication"
+MOCK_MODE=published_release
+MOCK_NPM_STATE=missing
+unset KAME_RELEASE_PUBLIC_KEY KAME_RELEASE_SIGNING_KEY
+# Local tags and changed tracked sources must not block recovery of the already
+# published version; the npm payload comes from GitHub, not this checkout.
+git -C "$fixture" tag "v$MOCK_VERSION"
+printf '\n' >>"$fixture/package.json"
+run_release --repo "$MOCK_REPO"
+if [ "$status" = 0 ] && grep -q '^gh release download ' "$MOCK_LOG" &&
+	grep -q '^npm publish ' "$MOCK_LOG" && [ ! -s "$LITTLESECRETS_LOG" ] &&
+	! grep -Eq '^(make|gh release (create|upload|edit)|gh api repos/.*/commits/)' "$MOCK_LOG"; then
+	test-ok "npm-only retry works without rebuilding, signing or modifying GitHub"
+else
+	test-fail "npm recovery: status=$status err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
+fi
+
+test-step "an already published npm version is a successful no-op"
+MOCK_NPM_STATE=present
+run_release
+if [ "$status" = 0 ] && grep -q 'already published on npm' "$TMPDIR/out" &&
+	! grep -Eq '^(make|npm publish|gh release)' "$MOCK_LOG"; then
+	test-ok "published npm version is never republished"
+else
+	test-fail "npm no-op: status=$status err=$(cat "$TMPDIR/err")"
+fi
+
+test-step "npm errors and mismatched tagged metadata fail safely"
+for state in api_failure publish_failure metadata_mismatch; do
+	MOCK_NPM_STATE=$state
+	run_release
+	if [ "$status" = 1 ] && ! grep -Eq '^(make|gh release (create|upload|edit))' "$MOCK_LOG" &&
+		{ [ "$state" = publish_failure ] || ! grep -q '^npm publish ' "$MOCK_LOG"; }; then
+		test-ok "$state does not modify GitHub or publish an unsafe npm payload"
+	else
+		test-fail "$state: status=$status err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
+	fi
+done
+MOCK_NPM_STATE=verification_failure
+run_release
+if [ "$status" = 3 ] && [ "$(grep -c '^npm publish ' "$MOCK_LOG")" = 1 ] &&
+	[ "$(grep -c '^sleep ' "$MOCK_LOG")" = 29 ] && grep -q 'still processing; do not republish' "$TMPDIR/err" &&
+	! grep -q 'verified .* on npm' "$TMPDIR/out"; then
+	test-ok "bounded verification reports accepted/pending without repeating the upload"
+else
+	test-fail "npm verification: status=$status err=$(cat "$TMPDIR/err")"
+fi
+MOCK_NPM_STATE=delayed
+run_release
+if [ "$status" = 0 ] && grep -q 'verified .* on npm' "$TMPDIR/out" &&
+	[ "$(grep -c '^npm publish ' "$MOCK_LOG")" = 1 ] && [ "$(grep -c '^sleep ' "$MOCK_LOG")" = 2 ] &&
+	[ ! -s "$TMPDIR/err" ]; then
+	test-ok "temporary post-publish E404s are retried quietly until verified"
+else
+	test-fail "delayed npm processing: status=$status err=$(cat "$TMPDIR/err")"
+fi
+MOCK_NPM_STATE=verification_auth_failure
+run_release
+if [ "$status" = 1 ] && grep -q 'npm accepted the upload, but registry verification failed' "$TMPDIR/err" &&
+	! grep -q '^sleep ' "$MOCK_LOG"; then
+	test-ok "post-publish auth errors fail immediately, not as processing delays"
+else
+	test-fail "post-publish auth failure: status=$status err=$(cat "$TMPDIR/err")"
+fi
+MOCK_NPM_STATE=missing
+run_release
+if [ "$status" = 0 ] && grep -q '^npm publish ' "$MOCK_LOG"; then
+	test-ok "rerunning after failed npm authentication retries publication"
+else
+	test-fail "npm authentication retry: status=$status err=$(cat "$TMPDIR/err")"
+fi
 
 test-step "build-ape reports a missing compiler driver"
 tools="$TMPDIR/no-tools"

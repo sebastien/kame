@@ -301,9 +301,9 @@ KAME_RELEASE_SIGNING_KEY=signing.pem \
   src/sh/release.sh
 ```
 
-Before retrieving signing keys or building, it requires a clean tracked tree,
+For a new release, before retrieving signing keys or building, it requires a clean tracked tree,
 checks that the exact HEAD commit exists in the target GitHub repository, and
-refuses to reuse an existing local/remote tag or release. The operator must push
+refuses to overwrite an existing local/remote tag or draft release. The operator must push
 the commit first, including when releasing from a detached HEAD; the script
 never pushes code automatically. Authentication/API failures stop preflight.
 It stages and signs `dist/release/`, creates a draft release for the `VERSION`
@@ -312,6 +312,21 @@ asset is present, and only then publishes. `--repo` selects
 another repository and `--notes-file` supplies release notes in place of
 generated notes. The signing key material is supplied out of band and is never
 stored in the repository.
+
+If the GitHub release is already published, rerunning the same command leaves
+GitHub untouched and checks the exact npm package version on npmjs.org. An
+existing npm version is a successful no-op; a missing version retries npm only,
+using the released `kame.js`/`kame.wasm` and the tagged `package.json`, README and
+license in a temporary directory. Recovery needs neither a clean checkout nor
+signing keys, and never publishes possibly newer local artifacts. Registry/auth
+failures other than a missing-version E404 stop without publishing. Successful
+npm publication is checked against the registry. After npm accepts an upload,
+temporary E404s are retried every ten seconds for up to five minutes without
+repeating the upload. If still unavailable, exit status 3 reports accepted but
+still processing and advises checking `npm view`, not republishing. Other
+verification errors fail immediately. Failed authentication/2FA during the
+upload can be corrected and retried without bumping VERSION or deleting the
+GitHub release.
 
 The `Makefile.kmk` staging task delegates to the same signed GNU Make recipe.
 

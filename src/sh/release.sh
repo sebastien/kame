@@ -7,8 +7,8 @@
 # signed assets, then publishes. Nothing is published until every asset verifies
 # against the signed manifest.
 #
-# The tag is `v$(cat VERSION)`. The script refuses to reuse an existing tag or
-# release; bump VERSION and re-tag instead of overwriting a published release.
+# The tag is `v$(cat VERSION)`. Existing GitHub releases are never overwritten;
+# a published release can be resumed solely to finish npm publication.
 set -euo pipefail
 
 usage() {
@@ -21,6 +21,7 @@ Usage:
   Key paths may be supplied with KAME_RELEASE_PUBLIC_KEY and
   KAME_RELEASE_SIGNING_KEY; otherwise they are fetched from littlesecrets.
   Push the exact release commit to the target repository before running.
+  Reruns of a published GitHub release retry only missing npm publication.
 
   --repo OWNER/REPO   publish to another repository (default: current)
   --notes-file FILE   use FILE as release notes instead of generated notes
@@ -65,18 +66,86 @@ command -v gh >/dev/null 2>&1 || {
 	printf 'release: the GitHub CLI (gh) is required to publish\n' >&2
 	exit 1
 }
-command -v openssl >/dev/null 2>&1 || {
-	printf 'release: openssl is required to sign the manifest\n' >&2
-	exit 1
-}
 command -v npm >/dev/null 2>&1 || {
 	printf 'release: npm is required to publish the runtime package\n' >&2
 	exit 1
 }
 
 package_version=$(cd "$root" && node -p "require('./package.json').version")
+package_name=$(node -p "require('./package.json').name")
 [ "$package_version" = "$version" ] || {
 	printf 'release: package.json version (%s) does not match VERSION (%s)\n' "$package_version" "$version" >&2
+	exit 1
+}
+
+ensure_npm() {
+	local registry=https://registry.npmjs.org/ result published_version name attempt
+	npm_dir=$(mktemp -d "${TMPDIR:-/tmp}/kame-npm-release.XXXXXX")
+	trap 'rm -rf "$npm_dir"; if [ -n "${key_dir:-}" ]; then rm -rf "$key_dir"; fi' EXIT
+	if result=$(npm view "$package_name@$version" version --json --registry "$registry" 2>"$npm_dir/view.err"); then
+		published_version=$(printf '%s' "$result" | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")))')
+		[ "$published_version" = "$version" ] || { printf 'release: npm returned an unexpected version\n' >&2; return 1; }
+		printf 'release: %s@%s is already published on npm\n' "$package_name" "$version"
+		return 0
+	fi
+	# Only a missing package/version permits publishing; outages/auth errors do not.
+	if ! printf '%s' "$result" | node -e 'try { process.exit(JSON.parse(require("fs").readFileSync(0, "utf8")).error?.code === "E404" ? 0 : 1) } catch { process.exit(1) }'; then
+		cat "$npm_dir/view.err" >&2
+		printf 'release: cannot check npm publication; refusing to publish\n' >&2
+		return 1
+	fi
+	printf 'release: publishing missing npm package %s@%s from %s\n' "$package_name" "$version" "$tag"
+	# Use the immutable release, never possibly newer local dist/package files.
+	mkdir -p "$npm_dir/dist"
+	gh release download "$tag" --pattern kame.js --pattern kame.wasm --dir "$npm_dir/dist" "${repo_args[@]}" || return 1
+	for name in package.json README.md LICENSE.md; do
+		gh api -H 'Accept: application/vnd.github.raw+json' "repos/$repo_slug/contents/$name?ref=$tag" >"$npm_dir/$name" || return 1
+	done
+	if ! node -e 'const p = require(process.argv[1]); process.exit(p.name === process.argv[2] && p.version === process.argv[3] ? 0 : 1)' "$npm_dir/package.json" "$package_name" "$version"; then
+		printf 'release: tagged npm package metadata does not match %s@%s\n' "$package_name" "$version" >&2
+		return 1
+	fi
+	if ! (cd "$npm_dir" && npm publish --access public --registry "$registry"); then
+		printf 'release: GitHub release %s is unchanged; fix npm authentication and rerun src/sh/release.sh to retry npm only\n' "$tag" >&2
+		return 1
+	fi
+	# npm can accept the upload before its processing makes the version readable.
+	for ((attempt = 1; attempt <= 30; attempt++)); do
+		if result=$(npm view "$package_name@$version" version --json --registry "$registry" 2>"$npm_dir/view.err"); then
+			published_version=$(printf '%s' "$result" | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")))')
+			[ "$published_version" = "$version" ] || { printf 'release: npm returned an unexpected version after accepting the upload\n' >&2; return 1; }
+			printf 'release: verified %s@%s on npm\n' "$package_name" "$version"
+			return 0
+		fi
+		if ! printf '%s' "$result" | node -e 'try { process.exit(JSON.parse(require("fs").readFileSync(0, "utf8")).error?.code === "E404" ? 0 : 1) } catch { process.exit(1) }'; then
+			cat "$npm_dir/view.err" >&2
+			printf 'release: npm accepted the upload, but registry verification failed; do not republish\n' >&2
+			return 1
+		fi
+		if [ "$attempt" = 1 ]; then
+			printf 'release: npm accepted the upload; waiting up to five minutes for processing\n'
+		fi
+		if [ "$attempt" -lt 30 ]; then sleep 10; fi
+	done
+	printf 'release: npm accepted %s@%s but it is still processing; do not republish\n' "$package_name" "$version" >&2
+	printf 'release: check later with npm view %s@%s version --registry %s\n' "$package_name" "$version" "$registry" >&2
+	return 3
+}
+
+# Resolve once so --repo, GH_REPO and the checkout all use the same target.
+repo_slug=$(gh repo view ${repo_args[@]+"${repo_args[@]}"} --json nameWithOwner --jq '.nameWithOwner')
+repo_args=(--repo "$repo_slug")
+# Successful list requests distinguish absence from authentication/API failures.
+existing_release=$(gh api --paginate "repos/$repo_slug/releases" --jq ".[] | select(.tag_name == \"$tag\") | if .draft then \"draft\" else \"published\" end")
+if [ "$existing_release" = published ]; then
+	printf 'release: GitHub release %s is already published; checking npm only\n' "$tag"
+	ensure_npm
+	exit 0
+fi
+[ -z "$existing_release" ] || { printf 'release: release %s already exists as a draft; refusing to overwrite\n' "$tag" >&2; exit 1; }
+
+command -v openssl >/dev/null 2>&1 || {
+	printf 'release: openssl is required to sign the manifest\n' >&2
 	exit 1
 }
 
@@ -93,18 +162,12 @@ if ! git -C "$root" diff --quiet || ! git -C "$root" diff --cached --quiet; then
 fi
 
 revision=$(git -C "$root" rev-parse HEAD)
-# Resolve once so --repo, GH_REPO and the checkout all use the same target.
-repo_slug=$(gh repo view ${repo_args[@]+"${repo_args[@]}"} --json nameWithOwner --jq '.nameWithOwner')
-repo_args=(--repo "$repo_slug")
 if ! remote_revision=$(gh api "repos/$repo_slug/commits/$revision" --jq '.sha'); then
 	printf 'release: cannot resolve commit %s in %s; check GitHub access and push this exact commit before releasing\n' "$revision" "$repo_slug" >&2
 	printf 'release: from a detached HEAD, push it to a branch in %s (for example HEAD:refs/heads/release-%s)\n' "$repo_slug" "$tag" >&2
 	exit 1
 fi
 [ "$remote_revision" = "$revision" ] || { printf 'release: GitHub returned a different release revision\n' >&2; exit 1; }
-# Successful list requests distinguish absence from authentication/API failures.
-existing_release=$(gh api --paginate "repos/$repo_slug/releases" --jq ".[] | select(.tag_name == \"$tag\") | .id")
-[ -z "$existing_release" ] || { printf 'release: release %s already exists; refusing to overwrite\n' "$tag" >&2; exit 1; }
 existing_tag=$(gh api "repos/$repo_slug/git/matching-refs/tags/$tag" --jq ".[] | select(.ref == \"refs/tags/$tag\") | .ref")
 [ -z "$existing_tag" ] || { printf 'release: remote tag %s already exists; refusing to overwrite\n' "$tag" >&2; exit 1; }
 
@@ -175,6 +238,5 @@ done <"$release_dir/SHA256SUMS"
 
 printf 'release: publishing %s\n' "$tag"
 gh release edit "$tag" --draft=false --latest ${repo_args[@]+"${repo_args[@]}"}
-printf 'release: published %s; publishing @ssebastien/kame to npm\n' "$tag"
-(cd "$root" && npm publish --access public)
-printf 'release: published %s and @ssebastien/kame@%s\n' "$tag" "$version"
+printf 'release: published %s; checking npm publication\n' "$tag"
+ensure_npm
