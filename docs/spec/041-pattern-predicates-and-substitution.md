@@ -53,11 +53,14 @@ behavior as the two-argument form. Both collection callback argument orders
 remain supported.
 
 ```kame
-(match? ./{*}.{*} "./foo.txt") ; :true
-(match? ./{*}.{*} "./foo")     ; :false
-(match? ./{*}.{*} "./.txt")    ; :false: captures cannot be empty
+# :true
+(match? ./{*}.{*} "./foo.txt")
+# :false
+(match? ./{*}.{*} "./foo")
+# :false: captures cannot be empty
+(match? ./{*}.{*} "./.txt")
+# ["./foo"]
 (filter-out (match? ./{*}.{*}) ["./foo.txt" "./foo"])
-; ["./foo"]
 ```
 
 Pattern matching itself is pure, requires no filesystem capability, and creates
@@ -103,11 +106,14 @@ must both support capture-scoped deferred expressions, not merely constant
 expansion values.
 
 ```kame
-(sub ./journal/{name:*} ./{name} "./journal/foo") ; "./foo"
-(sub ./journal/{name:*} ./{name} "./other/foo")   ; "./other/foo"
+# "./foo"
+(sub ./journal/{name:*} ./{name} "./journal/foo")
+# "./other/foo"
+(sub ./journal/{name:*} ./{name} "./other/foo")
+# ["./foo" "./other/foo"]
 (sub ./journal/{name:*} ./{name} ["./journal/foo" "./other/foo"])
-; ["./foo" "./other/foo"]
-(sub ./journal/{name:*} missing "./other/foo")   ; "./other/foo"
+# "./other/foo"
+(sub ./journal/{name:*} missing "./other/foo")
 ```
 
 Substitution must propagate matcher budget failures as `PAT_LIMIT`; it must not

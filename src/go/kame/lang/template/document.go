@@ -192,6 +192,32 @@ type docParser struct {
 	inlineFound inlineBlockDirective
 }
 
+// HasDocumentDirectivesRange uses the document parser's own directive scanners.
+// It does not retain probe expressions or diagnostics, and keeps authored offsets.
+func HasDocumentDirectivesRange(a mem.Allocator, s *source.Source, start int, end int) bool {
+	p := docParser{a: a, s: s, style: "plain"}
+	found := false
+	for pos := start; pos < end; {
+		lineEnd := pos
+		for lineEnd < end && s.Text[lineEnd] != '\n' {
+			lineEnd++
+		}
+		d := p.directiveOnLine(pos, lineEnd)
+		found = d.Kind != dirNone
+		freeArgs(a, d.Args)
+		if !found && p.nextInlineBlockDirective(pos, lineEnd) != 0 {
+			found = true
+			freeArgs(a, p.inlineFound.Dir.Args)
+		}
+		if found {
+			break
+		}
+		pos = lineEnd + 1
+	}
+	slices.Free(a, p.diags)
+	return found
+}
+
 type dirOut struct {
 	Kind       int
 	Args       []*expr.Expr
@@ -317,6 +343,18 @@ func (p *docParser) nextInlineBlockDirective(start int, end int) int {
 		if p.style == "plain" {
 			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') { i++; continue }
 			if text[i] == '@' && i+1 < end && text[i+1] == '@' { i++; continue }
+			if text[i] == '@' && i+1 < end && text[i+1] == '(' {
+				// Expression contents belong to the value parser, including strings
+				// containing directive-looking text.
+				value := p.inlineExpr(i+2, end)
+				expr.Free(p.a, value.Expr)
+				slices.Free(p.a, value.Diagnostics)
+				if !value.Closed {
+					return 0
+				}
+				i = value.End
+				continue
+			}
 			if text[i] != '@' || i+1 >= end || text[i+1] == '(' || text[i+1] == '@' {
 				continue
 			}
@@ -346,6 +384,8 @@ func (p *docParser) nextInlineBlockDirective(start int, end int) int {
 				innerEnd = wordEnd
 				if innerEnd < end && text[innerEnd] == '-' {
 					innerEnd++
+				} else if innerEnd < end && isDirectiveWordContinuation(text[innerEnd]) {
+					continue
 				}
 			} else {
 				continue
@@ -528,8 +568,7 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			letApp.Items = slices.Append(p.a, letApp.Items, restCat)
 			items = slices.Append(p.a, items, letApp)
 			// @let consumes the remainder; propagate terminator outward.
-			freeArgs(p.a, rest.TermArgs)
-			return blockOut{Items: items, Next: rest.Next, Term: rest.Term, TermSpan: rest.TermSpan, TermEnd: rest.TermEnd, TrimRight: rest.TrimRight}
+			return blockOut{Items: items, Next: rest.Next, Term: rest.Term, TermSpan: rest.TermSpan, TermArgs: rest.TermArgs, TermEnd: rest.TermEnd, TermTrimRight: rest.TermTrimRight, TrimRight: rest.TrimRight}
 		}
 		if d.Kind == dirInclude {
 			inc := mem.Alloc[expr.Expr](p.a)
@@ -872,10 +911,6 @@ func (p *docParser) parseMatch(head dirOut, bodyPos int, end int) pairRes {
 		}
 		if block.Term == dirElse {
 			freeArgs(p.a, block.TermArgs)
-			marker := mem.Alloc[expr.Expr](p.a)
-			marker.Kind = expr.Symbol
-			marker.Text = "else"
-			marker.Span = block.TermSpan
 			fallback := p.parseBlock(block.TermEnd, end)
 			if fallback.Term != dirEnd {
 				p.diag("TPL_BLOCK", block.TermSpan, "unterminated or invalid @match fallback")
@@ -883,6 +918,10 @@ func (p *docParser) parseMatch(head dirOut, bodyPos int, end int) pairRes {
 				freeArgs(p.a, fallback.TermArgs)
 				return pairRes{Expr: app, Next: fallback.Next}
 			}
+			marker := mem.Alloc[expr.Expr](p.a)
+			marker.Kind = expr.Symbol
+			marker.Text = "else"
+			marker.Span = block.TermSpan
 			elseClause := mem.Alloc[expr.Expr](p.a)
 			elseClause.Kind = expr.List
 			elseClause.Span = source.Span{Start: marker.Span.Start, End: fallback.Next}
@@ -920,25 +959,21 @@ func (p *docParser) parseRaw(head dirOut, bodyPos int, end int) pairRes {
 	cur := bodyPos
 	for cur < end {
 		ln := scanLine(p.s.Text, cur, end)
-		if p.nextInlineBlockDirective(cur, ln.ContentEnd) != 0 {
+		if p.nextRawEnd(cur, ln.ContentEnd) {
 			directive := p.inlineFound
-			if directive.Dir.Kind == dirEnd && (len(directive.Dir.Args) == 0 || (len(directive.Dir.Args) == 1 && directive.Dir.Args[0].Kind == expr.Name && directive.Dir.Args[0].Text == "raw")) {
-				freeArgs(p.a, directive.Dir.Args)
-				rawText := p.s.Text[bodyPos:directive.Start]
-				value := newStringLit(p.a, rawText, source.Span{Start: bodyPos, End: directive.Start})
-				if directive.Dir.TrimLeft {
-					value = wrapTemplateTrim(p.a, value, false)
-				}
-				if head.TrimRight {
-					value = wrapTemplateTrim(p.a, value, true)
-				}
-				next := directive.End
-				if onlyTemplateWhitespace(p.s.Text, ln.Start, directive.Start) && onlyTemplateWhitespace(p.s.Text, directive.End, ln.ContentEnd) {
-					next = ln.LineEnd
-				}
-				return pairRes{Expr: value, Next: next, TrimRight: directive.Dir.TrimRight}
+			rawText := p.s.Text[bodyPos:directive.Start]
+			value := newStringLit(p.a, rawText, source.Span{Start: bodyPos, End: directive.Start})
+			if directive.Dir.TrimLeft {
+				value = wrapTemplateTrim(p.a, value, false)
 			}
-			freeArgs(p.a, directive.Dir.Args)
+			if head.TrimRight {
+				value = wrapTemplateTrim(p.a, value, true)
+			}
+			next := directive.End
+			if onlyTemplateWhitespace(p.s.Text, ln.Start, directive.Start) && onlyTemplateWhitespace(p.s.Text, directive.End, ln.ContentEnd) {
+				next = ln.LineEnd
+			}
+			return pairRes{Expr: value, Next: next, TrimRight: directive.Dir.TrimRight}
 		}
 		if p.isEndLine(ln.Start, ln.ContentEnd) {
 			rawText := p.s.Text[bodyPos:ln.Start]
@@ -976,7 +1011,7 @@ func (p *docParser) checkEndLabel(args []*expr.Expr, expected string, span sourc
 		return
 	}
 	if len(args) != 1 || args[0].Kind != expr.Name || args[0].Text != expected {
-		p.diag("TPL_BLOCK", span, "template block end label does not match @"+expected)
+		p.diag("TPL_BLOCK", span, "template block end label does not match opening directive")
 	}
 }
 
@@ -1142,13 +1177,56 @@ func (p *docParser) isEndLine(lineStart int, contentEnd int) bool {
 }
 
 func isRawEndToken(text string) bool {
-	if len(text) != 0 && text[0] == '@' && len(text) > 1 && text[1] == '-' {
-		text = "@" + text[2:]
+	return len(text) != 0 && rawEndAt(text, 0, len(text)) == len(text)
+}
+
+// rawEndAt recognizes only raw terminators, never expressions or other args.
+func rawEndAt(text string, start int, end int) int {
+	if start >= end || text[start] != '@' {
+		return 0
 	}
-	if len(text) != 0 && text[len(text)-1] == '-' {
-		text = text[:len(text)-1]
+	pos := start + 1
+	if pos < end && text[pos] == '-' { pos++ }
+	if !hasPrefixAt(text, pos, end, "end") { return 0 }
+	pos += len("end")
+	labeled := pos < end && text[pos] == '('
+	if labeled {
+		pos++
+		for pos < end && templateSpace(text[pos]) { pos++ }
+		if !hasPrefixAt(text, pos, end, "raw") { return 0 }
+		pos += len("raw")
+		for pos < end && templateSpace(text[pos]) { pos++ }
+		if pos >= end || text[pos] != ')' { return 0 }
+		pos++
 	}
-	return text == "@end" || text == "@end(raw)"
+	if pos < end && text[pos] == '-' { pos++ } else if !labeled && pos < end && isDirectiveWordContinuation(text[pos]) { return 0 }
+	return pos
+}
+
+func (p *docParser) nextRawEnd(start int, end int) bool {
+	text := p.s.Text
+	for i := start; i < end; i++ {
+		innerStart, innerEnd, spanEnd := i, end, 0
+		if p.style == "plain" {
+			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') { i++; continue }
+			if text[i] == '@' && i+1 < end && text[i+1] == '@' { i++; continue }
+		} else if p.style == "html" || p.style == "c" || p.style == "powershell" {
+			open, close := "<!--", "-->"
+			if p.style == "c" { open, close = "/*", "*/" } else if p.style == "powershell" { open, close = "<#", "#>" }
+			if !hasPrefixAt(text, i, end, open) { continue }
+			closeStart := findFirst(text, i+len(open), end, close)
+			if closeStart < 0 { continue }
+			inner := trimRange(text, i+len(open), closeStart)
+			innerStart, innerEnd, spanEnd = inner.Start, inner.End, closeStart+len(close)
+		} else { return false }
+		tokenEnd := rawEndAt(text, innerStart, innerEnd)
+		if tokenEnd == 0 || (spanEnd != 0 && tokenEnd != innerEnd) { continue }
+		if spanEnd == 0 { spanEnd = tokenEnd }
+		span := source.Span{Start: i, End: spanEnd}
+		p.inlineFound = inlineBlockDirective{Start: i, End: spanEnd, Dir: dirOut{Kind: dirEnd, Span: span, TrimLeft: text[innerStart+1] == '-', TrimRight: text[tokenEnd-1] == '-'}}
+		return true
+	}
+	return false
 }
 
 // scanLine splits one line: ContentEnd excludes \r\n, LineEnd includes \n.
@@ -1436,6 +1514,12 @@ func trimRange(text string, start int, end int) trimOut {
 
 func isKeywordLetter(b byte) bool { return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
 
+// Name/path continuations keep keyword lookalikes literal; prose punctuation
+// can follow a bare marker without whitespace (for example, "@end!").
+func isDirectiveWordContinuation(b byte) bool {
+	return isKeywordLetter(b) || (b >= '0' && b <= '9') || b == '_' || b == '-' || b == '/' || b == '.' || b == '\\'
+}
+
 func keywordKind(word string) int {
 	switch word {
 	case "if":
@@ -1498,6 +1582,9 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 	// but unknown, so dirNone anyway). Use exact match.
 	kind := keywordKind(word)
 	if kind == dirNone {
+		return dirOut{Kind: dirNone}
+	}
+	if kend < innerEnd && text[kend] != '(' && !templateSpace(text[kend]) {
 		return dirOut{Kind: dirNone}
 	}
 	span := source.Span{Start: innerStart, End: innerEnd}
@@ -1570,7 +1657,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
 		if args[0].Kind != expr.List {
-			p.diag("TPL_PARSE", lineSpan, "malformed template directive")
+			p.diag("TPL_PARSE", args[0].Span, forParameterMessage(args[0].Kind, false))
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
@@ -1578,7 +1665,16 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 			return dirOut{Kind: dirError, Span: lineSpan}
 		}
 		if !validParams(args[0]) {
-			p.diag("TPL_PARSE", lineSpan, "malformed template directive")
+			message := "@for parameters must be unique names, with any rest parameter last"
+			span := args[0].Span
+			for i := range args[0].Items {
+				if args[0].Items[i].Kind != expr.Name {
+					message = forParameterMessage(args[0].Items[i].Kind, true)
+					span = args[0].Items[i].Span
+					break
+				}
+			}
+			p.diag("TPL_PARSE", span, message)
 			for i := range args {
 				expr.Free(p.a, args[i])
 			}
@@ -1675,6 +1771,62 @@ func (p *docParser) parseArgs(pos int, innerEnd int) argsRes {
 	}
 }
 
+// Parse diagnostics borrow strings; these complete messages must stay static.
+var forParameterShapes = [18]string{
+		"@for parameters must be a list of names; got invalid",
+		"@for parameters must be a list of names; got bool",
+		"@for parameters must be a list of names; got nil",
+		"@for parameters must be a list of names; got int",
+		"@for parameters must be a list of names; got float",
+		"@for parameters must be a list of names; got string",
+		"@for parameters must be a list of names; got symbol",
+		"@for parameters must be a list of names; got name",
+		"@for parameters must be a list of names; got path",
+		"@for parameters must be a list of names; got selector",
+		"@for parameters must be a list of names; got reference",
+		"@for parameters must be a list of names; got list",
+		"@for parameters must be a list of names; got record",
+		"@for parameters must be a list of names; got application",
+		"@for parameters must be a list of names; got lambda",
+		"@for parameters must be a list of names; got placeholder",
+		"@for parameters must be a list of names; got section",
+		"@for parameters must be a list of names; got command capture",
+}
+
+var forParameterMembers = [18]string{
+		"@for parameter list must contain only names; got invalid",
+		"@for parameter list must contain only names; got bool",
+		"@for parameter list must contain only names; got nil",
+		"@for parameter list must contain only names; got int",
+		"@for parameter list must contain only names; got float",
+		"@for parameter list must contain only names; got string",
+		"@for parameter list must contain only names; got symbol",
+		"@for parameter list must contain only names; got name",
+		"@for parameter list must contain only names; got path",
+		"@for parameter list must contain only names; got selector",
+		"@for parameter list must contain only names; got reference",
+		"@for parameter list must contain only names; got list",
+		"@for parameter list must contain only names; got record",
+		"@for parameter list must contain only names; got application",
+		"@for parameter list must contain only names; got lambda",
+		"@for parameter list must contain only names; got placeholder",
+		"@for parameter list must contain only names; got section",
+		"@for parameter list must contain only names; got command capture",
+}
+
+func forParameterMessage(kind expr.Kind, member bool) string {
+	if kind == expr.EnvironmentReference {
+		if member { return "@for parameter list must contain only names; got environment reference" }
+		return "@for parameters must be a list of names; got environment reference"
+	}
+	if int(kind) < 0 || int(kind) >= len(forParameterShapes) {
+		if member { return "@for parameter list must contain only names; got expression" }
+		return "@for parameters must be a list of names; got expression"
+	}
+	if member { return forParameterMembers[int(kind)] }
+	return forParameterShapes[int(kind)]
+}
+
 func validParams(list *expr.Expr) bool {
 	seenRest := false
 	for i := range list.Items {
@@ -1751,6 +1903,7 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 			}
 			prefix := p.inlineExpr(i+2, contentEnd)
 			if prefix.Expr == nil || !prefix.Closed {
+				expr.Free(p.a, prefix.Expr)
 				slices.Free(p.a, prefix.Diagnostics)
 				items = slices.Append(p.a, items, newStringLit(p.a, "@", source.Span{Start: i, End: i + 1}))
 				i++
@@ -1837,7 +1990,7 @@ func docSelectorEnd(text string, end int, start int) int {
 	}
 	i := start + 2
 	if b == '<' || b == '>' {
-		if i < end && (text[i] == '*' || text[i] == '#') {
+		if i < end && (text[i] == '*' || text[i] == '#' || (b == '<' && text[i] == '?')) {
 			candidate := text[start : i+1]
 			if expr.ValidSelector(candidate) {
 				return i + 1

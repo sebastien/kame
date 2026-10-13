@@ -139,7 +139,9 @@ type ProcessEventResult struct {
 
 // ProcessHost is the portable runtime contract for executing complete recipe
 // scripts. Submitted request storage remains caller-owned until a terminal
-// event is received.
+// event is received for an admitted request. Start returning false rejects the
+// request immediately; callers must not await a terminal event for it. Hosts may
+// still queue a rejection diagnostic, which does not imply active ownership.
 type ProcessHost interface {
 	SupportsExecutor(name string, version string) bool
 	Start(ProcessRequest) bool

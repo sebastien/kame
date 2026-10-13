@@ -79,7 +79,12 @@ def terminal(host: list[str], cwd: Path, mode: str, width: int = 80, resize: boo
 		assert process.wait(timeout=2) == 0, output
 		assert process.stdout.read() == b"", output
 		if resized_at is not None:
-			assert b"\x1b[1A" not in output[resized_at:], output
+			# Reads can lag queued old-size frames, and Node observes SIGWINCH
+			# asynchronously. Both presenters acknowledge unsafe reflow with a
+			# standalone newline (native frames end with synchronized-update off).
+			acknowledged = next((match.end() for match in re.finditer(rb"(?:\r\n|\x1b\[\?2026l)\r\n", output) if match.end() > resized_at), None)
+			assert acknowledged is not None, output
+			assert not re.search(rb"\x1b\[[0-9]*A", output[acknowledged:]), output
 	finally:
 		if process.poll() is None:
 			process.kill()

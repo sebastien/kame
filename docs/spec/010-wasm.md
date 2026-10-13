@@ -15,9 +15,11 @@ The WebAssembly module targets `wasm32-freestanding`. It includes:
 - Program compilation and evaluation.
 - Pure collection, text, and path operations.
 - Host-request operation stubs.
+- Shared portable CLI invocation parsing and command policy (`kame/cli`).
 
-It excludes POSIX, CLI, `os`, `conc`, `sync`, native process code, and direct
-filesystem access.
+It excludes POSIX, the native CLI executable/host implementation (`cmd/kame`),
+`os`, `conc`, `sync`, native process code, and direct filesystem access. The
+shared CLI package is included and audited alongside `program` for portability.
 
 Translation and link tests must fail if a portable package acquires a hosted
 transitive import.
@@ -81,17 +83,28 @@ build link lines (`-Wl,--export=...`) in both `Makefile` and `Makefile.kmk`.
 Additional session, process-streaming, and heap-control extensions carry
 `export_name` attributes in the C ABI source.
 
-Source-composition hosts may call `kame_wasm_declaration_predicate(handle,
+Source-composition hosts call `kame_wasm_composition_condition(handle,
 data, length, dst, capacity, out_length)`. Its JSON descriptor accepts optional
 `name` and `prefix` strings, a required `predicate` string, and optional
 `defines`/`environment` arrays of strings. The prefix contains only already
 selected definition declarations, extracted using each source's own portable
-parser. The result is UTF-8 `true` or `false`; ordinary query buffer statuses,
+parser. Selection follows ordinary `if` truth: only `:nil` and `:false` select
+the false branch. The result is UTF-8 `true` or `false`; ordinary query buffer statuses,
 instance diagnostics, and allocation-exhaustion recovery apply. The query never
 requests host work or acquires runtime grants. Hosts retain authored predicate
 spans for diagnostic rendering, select branches and includes in source order,
 and supply only selected fragments to compilation. Direct registration of
-uncomposed markers returns `FEATURE_UNSUP`.
+uncomposed composition forms returns `FEATURE_UNSUP`. The older
+`kame_wasm_declaration_predicate` query retains its boolean-only contract for
+embedding compatibility; it does not restore the removed `when` source syntax.
+Condition failures preserve structured diagnostic fields, including tips, in
+the instance diagnostic JSON envelope. Reports are owned by the instance until
+its next query replacing the diagnostic or destruction and are bounded at the
+65,536-byte source capacity. An oversized composition report returns `NO_MEMORY`
+explicitly instead of silently discarding structured fields.
+Configuration frame kinds and labels are preserved, but frame locations are
+omitted: the definitions-only prefix and isolated predicate do not carry an
+authored origin map. Hosts locate the primary failure at the authored condition.
 
 Every returned handle belongs to one global module handle table and encodes a
 table index plus a generation. Its table entry records the owning instance.
@@ -158,12 +171,12 @@ allocate.
 
 ## Memory
 
-The module uses a fixed-size arena allocated on first source compilation
+The module uses a fixed-size backing buffer allocated on first source compilation
 and reused by that instance slot. The freestanding ABI reserves 16 MiB per
 compiled slot on demand, rather than reserving memory for every possible slot.
 This accommodates the default 1 MiB Kash capture plus evaluator allocation and
 copy overhead. The module memory maximum still bounds simultaneous compiled
-instances and larger captures; an unavailable arena reports `NO_MEMORY`.
+instances and larger captures; an unavailable buffer reports `NO_MEMORY`.
 Within each slot, a coalescing heap reclaims arbitrary freed blocks while the
 compiled program remains alive; instance destruction resets the supplied buffer.
 The JS host reuses separate geometrically grown scratch buffers for process
@@ -277,7 +290,7 @@ must not grow memory implicitly unless the embedding contract explicitly
 enables it.
 
 `kame_wasm_instance_set_heap_limit(handle, bytes)` sets a logical allocator
-budget from 1 byte through 16 MiB before compilation; the backing arena size
+budget from 1 byte through 16 MiB before compilation; the backing buffer size
 remains unchanged. Allocator exhaustion invalidates the affected instance
 runtime: evaluator calls and result copies return `NO_MEMORY`, and `step` returns
 terminal state 2. Its emergency diagnostic remains readable and destruction
@@ -403,7 +416,7 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 - Fingerprint encoding matches native output.
 - A queried event remains stable until copied or discarded.
 - Completion buffers may be overwritten immediately after the ABI call returns.
-- Repeated create, compile, evaluate, and free cycles exhaust no logical arena
+- Repeated create, compile, evaluate, and free cycles exhaust no logical heap
   capacity.
 - An undersized heap produces a diagnostic rather than memory corruption.
 - The JavaScript wrapper copies payloads before further allocation and rejects

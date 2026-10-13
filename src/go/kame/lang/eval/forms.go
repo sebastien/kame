@@ -17,7 +17,7 @@ const defEscapeMessage = "function value escapes its scope; define it with (def 
 // ordinary registry operations. Special forms cannot be registered as operations.
 func IsSpecialForm(name string) bool {
 	switch name {
-	case "?", "let", "def", "eval", "if", "and", "or", "with", "match", "run!", "pipe!", "await":
+	case "?", "let", "def", "eval", "if", "and", "or", "with", "match", "run!", "pipe!", "await", "include", "include?":
 		return true
 	}
 	return false
@@ -69,7 +69,9 @@ func (p *Program) let(scope *Scope, values []*expr.Expr, context *Context, span 
 		if name.Kind != expr.Name || !definition.ValidName(name.Text) {
 			return failure(context.Run, "DEF_INVALID", name.Span, "let binding needs a name")
 		}
-		if context.ReserveEnv && name.Text == "env" { return failure(context.Run, "DEF_INVALID", name.Span, "env is reserved in Kash") }
+		if context.ReserveEnv && name.Text == "env" {
+			return failure(context.Run, "DEF_INVALID", name.Span, "env is reserved in Kash")
+		}
 		r := p.evaluate(context.Engine, child, values[0].Items[i+1], context)
 		if r.Waiting || r.Diagnostic.Code != "" {
 			return r
@@ -87,9 +89,18 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 	if len(values) < 2 || values[0].Kind != expr.Name || !definition.ValidName(values[0].Text) {
 		return failure(context.Run, "DEF_INVALID", span, "def needs a name and value")
 	}
-	if context.ReserveEnv && values[0].Text == "env" { return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash") }
+	if context.ReserveEnv && values[0].Text == "env" {
+		return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash")
+	}
 	if len(values) >= 3 && values[1].Kind == expr.List {
-		if context.ReserveEnv { for i := range values[1].Items { parameter := values[1].Items[i]; if parameter.Kind == expr.Name && parameter.Text == "env" { return failure(context.Run, "DEF_INVALID", parameter.Span, "env is reserved in Kash") } } }
+		if context.ReserveEnv {
+			for i := range values[1].Items {
+				parameter := values[1].Items[i]
+				if parameter.Kind == expr.Name && parameter.Text == "env" {
+					return failure(context.Run, "DEF_INVALID", parameter.Span, "env is reserved in Kash")
+				}
+			}
+		}
 		parameters := slices.Make[expr.Parameter](context.Run, len(values[1].Items))
 		for i := range values[1].Items {
 			parameter := values[1].Items[i]
@@ -157,14 +168,21 @@ func (p *Program) evalText(scope *Scope, values []*expr.Expr, context *Context, 
 		parsed.Free()
 		return Result{Diagnostic: diagnostic.Diagnostic{Code: parseDiagnostic.Code, Severity: diagnosticSeverity(parseDiagnostic.Severity), Message: parseDiagnostic.Message, Span: diagnostic.Span{Start: parseDiagnostic.Span.Start, End: parseDiagnostic.Span.End}}}
 	}
+	if result := validateValueExpression(context.Run, parsed.Expr); result.Diagnostic.Code != "" {
+		parsed.Free()
+		return result
+	}
 	previousCallPath := context.CallPath
 	previousMemo := context.DisableMemo
+	previousClone := context.CloneCallableAST
+	context.CloneCallableAST = true
 	context.DisableMemo = true
 	context.CallPath = invocationPath(context.Run, previousCallPath, span.Start, span.End)
 	result := p.evaluate(context.Engine, scope, parsed.Expr, context)
 	mem.FreeString(context.Run, context.CallPath)
 	context.CallPath = previousCallPath
 	context.DisableMemo = previousMemo
+	context.CloneCallableAST = previousClone
 	parsed.Free()
 	return result
 }
@@ -173,7 +191,7 @@ func truthValue(v core.Value) bool { return v.Kind != core.Nil && !(v.Kind == co
 
 func (p *Program) conditional(scope *Scope, values []*expr.Expr, context *Context, span source.Span) Result {
 	if len(values) < 2 {
-		return failure(context.Run, "EXPR_INVALID", span, "if needs a test and a body")
+		return arityFailure(context.Run, span, "if", len(values), 2, -1)
 	}
 	hasElse := len(values)%2 == 1
 	pairs := len(values)
@@ -259,11 +277,17 @@ func (p *Program) scopedWith(scope *Scope, values []*expr.Expr, context *Context
 	defer child.Free()
 	for i := range r.Value.Record {
 		key := r.Value.Record[i].Key
-		if context.ReserveEnv && key == "env" { r.Free(context.Run); return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash") }
+		if context.ReserveEnv && key == "env" {
+			r.Free(context.Run)
+			return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash")
+		}
 		if !child.trySetValue(key, r.Value.Record[i].Value) {
 			reject := rejectStrandedCapture(context.Run, &r.Value, values[0].Span)
 			return reject
 		}
+		// The child now owns callable leaves; clear only this field's original
+		// storage, including on a later field's rejection path.
+		r.Value.Record[i].Value.Free(context.Run)
 	}
 	freeCallables(context.Run, &r.Value)
 	r.Value.Free(context.Run)
@@ -329,7 +353,14 @@ func (p *Program) patternMatch(scope *Scope, values []*expr.Expr, context *Conte
 		mout := matchPattern(context.Run, subjectText, &pr.Value, head.Span)
 		matched, names, captures := mout.Matched, mout.Names, mout.Captures
 		diag := mout.Diag
-		if context.ReserveEnv { for i := range names { if names[i] == "env" && diag.Code == "" { denied := failure(context.Run, "DEF_INVALID", head.Span, "env is reserved in Kash"); diag = denied.Diagnostic } } }
+		if context.ReserveEnv {
+			for i := range names {
+				if names[i] == "env" && diag.Code == "" {
+					denied := failure(context.Run, "DEF_INVALID", head.Span, "env is reserved in Kash")
+					diag = denied.Diagnostic
+				}
+			}
+		}
 		freeCallables(context.Run, &pr.Value)
 		pr.Value.Free(context.Run)
 		if diag.Code != "" {

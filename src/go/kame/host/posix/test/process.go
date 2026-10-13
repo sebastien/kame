@@ -3,11 +3,51 @@ package posix_test
 import (
 	"kame/host"
 	"kame/host/posix"
+	"solod.dev/so/c"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strconv"
+	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 	"solod.dev/so/time"
 )
+
+//so:include <sys/wait.h>
+//so:include <errno.h>
+//so:include <signal.h>
+
+func nativeChildReaped(pid int64) bool {
+	c.Raw("pid_t result; do { result = waitpid((pid_t)pid, NULL, WNOHANG); } while (result < 0 && errno == EINTR); return result < 0 && errno == ECHILD;")
+	return false
+}
+
+// Subreaping makes descendant death observable with waitpid, independent of
+// whether the machine's PID 1 promptly reaps orphans. Only these Linux tests
+// adopt children; restore the prior process-wide setting afterward.
+func nativeSubreaper(enable bool) int {
+	c.Raw("#if defined(__linux__) && !defined(__COSMOPOLITAN__)\nextern int prctl(int, ...); int previous = 0; if (prctl(37, &previous, 0, 0, 0) || prctl(36, enable ? 1 : 0, 0, 0, 0)) return -1; return previous;\n#endif")
+	return -1
+}
+
+func nativeLeaderExited(pid int64) bool {
+	c.Raw("#if !defined(__COSMOPOLITAN__)\nsiginfo_t info = {0}; return waitid(P_PID, (pid_t)pid, &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid == pid;\n#endif")
+	return false
+}
+
+func nativeDescendantDead(pid int64) bool {
+	c.Raw("pid_t result; do { result = waitpid((pid_t)pid, NULL, WNOHANG); } while (result < 0 && errno == EINTR); return result == pid || (result < 0 && errno == ECHILD);")
+	return false
+}
+
+func cleanupNativeDescendant(pid *int64) {
+	c.Raw("if (*pid > 0 && waitpid((pid_t)*pid, NULL, WNOHANG) == 0) { kill((pid_t)*pid, SIGKILL); while (waitpid((pid_t)*pid, NULL, 0) < 0 && errno == EINTR) {} }")
+}
+
+func cleanupNativeHost(h **posix.Host) {
+	if *h != nil { (*h).Free(); *h = nil }
+}
+
+func cleanupNativeOutput(a mem.Allocator, output *[]byte) { slices.Free(a, *output) }
 
 // waitBudget bounds every test wait. It is deliberately generous so a loaded
 // machine slows the suite down instead of failing it.
@@ -403,15 +443,75 @@ func TestCancellationTerminatesBackgroundGrandchild(t *testing.T) {
 func TestWaitpidFailureEmitsHostFailure(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
+	defer h.Free()
 	r := request(a, 300, "sleep 5")
+	defer freeRequest(a, &r)
 	if !h.Start(r) { t.Fatal("start failed"); return }
 	h.ForceWaitpidFailureForTest()
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
 	if terminal.Kind != posix.Terminal || terminal.Outcome != posix.Failed || terminal.Diagnostic.Code != posix.DiagnosticHostFailure || terminal.Diagnostic.Message != "waitpid failed" { t.Error("waitpid failure did not emit HOST_FAIL terminal") }
+	if terminal.PID <= 0 || !nativeChildReaped(terminal.PID) { t.Error("failed child was forgotten before being reaped") }
 	freeEvents(a, events)
-	freeRequest(a, &r)
-	h.Free()
+}
+
+func testNativeDescendantRetirement(t *testing.T, graph bool, terminalRetirement bool) {
+	a := t.Allocator()
+	var childPID int64
+	defer cleanupNativeDescendant(&childPID)
+	h := posix.New(a)
+	defer cleanupNativeHost(&h)
+	// The child publishes its own PID after installing its handler. In the
+	// retirement case it then closes both streams but keeps running.
+	child := "trap \"\" TERM; echo $$; exec sleep 30"
+	if terminalRetirement { child = "trap \"\" TERM; echo $$; exec >/dev/null 2>&1; exec sleep 30" }
+	script := "/bin/sh -c '"+child+"' & exit 0"
+	r := request(a, 600, script)
+	defer freeRequest(a, &r)
+	// Slice literals lower to block-scoped C compound literals. Keep the
+	// borrowed stage/argv arrays in this function's scope through Start.
+	stages := []host.ProcessStage{{Argv: []string{"/bin/sh", "-c", script}}, {Argv: []string{"/bin/cat"}}}
+	if graph {
+		r.Stages = stages
+	}
+	if !h.Start(r) { t.Fatal("descendant start failed"); return }
+	var leaderPID int64
+	var output []byte
+	defer cleanupNativeOutput(a, &output)
+	sawTerminal := false
+	deadline := time.Now().Add(waitBudget)
+	for time.Now().Before(deadline) {
+		if !h.Pump(10) { t.Fatal("host pump failed"); return }
+		for {
+			result := h.Next()
+			if !result.OK { break }
+			if result.Event.Kind == posix.Started { leaderPID = result.Event.PID }
+			if result.Event.Kind == posix.Stdout { for i := range result.Event.Data { output = slices.Append(a, output, result.Event.Data[i]) } }
+			if result.Event.Kind == posix.Terminal { sawTerminal = true }
+			result.Event.Free(a)
+		}
+		if childPID == 0 && strings.Contains(string(output), "\n") { childPID, _ = strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64) }
+		if childPID > 0 && ((terminalRetirement && sawTerminal) || (!terminalRetirement && leaderPID > 0 && nativeLeaderExited(leaderPID))) { break }
+	}
+	if childPID <= 0 || (terminalRetirement && !sawTerminal) || (!terminalRetirement && (sawTerminal || !nativeLeaderExited(leaderPID))) {
+		t.Fatalf("did not reach descendant handshake: graph=%t retirement=%t leader=%d child=%d terminal=%t output=%s", graph, terminalRetirement, leaderPID, childPID, sawTerminal, string(output)); return
+	}
+	if !terminalRetirement { cleanupNativeHost(&h) }
+	deadline = time.Now().Add(waitBudget)
+	dead := false
+	for !dead && time.Now().Before(deadline) { dead = nativeDescendantDead(childPID); if !dead { time.Sleep(time.Millisecond) } }
+	if !dead { t.Error("owned descendant survived retirement") }
+	if dead { childPID = 0 }
+}
+
+func TestNativeDescendantsRetireWithHostAndTerminal(t *testing.T) {
+	previous := nativeSubreaper(true)
+	if previous < 0 { t.Skip("requires native Linux subreaping"); return }
+	defer nativeSubreaper(previous != 0)
+	testNativeDescendantRetirement(t, false, false)
+	testNativeDescendantRetirement(t, true, false)
+	testNativeDescendantRetirement(t, false, true)
+	testNativeDescendantRetirement(t, true, true)
 }
 
 func TestCancelAllTerminatesActiveGroups(t *testing.T) {

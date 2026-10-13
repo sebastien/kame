@@ -43,15 +43,10 @@ const (
 	FunctionTemporary FunctionKind = iota
 	// FunctionBorrowed is a value-owned wrapper copied from a binding. It
 	// retains the captured Scope and shares parameters, body, and Native
-	// state with its source. Only the wrapper struct and the retained Scope
-	// share are released; Native and AST stay owned by the source.
+	// state with its source. It releases its wrapper, scope hold, and owned
+	// payload share; authored ASTs remain owned by the source scope/program.
 	//
-	// Borrowed wrappers share Native without refcounting. Lexical closures
-	// are safe to escape because the Scope retain keeps the binding alive
-	// until the cycle breaker runs. Native closures (Scope nil) must not
-	// escape their defining binding: freeing the source releases Native
-	// while the wrapper still points at it. Current stdlib only uses native
-	// sections immediately through Call, never through let-escape.
+	// Native state and dynamic AST storage have an independent retained owner.
 	FunctionBorrowed
 	// FunctionDefinition is a scope-owned definition function (def, script
 	// function). The scope owns the Function struct plus owned AST slices;
@@ -64,7 +59,11 @@ const (
 )
 
 type Function struct {
-	Owner *Program
+	storage      *FunctionStorage
+	AST          *expr.Expr
+	// PayloadAlloc owns native state and cloned ASTs, not borrowed wrappers.
+	PayloadAlloc mem.Allocator
+	Owner        *Program
 	// OperationName is the registry key for FunctionOperation, not a discriminator.
 	OperationName       string
 	KashConstructor     bool
@@ -85,12 +84,45 @@ type Function struct {
 	Section bool
 	// NativeCall, when set, computes the result from evaluated argument
 	// values. Arity gives the fixed argument count. Native holds the
-	// implementation's opaque state and NativeFree releases it before a
-	// temporary function is freed.
+	// implementation's opaque state and NativeFree releases it after the last
+	// temporary/borrowed payload share is freed.
 	NativeCall func(c *Context, state any, values []core.Value) Result
 	Arity      int
 	Native     any
 	NativeFree func(a mem.Allocator, state any)
+}
+
+// Lazily shared only when a callable with owned payload is borrowed. Scopes
+// remain separate holds so the existing lexical cycle breaker can see them.
+type FunctionStorage struct {
+	Alloc      mem.Allocator
+	References int
+	Native     any
+	Free       func(a mem.Allocator, state any)
+	AST        *expr.Expr
+	Expression *expr.Expr
+}
+
+// BorrowValue copies storage and gives every callable leaf an independent
+// wrapper. core.Value.Clone intentionally remains callable-blind.
+func (c *Context) BorrowValue(value core.Value) core.Value { return borrowValue(c.Run, value) }
+
+func borrowValue(a mem.Allocator, value core.Value) core.Value {
+	result := value.Clone(a)
+	borrowValueCallables(a, &result)
+	return result
+}
+
+func borrowValueCallables(a mem.Allocator, value *core.Value) {
+	if value.Kind == core.Callable && value.Callable != nil && value.CallableOwner == nil {
+		value.Callable = borrowFunction(a, value.Callable.(*Function))
+	}
+	for i := range value.List {
+		borrowValueCallables(a, &value.List[i])
+	}
+	for i := range value.Record {
+		borrowValueCallables(a, &value.Record[i].Value)
+	}
 }
 
 // borrowFunction copies a binding-owned callable into a value-owned wrapper
@@ -100,9 +132,25 @@ func borrowFunction(a mem.Allocator, source *Function) *Function {
 	if source.Kind == FunctionInvocation || source.Kind == FunctionOperation {
 		return source
 	}
+	if source.storage == nil && (source.NativeFree != nil || source.AST != nil || source.ExpressionOwned) {
+		payloadAlloc := source.PayloadAlloc
+		if payloadAlloc == nil {
+			payloadAlloc = a
+		}
+		storage := mem.Alloc[FunctionStorage](payloadAlloc)
+		storage.Alloc, storage.References = payloadAlloc, 1
+		storage.Native, storage.Free, storage.AST = source.Native, source.NativeFree, source.AST
+		if source.ExpressionOwned {
+			storage.Expression = source.Expression
+		}
+		source.storage = storage
+	}
 	wrapper := mem.Alloc[Function](a)
 	*wrapper = *source
 	wrapper.Kind = FunctionBorrowed
+	if wrapper.storage != nil {
+		wrapper.storage.References++
+	}
 	if wrapper.Scope != nil {
 		wrapper.Scope.Retain()
 	}
@@ -163,6 +211,9 @@ func containsCallable(value core.Value, function any, depth int) bool {
 
 func freeCallables(a mem.Allocator, value *core.Value) {
 	if value.Kind == core.Callable {
+		if value.Callable == nil {
+			return
+		}
 		function := value.Callable.(*Function)
 		if function.Kind == FunctionTemporary {
 			freeTemporaryFunction(a, function)
@@ -185,19 +236,45 @@ func freeCallables(a mem.Allocator, value *core.Value) {
 }
 
 func freeTemporaryFunction(a mem.Allocator, function *Function) {
-	if function.NativeFree != nil {
-		function.NativeFree(a, function.Native)
-		function.Native = nil
-	}
-	if function.ExpressionOwned { expr.Free(a, function.Expression) }
+	freeFunctionStorage(a, function)
 	function.Scope.Free()
 	mem.Free(a, function)
 }
 
 func freeBorrowedWrapper(a mem.Allocator, function *Function) {
+	if function.storage != nil {
+		freeFunctionStorage(a, function)
+	}
 	function.Scope.Free()
 	function.Native = nil
 	mem.Free(a, function)
+}
+
+func freeFunctionStorage(a mem.Allocator, function *Function) {
+	storage := function.storage
+	if storage != nil {
+		storage.References--
+		if storage.References != 0 {
+			return
+		}
+		if storage.Free != nil {
+			storage.Free(storage.Alloc, storage.Native)
+		}
+		expr.Free(storage.Alloc, storage.AST)
+		expr.Free(storage.Alloc, storage.Expression)
+		mem.Free(storage.Alloc, storage)
+		return
+	}
+	if function.PayloadAlloc != nil {
+		a = function.PayloadAlloc
+	}
+	if function.NativeFree != nil {
+		function.NativeFree(a, function.Native)
+	}
+	expr.Free(a, function.AST)
+	if function.ExpressionOwned {
+		expr.Free(a, function.Expression)
+	}
 }
 
 // wouldStrandCapture reports whether storing value in scope would strand a
@@ -298,10 +375,7 @@ func freeRecordWithCallables(a mem.Allocator, values []core.RecordField) {
 func (s *Scope) breakCallableCycle() bool {
 	count := 0
 	for i := range s.Bindings {
-		value := s.Bindings[i].Value
-		if value.Kind == core.Callable && isSelfRetainedCallable(value.Callable.(*Function), s) {
-			count++
-		}
+		count += countSelfRetained(s.Bindings[i].Value, s)
 	}
 	if count == 0 || count != s.References {
 		return false
@@ -314,17 +388,7 @@ func (s *Scope) breakCallableCycle() bool {
 	values := slices.Make[core.Value](a, count)
 	n := 0
 	for i := range s.Bindings {
-		value := s.Bindings[i].Value
-		if value.Kind != core.Callable {
-			continue
-		}
-		function := value.Callable.(*Function)
-		if !isSelfRetainedCallable(function, s) {
-			continue
-		}
-		s.Bindings[i].Value = core.Value{}
-		values[n] = value
-		n++
+		extractSelfRetained(&s.Bindings[i].Value, s, values, &n)
 	}
 	s.breakingCycles = true
 	for i := range values {
@@ -332,6 +396,39 @@ func (s *Scope) breakCallableCycle() bool {
 	}
 	slices.Free(a, values)
 	return true
+}
+
+func countSelfRetained(value core.Value, scope *Scope) int {
+	// Evaluator-owned values are trees: each transient callable leaf owns a
+	// distinct wrapper. Host-created aliased/cyclic ownership graphs are not valid.
+	if value.Kind == core.Callable && value.Callable != nil {
+		if isSelfRetainedCallable(value.Callable.(*Function), scope) {
+			return 1
+		}
+	}
+	count := 0
+	for i := range value.List {
+		count += countSelfRetained(value.List[i], scope)
+	}
+	for i := range value.Record {
+		count += countSelfRetained(value.Record[i].Value, scope)
+	}
+	return count
+}
+
+func extractSelfRetained(value *core.Value, scope *Scope, values []core.Value, n *int) {
+	if value.Kind == core.Callable && value.Callable != nil && isSelfRetainedCallable(value.Callable.(*Function), scope) {
+		values[*n] = *value
+		*n = *n + 1
+		*value = core.Value{}
+		return
+	}
+	for i := range value.List {
+		extractSelfRetained(&value.List[i], scope, values, n)
+	}
+	for i := range value.Record {
+		extractSelfRetained(&value.Record[i].Value, scope, values, n)
+	}
 }
 
 func isSelfRetainedCallable(function *Function, scope *Scope) bool {

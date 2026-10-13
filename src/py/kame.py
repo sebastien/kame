@@ -23,23 +23,76 @@ class _ProcessOwner:
     def __init__(self) -> None:
         self._processes: set[asyncio.subprocess.Process] = set()
         self._requests: set[asyncio.Task[Any]] = set()
+        self._close_task: asyncio.Task[Any] | None = None
+
+    async def _await_cleanup(self, cleanup: asyncio.Task[Any]) -> None:
+        # Repeated cancellation must not abandon a child before it is reaped.
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                pass
+        cleanup.result()
 
     async def _start(self, argv: list[str], *, cwd: str, env: Mapping[str, str] | None) -> asyncio.subprocess.Process:
-        process = await asyncio.create_subprocess_exec(
+        task = asyncio.current_task()
+        registered = task is not None and task not in self._requests
+        if registered:
+            self._requests.add(task)
+        spawn = asyncio.create_task(asyncio.create_subprocess_exec(
             *argv,
             cwd=cwd,
             env=dict(env) if env is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             start_new_session=(os.name == "posix"),
-        )
-        self._processes.add(process)
-        return process
+        ))
+        try:
+            try:
+                process = await asyncio.shield(spawn)
+            except asyncio.CancelledError:
+                # Creation may already have launched the child: publish and reap
+                # it before letting cancellation leave the owning request.
+                async def reap() -> None:
+                    process = await spawn
+                    self._processes.add(process)
+                    await self._stop(process)
+
+                await self._await_cleanup(asyncio.create_task(reap()))
+                raise
+            self._processes.add(process)
+            if self._closed:
+                await self._await_cleanup(asyncio.create_task(self._stop(process)))
+                raise asyncio.CancelledError
+            return process
+        finally:
+            if registered:
+                self._requests.discard(task)
+
+    async def _communicate(self, argv: list[str], *, cwd: str, env: Mapping[str, str] | None) -> tuple[asyncio.subprocess.Process, bytes, bytes]:
+        task = asyncio.current_task()
+        if task is not None:
+            self._requests.add(task)
+        process = None
+        try:
+            process = await self._start(argv, cwd=cwd, env=env)
+            stdout, stderr = await process.communicate()
+            return process, stdout, stderr
+        except BaseException:
+            if process is not None:
+                await self._await_cleanup(asyncio.create_task(self._stop(process)))
+            raise
+        finally:
+            if task is not None:
+                self._requests.discard(task)
+            if process is not None:
+                self._forget(process)
 
     def _forget(self, process: asyncio.subprocess.Process) -> None:
         self._processes.discard(process)
 
-    async def _stop(self, process: asyncio.subprocess.Process) -> None:
+    async def _stop(self, process: asyncio.subprocess.Process, *, drain: bool = True) -> None:
+        draining = asyncio.create_task(process.communicate()) if drain else None
         if process.returncode is None:
             try:
                 if os.name == "posix":
@@ -59,12 +112,11 @@ class _ProcessOwner:
                 except ProcessLookupError:
                     pass
                 await process.wait()
-        if process.stdout is not None or process.stderr is not None:
-            await process.communicate()
+        if draining is not None:
+            await draining
         self._forget(process)
 
-    async def _close_processes(self) -> None:
-        current = asyncio.current_task()
+    async def _close_processes(self, current: asyncio.Task[Any] | None = None) -> None:
         requests = tuple(task for task in self._requests if task is not current)
         for task in requests:
             task.cancel()
@@ -141,19 +193,7 @@ class Kame(_ProcessOwner):
 
     async def _run(self, args: list[str], *, grants: Mapping[str, Iterable[str] | bool] | None = None) -> str:
         argv = [self.executable, *args[:2], *_grant_args(self.grants if grants is None else grants), *args[2:]] if args[:2] == ["do", "run"] else [self.executable, *args]
-        process = await self._start(argv, cwd=self.cwd, env=self.env)
-        task = asyncio.current_task()
-        if task is not None:
-            self._requests.add(task)
-        try:
-            stdout, stderr = await process.communicate()
-        except asyncio.CancelledError:
-            await self._stop(process)
-            raise
-        finally:
-            if task is not None:
-                self._requests.discard(task)
-            self._forget(process)
+        process, stdout, stderr = await self._communicate(argv, cwd=self.cwd, env=self.env)
         if process.returncode:
             message = stderr.decode("utf-8", "replace").strip()
             if not message and args[:2] == ["do", "parse"] and "--json" in args and stdout:
@@ -168,11 +208,14 @@ class Kame(_ProcessOwner):
         return stdout.decode("utf-8", "replace").rstrip("\n")
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._close(asyncio.current_task()))
+        await asyncio.shield(self._close_task)
+
+    async def _close(self, current: asyncio.Task[Any] | None) -> None:
         await asyncio.gather(*(program.close() for program in tuple(self._programs)), return_exceptions=True)
-        await self._close_processes()
+        await self._close_processes(current)
 
 
 class KameProgram(_ProcessOwner):
@@ -195,19 +238,7 @@ class KameProgram(_ProcessOwner):
     async def _run(self, args: list[str], *, grants: Mapping[str, Iterable[str] | bool] | None = None) -> str:
         self._check_open()
         argv = [self._owner.executable, *args[:2], *_grant_args(self._owner.grants if grants is None else grants), *args[2:]]
-        process = await self._start(argv, cwd=self._owner.cwd, env=self._owner.env)
-        task = asyncio.current_task()
-        if task is not None:
-            self._requests.add(task)
-        try:
-            stdout, stderr = await process.communicate()
-        except asyncio.CancelledError:
-            await self._stop(process)
-            raise
-        finally:
-            if task is not None:
-                self._requests.discard(task)
-            self._forget(process)
+        process, stdout, stderr = await self._communicate(argv, cwd=self._owner.cwd, env=self._owner.env)
         if process.returncode:
             message = stderr.decode("utf-8", "replace").strip() or f"Kame exited with status {process.returncode}"
             raise KameError(message, returncode=process.returncode, stderr=stderr.decode("utf-8", "replace"))
@@ -244,11 +275,14 @@ class KameProgram(_ProcessOwner):
         return watch
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        if self._close_task is None:
+            self._closed = True
+            self._close_task = asyncio.create_task(self._close(asyncio.current_task()))
+        await asyncio.shield(self._close_task)
+
+    async def _close(self, current: asyncio.Task[Any] | None) -> None:
         await asyncio.gather(*(watch.close() for watch in tuple(self._watches)), return_exceptions=True)
-        await self._close_processes()
+        await self._close_processes(current)
         shutil.rmtree(self._tempdir, ignore_errors=True)
         self._owner._programs.discard(self)
 
@@ -259,6 +293,15 @@ class KameWatch(AsyncIterator[dict[str, Any]]):
         self._process = process
         self._closed = False
         self._reader_task: asyncio.Task[Any] | None = None
+        self._close_task: asyncio.Task[Any] | None = None
+        self._stderr = bytearray()
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
+
+    async def _drain_stderr(self) -> None:
+        if self._process.stderr is not None:
+            while chunk := await self._process.stderr.read(65536):
+                self._stderr.extend(chunk)
+                del self._stderr[:-65536]
 
     def __aiter__(self) -> KameWatch:
         return self
@@ -269,31 +312,37 @@ class KameWatch(AsyncIterator[dict[str, Any]]):
         self._reader_task = asyncio.current_task()
         try:
             line = await self._process.stdout.readline()
+            if not line:
+                await asyncio.shield(self._stderr_task)
+                stderr = bytes(self._stderr)
+                status = await self._process.wait()
+                await self.close()
+                if status:
+                    raise KameError(stderr.decode("utf-8", "replace").strip() or f"Kame watch exited with status {status}", returncode=status)
+                raise StopAsyncIteration
+            return json.loads(line)
         except asyncio.CancelledError:
-            await self.close()
+            if not self._closed:
+                await self.close()
             raise
         finally:
             self._reader_task = None
-        if not line:
-            stderr = await self._process.stderr.read() if self._process.stderr else b""
-            status = await self._process.wait()
-            self._program._forget(self._process)
-            self._closed = True
-            self._program._watches.discard(self)
-            if status:
-                raise KameError(stderr.decode("utf-8", "replace").strip() or f"Kame watch exited with status {status}", returncode=status)
-            raise StopAsyncIteration
-        return json.loads(line)
 
     async def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        reader = self._reader_task
-        if reader is not None and reader is not asyncio.current_task():
+        if self._close_task is None:
+            self._closed = True
+            reader = self._reader_task
+            if reader is asyncio.current_task():
+                reader = None
+            self._close_task = asyncio.create_task(self._close(reader))
+        await asyncio.shield(self._close_task)
+
+    async def _close(self, reader: asyncio.Task[Any] | None) -> None:
+        if reader is not None:
             reader.cancel()
             await asyncio.gather(reader, return_exceptions=True)
-        await self._program._stop(self._process)
+        # The stderr reader remains active while termination drains stdout.
+        await asyncio.gather(self._program._stop(self._process, drain=False), self._process.stdout.read() if self._process.stdout else asyncio.sleep(0), self._stderr_task)
         self._program._watches.discard(self)
 
 

@@ -17,7 +17,7 @@ func TestRegisterAddsVersionedOperations(t *testing.T) {
 		t.Error("valid plugin operation was not registered")
 	}
 	key := registry.TaskKey(a, "task", "example-run")
-	if !key.OK || key.Key.Kind != core.ResourceTask || key.Key.Name != "task\x00example-run\x002/3" {
+	if !key.OK || key.Key.Kind != core.ResourceTask || key.Key.Name != "task\x00example-run\x002\x003" {
 		t.Error("plugin and operation versions were not included in operation identity")
 	}
 	key.Key.Free(a)

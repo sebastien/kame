@@ -71,8 +71,8 @@ headers = (wildcard ./src/**/*.h)
 # Every definition RHS is an expression; combine referenced lists explicitly
 sources = (concat sources-c headers)
 
-# Pattern replace remaps paths, and map applies it to every source
-objects = (map sources-c (replace ./src/{path:**}.c ./build/{path}.o))
+# Pattern substitution remaps paths, and map applies it to every source
+objects = (map sources-c (sub ./src/{path:**}.c ./build/{path}.o))
 
 # Default rule will be triggered when no argument is given
 default : build
@@ -93,7 +93,7 @@ archive : @(sources)
 
 # Shows statistics about this project.
 stats :
-	echo @(count sources) source files
+	echo @(count sources) input files
 	du -shc @(sources)
 	echo @(count objects) object files
 	du -shc @(filter ([path] (exists? path)) objects)

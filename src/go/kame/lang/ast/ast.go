@@ -300,9 +300,21 @@ func (e *astEncoder) pattern(value *expr.Expr) {
 			e.Str("text")
 			e.Str(p.Text)
 		}
+		if p.Kind == expr.PatternInterpolation {
+			e.Str("index")
+			e.Int(int64(p.Index))
+			next := 0
+			for j := range value.Parts {
+				if value.Parts[j].Expr == nil { continue }
+				if next == p.Index { e.Str("expr"); e.expr(value.Parts[j].Expr); break }
+				next++
+			}
+		}
 		if p.Kind == expr.PatternMatcher {
 			e.Str("pattern")
 			e.Str(p.Pattern)
+			e.Str("regex")
+			e.Bool(p.Regex)
 			if p.Text != "" {
 				e.Str("name")
 				e.Str(p.Text)
@@ -326,6 +338,7 @@ func (e *astEncoder) pattern(value *expr.Expr) {
 }
 
 func patternPartKind(k expr.PatternPartKind) string {
+	if k == expr.PatternInterpolation { return "interpolation" }
 	if k == expr.PatternLiteral {
 		return "literal"
 	}
@@ -566,6 +579,8 @@ func (e *astEncoder) rule(value *rule.Rule) {
 	for i := range value.Inputs {
 		in := value.Inputs[i]
 		e.BeginObject()
+		e.Str("sequenceEnd")
+		e.Bool(in.SequenceEnd)
 		if in.OrderOnly {
 			e.Str("orderOnly")
 			e.Bool(true)
@@ -670,6 +685,8 @@ func (e *astEncoder) target(value *template.Target, offset int) {
 			e.Str(p.Name)
 			e.Str("pattern")
 			e.Str(p.Pattern)
+			e.Str("regex")
+			e.Bool(p.Regex != nil)
 		}
 		e.EndObject()
 	}
@@ -722,6 +739,9 @@ func (e *astEncoder) script(value *script.Script) {
 	e.EndObject()
 }
 func scriptKind(k script.ScriptItemKind) string {
+	if k == script.Composition {
+		return "composition"
+	}
 	if k == script.When {
 		return "when"
 	}
@@ -760,6 +780,8 @@ func (e *astEncoder) definition(value *definition.Definition) {
 	e.node("definition", value.Span)
 	e.Str("name")
 	e.Str(value.Name)
+	e.Str("function")
+	e.Bool(value.Function)
 	if value.Default {
 		e.Str("default")
 		e.Bool(true)

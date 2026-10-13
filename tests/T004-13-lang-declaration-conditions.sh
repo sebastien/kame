@@ -2,7 +2,7 @@
 # Spec: docs/spec/004-language.md — declaration selection and gated includes
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
-test-start "T004-13 declaration conditions"
+test-start "T004-13 conditional source composition"
 test-step "build artifacts"
 cli_require_tools
 cli_build

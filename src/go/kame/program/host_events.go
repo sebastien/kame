@@ -659,6 +659,7 @@ func (p *Program) completeShell(request host.Request, event host.ProcessEvent) {
 		completion.Value, completion.HasValue = shellValue(p.Alloc, event), true
 	}
 	p.Engine.Complete(completion)
+	p.retirePendingRequest(request.ID)
 }
 
 // NextOutbound pops the oldest request an embedding host must service. The
@@ -765,6 +766,7 @@ func (p *Program) Complete(request host.Request, value core.Value, diagnostic di
 		}
 	}
 	p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Value: value, HasValue: diagnostic.Code == "", Diagnostic: diagnostic})
+	p.retirePendingRequest(request.ID)
 }
 
 func (p *Program) failServiceHost(entry *instance) {
@@ -873,6 +875,7 @@ func (p *Program) queueProcessCancellation(nodeID int64, generation int64, attem
 }
 
 func (p *Program) complete(event host.ProcessEvent) {
+	completedPending := p.retirePendingRequest(event.ID)
 	var d diagnostic.Diagnostic
 	if event.Outcome == host.ProcessFailed {
 		d = failure(p.Alloc, "HOST_FAIL", event.Diagnostic.Message)
@@ -926,20 +929,7 @@ func (p *Program) complete(event host.ProcessEvent) {
 		p.attachProcessContext(&d, entry, event)
 		p.releaseCacheLock(entry)
 	}
-	var completedPending pendingRequest
-	hasPending := false
-	for i := range p.Pending {
-		pending := p.Pending[i]
-		if pending.ID != event.ID {
-			continue
-		}
-		completedPending, hasPending = pending, true
-		freePendingRequest(p.Alloc, &p.Pending[i])
-		copy(p.Pending[i:], p.Pending[i+1:])
-		p.Pending = p.Pending[:len(p.Pending)-1]
-		break
-	}
-	if hasPending && (completedPending.Capture || completedPending.Stream) {
+	if completedPending.ID != 0 && (completedPending.Capture || completedPending.Stream) {
 		if completedPending.Capture && event.StdoutTruncated {
 			d.Free(p.Alloc)
 			d = failure(p.Alloc, "CAPTURE_LIMIT", "command substitution exceeded capture limit")
@@ -1183,6 +1173,23 @@ func (p *Program) emitProcess(entry *instance, kind EventKind, requestID int64) 
 		break
 	}
 	p.emit(event)
+}
+
+// retirePendingRequest releases terminal display storage and returns only the
+// scalar correlation/capture metadata needed to dispatch its completion.
+func (p *Program) retirePendingRequest(id int64) pendingRequest {
+	for i := range p.Pending {
+		if p.Pending[i].ID != id {
+			continue
+		}
+		completed := p.Pending[i]
+		completed.Program, completed.Argv = "", nil
+		freePendingRequest(p.Alloc, &p.Pending[i])
+		copy(p.Pending[i:], p.Pending[i+1:])
+		p.Pending = p.Pending[:len(p.Pending)-1]
+		return completed
+	}
+	return pendingRequest{}
 }
 
 func freePendingRequest(a mem.Allocator, pending *pendingRequest) {

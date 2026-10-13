@@ -12,6 +12,24 @@ cd "$CLI_ROOT"
 release="$CLI_ROOT/src/sh/release.sh"
 build_ape="$CLI_ROOT/src/sh/build-ape.sh"
 
+test-step "distribution license metadata agrees with the project license"
+if python3 - "$CLI_ROOT" <<'PYLICENSE'
+import json
+from pathlib import Path
+import sys
+import tomllib
+
+root = Path(sys.argv[1])
+assert json.loads((root / 'package.json').read_text())['license'] == 'BSD-3-Clause'
+assert tomllib.loads((root / 'pyproject.toml').read_text())['project']['license']['file'] == 'LICENSE.md'
+assert (root / 'LICENSE.md').read_text().startswith('# Revised BSD License')
+PYLICENSE
+then
+	test-ok "npm and Python metadata preserve Revised BSD"
+else
+	test-fail "distribution license metadata differs from LICENSE.md"
+fi
+
 # The helpers resolve the repository root from their own location, so their
 # argument and prerequisite guards run before any provisioning or network work.
 

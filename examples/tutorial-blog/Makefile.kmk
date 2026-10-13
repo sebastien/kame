@@ -28,10 +28,12 @@ default : ./build/index.html ./build/author.html @(post-html) @(project-html) ./
 	f="$1"
 	slug="$(basename "$f" .md)"
 	section="$(basename "$(dirname "$f")")"
-	title="$(sed -n 's/^title: *"\(.*\)"/\1/p' "$f")"
-	date="$(sed -n 's/^date: *"\(.*\)"/\1/p' "$f")"
-	desc="$(sed -n 's/^description: *"\(.*\)"/\1/p' "$f")"
-	echo "<li><time>$date</time> <a href=\"./$section/$slug.html\">$title</a><p>$desc</p></li>"
+	# Quoted single-line metadata is literal HTML text, not markup.
+	html_text() { sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'; }
+	title="$(sed -n 's/^title: *"\(.*\)"/\1/p' "$f" | html_text)"
+	date="$(sed -n 's/^date: *"\(.*\)"/\1/p' "$f" | html_text)"
+	desc="$(sed -n 's/^description: *"\(.*\)"/\1/p' "$f" | html_text)"
+	printf '<li><time>%s</time> <a href="./%s/%s.html">%s</a><p>%s</p></li>\n' "$date" "$section" "$slug" "$title" "$desc"
 	EOF
 
 ./build/index.html : @(posts) @(projects) ./templates/header.html ./templates/footer.html ./build/tools/row.sh

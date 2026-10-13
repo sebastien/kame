@@ -1,5 +1,5 @@
 # A small runnable build: include shared values, then make one file.
-include ./messages.kmk
+(include ./messages.kmk)
 default : ./build/greeting.txt
 ./build/greeting.txt :
 	mkdir -p ./build

@@ -35,6 +35,8 @@ typedef struct km_event {
 } km_event;
 
 km_host *km_host_new(void);
+// start/start_graph: 0 admitted, -1 failed with a queued terminal, -2 not
+// admitted because the allocation-free rejected-event slot needs Next draining.
 int km_host_start(km_host *, int64_t, so_Slice, so_Slice, so_String, so_Slice, int64_t, so_int, bool);
 int km_host_start_graph(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool);
 int km_event_stage_field(km_event *, int, int);
@@ -47,6 +49,7 @@ int km_host_active(km_host *);
 int km_host_cache_lock(km_host *, so_String, int);
 void km_host_cache_unlock(km_host *, int);
 void km_host_force_waitpid_failure(km_host *);
+void km_event_force_allocation_failure(int);
 void km_event_free(km_event *);
 void km_host_free(km_host *);
 int km_cli_install_signals(void);
@@ -60,6 +63,8 @@ int km_cli_environment_copy(so_Slice);
 bool km_cli_environment_names_case_insensitive(void);
 int64_t km_file_modtime(so_String, bool);
 bool km_file_watch_stamp(so_String, so_Slice);
+int km_file_sync(void *);
+int km_file_sync_parent(so_String);
 typedef struct km_watch km_watch;
 km_watch *km_watch_new(void);
 void km_watch_begin(km_watch *);

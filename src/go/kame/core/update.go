@@ -18,7 +18,9 @@ const (
 )
 
 // Event narrows an UpdateKind with its payload. A value event transfers Value
-// ownership to the receiver. The zero event is the "no update" sentinel.
+// ownership to the receiver. Diagnostic is borrowed from the node until its
+// next invalidation or engine teardown: do not free it; clone it before retaining
+// it beyond that lifetime. The zero event is the "no update" sentinel.
 type Event struct {
 	Kind         UpdateKind
 	NodeID       int64
@@ -57,6 +59,7 @@ func (s *Subscription) pushValue(event Event) {
 // Next returns the next retained update in publication order, or the zero
 // event when the queue is empty. A terminal event with a zero order was
 // installed for a late subscriber and is delivered after all queued updates.
+// Invalidation discards undelivered terminals from the obsolete generation.
 func (s *Subscription) Next() Event {
 	if s.terminal.Kind != UpdateNone && s.terminal.Order != 0 &&
 		(len(s.updates) == 0 || s.updates[0].Order >= s.terminal.Order) &&

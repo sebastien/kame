@@ -154,7 +154,7 @@ A body is a sequence of literal text, inline expansions, and nested blocks.
 Write `L(x)` for the lowering of `x`. Literal text lowers to a string literal,
 and an inline `@(E)` lowers to `E`. A reference is written as an expression, for
 example `@(post.title)`. A body `B1 ... Bn` lowers to `(template-cat L(B1) ... L(Bn))`,
-and an empty body lowers to `(cat)`, the empty string.
+and an empty body lowers to `(template-cat)`, the empty string.
 Blocks lower as follows:
 
 ```text
@@ -172,16 +172,17 @@ L(@raw ... @end)                     = the raw text as a string literal
 Blocks nest arbitrarily. Lowering happens when the template is parsed, so a
 malformed template fails before any body text is produced.
 
-### Recipe Bodies
+### External-Shell Recipe Bodies
 
-A rule recipe body is a document template in `plain` style whose rendered output
+An external-shell rule recipe body is a document template in `plain` style whose rendered output
 is the shell script. Directive lines are recognized by the same keyword-gated,
 whole-line rule as any document template, and each is removed together with its
 rule indent and line ending. Selected body lines render as shell text, so
 indentation inside a branch is preserved. Inline `@(...)` and selectors keep
 their string-template meaning, and a non-directive line such as a comment
 carrying `@media` is emitted unchanged. `016`'s escaping rules (`@@`, `\@`, and
-`@raw`) apply to recipes identically.
+`@raw`) apply to external-shell recipes identically. Kash recipes parse directly
+as Kash and do not use this template/escaping layer (`038-direct-kash-and-values.md`).
 
 ### Whitespace
 
@@ -367,16 +368,19 @@ refer to that file rather than to the caller.
 
 ## Formatting
 
-Document templates are data, not Kame sources. `kame do fmt` does not rewrite
-them, and a verbatim string literal used as a template is preserved byte for
-byte inside a definition. Formatting a definition or script that contains a
+Document templates are data, not script sources. Default script-mode
+`kame do fmt` does not rewrite their directives. Explicit
+`kame do fmt --lang template` formats document directives while preserving host
+document bytes, under `030-template-extensions.md`; select `--comment STYLE`
+when required. A verbatim string literal used as a template is preserved byte
+for byte inside a definition. Formatting a definition or script that contains a
 verbatim literal is idempotent.
 
 ## Related Specifications
 
 `004-language.md` defines the control forms and
 syntax, `005-evaluation.md` defines lazy evaluation and scope/dependency
-behavior, `007-library.md` defines `cat`, `text`, and `render`, `009-cli.md`
+behavior, this specification defines `template-cat`, `text`, and `render`, `009-cli.md`
 defines `do render`, and `011-diagnostics.md` registers the diagnostic codes.
 
 ## Template Extensions
@@ -391,7 +395,7 @@ batch comment conventions, canonical formatting, and loop index/key bindings.
   true and its `@else` body otherwise.
 - `@elif` chains select the first true branch; a false chain renders `@else` or
   nothing, and the chain lowers to one variadic `if` expression.
-- A recipe body removes `@if`/`@else`/`@end` directive lines with their rule
+- An external-shell recipe body removes `@if`/`@else`/`@end` directive lines with its rule
   indent and renders only the selected branch lines as shell text.
 - `@for([x] xs)` renders its body once per item in order; an optional separator
   is inserted between results and nowhere else.

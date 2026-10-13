@@ -15,14 +15,14 @@ import (
 )
 
 type Context struct {
-	Program     *Program
-	Engine      *core.EngineContext
+	Program               *Program
+	Engine                *core.EngineContext
 	TrackUnvalidatedReads bool
-	Scope       *Scope
-	Run         mem.Allocator
-	Requests    *host.Queue
-	Cwd         string
-	Environment []string
+	Scope                 *Scope
+	Run                   mem.Allocator
+	Requests              *host.Queue
+	Cwd                   string
+	Environment           []string
 	// HasEnvironment binds a complete snapshot, including an empty environment.
 	HasEnvironment bool
 	// DefinitionNamespace identifies an immutable runtime environment and phase.
@@ -71,7 +71,9 @@ type Context struct {
 	RecoverFailures    bool
 	ReserveEnv         bool
 	DisableMemo        bool
-	evaluationDepth int
+	// Dynamic expressions must not lend callable ASTs past their parse lifetime.
+	CloneCallableAST bool
+	evaluationDepth  int
 }
 
 type operationState struct {
@@ -424,11 +426,15 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 	if kind == host.RequestReadFile && host.PayloadText(payload, host.FieldOp) == host.OpWildcard && strings.IndexByte(name, '\\') >= 0 {
 		// Escapes encode matching provenance, not different filesystem authority.
 		a := c.Run
-		if a == nil { a = mem.System }
+		if a == nil {
+			a = mem.System
+		}
 		decoded := slices.Clone(a, []byte(name))
 		n := 0
 		for i := 0; i < len(name); i++ {
-			if name[i] == '\\' && i+1 < len(name) { i++ }
+			if name[i] == '\\' && i+1 < len(name) {
+				i++
+			}
 			decoded[n] = name[i]
 			n++
 		}
@@ -460,7 +466,7 @@ func (c *Context) TakeCompletion() core.Completion {
 	return completion
 }
 
-// Call invokes a closure, operation, or Kash callable with already evaluated values.
+// Call borrows already evaluated values; the caller retains their ownership.
 func (c *Context) Call(callable core.Value, values []core.Value) Result {
 	if c == nil {
 		return failure(mem.System, "EXPR_INVALID", source.Span{}, "expected a function")
@@ -468,7 +474,27 @@ func (c *Context) Call(callable core.Value, values []core.Value) Result {
 	if c.Program == nil || callable.Kind != core.Callable {
 		return failure(c.Run, "EXPR_INVALID", source.Span{}, "expected a function")
 	}
-	return c.Program.callValues(callable.Callable.(*Function), values, c, c.Span)
+	// Embedders can supply malformed/cyclic graphs. Validate before Clone,
+	// which (unlike operation validation) assumes a finite owned tree.
+	for i := range values {
+		if !borrowableValue(values[i], 0) {
+			return failure(c.Run, "EXPR_INVALID", c.Span, "argument nesting must be below 256; cyclic values are unsupported")
+		}
+	}
+	owned := slices.Make[core.Value](c.Run, len(values))
+	for i := range values {
+		owned[i] = borrowValue(c.Run, values[i])
+	}
+	result := c.Program.callValues(callable.Callable.(*Function), owned, c, c.Span)
+	freeValues(c.Run, owned)
+	return result
+}
+
+func borrowableValue(value core.Value, depth int) bool {
+	if depth >= 256 { return false }
+	for i := range value.List { if !borrowableValue(value.List[i], depth+1) { return false } }
+	for i := range value.Record { if !borrowableValue(value.Record[i].Value, depth+1) { return false } }
+	return true
 }
 
 // CallAt supplies a stable ordinal for callbacks resumed within a collection

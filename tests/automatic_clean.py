@@ -393,7 +393,7 @@ def main(binary: str) -> None:
 		assert clean(binary, root)["removed"] == 0 and (root / "input").exists()
 
 		root = base / "include-edit"
-		project(root, "include ./rules.kmk\n")
+		project(root, "(include ./rules.kmk)\n")
 		(root / "rules.kmk").write_text("default : ./build/out\n./build/out : ./input\n\tcp @< @>\n")
 		run(binary, root)
 		with (root / "rules.kmk").open("a") as source:

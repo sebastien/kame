@@ -11,6 +11,7 @@ test-start "T010-07 wasm cat and primary materialization"
 cd "$CLI_ROOT"
 
 make dist-wasm >/dev/null
+cli_build
 
 project="$TMPDIR/wasm-cat"
 mkdir -p "$project/out"

@@ -291,9 +291,15 @@ func (m *Match) Free(a mem.Allocator) {
 
 // MatchTarget applies anchored, leftmost-shortest target matching.
 func (t *Target) MatchTarget(a mem.Allocator, target string) *Match {
-	var captures []CaptureValue
 	budget := expr.RegexStepLimit
-	matched, limited := t.match(a, target, 0, 0, &captures, &budget)
+	return t.MatchTargetBudget(a, target, &budget)
+}
+
+// MatchTargetBudget shares the work bound across target candidates, captures,
+// glob backtracking, and regex execution. Exhaustion returns a Limited match.
+func (t *Target) MatchTargetBudget(a mem.Allocator, target string, budget *int) *Match {
+	var captures []CaptureValue
+	matched, limited := t.match(a, target, 0, 0, &captures, budget)
 	if limited {
 		slices.Free(a, captures)
 		m := mem.Alloc[Match](a)
@@ -311,6 +317,7 @@ func (t *Target) MatchTarget(a mem.Allocator, target string) *Match {
 }
 
 func (t *Target) match(a mem.Allocator, target string, part int, offset int, captures *[]CaptureValue, budget *int) (bool, bool) {
+	if !expr.ChargeMatchStep(budget) { return false, true }
 	if part == len(t.Parts) {
 		return offset == len(target), false
 	}
@@ -332,6 +339,7 @@ func (t *Target) match(a mem.Allocator, target string, part int, offset int, cap
 		}
 	}
 	for end := offset + 1; end <= len(target); end++ {
+		if !expr.ChargeMatchStep(budget) { return false, true }
 		value := target[offset:end]
 		if found && value != previous {
 			continue
@@ -341,8 +349,10 @@ func (t *Target) match(a mem.Allocator, target string, part int, offset int, cap
 			slices.Free(a, result.Captures)
 			if result.Limited { return false, true }
 			if !result.Matched { continue }
-		} else if !matchPattern(p.Pattern, value) {
-			continue
+		} else {
+			matched, limited := expr.MatchGlobBudget(p.Pattern, value, budget)
+			if limited { return false, true }
+			if !matched { continue }
 		}
 		*captures = slices.Append(a, *captures, CaptureValue{Name: p.Name, Text: value})
 		matched, limited := t.match(a, target, part+1, end, captures, budget)
@@ -351,68 +361,6 @@ func (t *Target) match(a mem.Allocator, target string, part int, offset int, cap
 		*captures = (*captures)[:len(*captures)-1]
 	}
 	return false, false
-}
-
-func matchPattern(pattern string, value string) bool { return matchPatternAt(pattern, value, 0, 0) }
-
-func matchPatternAt(pattern string, value string, pi int, vi int) bool {
-	if pi == len(pattern) {
-		return vi == len(value)
-	}
-	if pattern[pi] == '*' {
-		cross := pi+1 < len(pattern) && pattern[pi+1] == '*'
-		next := pi + 1
-		if cross {
-			next++
-		}
-		for end := vi + 1; end <= len(value); end++ {
-			if !cross && value[end-1] == '/' {
-				break
-			}
-			if matchPatternAt(pattern, value, next, end) {
-				return true
-			}
-		}
-		return false
-	}
-	if pattern[pi] == '?' {
-		return vi < len(value) && value[vi] != '/' && matchPatternAt(pattern, value, pi+1, vi+1)
-	}
-	if pattern[pi] == '\\' {
-		return pi+1 < len(pattern) && vi < len(value) && pattern[pi+1] == value[vi] && matchPatternAt(pattern, value, pi+2, vi+1)
-	}
-	if pattern[pi] == '[' {
-		end := pi + 1
-		for end < len(pattern) && pattern[end] != ']' {
-			end++
-		}
-		return end < len(pattern) && vi < len(value) && classMatches(pattern[pi+1:end], value[vi]) && matchPatternAt(pattern, value, end+1, vi+1)
-	}
-	return vi < len(value) && pattern[pi] == value[vi] && matchPatternAt(pattern, value, pi+1, vi+1)
-}
-
-func classMatches(class string, value byte) bool {
-	invert, i, matched := false, 0, false
-	if len(class) != 0 && class[0] == '!' {
-		invert, i = true, 1
-	}
-	for i < len(class) {
-		if i+2 < len(class) && class[i+1] == '-' {
-			if value >= class[i] && value <= class[i+2] {
-				matched = true
-			}
-			i += 3
-		} else {
-			if value == class[i] {
-				matched = true
-			}
-			i++
-		}
-	}
-	if invert {
-		return !matched
-	}
-	return matched
 }
 
 func FormatTarget(a mem.Allocator, t *Target) string {

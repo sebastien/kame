@@ -21,65 +21,82 @@ Line endings `LF` and `CRLF` are accepted. Canonical formatting emits `LF`.
 A line whose first non-whitespace text begins with `#` or `//` is a comment.
 Comment markers inside strings, paths, or recipe text are literal.
 
-`include PATH` is a top-level source-composition directive. `PATH` is a quoted
-or unquoted path without whitespace, resolved relative to the including file.
-Includes are expanded depth-first at their declaration location; included
-definitions and rules share the caller's scope and source order. Includes are
-only valid for file-backed sources. Active-ancestry cycles are an error;
-repeated nonrecursive includes expand again and ordinary declaration registration
-checks duplicates.
+`(include PATH)` and `(include? PATH)` are source-composition forms, not runtime
+operations. Each takes exactly one literal explicit path atom (`./`, `../`, or
+`/` prefix) or noninterpolated double-quoted string. String escapes are decoded;
+empty paths, NUL, glob/pattern syntax, interpolation, references and computed
+paths are rejected. A quoted relative filename such as `"common.km"` is valid.
 
-`include? PATH` follows the same grammar and expansion order, but ignores a
-missing file. Existing unreadable files, directories, malformed sources, and
-cycles still fail before execution. AST JSON emits `optional: true` for this
-form; formatting retains `include?`. Native source tracking retains missing
-optional path identities so watch can notice their later creation. The directive
-is source configuration and follows ordinary include loading policy.
+Selected paths resolve relative to their containing file, not evaluation cwd.
+Includes expand depth-first at their declaration location, sharing caller scope
+and source order. Included text inherits the caller's outer language regardless
+of filename suffix: a value program cannot import rules, even from a `.kmk`
+file. Selected includes require a file-backed source. Active-ancestry cycles
+are errors; repeated nonrecursive includes expand again and ordinary declaration
+registration checks duplicates. Path identity is normalized lexically; this is
+not a claim of physical realpath or symlink-cycle detection.
 
-### Conditional source declarations
+`include?` skips only a missing file. Existing unreadable files, directories,
+malformed sources and cycles still fail before execution. AST JSON retains
+`optional: true`; formatting retains the parenthesized form. Source tracking
+retains selected missing optional path identities so watch can notice creation.
 
-Kame value (`.km`) and rule (`.kmk`) sources select declarations with
-`when PREDICATE`, an optional `otherwise`, and a matching `end`:
+### Conditional source composition
+
+Kame value (`.km`) and rule (`.kmk`) sources select includes with ordinary `if`
+syntax at top level:
 
 ```kmk
 mode ?= "debug"
-when (eq mode "debug")
-include debug.kmk
-otherwise
-include release.kmk
-end
+(if (eq mode "debug")
+  (include ./debug.kmk)
+  (include ./release.kmk))
+(if (eq mode "local") (include? "local.kmk"))
 ```
 
-These are top-level source markers, with rule-source markers and declarations
-flush left and ordinary indentation for recipes. Branches may nest. Each
-physical source must balance its markers; an included file cannot close its
-caller's branch. More than one `otherwise`, a missing predicate, or an unmatched
-marker is `PARSE_ERR`. The parser checks inactive text for syntax errors, and
-formatting and AST inspection retain both branches and their authored byte
-spans (`when`, `otherwise`, and `end-when` AST kinds).
+An `if` containing a composition include is a composition-only form. Every body
+slot, including an optional else, must be an include, a nested composition `if`,
+or `:nil`. It accepts multiple test/body pairs and an optional trailing else;
+omitting else selects nothing when no test is true. Definitions and rules belong
+in included branch files, not directly in an `if` body. Ordinary value-only `if`
+remains a runtime expression. Both use the same truthiness: only `:nil` and
+`:false` are false; zero and empty collections or strings are true.
 
-Selection happens before registration or execution. Predicates must return a
-boolean and may use pure expressions and lazy definitions selected earlier in
-source order, including earlier selected includes and earlier explicit `.km`
-or `.kmk` inputs. They cannot depend on subsequent declarations or the effects
-of earlier value statements. Literal `--define NAME=VALUE` and case-sensitive
-`KAME_NAME` configuration follow ordinary override precedence; the final
-registration still validates explicit override names. Unused definitions remain
-lazy. A predicate inside an inactive branch is not evaluated.
+Selection happens before final registration or execution. Conditions may use
+pure expressions and lazy definitions selected earlier in source order,
+including earlier selected includes and earlier explicit `.km` or `.kmk`
+inputs. They cannot depend on later declarations or effects of earlier value
+statements. Explicit literal defines and case-sensitive `KAME_NAME`
+configuration follow ordinary override precedence and the caller's environment
+authority; final registration still validates explicit override names. This
+configuration does not authorize host operations in conditions. Restrictions
+propagate through lazy definitions and helpers; runtime grants do not grant
+conditions host/effect authority. Unused definitions remain lazy and conditions
+inside an inactive branch are not evaluated. Final runtime definitions retain
+their ordinary forward-reference and lazy semantics.
 
-Only selected declarations enter the shared scope. Inactive includes are not
-read, tracked, or cycle-checked, even when required or missing. Selected includes
-retain the ordinary required/optional and active-ancestry rules. Inline and stdin
-sources support conditional declarations but a selected include still requires
-a file-backed source. A nonboolean predicate reports `EXPR_INVALID`; unknown
-references, cycles, capability use, and effectful operations fail with their
-ordinary diagnostic codes before recipes or statements execute. Runtime grants
-do not grant predicates host authority.
+Only selected declarations enter shared scope. Inactive includes are not read,
+tracked or cycle-checked. Inline and stdin sources can contain composition `if`,
+but a selected include still requires a file-backed source. Unknown references,
+cycles, capability use and effectful operations fail with their ordinary codes
+before recipes or statements execute.
 
-Embedding hosts compose source branches before compilation. Passing authored
-conditional markers directly to evaluator registration fails `FEATURE_UNSUP`
-rather than registering both branches. The portable predicate query and the
-native/JavaScript source loaders share predicate evaluation semantics.
+`include` and `include?` application heads are reserved structurally: they are
+invalid in value positions, conditions, definitions, lambdas, containers and
+recipe expressions, even in unused definitions or inactive value branches.
+Parsing checks all authored branches and retains their spans for formatting and
+AST inspection. Malformed literal operands report `PARSE_ERR`; invalid placement
+or composition bodies report `EXPR_INVALID`.
+
+Legacy line-oriented `include PATH`, `include? PATH`, and
+`when`/`otherwise`/`end` source markers are rejected with migration guidance,
+not accepted as compatibility aliases. Parenthesize literal includes; extract
+legacy branch declarations into files and select those files with `if`.
+Document-template `@include` and its control directives are unchanged.
+
+Embedding hosts compose source branches before compilation; composition forms
+are not evaluator operations. The portable condition query and native/JavaScript
+source loaders share condition semantics.
 
 Parsers return an AST and zero or more diagnostics. Invalid syntax must never be
 silently discarded. Recovery may preserve malformed recipe interpolation as
@@ -359,13 +376,24 @@ parameters. `((f _ __ ___))` is `([a b c] (f a b c))`. Placeholders are
 positional argument references, not names. Grammar, semantics, and formatting
 are specified in `014-patterns.md`.
 
+Sections synthesize at most 4096 parameters (`_0` through `_4095`); gaps count
+toward that limit. Larger placeholder positions are rejected before allocation.
+
 ### Pattern Literals
 
-A bare path atom or a quoted string without interpolation whose text contains
-pattern groups is a pattern value. Groups with glob content (`{*}`, `{**}`,
+An expression path atom with authored pattern groups, or a quoted string without
+interpolation whose text contains pattern groups, is a pattern value. Groups
+with glob content (`{*}`, `{**}`,
 `{name:*}`, `{name:**}`) are matchers; `{name}` and `{_N}` are expansion
 references. Pattern values, matching, and the pattern form of `replace` are
 specified in `014-patterns.md`. Rule target templates are unchanged.
+
+Paths may interpolate literal prefixes and suffixes around fully authored groups:
+`@(ROOT)/{name:*}.@(EXT)` constructs a matcher and `@(OUT)/{name}` constructs an
+expansion reference pattern. Inserted values cannot inject pattern syntax.
+Interpolation inside a group is rejected; deliberate dynamic syntax uses
+`(pattern TEXT)`. These pattern paths do not enumerate filesystem globs. See
+`038-direct-kash-and-values.md` for roots, provenance and suspension.
 
 Pattern `replace` evaluates its replacement expression only after matching,
 with named captures available as local string bindings. Both `./{name}` and
@@ -737,7 +765,9 @@ name matching `[A-Za-z_][A-Za-z0-9_]*`. Empty values are valid. A semicolon
 inside a quoted input or balanced expression remains part of that input.
 Alternatively, a header may end with a Kame metadata record:
 `target : inputs ; [shell: kash env: [MODE: mode]]`. The supported keys are
-`shell` and `env`; duplicate and unknown keys are errors. `env` contains valid
+`shell` and `env` for all rule kinds. Service-specific keys are defined in
+`024-managed-services.md`, and file-rule `executor` in `032-remote-execution.md`;
+duplicate keys and keys unsupported for the rule kind are errors. `env` contains valid
 environment names with string values, including pure Kame expressions. Settings
 are evaluated under planning policy before prerequisite recipes execute.
 `shell` overrides the build-wide `SHELL` definition for this rule. It accepts the
@@ -804,10 +834,10 @@ semantics.
 Thus a statement `42` is an integer and a statement `:nil` is nil. Balanced
 expressions may span lines, and comments/blank lines do not become statements.
 
-`include PATH` retains the source-composition behavior above. Included sources
-retain their parser and spans: a `.km` source can supply definitions to a `.kmk`
-program without being reparsed as recipe text. A value program cannot import
-rule declarations through an include to circumvent its grammar restriction.
+`(include PATH)` retains the source-composition behavior above. Included sources
+retain authored spans and inherit the caller's outer parser, not the included
+filename's suffix. A `.km` file can supply definitions to a `.kmk` caller; a
+value program cannot import rule declarations to circumvent its grammar restriction.
 Kash inclusion is not added by these execution conventions.
 
 File execution, named value entries, expression-statement result selection,
@@ -861,6 +891,17 @@ expression definitions and verbatim string definitions remain supported.
 
 ## Acceptance Tests
 
+- Literal required/optional includes and composition-only `if` parse and format
+  idempotently, retaining authored spans and all inactive branches.
+- Composition accepts multiple test/body pairs, optional else, nested `if` and
+  `:nil`; conditions share ordinary truthiness and see only earlier selected
+  definitions and authorized explicit configuration, never host effects.
+- Includes inherit caller language, resolve source-relative paths and track only
+  selected files (including selected missing optional paths); required failures,
+  non-missing optional failures and active-ancestry cycles remain errors.
+- Computed/interpolated/empty/glob/NUL include paths and reserved include heads
+  in value positions fail structurally even when unused or inactive. Legacy
+  source directives produce migration guidance; template `@include` is unchanged.
 - Continued declarations execute and format idempotently, retaining authored
   spans, CRLF behavior, comment boundaries and shell recipe backslashes.
 - Each language package parses and formats its syntax without using the script

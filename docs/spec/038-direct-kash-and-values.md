@@ -224,6 +224,22 @@ path with authored glob syntax produces a tracked path list without requiring a
 no authored glob syntax remains a literal path even if an inserted value
 contains metacharacters. Capture-pattern groups retain their distinct grammar.
 
+Expression path atoms can construct capture patterns with interpolated literal
+prefixes and suffixes. Authored groups take precedence over filesystem globs:
+`@(ROOT)/{name:*}.@(EXT)` is a match pattern, while `@(OUT)/{name}` is an
+expansion pattern. The interpolations evaluate through the same retained-operand
+mechanism as other paths and return an owned pattern value, not a path list.
+Inserted braces, backslashes, glob/regex punctuation and template-looking bytes
+remain literal pattern data and cannot introduce groups or matching syntax.
+
+Each capture/reference group, including its name and matcher/regex content,
+must be fully authored in one static segment. Interpolation inside a group,
+such as `./{@(NAME):*}` or `./{name:@(MATCHER)}`, is a source error. Use the
+explicit `(pattern TEXT)` boundary to deliberately compile constructed pattern
+syntax. Interpolated strings remain strings; raw Kash words and rule headers
+retain their separate grammars. The decoded computed path must still satisfy
+the explicit-root, text-only and no-NUL rules above.
+
 A caller can deliberately supply a complete string pattern to `wildcard`; that
 argument retains its ordinary pattern-string contract. `wildcard` also accepts
 already-expanded path lists without interpreting their member text again, and

@@ -3,6 +3,7 @@ package eval
 import (
 	"kame/core"
 	"kame/lang/expr"
+	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 )
@@ -39,7 +40,7 @@ func (p *Program) pathExpression(scope *Scope, expression *expr.Expr, c *Context
 		glob = false
 		for i := range expression.Parts { if expression.Parts[i].Expr == nil && pathGlob(expression.Parts[i].Text) { glob = true } }
 	}
-	if result.Waiting || result.Diagnostic.Code != "" || !glob || expression.LiteralPath { return result }
+	if result.Waiting || result.Diagnostic.Code != "" || result.Value.Kind == core.Pattern || !glob || expression.LiteralPath { return result }
 	if p.Registry == nil { result.Free(c.Run); return failure(c.Run, "OP_UNKNOWN", expression.Span, "glob expressions require wildcard") }
 	operation := p.Registry.lookup("wildcard")
 	if operation == nil { result.Free(c.Run); return failure(c.Run, "OP_UNKNOWN", expression.Span, "glob expressions require wildcard") }
@@ -64,12 +65,22 @@ func (p *Program) pathValue(scope *Scope, expression *expr.Expr, c *Context) Res
 	text, pattern := strings.NewBuilder(c.Run), strings.NewBuilder(c.Run)
 	defer text.Free()
 	defer pattern.Free()
+	var instantiated *expr.Pattern
+	defer instantiated.Free(c.Run)
 	next := 0
+	characterClass, escaped := false, false
 	for i := range expression.Parts {
 		part := expression.Parts[i]
 		if part.Expr == nil {
 			if expression.LiteralPath { text.WriteString(part.Text) } else { appendPathText(&text, part.Text) }
 			pattern.WriteString(part.Text)
+			// Only authored bytes can open or close a glob character class.
+			for j := 0; j < len(part.Text); j++ {
+				b := part.Text[j]
+				if escaped { escaped = false; continue }
+				if b == '\\' { escaped = true; continue }
+				if b == '[' && !characterClass { characterClass = true } else if b == ']' && characterClass { characterClass = false }
+			}
 			continue
 		}
 		value := operands.Values[next]
@@ -80,13 +91,26 @@ func (p *Program) pathValue(scope *Scope, expression *expr.Expr, c *Context) Res
 		text.WriteString(value.Text)
 		for j := 0; j < len(value.Text); j++ {
 			b := value.Text[j]
-			if b == '*' || b == '?' || b == '[' || b == '\\' { pattern.WriteByte('\\') }
+			if b == '*' || b == '?' || b == '[' || b == '\\' || (characterClass && (b == ']' || b == '-' || b == '!' || b == '^')) { pattern.WriteByte('\\') }
 			pattern.WriteByte(b)
 		}
 	}
 	name := text.String()
 	if !(strings.HasPrefix(name, "/") || strings.HasPrefix(name, "./") || strings.HasPrefix(name, "../")) || strings.IndexByte(name, 0) >= 0 {
 		return failure(c.Run, "EXPR_INVALID", expression.Span, "interpolated path requires an explicit /, ./ or ../ root and no NUL")
+	}
+	if expression.Pattern != nil {
+		instantiated = expression.Pattern.Clone(c.Run)
+		for i := range instantiated.Parts {
+			part := &instantiated.Parts[i]
+			if part.Kind != expr.PatternInterpolation { continue }
+			part.Kind = expr.PatternLiteral
+			part.Text = owned(c.Run, operands.Values[part.Index].Text)
+		}
+		canonical := expr.CanonicalPattern(c.Run, instantiated)
+		value := core.NewPattern(c.Run, canonical)
+		mem.FreeString(c.Run, canonical)
+		return Result{Value: value}
 	}
 	value := core.NewString(c.Run, name)
 	value.GlobPattern = owned(c.Run, pattern.String())

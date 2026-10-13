@@ -1,4 +1,4 @@
-include ./publication.km
+(include ./publication.km)
 
 default : ./public/index.txt
 

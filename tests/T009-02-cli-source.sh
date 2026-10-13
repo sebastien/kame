@@ -74,7 +74,7 @@ task child :
 	@(out! "child\n")
 EOF
 cat > includes/Makefile.kmk <<'EOF'
-include ./child.kmk
+(include ./child.kmk)
 task default : child
 	@(out! "@(name)\n")
 EOF
@@ -90,10 +90,10 @@ included
 test-step "include cycles fail before compilation"
 mkdir -p include-cycle
 cat > include-cycle/first.kmk <<'EOF'
-include ./second.kmk
+(include ./second.kmk)
 EOF
 cat > include-cycle/second.kmk <<'EOF'
-include ./first.kmk
+(include ./first.kmk)
 EOF
 (
 	cd include-cycle

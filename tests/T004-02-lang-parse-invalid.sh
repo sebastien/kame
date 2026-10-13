@@ -68,4 +68,16 @@ cli_run -- do parse --json --lang expr "$(lang_fixture invalid/expr-empty-applic
 cli_expect_status 1
 cli_expect_printable "$CLI_OUT"
 
+test-step "EOF list errors report the missing delimiter once"
+eof_source="$(mktemp "${TMPDIR:-/tmp}/kame-list-eof.XXXXXX")"
+printf '%s' '[1 2' >"$eof_source"
+cli_run --stdin "$eof_source" -- do parse --json --lang expr
+rm -f "$eof_source"
+cli_expect_status 1
+if jq -se --arg message "unclosed list; expected ']'" 'length == 1 and .[0].diagnostic.code == "PARSE_ERR" and .[0].diagnostic.message == $message' "$CLI_OUT" >/dev/null; then
+	test-ok "one actionable list EOF diagnostic"
+else
+	test-fail "list EOF diagnostics were misleading or duplicated"
+fi
+
 test-end

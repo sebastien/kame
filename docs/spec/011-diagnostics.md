@@ -20,6 +20,14 @@ Diagnostics are not ad-hoc strings assembled at failure sites. Parser,
 evaluator, planner, runtime, host, and CLI code construct or enrich one
 structured diagnostic. Human, plain, and JSON output render that same value.
 
+New and revised messages should identify established constraints: arity failures
+give expected and actual counts, type failures give the actual kind, and missing selector contexts
+name the required input, output or argument context. An EOF delimiter failure
+names the missing delimiter without an additional whitespace error. A recognized
+outer-language mismatch names the appropriate language rather than suggesting
+an unrelated separator fix. Recovery actions use structured `tips` where the
+diagnostic representation supports them; changing wording does not rename codes.
+
 ## Diagnostic Model
 
 Every diagnostic has:
@@ -106,10 +114,13 @@ meaning by themselves.
 | `TOOL_UNKNOWN` | error | Tool reference used without a tool resolver |
 | `TOOL_MISSING` | error | Referenced tool was not found or is not executable |
 | `EXPR_INVALID` | error | Invalid expression value, type, or arity |
+| `JSON_INVALID` | error | Malformed JSON input |
+| `USER_ERROR` | error | Explicit user failure from `fail!` |
 | `EVAL_DEPTH` | error | Recursive evaluation exceeds the 32-expression stack-depth limit |
 | `DEF_INVALID` | error | Invalid definition or binding form |
-| `DEF_ESCAPE` | error | function value escapes its scope; define it with (def name [params] body) instead |
+| `DEF_ESCAPE` | error | Binding a callable into an ancestor would strand its captured scope; ordinary returned callables may retain their owners |
 | `PAT_INVALID` | error | Invalid pattern combination or missing pattern capture reference |
+| `PAT_LIMIT` | error | Pattern matching exceeded its work budget |
 | `TPL_PARSE` | error | Malformed template directive, argument list, or verbatim literal |
 | `TPL_BLOCK` | error | Unterminated, stray, or mismatched template block directive |
 | `TPL_STYLE` | error | Missing or unknown template comment style |
@@ -119,10 +130,13 @@ meaning by themselves.
 | `TGT_NO_DEFAULT` | error | No target or value entry was requested and the required default is absent |
 | `TGT_NO_RULE` | error | No rule or source for target |
 | `TGT_AMBIG` | error | More than one rule instance matches |
+| `TGT_ARGUMENT` | error | Invalid, duplicate, missing, unknown or shadowing target argument/parameter |
 | `ENV_CONFLICT` | error | Active shared rule instance has a different recipe environment |
 | `DEP_CYCLE` | error | Dependency cycle |
 | `RECIPE_FAIL` | error | Recipe process exited unsuccessfully |
 | `RECIPE_TIMEOUT` | error | Recipe process timed out |
+| `CAPTURE_LIMIT` | error | Command substitution exceeded its capture byte limit |
+| `CAPTURE_ENCODING` | error | Captured text is not valid UTF-8 |
 | `SERVICE_READY_TIMEOUT` | error | Service did not become ready before its timeout |
 | `SERVICE_START_FAILED` | error | Service exited before becoming ready |
 | `SERVICE_EXITED` | error | Service exited unexpectedly after becoming ready |
@@ -131,13 +145,19 @@ meaning by themselves.
 | `EXEC_CANCELLED` | error | Execution was cancelled |
 | `HOST_FAIL` | error | Host request, spawn, pipe, wait, or signal failure |
 | `FS_ERR` | error | Filesystem read, write, stat, or glob failure |
+| `RES_INVALID` | error | Invalid resource identity, URI or protocol use |
+| `PLUGIN_CONFIG` | error | Invalid or conflicting plugin declarations |
+| `PLUGIN_PROTOCOL` | error | Invalid plugin request/response shape, identity or value |
+| `PLUGIN_LIMIT` | error | Plugin request or response exceeds its byte limit |
+| `PLUGIN_FAIL` | error | Plugin host/process reports an operation failure |
+| `PLUGIN_TIMEOUT` | error | Plugin operation exceeded its timeout |
 | `OUTPUT_MISSING` | error | Successful recipe omitted a declared output |
 | `OUTPUT_CONFLICT` | error | Declarative yield conflicts with a shell command |
 | `CACHE_UNUSABLE` | warning | Cache record or manifest cannot be used |
 | `CLEAN_STATE` | error/warning | Output ownership cannot be persisted or cleanup requires safety/recovery review; uncertain production is a warning when ordinary publication remains valid |
 | `CLEAN_BUSY` | error | A cooperating producer, service or cleanup operation holds the project cleanup boundary |
 | `FEATURE_UNSUP` | error | Valid but unsupported feature on this target |
-| `NO_MEMORY` | fatal | Allocator or fixed arena exhausted |
+| `NO_MEMORY` | fatal | Allocator or fixed heap budget exhausted |
 | `HANDLE_INVALID` | error | Invalid, stale, or foreign ABI handle |
 | `CMD_UNKNOWN` | error | Unknown CLI command |
 | `OPT_UNKNOWN` | error | Unknown CLI option |
@@ -147,6 +167,9 @@ meaning by themselves.
 | `BUILD_NO_SOURCE` | error | No build source was found |
 | `NO_ARTIFACT` | error | Requested target has no readable artifact |
 | `VAL_NOT_JSON` | error | Human `do cat` definition value has no plain JSON representation |
+
+Embedding-wrapper errors such as `DISPOSED` identify client lifecycle misuse,
+not portable runtime diagnostics; they are documented with the embedding API.
 
 ## Rules
 

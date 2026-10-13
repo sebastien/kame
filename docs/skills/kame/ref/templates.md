@@ -11,8 +11,9 @@ Hello, @(name). There are @(count files) files.
 
 `@(reference)` is a reference expansion; `@(operation args...)` is an expression
 expansion. Do not use `@{reference}`. Lists render with one space between items;
-nil renders empty. Records and bytes require explicit conversion (`str` or
-`text`) rather than direct interpolation.
+nil renders empty. Records need explicit JSON encoding (`json`); bytes need
+explicit UTF-8 conversion (`text`) rather than direct interpolation. `str` is
+scalar-only and does not serialize records.
 
 | Rule selector | Meaning |
 | --- | --- |
@@ -117,14 +118,18 @@ default : ./build/page.html
 ```
 
 The literal's content is untouched until `render`; a longer quote delimiter
-allows triple quotes in its content. `cat` concatenates renderable values;
+allows triple quotes in its content. `template-cat` is the document-rendering
+lowering primitive (nil is empty and lists join with spaces);
 `text` converts valid UTF-8 bytes to a string.
 
 ## Recipes and verification
 
-Recipes are `plain` document templates rendering to one shell script. You can
+External-shell recipes are `plain` document templates rendering to one shell script. You can
 use `@if`/`@for` directives there; selected non-directive lines remain shell
 text, with recipe-local state persisting between lines.
+
+Direct Kash recipes (`SHELL = kash` or `[shell: kash]`) are parsed as Kash,
+not expanded as document templates; see [Kash](./kash.md).
 
 ```sh
 kame do run --lang expr --allow-read -c '(render ./page.html [title: "Hello"])'

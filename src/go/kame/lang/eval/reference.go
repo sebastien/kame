@@ -16,23 +16,26 @@ func (p *Program) reference(scope *Scope, expression *expr.Expr, context *Contex
 	var result Result
 	firstPart := 1
 	if expression.Kind == expr.EnvironmentReference {
-		if p.Registry == nil { return failure(context.Run, "OP_UNKNOWN", expression.Span, "environment operation unavailable") }
+		if p.Registry == nil {
+			return failure(context.Run, "OP_UNKNOWN", expression.Span, "environment operation unavailable")
+		}
 		operation := p.Registry.lookup("env")
-		if operation == nil { return failure(context.Run, "OP_UNKNOWN", expression.Span, "environment operation unavailable") }
+		if operation == nil {
+			return failure(context.Run, "OP_UNKNOWN", expression.Span, "environment operation unavailable")
+		}
 		result = p.operation(scope, operation, expression.Items, context, expression.Span)
 		firstPart = 2
-	} else { result = name(scope, expression.Reference[0].Text, expression.Reference[0].Span, context) }
+	} else {
+		result = name(scope, expression.Reference[0].Text, expression.Reference[0].Span, context)
+	}
 	if result.Waiting || result.Diagnostic.Code != "" {
 		return result
 	}
 	for i := firstPart; i < len(expression.Reference); i++ {
 		part := expression.Reference[i]
 		next := p.referencePart(result.Value, part, context)
-		// Transfer: next clones out of result.Value, so release only a
-		// top-level wrapper here; nested shares still belong to next.
-		if result.Value.Kind == core.Callable {
-			freeCallables(context.Run, &result.Value)
-		}
+		// Selection borrows independent wrappers, so every source leaf can go.
+		freeCallables(context.Run, &result.Value)
 		result.Value.Free(context.Run)
 		result = next
 		if result.Diagnostic.Code != "" {
@@ -50,7 +53,7 @@ func (p *Program) referencePart(value core.Value, part expr.ReferencePart, conte
 		}
 		for i := range value.Record {
 			if value.Record[i].Key == part.Text {
-				return Result{Value: value.Record[i].Value.Clone(context.Run)}
+				return Result{Value: borrowValue(context.Run, value.Record[i].Value)}
 			}
 		}
 		return failure(context.Run, "REF_MISSING", part.Span, "record field not found")
@@ -69,22 +72,20 @@ func (p *Program) referencePart(value core.Value, part expr.ReferencePart, conte
 			found := false
 			for j := range value.Record {
 				if value.Record[j].Key == key {
-					fields = slices.Append(context.Run, fields, core.RecordField{Key: key, Value: value.Record[j].Value.Clone(context.Run)})
+					fields = slices.Append(context.Run, fields, core.RecordField{Key: key, Value: borrowValue(context.Run, value.Record[j].Value)})
 					found = true
 					break
 				}
 			}
 			if !found {
-				// Shallow: fields share callable storage with the source record,
-				// which still owns those scopes.
-				freeRecord(context.Run, fields)
+				// No fields transfer on rejection; each borrow owns its wrapper.
+				freeRecordWithCallables(context.Run, fields)
 				return failure(context.Run, "REF_MISSING", part.Span, "record field not found")
 			}
 			start = i + 1
 		}
 		result := Result{Value: core.NewRecord(context.Run, fields)}
-		// Shallow: NewRecord shallow-cloned callables shared with the source;
-		// the source and the result each own one logical share.
+		// NewRecord transfers the independent field wrappers into the result.
 		freeRecord(context.Run, fields)
 		return result
 	}
@@ -98,10 +99,14 @@ func (p *Program) referencePart(value core.Value, part expr.ReferencePart, conte
 			if index < 0 || index >= len(value.List) {
 				return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "index out of range")
 			}
-			return Result{Value: value.List[index].Clone(context.Run)}
+			return Result{Value: borrowValue(context.Run, value.List[index])}
 		}
 		if value.Kind == core.String {
-			index = normalizedIndex(index, utf8.RuneCountInString(value.Text))
+			length := utf8.RuneCountInString(value.Text)
+			index = normalizedIndex(index, length)
+			if index < 0 || index >= length {
+				return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "index out of range")
+			}
 			start := runeOffset(value.Text, index)
 			end := runeOffset(value.Text, index+1)
 			if start < 0 || end < 0 {
@@ -118,15 +123,15 @@ func (p *Program) referencePart(value core.Value, part expr.ReferencePart, conte
 		}
 		start, end := bounds.Start, bounds.End
 		if value.Kind == core.List {
-			bounds = normalizedSlice(start, end, len(value.List))
+			bounds = normalizedSlice(bounds, len(value.List))
 			if !bounds.OK {
 				return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "slice out of range")
 			}
 			start, end = bounds.Start, bounds.End
-			return Result{Value: core.NewList(context.Run, value.List[start:end])}
+			return Result{Value: borrowValue(context.Run, core.Value{Kind: core.List, List: value.List[start:end]})}
 		}
 		if value.Kind == core.String {
-			bounds = normalizedSlice(start, end, utf8.RuneCountInString(value.Text))
+			bounds = normalizedSlice(bounds, utf8.RuneCountInString(value.Text))
 			if !bounds.OK {
 				return failure(context.Run, "SEL_INDEX_INVALID", part.Span, "slice out of range")
 			}
@@ -142,7 +147,7 @@ func parseIndex(text string) (int, bool) {
 	if len(text) == 0 {
 		return 0, false
 	}
-	negative, index := false, 0
+	negative := false
 	if text[0] == '-' {
 		negative = true
 		text = text[1:]
@@ -150,16 +155,22 @@ func parseIndex(text string) (int, bool) {
 	if len(text) == 0 {
 		return 0, false
 	}
+	index := uint(0)
+	limit := ^uint(0) >> 1
+	if negative { limit++ }
 	for i := range text {
 		if text[i] < '0' || text[i] > '9' {
 			return 0, false
 		}
-		index = index*10 + int(text[i]-'0')
+		digit := uint(text[i]-'0')
+		if index > (limit-digit)/10 { return 0, false }
+		index = index*10 + digit
 	}
 	if negative {
-		index = -index
+		if index == 0 { return 0, true }
+		return -int(index-1)-1, true
 	}
-	return index, true
+	return int(index), true
 }
 
 func normalizedIndex(index int, length int) int {
@@ -186,6 +197,7 @@ func runeOffset(text string, index int) int {
 type sliceBounds struct {
 	Start int
 	End   int
+	EndOmitted bool
 	OK    bool
 }
 
@@ -200,7 +212,7 @@ func parseSlice(text string) sliceBounds {
 	if cut < 0 {
 		return sliceBounds{}
 	}
-	start, end, ok := 0, -2147483648, true
+	start, end, ok := 0, 0, true
 	if cut != 0 {
 		start, ok = parseIndex(text[:cut])
 	}
@@ -210,14 +222,15 @@ func parseSlice(text string) sliceBounds {
 	if cut+2 != len(text) {
 		end, ok = parseIndex(text[cut+2:])
 	}
-	return sliceBounds{Start: start, End: end, OK: ok}
+	return sliceBounds{Start: start, End: end, EndOmitted: cut+2 == len(text), OK: ok}
 }
 
-func normalizedSlice(start int, end int, length int) sliceBounds {
+func normalizedSlice(bounds sliceBounds, length int) sliceBounds {
+	start, end := bounds.Start, bounds.End
 	if start < 0 {
 		start = length + start
 	}
-	if end == -2147483648 {
+	if bounds.EndOmitted {
 		end = length
 	} else if end < 0 {
 		end = length + end
@@ -230,11 +243,15 @@ func normalizedSlice(start int, end int, length int) sliceBounds {
 
 func (p *Program) selector(text string, span source.Span, context *Context) Result {
 	_ = p
- if text == "@<?" {
-  if context.Phase == PlanningPhase || context.Phase == ResolvingPhase { return failure(context.Run, "PHASE_INVALID", span, "newer-input selection is available only while rendering a file recipe") }
-  if len(context.RuleFrames) == 0 || !context.RuleFrames[len(context.RuleFrames)-1].FileRule { return failure(context.Run, "SEL_NO_CONTEXT", span, "newer-input selector requires a file rule") }
-  return Result{Value: core.NewList(context.Run, context.RuleFrames[len(context.RuleFrames)-1].NewerInputs)}
- }
+	if text == "@<?" {
+		if context.Phase == PlanningPhase || context.Phase == ResolvingPhase {
+			return failure(context.Run, "PHASE_INVALID", span, "newer-input selection is available only while rendering a file recipe")
+		}
+		if len(context.RuleFrames) == 0 || !context.RuleFrames[len(context.RuleFrames)-1].FileRule {
+			return failure(context.Run, "SEL_NO_CONTEXT", span, "newer-input selector requires a file rule")
+		}
+		return Result{Value: core.NewList(context.Run, context.RuleFrames[len(context.RuleFrames)-1].NewerInputs)}
+	}
 	values := context.Args
 	offset := 1
 	present := context.HasArgs
@@ -258,11 +275,21 @@ func (p *Program) selector(text string, span source.Span, context *Context) Resu
 		offset = 2
 	}
 	if !present {
-		return failure(context.Run, "SEL_NO_CONTEXT", span, "selector has no context")
+		kind := "argument"
+		if offset == 2 {
+			if text[1] == '<' {
+				kind = "input"
+			} else {
+				kind = "output"
+			}
+		}
+		result := failure(context.Run, "SEL_NO_CONTEXT", span, kind+" selector "+text+" requires an "+kind+" context; none is available")
+		result.Diagnostic.Tips = slices.Append(context.Run, result.Diagnostic.Tips, cloneFailureText(context.Run, "use "+text+" in a rule recipe, or pass the "+kind+" value explicitly"))
+		return result
 	}
 	suffix := text[offset:]
 	if suffix == "*" {
-		return Result{Value: core.NewList(context.Run, values)}
+		return Result{Value: borrowValue(context.Run, core.Value{Kind: core.List, List: values})}
 	}
 	if suffix == "#" {
 		return Result{Value: core.Value{Kind: core.Int, Int: int64(len(values))}}
@@ -271,14 +298,14 @@ func (p *Program) selector(text string, span source.Span, context *Context) Resu
 		if len(values) == 0 {
 			return failure(context.Run, "SEL_INDEX_INVALID", span, "selector index is empty")
 		}
-		return Result{Value: values[0].Clone(context.Run)}
+		return Result{Value: borrowValue(context.Run, values[0])}
 	}
 	if bounds := parseSlice(suffix); bounds.OK {
-		bounds = normalizedSlice(bounds.Start, bounds.End, len(values))
+		bounds = normalizedSlice(bounds, len(values))
 		if !bounds.OK {
 			return failure(context.Run, "SEL_INDEX_INVALID", span, "selector slice out of range")
 		}
-		return Result{Value: core.NewList(context.Run, values[bounds.Start:bounds.End])}
+		return Result{Value: borrowValue(context.Run, core.Value{Kind: core.List, List: values[bounds.Start:bounds.End]})}
 	}
 	index, ok := parseIndex(suffix)
 	if !ok {
@@ -288,5 +315,5 @@ func (p *Program) selector(text string, span source.Span, context *Context) Resu
 	if index < 0 || index >= len(values) {
 		return failure(context.Run, "SEL_INDEX_INVALID", span, "selector index out of range")
 	}
-	return Result{Value: values[index].Clone(context.Run)}
+	return Result{Value: borrowValue(context.Run, values[index])}
 }

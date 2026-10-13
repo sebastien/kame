@@ -25,11 +25,11 @@ func TestStructuredRecipeAsyncUsesInstanceHeap(t *testing.T) {
 	r.SetEnvironment("MODE", "scoped")
 	begin := r.RequestTarget("chosen")
 	if begin.Code != "" {
-		begin.Free(a)
+		begin.Free(r.Alloc)
 		t.Fatal("request async recipe")
 		return
 	}
-	begin.Free(a)
+	begin.Free(r.Alloc)
 	processes := 0
 	for step := 0; step < 128; step++ {
 		next := r.Step()

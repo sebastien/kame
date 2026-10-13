@@ -12,20 +12,26 @@ WASM_STACK_SIZE ?= 262144
 
 
 .PHONY: build dist dist-native dist-ape dist-release dist-wasm dist-windows wasm wasm-check wasm-portable wasm-translate test-wasm version-source build/kame.debug build/kame.sanitize dist/kame dist/kame.com \
-	test test-so test-examples test-go test-cli test-presentation test-reuse-reasons test-all test-sanitize test-leaks fmt clean demo
+	test test-so test-native-host test-native-lifecycle test-examples test-go test-cli test-presentation test-reuse-reasons test-all test-sanitize test-leaks fmt clean demo
 
 build: dist
 
 test: test-so test-examples test-go test-cli
 
-test-so: $(KAME_DIR)/cmd/kame/version_generated.go
+test-so: $(KAME_DIR)/cmd/kame/version_generated.go test-native-lifecycle test-native-host
 	cd $(KAME_DIR) && so test ./...
+
+test-native-lifecycle: $(KAME_DIR)/cmd/kame/version_generated.go
+	CC=clang bash tools/native/test-cli-lifecycle.sh
+
+test-native-host:
+	CC=clang bash tools/native/test-host.sh
 
 test-examples:
 	cd $(EXAMPLES_DIR) && so test ./...
 
-test-go: $(KAME_DIR)/cmd/kame/version_generated.go
-	cd $(KAME_DIR) && go test ./cmd/kame
+test-go: $(KAME_DIR)/cmd/kame/version_generated.go build/kame.debug test-native-lifecycle
+	cd $(KAME_DIR) && KAME_NATIVE_FORMAT_TEST_BINARY="$(CURDIR)/build/kame.debug" KAME_NATIVE_CLI_TEST_BINARY="$(CURDIR)/build/kame.debug" go test ./cmd/kame
 
 test-cli: build/kame.debug
 	tests/harness.sh
@@ -45,7 +51,10 @@ wasm-portable:
 	src/sh/check-portable.sh
 
 wasm-check: wasm wasm-portable
+	$(CC) -std=c11 -Wall -Wextra -Werror -fsyntax-only tools/native/test-wasm-header.c
 	node tools/wasm/check-imports.mjs build/wasm/kame.wasm
+	node tools/wasm/test-abi.mjs build/wasm/kame.wasm
+	node tools/wasm/test-composition-diagnostics.mjs build/wasm/kame.wasm
 
 test-wasm: wasm-check
 	tests/T010-01-wasm-loader.sh
@@ -79,7 +88,7 @@ test-wasm: wasm-check
 	tests/T009-13-cli-configuration.sh
 	tests/T009-16-cli-script-output.sh
 	tests/T009-14-cli-watch.sh
-	tests/T004-09-lang-rule-header-composition.sh
+	tests/T004-19-lang-rule-header-composition.sh
 	tests/T004-10-lang-line-continuations.sh
 	tests/T004-11-lang-wildcard-inputs.sh
 	tests/T004-12-lang-optional-includes.sh
@@ -144,12 +153,12 @@ test-wasm: wasm-check
 
 test-all: test test-leaks
 
-test-sanitize: $(KAME_DIR)/cmd/kame/version_generated.go
+test-sanitize: $(KAME_DIR)/cmd/kame/version_generated.go test-native-lifecycle test-native-host
 	cd $(KAME_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 	cd $(EXAMPLES_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 
-test-leaks: build/kame.sanitize
-	cd $(KAME_DIR) && GOGC=off CC=clang go test -asan ./cmd/kame
+test-leaks: build/kame.sanitize test-native-lifecycle test-native-host
+	cd $(KAME_DIR) && KAME_NATIVE_FORMAT_TEST_BINARY="$(CURDIR)/build/kame.sanitize" KAME_NATIVE_CLI_TEST_BINARY="$(CURDIR)/build/kame.sanitize" CC=clang go test -asan ./cmd/kame
 	cd $(KAME_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 	cd $(EXAMPLES_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 CLI_BIN="$(CURDIR)/build/kame.sanitize" tests/harness.sh $$(find tests -type f -name 'T*.sh' ! -name 'T013-03-meta-binary.sh')
@@ -163,7 +172,7 @@ clean:
 	rm -rf build dist
 
 demo:
-	cd $(EXAMPLES_DIR) && so run ./demo
+	cd $(EXAMPLES_DIR)/engine && so run ./demo
 
 dist: build/kame.debug dist/kame
 
@@ -215,9 +224,11 @@ dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zi
 			cp "$$artifact" "dist/release/kame-$$platform"; fi; \
 	done; fi
 	cp VERSION dist/release/VERSION
-	cp Makefile.bootstrap dist/release/Makefile.bootstrap
 	python3 src/sh/release_package_manifests.py --directory dist/release --version "$$(cat VERSION)"
 	public_key_b64=$$(openssl pkey -pubin -in "$(KAME_RELEASE_PUBLIC_KEY)" -outform DER | openssl base64 -A); \
+	sed -e "s|^KAME_VERSION ?=.*|KAME_VERSION ?= $$(cat VERSION)|" \
+	    -e "s|^KAME_RELEASE_PUBKEY_B64 ?=.*|KAME_RELEASE_PUBKEY_B64 ?= $$public_key_b64|" \
+	    Makefile.bootstrap > dist/release/Makefile.bootstrap; \
 	sed -e "s|^KAME_STAMP=.*|KAME_STAMP=\"$$(cat VERSION)\"|" \
 	    -e "s|^KAME_RELEASE_PUBKEY_B64=.*|KAME_RELEASE_PUBKEY_B64=\"$$public_key_b64\"|" \
 	    bin/kame > dist/release/kame
@@ -257,7 +268,7 @@ wasm-translate:
 
 wasm: build/wasm/kame.wasm
 
-build/wasm/kame.wasm: $(WASM_SOURCES) Makefile
+build/wasm/kame.wasm: $(WASM_SOURCES) $(KAME_DIR)/go.mod $(KAME_DIR)/go.sum Makefile
 	command -v $(WASM_CC)
 	command -v $(WASM_LD)
 	mkdir -p build/wasm/c
@@ -269,7 +280,7 @@ $(KAME_DIR)/cmd/kame/version_generated.go: VERSION src/sh/generate-version.sh
 
 version-source: $(KAME_DIR)/cmd/kame/version_generated.go
 
-KAME_SOURCES := $(shell find $(KAME_DIR) -type f -name '*.go')
+KAME_SOURCES := $(shell find $(KAME_DIR) -type f \( -name '*.go' -o -name '*.c' -o -name '*.h' \))
 KAME_BUILD_INPUTS := $(KAME_DIR)/cmd/kame/version_generated.go $(KAME_SOURCES) $(KAME_DIR)/go.mod $(KAME_DIR)/go.sum $(KAME_DIR)/cmd/kame/build_mode.h Makefile
 
 build/kame.debug: $(KAME_BUILD_INPUTS)

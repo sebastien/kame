@@ -102,30 +102,32 @@ func cleanupFingerprintVector(a mem.Allocator) {
 func TestCompleteTaskFingerprintVector(t *testing.T) {
 	a:=t.Allocator()
 	const dir="/tmp/kame-cache-fingerprint-vector"
-	cleanupFingerprintVector(a)
+	// The directory contributes to this golden fingerprint. Never delete a
+	// pre-existing directory: this test owns it only after exclusive creation.
 	if os.Mkdir(dir,0o755)!=nil { t.Fatal("cannot create fingerprint vector directory");return }
+	defer cleanupFingerprintVector(a)
 	parsed:=script.Parse(a,"vector.kmk","task cache-vector :\n\tprintf vector\n")
+	defer parsed.Free()
 	registry:=eval.NewRegistry(a)
+	defer registry.Free()
 	compiled:=program.Compile(a,parsed,registry,program.Options{Host: posix.New(a), Directory:dir,Shell:[]string{"/bin/sh","-c"},Environment:[]string{"PATH=/usr/bin:/bin"}})
+	defer compiled.Free(a)
 	if compiled.Program==nil { t.Fatal("vector task compile failed");return }
+	defer compiled.Program.Free()
 	result:=compiled.Program.Materialize("cache-vector")
-	if result.Diagnostic.Code!="" { t.Fatalf("vector task failed: %s",result.Diagnostic.Code) }
+	if result.Diagnostic.Code!="" { t.Fatalf("vector task failed: %s",result.Diagnostic.Code); result.Free(a); return }
 	result.Free(a)
 	entries,err:=os.ReadDir(a,dir+"/.kame/cache/tasks")
-	if err!=nil||len(entries)!=1 { t.Fatal("expected exactly one task record");return }
+	if err!=nil||len(entries)!=1 { os.FreeDirEntry(a,entries); t.Fatal("expected exactly one task record");return }
 	data,err:=os.ReadFile(a,dir+"/.kame/cache/tasks/"+entries[0].Name)
 	os.FreeDirEntry(a,entries)
-	if err!=nil||len(data)<46 { t.Fatal("task record could not be read");return }
+	if err!=nil||len(data)<46 { mem.FreeSlice(a,data); t.Fatal("task record could not be read");return }
 	identityLength:=uint64(0);for i:=0;i<8;i++{identityLength|=uint64(data[5+i])<<uint(i*8)}
 	fingerprintAt:=13+int(identityLength)
 	if fingerprintAt+32>len(data) { mem.FreeSlice(a,data);t.Fatal("record fingerprint is truncated");return }
 	fingerprint:=program.FingerprintHex(data[fingerprintAt:fingerprintAt+32])
   if fingerprint!="2b2a500123d75c36ededba2f40673df4355bfd002eb52203189a680f24476d45" { t.Errorf("complete task fingerprint = %s",fingerprint) }
 	mem.FreeString(mem.System,fingerprint);mem.FreeSlice(a,data)
-	compiled.Program.Free();compiled.Free(a);parsed.Free();registry.Free()
-	entries,err=os.ReadDir(a,dir+"/.kame/cache/tasks")
-	if err==nil { for i:=range entries { _=os.Remove(dir+"/.kame/cache/tasks/"+entries[i].Name) };os.FreeDirEntry(a,entries) }
-	cleanupFingerprintVector(a)
 }
 
 func TestCachedTaskHits(t *testing.T) {
@@ -831,12 +833,14 @@ func finishMaterialize(t *testing.T, a mem.Allocator, compiled *program.Program,
 	started := compiled.Start(target)
 	if started.Diagnostic.Code != "" { return program.Result{Diagnostic: started.Diagnostic} }
 	if started.Handle == nil { t.Fatal("materialize did not start"); return program.Result{} }
+	defer started.Handle.Free()
 	for i := 0; i < 2000; i++ {
 		wait := 0
 		if i%25 == 24 { wait = 5 }
 		compiled.Tick(wait)
 		poll := started.Handle.Poll()
-		if poll.Done { started.Handle.Free(); return poll.Result }
+		if poll.Done { return poll.Result }
+		poll.Result.Free(a)
 	}
 	state := started.Handle.Node.State
 	notes := ""
@@ -867,7 +871,11 @@ func TestCachedTaskManifestOverflowFromNestedDefinition(t *testing.T) {
 	if measured.Program == nil { t.Fatal("measure compile failed"); return }
 	first := finishMaterialize(t, a, measured.Program, "run", "measure")
 	if t.Failed() { first.Free(a); measured.Program.Free(); measured.Free(a); parsed.Free(); registry.Free(); return }
-	if first.Diagnostic.Code != "" { t.Fatalf("measure run failed: %s", first.Diagnostic.Code) }
+	if first.Diagnostic.Code != "" {
+		t.Fatalf("measure run failed: %s", first.Diagnostic.Code)
+		first.Free(a); measured.Program.Free(); measured.Free(a); parsed.Free(); registry.Free()
+		return
+	}
 	first.Free(a)
 	limit := cacheManifestLength(t, a, dir)
 	measured.Program.Free(); measured.Free(a)

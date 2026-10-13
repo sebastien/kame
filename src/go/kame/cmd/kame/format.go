@@ -3,6 +3,7 @@ package main
 import (
 	"kame/cli"
 	"kame/diagnostic"
+	"kame/host/posix"
 	"kame/lang/format"
 	"kame/lang/source"
 	"solod.dev/so/io"
@@ -83,10 +84,12 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 			different = true
 		}
 		if parsed.InPlace && changed {
-			temporary := parsed.Files[i] + ".kame-fmt.tmp"
-			if os.WriteFile(temporary, []byte(formatted), 0o644) != nil || os.Rename(temporary, parsed.Files[i]) != nil {
+			// Stat follows source symlinks, as ReadFile does. Publication replaces
+			// the source entry, not its target, retaining the target's permissions.
+			info, statErr := os.Stat(parsed.Files[i])
+			h := posix.Host{Alloc: mem.System}
+			if statErr != nil || h.WriteFileAtomic(parsed.Files[i], []byte(formatted), uint32(info.Mode().Perm()), false) != nil {
 				invocationCounts.Failed++
-				os.Remove(temporary)
 				mem.FreeString(mem.System, formatted)
 				cliError(errOut, "FS_ERR", "cannot replace source: "+parsed.Files[i])
 				return 1

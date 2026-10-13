@@ -18,16 +18,16 @@ type Program struct {
 	KashFunctions      []*Function
 	NextScriptGroup    int64
 	// DryRun suppresses invocation-owned process, write and output effects.
-	DryRun   bool
+	DryRun bool
 	// GeneratedFile identifies reads that may be deferred during dry-run.
-	GeneratedFile func(any, string) bool
+	GeneratedFile      func(any, string) bool
 	GeneratedFileState any
-	Alloc    mem.Allocator
-	Engine   *core.Engine
-	Script   *script.Script
-	Registry *Registry
-	Requests *host.Queue
-	Scope    *Scope
+	Alloc              mem.Allocator
+	Engine             *core.Engine
+	Script             *script.Script
+	Registry           *Registry
+	Requests           *host.Queue
+	Scope              *Scope
 	// Explicit CLI definition overrides take precedence over target KAME_NAME values.
 	explicitDefinitionOverrides []string
 	// Definitions is the canonical lookup list, borrowing authored ASTs, aggregates,
@@ -92,8 +92,8 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 	var names []*definition.Definition
 	for i := range parsed.Items {
 		item := parsed.Items[i]
-		if item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
-			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "declaration conditionals require source composition before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
+		if item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
+			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 			continue
 		}
 		if item.Kind != script.Definition || item.Definition == nil {
@@ -140,11 +140,19 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 	p.Requests = host.NewQueue(a)
 	p.Valid = true
 	p.Scope = newScope(a, nil)
+	for i := range parsed.Diagnostics {
+		d := parsed.Diagnostics[i]
+		if d.Severity != source.Error {
+			continue
+		}
+		p.Valid = false
+		p.Diagnostics = slices.Append(a, p.Diagnostics, diagnostic.Diagnostic{Code: d.Code, Severity: diagnostic.Error, Message: d.Message, Span: diagnostic.Span{Start: d.Span.Start, End: d.Span.End}})
+	}
 	for i := range parsed.Items {
 		item := parsed.Items[i]
-		if item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
+		if item.Kind == script.Include || item.Kind == script.Composition || item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
 			p.Valid = false
-			p.Diagnostics = slices.Append(a, p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "declaration conditionals require source composition before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
+			p.Diagnostics = slices.Append(a, p.Diagnostics, diagnostic.Diagnostic{Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: "source composition must be resolved before registration", Span: diagnostic.Span{Start: item.Span.Start, End: item.Span.End}})
 		}
 	}
 	if !p.Valid {
@@ -279,6 +287,7 @@ func (p *Program) SetDefinitionEffectSink(sink func(any, Effect), state any) {
 	p.DefinitionEffectSink, p.DefinitionEffectState = sink, state
 }
 
+// SetDefinitionArgs owns cloned storage; callable handles remain caller-borrowed.
 func (p *Program) SetDefinitionArgs(values []core.Value) {
 	if p == nil {
 		return
@@ -287,6 +296,7 @@ func (p *Program) SetDefinitionArgs(values []core.Value) {
 		p.DefinitionArgs[i].Free(p.Alloc)
 	}
 	slices.Free(p.Alloc, p.DefinitionArgs)
+	p.DefinitionArgs = nil
 	for i := range values {
 		p.DefinitionArgs = slices.Append(p.Alloc, p.DefinitionArgs, values[i].Clone(p.Alloc))
 	}

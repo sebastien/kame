@@ -150,10 +150,10 @@ environment values can invalidate a consumer.
 | `lstat` | `(lstat PATH)` | read | No-follow final-component metadata, with a portable `link` boolean; parents still follow links. |
 | `readlink` | `(readlink PATH)` | read | Exact UTF-8 target text; relative targets stay relative, dangling links work; invalid text/absent paths/non-links report `FS_ERR`. |
 | `wildcard` | `(wildcard PATTERN...)` | read | Sorted, duplicate-free union of one or more patterns; each tracks its own membership. |
-| `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other coercible values render as with `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
+| `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other supported values use the effect-output encoding described below, not scalar-only `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
 | `env` | `(env NAME)` | env | Environment value. |
 | `shell!` | `(shell! COMMAND [OPTIONS])` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
-| `sh`, `shellrun` | Same as `shell` | run | Aliases with identical result and phase behavior. |
+| `sh!`, `shellrun!` | Same as `shell!` | run | Aliases with identical result and phase behavior. |
 | `shell-template!` | `(shell-template! FRAGMENTS VALUES)` | run | Collected shell call with POSIX-quoted dynamic strings; FRAGMENTS has one more string than VALUES. Same phase policy as shell!. |
 
 `(resource URI)` constructs a validated `file:`/`mem:` resource value for file
@@ -168,6 +168,8 @@ neither needs a grant, but both are invalid during planning/output resolution.
 
 Standalone `kame do run --lang expr` denies these capabilities by default; grant only the
 needed roots, names, or process access with its `--allow-*` options.
+`run!`, `pipe!`, and `await` are process special forms, not registry operations;
+see [Kash](./kash.md).
 
 Recursive wildcards do not descend into directory symlinks discovered during
 enumeration. Name a linked directory in the literal prefix (`./linked/**/*.js`)
@@ -176,8 +178,8 @@ to traverse it explicitly; results retain that lexical prefix.
 ## Build effects
 
 These operations are meaningful in a rule recipe expression. Bytes are
-emitted raw; every other coercible value is rendered as with `str`
-(nil as `nil`, booleans, integers, floats, text, lists and records in
+emitted raw; other supported values use a separate effect-output encoder
+(nil as `nil`, booleans, integers, floats, text, patterns, lists and records in
 stable syntax) and emitted. Unrenderable values (callables, resources)
 still report `EXPR_INVALID`.
 
@@ -187,5 +189,5 @@ still report `EXPR_INVALID`.
 | `err!` | `(err! VALUE...)` | In a rule, defers bytes to the target's stderr. Standalone evaluation writes to stderr and returns the combined output. |
 | `yield!` | `(yield! VALUE...)` | Supplies the bytes for a declared file output. Standalone evaluation writes to stdout and returns nil. It is valid only for a file rule with one output. |
 
-Do not combine a nonempty shell recipe with `yield`; Kame reports an output
+Do not combine a nonempty shell recipe with `yield!`; Kame reports an output
 conflict rather than choosing a producer.

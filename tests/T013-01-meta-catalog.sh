@@ -32,6 +32,15 @@ while IFS=$'\t' read -r file spec category covers; do
 	else
 		test-fail "$file does not match spec $spec"
 	fi
+	basename=${file##*/}
+	category_tail=${basename#*-}
+	category_tail=${category_tail#*-}
+	filename_category=${category_tail%%-*}
+	if [ "$category" = "$filename_category" ]; then
+		test-ok "category $category"
+	else
+		test-fail "$file category $category does not match $filename_category"
+	fi
 	if [ -n "$covers" ]; then
 		test-ok "coverage text present"
 	else
@@ -43,6 +52,14 @@ while IFS=$'\t' read -r file spec category covers; do
 		test-fail "catalogued file missing: $file"
 	fi
 done <"$catalog"
+
+test-step "catalog test identifiers are unique"
+duplicates=$(awk -F '\t' '!/^#/ && NF { n=split($1, path, "/"); split(path[n], part, "-"); print part[1] "-" part[2] }' "$catalog" | sort | uniq -d)
+if [ -z "$duplicates" ]; then
+	test-ok "unique spec-sequence identifiers and filenames"
+else
+	test-fail "duplicate test identifiers: $duplicates"
+fi
 
 test-step "every test script has a catalog row"
 missing=0

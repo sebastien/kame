@@ -100,7 +100,8 @@ func KashHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
 	return headerEnd(a, s, start, false)
 }
 
-// ValueHeaderEnd additionally recognizes Kame's contiguous default operator.
+// ValueHeaderEnd recognizes compact value headers as ParseRange does; only Kash
+// requires a standalone operator. The complete name/function head stays valid.
 func ValueHeaderEnd(a mem.Allocator, s *source.Source, start int) int {
 	return headerEnd(a, s, start, true)
 }
@@ -144,13 +145,10 @@ func headerEnd(a mem.Allocator, s *source.Source, start int, defaults bool) int 
 		compoundOp = true
 		pos++
 	}
-	if defaults && pos == end && pos < len(text) && text[pos] == '=' && end > start && text[end-1] == '?' {
-		compoundOp = true
-	}
-	if (pos == end && !compoundOp) || pos == len(text) || text[pos] != '=' {
+	if (!defaults && pos == end && !compoundOp) || pos == len(text) || text[pos] != '=' {
 		return 0
 	}
-	if pos+1 < len(text) && !space(text[pos+1]) && text[pos+1] != '\n' && text[pos+1] != ';' {
+	if !defaults && pos+1 < len(text) && !space(text[pos+1]) && text[pos+1] != '\n' && text[pos+1] != ';' {
 		return 0
 	}
 	return pos + 1
@@ -205,7 +203,7 @@ func (p *parser) definition() *Definition {
 		d.Function = true
 		p.functionLHS(d, lhsStart, lhsEnd)
 	} else {
-		name := scanName(p.s.Text, lhsStart)
+		name := scanName(p.s.Text[:lhsEnd], lhsStart)
 		if !name.OK || name.End != lhsEnd {
 			p.error(lhsStart, lhsEnd, "invalid definition name")
 		} else {

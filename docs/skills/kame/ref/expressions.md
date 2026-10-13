@@ -30,7 +30,7 @@ use `(= (count VALUE) 0)` for emptiness and `(> (count VALUE) 0)` for nonemptine
 `count` does not accept nil, booleans, or numbers. Test absence with
 `(= VALUE :nil)` and numeric zero with `(= VALUE 0)` instead. Whitespace is data.
 `and`/`or` retain the deciding operand, so `(or "" "fallback")` returns `""`.
-Declaration `when` requires an actual boolean, not a truthy collection.
+Source-composition `if` shares this truthiness; test collection emptiness explicitly.
 
 Expression strings use double quotes with `\"`, `\\`, `\n`, `\r`, and `\t`.
 Interpolation is `"Count: @(count files)"`. Deprecated `{(...)}` input is still
@@ -86,7 +86,7 @@ and comparison aliases. Callables are invocation-owned, not serialized code.
 
 Special forms are syntax-only, not callable values or plugin operation names.
 Use a lambda when adapting one to a callback. In addition to the forms below,
-`run`, `pipe`, and `await` are process special forms.
+`run!`, `pipe!`, and `await` are process special forms; see [Kash](./kash.md).
 
 | Form | Behavior |
 | --- | --- |
@@ -98,7 +98,7 @@ Use a lambda when adapting one to a callback. In addition to the forms below,
 | `(with RECORD BODY...)` | Bind record fields in a child scope. |
 | `(match SUBJECT [PATTERN BODY...]... [:else BODY...])` | First matching clause; captures are local to its body. |
 | `(? VALUE...)` | First operand not failing with unknown-reference; not general error recovery. |
-| `(eval SOURCE)` | Evaluate expression text or an explicitly loaded script; not a replacement for native source composition. |
+| `(eval SOURCE)` | Evaluate expression text; not a script loader or replacement for native source composition. |
 
 Comparison heads `=`, `==`, `!=`, `<`, `>`, `<=`, `>=` alias `eq`, `is`, `ne`,
 `lt`, `gt`, `lte`, `gte`. Equality is kind-aware and recursive for bytes, lists,
@@ -124,6 +124,18 @@ matcher groups are `{name:~REGEX}` or `{~REGEX}`; `regex-match`, `capture`, and
 `regex-replace` expose bounded matching and capture processing. Regex syntax is
 portable and byte-oriented, not PCRE; see
 [Pattern extensions](../../../spec/029-pattern-extensions.md).
+
+Computed path patterns keep their groups authored while inserting literal data:
+
+```kame
+(let [root "./src" output "./build" extension "c"]
+  (sub @(root)/{name:*}.@(extension) @(output)/{name}.o "./src/main.c"))
+```
+
+Interpolation inside a group is invalid. Inserted braces, backslashes and glob
+or regex punctuation stay literal; they cannot create matching syntax. Use
+`(pattern TEXT)` when that compilation is intentional. These patterns do not
+enumerate files; interpolated strings and raw Kash words remain separate data.
 
 `$(printf "hello\n")` is an expression atom whose contents parse as Kash.
 It captures UTF-8 stdout exactly, including trailing newlines; it does not

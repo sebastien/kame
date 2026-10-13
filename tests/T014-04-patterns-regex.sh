@@ -13,7 +13,7 @@ for host in native wasm; do
 	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
 	"${runner[@]}" do run --lang expr -c '(replace ./src/txto/{prefix:**}/{name:*}.txto ./build/data/{prefix}/{name}.json "./src/txto/blog/2026/deep/post.txto")' >"$TMPDIR/$host.nested-pattern.out"
 	if [ "$(cat "$TMPDIR/$host.nested-pattern.out")" = '"./build/data/blog/2026/deep/post.json"' ]; then test-ok "$host backtracks named recursive path captures"; else test-fail "$host nested recursive path capture: $(cat "$TMPDIR/$host.nested-pattern.out")"; fi
-	printf '(str ./{name:~[a-z]+}.txt)\n' >"$TMPDIR/$host.regex.expr"
+	printf '(nop ./{name:~[a-z]+}.txt)\n' >"$TMPDIR/$host.regex.expr"
 	"${runner[@]}" do fmt --lang expr "$TMPDIR/$host.regex.expr" >"$TMPDIR/$host.regex.formatted"
 	"${runner[@]}" do fmt --lang expr "$TMPDIR/$host.regex.formatted" >"$TMPDIR/$host.regex.formatted.again"
 	if cmp -s "$TMPDIR/$host.regex.formatted" "$TMPDIR/$host.regex.formatted.again" && grep -q 'name:~\[a-z\]+' "$TMPDIR/$host.regex.formatted"; then

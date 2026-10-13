@@ -2,7 +2,7 @@
 # Spec: docs/spec/004-language.md — composed inputs and alternative rule separator
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
-test-start "T004-09 rule header composition"
+test-start "T004-19 rule header composition"
 test-step "build artifacts"
 cli_require_tools
 cli_build

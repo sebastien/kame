@@ -11,7 +11,7 @@ make dist-wasm >/dev/null
 test-ok "WASM plugin registration and callback exports are current"
 
 test-step "round-trip all value kinds; verify identity, grants, bounds, timeout, cancellation and cleanup"
-if node --input-type=module <<'NODE'
+if timeout --kill-after=5 60 node --input-type=module <<'NODE'
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -38,6 +38,17 @@ const responseFor = (request) => ({
   operation: request.operation, operationVersion: request.operationVersion, generation: request.generation,
   attempt: request.attempt, value: { kind: 'int', data: 37 },
 });
+async function waitUntilStarted(ready, invocation, description) {
+  let settled = false;
+  let failure;
+  invocation.then(() => { settled = true; }, (error) => { settled = true; failure = error; });
+  const deadline = Date.now() + 3000;
+  while (!ready()) {
+    if (settled) throw failure ?? new Error(`${description} finished before readiness`);
+    assert.ok(Date.now() < deadline, `${description} did not become ready`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
 
 let calls = 0;
 const roundTrip = await call('(example-run "hello")', declarations(), async (request, { signal }) => {
@@ -163,7 +174,7 @@ const cancelled = call('(example-run "x")', declarations(), async (request, { si
   callbackSignal = signal;
   return new Promise((resolve) => { releaseLatePlugin = () => resolve(responseFor(request)); });
 }, { signal: abortController.signal });
-while (!callbackSignal) await new Promise((resolve) => setTimeout(resolve, 1));
+await waitUntilStarted(() => Boolean(callbackSignal), cancelled, 'callback cancellation');
 abortController.abort();
 await assert.rejects(cancelled, (error) => error.code === 'EXEC_CANCELLED');
 assert.equal(callbackSignal.aborted, true);
@@ -233,7 +244,7 @@ setInterval(() => {}, 1000);
 fs.writeFileSync(process.argv[1], 'ready');`, readyPath, stoppedPath];
 const processAbortController = new AbortController();
 const cancelledProcess = call('(example-run "x")', cancelProcess, undefined, { signal: processAbortController.signal });
-while (!existsSync(readyPath)) await new Promise((resolve) => setTimeout(resolve, 1));
+await waitUntilStarted(() => existsSync(readyPath), cancelledProcess, 'process cancellation');
 processAbortController.abort();
 await assert.rejects(cancelledProcess, (error) => error.code === 'EXEC_CANCELLED');
 assert.equal(readFileSync(stoppedPath, 'utf8'), 'stopped');
@@ -252,7 +263,7 @@ process.stdin.resume();
 setInterval(() => {}, 1000);
 fs.writeFileSync(process.argv[1], 'ready');`, disposalReadyPath, disposalStoppedPath];
 const disposedInvocation = disposalProgram.evaluate('answer', { plugins: disposalPlugin });
-while (!existsSync(disposalReadyPath)) await new Promise((resolve) => setTimeout(resolve, 1));
+await waitUntilStarted(() => existsSync(disposalReadyPath), disposedInvocation, 'process disposal');
 await disposalProgram.dispose();
 await assert.rejects(disposedInvocation, (error) => error.code === 'EXEC_CANCELLED');
 assert.equal(readFileSync(disposalStoppedPath, 'utf8'), 'stopped', 'program disposal did not reap its native plugin process');
@@ -276,7 +287,7 @@ process.stdin.resume();
 setInterval(() => {}, 1000);`, treePid, treeReady];
   const treeAbort = new AbortController();
   const treeInvocation = treeProgram.evaluate('(example-run "tree")', { plugins: treeDeclaration, signal: treeAbort.signal });
-  while (!existsSync(treeReady)) await new Promise((resolve) => setTimeout(resolve, 1));
+  await waitUntilStarted(() => existsSync(treeReady), treeInvocation, 'Windows process tree');
   const descendantPid = Number(readFileSync(treePid, 'utf8'));
   treeAbort.abort();
   await assert.rejects(treeInvocation, (error) => error.code === 'EXEC_CANCELLED');

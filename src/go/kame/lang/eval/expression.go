@@ -14,13 +14,17 @@ const MaxEvaluationDepth = 32
 func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression *expr.Expr, context *Context) Result {
 	if context.evaluationDepth >= MaxEvaluationDepth {
 		span := source.Span{}
-		if expression != nil { span = expression.Span }
+		if expression != nil {
+			span = expression.Span
+		}
 		return failure(context.Run, "EVAL_DEPTH", span, "evaluation depth limit exceeded")
 	}
 	context.evaluationDepth++
 	previousEnv := context.ReserveEnv
 	previousEngine, previousScope, previousRequests := context.Engine, context.Scope, context.Requests
-	if expression != nil { context.ReserveEnv = expression.Kash }
+	if expression != nil {
+		context.ReserveEnv = expression.Kash
+	}
 	result := p.evaluateExpression(engine, scope, expression, context)
 	context.ReserveEnv = previousEnv
 	context.Engine, context.Scope, context.Requests = previousEngine, previousScope, previousRequests
@@ -51,12 +55,14 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 	case expr.Symbol:
 		return Result{Value: core.NewString(context.Run, expression.Text)}
 	case expr.Path:
-		if expression.Pattern != nil {
+		if expression.Pattern != nil && len(expression.Parts) == 0 {
 			return Result{Value: core.NewPattern(context.Run, expression.Text)}
 		}
 		return p.pathExpression(scope, expression, context)
 	case expr.Name:
-		if expression.Kash && expression.Text == "env" { return failure(context.Run, "REF_MISSING", expression.Span, "environment namespace requires a named variable") }
+		if expression.Kash && expression.Text == "env" {
+			return failure(context.Run, "REF_MISSING", expression.Span, "environment namespace requires a named variable")
+		}
 		return name(scope, expression.Text, expression.Span, context)
 	case expr.InvocationJoin:
 		return p.joinProcesses(context)
@@ -76,11 +82,21 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.recoverValue(scope, expression, context)
 	case expr.Lambda:
 		function := mem.Alloc[Function](context.Run)
+		function.PayloadAlloc = context.Run
+		if context.CloneCallableAST {
+			function.AST = expr.Clone(context.Run, expression)
+			expression = function.AST
+		}
 		function.Kind, function.Parameters, function.Body, function.Scope = FunctionTemporary, expression.Parameters, expression.Body, scope
 		scope.Retain()
 		return Result{Value: core.Value{Kind: core.Callable, Callable: function}}
 	case expr.Section:
 		function := mem.Alloc[Function](context.Run)
+		function.PayloadAlloc = context.Run
+		if context.CloneCallableAST {
+			function.AST = expr.Clone(context.Run, expression)
+			expression = function.AST
+		}
 		function.Kind, function.Parameters, function.Expression, function.Scope, function.Section = FunctionTemporary, expression.Parameters, expression.Body[0], scope, true
 		scope.Retain()
 		return Result{Value: core.Value{Kind: core.Callable, Callable: function}}
@@ -103,24 +119,40 @@ func placeholder(scope *Scope, expression *expr.Expr, context *Context) Result {
 		if index >= len(current.Section) {
 			break
 		}
-		return Result{Value: current.Section[index].Clone(context.Run)}
+		return Result{Value: borrowValue(context.Run, current.Section[index])}
 	}
 	return failure(context.Run, "EXPR_INVALID", expression.Span, "placeholder outside section")
 }
 
 func name(scope *Scope, name string, span source.Span, context *Context) Result {
-	if len(name) > 2 && name[:2] == "x/" { return context.TrackedTool(name[2:], span) }
+	if len(name) > 2 && name[:2] == "x/" {
+		return context.TrackedTool(name[2:], span)
+	}
 	b := scope.lookup(name)
 	if b == nil {
-		if name == "inputs" { return context.Program.selector("@<*", span, context) }
-		if name == "outputs" { return context.Program.selector("@>*", span, context) }
-		if name == "inputs/changed" { return context.Program.selector("@<?", span, context) }
-		if name == "args" { return context.Program.selector("@*", span, context) }
-		if name == "kash" && context.Program != nil { return Result{Value: context.Program.KashConstructor()} }
-		if IsSpecialForm(name) { return failure(context.Run, "EXPR_INVALID", span, "special form is not a callable value: "+name) }
+		if name == "inputs" {
+			return context.Program.selector("@<*", span, context)
+		}
+		if name == "outputs" {
+			return context.Program.selector("@>*", span, context)
+		}
+		if name == "inputs/changed" {
+			return context.Program.selector("@<?", span, context)
+		}
+		if name == "args" {
+			return context.Program.selector("@*", span, context)
+		}
+		if name == "kash" && context.Program != nil {
+			return Result{Value: context.Program.KashConstructor()}
+		}
+		if IsSpecialForm(name) {
+			return failure(context.Run, "EXPR_INVALID", span, "special form is not a callable value: "+name)
+		}
 		if context.Program != nil {
 			canonical := name
-			if alias, ok := comparisonAlias(name); ok { canonical = alias }
+			if alias, ok := comparisonAlias(name); ok {
+				canonical = alias
+			}
 			if operation := context.Program.Registry.lookup(canonical); operation != nil {
 				return Result{Value: context.Program.newOperationCallable(operation.Name)}
 			}
@@ -128,18 +160,7 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		return missingOperation(context, name, span, true)
 	}
 	if b.Kind == bindingValue {
-		if b.Value.CallableOwner != nil { return Result{Value: b.Value.Clone(context.Run)} }
-		if b.Value.Kind == core.Callable {
-			// Binding-owned callables are returned as borrowed wrappers so
-			// call sites release the wrapper without freeing the binding's
-			// function or scope. The wrapper retains the scope so an escaped
-			// callable keeps its capture alive until Result.Free runs the
-			// cycle breaker.
-			source := b.Value.Callable.(*Function)
-			wrapper := borrowFunction(context.Run, source)
-			return Result{Value: core.Value{Kind: core.Callable, Callable: wrapper}}
-		}
-		return Result{Value: b.Value.Clone(context.Run)}
+		return Result{Value: borrowValue(context.Run, b.Value)}
 	}
 	if b.Kind == bindingFunction {
 		// A definition can be returned from its defining let scope. Keep
@@ -147,14 +168,18 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		wrapper := borrowFunction(context.Run, b.Function)
 		return Result{Value: core.Value{Kind: core.Callable, Callable: wrapper}}
 	}
-	if b.Kind == bindingLocalDefinition { return context.Program.localValue(b.Local, context) }
+	if b.Kind == bindingLocalDefinition {
+		return context.Program.localValue(b.Local, context)
+	}
 	if context.Engine == nil && context.ResolveDefinition != nil {
 		return context.ResolveDefinition(context.ResolverState, b.Definition, context)
 	}
 	key := b.Definition
 	if context.Engine != nil && context.HasDefinitionNamespace {
 		node := context.Program.scopedDefinition(key, context)
-		if node != nil { key = node.Key }
+		if node != nil {
+			key = node.Key
+		}
 	}
 	ready := false
 	if context.Engine != nil {
@@ -163,8 +188,12 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 			// diagnostic before the engine propagates it as a target failure.
 			ready = context.Engine.TryDependency(key)
 			d := context.Engine.DependencyDiagnostic(key)
-			if d.Code != "" { return Result{Diagnostic: d.Clone(context.Run)} }
-		} else { ready = context.Engine.Dependency(key) }
+			if d.Code != "" {
+				return Result{Diagnostic: d.Clone(context.Run)}
+			}
+		} else {
+			ready = context.Engine.Dependency(key)
+		}
 	}
 	if !ready {
 		if context.Engine != nil && context.Engine.Failed() {

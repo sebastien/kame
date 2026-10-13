@@ -53,7 +53,8 @@ type callState struct { RequestID int64 }
 
 // Register validates every declaration before mutating the registry. Operation
 // calls become correlated RequestPlugin requests; hosts supply one validated
-// value or a diagnostic through the usual completion API.
+// value or a diagnostic through the usual completion API. The allocator backing
+// retained declarations must outlive the registry, which releases them.
 func Register(a mem.Allocator, registry *eval.Registry, declarations []Plugin) bool {
 	if registry == nil { return false }
 	for i := range declarations {
@@ -87,7 +88,8 @@ func Register(a mem.Allocator, registry *eval.Registry, declarations []Plugin) b
 			descriptor.Operation, descriptor.OperationVersion = copyText(a, op.Name), copyText(a, op.Version)
 			descriptor.MinArity, descriptor.MaxArity = op.MinArity, op.MaxArity
 			descriptor.MaxRequestBytes, descriptor.MaxResponseBytes, descriptor.TimeoutMS = maxRequest, maxResponse, timeout
-			version := copyText(a, p.Version+"/"+op.Version)
+			// NUL is rejected in each component, so version pairs cannot collide.
+			version := copyText(a, p.Version+"\x00"+op.Version)
 			added := registry.Add(eval.Operation{Name: op.Name, Call: invoke, Context: descriptor, FreeContext: freeRegistration, MinArity: op.MinArity, MaxArity: op.MaxArity, Capabilities: op.Capabilities, Version: version})
 			mem.FreeString(a, version)
 			if !added { freeRegistration(a, descriptor); return false }
@@ -119,6 +121,7 @@ func copyText(a mem.Allocator, text string) string {
 
 func freeRegistration(a mem.Allocator, value any) {
 	state := value.(*registration)
+	a = state.Alloc
 	mem.FreeString(a, state.Plugin)
 	mem.FreeString(a, state.PluginVersion)
 	mem.FreeString(a, state.Operation)
@@ -146,6 +149,10 @@ func invoke(c *eval.Context, value any, args []core.Value) eval.Result {
 			return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin host omitted its result")
 		}
 		if completion.Value.Kind == core.String {
+			if len(completion.Value.Text) > state.MaxResponseBytes {
+				completion.Value.Free(c.Run)
+				return pluginFailure(c, "PLUGIN_LIMIT", "plugin result exceeds its byte limit")
+			}
 			var decoded core.Value
 			valid := core.ParsePluginValueJSON(c.Run, []byte(completion.Value.Text), &decoded)
 			completion.Value.Free(c.Run)

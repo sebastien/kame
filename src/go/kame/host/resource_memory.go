@@ -7,6 +7,10 @@ import (
 	"solod.dev/so/strings"
 )
 
+var errResourceDirectory = errors.New("memory resource is a directory")
+var errResourceFile = errors.New("memory resource is a file")
+var errResourceNotEmpty = errors.New("memory resource directory is not empty")
+
 type memoryResourceFile struct {
 	URI     string
 	Data    []byte
@@ -105,7 +109,7 @@ func (r *MemoryResources) ReadFile(a mem.Allocator, uri string) ([]byte, error) 
 }
 
 func (r *MemoryResources) ReadDir(a mem.Allocator, uri string) ([]DirEntry, error) {
-	if r == nil || !r.isDir(uri) {
+	if r == nil || r.fileIndex(uri) >= 0 || !r.isDir(uri) {
 		return nil, errors.New("memory resource directory does not exist")
 	}
 	prefix := uri
@@ -116,13 +120,13 @@ func (r *MemoryResources) ReadDir(a mem.Allocator, uri string) ([]DirEntry, erro
 	for i := range r.Files {
 		rest, ok := resourceChild(r.Files[i].URI, prefix)
 		if ok {
-			addMemoryResourceEntry(a, &entries, rest, strings.IndexByte(rest, '/') >= 0)
+			addMemoryResourceEntry(a, &entries, rest, false)
 		}
 	}
 	for i := range r.Dirs {
 		rest, ok := resourceChild(r.Dirs[i], prefix)
 		if ok {
-			addMemoryResourceEntry(a, &entries, rest, strings.IndexByte(rest, '/') >= 0)
+			addMemoryResourceEntry(a, &entries, rest, true)
 		}
 	}
 	return entries, nil
@@ -135,11 +139,12 @@ func resourceChild(uri string, prefix string) (string, bool) {
 	return uri[len(prefix):], true
 }
 
-func addMemoryResourceEntry(a mem.Allocator, entries *[]DirEntry, rest string, nested bool) {
+func addMemoryResourceEntry(a mem.Allocator, entries *[]DirEntry, rest string, directory bool) {
 	name := rest
-	isDir := nested
-	if nested {
-		name = rest[:strings.IndexByte(rest, '/')]
+	isDir := directory
+	if cut := strings.IndexByte(rest, '/'); cut >= 0 {
+		name = rest[:cut]
+		isDir = true
 	}
 	for i := range *entries {
 		if (*entries)[i].Name == name {
@@ -159,6 +164,9 @@ func (r *MemoryResources) WriteFileAtomic(uri string, data []byte, perm uint32, 
 	if r == nil {
 		return errors.New("memory resource host unavailable")
 	}
+	if r.isDir(uri) {
+		return errResourceDirectory
+	}
 	r.Time++
 	if i := r.fileIndex(uri); i >= 0 {
 		slices.Free(r.Alloc, r.Files[i].Data)
@@ -176,6 +184,9 @@ func (r *MemoryResources) Mkdir(uri string, perm uint32) error {
 	_ = perm
 	if r == nil {
 		return errors.New("memory resource host unavailable")
+	}
+	if r.fileIndex(uri) >= 0 {
+		return errResourceFile
 	}
 	if r.isDir(uri) {
 		return nil
@@ -204,6 +215,20 @@ func (r *MemoryResources) Remove(uri string) error {
 		}
 		r.Time++
 		return nil
+	}
+	prefix := uri
+	if prefix != "" && prefix[len(prefix)-1] != '/' {
+		prefix += "/"
+	}
+	for i := range r.Files {
+		if strings.HasPrefix(r.Files[i].URI, prefix) {
+			return errResourceNotEmpty
+		}
+	}
+	for i := range r.Dirs {
+		if r.Dirs[i] != uri && strings.HasPrefix(r.Dirs[i], prefix) {
+			return errResourceNotEmpty
+		}
 	}
 	for i := range r.Dirs {
 		if r.Dirs[i] == uri {

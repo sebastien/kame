@@ -8,6 +8,10 @@ import (
 	"solod.dev/so/strings"
 )
 
+var errMemoryDirectory = errors.New("path is a directory")
+var errMemoryFile = errors.New("path is a file")
+var errMemoryNotEmpty = errors.New("directory is not empty")
+
 // MemoryHost is a synchronous in-memory ProgramHost. It lets the freestanding
 // runtime materialize targets whose files and clock the embedding host has
 // supplied. docs/spec/010-wasm.md explicitly allows a browser host to map host
@@ -80,6 +84,11 @@ func (h *MemoryHost) isDir(name string) bool {
 			return true
 		}
 	}
+	for i := range h.Dirs {
+		if strings.HasPrefix(h.Dirs[i], prefix) {
+			return true
+		}
+	}
 	return false
 }
 
@@ -119,6 +128,9 @@ func (h *MemoryHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, err
 	if h == nil {
 		return nil, errors.New("host unavailable")
 	}
+	if h.findFile(name) >= 0 || !h.isDir(name) {
+		return nil, errors.New("directory does not exist")
+	}
 	prefix := name
 	if prefix == "." || prefix == "" {
 		prefix = ""
@@ -142,8 +154,19 @@ func (h *MemoryHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, err
 			entries = addEntry(a, entries, rest[:cut], true)
 		}
 	}
-	if len(entries) == 0 {
-		return nil, errors.New("directory does not exist")
+	for i := range h.Dirs {
+		path := h.Dirs[i]
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		rest := path[len(prefix):]
+		if rest == "" {
+			continue
+		}
+		if cut := strings.IndexByte(rest, '/'); cut >= 0 {
+			rest = rest[:cut]
+		}
+		entries = addEntry(a, entries, rest, true)
 	}
 	return entries, nil
 }
@@ -174,6 +197,9 @@ func (h *MemoryHost) WriteFileAtomic(name string, data []byte, perm uint32, dura
 	if h == nil {
 		return errors.New("host unavailable")
 	}
+	if h.isDir(name) {
+		return errMemoryDirectory
+	}
 	h.SetFile(name, data)
 	return nil
 }
@@ -182,6 +208,9 @@ func (h *MemoryHost) Mkdir(name string, perm uint32) error {
 	_ = perm
 	if h == nil {
 		return errors.New("host unavailable")
+	}
+	if h.findFile(name) >= 0 {
+		return errMemoryFile
 	}
 	for i := range h.Dirs {
 		if h.Dirs[i] == name {
@@ -198,12 +227,39 @@ func (h *MemoryHost) Remove(name string) error {
 	}
 	i := h.findFile(name)
 	if i < 0 {
+		prefix := name + "/"
+		for j := range h.Files {
+			if strings.HasPrefix(h.Files[j].Path, prefix) {
+				return errMemoryNotEmpty
+			}
+		}
+		for j := range h.Dirs {
+			if strings.HasPrefix(h.Dirs[j], prefix) {
+				return errMemoryNotEmpty
+			}
+		}
+		for j := range h.Dirs {
+			if h.Dirs[j] == name {
+				mem.FreeString(h.Alloc, h.Dirs[j])
+				copy(h.Dirs[j:], h.Dirs[j+1:])
+				h.Dirs = h.Dirs[:len(h.Dirs)-1]
+				if len(h.Dirs) == 0 {
+					slices.Free(h.Alloc, h.Dirs)
+					h.Dirs = nil
+				}
+				return nil
+			}
+		}
 		return errors.New("file does not exist")
 	}
 	mem.FreeString(h.Alloc, h.Files[i].Path)
 	slices.Free(h.Alloc, h.Files[i].Data)
 	copy(h.Files[i:], h.Files[i+1:])
 	h.Files = h.Files[:len(h.Files)-1]
+	if len(h.Files) == 0 {
+		slices.Free(h.Alloc, h.Files)
+		h.Files = nil
+	}
 	return nil
 }
 
@@ -225,7 +281,10 @@ func (h *MemoryHost) Monotonic() int64 {
 	return h.Time
 }
 
-func (h *MemoryHost) SupportsExecutor(name string, version string) bool { _, _ = h, version; return name == "" || name == "local" }
+func (h *MemoryHost) SupportsExecutor(name string, version string) bool {
+	_, _ = h, version
+	return name == "" || name == "local"
+}
 
 func (h *MemoryHost) Start(request host.ProcessRequest) bool {
 	_, _ = h, request

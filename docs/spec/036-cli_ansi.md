@@ -136,6 +136,8 @@ encoded in its command's JSON representation rather than interleaved with JSON.
 
 Message kind, lifecycle state, and diagnostic severity are separate concepts.
 Informational messages and tips do not introduce new diagnostic severities.
+The labels and example below describe text messages. ANSI target outcomes and
+routine transition visibility follow the mode-specific persistent-log policy.
 
 | Message kind | Visible label | Meaning |
 | --- | --- | --- |
@@ -331,9 +333,7 @@ and tools illustrate established facts; real output omits facts it cannot know.
 ### Active build
 
 ```text
-info [./build/main.o] reevaluate: input content changed: ./src/main.c
-info [./build/util.o] execute: declared output is missing
-done [./build/config.h] reused
+[./build/config.h] reused                                0.0s - ✓
 
 build default                                                2.4s
   0  ./build/main.o       running       cc                     1.2s
@@ -351,13 +351,13 @@ bounded argv beneath its worker; the compact layout keeps the tool in the row.
 On normal completion, replace the dashboard with one permanent summary:
 
 ```text
-done build default · 12 targets complete (5 reused) · 3.18s
+build default · 12 targets complete (5 reused) · 3.2s - ✓
 ```
 
 When no execution work was required and that fact is established:
 
 ```text
-done build default · no work required · 0.04s
+build default · no work required · 0.0s - ✓
 ```
 
 A result-producing pure expression need not add a routine success message to
@@ -366,7 +366,8 @@ stderr. Its canonical value remains the result; empty programs do not invent one
 ### Failure
 
 ```text
-error [./build/app] RECIPE_FAIL: recipe exited unsuccessfully
+[./build/app] failed                                      2.4s - ✗
+  RECIPE_FAIL: recipe exited unsuccessfully
   required by default -> ./build/app
 
   Makefile.kmk:18:2
@@ -375,7 +376,7 @@ error [./build/app] RECIPE_FAIL: recipe exited unsuccessfully
 
   caused by: cc exited with status 1
 
-build failed · 8 done · 1 failed · 2 cancelled · 2.41s
+build failed · 8 done · 1 failed · 2 cancelled · 2.4s - ✗
 ```
 
 The authored location, process identity, and dependency stack are shown only when
@@ -386,7 +387,7 @@ Final success is not printed until owned process/service cleanup has completed.
 ### Watch
 
 ```text
-done cycle 3 · 4 targets complete · 0.62s
+cycle 3 · 4 targets complete · 0.6s - ✓
 
 watch default · waiting for changes
 last cycle succeeded · 4 done · Ctrl+C to stop
@@ -476,7 +477,7 @@ Human reports use consistent spelling independently of their theme:
 | Literal value | Canonical Kame display: quoted strings/patterns, `:nil`, `:true`, `:false`, lists and records |
 | Source location | `source:line:column`, one-based display coordinates; no invented coordinates |
 | Count or measured progress | Integer with a named unit or labelled category; `6/10 files`, not an unexplained percentage |
-| Duration | Explicit unit, such as `24ms`, `1.42s`, or `2m 04s`; unknown duration is omitted |
+| Duration | Native ANSI: seconds with one decimal place, such as `1.4s`; other human presentations use explicit units; unknown duration is omitted |
 | Byte size | Explicit unit; JSON retains integer bytes even when a human table uses a scaled unit |
 | Missing information | A labelled `unknown`/`unavailable` state or omitted optional field, never an invented zero |
 
@@ -489,7 +490,8 @@ different facts even when they concern the same target.
 
 Tokens describe meaning, not literal colors. Command logic must not request
 "red text" directly. The hardcoded initial theme uses terminal-default backgrounds
-and a restrained palette: cyan, green, yellow, red, and the default foreground.
+and the established palette: cyan, green, yellow, red, purple, gold, amber,
+and the default foreground.
 No configurable theme loader is required by this specification.
 
 | Token | Applied to | Initial theme |
@@ -499,7 +501,7 @@ No configurable theme loader is required by this specification.
 | `text.muted` | Times and supplementary counters | Dim where readable |
 | `heading` | Invocation and report headings | Bold |
 | `message.info` | Information label | Cyan |
-| `message.warning` | Warning label | Yellow, bold |
+| `message.warning` | Warning label | Amber, bold |
 | `message.error` | Error label | Red, bold |
 | `message.fatal` | Fatal label | Red, bold |
 | `message.tip` | Recovery label | Cyan, bold |
@@ -510,13 +512,13 @@ No configurable theme loader is required by this specification.
 | `status.reused` | Established reuse | Green |
 | `status.failed` | Failed work | Red, bold |
 | `status.cancelled` | Cancelled work | Yellow |
-| `status.retrying` | Retry or service restart | Yellow |
+| `status.retrying` | Retry or service restart | Amber |
 | `status.ready` | Ready service | Green |
-| `value.path` | Filesystem paths and resource URIs | Cyan |
-| `value.target` | Target identity | Bold |
+| `value.path` | Filesystem paths and resource URIs | Muted directory prefix, bold basename |
+| `value.target` | Named target identity | Purple |
 | `value.rule` | Rule syntax and target patterns | Default foreground |
 | `value.symbol` | Definitions, operations, captures | Bold |
-| `value.tool` | Executable names | Bold |
+| `value.tool` | Executable names | Gold |
 | `value.option` | CLI option spellings | Bold |
 | `value.literal` | Strings, numbers, booleans, nil | Default foreground |
 | `location` | Source identity and coordinates | Cyan |
@@ -532,7 +534,7 @@ attributes listed above. Unsupported attributes degrade to readable plain text.
 
 - Apply severity styling to labels and markers, not entire paragraphs.
 - Keep paths recognizable across information, warning, and error messages.
-- A path target combines `value.target` emphasis with `value.path` treatment.
+- A path target uses `value.path` treatment rather than named-target purple.
 - Literal spelling remains canonical; styling must not change its characters.
 - Styling requires typed fragments or known fields, not regex inference over
   arbitrary prose, source text, or child output.
@@ -552,7 +554,7 @@ reused display slot.
 | Event | Human presentation |
 | --- | --- |
 | `target-started` | Active target state; one text transition |
-| `target-reason` | Persistent informational decision and established reason |
+| `target-reason` | Text: persistent decision and established reason once; ANSI: routine reasons omitted |
 | `process-started` | Current tool, bounded argv, and process clock |
 | `process-exited` | Process outcome/runtime; not necessarily target completion |
 | `dependency` | Known graph state; detailed verbose transition |

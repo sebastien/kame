@@ -239,8 +239,8 @@ and a trailing `[N]`: the number of distinct referencing producer identities in
 the selected graph, including its producing target when present. Repeated edges
 from one target count once; sibling outputs share one producer identity. Counts
 describe the inspected graph, not omitted or deferred references.
-Do not append classification metadata or nested producer/consumer details to
-inventory entries. Detailed target information remains available through
+Do not append classification metadata (except the artifact status below) or
+nested producer/consumer details to inventory entries. Detailed target information remains available through
 `do plan TARGET`, and full classification and relationships remain in JSON.
 Downstream human reports additionally show affected `input → consumer`
 relationships in a separate section, without expanding inventory entries.
@@ -261,6 +261,8 @@ prerequisites with unresolved freshness prevent a `built` claim downstream.
 This includes prerequisite producers omitted from the affected-work projection;
 matching their current output bytes does not verify those producers' freshness.
 Schema-2 artifact resources expose the same value in their `status` field.
+For example, `./build/app · built [1]` is one artifact inventory entry; the
+reference count remains trailing and no producer details are appended.
 Unknown lifetime or freshness in detailed plans is written as unknown, not
 fabricated from naming conventions.
 

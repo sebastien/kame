@@ -16,11 +16,15 @@ const (
 	PatternLiteral PatternPartKind = iota
 	PatternMatcher
 	PatternReference
+	// PatternInterpolation indexes an expression operand owned by Expr.Parts.
+	// It exists only in computed path ASTs, never in runtime pattern text.
+	PatternInterpolation
 )
 
 // PatternPart is one pattern segment. Text holds decoded literal text or a
 // reference name. Pattern holds "*" or "**" for matchers. Index holds the
-// capture slot for matchers and the positional index for {_N} references.
+// capture slot for matchers, positional index for {_N} references, or expression
+// operand ordinal for AST-only interpolation placeholders.
 type PatternPart struct {
 	Kind    PatternPartKind
 	Text    string
@@ -102,6 +106,29 @@ func ParsePatternText(a mem.Allocator, text string, offset int) PatternParse {
 	return PatternParse{Pattern: pattern, Diagnostics: p.diags}
 }
 
+// ParsePathPatternParts parses authored chunks without interpreting inserted
+// values. Groups must be wholly contained in one text part. Spans retain source
+// byte offsets; interpolation indices follow expression operand order.
+func ParsePathPatternParts(a mem.Allocator, parts []StringPart) PatternParse {
+	p := patternParser{a: a}
+	pattern := mem.Alloc[Pattern](a)
+	pattern.Alloc = a
+	next := 0
+	for i := range parts {
+		part := parts[i]
+		if part.Expr != nil {
+			pattern.Parts = slices.Append(a, pattern.Parts, PatternPart{Kind: PatternInterpolation, Index: next, Span: part.Span})
+			next++
+			continue
+		}
+		p.text, p.offset, p.pos = part.Text, part.Span.Start, 0
+		p.parse(pattern)
+		if len(p.diags) != 0 { break }
+	}
+	pattern.Matchers, pattern.References = countGroups(pattern)
+	return PatternParse{Pattern: pattern, Diagnostics: p.diags}
+}
+
 func (p *patternParser) fail(start int, end int, message string) {
 	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: p.offset + start, End: p.offset + end}, Message: message})
 }
@@ -173,7 +200,15 @@ func (p *patternParser) group(pattern *Pattern) bool {
 		digitsEnd := p.pos + 1
 		for digitsEnd < len(p.text) && isPatternDigit(p.text[digitsEnd]) { digitsEnd++ }
 		index := 0
-		for i := p.pos + 1; i < digitsEnd; i++ { index = index*10 + int(p.text[i]-'0') }
+		for i := p.pos + 1; i < digitsEnd; i++ {
+			digit := int(p.text[i]-'0')
+			if index > (int(^uint(0)>>1)-digit)/10 {
+				p.fail(start, digitsEnd, "pattern position exceeds integer range")
+				p.pos = digitsEnd
+				return false
+			}
+			index = index*10 + digit
+		}
 		if digitsEnd == len(p.text) || p.text[digitsEnd] != '}' {
 			p.fail(start, digitsEnd+1, "unclosed pattern group")
 			p.pos = digitsEnd
@@ -198,7 +233,10 @@ func (p *patternParser) group(pattern *Pattern) bool {
 		}
 		patternStart := p.pos
 		for p.pos < len(p.text) && p.text[p.pos] != '}' {
-			if p.text[p.pos] == '\\' { p.pos++ }
+			if p.text[p.pos] == '\\' {
+				if p.pos+1 == len(p.text) { p.fail(p.pos, p.pos+1, "unfinished pattern escape"); p.pos = len(p.text); return false }
+				p.pos++
+			}
 			p.pos++
 		}
 		glob := p.text[patternStart:p.pos]
@@ -274,7 +312,8 @@ func validPatternName(name string) bool {
 }
 
 // CanonicalPattern renders allocator-owned canonical pattern text. Literal
-// braces and backslashes are re-escaped so the text round-trips.
+// braces and backslashes are re-escaped so the text round-trips. Computed path
+// placeholders must first be instantiated as PatternLiteral parts.
 func CanonicalPattern(a mem.Allocator, pattern *Pattern) string {
 	var b strings.Builder
 	b = strings.NewBuilder(a)
@@ -323,9 +362,11 @@ func (p *Pattern) MatchText(a mem.Allocator, subject string) MatchResult {
 	return p.MatchTextBudget(a, subject, &budget)
 }
 
-// MatchTextBudget matches with caller-owned step accounting. It lets larger
-// callers share one bound across repeated candidate-boundary checks.
+// MatchTextBudget charges recursive matching, capture candidates, glob work,
+// and regex execution to one caller-owned bound. Exhaustion (including an
+// initially zero budget) fails closed with Limited and no captures.
 func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) MatchResult {
+	if budget == nil || *budget <= 0 { return MatchResult{Limited: true} }
 	var slots []string
 	programs := slices.Make[*regexProgram](a, p.Matchers)
 	for i := range p.Parts {
@@ -350,6 +391,7 @@ func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) 
 }
 
 func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, slots *[]string, programs []*regexProgram, budget *int) (bool, bool) {
+	if !ChargeMatchStep(budget) { return false, true }
 	if part == len(p.Parts) { return offset == len(subject), false }
 	current := p.Parts[part]
 	if current.Kind == PatternLiteral {
@@ -362,13 +404,18 @@ func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, s
 		if p.Names[i] != "" && p.Names[i] == current.Text { previous, found = (*slots)[i], true; break }
 	}
 	for end := offset + 1; end <= len(subject); end++ {
+		if !ChargeMatchStep(budget) { return false, true }
 		value := subject[offset:end]
 		if found && value != previous { continue }
 		if current.Regex {
 			matched, limited := regexFullMatch(a, programs[current.Index], value, budget)
 			if limited { return false, true }
 			if !matched { continue }
-		} else if !matchGlob(current.Pattern, value) { continue }
+		} else {
+			matched, limited := MatchGlobBudget(current.Pattern, value, budget)
+			if limited { return false, true }
+			if !matched { continue }
+		}
 		for len(*slots) <= current.Index { *slots = slices.Append(a, *slots, "") }
 		(*slots)[current.Index] = value
 		matched, limited := p.match(a, subject, part+1, end, slots, programs, budget)
@@ -418,36 +465,56 @@ func (p *Pattern) ExpandText(a mem.Allocator, match *Pattern, slots []string) Ex
 	return Expansion{Text: ownedText(a, b.String())}
 }
 
-func matchGlob(pattern string, value string) bool { return matchGlobAt(pattern, value, 0, 0) }
+// ChargeMatchStep charges shared regex/glob/capture work. A negative budget
+// records an attempted step past the limit; zero remaining alone is not failure.
+func ChargeMatchStep(budget *int) bool {
+	if budget == nil { return false }
+	if *budget <= 0 { *budget = -1; return false }
+	*budget--
+	return true
+}
 
-func matchGlobAt(pattern string, value string, pi int, vi int) bool {
+// MatchGlobBudget uses the existing nonempty-star glob matcher and shared bound.
+func MatchGlobBudget(pattern string, value string, budget *int) (bool, bool) {
+	matched := matchGlobAt(pattern, value, 0, 0, budget)
+	return matched, budget == nil || *budget < 0
+}
+
+func matchGlobAt(pattern string, value string, pi int, vi int, budget *int) bool {
+	if !ChargeMatchStep(budget) { return false }
 	if pi == len(pattern) { return vi == len(value) }
 	if pattern[pi] == '*' {
 		cross := pi+1 < len(pattern) && pattern[pi+1] == '*'
 		next := pi + 1
 		if cross { next++ }
 		for end := vi + 1; end <= len(value); end++ {
+			if !ChargeMatchStep(budget) { return false }
 			if !cross && value[end-1] == '/' { break }
-			if matchGlobAt(pattern, value, next, end) { return true }
+			if matchGlobAt(pattern, value, next, end, budget) { return true }
+			if *budget < 0 { return false }
 		}
 		return false
 	}
-	if pattern[pi] == '?' { return vi < len(value) && value[vi] != '/' && matchGlobAt(pattern, value, pi+1, vi+1) }
+	if pattern[pi] == '?' { return vi < len(value) && value[vi] != '/' && matchGlobAt(pattern, value, pi+1, vi+1, budget) }
 	if pattern[pi] == '\\' {
-		return pi+1 < len(pattern) && vi < len(value) && pattern[pi+1] == value[vi] && matchGlobAt(pattern, value, pi+2, vi+1)
+		return pi+1 < len(pattern) && vi < len(value) && pattern[pi+1] == value[vi] && matchGlobAt(pattern, value, pi+2, vi+1, budget)
 	}
 	if pattern[pi] == '[' {
 		end := pi + 1
-		for end < len(pattern) && pattern[end] != ']' { end++ }
-		return end < len(pattern) && vi < len(value) && classMatches(pattern[pi+1:end], value[vi]) && matchGlobAt(pattern, value, end+1, vi+1)
+		for end < len(pattern) && pattern[end] != ']' {
+			if !ChargeMatchStep(budget) { return false }
+			end++
+		}
+		return end < len(pattern) && vi < len(value) && classMatches(pattern[pi+1:end], value[vi], budget) && matchGlobAt(pattern, value, end+1, vi+1, budget)
 	}
-	return vi < len(value) && pattern[pi] == value[vi] && matchGlobAt(pattern, value, pi+1, vi+1)
+	return vi < len(value) && pattern[pi] == value[vi] && matchGlobAt(pattern, value, pi+1, vi+1, budget)
 }
 
-func classMatches(class string, value byte) bool {
+func classMatches(class string, value byte, budget *int) bool {
 	invert, i, matched := false, 0, false
 	if len(class) != 0 && class[0] == '!' { invert, i = true, 1 }
 	for i < len(class) {
+		if !ChargeMatchStep(budget) { return false }
 		if i+2 < len(class) && class[i+1] == '-' {
 			if value >= class[i] && value <= class[i+2] { matched = true }
 			i += 3

@@ -32,11 +32,34 @@ def stop(process):
         process.wait()
         raise
 
+if os.name != 'nt':  # Angle brackets are valid POSIX filename bytes, not Windows names.
+    with tempfile.TemporaryDirectory(prefix='kame-watch-source-kind-') as directory:
+        project = Path(directory)
+        (project / 'Makefile.kmk').write_text('(include "<command>")\nchosen :\n\tprintf %s @(MARK) >> source-log\n')
+        included = project / '<command>'
+        included.write_text('MARK = "alpha"\n')
+        error = project / 'stderr'
+        with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+            # Use actual cwd, not -C: the canonical child name must be exactly
+            # <command>, formerly confused with the inline-source display label.
+            process = subprocess.Popen([*runner, '--watch', 'chosen'], cwd=directory, stdout=stdout, stderr=stderr)
+            try:
+                log = project / 'source-log'
+                wait_for(process, lambda: read(log) == 'alpha', error, 'file-backed pseudo-label initial build')
+                stamp = included.stat()
+                included.write_text('MARK = "bravo"\n')
+                os.utime(included, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+                wait_for(process, lambda: read(log) == 'alphabravo', error, 'file-backed pseudo-label source watch')
+                cases += 1
+            finally:
+                stop(process)
+        assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
 with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
     project = Path(directory)
     source = project / 'Makefile.kmk'
     included = project / 'values.kmk'
-    source.write_text('include values.kmk\nchosen :\n\tprintf %s @(MARK) >> source-log\n')
+    source.write_text('(include "values.kmk")\nchosen :\n\tprintf %s @(MARK) >> source-log\n')
     included.write_text('MARK = "alpha"\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -54,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
             included.write_text('MARK = "gamma"\n')
             wait_for(process, lambda: read(log) == 'alphabravogamma', error, 'recovery after source repair')
             cases += 1
-            source.write_text('include values.kmk\nchosen : added\n\tprintf %s @(MARK) >> source-log\nadded :\n\tprintf dependency >> source-log\n')
+            source.write_text('(include "values.kmk")\nchosen : added\n\tprintf %s @(MARK) >> source-log\nadded :\n\tprintf dependency >> source-log\n')
             wait_for(process, lambda: read(log) == 'alphabravogammadependencygamma', error, 'changed source graph')
             cases += 1
         finally:
@@ -65,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-generated-') as directory:
     project = Path(directory)
     source = project / 'Makefile.kmk'
     values = project / 'modules.kmk'
-    source.write_text('include modules.kmk\ngenerate modules = (map ([module] [kind: "task" target: module inputs: [] order-only: [] recipe: (list (join (list "touch generated-" module) ""))]) MODULES)\nchosen : @((map ([module] module) MODULES))\n\tprintf x >> runs\n')
+    source.write_text('(include "modules.kmk")\ngenerate modules = (map ([module] [kind: "task" target: module inputs: [] order-only: [] recipe: (list (join (list "touch generated-" module) ""))]) MODULES)\nchosen : @((map ([module] module) MODULES))\n\tprintf x >> runs\n')
     values.write_text('MODULES = ["alpha"]\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -133,7 +156,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-missing-source-') as directo
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-optional-include-') as directory:
     project = Path(directory)
-    (project / 'Makefile.kmk').write_text('include? ./optional.kmk\nchosen : configured\n\tprintf chosen >> watch-log\n')
+    (project / 'Makefile.kmk').write_text('(include? ./optional.kmk)\nchosen : configured\n\tprintf chosen >> watch-log\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)

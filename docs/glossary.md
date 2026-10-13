@@ -113,9 +113,10 @@ expressions and do not reclassify runtime strings containing braces.
 ### Script and include
 
 A **script** is one composed Kame build source containing comments, definitions,
-rules, and top-level expressions. `include PATH` composes file-backed scripts at
+rules, and top-level expressions. `(include PATH)` composes file-backed scripts at
 the inclusion point; included declarations share the surrounding scope and source
-order.
+order and inherit the caller's language. Composition-only `if` selects literal
+includes before runtime; `(include? PATH)` skips only missing files.
 
 ### Rule
 
@@ -143,10 +144,11 @@ already exist.
 
 ### Recipe
 
-A **recipe** is the ordered set of indented body lines belonging to a rule. Kame
-renders its templates, joins its nonempty command lines into one shell script,
-and sends that script to the host. Kame does not parse the shell language inside
-a recipe.
+A **recipe** is the ordered set of indented body lines belonging to a rule.
+External-shell recipes are document templates: Kame renders them and sends the
+resulting shell script to the host without parsing its shell language. With
+`SHELL = kash` or rule metadata `[shell: kash]`, Kame instead parses the body as
+direct Kash statements and process graphs, without document-template expansion.
 
 ### Rule selection and rule instance
 
@@ -166,11 +168,14 @@ freshness stays **unknown** when body evaluation could discover more dependencie
 
 ### Freshness
 
-**Freshness** is the file-rule decision to skip or execute a recipe. A file rule
-is fresh only when all outputs and relevant file inputs exist and its oldest
-output is at least as new as its newest input. A file rule with no inputs is
-stale. Phony tasks are always stale; cached tasks use fingerprints rather than
-file modification times.
+**Freshness** is the file-rule decision to reuse or execute a recipe. Reuse needs
+an accepted successful-run proof matching the current consumed dependencies,
+output content signatures, rule/operation identity, and execution settings.
+File content is compared by digest, not oldest-output/newest-input timestamps;
+metadata observations are tracked separately. Missing outputs or unverifiable
+proofs prevent reuse, as does having no reusable material input. Phony tasks
+always run; cached tasks use their matching successful fingerprint/manifest.
+See `docs/spec/006-runtime.md` and `docs/spec/008-cache.md`.
 
 ### Materialize
 
@@ -197,12 +202,14 @@ process work.
 
 ### Allocator, arena, ownership, and lifetime
 
-An **allocator** supplies storage for an explicitly owned object graph. Kame
-distinguishes instance, program, engine, and run/message **lifetimes** so values
-cannot outlive the storage or source data they borrow. **Ownership** determines
-which layer frees a value or payload; values crossing a lifetime boundary are
-cloned or transferred. A WebAssembly **arena** is the fixed allocator used for an
-instance and can release its logical allocations together on reset.
+An **allocator** supplies storage; **ownership** determines who must release an
+object or payload. A **lifetime** bounds validity, including borrowed source data.
+Kame distinguishes instance, program, engine, and run/message lifetimes; these
+logical owners can share an allocator. Boundary crossings require explicit
+cloning or transfer. An **arena** is an allocation strategy, commonly releasing
+storage together on reset, not a synonym for ownership. WASM instances use a
+fixed backing buffer managed by a coalescing **reclaiming heap**, which can free
+individual blocks while the compiled program remains alive.
 
 ### Producer
 
@@ -282,14 +289,14 @@ commits the accepted render's effects.
 
 ### Effect and yield
 
-An **effect** is a deferred action recorded while rendering: `out` and `err`
-write to the corresponding runtime streams, and `write` can write a file.
+An **effect** is a deferred action recorded while rendering: `out!` and `err!`
+write to the corresponding runtime streams, and `write!` can write a file.
 **Yield** is the declarative effect that appends content for exactly one file-rule
 output. Yield cannot share an accepted render with a nonempty shell command,
 because Kame must have one unambiguous owner for that output.
 
-In standalone evaluation, the context flushes successful `out`, `err`, and
-`yield` effects to its output streams instead. This happens only after the
+In standalone evaluation, the context flushes successful `out!`, `err!`, and
+`yield!` effects to its output streams instead. This happens only after the
 evaluation completes, so a host-request retry does not duplicate output.
 
 ### Host request

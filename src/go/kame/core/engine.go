@@ -567,6 +567,7 @@ func (e *Engine) accept(c Completion) *Node {
 		return n
 	}
 	c.Value.Free(e.Alloc)
+	c.Diagnostic.Free(e.Alloc)
 	return nil
 }
 
@@ -623,6 +624,11 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 		n.Completion.Diagnostic.Free(e.Alloc)
 		n.Completion = Completion{}
 		n.HasCompletion = false
+	}
+	// Terminal slots borrow this generation's diagnostic; obsolete terminals
+	// must not survive its owner. Retain independently owned values and metadata.
+	for i := range n.Subs {
+		n.Subs[i].terminal = Event{}
 	}
 	n.Diagnostic.Free(e.Alloc)
 	n.State, n.Requested, n.Diagnostic = NodeIdle, n.Interest != 0, Diagnostic{}
@@ -716,6 +722,7 @@ func (e *Engine) cancel(n *Node) {
 	}
 	if n.HasCompletion {
 		n.Completion.Value.Free(e.Alloc)
+		n.Completion.Diagnostic.Free(e.Alloc)
 		n.Completion = Completion{}
 		n.HasCompletion = false
 	}
@@ -795,6 +802,7 @@ func (e *Engine) Free() {
 		}
 		if n.HasCompletion {
 			n.Completion.Value.Free(e.Alloc)
+			n.Completion.Diagnostic.Free(e.Alloc)
 		}
 		n.Diagnostic.Free(e.Alloc)
 		n.Key.Free(e.Alloc)

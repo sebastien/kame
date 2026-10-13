@@ -614,17 +614,22 @@ func TestRepeatedProgramMaterializationReleasesRunState(t *testing.T) {
 	}
 	defer os.Remove(dir)
 	parsed := script.Parse(a, "test.kmk", "run :\n\tprintf x >> task-log\n")
+	defer parsed.Free()
 	registry := eval.NewRegistry(a)
+	defer registry.Free()
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
+	defer compiled.Free(a)
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
 		t.Fatal("compile failed")
 		return
 	}
+	defer compiled.Program.Free()
 	for i := 0; i < 64; i++ {
 		result := compiled.Program.Materialize("run")
 		if result.Diagnostic.Code != "" {
-			result.Free(a)
 			t.Fatalf("materialization %d failed: %s", i, result.Diagnostic.Code)
+			result.Free(a)
+			return
 		}
 		result.Free(a)
 	}
@@ -633,10 +638,6 @@ func TestRepeatedProgramMaterializationReleasesRunState(t *testing.T) {
 		t.Errorf("repeated task did not complete: %d bytes", len(data))
 	}
 	mem.FreeSlice(a, data)
-	compiled.Program.Free()
-	compiled.Free(a)
-	parsed.Free()
-	registry.Free()
 }
 
 func TestBareTaskDependencyPreventsCachedHit(t *testing.T) {
@@ -1381,6 +1382,12 @@ func TestServiceStopUsesConfiguredGracePeriod(t *testing.T) {
 	}
 	if host.Active() != 1 {
 		t.Fatal("service process was not retained")
+		started.Handle.Free()
+		compiled.Program.Free()
+		compiled.Free(a)
+		parsed.Free()
+		registry.Free()
+		return
 	}
 	started.Handle.Cancel()
 	for i := 0; i < 30 && host.Active() != 0; i++ {
@@ -1465,6 +1472,9 @@ func TestServiceRestartsAfterFailedStartup(t *testing.T) {
 	if !ready {
 		t.Error("service did not become ready after a failed first start")
 	}
+	if ready && len(compiled.Program.Pending) != 1 {
+		t.Error("service restart retained a completed process display")
+	}
 	starts, readErr := os.ReadFile(a, dir+"/first")
 	if readErr != nil {
 		t.Error("first startup marker was not created")
@@ -1473,6 +1483,9 @@ func TestServiceRestartsAfterFailedStartup(t *testing.T) {
 	started.Handle.Cancel()
 	for i := 0; i < 30 && compiled.Program.Host.Active() != 0; i++ {
 		compiled.Program.Tick(10)
+	}
+	if len(compiled.Program.Pending) != 0 {
+		t.Error("service cancellation retained a completed process display")
 	}
 	started.Handle.Free()
 	compiled.Program.Free()

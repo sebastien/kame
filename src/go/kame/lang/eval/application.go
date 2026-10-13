@@ -17,7 +17,12 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 	}
 	head := expression.Items[0]
 	if head.Kind == expr.Name {
-		if head.Text == "await" { return p.awaitProcess(expression, context) }
+		if head.Text == "include" || head.Text == "include?" {
+			return failure(context.Run, "EXPR_INVALID", expression.Span, "include/include? are source-composition forms; use them at script top level or in composition if bodies")
+		}
+		if head.Text == "await" {
+			return p.awaitProcess(expression, context)
+		}
 		if head.Text == "run!" || head.Text == "pipe!" {
 			return p.processExpression(expression, context)
 		}
@@ -112,18 +117,25 @@ func comparisonAlias(name string) (string, bool) {
 
 func (p *Program) operation(scope *Scope, operation *Operation, arguments []*expr.Expr, context *Context, span source.Span) Result {
 	ready := p.prepareOperation(operation, len(arguments), context, span)
-	if ready.Waiting || ready.Diagnostic.Code != "" { return ready }
+	if ready.Waiting || ready.Diagnostic.Code != "" {
+		return ready
+	}
 	if operation.Preflight != nil {
 		previousName, previousSpan, previousArguments := context.OperationName, context.Span, context.operationArguments
 		context.OperationName, context.Span, context.operationArguments = operation.Name, span, arguments
 		checked := operation.Preflight(context, arguments)
 		context.OperationName, context.Span, context.operationArguments = previousName, previousSpan, previousArguments
-		if checked.Waiting || checked.Diagnostic.Code != "" { return checked }
+		if checked.Waiting || checked.Diagnostic.Code != "" {
+			return checked
+		}
 	}
 	operands := p.argumentValuesMode(scope, arguments, context, span, operation.DeferredReplacement)
-	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
+		return operands.Result
+	}
 	if operation.DeferredReplacement && operands.Values[0].Kind == core.Pattern {
 		function := mem.Alloc[Function](context.Run)
+		function.PayloadAlloc = context.Run
 		function.Kind, function.Scope, function.Expression = FunctionTemporary, scope, expr.Clone(context.Run, arguments[1])
 		function.ExpressionOwned = true
 		function.DeferredReplacement = true
@@ -140,12 +152,21 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 // EvaluateReplacement evaluates a retained operand in a match-local scope.
 func (c *Context) EvaluateReplacement(value core.Value, captures core.Value, parent *Scope) Result {
 	if c.ReserveEnv {
-		for i := range captures.Record { if captures.Record[i].Key == "env" { return failure(c.Run, "DEF_INVALID", c.Span, "env is reserved in Kash") } }
+		for i := range captures.Record {
+			if captures.Record[i].Key == "env" {
+				return failure(c.Run, "DEF_INVALID", c.Span, "env is reserved in Kash")
+			}
+		}
 	}
 	function := value.Callable.(*Function)
 	child := RenderChildScope(c, parent, captures)
-	if child == nil { return failure(c.Run, "EXPR_INVALID", c.Span, "invalid capture scope") }
+	if child == nil {
+		return failure(c.Run, "EXPR_INVALID", c.Span, "invalid capture scope")
+	}
+	previousClone := c.CloneCallableAST
+	c.CloneCallableAST = true
 	result := c.Program.evaluate(c.Engine, child, function.Expression, c)
+	c.CloneCallableAST = previousClone
 	child.Free()
 	return result
 }
@@ -172,7 +193,7 @@ func (p *Program) prepareOperation(operation *Operation, count int, context *Con
 	}
 	for i := range operation.Capabilities {
 		if !context.allowed(operation.Capabilities[i]) {
-			message := "`"+operation.Name+"` requires a capability that was not granted"
+			message := "`" + operation.Name + "` requires a capability that was not granted"
 			if operation.Capabilities[i] == Read {
 				message += "; grant read access with --allow-read=ROOT"
 			}
@@ -215,14 +236,18 @@ func (p *Program) invokeOperation(operation *Operation, values []core.Value, arg
 func (p *Program) call(function *Function, arguments []*expr.Expr, context *Context, span source.Span) Result {
 	if function.Kind == FunctionOperation {
 		operation := p.operationForCallable(function)
-		if operation == nil { return failure(context.Run, "EXPR_INVALID", span, "operation callable unavailable or belongs to another invocation") }
+		if operation == nil {
+			return failure(context.Run, "EXPR_INVALID", span, "operation callable unavailable or belongs to another invocation")
+		}
 		result := p.operation(context.Scope, operation, arguments, context, span)
 		attachNamedFrame(&result, context, span, "operation", function.OperationName)
 		return result
 	}
 	scope := context.Scope
 	operands := p.argumentValues(scope, arguments, context, span)
-	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
+		return operands.Result
+	}
 	values := operands.Values
 	// Argument expressions may enter temporary scopes. Native constructors
 	// capture the application scope, which must still be alive after arguments.
@@ -237,23 +262,40 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
 	if function.Kind == FunctionOperation {
 		operation := p.operationForCallable(function)
-		if operation == nil { return failure(context.Run, "EXPR_INVALID", span, "operation callable unavailable or belongs to another invocation") }
+		if operation == nil {
+			discardCallValues(context.Run, values)
+			return failure(context.Run, "EXPR_INVALID", span, "operation callable unavailable or belongs to another invocation")
+		}
 		result := p.prepareOperation(operation, len(values), context, span)
-		if !result.Waiting && result.Diagnostic.Code == "" { result = p.invokeOperation(operation, values, nil, context, span) }
+		if !result.Waiting && result.Diagnostic.Code == "" {
+			result = p.invokeOperation(operation, values, nil, context, span)
+		} else {
+			discardCallValues(context.Run, values)
+		}
 		attachNamedFrame(&result, context, span, "operation", function.OperationName)
 		return result
 	}
 	if function.Kind == FunctionInvocation {
-		if function.Owner != p { return failure(context.Run, "EXPR_INVALID", span, "Kash callable belongs to another invocation") }
+		if function.Owner != p {
+			discardCallValues(context.Run, values)
+			return failure(context.Run, "EXPR_INVALID", span, "Kash callable belongs to another invocation")
+		}
 		previousStart, previousEnd := context.operationStart, context.operationEnd
 		context.operationStart, context.operationEnd = span.Start, span.End
 		var result Result
-		if function.KashConstructor { result = p.constructKash(values, context, span) } else { result = p.invokeKash(function.KashScript, function.Scope, values, context) }
+		if function.KashConstructor {
+			result = p.constructKash(values, context, span)
+		} else {
+			result = p.invokeKash(function.KashScript, function.Scope, values, context)
+		}
+		// Kash only borrows invocation arguments (selectors independently borrow).
+		discardCallValues(context.Run, values)
 		context.operationStart, context.operationEnd = previousStart, previousEnd
 		return result
 	}
 	if function.NativeCall != nil {
 		if len(values) != function.Arity {
+			discardCallValues(context.Run, values)
 			return arityFailure(context.Run, span, "function", len(values), function.Arity, function.Arity)
 		}
 		return function.NativeCall(context, function.Native, values)
@@ -264,6 +306,7 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		fixed--
 	}
 	if len(values) < fixed || (!rest && len(values) != fixed) {
+		discardCallValues(context.Run, values)
 		name := "function"
 		if function.Definition != nil {
 			name = function.Definition.Name
@@ -298,6 +341,10 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		}
 	}
 	previousArgs, previousScope, previousHasArgs := context.Args, context.Scope, context.HasArgs
+	previousClone := context.CloneCallableAST
+	if function.AST != nil || function.ExpressionOwned {
+		context.CloneCallableAST = true
+	}
 	previousCallPath := context.CallPath
 	context.CallPath = invocationPath(context.Run, previousCallPath, span.Start, span.End)
 	context.Args, context.HasArgs = values, true
@@ -310,6 +357,7 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		result = p.body(child, function.Body, context)
 	}
 	context.Args, context.Scope, context.HasArgs = previousArgs, previousScope, previousHasArgs
+	context.CloneCallableAST = previousClone
 	mem.FreeString(context.Run, context.CallPath)
 	context.CallPath = previousCallPath
 	label := "function"
@@ -318,6 +366,12 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 	}
 	attachNamedFrame(&result, context, span, "call", label)
 	return result
+}
+
+func discardCallValues(a mem.Allocator, values []core.Value) {
+	for i := range values {
+		freeCallables(a, &values[i])
+	}
 }
 
 func attachNamedFrame(result *Result, context *Context, span source.Span, kind string, label string) {

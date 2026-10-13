@@ -7,11 +7,11 @@ import (
 	"solod.dev/so/testing"
 )
 
-func TestUncomposedConditionalDeclarationsCannotRegisterDefinitions(t *testing.T) {
+func TestUncomposedConditionalIncludesCannotRegisterDefinitions(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "uncomposed.kmk", "when :false\nhidden = \"value\"\nend\n")
+	parsed := script.Parse(a, "uncomposed.kmk", "(if :false (include ./hidden.kmk) :nil)\nhidden = \"value\"\n")
 	checked := eval.CompileChecked(a, engine, parsed, registry)
 	if checked.Program != nil || len(checked.Diagnostics) == 0 || checked.Diagnostics[0].Code != "FEATURE_UNSUP" {
 		t.Error("checked compilation registered unselected declarations")

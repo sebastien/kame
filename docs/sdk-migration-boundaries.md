@@ -26,8 +26,9 @@ For an optional collection, guard missing values explicitly:
 `(and (!= OPTIONAL :nil) (nonempty OPTIONAL))`. A list containing nil and a
 record with a nil-valued field are nonempty. Whitespace-only text is nonempty;
 testing `(count (strip TEXT))` instead is an explicit, different policy.
-Declaration `when` predicates require a boolean, so use `nonempty` or `bool`
-there rather than passing a collection or number directly.
+Source-composition `if` uses the same truthiness as runtime `if`; use `nonempty`
+when selection depends on collection membership. Legacy `when` declarations
+must migrate to `if` selecting branch files, not inline declaration bodies.
 
 ## Capture is data, not an identifier conversion (K25)
 

@@ -16,33 +16,55 @@ release_test_keys "$root/keys"
 
 test-step "stage actual release artifacts with operator supplied keys"
 make dist-native >/dev/null
+# Assemble in a copied tree: neither missing-artifact probes nor fixture signing
+# may move operator artifacts or replace the real dist/release directory.
+staging="$root/staging"
+mkdir -p "$staging/dist" "$staging/src/sh" "$staging/bin"
+cp Makefile VERSION Makefile.bootstrap "$staging/"
+cp bin/kame "$staging/bin/"
+cp src/sh/release_package_manifests.py src/sh/release_manifest.py "$staging/src/sh/"
+for artifact in kame.com kame.wasm kame.js kame-windows-x64.zip kame-windows-x64.exe; do
+	cp "dist/$artifact" "$staging/dist/"
+done
+if [ -d dist/native ]; then cp -R dist/native "$staging/dist/"; fi
+assemble_release() {
+	make -C "$staging" --old-file=dist/kame.com --old-file=dist/kame.wasm \
+		--old-file=dist/kame.js --old-file=dist/kame-windows-x64.zip \
+		--old-file=dist/kame-windows-x64.exe KAME_PLATFORM=test-staging \
+		WASM_SOURCES= KAME_SOURCES= dist-release "$@"
+}
 missing_platform="openbsd-x86_64"
-missing_artifact="dist/native/$missing_platform/kame"
-saved_native="$root/saved-$missing_platform"
-if [ -f "$missing_artifact" ]; then mv "$missing_artifact" "$saved_native"; fi
-if make dist-release KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
+missing_artifact="$staging/dist/native/$missing_platform/kame"
+rm -f "$missing_artifact"
+if assemble_release KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
 	KAME_RELEASE_SIGNING_KEY="$root/keys/signing.pem" >"$root/missing-native.out" 2>&1; then
 	missing_status=0
 else
 	missing_status=$?
 fi
-if [ -f "$saved_native" ]; then mv "$saved_native" "$missing_artifact"; fi
 if [ "$missing_status" -ne 0 ] && grep -q 'missing native release artifact:' "$root/missing-native.out"; then
 	test-ok "release assembly refuses an incomplete cross-host native set"
 else
 	test-fail "release assembly accepted a missing native artifact: status=$missing_status output=$(cat "$root/missing-native.out")"
 fi
-fixture_platforms=()
+if [ -f "$CLI_ROOT/dist/native/$missing_platform/kame" ]; then
+	cp "$CLI_ROOT/dist/native/$missing_platform/kame" "$missing_artifact"
+fi
 for platform in linux-x86_64 linux-arm64 darwin-x86_64 darwin-arm64 freebsd-x86_64 netbsd-x86_64 openbsd-x86_64; do
-	if [ ! -f "dist/native/$platform/kame" ]; then
-		mkdir -p "dist/native/$platform"
-		printf 'fixture artifact for %s\n' "$platform" >"dist/native/$platform/kame"
-		fixture_platforms+=("$platform")
+	if [ ! -f "$staging/dist/native/$platform/kame" ]; then
+		mkdir -p "$staging/dist/native/$platform"
+		printf 'fixture artifact for %s\n' "$platform" >"$staging/dist/native/$platform/kame"
 	fi
 done
-make dist-release KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
+assemble_release KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
 	KAME_RELEASE_SIGNING_KEY="$root/keys/signing.pem" KAME_RELEASE_REVISION=test-fixture >/dev/null
-release="$CLI_ROOT/dist/release"
+release="$staging/dist/release"
+if grep -qx "KAME_VERSION ?= $(cat VERSION)" "$release/Makefile.bootstrap" && \
+	grep -qx "KAME_RELEASE_PUBKEY_B64 ?= $RELEASE_TEST_KEY_B64" "$release/Makefile.bootstrap"; then
+	test-ok "release bootstrap pins the version and trusted verification key"
+else
+	test-fail "release bootstrap is not stamped with its version and verification key"
+fi
 if python3 - "$release" <<'PY'; then test-ok "staged assets have signed-manifest provenance"; else test-fail "release provenance is incomplete"; fi
 import hashlib, json, pathlib, sys
 root = pathlib.Path(sys.argv[1])
@@ -133,10 +155,5 @@ if [ "$prov_status" = 1 ] && grep -q 'checksum mismatch: PROVENANCE.json' "$root
 else
 	test-fail "cached provenance status=$prov_status err=$(cat "$root/err-prov")"
 fi
-
-for platform in "${fixture_platforms[@]}"; do
-	rm -f "dist/native/$platform/kame"
-	rmdir "dist/native/$platform" 2>/dev/null || true
-done
 
 test-end

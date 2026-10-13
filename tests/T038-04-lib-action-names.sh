@@ -20,6 +20,9 @@ for backend in native wasm; do
 		if [ "$actual" = 42 ]; then test-ok "$backend lexical $name"; else test-fail "$backend lexical $name: $actual"; fi
 	done
 	test-step "$backend canonical actions and process syntax"
+	status=0
+	"${runner[@]}" do run --lang kash -c 'value = (fail! "stop") ?? (nop "fallback"); (out! value)' >"$TMPDIR/out" 2>"$TMPDIR/err" || status=$?
+	if [ "$status" = 1 ] && [ ! -s "$TMPDIR/out" ] && grep -Fq USER_ERROR "$TMPDIR/err"; then test-ok "$backend authored failure is unrecoverable"; else test-fail "$backend authored failure recovery boundary"; cat "$TMPDIR/out" "$TMPDIR/err"; fi
 	actual="$("${runner[@]}" do run --lang expr -c '(let [emit out!] (emit "ok"))')"
 	if [ "$actual" = 'ok"ok"' ]; then test-ok "$backend action callable"; else test-fail "$backend action callable: $actual"; fi
 	actual="$("${runner[@]}" do run --allow-run --lang expr -c '(let [r (pipe! (run! "printf" "process") (run! "cat"))] r.status)')"

@@ -429,7 +429,7 @@ function test-run {
 	TEST_STEP_NAME="$display"
 	((TEST_STEP_COUNT += 1))
 	test_log "${BLUE}=== ${YELLOW}${BOLD}$display ${RESET}${BLUE}${DIM}in '${ORIGINAL_PATH}'${RESET}"
-	env -C "$ORIGINAL_PATH" "$SHELL" "$@" 2> >(sed "s/^/${RESET}${prefix} . ${GRAY}/" >&2) > >(sed "s/^/${RESET}${prefix} ! ${ORANGE}/")
+	env -C "$ORIGINAL_PATH" bash "$@" 2> >(sed "s/^/${RESET}${prefix} . ${GRAY}/" >&2) > >(sed "s/^/${RESET}${prefix} ! ${ORANGE}/")
 	return $?
 }
 
@@ -468,28 +468,20 @@ function test_fmt_result {
 	printf '%s' "$*" | tr '\n\t' '  '
 }
 
-# Function: test-fata
+# Function: test-fatal
 # Fatal error, aborts everything
 function test-fatal {
-	if [ -z "$TEST_EXPECT_FAILURE" ]; then
-		test_step_reveal
-		test_log_error "Fatal failure $*"
-		TEST_LOG+=("${RED}×")
-		TEST_ERRORS+=("[$(test_step_id)] ×←- ${TEST_STEP_NAME} $*")
-		test-end
-	fi
+	test-fail "Fatal failure $*"
+	test-end || true
+	exit 1
 }
 
 # Function: test-abort
 # Aborts the entire test, triggering a test end
 function test-abort {
-	test_step_reveal
-	if [ -n "${1:-}" ]; then
-		test_log_error "ABRT $*"
-	fi
-	TEST_LOG+=("${ORANGE}☇")
-	TEST_ERRORS+=("[$(test_step_id)] ☇←- ${TEST_STEP_NAME} $*")
-	test-end
+	test-fail "ABRT $*"
+	test-end || true
+	exit 1
 }
 
 # -----------------------------------------------------------------------------
@@ -693,11 +685,6 @@ function test-diff {
 		test_log "${ORANGE}B:[${RESET}$2${ORANGE}] $(sha256sum "$b" | cut -d' ' -f1)"
 		test_log_run "${ORANGE}>>>" diff -u "$a" "$b"
 		test_log "<<<${RESET}"
-		# Optional convenience copies for interactive debugging.
-		if [ -d "${HOME:-}/Desktop" ]; then
-			cp "$a" "$HOME/Desktop/a.txt"
-			cp "$b" "$HOME/Desktop/b.txt"
-		fi
 		unlink "$a"
 		unlink "$b"
 	fi

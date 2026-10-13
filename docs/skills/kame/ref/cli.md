@@ -15,11 +15,12 @@ source prints help. Source discovery
 tries `Makefile.kmk`, `make.kmk`, then `src/kmk/main.kmk` below the selected
 working directory.
 
-File-backed Kame sources can use `include PATH` to merge shared definitions and
-rules. Relative include paths are resolved from the including source, expanded
+File-backed Kame sources can use `(include PATH)` to merge shared definitions and
+rules under the caller's language. Literal relative paths resolve from the
+including source, expanded
 depth-first, and reject active-ancestry cycles. Repeated nonrecursive includes
 expand again; duplicate declarations still fail registration. Inline `-c` /
-`--command` sources cannot use includes.
+`--command` sources cannot load selected includes.
 
 ## Execute values, rules, and processes
 
@@ -53,10 +54,10 @@ Use `do run --lang expr` for expressions and `do run --lang kash` for processes.
 Native and WASM runner
 sessions support `--json` JSON Lines events for values, processes and diagnostics.
 
-`.km` scripts emit only explicit `out`/`err` effects by default, including inline
+`.km` scripts emit only explicit `out!`/`err!` effects by default, including inline
 `-c` scripts and implicit `default` definitions. `--print-result` also displays
 the final script value; `expr` and explicitly selected entries retain canonical
-result display. This never depends on whether `out` ran. Migrate implicit-display
+result display. This never depends on whether `out!` ran. Migrate implicit-display
 scripts with `(out! VALUE)` for exact data, a named entry, or `--print-result`.
 
 ## Build targets
@@ -132,7 +133,7 @@ kame -n ./build/app
 | `do inputs [--depth N] [TARGET]` | Reachable input files and separately labeled logical/configuration prerequisites. |
 | `do outputs [--depth N] [RESOURCE]` | Downstream declared outputs potentially affected by a resource change, including intermediate and sibling outputs; excludes the resource's own producer. |
 | `do span [--expand] [--depth N] [TARGET]` | Separate static inputs/outputs from evaluation-dependent inputs; `--json` retains the span document. `--expand` evaluates dynamic definitions without executing recipes. |
-| `do cat [TARGET]` | Materialize one target, then write exact file bytes or a definition value (text raw, other JSON-native values as plain JSON) without a newline. |
+| `do cat [TARGET]` | Materialize one target, then write exact file bytes or a definition value (text and top-level bytes raw, other JSON-native values as plain JSON) without a newline; nested bytes are not JSON-compatible. |
 
 `plan`, `inputs`, and `outputs` default to depth `-1` (unlimited); `span` defaults
 to `1`. Depth `0` returns no dependency inventory; `1` reports direct resources.
@@ -157,6 +158,20 @@ Under `--json`, `plan`, `inputs`, and `outputs` emit one schema-2 document with
 `direction`, `stages`, and `deferred`; input/output inventories also have resource-ID `items`.
 This replaces old plan records and string edge arrays. `span` retains schema 1.
 See [Build inspection](../../../spec/037-build-inspection.md).
+
+## Automatic output cleanup
+
+[Automatic clean](../../../spec/040-automatic-clean.md) specifies
+`kame do clean [-C DIR] [--dry-run] [--json]` over historical output ownership,
+without building prerequisites or executing authored recipes. Its mutually
+exclusive `--keep PATH...` and `--release PATH...` modes protect literal paths
+or retire ownership without deleting files; release does not clear protection.
+An implicit `clean` target is supplied only if no authored `clean` exists.
+Explicit `do clean` never invokes an authored `clean` recipe. This differs from
+`do cache clean`, which evicts cache records rather than outputs.
+Cleanup requires renewed ownership validation and race-resistant host removal;
+unsupported hosts must preserve artifacts and report the limitation. This is
+the intended contract, not a claim that every installed backend implements it.
 
 ## Format and parse Kame sources
 

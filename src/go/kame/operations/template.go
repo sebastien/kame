@@ -233,7 +233,10 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		c.Scope = child
 	}
 	_ = evalScope
+	previousClone := c.CloneCallableAST
+	c.CloneCallableAST = true
 	res := c.Program.EvaluateWith(doc.Root, c)
+	c.CloneCallableAST = previousClone
 	c.Source = prevSource
 	c.Scope = prevScope
 	if child != nil {
@@ -304,7 +307,7 @@ func opTemplateApply(c *eval.Context, state any, values []core.Value) eval.Resul
 		return invalidArgument(c, values, 1, "list")
 	}
 	result := c.Call(values[0], values[1].List)
-	c.FreeCallable(&values[0])
+	discardArgCallables(c, values)
 	return result
 }
 

@@ -14,8 +14,8 @@ expressions = [
     '(parse-json "01")', '(parse-json "[1,]")', '(parse-json "[bad]")', '(parse-json 42)',
 ]
 for expression in expressions:
-    first = subprocess.run([str(native), 'do', 'expr', '-c', expression], capture_output=True)
-    second = subprocess.run(['node', str(wasm), 'do', 'expr', '-c', expression], capture_output=True)
+    first = subprocess.run([str(native), 'do', 'run', '--lang', 'expr', '-c', expression], capture_output=True, timeout=30)
+    second = subprocess.run(['node', str(wasm), 'do', 'run', '--lang', 'expr', '-c', expression], capture_output=True, timeout=30)
     assert first.returncode == second.returncode, (expression, first.stderr, second.stderr)
     assert first.stdout == second.stdout, (expression, first.stdout, second.stdout)
     if first.returncode:
@@ -32,7 +32,7 @@ with tempfile.TemporaryDirectory(prefix='kame-json-') as directory:
 ./page.html :
 	@(yield! (let [data (parse-json (text (read ./data.json)))] data.title))
 ''')
-    result = subprocess.run([str(native)], cwd=project, capture_output=True)
+    result = subprocess.run([str(native)], cwd=project, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert (project / 'page.html').read_text() == 'Generated'
     # Absolute requests must select relative template producers too.
@@ -42,9 +42,9 @@ with tempfile.TemporaryDirectory(prefix='kame-json-') as directory:
 ./page.html :
 	@(yield! (let [data (parse-json (text (read ./other.json)))] data.title))
 ''')
-    result = subprocess.run([str(native)], cwd=project, capture_output=True)
+    result = subprocess.run([str(native)], cwd=project, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert (project / 'page.html').read_text() == 'Template'
-result = subprocess.run(['node', str(wasm), '--watch'], capture_output=True)
-assert result.returncode != 0 and b'--watch' in result.stderr and b'native' in result.stderr
+# Watch lifecycle conformance lives in the dedicated WASM watch tests; watch is
+# supported and intentionally does not terminate as a one-shot JSON probe.
 print('JSON native/WASM parity and generated-read checks passed.')

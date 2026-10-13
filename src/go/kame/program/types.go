@@ -472,6 +472,8 @@ type CompileSource struct {
 	Offset int
 }
 
+// Free releases the compilation envelope, not the Program. Retain a successful
+// Program before calling Free; its lifetime ends with Program.Free.
 func (r *CompileResult) Free(a mem.Allocator) {
 	for i := range r.Diagnostics {
 		r.Diagnostics[i].Free(a)

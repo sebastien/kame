@@ -14,7 +14,7 @@ repository root), plus `pandoc` and `python3` on your `PATH`. Check
 with:
 
 ```sh
-../../../build/kame.debug do tools
+../../build/kame.debug do tools
 ```
 
 You should see `pandoc` and `python3` with resolved paths. If `pandoc`
@@ -28,7 +28,7 @@ All commands below run from this directory
 First, build everything:
 
 ```sh
-../../../build/kame.debug
+../../build/kame.debug
 ```
 
 You will see one line per target and a final summary:
@@ -46,7 +46,7 @@ Summary: ... targets complete
 Now open the result:
 
 ```sh
-../../../build/kame.debug serve
+../../build/kame.debug serve
 ```
 
 Visit <http://localhost:8000>. You will see the hero, one post, one
@@ -90,8 +90,8 @@ that page changes.
 Check what kame sees for this page:
 
 ```sh
-../../../build/kame.debug do plan ./build/posts/hello-world.html
-../../../build/kame.debug do inputs ./build/posts/hello-world.html
+../../build/kame.debug do plan ./build/posts/hello-world.html
+../../build/kame.debug do inputs ./build/posts/hello-world.html
 ```
 
 ## 3. Add a second post and watch the index update
@@ -111,7 +111,7 @@ Edit one file, rebuild, and only that page plus the index update.
 Now rebuild:
 
 ```sh
-../../../build/kame.debug
+../../build/kame.debug
 ```
 
 Reload the index. Notice the new post appears first — the index sorts
@@ -122,7 +122,7 @@ ls -l --time-style=full-iso build/posts build/index.html
 ```
 
 Only `incremental-rebuilds.html` is new; `hello-world.html` and
-`this-site.html` kept their timestamps. Touching one input rebuilt
+`this-site.html` kept their timestamps. Changing one input's content rebuilt
 that page plus the index, nothing else.
 
 The index rule declares its inputs with the stdlib:
@@ -136,7 +136,7 @@ Adding a `.md` file changes the `wildcard` result, so the index
 rebuilds. See the full dependency closure with:
 
 ```sh
-../../../build/kame.debug do span --expand ./build/index.html
+../../build/kame.debug do span --expand ./build/index.html
 ```
 
 ## 4. Meet the generated helper
@@ -145,12 +145,17 @@ The index rows are built by a helper script that lives inside
 `Makefile.kmk` and is materialized as `./build/tools/row.sh`:
 
 ```sh
-../../../build/kame.debug do cat ./build/tools/row.sh
+../../build/kame.debug do cat ./build/tools/row.sh
 ```
 
 You will see a short shell script: slug and section from the path,
 `title`/`date`/`description` from the front-matter with `sed`, one
-`<li>` on stdout. The index recipe calls it once per file and sorts:
+`<li>` on stdout. The helper supports only quoted single-line fields as shown
+above, not full YAML quoting or multiline values. It escapes `&`, `<`, and `>`
+in all three fields so metadata stays literal HTML text. Use simple page
+filenames (letters, digits, and hyphens): the fixed `posts`/`projects` sections
+and those slugs go directly into link URLs, without general URL/attribute
+encoding. The index recipe calls it once per file and sorts:
 
 ```sh
 for f in @(posts); do sh ./build/tools/row.sh "$f"; done | sort -r
@@ -179,8 +184,8 @@ restores it.
 
 You have built a static blog: author bio, posts, projects, and an
 auto-generated index, all orchestrated by kame. Serve it with
-`../../../build/kame.debug serve`, publish `build/` anywhere static,
-and remove it with `../../../build/kame.debug clean`.
+`../../build/kame.debug serve`, publish `build/` anywhere static,
+and remove it with `../../build/kame.debug clean`.
 
 Where to go next: `kame do plan`, `kame do inputs`, and
 `kame do span --expand` on any target to see what kame knows before it

@@ -20,6 +20,9 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build source descriptor")}
 	}
 	defer descriptor.Free(r.Alloc)
+	if !validDescriptorOptions(descriptor, false) {
+		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build options")}
+	}
 	inputs := host.PayloadList(descriptor, "sources")
 	if len(inputs) == 0 {
 		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "empty build source descriptor")}
@@ -29,9 +32,21 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 		valid, hasName, hasText := inputs[i].Kind == core.Record, false, false
 		for j := range inputs[i].Record {
 			field := inputs[i].Record[j]
-			if field.Key == "name" { hasName = true; if field.Value.Kind != core.String { valid = false } }
-			if field.Key == "text" { hasText = true; if field.Value.Kind != core.String { valid = false } }
-			if field.Key == "offset" && field.Value.Kind != core.Int { valid = false }
+			if field.Key == "name" {
+				hasName = true
+				if field.Value.Kind != core.String {
+					valid = false
+				}
+			}
+			if field.Key == "text" {
+				hasText = true
+				if field.Value.Kind != core.String {
+					valid = false
+				}
+			}
+			if field.Key == "offset" && field.Value.Kind != core.Int {
+				valid = false
+			}
 		}
 		name := host.PayloadText(inputs[i], "name")
 		offset := host.PayloadInt(inputs[i], "offset")
@@ -53,22 +68,34 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 	}
 	tools := host.PayloadList(descriptor, "toolOverrides")
 	for i := range tools {
-		if tools[i].Kind != core.String { r.freeBuildSources(); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid tool override")} }
+		if tools[i].Kind != core.String {
+			r.freeBuildSources()
+			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid tool override")}
+		}
 		r.BuildToolOverrides = slices.Append(r.Alloc, r.BuildToolOverrides, pureText(r.Alloc, tools[i].Text))
 	}
 	defines := host.PayloadList(descriptor, "defines")
 	for i := range defines {
-		if defines[i].Kind != core.String { r.freeBuildSources(); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid definition override")} }
+		if defines[i].Kind != core.String {
+			r.freeBuildSources()
+			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid definition override")}
+		}
 		r.BuildDefines = slices.Append(r.Alloc, r.BuildDefines, pureText(r.Alloc, defines[i].Text))
 	}
 	environment := host.PayloadList(descriptor, "environment")
 	parameters := host.PayloadList(descriptor, "parameters")
 	for i := range parameters {
-		if parameters[i].Kind != core.String { r.freeBuildSources(); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid parameter override")} }
+		if parameters[i].Kind != core.String {
+			r.freeBuildSources()
+			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid parameter override")}
+		}
 		r.BuildParameters = slices.Append(r.Alloc, r.BuildParameters, pureText(r.Alloc, parameters[i].Text))
 	}
 	for i := range environment {
-		if environment[i].Kind != core.String { r.freeBuildSources(); return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build environment")} }
+		if environment[i].Kind != core.String {
+			r.freeBuildSources()
+			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build environment")}
+		}
 		r.BuildEnvironment = slices.Append(r.Alloc, r.BuildEnvironment, pureText(r.Alloc, environment[i].Text))
 	}
 	r.BuildForce = host.PayloadInt(descriptor, "force") != 0
@@ -79,7 +106,7 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 }
 
 func (r *Runtime) freeBuildSources() {
-  r.BuildForce = false
+	r.BuildForce = false
 	r.BuildRetainBytes = 0
 	for i := range r.BuildSources {
 		mem.FreeString(r.Alloc, r.BuildSources[i].Name)
@@ -87,14 +114,26 @@ func (r *Runtime) freeBuildSources() {
 	}
 	slices.Free(r.Alloc, r.BuildSources)
 	r.BuildSources = nil
-	for i := range r.BuildToolOverrides { mem.FreeString(r.Alloc, r.BuildToolOverrides[i]) }
-	slices.Free(r.Alloc, r.BuildToolOverrides); r.BuildToolOverrides = nil
-	for i := range r.BuildDefines { mem.FreeString(r.Alloc, r.BuildDefines[i]) }
-	for i := range r.BuildParameters { mem.FreeString(r.Alloc, r.BuildParameters[i]) }
-	slices.Free(r.Alloc, r.BuildParameters); r.BuildParameters = nil
-	for i := range r.BuildEnvironment { mem.FreeString(r.Alloc, r.BuildEnvironment[i]) }
-	slices.Free(r.Alloc, r.BuildDefines); r.BuildDefines = nil
-	slices.Free(r.Alloc, r.BuildEnvironment); r.BuildEnvironment = nil
+	for i := range r.BuildToolOverrides {
+		mem.FreeString(r.Alloc, r.BuildToolOverrides[i])
+	}
+	slices.Free(r.Alloc, r.BuildToolOverrides)
+	r.BuildToolOverrides = nil
+	for i := range r.BuildDefines {
+		mem.FreeString(r.Alloc, r.BuildDefines[i])
+	}
+	for i := range r.BuildParameters {
+		mem.FreeString(r.Alloc, r.BuildParameters[i])
+	}
+	slices.Free(r.Alloc, r.BuildParameters)
+	r.BuildParameters = nil
+	for i := range r.BuildEnvironment {
+		mem.FreeString(r.Alloc, r.BuildEnvironment[i])
+	}
+	slices.Free(r.Alloc, r.BuildDefines)
+	r.BuildDefines = nil
+	slices.Free(r.Alloc, r.BuildEnvironment)
+	r.BuildEnvironment = nil
 }
 
 func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
@@ -105,8 +144,12 @@ func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 	options.Parameters = r.BuildParameters
 	options.ToolOverrides = r.BuildToolOverrides
 	var environment []string
-	for i := range options.Environment { environment = slices.Append(r.Alloc, environment, options.Environment[i]) }
-	for i := range r.BuildEnvironment { environment = slices.Append(r.Alloc, environment, r.BuildEnvironment[i]) }
+	for i := range options.Environment {
+		environment = slices.Append(r.Alloc, environment, options.Environment[i])
+	}
+	for i := range r.BuildEnvironment {
+		environment = slices.Append(r.Alloc, environment, r.BuildEnvironment[i])
+	}
 	options.Environment = environment
 	defer slices.Free(r.Alloc, environment)
 	if len(r.BuildSources) != 0 {

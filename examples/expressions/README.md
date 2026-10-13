@@ -18,7 +18,7 @@ kame -f ./01-values.km publication
 The first two commands produce the same list:
 
 ```text
-[./public/hello.txt ./public/world.txt]
+["./public/hello.txt" "./public/world.txt"]
 ```
 
 The third produces a record with a title, that list, and a count of `2`. Paths,
@@ -40,7 +40,7 @@ kame -f ./02-functions.km labels
 ```
 
 `pages` preserves the source order and duplicate. `ordered` removes the
-duplicate and sorts the paths. `labels` is `[HELLO.TXT WORLD.TXT]`.
+duplicate and sorts the paths. `labels` is `["HELLO.TXT" "WORLD.TXT"]`.
 
 Read the named `page` function, the value pipe, and the anonymous function side
 by side. None introduces a new kind of value.
@@ -54,16 +54,16 @@ computations independently of either rules or processes.
 ## 3. Let the outside world supply a value
 
 ```sh
-kame -f ./03-resources.km publication
+kame --allow-read=. -f ./03-resources.km publication
 printf 'a new note\n' > ./notes/third.txt
-kame -f ./03-resources.km publication
+kame --allow-read=. -f ./03-resources.km publication
 ```
 
 The count changes from `2` to `3`. Remove only the `third.txt` you just created
 when finished. There are still no generated pages.
 
 Unlike the literal list, `wildcard` records a filesystem dependency. In standalone
-expression execution it requires an explicit read grant:
+expression execution and standalone `.km` programs it requires an explicit read grant:
 
 ```sh
 kame do run --lang expr --allow-read -c '(wildcard ./notes/*.txt)'
@@ -74,9 +74,9 @@ special build-only list mechanism.
 
 ## File execution
 
-`.km` is the value-program format. The current executable route is `-f FILE`
-plus a requested definition, as shown above. Direct `.km` execution is planned;
-these examples do not assume its invocation syntax or entry-point policy.
+`.km` is the value-program format. Both `-f FILE` plus a requested definition,
+as shown above, and direct `kame ./01-values.km --entry publication` execute it.
+Select the definition explicitly when inspecting these definitions-only lessons.
 
 Next: [rules](../rules/README.md), or enter independently through
 [Kash](../shell/README.md).

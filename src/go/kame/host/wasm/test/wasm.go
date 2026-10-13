@@ -197,7 +197,7 @@ func TestToolInspectionYieldsHostRequestsWithoutRunningRecipes(t *testing.T) {
 	}
 	checked.Free(a)
 	next = r.Step()
-	if !next.OK || next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, "op") != host.OpWildcard {
+	if !next.OK || next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, "op") != host.OpWildcard || host.PayloadPath(next.Request.Payload) != "./input/*.txt" {
 		t.Error("inspection emitted a non-read request")
 	}
 	items := []core.Value{core.NewString(a, "./input/needs.txt")}
@@ -205,6 +205,27 @@ func TestToolInspectionYieldsHostRequestsWithoutRunningRecipes(t *testing.T) {
 	items[0].Free(a)
 	r.Complete(next.Request, value, diagnostic.Diagnostic{})
 	next.Request.Free(a)
+	// The resource producer and the consuming operation each read membership;
+	// the latter memoizes its accepted result for expression replay. Forwarding
+	// must service both rather than satisfy the producer from guest memory.
+	for reads := 0; reads < 4; reads++ {
+		checked = r.ToolsCheckJSON("root")
+		waiting := checked.HostNeeded
+		if checked.Code != "" { t.Error("resumed tool inspection failed") }
+		checked.Free(a)
+		if !waiting { break }
+		next = r.Step()
+		if !next.OK || next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, host.FieldOp) != host.OpWildcard || host.PayloadPath(next.Request.Payload) != "./input/*.txt" {
+			t.Error("resumed inspection requested an effect or a different resource")
+			if next.OK { next.Request.Free(a) }
+			break
+		}
+		items = []core.Value{core.NewString(a, "./input/needs.txt")}
+		value = core.NewList(a, items)
+		items[0].Free(a)
+		r.Complete(next.Request, value, diagnostic.Diagnostic{})
+		next.Request.Free(a)
+	}
 	for i := 0; i < 2; i++ {
 		checked = r.ToolsCheckJSON("root")
 		if checked.HostNeeded || checked.Code != "" || !strings.Contains(checked.Text, "TOOL_MISSING") || !strings.Contains(checked.Text, "\"targetStack\":[\"root\",\"./input/needs.txt\"]") {

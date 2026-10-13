@@ -375,7 +375,7 @@ func (p *parser) targetArgument(r *Rule, span source.Span, text string) {
 	}
 	for i := range r.Arguments {
 		if r.Arguments[i].Name == name {
-			p.error(span.Start, span.End, "duplicate target argument: "+name)
+			p.error(span.Start, span.End, "duplicate target argument")
 			return
 		}
 	}
@@ -588,66 +588,28 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 		}
 		bodyStart := lineStart + len(indent)
 		line := template.ParseStringRange(p.a, p.s, bodyStart, contentEnd)
-		for i := range line.Diagnostics {
-			if p.deferRecipeDiagnostics { r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, line.Diagnostics[i]) } else { p.diags = slices.Append(p.a, p.diags, line.Diagnostics[i]) }
-		}
-		slices.Free(p.a, line.Diagnostics)
-		line.Diagnostics = nil
 		r.Body = slices.Append(p.a, r.Body, RecipeLine{Text: p.s.Text[bodyStart:contentEnd], Span: source.Span{Start: bodyStart, End: contentEnd}, Template: line})
 		r.Span.End = contentEnd
 		pos = end + 1
 	}
 	p.recipeDocument(r, indent)
+	// Only the selected template grammar owns recipe diagnostics. Per-line
+	// probes must not diagnose literal contents of a document's raw blocks.
+	for i := range r.Body {
+		line := r.Body[i].Template
+		if line == nil { continue }
+		if r.BodyDoc == nil {
+			for j := range line.Diagnostics {
+				if p.deferRecipeDiagnostics { r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, line.Diagnostics[j]) } else { p.diags = slices.Append(p.a, p.diags, line.Diagnostics[j]) }
+			}
+		}
+		slices.Free(p.a, line.Diagnostics)
+		line.Diagnostics = nil
+	}
 }
 
 func (p *parser) recipeDocument(r *Rule, indent string) {
 	if len(r.Body) == 0 {
-		return
-	}
-	// Detect plain-style directive lines in stripped body text. If none,
-	// keep per-line templates for exact backward-compatible rendering.
-	found := false
-	for i := range r.Body {
-		// Blank lines (nil Template) cannot be directives.
-		if r.Body[i].Template == nil {
-			continue
-		}
-		text := r.Body[i].Text
-		// Trim trailing spaces for whole-line check.
-		end := len(text)
-		for end > 0 && (text[end-1] == ' ' || text[end-1] == '\t') {
-			end--
-		}
-		if end == 0 || text[0] != '@' {
-			continue
-		}
-		if end >= 2 && text[0] == '@' && text[1] == '@' {
-			found = true
-			break
-		}
-		// Keyword letters.
-		kend := 1
-		for kend < end && isDocKeywordLetter(text[kend]) {
-			kend++
-		}
-		if kend == 1 {
-			continue
-		}
-		if !isDocKeyword(text[1:kend]) {
-			continue
-		}
-		word := text[1:kend]
-		if word == "else" || word == "end" || word == "raw" {
-			found = true
-			break
-		}
-		// Args keywords need "(" adjacent; "@if (" is ordinary text.
-		if kend < end && text[kend] == '(' {
-			found = true
-			break
-		}
-	}
-	if !found {
 		return
 	}
 	// Parse whole body range as plain document, preserving original spans.
@@ -657,21 +619,14 @@ func (p *parser) recipeDocument(r *Rule, indent string) {
 		firstStart = r.Body[0].Span.Start
 	}
 	lastEnd := r.Body[len(r.Body)-1].Span.End
+	if !template.HasDocumentDirectivesRange(p.a, p.s, firstStart, lastEnd) {
+		return
+	}
 	doc := template.ParseDocumentRange(p.a, p.s, firstStart, lastEnd, "plain")
 	for i := range doc.Diagnostics {
 		if p.deferRecipeDiagnostics { r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, doc.Diagnostics[i]) } else { p.diags = slices.Append(p.a, p.diags, doc.Diagnostics[i]) }
 	}
 	r.BodyDoc = doc
-}
-
-func isDocKeywordLetter(b byte) bool { return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
-
-func isDocKeyword(word string) bool {
-	switch word {
-	case "if", "elif", "else", "for", "with", "let", "include", "raw", "end":
-		return true
-	}
-	return false
 }
 
 func topLevel(text string, want byte) int {

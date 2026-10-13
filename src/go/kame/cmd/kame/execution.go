@@ -19,7 +19,9 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 	if len(targets) != 0 {
 		setDashboardSubject(targets[0])
 	}
-	var handles []*program.Handle
+	// Preserve operand indices even when an earlier target fails to start.
+	handles := slices.Make[*program.Handle](mem.System, len(targets))
+	remaining := 0
 	failed := false
 	progress := buildProgress{}
 	for i := range targets {
@@ -31,11 +33,13 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			failed = true
 			continue
 		}
-		handles = slices.Append(mem.System, handles, started.Handle)
+		handles[i] = started.Handle
+		remaining++
 	}
-	remaining := len(handles)
 	cancelling := false
-	for remaining != 0 {
+	// Keep the same signal policy while the final root's service dependencies
+	// shut down: root completion does not mean the host has reaped its groups.
+	for remaining != 0 || (p.Host != nil && p.Host.Active() != 0) {
 		signal := posix.TakeSignal()
 		if signal < 0 {
 			for i := range handles {
@@ -91,22 +95,16 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 			remaining--
 		}
 	}
-	// A completed target may have released its final service dependency. Keep
-	// pumping the host until graceful service teardown has reaped its process
-	// group so terminal lifecycle events are published before the CLI returns.
-	for p.Host != nil && p.Host.Active() != 0 {
-		tickCLIProgram(p, 10, errOut, json)
-		drainEvents(p, out, errOut, json, &progress)
-	}
 	drainEvents(p, out, errOut, json, &progress)
 	slices.Free(mem.System, handles)
-	// A second signal may arrive while the first cancellation reaps the final
-	// process. Consume it before returning the ordinary cancellation status.
-	if cancelling {
-		signal := posix.TakeSignal()
-		if signal < 0 {
-			return 128 - signal
-		}
+	// Either signal may arrive during the final tick/drain, even when all
+	// targets completed successfully before shutdown began.
+	signal := posix.TakeSignal()
+	if signal < 0 {
+		return 128 - signal
+	}
+	if signal > 0 {
+		cancelling = true
 	}
 	if failed || cancelling {
 		return 1

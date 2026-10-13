@@ -136,7 +136,7 @@ else
 fi
 cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" -- stats
 cli_expect_status 0
-cli_expect_stdout_contains "3 source files" "2 object files"
+cli_expect_stdout_contains "3 input files" "2 object files"
 
 test-step "unknown do command is a usage error with a hint"
 cli_run -- do bogus

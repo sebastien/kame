@@ -5,6 +5,16 @@ contracts without requiring Node or WASM. Its PE entry uses the native process
 host; the Node/WASM launcher is a separate fallback, not a substitute for native
 runtime conformance.
 
+## Current implementation limits
+
+The requirements below remain acceptance targets, not a claim of full native
+Windows conformance. In the pinned Cosmopolitan 4.0.2 host, graph stages start
+before job assignment. Exec replacements use Kame as their parent and do not
+inherit the ready-blocked fork child's request job, leaving a single-process
+replacement window too. Launch-time descendant containment is unresolved;
+reusing the fork barrier alone does not fix it. Windows directory durability
+also remains unsupported. These paths require native Windows validation.
+
 ## Requirements
 
 1. `kame-windows-x64.exe` is a self-contained native CLI build of the same Kame

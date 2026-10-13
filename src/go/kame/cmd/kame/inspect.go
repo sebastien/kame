@@ -4,6 +4,7 @@ import (
 	"kame/cli"
 	"kame/core"
 	"kame/diagnostic"
+	"kame/host/posix"
 	"kame/program"
 	"solod.dev/so/bytes"
 	"solod.dev/so/encoding/json"
@@ -160,9 +161,29 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 	}
 	handle := started.Handle
 	defer handle.Free()
+	cancelling := false
 	for {
+		signal := posix.TakeSignal()
+		if signal < 0 {
+			return 128 - signal
+		}
+		if signal > 0 && !cancelling {
+			cancelling = true
+			handle.Cancel()
+		}
 		session.Program.Tick(10)
 		discardEvents(session.Program)
+		if cancelling {
+			// Cancellation completes the root before the host has necessarily
+			// reaped its process group. Keep pumping without publishing an artifact.
+			if session.Program.Host != nil && session.Program.Host.Active() != 0 {
+				continue
+			}
+			if signal := posix.TakeSignal(); signal < 0 {
+				return 128 - signal
+			}
+			return 1
+		}
 		if handle.Definition && handle.Node.Current {
 			if parsed.JSON {
 				program.WriteJSONEvent(out, program.Event{Kind: program.TargetValue, Target: targets[0], NodeID: handle.Node.ID, Generation: handle.Node.Generation, Attempt: handle.Node.Attempt, Key: handle.Node.Key, Value: handle.Node.Latest})

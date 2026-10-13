@@ -75,8 +75,12 @@ func ParseString(a mem.Allocator, name string, text string) *String {
 
 // ParseStringRange parses a template within a caller-owned Source.
 func ParseStringRange(a mem.Allocator, s *source.Source, start int, end int) *String {
-	p := parser{a: a, s: s, pos: start, end: end}
+	view := mem.Alloc[source.Source](a)
+	*view = *s
+	view.Text = s.Text[:end]
+	p := parser{a: a, s: view, pos: start, end: end}
 	p.stringParts()
+	mem.Free(a, view)
 	t := mem.Alloc[String](a)
 	t.Alloc, t.Span, t.Parts, t.Diagnostics = a, source.Span{Start: start, End: end}, p.parts, p.diags
 	return t

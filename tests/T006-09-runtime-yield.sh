@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Spec: docs/spec/006-runtime.md — Yield and Effects
 # Spec: docs/spec/007-library.md — Build Effects
-# Spec: docs/spec/013-tests.md — T006-04-runtime-yield
+# Spec: docs/spec/013-tests.md — T006-09-runtime-yield
 set -euo pipefail
 
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 
-test-start "T006-04 runtime yield"
+test-start "T006-09 runtime yield"
 
 test-step "toolchain and binary"
 cli_require_tools

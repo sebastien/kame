@@ -32,7 +32,7 @@ command -v so >/dev/null 2>&1 || {
 mkdir -p "$root/dist"
 cd "$kame_dir"
 CC=$cosmocc \
-	CFLAGS="-O3 -s -DKAME_BUILD_MODE_RELEASE" \
+	CFLAGS="-O3 -s -DKAME_BUILD_MODE_RELEASE -DKAME_RUNTIME_APE" \
 	so build -assert=off -panic=exit -o "$out" ./cmd/kame
 
 printf 'built %s (%s bytes)\n' "$out" "$(wc -c <"$out" | tr -d ' ')"

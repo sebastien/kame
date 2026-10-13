@@ -93,16 +93,16 @@ Sections are first-class callable values. They flow through `map`, `filter`,
 
 ### Pipes
 
-Pipe rewriting inspects only direct right-side items for `_` placeholders, so
-a placeholder inside a section is never rewritten and the section travels as
-one item:
+Pipe rewriting inspects only direct right-side items for `_` placeholders;
+placeholders inside a section are not rewritten. Pattern substitution already
+accepts a list subject, so no extra section is needed:
 
 ```kame
-(files | map ((replace ./{**}/{*}.c ./build/{_0}/{_1}.c)))
+(files | sub ./{**}/{*}.c ./build/{_0}/{_1}.c)
 ```
 
-rewrites to `(map (replace ./{**}/{*}.c ./build/{_0}/{_1}.c) files)` where the
-two-argument pattern `replace` returns a callable section applied per item.
+rewrites to `(sub ./{**}/{*}.c ./build/{_0}/{_1}.c files)`, preserving
+nonmatching entries under `041-pattern-predicates-and-substitution.md`.
 
 ### Formatting
 
@@ -120,6 +120,16 @@ or a quoted string without interpolation
 whose text contains one or more pattern groups. Interpolated strings are never
 patterns. Runtime string values are never reclassified: a string computed by an
 expression and containing braces is a plain string.
+
+Expression path patterns may interpolate literal prefixes and suffixes around
+fully authored groups: `@(ROOT)/{name:*}.@(EXT)` matches and
+`@(OUT)/{name}` expands. Inserted bytes are literal pattern data; braces,
+backslashes and regex/glob punctuation cannot inject groups. Group names and
+matcher/regex syntax must occupy one authored static segment: interpolation
+inside `{...}` is a source error. Deliberately constructed syntax uses the
+explicit `(pattern TEXT)` boundary instead. Computed paths retain the explicit
+root, text-only, no-NUL and suspension rules of `038-direct-kash-and-values.md`;
+their pattern values never implicitly enumerate filesystem globs.
 
 Group forms are:
 
@@ -177,10 +187,11 @@ An expansion pattern renders literal text and resolves each reference group:
 ### Value Kind
 
 A pattern is a new value kind carrying its canonical text and parsed groups.
-Patterns are immutable. `str` renders a pattern as its text, and recipe and
-rule-input rendering render a pattern as its text. Patterns serialize as their
-text and are cache-safe. Operations that expect strings reject patterns with
-`EXPR_INVALID`; converting with `str` is explicit.
+Patterns are immutable. Recipe and rule-input rendering render a pattern as its
+text; scalar `str` rejects patterns. Canonical display quotes their canonical
+text, and cache fingerprinting encodes their kind and text. This does not make
+them JSON-compatible strings. Operations that expect strings reject patterns
+with `EXPR_INVALID`.
 
 ## Replace
 
@@ -339,7 +350,7 @@ and runtime pattern construction are specified in
   groups leave a non-pattern path or string under ordinary atom classification.
   Selected matcher-pattern replacements and literal-string calls with pattern
   operands are `PAT_INVALID`.
-- A pattern renders as its text in recipes, rule inputs, and `str`.
+- A pattern renders as its text in recipes and rule inputs; `str` rejects it.
 - A string operation given a pattern is `EXPR_INVALID`.
 - Formatting sections and patterns is idempotent and preserves section form.
 - Pattern and section tests under `mem.Tracker` leak no values.

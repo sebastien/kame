@@ -78,7 +78,7 @@ KMK
 		done
 		return 1
 	}
-	timeout 30 "${runner[@]}" -C "$work/watch" --json --watch report >"$work/watch/log" 2>"$work/watch/err" &
+	timeout -k 2 30 "${runner[@]}" -C "$work/watch" --json --watch report >"$work/watch/log" 2>"$work/watch/err" &
 	watcher=$!
 	if settled '' './items/slot' 1; then test-ok "$backend initial shared directory selection"; else test-fail "$backend initial filtered watch"; fi
 	rmdir "$work/watch/items/slot"
@@ -91,4 +91,51 @@ KMK
 	kill -TERM "$watcher" 2>/dev/null || true
 	wait "$watcher" 2>/dev/null || true
 done
+test-step "wasm excluded writerless FIFO watch remains responsive"
+# Real POSIX FIFOs only: do not infer Windows conformance or emulate pipes.
+if [ "$(node -p 'process.platform')" = win32 ]; then
+	test-ok "FIFO watch skipped on Windows"
+else
+	work="$TMPDIR/wasm-fifo"
+	mkdir -p "$work/items"
+	if mkfifo "$work/items/slot"; then
+		mkfifo "$work/items/writerless"
+		ln -s writerless "$work/items/linkfifo"
+		printf before >"$work/items/visible"
+		cp -p "$work/items/visible" "$work/seed"
+		cat >"$work/Makefile.kmk" <<'KMK'
+SHELL = kash
+FILES = (wildcard :+files ./items/*)
+report :
+	(write! ./file-report (join FILES ","))
+	(write! ./content-report (read ./items/visible))
+KMK
+		fifo_settled() {
+			local files="$1" content="$2" cycles="$3"
+			for attempt in {1..300}; do
+				if [ -f "$work/file-report" ] && [ -f "$work/content-report" ] && [ "$(cat "$work/file-report")" = "$files" ] && [ "$(cat "$work/content-report")" = "$content" ] && [ "$(grep -c '"type":"watch-idle"' "$work/log" || true)" -ge "$cycles" ]; then return 0; fi
+				sleep .025
+			done
+			return 1
+		}
+		timeout -k 2 30 env KAME_WASM="$CLI_ROOT/dist/kame.wasm" node "$CLI_ROOT/src/js/kame.js" -C "$work" --json --watch report >"$work/log" 2>"$work/err" &
+		watcher=$!
+		trap 'kill -TERM "$watcher" 2>/dev/null || true; wait "$watcher" 2>/dev/null || true' EXIT
+		if fifo_settled './items/visible' before 1; then test-ok "wasm initial build excludes FIFO and symlink to FIFO without blocking"; else test-fail "wasm initial FIFO watch"; cat "$work/log" "$work/err"; fi
+		printf after! >"$work/items/visible"
+		touch -r "$work/seed" "$work/items/visible"
+		if fifo_settled './items/visible' 'after!' 2; then test-ok "wasm visible file content change with preserved mtime rebuilds beside FIFO"; else test-fail "wasm FIFO watch content invalidation"; fi
+		rm "$work/items/slot"
+		printf regular >"$work/items/slot"
+		if fifo_settled './items/slot,./items/visible' 'after!' 3; then test-ok "wasm same-name excluded FIFO becomes selected regular file"; else test-fail "wasm FIFO-to-file invalidation"; fi
+		if [ -s "$work/err" ]; then test-fail "wasm FIFO watch diagnostic"; cat "$work/err"; fi
+		kill -TERM "$watcher" 2>/dev/null || true
+		status=0
+		wait "$watcher" 2>/dev/null || status=$?
+		trap - EXIT
+		if [ "$status" = 143 ]; then test-ok "wasm writerless FIFO watcher stops without timeout or leaked child"; else test-fail "wasm FIFO watcher termination ($status)"; fi
+	else
+		test-ok "FIFO watch skipped: host does not support mkfifo"
+	fi
+fi
 test-end

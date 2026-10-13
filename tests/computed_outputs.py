@@ -50,7 +50,7 @@ def check(command: list[str], source: str, target: str, *,
 					if json.loads(line).get('diagnostic', {}).get('code') == 'TGT_AMBIG']
 				assert diagnostics and diagnostics[0].get('related'), result.stdout
 				assert diagnostics[0]['related'][0].get('source'), result.stdout
-				if source.startswith('include '):
+				if source.startswith('(include '):
 					assert diagnostics[0]['related'][0]['source'].endswith('included.kmk'), result.stdout
 			if 'PHASE_INVALID' in codes:
 				assert any(json.loads(line).get('diagnostic', {}).get('tips')
@@ -206,7 +206,7 @@ def main() -> None:
 	failures = []
 	cases.extend([
 		('lazy read output alias', 'OUTPUTS = (text (read ./seed))\n@(OUTPUTS) :\n\ttouch forbidden\n', 'default', {'code': ('PHASE_INVALID', 'CAP_DENIED'), 'overrides': ['--allow-read=.']}),
-		('included producer location', 'include ./included.kmk\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
+		('included producer location', '(include ./included.kmk)\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
 		('competing source patterns', './out/{name}.o : ./src/{name}.c\n\ttouch forbidden\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
 		('canonical duplicate outputs', './out/../same :\n\ttouch forbidden\n./same :\n\ttouch forbidden\n', 'same', {'code': 'TGT_AMBIG'}),
 	])

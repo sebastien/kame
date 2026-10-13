@@ -384,7 +384,7 @@ if [ "${1:-}" = "init" ]; then
 	(umask 077; set -C; : >"$template_tmp") 2>/dev/null || die "cannot stage Makefile.bootstrap"
 	while IFS= read -r line || [ -n "$line" ]; do
 		case $line in
-		'KAME_VERSION ?= @KAME_VERSION@') printf 'KAME_VERSION ?= %s\n' "$version" ;;
+		'KAME_VERSION ?= '*) printf 'KAME_VERSION ?= %s\n' "$version" ;;
 		*) printf '%s\n' "$line" ;;
 		esac
 	done <"$cache/Makefile.bootstrap" >"$template_tmp"

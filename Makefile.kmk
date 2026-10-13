@@ -33,18 +33,19 @@ WASM_STACK_SIZE = 262144
 
 # --- Source sets ------------------------------------------------------------
 #
-# KAME_SOURCES is every Go source in the module; KAME_INPUTS adds the module
-# metadata and this build file so any of them can invalidate a native binary.
+# KAME_SOURCES is every Go source in the module; KAME_INPUTS also includes native
+# interop sources, module metadata and this build file to invalidate binaries.
 # The generated version file is named explicitly to match the GNU Makefile.
 KAME_SOURCES = (wildcard ./src/go/kame/**/*.go)
 KAME_INPUTS =
   (concat
     [./src/go/kame/cmd/kame/version_generated.go]
     KAME_SOURCES
+    (wildcard ./src/go/kame/**/*.c)
+    (wildcard ./src/go/kame/**/*.h)
     [
       ./src/go/kame/go.mod
       ./src/go/kame/go.sum
-      ./src/go/kame/cmd/kame/build_mode.h
       ./Makefile.kmk])
 
 # The wasm module links the portable runtime (every Go package except cmd/kame)
@@ -105,7 +106,7 @@ wasm-translate :
 	mkdir -p ./build/wasm/c
 	cd @(KAME_DIR) && so translate -o ../../../build/wasm/c ./host/wasm
 
-./build/wasm/kame.wasm : @(WASM_SOURCES) ./src/go/kame/host/posix/posix.c ./src/go/kame/host/posix/posix.h ./src/go/kame/host/wasm/kame_wasm.h ./tools/wasm/kame_wasm_abi.c
+./build/wasm/kame.wasm : @(WASM_SOURCES) ./src/go/kame/host/posix/posix.c ./src/go/kame/host/posix/posix.h ./src/go/kame/host/wasm/kame_wasm.h ./tools/wasm/kame_wasm_abi.c ./tools/wasm/kame_wasm_jump.c ./tools/wasm/kame_wasm_panic.h ./src/go/kame/go.mod ./src/go/kame/go.sum ./Makefile.kmk
 	command -v "@(WASM_CC)"
 	command -v "@(WASM_LD)"
 	mkdir -p ./build/wasm/c
@@ -134,14 +135,20 @@ dist-release :
 
 test : test-so test-examples test-go test-cli
 
-test-so : ./src/go/kame/cmd/kame/version_generated.go
+test-so : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
 	cd @(KAME_DIR) && so test ./...
+
+task test-native-lifecycle : ./src/go/kame/cmd/kame/version_generated.go
+	CC=clang bash ./tools/native/test-cli-lifecycle.sh
+
+task test-native-host :
+	CC=clang bash ./tools/native/test-host.sh
 
 test-examples :
 	cd @(EXAMPLES_DIR)/engine && so test ./...
 
-test-go : ./src/go/kame/cmd/kame/version_generated.go
-	cd @(KAME_DIR) && go test ./cmd/kame
+test-go : ./src/go/kame/cmd/kame/version_generated.go ./build/kame.debug test-native-lifecycle
+	cd @(KAME_DIR) && KAME_NATIVE_FORMAT_TEST_BINARY="@(abspath ./build/kame.debug)" KAME_NATIVE_CLI_TEST_BINARY="@(abspath ./build/kame.debug)" go test ./cmd/kame
 
 test-presentation : ./build/kame.debug dist-wasm
 	./tests/T036-01-cli-presentation.sh
@@ -158,12 +165,12 @@ test-cli : ./build/kame.debug
 
 test-all : test test-leaks
 
-test-sanitize : ./src/go/kame/cmd/kame/version_generated.go
+test-sanitize : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
 	cd @(KAME_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 	cd @(EXAMPLES_DIR)/engine && CC=clang so test -check=sanitize -panic=abort ./...
 
-test-leaks : ./build/kame.sanitize
-	cd @(KAME_DIR) && CC=clang go test -asan ./cmd/kame
+test-leaks : ./build/kame.sanitize test-native-lifecycle test-native-host
+	cd @(KAME_DIR) && KAME_NATIVE_FORMAT_TEST_BINARY="@(abspath ./build/kame.sanitize)" KAME_NATIVE_CLI_TEST_BINARY="@(abspath ./build/kame.sanitize)" CC=clang go test -asan ./cmd/kame
 	cd @(KAME_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 	cd @(EXAMPLES_DIR)/engine && CC=clang so test -check=sanitize -panic=abort ./...
 	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 CLI_BIN="@(abspath ./build/kame.sanitize)" ./tests/harness.sh $(find ./tests -type f -name 'T*.sh' ! -name 'T013-03-meta-binary.sh')
@@ -172,7 +179,10 @@ wasm-portable :
 	./src/sh/check-portable.sh
 
 wasm-check : wasm wasm-portable
+	${CC:-cc} -std=c11 -Wall -Wextra -Werror -fsyntax-only ./tools/native/test-wasm-header.c
 	node ./tools/wasm/check-imports.mjs ./build/wasm/kame.wasm
+	node ./tools/wasm/test-abi.mjs ./build/wasm/kame.wasm
+	node ./tools/wasm/test-composition-diagnostics.mjs ./build/wasm/kame.wasm
 
 test-wasm : wasm-check
 	./tests/T010-01-wasm-loader.sh
@@ -204,7 +214,7 @@ test-wasm : wasm-check
 	./tests/T007-14-lib-native-data.sh
 	./tests/T009-13-cli-configuration.sh
 	./tests/T009-14-cli-watch.sh
-	./tests/T004-09-lang-rule-header-composition.sh
+	./tests/T004-19-lang-rule-header-composition.sh
 	./tests/T004-10-lang-line-continuations.sh
 	./tests/T004-11-lang-wildcard-inputs.sh
 	./tests/T004-12-lang-optional-includes.sh

@@ -89,15 +89,15 @@ cases.append(('script', f'(f {long} x)\nnext = 1\n',
 cases.append(('script', f'value = (f {long} x)\n./out : ./in\n\techo base\n\t  echo literal\n',
               f'value =\n  (f {long} x)\n./out : ./in\n\techo base\n\t  echo literal\n'))
 
-# Declaration predicates include their five-column prefix in layout decisions.
-for size in (69, 70):
+# Composition branches obey the same 80/81-column layout boundary.
+for size in (47, 48):
     predicate = f'(f "{"a" * size}")'
-    text = f'when {predicate}\nV = 1\nend\n'
-    want = text if size == 69 else f'when (f\n       "{"a" * size}")\nV = 1\nend\n'
+    text = f'(if {predicate} (include ./a.km) :nil)\n'
+    want = text if size == 47 else f'(if\n  {predicate}\n    (include ./a.km)\n  :nil)\n'
     cases.append(('script', text, want))
-# Formatting preserves effectful syntax without invoking it.
-cases.append(('script', 'when (shell! "touch formatter-forbidden")\nV = 1\nend\n',
-              'when (shell! "touch formatter-forbidden")\nV = 1\nend\n'))
+# Formatting is host-pure: it neither evaluates predicates nor opens includes.
+cases.append(('script', '(if (out! "formatter-forbidden") (include ./formatter-forbidden) :nil)\n',
+              '(if (out! "formatter-forbidden") (include ./formatter-forbidden) :nil)\n'))
 
 def run(runner, command, lang, text):
     file = work / 'style.km'

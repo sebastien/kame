@@ -24,9 +24,10 @@ func TestDeclarationPredicateRejectsCyclesEffectsAndNonBooleanValues(t *testing.
  prefixes := []string{"a = b\nb = a\n", "", "", "", "", ""}
  predicates := []string{"a", "42", "(shell! \"never execute\")", "(out! \"never publish\")", "(read \"never read\")", "(eq missing 1)"}
  codes := []string{"DEP_CYCLE", "EXPR_INVALID", "CAP_DENIED", "PHASE_INVALID", "CAP_DENIED", "REF_MISSING"}
- for i := range prefixes {
+  for i := range prefixes {
   result := program.DeclarationPredicate(a, "conditions.kmk", prefixes[i], predicates[i], nil, nil)
-  if result.Diagnostic.Code != codes[i] { t.Error("predicate "+predicates[i]+" expected "+codes[i]+" got "+result.Diagnostic.Code+" "+result.Diagnostic.Message) }
+   if result.Diagnostic.Code != codes[i] { t.Error("predicate "+predicates[i]+" expected "+codes[i]+" got "+result.Diagnostic.Code+" "+result.Diagnostic.Message) }
+   if predicates[i] == "42" && (result.Diagnostic.Message != "configuration predicate must return bool; got int" || len(result.Diagnostic.Tips) != 1 || result.Diagnostic.Source != "conditions.kmk" || result.Diagnostic.Span.End != 2 || !result.Diagnostic.Owned) { t.Error("strict predicate lost kind, owned tip, or source span") }
   result.Diagnostic.Free(a)
  }
 }

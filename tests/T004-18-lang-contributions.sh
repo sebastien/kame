@@ -13,7 +13,7 @@ mkdir -p "$work"
 cat >"$work/main.km" <<'KM'
 items ?= [0]
 items += [1]
-include ./module.km
+(include ./module.km)
 items += later
 items ?= missing
 later = [4 [5]]
@@ -21,9 +21,12 @@ unused += missing
 KM
 cat >"$work/module.km" <<'KM'
 items += [2]
-include ./nested.km
+(include ./nested.km)
 KM
 printf 'items += [3 3]\n' >"$work/nested.km"
+printf 'items += [2]\n' >"$work/selected.km"
+printf 'items += missing\n' >"$work/skipped.km"
+printf 'items += [1]\n(if (eq (count items) 1) (include ./selected.km) (include ./skipped.km))\nitems\n' >"$work/conditional.km"
 cp "$work/main.km" "$work/main.kmk"
 cat >"$work/Makefile.kmk" <<'KMK'
 SHELL = kash
@@ -58,7 +61,7 @@ for backend in native wasm; do
 	check '[1 2]' do run --print-result -c 'items += [1]' -c 'items += [2]' -c items
 	check '[1 2]' do run --print-result -c $'items = [1]\nitems+= [2]\nitems'
 	check '[]' do run --print-result -c $'items += []\nitems ?= missing\nitems'
-	check '[1 2]' do run --print-result -c $'items += [1]\nwhen (eq (count items) 1)\nitems += [2]\notherwise\nitems += missing\nend\nitems'
+	check '[1 2]' do run --print-result "$work/conditional.km"
 	test-step "$backend overrides replace all operands and retain literal data"
 	check '"@(missing)=literal"' do run -c $'items += missing\nitems += items' items --define 'items=@(missing)=literal'
 	check '"operand"' do run "$work/main.km" items items=operand

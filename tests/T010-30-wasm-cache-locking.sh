@@ -134,4 +134,102 @@ else
 	test-fail "waiter status=$waiter_status; owner=$(cat "$waiters/owner.err"); waiter=$(cat "$waiters/waiter.err")"
 fi
 
+test-step "embedding exceptions and watch disposal release acquired leases before reuse"
+if timeout 20 node --input-type=module - "$CLI_ROOT" "$TMPDIR" <<'NODE'
+import assert from 'node:assert/strict';
+import { mkdirSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+// stdin has no filesystem entry point for the importable CLI guard.
+process.argv[1] = undefined;
+const { Kame } = await import(pathToFileURL(join(process.argv[2], 'dist/kame.js')));
+const directory = join(process.argv[3], 'embedding-cache-cleanup');
+mkdirSync(directory);
+process.chdir(directory);
+const owner = await Kame.create();
+const program = await owner.compile('task cached :\n\t@(out! "reused")\n', { name: 'cache.kmk' });
+const prototype = Object.getPrototypeOf(program.module);
+const dispatch = prototype.dispatch;
+const options = { cwd: directory, grants: [{ capability: 'read', names: [directory] }, { capability: 'write', names: [directory] }, { capability: 'run', names: [] }] };
+let acquiredModule, acquiredInstance;
+try {
+  for (const mode of ['exception', 'abort', 'watch']) {
+    let acquired;
+    const ready = new Promise((resolve) => { acquired = resolve; });
+    prototype.dispatch = async function (instance, request, kind, payload, data, context, key, record, rawRequest) {
+      const result = await dispatch.call(this, instance, request, kind, payload, data, context, key, record, rawRequest);
+      if (kind === 24) {
+        acquiredModule = this;
+        acquiredInstance = instance;
+        acquired();
+        if (mode !== 'exception' && !context.signal.aborted) await new Promise((resolve) => context.signal.addEventListener('abort', resolve, { once: true }));
+        throw Object.assign(new Error('injected exit after acquire'), { code: 'HOST_FAIL' });
+      }
+      return result;
+    };
+    const controller = new AbortController();
+    let watch;
+    const operation = mode === 'watch'
+      ? (watch = await program.watch('cached', options)).next()
+      : program.build('cached', { ...options, signal: controller.signal });
+    const settled = operation.catch(() => {});
+    await ready;
+    assert.equal(acquiredModule.cacheLeases.size, 1, 'gate must hold a real acquired lease');
+    assert.ok([...acquiredModule.cacheLeases.keys()].every((key) => key.startsWith(`${acquiredInstance}:`)), 'lease must belong to the operational instance');
+    if (watch) {
+      assert.equal(acquiredModule, watch.module, 'acquisition must use the active watch module');
+      assert.equal(acquiredInstance, watch.watch.instance);
+    }
+    if (watch) await Promise.all([watch.close(), watch.close()]);
+    else controller.abort();
+    await settled;
+    assert.equal(acquiredModule.cacheLeases.size, 0);
+    assert.equal(acquiredModule.cacheWrites.size, 0);
+    assert.deepEqual(readdirSync(join(directory, '.kame/cache/locks')), [], 'live-PID lease survived cleanup');
+    prototype.dispatch = dispatch;
+  }
+  const reused = await program.build('cached', options);
+  assert.equal(reused.results[0].target, 'cached');
+  assert.deepEqual(readdirSync(join(directory, '.kame/cache/locks')), []);
+
+  // A sweep is instance-local even within one module. Acquiring without a
+  // completion target deliberately exercises the host ownership boundary.
+  const module = program.module;
+  const first = module.exports.kame_wasm_instance_create();
+  const second = module.exports.kame_wasm_instance_create();
+  const firstKey = new Uint8Array(32).fill(41), secondKey = new Uint8Array(32).fill(42);
+  try {
+    await Promise.all([1, 2].map(() => module.dispatch(first, 0n, 24, '', null, { signal: new AbortController().signal }, firstKey)));
+    await module.dispatch(second, 0n, 24, '', null, { signal: new AbortController().signal }, secondKey);
+    const firstOwner = module.cacheLeaseKey(first, firstKey);
+    const release = await module.cacheLeases.get(firstOwner);
+    let releases = 0, finishWrite, swept = false;
+    module.cacheLeases.set(firstOwner, Promise.resolve(async () => { releases++; await release(); }));
+    module.cacheWrites.set(firstOwner, new Promise((resolve) => { finishWrite = resolve; }));
+    const sweep = module.cleanupInstance(first).then(() => { swept = true; });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(swept, false, 'sweep must wait for an outstanding publication');
+    assert.equal(releases, 0);
+    finishWrite();
+    await sweep;
+    module.cacheWrites.delete(firstOwner);
+    await module.cleanupInstance(first);
+    assert.equal(releases, 1, 'lease was released more than once');
+    assert.equal(module.cacheLeases.size, 1, 'sweep released another instance lease');
+    await module.cleanupInstance(second);
+    assert.equal(module.cacheLeases.size, 0);
+  } finally {
+    await module.cleanupInstance(first);
+    await module.cleanupInstance(second);
+    module.exports.kame_wasm_instance_free(first);
+    module.exports.kame_wasm_instance_free(second);
+  }
+} finally { prototype.dispatch = dispatch; await owner.dispose(); }
+NODE
+then
+  test-ok "exception, cancel-after-acquire and watch close release only owned leases and allow reuse"
+else
+  test-fail "embedding cache-lease cleanup or reuse failed"
+fi
+
 test-end

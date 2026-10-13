@@ -19,16 +19,21 @@ The package boundaries are:
 
 ```text
 src/go/kame/core/             values, graph, scheduler, updates
+src/go/kame/cli/              portable invocation parsing and command policy
 src/go/kame/diagnostic/       stable codes, severity, diagnostic model
 src/go/kame/lang/expr/        expression AST, parser, formatter
 src/go/kame/lang/template/    template AST, parser, matcher, renderer, formatter
-src/go/kame/lang/rule/        definition and rule AST, parser, formatter
+src/go/kame/lang/rule/        rule-block AST, parser, formatter
 src/go/kame/lang/definition/  definition AST, parser, formatter
 src/go/kame/lang/script/      script composition
 src/go/kame/lang/eval/        scopes, operations, evaluator
 src/go/kame/lang/source/      source text and display positions
 src/go/kame/lang/fixture/     shared fixture validation helpers
+src/go/kame/lang/ast/         portable AST inspection and JSON encoding
+src/go/kame/lang/format/      shared source canonicalization
 src/go/kame/operations/       standard operations
+src/go/kame/plugins/          external operation registration and dispatch
+src/go/kame/ownership/        historical output records and native cleanup
 src/go/kame/program/          planning, resources, execution
 src/go/kame/host/             portable request contracts
 src/go/kame/host/posix/       native filesystem and process execution
@@ -41,6 +46,11 @@ at the repository root. `examples/` is a separate module (`kame/examples`) that
 consumes the module through a local `replace` directive, so the examples
 compile against the same packages an external caller would import.
 
+Kash process grammar lives in `lang/expr` because it and expressions are mutually
+recursive. `lang/script` composes Kash statements and control flow; `lang/eval`
+evaluates them and submits process requests. There is no separate `lang/kash`
+package.
+
 Packages named `utils` or `tools` require at least two concrete consumers.
 
 ## Dependency Direction
@@ -48,8 +58,11 @@ Packages named `utils` or `tools` require at least two concrete consumers.
 Allowed dependencies flow downward:
 
 ```text
-cmd -> program -> language + operations + core
+cmd -> cli + program
+host/wasm -> cli + program + plugins
+program -> language + operations + core
 program -> host contract
+cmd -> ownership -> native filesystem support
 host/posix -> platform and C interop
 language -> core values where evaluation requires them
 core -> portable Solod standard library only
@@ -84,7 +97,7 @@ pointer. Solod has no closures, and `any` has no runtime type information, so:
 
 ## Ownership
 
-Kame uses four lifetimes:
+Kame uses four logical lifetimes:
 
 1. Instance lifetime for operation registrations and global configuration.
 2. Program lifetime for source text, ASTs, top-level definitions, and lexical
@@ -94,11 +107,15 @@ Kame uses four lifetimes:
 4. Run/message lifetime for call scopes, plans, command expansion, host requests,
    completions, and streamed events.
 
-An instance and compiled program each receive an allocator and free all retained
-objects as one ownership tree. Program ASTs are immutable and program-owned.
+An allocator supplies storage; an owner is responsible for releasing it, and a
+lifetime bounds how long an object or borrow remains valid. Different logical
+owners may share an allocator; a lifetime does not require a separate arena or
+bulk reset. An instance and compiled program each receive an allocator and free
+all retained objects as one ownership tree. Program ASTs are immutable and program-owned.
 Top-level lexical functions reference program-owned AST and scope data. Call
-scopes and expression-local closures use a run arena and may not be published as
-engine values or retained after the run. A queued message owns its payload.
+scopes and expression-local closures are run-owned and may not be published as
+engine values or retained after the run. Crossing ownership/lifetime boundaries
+requires an explicit clone or transfer. A queued message owns its payload.
 
 The instance and compiled program must outlive every engine node whose producer
 references them. Destruction cancels roots and waits for native process-group

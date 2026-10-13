@@ -75,8 +75,17 @@ Canonical value encoding uses a one-byte tag followed by payload:
 | 5 | string | uint64 byte length, then UTF-8 bytes |
 | 6 | bytes | uint64 length, then bytes |
 | 7 | list | uint64 count, then encoded values |
-| 8 | record | uint64 count, then sorted string/value pairs |
-| 9 | resource reference | kind string followed by canonical-name string |
+| 8 | record | uint64 count, then sorted encoded string/value pairs |
+| 9 | resource reference | encoded kind string followed by encoded canonical-name string |
+| 10 | pattern | encoded canonical pattern-text string |
+| 11 | Kash constructor identity | encoded string `"kash"` |
+
+Each encoded string in a payload includes tag 5, its uint64 byte length,
+and its UTF-8 bytes; tags 9–11 do not omit this nested framing. Tag 11 is a
+narrow fingerprint identity for the built-in invocation-owned Kash constructor,
+not serialized executable code. It does not make other callables cache-safe or
+permit persistent callable publication. This table defines fingerprint encoding,
+not a general persistent-value serialization API.
 
 NaN values use one canonical quiet-NaN bit pattern and negative zero is encoded
 as positive zero. Value record fields are sorted by raw UTF-8 key bytes.

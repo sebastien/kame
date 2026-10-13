@@ -206,7 +206,7 @@ function cli_run {
 			ASAN_OPTIONS="${ASAN_OPTIONS:-}" \
 			UBSAN_OPTIONS="${UBSAN_OPTIONS:-}" \
 			${envs[@]+"${envs[@]}"} \
-			timeout --signal=TERM "$timeout_s" "$CLI_BIN" "$@"
+			timeout --signal=TERM --kill-after=2 "$timeout_s" "$CLI_BIN" "$@"
 	) <"$stdin_file" >"$CLI_OUT" 2>"$CLI_ERR"
 	CLI_STATUS=$?
 	if [ "$had_errexit" = true ]; then
@@ -486,7 +486,7 @@ function cli_expect_jsonl {
 		if [ -z "$line" ]; then
 			continue
 		fi
-		if ! jq -e . >/dev/null 2>&1 <<<"$line"; then
+		if ! jq -e -s 'length == 1' >/dev/null 2>&1 <<<"$line"; then
 			test-fail "line $number is not JSON: $(test_fmt_line "$line")"
 			failed=1
 			break

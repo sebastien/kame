@@ -87,8 +87,8 @@ registration before recipe effects and retain the authored output location.
 Only nil and boolean false are false. Integer/float zero and empty strings,
 bytes, lists, and records are true. Expression conditions, `bool`/`not`, and
 predicate filtering use this same truth contract. `and`/`or` short-circuit and
-return the deciding operand without boolean coercion. Process exit status and
-boolean-only declaration predicates retain their separate contracts.
+return the deciding operand without boolean coercion. Source-composition `if`
+conditions use this same truthiness; process exit status has a separate contract.
 
 Emptiness must be tested explicitly with `count` on strings, bytes, lists, or
 records; zero count does not make the original value false. Missing optional
@@ -120,7 +120,7 @@ They cannot be invoked through another program or serialized as persistent
 cache values; ordinary closure publication restrictions remain unchanged.
 
 Special forms consume expression syntax, not already-evaluated arguments:
-`?`, `let`, `def`, `eval`, `if`, `and`, `or`, `with`, `match`, `run`, `pipe`, and
+`?`, `let`, `def`, `eval`, `if`, `and`, `or`, `with`, `match`, `run!`, `pipe!`, and
 `await`. They are not registry operations or callable values. Referencing an
 unbound special form as a value fails `EXPR_INVALID`; use a lambda to adapt its
 syntax. Registry/plugin registration rejects these reserved operation names.
@@ -161,6 +161,21 @@ must not replay an accepted earlier statement or consume another statement's
 host completion. Named entries share one engine and lazy dependency nodes.
 
 ### Composed execution sessions
+
+Source-composition forms are selected before final compilation, not evaluated
+as statements. Conditions use a pure scope containing only earlier selected
+definitions/contributions and explicit configured overrides, with environment
+configuration subject to caller authority. They cannot use host reads, globs,
+processes or effects, including indirectly through lazy definitions or helpers.
+Later definitions remain invisible to selection, but retain normal forward lazy
+visibility in the final runtime program. Inactive conditions are not demanded;
+reserved include heads and composition body shapes are nevertheless validated
+in every authored branch. See `004-language.md` for literal paths and placement.
+Capability/effect failures explain the pure-condition restriction rather than
+suggesting runtime grants that cannot authorize selection. Their primary location
+is the authored condition. Configuration frame labels remain useful context,
+but carry no source/span until the synthetic prefix and isolated predicate have
+an authored origin map; runtime execution's normal source mapping is unchanged.
 
 The runner can load multiple sources and inline fragments in command-line order.
 Parse all inputs and register their shared top-level scope before any demanded
@@ -217,7 +232,8 @@ interpolation values, are never retrospectively treated as glob expressions.
 
 When a materialized value is written to stdout — a `do run` result or a
 definition value selected as a target — it uses
-one canonical notation that is also a valid Kame expression:
+one canonical display notation. For the representable subset described below,
+this is also a valid Kame expression:
 
 | Kind | Notation |
 | --- | --- |
@@ -230,16 +246,26 @@ one canonical notation that is also a valid Kame expression:
 | list | `[ITEM ...]`, items space-separated |
 | record | `[KEY: VALUE ...]`, keys bare names, pairs space-separated |
 
-The display is idempotent: evaluating the displayed text and displaying the
-result again yields the same bytes. Nil, booleans, strings, patterns, lists, and
-records also reproduce a value of the same kind; an integral float re-evaluates
-as an integer but still displays identically. Record keys are produced from
-`NAME:` syntax and are always valid names.
+For representable values, evaluating the displayed text and displaying the
+result again yields the same bytes. Kind preservation is a separate property:
+an integral float re-evaluates as an integer, and a pattern-looking string may
+re-evaluate as a pattern. Strings containing interpolation openers are also
+outside the inert-string round-trip guarantee. Non-finite numbers have no
+ordinary numeric literal. Record display writes keys as bare names, but runtime
+records can have arbitrary string keys, including empty keys; those keys are
+not necessarily expressible with `NAME:` syntax. Empty records likewise have no
+distinct literal (`[]` is a list). The round-trip guarantee therefore applies
+only to values whose displayed atoms and nested containers are representable;
+it is not a general serialization contract. Use `json` for JSON-compatible
+arbitrary-key data or typed API results to preserve runtime kinds.
 
 Bytes are written raw and resources as their name; the grammar has no literal
 for either, so they are outside the notation. This notation is distinct from the
-`str` operation (`007-library.md`), which encodes lists and records as JSON-like
-text. `--json` emits structured values in its event schema instead of this
+`str` operation (`007-library.md`), which concatenates only textual scalars
+(nil, booleans, numbers and strings), rejecting patterns and collections.
+`json` explicitly encodes JSON-compatible values, including quoted strings.
+Template rendering and effect output have their own conversion contracts;
+neither is defined by `str`. `--json` emits structured values in its event schema instead of this
 notation. Human `do cat` definition values use a different contract
 (`009-cli.md`): text and bytes stay raw while every other JSON-native value
 prints as plain JSON, so other programs can parse `cat` output directly.
@@ -435,6 +461,9 @@ containment, which is outside the language capability model.
 ## Acceptance Tests
 
 - Top-level definitions are lazy and shared by two consumers.
+- Composition conditions share `if` truthiness, see only earlier selected
+  bindings, preserve override/environment authority and forbid indirect host
+  effects; final runtime forward references remain lazy and valid.
 - Invalidating a definition causes one reevaluation on next access.
 - A definition cycle reports `DEP_CYCLE` with definition frames.
 - Lexical functions capture their defining scope and bind rest arguments.

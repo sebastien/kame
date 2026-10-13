@@ -37,8 +37,9 @@ a rule program. See [CLI](./ref/cli.md) for invocation and capability policy.
    directives for text structure, rule headers for dependencies, and Kash for
    direct process graphs. Recipes default to shell text; `SHELL = kash` or
    `; [shell: kash]` selects direct Kash parsing, without template expansion.
-4. **Compose without erasing context.** File-backed `include ./path.km` or
-   `include ./path.kmk` is relative to its containing source. `do run` can share
+4. **Compose without erasing context.** File-backed `(include ./path.km)` or
+   `(include ./path.kmk)` is relative to its containing source and inherits the
+   caller's language, not the included suffix. `do run` can share
    definitions across ordered fragments; changing parsers must not add grants.
 5. **Validate without effects first.** Use `do parse --lang LANG` and
    `do fmt --lang LANG -n FILE`. For rules, inspect `do plan`, `do inputs`, and
@@ -91,7 +92,7 @@ clean :
   in a recipe. They correspond most closely to Make's `$<`, `$^`, and `$@`.
 - `@(EXPRESSION)` evaluates and renders a value; `@(reference)` is the reference
   spelling. Do not use the obsolete `@{reference}` form.
-- `include ./rules/common.kmk` merges a file-backed source at that location.
+- `(include ./rules/common.kmk)` merges a file-backed source at that location.
 
 Keep these boundaries distinct:
 

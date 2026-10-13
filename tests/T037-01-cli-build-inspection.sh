@@ -26,7 +26,7 @@ printf 'one' >"$project/src/one.c"
 printf 'two' >"$project/src/two.c"
 printf 'version' >"$project/seed"
 cat >"$project/Makefile.kmk" <<'KMK'
-include ./rules/build.kmk
+(include ./rules/build.kmk)
 default : build
 build : ./bin/one ./bin/two cached daemon
 task cached :

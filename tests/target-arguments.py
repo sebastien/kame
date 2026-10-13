@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix='kame-target-arguments-') as directory:
     )
 
     def run(*args):
-        return subprocess.run([*runner, *args], cwd=project, text=True, capture_output=True)
+        return subprocess.run([*runner, *args], cwd=project, text=True, capture_output=True, timeout=10)
 
     parsed = run('do', 'parse', '--json', '--lang', 'script', 'Makefile.kmk')
     assert parsed.returncode == 0, parsed.stderr
@@ -107,6 +107,11 @@ with tempfile.TemporaryDirectory(prefix='kame-target-argument-watch-') as direct
     finally:
         if process.poll() is None:
             process.send_signal(signal.SIGINT)
-        process.communicate(timeout=3)
+        try:
+            process.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.communicate(timeout=3)
+            raise
 
 print('target argument planning, execution, defaults and validation passed')

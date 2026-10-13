@@ -15,13 +15,13 @@ the repository's `build/kame.debug`.
 ## First, compute without publishing
 
 ```sh
-kame -f ./publication.km publication
-kame -f ./publication.km pages
+kame --allow-read=. -f ./publication.km publication
+kame --allow-read=. -f ./publication.km pages
 ```
 
 You get a record and a list of page paths. You do not get a `public/` directory.
 The value program is useful on its own: calculating outputs is not producing
-them.
+them. Standalone `.km` discovery needs the explicit read grant shown above.
 
 ## Then, reuse the value program unchanged
 
@@ -56,7 +56,7 @@ It invokes the build, validates it, then summarizes its files. Its definitions
 and argument expansions use the same expression language as `publication.km`.
 Its process pipe is different from the value pipe in the expression lessons.
 
-**Boundary:** `include ./publication.km` is native source composition in the
+**Boundary:** `(include ./publication.km)` is native source composition in the
 rule program. The `kame` commands in `publish.kash` are subprocesses, each with
 its own invocation and engine. The current Kash specification does not define
 an include/import facility or an in-process rule invocation. This example does

@@ -30,11 +30,11 @@ func opPattern(c *eval.Context, state any, values []core.Value) eval.Result {
 // replaceState holds the parsed patterns of one pattern replace. The state is
 // owned by the allocator that parsed it and freed by freeReplaceState.
 type replaceState struct {
-	match    *expr.Pattern
-	expand   *expr.Pattern
-	constant core.Value
-	replacement core.Value
-	scope *eval.Scope
+	match              *expr.Pattern
+	expand             *expr.Pattern
+	constant           core.Value
+	replacement        core.Value
+	scope              *eval.Scope
 	preserveNonmatches bool
 }
 
@@ -141,6 +141,7 @@ func replaceCall(c *eval.Context, state any, values []core.Value) eval.Result {
 // match and expansion to its argument.
 func replaceSection(c *eval.Context, state *replaceState) eval.Result {
 	function := mem.Alloc[eval.Function](c.Run)
+	function.PayloadAlloc = c.Run
 	function.Kind = eval.FunctionTemporary
 	function.Arity = 1
 	function.Native = state
@@ -175,13 +176,16 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 			}
 			previous := c.CallPath
 			var digits [32]byte
-			identity := core.NewString(c.Run, previous + "/replace-item:" + strconv.Itoa(digits[:], i))
+			identity := core.NewString(c.Run, previous+"/replace-item:"+strconv.Itoa(digits[:], i))
 			c.CallPath = identity.Text
 			effects, paths := len(c.Effects), len(c.WritePaths)
 			one := replaceOne(c, state, subject.List[i].Text)
 			c.CallPath = previous
 			identity.Free(c.Run)
-			if one.Waiting { suspendCallback(c, progress); return one }
+			if one.Waiting {
+				suspendCallback(c, progress)
+				return one
+			}
 			if one.Diagnostic.Code != "" {
 				discardCallback(c, progress)
 				c.DiscardCallables(&subject)
@@ -207,20 +211,29 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 	}
 	if !matched.Matched {
 		slices.Free(c.Run, matched.Captures)
-		if state.preserveNonmatches { return eval.Result{Value: core.NewString(c.Run, subject)} }
+		if state.preserveNonmatches {
+			return eval.Result{Value: core.NewString(c.Run, subject)}
+		}
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
 	if state.replacement.Kind == core.Callable {
 		var fields []core.RecordField
 		for i := range state.match.Names {
-			if state.match.Names[i] != "" { fields = slices.Append(c.Run, fields, core.RecordField{Key: state.match.Names[i], Value: core.NewString(c.Run, matched.Captures[i])}) }
+			if state.match.Names[i] != "" {
+				fields = slices.Append(c.Run, fields, core.RecordField{Key: state.match.Names[i], Value: core.NewString(c.Run, matched.Captures[i])})
+			}
 		}
 		captures := core.NewRecord(c.Run, fields)
-		for i := range fields { fields[i].Value.Free(c.Run) }
+		for i := range fields {
+			fields[i].Value.Free(c.Run)
+		}
 		slices.Free(c.Run, fields)
 		result := c.EvaluateReplacement(state.replacement, captures, state.scope)
 		captures.Free(c.Run)
-		if result.Waiting || result.Diagnostic.Code != "" { slices.Free(c.Run, matched.Captures); return result }
+		if result.Waiting || result.Diagnostic.Code != "" {
+			slices.Free(c.Run, matched.Captures)
+			return result
+		}
 		if result.Value.Kind == core.Pattern {
 			expansion := expr.ParsePatternText(c.Run, result.Value.Text, 0)
 			result.Free(c.Run)
@@ -234,7 +247,9 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 			expanded := expansion.Pattern.ExpandText(c.Run, state.match, matched.Captures)
 			expansion.Pattern.Free(c.Run)
 			slices.Free(c.Run, matched.Captures)
-			if expanded.Missing != "" { return missingReferenceFailure(c.Run, expanded.Missing) }
+			if expanded.Missing != "" {
+				return missingReferenceFailure(c.Run, expanded.Missing)
+			}
 			return eval.Result{Value: core.Value{Kind: core.String, Text: expanded.Text}}
 		}
 		slices.Free(c.Run, matched.Captures)
@@ -244,7 +259,9 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 		}
 		text, ok := stringValue(c.Run, result.Value, false)
 		result.Free(c.Run)
-		if !ok { return ownedFailure(c.Run, "PAT_INVALID", "invalid expansion") }
+		if !ok {
+			return ownedFailure(c.Run, "PAT_INVALID", "invalid expansion")
+		}
 		return eval.Result{Value: core.Value{Kind: core.String, Text: text}}
 	}
 	if state.expand == nil {

@@ -12,15 +12,15 @@ import (
 	"solod.dev/so/os"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
-	"solod.dev/so/strings"
 )
 
 type sourceFile struct {
-	Name      string
-	Text      string
-	Data      []byte
-	OwnedName bool
-	Parent    int
+	Name       string
+	Text       string
+	Data       []byte
+	OwnedName  bool
+	FileBacked bool
+	Parent     int
 }
 
 type sourcePart struct {
@@ -30,11 +30,11 @@ type sourcePart struct {
 }
 
 type buildSource struct {
-	Files                []sourceFile
-	Parts                []sourcePart
-	Missing              bool
-	Status               int
-	JSON                 bool
+	Files   []sourceFile
+	Parts   []sourcePart
+	Missing bool
+	Status  int
+	JSON    bool
 	// Borrowed configuration used only while expanding includes/branches.
 	SelectionPrefix      string
 	SelectionDefines     []string
@@ -158,7 +158,7 @@ func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bo
 	result := buildSource{JSON: json, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), environment)}
 	// Text wraps Data backing (zero-copy string conversion in Solod):
 	// freeBuildSource frees Data only, Text never outlives it.
-	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), Data: data, OwnedName: true, Parent: -1})
+	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), Data: data, OwnedName: true, FileBacked: true, Parent: -1})
 	if lang == "template" {
 		result.Parts = slices.Append(mem.System, result.Parts, sourcePart{Name: canonical, Text: string(data)})
 	} else if !expandIncludesLanguage(&result, 0, errOut, lang) {
@@ -180,88 +180,32 @@ func (s *buildSource) compileSources() []program.CompileSource {
 func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lang string) bool {
 	file := s.Files[fileIndex]
 	authored := source.New(mem.System, file.Name, file.Text)
-	parsed := script.ParseFragment(mem.System, authored, lang, 0, len(file.Text))
 	defer authored.Free(mem.System)
+	parsed := script.ParseFragment(mem.System, authored, lang, 0, len(file.Text))
+	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 {
 		for i := range parsed.Diagnostics {
 			d := parsed.Diagnostics[i]
 			emitDiagnostic(errOut, diagnostic.Diagnostic{Source: file.Name, Code: d.Code, Severity: diagnostic.Error, Message: d.Message, Span: diagnostic.Span{Start: d.Span.Start, End: d.Span.End}}, s.JSON, authored)
 		}
-		parsed.Free()
 		return false
 	}
-	var branches []sourceBranch
-	defer slices.Free(mem.System, branches)
 	start := 0
 	for i := range parsed.Items {
 		item := parsed.Items[i]
-		if item.Kind == script.When || item.Kind == script.Otherwise || item.Kind == script.EndWhen {
-			if declarationActive(branches) {
-				s.Parts = slices.Append(mem.System, s.Parts, sourcePart{Name: file.Name, Text: file.Text[start:item.Span.Start], Offset: start})
-			}
-			start = item.Span.End
-			branches = s.declarationBranch(item, file.Text, file.Name, branches, errOut, authored, lang)
-			if s.Status != 0 {
-				parsed.Free()
-				return false
-			}
+		if item.Kind != script.Include && item.Kind != script.Composition {
 			continue
-		}
-		if item.Kind != script.Include {
-			continue
-		}
-		if !declarationActive(branches) {
-			start = item.Span.End
-			continue
-		}
-		if strings.HasPrefix(file.Name, "<command") || file.Name == "<stdin>" {
-			sourceError(errOut, "FEATURE_UNSUP", "include requires a file-backed build source", s.JSON)
-			parsed.Free()
-			return false
 		}
 		s.Parts = slices.Append(mem.System, s.Parts, sourcePart{Name: file.Name, Text: file.Text[start:item.Span.Start], Offset: start})
-		includeName := cloneCommandText(item.Include)
-		if !path.IsAbs(includeName) {
-			parent := path.Dir(mem.System, file.Name)
-			resolved := path.Join(mem.System, parent, includeName)
-			mem.FreeString(mem.System, parent)
-			mem.FreeString(mem.System, includeName)
-			includeName = resolved
-		}
-		canonical := path.Clean(mem.System, includeName)
-		mem.FreeString(mem.System, includeName)
-		includeName = canonical
-		for j := fileIndex; j >= 0; j = s.Files[j].Parent {
-			if s.Files[j].Name == includeName {
-				sourceError(errOut, "DEP_CYCLE", "include cycle: "+includeName, s.JSON)
-				mem.FreeString(mem.System, includeName)
-				parsed.Free()
+		start = item.Span.End
+		if item.Kind == script.Include {
+			if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, errOut, authored, lang) {
 				return false
 			}
-		}
-		data, readErr := os.ReadFile(mem.System, includeName)
-		if readErr != nil {
-			if item.OptionalInclude && readErr == os.ErrNotExist {
-				// Retain the absent source identity so watch notices its later creation.
-				s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, OwnedName: true, Parent: fileIndex})
-				start = item.Span.End
-				continue
-			}
-			sourceError(errOut, "FS_ERR", "cannot read included source: "+includeName, s.JSON)
-			mem.FreeString(mem.System, includeName)
-			parsed.Free()
+		} else if !s.expandSourceComposition(fileIndex, item.Expression, errOut, authored, lang) {
 			return false
 		}
-		s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), Data: data, OwnedName: true, Parent: fileIndex})
-		if !expandIncludesLanguage(s, len(s.Files)-1, errOut, lang) {
-			parsed.Free()
-			return false
-		}
-		start = item.Span.End
 	}
-	if declarationActive(branches) {
-		s.Parts = slices.Append(mem.System, s.Parts, sourcePart{Name: file.Name, Text: file.Text[start:], Offset: start})
-	}
-	parsed.Free()
+	s.Parts = slices.Append(mem.System, s.Parts, sourcePart{Name: file.Name, Text: file.Text[start:], Offset: start})
 	return true
 }

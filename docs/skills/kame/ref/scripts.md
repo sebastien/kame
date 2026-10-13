@@ -72,7 +72,7 @@ kame do run --print-result -c 'name = "Ada"' -c '(uppercase name)'
 ```
 
 Without named entries, `.km` runs expression statements in source order but
-emits only explicit `out`/`err` effects. `--print-result` opts into final value
+emits only explicit `out!`/`err!` effects. `--print-result` opts into final value
 display, independent of whether an output operation ran. `expr` retains result
 display. Entries display only named definitions, skipping
 unrelated statements; selecting a function value does not implicitly call it.
@@ -86,23 +86,53 @@ than suppressing an implicit result with `(nop OPERATION "")`.
 ## File-backed includes
 
 ```kame
-include ./values.km
-include "./rules/common.kmk"
+(include ./values.km)
+(include "./rules/common.kmk")
 
 default : ./build/app
 ```
 
-Paths resolve relative to the containing file, not evaluation cwd. Includes
+Each operand is a literal explicit path atom or noninterpolated double-quoted
+string (escapes are decoded). Empty paths, NUL, globs/patterns, interpolation and
+computed operands are invalid. Paths resolve relative to the containing file,
+not evaluation cwd. Included text inherits the caller's outer language, not its
+filename suffix. Includes
 expand depth-first at their declaration position and share scope/source order.
-Active-ancestry cycles are errors. Repeated nonrecursive includes expand again;
+Active-ancestry cycles are errors (lexical path identity, not physical realpath).
+Repeated nonrecursive includes expand again;
 ordinary registration still rejects duplicate declarations. Inline `-c` sources
 have no include base and cannot include files. Value programs cannot introduce rules through
 includes; Kash inclusion is not provided by this directive.
 
-`include? PATH` skips an absent optional file, not other loading errors.
-`when PREDICATE` / `otherwise` / `end` selects declarations before registration;
-only selected includes are loaded. Predicates use pure configuration values,
-not host reads, processes, writes, or rule-local bindings. Typed rule generation
+`(include? PATH)` skips only a missing file, not other loading errors. Only
+selected includes are loaded, tracked or cycle-checked; selected missing optional
+paths remain tracked for later creation.
+
+```kame
+mode ?= "debug"
+(if (eq mode "debug")
+  (include ./debug.kmk)
+  (include ./release.kmk))
+(if (eq mode "local") (include? "local.kmk"))
+```
+
+A top-level `if` containing an include is composition-only: every body must be
+an include, nested composition `if`, or `:nil`. Multiple test/body pairs and an
+optional else use ordinary `if` syntax; no else is required. Only nil and false
+are false, including in composition conditions. Put branch definitions/rules in
+the selected files, not inside the `if` itself. Ordinary value-only `if` stays a
+runtime expression.
+
+Conditions see only earlier selected definitions/contributions and explicit
+defines or authorized environment configuration. They cannot use host reads,
+processes, writes, globs or rule-local bindings, even indirectly through helpers;
+runtime grants do not broaden selection authority. Final runtime definitions
+still support lazy forward references. Include heads are reserved structurally
+and rejected in value positions, even unused definitions or inactive branches.
+
+Legacy line `include`/`include?` and `when`/`otherwise`/`end` are migration errors.
+Parenthesize includes and extract legacy branch declarations into branch files.
+Template `@include` is unchanged. Typed rule generation
 uses `generate NAME = EXPRESSION`; see
 [Generated declarations](../../../spec/025-generated-declarations.md).
 

@@ -4,7 +4,7 @@ Fixtures consumed by the end-to-end shell suite in `tests/T*-*.sh`. They are
 immutable inputs: tests copy them into their scratch directory with
 `fixture_copy` and never build inside this tree.
 
-Language fixtures live in `../lang/` and are shared with the parser tests.
+Language fixtures live in `lang/` and are shared with the parser tests.
 
 ## Language fixtures (`lang/`)
 
@@ -35,7 +35,7 @@ by the `expr/section-*.km`, `expr/pattern-*.km`, `expr/placeholder-*.km`, and
 | `operations/lib-grants/` | library capabilities | Read fixture plus a target for rooted write checks |
 | `host/retry.kmk` | host process | Retry recipe that fails until a marker exists |
 | `fmt/` | formatter | Unformatted source and its canonical form |
-| `cases/` | table-driven matrix | Reserved for the `T009-12` case runner |
+| `cases/` | T009-12 table-driven CLI matrix | Populated cases with one argv element per `args` line, optional stdin/output assertions, and expected status |
 
 ## Conventions
 

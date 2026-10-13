@@ -76,7 +76,10 @@ or publishing completion. Timeouts cover the whole recipe; retries start a fresh
 script invocation. Interpreter identity is an execution dependency, as specified
 in `006-runtime.md`. It participates in cache and file freshness only as that
 dependency. Selecting Kash or a shell does not make the recipe depend on the
-process environment. Environment dependencies are the names actually read.
+process environment merely by selecting an interpreter. Named Kame environment
+reads remain selectively tracked. Once a recipe submits a process, it also
+consumes the complete effective child environment after overrides, independently
+of those named reads (`006-runtime.md`, `038-direct-kash-and-values.md`).
 
 `(kash TEXT)` parses text without running commands and returns an immutable,
 invocation-owned callable that retains its construction scope:

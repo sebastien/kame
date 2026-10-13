@@ -116,7 +116,9 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		for j := range item.Rule.Arguments {
 			argument := item.Rule.Arguments[j]
 			if p.Eval.Definition(argument.Name) != nil {
-				result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Source: parsed.Source.Name, Code: "TGT_ARGUMENT", Severity: diagnostic.Error, Message: "target argument shadows definition: " + argument.Name, Span: diagnostic.Span{Start: argument.Span.Start, End: argument.Span.End}})
+				d := failureAt(a, "TGT_ARGUMENT", diagnostic.Span{Start: argument.Span.Start, End: argument.Span.End}, "target argument shadows definition: "+argument.Name)
+				d.Source = cloneText(a, parsed.Source.Name)
+				result.Diagnostics = slices.Append(a, result.Diagnostics, d)
 			}
 		}
 		for j := range item.Rule.Body {

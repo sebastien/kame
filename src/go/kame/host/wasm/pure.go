@@ -118,6 +118,7 @@ func evaluateParsed(a mem.Allocator, parsed *script.Script, expression *expr.Exp
 	program := eval.Compile(a, engine, parsed, registry)
 	context := &eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Read}}, ResolveDefinition: resolvePureDefinition, ResolverState: program}
 	result := program.EvaluateWith(expression, context)
+	eval.FreeEffects(a, context.Effects)
 	if result.Waiting {
 		result.Free(a)
 		program.Free()

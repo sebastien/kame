@@ -44,6 +44,8 @@ for backend in native wasm; do
 	check fallback 'broken = (read "missing-file"); value = broken ?? "fallback"'
 	check abab '(recover X) = $(false) ?? X; value = (str (recover "a") (recover "b") (recover "a") (recover "b"))'
 	test-step "$backend preserves validation and capability failures"
+	reject USER_ERROR 'value = (fail! "stop") ?? (nop "fallback")'
+	reject USER_ERROR 'value = (fail! "stop") ?? (out! "fallback")'
 	reject EXPR_INVALID 'value = (first 1) ?? "forbidden"'
 	reject EXPR_INVALID 'value = $(printf (nop [bad: 1])) ?? "forbidden"'
 	reject CAP_DENIED 'value = $(false) ?? "forbidden"' --allow-run=/bin/printf

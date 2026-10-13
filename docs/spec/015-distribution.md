@@ -223,17 +223,25 @@ command pins `KAME_VERSION` to the launcher's resolved version. Projects can
 run `make -f Makefile.bootstrap TARGET...` without changing an existing
 Makefile, or inspect/include the sidecar themselves. The template contract:
 
-- Variables: `KAME_VERSION` (default: the stamped version), `KAME_HOME` and
-  `KAME_RELEASE_URL` (optional), and `KAME` (default `./bin/kame`).
-- The first invocation provisions `./bin/kame` by downloading the stamped
-  launcher for `KAME_VERSION`, verifying it against `SHA256SUMS`, and marking
-  it executable. Provisioning is idempotent.
-- Every requested goal is `.PHONY`, depends on the provisioned launcher, and is
-  delegated in order: `@exec ./bin/kame $@`.
+- Variables: `KAME_VERSION` (default `0.2.3`, pinned by `kame init`),
+  `KAME_RELEASE_URL` (default the version's GitHub release), and `KAME`
+  (default `$(HOME)/.cache/kame/bin/kame-$(KAME_VERSION)`).
+- Released templates embed `KAME_RELEASE_PUBKEY_B64`, the same verification key
+  as the launcher. Source copies require a trusted key through this variable or
+  `KAME_RELEASE_PUBKEY_B64_OVERRIDE`; a key is never fetched from the asset server.
+- The first invocation downloads `kame.com`, `VERSION`, `SHA256SUMS`, and
+  `SHA256SUMS.sig` with curl, verifies the Ed25519 manifest signature and both
+  asset digests, and checks the signed version against `KAME_VERSION`. It then
+  atomically installs the executable and retains the signed manifest and version
+  beside it. Every reuse rechecks signature, digests and version without
+  downloading. Invalid or missing verification data fails closed. The bootstrap
+  does not use the launcher's backend selection.
+- Every requested goal is `.PHONY`, depends on executable verification, and is
+  delegated via `@exec "$(KAME)" $@`.
 - A no-goal invocation delegates `default`.
 - The delegate's exit status is the build's exit status.
-- The template is self-contained POSIX `make` and `sh`; it needs only the same
-  downloader and verifier tools as the launcher.
+- The template uses make and sh, requires OpenSSL for verification, and requires
+  curl for the first download.
 - `kame init` needs a verified cache/release manifest, creates its sidecar
   atomically without clobbering a concurrent or pre-existing path, and reports
   the make command needed to use it.
@@ -373,6 +381,9 @@ the canonical build.
 - Concurrent first invocations install exactly one verified artifact.
 - The bootstrap Makefile provisions once and forwards single, multiple, and
   default goals in order with the delegate's exit status.
+- The bootstrap rejects tampered downloads and caches, missing verification data
+  or verifiers, wrong signing keys, and correctly signed releases whose version
+  differs from `KAME_VERSION`, without executing or publishing unverified bytes.
 - Cache root selection honors `KAME_HOME`, then `XDG_DATA_HOME`, then `HOME`.
 - Native POSIX package/host tests and version execution run on Linux and macOS
   x64/ARM64 plus FreeBSD, NetBSD and OpenBSD x64. The native artifact

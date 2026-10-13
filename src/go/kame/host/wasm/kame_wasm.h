@@ -78,7 +78,12 @@ enum kame_wasm_request_kind {
   KAME_WASM_REQUEST_PROCESS_CANCEL = 23,
   KAME_WASM_REQUEST_CACHE_LOCK = 24,
   KAME_WASM_REQUEST_CACHE_UNLOCK = 25,
-  KAME_WASM_REQUEST_PLUGIN = 26
+  KAME_WASM_REQUEST_PLUGIN = 26,
+  KAME_WASM_REQUEST_FILE_CONTENT = 27,
+  KAME_WASM_REQUEST_TOOL_CONTENT = 28,
+  KAME_WASM_REQUEST_OUTPUT_CONTENT = 29,
+  KAME_WASM_REQUEST_LSTAT = 30,
+  KAME_WASM_REQUEST_READLINK = 31
 };
 
 /* Terminal process outcomes reported by kame_wasm_process_terminal. */
@@ -91,9 +96,12 @@ enum kame_wasm_process_outcome {
 
 /* Module ABI discovery and linear-memory ownership. Allocation grows exported
  * memory only as needed, never beyond the linker-provided maximum. Returned
- * ranges belong to the caller until the owning instance is freed; free is a
- * deliberately no-op operation for the initial arena model. */
+ * ranges belong to the caller for the module lifetime, independently of engine
+ * instances. Free is a no-op for this host-buffer bump allocator; reuse buffers
+ * or use an operation-local module. Instance payloads use a reclaiming heap. */
 uint32_t kame_wasm_abi_version(void);
+/* Diagnostic accounting for the separate fixed system heap, not host buffers. */
+uint32_t kame_wasm_system_heap_used(void);
 uint32_t kame_wasm_alloc(uint32_t size, uint32_t alignment);
 uint32_t kame_wasm_free(uint32_t pointer, uint32_t size);
 
@@ -161,6 +169,10 @@ uint32_t kame_wasm_instance_set_heap_limit(uint64_t instance, uint32_t limit);
 /* Pure source-composition predicate query: JSON descriptor in, true/false out.
  * Uses the same length-query convention and emergency diagnostics as parse. */
 uint32_t kame_wasm_declaration_predicate(uint64_t instance, uint32_t data,
+    uint32_t data_len, uint32_t dst, uint32_t dst_len, uint32_t out_len);
+/* Same strict descriptor as declaration_predicate, with ordinary truth.
+ * Diagnostics add portable source/span/tips when available. */
+uint32_t kame_wasm_composition_condition(uint64_t instance, uint32_t data,
     uint32_t data_len, uint32_t dst, uint32_t dst_len, uint32_t out_len);
 uint32_t kame_wasm_source_compile(uint64_t instance, uint32_t source,
                                   uint32_t source_len);
@@ -270,6 +282,10 @@ uint32_t kame_wasm_step(uint64_t instance);
 uint32_t kame_wasm_next_event_header(uint64_t instance, uint32_t dst,
                                      uint32_t dst_len);
 uint32_t kame_wasm_next_request_kind(uint64_t instance);
+/* Raw engine process/request identity, valid while the request is pinned. Read
+ * before detach; scope it by module and instance. Unlike the envelope handle,
+ * this identity is also used by process-cancellation payloads. */
+int64_t kame_wasm_next_request_id(uint64_t instance);
 uint32_t kame_wasm_next_request_data_length(uint64_t instance);
 uint32_t kame_wasm_request_data_copy(uint64_t instance, uint32_t dst,
                                      uint32_t dst_len);

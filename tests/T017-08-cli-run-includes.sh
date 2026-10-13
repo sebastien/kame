@@ -10,17 +10,17 @@ work="$TMPDIR/includes"
 mkdir -p "$work/nested" "$work/cwd"
 cat >"$work/main.km" <<'KM'
 (out! "界")
-include ./nested/child.km
+(include ./nested/child.km)
 (out! "after")
 (str name "!")
 KM
 cat >"$work/nested/child.km" <<'KM'
-include ./values.km
+(include ./values.km)
 (out! "child")
 KM
 printf 'name = "Ada"\n' >"$work/nested/values.km"
 cat >"$work/rules.kmk" <<'KMK'
-include ./nested/rules.kmk
+(include ./nested/rules.kmk)
 build : child
 	printf main
 KMK
@@ -30,15 +30,17 @@ child :
 KMK
 cat >"$work/cycle.km" <<'KM'
 (out! "must-not-run")
-include ./nested/cycle.km
+(include ./nested/cycle.km)
 KM
-printf 'include ../cycle.km\n' >"$work/nested/cycle.km"
-printf 'include ./absent.km\n' >"$work/missing.km"
-printf 'include ./nested/invalid.km\n' >"$work/invalid.km"
+printf '(include ../cycle.km)\n' >"$work/nested/cycle.km"
+printf '(include ./absent.km)\n' >"$work/missing.km"
+printf '(include ./nested/invalid.km)\n' >"$work/invalid.km"
 printf 'name = [\n' >"$work/nested/invalid.km"
-printf 'include ./empty.km\ninclude ./empty.km\n42\n' >"$work/repeated.km"
+printf '(include ./empty.km)\n(include ./empty.km)\n42\n' >"$work/repeated.km"
 : >"$work/empty.km"
-printf 'include "%s"\nname\n' "$work/nested/values.km" >"$work/absolute.km"
+printf '(include "%s")\nname\n' "$work/nested/values.km" >"$work/absolute.km"
+printf '(include ./values.km)\n(out! name)\n' >"$work/nested/<command-file>.km"
+printf '(include ./values.km)\n(out! name)\n' >"$work/nested/<stdin>"
 
 for backend in native wasm; do
 	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
@@ -62,6 +64,12 @@ for backend in native wasm; do
 	check '"Ada"' do run --print-result "$work/absolute.km"
 	check 'childmain' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
 	check 'childmain' do run "$work/rules.kmk" build
+	# A physical file's spelling must not classify it as an inline/stdin source.
+	original_command=("${command[@]}")
+	command=(env -C "$work/nested" "${command[@]}")
+	check 'Ada' do run './<command-file>.km'
+	check 'Ada' do run --lang km './<stdin>'
+	command=("${original_command[@]}")
 	reject DEP_CYCLE do run "$work/cycle.km"
 	reject FS_ERR do run -c '(out! "must-not-run")' "$work/missing.km"
 	reject PARSE_ERR do run -c '(out! "must-not-run")' "$work/invalid.km"

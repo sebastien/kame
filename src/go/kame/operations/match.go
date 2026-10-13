@@ -23,6 +23,7 @@ func opMatch(c *eval.Context, state any, values []core.Value) eval.Result {
 	}
 	if len(values) == 1 {
 		function := mem.Alloc[eval.Function](c.Run)
+		function.PayloadAlloc = c.Run
 		function.Kind = eval.FunctionTemporary
 		function.Arity = 1
 		function.Native = parsed.Pattern

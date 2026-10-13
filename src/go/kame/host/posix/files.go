@@ -14,6 +14,7 @@ import (
 )
 
 var errInvalidFileResourceURI = errors.New("invalid file resource URI")
+var errStorageSync = errors.New("storage sync failed (rename may already be published)")
 
 type hostPathResult struct {
 	Path  string
@@ -180,7 +181,9 @@ func (h *Host) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
 
 // WriteFileAtomic uses an exclusively created sibling temp so concurrent writes
 // cannot share a staging file or follow a pre-created staging symlink. Durable
-// cache writes also sync before rename. Failures remove the temporary.
+// cache writes sync storage before rename and the parent directory afterwards.
+// A parent-sync failure is reported even though rename is already published.
+// Filesystems/platforms without directory fsync cannot claim durable success.
 func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error {
 	if core.IsMemoryResourceURIName(name) {
 		return h.Memory.WriteFileAtomic(name, data, perm, durable)
@@ -205,12 +208,18 @@ func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bo
 		return err
 	}
 	temporary := f.Name()
-	_, err = f.Write(data)
+	written, writeErr := f.Write(data)
+	err = writeErr
+	if err == nil && written != len(data) {
+		err = os.ErrInvalid
+	}
 	if err == nil {
 		err = os.Chmod(temporary, os.FileMode(perm))
 	}
 	if err == nil && durable {
-		err = f.Sync()
+		if syncStorage(&f) != 0 {
+			err = errStorageSync
+		}
 	}
 	closeErr := f.Close()
 	if err == nil {
@@ -222,6 +231,9 @@ func (h *Host) WriteFileAtomic(name string, data []byte, perm uint32, durable bo
 	if err != nil {
 		os.Remove(temporary)
 		return err
+	}
+	if durable && km_file_sync_parent(directory) != 0 {
+		return errStorageSync
 	}
 	return nil
 }

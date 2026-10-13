@@ -175,10 +175,12 @@ func New(a mem.Allocator) *Host {
 	return h
 }
 
-// Start queues a failed terminal event when the host rejects the request. A
-// nil host cannot queue anything and returns false without an event.
 func (h *Host) SupportsExecutor(name string, version string) bool { _, _ = h, version; return name == "" || name == "local" }
 
+// Start returns false when the request was not admitted; callers must settle
+// failure immediately rather than wait for an event. A failed terminal may also
+// be queued for diagnostics, but nil hosts or an occupied emergency rejection
+// slot cannot queue another one. Only true transfers active process ownership.
 func (h *Host) Start(request host.ProcessRequest) bool {
 	if request.Directory == "" {
 		request.Directory = "."
@@ -206,11 +208,12 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 			start := len(environment)
 			for j := range request.Environment {
 				entry := request.Environment[j]
+				entryAt := strings.IndexByte(entry, '=')
 				overridden := false
 				for k := range request.Stages[i].Environment {
 					replacement := request.Stages[i].Environment[k]
 					at := strings.IndexByte(replacement, '=')
-					if at > 0 && strings.HasPrefix(entry, replacement[:at+1]) {
+					if at > 0 && entryAt > 0 && EnvironmentNameEqual(entry[:entryAt], replacement[:at]) {
 						overridden = true
 					}
 				}
@@ -371,10 +374,16 @@ func FreeEnvironment(a mem.Allocator, values []string) {
 // EnvironmentNameEqual uses the active host's environment-name comparison
 // rules. Windows names are case-insensitive; POSIX names are byte-sensitive.
 func EnvironmentNameEqual(left string, right string) bool {
+	return EnvironmentNameEqualForPlatform(left, right, km_cli_environment_names_case_insensitive())
+}
+
+// EnvironmentNameEqualForPlatform exposes the name policy without changing the
+// native platform, so portable callers and tests can apply either rule.
+func EnvironmentNameEqualForPlatform(left string, right string, windows bool) bool {
 	if left == right {
 		return true
 	}
-	if !km_cli_environment_names_case_insensitive() {
+	if !windows {
 		return false
 	}
 	for i, j := 0, 0; i < len(left) && j < len(right); {

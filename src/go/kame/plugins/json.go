@@ -40,6 +40,7 @@ func RegisterJSON(a mem.Allocator, registry *eval.Registry, data []byte) bool {
 			minArity := jsonFieldValue(op, "minArity")
 			maxArity := jsonFieldValue(op, "maxArity")
 			if operationName.Duplicate || operationVersion.Duplicate || minArity.Duplicate || maxArity.Duplicate || !operationName.Found || !operationVersion.Found || !minArity.Found || !maxArity.Found || operationName.Value.Kind != core.String || operationVersion.Value.Kind != core.String || minArity.Value.Kind != core.Int || maxArity.Value.Kind != core.Int { return false }
+			if int64(int(minArity.Value.Int)) != minArity.Value.Int || int64(int(maxArity.Value.Int)) != maxArity.Value.Int { return false }
 			declaration := &declarations[i].Operations[j]
 			declaration.Name, declaration.Version = operationName.Value.Text, operationVersion.Value.Text
 			declaration.MinArity, declaration.MaxArity = int(minArity.Value.Int), int(maxArity.Value.Int)
@@ -85,6 +86,7 @@ func jsonFieldValue(value core.Value, key string) jsonField {
 }
 
 func readOptionalLimit(field jsonField, target *int) bool {
+	if field.Duplicate { return false }
 	if !field.Found { return true }
 	if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > int64(DefaultMaxRequestBytes) { return false }
 	*target = int(field.Value.Int)
@@ -92,6 +94,7 @@ func readOptionalLimit(field jsonField, target *int) bool {
 }
 
 func readOptionalTimeout(field jsonField, target *int64) bool {
+	if field.Duplicate { return false }
 	if !field.Found { return true }
 	if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > DefaultTimeoutMS { return false }
 	*target = field.Value.Int

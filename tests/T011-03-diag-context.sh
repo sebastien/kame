@@ -113,7 +113,7 @@ cli_expect_stdout 'tool-ok'
 test-step "included recipes and post-include rules retain authored locations"
 mkdir -p include-project
 cat >include-project/Makefile.kmk <<'EOF'
-include ./rules.kmk
+(include ./rules.kmk)
 root : leaf
 local :
 	@(first 1)

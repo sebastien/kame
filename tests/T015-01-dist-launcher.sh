@@ -42,7 +42,9 @@ printf 'dummy-wasm' >"$release/kame.wasm"
 printf 'fixture Windows launcher bundle' >"$release/kame-windows-x64.zip"
 printf 'fixture native Windows CLI' >"$release/kame-windows-x64.exe"
 printf '9.9.9\n' >"$release/VERSION"
-cp "$CLI_ROOT/Makefile.bootstrap" "$release/Makefile.bootstrap"
+sed -e 's|^KAME_VERSION ?=.*|KAME_VERSION ?= 9.9.9|' \
+    -e "s|^KAME_RELEASE_PUBKEY_B64 ?=.*|KAME_RELEASE_PUBKEY_B64 ?= $RELEASE_TEST_KEY_B64|" \
+    "$CLI_ROOT/Makefile.bootstrap" >"$release/Makefile.bootstrap"
 release_test_stamp_launcher "$launcher" "$release/kame" 9.9.9
 python3 src/sh/release_package_manifests.py --directory "$release" --version 9.9.9
 release_test_sign "$release" 9.9.9 fixture "$root/keys"
@@ -169,7 +171,7 @@ fi
 test-step "a missing verifier fails closed"
 tools="$root/tools"
 mkdir -p "$tools"
-for tool in dirname tr mkdir cat cut rm sleep kill uname mv chmod sort rmdir curl; do
+for tool in dirname tr mkdir cat cut rm sleep kill uname mv chmod sort rmdir curl mktemp; do
 	if path=$(command -v "$tool" 2>/dev/null); then
 		ln -sf "$path" "$tools/$tool"
 	fi
@@ -184,19 +186,106 @@ else
 	test-fail "missing verifier: status=$status err=$(cat "$root/err")"
 fi
 
-test-step "the bootstrap Makefile provisions the launcher and delegates"
+test-step "the bootstrap Makefile caches the executable and delegates"
 project="$root/project"
 mkdir -p "$project"
-sed 's|@KAME_VERSION@|9.9.9|' "$CLI_ROOT/Makefile.bootstrap" >"$project/Makefile"
+cp "$CLI_ROOT/Makefile.bootstrap" "$project/Makefile"
 set +e
-out="$(cd "$project" && KAME_HOME="$root/bootcache" KAME_RELEASE_URL="file://$release" KAME_BACKEND=wasm make --no-print-directory KAME="$project/bin/kame" hello 2>&1)"
+out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory hello 2>&1)"
 status=$?
 set -e
-if [ "$status" = 0 ] && [ "$out" = "wasm:hello" ] && [ -x "$project/bin/kame" ]; then
-	test-ok "bootstrap provisioned bin/kame and forwarded the goal"
+if [ "$status" = 0 ] && [ "$out" = "ape:hello" ] && [ -x "$root/boot-home/.cache/kame/bin/kame-9.9.9" ]; then
+	test-ok "bootstrap cached kame.com and forwarded the goal"
 else
 	test-fail "bootstrap: status=$status out=$out"
 fi
+
+out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory KAME_RELEASE_URL=file:///nonexistent)"
+if [ "$out" = "ape:default" ]; then
+	test-ok "bootstrap reuses the cache offline and forwards the default goal"
+else
+	test-fail "bootstrap cache/default: out=$out"
+fi
+
+out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory KAME_RELEASE_URL=file:///nonexistent first second)"
+if [ "$out" = $'ape:first\nape:second' ]; then
+	test-ok "bootstrap verifies once and delegates multiple goals in order"
+else
+	test-fail "bootstrap multiple goals: out=$out"
+fi
+
+test-step "bootstrap rejects unverified downloads before installation"
+make_bin=$(command -v make)
+wrong_key=$(openssl genpkey -algorithm ED25519 | openssl pkey -pubout -outform DER | openssl base64 -A)
+for defect in artifact signature missing-entry wrong-key missing-key missing-verifier wrong-version; do
+	bootstrap_release="$root/bootstrap-$defect"
+	cp -R "$release" "$bootstrap_release"
+	key="$RELEASE_TEST_KEY_B64"
+	bootstrap_path="$PATH"
+	message='release manifest signature is invalid'
+	case "$defect" in
+	artifact) printf '\n# altered executable\n' >>"$bootstrap_release/kame.com"; message='checksum mismatch' ;;
+	signature) printf 'invalid' >"$bootstrap_release/SHA256SUMS.sig" ;;
+	missing-entry)
+		message='missing manifest entry'
+		grep -v '  kame.com$' "$bootstrap_release/SHA256SUMS" >"$root/without-ape"
+		mv "$root/without-ape" "$bootstrap_release/SHA256SUMS"
+		openssl pkeyutl -sign -inkey "$root/keys/signing.pem" -rawin -in "$bootstrap_release/SHA256SUMS" -out "$bootstrap_release/SHA256SUMS.sig"
+		;;
+	wrong-key) key="$wrong_key" ;;
+	missing-key) key=""; message='verification key is not configured' ;;
+	missing-verifier) bootstrap_path="$tools"; message='no signature verifier' ;;
+	wrong-version)
+		message='release version does not match KAME_VERSION'
+		printf '0.0.0\n' >"$bootstrap_release/VERSION"
+		release_test_sign "$bootstrap_release" 0.0.0 old-release "$root/keys"
+		;;
+	esac
+	bootstrap_bin="$root/bootstrap-cache/$defect"
+	status=0
+	(cd "$project" && PATH="$bootstrap_path" "$make_bin" --no-print-directory \
+		KAME="$bootstrap_bin" KAME_RELEASE_URL="file://$bootstrap_release" \
+		KAME_RELEASE_PUBKEY_B64= KAME_RELEASE_PUBKEY_B64_OVERRIDE="$key" hello) >"$root/bootstrap-out" 2>"$root/bootstrap-err" || status=$?
+	if [ "$status" -ne 0 ] && grep -q "$message" "$root/bootstrap-err" && [ ! -e "$bootstrap_bin" ] && \
+		! grep -q 'ape:hello' "$root/bootstrap-out" && \
+		! compgen -G "$bootstrap_bin.tmp.*" >/dev/null; then
+		test-ok "bootstrap $defect fails without installing, executing or retaining temporary downloads"
+	else
+		test-fail "bootstrap $defect: status=$status out=$(cat "$root/bootstrap-out") err=$(cat "$root/bootstrap-err")"
+	fi
+done
+
+test-step "bootstrap verifies cached executables and retained manifests offline"
+bootstrap_bin="$root/boot-home/.cache/kame/bin/kame-9.9.9"
+for defect in artifact signature missing-manifest wrong-version; do
+	message='release manifest signature is invalid'
+	if [ "$defect" = artifact ]; then
+		printf '\n# cached tampering\n' >>"$bootstrap_bin"
+		message='checksum mismatch'
+	elif [ "$defect" = signature ]; then
+		printf 'invalid' >"$bootstrap_bin.SHA256SUMS.sig"
+	elif [ "$defect" = missing-manifest ]; then
+		rm "$bootstrap_bin.SHA256SUMS"
+	else
+		message='release version does not match KAME_VERSION'
+		cp "$root/bootstrap-wrong-version/kame.com" "$bootstrap_bin"
+		cp "$root/bootstrap-wrong-version/SHA256SUMS" "$bootstrap_bin.SHA256SUMS"
+		cp "$root/bootstrap-wrong-version/SHA256SUMS.sig" "$bootstrap_bin.SHA256SUMS.sig"
+		cp "$root/bootstrap-wrong-version/VERSION" "$bootstrap_bin.VERSION"
+	fi
+	status=0
+	(cd "$project" && "$make_bin" --no-print-directory KAME="$bootstrap_bin" KAME_RELEASE_URL=file:///nonexistent hello) >"$root/bootstrap-out" 2>"$root/bootstrap-err" || status=$?
+	if [ "$status" -ne 0 ] && grep -q "$message" "$root/bootstrap-err" && ! grep -q 'ape:hello' "$root/bootstrap-out" && \
+		! compgen -G "$bootstrap_bin.tmp.*" >/dev/null; then
+		test-ok "bootstrap rejects cached $defect tampering without downloads or execution"
+	else
+		test-fail "cached bootstrap $defect: status=$status out=$(cat "$root/bootstrap-out")"
+	fi
+	cp "$release/kame.com" "$bootstrap_bin"
+	cp "$release/SHA256SUMS" "$bootstrap_bin.SHA256SUMS"
+	cp "$release/SHA256SUMS.sig" "$bootstrap_bin.SHA256SUMS.sig"
+	cp "$release/VERSION" "$bootstrap_bin.VERSION"
+done
 
 test-step "init creates a pinned sidecar and preserves project files"
 init_project="$root/init-project"
@@ -210,6 +299,12 @@ if [ "$out" = "Created Makefile.bootstrap for Kame 9.9.9. Use make -f Makefile.b
 	test-ok "init writes a pinned bootstrap sidecar without changing Makefile"
 else
 	test-fail "init output or project preservation: out=$out"
+fi
+out="$(unset KAME KAME_RELEASE_PUBKEY_B64_OVERRIDE; cd "$init_project" && HOME="$root/init-home" make --no-print-directory -f Makefile.bootstrap hello)"
+if [ "$out" = "ape:hello" ]; then
+	test-ok "initialized sidecar verifies the executable using its embedded release key"
+else
+	test-fail "initialized bootstrap: out=$out"
 fi
 set +e
 (cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init >"$root/init-out" 2>"$root/init-err")

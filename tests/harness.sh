@@ -69,7 +69,7 @@ for TEST in $FILES; do
 			fi
 			test-run "${DIM}»${PURPLE}" "$TEST" || status=$?
 		else
-			env -C "$ORIGINAL_PATH" "$SHELL" "$TEST" >"$log" 2>&1 || status=$?
+			env -C "$ORIGINAL_PATH" bash "$TEST" >"$log" 2>&1 || status=$?
 		fi
 		elapsed=$((SECONDS - started))
 		if [ "$status" -eq 0 ]; then

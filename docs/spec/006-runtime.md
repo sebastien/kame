@@ -227,13 +227,15 @@ record renders once. Dry-run renders so the recipe remains visible.
 
 ## When to execute
 
-Do not execute when the rendered recipe text is unchanged and the interpreter
-dependency is unchanged. Skipping the render implies both, so a fresh record
-does not start a process. If rendering ran and produced the same command text,
-and the interpreter dependency is unchanged, do not execute either. `always`
-and `--force` execute.
+A fresh accepted record may skip execution only while the consumed inputs,
+output content and execution settings still satisfy the reuse proof above.
+Skipping rendering under that proof does not start a process. Unchanged rendered
+command text and interpreter alone are insufficient: changed input bytes or a
+missing output still require execution. Rendering may establish a new dependency
+set, whose current values and output proof must be validated before reuse.
+`always` and `--force` execute.
 
-Operations that cannot be deferred, including collected `shell`, are invalid in
+Operations that cannot be deferred, including collected `shell!`, are invalid in
 planning and direct build-template rendering and return `PHASE_INVALID`.
 Demanded lazy values and Kash recipe expressions evaluate in their runtime
 phase, where collected shell calls may execute with the target environment and

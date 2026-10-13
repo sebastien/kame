@@ -6,7 +6,6 @@ import (
 	"kame/lang/source"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
-	"solod.dev/so/strings"
 )
 
 // ParseFragment parses only this bounded range, in the selected language. The
@@ -39,6 +38,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		if part.End != end {
 			s.error(part.End, end, "expected exactly one expression")
 		}
+		validateValueScript(s)
 		return s
 	}
 	// Definitions and top-level statements share expression grammar, never
@@ -57,15 +57,17 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 			lineEnd++
 		}
 		if comment(text, pos, lineEnd) {
+			_, commentEnd := trim(text, pos, lineEnd)
+			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Comment, Text: text[pos:commentEnd], Span: source.Span{Start: pos, End: commentEnd}})
 			pos = nextLine(text, lineEnd)
 			continue
 		}
-		if following := parseConditional(s, pos, lineEnd); following != 0 {
+		if following := rejectLegacyDirective(s, pos, lineEnd); following != 0 {
 			pos = following
 			continue
 		}
-		if name, ok := include(text[pos:lineEnd]); ok {
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: pos, End: lineEnd}, Include: name, OptionalInclude: strings.HasPrefix(text[pos:lineEnd], "include?")})
+		if legacyInclude(text[pos:lineEnd]) {
+			s.error(pos, lineEnd, "legacy include directive is unsupported; use (include PATH) or (include? PATH)")
 			pos = nextLine(text, lineEnd)
 			continue
 		}
@@ -92,12 +94,18 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 			pos++
 		}
 		if pos < end && text[pos] != '\n' {
-			s.error(pos, pos+1, "expected statement separator")
+			last := s.Items[len(s.Items)-1].Expression
+			ruleHead := last != nil && (last.Kind == expr.Name || last.Kind == expr.Path)
+			if ruleHead && text[pos] == ':' && (pos+1 == end || space(text[pos+1])) && topLevel(text[from:lineEnd], ':') == pos-from {
+				s.error(pos, pos+1, "build rule syntax is not accepted in a km value script; use --lang kmk for definitions and build rules")
+			} else {
+				s.error(pos, pos+1, "expected statement separator")
+			}
 		}
 		if len(s.Diagnostics) != 0 || pos <= from {
 			break
 		}
 	}
-	validateConditionals(s)
+	validateComposition(s)
 	return s
 }

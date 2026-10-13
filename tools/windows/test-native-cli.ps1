@@ -34,7 +34,7 @@ New-Item -ItemType Directory -Path $project | Out-Null
 $shell = (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe').Replace('\', '/')
 try {
 	@'
-include ./native-child.kmk
+(include ./native-child.kmk)
 
 task native-windows :
 	Write-Output 'native-windows-recipe-ok'

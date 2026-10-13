@@ -142,10 +142,10 @@ func TestContinuationsPreserveSourceSpansAndRecipeBackslashes(t *testing.T) {
 }
 
 func TestOptionalIncludesPreserveParsingAndFormatting(t *testing.T) {
-	text := "include? ./optional.kmk\ninclude ./required.kmk\n"
+	text := "(include? \"folder/optional file.kmk\")\n(include ./required.kmk)\n"
 	parsed := script.Parse(t.Allocator(), "test.kmk", text)
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 || !parsed.Items[0].OptionalInclude || parsed.Items[1].OptionalInclude || parsed.Items[0].Include != "./optional.kmk" {
+	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 || !parsed.Items[0].OptionalInclude || parsed.Items[1].OptionalInclude || parsed.Items[0].Include != "folder/optional file.kmk" || parsed.Items[1].Include != "./required.kmk" {
 		t.Error("optional include did not retain its path and required distinction")
 		return
 	}

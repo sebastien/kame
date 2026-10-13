@@ -49,7 +49,7 @@ the available literal targets.
 | `make -C DIR target` | `kame -C DIR target` | Sets Kame's working directory. |
 | `make -j N target` | `kame -j N target` | Limits concurrent graph nodes. |
 | `make -n target` | `kame -n target` | Kame plans and renders, without process or effect execution. |
-| `include rules.mk` | `include ./rules.kmk` | Merges the included Kame source depth-first; paths are relative to the including source. |
+| `include rules.mk` | `(include ./rules.kmk)` | Merges the included Kame source depth-first under the caller's grammar; literal paths are relative to the including source. |
 
 ## Example conversion
 
@@ -94,14 +94,17 @@ For a split Makefile, migrate shared declarations into `.kmk` fragments and
 include them explicitly:
 
 ```kame
-include ./rules/common.kmk
-include ./rules/platform.kmk
+(include ./rules/common.kmk)
+(include ./rules/platform.kmk)
 ```
 
 Kame merges the included definitions and rules into the caller's program.
 Repeated nonrecursive inclusion expands again; duplicate declarations still
-fail registration. Active-ancestry include cycles are errors. Use `include?`
-for an optional file and `when`/`otherwise`/`end` for declaration selection.
+fail registration. Active-ancestry include cycles are errors. Use
+`(include? "local.kmk")` for a missing-only optional file and composition-only
+`if` to select include files. Extract conditional definitions/rules into those
+files; they are not valid `if` bodies. Legacy line includes and
+`when`/`otherwise`/`end` are rejected with migration guidance.
 
 ## Convert incrementally
 

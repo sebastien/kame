@@ -22,7 +22,6 @@ const graphKinds = Object.freeze({ inputs: 0, outputs: 1, span: 2, planRoots: 3 
 // Children run in their own process group so a signal terminates the whole
 // tree, and a forced termination reports 128 plus the signal number.
 const activeChildren = new Set();
-const activeProcessGroups = new Map();
 const invocationCancellations = new Set();
 const invocationDisposals = new Set();
 const activeCacheLocks = new Set();
@@ -47,12 +46,12 @@ function installSignals() {
   }
 }
 
-function track(child, request = undefined) {
+function track(child, group = undefined) {
   activeChildren.add(child);
-  if (request !== undefined) activeProcessGroups.set(request.toString(), child);
+  group?.add(child);
   child.once('close', () => {
     activeChildren.delete(child);
-    if (request !== undefined && activeProcessGroups.get(request.toString()) === child) activeProcessGroups.delete(request.toString());
+    group?.delete(child);
   });
 }
 
@@ -69,15 +68,16 @@ function signalProcessTree(child, signal = 'SIGKILL') {
   return Promise.resolve();
 }
 
-async function cancelProcessGroup(request, graceMS = 5000) {
-  const child = activeProcessGroups.get(request.toString());
-  if (!child || child.pid === undefined) return;
-  if (process.platform === 'win32') { await signalProcessTree(child, 'SIGKILL'); return; }
-  signalProcessTree(child, 'SIGTERM');
-  const timer = setTimeout(() => {
-    signalProcessTree(child, 'SIGKILL');
-  }, graceMS);
-  timer.unref();
+async function cancelProcessGroup(group, graceMS = 5000) {
+  const children = [...(group ?? [])];
+  const reaped = children.map((child) => new Promise((resolve) => child.once('close', resolve)));
+  let timer;
+  try {
+    await Promise.all(children.map((child) => signalProcessTree(child, process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM')));
+    timer = setTimeout(() => { for (const child of children) if (group.has(child)) void signalProcessTree(child, 'SIGKILL'); }, graceMS);
+    timer.unref();
+    await Promise.all(reaped);
+  } finally { clearTimeout(timer); }
 }
 
 // A blocked public sink must stop every publishing child pipe. One pair of
@@ -788,7 +788,7 @@ function matchSegment(pattern, name) {
       mark = ni;
       continue;
     }
-    if (pi < pattern.length && (pattern[pi] === '?' || pattern[pi] === name[ni])) {
+    if (pi < pattern.length && (pattern[pi] === '?' || (pattern[pi] !== '[' && pattern[pi] === name[ni]))) {
       pi++;
       ni++;
       continue;
@@ -829,19 +829,22 @@ function matchClass(pattern, pi, ch) {
   let first = true;
   while (i < pattern.length && (pattern[i] !== ']' || first)) {
     first = false;
-    if (pattern[i] === '\\' && i + 1 < pattern.length) {
-      i++;
-      if (pattern[i] === ch) matched = true;
-      i++;
-      continue;
+    let start = pattern[i++];
+    if (start === '\\') {
+      if (i >= pattern.length) return { ok: false, next: pi + 1 };
+      start = pattern[i++];
     }
-    if (i + 2 < pattern.length && pattern[i + 1] === '-' && pattern[i + 2] !== ']') {
-      if (ch >= pattern[i] && ch <= pattern[i + 2]) matched = true;
-      i += 3;
-      continue;
+    if (pattern[i] === '-' && i + 1 < pattern.length && pattern[i + 1] !== ']') {
+      i++;
+      let end = pattern[i++];
+      if (end === '\\') {
+        if (i >= pattern.length) return { ok: false, next: pi + 1 };
+        end = pattern[i++];
+      }
+      if (ch >= start && ch <= end) matched = true;
+    } else {
+      if (start === ch) matched = true;
     }
-    if (pattern[i] === ch) matched = true;
-    i++;
   }
   if (i >= pattern.length || pattern[i] !== ']') return { ok: false, next: pi + 1 };
   return { ok: matched !== negate, next: i + 1 };
@@ -1108,6 +1111,7 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_step',
   'kame_wasm_next_event_header',
   'kame_wasm_next_request_kind',
+  'kame_wasm_next_request_id',
   'kame_wasm_next_request_data_length',
   'kame_wasm_request_data_copy',
   'kame_wasm_next_request_key_length',
@@ -1129,6 +1133,7 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_process_stream',
   'kame_wasm_process_terminal',
   'kame_wasm_declaration_predicate',
+  'kame_wasm_composition_condition',
   'kame_wasm_instance_diagnostic_length',
   'kame_wasm_instance_diagnostic_copy',
   'kame_wasm_instance_diagnostic_span',
@@ -1144,6 +1149,7 @@ class Module {
     this.path = wasmPath;
     this.scratchBuffers = new Map();
     this.cacheLeases = new Map();
+    this.processGroups = new Map();
     this.cacheWrites = new Map();
   }
 
@@ -1283,12 +1289,27 @@ class Module {
   }
 
   async declarationPredicate(descriptor) {
+    return this.configurationCondition(descriptor, this.exports.kame_wasm_declaration_predicate);
+  }
+
+  async compositionCondition(descriptor) {
+    return this.configurationCondition(descriptor, this.exports.kame_wasm_composition_condition);
+  }
+
+  async configurationCondition(descriptor, query) {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
       const bytes = this.write(JSON.stringify(descriptor));
-      const result = this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_declaration_predicate(handle, bytes.pointer, bytes.length, dst, capacity, length), instance);
+      const result = this.copyQuery((handle, dst, capacity, length) => query(handle, bytes.pointer, bytes.length, dst, capacity, length), instance);
       return new TextDecoder().decode(result) === 'true';
+    } catch (error) {
+      const text = this.instanceDiagnostic(instance);
+      if (text?.trimStart().startsWith('{')) {
+        const detail = JSON.parse(text).diagnostic;
+        if (detail) throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, 'EXPR_INVALID'), { span: detail.span, diagnostics: [detail] });
+      }
+      throw error;
     } finally { this.exports.kame_wasm_instance_free(instance); }
   }
 
@@ -1312,6 +1333,9 @@ class Module {
     const request = view.getBigUint64(20, true);
     const payloadLength = view.getUint32(44, true);
     const kind = this.exports.kame_wasm_next_request_kind(instance);
+    // Raw engine identity is distinct from the opaque ABI completion handle.
+    // Read it while pinned; handle slots may be retired/reused after detach.
+    const rawRequest = this.exports.kame_wasm_next_request_id(instance);
     let data = null;
     if (kind === 2) {
       const dataLength = this.exports.kame_wasm_next_request_data_length(instance);
@@ -1340,10 +1364,14 @@ class Module {
     // Copy and detach before yielding: another completion can change the ABI's
     // current request while public output waits for its reader.
     await waitOutputReady(context.signal);
-    return this.dispatch(instance, request, kind, payload, data, context, key, record);
+    try {
+      return await this.dispatch(instance, request, kind, payload, data, context, key, record, rawRequest);
+    } finally {
+      if ([3, 13, 14, 15, 16].includes(kind)) this.processGroups.delete(`${instance}:${rawRequest}`);
+    }
   }
 
-  async dispatch(instance, request, kind, payload, data, context, key, record) {
+  async dispatch(instance, request, kind, payload, data, context, key, record, rawRequest) {
     const grants = context.grants;
     if (kind === 26) return this.pluginCallback(instance, request, payload, context);
     if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18].includes(kind)) {
@@ -1353,9 +1381,12 @@ class Module {
     if (kind === 24) {
       const owner = this.cacheLeaseKey(instance, key);
       if (!this.cacheLeases.has(owner)) {
-        try { this.cacheLeases.set(owner, await acquireCacheLock(key, context.signal)); }
-        catch (error) { return this.completeFailure(instance, request, error.code ?? 'FS_ERR', `cannot acquire cache lock: ${error.message}`); }
+        // Publish acquisition before yielding, so unlock/cleanup also waits for
+        // an acquisition racing cancellation and duplicate acquire requests.
+        this.cacheLeases.set(owner, acquireCacheLock(key, context.signal));
       }
+      try { await this.cacheLeases.get(owner); }
+      catch (error) { return this.completeFailure(instance, request, error.code ?? 'FS_ERR', `cannot acquire cache lock: ${error.message}`); }
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
     if (kind === 25) {
@@ -1384,7 +1415,7 @@ class Module {
         graceMS = cancellation.graceMS;
       } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process cancellation request'); }
       if (!Number.isSafeInteger(graceMS) || graceMS < 0 || graceMS > 60000) return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process cancellation grace period');
-      await cancelProcessGroup(processRequest, graceMS);
+      await cancelProcessGroup(this.processGroups.get(`${instance}:${processRequest}`), graceMS);
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
     if (kind === 27 || kind === 28 || kind === 29) {
@@ -1510,7 +1541,7 @@ class Module {
         }
       }
       const detached = context.concurrent === true;
-      const completion = await runArgvCapture(stages, { ...context, ...redirections, request: detached ? request : undefined, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); this.drainEvents(instance, context); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
+      const completion = await runArgvCapture(stages, { ...context, ...redirections, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); return this.startedProcessGroup(instance, context, rawRequest); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout);
@@ -1553,7 +1584,7 @@ class Module {
       }
       if (context.streaming) {
         const detached = context.concurrent === true;
-        await runProcess(this, instance, payload, context, detached ? request : undefined);
+        await runProcess(this, instance, payload, context, detached ? request : undefined, rawRequest);
         return 0;
       }
       const completion = await runProcessDirect(payload, context);
@@ -1683,7 +1714,7 @@ class Module {
     try {
       const invoke = typeof callback === 'function'
         ? Promise.resolve().then(() => callback(invocation, { signal: pluginController.signal }))
-        : runPluginProcess(invocation, executable, maxResponseBytes, pluginController.signal);
+        : runPluginProcess(invocation, executable, maxResponseBytes, pluginController.signal, context.cwd);
       response = await Promise.race([invoke, timeout, aborted]);
     }
     catch (error) {
@@ -1796,12 +1827,34 @@ class Module {
 
   async releaseCacheLease(instance, key) {
     const owner = this.cacheLeaseKey(instance, key);
+    await this.releaseCacheOwner(owner);
+  }
+
+  async releaseCacheOwner(owner) {
     const writing = this.cacheWrites.get(owner);
     if (writing) { try { await writing; } catch {} }
-    const release = this.cacheLeases.get(owner);
-    if (!release) return;
+    const acquired = this.cacheLeases.get(owner);
+    if (!acquired) return;
     this.cacheLeases.delete(owner);
+    let release;
+    try { release = await acquired; } catch { return; }
     await release();
+  }
+
+  async cleanupInstance(instance) {
+    const prefix = `${instance}:`;
+    await Promise.all([...this.cacheWrites].filter(([owner]) => owner.startsWith(prefix)).map(([, writing]) => writing.catch(() => {})));
+    await Promise.all([...this.cacheLeases.keys()].filter((owner) => owner.startsWith(prefix)).map((owner) => this.releaseCacheOwner(owner)));
+    for (const owner of this.processGroups.keys()) if (owner.startsWith(prefix)) this.processGroups.delete(owner);
+  }
+
+  startedProcessGroup(instance, context, rawRequest) {
+    this.drainEvents(instance, context);
+    if (rawRequest === undefined) return undefined;
+    const owner = `${instance}:${rawRequest}`;
+    let group = this.processGroups.get(owner);
+    if (!group) this.processGroups.set(owner, group = new Set());
+    return group;
   }
 
   deny(instance, request, capability) {
@@ -1810,6 +1863,7 @@ class Module {
   }
 
   async evaluate(source, expression, context) {
+    if (context.signal?.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
@@ -1829,6 +1883,9 @@ class Module {
       if (this.exports.kame_wasm_expression_begin(instance, encoded.pointer, encoded.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
       for (;;) {
         await waitOutputReady(context.signal);
+        if (context.signal?.aborted) {
+          throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
+        }
         const state = this.exports.kame_wasm_step(instance);
         this.drainExpressionEffects(instance);
         if (state === 2) break;
@@ -1837,6 +1894,8 @@ class Module {
       }
       return this.copyResult(instance);
     } finally {
+      if (context.signal?.aborted) this.exports.kame_wasm_expression_cancel(instance);
+      await this.cleanupInstance(instance);
       this.exports.kame_wasm_instance_free(instance);
     }
   }
@@ -2094,9 +2153,13 @@ class Module {
       cancellation.abort();
       externalSignal?.removeEventListener('abort', cancel);
       await Promise.all(pending);
-      if (targetStarted) this.drainEvents(instance, context);
-      invocationCancellations.delete(cancellation);
-      this.exports.kame_wasm_instance_free(instance);
+      try {
+        if (targetStarted) this.drainEvents(instance, context);
+      } finally {
+        await this.cleanupInstance(instance);
+        invocationCancellations.delete(cancellation);
+        this.exports.kame_wasm_instance_free(instance);
+      }
     }
   }
 
@@ -2169,6 +2232,7 @@ class Module {
       cancellation.abort();
       externalSignal?.removeEventListener('abort', cancel);
       await Promise.all(pending);
+      await this.cleanupInstance(instance);
       this.exports.kame_wasm_instance_free(instance);
       throw error;
     }
@@ -2205,6 +2269,7 @@ class Module {
     watch.cancellation.abort();
     await Promise.all(watch.pending);
     this.exports.kame_wasm_watch_cancel(watch.instance);
+    await this.cleanupInstance(watch.instance);
     this.exports.kame_wasm_instance_free(watch.instance);
     watch.externalSignal?.removeEventListener('abort', watch.cancel);
   }
@@ -2284,6 +2349,7 @@ class Module {
     } finally {
       cancellation.abort();
       await Promise.all(pending);
+      await this.cleanupInstance(instance);
       invocationCancellations.delete(cancellation);
       this.exports.kame_wasm_instance_free(instance);
     }
@@ -2313,10 +2379,10 @@ function terminatePluginChild(child) {
   return timer;
 }
 
-function runPluginProcess(invocation, executable, responseLimit, signal) {
+function runPluginProcess(invocation, executable, responseLimit, signal, cwd) {
   return new Promise((resolveResponse, rejectResponse) => {
     if (signal.aborted) { rejectResponse(new Error('cancelled')); return; }
-    const child = spawn(executable[0], executable.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], detached: true, shell: false });
+    const child = spawn(executable[0], executable.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], detached: true, shell: false, cwd: cwd ?? process.cwd() });
     track(child);
     const output = [];
     let outputBytes = 0;
@@ -2432,7 +2498,10 @@ export class Kame {
     if (external?.aborted) controller.abort();
     const token = { program, controller, promise: null };
     const context = apiContext(options ?? {}, controller.signal);
-    token.promise = Promise.resolve().then(() => callback(context));
+    token.promise = Promise.resolve().then(() => {
+      if (controller.signal.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
+      return callback(context);
+    });
     this.operations.add(token);
     try {
       return await token.promise;
@@ -2443,16 +2512,20 @@ export class Kame {
   }
 
   async parse(language, source, options = {}) {
-    return this.operation(null, options, async () => {
-      const bytes = await this.module.parse(language, options.name ?? 'input.km', source);
-      return JSON.parse(this.module.decode0(bytes));
+    return this.operation(null, options, async (context) => {
+      const module = await Module.load(this.module.path);
+      if (context.signal.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
+      const bytes = await module.parse(language, options.name ?? 'input.km', source);
+      return JSON.parse(module.decode0(bytes));
     });
   }
 
   async format(language, source, options = {}) {
-    return this.operation(null, options, async () => {
-      const bytes = await this.module.format(language, options.name ?? 'input.km', source, options.indentStyle ?? 'tab', options.indentWidth ?? 4);
-      return this.module.decode0(bytes);
+    return this.operation(null, options, async (context) => {
+      const module = await Module.load(this.module.path);
+      if (context.signal.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
+      const bytes = await module.format(language, options.name ?? 'input.km', source, options.indentStyle ?? 'tab', options.indentWidth ?? 4);
+      return module.decode0(bytes);
     });
   }
 
@@ -2480,7 +2553,11 @@ export class Kame {
   }
 
   async dispose() {
-    if (this.disposed) return;
+    if (!this.disposePromise) this.disposePromise = this.disposeOwned();
+    return this.disposePromise;
+  }
+
+  async disposeOwned() {
     this.disposed = true;
     for (const operation of this.operations) operation.controller.abort();
     await Promise.allSettled([...this.watches].map((watch) => watch.close()));
@@ -2524,8 +2601,12 @@ export class KameProgram {
 
   async evaluate(expression, options = {}) {
     return this.owner.operation(this, options, async (context) => this.serialized(async () => {
-      const result = await this.module.evaluate(this.source, expression, context);
-      return this.module.decode0(result);
+      // Host allocations are monotonic: keep one module per operation, never
+      // reset an allocator that an active watch or another owner can still use.
+      const module = await Module.load(this.module.path);
+      this.module = module;
+      const result = await module.evaluate(this.source, expression, context);
+      return module.decode0(result);
     }));
   }
 
@@ -2533,8 +2614,10 @@ export class KameProgram {
     const requested = Array.isArray(targets) ? [...targets] : [targets];
     if (requested.some((target) => typeof target !== 'string')) throw Object.assign(new Error('build targets must be strings'), { code: 'OPT_VALUE_INVALID' });
     return this.owner.operation(this, options, async (base) => this.serialized(async () => {
-      const results = await this.module.materializeMany(this.source, requested, base, this.name);
-      return { results: results.map((result, index) => ({ target: requested[index], kind: result.kind, value: this.module.decode0(result.bytes) })), events: structuredClone(base.events) };
+      const module = await Module.load(this.module.path);
+      this.module = module;
+      const results = await module.materializeMany(this.source, requested, base, this.name);
+      return { results: results.map((result, index) => ({ target: requested[index], kind: result.kind, value: module.decode0(result.bytes) })), events: structuredClone(base.events) };
     }));
   }
 
@@ -2554,9 +2637,11 @@ export class KameProgram {
     const token = { program: this, controller, promise: null };
     token.promise = this.serialized(async () => {
       if (controller.signal.aborted || this.disposed || this.owner.disposed) throw Object.assign(new Error('watch creation cancelled'), { code: 'EXEC_CANCELLED' });
-      const watch = await this.module.beginWatch(this.source, names, this.name, context);
+      const module = await Module.load(this.module.path);
+      this.module = module;
+      const watch = await module.beginWatch(this.source, names, this.name, context);
       if (controller.signal.aborted || this.disposed || this.owner.disposed) {
-        await this.module.disposeWatch(watch);
+        await module.disposeWatch(watch);
         throw Object.assign(new Error('watch creation cancelled'), { code: 'EXEC_CANCELLED' });
       }
       const apiWatch = new KameWatch(this, watch, controller, external, abort);
@@ -2576,7 +2661,11 @@ export class KameProgram {
   }
 
   async dispose() {
-    if (this.disposed) return;
+    if (!this.disposePromise) this.disposePromise = this.disposeOwned();
+    return this.disposePromise;
+  }
+
+  async disposeOwned() {
     this.disposed = true;
     await Promise.allSettled([...this.owner.watches].filter((watch) => watch.program === this).map((watch) => watch.close()));
     const operations = [...this.owner.operations].filter((operation) => operation.program === this);
@@ -2590,6 +2679,7 @@ export class KameProgram {
 export class KameWatch {
   constructor(program, watch, controller, externalSignal, abort) {
     this.program = program;
+    this.module = program.module;
     this.watch = watch;
     this.controller = controller;
     this.externalSignal = externalSignal;
@@ -2604,17 +2694,17 @@ export class KameWatch {
 
   snapshot() {
     this.assertLive();
-    return structuredClone(this.program.module.watchSnapshot(this.watch));
+    return structuredClone(this.module.watchSnapshot(this.watch));
   }
 
   invalidate(resources) {
     this.assertLive();
-    this.program.module.invalidateWatch(this.watch, structuredClone(resources));
+    this.module.invalidateWatch(this.watch, structuredClone(resources));
   }
 
   async next() {
     this.assertLive();
-    const module = this.program.module;
+    const module = this.module;
     while (!this.closed && !this.controller.signal.aborted) {
       const state = module.drainWatch(this.watch);
       if (state === 1) module.serviceWatchRequest(this.watch);
@@ -2634,18 +2724,25 @@ export class KameWatch {
   [Symbol.asyncIterator]() { return this; }
 
   async close() {
-    if (this.closed) return;
+    if (!this.closePromise) this.closePromise = this.closeOwned();
+    return this.closePromise;
+  }
+
+  async closeOwned() {
     this.closed = true;
     this.controller.abort();
-    await this.program.module.disposeWatch(this.watch);
+    await this.module.disposeWatch(this.watch);
     this.externalSignal?.removeEventListener('abort', this.abort);
     this.program.owner.watches.delete(this);
+    this.module = null;
+    this.watch = null;
   }
 }
 
 // runProcessDirect services a process request without an event stream; used by
 // expression evaluation, which has no target program to emit events for.
 function runProcessDirect(script, context) {
+  if (context.signal?.aborted) return Promise.resolve({ ok: false, code: 'EXEC_CANCELLED', message: 'invocation cancelled' });
   return new Promise((resolveRun) => {
     const shell = context.shell.length !== 0 ? context.shell : defaultShell();
     const childEnv = context.environmentExact ? {} : { ...process.env };
@@ -2653,15 +2750,22 @@ function runProcessDirect(script, context) {
       const at = entry.indexOf('=');
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
     }
-    const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, detached: true });
+    const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, cwd: context.cwd ?? process.cwd(), detached: true });
     track(child);
     const out = [];
     let failure = null;
+    let killCompletion = Promise.resolve();
+    const cancelled = () => { killCompletion = Promise.resolve(signalProcessTree(child, 'SIGKILL')); };
+    context.signal?.addEventListener('abort', cancelled, { once: true });
+    if (context.signal?.aborted) cancelled();
     child.stdout.on('data', (chunk) => out.push(chunk));
     child.stderr.on('data', () => {});
     child.once('error', (error) => { failure = error; });
-    child.once('close', (status) => {
-      if (failure !== null) resolveRun({ ok: false, code: 'HOST_FAIL', message: failure.message });
+    child.once('close', async (status) => {
+      await killCompletion;
+      context.signal?.removeEventListener('abort', cancelled);
+      if (context.signal?.aborted) resolveRun({ ok: false, code: 'EXEC_CANCELLED', message: 'invocation cancelled' });
+      else if (failure !== null) resolveRun({ ok: false, code: 'HOST_FAIL', message: failure.message });
       else if (status !== 0) resolveRun({ ok: false, code: 'RECIPE_FAIL', message: `process exited with status ${status}` });
       else resolveRun({ ok: true, text: Buffer.concat(out).toString('utf8') });
     });
@@ -2707,7 +2811,7 @@ function runArgvCapture(stages, context) {
       const setup = setups[i];
       const env = { ...childEnv };
       for (const entry of setup?.environment ?? []) { const at = entry.indexOf('='); env[entry.slice(0, at)] = entry.slice(at + 1); }
-      return { env, cwd: setup?.cwd || process.cwd(), timeoutMS: setup?.timeoutMS ?? 0 };
+      return { env, cwd: setup?.cwd || context.cwd || process.cwd(), timeoutMS: setup?.timeoutMS ?? 0 };
     });
     let executables;
     try {
@@ -2779,15 +2883,34 @@ function runArgvCapture(stages, context) {
       });
     };
     try {
-      for (let i = 0; i < stages.length; i++) {
+      for (let i = 0; i < stages.length && failure === null; i++) {
         const args = stages[i];
         const configuration = configurations[i];
-        const child = spawn(executables[i], args.slice(1), { argv0: args[0], shell: false, stdio: [i === 0 ? input ?? 'ignore' : process.platform === 'win32' ? children[i - 1].stdout : pipes[i - 1].read, i === stages.length - 1 ? output ?? 'pipe' : process.platform === 'win32' ? 'pipe' : pipes[i].write, 'pipe'], env: configuration.env, cwd: configuration.cwd, detached: true });
+        const child = spawn(executables[i], args.slice(1), { argv0: args[0], shell: false, stdio: [i === 0 ? input ?? 'ignore' : process.platform === 'win32' ? 'pipe' : pipes[i - 1].read, i === stages.length - 1 ? output ?? 'pipe' : process.platform === 'win32' ? 'pipe' : pipes[i].write, 'pipe'], env: configuration.env, cwd: configuration.cwd, detached: true });
         children.push(child);
-        if (process.platform === 'win32' && i > 0) children[i - 1].stdout.pipe(child.stdin);
+        if (process.platform === 'win32' && i > 0) {
+          const upstream = children[i - 1].stdout;
+          const closeInput = () => {
+            upstream.unpipe(child.stdin);
+            upstream.destroy();
+          };
+          const inputError = (error) => {
+            // Closing stdin is ordinary even while the consumer remains alive.
+            // Close the upstream read end so the producer observes broken output.
+            if (['EPIPE', 'ECONNRESET'].includes(error.code)) {
+              closeInput();
+              child.stdin.destroy();
+              return;
+            }
+            stop('HOST_FAIL', `pipeline input failed: ${error.message}`);
+          };
+          child.stdin.on('error', inputError);
+          child.stdin.once('close', () => { closeInput(); child.stdin.removeListener('error', inputError); });
+          upstream.pipe(child.stdin);
+        }
         remaining++;
-        track(child, context.request);
-        if (i === 0 && context.onStarted) publish(() => context.onStarted());
+        if (i === 0 && context.onStarted) publish(() => { context.processGroup = context.onStarted(); });
+        track(child, context.processGroup);
         const cancel = configuration.timeoutMS > 0 ? processDeadline(configuration.timeoutMS, () => stop('RECIPE_TIMEOUT', 'stage timed out')) : () => {};
         timers.push(cancel);
         child.once('exit', cancel);
@@ -2896,10 +3019,10 @@ function argvExecutable(name, childEnv, cwd = process.cwd()) {
 // and --retry (rerunning a failed attempt) before reporting a terminal status.
 // The terminal report carries the wait status and captured output so the engine
 // reconstructs the native completion value and failure cause.
-async function runProcess(module, instance, script, context, request) {
+async function runProcess(module, instance, script, context, request, rawRequest) {
   let attempt = 0;
   for (;;) {
-    const outcome = await runProcessAttempt(module, instance, script, context, request);
+    const outcome = await runProcessAttempt(module, instance, script, context, request, rawRequest);
     if (outcome.ok) {
       module.processTerminal(instance, 0, 0, 0, outcome.stdout, outcome.stderr, '', '', request);
       return;
@@ -2913,7 +3036,7 @@ async function runProcess(module, instance, script, context, request) {
   }
 }
 
-function runProcessAttempt(module, instance, script, context, request) {
+function runProcessAttempt(module, instance, script, context, request, rawRequest) {
   const retain = module.exports.kame_wasm_process_retain_limit(instance, request ?? 0n);
   if (retain === 0xffffffff) throw new Error('process retention budget unavailable');
   return new Promise((resolveAttempt, rejectAttempt) => {
@@ -2923,8 +3046,8 @@ function runProcessAttempt(module, instance, script, context, request) {
       const at = entry.indexOf('=');
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
     }
-    const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, detached: true });
-    track(child, request);
+    const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, cwd: context.cwd ?? process.cwd(), detached: true });
+    track(child);
     const out = [];
     const err = [];
     let outLength = 0;
@@ -2978,7 +3101,11 @@ function runProcessAttempt(module, instance, script, context, request) {
     });
     publish(() => {
       module.processStarted(instance, request);
-      module.drainEvents(instance, context);
+      const group = module.startedProcessGroup(instance, context, rawRequest);
+      if (group) {
+        group.add(child);
+        child.once('close', () => group.delete(child));
+      }
     });
   });
 }
@@ -3160,53 +3287,77 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
   if (active.includes(identity)) throw Object.assign(new Error(`include cycle: ${name}`), { code: 'DEP_CYCLE' });
   const document = JSON.parse(new TextDecoder().decode(await module.parse(lang === 'kmk' ? 'script' : lang, name, text)));
   const invalid = document.diagnostics.find((item) => item.severity === 'error');
-  if (invalid && (validate || document.ast.items.some((item) => ['when', 'otherwise', 'end-when'].includes(item.kind)))) {
+  if (invalid) {
     primarySource = { name, text };
     throw Object.assign(new Error(invalid.message), { code: invalid.code, span: invalid.span, diagnostics: document.diagnostics.filter((item) => item.severity === 'error').map((item) => ({ ...item, source: name })) });
   }
   const bytes = new TextEncoder().encode(text);
   const parts = [];
-  const branches = [];
-  const enabled = () => branches.length === 0 || (branches.at(-1).parent && branches.at(-1).selected);
+  const slice = (span) => new TextDecoder().decode(bytes.subarray(span.start, span.end));
   const append = (end) => {
     const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), offset: start };
     parts.push(part);
     selection.parts.push(document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => new TextDecoder().decode(bytes.subarray(item.span.start, item.span.end))).join('\n'));
   };
-  let start = 0;
-  for (const item of document.ast.items) {
-    if (['when', 'otherwise', 'end-when'].includes(item.kind)) {
-      const parent = enabled();
-      if (parent) append(item.span.start);
-      start = item.span.end;
-      if (item.kind === 'when') {
-        let selected = false;
-        if (parent) {
-          try {
-            selected = await module.declarationPredicate({ name, prefix: selection.parts.join('\n'), predicate: new TextDecoder().decode(bytes.subarray(item.expression.span.start, item.expression.span.end)), defines: selection.defines, environment: selection.environment });
-          } catch (error) { primarySource = { name, text }; error.span = item.expression.span; throw error; }
-        }
-        branches.push({ parent, selected });
-      } else if (item.kind === 'otherwise') branches.at(-1).selected = !branches.at(-1).selected;
-      else branches.pop();
-      continue;
+  const include = async (path, optional, span) => {
+    if (!fileBacked) {
+      primarySource = { name, text };
+      const detail = { code: 'FEATURE_UNSUP', severity: 'error', message: `include requires a file-backed source; this fragment was supplied ${name === '<stdin>' ? 'on stdin' : 'inline'}`, source: name, span, tips: ['save this fragment as a .km or .kmk file and run that file'] };
+      throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
     }
-    if (item.kind !== 'include') continue;
-    if (!enabled()) { start = item.span.end; continue; }
-    if (!fileBacked) throw Object.assign(new Error('include requires a file-backed build source'), { code: 'FEATURE_UNSUP' });
-    append(item.span.start);
-    const included = normalize(isAbsolute(item.path) ? item.path : join(dirname(name), item.path));
+    const included = normalize(isAbsolute(path) ? path : join(dirname(name), path));
     selection.watchedSources?.add(resolve(sourceDirectory, included));
+    if ([...active, identity].includes(resolve(sourceDirectory, included))) {
+      primarySource = { name, text };
+      const detail = { code: 'DEP_CYCLE', severity: 'error', message: `include cycle: ${included}`, source: name, span };
+      throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
+    }
     let child;
     try { child = await readFile(resolve(sourceDirectory, included), 'utf8'); }
     catch (error) {
-      if (item.optional && error.code === 'ENOENT') { start = item.span.end; continue; }
-      throw Object.assign(new Error(`cannot read included source: ${included}`), { code: 'FS_ERR' });
+      if (optional && error.code === 'ENOENT') return;
+      primarySource = { name, text };
+      const detail = { code: 'FS_ERR', severity: 'error', message: `cannot read included source: ${included}`, source: name, span };
+      throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
     }
     parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity], true, validate, selection));
+  };
+  // All branches have already been validated by the portable parser. Walk only
+  // the selected application AST; never interpret source text as JS grammar.
+  const compose = async (expression) => {
+    if (expression.kind === 'nil') return;
+    const [head, ...args] = expression.items;
+    if (head.text === 'include' || head.text === 'include?') {
+      const path = args[0];
+      if (path.kind === 'path' && typeof path.text === 'string' && !path.parts) return include(path.text, head.text === 'include?', expression.span);
+      if (path.kind === 'string' && path.parts.every((part) => typeof part.text === 'string' && !part.expression)) return include(path.parts.map((part) => part.text).join(''), head.text === 'include?', expression.span);
+      throw Object.assign(new Error('invalid literal include path in validated AST'), { code: 'PARSE_ERR', span: path.span });
+    }
+    for (let i = 0; i + 1 < args.length; i += 2) {
+      const condition = args[i];
+      let selected;
+      try {
+        selected = await module.compositionCondition({ name, prefix: selection.parts.join('\n'), predicate: slice(condition.span), defines: selection.defines, environment: selection.environment });
+      } catch (error) {
+        primarySource = { name, text };
+        error.span = condition.span;
+        const details = error.diagnostics ?? [{ code: error.code ?? 'EXPR_INVALID', severity: 'error', message: error.message }];
+        error.diagnostics = details.map((detail) => ({ ...detail, source: name, span: condition.span }));
+        throw error;
+      }
+      if (selected) return compose(args[i + 1]);
+    }
+    if (args.length % 2) await compose(args.at(-1));
+  };
+  let start = 0;
+  for (const item of document.ast.items) {
+    if (item.kind !== 'include' && item.kind !== 'composition') continue;
+    append(item.span.start);
+    if (item.kind === 'include') await include(item.path, item.optional, item.span);
+    else await compose(item.expression);
     start = item.span.end;
   }
-  if (enabled()) append(bytes.length);
+  append(bytes.length);
   return parts;
 }
 
@@ -3441,10 +3592,21 @@ async function watchFingerprint(kind, name, metadata = false) {
   if (kind === 'glob') {
     try { return JSON.stringify(resourceWildcard(name)); } catch { return 'unavailable'; }
   }
-  let content;
+  let content = 'not-file';
   try {
-    const bytes = await readResource(name);
-    content = createHash('sha256').update(bytes).digest('hex');
+    if ((await statResource(name)).isFile()) {
+      if (isMemoryResource(name) || process.platform === 'win32') {
+        // ponytail: Windows retains the dispatcher's stat/read race; POSIX
+        // uses a nonblocking descriptor so a replacement FIFO cannot stall.
+        const bytes = await readResource(name);
+        content = createHash('sha256').update(bytes).digest('hex');
+      } else {
+        const file = await open(filesystemPath(name), fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+        try {
+          if ((await file.stat()).isFile()) content = createHash('sha256').update(await file.readFile()).digest('hex');
+        } finally { await file.close(); }
+      }
+    }
   } catch (error) {
     content = error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 'missing' : `error:${error.code ?? error.message}`;
   }

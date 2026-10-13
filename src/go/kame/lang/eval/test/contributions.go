@@ -15,8 +15,13 @@ func TestContributionsAreLazyOrderedAndImmutable(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	p := eval.Compile(a, engine, parsed, registry)
+	defer parsed.Free()
+	defer registry.Free()
+	defer p.Free()
+	defer engine.Free()
 	if !p.Valid || len(parsed.Diagnostics) != 0 {
 		t.Fatal("contributions failed registration")
+		return
 	}
 	node := p.Definition("items")
 	if node.Requested {
@@ -27,6 +32,7 @@ func TestContributionsAreLazyOrderedAndImmutable(t *testing.T) {
 	value := node.Latest
 	if !node.Current || value.Kind != core.List || len(value.List) != 5 {
 		t.Fatal("contributions failed concatenation")
+		return
 	}
 	if value.List[0].Int != 0 || value.List[1].Int != 1 || value.List[2].Int != 2 || value.List[3].Kind != core.List || value.List[4].Int != 4 {
 		t.Error("contribution order or nesting changed")
@@ -37,10 +43,6 @@ func TestContributionsAreLazyOrderedAndImmutable(t *testing.T) {
 	if parsed.Items[0].Definition.Aggregate || !parsed.Items[1].Definition.Contribution {
 		t.Error("registration mutated authored AST")
 	}
-	engine.Free()
-	p.Free()
-	registry.Free()
-	parsed.Free()
 }
 
 func TestContributionOverrideReplacesUnevaluatedOperands(t *testing.T) {
@@ -50,8 +52,13 @@ func TestContributionOverrideReplacesUnevaluatedOperands(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	p := eval.Compile(a, engine, parsed, registry)
+	defer parsed.Free()
+	defer registry.Free()
+	defer p.Free()
+	defer engine.Free()
 	if !p.OverrideDefinition("items", "literal") {
 		t.Fatal("aggregate override rejected")
+		return
 	}
 	node := p.Definition("items")
 	engine.Request(node)
@@ -59,10 +66,6 @@ func TestContributionOverrideReplacesUnevaluatedOperands(t *testing.T) {
 	if !node.Current || node.Latest.Kind != core.String || node.Latest.Text != "literal" {
 		t.Error("override evaluated original operands")
 	}
-	engine.Free()
-	p.Free()
-	registry.Free()
-	parsed.Free()
 }
 
 func TestContributionFailuresRetainOrdinaryDiagnostics(t *testing.T) {
@@ -82,6 +85,11 @@ func TestContributionFailuresRetainOrdinaryDiagnostics(t *testing.T) {
 		} else {
 			if checked.Program == nil {
 				t.Fatal("contribution failed registration")
+				engine.Free()
+				checked.Free(a)
+				registry.Free()
+				parsed.Free()
+				return
 			}
 			node := checked.Program.Definition("items")
 			engine.Request(node)
@@ -110,14 +118,20 @@ func TestScopedContributionOverrideOwnsItsLiteralSnapshot(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	p := eval.Compile(a, engine, parsed, registry)
+	defer parsed.Free()
+	defer registry.Free()
+	defer p.Free()
+	defer engine.Free()
 	if !p.OverrideDefinition("items", "first") {
 		t.Fatal("aggregate override rejected")
+		return
 	}
 	c := eval.Context{Program: p, Scope: p.Scope, Run: a, HasDefinitionNamespace: true}
 	c.DefinitionNamespace[0] = 1
 	snapshot := p.DefinitionWith("items", &c)
 	if !p.OverrideDefinition("items", "second") {
 		t.Fatal("replacement override rejected")
+		return
 	}
 	engine.Request(snapshot)
 	stepUntilCurrent(engine, snapshot)
@@ -130,8 +144,4 @@ func TestScopedContributionOverrideOwnsItsLiteralSnapshot(t *testing.T) {
 	if !canonical.Current || canonical.Latest.Text != "second" {
 		t.Error("canonical literal was not replaced")
 	}
-	engine.Free()
-	p.Free()
-	registry.Free()
-	parsed.Free()
 }

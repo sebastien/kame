@@ -432,13 +432,13 @@ func TestPatternPathsClassify(t *testing.T) {
 	plain := parse(t, "./src/main.c")
 	defer plain.Free()
 	if plain.Expr == nil || plain.Expr.Pattern != nil { t.Error("plain path became a pattern") }
-	regex := parse(t, `(str ./{name:~[a-z]+}.txt)`)
+	regex := parse(t, `(nop ./{name:~[a-z]+}.txt)`)
 	defer regex.Free()
 	if regex.Expr == nil || len(regex.Diagnostics) != 0 || len(regex.Expr.Items) != 2 || regex.Expr.Items[1].Pattern == nil || regex.Expr.Items[1].Pattern.Matchers != 1 {
 		t.Error("regex path pattern did not stay within one expression atom")
 	} else {
 		formatted := expr.Format(t.Allocator(), regex.Expr)
-		if formatted != `(str ./{name:~[a-z]+}.txt)` { t.Error("regex path expression formatting changed") }
+		if formatted != `(nop ./{name:~[a-z]+}.txt)` { t.Error("regex path expression formatting changed") }
 		mem.FreeString(t.Allocator(), formatted)
 	}
 	invalidRegex := expr.Parse(t.Allocator(), "regex.km", `(str ./{name:~(a|)}.txt)`)

@@ -80,19 +80,29 @@ func SourceWithComment(a mem.Allocator, lang string, name string, text string, i
 		return Result{Text: formatted, OK: true}
 	}
 	var result *script.Script
+	var authored *source.Source
 	if lang == "kash" {
 		result = script.ParseKash(a, name, text)
+	} else if lang == "km" {
+		authored = source.New(a, name, text)
+		result = script.ParseFragment(a, authored, lang, 0, len(text))
 	} else {
 		result = script.Parse(a, name, text)
 	}
 	if len(result.Diagnostics) != 0 {
 		out := diagnosticResult(a, result.Diagnostics[0].Code, result.Diagnostics[0].Message, result.Diagnostics[0].Span)
 		result.Free()
+		if authored != nil {
+			authored.Free(a)
+		}
 		freeIndent(a, indentBuf)
 		return out
 	}
 	formatted := script.FormatWithIndent(a, result, indent)
 	result.Free()
+	if authored != nil {
+		authored.Free(a)
+	}
 	freeIndent(a, indentBuf)
 	return Result{Text: formatted, OK: true}
 }

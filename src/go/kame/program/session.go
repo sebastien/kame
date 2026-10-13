@@ -91,9 +91,12 @@ type SessionCompile struct {
 	Diagnostics []diagnostic.Diagnostic
 }
 
+// Free releases the compilation envelope, not the Session. Retain a successful
+// Session before calling Free; its lifetime ends with Session.Free.
 func (s *SessionCompile) Free(a mem.Allocator) {
 	for i := range s.Diagnostics { s.Diagnostics[i].Free(a) }
 	slices.Free(a, s.Diagnostics)
+	*s = SessionCompile{}
 }
 
 func (s *Session) Free() {
@@ -128,7 +131,10 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
    doc := template.ParseDocumentRange(a, parsed.Source, offsets[i], offsets[i]+len(f.Text), style)
    for j := range doc.Diagnostics { parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, doc.Diagnostics[j]) }
    slices.Free(a, doc.Diagnostics); doc.Diagnostics = nil
-   root := templateBindings(a, doc.Root, f.Defines)
+    root := templateBindings(a, doc.Root, f.Defines)
+    valueDiagnostics := script.ValidateValueExpression(a, root)
+    for j := range valueDiagnostics { parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, valueDiagnostics[j]) }
+    slices.Free(a, valueDiagnostics)
    doc.Root = nil; doc.Free()
    parsed.Items = slices.Append(a, parsed.Items, script.ScriptItem{Kind: script.Expression, Expression: root, Span: root.Span})
    if !f.Check { work = slices.Append(a, work, SessionWork{Expression: root, Value: true, Display: true, Raw: true}) }
@@ -141,7 +147,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		for j := range part.Items {
 			item := part.Items[j]
 			parsed.Items = slices.Append(a, parsed.Items, item)
-			if item.Kind == script.Include { parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, source.Diagnostic{Code: "FEATURE_UNSUP", Severity: source.Error, Span: item.Span, Message: "includes in runner sessions are not yet supported"}) }
+			if item.Kind == script.Include || item.Kind == script.Composition { parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, source.Diagnostic{Code: "FEATURE_UNSUP", Severity: source.Error, Span: item.Span, Message: "source composition is required before declaration registration"}) }
 			if item.Kind == script.Definition && f.Lang == "km" { valueDefinitions = true }
 			if len(f.Entries) == 0 && !f.SkipStatements && f.Lang != "kmk" && (item.Kind == script.Expression || item.Kind == script.Command) {
 				work = slices.Append(a, work, SessionWork{Expression: item.Expression, Value: f.Lang != "kash", Display: f.Lang == "expr" || (f.Lang == "km" && options.PrintResult)})

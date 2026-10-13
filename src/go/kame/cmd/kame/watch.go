@@ -146,7 +146,7 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 	}
 	for i := range session.Source.Files {
 		name := session.Source.Files[i].Name
-		if name != "<command>" {
+		if session.Source.Files[i].FileBacked {
 			addWatchResource(items, session.Program, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)
 		}
 	}

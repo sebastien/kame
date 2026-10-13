@@ -124,6 +124,32 @@ func produceExternalValue(c *core.EngineContext, nodeID int64) core.ProducerResu
 			c.Publish(core.Value{Kind: core.Nil})
 		}
 	} else if state.Kind == core.ResourceGlob {
+		if state.Program.Forwarding {
+			completion := c.Completion()
+			if completion.RequestID == 0 {
+				payload := host.FilePayload(c.Allocator(), host.OpWildcard, state.Name)
+				id := state.Program.Eval.Requests.Submit(c.NodeID(), c.Generation(), c.Attempt(), host.RequestReadFile, payload)
+				payload.Free(c.Allocator())
+				c.Submit(id)
+				return core.ProducerSubmitted
+			}
+			if completion.Diagnostic.Code != "" {
+				completion.Value.Free(c.Allocator())
+				c.Fail(completion.Diagnostic)
+				return core.ProducerFailed
+			}
+			valid := completion.HasValue && completion.Value.Kind == core.List
+			for i := range completion.Value.List {
+				if completion.Value.List[i].Kind != core.String { valid = false }
+			}
+			if !valid {
+				completion.Value.Free(c.Allocator())
+				c.Fail(failure(c.Allocator(), "HOST_FAIL", "invalid wildcard observation"))
+				return core.ProducerFailed
+			}
+			c.Publish(completion.Value)
+			return core.ProducerCompleted
+		}
 		result := state.Program.wildcard(state.Name)
 		if result.Diagnostic.Code != "" { c.Fail(result.Diagnostic); return core.ProducerFailed }
 		c.Publish(result.Value)

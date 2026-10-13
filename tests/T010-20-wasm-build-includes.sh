@@ -10,13 +10,13 @@ cli_build
 work="$TMPDIR/build-includes"
 mkdir -p "$work/project/nested"
 cat >"$work/project/Makefile.kmk" <<'KMK'
-include ./nested/values.kmk
-include ./nested/rules.kmk
+(include ./nested/values.kmk)
+(include ./nested/rules.kmk)
 
 default : leaf
 	@(out! "@(message)\n")
 KMK
-printf 'include ./base.kmk\nmessage = (str greeting " include")\n' >"$work/project/nested/values.kmk"
+printf '(include ./base.kmk)\nmessage = (str greeting " include")\n' >"$work/project/nested/values.kmk"
 printf 'greeting = "nested"\n' >"$work/project/nested/base.kmk"
 cat >"$work/project/nested/rules.kmk" <<'KMK'
 leaf :
@@ -81,14 +81,14 @@ if cmp -s "$work/native.err" "$work/wasm.err"; then test-ok "included evaluation
 	diff -u "$work/native.err" "$work/wasm.err" || true
 fi
 
-printf 'include ./nested/cycle.kmk\n' >"$work/project/cycle.kmk"
-printf 'include ../cycle.kmk\n' >"$work/project/nested/cycle.kmk"
-printf 'include ./absent.kmk\n' >"$work/project/missing.kmk"
-printf 'include ./nested/invalid.kmk\n' >"$work/project/invalid.kmk"
+printf '(include ./nested/cycle.kmk)\n' >"$work/project/cycle.kmk"
+printf '(include ../cycle.kmk)\n' >"$work/project/nested/cycle.kmk"
+printf '(include ./absent.kmk)\n' >"$work/project/missing.kmk"
+printf '(include ./nested/invalid.kmk)\n' >"$work/project/invalid.kmk"
 printf 'name = [\n' >"$work/project/nested/invalid.kmk"
-printf 'include ./nested/duplicate.kmk\ninclude ./nested/duplicate.kmk\n' >"$work/project/duplicate.kmk"
+printf '(include ./nested/duplicate.kmk)\n(include ./nested/duplicate.kmk)\n' >"$work/project/duplicate.kmk"
 printf 'name = "duplicate"\n' >"$work/project/nested/duplicate.kmk"
-printf 'include ./empty.kmk\ninclude ./empty.kmk\ndefault :\n\t@(out! "ok")\n' >"$work/project/repeated.kmk"
+printf '(include ./empty.kmk)\n(include ./empty.kmk)\ndefault :\n\t@(out! "ok")\n' >"$work/project/repeated.kmk"
 : >"$work/project/empty.kmk"
 test-step "include preflight rejects cycles, missing and malformed sources, and duplicates"
 reject DEP_CYCLE -C "$work/project" -f cycle.kmk
@@ -100,7 +100,7 @@ if cmp -s "$work/native.err" "$work/wasm.err"; then test-ok "included parse diag
 fi
 reject DEF_INVALID do plan -C "$work/project" -f duplicate.kmk default
 compare -C "$work/project" -f repeated.kmk default
-reject FEATURE_UNSUP do plan -c 'include ./unused.kmk' default
+reject FEATURE_UNSUP do plan -c '(include ./unused.kmk)' default
 
 test-step "JSON diagnostics preserve the complete authored diagnostic list"
 for file in invalid.kmk duplicate.kmk; do

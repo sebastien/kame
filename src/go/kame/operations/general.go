@@ -12,11 +12,15 @@ import (
 
 func opNot(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
-	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: !truth(v[0])}}
+	value := !truth(v[0])
+	discardArgCallables(c, v)
+	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: value}}
 }
 func opBool(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
-	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: truth(v[0])}}
+	value := truth(v[0])
+	discardArgCallables(c, v)
+	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: value}}
 }
 
 func opStr(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -29,7 +33,9 @@ func opStr(c *eval.Context, s any, v []core.Value) eval.Result {
 			return invalidArgument(c, v, i, "textual scalar (nil, bool, int, float, or string); use json for collections")
 		}
 		value, ok := stringValue(c.Run, v[i], false)
-		if !ok { return invalidArgument(c, v, i, "textual scalar") }
+		if !ok {
+			return invalidArgument(c, v, i, "textual scalar")
+		}
 		b.WriteString(value)
 		mem.FreeString(c.Run, value)
 	}
@@ -39,7 +45,9 @@ func opStr(c *eval.Context, s any, v []core.Value) eval.Result {
 func opJSON(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	var data []byte
-	if !core.ValueJSON(c.Run, v[0], &data) { return invalidArgument(c, v, 0, "JSON-compatible value without bytes, nonfinite numbers, patterns, resources, or callables") }
+	if !core.ValueJSON(c.Run, v[0], &data) {
+		return invalidArgument(c, v, 0, "JSON-compatible value without bytes, nonfinite numbers, patterns, resources, or callables")
+	}
 	value := core.NewString(c.Run, string(data))
 	slices.Free(c.Run, data)
 	return eval.Result{Value: value}
@@ -95,7 +103,8 @@ func stringValue(a mem.Allocator, v core.Value, quoted bool) (string, bool) {
 			for j := range v.Record {
 				rank := 0
 				for k := range v.Record {
-					if strings.Compare(v.Record[k].Key, v.Record[j].Key) < 0 {
+					order := strings.Compare(v.Record[k].Key, v.Record[j].Key)
+					if order < 0 || (order == 0 && k < j) {
 						rank++
 					}
 				}
@@ -156,24 +165,43 @@ func opCount(c *eval.Context, s any, v []core.Value) eval.Result {
 	} else {
 		return invalidArgument(c, v, 0, "string, bytes, list, or record")
 	}
+	discardArgCallables(c, v)
 	return eval.Result{Value: core.Value{Kind: core.Int, Int: int64(n)}}
 }
+
 // opGet selects a record value by a computed string key. The selected value
 // transfers callable ownership; discarded fields/defaults release theirs.
 func opGet(c *eval.Context, s any, v []core.Value) eval.Result {
- _ = s
- if v[0].Kind != core.Record { return invalidArgument(c, v, 0, "record") }
- if v[1].Kind != core.String { return invalidArgument(c, v, 1, "string") }
- selected := -1
- for i := range v[0].Record { if v[0].Record[i].Key == v[1].Text { selected = i; break } }
- result := core.Value{Kind: core.Nil}
- for i := range v[0].Record {
-  if i == selected { result = v[0].Record[i].Value.Clone(c.Run) } else { c.FreeCallable(&v[0].Record[i].Value) }
- }
- if len(v) == 3 {
-  if selected < 0 { result = v[2].Clone(c.Run) } else { c.FreeCallable(&v[2]) }
- }
- return eval.Result{Value: result}
+	_ = s
+	if v[0].Kind != core.Record {
+		return invalidArgument(c, v, 0, "record")
+	}
+	if v[1].Kind != core.String {
+		return invalidArgument(c, v, 1, "string")
+	}
+	selected := -1
+	for i := range v[0].Record {
+		if v[0].Record[i].Key == v[1].Text {
+			selected = i
+			break
+		}
+	}
+	result := core.Value{Kind: core.Nil}
+	for i := range v[0].Record {
+		if i == selected {
+			result = v[0].Record[i].Value.Clone(c.Run)
+		} else {
+			c.FreeCallable(&v[0].Record[i].Value)
+		}
+	}
+	if len(v) == 3 {
+		if selected < 0 {
+			result = v[2].Clone(c.Run)
+		} else {
+			c.FreeCallable(&v[2])
+		}
+	}
+	return eval.Result{Value: result}
 }
 
 func opFirst(c *eval.Context, s any, v []core.Value) eval.Result {
@@ -184,28 +212,41 @@ func opFirst(c *eval.Context, s any, v []core.Value) eval.Result {
 	if len(v[0].List) == 0 {
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
-	return eval.Result{Value: v[0].List[0].Clone(c.Run)}
+	result := v[0].List[0].Clone(c.Run)
+	for i := 1; i < len(v[0].List); i++ {
+		c.FreeCallable(&v[0].List[i])
+	}
+	return eval.Result{Value: result}
 }
 func opNth(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[1].Kind != core.Int {
 		return invalidArgument(c, v, 1, "int")
 	}
-	index := int(v[1].Int)
+	// Validate in the value's int64 width before narrowing on 32-bit targets.
+	length := 0
 	if v[0].Kind == core.List {
-		if index < 0 {
-			index += len(v[0].List)
-		}
-		if index < 0 || index >= len(v[0].List) {
-			return eval.Result{Value: core.Value{Kind: core.Nil}}
-		}
-		return eval.Result{Value: v[0].List[index].Clone(c.Run)}
-	}
-	if v[0].Kind != core.String {
+		length = len(v[0].List)
+	} else if v[0].Kind == core.String {
+		length = utf8.RuneCountInString(v[0].Text)
+	} else {
 		return invalidArgument(c, v, 0, "list or string")
 	}
-	if index < 0 {
-		index += utf8.RuneCountInString(v[0].Text)
+	wideIndex := v[1].Int
+	if wideIndex < -int64(length) || wideIndex >= int64(length) {
+		c.FreeCallable(&v[0])
+		return eval.Result{Value: core.Value{Kind: core.Nil}}
+	}
+	index := int(wideIndex)
+	if index < 0 { index += length }
+	if v[0].Kind == core.List {
+		result := v[0].List[index].Clone(c.Run)
+		for i := range v[0].List {
+			if i != index {
+				c.FreeCallable(&v[0].List[i])
+			}
+		}
+		return eval.Result{Value: result}
 	}
 	start, end := runeOffset(v[0].Text, index), runeOffset(v[0].Text, index+1)
 	if start < 0 || end < 0 {
@@ -241,7 +282,7 @@ func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 		if arguments.Owned {
 			slices.Free(c.Run, arguments.Values)
 		}
-		c.FreeCallable(&v[1])
+		discardArgCallables(c, v)
 		return result
 	}
 	if v[0].Kind == core.Callable && v[1].Kind == core.List {
@@ -250,7 +291,7 @@ func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 		if arguments.Owned {
 			slices.Free(c.Run, arguments.Values)
 		}
-		c.FreeCallable(&v[0])
+		discardArgCallables(c, v)
 		return result
 	}
 	if v[0].Kind == core.Callable {
@@ -286,6 +327,9 @@ func opNop(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if len(v) == 0 {
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
+	}
+	for i := 0; i < len(v)-1; i++ {
+		c.FreeCallable(&v[i])
 	}
 	return eval.Result{Value: v[len(v)-1].Clone(c.Run)}
 }

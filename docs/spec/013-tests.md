@@ -3,10 +3,11 @@
 ## Purpose
 
 This specification defines the end-to-end conformance suite for the compiled
-`kame` binary. In-process tests (`cd src/go/kame && go test ./cmd/kame`) and
-package tests (`cd src/go/kame && so test ./...`) cannot catch Solod-to-C
-defects; this suite exercises
-the real binary against real files, processes, streams, and signals, and
+`kame` binary. Package tests (`cd src/go/kame && so test ./...`) transpile and
+compile So code to C and can catch translation and native memory defects through
+the exported package APIs. In-process Go CLI tests exercise `Run()` in Go's
+compatibility runtime. This suite adds actual compiled CLI/host orchestration
+against real files, processes, streams, and signals, and
 asserts the behavior promised by the language, host, runtime and CLI specifications.
 
 The suite is strict: a test encodes specified behavior and must pass. When it
@@ -17,12 +18,23 @@ and no skipped assertions.
 
 | Layer | Command | Scope |
 | --- | --- | --- |
-| Package tests | `cd src/go/kame && so test ./...` | Solod package internals |
+| Package tests | `cd src/go/kame && so test ./...` | compiled exported-package API tests |
+| Native host tests | `make test-native-host` | C event/storage fault checks, argv lookup policy and Linux execution with ASan/UBSan |
+| Native CLI unit/lifetime tests | `make test-native-lifecycle` | exact generated Solod CLI, private renderer/AST checks and repeated calls with ASan/UBSan and allocator tracking |
 | Engine examples tests | `cd examples/engine && so test ./...` | external-consumer engine examples |
-| CLI unit tests | `cd src/go/kame && go test ./cmd/kame` | in-process `Run()` behavior |
+| CLI black-box tests | `make test-go` | Go subprocess driver; behavior executes in the compiled Solod CLI |
 | End-to-end | `tests/harness.sh`, `make test-cli` | compiled debug binary, real system calls |
 | Sanitized package tests | `make test-sanitize` | allocator tracking and native memory safety |
 | Leak gate | `make test-leaks` | sanitized package tests plus the compiled CLI end-to-end suite |
+
+The So `test/` directories are separate consumer packages, not privileged access
+to package internals. For example, `operations/test` imports `kame/operations`;
+its historical `lib_test` package label does not rename the production package.
+
+Runtime assertions execute compiled Solod/native code. Go may drive subprocesses
+and inspect their output, but must not execute Solod runtime methods through Go
+compatibility stubs. `make test-go` supplies the compiled CLI and formatter binary
+paths; direct Go driver invocations without those paths skip native cases.
 
 General end-to-end conformance uses the checks-enabled debug build
 (`build/kame.debug`); the leak gate selects `build/kame.sanitize`. Artifact tests
@@ -44,9 +56,11 @@ tests/
 ```
 
 - `SSS` is the governing spec number and `NN` a two-digit sequence per spec.
-- `category` maps one-to-one to the spec: `host`=003, `lang`=004, `eval`=005,
-  `runtime`=006, `lib`=007, `cache`=008, `cli`=009, `wasm`=010, `diag`=011,
-  `streams`=012, `meta`=013, `patterns`=014, `dist`=015.
+- The `SSS-NN` identifier is unique across the catalog. A row's category must
+  match the category segment of its filename.
+- `category` is a thematic label, not a one-to-one spec mapping: `host`, `lang`,
+  `eval`, `runtime`, `lib`, `cache`, `cli`, `wasm`, `diag`, `streams`, `meta`,
+  `patterns`, `dist`, or `kash`. Later governing specs may reuse these labels.
 - `lib-*.sh` files are support libraries and are never executed as tests.
 - Nothing under `tests/data/` is executed as a test.
 - Every test script has one `CATALOG.tsv` row; `T013-01` enforces both
@@ -208,14 +222,27 @@ teardown in one process so retained allocations cannot hide behind process exit.
 The binary-contract meta test is excluded because it deliberately requires the
 normal debug binary path and verifies the harness's non-sanitized rebuild flow.
 
-The Go CLI unit-test sanitizer command uses `GOGC=off`. Solod 0.4.0's Go
-compatibility allocator stores structs in unscanned byte slices, while its Go
-`slices.Append` stub uses ordinary Go append. A slice reachable only through such
-a struct is invisible to Go's collector and can be reclaimed during sustained
-CLI churn. Disabling collection for this short-lived compatibility test preserves
-the explicit C lifetime model. It does not replace allocator tracking or the
-compiled CLI AddressSanitizer/LeakSanitizer gate, which run with the actual C
-allocator and remain mandatory.
+Solod production execution has no garbage collector. Its Go compatibility stubs
+are not equivalent to its C allocator: they use unscanned byte storage, retain
+addresses rather than allocation roots, and let Go slice growth bypass the
+allocator. Go byte-to-string copies also differ from Solod's aliasing conversion;
+such copied strings can become unreachable inside unscanned record storage.
+Rooting allocator buffers alone therefore does not repair this backend.
+The project therefore does not use this backend for runtime tests and does not
+disable Go GC. This is a test-strategy change, not a repair of upstream Go emulation.
+
+The mandatory `test-native-lifecycle` gate compiles the actual generated CLI and
+repeats 2304 invocations in one process using the real C allocator wrapped in a
+Tracker. It requires zero live bytes and balanced allocation/free counts after
+each invocation, with ASan/UBSan and LeakSanitizer enabled. This tests manual
+lifetimes directly, independently of Go stubs or GC settings.
+
+`tools/native/test-cli-{diagnostics,presentation,ast}.h` retain private-unit
+assertions against that generated CLI, including the partial AST error golden
+that differs from the public CLI diagnostic stream. These cases repeat under the
+same tracker and sanitizer gate. CLI subprocess tests use `*_native_test.go` and
+standard Go libraries only; version assertions compare compiled metadata rather
+than executing Go-only build-mode stubs.
 
 The harness preserves `-check=sanitize -panic=abort` and Clang when freshness requires rebuilding `build/kame.sanitize`. A stale sanitized binary must never be replaced by a checks-only executable during the leak gate.
 

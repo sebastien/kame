@@ -5,12 +5,28 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/lang/expr"
+	"kame/lang/script"
 	"kame/lang/source"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
 )
 
 func (p *Program) Evaluate(run mem.Allocator, expression *expr.Expr, scope *Scope) Result {
+	if checked := validateValueExpression(run, expression); checked.Diagnostic.Code != "" {
+		return checked
+	}
 	return p.evaluate(nil, scope, expression, &Context{Program: p, Scope: scope, Run: run, Requests: p.Requests})
+}
+
+// Validate public roots once; recursive evaluation consumes trusted children.
+func validateValueExpression(a mem.Allocator, expression *expr.Expr) Result {
+	diagnostics := script.ValidateValueExpression(a, expression)
+	defer slices.Free(a, diagnostics)
+	if len(diagnostics) == 0 {
+		return Result{}
+	}
+	d := diagnostics[0]
+	return failure(a, d.Code, d.Span, d.Message)
 }
 
 // EvaluateWith evaluates an expression with caller-provided capability grants
@@ -28,7 +44,10 @@ func (p *Program) EvaluateWith(expression *expr.Expr, context *Context) Result {
 	if context.Requests == nil {
 		context.Requests = p.Requests
 	}
-	result := p.evaluate(context.Engine, context.Scope, expression, context)
+	result := validateValueExpression(context.Run, expression)
+	if result.Diagnostic.Code == "" {
+		result = p.evaluate(context.Engine, context.Scope, expression, context)
+	}
 	attachContextFrames(&result, context)
 	attachSource(&result, context)
 	return result

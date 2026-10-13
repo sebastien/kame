@@ -134,7 +134,7 @@ and `(first outputs)` in direct Kash, or `@(inputs)` in external-shell templates
 | `(wildcard PATTERN)` / `(read PATH)` | Discover a dependency. |
 | `(render PATH PAYLOAD)` | Read/render a tracked template with tracked expression dependencies. |
 
-`yield` requires exactly one file output. Do not combine it with nonempty
+`yield!` requires exactly one file output. Do not combine it with nonempty
 shell commands; Kame reports a producer conflict.
 
 Known sibling artifacts belong in one grouped declaration, for example

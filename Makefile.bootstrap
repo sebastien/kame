@@ -1,44 +1,39 @@
-# Kame bootstrap Makefile.
-#
-# Copy this file to `Makefile` (or include it) in a project that wants Kame
-# without installing it. The first invocation provisions `./bin/kame`, and every
-# requested goal is delegated to it in order.
-#
-# Spec: docs/spec/015-distribution.md
-KAME_VERSION ?= @KAME_VERSION@
-KAME_HOME ?=
-KAME_RELEASE_URL ?=
-KAME ?= ./bin/kame
-
-ifneq ($(KAME_HOME),)
-export KAME_HOME
-endif
-ifneq ($(KAME_RELEASE_URL),)
-export KAME_RELEASE_URL
-endif
-
+# Verify the signed release before installing or reusing the cached executable.
+KAME_VERSION ?= 0.2.3
+KAME ?= $(HOME)/.cache/kame/bin/kame-$(KAME_VERSION)
+KAME_RELEASE_URL ?= https://github.com/sebastien/kame/releases/download/v$(KAME_VERSION)
+# Stamped with the release operator's public key; source copies require an override.
+KAME_RELEASE_PUBKEY_B64 ?=
 GOALS := $(if $(MAKECMDGOALS),$(MAKECMDGOALS),default)
-.PHONY: $(GOALS)
+.PHONY: $(GOALS) $(KAME)
 
-# Provision the launcher once, verifying it against SHA256SUMS before installing.
-$(KAME):
-	@mkdir -p $(dir $(KAME))
-	@base="$${KAME_RELEASE_URL:-https://github.com/sebastien/kame/releases/download/v$(KAME_VERSION)}"; \
-	tmp="$(KAME).tmp.$$$$"; sums="$$tmp.SHA256SUMS"; \
-	if command -v curl >/dev/null 2>&1; then fetch() { curl -fsSL "$$1" -o "$$2"; }; \
-	elif command -v wget >/dev/null 2>&1; then fetch() { wget -q -O "$$2" "$$1"; }; \
-	else echo "kame: no downloader (curl or wget)" >&2; exit 1; fi; \
-	fetch "$$base/SHA256SUMS" "$$sums" || exit 1; \
-	fetch "$$base/kame" "$$tmp" || exit 1; \
-	if command -v sha256sum >/dev/null 2>&1; then actual=$$(sha256sum "$$tmp" | cut -d' ' -f1); \
-	elif command -v shasum >/dev/null 2>&1; then actual=$$(shasum -a 256 "$$tmp" | cut -d' ' -f1); \
-	else echo "kame: no SHA-256 verifier (sha256sum or shasum)" >&2; rm -f "$$tmp" "$$sums"; exit 1; fi; \
-	expected=$$(grep -E '  kame$$' "$$sums" | cut -d' ' -f1); \
-	if [ -z "$$expected" ] || [ "$$actual" != "$$expected" ]; then \
-		echo "kame: checksum mismatch: kame" >&2; rm -f "$$tmp" "$$sums"; exit 1; \
-	fi; \
-	chmod +x "$$tmp"; mv "$$tmp" "$(KAME)"; rm -f "$$sums"
-
-# Every requested goal is delegated with the delegate's exit status.
 $(GOALS): $(KAME)
-	@exec $(KAME) $@
+	@exec "$(KAME)" $@
+
+$(KAME):
+	@mkdir -p "$(dir $(KAME))"
+	@set -eu; tmp=$$(mktemp -d "$@.tmp.XXXXXX"); trap 'rm -rf "$$tmp"' EXIT HUP INT TERM; \
+	key="$(or $(KAME_RELEASE_PUBKEY_B64_OVERRIDE),$(KAME_RELEASE_PUBKEY_B64))"; \
+	[ -n "$$key" ] || { echo 'kame: release verification key is not configured' >&2; exit 1; }; \
+	command -v openssl >/dev/null 2>&1 || { echo 'kame: no signature verifier (openssl)' >&2; exit 1; }; \
+	file="$@"; sums="$$file.SHA256SUMS"; signature="$$sums.sig"; version="$$file.VERSION"; \
+	if [ ! -f "$$file" ]; then \
+		file="$$tmp/kame.com"; sums="$$tmp/SHA256SUMS"; signature="$$sums.sig"; version="$$tmp/VERSION"; \
+		curl -fsSL "$(KAME_RELEASE_URL)/SHA256SUMS" -o "$$sums"; \
+		curl -fsSL "$(KAME_RELEASE_URL)/SHA256SUMS.sig" -o "$$signature"; \
+		curl -fsSL "$(KAME_RELEASE_URL)/VERSION" -o "$$version"; \
+		curl -fsSL "$(KAME_RELEASE_URL)/kame.com" -o "$$file"; \
+	fi; \
+	printf '%s' "$$key" | openssl base64 -d -A >"$$tmp/key.der"; \
+	openssl pkeyutl -verify -pubin -keyform DER -inkey "$$tmp/key.der" -rawin -in "$$sums" -sigfile "$$signature" >/dev/null 2>&1 || \
+		{ echo 'kame: release manifest signature is invalid' >&2; exit 1; }; \
+	for asset in kame.com VERSION; do \
+		checked="$$file"; [ "$$asset" != VERSION ] || checked="$$version"; \
+		expected=$$(awk -v asset="$$asset" '$$2 == asset { print $$1 }' "$$sums"); \
+		actual=$$(openssl dgst -sha256 -r "$$checked"); actual=$${actual%% *}; \
+		[ "$$actual" = "$$expected" ] || { echo "kame: checksum mismatch or missing manifest entry: $$asset" >&2; exit 1; }; \
+	done; \
+	[ "$$(cat "$$version")" = "$(KAME_VERSION)" ] || { echo 'kame: release version does not match KAME_VERSION' >&2; exit 1; }; \
+	if [ "$$file" != "$@" ]; then \
+		chmod +x "$$file"; mv "$$sums" "$@.SHA256SUMS"; mv "$$signature" "$@.SHA256SUMS.sig"; mv "$$version" "$@.VERSION"; mv "$$file" "$@"; \
+	fi

@@ -9,7 +9,7 @@ import (
 
 func TestRuleMetadataUsesKameRecordExpressions(t *testing.T) {
 	a := t.Allocator()
-	parsed := rule.ParseRule(a, "test.kmk", "build : ./input ; [shell: kash env: [MODE: (cat \"de\" \"bug\")]]\n\tprintf hello\n")
+	parsed := rule.ParseRule(a, "test.kmk", "build : ./input ; [shell: kash env: [MODE: (str \"de\" \"bug\")]]\n\tprintf hello\n")
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || parsed.Rule.Metadata == nil || parsed.Rule.Metadata.Kind != expr.Record || len(parsed.Rule.Metadata.Fields) != 2 {
 		t.Error("record metadata was not preserved")

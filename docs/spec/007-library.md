@@ -393,6 +393,12 @@ emits to the evaluation output context and returns nil. During rule rendering,
 all three retain their nil result so an effect expression contributes no shell
 command text; `yield!` remains the declarative file-output effect.
 
+Effect output is not scalar `str` conversion: it accepts raw bytes and text
+conversion of nil, booleans, numbers, strings, patterns, lists and records.
+Collection output uses the output encoder's JSON-like text, not a guarantee of
+JSON compatibility or reparsable Kame display. Callables and resources are
+rejected. Use `json` when a consumer requires JSON.
+
 Effects record their source position. Evaluating or rerendering an effect does
 not perform it. The runtime commits it once for the accepted generation.
 Every build effect is invalid during planning and returns `PHASE_INVALID`.
@@ -515,8 +521,10 @@ executable metadata checks do not grant access to user read operations.
 - Terminal style functions wrap strings with their documented ANSI sequences,
   compose using selective reset codes, reject nonstrings, and leave canonical
   value display unchanged.
-- Pattern `replace` matches anchored, expands references, returns `:nil`
-  without a match, and accepts a section through `map` and pipes.
+- Pattern `sub` (and its deprecated `replace` alias) matches anchored, expands
+  references, preserves the original string without a match, and accepts a
+  callable through `map` and pipes. `regex-replace` retains its separate
+  nil-on-nonmatch contract in `029-pattern-extensions.md`.
 - Pattern replacement expressions resolve captures as local names, skip all
   replacement dependencies/effects on nonmatches, and leave literal-string
   replacement unchanged.

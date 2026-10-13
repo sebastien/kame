@@ -21,6 +21,7 @@ import (
 type Runtime struct {
 	Alloc      mem.Allocator
 	Arena      *Heap
+	OwnArena   bool
 	Engine     *core.Engine
 	Eval       *eval.Program
 	Parsed     *script.Script
@@ -53,8 +54,8 @@ type Runtime struct {
 	EventJSON          []byte
 	Effects            []eval.Effect
 	EffectIndex        int
-	// Directory is the working directory the build runtime canonicalizes
-	// against. It defaults to "." and the host may set the absolute cwd.
+	// Directory is owned by Alloc. It defaults to "."; hosts use SetDirectory
+	// to replace the working directory the build runtime canonicalizes against.
 	Directory string
 }
 
@@ -92,14 +93,22 @@ func NewRuntime(a mem.Allocator, source string) RuntimeStart {
 }
 
 // NewRuntimeIn creates an instance whose logical lifetime is bounded by buf.
-// ABI callers supply one fixed arena per instance and Runtime.Free resets it.
+// The private heap descriptor uses mem.System and is released by Runtime.Free.
+// Failed construction returns diagnostics owned by mem.System, not buf.
 // name labels the source in diagnostics; an empty name keeps the default.
 func NewRuntimeIn(buf []byte, name string, source string) RuntimeStart {
 	arena := mem.Alloc[Heap](mem.System)
 	*arena = NewHeap(buf)
 	result := newRuntime(arena, arena, name, source)
 	if result.Runtime == nil {
+		old := result.Result
+		result.Result.Text = pureText(mem.System, old.Text)
+		result.Result.Code = pureText(mem.System, old.Code)
+		result.Result.Message = pureText(mem.System, old.Message)
 		arena.Reset()
+		mem.Free(mem.System, arena)
+	} else {
+		result.Runtime.OwnArena = true
 	}
 	return result
 }
@@ -138,15 +147,15 @@ func newRuntime(a mem.Allocator, arena *Heap, name string, source string) Runtim
 	runtime := mem.Alloc[Runtime](a)
 	runtime.Alloc, runtime.Arena, runtime.Engine, runtime.Eval, runtime.Parsed, runtime.Registry = a, arena, engine, evalProgram, parsed, registry
 	runtime.Host = NewMemoryHost(a)
-	runtime.Directory = "."
+	runtime.Directory = pureText(a, ".")
 	runtime.Environment = nil
 	return RuntimeStart{Runtime: runtime}
 }
 
-// RequestExpression schedules one expression. Only one root is active in this
-// initial runner; callers must observe its terminal result before replacing it.
+// RequestExpression schedules one expression in a one-shot runtime. Expression
+// and build modes are mutually exclusive, including after completion.
 func (r *Runtime) RequestExpression(text string) PureResult {
-	if r == nil || r.Node != nil {
+	if r == nil || r.Node != nil || r.Program != nil {
 		a := runtimeAllocator(r)
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "runtime already has an active expression")}
 	}
@@ -215,7 +224,9 @@ func (r *Runtime) InspectionGrant(capability string, name string) bool {
 		slices.Free(r.Alloc, r.InspectionGrants)
 		r.InspectionGrants = nil
 		r.InspectionPolicy = true
-		if r.Eval != nil { r.Eval.SetGrants(nil) }
+		if r.Eval != nil {
+			r.Eval.SetGrants(nil)
+		}
 		return true
 	}
 	grant := eval.Grant{}
@@ -236,7 +247,9 @@ func (r *Runtime) InspectionGrant(capability string, name string) bool {
 	}
 	r.InspectionGrants = slices.Append(r.Alloc, r.InspectionGrants, grant)
 	r.InspectionPolicy = true
-	if r.Eval != nil { r.Eval.SetGrants(r.InspectionGrants) }
+	if r.Eval != nil {
+		r.Eval.SetGrants(r.InspectionGrants)
+	}
 	return true
 }
 
@@ -300,7 +313,9 @@ func (r *Runtime) toolsCheckJSON(target string, report bool) PureResult {
 			program.WriteJSONDiagnostic(&buffer, d)
 		}
 	}
-	if report { cli.WriteToolsCheckResult(&buffer, r.Program, target, result.Uses) }
+	if report {
+		cli.WriteToolsCheckResult(&buffer, r.Program, target, result.Uses)
+	}
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Free()
 	result.Free(r.Alloc)
@@ -318,8 +333,14 @@ func (r *Runtime) PlanJSON(target string, expand bool) PureResult {
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
 	targets := []string{target}
 	d := r.Program.WriteInspection(&buffer, targets, -1, "plan")
-	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
-	if d.Code != "" { program.WriteJSONDiagnostic(&buffer, d); d.Free(r.Alloc) }
+	if r.Program.InspectionWaiting {
+		buffer.Free()
+		return PureResult{HostNeeded: true}
+	}
+	if d.Code != "" {
+		program.WriteJSONDiagnostic(&buffer, d)
+		d.Free(r.Alloc)
+	}
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Free()
 	return PureResult{Text: text}
@@ -333,7 +354,10 @@ func (r *Runtime) GraphJSON(target string, depth int, kind string) PureResult {
 	}
 	var buffer bytes.Buffer = bytes.NewBuffer(r.Alloc, nil)
 	d := r.Program.WriteGraph(&buffer, target, depth, kind)
-	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
+	if r.Program.InspectionWaiting {
+		buffer.Free()
+		return PureResult{HostNeeded: true}
+	}
 	if d.Code != "" {
 		program.WriteJSONDiagnostic(&buffer, d)
 		out := PureResult{Text: pureText(r.Alloc, buffer.String())}
@@ -358,21 +382,38 @@ func (r *Runtime) PlanQueryJSON(encoded string, depth int, affected bool) PureRe
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
 	var value core.Value
-	if !core.ParseJSON(r.Alloc, []byte(encoded), &value) { r.Program.CancelInspection(); return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "invalid inspection roots")} }
+	if !core.ParseJSON(r.Alloc, []byte(encoded), &value) {
+		r.Program.CancelInspection()
+		return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "invalid inspection roots")}
+	}
 	defer value.Free(r.Alloc)
-	if value.Kind != core.List || len(value.List) == 0 { r.Program.CancelInspection(); return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be a nonempty string array")} }
+	if value.Kind != core.List || len(value.List) == 0 {
+		r.Program.CancelInspection()
+		return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be a nonempty string array")}
+	}
 	targets := slices.Make[string](r.Alloc, len(value.List))
 	defer slices.Free(r.Alloc, targets)
 	for i := range value.List {
-		if value.List[i].Kind != core.String || value.List[i].Text == "" { r.Program.CancelInspection(); return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be nonempty strings")} }
+		if value.List[i].Kind != core.String || value.List[i].Text == "" {
+			r.Program.CancelInspection()
+			return PureResult{Code: pureText(r.Alloc, "OPT_VALUE_INVALID"), Message: pureText(r.Alloc, "inspection roots must be nonempty strings")}
+		}
 		targets[i] = value.List[i].Text
 	}
 	var buffer = bytes.NewBuffer(r.Alloc, nil)
 	kind := "plan"
-	if affected { kind = "affected" }
+	if affected {
+		kind = "affected"
+	}
 	d := r.Program.WriteInspection(&buffer, targets, depth, kind)
-	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
-	if d.Code != "" { program.WriteJSONDiagnostic(&buffer, d); d.Free(r.Alloc) }
+	if r.Program.InspectionWaiting {
+		buffer.Free()
+		return PureResult{HostNeeded: true}
+	}
+	if d.Code != "" {
+		program.WriteJSONDiagnostic(&buffer, d)
+		d.Free(r.Alloc)
+	}
 	out := PureResult{Text: pureText(r.Alloc, buffer.String())}
 	buffer.Free()
 	return out
@@ -441,7 +482,9 @@ func (r *Runtime) SetDirectory(directory string) bool {
 	if r == nil || r.Program != nil {
 		return false
 	}
+	previous := r.Directory
 	r.Directory = pureText(r.Alloc, directory)
+	mem.FreeString(r.Alloc, previous)
 	return true
 }
 
@@ -615,7 +658,9 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	state := c.Context().(*runtimeState)
 	r := state.Runtime
 	grants := []eval.Grant{{Capability: eval.Read}, {Capability: eval.Write}, {Capability: eval.Run}, {Capability: eval.Env}}
-	if r.InspectionPolicy { grants = r.InspectionGrants }
+	if r.InspectionPolicy {
+		grants = r.InspectionGrants
+	}
 	context := &eval.Context{Program: r.Eval, Engine: c, Scope: r.Eval.Scope, Run: c.Allocator(), Cwd: r.Directory, Grants: grants, DirectHostRequests: true}
 	result := r.Eval.EvaluateWith(r.Expr, context)
 	if result.Waiting {
@@ -767,7 +812,9 @@ func (r *Runtime) Result() RuntimeResult {
 			r.Session.Observe(r.Handle)
 		}
 		if r.Handle.Definition && r.Handle.Node != nil && r.Handle.Node.Current {
-			if r.Session == nil { r.Program.ObserveDefinition(r.Handle) }
+			if r.Session == nil {
+				r.Program.ObserveDefinition(r.Handle)
+			}
 			return RuntimeResult{Value: r.Handle.Node.Latest.Clone(r.Alloc), Done: true}
 		}
 		poll := r.Handle.Poll()
@@ -844,8 +891,13 @@ func (r *Runtime) Free() {
 	r.Registry.Free()
 	r.Parsed.Free()
 	r.freeBuildSources()
+	mem.FreeString(r.Alloc, r.Directory)
 	if r.Arena != nil {
-		r.Arena.Reset()
+		arena, owned := r.Arena, r.OwnArena
+		arena.Reset()
+		if owned {
+			mem.Free(mem.System, arena)
+		}
 		return
 	}
 	a := r.Alloc

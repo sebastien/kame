@@ -53,6 +53,8 @@ extern int sys_inotify_add_watch(int, const char *, uint32_t);
 #include "libc/nt/runtime.h"
 #include "libc/proc/proc.h"
 #include "libc/nt/thunk/msabi.h"
+// Cosmopolitan 4.0.2 exposes the Linux syscall, not a public waitid() wrapper.
+extern int sys_waitid(int, int, void *, int, void *);
 #endif
 
 // Event kind and outcome values must match posix.EventKind and posix.Outcome.
@@ -68,7 +70,7 @@ typedef struct km_stage {
     int64_t job;
     int64_t deadline;
     int status, signal, outcome;
-    bool reaped, spawned_in_job;
+    bool exited, reaped, spawned_in_job;
 } km_stage;
 
 typedef struct km_process {
@@ -76,7 +78,7 @@ typedef struct km_process {
     pid_t pid;
     int64_t job;
     int outfd, errfd, execfd;
-    bool started, reaped, terminating, killed, terminal;
+    bool started, exited, reaped, terminating, killed, terminal;
     int outcome, status, signal;
     int64_t deadline, kill_deadline;
     int queued;
@@ -86,12 +88,16 @@ typedef struct km_process {
     bool direct;
     km_stage *stages;
     int stage_count;
+    // Mandatory events survive queue allocation failure without allocating.
+    km_event pending[2];
+    uint64_t pending_sequence[2];
 } km_process;
 
 typedef struct km_event_node {
     km_event event;
     int64_t process_id;
     struct km_event_node *next;
+    uint64_t sequence;
 } km_event_node;
 
 struct km_host {
@@ -99,6 +105,8 @@ struct km_host {
     int len, cap;
     km_event_node *first, *last;
     bool force_waitpid_failure;
+    uint64_t sequence, rejected_sequence;
+    km_event rejected;
     unsigned cache_lock_refs[256];
 };
 
@@ -235,8 +243,13 @@ static bool km_windows_job_assign(int64_t job, pid_t pid) {
 // Cosmopolitan's Windows execve replaces its tracked process handle with a
 // separately created native process. Bind that replacement to the job before
 // publishing the started event, so timeout cleanup reaches the requested exe.
+// This is not launch-time containment: 4.0.2 creates the replacement using
+// Kame as its parent, not the ready-blocked fork child's assigned job. Early
+// descendants can therefore escape before the replacement is assigned.
 static bool km_windows_job_assign_exec(int64_t job, pid_t pid) {
-    if (!km_windows_jobs_needed()) return true;
+    // IsWindows is compile-time false on aarch64; keep this guard direct so
+    // even unoptimized builds omit the x86-only __proc_search reference.
+    if (!IsWindows() || !km_windows_jobs_needed()) return true;
     if (!job || !km_load_windows_job_api() || !km_get_process_id) return false;
     int64_t process = 0;
     uint32_t native_pid = 0;
@@ -369,8 +382,22 @@ static int64_t km_now(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+// Native test probe: fail all event allocations after N successful allocations.
+// It intentionally excludes process setup and the So allocator.
+static int km_event_allocations_left = -1;
+void km_event_force_allocation_failure(int after) { km_event_allocations_left = after; }
+static bool km_event_allocate(void) {
+    if (km_event_allocations_left < 0) return true;
+    if (!km_event_allocations_left) return false;
+    km_event_allocations_left--; return true;
+}
+static const char km_allocation_code[] = KM_HOSTF;
+static const char km_allocation_diagnostic[] = "event allocation failed";
+
 static void km_free_event(km_event *event) {
-    free(event->data); free(event->diagnosticCode); free(event->diagnostic);
+    free(event->data);
+    if (event->diagnosticCode != (const so_byte *)km_allocation_code) free(event->diagnosticCode);
+    if (event->diagnostic != (const so_byte *)km_allocation_diagnostic) free(event->diagnostic);
     free(event->output); free(event->errorOutput);
     free(event->stageData);
     memset(event, 0, sizeof(*event));
@@ -378,18 +405,53 @@ static void km_free_event(km_event *event) {
 
 void km_event_free(km_event *event) { km_free_event(event); }
 
+static void km_fail(km_host *, km_process *, const char *);
+
+static void km_allocation_failed(km_event *event) {
+    if (event->diagnosticCode != (const so_byte *)km_allocation_code) free(event->diagnosticCode);
+    if (event->diagnostic != (const so_byte *)km_allocation_diagnostic) free(event->diagnostic);
+    event->diagnosticCode = (so_byte *)km_allocation_code;
+    event->diagnosticCodeLen = sizeof(km_allocation_code) - 1;
+    event->diagnostic = (so_byte *)km_allocation_diagnostic;
+    event->diagnosticLen = sizeof(km_allocation_diagnostic) - 1;
+    event->outcome = KM_FAILED;
+}
+
 static bool km_push(km_host *host, km_process *process, km_event event) {
-    km_event_node *node = calloc(1, sizeof(*node));
-    if (!node) { km_free_event(&event); return false; }
+    bool chunk = event.kind == KM_STDOUT || event.kind == KM_STDERR;
+    if (chunk && event.dataLen && !event.data) {
+        km_free_event(&event); km_fail(host, process, "output queue allocation failed"); return false;
+    }
+    if (event.kind == KM_TERMINAL &&
+        ((event.stdoutLen && !event.output) || (event.stderrLen && !event.errorOutput) ||
+         (event.diagnosticCodeLen && !event.diagnosticCode) || (event.diagnosticLen && !event.diagnostic))) {
+        if (!event.output) { event.stdoutLen = 0; event.stdoutTruncated = true; }
+        if (!event.errorOutput) { event.stderrLen = 0; event.stderrTruncated = true; }
+        km_allocation_failed(&event);
+    }
+    km_event_node *node = km_event_allocate() ? calloc(1, sizeof(*node)) : NULL;
+    if (!node) {
+        if (chunk) { km_free_event(&event); km_fail(host, process, "output queue allocation failed"); return false; }
+        uint64_t sequence = ++host->sequence;
+        if (process) {
+            int slot = event.kind == KM_STARTED ? 0 : 1;
+            process->pending[slot] = event; process->pending_sequence[slot] = sequence;
+        } else {
+            host->rejected = event; host->rejected_sequence = sequence;
+        }
+        return true;
+    }
     node->event = event; node->process_id = process ? process->id : 0;
+    node->sequence = ++host->sequence;
     if (host->last) host->last->next = node; else host->first = node;
     host->last = node;
+    if (chunk && process) process->queued += event.dataLen;
     return true;
 }
 
 static so_byte *km_copy(const void *data, int len) {
     if (len <= 0) return NULL;
-    so_byte *out = malloc((size_t)len);
+    so_byte *out = km_event_allocate() ? malloc((size_t)len) : NULL;
     if (out) memcpy(out, data, (size_t)len);
     return out;
 }
@@ -399,6 +461,32 @@ static char *km_cstring(so_String value) {
     char *out = calloc((size_t)value.len + 1, 1);
     if (out && value.len) memcpy(out, value.ptr, (size_t)value.len);
     return out;
+}
+
+// Real storage sync, not only stdio fflush. Return errno (zero on success).
+int km_file_sync(void *stream) {
+    if (!stream) return EINVAL;
+    if (fflush(stream) != 0) return errno ? errno : EIO;
+    int result;
+    do { result = fsync(fileno(stream)); } while (result < 0 && errno == EINTR);
+    return result == 0 ? 0 : (errno ? errno : EIO);
+}
+
+int km_file_sync_parent(so_String directory) {
+#if defined(__COSMOPOLITAN__)
+    // No verified directory-flush seam on Windows. Do not promise durability.
+    if (IsWindows()) return ENOTSUP;
+#endif
+    char *path = km_cstring(directory);
+    if (!path) return ENOMEM;
+    int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    free(path);
+    if (fd < 0) return errno ? errno : EIO;
+    int result;
+    do { result = fsync(fd); } while (result < 0 && errno == EINTR);
+    int error = result == 0 ? 0 : (errno ? errno : EIO);
+    if (close(fd) != 0 && !error) error = errno ? errno : EIO;
+    return error;
 }
 
 int64_t km_file_modtime(so_String name, bool link) {
@@ -624,6 +712,7 @@ static void km_release_process(km_process *p) {
     km_windows_job_close(&p->job);
     for (int i = 0; i < p->stage_count; i++) km_windows_job_close(&p->stages[i].job);
     free(p->stages);
+    for (int i = 0; i < 2; i++) if (p->pending_sequence[i]) km_free_event(&p->pending[i]);
     memset(p, 0, sizeof(*p)); p->outfd = p->errfd = p->execfd = -1;
 }
 
@@ -633,7 +722,7 @@ static bool km_append(so_byte **data, int *len, int *cap, const so_byte *chunk, 
     if (*len + n > *cap) {
         int next = *cap ? *cap : 64;
         while (next < *len + n) next *= 2;
-        so_byte *grown = realloc(*data, (size_t)next);
+        so_byte *grown = km_event_allocate() ? realloc(*data, (size_t)next) : NULL;
         if (!grown) return false;
         *data = grown; *cap = next;
     }
@@ -646,7 +735,7 @@ static void km_emit_terminal(km_host *host, km_process *p, int outcome, const ch
     p->terminal = true;
     km_event event = { .kind = KM_TERMINAL, .id = p->id, .pid = p->pid, .pgid = p->pid, .outcome = outcome, .status = p->status, .signal = p->signal, .output = km_copy(p->stdout_data, p->stdout_len), .stdoutLen = p->stdout_len, .errorOutput = km_copy(p->stderr_data, p->stderr_len), .stderrLen = p->stderr_len, .stdoutTruncated = p->stdout_truncated, .stderrTruncated = p->stderr_truncated, .retainBytes = p->retain };
     if (p->stage_count) {
-        event.stageData = calloc((size_t)p->stage_count * 3, sizeof(int));
+        event.stageData = km_event_allocate() ? calloc((size_t)p->stage_count * 3, sizeof(int)) : NULL;
         if (!event.stageData) { outcome = event.outcome = KM_FAILED; diagnostic = "stage result allocation failed"; }
         else {
             event.stageCount = p->stage_count;
@@ -668,40 +757,55 @@ static int km_signal(km_process *p, int sig) {
     if (!p->stage_count) {
         if (km_windows_jobs_needed() && p->job) {
             if (sig == SIGKILL) return km_windows_job_terminate(p->job, sig) ? 0 : -1;
+            if (p->reaped) return 0; // The numeric Windows PID may have been reused.
             return kill(p->pid, sig) < 0 && errno != ESRCH ? -1 : 0;
         }
+        if (p->reaped || p->pid <= 0) return 0;
         return kill(-p->pid, sig) < 0 && errno != ESRCH ? -1 : 0;
     }
     for (int i = 0; i < p->stage_count; i++) if (p->stages[i].pid > 0) {
         if (km_windows_jobs_needed() && p->stages[i].job) {
             if (sig == SIGKILL) { if (!km_windows_job_terminate(p->stages[i].job, sig)) failed = -1; }
-            else if (kill(p->stages[i].pid, sig) < 0 && errno != ESRCH) failed = -1;
-        } else if (kill(-p->stages[i].pid, sig) < 0 && errno != ESRCH) failed = -1;
+            else if (!p->stages[i].reaped && kill(p->stages[i].pid, sig) < 0 && errno != ESRCH) failed = -1;
+        } else if (!p->stages[i].reaped && kill(-p->stages[i].pid, sig) < 0 && errno != ESRCH) failed = -1;
     }
     return failed;
 }
 
-static void km_wait_graph(km_process *p) {
+static bool km_wait_child(pid_t pid, bool *reaped, int *code, int *signal_number) {
+    if (*reaped || pid <= 0) return true;
+    int status; pid_t result;
+    do { result = waitpid(pid, &status, 0); } while (result < 0 && errno == EINTR);
+    if (result != pid) {
+        // ECHILD means we no longer own this PID; never signal it again. Other
+        // failures leave ownership tracked for another cleanup attempt.
+        if (errno == ECHILD) *reaped = true;
+        return false;
+    }
+    *reaped = true;
+    if (WIFEXITED(status)) *code = WEXITSTATUS(status);
+    else if (WIFSIGNALED(status)) *signal_number = WTERMSIG(status);
+    return true;
+}
+
+static bool km_wait_graph(km_process *p) {
+    bool all = true, ok = true;
     for (int i = 0; i < p->stage_count; i++) {
         km_stage *s = &p->stages[i];
-        if (s->pid <= 0 || s->reaped) continue;
-        int status; pid_t result;
-        do { result = waitpid(s->pid, &status, 0); } while (result < 0 && errno == EINTR);
-        s->reaped = true;
-        if (result == s->pid) {
-            if (WIFEXITED(status)) s->status = WEXITSTATUS(status);
-            else if (WIFSIGNALED(status)) s->signal = WTERMSIG(status);
-        }
+        if (!km_wait_child(s->pid, &s->reaped, &s->status, &s->signal)) ok = false;
+        if (s->pid > 0 && !s->reaped) all = false;
     }
-    p->reaped = true;
+    p->reaped = all;
+    return ok;
 }
 
 static void km_fail(km_host *host, km_process *p, const char *diagnostic) {
+    if (p->terminal) return;
+    km_signal(p, SIGKILL);
     if (p->stage_count) {
         for (int i = 0; i < p->stage_count; i++) if (!p->stages[i].reaped && !p->terminating) p->stages[i].outcome = KM_FAILED;
-        km_signal(p, SIGKILL); km_wait_graph(p);
-    }
-    if (!p->reaped) km_signal(p, SIGKILL);
+        km_wait_graph(p);
+    } else km_wait_child(p->pid, &p->reaped, &p->status, &p->signal);
     km_close(&p->outfd); km_close(&p->errfd);
     km_emit_terminal(host, p, KM_FAILED, diagnostic);
 }
@@ -714,6 +818,7 @@ static km_process *km_process_for(km_host *host, int64_t id) {
 static void km_remove_process(km_host *host, int64_t id) {
     for (int i = 0; i < host->len; i++) {
         if (host->processes[i].id != id) continue;
+        if (!host->processes[i].reaped) return;
         km_release_process(&host->processes[i]);
         host->len--;
         if (i != host->len) host->processes[i] = host->processes[host->len];
@@ -794,30 +899,199 @@ static bool km_abort_spawn(pid_t pid, int64_t job) {
     return result == pid;
 }
 
-// Unlike execvp, never fall back to /bin/sh for an ENOEXEC file.
-static void km_exec_argv(char **argv, char **envp) {
-    if (strchr(argv[0], '/')) { execve(argv[0], argv, envp); return; }
-    const char *paths = "/bin:/usr/bin";
-    for (char **entry = envp; *entry; entry++) if (strncmp(*entry, "PATH=", 5) == 0) { paths = *entry + 5; break; }
-    int saved = ENOENT;
-    const char *part = paths;
-    for (;;) {
-        const char *end = strchr(part, ':');
+typedef int (*km_argv_launch)(const char *, void *);
+
+static const char *km_argv_environment(char **envp, const char *name, bool windows) {
+    size_t n = strlen(name);
+    for (char **entry = envp; *entry; entry++) {
+        size_t i = 0;
+        for (; i < n && (*entry)[i]; i++) {
+            unsigned char c = (unsigned char)(*entry)[i];
+            if (windows && c >= 'a' && c <= 'z') c -= 'a' - 'A';
+            if (c != (unsigned char)name[i]) break;
+        }
+        if (i == n && (*entry)[i] == '=') return *entry + i + 1;
+    }
+    return NULL;
+}
+
+static bool km_argv_slash(char c) { return c == '/' || c == '\\'; }
+
+// Reserve only forward-slash /[A-Za-z] followed by '/' or end-of-string for
+// Cosmo's drive alias. Native \\C\\... is rooted, not a cross-drive alias.
+static bool km_argv_drive_alias(const char *path) {
+    return path[0] == '/' && ((path[1] >= 'A' && path[1] <= 'Z') ||
+                             (path[1] >= 'a' && path[1] <= 'z')) &&
+           (path[2] == '/' || !path[2]);
+}
+
+// cwd is an absolute native Windows path, not a drive-relative path. Leave
+// normalization of dot components to Cosmo; preserve UNC's leading slashes.
+static char *km_argv_windows_path(const char *cwd, const char *name) {
+    size_t n = strlen(name), base = 0;
+    const char *prefix = cwd;
+    bool alias = km_argv_drive_alias(name);
+    bool cwd_alias = cwd && km_argv_drive_alias(cwd);
+    char drive_prefix[3] = {cwd_alias ? cwd[1] : 0, ':', 0};
+    bool drive = n >= 2 && name[1] == ':';
+    if (drive && (n < 3 || !km_argv_slash(name[2]))) { errno = ENOTSUP; return NULL; }
+    if (!drive && !alias && km_argv_slash(name[0])) {
+        if (!km_argv_slash(name[1])) {
+            if (cwd_alias) prefix = drive_prefix;
+            else if (!cwd || strlen(cwd) < 3 || cwd[1] != ':' || !km_argv_slash(cwd[2])) {
+                errno = ENOTSUP; return NULL;
+            }
+            base = 2; // Rooted paths use the stage's drive, never the parent's.
+        }
+    } else if (!drive && !alias) {
+        if (!cwd || !*cwd) { errno = ENOTSUP; return NULL; }
+        base = strlen(cwd);
+    }
+    bool slash = (base > 2 || (base == 2 && cwd_alias && prefix == cwd)) && !km_argv_slash(prefix[base - 1]);
+    if (base > SIZE_MAX - n - 2) { errno = ENOMEM; return NULL; }
+    char *path = malloc(base + n + 2);
+    if (!path) { errno = ENOMEM; return NULL; }
+    if (base) memcpy(path, prefix, base);
+    if (slash) path[base++] = '/';
+    memcpy(path + base, name, n + 1);
+    if (alias || (cwd_alias && prefix == cwd && base)) {
+        path[0] = path[1]; path[1] = ':';
+        if (!path[2]) { path[2] = '/'; path[3] = 0; }
+    }
+    for (char *p = path; *p; p++) if (*p == '\\') *p = '/';
+    return path;
+}
+
+// Cosmo getcwd returns /C/... on Windows, also accepted in resolved argv and
+// PATH entries. Preserve original delimiters until rooted resolution, so
+// neither \\C\\work nor /C\\work can turn into a forward drive alias by accident.
+// The buffer needs one spare byte for the /C -> C:/ drive-root case.
+static void km_argv_native_cwd(char *cwd) {
+    if (km_argv_drive_alias(cwd)) {
+        cwd[0] = cwd[1]; cwd[1] = ':';
+        if (!cwd[2]) { cwd[2] = '/'; cwd[3] = 0; }
+    }
+}
+
+static char *km_argv_windows_cwd(const char *cwd) {
+    char current[PATH_MAX];
+    if (!getcwd(current, sizeof(current))) return NULL;
+    km_argv_native_cwd(current);
+    if (!cwd) return km_argv_windows_path(current, "");
+    char *native = malloc(strlen(cwd) + 2);
+    if (!native) { errno = ENOMEM; return NULL; }
+    strcpy(native, cwd);
+    km_argv_native_cwd(native);
+    char *result = km_argv_windows_path(current, native);
+    int error = errno;
+    free(native);
+    errno = error;
+    return result;
+}
+
+static bool km_argv_search_error(int error, int *saved) {
+    if (error == EACCES) *saved = EACCES;
+    return error == ENOENT || error == ENOTDIR || error == EACCES;
+}
+
+// Return launch errors directly. In particular, ordinary BAT/CMD text is
+// ENOEXEC in pinned Cosmo ntspawn; never synthesize a cmd.exe command string.
+// Explicit paths try the exact file first. Bare names keep PATHEXT order in
+// each PATH directory, then try that directory's exact extensionless file.
+static int km_argv_candidate(const char *path, const char *extensions, bool windows, bool explicit,
+                             km_argv_launch launch, void *context, int *saved) {
+    const char *base = path;
+    for (const char *p = path; *p; p++) if (km_argv_slash(*p)) base = p + 1;
+    bool exact_first = !windows || explicit || strchr(base, '.');
+    if (exact_first) {
+        int error = launch(path, context);
+        if (!km_argv_search_error(error, saved)) return error;
+    }
+    if (windows) for (const char *part = extensions;;) {
+        const char *end = strchr(part, ';');
         size_t n = end ? (size_t)(end - part) : strlen(part);
-        size_t name_len = strlen(argv[0]);
-        char *path = malloc(n + name_len + 2);
-        if (!path) { errno = ENOMEM; return; }
-        if (n) { memcpy(path, part, n); path[n] = '/'; memcpy(path + n + 1, argv[0], name_len + 1); }
-        else memcpy(path, argv[0], name_len + 1);
-        execve(path, argv, envp);
-        int error = errno;
-        free(path);
-        if (error != ENOENT && error != ENOTDIR && error != EACCES) { errno = error; return; }
-        if (error == EACCES) saved = EACCES;
+        if (n > 1 && part[0] == '.') {
+            size_t len = strlen(path);
+            if (len > SIZE_MAX - n - 1) return ENOMEM;
+            char *option = malloc(len + n + 1);
+            if (!option) return ENOMEM;
+            memcpy(option, path, len); memcpy(option + len, part, n); option[len + n] = 0;
+            int error = launch(option, context);
+            free(option);
+            if (!km_argv_search_error(error, saved)) return error;
+        }
         if (!end) break;
         part = end + 1;
     }
-    errno = saved;
+    if (windows && !exact_first) {
+        int error = launch(path, context);
+        if (!km_argv_search_error(error, saved)) return error;
+    }
+    return -1; // All candidates exhausted; saved retains EACCES preference.
+}
+
+static int km_argv_lookup(const char *name, char **envp, const char *cwd, bool windows,
+                          km_argv_launch launch, void *context) {
+    if (windows && !*name) return ENOENT;
+    const char *extensions = km_argv_environment(envp, "PATHEXT", windows);
+    if (!extensions || !*extensions) extensions = ".COM;.EXE;.BAT;.CMD";
+    int saved = ENOENT;
+    if (strchr(name, '/') || (windows && (strchr(name, '\\') || strchr(name, ':')))) {
+        if (!windows) return launch(name, context);
+        char *path = km_argv_windows_path(cwd, name);
+        if (!path) return errno;
+        int error = km_argv_candidate(path, extensions, true, true, launch, context, &saved);
+        free(path);
+        return error == -1 ? saved : error;
+    }
+    const char *paths = km_argv_environment(envp, "PATH", windows);
+    if (!paths) paths = windows ? "" : "/bin:/usr/bin";
+    for (const char *part = paths;;) {
+        const char *end = strchr(part, windows ? ';' : ':');
+        size_t n = end ? (size_t)(end - part) : strlen(part), len = strlen(name);
+        if (n > SIZE_MAX - len - 2) return ENOMEM;
+        char *path = malloc(n + len + 2);
+        if (!path) return ENOMEM;
+        if (windows) {
+            memcpy(path, part, n); path[n] = 0;
+            char *directory = km_argv_windows_path(cwd, path);
+            int error = errno;
+            free(path); path = NULL;
+            if (directory) {
+                path = km_argv_windows_path(directory, name);
+                error = errno;
+                free(directory);
+            }
+            if (!path && error != ENOTSUP) return error;
+        } else {
+            if (n) { memcpy(path, part, n); path[n++] = '/'; }
+            memcpy(path + n, name, len + 1);
+        }
+        if (path) {
+            int error = km_argv_candidate(path, extensions, windows, false, launch, context, &saved);
+            free(path);
+            if (error != -1) return error;
+        }
+        if (!end) return saved;
+        part = end + 1;
+    }
+}
+
+typedef struct km_exec_argv_context { char **argv, **envp; } km_exec_argv_context;
+static int km_exec_argv_launch(const char *path, void *opaque) {
+    km_exec_argv_context *context = opaque;
+    execve(path, context->argv, context->envp);
+    return errno;
+}
+
+static void km_exec_argv(char **argv, char **envp) {
+    bool windows = km_cli_environment_names_case_insensitive();
+    char *cwd = windows ? km_argv_windows_cwd(NULL) : NULL;
+    if (windows && !cwd) return;
+    km_exec_argv_context context = {argv, envp};
+    int error = km_argv_lookup(argv[0], envp, cwd, windows, km_exec_argv_launch, &context);
+    free(cwd);
+    errno = error;
 }
 
 // Resolve PATH using the request environment and launch through Cosmopolitan's
@@ -830,28 +1104,26 @@ static bool km_spawn_trace_enabled(char **envp) {
     return false;
 }
 
-static int km_spawn_argv(pid_t *pid, char **argv, char **envp, posix_spawn_file_actions_t *actions, posix_spawnattr_t *attr) {
-    if (strchr(argv[0], '/')) return posix_spawn(pid, argv[0], actions, attr, argv, envp);
-    const char *paths = "/bin:/usr/bin";
-    for (char **entry = envp; *entry; entry++) if (strncmp(*entry, "PATH=", 5) == 0) { paths = *entry + 5; break; }
-    int saved = ENOENT;
-    const char *part = paths;
-    for (;;) {
-        const char *end = strchr(part, ':');
-        size_t n = end ? (size_t)(end - part) : strlen(part);
-        size_t name_len = strlen(argv[0]);
-        char *path = malloc(n + name_len + 2);
-        if (!path) return ENOMEM;
-        if (n) { memcpy(path, part, n); path[n] = '/'; memcpy(path + n + 1, argv[0], name_len + 1); }
-        else memcpy(path, argv[0], name_len + 1);
-        int error = posix_spawn(pid, path, actions, attr, argv, envp);
-        free(path);
-        if (!error) return 0;
-        if (error != ENOENT && error != ENOTDIR && error != EACCES) return error;
-        if (error == EACCES) saved = EACCES;
-        if (!end) return saved;
-        part = end + 1;
-    }
+typedef struct km_spawn_argv_context {
+    pid_t *pid;
+    char **argv, **envp;
+    posix_spawn_file_actions_t *actions;
+    posix_spawnattr_t *attr;
+} km_spawn_argv_context;
+
+static int km_spawn_argv_launch(const char *path, void *opaque) {
+    km_spawn_argv_context *context = opaque;
+    return posix_spawn(context->pid, path, context->actions, context->attr, context->argv, context->envp);
+}
+
+static int km_spawn_argv(pid_t *pid, char **argv, char **envp, const char *cwd, posix_spawn_file_actions_t *actions, posix_spawnattr_t *attr) {
+    bool windows = km_cli_environment_names_case_insensitive();
+    char *directory = windows ? km_argv_windows_cwd(cwd) : NULL;
+    if (windows && !directory) return errno;
+    km_spawn_argv_context context = {pid, argv, envp, actions, attr};
+    int error = km_argv_lookup(argv[0], envp, directory, windows, km_spawn_argv_launch, &context);
+    free(directory);
+    return error;
 }
 
 static int km_spawn_graph_stage(pid_t *pid, char **argv, char **envp, char *cwd, int input, int output, int error_output, int out[2], int err[2], int execerr[2], int *edges, int edge_count, int inputfd, int outputfd) {
@@ -876,7 +1148,7 @@ static int km_spawn_graph_stage(pid_t *pid, char **argv, char **envp, char *cwd,
     }
     error = posix_spawnattr_setpgroup(&attr, 0);
     if (!error) error = posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETPGROUP);
-    if (!error) error = km_spawn_argv(pid, argv, envp, &actions, &attr);
+    if (!error) error = km_spawn_argv(pid, argv, envp, cwd, &actions, &attr);
 done:
     if (trace) fprintf(stderr, "[windows-spawn] done argv=%s error=%d pid=%d\n", argv[0], error, (int)*pid);
     posix_spawnattr_destroy(&attr);
@@ -887,6 +1159,8 @@ done:
 
 int km_host_start(km_host *host, int64_t id, so_Slice shell, so_Slice script, so_String directory, so_Slice environment, int64_t timeout, so_int retain, bool direct) {
     if (!host) return -1;
+    // Bounded emergency rejection slot: -2 means not admitted; drain Next first.
+    if (host->rejected_sequence) return -2;
     // Every rejected request emits exactly one failed terminal event.
     if (id == 0 || shell.len == 0 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid request");
     for (int i = 0; i < host->len; i++) if (host->processes[i].id == id) return km_spawn_failed(host, id, "request ID already active");
@@ -981,6 +1255,7 @@ fail:
 // Go structs. OS pipes carry intermediate bytes directly, with backpressure.
 int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output) {
     if (!host) return -1;
+    if (host->rejected_sequence) return -2;
     if (!id || lengths.len < 1 || lengths.len > INT_MAX / 2 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid graph request");
     for (int i = 0; i < host->len; i++) if (host->processes[i].id == id) return km_spawn_failed(host, id, "request ID already active");
     so_int *counts = lengths.ptr;
@@ -1063,6 +1338,13 @@ int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice 
             p.stages[i].deadline = stage_timeouts[i] ? km_now() + stage_timeouts[i] : 0;
             setpgid(pid, pid);
             if (i == 0) p.pid = pid;
+            // TODO(native-cli-review #9): posix_spawn already runs the native
+            // executable before assignment, so it can create escaping children.
+            // The fork ready-pipe barrier needs a Kame-controlled pre-exec child;
+            // it cannot be added as a file action to an arbitrary executable.
+            // Cosmocc 4.0.2 libc/proc/posix_spawn.h exposes neither suspended
+            // creation nor a job attribute. A verified Windows suspended-launch
+            // or equivalent job-at-creation seam is required; do not claim fixed.
             bool assigned = km_windows_job_assign(p.stages[i].job, pid);
             if (!assigned) {
                 int status = 0;
@@ -1179,21 +1461,64 @@ static void km_exec_ready(km_host *host, km_process *p) {
 static void km_terminate(km_host *host, km_process *p, int outcome, int64_t grace_ms);
 
 static void km_read(km_host *host, km_process *p, int *fd, int kind) {
-    if (*fd < 0 || p->queued >= KM_QUEUE_LIMIT) return;
+    if (p->terminal || *fd < 0 || p->queued >= KM_QUEUE_LIMIT) return;
     int want = KM_QUEUE_LIMIT - p->queued; if (want > KM_CHUNK) want = KM_CHUNK;
     so_byte buffer[KM_CHUNK]; ssize_t n = read(*fd, buffer, (size_t)want);
     if (n == 0) { if (!km_close_checked(fd)) km_fail(host, p, "pipe close failed"); return; }
     if (n < 0) { if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) km_fail(host, p, "pipe read failed"); return; }
     km_event event = {.kind = kind, .id = p->id, .pid = p->pid, .pgid = p->pid, .data = km_copy(buffer, (int)n), .dataLen = (int)n};
-    if (!event.data || !km_push(host, p, event)) { km_fail(host, p, "output queue allocation failed"); return; }
-    p->queued += (int)n;
+    if (!km_push(host, p, event)) return;
     if (kind == KM_STDOUT) { if (!km_append(&p->stdout_data, &p->stdout_len, &p->stdout_cap, buffer, (int)n, p->retain, &p->stdout_truncated)) km_fail(host, p, "retained output allocation failed"); }
     else if (!km_append(&p->stderr_data, &p->stderr_len, &p->stderr_cap, buffer, (int)n, p->retain, &p->stderr_truncated)) km_fail(host, p, "retained output allocation failed");
     if (p->direct && p->retain > 0 && p->stdout_truncated) km_terminate(host, p, KM_CANCELLED, KM_GRACE_MS);
 }
 
+// Observe native POSIX and APE Linux exit without consuming the child: its
+// waitable PID pins the group until draining and descendant cleanup finish.
+// Windows instead pins ownership with a job handle and uses ordinary waitpid.
+static int km_observe_child(pid_t pid, bool *exited, bool *reaped, int *code, int *signal_number) {
+    if (*reaped) { *exited = true; return 0; }
+    if (*exited) return 0;
+    bool consume = km_windows_jobs_needed();
+#if defined(__COSMOPOLITAN__)
+    // ponytail: APE non-Linux POSIX keeps legacy reaped-leader behavior. Safe
+    // non-consuming exit observation and descendant retirement remain deferred
+    // there; never signal a reaped POSIX PID/group that may have been reused.
+    consume = consume || !IsLinux();
+#endif
+    if (consume) {
+        int status; pid_t result = waitpid(pid, &status, WNOHANG);
+        if (result == 0 || (result < 0 && errno == EINTR)) return 0;
+        if (result < 0) { if (errno == ECHILD) *reaped = true; return -1; }
+        *exited = *reaped = true;
+        if (WIFEXITED(status)) *code = WEXITSTATUS(status);
+        else if (WIFSIGNALED(status)) *signal_number = WTERMSIG(status);
+        return 0;
+    }
+    siginfo_t info;
+    memset(&info, 0, sizeof(info));
+    int result;
+#if defined(__COSMOPOLITAN__)
+    // Linux P_PID=1; Cosmopolitan's siginfo_t is the Linux syscall layout.
+    result = sys_waitid(1, pid, &info, WEXITED | WNOHANG | WNOWAIT, NULL);
+#else
+    result = waitid(P_PID, pid, &info, WEXITED | WNOHANG | WNOWAIT);
+#endif
+    if (result < 0) {
+        if (errno == EINTR) return 0;
+        if (errno == ECHILD) *reaped = true;
+        return -1;
+    }
+    if (!info.si_pid) return 0;
+    *exited = true;
+    // OpenBSD waitid retains the full exit(int); match waitpid's exit byte.
+    if (info.si_code == CLD_EXITED) *code = info.si_status & 0xff;
+    else *signal_number = info.si_status;
+    return 0;
+}
+
 static void km_reap(km_host *host, km_process *p) {
-    if (p->reaped || p->terminal) return;
+    if (p->exited || p->terminal) return;
     if (host->force_waitpid_failure) {
         host->force_waitpid_failure = false;
         km_fail(host, p, "waitpid failed");
@@ -1203,31 +1528,22 @@ static void km_reap(km_host *host, km_process *p) {
         bool all = true;
         for (int i = 0; i < p->stage_count; i++) {
             km_stage *s = &p->stages[i];
-            if (s->reaped) continue;
-            int status; pid_t result = waitpid(s->pid, &status, WNOHANG);
-            if (result == 0 || (result < 0 && errno == EINTR)) { all = false; continue; }
-            if (result < 0) { km_fail(host, p, "waitpid failed"); return; }
-            s->reaped = true;
-            if (WIFEXITED(status)) s->status = WEXITSTATUS(status);
-            else if (WIFSIGNALED(status)) s->signal = WTERMSIG(status);
+            if (km_observe_child(s->pid, &s->exited, &s->reaped, &s->status, &s->signal) < 0) { km_fail(host, p, "waitpid failed"); return; }
+            if (!s->exited) all = false;
         }
-        p->reaped = all;
+        p->exited = all;
         if (all) for (int i = 0; i < p->stage_count; i++) {
             km_stage *s = &p->stages[i];
             if (s->status || s->signal) { p->status = s->signal ? 128 + s->signal : s->status; p->signal = s->signal; }
         }
         return;
     }
-    int status; pid_t result = waitpid(p->pid, &status, WNOHANG);
-    if (result == 0) return;
-    if (result < 0) { if (errno != EINTR) km_fail(host, p, "waitpid failed"); return; }
-    p->reaped = true;
-    if (WIFEXITED(status)) p->status = WEXITSTATUS(status); else if (WIFSIGNALED(status)) p->signal = WTERMSIG(status);
+    if (km_observe_child(p->pid, &p->exited, &p->reaped, &p->status, &p->signal) < 0) km_fail(host, p, "waitpid failed");
 }
 
 static void km_terminate(km_host *host, km_process *p, int outcome, int64_t grace_ms) {
     if (p->terminal || p->terminating) return;
-    for (int i = 0; i < p->stage_count; i++) if (!p->stages[i].reaped) p->stages[i].outcome = outcome;
+    for (int i = 0; i < p->stage_count; i++) if (!p->stages[i].exited && !p->stages[i].reaped) p->stages[i].outcome = outcome;
     if (km_signal(p, SIGTERM) < 0) { km_fail(host, p, "SIGTERM failed"); return; }
     if (grace_ms < 0) grace_ms = 0;
     p->terminating = true; p->outcome = outcome; p->kill_deadline = km_now() + grace_ms;
@@ -1258,7 +1574,7 @@ int km_host_pump(km_host *host, int wait) {
         if (!p->terminal && p->stage_count) km_reap(host, p);
         for (int j = 0; !p->terminal && !p->terminating && j < p->stage_count; j++) {
             km_stage *stage = &p->stages[j];
-            if (!stage->reaped && stage->deadline && now >= stage->deadline) km_terminate(host, p, KM_TIMED_OUT, KM_GRACE_MS);
+            if (!stage->exited && !stage->reaped && stage->deadline && now >= stage->deadline) km_terminate(host, p, KM_TIMED_OUT, KM_GRACE_MS);
         }
         if (!p->terminal && p->deadline && now >= p->deadline) km_terminate(host, p, KM_TIMED_OUT, KM_GRACE_MS);
         if (!p->terminal && p->terminating && !p->killed && now >= p->kill_deadline) { if (km_signal(p, SIGKILL) < 0) km_fail(host, p, "SIGKILL failed"); p->killed = true; }
@@ -1270,7 +1586,7 @@ int km_host_pump(km_host *host, int wait) {
         if (!p->terminal && !p->terminating && p->deadline) due = p->deadline;
         for (int j = 0; !p->terminal && !p->terminating && j < p->stage_count; j++) {
             km_stage *stage = &p->stages[j];
-            if (!stage->reaped && stage->deadline && (!due || stage->deadline < due)) due = stage->deadline;
+            if (!stage->exited && !stage->reaped && stage->deadline && (!due || stage->deadline < due)) due = stage->deadline;
         }
         if (!p->terminal && p->terminating && !p->killed && (!due || p->kill_deadline < due)) due = p->kill_deadline;
         if (due) {
@@ -1304,12 +1620,43 @@ int km_host_pump(km_host *host, int wait) {
         else km_read(host, owners[i], kinds[i] == KM_STDOUT ? &owners[i]->outfd : &owners[i]->errfd, kinds[i]);
     }
     free(fds); free(owners); free(kinds);
-    for (int i = 0; i < host->len; i++) { km_process *p = &host->processes[i]; km_reap(host, p); if (!p->terminal && p->reaped && p->outfd < 0 && p->errfd < 0) km_emit_terminal(host, p, p->terminating ? p->outcome : KM_EXITED, NULL); }
+    for (int i = 0; i < host->len; i++) {
+        km_process *p = &host->processes[i];
+        km_reap(host, p);
+        if (!p->terminal && p->exited && p->outfd < 0 && p->errfd < 0) {
+            // Descendants that closed captured streams still belong to this
+            // request. Retire them while the POSIX leader PID is still pinned.
+            if (km_signal(p, SIGKILL) < 0) { km_fail(host, p, "SIGKILL failed"); continue; }
+            bool waited = p->stage_count ? km_wait_graph(p) : km_wait_child(p->pid, &p->reaped, &p->status, &p->signal);
+            if (!waited) km_fail(host, p, "waitpid failed");
+            else km_emit_terminal(host, p, p->terminating ? p->outcome : KM_EXITED, NULL);
+        }
+    }
     return 0;
 }
 
 bool km_host_next(km_host *host, km_event *event) {
-    if (!host || !host->first) return false;
+    if (!host) return false;
+    uint64_t sequence = host->first ? host->first->sequence : UINT64_MAX;
+    km_event *pending = NULL;
+    uint64_t *pending_sequence = NULL;
+    int64_t process_id = 0;
+    if (host->rejected_sequence && host->rejected_sequence < sequence) {
+        pending = &host->rejected; pending_sequence = &host->rejected_sequence; sequence = *pending_sequence;
+    }
+    for (int i = 0; i < host->len; i++) for (int j = 0; j < 2; j++) {
+        km_process *p = &host->processes[i];
+        if (p->pending_sequence[j] && p->pending_sequence[j] < sequence) {
+            pending = &p->pending[j]; pending_sequence = &p->pending_sequence[j];
+            sequence = *pending_sequence; process_id = p->id;
+        }
+    }
+    if (pending) {
+        *event = *pending; memset(pending, 0, sizeof(*pending)); *pending_sequence = 0;
+        if (event->kind == KM_TERMINAL && process_id) km_remove_process(host, process_id);
+        return true;
+    }
+    if (!host->first) return false;
     km_event_node *node = host->first; host->first = node->next; if (!host->first) host->last = NULL;
     *event = node->event;
     km_process *process = node->process_id ? km_process_for(host, node->process_id) : NULL;
@@ -1332,17 +1679,17 @@ void km_host_force_waitpid_failure(km_host *host) {
 void km_host_free(km_host *host) {
     if (!host) return;
     bool terminating = false;
-    for (int i = 0; i < host->len; i++) if (!host->processes[i].reaped) {
+    for (int i = 0; i < host->len; i++) {
         km_signal(&host->processes[i], SIGTERM);
         terminating = true;
     }
     if (terminating) poll(NULL, 0, KM_GRACE_MS);
     for (int i = 0; i < host->len; i++) {
         km_process *p = &host->processes[i];
+        km_signal(p, SIGKILL);
         if (!p->reaped) {
-            km_signal(p, SIGKILL);
             if (p->stage_count) km_wait_graph(p);
-            else while (waitpid(p->pid, NULL, 0) < 0 && errno == EINTR) {}
+            else km_wait_child(p->pid, &p->reaped, &p->status, &p->signal);
         }
         km_release_process(p);
     }
@@ -1350,6 +1697,7 @@ void km_host_free(km_host *host) {
         while (host->cache_lock_refs[i] != 0 && km_cache_lock_refs[i] != 0) km_host_cache_unlock(host, i);
     }
     free(host->processes);
+    if (host->rejected_sequence) km_free_event(&host->rejected);
     while (host->first) { km_event_node *node = host->first; host->first = node->next; km_free_event(&node->event); free(node); }
     free(host);
 }

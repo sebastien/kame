@@ -39,8 +39,8 @@ def main():
         workloads['scope-deep-16'] = (['do', 'run', '--lang', 'expr', '-c', deep], lambda p: p.stdout == b'0')
 
         graph = root / 'graph-512.kmk'
-        graph.write_text(''.join(f'task target{i} :\n\t@(out "ok")\n' for i in range(512)))
-        workloads['graph-lookup-512'] = (['do', 'plan', '--json', '-f', str(graph), 'target511'], lambda p: json.loads(p.stdout)['target'] == 'target511')
+        graph.write_text(''.join(f'task target{i} :\n\t@(out! "ok")\n' for i in range(512)))
+        workloads['graph-lookup-512'] = (['do', 'plan', '--json', '-f', str(graph), 'target511'], lambda p: json.loads(p.stdout)['targets'] == ['target511'])
 
         tree = root / 'tree'
         for i in range(128):

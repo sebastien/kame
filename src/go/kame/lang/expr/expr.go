@@ -279,6 +279,7 @@ func (p *parser) pathAtom(command bool) *Expr {
 	for p.pos < len(p.s.Text) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
 		b := p.s.Text[p.pos]
 		if b == '@' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
+			if !command && patternDepth != 0 { p.error(p.pos, p.pos+2, "pattern groups must be fully authored; interpolation inside a group is invalid") }
 			if partStart < p.pos { e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}}) }
 			open := p.pos
 			inner := p.interpolation(false, "path")
@@ -306,7 +307,7 @@ func (p *parser) pathAtom(command bool) *Expr {
 	if len(e.Parts) != 0 && partStart < p.pos { e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}}) }
 	e.Span.End = p.pos
 	e.Text = p.s.Text[start:p.pos]
-	if len(e.Parts) == 0 && !command { p.classifyPathPattern(e, start) }
+	if !command { p.classifyPathPattern(e, start) }
 	return e
 }
 
@@ -394,9 +395,15 @@ func (p *parser) tplError(start int, end int, message string) {
 // literal; a clean parse mixing matchers and references is a parse error.
 func (p *parser) classifyPathPattern(e *Expr, start int) {
 	if e.Text == "" || strings.IndexByte(e.Text, '{') < 0 { return }
-	parsed := ParsePatternText(p.a, e.Text, start)
+	var parsed PatternParse
+	if len(e.Parts) == 0 { parsed = ParsePatternText(p.a, e.Text, start) } else { parsed = ParsePathPatternParts(p.a, e.Parts) }
 	if len(parsed.Diagnostics) != 0 {
-		if containsRegexGroupMarker(e.Text) {
+		regex := containsRegexGroupMarker(e.Text)
+		if len(e.Parts) != 0 {
+			regex = false
+			for i := range e.Parts { if e.Parts[i].Expr == nil && containsRegexGroupMarker(e.Parts[i].Text) { regex = true } }
+		}
+		if regex {
 			for i := range parsed.Diagnostics { p.diags = slices.Append(p.a, p.diags, parsed.Diagnostics[i]) }
 		}
 		parsed.Pattern.Free(p.a)
@@ -414,8 +421,10 @@ func (p *parser) classifyPathPattern(e *Expr, start int) {
 		parsed.Pattern.Free(p.a)
 		return
 	}
-	e.TextOwned = true
-	e.Text = CanonicalPattern(p.a, parsed.Pattern)
+	if len(e.Parts) == 0 {
+		e.TextOwned = true
+		e.Text = CanonicalPattern(p.a, parsed.Pattern)
+	}
 	e.Pattern = parsed.Pattern
 }
 
@@ -753,9 +762,9 @@ func (p *parser) list() *Expr {
 		list.Items = slices.Append(p.a, list.Items, item)
 		space := p.skipSpace()
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ']' { p.pos++; list.Span.End = p.pos; return list }
-		if space == 0 { p.error(p.pos, p.pos+1, "list items need whitespace"); break }
+		if p.pos < len(p.s.Text) && space == 0 { p.error(p.pos, p.pos+1, "list items need whitespace"); break }
 	}
-	p.error(start, p.pos, "unclosed list")
+	p.error(start, p.pos, "unclosed list; expected ']'")
 	return list
 }
 
@@ -763,6 +772,10 @@ func (p *parser) itemAfterSpace() *Expr {
 	if p.skipSpace() == 0 { p.error(p.pos, p.pos+1, "expected value after key"); return nil }
 	return p.expression()
 }
+
+// MaxSectionArity bounds synthesized placeholder parameters, including gaps.
+// Sections support at most 4096 arguments (_0 through _4095).
+const MaxSectionArity = 4096
 
 // classifySection converts a single-item application containing placeholders
 // into a placeholder section. Nested sections and placeholder-free bodies are
@@ -773,6 +786,10 @@ func (p *parser) classifySection(app *Expr) *Expr {
 	if body == nil || body.Kind == Section || !containsPlaceholder(body) { return app }
 	arity := int64(0)
 	reclassifyPlaceholders(body, &arity)
+	if arity > MaxSectionArity {
+		p.error(body.Span.Start, body.Span.End, "placeholder section exceeds 4096 parameters")
+		return app
+	}
 	app.Kind = Section
 	items := app.Items
 	app.Items = nil
@@ -832,7 +849,7 @@ func placeholderIndex(text string) int {
 	if len(text) == 0 || text[0] != '_' { return -1 }
 	underscores := 0
 	for underscores < len(text) && text[underscores] == '_' { underscores++ }
-	if underscores == len(text) { return underscores - 1 }
+	if underscores == len(text) { return min(underscores - 1, MaxSectionArity) }
 	rest := text[underscores:]
 	if underscores != 1 { return -1 }
 	if len(rest) > 1 && rest[0] == '0' { return -1 }
@@ -841,8 +858,11 @@ func placeholderIndex(text string) int {
 	}
 	index := 0
 	for i := 0; i < len(rest); i++ {
-		if index > 1<<30 { return -1 }
-		index = index*10 + int(rest[i]-'0')
+		digit := int(rest[i]-'0')
+		// Saturate only after validating all digits: oversized placeholders
+		// remain placeholders and receive the section arity diagnostic.
+		if index > (MaxSectionArity-digit)/10 { return MaxSectionArity }
+		index = index*10 + digit
 	}
 	return index
 }
@@ -888,7 +908,12 @@ func (p *parser) pipe(start int, left *Expr) *Expr {
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] != ')' && p.skipSpace() == 0 { p.error(p.pos, p.pos+1, "pipe items need whitespace"); break }
 	}
 	if len(right) == 0 { p.error(p.pos, p.pos, "pipe needs right expression"); slices.Free(p.a, right); return left }
-	if p.pos == len(p.s.Text) { p.error(start, p.pos, "unclosed pipe"); slices.Free(p.a, right); return left }
+	if p.pos == len(p.s.Text) {
+		p.error(start, p.pos, "unclosed pipe")
+		for i := range right { freeExpr(p.a, right[i]) }
+		slices.Free(p.a, right)
+		return left
+	}
 	result := p.node(Application, start)
 	used := false
 	for i := range right {
@@ -1145,7 +1170,13 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	if e.Kind == Boolean { if e.Bool { b.WriteString(":true") } else { b.WriteString(":false") }; return }
 	if e.Kind == Nil { b.WriteString(":nil"); return }
 	if e.Kind == Integer { var buf [strconv.MaxIntBase10Len]byte; b.WriteString(strconv.FormatInt(buf[:], e.Int, 10)); return }
-	if e.Kind == Float { var buf [strconv.MaxFloat64Len]byte; b.WriteString(strconv.FormatFloat(buf[:], e.Float, 'g', -1, 64)); return }
+	if e.Kind == Float {
+		var buf [strconv.MaxFloat64Len]byte
+		text := strconv.FormatFloat(buf[:], e.Float, 'g', -1, 64)
+		b.WriteString(text)
+		if !strings.ContainsAny(text, ".eE") { b.WriteString(".0") }
+		return
+	}
 	if e.Kind == Symbol { b.WriteByte(':'); b.WriteString(e.Text); return }
 	if e.Kind == Name { b.WriteString(e.Text); if e.Rest { b.WriteString("...") }; return }
 	if e.Kind == Placeholder {

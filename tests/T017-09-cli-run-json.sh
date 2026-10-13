@@ -9,7 +9,7 @@ cli_build
 work="$TMPDIR/json"
 mkdir -p "$work"
 printf 'name = "Ada"\n' >"$work/values.km"
-printf 'include ./values.km\nname\n' >"$work/includes.km"
+printf '(include ./values.km)\nname\n' >"$work/includes.km"
 printf 'build :\n\tprintf rule\n' >"$work/rules.kmk"
 printf 'name = [\n' >"$work/invalid.km"
 

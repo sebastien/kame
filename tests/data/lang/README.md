@@ -1,10 +1,11 @@
 # Kame language fixtures
 
 Representative Kame source covering the syntax in
-`docs/spec/004-language.md`. These are fixtures only: no parser or AST
-assertions are attached yet. Later, the `lang/expr`, `lang/template`,
-`lang/rule`, and `lang/script` packages parse these files and validate their
-ASTs (and the CLI/wasm golden tests consume them).
+`docs/spec/004-language.md`. The `lang/expr`, `lang/template`, `lang/rule`, and
+`lang/script` package tests consume shared fixtures, alongside the CLI parse
+matrix (T004-01), invalid-diagnostic checks (T004-02), canonicalization
+(T004-06), and format/AST stability checks (T004-08). Native and WASM consumers
+reuse the same bytes; each runner defines its supported fixture subset.
 
 ## Layout
 
@@ -31,8 +32,9 @@ the native, CLI, and wasm golden tests can consume the same bytes.
 
 ## Conventions
 
-- Syntax follows `004-language.md`, not the current partial parsers in `lang/`.
-  Fixtures may use features the parser does not implement yet.
+- Fixtures cover specified syntax as well as deliberately retained legacy and
+  migration inputs. Their presence is not a claim that every consumer supports
+  every input; check the consuming runner and diagnostic manifest.
 - `expr/`, `rule/`, and `script/` files end with a trailing newline because the
   parsers ignore surrounding whitespace. Invalid `expr-` and `rule-` fixtures
   follow the same rule.
@@ -40,8 +42,10 @@ the native, CLI, and wasm golden tests can consume the same bytes.
   their bytes are the template. Their invalid `template-string-*` and
   `template-target-*` counterparts follow the same rule. `multiline.km` carries
   its newlines deliberately.
-- Files are authored in canonical form; `format(fixture)` is expected to equal the
-  fixture once the formatter exists.
+- Canonical goldens must match their expected formatted bytes. General parse
+  fixtures need not already be canonical: T004-06 checks that formatting reaches
+  a fixed point, and T004-08 checks AST stability. Deprecated interpolation
+  fixtures deliberately change spelling during formatting; preserve those inputs.
 - Recipe lines are indented with one tab. `rule/rules/indent.km` keeps extra
   indentation inside recipe text on purpose.
 - LF line endings only.
@@ -59,7 +63,7 @@ the native, CLI, and wasm golden tests can consume the same bytes.
   slice, mixed components, selection), applications, lambdas (plain, no-arg,
   rest), pipes (deferred and placeholder), and the `?` (`special-optional`),
   `let`, `def`, `eval` special forms.
-- `template/string/`: literal text, `@(expression)`, `@{reference}`, the full
+- `template/string/`: literal text, `@(expression)`, legacy `@{reference}` migration inputs, the full
   selector table including a negative input index, escapes, mixed expansions,
   nested expressions, multiline text.
 - `template/target/`: `{name}`, `{name:*}`, `{name:**}`, `?`, character classes,

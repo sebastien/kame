@@ -24,6 +24,7 @@ const (
 	Otherwise
 	EndWhen
 	Generate
+	Composition
 )
 
 type ScriptItem struct {
@@ -104,13 +105,13 @@ func parseScript(s *Script, offset int) {
 			continue
 		}
 		if start == pos {
-			if following := parseConditional(s, start, end); following != 0 {
+			if following := rejectLegacyDirective(s, start, end); following != 0 {
 				pos = following
 				continue
 			}
 		}
-		if includePath, ok := include(text[start:end]); ok {
-			s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Include, Span: source.Span{Start: start, End: end}, Include: includePath, OptionalInclude: strings.HasPrefix(text[start:end], "include?")})
+		if legacyInclude(text[start:end]) {
+			s.error(start, end, "legacy include directive is unsupported; use (include PATH) or (include? PATH)")
 			pos = nextLine(text, lineEnd)
 			continue
 		}
@@ -177,7 +178,7 @@ func parseScript(s *Script, offset int) {
 		s.Items = slices.Append(a, s.Items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: end}, Expression: prefix.Expr})
 		pos = nextLine(text, lineEnd)
 	}
-	validateConditionals(s)
+	validateComposition(s)
 }
 
 type generatedHeaderResult struct {
@@ -255,30 +256,11 @@ func trim(text string, start int, end int) (int, int) {
 func comment(text string, start int, end int) bool {
 	return text[start] == '#' || (start+1 < end && text[start] == '/' && text[start+1] == '/')
 }
-func include(text string) (string, bool) {
-	prefix := 7
-	if strings.HasPrefix(text, "include?") {
-		prefix = 8
+func legacyInclude(text string) bool {
+	if topLevel(text, '=') >= 0 {
+		return false
 	}
-	if len(text) < prefix+2 || text[:7] != "include" || !space(text[prefix]) {
-		return "", false
-	}
-	path := text[prefix+1:]
-	for len(path) != 0 && space(path[0]) {
-		path = path[1:]
-	}
-	if len(path) == 0 {
-		return "", false
-	}
-	if path[0] == '"' && len(path) >= 2 && path[len(path)-1] == '"' {
-		path = path[1 : len(path)-1]
-	}
-	for i := 0; i < len(path); i++ {
-		if space(path[i]) {
-			return "", false
-		}
-	}
-	return path, true
+	return text == "include" || text == "include?" || strings.HasPrefix(text, "include ") || strings.HasPrefix(text, "include\t") || strings.HasPrefix(text, "include? ") || strings.HasPrefix(text, "include?\t")
 }
 
 func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEnd int) int {
@@ -386,33 +368,6 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 		}
 		if item.Kind == Comment {
 			b.WriteString(item.Text)
-			previousEnd = item.Span.End
-			continue
-		}
-		if item.Kind == When {
-			b.WriteString("when ")
-			value := expr.FormatAt(a, item.Expression, 5)
-			b.WriteString(value)
-			mem.FreeString(a, value)
-			previousEnd = item.Span.End
-			continue
-		}
-		if item.Kind == Otherwise || item.Kind == EndWhen {
-			if item.Kind == Otherwise {
-				b.WriteString("otherwise")
-			} else {
-				b.WriteString("end")
-			}
-			previousEnd = item.Span.End
-			continue
-		}
-		if item.Kind == Include {
-			if item.OptionalInclude {
-				b.WriteString("include? ")
-			} else {
-				b.WriteString("include ")
-			}
-			b.WriteString(item.Include)
 			previousEnd = item.Span.End
 			continue
 		}
