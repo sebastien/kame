@@ -12,6 +12,22 @@ func parseRender(inv *Invocation, args []string) {
 	selected, positional := false, false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if !positional && (arg == "-C" || arg == "--directory" || arg == "-f" || arg == "--file" || (len(arg) >= 12 && arg[:12] == "--directory=") || (len(arg) >= 7 && arg[:7] == "--file=")) {
+			before := len(inv.Inputs)
+			sourceOption(inv, args, &i)
+			if inv.Error.Code != "" {
+				return
+			}
+			if len(inv.Inputs) != before {
+				if selected {
+					inv.fail("OPT_CONFLICT", "render accepts one source")
+					return
+				}
+				inv.Inputs[len(inv.Inputs)-1].Lang = "template"
+				selected = true
+			}
+			continue
+		}
 		if !positional && arg == "--" {
 			positional = true
 			continue
@@ -74,6 +90,10 @@ func parseRender(inv *Invocation, args []string) {
 		}
 		if selected {
 			inv.fail("OPT_CONFLICT", "render accepts one source")
+			return
+		}
+		if arg == "" {
+			inv.fail("OPT_VALUE_INVALID", "source filename must not be empty")
 			return
 		}
 		kind := "file"

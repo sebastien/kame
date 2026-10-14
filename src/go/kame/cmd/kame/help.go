@@ -57,10 +57,17 @@ func writeCommandHelp(out io.Writer, command string) bool {
 }
 
 func runHelpCommand(args []string, out io.Writer, errOut io.Writer) int {
-	if len(args) != 0 && args[0] == "--" {
-		args = args[1:]
+	inv := cli.Parse("help", args)
+	defer inv.Free()
+	if !inv.OK {
+		cliError(errOut, inv.Error.Code, inv.Error.Message)
+		if inv.Error.Code == "CMD_UNKNOWN" && !cliDiagnosticJSON {
+			io.WriteString(errOut, "help: run 'kame do --help' to list commands\n")
+		}
+		return 2
 	}
-	if len(args) == 0 || args[0] == "help" {
+	args = inv.Args
+	if len(args) == 0 || args[0] == "help" || args[0] == "do" {
 		writeDoHelp(out)
 		return 0
 	}

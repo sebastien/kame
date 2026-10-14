@@ -34,8 +34,13 @@ func streamCommand(args []string) string {
 		if command == "run" || command == "render" || command == "cat" || command == "fmt" {
 			return command
 		}
-		if len(args) > 2 && ((command == "cache" && args[2] == "clean") || (command == "tools" && args[2] == "check")) {
-			return command
+		if command == "cache" || command == "tools" {
+			inv := cli.Parse(command, args[2:])
+			streaming := len(inv.Args) != 0 && ((command == "cache" && inv.Args[0] == "clean") || (command == "tools" && inv.Args[0] == "check"))
+			inv.Free()
+			if streaming {
+				return command
+			}
 		}
 		return ""
 	}

@@ -14,6 +14,15 @@ import (
 	"solod.dev/so/slices"
 )
 
+// languageSourcePath preserves authored spelling and returns an exactly sized
+// owned string. The OS resolves dot segments; source labels need no cleaning.
+func languageSourcePath(directory string, name string) string {
+	if path.IsAbs(name) || directory == "." {
+		return cloneCommandText(name)
+	}
+	return cloneCommandText(directory + "/" + name)
+}
+
 type sourceFile struct {
 	Name       string
 	Text       string

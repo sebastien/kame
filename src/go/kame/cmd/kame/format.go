@@ -20,11 +20,16 @@ type formatArguments struct {
 	InPlace     bool
 	Check       bool
 	Files       []string
+	Inputs      []cli.RunInput
 	OK          bool
 }
 
 func (options *formatArguments) Free() {
+	for i := range options.Files {
+		mem.FreeString(mem.System, options.Files[i])
+	}
 	slices.Free(mem.System, options.Files)
+	slices.Free(mem.System, options.Inputs)
 	*options = formatArguments{}
 }
 
@@ -36,28 +41,32 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 		return 2
 	}
 	if len(parsed.Files) == 0 {
-		// Stdin has no file to replace; in-place retains ordinary stdout output.
-		parsed.InPlace = false
 		formatHasResults = parsed.Check
-		data, readErr := io.ReadAll(mem.System, in)
-		if readErr != nil {
-			invocationCounts.Failed++
-			cliError(errOut, "FS_ERR", "cannot read stdin")
-			return 1
+		var data []byte
+		text, name := parsed.Inputs[0].Value, "<command:1>"
+		if parsed.Inputs[0].Kind == "stdin" {
+			name = "<stdin>"
+			readData, readErr := io.ReadAll(mem.System, in)
+			if readErr != nil {
+				invocationCounts.Failed++
+				cliError(errOut, "FS_ERR", "cannot read stdin")
+				return 1
+			}
+			data, text = readData, string(readData)
 		}
-		formatted, ok := formatSource(parsed.Lang, "<stdin>", string(data), parsed.Indent, parsed.IndentWidth, parsed.Comment, errOut)
-		changed := string(data) != formatted
+		formatted, ok := formatSource(parsed.Lang, name, text, parsed.Indent, parsed.IndentWidth, parsed.Comment, errOut)
+		changed := text != formatted
 		mem.FreeSlice(mem.System, data)
 		if !ok {
 			invocationCounts.Failed++
 			return 1
 		}
-		writeFormattedResult(out, errOut, "<stdin>", parsed, formatted, changed)
+		writeFormattedResult(out, errOut, name, parsed, formatted, changed)
 		invocationCounts.Completed++
 		mem.FreeString(mem.System, formatted)
 		if parsed.Check && changed {
 			if !cliDiagnosticJSON {
-				io.WriteString(out, "<stdin>\n")
+				io.WriteString(out, name+"\n")
 			}
 			return 1
 		}
@@ -142,7 +151,10 @@ func parseFormatArguments(args []string, errOut io.Writer) formatArguments {
 		inv.Free()
 		return formatArguments{}
 	}
-	return formatArguments{Lang: inv.Lang, Indent: inv.Indent, IndentWidth: inv.IndentWidth, Comment: inv.Comment, InPlace: inv.InPlace, Check: inv.Check, Files: inv.Files, OK: inv.OK}
+	for i := range inv.Files {
+		inv.Files[i] = languageSourcePath(inv.Directory, inv.Files[i])
+	}
+	return formatArguments{Lang: inv.Lang, Indent: inv.Indent, IndentWidth: inv.IndentWidth, Comment: inv.Comment, InPlace: inv.InPlace, Check: inv.Check, Files: inv.Files, Inputs: inv.Inputs, OK: inv.OK}
 }
 
 func formatSource(lang string, name string, text string, indentStyle string, indentWidth int, comment string, errOut io.Writer) (string, bool) {

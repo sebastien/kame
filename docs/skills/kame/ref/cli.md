@@ -180,6 +180,9 @@ kame do fmt -n Makefile.kmk       # report files that differ; exit 1 if any
 kame do fmt -i Makefile.kmk       # replace formatted files atomically
 kame do fmt < Makefile.kmk        # write canonical source to stdout
 kame do parse --lang script Makefile.kmk
+kame do parse --lang kash -c '$x/cp -pL -- $inputs.0 $outputs.0'
+kame do parse --lang expr --check -c '42'
+kame do fmt --lang expr -c '[1   2]'
 ```
 
 `do fmt` defaults to `script` language. `--lang` (`-l`) also accepts `expr`,
@@ -190,6 +193,26 @@ with spans; add `--json` for the stable AST document. Parsing `template` inspect
 inline syntax. Formatting `template` handles document directives with
 `--comment STYLE` and preserves non-directive bytes; never format an HTML/config
 template in `script` mode.
+
+`parse`, `fmt`, and `render` share `-c`/`--command TEXT`, `-f`/`--file FILE`,
+positional files, explicit stdin `-`, and `-C`/`--directory DIR`. Long value
+options accept `--option=value`; `--` protects dash-prefixed filenames.
+Omitted sources read stdin. Parse/render accept one source; fmt accepts multiple
+files but cannot mix files with inline/stdin input. `fmt -i` requires files;
+`fmt -n` also checks inline/stdin text. Parse `--check` validates without an AST.
+Comment styles for fmt/render are case-insensitive.
+Explicit indentation options require `rule`, `script`, `kmk`, or `kash`;
+`--indent-width` requires `--indent spaces`. `--comment` requires template mode.
+Empty option values are invalid, not unknown options. Invalid `-C` directories
+fail before source reads or effects, including inline and absolute-path input.
+Help/version still work without a valid working directory.
+
+Inspection commands reject execution-only flags and repeated single-source
+options. `cat` rejects watch/dry-run. Options may precede `tools check` and cache
+actions. `do cache clean -n` previews cache eviction without deleting records;
+it differs from ownership-aware `do clean -n`. `do help [--] COMMAND` accepts one
+topic only. Launcher-only `kame init --help` prints bootstrap usage without provisioning.
+Runner dry-run works for pure km/expr/Kash as well as mixed rule sessions.
 
 ## Evaluate a standalone expression
 

@@ -11,21 +11,19 @@ import (
 	"solod.dev/so/os"
 )
 
-type parseArgumentResult struct {
-	Lang string
-	File string
-	OK   bool
-}
-
 func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
-	parsed := parseArguments(args, errOut)
+	parsed := cli.Parse("parse", args)
+	defer parsed.Free()
 	if !parsed.OK {
+		cliError(errOut, parsed.Error.Code, parsed.Error.Message)
 		return 2
 	}
 	lang, file := parsed.Lang, parsed.File
 	name, text := "<stdin>", ""
 	var data []byte
-	if file == "" {
+	if parsed.Inputs[0].Kind == "command" {
+		name, text = "<command:1>", parsed.Inputs[0].Value
+	} else if file == "" {
 		readData, readErr := io.ReadAll(mem.System, in)
 		if readErr != nil {
 			cliError(errOut, "FS_ERR", "cannot read stdin")
@@ -33,6 +31,8 @@ func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int 
 		}
 		data, text = readData, string(readData)
 	} else {
+		file = languageSourcePath(parsed.Directory, file)
+		defer mem.FreeString(mem.System, file)
 		readData, readErr := os.ReadFile(mem.System, file)
 		if readErr != nil {
 			cliError(errOut, "FS_ERR", "cannot read source: "+file)
@@ -42,7 +42,9 @@ func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int 
 	}
 	var buffer = bytes.NewBuffer(mem.System, nil)
 	status := writeAST(&buffer, lang, name, text)
-	if cliDiagnosticJSON && status == 0 {
+	if status == 0 && parsed.Check {
+		// Parse-only validation intentionally emits no AST.
+	} else if cliDiagnosticJSON && status == 0 {
 		io.WriteString(out, buffer.String())
 	} else if !cliDiagnosticJSON && status == 0 {
 		cli.WriteReport(out, "parse "+name+" · "+lang, buffer.String(), stdoutColor)
@@ -67,16 +69,6 @@ func runParse(args []string, in io.Reader, out io.Writer, errOut io.Writer) int 
 	buffer.Free()
 	mem.FreeSlice(mem.System, data)
 	return status
-}
-
-func parseArguments(args []string, errOut io.Writer) parseArgumentResult {
-	inv := cli.Parse("parse", args)
-	defer inv.Free()
-	if !inv.OK {
-		cliError(errOut, inv.Error.Code, inv.Error.Message)
-		return parseArgumentResult{}
-	}
-	return parseArgumentResult{Lang: inv.Lang, File: inv.File, OK: inv.OK}
 }
 
 // documentField borrows a JSON record field; it must not be freed independently.

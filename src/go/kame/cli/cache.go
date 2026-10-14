@@ -6,28 +6,58 @@ import (
 )
 
 func parseCache(inv *Invocation, args []string) {
-	if len(args) == 0 || (args[0] != "list" && args[0] != "clean") {
-		inv.fail("OPT_VALUE_INVALID", "cache requires the list or clean action")
-		return
-	}
-	inv.OK = true
-	inv.Args = slices.Append(mem.System, inv.Args, args[0])
-	for i := 1; i < len(args); i++ {
+	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if arg == "--" {
+			if i+1 == len(args) {
+				break
+			}
+			inv.fail("OPT_VALUE_INVALID", "unexpected cache operands")
+			return
+		}
+		if arg == "-n" || arg == "--dry-run" {
+			inv.DryRun = true
+			continue
+		}
+		if arg == "list" || arg == "clean" {
+			if len(inv.Args) != 0 {
+				inv.fail("OPT_CONFLICT", "cache accepts one action")
+				return
+			}
+			inv.Args = slices.Append(mem.System, inv.Args, arg)
+			continue
+		}
 		if arg == "-C" || arg == "--directory" {
-			if i+1 >= len(args) || args[i+1] == "" {
+			if i+1 >= len(args) {
 				inv.fail("OPT_NO_VALUE", "missing value for "+arg)
 				return
 			}
 			i++
-			inv.Directory = args[i]
+			if !assignBuildOption(inv, arg, args[i]) {
+				return
+			}
 			continue
 		}
-		if len(arg) > len("--directory=") && arg[:len("--directory=")] == "--directory=" {
-			inv.Directory = arg[len("--directory="):]
+		if equalsValue(arg, "--directory", inv) {
+			if inv.Error.Code != "" {
+				return
+			}
 			continue
+		}
+		if len(arg) != 0 && arg[0] == '-' {
+			inv.fail("OPT_UNKNOWN", "unknown cache option: "+arg)
+			return
 		}
 		inv.fail("OPT_VALUE_INVALID", "unexpected cache argument: "+arg)
 		return
 	}
+	if len(inv.Args) == 0 {
+		inv.fail("OPT_NO_VALUE", "cache requires the list or clean action")
+		return
+	}
+	if inv.DryRun && inv.Args[0] != "clean" {
+		inv.fail("OPT_CONFLICT", "--dry-run requires cache clean")
+		return
+	}
+	inv.OK = true
 }

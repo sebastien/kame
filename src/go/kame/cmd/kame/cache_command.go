@@ -98,6 +98,7 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 		return 0
 	}
 	removed := 0
+	wouldRemove := 0
 	for i := range buckets {
 		name := path.Join(mem.System, parsed.Directory, ".kame/cache/"+buckets[i].Directory)
 		entries, err := os.ReadDir(mem.System, name)
@@ -114,6 +115,11 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 			file := path.Join(mem.System, name, entries[j].Name)
 			info, statErr := os.Lstat(file)
 			if statErr == nil && info.Mode().IsRegular() {
+				if parsed.DryRun {
+					wouldRemove++
+					mem.FreeString(mem.System, file)
+					continue
+				}
 				removeErr := os.Remove(file)
 				if removeErr == nil {
 					removed++
@@ -146,10 +152,20 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 		e.Str("cache-clean-result")
 		e.Str("removed")
 		e.Int(int64(removed))
+		if parsed.DryRun {
+			e.Str("wouldRemove")
+			e.Int(int64(wouldRemove))
+			e.Str("dryRun")
+			e.Bool(true)
+		}
 		e.EndObject()
 		e.Flush()
 		io.WriteString(out, "\n")
 	} else {
+		if parsed.DryRun {
+			io.WriteString(errOut, "cache clean · would remove "+strconv.Itoa(buffer, wouldRemove)+" cache records\n")
+			return 0
+		}
 		cli.Style(errOut, "status.success", "done ", diagnosticColor == "always")
 		io.WriteString(errOut, "cache clean · removed "+strconv.Itoa(buffer, removed)+" cache records\n")
 	}

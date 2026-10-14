@@ -51,8 +51,13 @@ int main(int argc, char **argv) {
         {"do", "run", "--lang", "expr", "-c", "(let [root \"./src\"] (match? @(root)/{name:*} \"./src/file\"))"},
         {"do", "run", "--lang", "expr", "-c", "(let [root \"./src\" output \"./build\"] (sub @(root)/{name:*} @(output)/{name}.o \"./src/file\"))"},
         {"do", "run", "--lang", "expr", "-c", "./{name:@(nop \"*\")}"},
+        {"do", "parse", "--lang", "kash", "-c", "$x/cp -pL -- $inputs.0 $outputs.0"},
+        {"do", "parse", "--lang", "expr", "--check", "-c", "42"},
+        {"do", "fmt", "--lang", "expr", "-c", "[1   2]"},
+        {"do", "fmt", "--lang", "expr", "-f", "missing.km", "-C", "."},
+        {"do", "tools", "-C", ".", "check", "-c", "default :", "default", "--json"},
     };
-    const so_int statuses[] = {1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1, 1, 0, 0, 1};
+    const so_int statuses[] = {1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0};
     for (int iteration = 0; iteration < 256; iteration++) {
         test_cli_invalid_ast();
         mem_Stats ast_stats = mem_Tracker_Stats(&tracker);
@@ -81,10 +86,13 @@ int main(int argc, char **argv) {
             bytes_Buffer_Free(&output);
             bytes_Buffer_Free(&errors);
             mem_Stats stats = mem_Tracker_Stats(&tracker);
+            if (stats.Alloc != 0 || stats.Mallocs != stats.Frees) {
+                fprintf(stderr, "CLI case %zu (%s): %lld live bytes\n", test, cases[test][0], (long long)stats.Alloc);
+            }
             assert(stats.Alloc == 0 && stats.Mallocs == stats.Frees);
         }
     }
     mem_System = original;
-    puts("PASS compiled Solod CLI: native diagnostic/presentation cases and 4096 invocations, zero live allocations");
+    puts("PASS compiled Solod CLI: native diagnostic/presentation/source cases, zero live allocations");
     return 0;
 }

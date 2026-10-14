@@ -124,7 +124,7 @@ func parseRun(args []string, discover bool) Invocation {
 			continue
 		}
 		if arg == "-n" || arg == "--dry-run" {
-			inv.DryRun, ruleOptions = true, true
+			inv.DryRun = true
 			continue
 		}
 		if arg == "--force" {
@@ -140,17 +140,25 @@ func parseRun(args []string, discover bool) Invocation {
 			continue
 		}
 		if assignmentOperand(&inv, arg) {
-			if inv.Error.Code != "" { return inv }
+			if inv.Error.Code != "" {
+				return inv
+			}
 			if len(arg) >= 4 && arg[:4] == "env." {
 				processOptions = true
 				continue
 			}
-			if !discover && len(inv.Inputs) == 0 { continue }
-			if !discover && inv.Inputs[len(inv.Inputs)-1].Lang != "kmk" { continue }
+			if !discover && len(inv.Inputs) == 0 {
+				continue
+			}
+			if !discover && inv.Inputs[len(inv.Inputs)-1].Lang != "kmk" {
+				continue
+			}
 			// Keep task arguments as entries, never reinterpret their value as a file.
 			if discover {
 				inv.Inputs[0].Entries = slices.Append(mem.System, inv.Inputs[0].Entries, arg)
-			} else if !runEntry(&inv, arg) { return inv }
+			} else if !runEntry(&inv, arg) {
+				return inv
+			}
 			continue
 		}
 		if !discover && (arg == "-" || runLanguage(arg) != "") {
@@ -183,8 +191,11 @@ func parseRun(args []string, discover bool) Invocation {
 	}
 	// A later file/parser cannot broaden the first fragment's authority.
 	inv.NoDefaultGrants = !runProcessLanguage(inv.Inputs[0].Lang)
-	rules, processes := false, false
+	rules, processes, scripts := false, false, false
 	for i := range inv.Inputs {
+		if inv.Inputs[i].Lang == "km" {
+			scripts = true
+		}
 		if inv.Inputs[i].Lang == "kmk" {
 			rules = true
 		}
@@ -194,6 +205,10 @@ func parseRun(args []string, discover bool) Invocation {
 	}
 	if (ruleOptions && !rules) || (processOptions && !processes) {
 		inv.fail("OPT_CONFLICT", "option requires rule or process source work")
+		return inv
+	}
+	if inv.PrintResult && !scripts {
+		inv.fail("OPT_CONFLICT", "--print-result requires km source work")
 		return inv
 	}
 	inv.OK = true
@@ -242,7 +257,7 @@ func SelectsRun(args []string) bool {
 			i++
 			continue
 		}
-		if len(arg) > 7 && arg[:7] == "--lang=" {
+		if len(arg) >= 7 && arg[:7] == "--lang=" {
 			language = true
 			continue
 		}
@@ -257,8 +272,15 @@ func SelectsRun(args []string) bool {
 			continue
 		}
 		assignment := false
-		for j := range arg { if arg[j] == '=' { assignment = true; break } }
-		if assignment { continue }
+		for j := range arg {
+			if arg[j] == '=' {
+				assignment = true
+				break
+			}
+		}
+		if assignment {
+			continue
+		}
 		return language || runLanguage(arg) != ""
 	}
 	return language

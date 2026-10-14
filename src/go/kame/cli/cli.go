@@ -7,6 +7,7 @@ package cli
 import (
 	"kame/lang/definition"
 	"kame/lang/eval"
+	"kame/lang/template"
 	"solod.dev/so/bytes"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
@@ -22,18 +23,18 @@ type Diagnostic struct {
 // Invocation is the normalized result of parsing one command line. Fields are a
 // superset of every command's needs; each command reads the ones it uses.
 type Invocation struct {
-	Name             string
-	Command          string
-	File             string
-	Directory        string
-	Jobs             int
-	DryRun           bool
-	Watch            bool
-	Force            bool
-	JSON             bool
-	Output           string
-	EarlyAction      string
-	HelpTopic        string
+	Name        string
+	Command     string
+	File        string
+	Directory   string
+	Jobs        int
+	DryRun      bool
+	Watch       bool
+	Force       bool
+	JSON        bool
+	Output      string
+	EarlyAction string
+	HelpTopic   string
 	// HelpResult owns the rendered response of the internal @help query.
 	// Command and all other option strings continue to borrow argv.
 	HelpResult       string
@@ -140,6 +141,25 @@ func parseCommand(command string, args []string) Invocation {
 	}
 	inv := Invocation{Name: command, Directory: ".", Jobs: 1, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
 	if command == "help" {
+		if len(args) != 0 && args[0] == "--" {
+			args = args[1:]
+		}
+		if len(args) > 1 {
+			inv.fail("OPT_VALUE_INVALID", "help accepts at most one command")
+			return inv
+		}
+		if len(args) == 1 {
+			known := args[0] == "do"
+			for i := range Commands {
+				if Commands[i].Name == args[0] {
+					known = true
+				}
+			}
+			if !known {
+				inv.fail("CMD_UNKNOWN", "unknown command: "+args[0])
+				return inv
+			}
+		}
 		inv.Args = slices.Clone(mem.System, args)
 		inv.OK = true
 		return inv
@@ -187,8 +207,26 @@ func parseCommand(command string, args []string) Invocation {
 		parseGraph(&inv, args, false)
 		return inv
 	}
-	// cat and tools accept the common build options only.
+	// Cat executes; tools only inspects. Both use command-specific build validation.
 	parseBuild(&inv, args)
+	if inv.OK && command == "cat" && inv.DryRun {
+		inv.fail("OPT_CONFLICT", "cat does not support dry-run")
+	}
+	if inv.OK && command == "cat" && len(inv.Targets) > 1 {
+		inv.fail("OPT_VALUE_INVALID", "cat accepts at most one target")
+	}
+	if inv.OK && command == "tools" {
+		if len(inv.Targets) != 0 && inv.Targets[0] == "check" {
+			inv.Args = slices.Append(mem.System, inv.Args, "check")
+			copy(inv.Targets, inv.Targets[1:])
+			inv.Targets = inv.Targets[:len(inv.Targets)-1]
+			if len(inv.Targets) == 0 {
+				inv.fail("OPT_NO_VALUE", "tools check requires at least one target")
+			}
+		} else if len(inv.Targets) != 0 {
+			inv.fail("OPT_VALUE_INVALID", "tools does not accept targets")
+		}
+	}
 	return inv
 }
 
@@ -219,6 +257,17 @@ func parseBuild(inv *Invocation, args []string) {
 		if arg == "--" {
 			afterOptions = true
 			continue
+		}
+		option := arg
+		for j := range arg {
+			if arg[j] == '=' {
+				option = arg[:j]
+				break
+			}
+		}
+		if inv.Name != "" && inv.Name != "build" && inv.Name != "cat" && (option == "-n" || option == "--dry-run" || option == "--force" || option == "--verbose" || option == "-j" || option == "--jobs" || option == "--shell" || option == "--timeout" || option == "--retry" || option == "--log-limit" || option == "--capture-limit" || option == "--env") {
+			inv.fail("OPT_UNKNOWN", "execution option is not supported by "+inv.Name+": "+option)
+			return
 		}
 		if arg == "-n" || arg == "--dry-run" {
 			inv.DryRun = true
@@ -264,8 +313,12 @@ func parseBuild(inv *Invocation, args []string) {
 			return
 		}
 		if assignmentOperand(inv, arg) {
-			if inv.Error.Code != "" { return }
-			if len(arg) >= 4 && arg[:4] == "env." { continue }
+			if inv.Error.Code != "" {
+				return
+			}
+			if len(arg) >= 4 && arg[:4] == "env." {
+				continue
+			}
 		}
 		inv.Targets = slices.Append(mem.System, inv.Targets, arg)
 	}
@@ -284,7 +337,9 @@ func parseBuild(inv *Invocation, args []string) {
 // is a definition or a task argument; that requires the compiled declarations.
 func assignmentOperand(inv *Invocation, arg string) bool {
 	for i := range arg {
-		if arg[i] != '=' { continue }
+		if arg[i] != '=' {
+			continue
+		}
 		if len(arg) >= 4 && arg[:4] == "env." {
 			if i <= 4 || !definition.ValidName(arg[4:i]) {
 				inv.fail("OPT_VALUE_INVALID", "environment assignment must be env.NAME=VALUE")
@@ -362,10 +417,18 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 		return false
 	}
 	if option == "-f" || option == "--file" {
+		if inv.File != "" {
+			inv.fail("OPT_CONFLICT", "command accepts only one file source")
+			return false
+		}
 		inv.File = value
 		return true
 	}
 	if option == "-c" || option == "--command" {
+		if inv.Command != "" {
+			inv.fail("OPT_CONFLICT", "command accepts only one inline source")
+			return false
+		}
 		inv.Command = value
 		return true
 	}
@@ -459,7 +522,10 @@ func parseGraph(inv *Invocation, args []string, allowExpand bool) {
 			continue
 		}
 		if arg == "--affected" {
-			if inv.Name != "plan" { inv.fail("OPT_UNKNOWN", "unknown option: --affected"); return }
+			if inv.Name != "plan" {
+				inv.fail("OPT_UNKNOWN", "unknown option: --affected")
+				return
+			}
 			inv.Affected = true
 			continue
 		}
@@ -478,7 +544,7 @@ func parseGraph(inv *Invocation, args []string, allowExpand bool) {
 			continue
 		}
 		prefix := "--depth="
-		if len(arg) > len(prefix) && arg[:len(prefix)] == prefix {
+		if len(arg) >= len(prefix) && arg[:len(prefix)] == prefix {
 			depth, valid := parseDepth(arg[len(prefix):])
 			if !valid {
 				inv.fail("OPT_VALUE_INVALID", "depth must be -1 or a nonnegative integer")
@@ -509,8 +575,27 @@ func parseDepth(value string) (int, bool) {
 
 // parseFormat mirrors do fmt.
 func parseFormat(inv *Invocation, args []string) {
+	after := false
+	indentSelected, widthSelected, commentSelected := false, false, false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
+		if !after && arg == "--" {
+			after = true
+			continue
+		}
+		if after || arg == "-" {
+			languageFile(inv, arg)
+			if inv.Error.Code != "" {
+				return
+			}
+			continue
+		}
+		if sourceOption(inv, args, &i) {
+			if inv.Error.Code != "" {
+				return
+			}
+			continue
+		}
 		if arg == "-i" || arg == "--in-place" {
 			inv.InPlace = true
 			continue
@@ -528,11 +613,12 @@ func parseFormat(inv *Invocation, args []string) {
 			inv.Lang = args[i]
 			continue
 		}
-		if len(arg) > 7 && arg[:7] == "--lang=" {
+		if len(arg) >= 7 && arg[:7] == "--lang=" {
 			inv.Lang = arg[7:]
 			continue
 		}
 		if arg == "--indent" {
+			indentSelected = true
 			if i+1 == len(args) {
 				inv.fail("OPT_NO_VALUE", "missing value for --indent")
 				return
@@ -542,6 +628,7 @@ func parseFormat(inv *Invocation, args []string) {
 			continue
 		}
 		if arg == "--comment" {
+			commentSelected = true
 			if i+1 == len(args) {
 				inv.fail("OPT_NO_VALUE", "missing value for --comment")
 				return
@@ -550,15 +637,18 @@ func parseFormat(inv *Invocation, args []string) {
 			inv.Comment = args[i]
 			continue
 		}
-		if len(arg) > len("--comment=") && arg[:len("--comment=")] == "--comment=" {
+		if len(arg) >= len("--comment=") && arg[:len("--comment=")] == "--comment=" {
+			commentSelected = true
 			inv.Comment = arg[len("--comment="):]
 			continue
 		}
-		if len(arg) > len("--indent=") && arg[:len("--indent=")] == "--indent=" {
+		if len(arg) >= len("--indent=") && arg[:len("--indent=")] == "--indent=" {
+			indentSelected = true
 			inv.Indent = arg[len("--indent="):]
 			continue
 		}
 		if arg == "--indent-width" {
+			widthSelected = true
 			if i+1 == len(args) {
 				inv.fail("OPT_NO_VALUE", "missing value for --indent-width")
 				return
@@ -572,7 +662,8 @@ func parseFormat(inv *Invocation, args []string) {
 			inv.IndentWidth = width
 			continue
 		}
-		if len(arg) > len("--indent-width=") && arg[:len("--indent-width=")] == "--indent-width=" {
+		if len(arg) >= len("--indent-width=") && arg[:len("--indent-width=")] == "--indent-width=" {
+			widthSelected = true
 			value := arg[len("--indent-width="):]
 			width, valid := parseIndentWidth(value)
 			if !valid {
@@ -586,7 +677,10 @@ func parseFormat(inv *Invocation, args []string) {
 			inv.fail("OPT_UNKNOWN", "unknown option: "+arg)
 			return
 		}
-		inv.Files = slices.Append(mem.System, inv.Files, arg)
+		languageFile(inv, arg)
+		if inv.Error.Code != "" {
+			return
+		}
 	}
 	if inv.InPlace && inv.Check {
 		inv.fail("OPT_CONFLICT", "-i and -n cannot be used together")
@@ -600,20 +694,36 @@ func parseFormat(inv *Invocation, args []string) {
 		inv.fail("OPT_VALUE_INVALID", "invalid indent style: "+inv.Indent)
 		return
 	}
-	if inv.Comment != "" && !isCommentStyle(inv.Comment) {
+	if commentSelected && !isCommentStyle(inv.Comment) {
 		inv.fail("OPT_VALUE_INVALID", "invalid comment style: "+inv.Comment)
 		return
+	}
+	if (indentSelected || widthSelected) && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "kmk" && inv.Lang != "kash" {
+		inv.fail("OPT_CONFLICT", "indent options require rule, script, kmk, or kash language")
+		return
+	}
+	if widthSelected && inv.Indent != "spaces" {
+		inv.fail("OPT_CONFLICT", "--indent-width requires --indent spaces")
+		return
+	}
+	if commentSelected && inv.Lang != "template" {
+		inv.fail("OPT_CONFLICT", "--comment requires template language")
+		return
+	}
+	if !validateLanguageSources(inv, true) {
+		return
+	}
+	for i := range inv.Inputs {
+		if inv.Inputs[i].Kind == "file" {
+			inv.Files = slices.Append(mem.System, inv.Files, inv.Inputs[i].Value)
+		}
 	}
 	inv.OK = true
 }
 
 func isCommentStyle(value string) bool {
-	switch value {
-	case "auto", "plain", "none", "html", "c", "hash", "dash", "semi", "percent", "powershell", "batch":
-		return true
-	default:
-		return false
-	}
+	_, ok := template.NormalizeStyle(value)
+	return ok
 }
 
 func parseIndentWidth(value string) (int, bool) {
@@ -637,17 +747,33 @@ func parseIndentWidth(value string) (int, bool) {
 // parseParse mirrors do parse. Unlike do fmt, --lang has no default.
 func parseParse(inv *Invocation, args []string) {
 	inv.Lang = ""
+	after := false
+	languageSelected := false
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
-		if arg == "--" {
-			if i+2 != len(args) || inv.File != "" {
-				inv.fail("OPT_VALUE_INVALID", "parse accepts at most one file")
+		if !after && arg == "--" {
+			after = true
+			continue
+		}
+		if after || arg == "-" {
+			languageFile(inv, arg)
+			if inv.Error.Code != "" {
 				return
 			}
-			inv.File = args[i+1]
-			break
+			continue
+		}
+		if sourceOption(inv, args, &i) {
+			if inv.Error.Code != "" {
+				return
+			}
+			continue
+		}
+		if arg == "--check" {
+			inv.Check = true
+			continue
 		}
 		if arg == "-l" || arg == "--lang" {
+			languageSelected = true
 			if i+1 == len(args) {
 				inv.fail("OPT_NO_VALUE", "missing value for --lang")
 				return
@@ -656,7 +782,8 @@ func parseParse(inv *Invocation, args []string) {
 			inv.Lang = args[i]
 			continue
 		}
-		if len(arg) > 7 && arg[:7] == "--lang=" {
+		if len(arg) >= 7 && arg[:7] == "--lang=" {
+			languageSelected = true
 			inv.Lang = arg[7:]
 			continue
 		}
@@ -664,19 +791,24 @@ func parseParse(inv *Invocation, args []string) {
 			inv.fail("OPT_UNKNOWN", "unknown option: "+arg)
 			return
 		}
-		if inv.File != "" {
-			inv.fail("OPT_VALUE_INVALID", "parse accepts at most one file")
+		languageFile(inv, arg)
+		if inv.Error.Code != "" {
 			return
 		}
-		inv.File = arg
 	}
-	if inv.Lang == "" {
+	if !languageSelected {
 		inv.fail("OPT_NO_VALUE", "missing required --lang")
 		return
 	}
 	if inv.Lang != "expr" && inv.Lang != "template" && inv.Lang != "rule" && inv.Lang != "script" && inv.Lang != "km" && inv.Lang != "kmk" && inv.Lang != "kash" {
 		inv.fail("OPT_VALUE_INVALID", "invalid language: "+inv.Lang)
 		return
+	}
+	if !validateLanguageSources(inv, false) {
+		return
+	}
+	if inv.Inputs[0].Kind == "file" {
+		inv.File = inv.Inputs[0].Value
 	}
 	inv.OK = true
 }

@@ -7,6 +7,12 @@
 # stdout except its own --version answer.
 set -eu
 
+# Bootstrap help must not select, download, or provision a backend.
+if [ "${1:-}" = "init" ] && [ "$#" -eq 2 ] && { [ "$2" = "--help" ] || [ "$2" = "-h" ]; }; then
+	printf '%s\n' 'Usage: kame init' 'Create Makefile.bootstrap in the current directory without overwriting an existing file.' 'Launcher-only command; KAME_VERSION selects the pinned release.'
+	exit 0
+fi
+
 # Stamped to the pinned version at release time. Empty in a source checkout,
 # where the version comes from a VERSION file.
 KAME_STAMP=""

@@ -36,7 +36,7 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	startedAt := time.Now()
 	command := streamCommand(args)
 	dashboardCommand = command
-	dryRun := (command == "build" || command == "run") && hasDryRun(args)
+	dryRun := (command == "build" || command == "run" || command == "cache") && hasDryRun(args)
 	dashboardDryRun = dryRun
 	if command != "" && cliDiagnosticJSON {
 		cli.WriteInvocation(out, command, dryRun)
@@ -108,6 +108,9 @@ func runCommand(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 			return 0
 		}
 		if isDoCommand(args[1]) {
+			if !validateCommandDirectory(args[1], args[2:], errOut) {
+				return 1
+			}
 			return runDoCommand(args[1], args[2:], in, out, errOut)
 		}
 		message := cli.RemovedCommandMessage(args[1])
@@ -120,10 +123,29 @@ func runCommand(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 		}
 		return 2
 	}
+	if !validateCommandDirectory("", args, errOut) {
+		return 1
+	}
 	if cli.SelectsRun(args) || cli.AppendsCommands(args) {
 		return runPrimarySession(args, in, out, errOut)
 	}
 	return runBuild(args, out, errOut, false)
+}
+
+// Check directory selection once for every native command, before source reads
+// or effects. Leave syntax diagnostics to the command's normal parser/handler.
+func validateCommandDirectory(command string, args []string, errOut io.Writer) bool {
+	inv := cli.Parse(command, args)
+	defer inv.Free()
+	if !inv.OK || command == "help" {
+		return true
+	}
+	info, err := os.Stat(inv.Directory)
+	if err != nil || !info.IsDir() {
+		cliError(errOut, "FS_ERR", "cannot use working directory: "+inv.Directory)
+		return false
+	}
+	return true
 }
 
 func runDoCommand(command string, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {

@@ -3159,7 +3159,7 @@ function applyDirectory(inv) {
     try {
       process.chdir(inv.directory);
     } catch (error) {
-      throw Object.assign(new Error(`cannot change directory: ${error.message}`), { code: 'FS_ERR' });
+      throw Object.assign(new Error(`cannot use working directory: ${inv.directory}`), { code: 'FS_ERR' });
     }
   }
 }
@@ -3197,13 +3197,16 @@ function failure(code, message) {
 async function runParse(module, inv) {
   let name = '<stdin>';
   let text = '';
-  if (inv.file) {
+  if (inv.inputs[0].kind === 'command') {
+    name = '<command:1>';
+    text = inv.inputs[0].value;
+  } else if (inv.file) {
     try {
       text = await readFile(inv.file, 'utf8');
     } catch (error) {
       return failure('FS_ERR', `cannot read source: ${inv.file}`);
     }
-    name = inv.file;
+    name = isAbsolute(inv.file) || inv.directory === '.' ? inv.file : `${inv.directory}/${inv.file}`;
   } else {
     text = await readStdin();
   }
@@ -3213,7 +3216,7 @@ async function runParse(module, inv) {
     primarySource = { name, text };
     throw Object.assign(new Error('source has errors'), { diagnostics: document.diagnostics.map((entry) => ({ code: entry.code, severity: entry.severity, message: entry.message, source: name, span: entry.span })) });
   }
-  writeReport(`parse ${name} · ${inv.lang}`, bytes);
+  if (!inv.check) writeReport(`parse ${name} · ${inv.lang}`, bytes);
   return 0;
 }
 
@@ -3363,28 +3366,30 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
 
 async function runFmt(module, inv) {
   if (inv.files.length === 0) {
-    const text = await readStdin();
-    const bytes = await module.format(inv.lang, '<stdin>', text, inv.indent, inv.indentWidth, inv.comment);
+    const name = inv.inputs[0].kind === 'command' ? '<command:1>' : '<stdin>';
+    const text = inv.inputs[0].kind === 'command' ? inv.inputs[0].value : await readStdin();
+    const bytes = await module.format(inv.lang, name, text, inv.indent, inv.indentWidth, inv.comment);
     const changed = Buffer.from(bytes).toString('utf8') !== text;
     const action = inv.check ? 'check' : 'format';
-    if (jsonMode) writeDataResult('format-result', { source: '<stdin>', action, changed }, bytes, action === 'format');
+    if (jsonMode) writeDataResult('format-result', { source: name, action, changed }, bytes, action === 'format');
     else if (inv.check) {
-      if (changed) stdout.write('<stdin>\n');
-      stderr.write(`${styled('status.success', 'done')} fmt <stdin> · ${changed ? 'would change' : 'unchanged'}\n`);
+      if (changed) stdout.write(`${name}\n`);
+      stderr.write(`${styled('status.success', 'done')} fmt ${name} · ${changed ? 'would change' : 'unchanged'}\n`);
     } else stdout.write(bytes);
     formatCounts.completed++;
     return inv.check && changed ? 1 : 0;
   }
   let different = false;
   for (const file of inv.files) {
+    const name = isAbsolute(file) || inv.directory === '.' ? file : `${inv.directory}/${file}`;
     let text;
     try {
       text = await readFile(file, 'utf8');
     } catch (error) {
       return failure('FS_ERR', `cannot read source: ${file}`);
     }
-    primarySource = { name: file, text };
-    const bytes = await module.format(inv.lang, file, text, inv.indent, inv.indentWidth, inv.comment);
+    primarySource = { name, text };
+    const bytes = await module.format(inv.lang, name, text, inv.indent, inv.indentWidth, inv.comment);
     const changed = new TextDecoder().decode(bytes) !== text;
     if (inv.check && changed) different = true;
     if (inv.inPlace && changed) {
@@ -3395,11 +3400,11 @@ async function runFmt(module, inv) {
       }
     }
     const action = inv.check ? 'check' : inv.inPlace ? 'in-place' : 'format';
-    if (jsonMode) writeDataResult('format-result', { source: file, action, changed }, bytes, action === 'format');
+    if (jsonMode) writeDataResult('format-result', { source: name, action, changed }, bytes, action === 'format');
     else if (action === 'format') stdout.write(bytes);
     else {
-      if (inv.check && changed) stdout.write(`${file}\n`);
-      stderr.write(`${styled('status.success', 'done')} fmt ${file} · ${changed ? inv.check ? 'would change' : 'formatted' : 'unchanged'}\n`);
+      if (inv.check && changed) stdout.write(`${name}\n`);
+      stderr.write(`${styled('status.success', 'done')} fmt ${name} · ${changed ? inv.check ? 'would change' : 'formatted' : 'unchanged'}\n`);
     }
     formatCounts.completed++;
   }
@@ -3444,8 +3449,8 @@ function shortReportField(text) {
 }
 
 async function runTools(module, inv, sourceDirectory) {
-  const check = inv.targets[0] === 'check';
-  let targets = check ? inv.targets.slice(1) : inv.targets;
+  const check = inv.args[0] === 'check';
+  let targets = inv.targets;
   if (!check && targets.length !== 0) return usageError('OPT_VALUE_INVALID', 'tools does not accept targets');
   if (check && targets.length === 0) return usageError('OPT_VALUE_INVALID', 'tools check requires at least one target');
   const source = await discoverBuildSource(module, inv, sourceDirectory);
@@ -4014,7 +4019,7 @@ async function dispatch(module, inv, noArguments) {
   formatCounts = { completed: 0, failed: 0, cancelled: 0 };
   const started = performance.now();
   if (inv.dryRun && !jsonMode) stderr.write(`info ${presentationCommand}: dry-run · no effects or processes\n`);
-  const streaming = ['', 'run', 'render', 'cat', 'fmt'].includes(inv.name) || (inv.name === 'cache' && inv.args[0] === 'clean') || (inv.name === 'tools' && inv.targets[0] === 'check');
+  const streaming = ['', 'run', 'render', 'cat', 'fmt'].includes(inv.name) || (inv.name === 'cache' && inv.args[0] === 'clean') || (inv.name === 'tools' && inv.args[0] === 'check');
   if (streaming && jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'invocation-started', command: presentationCommand, ...(inv.dryRun ? { dryRun: true } : {}) })}\n`);
   let status;
   try { status = await dispatchCommand(module, inv, noArguments); }
@@ -4104,6 +4109,7 @@ function runCache(inv) {
     return 0;
   }
   let removed = 0;
+  let wouldRemove = 0;
   for (const [, relative] of buckets) {
     const directory = join(process.cwd(), relative);
     let names;
@@ -4111,14 +4117,14 @@ function runCache(inv) {
     catch (error) { if (error.code === 'ENOENT') continue; throw Object.assign(new Error(`cannot inspect cache directory: ${error.message}`), { code: 'FS_ERR' }); }
     for (const key of names) {
       try {
-        if (lstatSync(join(directory, key)).isFile()) { unlinkSync(join(directory, key)); removed++; }
+        if (lstatSync(join(directory, key)).isFile()) { if (inv.dryRun) wouldRemove++; else { unlinkSync(join(directory, key)); removed++; } }
       } catch (error) {
         if (error.code !== 'ENOENT') throw Object.assign(new Error(`cannot remove cache record: ${error.message}`), { code: 'FS_ERR' });
       }
     }
   }
-  if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'cache-clean-result', removed })}\n`);
-  else stderr.write(`${styled('status.success', 'done')} cache clean · removed ${removed} cache records\n`);
+  if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'cache-clean-result', removed, ...(inv.dryRun ? { dryRun: true, wouldRemove } : {}) })}\n`);
+  else stderr.write(`${styled('status.success', 'done')} cache clean · ${inv.dryRun ? `would remove ${wouldRemove}` : `removed ${removed}`} cache records\n`);
   return 0;
 }
 
@@ -4175,7 +4181,11 @@ async function main() {
     if (command === undefined) {
       return showHelp('do');
     }
-    if (command === 'help') return showHelp(args[2] || 'do');
+    if (command === 'help') {
+      const inv = await module.parseCLI('help', args.slice(2));
+      if (!inv.ok) { diagnostic(inv.error.code, inv.error.message); return 2; }
+      return showHelp(inv.args[0] || 'do');
+    }
     if (!commands.includes(command)) {
       const inv = await module.parseCLI(command, args.slice(2)); diagnostic(inv.error.code || 'CMD_UNKNOWN', inv.error.message || `unknown command: ${command}`); return 2;
     }

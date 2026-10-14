@@ -19,16 +19,20 @@ func parseClean(inv *Invocation, args []string) {
 			continue
 		}
 		if !after && (arg == "-C" || arg == "--directory") {
-			if i+1 == len(args) || args[i+1] == "" {
+			if i+1 == len(args) {
 				inv.fail("OPT_NO_VALUE", "missing directory")
 				return
 			}
 			i++
-			inv.Directory = args[i]
+			if !assignBuildOption(inv, arg, args[i]) {
+				return
+			}
 			continue
 		}
-		if !after && len(arg) > 12 && arg[:12] == "--directory=" {
-			inv.Directory = arg[12:]
+		if !after && equalsValue(arg, "--directory", inv) {
+			if inv.Error.Code != "" {
+				return
+			}
 			continue
 		}
 		if !after && (arg == "-n" || arg == "--dry-run") {
@@ -37,7 +41,7 @@ func parseClean(inv *Invocation, args []string) {
 		}
 		if !after && (arg == "--keep" || arg == "--release") {
 			if inv.Command != "" {
-				inv.fail("OPT_VALUE_INVALID", "clean protection modes are mutually exclusive")
+				inv.fail("OPT_CONFLICT", "clean protection modes are mutually exclusive")
 				return
 			}
 			inv.Command = arg

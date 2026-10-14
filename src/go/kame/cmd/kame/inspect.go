@@ -27,13 +27,12 @@ func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 }
 
 func runTools(args []string, out io.Writer, errOut io.Writer) int {
-	check := len(args) != 0 && args[0] == "check"
-	if check {
-		args = args[1:]
-	}
-	parsed := parseBuildArguments(args, errOut)
+	parsed := cli.Parse("tools", args)
+	applyInvocationPresentation(&parsed)
+	check := len(parsed.Args) != 0
 	defer parsed.Free()
 	if !parsed.OK {
+		cliError(errOut, parsed.Error.Code, parsed.Error.Message)
 		return 2
 	}
 	if !check && len(parsed.Targets) != 0 {
@@ -114,9 +113,11 @@ func checkTargetTools(p *program.Program, machine bool, targets []string, out io
 }
 
 func runCat(args []string, out io.Writer, errOut io.Writer) int {
-	parsed := parseBuildArguments(args, errOut)
+	parsed := cli.Parse("cat", args)
+	applyInvocationPresentation(&parsed)
 	defer parsed.Free()
 	if !parsed.OK {
+		cliError(errOut, parsed.Error.Code, parsed.Error.Message)
 		return 2
 	}
 	session := openBuildSession(parsed, errOut, true)
@@ -253,7 +254,9 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	defer buffer.Free()
 	if kind != "span" {
 		query := kind
-		if graph.Build.Affected { query = "affected" }
+		if graph.Build.Affected {
+			query = "affected"
+		}
 		graphDiagnostic = session.Program.WriteInspection(&buffer, targets, graph.Depth, query)
 	} else {
 		graphDiagnostic = session.Program.WriteSpan(&buffer, targets[0], graph.Depth, graph.Expand)
@@ -269,7 +272,9 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	} else {
 		var heading = bytes.NewBuffer(mem.System, nil)
 		fmt.Fprintf(&heading, "%s", kind)
-		for i := range targets { io.WriteString(&heading, " "+targets[i]) }
+		for i := range targets {
+			io.WriteString(&heading, " "+targets[i])
+		}
 		fmt.Fprintf(&heading, " · depth %d", graph.Depth)
 		cli.WriteReport(out, heading.String(), buffer.String(), stdoutColor)
 		heading.Free()

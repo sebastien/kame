@@ -36,6 +36,10 @@ test-go: $(KAME_DIR)/cmd/kame/version_generated.go build/kame.debug test-native-
 test-cli: build/kame.debug
 	tests/harness.sh
 
+.PHONY: test-cli-options
+test-cli-options: build/kame.debug dist-wasm
+	tests/T009-17-cli-options.sh
+
 test-presentation: build/kame.debug dist-wasm
 	tests/T036-01-cli-presentation.sh
 	tests/T036-02-cli-reuse-reasons.sh

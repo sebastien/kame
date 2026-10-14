@@ -190,8 +190,8 @@ def check_host(host: list[str], root: Path) -> None:
 		assert payload(rows, "summary")["status"] == ("different" if changed else "success"), rows
 		result = invoke(host, ["do", "fmt", "--check"], project, text, status=int(changed))
 		assert result.stdout == (b"<stdin>\n" if changed else b""), result
-	result = invoke(host, ["do", "fmt", "--in-place"], project, b"v=42\n")
-	assert result.stdout == b"v = 42\n" and not result.stderr, result
+	result = invoke(host, ["do", "fmt", "--in-place"], project, b"v=42\n", status=2)
+	assert b"OPT_CONFLICT" in result.stderr and result.stdout == b"", result
 	rows = records(invoke(host, ["do", "fmt", "--json", "--in-place", "source.kmk"], project))
 	assert payload(rows, "format-result")["action"] == "in-place" and (project / "source.kmk").read_bytes() == b"v = 42\n"
 	assert payload(records(invoke(host, ["do", "render", "--json", "--check", "-c", "hello"], project)), "render-result")["action"] == "check"
