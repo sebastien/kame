@@ -3,6 +3,7 @@ package cli_test
 import (
 	"kame/cli"
 	"kame/lang/eval"
+	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
 
@@ -149,21 +150,30 @@ func TestBuildDefinitionOverrideGrammar(t *testing.T) {
 }
 
 func TestTypedDefinitionOverrideGrammar(t *testing.T) {
-	inv := cli.Parse("plan", []string{"--define-value", "flag=:false", "--define=flag=literal", "--define-value=modules=[\"py\" \"js\"]", "default"})
+	inv := cli.Parse("plan", []string{"--set", "flag=:false", "--define=flag=literal", "--set=modules=[\"py\" \"js\"]", "default"})
 	if !inv.OK || len(inv.Defines) != 3 || inv.Defines[0] != "flag:=:false" || inv.Defines[1] != "flag=literal" || inv.Defines[2] != "modules:=[\"py\" \"js\"]" { t.Error("typed and literal overrides lost order or type") }
 	inv.Free()
-	inv = cli.ParseRun([]string{"--define-value", "modules=[\"module.km\"]", "--lang", "km", "-c", "modules = []", "modules"})
+	inv = cli.ParseRun([]string{"--set", "modules=[\"module.km\"]", "--lang", "km", "-c", "modules = []", "modules"})
 	if !inv.OK || len(inv.Inputs) != 1 || len(inv.Defines) != 1 { t.Error("typed override was mistaken for a source") }
 	inv.Free()
 	invalid := []string{"bad", "=1", "flag=", "flag=other", "flag=(env \"HOME\")", "flag=$(printf bad)", "flag=[1 (out! \"bad\")]", "flag=\"@(missing)\"", "flag=([x] x)", "flag=1 2", "flag=[x: 1 x: 2]"}
 	for i := range invalid {
-		inv = cli.Parse("build", []string{"--define-value", invalid[i]})
+		inv = cli.Parse("build", []string{"--set", invalid[i]})
 		if inv.OK || inv.Error.Code != "OPT_VALUE_INVALID" { t.Error("nonliteral typed configuration was accepted: " + invalid[i]) }
 		inv.Free()
 	}
-	inv = cli.Parse("build", []string{"--define-value"})
+	inv = cli.Parse("build", []string{"--set"})
 	if inv.OK || inv.Error.Code != "OPT_NO_VALUE" { t.Error("missing typed override value was accepted") }
 	inv.Free()
+	commands := []string{"build", "run", "plan", "inputs", "outputs", "span", "cat", "tools", "render"}
+	for i := range commands {
+		removed := []string{"--define-value", "--define-value=flag=:false"}
+		for j := range removed {
+			inv = cli.Parse(commands[i], []string{removed[j]})
+			if inv.OK || inv.Error.Code != "OPT_UNKNOWN" || !strings.Contains(inv.Error.Message, "--set NAME=LITERAL") { t.Error("removed typed option lacks recovery guidance") }
+			inv.Free()
+		}
+	}
 }
 
 func TestAssignmentShorthand(t *testing.T) {

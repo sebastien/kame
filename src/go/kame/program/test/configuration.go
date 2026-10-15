@@ -81,7 +81,7 @@ func TestBuildConfigurationOverridesAreLiteralOwnedAndVisible(t *testing.T) {
 func TestAssignmentShapedTargetsValidateAfterRegistration(t *testing.T) {
 	a := t.Allocator()
 	fixtures := []string{
-		"@(\"./mode=debug\") :\n\ttrue\n",
+		"@(nop \"./mode=debug\") :\n\ttrue\n",
 		"generate outputs = [[kind: \"file\" target: \"./mode=debug\" inputs: [] order-only: [] recipe: [\"true\"]]]\n",
 	}
 	for i := range fixtures {

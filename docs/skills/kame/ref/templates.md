@@ -6,12 +6,16 @@ parse generated text as Kash or automatically quote shell arguments/escape HTML.
 ## Inline expansions and selectors
 
 ```text
-Hello, @(name). There are @(count files) files.
+Hello, @{name}. There are @(count files) files. Version: @(version).
 ```
 
-`@(reference)` is a reference expansion; `@(operation args...)` is an expression
-expansion. Do not use `@{reference}`. Lists render with one space between items;
-nil renders empty. Records need explicit JSON encoding (`json`); bytes need
+`@{reference}` reads a binding, including fields/indexes/selections. `@` followed
+by a complete parenthesized expression evaluates it: `@(version)` calls without
+arguments, and `@(count files)` calls with an argument. There is no extra wrapper,
+implicit callable invocation or fallback from a noncallable call to a lookup.
+Use `@(nop VALUE)` for another atom, such as a literal list. Lists render with
+one space between items; nil renders empty. Records need explicit JSON encoding
+(`json`); bytes need
 explicit UTF-8 conversion (`text`) rather than direct interpolation. `str` is
 scalar-only and does not serialize records.
 
@@ -26,8 +30,12 @@ scalar-only and does not serialize records.
 Function selectors are `@_` (first argument), `@*` (all), `@#` (count), and
 `@N` (index). Indexes are zero-based; negative indexes count from the end.
 Missing context and invalid bounds produce diagnostics, not empty text.
-Expression strings use `@(EXPRESSION)` too; deprecated `{(EXPRESSION)}` input
-is migrated by expression/script formatting. Selectors also work as expression
+Literal `@0` in a recipe, such as tar's `--mtime=@0`, collides with an argument
+selector: write `--mtime=\@0`. Shell quotes do not disable template parsing; use
+an `@raw` block for larger literal sections.
+Expression strings use the same reference/call boundaries. Bare `{(...)}` does
+not interpolate; no legacy mode or automatic formatting migration is provided.
+Selectors also work as expression
 atoms when their rule/argument context exists, as in `(dirname @>)`; compact
 selectors inside expression-string text require explicit rendering instead.
 Backslash can escape `@` and `\` in string templates, and `\@`/`\{` keep
@@ -49,10 +57,10 @@ keep explicit slots, so applications there need parentheses:
 `@include((str ./pages/ name) payload)`. No optional-slot guessing is performed.
 
 ```html
-<h1>@(title)</h1>
+<h1>@{title}</h1>
 <ul>
 <!-- @for([post] posts) -->
-  <li>@(post.title)</li>
+  <li>@{post.title}</li>
 <!-- @end -->
 </ul>
 ```
@@ -111,7 +119,7 @@ Store raw templates with a verbatim literal, then explicitly render:
 
 ```kame
 CARD = """
-<h1>@(title)</h1>
+<h1>@{title}</h1>
 """
 
 default : ./build/page.html
@@ -138,13 +146,16 @@ not expanded as document templates; see [Kash](./kash.md).
 kame do run --lang expr --allow-read -c '(render [title: "Hello"] ./page.html)'
 kame do render --define title=Hello ./page.html
 kame do render --check ./page.html
-printf '%s\n' 'Hello @(name)' | kame do parse --lang template
+printf '%s\n' 'Hello @{name}' | kame do parse --lang template
 ```
 
 `do parse --lang template` handles inline template syntax, not document blocks.
 `do fmt --lang template --comment STYLE` formats document directives while
 preserving all other bytes; the default `script` formatter must not be used on
 host documents. Verbatim literal contents in Kame sources remain raw.
+Where inline expressions are formatted, pipes remain pipes, nested calls remain
+nested calls, and parentheses are not removed as presumed legacy wrappers.
+`@if(enabled)` and `@if((predicate))` keep their separate directive-slot grammar.
 `kame do render` renders documents;
 repeatable `--define NAME=VALUE` supplies literal string payload fields,
 `--comment STYLE` selects the directive comment style, and `--check` validates

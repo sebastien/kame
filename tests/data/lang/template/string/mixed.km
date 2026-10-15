@@ -1,1 +1,1 @@
-cp @{src} @(dest) @> $HOME
+cp @{src} @{dest} @> $HOME

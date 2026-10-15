@@ -34,6 +34,10 @@ func TestCompletedOperationSurvivesSiblingWaitWithEffects(t *testing.T) {
 	checkRetainedOperands(t, "result = (list (once) (async))")
 }
 
+func TestPipeLoweringPreservesRetainedEffects(t *testing.T) {
+	checkRetainedOperands(t, "result = ((once) | list _ (async))")
+}
+
 func TestFunctionArgumentsSurviveSiblingWait(t *testing.T) {
 	checkRetainedOperands(t, "(pair first second) = (list first second)\nresult = (pair (once) (async))")
 }

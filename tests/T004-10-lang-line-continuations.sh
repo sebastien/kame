@@ -23,8 +23,8 @@ dir = \
   "./"
 raw = """first
 second"""
-./out : @(paths) \
-  @(dir)a
+./out : @{paths} \
+  @{dir}a
 	cat @<* \
 	 > @>
 default : ./out

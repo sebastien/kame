@@ -42,8 +42,8 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	}
 	p := parser{a: a, s: bounded, pos: start, kash: true}
 	var e *Expr
-	if start+1 < len(s.Text) && s.Text[start:start+2] == "@(" {
-		p.error(start, start+2, "legacy Kash @(...) is invalid; use (function arguments...) instead")
+	if start+1 < len(s.Text) && (s.Text[start:start+2] == "@(" || s.Text[start:start+2] == "@{") {
+		p.error(start, start+2, "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call")
 		p.pos += 2
 	} else if start < len(s.Text) && s.Text[start] == '$' && (start+1 == len(s.Text) || s.Text[start+1] != '(') {
 		word := p.commandWord(false)
@@ -235,34 +235,18 @@ func commandOperator(b byte) bool {
 func (p *parser) commandWord(allowSpread bool) *Expr {
 	start := p.pos
 	e := p.node(CommandWord, start)
-	if strings.HasPrefix(p.s.Text[start:], "/") || strings.HasPrefix(p.s.Text[start:], "./") || strings.HasPrefix(p.s.Text[start:], "../") || strings.HasPrefix(p.s.Text[start:], "@(") {
+	if strings.HasPrefix(p.s.Text[start:], "/") || strings.HasPrefix(p.s.Text[start:], "./") || strings.HasPrefix(p.s.Text[start:], "../") || strings.HasPrefix(p.s.Text[start:], "@(") || strings.HasPrefix(p.s.Text[start:], "@{") {
 		inner := p.pathAtom(true)
 		if len(inner.Parts) != 0 {
 			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "path", Span: inner.Span})
-			e.Bool, e.Span.End = true, p.pos
-			if p.pos < len(p.s.Text) && !commandWhitespace(p.s.Text[p.pos]) && p.s.Text[p.pos] != ')' && !commandOperator(p.s.Text[p.pos]) {
-				p.error(start, p.pos, "interpolated path requires a word boundary")
-			}
-			return e
+		} else {
+			freeExpr(p.a, inner)
+			p.pos = start
 		}
-		freeExpr(p.a, inner)
-		p.pos = start
-	}
-	if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '(' {
-		previousKash := p.kash
-		p.kash = true
-		inner := p.expression()
-		p.kash = previousKash
-		e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "(", Span: source.Span{Start: start, End: p.pos}})
-		e.Bool, e.Span.End = true, p.pos
-		if p.pos < len(p.s.Text) && !commandWhitespace(p.s.Text[p.pos]) && p.s.Text[p.pos] != ')' && !commandOperator(p.s.Text[p.pos]) {
-			p.error(start, p.pos, "parenthesized argument requires a word boundary")
-		}
-		return e
 	}
 	text := strings.NewBuilder(p.a)
 	quoted, hadQuote, spread := false, false, false
-	partStart := start
+	partStart := p.pos
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
 		if !quoted && (b == '?' || b == ')' || b == ';' || b == '|' || b == '<' || b == '>' || b == ' ' || b == '\t' || b == '\r' || b == '\n') {
@@ -274,11 +258,23 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			p.pos++
 			continue
 		}
+		if !quoted && b == '(' {
+			p.addTextPart(e, &text, partStart, p.pos)
+			from := p.pos
+			previousKash := p.kash
+			p.kash = true
+			inner := p.expression()
+			p.kash = previousKash
+			if inner != nil { e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "(", Span: source.Span{Start: from, End: p.pos}}) }
+			partStart = p.pos
+			if len(p.diags) != 0 { break }
+			continue
+		}
 		if b == '\\' {
 			from := p.pos
 			p.pos++
-			if !quoted && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos:p.pos+2] == "@(" {
-				p.error(from, p.pos+2, "Kash has no template layer; use (function arguments...) instead of escaped @(...)")
+			if !quoted && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos:p.pos+2] == "@(" || p.s.Text[p.pos:p.pos+2] == "@{") {
+				p.error(from, p.pos+2, "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call")
 				break
 			}
 			if p.pos == len(p.s.Text) {
@@ -309,8 +305,8 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			p.pos++
 			continue
 		}
-		if !quoted && b == '@' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
-			p.error(p.pos, p.pos+2, "legacy Kash @(...) is invalid; use (function arguments...) instead")
+		if !quoted && b == '@' && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') {
+			p.error(p.pos, p.pos+2, "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call")
 			break
 		}
 		if !quoted && b == '@' && p.pos == start {
@@ -406,6 +402,20 @@ func commandWordNeedsQuotes(e *Expr) bool {
 }
 
 func writeCommandWord(b *strings.Builder, e *Expr) {
+	// Expressions must stay outside command quotes. Quote only the adjacent
+	// literal/reference fragments, preserving scalar words versus typed splices.
+	mixedExpression := false
+	for i := range e.Parts { if e.Parts[i].Form == "(" { mixedExpression = true } }
+	if mixedExpression {
+		if !e.Bool && len(e.Parts) == 1 { b.WriteString("\"\"") }
+		for i := range e.Parts {
+			part := e.Parts[i]
+			if part.Form == "(" || part.Form == "path" || part.Form == "selector" { writeExpr(b, part.Expr); continue }
+			fragment := Expr{Kind: CommandWord, Parts: e.Parts[i:i+1]}
+			writeCommandWord(b, &fragment)
+		}
+		return
+	}
 	quoted := commandWordNeedsQuotes(e)
 	if quoted {
 		b.WriteByte('"')

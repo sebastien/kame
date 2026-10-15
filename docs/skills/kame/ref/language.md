@@ -20,8 +20,10 @@ process-oriented outer syntax, using the same Kame expression/value language.
 | Context | Interpretation |
 | --- | --- |
 | `(f x)` in an expression | Call `f` with the value of `x`. |
+| `@{reference}` in template text | Read and render a binding without invoking it. |
 | `@(f x)` in template text | Evaluate `(f x)` and render its value as text. |
-| `(f x)` in a Kash word | Evaluate `(f x)` and supply a typed argument value. |
+| `@(f)` in template text | Invoke `f` with no arguments and render the result. |
+| `(f x)` in a Kash word | Supply a typed standalone value or a scalar fragment of a mixed word. |
 | `$(command)` in an expression or Kash word | Parse the contents as Kash and capture stdout, subject to execution policy. |
 | `$(command)` in a plain Kame string/document | Literal text unless explicitly inside expression interpolation. |
 | `$(command)` in recipe text | Owned by the selected interpreter: shell by default, Kash when explicitly configured. |
@@ -29,7 +31,10 @@ process-oriented outer syntax, using the same Kame expression/value language.
 | `{name}` in an expression pattern | Expansion reference, not a matcher; use `{name:*}` to match. |
 | `@if(...)` in a document directive | Template control, not a Kash statement or shell conditional; blocks may be whole-line or inline. |
 
-Do not use `@{reference}`; the inline reference spelling is `@(reference)`.
+There is one interpolation grammar: `@{reference}` for lookup and `@`-prefixed
+parenthesized expressions for evaluation. Bare `{(...)}` does not interpolate.
+No legacy parser mode, automatic formatter migration or runtime-type fallback
+is provided. Formatting preserves authored pipes and nested calls.
 Selectors require their rule/function context. Template rendering is text
 conversion, not shell quoting, HTML escaping, or typed argv conversion.
 

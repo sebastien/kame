@@ -13,7 +13,14 @@ import (
 // concatenations, so they are cloned into the program allocator before they
 // can outlive the function that produced them.
 func failure(a mem.Allocator, code string, message string) diagnostic.Diagnostic {
-	return diagnostic.Diagnostic{Code: cloneText(a, code), Severity: diagnostic.Error, Message: cloneText(a, message), Owned: true}
+	result := diagnostic.Diagnostic{Code: cloneText(a, code), Severity: diagnostic.Error, Message: cloneText(a, message), Owned: true}
+	if code == "TGT_NO_RULE" && strings.HasPrefix(message, "no rule for target: ") {
+		target := message[len("no rule for target: "):]
+		if strings.ContainsAny(target, "/.") && !isPathTarget(target) {
+			result.Tips = slices.Append(a, result.Tips, cloneText(a, "Unprefixed names are logical targets. Use an explicit ./ prefix when a file path is intended."))
+		}
+	}
+	return result
 }
 func failureAt(a mem.Allocator, code string, span diagnostic.Span, message string) diagnostic.Diagnostic {
 	return diagnostic.Diagnostic{Code: cloneText(a, code), Severity: diagnostic.Error, Message: cloneText(a, message), Span: span, Owned: true}

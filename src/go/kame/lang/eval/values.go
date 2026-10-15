@@ -10,7 +10,15 @@ import (
 	"solod.dev/so/strings"
 )
 
-func (p *Program) stringValue(scope *Scope, parts []expr.StringPart, context *Context) Result {
+func (p *Program) stringValue(scope *Scope, expression *expr.Expr, context *Context) Result {
+	parts := expression.Parts
+	var children []*expr.Expr
+	for i := range parts { if parts[i].Expr != nil { children = slices.Append(context.Run, children, parts[i].Expr) } }
+	operands := p.argumentValues(scope, children, context, expression.Span)
+	slices.Free(context.Run, children)
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	defer freeValuesWithCallables(context.Run, operands.Values)
+	next := 0
 	b := strings.NewBuilder(context.Run)
 	defer b.Free()
 	for i := range parts {
@@ -18,17 +26,12 @@ func (p *Program) stringValue(scope *Scope, parts []expr.StringPart, context *Co
 			b.WriteString(parts[i].Text)
 			continue
 		}
-		r := p.evaluate(context.Engine, scope, parts[i].Expr, context)
-		if r.Waiting || r.Diagnostic.Code != "" {
-			return r
-		}
-		text, ok := stringify(context.Run, r.Value)
+		value := operands.Values[next]
+		next++
+		text, ok := stringify(context.Run, value)
 		if !ok {
-			freeCallables(context.Run, &r.Value)
-			r.Value.Free(context.Run)
-			return failure(context.Run, "EXPR_INVALID", parts[i].Span, "records and bytes require explicit text conversion")
+			return renderFailure(context.Run, parts[i].Expr, parts[i].Span, value.Kind)
 		}
-		r.Value.Free(context.Run)
 		b.WriteString(text)
 		mem.FreeString(context.Run, text)
 	}

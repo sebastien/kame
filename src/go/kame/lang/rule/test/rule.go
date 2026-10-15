@@ -13,7 +13,7 @@ func sameSpan(span source.Span, start int, end int) bool {
 
 func TestComputedSequenceGroups(t *testing.T) {
 	a := t.Allocator()
-	text := "a : @(PREP), @(BUILD) | @(TOOLS), ./ready"
+	text := "a : @{PREP}, @{BUILD} | @{TOOLS}, ./ready"
 	parsed := rule.ParseRule(a, "groups.kmk", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 4 { t.Error("computed sequence did not parse"); return }
@@ -25,7 +25,7 @@ func TestComputedSequenceGroups(t *testing.T) {
 
 func TestComputedOutputsPreserveExpressionsAndFormatting(t *testing.T) {
 	a := t.Allocator()
-	text := "@(ROOT)/{name}.o @(OUTPUTS) : ./seed\n\tcat @< > @>"
+	text := "@{ROOT}/{name}.o @{OUTPUTS} : ./seed\n\tcat @< > @>"
 	parsed := rule.ParseRule(a, "computed.kmk", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Outputs) != 2 {
@@ -66,7 +66,7 @@ func TestNamedAndPrefixedRulesClassify(t *testing.T) {
 
 func TestNamedTaskArgumentsParseFormatAndValidate(t *testing.T) {
 	a := t.Allocator()
-	text := "task deploy {environment} {region=us-east} : configure\n\tship @(environment) @(region)"
+	text := "task deploy {environment} {region=us-east} : configure\n\tship @{environment} @{region}"
 	parsed := rule.ParseRule(a, "arguments.kmk", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || parsed.Rule.Kind != rule.CachedTaskRule || len(parsed.Rule.Outputs) != 1 || len(parsed.Rule.Arguments) != 2 {

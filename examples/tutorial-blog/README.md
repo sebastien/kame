@@ -1,5 +1,9 @@
 # Build a personal blog with kame
 
+Documentation snippets use the specified `@{ref}` / `@(call)` syntax. The
+executable build files and installed backend may lag it; this documentation
+update does not migrate those files or establish runtime support.
+
 In this tutorial we will build a minimalist personal blog — an author
 page, blog posts, and projects — from Markdown files into plain
 HTML and CSS. Along the way we will use file rules, target templates,
@@ -129,7 +133,7 @@ The index rule declares its inputs with the stdlib:
 
 ```kame
 posts = (wildcard ./content/posts/*.md)
-./build/index.html : @(posts) @(projects) ./templates/header.html ./templates/footer.html ./build/tools/row.sh
+./build/index.html : @{posts} @{projects} ./templates/header.html ./templates/footer.html ./build/tools/row.sh
 ```
 
 Adding a `.md` file changes the `wildcard` result, so the index
@@ -158,7 +162,7 @@ and those slugs go directly into link URLs, without general URL/attribute
 encoding. The index recipe calls it once per file and sorts:
 
 ```sh
-for f in @(posts); do sh ./build/tools/row.sh "$f"; done | sort -r
+for f in @{posts}; do sh ./build/tools/row.sh "$f"; done | sort -r
 ```
 
 Kame tracks the helper itself (`./build/tools/row.sh :

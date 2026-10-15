@@ -429,7 +429,7 @@ func TestCachedTaskInvalidatesForOperationVersion(t *testing.T) {
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-cache-")
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "task run :\n\t@((versioned))\n\tprintf x >> task-log\n")
+	parsed := script.Parse(a, "test.kmk", "task run :\n\t@(versioned)\n\tprintf x >> task-log\n")
 	firstRegistry := eval.NewRegistry(a)
 	if !firstRegistry.Add(eval.Operation{Name: "versioned", Version: "v1", Call: cacheVersionOperation, MinArity: 0, MaxArity: 0}) { t.Fatal("operation registration failed"); return }
 	firstProgram := program.Compile(a, parsed, firstRegistry, program.Options{Host: posix.New(a), Directory: dir})
@@ -863,8 +863,8 @@ func TestCachedTaskManifestOverflowFromNestedDefinition(t *testing.T) {
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
 	// nop observes the definition without interpolating it into the shell script.
-	// The nested @(mid)/@(leaf) chain is what must consume the manifest budget.
-	parsed := script.Parse(a, "overflow.kmk", "leaf = \"nested-definition-value\"\nmid = \"@(leaf)\"\nouter = \"@(mid)\"\ntask run :\n\t@(nop outer)\n\tprintf x >> task-log\n")
+	// The nested @{mid}/@{leaf} chain must consume the manifest budget.
+	parsed := script.Parse(a, "overflow.kmk", "leaf = \"nested-definition-value\"\nmid = \"@{leaf}\"\nouter = \"@{mid}\"\ntask run :\n\t@(nop outer)\n\tprintf x >> task-log\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	measured := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})

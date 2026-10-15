@@ -21,6 +21,11 @@ cached tasks, and managed services on one incremental engine.
 Use its Lisp-like expressions, value scripts, templates, build rules, or typed
 Kash process scripts independently, then compose them as a project grows.
 
+The documentation teaches the specified contract. Installed backends and
+executable examples may lag `@{ref}` / `@(call)`, `--set`, mixed Kash expression
+words and pipe-preserving formatting; verify support with help and small probes.
+Documentation updates do not implement or automatically migrate executable code.
+
 ## Get started
 
 From a checkout, install Go 1.26.0+, Solod 0.4.0, GNU Make, Clang, and Python 3
@@ -69,8 +74,8 @@ but its unchanged file prerequisite can be reused.
 - **Familiar, not Make-compatible.** Keep targets, prerequisites, and recipes;
   distinguish file artifacts, bare tasks, cached tasks, and services explicitly.
 - **Clear language boundaries.** Expressions compute values; external-shell
-  recipes use `@(...)` expansions and run as one script. Direct Kash recipes
-  pass typed argv without generating shell text. No `.PHONY` or `.ONESHELL`.
+  recipes use `@{ref}` / `@(call)` expansions and run as one script. Direct Kash
+  recipes pass typed argv without generating shell text. No `.PHONY` or `.ONESHELL`.
 - **Demand-driven computation.** Lazy definitions, dynamic dependencies, streaming,
   and watch invalidation share one engine, informed by
   [Build Systems à La Carte](https://dl.acm.org/doi/10.1145/3236774).
@@ -101,24 +106,24 @@ objects = (map (sub ./src/{path:**}.c ./build/{path}.o) sources-c)
 default : build
 
 # Inputs can be paths, target names, or values from expression expansions
-build : @(objects)
+build : @{objects}
 	echo @(count objects) products built from @(count sources) inputs
 
 # Target templates capture the matching target and expand it in inputs
-./build/{path:**}.o : ./src/{path}.c @(headers)
+./build/{path:**}.o : ./src/{path}.c @{headers}
 	# No clash with the shell's $, more natural shorthands @< inputs @> outputs.
 	mkdir -p @(dirname @>)
-	@(cc) -I @(include-path) -c @< -o @>
+	@{cc} -I @{include-path} -c @< -o @>
 	echo compiled @< to @>
 
-archive : @(sources)
+archive : @{sources}
 	tar cvfz archive-$(date +%F).tar.gz @<*
 	echo created archive of size $(du -shc @<*)
 
 # Shows statistics about this project.
 stats :
 	echo @(count sources) input files
-	du -shc @(sources)
+	du -shc @{sources}
 	echo @(count objects) object files
 	du -shc @(filter ([path] (exists? path)) objects)
 ```

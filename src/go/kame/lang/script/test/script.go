@@ -119,7 +119,7 @@ func TestScriptParsesMultilineDefinition(t *testing.T) {
 
 func TestContinuationsPreserveSourceSpansAndRecipeBackslashes(t *testing.T) {
 	a := t.Allocator()
-	text := "# comment \\\nwords = [\"one\" \\\n  \"two\" \\\r\n  \"three\"]\npaths = (list ./a \\\n ./b)\n./out : ./a \\\n ./b @(paths)\n\tprintf one \\\n\t two\n"
+	text := "# comment \\\nwords = [\"one\" \\\n  \"two\" \\\r\n  \"three\"]\npaths = (list ./a \\\n ./b)\n./out : ./a \\\n ./b @{paths}\n\tprintf one \\\n\t two\n"
 	s := script.Parse(a, "continued.kmk", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 || s.Source.Text != text {

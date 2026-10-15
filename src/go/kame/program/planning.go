@@ -252,7 +252,7 @@ func clonePlan(a mem.Allocator, plan Plan) Plan {
 }
 
 func (p *Program) planInputExpression(input rule.Input, plan *Plan) diagnostic.Diagnostic {
-	if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil)) {
+	if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || (input.Template.Parts[0].Kind != template.Expression && input.Template.Parts[0].Kind != template.Reference) || input.Template.Parts[0].Expr == nil)) {
 		return failure(p.Alloc, "EXPR_INVALID", "invalid rule input expression")
 	}
 	inputs, outputs := makeRuleInputValues(p.Alloc, plan.Inputs, plan.ResourceInputs), makeValues(p.Alloc, plan.Outputs)

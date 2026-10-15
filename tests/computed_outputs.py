@@ -68,7 +68,7 @@ def check(command: list[str], source: str, target: str, *,
 		if formatting:
 			formatted = run(['do', 'fmt', '--lang', 'script', 'Makefile.kmk'])
 			assert formatted.returncode == 0, formatted.stderr
-			assert '@(' in formatted.stdout, 'formatter erased computed syntax'
+			assert '@(' in formatted.stdout or '@{' in formatted.stdout, 'formatter erased computed syntax'
 			(project / 'formatted.kmk').write_text(formatted.stdout)
 			again = run(['do', 'fmt', '--lang', 'script', 'formatted.kmk'])
 			assert again.returncode == 0 and again.stdout == formatted.stdout, again.stderr
@@ -92,8 +92,8 @@ def check_watch(command: list[str]) -> None:
 		(project / 'seed').write_text('watch-ok')
 		def source(directory: str) -> None:
 			(project / 'Makefile.kmk').write_text(
-				f'ROOT = "./{directory}"\ndefault : @(ROOT)/demo.o\n'
-				'@(ROOT)/{name}.o : ./seed\n\tcat @< > @>\n')
+				f'ROOT = "./{directory}"\ndefault : @{{ROOT}}/demo.o\n'
+				'@{ROOT}/{name}.o : ./seed\n\tcat @< > @>\n')
 		source('one')
 		environment = {key: value for key, value in os.environ.items()
 			if not key.startswith('KAME_')}
@@ -128,7 +128,7 @@ def check_output_membership(command: list[str]) -> None:
 		(project / 'unrelated').write_text('preserve')
 		environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_')}
 		def source(members: str) -> None:
-			(project / 'Makefile.kmk').write_text(f'OUTPUTS = [{members}]\n@(OUTPUTS) : ./seed\n\tfor path in @>*; do cat @< > "$path"; done\n\tprintf x >> runs\n')
+			(project / 'Makefile.kmk').write_text(f'OUTPUTS = [{members}]\n@{{OUTPUTS}} : ./seed\n\tfor path in @>*; do cat @< > "$path"; done\n\tprintf x >> runs\n')
 		def build() -> None:
 			result = subprocess.run(command + ['./a'], cwd=project, env=environment, text=True, capture_output=True, timeout=20)
 			assert result.returncode == 0, (result.stdout, result.stderr)
@@ -156,56 +156,56 @@ def main() -> None:
 	root, backend, binary = sys.argv[1:]
 	command = [binary] if backend == 'native' else ['node', str(Path(root) / 'dist/kame.js')]
 	cases = [
-		('interpolated capture', 'ROOT = "./build"\n@(ROOT)/{name}.o : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
+		('interpolated capture', 'ROOT = "./build"\n@{ROOT}/{name}.o : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
 			dict(outputs=['./build/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)),
 		('arbitrary pure application', '@(str "./build/" "demo.o") : ./src/demo.c\n\tcat @< > @>\n', './build/demo.o',
 			dict(outputs=['./build/demo.o'], build=True)),
-		('quoted interpolation', 'ROOT = "./build dir"\n"@(ROOT)/{name}.o" : ./src/{name}.c\n\tcat @< > "@>"\n', './build dir/demo.o',
+		('quoted interpolation', 'ROOT = "./build dir"\n"@{ROOT}/{name}.o" : ./src/{name}.c\n\tcat @< > "@>"\n', './build dir/demo.o',
 			dict(outputs=['./build dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)),
-		('expression-supplied capture', 'PATTERN = (str "./build/" "{" "name" "}.o")\n@(PATTERN) : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
+		('expression-supplied capture', 'PATTERN = (str "./build/" "{" "name" "}.o")\n@{PATTERN} : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
 			dict(outputs=['./build/demo.o'], inputs=['./src/demo.c'], build=True)),
-		('pattern value output', 'PATTERN = "./build/{name:*}.o"\n@(PATTERN) : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
+		('pattern value output', 'PATTERN = "./build/{name:*}.o"\n@{PATTERN} : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
 			dict(outputs=['./build/demo.o'], inputs=['./src/demo.c'], build=True)),
-		('nested list order and omissions', 'OUTPUTS = [./one [./two :nil] []]\n@(OUTPUTS) ./three : ./src/demo.c\n\tcat @< > ./one\n\tcat @< > ./two\n\tcat @< > ./three\n', './two',
+		('nested list order and omissions', 'OUTPUTS = [./one [./two :nil] []]\n@{OUTPUTS} ./three : ./src/demo.c\n\tcat @< > ./one\n\tcat @< > ./two\n\tcat @< > ./three\n', './two',
 			dict(outputs=['./one', './two', './three'], build=True)),
-		('nil beside literal', '@(:nil) ./one :\n', './one', dict(outputs=['./one'])),
-		('computed bare task', 'NAME = "chosen"\n@(NAME) :\n\ttouch forbidden\n', 'chosen', dict(outputs=[])),
-		('computed cached task', 'NAME = "chosen"\ntask @(NAME) :\n', 'chosen', dict(outputs=[])),
-		('nil beside cached task', 'task @(:nil) chosen :\n', 'chosen', dict(outputs=[])),
+		('nil beside literal', '@(nop :nil) ./one :\n', './one', dict(outputs=['./one'])),
+		('computed bare task', 'NAME = "chosen"\n@{NAME} :\n\ttouch forbidden\n', 'chosen', dict(outputs=[])),
+		('computed cached task', 'NAME = "chosen"\ntask @{NAME} :\n', 'chosen', dict(outputs=[])),
+		('nil beside cached task', 'task @(nop :nil) chosen :\n', 'chosen', dict(outputs=[])),
 		('pure helper output', '(output name) = (str "./" name)\n@(output "one") :\n', './one', dict(outputs=['./one'])),
-		('computed service', 'NAME = "chosen"\nservice @(NAME) :\n', 'chosen', dict(outputs=[])),
-		('always file', 'ROOT = "./build"\nalways @(ROOT)/demo.o :\n', './build/demo.o', dict(outputs=['./build/demo.o'])),
-		('configured override', 'ROOT = "./old"\n@(ROOT)/{name}.o :\n', './new/demo.o',
+		('computed service', 'NAME = "chosen"\nservice @{NAME} :\n', 'chosen', dict(outputs=[])),
+		('always file', 'ROOT = "./build"\nalways @{ROOT}/demo.o :\n', './build/demo.o', dict(outputs=['./build/demo.o'])),
+		('configured override', 'ROOT = "./old"\n@{ROOT}/{name}.o :\n', './new/demo.o',
 			dict(outputs=['./new/demo.o'], overrides=['--define', 'ROOT=./new'])),
 	]
 	invalid = [
-		('missing explicit prefix', 'ROOT = "build"\n@(ROOT)/{name}.o :\n', 'PARSE_ERR'),
-		('empty list', '@([]) :\n', 'EXPR_INVALID'),
-		('nil only', '@(:nil) :\n', 'EXPR_INVALID'),
+		('missing explicit prefix', 'ROOT = "build"\n@{ROOT}/{name}.o :\n', 'PARSE_ERR'),
+		('empty list', '@(nop []) :\n', 'EXPR_INVALID'),
+		('nil only', '@(nop :nil) :\n', 'EXPR_INVALID'),
 		('empty string', '@(str "") :\n', 'EXPR_INVALID'),
 		('number', '@(first [42]) :\n', 'EXPR_INVALID'),
 		('record', '@(first [[key: "value"]]) :\n', 'EXPR_INVALID'),
-		('mixed output kinds', '@([./one "chosen"]) :\n', 'PARSE_ERR'),
-		('multiple task outputs', 'task @(["one" "two"]) :\n', 'PARSE_ERR'),
+		('mixed output kinds', '@(nop [./one "chosen"]) :\n', 'PARSE_ERR'),
+		('multiple task outputs', 'task @(nop ["one" "two"]) :\n', 'PARSE_ERR'),
 		('file service', 'service @(str "./one") :\n', 'PARSE_ERR'),
 		('always logical name', 'always @(str "chosen") :\n', 'PARSE_ERR'),
 		('duplicate literal targets', '@(str "./one") :\n./one :\n', 'TGT_AMBIG'),
-		('duplicate within rule', '@([./one ./one]) :\n', 'PARSE_ERR'),
+		('duplicate within rule', '@(nop [./one ./one]) :\n', 'PARSE_ERR'),
 		('generated collision', '@(str "./one") :\ngenerate batch = [[kind: "file" target: "./one" inputs: [] order-only: [] recipe: ["touch forbidden"]]]\n', 'TGT_AMBIG'),
 		('malformed resolved pattern', '@(str "./" "{" "name") :\n', 'PARSE_ERR'),
-		('missing reference', '@(missing) :\n', 'REF_MISSING'),
-		('capture unavailable', 'ROOT = (str "./" name)\n@(ROOT)/{name}.o :\n', 'REF_MISSING'),
-		('definition cycle', 'ROOT = (OTHER)\nOTHER = (ROOT)\n@(ROOT) :\n', 'DEP_CYCLE'),
-		('indirect effect', 'ROOT = (out! "forbidden")\n@(ROOT)/demo.o :\n', 'PHASE_INVALID'),
-		('indirect read', 'ROOT = (read ./seed)\n@(ROOT)/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
-		('indirect process', 'ROOT = (sh! "touch forbidden")\n@(ROOT)/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
-		('indirect write', 'ROOT = (write! ./forbidden "bad")\n@(ROOT)/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
+		('missing reference', '@{missing} :\n', 'REF_MISSING'),
+		('capture unavailable', 'ROOT = (str "./" name)\n@{ROOT}/{name}.o :\n', 'REF_MISSING'),
+		('definition cycle', 'ROOT = (OTHER)\nOTHER = (ROOT)\n@{ROOT} :\n', 'DEP_CYCLE'),
+		('indirect effect', 'ROOT = (out! "forbidden")\n@{ROOT}/demo.o :\n', 'PHASE_INVALID'),
+		('indirect read', 'ROOT = (read ./seed)\n@{ROOT}/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
+		('indirect process', 'ROOT = (sh! "touch forbidden")\n@{ROOT}/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
+		('indirect write', 'ROOT = (write! ./forbidden "bad")\n@{ROOT}/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
 	]
 	for name, source, code in invalid:
 		cases.append((name, source + 'sentinel :\n\ttouch forbidden\n', 'sentinel', dict(code=code)))
 	failures = []
 	cases.extend([
-		('lazy read output alias', 'OUTPUTS = (text (read ./seed))\n@(OUTPUTS) :\n\ttouch forbidden\n', 'default', {'code': ('PHASE_INVALID', 'CAP_DENIED'), 'overrides': ['--allow-read=.']}),
+		('lazy read output alias', 'OUTPUTS = (text (read ./seed))\n@{OUTPUTS} :\n\ttouch forbidden\n', 'default', {'code': ('PHASE_INVALID', 'CAP_DENIED'), 'overrides': ['--allow-read=.']}),
 		('included producer location', '(include ./included.kmk)\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
 		('competing source patterns', './out/{name}.o : ./src/{name}.c\n\ttouch forbidden\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
 		('canonical duplicate outputs', './out/../same :\n\ttouch forbidden\n./same :\n\ttouch forbidden\n', 'same', {'code': 'TGT_AMBIG'}),

@@ -45,13 +45,15 @@ func (p *Program) configureDefinitions(defines, environment []string) diagnostic
 	for i := range defines {
 		override := definition.ParseOverride(defines[i])
 		if override.Name == "" || p.Eval.Definition(override.Name) == nil {
-			return failure(p.Alloc, "DEF_INVALID", "--define must name a declared value definition")
+			option := "--define"
+			if override.Typed { option = "--set" }
+			return failure(p.Alloc, "DEF_INVALID", option+" must name a declared value definition")
 		}
 		if override.Typed {
-			parsed := expr.Parse(p.Alloc, "<define-value>", override.Text)
+			parsed := expr.Parse(p.Alloc, "<set>", override.Text)
 			valid := len(parsed.Diagnostics) == 0 && expr.IsLiteral(parsed.Expr)
 			parsed.Free()
-			if !valid { return failure(p.Alloc, "DEF_INVALID", "--define-value requires a closed literal value for a declared value definition") }
+			if !valid { return failure(p.Alloc, "DEF_INVALID", "--set requires a closed literal value for a declared value definition") }
 		}
 	}
 	p.Eval.SetDefinitionOverrides(defines)

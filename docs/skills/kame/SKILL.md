@@ -11,6 +11,12 @@ engine. These surfaces share expressions and values, not one interchangeable
 outer grammar. They can be used independently; a value or template task does
 not need a build file.
 
+These references teach the specified contract, not implementation status.
+`@{ref}` / `@(call)`, `--set`, mixed Kash expression words and pipe-preserving
+formatting may be ahead of an installed backend or executable example file.
+Check help and small parse/run probes before claiming support; documentation
+updates do not implement features or migrate executable sources.
+
 ## Choose the language first
 
 | Surface | Use it for | Reference |
@@ -65,7 +71,8 @@ Values use whitespace-separated lists and records, not comma-separated items:
 
 `(operation args...)` is an application; `([args...] body...)` is a lambda.
 Only `:nil` and `:false` are false. Definitions are lazy, not mutable shell
-assignments. Use `@(name)` to render a reference in template text.
+assignments. Use `@{name}` to render a reference and `@(name)` to call a
+zero-argument function in template text.
 
 Build rules declare resources explicitly:
 
@@ -90,15 +97,17 @@ clean :
 - `{name}` connects corresponding target-template captures in the rule header.
 - `@<`, `@<*`, and `@>` render the first input, all inputs, and first output
   in a recipe. They correspond most closely to Make's `$<`, `$^`, and `$@`.
-- `@(EXPRESSION)` evaluates and renders a value; `@(reference)` is the reference
-  spelling. Do not use the obsolete `@{reference}` form.
+- `@{reference}` renders a lookup; `@` followed by a complete parenthesized
+  expression evaluates and renders it. `@(function)` calls without arguments.
+  Never infer lookup versus invocation from the value's type.
 - `(include ./rules/common.kmk)` merges a file-backed source at that location.
 
 Keep these boundaries distinct:
 
-- Expression strings use `@(EXPRESSION)`; deprecated `{(EXPRESSION)}` input
-  is migrated by formatting. `\@`/`\{` preserve literal openers, and verbatim
-  `"""..."""` strings stay raw until explicitly passed to `render`.
+- Expression strings use the same `@{reference}` / `@(function args...)` split.
+  Bare `{(...)}` does not interpolate; no legacy parser or automatic migration
+  is provided. `\@`/`\{` preserve literal openers, and verbatim `"""..."""`
+  strings stay raw until explicitly passed to `render`.
 - Document templates use `@if`, `@for`, `@with`, `@let`, `@include`, `@match`,
   `@case`, `@raw`, and `@end` directives, optionally inside host-language comments.
   Blocks can also be inline; labeled endings such as `@end(for)` are supported.
@@ -107,7 +116,14 @@ Keep these boundaries distinct:
 - Kash `$name` looks up a Kame value; `(EXPRESSION)` computes a typed argument;
   `$(COMMAND)` captures a Kash process's stdout. Lists splice argv only as
   standalone unquoted substitutions; `$...command` explicitly spreads an argv
-  list including its executable. No implicit shell splitting or globbing.
+  list including its executable. Mixed expressions such as
+  `--config-path=(js-biome-config)` require scalars, also in redirection paths
+  and scalar stage setup. Quoted parentheses stay literal. No implicit shell
+  splitting or globbing.
+- `NAME=TEXT` / `--define` configure strings; `--set NAME=LITERAL` configures
+  closed typed data without evaluating code. Neither grants environment reads.
+- Formatters preserve authored value pipes and nested calls as distinct forms,
+  including placeholders. Formatting never evaluates code or migrates old syntax.
 - `$(COMMAND)` is also an expression atom, but requires process authority and
   an allowed execution phase. Plain Kame strings keep it literal; raw recipe
   text leaves it to the selected recipe interpreter.

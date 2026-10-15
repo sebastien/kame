@@ -15,7 +15,7 @@ printf b >"$project/src/nested/b.c"
 printf excluded >"$project/cmd/excluded.go"
 cat >"$project/Makefile.kmk" <<'KMK'
 sources = (wildcard ./src/**/*.go ./src/**/*.c ./src/**/*.go ./absent/**/*.h)
-./out.txt : @(sources)
+./out.txt : @{sources}
 	printf '%s\n' @<* > @>
 KMK
 expected='["./src/a.go" "./src/nested/b.c"]'

@@ -35,12 +35,12 @@ the available literal targets.
 | GNU Make | Kame | Notes |
 | --- | --- | --- |
 | `VAR = value` / `VAR := value` | `VAR = "value"` | Kame RHSs are expressions and definitions are lazy: bare names reference values, numbers are typed, text requires quotes, and lists require brackets. Do not assume Make's recursive versus immediate expansion distinction. |
-| `$(VAR)` in a recipe | `@(VAR)` | Evaluates and renders a Kame definition. |
+| `$(VAR)` in a recipe | `@{VAR}` | Reads and renders a Kame definition. |
 | `$@` | `@>` | First output. |
 | `$<` | `@<` | First input. |
 | `$^` | `@<*` | All normal inputs, rendered space-separated. |
 | `$?` | `@<?` | Changed normal file inputs by content digest, not timestamp; missing outputs/records select all. |
-| `$*` | `@(stem)` | Name an explicit target capture such as `{stem}`. |
+| `$*` | `@{stem}` | Name an explicit target capture such as `{stem}`. |
 | `$(@D)`, `$(<D)` | `@(dirname @>)`, `@(dirname @<)` | Output and first-input directories. |
 | `out: in` | `./out : ./in` | Filesystem paths must be explicit. |
 | `%.o: %.c` | `./build/{name}.o : ./src/{name}.c` | The same named capture must match consistently. |
@@ -165,8 +165,8 @@ For dynamic source discovery, prefer an explicit definition:
 ```kame
 SOURCES = (wildcard ./src/*.c)
 
-./build/sources.txt : @(SOURCES)
-	printf '%s\n' @(SOURCES) > @>
+./build/sources.txt : @{SOURCES}
+	printf '%s\n' @{SOURCES} > @>
 ```
 
 `wildcard` records a dependency on the glob result, so later membership changes

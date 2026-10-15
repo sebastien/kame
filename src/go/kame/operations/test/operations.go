@@ -336,7 +336,7 @@ func TestPatternReplace(t *testing.T) {
 	}
 	result.Free(a)
 	captureExpressions := []string{
-		`(replace ./journal/{name:*} "@(name)" "./journal/demo")`,
+		`(replace ./journal/{name:*} "@{name}" "./journal/demo")`,
 		`(replace ./journal/{name:*} name "./journal/demo")`,
 		`(sub ./journal/{name:*} name "./journal/demo")`,
 		`(let [r sub name "outer"] (r ./journal/{name:*} name "./journal/demo"))`,
@@ -569,12 +569,12 @@ func TestDocumentMatchRendersNamedCaptureAndFallback(t *testing.T) {
 		t.Error("baseline expression match failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(render "plain" (str "@match(\"./posts/demo.md\")\n@case(./posts/" "{" "slug:*" "}.md)\n@" "(slug)\n@else\nother\n@end(match)\n"))`)
+	result = evaluate(t, program, `(render "plain" (str "@match(\"./posts/demo.md\")\n@case(./posts/" "{" "slug:*" "}.md)\n@" "{" "slug" "}\n@else\nother\n@end(match)\n"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "demo\n" {
 		t.Error("document match selected capture mismatch: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(render "plain" (str "@match(\"./other.txt\")\n@case(./posts/" "{" "slug:*" "}.md)\n@" "(slug)\n@else\nother\n@end(match)\n"))`)
+	result = evaluate(t, program, `(render "plain" (str "@match(\"./other.txt\")\n@case(./posts/" "{" "slug:*" "}.md)\n@" "{" "slug" "}\n@else\nother\n@end(match)\n"))`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "other\n" {
 		t.Error("document match fallback mismatch: " + result.Diagnostic.Code + " " + result.Diagnostic.Message + " " + result.Value.Text)
 	}
@@ -594,7 +594,7 @@ func TestDocumentForBindsIndexKeyAndValue(t *testing.T) {
 	}
 	parsed := script.Parse(a, "document-for", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	templateText := `(str "@for([item] xs)\n" "@" "(index)" ":" "@" "(key)" ":" "@" "(item)" ";\n@end(for)\n")`
+	templateText := `(str "@for([item] xs)\n" "@" "{" "index" "}" ":" "@" "{" "key" "}" ":" "@" "{" "item" "}" ";\n@end(for)\n")`
 	result := evaluate(t, program, `(render [xs: ["a" "b"]] "plain" `+templateText+`)`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "0::a;\n1::b;\n" {
 		t.Error("list loop did not bind its zero-based index, nil key and item value")

@@ -14,6 +14,8 @@ func TestStructuralLayoutRoundTrip(t *testing.T) {
 		"([x rest...] [name: x data: (f " + long + " rest)])",
 		"((choose " + long + " x) [x y])",
 		"(f \"\"\"literal\n  text\t\nend\"\"\" x)",
+		"(" + long + " | map navigation-item | filter ([item] item.visible) | join \"\\n\")",
+		"(value | transform (nested " + long + " data) _ | finish)",
 	}
 	for i := range cases {
 		checkLayoutRoundTrip(t, cases[i])

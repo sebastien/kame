@@ -39,7 +39,7 @@ named :
 	printf "%s\n" $KASH_NEWER > ./kash-selected
 	touch ./kash-out
 ./capture/{stem}.out : ./a
-	printf '%s\n' @(stem) @(dirname @>) @(dirname @<) > @>
+	printf '%s\n' @{stem} @(dirname @>) @(dirname @<) > @>
 bad-task :
 	printf '%s' @<?
 KMK
@@ -134,7 +134,7 @@ PYTIMES
  test-step "$backend rejects newer selection outside file recipes"
  if "${runner[@]}" -C "$project" bad-task > "$project/log" 2> "$project/err"; then test-fail "$backend task accepted newer selector"; elif rg -q SEL_NO_CONTEXT "$project/err"; then test-ok "$backend task newer selector rejected"; else test-fail "$backend task newer diagnostic"; fi
  test-step "$backend rejects newer selection while resolving rule inputs"
- printf './invalid : @(@<?)\n\ttouch forbidden\n' > "$project/invalid.kmk"
+  printf './invalid : @(nop @<?)\n\ttouch forbidden\n' > "$project/invalid.kmk"
  if "${runner[@]}" -C "$project" -f invalid.kmk ./invalid > "$project/log" 2> "$project/err"; then test-fail "$backend input phase accepted newer selector"; elif rg -q PHASE_INVALID "$project/err" && [ ! -e "$project/forbidden" ]; then test-ok "$backend input phase rejects before effects"; else test-fail "$backend input-phase diagnostic"; fi
  test-step "$backend preserves newer syntax during formatting"
  "${runner[@]}" do fmt --lang script "$project/Makefile.kmk" > "$project/fmt" 2> "$project/err"

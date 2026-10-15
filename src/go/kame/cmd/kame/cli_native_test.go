@@ -207,7 +207,7 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 
 func TestToolsCommandListsGloballyReferencedTools(t *testing.T) {
 	var out, errOut bytes.Buffer
-	source := "task build :\n\t@(x/sh) -c 'true'\n"
+	source := "task build :\n\t@{x/sh} -c 'true'\n"
 	status := runNativeCLI(t, []string{"do", "tools", "--json", "-c", source}, &input{}, &out, &errOut)
 	if status != 0 || !strings.Contains(out.String(), `"name":"sh"`) || !strings.Contains(out.String(), `"path":"`) {
 		t.Errorf("tools status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
@@ -338,7 +338,7 @@ func TestJSONDiagnosticUsesStdout(t *testing.T) {
 func TestSpanExpandReportsExpressionInputs(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	source := "SOURCE = ./input\ntask build : @(SOURCE)\n\ttrue\n"
+	source := "SOURCE = ./input\ntask build : @{SOURCE}\n\ttrue\n"
 	if status := runNativeCLI(t, []string{"do", "span", "--json", "--expand", "-c", source, "build"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), `"static":{"inputs":[],"outputs":["build"]}`) || !strings.Contains(out.String(), `"dynamic":["./input"]`) || !strings.Contains(out.String(), `"expanded":true`) {
 		t.Errorf("expanded span status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
@@ -407,7 +407,7 @@ func TestRepeatedNativeCLICommandResults(t *testing.T) {
 		{[]string{"-c", "task first :\ntask second :"}, 1},
 		{[]string{"do", "run", "--lang", "expr", "--allow-read=/tmp", "--allow-env=HOME", "-c", "(nop 42)", "--", "left", "right"}, 0},
 		{[]string{"do", "plan", "-c", "task build :\n\techo ignored", "build"}, 0},
-		{[]string{"do", "span", "--expand", "-c", "SOURCE = ./input\ntask build : @(SOURCE)\n\ttrue", "build"}, 0},
+		{[]string{"do", "span", "--expand", "-c", "SOURCE = ./input\ntask build : @{SOURCE}\n\ttrue", "build"}, 0},
 		{[]string{"do", "fmt", "--lang", "expr"}, 0},
 		{[]string{"--shell", "/bin/sh", "--env", "KM_TEST=value", "--unknown"}, 2},
 		{[]string{"do", "run", "--lang", "expr", "--allow-read=/tmp", "--allow-env=HOME", "--unknown"}, 2},

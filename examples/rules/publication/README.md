@@ -1,5 +1,8 @@
 # A tiny publication
 
+The syntax below follows the specified contract; the executable rule file and
+installed backend may lag it. Documentation updates do not migrate that file.
+
 **Question:** How do we describe a set of results instead of a fixed sequence of
 commands?
 
@@ -59,7 +62,7 @@ The examples' regression test performs these experiments in temporary copies.
 `sources` is a value. `pages` transforms that value. The index's rule header
 uses the result as dependencies. `{name}` connects each output to its source;
 `@<` and `@>` supply the first input and first output. The index also evaluates
-`@(pages)` in its recipe, so changes to the page set change the rendered command
+`@{pages}` in its recipe, so changes to the page set change the rendered command
 as well as the declared dependencies. `@<*` is the shorthand for all inputs;
 the explicit value here makes the changing set part of the recipe too.
 
@@ -68,7 +71,8 @@ the explicit value here makes the changing set part of the recipe too.
 ## The language boundary
 
 Rule recipes currently run as one ordinary shell script. They are not Kash.
-`@(expression)` enters Kame's value language; shell redirection and `tr` remain
+`@{ref}` reads a binding and `@(function args...)` evaluates a call; shell
+redirection and `tr` remain
 shell operations. See [Kash](../../shell/README.md) for the independent process
 language, or [composition](../../composition/publication/README.md) for the
 shared value program and rule file.

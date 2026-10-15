@@ -79,8 +79,10 @@ dependencies and effects never run.
 ### Template and selector
 
 A **string template** is text containing literal segments and Kame expansions.
-`@(expression)` evaluates an expression, including a reference expression. A
-**selector** is an expansion whose value comes from the nearest rule or function
+`@{reference}` reads a binding; `@` followed by a parenthesized Kame expression
+evaluates it, so `@(function)` is a zero-argument call. Bare `{(...)}` does not
+interpolate. A **selector** is an expansion whose value comes from the nearest
+rule or function
 context: `@<` is the first rule input, `@>` the first output, and `@_` the first
 function argument. Templates are rendered; they are not shell syntax.
 
@@ -321,7 +323,7 @@ the host request, so denial (`CAP_DENIED`) has no side effect.
 ### Tool reference
 
 A **tool reference** obtains a resolved, tracked executable through `x/NAME` or
-`(tool NAME)`, rendered as `@(x/NAME)` in external-shell recipes or referenced
+`(tool NAME)`, rendered as `@{x/NAME}` in external-shell recipes or referenced
 as `$x/NAME` in Kash. Named lookup uses the driver's startup `PATH` and `--tool`
 overrides. Every reached Kash command head also acquires an executable dependency
 automatically; explicit executable paths resolve from stage cwd. Ordinary command

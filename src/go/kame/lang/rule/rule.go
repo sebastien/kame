@@ -156,7 +156,17 @@ func ParseRuleRangeDeferred(a mem.Allocator, s *source.Source, start int, end in
 
 // HasRuleSeparator reports whether text has a top-level rule separator.
 func HasRuleSeparator(text string) bool {
-	return source.TopLevelByte(text, ':') >= 0 || topLevelArrow(text) >= 0
+	return source.TopLevelByte(text, ':') >= 0 || topLevelArrow(text) >= 0 || misplacedSettings(text)
+}
+
+func misplacedSettings(text string) bool {
+	bracket := strings.IndexByte(text, '[')
+	if bracket < 0 || !strings.HasPrefix(strings.TrimSpace(text[bracket+1:]), "shell:") || source.TopLevelByte(text[:bracket], ':') >= 0 { return false }
+	head := strings.TrimSpace(text[:bracket])
+	if strings.HasSuffix(head, ";") { head = strings.TrimSpace(head[:len(head)-1]) }
+	if strings.HasPrefix(head, "task ") { head = strings.TrimSpace(head[5:]) }
+	if strings.HasPrefix(head, "service ") { head = strings.TrimSpace(head[8:]) }
+	return validName(head) || explicitPath(head)
 }
 
 func FreeRule(a mem.Allocator, r *Rule) {
@@ -229,6 +239,10 @@ func (p *parser) rule() *Rule {
 	r := mem.Alloc[Rule](p.a)
 	r.Header, r.Span = source.Span{Start: headerStart, End: headerEnd}, source.Span{Start: p.start, End: lineEnd}
 	header := p.s.Text[headerStart:headerEnd]
+	if misplacedSettings(header) {
+		p.error(headerStart, headerEnd, "rule settings belong after the colon and inputs: target : inputs ; [shell: kash], or target : ; [shell: kash] with no inputs")
+		return r
+	}
 	colon := source.TopLevelByte(header, ':')
 	arrow := topLevelArrow(header)
 	separator, separatorWidth := colon, 1
@@ -304,7 +318,7 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 	if r.Kind == CachedTaskRule || r.Kind == ServiceRule {
 		computed := false
 		for i := range words {
-			if strings.Index(p.s.Text[words[i].Start:words[i].End], "@(") >= 0 {
+			if hasExpansion(p.s.Text[words[i].Start:words[i].End]) {
 				computed = true
 			}
 		}
@@ -316,7 +330,7 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 		span := words[i]
 		text := p.s.Text[span.Start:span.End]
 		value := targetValue(text)
-		if strings.Index(value, "@(") >= 0 {
+		if hasExpansion(value) {
 			start, end := span.Start, span.End
 			if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
 				start++
@@ -327,7 +341,7 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 				p.diags = slices.Append(p.a, p.diags, expansion.Diagnostics[j])
 			}
 			kind := TargetString
-			if text[0] != '"' && len(expansion.Parts) == 1 && expansion.Parts[0].Kind == template.Expression {
+			if text[0] != '"' && len(expansion.Parts) == 1 && (expansion.Parts[0].Kind == template.Expression || expansion.Parts[0].Kind == template.Reference) {
 				kind = TargetExpression
 			}
 			r.Outputs = slices.Append(p.a, r.Outputs, Target{Kind: kind, Text: text, Span: span, Expansion: expansion})
@@ -394,6 +408,8 @@ func (p *parser) validateArguments(r *Rule) {
 	}
 }
 
+func hasExpansion(text string) bool { return strings.Contains(text, "@(") || strings.Contains(text, "@{") }
+
 func (p *parser) ruleInputs(r *Rule, start int, end int) {
 	items := ranges(p.a, p.s.Text, start, end)
 	ordered := false
@@ -428,12 +444,10 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 		if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
 			input.Kind = InputString
 			input.Template = template.ParseStringRange(p.a, p.s, span.Start+1, span.End-1)
-		} else if len(text) >= 3 && text[0] == '@' && text[1] == '(' && text[len(text)-1] == ')' {
-			input.Kind = InputExpression
-			input.Template = template.ParseStringRange(p.a, p.s, span.Start, span.End)
-		} else if strings.Contains(text, "@(") {
+		} else if hasExpansion(text) {
 			input.Kind = InputString
 			input.Template = template.ParseStringRange(p.a, p.s, span.Start, span.End)
+			if len(input.Template.Parts) == 1 && (input.Template.Parts[0].Kind == template.Expression || input.Template.Parts[0].Kind == template.Reference) { input.Kind = InputExpression }
 		} else if hasTemplate(text) {
 			input.Kind = InputTemplate
 			input.TargetForm = template.ParseTarget(p.a, p.s.Name, text)
@@ -445,7 +459,7 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 				input.Template = wildcardInput(p.a, text, span)
 			}
 		} else if !validName(text) {
-			p.error(span.Start, span.End, "invalid rule input")
+			p.error(span.Start, span.End, "invalid rule input; use ./ for a file path, rather than a logical name")
 		}
 		if input.Template != nil {
 			p.takeDiagnostics(input.Template.Diagnostics)

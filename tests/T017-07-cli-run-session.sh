@@ -28,8 +28,8 @@ KMK
 cat >"$work/arguments.kmk" <<'KMK'
 leaf :
 	printf leaf
-build : @((first @*))
-	printf "rule%s" @((first @*))
+build : @(first @*)
+	printf "rule%s" @(first @*)
 KMK
 cat >"$work/cwd/Makefile.kmk" <<'KMK'
 name = "Ada"
@@ -107,7 +107,7 @@ PYTIME
 	service_case=0
 	for service_source in \
 		$'service daemon :\n\t@(write! "./forbidden-service-output" "payload")\n' \
-		$'BAD = (write! "./forbidden-service-output" "payload")\nservice daemon :\n\t@(BAD)\n' \
+		$'BAD = (write! "./forbidden-service-output" "payload")\nservice daemon :\n\t@{BAD}\n' \
 		$'service daemon : ; [shell: kash]\n\t(write! "./forbidden-service-output" "payload")\n'; do
 		service_case=$((service_case + 1))
 		service_directory="$work/service-$backend-$service_case"

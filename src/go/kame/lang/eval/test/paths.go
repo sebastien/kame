@@ -16,7 +16,7 @@ func TestInterpolatedPathsValidateTextAndRetainGlobProvenance(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "paths.km", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	texts := []string{`./@(nop "a *?[\\]")/file.txt`, `@(nop "../two words")/file`, `./@(:nil)/file`, `./@(42)/file`, `./@([])/file`, `./@([a: 1])/file`, `@(nop "src")/file`, `./@(:true)/file`, `./@(([x] x))/file`, "./@(nop \"\x00\")/file"}
+	texts := []string{`./@(nop "a *?[\\]")/file.txt`, `@(nop "../two words")/file`, `./@(nop :nil)/file`, `./@(nop 42)/file`, `./@(nop [])/file`, `./@(nop [a: 1])/file`, `@(nop "src")/file`, `./@(nop :true)/file`, `./@([x] x)/file`, "./@(nop \"\x00\")/file"}
 	for i := range texts {
 		e := expr.Parse(a, "path.km", texts[i])
 		if len(e.Diagnostics) != 0 { t.Error("path did not parse") }

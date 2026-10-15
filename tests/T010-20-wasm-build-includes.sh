@@ -14,7 +14,7 @@ cat >"$work/project/Makefile.kmk" <<'KMK'
 (include ./nested/rules.kmk)
 
 default : leaf
-	@(out! "@(message)\n")
+	@(out! "@{message}\n")
 KMK
 printf '(include ./base.kmk)\nmessage = (str greeting " include")\n' >"$work/project/nested/values.kmk"
 printf 'greeting = "nested"\n' >"$work/project/nested/base.kmk"
@@ -24,7 +24,7 @@ leaf :
 ./artifact.txt :
 	@(yield! message)
 tooled :
-	@(x/sh) -c true
+	@{x/sh} -c true
 broken :
 	@(out! missing)
 KMK

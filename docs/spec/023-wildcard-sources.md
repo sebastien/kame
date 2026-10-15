@@ -15,7 +15,7 @@ embedded Kame expressions use ordinary glob-expression evaluation.
 
 ```kame
 SOURCES_JOURNAL = ./journal/*
-PRODUCT_BY_NAME = (map (replace ./journal/{name:*} "@(name)") SOURCES_JOURNAL)
+PRODUCT_BY_NAME = (map (replace ./journal/{name:*} "@{name}") SOURCES_JOURNAL)
 ```
 
 Glob expressions and explicit `wildcard` calls use the same dependency-tracked

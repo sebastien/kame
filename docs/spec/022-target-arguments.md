@@ -6,8 +6,8 @@ A named rule may declare zero or more standalone argument blocks after its
 single target name:
 
 ```kame
-deploy {environment} {region=us-east} : configure @(environment) @(region)
-	ship @(environment) @(region)
+deploy {environment} {region=us-east} : configure @{environment} @{region}
+	ship @{environment} @{region}
 ```
 
 After an optional `task` prefix, the first token is the literal target name

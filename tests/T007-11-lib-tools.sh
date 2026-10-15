@@ -22,12 +22,12 @@ cat >"$project/Makefile.kmk" <<'KMK'
 compiler = (tool "kame-test-compiler")
 computed = "kame-test-compiler"
 default :
-	"@(compiler)"
+	"@{compiler}"
 	"@(tool computed)"
 scoped : ; env "PATH=./scoped tools"
-	"@(compiler)"
+	"@{compiler}"
 	"@(tool computed)"
-	"@(x/kame-test-compiler)"
+	"@{x/kame-test-compiler}"
 KMK
 for backend in native wasm; do
  test-step "$backend tool resolution and overrides"

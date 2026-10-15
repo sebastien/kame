@@ -46,6 +46,8 @@ const (
 	// CommandResult is the runtime lowering of expression-level run/pipe.
 	CommandResult
 	InvocationJoin
+	// ValuePipe is the source-only subject/stages retained by AuthoredPipe.
+	ValuePipe
 )
 
 type ReferenceKind int
@@ -79,10 +81,7 @@ type StringPart struct {
 	Text string
 	Span source.Span
 	Expr *Expr
-	// Brace retains deprecated {(EXPR)} input spelling for source inspection.
-	// Formatting always emits the canonical @(EXPR) boundary.
-	Brace bool
-	// Form retains Kash's parser boundary: $, ${, (, selector, or $(.
+	// Form retains the authored interpolation or Kash word boundary.
 	Form string
 }
 
@@ -112,6 +111,10 @@ type Expr struct {
 	Body       []*Expr
 	Pattern    *Pattern
 	LiteralPath bool
+	// Applications produced by pipe lowering keep their authored source apart
+	// from executable children. Semantic visitors see only the ordinary call.
+	AuthoredPipe *Expr
+	Expansion string
 }
 
 type Result struct {
@@ -127,6 +130,7 @@ type Prefix struct {
 	Expr        *Expr
 	End         int
 	Diagnostics []source.Diagnostic
+	Closed      bool
 }
 
 func (r *Result) Free() {
@@ -143,6 +147,7 @@ func freeExpr(a mem.Allocator, e *Expr) {
 	if e == nil { return }
 	if e.TextOwned { mem.FreeString(a, e.Text) }
 	e.Pattern.Free(a)
+	freeExpr(a, e.AuthoredPipe)
 	for i := range e.Parts {
 		mem.FreeString(a, e.Parts[i].Text)
 		freeExpr(a, e.Parts[i].Expr)
@@ -201,6 +206,17 @@ func ParsePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
+// ParseExpansionPrefix shares reference/call boundaries across all text surfaces.
+// End includes the closing delimiter; malformed openers can remain literal in
+// document text, while strings and paths retain strict parser diagnostics.
+func ParseExpansionPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
+	p := parser{a: a, s: s, pos: start}
+	e := p.expansion()
+	closed := p.pos > start+2 && (s.Text[p.pos-1] == ')' || s.Text[p.pos-1] == '}')
+	for i := range p.diags { if strings.HasPrefix(p.diags[i].Message, "unclosed") { closed = false } }
+	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags, Closed: closed}
+}
+
 func ParseKashExpressionPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	p := parser{a: a, s: s, pos: start, kash: true}
 	e := p.expression()
@@ -247,7 +263,7 @@ func (p *parser) expression() *Expr {
 	case ':':
 		return p.symbol()
 	case '@':
-		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' { return p.path() }
+		if p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') { return p.path() }
 		return p.selector()
 	case '$':
 		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' { return p.commandCapture() }
@@ -278,15 +294,21 @@ func (p *parser) pathAtom(command bool) *Expr {
 	characterClass := false
 	for p.pos < len(p.s.Text) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
 		b := p.s.Text[p.pos]
-		if b == '@' && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
+		if b == '@' && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') {
 			if !command && patternDepth != 0 { p.error(p.pos, p.pos+2, "pattern groups must be fully authored; interpolation inside a group is invalid") }
 			if partStart < p.pos { e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}}) }
 			open := p.pos
-			inner := p.interpolation(false, "path")
+			form := "@("; if p.s.Text[open+1] == '{' { form = "@{" }
+			inner := p.expansion()
 			if inner == nil { break }
-			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Span: source.Span{Start: open, End: p.pos}})
+			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: open, End: p.pos}})
 			partStart = p.pos
-			if open == start && (p.pos == len(p.s.Text) || p.s.Text[p.pos] != '/') { p.error(start, p.pos, "standalone @(...) is invalid; use (function arguments...) or follow the interpolation with / for a path"); break }
+			if open == start && (p.pos == len(p.s.Text) || p.s.Text[p.pos] != '/') {
+				message := "a leading path expansion requires / after it"
+				if command { message = "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call; a leading path expansion requires / after it" }
+				p.error(start, p.pos, message)
+				break
+			}
 			continue
 		}
 		if b == '\\' && p.pos+1 < len(p.s.Text) { p.pos += 2; continue }
@@ -869,11 +891,11 @@ func placeholderIndex(text string) int {
 
 func (p *parser) paren() *Expr {
 	start := p.pos; p.pos++; p.skipSpace()
-	if p.pos == len(p.s.Text) { p.error(start, p.pos, "unclosed application"); return nil }
+	if p.pos == len(p.s.Text) { p.error(start, p.pos, "unclosed application; expected ')'"); return nil }
 	if p.s.Text[p.pos] == ')' { p.pos++; p.error(start, p.pos, "empty application"); return nil }
 	if p.s.Text[p.pos] == '[' { return p.lambda(start) }
 	first := p.expression()
-	if first == nil { return nil }
+	if first == nil { if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' { p.pos++ }; return nil }
 	app := p.node(Application, start); app.Items = slices.Append(p.a, app.Items, first)
 	for p.pos < len(p.s.Text) {
 		space := p.skipSpace()
@@ -893,27 +915,40 @@ func (p *parser) paren() *Expr {
 			return p.pipe(start, left)
 		}
 		if space == 0 { p.error(p.pos, p.pos+1, "application items need whitespace"); return app }
-		item := p.expression(); if item == nil { return app }
+		item := p.expression(); if item == nil { if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' { p.pos++ }; app.Span.End = p.pos; return app }
 		app.Items = slices.Append(p.a, app.Items, item)
 	}
-	p.error(start, p.pos, "unclosed application")
+	p.error(start, p.pos, "unclosed application; expected ')'")
 	return app
 }
 
 func (p *parser) pipe(start int, left *Expr) *Expr {
+	pipe := p.node(ValuePipe, start)
+	pipe.Items = slices.Append(p.a, pipe.Items, cloneExpr(p.a, left))
+	return p.pipeStage(start, left, pipe)
+}
+
+func (p *parser) pipeStage(start int, left *Expr, pipe *Expr) *Expr {
 	var right []*Expr
 	for p.pos < len(p.s.Text) && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '|' {
 		item := p.expression(); if item == nil { break }
 		right = slices.Append(p.a, right, item)
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] != ')' && p.skipSpace() == 0 { p.error(p.pos, p.pos+1, "pipe items need whitespace"); break }
 	}
-	if len(right) == 0 { p.error(p.pos, p.pos, "pipe needs right expression"); slices.Free(p.a, right); return left }
+	if len(right) == 0 { p.error(p.pos, p.pos, "pipe needs right expression"); slices.Free(p.a, right); freeExpr(p.a, pipe); return left }
 	if p.pos == len(p.s.Text) {
 		p.error(start, p.pos, "unclosed pipe")
 		for i := range right { freeExpr(p.a, right[i]) }
 		slices.Free(p.a, right)
+		freeExpr(p.a, pipe)
 		return left
 	}
+	stage := p.node(Application, right[0].Span.Start)
+	stage.Items = right
+	stage.Span.End = right[len(right)-1].Span.End
+	pipe.Items = slices.Append(p.a, pipe.Items, cloneExpr(p.a, stage))
+	stage.Items = nil
+	mem.Free(p.a, stage)
 	result := p.node(Application, start)
 	used := false
 	for i := range right {
@@ -926,16 +961,22 @@ func (p *parser) pipe(start int, left *Expr) *Expr {
 	}
 	if !used { result.Items = slices.Append(p.a, result.Items, left) }
 	slices.Free(p.a, right)
-	if p.s.Text[p.pos] == ')' { p.pos++; result.Span.End = p.pos; return result }
+	if p.s.Text[p.pos] == ')' {
+		p.pos++
+		result.Span.End, pipe.Span.End = p.pos, p.pos
+		result.AuthoredPipe = pipe
+		return result
+	}
 	p.pos++
-	if p.skipSpace() == 0 { p.error(p.pos, p.pos, "pipe needs right expression"); return result }
-	return p.pipe(start, result)
+	if p.skipSpace() == 0 { p.error(p.pos, p.pos, "pipe needs right expression"); freeExpr(p.a, pipe); return result }
+	return p.pipeStage(start, result, pipe)
 }
 
 func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	if original == nil { return nil }
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
+	copy.AuthoredPipe = cloneExpr(a, original.AuthoredPipe)
 	copy.NamesOwned = true
 	if original.Text != "" { copy.Text, copy.TextOwned = sourceText(a, original.Text), true }
 	copy.Parts, copy.Reference, copy.Items, copy.Fields, copy.Parameters, copy.Body, copy.Pattern = nil, nil, nil, nil, nil, nil, nil
@@ -1011,48 +1052,61 @@ func (p *parser) quoted() *Expr {
 			} else { p.error(p.pos-1, p.pos+1, "invalid string escape"); text.WriteByte(escaped) }
 			p.pos++; continue
 		}
-		if (b == '@' || b == '{') && p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
+		if b == '@' && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') {
 			p.addTextPart(e, &text, partStart, p.pos)
-			open, brace := p.pos, b == '{'
-			inner := p.interpolation(brace, "string")
-			if inner == nil { break }
-		e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Brace: brace, Span: source.Span{Start: open, End: p.pos}}); partStart = p.pos; continue
+			open := p.pos
+			form := "@("; if p.s.Text[open+1] == '{' { form = "@{" }
+			before := len(p.diags)
+			inner := p.expansion()
+			if inner == nil { text.Free(); e.Span.End = p.pos; return e }
+			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: open, End: p.pos}})
+			if p.pos == len(p.s.Text) && len(p.diags) > before { text.Free(); e.Span.End = p.pos; return e }
+			partStart = p.pos
+			continue
 		}
 		text.WriteByte(b); p.pos++
 	}
 	text.Free(); p.error(start, p.pos, "unclosed string"); return e
 }
 
-func (p *parser) interpolation(brace bool, kind string) *Expr {
+func (p *parser) expansion() *Expr {
 	open := p.pos
+	if p.pos+1 >= len(p.s.Text) || p.s.Text[p.pos] != '@' || (p.s.Text[p.pos+1] != '(' && p.s.Text[p.pos+1] != '{') { p.error(open, open+1, "expected @{reference} or @(function args...)"); return nil }
+	if p.s.Text[p.pos+1] == '(' {
+		p.pos++
+		inner := p.paren()
+		if inner != nil { inner.Expansion = "@(" }
+		return inner
+	}
 	p.pos += 2
 	p.skipSpace()
 	innerStart := p.pos
+	diagnosticStart := len(p.diags)
 	inner := p.expression()
-	var items []*Expr
-	if inner != nil { items = slices.Append(p.a, items, inner) }
-	for inner != nil {
-		space := p.skipSpace()
-		if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' { break }
-		if space == 0 { p.error(p.pos, p.pos+1, "interpolation expressions need whitespace"); inner = nil; break }
-		next := p.expression()
-		if next == nil { inner = nil; break }
-		items = slices.Append(p.a, items, next)
+	valid := inner != nil && (inner.Kind == Name || inner.Kind == Reference || inner.Kind == EnvironmentReference) && len(p.diags) == diagnosticStart
+	p.skipSpace()
+	if p.pos < len(p.s.Text) && p.s.Text[p.pos] != '}' {
+		valid = false
+		for p.pos < len(p.s.Text) && p.s.Text[p.pos] != '}' {
+			before := p.pos
+			extra := p.expression()
+			freeExpr(p.a, extra)
+			if p.pos == before { p.pos++ }
+			p.skipSpace()
+		}
 	}
-	if inner == nil {
-		for i := range items { freeExpr(p.a, items[i]) }
-		slices.Free(p.a, items)
-	} else if len(items) > 1 { application := p.node(Application, innerStart); application.Items = items; inner = application
-	} else { slices.Free(p.a, items) }
-	if inner == nil || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || (brace && (p.pos+1 == len(p.s.Text) || p.s.Text[p.pos+1] != '}')) {
+	if p.pos == len(p.s.Text) {
 		freeExpr(p.a, inner)
-		message := "unclosed string interpolation"
-		if kind == "path" { message = "unclosed path interpolation" }
-		p.error(open, p.pos, message)
+		p.diags = p.diags[:diagnosticStart]
+		p.error(open, p.pos, "unclosed reference expansion; expected '}'")
 		return nil
 	}
+	if !valid {
+		p.diags = p.diags[:diagnosticStart]
+		p.error(innerStart, p.pos, "@{...} requires a reference; use @(function args...) for a call")
+	}
 	p.pos++
-	if brace { p.pos++ }
+	if inner != nil { inner.Expansion = "@{" }
 	return inner
 }
 
@@ -1161,6 +1215,17 @@ func writeProcess(b *strings.Builder, e *Expr) {
 
 func writeExpr(b *strings.Builder, e *Expr) {
 	if e == nil { return }
+	if e.AuthoredPipe != nil { writeExpr(b, e.AuthoredPipe); return }
+	if e.Kind == ValuePipe {
+		b.WriteByte('(')
+		writeExpr(b, e.Items[0])
+		for i := 1; i < len(e.Items); i++ {
+			b.WriteString(" | ")
+			writeEmbedded(b, e.Items[i])
+		}
+		b.WriteByte(')')
+		return
+	}
 	if e.Kind == ValueRecovery { writeExpr(b, e.Items[0]); b.WriteString(" ?? "); writeExpr(b, e.Items[1]); return }
 	if e.Kind == CommandCapture || e.Kind == CommandGraph || e.Kind == CommandTest { if e.Kind == CommandCapture { b.WriteString("$(") }; writeProcess(b, e); if e.Kind == CommandCapture { b.WriteByte(')') }; return }
 	if e.Kind == CommandStage { for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }; return }
@@ -1190,7 +1255,7 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		if len(e.Parts) == 0 { b.WriteString(e.Text); return }
 		for i := range e.Parts {
 			part := e.Parts[i]
-			if part.Expr == nil { b.WriteString(part.Text) } else { b.WriteString("@("); writeEmbedded(b, part.Expr); b.WriteByte(')') }
+			if part.Expr == nil { b.WriteString(part.Text) } else { writeExpansion(b, part) }
 		}
 		return
 	}
@@ -1236,7 +1301,7 @@ func writeString(b *strings.Builder, e *Expr) {
 			} else if c == '\n' { b.WriteString("\\n")
 			} else if c == '\r' { b.WriteString("\\r")
 			} else if c == '\t' { b.WriteString("\\t")
-			} else if c == '@' && j+1 < len(e.Text) && e.Text[j+1] == '(' { b.WriteString("\\@")
+			} else if c == '@' && j+1 < len(e.Text) && (e.Text[j+1] == '(' || e.Text[j+1] == '{') { b.WriteString("\\@")
 			} else { b.WriteByte(c) }
 		}
 		b.WriteByte('"')
@@ -1244,7 +1309,7 @@ func writeString(b *strings.Builder, e *Expr) {
 	}
 	for i := range e.Parts {
 		part := e.Parts[i]
-		if part.Expr != nil { b.WriteString("@("); writeEmbedded(b, part.Expr); b.WriteByte(')'); continue }
+		if part.Expr != nil { writeExpansion(b, part); continue }
 		for j := 0; j < len(part.Text); j++ {
 			c := part.Text[j]
 			if c == '"' { b.WriteString("\\\"")
@@ -1252,7 +1317,7 @@ func writeString(b *strings.Builder, e *Expr) {
 			} else if c == '\n' { b.WriteString("\\n")
 			} else if c == '\r' { b.WriteString("\\r")
 			} else if c == '\t' { b.WriteString("\\t")
-			} else if (c == '@' || c == '{') && j+1 < len(part.Text) && part.Text[j+1] == '(' { b.WriteByte('\\'); b.WriteByte(c)
+			} else if c == '@' && j+1 < len(part.Text) && (part.Text[j+1] == '(' || part.Text[j+1] == '{') { b.WriteByte('\\'); b.WriteByte(c)
 			} else { b.WriteByte(c) }
 		}
 	}
@@ -1260,6 +1325,12 @@ func writeString(b *strings.Builder, e *Expr) {
 }
 
 func writeEmbedded(b *strings.Builder, e *Expr) {
-	if e.Kind != Application { writeExpr(b, e); return }
+	if e.Kind != Application || e.AuthoredPipe != nil { writeExpr(b, e); return }
 	for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }
+}
+
+func writeExpansion(b *strings.Builder, part StringPart) {
+	if part.Form == "@{" { b.WriteString("@{"); writeExpr(b, part.Expr); b.WriteByte('}'); return }
+	b.WriteByte('@')
+	writeExpr(b, part.Expr)
 }

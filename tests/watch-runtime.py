@@ -35,7 +35,7 @@ def stop(process):
 if os.name != 'nt':  # Angle brackets are valid POSIX filename bytes, not Windows names.
     with tempfile.TemporaryDirectory(prefix='kame-watch-source-kind-') as directory:
         project = Path(directory)
-        (project / 'Makefile.kmk').write_text('(include "<command>")\nchosen :\n\tprintf %s @(MARK) >> source-log\n')
+        (project / 'Makefile.kmk').write_text('(include "<command>")\nchosen :\n\tprintf %s @{MARK} >> source-log\n')
         included = project / '<command>'
         included.write_text('MARK = "alpha"\n')
         error = project / 'stderr'
@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
     project = Path(directory)
     source = project / 'Makefile.kmk'
     included = project / 'values.kmk'
-    source.write_text('(include "values.kmk")\nchosen :\n\tprintf %s @(MARK) >> source-log\n')
+    source.write_text('(include "values.kmk")\nchosen :\n\tprintf %s @{MARK} >> source-log\n')
     included.write_text('MARK = "alpha"\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -77,7 +77,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-') as directory:
             included.write_text('MARK = "gamma"\n')
             wait_for(process, lambda: read(log) == 'alphabravogamma', error, 'recovery after source repair')
             cases += 1
-            source.write_text('(include "values.kmk")\nchosen : added\n\tprintf %s @(MARK) >> source-log\nadded :\n\tprintf dependency >> source-log\n')
+            source.write_text('(include "values.kmk")\nchosen : added\n\tprintf %s @{MARK} >> source-log\nadded :\n\tprintf dependency >> source-log\n')
             wait_for(process, lambda: read(log) == 'alphabravogammadependencygamma', error, 'changed source graph')
             cases += 1
         finally:
@@ -88,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-generated-') as directory:
     project = Path(directory)
     source = project / 'Makefile.kmk'
     values = project / 'modules.kmk'
-    source.write_text('(include "modules.kmk")\ngenerate modules = (map ([module] [kind: "task" target: module inputs: [] order-only: [] recipe: (list (join "" (list "touch generated-" module)))]) MODULES)\nchosen : @((map ([module] module) MODULES))\n\tprintf x >> runs\n')
+    source.write_text('(include "modules.kmk")\ngenerate modules = (map ([module] [kind: "task" target: module inputs: [] order-only: [] recipe: (list (join "" (list "touch generated-" module)))]) MODULES)\nchosen : @(map ([module] module) MODULES)\n\tprintf x >> runs\n')
     values.write_text('MODULES = ["alpha"]\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -292,7 +292,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-output-pressure-') as direct
 
 with tempfile.TemporaryDirectory(prefix='kame-watch-root-repair-') as directory:
     project = Path(directory)
-    (project / 'Makefile.kmk').write_text('MARK = (text (read ./input))\nchosen :\n\tprintf %s @(MARK) >> watch-log\n')
+    (project / 'Makefile.kmk').write_text('MARK = (text (read ./input))\nchosen :\n\tprintf %s @{MARK} >> watch-log\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -311,7 +311,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-grants-') as directory:
     secret = project / 'secret'
     other = project / 'other'
     secret.write_text('first')
-    source.write_text('MARK = (text (read ./secret))\nchosen : ./secret\n\tprintf %s @(MARK) >> watch-log\n')
+    source.write_text('MARK = (text (read ./secret))\nchosen : ./secret\n\tprintf %s @{MARK} >> watch-log\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -320,11 +320,11 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-grants-') as directory:
             wait_for(process, lambda: read(log) == 'first', error, 'granted initial read')
             secret.write_text('second')
             wait_for(process, lambda: read(log) == 'firstsecond', error, 'granted input invalidation')
-            source.write_text('MARK = (text (read ../secret))\nchosen : ./secret\n\tprintf %s @(MARK) >> watch-log\n')
+            source.write_text('MARK = (text (read ../secret))\nchosen : ./secret\n\tprintf %s @{MARK} >> watch-log\n')
             wait_for(process, lambda: 'CAP_DENIED' in error.read_text(), error, 'denied read after source reload')
             assert read(log) == 'firstsecond', 'denied read ran the recipe'
             other.write_text('third')
-            source.write_text('MARK = (text (read ./other))\nchosen : ./secret\n\tprintf %s @(MARK) >> watch-log\n')
+            source.write_text('MARK = (text (read ./other))\nchosen : ./secret\n\tprintf %s @{MARK} >> watch-log\n')
             wait_for(process, lambda: read(log) == 'firstsecondthird', error, 'grant preserved after source reload')
             cases += 1
         finally:
@@ -414,7 +414,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cached-metadata-') as direct
 	input_file = project / 'input'
 	input_file.write_text('unchanged')
 	input_file.chmod(0o600)
-	(project / 'Makefile.kmk').write_text('MODE = (get "mode" (stat ./input))\nchosen :\n\tprintf %s @(MODE) > mode; printf x >> runs\n')
+	(project / 'Makefile.kmk').write_text('MODE = (get "mode" (stat ./input))\nchosen :\n\tprintf %s @{MODE} > mode; printf x >> runs\n')
 	error = project / 'stderr'
 	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
 		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)
@@ -428,7 +428,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cached-metadata-') as direct
 			# Neither symlink target exists: only the no-follow view can change.
 			link = project / 'link'
 			link.symlink_to('absent')
-			(project / 'Makefile.kmk').write_text('LINK = (readlink ./link)\nchosen :\n\tprintf %s @(LINK) > seen\n')
+			(project / 'Makefile.kmk').write_text('LINK = (readlink ./link)\nchosen :\n\tprintf %s @{LINK} > seen\n')
 			wait_for(process, lambda: read(project / 'seen') == 'absent', error, 'initial dangling symlink observation')
 			time.sleep(.5)
 			link.unlink()
@@ -561,7 +561,7 @@ if sys.platform == 'linux':
 			source = '# ' + 'x' * (16 * 1024) + '\n'
 			if fallback:
 				source += 'MARK = (exists? (resource "mem://watch/missing"))\n'
-				source += 'chosen : ./input\n\tprintf %s @(MARK) > exists; cat @< > copy\n'
+				source += 'chosen : ./input\n\tprintf %s @{MARK} > exists; cat @< > copy\n'
 			else:
 				source += 'chosen : ./input\n\tcat @< > copy\n'
 			(project / 'Makefile.kmk').write_text(source)

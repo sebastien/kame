@@ -10,7 +10,7 @@ cd "$CLI_ROOT"
 make dist-wasm >/dev/null
 work="$TMPDIR/render"
 mkdir -p "$work"
-printf 'Hello @(name)!' >"$work/hello.md"
+printf 'Hello @{name}!' >"$work/hello.md"
 printf '@(text (read ./value.txt))' >"$work/read.md"
 printf 'read-value' >"$work/value.txt"
 printf '@if(:true)\nmissing end' >"$work/broken.md"
@@ -20,10 +20,10 @@ for backend in native wasm; do
  "${runner[@]}" do render "$work/hello.md" --define name=World >"$work/out" 2>"$work/err"
  printf 'Hello World!' >"$work/expected"
  if cmp -s "$work/out" "$work/expected"; then test-ok "$backend file payload raw bytes"; else test-fail "$backend file rendering"; fi
- "${runner[@]}" do render -c 'Hello @(name)!' --define name=old --define 'name=new "value"' >"$work/out" 2>"$work/err"
+ "${runner[@]}" do render -c 'Hello @{name}!' --define name=old --define 'name=new "value"' >"$work/out" 2>"$work/err"
  printf 'Hello new "value"!' >"$work/expected"
  if cmp -s "$work/out" "$work/expected"; then test-ok "$backend inline repeated definitions preserve literals"; else test-fail "$backend inline definitions"; fi
- printf 'stdin @(name)' | "${runner[@]}" do render --define name=OK >"$work/out" 2>"$work/err"
+ printf 'stdin @{name}' | "${runner[@]}" do render --define name=OK >"$work/out" 2>"$work/err"
  if [ "$(cat "$work/out")" = 'stdin OK' ]; then test-ok "$backend default stdin"; else test-fail "$backend stdin"; fi
  printf 'literal' >"$work/no-extension"
  "${runner[@]}" do render "$work/no-extension" --comment plain >"$work/out" 2>"$work/err"

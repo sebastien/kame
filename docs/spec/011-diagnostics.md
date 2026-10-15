@@ -211,6 +211,38 @@ not portable runtime diagnostics; they are documented with the embedding API.
   Arity errors state the expected count or range and the supplied count.
   Rejected values are not printed merely to explain their kinds.
 
+## Language-Boundary Recovery
+
+Keep existing diagnostic codes while making parser ownership and recovery clear.
+The rules below constrain the established reason, primary span and useful tips,
+not exact English wording. Human, plain and JSON output expose the same guidance;
+evaluated values and environment contents are not included to illustrate errors.
+
+| Failure | Required explanation and recovery |
+| --- | --- |
+| Rendering a callable (`EXPR_INVALID`) | Identify the actual callable kind, not a record/bytes conversion failure. For `@{name}`, suggest `@(name)` when invocation is intended; never invoke it implicitly. |
+| Applying a noncallable (`EXPR_INVALID`) | Identify the actual head kind and authored call. If the head is a reference being rendered with `@(name)`, suggest `@{name}` for lookup; never fall back to that interpretation. |
+| Invalid reference expansion (`PARSE_ERR`) | State that `@{...}` requires a reference; point at the invalid body and show `@(function args...)` for a call when applicable. |
+| Invalid mixed Kash word (`EXPR_INVALID`) | Name the destination (argument, command head, redirection or setup key), actual fragment kind, and scalar constraint. Explain that list splicing is only valid for standalone unquoted argv substitutions. |
+| Missing/invalid selector context (`SEL_NO_CONTEXT`, `SEL_INDEX_INVALID`) | Identify the required frame or invalid bound. In template text, also explain `\@` for a literal at-sign when the authored spelling may be literal, such as `--mtime=@0`; do not guess from an external executable name. |
+| Missing explicit file prefix (`PARSE_ERR`, or `TGT_NO_RULE` where applicable) | Distinguish a logical name from a file path and suggest `./` when a file path is plausible. Never silently reclassify a name or modify source. |
+| Denied environment read (`CAP_DENIED`) | Identify environment-read authority and, when known, the name. Explain the scoped `--allow-env=NAME` grant; definition configuration and child environment settings do not grant that read. |
+| Invalid rule settings placement (`PARSE_ERR`) | When the malformed metadata placement is recognizable, show `target : inputs ; [shell: kash]`, or `target : ; [shell: kash]` with no inputs. Do not imply valid metadata is unsupported. |
+| Template syntax in direct Kash (`PARSE_ERR`) | Name the direct Kash boundary and show `$name` / `${name}` for a reference or `(function args...)` for a call, without adding an implicit template pass. |
+| Removed `--define-value` option (`OPT_UNKNOWN`) | Show `--set NAME=LITERAL` for closed typed data; `NAME=TEXT` and `--define` remain strings. No compatibility alias or type inference is offered. |
+
+Recognized unclosed expressions/references name their missing delimiter without
+extra separator errors. Literal parentheses in raw Kash words can be quoted or
+escaped; quoted literal parentheses must not be diagnosed as calls. A pipe is
+not diagnosed as noncanonical merely because it has application-equivalent
+semantics. Valid selector use and deliberately literal brace text are not errors.
+
+Grant tips do not broaden authority automatically or suppress phase failures.
+They must not imply `--env NAME=VALUE`, `NAME=VALUE`, `KAME_NAME` or `--set`
+authorizes `(env NAME)`. Where a tip names an explicit grant, it must respect
+`009-cli.md`'s replacement policy rather than suggesting that all default grants
+will remain enabled.
+
 ## Human and Plain Rendering
 
 Human diagnostics are written to stderr. They use this information hierarchy:
@@ -359,6 +391,13 @@ contain no ANSI escapes, and use no terminal-width-dependent wrapping.
 ## Acceptance Tests
 
 - Every normative failure named in `docs/spec` references a registered code.
+- Language-boundary failures retain their codes and authored spans while naming
+  the actual kind/context and exposing the recovery above consistently in human,
+  plain and JSON output. Coverage includes callable rendering, noncallable calls,
+  reference bodies, scalar word destinations, literal selector collisions,
+  explicit path prefixes, environment grants and misplaced rule metadata.
+- Tips never invoke a value, reinterpret syntax, grant capabilities, modify
+  source, infer command-specific template semantics or expose evaluated secrets.
 - Every code matches `^[A-Z]+(?:_[A-Z]+)*$` and appears once in this registry.
 - Wrapping a diagnostic preserves code, severity, and original source span.
 - A source diagnostic reports one-based line and tab-aware display column,

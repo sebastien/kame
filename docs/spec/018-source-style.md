@@ -187,6 +187,39 @@ on a separate line, indented two spaces:
 
 The operator can itself be an expression and follows the same nested rules.
 
+### Value Pipes
+
+Preserve the authored choice between a pipe chain and nested applications:
+
+```kame
+(HELP | map std-help-line | join "\n")
+(join "\n" (map std-help-line HELP))
+```
+
+Both are valid canonical structures. Formatting changes only their spacing and
+layout, never converts between them, and never moves, inserts or removes `_`
+placeholders. Parsing retains enough authored structure to distinguish a pipe
+from its application-equivalent evaluation. Lowering for evaluation must not
+dictate source formatting or change evaluation order, multiplicity or effects.
+
+A short chain is inline with one space on each side of `|`. An expanded chain
+keeps its subject after `(` and puts each stage on a new two-space-indented line,
+beginning with `|` and one space:
+
+```kame
+(PAGES_WITH_PUBLISHED_NAVIGATION_METADATA
+  | map navigation-item
+  | filter ([item] item.visible)
+  | join "\n")
+```
+
+Nested stage operands use the ordinary expression layouts at their actual
+columns; long stage operands expand beneath the stage head. The closing `)`
+stays attached to the last stage's final element. Compact embedded formatting
+inside strings, templates and Kash words keeps the chain on one physical line
+without rewriting it into calls. Kash process pipelines retain their separate
+streaming syntax and are not value-pipe conversions.
+
 ### Lists and Records
 
 Short collections remain inline:
@@ -315,3 +348,8 @@ the transformations next, and find rules or execution at the end of the file.
   order, and execution order remain preserved under their existing contracts.
 - Formatting does not enforce naming conventions by changing identifiers.
 - Formatting does not perform effects or evaluate declarations to choose layout.
+- Inline/expanded value pipes and nested applications keep their authored form
+  through repeated formatting. Coverage includes mixed nesting, explicit and
+  repeated placeholders, multiline operands, comments, and compact expressions
+  in strings, templates, rule headers and Kash words; no calls/effects execute
+  merely to choose or preserve the structure.

@@ -27,7 +27,8 @@ A final `rest...` parameter collects remaining arguments. Definitions are
 demanded on reference, not executed as sequential shell assignments.
 `NAME ?= RHS` supplies a lazy default if the name is not already configured;
 `?=` must be contiguous. `--define NAME=VALUE` overrides a declared definition
-with literal string data, not expression source.
+with literal string data, not expression source; `--set NAME=LITERAL` supplies
+closed typed data without evaluating it.
 
 Every RHS is one expression: `alias = other` references a value, `number = 42`
 is numeric, text requires quotes, and lists require brackets. This applies to
@@ -54,7 +55,8 @@ In `.km`/`.kmk`, `+=` lazily concatenates lists in source/include/session order,
 without flattening nested items or removing duplicates. An earlier `=`/`?=` is
 the base; otherwise the base is `[]`. Later `?=` is skipped, and later `=` is
 still a duplicate error. Non-list bases/contributions fail `EXPR_INVALID`.
-CLI/environment overrides replace the whole aggregate with literal string data.
+String CLI/environment overrides replace the whole aggregate with string data;
+`--set` replaces it with typed literal data, so a list override remains a list.
 Self/indirect references to the final aggregate fail `DEP_CYCLE` when demanded;
 there is no previous-accumulator value. Functions and Kash do not support `+=`.
 

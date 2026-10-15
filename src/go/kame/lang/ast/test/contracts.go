@@ -23,8 +23,8 @@ func TestSchemaOneAdditiveSemanticFields(t *testing.T) {
 	for _, lang := range patternLanguages {
 		text := "[./{name:~[a-z]+} ./{name:*}]"
 		if lang == "kash" { text = "p = " + text }
-		if lang == "rule" { text = "./{name:~[a-z]+} ./{name:*} : @(PREP), @(BUILD) ./in/{name:~[a-z]+}" }
-		if lang == "template" { text = "@(" + text + ")" }
+		if lang == "rule" { text = "./{name:~[a-z]+} ./{name:*} : @{PREP}, @{BUILD} ./in/{name:~[a-z]+}" }
+		if lang == "template" { text = "@(nop " + text + ")" }
 		formatted := format.Source(a, lang, "regex", text, "tabs", 4)
 		if !formatted.OK {
 			t.Error("regex source failed formatting")

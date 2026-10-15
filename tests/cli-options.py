@@ -121,7 +121,8 @@ def main() -> None:
 		(project / "Makefile.kmk").write_text("default :\n")
 		for host in [[native], ["node", wasm]]:
 			checkHost(host, project)
-		invoke([str(root / "bin/kame")], ["init", "--help"], project)
+		result = invoke([str(root / "bin/kame")], ["init", "--help"], project, status=1)
+		assert "retired" in result.stderr and not result.stdout, result
 		assert not (project / "Makefile.bootstrap").exists()
 	print("native/WASM CLI option matrix passed")
 

@@ -31,7 +31,7 @@ filesystem access and starts no producer.
 Literal phony, cached-task, and service rules share the source-level target
 namespace. Defining the same literal name in more than one of those rule kinds
 is `TGT_AMBIG` during compilation. A definition may share that name because it
-uses a distinct `definition` key; rule lookup wins and `@(NAME)` explicitly
+uses a distinct `definition` key; rule lookup wins and `@{NAME}` explicitly
 evaluates the definition. Overlapping templates remain a selection-time error.
 
 Dynamic module imports are not supported.
@@ -77,7 +77,7 @@ It does not evaluate body expressions or run commands.
 Freshness is `unknown` when body evaluation may discover dependencies. A plan
 never claims such a rule is fresh from declared inputs alone.
 
-Bare input names refer to symbolic resources. `@(NAME)` evaluates and recursively
+Bare input names refer to symbolic resources. `@{NAME}` evaluates and recursively
 flattens the definition value into concrete inputs. Nil contributes no input.
 Values other than strings, resource references, lists, or nil are invalid rule
 inputs.
@@ -164,7 +164,8 @@ render.
 Rendering and execution append to the dependency set. A successful run persists
 that set with the outputs:
 
-- A header input or `@(expression)` result records the resolved file path set.
+- A header input or reference/expression expansion records the resolved file
+  path set.
 - `(read PATH)`, `(render PATH)`, and a template include record that file.
 - `(wildcard PATTERN)` and any glob evaluated while rendering record the pattern
   and the sorted member paths.
@@ -371,9 +372,11 @@ effective target snapshot after checking environment grants; absent names return
 nil, including in an empty snapshot. Lazy definitions and functions reached from
 recipes or dynamic prerequisites evaluate against the same target environment.
 A target's `KAME_NAME` assignment overrides a declared value definition `NAME`;
-explicit `--define NAME=value` wins over that assignment. Overrides remain literal
-strings. Definitions retain separate engine values per environment and phase,
-including ordinary replay, dependency and cycle handling. Produced file reads
+explicit CLI configuration wins over that assignment under `009-cli.md`.
+`--define NAME=value` and bare assignments remain literal strings;
+`--set NAME=LITERAL` preserves closed literal data without evaluation. Definitions
+retain separate engine values per environment and phase, including ordinary
+replay, dependency and cycle handling. Produced file reads
 reached through definitions inherit the demanding target environment.
 Dynamic prerequisites retain their read-only phase through lazy definitions.
 Collected shell requests reached during runtime evaluation receive the same
@@ -486,7 +489,7 @@ bytes is a separate operation used by `cat`.
 - Two matching templates produce `TGT_AMBIG` regardless of source order.
 - Captures render corresponding input and output templates.
 - Bare symbolic dependencies select rules before definitions with the same
-  name; explicit definition evaluation remains available through `@(...)`.
+  name; explicit definition evaluation remains available through `@{NAME}`.
 - A diamond dependency graph executes its shared node once.
 - Existing fresh file outputs are skipped; missing outputs and changed content
   rebuild. A modification-time update that leaves the bytes alone does not.
@@ -551,5 +554,5 @@ read can be discovered. An unread environment value only invalidates when the
 rule consumes a process environment snapshot.
 
 Make's `$?` maps to `@<?`. Pattern stems use explicit captures, for example
-`./build/{stem}.o` and `@(stem)` in its recipe. Output and first-input directories
+`./build/{stem}.o` and `@{stem}` in its recipe. Output and first-input directories
 use `@(dirname @>)` and `@(dirname @<)`.

@@ -30,7 +30,7 @@ for backend in native wasm; do
 	check '"[5e-324,2.2250738585072014e-308,1.7976931348623157e+308]"' '(json (parse-json "[5e-324,2.2250738585072014e-308,1.7976931348623157e308]"))'
 	check '"[9223372036854775807,-9223372036854775808,1.8446744073709552e+19]"' '(json (parse-json "[9223372036854775807,-9223372036854775808,18446744073709551615]"))'
 	check '"[0.1,1.2345678901234567,1e-300,1e+300,0]"' '(json (parse-json "[0.1,1.2345678901234567,1e-300,1e300,-0.0]"))'
-	check '"a1 2b"' '(render "plain" """a@(:nil)@([1 2])b""")'
+	check '"a1 2b"' '(render "plain" """a@(nop :nil)@(nop [1 2])b""")'
 	reject '(cat "a" "b")' OP_UNKNOWN
 	for operation in str json; do
 		for value in '([x] x)' './path/{*}' '(resource "mem://x/file")' '[bad: ([x] x)]'; do reject "($operation $value)" EXPR_INVALID; done

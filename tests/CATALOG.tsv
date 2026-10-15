@@ -1,7 +1,9 @@
 # CLI conformance test catalog. One row per test script.
 # Columns: file<TAB>spec<TAB>category<TAB>covers
-tests/T016-03-lang-template-boundaries.sh	016	lang	Single-expression directive shorthand, explicit multi-argument slots, host comments, malformed boundaries, lazy branches, canonical interpolation migration, raw/escaped text and native/WASM parity
+tests/T016-03-lang-template-boundaries.sh	016	lang	Reference/call distinction, zero-argument and computed-callable calls, directive slots, nested selections, raw/escaped and inert brace text, headers/paths/tools, canonical formatting and native/WASM parity
 tests/T017-20-kash-context-environment.sh	017	kash	Expression statements, computed stage env records, ordered local overrides, validation and secret-safe traces, named args/inputs/outputs/changed inputs, rule-frame retention and native/WASM formatting parity
+tests/T017-21-kash-words.sh	017	kash	Mixed scalar expression fragments in argv, command heads, redirections and setup; quoting, typed splicing, retained operands, prelaunch rejection and native/WASM format parity
+tests/T011-04-diag-language-boundaries.sh	011	diag	Reference/call recovery, actual scalar kinds and destinations, selector literal escapes, file prefixes, environment grants, rule settings placement, secret-safe human/plain/JSON host parity
 tests/T036-01-cli-presentation.sh	036	cli	Native/WASM presentation modes, global options, exact bytes, JSON results, static errors, watch boundaries and terminal fallback
 tests/T036-02-cli-reuse-reasons.sh	036	cli	Native/WASM file and task reuse reasons, missing/corrupt records, guard/input/output/configuration/environment changes, force/always, deduplication and privacy
 tests/T004-16-lang-computed-outputs.sh	004	lang	Pure computed output paths and names, captures, list flattening, overrides, validation, diagnostics, formatting and native/WASM parity

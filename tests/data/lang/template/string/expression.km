@@ -1,1 +1,1 @@
-echo @(project.name)
+echo @{project.name}

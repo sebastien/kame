@@ -14,11 +14,11 @@ with tempfile.TemporaryDirectory(prefix='kame-target-arguments-') as directory:
     project = Path(directory)
     (project / 'Makefile.kmk').write_text(
         'prepare {region=west} {zone=global} :\n'
-        '\tprintf @(region) >> dependency-log\n'
-        'deploy {region=west} {zone=global} : "prepare region=@(region) zone=@(zone)"\n'
-        '\tprintf @(region) >> deploy-log\n'
+        '\tprintf @{region} >> dependency-log\n'
+        'deploy {region=west} {zone=global} : "prepare region=@{region} zone=@{zone}"\n'
+        '\tprintf @{region} >> deploy-log\n'
         'required {environment} :\n'
-        '\tprintf @(environment) >> required-log\n'
+        '\tprintf @{environment} >> required-log\n'
         'other :\n\ttrue\n'
     )
 
@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory(prefix='kame-target-argument-watch-') as direct
     (project / 'Makefile.kmk').write_text(
         'label ?= "authored"\n'
         'deploy {region=west} : ./input\n'
-        '\tprintf \'%s:%s:%s:\' \'@(region)\' \'@(label)\' "$HOST" >> watch-log; cat ./input >> watch-log\n'
+        '\tprintf \'%s:%s:%s:\' \'@{region}\' \'@{label}\' "$HOST" >> watch-log; cat ./input >> watch-log\n'
     )
     process = subprocess.Popen([*runner, '--watch', 'deploy', 'region=east', 'label=override', 'env.HOST=local'], cwd=project, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:

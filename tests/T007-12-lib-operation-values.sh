@@ -32,7 +32,7 @@ SHELL = kash
 predicate = exists?
 files = [./first ./missing ./second]
 inputs = (filter predicate files)
-default : @(inputs)
+default : @{inputs}
 	(out! (map uppercase ["a" "b"]))
 KMK
 for backend in native wasm; do
@@ -74,7 +74,7 @@ for backend in native wasm; do
 	check '"zab"' do run --lang expr -c '(let [value ["a" "b"]] (value | reduce str "z"))'
 	check '[[1] [1]]' do run --lang expr -c '(let [value [[1] [2] [1]]] (value | filter [1]))'
 	check '"b"' do run --lang expr -c '("a/b" | relpath "a")'
-	check '"Hi Ada"' do run --lang expr -c '("""Hi @(name)""" | render [name: "Ada"] "plain")'
+	check '"Hi Ada"' do run --lang expr -c '("""Hi @{name}""" | render [name: "Ada"] "plain")'
 	check 0 do run --lang expr --allow-run -c '("printf ok" | sh! (parse-json "{}") | get "status")'
 	check '[:true :false]' do run --lang expr -c '[(2 | gt 3) (2 | gt _ 3)]'
 	for expression in '(nth [1] 0)' '(get [x: 1] "x")' '(set [x: 1] "x" 2)' '(slice [1] 0)' '(join ["a"] "-")' '(map [1] ([x] x))' '(flatmap [1] ([x] [x]))' '(filter [1] ([x] :true))' '(filter-out [1] ([x] :true))' '(reduce str ["a"] "")' '(apply [1] ([x] x))' '(render "hello" [x: 1])'; do

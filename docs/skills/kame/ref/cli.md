@@ -94,7 +94,7 @@ Primary options:
 | `--capture-limit N` | Limit each command substitution's captured stdout; default 1 MiB, independent of retained recipe logs. |
 | `--watch` | Rebuild tracked inputs; primary build mode only, not `do run`. |
 | `--define NAME=VALUE` | Override a declared definition with literal string data. |
-| `--define-value NAME=LITERAL` | Override a declared definition with typed, closed Kame data. |
+| `--set NAME=LITERAL` | Override a declared definition with typed, closed Kame data. |
 | `--print-result` | In execution sessions, opt into final `.km` result display. |
 | `--tool NAME=PATH` | Override executable resolution for a declared tool. |
 
@@ -109,25 +109,31 @@ Program arguments after `--` are a separate mechanism.
 
 Declared value definitions also accept case-sensitive `KAME_<NAME>` environment
 configuration: `KAME_MODE=release kame` overrides an authored `MODE` definition.
-Precedence is explicit CLI configuration (`--define` or `NAME=VALUE`), then
-`KAME_<NAME>`, then the authored value, including `?=` defaults. Repeated CLI
-entries use the last value. Overrides are literal strings, never expressions;
+Precedence is explicit CLI configuration, then `KAME_<NAME>`, then the authored
+value, including `?=` defaults. `--define`, bare `NAME=VALUE` and environment
+overrides are literal strings, never evaluated expressions;
 function definitions cannot be overridden. Unknown explicit names fail, while
 unrelated `KAME_` environment entries are ignored. This is definition
 configuration, not `env.NAME=VALUE` child-environment setup or an `(env NAME)`
 read grant. `do render --define` instead supplies template payload fields.
 
-Use `--define-value 'SDK_MODULES=["py" "js"]'` or `--define-value FLAG=:false`
+Use `--set 'SDK_MODULES=["py" "js"]'` or `--set FLAG=:false`
 for typed configuration. Accepted data is nil, booleans, finite numbers, plain
 strings/symbols/paths, lists, and records with unique keys, nested below 256
 levels. References, applications, interpolation, pattern values, wildcard paths,
 captures, and callables are rejected before any work runs. Verbatim strings can
 carry interpolation-looking data literally. This option does not grant effects
 or evaluate arbitrary expressions, and is not a template-render payload option.
-Repeated `--define`/`--define-value` options share last-option-wins precedence;
+Repeated `--define`/`--set` options share last-option-wins precedence;
 bare `NAME=VALUE` parameters retain their existing final precedence and string
 semantics. `KAME_<NAME>` remains string configuration. Inspection JSON preserves
 typed values rather than rendering them as strings.
+
+`--set=NAME=LITERAL` is also accepted. This configures declared values, not task
+arguments or child environments. `--define-value` is not a compatibility alias;
+use `--set`. In particular, `--set FLAG=:false` supplies false, whereas
+`FLAG=:false` supplies the truthy string `:false`. No default-type inference
+occurs. Template-render payloads retain their separate `--define` interface.
 
 Recipes receive an explicit complete environment. The CLI starts from its
 environment and applies `--env` replacements; cache fingerprints include the
@@ -297,3 +303,11 @@ options. Document rendering is not source formatting.
 For a migration loop, prefer: format check → `plan` → graph inspection →
 dry-run → targeted build. This makes target classification and dependency
 mistakes visible before a recipe changes the working tree.
+
+Boundary diagnostics should identify the actual value kind, destination and
+authored span. A callable lookup is not a record/bytes conversion error; a
+noncallable `@(name)` may need `@{name}` when lookup was intended. `CAP_DENIED`
+for an environment read is not fixed by `--env` or definition configuration.
+Selector-looking literal text needs escaping, not command-specific guessing.
+See [boundary recovery](../../../spec/011-diagnostics.md#language-boundary-recovery)
+for the shared human/plain/JSON contract. Tips never change source or authority.

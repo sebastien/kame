@@ -20,7 +20,7 @@ root : left right
 always ./one ./two : ./input
 	cp @< ./one; cp @< ./two; printf m >> ./multi-runs
 always ./capture/{name}.txt : ./input
-	printf %s @(name) > @>; printf c >> ./capture-runs
+	printf %s @{name} > @>; printf c >> ./capture-runs
 always ./yielded : ./input
 	@(yield! "constant")
 always ./missing : ./input

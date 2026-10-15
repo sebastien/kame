@@ -33,7 +33,7 @@ broken :
 	false
 ./blocked : ./input | broken
 	touch forbidden
-./computed : ./input | @([./ordered])
+./computed : ./input | @(nop [./ordered])
 	cat @<* > @>; printf e >> computed-runs
 KMK
  test-step "$backend schedules order-only producers and omits them from selectors"

@@ -63,15 +63,15 @@ VALUE = (mode)
 definition-root : definition-cached ; env "MODE=debug" "KAME_SETTING=debug"
 release-definition-root : definition-cached ; env "MODE=release" "KAME_SETTING=release"
 task definition-cached :
-	printf '%s|%s' '@(VALUE)' '@(SETTING)' > definition-log; printf x >> definition-runs
-definition-select : @(NEXT) ; env "NEXT=definition-selected" "MODE=chosen"
+	printf '%s|%s' '@{VALUE}' '@{SETTING}' > definition-log; printf x >> definition-runs
+definition-select : @{NEXT} ; env "NEXT=definition-selected" "MODE=chosen"
 definition-selected :
-	printf %s @(VALUE) > definition-selected-log
+	printf %s @{VALUE} > definition-selected-log
 definition-denied : ; env "MODE=secret"
-	printf %s @(VALUE); touch forbidden-definition
+	printf %s @{VALUE}; touch forbidden-definition
 GENERATED = (text (read ./definition-input))
 definition-generated-root : ; env "MODE=generated"
-	printf %s @(GENERATED) > definition-generated-log
+	printf %s @{GENERATED} > definition-generated-log
 ./definition-input :
 	printf %s "$MODE" > @>
 COLLECTED = (sh! "printf %s \"$MODE\"; printf captured-error >&2")
@@ -79,7 +79,7 @@ COLLECTED_VALUE = (text (get "stdout" COLLECTED))
 collected-root : collected-cached ; env "MODE=debug"
 collected-release-root : collected-cached ; env "MODE=release"
 task collected-cached :
-	printf %s @(COLLECTED_VALUE) > collected-log; printf x >> collected-runs
+	printf %s @{COLLECTED_VALUE} > collected-log; printf x >> collected-runs
 kash-collected : ; [shell: kash env: [MODE: "kash"]]
 	value = (sh! "printf %s \"$MODE\"")
 	printf %s (text (get "stdout" value))
@@ -87,10 +87,10 @@ collected-denied : ; [shell: kash env: [MODE: "secret"]]
 	value = (sh! "touch forbidden-collected")
 	(out! (get "status" value))
 BAD = (sh! "touch forbidden-phase")
-definition-phase : @(BAD) ; env "MODE=debug"
+definition-phase : @{BAD} ; env "MODE=debug"
 CYCLE = (str CYCLE)
 definition-cycle :
-	printf %s @(CYCLE); touch forbidden-cycle
+	printf %s @{CYCLE}; touch forbidden-cycle
 read-root : read-cached ; env "MODE=debug"
 release-read-root : read-cached ; env "MODE=release"
 task read-cached :
@@ -187,7 +187,7 @@ CONTENT = (text (read "./definition-input"))
 ./output : ./input
 	cp @< @>; printf x >> runs
 ./override : ./input
-	printf %s @(VALUE) > @>
+	printf %s @{VALUE} > @>
 ./discovered : ./input ; [shell: kash]
 	(yield! (text (read "./extra")))
 ./constant : ./input

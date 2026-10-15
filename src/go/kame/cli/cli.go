@@ -13,6 +13,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
+	"solod.dev/so/strings"
 )
 
 // Diagnostic is a usage error: the stable code and human message the CLI prints.
@@ -104,6 +105,9 @@ func (inv *Invocation) Free() {
 // fail records a usage error. The message is copied because callers build it
 // by concatenation, whose storage does not outlive the returning call.
 func (inv *Invocation) fail(code string, message string) {
+	if code == "OPT_UNKNOWN" && (strings.HasSuffix(message, ": --define-value") || strings.Contains(message, ": --define-value=")) {
+		message = "--define-value was removed; use --set NAME=LITERAL for typed data; NAME=TEXT and --define remain strings"
+	}
 	inv.Error = Diagnostic{Code: code, Message: cloneText(message)}
 	inv.OK = false
 }
@@ -306,7 +310,7 @@ func parseBuild(inv *Invocation, args []string) {
 			}
 			continue
 		}
-		if equalsValue(arg, "--tool", inv) || equalsValue(arg, "--define", inv) || equalsValue(arg, "--define-value", inv) || equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) {
+		if equalsValue(arg, "--tool", inv) || equalsValue(arg, "--define", inv) || equalsValue(arg, "--set", inv) || equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) {
 			if inv.Error.Code != "" {
 				return
 			}
@@ -362,7 +366,7 @@ func assignmentOperand(inv *Invocation, arg string) bool {
 }
 
 func isBuildValueOption(arg string) bool {
-	if arg == "--define" || arg == "--define-value" || arg == "--tool" {
+	if arg == "--define" || arg == "--set" || arg == "--tool" {
 		return true
 	}
 	if arg == "--capture-limit" {
@@ -401,7 +405,7 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 		inv.ToolOverrides = slices.Append(mem.System, inv.ToolOverrides, value)
 		return true
 	}
-	if option == "--define" || option == "--define-value" {
+	if option == "--define" || option == "--set" {
 		equal := -1
 		for i := range value {
 			if value[i] == '=' {
@@ -410,15 +414,16 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 			}
 		}
 		if equal <= 0 || !definition.ValidName(value[:equal]) {
-			inv.fail("OPT_VALUE_INVALID", "define must be NAME=VALUE with a valid name")
+			if option == "--set" { inv.fail("OPT_VALUE_INVALID", "--set requires NAME=LITERAL with a valid name")
+			} else { inv.fail("OPT_VALUE_INVALID", "define must be NAME=VALUE with a valid name") }
 			return false
 		}
-		if option == "--define-value" {
-			parsed := expr.Parse(mem.System, "<define-value>", value[equal+1:])
+		if option == "--set" {
+			parsed := expr.Parse(mem.System, "<set>", value[equal+1:])
 			valid := len(parsed.Diagnostics) == 0 && expr.IsLiteral(parsed.Expr)
 			parsed.Free()
 			if !valid {
-				inv.fail("OPT_VALUE_INVALID", "--define-value requires NAME=LITERAL (no names, interpolation, patterns, or calls)")
+				inv.fail("OPT_VALUE_INVALID", "--set requires NAME=LITERAL (no names, interpolation, patterns, or calls)")
 				return false
 			}
 			value = cloneText(value[:equal]+":="+value[equal+1:])

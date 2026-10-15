@@ -66,11 +66,25 @@ Kash has three value/process boundaries:
 | Form | Meaning |
 | --- | --- |
 | `$reference` / `${reference}` | Look up a Kame binding; never implicitly read the environment |
-| `(function arguments...)` | Evaluate an ordinary Kame application |
+| `(function arguments...)` | Evaluate an ordinary Kame application, standalone or as an unquoted word fragment |
 | `$(command arguments...)` | Run a Kash process graph and capture stdout |
 
 Parenthesized expressions are legal as statements, typed command arguments,
 definition values, setup values, redirection operands, and control operands.
+Within raw words they can adjoin other unquoted or quoted fragments, as in
+`biome --config-path=(js-biome-config)`, `emit (name).json`,
+`:cwd ./build/(variant) tool` and `tool > ./out/(name).txt`. Their complete
+parentheses belong to the shared expression grammar, so a single name calls
+without arguments. Mixed words require scalar fragments and produce one
+value; only standalone unquoted argv substitutions retain list-splicing behavior.
+This applies equally to argv, redirection paths and scalar stage setup, with
+ordinary per-context validation. Typed `:env` records and definition values do
+not become scalar words. Raw path-shaped words accept the same fragments;
+Kame path atoms inside expressions retain their distinct interpolation grammar.
+Kash double-quoted literal parentheses do not start expression fragments.
+`$reference` / `${reference}` remain the reference forms; braces alone do not
+provide another interpolation grammar. `017-kash.md` defines word composition,
+literal escaping, definition detection and formatting preservation.
 Kash delegates them to the shared Kame expression parser. Expressions inside
 the boundary use Kame names, not `$` wrappers:
 
@@ -196,13 +210,16 @@ canonical CLI value display remains separate from both `str` and `json`.
 ## Interpolated paths and globs
 
 An explicit path atom beginning with `/`, `./`, or `../` may contain
-`@(EXPRESSION)` segments. An atom beginning with `@(EXPRESSION)` followed
-immediately by a path separator is also an interpolated path atom:
+`@{REFERENCE}` segments and `@`-prefixed parenthesized expressions, sharing the
+boundaries in `004-language.md` and `016-templates.md`. An atom beginning with
+either expansion followed immediately by a path separator is also an
+interpolated path atom:
 
 ```kame
-SOURCES = @(PATH_SRC)/sh/**/*.sh
-FILTERED_SOURCES = (wildcard :+files :-symlinks @(PATH_SRC)/sh/**/*.sh)
-OUTPUT = (nop ./build/@(component)/main.js)
+SOURCES = @{PATH_SRC}/sh/**/*.sh
+FILTERED_SOURCES = (wildcard :+files :-symlinks @{PATH_SRC}/sh/**/*.sh)
+OUTPUT = (nop ./build/@{component}/main.js)
+COMPUTED_OUTPUT = (nop @(output-root)/main.js)
 ```
 
 The parser retains static fragments and expression children in one path AST
@@ -218,7 +235,10 @@ value remain path data. Slashes in values contribute path components;
 an explicit filesystem path; a leading value `src` requires an authored `./`
 if the result otherwise lacks an explicit root. Relative paths use evaluation
 cwd, not the including source's directory. This extension is path-atom syntax,
-not a reintroduction of Kash's standalone `@(...)` expression boundary.
+not a reintroduction of Kash's standalone template boundaries. `@{ROOT}` alone
+is not a Kash reference word, nor is `@(root)` a Kash call word; use `$ROOT` and
+`(root)` there. The leading path separator after an expansion distinguishes a
+path atom. Bare `{capture}` groups keep their existing pattern/capture meaning.
 
 In a wildcard interpolated path, glob metacharacters in authored static
 fragments retain pattern meaning. Metacharacters contributed by expression
@@ -231,7 +251,7 @@ contains metacharacters. Capture-pattern groups retain their distinct grammar.
 
 Expression path atoms can construct capture patterns with interpolated literal
 prefixes and suffixes. Authored groups take precedence over filesystem globs:
-`@(ROOT)/{name:*}.@(EXT)` is a match pattern, while `@(OUT)/{name}` is an
+`@{ROOT}/{name:*}.@{EXT}` is a match pattern, while `@{OUT}/{name}` is an
 expansion pattern. The interpolations evaluate through the same retained-operand
 mechanism as other paths and return an owned pattern value, not a path list.
 Inserted braces, backslashes, glob/regex punctuation and template-looking bytes
@@ -239,7 +259,7 @@ remain literal pattern data and cannot introduce groups or matching syntax.
 
 Each capture/reference group, including its name and matcher/regex content,
 must be fully authored in one static segment. Interpolation inside a group,
-such as `./{@(NAME):*}` or `./{name:@(MATCHER)}`, is a source error. Use the
+such as `./{@{NAME}:*}` or `./{name:@{MATCHER}}`, is a source error. Use the
 explicit `(pattern TEXT)` boundary to deliberately compile constructed pattern
 syntax. Interpolated strings remain strings; raw Kash words and rule headers
 retain their separate grammars. The decoded computed path must still satisfy
@@ -293,7 +313,7 @@ Filtering changes emitted matches, not traversal through ordinary directories.
 For example, `:+files` still discovers files under nested directories:
 
 ```kame
-(wildcard :+files @(PATH_SRC)/sh/**/*.sh)
+(wildcard :+files @{PATH_SRC}/sh/**/*.sh)
 (wildcard :+files :+symlinks ./assets/**)
 (wildcard :-dir :-symlinks ./assets/**)
 ```
@@ -382,6 +402,14 @@ publication or retry.
   result or printing an unsolicited final value.
 - Multiple arguments, spaces, newlines, quotes, `$`, `@(...)`, and `{(...)}` in
   runtime data survive without serialization helpers or source injection.
+- Mixed Kash expression fragments preserve one scalar argument, authored spans,
+  retained operands, phase/capability checks and dependencies. Standalone list
+  splicing, quoted literal parentheses and statement-leading expressions keep
+  their distinct semantics across parse/format round trips.
+- Redirection paths and scalar setup values use the same composition as argv,
+  including path-shaped raw words and leading expression operands. Validation
+  retains the destination's type/path constraints, prelaunch grants and file
+  safety; typed environment records retain their existing non-conversion rules.
 - Literal, dynamic, explicit-path, and `x/NAME` command heads track executable
   identity; overrides, PATH, scoped authority, missing tools, and unreached
   branches behave consistently on native and WASM hosts.
@@ -391,6 +419,10 @@ publication or retry.
   quotes scalars and round-trips nested JSON-compatible values.
 - Interpolated paths remain one atom, preserve spans/dependencies, accept roots
   containing spaces, and distinguish literal dynamic glob metacharacters.
+- Path interpolation uses `@{REFERENCE}` for lookup and `@(function)` for a
+  zero-argument call, consistently with strings/templates/headers. Bare capture
+  groups remain authored patterns; standalone template boundaries are not Kash
+  argv substitutions.
 - Unquoted interpolated globs evaluate to tracked lists without a wrapper;
   explicit `wildcard` retains union/kind-filter behavior without re-globbing
   dynamic filename bytes, and raw Kash words remain literal.

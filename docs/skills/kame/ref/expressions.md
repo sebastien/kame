@@ -25,6 +25,10 @@ do not accumulate depth across items.
   half-open slices (`files.1..4`), and selections (`config.{host,port}`).
 - Only `:nil` and `:false` are false; zero, empty strings, and empty lists are true.
 
+Postfix fields start from a named reference, not a call result. Use
+`(get "stdout" (sh! COMMAND))`, or bind the record and read `result.stdout`,
+rather than `(expression).stdout`. This does not change process authority.
+
 An unquoted explicit path with authored `*`, `?`, or a bracket class is a
 glob expression: `SOURCES = ./src/**/*.c` lazily requests a tracked filesystem
 scan under read authority. Results are always lists: no matches give `[]`, and
@@ -41,8 +45,10 @@ use `(= (count VALUE) 0)` for emptiness and `(> (count VALUE) 0)` for nonemptine
 Source-composition `if` shares this truthiness; test collection emptiness explicitly.
 
 Expression strings use double quotes with `\"`, `\\`, `\n`, `\r`, and `\t`.
-Interpolation is `"Count: @(count files)"`. Deprecated `{(...)}` input is still
-evaluated but formatting migrates it to `@(...)`, including nested strings.
+Use `"Name: @{name}"` for lookup and `"Count: @(count files)"` for a call.
+`"Version: @(version)"` calls without arguments; parentheses are part of the
+expression, not an extra wrapper. Bare `{(...)}` does not interpolate and there
+is no compatibility parser or automatic formatter migration.
 Use `\@`/`\{` for literal openers; verbatim literals remain untouched.
 Single quotes are not string delimiters. Verbatim strings with matching runs
 of three or more double quotes preserve raw multiline content.
@@ -61,8 +67,10 @@ parameter list; a single final `rest...` parameter collects remaining arguments.
 `((str "prefix-" _))` is a placeholder section equivalent to a one-argument
 lambda. Outside sections, underscore names remain ordinary names.
 
-`(value | transform a)` becomes `(transform a value)`; `_` on the right chooses
-where to insert the value. This is value transformation, not a process pipe.
+`(value | transform a)` evaluates like `(transform a value)`; `_` on the right
+chooses where to insert the value. Formatting preserves authored pipes and
+nested calls as distinct structures, including placeholder positions; only
+spacing/layout changes. This is value transformation, not a process pipe.
 Standard transformations put parameters (including optional ones) before their
 subject: `(nth 1 files)` or `(files | nth 1)`. Comparisons keep left/right order:
 `(gt LEFT RIGHT)`, so use `(VALUE | gt _ 3)` to test whether `VALUE > 3`.
@@ -140,7 +148,7 @@ Computed path patterns keep their groups authored while inserting literal data:
 
 ```kame
 (let [root "./src" output "./build" extension "c"]
-  (sub @(root)/{name:*}.@(extension) @(output)/{name}.o "./src/main.c"))
+  (sub @{root}/{name:*}.@{extension} @{output}/{name}.o "./src/main.c"))
 ```
 
 Interpolation inside a group is invalid. Inserted braces, backslashes and glob

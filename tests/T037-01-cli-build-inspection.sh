@@ -38,7 +38,7 @@ unrelated :
 KMK
 cat >"$project/rules/build.kmk" <<'KMK'
 SOURCES = (wildcard ./src/*.c)
-./bin/one ./bin/one.map : @(SOURCES) ./version | prepare
+./bin/one ./bin/one.map : @{SOURCES} ./version | prepare
 	touch forbidden-recipe
 ./bin/two : ./version
 	touch forbidden-recipe
@@ -98,7 +98,7 @@ for backend in native wasm; do
   printf './manifest' >"$project/selection"
   cat >"$project/deferred.kmk" <<'KMK'
 FILES = (text (read (text (read ./selection))))
-default : @(FILES)
+default : @{FILES}
 ./manifest : ./seed
 	touch forbidden-manifest
 KMK
@@ -110,12 +110,12 @@ KMK
   test-step "$backend read denials and invalid phases remain errors"
   for expression in '(text (read ../blocked))' '(out! "forbidden-effect")'; do
     status=0
-    "${runner[@]}" do plan --json -C "$project" -c "default : @($expression)" >"$project/failure" 2>"$project/error" || status=$?
+    "${runner[@]}" do plan --json -C "$project" -c "default : @(nop $expression)" >"$project/failure" 2>"$project/error" || status=$?
     if [ "$status" = 1 ] && jq -e '.type == "diagnostic" and (.diagnostic.code == "CAP_DENIED" or .diagnostic.code == "PHASE_INVALID")' "$project/failure" >/dev/null; then test-ok "$backend read-only authority"; else test-fail "$backend authority failure hidden"; fi
   done
   cat >"$project/failed-read.kmk" <<'KMK'
 FILES = (list (exists? ./manifest) (text (read ./missing-external)))
-default : @(FILES)
+default : @{FILES}
 ./manifest : ./seed
 	touch forbidden-manifest
 KMK
@@ -143,7 +143,7 @@ KMK
   if jq -e 'any(.resources[]; .display == "./result" and .status == "outdated")' "$project/status" >/dev/null && [ "$(cat "$status_project/result")" = bad ]; then test-ok "$backend tampered artifact is outdated without repair"; else test-fail "$backend output signature status"; fi
   "${runner[@]}" do plan --json --allow-read="$project" -C "$status_project" ./result >"$project/status" 2>"$project/error"
   if jq -e 'any(.resources[]; .display == "./result" and .status == "unknown")' "$project/status" >/dev/null; then test-ok "$backend denied status observation stays unknown"; else test-fail "$backend denied artifact observation"; fi
-  printf './result : ./seed\n\t@(x/sh) -c '\''cat ./seed > ./result'\''\n' >"$status_project/Makefile.kmk"
+  printf './result : ./seed\n\t@{x/sh} -c '\''cat ./seed > ./result'\''\n' >"$status_project/Makefile.kmk"
   "${runner[@]}" -C "$status_project" ./result >"$project/value" 2>"$project/error"
   "${runner[@]}" do plan --json -C "$status_project" ./result >"$project/status" 2>"$project/error"
   if jq -e 'any(.resources[]; .display == "./result" and .status == "built")' "$project/status" >/dev/null; then test-ok "$backend verifies tool metadata without treating it as file content"; else test-fail "$backend tool artifact status"; fi
@@ -163,7 +163,7 @@ site : ./site/one.html ./catalogue ./assets
 	touch forbidden
 ./site/{name}.html : ./build/{name}.json ./catalogue
 	touch forbidden
-./catalogue : @(PAGES)
+./catalogue : @{PAGES}
 	touch forbidden
 ./assets : ./catalogue
 	touch forbidden
@@ -171,7 +171,7 @@ site : ./site/one.html ./catalogue ./assets
 	touch forbidden
 ./ordered : | ./src/one.txt
 	touch forbidden
-./all-sources : @(SOURCES)
+./all-sources : @{SOURCES}
 	touch forbidden
 unrelated :
 KMK
@@ -213,7 +213,7 @@ KMK
   "${runner[@]}" do plan --affected --json -c $'build-{name} : seed-{name}\nseed-one :\n./out : build-one\n' seed-one >"$project/logical-pattern-impact" 2>"$project/error"
   if jq -e 'any(.producers[]; .target == "build-one") and any(.producers[]; .target == "./out")' "$project/logical-pattern-impact" >/dev/null; then test-ok "$backend logical pattern consumers"; else test-fail "$backend logical pattern consumer lost"; fi
   for depth in -1 0; do
-    "${runner[@]}" do outputs --json --depth "$depth" -c $'./out : ./seed\nunrelated : unknown\n./seed : @((text (read ./missing-review-input)))\n' ./seed >"$project/unrelated-failure" 2>"$project/error"
+    "${runner[@]}" do outputs --json --depth "$depth" -c $'./out : ./seed\nunrelated : unknown\n./seed : @(text (read ./missing-review-input))\n' ./seed >"$project/unrelated-failure" 2>"$project/error"
     if jq -e '.type == "outputs" and .direction == "downstream"' "$project/unrelated-failure" >/dev/null; then test-ok "$backend depth $depth ignores unrelated and excluded seed failures"; else test-fail "$backend unrelated resolution aborted impact query"; fi
   done
   status=0

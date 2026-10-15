@@ -12,8 +12,8 @@ default : ./public/index.txt
 	echo rendered @>
 
 # The discovered source set determines the shape of this dependency graph.
-./public/index.txt : @(pages)
-	cat @(pages) > @>
+./public/index.txt : @{pages}
+	cat @{pages} > @>
 	echo assembled @>
 
 # A bare task deliberately runs whenever requested.

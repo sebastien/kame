@@ -46,7 +46,7 @@ const BuildHelp = `  -f, --file FILE         select/append source (repeatable in
       --force             bypass freshness and cached-task hits
       --verbose           detailed process and dependency events
       --define NAME=VALUE override a declared value with literal text
-      --define-value NAME=LITERAL override with typed Kame data (no evaluation)
+      --set NAME=LITERAL override with typed Kame data (no evaluation)
       --tool NAME=PATH    select a declared executable
       --shell SHELL       recipe shell executable/arguments (repeatable)
       --env NAME=VALUE    replace a process environment entry
@@ -77,7 +77,7 @@ func HelpText(topic string) string {
 			}
 		}
 		if topic == "run" {
-			b.WriteString("Source: -f, --file FILE; -c, --command TEXT; - selects stdin.\n-C, --directory DIR; -n, --dry-run suppresses effects in every language.\n--timeout MS; --capture-limit N; --verbose; --define NAME=VALUE; --define-value NAME=LITERAL; --tool NAME=PATH.\nRule work also accepts -j/--jobs N, --force, --retry N, --shell SHELL, --log-limit N.\nRule/Kash process environments accept --env NAME=VALUE or env.NAME=VALUE.\n")
+			b.WriteString("Source: -f, --file FILE; -c, --command TEXT; - selects stdin.\n-C, --directory DIR; -n, --dry-run suppresses effects in every language.\n--timeout MS; --capture-limit N; --verbose; --define NAME=VALUE; --set NAME=LITERAL; --tool NAME=PATH.\nRule work also accepts -j/--jobs N, --force, --retry N, --shell SHELL, --log-limit N.\nRule/Kash process environments accept --env NAME=VALUE or env.NAME=VALUE.\n")
 			b.WriteString("-l, --lang km|kmk|kash|expr; --entry NAME selects the preceding source entry.\nFiles/-f and -c compose ordered fragments; inline input defaults to km.\n")
 			b.WriteString("km scripts emit explicit out/err effects; --print-result also displays their final value (requires km work).\nexpr and explicitly selected value entries retain result display.\nArguments after -- bind args (@*); each operand remains one literal string.\nNAME=VALUE is literal configuration, even when VALUE ends in a source suffix.\n")
 		}
@@ -116,7 +116,7 @@ func HelpText(topic string) string {
 			}
 		}
 		if topic == "plan" || topic == "cat" || topic == "tools" || topic == "inputs" || topic == "outputs" || topic == "span" {
-			b.WriteString("Source: one -f FILE or -c TEXT; -C DIR, --define NAME=VALUE, --define-value NAME=LITERAL, --tool NAME=PATH.\nNAME=VALUE overrides a declared value or binds a task argument.\nInspection never executes recipes; execution-only flags are rejected.\n")
+			b.WriteString("Source: one -f FILE or -c TEXT; -C DIR, --define NAME=VALUE, --set NAME=LITERAL, --tool NAME=PATH.\nNAME=VALUE overrides a declared value or binds a task argument.\nInspection never executes recipes; execution-only flags are rejected.\n")
 		}
 		if topic == "plan" || topic == "cat" || topic == "tools" || topic == "inputs" || topic == "outputs" || topic == "span" {
 			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES]; inspection still forbids effects.\n")

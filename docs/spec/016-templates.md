@@ -18,24 +18,57 @@ text from data. It adds:
 Document templates lower to the expression language: every directive compiles
 to `if`, `map`, `join`, `let`, `with`, `str`, or `render`. There is no second
 evaluator, so templates share laziness, capabilities, and dynamic dependencies
-with the rest of Kame. Inline `@(...)` and selectors remain native template
-forms for external-shell recipes and template-valued definitions. Kash recipes
-are direct programs under `038-direct-kash-and-values.md`.
+with the rest of Kame. Inline `@{REFERENCE}`, `@`-prefixed parenthesized
+expressions and selectors remain native template forms for external-shell
+recipes and template-valued definitions. Kash recipes are direct programs under
+`038-direct-kash-and-values.md`.
 
 ## Relationship to Kash
 
 A document template is not a Kash source. Its executable forms are template
-directives and inline `@(EXPRESSION)` forms, both of which use Kame expression
-syntax. `$REFERENCE`, `${REFERENCE}`, and `$(COMMAND)` are Kash-only forms and
-are emitted literally in document text.
+directives and inline reference/expression expansions using Kame syntax.
+`$REFERENCE`, `${REFERENCE}`, and `$(COMMAND)` are emitted literally in document
+text; process capture is available inside an explicitly evaluated Kame expression.
 
-Templates use `@(EXPRESSION)` to render a Kame value as text. Kash embeds
-parenthesized Kame expressions directly as typed values and is not implicitly
-rendered as a template. The parsers share the Kame expression grammar, not a
-common outer interpolation syntax. Kash interpolated path atoms are separately
+Templates render `@{REFERENCE}` lookups and `@`-prefixed parenthesized expressions
+as text. Kash uses `$REFERENCE` lookups and embeds parenthesized Kame expressions
+directly as typed values, including fragments of unquoted words; it is not
+implicitly rendered as a template. The parsers share the Kame expression grammar,
+not a common outer interpolation syntax. Kash interpolated path atoms are
 defined in `038-direct-kash-and-values.md`. Template directives such as `@if`
 and `@for` are not Kash meta-programming forms; `@NAME` and `@tmpl(...)` are
 not document-template macro forms.
+
+## Inline expansions
+
+```text
+Hello @{name}
+Project: @{project.name}
+Version: @(version)
+Files: @(join ", " files)
+Names: @(files | map basename | join ", ")
+```
+
+`@{REFERENCE}` accepts exactly one Kame reference, including fields, indexes,
+slices and selections. It reads the value without invoking it. Calls, literals
+and arbitrary expressions are not reference bodies. Tool references use the same
+reference spelling, `@{x/NAME}`, with resolution and tracking from `007-library.md`.
+
+For expression expansion, `@` prefixes a complete parenthesized Kame expression.
+The parentheses belong to that expression, not an additional wrapper:
+`@(version)` evaluates `(version)`, a zero-argument call. `@(join ", " files)`
+evaluates `(join ", " files)`. Special forms, lambdas, sections and value pipes
+retain their ordinary expression semantics. Another atom can be rendered with
+`@(nop VALUE)`. There is no single-item lookup shorthand or type-dependent
+implicit invocation. A callable value cannot be rendered as text; the diagnostic
+identifies that kind and suggests explicit invocation when applicable.
+
+Expression strings, document templates, external-shell recipes, computed rule
+headers and interpolated path atoms share these reference/call boundaries.
+Their existing context, value conversion, list-splicing and phase restrictions
+remain distinct. Delimiters inside nested strings, reference selections and
+command captures are balanced by the shared language parsers, not text matching.
+Escaping and raw regions keep both expansion forms literal.
 
 ## Document Templates
 
@@ -60,12 +93,13 @@ parentheses, brackets, lists, records, strings, and lambdas. `@`, the keyword,
 and `(` must be adjacent; `@ if` and `@if (` are not directives. Directives with
 no arguments are written bare: `@else`, `@end`, `@raw`.
 
-### Expression boundaries
+### Directive argument boundaries
 
-Single-expression directives `@if`, `@elif`, `@with`, `@match`, and `@case`
-use the same boundary convention as `@(EXPR)`: one contained expression is
-evaluated as-is, while multiple whitespace-separated expressions form one
-application. Thus `@if(exists? ./file)` and `@if((exists? ./file))` are equivalent;
+Directive parentheses delimit argument slots, unlike the expression parentheses
+following a bare `@`. Single-expression directives `@if`, `@elif`, `@with`,
+`@match`, and `@case` evaluate one contained expression as-is, while multiple
+whitespace-separated expressions form one application. Thus
+`@if(exists? ./file)` and `@if((exists? ./file))` are equivalent;
 `@if(enabled)` still reads a value, not a zero-argument call. Write
 `@if((predicate))` to call a function without arguments. Nested expressions,
 lists, records, and lambdas retain ordinary Kame syntax. Adjacent expressions
@@ -112,7 +146,7 @@ A mustache-style HTML page needs no rewriting to become a template:
 ```html
 <ul>
 <!-- @for([post] posts) -->
-  <li><a href="@(post.url)">@(post.title)</a>
+  <li><a href="@{post.url}">@{post.title}</a>
 <!-- @if(post.pinned) -->
     <span class="pin">pinned</span>
 <!-- @else -->
@@ -151,9 +185,10 @@ without an open block.
 ### Lowering
 
 A body is a sequence of literal text, inline expansions, and nested blocks.
-Write `L(x)` for the lowering of `x`. Literal text lowers to a string literal,
-and an inline `@(E)` lowers to `E`. A reference is written as an expression, for
-example `@(post.title)`. A body `B1 ... Bn` lowers to `(template-cat L(B1) ... L(Bn))`,
+Write `L(x)` for the lowering of `x`. Literal text lowers to a string literal.
+An inline `@{R}` lowers to reference `R`; an `@`-prefixed parenthesized expression
+lowers to that entire expression, so `@(f)` lowers to `(f)`, not `f`.
+A body `B1 ... Bn` lowers to `(template-cat L(B1) ... L(Bn))`,
 and an empty body lowers to `(template-cat)`, the empty string.
 Blocks lower as follows:
 
@@ -178,8 +213,8 @@ An external-shell rule recipe body is a document template in `plain` style whose
 is the shell script. Directive lines are recognized by the same keyword-gated,
 whole-line rule as any document template, and each is removed together with its
 rule indent and line ending. Selected body lines render as shell text, so
-indentation inside a branch is preserved. Inline `@(...)` and selectors keep
-their string-template meaning, and a non-directive line such as a comment
+indentation inside a branch is preserved. Inline reference/call expansions and
+selectors keep their string-template meaning, and a non-directive line such as a comment
 carrying `@media` is emitted unchanged. `016`'s escaping rules (`@@`, `\@`, and
 `@raw`) apply to external-shell recipes identically. Kash recipes parse directly
 as Kash and do not use this template/escaping layer (`038-direct-kash-and-values.md`).
@@ -254,7 +289,7 @@ only. Style names are matched literally and case-insensitively.
 ### Payload
 
 `(render PAYLOAD SOURCE)` binds `PAYLOAD`, a record, for the duration of
-rendering. The payload is applied with the semantics of `with`, so `@(title)`
+rendering. The payload is applied with the semantics of `with`, so `@{title}`
 resolves to its field. The expression scope of the caller remains visible as the
 parent, so a template may also reference definitions and captured values. With no
 payload the caller scope is used unchanged.
@@ -322,7 +357,7 @@ CARD = """
 <!-- @if(post.pinned) -->
 <span class="pin">pinned</span>
 <!-- @end -->
-<h2>@(post.title)</h2>
+<h2>@{post.title}</h2>
 </article>
 """
 
@@ -377,6 +412,22 @@ when required. A verbatim string literal used as a template is preserved byte
 for byte inside a definition. Formatting a definition or script that contains a
 verbatim literal is idempotent.
 
+### Clean-break syntax
+
+There is one reference/call grammar, with no compatibility aliases or legacy
+parser mode. `@(name)` always calls, even when `name` resolves to a noncallable;
+it must fail rather than fall back to lookup. `@{name}` reads the binding without
+calling it. Parenthesized computed-callable applications keep ordinary Kame
+meaning; their parentheses are not discarded as a former interpolation wrapper.
+
+Bare `{(...)}` does not interpolate in strings or documents. Existing sources
+must be updated explicitly; neither a migration command nor a formatter migration
+flag is part of this contract. Ordinary formatting cannot infer an older source's
+intent and never does so. Directives retain their argument grammar:
+`@if(enabled)` reads a value and `@if((predicate))` calls without arguments.
+Selectors, bare pattern/capture braces, escapes, verbatim strings, raw regions and
+literal Kash word text retain their separate meanings.
+
 ## Related Specifications
 
 `004-language.md` defines the control forms and
@@ -392,6 +443,20 @@ batch comment conventions, canonical formatting, and loop index/key bindings.
 
 ## Acceptance Tests
 
+- `@{name}` and `@{project.name}` render references; `@(version)` invokes a
+  zero-argument function, and `@(join ", " files)` invokes with arguments.
+  Reference selections with nested braces retain their authored spans.
+- Unknown references, noncallable application heads and callable rendering fail
+  without type-dependent fallback or implicit invocation. Reference bodies reject
+  calls and literals; callable-rendering diagnostics name the actual value kind.
+- Parenthesized special forms and pipes have ordinary Kame semantics. Nested
+  strings/captures, zero-argument calls, escapes and raw regions parse and format
+  consistently across expression strings, documents, recipes, headers and paths.
+- Ordinary parsing/formatting has no legacy mode or automatic migration:
+  `@(name)` calls, nested computed-callable applications stay nested, and bare
+  `{(...)}` does not interpolate. Escaped, raw and verbatim text stays inert.
+- `@if(enabled)`, `@if((predicate))` and multi-slot directives keep their existing
+  argument semantics independently of inline expression expansion.
 - A `hash` document with `# @if(cond)` renders its consequent when `cond` is
   true and its `@else` body otherwise.
 - `@elif` chains select the first true branch; a false chain renders `@else` or

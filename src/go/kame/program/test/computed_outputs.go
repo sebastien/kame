@@ -10,7 +10,7 @@ import (
 
 func TestComputedOutputsRetainAuthoredSyntaxAndResolveCaptures(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "computed.kmk", "ROOT = \"./build\"\n@(ROOT)/{name}.o : ./src/{name}.c\n\tcat @< > @>\n")
+	parsed := script.Parse(a, "computed.kmk", "ROOT = \"./build\"\n@{ROOT}/{name}.o : ./src/{name}.c\n\tcat @< > @>\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{})
@@ -21,7 +21,7 @@ func TestComputedOutputsRetainAuthoredSyntaxAndResolveCaptures(t *testing.T) {
 		if planned.Diagnostic.Code != "" || len(planned.Plan.Outputs) != 1 || planned.Plan.Outputs[0] != "./build/demo.o" || len(planned.Plan.Inputs) != 1 || planned.Plan.Inputs[0] != "./src/demo.c" {
 			t.Error("computed capture was not propagated to inputs and outputs")
 		}
-		if parsed.Items[1].Rule.Outputs[0].Text != "@(ROOT)/{name}.o" {
+		if parsed.Items[1].Rule.Outputs[0].Text != "@{ROOT}/{name}.o" {
 			t.Error("resolution overwrote authored syntax")
 		}
 		planned.Plan.Free(a)
@@ -36,9 +36,9 @@ func TestComputedOutputsRetainAuthoredSyntaxAndResolveCaptures(t *testing.T) {
 func TestComputedOutputFailureCleanup(t *testing.T) {
 	a := t.Allocator()
 	fixtures := []string{
-		"@([./one ./one]) :\n",
-		"@([]) :\n",
-		"ROOT = (out! \"forbidden\")\n@(ROOT)/out :\n",
+		"@(nop [./one ./one]) :\n",
+		"@(nop []) :\n",
+		"ROOT = (out! \"forbidden\")\n@{ROOT}/out :\n",
 		"@(str \"./one\") :\n./one :\n",
 		"@(str \"./\" \"{\" \"name\") :\n",
 	}

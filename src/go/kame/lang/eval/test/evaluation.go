@@ -930,7 +930,7 @@ func TestDefinitionDependenciesAreSharedByTheEngine(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "first = \"ka\"\nsecond = \"@(first)me\"")
+	parsed := script.Parse(a, "test", "first = \"ka\"\nsecond = \"@{first}me\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	engine.Request(program.Definition("second"))
 	engine.Step()
@@ -1403,7 +1403,7 @@ func TestTemplateRejectsRecordInterpolation(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, "(let [value [name: \"kame\"]] \"{(value)}\")")
+	result := evaluate(t, program, "(let [value [name: \"kame\"]] \"@{value}\")")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("record interpolation did not fail")
 	}
@@ -1489,7 +1489,7 @@ func TestFunctionDefinitionsEvaluateExpressionStrings(t *testing.T) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
-	parsed := script.Parse(a, "test", "(prefix value) = \"pre-@(value)\"\n(quoted value) = \"@(value)!\"")
+	parsed := script.Parse(a, "test", "(prefix value) = \"pre-@{value}\"\n(quoted value) = \"@{value}!\"")
 	program := eval.Compile(a, engine, parsed, registry)
 	result := evaluate(t, program, "(prefix \"fix\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "pre-fix" {
@@ -1628,7 +1628,7 @@ func TestEvaluationContextFramesAndDefinitionCycleFrames(t *testing.T) {
 
 	engine = core.NewEngine(a)
 	registry = eval.NewRegistry(a)
-	parsed = script.Parse(a, "test", "a = \"@(b)\"\nb = \"@(a)\"")
+	parsed = script.Parse(a, "test", "a = \"@{b}\"\nb = \"@{a}\"")
 	program = eval.Compile(a, engine, parsed, registry)
 	node := program.Definition("a")
 	engine.Request(node)

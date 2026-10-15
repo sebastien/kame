@@ -62,11 +62,13 @@ func DefinitionEventEffect(state any, effect eval.Effect) {
 	p.emit(Event{Kind: kind, Data: slices.Clone(p.Alloc, effect.Data)})
 }
 
-// Observe reports value/statement roots once. Recipe roots already emit their
+// Observe reports root failures in every mode and JSON value/statement roots once.
+// Recipe roots already emit their
 // own lifecycle through observeInstances and must not be duplicated here.
 func (s *Session) Observe(h *Handle) {
-	if !s.JSON || s.reported || h == nil || !h.Definition { return }
+	if s.reported || h == nil || !h.Definition { return }
 	n := h.Node
+	if !s.JSON && n.State != core.NodeFailed && n.State != core.NodeCancelled { return }
 	if !n.Current && n.State != core.NodeFailed && n.State != core.NodeCancelled { return }
 	s.reported = true
 	p := s.Program

@@ -181,7 +181,8 @@ func opTemplateCat(c *eval.Context, s any, v []core.Value) eval.Result {
 	for i := range v {
 		text, ok := eval.Stringify(c.Run, v[i])
 		if !ok {
-			return invalidArgument(c, v, i, "text-renderable scalar or list")
+			discardArgCallables(c, v)
+			return c.InvalidRender(i, v[i].Kind)
 		}
 		b.WriteString(text)
 		mem.FreeString(c.Run, text)

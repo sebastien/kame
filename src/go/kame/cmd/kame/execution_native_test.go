@@ -250,7 +250,7 @@ func TestNativeWatchMissingMandatoryIncludeRecovers(t *testing.T) {
 			directory := t.TempDir()
 			root := filepath.Join(directory, "Makefile.kmk")
 			missing := filepath.Join(directory, "missing.kmk")
-			source := "(include ./missing.kmk)\nchosen :\n\tprintf %s @(MARK) > recovered\n"
+			source := "(include ./missing.kmk)\nchosen :\n\tprintf %s @{MARK} > recovered\n"
 			if mode == "nested" {
 				nativeCLIWrite(t, filepath.Join(directory, "parent.kmk"), "(include ./missing.kmk)\n")
 				source = strings.Replace(source, "./missing.kmk", "./parent.kmk", 1)

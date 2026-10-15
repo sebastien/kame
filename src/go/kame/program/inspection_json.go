@@ -142,7 +142,7 @@ func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 			override := definition.ParseOverride(plan.Configuration[i])
 			e.Str(override.Name)
 			if !override.Typed { e.Str(override.Text); continue }
-			literal := expr.Parse(p.Alloc, "<define-value>", override.Text)
+			literal := expr.Parse(p.Alloc, "<set>", override.Text)
 			value := p.Eval.Evaluate(p.Alloc, literal.Expr, p.Eval.Scope)
 			core.EncodeValueJSON(p.Alloc, e, value.Value)
 			value.Free(p.Alloc)

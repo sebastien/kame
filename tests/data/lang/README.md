@@ -33,8 +33,11 @@ the native, CLI, and wasm golden tests can consume the same bytes.
 ## Conventions
 
 - Fixtures cover specified syntax as well as deliberately retained legacy and
-  migration inputs. Their presence is not a claim that every consumer supports
-  every input; check the consuming runner and diagnostic manifest.
+  historical inputs. Their presence is not a language compatibility contract or
+  a claim that every consumer supports every input; check the consuming runner
+  and diagnostic manifest. The current specification uses `@{ref}` / `@(call)`,
+  literal bare `{(...)}`, and authored-pipe preservation. Updating this guide
+  does not update fixture bytes, goldens or parser implementations.
 - `expr/`, `rule/`, and `script/` files end with a trailing newline because the
   parsers ignore surrounding whitespace. Invalid `expr-` and `rule-` fixtures
   follow the same rule.
@@ -44,8 +47,9 @@ the native, CLI, and wasm golden tests can consume the same bytes.
   its newlines deliberately.
 - Canonical goldens must match their expected formatted bytes. General parse
   fixtures need not already be canonical: T004-06 checks that formatting reaches
-  a fixed point, and T004-08 checks AST stability. Deprecated interpolation
-  fixtures deliberately change spelling during formatting; preserve those inputs.
+  a fixed point, and T004-08 checks AST stability. Historical interpolation
+  fixtures may require reclassification or new goldens alongside implementation;
+  they do not require a deprecated-input parser or automatic migration.
 - Recipe lines are indented with one tab. `rule/rules/indent.km` keeps extra
   indentation inside recipe text on purpose.
 - LF line endings only.
@@ -58,12 +62,13 @@ the native, CLI, and wasm golden tests can consume the same bytes.
 
 - `expr/`: literals, all number forms (`0`, integer, negative, underscore,
   binary, octal, hex, float, signed exponent), string escapes and interpolation
-  (`@(...)`, deprecated `{(...)}` input, nested interpolation, escaped braces), lists, records,
+  (including samples of earlier `@(...)` and `{(...)}` forms, nested interpolation
+  and escaped braces), lists, records,
   names (`?`, `!`, leading `_`), references (index, negative index, slice, open
   slice, mixed components, selection), applications, lambdas (plain, no-arg,
   rest), pipes (deferred and placeholder), and the `?` (`special-optional`),
   `let`, `def`, `eval` special forms.
-- `template/string/`: literal text, `@(expression)`, legacy `@{reference}` migration inputs, the full
+- `template/string/`: literal text, reference/call expansion samples, the full
   selector table including a negative input index, escapes, mixed expansions,
   nested expressions, multiline text.
 - `template/target/`: `{name}`, `{name:*}`, `{name:**}`, `?`, character classes,

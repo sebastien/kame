@@ -1,5 +1,11 @@
 # Kame documentation
 
+References and documentation snippets teach the specified language contract.
+`@{ref}` / `@(call)`, `--set`, mixed Kash expression words and pipe-preserving
+formatting may be ahead of an installed backend or checked-in executable example.
+Check help and small parse/run probes; documentation changes alone do not
+implement these features or update executable sources.
+
 ## Start here
 
 - [Quickstart and build example](../README.md#get-started)

@@ -20,7 +20,7 @@ func (p *Program) OverrideDefinition(name, text string) bool {
 // OverrideDefinitionValue accepts closed literal data only. Validation precedes
 // registration, including for overrides of definitions that are never demanded.
 func (p *Program) OverrideDefinitionValue(name, text string) bool {
-	parsed := expr.Parse(p.Alloc, "<define-value>", text)
+	parsed := expr.Parse(p.Alloc, "<set>", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || !expr.IsLiteral(parsed.Expr) { return false }
 	return p.overrideDefinition(name, parsed.Expr)

@@ -212,7 +212,7 @@ Kash has these explicit value/process boundaries:
 | `$REFERENCE` | Kame reference parser | Resolve and insert a value from the current Kame scope. |
 | `${REFERENCE}` | Kame reference parser | Braced spelling of `$REFERENCE`. |
 | `$...REFERENCE`, `$...{REFERENCE}` | Kame reference parser | Explicitly spread a flat argv list, including at command position. |
-| `(EXPRESSION)` | Kame expression parser | Evaluate an ordinary parenthesized Kame expression and insert its typed value. |
+| `(EXPRESSION)` | Kame expression parser | Evaluate an ordinary parenthesized Kame expression, standalone or as an unquoted word fragment. |
 | `$(COMMAND)` | Kash statement parser | Run a Kash command or pipeline and capture its standard output. |
 
 ### References
@@ -252,11 +252,41 @@ or value pipes for transformations. Expressions use Kame names, not `$` wrappers
 ```kash
 emit (replace ".c" ".o" source)
 report (map inspect sources)
+biome --config-path=(js-biome-config)
+emit prefix-(name)-suffix
 ```
+
+An unquoted word may contain literal fragments, references, command captures and
+parenthesized expressions in any combination. The complete parentheses are
+owned by the Kame expression parser: `(js-biome-config)` is a zero-argument call,
+not a wrapper around a reference. Whitespace, quotes, nested applications, value
+pipes and command captures inside that expression do not end the command word.
+After its closing delimiter, adjacent word fragments continue the same argument.
+This is general word composition, not special handling of `--flag=` syntax.
+An expression may begin a mixed argument, as in `emit (name).json`.
+
+The same scalar-word composition applies to command heads/arguments, redirection
+paths, `:cwd`, `:timeout` and individual environment setup values. It also applies
+to path-shaped raw words: `./out/(name).txt` contains a call fragment. Inside a
+delegated Kame expression, path atoms keep their own `@{REFERENCE}` / `@(call)`
+interpolation grammar; raw-word fragments do not change the Kame path grammar.
+An expression in a setup/redirection operand is not a statement-leading
+expression. Typed `:env` records and definition right-hand sides retain their
+existing value grammar rather than becoming scalar word concatenation.
+
+`$reference` and `${reference}` remain the reference forms. Braces introduce no
+substitution boundary: `{reference}` is literal text, while `{(call)}` is literal
+braces around an ordinary `(call)` fragment, not an alternative call wrapper.
+A definition still requires a valid name or function header followed by a
+standalone `=`: both `biome --config-path=(js-biome-config)` and
+`echo name=(name)` are commands.
 
 Values carry ordinary Kame dependencies, capabilities, failures, and authored
 source spans. A statement-leading expression evaluates for effects and discards
-the result. Use a reference at the command head for a computed executable.
+the result; a leading `(expression)` does not become a command head by adjoining
+a suffix. Use a reference at the command head for a computed executable. Mixed
+words with a literal or reference prefix may supply computed executable paths,
+subject to the ordinary executable validation and dependency tracking.
 
 Legacy unquoted `@(...)`, escaped `\@(...)`, and template directives are invalid
 Kash syntax, with no compatibility alias. Quoted interpolation-looking argument
@@ -345,7 +375,8 @@ explicit Kame value, such as `(wildcard ./src/**/*.go)`.
 ### Words, quoting, and argv conversion
 
 Unquoted spaces and tabs separate words. Adjacent literal and substitution parts
-form one word, as in `revision=$revision` and `${name}.c`. Double quotes group
+form one word, as in `revision=$revision`, `${name}.c` and
+`--config-path=(js-biome-config)`. Double quotes group
 parts into one word and allow reference and command-capture substitutions. An
 empty quoted word is one empty argument. Single quotes are reserved and rejected,
 consistent with Kame expression syntax.
@@ -356,6 +387,13 @@ newline continues the statement without inserting text. Inside double quotes,
 are errors. Quoted or escaped operators are literal. Command quotes are Kash
 word syntax, not expression strings: `{(...)}` has no interpolation meaning.
 Inside Kame expressions, the existing Kame string and escape rules apply instead.
+
+Unescaped `(` outside double quotes starts a Kame expression fragment, including
+in the middle of a word; it is not a shell subshell or literal punctuation.
+Escape a literal parenthesis or quote its text. Parentheses inside Kash double
+quotes remain literal: `"--config-path=(js-biome-config)"` does not call anything.
+Reference and process-capture substitutions inside those quotes are unchanged.
+An expression outside quotes may adjoin a quoted fragment in the same word.
 
 A word consisting solely of an unquoted substitution preserves its typed value
 until argv conversion:
@@ -371,9 +409,25 @@ until argv conversion:
 Quoted substitutions and words combining literal and substitution parts require
 scalar values from the first three rows and produce exactly one argument. They
 never splice lists: `$files` splices a flat list, while `"$files"` fails when
-`files` is a list. A wildcard result supplies explicit argv items without shell
-globbing. Quoted/escaped `@` and `$` are literal only when escaped or not followed
-by substitution syntax; quotes do not disable valid substitutions.
+`files` is a list. A standalone `(modules)` may splice its flat list result,
+but `--modules=(modules)` rejects that result rather than joining or splicing it.
+An empty scalar in a mixed word contributes empty text; whitespace in a scalar
+remains inside the one argument. A wildcard result supplies explicit argv items
+without shell globbing. Quoted/escaped `@` and `$` are literal only when escaped
+or not followed by substitution syntax; quotes do not disable valid substitutions.
+
+Word fragments evaluate in authored order and retain completed values across
+suspension, without replaying calls or effects. Result bytes are inert data:
+spaces, operators, quotes, braces, parentheses and substitution-looking text
+cannot create words, commands or new source. Nil and nonscalar mixed fragments
+are argument-type errors; invalid values fail before launching the containing
+process graph, under the existing capability and phase policy.
+
+Parsing and formatting retain expression-fragment boundaries and authored spans.
+Formatting must not quote an expression fragment into literal text, turn literal
+parentheses into a call, or change standalone typed splicing into mixed-word
+scalar conversion. Quoted/escaped literal fragments may be normalized only while
+preserving those distinctions.
 
 An explicit `$...REFERENCE` (or `$...{REFERENCE}`) requires a flat list and
 contributes one argument per scalar item, preserving order and argument bytes.
@@ -423,6 +477,12 @@ In raw Kash, setup keys precede the executable and use `:KEY VALUE` pairs:
 ```
 
 Except for `:env`, each setup value is one scalar word or substitution, never a list splice.
+It may combine fragments under the same rules as argv words:
+
+```kash
+:cwd ./build/(variant) :MODE release-(variant) deploy
+```
+
 `:cwd` is a directory relative to the invocation directory, `:timeout` is a
 positive number of seconds, and other keys matching `[A-Za-z_][A-Za-z0-9_]*`
 are environment overrides. Duplicate keys are errors. The process environment
@@ -431,6 +491,9 @@ lookup still requires `env` access. Quoted or escaped leading colons are literal
 After the executable, colon-prefixed words are ordinary arguments. Each pipeline
 stage has independent setup keys. Reserved setup keys are not environment
 overrides. Invalid paths, keys, values, and missing executables are errors.
+The final scalar must still satisfy the setting's contract: for example a
+computed `:timeout` must be a positive number of seconds and `:cwd` must be a
+valid directory path. No list splicing or implicit record conversion occurs.
 
 ### Computed stage environments
 
@@ -500,8 +563,13 @@ intermediate output. `<` supplies standard input, `>` replaces an output file,
 and `>>` appends to it.
 
 Redirections belong to an individual stage and accept one nonempty scalar path
-word. Paths resolve relative to that stage's working directory. Each stage may
-have at most one stdin and one stdout redirection. A pipeline edge and a
+word, including mixed expressions such as `tool > ./out/(name).txt` or
+`tool < (input-name).txt`. Paths resolve relative to that stage's working directory.
+Expression result spaces stay inside the single path; they do not create argv
+or redirection operators. Empty paths, NUL, lists and nonscalar results are
+errors. The same authored spans, retained operand evaluation and capability
+checks as argv words apply. Each stage may have at most one stdin and one stdout
+redirection. A pipeline edge and a
 redirection cannot both supply the same stream: `<` is allowed only on the first
 stage and `>`/`>>` only on the last. Conflicts are errors, not silently overridden.
 `>` creates or truncates; `>>` creates or appends. Stderr redirection, descriptor
@@ -814,6 +882,26 @@ live forwarding and explicit capture remain separate channels.
 - `$PATH` does not read the environment, while `$env.PATH` does.
 - Parenthesized expressions use the Kame expression grammar and preserve
   values without string splitting.
+- `biome --config-path=(js-biome-config)`, `echo name=(name)` and arguments with
+  expression prefixes/suffixes parse as command words, not definitions. Nested
+  calls, whitespace, strings, value pipes and process captures retain one word
+  and original spans; zero-argument calls need no extra parentheses.
+- Mixed expression words produce one scalar argument with exact whitespace and
+  empty-text behavior. Standalone list results splice; mixed/quoted list results,
+  nil, records and other invalid values fail before the containing graph launches.
+- Mixed expressions work consistently in path-shaped words, redirection paths,
+  `:cwd`, `:timeout` and individual environment setup values, including operand
+  words that start with an expression. Per-setting validation, stage-relative
+  redirection paths, dependency tracking, no-splice rules and prelaunch checks
+  remain unchanged; invalid values cannot start stages or truncate files.
+  Typed `:env` records and definition values keep their distinct value grammar.
+- Quoted and escaped literal parentheses stay literal. References/captures inside
+  quotes keep their existing semantics, bare braces do not become substitutions,
+  and statement-leading expressions keep their expression-statement meaning.
+- Mixed fragments retain completed values across suspension, obey capabilities,
+  phases, dependencies and executable tracking, and never reparse result bytes.
+  Parse/format/parse is idempotent without turning calls into quoted literals or
+  changing typed splicing on either host.
 - `$(COMMAND)` captures stdout and does not parse its contents as Kame syntax.
 - Command arguments containing whitespace remain one argument.
 - A raw wildcard is literal; `(wildcard PATH)` is evaluated as a Kame wildcard.

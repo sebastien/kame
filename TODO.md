@@ -17,8 +17,8 @@ Completed work and historical audit results are not retained here.
   `CC=clang CFLAGS=-O0 make test`, `CC=clang CFLAGS=-O0 make test-leaks`, and
   `CC=clang CFLAGS=-O0 make test-wasm`. Verify sanitizer instrumentation survives
   harness rebuilds and rerun artifact/build-mode checks without changing Git HEAD.
-  Historical passes predate the latest signature/revalidation changes and do not
-  establish current-tree conformance. See [test requirements](docs/spec/013-tests.md).
+  Validate the exact release tree; development-tree passes do not establish
+  published-asset conformance. See [test requirements](docs/spec/013-tests.md).
 
 ## Remaining repository-review remediation
 

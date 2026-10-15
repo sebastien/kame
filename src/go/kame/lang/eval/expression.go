@@ -51,7 +51,7 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		if expression.Pattern != nil {
 			return Result{Value: core.NewPattern(context.Run, expression.Text)}
 		}
-		return p.stringValue(scope, expression.Parts, context)
+		return p.stringValue(scope, expression, context)
 	case expr.Symbol:
 		return Result{Value: core.NewString(context.Run, expression.Text)}
 	case expr.Path:
@@ -103,7 +103,9 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 	case expr.Placeholder:
 		return placeholder(scope, expression, context)
 	case expr.Selector:
-		return p.selector(expression.Text, expression.Span, context)
+		result := p.selector(expression.Text, expression.Span, context)
+		if expression.Expansion == "selector" { return literalSelectorTip(context.Run, result) }
+		return result
 	}
 	return failure(context.Run, "EXPR_INVALID", expression.Span, "invalid expression")
 }

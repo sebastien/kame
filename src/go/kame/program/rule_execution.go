@@ -213,7 +213,7 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			resourceInputs = slices.Append(p.Alloc, resourceInputs, PlanInput{OrderOnly: input.OrderOnly, SequenceEnd: input.SequenceEnd, Group: group, Display: cloneText(p.Alloc, text), Key: core.NewResourceKey(p.Alloc, kind, text)})
 			continue
 		}
-		if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || input.Template.Parts[0].Kind != template.Expression || input.Template.Parts[0].Expr == nil)) {
+		if input.Template == nil || (input.Kind == rule.InputExpression && (len(input.Template.Parts) != 1 || (input.Template.Parts[0].Kind != template.Expression && input.Template.Parts[0].Kind != template.Reference) || input.Template.Parts[0].Expr == nil)) {
 			freeStrings(p.Alloc, inputs)
 			freeStrings(p.Alloc, dynamicInputs)
 			freePlanInputs(p.Alloc, resourceInputs, true)

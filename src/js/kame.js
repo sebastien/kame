@@ -164,12 +164,12 @@ const sourceTexts = new Map();
 function diagnostic(code, message) {
   invocationHadDiagnostic = true;
   clearDashboard();
+  const detail = lastDiagnostic ?? { code, severity: 'error', message };
   if (jsonMode) {
-    const detail = lastDiagnostic ?? { code, severity: 'error', message };
     stdout.write(`${JSON.stringify({ schema: 1, type: 'diagnostic', diagnostic: detail })}\n`);
     return;
   }
-  stderr.write(renderDiagnostic({ code, severity: 'error', message }, primarySource, 80));
+  stderr.write(renderDiagnostic(detail, primarySource, 80));
 }
 
 // resolveColor mirrors the native CLI: color only applies to the human format
@@ -2033,8 +2033,11 @@ class Module {
         if (context.render && event.type === 'target-value') {
           context.renderData = Buffer.from(event.value?.data ?? '', event.value?.encoding === 'base64' ? 'base64' : 'utf8');
         }
-        if (context.api !== true && (json || human)) observeCLIEvent(event);
         if (event.diagnostic && (event.type === 'target-failed' || event.type === 'target-cancelled')) lastDiagnostic = event.diagnostic;
+        // Non-JSON expression roots only transport the rich failure; they do not
+        // add build lifecycle output or count toward build summaries.
+        if (!json && context.api !== true && event.resource?.kind === 'definition') continue;
+        if (context.api !== true && (json || human)) observeCLIEvent(event);
         context.events?.push(event);
       }
       if (context.api === true) {

@@ -13,26 +13,26 @@ func sameSpan(span source.Span, start int, end int) bool {
 }
 
 func TestStringTemplateRetainsExpansionSpans(t *testing.T) {
-	parsed := template.ParseString(t.Allocator(), "test.km", "before @(project.name) @< after")
+	parsed := template.ParseString(t.Allocator(), "test.km", "before @{project.name} @< after")
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Parts) != 5 {
 		t.Error("template did not parse literal, expression, and selector parts")
 		return
 	}
-	if parsed.Parts[1].Kind != template.Expression || !sameSpan(parsed.Parts[1].Span, 7, 22) || parsed.Parts[3].Kind != template.Selector || !sameSpan(parsed.Parts[3].Span, 23, 25) {
+	if parsed.Parts[1].Kind != template.Reference || !sameSpan(parsed.Parts[1].Span, 7, 22) || parsed.Parts[3].Kind != template.Selector || !sameSpan(parsed.Parts[3].Span, 23, 25) {
 		t.Error("template expansion spans were not retained")
 	}
 }
 
 func TestCommandToolReferenceIsGlobalTemplatePart(t *testing.T) {
-	parsed := template.ParseString(t.Allocator(), "test.km", "@(x/gcc) -c @<")
+	parsed := template.ParseString(t.Allocator(), "test.km", "@{x/gcc} -c @<")
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Parts) != 3 || parsed.Parts[0].Kind != template.Tool || parsed.Parts[0].Text != "gcc" || !sameSpan(parsed.Parts[0].Span, 0, 8) {
 		t.Error("command reference did not parse as a tool part")
 		return
 	}
 	formatted := template.FormatString(t.Allocator(), parsed)
-	if formatted != "@(x/gcc) -c @<" {
+	if formatted != "@{x/gcc} -c @<" {
 		t.Errorf("formatted command reference = %q", formatted)
 	}
 	mem.FreeString(t.Allocator(), formatted)
@@ -176,10 +176,10 @@ func TestTargetCharacterClassesRejectDescendingRanges(t *testing.T) {
 }
 
 func TestFormatTemplateCanonicalizesEscapes(t *testing.T) {
-	parsed := template.ParseString(t.Allocator(), "test.km", "a\\@b @(name)")
+	parsed := template.ParseString(t.Allocator(), "test.km", "a\\@b @{name}")
 	defer parsed.Free()
 	formatted := template.FormatString(t.Allocator(), parsed)
-	if formatted != "a\\@b @(name)" {
+	if formatted != "a\\@b @{name}" {
 		t.Errorf("FormatString() = %q", formatted)
 	}
 	mem.FreeString(t.Allocator(), formatted)
@@ -212,14 +212,15 @@ func TestDirectiveExpressionShorthandAndCanonicalFormatting(t *testing.T) {
 	a := t.Allocator()
 	inputs := []string{
 		"@if(eq name \"Ada\")\nyes\n@elif(eq name \"Lin\")\nother\n@end(if)\n",
-		"@with(nop [name: \"Ada\"])\n@(name)\n@end(with)\n",
+		"@with(nop [name: \"Ada\"])\n@{name}\n@end(with)\n",
 		"@match(str \"./\" name)\n@case(nop ./Ada)\nyes\n@end(match)\n",
 		"@if(cond)yes@end(if)",
 		"@if((predicate))yes@end(if)",
-		"@for([item] (list \"a\" \"b\") \",\")\n@(item)\n@end(for)\n",
-		"@let(name (str \"A\" \"da\"))\n@(name)\n",
+		"@for([item] (list \"a\" \"b\") \",\")\n@{item}\n@end(for)\n",
+		"@let(name (str \"A\" \"da\"))\n@{name}\n",
 		"@include((str \"./\" name) [name: \"Ada\"])\n",
 		"@if(([x] (eq x \"Ada\")) name)yes@end(if)",
+		"@if((values | count))yes@end(if)",
 	}
 	for i := range inputs {
 		doc := template.ParseDocument(a, "boundary.tmpl", inputs[i], "plain")
@@ -284,12 +285,12 @@ func TestDocumentStrayEndIsBlockError(t *testing.T) {
 
 func TestDocumentBlockEndLabelsAreChecked(t *testing.T) {
 	a := t.Allocator()
-	valid := template.ParseDocument(a, "labels.tmpl", "@if(ok)\nyes\n@end(if)\n@for([x] xs)\n@(x)\n@end(for)\n", "plain")
+	valid := template.ParseDocument(a, "labels.tmpl", "@if(ok)\nyes\n@end(if)\n@for([x] xs)\n@{x}\n@end(for)\n", "plain")
 	defer valid.Free()
 	if len(valid.Diagnostics) != 0 {
 		t.Error("matching template block labels were rejected")
 	}
-	invalid := template.ParseDocument(a, "mismatch.tmpl", "@for([x] xs)\n@(x)\n@end(if)\n", "plain")
+	invalid := template.ParseDocument(a, "mismatch.tmpl", "@for([x] xs)\n@{x}\n@end(if)\n", "plain")
 	defer invalid.Free()
 	if len(invalid.Diagnostics) != 1 || invalid.Diagnostics[0].Code != "TPL_BLOCK" {
 		t.Error("mismatched template block label was not TPL_BLOCK")
@@ -297,7 +298,7 @@ func TestDocumentBlockEndLabelsAreChecked(t *testing.T) {
 }
 
 func TestDocumentMatchClausesLowerToMatchForm(t *testing.T) {
-	doc := template.ParseDocument(t.Allocator(), "match.tmpl", "@match(path)\n@case(./posts/{slug}.md)\n@(slug)\n@else\nother\n@end(match)\n", "plain")
+	doc := template.ParseDocument(t.Allocator(), "match.tmpl", "@match(path)\n@case(./posts/{slug}.md)\n@{slug}\n@else\nother\n@end(match)\n", "plain")
 	defer doc.Free()
 	if len(doc.Diagnostics) != 0 || doc.Root == nil || len(doc.Root.Items) != 2 {
 		t.Error("document match clauses did not parse and lower")

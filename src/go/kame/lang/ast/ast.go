@@ -138,11 +138,18 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Null()
 		return
 	}
+	if value.AuthoredPipe != nil { e.expr(value.AuthoredPipe); return }
 	if value.Pattern != nil {
 		e.pattern(value)
 		return
 	}
 	e.node(exprKind(value.Kind), value.Span)
+	if value.Kind == expr.ValuePipe {
+		e.Str("items")
+		e.BeginArray()
+		for i := range value.Items { e.expr(value.Items[i]) }
+		e.EndArray()
+	}
 	if value.Kind == expr.Boolean {
 		e.Str("value")
 		e.Bool(value.Bool)
@@ -174,8 +181,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 				}
 				e.Str("expression")
 				e.expr(p.Expr)
-				e.Str("brace")
-				e.Bool(p.Brace)
+				if value.Kind != expr.CommandWord { e.Str("form"); e.Str(p.Form) }
 			} else {
 				e.Str("text")
 				e.Str(p.Text)
@@ -356,6 +362,7 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
+	if k == expr.ValuePipe { return "value-pipe" }
 	if k == expr.EnvironmentReference {
 		return "environment-reference"
 	}

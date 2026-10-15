@@ -83,9 +83,16 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		return callee
 	}
 	if callee.Value.Kind != core.Callable {
+		kind := callee.Value.Kind
 		freeCallables(context.Run, &callee.Value)
 		callee.Value.Free(context.Run)
-		return failure(context.Run, "EXPR_INVALID", head.Span, "application head is not callable")
+		result := failure(context.Run, "EXPR_INVALID", head.Span, "application head is "+core.KindName(kind)+", not callable")
+		if expression.Expansion == "@(" && len(expression.Items) == 1 && (head.Kind == expr.Name || head.Kind == expr.Reference) {
+			name := expr.Compact(context.Run, head)
+			result.Diagnostic.Tips = slices.Append(context.Run, result.Diagnostic.Tips, owned(context.Run, "Use @{"+name+"} for lookup, rather than calling it."))
+			mem.FreeString(context.Run, name)
+		}
+		return result
 	}
 	function := callee.Value.Callable.(*Function)
 	context.Scope = scope
@@ -193,6 +200,7 @@ func (p *Program) prepareOperation(operation *Operation, count int, context *Con
 	}
 	for i := range operation.Capabilities {
 		if !context.allowed(operation.Capabilities[i]) {
+			if operation.Capabilities[i] == Env { return environmentDenied(context.Run, span, "") }
 			message := "`" + operation.Name + "` requires a capability that was not granted"
 			if operation.Capabilities[i] == Read {
 				message += "; grant read access with --allow-read=ROOT"

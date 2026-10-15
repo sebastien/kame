@@ -97,7 +97,7 @@ func TestDefinitionExpressionSuppliesInput(t *testing.T) {
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
 	if os.WriteFile(dir+"/input", []byte("source"), 0o644) != nil { t.Fatal("input write failed"); return }
-	parsed := script.Parse(a, "test.kmk", "SRC = ./input\n./output : @(SRC)\n\tcp @< @>\n\tprintf x >> recipe-log\n")
+	parsed := script.Parse(a, "test.kmk", "SRC = ./input\n./output : @{SRC}\n\tcp @< @>\n\tprintf x >> recipe-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil { t.Error("compile failed"); return }
@@ -154,7 +154,7 @@ func TestRenderedDuplicateOutputsAreRejected(t *testing.T) {
 
 func TestPlanFlattensComputedInputExpression(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "SRC = ./src\nOTHER = ./other\n./output : @((list SRC (list OTHER :nil)))\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "SRC = ./src\nOTHER = ./other\n./output : @(list SRC (list OTHER :nil))\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
@@ -167,7 +167,7 @@ func TestPlanFlattensComputedInputExpression(t *testing.T) {
 
 func TestPlanOnlyResolvesSelectedFallbackInput(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "SRC = ./src\n./output : @((? SRC missing))\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "SRC = ./src\n./output : @(? SRC missing)\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }
@@ -179,7 +179,7 @@ func TestPlanOnlyResolvesSelectedFallbackInput(t *testing.T) {
 
 func TestPlanDefersHostBackedInputWithoutPhaseFailure(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "./output : @((wildcard ./source/*))\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "./output : @(wildcard ./source/*)\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -197,7 +197,7 @@ func TestExpandPlanResolvesHostBackedInputsWithoutRunningRecipe(t *testing.T) {
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
 	if os.Mkdir(dir+"/src", 0o755) != nil || os.WriteFile(dir+"/src/one.c", []byte("one"), 0o644) != nil || os.WriteFile(dir+"/src/two.c", []byte("two"), 0o644) != nil { t.Fatal("source setup failed"); return }
-	parsed := script.Parse(a, "test.kmk", "./output : @((wildcard ./src/*.c))\n\tfalse\n")
+	parsed := script.Parse(a, "test.kmk", "./output : @(wildcard ./src/*.c)\n\tfalse\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -215,7 +215,7 @@ func TestExpandPlanDoesNotReplaceMaterializationInstance(t *testing.T) {
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
 	if os.Mkdir(dir+"/src", 0o755) != nil || os.WriteFile(dir+"/src/input.txt", []byte("input"), 0o644) != nil { t.Fatal("source setup failed"); return }
-	parsed := script.Parse(a, "test.kmk", "./output : @((wildcard ./src/*.txt))\n\tprintf expanded > @>\n")
+	parsed := script.Parse(a, "test.kmk", "./output : @(wildcard ./src/*.txt)\n\tprintf expanded > @>\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -238,7 +238,7 @@ func TestExpandPlanDoesNotMaterializeRuleDependency(t *testing.T) {
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-expand-read-")
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./generated:\n\tprintf ./input > @>\n./output : @((read \"./generated\"))\n\tprintf output > @>\n")
+	parsed := script.Parse(a, "test.kmk", "./generated:\n\tprintf ./input > @>\n./output : @(read \"./generated\")\n\tprintf output > @>\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -258,7 +258,7 @@ func TestMaterializeResumesHostBackedRuleInput(t *testing.T) {
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
 	if os.Mkdir(dir+"/src", 0o755) != nil || os.WriteFile(dir+"/src/input.txt", []byte("resolved\n"), 0o644) != nil { t.Fatal("source setup failed"); return }
-	parsed := script.Parse(a, "test.kmk", "./output : @((wildcard ./src/*.txt))\n\tcat @< > @>\n")
+	parsed := script.Parse(a, "test.kmk", "./output : @(wildcard ./src/*.txt)\n\tcat @< > @>\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -278,7 +278,7 @@ func TestPlanAndBuildInputLambdaReleasesItsScope(t *testing.T) {
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-runtime-")
 	if err != nil { t.Fatal("temporary directory failed"); return }
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "sources = [\"source-a\" \"source-b\"]\ntask source-a :\ntask source-b :\ntask run : @((map ([s] s) sources))\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "sources = [\"source-a\" \"source-b\"]\ntask source-a :\ntask source-b :\ntask run : @(map ([s] s) sources)\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
@@ -300,7 +300,7 @@ func TestPatternReplaceComputesObjectInputs(t *testing.T) {
 	defer os.Remove(dir)
 	if os.Mkdir(dir+"/src", 0o755) != nil { t.Fatal("source directory failed"); return }
 	if os.WriteFile(dir+"/src/a.c", []byte("a"), 0o644) != nil || os.WriteFile(dir+"/src/b.c", []byte("b"), 0o644) != nil { t.Fatal("source write failed"); return }
-	parsed := script.Parse(a, "test.kmk", "sources = [\"./src/a.c\" \"./src/b.c\"]\nobjects = (replace ./src/{name:*}.c ./build/{name}.o sources)\n./build/marker : @(objects)\n\tcat @<* > @>\n./build/{name}.o : ./src/{name}.c\n\tcp @< @>\n")
+	parsed := script.Parse(a, "test.kmk", "sources = [\"./src/a.c\" \"./src/b.c\"]\nobjects = (replace ./src/{name:*}.c ./build/{name}.o sources)\n./build/marker : @{objects}\n\tcat @<* > @>\n./build/{name}.o : ./src/{name}.c\n\tcp @< @>\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) { t.Fatal("library registration failed"); return }
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -316,7 +316,7 @@ func TestPatternReplaceComputesObjectInputs(t *testing.T) {
 
 func TestPlanReportsDefinitionCycleInInput(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "test.kmk", "A = \"@(B)\"\nB = \"@(A)\"\n./output : @(A)\n\ttrue\n")
+	parsed := script.Parse(a, "test.kmk", "A = \"@{B}\"\nB = \"@{A}\"\n./output : @{A}\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: "."})
 	if compiled.Program == nil { t.Fatal("compile failed"); return }

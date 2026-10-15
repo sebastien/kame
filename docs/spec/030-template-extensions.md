@@ -38,9 +38,9 @@ first directive after `@match` must be `@case`:
 ```html
 <!-- @match(post.path) -->
 <!-- @case(./posts/{slug:*}.md) -->
-<a href="@(slug)">@(post.title)</a>
+<a href="@{slug}">@{post.title}</a>
 <!-- @case(./drafts/{slug:*}.md) -->
-<span class="draft">@(slug)</span>
+<span class="draft">@{slug}</span>
 <!-- @else -->
 <span>unclassified</span>
 <!-- @end(match) -->
@@ -59,8 +59,10 @@ The same `@if`, `@elif`, `@else`, `@for`, `@with`, `@match`, `@case`, `@raw`,
 and labeled `@end` forms apply. In comment styles, inline directive tokens use
 the complete comment wrapper for that style, such as `<!-- @if(ok) -->`; a
 comment wrapper may not contain surrounding text. In `plain` style the token
-is the directive spelling itself. Inline `@(EXPR)` remains an expression and
-does not open a block.
+is the directive spelling itself. Inline `@{REFERENCE}` and `@`-prefixed
+parenthesized expressions remain expansions and do not open blocks. Directive
+parentheses retain their argument-slot grammar from 016, independently of the
+inline reference/call split.
 
 An optional `-` immediately after `@` trims adjacent output whitespace on the
 left. An optional `-` immediately before the token's closing comment wrapper

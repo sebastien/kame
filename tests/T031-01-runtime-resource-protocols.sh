@@ -101,7 +101,7 @@ for runner in ([native], ['node', wasm]):
         source.write_text('first')
         uri = 'file://' + str(source)
         (work / 'Makefile.kmk').write_text(
-            f'./output : @((list (resource "{uri}")))\n'
+            f'./output : @(list (resource "{uri}"))\n'
             f'\t@(yield! (read (resource "{uri}")))\n')
         process = subprocess.Popen(
             runner + ['-C', directory, '--watch', './output'],

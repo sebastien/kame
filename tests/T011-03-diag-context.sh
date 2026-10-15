@@ -45,7 +45,7 @@ else
 fi
 
 test-step "unused tools do not block planning or execution"
-tools=$'good :\n\ttrue\nbad :\n\t@(x/kame-definitely-missing-tool)\nroot : bad\n'
+tools=$'good :\n\ttrue\nbad :\n\t@{x/kame-definitely-missing-tool}\nroot : bad\n'
 cli_run -- do plan -c "$tools" good
 cli_expect_status 0
 cli_run -- -l kmk -c "$tools" good
@@ -66,13 +66,13 @@ else
 fi
 cli_run -- -l kmk -c "$tools" bad
 cli_expect_status 1
-cli_expect_stderr_contains 'TOOL_MISSING' '@(x/kame-definitely-missing-tool)' 'while rule bad'
+cli_expect_stderr_contains 'TOOL_MISSING' '@{x/kame-definitely-missing-tool}' 'while rule bad'
 cli_run -- do tools check -c "$tools"
 cli_expect_status 2
 cli_expect_stderr_contains 'tools check requires at least one target'
 
 test-step "checks follow computed dependencies and reject cycles"
-cli_run -- do tools check -c $'root : @("bad")\nbad :\n\t@(x/kame-definitely-missing-tool)\n' root
+cli_run -- do tools check -c $'root : @(nop "bad")\nbad :\n\t@{x/kame-definitely-missing-tool}\n' root
 cli_expect_status 1
 cli_expect_stderr_contains 'TOOL_MISSING' 'required by root -> bad'
 cli_run -- do tools check -c $'a : b\nb : a\n' a
@@ -82,10 +82,10 @@ cli_expect_stderr_contains 'DEP_CYCLE' 'required by a -> b -> a'
 test-step "read-only input expansion does not execute a recipe"
 mkdir -p tool-project
 cat >tool-project/Makefile.kmk <<'EOF'
-root : @((wildcard ./*.txt))
+root : @(wildcard ./*.txt)
 	touch should-not-run
 ./source.txt :
-	@(x/kame-definitely-missing-tool)
+	@{x/kame-definitely-missing-tool}
 EOF
 touch tool-project/source.txt
 cli_run -- do tools check -C tool-project root
@@ -104,9 +104,9 @@ cat >tool-project/bin/kame-test-tool <<'EOF'
 printf tool-ok
 EOF
 chmod +x tool-project/bin/kame-test-tool
-PATH="bin:$PATH" cli_run -- do tools check -C tool-project -c $'using :\n\t@(x/kame-test-tool)\n' using
+PATH="bin:$PATH" cli_run -- do tools check -C tool-project -c $'using :\n\t@{x/kame-test-tool}\n' using
 cli_expect_status 0
-PATH="bin:$PATH" cli_run -- -C tool-project --env PATH=/does-not-exist -l kmk -c $'using :\n\t@(x/kame-test-tool)\n' using
+PATH="bin:$PATH" cli_run -- -C tool-project --env PATH=/does-not-exist -l kmk -c $'using :\n\t@{x/kame-test-tool}\n' using
 cli_expect_status 0
 cli_expect_stdout 'tool-ok'
 

@@ -101,7 +101,7 @@ cli_expect_stdout '"1"'
 test-step "README build example executes and reuses unchanged file outputs"
 readme_project="$TEST_PATH/readme"
 mkdir -p "$readme_project/src/demo" "$readme_project/lib/h" "$readme_project/bin"
-awk '/^```kame$/ { code = 1; next } code && /^```$/ { exit } code { print }' \
+awk '/^## Build example$/ { example = 1 } example && /^```kame$/ { code = 1; next } code && /^```$/ { exit } code { print }' \
 	"$CLI_ROOT/README.md" >"$readme_project/Makefile.kmk"
 printf 'main\n' >"$readme_project/src/main.c"
 printf 'util\n' >"$readme_project/src/demo/util.c"

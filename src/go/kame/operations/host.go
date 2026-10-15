@@ -427,7 +427,7 @@ func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 		return invalidArgument(c, v, 0, "string")
 	}
 	if !c.Allows(eval.Env, v[0].Text) {
-		return failure("CAP_DENIED", "environment access denied")
+		return c.EnvironmentDenied(v[0].Text)
 	}
 	if c.HasEnvironment {
 		// The snapshot supplies the value; only the requested name is observed.

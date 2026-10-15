@@ -16,7 +16,7 @@ cat >"$project/Makefile.kmk" <<'KMK'
 ./{**}/{*}.c : ./{_0}/{_1}.h
 	cat @< > @>
 ./{*}.name :
-	printf '%s' @(_0) > @>
+	printf '%s' @{_0} > @>
 KMK
 printf 'positional-capture-ok\n' >"$project/src/demo.h"
 

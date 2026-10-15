@@ -36,7 +36,7 @@ For a computed executable, bind its value and use `$command` at the command head
 | --- | --- |
 | `$name`, `$project.name`, `${name}` | Look up a Kame reference. |
 | `$...name`, `$...{project.command}` | Explicitly spread a flat argv list, including the executable at command position. |
-| `(EXPRESSION)` | Evaluate an ordinary Kame expression, such as `(count files)`. |
+| `(EXPRESSION)` | Evaluate a parenthesized Kame expression, standalone or as an unquoted scalar word fragment. |
 | `$(COMMAND)` | Execute a Kash command/pipeline and capture stdout. |
 | `$env.NAME` | Explicit lazy environment lookup, requiring an env grant. |
 
@@ -57,11 +57,36 @@ Kash executes argv directly:
   unquoted argv words, never definition/setup values or redirection paths.
 - Quoted or mixed words require scalars; `"$files"` is invalid for a list.
 - Nil, bytes, records, nested lists, callables, and process/results are not argv.
-- Double quotes group words and allow substitutions; empty quotes preserve an
-  empty argument. Single quotes are reserved and rejected.
+- Double quotes group words and allow references/process captures; parentheses
+  inside them stay literal. Empty quotes preserve an empty argument. Single
+  quotes are reserved and rejected.
 - Legacy unquoted `@(...)`, `\@(...)`, and template directives are errors.
   Quoted argument data containing `@(...)` remains literal. Expression strings
   and explicit document templates retain their interpolation rules.
+
+Mixed words compose directly, without `str` workarounds:
+
+```kash
+biome --config-path=(js-biome-config)
+emit prefix-(name)-suffix (name).json
+:cwd ./build/(variant) :MODE release-(variant) tool > ./out/(name).txt
+tool < (input-name).txt
+```
+
+Each mixed word requires scalar fragments and produces one value, preserving
+spaces and empty text. A standalone `(modules)` may splice its list result in
+argv; `--modules=(modules)` rejects a list. The same composition applies to
+redirection paths and scalar setup values, including `:cwd` and `:timeout`, with
+their ordinary path/type checks. Typed `:env` records and definition RHSs keep
+their value grammar. Calls/effects retain completed values across suspension;
+results are never reparsed as words or source.
+
+`"--config-path=(js-biome-config)"` is literal, not a call. Quote or escape literal
+parentheses outside quotes. `$config` / `${config}` remain the reference forms;
+bare braces do not add another substitution syntax. In a delegated Kame
+expression, path interpolation still uses `@{ref}` / `@(call)`, not raw-word
+fragments. Formatting preserves calls versus literal parentheses, list-splicing
+boundaries, and authored value pipes rather than converting them to nested calls.
 
 The entire body is parsed before execution, including unselected branches.
 Generated Kash is explicit: construct `(kash TEXT)`, optionally using `render`
@@ -71,8 +96,9 @@ expressions directly; JSON serialization and escaping helpers are unnecessary.
 
 ### Migrating recipes
 
-Replace `@(name)` and `\@(name)` with `$name`, and expression boundaries such
-as `@(join ":" files)` with `(join ":" files)`. Replace document `@if`/`@for`
+When switching from external-shell templates, replace `@{name}` with `$name`,
+and call expansions such as `@(join ":" files)` with `(join ":" files)`.
+Replace document `@if`/`@for`
 generation with Kash control or explicit source construction. For a command
 represented as an argv list, explicitly spread the executable and arguments:
 
@@ -83,8 +109,8 @@ show :
 	$...command
 ```
 
-Do not serialize argv back into source. Keep `@(...)` in system-shell recipes,
-document templates, and Kame expression strings where interpolation is intended.
+Do not serialize argv back into source. Keep `@{ref}` / `@(call)` in system-shell
+recipes, document templates and expression strings where interpolation is intended.
 
 ## Executable dependencies
 
@@ -99,7 +125,7 @@ not grant user filesystem-read authority.
 `aws ...`, `$x/aws ...`, and `${x/aws} ...` use the same named tool resolver;
 `(tool "aws")` obtains a tracked executable value outside command position.
 Unreached branches acquire no runtime tool dependencies. External-shell command
-names remain shell-resolved unless explicitly rendered through `@(x/NAME)`.
+names remain shell-resolved unless explicitly rendered through `@{x/NAME}`.
 
 Tracking a wrapper does not reveal its subprocesses: `bun x tsc` tracks Bun,
 not an inferred package/compiler graph. Declare scripts and other relevant

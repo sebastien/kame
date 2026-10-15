@@ -8,7 +8,7 @@ import (
 
 func TestComputedPatternAuthoredPartsAndClone(t *testing.T) {
 	a := t.Allocator()
-	text := `@(ROOT)/{one:*}.@(EXT)/{two:~[a-z]+}`
+	text := `@{ROOT}/{one:*}.@{EXT}/{two:~[a-z]+}`
 	r := expr.Parse(a, "computed", text)
 	if len(r.Diagnostics) != 0 || r.Expr.Pattern == nil { t.Error("computed pattern did not classify"); r.Free(); return }
 	p := r.Expr.Pattern
@@ -29,7 +29,7 @@ func TestComputedPatternAuthoredPartsAndClone(t *testing.T) {
 
 func TestComputedPatternClassificationAndGroupBoundaries(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{`@(ROOT)/{name}`, `@(ROOT)/{bad:}`, `@(ROOT)/\{name}`, `"@(ROOT)/{name:*}"`, `@(ROOT)/{a:*}/{b}`, `./{@(NAME):*}`, `./{name:@(GLOB)}`, `./{name:~@(REGEX)}`, `@(ROOT)/{name:~(a|)}`}
+	texts := []string{`@{ROOT}/{name}`, `@{ROOT}/{bad:}`, `@{ROOT}/\{name}`, `"@{ROOT}/{name:*}"`, `@{ROOT}/{a:*}/{b}`, `./{@{NAME}:*}`, `./{name:@{GLOB}}`, `./{name:~@{REGEX}}`, `@{ROOT}/{name:~(a|)}`}
 	for i := range texts {
 		r := expr.Parse(a, "computed", texts[i])
 		if i == 0 {

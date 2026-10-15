@@ -54,7 +54,7 @@ diag '(str ./{**}/{*}.c)' 'EXPR_INVALID'
 evaluates '(replace "a" "b" "banana")' '"bbnbnb"'
 
 test-step "invalid pattern combinations"
-diag '(replace "a" "b")' 'PAT_INVALID'
+diag '(replace "a" "b")' 'EXPR_INVALID'
 diag '(replace ./{**}/{*}.c ./build/{_0}/{_9}.c "./a/b.c")' 'PAT_INVALID'
 diag '(replace ./{**}/{*}.c ./build/{_0}/{_1}.c 42)' 'EXPR_INVALID'
 
@@ -65,7 +65,7 @@ test-step "patterns render as their text in rule inputs"
 	cat > Makefile.kmk <<'LMK'
 sources = ["./src/a.c" "./src/b.c"]
 objects = (replace ./src/{name:*}.c ./build/{name}.o sources)
-./build/marker : @(objects)
+./build/marker : @{objects}
 	cat @<* > @>
 ./build/{name}.o : ./src/{name}.c
 	cp @< @>

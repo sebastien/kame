@@ -76,8 +76,7 @@ test-step "value programs, functions, pipes, discovery and lazy failure"
 	for file in ./*.km; do
 		cli_run -- do parse --lang script "$file"
 		cli_expect_status 0
-		# The formatter expands value pipes into nested applications.
-		cli_run -- do fmt "$file"
+		cli_run -- do fmt -n "$file"
 		cli_expect_status 0
 	done
 )

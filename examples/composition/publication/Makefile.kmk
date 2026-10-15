@@ -8,8 +8,8 @@ default : ./public/index.txt
 	tr '[:lower:]' '[:upper:]' < @< >> @>
 	echo rendered @>
 
-./public/index.txt : @(pages)
-	cat @(pages) > @>
+./public/index.txt : @{pages}
+	cat @{pages} > @>
 	echo assembled @>
 
 check : ./public/index.txt

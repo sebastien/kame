@@ -4,19 +4,19 @@ projects = (wildcard ./content/projects/*.md)
 post-html = (map (replace ./content/posts/{name:*}.md ./build/posts/{name}.html) posts)
 project-html = (map (replace ./content/projects/{name:*}.md ./build/projects/{name}.html) projects)
 
-default : ./build/index.html ./build/author.html @(post-html) @(project-html) ./build/style.css
+default : ./build/index.html ./build/author.html @{post-html} @{project-html} ./build/style.css
 
 ./build/posts/{name}.html : ./content/posts/{name}.md ./templates/post.html
 	mkdir -p ./build/posts
-	@(x/pandoc) @< --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="../style.css" -V home="../index.html" -V about="../author.html" -o @>
+	@{x/pandoc} @< --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="../style.css" -V home="../index.html" -V about="../author.html" -o @>
 
 ./build/projects/{name}.html : ./content/projects/{name}.md ./templates/post.html
 	mkdir -p ./build/projects
-	@(x/pandoc) @< --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="../style.css" -V home="../index.html" -V about="../author.html" -o @>
+	@{x/pandoc} @< --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="../style.css" -V home="../index.html" -V about="../author.html" -o @>
 
 ./build/author.html : ./content/author.md ./templates/post.html
 	mkdir -p ./build
-	@(x/pandoc) @< --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="./style.css" -V home="./index.html" -V about="./author.html" -o @>
+	@{x/pandoc} @< --from markdown+yaml_metadata_block --to html5 --template ./templates/post.html -V css="./style.css" -V home="./index.html" -V about="./author.html" -o @>
 
 # Helper script lives here in the Kamefile and is materialized as a build
 # artifact, so the index recipe stays small and inspectable with
@@ -36,16 +36,16 @@ default : ./build/index.html ./build/author.html @(post-html) @(project-html) ./
 	printf '<li><time>%s</time> <a href="./%s/%s.html">%s</a><p>%s</p></li>\n' "$date" "$section" "$slug" "$title" "$desc"
 	EOF
 
-./build/index.html : @(posts) @(projects) ./templates/header.html ./templates/footer.html ./build/tools/row.sh
+./build/index.html : @{posts} @{projects} ./templates/header.html ./templates/footer.html ./build/tools/row.sh
 	mkdir -p ./build
 	cat ./templates/header.html > @>
 	echo "<h2>Posts</h2>" >> @>
 	echo "<ul class=\"posts\">" >> @>
-	for f in @(posts); do sh ./build/tools/row.sh "$f"; done | sort -r >> @>
+	for f in @{posts}; do sh ./build/tools/row.sh "$f"; done | sort -r >> @>
 	echo "</ul>" >> @>
 	echo "<h2>Projects</h2>" >> @>
 	echo "<ul class=\"posts\">" >> @>
-	for f in @(projects); do sh ./build/tools/row.sh "$f"; done | sort -r >> @>
+	for f in @{projects}; do sh ./build/tools/row.sh "$f"; done | sort -r >> @>
 	echo "</ul>" >> @>
 	cat ./templates/footer.html >> @>
 
@@ -57,4 +57,4 @@ clean :
 	rm -rf ./build
 
 serve : default
-	@(x/python3) -m http.server -d ./build 8000
+	@{x/python3} -m http.server -d ./build 8000

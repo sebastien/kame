@@ -292,7 +292,7 @@ strings replaces literal occurrences and retains ordinary eager evaluation.
 Wrong literal operand types or a missing literal subject report `EXPR_INVALID`.
 A match pattern as the first argument selects anchored matching. Its second
 operand is a replacement expression evaluated only after a match, with named
-captures bound locally; `./{name}`, `"@(name)"`, `name`, and `(uppercase name)`
+captures bound locally; `./{name}`, `"@{name}"`, `name`, and `(uppercase name)`
 can all use `{name:*}`. With two operands it returns a callable of arity one
 that defers the replacement until applied by `map`, a pipe, or a direct call.
 A string subject produces the replacement string or the original string on no
@@ -436,7 +436,7 @@ Every build effect is invalid during planning and returns `PHASE_INVALID`.
 
 ## Shell Operations
 
-Recipes may refer to an executable with `@(x/NAME)`. Kame resolves `NAME`
+Recipes may refer to an executable with `@{x/NAME}`. Kame resolves `NAME`
 against the build driver's startup `PATH` (not the recipe's configured PATH)
 only when the reference is reached while rendering a selected rule. Missing or
 non-executable tools use `TOOL_MISSING` at the authored reference; tools in
@@ -535,6 +535,11 @@ executable metadata checks do not grant access to user read operations.
   against a fixture source tree with tracked resource dependencies.
 - Path operations handle root, dotfiles, trailing separators, and relative
   normalization without filesystem access.
+- `joinpath` retains explicit relative anchoring across empty leading parts,
+  `.` / `./` roots, cleaning and parent traversal, without adding an anchor to
+  ordinary unanchored paths. Joined concrete artifact paths retain file
+  classification as computed outputs/prerequisites in planning/materialization,
+  including basenames that would otherwise be valid logical task names.
 - Wildcard results are sorted and recursive `**` crosses directories.
 - Unquoted glob expressions and explicit `wildcard` calls agree for empty,
   singleton and multiple matches; unioning expanded lists never re-globs their

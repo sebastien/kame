@@ -17,7 +17,7 @@ func TestComputedPatternLiteralValuesAndValidation(t *testing.T) {
 	operations.Register(registry)
 	parsed := script.Parse(a, "computed", "")
 	p := eval.Compile(a, engine, parsed, registry)
-	texts := []string{`@(nop """../two {evil:*} *?[\] @() words""")/{name:*}.@(nop "[a-z]+")`, `@(nop "src")/{name:*}`, `@(nop "file://root")/{name:*}`, `@(nop "C:\\root")/{name:*}`, `./@(42)/{name:*}`, "./@(nop \"\x00\")/{name:*}", `@(nop "/root")/{name:*}`, `@(nop "./root")/{name:*}`, `@(nop "../root")/{name:*}`, `@(nop "./C:\\root")/{name:*}`, `./@("{name:*}")/{other:*}`, `./@([])/{name:*}`}
+	texts := []string{`@(nop """../two {evil:*} *?[\] @() words""")/{name:*}.@(nop "[a-z]+")`, `@(nop "src")/{name:*}`, `@(nop "file://root")/{name:*}`, `@(nop "C:\\root")/{name:*}`, `./@(nop 42)/{name:*}`, "./@(nop \"\x00\")/{name:*}", `@(nop "/root")/{name:*}`, `@(nop "./root")/{name:*}`, `@(nop "../root")/{name:*}`, `@(nop "./C:\\root")/{name:*}`, `./@(nop "{name:*}")/{other:*}`, `./@(nop [])/{name:*}`}
 	for i := range texts {
 		e := expr.Parse(a, "computed", texts[i])
 		if len(e.Diagnostics) != 0 { t.Error("computed path did not parse"); e.Free(); continue }

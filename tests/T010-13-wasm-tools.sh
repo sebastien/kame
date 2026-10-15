@@ -20,8 +20,8 @@ cat >"$project/Makefile.kmk" <<'EOF'
 default : ./out.txt
 
 ./out.txt :
-	@(x/sh) -c 'echo hi' > @>
-	@(x/definitely-not-a-real-tool-xyz) foo
+	@{x/sh} -c 'echo hi' > @>
+	@{x/definitely-not-a-real-tool-xyz} foo
 EOF
 
 test-step "tools JSON matches native including unresolved names"
@@ -56,9 +56,9 @@ fi
 test-step "target-scoped checks match native without executing recipes"
 cat >>"$project/Makefile.kmk" <<'EOF'
 good :
-	@(x/sh) -c 'printf tool-ok'
+	@{x/sh} -c 'printf tool-ok'
 root : default
-computed : @("default")
+computed : @(nop "default")
 EOF
 compare_check() {
 	local wasm_status native_status
@@ -94,18 +94,18 @@ touch "$project/input/needs.txt"
 printf default >"$project/dependency"
 printf glob_root >"$project/next-dependency"
 cat >>"$project/Makefile.kmk" <<'EOF'
-glob_root : @((wildcard ./input/*.txt))
+glob_root : @(wildcard ./input/*.txt)
 	touch should-not-run
 ./input/needs.txt :
-	@(x/definitely-not-a-real-tool-xyz)
-read_root : @((text (read "./dependency")))
-env_root : @((env "KAME_TOOL_TARGET"))
-exists_root : @((if (exists "./input/needs.txt") "default" "good"))
-write_bad : @((write! "./should-not-write" "forbidden"))
-shell_bad : @((sh! "touch should-not-spawn"))
-read_error : @((text (read "./missing-input")))
-two_reads : @((list (text (read "./dependency")) (text (read "./next-dependency"))))
-two_globs : @((concat (wildcard ./input/*.txt) (wildcard ./input/*.txt)))
+	@{x/definitely-not-a-real-tool-xyz}
+read_root : @(text (read "./dependency"))
+env_root : @(env "KAME_TOOL_TARGET")
+exists_root : @(if (exists "./input/needs.txt") "default" "good")
+write_bad : @(write! "./should-not-write" "forbidden")
+shell_bad : @(sh! "touch should-not-spawn")
+read_error : @(text (read "./missing-input"))
+two_reads : @(list (text (read "./dependency")) (text (read "./next-dependency")))
+two_globs : @(concat (wildcard ./input/*.txt) (wildcard ./input/*.txt))
 EOF
 compare_check --json glob_root
 compare_check glob_root

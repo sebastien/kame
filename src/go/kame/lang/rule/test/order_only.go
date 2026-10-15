@@ -8,7 +8,7 @@ import (
 
 func TestOrderOnlyInputsPreservePurposeAndQuotedPipes(t *testing.T) {
 	a := t.Allocator()
-	result := rule.ParseRule(a, "order.kmk", "./out : \"./input|literal\" | prepare @([./directory]) ; env \"MODE=debug\"\n\tcat @<* > @>\n")
+	result := rule.ParseRule(a, "order.kmk", "./out : \"./input|literal\" | prepare @(nop [./directory]) ; env \"MODE=debug\"\n\tcat @<* > @>\n")
 	if len(result.Diagnostics) != 0 || len(result.Rule.Inputs) != 3 {
 		t.Fatal("order-only rule failed to parse")
 		result.Free()

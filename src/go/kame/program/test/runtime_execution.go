@@ -368,7 +368,7 @@ func TestNamedTargetArgumentsBindDefaultsAndSeparateInstances(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "arguments.kmk", "prepare {region=west} {zone=global} :\n\tprintf @(region) >> ./dependency-log\ndeploy {region=west} {zone=global} : \"prepare region=@(region) zone=@(zone)\"\n\tprintf @(region) >> ./deploy-log\n")
+	parsed := script.Parse(a, "arguments.kmk", "prepare {region=west} {zone=global} :\n\tprintf @{region} >> ./dependency-log\ndeploy {region=west} {zone=global} : \"prepare region=@{region} zone=@{zone}\"\n\tprintf @{region} >> ./deploy-log\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
 	if len(compiled.Diagnostics) != 0 || compiled.Program == nil {
@@ -1710,7 +1710,7 @@ func TestMaterializeReevaluatesComputedInputsWithoutDuplication(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "SRC = ./src\nOTHER = ./other\n./output : @((list SRC OTHER))\n\tcat @<* > @>\n")
+	parsed := script.Parse(a, "test.kmk", "SRC = ./src\nOTHER = ./other\n./output : @(list SRC OTHER)\n\tcat @<* > @>\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1817,7 +1817,7 @@ func TestResourceURIInputUsesCanonicalMemoryIdentity(t *testing.T) {
 	a := t.Allocator()
 	memory := wasm.NewMemoryHost(a)
 	inputURI := "mem://workspace/src/input.txt"
-	parsed := script.Parse(a, "resource.kmk", "./output : @((list (resource \"mem://workspace/src/./input.txt\")))\n\t@(yield! (read (resource \"mem://workspace/src/input.txt\")))\n")
+	parsed := script.Parse(a, "resource.kmk", "./output : @(list (resource \"mem://workspace/src/./input.txt\"))\n\t@(yield! (read (resource \"mem://workspace/src/input.txt\")))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")

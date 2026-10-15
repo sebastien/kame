@@ -247,27 +247,38 @@ Expression strings use double quotes. They support `\"`, `\\`, `\n`, `\r`,
 "Bundle of @(count files) files"
 ```
 
-Within a quoted expression string, `@(` opens interpolation and the matching
-`)` closes it. One contained expression is a value/reference; multiple expressions
-form an application. Parentheses and quoted strings inside the expression are
-balanced normally. `\@` produces a literal `@`; `\{` produces a literal `{`.
-An unclosed interpolation is `PARSE_ERR`; it does not use recipe recovery.
-`@(expression)` is the canonical expansion shared with string templates (see
-String Templates); contextual selectors are not expression-string syntax.
+Quoted expression strings and string templates share two explicit expansions:
 
-#### Migrating brace interpolation
+- `@{REFERENCE}` reads a reference, including fields, indexes, slices and key
+  selections: `"Hello @{project.name}"`. Its body must be a reference, not an
+  application or literal. Reading a callable does not invoke it.
+- `@` followed immediately by a parenthesized Kame expression evaluates that
+  complete expression: `"Version @(version)"` calls `version` without arguments,
+  while `"Bundle of @(count files) files"` calls `count`. The parentheses belong
+  to the expression; they are not an extra interpolation wrapper. Applications,
+  special forms, lambdas, sections and value pipes keep ordinary Kame semantics.
 
-`{(...)}` in expression strings is deprecated input syntax, retained with its
-existing value semantics for migration. All expression/script formatters emit
-`@(...)`, including nested interpolated strings. Run
-`kame do fmt --lang km --in-place FILE` (or `expr`, `kmk`, `kash` as appropriate) to migrate parsed
-expression strings; `--check` detects remaining noncanonical input. This is an
-input-only compatibility period: new sources and examples use `@(...)`. Removal
-of brace-input support is deferred to a separately announced breaking change.
+There is no single-item reference shorthand inside `@(...)` and no implicit
+invocation based on the resulting value's type. `@(name)` always means `(name)`;
+use `@{name}` to read the binding. Use `@(nop VALUE)` to render another expression
+atom, such as an inline list, without calling it. Delimiters, nested strings,
+reference selections and embedded processes are balanced by their owning parsers.
+`\@` produces a literal `@`; `\{` produces a literal `{`. An unclosed interpolation
+is `PARSE_ERR`; it does not use recipe recovery. Contextual selectors are not
+compact expression-string syntax.
 
-Do not blindly replace text: document templates never interpret `{(...)}`, and
-verbatim literals, `@raw` bodies, escaped `\{(...)}`, and raw Kash argument data
-remain literal. Formatting preserves those distinctions and escapes literal
+#### One interpolation grammar
+
+Only `@{REFERENCE}` and `@`-prefixed parenthesized expressions introduce
+interpolation. `{(...)}` has no interpolation semantics in expression strings or
+documents; it is literal text, subject only to independently valid pattern syntax.
+There is no deprecated-input parser, prior-grammar mode, automatic migration or
+runtime-type fallback. Existing sources must be updated explicitly to the current
+grammar. Ordinary formatting does not reinterpret `@(name)` as a reference or
+remove parentheses from a call of a computed callable.
+
+Verbatim literals, `@raw` bodies, escaped openers and literal Kash argument data
+remain inert. Formatting preserves those distinctions and escapes literal
 interpolation openers when needed so reparsing cannot activate them.
 
 Single quote is reserved and is not an alternative string delimiter.
@@ -294,9 +305,13 @@ Components are names, integer indexes, half-open slices, or key selections.
 Slice endpoints may be omitted or negative. Selection keys are comma-separated
 names.
 
+Component syntax starts from a named reference, not an arbitrary expression.
+Use `(get "stdout" (sh! COMMAND))` to read a computed record's field, or bind the
+record and use `result.stdout`; postfix `(expression).field` is not added.
+
 ### Pipes
 
-`|` rewrites applications before evaluation:
+`|` composes value transformations, with application-equivalent evaluation:
 
 ```kame
 (value | transform a)
@@ -311,6 +326,13 @@ right are each replaced with the piped value:
 
 is equivalent to `(transform value a)`. A pipe must have expressions on both
 sides.
+
+Parsing retains the authored chain and placeholder positions for source tools;
+evaluation may lower it to ordinary applications. Formatting preserves pipes as
+pipes and nested calls as nested calls; it does not infer one form from the other
+or change evaluation order or multiplicity. Layout is defined in
+`018-source-style.md`; compact formatting inside strings and words preserves the
+same distinction. These value pipes are separate from Kash process pipelines.
 
 ### Comparison Operators
 
@@ -389,7 +411,7 @@ references. Pattern values, matching, and the pattern form of `replace` are
 specified in `014-patterns.md`. Rule target templates are unchanged.
 
 Paths may interpolate literal prefixes and suffixes around fully authored groups:
-`@(ROOT)/{name:*}.@(EXT)` constructs a matcher and `@(OUT)/{name}` constructs an
+`@{ROOT}/{name:*}.@{EXT}` constructs a matcher and `@{OUT}/{name}` constructs an
 expansion reference pattern. Inserted values cannot inject pattern syntax.
 Interpolation inside a group is rejected; deliberate dynamic syntax uses
 `(pattern TEXT)`. These pattern paths do not enumerate filesystem globs. See
@@ -397,7 +419,7 @@ Interpolation inside a group is rejected; deliberate dynamic syntax uses
 
 Pattern `replace` evaluates its replacement expression only after matching,
 with named captures available as local string bindings. Both `./{name}` and
-`"@(name)"` can therefore use a `{name:*}` capture. This staged operation
+`"@{name}"` can therefore use a `{name:*}` capture. This staged operation
 evaluation is distinct from the reserved special forms above.
 
 ## String Templates
@@ -407,18 +429,21 @@ recipe text and standalone template sources, or as data explicitly passed to
 `render`. Quoted definition values are expression strings, not implicit template
 sources. String templates contain literal segments and expansions:
 
-- `@(expression)` evaluates an expression, including a reference expression.
+- `@{REFERENCE}` reads a reference without invoking it.
+- `@` followed by a parenthesized Kame expression evaluates that expression;
+  `@(function)` is a zero-argument call, and `@(function argument)` supplies an
+  argument.
 - `@<`, `@>`, and argument forms resolve contextual selectors.
 - A backslash escapes `@` and `\`.
 
-`@(expression)` is shared with expression strings (see Strings). Contextual
+These forms are shared with expression strings (see Strings). Contextual
 selectors are also expression atoms when the required frame exists, including
 inside [direct Kash recipe expressions](038-direct-kash-and-values.md). They
-are not compact expansions inside expression-string text. Deprecated `{(...)}`
-input remains specific to expression strings; it is literal in document templates.
+are not compact expansions inside expression-string text. Bare `{(...)}` is not
+an interpolation form in either language.
 
-Malformed `@(` expansions remain literal and produce an `PARSE_ERR` warning. A
-well-delimited but invalid contained expression is an error.
+Malformed `@(` and `@{` expansions remain literal and produce a `PARSE_ERR`
+warning. A well-delimited but invalid expression or reference is an error.
 
 Rendered list values are joined with one ASCII space. Nil renders as an empty
 string. Records and bytes cannot be interpolated into command text without an
@@ -566,6 +591,8 @@ EXTRA_CHECKS = [./tests/smoke]
 - Literal CLI `--define NAME=VALUE`, operand `NAME=VALUE`, and `KAME_NAME`
   configuration replace the whole aggregate under existing override precedence;
   they do not append or evaluate its original operands, and remain strings.
+  Explicit `--set NAME=LITERAL` likewise replaces the aggregate, preserving the
+  literal's type under `009-cli.md`; a typed list override remains a list.
 - Self-reference (`CHECKS += CHECKS`) and indirect dependency cycles fail
   `DEP_CYCLE` when demanded. A contribution refers to the final binding, never
   to a previous accumulator value. Use another binding for reusable lists.
@@ -584,9 +611,9 @@ EXTRA_CHECKS = [./tests/smoke]
   when text is intended. An evaluation wrapper such as `(nop B)` is unnecessary
   for an alias; write `A = B`.
 - Quoted values use ordinary expression-string escapes and interpolation
-  (`@(...)`, with deprecated `{(...)}` accepted on input); verbatim strings
-  remain inert until explicitly
-  rendered. Interpolation-free quoted strings also retain expression-pattern
+  (`@{REFERENCE}` and `@(function args...)`); verbatim strings remain inert until
+  explicitly rendered. Bare `{(...)}` does not interpolate.
+  Interpolation-free quoted strings also retain expression-pattern
   semantics: use `DATA = """{name}"""` for literal pattern-looking data.
   Former unquoted template text must be quoted. Template-only
   directives and compact selectors in text require explicit `render`, rather
@@ -595,8 +622,9 @@ EXTRA_CHECKS = [./tests/smoke]
   callable, not literal text. External shell names require quotes, for example
   `SHELL = "bash"`; shell argv require brackets, for example
   `SHELL = ["/bin/bash" "-eu"]`. `SHELL = /bin/sh` remains an explicit path.
-- `?=` remains a lazy default in value/build sources. CLI and environment
-  configuration overrides remain literal string data, not expression source.
+- `?=` remains a lazy default in value/build sources. Bare CLI assignments,
+  `--define` and environment configuration remain literal string data; `--set`
+  supplies closed typed data. Neither interface evaluates configuration as code.
 
 This migration also affects CLI and embedding results: `value = 42` publishes
 an integer (`value.data: 42` in JSON target events), not the former string
@@ -663,15 +691,19 @@ UNPREFIXED-RULE = OUTPUTS WS* ":" (WS+ INPUTS)?
 INPUTS = INPUT-GROUP (WS* "," WS+ INPUT-GROUP)*
 INPUT-GROUP = (WS+ INPUT)*
 OUTPUTS = OUTPUT-TARGET (WS+ OUTPUT-TARGET)*
-OUTPUT-TARGET = NAME | PATH | TEMPLATE | QUOTED-PATH | "@(" EXPRESSION ")" | INTERPOLATED-TARGET
-NAME-TARGET = NAME | NAME-TEMPLATE | "@(" EXPRESSION ")" | INTERPOLATED-TARGET
-INPUT = NAME | PATH | WILDCARD-PATH | TEMPLATE | QUOTED-STRING | "@(" EXPRESSION ")" | INTERPOLATED-PATH
+REFERENCE-EXPANSION = "@{" REFERENCE "}"
+EXPRESSION-EXPANSION = "@" PARENTHESIZED-EXPRESSION
+INTERPOLATION = REFERENCE-EXPANSION | EXPRESSION-EXPANSION
+OUTPUT-TARGET = NAME | PATH | TEMPLATE | QUOTED-PATH | INTERPOLATION | INTERPOLATED-TARGET
+NAME-TARGET = NAME | NAME-TEMPLATE | INTERPOLATION | INTERPOLATED-TARGET
+INPUT = NAME | PATH | WILDCARD-PATH | TEMPLATE | QUOTED-STRING | INTERPOLATION | INTERPOLATED-PATH
 ```
 
 Whitespace inside quoted strings and balanced input expressions does not split
-header items. Each whole `@(EXPRESSION)` contributes a value independently;
-strings, resources, lists and nil are flattened in authored order. Quoted input
-tokens and interpolated paths such as `@(ROOT)/suffix` render one path through
+header items. Each whole interpolation, such as `@{SOURCES}` or `@(sources)`,
+contributes a value independently; strings, resources, lists and nil are
+flattened in authored order. Quoted input tokens and interpolated paths such as
+`@{ROOT}/suffix` render one path through
 the shared template engine and retain dependencies of their expressions.
 An unquoted explicit path containing `*`, `?`, or `[` is a wildcard input.
 It lowers to the dependency-tracked `wildcard` operation, produces sorted files,
@@ -700,9 +732,9 @@ Resolution does not depend on the requested target, that rule's captures, target
 arguments, or input/output selectors. Host requests, reads, process execution,
 and effects are forbidden, including through lazy definitions and helpers.
 
-Each standalone `@(EXPRESSION)` contributes strings or pattern values; nested
-lists flatten recursively in authored order. Nil and empty lists contribute no
-outputs. Other types, empty strings, and a complete empty output set are
+Each standalone reference or expression expansion contributes strings or pattern
+values; nested lists flatten recursively in authored order. Nil and empty lists
+contribute no outputs. Other types, empty strings, and a complete empty output set are
 `EXPR_INVALID` errors. An interpolated token, quoted or unquoted, renders one
 target string through the shared template engine, without list splicing.
 
@@ -713,18 +745,18 @@ No second expression-interpolation pass is performed on computed text.
 
 ```kame
 PATH_BUILD = "./build"
-@(PATH_BUILD)/{name}.o : ./src/{name}.c
+@{PATH_BUILD}/{name}.o : ./src/{name}.c
 
 OUTPUTS = [./build/one [./build/two :nil] []]
-@(OUTPUTS) : ./seed
+@{OUTPUTS} : ./seed
 
 NAME = "chosen"
-task @(NAME) :
+task @{NAME} :
 ```
 
 The first output resolves to the file pattern `./build/{name}.o`. Explicit
 prefixes remain mandatory: `PATH_BUILD = "build"` does not make
-`@(PATH_BUILD)/{name}.o` a file pattern. Invalid resolved path/name shapes and
+`@{PATH_BUILD}/{name}.o` a file pattern. Invalid resolved path/name shapes and
 malformed target patterns use `PARSE_ERR` with the authored output span.
 File, bare task, cached task, service, and `always` restrictions apply to the
 resolved output set. Mixing file and logical outputs remains invalid.
@@ -784,8 +816,8 @@ Mixing path and name outputs is invalid. A target token such as `out.o` that is
 neither a valid name nor an explicit path is a parse error; the diagnostic
 should suggest `./out.o` when a file rule was likely intended.
 
-Inputs may be names, explicit paths, templates, string values, or `@(expression)`
-expansions. Input expression lists are flattened recursively at evaluation.
+Inputs may be names, explicit paths, templates, string values, or reference and
+expression expansions. Input expression lists flatten recursively at evaluation.
 
 A body line belongs to the rule when it begins with at least one tab or space.
 The exact leading whitespace prefix of the first nonblank body line is the rule
@@ -806,8 +838,9 @@ An external-shell recipe body is a `plain`-style document template (`016-templat
 whole-line, keyword-gated directive (`@if`, `@elif`, `@else`, `@for`, `@with`,
 `@let`, `@include`, `@raw`, `@end`) is removed together with its rule indent and
 line ending and contributes no shell text; the selected body lines render as
-shell. Inline `@(...)`, `@<`, `@>`, and the `@@`/`\@` escapes retain their
-string-template meaning. Text that is not a directive line remains opaque shell.
+shell. Inline `@{REFERENCE}`, `@(function args...)`, `@<`, `@>`, and the `@@`/`\@`
+escapes retain their string-template meaning. Text that is not a directive line
+remains opaque shell.
 
 ## Scripts
 
@@ -929,9 +962,14 @@ expression definitions and verbatim string definitions remain supported.
   and parse/format without performing host effects. A leading `$(` definition
   RHS is an expression, while `$(...)` in plain quoted strings remains literal.
 - A target template with no capture group parses as a literal target.
-- Expression strings and templates use canonical `@(...)` expansions, parsed
-  by their respective packages. Deprecated brace input formats to `@(...)`
-  without activating escaped or verbatim content.
+- Expression strings, templates, computed rule headers and interpolated paths
+  agree on `@{REFERENCE}` lookup and `@`-prefixed parenthesized expressions.
+  `@(function)` is always a zero-argument call, never a type-dependent lookup.
+- Bare `{(...)}` is not interpreted as interpolation. Formatting never activates
+  literal, escaped, raw or verbatim text and provides no prior-grammar fallback.
+- Pipes, nested calls and placeholder positions retain their authored structure
+  through parse/format/parse, including compact embedded expressions, without
+  changing evaluation order, multiplicity, dependencies or effects.
 - `def` distinguishes value and function bindings by the number of operands
   after the bound name.
 - `if`, `and`, `or`, and `match` are special forms: each operand is evaluated

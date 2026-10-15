@@ -38,14 +38,14 @@ with preserved timestamps. The first run establishes a successful record, and
 a file rule without declared or discovered dependencies is always stale.
 `always ./output : ./input` and `--force` bypass reuse.
 
-Outputs may also use `@(EXPRESSION)` or interpolated tokens:
+Outputs may also use reference/call expansions or interpolated tokens:
 
 ```kame
 PATH_BUILD = "./build"
-@(PATH_BUILD)/{name}.o : ./src/{name}.c
+@{PATH_BUILD}/{name}.o : ./src/{name}.c
 
 OUTPUTS = [./build/one [./build/two :nil]]
-@(OUTPUTS) : ./seed
+@{OUTPUTS} : ./seed
 ```
 
 Outputs resolve purely before target selection. Explicit path prefixes are
@@ -58,13 +58,13 @@ to this rule's captures, arguments or selectors are unavailable during output
 resolution.
 
 Inputs may be logical targets, paths, target templates, quoted values, or
-`@(EXPRESSION)` expansions. Lists from input expressions flatten recursively:
+reference/call expansions. Lists from input expressions flatten recursively:
 
 ```kame
 SOURCES = (wildcard ./src/*.c)
 
-./build/sources.txt : @(SOURCES)
-	printf '%s\n' @(SOURCES) > @>
+./build/sources.txt : @{SOURCES}
+	printf '%s\n' @{SOURCES} > @>
 ```
 
 Declare actual file inputs; a bare task prerequisite alone does not establish
@@ -93,11 +93,15 @@ Single named tasks can declare required/defaulted arguments:
 `deploy {environment} {region=us-east} :`. Invoke with
 `kame deploy environment=production`; these string bindings are distinct from
 file-pattern captures and participate in rule-instance/cache identity.
+Defaults are literal text: `{workspace=TERRAFORM_WORKSPACE}` is that spelling,
+not a reference. Resolve computed defaults in the recipe; `auto` is an ordinary
+application-chosen sentinel, not a built-in default evaluator. `--set` configures
+declared definitions, not these target arguments.
 
 `|` introduces order-only inputs, excluded from normal input selectors and
 content freshness. Commas separate input sequence groups: later groups are
 evaluated and requested after earlier groups complete, not a global barrier across
-targets. `a : @(PREP), @(BUILD)` splices computed lists into authored groups;
+targets. `a : @{PREP}, @{BUILD}` splices computed lists into authored groups;
 empty expansions preserve barriers. Output registration remains pure.
 
 ## Recipes and effects
@@ -124,7 +128,7 @@ The ordinary names `inputs`, `outputs`, and `inputs/changed` expose the lists
 corresponding to `@<*`, `@>*`, and `@<?`. `outputs` includes logical task names,
 not just file artifacts. Lexical bindings take precedence; missing rule context
 and disallowed changed-input access retain selector diagnostics. Use `$inputs`
-and `(first outputs)` in direct Kash, or `@(inputs)` in external-shell templates.
+and `(first outputs)` in direct Kash, or `@{inputs}` in external-shell templates.
 
 | Expression while rendering | Build behavior |
 | --- | --- |

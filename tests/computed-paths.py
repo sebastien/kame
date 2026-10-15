@@ -45,7 +45,7 @@ def watch(command: list[str], project: Path, environment: dict[str, str]) -> int
 	(project / 'items').mkdir()
 	(project / 'other').mkdir()
 	(project / 'Makefile.kmk').write_text(
-		'SHELL = kash\nROOT = "./items"\nFILES = @(ROOT)/*.txt\n'
+		'SHELL = kash\nROOT = "./items"\nFILES = @{ROOT}/*.txt\n'
 		'one :\n\t(write! ./one (join "," FILES))\n'
 		'two :\n\t(write! ./two (join "," FILES))\n'
 		'isolated :\n\t(write! ./isolated (join "," ./other/*.txt))\n')
@@ -129,20 +129,20 @@ def main() -> None:
 			assert result.returncode == 1 and code in result.stdout + result.stderr, (source, result)
 			checks += 1
 		allFiles = '["./files/a.txt" "./files/b.txt" "./files/literal*.txt" "./files/literal?.txt"]'
-		value('(let [ROOT "./files"] @(ROOT)/*.txt)', allFiles)
-		value('ROOT = "./files"\nFILES = @(ROOT)/*.txt\n(out! (count FILES))', '4', lang='km')
-		value('(count (let [ROOT "./files"] @(ROOT)/*.txt))', '4')
-		value('(let [ROOT "./files"] @(ROOT)/absent*)', '[]')
-		value('(let [ROOT "./files"] @(ROOT)/a.*)', '["./files/a.txt"]')
-		value('(let [ROOT "./files"] [@(ROOT)/absent* @(ROOT)/a.*])', '[[] ["./files/a.txt"]]')
-		value('(let [ROOT "./files"] (concat @(ROOT)/a.* @(ROOT)/absent* @(ROOT)/b.*))', '["./files/a.txt" "./files/b.txt"]')
-		value('(let [ROOT "./files"] [files: @(ROOT)/a.* empty: @(ROOT)/absent*])', '[files: ["./files/a.txt"] empty: []]')
+		value('(let [ROOT "./files"] @{ROOT}/*.txt)', allFiles)
+		value('ROOT = "./files"\nFILES = @{ROOT}/*.txt\n(out! (count FILES))', '4', lang='km')
+		value('(count (let [ROOT "./files"] @{ROOT}/*.txt))', '4')
+		value('(let [ROOT "./files"] @{ROOT}/absent*)', '[]')
+		value('(let [ROOT "./files"] @{ROOT}/a.*)', '["./files/a.txt"]')
+		value('(let [ROOT "./files"] [@{ROOT}/absent* @{ROOT}/a.*])', '[[] ["./files/a.txt"]]')
+		value('(let [ROOT "./files"] (concat @{ROOT}/a.* @{ROOT}/absent* @{ROOT}/b.*))', '["./files/a.txt" "./files/b.txt"]')
+		value('(let [ROOT "./files"] [files: @{ROOT}/a.* empty: @{ROOT}/absent*])', '[files: ["./files/a.txt"] empty: []]')
 		for name in ('literal*', 'literal?'):
-			value(f'(let [ROOT "./files" NAME {quote(name)}] @(ROOT)/@(NAME).*)', f'["./files/{name}.txt"]')
-			value(f'(let [ROOT "./files" NAME {quote(name)}] (concat @(ROOT)/@(NAME).* []))', f'["./files/{name}.txt"]')
+			value(f'(let [ROOT "./files" NAME {quote(name)}] @{{ROOT}}/@{{NAME}}.*)', f'["./files/{name}.txt"]')
+			value(f'(let [ROOT "./files" NAME {quote(name)}] (concat @{{ROOT}}/@{{NAME}}.* []))', f'["./files/{name}.txt"]')
 		for name in ('{evil:*}', '[]', 'back\\slash', '"quote"', '@()', 'café猫'):
 			(project / 'files' / (name + '.txt')).write_text('literal')
-			value(f'(let [ROOT "./files" NAME {quote(name)}] @(ROOT)/@(NAME).*)', '[' + json.dumps('./files/' + name + '.txt', ensure_ascii=False) + ']')
+			value(f'(let [ROOT "./files" NAME {quote(name)}] @{{ROOT}}/@{{NAME}}.*)', '[' + json.dumps('./files/' + name + '.txt', ensure_ascii=False) + ']')
 		for char in ('-', ']', '!', '^', '[', '\\'):
 			classRoot = project / ('class-' + str(ord(char)))
 			classRoot.mkdir()
@@ -150,32 +150,32 @@ def main() -> None:
 				(classRoot / name).write_text('x')
 			prefix = './' + classRoot.name
 			wanted = '[' + ' '.join(json.dumps(prefix + '/' + name) for name in sorted({'a', 'z', char})) + ']'
-			value(f'(let [ROOT {quote(prefix)} CHAR {quote(char)}] @(ROOT)/[a@(CHAR)z])', wanted)
+			value(f'(let [ROOT {quote(prefix)} CHAR {quote(char)}] @{{ROOT}}/[a@{{CHAR}}z])', wanted)
 		# An authored range may use an escaped closing bracket as its endpoint.
 		(project / 'range').mkdir()
 		for name in ('[', '\\', ']', '^'):
 			(project / 'range' / name).write_text('x')
-		value(r'(let [ROOT "./range"] @(ROOT)/[\[-\]])', '["./range/[" "./range/\\\\" "./range/]"]')
+		value(r'(let [ROOT "./range"] @{ROOT}/[\[-\]])', '["./range/[" "./range/\\\\" "./range/]"]')
 		for pathRoot in ('./files', '../' + project.name + '/files', str(project / 'files')):
-			value(f'(let [ROOT {quote(pathRoot)} EXT "txt"] (match? @(ROOT)/{{name:*}}.@(EXT) {quote(pathRoot + "/a.txt")}))', ':true', grant=False)
-		value('(let [ROOT "./files" EXT "txt"] (sub @(ROOT)/{first:*}-{second:*}.@(EXT) ./out/{second}/{first} "./files/a-b.txt"))', '"./out/b/a"', grant=False)
-		value('(let [ROOT "./files" OUT "./out"] (sub @(ROOT)/{name:*}-{name:*} @(OUT)/{name} "./files/a-a"))', '"./out/a"', grant=False)
-		value('(let [ROOT "./files"] (match? @(ROOT)/{name:~[a-z]+} "./files/abc"))', ':true', grant=False)
+			value(f'(let [ROOT {quote(pathRoot)} EXT "txt"] (match? @{{ROOT}}/{{name:*}}.@{{EXT}} {quote(pathRoot + "/a.txt")}))', ':true', grant=False)
+		value('(let [ROOT "./files" EXT "txt"] (sub @{ROOT}/{first:*}-{second:*}.@{EXT} ./out/{second}/{first} "./files/a-b.txt"))', '"./out/b/a"', grant=False)
+		value('(let [ROOT "./files" OUT "./out"] (sub @{ROOT}/{name:*}-{name:*} @{OUT}/{name} "./files/a-a"))', '"./out/a"', grant=False)
+		value('(let [ROOT "./files"] (match? @{ROOT}/{name:~[a-z]+} "./files/abc"))', ':true', grant=False)
 		for payload in ('{evil:*}', '*?[]\\"@()猫', '[a-z]+'):
-			value(f'(let [ROOT {quote("./" + payload)} EXT {quote(payload)}] (match? @(ROOT)/{{name:*}}.@(EXT) {quote("./" + payload + "/demo." + payload)}))', ':true', grant=False)
-		value('(let [ROOT "./files"] "@(ROOT)/{name:*}")', '"./files/{name:*}"', grant=False)
+			value(f'(let [ROOT {quote("./" + payload)} EXT {quote(payload)}] (match? @{{ROOT}}/{{name:*}}.@{{EXT}} {quote("./" + payload + "/demo." + payload)}))', ':true', grant=False)
+		value('(let [ROOT "./files"] "@{ROOT}/{name:*}")', '"./files/{name:*}"', grant=False)
 		value('"./files/literal*.txt"', '"./files/literal*.txt"', grant=False)
-		value('(if :false (let [ROOT "./files"] @(ROOT)/*) "inactive")', '"inactive"', grant=False)
-		value('ROOT = "./files"\nUNUSED = @(ROOT)/*\n(out! "lazy")', 'lazy', lang='km', grant=False)
-		reject('(let [ROOT "./files"] @(ROOT)/*)', 'CAP_DENIED')
+		value('(if :false (let [ROOT "./files"] @{ROOT}/*) "inactive")', '"inactive"', grant=False)
+		value('ROOT = "./files"\nUNUSED = @{ROOT}/*\n(out! "lazy")', 'lazy', lang='km', grant=False)
+		reject('(let [ROOT "./files"] @{ROOT}/*)', 'CAP_DENIED')
 		for operand in ('42', ':true', '[]', '[x: "./files"]', '"files"', '"file://files"', '(parse-json ' + json.dumps(json.dumps('\x00')) + ')'):
-			reject(f'(let [ROOT {operand}] @(ROOT)/{{name:*}})', 'EXPR_INVALID')
+			reject(f'(let [ROOT {operand}] @{{ROOT}}/{{name:*}})', 'EXPR_INVALID')
 		for operand in ('"files"', '[]'):
-			reject(f'(let [ROOT {operand}] @(ROOT)/*)', 'EXPR_INVALID')
-		reject('./@(42)/{name:*}', 'EXPR_INVALID')
-		for source in ('./{@(NAME):*}', './{name:@(GLOB)}', './{name:~@(REGEX)}', '@(ROOT)/{a:*}/{b}', '@(ROOT)/{name:~(a|)}'):
+			reject(f'(let [ROOT {operand}] @{{ROOT}}/*)', 'EXPR_INVALID')
+		reject('./@(nop 42)/{name:*}', 'EXPR_INVALID')
+		for source in ('./{@{NAME}:*}', './{name:@{GLOB}}', './{name:~@{REGEX}}', '@{ROOT}/{a:*}/{b}', '@{ROOT}/{name:~(a|)}'):
 			reject(source, 'PARSE_ERR', parse=True)
-		reject('ROOT = "./"\n(include @(ROOT)/included.km)', 'PARSE_ERR', lang='km', parse=True)
+		reject('ROOT = "./"\n(include @{ROOT}/included.km)', 'PARSE_ERR', lang='km', parse=True)
 		(project / 'included.km').write_text('(out! "literal-include")\n')
 		(project / 'parent.km').write_text('(include ./included.km)\n')
 		includedResult = run(['do', 'run', '--lang', 'km', 'parent.km'])
@@ -195,7 +195,7 @@ def main() -> None:
 			assert boundaryFormat.returncode == 0 and not boundaryFormat.stderr and '{name' in boundaryFormat.stdout, boundaryFormat
 			checks += 1
 		# Inspect the public schema rather than assuming a private AST layout.
-		source = '@(ROOT)/{one:*}.@(EXT)/{two:~[a-z]+}'
+		source = '@{ROOT}/{one:*}.@{EXT}/{two:~[a-z]+}'
 		(project / 'source.expr').write_text(source)
 		parsed = run(['do', 'parse', '--json', '--lang', 'expr', 'source.expr'])
 		assert parsed.returncode == 0 and not parsed.stderr, parsed

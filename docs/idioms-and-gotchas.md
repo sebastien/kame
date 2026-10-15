@@ -31,6 +31,11 @@ Program operands after `--` are literal strings in `args` (`@*`), with indexed
 access through `args.0`. A quoted `NAME=VALUE` is literal configuration even
 when VALUE ends in a source suffix or contains expression-looking text.
 
+`NAME=TEXT`, `--define NAME=TEXT` and `KAME_NAME` configure strings. Use
+`kame --set FLAG=:false` for false or `kame --set 'MODULES=["js" "py"]'` for a
+list. Bare `FLAG=:false` is the truthy string `:false`, not a boolean. Typed
+overrides accept only closed literal data, never calls or references.
+
 ## Truth, emptiness, and captured identifiers
 
 Only nil and false are false; zero and empty text, bytes, lists, and records are
@@ -66,6 +71,9 @@ the following unchanged invocation should reuse them.
 `-C project -f Makefile.kmk` selects `project/Makefile.kmk`, independent of
 option order. Absolute source paths stay absolute. Includes are relative to
 the containing source, while evaluation paths use the selected working directory.
+`joinpath` preserves a first nonempty `.` / `./` anchor while cleaning components:
+`(joinpath ./deps/sdk ./etc/file)` stays `"./deps/sdk/etc/file"`. Do not replace
+path joining with concatenation just to retain file-rule classification.
 
 An initial value/expression invocation denies host operations by default:
 
@@ -78,6 +86,13 @@ implicitly broaden the first fragment's policy. Filesystem roots are lexical
 checks, with the symlink boundary described in
 [the capability contract](spec/005-evaluation.md#capabilities). Grants do not
 contain a child process's filesystem, network or environment access.
+
+Even a normal build needs an environment-read grant for `(env "NO_COLOR")`.
+Shell `NO_COLOR=1` affects inherited processes and CLI presentation but does not
+configure a declared Kame `NO_COLOR` definition. Use `kame NO_COLOR=1`,
+`KAME_NO_COLOR=1 kame`, or a typed `--set` for definition configuration. None of
+those grants an environment read; use `--allow-env=NO_COLOR` when a read is
+actually intended, preserving other required grants under the replacement policy.
 
 ## Build expressions and shell recipes
 
@@ -94,9 +109,17 @@ excludes order-only prerequisites and is available only inside file recipes.
 Use explicit `{stem}` pattern captures for stems, `@(dirname @>)` for the output
 directory and `@(dirname @<)` for the first input directory.
 
-External-shell recipes use `@(EXPRESSION)`. Build headers accept whole input expressions and paths such as
-`@(DIRECTORY)/suffix`, interleaved with literal or quoted paths. Each whole
-expression is evaluated and flattened independently, in authored order.
+External-shell recipes use `@{name}` for lookup and `@(function args...)` for a
+call; `@(function)` invokes without arguments. Bare `{(...)}` does not interpolate,
+and ordinary formatting does not translate old syntax. Build headers accept
+whole reference/call expansions and paths such as `@{DIRECTORY}/suffix`,
+interleaved with literal or quoted paths. Each whole expansion is evaluated and
+flattened independently, in authored order.
+
+Template `@0` is a selector even inside shell quotes. Write `--mtime=\@0` for a
+literal tar argument, or use `@raw` for a larger literal template section.
+Rule metadata follows the colon and inputs: `show : ; [shell: kash]`, not
+`show ; [shell: kash] :`.
 
 Long definitions and rule headers may continue with backslash-newline; indented
 continuation lines belong to that declaration. Use multiline expressions or a
@@ -106,7 +129,7 @@ Quote shell text held in a Kame definition:
 
 ```kame
 WASM_SDK = "$(mise where asdf:mise-plugins/mise-wasi-sdk)/wasi-sdk"
-WASM_CC = "@(WASM_SDK)/bin/clang"
+WASM_CC = "@{WASM_SDK}/bin/clang"
 ```
 
 The plain quoted `$(...)` stays literal until the recipe shell sees the rendered
@@ -124,6 +147,12 @@ expanded path lists and returns a sorted, duplicate-free union. Use `:+files`,
 for other predicates. `**` matches zero or more directory levels. See the
 [library reference](skills/kame/ref/library.md#wildcard-selection).
 
+Kash composes scalar words directly: `biome --config-path=(js-biome-config)`.
+The same fragments work in `:cwd ./build/(variant)` and redirections such as
+`> ./out/(name).txt`. Whitespace in a result stays inside one argument/path;
+mixed lists are errors, not implicit joins. Quoted parentheses remain literal.
+Definitions require a standalone `=`, so `echo name=(name)` is a command word.
+
 ## Patterns and expansions
 
 A replacement expansion may be a string, a number, a boolean, or an expansion
@@ -139,7 +168,7 @@ A nonmatching subject remains unchanged under `sub` (or its deprecated alias
 as a predicate for `filter`/`filter-out`. Keep match patterns and expansion
 patterns distinct; their capture/reference groups have different roles.
 Patterns can start with a capture, and bare targets can capture: `{name:*}`
-or `aws-shell@{role-account}`. Exact targets win over templates; two matching
+or `aws-shell-{role-account}`. Exact targets win over templates; two matching
 templates remain ambiguous. Required/optional standalone target arguments are
 implemented separately from captures; see [spec 022](spec/022-target-arguments.md).
 
@@ -170,6 +199,9 @@ spacing. `do fmt -n FILE` reports whether that source differs; neither mode
 rewrites FILE. Only `do fmt -i FILE` replaces it. Review canonical output before
 applying it to a hand-formatted file. Formatting must preserve the parsed AST,
 and ordinary inspection/build commands must leave authored source bytes intact.
+Pipes stay pipes and nested calls stay nested calls, including placeholder
+positions; canonical formatting only changes spacing and layout. There is no
+need to keep a deliberately noncanonical pipe to preserve its reading order.
 
 Dynamic discovery is only correct when the aggregate actually rebuilds after
 input membership changes. Keep a source-addition check immediately after a build,

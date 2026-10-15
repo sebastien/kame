@@ -192,7 +192,7 @@ func TestTemplateSessionPreservesPayloadAndAuthoredDiagnostics(t *testing.T) {
  registry := eval.NewRegistry(a)
  defer registry.Free()
  operations.Register(registry)
- fragments := []program.Fragment{{Name: "page.md", Lang: "template", Text: "Hello @(name)!", Defines: []string{"name=old", "name=\"new\""}}}
+ fragments := []program.Fragment{{Name: "page.md", Lang: "template", Text: "Hello @{name}!", Defines: []string{"name=old", "name=\"new\""}}}
  compiled := program.CompileSession(a, fragments, registry, program.Options{})
  defer compiled.Free(a)
  if compiled.Session == nil { t.Fatal("template compilation failed"); return }

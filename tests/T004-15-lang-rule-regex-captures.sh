@@ -16,7 +16,7 @@ cat >"$project/Makefile.kmk" <<'KMK'
 ./src/{name:~[a-z]+}.c : ./src/{name}.h
 	cat @< > @>
 ./{name:~[a-z]+}.name :
-	printf '%s' @(_0) > @>
+	printf '%s' @{_0} > @>
 KMK
 printf 'regex-rule-capture-ok\n' >"$project/src/demo.h"
 

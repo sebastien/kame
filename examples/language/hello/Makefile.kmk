@@ -3,4 +3,4 @@
 default : ./build/greeting.txt
 ./build/greeting.txt :
 	mkdir -p ./build
-	printf '%s\n' "@(GREETING)" > @>
+	printf '%s\n' "@{GREETING}" > @>

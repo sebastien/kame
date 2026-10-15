@@ -122,8 +122,8 @@ patterns. Runtime string values are never reclassified: a string computed by an
 expression and containing braces is a plain string.
 
 Expression path patterns may interpolate literal prefixes and suffixes around
-fully authored groups: `@(ROOT)/{name:*}.@(EXT)` matches and
-`@(OUT)/{name}` expands. Inserted bytes are literal pattern data; braces,
+fully authored groups: `@{ROOT}/{name:*}.@{EXT}` matches and
+`@{OUT}/{name}` expands. Inserted bytes are literal pattern data; braces,
 backslashes and regex/glob punctuation cannot inject groups. Group names and
 matcher/regex syntax must occupy one authored static segment: interpolation
 inside `{...}` is a source error. Deliberately constructed syntax uses the
@@ -228,11 +228,12 @@ names.
 Only then evaluate `REPLACEMENT`, including its expression-string/path
 interpolations, in that scope. Ordinary names and composed expressions can use
 captures, and unrelated names follow normal lexical lookup. The canonical
-expression-string expansion is `@(name)`, not `@{name}`:
+expression-string reference expansion is `@{name}`; `@(name)` would call the
+binding without arguments:
 
 ```kame
 (replace ./journal/{name:*} ./{name} "./journal/demo")
-(replace ./journal/{name:*} "@(name)" "./journal/demo")
+(replace ./journal/{name:*} "@{name}" "./journal/demo")
 (replace ./journal/{name:*} name "./journal/demo")
 (replace ./journal/{name:*} (uppercase name) "./journal/demo")
 ```
@@ -255,7 +256,7 @@ in a selected expression report `REF_MISSING`; missing capture references in
 an expansion pattern remain `PAT_INVALID`.
 
 Replacement results are data, not new expression/template/glob source. In
-particular, captured metacharacters in `./{name}` or `"./@(name)"` do not start
+particular, captured metacharacters in `./{name}` or `"./@{name}"` do not start
 filesystem enumeration. Reached replacement reads and effects retain the
 caller's capabilities, phase restrictions, suspension and publication policy.
 
@@ -287,7 +288,7 @@ expression replacement:
 
 ```kame
 SOURCES_JOURNAL = ./journal/*
-PRODUCT_BY_NAME = (map (replace ./journal/{name:*} "@(name)") SOURCES_JOURNAL)
+PRODUCT_BY_NAME = (map (replace ./journal/{name:*} "@{name}") SOURCES_JOURNAL)
 PRODUCT_PATHS = (replace ./journal/{name:*} ./{name} SOURCES_JOURNAL)
 ```
 
@@ -341,7 +342,7 @@ and runtime pattern construction are specified in
 - Each successful list item evaluates its own replacement once; suspension and
   cancellation retain/release scopes and do not replay accepted effects.
 - Replacement results containing braces or glob metacharacters remain data;
-  `./{name}` expansion and canonical `"@(name)"` interpolation both work without
+  `./{name}` expansion and canonical `"@{name}"` interpolation both work without
   implicit filesystem access.
 - String, expansion-pattern and numeric/boolean replacements preserve existing
   rendering; invalid selected values are `PAT_INVALID`, while missing ordinary

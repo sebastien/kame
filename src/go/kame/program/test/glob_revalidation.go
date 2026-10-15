@@ -87,7 +87,7 @@ func TestGlobRevalidationSharedMembershipLocalAndForwarded(t *testing.T) {
 		memory := wasm.NewMemoryHost(a)
 		memory.Mkdir("items", 0o755)
 		memory.Mkdir("other", 0o755)
-		parsed := script.Parse(a, "watch.kmk", "ROOT = \"./items\"\nFILES = @(ROOT)/*.txt\none = FILES\ntwo = FILES\nisolated = ./other/*.txt\n")
+		parsed := script.Parse(a, "watch.kmk", "ROOT = \"./items\"\nFILES = @{ROOT}/*.txt\none = FILES\ntwo = FILES\nisolated = ./other/*.txt\n")
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
 		directory := "."

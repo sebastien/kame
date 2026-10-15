@@ -167,7 +167,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				if word.Text == "env" && p.DryRun { state.Index++; continue }
 				before := len(c.Effects)
 				beforePaths := len(c.WritePaths)
-				r := p.commandWord(word.Items[0], c)
+				r := p.commandWord(word.Items[0], c, "setup :"+word.Text)
 				if r.Waiting || r.Diagnostic.Code != "" { return r }
 				rememberArgumentEffects(state, c, before, beforePaths)
 				if word.Text == "env" {
@@ -216,7 +216,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			if word.Kind == expr.CommandRedirection {
 				before := len(c.Effects)
 				beforePaths := len(c.WritePaths)
-				r := p.commandWord(word.Items[0], c)
+				r := p.commandWord(word.Items[0], c, "redirection")
 				if r.Waiting || r.Diagnostic.Code != "" { return r }
 				rememberArgumentEffects(state, c, before, beforePaths)
 				text, ok := processScalar(c.Run, r.Value)
@@ -229,7 +229,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			}
 			before := len(c.Effects)
 			beforePaths := len(c.WritePaths)
-			r := p.commandWord(word, c)
+			destination := "argument"
+			if len(state.Argv) == 0 { destination = "command head" }
+			r := p.commandWord(word, c, destination)
 			if r.Waiting || r.Diagnostic.Code != "" {
 				return r
 			}
@@ -442,29 +444,33 @@ func appendArgument(state *captureState, value core.Value) bool {
 	return true
 }
 
-func (p *Program) commandWord(e *expr.Expr, c *Context) Result {
+func (p *Program) commandWord(e *expr.Expr, c *Context, destination string) Result {
 	if e.Bool {
 		return p.evaluate(c.Engine, c.Scope, e.Parts[0].Expr, c)
 	}
+	var children []*expr.Expr
+	for i := range e.Parts {
+		if e.Parts[i].Expr != nil { children = slices.Append(c.Run, children, e.Parts[i].Expr) }
+	}
+	operands := p.argumentValues(c.Scope, children, c, e.Span)
+	slices.Free(c.Run, children)
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	defer freeValuesWithCallables(c.Run, operands.Values)
 	b := strings.NewBuilder(c.Run)
+	next := 0
 	for i := range e.Parts {
 		part := e.Parts[i]
 		if part.Expr == nil {
 			b.WriteString(part.Text)
 			continue
 		}
-		r := p.evaluate(c.Engine, c.Scope, part.Expr, c)
-		if r.Waiting || r.Diagnostic.Code != "" {
+		value := operands.Values[next]
+		next++
+		if value.Kind != core.String && value.Kind != core.Pattern && value.Kind != core.Int && value.Kind != core.Float && value.Kind != core.Bool {
 			b.Free()
-			return r
+			return failure(c.Run, "EXPR_INVALID", part.Span, destination+" word requires a scalar fragment; got "+core.KindName(value.Kind)+"; list splicing is only valid in standalone unquoted argv substitutions")
 		}
-		if r.Value.Kind != core.String && r.Value.Kind != core.Pattern && r.Value.Kind != core.Int && r.Value.Kind != core.Float && r.Value.Kind != core.Bool {
-			r.Free(c.Run)
-			b.Free()
-			return failure(c.Run, "EXPR_INVALID", part.Span, "quoted or mixed command word requires a scalar")
-		}
-		text, ok := Stringify(c.Run, r.Value)
-		r.Free(c.Run)
+		text, ok := Stringify(c.Run, value)
 		if !ok {
 			b.Free()
 			return failure(c.Run, "EXPR_INVALID", part.Span, "invalid command word")

@@ -38,13 +38,13 @@ blocked : broken, later
 	touch forbidden
 PREP = ["first"]
 BUILD = ["second"]
-computed : @(PREP), @(BUILD)
-computed-parallel : @(["parallel-a" "parallel-b"])
-empty-middle : @(PREP), @([]), @(BUILD)
+computed : @{PREP}, @{BUILD}
+computed-parallel : @(nop ["parallel-a" "parallel-b"])
+empty-middle : @{PREP}, @(nop []), @{BUILD}
 ./membership :
 	printf second > @>
-discovered : @([./membership]), @(text (read ./membership))
-computed-blocked : @(["broken"]), @(text (read ./must-not-read))
+discovered : @(nop [./membership]), @(text (read ./membership))
+computed-blocked : @(nop ["broken"]), @(text (read ./must-not-read))
 KMK
 
 	test-step "$backend keeps whitespace dependencies parallel"

@@ -64,7 +64,7 @@ func TestInspectionBoundArgumentsAndCycles(t *testing.T) {
 
 func TestInspectionCoincidentOrigins(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "default : left ./source @(\"./source\") right\nleft :\nright :\n")
+	parsed := script.Parse(a, "<test>", "default : left ./source @(nop \"./source\") right\nleft :\nright :\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -174,7 +174,7 @@ func TestInspectionReversePositionalReferencesAndLogicalPatterns(t *testing.T) {
 
 func TestInspectionConsumerPlanningErrorsAreScopedToAffectedProducers(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./out : ./seed\n./bad : @(:true) ./elsewhere\n./computed-bad : @(\"./computed-seed\") @(:true)\n./late-computed-bad : @(:true) @(\"./late-computed-seed\")\n")
+	parsed := script.Parse(a, "<test>", "./out : ./seed\n./bad : @(nop :true) ./elsewhere\n./computed-bad : @(nop \"./computed-seed\") @(nop :true)\n./late-computed-bad : @(nop :true) @(nop \"./late-computed-seed\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: "."})
@@ -209,7 +209,7 @@ func TestInspectionConsumerPlanningErrorsAreScopedToAffectedProducers(t *testing
 
 func TestInspectionExcludedSeedDoesNotResolveItsInputs(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./seed : @((read ./secret))\n./out : ./seed\n")
+	parsed := script.Parse(a, "<test>", "./seed : @(read ./secret)\n./out : ./seed\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: ".", ForwardRequests: true, Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -238,7 +238,7 @@ func TestInspectionExcludedSeedDoesNotResolveItsInputs(t *testing.T) {
 
 func TestInspectionConsumerReadErrorsRemainAuthorizedAndScoped(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./out : ./seed\n./bad : ./elsewhere @((read ./missing))\n")
+	parsed := script.Parse(a, "<test>", "./out : ./seed\n./bad : ./elsewhere @(read ./missing)\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: wasm.NewMemoryHost(a), Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -260,7 +260,7 @@ func TestInspectionConsumerReadErrorsRemainAuthorizedAndScoped(t *testing.T) {
 
 func TestInspectionAffectedConsumerReadStillRequiresGrant(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "<test>", "./out : ./seed @((read ./secret))\n")
+	parsed := script.Parse(a, "<test>", "./out : ./seed @(read ./secret)\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Directory: ".", ForwardRequests: true})

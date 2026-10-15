@@ -3,6 +3,11 @@
 **Describe values. Describe dependencies. Describe processes. Then discover
 the computation they describe together.**
 
+Documentation snippets follow the specified `@{ref}` / `@(call)` contract.
+Checked-in executable examples and installed backends may still use earlier
+syntax; updating documentation does not migrate those files or prove runtime
+support. Check the source and backend before running a lesson.
+
 ## Three independent entrances, one shared reveal
 
 | Lesson | Question | Source | Status |

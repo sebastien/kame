@@ -228,7 +228,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 				return 1
 			}
 			tickCLIProgram(p, 10, errOut, inv.JSON)
-			session.Observe(h)
+			if inv.JSON { session.Observe(h) }
 			drainEvents(p, out, errOut, inv.JSON, &progress)
 			if h.Definition && h.Node.Current {
 				if inv.Name == "render" {
@@ -251,8 +251,8 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 				continue
 			}
 			if polled.Result.Diagnostic.Code != "" {
-				if !inv.JSON {
-					emitRunDiagnostic(errOut, polled.Result.Diagnostic, false, fragments, loaded)
+				if !inv.JSON || inv.Name == "render" {
+					emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), polled.Result.Diagnostic, inv.JSON, fragments, loaded)
 				}
 				polled.Result.Free(mem.System)
 				h.Free()

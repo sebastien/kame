@@ -106,10 +106,10 @@ func (p *parser) stringParts() {
 	literal = strings.NewBuilder(p.a)
 	literalStart := p.pos
 	for p.pos < p.end {
-		if p.pos+4 < p.end && p.s.Text[p.pos:p.pos+4] == "@(x/" {
+		if p.pos+4 < p.end && p.s.Text[p.pos:p.pos+4] == "@{x/" {
 			end := p.pos + 4
 			for end < p.end && (isToolNameByte(p.s.Text[end])) { end++ }
-			if end > p.pos+4 && end < p.end && p.s.Text[end] == ')' {
+			if end > p.pos+4 && end < p.end && p.s.Text[end] == '}' {
 				p.literal(&literal, literalStart, p.pos)
 				p.parts = slices.Append(p.a, p.parts, Part{Kind: Tool, Text: p.s.Text[p.pos+4:end], Span: source.Span{Start: p.pos, End: end+1}})
 				p.pos, literalStart = end+1, end+1
@@ -132,15 +132,15 @@ func (p *parser) stringParts() {
 			if p.s.Text[p.pos+1] == '{' {
 				close, kind = '}', Reference
 			}
-			prefix := p.embeddedExpression(p.pos+2, close)
-			closed := prefix.End < p.end && p.s.Text[prefix.End] == close
+			prefix := expr.ParseExpansionPrefix(p.a, p.s, p.pos)
+			closed := prefix.Closed
 			if prefix.Expr == nil && closed {
 				p.literal(&literal, literalStart, start)
 				for i := range prefix.Diagnostics {
 					p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
 				}
 				slices.Free(p.a, prefix.Diagnostics)
-				p.pos = prefix.End + 1
+				p.pos = prefix.End
 				p.parts = slices.Append(p.a, p.parts, Part{Kind: Literal, Text: owned(p.a, p.s.Text[start:p.pos]), Span: source.Span{Start: start, End: p.pos}})
 				literalStart = p.pos
 				continue
@@ -148,7 +148,9 @@ func (p *parser) stringParts() {
 			if prefix.Expr == nil || !closed {
 				expr.Free(p.a, prefix.Expr)
 				slices.Free(p.a, prefix.Diagnostics)
-				p.diagnostic(source.Warning, start, start+2, "malformed template expansion")
+				message := "unclosed template expression; expected ')'"
+				if close == '}' { message = "unclosed reference expansion; expected '}'" }
+				p.diagnostic(source.Warning, start, start+2, message)
 				literal.WriteByte('@')
 				p.pos++
 				continue
@@ -158,10 +160,7 @@ func (p *parser) stringParts() {
 				p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[i])
 			}
 			slices.Free(p.a, prefix.Diagnostics)
-			if kind == Reference && prefix.Expr.Kind != expr.Name && prefix.Expr.Kind != expr.Reference {
-				p.diagnostic(source.Error, p.pos+2, prefix.End, "expected reference")
-			}
-			p.pos = prefix.End + 1
+			p.pos = prefix.End
 			p.parts = slices.Append(p.a, p.parts, Part{Kind: kind, Expr: prefix.Expr, Span: source.Span{Start: start, End: p.pos}})
 			literalStart = p.pos
 			continue
@@ -182,47 +181,6 @@ func (p *parser) stringParts() {
 
 func isToolNameByte(b byte) bool {
 	return b == '_' || b == '-' || b == '.' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
-}
-
-func (p *parser) embeddedExpression(start int, close byte) expr.Prefix {
-	prefix := expr.ParsePrefix(p.a, p.s, start)
-	if prefix.Expr == nil {
-		return prefix
-	}
-	items := slices.Append(p.a, []*expr.Expr(nil), prefix.Expr)
-	for prefix.End < p.end && p.s.Text[prefix.End] != close {
-		if !templateSpace(p.s.Text[prefix.End]) {
-			break
-		}
-		pos := prefix.End
-		for pos < p.end && templateSpace(p.s.Text[pos]) {
-			pos++
-		}
-		if pos == p.end || p.s.Text[pos] == close {
-			prefix.End = pos
-			break
-		}
-		next := expr.ParsePrefix(p.a, p.s, pos)
-		for i := range next.Diagnostics {
-			prefix.Diagnostics = slices.Append(p.a, prefix.Diagnostics, next.Diagnostics[i])
-		}
-		slices.Free(p.a, next.Diagnostics)
-		if next.Expr == nil {
-			break
-		}
-		items = slices.Append(p.a, items, next.Expr)
-		prefix.End = next.End
-	}
-	if len(items) == 1 {
-		slices.Free(p.a, items)
-		return prefix
-	}
-	application := mem.Alloc[expr.Expr](p.a)
-	application.Kind = expr.Application
-	application.Span = source.Span{Start: start, End: prefix.End}
-	application.Items = items
-	prefix.Expr = application
-	return prefix
 }
 
 func templateSpace(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
@@ -280,22 +238,20 @@ func FormatString(a mem.Allocator, t *String) string {
 			continue
 		}
 		if part.Kind == Tool {
-			b.WriteString("@(x/")
+			b.WriteString("@{x/")
 			b.WriteString(part.Text)
-			b.WriteByte(')')
+			b.WriteByte('}')
 			continue
 		}
 		if part.Kind == Expression {
-			b.WriteString("@(")
+			b.WriteByte('@')
 		} else {
 			b.WriteString("@{")
 		}
 		value := expr.Compact(a, part.Expr)
 		b.WriteString(value)
 		mem.FreeString(a, value)
-		if part.Kind == Expression {
-			b.WriteByte(')')
-		} else {
+		if part.Kind != Expression {
 			b.WriteByte('}')
 		}
 	}

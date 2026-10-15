@@ -180,7 +180,7 @@ func TestFileInputsRebuildWhenMembershipChanges(t *testing.T) {
 		t.Fatal("source setup failed")
 		return
 	}
-	source := "./output : @((wildcard ./src/*))\n\t@(yield! (str (count @<*)))\n"
+	source := "./output : @(wildcard ./src/*)\n\t@(yield! (str (count @<*)))\n"
 	if code, _ := materializeSource(t, dir, source, true, false); code != "" {
 		t.Fatal("first membership build failed: " + code)
 		return

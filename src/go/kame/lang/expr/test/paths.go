@@ -8,7 +8,7 @@ import (
 
 func TestInterpolatedPathsRetainStructuralChildren(t *testing.T) {
 	a := t.Allocator()
-	texts := []string{`./build/@(component)/main.js`, `@(root)/sh/**/*.sh`, `../@(join " " ["a" "b"])/@(name)`, "/@(nop\n \"nested )\")/file", `$(printf "%s" ./@(name)/file)`, `$(printf "%s" @(root)/file)`, `./journal/[a@(name)].md`, `./journal/[@(get "name" [name: "b"])].md`}
+	texts := []string{`./build/@{component}/main.js`, `@{root}/sh/**/*.sh`, `../@(join " " ["a" "b"])/@{name}`, "/@(nop\n \"nested )\")/file", `$(printf "%s" ./@{name}/file)`, `$(printf "%s" @{root}/file)`, `./journal/[a@{name}].md`, `./journal/[@(get "name" [name: "b"])].md`}
 	for i := range texts {
 		parsed := expr.Parse(a, "paths.km", texts[i])
 		if len(parsed.Diagnostics) != 0 || parsed.Expr == nil {
@@ -34,7 +34,7 @@ func TestInterpolatedPathsRetainStructuralChildren(t *testing.T) {
 }
 
 func TestInterpolatedPathsRejectMissingBoundaries(t *testing.T) {
-	texts := []string{`@(root)`, `@(root)suffix`, `./@()/file`, `./@(name`, `./@(nop "unclosed)/file`, `./@(root`, `$(printf ./@(name)"suffix")`}
+	texts := []string{`@(root)`, `@(root)suffix`, `./@()/file`, `./@(name`, `./@(nop "unclosed)/file`, `./@(root`}
 	for i := range texts {
 		parsed := expr.Parse(t.Allocator(), "invalid.km", texts[i])
 		if len(parsed.Diagnostics) == 0 { t.Error("malformed path was accepted") }

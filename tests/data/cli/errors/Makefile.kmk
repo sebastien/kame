@@ -10,9 +10,9 @@
 	@(yield! "declared")
 	echo command
 
-A = "@(B)"
-B = "@(A)"
-./cycle.out : @(A)
+A = "@{B}"
+B = "@{A}"
+./cycle.out : @{A}
 	true
 
 ./amb-{x}.c :

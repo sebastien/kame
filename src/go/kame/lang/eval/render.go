@@ -3,8 +3,10 @@ package eval
 
 import (
 	"kame/core"
+	"kame/lang/expr"
 	"kame/lang/template"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 )
 
@@ -15,6 +17,13 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 	if context == nil {
 		context = &fallback
 	}
+	var children []*expr.Expr
+	for i := range value.Parts { if value.Parts[i].Expr != nil { children = slices.Append(run, children, value.Parts[i].Expr) } }
+	operands := p.argumentValues(scope, children, context, value.Span)
+	slices.Free(run, children)
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	defer freeValuesWithCallables(run, operands.Values)
+	next := 0
 	b := strings.NewBuilder(run)
 	defer b.Free()
 	for i := range value.Parts {
@@ -49,9 +58,10 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 		}
 		var r Result
 		if part.Kind == template.Selector {
-			r = p.selector(part.Text, part.Span, context)
+			r = literalSelectorTip(context.Run, p.selector(part.Text, part.Span, context))
 		} else {
-			r = p.evaluate(context.Engine, scope, part.Expr, context)
+			r.Value = operands.Values[next]
+			next++
 		}
 		if r.Waiting || r.Diagnostic.Code != "" {
 			attachSource(&r, context)
@@ -59,11 +69,11 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 		}
 		text, ok := stringify(run, r.Value)
 		if !ok {
-			freeCallables(run, &r.Value)
-			r.Value.Free(run)
-			return failure(context.Run, "EXPR_INVALID", part.Span, "records and bytes require explicit text conversion")
+			kind := r.Value.Kind
+			if part.Kind == template.Selector { r.Free(run) }
+			return renderFailure(context.Run, part.Expr, part.Span, kind)
 		}
-		r.Value.Free(run)
+		if part.Kind == template.Selector { r.Free(run) }
 		b.WriteString(text)
 		mem.FreeString(run, text)
 	}

@@ -33,7 +33,7 @@ func TestFunctionDefinitionRetainsRestParameter(t *testing.T) {
 }
 
 func TestRangeKeepsCallerSourceAndInterpolatedString(t *testing.T) {
-	s := source.New(t.Allocator(), "test.km", "prefix\nvalue = \"hello @(name)\"")
+	s := source.New(t.Allocator(), "test.km", "prefix\nvalue = \"hello @{name}\"")
 	defer s.Free(t.Allocator())
 	part := definition.ParseRange(t.Allocator(), s, 7, len(s.Text))
 	defer part.Free(t.Allocator())

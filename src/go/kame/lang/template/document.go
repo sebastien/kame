@@ -343,10 +343,10 @@ func (p *docParser) nextInlineBlockDirective(start int, end int) int {
 		if p.style == "plain" {
 			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') { i++; continue }
 			if text[i] == '@' && i+1 < end && text[i+1] == '@' { i++; continue }
-			if text[i] == '@' && i+1 < end && text[i+1] == '(' {
+			if text[i] == '@' && i+1 < end && (text[i+1] == '(' || text[i+1] == '{') {
 				// Expression contents belong to the value parser, including strings
 				// containing directive-looking text.
-				value := p.inlineExpr(i+2, end)
+				value := p.inlineExpr(i, end)
 				expr.Free(p.a, value.Expr)
 				slices.Free(p.a, value.Diagnostics)
 				if !value.Closed {
@@ -1633,7 +1633,7 @@ func (p *docParser) parseInner(innerStart int, innerEnd int, lineSpan source.Spa
 	// Validate arity and shapes.
 	switch kind {
 	case dirIf, dirElif, dirWith, dirMatch, dirCase:
-		// A single-expression directive owns its boundary, like @(EXPR):
+		// A directive owns argument slots, unlike a bare @ expression prefix:
 		// one item is a value/reference; multiple items form an application.
 		if len(args) > 1 {
 			app := mem.Alloc[expr.Expr](p.a)
@@ -1867,8 +1867,8 @@ func lambdaParams(a mem.Allocator, list *expr.Expr) []expr.Parameter {
 
 // inlineParts parses body text (lineStart..contentEnd) plus its line ending
 // (contentEnd..lineEnd) into lowered pieces: string literals, inline
-// @(expr) values, selectors, and \@ escapes. Tool references @(x/...) are
-// emitted literally (deferred); malformed @( stays literal.
+// reference/call expansions, selectors, and \@ escapes. Malformed expansions
+// remain literal; complete expressions keep their ordinary evaluation semantics.
 func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*expr.Expr {
 	var items []*expr.Expr
 	text := p.s.Text
@@ -1885,34 +1885,26 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 			litStart = i
 			continue
 		}
-		if b == '@' && i+1 < contentEnd && text[i+1] == '(' {
-			// Tool references @(x/...) are deferred: emit literally.
-			if isToolOpen(text, i+2, contentEnd) {
-				toolEnd := findToolClose(text, i+2, contentEnd)
-				if toolEnd > i {
-					if i > litStart {
-						items = slices.Append(p.a, items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
-					}
-					items = slices.Append(p.a, items, newStringLit(p.a, text[i:toolEnd], source.Span{Start: i, End: toolEnd}))
-					i = toolEnd
-					litStart = i
-					continue
-				}
-			}
+		if b == '@' && i+1 < contentEnd && (text[i+1] == '(' || text[i+1] == '{') {
 			if i > litStart {
 				items = slices.Append(p.a, items, newStringLit(p.a, text[litStart:i], source.Span{Start: litStart, End: i}))
 			}
-			prefix := p.inlineExpr(i+2, contentEnd)
-			if prefix.Expr == nil || !prefix.Closed {
+			prefix := p.inlineExpr(i, contentEnd)
+			if !prefix.Closed {
 				expr.Free(p.a, prefix.Expr)
 				slices.Free(p.a, prefix.Diagnostics)
+				message := "unclosed template expression; expected ')'"
+				if text[i+1] == '{' { message = "unclosed reference expansion; expected '}'" }
+				p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Warning, Span: source.Span{Start: i, End: i+2}, Message: message})
 				items = slices.Append(p.a, items, newStringLit(p.a, "@", source.Span{Start: i, End: i + 1}))
 				i++
 				litStart = i
 				continue
 			}
+			for j := range prefix.Diagnostics { p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[j]) }
 			slices.Free(p.a, prefix.Diagnostics)
-			items = slices.Append(p.a, items, prefix.Expr)
+			if prefix.Expr == nil { items = slices.Append(p.a, items, newStringLit(p.a, text[i:prefix.End+1], source.Span{Start: i, End: prefix.End+1}))
+			} else { items = slices.Append(p.a, items, prefix.Expr) }
 			i = prefix.End + 1
 			litStart = i
 			continue
@@ -1925,6 +1917,7 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 				}
 				sel := mem.Alloc[expr.Expr](p.a)
 				sel.Kind = expr.Selector
+				sel.Expansion = "selector"
 				sel.Span = source.Span{Start: i, End: selEnd}
 				sel.Text = text[i:selEnd]
 				items = slices.Append(p.a, items, sel)
@@ -1943,30 +1936,6 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 		items = slices.Append(p.a, items, newStringLit(p.a, ending, source.Span{Start: contentEnd, End: lineEnd}))
 	}
 	return items
-}
-
-func isToolOpen(text string, pos int, end int) bool {
-	if pos+2 > end {
-		return false
-	}
-	return text[pos] == 'x' && pos+1 < end && text[pos+1] == '/'
-}
-
-func findToolClose(text string, pos int, end int) int {
-	// pos is after "@(": scan x/NAME then ")". Returns end offset after ")",
-	// or 0 when not a well-formed tool reference.
-	i := pos + 2
-	for i < end && isDocToolNameByte(text[i]) {
-		i++
-	}
-	if i == pos+2 || i >= end || text[i] != ')' {
-		return 0
-	}
-	return i + 1
-}
-
-func isDocToolNameByte(b byte) bool {
-	return b == '_' || b == '-' || b == '.' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
 func docSelectorEnd(text string, end int, start int) int {
@@ -2019,49 +1988,12 @@ type inlineOut struct {
 }
 
 func (p *docParser) inlineExpr(start int, contentEnd int) inlineOut {
-	prefix := expr.ParsePrefix(p.a, p.s, start)
-	if prefix.Expr == nil {
-		return inlineOut{Diagnostics: prefix.Diagnostics}
-	}
-	items := slices.Append(p.a, []*expr.Expr(nil), prefix.Expr)
-	end := prefix.End
-	diags := prefix.Diagnostics
-	text := p.s.Text
-	for end < contentEnd && text[end] != ')' {
-		if text[end] != ' ' && text[end] != '\t' && text[end] != '\r' && text[end] != '\n' {
-			break
-		}
-		pos := end
-		for pos < contentEnd && (text[pos] == ' ' || text[pos] == '\t' || text[pos] == '\r' || text[pos] == '\n') {
-			pos++
-		}
-		if pos >= contentEnd || text[pos] == ')' {
-			end = pos
-			break
-		}
-		next := expr.ParsePrefix(p.a, p.s, pos)
-		for i := range next.Diagnostics {
-			diags = slices.Append(p.a, diags, next.Diagnostics[i])
-		}
-		slices.Free(p.a, next.Diagnostics)
-		if next.Expr == nil {
-			break
-		}
-		items = slices.Append(p.a, items, next.Expr)
-		end = next.End
-	}
-	if len(items) == 1 {
-		single := items[0]
-		slices.Free(p.a, items)
-		closed := end < contentEnd && text[end] == ')'
-		return inlineOut{Expr: single, End: end, Closed: closed, Diagnostics: diags}
-	}
-	app := mem.Alloc[expr.Expr](p.a)
-	app.Kind = expr.Application
-	app.Span = source.Span{Start: start, End: end}
-	app.Items = items
-	closed := end < contentEnd && text[end] == ')'
-	return inlineOut{Expr: app, End: end, Closed: closed, Diagnostics: diags}
+	view := mem.Alloc[source.Source](p.a)
+	*view = *p.s
+	view.Text = p.s.Text[:contentEnd]
+	prefix := expr.ParseExpansionPrefix(p.a, view, start)
+	mem.Free(p.a, view)
+	return inlineOut{Expr: prefix.Expr, End: prefix.End-1, Closed: prefix.Closed, Diagnostics: prefix.Diagnostics}
 }
 
 func newStringLit(a mem.Allocator, text string, span source.Span) *expr.Expr {

@@ -39,7 +39,7 @@ configured : ; env "KAME_items=scoped-override"
 	(out! items)
 outputs += ["computed"]
 inputs += ["prerequisite"]
-@(outputs) : @(inputs)
+@{outputs} : @{inputs}
 	(out! "computed")
 prerequisite :
 KMK

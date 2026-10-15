@@ -18,9 +18,9 @@ printf spaced >"$project/src dir/space.txt"
 cat >"$project/Makefile.kmk" <<'KMK'
 root = "./src"
 left = (wildcard ./src/*.go)
-./out <- @(left) ./literal @(wildcard ./src/*.c) @(root)/extra.h
+./out <- @{left} ./literal @(wildcard ./src/*.c) @{root}/extra.h
 	cat @<* > @>
-quoted : "./src dir/space.txt" "@(root)/a.go"
+quoted : "./src dir/space.txt" "@{root}/a.go"
 KMK
 for backend in native wasm; do
 	test-step "$backend mixes expression values, literal paths and interpolated paths"

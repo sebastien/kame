@@ -76,7 +76,7 @@ EOF
 cat > includes/Makefile.kmk <<'EOF'
 (include ./child.kmk)
 task default : child
-	@(out! "@(name)\n")
+	@(out! "@{name}\n")
 EOF
 (
 	cd includes

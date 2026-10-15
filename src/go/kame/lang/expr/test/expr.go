@@ -275,20 +275,20 @@ func TestRecordAndReferenceSpans(t *testing.T) {
 	}
 }
 
-func TestPipeRewritesWithOriginalSpans(t *testing.T) {
+func TestPipeRetainsAuthoredAndEvaluationSpans(t *testing.T) {
 	r := parse(t, "(value | transform _ a)")
 	defer r.Free()
-	if r.Expr == nil || r.Expr.Kind != expr.Application || len(r.Expr.Items) != 3 || r.Expr.Items[0].Text != "transform" || r.Expr.Items[1].Text != "value" || r.Expr.Items[2].Text != "a" {
-		t.Error("pipe did not normalize to an application")
+	if r.Expr == nil || r.Expr.AuthoredPipe == nil || len(r.Expr.AuthoredPipe.Items) != 2 || r.Expr.AuthoredPipe.Items[0].Text != "value" || r.Expr.AuthoredPipe.Items[1].Items[1].Text != "_" {
+		t.Error("pipe lost authored subject or placeholder")
 		return
 	}
-	if !sameSpan(r.Expr.Span, 0, 23) || !sameSpan(r.Expr.Items[1].Span, 1, 6) {
+	if !sameSpan(r.Expr.Span, 0, 23) || !sameSpan(r.Expr.Items[1].Span, 1, 6) || r.Expr.Items[1].Text != "value" {
 		t.Error("pipe rewrite lost source spans")
 	}
 }
 
 func TestStringInterpolationAndRoundTrip(t *testing.T) {
-	r := parse(t, "\"hello @(name)\\n\"")
+	r := parse(t, "\"hello @{name}\\n\"")
 	defer r.Free()
 	if r.Expr == nil || r.Expr.Kind != expr.String || len(r.Expr.Parts) != 3 || r.Expr.Parts[1].Expr == nil || !sameSpan(r.Expr.Parts[1].Span, 7, 14) {
 		t.Error("string interpolation parts did not retain spans")
@@ -306,12 +306,13 @@ func TestStringInterpolationAndRoundTrip(t *testing.T) {
 func TestStringInterpolationQuoteBoundaries(t *testing.T) {
 	a := t.Allocator()
 	// Quotes inside interpolation start nested expressions, not the outer close.
-	r := parse(t, `(cat "@(" (str [VALUE]) ")")`)
+	r := parse(t, `(cat "@(nop " (str [VALUE]) ")")`)
 	defer r.Free()
 	if r.Expr == nil || len(r.Expr.Items) != 2 { t.Fatal("nested quote boundary changed"); return }
 	value := r.Expr.Items[1]
 	if len(value.Parts) != 1 || value.Parts[0].Expr == nil { t.Fatal("missing interpolation"); return }
 	inner := value.Parts[0].Expr
+	if inner.Kind == expr.Application && len(inner.Items) == 2 { inner = inner.Items[1] }
 	if inner.Kind != expr.String || len(inner.Parts) != 1 || inner.Parts[0].Text != " (str [VALUE]) " { t.Error("nested expression string parsed incorrectly") }
 	invalid := []string{`"@("`, `"@(name"`, `"@(cat "x" "y")`}
 	for i := range invalid {
@@ -329,7 +330,7 @@ func TestInvalidNumberReportsParseSpan(t *testing.T) {
 	}
 }
 
-func TestSelectorsAndBraceInterpolationRetainSpans(t *testing.T) {
+func TestSelectorsAndInertBraceTextRetainSpans(t *testing.T) {
 	selector := parse(t, "@<1..-1")
 	defer selector.Free()
 	if selector.Expr == nil || selector.Expr.Kind != expr.Selector || selector.Expr.Text != "@<1..-1" || !sameSpan(selector.Expr.Span, 0, 7) {
@@ -337,18 +338,18 @@ func TestSelectorsAndBraceInterpolationRetainSpans(t *testing.T) {
 	}
 	string := parse(t, "\"Bundle {(count files)}\"")
 	defer string.Free()
-	if string.Expr == nil || len(string.Expr.Parts) != 2 || !string.Expr.Parts[1].Brace || !sameSpan(string.Expr.Parts[1].Span, 8, 23) {
-		t.Error("brace interpolation was not retained")
+	if string.Expr == nil || len(string.Expr.Parts) != 1 || string.Expr.Parts[0].Expr != nil || string.Expr.Parts[0].Text != "Bundle {(count files)}" {
+		t.Error("bare brace text was interpreted as interpolation")
 	}
 	formatted := expr.Format(t.Allocator(), string.Expr)
-	if formatted != "\"Bundle @(count files)\"" { t.Errorf("Format() = %s", formatted) }
+	if formatted != "\"Bundle {(count files)}\"" { t.Errorf("Format() = %s", formatted) }
 	mem.FreeString(t.Allocator(), formatted)
 }
 
-func TestInterpolationMigrationPreservesRawAndEscapedData(t *testing.T) {
+func TestFormattingNeverMigratesLiteralInterpolationText(t *testing.T) {
 	a := t.Allocator()
-	inputs := []string{`"outer {(cat "x" "y")} end"`, `"\@(missing) \{(missing)}"`, `"""@(missing) {(missing)}"""`, `"nested {(cat "x{(count files)}y")} end"`, `"\@(missing){name:*}"`}
-	expected := []string{`"outer @(cat "x" "y") end"`, `"\@(missing) \{(missing)}"`, `"""@(missing) {(missing)}"""`, `"nested @(cat "x@(count files)y") end"`, `"\@(missing){name:*}"`}
+	inputs := []string{`"outer {(count files)} end"`, `"\@(missing) \{(missing)}"`, `"""@(missing) {(missing)}"""`, `"nested @(str "x@(count files)y") end"`, `"\@(missing){name:*}"`}
+	expected := []string{`"outer {(count files)} end"`, `"\@(missing) {(missing)}"`, `"""@(missing) {(missing)}"""`, `"nested @(str "x@(count files)y") end"`, `"\@(missing){name:*}"`}
 	for i := range inputs {
 		parsed := expr.Parse(a, "migration.km", inputs[i])
 		if len(parsed.Diagnostics) != 0 { t.Error("migration input did not parse") }
@@ -356,7 +357,7 @@ func TestInterpolationMigrationPreservesRawAndEscapedData(t *testing.T) {
 		if formatted != expected[i] { t.Errorf("canonical interpolation = %q, want %q", formatted, expected[i]) }
 		copy := expr.Parse(a, "canonical.km", formatted)
 		again := expr.Format(a, copy.Expr)
-		if len(copy.Diagnostics) != 0 || again != formatted { t.Error("interpolation migration was not idempotent") }
+		if len(copy.Diagnostics) != 0 || again != formatted { t.Error("literal-preserving formatting was not idempotent") }
 		mem.FreeString(a, again)
 		copy.Free()
 		mem.FreeString(a, formatted)
@@ -382,7 +383,7 @@ func TestPathAndPipeChain(t *testing.T) {
 	if path.Expr.Kind != expr.Path || path.Expr.Text != "./src/main.c" { t.Error("explicit path did not parse") }
 	chain := parse(t, "(value | first | second b)")
 	defer chain.Free()
-	if chain.Expr.Kind != expr.Application || len(chain.Expr.Items) != 3 || chain.Expr.Items[0].Text != "second" || chain.Expr.Items[1].Text != "b" || chain.Expr.Items[2].Kind != expr.Application { t.Error("pipe chain did not normalize") }
+	if chain.Expr.Kind != expr.Application || chain.Expr.AuthoredPipe == nil || len(chain.Expr.AuthoredPipe.Items) != 3 || chain.Expr.AuthoredPipe.Items[2].Items[0].Text != "second" || chain.Expr.Items[2].Kind != expr.Application { t.Error("pipe chain lost authored or evaluation structure") }
 }
 
 func TestPlaceholderSectionParsesAndFormats(t *testing.T) {
@@ -468,7 +469,7 @@ func TestPatternStringsClassifyAndFormat(t *testing.T) {
 	formatted = expr.Format(t.Allocator(), escaped.Expr)
 	if formatted != "\"line\\n{*}\"" { t.Errorf("escaped pattern Format() = %s", formatted) }
 	mem.FreeString(t.Allocator(), formatted)
-	interp := parse(t, "\"{(count files)}/*.c\"")
+	interp := parse(t, "\"@(count files)/*.c\"")
 	defer interp.Free()
 	if interp.Expr == nil || interp.Expr.Pattern != nil { t.Error("interpolated string became a pattern") }
 }
