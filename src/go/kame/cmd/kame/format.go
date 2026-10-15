@@ -90,7 +90,6 @@ func runFormat(args []string, in io.Reader, out io.Writer, errOut io.Writer) int
 		if parsed.Check && changed && !cliDiagnosticJSON {
 			io.WriteString(out, parsed.Files[i])
 			io.WriteString(out, "\n")
-			different = true
 		}
 		if parsed.InPlace && changed {
 			// Stat follows source symlinks, as ReadFile does. Publication replaces

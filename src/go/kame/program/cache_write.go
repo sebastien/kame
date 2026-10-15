@@ -22,7 +22,7 @@ func (p *Program) cacheCommit(entry *instance, stdout []byte, stderr []byte, std
 		p.releaseCacheLock(entry)
 		return
 	}
-	if !p.cacheFingerprint(entry, "") {
+	if !p.cacheFingerprint(entry) {
 		p.releaseCacheLock(entry)
 		return
 	}

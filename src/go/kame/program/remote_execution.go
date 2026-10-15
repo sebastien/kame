@@ -55,7 +55,7 @@ func (p *Program) prepareRemoteExecution(entry *instance) diagnostic.Diagnostic 
 		entry.ExecutionOutputs = slices.Append(p.Alloc, entry.ExecutionOutputs, remoteArtifactName(p, canonical))
 		mem.FreeString(p.Alloc, canonical)
 	}
-	key := hashSink{state: newSHA256()}
+	key := hashSink{state: core.NewDigest()}
 	key.appendText("kame-remote-idempotency-v1")
 	key.appendText(entry.Plan.Target)
 	key.appendText(entry.Executor)

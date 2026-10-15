@@ -333,7 +333,6 @@ type pendingRequest struct {
 	NodeID           int64
 	Generation       int64
 	Attempt          int64
-	Retries          int
 }
 
 // ServiceConfig owns the validated, bounded lifecycle policy for one service
@@ -400,7 +399,6 @@ type instance struct {
 	// Environment owns the resolved child-process assignments.
 	Environment         []string
 	EnvironmentClaimed  bool
-	ScopedEnvironment   bool
 	EnvironmentConflict bool
 	NewerInputs         *newerInputState
 	FileContext         *fileContextState

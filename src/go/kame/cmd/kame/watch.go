@@ -297,7 +297,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 				outcome = "failure"
 			}
 			elapsed := int64(time.Since(cycleStarted)) / 1000000
-			dashboardCycleStatus, dashboardCycleElapsed = outcome, elapsed
+			dashboardCycleElapsed = elapsed
 			if options.JSON {
 				cli.WriteWatchTransition(out, "watch-cycle-finished", cycle, outcome, elapsed, progress.Completed, progress.Failed, progress.Cancelled)
 				cli.WriteWatchTransition(out, "watch-idle", cycle, outcome, 0, 0, 0, 0)

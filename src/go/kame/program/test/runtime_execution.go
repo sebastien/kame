@@ -1919,6 +1919,46 @@ func TestWriteOperationDefersUntilExecution(t *testing.T) {
 	registry.Free()
 }
 
+func TestRecipeRenderingRetainsEffectsAndTrimsDocumentEndings(t *testing.T) {
+	a := t.Allocator()
+	bodies := []string{
+		"\t@(write! \"./output\" \"written\")\n\t@(out! \"rendered\")\n\tprintf command >> @>\n",
+		"\t@if(:true)\n\t@(write! \"./output\" \"written\")\n\t@(out! \"rendered\")\n\tprintf command >> @>\n\t@end(if)\n",
+		"\t@if(:true)\r\n\t@(write! \"./output\" \"written\")\r\n\t@(out! \"rendered\")\r\n\tprintf command >> @>\r\n\t@end(if)\r\n",
+	}
+	for i := range bodies {
+		dirBuffer := make([]byte, os.MaxPathLen)
+		dir, err := os.MkdirTemp(dirBuffer, "", "kame-render-ownership-")
+		if err != nil { t.Fatal("temporary directory failed"); return }
+		parsed := script.Parse(a, "render.kmk", "./output :\n" + bodies[i])
+		registry := eval.NewRegistry(a)
+		operations.Register(registry)
+		compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
+		if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
+			if compiled.Program != nil { compiled.Program.Free() }
+			compiled.Free(a); parsed.Free(); registry.Free(); _ = os.Remove(dir)
+			t.Fatal("recipe ownership fixture did not compile"); return
+		}
+		if i != 0 && parsed.Items[0].Rule.BodyDoc == nil { t.Error("document rendering was not selected") }
+		result := compiled.Program.Materialize("./output")
+		if result.Diagnostic.Code != "" { t.Error("recipe rendering failed: " + result.Diagnostic.Code) }
+		result.Free(a)
+		data, readErr := os.ReadFile(a, dir + "/output")
+		if readErr != nil || string(data) != "writtencommand" { t.Error("rendered write effect or shell command was lost") }
+		mem.FreeSlice(a, data)
+		seen := false
+		for {
+			next := compiled.Program.NextEvent()
+			if !next.OK { break }
+			if next.Event.Kind == program.Stdout && string(next.Event.Data) == "rendered" { seen = true }
+			next.Event.Free(a)
+		}
+		if !seen { t.Error("rendered output effect was lost") }
+		compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+		_ = os.Remove(dir)
+	}
+}
+
 func TestWriteOperationCoercesValue(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)

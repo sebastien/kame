@@ -65,7 +65,7 @@ func encodePluginValue(a mem.Allocator, e *json.Encoder, value Value) bool {
 	case Bytes:
 		e.Str("bytes")
 		e.Str("data")
-		encoded := pluginBase64(a, value.Bytes)
+		encoded := base64Text(a, value.Bytes)
 		e.Str(encoded)
 		mem.FreeString(a, encoded)
 	case Resource:
@@ -266,35 +266,6 @@ func freePluginFields(a mem.Allocator, fields []RecordField) {
 		fields[i].Value.Free(a)
 	}
 	slices.Free(a, fields)
-}
-
-func pluginBase64(a mem.Allocator, data []byte) string {
-	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	b := strings.NewBuilder(a)
-	for i := 0; i < len(data); i += 3 {
-		v := int(data[i]) << 16
-		if i+1 < len(data) {
-			v |= int(data[i+1]) << 8
-		}
-		if i+2 < len(data) {
-			v |= int(data[i+2])
-		}
-		b.WriteByte(alphabet[(v>>18)&63])
-		b.WriteByte(alphabet[(v>>12)&63])
-		if i+1 < len(data) {
-			b.WriteByte(alphabet[(v>>6)&63])
-		} else {
-			b.WriteByte('=')
-		}
-		if i+2 < len(data) {
-			b.WriteByte(alphabet[v&63])
-		} else {
-			b.WriteByte('=')
-		}
-	}
-	text := strings.Clone(a, b.String())
-	b.Free()
-	return text
 }
 
 func parsePluginBase64(a mem.Allocator, text string, out *[]byte) bool {

@@ -156,7 +156,7 @@ func ParseRuleRangeDeferred(a mem.Allocator, s *source.Source, start int, end in
 
 // HasRuleSeparator reports whether text has a top-level rule separator.
 func HasRuleSeparator(text string) bool {
-	return topLevel(text, ':') >= 0 || topLevelArrow(text) >= 0
+	return source.TopLevelByte(text, ':') >= 0 || topLevelArrow(text) >= 0
 }
 
 func FreeRule(a mem.Allocator, r *Rule) {
@@ -229,7 +229,7 @@ func (p *parser) rule() *Rule {
 	r := mem.Alloc[Rule](p.a)
 	r.Header, r.Span = source.Span{Start: headerStart, End: headerEnd}, source.Span{Start: p.start, End: lineEnd}
 	header := p.s.Text[headerStart:headerEnd]
-	colon := topLevel(header, ':')
+	colon := source.TopLevelByte(header, ':')
 	arrow := topLevelArrow(header)
 	separator, separatorWidth := colon, 1
 	if arrow >= 0 && (separator < 0 || arrow < separator) {
@@ -243,7 +243,7 @@ func (p *parser) rule() *Rule {
 	leftStart, leftEnd := trim(p.s.Text, headerStart, separator)
 	rightStart, rightEnd := trim(p.s.Text, separator+separatorWidth, headerEnd)
 	p.ruleTargets(r, leftStart, leftEnd)
-	metadata := topLevel(p.s.Text[rightStart:rightEnd], ';')
+	metadata := source.TopLevelByte(p.s.Text[rightStart:rightEnd], ';')
 	if metadata >= 0 {
 		metadata += rightStart
 		p.ruleMetadata(r, metadata+1, rightEnd)
@@ -627,30 +627,6 @@ func (p *parser) recipeDocument(r *Rule, indent string) {
 		if p.deferRecipeDiagnostics { r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, doc.Diagnostics[i]) } else { p.diags = slices.Append(p.a, p.diags, doc.Diagnostics[i]) }
 	}
 	r.BodyDoc = doc
-}
-
-func topLevel(text string, want byte) int {
-	depth, quote := 0, false
-	for i := 0; i < len(text); i++ {
-		if quote {
-			if text[i] == '\\' {
-				i++
-			} else if text[i] == '"' {
-				quote = false
-			}
-			continue
-		}
-		if text[i] == '"' {
-			quote = true
-		} else if text[i] == '(' || text[i] == '[' || text[i] == '{' {
-			depth++
-		} else if text[i] == ')' || text[i] == ']' || text[i] == '}' {
-			depth--
-		} else if text[i] == want && depth == 0 {
-			return i
-		}
-	}
-	return -1
 }
 
 func topLevelArrow(text string) int {

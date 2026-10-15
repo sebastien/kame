@@ -5,6 +5,9 @@ ROOT="$(CDPATH= cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 make wasm >/dev/null
+# Exercise the production host, not a second implementation of its services.
+export KAME_WASM="${KAME_WASM:-$ROOT/build/wasm/kame.wasm}"
+cli=(node ./src/js/kame.js do run)
 info="$(node ./tools/kame-wasm.mjs --self-test)"
 for export in memory kame_wasm_abi_version kame_wasm_alloc kame_wasm_copy kame_wasm_event_header kame_wasm_eval_pure; do
 	case "$info" in
@@ -22,25 +25,25 @@ case "$info" in
 	exit 1
 	;;
 esac
-actual="$(node ./tools/kame-wasm.mjs do expr -c '(count [1 2 3])')"
+actual="$("${cli[@]}" --lang expr -c '(count [1 2 3])')"
 if [ "$actual" != "3" ]; then
 	echo "WASM expression CLI = $actual, want 3" >&2
 	exit 1
 fi
-actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(let [a 10] (out! "hello" a))')"
+actual="$("${cli[@]}" --lang expr -c '(let [a 10] (out! "hello" a))')"
 if [ "$actual" != 'hello10"hello10"' ]; then
 	echo "WASM output expression CLI = $actual, want hello10\"hello10\"" >&2
 	exit 1
 fi
 effect_err="$(mktemp)"
-actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(err! "notice")' 2>"$effect_err")"
+actual="$("${cli[@]}" --lang expr -c '(err! "notice")' 2>"$effect_err")"
 if [ "$actual" != '"notice"' ] || [ "$(cat "$effect_err")" != "notice" ]; then
 	echo "WASM stderr expression CLI did not preserve streams" >&2
 	rm -f "$effect_err"
 	exit 1
 fi
 rm -f "$effect_err"
-actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(yield! "generated")')"
+actual="$("${cli[@]}" --lang expr -c '(yield! "generated")')"
 if [ "$actual" != "generated:nil" ]; then
 	echo "WASM yield expression CLI = $actual, want generated:nil" >&2
 	exit 1
@@ -48,67 +51,75 @@ fi
 program="$(mktemp)"
 input="$(mktemp)"
 written="$(mktemp)"
-trap 'rm -f "$program" "$input" "$written"' EXIT
+calls="$(mktemp)"
+trap 'rm -f "$program" "$input" "$written" "$calls"' EXIT
 printf 'result = (join "-" ["wasm" "source"])\n' >"$program"
-actual="$(node ./tools/kame-wasm.mjs do expr -f "$program")"
+actual="$("${cli[@]}" --lang km -f "$program" result)"
 if [ "$actual" != '"wasm-source"' ]; then
 	echo "WASM source expression CLI = $actual, want \"wasm-source\"" >&2
 	exit 1
 fi
-printf 'result = (sh! "printf async-source")\n' >"$program"
-actual="$(node ./tools/kame-wasm.mjs do expr --async -f "$program")"
-if [ "$actual" != '"async-source"' ]; then
-	echo "WASM async source expression CLI = $actual, want \"async-source\"" >&2
+# Definitions stay lazy, and querying/copying a result must not run it twice.
+printf 'unused = (fail! "unused definition evaluated")\nresult = (let [p (sh! "printf x >> %s; printf async-source")] p.stdout)\n' "$calls" >"$program"
+actual="$("${cli[@]}" --lang km --allow-run -f "$program" result)"
+if [ "$actual" != 'async-source' ] || [ "$(cat "$calls")" != x ]; then
+	echo "WASM source result was not selected lazily exactly once: $actual" >&2
 	exit 1
 fi
 printf 'async-read' >"$input"
-actual="$(node ./tools/kame-wasm.mjs do expr --async -c "(read \"$input\")")"
+actual="$("${cli[@]}" --lang expr --allow-read -c "(read \"$input\")")"
 if [ "$actual" != "async-read" ]; then
 	echo "WASM async read CLI = $actual, want async-read" >&2
 	exit 1
 fi
 printf 'result = (read "%s")\n' "$input" >"$program"
-actual="$(node ./tools/kame-wasm.mjs do expr --async -f "$program")"
+actual="$("${cli[@]}" --lang km --allow-read -f "$program" result)"
 if [ "$actual" != "async-read" ]; then
 	echo "WASM async source read CLI = $actual, want async-read" >&2
 	exit 1
 fi
-actual="$(node ./tools/kame-wasm.mjs do expr --async -c "(write! \"$written\" \"async-write\")")"
+actual="$("${cli[@]}" --lang expr --allow-write -c "(write! \"$written\" \"async-write\")")"
 if [ "$actual" != ":nil" ] || [ "$(cat "$written")" != "async-write" ]; then
 	echo "WASM async write CLI failed" >&2
 	exit 1
 fi
 printf 'result = (write! "%s" "source-write")\n' "$written" >"$program"
-actual="$(node ./tools/kame-wasm.mjs do expr --async -f "$program")"
+actual="$("${cli[@]}" --lang km --allow-write -f "$program" result)"
 if [ "$actual" != ":nil" ] || [ "$(cat "$written")" != "source-write" ]; then
 	echo "WASM async source write CLI failed" >&2
 	exit 1
 fi
-actual="$(KAME_WASM_TEST_VALUE=async-env node ./tools/kame-wasm.mjs do expr --async -c '(env "KAME_WASM_TEST_VALUE")')"
+actual="$(KAME_WASM_TEST_VALUE=async-env "${cli[@]}" --lang expr --allow-env=KAME_WASM_TEST_VALUE -c '(env "KAME_WASM_TEST_VALUE")')"
 if [ "$actual" != '"async-env"' ]; then
 	echo "WASM async environment CLI = $actual, want \"async-env\"" >&2
 	exit 1
 fi
-actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(sh! "printf async-wasm")')"
-if [ "$actual" != '"async-wasm"' ]; then
-	echo "WASM async expression CLI = $actual, want async-wasm" >&2
+actual="$("${cli[@]}" --lang expr --allow-run -c '(sh! "printf async-wasm")')"
+if [ "$actual" != '[status: 0 stdout: async-wasm stderr:  signal: 0]' ]; then
+	echo "WASM process result lost its status or streams: $actual" >&2
 	exit 1
 fi
-if failed="$(node ./tools/kame-wasm.mjs do expr --async -c '(sh! "false")' 2>&1)"; then
-	echo "WASM async failed process unexpectedly succeeded" >&2
+# sh! captures nonzero status as data; authored failures remain diagnostics.
+actual="$("${cli[@]}" --lang expr --allow-run -c '(let [p (sh! "false")] p.status)')"
+if [ "$actual" != 1 ]; then
+	echo "WASM process result did not retain a nonzero status: $actual" >&2
+	exit 1
+fi
+if failed="$("${cli[@]}" --lang expr -c '(fail! "stop")' 2>&1)"; then
+	echo "WASM authored failure unexpectedly succeeded" >&2
 	exit 1
 fi
 case "$failed" in
-*"RECIPE_FAIL: process exited with status 1"*) ;;
+*"USER_ERROR: stop"*) ;;
 *)
-	echo "WASM async failed process diagnostic = $failed" >&2
+	echo "WASM authored failure diagnostic = $failed" >&2
 	exit 1
 	;;
 esac
 node --input-type=module - <<'NODE'
 import { readFile } from 'node:fs/promises';
 
-const bytes = await readFile('./build/wasm/kame.wasm');
+const bytes = await readFile(process.env.KAME_WASM);
 const { instance } = await WebAssembly.instantiate(bytes, {});
 const { exports } = instance;
 const handle = exports.kame_wasm_instance_create();

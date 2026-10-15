@@ -11,10 +11,14 @@ for backend in native wasm; do
 	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
 	test-step "$backend migration diagnostics and lexical bindings"
 	for name in write yield out err run pipe shell sh shellrun shell-template fail; do
+		replacement="$name!"
+		case "$name" in
+		shell | shellrun) replacement="sh!" ;;
+		esac
 		for expression in "$name" "($name (fail! \"must not evaluate\"))"; do
 			status=0
 			"${runner[@]}" do run --lang expr -c "$expression" >"$TMPDIR/out" 2>"$TMPDIR/err" || status=$?
-			if [ "$status" = 1 ] && [ ! -s "$TMPDIR/out" ] && grep -Fq "renamed to \`$name!\`" "$TMPDIR/err"; then test-ok "$backend rejects $expression"; else test-fail "$backend migration for $expression"; cat "$TMPDIR/out" "$TMPDIR/err"; fi
+			if [ "$status" = 1 ] && [ ! -s "$TMPDIR/out" ] && grep -Fq "renamed to \`$replacement\`" "$TMPDIR/err"; then test-ok "$backend rejects $expression"; else test-fail "$backend migration for $expression"; cat "$TMPDIR/out" "$TMPDIR/err"; fi
 		done
 		actual="$("${runner[@]}" do run --lang expr -c "(let [$name ([x] x)] ($name 42))")"
 		if [ "$actual" = 42 ]; then test-ok "$backend lexical $name"; else test-fail "$backend lexical $name: $actual"; fi

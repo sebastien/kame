@@ -8,7 +8,7 @@ import (
 func (p *Program) sourceSignature() core.Signature {
 	if p.SourceSignature.Mode == core.SignatureUnavailable {
 		var source hashSink
-		source.state = newSHA256()
+		source.state = core.NewDigest()
 		source.appendText(p.Parsed.Source.Name)
 		source.appendText(p.Parsed.Source.Text)
 		source.appendText(p.Eval.Script.Source.Name)
@@ -21,7 +21,7 @@ func (p *Program) sourceSignature() core.Signature {
 
 func (p *Program) fileGuard(entry *instance) core.Signature {
 	var sink hashSink
-	sink.state = newSHA256()
+	sink.state = core.NewDigest()
 	sink.appendText("kame-file-preflight-v1")
 	// ponytail: a whole-source guard conservatively falls back to rendering after
 	// any code edit; fingerprint reached definitions if edit-time cost warrants it.

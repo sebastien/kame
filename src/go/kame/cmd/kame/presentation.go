@@ -87,8 +87,7 @@ func tickCLIProgram(p *program.Program, wait int, errOut io.Writer, json bool) {
 	p.ObserveWork, dashboardOutput = nil, nil
 }
 
-func resetInvocationPresentation(out io.Writer) {
-	_ = out
+func resetInvocationPresentation() {
 	invocationHadDiagnostic = false
 	dashboardRows, dashboardLast = 0, 0
 	mem.FreeString(mem.System, dashboardFrame)
@@ -96,7 +95,7 @@ func resetInvocationPresentation(out io.Writer) {
 	dashboardUnsafe, dashboardPending = false, false
 	dashboardIdle = false
 	dashboardDryRun = false
-	dashboardCycle, dashboardCycleElapsed, dashboardCycleStatus = 0, 0, ""
+	dashboardCycle, dashboardCycleElapsed = 0, 0
 	formatHasResults = false
 	presentationClock = time.Now()
 	dashboardStarted = 0

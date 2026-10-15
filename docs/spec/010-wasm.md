@@ -24,6 +24,13 @@ shared CLI package is included and audited alongside `program` for portability.
 Translation and link tests must fail if a portable package acquires a hosted
 transitive import.
 
+Both build files compile the module with `-Oz` for size and `-fwrapv` to preserve
+the native Solod build's signed-overflow semantics. The freestanding link uses
+only needed arithmetic helpers from the SDK's compiler-rt builtins archive,
+discovered with its configured Clang's `-print-libgcc-file-name`. Query the SDK's
+default target: the `wasm32-unknown-unknown` runtime path need not exist. Linking
+these helpers must not add WASI libc or any host imports.
+
 ## Execution Model
 
 JavaScript drives the engine synchronously through explicit calls:
@@ -177,6 +184,8 @@ compiled slot on demand, rather than reserving memory for every possible slot.
 This accommodates the default 1 MiB Kash capture plus evaluator allocation and
 copy overhead. The module memory maximum still bounds simultaneous compiled
 instances and larger captures; an unavailable buffer reports `NO_MEMORY`.
+The default linear-memory stack is 512 KiB so optimized evaluator frames can
+reach the 32-level evaluation guard and return `EVAL_DEPTH` instead of trapping.
 Within each slot, a coalescing heap reclaims arbitrary freed blocks while the
 compiled program remains alive; instance destruction resets the supplied buffer.
 The JS host reuses separate geometrically grown scratch buffers for process
@@ -325,6 +334,12 @@ third-party dependencies.
 node dist/kame.js [OPTIONS] [TARGET...]
 node dist/kame.js do COMMAND [OPTIONS] [ARG...]
 ```
+
+Host-service conformance tests use this production wrapper, not a second test
+host implementation. `tools/kame-wasm.mjs` is limited to raw ABI information and
+self-tests (`--abi-info` and `--self-test`). Independent raw ABI tests retain
+coverage of synchronous queries, event headers, memory growth, handles and
+completion validation even when the production wrapper uses asynchronous calls.
 
 ### CLI Contract
 

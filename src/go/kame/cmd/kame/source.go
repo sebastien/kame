@@ -32,15 +32,9 @@ type sourceFile struct {
 	Parent     int
 }
 
-type sourcePart struct {
-	Name   string
-	Text   string
-	Offset int
-}
-
 type buildSource struct {
 	Files   []sourceFile
-	Parts   []sourcePart
+	Parts   []program.CompileSource
 	Missing bool
 	Status  int
 	JSON    bool
@@ -75,14 +69,7 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 	defines := selectionOverrides(options.Defines, options.Parameters)
 	defer slices.Free(mem.System, defines)
 	if options.Command != "" {
-		result := buildSource{JSON: options.JSON, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), options.Environment)}
-		result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: "<command>", Text: options.Command, Parent: -1})
-		if !expandIncludesLanguage(&result, 0, errOut, "kmk") {
-			result.Status = 1
-		}
-		result.SelectionPrefix = ""
-		result.SelectionDefines = nil
-		return result
+		return inlineRunSource("<command>", options.Command, "kmk", options.JSON, defines, options.Environment, errOut, prefix)
 	}
 	if options.File != "" {
 		name := options.File
@@ -169,20 +156,12 @@ func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bo
 	// freeBuildSource frees Data only, Text never outlives it.
 	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), Data: data, OwnedName: true, FileBacked: true, Parent: -1})
 	if lang == "template" {
-		result.Parts = slices.Append(mem.System, result.Parts, sourcePart{Name: canonical, Text: string(data)})
+		result.Parts = slices.Append(mem.System, result.Parts, program.CompileSource{Name: canonical, Text: string(data)})
 	} else if !expandIncludesLanguage(&result, 0, errOut, lang) {
 		result.Status = 1
 	}
 	result.SelectionPrefix = ""
 	result.SelectionDefines = nil
-	return result
-}
-
-func (s *buildSource) compileSources() []program.CompileSource {
-	result := slices.Make[program.CompileSource](mem.System, len(s.Parts))
-	for i := range s.Parts {
-		result[i] = program.CompileSource{Name: s.Parts[i].Name, Text: s.Parts[i].Text, Offset: s.Parts[i].Offset}
-	}
 	return result
 }
 
@@ -205,7 +184,7 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 		if item.Kind != script.Include && item.Kind != script.Composition {
 			continue
 		}
-		s.Parts = slices.Append(mem.System, s.Parts, sourcePart{Name: file.Name, Text: file.Text[start:item.Span.Start], Offset: start})
+		s.Parts = slices.Append(mem.System, s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:item.Span.Start], Offset: start})
 		start = item.Span.End
 		if item.Kind == script.Include {
 			if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, errOut, authored, lang) {
@@ -215,6 +194,6 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 			return false
 		}
 	}
-	s.Parts = slices.Append(mem.System, s.Parts, sourcePart{Name: file.Name, Text: file.Text[start:], Offset: start})
+	s.Parts = slices.Append(mem.System, s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:], Offset: start})
 	return true
 }

@@ -554,13 +554,6 @@ function cli_expect_diagnostic {
 	cli_expect_printable "$file"
 }
 
-# Function: cli_normalize_json FILE
-# Emits a stable projection of JSON Lines, dropping volatile identity fields.
-function cli_normalize_json {
-	local file="$1"
-	jq -cS 'del(.node, .request, .generation, .attempt)' "$file"
-}
-
 # -----------------------------------------------------------------------------
 #
 # FIXTURES
@@ -609,12 +602,6 @@ function operation_fixture_copy {
 	mkdir -p "$dest"
 	cp -a "$src/." "$dest/"
 	test_log_message "operation fixture $name → $(test-relpath "$dest")"
-}
-
-# Function: case_path NAME
-# Absolute path of one table-driven case directory.
-function case_path {
-	tests_data_path "cases/$1"
 }
 
 # -----------------------------------------------------------------------------

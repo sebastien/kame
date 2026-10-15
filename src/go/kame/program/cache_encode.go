@@ -28,7 +28,6 @@ type cacheEncoder struct {
 	buf      []byte
 	limit    int
 	exceeded bool
-	unusable bool
 }
 
 func newCacheEncoder(a mem.Allocator, limit int) cacheEncoder {
@@ -143,7 +142,7 @@ func (e *cacheEncoder) writeRaw(value string) bool {
 	return true
 }
 
-type hashSink struct{ state sha256State }
+type hashSink struct{ state core.Digest }
 
 func (h *hashSink) appendByte(value byte) bool {
 	h.state.Write([]byte{value})
@@ -314,7 +313,7 @@ func (p *Program) cacheLockPath(key []byte) string {
 func (p *Program) cacheKey(entry *instance) []byte {
 	target := p.identityTarget(entry)
 	var sink hashSink
-	sink.state = newSHA256()
+	sink.state = core.NewDigest()
 	writeIdentity(&sink, entry, target)
 	mem.FreeString(p.Alloc, target)
 	var digest [32]byte
@@ -322,8 +321,7 @@ func (p *Program) cacheKey(entry *instance) []byte {
 	return slices.Clone(p.Alloc, digest[:])
 }
 
-func (p *Program) cacheFingerprint(entry *instance, script string) bool {
-	_ = script
+func (p *Program) cacheFingerprint(entry *instance) bool {
 	core.FreeObservations(p.Alloc, entry.AcceptedRecord.Inputs)
 	entry.AcceptedRecord.Inputs = p.acceptedInputs(entry)
 	data := core.EncodeSignatureRecord(p.Alloc, &entry.AcceptedRecord)

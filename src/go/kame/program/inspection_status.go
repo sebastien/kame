@@ -147,7 +147,7 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 		if s.Unknown { s.Phase = 3 } else if !p.claimEnvironment(index, p.Options.Environment) { s.Unknown = true; s.Phase = 3 }
 		entry = &p.Instances[index]
 		var identity hashSink
-		identity.state = newSHA256()
+		identity.state = core.NewDigest()
 		identity.appendText("kame-file-context-v1")
 		name := p.canonicalTarget(entry.Plan.Outputs[0], true)
 		identity.appendText(name); mem.FreeString(p.Alloc, name)

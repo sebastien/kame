@@ -149,7 +149,7 @@ func ParseTarget(a mem.Allocator, name string, text string) *Target {
 				pos++
 			}
 			pattern = text[patternStart:pos]
-			if !validPattern(pattern) {
+			if !expr.ValidGlob(pattern) {
 				t.Diagnostics = slices.Append(a, t.Diagnostics, parseDiagnostic(patternStart, pos, "invalid capture pattern"))
 			}
 		}
@@ -215,62 +215,6 @@ func validCapture(name string) bool {
 
 func isCaptureStart(b byte) bool    { return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
 func isCaptureContinue(b byte) bool { return isCaptureStart(b) || isDigit(b) || b == '-' }
-
-func validPattern(pattern string) bool {
-	if len(pattern) == 0 {
-		return false
-	}
-	for i := 0; i < len(pattern); i++ {
-		if pattern[i] == '\\' {
-			i++
-			if i == len(pattern) {
-				return false
-			}
-			continue
-		}
-		if pattern[i] == '{' || pattern[i] == '}' || pattern[i] == ':' {
-			return false
-		}
-		if pattern[i] == '[' {
-			end := i + 1
-			if end < len(pattern) && pattern[end] == '!' {
-				end++
-			}
-			if end == len(pattern) || pattern[end] == ']' {
-				return false
-			}
-			for end < len(pattern) && pattern[end] != ']' {
-				end++
-			}
-			if end == len(pattern) {
-				return false
-			}
-			if !validClass(pattern[i+1 : end]) {
-				return false
-			}
-			i = end
-		}
-	}
-	return true
-}
-
-func validClass(class string) bool {
-	start := 0
-	if class[0] == '!' {
-		start = 1
-	}
-	for i := start; i < len(class); {
-		if i+2 < len(class) && class[i+1] == '-' {
-			if class[i] > class[i+2] {
-				return false
-			}
-			i += 3
-		} else {
-			i++
-		}
-	}
-	return true
-}
 
 type CaptureValue struct {
 	Name string

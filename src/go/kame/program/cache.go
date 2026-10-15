@@ -89,24 +89,7 @@ func (r *cacheRecord) Free(a mem.Allocator) {
 	*r = cacheRecord{}
 }
 
-// Compatibility wrapper around the engine's shared digest primitive.
-type sha256State struct {
-	digest core.Digest
-}
-
-func newSHA256() sha256State {
-	return sha256State{digest: core.NewDigest()}
-}
-
-func (s *sha256State) Write(data []byte) {
-	s.digest.Write(data)
-}
-
-func (s *sha256State) Sum(out []byte) {
-	s.digest.Sum(out)
-}
-
-func cacheHash(data []byte, out []byte) { s := newSHA256(); s.Write(data); s.Sum(out) }
+func cacheHash(data []byte, out []byte) { s := core.NewDigest(); s.Write(data); s.Sum(out) }
 
 // FingerprintSHA256 computes the cache's streaming SHA-256 digest. It returns
 // false when output is too short; callers need not allocate or retain input.

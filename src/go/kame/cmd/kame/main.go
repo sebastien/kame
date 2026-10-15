@@ -8,6 +8,7 @@ import (
 	"kame/lang/ast"
 	"kame/lang/eval"
 	"kame/lang/script"
+	"kame/lang/source"
 	"kame/operations"
 	"kame/ownership"
 	"kame/program"
@@ -23,7 +24,7 @@ import (
 // freestanding JavaScript wrapper parse argv with the same code.
 type buildArguments = cli.Invocation
 
-func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int {
+func runBuild(args []string, out io.Writer, errOut io.Writer) int {
 	parsed := parseBuildArguments(args, errOut)
 	defer parsed.Free()
 	if !parsed.OK {
@@ -34,7 +35,7 @@ func runBuild(args []string, out io.Writer, errOut io.Writer, toolRun bool) int 
 	}
 	// A bare primary invocation with no build source is a discoverability
 	// opportunity: present the overview instead of a terse diagnostic.
-	bare := len(args) == 0 && !toolRun
+	bare := len(args) == 0
 	session := openBuildSession(parsed, errOut, !bare)
 	defer session.Free()
 	if session.Status != 0 {
@@ -94,13 +95,12 @@ func reportNoDefault(p *program.Program, out io.Writer, errOut io.Writer, json b
 }
 
 type buildSession struct {
-	Ledger         *outputLedger
-	Source         buildSource
-	Registry       *eval.Registry
-	Parsed         *script.Script
-	ParsedBorrowed bool
-	Program        *program.Program
-	Status         int
+	Ledger   *outputLedger
+	Source   buildSource
+	Registry *eval.Registry
+	Parsed   *script.Script // Borrowed from Program after successful compilation.
+	Program  *program.Program
+	Status   int
 }
 
 func openBuildSession(options buildArguments, errOut io.Writer, reportMissing bool) buildSession {
@@ -143,10 +143,12 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	}
 	environment := posix.Environment(mem.System)
 	environment = mergeEnvironment(environment, options.Environment)
-	sources := session.Source.compileSources()
+	// CompileMany remaps spans to authored offsets, not its combined parse text.
+	var authored *source.Source
 	if len(session.Source.Files) != 0 {
-		session.Parsed = script.Parse(mem.System, session.Source.Files[0].Name, session.Source.Files[0].Text)
+		authored = source.New(mem.System, session.Source.Files[0].Name, session.Source.Files[0].Text)
 	}
+	defer authored.Free(mem.System)
 	programOptions := program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, Defines: options.Defines, Parameters: options.Parameters, ToolOverrides: options.ToolOverrides, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, CaptureLimit: options.CaptureLimit, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool}
 	if ownership.Supported() {
 		session.Ledger = mem.Alloc[outputLedger](mem.System)
@@ -156,15 +158,14 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 		programOptions.Ownership, programOptions.OwnershipState = recordProduction, session.Ledger
 		programOptions.AutomaticClean, programOptions.AutomaticCleanState = automaticClean, session.Ledger
 	}
-	compiled := program.CompileMany(mem.System, sources, session.Registry, programOptions)
-	slices.Free(mem.System, sources)
+	compiled := program.CompileMany(mem.System, session.Source.Parts, session.Registry, programOptions)
 	posix.FreeEnvironment(mem.System, environment)
 	if compiled.Program == nil {
 		if directoryOwned {
 			mem.FreeString(mem.System, options.Directory)
 		}
 		for i := range compiled.Diagnostics {
-			emitDiagnostic(diagnosticWriter(cliDiagnosticOut, errOut, cliDiagnosticJSON), compiled.Diagnostics[i], cliDiagnosticJSON, session.Parsed.Source)
+			emitDiagnostic(diagnosticWriter(cliDiagnosticOut, errOut, cliDiagnosticJSON), compiled.Diagnostics[i], cliDiagnosticJSON, authored)
 		}
 		compiled.Free(mem.System)
 		session.Free()
@@ -181,15 +182,11 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	}
 	for i := range compiled.Diagnostics {
 		if compiled.Diagnostics[i].Severity == diagnostic.Warning {
-			emitDiagnostic(diagnosticWriter(cliDiagnosticOut, errOut, cliDiagnosticJSON), compiled.Diagnostics[i], cliDiagnosticJSON, session.Parsed.Source)
+			emitDiagnostic(diagnosticWriter(cliDiagnosticOut, errOut, cliDiagnosticJSON), compiled.Diagnostics[i], cliDiagnosticJSON, authored)
 		}
-	}
-	if session.Parsed != nil {
-		session.Parsed.Free()
 	}
 	session.Program = compiled.Program
 	session.Parsed = compiled.Program.Parsed
-	session.ParsedBorrowed = true
 	compiled.Free(mem.System)
 	return session
 }
@@ -207,9 +204,6 @@ func (s *buildSession) Free() {
 		s.Program.Free()
 	}
 	if s.Ledger != nil { s.Ledger.Store.Free(); mem.Free(mem.System, s.Ledger) }
-	if s.Parsed != nil && !s.ParsedBorrowed {
-		s.Parsed.Free()
-	}
 	if s.Registry != nil {
 		s.Registry.Free()
 	}

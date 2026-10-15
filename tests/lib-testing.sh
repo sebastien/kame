@@ -373,10 +373,6 @@ function test_cleanup {
 #
 # -----------------------------------------------------------------------------
 
-function test-case {
-	test-step "$@"
-}
-
 function test-step {
 	test_step_flush
 	((TEST_STEP_COUNT += 1))
@@ -402,17 +398,6 @@ function test-step {
 # TEST ACTIONS
 #
 # -----------------------------------------------------------------------------
-
-# Function: test-cmd COMMAND…
-# Runs the command and fails the test if the command fails.
-function test-cmd {
-	if ! "$@"; then
-		test-fail "Subcommand failed [$?]: $(test_fmt_line "$*")"
-		return 1
-	else
-		return 0
-	fi
-}
 
 # --
 # Function: test-run PREFIX COMMAND…
@@ -499,71 +484,6 @@ function test-expect {
 	fi
 }
 
-function test-expect-different {
-	if [ "$1" == "$2" ]; then
-		test-fail "Expected output identical" "$(test_fmt_line "$1")"
-	else
-		test-ok "${3:-}"
-	fi
-}
-
-# Function: test-expect-success COMMAND…
-function test-expect-success {
-	local exit_code=$?
-	if [ -n "$*" ]; then
-		"$@"
-		exit_code=$?
-	fi
-	if [ $exit_code != 0 ]; then
-		test-fail "Subcommand was expected to succeed but failed [$exit_code] $(test_fmt_line "$*")"
-		return $exit_code
-	else
-		test-ok
-		return 0
-	fi
-}
-
-function test-expect-failure {
-	TEST_EXPECT_FAILURE="yes"
-	# Save current errexit state
-	local has_errexit=false
-	if [[ $- == *e* ]]; then
-		has_errexit=true
-		set +e # Disable errexit
-	fi
-
-	if [ "$TEST_VERBOSE" = 1 ]; then
-		test_log "${BLUE}>>> Expected to fail:${DIM} [$(test_fmt_line "$*")]"
-		test_log_run "${ORANGE}${DIM}>>>" "$@"
-	else
-		"$@" >/dev/null 2>&1
-	fi
-	local res=$?
-
-	if [[ "$has_errexit" == true ]]; then
-		set -e
-	fi
-
-	TEST_EXPECT_FAILURE=""
-	# Check if test failed as expected
-	if [[ $res -ne 0 ]]; then
-		test-ok
-		return 0
-	else
-		test-fail "Command was expected to fail got [$res]:${DIM} [$(test_fmt_line "$*")"
-		return 1
-	fi
-}
-
-function test-path {
-	if [ ! -e "$BASE_PATH/build/tests" ]; then mkdir -p "$BASE_PATH/build/tests"; fi
-	TEST_PATH="$(mktemp -d -p "$BASE_PATH/build/tests" "$TEST_NAME.test.XXXXX")"
-	export TEST_PATH
-	mkdir -p "$TEST_PATH"
-	cd "$ORIGINAL_PATH"
-	echo -n "$TEST_PATH"
-}
-
 function test-relpath {
 	realpath --relative-to="$PWD" "$1"
 }
@@ -576,19 +496,6 @@ function test-repo-path {
 		path="$ORIGINAL_PATH/$path"
 	fi
 	realpath --relative-to="$ORIGINAL_PATH" "$path"
-}
-
-function test-substring { # STRING STRING…
-	local str="$1"
-	shift
-	for expr in "$@"; do
-		if ! grep -q "$expr" <(echo "$str"); then
-			test-fail "'$str' does not contain: '$expr'"
-			return 1
-		fi
-	done
-	return 0
-
 }
 
 function test-contains { # PATH STRING…
@@ -608,30 +515,6 @@ function test-contains { # PATH STRING…
 	fi
 }
 
-function test-exist {
-	if [ ! -e "$1" ]; then
-		test-fail "Path does not exists: $1"
-		return 1
-	elif [ -n "${2:-}" ]; then
-		test-ok "$2: $(test-relpath "$1")"
-	else
-		test-ok "$(test-relpath "$1") exists"
-	fi
-	return 0
-}
-
-function test-path-noempty {
-	for path in "$@"; do
-		if [ ! -f "$path" ]; then
-			test-fail "path does not exists: $path"
-		elif [ ! -s "$path" ]; then
-			test-fail "path is empty: $path"
-		else
-			test-ok
-		fi
-	done
-}
-
 function test-empty {
 	local value="$1"
 	local failure="${2:-}"
@@ -639,30 +522,6 @@ function test-empty {
 		test-fail "$failure"
 	else
 		test-ok
-	fi
-}
-
-function test-noempty {
-	local value="$1"
-	local message="${2:-}"
-	if [ -z "$value" ]; then
-		test-fail "$message"
-	else
-		test-ok "$message"
-	fi
-}
-function test-data {
-	local data_path="$BASE_PATH/tests/data/${1:-}"
-	if [ -n "${1:-}" ] && [ -e "$data_path" ]; then
-		# Trace on stderr so command substitution stays clean.
-		test_log_message "DATA $(test-relpath "$data_path")"
-		echo -n "$data_path"
-	elif [ -z "${1:-}" ]; then
-		test-fail "'test-data FILENAME' is missing FILENAME argument"
-		exit 1
-	else
-		test-fail "Could not find test data: path=$data_path"
-		exit 1
 	fi
 }
 
@@ -688,16 +547,6 @@ function test-diff {
 		unlink "$a"
 		unlink "$b"
 	fi
-}
-
-function test-output {
-	echo ">>>" >&2
-	echo "$@" >&2
-	echo "<<<" >&2
-}
-
-function test-info {
-	echo " → $*" >&2
 }
 
 # Function(internal): test_fmt_line STR MAXLEN
@@ -744,12 +593,6 @@ function test_prefix {
 
 }
 
-function test_nocolor {
-	# Use printf to generate control chars for BSD sed compatibility
-	# Remove ANSI escape sequences and control characters
-	LC_ALL=C sed -e 's/\x1b\[[0-9;]*[a-zA-Z]//g' -e 's/\x1b(B//g' -e 's/[[:cntrl:]]//g'
-
-}
 # -----------------------------------------------------------------------------
 #
 # TEST LOGGING
@@ -769,11 +612,6 @@ function test_log_message {
 	test_log "${BLUE}... ${DIM}$*"
 }
 
-function test_log_output {
-	[ "$TEST_VERBOSE" = 1 ] || return 0
-	test_log "${GRAY} =  ${DIM}$*"
-}
-
 function test_log_success {
 	test_log "${GREEN} ✓  ${RESET}${DIM}$*"
 }
@@ -789,34 +627,6 @@ function test_signal_err {
 
 function test_signal_exit {
 	test-end
-}
-
-# FIXME: What is this?
-function test-xxx() {
-	local prefix="${2:-}"
-	local suffix="${1:-}"
-	local parent="${TEST_PATH:-/tmp}"
-	test_log_message "TEST PATH $TEST_PATH"
-	local tmp
-	if [[ -n "${prefix}" ]] && [[ -n "${suffix}" ]]; then
-		if ! tmp=$(mktemp -p "$parent" -t "${prefix}.XXXXXX${suffix}"); then
-			test-abort "Failed to create temporary file"
-			exit 1
-		fi
-	elif [[ -n "${prefix}" ]]; then
-		if ! tmp=$(mktemp -p "$parent" -t "${prefix}.XXXXXX"); then
-			test-abort "Failed to create temporary file"
-			exit 1
-		fi
-	else
-		if ! tmp=$(mktemp); then
-			test-abort "Failed to create temporary file"
-			exit 1
-		fi
-	fi
-	TEST_CLEAN+=("${tmp}")
-	test_log_message "TEMP ${TEST_CLEAN[*]} ${tmp}"
-	echo "${tmp}"
 }
 
 trap test_signal_err ERR

@@ -953,29 +953,6 @@ function statResource(name, options, noFollow = false) {
   throw Object.assign(new Error('memory resource does not exist'), { code: 'ENOENT' });
 }
 
-function memoryResourceEntries(directory) {
-  let prefix = directory;
-  if (!prefix.endsWith('/')) prefix += '/';
-  const entries = new Map();
-  for (const name of memoryResourceFiles.keys()) {
-    if (!name.startsWith(prefix)) continue;
-    const rest = name.slice(prefix.length);
-    if (!rest) continue;
-    const slash = rest.indexOf('/');
-    const child = slash < 0 ? rest : rest.slice(0, slash);
-    entries.set(child, entries.get(child) === true || slash >= 0);
-  }
-  for (const name of memoryResourceDirectories) {
-    if (!name.startsWith(prefix)) continue;
-    const rest = name.slice(prefix.length);
-    if (!rest) continue;
-    const slash = rest.indexOf('/');
-    const child = slash < 0 ? rest : rest.slice(0, slash);
-    entries.set(child, true);
-  }
-  return [...entries.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([name]) => name);
-}
-
 function resourceExists(name) {
   if (isMemoryResource(name)) return memoryResourceExists(name);
   return existsSync(filesystemPath(name));

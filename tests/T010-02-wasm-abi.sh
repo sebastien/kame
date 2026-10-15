@@ -11,7 +11,9 @@ cd "$CLI_ROOT"
 
 test-step "freestanding module imports nothing"
 make wasm >/dev/null
-if import_output="$(node tools/wasm/check-imports.mjs build/wasm/kame.wasm)"; then
+export KAME_WASM="${KAME_WASM:-$CLI_ROOT/build/wasm/kame.wasm}"
+cli=(node ./src/js/kame.js do run --lang expr --allow-read)
+if import_output="$(node tools/wasm/check-imports.mjs "$KAME_WASM")"; then
 	test-ok "$import_output"
 else
 	test-fail "freestanding module imported a hosted symbol"
@@ -22,25 +24,23 @@ printf 'x' >"$marker"
 trap 'rm -f "$marker"' EXIT
 
 test-step "async host services exists, stat, and glob distinctly"
-if exists="$(node tools/kame-wasm.mjs do expr --async -c "(exists? \"$marker\")")" && [ "$exists" = ':true' ]; then
+if exists="$("${cli[@]}" -c "(exists? \"$marker\")")" && [ "$exists" = ':true' ]; then
 	test-ok "exists? on a present path is true"
 else
 	test-fail "exists? on a present path = ${exists:-<error>}"
 fi
-if missing="$(node tools/kame-wasm.mjs do expr --async -c '(exists? "/nonexistent-kame-path")')" && [ "$missing" = ':false' ]; then
+if missing="$("${cli[@]}" -c '(exists? "/nonexistent-kame-path")')" && [ "$missing" = ':false' ]; then
 	test-ok "exists? on an absent path is false"
 else
 	test-fail "exists? on an absent path = ${missing:-<error>}"
 fi
-if size="$(node tools/kame-wasm.mjs do expr --async -c "(let [s (stat \"$marker\")] s.size)")" && [ "$size" = "1" ]; then
+if size="$("${cli[@]}" -c "(let [s (stat \"$marker\")] s.size)")" && [ "$size" = "1" ]; then
 	test-ok "stat returns a record with a size field"
 else
 	test-fail "stat size = ${size:-<error>}"
 fi
-if glob="$(node tools/kame-wasm.mjs do expr --async -c '(wildcard "*.md")' 2>&1)"; then
-	test-fail "unimplemented glob capability unexpectedly succeeded: $glob"
-elif printf '%s' "$glob" | grep -q 'FEATURE_UNSUP'; then
-	test-ok "glob reports FEATURE_UNSUP honestly"
+if glob="$("${cli[@]}" -c "(wildcard \"$marker*\")")" && [ "$glob" = "[\"$marker\"]" ]; then
+	test-ok "glob returns the matching path through the production host"
 else
 	test-fail "glob diagnostic = $glob"
 fi
@@ -48,7 +48,7 @@ fi
 test-step "handles are generational and completion is validated"
 if node --input-type=module - <<'NODE'; then
 const { readFile } = await import('node:fs/promises');
-const bytes = await readFile('./build/wasm/kame.wasm');
+const bytes = await readFile(process.env.KAME_WASM);
 const { instance } = await WebAssembly.instantiate(bytes, {});
 const { exports } = instance;
 const alloc = (size, alignment = 1) => {
@@ -109,6 +109,25 @@ if (exports.kame_wasm_result_copy(jsonInstance, output, resultLength, outLength)
 if (new TextDecoder().decode(new Uint8Array(exports.memory.buffer, output, resultLength)) !== ':true') throw new Error('json completion value was not preserved');
 if (exports.kame_wasm_instance_free(jsonInstance) !== 0) throw new Error('json instance did not free');
 
+// Synchronous queries are public ABI paths, separate from the production async host.
+const [sourceText, sourceLength] = write('unused = (fail! "unused definition evaluated")\nresult = (join ":" ["source" "pure"])\n');
+const [selected, selectedLength] = write('result');
+const syncInstance = exports.kame_wasm_instance_create();
+if (syncInstance === 0n || exports.kame_wasm_source_compile(syncInstance, sourceText, sourceLength) !== 0) throw new Error('synchronous source did not compile');
+for (const [name, query] of [
+  ['compiled expression', (dst, capacity, length) => exports.kame_wasm_expression_request(syncInstance, selected, selectedLength, dst, capacity, length)],
+  ['pure source', (dst, capacity, length) => exports.kame_wasm_eval_source_pure(sourceText, sourceLength, selected, selectedLength, dst, capacity, length)],
+]) {
+  const lengthPointer = alloc(4, 4);
+  if (query(0, 0, lengthPointer) !== 3) throw new Error(`${name} did not report its output length`);
+  const size = new DataView(exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
+  const destination = alloc(size);
+  if (query(destination, size, lengthPointer) !== 0) throw new Error(`${name} did not copy its output`);
+  const value = new TextDecoder().decode(new Uint8Array(exports.memory.buffer, destination, size));
+  if (value !== '"source:pure"') throw new Error(`${name} selected the wrong value: ${value}`);
+}
+if (exports.kame_wasm_instance_free(syncInstance) !== 0) throw new Error('synchronous instance did not free');
+
 // Instance diagnostics are isolated to their instance.
 const instanceA = exports.kame_wasm_instance_create();
 const instanceB = exports.kame_wasm_instance_create();
@@ -123,7 +142,7 @@ if (!new TextDecoder().decode(new Uint8Array(exports.memory.buffer, diagnosticPo
 exports.kame_wasm_instance_free(instanceA);
 exports.kame_wasm_instance_free(instanceB);
 NODE
-	test-ok "handles, kinds, JSON completion, and diagnostics behave"
+	test-ok "handles, kinds, synchronous queries, JSON completion, and diagnostics behave"
 else
 	test-fail "raw ABI assertions failed"
 fi

@@ -164,7 +164,7 @@ func (p *Program) drainRequests() {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else {
 				display := processDisplayFromHost(p.Alloc, processRequest)
-				pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Retries: 0, Capture: capture, Stream: stream, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated}
+				pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Capture: capture, Stream: stream, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated}
 				p.Pending = slices.Append(p.Alloc, p.Pending, pending)
 			}
 			slices.Free(p.Alloc, scopedEnvironment)

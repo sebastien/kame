@@ -66,6 +66,34 @@ assert.equal(e.kame_wasm_complete_bytes(handle, request, alloc(1024 * 1024), 102
 assert.match(instanceDiagnostic(handle), /^NO_MEMORY:/);
 assert.equal(e.kame_wasm_complete_nil(handle, request), 2);
 assert.equal(e.kame_wasm_instance_free(handle), 0);
+// Optimized evaluator frames must reach the language guard before the C stack
+// is exhausted. Destruction and slot reuse must remain valid after EVAL_DEPTH.
+const recursiveSource = write('(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))\n(character TEXT) = (walk (slice 1 TEXT))\n');
+for (const [expression, code] of [
+  ['(walk "x,y\\n")', ''],
+  ['(walk (reduce ([TEXT STEP] (str TEXT TEXT)) "x,y\\n" [1 2 3 4 5 6 7 8 9 10]))', 'EVAL_DEPTH'],
+  ['(walk "x,y\\n")', ''],
+]) {
+  const bounded = e.kame_wasm_instance_create();
+  assert.notEqual(bounded, 0n);
+  assert.equal(e.kame_wasm_source_compile(bounded, ...recursiveSource), 0);
+  assert.equal(e.kame_wasm_expression_begin(bounded, ...write(expression)), 0);
+  let state = 0;
+  for (let i = 0; i < 100 && state !== 2; i++) state = e.kame_wasm_step(bounded);
+  assert.equal(state, 2);
+  // Result retrieval materializes ordinary evaluation diagnostics at the ABI.
+  const copied = e.kame_wasm_result_copy(bounded, output, 128, length);
+  if (code) {
+    assert.equal(copied, 5);
+    assert.match(instanceDiagnostic(bounded), /^EVAL_DEPTH:/);
+  } else {
+    assert.equal(copied, 0);
+    assert.equal(new DataView(e.memory.buffer).getUint32(length, true), 1);
+    assert.equal(Buffer.from(e.memory.buffer, output, 1).toString(), '0');
+    assert.equal(e.kame_wasm_instance_diagnostic_length(bounded), 0);
+  }
+  assert.equal(e.kame_wasm_instance_free(bounded), 0);
+}
 // Temporary module-heap exhaustion must release its failed query allocations.
 const oversized = write('"' + 'x'.repeat(9 * 1024 * 1024) + '"');
 const small = write('42');

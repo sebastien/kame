@@ -88,7 +88,7 @@ func (p *Program) CleanupContext() core.Signature {
 		return core.Signature{}
 	}
 	var sink hashSink
-	sink.state = newSHA256()
+	sink.state = core.NewDigest()
 	sink.appendText("kame-clean-context-v1")
 	// Session composition supplies a final separator newline. The caller's raw
 	// authored-source signature still detects formatting edits; do not treat a

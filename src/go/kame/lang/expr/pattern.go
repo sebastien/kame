@@ -241,7 +241,7 @@ func (p *patternParser) group(pattern *Pattern) bool {
 		}
 		glob := p.text[patternStart:p.pos]
 		if p.pos == len(p.text) { p.fail(start, p.pos, "unclosed pattern group"); return false }
-		if !validGlob(glob) { p.fail(patternStart, p.pos, "invalid capture pattern"); return false }
+		if !ValidGlob(glob) { p.fail(patternStart, p.pos, "invalid capture pattern"); return false }
 		pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternMatcher, Text: ownedText(p.a, name), Pattern: ownedText(p.a, glob), Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + p.pos + 1}})
 		pattern.Names = slices.Append(p.a, pattern.Names, ownedText(p.a, name))
 		pattern.Matchers++
@@ -527,7 +527,8 @@ func classMatches(class string, value byte, budget *int) bool {
 	return matched
 }
 
-func validGlob(pattern string) bool {
+// ValidGlob reports whether a capture glob has valid escapes and character classes.
+func ValidGlob(pattern string) bool {
 	if len(pattern) == 0 { return false }
 	for i := 0; i < len(pattern); i++ {
 		if pattern[i] == '\\' {

@@ -38,7 +38,7 @@ static bytes_Buffer presentation_begin(void) {
     diagnosticColor = so_str("never");
     dashboardCommand = so_str("build");
     cliDiagnosticJSON = false;
-    resetInvocationPresentation(native_writer(&out));
+    resetInvocationPresentation();
     return out;
 }
 
@@ -47,7 +47,7 @@ static void presentation_end(bytes_Buffer *out) {
     selectedOutput = so_str("");
     diagnosticColor = so_str("never");
     dashboardCommand = so_str("");
-    resetInvocationPresentation(native_writer(out));
+    resetInvocationPresentation();
     dashboardWidth = dashboardHeight = 0;
     dashboardOutput = (io_Writer){0};
     bytes_Buffer_Free(out);

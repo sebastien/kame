@@ -30,10 +30,6 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 		cliError(errOut, parsed.Error.Code, parsed.Error.Message)
 		return 2
 	}
-	if len(parsed.Args) != 1 {
-		cliError(errOut, "OPT_VALUE_INVALID", "cache requires the list or clean action")
-		return 2
-	}
 	var buckets = [3]cacheBucket{
 		{Name: "tasks", Directory: "tasks"},
 		{Name: "host", Directory: "host"},

@@ -96,7 +96,7 @@ func ParseFragment(a mem.Allocator, original *source.Source, lang string, start 
 		if pos < end && text[pos] != '\n' {
 			last := s.Items[len(s.Items)-1].Expression
 			ruleHead := last != nil && (last.Kind == expr.Name || last.Kind == expr.Path)
-			if ruleHead && text[pos] == ':' && (pos+1 == end || space(text[pos+1])) && topLevel(text[from:lineEnd], ':') == pos-from {
+			if ruleHead && text[pos] == ':' && (pos+1 == end || space(text[pos+1])) && source.TopLevelByte(text[from:lineEnd], ':') == pos-from {
 				s.error(pos, pos+1, "build rule syntax is not accepted in a km value script; use --lang kmk for definitions and build rules")
 			} else {
 				s.error(pos, pos+1, "expected statement separator")

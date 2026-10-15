@@ -133,7 +133,7 @@ func parseScript(s *Script, offset int) {
 			pos = nextLine(text, lineEnd)
 			continue
 		}
-		if topLevel(text[start:end], '=') >= 0 {
+		if source.TopLevelByte(text[start:end], '=') >= 0 {
 			definitionEnd := multilineDefinitionEnd(a, s.Source, start, end)
 			part := definition.ParseRange(a, s.Source, start, definitionEnd)
 			s.takeDiagnostics(part.Diagnostics)
@@ -192,7 +192,7 @@ func generatedHeader(text string, start int, end int) generatedHeaderResult {
 		return generatedHeaderResult{}
 	}
 	declarationStart := trimStart(text, start+len("generate"), end)
-	equal := topLevel(text[declarationStart:end], '=')
+	equal := source.TopLevelByte(text[declarationStart:end], '=')
 	if equal < 0 {
 		return generatedHeaderResult{}
 	}
@@ -257,7 +257,7 @@ func comment(text string, start int, end int) bool {
 	return text[start] == '#' || (start+1 < end && text[start] == '/' && text[start+1] == '/')
 }
 func legacyInclude(text string) bool {
-	if topLevel(text, '=') >= 0 {
+	if source.TopLevelByte(text, '=') >= 0 {
 		return false
 	}
 	return text == "include" || text == "include?" || strings.HasPrefix(text, "include ") || strings.HasPrefix(text, "include\t") || strings.HasPrefix(text, "include? ") || strings.HasPrefix(text, "include?\t")
@@ -265,7 +265,7 @@ func legacyInclude(text string) bool {
 
 func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEnd int) int {
 	text := s.Text
-	equals := topLevel(text[start:lineEnd], '=')
+	equals := source.TopLevelByte(text[start:lineEnd], '=')
 	if equals < 0 {
 		return lineEnd
 	}
@@ -294,30 +294,6 @@ func multilineDefinitionEnd(a mem.Allocator, s *source.Source, start int, lineEn
 		end++
 	}
 	return end
-}
-
-func topLevel(text string, want byte) int {
-	depth, quote := 0, false
-	for i := 0; i < len(text); i++ {
-		if quote {
-			if text[i] == '\\' {
-				i++
-			} else if text[i] == '"' {
-				quote = false
-			}
-			continue
-		}
-		if text[i] == '"' {
-			quote = true
-		} else if text[i] == '(' || text[i] == '[' || text[i] == '{' {
-			depth++
-		} else if text[i] == ')' || text[i] == ']' || text[i] == '}' {
-			depth--
-		} else if text[i] == want && depth == 0 {
-			return i
-		}
-	}
-	return -1
 }
 
 func owned(a mem.Allocator, text string) string {

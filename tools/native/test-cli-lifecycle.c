@@ -26,6 +26,25 @@ static bool native_contains(bytes_Buffer *buffer, const char *text) {
 #include "test-cli-presentation.h"
 #include "test-cli-ast.h"
 
+static void test_cli_build_source_diagnostics(void) {
+    so_String arguments[] = {so_str("do"), so_str("plan"), so_str("--output"), so_str("text"),
+        so_str("-c"), so_str("# heading\n(if :false (include ./absent.kmk) :nil)\ntask build :\ntask build :"),
+        so_str("build")};
+    bytes_Buffer input = bytes_NewBuffer(mem_System, (so_Slice){0});
+    bytes_Buffer output = bytes_NewBuffer(mem_System, (so_Slice){0});
+    bytes_Buffer errors = bytes_NewBuffer(mem_System, (so_Slice){0});
+    so_int status = main_Run((so_Slice){arguments, 7, 7},
+        (io_Reader){.self = &input, .Read = bytes_Buffer_Read},
+        native_writer(&output), native_writer(&errors));
+    assert(status == 1 && bytes_Buffer_Len(&output) == 0);
+    assert(native_contains(&errors, "TGT_AMBIG"));
+    assert(native_contains(&errors, "<command>:4:6:"));
+    assert(native_contains(&errors, "task build :\n     ^"));
+    bytes_Buffer_Free(&input);
+    bytes_Buffer_Free(&output);
+    bytes_Buffer_Free(&errors);
+}
+
 int main(int argc, char **argv) {
     so_String process_args[argc];
     so_args_init(argc, argv, process_args);
@@ -56,13 +75,19 @@ int main(int argc, char **argv) {
         {"do", "fmt", "--lang", "expr", "-c", "[1   2]"},
         {"do", "fmt", "--lang", "expr", "-f", "missing.km", "-C", "."},
         {"do", "tools", "-C", ".", "check", "-c", "default :", "default", "--json"},
+        {"do", "tools", "unexpected"},
+        {"do", "tools", "check"},
+        {"do", "cache"},
+        {"do", "cache", "list", "clean"},
+        {"do", "cache", "list", "--dry-run"},
     };
-    const so_int statuses[] = {1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0};
+    const so_int statuses[] = {1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 2, 2, 2, 2, 2};
     for (int iteration = 0; iteration < 256; iteration++) {
         test_cli_invalid_ast();
         mem_Stats ast_stats = mem_Tracker_Stats(&tracker);
         assert(ast_stats.Alloc == 0 && ast_stats.Mallocs == ast_stats.Frees);
         test_cli_diagnostics();
+        test_cli_build_source_diagnostics();
         mem_Stats diagnostic_stats = mem_Tracker_Stats(&tracker);
         assert(diagnostic_stats.Alloc == 0 && diagnostic_stats.Mallocs == diagnostic_stats.Frees);
         test_cli_presentation();

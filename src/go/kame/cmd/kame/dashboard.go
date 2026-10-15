@@ -17,7 +17,6 @@ var dashboardDryRun bool
 var dashboardIdle bool
 var dashboardSubject string
 var dashboardCycle int
-var dashboardCycleStatus string
 var dashboardCycleElapsed int64
 
 type cliWorker struct {

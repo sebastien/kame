@@ -15,13 +15,6 @@ import (
 	"solod.dev/so/path"
 )
 
-type graphArguments struct {
-	Build  buildArguments
-	Depth  int
-	Expand bool
-	OK     bool
-}
-
 func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 	return runGraph(args, out, errOut, "plan")
 }
@@ -33,14 +26,6 @@ func runTools(args []string, out io.Writer, errOut io.Writer) int {
 	defer parsed.Free()
 	if !parsed.OK {
 		cliError(errOut, parsed.Error.Code, parsed.Error.Message)
-		return 2
-	}
-	if !check && len(parsed.Targets) != 0 {
-		cliError(errOut, "OPT_VALUE_INVALID", "tools does not accept targets")
-		return 2
-	}
-	if check && len(parsed.Targets) == 0 {
-		cliError(errOut, "OPT_VALUE_INVALID", "tools check requires at least one target")
 		return 2
 	}
 	session := openBuildSessionForTools(parsed, errOut, true, !check)
@@ -226,24 +211,22 @@ func runCat(args []string, out io.Writer, errOut io.Writer) int {
 	}
 }
 
-func (arguments *graphArguments) Free() { arguments.Build.Free(); *arguments = graphArguments{} }
-
 func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	graph := parseGraphArguments(args, errOut, kind)
 	defer graph.Free()
 	if !graph.OK {
 		return 2
 	}
-	session := openBuildSession(graph.Build, errOut, true)
+	session := openBuildSession(graph, errOut, true)
 	defer session.Free()
 	if session.Status != 0 {
 		return session.Status
 	}
-	targets := selectTargets(session.Program, graph.Build.Targets)
-	graph.Build.Targets = nil
+	targets := selectTargets(session.Program, graph.Targets)
+	graph.Targets = nil
 	defer program.FreeStrings(mem.System, targets)
 	if len(targets) == 0 {
-		return reportNoDefault(session.Program, out, errOut, graph.Build.JSON)
+		return reportNoDefault(session.Program, out, errOut, graph.JSON)
 	}
 	if kind != "plan" && len(targets) != 1 {
 		cliError(errOut, "OPT_VALUE_INVALID", kind+" requires exactly one target")
@@ -254,7 +237,7 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	defer buffer.Free()
 	if kind != "span" {
 		query := kind
-		if graph.Build.Affected {
+		if graph.Affected {
 			query = "affected"
 		}
 		graphDiagnostic = session.Program.WriteInspection(&buffer, targets, graph.Depth, query)
@@ -263,11 +246,11 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 	}
 	if graphDiagnostic.Code != "" {
 		annotateTargetDiagnostic(&graphDiagnostic, targets[0])
-		emitDiagnostic(diagnosticWriter(out, errOut, graph.Build.JSON), graphDiagnostic, graph.Build.JSON, session.Parsed.Source)
+		emitDiagnostic(diagnosticWriter(out, errOut, graph.JSON), graphDiagnostic, graph.JSON, session.Parsed.Source)
 		graphDiagnostic.Free(mem.System)
 		return 1
 	}
-	if graph.Build.JSON {
+	if graph.JSON {
 		io.WriteString(out, buffer.String())
 	} else {
 		var heading = bytes.NewBuffer(mem.System, nil)
@@ -323,15 +306,15 @@ func writeCatValue(out io.Writer, errOut io.Writer, value core.Value) bool {
 	return true
 }
 
-func parseGraphArguments(args []string, errOut io.Writer, command string) graphArguments {
+func parseGraphArguments(args []string, errOut io.Writer, command string) buildArguments {
 	inv := cli.Parse(command, args)
 	applyInvocationPresentation(&inv)
 	if !inv.OK {
 		cliError(errOut, inv.Error.Code, inv.Error.Message)
 		inv.Free()
-		return graphArguments{}
+		return buildArguments{}
 	}
-	return graphArguments{Build: inv, Depth: inv.Depth, Expand: inv.Expand, OK: inv.OK}
+	return inv
 }
 
 func discardEvents(p *program.Program) {

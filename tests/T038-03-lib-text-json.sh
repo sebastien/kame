@@ -26,6 +26,10 @@ for backend in native wasm; do
 	check '"{\"a\":[true,null],\"z\":2}"' '(json [z: 2 a: [:true :nil]])'
 	check ':true' '(eq (parse-json (json [z: 2 a: [:true :nil]])) [a: [:true :nil] z: 2])'
 	check ':true' '(eq (parse-json (json "a\n\t\\\"")) "a\n\t\\\"")'
+	# Optimized float formatting uses the SDK's wide-integer arithmetic builtins.
+	check '"[5e-324,2.2250738585072014e-308,1.7976931348623157e+308]"' '(json (parse-json "[5e-324,2.2250738585072014e-308,1.7976931348623157e308]"))'
+	check '"[9223372036854775807,-9223372036854775808,1.8446744073709552e+19]"' '(json (parse-json "[9223372036854775807,-9223372036854775808,18446744073709551615]"))'
+	check '"[0.1,1.2345678901234567,1e-300,1e+300,0]"' '(json (parse-json "[0.1,1.2345678901234567,1e-300,1e300,-0.0]"))'
 	check '"a1 2b"' '(render "plain" """a@(:nil)@([1 2])b""")'
 	reject '(cat "a" "b")' OP_UNKNOWN
 	for operation in str json; do

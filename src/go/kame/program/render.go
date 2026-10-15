@@ -162,36 +162,14 @@ func (p *Program) renderDocument(entry *instance, context *eval.Context) renderR
 	// Trim a single trailing newline for shell parity with per-line rendering.
 	// Document bodies preserve endings; per-line joins without trailing NL.
 	if len(script) != 0 && script[len(script)-1] == '\n' {
-		trimmed := ""
-		if len(script)-1 != 0 {
-			trimmed = cloneText(p.Alloc, script[:len(script)-1])
-		}
-		result.Value.Free(p.Alloc)
+		script = script[:len(script)-1]
 		// Strip a trailing \r for CRLF bodies.
-		if len(trimmed) != 0 && trimmed[len(trimmed)-1] == '\r' {
-			retrimmed := ""
-			if len(trimmed)-1 != 0 {
-				retrimmed = cloneText(p.Alloc, trimmed[:len(trimmed)-1])
-			}
-			mem.FreeString(p.Alloc, trimmed)
-			trimmed = retrimmed
-		}
-		script = trimmed
-		// Transfer: script now owns trimmed storage; prevent double free below.
-		// result.Value already freed; set empty to keep Free safe.
-		result.Value = core.Value{}
-		// Re-wrap trimmed as owned value for uniform handling below.
-		if script != "" {
-			// script already owned; create value referencing it without copy?
-			// Use NewString which copies; free the intermediate.
-			owned := core.NewString(p.Alloc, script)
-			mem.FreeString(p.Alloc, script)
-			result.Value = owned
-			script = result.Value.Text
+		if len(script) != 0 && script[len(script)-1] == '\r' {
+			script = script[:len(script)-1]
 		}
 	}
 	var spans []diagnostic.Span
-	if result.Value.Text != "" && len(body) != 0 {
+	if script != "" && len(body) != 0 {
 		// Single authored span covering the recipe body.
 		first := body[0].Span
 		last := body[len(body)-1].Span
@@ -208,7 +186,7 @@ func (p *Program) renderDocument(entry *instance, context *eval.Context) renderR
 		mem.FreeString(p.Alloc, context.WritePaths[i])
 	}
 	slices.Free(p.Alloc, context.WritePaths)
-	out := renderResult{Commands: cloneText(p.Alloc, result.Value.Text), Effects: effects, WritePaths: writePaths, LineSpans: spans}
+	out := renderResult{Commands: cloneText(p.Alloc, script), Effects: effects, WritePaths: writePaths, LineSpans: spans}
 	result.Value.Free(p.Alloc)
 	mem.Free(p.Alloc, context)
 	return out

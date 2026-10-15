@@ -452,7 +452,7 @@ func (p *kashParser) valueHeader(start int, end int, kash bool) *expr.Expr {
 	for value.End < end && space(s.Source.Text[value.End]) {
 		value.End++
 	}
-	if (value.End < end && s.Source.Text[value.End] != '#') || topLevel(s.Source.Text[start:end], ';') >= 0 || (value.Expr != nil && value.Expr.Kind == expr.ValueRecovery) {
+	if (value.End < end && s.Source.Text[value.End] != '#') || source.TopLevelByte(s.Source.Text[start:end], ';') >= 0 || (value.Expr != nil && value.Expr.Kind == expr.ValueRecovery) {
 		s.error(start, end, "control header requires exactly one expression")
 	}
 	return value.Expr

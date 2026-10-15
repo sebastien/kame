@@ -60,6 +60,25 @@ func TestPluginValueJSONRoundTripsSupportedKinds(t *testing.T) {
 	slices.Free(a, values)
 }
 
+func TestPluginBytesBase64Padding(t *testing.T) {
+	a := t.Allocator()
+	data := []byte{255, 255, 255, 255}
+	expected := []string{
+		`{"kind":"bytes","data":""}`,
+		`{"kind":"bytes","data":"/w=="}`,
+		`{"kind":"bytes","data":"//8="}`,
+		`{"kind":"bytes","data":"////"}`,
+		`{"kind":"bytes","data":"/////w=="}`,
+	}
+	for i := range expected {
+		encoded := core.PluginValueJSON(a, core.Value{Kind: core.Bytes, Bytes: data[:i]})
+		if string(encoded) != expected[i] {
+			t.Error("plugin bytes lost canonical Base64 padding")
+		}
+		mem.FreeSlice(a, encoded)
+	}
+}
+
 func TestPluginValueJSONRejectsEncoderFailures(t *testing.T) {
 	a := t.Allocator()
 	numbers := []float64{math.NaN(), math.Inf(1), math.Inf(-1)}

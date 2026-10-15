@@ -127,7 +127,7 @@ func (p *Program) isToolPath(name string) bool {
 
 func (p *Program) fileImplementation(entry *instance, rendered renderResult) core.Signature {
 	var sink hashSink
-	sink.state = newSHA256()
+	sink.state = core.NewDigest()
 	sink.appendText("kame-file-signatures-v2")
 	sink.appendText(entry.Executor)
 	sink.appendText(entry.ExecutorVersion)
@@ -210,7 +210,7 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 		return p.continueFileContext(c, index)
 	}
 	var identity hashSink
-	identity.state = newSHA256()
+	identity.state = core.NewDigest()
 	identity.appendText("kame-file-context-v1")
 	name := p.canonicalTarget(entry.Plan.Outputs[0], true)
 	identity.appendText(name)

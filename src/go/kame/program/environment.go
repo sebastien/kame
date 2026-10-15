@@ -1,6 +1,7 @@
 package program
 
 import (
+	"kame/core"
 	"kame/lang/eval"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
@@ -57,7 +58,6 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 	freeStrings(p.Alloc, entry.Environment)
 	entry.Environment = resolved
 	entry.EnvironmentClaimed = true
-	entry.ScopedEnvironment = !sameEnvironment(resolved, p.Options.Environment)
 	return true
 }
 
@@ -107,7 +107,7 @@ func (p *Program) bindDefinitionEnvironment(context *eval.Context) {
     _ = p
     if !context.HasEnvironment { return }
     var identity hashSink
-    identity.state = newSHA256()
+    identity.state = core.NewDigest()
     identity.appendText("kame-definition-environment-v1")
     identity.appendText(context.Cwd)
      identity.appendU64(uint64(context.Phase))

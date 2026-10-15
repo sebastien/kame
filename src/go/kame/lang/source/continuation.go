@@ -1,5 +1,31 @@
 package source
 
+// TopLevelByte returns the first matching byte outside double quotes and nested
+// delimiters, or -1. Unmatched closing delimiters retain negative depth.
+func TopLevelByte(text string, want byte) int {
+	depth, quote := 0, false
+	for i := 0; i < len(text); i++ {
+		if quote {
+			if text[i] == '\\' {
+				i++
+			} else if text[i] == '"' {
+				quote = false
+			}
+			continue
+		}
+		if text[i] == '"' {
+			quote = true
+		} else if text[i] == '(' || text[i] == '[' || text[i] == '{' {
+			depth++
+		} else if text[i] == ')' || text[i] == ']' || text[i] == '}' {
+			depth--
+		} else if text[i] == want && depth == 0 {
+			return i
+		}
+	}
+	return -1
+}
+
 // ContinuationEnd returns the position after an escaped line ending, or pos.
 // Parsers consume it as whitespace without rewriting authored source bytes.
 func ContinuationEnd(text string, pos int, end int) int {

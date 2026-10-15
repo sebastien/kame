@@ -31,7 +31,7 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	}
 	args = presentation.Args
 	invocationCounts = buildProgress{}
-	resetInvocationPresentation(errOut)
+	resetInvocationPresentation()
 	defer freeInvocationPresentation(errOut)
 	startedAt := time.Now()
 	command := streamCommand(args)
@@ -129,7 +129,7 @@ func runCommand(args []string, in io.Reader, out io.Writer, errOut io.Writer) in
 	if cli.SelectsRun(args) || cli.AppendsCommands(args) {
 		return runPrimarySession(args, in, out, errOut)
 	}
-	return runBuild(args, out, errOut, false)
+	return runBuild(args, out, errOut)
 }
 
 // Check directory selection once for every native command, before source reads
