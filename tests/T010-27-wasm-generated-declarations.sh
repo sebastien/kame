@@ -18,7 +18,7 @@ trap 'rm -rf "$work"' EXIT
 cli="$CLI_ROOT/dist/kame.js"
 cat >"$work/Makefile.kmk" <<'EOF'
 MODULES = ["core" "cli"]
-generate module-checks = (map ([module] [kind: "task" target: (join (list "check-" module) "") inputs: [] order-only: [] recipe: (list (join (list "touch generated-" module) ""))]) MODULES)
+generate module-checks = (map ([module] [kind: "task" target: (join "" (list "check-" module)) inputs: [] order-only: [] recipe: (list (join "" (list "touch generated-" module)))]) MODULES)
 EOF
 
 test-step "plan output matches across hosts"

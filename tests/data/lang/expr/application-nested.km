@@ -1,1 +1,1 @@
-(map ./src ([f] (compile f)))
+(map ([f] (compile f)) [./src])

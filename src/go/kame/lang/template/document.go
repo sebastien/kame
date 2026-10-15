@@ -579,9 +579,10 @@ func (p *docParser) parseBlock(pos int, end int) blockOut {
 			head.Span = d.Span
 			head.Text = "render"
 			inc.Items = slices.Append(p.a, inc.Items, head)
-			for i := range d.Args {
+			for i := 1; i < len(d.Args); i++ {
 				inc.Items = slices.Append(p.a, inc.Items, d.Args[i])
 			}
+			inc.Items = slices.Append(p.a, inc.Items, d.Args[0])
 			slices.Free(p.a, d.Args)
 			items = slices.Append(p.a, items, inc)
 			cur = lineEnd
@@ -795,7 +796,7 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	mapApp.Items = slices.Append(p.a, mapApp.Items, mapHead)
 	mapApp.Items = slices.Append(p.a, mapApp.Items, lam)
 	mapApp.Items = slices.Append(p.a, mapApp.Items, itemsApp)
-	// (join mapApp sep)
+	// (join sep mapApp)
 	joinApp := mem.Alloc[expr.Expr](p.a)
 	joinApp.Kind = expr.Application
 	joinApp.Span = head.Span
@@ -804,12 +805,12 @@ func (p *docParser) parseFor(head dirOut, bodyPos int, end int) pairRes {
 	joinHead.Span = head.Span
 	joinHead.Text = "join"
 	joinApp.Items = slices.Append(p.a, joinApp.Items, joinHead)
-	joinApp.Items = slices.Append(p.a, joinApp.Items, mapApp)
 	if len(head.Args) == 3 {
 		joinApp.Items = slices.Append(p.a, joinApp.Items, head.Args[2])
 	} else {
 		joinApp.Items = slices.Append(p.a, joinApp.Items, newStringLit(p.a, "", head.Span))
 	}
+	joinApp.Items = slices.Append(p.a, joinApp.Items, mapApp)
 	expr.Free(p.a, head.Args[0])
 	slices.Free(p.a, head.Args)
 	joinApp.Span.End = nextPos
@@ -832,8 +833,8 @@ func templateItemField(a mem.Allocator, rowName string, field string, span sourc
 	row.Text = rowName
 	row.Span = span
 	app.Items = slices.Append(a, app.Items, head)
-	app.Items = slices.Append(a, app.Items, row)
 	app.Items = slices.Append(a, app.Items, newStringLit(a, field, span))
+	app.Items = slices.Append(a, app.Items, row)
 	return app
 }
 

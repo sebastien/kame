@@ -46,9 +46,9 @@ def watch(command: list[str], project: Path, environment: dict[str, str]) -> int
 	(project / 'other').mkdir()
 	(project / 'Makefile.kmk').write_text(
 		'SHELL = kash\nROOT = "./items"\nFILES = @(ROOT)/*.txt\n'
-		'one :\n\t(write! ./one (join FILES ","))\n'
-		'two :\n\t(write! ./two (join FILES ","))\n'
-		'isolated :\n\t(write! ./isolated (join ./other/*.txt ","))\n')
+		'one :\n\t(write! ./one (join "," FILES))\n'
+		'two :\n\t(write! ./two (join "," FILES))\n'
+		'isolated :\n\t(write! ./isolated (join "," ./other/*.txt))\n')
 	with (project / 'watch-log').open('w+') as log, (project / 'watch-err').open('w+') as err:
 		process = subprocess.Popen(command + ['--json', '--watch', 'one', 'two', 'isolated'],
 			cwd=project, env=environment, stdout=log, stderr=err, start_new_session=True)

@@ -66,7 +66,7 @@ expressions directly; JSON serialization and escaping helpers are unnecessary.
 ### Migrating recipes
 
 Replace `@(name)` and `\@(name)` with `$name`, and expression boundaries such
-as `@(join files ":")` with `(join files ":")`. Replace document `@if`/`@for`
+as `@(join ":" files)` with `(join ":" files)`. Replace document `@if`/`@for`
 generation with Kash control or explicit source construction. For a command
 represented as an argv list, separate its executable from its arguments:
 
@@ -75,7 +75,7 @@ SHELL = kash
 command = ["printf" "<%s>" """@(literal)""" "two words"]
 show :
 	executable = (first command)
-	arguments = (slice command 1)
+	arguments = (slice 1 command)
 	$executable $arguments
 ```
 
@@ -125,7 +125,7 @@ aggregate status is the rightmost failure. Failures/cancellation reap owned work
 Spaces, tabs, embedded line endings, CRLF, and every terminal newline are data.
 Use `strip` explicitly only when an identifier's contract permits removing all
 surrounding whitespace. For a producer with one terminal LF, use
-`(if (ends? TEXT "\n") (slice TEXT 0 -1) TEXT)` to remove only that byte. Captured
+`(if (ends? "\n" TEXT) (slice 0 -1 TEXT) TEXT)` to remove only that byte. Captured
 paths may themselves end in whitespace/newlines; do not trim them implicitly.
 
 ## Named execution context

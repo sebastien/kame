@@ -10,7 +10,7 @@ the CLI on your PATH (or the absolute path to `build/kame.debug`).
 ## 1. From an expression to a program
 
 ```sh
-kame do run --lang expr -c '(map [./notes/hello.txt ./notes/world.txt] (replace ./notes/{name:*}.txt ./public/{name}.txt))'
+kame do run --lang expr -c '(map (replace ./notes/{name:*}.txt ./public/{name}.txt) [./notes/hello.txt ./notes/world.txt])'
 kame -f ./01-values.km pages
 kame -f ./01-values.km publication
 ```

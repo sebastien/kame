@@ -164,7 +164,7 @@ func TestPlanDoesNotMaterializeRecipe(t *testing.T) {
 
 func TestExpressionAndGraphInspection(t *testing.T) {
 	var out, errOut bytes.Buffer
-	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(join [\"a\" \"b\"] \",\")"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"a,b\"" {
+	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(join \",\" [\"a\" \"b\"])"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"a,b\"" {
 		t.Errorf("expr status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()
@@ -185,7 +185,7 @@ func TestExpressionAndGraphInspection(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(join @* \",\")", "--", "left", "right"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"left,right\"" {
+	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(join \",\" @*)", "--", "left", "right"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"left,right\"" {
 		t.Errorf("expr args status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 	out.Reset()

@@ -132,7 +132,7 @@ and `(first outputs)` in direct Kash, or `@(inputs)` in external-shell templates
 | `(yield! VALUE...)` | Atomically supply one declared file output's content. |
 | `(write! PATH VALUE)` | Defer an atomic write. |
 | `(wildcard PATTERN)` / `(read PATH)` | Discover a dependency. |
-| `(render PATH PAYLOAD)` | Read/render a tracked template with tracked expression dependencies. |
+| `(render PAYLOAD PATH)` | Read/render a tracked template with tracked expression dependencies. |
 
 `yield!` requires exactly one file output. Do not combine it with nonempty
 shell commands; Kame reports a producer conflict.

@@ -81,7 +81,7 @@ func TestKashIfRetainsNestedBodiesAndLocalDefinitions(t *testing.T) {
 
 func TestDirectKashExpressionsKeepAuthoredBoundaries(t *testing.T) {
 	a := t.Allocator()
-	text := "(nop [result: :nil])\nprintf \"%s\" (join\n [\"a\" \"b\"] \"-\")\nif (=\n 1 1)\n  (nop :nil)\nmatch (nop\n \"value\")\n  case \"value\"\n    printf yes\n"
+	text := "(nop [result: :nil])\nprintf \"%s\" (join\n \"-\" [\"a\" \"b\"])\nif (=\n 1 1)\n  (nop :nil)\nmatch (nop\n \"value\")\n  case \"value\"\n    printf yes\n"
 	s := script.ParseKash(a, "direct.kash", text)
 	defer s.Free()
 	if len(s.Diagnostics) != 0 || len(s.Items) != 4 { t.Fatal("direct multiline expressions failed to parse"); return }

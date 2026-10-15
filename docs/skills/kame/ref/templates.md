@@ -85,12 +85,12 @@ template directives are not Kash meta-programming forms.
 ## Render with data
 
 ```kame
-(render ./page.html [title: "News" posts: [[title: "Hello"]]])
-(render ./page.tmpl [title: "News"] "html")
-(render (read ./page.html) [title: "News"] "html")
+(render [title: "News" posts: [[title: "Hello"]]] ./page.html)
+(render [title: "News"] "html" ./page.tmpl)
+(render [title: "News"] "html" (read ./page.html))
 ```
 
-`(render SOURCE [PAYLOAD] [STYLE])` returns a string:
+`(render [PAYLOAD] [STYLE] SOURCE)` returns a string:
 
 - A string starting with `./`, `../`, or `/` is a file path, read under the read
   capability and tracked as a dependency. Other strings and bytes are content.
@@ -114,7 +114,7 @@ CARD = """
 default : ./build/page.html
 
 ./build/page.html : ./page.html
-	@(yield! (render ./page.html [title: "Hello"]))
+	@(yield! (render [title: "Hello"] ./page.html))
 ```
 
 The literal's content is untouched until `render`; a longer quote delimiter
@@ -132,7 +132,7 @@ Direct Kash recipes (`SHELL = kash` or `[shell: kash]`) are parsed as Kash,
 not expanded as document templates; see [Kash](./kash.md).
 
 ```sh
-kame do run --lang expr --allow-read -c '(render ./page.html [title: "Hello"])'
+kame do run --lang expr --allow-read -c '(render [title: "Hello"] ./page.html)'
 kame do render --define title=Hello ./page.html
 kame do render --check ./page.html
 printf '%s\n' 'Hello @(name)' | kame do parse --lang template

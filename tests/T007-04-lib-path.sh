@@ -39,7 +39,7 @@ evaluates '(joinpath "a" "b" ".." "c")' '"a/c"'
 evaluates '(joinpath "a" "")' '"a"'
 
 test-step "relpath and abspath are lexical"
-evaluates '(relpath "a/b/c" "a")' '"b/c"'
+evaluates '(relpath "a" "a/b/c")' '"b/c"'
 evaluates '(relpath "a" "a")' '"."'
 cli_run -- do run --lang expr -c '(abspath "x")'
 cli_expect_status 0

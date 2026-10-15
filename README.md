@@ -31,7 +31,7 @@ installed:
 CC=clang make dist
 export PATH="$PWD/dist:$PATH"
 kame --version
-kame do run --lang expr -c '(join ["hello" "world"] " ")'
+kame do run --lang expr -c '(join " " ["hello" "world"])'
 # "hello world"
 ```
 
@@ -72,7 +72,7 @@ headers = (wildcard ./src/**/*.h)
 sources = (concat sources-c headers)
 
 # Pattern substitution remaps paths, and map applies it to every source
-objects = (map sources-c (sub ./src/{path:**}.c ./build/{path}.o))
+objects = (map (sub ./src/{path:**}.c ./build/{path}.o) sources-c)
 
 # Default rule will be triggered when no argument is given
 default : build

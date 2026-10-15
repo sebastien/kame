@@ -108,16 +108,9 @@ func transform(c *eval.Context, s any, v []core.Value, flatten bool) eval.Result
 	callback := &v[0]
 	values := v[1].List
 	if v[0].Kind != core.Callable {
-		if v[1].Kind != core.Callable {
-			return invalidArgument(c, v, 1, "callable when argument 1 is a value")
-		}
-		callback = &v[1]
-		if v[0].Kind == core.List {
-			values = v[0].List
-		} else {
-			values = v[:1]
-		}
-	} else if v[1].Kind != core.List {
+		return invalidArgument(c, v, 0, "callable")
+	}
+	if v[1].Kind != core.List {
 		return invalidArgument(c, v, 1, "list")
 	}
 	defer discardArgCallables(c, v)
@@ -168,24 +161,17 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 	var callback *core.Value
 	var values []core.Value
 	var target *core.Value
+	if v[1].Kind != core.List {
+		return invalidArgument(c, v, 1, "list")
+	}
+	values = v[1].List
 	if v[0].Kind == core.Callable {
 		callback = &v[0]
-		if v[1].Kind != core.List {
-			return invalidArgument(c, v, 1, "list")
-		}
-		values = v[1].List
-	} else if v[0].Kind == core.List {
-		values = v[0].List
-		if v[1].Kind == core.Callable {
-			callback = &v[1]
-		} else {
-			target = &v[1]
-			if _, ok := compareEq(*target, *target); !ok {
-				return invalidArgument(c, v, 1, "equality-comparable value")
-			}
-		}
 	} else {
-		return invalidArgument(c, v, 0, "callable or list")
+		target = &v[0]
+		if _, ok := compareEq(*target, *target); !ok {
+			return invalidArgument(c, v, 0, "equality-comparable value")
+		}
 	}
 	state := callbackProgress(c)
 	for state.Index < len(values) {
@@ -229,26 +215,27 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 }
 func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
+	subject := len(v)-1
 	if v[0].Kind != core.Callable {
 		return invalidArgument(c, v, 0, "callable")
 	}
-	if v[1].Kind != core.List {
-		return invalidArgument(c, v, 1, "list")
+	if v[subject].Kind != core.List {
+		return invalidArgument(c, v, subject, "list")
 	}
 	defer discardArgCallables(c, v)
 	state := callbackProgress(c)
 	if !state.HasAccumulator {
 		state.HasAccumulator = true
 		if len(v) == 3 {
-			state.Accumulator = c.BorrowValue(v[2])
-		} else if len(v[1].List) != 0 {
-			state.Accumulator, state.Index = c.BorrowValue(v[1].List[0]), 1
+			state.Accumulator = c.BorrowValue(v[1])
+		} else if len(v[subject].List) != 0 {
+			state.Accumulator, state.Index = c.BorrowValue(v[subject].List[0]), 1
 		} else {
 			state.Accumulator = core.Value{Kind: core.Nil}
 		}
 	}
-	for state.Index < len(v[1].List) {
-		args := []core.Value{state.Accumulator, v[1].List[state.Index]}
+	for state.Index < len(v[subject].List) {
+		args := []core.Value{state.Accumulator, v[subject].List[state.Index]}
 		effects, paths := len(c.Effects), len(c.WritePaths)
 		result := c.CallAt(v[0], args, state.Index)
 		if result.Waiting {
@@ -289,24 +276,25 @@ func opConcat(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opSlice(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[1].Kind != core.Int {
+	subject := len(v)-1
+	if v[0].Kind != core.Int {
+		return invalidArgument(c, v, 0, "int")
+	}
+	if len(v) == 3 && v[1].Kind != core.Int {
 		return invalidArgument(c, v, 1, "int")
 	}
-	if len(v) == 3 && v[2].Kind != core.Int {
-		return invalidArgument(c, v, 2, "int")
-	}
 	length := 0
-	if v[0].Kind == core.List {
-		length = len(v[0].List)
-	} else if v[0].Kind == core.String {
-		length = utf8.RuneCountInString(v[0].Text)
+	if v[subject].Kind == core.List {
+		length = len(v[subject].List)
+	} else if v[subject].Kind == core.String {
+		length = utf8.RuneCountInString(v[subject].Text)
 	} else {
-		return invalidArgument(c, v, 0, "list or string")
+		return invalidArgument(c, v, subject, "list or string")
 	}
 	// Normalize and validate int64 values before pointer-width conversion.
-	wideStart, wideEnd := v[1].Int, int64(length)
+	wideStart, wideEnd := v[0].Int, int64(length)
 	if len(v) == 3 {
-		wideEnd = v[2].Int
+		wideEnd = v[1].Int
 	}
 	if wideStart < 0 {
 		wideStart += int64(length)
@@ -319,15 +307,15 @@ func opSlice(c *eval.Context, s any, v []core.Value) eval.Result {
 		return c.InvalidOperation("slice bounds must satisfy 0 <= start <= end <= length after resolving negative indices")
 	}
 	start, end := int(wideStart), int(wideEnd)
-	if v[0].Kind == core.List {
-		for i := range v[0].List {
+	if v[subject].Kind == core.List {
+		for i := range v[subject].List {
 			if i < start || i >= end {
-				c.FreeCallable(&v[0].List[i])
+				c.FreeCallable(&v[subject].List[i])
 			}
 		}
-		return eval.Result{Value: core.NewList(c.Run, v[0].List[start:end])}
+		return eval.Result{Value: core.NewList(c.Run, v[subject].List[start:end])}
 	}
-	return eval.Result{Value: core.NewString(c.Run, v[0].Text[runeOffset(v[0].Text, start):runeOffset(v[0].Text, end)])}
+	return eval.Result{Value: core.NewString(c.Run, v[subject].Text[runeOffset(v[subject].Text, start):runeOffset(v[subject].Text, end)])}
 }
 func compare(left core.Value, right core.Value) int {
 	if left.Kind != right.Kind {

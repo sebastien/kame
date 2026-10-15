@@ -27,7 +27,7 @@ evaluates '$(printf "%s" $(printf nested))' '"nested"'
 evaluates '(str $(printf a) $(printf b))' '"ab"'
 evaluates '(str (eval "$(printf a)") (eval "$(printf b)"))' '"ab"'
 evaluates '(let [f ([x] $(printf "%s" $x))] (str (f "a") (f "b")))' '"ab"'
-evaluates '(map ["a" "b"] ([x] $(printf "%s" $x)))' '["a" "b"]'
+evaluates '(map ([x] $(printf "%s" $x)) ["a" "b"])' '["a" "b"]'
 evaluates '[name: $(printf record)]' '[name: "record"]'
 evaluates '"$(printf literal)"' '"$(printf literal)"'
 evaluates '(if :false $(no-such-executable-kash) "selected")' '"selected"'
@@ -95,7 +95,7 @@ marker="$TMPDIR/capture-marker"
 expression="(str \$(sh -c \"printf x >> '$marker'; printf a\") \$(printf b))"
 evaluates "$expression" '"ab"'
 if [ "$(cat "$marker")" = x ]; then test-ok "completed substitution was not replayed"; else test-fail "substitution was replayed"; fi
-expression="(map [1 1] ([x] \$(sh -c \"printf x >> '$marker'; printf a\")))"
+expression="(map ([x] \$(sh -c \"printf x >> '$marker'; printf a\")) [1 1])"
 evaluates "$expression" '["a" "a"]'
 if [ "$(cat "$marker")" = xxx ]; then test-ok "identical callback arguments have distinct executions"; else test-fail "callback execution identity was lost"; fi
 

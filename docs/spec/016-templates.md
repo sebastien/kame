@@ -160,12 +160,12 @@ Blocks lower as follows:
 ```text
 L(@if(c) A @elif(c2) B @else C @end) = (if c L(A) c2 L(B) L(C))
 L(@if(c) A @end)                     = (if c L(A))
-L(@for([p...] xs) A @end)            = (join (map ([p...] L(A)) xs) "")
-L(@for([p...] xs sep) A @end)        = (join (map ([p...] L(A)) xs) sep)
+L(@for([p...] xs) A @end)            = (join "" (map ([p...] L(A)) xs))
+L(@for([p...] xs sep) A @end)        = (join sep (map ([p...] L(A)) xs))
 L(@with(r) A @end)                   = (with r L(A))
 L(@let(n e) rest)                    = (let [n e] L(rest))
 L(@include(p))                       = (render p)
-L(@include(p y))                     = (render p y)
+L(@include(p y))                     = (render y p)
 L(@raw ... @end)                     = the raw text as a string literal
 ```
 
@@ -222,7 +222,7 @@ never recognized.
 Use `Bytes` to render text that was already read:
 
 ```kame
-(render (read ./page.html) [title: title] "html")
+(render [title: title] "html" (read ./page.html))
 ```
 
 ### Style Selection
@@ -240,10 +240,11 @@ For a file path, the comment style is inferred from the extension:
 | `powershell` | ps1, psm1, psd1 |
 | `batch` | bat, cmd |
 
-A third `render` argument overrides the inferred style:
+A `STYLE` string immediately before the source overrides the inferred style
+(`(render STYLE SOURCE)` or `(render PAYLOAD STYLE SOURCE)`):
 
 ```kame
-(render ./page.tmpl [title: title] "html")
+(render [title: title] "html" ./page.tmpl)
 ```
 
 An unknown or absent extension with no override is `TPL_STYLE`. Content defaults
@@ -252,7 +253,7 @@ only. Style names are matched literally and case-insensitively.
 
 ### Payload
 
-`(render SOURCE PAYLOAD)` binds `PAYLOAD`, a record, for the duration of
+`(render PAYLOAD SOURCE)` binds `PAYLOAD`, a record, for the duration of
 rendering. The payload is applied with the semantics of `with`, so `@(title)`
 resolves to its field. The expression scope of the caller remains visible as the
 parent, so a template may also reference definitions and captured values. With no
@@ -304,7 +305,7 @@ so the last field wins. An empty body returns `:nil`.
 
 ### render
 
-`(render SOURCE [PAYLOAD] [STYLE])` parses `SOURCE` as a document template and
+`(render [PAYLOAD] [STYLE] SOURCE)` parses `SOURCE` as a document template and
 returns the rendered `String`. Source resolution, style selection, payload
 binding, and dependency behavior are defined above. `@include` lowers to
 `render`, so recursive inclusion is possible; a template that includes itself,
@@ -328,7 +329,7 @@ CARD = """
 default : ./build/post.html
 
 ./build/post.html :
-	@(yield! (render CARD [post: [title: "Hello, world" pinned: :true]] "html"))
+	@(yield! (render [post: [title: "Hello, world" pinned: :true]] "html" CARD))
 ```
 
 The content between the opening and closing runs of `"""` is raw: no escape

@@ -36,16 +36,16 @@ evaluates '(flatmap ([x] (list x x)) (list 1 2))' '[1 1 2 2]'
 evaluates '(flatmap ([x] (list x)) (list 1 2))' '[1 2]'
 
 test-step "filter and filter-out"
-evaluates '(filter ([x] (includes? x "a")) (list "a" "b" "aa"))' '["a" "aa"]'
-evaluates '(filter-out ([x] (includes? x "a")) (list "a" "b" "aa"))' '["b"]'
-evaluates '(filter (list "a" "b" "a") "a")' '["a" "a"]'
-evaluates '(filter-out (list "a" "b" "a") "a")' '["b"]'
-evaluates '(filter (list 1 "1" 1.0) 1.0)' '[1 1]'
+evaluates '(filter ([x] (includes? "a" x)) (list "a" "b" "aa"))' '["a" "aa"]'
+evaluates '(filter-out ([x] (includes? "a" x)) (list "a" "b" "aa"))' '["b"]'
+evaluates '(filter "a" (list "a" "b" "a"))' '["a" "a"]'
+evaluates '(filter-out "a" (list "a" "b" "a"))' '["b"]'
+evaluates '(filter 1.0 (list 1 "1" 1.0))' '[1 1]'
 evaluates '(filter (list 1) (list 1))' '[]'
 
 test-step "reduce folds from the left"
-evaluates '(reduce ([a b] (join [b a] "")) (list "a" "b") "z")' '"baz"'
-evaluates '(reduce ([a b] (str a)) (list 3) 1)' '"1"'
+evaluates '(reduce ([a b] (join "" [b a])) "z" (list "a" "b"))' '"baz"'
+evaluates '(reduce ([a b] (str a)) 1 (list 3))' '"1"'
 
 test-step "concat appends lists and scalars"
 evaluates '(concat (list 1 2) 3)' '[1 2 3]'
@@ -53,8 +53,8 @@ evaluates '(concat (list 1) (list 2 3))' '[1 2 3]'
 evaluates '(concat "a" "b")' '["a" "b"]'
 
 test-step "slice uses half-open bounds"
-evaluates '(slice (list 1 2 3 4) 1 3)' '[2 3]'
-evaluates '(slice (list 1 2 3) 0 0)' '[]'
+evaluates '(slice 1 3 (list 1 2 3 4))' '[2 3]'
+evaluates '(slice 0 0 (list 1 2 3))' '[]'
 
 test-step "sorted and unique"
 evaluates '(sorted (list "b" "a" "c"))' '["a" "b" "c"]'

@@ -11,44 +11,44 @@ import (
 
 func opJoin(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[0].Kind != core.List {
-		return invalidArgument(c, v, 0, "list of strings")
+	if v[1].Kind != core.List {
+		return invalidArgument(c, v, 1, "list of strings")
 	}
-	if v[1].Kind != core.String {
-		return invalidArgument(c, v, 1, "string")
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
 	}
 	b := strings.NewBuilder(c.Run)
 	defer b.Free()
-	for i := range v[0].List {
-		if v[0].List[i].Kind != core.String {
+	for i := range v[1].List {
+		if v[1].List[i].Kind != core.String {
 			discardArgCallables(c, v)
-			return c.InvalidElement(0, i, "string", v[0].List[i].Kind)
+			return c.InvalidElement(1, i, "string", v[1].List[i].Kind)
 		}
 		if i != 0 {
-			b.WriteString(v[1].Text)
+			b.WriteString(v[0].Text)
 		}
-		b.WriteString(v[0].List[i].Text)
+		b.WriteString(v[1].List[i].Text)
 	}
 	return eval.Result{Value: core.NewString(c.Run, b.String())}
 }
 func opSplit(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	left, ok := text(v[0])
+	left, ok := text(v[1])
 	if !ok {
-		return invalidArgument(c, v, 0, "string")
+		return invalidArgument(c, v, 1, "string")
 	}
-	if v[1].Kind != core.String || v[1].Text == "" {
-		return invalidArgument(c, v, 1, "non-empty string")
+	if v[0].Kind != core.String || v[0].Text == "" {
+		return invalidArgument(c, v, 0, "non-empty string")
 	}
 	var out []core.Value
 	for {
-		cut := strings.Index(left, v[1].Text)
+		cut := strings.Index(left, v[0].Text)
 		if cut < 0 {
 			out = slices.Append(c.Run, out, core.NewString(c.Run, left))
 			break
 		}
 		out = slices.Append(c.Run, out, core.NewString(c.Run, left[:cut]))
-		left = left[cut+len(v[1].Text):]
+		left = left[cut+len(v[0].Text):]
 	}
 	result := core.NewList(c.Run, out)
 	freeValues(c, out)
@@ -65,12 +65,12 @@ func opStrip(c *eval.Context, s any, v []core.Value) eval.Result {
 func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.Pattern {
-		// Legacy literal form: replace occurrences of one plain string.
+		// Literal form: parameters precede the subject, as in pattern substitution.
 		if len(v) != 3 || v[0].Kind != core.String || v[1].Kind != core.String || v[2].Kind != core.String {
 			discardArgCallables(c, v)
 			return failure("PAT_INVALID", "invalid replace arguments")
 		}
-		value := strings.ReplaceAll(c.Run, v[0].Text, v[1].Text, v[2].Text)
+		value := strings.ReplaceAll(c.Run, v[2].Text, v[0].Text, v[1].Text)
 		return eval.Result{Value: core.Value{Kind: core.String, Text: value}}
 	}
 	var state *replaceState
@@ -89,36 +89,36 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opIncludes(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
-	left, ok := text(v[0])
+	left, ok := text(v[1])
 	if !ok {
-		return invalidArgument(c, v, 0, "string")
-	}
-	if v[1].Kind != core.String {
 		return invalidArgument(c, v, 1, "string")
 	}
-	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.Contains(left, v[1].Text)}}
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
+	}
+	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.Contains(left, v[0].Text)}}
 }
 func opStarts(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
-	left, ok := text(v[0])
+	left, ok := text(v[1])
 	if !ok {
-		return invalidArgument(c, v, 0, "string")
-	}
-	if v[1].Kind != core.String {
 		return invalidArgument(c, v, 1, "string")
 	}
-	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.HasPrefix(left, v[1].Text)}}
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
+	}
+	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.HasPrefix(left, v[0].Text)}}
 }
 func opEnds(c *eval.Context, s any, v []core.Value) eval.Result {
 	_, _ = c, s
-	left, ok := text(v[0])
+	left, ok := text(v[1])
 	if !ok {
-		return invalidArgument(c, v, 0, "string")
-	}
-	if v[1].Kind != core.String {
 		return invalidArgument(c, v, 1, "string")
 	}
-	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.HasSuffix(left, v[1].Text)}}
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
+	}
+	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: strings.HasSuffix(left, v[0].Text)}}
 }
 func opUppercase(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s

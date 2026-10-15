@@ -49,7 +49,7 @@ program="$(mktemp)"
 input="$(mktemp)"
 written="$(mktemp)"
 trap 'rm -f "$program" "$input" "$written"' EXIT
-printf 'result = (join ["wasm" "source"] "-")\n' >"$program"
+printf 'result = (join "-" ["wasm" "source"])\n' >"$program"
 actual="$(node ./tools/kame-wasm.mjs do expr -f "$program")"
 if [ "$actual" != '"wasm-source"' ]; then
 	echo "WASM source expression CLI = $actual, want \"wasm-source\"" >&2

@@ -19,9 +19,9 @@ if grep -q 'result = (nop' "$CLI_ERR"; then
 else
 	test-ok "expression diagnostic uses only authored input"
 fi
-cli_run -- do run --lang expr -c '(nth [1] :false)'
+cli_run -- do run --lang expr -c '(nth :false [1])'
 cli_expect_status 1
-cli_expect_stderr_contains '`nth` argument 2 expects int; got bool'
+cli_expect_stderr_contains '`nth` argument 1 expects int; got bool'
 cli_run -- do run --lang expr -c '(first)'
 cli_expect_status 1
 cli_expect_stderr_contains '`first` expects 1 argument; got 0'

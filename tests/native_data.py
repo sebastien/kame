@@ -32,19 +32,19 @@ def main():
 			checks += 1
 		for expression in [
 			'(eq (items [z: 1 a: [x: [2 :nil]]]) [[key: "z" value: 1] [key: "a" value: [x: [2 :nil]]]])',
-			'(eq (items (set-field [z: 1 a: 2] "z" :nil)) [[key: "z" value: :nil] [key: "a" value: 2]])',
-			'(eq (items (set-field [z: 1] "a" 2)) [[key: "z" value: 1] [key: "a" value: 2]])',
+			'(eq (items (set-field "z" :nil [z: 1 a: 2])) [[key: "z" value: :nil] [key: "a" value: 2]])',
+			'(eq (items (set-field "a" 2 [z: 1])) [[key: "z" value: 1] [key: "a" value: 2]])',
 			'(eq (merge) (parse-json "{}"))',
 			'(eq (items (merge [z: [x: 1] a: 2] [z: [y: 3] b: 4])) [[key: "z" value: [y: 3]] [key: "a" value: 2] [key: "b" value: 4]])',
-			'(let [r [x: 1]] (eq [(get (set-field r "x" 2) "x") r.x] [2 1]))',
-			'(eq (apply (get (first (items [f: ([x] x)])) "value") [42]) [42])',
-			'(eq (apply (get (set-field [f: ([x] x)] "f" ([x] 42)) "f") [0]) 42)',
-			'(eq (apply (get (merge [f: ([x] x)] [f: ([x] 42)]) "f") [0]) 42)',
+			'(let [r [x: 1]] (eq [(get "x" (set-field "x" 2 r)) r.x] [2 1]))',
+			'(eq (apply (get "value" (first (items [f: ([x] x)]))) [42]) [42])',
+			'(eq (apply (get "f" (set-field "f" ([x] 42) [f: ([x] x)])) [0]) 42)',
+			'(eq (apply (get "f" (merge [f: ([x] x)] [f: ([x] 42)])) [0]) 42)',
 			'(record? (parse-json "{}"))', '(list? [])', '(string? "")',
 			'(not (record? []))', '(not (list? :nil))', '(not (string? "{x:*}"))',
 			'(not (string? [f: ([x] x)]))', '(not (list? ([x] x)))',
 		]: value(expression, ':true')
-		for expression in ['(items [])', '(set-field [] "x" 1)', '(set-field [x: 1] 0 2)', '(merge [x: 1] [])', '(items (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(set-field (parse-json "{\\"x\\":1,\\"x\\":2}") "x" ([x] x))', '(merge (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(digest "md5" "abc")', '(digest "sha1" 42)', '(digest :nil "abc")']:
+		for expression in ['(items [])', '(set-field "x" 1 [])', '(set-field 0 2 [x: 1])', '(merge [x: 1] [])', '(items (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(set-field "x" ([x] x) (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(merge (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(digest "md5" "abc")', '(digest "sha1" 42)', '(digest :nil "abc")']:
 			reject(expression)
 		for algorithm in ['sha1', 'sha256', 'sha512']:
 			for text in ['', 'abc', 'é\u0000\n']:
@@ -55,7 +55,7 @@ def main():
 				(project / 'data').write_bytes(data)
 				value(f'(digest "{algorithm}" (read ./data))', json.dumps(hashlib.new(algorithm, data).hexdigest()), '--allow-read')
 		(project / 'anchor').write_text('anchor')
-		value('(eq (get (set-field [data: :nil] "data" (read ./data)) "data") (read ./data))', ':true', '--allow-read')
+		value('(eq (get "data" (set-field "data" (read ./data) [data: :nil])) (read ./data))', ':true', '--allow-read')
 		value('(not (string? (read ./data)))', ':true', '--allow-read')
 		(project / 'Makefile.kmk').write_text('./hash : ./anchor\n\tprintf %s @(digest "sha512" (read ./data)) > @>\n')
 		for data in [b'A\x00\xff\n', b'B\x00\xff\n']:
@@ -74,12 +74,12 @@ def main():
 		os.symlink('\ufeff../one', project / 'bom-link')
 		os.symlink('x' * 600, project / 'long-link')
 		for expression, expected in [
-			('(get (lstat ./link) "link")', ':true'),
-			('(get (lstat ./one) "link")', ':false'),
-			('(get (lstat ./dir-link) "dir")', ':false'),
-			('(get (stat ./dir-link) "dir")', ':true'),
-			('(get (lstat ./dangling) "link")', ':true'),
-			('(get (lstat ./loop) "link")', ':true'),
+			('(get "link" (lstat ./link))', ':true'),
+			('(get "link" (lstat ./one))', ':false'),
+			('(get "dir" (lstat ./dir-link))', ':false'),
+			('(get "dir" (stat ./dir-link))', ':true'),
+			('(get "link" (lstat ./dangling))', ':true'),
+			('(get "link" (lstat ./loop))', ':true'),
 			('(readlink ./link)', '"one"'), ('(readlink ./dangling)', '"absent"'),
 			('(readlink ./loop)', '"loop"'),
 			('(readlink ./bom-link)', '"\ufeff../one"'),
@@ -90,14 +90,14 @@ def main():
 			reject(expression, 'FS_ERR', '--allow-read')
 		os.symlink('../link', project / 'sub/inner')
 		value('(readlink ./dir-link/inner)', '"../link"', '--allow-read')
-		value('(get (lstat (resource "file://' + str(project / 'link') + '")) "link")', ':true', '--allow-read')
+		value('(get "link" (lstat (resource "file://' + str(project / 'link') + '")))', ':true', '--allow-read')
 		for operation in ['lstat', 'readlink']:
 			(project / 'Makefile.kmk').write_text(f'@({operation} ./link) :\n\ttouch forbidden\n')
 			result = run('do', 'plan', '--json', './any')
 			assert result.returncode == 1 and any(code in result.stdout for code in ['PHASE_INVALID', 'CAP_DENIED']), (result.stdout, result.stderr)
 			assert not (project / 'forbidden').exists()
 			checks += 1
-		(project / 'Makefile.kmk').write_text('probe : @(if (get (lstat ./dangling) "link") [] ["missing"])\n')
+		(project / 'Makefile.kmk').write_text('probe : @(if (get "link" (lstat ./dangling)) [] ["missing"])\n')
 		result = run('do', 'plan', '--json', 'probe')
 		assert result.returncode == 0, (result.stdout, result.stderr)
 		checks += 1

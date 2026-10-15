@@ -148,11 +148,11 @@ func TestLibraryLiftsScalarAtomPublications(t *testing.T) {
 }
 
 func TestLibraryLiftsMapFilterFlatmapOverCompleteBatches(t *testing.T) {
-	checkLibraryPublications(t, 1, "(join (map ([x] (str x)) (flatmap ([x] (list x x)) (filter ([x] (gt x 1)) feed))) \",\")", []string{"2,2", "", "3,3,4,4"})
+	checkLibraryPublications(t, 1, "(join \",\" (map ([x] (str x)) (flatmap ([x] (list x x)) (filter ([x] (gt x 1)) feed))))", []string{"2,2", "", "3,3,4,4"})
 }
 
 func TestLibraryLiftsReduceAndResumesOuterNestedSource(t *testing.T) {
-	checkLibraryPublications(t, 2, "(reduce ([a b] (str a b)) feed \"\")", []string{"12", "", "34", "9"})
+	checkLibraryPublications(t, 2, "(reduce ([a b] (str a b)) \"\" feed)", []string{"12", "", "34", "9"})
 }
 
 func TestStreamUpdateCancelsPendingLibraryCallback(t *testing.T) {

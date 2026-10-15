@@ -88,7 +88,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-generated-') as directory:
     project = Path(directory)
     source = project / 'Makefile.kmk'
     values = project / 'modules.kmk'
-    source.write_text('(include "modules.kmk")\ngenerate modules = (map ([module] [kind: "task" target: module inputs: [] order-only: [] recipe: (list (join (list "touch generated-" module) ""))]) MODULES)\nchosen : @((map ([module] module) MODULES))\n\tprintf x >> runs\n')
+    source.write_text('(include "modules.kmk")\ngenerate modules = (map ([module] [kind: "task" target: module inputs: [] order-only: [] recipe: (list (join "" (list "touch generated-" module)))]) MODULES)\nchosen : @((map ([module] module) MODULES))\n\tprintf x >> runs\n')
     values.write_text('MODULES = ["alpha"]\n')
     error = project / 'stderr'
     with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
@@ -414,7 +414,7 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cached-metadata-') as direct
 	input_file = project / 'input'
 	input_file.write_text('unchanged')
 	input_file.chmod(0o600)
-	(project / 'Makefile.kmk').write_text('MODE = (get (stat ./input) "mode")\nchosen :\n\tprintf %s @(MODE) > mode; printf x >> runs\n')
+	(project / 'Makefile.kmk').write_text('MODE = (get "mode" (stat ./input))\nchosen :\n\tprintf %s @(MODE) > mode; printf x >> runs\n')
 	error = project / 'stderr'
 	with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
 		process = subprocess.Popen([*runner, '-C', directory, '--watch', 'chosen'], stdout=stdout, stderr=stderr)

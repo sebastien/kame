@@ -63,6 +63,20 @@ the context.
 
 ## General Operations
 
+Public transformations use `(f PARAMS VALUE)`, with all configuration, including
+optional operands, before the subject. Value pipes append their input, so direct
+calls and `(VALUE | f PARAMS)` have identical meaning. This is a breaking contract:
+operations do not detect or accept the former subject-first order. Comparisons
+keep conventional `(gt LEFT RIGHT)` semantics; variadic combiners retain authored
+operand order. Special forms and internal template primitives are separate.
+
+Canonical changed signatures are `(nth INDEX VALUE)`, `(slice START [END] VALUE)`,
+`(join SEPARATOR LIST)`, `(split SEPARATOR TEXT)`, `(includes? PART TEXT)`,
+`(starts? PREFIX TEXT)`, `(ends? SUFFIX TEXT)`, `(reduce FUNCTION [INITIAL] LIST)`,
+`(apply FUNCTION LIST)`, and `(relpath BASE TARGET)`. `map` and `flatmap` accept only
+`(FUNCTION LIST)`; `reduce` callbacks still receive `(accumulator item)`.
+`(shell! [OPTIONS] COMMAND)` and its aliases also put their subject last.
+
 The general operations are:
 
 | Name | Contract |
@@ -72,13 +86,13 @@ The general operations are:
 | `str` | Concatenate zero or more scalar textual values; reject implicit collection serialization |
 | `json` | Encode exactly one JSON-compatible value, including quoted scalar strings |
 | `count` | Length of string code points, bytes, list, or record |
-| `get` | `(get RECORD KEY [DEFAULT])`: computed string key; missing keys return nil or DEFAULT |
+| `get` | `(get KEY [DEFAULT] RECORD)`: computed string key; missing keys return nil or DEFAULT |
 | `first` | First list item or nil |
 | `nth` | Indexed list or string item with negative indexes |
 | `apply` | Call a function with a list of arguments |
 | `list` | Return arguments as a list |
 | `items` | `(items RECORD)`: ordered `[key: STRING value: VALUE]` entries |
-| `set-field` | `(set-field RECORD KEY VALUE)`: immutable field replacement/insertion |
+| `set-field` | `(set-field KEY VALUE RECORD)`: immutable field replacement/insertion |
 | `merge` | `(merge RECORD...)`: shallow, right-biased immutable record merge |
 | `record?` / `list?` / `string?` | Exact kind tests on one value, without serialization |
 | `digest` | `(digest ALGORITHM BYTES-OR-STRING)`: raw SHA digest as lowercase hexadecimal |
@@ -96,7 +110,7 @@ Records can replace families of computed configuration names:
 ```kame
 modes = [debug: "-O0" release: "-O2"]
 selected = "release"
-flags = (get modes selected)
+flags = (get selected modes)
 ```
 
 The operation is pure and works in definitions, input headers, and planning.
@@ -119,7 +133,7 @@ JSON/template round trips:
 
 ```kame
 settings = [version: "old" nested: [enabled: :true]]
-updated = (set-field settings "version" "new")
+updated = (set-field "version" "new" settings)
 entries = (items updated)
 combined = (merge settings [version: "new" extra: 3])
 ```
@@ -222,8 +236,8 @@ Callbacks are lexical functions evaluated in item order for deterministic
 effects and diagnostics. Their internally discovered host dependencies may run
 in parallel, but the resulting list preserves input order.
 
-`filter` and `filter-out` accept a callable predicate in either argument order,
-or `(LIST VALUE)` as an equality shorthand. The shorthand retains or removes
+`filter` and `filter-out` accept `(PREDICATE LIST)`,
+or `(VALUE LIST)` as an equality shorthand. The shorthand retains or removes
 items equal to `VALUE`, respectively, using the same recursive equality contract
 as `eq`, including bytes, lists, and records. Unsupported values remain errors.
 
@@ -264,7 +278,7 @@ Per `041-pattern-predicates-and-substitution.md`, `sub` is canonical, `replace` 
 a deprecated alias, nonmatching strings are preserved, and `match?` provides
 boolean pattern predicates.
 
-`sub` accepts two or three arguments. `(sub TEXT FROM TO)` with plain
+`sub` accepts two or three arguments. `(sub FROM TO TEXT)` with plain
 strings replaces literal occurrences and retains ordinary eager evaluation.
 A match pattern as the first argument selects anchored matching. Its second
 operand is a replacement expression evaluated only after a match, with named

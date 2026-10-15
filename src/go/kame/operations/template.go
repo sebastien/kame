@@ -17,34 +17,34 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		discardArgCallables(c, v)
 		return c.InvalidOperation("expects 1 to 3 arguments")
 	}
-	// Split PAYLOAD vs STYLE for 2-arg form: record is payload, string is style.
+	// Optional PAYLOAD and STYLE precede the template source.
 	var payload *core.Value
 	var styleArg *core.Value
 	if len(v) == 2 {
-		if v[1].Kind == core.Record {
-			payload = &v[1]
-		} else if v[1].Kind == core.String {
-			styleArg = &v[1]
+		if v[0].Kind == core.Record {
+			payload = &v[0]
+		} else if v[0].Kind == core.String {
+			styleArg = &v[0]
 		} else {
-			return invalidArgument(c, v, 1, "record or string")
+			return invalidArgument(c, v, 0, "record or string")
 		}
 	}
 	if len(v) == 3 {
-		if v[1].Kind != core.Record {
-			return invalidArgument(c, v, 1, "record")
+		if v[0].Kind != core.Record {
+			return invalidArgument(c, v, 0, "record")
 		}
-		if v[2].Kind != core.String {
-			return invalidArgument(c, v, 2, "string")
+		if v[1].Kind != core.String {
+			return invalidArgument(c, v, 1, "string")
 		}
-		payload = &v[1]
-		styleArg = &v[2]
+		payload = &v[0]
+		styleArg = &v[1]
 	}
 	if payload != nil && payload.Kind != core.Record {
-		return invalidArgument(c, v, 1, "record")
+		return invalidArgument(c, v, 0, "record")
 	}
-	src := &v[0]
+	src := &v[len(v)-1]
 	if src.Kind != core.String && src.Kind != core.Bytes {
-		return invalidArgument(c, v, 0, "string or bytes")
+		return invalidArgument(c, v, len(v)-1, "string or bytes")
 	}
 	// Resolve source bytes, style, and file identity.
 	var content string
@@ -65,7 +65,7 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 		style = norm
 		if !utf8.Valid(src.Bytes) {
 			discardArgCallables(c, v)
-			return c.InvalidOperation("argument 1 contains bytes that are not valid UTF-8")
+			return c.InvalidOperation("template source contains bytes that are not valid UTF-8")
 		}
 		if len(src.Bytes) != 0 {
 			b := mem.AllocSlice[byte](c.Run, len(src.Bytes), len(src.Bytes))
@@ -297,7 +297,7 @@ func opTemplateItems(c *eval.Context, state any, values []core.Value) eval.Resul
 }
 
 // opTemplateApply splats the already-built positional argument list. It keeps
-// document loop calls distinct from apply's legacy single-list argument rule.
+// document loop calls distinct from apply's unary list-consumer rule.
 func opTemplateApply(c *eval.Context, state any, values []core.Value) eval.Result {
 	_ = state
 	if values[0].Kind != core.Callable {

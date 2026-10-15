@@ -24,7 +24,7 @@ func TestGeneratedTargetsPlanAndMaterializeWithDefinitionDependencies(t *testing
 		return
 	}
 	defer os.Remove(dir)
-	source := "MODULES = [\"core\" \"cli\"]\ngenerate module-checks = (map ([module] [kind: \"task\" target: (join (list \"check-\" module) \"\") inputs: [] order-only: [] recipe: (list (join (list \"touch generated-\" module) \"\"))]) MODULES)\n"
+	source := "MODULES = [\"core\" \"cli\"]\ngenerate module-checks = (map ([module] [kind: \"task\" target: (join \"\" (list \"check-\" module)) inputs: [] order-only: [] recipe: (list (join \"\" (list \"touch generated-\" module)))]) MODULES)\n"
 	parsed := script.Parse(a, "generated.kmk", source)
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {

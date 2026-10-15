@@ -16,11 +16,11 @@ for backend in native wasm; do
 		'((match? {name:~[a-z]+}) "demo")|:true' \
 		'(map (match? {name:*}-{name:*}) ["a-a" "a-b"])|[:true :false]' \
 		'(filter-out (match? ./{*}.{*}) (map (sub ./journal/{name:*} ./{name}) ["./journal/foo" "./journal/bar.txt"]))|["./foo"]' \
-		'(filter ["./foo" "./foo.txt"] (match? ./{*}.{*}))|["./foo.txt"]' \
+		'(filter (match? ./{*}.{*}) ["./foo" "./foo.txt"])|["./foo.txt"]' \
 		'(sub ./journal/{name:*} missing "./other/foo")|"./other/foo"' \
 		'(replace ./journal/{name:*} missing "./other/foo")|"./other/foo"' \
 		'(sub {name:*}.c {name}.o ["a.c" "b.h"])|["a.o" "b.h"]' \
-		'(sub "banana" "a" "b")|"bbnbnb"' \
+		'(sub "a" "b" "banana")|"bbnbnb"' \
 		'(sub {*}.c "x" [])|[]' \
 		'(sub {*}.c "x" :nil)|:nil' \
 		'(regex-replace {name:~[a-z]+} "x" "42")|:nil'; do

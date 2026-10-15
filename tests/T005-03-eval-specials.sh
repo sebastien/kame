@@ -28,8 +28,8 @@ diag() { # EXPR CODE
 }
 
 test-step "let bindings"
-evaluates '(let [name "app" path ./src] (join [name path] " "))' '"app ./src"'
-evaluates '(let [x 1 y 2] (join [(str x) (str y)] "-"))' '"1-2"'
+evaluates '(let [name "app" path ./src] (join " " [name path]))' '"app ./src"'
+evaluates '(let [x 1 y 2] (join "-" [(str x) (str y)]))' '"1-2"'
 diag '(let)' 'EXPR_INVALID'
 diag '(let [x] x)' 'EXPR_INVALID'
 
@@ -39,7 +39,7 @@ diag '(def)' 'DEF_INVALID'
 diag '(def name)' 'DEF_INVALID'
 
 test-step "eval evaluates expression text"
-evaluates '(eval "(join [\"a\" \"b\"] \"-\")")' '"a-b"'
+evaluates '(eval "(join \"-\" [\"a\" \"b\"])")' '"a-b"'
 evaluates '(eval ":true")' ':true'
 diag '(eval 1)' 'EXPR_INVALID'
 
@@ -49,9 +49,9 @@ evaluates '(let [x 1] (? x "fallback"))' '1'
 
 test-step "pipes"
 evaluates '(1 | str)' '"1"'
-evaluates '("a-b" | replace _ "-" "+")' '"a+b"'
+evaluates '("a-b" | replace "-" "+" _)' '"a+b"'
 evaluates '("x" | uppercase)' '"X"'
 evaluates '(1 | str | uppercase)' '"1"'
-evaluates '(("a" | uppercase) | ([v] (join [v "!"] "")))' '"A!"'
+evaluates '(("a" | uppercase) | ([v] (join "" [v "!"])))' '"A!"'
 
 test-end

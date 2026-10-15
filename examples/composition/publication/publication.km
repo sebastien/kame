@@ -2,5 +2,5 @@
 title = "Little publication"
 sources = (wildcard ./notes/*.txt)
 (page source) = (replace ./notes/{name:*}.txt ./public/{name}.txt source)
-pages = (map sources page)
+pages = (map page sources)
 publication = [title: title sources: sources pages: pages count: (count pages)]

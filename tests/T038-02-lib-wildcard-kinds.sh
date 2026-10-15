@@ -51,8 +51,8 @@ for backend in native wasm; do
 	check '["./assets/nested/dangling"]' '(wildcard :+symlinks ./assets/*/dangling)'
 	check '[]' '(wildcard :+files ./absent/**)'
 	check '["./assets/dirlink/secret"]' '(wildcard :+files ./assets/dirlink/*)'
-	check ':true' '(get (lstat ./assets/file) "regular")'
-	check ':false' '(get (lstat ./assets/linkfile) "regular")'
+	check ':true' '(get "regular" (lstat ./assets/file))'
+	check ':false' '(get "regular" (lstat ./assets/linkfile))'
 	test-step "$backend invalid flags and real metadata errors"
 	for expression in '(wildcard :+files)' '(wildcard :-dir :-symlinks)' '(wildcard :+files :-files ./assets/*)' '(wildcard :-symlinks :+symlinks ./assets/*)' '(wildcard "+unknown" ./assets/*)' '(wildcard "-unknown" ./assets/*)' '(wildcard "+files/child")'; do reject EXPR_INVALID "$expression"; done
 	reject FS_ERR '(wildcard :+files ./assets/loop/*)'
@@ -67,8 +67,8 @@ SHELL = kash
 FILES = (wildcard :+files ./items/*)
 DIRS = (wildcard :+dir ./items/*)
 report :
-	(write! ./file-report (join FILES ","))
-	(write! ./dir-report (join DIRS ","))
+	(write! ./file-report (join "," FILES))
+	(write! ./dir-report (join "," DIRS))
 KMK
 	settled() {
 		local files="$1" dirs="$2" cycles="$3"
@@ -107,7 +107,7 @@ else
 SHELL = kash
 FILES = (wildcard :+files ./items/*)
 report :
-	(write! ./file-report (join FILES ","))
+	(write! ./file-report (join "," FILES))
 	(write! ./content-report (read ./items/visible))
 KMK
 		fifo_settled() {

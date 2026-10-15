@@ -62,10 +62,10 @@ try {
   process.stdout.write = stdoutWrite;
   process.stderr.write = stderrWrite;
 }
-for (const expression of ['(nth [7] 4294967296)', '(nth "a" -4294967296)']) {
+for (const expression of ['(nth 4294967296 [7])', '(nth -4294967296 "a")']) {
   assert.equal(await boundsProgram.evaluate(expression), ':nil', expression);
 }
-for (const expression of ['(slice [7] 4294967296)', '(slice "a" 0 4294967296)']) {
+for (const expression of ['(slice 4294967296 [7])', '(slice 0 4294967296 "a")']) {
   await assert.rejects(boundsProgram.evaluate(expression), (error) => error.code === 'EXPR_INVALID', expression);
 }
 for (const expression of ['(let [xs [7]] xs.-2147483648)', '(let [xs [7]] xs.0..-2147483648)']) {

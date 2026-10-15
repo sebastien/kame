@@ -85,7 +85,7 @@ lesson="$TEST_PATH/idioms"
 mkdir -p "$lesson/docs"
 printf 'one\n' >"$lesson/docs/a.md"
 printf 'two\n' >"$lesson/docs/b.md"
-cli_run --dir "$lesson" -- do run --lang expr -c '(join ["a" "b"] "-")'
+cli_run --dir "$lesson" -- do run --lang expr -c '(join "-" ["a" "b"])'
 cli_expect_status 0
 cli_expect_stdout '"a-b"'
 cli_run --dir "$lesson" -- do run --lang expr -c '(count [1 2 3])'

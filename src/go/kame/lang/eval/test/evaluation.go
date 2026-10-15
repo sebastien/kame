@@ -319,7 +319,7 @@ func TestRenderContentTemplate(t *testing.T) {
 	}
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	result := evaluate(t, program, "(render \"# @if(:true)\nhi\n# @end\n\" \"hash\")")
+	result := evaluate(t, program, "(render \"hash\" \"# @if(:true)\nhi\n# @end\n\")")
 	if result.Diagnostic.Code != "" || result.Value.Text != "hi\n" {
 		t.Error("content render did not remove directive lines")
 	}
@@ -797,12 +797,12 @@ func TestApplyFormsReleaseCallables(t *testing.T) {
 	// One-parameter functions consume the whole list.
 	result := evaluate(t, program, "(apply ([x] x) [1])")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 1 {
-		t.Error("apply list-first failed")
+		t.Error("apply unary list consumer failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(apply [1] ([x] x))")
+	result = evaluate(t, program, "((list 1) | apply ([x] x))")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 1 {
-		t.Error("apply function-first failed")
+		t.Error("piped apply failed")
 	}
 	result.Free(a)
 	// Multi-parameter functions splat the list.
@@ -1513,10 +1513,10 @@ func TestRecursiveEvaluationDepthIsBoundedAndRestored(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	parsed := script.Parse(a, "depth.km", `(walk TEXT) = (if (= (count TEXT) 0) 0 (character TEXT))
-(character TEXT) = (walk (slice TEXT 1))`)
+(character TEXT) = (walk (slice 1 TEXT))`)
 	program := eval.Compile(a, engine, parsed, registry)
 	context := eval.Context{Program: program, Scope: program.Scope, Run: a}
-	texts := []string{`(walk "x,y\n")`, `(walk (reduce ([TEXT STEP] (str TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))`, `(walk "x,y\n")`, `(count (reduce ([TEXT STEP] (str TEXT TEXT)) [1 2 3 4 5 6 7 8 9 10] "x,y\n"))`}
+	texts := []string{`(walk "x,y\n")`, `(walk (reduce ([TEXT STEP] (str TEXT TEXT)) "x,y\n" [1 2 3 4 5 6 7 8 9 10]))`, `(walk "x,y\n")`, `(count (reduce ([TEXT STEP] (str TEXT TEXT)) "x,y\n" [1 2 3 4 5 6 7 8 9 10]))`}
 	for i := range texts {
 		expression := expr.Parse(a, "call.km", texts[i])
 		if len(expression.Diagnostics) != 0 { t.Error("depth fixture failed to parse") }
@@ -1731,12 +1731,12 @@ func TestPlaceholderSectionsEvaluateAsLambdas(t *testing.T) {
 		t.Error("section over a defined function failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(((list (nth _0 0) _1)) [\"x\"] \"y\")")
+	result = evaluate(t, program, "(((list (nth 0 _0) _1)) [\"x\"] \"y\")")
 	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "x" || result.Value.List[1].Text != "y" {
 		t.Error("section placeholders did not descend into nested calls")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(map ((nth _0 0)) (list [\"a\" \"b\"] [\"c\"]))")
+	result = evaluate(t, program, "(map ((nth 0 _0)) (list [\"a\" \"b\"] [\"c\"]))")
 	if result.Diagnostic.Code != "" || result.Value.List[0].Text != "a" || result.Value.List[1].Text != "c" {
 		t.Error("nested section callback through map failed")
 	}

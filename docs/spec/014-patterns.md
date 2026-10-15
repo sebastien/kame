@@ -68,8 +68,8 @@ Recognition rules:
   the name `_`.
 - The section body is the single item. The scan for placeholders descends the
   whole body subtree but does not descend into a nested section form, so a
-  nested section owns its own placeholders: `((map _ ((nth _ 0))))` is
-  `([x] (map x ([i] (nth i 0))))`.
+  nested section owns its own placeholders: `((map _ ((nth 0 _))))` is
+  `([x] (map x ([i] (nth 0 i))))`.
 - A body with no placeholder is an ordinary nested call, not a section.
 
 ### Semantics
@@ -197,7 +197,7 @@ with `EXPR_INVALID`.
 
 `replace` has two modes:
 
-- `(replace TEXT FROM TO)` with plain strings replaces every literal `FROM`
+- `(replace FROM TO TEXT)` with plain strings replaces every literal `FROM`
   occurrence in `TEXT` with `TO`. All three operands evaluate normally in
   caller scope, left to right; this mode is unchanged.
 - `(replace MATCH-PATTERN REPLACEMENT [SUBJECT])` performs anchored pattern

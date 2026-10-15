@@ -1,1 +1,1 @@
-(let [name "app" path ./src] (join [name path] " "))
+(let [name "app" path ./src] (join " " [name path]))

@@ -2358,7 +2358,7 @@ class Module {
   async selfTest() {
     const info = this.abiInfo();
     const context = { grants: { read: true, write: true, run: true, env: true } };
-    const pure = this.decode0(await this.evaluate('', '(join ["a" "b"] ":")', context));
+    const pure = this.decode0(await this.evaluate('', '(join ":" ["a" "b"])', context));
     const expression = this.decode0(await this.evaluate('', '(count [1 2 3])', context));
     return { ...info, selfTest: { pure, expression } };
   }

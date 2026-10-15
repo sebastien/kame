@@ -45,19 +45,19 @@ func opItems(c *eval.Context, s any, v []core.Value) eval.Result {
 // Replacing a field preserves its position; inserting a new field appends it.
 func opSetField(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if !validRecord(v[0]) { return invalidArgument(c, v, 0, "record with unique keys") }
-	if v[1].Kind != core.String { return invalidArgument(c, v, 1, "string") }
+	if !validRecord(v[2]) { return invalidArgument(c, v, 2, "record with unique keys") }
+	if v[0].Kind != core.String { return invalidArgument(c, v, 0, "string") }
 	var fields []core.RecordField
 	found := false
-	for i := range v[0].Record {
-		field := v[0].Record[i]
-		if field.Key == v[1].Text {
-			c.FreeCallable(&v[0].Record[i].Value)
-			field.Value, found = v[2], true
+	for i := range v[2].Record {
+		field := v[2].Record[i]
+		if field.Key == v[0].Text {
+			c.FreeCallable(&v[2].Record[i].Value)
+			field.Value, found = v[1], true
 		}
 		fields = slices.Append(c.Run, fields, field)
 	}
-	if !found { fields = slices.Append(c.Run, fields, core.RecordField{Key: v[1].Text, Value: v[2]}) }
+	if !found { fields = slices.Append(c.Run, fields, core.RecordField{Key: v[0].Text, Value: v[1]}) }
 	result := core.NewRecord(c.Run, fields)
 	slices.Free(c.Run, fields)
 	return eval.Result{Value: result}

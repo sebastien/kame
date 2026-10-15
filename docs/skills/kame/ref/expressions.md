@@ -42,7 +42,7 @@ of three or more double quotes preserve raw multiline content.
 ## Calls, functions, and pipes
 
 ```kame
-(join ["a" "b"] ",")
+(join "," ["a" "b"])
 ([name] (str "Hello, " name))
 (let [names ["Ada" "Lin"]]
   (names | map ([name] (uppercase name)) | join ", "))
@@ -55,6 +55,9 @@ lambda. Outside sections, underscore names remain ordinary names.
 
 `(value | transform a)` becomes `(transform a value)`; `_` on the right chooses
 where to insert the value. This is value transformation, not a process pipe.
+Standard transformations put parameters (including optional ones) before their
+subject: `(nth 1 files)` or `(files | nth 1)`. Comparisons keep left/right order:
+`(gt LEFT RIGHT)`, so use `(VALUE | gt _ 3)` to test whether `VALUE > 3`.
 See [Library](./library.md) for operation signatures; do not infer operand
 order from another language.
 
@@ -146,9 +149,9 @@ interpolation to demand capture. See [Kash](./kash.md) for process semantics.
 ## Verify
 
 ```sh
-kame do run --lang expr -c '(join ["a" "b"] ",")'
+kame do run --lang expr -c '(join "," ["a" "b"])'
 kame do run --lang expr --allow-read=./src -c '(wildcard ./src/*.c)'
-printf '%s\n' '(join ["a" "b"] ",")' | kame do parse --lang expr
+printf '%s\n' '(join "," ["a" "b"])' | kame do parse --lang expr
 ```
 
 Pure value sessions deny host capabilities by default. Grant only required

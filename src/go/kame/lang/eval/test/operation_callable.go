@@ -13,7 +13,7 @@ func TestOperationValuesSupportCallbacksAliasesAndContainers(t *testing.T) {
 	engine := core.NewEngine(a)
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
-	parsed := script.Parse(a, "operations.km", "callback = count\ncallbacks = [count uppercase]\nrecord = [callback: count]\nresult = [(callback [1 2]) (map count [[1] [2 3]]) (reduce str [\"a\" \"b\"] \"\")]\n")
+	parsed := script.Parse(a, "operations.km", "callback = count\ncallbacks = [count uppercase]\nrecord = [callback: count]\nresult = [(callback [1 2]) (map count [[1] [2 3]]) (reduce str \"\" [\"a\" \"b\"])]\n")
 	p := eval.Compile(a, engine, parsed, registry)
 	node := p.Definition("result")
 	engine.Request(node)

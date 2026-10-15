@@ -5,7 +5,7 @@ names = ["hello world.txt" "second.txt"]
 
 echo $title
 printf "[%s]\n" $names
-printf "[%s]\n" (map names label)
+printf "[%s]\n" (map label names)
 
 # Capture is a value; strip explicitly removes its preserved trailing newline.
 greeting = $(printf "hello\n")

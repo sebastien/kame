@@ -32,7 +32,7 @@ parity '(str $(printf a) $(printf b))' 0 --allow-run
 parity '(str (eval "$(printf a)") (eval "$(printf b)"))' 0 --allow-run
 parity '$(printf "one\ntwo\n")' 0 --allow-run
 parity '(let [files ["a b" "c"]] $(printf "[%s]" $files))' 0 --allow-run
-parity '(map ["a" "b"] ([x] $(printf "%s" $x)))' 0 --allow-run
+parity '(map ([x] $(printf "%s" $x)) ["a" "b"])' 0 --allow-run
 parity '(let [f ([x] $(printf "%s" $x))] (str (f "a") (f "b")))' 0 --allow-run
 parity '$(printf "%s" $(printf nested))' 0 --allow-run
 parity '$(printf "[%s]" (nop ["a b" "c"]))' 0 --allow-run

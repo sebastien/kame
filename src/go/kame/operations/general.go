@@ -173,32 +173,33 @@ func opCount(c *eval.Context, s any, v []core.Value) eval.Result {
 // transfers callable ownership; discarded fields/defaults release theirs.
 func opGet(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[0].Kind != core.Record {
-		return invalidArgument(c, v, 0, "record")
+	record := len(v)-1
+	if v[record].Kind != core.Record {
+		return invalidArgument(c, v, record, "record")
 	}
-	if v[1].Kind != core.String {
-		return invalidArgument(c, v, 1, "string")
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
 	}
 	selected := -1
-	for i := range v[0].Record {
-		if v[0].Record[i].Key == v[1].Text {
+	for i := range v[record].Record {
+		if v[record].Record[i].Key == v[0].Text {
 			selected = i
 			break
 		}
 	}
 	result := core.Value{Kind: core.Nil}
-	for i := range v[0].Record {
+	for i := range v[record].Record {
 		if i == selected {
-			result = v[0].Record[i].Value.Clone(c.Run)
+			result = v[record].Record[i].Value.Clone(c.Run)
 		} else {
-			c.FreeCallable(&v[0].Record[i].Value)
+			c.FreeCallable(&v[record].Record[i].Value)
 		}
 	}
 	if len(v) == 3 {
 		if selected < 0 {
-			result = v[2].Clone(c.Run)
+			result = v[1].Clone(c.Run)
 		} else {
-			c.FreeCallable(&v[2])
+			c.FreeCallable(&v[1])
 		}
 	}
 	return eval.Result{Value: result}
@@ -220,39 +221,39 @@ func opFirst(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opNth(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[1].Kind != core.Int {
-		return invalidArgument(c, v, 1, "int")
+	if v[0].Kind != core.Int {
+		return invalidArgument(c, v, 0, "int")
 	}
 	// Validate in the value's int64 width before narrowing on 32-bit targets.
 	length := 0
-	if v[0].Kind == core.List {
-		length = len(v[0].List)
-	} else if v[0].Kind == core.String {
-		length = utf8.RuneCountInString(v[0].Text)
+	if v[1].Kind == core.List {
+		length = len(v[1].List)
+	} else if v[1].Kind == core.String {
+		length = utf8.RuneCountInString(v[1].Text)
 	} else {
-		return invalidArgument(c, v, 0, "list or string")
+		return invalidArgument(c, v, 1, "list or string")
 	}
-	wideIndex := v[1].Int
+	wideIndex := v[0].Int
 	if wideIndex < -int64(length) || wideIndex >= int64(length) {
-		c.FreeCallable(&v[0])
+		c.FreeCallable(&v[1])
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
 	index := int(wideIndex)
 	if index < 0 { index += length }
-	if v[0].Kind == core.List {
-		result := v[0].List[index].Clone(c.Run)
-		for i := range v[0].List {
+	if v[1].Kind == core.List {
+		result := v[1].List[index].Clone(c.Run)
+		for i := range v[1].List {
 			if i != index {
-				c.FreeCallable(&v[0].List[i])
+				c.FreeCallable(&v[1].List[i])
 			}
 		}
 		return eval.Result{Value: result}
 	}
-	start, end := runeOffset(v[0].Text, index), runeOffset(v[0].Text, index+1)
+	start, end := runeOffset(v[1].Text, index), runeOffset(v[1].Text, index+1)
 	if start < 0 || end < 0 {
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
-	return eval.Result{Value: core.NewString(c.Run, v[0].Text[start:end])}
+	return eval.Result{Value: core.NewString(c.Run, v[1].Text[start:end])}
 }
 func runeOffset(text string, index int) int {
 	if index < 0 {
@@ -270,21 +271,9 @@ func runeOffset(text string, index int) int {
 }
 func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	// Legacy sources pass the argument list first; the function-first order is
-	// also accepted for symmetry.
-	//
 	// Frees are explicit, never deferred: Solod emits textually-prior defers
 	// at every later return, so conditional defers would also run on paths
 	// whose branch never executed (double free with rejected-argument cleanup).
-	if v[0].Kind == core.List && v[1].Kind == core.Callable {
-		arguments := applyArguments(c.Run, v[0], v[1])
-		result := c.Call(v[1], arguments.Values)
-		if arguments.Owned {
-			slices.Free(c.Run, arguments.Values)
-		}
-		discardArgCallables(c, v)
-		return result
-	}
 	if v[0].Kind == core.Callable && v[1].Kind == core.List {
 		arguments := applyArguments(c.Run, v[1], v[0])
 		result := c.Call(v[0], arguments.Values)
@@ -297,10 +286,7 @@ func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 	if v[0].Kind == core.Callable {
 		return invalidArgument(c, v, 1, "list")
 	}
-	if v[0].Kind == core.List {
-		return invalidArgument(c, v, 1, "callable")
-	}
-	return invalidArgument(c, v, 0, "list or callable")
+	return invalidArgument(c, v, 0, "callable")
 }
 
 type applyCall struct {
@@ -310,8 +296,8 @@ type applyCall struct {
 
 func applyArguments(a mem.Allocator, values core.Value, function core.Value) applyCall {
 	callable := function.Callable.(*eval.Function)
-	// Legacy apply treats a one-parameter function as a list consumer. Keep
-	// function-first splatting for multi-parameter callbacks.
+	// Unary functions consume the whole list; multi-parameter functions
+	// receive its items as positional arguments.
 	if len(callable.Parameters) == 1 || callable.Arity == 1 {
 		arguments := mem.AllocSlice[core.Value](a, 1, 1)
 		arguments[0] = values

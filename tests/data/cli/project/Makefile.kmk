@@ -12,7 +12,7 @@ default : ./build/app
 	sh tools/compile @> @<
 
 ./build/version.txt :
-	@(yield! (join ["version " VERSION] ""))
+	@(yield! (join "" ["version " VERSION]))
 
 task bundle : ./build/app
 	sh tools/link ./build/bundle.tar @<

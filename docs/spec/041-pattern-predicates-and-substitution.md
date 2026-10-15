@@ -19,7 +19,7 @@ nonmatch. It does not change pattern grammar, rule matching, `regex-match`,
 | --- | --- |
 | `(match? MATCH-PATTERN TEXT)` | `:true` or `:false` |
 | `(match? MATCH-PATTERN)` | Unary matching predicate |
-| `(sub TEXT FROM TO)` | Literal substitution with three string arguments |
+| `(sub FROM TO TEXT)` | Literal substitution with three string arguments |
 | `(sub MATCH-PATTERN EXPANSION SUBJECT)` | Pattern substitution |
 | `(sub MATCH-PATTERN EXPANSION)` | Unary substitution callable |
 
@@ -72,7 +72,7 @@ or register dependencies. Exceeding the shared regex matching budget reports
 
 ### Literal form
 
-`(sub TEXT FROM TO)` with three strings replaces all literal occurrences of
+`(sub FROM TO TEXT)` with three strings replaces all literal occurrences of
 `FROM` in `TEXT`, using the existing literal `replace` contract. All arguments
 are evaluated eagerly. This form does not perform pattern matching or expose
 captures, and a text with no occurrences is returned unchanged.

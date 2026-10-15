@@ -47,17 +47,17 @@ evaluates '(count "")' '0'
 test-step "first and nth"
 evaluates '(first (list "a" "b"))' '"a"'
 evaluates '(first [])' ':nil'
-evaluates '(nth (list "a" "b" "c") 1)' '"b"'
-evaluates '(nth (list "a" "b" "c") -1)' '"c"'
-evaluates '(nth "abc" 1)' '"b"'
+evaluates '(nth 1 (list "a" "b" "c"))' '"b"'
+evaluates '(nth -1 (list "a" "b" "c"))' '"c"'
+evaluates '(nth 1 "abc")' '"b"'
 
 test-step "list builds a list from its arguments"
 evaluates '(list 1 "a" :true)' '[1 "a" :true]'
 evaluates '(list)' '[]'
 
 test-step "apply calls a function with a list of arguments"
-evaluates '(apply ([x y] (join [x y] "-")) (list "a" "b"))' '"a-b"'
-evaluates '(apply (list "a" "b") ([x y] (join [x y] "-")))' '"a-b"'
+evaluates '(apply ([x y] (join "-" [x y])) (list "a" "b"))' '"a-b"'
+evaluates '((list "a" "b") | apply ([x y] (join "-" [x y])))' '"a-b"'
 
 test-step "legacy core-make expressions evaluate against a fixture tree"
 fixture_copy legacy-core legacy-core

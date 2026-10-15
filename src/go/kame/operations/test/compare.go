@@ -39,10 +39,10 @@ func TestStructuralEqualityAndFilterShorthand(t *testing.T) {
 		if r.Diagnostic.Code != "" || r.Value.Kind != core.Bool || !r.Value.Bool { t.Error("equality contract failed: " + texts[i]) }
 		r.Free(a)
 	}
-	r := evaluate(t, p, "(filter [[a: 1 b: 2] [a: 2] [b: 2 a: 1]] [b: 2 a: 1])")
+	r := evaluate(t, p, "(filter [b: 2 a: 1] [[a: 1 b: 2] [a: 2] [b: 2 a: 1]])")
 	if r.Diagnostic.Code != "" || len(r.Value.List) != 2 { t.Error("filter did not use structural equality") }
 	r.Free(a)
-	invalid := []string{"(eq count :nil)", "(ne [0 count] [1])", "(is [] [count])", "(eq [f: count] [other: 1])", "(eq ./a/{name} \"a\")", "(eq (resource \"mem://test/a\") :nil)", "(filter [[count]] [])", "(eq [([x] x)] [])", "(let [xs [identity]] (eq xs xs))", "(let [xs [identity]] (filter [xs] xs))", "(lt [] [])"}
+	invalid := []string{"(eq count :nil)", "(ne [0 count] [1])", "(is [] [count])", "(eq [f: count] [other: 1])", "(eq ./a/{name} \"a\")", "(eq (resource \"mem://test/a\") :nil)", "(filter [] [[count]])", "(eq [([x] x)] [])", "(let [xs [identity]] (eq xs xs))", "(let [xs [identity]] (filter xs [xs]))", "(lt [] [])"}
 	for i := range invalid {
 		r = evaluate(t, p, invalid[i])
 		if r.Diagnostic.Code != "EXPR_INVALID" { t.Error("opaque value or unordered kind accepted: " + invalid[i]) }

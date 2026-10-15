@@ -14,7 +14,7 @@ parse error; use `name = :nil` or `name = ""` to state what you mean.
 Application arguments are Kame values, not shell words:
 
 ```sh
-kame do run --lang expr -c '(join ["a" "b"] "-")'
+kame do run --lang expr -c '(join "-" ["a" "b"])'
 # "a-b"
 kame do run --lang expr -c '(count [1 2 3])'
 # 3
@@ -142,7 +142,7 @@ including a filtered wildcard result. `**` captures can backtrack across path
 segments. Anchor the source prefix to avoid copying it into the destination:
 
 ```kame
-SOURCES = (filter-out ([x] (includes? x "draft")) (wildcard ./src/**/*.txto))
+SOURCES = (filter-out ([x] (includes? "draft" x)) (wildcard ./src/**/*.txto))
 OUTPUTS = (sub ./src/{path:**}.txto ./build/{path}.json SOURCES)
 ```
 

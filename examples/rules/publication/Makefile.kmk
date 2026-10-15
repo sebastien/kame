@@ -1,6 +1,6 @@
 # Calculated paths become dependencies, not commands.
 sources = (wildcard ./notes/*.txt)
-pages = (map sources (replace ./notes/{name:*}.txt ./public/{name}.txt))
+pages = (map (replace ./notes/{name:*}.txt ./public/{name}.txt) sources)
 
 default : ./public/index.txt
 

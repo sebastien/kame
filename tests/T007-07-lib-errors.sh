@@ -39,8 +39,8 @@ diag '(nth (list 1))' 'EXPR_INVALID'
 
 test-step "kind failures carry messages"
 diag '(first 1)' 'EXPR_INVALID'
-diag '(join (list 1) "-")' 'EXPR_INVALID'
-diag '(slice 1 0 2)' 'EXPR_INVALID'
+diag '(join "-" (list 1))' 'EXPR_INVALID'
+diag '(slice 0 2 1)' 'EXPR_INVALID'
 diag '(sorted "abc")' 'EXPR_INVALID'
 
 test-step "failure diagnostics stay printable"

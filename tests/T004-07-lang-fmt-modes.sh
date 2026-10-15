@@ -36,10 +36,10 @@ cli_expect_status 0
 cli_expect_stdout "./x :
   true"
 
-printf '( join [a b] "," )' >expression.km
+printf '( join "," [a b] )' >expression.km
 cli_run --stdin expression.km -- do fmt --lang expr
 cli_expect_status 0
-cli_expect_stdout '(join [a b] ",")'
+cli_expect_stdout '(join "," [a b])'
 
 printf 'echo @(count [a b])' >template.km
 cli_run --stdin template.km -- do fmt --lang template

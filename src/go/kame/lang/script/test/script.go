@@ -157,7 +157,7 @@ func TestOptionalIncludesPreserveParsingAndFormatting(t *testing.T) {
 }
 
 func TestGeneratedDeclarationParsesFormatsAndRetainsName(t *testing.T) {
-	text := "MODULES = [\"core\" \"cli\"]\ngenerate checks = (map ([module] [kind: \"task\" target: (join (list \"check-\" module) \"\") inputs: [] order-only: [] recipe: [\"go test ./...\"]]) MODULES)\n"
+	text := "MODULES = [\"core\" \"cli\"]\ngenerate checks = (map ([module] [kind: \"task\" target: (join \"\" (list \"check-\" module)) inputs: [] order-only: [] recipe: [\"go test ./...\"]]) MODULES)\n"
 	parsed := script.Parse(t.Allocator(), "generated.kmk", text)
 	defer parsed.Free()
 	if len(parsed.Diagnostics) != 0 || len(parsed.Items) != 2 {

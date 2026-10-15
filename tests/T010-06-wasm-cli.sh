@@ -84,7 +84,7 @@ else
 fi
 
 test-step "do run --lang expr matches native output byte-for-byte"
-for expression in '(count [1 2 3])' '(join ["a" "b"] ":")' '(uppercase "kame")' '(let [a 10] (out! "hello" a))' '(yield! "generated")'; do
+for expression in '(count [1 2 3])' '(join ":" ["a" "b"])' '(uppercase "kame")' '(let [a 10] (out! "hello" a))' '(yield! "generated")'; do
 	node "$CLI_ROOT/dist/kame.js" do run --lang expr -c "$expression" >"$work/wasm.out"
 	"$CLI_BIN" do run --lang expr -c "$expression" >"$work/native.out"
 	if cmp -s "$work/wasm.out" "$work/native.out"; then
@@ -103,7 +103,7 @@ if [ "$wasm_status" = 0 ] && cmp -s "$work/wasm.err-effect.out" "$work/native.er
 else
 	test-fail "err parity: wasm-out=$(cat "$work/wasm.err-effect.out") wasm-err=$(cat "$work/wasm.err-effect.err") native-out=$(cat "$work/native.err-effect.out") native-err=$(cat "$work/native.err-effect.err")"
 fi
-printf '(join ["wasm" "source"] "-")\n' >"$work/expression.kmk"
+printf '(join "-" ["wasm" "source"])\n' >"$work/expression.kmk"
 node "$CLI_ROOT/dist/kame.js" do run --lang expr "$work/expression.kmk" >"$work/wasm.expr"
 "$CLI_BIN" do run --lang expr "$work/expression.kmk" >"$work/native.expr"
 if cmp -s "$work/wasm.expr" "$work/native.expr" && [ "$(cat "$work/wasm.expr")" = '"wasm-source"' ]; then

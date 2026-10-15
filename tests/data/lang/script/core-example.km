@@ -4,17 +4,17 @@
 SOURCE_PATH = ./src/ts/littlemake
 
 SOURCE_FILES = (filter
-  ([f] (not (includes? f "/node_modules/")))
+  ([f] (not (includes? "/node_modules/" f)))
   (filter
-    ([f] (not (ends? f ".d.ts")))
-    (wildcard (join [SOURCE_PATH "/**/*.ts"] ""))))
+    ([f] (not (ends? ".d.ts" f)))
+    (wildcard (join "" [SOURCE_PATH "/**/*.ts"]))))
 
 FILE_COUNT = (count SOURCE_FILES)
 
 manifest = (map
   ([file] [
-    path: (relpath file SOURCE_PATH)
-    name: (nth (splitext file) 0)
+    path: (relpath SOURCE_PATH file)
+    name: (nth 0 (splitext file))
   ])
   SOURCE_FILES
 )

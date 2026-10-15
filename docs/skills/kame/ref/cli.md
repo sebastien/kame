@@ -25,7 +25,7 @@ expand again; duplicate declarations still fail registration. Inline `-c` /
 ## Execute values, rules, and processes
 
 ```sh
-kame do run --lang expr -c '(join ["a" "b"] ",")'
+kame do run --lang expr -c '(join "," ["a" "b"])'
 kame do run ./values.km result
 kame do run ./Makefile.kmk check
 kame do run ./publish.kash -- preview
@@ -217,7 +217,7 @@ Runner dry-run works for pure km/expr/Kash as well as mixed rule sessions.
 ## Evaluate a standalone expression
 
 ```sh
-kame do run --lang expr -c '(join ["a" "b"] ",")'
+kame do run --lang expr -c '(join "," ["a" "b"])'
 kame do run --lang expr --allow-read=./src -c '(wildcard ./src/*.c)'
 kame do run --lang expr --allow-env=HOME -c '(env "HOME")'
 ```
@@ -245,10 +245,10 @@ executable paths for direct argv processes; legacy shell-text operations require
 an unrestricted run grant.
 Grants do not sandbox a launched executable's internal filesystem access.
 
-Render a document with `(render SOURCE [PAYLOAD] [STYLE])`, for example:
+Render a document with `(render [PAYLOAD] [STYLE] SOURCE)`, for example:
 
 ```sh
-kame do run --lang expr --allow-read -c '(render ./page.html [title: "Hello"])'
+kame do run --lang expr --allow-read -c '(render [title: "Hello"] ./page.html)'
 ```
 
 `do render` renders document files directly and supports parse-only `--check`:

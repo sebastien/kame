@@ -83,14 +83,14 @@ func opAbspath(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opRelpath(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	target, ok := text(v[0])
+	target, ok := text(v[1])
 	if !ok {
-		return invalidArgument(c, v, 0, "string")
-	}
-	if v[1].Kind != core.String {
 		return invalidArgument(c, v, 1, "string")
 	}
-	base := path.Join(c.Run, c.Cwd, v[1].Text)
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
+	}
+	base := path.Join(c.Run, c.Cwd, v[0].Text)
 	absolute := path.Join(c.Run, c.Cwd, target)
 	defer mem.FreeString(c.Run, base)
 	defer mem.FreeString(c.Run, absolute)

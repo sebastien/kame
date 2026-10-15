@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v14"
+const version = "v15"
 
 // Register describes every standard operation explicitly. Categories describe
 // the operation itself; callable/template effects still propagate dynamically.

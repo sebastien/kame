@@ -249,8 +249,8 @@ for a reference, `(nop [1 2])` for an inline list argument, and ordinary calls
 or value pipes for transformations. Expressions use Kame names, not `$` wrappers:
 
 ```kash
-emit (replace source ".c" ".o")
-report (map sources inspect)
+emit (replace ".c" ".o" source)
+report (map inspect sources)
 ```
 
 Values carry ordinary Kame dependencies, capabilities, failures, and authored

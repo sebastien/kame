@@ -453,24 +453,25 @@ func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
+	command := len(v)-1
 	if c.Phase != eval.EvaluatePhase {
 		c.MarkPhaseInvalid()
 		discardArgCallables(c, v)
 		return failure("PHASE_INVALID", "shell is invalid outside evaluation")
 	}
-	if v[0].Kind != core.String {
-		return invalidArgument(c, v, 0, "string")
+	if v[command].Kind != core.String {
+		return invalidArgument(c, v, command, "string")
 	}
-	if len(v) == 2 && v[1].Kind != core.Record {
-		return invalidArgument(c, v, 1, "record")
+	if len(v) == 2 && v[0].Kind != core.Record {
+		return invalidArgument(c, v, 0, "record")
 	}
 	if c.Program != nil && c.Program.DryRun {
 		return eval.Result{Value: core.NewString(c.Run, "")}
 	}
 	if c.HasEnvironment {
-		return request(c, host.RequestProcess, host.ScopedProcessPayload(c.Run, v[0].Text, c.Environment))
+		return request(c, host.RequestProcess, host.ScopedProcessPayload(c.Run, v[command].Text, c.Environment))
 	}
-	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[0].Text))
+	return request(c, host.RequestProcess, host.ProcessPayload(c.Run, v[command].Text))
 }
 
 func opShellTemplate(c *eval.Context, s any, v []core.Value) eval.Result {

@@ -45,7 +45,7 @@ When a producer promises one terminal LF, remove exactly that framing byte:
 
 ```kame
 (without-final-lf TEXT) =
-  (if (ends? TEXT "\n") (slice TEXT 0 -1) TEXT)
+  (if (ends? "\n" TEXT) (slice 0 -1 TEXT) TEXT)
 ```
 
 This preserves leading whitespace, trailing spaces/tabs, embedded newlines, and

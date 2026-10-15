@@ -426,7 +426,7 @@ async function main() {
   };
   if (args[0] === '--self-test') {
     result.selfTest = selfTest(exports);
-    result.pureExpression = evaluatePure(exports, '(join ["a" "b"] ":")');
+    result.pureExpression = evaluatePure(exports, '(join ":" ["a" "b"])');
   }
   stdout.write(`${JSON.stringify(result)}\n`);
   return 0;

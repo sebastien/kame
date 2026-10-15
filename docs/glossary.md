@@ -96,7 +96,7 @@ reference.
 ### Placeholder section
 
 A **placeholder section** is a short lexical function written around one
-expression with placeholders, such as `((replace _ ".c" ".o"))`. `_`, `__`,
+expression with placeholders, such as `((replace ".c" ".o" _))`. `_`, `__`,
 and `_2` denote positional arguments. A placeholder only has this special meaning
 inside a section; elsewhere it remains an ordinary name.
 

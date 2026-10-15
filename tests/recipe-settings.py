@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory() as temporary:
     # Membership is itself a dependency, including appearance and disappearance.
     (project / 'members').mkdir()
     (project / 'members/a').write_text('A')
-    membership = 'SHELL = kash\nMEMBERS = (wildcard ./members/*)\n./membership : ./input\n\t(yield! (join (map ([file] (text (read file))) MEMBERS) ""))\n'
+    membership = 'SHELL = kash\nMEMBERS = (wildcard ./members/*)\n./membership : ./input\n\t(yield! (join "" (map ([file] (text (read file))) MEMBERS)))\n'
     for expected in ('A', 'AB', 'B'):
         run(membership, ['./membership'])
         assert (project / 'membership').read_text() == expected
@@ -107,7 +107,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (project / 'consumer').stat().st_mtime_ns == stamp
     # Completed operands retain their staged effects and reconstructed scopes.
     (project / 'late').write_text('B')
-    staged = 'SHELL = kash\n./staged : ./input\n\t(yield! (join (list (let [] (out! "once") "A") (text (read "./late"))) ""))\n'
+    staged = 'SHELL = kash\n./staged : ./input\n\t(yield! (join "" (list (let [] (out! "once") "A") (text (read "./late")))))\n'
     run(staged, ['./staged'], expected='once')
     assert (project / 'staged').read_text() == 'AB'
     run(staged, ['--force', './staged'], expected='once')
@@ -116,7 +116,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (project / 'nested').read_text() == 'ABB'
     (project / 'first').write_text('A')
     (project / 'second').write_text('C')
-    callbacks = 'SHELL = kash\n./callbacks : ./input\n\t(yield! (join (map ([file] (str (text (read file)) (text (read "./late")))) [./first ./second]) "|"))\n'
+    callbacks = 'SHELL = kash\n./callbacks : ./input\n\t(yield! (join "|" (map ([file] (str (text (read file)) (text (read "./late")))) [./first ./second])))\n'
     run(callbacks, ['./callbacks'])
     assert (project / 'callbacks').read_text() == 'AB|CB'
     mutable = 'SHELL = kash\n./mutable : ./input\n\t(yield! (let [value "A"] (def value "C") (str value (text (read "./late")))))\n'

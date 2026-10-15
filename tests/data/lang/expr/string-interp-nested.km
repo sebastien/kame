@@ -1,1 +1,1 @@
-"{(join [prefix name suffix] "-")}"
+"{(join "-" [prefix name suffix])}"

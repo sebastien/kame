@@ -7,7 +7,7 @@ test-step "build native and WASM artifacts"
 cd "$CLI_ROOT"
 make dist-wasm >/dev/null
 cli_build
-printf '%s\n' '(nop [status: 0])' 'if (= 1 1)' '  printf "%s" (join ["a" "b"] "-")' 'printf "%s" ./@(join ["two" "words"] " ")/file' >"$TMPDIR/source.kash"
+printf '%s\n' '(nop [status: 0])' 'if (= 1 1)' '  printf "%s" (join "-" ["a" "b"])' 'printf "%s" ./@(join " " ["two" "words"])/file' >"$TMPDIR/source.kash"
 for backend in native wasm; do
 	work="$TMPDIR/$backend"
 	mkdir -p "$work"
@@ -40,9 +40,9 @@ for backend in native wasm; do
 	done
 	test-step "$backend structural path interpolation preserves data and glob provenance"
 	check '"./two words/file"' do run --lang expr -c '@(nop "./two words")/file'
-	check '"./build/a b/main.js"' do run --lang expr -c './build/@(join ["a" "b"] " ")/main.js'
+	check '"./build/a b/main.js"' do run --lang expr -c './build/@(join " " ["a" "b"])/main.js'
 	check './two words/file' do run --allow-run --lang kash -c 'printf "%s" @(nop "./two words")/file'
-	check './two words/file' do run --allow-run --lang kash -c 'printf "%s" ./@(join ["two" "words"] " ")/file'
+	check './two words/file' do run --allow-run --lang kash -c 'printf "%s" ./@(join " " ["two" "words"])/file'
 	data=$'$(touch forbidden) @(missing) {(missing)} "quotes"\nline'
 	printf 'name = """%s"""\nresult = ./@(name)/file\n' "$data" >"$work/path-data.km"
 	check "$(jq -cn --arg name "./$data/file" '$name')" do run path-data.km result
@@ -61,12 +61,12 @@ KM
 	check '["./literal*?[x]\\name/a.txt"]' do run --allow-read="$work/literal*?[x]\\name" path-glob.km matches
 	reject CAP_DENIED do run --allow-read="$work/literalZZxname" path-glob.km matches
 	check '["./literal*?[x]\\name/a.txt"]' do run --allow-read --lang expr -c '(let [root "./literal*?[x]\\name"] (wildcard (nop @(root)/*.txt)))'
-	printf '%s\n' './@(join ["a" "b"] " ")/file' | "${runner[@]}" do parse --lang expr --json >"$work/path-ast.json"
+	printf '%s\n' './@(join " " ["a" "b"])/file' | "${runner[@]}" do parse --lang expr --json >"$work/path-ast.json"
 	if jq -e '.ast.kind == "path" and (.ast.parts | length) == 3 and .ast.parts[1].expression.kind == "application"' "$work/path-ast.json" >/dev/null; then test-ok "$backend path AST exposes interpolation children"; else test-fail "$backend path AST lost children"; cat "$work/path-ast.json"; fi
 	test-step "$backend expression statements and typed arguments"
 	check '' do run --lang kash -c '(nop [status: 0])'
 	check '' do run --lang kash -c $'if (nop :true)\n\t(nop [status: 0])'
-	check 'a-bvalue' do run --allow-run --lang kash -c $'(nop :nil)\nprintf "%s" (join\n ["a" "b"] "-")\nif (=\n 1 1)\n\tprintf "%s" (nop "value")\nelse\n\t(fail! "unselected")'
+	check 'a-bvalue' do run --allow-run --lang kash -c $'(nop :nil)\nprintf "%s" (join\n "-" ["a" "b"])\nif (=\n 1 1)\n\tprintf "%s" (nop "value")\nelse\n\t(fail! "unselected")'
 	check 'captured' do run --allow-run --lang kash -c $'name = $(printf captured)\nmatch $name\n\tcase "captured"\n\t\tprintf "%s" $name'
 	check 'expression' do run --allow-run --lang kash -c $':MODE (nop "expression") printenv MODE'
 	test-step "$backend direct recipes preserve data, selectors and rule arguments"
@@ -80,7 +80,7 @@ chosen {mode=sso} :
 		(fail! "unselected")
 ./nested/output :
 	printf "%s" "artifact" > @>
-generated-source = """printf "%s" (join ["generated" "direct"] "-")"""
+generated-source = """printf "%s" (join "-" ["generated" "direct"])"""
 generate generated = [[kind: "task" target: "generated" inputs: [] order-only: [] recipe: [generated-source]]]
 KMK
 	check '@if(:false) $(touch forbidden) {(missing)} "quotes" end' chosen
@@ -101,7 +101,7 @@ captured :
 callable :
 	(script)
 explicit :
-	generated = (kash (render """printf "%s" "@(name)" """ [name: "explicit"] "plain"))
+	generated = (kash (render [name: "explicit"] "plain" """printf "%s" "@(name)" """))
 	(generated)
 KMK
 	argv_expected=$'<><two words><line\nbreak><"quotes"><$missing @(missing) {(missing)}><\\@(missing)>'

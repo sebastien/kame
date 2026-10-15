@@ -90,7 +90,7 @@ KMK
 	if [ "$(cat "$work/runs")" = xx ] && [ "$(cat "$work/received")" = changed ]; then test-ok "$backend changed env invalidates task"; else test-fail "$backend stale computed env"; fi
 	test-step "$backend named operands, function arguments and invalid context"
 	check '<one><two words>' do run --allow-run --lang kash -c 'printf "<%s>" $args' -- one 'two words'
-	check 'one-two' do run --allow-run --lang kash -c $'(f one two) = (join args "-")\nprintf "%s" (f "one" "two")'
+	check 'one-two' do run --allow-run --lang kash -c $'(f one two) = (join "-" args)\nprintf "%s" (f "one" "two")'
 	check '<one><two words>' do run --allow-run --lang kash -c $'script = (kash """printf "<%s>" $args""")\n(script "one" "two words")'
 	check '"one"' do run --lang expr -c 'args.0' -- one
 	check '"shadow"' do run --lang expr -c '(let [inputs "shadow"] inputs)'
@@ -127,8 +127,8 @@ KMK
 SHELL = kash
 (changed-files UNUSED) = inputs/changed
 ./named-output : ./input ./other | prepare
-	printf "%s" (join (map basename (changed-files :nil)) ",") > ./selected
-	printf "%s" (join (map basename inputs) ",") > (first outputs)
+	printf "%s" (join "," (map basename (changed-files :nil))) > ./selected
+	printf "%s" (join "," (map basename inputs)) > (first outputs)
 prepare :
 	(nop args)
 KMK
@@ -140,7 +140,7 @@ KMK
 	if [ "$(cat "$work/selected")" = input ]; then test-ok "$backend named changed inputs exclude unchanged and order-only inputs"; else test-fail "$backend named changed-input selection"; fi
 	cat >"$work/Makefile.kmk" <<'KMK'
 ./shell-output : ./input
-	printf "%s" @(join (map basename inputs) ",") > @>
+	printf "%s" @(join "," (map basename inputs)) > @>
 	printf "%s" @(count args) > ./shell-args
 KMK
 	check '' ./shell-output

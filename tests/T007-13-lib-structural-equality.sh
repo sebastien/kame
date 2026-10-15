@@ -19,7 +19,7 @@ left = (read "./first")
 same = (read "./same")
 different = (read "./different")
 short = (read "./short")
-result = [(eq left same) (is left same) (ne left different) (ne left short) (ne left "") (eq [left [data: left]] [same [data: same]]) (count (filter [left different same] left))]
+result = [(eq left same) (is left same) (ne left different) (ne left short) (ne left "") (eq [left [data: left]] [same [data: same]]) (count (filter left [left different same]))]
 KM
 for backend in native wasm; do
 	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
@@ -41,8 +41,8 @@ for backend in native wasm; do
 	done
 	for op in ne '!='; do check ':true' do run --lang expr -c "($op [1] [\"1\"])"; done
 	check ':true' do run --lang expr -c '(eq (parse-json "{}") (parse-json "{}"))'
-	check '[[a: 1 b: 2] [b: 2 a: 1]]' do run --lang expr -c '(filter [[a: 1 b: 2] [a: 2] [b: 2 a: 1]] [b: 2 a: 1])'
-	check '[[2]]' do run --lang expr -c '(filter-out [[1] [2] [1.0]] [1])'
+	check '[[a: 1 b: 2] [b: 2 a: 1]]' do run --lang expr -c '(filter [b: 2 a: 1] [[a: 1 b: 2] [a: 2] [b: 2 a: 1]])'
+	check '[[2]]' do run --lang expr -c '(filter-out [1] [[1] [2] [1.0]])'
 	check ':false' do run --lang expr -c '(eq 9007199254740992 9007199254740993)'
 	check ':false' do run --lang expr -c '(eq 9007199254740993 9007199254740992.0)'
 	check ':true' do run --lang expr -c '(eq 9007199254740992 9007199254740992.0)'
@@ -52,6 +52,6 @@ for backend in native wasm; do
 	check '[:true :true :true :true :true :true 2]' do run --allow-read -C "$work" bytes.km result
 	check '[true,false]' do run --lang kash -c '(out! [(eq [1] [1.0]) (is [1] [2])])'
 	test-step "$backend opaque values are errors even behind mismatches"
-	for text in '(eq count count)' '(ne count :nil)' '(eq [0 count] [1])' '(is [] [count])' '(eq [f: count] [other: 1])' '(eq ./a/{name} "a")' '(eq (resource "mem://test/a") :nil)' '(filter [[count]] [])' '(eq [([x] x)] [])' '(lt [] [])' '(eq [1] [1] [1])'; do reject "$text"; done
+	for text in '(eq count count)' '(ne count :nil)' '(eq [0 count] [1])' '(is [] [count])' '(eq [f: count] [other: 1])' '(eq ./a/{name} "a")' '(eq (resource "mem://test/a") :nil)' '(filter [] [[count]])' '(eq [([x] x)] [])' '(lt [] [])' '(eq [1] [1] [1])'; do reject "$text"; done
 done
 test-end

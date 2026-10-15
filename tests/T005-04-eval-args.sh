@@ -14,7 +14,7 @@ cli_require_tools
 cli_build
 
 test-step "arguments after -- are available as @*"
-cli_run -- do run --lang expr -c '(join @* "-")' -- a b c
+cli_run -- do run --lang expr -c '(join "-" @*)' -- a b c
 cli_expect_status 0
 cli_expect_stdout '"a-b-c"'
 
@@ -31,7 +31,7 @@ cli_expect_status 0
 cli_expect_stdout '"second"'
 
 test-step "no arguments yields an empty argument list"
-cli_run -- do run --lang expr -c '(join @* "-")'
+cli_run -- do run --lang expr -c '(join "-" @*)'
 cli_expect_status 0
 cli_expect_stdout '""'
 cli_expect_stderr_empty
@@ -41,7 +41,7 @@ cli_expect_status 0
 cli_expect_stdout '0'
 
 test-step "expression read from stdin"
-printf '(join ["x" "y"] "")' >expression.km
+printf '(join "" ["x" "y"])' >expression.km
 cli_run --stdin expression.km -- do run --lang expr -
 cli_expect_status 0
 cli_expect_stdout '"xy"'

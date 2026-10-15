@@ -13,7 +13,7 @@ mkdir -p "$work"
 printf x >"$work/nonempty"
 cat >"$work/semantics.km" <<'KM'
 (nonempty VALUE) = (> (count VALUE) 0)
-(without-final-lf TEXT) = (if (ends? TEXT "\n") (slice TEXT 0 -1) TEXT)
+(without-final-lf TEXT) = (if (ends? "\n" TEXT) (slice 0 -1 TEXT) TEXT)
 EMPTY_RECORD = (parse-json "{}")
 EMPTY_BYTES = (read ./empty)
 VALUES = [:nil :false 0 0.0 "" [] EMPTY_RECORD EMPTY_BYTES]
@@ -47,7 +47,7 @@ for backend in native wasm; do
 	check '0' do run --lang expr -c '(and "" [] (parse-json "{}") 0)'
 	check ':nil' do run --lang expr -c '(and :nil (fail! "nil did not short-circuit"))'
 	check 'selected' do run --lang kash -c $'if (nop 0)\n\tprintf selected\nelse\n\tprintf forbidden'
-	check '"selected"' do run --lang expr -c '(render "@if(0)selected@else forbidden@end" (parse-json "{}") "plain")'
+	check '"selected"' do run --lang expr -c '(render (parse-json "{}") "plain" "@if(0)selected@else forbidden@end")'
 
 	test-step "$backend exact stdout, typed capture reuse and opt-in conversion"
 	check $' \té\nbody  \r\n\n' do run --allow-run -c '(out! $(printf " \té\nbody  \r\n\n"))'

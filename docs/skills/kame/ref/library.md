@@ -4,6 +4,13 @@ Kame operations are ordinary expression calls: `(name argument...)`. Arguments
 are evaluated before the operation runs. Unless noted, invalid arity or value
 types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 
+Transformations take parameters first and their subject last: `(f PARAMS VALUE)`.
+Optional parameters also precede the subject, so `(VALUE | f PARAMS)` is the same
+call. Only this order is accepted; there is no legacy-order detection. Comparisons
+retain `(gt LEFT RIGHT)` and conventional left/right semantics. Variadic operations
+such as `str`, `concat`, `merge`, and `joinpath` retain authored operand order;
+special forms and internal template-lowering primitives have their own contracts.
+
 ## Values and calls
 
 | Operation | Signature | Result |
@@ -15,14 +22,14 @@ types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 | `parse-json` | `(parse-json TEXT)` | Parse JSON into typed Kame values; malformed input reports `JSON_INVALID`. |
 | `fail!` | `(fail! MESSAGE)` | Raise `USER_ERROR` with an explicit string message. |
 | `count` | `(count VALUE)` | Number of string code points, bytes, list items, or record fields. |
-| `get` | `(get RECORD KEY [DEFAULT])` | Computed string-key lookup; missing keys return nil or DEFAULT. DEFAULT is evaluated eagerly. |
+| `get` | `(get KEY [DEFAULT] RECORD)` | Computed string-key lookup; missing keys return nil or DEFAULT. DEFAULT is evaluated eagerly. |
 | `first` | `(first LIST)` | First item, or `:nil` for an empty list. |
-| `nth` | `(nth LIST-OR-TEXT INDEX)` | Indexed item/code point, or `:nil` when out of range; negative indexes count from the end. |
+| `nth` | `(nth INDEX LIST-OR-TEXT)` | Indexed item/code point, or `:nil` when out of range; negative indexes count from the end. |
 | `list` | `(list VALUE...)` | A list containing the arguments. |
 | `nop` | `(nop VALUE...)` | Last argument, or `:nil` with no arguments. |
-| `apply` | `(apply LIST FUNCTION)` or `(apply FUNCTION LIST)` | Calls a function with list arguments. A one-argument function receives the list itself for legacy compatibility. |
+| `apply` | `(apply FUNCTION LIST)` | Calls a function with list arguments. A one-argument function receives the list itself. |
 | `items` | `(items RECORD)` | Ordered records `[key: STRING value: VALUE]`, preserving typed nested data. |
-| `set-field` | `(set-field RECORD KEY VALUE)` | Replace at the existing position, or append a new string key; nil is a value, not deletion. |
+| `set-field` | `(set-field KEY VALUE RECORD)` | Replace at the existing position, or append a new string key; nil is a value, not deletion. |
 | `merge` | `(merge RECORD...)` | Shallow right-biased merge; first-seen key order; no arguments return an empty record. |
 | `record?`, `list?`, `string?` | `(PREDICATE VALUE)` | Exact outer-kind boolean, including empty data; patterns/bytes are not strings. |
 | `digest` | `(digest ALGORITHM BYTES-OR-STRING)` | Raw bytes/UTF-8 SHA-1/256/512 digest, lowercase hex, without build fingerprint framing. SHA-1 is legacy-only. |
@@ -53,18 +60,18 @@ uses this same contract. Ordering and `unique` remain scalar-only.
 
 ## Collections
 
-Callbacks run in input order. `map`, `flatmap`, `filter`, and `filter-out`
-accept either `(FUNCTION LIST)` or the legacy `(LIST FUNCTION)` order.
+Callbacks run in input order. `map` and `flatmap` require `(FUNCTION LIST)`;
+`filter` and `filter-out` require `(PREDICATE-OR-VALUE LIST)`.
 
 | Operation | Signature | Result |
 | --- | --- | --- |
 | `map` | `(map FUNCTION LIST)` | One callback result per item. |
 | `flatmap` | `(flatmap FUNCTION LIST)` | Maps and flattens one list level; every callback result must be a list. |
-| `filter` | `(filter PREDICATE LIST)` or `(filter LIST VALUE)` | Items whose predicate is true or equal to `VALUE`. |
-| `filter-out` | `(filter-out PREDICATE LIST)` or `(filter-out LIST VALUE)` | Items whose predicate is false or unequal to `VALUE`. |
-| `reduce` | `(reduce FUNCTION LIST [INITIAL])` | Left fold. Without `INITIAL`, the first item is the accumulator; an empty list produces `:nil`. |
+| `filter` | `(filter PREDICATE-OR-VALUE LIST)` | Items whose predicate is true or equal to `VALUE`. |
+| `filter-out` | `(filter-out PREDICATE-OR-VALUE LIST)` | Items whose predicate is false or unequal to `VALUE`. |
+| `reduce` | `(reduce FUNCTION [INITIAL] LIST)` | Left fold with `(accumulator item)` callbacks. Without `INITIAL`, the first item is the accumulator; an empty list produces `:nil`. |
 | `concat` | `(concat VALUE...)` | Flattens list arguments one level and appends scalar arguments. |
-| `slice` | `(slice LIST-OR-TEXT START [END])` | Half-open slice; negative bounds count from the end. |
+| `slice` | `(slice START [END] LIST-OR-TEXT)` | Half-open slice; negative bounds count from the end. |
 | `sorted` | `(sorted LIST)` | Ascending sort of one comparable scalar kind. |
 | `unique` | `(unique LIST)` | First occurrence of every comparable scalar value. |
 
@@ -75,21 +82,21 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 
 | Operation | Signature | Result |
 | --- | --- | --- |
-| `join` | `(join LIST SEPARATOR)` | Joins a list of strings. |
-| `split` | `(split TEXT SEPARATOR)` | Splits text on a nonempty literal separator. |
+| `join` | `(join SEPARATOR LIST)` | Joins a list of strings. |
+| `split` | `(split SEPARATOR TEXT)` | Splits text on a nonempty literal separator. |
 | `strip` | `(strip TEXT)` | Removes leading and trailing Unicode whitespace. |
-| `sub` | `(sub TEXT FROM TO)` | Replaces all literal `FROM` occurrences. |
+| `sub` | `(sub FROM TO TEXT)` | Replaces all literal `FROM` occurrences. |
 | `sub` | `(sub MATCH-PATTERN EXPANSION [TEXT])` | Pattern substitution. Without `TEXT`, returns a one-argument callable suitable for `map`. Nonmatches remain unchanged. |
 | `replace` | Same signatures as `sub` | Deprecated alias with identical behavior; no runtime warning. |
 | `match?` | `(match? MATCH-PATTERN [TEXT])` | Anchored boolean match; without `TEXT`, returns a unary predicate suitable for `filter`/`filter-out`. Subjects must be strings. |
-| `includes?` | `(includes? TEXT PART)` | Literal substring test. |
-| `starts?` | `(starts? TEXT PREFIX)` | Literal prefix test. |
-| `ends?` | `(ends? TEXT SUFFIX)` | Literal suffix test. |
+| `includes?` | `(includes? PART TEXT)` | Literal substring test. |
+| `starts?` | `(starts? PREFIX TEXT)` | Literal prefix test. |
+| `ends?` | `(ends? SUFFIX TEXT)` | Literal suffix test. |
 | `uppercase` | `(uppercase TEXT)` | Unicode uppercase conversion. |
 | `lowercase` | `(lowercase TEXT)` | Unicode lowercase conversion. |
 | `template-cat` | Lowering primitive | Document rendering only: nil is empty and lists join with spaces. Not scalar conversion. |
 | `text` | `(text VALUE)` | Convert UTF-8 bytes to a string, or return a string unchanged. |
-| `render` | `(render SOURCE [PAYLOAD] [STYLE])` | Render a document template; a string second argument is style-only. File sources require read capability; bytes need explicit style. |
+| `render` | `(render [PAYLOAD] [STYLE] SOURCE)` | Render a document template; in a two-argument call a leading record is payload and a leading string is style. File sources require read capability; bytes need explicit style. |
 | `pattern` | `(pattern TEXT)` | Construct and validate a pattern from runtime text. |
 | `regex-match` | `(regex-match PATTERN SUBJECT)` | Regex-pattern match record (`text`, `captures`, `named`), or nil. |
 | `capture` | `(capture INDEX-OR-NAME MATCH)` | Select a match capture, or nil when absent. |
@@ -97,7 +104,7 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 
 `strip` is an explicit broad-whitespace conversion, not command-capture framing.
 To remove one known terminal LF while preserving other whitespace and earlier
-newlines, use `(if (ends? TEXT "\n") (slice TEXT 0 -1) TEXT)`. Do not infer a
+newlines, use `(if (ends? "\n" TEXT) (slice 0 -1 TEXT) TEXT)`. Do not infer a
 CRLF terminator or remove all terminal newlines unless the producer's protocol
 requires it. Capture itself is lossless; see [Kash](./kash.md).
 
@@ -133,7 +140,7 @@ dependencies. Relative paths use the current evaluation directory where needed.
 | `splitext` | `(splitext PATH)` | `[ROOT EXTENSION]`; a lone leading dot is not an extension. |
 | `ext` | `(ext PATH)` | Final extension. |
 | `joinpath` | `(joinpath PART...)` | Joined, cleaned path. |
-| `relpath` | `(relpath TARGET BASE)` | Target path relative to base. |
+| `relpath` | `(relpath BASE TARGET)` | Target path relative to base. |
 | `abspath` | `(abspath PATH)` | Clean absolute path, resolving a relative path from the evaluation directory. |
 
 ## Filesystem, environment, and process operations
@@ -152,7 +159,7 @@ environment values can invalidate a consumer.
 | `wildcard` | `(wildcard PATTERN...)` | read | Sorted, duplicate-free union of one or more patterns; each tracks its own membership. |
 | `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other supported values use the effect-output encoding described below, not scalar-only `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
 | `env` | `(env NAME)` | env | Environment value. |
-| `shell!` | `(shell! COMMAND [OPTIONS])` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
+| `shell!` | `(shell! [OPTIONS] COMMAND)` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
 | `sh!`, `shellrun!` | Same as `shell!` | run | Aliases with identical result and phase behavior. |
 | `shell-template!` | `(shell-template! FRAGMENTS VALUES)` | run | Collected shell call with POSIX-quoted dynamic strings; FRAGMENTS has one more string than VALUES. Same phase policy as shell!. |
 

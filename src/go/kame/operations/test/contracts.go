@@ -222,7 +222,7 @@ func TestContractMetadataDoesNotAuthorizeNestedEffects(t *testing.T) {
 		}
 		result.Free(a)
 		parsed.Free()
-		parsed = expr.Parse(a, "contracts.km", `(if :false (fail! "unreached") (render """@(str "ok")""" "plain"))`)
+		parsed = expr.Parse(a, "contracts.km", `(if :false (fail! "unreached") (render "plain" """@(str "ok")"""))`)
 		context = eval.Context{Program: p, Scope: p.Scope, Run: a, Phase: phases[i]}
 		result = p.EvaluateWith(parsed.Expr, &context)
 		if result.Diagnostic.Code != "" || result.Value.Text != "ok" || context.PhaseInvalid() {

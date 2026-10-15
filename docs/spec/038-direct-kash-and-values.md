@@ -75,7 +75,7 @@ Kash delegates them to the shared Kame expression parser. Expressions inside
 the boundary use Kame names, not `$` wrappers:
 
 ```kash
-package = (get packages manager)
+package = (get manager packages)
 printf "%s\n" (str "manager: " manager)
 revision = $(git rev-parse HEAD)
 
@@ -96,7 +96,7 @@ To execute a command whose executable is computed by a Kame application, use a
 reference at the command head:
 
 ```kash
-command = (get commands manager)
+command = (get manager commands)
 $command --version
 ```
 

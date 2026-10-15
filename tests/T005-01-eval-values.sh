@@ -44,9 +44,9 @@ evaluates '"a\"b"' '"a\"b"'
 evaluates '"back\\slash"' '"back\\slash"'
 
 test-step "string interpolation"
-evaluates '"value={(join ["x" "y"] "")}"' '"value=xy"'
-evaluates '"value={(nth [10 20] 1)}"' '"value=20"'
-evaluates '"outer {(join ["x" "y"] "")} end"' '"outer xy end"'
+evaluates '"value={(join "" ["x" "y"])}"' '"value=xy"'
+evaluates '"value={(nth 1 [10 20])}"' '"value=20"'
+evaluates '"outer {(join "" ["x" "y"])} end"' '"outer xy end"'
 
 test-step "lists and records"
 evaluates '(list 1 "a" :true)' '[1 "a" :true]'

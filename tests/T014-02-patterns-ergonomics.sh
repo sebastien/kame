@@ -23,11 +23,11 @@ mkdir -p "$project/src/txto/blog/2026/deep"
 touch "$project/src/txto/blog/foo.txto" "$project/src/txto/blog/2026/deep/foo.txto" "$project/src/txto/blog/skip.txto"
 cat >"$project/replace.kmk" <<'KMK'
 SOURCES_TXTO = (wildcard ./src/txto/**/*.txto)
-FILTERED = (filter-out ([x] (includes? x "skip")) SOURCES_TXTO)
+FILTERED = (filter-out ([x] (includes? "skip" x)) SOURCES_TXTO)
 BUILD_JSON = (replace ./src/txto/{prefix:**}/{name:*}.txto ./build/data/{prefix}/{name}.json FILTERED)
 SECTION = (replace ./src/txto/{prefix:**}/{name:*}.txto ./build/data/{prefix}/{name}.json)
 ./result : @(SOURCES_TXTO)
-	@(yield! (join BUILD_JSON "\n"))
+	@(yield! (join "\n" BUILD_JSON))
 KMK
 cp "$project/replace.kmk" "$project/replace.original"
 mkdir -p "$project/journal"
@@ -71,7 +71,7 @@ for backend in native wasm; do
 	for sample in \
 		'(filter (replace ./journal/{name:*} (nop (out! name) (text (read ./journal/@(name))))) ./journal/*)|abstar*["./journal/a" "./journal/b" "./journal/star*"]' \
 		'(filter-out (replace ./journal/{name:*} (nop (out! name) (text (read ./journal/@(name))))) ./journal/*)|abstar*[]' \
-		'(reduce ([acc subject] (nop (replace ./journal/{name:*} (nop (out! name) (text (read ./journal/@(name)))) subject) acc)) ./journal/* "")|abstar*""'; do
+		'(reduce ([acc subject] (nop (replace ./journal/{name:*} (nop (out! name) (text (read ./journal/@(name)))) subject) acc)) "" ./journal/*)|abstar*""'; do
 		"${runner[@]}" do run --lang expr --allow-read -C "$project" -c "${sample%|*}" >"$project/value"
 		if [ "$(cat "$project/value")" = "${sample##*|}" ]; then test-ok "$backend callback effects survive host yields once"; else test-fail "$backend callback effect replay: $(cat "$project/value")"; fi
 	done

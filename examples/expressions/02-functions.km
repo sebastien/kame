@@ -1,7 +1,7 @@
 # Named functions and anonymous functions use the same expression language.
 (page source) = (replace ./notes/{name:*}.txt ./public/{name}.txt source)
 sources = [./notes/world.txt ./notes/hello.txt ./notes/hello.txt]
-pages = (map sources page)
+pages = (map page sources)
 ordered = (pages | unique | sorted)
-labels = (map ordered ([path] (uppercase (basename path))))
+labels = (map ([path] (uppercase (basename path))) ordered)
 publication = [pages: ordered labels: labels]

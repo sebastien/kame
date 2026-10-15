@@ -51,7 +51,7 @@ evaluates '(map (replace ./{**}/{*}.c ./build/{_0}.o) ["./a.c" "./x/y.c"])' '[".
 evaluates '(replace ./{**}/{*}.c ./x/{_0}.o "./a/b.c")' '"./x/a.o"'
 evaluates '(replace ./{**}/{*}.c ./x/{_1}.o "./a/b.c")' '"./x/b.o"'
 diag '(str ./{**}/{*}.c)' 'EXPR_INVALID'
-evaluates '(replace "banana" "a" "b")' '"bbnbnb"'
+evaluates '(replace "a" "b" "banana")' '"bbnbnb"'
 
 test-step "invalid pattern combinations"
 diag '(replace "a" "b")' 'PAT_INVALID'
