@@ -1,6 +1,6 @@
 {
 	"name": "@ssebastien/kame",
-	"version": "0.2.3",
+	"version": "0.3.0",
 	"description": "Build tool for projects described with Kame",
 	"license": "BSD-3-Clause",
 	"type": "module",
