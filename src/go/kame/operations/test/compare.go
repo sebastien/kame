@@ -111,3 +111,38 @@ func TestByteEqualityAndHostValueLimits(t *testing.T) {
 	parsed.Free()
 	registry.Free()
 }
+
+func TestMembershipBlankAndRelativeJoinpath(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	parsed := script.Parse(a, "helpers.km", "")
+	p := eval.Compile(a, engine, parsed, registry)
+	checks := []string{
+		`(has? "py" ["js" "py"])`, `(not (has? "p" ["py"]))`, `(not (has? :nil []))`,
+		`(has? [b: [1] a: :nil] [[a: :nil b: [1.0]]])`, `(has? :false [:nil :false])`,
+		`(has? :nil [:nil])`, `(not (has? 9007199254740993 [9007199254740992.0]))`,
+		`(blank? :nil)`, `(blank? "")`, `(not (blank? " "))`, `(not (blank? :false))`,
+		`(not (blank? 0))`, `(not (blank? []))`, `(not (blank? [x: :nil]))`,
+		`(not (blank? ([x] x)))`, `(not (blank? (list ([x] x))))`,
+		`(eq (joinpath ./sdk "src") "./sdk/src")`, `(eq (joinpath "." "src") "./src")`,
+		`(eq (joinpath "" "./sdk" ".." "src") "./src")`, `(eq (joinpath "./sdk" "..") "./")`,
+		`(eq (joinpath "./sdk" ".." ".." "src") "../src")`,
+		`(eq (joinpath "../sdk" "src") "../sdk/src")`, `(eq (joinpath "sdk" "src") "sdk/src")`,
+		`(eq (joinpath "/sdk" "src") "/sdk/src")`, `(eq (joinpath) "")`,
+		`(eq (split " " "") [""])`,
+	}
+	for i := range checks {
+		r := evaluate(t, p, checks[i])
+		if r.Diagnostic.Code != "" || r.Value.Kind != core.Bool || !r.Value.Bool { t.Error("helper contract failed: " + checks[i]) }
+		r.Free(a)
+	}
+	invalid := []string{`(has? "py" "py js")`, `(has? count [])`, `(has? 1 [1 count])`, `(has? ([x] x) [])`, `(has? 1 [1 [f: ([x] x)]])`, `(has? ./a/{name} [])`}
+	for i := range invalid {
+		r := evaluate(t, p, invalid[i])
+		if r.Diagnostic.Code != "EXPR_INVALID" { t.Error("unsupported membership value was accepted: " + invalid[i]) }
+		r.Free(a)
+	}
+	engine.Free(); p.Free(); parsed.Free(); registry.Free()
+}

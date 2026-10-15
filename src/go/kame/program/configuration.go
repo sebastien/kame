@@ -2,6 +2,8 @@ package program
 
 import (
 	"kame/diagnostic"
+	"kame/lang/definition"
+	"kame/lang/expr"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 )
@@ -41,16 +43,22 @@ func (p *Program) validateParameters(parameters []string) diagnostic.Diagnostic 
 
 func (p *Program) configureDefinitions(defines, environment []string) diagnostic.Diagnostic {
 	for i := range defines {
-		equal := strings.IndexByte(defines[i], '=')
-		if equal <= 0 || p.Eval.Definition(defines[i][:equal]) == nil {
+		override := definition.ParseOverride(defines[i])
+		if override.Name == "" || p.Eval.Definition(override.Name) == nil {
 			return failure(p.Alloc, "DEF_INVALID", "--define must name a declared value definition")
+		}
+		if override.Typed {
+			parsed := expr.Parse(p.Alloc, "<define-value>", override.Text)
+			valid := len(parsed.Diagnostics) == 0 && expr.IsLiteral(parsed.Expr)
+			parsed.Free()
+			if !valid { return failure(p.Alloc, "DEF_INVALID", "--define-value requires a closed literal value for a declared value definition") }
 		}
 	}
 	p.Eval.SetDefinitionOverrides(defines)
 	for i := range p.Eval.Definitions {
 		name := p.Eval.Definitions[i].Name
 		prefix := "KAME_" + name + "="
-		value, provided := "", false
+		value, provided, typed := "", false, false
 		for j := range environment {
 			if strings.HasPrefix(environment[j], prefix) {
 				value, provided = environment[j][len(prefix):], true
@@ -58,16 +66,20 @@ func (p *Program) configureDefinitions(defines, environment []string) diagnostic
 		}
 		prefix = name + "="
 		for j := range defines {
-			if strings.HasPrefix(defines[j], prefix) {
-				value, provided = defines[j][len(prefix):], true
+			override := definition.ParseOverride(defines[j])
+			if override.Name == name {
+				value, provided, typed = override.Text, true, override.Typed
 			}
 		}
 		if !provided {
 			continue
 		}
-		if !p.Eval.OverrideDefinition(name, value) {
+		installed := false
+		if typed { installed = p.Eval.OverrideDefinitionValue(name, value) } else { installed = p.Eval.OverrideDefinition(name, value) }
+		if !installed {
 			return failure(p.Alloc, "DEF_INVALID", "cannot override an active definition")
 		}
+		if typed { prefix = name + ":=" }
 		p.Configuration = slices.Append(p.Alloc, p.Configuration, cloneText(p.Alloc, prefix+value))
 	}
 	return diagnostic.Diagnostic{}

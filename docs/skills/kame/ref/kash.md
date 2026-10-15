@@ -35,6 +35,7 @@ For a computed executable, bind its value and use `$command` at the command head
 | Form | Meaning |
 | --- | --- |
 | `$name`, `$project.name`, `${name}` | Look up a Kame reference. |
+| `$...name`, `$...{project.command}` | Explicitly spread a flat argv list, including the executable at command position. |
 | `(EXPRESSION)` | Evaluate an ordinary Kame expression, such as `(count files)`. |
 | `$(COMMAND)` | Execute a Kash command/pipeline and capture stdout. |
 | `$env.NAME` | Explicit lazy environment lookup, requiring an env grant. |
@@ -49,6 +50,11 @@ Kash executes argv directly:
   implicit splitting, shell reparsing, or globbing; raw `*.c` is literal.
 - A standalone unquoted list expansion splices scalar items: `$files` or
   `(wildcard ./src/*.c)`. Empty lists contribute no arguments.
+- `$...name` requires a flat list. At command position it must be nonempty, with
+  a nonempty string/path executable first and initial arguments afterward.
+  Following words append arguments; an empty command list is an error. Ordinary
+  `$name` still requires a scalar executable. Explicit spreads are standalone,
+  unquoted argv words, never definition/setup values or redirection paths.
 - Quoted or mixed words require scalars; `"$files"` is invalid for a list.
 - Nil, bytes, records, nested lists, callables, and process/results are not argv.
 - Double quotes group words and allow substitutions; empty quotes preserve an
@@ -68,15 +74,13 @@ expressions directly; JSON serialization and escaping helpers are unnecessary.
 Replace `@(name)` and `\@(name)` with `$name`, and expression boundaries such
 as `@(join ":" files)` with `(join ":" files)`. Replace document `@if`/`@for`
 generation with Kash control or explicit source construction. For a command
-represented as an argv list, separate its executable from its arguments:
+represented as an argv list, explicitly spread the executable and arguments:
 
 ```kame
 SHELL = kash
 command = ["printf" "<%s>" """@(literal)""" "two words"]
 show :
-	executable = (first command)
-	arguments = (slice 1 command)
-	$executable $arguments
+	$...command
 ```
 
 Do not serialize argv back into source. Keep `@(...)` in system-shell recipes,

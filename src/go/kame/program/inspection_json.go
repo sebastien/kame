@@ -2,6 +2,7 @@ package program
 
 import (
 	"kame/core"
+	"kame/lang/definition"
 	"kame/lang/expr"
 	"kame/lang/source"
 	"kame/lang/template"
@@ -137,7 +138,16 @@ func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 	}
 	if len(plan.Configuration) != 0 {
 		e.Str("configuration"); e.BeginObject()
-		for i := range plan.Configuration { equal := strings.IndexByte(plan.Configuration[i], '='); e.Str(plan.Configuration[i][:equal]); e.Str(plan.Configuration[i][equal+1:]) }
+		for i := range plan.Configuration {
+			override := definition.ParseOverride(plan.Configuration[i])
+			e.Str(override.Name)
+			if !override.Typed { e.Str(override.Text); continue }
+			literal := expr.Parse(p.Alloc, "<define-value>", override.Text)
+			value := p.Eval.Evaluate(p.Alloc, literal.Expr, p.Eval.Scope)
+			core.EncodeValueJSON(p.Alloc, e, value.Value)
+			value.Free(p.Alloc)
+			literal.Free()
+		}
 		e.EndObject()
 	}
 	if plan.Generator != "" {

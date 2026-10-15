@@ -7,6 +7,7 @@ package cli
 import (
 	"kame/lang/definition"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/template"
 	"solod.dev/so/bytes"
 	"solod.dev/so/mem"
@@ -36,7 +37,7 @@ type Invocation struct {
 	EarlyAction string
 	HelpTopic   string
 	// HelpResult owns the rendered response of the internal @help query.
-	// Command and all other option strings continue to borrow argv.
+	// Command and ordinary option strings continue to borrow argv.
 	HelpResult       string
 	Verbose          bool
 	PrintResult      bool
@@ -70,8 +71,8 @@ type Invocation struct {
 	Error            Diagnostic
 }
 
-// Free releases parser-owned arrays and HelpResult. Option values borrow argv
-// storage; consumers clone what they retain.
+// Free releases parser-owned arrays, normalized typed defines and HelpResult.
+// Other option values borrow argv; consumers clone what they retain.
 func (inv *Invocation) Free() {
 	mem.FreeString(mem.System, inv.HelpResult)
 	for i := range inv.Inputs {
@@ -90,6 +91,9 @@ func (inv *Invocation) Free() {
 	slices.Free(mem.System, inv.Targets)
 	slices.Free(mem.System, inv.Files)
 	slices.Free(mem.System, inv.Args)
+	for i := range inv.Defines {
+		if definition.ParseOverride(inv.Defines[i]).Typed { mem.FreeString(mem.System, inv.Defines[i]) }
+	}
 	slices.Free(mem.System, inv.Defines)
 	slices.Free(mem.System, inv.Parameters)
 	slices.Free(mem.System, inv.ToolOverrides)
@@ -302,7 +306,7 @@ func parseBuild(inv *Invocation, args []string) {
 			}
 			continue
 		}
-		if equalsValue(arg, "--tool", inv) || equalsValue(arg, "--define", inv) || equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) {
+		if equalsValue(arg, "--tool", inv) || equalsValue(arg, "--define", inv) || equalsValue(arg, "--define-value", inv) || equalsValue(arg, "--file", inv) || equalsValue(arg, "--command", inv) || equalsValue(arg, "--directory", inv) || equalsValue(arg, "--jobs", inv) || equalsValue(arg, "--shell", inv) || equalsValue(arg, "--timeout", inv) || equalsValue(arg, "--retry", inv) || equalsValue(arg, "--log-limit", inv) || equalsValue(arg, "--capture-limit", inv) || equalsValue(arg, "--env", inv) {
 			if inv.Error.Code != "" {
 				return
 			}
@@ -358,7 +362,7 @@ func assignmentOperand(inv *Invocation, arg string) bool {
 }
 
 func isBuildValueOption(arg string) bool {
-	if arg == "--define" || arg == "--tool" {
+	if arg == "--define" || arg == "--define-value" || arg == "--tool" {
 		return true
 	}
 	if arg == "--capture-limit" {
@@ -397,7 +401,7 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 		inv.ToolOverrides = slices.Append(mem.System, inv.ToolOverrides, value)
 		return true
 	}
-	if option == "--define" {
+	if option == "--define" || option == "--define-value" {
 		equal := -1
 		for i := range value {
 			if value[i] == '=' {
@@ -408,6 +412,16 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 		if equal <= 0 || !definition.ValidName(value[:equal]) {
 			inv.fail("OPT_VALUE_INVALID", "define must be NAME=VALUE with a valid name")
 			return false
+		}
+		if option == "--define-value" {
+			parsed := expr.Parse(mem.System, "<define-value>", value[equal+1:])
+			valid := len(parsed.Diagnostics) == 0 && expr.IsLiteral(parsed.Expr)
+			parsed.Free()
+			if !valid {
+				inv.fail("OPT_VALUE_INVALID", "--define-value requires NAME=LITERAL (no names, interpolation, patterns, or calls)")
+				return false
+			}
+			value = cloneText(value[:equal]+":="+value[equal+1:])
 		}
 		inv.Defines = slices.Append(mem.System, inv.Defines, value)
 		return true

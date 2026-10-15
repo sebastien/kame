@@ -157,3 +157,40 @@ func TestUnknownParameterFailsCompilationAfterGeneration(t *testing.T) {
 	parsed.Free()
 	registry.Free()
 }
+
+func TestTypedConfigurationPrecedenceAndOwnedLiterals(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "typed.kmk", "flag = (read ./never)\nmodules = []\nresult = [flag: flag modules: modules]\n")
+	defer parsed.Free()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{Defines: []string{"flag=literal", "flag:=:false", "modules:=[\"py\" \"js\"]"}, Environment: []string{"KAME_flag=ambient", "KAME_modules=ambient"}})
+	defer compiled.Free(a)
+	if compiled.Program == nil { t.Fatal("typed configuration did not compile"); return }
+	p := compiled.Program
+	defer p.Free()
+	r := p.Materialize("result")
+	if r.Diagnostic.Code != "" || r.Value.Kind != core.Record || len(r.Value.Record) != 2 || r.Value.Record[0].Value.Kind != core.Bool || r.Value.Record[0].Value.Bool || r.Value.Record[1].Value.Kind != core.List || len(r.Value.Record[1].Value.List) != 2 || r.Value.Record[1].Value.List[0].Text != "py" { t.Error("typed values lost type, precedence, or ownership") }
+	r.Free(a)
+	if len(p.Configuration) != 2 || p.Configuration[0] != "flag:=:false" || p.Configuration[1] != "modules:=[\"py\" \"js\"]" { t.Error("configuration identity lost literal type") }
+}
+
+func TestTypedConfigurationRejectsNonliteralEmbeddingInput(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "typed.kmk", "flag = :true\n(f x) = x\n")
+	defer parsed.Free()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	invalid := []string{"flag:=(out! \"bad\")", "flag:=[(env \"HOME\")]", "flag:=missing", "flag:=\"@(missing)\"", "unknown:=:false", "f:=:false"}
+	for i := range invalid {
+		compiled := program.Compile(a, parsed, registry, program.Options{Defines: []string{invalid[i]}})
+		if compiled.Program != nil { t.Error("invalid embedding override was accepted"); compiled.Program.Free() }
+		if len(compiled.Diagnostics) == 0 || compiled.Diagnostics[0].Code != "DEF_INVALID" { t.Error("invalid typed configuration did not report DEF_INVALID") }
+		compiled.Free(a)
+	}
+	condition := program.DeclarationPredicate(a, "typed", "flag = :true\n", "flag", []string{"flag:=:false"}, nil)
+	if condition.Diagnostic.Code != "" || condition.Selected { t.Error("typed false did not select declaration conditions") }
+	condition.Diagnostic.Free(a)
+}

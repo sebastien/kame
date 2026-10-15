@@ -46,7 +46,7 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 		p.error(start, start+2, "legacy Kash @(...) is invalid; use (function arguments...) instead")
 		p.pos += 2
 	} else if start < len(s.Text) && s.Text[start] == '$' && (start+1 == len(s.Text) || s.Text[start+1] != '(') {
-		word := p.commandWord()
+		word := p.commandWord(false)
 		if word.Bool {
 			e = word.Parts[0].Expr
 			word.Parts[0].Expr = nil
@@ -160,7 +160,7 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') { p.error(from, p.pos, "expected redirection path"); break }
 			redirection := p.node(CommandRedirection, from)
 			redirection.Text = op
-			redirection.Items = slices.Append(p.a, redirection.Items, p.commandWord())
+			redirection.Items = slices.Append(p.a, redirection.Items, p.commandWord(false))
 			redirection.Span.End = p.pos
 			stage.Items = slices.Append(p.a, stage.Items, redirection)
 			if op == "<" { input = true } else { output = true }
@@ -181,7 +181,7 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') { p.error(from, p.pos, "expected Kash stage setup value"); break }
 			setup := p.node(CommandSetup, from)
 			setup.Text = key
-			setup.Items = slices.Append(p.a, setup.Items, p.commandWord())
+			setup.Items = slices.Append(p.a, setup.Items, p.commandWord(false))
 			setup.Span.End = p.pos
 			stage.Items = slices.Append(p.a, stage.Items, setup)
 			if len(p.diags) != 0 { break }
@@ -194,7 +194,7 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 			continue
 		}
 		before := p.pos
-		word := p.commandWord()
+		word := p.commandWord(true)
 		if word != nil {
 			stage.Items = slices.Append(p.a, stage.Items, word)
 		}
@@ -232,7 +232,7 @@ func commandOperator(b byte) bool {
 	return b == '|' || b == '<' || b == '>' || b == '&' || b == '?' || b == ';' || b == '(' || b == '\''
 }
 
-func (p *parser) commandWord() *Expr {
+func (p *parser) commandWord(allowSpread bool) *Expr {
 	start := p.pos
 	e := p.node(CommandWord, start)
 	if strings.HasPrefix(p.s.Text[start:], "/") || strings.HasPrefix(p.s.Text[start:], "./") || strings.HasPrefix(p.s.Text[start:], "../") || strings.HasPrefix(p.s.Text[start:], "@(") {
@@ -261,7 +261,7 @@ func (p *parser) commandWord() *Expr {
 		return e
 	}
 	text := strings.NewBuilder(p.a)
-	quoted, hadQuote := false, false
+	quoted, hadQuote, spread := false, false, false
 	partStart := start
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
@@ -334,9 +334,13 @@ func (p *parser) commandWord() *Expr {
 				inner = p.commandCapture()
 			} else {
 				p.pos++
+				if strings.HasPrefix(p.s.Text[p.pos:], "...") {
+					form, spread = "$...", true
+					p.pos += 3
+				}
 				braced := p.pos < len(p.s.Text) && p.s.Text[p.pos] == '{'
 				if braced {
-					form = "${"
+					if spread { form = "$...{" } else { form = "${" }
 					p.pos++
 				}
 				if p.pos == len(p.s.Text) || !isNameStart(p.s.Text[p.pos]) {
@@ -375,6 +379,9 @@ func (p *parser) commandWord() *Expr {
 	}
 	// A standalone unquoted substitution retains its typed value (list splice).
 	e.Bool = !hadQuote && len(e.Parts) == 1 && e.Parts[0].Expr != nil
+	if spread && (!allowSpread || !e.Bool) {
+		p.error(start, p.pos, "list spread requires a standalone unquoted command argv word")
+	}
 	e.Span.End = p.pos
 	return e
 }
@@ -419,7 +426,7 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 			} else {
 				b.WriteString(part.Form)
 				writeExpr(b, part.Expr)
-				if part.Form == "${" {
+				if part.Form == "${" || part.Form == "$...{" {
 					b.WriteByte('}')
 				}
 			}

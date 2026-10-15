@@ -234,15 +234,26 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				return r
 			}
 			rememberArgumentEffects(state, c, before, beforePaths)
-			if len(state.Argv) == 0 && (r.Value.Kind != core.String || r.Value.Text == "" || strings.IndexByte(r.Value.Text, 0) >= 0) {
+			spread := word.Bool && strings.HasPrefix(word.Parts[0].Form, "$...")
+			if spread && r.Value.Kind != core.List {
 				r.Free(c.Run)
-				return failure(c.Run, "EXPR_INVALID", word.Span, "executable requires one nonempty string or path without NUL")
+				return failure(c.Run, "EXPR_INVALID", word.Span, "list spread requires a flat list of scalar arguments")
+			}
+			if len(state.Argv) == 0 {
+				executable := r.Value
+				if spread {
+					if len(r.Value.List) == 0 {
+						r.Free(c.Run)
+						return failure(c.Run, "EXPR_INVALID", word.Span, "command list spread requires a nonempty list")
+					}
+					executable = r.Value.List[0]
+				}
+				if executable.Kind != core.String || executable.Text == "" || strings.IndexByte(executable.Text, 0) >= 0 {
+					r.Free(c.Run)
+					return failure(c.Run, "EXPR_INVALID", word.Span, "executable requires one nonempty string or path without NUL")
+				}
 			}
 			if r.Value.Kind == core.List {
-				if len(state.Argv) == 0 {
-					r.Free(c.Run)
-					return failure(c.Run, "EXPR_INVALID", word.Span, "executable cannot be a list")
-				}
 				for i := range r.Value.List {
 					if !appendArgument(state, r.Value.List[i]) {
 						r.Free(c.Run)

@@ -65,7 +65,7 @@ func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
 func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 	r := eval.NewRegistry(t.Allocator())
 	if !operations.Register(r) { t.Error("standard operation registration failed") }
-	if len(r.Items) != 92 { t.Error("standard operation count changed") }
+	if len(r.Items) != 94 { t.Error("standard operation count changed") }
 	for i := range r.Items {
 		o := &r.Items[i]
 		if !o.HasContract() || !o.ValidContract() || !o.AllowsPhase(eval.EvaluatePhase) || o.Version == "" {

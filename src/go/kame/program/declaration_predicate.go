@@ -3,13 +3,13 @@ package program
 import (
 	"kame/core"
 	"kame/diagnostic"
+	"kame/lang/definition"
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
-	"solod.dev/so/strings"
 )
 
 type PredicateResult struct {
@@ -62,13 +62,13 @@ func configurationCondition(a mem.Allocator, name string, prefix string, predica
 	defer parsed.Free()
 	var known []string
 	for i := range defines {
-		equal := strings.IndexByte(defines[i], '=')
-		if equal <= 0 {
+		override := definition.ParseOverride(defines[i])
+		if override.Name == "" {
 			continue
 		}
 		for j := range parsed.Items {
 			d := parsed.Items[j].Definition
-			if d != nil && !d.Function && d.Name == defines[i][:equal] {
+			if d != nil && !d.Function && d.Name == override.Name {
 				known = slices.Append(a, known, defines[i])
 				break
 			}

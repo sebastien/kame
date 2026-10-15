@@ -230,6 +230,7 @@ The collection operations are:
 | `flatmap` | Map and flatten one list level |
 | `filter` | Keep items for which a predicate is true |
 | `filter-out` | Remove items for which a predicate is true |
+| `has?` | `(has? ITEM LIST)` tests exact membership with the recursive `eq` contract; full operands are validated before matching |
 | `reduce` | Fold a list from left to right |
 | `concat` | Concatenate lists or append scalar values |
 | `slice` | Half-open list or string slice |
@@ -245,6 +246,10 @@ or `(VALUE LIST)` as an equality shorthand. The shorthand retains or removes
 items equal to `VALUE`, respectively, using the same recursive equality contract
 as `eq`, including bytes, lists, and records. Unsupported values remain errors.
 
+`blank?` is true exactly for nil or an empty string. False, zero, whitespace-only
+strings, empty lists/records, patterns, and other kinds are not blank. This does
+not change ordinary Kame truthiness.
+
 `unique` supports nil, boolean, number, and string values. Sorting
 mixed kinds is invalid.
 
@@ -255,7 +260,7 @@ The text operations are:
 | Name | Contract |
 | --- | --- |
 | `join` | Join a list of scalar strings with a separator |
-| `split` | Split text by a literal separator |
+| `split` | Split text by a nonempty literal separator, preserving empty fields (`""` produces `[""]`) |
 | `strip` | Trim Unicode whitespace |
 | `includes?` | Literal substring membership |
 | `starts?` | Literal prefix test |
@@ -307,13 +312,20 @@ Path operations are lexical and use slash-separated Kame paths:
 | `dirname` | Path without final component |
 | `splitext` | Two-item list of root and final extension |
 | `ext` | Final extension |
-| `joinpath` | Join and clean path components |
+| `joinpath` | Join and clean path components, preserving an explicit relative anchor |
 | `relpath` | Path relative to a base |
 | `abspath` | Path resolved against evaluation cwd |
 
 These operations do not access the filesystem and create no dependencies.
 `splitext` treats a leading dot on a basename as part of the name unless another
 dot follows.
+
+`joinpath` preserves a leading `./` when its first nonempty part is `.` or
+begins with `./`, so a computed file path does not become a bare task name.
+For example `(joinpath ./sdk "src")` is `"./sdk/src"`; a result at the anchor
+itself is `"./"`. Parent traversal still normalizes: `(joinpath ./sdk ".." "..")`
+is `".."`, not a fabricated parent prefix. Unanchored and absolute inputs retain
+their ordinary cleaned spelling.
 
 ## Filesystem Operations
 

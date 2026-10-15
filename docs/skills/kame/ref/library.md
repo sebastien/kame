@@ -47,6 +47,7 @@ different: it remains a deprecated alias for `sub` with identical behavior.
 | `set` | `(set KEY VALUE RECORD)` | Replace at the existing position, or append a new string key; nil is a value, not deletion. |
 | `merge` | `(merge RECORD...)` | Shallow right-biased merge; first-seen key order; no arguments return an empty record. |
 | `record?`, `list?`, `string?` | `(PREDICATE VALUE)` | Exact outer-kind boolean, including empty data; patterns/bytes are not strings. |
+| `blank?` | `(blank? VALUE)` | True only for nil or an empty string; false, zero, whitespace, and empty collections are not blank. |
 | `digest` | `(digest ALGORITHM BYTES-OR-STRING)` | Raw bytes/UTF-8 SHA-1/256/512 digest, lowercase hex, without build fingerprint framing. SHA-1 is legacy-only. |
 
 Only `:false` and `:nil` are false. Other values are true.
@@ -84,6 +85,7 @@ Callbacks run in input order. `map` and `flatmap` require `(FUNCTION LIST)`;
 | `flatmap` | `(flatmap FUNCTION LIST)` | Maps and flattens one list level; every callback result must be a list. |
 | `filter` | `(filter PREDICATE-OR-VALUE LIST)` | Items whose predicate is true or equal to `VALUE`. |
 | `filter-out` | `(filter-out PREDICATE-OR-VALUE LIST)` | Items whose predicate is false or unequal to `VALUE`. |
+| `has?` | `(has? ITEM LIST)` | Exact membership using value equality, including nested lists/records and exact numeric equality. Validates the full operands before matching. |
 | `reduce` | `(reduce FUNCTION [INITIAL] LIST)` | Left fold with `(accumulator item)` callbacks. Without `INITIAL`, the first item is the accumulator; an empty list produces `:nil`. |
 | `concat` | `(concat VALUE...)` | Flattens list arguments one level and appends scalar arguments. |
 | `slice` | `(slice START [END] LIST-OR-TEXT)` | Half-open slice; negative bounds count from the end. |
@@ -98,7 +100,7 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 | Operation | Signature | Result |
 | --- | --- | --- |
 | `join` | `(join SEPARATOR LIST)` | Joins a list of strings. |
-| `split` | `(split SEPARATOR TEXT)` | Splits text on a nonempty literal separator. |
+| `split` | `(split SEPARATOR TEXT)` | Splits text on a nonempty literal separator, preserving empty fields; empty text produces `[""]`. |
 | `strip` | `(strip TEXT)` | Removes leading and trailing Unicode whitespace. |
 | `sub` | `(sub FROM TO TEXT)` | Replaces all literal `FROM` occurrences. |
 | `sub` | `(sub MATCH-PATTERN EXPANSION [TEXT])` | Pattern substitution. Without `TEXT`, returns a one-argument callable suitable for `map`. Nonmatches remain unchanged. |
@@ -157,7 +159,7 @@ dependencies. Relative paths use the current evaluation directory where needed.
 | `dirname` | `(dirname PATH)` | Parent path. |
 | `splitext` | `(splitext PATH)` | `[ROOT EXTENSION]`; a lone leading dot is not an extension. |
 | `ext` | `(ext PATH)` | Final extension. |
-| `joinpath` | `(joinpath PART...)` | Joined, cleaned path. |
+| `joinpath` | `(joinpath PART...)` | Joined, cleaned path; retains explicit relative anchoring when the first nonempty part is `.` or starts with `./`. Parent traversal still normalizes normally. |
 | `relpath` | `(relpath BASE TARGET)` | Target path relative to base. |
 | `abspath` | `(abspath PATH)` | Clean absolute path, resolving a relative path from the evaluation directory. |
 

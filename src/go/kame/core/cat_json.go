@@ -24,6 +24,11 @@ func ValueJSON(a mem.Allocator, value Value, out *[]byte) bool {
 	return valueJSON(a, value, out, false)
 }
 
+// EncodeValueJSON writes a JSON-native value into an existing encoder.
+func EncodeValueJSON(a mem.Allocator, e *json.Encoder, value Value) bool {
+	return encodeCatValue(a, e, value, 0, false)
+}
+
 func valueJSON(a mem.Allocator, value Value, out *[]byte, allowBytes bool) bool {
 	var builder strings.Builder
 	e := json.NewEncoder(&builder)

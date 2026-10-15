@@ -20,6 +20,26 @@ func opIs(c *eval.Context, s any, v []core.Value) eval.Result {
 	return opEq(c, s, v)
 }
 
+func opHas(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	if v[1].Kind != core.List { return invalidArgument(c, v, 1, "list") }
+	if !equalitySupported(v[0], 0) || !equalitySupported(v[1], 0) {
+		discardArgCallables(c, v)
+		return equalityFailure(c, v[0], v[1])
+	}
+	for i := range v[1].List {
+		if equalValues(v[0], v[1].List[i]) { return eval.Result{Value: core.Value{Kind: core.Bool, Bool: true}} }
+	}
+	return eval.Result{Value: core.Value{Kind: core.Bool}}
+}
+
+func opBlank(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	blank := v[0].Kind == core.Nil || (v[0].Kind == core.String && v[0].Text == "")
+	discardArgCallables(c, v)
+	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: blank}}
+}
+
 func opNe(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	eq, ok := compareEq(v[0], v[1])

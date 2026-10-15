@@ -2,15 +2,15 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v16"
+const version = "v17"
 
 // Register describes every standard operation explicitly. Categories describe
 // the operation itself; callable/template effects still propagate dynamically.
 func Register(r *eval.Registry) bool {
-	return pure(r, "not", opNot, 1, 1) && pure(r, "bool", opBool, 1, 1) &&
+	return pure(r, "not", opNot, 1, 1) && pure(r, "bool", opBool, 1, 1) && pure(r, "blank?", opBlank, 1, 1) &&
 		contract(r, "fail!", opFail, 1, 1, eval.ControlOperation, eval.AllPhases, eval.RaisesFailure) &&
 		pure(r, "parse-json", opParseJSON, 1, 1) && pure(r, "str", opStr, 0, -1) && pure(r, "json", opJSON, 1, 1) && pure(r, "count", opCount, 1, 1) &&
-		pure(r, "eq", opEq, 2, 2) && pure(r, "is", opIs, 2, 2) &&
+		pure(r, "eq", opEq, 2, 2) && pure(r, "is", opIs, 2, 2) && pure(r, "has?", opHas, 2, 2) &&
 		pure(r, "ne", opNe, 2, 2) && pure(r, "lt", opLt, 2, 2) &&
 		pure(r, "gt", opGt, 2, 2) && pure(r, "gte", opGte, 2, 2) && pure(r, "lte", opLte, 2, 2) &&
 		pure(r, "template-cat", opTemplateCat, 0, -1) && pure(r, "text", opText, 1, 1) &&

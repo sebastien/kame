@@ -148,6 +148,24 @@ func TestBuildDefinitionOverrideGrammar(t *testing.T) {
  inv.Free()
 }
 
+func TestTypedDefinitionOverrideGrammar(t *testing.T) {
+	inv := cli.Parse("plan", []string{"--define-value", "flag=:false", "--define=flag=literal", "--define-value=modules=[\"py\" \"js\"]", "default"})
+	if !inv.OK || len(inv.Defines) != 3 || inv.Defines[0] != "flag:=:false" || inv.Defines[1] != "flag=literal" || inv.Defines[2] != "modules:=[\"py\" \"js\"]" { t.Error("typed and literal overrides lost order or type") }
+	inv.Free()
+	inv = cli.ParseRun([]string{"--define-value", "modules=[\"module.km\"]", "--lang", "km", "-c", "modules = []", "modules"})
+	if !inv.OK || len(inv.Inputs) != 1 || len(inv.Defines) != 1 { t.Error("typed override was mistaken for a source") }
+	inv.Free()
+	invalid := []string{"bad", "=1", "flag=", "flag=other", "flag=(env \"HOME\")", "flag=$(printf bad)", "flag=[1 (out! \"bad\")]", "flag=\"@(missing)\"", "flag=([x] x)", "flag=1 2", "flag=[x: 1 x: 2]"}
+	for i := range invalid {
+		inv = cli.Parse("build", []string{"--define-value", invalid[i]})
+		if inv.OK || inv.Error.Code != "OPT_VALUE_INVALID" { t.Error("nonliteral typed configuration was accepted: " + invalid[i]) }
+		inv.Free()
+	}
+	inv = cli.Parse("build", []string{"--define-value"})
+	if inv.OK || inv.Error.Code != "OPT_NO_VALUE" { t.Error("missing typed override value was accepted") }
+	inv.Free()
+}
+
 func TestAssignmentShorthand(t *testing.T) {
  inv := cli.Parse("build", []string{"env.HOST=0.0.0.0", "port=8000", "env.EMPTY=", "env.TOKEN=a=b", "--", "env.LITERAL=value"})
  if !inv.OK || len(inv.Environment) != 3 || inv.Environment[0] != "HOST=0.0.0.0" || inv.Environment[1] != "EMPTY=" || inv.Environment[2] != "TOKEN=a=b" || len(inv.Parameters) != 1 || inv.Parameters[0] != "port=8000" || len(inv.Targets) != 2 || inv.Targets[1] != "env.LITERAL=value" { t.Error("assignment shorthand lost environment, literal values, or delimiter policy") }

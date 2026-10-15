@@ -134,3 +134,32 @@ func TestKashMatchRetainsSubjectAndArmBoundaries(t *testing.T) {
 	defer again.Free()
 	if len(again.Diagnostics) != 0 || len(again.Items) != 1 { t.Error("canonical match failed to reparse") }
 }
+
+func TestKashListSpreadPreservesReferenceAndFormat(t *testing.T) {
+	a := t.Allocator()
+	text := "$...CMD $...{project.args} | cat\nprintf \"%s\" $($...commands.0)\nif $...check\n  $...CMD\n"
+	s := script.ParseKash(a, "spread.kash", text)
+	defer s.Free()
+	if len(s.Diagnostics) != 0 || len(s.Items) != 3 { t.Fatal("Kash list spread did not parse"); return }
+	words := s.Items[0].Expression.Items[0].Items
+	if !words[0].Bool || words[0].Parts[0].Form != "$..." || words[0].Parts[0].Expr.Kind != expr.Name || !words[1].Bool || words[1].Parts[0].Form != "$...{" || words[1].Parts[0].Expr.Kind != expr.Reference { t.Error("list spread lost typed reference semantics") }
+	cloned := expr.Clone(a, s.Items[0].Expression)
+	defer expr.Free(a, cloned)
+	formattedGraph := expr.Format(a, cloned)
+	defer mem.FreeString(a, formattedGraph)
+	if formattedGraph != "$...CMD $...{project.args} | cat" { t.Error("clone or formatter lost list spread spelling") }
+	formatted := script.Format(a, s)
+	defer mem.FreeString(a, formatted)
+	copy := script.ParseKash(a, "canonical.kash", formatted)
+	defer copy.Free()
+	if len(copy.Diagnostics) != 0 { t.Fatal("formatted list spread did not parse"); return }
+	again := script.Format(a, copy)
+	defer mem.FreeString(a, again)
+	if formatted != again { t.Error("list spread formatting is not idempotent") }
+	invalid := []string{"$...", "$...{CMD", "$....CMD", "printf \"$...CMD\"", "printf prefix$...CMD", "printf $...{CMD}suffix", "printf $...CMD\"\"", "printf $...CMD$other", "value = $...CMD", ":cwd $...CMD printf bad", ":env $...CMD printf bad", "printf > $...CMD", "match $...CMD\n  case \"x\"\n    printf bad"}
+	for i := range invalid {
+		bad := script.ParseKash(a, "invalid.kash", invalid[i])
+		if len(bad.Diagnostics) == 0 { t.Error("malformed or non-argv list spread was accepted") }
+		bad.Free()
+	}
+}

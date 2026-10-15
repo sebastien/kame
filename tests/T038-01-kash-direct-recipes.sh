@@ -109,6 +109,35 @@ KMK
 	check '<@(missing) {(missing)}>' captured
 	check "$argv_expected" callable
 	check explicit explicit
+	test-step "$backend explicit argv spreads include command heads"
+	check '<two words><><tail>' do run --allow-run --lang kash -c $'CMD = ["printf" "<%s>" "two words" ""]\n$...CMD tail'
+	check '<1><true><two words>' do run --allow-run --lang kash -c $'args = [1 :true "two words"]\nprintf "<%s>" $...args'
+	check '<tail>' do run --allow-run --lang kash -c $'args = []\nprintf "<%s>" $...args tail'
+	check '<field>' do run --allow-run --lang kash -c $'commands = [main: ["printf" "<%s>"]]\n$...{commands.main} field'
+	check '<pipeline>' do run --allow-run --lang kash -c $'CMD = ["printf" "<%s>"]\n:cwd . $...CMD pipeline | cat'
+	check '<capture>' do run --allow-run --lang kash -c $'CMD = ["printf" "<%s>"]\nprintf "%s" $($...CMD capture)'
+	check 'selected' do run --allow-run --lang kash -c $'CMD = ["true"]\nif $...CMD\n  printf selected'
+	check 'recovered' do run --allow-run --lang kash -c $'CMD = ["false"]\n$...CMD ? printf recovered'
+	check '' do run --allow-run --lang kash -c $'CMD = ["true"]\n$...CMD &'
+	check '<$missing @(missing) ; | *>' do run --allow-run --lang kash -c $'CMD = ["printf" "<%s>" """$missing @(missing) ; | *"""]\n$...CMD'
+	for value in '[]' '[""]' '[1]' '[:true]' '["printf" []]' '["printf" :nil]' '["printf" [key: "value"]]' '"printf"' ':nil'; do
+		reject EXPR_INVALID do run --allow-run --lang kash -c "CMD = $value"$'\n$...CMD printf forbidden'
+	done
+	reject EXPR_INVALID do run --allow-run --lang kash -c $'CMD = ["printf"]\n$CMD forbidden'
+	reject EXPR_INVALID do run --allow-run --lang kash -c $'args = "scalar"\nprintf "%s" $...args'
+	printf '\0' >"$work/nul"
+	reject EXPR_INVALID do run --allow-run --allow-read --lang kash -c $'CMD = ["printf" (text (read ./nul))]\n$...CMD'
+	reject EXPR_INVALID do run --allow-run --allow-read --lang kash -c $'CMD = [(text (read ./nul))]\n$...CMD'
+	for source in 'printf "$...CMD"' 'printf prefix$...CMD' 'printf $...{CMD}suffix' ':cwd $...CMD printf bad' 'printf > $...CMD' 'value = $...CMD'; do
+		reject PARSE_ERR do run --allow-run --lang kash -c $'printf forbidden\n'"$source"
+	done
+	cat >"$work/Makefile.kmk" <<'KMK'
+SHELL = kash
+CMD = ["printf" "<%s>" "recipe argument"]
+chosen :
+	$...CMD tail
+KMK
+	check '<recipe argument><tail>' chosen
 	test-step "$backend selected syntax is checked before any statement executes"
 	cat >"$work/Makefile.kmk" <<'KMK'
 SHELL = kash
@@ -193,6 +222,9 @@ chosen :
 KMK
 	PATH="$work/startup tools:$PATH" check 'startupstartupstartupstartupstartupstartupstartup' chosen
 	PATH="$work/startup tools:$PATH" check 'overrideoverrideoverrideoverrideoverrideoverrideoverride' --tool kame-direct-tool=./override-tool chosen
+	check override do run --allow-run --tool kame-direct-tool=./override-tool --lang kash -c $'CMD = ["kame-direct-tool"]\n$...CMD'
+	check override do run --allow-run --tool kame-direct-tool=./override-tool --lang kash -c $'CMD = [x/kame-direct-tool]\n$...CMD'
+	reject TOOL_MISSING do run --allow-run --lang kash -c $'CMD = ["kame-038-missing-spread-tool"]\n$...CMD'
 	reject TOOL_MISSING chosen
 	printf 'SHELL = kash\nchosen :\n\t./override-tool\n' >"$work/Makefile.kmk"
 	check override do run --allow-run="$work/override-tool" "$work/Makefile.kmk" chosen
@@ -222,6 +254,9 @@ KMK
 	kill -TERM "$watcher" 2>/dev/null || true
 	wait "$watcher" 2>/dev/null || true
 	test-step "$backend parenthesized formatting and AST parity"
+	printf '%s\n' '$...CMD $...{project.args}' >"$work/spread.kash"
+	"${runner[@]}" do fmt --lang kash "$work/spread.kash" >"$work/spread.fmt"
+	if cmp -s "$work/spread.kash" "$work/spread.fmt"; then test-ok "$backend formatting preserves explicit spreads"; else test-fail "$backend spread formatting"; cat "$work/spread.fmt"; fi
 	"${runner[@]}" do parse --lang kash "$TMPDIR/source.kash" >"$TMPDIR/$backend.ast"
 	"${runner[@]}" do fmt --lang kash "$TMPDIR/source.kash" >"$TMPDIR/$backend.fmt"
 	"${runner[@]}" do fmt --lang kash "$TMPDIR/$backend.fmt" >"$work/again"

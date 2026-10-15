@@ -13,13 +13,27 @@ import (
 // requested. The evaluator owns its replacement AST; the authored AST remains
 // untouched, retaining its name and diagnostic position.
 func (p *Program) OverrideDefinition(name, text string) bool {
+	literal := expr.Expr{Kind: expr.Symbol, Text: text}
+	return p.overrideDefinition(name, &literal)
+}
+
+// OverrideDefinitionValue accepts closed literal data only. Validation precedes
+// registration, including for overrides of definitions that are never demanded.
+func (p *Program) OverrideDefinitionValue(name, text string) bool {
+	parsed := expr.Parse(p.Alloc, "<define-value>", text)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || !expr.IsLiteral(parsed.Expr) { return false }
+	return p.overrideDefinition(name, parsed.Expr)
+}
+
+func (p *Program) overrideDefinition(name string, expression *expr.Expr) bool {
 	node := p.Definition(name)
 	if node == nil || node.Requested || node.State != core.NodeIdle {
 		return false
 	}
 	state := node.Context.(*definitionState)
 	original := state.Definition
-	replacement := p.literalDefinition(original, text)
+	replacement := p.expressionDefinition(original, expression)
 	for i := range p.Definitions {
 		if p.Definitions[i] == original {
 			p.Definitions[i] = replacement
@@ -33,10 +47,15 @@ func (p *Program) OverrideDefinition(name, text string) bool {
 }
 
 func (p *Program) literalDefinition(original *definition.Definition, text string) *definition.Definition {
+	literal := expr.Expr{Kind: expr.Symbol, Text: text, Span: original.Span}
+	return p.expressionDefinition(original, &literal)
+}
+
+func (p *Program) expressionDefinition(original *definition.Definition, expression *expr.Expr) *definition.Definition {
 	replacement := mem.Alloc[definition.Definition](p.Alloc)
 	replacement.Name, replacement.NameSpan, replacement.Span, replacement.Default = original.Name, original.NameSpan, original.Span, original.Default
-	replacement.Expression = mem.Alloc[expr.Expr](p.Alloc)
-	replacement.Expression.Kind, replacement.Expression.Text, replacement.Expression.TextOwned, replacement.Expression.Span = expr.Symbol, owned(p.Alloc, text), true, original.Span
+	replacement.Expression = expr.Clone(p.Alloc, expression)
+	replacement.Expression.Span = original.Span
 	return replacement
 }
 
@@ -130,19 +149,20 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 			text, provided = state.Environment[i][len(prefix):], true
 		}
 	}
-	prefix = key.Name + "="
+	typed := false
 	for i := range p.explicitDefinitionOverrides {
-		if strings.HasPrefix(p.explicitDefinitionOverrides[i], prefix) {
-			text, provided = p.explicitDefinitionOverrides[i][len(prefix):], true
+		override := definition.ParseOverride(p.explicitDefinitionOverrides[i])
+		if override.Name == key.Name {
+			text, provided, typed = override.Text, true, override.Typed
 		}
 	}
 	canonical := p.Definition(key.Name).Context.(*definitionState)
-	if provided {
+	if provided && !typed {
 		state.Definition, state.Owned = p.literalDefinition(authored, text), true
 	} else if canonical.Owned {
 		// Canonical literals belong to the unscoped node and can be replaced again
 		// before demand. Keep this scoped snapshot independent of that lifetime.
-		state.Definition, state.Owned = p.literalDefinition(authored, authored.Expression.Text), true
+		state.Definition, state.Owned = p.expressionDefinition(authored, canonical.Definition.Expression), true
 	}
 	node := p.Engine.AddOwned(scopedKey, evaluateDefinition, state, freeDefinitionState)
 	if node == nil {

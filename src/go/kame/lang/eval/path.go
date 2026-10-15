@@ -8,14 +8,6 @@ import (
 	"solod.dev/so/strings"
 )
 
-func pathGlob(text string) bool {
-	for i := 0; i < len(text); i++ {
-		if text[i] == '\\' { i++; continue }
-		if text[i] == '*' || text[i] == '?' || text[i] == '[' { return true }
-	}
-	return false
-}
-
 func appendPathText(b *strings.Builder, text string) {
 	for i := 0; i < len(text); i++ {
 		if text[i] == '\\' && i+1 < len(text) { i++ }
@@ -25,7 +17,7 @@ func appendPathText(b *strings.Builder, text string) {
 
 func (p *Program) pathExpression(scope *Scope, expression *expr.Expr, c *Context) Result {
 	result := Result{Value: core.NewString(c.Run, expression.Text)}
-	glob := pathGlob(expression.Text)
+	glob := expr.PathHasGlob(expression.Text)
 	if len(expression.Parts) == 0 && !expression.LiteralPath && strings.IndexByte(expression.Text, '\\') >= 0 {
 		b := strings.NewBuilder(c.Run)
 		appendPathText(&b, expression.Text)
@@ -38,7 +30,7 @@ func (p *Program) pathExpression(scope *Scope, expression *expr.Expr, c *Context
 		result.Value.Free(c.Run)
 		result = p.pathValue(scope, expression, c)
 		glob = false
-		for i := range expression.Parts { if expression.Parts[i].Expr == nil && pathGlob(expression.Parts[i].Text) { glob = true } }
+		for i := range expression.Parts { if expression.Parts[i].Expr == nil && expr.PathHasGlob(expression.Parts[i].Text) { glob = true } }
 	}
 	if result.Waiting || result.Diagnostic.Code != "" || result.Value.Kind == core.Pattern || !glob || expression.LiteralPath { return result }
 	if p.Registry == nil { result.Free(c.Run); return failure(c.Run, "OP_UNKNOWN", expression.Span, "glob expressions require wildcard") }

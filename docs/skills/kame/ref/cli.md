@@ -94,6 +94,7 @@ Primary options:
 | `--capture-limit N` | Limit each command substitution's captured stdout; default 1 MiB, independent of retained recipe logs. |
 | `--watch` | Rebuild tracked inputs; primary build mode only, not `do run`. |
 | `--define NAME=VALUE` | Override a declared definition with literal string data. |
+| `--define-value NAME=LITERAL` | Override a declared definition with typed, closed Kame data. |
 | `--print-result` | In execution sessions, opt into final `.km` result display. |
 | `--tool NAME=PATH` | Override executable resolution for a declared tool. |
 
@@ -115,6 +116,18 @@ function definitions cannot be overridden. Unknown explicit names fail, while
 unrelated `KAME_` environment entries are ignored. This is definition
 configuration, not `env.NAME=VALUE` child-environment setup or an `(env NAME)`
 read grant. `do render --define` instead supplies template payload fields.
+
+Use `--define-value 'SDK_MODULES=["py" "js"]'` or `--define-value FLAG=:false`
+for typed configuration. Accepted data is nil, booleans, finite numbers, plain
+strings/symbols/paths, lists, and records with unique keys, nested below 256
+levels. References, applications, interpolation, pattern values, wildcard paths,
+captures, and callables are rejected before any work runs. Verbatim strings can
+carry interpolation-looking data literally. This option does not grant effects
+or evaluate arbitrary expressions, and is not a template-render payload option.
+Repeated `--define`/`--define-value` options share last-option-wins precedence;
+bare `NAME=VALUE` parameters retain their existing final precedence and string
+semantics. `KAME_<NAME>` remains string configuration. Inspection JSON preserves
+typed values rather than rendering them as strings.
 
 Recipes receive an explicit complete environment. The CLI starts from its
 environment and applies `--env` replacements; cache fingerprints include the

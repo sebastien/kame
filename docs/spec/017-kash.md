@@ -211,6 +211,7 @@ Kash has these explicit value/process boundaries:
 | --- | --- | --- |
 | `$REFERENCE` | Kame reference parser | Resolve and insert a value from the current Kame scope. |
 | `${REFERENCE}` | Kame reference parser | Braced spelling of `$REFERENCE`. |
+| `$...REFERENCE`, `$...{REFERENCE}` | Kame reference parser | Explicitly spread a flat argv list, including at command position. |
 | `(EXPRESSION)` | Kame expression parser | Evaluate an ordinary parenthesized Kame expression and insert its typed value. |
 | `$(COMMAND)` | Kash statement parser | Run a Kash command or pipeline and capture its standard output. |
 
@@ -345,9 +346,9 @@ explicit Kame value, such as `(wildcard ./src/**/*.go)`.
 
 Unquoted spaces and tabs separate words. Adjacent literal and substitution parts
 form one word, as in `revision=$revision` and `${name}.c`. Double quotes group
-parts into one word and allow all four substitutions. An empty quoted word is
-one empty argument. Single quotes are reserved and rejected, consistent with
-Kame expression syntax.
+parts into one word and allow reference and command-capture substitutions. An
+empty quoted word is one empty argument. Single quotes are reserved and rejected,
+consistent with Kame expression syntax.
 
 Outside quotes, backslash escapes the next non-newline character; backslash plus
 newline continues the statement without inserting text. Inside double quotes,
@@ -374,10 +375,32 @@ never splice lists: `$files` splices a flat list, while `"$files"` fails when
 globbing. Quoted/escaped `@` and `$` are literal only when escaped or not followed
 by substitution syntax; quotes do not disable valid substitutions.
 
-The executable position requires one nonempty scalar value, not a list even if
-it has one item. Executables, arguments, environment entries, and filesystem
-paths must be free of NUL bytes. Processes execute argv directly, using host
-PATH lookup for an executable without a path separator; no shell interprets it.
+An explicit `$...REFERENCE` (or `$...{REFERENCE}`) requires a flat list and
+contributes one argument per scalar item, preserving order and argument bytes.
+It must be a standalone unquoted argv word; quoted/mixed words, definition
+values, stage setup values, and redirection paths cannot use this form. Empty
+lists contribute no arguments after an executable.
+
+At command position, explicit spreading interprets the first list item as the
+executable and the remaining items as its initial arguments:
+
+```kash
+CMD = ["git" "-C" "./my project"]
+$...CMD status --short
+```
+
+The command list must be nonempty, and its first item must be a nonempty
+string/path. An empty command list fails rather than promoting the next word to
+executable. Subsequent authored words append arguments normally; spread values
+are never reparsed as setup keys, operators, or Kash source. This also works in
+pipelines, captures, command conditions, recovery, async commands, and recipes.
+
+Without explicit spreading, the executable position requires one nonempty
+string/path value, not a list even if it has one item. Ordinary `$files` list
+splicing in argument position is unchanged. Executables, arguments, environment
+entries, and filesystem paths must be free of NUL bytes. Processes execute argv
+directly, using host PATH lookup for an executable without a path separator; no
+shell interprets it.
 
 Executable resolution uses the driver's startup PATH and tool overrides, not
 stage environment PATH changes or a Kame binding named `PATH`, as specified by
@@ -817,6 +840,9 @@ live forwarding and explicit capture remain separate channels.
   and invalid escapes, single quotes, `&&`, and `||` are rejected.
 - Flat lists splice only in standalone unquoted substitutions; mixed/quoted
   lists, unsupported values, empty executables, and NUL bytes fail before launch.
+- `$...CMD` explicitly spreads a nonempty command list; `$...args` spreads a flat
+  argument list, including empty lists. Formatting preserves the explicit marker,
+  and ordinary `$CMD` still rejects a list in executable position.
 - Setup keys configure only their stage; duplicates fail, timeout units are
   seconds, and stage cwd governs relative redirection paths.
 - Substitution preserves empty stdout and trailing newlines, forwards stderr

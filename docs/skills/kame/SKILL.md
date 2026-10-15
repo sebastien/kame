@@ -106,7 +106,8 @@ Keep these boundaries distinct:
   `for`, `let`, and `include` arguments keep nested applications parenthesized.
 - Kash `$name` looks up a Kame value; `(EXPRESSION)` computes a typed argument;
   `$(COMMAND)` captures a Kash process's stdout. Lists splice argv only as
-  standalone unquoted substitutions; no implicit shell splitting or globbing.
+  standalone unquoted substitutions; `$...command` explicitly spreads an argv
+  list including its executable. No implicit shell splitting or globbing.
 - `$(COMMAND)` is also an expression atom, but requires process authority and
   an allowed execution phase. Plain Kame strings keep it literal; raw recipe
   text leaves it to the selected recipe interpreter.

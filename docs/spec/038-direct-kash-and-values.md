@@ -111,6 +111,11 @@ Unquoted standalone argument expressions or references splice flat lists.
 Scalars contribute one argument without splitting, globbing, or source parsing.
 Quoted or mixed words require scalars. Executable heads require one nonempty
 string/path without NUL; a list does not implicitly become a command prefix.
+Use `$...command` to explicitly spread a flat argv list: its first item supplies
+the executable and the remaining items precede any following authored arguments.
+The list must be nonempty at command position. `$...reference` and the braced
+`$...{reference}` spelling are standalone unquoted argv words, not scalar
+interpolation or source generation; ordinary `$command` semantics are unchanged.
 
 Kash quoted words use Kash reference and capture rules, not document
 interpolation. Expression strings inside Kame expressions retain the ordinary

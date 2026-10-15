@@ -67,6 +67,15 @@ func opJoinpath(c *eval.Context, s any, v []core.Value) eval.Result {
 		values = slices.Append(c.Run, values, v[i].Text)
 	}
 	joined := path.Join(c.Run, values...)
+	// Cleaning must not turn an explicitly relative file into a bare task name.
+	first := 0
+	for first < len(values) && values[first] == "" { first++ }
+	if first < len(values) && (values[first] == "." || strings.HasPrefix(values[first], "./")) && !path.IsAbs(joined) && joined != ".." && !strings.HasPrefix(joined, "../") {
+		marked := cloneText(c.Run, "./"+joined)
+		if joined == "." { mem.FreeString(c.Run, marked); marked = cloneText(c.Run, "./") }
+		mem.FreeString(c.Run, joined)
+		joined = marked
+	}
 	slices.Free(c.Run, values)
 	return eval.Result{Value: core.Value{Kind: core.String, Text: joined}}
 }
