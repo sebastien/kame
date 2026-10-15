@@ -3,12 +3,11 @@
 ## Start here
 
 - [Quickstart and build example](../README.md#get-started)
+- [Installation and backends](ref-installation.md): release verification, host requirements, launcher setup
 - [Runnable lessons](../examples/README.md): independent values, rules and Kash processes, then composition
 - [Migrating from GNU Make](skills/kame/ref/make-migration.md)
 - [Idioms and gotchas](idioms-and-gotchas.md)
 - [Glossary](glossary.md)
-- [XML extraction requirements scope](xml-extraction-scope.md)
-- [SDK migration boundaries](sdk-migration-boundaries.md): truth/emptiness, lossless capture, cleanup ownership, and vendor/workflow scope
 
 ## Language and CLI references
 
@@ -20,12 +19,25 @@
 - [Kash processes](skills/kame/ref/kash.md)
 - [CLI](skills/kame/ref/cli.md)
 
+## Integrate and contribute
+
+- [Embedding APIs](ref-embedding.md): JavaScript/WASM and asynchronous Python/CLI usage
+- [Contributing](ref-contributing.md): toolchain, repository map, local checks, documentation maintenance
+
 ## Normative specifications
 
 The [specification index](spec/README.md) covers the language, engine, host
 boundaries, interfaces and acceptance requirements. Specs define intended
 behavior; references teach it. When they disagree, the applicable specification
 governs. A specification is not an implementation-status report.
+
+## Workflow scope assessments
+
+These documents constrain SDK migration work; they are not general language
+tutorials or promises of new native operations.
+
+- [SDK migration boundaries](sdk-migration-boundaries.md): truth/emptiness, lossless capture, cleanup ownership, and vendor/workflow scope
+- [XML extraction requirements scope](xml-extraction-scope.md)
 
 ## Remaining work
 

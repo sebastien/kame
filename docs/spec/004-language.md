@@ -411,9 +411,11 @@ sources. String templates contain literal segments and expansions:
 - `@<`, `@>`, and argument forms resolve contextual selectors.
 - A backslash escapes `@` and `\`.
 
-`@(expression)` is shared with expression strings (see Strings); contextual
-selectors are template-only. Deprecated `{(...)}` input remains specific to
-expression strings; it is literal in document templates.
+`@(expression)` is shared with expression strings (see Strings). Contextual
+selectors are also expression atoms when the required frame exists, including
+inside [direct Kash recipe expressions](038-direct-kash-and-values.md). They
+are not compact expansions inside expression-string text. Deprecated `{(...)}`
+input remains specific to expression strings; it is literal in document templates.
 
 Malformed `@(` expansions remain literal and produce an `PARSE_ERR` warning. A
 well-delimited but invalid contained expression is an error.

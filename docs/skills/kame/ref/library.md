@@ -13,8 +13,18 @@ retain `(gt LEFT RIGHT)` and conventional left/right semantics. Variadic operati
 such as `str`, `concat`, `merge`, and `joinpath` retain authored operand order;
 special forms and internal template-lowering primitives have their own contracts.
 
-Migration: `set-field` → `set`, `regex-replace` → `resub`, and
-`shell!`/`shellrun!` → `sh!`. Old names are removed with migration diagnostics.
+### Operation-name migration
+
+| Removed spelling | Replacement |
+| --- | --- |
+| `write`, `yield`, `out`, `err`, `run`, `pipe`, `fail`, `shell-template` | Add `!`: `write!`, `yield!`, `out!`, `err!`, `run!`, `pipe!`, `fail!`, `shell-template!`. |
+| `shell`, `shellrun`, `shell!`, `shellrun!`, `sh` | `sh!` |
+| `set-field`, `regex-replace` | `set`, `resub` |
+| `cat` | `str` for scalars, `join` for collections, or `json` for serialization. |
+
+Removed standard-library spellings produce migration diagnostics, not aliases.
+External command names and user-defined bindings are unaffected. `replace` is
+different: it remains a deprecated alias for `sub` with identical behavior.
 
 ## Values and calls
 
@@ -164,7 +174,7 @@ environment values can invalidate a consumer.
 | `stat` | `(stat PATH)` | read | Stable file metadata. |
 | `lstat` | `(lstat PATH)` | read | No-follow final-component metadata, with a portable `link` boolean; parents still follow links. |
 | `readlink` | `(readlink PATH)` | read | Exact UTF-8 target text; relative targets stay relative, dangling links work; invalid text/absent paths/non-links report `FS_ERR`. |
-| `wildcard` | `(wildcard PATTERN...)` | read | Sorted, duplicate-free union of one or more patterns; each tracks its own membership. |
+| `wildcard` | `(wildcard [FLAG...] PATTERN-OR-PATH-LIST...)` | read | Sorted, duplicate-free union; at least one pattern/path-list operand is required. Each pattern tracks membership. |
 | `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other supported values use the effect-output encoding described below, not scalar-only `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
 | `env` | `(env NAME)` | env | Environment value. |
 | `sh!` | `(sh! [OPTIONS] COMMAND)` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
@@ -188,9 +198,33 @@ needed roots, names, or process access with its `--allow-*` options.
 `run!`, `pipe!`, and `await` are process special forms, not registry operations;
 see [Kash](./kash.md).
 
-Recursive wildcards do not descend into directory symlinks discovered during
-enumeration. Name a linked directory in the literal prefix (`./linked/**/*.js`)
-to traverse it explicitly; results retain that lexical prefix.
+### Wildcard selection
+
+Unquoted glob paths evaluate to tracked lists before the call. `wildcard` accepts
+these expanded lists without reinterpreting their filenames as patterns.
+
+| Flags | Entry kind |
+| --- | --- |
+| `:+files` / `:-files` | Include / exclude regular files. |
+| `:+dir` / `:-dir` | Include / exclude directories. |
+| `:+symlinks` / `:-symlinks` | Include / exclude symbolic links, including dangling links. |
+
+Without positive flags, selection starts with all entry kinds. Positive flags
+select their union; negative flags subtract kinds. Flags may appear anywhere;
+identical duplicates are harmless, opposite flags for one kind and unknown flags
+report `EXPR_INVALID`. Pass flags as scalar operands, not list members.
+
+```kame
+(wildcard :+files ./src/**/*.c)
+(wildcard :+files :+symlinks ./assets/**)
+```
+
+Classification does not follow symlinks: `:+files` excludes links to files.
+Filtering does not prune traversal through ordinary directories. Recursive
+wildcards do not descend into discovered directory symlinks; name a linked
+directory in the literal prefix (`./linked/**/*.js`) to traverse it explicitly.
+Results retain that lexical prefix. Membership and entry-kind changes can
+invalidate consumers even when the set of path names stays unchanged.
 
 ## Build effects
 

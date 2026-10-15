@@ -23,9 +23,9 @@ kame do run --lang expr -c '(count [1 2 3])'
 Printed values use canonical syntax: `:nil`, `:true`, `:false`, and quoted
 strings. Bytes print directly. Do not infer string splitting from display.
 
-`.km` scripts emit only explicit `out`/`err` output, not their final value.
+`.km` scripts emit only explicit `out!`/`err!` output, not their final value.
 Use `--print-result` for canonical result display, or select a named entry.
-`expr` still displays its result even when it also calls `out`; no output-call
+`expr` still displays its result even when it also calls `out!`; no output-call
 heuristic changes the framing. Machine-readable scripts should use `(out! DATA)`.
 Program operands after `--` are literal strings in `args` (`@*`), with indexed
 access through `args.0`. A quoted `NAME=VALUE` is literal configuration even
@@ -81,8 +81,10 @@ contain a child process's filesystem, network or environment access.
 
 ## Build expressions and shell recipes
 
-A `.kmk` recipe is one shell script. Shell variables and `cd` persist between
-its lines. Port Make recipes that relied on one shell per line carefully.
+A default external-shell recipe is one shell script. Shell variables and `cd`
+persist between its lines. Port Make recipes that relied on one shell per line
+carefully. `SHELL = kash` selects direct Kash instead: use `$name` and
+`(EXPRESSION)`, not document-template expansion.
 
 Kame selectors use `@>` for outputs, `@<` for the first input, and `@<*` for
 all normal inputs. `@<?` selects unique normal file inputs whose content digest
@@ -92,7 +94,7 @@ excludes order-only prerequisites and is available only inside file recipes.
 Use explicit `{stem}` pattern captures for stems, `@(dirname @>)` for the output
 directory and `@(dirname @<)` for the first input directory.
 
-Kame expressions use `@(EXPRESSION)` in recipes. Build headers accept multiple whole input expressions and paths such as
+External-shell recipes use `@(EXPRESSION)`. Build headers accept whole input expressions and paths such as
 `@(DIRECTORY)/suffix`, interleaved with literal or quoted paths. Each whole
 expression is evaluated and flattened independently, in authored order.
 
@@ -114,9 +116,13 @@ per use and is not reflected as a resolved executable in the plan. Unquoted
 is not part of that atom. Do not use Make's `$$` habit blindly: raw recipe text
 is shell-owned, so `$HOME` is a shell expansion; `$$` means the shell process ID.
 
-A literal wildcard in Kash argv stays literal. Ask Kame to discover files with
-an explicit wildcard expression when that is intended. `wildcard` accepts one or more patterns and returns a sorted, duplicate-free
-union; filter results with collection operations. `**` matches zero or more directory levels.
+A raw wildcard word in Kash argv stays literal. In Kame expressions, an
+unquoted explicit path such as `./src/**/*.c` discovers files and returns a
+tracked list; quoted paths remain literal. `wildcard` accepts patterns or
+expanded path lists and returns a sorted, duplicate-free union. Use `:+files`,
+`:+dir`, or `:+symlinks` for entry-kind selection; use collection operations
+for other predicates. `**` matches zero or more directory levels. See the
+[library reference](skills/kame/ref/library.md#wildcard-selection).
 
 ## Patterns and expansions
 

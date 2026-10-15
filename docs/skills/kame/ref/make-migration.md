@@ -155,9 +155,9 @@ Do not copy GNU Make syntax for these constructs; use the Kame-specific model:
 Use Kame definitions and expression operations for deterministic build data;
 use explicit prerequisite rules to generate files; and use the normal rule
 recipe as the process interface (shell by default, or explicitly selected Kash).
-Collected `shell` calls are invalid during
+Collected `sh!` calls are invalid during
 planning and direct template rendering. Demanded lazy values and Kash recipe
-expressions may call `shell` in their runtime phase, subject to run grants and
+expressions may call `sh!` in their runtime phase, subject to run grants and
 the target environment. Compilation never launches them.
 
 For dynamic source discovery, prefer an explicit definition:

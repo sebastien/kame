@@ -7,10 +7,11 @@ Completed work and historical audit results are not retained here.
 ## Release
 
 - [ ] Publish the first actual signed GitHub release. Staged-release checks do
-  not complete publication. Include the pinned bootstrap and launcher, native
-  platform artifacts (including Windows PE and OpenBSD native), WASM bundle,
-  package-manager manifests, signed checksums and provenance required by
-  [distribution](docs/spec/015-distribution.md). Verify installation and execution
+  not complete publication. Attach only `kame.com`, `kame.js`, `kame.wasm`,
+  `VERSION`, `PROVENANCE.json`, `SHA256SUMS`, and `SHA256SUMS.sig`, as required by
+  [distribution](docs/spec/015-distribution.md). Keep launcher/bootstrap helpers
+  and package definitions in source; native CI outputs are development artifacts,
+  not release attachments. Verify installation and execution
   from the published assets, including offline reuse and integrity rejection.
 - [ ] Before release, rerun native, leak and WASM gates at a stable revision:
   `CC=clang CFLAGS=-O0 make test`, `CC=clang CFLAGS=-O0 make test-leaks`, and

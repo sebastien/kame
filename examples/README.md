@@ -36,6 +36,10 @@ The lessons use `kame` for readability. Substitute the absolute path to
 `build/kame.debug`, or use an installed `kame` on PATH. Run lesson commands from
 the stated example directory so generated files remain local.
 
+For toolchain setup, see [Contributing](../docs/ref-contributing.md). To call
+Kame from JavaScript or Python rather than the terminal, use the runnable
+examples in [Embedding APIs](../docs/ref-embedding.md).
+
 The examples regression test uses temporary copies rather than modifying lesson
 inputs:
 
@@ -58,8 +62,10 @@ bash tests/T013-04-meta-layer-examples.sh
 | Demand, invalidation, subscriptions, generations and streams | `reactive/README.md`, `engine/` |
 
 This is a teaching map, not an exhaustive syntax reference. Continue with the
-[language](../docs/spec/004-language.md), [library](../docs/spec/007-library.md),
-and [Kash](../docs/spec/017-kash.md) specifications for the full contracts.
+[language](../docs/skills/kame/ref/language.md),
+[library](../docs/skills/kame/ref/library.md), and
+[Kash](../docs/skills/kame/ref/kash.md) references for practical usage, or the
+[specifications](../docs/spec/README.md) for the full contracts.
 
 ## More examples
 

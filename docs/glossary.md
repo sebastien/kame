@@ -96,7 +96,7 @@ reference.
 ### Placeholder section
 
 A **placeholder section** is a short lexical function written around one
-expression with placeholders, such as `((replace ".c" ".o" _))`. `_`, `__`,
+expression with placeholders, such as `((sub ".c" ".o" _))`. `_`, `__`,
 and `_2` denote positional arguments. A placeholder only has this special meaning
 inside a section; elsewhere it remains an ordinary name.
 
@@ -105,18 +105,23 @@ inside a section; elsewhere it remains an ordinary name.
 A **pattern** is a first-class expression value parsed from a path or plain
 string with brace groups. Match groups, such as `{name:*}` and `{**}`, capture
 text; expansion groups, such as `{name}` and `{_0}`, insert a prior capture.
-Patterns power the match-and-expand form of `replace`. They are not regular
-expressions and do not reclassify runtime strings containing braces.
+Patterns power `match?` predicates and the match-and-expand form of `sub`
+(`replace` is a deprecated alias). Substitution preserves nonmatches; matching
+returns a boolean. Patterns do not reclassify runtime strings containing braces;
+explicit regex groups use the bounded regex grammar.
 
 ## Build declarations and planning
 
 ### Script and include
 
-A **script** is one composed Kame build source containing comments, definitions,
-rules, and top-level expressions. `(include PATH)` composes file-backed scripts at
-the inclusion point; included declarations share the surrounding scope and source
-order and inherit the caller's language. Composition-only `if` selects literal
-includes before runtime; `(include? PATH)` skips only missing files.
+A **script** is a Kame source program: a `.km` value script contains definitions
+and expression statements; a `.kmk` rule program adds build rules; a `.kash`
+process script describes typed commands and control flow. They share expressions,
+not one outer grammar. `(include PATH)` composes file-backed value/rule sources
+at the inclusion point; included declarations share scope/source order and inherit
+the caller's language. Composition-only `if` selects literal includes before
+runtime; `(include? PATH)` skips only missing files. These directives do not
+provide Kash source inclusion.
 
 ### Rule
 
@@ -124,8 +129,8 @@ A **rule** declares outputs, inputs, and an optional indented recipe. Kame
 classifies rules by their output syntax:
 
 - A **file rule** has explicit path outputs and produces filesystem artifacts.
-- A **phony task** (or bare task) has one bare-name output and runs whenever it
-  is reached.
+- A **bare task** (also called a phony task) has one bare-name output and runs
+  whenever it is reached.
 - A **cached task** is prefixed with `task` and may reuse a successful cached
   execution.
 - A **service** is prefixed with `service` and represents a long-running action.
@@ -315,10 +320,12 @@ the host request, so denial (`CAP_DENIED`) has no side effect.
 
 ### Tool reference
 
-A **tool reference** is `@(x/NAME)` in a recipe. Kame resolves the named
-executable from the build driver's startup `PATH` before execution, renders its
-resolved path, and records that executable file as a dynamic dependency. An
-ordinary shell command name is not a tool reference and remains shell-resolved.
+A **tool reference** obtains a resolved, tracked executable through `x/NAME` or
+`(tool NAME)`, rendered as `@(x/NAME)` in external-shell recipes or referenced
+as `$x/NAME` in Kash. Named lookup uses the driver's startup `PATH` and `--tool`
+overrides. Every reached Kash command head also acquires an executable dependency
+automatically; explicit executable paths resolve from stage cwd. Ordinary command
+names in external-shell text remain shell-resolved and are not tracked this way.
 
 ## Cache and portable ABI
 

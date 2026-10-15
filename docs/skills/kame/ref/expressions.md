@@ -18,12 +18,20 @@ do not accumulate depth across items.
   entries. Numbers, strings, explicit paths, booleans, and nil are values.
 - Bare names are references; use `"app"` or `:app` for literal text. Symbols
   other than `:true`, `:false`, and `:nil` evaluate to their name without `:`.
-- Paths start with `./`, `../`, or `/`; they are not implicit filesystem reads.
+- Paths start with `./`, `../`, or `/`; nonglob paths are values, not file reads.
   `(resource "file:///absolute/path")` or `(resource "mem://workspace/path")`
   constructs an explicit protocol resource; a quoted URI alone is ordinary text.
 - References support fields (`project.name`), indexes (`files.0`, `files.-1`),
   half-open slices (`files.1..4`), and selections (`config.{host,port}`).
 - Only `:nil` and `:false` are false; zero, empty strings, and empty lists are true.
+
+An unquoted explicit path with authored `*`, `?`, or a bracket class is a
+glob expression: `SOURCES = ./src/**/*.c` lazily requests a tracked filesystem
+scan under read authority. Results are always lists: no matches give `[]`, and
+one match remains a one-item list. Quoted/escaped wildcard bytes and wildcard
+bytes inserted by interpolation remain literal. Capture-pattern groups take
+precedence over globs. Raw Kash command words do not glob; embedded Kame
+expressions do. See [wildcard selection](./library.md#wildcard-selection).
 
 Empty records and bytes are also true. For strings, bytes, lists, or records,
 use `(= (count VALUE) 0)` for emptiness and `(> (count VALUE) 0)` for nonemptiness;

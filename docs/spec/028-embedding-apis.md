@@ -2,6 +2,9 @@
 
 ## Scope
 
+For setup and runnable examples, see the [embedding reference](../ref-embedding.md).
+This specification defines the required API and ownership contracts.
+
 Importable JavaScript and Python interfaces expose Kame without changing
 the CLI grammar. The APIs cover source compilation, expression evaluation,
 builds and watches; copy all values and events that cross an API boundary; and

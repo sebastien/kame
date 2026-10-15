@@ -27,7 +27,9 @@ Function selectors are `@_` (first argument), `@*` (all), `@#` (count), and
 `@N` (index). Indexes are zero-based; negative indexes count from the end.
 Missing context and invalid bounds produce diagnostics, not empty text.
 Expression strings use `@(EXPRESSION)` too; deprecated `{(EXPRESSION)}` input
-is migrated by expression/script formatting. Selectors are template-only.
+is migrated by expression/script formatting. Selectors also work as expression
+atoms when their rule/argument context exists, as in `(dirname @>)`; compact
+selectors inside expression-string text require explicit rendering instead.
 Backslash can escape `@` and `\` in string templates, and `\@`/`\{` keep
 interpolation openers inert in expression strings. Raw regions remain unchanged.
 
@@ -99,7 +101,8 @@ template directives are not Kash meta-programming forms.
   Content defaults to `plain`; specify a style for host-comment content.
 - Payload must be a record; its fields shadow caller bindings for rendering.
   The caller's scope remains visible as the parent.
-- With two arguments, a string second argument supplies STYLE instead of PAYLOAD.
+- With two arguments, a string first argument supplies STYLE instead of PAYLOAD:
+  `(render "html" SOURCE)`. A leading record supplies PAYLOAD instead.
   Bytes content requires an explicit style; unlike string content, it has no default.
 - Template reads and evaluated `read`, `wildcard`, or `env` calls contribute
   dynamic dependencies in builds. Recursive includes are diagnosed.

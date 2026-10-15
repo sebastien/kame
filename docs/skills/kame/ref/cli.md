@@ -106,6 +106,16 @@ Values remain literal even when they contain interpolation or process syntax;
 quote the whole operand at the host shell when it contains whitespace.
 Program arguments after `--` are a separate mechanism.
 
+Declared value definitions also accept case-sensitive `KAME_<NAME>` environment
+configuration: `KAME_MODE=release kame` overrides an authored `MODE` definition.
+Precedence is explicit CLI configuration (`--define` or `NAME=VALUE`), then
+`KAME_<NAME>`, then the authored value, including `?=` defaults. Repeated CLI
+entries use the last value. Overrides are literal strings, never expressions;
+function definitions cannot be overridden. Unknown explicit names fail, while
+unrelated `KAME_` environment entries are ignored. This is definition
+configuration, not `env.NAME=VALUE` child-environment setup or an `(env NAME)`
+read grant. `do render --define` instead supplies template payload fields.
+
 Recipes receive an explicit complete environment. The CLI starts from its
 environment and applies `--env` replacements; cache fingerprints include the
 authored environment assignments and named environment reads. Rules that execute
@@ -236,14 +246,14 @@ Grant only what the expression needs:
 
 Arguments after `--` are available as the same typed list through `args` and
 `@*` in km, expr, Kash, and session rule work; `args.0` selects the first operand.
-Each operand is one literal string, and no operands means `[]`. These grants
-apply to standalone expression execution; normal builds grant recipe execution
-and working-directory read/write access, while language-level environment reads
-and access outside the working directory remain denied without explicit grants.
-Explicit grant options belong to `do run`/explicit source sessions, not discovered
-primary builds; `do render` also accepts them. Scoped run grants require explicit
-executable paths for direct argv processes; legacy shell-text operations require
-an unrestricted run grant.
+Each operand is one literal string, and no operands means `[]`. Normal builds
+and rule/Kash-first sessions default to recipe execution and working-directory
+read/write access; language-level environment reads and access outside that
+directory remain denied. Primary builds, watches, explicit source sessions, and
+`do render` accept grant options. Providing any explicit grants replaces the
+default capability set: omitted capabilities are denied, not inherited. Scoped
+run grants require explicit executable paths for direct argv processes; legacy
+shell-text operations require an unrestricted run grant.
 Grants do not sandbox a launched executable's internal filesystem access.
 
 Render a document with `(render [PAYLOAD] [STYLE] SOURCE)`, for example:

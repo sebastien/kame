@@ -82,6 +82,25 @@ show :
 Do not serialize argv back into source. Keep `@(...)` in system-shell recipes,
 document templates, and Kame expression strings where interpolation is intended.
 
+## Executable dependencies
+
+Every reached Kash stage automatically resolves and tracks its executable,
+including literal/dynamic command heads, pipelines, captures, and async work.
+Bare names use the driver's startup `PATH` and `--tool NAME=PATH` overrides;
+explicit paths resolve from the stage working directory. Stage environment
+`PATH` overrides affect the child, not this lookup. Missing/non-executable heads
+report `TOOL_MISSING`. Run grants still apply; internal executable checks do
+not grant user filesystem-read authority.
+
+`aws ...`, `$x/aws ...`, and `${x/aws} ...` use the same named tool resolver;
+`(tool "aws")` obtains a tracked executable value outside command position.
+Unreached branches acquire no runtime tool dependencies. External-shell command
+names remain shell-resolved unless explicitly rendered through `@(x/NAME)`.
+
+Tracking a wrapper does not reveal its subprocesses: `bun x tsc` tracks Bun,
+not an inferred package/compiler graph. Declare scripts and other relevant
+files as inputs when their contents affect the result.
+
 ## Process graphs
 
 ```kash

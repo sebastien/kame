@@ -264,7 +264,7 @@ Release assets are built with these targets, additive to the existing
   `dist/native/PLATFORM/kame`; `.github/workflows/native-artifacts.yml` uploads
   Linux and macOS x64/ARM64 host builds, and
   `.github/workflows/native-bsd-artifacts.yml` uploads FreeBSD, NetBSD and
-  OpenBSD x64 builds for later release staging.
+  OpenBSD x64 development builds, not release attachments.
 
 Install the Scoop definition from a source checkout:
 
