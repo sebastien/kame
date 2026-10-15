@@ -314,7 +314,7 @@ aliases and template primitives, rather than inferring effects from suffixes.
 | Pure computation/construction | `str`, `json`, collections, lexical paths, `kash` | No host action merely from construction |
 | Tracked observations | `read`, `exists?`, `stat`, `wildcard`, `env`, `tool`, `render`, `await` | Retain dependency/phase contracts; render can read templates; await joins already-started work |
 | File/output actions | `write!`, `yield!`, `out!`, `err!` | Mutation/publication/output under existing authority and publication contracts |
-| Process actions | `run!`, `pipe!`, `shell!`, `sh!`, `shellrun!`, `shell-template!` | Preserve existing process grants, results, ownership, and failure semantics |
+| Process actions | `run!`, `pipe!`, `sh!`, `shell-template!` | Preserve existing process grants, results, ownership, and failure semantics |
 | Control effect | `fail!` | Raise an authored diagnostic and abort the current computation |
 | Volatile observations | `now`, `monotonic` | Unsuffixed; existing planning/resolution restrictions still apply |
 

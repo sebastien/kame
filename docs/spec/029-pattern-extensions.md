@@ -92,7 +92,7 @@ MATCH)` selects from the `named` record; an absent name returns `:nil`, and a
 non-string name or non-match input is invalid. These processors do not coerce
 their index, name, or match result.
 
-`(regex-replace MATCH-PATTERN EXPANSION SUBJECT)` uses the same expansion
+`(resub MATCH-PATTERN EXPANSION SUBJECT)` uses the same expansion
 pattern rules as `replace`: a string expansion is constant, while a pattern
 value must contain references and no matchers. The subject must be a string or
 a list of strings. A non-matching scalar or list item produces `:nil`, missing
@@ -122,5 +122,5 @@ replacement results must agree across native, WASM CLI and evaluator tests.
   outputs, preserve their spelling when formatted, and expose each non-empty
   capture by name and source-order index.
 - `(regex-match PATTERN SUBJECT)`, `(capture INDEX-OR-NAME MATCH)`, and
-  `(regex-replace MATCH-PATTERN EXPANSION SUBJECT)` have identical capture,
+  `(resub MATCH-PATTERN EXPANSION SUBJECT)` have identical capture,
   replacement, invalid-input and budget behavior on native and WASM.

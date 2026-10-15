@@ -66,7 +66,7 @@ for backend in native wasm; do
 	test-step "$backend subject-last composition and conventional comparisons"
 	check 7 do run --lang expr -c '(let [value [[[7]]]] (value | nth 0 | nth 0 | nth 0))'
 	check 42 do run --lang expr -c '(let [value [other: 1]] (value | get "missing" 42))'
-	check 2 do run --lang expr -c '(let [value [x: 1]] (value | set-field "x" 2 | get "x"))'
+	check 2 do run --lang expr -c '(let [value [x: 1]] (value | set "x" 2 | get "x"))'
 	check '"a:b"' do run --lang expr -c '("a-b" | split "-" | join ":")'
 	check '"é"' do run --lang expr -c '("aéz" | slice 1 -1)'
 	check '"x-b-x"' do run --lang expr -c '("a-b-a" | sub "a" "x")'
@@ -75,12 +75,13 @@ for backend in native wasm; do
 	check '[[1] [1]]' do run --lang expr -c '(let [value [[1] [2] [1]]] (value | filter [1]))'
 	check '"b"' do run --lang expr -c '("a/b" | relpath "a")'
 	check '"Hi Ada"' do run --lang expr -c '("""Hi @(name)""" | render [name: "Ada"] "plain")'
-	check 0 do run --lang expr --allow-run -c '("printf ok" | shell! (parse-json "{}") | get "status")'
+	check 0 do run --lang expr --allow-run -c '("printf ok" | sh! (parse-json "{}") | get "status")'
 	check '[:true :false]' do run --lang expr -c '[(2 | gt 3) (2 | gt _ 3)]'
-	for expression in '(nth [1] 0)' '(get [x: 1] "x")' '(set-field [x: 1] "x" 2)' '(slice [1] 0)' '(join ["a"] "-")' '(map [1] ([x] x))' '(flatmap [1] ([x] [x]))' '(filter [1] ([x] :true))' '(filter-out [1] ([x] :true))' '(reduce str ["a"] "")' '(apply [1] ([x] x))' '(render "hello" [x: 1])'; do
+	for expression in '(nth [1] 0)' '(get [x: 1] "x")' '(set [x: 1] "x" 2)' '(slice [1] 0)' '(join ["a"] "-")' '(map [1] ([x] x))' '(flatmap [1] ([x] [x]))' '(filter [1] ([x] :true))' '(filter-out [1] ([x] :true))' '(reduce str ["a"] "")' '(apply [1] ([x] x))' '(render "hello" [x: 1])'; do
 		reject EXPR_INVALID do run --lang expr -c "$expression"
 	done
-	reject EXPR_INVALID do run --lang expr --allow-run -c '(shell! "printf forbidden" [x: 1])'
+	reject EXPR_INVALID do run --lang expr --allow-run -c '(sh! "printf forbidden" [x: 1])'
+	reject EXPR_INVALID do run --lang expr --allow-run -c '(sh! [cwd: "."] "printf forbidden")'
 	test-step "$backend operation contracts and special-form distinction"
 	reject CAP_DENIED do run -c '(map read ["blocked"])'
 	reject CAP_DENIED do run -c '(let [f read] (f missing))'

@@ -68,7 +68,7 @@ func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 		// Literal form: parameters precede the subject, as in pattern substitution.
 		if len(v) != 3 || v[0].Kind != core.String || v[1].Kind != core.String || v[2].Kind != core.String {
 			discardArgCallables(c, v)
-			return failure("PAT_INVALID", "invalid replace arguments")
+			return c.InvalidOperation("expects FROM TO TEXT strings, or MATCH-PATTERN EXPANSION [TEXT]")
 		}
 		value := strings.ReplaceAll(c.Run, v[2].Text, v[0].Text, v[1].Text)
 		return eval.Result{Value: core.Value{Kind: core.String, Text: value}}

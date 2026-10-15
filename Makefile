@@ -207,37 +207,21 @@ dist/kame.js: src/js/kame.js
 KAME_RELEASE_PUBLIC_KEY ?=
 KAME_RELEASE_SIGNING_KEY ?=
 KAME_RELEASE_REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
-RELEASE_NATIVE_PLATFORMS := linux-x86_64 linux-arm64 darwin-x86_64 darwin-arm64 freebsd-x86_64 netbsd-x86_64 openbsd-x86_64
-dist-release: dist/kame.com dist/kame.wasm dist/kame.js dist/kame-windows-x64.zip dist/kame-windows-x64.exe
+dist-release: dist/kame.com dist/kame.wasm dist/kame.js
 	test -n "$(KAME_RELEASE_PUBLIC_KEY)" -a -f "$(KAME_RELEASE_PUBLIC_KEY)"
 	test -n "$(KAME_RELEASE_SIGNING_KEY)" -a -f "$(KAME_RELEASE_SIGNING_KEY)"
-	@for platform in $(RELEASE_NATIVE_PLATFORMS); do \
-		if test ! -f "dist/native/$$platform/kame"; then \
-			echo "missing native release artifact: $$platform" >&2; exit 1; \
-		fi; \
-	done
 	rm -rf dist/release
 	mkdir -p dist/release
 	cp dist/kame.com dist/release/kame.com
 	cp dist/kame.wasm dist/release/kame.wasm
 	cp dist/kame.js dist/release/kame.js
-	cp dist/kame-windows-x64.zip dist/release/kame-windows-x64.zip
-	cp dist/kame-windows-x64.exe dist/release/kame-windows-x64.exe
-	if test -d dist/native; then for artifact in dist/native/*/kame; do \
-		if test -f "$$artifact"; then platform=$$(basename "$$(dirname "$$artifact")"); \
-			cp "$$artifact" "dist/release/kame-$$platform"; fi; \
-	done; fi
 	cp VERSION dist/release/VERSION
-	python3 src/sh/release_package_manifests.py --directory dist/release --version "$$(cat VERSION)"
-	public_key_b64=$$(openssl pkey -pubin -in "$(KAME_RELEASE_PUBLIC_KEY)" -outform DER | openssl base64 -A); \
-	sed -e "s|^KAME_VERSION ?=.*|KAME_VERSION ?= $$(cat VERSION)|" \
-	    -e "s|^KAME_RELEASE_PUBKEY_B64 ?=.*|KAME_RELEASE_PUBKEY_B64 ?= $$public_key_b64|" \
-	    Makefile.bootstrap > dist/release/Makefile.bootstrap; \
-	sed -e "s|^KAME_STAMP=.*|KAME_STAMP=\"$$(cat VERSION)\"|" \
-	    -e "s|^KAME_RELEASE_PUBKEY_B64=.*|KAME_RELEASE_PUBKEY_B64=\"$$public_key_b64\"|" \
-	    bin/kame > dist/release/kame
-	chmod +x dist/release/kame
 	python3 src/sh/release_manifest.py --directory dist/release --version "$$(cat VERSION)" --revision "$(KAME_RELEASE_REVISION)" --public-key "$(KAME_RELEASE_PUBLIC_KEY)" --signing-key "$(KAME_RELEASE_SIGNING_KEY)"
+
+# Explicitly refresh checked-in package definitions before committing a release.
+.PHONY: package-manifests
+package-manifests: dist/kame.com
+	python3 src/sh/release_package_manifests.py --directory dist --output-directory etc --version "$$(cat VERSION)"
 
 dist-ape: dist/kame.com dist/ape-smoke.com
 

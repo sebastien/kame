@@ -47,7 +47,7 @@ diag '(eval 42)' 'EXPR_INVALID'
 test-step "capability failures"
 diag '(read "x")' 'CAP_DENIED'
 diag '(env "HOME")' 'CAP_DENIED'
-diag '(shell! "true")' 'CAP_DENIED'
+diag '(sh! "true")' 'CAP_DENIED'
 diag '(write! "x" "y")' 'CAP_DENIED'
 
 test-step "deep mutual recursion reports a diagnostic instead of crashing"

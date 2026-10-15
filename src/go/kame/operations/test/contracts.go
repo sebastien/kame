@@ -22,9 +22,13 @@ func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
 	engine := core.NewEngine(a)
 	source := script.Parse(a, "migration.km", "")
 	p := eval.Compile(a, engine, source, r)
-	names := []string{"write", "yield", "out", "err", "run", "pipe", "shell", "sh", "shellrun", "shell-template", "fail"}
+	names := []string{"write", "yield", "out", "err", "run", "pipe", "shell", "sh", "shellrun", "shell-template", "fail", "shell!", "shellrun!", "set-field", "regex-replace"}
 	for i := range names {
 		name := names[i]
+		replacement := name + "!"
+		if name == "shell" || name == "shellrun" || name == "shell!" || name == "shellrun!" { replacement = "sh!" }
+		if name == "set-field" { replacement = "set" }
+		if name == "regex-replace" { replacement = "resub" }
 		texts := []string{name, "(" + name + " (fail! \"must not evaluate operands\"))"}
 		for j := range texts {
 			parsed := expr.Parse(a, "migration.km", texts[j])
@@ -32,7 +36,7 @@ func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
 			result := p.EvaluateWith(parsed.Expr, &context)
 			code := "REF_MISSING"
 			if j == 1 { code = "OP_UNKNOWN" }
-			if result.Diagnostic.Code != code || !strings.Contains(result.Diagnostic.Message, "`" + name + "!`") || result.Diagnostic.Span.End-result.Diagnostic.Span.Start != len(name) {
+			if result.Diagnostic.Code != code || !strings.Contains(result.Diagnostic.Message, "`" + replacement + "`") || result.Diagnostic.Span.End-result.Diagnostic.Span.Start != len(name) {
 				t.Error("missing action migration diagnostic: " + texts[j])
 			}
 			result.Free(a)
@@ -61,7 +65,7 @@ func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
 func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 	r := eval.NewRegistry(t.Allocator())
 	if !operations.Register(r) { t.Error("standard operation registration failed") }
-	if len(r.Items) != 94 { t.Error("standard operation count changed") }
+	if len(r.Items) != 92 { t.Error("standard operation count changed") }
 	for i := range r.Items {
 		o := &r.Items[i]
 		if !o.HasContract() || !o.ValidContract() || !o.AllowsPhase(eval.EvaluatePhase) || o.Version == "" {
@@ -80,6 +84,9 @@ func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 				t.Error("shell operation authority/phase contract changed: " + o.Name)
 			}
 		}
+		if o.Category == eval.OutputOperation || o.Category == eval.ProcessOperation || o.Category == eval.ControlOperation {
+			if !strings.HasSuffix(o.Name, "!") { t.Error("standard action lacks ! suffix: " + o.Name) }
+		}
 		if o.Name == "fail!" && (o.Category != eval.ControlOperation || o.Phases != eval.AllPhases || len(o.Capabilities) != 0 || o.Behavior != eval.RaisesFailure) {
 			t.Error("authored failure must be available without host authority in all phases")
 		}
@@ -96,14 +103,12 @@ func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 func TestStandardOperationAliasMetadata(t *testing.T) {
 	r := eval.NewRegistry(t.Allocator())
 	operations.Register(r)
-	names := []string{"sub", "replace", "shell!", "sh!", "shellrun!"}
+	names := []string{"sub", "replace"}
 	var replacement *eval.Operation
-	var shell *eval.Operation
 	for i := range r.Items {
 		if r.Items[i].Name == "replace" { replacement = &r.Items[i] }
-		if r.Items[i].Name == "shell!" { shell = &r.Items[i] }
 	}
-	if replacement == nil || shell == nil {
+	if replacement == nil {
 		t.Error("standard aliases missing")
 		r.Free()
 		return
@@ -114,8 +119,7 @@ func TestStandardOperationAliasMetadata(t *testing.T) {
 			o := &r.Items[j]
 			if o.Name != names[i] { continue }
 			found = true
-			base := shell
-			if i < 2 { base = replacement }
+			base := replacement
 			if o.Category != base.Category || o.Phases != base.Phases || o.Behavior != base.Behavior || o.Version != base.Version || o.MinArity != base.MinArity || o.MaxArity != base.MaxArity || o.DeferredReplacement != base.DeferredReplacement || len(o.Capabilities) != len(base.Capabilities) || len(o.ConditionalCapabilities) != len(base.ConditionalCapabilities) {
 				t.Error("alias metadata differs: " + o.Name)
 			}

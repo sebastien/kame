@@ -143,7 +143,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         await watch.close()
 
     async def test_cancelled_request_reaps_process_group(self):
-        task = asyncio.create_task(self.client.evaluate('(shell! "sleep 10")', grants={"run": True}))
+        task = asyncio.create_task(self.client.evaluate('(sh! "sleep 10")', grants={"run": True}))
         await asyncio.sleep(0.15)
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
@@ -151,7 +151,7 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.client._processes)
 
     async def test_close_cancels_and_awaits_owned_requests(self):
-        task = asyncio.create_task(self.client.evaluate('(shell! "sleep 10")', grants={"run": True}))
+        task = asyncio.create_task(self.client.evaluate('(sh! "sleep 10")', grants={"run": True}))
         await asyncio.sleep(0.15)
         await self.client.close()
         with self.assertRaises(asyncio.CancelledError):

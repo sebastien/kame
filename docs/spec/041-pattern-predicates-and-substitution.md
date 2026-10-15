@@ -11,7 +11,7 @@ This specification refines [the standard library](007-library.md),
 [pattern extensions](029-pattern-extensions.md). Its substitution contract
 supersedes the earlier requirement that pattern `replace` return `:nil` on a
 nonmatch. It does not change pattern grammar, rule matching, `regex-match`,
-`capture`, or `regex-replace`.
+`capture`, or `resub`.
 
 ## Operation surface
 
@@ -49,8 +49,8 @@ obtain a list of booleans, or `filter`/`filter-out` to select subjects.
 
 The one-argument form validates and retains its pattern when the predicate is
 constructed and returns a callable of arity one. Applying it has the same
-behavior as the two-argument form. Both collection callback argument orders
-remain supported.
+behavior as the two-argument form. Collection calls use `(OP PREDICATE LIST)`;
+the former list-first order is not supported.
 
 ```kame
 # :true
@@ -76,6 +76,7 @@ or register dependencies. Exceeding the shared regex matching budget reports
 `FROM` in `TEXT`, using the existing literal `replace` contract. All arguments
 are evaluated eagerly. This form does not perform pattern matching or expose
 captures, and a text with no occurrences is returned unchanged.
+Wrong literal operand types or a missing literal subject report `EXPR_INVALID`.
 
 ### Pattern form
 
@@ -139,7 +140,7 @@ New documentation and examples use `sub`. Existing `replace` calls continue to
 resolve but must account for the changed nonmatch result. In particular, filters
 using a pattern replacement as a predicate must migrate to `match?`: both a
 replacement string and an unchanged string are truthy. Removing nil entries
-after substitution no longer removes nonmatches. `regex-replace` retains its
+after substitution no longer removes nonmatches. `resub` retains its
 separate nil-on-nonmatch contract.
 
 The semantic change must invalidate cached operation results computed under
@@ -152,8 +153,8 @@ may continue to use the deprecated alias.
   nonmatching subjects, including regex, recursive, and repeated-name patterns.
 - Anchoring and non-empty captures distinguish `./foo.txt`, `./foo`, and
   `./.txt` as shown above; captures do not leak into caller scope.
-- Predicate callables work with `map`, `filter`, and `filter-out` in either
-  supported callback order; invalid arity and subject kinds are rejected.
+- Predicate callables work with `map`, `filter`, and `filter-out` in
+  `(OP PREDICATE LIST)` order; invalid arity and subject kinds are rejected.
 - Direct and callable `sub` preserve nonmatching strings byte-for-byte, and
   list substitution preserves order and length without inserting nil entries.
 - Literal substitution, empty lists, and nil subject passthrough retain their
@@ -166,4 +167,4 @@ may continue to use the deprecated alias.
   matcher budget failures remain diagnostics rather than nonmatch results.
 - The product example produces `["./foo"]` from the stated journal sources.
 - Native and WASM agree, formatting is idempotent, old operation-cache entries
-  are not reused, and the separate `regex-replace` contract is unchanged.
+  are not reused, and the separate `resub` contract is unchanged.

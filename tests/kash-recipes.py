@@ -64,7 +64,7 @@ with tempfile.TemporaryDirectory() as temporary:
     # Environments inherit through prerequisites; shell overrides are local.
     recipe('SHELL = kash\nchosen : child ; [env: [MODE: "parent"]]\n\tprintenv MODE\nchild : ; [shell: "/bin/sh"]\n\tprintf %s "$MODE"\n', expected='parentparent\n')
     recipe('chosen : child ; [shell: kash]\n\tprintf parent\nchild :\n\tprintf child; :\n', expected='childparent')
-    recipe('SHELL = (shell! "touch forbidden")\nchosen :\n\ttrue\n', code='PHASE_INVALID')
+    recipe('SHELL = (sh! "touch forbidden")\nchosen :\n\ttrue\n', code='PHASE_INVALID')
     assert not (project / 'forbidden').exists()
     recipe('chosen : ; [shell: kash env: [MODE: "rule"]]\n\tprintenv MODE\n\t:MODE command printenv MODE\n', expected='rule\ncommand\n')
 

@@ -1,0 +1,13 @@
+{
+  "bin": [
+    [
+      "kame.exe",
+      "kame"
+    ]
+  ],
+  "description": "Build tool for projects described with Kame",
+  "hash": "aedbbc1037e4ea77de3ec687699a5898ddfd5552844c6d2cfb64f392ae201de0",
+  "homepage": "https://github.com/sebastien/kame",
+  "url": "https://github.com/sebastien/kame/releases/download/v0.2.3/kame.com#/kame.exe",
+  "version": "0.2.3"
+}

@@ -1,7 +1,9 @@
 # Kame standard-library reference
 
 Kame operations are ordinary expression calls: `(name argument...)`. Arguments
-are evaluated before the operation runs. Unless noted, invalid arity or value
+are evaluated before the operation runs, except the replacement operand of
+pattern `sub`/`replace`: it is evaluated only after matching, with local captures.
+Unless noted, invalid arity or value
 types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 
 Transformations take parameters first and their subject last: `(f PARAMS VALUE)`.
@@ -10,6 +12,9 @@ call. Only this order is accepted; there is no legacy-order detection. Compariso
 retain `(gt LEFT RIGHT)` and conventional left/right semantics. Variadic operations
 such as `str`, `concat`, `merge`, and `joinpath` retain authored operand order;
 special forms and internal template-lowering primitives have their own contracts.
+
+Migration: `set-field` → `set`, `regex-replace` → `resub`, and
+`shell!`/`shellrun!` → `sh!`. Old names are removed with migration diagnostics.
 
 ## Values and calls
 
@@ -29,7 +34,7 @@ special forms and internal template-lowering primitives have their own contracts
 | `nop` | `(nop VALUE...)` | Last argument, or `:nil` with no arguments. |
 | `apply` | `(apply FUNCTION LIST)` | Calls a function with list arguments. A one-argument function receives the list itself. |
 | `items` | `(items RECORD)` | Ordered records `[key: STRING value: VALUE]`, preserving typed nested data. |
-| `set-field` | `(set-field KEY VALUE RECORD)` | Replace at the existing position, or append a new string key; nil is a value, not deletion. |
+| `set` | `(set KEY VALUE RECORD)` | Replace at the existing position, or append a new string key; nil is a value, not deletion. |
 | `merge` | `(merge RECORD...)` | Shallow right-biased merge; first-seen key order; no arguments return an empty record. |
 | `record?`, `list?`, `string?` | `(PREDICATE VALUE)` | Exact outer-kind boolean, including empty data; patterns/bytes are not strings. |
 | `digest` | `(digest ALGORITHM BYTES-OR-STRING)` | Raw bytes/UTF-8 SHA-1/256/512 digest, lowercase hex, without build fingerprint framing. SHA-1 is legacy-only. |
@@ -40,7 +45,7 @@ and records are true. Use `(> (count VALUE) 0)` for a nonempty collection/text;
 nil, booleans, and numbers are not valid `count` inputs. A nil-valued list item or
 record field still contributes to the count. See [Expressions](./expressions.md).
 
-Use native `items`/`set-field`/`merge` instead of JSON/template round trips and
+Use native `items`/`set`/`merge` instead of JSON/template round trips and
 kind predicates instead of JSON-prefix tests. Remove same-named local wrappers
 to expose the native operations. `(digest "sha512" (read ./file))` hashes a tracked
 read, including every trailing newline and binary byte.
@@ -100,7 +105,10 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 | `pattern` | `(pattern TEXT)` | Construct and validate a pattern from runtime text. |
 | `regex-match` | `(regex-match PATTERN SUBJECT)` | Regex-pattern match record (`text`, `captures`, `named`), or nil. |
 | `capture` | `(capture INDEX-OR-NAME MATCH)` | Select a match capture, or nil when absent. |
-| `regex-replace` | `(regex-replace MATCH-PATTERN EXPANSION SUBJECT)` | Anchored regex-pattern replacement on a string or string list; non-matches yield nil. |
+| `resub` | `(resub MATCH-PATTERN EXPANSION SUBJECT)` | Anchored regex-pattern replacement on a string or string list; non-matches yield nil. |
+
+Literal `sub`/`replace` requires three strings; wrong types or a missing subject
+report `EXPR_INVALID` rather than constructing a pattern-substitution callable.
 
 `strip` is an explicit broad-whitespace conversion, not command-capture framing.
 To remove one known terminal LF while preserving other whitespace and earlier
@@ -122,7 +130,7 @@ an invocation-owned callable, not printable/serializable definition data.
 Regex grammar and matching budgets are defined in
 [Pattern extensions](../../../spec/029-pattern-extensions.md).
 Use `match?`, not substitution, as a filtering predicate: unchanged strings are
-truthy. `regex-replace` retains its separate nil-on-nonmatch contract. See
+truthy. `resub` retains its separate nil-on-nonmatch contract. See
 [Pattern predicates and substitution](../../../spec/041-pattern-predicates-and-substitution.md).
 `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `bold`,
 and `dim` each wrap one string in ANSI styling unconditionally; they do not
@@ -159,9 +167,11 @@ environment values can invalidate a consumer.
 | `wildcard` | `(wildcard PATTERN...)` | read | Sorted, duplicate-free union of one or more patterns; each tracks its own membership. |
 | `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other supported values use the effect-output encoding described below, not scalar-only `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
 | `env` | `(env NAME)` | env | Environment value. |
-| `shell!` | `(shell! [OPTIONS] COMMAND)` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
-| `sh!`, `shellrun!` | Same as `shell!` | run | Aliases with identical result and phase behavior. |
-| `shell-template!` | `(shell-template! FRAGMENTS VALUES)` | run | Collected shell call with POSIX-quoted dynamic strings; FRAGMENTS has one more string than VALUES. Same phase policy as shell!. |
+| `sh!` | `(sh! [OPTIONS] COMMAND)` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
+| `shell-template!` | `(shell-template! FRAGMENTS VALUES)` | run | Collected shell call with POSIX-quoted dynamic strings; FRAGMENTS has one more string than VALUES. Same phase policy as sh!. |
+
+`sh!` accepts only an empty OPTIONS record, such as `(parse-json "{}")`, until
+options are supported; nonempty records report `EXPR_INVALID`. COMMAND is last.
 
 `(resource URI)` constructs a validated `file:`/`mem:` resource value for file
 operations and rule inputs. Memory resources are host-scoped, not durable disk

@@ -55,7 +55,7 @@ if [ "$actual" != '"wasm-source"' ]; then
 	echo "WASM source expression CLI = $actual, want \"wasm-source\"" >&2
 	exit 1
 fi
-printf 'result = (shell! "printf async-source")\n' >"$program"
+printf 'result = (sh! "printf async-source")\n' >"$program"
 actual="$(node ./tools/kame-wasm.mjs do expr --async -f "$program")"
 if [ "$actual" != '"async-source"' ]; then
 	echo "WASM async source expression CLI = $actual, want \"async-source\"" >&2
@@ -89,12 +89,12 @@ if [ "$actual" != '"async-env"' ]; then
 	echo "WASM async environment CLI = $actual, want \"async-env\"" >&2
 	exit 1
 fi
-actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(shell! "printf async-wasm")')"
+actual="$(node ./tools/kame-wasm.mjs do expr --async -c '(sh! "printf async-wasm")')"
 if [ "$actual" != '"async-wasm"' ]; then
 	echo "WASM async expression CLI = $actual, want async-wasm" >&2
 	exit 1
 fi
-if failed="$(node ./tools/kame-wasm.mjs do expr --async -c '(shell! "false")' 2>&1)"; then
+if failed="$(node ./tools/kame-wasm.mjs do expr --async -c '(sh! "false")' 2>&1)"; then
 	echo "WASM async failed process unexpectedly succeeded" >&2
 	exit 1
 fi
@@ -129,7 +129,7 @@ const write = (text) => {
 };
 const asyncInstance = exports.kame_wasm_instance_create();
 if (exports.kame_wasm_source_compile(asyncInstance, 0, 0) !== 0) throw new Error('empty source did not compile');
-const [expression, expressionLength] = write('(shell! "echo wasm")');
+const [expression, expressionLength] = write('(sh! "echo wasm")');
 if (exports.kame_wasm_expression_begin(asyncInstance, expression, expressionLength) !== 0) throw new Error('async expression did not begin');
 if (exports.kame_wasm_step(asyncInstance) !== 1) throw new Error('step did not yield a host request');
 const header = alloc(48, 8);

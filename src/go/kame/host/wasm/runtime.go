@@ -752,7 +752,7 @@ func (r *Runtime) Step() host.NextResult {
 	return r.Eval.Requests.Next()
 }
 
-// Complete copies host completion data into the engine. Stale generations and
+// Complete transfers host completion data to the engine. Stale generations and
 // attempts are accepted and discarded by Engine.Step according to core rules.
 func (r *Runtime) Complete(request host.Request, value core.Value, diagnostic diagnostic.Diagnostic) {
 	if r == nil {

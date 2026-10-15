@@ -86,7 +86,7 @@ tests/T013-02-meta-hygiene.sh	013	meta	Fixtures are never modified and scratch d
 tests/T013-03-meta-binary.sh	013	meta	Binary contract, no-op rebuilds, cross-copy determinism
 tests/T013-06-meta-testing.sh	013	meta	Fatal/abort failure logging and termination, result summaries and cleanup, Desktop isolation, Bash harness execution and standalone JSON Lines values
 tests/T014-01-patterns-sections.sh	014	patterns	Placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs
-tests/T015-01-dist-launcher.sh	015	dist	Pinned/latest version selection, signed launcher handoff, provisioning, cached-launcher tamper rejection, checksums, cache reuse, backend selection, bootstrap delegation, and non-overwriting init
+tests/T015-01-dist-launcher.sh	015	dist	Pinned/latest runtime selection without shell self-update, ESM provisioning, checksums, cache reuse, backend selection, bootstrap delegation, and retired-init migration guidance
 tests/T015-02-dist-launcher-backends.sh	015	dist	Launcher APE probe fallback, forced backends, missing manifest, no-download, concurrency, and cache roots
 tests/T015-03-dist-self-build.sh	015	dist	Generated version metadata stability, incremental self-build input declaration, and fresh-skip behavior
 tests/T015-04-dist-signed-release.sh	015	dist	Operator-supplied Ed25519 signing keys, generated pinned Homebrew/Scoop manifests, authenticated launcher/bootstrap/VERSION assets, latest-channel handoff, checksums, provenance and tamper rejection
@@ -159,5 +159,5 @@ tests/T038-05-lang-computed-paths.sh	038	lang	Computed implicit globs, literal i
 tests/T009-16-cli-script-output.sh	009	cli	Explicit script output, optional result display, expr and selected-entry display, JSON Lines, shared args and literal suffix-looking assignments on native and WASM
 tests/T005-06-eval-truth-capture.sh	005	eval	Nil/false-only truth, empty bytes/records/text/lists, explicit count checks, operand-preserving short-circuiting, exact capture and opt-in LF framing on native and WASM
 tests/T040-01-cli-automatic-clean.sh	040	cli	Native historical accumulation, no-op non-acquisition, rule-change protection, keep/release, failed groups, copied roots, symlinks, corrupt ledgers, live build/watch locks, cancellation, capture substitution, recovery, crash retry and clean target precedence
-tests/T041-01-patterns-predicates-and-substitution.sh	041	patterns	Native/WASM boolean predicates, callable filtering, nonmatch-preserving substitution, deprecated alias and unchanged regex-replace
+tests/T041-01-patterns-predicates-and-substitution.sh	041	patterns	Native/WASM boolean predicates, callable filtering, nonmatch-preserving substitution, deprecated alias and unchanged resub
 tests/T015-06-dist-release-scripts.sh	015	dist	Manual release preflight and mocked publication: pushed revision, clean tree, tag/release conflicts, API failures, flat launcher assets, operator paths, key guards, npm-only recovery/no-op/auth retry/processing delays, and missing APE toolchain

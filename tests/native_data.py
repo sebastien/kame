@@ -32,19 +32,19 @@ def main():
 			checks += 1
 		for expression in [
 			'(eq (items [z: 1 a: [x: [2 :nil]]]) [[key: "z" value: 1] [key: "a" value: [x: [2 :nil]]]])',
-			'(eq (items (set-field "z" :nil [z: 1 a: 2])) [[key: "z" value: :nil] [key: "a" value: 2]])',
-			'(eq (items (set-field "a" 2 [z: 1])) [[key: "z" value: 1] [key: "a" value: 2]])',
+			'(eq (items (set "z" :nil [z: 1 a: 2])) [[key: "z" value: :nil] [key: "a" value: 2]])',
+			'(eq (items (set "a" 2 [z: 1])) [[key: "z" value: 1] [key: "a" value: 2]])',
 			'(eq (merge) (parse-json "{}"))',
 			'(eq (items (merge [z: [x: 1] a: 2] [z: [y: 3] b: 4])) [[key: "z" value: [y: 3]] [key: "a" value: 2] [key: "b" value: 4]])',
-			'(let [r [x: 1]] (eq [(get "x" (set-field "x" 2 r)) r.x] [2 1]))',
+			'(let [r [x: 1]] (eq [(get "x" (set "x" 2 r)) r.x] [2 1]))',
 			'(eq (apply (get "value" (first (items [f: ([x] x)]))) [42]) [42])',
-			'(eq (apply (get "f" (set-field "f" ([x] 42) [f: ([x] x)])) [0]) 42)',
+			'(eq (apply (get "f" (set "f" ([x] 42) [f: ([x] x)])) [0]) 42)',
 			'(eq (apply (get "f" (merge [f: ([x] x)] [f: ([x] 42)])) [0]) 42)',
 			'(record? (parse-json "{}"))', '(list? [])', '(string? "")',
 			'(not (record? []))', '(not (list? :nil))', '(not (string? "{x:*}"))',
 			'(not (string? [f: ([x] x)]))', '(not (list? ([x] x)))',
 		]: value(expression, ':true')
-		for expression in ['(items [])', '(set-field "x" 1 [])', '(set-field 0 2 [x: 1])', '(merge [x: 1] [])', '(items (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(set-field "x" ([x] x) (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(merge (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(digest "md5" "abc")', '(digest "sha1" 42)', '(digest :nil "abc")']:
+		for expression in ['(items [])', '(set "x" 1 [])', '(set 0 2 [x: 1])', '(merge [x: 1] [])', '(items (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(set "x" ([x] x) (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(merge (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(digest "md5" "abc")', '(digest "sha1" 42)', '(digest :nil "abc")']:
 			reject(expression)
 		for algorithm in ['sha1', 'sha256', 'sha512']:
 			for text in ['', 'abc', 'é\u0000\n']:
@@ -55,7 +55,7 @@ def main():
 				(project / 'data').write_bytes(data)
 				value(f'(digest "{algorithm}" (read ./data))', json.dumps(hashlib.new(algorithm, data).hexdigest()), '--allow-read')
 		(project / 'anchor').write_text('anchor')
-		value('(eq (get "data" (set-field "data" (read ./data) [data: :nil])) (read ./data))', ':true', '--allow-read')
+		value('(eq (get "data" (set "data" (read ./data) [data: :nil])) (read ./data))', ':true', '--allow-read')
 		value('(not (string? (read ./data)))', ':true', '--allow-read')
 		(project / 'Makefile.kmk').write_text('./hash : ./anchor\n\tprintf %s @(digest "sha512" (read ./data)) > @>\n')
 		for data in [b'A\x00\xff\n', b'B\x00\xff\n']:

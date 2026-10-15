@@ -63,7 +63,7 @@ func HelpText(topic string) string {
 	if topic == "" {
 		b.WriteString("kame - a modern build system in the spirit of GNU Make.\n\nUsage:\n  kame [OPTIONS] [TARGET...]\n  kame [OPTIONS] INPUT... [-- ARG...]\n  kame do COMMAND [OPTIONS] [ARG...]\n\nSource discovery: Makefile.kmk, make.kmk, src/kmk/main.kmk.\nWithout targets, select default; without a source or arguments, show help.\n\nBuild options:\n")
 		b.WriteString(BuildHelp)
-		b.WriteString("\nExplicit execution: -l, --lang km|kmk|kash|expr; --entry NAME; --print-result.\nCapability grants: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\nLauncher-only: kame init [--help] creates Makefile.bootstrap without overwriting it.\n")
+		b.WriteString("\nExplicit execution: -l, --lang km|kmk|kash|expr; --entry NAME; --print-result.\nCapability grants: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
 	} else if topic != "do" {
 		for i := range Commands {
 			if Commands[i].Name == topic {

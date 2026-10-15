@@ -52,7 +52,7 @@ An operation receives evaluated arguments and an evaluation context. It returns
 a value, a host request, or a structured diagnostic. Returned owned values use
 the run allocator unless explicitly transferred to the engine.
 
-An explicitly specified staged operand is the exception: pattern `replace`
+An explicitly specified staged operand is the exception: pattern `sub`/`replace`
 retains its replacement expression for evaluation after matching, as defined in
 `014-patterns.md` and `005-evaluation.md`. This does not make `replace` a reserved
 special form or change ordinary literal-string replacement.
@@ -75,7 +75,11 @@ Canonical changed signatures are `(nth INDEX VALUE)`, `(slice START [END] VALUE)
 `(starts? PREFIX TEXT)`, `(ends? SUFFIX TEXT)`, `(reduce FUNCTION [INITIAL] LIST)`,
 `(apply FUNCTION LIST)`, and `(relpath BASE TARGET)`. `map` and `flatmap` accept only
 `(FUNCTION LIST)`; `reduce` callbacks still receive `(accumulator item)`.
-`(shell! [OPTIONS] COMMAND)` and its aliases also put their subject last.
+`(sh! [OPTIONS] COMMAND)` also puts its subject last.
+
+Migration: rename `set-field` to `set`, `regex-replace` to `resub`, and
+`shell!`/`shellrun!` to `sh!`. The old names are removed and report migration
+diagnostics; they are not aliases. Other operation names are unchanged.
 
 The general operations are:
 
@@ -92,7 +96,7 @@ The general operations are:
 | `apply` | Call a function with a list of arguments |
 | `list` | Return arguments as a list |
 | `items` | `(items RECORD)`: ordered `[key: STRING value: VALUE]` entries |
-| `set-field` | `(set-field KEY VALUE RECORD)`: immutable field replacement/insertion |
+| `set` | `(set KEY VALUE RECORD)`: immutable field replacement/insertion |
 | `merge` | `(merge RECORD...)`: shallow, right-biased immutable record merge |
 | `record?` / `list?` / `string?` | Exact kind tests on one value, without serialization |
 | `digest` | `(digest ALGORITHM BYTES-OR-STRING)`: raw SHA digest as lowercase hexadecimal |
@@ -119,7 +123,7 @@ The operation is pure and works in definitions, input headers, and planning.
 
 `items` returns a list in stored field order, not sorted or serialized order.
 Each entry contains exactly `key` and `value`. Empty records yield an empty list;
-`[]` remains a list and is not accepted as a record. `set-field` requires a string
+`[]` remains a list and is not accepted as a record. `set` requires a string
 key: replacement preserves the field's position; a new key appends. An empty key
 is valid, and setting nil stores a present nil field rather than removing it.
 
@@ -133,7 +137,7 @@ JSON/template round trips:
 
 ```kame
 settings = [version: "old" nested: [enabled: :true]]
-updated = (set-field "version" "new" settings)
+updated = (set "version" "new" settings)
 entries = (items updated)
 combined = (merge settings [version: "new" extra: 3])
 ```
@@ -143,7 +147,7 @@ inspect only the outer kind. A pattern is not a string, bytes are not strings,
 and a record/list containing callables remains a record/list. No JSON-prefix
 test, truth conversion, or implicit parsing occurs. SDK `object?` and `array?`
 wrappers can delegate to `record?` and `list?`; local serialization-based `items`,
-`set-field`, and `string?` definitions should be removed to expose native calls.
+`set`, and `string?` definitions should be removed to expose native calls.
 
 ### Raw digests
 
@@ -280,6 +284,7 @@ boolean pattern predicates.
 
 `sub` accepts two or three arguments. `(sub FROM TO TEXT)` with plain
 strings replaces literal occurrences and retains ordinary eager evaluation.
+Wrong literal operand types or a missing literal subject report `EXPR_INVALID`.
 A match pattern as the first argument selects anchored matching. Its second
 operand is a replacement expression evaluated only after a match, with named
 captures bound locally; `./{name}`, `"@(name)"`, `name`, and `(uppercase name)`
@@ -430,7 +435,7 @@ including an empty path for an unavailable tool. `kame do tools check TARGETS...
 validates tools in selected dependency plans without executing recipes.
 Ordinary command names remain shell-resolved.
 
-Normal recipes are the primary shell interface. One explicit `shell!` operation
+Normal recipes are the primary shell interface. One explicit `sh!` operation
 is provided for expressions that need collected process results. It requires
 `run`, submits a process through `003-posix-process.md`, and returns:
 
@@ -438,16 +443,16 @@ is provided for expressions that need collected process results. It requires
 [status: 0 stdout: "..." stderr: "..."]
 ```
 
-Its arguments are a script string and optional option record. Streaming process
+The signature is `(sh! [OPTIONS] COMMAND)`: COMMAND is a script string and
+OPTIONS, when present, must be an empty record (for example `(parse-json "{}")`).
+Nonempty options are rejected with `EXPR_INVALID` until options are supported.
+Streaming process
 events remain available through runtime execution, not as a list accumulated by
-the operation. `shell!` is allowed in explicit expression execution but is
+the operation. `sh!` is allowed in explicit expression execution but is
 invalid during planning and direct build-template rendering with `PHASE_INVALID`.
 Demanded lazy values and Kash recipe expressions evaluate in their runtime phase;
 when bound to a target, their collected shell calls inherit its environment and
 retain the invocation run policy. Declaration registration never launches them.
-
-`shell!`, `sh!`, and `shellrun!` are aliases with the same script/options
-signature, collected result, run capability, and phase restrictions.
 
 `shell-template! FRAGMENTS VALUES` is the tagged-template form for constructing
 a shell script from trusted source and dynamic string values. Both arguments
@@ -460,7 +465,7 @@ executable shell syntax and should come from authored source; dynamic values
 cannot introduce shell syntax. Quoting does not prevent a value from being
 interpreted as an option or path by the invoked program.
 
-The constructed script is submitted and collected like `shell!`: it requires
+The constructed script is submitted and collected like `sh!`: it requires
 `run`, returns the same status/stdout/stderr record, inherits a target's
 environment, and is invalid during planning and direct build-template
 rendering. Dry-run submits no process and returns an empty string. Invalid
@@ -510,7 +515,7 @@ executable metadata checks do not grant access to user read operations.
 - Every operation validates arity and value kinds without mutating arguments.
 - Pure operations issue no host request and register no dependency.
 - Collection callbacks preserve input order.
-- `filter` and `filter-out` accept both callback orders and the `(LIST VALUE)`
+- `filter` and `filter-out` accept `(PREDICATE LIST)` and the `(VALUE LIST)`
   equality shorthand, including mixed-kind inequality and numeric int/float
   equality, binary equality, and recursive list/record equality; opaque values
   remain `EXPR_INVALID`, including behind an earlier mismatch.
@@ -525,9 +530,8 @@ executable metadata checks do not grant access to user read operations.
 - Reads and globs register canonical dynamic dependencies.
 - Denied read, write, run, or environment access performs no host action.
 - Deferred `out!`, `err!`, `yield!`, and `write!` effects commit once after rerender.
-- `shell!` captures status and separate byte-bounded stdout/stderr.
-- `sh!` and `shellrun!` match `shell!` in result, run-capability enforcement, and
-  phase restrictions.
+- `sh!` captures status and separate byte-bounded stdout/stderr, enforces run
+  capability and phase restrictions, and rejects nonempty options records.
 - `shell-template!` requires one more trusted fragment than dynamic string
   values, quotes dynamic values safely under POSIX `sh`, preserves the
   collected result, and is verified against command-substitution injection on
@@ -537,7 +541,7 @@ executable metadata checks do not grant access to user read operations.
   value display unchanged.
 - Pattern `sub` (and its deprecated `replace` alias) matches anchored, expands
   references, preserves the original string without a match, and accepts a
-  callable through `map` and pipes. `regex-replace` retains its separate
+  callable through `map` and pipes. `resub` retains its separate
   nil-on-nonmatch contract in `029-pattern-extensions.md`.
 - Pattern replacement expressions resolve captures as local names, skip all
   replacement dependencies/effects on nonmatches, and leave literal-string

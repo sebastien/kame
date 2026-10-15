@@ -43,7 +43,7 @@ func opItems(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 
 // Replacing a field preserves its position; inserting a new field appends it.
-func opSetField(c *eval.Context, s any, v []core.Value) eval.Result {
+func opSet(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if !validRecord(v[2]) { return invalidArgument(c, v, 2, "record with unique keys") }
 	if v[0].Kind != core.String { return invalidArgument(c, v, 0, "string") }

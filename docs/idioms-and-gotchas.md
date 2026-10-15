@@ -150,7 +150,7 @@ With two arguments, `sub` returns an invocation-owned callable for `map`,
 not printable data for `do cat`. Nonmatching list members remain unchanged;
 filter with `match?` first if only matching sources should be retained.
 Substitution is not a matching predicate: unchanged strings are truthy.
-`regex-replace` retains its separate nil-on-nonmatch behavior.
+`resub` retains its separate nil-on-nonmatch behavior.
 
 ## Inspection and reproducibility
 

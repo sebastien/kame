@@ -46,7 +46,7 @@ for host in native wasm; do
 	else
 		test-fail "$host group and alternation: $(cat "$TMPDIR/$host.group.err")"
 	fi
-	"${runner[@]}" do run --lang expr -c '(str (regex-replace (pattern (str "{" "name:~[a-z]+" "}")) (pattern (str "pre{" "name" "}post")) "demo"))' >"$TMPDIR/$host.replace.out" 2>"$TMPDIR/$host.replace.err"
+	"${runner[@]}" do run --lang expr -c '(str (resub (pattern (str "{" "name:~[a-z]+" "}")) (pattern (str "pre{" "name" "}post")) "demo"))' >"$TMPDIR/$host.replace.out" 2>"$TMPDIR/$host.replace.err"
 	if [ "$(cat "$TMPDIR/$host.replace.out")" = '"predemopost"' ]; then
 		test-ok "$host replaces using named regex captures"
 	else

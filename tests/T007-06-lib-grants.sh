@@ -16,7 +16,7 @@ cli_build
 operation_fixture_copy lib-grants lib-grants
 
 test-step "capabilities are denied by default"
-for expr in '(read "a.txt")' '(write! "x.txt" "x")' '(env "HOME")' '(shell! "true")' '(sh! "true")' '(shellrun! "true")' '(shell-template! ["true " ""] ["x"])'; do
+for expr in '(read "a.txt")' '(write! "x.txt" "x")' '(env "HOME")' '(sh! "true")' '(shell-template! ["true " ""] ["x"])'; do
 	cli_run --dir lib-grants -- do run --lang expr -c "$expr"
 	cli_expect_status 1 "$expr"
 	cli_expect_stderr_contains 'CAP_DENIED'
@@ -77,19 +77,15 @@ cli_expect_status 1
 cli_expect_stderr_contains 'CAP_DENIED'
 
 test-step "shell captures status and separate streams"
-cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shell! "echo out; echo err >&2; exit 3")'
+cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(sh! "echo out; echo err >&2; exit 3")'
 cli_expect_status 0
 cli_expect_stdout_contains 'status: 3' 'stdout: out' 'stderr: err'
-
-cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shell! "echo ok")'
-cli_expect_status 0
-cli_expect_stdout_contains 'status: 0' 'stdout: ok'
 
 cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(sh! "echo ok")'
 cli_expect_status 0
 cli_expect_stdout_contains 'status: 0' 'stdout: ok'
 
-cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(shellrun! "echo ok")'
+cli_run --dir lib-grants -- do run --lang expr --allow-run -c '(sh! (parse-json "{}") "echo ok")'
 cli_expect_status 0
 cli_expect_stdout_contains 'status: 0' 'stdout: ok'
 
@@ -118,7 +114,7 @@ cli_expect_status 1
 cli_expect_stderr_contains 'EXPR_INVALID'
 
 test-step "shell is denied without the run capability"
-cli_run --dir lib-grants -- do run --lang expr -c '(shell! "echo hi")'
+cli_run --dir lib-grants -- do run --lang expr -c '(sh! "echo hi")'
 cli_expect_status 1
 cli_expect_stderr_contains 'CAP_DENIED'
 

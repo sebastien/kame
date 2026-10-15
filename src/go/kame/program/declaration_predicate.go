@@ -21,12 +21,17 @@ type PredicateResult struct {
 // until the query accepts an authored origin map instead of inventing locations.
 func configurationDiagnostic(a mem.Allocator, value diagnostic.Diagnostic) diagnostic.Diagnostic {
 	view := value
+	// So lowers slice literals to C compound literals; keep their backing
+	// storage alive until Clone, outside the conditional blocks below.
+	tips := []string{""}
 	if value.Code == "CAP_DENIED" {
 		view.Message = "configuration conditions cannot use host capabilities or execute processes"
-		view.Tips = []string{"select source files using literal configuration and pure expressions; runtime grants do not apply to conditions"}
+		tips[0] = "select source files using literal configuration and pure expressions; runtime grants do not apply to conditions"
+		view.Tips = tips
 	} else if value.Code == "PHASE_INVALID" {
 		view.Message = "configuration conditions must be pure; runtime effects are not allowed"
-		view.Tips = []string{"move effects into runtime statements or rule recipes"}
+		tips[0] = "move effects into runtime statements or rule recipes"
+		view.Tips = tips
 	}
 	copy := view.Clone(a)
 	for i := range copy.Frames {

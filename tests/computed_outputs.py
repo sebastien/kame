@@ -198,7 +198,7 @@ def main() -> None:
 		('definition cycle', 'ROOT = (OTHER)\nOTHER = (ROOT)\n@(ROOT) :\n', 'DEP_CYCLE'),
 		('indirect effect', 'ROOT = (out! "forbidden")\n@(ROOT)/demo.o :\n', 'PHASE_INVALID'),
 		('indirect read', 'ROOT = (read ./seed)\n@(ROOT)/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
-		('indirect process', 'ROOT = (shell! "touch forbidden")\n@(ROOT)/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
+		('indirect process', 'ROOT = (sh! "touch forbidden")\n@(ROOT)/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
 		('indirect write', 'ROOT = (write! ./forbidden "bad")\n@(ROOT)/demo.o :\n', ('PHASE_INVALID', 'CAP_DENIED')),
 	]
 	for name, source, code in invalid:

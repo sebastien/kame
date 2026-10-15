@@ -24,38 +24,33 @@ release publishes these flat assets under the base URL
 | `kame.com` | `make dist-ape` | Cosmopolitan APE, full native CLI |
 | `kame.wasm` | `make wasm` | freestanding module |
 | `kame.js` | packaged JS CLI | Node CLI wrapper for `kame.wasm` (`010-wasm.md`) |
-| `kame-windows-x64.exe` | `make dist-windows` | Windows x64 PE entry for the native CLI |
-| `kame-windows-x64.zip` | `make dist-windows` | Windows x64 `kame.exe` launcher with colocated Node/WASM CLI assets |
-| `kame-PLATFORM` | `make dist-native` on each build host | Host-native CLI binary, named with the `OS-ARCH` platform key |
-| `kame` | stamped launcher | host provisioning and dispatch (installed locally as `bin/kame`) |
-| `Makefile.bootstrap` | bootstrap template | project-local make delegation and `kame init` |
 | `VERSION` | release tree | signed version selector for the explicit latest channel |
-| `kame.rb` | release builder | version-pinned Homebrew formula for the APE |
-| `kame.json` | release builder | version-pinned Scoop manifest for the native Windows CLI |
 | `PROVENANCE.json` | release builder | version, source revision and asset digests |
 | `SHA256SUMS` | checksums | signed integrity manifest |
 | `SHA256SUMS.sig` | release signer | Ed25519 signature over the exact manifest bytes |
 
-Asset filenames carry no version; the release tag does. The standalone Windows
-PE runs the native CLI without Node or a colocated runtime. The Windows ZIP
-retains the Node/WASM launcher as a separate fallback and requires Node 18 or
-later. The Cosmopolitan APE provides the native CLI on its supported hosts.
+Asset filenames carry no version; the release tag does. Only `kame.com`,
+`kame.js` and `kame.wasm` are runtime downloads. On supported Unix hosts, use
+`chmod +x kame.com` then `./kame.com --help`; on Windows rename it to `kame.exe`
+and run `.\kame.exe --help`. For the WASM CLI, keep `kame.js` and `kame.wasm`
+adjacent, rename `kame.js` to `kame.mjs` so Node recognizes the ES module, and
+run `node ./kame.mjs --help` with Node.js 18+, or use
+`npm x --yes @ssebastien/kame@VERSION -- --help`.
+The Cosmopolitan APE provides the native CLI on its supported hosts.
 The pinned Cosmopolitan 4.0.2 loader is incompatible with OpenBSD 7.5 and later:
 its syscall entry points are rejected by `pinsyscalls(2)`. Those OpenBSD
-releases use the native `kame-openbsd-x64` artifact; `auto` falls back to WASM
-when its APE probe fails.
-The native-artifact workflows build Linux and macOS binaries on x64 and ARM64,
-plus x64 binaries on FreeBSD, NetBSD and OpenBSD. Each is stored as
-`dist/native/PLATFORM/kame`. Before signing a multi-platform release, collect
-each workflow artifact under `dist/native/` and run `dist-release`;
-staging flattens them to `kame-PLATFORM`, and the checksum manifest and
-provenance include every staged native binary. The release signer should stage
-only outputs from trusted builds of the tagged source revision.
-The generated package-manager manifests embed the exact release version and
-asset digest. They can be installed directly with Homebrew or Scoop from the
-release URL; each release carries new pinned manifests. The Homebrew formula
-and Scoop manifest are release assets and are not maintained in separate
-package repositories.
+releases should use the Node/WASM pair instead.
+Native CI outputs and Windows bundles remain available for development/testing,
+but are never collected by `dist-release`. Neither platform placeholders nor
+stale outputs under `dist/native/` may enter a release.
+The Homebrew formula and Scoop manifest live in `etc/kame.rb` and
+`etc/kame.json`; both pin the version and digest of `kame.com`. Scoop renames
+that download to `kame.exe`. They are not release attachments.
+
+The launcher and bootstrap sections below describe source-tree helpers.
+Releases do not ship `kame` or `Makefile.bootstrap`. `init` and launcher
+self-update are retired; the checked-in launcher provisions only runtime
+assets, and the bootstrap template is copied manually from a source checkout.
 
 `SHA256SUMS` contains one `<64-hex-lowercase>  <asset>` line per asset, sorted
 by asset name, using the conventional two-space separator.
@@ -64,7 +59,8 @@ by asset name, using the conventional two-space separator.
 
 Every downloaded asset is verified against `SHA256SUMS` before it is installed
 or executed. The launcher first verifies the detached Ed25519 signature using a
-public key embedded in the stamped launcher, then checks the provenance file
+trusted public key configured through `KAME_RELEASE_PUBKEY_B64_OVERRIDE`
+(or embedded in a legacy launcher), then checks the provenance file
 and selected assets against that manifest. The release operator supplies both
 key files to `make dist-release`; neither is stored in the repository. The
 GitHub release helper fetches `package.signing.pem` and
@@ -81,7 +77,7 @@ only ASCII letters, digits, `.`, `+`, and `-`, preventing cache paths from
 escaping their per-version root. It resolves that version in order:
 
 1. `KAME_VERSION` when set to a concrete version.
-2. An embedded stamp present in the released `kame` asset.
+2. An embedded version stamp in a legacy launcher, if present.
 3. A `VERSION` file in the launcher's directory or its parent, used for a
   source checkout.
 
@@ -98,15 +94,11 @@ base URL. The latest selector requires downloads and fails when
 runtime or launcher artifacts. Concrete `KAME_VERSION` values and the
 launcher's stamped version remain pinned and perform no selector request.
 
-When the latest selector resolves to a version different from the running
-launcher's embedded stamp, the launcher verifies that release's signed manifest
-and provenance, installs the listed `kame` asset into the version cache,
-then replaces itself with that pinned launcher before backend selection. The
-cached launcher is checked against the signed manifest on each latest-channel
-handoff. Installation uses a sibling temporary file and atomic rename; the
-currently running launcher is never overwritten. The handoff sets
-`KAME_VERSION` to the resolved concrete version, so it cannot select or update
-itself recursively. `KAME_BIN` bypasses this behavior.
+The latest selector changes only the runtime version: the launcher verifies
+that release's signed manifest and provenance, then provisions the selected
+APE or WASM pair. It never downloads or executes a replacement shell launcher.
+`KAME_BIN` bypasses selection. WASM dispatch exports the resolved concrete
+`KAME_VERSION`, not the literal `latest` selector.
 
 ## Cache
 
@@ -124,7 +116,7 @@ $CACHE/<version>/SHA256SUMS
 $CACHE/<version>/ape/kame.com
 $CACHE/<version>/wasm/kame.js
 $CACHE/<version>/wasm/kame.wasm
-$CACHE/<version>/launcher/kame
+$CACHE/<version>/wasm/package.json
 $CACHE/<version>/.backend
 ```
 
@@ -154,7 +146,10 @@ checks timeout cleanup. `.github/workflows/ape-platforms.yml` runs that test
 against one artifact on Linux, Darwin, Windows POSIX, FreeBSD and NetBSD.
 
 The `wasm` backend requires a JavaScript runtime. `KAME_JS` names it;
-otherwise `node` is used. The runtime must be Node 18 or later.
+otherwise `node` is used. The runtime must be Node 18 or later. The launcher
+writes a local `package.json` containing `{"type":"module"}` in its WASM cache
+before dispatch, so the verified `kame.js` works without relying on Node's
+syntax detection or the surrounding project's module type.
 
 The Windows bundle's `kame.exe` locates `kame.js` beside itself and starts Node
 with the original argument vector, inherited standard streams, environment,
@@ -215,19 +210,17 @@ unavailable, or download failed.
 
 ## Bootstrap Makefile
 
-A release ships a signed `Makefile.bootstrap` template. `kame init` verifies
-and copies it to the current directory as a sidecar. It never changes
-`Makefile`, `Makefile.kmk`, or another project file. If `Makefile.bootstrap`
-already exists, init exits 1 and leaves it byte-for-byte unchanged. The
-command pins `KAME_VERSION` to the launcher's resolved version. Projects can
-run `make -f Makefile.bootstrap TARGET...` without changing an existing
-Makefile, or inspect/include the sidecar themselves. The template contract:
+`Makefile.bootstrap` is a source-tree template, not a release attachment.
+Copy it into a project manually, choose `KAME_VERSION` and configure a trusted
+verification key. `bin/kame init`, including its help forms, exits 1 with
+migration guidance before version selection, downloads or project writes.
+Projects can run `make -f Makefile.bootstrap TARGET...` without changing an
+existing Makefile, or inspect/include the sidecar themselves. The contract:
 
-- Variables: `KAME_VERSION` (default `0.2.3`, pinned by `kame init`),
+- Variables: `KAME_VERSION` (default `0.2.3`, pinned by the project),
   `KAME_RELEASE_URL` (default the version's GitHub release), and `KAME`
   (default `$(HOME)/.cache/kame/bin/kame-$(KAME_VERSION)`).
-- Released templates embed `KAME_RELEASE_PUBKEY_B64`, the same verification key
-  as the launcher. Source copies require a trusted key through this variable or
+- Source copies require a trusted key through `KAME_RELEASE_PUBKEY_B64` or
   `KAME_RELEASE_PUBKEY_B64_OVERRIDE`; a key is never fetched from the asset server.
 - The first invocation downloads `kame.com`, `VERSION`, `SHA256SUMS`, and
   `SHA256SUMS.sig` with curl, verifies the Ed25519 manifest signature and both
@@ -242,9 +235,6 @@ Makefile, or inspect/include the sidecar themselves. The template contract:
 - The delegate's exit status is the build's exit status.
 - The template uses make and sh, requires OpenSSL for verification, and requires
   curl for the first download.
-- `kame init` needs a verified cache/release manifest, creates its sidecar
-  atomically without clobbering a concurrent or pre-existing path, and reports
-  the make command needed to use it.
 
 Documented limitations:
 
@@ -263,29 +253,28 @@ Release assets are built with these targets, additive to the existing
 - `dist/kame.js` packages the JS CLI source.
 - `bin/kame` is the checked-in launcher; a source checkout resolves its
   version from `VERSION`.
-- `dist-release` stages `dist/release/` with the exact asset names, generated
-  Homebrew and Scoop manifests, and a signed `SHA256SUMS`. Before staging, it
-  requires native binaries for Linux x64/ARM64, macOS x64/ARM64, FreeBSD x64,
-  NetBSD x64 and OpenBSD x64; an incomplete platform set fails before the
-  existing release directory is removed. Release publication triggers the
-  package-manifest workflow when its destination repositories and token are
-  configured.
+- `dist-release` stages only `kame.com`, `kame.js`, `kame.wasm`, `VERSION`,
+  provenance and the signed checksum manifest. It does not collect native
+  platform artifacts or generate package definitions. The signer rejects
+  unexpected files, directories and symlinks in the release directory.
+- `make package-manifests` explicitly refreshes `etc/kame.rb` and
+  `etc/kame.json` using `dist/kame.com` and `VERSION`; commit these definitions
+  before publication. Release staging never modifies tracked files.
 - `dist-native` builds the current host's full native CLI and places it at
   `dist/native/PLATFORM/kame`; `.github/workflows/native-artifacts.yml` uploads
   Linux and macOS x64/ARM64 host builds, and
   `.github/workflows/native-bsd-artifacts.yml` uploads FreeBSD, NetBSD and
   OpenBSD x64 builds for later release staging.
 
-Install the pinned package definitions directly from a release:
+Install the Scoop definition from a source checkout:
 
 ```sh
-brew install https://github.com/sebastien/kame/releases/download/vVERSION/kame.rb
-scoop install https://github.com/sebastien/kame/releases/download/vVERSION/kame.json
+scoop install ./etc/kame.json
 ```
 
-Replace `VERSION` with the desired release version. The Homebrew formula
-installs the APE as `kame`; the Scoop manifest exposes the native Windows PE as
-`kame`. These release-pinned definitions do not publish or update a tap/bucket.
+For Homebrew, copy `etc/kame.rb` into a tap's `Formula/` directory and install
+from that tap. Both definitions expose the APE as `kame`. Updating them does
+not automatically publish a tap or bucket.
 
 The JS CLI source lives in the repository and is copied unchanged to
 `dist/kame.js`. Command execution keeps the absolute-path discipline of the
@@ -315,10 +304,12 @@ refuses to overwrite an existing local/remote tag or draft release. The operator
 the commit first, including when releasing from a detached HEAD; the script
 never pushes code automatically. Authentication/API failures stop preflight.
 It stages and signs `dist/release/`, creates a draft release for the `VERSION`
-tag, uploads every flat asset (including `kame`), verifies that every manifest
+tag, uploads the seven flat runtime/verification assets, verifies that every manifest
 asset is present, and only then publishes. `--repo` selects
 another repository and `--notes-file` supplies release notes in place of
-generated notes. The signing key material is supplied out of band and is never
+generated change notes. Both paths always include download descriptions, APE
+and Node/WASM commands, verification guidance and a version-pinned
+`npm x --yes @ssebastien/kame@VERSION -- --help` example. The signing key material is supplied out of band and is never
 stored in the repository.
 
 If the GitHub release is already published, rerunning the same command leaves
@@ -359,9 +350,8 @@ the canonical build.
 - `KAME_VERSION=latest` resolves the selector, prints its concrete version
   without provisioning for `--version`, and provisions only that version for
   execution; disabled downloads fail before creating the cache.
-- `KAME_VERSION=latest` installs and hands off to the selected release's
-  signed launcher before backend dispatch; cached launcher tampering fails
-  closed, while pinned launches do not self-update.
+- `KAME_VERSION=latest` provisions the selected runtime without fetching a
+  replacement shell launcher. Minimal releases contain no shell/bootstrap assets.
 - `kame-windows-x64.zip` contains exactly `kame.exe`, `kame.js`, and
   `kame.wasm`; the native launcher preserves argv, standard streams, working
   directory, environment and the Node process exit status. On a Windows host,
@@ -376,8 +366,8 @@ the canonical build.
   recipes, 64 KiB pipeline writes, EOF closure, 2 MiB transfer, cache, watch and
   descendant cleanup on an actual Windows host.
 - An invalid version override fails before creating or accessing a cache path.
-- `kame init` writes a correctly stamped bootstrap sidecar, preserves an
-  existing `Makefile`, and refuses a second write without changing either file.
+- Retired `kame init`, including help forms, reports migration guidance without
+  network access, cache creation or project writes.
 - Concurrent first invocations install exactly one verified artifact.
 - The bootstrap Makefile provisions once and forwards single, multiple, and
   default goals in order with the delegate's exit status.

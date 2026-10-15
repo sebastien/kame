@@ -28,7 +28,7 @@ func TestCompositionConditionUsesOrdinaryTruthAndLazyConfiguration(t *testing.T)
 func TestCompositionConditionRejectsEffectsCyclesAndResidualSources(t *testing.T) {
 	a := t.Allocator()
 	prefixes := []string{"a = b\nb = a\n", "", "", "", "", "(include ./never.km)\n", "(if :true (include ./never.km))\n"}
-	predicates := []string{"a", `(shell! "never execute")`, `(out! "never publish")`, `(read "never read")`, "missing", ":true", ":true"}
+	predicates := []string{"a", `(sh! "never execute")`, `(out! "never publish")`, `(read "never read")`, "missing", ":true", ":true"}
 	codes := []string{"DEP_CYCLE", "CAP_DENIED", "PHASE_INVALID", "CAP_DENIED", "REF_MISSING", "FEATURE_UNSUP", "FEATURE_UNSUP"}
 	for i := range prefixes {
 		result := program.CompositionCondition(a, "condition.kmk", prefixes[i], predicates[i], nil, nil)

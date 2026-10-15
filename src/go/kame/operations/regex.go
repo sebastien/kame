@@ -102,7 +102,7 @@ func regexRecordValue(a mem.Allocator, record core.Value, key string) core.Value
 	return core.Value{Kind: core.Nil}
 }
 
-func opRegexReplace(c *eval.Context, state any, values []core.Value) eval.Result {
+func opResub(c *eval.Context, state any, values []core.Value) eval.Result {
 	_ = state
 	if values[0].Kind != core.Pattern { return invalidArgument(c, values, 0, "pattern") }
 	if values[1].Kind != core.String && values[1].Kind != core.Pattern { return invalidArgument(c, values, 1, "string or expansion pattern") }
@@ -113,7 +113,7 @@ func opRegexReplace(c *eval.Context, state any, values []core.Value) eval.Result
 	if !hasRegexMatcher(replace.match) {
 		freeReplaceState(c.Run, replace)
 		discardArgCallables(c, values)
-		return ownedFailure(c.Run, "PAT_INVALID", "regex-replace needs a regex matcher")
+		return ownedFailure(c.Run, "PAT_INVALID", "resub needs a regex matcher")
 	}
 	result := replaceApply(c, replace, values[2])
 	freeReplaceState(c.Run, replace)

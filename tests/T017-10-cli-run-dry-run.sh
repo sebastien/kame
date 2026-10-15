@@ -17,7 +17,7 @@ build :
 KMK
 cat >"$work/values.km" <<'KM'
 capture = $(touch capture-ran)
-legacy = (shell! "touch shell-ran")
+legacy = (sh! "touch shell-ran")
 (out! "value-out")
 (err! "value-err")
 (write! "protected" "value-write")

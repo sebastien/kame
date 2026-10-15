@@ -37,16 +37,9 @@ fi
 echo "ape:$*"
 SH
 chmod +x "$release/kame.com"
-printf 'const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$release/kame.js"
+printf 'import process from "node:process";const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$release/kame.js"
 printf 'dummy-wasm' >"$release/kame.wasm"
-printf 'fixture Windows launcher bundle' >"$release/kame-windows-x64.zip"
-printf 'fixture native Windows CLI' >"$release/kame-windows-x64.exe"
 printf '9.9.9\n' >"$release/VERSION"
-sed -e 's|^KAME_VERSION ?=.*|KAME_VERSION ?= 9.9.9|' \
-    -e "s|^KAME_RELEASE_PUBKEY_B64 ?=.*|KAME_RELEASE_PUBKEY_B64 ?= $RELEASE_TEST_KEY_B64|" \
-    "$CLI_ROOT/Makefile.bootstrap" >"$release/Makefile.bootstrap"
-release_test_stamp_launcher "$launcher" "$release/kame" 9.9.9
-python3 src/sh/release_package_manifests.py --directory "$release" --version 9.9.9
 release_test_sign "$release" 9.9.9 fixture "$root/keys"
 
 export KAME_VERSION=9.9.9
@@ -81,22 +74,10 @@ else
 fi
 out="$(KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" KAME_RELEASE_URL="file://$release" KAME_HOME="$root/latest-cache" KAME_BACKEND=wasm "$launcher" latest)"
 if [ "$out" = "wasm:latest" ] && [ -f "$root/latest-cache/9.9.9/wasm/kame.js" ] && \
-	[ -x "$root/latest-cache/9.9.9/launcher/kame" ]; then
-	test-ok "latest updates to its verified pinned launcher and provisions the selected release"
+	[ ! -e "$root/latest-cache/9.9.9/launcher" ]; then
+	test-ok "latest provisions runtime assets without downloading a shell launcher"
 else
 	test-fail "latest backend: out=$out"
-fi
-
-test-step "latest revalidates its cached launcher before handoff"
-printf 'tampered launcher\n' >"$root/latest-cache/9.9.9/launcher/kame"
-set +e
-latest_tamper_out="$(KAME_VERSION=latest KAME_LATEST_URL="file://$release/VERSION" KAME_RELEASE_URL="file://$release" KAME_HOME="$root/latest-cache" KAME_BACKEND=wasm "$launcher" latest 2>&1)"
-latest_tamper_status=$?
-set -e
-if [ "$latest_tamper_status" = 1 ] && grep -q 'checksum mismatch: cached kame' <<<"$latest_tamper_out"; then
-	test-ok "tampered latest launcher is rejected before execution"
-else
-	test-fail "latest launcher tamper: status=$latest_tamper_status out=$latest_tamper_out"
 fi
 
 set +e
@@ -144,16 +125,12 @@ test-step "a checksum mismatch fails closed and installs nothing"
 bad="$root/bad"
 mkdir -p "$bad"
 cp "$release/kame.com" "$release/kame.js" "$release/kame.wasm" "$release/VERSION" "$bad/"
-cp "$release/Makefile.bootstrap" "$bad/"
 cp "$release/PROVENANCE.json" "$bad/"
-cp "$release/kame" "$bad/kame"
 {
 	echo "$(sha "$bad/kame.com")  kame.com"
 	printf '%064d  kame.js\n' 0
 echo "$(sha "$bad/kame.wasm")  kame.wasm"
 echo "$(sha "$bad/VERSION")  VERSION"
-echo "$(sha "$bad/kame")  kame"
-echo "$(sha "$bad/Makefile.bootstrap")  Makefile.bootstrap"
 } | sort -k2 >"$bad/SHA256SUMS"
 echo "$(sha "$bad/PROVENANCE.json")  PROVENANCE.json" >>"$bad/SHA256SUMS"
 sort -k2 "$bad/SHA256SUMS" -o "$bad/SHA256SUMS"
@@ -287,69 +264,23 @@ for defect in artifact signature missing-manifest wrong-version; do
 	cp "$release/VERSION" "$bootstrap_bin.VERSION"
 done
 
-test-step "init creates a pinned sidecar and preserves project files"
+test-step "retired init fails before downloads and preserves project files"
 init_project="$root/init-project"
 mkdir -p "$init_project"
 printf 'all:\n\t@echo project-makefile\n' >"$init_project/Makefile"
 before_makefile=$(sha "$init_project/Makefile")
-out="$(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init)"
-if [ "$out" = "Created Makefile.bootstrap for Kame 9.9.9. Use make -f Makefile.bootstrap [targets]." ] && \
-	grep -qx 'KAME_VERSION ?= 9.9.9' "$init_project/Makefile.bootstrap" && \
-	[ "$(sha "$init_project/Makefile")" = "$before_makefile" ]; then
-	test-ok "init writes a pinned bootstrap sidecar without changing Makefile"
-else
-	test-fail "init output or project preservation: out=$out"
-fi
-out="$(unset KAME KAME_RELEASE_PUBKEY_B64_OVERRIDE; cd "$init_project" && HOME="$root/init-home" make --no-print-directory -f Makefile.bootstrap hello)"
-if [ "$out" = "ape:hello" ]; then
-	test-ok "initialized sidecar verifies the executable using its embedded release key"
-else
-	test-fail "initialized bootstrap: out=$out"
-fi
-set +e
-(cd "$init_project" && KAME_HOME="$root/init-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init >"$root/init-out" 2>"$root/init-err")
-status=$?
-set -e
-if [ "$status" = 1 ] && grep -q 'refusing to overwrite Makefile.bootstrap' "$root/init-err" && \
-	[ "$(sha "$init_project/Makefile")" = "$before_makefile" ] && grep -qx 'KAME_VERSION ?= 9.9.9' "$init_project/Makefile.bootstrap"; then
-	test-ok "repeat init refuses to overwrite the existing sidecar"
-else
-	test-fail "repeat init: status=$status err=$(cat "$root/init-err")"
-fi
-
-race_project="$root/init-race"
-mkdir -p "$race_project"
-set +e
-(cd "$race_project" && KAME_HOME="$root/init-race-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init >"$root/race1-out" 2>"$root/race1-err") &
-race1=$!
-(cd "$race_project" && KAME_HOME="$root/init-race-cache" KAME_RELEASE_URL="file://$release" "$release/kame" init >"$root/race2-out" 2>"$root/race2-err") &
-race2=$!
-wait "$race1"
-race1_status=$?
-wait "$race2"
-race2_status=$?
-set -e
-if { [ "$race1_status" = 0 ] && [ "$race2_status" = 1 ]; } || { [ "$race1_status" = 1 ] && [ "$race2_status" = 0 ]; }; then
-	if grep -qx 'KAME_VERSION ?= 9.9.9' "$race_project/Makefile.bootstrap"; then
-		test-ok "concurrent init creates one complete sidecar without replacement"
+for argument in '' --help -h; do
+	status=0
+	(cd "$init_project" && KAME_VERSION=latest KAME_BIN=/bin/echo \
+		KAME_HOME="$root/init-cache" KAME_RELEASE_URL=file:///nonexistent KAME_NO_DOWNLOAD=1 \
+		"$launcher" init ${argument:+"$argument"}) >"$root/init-out" 2>"$root/init-err" || status=$?
+	if [ "$status" = 1 ] && grep -q 'init has been retired' "$root/init-err" &&
+		[ "$(sha "$init_project/Makefile")" = "$before_makefile" ] &&
+		[ ! -e "$init_project/Makefile.bootstrap" ] && [ ! -e "$root/init-cache" ]; then
+		test-ok "init $argument reports migration guidance without provisioning"
 	else
-		test-fail "concurrent init wrote an incomplete sidecar"
+		test-fail "init $argument: status=$status err=$(cat "$root/init-err")"
 	fi
-else
-	test-fail "concurrent init statuses: $race1_status, $race2_status"
-fi
-
-offline_project="$root/init-offline"
-mkdir -p "$offline_project"
-set +e
-(cd "$offline_project" && KAME_HOME="$root/init-offline-cache" KAME_RELEASE_URL="file://$release" KAME_NO_DOWNLOAD=1 "$release/kame" init >"$root/offline-out" 2>"$root/offline-err")
-status=$?
-set -e
-if [ "$status" = 1 ] && grep -q 'download disabled' "$root/offline-err" && \
-	[ ! -e "$offline_project/Makefile.bootstrap" ] && ! compgen -G "$root/init-offline-cache/9.9.9/.bootstrap.*" >/dev/null; then
-	test-ok "offline init fails without creating an unverified sidecar"
-else
-	test-fail "offline init: status=$status err=$(cat "$root/offline-err")"
-fi
+done
 
 test-end

@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v15"
+const version = "v16"
 
 // Register describes every standard operation explicitly. Categories describe
 // the operation itself; callable/template effects still propagate dynamically.
@@ -20,7 +20,7 @@ func Register(r *eval.Registry) bool {
 		contract(r, "tool", opTool, 1, 1, eval.ObservationOperation, eval.AllPhases, eval.TracksDependency) &&
 		pure(r, "get", opGet, 2, 3) && pure(r, "first", opFirst, 1, 1) && pure(r, "nth", opNth, 2, 2) &&
 		callback(r, "apply", opApply, 2, 2) && pure(r, "list", opList, 0, -1) &&
-		pure(r, "items", opItems, 1, 1) && pure(r, "set-field", opSetField, 3, 3) && pure(r, "merge", opMerge, 0, -1) &&
+		pure(r, "items", opItems, 1, 1) && pure(r, "set", opSet, 3, 3) && pure(r, "merge", opMerge, 0, -1) &&
 		pure(r, "record?", opKindPredicate, 1, 1) && pure(r, "list?", opKindPredicate, 1, 1) && pure(r, "string?", opKindPredicate, 1, 1) &&
 		pure(r, "digest", opDigest, 2, 2) &&
 		callback(r, "map", opMap, 2, 2) && callback(r, "flatmap", opFlatMap, 2, 2) &&
@@ -29,7 +29,7 @@ func Register(r *eval.Registry) bool {
 		pure(r, "unique", opUnique, 1, 1) && pure(r, "join", opJoin, 2, 2) && pure(r, "resource", opResource, 1, 1) &&
 		pure(r, "split", opSplit, 2, 2) && pure(r, "strip", opStrip, 1, 1) && pure(r, "pattern", opPattern, 1, 1) &&
 		callback(r, "sub", opReplace, 2, 3) && callback(r, "replace", opReplace, 2, 3) && pure(r, "match?", opMatch, 1, 2) && pure(r, "includes?", opIncludes, 2, 2) &&
-		pure(r, "regex-match", opRegexMatch, 2, 2) && pure(r, "regex-replace", opRegexReplace, 3, 3) && pure(r, "capture", opCapture, 2, 2) &&
+		pure(r, "regex-match", opRegexMatch, 2, 2) && pure(r, "resub", opResub, 3, 3) && pure(r, "capture", opCapture, 2, 2) &&
 		pure(r, "starts?", opStarts, 2, 2) && pure(r, "ends?", opEnds, 2, 2) &&
 		pure(r, "black", opTerminalStyle, 1, 1) && pure(r, "red", opTerminalStyle, 1, 1) &&
 		pure(r, "green", opTerminalStyle, 1, 1) && pure(r, "yellow", opTerminalStyle, 1, 1) &&
@@ -44,7 +44,7 @@ func Register(r *eval.Registry) bool {
 		observation(r, "stat", opStat, 1, 1, eval.Read) && observation(r, "lstat", opLstat, 1, 1, eval.Read) &&
 		observation(r, "readlink", opReadlink, 1, 1, eval.Read) && observation(r, "wildcard", opWildcard, 1, -1, eval.Read) &&
 		registerWrite(r) && observation(r, "env", opEnv, 1, 1, eval.Env) &&
-		process(r, "shell!", opShell, 1, 2) && process(r, "sh!", opShell, 1, 2) && process(r, "shellrun!", opShell, 1, 2) &&
+		process(r, "sh!", opSh, 1, 2) &&
 		process(r, "shell-template!", opShellTemplate, 2, 2) &&
 		contract(r, "out!", opOut, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.EmitsOutput) &&
 		contract(r, "err!", opErr, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.EmitsOutput) &&

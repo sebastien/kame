@@ -17,7 +17,7 @@ project="$TMPDIR/wasm-cat"
 mkdir -p "$project/out"
 cat >"$project/Makefile.kmk" <<'EOF'
 GREETING = "hello"
-SHELLVAL = (shell! "printf hi")
+SHELLVAL = (sh! "printf hi")
 ./out/greeting.txt :
 	printf hello > out/greeting.txt
 run :

@@ -124,7 +124,7 @@ a unary predicate when `TEXT` is omitted. Use it for filtering. Rule captures
 have a related but distinct grammar; see [Rules](./rules.md).
 `(pattern TEXT)` constructs and validates a pattern from runtime text. Regex
 matcher groups are `{name:~REGEX}` or `{~REGEX}`; `regex-match`, `capture`, and
-`regex-replace` expose bounded matching and capture processing. Regex syntax is
+`resub` expose bounded matching and capture processing. Regex syntax is
 portable and byte-oriented, not PCRE; see
 [Pattern extensions](../../../spec/029-pattern-extensions.md).
 

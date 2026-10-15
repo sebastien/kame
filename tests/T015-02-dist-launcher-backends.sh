@@ -24,6 +24,7 @@ sha() {
 root="$TMPDIR/t015b"
 mkdir -p "$root"
 release_test_keys "$root/keys"
+export KAME_RELEASE_PUBKEY_B64_OVERRIDE="$RELEASE_TEST_KEY_B64"
 
 # build_release DIR APE_BODY writes a complete verified release tree.
 build_release() {
@@ -33,12 +34,7 @@ build_release() {
 	chmod +x "$dir/kame.com"
 	printf 'const a=process.argv.slice(2);process.stdout.write("wasm:"+a.join(",")+"\\n");\n' >"$dir/kame.js"
 	printf 'dummy-wasm' >"$dir/kame.wasm"
-	printf 'fixture Windows launcher bundle' >"$dir/kame-windows-x64.zip"
-	printf 'fixture native Windows CLI' >"$dir/kame-windows-x64.exe"
 	printf '9.9.9\n' >"$dir/VERSION"
-	cp "$CLI_ROOT/Makefile.bootstrap" "$dir/Makefile.bootstrap"
-	release_test_stamp_launcher "$launcher" "$dir/kame" 9.9.9
-	python3 src/sh/release_package_manifests.py --directory "$dir" --version 9.9.9
 	release_test_sign "$dir" 9.9.9 fixture "$root/keys"
 }
 
@@ -53,7 +49,7 @@ exit 1'
 export KAME_VERSION=9.9.9
 
 test-step "auto falls back to wasm when the APE probe fails"
-out="$(KAME_RELEASE_URL="file://$broken" KAME_HOME="$root/broken-cache" "$broken/kame" a b)"
+out="$(KAME_RELEASE_URL="file://$broken" KAME_HOME="$root/broken-cache" "$launcher" a b)"
 if [ "$out" = "wasm:a,b" ] && [ "$(cat "$root/broken-cache/9.9.9/.backend")" = "wasm" ]; then
 	test-ok "a failed APE probe selects the wasm backend"
 else
@@ -61,7 +57,7 @@ else
 fi
 
 test-step "KAME_BACKEND forces the APE strategy"
-out="$(KAME_RELEASE_URL="file://$good" KAME_HOME="$root/ape-cache" KAME_BACKEND=ape "$good/kame" a b)"
+out="$(KAME_RELEASE_URL="file://$good" KAME_HOME="$root/ape-cache" KAME_BACKEND=ape "$launcher" a b)"
 if [ "$out" = "ape:a b" ] && [ -x "$root/ape-cache/9.9.9/ape/kame.com" ]; then
 	test-ok "KAME_BACKEND=ape provisions and runs the APE"
 else
@@ -75,14 +71,12 @@ echo "ape:$*"'
 {
 	echo "$(sha "$nomanifest/kame.com")  kame.com"
 	echo "$(sha "$nomanifest/kame.wasm")  kame.wasm"
-	echo "$(sha "$nomanifest/kame")  kame"
-	echo "$(sha "$nomanifest/Makefile.bootstrap")  Makefile.bootstrap"
 	echo "$(sha "$nomanifest/VERSION")  VERSION"
 	echo "$(sha "$nomanifest/PROVENANCE.json")  PROVENANCE.json"
 } | sort -k2 >"$nomanifest/SHA256SUMS"
 openssl pkeyutl -sign -inkey "$root/keys/signing.pem" -rawin -in "$nomanifest/SHA256SUMS" -out "$nomanifest/SHA256SUMS.sig"
 set +e
-KAME_RELEASE_URL="file://$nomanifest" KAME_HOME="$root/nomanifest-cache" KAME_BACKEND=wasm "$nomanifest/kame" x >"$root/out" 2>"$root/err"
+KAME_RELEASE_URL="file://$nomanifest" KAME_HOME="$root/nomanifest-cache" KAME_BACKEND=wasm "$launcher" x >"$root/out" 2>"$root/err"
 status=$?
 set -e
 if [ "$status" = 1 ] && grep -q 'missing manifest entry: kame.js' "$root/err" && [ ! -e "$root/nomanifest-cache/9.9.9/wasm" ]; then
@@ -93,7 +87,7 @@ fi
 
 test-step "KAME_NO_DOWNLOAD fails when the artifact is absent"
 set +e
-KAME_RELEASE_URL="file://$good" KAME_HOME="$root/nodl-cache" KAME_BACKEND=wasm KAME_NO_DOWNLOAD=1 "$good/kame" x >"$root/out" 2>"$root/err"
+KAME_RELEASE_URL="file://$good" KAME_HOME="$root/nodl-cache" KAME_BACKEND=wasm KAME_NO_DOWNLOAD=1 "$launcher" x >"$root/out" 2>"$root/err"
 status=$?
 set -e
 if [ "$status" = 1 ] && grep -q 'download disabled' "$root/err" && [ ! -e "$root/nodl-cache/9.9.9/wasm" ]; then
@@ -107,7 +101,7 @@ conc="$root/conc-cache"
 pids=()
 for i in 1 2 3 4; do
 	(
-		KAME_RELEASE_URL="file://$good" KAME_HOME="$conc" KAME_BACKEND=wasm "$good/kame" "t$i" >"$root/cout$i" 2>"$root/cerr$i"
+		KAME_RELEASE_URL="file://$good" KAME_HOME="$conc" KAME_BACKEND=wasm "$launcher" "t$i" >"$root/cout$i" 2>"$root/cerr$i"
 		echo $? >"$root/cst$i"
 	) &
 	pids+=("$!")
@@ -125,14 +119,14 @@ else
 fi
 
 test-step "cache root selection honors XDG_DATA_HOME then HOME"
-env -u KAME_HOME -u HOME KAME_RELEASE_URL="file://$good" XDG_DATA_HOME="$root/xdg" KAME_BACKEND=wasm "$good/kame" x >/dev/null
+env -u KAME_HOME -u HOME KAME_RELEASE_URL="file://$good" XDG_DATA_HOME="$root/xdg" KAME_BACKEND=wasm "$launcher" x >/dev/null
 xdg_ok=0
 [ -f "$root/xdg/kame/9.9.9/wasm/kame.js" ] && xdg_ok=1
-env -u KAME_HOME -u XDG_DATA_HOME KAME_RELEASE_URL="file://$good" HOME="$root/home" KAME_BACKEND=wasm "$good/kame" x >/dev/null
+env -u KAME_HOME -u XDG_DATA_HOME KAME_RELEASE_URL="file://$good" HOME="$root/home" KAME_BACKEND=wasm "$launcher" x >/dev/null
 home_ok=0
 [ -f "$root/home/.local/share/kame/9.9.9/wasm/kame.js" ] && home_ok=1
 set +e
-env -u KAME_HOME -u XDG_DATA_HOME -u HOME KAME_RELEASE_URL="file://$good" KAME_BACKEND=wasm "$good/kame" x >"$root/out" 2>"$root/err"
+env -u KAME_HOME -u XDG_DATA_HOME -u HOME KAME_RELEASE_URL="file://$good" KAME_BACKEND=wasm "$launcher" x >"$root/out" 2>"$root/err"
 status=$?
 set -e
 if [ "$xdg_ok" = 1 ] && [ "$home_ok" = 1 ] && [ "$status" = 1 ] && grep -q 'no usable cache root' "$root/err"; then

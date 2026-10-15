@@ -167,7 +167,7 @@ func TestSessionDryRunEvaluatesWithoutEffectRequests(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
 	operations.Register(registry)
-	fragments := []program.Fragment{{Name: "dry.km", Lang: "km", Text: "capture = $(printf ignored)\nlegacy = (shell! \"printf ignored\")\n(out! \"hidden\")\n(write! \"protected\" \"hidden\")\n(count [capture legacy])\n"}}
+	fragments := []program.Fragment{{Name: "dry.km", Lang: "km", Text: "capture = $(printf ignored)\nlegacy = (sh! \"printf ignored\")\n(out! \"hidden\")\n(write! \"protected\" \"hidden\")\n(count [capture legacy])\n"}}
 	grants := []eval.Grant{{Capability: eval.Run}, {Capability: eval.Write}}
 	compiled := program.CompileSession(a, fragments, registry, program.Options{DryRun: true, Grants: grants})
 	defer compiled.Free(a)

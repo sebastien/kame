@@ -199,7 +199,8 @@ with `EXPR_INVALID`.
 
 - `(replace FROM TO TEXT)` with plain strings replaces every literal `FROM`
   occurrence in `TEXT` with `TO`. All three operands evaluate normally in
-  caller scope, left to right; this mode is unchanged.
+  caller scope, left to right. Wrong literal operand types or a missing subject
+  report `EXPR_INVALID`; only pattern mode supports a two-argument callable.
 - `(replace MATCH-PATTERN REPLACEMENT [SUBJECT])` performs anchored pattern
   matching and evaluates `REPLACEMENT` with the successful match's named
   captures in scope. It is not an eager evaluation of every operand.
@@ -348,8 +349,8 @@ and runtime pattern construction are specified in
 - Literal string `replace` behaves exactly as before.
 - Mixing matcher and reference groups is `PARSE_ERR`; structurally invalid
   groups leave a non-pattern path or string under ordinary atom classification.
-  Selected matcher-pattern replacements and literal-string calls with pattern
-  operands are `PAT_INVALID`.
+  Selected matcher-pattern replacements are `PAT_INVALID`; literal-string calls
+  with pattern operands are `EXPR_INVALID`.
 - A pattern renders as its text in recipes and rule inputs; `str` rejects it.
 - A string operation given a pattern is `EXPR_INVALID`.
 - Formatting sections and patterns is idempotent and preserves section form.

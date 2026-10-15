@@ -91,7 +91,7 @@ with tempfile.TemporaryDirectory() as temporary:
         elif expected == 'AB':
             (project / 'members/a').unlink()
     # A clock/process-backed definition has no revalidatable leaf manifest.
-    volatile = 'SHELL = kash\nPAYLOAD = (shell! "printf x >> volatile-runs; printf payload")\n./volatile : ./input\n\t(yield! PAYLOAD.stdout)\n'
+    volatile = 'SHELL = kash\nPAYLOAD = (sh! "printf x >> volatile-runs; printf payload")\n./volatile : ./input\n\t(yield! PAYLOAD.stdout)\n'
     run(volatile, ['./volatile'])
     run(volatile, ['./volatile'])
     assert (project / 'volatile-runs').read_text() == 'xx'
@@ -134,7 +134,7 @@ with tempfile.TemporaryDirectory() as temporary:
     run('chosen : ; [env: 42]\n\ttouch forbidden\n', code='EXPR_INVALID')
     run('chosen : ; [env: [MODE: 42]]\n\ttouch forbidden\n', code='EXPR_INVALID')
     run('chosen : ; [shell: (out! "forbidden")]\n\ttouch forbidden\n', code='PHASE_INVALID')
-    run('chosen : ; [shell: (shell! "touch forbidden")]\n\ttouch forbidden\n', code='PHASE_INVALID')
+    run('chosen : ; [shell: (sh! "touch forbidden")]\n\ttouch forbidden\n', code='PHASE_INVALID')
     assert not (project / 'forbidden').exists()
     run('./out : ; [shell: kash]\n\t/usr/bin/printf artifact > ./out\n', ['./out'])
     assert (project / 'out').read_text() == 'artifact'

@@ -7,16 +7,15 @@
 # stdout except its own --version answer.
 set -eu
 
-# Bootstrap help must not select, download, or provision a backend.
-if [ "${1:-}" = "init" ] && [ "$#" -eq 2 ] && { [ "$2" = "--help" ] || [ "$2" = "-h" ]; }; then
-	printf '%s\n' 'Usage: kame init' 'Create Makefile.bootstrap in the current directory without overwriting an existing file.' 'Launcher-only command; KAME_VERSION selects the pinned release.'
-	exit 0
+# Bootstrap initialization was retired; fail before selecting or downloading anything.
+if [ "${1:-}" = "init" ]; then
+	printf '%s\n' 'kame: init has been retired; copy Makefile.bootstrap from a source checkout, or run kame.com / the npm CLI directly.' >&2
+	exit 1
 fi
 
-# Stamped to the pinned version at release time. Empty in a source checkout,
-# where the version comes from a VERSION file.
+# Legacy embedded version; empty in a source checkout, which uses VERSION.
 KAME_STAMP=""
-# Embedded from the release operator's verification key when staging a release.
+# Source users must configure the trusted key with KAME_RELEASE_PUBKEY_B64_OVERRIDE.
 KAME_RELEASE_PUBKEY_B64=""
 
 die() {
@@ -55,10 +54,8 @@ launcher_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 # --- Version resolution: KAME_VERSION, embedded stamp, then VERSION file. ---
 version=""
 requested_version=${KAME_VERSION:-}
-latest_channel=0
 if [ "$requested_version" = "latest" ] && [ -z "${KAME_BIN:-}" ]; then
 	[ "${KAME_NO_DOWNLOAD:-0}" != "1" ] || die "latest channel selection requires a download"
-	latest_channel=1
 	latest_url=${KAME_LATEST_URL:-https://github.com/sebastien/kame/releases/latest/download/VERSION}
 	version=$(fetch_text "$latest_url")
 	requested_version=""
@@ -91,7 +88,7 @@ if [ "$#" -eq 1 ] && { [ "$1" = "-V" ] || [ "$1" = "--version" ]; }; then
 fi
 
 # --- KAME_BIN bypasses detection and download entirely. ---
-if [ "${1:-}" != "init" ] && [ -n "${KAME_BIN:-}" ]; then
+if [ -n "${KAME_BIN:-}" ]; then
 	[ -x "$KAME_BIN" ] || die "KAME_BIN is not executable: $KAME_BIN"
 	exec "$KAME_BIN" "$@"
 fi
@@ -277,49 +274,6 @@ install_ape() {
 	rmdir "$staging"
 }
 
-install_bootstrap_template() {
-	ensure_manifest
-	template="$cache/Makefile.bootstrap"
-	asset="Makefile.bootstrap"
-	hex=$(manifest_entry "$cache/SHA256SUMS" "$asset") || die "missing manifest entry: $asset"
-	if [ -f "$template" ]; then
-		verify "$template" "$hex" || die "checksum mismatch: cached $asset"
-		return 0
-	fi
-	[ "${KAME_NO_DOWNLOAD:-0}" != "1" ] || die "missing cached $asset (download disabled)"
-	staging="$cache/.bootstrap.$$"
-	rm -f "$staging"
-	fetch "${release_base}${asset}" "$staging"
-	verify "$staging" "$hex" || {
-		rm -f "$staging"
-		die "checksum mismatch: $asset"
-	}
-	mv "$staging" "$template"
-}
-
-install_launcher() {
-	ensure_manifest
-	asset="kame"
-	hex=$(manifest_entry "$cache/SHA256SUMS" "$asset") || die "missing manifest entry: $asset"
-	launcher="$cache/launcher/kame"
-	if [ -x "$launcher" ]; then
-		verify "$launcher" "$hex" || die "checksum mismatch: cached $asset"
-		return 0
-	fi
-	[ "${KAME_NO_DOWNLOAD:-0}" != "1" ] || die "missing cached launcher (download disabled)"
-	staging="$cache/launcher/.kame.$$"
-	rm -f "$staging"
-	mkdir -p "$cache/launcher"
-	note "fetching $asset"
-	fetch "${release_base}${asset}" "$staging"
-	verify "$staging" "$hex" || {
-		rm -f "$staging"
-		die "checksum mismatch: $asset"
-	}
-	chmod +x "$staging"
-	mv -f "$staging" "$launcher"
-}
-
 ape_host() {
 	kame_os=$(uname -s 2>/dev/null || true)
 	kame_arch=$(uname -m 2>/dev/null || true)
@@ -379,42 +333,8 @@ select_backend() {
 	printf '%s' "$backend"
 }
 
-if [ "${1:-}" = "init" ]; then
-	[ "$#" -eq 1 ] || die "usage: kame init"
-	trap release_lock EXIT INT TERM
-	acquire_lock
-	install_bootstrap_template
-	release_lock
-	trap - EXIT INT TERM
-	template_tmp=".Makefile.bootstrap.tmp.$$"
-	(umask 077; set -C; : >"$template_tmp") 2>/dev/null || die "cannot stage Makefile.bootstrap"
-	while IFS= read -r line || [ -n "$line" ]; do
-		case $line in
-		'KAME_VERSION ?= '*) printf 'KAME_VERSION ?= %s\n' "$version" ;;
-		*) printf '%s\n' "$line" ;;
-		esac
-	done <"$cache/Makefile.bootstrap" >"$template_tmp"
-	chmod 644 "$template_tmp"
-	if ln "$template_tmp" Makefile.bootstrap 2>/dev/null; then
-		rm -f "$template_tmp"
-		printf 'Created Makefile.bootstrap for Kame %s. Use make -f Makefile.bootstrap [targets].\n' "$version"
-		exit 0
-	fi
-	rm -f "$template_tmp"
-	die "refusing to overwrite Makefile.bootstrap"
-fi
-
 trap release_lock EXIT INT TERM
 acquire_lock
-if [ "$latest_channel" = "1" ] && [ "$KAME_STAMP" != "$version" ]; then
-	install_launcher
-	updated_launcher="$cache/launcher/kame"
-	KAME_VERSION=$version
-	export KAME_VERSION
-	release_lock
-	trap - EXIT INT TERM
-	exec "$updated_launcher" "$@"
-fi
 backend=$(select_backend)
 case $backend in
 ape)
@@ -429,6 +349,11 @@ wasm)
 	install_wasm
 	js=$(js_runtime)
 	wscript=$cache/wasm/kame.js
+	# The release JS is ESM, including on Node 18 and inside CommonJS projects.
+	printf '{"type":"module"}\n' >"$cache/wasm/.package.json.$$"
+	mv -f "$cache/wasm/.package.json.$$" "$cache/wasm/package.json"
+	KAME_VERSION=$version
+	export KAME_VERSION
 	release_lock
 	trap - EXIT INT TERM
 	exec "$js" "$wscript" "$@"

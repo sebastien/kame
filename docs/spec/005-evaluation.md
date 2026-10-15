@@ -301,7 +301,8 @@ An operation registry entry contains:
 The evaluator validates arity and capability before calling an operation.
 Operation failures attach the current expression and call frames.
 
-Pattern `replace` has staged operand evaluation (`014-patterns.md`): evaluate
+Pattern `sub`/`replace` is an exception to eager operand evaluation
+(`014-patterns.md`): evaluate
 the match operand, retain the replacement expression without evaluating it,
 and evaluate that expression in a capture child scope only after a successful
 subject match. A two-argument call retains the expression and enclosing lexical

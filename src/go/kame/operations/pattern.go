@@ -202,7 +202,7 @@ func replaceApply(c *eval.Context, state *replaceState, subject core.Value) eval
 	return c.InvalidOperation("replace subject expects string, list of strings, or nil; got " + core.KindName(subject.Kind))
 }
 
-// replaceOne expands one subject; regex-replace alone drops nonmatches.
+// replaceOne expands one subject; resub alone drops nonmatches.
 func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Result {
 	matched := state.match.MatchText(c.Run, subject)
 	if matched.Limited {

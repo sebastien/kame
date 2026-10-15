@@ -226,13 +226,13 @@ try {
     assert.equal(readFileSync(join(directory, 'argv.txt'), 'utf8'), '<@(missing) two words><*.c><$(touch injected)><>');
     assert.equal(existsSync(join(directory, 'injected')), false);
   } finally { await typedArgv.dispose(); }
-  assert.equal(JSON.parse(await answer.evaluate('(shell! "pwd")', { cwd: directory, grants: [{ capability: 'run', names: [] }] })).trim(), directory);
+  assert.equal(JSON.parse(await answer.evaluate('(sh! "pwd")', { cwd: directory, grants: [{ capability: 'run', names: [] }] })).trim(), directory);
   for (const cleanup of ['abort', 'program', 'owner']) {
     const owner = await Kame.create();
     const retained = await owner.compile('answer = 42\n');
     const controller = new AbortController();
     const filename = join(directory, `${cleanup}.pid`);
-    const running = retained.evaluate(`(shell! "sleep 30 & echo $$ $! > ${filename}; wait")`, {
+    const running = retained.evaluate(`(sh! "sleep 30 & echo $$ $! > ${filename}; wait")`, {
       cwd: directory, grants: [{ capability: 'run', names: [] }], signal: controller.signal,
     });
     const rejected = assert.rejects(running, (error) => error.code === 'EXEC_CANCELLED');

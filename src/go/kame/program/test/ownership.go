@@ -100,7 +100,7 @@ func TestForwardedProcessCompletionRetiresDisplay(t *testing.T) {
 	defer registry.Free()
 	operations.Register(registry)
 	for mode := 0; mode < 2; mode++ {
-		parsed := script.Parse(a, "pending.kmk", "value = (shell! \"printf ok\")\n")
+		parsed := script.Parse(a, "pending.kmk", "value = (sh! \"printf ok\")\n")
 		compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), ForwardRequests: true, Grants: []eval.Grant{{Capability: eval.Run}}})
 		if compiled.Program == nil {
 			compiled.Free(a)

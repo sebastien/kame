@@ -35,10 +35,32 @@ kame do run --lang expr -c '(join " " ["hello" "world"])'
 # "hello world"
 ```
 
-A release ships a standalone `kame.com` Actually Portable Executable that runs
-the full native CLI with no Node, no WASM runtime and no `make`. Provision it
-through the launcher (`bin/kame`) or the bootstrap `Makefile`, or build it
-directly from a checkout that has no working `make`:
+A release ships just three runtime files plus verification metadata:
+
+- `kame.com`: standalone Actually Portable Executable, no Node or `make` needed.
+  On supported Unix hosts, run `chmod +x kame.com` then `./kame.com --help`.
+  On Windows, rename it to `kame.exe` and run `.\kame.exe --help`.
+- `kame.js` and `kame.wasm`: download both into the same directory, rename
+  `kame.js` to `kame.mjs`, then run `node ./kame.mjs --help` with Node.js 18+.
+  Renaming makes Node recognize the ES module without needing a package.json.
+  The CLI loads the adjacent WASM module. Use this backend where APE is
+  unsupported, including OpenBSD 7.5+.
+
+Or let npm fetch and run the WASM pair:
+
+```sh
+npm x --yes @ssebastien/kame@0.2.3 -- --help
+```
+
+Replace the version with the desired release and `--help` with your arguments.
+Homebrew and Scoop definitions are kept in [`etc/`](etc/README.md), not release
+attachments. The shell launcher and bootstrap template remain source-tree
+helpers; they are no longer shipped as release assets. `bin/kame` downloads
+only verified runtime assets, including when `KAME_VERSION=latest`; it does not
+update itself. `kame init` is retired: copy `Makefile.bootstrap` from a checkout
+and configure a trusted verification key if you need make delegation.
+
+Build the APE directly from a checkout that has no working `make`:
 
 ```sh
 src/sh/build-ape.sh            # writes dist/kame.com

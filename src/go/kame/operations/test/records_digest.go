@@ -17,14 +17,14 @@ func TestRecordOperationsAndKindPredicates(t *testing.T) {
 	p := eval.Compile(a, engine, parsed, registry)
 	texts := []string{
 		`(eq (items [z: 1 a: [inner: [2 :nil]]]) [[key: "z" value: 1] [key: "a" value: [inner: [2 :nil]]]])`,
-		`(eq (items (set-field "z" 3 [z: 1 a: 2])) [[key: "z" value: 3] [key: "a" value: 2]])`,
-		`(eq (items (set-field "a" :nil [z: 1])) [[key: "z" value: 1] [key: "a" value: :nil]])`,
+		`(eq (items (set "z" 3 [z: 1 a: 2])) [[key: "z" value: 3] [key: "a" value: 2]])`,
+		`(eq (items (set "a" :nil [z: 1])) [[key: "z" value: 1] [key: "a" value: :nil]])`,
 		`(eq (merge) (parse-json "{}"))`,
 		`(eq (items (merge [z: [one: 1] a: 2] [z: [two: 2] b: 3])) [[key: "z" value: [two: 2]] [key: "a" value: 2] [key: "b" value: 3]])`,
 		`(eq (apply (get "value" (first (items [f: ([x] (str (join " " x) "!"))]))) ["ok"]) "ok!")`,
-		`(eq (apply (get "f" (set-field "f" ([x] (str (join " " x) "!")) [f: ([x] x)])) ["ok"]) "ok!")`,
+		`(eq (apply (get "f" (set "f" ([x] (str (join " " x) "!")) [f: ([x] x)])) ["ok"]) "ok!")`,
 		`(eq (apply (get "f" (merge [f: ([x] x)] [f: ([x] (str (join " " x) "!"))])) ["ok"]) "ok!")`,
-		`(eq (apply (get "f" (let [n 42] (set-field "f" ([x] n) [old: ([x] x)]))) []) 42)`,
+		`(eq (apply (get "f" (let [n 42] (set "f" ([x] n) [old: ([x] x)]))) []) 42)`,
 		`(record? (parse-json "{}"))`, `(list? [])`, `(string? "")`,
 		`(not (record? []))`, `(not (list? :nil))`, `(not (string? "{x:*}"))`,
 		`(not (record? [([x] x)]))`, `(not (string? [f: ([x] x)]))`,
@@ -34,7 +34,7 @@ func TestRecordOperationsAndKindPredicates(t *testing.T) {
 		if result.Diagnostic.Code != "" || result.Value.Kind != core.Bool || !result.Value.Bool { t.Error("record/predicate check failed: "+texts[i]) }
 		result.Free(a)
 	}
-	invalid := []string{`(items [([x] x)])`, `(set-field ([x] x) 3 [f: ([x] x)])`, `(merge [f: ([x] x)] [([x] x)])`, `(digest "sha1" [f: ([x] x)])`}
+	invalid := []string{`(items [([x] x)])`, `(set ([x] x) 3 [f: ([x] x)])`, `(merge [f: ([x] x)] [([x] x)])`, `(digest "sha1" [f: ([x] x)])`}
 	for i := range invalid {
 		result := evaluate(t, p, invalid[i])
 		if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("invalid native record/digest argument accepted") }

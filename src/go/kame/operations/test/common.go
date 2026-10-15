@@ -42,7 +42,7 @@ func TestRejectedArgumentCallableOwnership(t *testing.T) {
 		"(match? {*} [f: [([x] x)]])",
 		"((match? {*}) [f: [([x] x)]])",
 		"(replace ./a/{name} \"b\" [[f: ([x] x)]])",
-		"(regex-replace ./a/{name} \"b\" [[f: ([x] x)]])",
+		"(resub ./a/{name} \"b\" [[f: ([x] x)]])",
 		"(capture 0 [captures: ([x] x)])",
 		"(capture \"x\" [named: [([x] x)]])",
 		"(render [f: [([x] x)]] \"unknown\" \"text\")",

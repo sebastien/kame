@@ -451,19 +451,23 @@ func opEnv(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	return request(c, host.RequestEnvironment, core.NewString(c.Run, v[0].Text))
 }
-func opShell(c *eval.Context, s any, v []core.Value) eval.Result {
+func opSh(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	command := len(v)-1
 	if c.Phase != eval.EvaluatePhase {
 		c.MarkPhaseInvalid()
 		discardArgCallables(c, v)
-		return failure("PHASE_INVALID", "shell is invalid outside evaluation")
+		return failure("PHASE_INVALID", "sh! is invalid outside evaluation")
 	}
 	if v[command].Kind != core.String {
 		return invalidArgument(c, v, command, "string")
 	}
 	if len(v) == 2 && v[0].Kind != core.Record {
 		return invalidArgument(c, v, 0, "record")
+	}
+	if len(v) == 2 && len(v[0].Record) != 0 {
+		discardArgCallables(c, v)
+		return c.InvalidOperation("options are not supported; omit OPTIONS or use an empty record")
 	}
 	if c.Program != nil && c.Program.DryRun {
 		return eval.Result{Value: core.NewString(c.Run, "")}

@@ -235,7 +235,7 @@ missing output still require execution. Rendering may establish a new dependency
 set, whose current values and output proof must be validated before reuse.
 `always` and `--force` execute.
 
-Operations that cannot be deferred, including collected `shell!`, are invalid in
+Operations that cannot be deferred, including collected `sh!`, are invalid in
 planning and direct build-template rendering and return `PHASE_INVALID`.
 Demanded lazy values and Kash recipe expressions evaluate in their runtime
 phase, where collected shell calls may execute with the target environment and

@@ -24,7 +24,7 @@ Usage:
   Reruns of a published GitHub release retry only missing npm publication.
 
   --repo OWNER/REPO   publish to another repository (default: current)
-  --notes-file FILE   use FILE as release notes instead of generated notes
+  --notes-file FILE   use FILE instead of generated changes; usage is always added
   -h, --help          show this help
 USAGE
 }
@@ -36,6 +36,7 @@ tag="v$version"
 release_dir=$root/dist/release
 repo_args=()
 notes_args=(--generate-notes)
+notes_file=""
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -46,7 +47,8 @@ while [ $# -gt 0 ]; do
 		;;
 	--notes-file)
 		[ $# -ge 2 ] && [ -f "$2" ] || { printf 'release: --notes-file requires an existing file\n' >&2; exit 2; }
-		notes_args=(--notes-file "$(CDPATH='' cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")")
+		notes_file="$(CDPATH='' cd -- "$(dirname -- "$2")" && pwd)/$(basename -- "$2")"
+		notes_args=()
 		shift 2
 		;;
 	-h | --help)
@@ -199,7 +201,7 @@ fi
 
 printf 'release: staging %s (revision %s)\n' "$tag" "$revision"
 
-# dist-release stages and signs every asset and requires the full native set.
+# dist-release stages only the APE, WASM pair and verification metadata.
 make -C "$root" dist-release \
 	KAME_RELEASE_PUBLIC_KEY="$public_key" \
 	KAME_RELEASE_SIGNING_KEY="$signing_key" \
@@ -210,15 +212,53 @@ make -C "$root" dist-release \
 	exit 1
 }
 
-# GitHub release assets have flat filenames, including the stamped launcher.
+# GitHub release assets have flat filenames.
 assets=()
 while IFS= read -r asset; do
 	assets+=("$asset")
 done < <(find "$release_dir" -type f | sort)
 
 printf 'release: creating draft release %s\n' "$tag"
+notes=$(
+	if [ -n "$notes_file" ]; then
+		cat "$notes_file"
+		printf '\n\n'
+	fi
+	cat <<EOF
+## Downloads and usage
+
+- **kame.com** — standalone Cosmopolitan/APE native CLI. On supported Unix hosts:
+  \`chmod +x kame.com\`, then \`./kame.com --help\`. On Windows, rename it to
+  \`kame.exe\` and run \`.\\kame.exe --help\`; Node.js is not required.
+- **kame.js + kame.wasm** — JavaScript CLI and its WebAssembly runtime.
+  Download **both into the same directory**. For Node.js 18+, rename
+  \`kame.js\` to \`kame.mjs\`, then run \`node ./kame.mjs --help\`.
+  It is an ES module: in a directory with \`"type": "module"\` in package.json,
+  \`node ./kame.js --help\` also works without renaming. The JS file loads the
+  adjacent WASM module; neither file is a standalone native executable.
+- **VERSION** — release version; **PROVENANCE.json** — source revision and
+  asset digests; **SHA256SUMS** — checksums; **SHA256SUMS.sig** — Ed25519
+  signature of the checksum file. Verify the signature with a trusted release
+  public key before trusting the checksums, then run \`sha256sum -c SHA256SUMS\`.
+
+### Run the WASM CLI through npm
+
+\`npm x --yes $package_name@$version -- --help\`
+
+npm fetches both the JavaScript wrapper and WASM runtime. Replace \`--help\`
+with your Kame arguments. For a permanent install:
+\`npm install --global $package_name@$version\`, then \`kame --help\`.
+
+The APE works on supported Linux, macOS, Windows and BSD hosts, not every
+OS/version. In particular, Cosmopolitan 4.0.2 is incompatible with OpenBSD
+7.5+; use the Node/WASM pair there.
+Homebrew and Scoop definitions live in [etc/](https://github.com/$repo_slug/tree/$tag/etc),
+not in release attachments. There are no separate per-platform downloads or
+shell installer assets in this release.
+EOF
+)
 # ${arr[@]+...} keeps empty-array expansion safe under `set -u` on bash < 4.4.
-gh release create "$tag" --draft --target "$revision" --title "Kame $version" ${notes_args[@]+"${notes_args[@]}"} ${repo_args[@]+"${repo_args[@]}"}
+gh release create "$tag" --draft --target "$revision" --title "Kame $version" --notes "$notes" ${notes_args[@]+"${notes_args[@]}"} ${repo_args[@]+"${repo_args[@]}"}
 gh release upload "$tag" ${assets[@]+"${assets[@]}"} ${repo_args[@]+"${repo_args[@]}"}
 # Verify every signed manifest asset is present before publishing.
 asset_names=$(gh release view "$tag" --json assets --jq '.assets[].name' ${repo_args[@]+"${repo_args[@]}"})

@@ -14,9 +14,12 @@ def sha256(path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", required=True, type=pathlib.Path)
+    parser.add_argument("--output-directory", required=True, type=pathlib.Path)
     parser.add_argument("--version", required=True)
     args = parser.parse_args()
     root = args.directory
+    output = args.output_directory
+    output.mkdir(parents=True, exist_ok=True)
     version = args.version
     base = f"https://github.com/sebastien/kame/releases/download/v{version}"
 
@@ -36,20 +39,17 @@ def main():
   end
 end
 '''
-    # Release assets have one flat asset name. Keep the formula at the release
-    # root so its download URL is stable; a tap publisher can copy it into its
-    # own Formula/kame.rb path.
-    (root / "kame.rb").write_text(formula, encoding="utf-8")
+    (output / "kame.rb").write_text(formula, encoding="utf-8")
 
     scoop = {
         "version": version,
         "description": "Build tool for projects described with Kame",
         "homepage": "https://github.com/sebastien/kame",
-        "url": f"{base}/kame-windows-x64.exe",
-        "hash": sha256(root / "kame-windows-x64.exe"),
-        "bin": [["kame-windows-x64.exe", "kame"]],
+        "url": f"{base}/kame.com#/kame.exe",
+        "hash": sha256(root / "kame.com"),
+        "bin": [["kame.exe", "kame"]],
     }
-    (root / "kame.json").write_text(
+    (output / "kame.json").write_text(
         json.dumps(scoop, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
 

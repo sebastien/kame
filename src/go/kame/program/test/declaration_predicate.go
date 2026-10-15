@@ -7,7 +7,7 @@ import (
 
 func TestDeclarationPredicateUsesLiteralOverridesAndLazyDefinitions(t *testing.T) {
  a := t.Allocator()
- text := "mode ?= \"debug\"\nmode ?= (shell! \"never executed\")\n(selected value) = (eq mode value)\nunused = (read \"never read\")\n"
+ text := "mode ?= \"debug\"\nmode ?= (sh! \"never executed\")\n(selected value) = (eq mode value)\nunused = (read \"never read\")\n"
  result := program.DeclarationPredicate(a, "conditions.kmk", text, "(selected \"release\")", []string{"mode=first", "future=later", "mode=release"}, []string{"KAME_mode=environment"})
  if result.Diagnostic.Code != "" || !result.Selected { t.Error("override predicate: "+result.Diagnostic.Code+" "+result.Diagnostic.Message) }
  result.Diagnostic.Free(a)
@@ -22,7 +22,7 @@ func TestDeclarationPredicateUsesLiteralOverridesAndLazyDefinitions(t *testing.T
 func TestDeclarationPredicateRejectsCyclesEffectsAndNonBooleanValues(t *testing.T) {
  a := t.Allocator()
  prefixes := []string{"a = b\nb = a\n", "", "", "", "", ""}
- predicates := []string{"a", "42", "(shell! \"never execute\")", "(out! \"never publish\")", "(read \"never read\")", "(eq missing 1)"}
+ predicates := []string{"a", "42", "(sh! \"never execute\")", "(out! \"never publish\")", "(read \"never read\")", "(eq missing 1)"}
  codes := []string{"DEP_CYCLE", "EXPR_INVALID", "CAP_DENIED", "PHASE_INVALID", "CAP_DENIED", "REF_MISSING"}
   for i := range prefixes {
   result := program.DeclarationPredicate(a, "conditions.kmk", prefixes[i], predicates[i], nil, nil)

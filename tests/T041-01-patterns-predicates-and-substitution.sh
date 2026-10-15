@@ -23,7 +23,7 @@ for backend in native wasm; do
 		'(sub "a" "b" "banana")|"bbnbnb"' \
 		'(sub {*}.c "x" [])|[]' \
 		'(sub {*}.c "x" :nil)|:nil' \
-		'(regex-replace {name:~[a-z]+} "x" "42")|:nil'; do
+		'(resub {name:~[a-z]+} "x" "42")|:nil'; do
 		"${runner[@]}" do run --lang expr -c "${sample%|*}" >"$TMPDIR/value" 2>"$TMPDIR/error"
 		if [ "$(cat "$TMPDIR/value")" = "${sample##*|}" ] && [ ! -s "$TMPDIR/error" ]; then test-ok "$backend ${sample%|*}"; else test-fail "$backend ${sample%|*}: $(cat "$TMPDIR/value")"; fi
 	done
@@ -31,6 +31,11 @@ for backend in native wasm; do
 		status=0
 		"${runner[@]}" do run --lang expr -c "$expression" >"$TMPDIR/value" 2>"$TMPDIR/error" || status=$?
 		if [ "$status" = 1 ] && grep -Eq 'EXPR_INVALID|PAT_INVALID' "$TMPDIR/error"; then test-ok "$backend rejects $expression"; else test-fail "$backend accepted $expression"; fi
+	done
+	for expression in '(sub "a" "b")' '(replace "a" "b")' '(sub "a" 1 "a")' '(replace "a" "b" :nil)' '(sub "a" {*} "a")'; do
+		status=0
+		"${runner[@]}" do run --lang expr -c "$expression" >"$TMPDIR/value" 2>"$TMPDIR/error" || status=$?
+		if [ "$status" = 1 ] && grep -Fq EXPR_INVALID "$TMPDIR/error"; then test-ok "$backend rejects literal $expression"; else test-fail "$backend accepted literal $expression"; fi
 	done
 done
 test-end

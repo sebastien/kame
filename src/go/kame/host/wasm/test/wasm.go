@@ -1178,7 +1178,7 @@ func TestRuntimeYieldsHostRequestAndResumes(t *testing.T) {
 	}
 	runtime := started.Runtime
 	defer runtime.Free()
-	request := runtime.RequestExpression("(shell! \"echo wasm\")")
+	request := runtime.RequestExpression("(sh! \"echo wasm\")")
 	if request.Code != "" {
 		t.Fatalf("request expression failed: %s", request.Code)
 		return
@@ -1266,7 +1266,7 @@ func TestRuntimeCancellationIgnoresLateCompletion(t *testing.T) {
 	}
 	runtime := started.Runtime
 	defer runtime.Free()
-	if request := runtime.RequestExpression("(shell! \"echo wasm\")"); request.Code != "" {
+	if request := runtime.RequestExpression("(sh! \"echo wasm\")"); request.Code != "" {
 		t.Fatalf("request expression failed: %s", request.Code)
 		return
 	}

@@ -114,7 +114,7 @@ const readRun = run(`result = (read "${process.env.KAME_READ_PATH}")`, (handle, 
 if (readRun.text !== 'forwarded-read') throw new Error('forwarded read value was wrong');
 exports.kame_wasm_instance_free(readRun.handle);
 
-const shellRun = run('result = (shell! "printf forwarded-shell")', (handle, request) => {
+const shellRun = run('result = (sh! "printf forwarded-shell")', (handle, request) => {
   if (requestKind() !== 3) throw new Error('process kind was not 3');
   const child = spawnSync('/bin/sh', ['-c', payloadText()], { encoding: 'utf8' });
   if (child.status !== 0) throw new Error('shell failed');

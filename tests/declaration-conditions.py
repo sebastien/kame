@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory() as temporary:
         (project / 'invalid.kmk').write_text(text)
         run(['-f', 'invalid.kmk'], code='PARSE_ERR')
     # Predicates have no host authority; registration failures precede effects.
-    for predicate, code in [('(shell! "touch forbidden")', 'CAP_DENIED'), ('(read "forbidden")', 'CAP_DENIED'), ('(out! "forbidden")', 'PHASE_INVALID')]:
+    for predicate, code in [('(sh! "touch forbidden")', 'CAP_DENIED'), ('(read "forbidden")', 'CAP_DENIED'), ('(out! "forbidden")', 'PHASE_INVALID')]:
         (project / 'unsafe.kmk').write_text(f'(if {predicate} (include ./included.kmk))\nchosen :\n\ttouch should-not-run\n')
         result = run(['-f', 'unsafe.kmk', 'chosen'], code=code)
         assert 'unsafe.kmk:1:' in result.stderr, result.stderr

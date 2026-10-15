@@ -22,7 +22,7 @@ func TestSubjectLastOperationsAndPipes(t *testing.T) {
 		`(eq (get "x" 42 [y: 0]) ((nop [y: 0]) | get "x" 42))`,
 		`(eq ((nop [x: :nil]) | get "x" 42) :nil)`,
 		`(eq (get "missing" [default: 1] [other: 2]) [default: 1])`,
-		`(eq ((nop [x: 1]) | set-field "x" 2 | get "x") 2)`,
+		`(eq ((nop [x: 1]) | set "x" 2 | get "x") 2)`,
 		`(eq (slice 1 "aéz") ("aéz" | slice 1))`,
 		`(eq (slice 1 -1 [0 1 2 3]) ((nop [0 1 2 3]) | slice 1 -1))`,
 		`(eq ("a-b-c" | split "-" | join ":") "a:b:c")`,
@@ -65,7 +65,7 @@ func TestSubjectLastOperationsAndPipes(t *testing.T) {
 	}
 	invalid := []string{
 		`(nth [1] 0)`, `(get [x: 1] "x")`, `(get [x: 1] "x" 7)`,
-		`(set-field [x: 1] "x" 2)`, `(slice [1] 0)`, `(slice [1] 0 1)`,
+		`(set [x: 1] "x" 2)`, `(slice [1] 0)`, `(slice [1] 0 1)`,
 		`(join ["a"] "-")`, `(map [1] ([x] x))`, `(flatmap [1] ([x] [x]))`,
 		`(flatmap "first" ([x] [x]))`,
 		`(filter [1] ([x] :true))`, `(filter-out [1] ([x] :true))`,

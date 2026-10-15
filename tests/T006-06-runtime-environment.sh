@@ -74,19 +74,19 @@ definition-generated-root : ; env "MODE=generated"
 	printf %s @(GENERATED) > definition-generated-log
 ./definition-input :
 	printf %s "$MODE" > @>
-COLLECTED = (shell! "printf %s \"$MODE\"; printf captured-error >&2")
+COLLECTED = (sh! "printf %s \"$MODE\"; printf captured-error >&2")
 COLLECTED_VALUE = (text (get "stdout" COLLECTED))
 collected-root : collected-cached ; env "MODE=debug"
 collected-release-root : collected-cached ; env "MODE=release"
 task collected-cached :
 	printf %s @(COLLECTED_VALUE) > collected-log; printf x >> collected-runs
 kash-collected : ; [shell: kash env: [MODE: "kash"]]
-	value = (shell! "printf %s \"$MODE\"")
+	value = (sh! "printf %s \"$MODE\"")
 	printf %s (text (get "stdout" value))
 collected-denied : ; [shell: kash env: [MODE: "secret"]]
-	value = (shell! "touch forbidden-collected")
+	value = (sh! "touch forbidden-collected")
 	(out! (get "status" value))
-BAD = (shell! "touch forbidden-phase")
+BAD = (sh! "touch forbidden-phase")
 definition-phase : @(BAD) ; env "MODE=debug"
 CYCLE = (str CYCLE)
 definition-cycle :

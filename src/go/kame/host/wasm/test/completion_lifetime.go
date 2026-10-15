@@ -29,14 +29,17 @@ func TestRuntimeAcceptsOwnedFailureAfterInputReuse(t *testing.T) {
 		t.Fatal("expression did not yield")
 		return
 	}
-	code := []byte("CUSTOM_FAIL")
-	message := []byte("original host message")
-	d := diagnostic.Diagnostic{Severity: diagnostic.Error, Code: string(code), Message: string(message)}
+	// So's []byte(string) aliases the string; allocate writable input buffers.
+	var code [len("CUSTOM_FAIL")]byte
+	var message [len("original host message")]byte
+	copy(code[:], []byte("CUSTOM_FAIL"))
+	copy(message[:], []byte("original host message"))
+	d := diagnostic.Diagnostic{Severity: diagnostic.Error, Code: string(code[:]), Message: string(message[:])}
 	// Mirrors the ABI's allocator-owned transfer, not a borrowed Runtime input.
 	r.Complete(next.Request, core.Value{}, d.Clone(a))
 	next.Request.Free(a)
-	clear(code)
-	clear(message)
+	clear(code[:])
+	clear(message[:])
 	for i := 0; i < 10; i++ {
 		_ = r.Step()
 		result := r.Result()

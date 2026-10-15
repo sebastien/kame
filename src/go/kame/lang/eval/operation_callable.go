@@ -13,6 +13,10 @@ func (p *Program) newOperationCallable(name string) core.Value {
 	}
 	f := mem.Alloc[Function](p.Alloc)
 	f.Kind, f.Owner, f.OperationName = FunctionOperation, p, name
+	operation := p.Registry.lookup(name)
+	if operation != nil && operation.MinArity == operation.MaxArity {
+		f.Arity = operation.MinArity
+	}
 	p.OperationFunctions = slices.Append(p.Alloc, p.OperationFunctions, f)
 	return core.Value{Kind: core.Callable, Callable: f, CallableOwner: p, Text: f.OperationName}
 }

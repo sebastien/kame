@@ -211,7 +211,8 @@ Inspection commands reject execution-only flags and repeated single-source
 options. `cat` rejects watch/dry-run. Options may precede `tools check` and cache
 actions. `do cache clean -n` previews cache eviction without deleting records;
 it differs from ownership-aware `do clean -n`. `do help [--] COMMAND` accepts one
-topic only. Launcher-only `kame init --help` prints bootstrap usage without provisioning.
+topic only. The source launcher's retired `kame init` reports migration guidance
+without provisioning; copy `Makefile.bootstrap` from a checkout if needed.
 Runner dry-run works for pure km/expr/Kash as well as mixed rule sessions.
 
 ## Evaluate a standalone expression

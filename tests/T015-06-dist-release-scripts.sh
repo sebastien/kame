@@ -116,7 +116,7 @@ release\ upload*)
 	while [ "$#" -gt 0 ] && [ "$1" != --repo ]; do
 		[ -f "$1" ] || exit 1
 		name=${1##*/}
-		if [ "$MOCK_MODE" != missing_asset ] || [ "$name" != kame ]; then
+		if [ "$MOCK_MODE" != missing_asset ] || [ "$name" != kame.wasm ]; then
 			printf '%s\n' "$name" >>"$MOCK_ASSETS"
 		fi
 		shift
@@ -149,9 +149,11 @@ cat >"$mock_bin/make" <<'SH'
 set -eu
 printf 'make %s\n' "$*" >>"$MOCK_LOG"
 mkdir -p "$MOCK_ROOT/dist/release"
-printf 'launcher fixture\n' >"$MOCK_ROOT/dist/release/kame"
 cd "$MOCK_ROOT/dist/release"
-sha256sum kame >SHA256SUMS
+for name in kame.com kame.js kame.wasm VERSION PROVENANCE.json; do
+	printf 'fixture\n' >"$name"
+done
+sha256sum kame.com kame.js kame.wasm VERSION PROVENANCE.json >SHA256SUMS
 printf 'signature fixture\n' >SHA256SUMS.sig
 SH
 cat >"$mock_bin/npm" <<'SH'
@@ -285,11 +287,15 @@ else
 	test-fail "flag parsing: status=$status err=$(cat "$TMPDIR/err")"
 fi
 
-test-step "successful publication uploads a flat launcher to the selected repo"
+test-step "successful publication uploads minimal assets and explains usage"
 touch "$TMPDIR/verification.pem" "$TMPDIR/signing.pem"
 export KAME_RELEASE_PUBLIC_KEY="$TMPDIR/verification.pem" KAME_RELEASE_SIGNING_KEY="$TMPDIR/signing.pem"
 run_release --repo "$MOCK_REPO" --notes-file "$TMPDIR/notes"
-if [ "$status" = 0 ] && grep -qx kame "$MOCK_ASSETS" &&
+if [ "$status" = 0 ] && grep -qx kame.wasm "$MOCK_ASSETS" && ! grep -qx kame "$MOCK_ASSETS" &&
+	grep -q 'node ./kame.js --help' "$MOCK_LOG" &&
+	grep -q "npm x --yes $MOCK_PACKAGE@$MOCK_VERSION -- --help" "$MOCK_LOG" &&
+	grep -q 'release notes' "$MOCK_LOG" &&
+	! grep -q -- '--generate-notes' "$MOCK_LOG" &&
 	grep -q '^gh release edit .*--draft=false' "$MOCK_LOG" &&
 	grep -qx 'npm publish --access public --registry https://registry.npmjs.org/' "$MOCK_LOG" &&
 	! grep -q 'bin/kame\|PATCH' "$MOCK_LOG"; then
@@ -301,7 +307,7 @@ fi
 test-step "relative operator paths work when invoked outside the checkout"
 (cd "$TMPDIR" && KAME_RELEASE_PUBLIC_KEY=verification.pem KAME_RELEASE_SIGNING_KEY=signing.pem \
 	run_release --notes-file notes)
-if grep -q -- "--notes-file $TMPDIR/notes" "$MOCK_LOG" &&
+if grep -q 'release notes' "$MOCK_LOG" &&
 	grep -q "KAME_RELEASE_PUBLIC_KEY=$TMPDIR/verification.pem" "$MOCK_LOG" &&
 	grep -qx 'npm publish --access public --registry https://registry.npmjs.org/' "$MOCK_LOG"; then
 	test-ok "relative key and note paths remain relative to the caller"
@@ -309,11 +315,21 @@ else
 	test-fail "relative paths: err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
 fi
 
-test-step "failed creation and missing launcher never publish"
+test-step "generated change notes also include download instructions"
+run_release --repo "$MOCK_REPO"
+if [ "$status" = 0 ] && grep -q -- '--generate-notes' "$MOCK_LOG" &&
+	grep -q 'Download \*\*both into the same directory\*\*' "$MOCK_LOG" &&
+	grep -q "npm x --yes $MOCK_PACKAGE@$MOCK_VERSION -- --help" "$MOCK_LOG"; then
+	test-ok "default notes prepend versioned usage to generated changes"
+else
+	test-fail "default release notes: status=$status err=$(cat "$TMPDIR/err")"
+fi
+
+test-step "failed creation and missing runtime never publish"
 for mode in create_failure missing_asset; do
 	MOCK_MODE=$mode
 	run_release
-	if [ "$status" = 1 ] && ! grep -Eq '^(gh release edit|npm)' "$MOCK_LOG"; then
+	if [ "$status" = 1 ] && ! grep -Eq '^(gh release edit|npm (view|publish)) ' "$MOCK_LOG"; then
 		test-ok "$mode leaves publication blocked"
 	else
 		test-fail "$mode: status=$status err=$(cat "$TMPDIR/err")"

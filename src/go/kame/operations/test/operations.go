@@ -514,29 +514,29 @@ func TestRegexCaptureOperations(t *testing.T) {
 		t.Error("repeated named regex groups did not populate each positional slot")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~" "[a-z]+" "}")) (pattern (str "x{" "name" "}")) "demo")`)
+	result = evaluate(t, program, `(resub (pattern (str "{" "name:~" "[a-z]+" "}")) (pattern (str "x{" "name" "}")) "demo")`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "xdemo" {
-		t.Error("regex-replace did not expand a named capture")
+		t.Error("resub did not expand a named capture")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~[a-z]+}")) (pattern (str "x{" "name" "}")) ["demo" "42"])`)
+	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) (pattern (str "x{" "name" "}")) ["demo" "42"])`)
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 2 || result.Value.List[0].Kind != core.String || result.Value.List[0].Text != "xdemo" || result.Value.List[1].Kind != core.Nil {
-		t.Error("regex-replace did not map captures over a list")
+		t.Error("resub did not map captures over a list")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~[a-z]+}")) (pattern (str "x{" "missing" "}")) "demo")`)
+	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) (pattern (str "x{" "missing" "}")) "demo")`)
 	if result.Diagnostic.Code != "PAT_INVALID" {
-		t.Error("regex-replace accepted a missing capture reference")
+		t.Error("resub accepted a missing capture reference")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~[a-z]+}")) "x" :nil)`)
+	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) "x" :nil)`)
 	if result.Diagnostic.Code != "EXPR_INVALID" {
-		t.Error("regex-replace accepted a nil subject")
+		t.Error("resub accepted a nil subject")
 	}
 	result.Free(a)
-	result = evaluate(t, program, `(regex-replace (pattern (str "{" "name:~[a-z]+}")) "x" 42)`)
+	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) "x" 42)`)
 	if result.Diagnostic.Code != "EXPR_INVALID" {
-		t.Error("regex-replace accepted a non-string subject")
+		t.Error("resub accepted a non-string subject")
 	}
 	result.Free(a)
 	result = evaluate(t, program, `(regex-match (pattern (str "{" "~(ab|cd)+" "}")) "abcd")`)

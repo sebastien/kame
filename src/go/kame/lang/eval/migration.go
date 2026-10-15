@@ -12,7 +12,13 @@ func missingOperation(c *Context, name string, span source.Span, reference bool)
 		return failure(c.Run, code, span, "Kame cat was removed; use str for scalar text, join for collections, or json for serialization")
 	}
 	switch name {
-	case "write", "yield", "out", "err", "run", "pipe", "shell", "sh", "shellrun", "shell-template", "fail":
+	case "set-field":
+		return failure(c.Run, code, span, "operation `set-field` was renamed to `set`; use (set NAME VALUE RECORD)")
+	case "regex-replace":
+		return failure(c.Run, code, span, "operation `regex-replace` was renamed to `resub`")
+	case "shell", "shellrun", "shell!", "shellrun!":
+		return failure(c.Run, code, span, "operation `"+name+"` was renamed to `sh!`")
+	case "write", "yield", "out", "err", "run", "pipe", "sh", "shell-template", "fail":
 		return failure(c.Run, code, span, "operation `"+name+"` was renamed to `"+name+"!`; action names require an explicit ! suffix")
 	}
 	if reference { return failure(c.Run, code, span, "unknown reference: "+name) }
