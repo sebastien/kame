@@ -149,6 +149,8 @@ test-wasm: wasm-check
 	tests/T017-19-kash-recipes.sh
 	tests/T017-20-kash-context-environment.sh
 	tests/T017-21-kash-words.sh
+	tests/T017-22-kash-defer.sh
+	tests/T017-23-kash-operations.sh
 	tests/T011-04-diag-language-boundaries.sh
 	tests/T038-01-kash-direct-recipes.sh
 	tests/T038-02-lib-wildcard-kinds.sh

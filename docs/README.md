@@ -22,6 +22,7 @@ use an executable built from the matching sources.
 - [Build rules](skills/kame/ref/rules.md)
 - [Templates](skills/kame/ref/templates.md)
 - [Kash processes](skills/kame/ref/kash.md)
+- [Kash operational cookbook](kash-cookbook.md): argv, status policy, finite retry, scoped environments and deferred cleanup
 - [CLI](skills/kame/ref/cli.md)
 
 ## Integrate and contribute

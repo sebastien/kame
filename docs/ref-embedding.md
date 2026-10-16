@@ -133,6 +133,14 @@ Python has no host-request callback API.
 
 ## Cancellation, watches, and cleanup
 
+Kash `defer` actions run as part of invocation completion/finalization, retaining
+the original grants. Cancellation reaps user processes before executing cleanup;
+it is not remote rollback or a guarantee under SIGKILL/crash. See the
+[operational cookbook](kash-cookbook.md). Low-level WASM embedders must call
+the shared `kame_wasm_finalization_tick` driver and pump ordinary step/completion
+requests before freeing an interrupted instance (`kame_wasm_finalize_begin` is
+also available to Kash-only hosts). Freeing memory alone cannot execute cleanup.
+
 - JS operations accept `signal: controller.signal`; `controller.abort()` cancels
   work (`EXEC_CANCELLED`). Await `program.dispose()` or `kame.dispose()` in
   `finally`; both are idempotent and await owned cleanup. Later calls fail `DISPOSED`.

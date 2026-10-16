@@ -14,7 +14,12 @@ The invocation for these lessons is:
 kame do run ./01-values.kash
 kame do run ./02-pipelines.kash
 kame do run ./03-recovery.kash
+kame do run ./04-operations.kash
 ```
+
+`04-operations.kash` adds explicit status validation, finite retry and a temporary
+workspace with invocation-scoped `defer`. It is covered by `T017-23`; see the
+[operational cookbook](../../docs/kash-cookbook.md) for its contracts and limits.
 
 ## 1. Commands receive values
 

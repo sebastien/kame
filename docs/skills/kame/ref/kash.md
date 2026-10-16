@@ -240,13 +240,48 @@ scoped to the selected arm.
 - `&&`, `||`, shell subshell grouping, and single-quoted shell strings are not
   supported. Use Kash control statements or Kame special forms.
 
-Cancellation/process reaping is not filesystem or remote rollback. `if` and
-fallback handle recoverable process failure, not cancellation or capability
-denial; they are not general finalizers. A `clean` target is explicit work, not
-an automatic cleanup callback. Ownership-safe temporary files and stale artifact
-cleanup need a separate contract before adding structured cleanup syntax. See
-[SDK migration boundaries](../../../sdk-migration-boundaries.md) for concrete
-use cases and the division between language capabilities and SDK/vendor policy.
+### Deferred cleanup
+
+```kash
+created = $(mktemp -d ./workspace.XXXXXX)
+directory = (if (ends? "\n" created) (slice 0 -1 created) created)
+defer rm -rf $directory
+defer (out! "finishing\n")
+```
+
+`defer COMMAND` snapshots validated argv/setup/redirection operands now, without
+launching the graph or opening its output. `defer (EXPRESSION)` retains the
+expression and lexical scope and evaluates it during cleanup. Both register only
+when reached at runtime; dry-run does neither. Expressions keep normal laziness:
+an undemanded resource definition may first run during cleanup. Commands can
+demand it while snapshotting. Demanded top-level lazy values are retained through
+the invocation rather than recaptured by each statement.
+
+The enclosing recipe, constructed callable or top-level runner invocation owns a
+LIFO stack; branches do not create a cleanup lifetime. Normal exit joins user work
+first. Failure/cancellation cancels and reaps it first. Cleanup expressions also
+join async work they start. Deferred commands cannot end in `&` or use a direct
+fallback; for compound cleanup defer a call to an authored Kash callable.
+Terminal `?` still explicitly accepts unsuccessful exits.
+
+Kame's `(finally! BODY CLEANUP)` is an explicit value-language scope, not ambient
+Kash registration. Both use the shared finalization host driver; an enclosing
+Kash invocation runs its remaining `defer` actions after reached `finally!`
+scopes have unwound during shutdown.
+
+Cleanup gets a separate five-second stack budget, capped by tighter process
+limits. Try remaining actions after failure while budget remains. Cleanup failure
+fails otherwise successful work; an existing failure/cancellation stays primary.
+Finalization retains original grants. A forced second interruption, SIGKILL,
+crash or blocking custom host can prevent cleanup.
+
+Deferred `write!` executes during cleanup even in a failed recipe, not as a
+successful output-publication effect. `defer` does not establish ownership or make
+`>` atomic. Only remove freshly created private resources; don't infer ownership
+of shared paths. `if`/fallback
+are not finalizers, `do clean` is historical cleanup, and killing a process does
+not roll back remote operations. See the [operational cookbook](../../../kash-cookbook.md)
+and [SDK migration boundaries](../../../sdk-migration-boundaries.md).
 
 ## Run and inspect
 

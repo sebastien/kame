@@ -2032,7 +2032,7 @@ class Module {
     if (context.signal?.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
-    let failure;
+    let failure, primaryDiagnostic;
     try {
       const compiled = this.write(source);
       if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
@@ -2062,6 +2062,7 @@ class Module {
       return this.copyResult(instance);
     } catch (error) {
       failure = error;
+      primaryDiagnostic = lastDiagnostic;
       throw error;
     } finally {
       try {
@@ -2070,6 +2071,7 @@ class Module {
         if (failure && diagnostic) failure.diagnostics = [diagnostic];
       } finally {
         this.exports.kame_wasm_instance_free(instance);
+        if (failure) lastDiagnostic = primaryDiagnostic;
       }
     }
   }
@@ -2292,7 +2294,7 @@ class Module {
     if (externalSignal?.aborted) cancel();
     context.concurrent = true;
     context.signal = cancellation.signal;
-    let hostError;
+    let hostError, primaryDiagnostic;
     let targetStarted = false;
     let failure;
     try {
@@ -2332,6 +2334,7 @@ class Module {
       return { kind, bytes: this.copyResult(instance), events: context.events?.slice() ?? [] };
     } catch (error) {
       failure = error;
+      primaryDiagnostic = lastDiagnostic;
       throw error;
     } finally {
       try {
@@ -2347,6 +2350,7 @@ class Module {
           this.exports.kame_wasm_instance_free(instance);
         }
       } finally {
+        if (failure) lastDiagnostic = primaryDiagnostic;
         invocationDisposals.delete(disposal);
         disposed();
       }
@@ -2481,7 +2485,7 @@ class Module {
     invocationCancellations.add(cancellation);
     context.concurrent = true;
     context.signal = cancellation.signal;
-    let hostError;
+    let hostError, primaryError, primaryDiagnostic;
     try {
       if (this.exports.kame_wasm_source_compile(instance, 0, 0) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
       this.registerPlugins(instance, context);
@@ -2538,18 +2542,26 @@ class Module {
       return 0;
     } catch (error) {
       if (error.code === 'RECIPE_TIMEOUT') this.exports.kame_wasm_finalization_tick?.(instance, process.hrtime.bigint(), 2);
+      primaryError = error;
+      primaryDiagnostic = lastDiagnostic;
       if (inv.json && lastDiagnostic !== null) return 1;
       throw error;
     } finally {
+      cancellation.abort();
+      await Promise.all(pending);
       try {
-        cancellation.abort();
-        await Promise.all(pending);
-        await this.cleanupInstance(instance, context);
+        try {
+          const diagnostic = await this.cleanupInstance(instance, context);
+          if (diagnostic && primaryError) primaryError.diagnostics = [{ ...diagnostic, code: primaryError.code, message: primaryError.message }];
+          else if (diagnostic && !interruptedStatus) throw Object.assign(new Error(diagnostic.message), { code: diagnostic.code, diagnostics: [diagnostic] });
+        }
+        catch (error) { if (!primaryError && !interruptedStatus) throw error; reportWatchError(error); }
+      } finally {
         invocationCancellations.delete(cancellation);
         this.exports.kame_wasm_instance_free(instance);
-      } finally {
-        invocationDisposals.delete(disposal);
+        if (primaryError) lastDiagnostic = primaryDiagnostic;
         disposed();
+        invocationDisposals.delete(disposal);
       }
     }
   }

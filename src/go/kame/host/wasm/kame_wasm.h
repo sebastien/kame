@@ -42,6 +42,9 @@ uint32_t kame_wasm_register_plugins(uint64_t handle, uint32_t data, uint32_t len
 uint32_t kame_wasm_session_work_count(uint64_t handle);
 uint32_t kame_wasm_session_work_kind(uint64_t handle, uint32_t index);
 uint32_t kame_wasm_session_work_begin(uint64_t handle, uint32_t index);
+/* Cancel active execution, then pump step/completion until finalization is done.
+ * Cleanup retains original grants. Free alone cannot service deferred actions. */
+uint32_t kame_wasm_finalize_begin(uint64_t handle);
 
 /* Request kinds reported by kame_wasm_next_request_kind. Filesystem
  * operations that the engine carries as one read request are promoted to

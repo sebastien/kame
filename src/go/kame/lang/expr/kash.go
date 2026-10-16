@@ -395,7 +395,7 @@ func commandWordNeedsQuotes(e *Expr) bool {
 		part := e.Parts[i]
 		if part.Expr != nil { continue }
 		// Keep grammar-sensitive literals quoted even outside executable position.
-		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case") { return true }
+		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer") { return true }
 		if i == 0 && len(part.Text) != 0 && (part.Text[0] == ':' || part.Text[0] == '#') { return true }
 		for j := 0; j < len(part.Text); j++ {
 			c := part.Text[j]

@@ -671,6 +671,15 @@ uint32_t kame_wasm_session_work_begin(uint64_t handle, uint32_t index) {
   return KAME_WASM_OK;
 }
 
+__attribute__((export_name("kame_wasm_finalize_begin")))
+uint32_t kame_wasm_finalize_begin(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (!instance) return KAME_WASM_HANDLE_INVALID;
+  if (!instance->runtime) return KAME_WASM_STATE_INVALID;
+  return wasm_Runtime_BeginFinalization(instance->runtime) ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
 /* Set the working directory the build runtime canonicalizes against. Must be
  * called before kame_wasm_prepare, kame_wasm_target_begin, or kame_wasm_plan. */
 uint32_t kame_wasm_set_directory(uint64_t handle, uint32_t directory, uint32_t directory_len) {

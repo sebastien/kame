@@ -47,6 +47,8 @@ type Session struct {
 	reported bool
 	active int
 	JoinExpression expr.Expr
+	Deferred *eval.DeferScope
+	retained []*core.Root
 }
 
 // JSON sessions share the build event encoder, including binary-safe streams.
@@ -105,6 +107,8 @@ func (s *SessionCompile) Free(a mem.Allocator) {
 func (s *Session) Free() {
 	if s == nil { return }
 	a := s.Program.Alloc
+	for i := range s.retained { s.Program.Engine.Release(s.retained[i]) }
+	slices.Free(a, s.retained)
 	freeSessionWork(a, s.Work)
 	s.Program.Free()
 	mem.Free(a, s)
@@ -260,6 +264,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		if len(result.Diagnostics) == 0 {
 			s := mem.Alloc[Session](a)
 			s.Program, s.Work = p, work
+			s.Deferred = p.Eval.NewDeferScope(0, 0)
 			result.Session = s
 		} else { p.Free(); freeSessionWork(a, work) }
 	}
@@ -271,7 +276,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 	return result
 }
 
-type statementState struct { Program *Program; Expression *expr.Expr; Raw bool }
+type statementState struct { Program *Program; Expression *expr.Expr; Raw bool; Deferred *eval.DeferScope }
 
 func freeSessionWork(a mem.Allocator, work []SessionWork) {
 	for i := range work { mem.FreeString(a, work[i].Target) }
@@ -285,6 +290,7 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	state := c.Context().(*statementState)
 	p := state.Program
 	context := eval.Context{Program: p.Eval, Engine: c, Run: c.Allocator(), Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: true, DependencyObserver: p.Eval.DefinitionDependencyObserver, ResolverState: p.Eval.DefinitionDependencyState}
+	context.Deferred = state.Deferred
 	r := p.Eval.EvaluateWith(state.Expression, &context)
 	if !r.Waiting && r.Diagnostic.Code == "" && p.Eval.DefinitionEffectSink != nil {
 		for i := range context.Effects { p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, context.Effects[i]) }
@@ -310,6 +316,7 @@ func (s *Session) Start(index int) HandleStart {
 	p := s.Program
 	state := mem.Alloc[statementState](p.Alloc)
 	state.Program, state.Expression, state.Raw = p, w.Expression, w.Raw
+	state.Deferred = s.Deferred
 	var buffer [strconv.MaxIntBase10Len]byte
 	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<statement:"+strconv.Itoa(buffer[:], index)+">")
 	node := p.Engine.AddOwned(key, runStatement, state, freeStatement)
@@ -318,5 +325,16 @@ func (s *Session) Start(index int) HandleStart {
 	h := mem.Alloc[Handle](p.Alloc)
 	h.Program, h.Node, h.Root, h.Target = p, node, p.Engine.RequestRoot(node), cloneText(p.Alloc, "<statement>")
 	h.Definition = true // Value-producing root, not a recipe instance.
+	h.Session = s
 	return HandleStart{Handle: h}
+}
+
+// Releasing each statement used to cancel its lazy dependencies, replaying
+// effectful definitions at the next statement. Hold completed roots through the
+// invocation (including finalizers), without pinning active/cancelled work.
+func (h *Handle) retainSessionStatement() {
+	if h.Session == nil || h.Node == nil || !h.Node.Current || h.Node.State == core.NodeFailed || h.Node.State == core.NodeCancelled { return }
+	s := h.Session
+	s.retained = slices.Append(s.Program.Alloc, s.retained, s.Program.Engine.RequestRoot(h.Node))
+	h.Session = nil
 }

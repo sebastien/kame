@@ -72,7 +72,12 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		}
 		return name(scope, expression.Text, expression.Span, context)
 	case expr.InvocationJoin:
-		return p.joinProcesses(context)
+		r := p.joinProcesses(context)
+		if r.Waiting || r.Diagnostic.Code != "" { return r }
+		r.Free(context.Run)
+		return p.finishDefers(context.Deferred, context, false)
+	case expr.KashDefer:
+		return p.registerDefer(expression, context)
 	case expr.Reference, expr.EnvironmentReference:
 		return p.reference(scope, expression, context)
 	case expr.List:

@@ -175,6 +175,7 @@ type EventResult struct {
 }
 
 type Handle struct {
+	Session *Session
 	Program    *Program
 	Root       *core.Root
 	Node       *core.Node
@@ -217,6 +218,7 @@ func (h *Handle) Free() {
 		return
 	}
 	p := h.Program
+	h.retainSessionStatement()
 	if h.Root != nil {
 		p.Engine.Release(h.Root)
 		// A caller may drop its final handle without issuing Cancel. Forward the

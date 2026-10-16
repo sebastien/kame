@@ -212,7 +212,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.List || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || value.Kind == expr.KashIf || value.Kind == expr.KashMatch || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition {
+	if value.Kind == expr.List || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || value.Kind == expr.KashIf || value.Kind == expr.KashMatch || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
 		if value.AcceptExit {
 			e.Str("acceptExit")
 			e.Bool(true)
@@ -364,6 +364,7 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
+	if k == expr.KashDefer { return "kash-defer" }
 	if k == expr.ValuePipe { return "value-pipe" }
 	if k == expr.EnvironmentReference {
 		return "environment-reference"

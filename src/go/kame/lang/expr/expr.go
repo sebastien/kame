@@ -48,6 +48,7 @@ const (
 	InvocationJoin
 	// ValuePipe is the source-only subject/stages retained by AuthoredPipe.
 	ValuePipe
+	KashDefer
 )
 
 type ReferenceKind int
@@ -1239,6 +1240,7 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		return
 	}
 	if e.Kind == ValueRecovery { writeExpr(b, e.Items[0]); b.WriteString(" ?? "); writeExpr(b, e.Items[1]); return }
+	if e.Kind == KashDefer { b.WriteString("defer "); writeExpr(b, e.Items[0]); return }
 	if e.Kind == CommandCapture || e.Kind == CommandGraph || e.Kind == CommandTest { if e.Kind == CommandCapture { b.WriteString("$(") }; writeProcess(b, e); if e.Kind == CommandCapture { b.WriteByte(')') }; return }
 	if e.Kind == CommandStage { for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }; return }
 	if e.Kind == CommandRedirection { b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }

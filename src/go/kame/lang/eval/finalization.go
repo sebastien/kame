@@ -315,6 +315,7 @@ func advanceFinalizerTeardown(engine *core.EngineContext, node int64) core.Produ
 
 // PollFinalizers services deadlines even when a host request cannot complete.
 func (p *Program) PollFinalizers() {
+	if p.DeferStopping { p.AdvanceFinalization() }
 	if p.FinalizationNow == nil { return }
 	now := p.FinalizationNow(p.FinalizationHost)
 	for i := range p.finalizers {
@@ -332,10 +333,11 @@ func (p *Program) PollFinalizers() {
 
 func (p *Program) Finalizing() bool {
 	for i := range p.finalizers { if p.finalizers[i].Stage != 4 { return true } }
-	return false
+	return p.defersPending()
 }
 
 func (p *Program) BeginFinalization() {
+	if !p.DeferStopping { p.DeferStopping = true; p.CancelProcesses() }
 	for i := range p.finalizers {
 		s := p.finalizers[i]
 		if s.Stage != 4 { p.Engine.Teardown(p.Engine.LookupID(s.NodeID)) }
@@ -356,6 +358,17 @@ func (p *Program) BeginFinalizationWith(cause diagnostic.Diagnostic) {
 // grant authority or start unrelated work.
 func (p *Program) FinalizerDeadline(node int64) int64 {
 	deadline := int64(0)
+	for i := range p.DeferScopes {
+		s := p.DeferScopes[i]
+		if s.Node == nil || s.Done || !s.ClockStarted { continue }
+		owned := node == 0 || node == s.Node.ID
+		for j := range s.Actions {
+			action := s.Actions[j]
+			if action.Node != nil && (action.Node.ID == node || p.ProcessInGroup(node, action.Context.ScriptGroup)) { owned = true }
+		}
+		limit := s.StartedAt + DeferTimeoutMS*1000000
+		if owned && (deadline == 0 || limit < deadline) { deadline = limit }
+	}
 	for i := range p.finalizers {
 		s := p.finalizers[i]
 		if (node == 0 || s.NodeID == node) && s.Stage >= 2 && s.Stage < 4 && s.Deadline != 0 && (deadline == 0 || s.Deadline < deadline) { deadline = s.Deadline }
