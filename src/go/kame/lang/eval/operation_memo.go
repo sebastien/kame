@@ -247,7 +247,7 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 			facts = len(c.Engine.AcceptedObservations())
 		}
 		r := p.evaluate(c.Engine, scope, arguments[i], c)
-		if r.Waiting || r.Diagnostic.Code != "" {
+		if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
 			if r.Waiting && i != 0 && p.retainArguments(scope, c, span, values, i, facts, effects, completedEffects, paths, completedPaths) {
 				return argumentResult{Result: r}
 			}

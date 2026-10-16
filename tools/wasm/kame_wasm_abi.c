@@ -466,6 +466,7 @@ uint64_t kame_wasm_instance_create(void) {
 uint32_t kame_wasm_instance_free(uint64_t handle) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime != NULL && !instance->exhausted && wasm_Runtime_FinalizationPending(instance->runtime)) return KAME_WASM_STATE_INVALID;
   if (instance->has_pending) {
     host_Request_Free(&instance->pending, instance->runtime->Alloc);
     instance->pending = (host_Request){};
@@ -1033,6 +1034,26 @@ uint32_t kame_wasm_expression_effect_copy(uint64_t handle, uint32_t dst, uint32_
       (so_Slice){(so_byte *)(uintptr_t)dst, (so_int)dst_len, (so_int)dst_len}) ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
 }
 
+/* Additive opt-in: a graceful driver supplies a monotonic nanosecond clock and
+ * keeps stepping through cancellation/disposal until all armed scopes settle. */
+__attribute__((export_name("kame_wasm_finalization_tick")))
+uint32_t kame_wasm_finalization_tick(uint64_t handle, int64_t now_ns, uint32_t stopping) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (instance == NULL || instance->runtime == NULL) return 0u;
+  if (stopping == 2u) return wasm_Runtime_FinalizationTimeout(instance->runtime, now_ns) ? 1u : 0u;
+  return wasm_Runtime_FinalizationTick(instance->runtime, now_ns, stopping != 0u) ? 1u : 0u;
+}
+
+__attribute__((export_name("kame_wasm_finalization_budget")))
+int64_t kame_wasm_finalization_budget(uint64_t handle, uint32_t all_scopes) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  if (instance == NULL || instance->runtime == NULL) return 0;
+  if (all_scopes != 0u) return wasm_Runtime_FinalizationBudget(instance->runtime, 0);
+  if (!instance->has_pending) return 0;
+  return wasm_Runtime_FinalizationBudget(instance->runtime, instance->pending.NodeID);
+}
+
 uint32_t kame_wasm_step(uint64_t handle) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   KAME_WASM_CHECKPOINT(instance, 2u, false);
@@ -1056,6 +1077,18 @@ uint32_t kame_wasm_step(uint64_t handle) {
     return 2u;
   }
   return 0u;
+}
+
+__attribute__((export_name("kame_wasm_result_diagnostic")))
+uint32_t kame_wasm_result_diagnostic(uint64_t handle, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (out_len == 0u) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  if (instance->runtime == NULL) return KAME_WASM_OK;
+  wasm_PureResult result = wasm_Runtime_ResultDiagnosticJSON(instance->runtime);
+  return kame_wasm_finish_query(instance, result, dst, dst_len, out_len);
 }
 
 uint32_t kame_wasm_next_event_header(uint64_t handle, uint32_t dst, uint32_t dst_len) {

@@ -17,7 +17,12 @@ for backend in native wasm; do
 			local report="$work/error" status=0
 			if [ "$format" = json ]; then options=(--json); report="$work/output"; fi
 			"${runner[@]}" "${options[@]}" "$@" >"$work/output" 2>"$work/error" || status=$?
-			if [ "$status" = 1 ] && grep -Fq "$code" "$report" && grep -Fq -- "$guidance" "$report"; then
+			local guidance_report="$report"
+			if [ "$format" = json ]; then
+				jq -r 'select(.diagnostic != null) | .diagnostic | (.message, .tips[]?)' "$report" >"$work/guidance"
+				guidance_report="$work/guidance"
+			fi
+			if [ "$status" = 1 ] && grep -Fq "$code" "$report" && grep -Fq -- "$guidance" "$guidance_report"; then
 				test-ok "$backend $format $code recovery"
 			else
 				test-fail "$backend $format $code recovery ($status)"
@@ -37,7 +42,14 @@ for backend in native wasm; do
 	reject CAP_DENIED '--allow-env=NAME' do run --lang expr -c '(env "MODE")'
 	reject PARSE_ERR 'target : inputs ; [shell: kash]' do run --lang kmk -c 'show ; [shell: kash] :'
 	reject PARSE_ERR 'direct Kash' do run --allow-run --lang kash -c 'printf @{name}'
+	reject PARSE_ERR '"--mtime=@0"' do run --lang kash -c 'printf --mtime=@0'
 	reject PARSE_ERR './ for a file path' do run --lang kmk -c 'out.o :'
+	test-step "$backend quoted literal at-signs retain argument bytes through formatting"
+	source='printf "%s" "--mtime=@0"'
+	"${runner[@]}" do fmt --lang kash -c "$source" >"$work/at.kash"
+	"${runner[@]}" do fmt --lang kash "$work/at.kash" >"$work/at-again.kash"
+	"${runner[@]}" do run --allow-run "$work/at.kash" >"$work/at-output"
+	if cmp -s "$work/at.kash" "$work/at-again.kash" && [ "$(cat "$work/at-output")" = '--mtime=@0' ]; then test-ok "$backend literal at-sign format round trip"; else test-fail "$backend literal at-sign changed"; fi
 	test-step "$backend scalar destinations never reveal evaluated secrets"
 	secret='boundary-secret-that-must-not-be-disclosed'
 	for setup in '' ':cwd ' ':timeout ' ':MODE '; do

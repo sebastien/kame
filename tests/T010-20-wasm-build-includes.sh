@@ -116,4 +116,39 @@ for file in invalid.kmk duplicate.kmk; do
 	fi
 done
 
+test-step "duplicate diagnostics distinguish authored declarations and nested include occurrences"
+printf '(include ./first.kmk)\n(include ./second.kmk)\n' >"$work/project/nested-conflict.kmk"
+printf '(include ./shared.kmk)\n' >"$work/project/first.kmk"
+printf '(include ./shared.kmk)\n' >"$work/project/second.kmk"
+printf 'SETTING = 1\n' >"$work/project/shared.kmk"
+for backend in native wasm; do
+	if [ "$backend" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
+	for mode in plan run; do
+		status=0
+		if [ "$mode" = plan ]; then invocation=(do plan --json -C "$work/project" -f nested-conflict.kmk default); else invocation=(do run --json -C "$work/project" ./nested-conflict.kmk default); fi
+		"${runner[@]}" "${invocation[@]}" >"$work/conflict.json" 2>"$work/error" || status=$?
+		if [ "$status" = 1 ] && [ ! -s "$work/error" ] && jq -e -s 'map(select(.type == "diagnostic"))[0].diagnostic |
+			.code == "DEF_INVALID" and .message == "duplicate definition: SETTING" and
+			(.source | endswith("/shared.kmk")) and .span == {start:0,end:7} and
+			.related[0].source == .source and .related[0].span == .span and
+			(.frames | length) == 4 and
+			(.frames[0].source | endswith("/second.kmk")) and
+			(.frames[2].source | endswith("/first.kmk")) and
+			.frames[1].span.start > .frames[3].span.start and (.tips | length) > 0
+		' "$work/conflict.json" >/dev/null; then test-ok "$backend $mode retains both inclusion paths"; else test-fail "$backend $mode lost include provenance"; cat "$work/conflict.json" "$work/error"; fi
+	done
+	status=0
+	"${runner[@]}" do run --json --lang km -c 'SETTING = 1' -c 'SETTING = 2' >"$work/conflict.json" 2>"$work/error" || status=$?
+	if [ "$status" = 1 ] && jq -e -s 'map(select(.type == "diagnostic"))[0].diagnostic | .source == "<command:2>" and .related[0].source == "<command:1>" and .span == .related[0].span' "$work/conflict.json" >/dev/null; then test-ok "$backend separate fragments retain original declaration"; else test-fail "$backend fragment provenance"; fi
+	for format in human plain; do
+		status=0
+		"${runner[@]}" --color=never --diagnostic-format="$format" do plan -C "$work/project" -f nested-conflict.kmk default >"$work/output" 2>"$work/error" || status=$?
+		if [ "$status" = 1 ] && grep -q 'duplicate definition: SETTING' "$work/error" && grep -q 'original declaration' "$work/error" && grep -q 'first.kmk' "$work/error" && grep -q 'second.kmk' "$work/error"; then test-ok "$backend $format renders conflict context"; else test-fail "$backend $format conflict context"; cat "$work/error"; fi
+	done
+done
+printf 'ITEMS ?= []\nITEMS += ["x"]\n' >"$work/project/contributions.kmk"
+printf 'ITEMS = []\n(include ./contributions.kmk)\n(include ./contributions.kmk)\ndefault : ; [shell: kash]\n\t(out! (json ITEMS))\n' >"$work/project/consumer.kmk"
+compare -C "$work/project" -f consumer.kmk default
+if [ "$(cat "$work/native.out")" = '["x","x"]' ]; then test-ok "consumer defaults and repeated contributions retain source semantics"; else test-fail "repeated inclusion was silently deduplicated"; fi
+
 test-end

@@ -16,6 +16,21 @@ func main() { posix.InstallSignals(); os.Exit(Run(os.Args[1:], os.Stdin, os.Stdo
 // Run executes a command with explicit streams so the command behavior remains
 // independently testable from process startup.
 func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
+	outputState := mem.Alloc[nativeOutputState](mem.System)
+	defer mem.Free(mem.System, outputState)
+	previousOutput := activeNativeOutput
+	activeNativeOutput = outputState
+	defer restoreNativeOutput(previousOutput)
+	stdout := mem.Alloc[nativeOutputWriter](mem.System)
+	stderr := mem.Alloc[nativeOutputWriter](mem.System)
+	defer mem.Free(mem.System, stdout)
+	defer mem.Free(mem.System, stderr)
+	stdout.State, stdout.FD = outputState, nativeOutputFD(out)
+	stderr.State, stderr.FD = outputState, nativeOutputFD(errOut)
+	if stdout.FD != 0 { out = stdout }
+	if stderr.FD != 0 { errOut = stderr }
+	previousDiagnosticOut := cliDiagnosticOut
+	defer restoreDiagnosticOut(previousDiagnosticOut)
 	presentation := cli.Presentation(args)
 	selectedOutput = presentation.Output
 	requestedDiagnosticColor, requestedDiagnosticFormat = presentation.Color, presentation.DiagnosticFormat
@@ -54,6 +69,16 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 		cliDiagnosticOut = destination
 	}
 	status := runCommand(args, in, destination, errOut)
+	// A signal can arrive inside a bounded write after the evaluator's last
+	// signal check. Cleanup remains shielded, but the invocation keeps its exit.
+	if outputState.Bounded {
+		if signal := posix.TakeSignal(); signal != 0 { outputState.Signal = signal }
+		if outputState.Signal < 0 { status = 128 - outputState.Signal } else if outputState.Signal != 0 { status = 128 + outputState.Signal }
+	}
+	if status == 0 && outputState.FailureCode != "" {
+		cliError(errOut, outputState.FailureCode, "cleanup output could not be delivered before scope completion")
+		status = 1
+	}
 	if static {
 		writeStaticDocument(out, document.String(), status != 0)
 		cliDiagnosticOut = out

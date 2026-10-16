@@ -73,7 +73,11 @@ type Context struct {
 	DisableMemo        bool
 	// Dynamic expressions must not lend callable ASTs past their parse lifetime.
 	CloneCallableAST bool
+	FinalizationForbidden bool
 	evaluationDepth  int
+	finalizer *FinalizerState
+	deferred bool
+	dependencyFailure diagnostic.Diagnostic
 }
 
 type operationState struct {
@@ -173,6 +177,8 @@ const (
 )
 
 type Effect struct {
+	// Host-only transport metadata; never grants authority or enters value data.
+	FinalizationDeadlineNS int64
 	Kind EffectKind
 	Data []byte
 	Span source.Span
@@ -209,6 +215,11 @@ func (c *Context) EmitWrite(name string, data []byte) {
 }
 
 func (c *Context) PhaseInvalid() bool { return c.phaseInvalid }
+
+func (c *Context) ArgumentSpan(index int) source.Span {
+	if index >= 0 && index < len(c.operationArguments) { return c.operationArguments[index].Span }
+	return c.Span
+}
 func (c *Context) MarkPhaseInvalid()  { c.phaseInvalid = true }
 
 // RuleFrame supplies the inputs and outputs for one enclosing rule evaluation.
@@ -313,7 +324,15 @@ func (c *Context) Dependency(key core.ResourceKey) bool {
 	} else if c.DependencyObserver != nil {
 		c.DependencyObserver(c.ResolverState, key)
 	}
-	current := c.Engine.Dependency(key)
+	current := false
+	if c.finalizer != nil {
+		current = c.Engine.TryDependency(key)
+		if d := c.Engine.DependencyDiagnostic(key); d.Code != "" {
+			c.dependencyFailure.Free(c.Run)
+			c.dependencyFailure = d.Clone(c.Run)
+			current = false
+		}
+	} else { current = c.Engine.Dependency(key) }
 	mem.FreeString(c.Run, resourcePath)
 	return current
 }
@@ -350,6 +369,14 @@ func (c *Context) Observe(key core.ResourceKey, aspect core.ObservationAspect, s
 // Submit queues an owned request and records its generated ID on the active
 // engine node. The host completes it using the request correlation data.
 func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
+	if c.deferred { return 0 }
+	if c.finalizer != nil && c.Engine != nil && c.Program.FinalizationNow != nil {
+		deadline := c.Program.FinalizerDeadline(c.Engine.NodeID())
+		if deadline != 0 && c.Program.FinalizationNow(c.Program.FinalizationHost) >= deadline {
+			c.finalizer.Expired = true
+			return 0
+		}
+	}
 	if c.Phase == PlanningPhase {
 		c.phaseInvalid = true
 		return 0

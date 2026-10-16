@@ -63,12 +63,12 @@ tests. It must remain opt-in; never implement it as automatic capture trimming.
 
 ## Failure cleanup is an ownership question (K26)
 
-Concrete SDK cases, based on `src/kmk` in `sdk.km`:
+Concrete SDK cases, based on `src/km/sdk` in `sdk.km`:
 
 | Case | Existing behavior / real need | Boundary |
 | --- | --- | --- |
-| HTML Tidy and XSLT (`www.kmk`) | Write an output-adjacent `.tmp`, move it on success, remove it on handled transform failure. Interruption or a failed move can leave the temporary file. | Need an invocation-owned temporary path and publication policy, not mutable shell state. Do not delete the previous good output or a concurrent producer's temporary file. |
-| Tool downloads (`tools.kmk`) | Download to `.tmp`; handled download failure removes it. Failure during chmod/move or interruption can leave it behind. | The same owned-temporary-file need; installer authentication, retries and package-manager policy remain SDK work. |
+| HTML Tidy and XSLT (`www.kmk`) | Write directly to the final output; failed or interrupted transforms can leave partial bytes or replace a previous good artifact. | Need an invocation-owned temporary path and publication policy, not mutable shell state. Do not delete the previous good output or a concurrent producer's temporary file. |
+| Tool downloads (`tools.kmk`) | Download directly to the final executable path, then chmod it. Failure or interruption can leave a partial or unusable executable. | The same owned-temporary-file need; installer authentication, retries and package-manager policy remain SDK work. |
 | Compilers/bundlers (`js.kmk`) | Redirections and external tools can leave partial main files or side assets. | Successful output validation is not rollback. Variable asset membership first needs the [output ownership contract](spec/039-output-ownership.md); a cleanup block alone cannot establish ownership. |
 | Managed links (`opencode.kmk`) | Prep preserves user-owned files; clean explicitly refuses without a manifest. | Removing stale owned links is reconciliation, not failure cleanup. Require a validated ownership manifest and race-aware deletion; `lstat`/`readlink` alone is insufficient. |
 | Release/deployment (`release.kmk`) | A tag may exist locally after push failure; deployment can fail after remote changes. | Preserve the failure and support explicit retry/reconciliation. Do not automatically delete tags or undo remote work. |
@@ -81,14 +81,16 @@ run a cleanup arm on capability denial or cancellation. A separate `clean` targe
 is not an automatically invoked finalizer. Native `write`/`yield` publication
 does not make a whole multi-output recipe or external command transactional.
 
-**Decision:** defer general structured cleanup syntax. A proposal must first
-pin down owned resources, cleanup timing on success/failure/cancellation, nested
-and async lifetime, concurrent invocations, capability checks, and reporting of
-cleanup failure without masking the primary error. Test failed publication and
-interruption, not only a nonzero tool exit. Do not add persistent mutable Bash
-sessions, sourcing, or traps merely to transliterate shell libraries. An
-explicit system-shell recipe or user-launched interactive shell remains external
-to Kash's language contract.
+**Kame support:** [scoped finalization](spec/043-kame-finalization.md) provides
+`finally!` over body and cleanup callables in execution contexts, including
+bounded cancellation, async ownership and primary-error preservation. This is
+native/WASM expression-driver support, not evidence of SDK workflow coverage.
+It does not acquire resources safely on its own, prove deletion ownership,
+bracket deferred shell recipes or make publication transactional. Temporary
+resource APIs, Kash cleanup syntax and remote rollback remain separate questions.
+Test failed publication and interruption, not only a nonzero tool exit. Do not
+add persistent mutable Bash sessions, sourcing or traps merely to transliterate
+shell libraries. An explicit external-shell recipe remains an authored boundary.
 
 ## Vendor tools and SDK workflows stay outside the language (K27)
 

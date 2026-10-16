@@ -1,9 +1,10 @@
 # CLI conformance test catalog. One row per test script.
 # Columns: file<TAB>spec<TAB>category<TAB>covers
+tests/T043-01-lang-finalization.sh	043	lang	Native/WASM finally! values, callbacks and aliases, validation, accepted/discarded effects, lexical retention, deadlines, SIGINT during body/cleanup and mandatory teardown
 tests/T016-03-lang-template-boundaries.sh	016	lang	Reference/call distinction, zero-argument and computed-callable calls, directive slots, nested selections, raw/escaped and inert brace text, headers/paths/tools, canonical formatting and native/WASM parity
 tests/T017-20-kash-context-environment.sh	017	kash	Expression statements, computed stage env records, ordered local overrides, validation and secret-safe traces, named args/inputs/outputs/changed inputs, rule-frame retention and native/WASM formatting parity
 tests/T017-21-kash-words.sh	017	kash	Mixed scalar expression fragments in argv, command heads, redirections and setup; quoting, typed splicing, retained operands, prelaunch rejection and native/WASM format parity
-tests/T011-04-diag-language-boundaries.sh	011	diag	Reference/call recovery, actual scalar kinds and destinations, selector literal escapes, file prefixes, environment grants, rule settings placement, secret-safe human/plain/JSON host parity
+tests/T011-04-diag-language-boundaries.sh	011	diag	Reference/call recovery, actual scalar kinds and destinations, selector literal escapes, Kash literal at-sign quoting and format stability, file prefixes, environment grants, rule settings placement, secret-safe human/plain/JSON host parity
 tests/T036-01-cli-presentation.sh	036	cli	Native/WASM presentation modes, global options, exact bytes, JSON results, static errors, watch boundaries and terminal fallback
 tests/T036-02-cli-reuse-reasons.sh	036	cli	Native/WASM file and task reuse reasons, missing/corrupt records, guard/input/output/configuration/environment changes, force/always, deduplication and privacy
 tests/T004-16-lang-computed-outputs.sh	004	lang	Pure computed output paths and names, captures, list flattening, overrides, validation, diagnostics, formatting and native/WASM parity
@@ -57,7 +58,7 @@ tests/T010-02-wasm-abi.sh	010	wasm	Import gate, distinct host request kinds, can
 tests/T010-03-wasm-target.sh	010	wasm	Definition targets materialize against the in-memory host; missing targets diagnose
 tests/T010-04-wasm-forwarding.sh	010	wasm	Target host requests for read, process, and write are forwarded and completed asynchronously
 tests/T010-05-wasm-rule-target.sh	010	wasm	A file rule materializes with its recipe forwarded to the embedding host
-tests/T010-06-wasm-cli.sh	010	wasm	dist/kame.js version, help, do run expression byte parity, grants, diagnostic flags, and exit statuses
+tests/T010-06-wasm-cli.sh	010	wasm	dist/kame.js version, matched local provenance and unavailable identity without module instantiation, help, do run expression byte parity, grants, diagnostic flags, and exit statuses
 tests/T010-07-wasm-cat.sh	010	wasm	dist/kame.js do cat and primary materialization over a discovered source
 tests/T010-08-wasm-glob.sh	010	wasm	Wildcard host requests match native output byte-for-byte and require a read grant
 tests/T010-09-wasm-parse.sh	010	wasm	dist/kame.js do parse matches native AST JSON for all languages, stdin, and errors
@@ -111,7 +112,7 @@ tests/T017-15-kash-match.sh	017	kash	Kash match patterns, lexical captures, subj
 tests/T017-16-kash-environment.sh	017	kash	Explicit Kash environment lookup, scoped grants, reserved bindings and native/WASM parity
 tests/T017-17-eval-process-expressions.sh	017	eval	Expression run/pipe graphs, structured results, lazy replay safety and native/WASM parity
 tests/T017-18-kash-async.sh	017	kash	Async graph ownership, lazy handles, repeat-safe await, joins, cancellation and native/WASM parity
-tests/T010-20-wasm-build-includes.sh	010	wasm	Build and inspection includes, nested source loading, cycles, duplicate declarations and authored diagnostic parity
+tests/T010-20-wasm-build-includes.sh	010	wasm	Build and inspection includes, nested source loading, cycles, duplicate declarations with original locations and distinct include-site provenance, repeated contributions and authored diagnostic parity
 tests/T007-09-lib-wildcard-union.sh	007	lib	Sorted multi-pattern unions, deduplication, independent dependency membership and native/WASM file input parity
 tests/T004-19-lang-rule-header-composition.sh	004	lang	Mixed expression and interpolated inputs, quoted paths, alternative <- rule separator, expanded inspection and native/WASM ordering
 tests/T010-21-wasm-build-effects.sh	010	wasm	Isolated binary yield and write publication, dependent recipe ordering, missing outputs, shell parent directories, failures and atomic staging cleanup
@@ -122,7 +123,7 @@ tests/T016-02-cli-template-extensions.sh	016	cli	Matched template cases, auto st
 tests/T004-10-lang-line-continuations.sh	004	lang	Continued definitions and headers, recipe backslashes, multiline verbatim values and native/WASM format idempotence
 tests/T016-01-cli-render.sh	016	cli	Raw document rendering, repeated string payloads, comment inference, parse-only checks and capability parity on native/WASM
 tests/T007-10-lib-record-lookup.sh	007	lib	Computed record keys, nil/default contracts, callable transfer and configuration/input planning parity
-tests/T009-13-cli-configuration.sh	009	cli	Build defaults, CLI and environment override precedence, literal values, effective plans and authored formatting on native/WASM
+tests/T009-13-cli-configuration.sh	009	cli	Build defaults, CLI and environment override precedence, typed literals, aggregate configuration, lazy authored setting checks at pure registration boundaries, effective plans and authored formatting on native/WASM
 tests/T007-11-lib-tools.sh	007	lib	Shared executable resolution, computed tool names, repeatable host overrides, plan visibility, startup PATH policy under target overrides and missing-tool failure on native/WASM
 tests/T007-12-lib-operation-values.sh	007	lib	First-class operation callbacks, aliases and containers, lexical precedence, comparison aliases, host suspension, build planning, capabilities, arity and special-form distinction
 tests/T007-13-lib-structural-equality.sh	007	lib	Bytewise and recursive equality, aliases, record-order independence, kind sensitivity, exact numeric equality, filter shorthand, host-backed binary data and unsupported-value diagnostics

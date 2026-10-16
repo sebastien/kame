@@ -5,8 +5,27 @@ import (
 	"kame/core"
 	"solod.dev/so/bytes"
 	"solod.dev/so/mem"
+	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
+
+func TestHelpDistinguishesInspectionFromMaterialization(t *testing.T) {
+	topics := []string{"cat", "plan", "inputs", "outputs", "span", "tools"}
+	for i := range topics {
+		text := cli.HelpText(topics[i])
+		if topics[i] == "cat" {
+			if !strings.Contains(text, "builds prerequisites") || !strings.Contains(text, "Supports -j/--jobs") {
+				t.Error("cat help must describe materialization and execution options")
+			}
+			if strings.Contains(text, "Inspection never") || strings.Contains(text, "forbids effects") || strings.Contains(text, "execution-only flags are rejected") {
+				t.Error("cat help must not promise effect-free inspection")
+			}
+		} else if !strings.Contains(text, "Inspection never executes recipes or applies deferred writes") {
+			t.Error("inspection help must retain the read-only boundary")
+		}
+		mem.FreeString(mem.System, text)
+	}
+}
 
 func TestHelpResultHasExplicitOwnership(t *testing.T) {
 	inv := cli.Parse("@help", []string{"plan", "--json"})

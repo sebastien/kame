@@ -2,6 +2,7 @@ package program_test
 
 import (
 	"kame/core"
+	"kame/diagnostic"
 	"kame/host/posix"
 	"kame/lang/expr"
 	"kame/lang/eval"
@@ -193,4 +194,28 @@ func TestTypedConfigurationRejectsNonliteralEmbeddingInput(t *testing.T) {
 	condition := program.DeclarationPredicate(a, "typed", "flag = :true\n", "flag", []string{"flag:=:false"}, nil)
 	if condition.Diagnostic.Code != "" || condition.Selected { t.Error("typed false did not select declaration conditions") }
 	condition.Diagnostic.Free(a)
+}
+
+func TestDuplicateDefinitionsRetainDistinctIncludeOccurrences(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	first := []diagnostic.Frame{{Kind: "include", Label: "shared.kmk", Source: "main.kmk", Span: diagnostic.Span{Start: 0, End: 22}}}
+	second := []diagnostic.Frame{{Kind: "include", Label: "shared.kmk", Source: "main.kmk", Span: diagnostic.Span{Start: 23, End: 45}}}
+	sources := []program.CompileSource{{Name: "shared.kmk", Text: "SETTING = 1\n", Offset: 10, Includes: first}, {Name: "shared.kmk", Text: "SETTING = 2\n", Offset: 30, Includes: second}}
+	compiled := program.CompileMany(a, sources, registry, program.Options{})
+	if compiled.Program != nil { t.Error("duplicate definitions compiled"); compiled.Program.Free() }
+	if len(compiled.Diagnostics) != 1 { t.Error("missing duplicate diagnostic"); compiled.Free(a); return }
+	d := compiled.Diagnostics[0]
+	if d.Code != "DEF_INVALID" || d.Message != "duplicate definition: SETTING" || d.Source != "shared.kmk" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Source != "shared.kmk" || d.Related[0].Span.Start != 10 { t.Error("primary and original declarations lost authored locations") }
+	if len(d.Frames) != 2 || d.Frames[0].Span.Start != 23 || d.Frames[1].Span.Start != 0 || len(d.Tips) == 0 { t.Error("include occurrences or recovery lost after combined parser disposal") }
+	compiled.Free(a)
+	fragments := []program.Fragment{{Name: "shared.kmk", Text: "SETTING = 1\n", Lang: "km", Offset: 10, Includes: first}, {Name: "shared.kmk", Text: "SETTING = 2\n", Lang: "km", Offset: 30, Includes: second}}
+	session := program.CompileSession(a, fragments, registry, program.Options{})
+	if session.Session != nil { t.Error("duplicate session compiled"); session.Session.Free() }
+	if len(session.Diagnostics) != 1 { t.Error("missing session diagnostic"); session.Free(a); return }
+	d = session.Diagnostics[0]
+	if d.Source != "shared.kmk" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Span.Start != 10 || len(d.Frames) != 2 { t.Error("session did not map every located diagnostic fact") }
+	session.Free(a)
 }

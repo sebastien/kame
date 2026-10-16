@@ -35,9 +35,9 @@ the native, CLI, and wasm golden tests can consume the same bytes.
 - Fixtures cover specified syntax as well as deliberately retained legacy and
   historical inputs. Their presence is not a language compatibility contract or
   a claim that every consumer supports every input; check the consuming runner
-  and diagnostic manifest. The current specification uses `@{ref}` / `@(call)`,
-  literal bare `{(...)}`, and authored-pipe preservation. Updating this guide
-  does not update fixture bytes, goldens or parser implementations.
+  and diagnostic manifest. Current syntax uses `@{ref}` / `@(call)`, literal bare
+  `{(...)}`, and authored-pipe preservation; fixtures and goldens follow those
+  boundaries rather than providing automatic migration of historical sources.
 - `expr/`, `rule/`, and `script/` files end with a trailing newline because the
   parsers ignore surrounding whitespace. Invalid `expr-` and `rule-` fixtures
   follow the same rule.
@@ -48,8 +48,8 @@ the native, CLI, and wasm golden tests can consume the same bytes.
 - Canonical goldens must match their expected formatted bytes. General parse
   fixtures need not already be canonical: T004-06 checks that formatting reaches
   a fixed point, and T004-08 checks AST stability. Historical interpolation
-  fixtures may require reclassification or new goldens alongside implementation;
-  they do not require a deprecated-input parser or automatic migration.
+  fixtures test literal text or explicit rejection, not a deprecated-input parser
+  or automatic migration.
 - Recipe lines are indented with one tab. `rule/rules/indent.km` keeps extra
   indentation inside recipe text on purpose.
 - LF line endings only.

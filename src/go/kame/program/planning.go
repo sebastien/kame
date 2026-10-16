@@ -237,6 +237,9 @@ func restoreInspectionContextObserver(p *Program, observer func(any, core.Resour
 }
 
 func (p *Program) tickInspection(wait int) {
+	previousFinalization := p.Eval.FinalizationReadOnly
+	p.Eval.FinalizationReadOnly = true
+	defer restoreInspectionFinalization(p, previousFinalization)
 	previousObserver, previousState := p.Eval.DefinitionDependencyObserver, p.Eval.DefinitionDependencyState
 	previousContextObserver := p.Eval.DefinitionDependencyContextObserver
 	p.Eval.SetDefinitionDependencyObserver(observeInspectionDependency, p)
@@ -245,6 +248,8 @@ func (p *Program) tickInspection(wait int) {
 	defer restoreInspectionContextObserver(p, previousContextObserver)
 	p.tick(wait)
 }
+
+func restoreInspectionFinalization(p *Program, previous bool) { p.Eval.FinalizationReadOnly = previous }
 
 func clonePlan(a mem.Allocator, plan Plan) Plan {
 	clone := Plan{Tools: cloneTools(a, plan.Tools), Configuration: cloneStrings(a, plan.Configuration), Target: cloneText(a, plan.Target), Generator: cloneText(a, plan.Generator), GeneratorDependencies: cloneStrings(a, plan.GeneratorDependencies), Key: plan.Key.Clone(a), Rule: plan.Rule, RuleSpan: plan.RuleSpan, Body: plan.Body, Captures: cloneCaptures(a, plan.Captures), Arguments: cloneArguments(a, plan.Arguments), Inputs: cloneStrings(a, plan.Inputs), StaticInputs: cloneStrings(a, plan.StaticInputs), DynamicInputs: cloneStrings(a, plan.DynamicInputs), ResourceInputs: clonePlanInputs(a, plan.ResourceInputs), ResolvedInputs: cloneStrings(a, plan.ResolvedInputs), ResolvedResourceInputs: clonePlanInputs(a, plan.ResolvedResourceInputs), Resolved: plan.Resolved, Outputs: cloneStrings(a, plan.Outputs), Freshness: plan.Freshness}

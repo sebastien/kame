@@ -68,6 +68,14 @@ Within each section:
 These are authoring conventions. The formatter must not sort declarations,
 move includes, group values, invent section comments, or reorder execution.
 
+Consumer configuration is an intentional exception to includes-first guidance:
+place settings before the include whose `?=` defaults they replace, then append
+consumer contributions and extra rules afterward. Follow the
+[consumer composition contract](004-language.md#consumer-composition), rather
+than moving an include for visual consistency. Distinguish configurable settings
+from derived values in names or comments; an ordinary `=` value definition does
+not itself prohibit CLI overrides.
+
 ## General Formatting
 
 - Use LF line endings and a terminal newline for scripts.

@@ -22,6 +22,7 @@ const graphKinds = Object.freeze({ inputs: 0, outputs: 1, span: 2, planRoots: 3 
 // Children run in their own process group so a signal terminates the whole
 // tree, and a forced termination reports 128 plus the signal number.
 const activeChildren = new Set();
+const cleanupChildren = new WeakSet();
 const invocationCancellations = new Set();
 const invocationDisposals = new Set();
 const activeCacheLocks = new Set();
@@ -40,14 +41,15 @@ function installSignals() {
       const reaped = [...activeChildren].map((child) => new Promise((resolve) => child.once('close', resolve)));
       for (const cancellation of invocationCancellations) cancellation.abort();
       const cacheReleases = [...activeCacheLocks].map((release) => release());
-      const treeStops = [...activeChildren].map((child) => signalProcessTree(child, 'SIGKILL'));
+      const treeStops = [...activeChildren].filter(child => !cleanupChildren.has(child)).map((child) => signalProcessTree(child, 'SIGKILL'));
       Promise.all([...reaped, ...treeStops, ...invocationDisposals, ...cacheReleases]).then(() => process.exit(interruptedStatus));
     });
   }
 }
 
-function track(child, group = undefined) {
+function track(child, group = undefined, finalizing = false) {
   activeChildren.add(child);
+  if (finalizing) cleanupChildren.add(child);
   group?.add(child);
   child.once('close', () => {
     activeChildren.delete(child);
@@ -128,6 +130,37 @@ function version() {
     }
   }
   return 'unknown';
+}
+
+function versionIdentity() {
+  try {
+    let metadata;
+    for (const candidate of [join(here, 'PROVENANCE.json'), join(here, '..', 'PROVENANCE.json')]) {
+      try { lstatSync(candidate); }
+      catch (error) { if (error.code === 'ENOENT') continue; return null; }
+      if (!statSync(candidate).isFile()) return null;
+      metadata = JSON.parse(readFileSync(candidate, 'utf8'));
+      break;
+    }
+    if (metadata?.schema !== 1 || typeof metadata.version !== 'string' ||
+        !/^[A-Za-z0-9.+-]+$/.test(metadata.version) || metadata.version === 'latest' ||
+        typeof metadata.sourceRevision !== 'string' || !metadata.sourceRevision.trim() || metadata.sourceRevision === 'unknown' ||
+        typeof metadata.created !== 'string' || !Number.isFinite(Date.parse(metadata.created)) || !Array.isArray(metadata.subjects)) return null;
+    const subjects = new Map();
+    for (const subject of metadata.subjects) {
+      if (typeof subject?.name !== 'string' || !subject.name || typeof subject.sha256 !== 'string' ||
+          !/^[0-9a-f]{64}$/.test(subject.sha256) || subjects.has(subject.name)) return null;
+      subjects.set(subject.name, subject.sha256);
+    }
+    for (const [name, path] of [['kame.js', fileURLToPath(import.meta.url)], ['kame.wasm', wasmPath]]) {
+      if (!subjects.has(name) || !statSync(path).isFile() ||
+          createHash('sha256').update(readFileSync(path)).digest('hex') !== subjects.get(name)) return null;
+    }
+    return { version: metadata.version, buildID: metadata.sourceRevision };
+  } catch {
+    // Local byte correspondence is optional reporting, never authentication.
+    return null;
+  }
 }
 
 let jsonMode = false;
@@ -1313,6 +1346,8 @@ class Module {
     // Raw engine identity is distinct from the opaque ABI completion handle.
     // Read it while pinned; handle slots may be retired/reused after detach.
     const rawRequest = this.exports.kame_wasm_next_request_id(instance);
+    const finalizationActive = this.exports.kame_wasm_finalization_tick?.(instance, process.hrtime.bigint(), 0) === 1;
+    const cleanupMS = Number(this.exports.kame_wasm_finalization_budget?.(instance, 0) ?? 0n);
     let data = null;
     if (kind === 2) {
       const dataLength = this.exports.kame_wasm_next_request_data_length(instance);
@@ -1338,12 +1373,34 @@ class Module {
     if (this.exports.kame_wasm_event_payload_copy(instance, payloadPointer, payloadLength) !== 0) throw Object.assign(new Error('request payload copy failed'), { code: 'HOST_FAIL' });
     const payload = this.decode(payloadPointer, payloadLength);
     if (context.concurrent && this.exports.kame_wasm_request_detach(instance, request) !== 0) throw Object.assign(new Error('cannot unpin host request'), { code: 'HOST_FAIL' });
+    let cleanupTimer;
+    let notifyCancellation;
+    const bodySignal = context.signal;
+    context = { ...context, finalizationActive };
+    if (finalizationActive && cleanupMS === 0 && bodySignal) {
+      notifyCancellation = () => this.exports.kame_wasm_finalization_tick(instance, process.hrtime.bigint(), 1);
+      bodySignal.addEventListener('abort', notifyCancellation, { once: true });
+      if (bodySignal.aborted) notifyCancellation();
+    }
+    if (cleanupMS !== 0 && kind !== 23) {
+      const cleanup = new AbortController();
+      if (cleanupMS < 0) cleanup.abort();
+      else cleanupTimer = setTimeout(() => cleanup.abort(), cleanupMS);
+      // Only runtime-designated cleanup is shielded. All host policy and grants
+      // are inherited unchanged; this signal does not authorize other work.
+      context = { ...context, signal: cleanup.signal, timeoutMS: Math.max(1, cleanupMS), finalizing: true };
+    }
     // Copy and detach before yielding: another completion can change the ABI's
     // current request while public output waits for its reader.
-    await waitOutputReady(context.signal);
     try {
+      if (kind !== 23) await waitOutputReady(context.signal);
       return await this.dispatch(instance, request, kind, payload, data, context, key, record, rawRequest);
+    } catch (error) {
+      const expired = cleanupMS !== 0 && context.signal?.aborted;
+      return this.completeFailure(instance, request, expired ? 'FINALIZE_TIMEOUT' : error.code ?? 'HOST_FAIL', expired ? 'cleanup deadline expired' : error.message ?? 'host request failed');
     } finally {
+      clearTimeout(cleanupTimer);
+      if (notifyCancellation) bodySignal.removeEventListener('abort', notifyCancellation);
       if ([3, 13, 14, 15, 16].includes(kind)) this.processGroups.delete(`${instance}:${rawRequest}`);
     }
   }
@@ -1691,7 +1748,7 @@ class Module {
     try {
       const invoke = typeof callback === 'function'
         ? Promise.resolve().then(() => callback(invocation, { signal: pluginController.signal }))
-        : runPluginProcess(invocation, executable, maxResponseBytes, pluginController.signal, context.cwd);
+        : runPluginProcess(invocation, executable, maxResponseBytes, pluginController.signal, context.cwd, context.finalizing);
       response = await Promise.race([invoke, timeout, aborted]);
     }
     catch (error) {
@@ -1774,7 +1831,11 @@ class Module {
     });
     let result;
     try {
-      result = await (context.signal ? Promise.race([Promise.resolve().then(() => context.hostRequest(descriptor)), aborted]) : context.hostRequest(descriptor));
+      const work = Promise.resolve().then(() => context.hostRequest(descriptor));
+      // With an armed finalizer, settling the callback is its acknowledgement
+      // that host work has stopped. Racing abort would let cleanup touch a
+      // resource while an abandoned callback still uses it.
+      result = await (context.signal && !context.finalizationActive ? Promise.race([work, aborted]) : work);
     } catch (error) {
       return this.completeFailure(instance, request, error.code ?? 'HOST_FAIL', error.message ?? 'host request failed');
     } finally {
@@ -1818,11 +1879,64 @@ class Module {
     await release();
   }
 
-  async cleanupInstance(instance) {
+  step(instance, context) {
+    const cancelling = context?.signal?.aborted === true;
+    const finalizing = this.exports.kame_wasm_finalization_tick?.(instance, process.hrtime.bigint(), cancelling ? 1 : 0);
+    if (cancelling && finalizing !== 1) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
+    return this.exports.kame_wasm_step(instance);
+  }
+
+  async waitReady(instance, context) {
+    this.exports.kame_wasm_finalization_tick?.(instance, process.hrtime.bigint(), 0);
+    const remaining = Number(this.exports.kame_wasm_finalization_budget?.(instance, 1) ?? 0n);
+    if (remaining < 0) return;
+    if (remaining === 0) return waitOutputReady(context.signal);
+    const deadline = new AbortController();
+    const abort = () => deadline.abort();
+    context.signal?.addEventListener('abort', abort, { once: true });
+    if (context.signal?.aborted) abort();
+    const timer = setTimeout(abort, remaining);
+    try { await waitOutputReady(deadline.signal); }
+    finally { clearTimeout(timer); context.signal?.removeEventListener('abort', abort); }
+  }
+
+  async cleanupInstance(instance, context) {
+    if (context && this.exports.kame_wasm_finalization_tick) {
+      const pending = new Set();
+      const stopping = { ...context, concurrent: true, signal: AbortSignal.abort() };
+      while (this.exports.kame_wasm_finalization_tick(instance, process.hrtime.bigint(), 1) === 1) {
+        const state = this.step(instance);
+        this.drainEvents(instance, stopping);
+        this.drainExpressionEffects(instance);
+        if (state === 1) {
+          const work = this.service(instance, stopping).finally(() => pending.delete(work));
+          pending.add(work);
+        } else {
+          await Promise.race([...pending, new Promise(resolve => setTimeout(resolve, 5))]);
+        }
+      }
+      await Promise.all(pending);
+      this.drainEvents(instance, stopping);
+      this.drainExpressionEffects(instance);
+    }
     const prefix = `${instance}:`;
     await Promise.all([...this.cacheWrites].filter(([owner]) => owner.startsWith(prefix)).map(([, writing]) => writing.catch(() => {})));
     await Promise.all([...this.cacheLeases.keys()].filter((owner) => owner.startsWith(prefix)).map((owner) => this.releaseCacheOwner(owner)));
     for (const owner of this.processGroups.keys()) if (owner.startsWith(prefix)) this.processGroups.delete(owner);
+    return this.resultDiagnostic(instance);
+  }
+
+  resultDiagnostic(instance) {
+    if (!this.exports.kame_wasm_result_diagnostic) return undefined;
+    try {
+      const bytes = this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_result_diagnostic(handle, dst, capacity, length), instance);
+      return bytes.length ? JSON.parse(this.decode0(bytes)).diagnostic : undefined;
+    } catch (error) {
+      // Fatal allocator exhaustion may prevent diagnostic copying; it must not
+      // replace an already established invocation failure or prevent disposal.
+      if (error.code === 'NO_MEMORY') return undefined;
+      throw error;
+    }
   }
 
   startedProcessGroup(instance, context, rawRequest) {
@@ -1843,6 +1957,7 @@ class Module {
     if (context.signal?.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
+    let failure;
     try {
       const compiled = this.write(source);
       if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
@@ -1859,21 +1974,28 @@ class Module {
       const encoded = this.write(expression);
       if (this.exports.kame_wasm_expression_begin(instance, encoded.pointer, encoded.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
       for (;;) {
-        await waitOutputReady(context.signal);
+        await this.waitReady(instance, context);
         if (context.signal?.aborted) {
           throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
         }
-        const state = this.exports.kame_wasm_step(instance);
+        const state = this.step(instance, context);
         this.drainExpressionEffects(instance);
         if (state === 2) break;
         if (state !== 1) continue;
         await this.service(instance, context);
       }
       return this.copyResult(instance);
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      if (context.signal?.aborted) this.exports.kame_wasm_expression_cancel(instance);
-      await this.cleanupInstance(instance);
-      this.exports.kame_wasm_instance_free(instance);
+      try {
+        if (context.signal?.aborted) this.exports.kame_wasm_expression_cancel(instance);
+        const diagnostic = await this.cleanupInstance(instance, context);
+        if (failure && diagnostic) failure.diagnostics = [diagnostic];
+      } finally {
+        this.exports.kame_wasm_instance_free(instance);
+      }
     }
   }
 
@@ -2084,6 +2206,9 @@ class Module {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     const pending = new Set();
+    let disposed;
+    const disposal = new Promise(resolve => { disposed = resolve; });
+    invocationDisposals.add(disposal);
     const cancellation = new AbortController();
     const externalSignal = context.signal;
     const cancel = () => cancellation.abort();
@@ -2094,6 +2219,7 @@ class Module {
     context.signal = cancellation.signal;
     let hostError;
     let targetStarted = false;
+    let failure;
     try {
       this.compileBuild(instance, source, name, context);
       this.registerPlugins(instance, context);
@@ -2113,8 +2239,8 @@ class Module {
       if (this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length) !== 0) throw this.compileFailure(instance, 'TGT_NO_RULE');
       targetStarted = true;
       for (;;) {
-        await waitOutputReady(context.signal);
-        const state = this.exports.kame_wasm_step(instance);
+        await this.waitReady(instance, context);
+        const state = this.step(instance, context);
         this.drainEvents(instance, context);
         if (state === 2) break;
         if (state !== 1) {
@@ -2129,16 +2255,25 @@ class Module {
       }
       const kind = this.exports.kame_wasm_result_kind(instance);
       return { kind, bytes: this.copyResult(instance), events: context.events?.slice() ?? [] };
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
-      cancellation.abort();
-      externalSignal?.removeEventListener('abort', cancel);
-      await Promise.all(pending);
       try {
-        if (targetStarted) this.drainEvents(instance, context);
+        cancellation.abort();
+        externalSignal?.removeEventListener('abort', cancel);
+        await Promise.all(pending);
+        try {
+          if (targetStarted) this.drainEvents(instance, context);
+        } finally {
+          const diagnostic = await this.cleanupInstance(instance, context);
+          if (context.api && failure && diagnostic) failure.diagnostics = [diagnostic];
+          invocationCancellations.delete(cancellation);
+          this.exports.kame_wasm_instance_free(instance);
+        }
       } finally {
-        await this.cleanupInstance(instance);
-        invocationCancellations.delete(cancellation);
-        this.exports.kame_wasm_instance_free(instance);
+        invocationDisposals.delete(disposal);
+        disposed();
       }
     }
   }
@@ -2153,7 +2288,7 @@ class Module {
     try {
       for (;;) {
         if (context.signal.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
-        await waitOutputReady(context.signal);
+        await this.waitReady(watch.instance, context);
         const state = this.drainWatch(watch);
         const snapshot = this.watchSnapshot(watch);
         this.drainEvents(watch.instance, context);
@@ -2212,7 +2347,7 @@ class Module {
       cancellation.abort();
       externalSignal?.removeEventListener('abort', cancel);
       await Promise.all(pending);
-      await this.cleanupInstance(instance);
+      await this.cleanupInstance(instance, context);
       this.exports.kame_wasm_instance_free(instance);
       throw error;
     }
@@ -2230,7 +2365,7 @@ class Module {
 
   drainWatch(watch) {
     const { instance, context } = watch;
-    const state = this.exports.kame_wasm_step(instance);
+    const state = this.step(instance, context);
     this.drainEvents(instance, context);
     this.drainExpressionEffects(instance);
     return state;
@@ -2249,7 +2384,7 @@ class Module {
     watch.cancellation.abort();
     await Promise.all(watch.pending);
     this.exports.kame_wasm_watch_cancel(watch.instance);
-    await this.cleanupInstance(watch.instance);
+    await this.cleanupInstance(watch.instance, watch.context);
     this.exports.kame_wasm_instance_free(watch.instance);
     watch.externalSignal?.removeEventListener('abort', watch.cancel);
   }
@@ -2264,6 +2399,9 @@ class Module {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     const pending = new Set();
+    let disposed;
+    const disposal = new Promise(resolve => { disposed = resolve; });
+    invocationDisposals.add(disposal);
     const cancellation = new AbortController();
     invocationCancellations.add(cancellation);
     context.concurrent = true;
@@ -2299,8 +2437,8 @@ class Module {
         for (;;) {
           context.timeoutMS = Number.isFinite(deadline) ? Math.max(1, Math.ceil(deadline - performance.now())) : 0;
           if (performance.now() >= deadline) throw Object.assign(new Error('invocation timed out'), { code: 'RECIPE_TIMEOUT' });
-          await waitOutputReady(context.signal);
-          const state = this.exports.kame_wasm_step(instance);
+          await this.waitReady(instance, context);
+          const state = this.step(instance, context);
           this.drainEvents(instance, context);
           this.drainExpressionEffects(instance);
           if (state === 2) break;
@@ -2324,14 +2462,20 @@ class Module {
       } else if (last !== undefined) rawPublication(stdout, last);
       return 0;
     } catch (error) {
+      if (error.code === 'RECIPE_TIMEOUT') this.exports.kame_wasm_finalization_tick?.(instance, process.hrtime.bigint(), 2);
       if (inv.json && lastDiagnostic !== null) return 1;
       throw error;
     } finally {
-      cancellation.abort();
-      await Promise.all(pending);
-      await this.cleanupInstance(instance);
-      invocationCancellations.delete(cancellation);
-      this.exports.kame_wasm_instance_free(instance);
+      try {
+        cancellation.abort();
+        await Promise.all(pending);
+        await this.cleanupInstance(instance, context);
+        invocationCancellations.delete(cancellation);
+        this.exports.kame_wasm_instance_free(instance);
+      } finally {
+        invocationDisposals.delete(disposal);
+        disposed();
+      }
     }
   }
 
@@ -2359,11 +2503,11 @@ function terminatePluginChild(child) {
   return timer;
 }
 
-function runPluginProcess(invocation, executable, responseLimit, signal, cwd) {
+function runPluginProcess(invocation, executable, responseLimit, signal, cwd, finalizing = false) {
   return new Promise((resolveResponse, rejectResponse) => {
     if (signal.aborted) { rejectResponse(new Error('cancelled')); return; }
     const child = spawn(executable[0], executable.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], detached: true, shell: false, cwd: cwd ?? process.cwd() });
-    track(child);
+    track(child, undefined, finalizing);
     const output = [];
     let outputBytes = 0;
     let overflow = false;
@@ -2731,7 +2875,7 @@ function runProcessDirect(script, context) {
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
     }
     const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, cwd: context.cwd ?? process.cwd(), detached: true });
-    track(child);
+    track(child, undefined, context.finalizing);
     const out = [];
     let failure = null;
     let killCompletion = Promise.resolve();
@@ -2890,7 +3034,7 @@ function runArgvCapture(stages, context) {
         }
         remaining++;
         if (i === 0 && context.onStarted) publish(() => { context.processGroup = context.onStarted(); });
-        track(child, context.processGroup);
+        track(child, context.processGroup, context.finalizing);
         const cancel = configuration.timeoutMS > 0 ? processDeadline(configuration.timeoutMS, () => stop('RECIPE_TIMEOUT', 'stage timed out')) : () => {};
         timers.push(cancel);
         child.once('exit', cancel);
@@ -3027,7 +3171,7 @@ function runProcessAttempt(module, instance, script, context, request, rawReques
       if (at > 0) childEnv[entry.slice(0, at)] = entry.slice(at + 1);
     }
     const child = spawn(shell[0], [...shell.slice(1), script], { stdio: ['ignore', 'pipe', 'pipe'], env: childEnv, cwd: context.cwd ?? process.cwd(), detached: true });
-    track(child);
+    track(child, undefined, context.finalizing);
     const out = [];
     const err = [];
     let outLength = 0;
@@ -3263,7 +3407,7 @@ async function discoverBuildSource(module, inv, sourceDirectory, watchedSources 
 }
 
 // Syntax and byte spans come from the portable parser, not a second JS grammar.
-async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true, selection = { defines: [], environment: [], parts: [] }) {
+async function expandSessionIncludes(module, sourceDirectory, name, text, lang, active = [], fileBacked = true, validate = true, selection = { defines: [], environment: [], parts: [] }, includes = []) {
   const identity = resolve(sourceDirectory, name);
   selection.watchedSources?.add(identity);
   sourceTexts.set(name, text);
@@ -3278,7 +3422,7 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
   const parts = [];
   const slice = (span) => new TextDecoder().decode(bytes.subarray(span.start, span.end));
   const append = (end) => {
-    const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), offset: start };
+    const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), offset: start, ...(includes.length ? { includes } : {}) };
     parts.push(part);
     selection.parts.push(document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => new TextDecoder().decode(bytes.subarray(item.span.start, item.span.end))).join('\n'));
   };
@@ -3303,7 +3447,7 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
       const detail = { code: 'FS_ERR', severity: 'error', message: `cannot read included source: ${included}`, source: name, span };
       throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
     }
-    parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity], true, validate, selection));
+    parts.push(...await expandSessionIncludes(module, sourceDirectory, included, child, lang, [...active, identity], true, validate, selection, [...includes, { source: name, label: included, start: span.start, end: span.end }]));
   };
   // All branches have already been validated by the portable parser. Walk only
   // the selected application AST; never interpret source text as JS grammar.
@@ -3848,7 +3992,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
     while (!cancellation.signal.aborted) {
       let busy = false;
       if (active) {
-        await waitOutputReady(cancellation.signal);
+        await module.waitReady(watch.instance, watch.context);
         const step = module.drainWatch(watch);
         if (step === 1) module.serviceWatchRequest(watch);
         if (watch.hostError) throw watch.hostError;
@@ -4109,7 +4253,7 @@ function runCache(inv) {
 }
 
 function writeVersion(asJSON) {
-  if (asJSON) stdout.write(`${JSON.stringify({ schema: 1, type: 'version', version: version(), buildID: 'unknown', buildTime: 'unknown', buildMode: 'wasm', runtime: 'WASM' })}\n`);
+  if (asJSON) stdout.write(`${JSON.stringify({ schema: 1, type: 'version', version: version(), buildID: 'unknown', buildTime: 'unknown', buildMode: 'wasm', runtime: 'WASM', ...versionIdentity() })}\n`);
   else stdout.write(`kame ${version()} (runtime=WASM)\n`);
 }
 
@@ -4184,7 +4328,7 @@ async function main() {
   return dispatch(module, inv, args.length === 0);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+if (process.argv[1] && existsSync(process.argv[1]) && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   main().then(
     (status) => { process.exitCode = status; },
     (error) => {

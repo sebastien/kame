@@ -80,8 +80,12 @@ int main(int argc, char **argv) {
         {"do", "cache"},
         {"do", "cache", "list", "clean"},
         {"do", "cache", "list", "--dry-run"},
+        {"do", "run", "--lang", "expr", "-c", "(finally! ([] 42) ([] (out! \"cleanup\")))"},
+        {"do", "run", "--lang", "expr", "-c", "(finally! ([] (fail! \"body\")) ([] (fail! \"cleanup\")))"},
+        {"do", "run", "--lang", "expr", "-c", "(? (finally! ([] missing) ([] (read \"denied\"))) 42)"},
+        {"do", "run", "--lang", "expr", "-n", "-c", "(str \"unknown\" (finally! ([] 42) ([] (out! \"cleanup\"))))"},
     };
-    const so_int statuses[] = {1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 2, 2, 2, 2, 2};
+    const so_int statuses[] = {1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 2, 2, 2, 2, 2, 0, 1, 1, 0};
     for (int iteration = 0; iteration < 256; iteration++) {
         test_cli_invalid_ast();
         mem_Stats ast_stats = mem_Tracker_Stats(&tracker);

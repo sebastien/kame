@@ -279,6 +279,16 @@ uint32_t kame_wasm_expression_effect_length(uint64_t instance);
 uint32_t kame_wasm_expression_effect_copy(uint64_t instance, uint32_t dst,
                                            uint32_t dst_len);
 uint32_t kame_wasm_step(uint64_t instance);
+/* Non-consuming schema-1 diagnostic document, or empty bytes if none. Copy
+ * after graceful teardown, before instance_free, to retain notes/related/cause. */
+uint32_t kame_wasm_result_diagnostic(uint64_t instance, uint32_t dst, uint32_t dst_len, uint32_t out_len);
+/* Graceful-finalization driver opt-in. Tick uses monotonic nanoseconds; stopping
+ * begins teardown (1 cancellation/disposal, 2 invocation timeout). Keep servicing
+ * requests while tick returns 1. A pending
+ * request's budget is 0 outside cleanup, positive milliseconds inside cleanup,
+ * or -1 after its deadline. Cleanup work keeps the original grants. */
+uint32_t kame_wasm_finalization_tick(uint64_t instance, int64_t now_ns, uint32_t stopping);
+int64_t kame_wasm_finalization_budget(uint64_t instance, uint32_t all_scopes);
 uint32_t kame_wasm_next_event_header(uint64_t instance, uint32_t dst,
                                      uint32_t dst_len);
 uint32_t kame_wasm_next_request_kind(uint64_t instance);

@@ -107,7 +107,9 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 		emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "FS_ERR", Severity: diagnostic.Error, Message: "cannot read included source: " + includeName, Span: diagnostic.Span{Start: span.Start, End: span.End}}, s.JSON, authored)
 		return false
 	}
-	s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), Data: data, OwnedName: true, FileBacked: true, Parent: fileIndex})
+	includes := slices.Clone(mem.System, file.Includes)
+	includes = slices.Append(mem.System, includes, diagnostic.Frame{Kind: "include", Label: includeName, Source: file.Name, Span: diagnostic.Span{Start: span.Start, End: span.End}})
+	s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), Data: data, OwnedName: true, FileBacked: true, Parent: fileIndex, Includes: includes})
 	return expandIncludesLanguage(s, len(s.Files)-1, out, lang)
 }
 

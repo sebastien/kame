@@ -70,6 +70,45 @@ missing signature verifier, invalid signature, missing manifest entry, or
 checksum mismatch is fatal. A partial or unverified download never replaces a
 cached artifact, and cached artifacts are checked again before reuse.
 
+### WASM identity reporting
+
+Release provenance is schema-1 JSON with `version`, `sourceRevision`, `created`,
+and `subjects`; each subject has an asset `name` and lowercase SHA-256 `sha256`.
+`created` is the release assembly time, not the compilation time. The builder
+must describe the revision used to produce the staged assets, not merely the
+checkout revision at a later signing step.
+
+For JavaScript JSON version reporting, look for `PROVENANCE.json` beside the
+wrapper, then in its parent directory (the versioned launcher-cache root).
+Use the first existing candidate; an invalid or unreadable candidate does not
+authorize searching elsewhere for a more convenient identity. Do not search
+the project's cwd or fetch metadata. Flat release installations retain adjacent
+provenance; launcher installations retain it at the versioned cache root.
+
+An identity match requires a valid schema-1 document, a concrete version,
+a nonempty, non-`unknown` source revision, and unique, valid digest entries for
+both `kame.js` and `kame.wasm`. Hash the running wrapper and the actual selected
+module, including a `KAME_WASM` override, against those entries. Renaming the
+wrapper to `kame.mjs` does not change its canonical subject name or byte digest.
+Both must match before advertising the provenance version and source revision
+through the existing JSON `version` and `buildID` fields. Neither `KAME_VERSION`
+nor an unrelated `VERSION` file can supply or override that matched identity.
+
+Missing, unreadable, malformed, unsupported, incomplete or mismatched provenance,
+or an unavailable selected asset, leaves `buildID` and `buildTime` unknown;
+the version query still succeeds without instantiating the module. Retain the
+ordinary version-label fallback when identity is unavailable. Reporting performs
+only local reads and hashes, never installation, cache writes, network requests
+or process execution. Human short-format version queries remain available
+without the module or provenance.
+
+Matching local metadata establishes byte correspondence, not publisher
+authenticity: replacing both assets and provenance can produce another local
+match. Authentication belongs to signed-manifest verification during
+provisioning and reuse. That verification remains mandatory and fails closed;
+an unknown identity response cannot bypass it. SDK consumers pin a signed
+release or verified artifact digests, not merely a displayed version label.
+
 ## Version Pinning
 
 The launcher uses a pinned version by default. Valid version labels contain
@@ -113,6 +152,8 @@ Layout:
 
 ```text
 $CACHE/<version>/SHA256SUMS
+$CACHE/<version>/SHA256SUMS.sig
+$CACHE/<version>/PROVENANCE.json
 $CACHE/<version>/ape/kame.com
 $CACHE/<version>/wasm/kame.js
 $CACHE/<version>/wasm/kame.wasm
@@ -345,6 +386,11 @@ the canonical build.
   provenance tampering, and missing OpenSSL verifier each fail closed and leave
   no installed artifact.
 - A second invocation with a populated cache performs no network access.
+- Provisioned WASM assets retain signed provenance for local identity reporting.
+  JSON version output matches both selected assets, including wrapper renaming
+  and module overrides; missing or mismatched local reporting metadata yields
+  unknown identity without instantiation or downloads. Tampering still fails
+  normal provisioning/reuse verification rather than downgrading its checks.
 - `KAME_NO_DOWNLOAD=1` fails when the artifact is absent.
 - A lone `--version` prints `kame VERSION (runtime=unknown)` and provisions nothing.
 - `KAME_VERSION=latest` resolves the selector, prints its concrete version

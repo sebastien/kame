@@ -11,6 +11,8 @@ import (
 
 // The invocation root owns work independently of whichever value demanded it.
 type processTask struct {
+	Finalizer *FinalizerState
+	FinalizerCleanup bool
 	Program *Program
 	Node *core.Node
 	Root *core.Root
@@ -24,10 +26,13 @@ type processTask struct {
 func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState) Result {
 	task := mem.Alloc[processTask](p.Alloc)
 	task.Program, task.Graph = p, expr.Clone(p.Alloc, e)
+	task.Finalizer = c.finalizer
+	task.FinalizerCleanup = c.finalizer != nil && c.finalizer.Stage >= 2
 	task.Graph.Async = false
 	task.Context = Context{Program: p, Scope: c.Scope, Run: p.Alloc, Cwd: owned(p.Alloc, c.Cwd), Source: owned(p.Alloc, c.Source), HasArgs: c.HasArgs, HasEnvironment: c.HasEnvironment, Phase: c.Phase, DirectHostRequests: c.DirectHostRequests, DependencyObserver: c.DependencyObserver, ResolverState: c.ResolverState, ResolveDefinition: c.ResolveDefinition, ToolResolver: c.ToolResolver}
 	task.Context.ScriptGroup, task.Context.TimeoutMS = c.ScriptGroup, c.TimeoutMS
 	task.Context.RecipeNode = c.RecipeNode
+	task.Context.finalizer = c.finalizer
 	task.Context.DefinitionNamespace, task.Context.HasDefinitionNamespace = c.DefinitionNamespace, c.HasDefinitionNamespace
 	task.Context.DependencyContextObserver = c.DependencyContextObserver
 	for i := range c.Environment { task.Context.Environment = slices.Append(p.Alloc, task.Context.Environment, owned(p.Alloc, c.Environment[i])) }
@@ -58,7 +63,7 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	key.Free(p.Alloc)
 	if task.Node == nil { freeProcessTask(p.Alloc, task); return failure(c.Run, "HOST_FAIL", e.Span, "cannot schedule async process") }
 	task.Root = p.Engine.RequestRoot(task.Node)
-	task.LauncherRoot = c.Engine.RetainRoot()
+	if c.finalizer == nil { task.LauncherRoot = c.Engine.RetainRoot() }
 	p.Processes = slices.Append(p.Alloc, p.Processes, task)
 	// Queue startup before the caller can advance to its next statement.
 	p.Engine.DispatchRoot(task.Node)
@@ -132,6 +137,7 @@ func (p *Program) CancelProcesses() {
 	if p == nil || p.Engine == nil { return }
 	for i := range p.Processes {
 		task := p.Processes[i]
+		if task.FinalizerCleanup && task.Finalizer != nil && !task.Finalizer.Expired && task.Finalizer.Stage < 4 { continue }
 		if task.Root != nil { p.Engine.Release(task.Root); task.Root = nil }
 		if task.LauncherRoot != nil { p.Engine.Release(task.LauncherRoot); task.LauncherRoot = nil }
 	}

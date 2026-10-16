@@ -41,13 +41,15 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 		for j := range items {
 			entries = slices.Append(r.Alloc, entries, items[j].Text)
 		}
-		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0, Comment: host.PayloadText(inputs[i], "comment"), Defines: defines, Check: host.PayloadInt(inputs[i], "check") != 0}
+		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), Includes: descriptorIncludes(r.Alloc, inputs[i]), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0, Comment: host.PayloadText(inputs[i], "comment"), Defines: defines, Check: host.PayloadInt(inputs[i], "check") != 0}
 		if f.Lang != "km" && f.Lang != "kmk" && f.Lang != "kash" && f.Lang != "expr" && f.Lang != "template" {
 			for j := range fragments {
+				freeDescriptorIncludes(r.Alloc, fragments[j].Includes)
 				slices.Free(r.Alloc, fragments[j].Entries)
 				slices.Free(r.Alloc, fragments[j].Defines)
 			}
 			slices.Free(r.Alloc, defines)
+			freeDescriptorIncludes(r.Alloc, f.Includes)
 			slices.Free(r.Alloc, entries)
 			slices.Free(r.Alloc, fragments)
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid session language")}
@@ -92,6 +94,7 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 	slices.Free(r.Alloc, environment)
 	r.Host = nil
 	for i := range fragments {
+		freeDescriptorIncludes(r.Alloc, fragments[i].Includes)
 		slices.Free(r.Alloc, fragments[i].Entries)
 		slices.Free(r.Alloc, fragments[i].Defines)
 	}

@@ -11,11 +11,11 @@ engine. These surfaces share expressions and values, not one interchangeable
 outer grammar. They can be used independently; a value or template task does
 not need a build file.
 
-These references teach the specified contract, not implementation status.
-`@{ref}` / `@(call)`, `--set`, mixed Kash expression words and pipe-preserving
-formatting may be ahead of an installed backend or executable example file.
-Check help and small parse/run probes before claiming support; documentation
-updates do not implement features or migrate executable sources.
+These references and this checkout's executable examples use `@{ref}` /
+`@(call)`, `--set`, mixed Kash expression words and pipe-preserving formatting.
+Older installed builds may use earlier syntax. Check help and small parse/run
+probes before claiming support; update downstream sources explicitly using the
+repository's `MIGRATION.md`, not an automatic formatter migration.
 
 ## Choose the language first
 

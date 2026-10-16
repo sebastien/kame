@@ -66,6 +66,92 @@ if [ "$status" = 0 ] && [ ! -s "$work/err" ] && node -e 'const i=JSON.parse(requ
 else
 	test-fail "version JSON: status=$status out=$(cat "$work/out") err=$(cat "$work/err")"
 fi
+test-step "JSON identity matches local provenance without loading even an invalid module"
+node --input-type=module - "$CLI_ROOT/src/js/kame.js" "$work/identity" <<'JS'
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+const [source, root] = process.argv.slice(2);
+const directory = join(root, 'wasm');
+mkdirSync(directory, { recursive: true });
+const wrapper = join(directory, 'kame.mjs');
+const module = join(directory, 'kame.wasm');
+const parent = join(root, 'PROVENANCE.json');
+const local = join(directory, 'PROVENANCE.json');
+copyFileSync(source, wrapper);
+writeFileSync(module, 'not a WebAssembly module');
+writeFileSync(join(root, 'Makefile.kmk'), 'default :\n\ttouch forbidden\n');
+const metadata = {
+  schema: 1, version: '0.3.0', sourceRevision: 'a'.repeat(40), created: '2026-10-17T00:00:00Z',
+  subjects: [['kame.js', wrapper], ['kame.wasm', module]].map(([name, path]) => ({ name, sha256: createHash('sha256').update(readFileSync(path)).digest('hex') })),
+};
+const publish = (value, path = parent) => writeFileSync(path, JSON.stringify(value));
+const query = (known, environment = {}) => {
+  const result = spawnSync(process.execPath, [wrapper, '--json', '--version'], {
+    cwd: root, env: { ...process.env, KAME_VERSION: 'label-only', KAME_WASM: '', ...environment }, encoding: 'utf8', timeout: 5000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  const value = JSON.parse(result.stdout);
+  assert.deepEqual(value, { schema: 1, type: 'version', version: known ? metadata.version : 'label-only', buildID: known ? metadata.sourceRevision : 'unknown', buildTime: 'unknown', buildMode: 'wasm', runtime: 'WASM' });
+};
+query(false);
+publish(metadata);
+query(true); // Parent cache metadata, renamed wrapper, invalid WASM and misleading selector.
+publish(metadata, local);
+query(true);
+writeFileSync(parent, 'invalid parent');
+query(true); // Adjacent metadata takes priority.
+publish(metadata);
+for (const change of [
+  value => { value.schema = 2; },
+  value => { value.version = '../escape'; },
+  value => { value.version = 'latest'; },
+  value => { value.sourceRevision = 'unknown'; },
+  value => { delete value.created; },
+  value => { value.subjects.pop(); },
+  value => { value.subjects.push(value.subjects[0]); },
+  value => { value.subjects[0].sha256 = '0'.repeat(64); },
+  value => { value.subjects[1].sha256 = '0'.repeat(64); },
+  value => { value.subjects[0].sha256 = 'INVALID'; },
+]) {
+  const changed = structuredClone(metadata);
+  change(changed);
+  publish(changed, local);
+  query(false); // An unusable first candidate must not fall back to valid parent metadata.
+}
+for (const invalid of ['{', 'null', '[]']) {
+  writeFileSync(local, invalid);
+  query(false);
+}
+rmSync(local);
+symlinkSync(join(root, 'absent-metadata'), local);
+query(false);
+rmSync(local);
+mkdirSync(local);
+query(false);
+rmSync(local, { recursive: true });
+const override = join(root, 'override.wasm');
+copyFileSync(module, override);
+query(true, { KAME_WASM: override });
+writeFileSync(override, 'different module');
+query(false, { KAME_WASM: override });
+query(false, { KAME_WASM: join(root, 'missing.wasm') });
+writeFileSync(wrapper, readFileSync(wrapper, 'utf8') + '\n// changed wrapper\n');
+query(false);
+copyFileSync(source, wrapper);
+rmSync(module);
+query(false);
+const human = spawnSync(process.execPath, [wrapper, '--version'], { encoding: 'utf8', env: { ...process.env, KAME_VERSION: 'label-only', KAME_WASM: '' }, timeout: 5000 });
+assert.equal(human.status, 0, human.stderr);
+assert.equal(human.stdout, 'kame label-only (runtime=WASM)\n');
+assert.deepEqual(readdirSync(root).sort(), ['Makefile.kmk', 'PROVENANCE.json', 'override.wasm', 'wasm']);
+console.log('matching, unavailable and mismatched provenance preserve fast, read-only version reporting');
+JS
+test-ok "local identity is distinct from version selectors and publisher authentication"
+
 test-step "help prints usage"
 run --help
 if [ "$status" = 0 ] && [ -s "$work/out" ]; then

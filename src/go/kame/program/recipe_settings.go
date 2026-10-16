@@ -356,7 +356,7 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 	entry = &p.Instances[index]
 	entry.KashRunning = false
 	if result.Diagnostic.Code != "" {
-		if entry.retryCount < p.Options.RetryCount && result.Diagnostic.Code != "EXEC_CANCELLED" && result.Diagnostic.Code != "PARSE_ERR" {
+		if entry.retryCount < p.Options.RetryCount && !result.Diagnostic.Protected && result.Diagnostic.Code != "EXEC_CANCELLED" && result.Diagnostic.Code != "PARSE_ERR" {
 			entry.retryCount++
 			slices.Free(p.Alloc, entry.CacheStdout)
 			slices.Free(p.Alloc, entry.CacheStderr)

@@ -21,10 +21,10 @@ cached tasks, and managed services on one incremental engine.
 Use its Lisp-like expressions, value scripts, templates, build rules, or typed
 Kash process scripts independently, then compose them as a project grows.
 
-The documentation teaches the specified contract. Installed backends and
-executable examples may lag `@{ref}` / `@(call)`, `--set`, mixed Kash expression
-words and pipe-preserving formatting; verify support with help and small probes.
-Documentation updates do not implement or automatically migrate executable code.
+The runtime and executable examples in this checkout use `@{ref}` / `@(call)`,
+`--set`, mixed Kash expression words and pipe-preserving formatting. Older
+installed builds may use earlier syntax; see [MIGRATION.md](MIGRATION.md) before
+updating downstream sources.
 
 ## Get started
 

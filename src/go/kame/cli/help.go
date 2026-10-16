@@ -116,10 +116,11 @@ func HelpText(topic string) string {
 			}
 		}
 		if topic == "plan" || topic == "cat" || topic == "tools" || topic == "inputs" || topic == "outputs" || topic == "span" {
-			b.WriteString("Source: one -f FILE or -c TEXT; -C DIR, --define NAME=VALUE, --set NAME=LITERAL, --tool NAME=PATH.\nNAME=VALUE overrides a declared value or binds a task argument.\nInspection never executes recipes; execution-only flags are rejected.\n")
-		}
-		if topic == "plan" || topic == "cat" || topic == "tools" || topic == "inputs" || topic == "outputs" || topic == "span" {
-			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES]; inspection still forbids effects.\n")
+			b.WriteString("Source: one -f FILE or -c TEXT; -C DIR, --define NAME=VALUE, --set NAME=LITERAL, --tool NAME=PATH.\nNAME=VALUE overrides a declared value or binds a task argument.\n")
+			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
+			if topic != "cat" {
+				b.WriteString("Inspection never executes recipes or applies deferred writes; execution-only flags are rejected.\n")
+			}
 		}
 		if topic == "cat" {
 			b.WriteString("One target (default when omitted); builds prerequisites before printing exact bytes.\nSupports -j/--jobs, --force, --verbose, --shell, --env, --timeout, --retry, --log-limit, --capture-limit. No --watch or dry-run.\n")

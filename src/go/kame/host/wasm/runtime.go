@@ -19,6 +19,9 @@ import (
 // Runtime is the portable, single-owner state machine used by the wasm ABI.
 // It deliberately neither performs host work nor creates a thread.
 type Runtime struct {
+	FinalizationEnabled bool
+	FinalizationNS int64
+	FinalizationRequests []host.Request
 	Alloc      mem.Allocator
 	Arena      *Heap
 	OwnArena   bool
@@ -646,6 +649,7 @@ func (r *Runtime) ProcessRetainLimit(request host.Request) int {
 }
 
 func (r *Runtime) ProcessTerminal(request host.Request, stdout []byte, stderr []byte, status int, signal int, outcome int, code string, message string) {
+	if r != nil { r.retireFinalizationRequest(request.ID) }
 	if r != nil && r.Program != nil {
 		r.Program.ProcessTerminal(request, stdout, stderr, status, signal, outcome, code, message)
 	}
@@ -678,7 +682,8 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		result.Free(c.Allocator())
 		return core.ProducerFailed
 	}
-	r.Effects = context.Effects
+	for i := range context.Effects { r.Effects = slices.Append(r.Alloc, r.Effects, context.Effects[i]) }
+	slices.Free(r.Alloc, context.Effects)
 	context.Effects = nil
 	c.Publish(result.Value)
 	result.Value = core.Value{}
@@ -737,10 +742,12 @@ func (r *Runtime) Step() host.NextResult {
 		return host.NextResult{}
 	}
 	if r.Program != nil {
+		r.configureFinalization()
 		if r.Handle != nil {
 			r.Program.Tick(0)
 		}
 		if outbound := r.Program.NextOutbound(); outbound.OK {
+			r.trackFinalizationRequest(outbound)
 			return outbound
 		}
 		return host.NextResult{}
@@ -748,8 +755,19 @@ func (r *Runtime) Step() host.NextResult {
 	if r.Engine == nil {
 		return host.NextResult{}
 	}
+	r.configureFinalization()
+	r.Eval.PollFinalizers()
 	r.Engine.Step()
-	return r.Eval.Requests.Next()
+	for r.FinalizationEnabled {
+		cancel := r.Engine.NextCancellation()
+		if cancel.RequestID == 0 { break }
+		payload := host.ServiceCancelPayload(r.Alloc, cancel.RequestID, 0)
+		r.Eval.Requests.Submit(cancel.NodeID, cancel.Generation, cancel.Attempt, host.RequestProcessCancel, payload)
+		payload.Free(r.Alloc)
+	}
+	next := r.Eval.Requests.Next()
+	r.trackFinalizationRequest(next)
+	return next
 }
 
 // Complete transfers host completion data to the engine. Stale generations and
@@ -760,6 +778,7 @@ func (r *Runtime) Complete(request host.Request, value core.Value, diagnostic di
 		diagnostic.Free(mem.System)
 		return
 	}
+	r.retireFinalizationRequest(request.ID)
 	if r.Program != nil {
 		r.Program.Complete(request, value, diagnostic)
 		return
@@ -852,6 +871,7 @@ func (r *Runtime) Free() {
 	if r == nil {
 		return
 	}
+	slices.Free(r.Alloc, r.FinalizationRequests)
 	r.freeWatchHandles()
 	if r.Handle != nil {
 		r.Handle.Free()

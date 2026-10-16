@@ -27,6 +27,7 @@ type OperationCall func(*Context, any, []core.Value) Result
 type ContextFree func(mem.Allocator, any)
 
 type Operation struct {
+	ScopedFinalizer bool
 	Name         string
 	Call         OperationCall
 	Context      any

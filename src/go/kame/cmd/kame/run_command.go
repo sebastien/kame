@@ -34,12 +34,15 @@ func runPrimarySession(args []string, in io.Reader, out io.Writer, errOut io.Wri
 }
 
 type exprEffectOutput struct {
+	Program *program.Program
 	Out io.Writer
 	Err io.Writer
 }
 
 func writeExprEffect(value any, effect eval.Effect) {
 	output := value.(*exprEffectOutput)
+	previousOutput := setNativeOutputDeadline(output.Program, effect.FinalizationDeadlineNS)
+	defer restoreNativeOutputDeadline(previousOutput)
 	if effect.Kind == eval.EffectErr {
 		dashboardRaw(output.Err, effect.Data, posix.StderrIsTerminal())
 		output.Err.Write(effect.Data)
@@ -77,7 +80,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 				if j+1 != len(file.Parts) {
 					entries = nil
 				}
-				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Lang: input.Lang, Entries: entries, Inline: j+1 != len(file.Parts), SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
+				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Includes: file.Parts[j].Includes, Lang: input.Lang, Entries: entries, Inline: j+1 != len(file.Parts), SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
 			}
 			continue
 		} else if input.Kind == "stdin" {
@@ -106,7 +109,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 				if j+1 != len(file.Parts) {
 					entries = nil
 				}
-				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Lang: input.Lang, Entries: entries, Inline: true, SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
+				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Includes: file.Parts[j].Includes, Lang: input.Lang, Entries: entries, Inline: true, SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
 			}
 			continue
 		}
@@ -174,7 +177,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	slices.Free(mem.System, values)
 	// A single rule source keeps the established build presentation, parallel
 	// target handling, JSON events, freshness and cache path unchanged.
-	output := exprEffectOutput{Out: out, Err: errOut}
+	output := exprEffectOutput{Program: p, Out: out, Err: errOut}
 	if inv.JSON && inv.Name != "render" {
 		session.SetJSON(true)
 	} else {
@@ -213,7 +216,11 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 			signal := posix.TakeSignal()
 			if signal != 0 {
 				h.Cancel()
-				tickCLIProgram(p, 10, errOut, inv.JSON)
+				p.Eval.BeginFinalization()
+				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
+				if !inv.JSON && len(h.Node.Diagnostic.Notes)+len(h.Node.Diagnostic.Related) != 0 {
+					emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded)
+				}
 				h.Free()
 				if signal < 0 {
 					return 128 - signal
@@ -221,15 +228,39 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 				return 128 + signal
 			}
 			if inv.TimeoutMS > 0 && (time.Now().UnixNano()-startedAt)/1000000 >= inv.TimeoutMS {
+				p.Eval.BeginFinalizationWith(diagnostic.Diagnostic{Code: "RECIPE_TIMEOUT", Severity: diagnostic.Error, Message: "invocation timed out"})
 				h.Cancel()
-				tickCLIProgram(p, 10, errOut, inv.JSON)
+				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
+				if !inv.JSON && h.Node.Diagnostic.Code == "RECIPE_TIMEOUT" {
+					emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded)
+				} else if !inv.JSON || h.Node.Diagnostic.Code != "RECIPE_TIMEOUT" {
+					sourceError(diagnosticWriter(out, errOut, inv.JSON), "RECIPE_TIMEOUT", "invocation timed out", inv.JSON)
+				}
 				h.Free()
-				sourceError(diagnosticWriter(out, errOut, inv.JSON), "RECIPE_TIMEOUT", "invocation timed out", inv.JSON)
 				return 1
 			}
 			tickCLIProgram(p, 10, errOut, inv.JSON)
 			if inv.JSON { session.Observe(h) }
 			drainEvents(p, out, errOut, inv.JSON, &progress)
+			if signal := nativeOutputSignal(); signal != 0 {
+				p.Eval.BeginFinalization()
+				h.Cancel()
+				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
+				if !inv.JSON && len(h.Node.Diagnostic.Notes)+len(h.Node.Diagnostic.Related) != 0 { emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded) }
+				h.Free()
+				if signal < 0 { return 128 - signal }
+				return 128 + signal
+			}
+			if code := nativeOutputFailure(); code != "" && h.Node.Diagnostic.Code == "" {
+				p.Eval.BeginFinalizationWith(diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: "cleanup output delivery failed"})
+				h.Cancel()
+				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
+				if h.Node.Diagnostic.Code != "" {
+					if !inv.JSON { emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded) }
+				} else { sourceError(diagnosticWriter(out, errOut, inv.JSON), code, "cleanup output delivery failed", inv.JSON) }
+				h.Free()
+				return 1
+			}
 			if h.Definition && h.Node.Current {
 				if inv.Name == "render" {
 					last.Free(mem.System)
@@ -293,6 +324,13 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		writeValue(out, last)
 	}
 	return 0
+}
+
+func finishSessionFinalizers(session *program.Session, h *program.Handle, out io.Writer, errOut io.Writer, json bool, progress *buildProgress) {
+	p := session.Program
+	for p.Eval.Finalizing() { tickCLIProgram(p, 10, errOut, json) }
+	if json { session.Observe(h) }
+	drainEvents(p, out, errOut, json, progress)
 }
 
 func freeRunInputs(fragments []program.Fragment, data [][]byte, names []string) {

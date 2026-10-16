@@ -9,6 +9,7 @@ const version = "v17"
 func Register(r *eval.Registry) bool {
 	return pure(r, "not", opNot, 1, 1) && pure(r, "bool", opBool, 1, 1) && pure(r, "blank?", opBlank, 1, 1) &&
 		contract(r, "fail!", opFail, 1, 1, eval.ControlOperation, eval.AllPhases, eval.RaisesFailure) &&
+		r.Add(eval.Operation{Name: "finally!", Call: opFinally, MinArity: 2, MaxArity: 3, Version: version, Category: eval.ControlOperation, Phases: eval.EvaluationAllowed, Behavior: eval.RaisesFailure | eval.CallsCallable | eval.ReadsClock, ScopedFinalizer: true}) &&
 		pure(r, "parse-json", opParseJSON, 1, 1) && pure(r, "str", opStr, 0, -1) && pure(r, "json", opJSON, 1, 1) && pure(r, "count", opCount, 1, 1) &&
 		pure(r, "eq", opEq, 2, 2) && pure(r, "is", opIs, 2, 2) && pure(r, "has?", opHas, 2, 2) &&
 		pure(r, "ne", opNe, 2, 2) && pure(r, "lt", opLt, 2, 2) &&

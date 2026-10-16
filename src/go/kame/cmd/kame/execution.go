@@ -113,6 +113,8 @@ func materializeTargets(p *program.Program, targets []string, out io.Writer, err
 }
 
 func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool, progress *buildProgress) {
+	previousOutput := setNativeOutputDeadline(p, 0)
+	defer restoreNativeOutputDeadline(previousOutput)
 	var messages = bytes.NewBuffer(mem.System, nil)
 	destination := errOut
 	if !json && dashboardLive {
@@ -121,6 +123,7 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 	for {
 		next := p.NextEvent()
 		if !next.OK {
+			restoreNativeOutputDeadline(previousOutput)
 			redrawDashboard(errOut, progress)
 			publishDashboard(destination, messages.Bytes())
 			messages.Free()
@@ -131,6 +134,7 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			return
 		}
 		event := next.Event
+		setNativeOutputDeadline(p, event.FinalizationDeadlineNS)
 		observeWorker(event)
 		observeOutcome(event, progress)
 		invocationCounts = *progress

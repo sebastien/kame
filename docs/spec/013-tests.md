@@ -199,6 +199,63 @@ Native/WASM conformance covers:
 Fixtures and advertised examples must remain runnable; regression coverage
 continues to apply when test infrastructure changes.
 
+### Configuration and composition requirements
+
+Native/WASM conformance covers the contracts in 004, 009, 011 and 018:
+
+- Authored defaults, `KAME_NAME` strings, ordered `--define`/`--set` options and
+  final-precedence bare assignments; ordinary `=` values remain configurable.
+- False versus the string `":false"`, empty lists, and list elements containing
+  spaces. Overrides replace complete contributed aggregates without demanding
+  their original operands; authored contributions preserve order and duplicates.
+- A valid literal with an invalid setting shape is accepted by the CLI but fails
+  when its authored checked path is demanded. Include element constraints,
+  setting-specific `USER_ERROR` without rejected-value disclosure, unused checks,
+  and pure checks used during source selection and computed output registration.
+- Consumer settings before includes, contributions afterward, and repeated and
+  nested includes. Conflicts locate both definitions and include sites; skipped
+  defaults and valid repeated contributions are not diagnosed as conflicts.
+  Formatting preserves this declaration order.
+- Quoted literal `"--mtime=@0"` in direct Kash retains argv bytes and formats
+  idempotently, while unquoted reserved syntax reports the correct boundary.
+
+### Artifact identity requirements
+
+JavaScript wrapper and distribution conformance covers 009, 010 and 015:
+
+- Matching local provenance identifies both selected wrapper/module bytes in
+  schema-1 JSON without instantiating the module, loading project sources,
+  launching processes, writing caches or accessing the network.
+- Missing, unreadable, malformed, unsupported, incomplete and mismatched metadata
+  yields unknown build identity with a successful version query. Cover missing
+  modules, wrapper renaming, changed wrapper bytes, different `KAME_WASM` bytes,
+  duplicate subjects, environment version selectors, and provenance lookup
+  independent of cwd. Assembly time must not become compilation time.
+- Human short-format version output remains available without the module or
+  metadata. Signed-manifest provisioning and reuse still reject tampering;
+  metadata-only version reporting is not an authenticity assertion.
+
+These scenarios require no new configuration schema, runtime-discovered output
+inventory, or general cleanup syntax. Output and service acceptance remains
+governed by 024, 039 and 040, including their explicit ownership boundaries.
+
+### Kame finalization requirements
+
+Conformance for [043-kame-finalization.md](043-kame-finalization.md) covers:
+
+- Both callable signatures; optional timeout options, defaults, limits and
+  pre-callback validation; aliases, `apply`, lazy definitions and nil/false results.
+- Every body/cleanup outcome combination, secondary locations, sticky capability
+  denial/cancellation, body timeouts and separate cleanup deadlines.
+- Inside-out unwinding with a shared outer deadline; shorter inner limits,
+  no extension by longer inner limits, skipped finalizers and repeated signals.
+- Body and cleanup async ownership, join/cancel/reap ordering, shared-dependency
+  isolation, suspension without replay, invalidation and retry teardown ordering.
+- Accepted and unaccepted effect ordering, visible cleanup effects after body
+  failure, rejection of rendering/deferred-only contexts and effect-free dry-run.
+- Native/WASM graceful cancellation and disposal, unavailable host support,
+  backpressure and repeated tracker/sanitizer checks with harmless fixture work.
+
 ## Suite acceptance criteria
 
 - `tests/harness.sh` exits 0 on a clean checkout after `make test-cli`.

@@ -33,6 +33,7 @@ func rejectStrandedCapture(a mem.Allocator, value *core.Value, span source.Span)
 }
 
 func (p *Program) body(scope *Scope, body []*expr.Expr, context *Context) Result {
+	if context.finalizer != nil && context.Engine != nil && len(body) != 0 { return p.finalizerBody(scope, body, context) }
 	result := Result{Value: core.Value{Kind: core.Nil}}
 	for i := range body {
 		// Discard: intermediates never escape, so release callables as well
@@ -50,10 +51,11 @@ func (p *Program) body(scope *Scope, body []*expr.Expr, context *Context) Result
 func (p *Program) fallback(scope *Scope, values []*expr.Expr, context *Context) Result {
 	for i := range values {
 		r := p.evaluate(context.Engine, scope, values[i], context)
-		if r.Waiting || r.Diagnostic.Code != "REF_MISSING" {
+		if r.Waiting || r.Diagnostic.Protected || r.Diagnostic.Code != "REF_MISSING" {
 			return r
 		}
 		r.Diagnostic.Free(context.Run)
+		context.handledFinalizerFailure()
 	}
 	return Result{Value: core.Value{Kind: core.Nil}}
 }

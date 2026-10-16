@@ -48,6 +48,7 @@ test-step "verify the signature and execute the staged WASM pair"
 mkdir -p "$root/manual"
 cp "$release/kame.js" "$root/manual/kame.mjs"
 cp "$release/kame.wasm" "$root/manual/kame.wasm"
+cp "$release/PROVENANCE.json" "$root/manual/PROVENANCE.json"
 # The manual command must work even inside a CommonJS project.
 printf '{"type":"commonjs"}\n' >"$root/manual/package.json"
 if openssl pkeyutl -verify -pubin -inkey "$root/keys/verification.pem" -rawin \
@@ -57,6 +58,12 @@ if openssl pkeyutl -verify -pubin -inkey "$root/keys/verification.pem" -rawin \
 	test-ok "signed release includes a usable WASM CLI"
 else
 	test-fail "signature verification or WASM execution failed"
+fi
+KAME_VERSION=unrelated-selector node "$root/manual/kame.mjs" --json --version >"$root/manual/version.json"
+if jq -e --arg version "$(cat VERSION)" '.version == $version and .buildID == "test-fixture" and .buildTime == "unknown" and .runtime == "WASM"' "$root/manual/version.json" >/dev/null; then
+	test-ok "staged provenance identifies the renamed wrapper and module, not an environment selector"
+else
+	test-fail "staged WASM identity does not match its provenance"
 fi
 cp "$release/SHA256SUMS" "$root/tampered"
 printf 'tampered\n' >>"$root/tampered"

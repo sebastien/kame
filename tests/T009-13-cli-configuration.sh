@@ -124,7 +124,7 @@ PY
     "${runner[@]}" do run --lang km -c '(out! "forbidden")' --set "value=$value" >"$project/value" 2>"$project/error" || status=$?
     if [ "$status" = 2 ] && grep -q OPT_VALUE_INVALID "$project/error" && [ ! -s "$project/value" ]; then test-ok "$backend rejects executable typed input before effects"; else test-fail "$backend typed validation ($status)"; cat "$project/value" "$project/error"; fi
   done
-  test-step "$backend removed typed option recovery"
+   test-step "$backend removed typed option recovery"
   for removed in --define-value --define-value=VALUE=:false; do
     for format in human plain json; do
       status=0
@@ -133,7 +133,23 @@ PY
       if [ "$format" = json ]; then options=(--json); report="$project/value"; fi
       "${runner[@]}" "${options[@]}" do run --lang km -c '(out! "forbidden")' "$removed" >"$project/value" 2>"$project/error" || status=$?
       if [ "$status" = 2 ] && grep -q OPT_UNKNOWN "$report" && grep -q -- '--set NAME=LITERAL' "$report" && { [ "$format" = json ] || [ ! -s "$project/value" ]; }; then test-ok "$backend removed option gives $format recovery before effects"; else test-fail "$backend removed option recovery ($format/$status)"; cat "$project/value" "$project/error"; fi
-    done
-  done
+   done
+   test-step "$backend authored setting checks are lazy, pure and name constraints without disclosing values"
+   checks=$'ITEMS ?= []\n(checked-items!) = (if (list? ITEMS) (if (= (count (filter-out string? ITEMS)) 0) ITEMS (fail! "ITEMS must contain strings")) (fail! "ITEMS must be a list"))\n'
+   "${runner[@]}" do run --print-result --lang km -c "$checks" -c '(checked-items!)' --set 'ITEMS=["two words" ""]' >"$project/value" 2>"$project/error"
+   if [ "$(cat "$project/value")" = '["two words" ""]' ]; then test-ok "$backend checked list retains element boundaries"; else test-fail "$backend checked list"; fi
+   "${runner[@]}" do run --print-result --lang km -c "$checks" -c ITEMS --set ITEMS=42 >"$project/value" 2>"$project/error"
+   if [ "$(cat "$project/value")" = 42 ]; then test-ok "$backend valid literal is not an inferred setting schema"; else test-fail "$backend validation became eager"; fi
+   for value in '"validation-secret"' '[1]'; do
+     status=0
+     "${runner[@]}" do run --lang km -c "$checks" -c '(checked-items!)' --set "ITEMS=$value" >"$project/value" 2>"$project/error" || status=$?
+     if [ "$status" = 1 ] && grep -q USER_ERROR "$project/error" && grep -q 'ITEMS must' "$project/error" && ! grep -q validation-secret "$project/error"; then test-ok "$backend demanded check reports constraint, not rejected data"; else test-fail "$backend authored constraint ($value)"; cat "$project/error"; fi
+   done
+   for registration in $'(if (> (count (checked-items!)) 0) (include ./must-not-be-loaded.kmk))\ndefault :\n' $'@(joinpath ./build (join "-" (checked-items!))) :\n'; do
+     status=0
+     "${runner[@]}" do plan --json -c "$checks$registration" --set 'ITEMS="validation-secret"' default >"$project/plan" 2>"$project/error" || status=$?
+     if [ "$status" = 1 ] && grep -q USER_ERROR "$project/plan" && grep -q 'ITEMS must be a list' "$project/plan" && ! grep -q validation-secret "$project/plan"; then test-ok "$backend pure registration demands authored check before work"; else test-fail "$backend pure authored check"; cat "$project/plan" "$project/error"; fi
+   done
+done
 done
 test-end

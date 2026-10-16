@@ -30,6 +30,7 @@ type sourceFile struct {
 	OwnedName  bool
 	FileBacked bool
 	Parent     int
+	Includes   []diagnostic.Frame
 }
 
 type buildSource struct {
@@ -49,6 +50,7 @@ func freeBuildSource(source *buildSource) {
 		return
 	}
 	for i := range source.Files {
+		slices.Free(mem.System, source.Files[i].Includes)
 		mem.FreeSlice(mem.System, source.Files[i].Data)
 		if source.Files[i].OwnedName {
 			mem.FreeString(mem.System, source.Files[i].Name)
@@ -184,7 +186,7 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 		if item.Kind != script.Include && item.Kind != script.Composition {
 			continue
 		}
-		s.Parts = slices.Append(mem.System, s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:item.Span.Start], Offset: start})
+		s.Parts = slices.Append(mem.System, s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:item.Span.Start], Offset: start, Includes: file.Includes})
 		start = item.Span.End
 		if item.Kind == script.Include {
 			if !s.expandSourceInclude(fileIndex, item.Include, item.OptionalInclude, item.Span, errOut, authored, lang) {
@@ -194,6 +196,6 @@ func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lan
 			return false
 		}
 	}
-	s.Parts = slices.Append(mem.System, s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:], Offset: start})
+	s.Parts = slices.Append(mem.System, s.Parts, program.CompileSource{Name: file.Name, Text: file.Text[start:], Offset: start, Includes: file.Includes})
 	return true
 }

@@ -123,8 +123,12 @@ func comparisonAlias(name string) (string, bool) {
 }
 
 func (p *Program) operation(scope *Scope, operation *Operation, arguments []*expr.Expr, context *Context, span source.Span) Result {
+	if operation.ScopedFinalizer {
+		if context.forbidsFinalization() { return failure(context.Run, "PHASE_INVALID", span, "finally! is invalid in this execution phase") }
+		if state := p.findFinalizer(context, span); state != nil { return p.advanceFinalizer(state, context) }
+	}
 	ready := p.prepareOperation(operation, len(arguments), context, span)
-	if ready.Waiting || ready.Diagnostic.Code != "" {
+	if ready.Waiting || ready.Completed || ready.Diagnostic.Code != "" {
 		return ready
 	}
 	if operation.Preflight != nil {
@@ -137,7 +141,7 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 		}
 	}
 	operands := p.argumentValuesMode(scope, arguments, context, span, operation.DeferredReplacement)
-	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
+	if operands.Result.Waiting || operands.Result.Completed || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
 	if operation.DeferredReplacement && operands.Values[0].Kind == core.Pattern {
@@ -183,6 +187,7 @@ func ReleaseCallable(a mem.Allocator, value *core.Value) { freeCallables(a, valu
 
 func (p *Program) prepareOperation(operation *Operation, count int, context *Context, span source.Span) Result {
 	_ = p
+	if context.deferred { return Result{Completed: true} }
 	// A dependency may publish while a host operation is outstanding. Keep its
 	// single request active until the engine supplies the matching completion;
 	// the resumed evaluation then snapshots every dependency at its latest value.
@@ -275,7 +280,7 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 			return failure(context.Run, "EXPR_INVALID", span, "operation callable unavailable or belongs to another invocation")
 		}
 		result := p.prepareOperation(operation, len(values), context, span)
-		if !result.Waiting && result.Diagnostic.Code == "" {
+		if !result.Waiting && !result.Completed && result.Diagnostic.Code == "" {
 			result = p.invokeOperation(operation, values, nil, context, span)
 		} else {
 			discardCallValues(context.Run, values)

@@ -54,6 +54,9 @@ void km_event_free(km_event *);
 void km_host_free(km_host *);
 int km_cli_install_signals(void);
 int km_cli_take_signal(void);
+// timeout_ns: 0 unbounded, negative already expired. Returns 0 success,
+// 1 deadline exhausted, -1 I/O failure; written is valid on every exit.
+int km_cli_write_output(int, so_Slice, int64_t, so_int *);
 int km_cli_stderr_is_terminal(void);
 int km_cli_stderr_width(void);
 int km_cli_stdout_is_terminal(void);

@@ -343,6 +343,7 @@ func (p *Program) Tick(wait int) {
 }
 
 func (p *Program) tick(wait int) {
+	p.Eval.PollFinalizers()
 	p.tickServiceReadiness()
 	// Host polling must not sleep between runnable dependency evaluations.
 	if p.Engine.HasWork() {

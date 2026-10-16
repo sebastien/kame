@@ -143,6 +143,7 @@ meaning by themselves.
 | `SERVICE_UNHEALTHY` | error | Service failed its configured health checks |
 | `SERVICE_RESTART_EXHAUSTED` | error | Service restart attempts were exhausted |
 | `EXEC_CANCELLED` | error | Execution was cancelled |
+| `FINALIZE_TIMEOUT` | error | A finalizer exhausted its cleanup budget or could not start before the shared unwind deadline |
 | `HOST_FAIL` | error | Host request, spawn, pipe, wait, or signal failure |
 | `FS_ERR` | error | Filesystem read, write, stat, or glob failure |
 | `RES_INVALID` | error | Invalid resource identity, URI or protocol use |
@@ -211,6 +212,46 @@ not portable runtime diagnostics; they are documented with the embedding API.
   Arity errors state the expected count or range and the supplied count.
   Rejected values are not printed merely to explain their kinds.
 
+### Definition and include conflicts
+
+A duplicate value or function definition uses `DEF_INVALID` and names the
+conflicting binding. Its primary location identifies the later declaration;
+`related` identifies the original declaration when available. Declarations in
+included files or distinct source fragments retain their authored locations,
+not offsets into flattened or synthetic source text. Include frames identify
+the source inclusion paths that establish the conflict, including distinct
+include sites when the same source was loaded twice.
+
+Recovery tips reflect the established declaration forms: use a module's `?=`
+default for intended consumer configuration, `+=` for an intended list
+contribution, or remove unintended repeated inclusion/declaration. Do not
+recommend these changes indiscriminately or infer that a repeated include is
+always invalid. Includes have no implicit include-once behavior; skipped defaults
+and valid repeated contributions are not conflicts. Producer conflicts retain
+their existing rule diagnostic codes rather than becoming definition errors.
+
+Authored setting checks using `fail!` retain `USER_ERROR` and their authored
+message and location. They should name the setting and constraint without
+including the rejected value; diagnostics must not expand the setting to explain
+the error. Such checks do not establish a new automatic validation phase.
+
+### Finalization failures
+
+[`finally!`](043-kame-finalization.md) preserves an established body diagnostic
+when cleanup also fails. Retain the cleanup code/message in `notes`, or in a
+source-qualified `related` message when its authored location is available;
+include nested failures once in unwind order. Never replace the body's code,
+message, primary span or cause with a generic cleanup failure. When only cleanup
+fails, its diagnostic is primary. `FINALIZE_TIMEOUT` distinguishes budget
+exhaustion from a process's own `RECIPE_TIMEOUT`; explain whether cleanup timed
+out or was not started because the shared deadline had expired.
+
+Diagnostic precedence does not make capability denial or cancellation
+recoverable: those control outcomes remain protected even if an earlier body
+failure is the primary displayed diagnostic. The same context and secrecy rules
+apply to cleanup messages as to ordinary failures; no callback return values,
+environment contents or captured process output are retained to explain them.
+
 ## Language-Boundary Recovery
 
 Keep existing diagnostic codes while making parser ownership and recovery clear.
@@ -229,6 +270,7 @@ evaluated values and environment contents are not included to illustrate errors.
 | Denied environment read (`CAP_DENIED`) | Identify environment-read authority and, when known, the name. Explain the scoped `--allow-env=NAME` grant; definition configuration and child environment settings do not grant that read. |
 | Invalid rule settings placement (`PARSE_ERR`) | When the malformed metadata placement is recognizable, show `target : inputs ; [shell: kash]`, or `target : ; [shell: kash]` with no inputs. Do not imply valid metadata is unsupported. |
 | Template syntax in direct Kash (`PARSE_ERR`) | Name the direct Kash boundary and show `$name` / `${name}` for a reference or `(function args...)` for a call, without adding an implicit template pass. |
+| Unquoted literal at-sign inside a Kash word (`PARSE_ERR`) | When reserved at-sign syntax is the established cause, explain quoting the literal word, such as `"--mtime=@0"`. Do not apply template-recipe selector rules or treat shell quotes as protection from a template pass. |
 | Removed `--define-value` option (`OPT_UNKNOWN`) | Show `--set NAME=LITERAL` for closed typed data; `NAME=TEXT` and `--define` remain strings. No compatibility alias or type inference is offered. |
 
 Recognized unclosed expressions/references name their missing delimiter without
@@ -398,8 +440,16 @@ contain no ANSI escapes, and use no terminal-width-dependent wrapping.
   explicit path prefixes, environment grants and misplaced rule metadata.
 - Tips never invoke a value, reinterpret syntax, grant capabilities, modify
   source, infer command-specific template semantics or expose evaluated secrets.
+- Duplicate-definition diagnostics name the binding, locate the conflicting and
+  original declarations, and retain include-site provenance across repeated or
+  nested includes. Valid repeated contributions and skipped defaults remain
+  valid; recovery tips do not change composition semantics.
 - Every code matches `^[A-Z]+(?:_[A-Z]+)*$` and appears once in this registry.
 - Wrapping a diagnostic preserves code, severity, and original source span.
+- Finalization preserves primary body diagnostics and appends secondary cleanup
+  codes/messages and available locations without changing protected cancellation
+  or capability outcomes; cleanup-only failure and budget exhaustion remain
+  distinguishable in human, plain and JSON output.
 - A source diagnostic reports one-based line and tab-aware display column,
   renders a non-empty span marker, supports combining and wide Unicode text,
   and does not mark a following line.

@@ -536,6 +536,11 @@ contiguous: `name? = value` still defines the name `name?`. Default function
 definitions are invalid. This declaration form applies to Kame value/build
 sources; Kash keeps its existing standalone `=` header grammar.
 
+Source immutability is distinct from external configuration. Both ordinary `=`
+value definitions and selected `?=` defaults accept the explicit configuration
+overrides in `009-cli.md`; `=` does not make a derived value non-overridable.
+Function definitions cannot be configured through those channels.
+
 A function definition is:
 
 ```kame
@@ -599,6 +604,28 @@ EXTRA_CHECKS = [./tests/smoke]
 - Function contributions, contributions to function bindings, and Kash `+=`
   declarations are invalid. AST JSON retains each authored contribution as a
   definition with `contribution: true`; formatting preserves `+=`.
+
+### Consumer composition
+
+A reusable rule module exposes intended consumer settings with `?=` defaults
+and documents its contribution bindings and rule entry points. Consumers may
+declare settings before including that module and contribute lists afterward:
+
+```kame
+BUILD_DIR = ./build/custom
+(include ./sdk/rules.kmk)
+CHECKS += ["project-check"]
+project-check :
+```
+
+Here the module supplies `BUILD_DIR ?= ...` and a list-valued `CHECKS` binding;
+`"project-check"` names a task prerequisite when spliced into a rule header.
+Includes remain literal, source-relative, depth-first composition, not an
+include-once mechanism. Repeated inclusion follows ordinary registration rules:
+defaults may be skipped, contributions may repeat, and conflicting definitions
+or producers fail. Diagnostics retain the conflicting declarations and include
+provenance under `011-diagnostics.md`. No declaration reordering, mutable hooks,
+or process execution is implied.
 
 ### Migrating textual definition values
 

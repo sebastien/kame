@@ -382,6 +382,58 @@ static int64_t km_now(void) {
     return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+static int64_t km_output_now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return -1;
+    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+int km_cli_write_output(int fd, so_Slice data, int64_t timeout_ns, so_int *written) {
+    *written = 0;
+    if (timeout_ns < 0) return 1;
+    bool bounded = timeout_ns != 0;
+    int flags = -1, result = 0;
+    int64_t deadline = 0;
+    if (bounded) {
+        int64_t now = km_output_now_ns();
+        if (now < 0 || timeout_ns > INT64_MAX - now) return -1;
+        deadline = now + timeout_ns;
+        flags = fcntl(fd, F_GETFL);
+        if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) return -1;
+    }
+    while (*written < data.len) {
+        if (bounded) {
+            int64_t now = km_output_now_ns();
+            if (now < 0) { result = -1; break; }
+            if (now >= deadline) { result = 1; break; }
+        }
+        size_t count = (size_t)(data.len - *written);
+        if (bounded && count > KM_CHUNK) count = KM_CHUNK;
+        ssize_t n = write(fd, (const so_byte *)data.ptr + *written, count);
+        if (n > 0) { *written += n; continue; }
+        if (n < 0 && errno == EINTR) {
+            if (!bounded && km_cli_signal_count != 0) { result = -1; break; }
+            continue;
+        }
+        if (bounded && n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            int64_t now = km_output_now_ns();
+            if (now < 0) { result = -1; break; }
+            int64_t remaining = deadline - now;
+            if (remaining <= 0) { result = 1; break; }
+            int64_t wait = remaining / 1000000 + (remaining % 1000000 != 0);
+            if (wait > INT_MAX) wait = INT_MAX;
+            struct pollfd pollfd = {.fd = fd, .events = POLLOUT};
+            int ready = poll(&pollfd, 1, (int)wait);
+            if (ready < 0 && errno != EINTR) { result = -1; break; }
+            continue;
+        }
+        result = -1;
+        break;
+    }
+    if (bounded && fcntl(fd, F_SETFL, flags) != 0 && result == 0) result = -1;
+    return result;
+}
+
 // Native test probe: fail all event allocations after N successful allocations.
 // It intentionally excludes process setup and the So allocator.
 static int km_event_allocations_left = -1;

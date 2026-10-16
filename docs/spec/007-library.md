@@ -42,8 +42,9 @@ inline evaluation in that phase. Tool metadata tracking does not confer user
 read authority. Service, dry-run, and publication restrictions remain independent.
 
 Callback-bearing operations (`apply`, `map`, `flatmap`, `filter`, `filter-out`,
-`reduce`, and template application) explicitly propagate reached callable
-behavior; their computation category does not declare those callbacks pure.
+`reduce`, `finally!`, and template application) explicitly propagate reached
+callable behavior. A computation category on the enclosing operation does not
+declare its callbacks pure.
 `render` also evaluates template expressions under the caller's authority and
 phase. Processes and `await` implemented as syntax obey the same contracts even
 though they are not ordinary registry calls.
@@ -94,6 +95,7 @@ The general operations are:
 | `first` | First list item or nil |
 | `nth` | Indexed list or string item with negative indexes |
 | `apply` | Call a function with a list of arguments |
+| `finally!` | Execution-only `(finally! [OPTIONS] BODY CLEANUP)`: zero-argument callbacks with bounded finalization under `043-kame-finalization.md` |
 | `list` | Return arguments as a list |
 | `items` | `(items RECORD)`: ordered `[key: STRING value: VALUE]` entries |
 | `set` | `(set KEY VALUE RECORD)`: immutable field replacement/insertion |
@@ -118,6 +120,17 @@ flags = (get selected modes)
 ```
 
 The operation is pure and works in definitions, input headers, and planning.
+
+### Scoped finalization
+
+`finally!` is a standard control-effect operation with runtime-managed scope
+state, not a special form or an ordinary helper around error recovery. Its
+optional leading record accepts only `timeout-ms`, an integer from 1 to 60000,
+default 5000. It propagates reached callback capabilities and effects without
+adding authority. [043-kame-finalization.md](043-kame-finalization.md) defines
+callback validation, result/error precedence, shared unwind deadlines,
+cancellation, execution-only effect ordering and host requirements. It adds no
+`defer!` alias or resource-acquisition/ownership protocol.
 
 ### Typed record traversal and updates
 

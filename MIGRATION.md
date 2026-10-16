@@ -1,9 +1,9 @@
 # Language contract migration note
 
-This note explains the specified syntax switch; it is not an implementation or
-release-status report. Runtime code, executable examples and fixture bytes were
-not migrated by the documentation update. Verify backend support before using
-the new forms. Implementation work is tracked only in [TODO.md](TODO.md#language-contract-implementation).
+This note explains the breaking syntax changes used by the runtime, executable
+examples and fixtures in this checkout. Update downstream sources explicitly and
+use a matching executable; older installed builds may use the previous grammar.
+Release validation and other remaining work are tracked in [TODO.md](TODO.md).
 
 This is a clean break: no legacy parser mode, compatibility aliases, migration
 command or formatter migration flag is required. Update authored sources

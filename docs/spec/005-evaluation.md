@@ -316,6 +316,19 @@ normal lexical lookup. `replace` is not a reserved special form. Calls with
 already-materialized arguments use constant or expansion-pattern values and
 cannot retroactively defer earlier argument evaluation.
 
+### Scoped finalization
+
+[`finally!`](043-kame-finalization.md) uses ordinary callable operands but owns a
+runtime execution scope. Register its cleanup before invoking the body; retain
+the scope through failure, graceful cancellation, host suspension and bounded
+cleanup. Scope completion and old-generation teardown precede result publication
+or reactive replacement. Allocator destruction alone cannot run finalizers.
+Cleanup retains the caller's authority and does not recover a body failure;
+cancellation and capability denial remain protected even when the primary
+diagnostic predates them. Deferred-effect-only and non-execution contexts reject
+the operation before invoking callbacks. Its supported execution effect channel
+must settle callback effects under 043 without changing ordinary recipe timing.
+
 ## Reactive Lifting
 
 Ordinary operation authors consume materialized arguments. The evaluator lifts

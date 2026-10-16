@@ -68,6 +68,13 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 	// The environment namespace alone cannot distinguish rule-local selectors.
 	// Keep the original namespace in state so nested definitions bind identically.
 	namespace := context.DefinitionNamespace
+	if context.forbidsFinalization() {
+		identity := core.NewDigest()
+		identity.Write(namespace[:])
+		identity.Text("finalization-forbidden")
+		identity.Uint64(uint64(context.Phase))
+		identity.Sum(namespace[:])
+	}
 	invalidFrames := false
 	if len(context.RuleFrames) != 0 {
 		identity := core.NewDigest()
@@ -123,6 +130,11 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 	state := mem.Alloc[definitionState](p.Alloc)
 	state.Program, state.Definition, state.Scoped = p, authored, true
 	state.Namespace, state.Phase = context.DefinitionNamespace, context.Phase
+	state.HasNamespace, state.HasEnvironment = context.HasDefinitionNamespace, context.HasDefinitionNamespace || context.HasEnvironment
+	state.FinalizationForbidden = context.forbidsFinalization()
+	// A restriction-only view does not redefine ordinary lazy-definition effect
+	// timing. Existing target namespaces still carry their original phase policy.
+	if !context.HasDefinitionNamespace { state.Phase = EvaluatePhase }
 	state.InvalidRuleFrames = invalidFrames
 	// Opaque or over-depth values cannot define a stable cached context. Reject
 	// them on evaluation rather than sharing zero digests or retaining processes.
@@ -177,7 +189,7 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 // Without a namespace it preserves ordinary invocation-level evaluation.
 func (p *Program) DefinitionWith(name string, context *Context) *core.Node {
 	node := p.Definition(name)
-	if node == nil || context == nil || !context.HasDefinitionNamespace {
+	if node == nil || context == nil || (!context.HasDefinitionNamespace && !context.needsFinalizationView()) {
 		return node
 	}
 	return p.scopedDefinition(node.Key, context)

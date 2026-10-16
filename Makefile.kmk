@@ -189,6 +189,7 @@ wasm-check : wasm wasm-portable
 	node ./tools/wasm/test-abi.mjs ./build/wasm/kame.wasm
 
 test-wasm : wasm-check
+	./tests/T043-01-lang-finalization.sh
 	./tests/T010-01-wasm-loader.sh
 	./tests/T010-02-wasm-abi.sh
 	./tests/T010-03-wasm-target.sh

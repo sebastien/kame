@@ -13,6 +13,9 @@ import (
 
 func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
+	previousFinalization := c.FinalizationForbidden
+	c.FinalizationForbidden = true
+	defer restoreRenderFinalization(c, previousFinalization)
 	if len(v) < 1 || len(v) > 3 {
 		discardArgCallables(c, v)
 		return c.InvalidOperation("expects 1 to 3 arguments")
@@ -259,6 +262,8 @@ func opRender(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	return res
 }
+
+func restoreRenderFinalization(c *eval.Context, previous bool) { c.FinalizationForbidden = previous }
 
 // opTemplateItems gives document loops stable positional and key metadata.
 // It is used by the template lowering rather than authored directly.

@@ -388,6 +388,14 @@ are errors. Quoted or escaped operators are literal. Command quotes are Kash
 word syntax, not expression strings: `{(...)}` has no interpolation meaning.
 Inside Kame expressions, the existing Kame string and escape rules apply instead.
 
+For literal at-sign data inside a word, quote the word: `tar "--mtime=@0"`.
+The unquoted `--mtime=@0` is reserved syntax, not a template recipe selector.
+Direct Kash has no implicit template pass; by contrast, shell quotes in an
+external-shell template recipe do not protect `@0` from that recipe's template
+parser, where `--mtime=\@0` supplies the literal argument. Canonical Kash
+formatting may emit `"--mtime=\@0"`; reparsing preserves the same argument bytes.
+This does not change valid standalone selectors or reference/call syntax.
+
 Unescaped `(` outside double quotes starts a Kame expression fragment, including
 in the middle of a word; it is not a shell subshell or literal punctuation.
 Escape a literal parenthesis or quote its text. Parentheses inside Kash double
@@ -926,6 +934,9 @@ live forwarding and explicit capture remain separate channels.
 - `$name.c` resolves a component; `${name}.c` appends a literal suffix.
 - Quoted/escaped operators are literal, empty quotes preserve an empty argument,
   and invalid escapes, single quotes, `&&`, and `||` are rejected.
+- Quoted `"--mtime=@0"` in direct Kash remains one literal argument through
+  repeated formatting; unquoted reserved at-sign syntax receives Kash quoting
+  guidance, not an unrelated template selector diagnostic.
 - Flat lists splice only in standalone unquoted substitutions; mixed/quoted
   lists, unsupported values, empty executables, and NUL bytes fail before launch.
 - `$...CMD` explicitly spreads a nonempty command list; `$...args` spreads a flat

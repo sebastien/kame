@@ -40,6 +40,14 @@ type Program struct {
 	OperationStates []operationState
 	OperationMemos  []*operationMemo
 	Processes       []*processTask
+	finalizers []*FinalizerState
+	// The driver must keep polling through cancellation and acknowledge reaping
+	// before cleanup. A missing driver rejects finally! before arming it.
+	FinalizationNow func(any) int64
+	FinalizationQuiet func(any, int64, int64) bool
+	FinalizationHost any
+	FinalizationReadOnly bool
+	finalizationCause diagnostic.Diagnostic
 	SourceParts     []SourcePart
 	// Grants provide the ambient capability policy for lazy definitions. Rule
 	// rendering supplies its own context policy from the runtime.
@@ -113,7 +121,7 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 			if item.Definition.Contribution && !previous.Function {
 				continue
 			}
-			result.Diagnostics = slices.Append(a, result.Diagnostics, diagnostic.Diagnostic{Code: "DEF_INVALID", Severity: diagnostic.Error, Message: "duplicate definition", Span: diagnostic.Span{Start: item.Definition.NameSpan.Start, End: item.Definition.NameSpan.End}})
+			result.Diagnostics = slices.Append(a, result.Diagnostics, duplicateDefinition(a, parsed, previous, item.Definition))
 		} else {
 			names = slices.Append(a, names, item.Definition)
 		}
@@ -173,7 +181,13 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 				continue
 			}
 			p.Valid = false
-			p.Diagnostics = slices.Append(a, p.Diagnostics, diagnostic.Diagnostic{Code: "DEF_INVALID", Severity: diagnostic.Error, Message: "duplicate definition", Span: diagnostic.Span{Start: d.NameSpan.Start, End: d.NameSpan.End}})
+			for j := 0; j < i; j++ {
+				previous := parsed.Items[j].Definition
+				if previous != nil && previous.Name == d.Name {
+					p.Diagnostics = slices.Append(a, p.Diagnostics, duplicateDefinition(a, parsed, previous, d))
+					break
+				}
+			}
 			continue
 		}
 		if d.Function {
@@ -193,12 +207,27 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 	return p
 }
 
+func duplicateDefinition(a mem.Allocator, parsed *script.Script, previous, current *definition.Definition) diagnostic.Diagnostic {
+	tips := []string{"remove the duplicate declaration or unintended repeated include"}
+	if !previous.Function && !current.Function {
+		tips[0] = "use ?= for an intended module default; otherwise remove the duplicate declaration or unintended repeated include"
+		if previous.Expression != nil && current.Expression != nil && previous.Expression.Kind == expr.List && current.Expression.Kind == expr.List {
+			tips[0] = "use += for an intended list contribution or ?= for a module default; otherwise remove the duplicate declaration or unintended repeated include"
+		}
+	}
+	related := []diagnostic.Related{{Message: "original declaration", Source: parsed.Source.Name, Span: diagnostic.Span{Start: previous.NameSpan.Start, End: previous.NameSpan.End}}}
+	d := diagnostic.Diagnostic{Source: parsed.Source.Name, Code: "DEF_INVALID", Severity: diagnostic.Error, Message: "duplicate definition: " + current.Name, Span: diagnostic.Span{Start: current.NameSpan.Start, End: current.NameSpan.End}, Related: related, Tips: tips}
+	return d.Clone(a)
+}
+
 // Free releases evaluator-owned compilation state. The parsed script and registry
 // are owned by their callers and must outlive the program's engine nodes.
 func (p *Program) Free() {
 	if p == nil {
 		return
 	}
+	for i := range p.finalizers { freeFinalizer(p.Alloc, p.finalizers[i]) }
+	slices.Free(p.Alloc, p.finalizers)
 	for i := range p.explicitDefinitionOverrides {
 		mem.FreeString(p.Alloc, p.explicitDefinitionOverrides[i])
 	}
@@ -332,6 +361,9 @@ type definitionState struct {
 	Environment       []string
 	Namespace         [32]byte
 	Scoped            bool
+	HasEnvironment bool
+	HasNamespace bool
+	FinalizationForbidden bool
 	RuleFrames        []RuleFrame
 	InvalidRuleFrames bool
 	Phase             Phase
@@ -445,9 +477,10 @@ func (p *Program) definition(engine *core.EngineContext, state *definitionState)
 	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState, DirectHostRequests: p.DirectHostRequests}
 	if state.Scoped {
 		context.TrackUnvalidatedReads = true
-		context.Environment, context.HasEnvironment = state.Environment, true
-		context.DefinitionNamespace, context.HasDefinitionNamespace = state.Namespace, true
+		context.Environment, context.HasEnvironment = state.Environment, state.HasEnvironment
+		context.DefinitionNamespace, context.HasDefinitionNamespace = state.Namespace, state.HasNamespace
 		context.Phase = state.Phase
+		context.FinalizationForbidden = state.FinalizationForbidden
 		context.RuleFrames = state.RuleFrames
 		context.DependencyContextObserver = p.DefinitionDependencyContextObserver
 		// Lazy values may perform evaluation-only host operations during render.

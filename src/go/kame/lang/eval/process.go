@@ -137,7 +137,8 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			r.Value.Free(c.Run)
 			r.Value = core.Value{Kind: core.Bool, Bool: host.PayloadInt(completion.Value, "status") == 0 && host.PayloadInt(completion.Value, "signal") == 0}
 		}
-		if r.Diagnostic.Code == "RECIPE_FAIL" {
+		if r.Diagnostic.Code == "RECIPE_FAIL" && !r.Diagnostic.Protected {
+			c.handledFinalizerFailure()
 			stages := host.PayloadStages(completion.Value)
 			for i := range stages {
 				if i >= len(e.Items) {
@@ -394,7 +395,8 @@ func rememberArgumentEffects(state *captureState, c *Context, before int, before
 // Only a completed process failure selects the fallback. Argument evaluation,
 // authorization, and waiting never reach this recovery boundary.
 func (p *Program) captureRecovery(e *expr.Expr, c *Context, state *captureState, r Result) Result {
-	if len(e.Body) == 0 || (r.Diagnostic.Code != "RECIPE_FAIL" && r.Diagnostic.Code != "HOST_FAIL" && r.Diagnostic.Code != "TOOL_MISSING" && r.Diagnostic.Code != "RECIPE_TIMEOUT") { return r }
+	if r.Diagnostic.Protected || len(e.Body) == 0 || (r.Diagnostic.Code != "RECIPE_FAIL" && r.Diagnostic.Code != "HOST_FAIL" && r.Diagnostic.Code != "TOOL_MISSING" && r.Diagnostic.Code != "RECIPE_TIMEOUT") { return r }
+	c.handledFinalizerFailure()
 	state.Recovering = true
 	r.Free(c.Run)
 	return p.capture(e.Body[0], c)

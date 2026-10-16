@@ -51,7 +51,7 @@ func TestBuildSourceCompileFailureKeepsCompleteDiagnosticJSON(t *testing.T) {
 	}
 	r := start.Runtime
 	defer r.Free()
-	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"first.kmk","text":"name = 1\n","offset":0},{"name":"second.kmk","text":"name = 2\n","offset":17}]}`))
+	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"first.kmk","text":"name = 1\n","offset":0,"includes":[{"source":"main.kmk","label":"first.kmk","start":0,"end":20}]},{"name":"second.kmk","text":"name = 2\n","offset":17,"includes":[{"source":"main.kmk","label":"second.kmk","start":21,"end":42}]}]}`))
 	if configured.Code != "" {
 		t.Error("configure sources")
 	}
@@ -64,6 +64,7 @@ func TestBuildSourceCompileFailureKeepsCompleteDiagnosticJSON(t *testing.T) {
 	if !strings.Contains(string(r.EventJSON), "second.kmk") || !strings.Contains(string(r.EventJSON), "DEF_INVALID") {
 		t.Error("compile diagnostic JSON lost source")
 	}
+	if !strings.Contains(string(r.EventJSON), "first.kmk") || !strings.Contains(string(r.EventJSON), "main.kmk") || !strings.Contains(string(r.EventJSON), "original declaration") { t.Error("compile diagnostic lost copied related location or include provenance") }
 }
 
 func TestBuildSourceDescriptorRejectsInvalidInputWithoutPoisoningRuntime(t *testing.T) {
@@ -75,7 +76,7 @@ func TestBuildSourceDescriptorRejectsInvalidInputWithoutPoisoningRuntime(t *test
 	}
 	r := start.Runtime
 	defer r.Free()
-	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"valid.kmk","text":"x = 1","offset":0},{"name":"","text":"","offset":0}]}`))
+	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"valid.kmk","text":"x = 1","offset":0,"includes":[{"source":"main.kmk","label":"valid.kmk","start":0,"end":20}]},{"name":"","text":"","offset":0}]}`))
 	if configured.Code != "PARSE_ERR" || len(r.BuildSources) != 0 {
 		t.Error("invalid partial descriptor retained sources")
 	}

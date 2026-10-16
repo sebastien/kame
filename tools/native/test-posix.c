@@ -76,7 +76,37 @@ static void test_full_waitid_exit_status(void) {
 }
 #endif
 
+static void test_output_deadlines(void) {
+    int fds[2];
+    assert(pipe(fds) == 0);
+    int flags = fcntl(fds[1], F_GETFL);
+    assert(flags >= 0);
+    so_int written = -1;
+    so_byte *data = malloc(1024 * 1024);
+    assert(data); memset(data, 'x', 1024 * 1024);
+    int64_t start = km_output_now_ns();
+    assert(km_cli_write_output(fds[1], (so_Slice){data, 1024 * 1024, 1024 * 1024}, 10000000, &written) == 1);
+    assert(written > 0 && written < 1024 * 1024);
+    assert(km_output_now_ns() - start < 1000000000);
+    assert(fcntl(fds[1], F_GETFL) == flags);
+    so_int remaining = written;
+    while (remaining) {
+        ssize_t n = read(fds[0], data, (size_t)remaining);
+        assert(n > 0); remaining -= n;
+    }
+    assert(km_cli_write_output(fds[1], (so_Slice){data, 3, 3}, -1, &written) == 1 && written == 0);
+    assert(fcntl(fds[1], F_GETFL) == flags);
+    assert(km_cli_write_output(fds[1], (so_Slice){data, 3, 3}, 10000000, &written) == 0 && written == 3);
+    assert(read(fds[0], data, 3) == 3);
+    assert(fcntl(fds[1], F_GETFL) == flags);
+    assert(km_cli_write_output(fds[1], (so_Slice){data, 3, 3}, 0, &written) == 0 && written == 3);
+    assert(read(fds[0], data, 3) == 3);
+    assert(km_cli_write_output(-1, (so_Slice){data, 3, 3}, 10000000, &written) == -1 && written == 0);
+    free(data); close(fds[0]); close(fds[1]);
+}
+
 int main(void) {
+    test_output_deadlines();
 #if !defined(__COSMOPOLITAN__)
     test_full_waitid_exit_status();
 #endif

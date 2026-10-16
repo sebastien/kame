@@ -114,6 +114,11 @@ func TestReviewDescriptorRejectsKnownMalformedFields(t *testing.T) {
 		`{"fragments":[{"lang":"km","defines":42}]}`,
 		`{"fragments":[{"lang":"km","name":42}]}`,
 		`{"fragments":[{"lang":"km","inline":"yes"}]}`,
+		`{"fragments":[{"lang":"km","includes":42}]}`,
+		`{"fragments":[{"lang":"km","includes":[{}]}]}`,
+		`{"fragments":[{"lang":"km","includes":[{"source":"a","label":"b","start":0,"end":-1}]}]}`,
+		`{"fragments":[{"lang":"km","includes":[{"source":"a","label":"b","start":2,"end":1}]}]}`,
+		`{"fragments":[{"lang":"invalid","includes":[{"source":"a","label":"b","start":0,"end":1}]}]}`,
 		`{"fragments":42}`,
 		`{"fragments":[{"lang":"km"}],"environment":42}`,
 		`{"fragments":[{"lang":"km"}],"retryCount":2147483648}`,
@@ -132,6 +137,9 @@ func TestReviewDescriptorRejectsKnownMalformedFields(t *testing.T) {
 		`{"sources":[{"name":"x","text":""}],"retainBytes":-1}`,
 		`{"sources":[{"name":"x","text":""}],"retryCount":2147483648}`,
 		`{"sources":[{"name":"x","text":""}],"force":"yes"}`,
+		`{"sources":[{"name":"x","text":"","includes":42}]}`,
+		`{"sources":[{"name":"x","text":"","includes":[{"source":"a","label":"b","start":"0","end":1}]}]}`,
+		`{"sources":[{"name":"x","text":"","includes":[{"source":"a","label":"b","start":0,"end":2147483648}]}]}`,
 	}
 	for i := range builds {
 		result := r.SetBuildSources([]byte(builds[i]))

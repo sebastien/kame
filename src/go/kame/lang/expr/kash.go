@@ -361,7 +361,11 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			}
 			continue
 		}
-		if !quoted && (commandOperator(b) || b == '@') {
+		if !quoted && b == '@' {
+			p.error(p.pos, p.pos+1, "literal at-sign in a Kash word must be quoted, for example \"--mtime=@0\"")
+			break
+		}
+		if !quoted && commandOperator(b) {
 			p.error(p.pos, p.pos+1, "unsupported Kash process operator or reserved syntax")
 			break
 		}

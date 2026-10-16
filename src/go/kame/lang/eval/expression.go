@@ -3,6 +3,7 @@ package eval
 
 import (
 	"kame/core"
+	"kame/diagnostic"
 	"kame/lang/expr"
 	"kame/lang/source"
 	"solod.dev/so/mem"
@@ -26,6 +27,12 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 		context.ReserveEnv = expression.Kash
 	}
 	result := p.evaluateExpression(engine, scope, expression, context)
+	if context.dependencyFailure.Code != "" {
+		result.Free(context.Run)
+		result = Result{Diagnostic: context.dependencyFailure}
+		context.dependencyFailure = diagnostic.Diagnostic{}
+	}
+	if context.deferred { result.Free(context.Run); result = Result{Completed: true} }
 	context.ReserveEnv = previousEnv
 	context.Engine, context.Scope, context.Requests = previousEngine, previousScope, previousRequests
 	context.evaluationDepth--
@@ -177,7 +184,7 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		return context.ResolveDefinition(context.ResolverState, b.Definition, context)
 	}
 	key := b.Definition
-	if context.Engine != nil && context.HasDefinitionNamespace {
+	if context.Engine != nil && (context.HasDefinitionNamespace || context.needsFinalizationView()) {
 		node := context.Program.scopedDefinition(key, context)
 		if node != nil {
 			key = node.Key

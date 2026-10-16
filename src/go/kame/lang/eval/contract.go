@@ -69,7 +69,7 @@ func (o *Operation) ValidContract() bool {
 	case ProcessOperation:
 		if o.Behavior & StartsProcess == 0 || o.Behavior & ^OperationBehavior(StartsProcess | TracksDependency) != 0 { return false }
 	case ControlOperation:
-		if o.Behavior != RaisesFailure { return false }
+		if o.Behavior & RaisesFailure == 0 || o.Behavior & ^OperationBehavior(RaisesFailure | CallsCallable | ReadsClock) != 0 { return false }
 	case VolatileOperation:
 		if o.Behavior != ReadsClock { return false }
 	}

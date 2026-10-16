@@ -946,7 +946,7 @@ func (p *Program) complete(event host.ProcessEvent) {
 		return
 	}
 	node := p.nodeForRequest(event.ID)
-	if node != nil && entry != nil && node.HostRequestID == event.ID && node.State == core.NodeWaiting && d.Code != "" && d.Code != "EXEC_CANCELLED" && entry.retryCount < p.Options.RetryCount {
+	if node != nil && entry != nil && node.HostRequestID == event.ID && node.State == core.NodeWaiting && !d.Protected && d.Code != "" && d.Code != "EXEC_CANCELLED" && entry.retryCount < p.Options.RetryCount {
 		p.nextRequest++
 		retryID := p.nextRequest
 		retain := p.Options.RetainBytes
@@ -1098,9 +1098,9 @@ func (p *Program) captureStderr(pending pendingRequest, data []byte) {
 		return
 	}
 	if p.Eval.DefinitionEffectSink != nil {
-		p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectErr, Data: data})
+		p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectErr, Data: data, FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
 	} else {
-		p.emit(Event{Kind: Stderr, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data)})
+		p.emit(Event{Kind: Stderr, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data), FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
 	}
 }
 
@@ -1110,9 +1110,9 @@ func (p *Program) statementStdout(pending pendingRequest, data []byte) {
 		return
 	}
 	if p.Eval.DefinitionEffectSink != nil {
-		p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectOut, Data: data})
+		p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, eval.Effect{Kind: eval.EffectOut, Data: data, FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
 	} else {
-		p.emit(Event{Kind: Stdout, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data)})
+		p.emit(Event{Kind: Stdout, NodeID: pending.NodeID, Generation: pending.Generation, Attempt: pending.Attempt, RequestID: pending.ID, Data: slices.Clone(p.Alloc, data), FinalizationDeadlineNS: p.Eval.FinalizerDeadline(pending.NodeID)})
 	}
 }
 

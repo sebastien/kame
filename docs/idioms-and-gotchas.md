@@ -43,6 +43,20 @@ true. Use `(> (count FILES) 0)` for a nonempty collection, `(= VALUE :nil)` for
 absence, and `(= NUMBER 0)` for zero. `count` is not valid on nil or numbers.
 `(or "" "fallback")` returns the empty string; it is not an emptiness default.
 
+`blank?` tests nil or empty text, not whitespace, false, zero or empty collections.
+`split` preserves empty fields; tokenizing a space-delimited setting is an explicit
+filter, not a change to splitting semantics:
+
+```kame
+(split " " "")                              # [""]
+(filter-out "" (split " " ""))              # []
+(filter-out "" (split " " " py  js "))      # ["py" "js"]
+(has? "py" ["pypy" "js"])                   # :false: exact membership
+```
+
+This tokenizer handles ASCII spaces, not tabs/newlines or shell quoting. Prefer
+typed lists (`--set 'MODULES=["py" "js"]'`) when the setting is structured data.
+
 Command capture preserves stdout, including every trailing newline. `(strip
 $(git rev-parse HEAD))` is an explicit identifier conversion, not a capture
 default. For a path tool promising one terminal LF, remove exactly that byte
@@ -93,6 +107,23 @@ configure a declared Kame `NO_COLOR` definition. Use `kame NO_COLOR=1`,
 `KAME_NO_COLOR=1 kame`, or a typed `--set` for definition configuration. None of
 those grants an environment read; use `--allow-env=NO_COLOR` when a read is
 actually intended, preserving other required grants under the replacement policy.
+
+For an authored opt-in color setting:
+
+```kame
+COLOR_DISABLED ?= (not (blank? (env "NO_COLOR")))
+```
+
+```sh
+NO_COLOR=1 kame --allow-read=. --allow-write=. --allow-run --allow-env=NO_COLOR check
+```
+
+This restores the usual build grants and permits only the named environment
+read. The setting treats unset/empty `NO_COLOR` as enabled color and nonempty
+text as disabled color. Read values participate in freshness; unrelated names
+remain unavailable to Kame expressions. Child programs are not sandboxed by
+these grants. The SDK must adopt such a setting explicitly; a CLI grant alone
+does not change its color policy.
 
 ## Build expressions and shell recipes
 

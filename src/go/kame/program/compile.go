@@ -55,6 +55,9 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	p.nextRequest = 1 << 60 // Evaluator queue request IDs start at one.
 	p.Forwarding = options.ForwardRequests
+	if p.Host != nil && !p.Forwarding {
+		p.Eval.FinalizationNow, p.Eval.FinalizationQuiet, p.Eval.FinalizationHost = finalizationNow, finalizationQuiet, p
+	}
 	p.Options.Directory, p.Options.DryRun, p.Options.Force, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.Force, options.RetainBytes, options.Jobs
 	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
 	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
@@ -277,29 +280,57 @@ func CompileMany(a mem.Allocator, sources []CompileSource, registry *eval.Regist
 		}
 	}
 	for i := range result.Diagnostics {
-		position := result.Diagnostics[i].Span.Start
 		// Diagnostics must outlive the temporary combined parser and the caller's
 		// source descriptors, including on failed compilation.
 		owned := result.Diagnostics[i].Clone(a)
 		result.Diagnostics[i].Free(a)
 		result.Diagnostics[i] = owned
-		owner := 0
-		for j := 1; j < len(sources); j++ {
-			if offsets[j] <= position {
-				owner = j
-			}
-		}
-		mem.FreeString(a, result.Diagnostics[i].Source)
-		result.Diagnostics[i].Source = cloneText(a, sources[owner].Name)
-		result.Diagnostics[i].Span.Start -= offsets[owner]
-		result.Diagnostics[i].Span.End -= offsets[owner]
-		result.Diagnostics[i].Span.Start += sources[owner].Offset
-		result.Diagnostics[i].Span.End += sources[owner].Offset
+		qualifyCompileDiagnostic(a, &result.Diagnostics[i], parsed.Source.Name, sources, offsets)
 	}
 	if result.Program == nil {
 		parsed.Free()
 	}
 	return result
+}
+
+// Remap every located fact before appending already-authored include frames.
+// Primary and related locations can belong to different include occurrences.
+func qualifyCompileDiagnostic(a mem.Allocator, d *diagnostic.Diagnostic, combined string, sources []CompileSource, offsets []int) {
+	if len(sources) == 0 { return }
+	for i := range d.Frames {
+		if d.Frames[i].Source == combined { qualifyCompileLocation(a, &d.Frames[i].Source, &d.Frames[i].Span, sources, offsets) }
+	}
+	if d.Source == combined {
+		owner := qualifyCompileLocation(a, &d.Source, &d.Span, sources, offsets)
+		appendIncludeFrames(a, d, sources[owner].Includes)
+	}
+	for i := range d.Related {
+		if d.Related[i].Source != combined { continue }
+		owner := qualifyCompileLocation(a, &d.Related[i].Source, &d.Related[i].Span, sources, offsets)
+		appendIncludeFrames(a, d, sources[owner].Includes)
+	}
+}
+
+func qualifyCompileLocation(a mem.Allocator, name *string, span *diagnostic.Span, sources []CompileSource, offsets []int) int {
+	owner := 0
+	for i := 1; i < len(sources); i++ { if offsets[i] <= span.Start { owner = i } }
+	mem.FreeString(a, *name)
+	*name = cloneText(a, sources[owner].Name)
+	span.Start += sources[owner].Offset-offsets[owner]
+	span.End += sources[owner].Offset-offsets[owner]
+	return owner
+}
+
+func appendIncludeFrames(a mem.Allocator, d *diagnostic.Diagnostic, frames []diagnostic.Frame) {
+	for i := len(frames)-1; i >= 0; i-- {
+		frame := frames[i]
+		found := false
+		for j := range d.Frames {
+			other := d.Frames[j]
+			if other.Kind == frame.Kind && other.Label == frame.Label && other.Source == frame.Source && other.Span.Start == frame.Span.Start && other.Span.End == frame.Span.End { found = true; break }
+		}
+		if !found { d.Frames = slices.Append(a, d.Frames, diagnostic.Frame{Kind: cloneText(a, frame.Kind), Label: cloneText(a, frame.Label), Source: cloneText(a, frame.Source), Span: frame.Span}) }
+	}
 }
 
 func duplicateLiteral(p *Program, candidate *rule.Rule) diagnostic.Diagnostic {
@@ -330,6 +361,10 @@ func duplicateLiteral(p *Program, candidate *rule.Rule) diagnostic.Diagnostic {
 func (p *Program) Free() {
 	if p == nil {
 		return
+	}
+	if !p.Forwarding {
+		p.Eval.BeginFinalization()
+		for p.Eval.Finalizing() { p.tick(10) }
 	}
 	p.Eval.CancelProcesses()
 	rule.FreeRule(p.Alloc, p.automaticCleanRule)

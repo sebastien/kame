@@ -130,6 +130,14 @@ as 0 or 1, and `timeoutMS` and `retryCount` as nonnegative integers, into portab
 cached-task lookup on either host. Registration failures expose their complete diagnostic
 list through the target-event query, including in non-JSON presentation modes.
 
+Build source entries and session fragments may carry an outer-to-inner `includes`
+list. Each entry contains nonempty `source` and `label` strings (the including
+source and included source), plus authored byte `start` and `end` offsets with
+`0 <= start <= end <= 2147483647`. The host supplies this provenance; the compiler
+never opens includes to reconstruct it. Invalid fields fail `PARSE_ERR` before
+registration. Compilation errors map primary and related locations separately
+and retain both inclusion paths, including distinct sites loading the same file.
+
 ## Host Requests
 
 Host request kinds include:
@@ -360,6 +368,14 @@ Runtime spelling and its distinction from `buildMode` are defined by the
 [canonical runtime table](009-cli.md#runtime-names). This short human format is
 an intentional exception to the native four-field format; `--json --version`
 includes `runtime: "WASM"` and `buildMode: "wasm"` without loading the module.
+Its version and build ID identify the selected wrapper/module pair only when
+local provenance matches both assets, following
+[WASM identity reporting](015-distribution.md#wasm-identity-reporting). Hashing
+module bytes for that check is not module instantiation. `KAME_WASM` changes the
+selected module and therefore the bytes that must match; metadata for the
+default adjacent module cannot identify a different override. Missing or
+unusable metadata leaves build identity unknown without fetching, provisioning
+or executing anything. This reporting does not change the WASM ABI.
 
 For ABI conformance testing, the wrapper also accepts `--wasm-abi-info` and
 `--wasm-self-test`, which print ABI exports and self-test results as JSON.
@@ -416,7 +432,47 @@ The wrapper must:
 - Copy bytes before a subsequent allocating ABI call.
 - Dispatch host requests by capability.
 - Feed every completion or cancellation back exactly once.
-- Free the instance and detach pending callbacks on disposal.
+- Finish bounded scoped finalization before freeing the instance and detaching
+  pending callbacks on graceful disposal.
+
+### Scoped finalization driver
+
+[`finally!`](043-kame-finalization.md) requires an explicit graceful driver.
+The additive `kame_wasm_finalization_tick(instance, now_ns, stopping)` entry
+supplies monotonic nanoseconds and opts the driver into this contract. Tick
+before stepping and while requests or public sinks are blocked. Stale clock
+samples cannot move the clock backward or extend an established deadline.
+Without that opt-in, reject `finally!` with `FEATURE_UNSUP` before either callback.
+
+Set `stopping` to 1 for graceful disposal, then continue stepping, servicing
+requests and draining effects/events while tick returns 1 (armed scopes remain).
+Every withdrawn request must still be acknowledged after its owned host work is
+quiescent/reaped, even though its evaluation result is stale. The finalization
+clock and event driver must outlive those acknowledgements. `instance_free`
+returns `STATE_INVALID` while scopes remain armed; fatal allocator exhaustion is
+an execution-state-loss boundary, not a promise to run user cleanup.
+Use `stopping` 2 when the established shutdown cause is an invocation timeout;
+its primary diagnostic remains `RECIPE_TIMEOUT`, not `EXEC_CANCELLED`.
+
+For a pinned request, `kame_wasm_finalization_budget(instance, 0)` returns 0 outside
+cleanup, positive remaining milliseconds for runtime-designated cleanup, or -1
+after its deadline. Copy this metadata before detaching. Only designated cleanup
+requests may use a separate bounded cancellation signal after body cancellation;
+keep their original grants, cwd, environment and host policy. A process started
+by cleanup is protected from ordinary invocation signal forwarding, but not its
+cleanup deadline. Body work and later fragments remain cancelled. No callback,
+timer, blocked sink or repeated signal may restart the absolute cleanup deadline.
+Passing 1 instead of 0 queries the earliest active cleanup deadline across all
+scopes, allowing a backpressured public sink to yield back to the deadline driver.
+
+After teardown, `kame_wasm_result_diagnostic(instance, dst, capacity, out_len)`
+copies the terminal schema-1 diagnostic document, including `notes`, `related`,
+frames and sanitized cause metadata. It is a non-consuming query: no result,
+effect or event is retired, and no root is released. Empty bytes mean there is
+no terminal diagnostic. Copy it before freeing the instance. JavaScript API
+errors expose this diagnostic through their existing `diagnostics` array, also
+when cancellation/disposal caused the initial rejection. Secondary cleanup
+failures must not replace that rejection's cancellation control code.
 
 The wrapper's stream exposes current-plus-future updates, not full replay.
 
@@ -437,6 +493,9 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 - The JavaScript wrapper copies payloads before further allocation and rejects
   use after disposal.
 - `node dist/kame.js --version` prints `kame VERSION (runtime=WASM)` and exits 0.
+- JSON version queries match provenance against the actual wrapper and selected
+  module without instantiating it. Missing or invalid metadata and differing
+  `KAME_WASM` bytes cannot inherit an unrelated release's identity.
 - `do run --lang expr` output matches native output byte-for-byte for pure expressions.
 - Direct `.km`/`.kmk`/`.kash`/`.ksh` execution and `do run` share native dispatch,
   ordered multi-source compilation, shared scope/engine, first-fragment policy,

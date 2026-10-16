@@ -29,8 +29,9 @@ func (p *Program) recoverValue(scope *Scope, e *expr.Expr, c *Context) Result {
 		c.RecoverFailures = true
 		r := p.evaluate(c.Engine, scope, e.Items[0], c)
 		c.RecoverFailures = previousRecovery
-		if r.Waiting || (r.Diagnostic.Code != "" && !recoverableValue(r.Diagnostic.Code)) || (r.Diagnostic.Code == "" && r.Value.Kind != core.Nil) { return r }
+		if r.Waiting || r.Diagnostic.Protected || (r.Diagnostic.Code != "" && !recoverableValue(r.Diagnostic.Code)) || (r.Diagnostic.Code == "" && r.Value.Kind != core.Nil) { return r }
 		r.Free(c.Run)
+		c.handledFinalizerFailure()
 		if state != nil { state.Fallback = true }
 	}
 	return p.evaluate(c.Engine, scope, e.Items[1], c)

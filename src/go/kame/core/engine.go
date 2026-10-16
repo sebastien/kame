@@ -199,6 +199,9 @@ func (e *Engine) Release(r *Root) {
 }
 
 func (e *Engine) interest(n *Node, delta int64) {
+	if delta < 0 && n.Interest+delta == 0 && !n.invalidating && !n.tearingDown && n.BeginTeardown != nil {
+		e.beginTeardown(n, false)
+	}
 	n.Interest += delta
 	for i := range n.Static {
 		e.interest(n.Static[i], delta)
@@ -335,6 +338,7 @@ func (e *Engine) ready(n *Node) bool {
 	}
 	for i := range n.Static {
 		dependency := n.Static[i]
+		if n.tearingDown { continue }
 		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
 			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
 			return false
@@ -467,7 +471,7 @@ func (e *Engine) DrainCompletions() {
 func (e *Engine) run(n *Node) *Node {
 	e.lastRun = n
 	n.offered = false
-	if n.materializer != nil {
+	if n.materializer != nil && !n.tearingDown {
 		n.Attempt++
 		c := &EngineContext{engine: e, node: n}
 		if n.HasCompletion {
@@ -515,11 +519,20 @@ func (e *Engine) run(n *Node) *Node {
 		n.Completion = Completion{}
 		n.HasCompletion = false
 	}
-	result := n.Producer(c, n.ID)
+	var result ProducerResult
+	if n.tearingDown {
+		result = n.Teardown(c, n.ID)
+		if result == ProducerCompleted || result == ProducerFailed {
+			e.finishTeardown(n)
+			return n
+		}
+	} else {
+		result = n.Producer(c, n.ID)
+	}
 	if n.State == NodeComplete || n.State == NodeFailed {
 		return n
 	}
-	if n.materializer != nil && result == ProducerActive {
+	if n.materializer != nil && !n.tearingDown && result == ProducerActive {
 		return e.run(n)
 	}
 	if result == ProducerRestart {
@@ -609,6 +622,7 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 	}
 	*seen = slices.Append(e.Alloc, *seen, n)
 	n.invalidating = true
+	if e.beginTeardown(n, true) { n.invalidating = false; return }
 	// Invalidating a child can remove its dynamic reverse edge from this node.
 	// Traverse a stable copy so that mutation cannot skip a sibling.
 	dependents := slices.Clone(e.Alloc, n.Dependents)
@@ -716,6 +730,7 @@ func (e *Engine) cancel(n *Node) {
 	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
 		return
 	}
+	if e.beginTeardown(n, false) { return }
 	if n.materializer != nil {
 		n.materializer.Free()
 		n.materializer = nil
@@ -735,7 +750,10 @@ func (e *Engine) cancel(n *Node) {
 	n.Generation++
 	n.Requested = false
 	n.State = NodeCancelled
-	n.Diagnostic = Diagnostic{Code: DiagnosticCancelled}
+	if n.teardownDiagnostic.Code != "" {
+		n.Diagnostic = n.teardownDiagnostic
+		n.teardownDiagnostic = Diagnostic{}
+	} else { n.Diagnostic = Diagnostic{Code: DiagnosticCancelled} }
 	e.emit(n, terminal(n))
 	for i := range n.Dependents {
 		if n.Dependents[i].State == NodeWaiting {
@@ -806,6 +824,7 @@ func (e *Engine) Free() {
 		}
 		n.Diagnostic.Free(e.Alloc)
 		n.Key.Free(e.Alloc)
+		n.teardownDiagnostic.Free(e.Alloc)
 		mem.Free(e.Alloc, n)
 	}
 	for i := range e.completions {

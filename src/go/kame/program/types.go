@@ -136,6 +136,8 @@ const (
 )
 
 type Event struct {
+	// Deadline for delivery of cleanup output, not a public event field.
+	FinalizationDeadlineNS int64
 	Decision string
 	Reason string
 	Message string
@@ -468,6 +470,8 @@ type CompileSource struct {
 	Text string
 	// Offset is the byte position of Text in its original source file.
 	Offset int
+	// Includes borrows the outer-to-inner authored inclusion path for this part.
+	Includes []diagnostic.Frame
 }
 
 // Free releases the compilation envelope, not the Program. Retain a successful

@@ -25,6 +25,7 @@ type Fragment struct {
  Defines []string
  Check bool
 	Offset int
+	Includes []diagnostic.Frame
 }
 
 type SessionWork struct {
@@ -59,7 +60,7 @@ func DefinitionEventEffect(state any, effect eval.Effect) {
 	p := state.(*Program)
 	kind := Stdout
 	if effect.Kind == eval.EffectErr { kind = Stderr } else if effect.Kind != eval.EffectOut && effect.Kind != eval.EffectYield { return }
-	p.emit(Event{Kind: kind, Data: slices.Clone(p.Alloc, effect.Data)})
+	p.emit(Event{Kind: kind, Data: slices.Clone(p.Alloc, effect.Data), FinalizationDeadlineNS: effect.FinalizationDeadlineNS})
 }
 
 // Observe reports root failures in every mode and JSON value/statement roots once.
@@ -114,7 +115,9 @@ func (s *Session) Free() {
 func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Registry, options Options) SessionCompile {
 	b := strings.NewBuilder(a)
 	var offsets []int
+	var sources []CompileSource
 	for i := range fragments {
+		sources = slices.Append(a, sources, CompileSource{Name: fragments[i].Name, Text: fragments[i].Text, Offset: fragments[i].Offset, Includes: fragments[i].Includes})
 		offsets = slices.Append(a, offsets, b.Len())
 		b.WriteString(fragments[i].Text)
 		b.WriteByte('\n')
@@ -261,18 +264,9 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		} else { p.Free(); freeSessionWork(a, work) }
 	}
 	for i := range result.Diagnostics {
-		position := result.Diagnostics[i].Span.Start
-		if result.Diagnostics[i].Source != "<session>" { continue }
-		owner := 0
-		for j := range offsets { if offsets[j] <= position { owner = j } }
-		copy := result.Diagnostics[i].Clone(a)
-		result.Diagnostics[i].Free(a)
-		mem.FreeString(a, copy.Source)
-		copy.Source = cloneText(a, fragments[owner].Name)
-		copy.Span.Start += fragments[owner].Offset-offsets[owner]
-		copy.Span.End += fragments[owner].Offset-offsets[owner]
-		result.Diagnostics[i] = copy
+		qualifyCompileDiagnostic(a, &result.Diagnostics[i], "<session>", sources, offsets)
 	}
+	slices.Free(a, sources)
 	slices.Free(a, offsets)
 	return result
 }
@@ -298,6 +292,7 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	eval.FreeEffects(c.Allocator(), context.Effects)
 	if r.Waiting { r.Free(c.Allocator()); if c.Submitted() { return core.ProducerSubmitted }; return core.ProducerWaiting }
 	if r.Diagnostic.Code != "" { c.Fail(r.Diagnostic); r.Diagnostic = diagnostic.Diagnostic{}; r.Free(c.Allocator()); return core.ProducerFailed }
+	if r.Completed { r.Free(c.Allocator()); return core.ProducerCompleted }
 	if state.Raw && r.Value.Kind == core.String { raw := core.NewBytes(c.Allocator(), []byte(r.Value.Text)); r.Value.Free(c.Allocator()); r.Value = raw }
 	c.Publish(r.Value)
 	r.Value = core.Value{}
