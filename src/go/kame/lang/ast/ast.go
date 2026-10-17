@@ -147,6 +147,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 	e.node(exprKind(value.Kind), value.Span)
 	if value.Kind == expr.CommandMux {
 		e.Str("operator"); e.Str(value.Text)
+		if value.Int != 0 { e.Str("bufferBytes"); e.Int(value.Int) }
 		if len(value.Body) != 0 { e.Str("selected"); e.expr(value.Body[0]) }
 	}
 	if value.Exit != "" { e.Str("rejoin"); e.Str(value.Exit) }

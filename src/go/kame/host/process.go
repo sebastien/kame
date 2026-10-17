@@ -77,6 +77,7 @@ type ExecutorDescriptor struct {
 }
 
 type ProcessStage struct {
+	BufferBytes int // zero selects the host's bounded default; native muxes only
 	Framed bool // output uses the private framed-line transport
 	Kind string // empty for an executable; otherwise a native stream operator
 	Argv []string

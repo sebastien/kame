@@ -98,8 +98,11 @@ func (p *Program) drainRequests() {
 			graphs := host.PayloadStages(request.Payload)
 			setups := host.PayloadSetups(request.Payload)
 			kinds := host.PayloadList(request.Payload, "kinds")
+			buffers := host.PayloadList(request.Payload, "buffers")
 			var edges []host.ProcessEdge
 			validEdges := true
+			if len(buffers) != 0 && len(buffers) != len(graphs) { validEdges = false }
+			for i := range buffers { if buffers[i].Kind != core.Int || buffers[i].Int < 0 || buffers[i].Int > 65536 { validEdges = false } }
 			connections := host.PayloadList(request.Payload, "edges")
 			for i := range connections {
 				items := connections[i].List
@@ -118,6 +121,7 @@ func (p *Program) drainRequests() {
 					arguments = slices.Append(p.Alloc, arguments, graphs[i].List[j].Text)
 				}
 				stage := host.ProcessStage{Argv: arguments}
+				if i < len(buffers) { stage.BufferBytes = int(buffers[i].Int) }
 				if i < len(kinds) { stage.Kind = kinds[i].Text }
 				framed := host.PayloadList(request.Payload, "framed")
 				if i < len(framed) { stage.Framed = framed[i].Bool }

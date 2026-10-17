@@ -146,6 +146,7 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 		if policy == "merge" && (i+1 == len(e.Items) || e.Items[i+1].Kind == expr.CommandMux) {
 			if len(ports.Outputs) < 2 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span }
 			merge := addStreamNode(c, flat, "merge", connection.Span)
+			flat.Items[merge].Int = connection.Int
 			for j := range ports.Outputs { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: merge}) }
 			slices.Free(c.Run, ports.Outputs); ports.Outputs = slices.Append(c.Run, []int{}, merge)
 			continue
@@ -155,7 +156,7 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 		if policy == "" {
 			if len(ports.Outputs) != 1 || len(right.Inputs) != 1 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span } else { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]}) }
 		} else {
-			if (policy == "merge" && (len(ports.Outputs) < 2 || len(right.Inputs) != 1)) || (policy == "broadcast" && (len(ports.Outputs) != 1 || len(right.Inputs) < 2)) { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span }
+			if (policy == "merge" && (len(ports.Outputs) < 2 || len(right.Inputs) != 1)) || ((policy == "broadcast" || policy == "balance") && (len(ports.Outputs) != 1 || len(right.Inputs) < 2)) { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span }
 			index := len(flat.Items)
 			flat.Items = slices.Append(c.Run, flat.Items, expr.Clone(c.Run, connection))
 			for j := range ports.Outputs { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: index}) }

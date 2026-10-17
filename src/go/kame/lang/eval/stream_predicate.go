@@ -15,6 +15,7 @@ const (
 	StreamPredicateEffect = 122
 	StreamPredicateBoolean = 123
 	StreamPredicateFailure = 124
+	StreamBufferLimit = 126 // 125 remains the native operator I/O failure status
 )
 
 // EvaluateStreamPredicate evaluates an authored AST, not source supplied by a
@@ -68,6 +69,7 @@ func streamFailure(c *Context, status int, span source.Span) Result {
 	switch status {
 	case StreamEncoding: return failure(c.Run, "KASH_FRAME_ENCODING", span, "line frame is not valid UTF-8")
 	case StreamRecordLimit: return failure(c.Run, "KASH_RECORD_LIMIT", span, "line frame exceeds the 64 KiB record limit")
+	case StreamBufferLimit: return failure(c.Run, "KASH_BUFFER_LIMIT", span, "complete line frame exceeds the configured operator byte budget")
 	case StreamPredicateEffect: return failure(c.Run, "KASH_PREDICATE_EFFECT", span, "stream predicate attempted an effect or suspension")
 	case StreamPredicateBoolean: return failure(c.Run, "KASH_PREDICATE_BOOLEAN", span, "stream predicate must return a Boolean")
 	}

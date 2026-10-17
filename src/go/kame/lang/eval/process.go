@@ -161,7 +161,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			for i := range stages {
 				if i < len(e.Items) && e.Items[i].Kind == expr.CommandMux && host.PayloadInt(stages[i], "status") == host.PayloadInt(completion.Value, "status") {
 					status := int(host.PayloadInt(stages[i], "status"))
-					if status >= StreamEncoding && status <= StreamPredicateFailure { r.Free(c.Run); r = streamFailure(c, status, e.Items[i].Span); break }
+					if (status >= StreamEncoding && status <= StreamPredicateFailure) || status == StreamBufferLimit { r.Free(c.Run); r = streamFailure(c, status, e.Items[i].Span); break }
 				}
 			}
 		}
@@ -440,6 +440,16 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			edges = slices.Append(c.Run, edges, value)
 		}
 		host.ConfigureTopology(c.Run, &payload, kinds, edges)
+		var buffers []core.Value
+		configuredBuffer := false
+		for i := range e.Items {
+			budget := int64(0)
+			if e.Items[i].Kind == expr.CommandMux { budget = e.Items[i].Int }
+			if budget != 0 { configuredBuffer = true }
+			buffers = slices.Append(c.Run, buffers, core.Value{Kind: core.Int, Int: budget})
+		}
+		if configuredBuffer { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "buffers"), Value: core.NewList(c.Run, buffers)}) }
+		slices.Free(c.Run, buffers)
 		for i := range kinds { kinds[i].Free(c.Run) }; slices.Free(c.Run, kinds)
 		for i := range edges { edges[i].Free(c.Run) }; slices.Free(c.Run, edges)
 	}
@@ -485,7 +495,7 @@ func rememberArgumentEffects(state *captureState, c *Context, before int, before
 // Only a completed process failure selects the fallback. Argument evaluation,
 // authorization, and waiting never reach this recovery boundary.
 func (p *Program) captureRecovery(e *expr.Expr, c *Context, state *captureState, r Result) Result {
-	if r.Diagnostic.Protected || len(e.Body) == 0 || (r.Diagnostic.Code != "RECIPE_FAIL" && r.Diagnostic.Code != "HOST_FAIL" && r.Diagnostic.Code != "TOOL_MISSING" && r.Diagnostic.Code != "RECIPE_TIMEOUT" && !strings.HasPrefix(r.Diagnostic.Code, "KASH_PREDICATE_") && r.Diagnostic.Code != "KASH_RECORD_LIMIT" && r.Diagnostic.Code != "KASH_FRAME_ENCODING") { return r }
+	if r.Diagnostic.Protected || len(e.Body) == 0 || (r.Diagnostic.Code != "RECIPE_FAIL" && r.Diagnostic.Code != "HOST_FAIL" && r.Diagnostic.Code != "TOOL_MISSING" && r.Diagnostic.Code != "RECIPE_TIMEOUT" && !strings.HasPrefix(r.Diagnostic.Code, "KASH_PREDICATE_") && r.Diagnostic.Code != "KASH_RECORD_LIMIT" && r.Diagnostic.Code != "KASH_BUFFER_LIMIT" && r.Diagnostic.Code != "KASH_FRAME_ENCODING") { return r }
 	c.handledFinalizerFailure()
 	state.Recovering = true
 	r.Free(c.Run)

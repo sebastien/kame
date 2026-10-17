@@ -24,3 +24,12 @@ func TestInvalidFramedRejoinStaysInspectable(t *testing.T) {
 	if ast.WriteAST(&buffer, "kash", "invalid.kash", "printf a |(frame :lines) |(filter :true | cat >&) | cat") != 0 { t.Error("semantic framing mismatch became a parse error") }
 	if !strings.Contains(buffer.String(), "KASH_FRAME_MISMATCH") { t.Error("missing static framing diagnostic") }
 }
+
+func TestSchedulingInspectionReportsEffectiveClosedPolicies(t *testing.T) {
+	buffer := bytes.NewBuffer(t.Allocator(), nil)
+	defer buffer.Free()
+	text := "printf $(touch ./must-not-run) |(frame :lines) |(balance :buffer 4096 :strategy round-robin) (cat, cat) |(merge :buffer 8192) cat"
+	if ast.WriteAST(&buffer, "kash", "scheduling.kash", text) != 0 { t.Error("scheduling failed inspection") }
+	fields := []string{"\"kind\":\"balance\"", "\"bufferBytes\":4096", "\"bufferBytes\":8192", "\"strategy\":\"round-robin\"", "\"strategy\":\"round-robin-ready\"", "\"overflow\":\"block\"", "\"failure\":\"fail-fast\"", "\"outputCount\":2"}
+	for _, field := range fields { if !strings.Contains(buffer.String(), field) { t.Errorf("missing scheduling metadata: %s", field) } }
+}

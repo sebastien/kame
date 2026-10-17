@@ -87,7 +87,8 @@ enum kame_wasm_request_kind {
   // JSON {stages, kinds, edges, setup, stream?}; explicit process topology.
   // Older hosts must reject this kind, never reinterpret it as a pipeline.
   KAME_WASM_REQUEST_PROCESS_TOPOLOGY = 32,
-  KAME_WASM_REQUEST_PROCESS_OPERANDS = 33
+  KAME_WASM_REQUEST_PROCESS_OPERANDS = 33,
+  KAME_WASM_REQUEST_PROCESS_POLICIES = 34
 };
 
 /* Terminal process outcomes reported by kame_wasm_process_terminal. */

@@ -259,6 +259,29 @@ Use `&name | cat > ./file` for a file sink. Names are ASCII identifiers (hyphens
 allowed after the first character); `in`, `out`, and `err` are reserved scope
 ports and are not available as general named endpoints.
 
+### Scheduling and working buffers
+
+```kash
+source |(frame :lines) |(balance :strategy round-robin) (worker-a, worker-b)
+source |(broadcast :buffer 4096) (audit, archive)
+```
+
+`balance` requires framed records and assigns each record to exactly one child,
+in strict round-robin group order. It preserves each child's assigned order;
+slow children apply backpressure, and any failure cancels the graph. Children are
+long-running processes, not new processes for each item. Unassigned children
+still receive EOF. Merge remains round-robin-ready with per-input ordering, not
+a globally ordered rejoin.
+
+`merge`, `broadcast`, and `balance` accept literal `:buffer BYTES` (1..65536).
+For bytes it limits each transfer; for records it limits each input's complete
+payload assembly, excluding the private four-byte frame header. A larger record
+fails with `KASH_BUFFER_LIMIT`. Kernel pipes and bounded host stream buffers are
+additional; this is not a total graph memory limit. Defaults are 16 KiB for byte
+transfer and 64 KiB per framed input. Invalid or computed policies fail before
+execution. Lossy buffering, alternate policies, per-item workers, and runtime
+buffer metrics are not implemented yet.
+
 ### Live stream arguments
 
 ```kash

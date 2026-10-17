@@ -40,7 +40,7 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 			if node.Text == "frame" {
 				if input != 0 { return failure(c.Run, "KASH_FRAME_MISMATCH", node.Span, "frame :lines requires bytes") }
 				output = 1
-			} else if node.Text == "encode" || node.Text == "filter" {
+			} else if node.Text == "encode" || node.Text == "filter" || node.Text == "balance" {
 				if input != 1 { return failure(c.Run, "KASH_FRAME_REQUIRED", node.Span, "item-aware operators require explicit line framing") }
 				if node.Text == "encode" { output = 0 }
 			}

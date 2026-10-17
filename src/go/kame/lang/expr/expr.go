@@ -1244,7 +1244,7 @@ func writeProcess(b *strings.Builder, e *Expr) {
 			}
 			b.WriteByte(')'); continue
 		}
-		if i != 0 { if e.Items[i].Kind == CommandWriter || (e.Items[i-1].Kind == CommandMux && (e.Items[i-1].Text == "merge" || e.Items[i-1].Text == "broadcast")) { b.WriteByte(' ') } else { b.WriteString(" | ") } }
+		if i != 0 { if e.Items[i].Kind == CommandWriter || (e.Items[i-1].Kind == CommandMux && (e.Items[i-1].Text == "merge" || e.Items[i-1].Text == "broadcast" || e.Items[i-1].Text == "balance")) { b.WriteByte(' ') } else { b.WriteString(" | ") } }
 		writeExpr(b, e.Items[i])
 	}
 	if e.AcceptExit { b.WriteString(" ?") }

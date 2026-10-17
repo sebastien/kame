@@ -110,7 +110,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			break
 		}
 		if ((grouped || branch) && p.s.Text[p.pos] == ')') || (grouped && p.s.Text[p.pos] == ',') { break }
-		if stage.Kind == CommandMux && (stage.Text == "merge" || stage.Text == "broadcast") && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
+		if stage.Kind == CommandMux && (stage.Text == "merge" || stage.Text == "broadcast" || stage.Text == "balance") && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
 			stage = p.node(CommandStage, p.pos)
 			input = false
 			e.Items = slices.Append(p.a, e.Items, stage)
@@ -199,8 +199,8 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 						p.commandSpace(true)
 						mux.Body = slices.Append(p.a, mux.Body, p.commandPipeline(p.pos, false, false, true))
 					}
-				}
-				if (mux.Text != "merge" && mux.Text != "broadcast" && mux.Text != "frame" && mux.Text != "encode" && mux.Text != "filter") || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || len(p.diags) != 0 {
+				} else if mux.Text == "merge" || mux.Text == "broadcast" || mux.Text == "balance" { p.streamPolicy(mux) }
+				if (mux.Text != "merge" && mux.Text != "broadcast" && mux.Text != "balance" && mux.Text != "frame" && mux.Text != "encode" && mux.Text != "filter") || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || len(p.diags) != 0 {
 					p.error(mux.Span.Start, p.pos, "invalid Kash stream operator")
 					freeExpr(p.a, mux)
 					break
@@ -314,7 +314,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 	if !hasExecutable(stage) {
 		p.error(start, p.pos, "expected Kash executable")
 	}
-	if stage.Kind == CommandMux && stage.Text == "broadcast" { p.error(stage.Span.Start, p.pos, "broadcast requires a destination group") }
+	if stage.Kind == CommandMux && (stage.Text == "broadcast" || stage.Text == "balance") { p.error(stage.Span.Start, p.pos, "fan-out requires a destination group") }
 	for i := 1; i < len(e.Items); i++ {
 		candidate := e.Items[i]
 		if candidate.Kind != CommandStage { continue }

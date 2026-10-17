@@ -1354,7 +1354,7 @@ static void km_mux_close_unowned(int node, int *edges, so_int *links, int count)
     }
 }
 
-enum { KM_RECORD_LIMIT = 64 * 1024, KM_FRAME_ENCODING = 120, KM_RECORD_TOO_LONG = 121, KM_PREDICATE_FAILED = 124 };
+enum { KM_RECORD_LIMIT = 64 * 1024, KM_FRAME_ENCODING = 120, KM_RECORD_TOO_LONG = 121, KM_PREDICATE_FAILED = 124, KM_BUFFER_LIMIT = 126 };
 
 static bool km_mux_write(int fd, const unsigned char *data, size_t length) {
     while (length) {
@@ -1372,7 +1372,7 @@ static int km_mux_send(int node, int kind, int *edges, so_int *links, int count,
                        unsigned char *data, int length, int selected) {
     int output = 0;
     for (int i = 0; i < count; i++) if (links[i * 2] == node) {
-        bool deliver = kind != 5 || output == selected;
+        bool deliver = (kind != 5 && kind != 7) || output == selected;
         output++;
         if (deliver && !km_mux_write(edges[i * 2 + 1], data, (size_t)length)) return 125;
     }
@@ -1418,6 +1418,9 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
                       int64_t id, km_stream_item item, void *context) {
     int kind = mode & 15;
     bool framed = (mode & 16) || kind == 4;
+    int budget = mode >> 8;
+    if (!budget) budget = framed ? KM_RECORD_LIMIT : KM_CHUNK;
+    if (budget < 1 || budget > KM_RECORD_LIMIT) return 125;
     struct pollfd *inputs = calloc((size_t)count, sizeof(*inputs));
     if (!inputs) return 125;
     int readers = 0;
@@ -1431,11 +1434,14 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
     if (framed && !frames) { free(inputs); return 125; }
     int result = 0;
     for (int i = 0; framed && i < readers; i++) {
-        frames[i].data = malloc(KM_RECORD_LIMIT + 4); frames[i].need = 4;
+        frames[i].data = malloc((size_t)budget + 4); frames[i].need = 4;
         if (!frames[i].data) { result = 125; break; }
     }
-    int active = readers, cursor = 0;
-    unsigned char buffer[KM_CHUNK];
+    int active = readers, cursor = 0, destination = 0, outputs = 0;
+    for (int i = 0; i < count; i++) if (links[i * 2] == node) outputs++;
+    if (kind == 7 && (!framed || readers != 1 || outputs < 2)) result = 125;
+    unsigned char *buffer = framed ? NULL : malloc((size_t)budget);
+    if (!framed && !buffer) result = 125;
     while (active && !result) {
         int ready;
         do { ready = poll(inputs, (nfds_t)readers, -1); } while (ready < 0 && errno == EINTR);
@@ -1446,7 +1452,7 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
             ssize_t n;
             km_frame_input *frame = framed ? &frames[next] : NULL;
             unsigned char *data = framed ? frame->data + frame->length : buffer;
-            size_t capacity = framed ? (size_t)(frame->need - frame->length) : sizeof(buffer);
+            size_t capacity = framed ? (size_t)(frame->need - frame->length) : (size_t)budget;
             do { n = read(inputs[next].fd, data, capacity); } while (n < 0 && errno == EINTR);
             if (n < 0) { result = 125; break; }
             if (!n) {
@@ -1462,6 +1468,7 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
                     uint32_t size = 0;
                     for (int j = 0; j < 4; j++) size |= (uint32_t)frame->data[j] << (j * 8);
                     if (!size || size > KM_RECORD_LIMIT) { result = KM_RECORD_TOO_LONG; break; }
+                    if (size > (uint32_t)budget) { result = KM_BUFFER_LIMIT; break; }
                     frame->need = 4 + (int)size;
                     break;
                 }
@@ -1473,6 +1480,7 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
                     selected = accepted ? 0 : 1;
                 }
                 if (kind == 4) { data += 4; length -= 4; }
+                if (kind == 7) { selected = destination; destination = (destination + 1) % outputs; }
             }
             result = km_mux_send(node, kind, edges, links, count, data, length, selected);
             if (framed) { frame->length = 0; frame->need = 4; }
@@ -1481,6 +1489,7 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
         }
     }
     if (frames) { for (int i = 0; i < readers; i++) free(frames[i].data); free(frames); }
+    free(buffer);
     free(inputs);
     return result;
 }
@@ -1840,7 +1849,7 @@ static void km_reap(km_host *host, km_process *p) {
             // A framing/predicate failure can close upstream before the parent
             // observes its exit. Preserve the causal operator diagnostic over
             // a resulting SIGPIPE, never reinterpret an executable's exit code.
-            if (p->topology && !p->terminating && s->operator_kind && s->exited && !s->signal && s->status >= 120 && s->status <= 124) {
+            if (p->topology && !p->terminating && s->operator_kind && s->exited && !s->signal && ((s->status >= 120 && s->status <= 124) || s->status == KM_BUFFER_LIMIT)) {
                 p->failed_stage = i; p->status = s->status; p->signal = 0;
             }
             if (!s->exited) all = false;

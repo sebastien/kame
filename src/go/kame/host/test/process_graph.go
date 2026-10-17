@@ -53,3 +53,17 @@ func TestPipelinePayloadAllowsLeadingNativeNodes(t *testing.T) {
 	if host.PayloadPath(payload) != "/bin/cat" { t.Error("leading native node hid executable identity") }
 	payload.Free(a); executable.Free(a); operator.Free(a)
 }
+
+func TestBalanceRequiresFramesAndValidatedWorkingBudget(t *testing.T) {
+	stages := []host.ProcessStage{{Argv: []string{"source"}}, {Kind: "frame", Framed: true}, {Kind: "balance", Framed: true, BufferBytes: 4}, {Kind: "encode"}, {Kind: "encode"}, {Argv: []string{"left"}}, {Argv: []string{"right"}}}
+	edges := []host.ProcessEdge{{From: 0, To: 1}, {From: 1, To: 2}, {From: 2, To: 3}, {From: 2, To: 4}, {From: 3, To: 5}, {From: 4, To: 6}}
+	request := host.ProcessRequest{Topology: true, Stages: stages, Edges: edges}
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "" { t.Errorf("framed balance rejected: %s", code) }
+	stages[2].BufferBytes = 65537
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_MUX_ARITY" { t.Error("unbounded operator budget accepted") }
+	stages[2].BufferBytes = 0
+	stages[1].Kind, stages[1].Framed = "copy", false
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_FRAME_REQUIRED" { t.Errorf("byte balance accepted: %s", code) }
+	stages[0].BufferBytes = 4
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_MUX_ARITY" { t.Error("working budget accepted on an executable") }
+}

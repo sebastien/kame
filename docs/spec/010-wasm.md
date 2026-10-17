@@ -347,6 +347,19 @@ are validated for that backend. `ProcessEdge.Argument` uses the same zero/stdin,
 positive/argv convention. Static parse inspection instead reports the one-based
 authored AST item as `argumentItem`, because inspection cannot expand argv values.
 
+Configured working buffers use request kind **34**, including when a graph also
+has injected arguments. It adds `buffers`, one integer per stage: zero selects
+the bounded default, and 1..65536 is the per-input payload budget. Only native
+`merge`, `broadcast`, and `balance` nodes accept nonzero budgets. A framed payload
+larger than its configured budget fails with native operator status 126,
+classified as `KASH_BUFFER_LIMIT`; the four-byte envelope does not count against
+the budget. Kind 34 prevents an older host from silently ignoring a bound.
+
+`balance` is a framed 1:N node (N >= 2). It routes each complete item to exactly
+one output in edge order, round-robin, and blocks until that assignment is
+delivered. It closes every output at EOF, including never-assigned outputs.
+It neither starts per-record workers nor drops/skips records for a slow child.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly

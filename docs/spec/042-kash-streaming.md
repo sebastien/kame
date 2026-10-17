@@ -68,7 +68,27 @@ This is pipe transport, not regular-file materialization.
 Native Windows and hosts without usable descriptor paths or FIFO support reject operands with
 `KASH_STREAM_OPERAND_UNSUPPORTED` before launching or truncating outputs.
 
-Balance and runtime topology inspection remain subsequent work. Process channels
+The first scheduling increment supports framed `balance`, with strict
+round-robin assignment in destination-group order. `:strategy round-robin` is
+optional; no readiness-based skipping or invisible per-item processes occur.
+Each complete record goes to exactly one child, preserving each child's assigned
+order. A slow child backpressures its next assignment, and failure still cancels
+the whole graph. All children receive EOF, including those assigned no records.
+
+`merge`, `broadcast`, and `balance` accept a literal `:buffer BYTES` in 1..65536.
+This bounds each operator input's working payload storage, not kernel pipes or
+Node's bounded stream internals. Byte operators transfer at most that many bytes
+per turn; framed operators assemble at most one record of that size per input
+(plus its four-byte private header). A larger record fails with
+`KASH_BUFFER_LIMIT`, never splits or drops silently. Defaults remain 16 KiB for
+byte transfer and 64 KiB per framed input. No nested operator can exceed this
+fixed 64 KiB ceiling. Explicit merge budgets also apply when followed directly by
+another adapter. Static inspection reports effective budgets, cardinalities,
+scheduling, ordering, and fail-fast/blocking policies without evaluating options.
+
+Lossy overflow modes, alternate ordering/failure policies, explicit per-item
+workers, and runtime graph state/transfer metrics remain subsequent Slice E work.
+Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing
 dependency observer before launching their owning graph, and consume their
@@ -639,6 +659,7 @@ Graph lowering expands the AST into process nodes, mux nodes, ports, and point-t
 | `KASH_FRAME_MISMATCH` | Incompatible framed/raw inputs at rejoin or merge. |
 | `KASH_FRAME_ENCODING` | A line record is not valid UTF-8. |
 | `KASH_RECORD_LIMIT` | A line record exceeds the bounded record limit. |
+| `KASH_BUFFER_LIMIT` | A complete record exceeds an operator's configured working byte budget. |
 | `KASH_PREDICATE_EFFECT` | A predicate attempts an effect or suspension. |
 | `KASH_PREDICATE_BOOLEAN` | A predicate returns a non-Boolean value. |
 | `KASH_PREDICATE_FAILED` | Predicate evaluation fails. |

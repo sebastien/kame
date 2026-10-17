@@ -219,7 +219,10 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				if request.Stages[i].Kind == "encode" { kind = 4 }
 				if request.Stages[i].Kind == "filter" { kind = 5 }
 				if request.Stages[i].Kind == "copy" { kind = 6 }
+				if request.Stages[i].Kind == "balance" { kind = 7 }
 				if request.Stages[i].Framed { kind += 16 }
+				// Low bits retain kind/framing; higher bits carry a <=64 KiB budget.
+				kind += request.Stages[i].BufferBytes * 256
 				kinds = slices.Append(h.Alloc, kinds, kind)
 				inputs = slices.Append(h.Alloc, inputs, request.Stages[i].Input)
 				outputs = slices.Append(h.Alloc, outputs, request.Stages[i].Output)
