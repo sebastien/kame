@@ -143,7 +143,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			if end < len(text) && text[end] != '\n' && text[end] != ';' && text[end] != '#' {
 				s.error(end, end+1, "unexpected Kash definition value; expected statement separator")
 			}
-		} else if text[start] == '(' {
+		} else if text[start] == '(' && !expr.IsCommandGroup(text, start) {
 			part := expr.ParseKashValuePrefix(s.Alloc, s.Source, start)
 			s.takeDiagnostics(part.Diagnostics)
 			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: part.End}, Expression: part.Expr})

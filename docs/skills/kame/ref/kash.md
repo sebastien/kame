@@ -177,6 +177,35 @@ surrounding whitespace. For a producer with one terminal LF, use
 `(if (ends? "\n" TEXT) (slice 0 -1 TEXT) TEXT)` to remove only that byte. Captured
 paths may themselves end in whitespace/newlines; do not trim them implicitly.
 
+## Explicit process topology (POSIX)
+
+Process groups run concurrently. A plain `|` is still exactly one stdout to one
+stdin; groups require an explicit connection policy:
+
+```kash
+(cat ./first, cat ./second) |(merge) sort
+cat ./input |(broadcast) (cat > ./audit, wc -c)
+```
+
+`merge` preserves each producer's byte order, with no cross-producer ordering or
+record-boundary guarantee. `broadcast` delivers all bytes to every destination;
+a slow destination eventually backpressures the source. Every edge is bounded.
+Groups can nest and contain pipelines. Commas inside quoted words or embedded
+expressions do not separate members. `(EXPRESSION)` without a process-level
+comma remains a Kame expression.
+
+The enclosing invocation owns all stages and native operator workers, including
+when the complete graph ends in `&`. Failure cancels peers. Capture rejects
+multiple unmerged terminal stdout streams; redirect unwanted outputs or merge
+them explicitly. Windows currently rejects these new graph forms before launch;
+ordinary linear pipelines remain available. Framing, conditional routing, named
+channels and live stream arguments are not implemented in this first slice.
+
+File stdin redirections demand generated prerequisites before graph launch and
+record their published signatures for build reuse/invalidation. Process-channel
+edges are not build-dependency edges; executable filesystem reads and stdout do
+not implicitly declare prerequisites.
+
 ## Named execution context
 
 | Name | Compact form | Value |

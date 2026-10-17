@@ -48,6 +48,8 @@ const (
 	InvocationJoin
 	// ValuePipe is the source-only subject/stages retained by AuthoredPipe.
 	ValuePipe
+	CommandGroup
+	CommandMux
 )
 
 type ReferenceKind int
@@ -87,6 +89,10 @@ type StringPart struct {
 
 // Expr is immutable after parsing. All child storage is owned by Result.Alloc.
 type Expr struct {
+	// Topology and Edges are used only by prepared process graphs. Authored
+	// syntax retains groups and connections until graph validation/lowering.
+	Topology bool
+	Edges []CommandEdge
 	Async bool
 	Kash bool
 	// AcceptExit applies terminal Kash ? to the complete process graph.
@@ -116,6 +122,8 @@ type Expr struct {
 	AuthoredPipe *Expr
 	Expansion string
 }
+
+type CommandEdge struct { From int; To int }
 
 type Result struct {
 	Alloc       mem.Allocator
@@ -172,6 +180,7 @@ func freeExpr(a mem.Allocator, e *Expr) {
 	slices.Free(a, e.Fields)
 	slices.Free(a, e.Parameters)
 	slices.Free(a, e.Body)
+	slices.Free(a, e.Edges)
 	mem.Free(a, e)
 }
 
@@ -187,6 +196,7 @@ type parser struct {
 	pos   int
 	diags []source.Diagnostic
 	kash bool
+	commandGroup bool
 }
 
 func Parse(a mem.Allocator, name string, text string) *Result {
@@ -319,7 +329,7 @@ func (p *parser) pathAtom(command bool) *Expr {
 			continue
 		}
 		if b == '[' && !command && patternDepth == 0 { characterClass = true; p.pos++; continue }
-		if command && commandOperator(b) { break }
+		if command && (commandOperator(b) || (p.commandGroup && b == ',' && patternDepth == 0)) { break }
 		if b == '{' { patternDepth++; p.pos++; continue }
 		if b == '}' && patternDepth > 0 { patternDepth--; p.pos++; continue }
 		if isDelimiter(b) && (patternDepth == 0 || b == ' ' || b == '\t' || b == '\n' || b == '\r') { break }
@@ -976,6 +986,7 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	if original == nil { return nil }
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
+	copy.Edges = slices.Clone(a, original.Edges)
 	copy.AuthoredPipe = cloneExpr(a, original.AuthoredPipe)
 	copy.NamesOwned = true
 	if original.Text != "" { copy.Text, copy.TextOwned = sourceText(a, original.Text), true }
@@ -1207,7 +1218,11 @@ func Compact(a mem.Allocator, e *Expr) string {
 }
 
 func writeProcess(b *strings.Builder, e *Expr) {
-	for i := range e.Items { if i != 0 { b.WriteString(" | ") }; writeExpr(b, e.Items[i]) }
+	for i := range e.Items {
+		if e.Items[i].Kind == CommandMux { b.WriteString(" |("); b.WriteString(e.Items[i].Text); b.WriteByte(')'); continue }
+		if i != 0 { if e.Items[i-1].Kind == CommandMux { b.WriteByte(' ') } else { b.WriteString(" | ") } }
+		writeExpr(b, e.Items[i])
+	}
 	if e.AcceptExit { b.WriteString(" ?") }
 	if len(e.Body) != 0 { b.WriteString(" ? "); writeProcess(b, e.Body[0]) }
 	if e.Async { b.WriteString(" &") }
@@ -1229,6 +1244,7 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	if e.Kind == ValueRecovery { writeExpr(b, e.Items[0]); b.WriteString(" ?? "); writeExpr(b, e.Items[1]); return }
 	if e.Kind == CommandCapture || e.Kind == CommandGraph || e.Kind == CommandTest { if e.Kind == CommandCapture { b.WriteString("$(") }; writeProcess(b, e); if e.Kind == CommandCapture { b.WriteByte(')') }; return }
 	if e.Kind == CommandStage { for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }; return }
+	if e.Kind == CommandGroup { b.WriteByte('('); for i := range e.Items { if i != 0 { b.WriteString(", ") }; writeProcess(b, e.Items[i]) }; b.WriteByte(')'); return }
 	if e.Kind == CommandRedirection { b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
 	if e.Kind == CommandSetup { b.WriteByte(':'); b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
 	if e.Kind == CommandWord { writeCommandWord(b, e); return }

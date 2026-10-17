@@ -2,6 +2,32 @@
 
 > This is a proposed extension to Kash, not a description of current Kame behavior. Syntax tagged **proposed** is subject to parser and implementation validation. Sections marked **Open** identify decisions requiring language-design agreement.
 
+## Implementation status
+
+The first implementation slice supports process groups, byte-oriented `merge`
+and lossless `broadcast`, explicit point-to-point topology, per-stage file
+redirections, whole-graph acceptance/recovery/async ownership, and ambiguous
+capture rejection on POSIX native and WASM/Node hosts. Ordinary linear pipelines
+retain their existing execution path. This is not full conformance to this draft.
+
+Native multiplexors are long-running, invocation-owned worker nodes, each with
+one bounded 16 KiB transfer buffer and bounded OS pipes. Node multiplexors use
+paused descriptor-backed streams and one bounded transfer per operator. Byte
+merges preserve per-source byte order, not records or cross-source ordering.
+Multiple terminal outputs are presentation effects, not implicit merge edges.
+Acceptance and recovery currently apply only to the enclosing graph, not to
+individual members of a process group. Windows rejects the new topology before
+launch or output truncation; its existing linear-pipeline support is unchanged.
+
+Conditional branches, framing, named channels, stream operands, balance, and
+resolved/runtime topology inspection remain subsequent slices. Process channels
+are distinct from both reactive-engine streams and build dependency edges.
+Explicit stdin redirections demand build-produced inputs through the existing
+dependency observer before launching their owning graph, and consume their
+published signatures for reuse and invalidation. This also applies to ordinary
+linear Kash pipelines. No dependency
+declarations are inferred from subprocess stdout or opaque filesystem reads.
+
 ## 1. Purpose
 
 Kash is a command-oriented process language. Kame expressions are embedded in Kash for values and computations, but the primary Kash grammar is shell-like.
@@ -605,7 +631,9 @@ cat ./events.log |(frame :lines)
     |(encode :lines) | store
 ```
 
-The trusted branch is returned directly to `store`. Dedupe and invalid filters see only the unmatched original items.
+The trusted branch rejoins at `encode :lines`, the first non-filter connection,
+and then reaches `store`. Dedupe and invalid filters see only the unmatched
+original items. The explicit adapter is a chain boundary under §5.3.
 
 ### 12.4 Multiple sources and a named sink
 

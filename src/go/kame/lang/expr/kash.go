@@ -75,7 +75,13 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 }
 
 func (p *parser) commandGraph(start int, capture bool) *Expr {
+	return p.commandPipeline(start, capture, false)
+}
+
+func (p *parser) commandPipeline(start int, capture bool, grouped bool) *Expr {
 	previousKash := p.kash
+	previousGroup := p.commandGroup
+	p.commandGroup = grouped
 	p.kash = true
 	kind := CommandGraph
 	if capture { kind = CommandCapture }
@@ -84,7 +90,12 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 	e.Items = slices.Append(p.a, e.Items, stage)
 	input, output := false, false
 	for {
-		p.commandSpace(capture)
+		p.commandSpace(capture || grouped)
+		if !capture && !grouped && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '\n' {
+			next := p.pos+1
+			for next < len(p.s.Text) && commandWhitespace(p.s.Text[next]) { next++ }
+			if next < len(p.s.Text) && p.s.Text[next] == '|' { p.pos = next }
+		}
 		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos] == '\\' && p.s.Text[p.pos+1] == '\n' {
 			p.pos += 2
 			continue
@@ -97,6 +108,13 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 			if capture { p.error(start, p.pos, "unclosed Kash command substitution") }
 			break
 		}
+		if grouped && (p.s.Text[p.pos] == ',' || p.s.Text[p.pos] == ')') { break }
+		if stage.Kind == CommandStage && len(stage.Items) == 0 && IsCommandGroup(p.s.Text, p.pos) {
+			freeExpr(p.a, stage)
+			stage = p.processGroup()
+			e.Items[len(e.Items)-1] = stage
+			continue
+		}
 		if !capture && (p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#') { break }
 		if capture && p.s.Text[p.pos] == ';' { p.error(p.pos, p.pos+1, "command substitution contains exactly one process expression"); break }
 		if p.s.Text[p.pos] == '?' {
@@ -108,12 +126,13 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 			separated := from > start && commandWhitespace(p.s.Text[from-1]) && p.pos < len(p.s.Text) && commandWhitespace(p.s.Text[p.pos])
 			p.commandSpace(capture)
 			if !capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '&' { e.AcceptExit = true; continue }
-			if p.pos < len(p.s.Text) && !((capture && p.s.Text[p.pos] == ')') || (!capture && (p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#'))) {
+			if p.pos < len(p.s.Text) && !(((capture || grouped) && p.s.Text[p.pos] == ')') || (grouped && p.s.Text[p.pos] == ',') || (!capture && (p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#'))) {
 				if !separated { p.error(from, p.pos, "command recovery requires whitespace around ?"); break }
 				e.Body = slices.Append(p.a, e.Body, p.commandGraph(p.pos, capture))
 				break
 			}
 			e.AcceptExit = true
+			if grouped { break }
 			if capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' { p.pos++; break }
 			if capture { p.error(start, p.pos, "unclosed Kash command substitution") }
 			break
@@ -145,10 +164,31 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 				p.error(p.pos-1, p.pos+1, "|| is not a Kash process operator")
 				break
 			}
+			multiplexed := false
+			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '(' {
+				mux := p.node(CommandMux, p.pos-1)
+				p.pos++
+				p.commandSpace(true)
+				from := p.pos
+				for p.pos < len(p.s.Text) && setupKeyByte(p.s.Text[p.pos], p.pos == from) { p.pos++ }
+				mux.Text = p.s.Text[from:p.pos]
+				p.commandSpace(true)
+				if (mux.Text != "merge" && mux.Text != "broadcast") || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' {
+					p.error(mux.Span.Start, p.pos, "expected |(merge) or |(broadcast)")
+					freeExpr(p.a, mux)
+					break
+				}
+				p.pos++
+				mux.Span.End = p.pos
+				e.Items = slices.Append(p.a, e.Items, mux)
+				multiplexed = true
+			}
 			stage = p.node(CommandStage, p.pos)
 			e.Items = slices.Append(p.a, e.Items, stage)
+			p.commandSpace(capture || grouped || multiplexed)
 			continue
 		}
+		if stage.Kind == CommandGroup { p.error(p.pos, p.pos+1, "expected a process connection or statement end after group"); break }
 		if p.s.Text[p.pos] == '<' || p.s.Text[p.pos] == '>' {
 			from := p.pos
 			op := p.s.Text[p.pos:p.pos+1]
@@ -209,6 +249,7 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 	e.Span.End = p.pos
 	if len(e.Body) != 0 && e.Body[0].Async { e.Async = true; e.Body[0].Async = false }
 	p.kash = previousKash
+	p.commandGroup = previousGroup
 	return e
 }
 
@@ -218,6 +259,7 @@ func (p *parser) commandSpace(capture bool) {
 }
 
 func hasExecutable(stage *Expr) bool {
+	if stage.Kind == CommandGroup { return len(stage.Items) >= 2 }
 	for i := range stage.Items { if stage.Items[i].Kind == CommandWord { return true } }
 	return false
 }
@@ -246,10 +288,11 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 	}
 	text := strings.NewBuilder(p.a)
 	quoted, hadQuote, spread := false, false, false
+	wordDelimiters := 0
 	partStart := p.pos
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
-		if !quoted && (b == '?' || b == ')' || b == ';' || b == '|' || b == '<' || b == '>' || b == ' ' || b == '\t' || b == '\r' || b == '\n') {
+		if !quoted && ((p.commandGroup && b == ',' && wordDelimiters == 0) || b == '?' || b == ')' || b == ';' || b == '|' || b == '<' || b == '>' || b == ' ' || b == '\t' || b == '\r' || b == '\n') {
 			break
 		}
 		if b == '"' {
@@ -369,6 +412,10 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			p.error(p.pos, p.pos+1, "unsupported Kash process operator or reserved syntax")
 			break
 		}
+		if !quoted {
+			if b == '{' || b == '[' { wordDelimiters++ }
+			if (b == '}' || b == ']') && wordDelimiters > 0 { wordDelimiters-- }
+		}
 		text.WriteByte(b)
 		p.pos++
 	}
@@ -399,7 +446,7 @@ func commandWordNeedsQuotes(e *Expr) bool {
 		if i == 0 && len(part.Text) != 0 && (part.Text[0] == ':' || part.Text[0] == '#') { return true }
 		for j := 0; j < len(part.Text); j++ {
 			c := part.Text[j]
-			if commandWhitespace(c) || commandOperator(c) || c == ')' || c == '"' || c == '\\' || c == '$' || c == '@' { return true }
+			if commandWhitespace(c) || commandOperator(c) || c == ',' || c == ')' || c == '"' || c == '\\' || c == '$' || c == '@' { return true }
 		}
 	}
 	return false

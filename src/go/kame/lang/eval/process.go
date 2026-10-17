@@ -62,6 +62,9 @@ func freeCaptureState(a mem.Allocator, value any) {
 }
 
 func (p *Program) capture(e *expr.Expr, c *Context) Result {
+	if !e.Topology && hasProcessTopology(e) {
+		return p.captureTopology(e, c)
+	}
 	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
 		return failure(c.Run, "PHASE_INVALID", e.Span, "process execution is invalid in this phase")
 	}
@@ -90,16 +93,19 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	}
 	for i := range state.Effects { effect := state.Effects[i]; c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)}) }
 	for i := range state.WritePaths { c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i])) }
+	if e.Topology {
+		for i := range state.Setups {
+			output := host.PayloadText(state.Setups[i], host.FieldOutput)
+			if output != "" { c.Emit(EffectProcessWrite, []byte(output)) }
+			input := host.PayloadText(state.Setups[i], host.FieldInput)
+			if !demandProcessInput(c, input) { return Result{Waiting: true} }
+		}
+	}
 	if state.Recovering {
 		if state.Output != "" { c.Emit(EffectProcessWrite, []byte(state.Output)) }
 		return p.capture(e.Body[0], c)
 	}
-	if state.Stage == len(e.Items) && state.Input != "" && !c.DirectHostRequests {
-		key := core.NewResourceKey(c.Run, core.ResourceFile, state.Input)
-		ready := c.Dependency(key)
-		key.Free(c.Run)
-		if !ready { return Result{Waiting: true} }
-	}
+	if state.Stage == len(e.Items) && !demandProcessInput(c, state.Input) { return Result{Waiting: true} }
 	if state.Done {
 		if state.Output != "" { c.Emit(EffectProcessWrite, []byte(state.Output)) }
 		return Result{Value: state.Value.Clone(c.Run)}
@@ -147,6 +153,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				for j := range stages[i].Record {
 					field := stages[i].Record[j]
 					if (field.Key == "status" || field.Key == "signal") && field.Value.Int != 0 {
+						if e.Topology && field.Value.Int != host.PayloadInt(completion.Value, field.Key) { continue }
 						r.Diagnostic.Span.Start, r.Diagnostic.Span.End = e.Items[i].Span.Start, e.Items[i].Span.End
 					}
 				}
@@ -160,6 +167,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	}
 	for state.Stage < len(e.Items) {
 		stage := e.Items[state.Stage]
+		if stage.Kind == expr.CommandMux {
+			state.Stages = slices.Append(state.Alloc, state.Stages, core.NewList(state.Alloc, nil))
+			state.Setups = slices.Append(state.Alloc, state.Setups, host.StageSetupPayload(state.Alloc, "", 0, nil))
+			state.Stage++
+			continue
+		}
 		for state.Index < len(stage.Items) {
 			word := stage.Items[state.Index]
 			if word.Kind == expr.CommandSetup {
@@ -304,6 +317,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			mem.FreeString(state.Alloc, text)
 			if word.Text == "<" { state.Input = resolved } else { state.Output = resolved }
 		}
+		if e.Topology && !demandProcessInput(c, state.Input) { return Result{Waiting: true} }
 		var environment []core.Value
 		for i := range c.Environment { environment = slices.Append(state.Alloc, environment, core.NewString(state.Alloc, c.Environment[i])) }
 		for i := range state.Environment {
@@ -323,6 +337,11 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		timeout := state.Timeout
 		if timeout == 0 { timeout = c.TimeoutMS }
 		state.Setups = slices.Append(state.Alloc, state.Setups, host.StageSetupPayload(state.Alloc, state.Cwd, timeout, environment))
+		if e.Topology {
+			host.ConfigureRedirections(state.Alloc, &state.Setups[len(state.Setups)-1], state.Input, state.Output, state.Append)
+			mem.FreeString(state.Alloc, state.Input); mem.FreeString(state.Alloc, state.Output)
+			state.Input, state.Output, state.Append = "", "", false
+		}
 		for i := range environment { environment[i].Free(state.Alloc) }
 		slices.Free(state.Alloc, environment)
 		mem.FreeString(state.Alloc, state.Cwd)
@@ -351,25 +370,28 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		}
 		return Result{Value: core.NewString(c.Run, "")}
 	}
-	if state.Input != "" && !c.DirectHostRequests {
-		key := core.NewResourceKey(c.Run, core.ResourceFile, state.Input)
-		ready := c.Dependency(key)
-		key.Free(c.Run)
-		if !ready { return Result{Waiting: true} }
-	}
+	if !demandProcessInput(c, state.Input) { return Result{Waiting: true} }
 	configured := false
 	for i := range e.Items { for j := range e.Items[i].Items { if e.Items[i].Items[j].Kind == expr.CommandSetup { configured = true } } }
 	payload := host.ArgvPayload(c.Run, state.Stages[0].List)
-	if configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
+	if e.Topology || configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
 		payload.Free(c.Run)
 		payload = host.PipelinePayload(c.Run, state.Stages)
+	}
+	if e.Topology {
+		var kinds, edges []core.Value
+		for i := range e.Items { kind := ""; if e.Items[i].Kind == expr.CommandMux { kind = e.Items[i].Text }; kinds = slices.Append(c.Run, kinds, core.NewString(c.Run, kind)) }
+		for i := range e.Edges { edge := []core.Value{{Kind: core.Int, Int: int64(e.Edges[i].From)}, {Kind: core.Int, Int: int64(e.Edges[i].To)}}; edges = slices.Append(c.Run, edges, core.NewList(c.Run, edge)) }
+		host.ConfigureTopology(c.Run, &payload, kinds, edges)
+		for i := range kinds { kinds[i].Free(c.Run) }; slices.Free(c.Run, kinds)
+		for i := range edges { edges[i].Free(c.Run) }; slices.Free(c.Run, edges)
 	}
 	if state.Input != "" || state.Output != "" { host.ConfigureRedirections(c.Run, &payload, state.Input, state.Output, state.Append) }
 	if e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult {
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "stream"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
 	if e.AcceptExit { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "acceptExit"), Value: core.Value{Kind: core.Bool, Bool: true}}) }
-	if configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit { host.ConfigureStages(c.Run, &payload, state.Setups) }
+	if e.Topology || configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit { host.ConfigureStages(c.Run, &payload, state.Setups) }
 	if state.Async || e.Async {
 		r := p.startProcess(e, c, state)
 		payload.Free(c.Run)
@@ -383,6 +405,17 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		return failure(c.Run, "HOST_FAIL", e.Span, "host request was not accepted")
 	}
 	return Result{Waiting: true}
+}
+
+// Consume the published artifact signature as well as demanding its producer.
+// An ordering edge alone does not persist a generated input's content identity.
+func demandProcessInput(c *Context, name string) bool {
+	if name == "" || c.DirectHostRequests { return true }
+	key := core.NewResourceKey(c.Run, core.ResourceFile, name)
+	ready := c.Dependency(key)
+	if ready { c.Value(key) }
+	key.Free(c.Run)
+	return ready
 }
 
 // Completed argument values are not reevaluated after a later argument waits.

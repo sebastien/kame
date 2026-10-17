@@ -97,13 +97,19 @@ func (p *Program) drainRequests() {
 			var stages []host.ProcessStage
 			graphs := host.PayloadStages(request.Payload)
 			setups := host.PayloadSetups(request.Payload)
+			kinds := host.PayloadList(request.Payload, "kinds")
+			var edges []host.ProcessEdge
+			connections := host.PayloadList(request.Payload, "edges")
+			for i := range connections { if len(connections[i].List) == 2 { edges = slices.Append(p.Alloc, edges, host.ProcessEdge{From: int(connections[i].List[0].Int), To: int(connections[i].List[1].Int)}) } }
 			for i := range graphs {
 				var arguments []string
 				for j := range graphs[i].List {
 					arguments = slices.Append(p.Alloc, arguments, graphs[i].List[j].Text)
 				}
 				stage := host.ProcessStage{Argv: arguments}
+				if i < len(kinds) { stage.Kind = kinds[i].Text }
 				if i < len(setups) {
+					stage.Input, stage.Output, stage.Append = host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput), host.PayloadAppend(setups[i])
 					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
 					values := host.PayloadList(setups[i], host.FieldEnvironment)
 					for j := range values {
@@ -160,6 +166,7 @@ func (p *Program) drainRequests() {
 				}
 			}
 			processRequest := host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
+			processRequest.Topology, processRequest.Edges = len(kinds) != 0, edges
 			if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(processRequest) {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else {
@@ -174,6 +181,7 @@ func (p *Program) drainRequests() {
 				slices.Free(p.Alloc, stages[i].Environment)
 			}
 			slices.Free(p.Alloc, stages)
+			slices.Free(p.Alloc, edges)
 		} else {
 			p.completeRequest(request)
 		}
@@ -1221,11 +1229,14 @@ func processDisplayFromPayload(a mem.Allocator, payload core.Value, shell []stri
 	} else {
 		stages := host.PayloadStages(payload)
 		if len(stages) != 0 {
+			kinds := host.PayloadList(payload, "kinds")
+			if len(kinds) != 0 { appendProcessDisplayToken(a, &raw, "graph", &truncated) }
 			if len(stages) > maxProcessDisplayStages { truncated = true }
 			stageCount := len(stages)
 			if stageCount > maxProcessDisplayStages { stageCount = maxProcessDisplayStages }
 			for i := 0; i < stageCount; i++ {
-				if i != 0 { appendProcessDisplayToken(a, &raw, "|", &truncated) }
+				if i != 0 { separator := "|"; if len(kinds) != 0 { separator = ";" }; appendProcessDisplayToken(a, &raw, separator, &truncated) }
+				if i < len(kinds) && kinds[i].Text != "" { appendProcessDisplayToken(a, &raw, kinds[i].Text, &truncated) }
 				for j := range stages[i].List { appendProcessDisplayToken(a, &raw, stages[i].List[j].Text, &truncated) }
 			}
 		} else {
@@ -1248,11 +1259,13 @@ func processDisplayFromHost(a mem.Allocator, request host.ProcessRequest) proces
 	if len(request.Argv) != 0 {
 		for i := range request.Argv { appendProcessDisplayToken(a, &raw, request.Argv[i], &truncated) }
 	} else if len(request.Stages) != 0 {
+		if request.Topology { appendProcessDisplayToken(a, &raw, "graph", &truncated) }
 		if len(request.Stages) > maxProcessDisplayStages { truncated = true }
 		stageCount := len(request.Stages)
 		if stageCount > maxProcessDisplayStages { stageCount = maxProcessDisplayStages }
 		for i := 0; i < stageCount; i++ {
-			if i != 0 { appendProcessDisplayToken(a, &raw, "|", &truncated) }
+			if i != 0 { separator := "|"; if request.Topology { separator = ";" }; appendProcessDisplayToken(a, &raw, separator, &truncated) }
+			if request.Stages[i].Kind != "" { appendProcessDisplayToken(a, &raw, request.Stages[i].Kind, &truncated) }
 			for j := range request.Stages[i].Argv { appendProcessDisplayToken(a, &raw, request.Stages[i].Argv[j], &truncated) }
 		}
 	} else {

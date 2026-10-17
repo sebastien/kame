@@ -16,6 +16,14 @@ import (
 //so:include <errno.h>
 //so:include <signal.h>
 
+func TestEmptyTopologyCannotFallBackToShell(t *testing.T) {
+	h := posix.New(t.Allocator())
+	defer h.Free()
+	request := host.ProcessRequest{ID: 987, Topology: true, Shell: []string{"/bin/sh", "-c"}, Script: []byte("exit 0")}
+	if h.Start(request) { t.Error("invalid topology was admitted as a shell request") }
+	if h.Active() != 0 { t.Error("invalid topology started owned work") }
+}
+
 func nativeChildReaped(pid int64) bool {
 	c.Raw("pid_t result; do { result = waitpid((pid_t)pid, NULL, WNOHANG); } while (result < 0 && errno == EINTR); return result < 0 && errno == ECHILD;")
 	return false

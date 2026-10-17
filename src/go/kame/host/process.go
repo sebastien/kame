@@ -49,6 +49,8 @@ type ProcessRequest struct {
 	// A nonempty Argv also closes stdin for command substitution.
 	Argv        []string
 	Stages      []ProcessStage
+	Topology    bool
+	Edges       []ProcessEdge
 	Input       string
 	Output      string
 	Append      bool
@@ -69,11 +71,16 @@ type ExecutorDescriptor struct {
 }
 
 type ProcessStage struct {
+	Kind string // empty for an executable; otherwise merge or broadcast
 	Argv []string
 	Directory string
 	Environment []string
 	TimeoutMS int64
+	Input string
+	Output string
+	Append bool
 }
+type ProcessEdge struct { From int; To int }
 type ProcessStageResult struct {
 	Status int
 	Signal int

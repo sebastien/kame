@@ -410,6 +410,12 @@ func ConfigureStages(a mem.Allocator, payload *core.Value, setups []core.Value) 
 	writeConfiguredGraph(a, payload)
 }
 
+func ConfigureTopology(a mem.Allocator, payload *core.Value, kinds []core.Value, edges []core.Value) {
+	payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, "kinds").Text, Value: core.NewList(a, kinds)})
+	payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, "edges").Text, Value: core.NewList(a, edges)})
+	writeConfiguredGraph(a, payload)
+}
+
 func PayloadSetups(payload core.Value) []core.Value { return PayloadList(payload, FieldSetup) }
 
 func PayloadList(payload core.Value, field string) []core.Value {
@@ -445,6 +451,16 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 		e.EndArray()
 	}
 	e.EndArray()
+	kinds := PayloadList(*payload, "kinds")
+	if len(kinds) != 0 {
+		e.Str("kinds"); e.BeginArray()
+		for i := range kinds { e.Str(kinds[i].Text) }
+		e.EndArray()
+		e.Str("edges"); e.BeginArray()
+		edges := PayloadList(*payload, "edges")
+		for i := range edges { e.BeginArray(); for j := range edges[i].List { e.Int(edges[i].List[j].Int) }; e.EndArray() }
+		e.EndArray()
+	}
 	e.Str("input")
 	e.Str(PayloadText(*payload, FieldInput))
 	e.Str("output")
@@ -468,6 +484,9 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 	setups := PayloadSetups(*payload)
 	for i := range setups {
 		e.BeginObject()
+		e.Str(FieldInput); e.Str(PayloadText(setups[i], FieldInput))
+		e.Str(FieldOutput); e.Str(PayloadText(setups[i], FieldOutput))
+		e.Str(FieldAppend); e.Bool(PayloadAppend(setups[i]))
 		e.Str(FieldCwd)
 		e.Str(PayloadText(setups[i], FieldCwd))
 		e.Str(FieldTimeout)

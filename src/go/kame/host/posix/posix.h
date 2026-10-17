@@ -39,6 +39,7 @@ km_host *km_host_new(void);
 // admitted because the allocation-free rejected-event slot needs Next draining.
 int km_host_start(km_host *, int64_t, so_Slice, so_Slice, so_String, so_Slice, int64_t, so_int, bool);
 int km_host_start_graph(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool);
+int km_host_start_topology(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice);
 int km_event_stage_field(km_event *, int, int);
 int km_host_pump(km_host *, int);
 bool km_host_next(km_host *, km_event *);

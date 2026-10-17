@@ -419,7 +419,14 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 			return false
 		}
 		stages := host.PayloadStages(payload)
+		kinds := host.PayloadList(payload, "kinds")
+		setups := host.PayloadSetups(payload)
 		for i := range stages {
+			if i < len(setups) {
+				input, output := host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput)
+				if (input != "" && !c.Allows(Read, input)) || (output != "" && !c.Allows(Write, output)) { return false }
+			}
+			if i < len(kinds) && (kinds[i].Text == "merge" || kinds[i].Text == "broadcast") { continue }
 			if stages[i].Kind != core.List || len(stages[i].List) == 0 || stages[i].List[0].Kind != core.String || !authorizeExecutable(c, stages[i].List[0].Text) {
 				return false
 			}

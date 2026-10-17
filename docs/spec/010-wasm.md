@@ -301,6 +301,16 @@ all remaining stages before completing the request.
 Individual `free` operations still release owned engine objects where supported
 so native and WebAssembly behavior remain comparable.
 
+Explicit process topology uses ABI request kind **32**, not the linear pipeline
+kinds above. Its JSON descriptor adds parallel `kinds` (empty for executable
+nodes, `merge` or `broadcast` for native nodes) and `edges` (zero-based `[from,
+to]` pairs). Native nodes have empty argv arrays. Each `setup` may also carry
+`input`, `output`, and `append` file redirections. Hosts validate cardinalities,
+acyclicity, grants, and all stage configurations before launch or truncation.
+They join every node, retain the causal failure when cancelling peers, and keep
+terminal presentation outputs distinct from channel edges. Unsupported hosts
+must reject kind 32 rather than silently execute the nodes as a linear pipeline.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly
