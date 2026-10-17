@@ -51,6 +51,9 @@ const (
 	CommandGroup
 	CommandMux
 	CommandInput
+	CommandStream
+	CommandReader
+	CommandWriter
 )
 
 type ReferenceKind int
@@ -96,6 +99,7 @@ type Expr struct {
 	Edges []CommandEdge
 	StreamKinds []int
 	Exit string
+	Channels []string
 	Async bool
 	Kash bool
 	// AcceptExit applies terminal Kash ? to the complete process graph.
@@ -185,6 +189,8 @@ func freeExpr(a mem.Allocator, e *Expr) {
 	slices.Free(a, e.Body)
 	slices.Free(a, e.Edges)
 	slices.Free(a, e.StreamKinds)
+	for i := range e.Channels { mem.FreeString(a, e.Channels[i]) }
+	slices.Free(a, e.Channels)
 	mem.Free(a, e)
 }
 
@@ -992,6 +998,8 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	*copy = *original
 	copy.Edges = slices.Clone(a, original.Edges)
 	copy.StreamKinds = slices.Clone(a, original.StreamKinds)
+	copy.Channels = nil
+	for i := range original.Channels { copy.Channels = slices.Append(a, copy.Channels, sourceText(a, original.Channels[i])) }
 	copy.AuthoredPipe = cloneExpr(a, original.AuthoredPipe)
 	copy.NamesOwned = true
 	if original.Text != "" { copy.Text, copy.TextOwned = sourceText(a, original.Text), true }
@@ -1235,7 +1243,7 @@ func writeProcess(b *strings.Builder, e *Expr) {
 			}
 			b.WriteByte(')'); continue
 		}
-		if i != 0 { if e.Items[i-1].Kind == CommandMux && (e.Items[i-1].Text == "merge" || e.Items[i-1].Text == "broadcast") { b.WriteByte(' ') } else { b.WriteString(" | ") } }
+		if i != 0 { if e.Items[i].Kind == CommandWriter || (e.Items[i-1].Kind == CommandMux && (e.Items[i-1].Text == "merge" || e.Items[i-1].Text == "broadcast")) { b.WriteByte(' ') } else { b.WriteString(" | ") } }
 		writeExpr(b, e.Items[i])
 	}
 	if e.AcceptExit { b.WriteString(" ?") }
@@ -1261,6 +1269,9 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	if e.Kind == ValueRecovery { writeExpr(b, e.Items[0]); b.WriteString(" ?? "); writeExpr(b, e.Items[1]); return }
 	if e.Kind == CommandCapture || e.Kind == CommandGraph || e.Kind == CommandTest { if e.Kind == CommandCapture { b.WriteString("$(") }; writeProcess(b, e); if e.Kind == CommandCapture { b.WriteByte(')') }; return }
 	if e.Kind == CommandStage { for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }; return }
+	if e.Kind == CommandStream { b.WriteString("stream "); b.WriteString(e.Text); return }
+	if e.Kind == CommandReader { b.WriteByte('&'); b.WriteString(e.Text); return }
+	if e.Kind == CommandWriter { b.WriteString(">&"); b.WriteString(e.Text); return }
 	if e.Kind == CommandGroup { b.WriteByte('('); for i := range e.Items { if i != 0 { b.WriteString(", ") }; writeProcess(b, e.Items[i]) }; b.WriteByte(')'); return }
 	if e.Kind == CommandRedirection { b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
 	if e.Kind == CommandSetup { b.WriteByte(':'); b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }

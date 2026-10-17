@@ -3248,7 +3248,7 @@ function runArgvCapture(stages, context) {
           upstream.pipe(child.stdin);
         }
         remaining++;
-        if (i === 0 && context.onStarted) publish(() => { context.processGroup = context.onStarted(); });
+        if (children.length === 1 && context.onStarted) publish(() => { context.processGroup = context.onStarted(); });
         track(child, context.processGroup, context.finalizing);
         const cancel = configuration.timeoutMS > 0 ? processDeadline(configuration.timeoutMS, () => stop('RECIPE_TIMEOUT', 'stage timed out')) : () => {};
         timers.push(cancel);

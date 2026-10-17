@@ -14,6 +14,11 @@ func (e *astEncoder) processTopology(value *expr.Expr) {
 	r := eval.InspectProcessTopology(mem.System, value, flat)
 	defer r.Free(mem.System)
 	e.Str("topology"); e.BeginObject()
+	if len(value.Channels) != 0 {
+		e.Str("channels"); e.BeginArray()
+		for i := range value.Channels { e.Str(value.Channels[i]) }
+		e.EndArray()
+	}
 	if r.Diagnostic.Code != "" {
 		e.Str("diagnostic"); e.Str(r.Diagnostic.Code)
 		e.Str("span"); e.span(flat.Span)

@@ -37,8 +37,18 @@ context of runtime predicates and helper closures; it does not run predicates to
 discover build dependencies. Unchanged contexts can reuse material-input proofs,
 while changed captured configuration invalidates them.
 
-Named channels, stream operands, balance, and runtime topology
-inspection remain subsequent work. Process channels
+Named channels use lexical `stream name` declarations and must bind exactly one
+`>&name` writer and one `&name` reader inside the same constructed graph. Named
+aliases lower to direct pipes, not extra worker processes. The one exception is
+a terminal reader, which needs a presentation adapter. Framing crosses aliases
+unchanged; all aliases are resolved and cycles rejected before argument demands.
+Separate sequential commands do not become concurrent just because they mention
+the same declared name. Declarations in a control body remain local to that body.
+Names use ASCII letters/underscore initially, then letters, digits, underscore,
+or hyphen. The scope ports `in`, `out`, and `err` remain reserved, not generally
+available external endpoints.
+
+Stream operands, balance, and runtime topology inspection remain subsequent work. Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing
 dependency observer before launching their owning graph, and consume their

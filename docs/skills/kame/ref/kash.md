@@ -198,8 +198,8 @@ The enclosing invocation owns all stages and native operator workers, including
 when the complete graph ends in `&`. Failure cancels peers. Capture rejects
 multiple unmerged terminal stdout streams; redirect unwanted outputs or merge
 them explicitly. Windows currently rejects these new graph forms before launch;
-ordinary linear pipelines remain available. Named channels and live stream
-arguments are not implemented yet.
+ordinary linear pipelines remain available. Live stream arguments are not
+implemented yet.
 
 Explicit line framing enables pure Boolean filters and frame-safe merge:
 
@@ -236,6 +236,28 @@ File stdin redirections demand generated prerequisites before graph launch and
 record their published signatures for build reuse/invalidation. Process-channel
 edges are not build-dependency edges; executable filesystem reads and stdout do
 not implicitly declare prerequisites.
+
+### Named process channels
+
+`stream name` declares a lexical channel name, not a Kame value or background
+task. Its writer and reader must belong to one simultaneously launched graph:
+
+```kash
+stream reports
+(
+    producer >&reports,
+    &reports | consumer
+)
+```
+
+Each channel has one writer and one reader; use `merge` or `broadcast` explicitly
+for multiple producers or consumers. A writer can also be a selected branch's
+exit. Missing/duplicate endpoints and feedback cycles fail before launch or
+output truncation. Named aliases become ordinary bounded pipes, preserving their
+byte/framed data kind. Separate sequential writer/reader statements are invalid.
+Use `&name | cat > ./file` for a file sink. Names are ASCII identifiers (hyphens
+allowed after the first character); `in`, `out`, and `err` are reserved scope
+ports and are not available as general named endpoints.
 
 ## Named execution context
 

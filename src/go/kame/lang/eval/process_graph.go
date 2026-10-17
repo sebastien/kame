@@ -28,7 +28,7 @@ func (p *Program) captureTopology(e *expr.Expr, c *Context) Result {
 }
 
 func hasProcessTopology(e *expr.Expr) bool {
-	for i := range e.Items { if e.Items[i].Kind == expr.CommandGroup || e.Items[i].Kind == expr.CommandMux { return true } }
+	for i := range e.Items { if e.Items[i].Kind == expr.CommandGroup || e.Items[i].Kind == expr.CommandMux || e.Items[i].Kind == expr.CommandReader || e.Items[i].Kind == expr.CommandWriter { return true } }
 	return false
 }
 
@@ -39,6 +39,8 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 	slices.Free(c.Run, ports.Inputs)
 	slices.Free(c.Run, ports.Outputs)
 	if flat.Text != "" { return failure(c.Run, flat.Text, flat.Span, "process connection has incompatible endpoint cardinality or disposition") }
+	if r := resolveProcessChannels(c, e, flat); r.Diagnostic.Code != "" { return r }
+	if !acyclicProcessGraph(c, flat) { return failure(c.Run, "KASH_GRAPH_CYCLE", e.Span, "named channels introduce unsupported feedback") }
 	if r := prepareStreamKinds(c, flat); r.Diagnostic.Code != "" { return r }
 	terminals := 0
 	for i := range flat.Items {
@@ -61,6 +63,12 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 	var ports graphPorts
 	if flat.Text != "" { return ports }
+	if e.Kind == expr.CommandReader || e.Kind == expr.CommandWriter {
+		index := len(flat.Items)
+		flat.Items = slices.Append(c.Run, flat.Items, expr.Clone(c.Run, e))
+		if e.Kind == expr.CommandReader { ports.Outputs = slices.Append(c.Run, ports.Outputs, index) } else { ports.Inputs = slices.Append(c.Run, ports.Inputs, index) }
+		return ports
+	}
 	if e.Kind == expr.CommandStage || e.Kind == expr.CommandInput {
 		index := len(flat.Items)
 		node := expr.Clone(c.Run, e)
@@ -107,7 +115,7 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			if connection.Text == "filter" {
 				branch := connection.Body[0]
 				selected := lowerProcessGraph(c, branch, flat)
-				if len(selected.Inputs) != 1 || len(selected.Outputs) != 1 { flat.Text, flat.Span = "KASH_MUX_ARITY", branch.Span }
+				if len(selected.Inputs) != 1 || (len(selected.Outputs) != 1 && !(len(selected.Outputs) == 0 && branch.Exit == "")) { flat.Text, flat.Span = "KASH_MUX_ARITY", branch.Span }
 				for j := range selected.Inputs { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: index, To: selected.Inputs[j]}) }
 				if branch.Exit != "" {
 					target := i+1
@@ -119,6 +127,13 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			continue
 		}
 		policy := ""
+		if connection.Kind == expr.CommandWriter {
+			right := lowerProcessGraph(c, connection, flat)
+			if len(ports.Outputs) != 1 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span } else { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]}) }
+			slices.Free(c.Run, ports.Outputs); slices.Free(c.Run, right.Inputs)
+			ports.Outputs = right.Outputs
+			continue
+		}
 		if connection.Kind == expr.CommandMux { policy = connection.Text }
 		if policy == "merge" && (i+1 == len(e.Items) || e.Items[i+1].Kind == expr.CommandMux) {
 			if len(ports.Outputs) < 2 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span }

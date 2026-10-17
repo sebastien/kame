@@ -144,6 +144,12 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			break
 		}
 		if p.s.Text[p.pos] == '&' {
+			if len(stage.Items) == 0 && !hasExecutable(stage) && p.pos+1 < len(p.s.Text) && channelNameByte(p.s.Text[p.pos+1], true) {
+				freeExpr(p.a, stage)
+				stage = p.channelEndpoint(CommandReader, 1)
+				e.Items[len(e.Items)-1] = stage
+				continue
+			}
 			from := p.pos
 			p.pos++
 			if capture || !hasExecutable(stage) { p.error(from, p.pos, "async syntax requires a complete command statement"); break }
@@ -211,6 +217,14 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 		}
 		if p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos:p.pos+2] == ">&" || p.s.Text[p.pos:p.pos+2] == ">@") {
 			from := p.pos
+			if p.s.Text[p.pos+1] == '&' && p.pos+2 < len(p.s.Text) && channelNameByte(p.s.Text[p.pos+2], true) {
+				if output || e.Exit != "" || stage.Kind == CommandWriter { p.error(from, from+2, "duplicate channel output disposition"); break }
+				if !hasExecutable(stage) && len(stage.Items) != 0 { p.error(from, from+2, "channel endpoints cannot carry stage setup or redirections"); break }
+				endpoint := p.channelEndpoint(CommandWriter, 2)
+				if !hasExecutable(stage) { freeExpr(p.a, stage); e.Items[len(e.Items)-1] = endpoint } else { stage.Span.End = from; e.Items = slices.Append(p.a, e.Items, endpoint) }
+				stage, output = endpoint, true
+				continue
+			}
 			if !branch || !hasExecutable(stage) || output || e.Exit != "" { p.error(from, from+2, "branch rejoin has no valid continuation scope"); p.diags[len(p.diags)-1].Code = "KASH_REJOIN_OUT_OF_SCOPE"; break }
 			e.Exit = "next"; if p.s.Text[from+1] == '@' { e.Exit = "otherwise" }
 			p.pos += 2
@@ -218,7 +232,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' { p.error(from, p.pos, "rejoin must be the final branch disposition"); break }
 			break
 		}
-		if stage.Kind == CommandGroup || stage.Kind == CommandMux { p.error(p.pos, p.pos+1, "expected a process connection or statement end after graph operand"); break }
+		if stage.Kind == CommandGroup || stage.Kind == CommandMux || stage.Kind == CommandReader || stage.Kind == CommandWriter { p.error(p.pos, p.pos+1, "expected a process connection or statement end after graph operand"); break }
 		if p.s.Text[p.pos] == '<' || p.s.Text[p.pos] == '>' {
 			from := p.pos
 			op := p.s.Text[p.pos:p.pos+1]
@@ -291,6 +305,7 @@ func (p *parser) commandSpace(capture bool) {
 
 func hasExecutable(stage *Expr) bool {
 	if stage.Kind == CommandMux || stage.Kind == CommandInput { return true }
+	if stage.Kind == CommandReader || stage.Kind == CommandWriter { return true }
 	if stage.Kind == CommandGroup { return len(stage.Items) >= 2 }
 	for i := range stage.Items { if stage.Items[i].Kind == CommandWord { return true } }
 	return false

@@ -154,7 +154,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 	if process {
 		if e.processDepth == 0 {
 			for i := range value.Items {
-				if value.Items[i].Kind == expr.CommandMux || value.Items[i].Kind == expr.CommandGroup { e.processTopology(value); break }
+				if value.Items[i].Kind == expr.CommandMux || value.Items[i].Kind == expr.CommandGroup || value.Items[i].Kind == expr.CommandReader || value.Items[i].Kind == expr.CommandWriter { e.processTopology(value); break }
 			}
 		}
 		e.processDepth++
@@ -209,6 +209,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("text")
 		e.Str(value.Text)
 	}
+	if value.Kind == expr.CommandStream || value.Kind == expr.CommandReader || value.Kind == expr.CommandWriter { e.Str("channel"); e.Str(value.Text) }
 	if value.Kind == expr.Reference || value.Kind == expr.EnvironmentReference {
 		e.Str("parts")
 		e.BeginArray()
@@ -378,6 +379,9 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
+	if k == expr.CommandStream { return "channel-declaration" }
+	if k == expr.CommandReader { return "channel-reader" }
+	if k == expr.CommandWriter { return "channel-writer" }
 	if k == expr.CommandInput { return "command-input" }
 	if k == expr.CommandGroup { return "command-group" }
 	if k == expr.CommandMux { return "command-mux" }

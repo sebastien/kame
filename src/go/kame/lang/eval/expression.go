@@ -46,6 +46,8 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 	}
 	context.Engine, context.Scope, context.Requests = engine, scope, p.Requests
 	switch expression.Kind {
+	case expr.CommandStream:
+		return Result{Value: core.Value{Kind: core.Nil}}
 	case expr.Nil:
 		return Result{Value: core.Value{Kind: core.Nil}}
 	case expr.Boolean:

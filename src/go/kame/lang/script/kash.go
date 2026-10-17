@@ -29,10 +29,13 @@ type kashParser struct {
 	Pos    int
 	Style  byte
 	Unit   int
+	Channels []string
 }
 
 func (p *kashParser) sequence(level int) []ScriptItem {
 	s, text := p.Script, p.Script.Source.Text
+	previousChannels := p.Channels
+	p.Channels = slices.Clone(s.Alloc, previousChannels)
 	var items []ScriptItem
 	for p.Pos < len(text) && len(s.Diagnostics) == 0 {
 		for p.Pos < len(text) && (space(text[p.Pos]) || text[p.Pos] == '\n' || text[p.Pos] == ';') {
@@ -76,6 +79,21 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			wordEnd++
 		}
 		word := text[start:wordEnd]
+		if word == "stream" {
+			p.Pos = wordEnd
+			for p.Pos < len(text) && space(text[p.Pos]) { p.Pos++ }
+			nameStart := p.Pos
+			for p.Pos < len(text) && !space(text[p.Pos]) && text[p.Pos] != '\n' && text[p.Pos] != ';' && text[p.Pos] != '#' { p.Pos++ }
+			name := text[nameStart:p.Pos]
+			if !expr.ChannelName(name) || slices.Contains(p.Channels, name) { s.error(nameStart, p.Pos, "invalid, duplicate, or reserved stream declaration"); break }
+			declaration := mem.Alloc[expr.Expr](s.Alloc)
+			declaration.Kind, declaration.Text, declaration.Span = expr.CommandStream, name, source.Span{Start: start, End: p.Pos}
+			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Expression, Span: declaration.Span, Expression: declaration})
+			p.Channels = slices.Append(s.Alloc, p.Channels, name)
+			for p.Pos < len(text) && space(text[p.Pos]) { p.Pos++ }
+			if p.Pos < len(text) && text[p.Pos] != '\n' && text[p.Pos] != ';' && text[p.Pos] != '#' { s.error(p.Pos, p.Pos+1, "stream declaration takes one channel name") }
+			continue
+		}
 		if word == "elif" || word == "else" {
 			if level != 0 {
 				break
@@ -103,6 +121,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			} else {
 				e = p.ifBlock(level, start)
 			}
+			expr.SetCommandChannels(s.Alloc, e, p.Channels)
 			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 			continue
 		}
@@ -130,6 +149,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 				}
 			}
 			p.Pos = part.Definition.Span.End
+			expr.SetCommandChannels(s.Alloc, part.Definition.Expression, p.Channels)
 			for i := range items {
 				if items[i].Kind == Definition && items[i].Definition.Name == part.Definition.Name {
 					s.error(start, p.Pos, "duplicate Kash definition name")
@@ -148,6 +168,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			s.takeDiagnostics(part.Diagnostics)
 			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Expression, Span: source.Span{Start: start, End: part.End}, Expression: part.Expr})
 			p.Pos = part.End
+			expr.SetCommandChannels(s.Alloc, part.Expr, p.Channels)
 			end := p.Pos
 			for end < len(text) && space(text[end]) {
 				end++
@@ -160,11 +181,14 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			s.takeDiagnostics(part.Diagnostics)
 			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: part.Expr.Span, Expression: part.Expr})
 			p.Pos = part.End
+			expr.SetCommandChannels(s.Alloc, part.Expr, p.Channels)
 		}
 		if p.Pos <= start {
 			break
 		}
 	}
+	slices.Free(s.Alloc, p.Channels)
+	p.Channels = previousChannels
 	return items
 }
 
