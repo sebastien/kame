@@ -635,6 +635,12 @@ func (r *Runtime) ProcessExited(request host.Request) {
 	}
 }
 
+func (r *Runtime) StreamItem(request host.Request, node int, raw []byte) int {
+	if r.Program != nil { return r.Program.Eval.StreamItem(request.ID, node, raw) }
+	if r.Eval != nil { return r.Eval.StreamItem(request.ID, node, raw) }
+	return -eval.StreamPredicateFailure
+}
+
 func (r *Runtime) ProcessStream(request host.Request, stderr bool, data []byte) {
 	if r != nil && r.Program != nil {
 		r.Program.ProcessStream(request, stderr, data)

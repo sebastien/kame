@@ -22,12 +22,17 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 	}
 	for i := range request.Stages {
 		stage := request.Stages[i]
+		if stage.Framed && outgoing[i] == 0 { return "KASH_FRAME_MISMATCH" }
 		if stage.Kind == "" {
 			if len(stage.Argv) == 0 || incoming[i] > 1 || outgoing[i] > 1 { return "KASH_MUX_ARITY" }
 			if (incoming[i] != 0 && stage.Input != "") || (outgoing[i] != 0 && stage.Output != "") { return "KASH_DOUBLE_CONSUME" }
 		} else {
 			if len(stage.Argv) != 0 || stage.Input != "" || stage.Output != "" { return "KASH_MUX_ARITY" }
-			if stage.Kind == "merge" { if incoming[i] < 2 || outgoing[i] != 1 { return "KASH_MUX_ARITY" }
+			if stage.Kind == "frame" || stage.Kind == "encode" || stage.Kind == "copy" {
+				if incoming[i] != 1 || outgoing[i] > 1 { return "KASH_MUX_ARITY" }
+			} else if stage.Kind == "filter" {
+				if incoming[i] != 1 || outgoing[i] != 2 { return "KASH_MUX_ARITY" }
+			} else if stage.Kind == "merge" { if incoming[i] < 2 || outgoing[i] != 1 { return "KASH_MUX_ARITY" }
 			} else if stage.Kind == "broadcast" { if incoming[i] != 1 || outgoing[i] < 2 { return "KASH_MUX_ARITY" }
 			} else { return "KASH_MUX_ARITY" }
 		}
@@ -45,5 +50,21 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 		}
 	}
 	if len(ready) != n { return "KASH_GRAPH_CYCLE" }
+	for cursor := range ready {
+		i := ready[cursor]
+		stage := request.Stages[i]
+		input, found := false, false
+		for j := range request.Edges {
+			edge := request.Edges[j]
+			if edge.To != i { continue }
+			kind := request.Stages[edge.From].Framed
+			if found && input != kind { return "KASH_FRAME_MISMATCH" }
+			input, found = kind, true
+		}
+		expected := input
+		if stage.Kind == "frame" || stage.Kind == "filter" { expected = true }
+		if stage.Kind == "encode" || stage.Kind == "" { expected = false }
+		if stage.Framed != expected || (stage.Kind == "frame" && input) || ((stage.Kind == "filter" || stage.Kind == "encode") && !input) || (stage.Kind == "" && input) { return "KASH_FRAME_MISMATCH" }
+	}
 	return ""
 }

@@ -33,7 +33,7 @@ func (p *parser) processGroup() *Expr {
 	p.pos++
 	for {
 		p.commandSpace(true)
-		group.Items = slices.Append(p.a, group.Items, p.commandPipeline(p.pos, false, true))
+		group.Items = slices.Append(p.a, group.Items, p.commandPipeline(p.pos, false, true, false))
 		if len(p.diags) != 0 { break }
 		if p.pos == len(p.s.Text) { p.error(group.Span.Start, p.pos, "unclosed Kash process group"); break }
 		if p.s.Text[p.pos] == ')' { p.pos++; break }

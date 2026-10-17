@@ -16,6 +16,9 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		return failure(context.Run, "EXPR_INVALID", expression.Span, "empty application")
 	}
 	head := expression.Items[0]
+	if context.PurePredicate && head.Kind == expr.Name && (head.Text == "def" || head.Text == "eval" || head.Text == "run!" || head.Text == "pipe!" || head.Text == "await") {
+		return failure(context.Run, "KASH_PREDICATE_EFFECT", expression.Span, "stream predicates require pure, nonblocking computations")
+	}
 	if head.Kind == expr.Name {
 		if head.Text == "include" || head.Text == "include?" {
 			return failure(context.Run, "EXPR_INVALID", expression.Span, "include/include? are source-composition forms; use them at script top level or in composition if bodies")
@@ -123,6 +126,7 @@ func comparisonAlias(name string) (string, bool) {
 }
 
 func (p *Program) operation(scope *Scope, operation *Operation, arguments []*expr.Expr, context *Context, span source.Span) Result {
+	if context.PurePredicate && operation.Category != PureOperation { return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations") }
 	if operation.ScopedFinalizer {
 		if context.forbidsFinalization() { return failure(context.Run, "PHASE_INVALID", span, "finally! is invalid in this execution phase") }
 		if state := p.findFinalizer(context, span); state != nil { return p.advanceFinalizer(state, context) }
@@ -187,6 +191,7 @@ func ReleaseCallable(a mem.Allocator, value *core.Value) { freeCallables(a, valu
 
 func (p *Program) prepareOperation(operation *Operation, count int, context *Context, span source.Span) Result {
 	_ = p
+	if context.PurePredicate && operation.Category != PureOperation { return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations") }
 	if context.deferred { return Result{Completed: true} }
 	// A dependency may publish while a host operation is outstanding. Keep its
 	// single request active until the engine supplies the matching completion;
@@ -273,6 +278,7 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 }
 
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
+	if context.PurePredicate && function.Kind == FunctionInvocation { return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot invoke process scripts") }
 	if function.Kind == FunctionOperation {
 		operation := p.operationForCallable(function)
 		if operation == nil {

@@ -15,6 +15,9 @@ import (
 )
 
 type Context struct {
+	// Stream predicates may compute values, but may not observe or mutate host
+	// state, suspend, start processes, or dynamically parse code.
+	PurePredicate bool
 	Program               *Program
 	Engine                *core.EngineContext
 	TrackUnvalidatedReads bool
@@ -196,6 +199,7 @@ func FreeEffects(a mem.Allocator, effects []Effect) {
 }
 
 func (c *Context) Emit(kind EffectKind, data []byte) {
+	if c.PurePredicate { c.phaseInvalid = true; return }
 	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
 		c.phaseInvalid = true
 		return
@@ -311,6 +315,7 @@ func canonicalPath(a mem.Allocator, cwd string, name string) string {
 }
 
 func (c *Context) Dependency(key core.ResourceKey) bool {
+	if c.PurePredicate { c.phaseInvalid = true; return false }
 	if c.Engine == nil {
 		return false
 	}
@@ -369,6 +374,7 @@ func (c *Context) Observe(key core.ResourceKey, aspect core.ObservationAspect, s
 // Submit queues an owned request and records its generated ID on the active
 // engine node. The host completes it using the request correlation data.
 func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
+	if c.PurePredicate { c.phaseInvalid = true; return 0 }
 	if c.deferred { return 0 }
 	if c.finalizer != nil && c.Engine != nil && c.Program.FinalizationNow != nil {
 		deadline := c.Program.FinalizerDeadline(c.Engine.NodeID())
@@ -426,7 +432,7 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 				input, output := host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput)
 				if (input != "" && !c.Allows(Read, input)) || (output != "" && !c.Allows(Write, output)) { return false }
 			}
-			if i < len(kinds) && (kinds[i].Text == "merge" || kinds[i].Text == "broadcast") { continue }
+			if i < len(kinds) && (kinds[i].Text == "merge" || kinds[i].Text == "broadcast" || kinds[i].Text == "frame" || kinds[i].Text == "encode" || kinds[i].Text == "filter" || kinds[i].Text == "copy") { continue }
 			if stages[i].Kind != core.List || len(stages[i].List) == 0 || stages[i].List[0].Kind != core.String || !authorizeExecutable(c, stages[i].List[0].Text) {
 				return false
 			}

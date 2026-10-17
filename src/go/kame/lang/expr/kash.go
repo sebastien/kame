@@ -75,10 +75,10 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 }
 
 func (p *parser) commandGraph(start int, capture bool) *Expr {
-	return p.commandPipeline(start, capture, false)
+	return p.commandPipeline(start, capture, false, false)
 }
 
-func (p *parser) commandPipeline(start int, capture bool, grouped bool) *Expr {
+func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch bool) *Expr {
 	previousKash := p.kash
 	previousGroup := p.commandGroup
 	p.commandGroup = grouped
@@ -87,10 +87,11 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool) *Expr {
 	if capture { kind = CommandCapture }
 	e := p.node(kind, start)
 	stage := p.node(CommandStage, p.pos)
+	if branch { p.commandSpace(true); if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '|' { stage.Kind = CommandInput } }
 	e.Items = slices.Append(p.a, e.Items, stage)
 	input, output := false, false
 	for {
-		p.commandSpace(capture || grouped)
+		p.commandSpace(capture || grouped || branch)
 		if !capture && !grouped && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '\n' {
 			next := p.pos+1
 			for next < len(p.s.Text) && commandWhitespace(p.s.Text[next]) { next++ }
@@ -108,7 +109,12 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool) *Expr {
 			if capture { p.error(start, p.pos, "unclosed Kash command substitution") }
 			break
 		}
-		if grouped && (p.s.Text[p.pos] == ',' || p.s.Text[p.pos] == ')') { break }
+		if ((grouped || branch) && p.s.Text[p.pos] == ')') || (grouped && p.s.Text[p.pos] == ',') { break }
+		if stage.Kind == CommandMux && (stage.Text == "merge" || stage.Text == "broadcast") && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
+			stage = p.node(CommandStage, p.pos)
+			e.Items = slices.Append(p.a, e.Items, stage)
+			continue
+		}
 		if stage.Kind == CommandStage && len(stage.Items) == 0 && IsCommandGroup(p.s.Text, p.pos) {
 			freeExpr(p.a, stage)
 			stage = p.processGroup()
@@ -164,7 +170,6 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool) *Expr {
 				p.error(p.pos-1, p.pos+1, "|| is not a Kash process operator")
 				break
 			}
-			multiplexed := false
 			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '(' {
 				mux := p.node(CommandMux, p.pos-1)
 				p.pos++
@@ -173,22 +178,47 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool) *Expr {
 				for p.pos < len(p.s.Text) && setupKeyByte(p.s.Text[p.pos], p.pos == from) { p.pos++ }
 				mux.Text = p.s.Text[from:p.pos]
 				p.commandSpace(true)
-				if (mux.Text != "merge" && mux.Text != "broadcast") || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' {
-					p.error(mux.Span.Start, p.pos, "expected |(merge) or |(broadcast)")
+				if mux.Text == "frame" || mux.Text == "encode" {
+					argument := p.expression()
+					if argument != nil { mux.Items = slices.Append(p.a, mux.Items, argument) }
+					if argument == nil || argument.Kind != Symbol || argument.Text != "lines" { p.error(mux.Span.Start, p.pos, "line adapters require :lines") }
+					p.commandSpace(true)
+				} else if mux.Text == "filter" {
+					predicate := p.expression()
+					if predicate != nil { mux.Items = slices.Append(p.a, mux.Items, predicate) }
+					p.commandSpace(true)
+					if p.pos == len(p.s.Text) || p.s.Text[p.pos] != '|' { p.error(mux.Span.Start, p.pos, "filter requires a predicate and selected branch") } else {
+						if p.pos+1 == len(p.s.Text) || p.s.Text[p.pos+1] != '(' { p.pos++ }
+						p.commandSpace(true)
+						mux.Body = slices.Append(p.a, mux.Body, p.commandPipeline(p.pos, false, false, true))
+					}
+				}
+				if (mux.Text != "merge" && mux.Text != "broadcast" && mux.Text != "frame" && mux.Text != "encode" && mux.Text != "filter") || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || len(p.diags) != 0 {
+					p.error(mux.Span.Start, p.pos, "invalid Kash stream operator")
 					freeExpr(p.a, mux)
 					break
 				}
 				p.pos++
 				mux.Span.End = p.pos
 				e.Items = slices.Append(p.a, e.Items, mux)
-				multiplexed = true
+				stage = mux
+				continue
 			}
 			stage = p.node(CommandStage, p.pos)
 			e.Items = slices.Append(p.a, e.Items, stage)
-			p.commandSpace(capture || grouped || multiplexed)
+			p.commandSpace(capture || grouped || branch)
 			continue
 		}
-		if stage.Kind == CommandGroup { p.error(p.pos, p.pos+1, "expected a process connection or statement end after group"); break }
+		if p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos:p.pos+2] == ">&" || p.s.Text[p.pos:p.pos+2] == ">@") {
+			from := p.pos
+			if !branch || !hasExecutable(stage) || output || e.Exit != "" { p.error(from, from+2, "branch rejoin has no valid continuation scope"); p.diags[len(p.diags)-1].Code = "KASH_REJOIN_OUT_OF_SCOPE"; break }
+			e.Exit = "next"; if p.s.Text[from+1] == '@' { e.Exit = "otherwise" }
+			p.pos += 2
+			p.commandSpace(true)
+			if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' { p.error(from, p.pos, "rejoin must be the final branch disposition"); break }
+			break
+		}
+		if stage.Kind == CommandGroup || stage.Kind == CommandMux { p.error(p.pos, p.pos+1, "expected a process connection or statement end after graph operand"); break }
 		if p.s.Text[p.pos] == '<' || p.s.Text[p.pos] == '>' {
 			from := p.pos
 			op := p.s.Text[p.pos:p.pos+1]
@@ -245,6 +275,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool) *Expr {
 	if !hasExecutable(stage) {
 		p.error(start, p.pos, "expected Kash executable")
 	}
+	if stage.Kind == CommandMux && stage.Text == "broadcast" { p.error(stage.Span.Start, p.pos, "broadcast requires a destination group") }
 	if stage.Span.End == stage.Span.Start { stage.Span.End = p.pos }
 	e.Span.End = p.pos
 	if len(e.Body) != 0 && e.Body[0].Async { e.Async = true; e.Body[0].Async = false }
@@ -259,6 +290,7 @@ func (p *parser) commandSpace(capture bool) {
 }
 
 func hasExecutable(stage *Expr) bool {
+	if stage.Kind == CommandMux || stage.Kind == CommandInput { return true }
 	if stage.Kind == CommandGroup { return len(stage.Items) >= 2 }
 	for i := range stage.Items { if stage.Items[i].Kind == CommandWord { return true } }
 	return false

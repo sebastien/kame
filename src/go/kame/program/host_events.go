@@ -108,6 +108,8 @@ func (p *Program) drainRequests() {
 				}
 				stage := host.ProcessStage{Argv: arguments}
 				if i < len(kinds) { stage.Kind = kinds[i].Text }
+				framed := host.PayloadList(request.Payload, "framed")
+				if i < len(framed) { stage.Framed = framed[i].Bool }
 				if i < len(setups) {
 					stage.Input, stage.Output, stage.Append = host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput), host.PayloadAppend(setups[i])
 					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
@@ -167,6 +169,7 @@ func (p *Program) drainRequests() {
 			}
 			processRequest := host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 			processRequest.Topology, processRequest.Edges = len(kinds) != 0, edges
+			processRequest.StreamItem, processRequest.StreamContext = eval.StreamItemCallback, p.Eval
 			if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(processRequest) {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else {

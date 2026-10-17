@@ -69,7 +69,7 @@ typedef struct km_stage {
     pid_t pid;
     int64_t job;
     int64_t deadline;
-    int status, signal, outcome;
+    int status, signal, outcome, operator_kind;
     bool exited, reaped, spawned_in_job;
 } km_stage;
 
@@ -1309,7 +1309,7 @@ fail:
 // Go structs. OS pipes carry intermediate bytes directly, with backpressure.
 int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output) {
     so_Slice empty = {0};
-    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty);
+    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty, NULL, NULL);
 }
 
 // One long-running native operator node, owned and reaped like a process stage.
@@ -1339,7 +1339,70 @@ static void km_mux_close_unowned(int node, int *edges, so_int *links, int count)
     }
 }
 
-static int km_run_mux(int node, int *edges, so_int *links, int count) {
+enum { KM_RECORD_LIMIT = 64 * 1024, KM_FRAME_ENCODING = 120, KM_RECORD_TOO_LONG = 121, KM_PREDICATE_FAILED = 124 };
+
+static bool km_mux_write(int fd, const unsigned char *data, size_t length) {
+    while (length) {
+        ssize_t written = write(fd, data, length);
+        if (written < 0 && errno == EINTR) continue;
+        if (written <= 0) return false;
+        data += written; length -= (size_t)written;
+    }
+    return true;
+}
+
+// The private envelope is uint32 little-endian length followed by exact raw
+// bytes. Only explicit framers create envelopes; executables never see them.
+static int km_mux_send(int node, int kind, int *edges, so_int *links, int count,
+                       unsigned char *data, int length, int selected) {
+    int output = 0;
+    for (int i = 0; i < count; i++) if (links[i * 2] == node) {
+        bool deliver = kind != 5 || output == selected;
+        output++;
+        if (deliver && !km_mux_write(edges[i * 2 + 1], data, (size_t)length)) return 125;
+    }
+    if (!output && !km_mux_write(STDOUT_FILENO, data, (size_t)length)) return 125;
+    return 0;
+}
+
+static int km_mux_frame(int node, int *edges, so_int *links, int count,
+                        int64_t id, km_stream_item item, void *context) {
+    int input = -1;
+    for (int i = 0; i < count; i++) if (links[i * 2 + 1] == node) input = edges[i * 2];
+    unsigned char *record = malloc(KM_RECORD_LIMIT + 4);
+    if (!record || input < 0) { free(record); return 125; }
+    unsigned char chunk[KM_CHUNK];
+    int length = 0, result = 0;
+    for (;;) {
+        ssize_t n;
+        do { n = read(input, chunk, sizeof(chunk)); } while (n < 0 && errno == EINTR);
+        if (n < 0) { result = 125; break; }
+        for (int i = 0; i < n || (!n && length); i++) {
+            if (n) {
+                if (length == KM_RECORD_LIMIT) { result = KM_RECORD_TOO_LONG; break; }
+                record[4 + length++] = chunk[i];
+                if (chunk[i] != '\n') continue;
+            }
+            so_Slice raw = {.ptr = record + 4, .len = length, .cap = length};
+            int valid = item ? (int)item(context, id, -1, raw) : -KM_PREDICATE_FAILED;
+            if (valid < 0) { result = -valid; break; }
+            for (int j = 0; j < 4; j++) record[j] = (unsigned char)((unsigned)length >> (j * 8));
+            result = km_mux_send(node, 3, edges, links, count, record, length + 4, 0);
+            length = 0;
+            if (result || !n) break;
+        }
+        if (result || !n) break;
+    }
+    free(record);
+    return result;
+}
+
+typedef struct km_frame_input { unsigned char *data; int length, need; } km_frame_input;
+
+static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
+                      int64_t id, km_stream_item item, void *context) {
+    int kind = mode & 15;
+    bool framed = (mode & 16) || kind == 4;
     struct pollfd *inputs = calloc((size_t)count, sizeof(*inputs));
     if (!inputs) return 125;
     int readers = 0;
@@ -1348,37 +1411,66 @@ static int km_run_mux(int node, int *edges, so_int *links, int count) {
     }
     km_mux_close_unowned(node, edges, links, count);
     signal(SIGPIPE, SIG_DFL); signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL);
+    if (kind == 3) { free(inputs); return km_mux_frame(node, edges, links, count, id, item, context); }
+    km_frame_input *frames = framed ? calloc((size_t)readers, sizeof(*frames)) : NULL;
+    if (framed && !frames) { free(inputs); return 125; }
+    int result = 0;
+    for (int i = 0; framed && i < readers; i++) {
+        frames[i].data = malloc(KM_RECORD_LIMIT + 4); frames[i].need = 4;
+        if (!frames[i].data) { result = 125; break; }
+    }
     int active = readers, cursor = 0;
     unsigned char buffer[KM_CHUNK];
-    while (active) {
+    while (active && !result) {
         int ready;
         do { ready = poll(inputs, (nfds_t)readers, -1); } while (ready < 0 && errno == EINTR);
-        if (ready < 0) { free(inputs); return 125; }
+        if (ready < 0) { result = 125; break; }
         for (int offset = 0; offset < readers; offset++) {
             int next = (cursor + offset) % readers;
             if (inputs[next].fd < 0 || !inputs[next].revents) continue;
             ssize_t n;
-            do { n = read(inputs[next].fd, buffer, sizeof(buffer)); } while (n < 0 && errno == EINTR);
-            if (n < 0) { free(inputs); return 125; }
-            if (!n) { close(inputs[next].fd); inputs[next].fd = -1; active--; continue; }
-            for (int i = 0; i < count; i++) if (links[i * 2] == node) {
-                ssize_t sent = 0;
-                while (sent < n) {
-                    ssize_t written = write(edges[i * 2 + 1], buffer + sent, (size_t)(n - sent));
-                    if (written < 0 && errno == EINTR) continue;
-                    if (written <= 0) { free(inputs); return 125; }
-                    sent += written;
-                }
+            km_frame_input *frame = framed ? &frames[next] : NULL;
+            unsigned char *data = framed ? frame->data + frame->length : buffer;
+            size_t capacity = framed ? (size_t)(frame->need - frame->length) : sizeof(buffer);
+            do { n = read(inputs[next].fd, data, capacity); } while (n < 0 && errno == EINTR);
+            if (n < 0) { result = 125; break; }
+            if (!n) {
+                if (framed && frame->length) { result = 125; break; }
+                close(inputs[next].fd); inputs[next].fd = -1; active--; continue;
             }
+            cursor = (next + 1) % readers;
+            int length = (int)n, selected = 0;
+            if (framed) {
+                frame->length += (int)n;
+                if (frame->length < frame->need) break;
+                if (frame->need == 4) {
+                    uint32_t size = 0;
+                    for (int j = 0; j < 4; j++) size |= (uint32_t)frame->data[j] << (j * 8);
+                    if (!size || size > KM_RECORD_LIMIT) { result = KM_RECORD_TOO_LONG; break; }
+                    frame->need = 4 + (int)size;
+                    break;
+                }
+                data = frame->data; length = frame->length;
+                if (kind == 5) {
+                    so_Slice raw = {.ptr = data + 4, .len = length - 4, .cap = length - 4};
+                    int accepted = item ? (int)item(context, id, node, raw) : -KM_PREDICATE_FAILED;
+                    if (accepted < 0) { result = -accepted; break; }
+                    selected = accepted ? 0 : 1;
+                }
+                if (kind == 4) { data += 4; length -= 4; }
+            }
+            result = km_mux_send(node, kind, edges, links, count, data, length, selected);
+            if (framed) { frame->length = 0; frame->need = 4; }
             cursor = (next + 1) % readers;
             break;
         }
     }
+    if (frames) { for (int i = 0; i < readers; i++) free(frames[i].data); free(frames); }
     free(inputs);
-    return 0;
+    return result;
 }
 
-int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends) {
+int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends, km_stream_item stream_item, void *stream_context) {
     if (!host) return -1;
     if (host->rejected_sequence) return -2;
     if (!id || lengths.len < 1 || lengths.len > INT_MAX / 2 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid graph request");
@@ -1419,6 +1511,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     char **cwd = calloc((size_t)n, sizeof(char *));
     km_process p = {.id = id, .outfd = -1, .errfd = -1, .execfd = -1, .direct = true, .retain = (int)retain, .stage_count = n, .topology = topology, .failed_stage = -1};
     p.stages = calloc((size_t)n, sizeof(km_stage));
+    if (p.stages && topology) for (int i = 0; i < n; i++) p.stages[i].operator_kind = (int)node_kinds[i] & 15;
     if (edges) for (int i = 0; i < edge_count * 2; i++) edges[i] = -1;
     bool ok = edges && stage_inputs && stage_outputs && truncate_outputs && argv && envp && cwd && p.stages && input_name && output_name;
     so_String *args = arguments.ptr, *envs = environment.ptr, *dirs = directories.ptr;
@@ -1545,7 +1638,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
             if (topology) for (int j = 0; j < n; j++) { if (stage_inputs[j] >= 0 && stage_inputs[j] != input) close(stage_inputs[j]); if (stage_outputs[j] >= 0) close(stage_outputs[j]); }
             if (!topology || !node_kinds[i]) for (int j = 0; j < edge_count * 2; j++) close(edges[j]);
             close(out[0]); close(out[1]); close(err[0]); close(err[1]); close(execerr[0]);
-            if (topology && node_kinds[i]) { close(execerr[1]); _exit(km_run_mux(i, edges, links, edge_count)); }
+            if (topology && node_kinds[i]) { close(execerr[1]); _exit(km_run_mux(i, (int)node_kinds[i], edges, links, edge_count, id, stream_item, stream_context)); }
             if (ready[0] >= 0) {
                 char token = 0;
                 ssize_t nread;
@@ -1702,6 +1795,12 @@ static void km_reap(km_host *host, km_process *p) {
                 p->failed_stage = i;
                 p->status = s->signal ? 128 + s->signal : s->status; p->signal = s->signal;
                 km_signal(p, SIGKILL);
+            }
+            // A framing/predicate failure can close upstream before the parent
+            // observes its exit. Preserve the causal operator diagnostic over
+            // a resulting SIGPIPE, never reinterpret an executable's exit code.
+            if (p->topology && !p->terminating && s->operator_kind && s->exited && !s->signal && s->status >= 120 && s->status <= 124) {
+                p->failed_stage = i; p->status = s->status; p->signal = 0;
             }
             if (!s->exited) all = false;
         }

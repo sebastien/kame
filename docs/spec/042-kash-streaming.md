@@ -10,7 +10,7 @@ redirections, whole-graph acceptance/recovery/async ownership, and ambiguous
 capture rejection on POSIX native and WASM/Node hosts. Ordinary linear pipelines
 retain their existing execution path. This is not full conformance to this draft.
 
-Native multiplexors are long-running, invocation-owned worker nodes, each with
+Native byte multiplexors are long-running, invocation-owned worker nodes, each with
 one bounded 16 KiB transfer buffer and bounded OS pipes. Node multiplexors use
 paused descriptor-backed streams and one bounded transfer per operator. Byte
 merges preserve per-source byte order, not records or cross-source ordering.
@@ -19,8 +19,26 @@ Acceptance and recovery currently apply only to the enclosing graph, not to
 individual members of a process group. Windows rejects the new topology before
 launch or output truncation; its existing linear-pipeline support is unchanged.
 
-Conditional branches, framing, named channels, stream operands, balance, and
-resolved/runtime topology inspection remain subsequent slices. Process channels
+The next implementation slice adds explicit `frame :lines` / `encode :lines`,
+Boolean filters, nested selected branches, and lexical `>&` / `>@` rejoins.
+Line records are UTF-8, retain exact delimiter bytes, and are limited to 64 KiB
+including the delimiter. A partial final line is a complete item. Predicates
+receive `item` without its LF or CRLF terminator; a callable predicate receives
+that same string as its argument. Predicates execute in the shared evaluator,
+without host observations, process execution, dynamic evaluation, or suspension.
+External commands automatically receive payload bytes, but their output must be
+explicitly reframed before rejoining a framed remainder. Frame-safe merges keep
+one bounded record assembly buffer per input and select ready inputs fairly.
+The parse AST retains operator kind, predicate and branch spans, and rejoin kind,
+plus a resolved syntax-only topology with node IDs, stream kinds, inserted
+adapters/mergers, and edges. Inspection never evaluates predicates or arguments.
+Kash recipe reuse conservatively fingerprints the full source/configuration
+context of runtime predicates and helper closures; it does not run predicates to
+discover build dependencies. Unchanged contexts can reuse material-input proofs,
+while changed captured configuration invalidates them.
+
+Named channels, stream operands, balance, and runtime topology
+inspection remain subsequent work. Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing
 dependency observer before launching their owning graph, and consume their
@@ -589,6 +607,11 @@ Graph lowering expands the AST into process nodes, mux nodes, ports, and point-t
 | `KASH_DOUBLE_CONSUME` | Current or named channel consumed twice without broadcast. |
 | `KASH_FRAME_REQUIRED` | Item-aware operator receives unframed bytes. |
 | `KASH_FRAME_MISMATCH` | Incompatible framed/raw inputs at rejoin or merge. |
+| `KASH_FRAME_ENCODING` | A line record is not valid UTF-8. |
+| `KASH_RECORD_LIMIT` | A line record exceeds the bounded record limit. |
+| `KASH_PREDICATE_EFFECT` | A predicate attempts an effect or suspension. |
+| `KASH_PREDICATE_BOOLEAN` | A predicate returns a non-Boolean value. |
+| `KASH_PREDICATE_FAILED` | Predicate evaluation fails. |
 | `KASH_STREAM_OPERAND_UNSUPPORTED` | Host/executable cannot accept a live injected stream. |
 | `KASH_GRAPH_CYCLE` | Unsupported feedback cycle. |
 | `KASH_AMBIGUOUS_CAPTURE` | Capture would expose more than one unmerged output. |

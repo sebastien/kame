@@ -35,6 +35,12 @@ type ProcessDiagnostic struct {
 // Shell contains the executable followed by its arguments; Script is appended as
 // its final argument.
 type ProcessRequest struct {
+	// Synchronous, pure authored-predicate bridge: node -1 validates UTF-8;
+	// other nodes return 0/1 or a negative reserved operator status. Native
+	// operator workers call this against their fork snapshot, never per item
+	// through a host request or a new process.
+	StreamItem func(any, int64, int, []byte) int
+	StreamContext any
 	ID          int64
 	Target      string
 	Generation  int64
@@ -71,7 +77,8 @@ type ExecutorDescriptor struct {
 }
 
 type ProcessStage struct {
-	Kind string // empty for an executable; otherwise merge or broadcast
+	Framed bool // output uses the private framed-line transport
+	Kind string // empty for an executable; otherwise a native stream operator
 	Argv []string
 	Directory string
 	Environment []string

@@ -456,6 +456,8 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 		e.Str("kinds"); e.BeginArray()
 		for i := range kinds { e.Str(kinds[i].Text) }
 		e.EndArray()
+		framed := PayloadList(*payload, "framed")
+		if len(framed) != 0 { e.Str("framed"); e.BeginArray(); for i := range framed { e.Bool(framed[i].Bool) }; e.EndArray() }
 		e.Str("edges"); e.BeginArray()
 		edges := PayloadList(*payload, "edges")
 		for i := range edges { e.BeginArray(); for j := range edges[i].List { e.Int(edges[i].List[j].Int) }; e.EndArray() }

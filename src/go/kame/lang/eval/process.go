@@ -16,6 +16,9 @@ import (
 // Progress is generation-owned: replaying an outer application must neither
 // relaunch an earlier substitution nor let it consume a later completion.
 type captureState struct {
+	Program *Program
+	PredicateScope *Scope
+	Predicates []*expr.Expr
 	Alloc  mem.Allocator
 	Index  int
 	Stage  int
@@ -39,6 +42,10 @@ type captureState struct {
 
 func freeCaptureState(a mem.Allocator, value any) {
 	s := value.(*captureState)
+	if s.Program != nil { for i := range s.Program.StreamStates { if s.Program.StreamStates[i] == s { copy(s.Program.StreamStates[i:], s.Program.StreamStates[i+1:]); s.Program.StreamStates = s.Program.StreamStates[:len(s.Program.StreamStates)-1]; break } } }
+	if s.PredicateScope != nil { s.PredicateScope.Free() }
+	for i := range s.Predicates { expr.Free(a, s.Predicates[i]) }
+	slices.Free(a, s.Predicates)
 	for i := range s.Argv {
 		s.Argv[i].Free(a)
 	}
@@ -62,6 +69,7 @@ func freeCaptureState(a mem.Allocator, value any) {
 }
 
 func (p *Program) capture(e *expr.Expr, c *Context) Result {
+	if c.PurePredicate { return failure(c.Run, "KASH_PREDICATE_EFFECT", e.Span, "stream predicates cannot execute processes") }
 	if !e.Topology && hasProcessTopology(e) {
 		return p.captureTopology(e, c)
 	}
@@ -90,6 +98,16 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		state = mem.Alloc[captureState](p.Alloc)
 		state.Alloc = p.Alloc
 		c.SetOperationState(state, freeCaptureState)
+	}
+	if e.Topology && state.Program == nil {
+		state.Program, state.PredicateScope = p, c.Scope
+		c.Scope.Retain()
+		for i := range e.Items {
+			var predicate *expr.Expr
+			if e.Items[i].Kind == expr.CommandMux && e.Items[i].Text == "filter" { predicate = expr.Clone(state.Alloc, e.Items[i].Items[0]) }
+			state.Predicates = slices.Append(state.Alloc, state.Predicates, predicate)
+		}
+		p.StreamStates = slices.Append(p.Alloc, p.StreamStates, state)
 	}
 	for i := range state.Effects { effect := state.Effects[i]; c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)}) }
 	for i := range state.WritePaths { c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i])) }
@@ -135,6 +153,15 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			}
 		}
 		r := captureValue(c.Run, completion.Value, e.Span, e.AcceptExit || e.Kind == expr.CommandTest)
+		if e.Topology && r.Diagnostic.Code == "RECIPE_FAIL" {
+			stages := host.PayloadStages(completion.Value)
+			for i := range stages {
+				if i < len(e.Items) && e.Items[i].Kind == expr.CommandMux && host.PayloadInt(stages[i], "status") == host.PayloadInt(completion.Value, "status") {
+					status := int(host.PayloadInt(stages[i], "status"))
+					if status >= StreamEncoding && status <= StreamPredicateFailure { r.Free(c.Run); r = streamFailure(c, status, e.Items[i].Span); break }
+				}
+			}
+		}
 		if (e.Kind == expr.CommandResult || e.Kind == expr.CommandGraph) && r.Diagnostic.Code == "" {
 			r.Value.Free(c.Run)
 			r = processResult(c.Run, completion.Value, e.Span)
@@ -379,8 +406,11 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		payload = host.PipelinePayload(c.Run, state.Stages)
 	}
 	if e.Topology {
-		var kinds, edges []core.Value
+		var kinds, edges, framed []core.Value
 		for i := range e.Items { kind := ""; if e.Items[i].Kind == expr.CommandMux { kind = e.Items[i].Text }; kinds = slices.Append(c.Run, kinds, core.NewString(c.Run, kind)) }
+		for i := range e.StreamKinds { framed = slices.Append(c.Run, framed, core.Value{Kind: core.Bool, Bool: e.StreamKinds[i] == 1}) }
+		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "framed"), Value: core.NewList(c.Run, framed)})
+		slices.Free(c.Run, framed)
 		for i := range e.Edges { edge := []core.Value{{Kind: core.Int, Int: int64(e.Edges[i].From)}, {Kind: core.Int, Int: int64(e.Edges[i].To)}}; edges = slices.Append(c.Run, edges, core.NewList(c.Run, edge)) }
 		host.ConfigureTopology(c.Run, &payload, kinds, edges)
 		for i := range kinds { kinds[i].Free(c.Run) }; slices.Free(c.Run, kinds)
@@ -428,7 +458,7 @@ func rememberArgumentEffects(state *captureState, c *Context, before int, before
 // Only a completed process failure selects the fallback. Argument evaluation,
 // authorization, and waiting never reach this recovery boundary.
 func (p *Program) captureRecovery(e *expr.Expr, c *Context, state *captureState, r Result) Result {
-	if r.Diagnostic.Protected || len(e.Body) == 0 || (r.Diagnostic.Code != "RECIPE_FAIL" && r.Diagnostic.Code != "HOST_FAIL" && r.Diagnostic.Code != "TOOL_MISSING" && r.Diagnostic.Code != "RECIPE_TIMEOUT") { return r }
+	if r.Diagnostic.Protected || len(e.Body) == 0 || (r.Diagnostic.Code != "RECIPE_FAIL" && r.Diagnostic.Code != "HOST_FAIL" && r.Diagnostic.Code != "TOOL_MISSING" && r.Diagnostic.Code != "RECIPE_TIMEOUT" && !strings.HasPrefix(r.Diagnostic.Code, "KASH_PREDICATE_") && r.Diagnostic.Code != "KASH_RECORD_LIMIT" && r.Diagnostic.Code != "KASH_FRAME_ENCODING") { return r }
 	c.handledFinalizerFailure()
 	state.Recovering = true
 	r.Free(c.Run)

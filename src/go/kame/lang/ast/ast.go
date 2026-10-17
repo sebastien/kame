@@ -64,6 +64,7 @@ func WriteAST(out io.Writer, lang string, name string, text string) int {
 type astEncoder struct {
 	enc json.Encoder
 	out io.Writer
+	processDepth int
 }
 
 func newASTEncoder(out io.Writer, lang string, name string) astEncoder {
@@ -144,6 +145,20 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		return
 	}
 	e.node(exprKind(value.Kind), value.Span)
+	if value.Kind == expr.CommandMux {
+		e.Str("operator"); e.Str(value.Text)
+		if len(value.Body) != 0 { e.Str("selected"); e.expr(value.Body[0]) }
+	}
+	if value.Exit != "" { e.Str("rejoin"); e.Str(value.Exit) }
+	process := value.Kind == expr.CommandGraph || value.Kind == expr.CommandCapture
+	if process {
+		if e.processDepth == 0 {
+			for i := range value.Items {
+				if value.Items[i].Kind == expr.CommandMux || value.Items[i].Kind == expr.CommandGroup { e.processTopology(value); break }
+			}
+		}
+		e.processDepth++
+	}
 	if value.Kind == expr.ValuePipe {
 		e.Str("items")
 		e.BeginArray()
@@ -286,6 +301,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("index")
 		e.Int(value.Int)
 	}
+	if process { e.processDepth-- }
 	e.EndObject()
 }
 
@@ -362,6 +378,7 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
+	if k == expr.CommandInput { return "command-input" }
 	if k == expr.CommandGroup { return "command-group" }
 	if k == expr.CommandMux { return "command-mux" }
 	if k == expr.ValuePipe { return "value-pipe" }

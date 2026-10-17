@@ -1310,6 +1310,24 @@ uint32_t kame_wasm_process_stream_request(uint64_t handle, uint64_t request, uin
   return KAME_WASM_OK;
 }
 
+/* Stream payload is data, never source. Negative results are reserved operator
+ * statuses. Resolve the request even when parked by the concurrent host. */
+__attribute__((export_name("kame_wasm_stream_item")))
+int32_t kame_wasm_stream_item(uint64_t handle, uint64_t request, int32_t node, uint32_t data, uint32_t length) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, -124, false);
+  if (!instance || !instance->runtime || length > 65536u || (length && !data) ||
+      (uint64_t)data + length > (uint64_t)__builtin_wasm_memory_size(0) * 65536u) return -124;
+  host_Request *pending = NULL;
+  if (!request || wasm_Table_Owner(kame_wasm_table(), (wasm_Handle)request) != instance->owner) return -124;
+  if (instance->has_pending && instance->request == request) pending = &instance->pending;
+  for (kame_wasm_parked_request *saved = instance->parked; !pending && saved; saved = saved->next)
+    if (saved->request == request) pending = &saved->pending;
+  if (!pending || pending->Kind != host_RequestProcess) return -124;
+  return (int32_t)wasm_Runtime_StreamItem(instance->runtime, *pending, node,
+      (so_Slice){.ptr = (void *)(uintptr_t)data, .len = length, .cap = length});
+}
+
 __attribute__((export_name("kame_wasm_process_started_request")))
 uint32_t kame_wasm_process_started_request(uint64_t handle, uint64_t request) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);

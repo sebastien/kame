@@ -156,6 +156,7 @@ test-wasm: wasm-check
 	tests/T040-01-cli-automatic-clean.sh
 	tests/T041-01-patterns-predicates-and-substitution.sh
 	tests/T042-01-kash-topology.sh
+	tests/T042-02-kash-framing.sh
 	tests/T036-01-cli-presentation.sh
 	tests/T036-02-cli-reuse-reasons.sh
 

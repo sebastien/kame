@@ -21,6 +21,14 @@ type localDefinition struct {
 }
 
 func (p *Program) localValue(local *localDefinition, c *Context) Result {
+	if c.PurePredicate {
+		if local.Done { return Result{Value: local.Value.Clone(c.Run), Diagnostic: local.Diagnostic.Clone(c.Run)} }
+		if local.Active { return failure(c.Run, "DEP_CYCLE", local.Expression.Span, "cyclic predicate definition") }
+		local.Active = true
+		r := p.evaluate(nil, local.Scope, local.Expression, c)
+		local.Active = false
+		return r
+	}
 	if local.Done {
 		replayLocalEffects(local, c)
 		return Result{Value: local.Value.Clone(c.Run), Diagnostic: local.Diagnostic.Clone(c.Run)}

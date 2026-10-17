@@ -180,6 +180,7 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	if b.Kind == bindingLocalDefinition {
 		return context.Program.localValue(b.Local, context)
 	}
+	if context.PurePredicate { return context.Program.EvaluateDefinition(b.Definition, context) }
 	if context.Engine == nil && context.ResolveDefinition != nil {
 		return context.ResolveDefinition(context.ResolverState, b.Definition, context)
 	}

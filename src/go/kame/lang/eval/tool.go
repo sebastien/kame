@@ -8,6 +8,7 @@ import (
 // TrackedTool resolves a tool through the driver's startup policy, then retains
 // the selected executable's internal metadata without granting user file reads.
 func (c *Context) TrackedTool(name string, span source.Span) Result {
+	if c.PurePredicate { return failure(c.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot resolve executables") }
 	if name == "" { return failure(c.Run, "TOOL_MISSING", span, "tool name is empty") }
 	if c.Engine == nil || (c.DependencyObserver == nil && c.DependencyContextObserver == nil) {
 		return failure(c.Run, "PHASE_INVALID", span, "tool requires a build or source session")

@@ -303,13 +303,29 @@ so native and WebAssembly behavior remain comparable.
 
 Explicit process topology uses ABI request kind **32**, not the linear pipeline
 kinds above. Its JSON descriptor adds parallel `kinds` (empty for executable
-nodes, `merge` or `broadcast` for native nodes) and `edges` (zero-based `[from,
+nodes, `merge`, `broadcast`, `frame`, `encode`, `filter`, or `copy` for native nodes) and `edges` (zero-based `[from,
 to]` pairs). Native nodes have empty argv arrays. Each `setup` may also carry
 `input`, `output`, and `append` file redirections. Hosts validate cardinalities,
 acyclicity, grants, and all stage configurations before launch or truncation.
 They join every node, retain the causal failure when cancelling peers, and keep
 terminal presentation outputs distinct from channel edges. Unsupported hosts
 must reject kind 32 rather than silently execute the nodes as a linear pipeline.
+
+The optional parallel Boolean `framed` array declares each node's output kind
+(omitting it means all-byte topology). Hosts validate input/output framing as
+well as cardinality. Framed pipes carry a private uint32 little-endian length
+followed by 1–65536 exact payload bytes; empty input emits no records. Framed
+merges never interleave envelopes. Executables receive decoded payloads only.
+
+`kame_wasm_stream_item(instance, request, node, data, length)` synchronously
+evaluates the live request's authored predicate in the shared evaluator; payload
+is data, never source. `node = -1` only validates UTF-8. Return values are 0/1 or
+negative reserved operator statuses: 120 encoding, 121 record limit, 122 forbidden
+effect, 123 non-Boolean result, 124 predicate failure. Hosts report positive
+statuses in that native node's result, not as executable exit reinterpretation.
+Calls accept active or parked request handles belonging to the same instance;
+stale/foreign handles fail without changing the active request. The call cannot
+submit host work or suspend. A missing export means framed execution is unsupported.
 
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module

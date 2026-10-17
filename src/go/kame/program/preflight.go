@@ -20,6 +20,10 @@ func (p *Program) sourceSignature() core.Signature {
 }
 
 func (p *Program) fileGuard(entry *instance) core.Signature {
+	return p.fileGuardWithImplementation(entry, p.fileImplementation(entry, renderResult{}))
+}
+
+func (p *Program) fileGuardWithImplementation(entry *instance, settings core.Signature) core.Signature {
 	var sink hashSink
 	sink.state = core.NewDigest()
 	sink.appendText("kame-file-preflight-v1")
@@ -27,7 +31,6 @@ func (p *Program) fileGuard(entry *instance) core.Signature {
 	// any code edit; fingerprint reached definitions if edit-time cost warrants it.
 	source := p.sourceSignature()
 	sink.state.Write(source.Digest[:])
-	settings := p.fileImplementation(entry, renderResult{})
 	sink.state.Write(settings.Digest[:])
 	if entry.Kash {
 		sink.appendText("kash")

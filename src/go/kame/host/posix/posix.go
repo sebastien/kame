@@ -91,7 +91,8 @@ func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []
 }
 
 //so:extern nodecay
-func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int) c.Int {
+func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, streamItem func(any, int64, int, []byte) int, streamContext any) c.Int {
+	_, _ = streamItem, streamContext
 	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput, kinds, edges, inputs, outputs, appends
 	return 0
 }
@@ -208,6 +209,11 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				kind := 0
 				if request.Stages[i].Kind == "merge" { kind = 1 }
 				if request.Stages[i].Kind == "broadcast" { kind = 2 }
+				if request.Stages[i].Kind == "frame" { kind = 3 }
+				if request.Stages[i].Kind == "encode" { kind = 4 }
+				if request.Stages[i].Kind == "filter" { kind = 5 }
+				if request.Stages[i].Kind == "copy" { kind = 6 }
+				if request.Stages[i].Framed { kind += 16 }
 				kinds = slices.Append(h.Alloc, kinds, kind)
 				inputs = slices.Append(h.Alloc, inputs, request.Stages[i].Input)
 				outputs = slices.Append(h.Alloc, outputs, request.Stages[i].Output)
@@ -248,7 +254,7 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		ok := false
 		if request.Topology {
 			for i := range request.Edges { edges = slices.Append(h.Alloc, edges, request.Edges[i].From); edges = slices.Append(h.Alloc, edges, request.Edges[i].To) }
-			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends) == 0
+			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, request.StreamItem, request.StreamContext) == 0
 		} else { ok = km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append) == 0 }
 		slices.Free(h.Alloc, kinds); slices.Free(h.Alloc, edges); slices.Free(h.Alloc, inputs); slices.Free(h.Alloc, outputs); slices.Free(h.Alloc, appends)
 		slices.Free(h.Alloc, arguments)

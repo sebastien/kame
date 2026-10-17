@@ -198,8 +198,39 @@ The enclosing invocation owns all stages and native operator workers, including
 when the complete graph ends in `&`. Failure cancels peers. Capture rejects
 multiple unmerged terminal stdout streams; redirect unwanted outputs or merge
 them explicitly. Windows currently rejects these new graph forms before launch;
-ordinary linear pipelines remain available. Framing, conditional routing, named
-channels and live stream arguments are not implemented in this first slice.
+ordinary linear pipelines remain available. Named channels and live stream
+arguments are not implemented yet.
+
+Explicit line framing enables pure Boolean filters and frame-safe merge:
+
+```kash
+cat ./events |(frame :lines)
+    |(filter (contains item "ERROR") | cat > ./errors)
+    | cat > ./normal
+```
+
+Selected items leave the main remainder; the selected branch runs once, not once
+per record. `item` is a UTF-8 string without its LF/CRLF terminator, while the
+forwarded bytes retain their exact delimiter. Partial EOF lines are valid;
+records over 64 KiB (including delimiter) fail. Predicates cannot observe host
+state, emit effects, execute processes, dynamically evaluate code, or suspend.
+External stages receive payload bytes automatically; `|(encode :lines)` also
+provides an explicit byte boundary.
+
+`do parse --lang kash` exposes the resolved syntax-only topology: node IDs,
+operators, framing, predicate spans, inserted adapters/mergers, and edges. It
+does not evaluate predicates, resolve tools, or run argument substitutions.
+
+A branch exit `>&` rejoins at the next stage/operator. `>@` bypasses contiguous
+filters and rejoins at the first non-filter connection in the same lexical
+pipeline. Rejoining an external command's output requires explicit reframing:
+
+```kash
+cat ./events |(frame :lines)
+    |(filter (contains item "legacy") | normalize |(frame :lines) >&)
+    |(filter (contains item "invalid") | cat > ./rejected)
+    | cat > ./accepted
+```
 
 File stdin redirections demand generated prerequisites before graph launch and
 record their published signatures for build reuse/invalidation. Process-channel

@@ -167,10 +167,12 @@ func (p *Program) fileImplementation(entry *instance, rendered renderResult) cor
 			sink.appendText(entry.Rule.Body[i].Text)
 		}
 		if entry.Kash && rendered.Commands != "" {
-			// Kash evaluates helper calls while executing. Until their code has
-			// individual observations, code edits must not reuse opaque commands.
-			source := p.sourceSignature()
-			sink.state.Write(source.Digest[:])
+			// ponytail: predicates and helper closures run outside dependency
+			// discovery. Conservatively fingerprint their whole lexical context
+			// until they can report individual, effect-free observations. The
+			// empty implementation avoids recursion through fileGuard.
+			context := p.fileGuardWithImplementation(entry, core.Signature{})
+			sink.state.Write(context.Digest[:])
 		}
 	} else {
 		sink.appendText(rendered.Commands)

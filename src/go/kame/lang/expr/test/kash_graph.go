@@ -13,6 +13,11 @@ func TestProcessGroupsAndMuxRoundTrip(t *testing.T) {
 		"$((printf a | cat, (printf b, printf c) |(merge) cat) |(merge) cat)",
 		"$((printf \"a,b\" (nop [1 2]), printf %s $(printf \"(x,y)\")) |(merge) cat)",
 		"$((printf %s ./a{b,c}, printf %s ./@(nop \"value\")) |(merge) cat)",
+		"$(printf a |(frame :lines) |(filter (eq item \"a\") | cat > ./selected) | cat)",
+		"$(printf a |(frame :lines) |(filter :true | cat |(frame :lines) >&) | cat)",
+		"$(printf a |(frame :lines) |(filter :true | cat |(frame :lines) >@) |(filter :false | cat > ./selected) | cat)",
+		"$((printf a |(frame :lines), printf b |(frame :lines)) |(merge) |(encode :lines) | cat)",
+		"$(printf a |(frame :lines) |(filter :true |(encode :lines) | cat > ./selected) | cat)",
 	}
 	for i := range texts {
 		r := expr.Parse(t.Allocator(), "graph.km", texts[i])

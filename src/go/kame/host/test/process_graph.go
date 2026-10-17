@@ -20,3 +20,13 @@ func TestProcessTopologyValidation(t *testing.T) {
 	request.Stages, request.Edges = cycleStages, cycleEdges
 	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_GRAPH_CYCLE" { t.Error("cycle accepted") }
 }
+
+func TestProcessTopologyRejectsPrivateFramesAtByteBoundaries(t *testing.T) {
+	stages := []host.ProcessStage{{Argv: []string{"source"}}, {Kind: "frame", Framed: true}, {Kind: "encode"}, {Argv: []string{"sink"}}}
+	edges := []host.ProcessEdge{{From: 0, To: 1}, {From: 1, To: 2}, {From: 2, To: 3}}
+	request := host.ProcessRequest{Topology: true, Stages: stages, Edges: edges}
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "" { t.Error("valid frame/encode rejected") }
+	request.Stages = stages[:2]
+	request.Edges = edges[:1]
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_FRAME_MISMATCH" { t.Error("private framed presentation accepted") }
+}

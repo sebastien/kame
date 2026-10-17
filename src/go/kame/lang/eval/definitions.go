@@ -14,6 +14,7 @@ import (
 )
 
 type Program struct {
+	StreamStates []*captureState
 	OperationFunctions []*Function
 	KashFunctions      []*Function
 	NextScriptGroup    int64
@@ -251,6 +252,7 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.Nodes)
 	slices.Free(p.Alloc, p.OperationStates)
+	slices.Free(p.Alloc, p.StreamStates)
 	for i := range p.OperationMemos {
 		p.freeOperationMemo(p.OperationMemos[i])
 	}

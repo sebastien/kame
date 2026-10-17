@@ -7,6 +7,15 @@ import (
 )
 
 type graphPorts struct { Inputs []int; Outputs []int }
+type graphJoin struct { Target int; Source int }
+
+// InspectProcessTopology lowers syntax only: no predicates, argument values,
+// tools, grants, dependencies, or host requests are evaluated. Caller owns flat.
+func InspectProcessTopology(a mem.Allocator, e *expr.Expr, flat *expr.Expr) Result {
+	flat.Kind, flat.Span = e.Kind, e.Span
+	c := Context{Run: a}
+	return prepareProcessGraph(&c, e, flat)
+}
 
 func (p *Program) captureTopology(e *expr.Expr, c *Context) Result {
 	flat := mem.Alloc[expr.Expr](c.Run)
@@ -30,14 +39,14 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 	slices.Free(c.Run, ports.Inputs)
 	slices.Free(c.Run, ports.Outputs)
 	if flat.Text != "" { return failure(c.Run, flat.Text, flat.Span, "process connection has incompatible endpoint cardinality or disposition") }
+	if r := prepareStreamKinds(c, flat); r.Diagnostic.Code != "" { return r }
 	terminals := 0
 	for i := range flat.Items {
 		node := flat.Items[i]
-		if node.Kind != expr.CommandStage { continue }
 		incoming, outgoing := 0, 0
 		for j := range flat.Edges { if flat.Edges[j].From == i { outgoing++ }; if flat.Edges[j].To == i { incoming++ } }
 		redirected := false
-		for j := range node.Items {
+		for j := 0; node.Kind == expr.CommandStage && j < len(node.Items); j++ {
 			word := node.Items[j]
 			if word.Kind != expr.CommandRedirection { continue }
 			if word.Text == "<" && incoming != 0 { return failure(c.Run, "KASH_DOUBLE_CONSUME", word.Span, "stdin redirection conflicts with graph input") }
@@ -52,9 +61,11 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 	var ports graphPorts
 	if flat.Text != "" { return ports }
-	if e.Kind == expr.CommandStage {
+	if e.Kind == expr.CommandStage || e.Kind == expr.CommandInput {
 		index := len(flat.Items)
-		flat.Items = slices.Append(c.Run, flat.Items, expr.Clone(c.Run, e))
+		node := expr.Clone(c.Run, e)
+		if e.Kind == expr.CommandInput { node.Kind, node.Text = expr.CommandMux, "copy" }
+		flat.Items = slices.Append(c.Run, flat.Items, node)
 		ports.Inputs = slices.Append(c.Run, ports.Inputs, index)
 		ports.Outputs = slices.Append(c.Run, ports.Outputs, index)
 		return ports
@@ -71,10 +82,52 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 		return ports
 	}
 	ports = lowerProcessGraph(c, e.Items[0], flat)
+	var joins []graphJoin
+	defer slices.Free(c.Run, joins)
 	for i := 1; i < len(e.Items); i++ {
-		policy := ""
 		connection := e.Items[i]
-		if connection.Kind == expr.CommandMux { policy = connection.Text; i++ }
+		joined := []int{}
+		for j := range joins { if joins[j].Target == i { joined = slices.Append(c.Run, joined, joins[j].Source) } }
+		if len(joined) != 0 {
+			if len(ports.Outputs) != 1 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span }
+			merge := addStreamNode(c, flat, "merge", connection.Span)
+			for j := range ports.Outputs { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: merge}) }
+			for j := range joined { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: joined[j], To: merge}) }
+			slices.Free(c.Run, ports.Outputs); ports.Outputs = slices.Append(c.Run, []int{}, merge)
+		}
+		slices.Free(c.Run, joined)
+		if connection.Kind == expr.CommandMux && (connection.Text == "frame" || connection.Text == "encode" || connection.Text == "filter") {
+			if len(ports.Outputs) != 1 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span }
+			index := len(flat.Items)
+			node := expr.Clone(c.Run, connection)
+			for j := range node.Body { expr.Free(c.Run, node.Body[j]) }; slices.Free(c.Run, node.Body); node.Body = nil
+			flat.Items = slices.Append(c.Run, flat.Items, node)
+			for j := range ports.Outputs { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: index}) }
+			slices.Free(c.Run, ports.Outputs); ports.Outputs = slices.Append(c.Run, []int{}, index)
+			if connection.Text == "filter" {
+				branch := connection.Body[0]
+				selected := lowerProcessGraph(c, branch, flat)
+				if len(selected.Inputs) != 1 || len(selected.Outputs) != 1 { flat.Text, flat.Span = "KASH_MUX_ARITY", branch.Span }
+				for j := range selected.Inputs { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: index, To: selected.Inputs[j]}) }
+				if branch.Exit != "" {
+					target := i+1
+					if branch.Exit == "otherwise" { for target < len(e.Items) && e.Items[target].Kind == expr.CommandMux && e.Items[target].Text == "filter" { target++ } }
+					if target >= len(e.Items) { flat.Text, flat.Span = "KASH_REJOIN_OUT_OF_SCOPE", branch.Span } else { for j := range selected.Outputs { joins = slices.Append(c.Run, joins, graphJoin{Target: target, Source: selected.Outputs[j]}) } }
+				}
+				slices.Free(c.Run, selected.Inputs); slices.Free(c.Run, selected.Outputs)
+			}
+			continue
+		}
+		policy := ""
+		if connection.Kind == expr.CommandMux { policy = connection.Text }
+		if policy == "merge" && (i+1 == len(e.Items) || e.Items[i+1].Kind == expr.CommandMux) {
+			if len(ports.Outputs) < 2 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span }
+			merge := addStreamNode(c, flat, "merge", connection.Span)
+			for j := range ports.Outputs { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: merge}) }
+			slices.Free(c.Run, ports.Outputs); ports.Outputs = slices.Append(c.Run, []int{}, merge)
+			continue
+		}
+		if policy != "" { i++; if i == len(e.Items) { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span; break } }
 		right := lowerProcessGraph(c, e.Items[i], flat)
 		if policy == "" {
 			if len(ports.Outputs) != 1 || len(right.Inputs) != 1 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span } else { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]}) }
@@ -87,6 +140,11 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 		}
 		slices.Free(c.Run, ports.Outputs); slices.Free(c.Run, right.Inputs)
 		ports.Outputs = right.Outputs
+	}
+	if len(e.Items) != 0 && e.Items[len(e.Items)-1].Kind == expr.CommandMux && e.Items[len(e.Items)-1].Text == "filter" {
+		sink := addStreamNode(c, flat, "copy", e.Span)
+		for i := range ports.Outputs { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[i], To: sink}) }
+		slices.Free(c.Run, ports.Outputs); ports.Outputs = slices.Append(c.Run, []int{}, sink)
 	}
 	return ports
 }

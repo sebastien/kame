@@ -1582,6 +1582,12 @@ class Module {
         }
       }
       const detached = context.concurrent === true;
+      redirections.streamItem = (node, chunk) => {
+        if (!this.exports.kame_wasm_stream_item) return -124;
+        const pointer = this.scratch('streamItem', chunk.length || 1);
+        new Uint8Array(this.exports.memory.buffer, pointer, chunk.length).set(chunk);
+        return this.exports.kame_wasm_stream_item(instance, request, node, pointer, chunk.length);
+      };
       const completion = await runArgvCapture(stages, { ...context, ...redirections, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); return this.startedProcessGroup(instance, context, rawRequest); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
@@ -2947,26 +2953,90 @@ function prepareByteTopology(stages, context) {
     outputs[edge[0]].push(i); inputs[edge[1]].push(i);
   }
   for (let i = 0; i < stages.length; i++) {
-    if (!Array.isArray(stages[i]) || !['', 'merge', 'broadcast'].includes(kinds[i])) invalid();
+    if (!Array.isArray(stages[i]) || !['', 'merge', 'broadcast', 'frame', 'encode', 'filter', 'copy'].includes(kinds[i])) invalid();
     if (!kinds[i]) {
       if (!stages[i].length || inputs[i].length > 1 || outputs[i].length > 1) invalid();
       if ((inputs[i].length && setup[i].input) || (outputs[i].length && setup[i].output)) invalid('KASH_DOUBLE_CONSUME');
     } else {
       if (stages[i].length || setup[i].input || setup[i].output) invalid();
-      if (kinds[i] === 'merge' ? inputs[i].length < 2 || outputs[i].length !== 1 : inputs[i].length !== 1 || outputs[i].length < 2) invalid();
+      if (kinds[i] === 'merge') { if (inputs[i].length < 2 || outputs[i].length !== 1) invalid(); }
+      else if (kinds[i] === 'broadcast') { if (inputs[i].length !== 1 || outputs[i].length < 2) invalid(); }
+      else if (kinds[i] === 'filter') { if (inputs[i].length !== 1 || outputs[i].length !== 2) invalid(); }
+      else if (inputs[i].length !== 1 || outputs[i].length > 1) invalid();
     }
   }
   const remaining = inputs.map((ports) => ports.length), ready = [];
   remaining.forEach((count, node) => { if (!count) ready.push(node); });
   for (let cursor = 0; cursor < ready.length; cursor++) for (const edge of outputs[ready[cursor]]) if (--remaining[edges[edge][1]] === 0) ready.push(edges[edge][1]);
   if (ready.length !== stages.length) invalid('KASH_GRAPH_CYCLE');
-  return { kinds, edges, inputs, outputs };
+  const framed = context.framed ?? stages.map(() => false);
+  if (!Array.isArray(framed) || framed.length !== stages.length || framed.some((value) => typeof value !== 'boolean')) invalid('KASH_FRAME_MISMATCH');
+  for (const node of ready) {
+    const inputKinds = inputs[node].map((edge) => framed[edges[edge][0]]);
+    if (inputKinds.some((kind) => kind !== inputKinds[0])) invalid('KASH_FRAME_MISMATCH');
+    const kind = kinds[node], input = inputKinds[0] ?? false;
+    if (framed[node] && !outputs[node].length) invalid('KASH_FRAME_MISMATCH');
+    const expected = kind === 'frame' || kind === 'filter' ? true : kind === 'encode' || kind === '' ? false : input;
+    if (framed[node] !== expected || (kind === 'frame' && input) || (['filter', 'encode'].includes(kind) && !input) || (!kind && input)) invalid('KASH_FRAME_MISMATCH');
+  }
+  return { kinds, edges, inputs, outputs, framed };
 }
 
 // A paused, round-robin-ready merger and lossless broadcaster share this pump.
-// Each turn holds one <=16 KiB chunk until every destination has flushed it.
-function startByteMux(readers, writers, fail, done) {
+// Each turn holds one <=16 KiB chunk or one <=64 KiB record until all selected
+// destinations have flushed it; incomplete records are bounded per input.
+function startByteMux(readers, writers, fail, done, kind = '', framed = false, item = null) {
   let cursor = 0, scheduled = false, pending = false, closing = false, disposed = false;
+  const recordLimit = 64 * 1024;
+  const states = readers.map(() => ({ data: framed || kind === 'frame' || kind === 'encode' ? Buffer.alloc(recordLimit + 4) : null, length: 0, need: 4, chunk: null, offset: 0 }));
+  const operatorError = (status) => { fail(status); return null; };
+  const readItem = (reader, state) => {
+    if (kind === 'frame') {
+      for (;;) {
+        if (state.chunk === null) {
+          state.chunk = reader.read(Math.min(16 * 1024, reader.readableLength || 16 * 1024));
+          state.offset = 0;
+          if (state.chunk === null) {
+            if (!reader.readableEnded || !state.length) return null;
+            break;
+          }
+        }
+        const newline = state.chunk.indexOf(10, state.offset);
+        const end = newline < 0 ? state.chunk.length : newline + 1;
+        const size = end - state.offset;
+        if (state.length + size > recordLimit) return operatorError(121);
+        state.chunk.copy(state.data, 4 + state.length, state.offset, end);
+        state.length += size; state.offset = end;
+        if (end === state.chunk.length) state.chunk = null;
+        if (newline >= 0) break;
+      }
+      const valid = item(-1, state.data.subarray(4, 4 + state.length));
+      if (valid < 0) return operatorError(-valid);
+      state.data.writeUInt32LE(state.length, 0);
+      const record = state.data.subarray(0, 4 + state.length);
+      state.length = 0;
+      return record;
+    }
+    if (!framed && kind !== 'encode') return reader.read(Math.min(16 * 1024, reader.readableLength || 16 * 1024));
+    for (;;) {
+      const chunk = reader.read(Math.min(state.need - state.length, reader.readableLength || state.need - state.length));
+      if (chunk === null) {
+        if (reader.readableEnded && state.length) return operatorError(124);
+        return null;
+      }
+      chunk.copy(state.data, state.length); state.length += chunk.length;
+      if (state.length < state.need) return null;
+      if (state.need === 4) {
+        const size = state.data.readUInt32LE(0);
+        if (!size || size > recordLimit) return operatorError(121);
+        state.need = 4 + size;
+      } else {
+        const record = state.data.subarray(kind === 'encode' ? 4 : 0, state.need);
+        state.length = 0; state.need = 4;
+        return record;
+      }
+    }
+  };
   let outputs = writers.length;
   const dispose = () => {
     disposed = true;
@@ -2983,12 +3053,19 @@ function startByteMux(readers, writers, fail, done) {
     if (pending || closing || disposed) return;
     for (let offset = 0; offset < readers.length; offset++) {
       const next = (cursor + offset) % readers.length, reader = readers[next];
-      const chunk = reader.read(Math.min(16 * 1024, reader.readableLength || 16 * 1024));
+      const chunk = readItem(reader, states[next]);
+      if (disposed) return;
       if (chunk === null) continue;
       cursor = (next + 1) % readers.length;
       pending = true;
-      let outstanding = writers.length;
-      for (const writer of writers) writer.write(chunk, (cause) => {
+      let destinations = writers;
+      if (kind === 'filter') {
+        const selected = item(0, chunk.subarray(4));
+        if (selected < 0) { operatorError(-selected); return; }
+        destinations = [writers[selected ? 0 : 1]];
+      }
+      let outstanding = destinations.length;
+      for (const writer of destinations) writer.write(chunk, (cause) => {
         if (cause) error(cause);
         if (--outstanding === 0) { pending = false; schedule(); }
       });
@@ -3047,7 +3124,8 @@ function runArgvCapture(stages, context) {
     }
     catch { resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot start process' }); return; }
     let pipes;
-    try { pipes = pipelinePipes(topology ? topology.edges.length : stages.length - 1); }
+    const terminalOperators = topology ? topology.kinds.map((kind, node) => kind && !topology.outputs[node].length ? node : -1).filter((node) => node >= 0) : [];
+    try { pipes = pipelinePipes(topology ? topology.edges.length + terminalOperators.length : stages.length - 1); }
     catch { resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot create pipeline pipes (POSIX mkfifo required)' }); return; }
     let input, output;
     const stageInputs = [], stageOutputs = [];
@@ -3104,6 +3182,13 @@ function runArgvCapture(stages, context) {
       if (failure !== null) return;
       try { callback(chunk); }
       catch (error) { publicationFailure = error; stop(error.code ?? 'HOST_FAIL', error.message); }
+    };
+    const receiveOutput = (chunk) => {
+      if (context.stream) { publish(context.onStdout, chunk); return; }
+      if (context.discardStdout) return;
+      length += chunk.length;
+      if (length > limit) stop('CAPTURE_LIMIT', 'command substitution exceeded capture limit');
+      else if (failure === null) chunks.push(chunk);
     };
     const cancelled = () => stop('EXEC_CANCELLED', 'invocation cancelled');
     context.signal?.addEventListener('abort', cancelled, { once: true });
@@ -3192,18 +3277,38 @@ function runArgvCapture(stages, context) {
       }
       if (topology && failure === null) for (let i = 0; i < stages.length; i++) if (topology.kinds[i]) {
         const failMux = (code, message) => {
+          if (Number.isInteger(code)) {
+            results[i] = { status: code, signal: 0, outcome: 0 };
+            stopGraph(results[i]);
+            return;
+          }
           if (code === 'RECIPE_FAIL') {
             results[i] = { status: 141, signal: osConstants.signals.SIGPIPE, outcome: 0 };
             stopGraph(results[i]);
           } else stop(code, message);
         };
+        const outputEdges = [...topology.outputs[i]];
+        if (!outputEdges.length) {
+          const edge = topology.edges.length + terminalOperators.indexOf(i);
+          outputEdges.push(edge);
+          const reader = new Socket({ fd: pipes[edge].read, readable: true, writable: false });
+          pipes[edge].read = undefined;
+          operatorStreams.push(reader);
+          // Join presentation EOF too: the writer may close before this reader
+          // has delivered its last bytes to capture or the public output queue.
+          remaining++;
+          reader.on('error', (error) => failMux('HOST_FAIL', error.message));
+          reader.once('close', () => { remaining--; finish(); });
+          if (context.stream) publishReader(reader, receiveOutput, () => failure !== null || context.signal?.aborted);
+          else reader.on('data', receiveOutput);
+        }
         operators.push(startByteMux(topology.inputs[i].map((edge) => {
           const reader = new Socket({ fd: pipes[edge].read, readable: true, writable: false });
           pipes[edge].read = undefined;
           operatorStreams.push(reader);
           reader.on('error', (error) => failMux(['EPIPE', 'ECONNRESET'].includes(error.code) ? 'RECIPE_FAIL' : 'HOST_FAIL', error.message));
           return reader;
-        }), topology.outputs[i].map((edge) => {
+        }), outputEdges.map((edge) => {
           const writer = new Socket({ fd: pipes[edge].write, readable: false, writable: true });
           pipes[edge].write = undefined;
           operatorStreams.push(writer);
@@ -3213,7 +3318,7 @@ function runArgvCapture(stages, context) {
           results[i] ??= { status: 0, signal: 0, outcome: 0 };
           remaining--;
           finish();
-        }));
+        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw)));
         remaining++;
       }
     } catch { stop('HOST_FAIL', 'cannot start process'); }

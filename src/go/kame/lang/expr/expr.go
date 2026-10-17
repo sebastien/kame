@@ -50,6 +50,7 @@ const (
 	ValuePipe
 	CommandGroup
 	CommandMux
+	CommandInput
 )
 
 type ReferenceKind int
@@ -93,6 +94,8 @@ type Expr struct {
 	// syntax retains groups and connections until graph validation/lowering.
 	Topology bool
 	Edges []CommandEdge
+	StreamKinds []int
+	Exit string
 	Async bool
 	Kash bool
 	// AcceptExit applies terminal Kash ? to the complete process graph.
@@ -181,6 +184,7 @@ func freeExpr(a mem.Allocator, e *Expr) {
 	slices.Free(a, e.Parameters)
 	slices.Free(a, e.Body)
 	slices.Free(a, e.Edges)
+	slices.Free(a, e.StreamKinds)
 	mem.Free(a, e)
 }
 
@@ -987,6 +991,7 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
 	copy.Edges = slices.Clone(a, original.Edges)
+	copy.StreamKinds = slices.Clone(a, original.StreamKinds)
 	copy.AuthoredPipe = cloneExpr(a, original.AuthoredPipe)
 	copy.NamesOwned = true
 	if original.Text != "" { copy.Text, copy.TextOwned = sourceText(a, original.Text), true }
@@ -1219,13 +1224,25 @@ func Compact(a mem.Allocator, e *Expr) string {
 
 func writeProcess(b *strings.Builder, e *Expr) {
 	for i := range e.Items {
-		if e.Items[i].Kind == CommandMux { b.WriteString(" |("); b.WriteString(e.Items[i].Text); b.WriteByte(')'); continue }
-		if i != 0 { if e.Items[i-1].Kind == CommandMux { b.WriteByte(' ') } else { b.WriteString(" | ") } }
+		if e.Items[i].Kind == CommandInput { continue }
+		if e.Items[i].Kind == CommandMux {
+			mux := e.Items[i]
+			b.WriteString(" |("); b.WriteString(mux.Text)
+			for j := range mux.Items { b.WriteByte(' '); writeExpr(b, mux.Items[j]) }
+			if mux.Text == "filter" && len(mux.Body) != 0 {
+				if len(mux.Body[0].Items) == 0 || mux.Body[0].Items[0].Kind != CommandInput { b.WriteString(" | ") }
+				writeProcess(b, mux.Body[0])
+			}
+			b.WriteByte(')'); continue
+		}
+		if i != 0 { if e.Items[i-1].Kind == CommandMux && (e.Items[i-1].Text == "merge" || e.Items[i-1].Text == "broadcast") { b.WriteByte(' ') } else { b.WriteString(" | ") } }
 		writeExpr(b, e.Items[i])
 	}
 	if e.AcceptExit { b.WriteString(" ?") }
 	if len(e.Body) != 0 { b.WriteString(" ? "); writeProcess(b, e.Body[0]) }
 	if e.Async { b.WriteString(" &") }
+	if e.Exit == "next" { b.WriteString(" >&") }
+	if e.Exit == "otherwise" { b.WriteString(" >@") }
 }
 
 func writeExpr(b *strings.Builder, e *Expr) {
