@@ -147,8 +147,8 @@ widen that set. `SHELL = kash`, `SHELL = /bin/bash`, a per-rule `shell`, and
 the implicit `/bin/sh -c` use one dependency rule.
 
 Pure/declarative rules depend only on environment names read by Kame, through
-`(env "NAME")`, Kash `env.NAME`, or the same operation reached indirectly from
-a definition or function. Process-executing rules additionally consume the complete
+`(env "NAME")`, `env.NAME` in Kame or Kash, or the same operation reached indirectly
+from a definition or function. Process-executing rules additionally consume the complete
 effective child environment after rule overrides. This includes `PATH`, loader
 variables such as `LD_LIBRARY_PATH` and `LD_PRELOAD`, `LANG`, `LC_ALL`, `LC_*`,
 `TZ`, and application-specific variables. Kash can track its own reads, but cannot
@@ -186,8 +186,8 @@ remain data dependencies.
 A shell script that opens a path never named in the recipe does not introduce
 a Kame file dependency. Kame does not infer filesystem reads inside opaque shell
 scripts or binaries. Environment access is covered conservatively by the complete
-child snapshot; Kash `env.NAME` additionally records its named read as a Kame
-operation, as specified in `017-kash.md`.
+child snapshot; `env.NAME` additionally records its named read as a Kame
+operation, as specified in `004-language.md` and `017-kash.md`.
 
 ## Content identity
 

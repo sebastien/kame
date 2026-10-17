@@ -202,6 +202,18 @@ Cleanup requires renewed ownership validation and race-resistant host removal;
 unsupported hosts must preserve artifacts and report the limitation. This is
 the intended contract, not a claim that every installed backend implements it.
 
+The native POSIX host implements this surface where the required filesystem
+guarantees are available. Node/WASM, including npm, currently refuses all
+`do clean` modes with exit status 1 and supplies no implicit `clean` target.
+Authored `clean` tasks still run normally; neither backend's explicit command
+delegates to them. See [backend support](../../../ref-installation.md#automatic-cleanup-support).
+
+Native cleanup accepts static quoted prerequisites and protects their decoded
+external-input paths. Dynamic prerequisites, target arguments and generated rules
+still withhold whole-context verification. For `context-unverifiable` preservation,
+human output identifies the first blocking declaration; JSON adds `contextBlocker`
+with the reason and available authored source/span and line/column, without values.
+
 ## Format and parse Kame sources
 
 ```sh

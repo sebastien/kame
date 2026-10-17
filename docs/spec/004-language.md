@@ -212,6 +212,7 @@ Expressions use these values:
 "hello"
 name
 project.name
+env.NO_COLOR
 [1 2 3]
 [name: "app" path: ./src]
 (operation argument...)
@@ -308,6 +309,20 @@ names.
 Component syntax starts from a named reference, not an arbitrary expression.
 Use `(get "stdout" (sh! COMMAND))` to read a computed record's field, or bind the
 record and use `result.stdout`; postfix `(expression).field` is not added.
+
+`env.NAME` is a lazy environment reference in both Kame and Kash, equivalent to
+the registered `(env "NAME")` operation. It requires the same environment-read
+grant, records the same named dependency, and retains phase restrictions. An
+unset variable yields nil; an empty variable yields an empty string. Parsing,
+formatting, unused definitions and unselected branches do not read the variable.
+String and document interpolation may use `@{env.NAME}`.
+
+The first component after `env` must name one variable; `env.{NAME,OTHER}` and
+`env.0` cannot enumerate or select the environment. Further components select
+from the returned value normally. The `env.` namespace bypasses lexical root
+lookup: use a different record name or `(get "NAME" env)` for a lexical record
+bound to `env`. Outside Kash, bare `env` retains ordinary callable lookup and
+`(env NAME)` remains available for computed names; it is not an environment record.
 
 ### Pipes
 
@@ -749,6 +764,18 @@ A literal quoted output is valid only when its decoded value begins with an
 explicit path prefix. Computed outputs, including quoted interpolated tokens,
 are classified after resolution. `NAME-TEMPLATE` contains a target capture and
 no explicit path prefix.
+
+Quoted header operands use expression-string escapes and interpolation. Producer
+identity uses decoded output text, so `"./out file"` registers the same file
+as a computed output yielding `"./out file"`; quote characters are not part of
+its name. Formatting retains authored quoting and escapes. Quoted prerequisites
+without interpolation are static literal inputs, including literal wildcard bytes.
+Decoding never performs a second interpolation pass on escaped or computed text,
+or a second literal-backslash decoding pass before capture matching. Capture and
+diagnostic spans retain authored source coordinates, including preceding escapes.
+AST JSON uses `pattern` consistently for output and prerequisite capture patterns,
+and `template` for decoded string/interpolation syntax, without duplicate keys.
+Schema 1 retains `template` as a legacy alias for capture-only operands.
 
 ### Computed outputs
 

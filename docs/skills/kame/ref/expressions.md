@@ -23,6 +23,9 @@ do not accumulate depth across items.
   constructs an explicit protocol resource; a quoted URI alone is ordinary text.
 - References support fields (`project.name`), indexes (`files.0`, `files.-1`),
   half-open slices (`files.1..4`), and selections (`config.{host,port}`).
+- `env.NAME` reads one environment variable, like `(env "NAME")`, under a named
+  environment-read grant. Missing variables yield nil; empty values stay strings.
+  The `env.` namespace does not look up a lexical record or expose all variables.
 - Only `:nil` and `:false` are false; zero, empty strings, and empty lists are true.
 
 Postfix fields start from a named reference, not a call result. Use

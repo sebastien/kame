@@ -263,7 +263,7 @@ func (h *MemoryHost) Remove(name string) error {
 	return nil
 }
 
-func (h *MemoryHost) LockCache(path string, stripe int) bool { _, _, _ = h, path, stripe; return true }
+func (h *MemoryHost) LockCache(path string, stripe int) host.CacheLockStatus { _, _, _ = h, path, stripe; return host.CacheLockAcquired }
 
 func (h *MemoryHost) UnlockCache(stripe int) { _, _ = h, stripe }
 

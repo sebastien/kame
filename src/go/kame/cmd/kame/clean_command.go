@@ -6,6 +6,7 @@ import (
 	"kame/diagnostic"
 	"kame/host/posix"
 	"kame/lang/eval"
+	"kame/lang/source"
 	"kame/ownership"
 	"kame/program"
 	"solod.dev/so/encoding/json"
@@ -92,6 +93,9 @@ func recordProduction(state any, p *program.Program, paths []string, producer st
 	if ledger.Store.Status == -2 {
 		code, message = "CLEAN_BUSY", "project is busy with another producer or cleanup"
 	}
+	if ledger.Store.Status == -4 {
+		code, message = "EXEC_CANCELLED", "cancelled while waiting for project lock"
+	}
 	return diagnostic.Diagnostic{Code: cloneCommandText(code), Message: cloneCommandText(message), Severity: diagnostic.Error, Owned: true}
 }
 
@@ -125,7 +129,7 @@ func runClean(args []string, out io.Writer, errOut io.Writer) int {
 	if inv.Command != "" {
 		for i := range inv.Args {
 			if !store.Protect(inv.Args[i], inv.Command == "--release") {
-				cliError(errOut, "CLEAN_STATE", "cannot safely update output protection or release ownership")
+				lockUpdateError(errOut)
 				return 1
 			}
 		}
@@ -163,10 +167,12 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 	defer session.Free()
 	defer options.Free()
 	var context core.Signature
+	var blocker program.CleanupBlocker
 	var protected []string
 	if session.Status == 0 && session.Program != nil {
 		ledger := outputLedger{Source: cleanupSource(&session.Source)}
 		context = ledgerContext(&ledger, session.Program)
+		blocker = session.Program.CleanupContextBlocker()
 		inputs := session.Program.CleanupExternalInputs()
 		for i := range inputs {
 			member := store.Member(inputs[i])
@@ -191,7 +197,9 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 	}
 	defer ownership.FreeDecisions(mem.System, items)
 	status, removed, preserved, missing, wouldRemove := 0, 0, 0, 0, 0
+	contextUnverifiable := false
 	for i := range items {
+		if items[i].Reason == "context-unverifiable" { contextUnverifiable = true }
 		if items[i].State == "error" {
 			status = 1
 		}
@@ -206,6 +214,18 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 		}
 		if items[i].State == "would-remove" {
 			wouldRemove++
+		}
+	}
+	if !contextUnverifiable { blocker = program.CleanupBlocker{} }
+	var position source.Position
+	for i := range session.Source.Files {
+		file := session.Source.Files[i]
+		if blocker.Location.Source != "" && file.Name == blocker.Location.Source {
+			text := file.Text
+			if file.Data != nil { text = string(file.Data) }
+			authored := source.Source{Text: text}
+			position = authored.Position(blocker.Location.Span.Start)
+			break
 		}
 	}
 	if jsonMode {
@@ -234,6 +254,36 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 			e.EndObject()
 		}
 		e.EndArray()
+		if busyLock.Path != "" {
+			e.Str("lock")
+			e.BeginObject()
+			writeLockFields(&e, &busyLock)
+			e.EndObject()
+		}
+		if blocker.Reason != "" {
+			e.Str("contextBlocker")
+			e.BeginObject()
+			e.Str("reason")
+			e.Str(blocker.Reason)
+			if blocker.Location.Source != "" {
+				e.Str("source")
+				e.Str(blocker.Location.Source)
+				e.Str("span")
+				e.BeginObject()
+				e.Str("start")
+				e.Int(int64(blocker.Location.Span.Start))
+				e.Str("end")
+				e.Int(int64(blocker.Location.Span.End))
+				e.EndObject()
+			}
+			if position.Line != 0 {
+				e.Str("line")
+				e.Int(int64(position.Line))
+				e.Str("column")
+				e.Int(int64(position.Column))
+			}
+			e.EndObject()
+		}
 		e.Str("removed")
 		e.Int(int64(removed))
 		e.Str("preserved")
@@ -253,6 +303,14 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 			if items[i].Recovery != "" {
 				io.WriteString(errOut, "recovery: "+items[i].Recovery+"\n")
 			}
+		}
+		if blocker.Reason != "" {
+			io.WriteString(errOut, "clean: context-unverifiable · "+blocker.Reason)
+			if blocker.Location.Source != "" {
+				io.WriteString(errOut, " · "+blocker.Location.Source)
+				if position.Line != 0 { fmt.Fprintf(errOut, ":%d:%d", position.Line, position.Column) }
+			}
+			io.WriteString(errOut, "\n")
 		}
 		if preserved != 0 {
 			io.WriteString(errOut, "clean: preserved historical outputs require review\n")

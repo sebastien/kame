@@ -79,6 +79,9 @@ URI and payload storage.
   removal and deterministic watch invalidation through the standard host API.
 - File URI behavior matches existing path behavior for grants, dependencies,
   glob ordering, build freshness and cache identity.
+- File URI publication creates parents in decoded filesystem path space;
+  memory publication stays in its namespace. Neither creates local `file:` or
+  `mem:` directories, including when process cwd differs from the selected cwd.
 - Memory resource dependencies invalidate on add, replace and remove; native,
   WASM CLI and embedded runtimes agree.
 - Missing resources, denied grants, malformed URIs, host errors and cancellation

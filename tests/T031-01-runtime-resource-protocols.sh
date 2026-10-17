@@ -14,8 +14,10 @@ file_uri="file://$TMPDIR/file-resource.txt"
 file_root="file://$TMPDIR/"
 
 for host in native wasm; do
-	if [ "$host" = native ]; then runner=("$CLI_BIN"); else runner=(node "$CLI_ROOT/dist/kame.js"); fi
 	mkdir -p "$TMPDIR/$host-work"
+	# Isolate the process cwd as well as -C: bad URI parent traversal used to
+	# create empty scheme-named directories outside the selected build directory.
+	if [ "$host" = native ]; then runner=(env -C "$TMPDIR/$host-work" "$CLI_BIN"); else runner=(env -C "$TMPDIR/$host-work" node "$CLI_ROOT/dist/kame.js"); fi
 	if (cd "$TMPDIR/$host-work" && "${runner[@]}" do run --lang expr --allow-write=mem://workspace/ --allow-read=mem://workspace/ \
 		-c '(write! (resource "mem://workspace/out.txt") "memory-uri")' \
 		-c '(read (resource "mem://workspace/out.txt"))' >"$TMPDIR/$host.memory.out" 2>"$TMPDIR/$host.memory.err"); then
@@ -62,6 +64,37 @@ for host in native wasm; do
 	else
 		test-fail "$host escaped file URI round trip: $(cat "$TMPDIR/$host.escaped-file.err")"
 	fi
+	selected="$TMPDIR/$host-work/selected"
+	mkdir -p "$selected"
+	nested_uri="file://$selected/new%252F%23%3F/deep/output.txt"
+	"${runner[@]}" do run -C "$selected" --lang expr "--allow-write=$selected" "--allow-read=$selected" \
+		-c "(write! (resource \"$nested_uri\") \"nested-file\")" \
+		-c "(read (resource \"$nested_uri\"))" >"$TMPDIR/$host.nested-file.out" 2>"$TMPDIR/$host.nested-file.err"
+	if [ "$(cat "$TMPDIR/$host.nested-file.out")" = nested-file ] && [ "$(cat "$selected/new%2F#?/deep/output.txt")" = nested-file ]; then
+		test-ok "$host creates decoded file URI parents under the selected grant root"
+	else
+		test-fail "$host nested file URI publication: $(cat "$TMPDIR/$host.nested-file.err")"
+	fi
+	status=0
+	"${runner[@]}" do run -C "$selected" --lang expr "--allow-write=$selected" \
+		-c "(write! (resource \"file://$TMPDIR/$host-work/forbidden/output.txt\") \"denied\")" \
+		>"$TMPDIR/$host.denied-file.out" 2>"$TMPDIR/$host.denied-file.err" || status=$?
+	if [ "$status" = 1 ] && grep -q CAP_DENIED "$TMPDIR/$host.denied-file.err" && [ ! -e "$TMPDIR/$host-work/forbidden" ]; then
+		test-ok "$host denied file URI creates no parent directories"
+	else
+		test-fail "$host denied file URI publication"
+	fi
+	for scheme in s3 https; do
+		status=0
+		"${runner[@]}" do run --lang expr --allow-write \
+			-c "(write! (resource \"$scheme://workspace/output.txt\") \"unsupported\")" \
+			>"$TMPDIR/$host.unsupported.out" 2>"$TMPDIR/$host.unsupported.err" || status=$?
+		if [ "$status" = 1 ] && grep -q RES_INVALID "$TMPDIR/$host.unsupported.err" && [ ! -e "$TMPDIR/$host-work/$scheme:" ]; then
+			test-ok "$host rejects $scheme resources without filesystem fallback"
+		else
+			test-fail "$host unsupported resource scheme fell through to a filesystem path"
+		fi
+	done
 	file_glob="file://$TMPDIR/$host-glob/**/*.txt"
 	mkdir -p "$TMPDIR/$host-glob/a%#?"
 	printf 'escaped-glob' >"$TMPDIR/$host-glob/a%#?/entry%#?.txt"
@@ -83,6 +116,11 @@ for host in native wasm; do
 		test-ok "$host keeps memory namespace grants isolated"
 	else
 		test-fail "$host memory namespace grant: $(cat "$TMPDIR/$host.denied.err")"
+	fi
+	if [ ! -e "$TMPDIR/$host-work/file:" ] && [ ! -e "$TMPDIR/$host-work/mem:" ]; then
+		test-ok "$host URI operations create no local scheme-named directories"
+	else
+		test-fail "$host URI operations leaked a local file: or mem: directory"
 	fi
 done
 

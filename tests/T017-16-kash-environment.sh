@@ -56,13 +56,13 @@ for backend in native wasm; do
 	check 'host value with spacestail' 'printf "%s" $env.KASH_TEST_ENV $(printf tail)'
 	check "$KASH_TEST_ENV" $'if (nop :true)\n\tvalue = $env.KASH_TEST_ENV\n\tprintf "%s" $value'
 	check found $'match $env.KASH_TEST_ENV\n\tcase "host value with spaces"\n\t\tprintf found'
-	test-step "$backend reserves env bindings without changing plain Kame"
+	test-step "$backend reserves env bindings only in Kash"
 	for text in 'env = "forbidden"' '(f env) = env' 'printf ([env] env)' 'printf $env.0' 'printf $env.{PATH}'; do reject PARSE_ERR "$text"; done
 	for text in 'printf (let [env 1] "forbidden")' 'printf (def env "forbidden")' 'printf (with [env: 1] "forbidden")'; do reject DEF_INVALID "$text"; done
 	reject DEF_INVALID $'match (nop "x")\n\tcase "{env:*}"\n\t\tprintf forbidden'
 	reject DEF_INVALID 'printf (match "x" ["{env:*}" "forbidden"])'
-	"${command[@]}" do run --print-result -l km -c $'env = [VALUE: "Kame"]\nenv.VALUE' >"$work/out" 2>"$work/err"
-	if [ "$(cat "$work/out")" = '"Kame"' ]; then test-ok "$backend leaves Kame reference semantics unchanged"; else test-fail "$backend rewrote plain Kame env"; fi
+	"${command[@]}" do run --print-result -l km -c $'env = [VALUE: "Kame"]\n(get "VALUE" env)' >"$work/out" 2>"$work/err"
+	if [ "$(cat "$work/out")" = '"Kame"' ]; then test-ok "$backend Kame retains explicit access to a lexical env binding"; else test-fail "$backend reserved bare env in Kame"; fi
 	"${command[@]}" do run --allow-run --allow-env=KASH_TEST_ENV -l expr -c '$(printf "%s" $env.KASH_TEST_ENV)' >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = '"host value with spaces"' ]; then test-ok "$backend embedded captures delegate env lookup to Kash"; else test-fail "$backend embedded env lookup"; fi
 	"${command[@]}" do run --allow-run --allow-env=KASH_TEST_ENV -l km -c '(env KEY) = "shadow"' -l kash -c 'printf "%s" $env.KASH_TEST_ENV' >"$work/out" 2>"$work/err"

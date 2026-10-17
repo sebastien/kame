@@ -11,6 +11,9 @@
 #include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <sys/file.h>
+#if defined(__linux__) || defined(__COSMOPOLITAN__)
+#include <sys/sysmacros.h>
+#endif
 #include <sys/wait.h>
 #include <signal.h>
 #if defined(__COSMOPOLITAN__)
@@ -116,6 +119,8 @@ static int64_t km_cache_lock_mutex[256];
 #endif
 static unsigned km_cache_lock_refs[256];
 static bool km_cache_lock_initialized;
+static bool km_lock_notice(int, so_String, so_String, const char *, int64_t);
+static int64_t km_now(void);
 
 #if defined(__COSMOPOLITAN__)
 typedef int64_t (__msabi *km_create_job_object_fn)(void *, const char16_t *);
@@ -192,13 +197,13 @@ static bool km_load_windows_job_api(void) {
     return km_create_job_object && km_assign_process_to_job_object && km_terminate_job_object;
 }
 
-static bool km_windows_cache_lock(int stripe) {
+static int km_windows_cache_lock(int stripe) {
     intptr_t kernel = GetModuleHandle("kernel32.dll");
-    if (!kernel) return false;
+    if (!kernel) return -1;
     if (!km_create_mutex) km_create_mutex = (km_create_mutex_fn)GetProcAddress(kernel, "CreateMutexW");
     if (!km_wait_single_object) km_wait_single_object = (km_wait_single_object_fn)GetProcAddress(kernel, "WaitForSingleObject");
     if (!km_release_mutex) km_release_mutex = (km_release_mutex_fn)GetProcAddress(kernel, "ReleaseMutex");
-    if (!km_create_mutex || !km_wait_single_object || !km_release_mutex) return false;
+    if (!km_create_mutex || !km_wait_single_object || !km_release_mutex) return -1;
     char16_t name[48] = {'L','o','c','a','l','\\','K','a','m','e','C','a','c','h','e','L','o','c','k','_'};
     int digits[3] = {stripe / 100, (stripe / 10) % 10, stripe % 10};
     int at = 20;
@@ -207,11 +212,25 @@ static bool km_windows_cache_lock(int stripe) {
     name[at++] = (char16_t)('0' + digits[2]);
     name[at] = 0;
     int64_t mutex = km_create_mutex(NULL, 0, name);
-    if (!mutex || mutex == -1) return false;
-    uint32_t result = km_wait_single_object(mutex, UINT32_MAX);
-    if (result != 0 && result != 0x80) { CloseHandle(mutex); return false; }
+    if (!mutex || mutex == -1) return -1;
+    uint32_t result = km_wait_single_object(mutex, 0);
+    bool waiting = result == 258;
+    int64_t started = km_now();
+    // Windows mutexes expose no owner PID. Name the actual mutex, not a fake file.
+    char display[64];
+    snprintf(display, sizeof(display), "Local\\KameCacheLock_%d", stripe);
+    so_String display_name = {.ptr = display, .len = (so_int)strlen(display)};
+    while (result == 258) {
+        if (!km_lock_notice(-1, display_name, (so_String){"cache", 5}, "waiting", km_now() - started)) {
+            CloseHandle(mutex); return -4;
+        }
+        result = km_wait_single_object(mutex, 100);
+    }
+    if (result != 0 && result != 0x80) { CloseHandle(mutex); return -1; }
+    if (km_cli_signal_pending()) { km_release_mutex(mutex); CloseHandle(mutex); return -4; }
+    if (waiting) km_lock_notice(-1, display_name, (so_String){"cache", 5}, "acquired", km_now() - started);
     km_cache_lock_mutex[stripe] = mutex;
-    return true;
+    return 0;
 }
 
 static void km_windows_cache_unlock(int stripe) {
@@ -291,7 +310,7 @@ static int km_windows_sync_pipe(int pipefd[2]) { (void)pipefd; errno = ENOSYS; r
 static int64_t km_windows_job_create(void) { return 0; }
 static bool km_windows_job_assign(int64_t job, pid_t pid) { (void)job; (void)pid; return true; }
 static bool km_windows_job_assign_exec(int64_t job, pid_t pid) { (void)job; (void)pid; return true; }
-static bool km_windows_cache_lock(int stripe) { (void)stripe; return false; }
+static int km_windows_cache_lock(int stripe) { (void)stripe; return -1; }
 static void km_windows_cache_unlock(int stripe) { (void)stripe; }
 static bool km_windows_job_terminate(int64_t job, int sig) { (void)job; (void)sig; return true; }
 static void km_windows_job_close(int64_t *job) { if (job) *job = 0; }
@@ -331,6 +350,8 @@ int km_cli_take_signal(void) {
     km_cli_signal_count = 0;
     return -(int)km_cli_signal;
 }
+
+bool km_cli_signal_pending(void) { return km_cli_signal_count != 0; }
 
 int km_cli_stderr_is_terminal(void) { return isatty(STDERR_FILENO); }
 int km_cli_stdout_is_terminal(void) { return isatty(STDOUT_FILENO); }
@@ -893,15 +914,164 @@ km_host *km_host_new(void) {
     return host;
 }
 
+static bool (*km_lock_observer)(km_lock_event *);
+static char km_lock_command[128] = "kame";
+
+void km_cli_observe_locks(bool (*observer)(km_lock_event *), so_String command) {
+    km_lock_observer = observer;
+    size_t n = command.len < 127 ? command.len : 127;
+    for (size_t i = 0; i < n; i++) {
+        unsigned char ch = command.ptr[i];
+        km_lock_command[i] = ch < 32 || ch == 127 ? '?' : ch;
+    }
+    km_lock_command[n] = 0;
+}
+
+// Metadata is advisory and never authorizes lock removal or acquisition. Linux
+// kernel records verify the current holder, including non-Kame flock users.
+static long km_lock_kernel_owner(int fd) {
+#if defined(__linux__) || defined(__COSMOPOLITAN__)
+#if defined(__COSMOPOLITAN__)
+    if (!IsLinux()) return 0;
+#endif
+    struct stat st;
+    if (fstat(fd, &st)) return 0;
+    FILE *locks = fopen("/proc/locks", "r");
+    if (!locks) return 0;
+    char line[512], type[16], mode[16], access[16];
+    long pid = 0, candidate;
+    unsigned device_major, device_minor;
+    unsigned long long inode;
+    while (fgets(line, sizeof(line), locks)) {
+        if (sscanf(line, "%*u: %15s %15s %15s %ld %x:%x:%llu", type, mode, access,
+                   &candidate, &device_major, &device_minor, &inode) == 7 &&
+            !strcmp(type, "FLOCK") && !strcmp(access, "WRITE") && candidate > 0 &&
+            device_major == major(st.st_dev) && device_minor == minor(st.st_dev) && inode == st.st_ino) {
+            pid = candidate; break;
+        }
+    }
+    fclose(locks);
+    return pid;
+#else
+    (void)fd; return 0;
+#endif
+}
+
+static unsigned long long km_lock_process_start(long pid) {
+    char path[64], data[1024];
+    snprintf(path, sizeof(path), "/proc/%ld/stat", pid);
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    ssize_t n = read(fd, data, sizeof(data) - 1);
+    close(fd);
+    if (n <= 0) return 0;
+    data[n] = 0;
+    char *p = strrchr(data, ')');
+    if (!p) return 0;
+    p++;
+    for (int field = 3; field < 22; field++) {
+        while (*p == ' ') p++;
+        while (*p && *p != ' ') p++;
+    }
+    return strtoull(p, NULL, 10);
+}
+
+static int64_t km_lock_wall_ms(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_REALTIME, &now)) return 0;
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static bool km_lock_notice(int fd, so_String path, so_String kind, const char *state, int64_t elapsed) {
+    if (!km_lock_observer) return !km_cli_signal_pending();
+    char data[320] = {0}, command[128] = {0};
+    long recorded = 0, pid = fd < 0 ? 0 : km_lock_kernel_owner(fd);
+    unsigned long long birth = 0;
+    long long since = 0;
+    bool verified = pid > 0;
+    int64_t held = -1;
+    ssize_t n = fd < 0 ? -1 : pread(fd, data, sizeof(data) - 1, 0);
+    if (n > 0) {
+        data[n] = 0;
+        char *summary = strchr(data, '\n');
+        // Cosmopolitan sscanf does not support scansets; copy the summary below.
+        if (sscanf(data, "kame-lock-v1 %ld %llu %lld", &recorded, &birth, &since) == 3 && summary &&
+            recorded > 0 && recorded <= INT_MAX && (!birth || birth == km_lock_process_start(recorded)) &&
+            (pid == recorded || (!pid && (!kill((pid_t)recorded, 0) || errno == EPERM)))) {
+            pid = recorded;
+            size_t length = strcspn(summary + 1, "\n");
+            if (length >= sizeof(command)) length = sizeof(command) - 1;
+            memcpy(command, summary + 1, length);
+            if (since > 0 && since <= km_lock_wall_ms()) held = km_lock_wall_ms() - since;
+        }
+    }
+    if (pid && !command[0]) {
+        char name[64];
+        snprintf(name, sizeof(name), "/proc/%ld/comm", pid);
+        int process = open(name, O_RDONLY | O_CLOEXEC);
+        if (process >= 0) {
+            n = read(process, command, sizeof(command) - 1);
+            close(process);
+            if (n > 0) command[n] = 0;
+        }
+    }
+    for (char *p = command; *p; p++) if ((unsigned char)*p < 32 || *p == 127) *p = ' ';
+    km_lock_event event = {.State = {.ptr = state, .len = (so_int)strlen(state)}, .Kind = kind, .Path = path,
+        .OwnerPID = pid, .OwnerCommand = {.ptr = command, .len = (so_int)strlen(command)}, .OwnerVerified = verified,
+        .ElapsedMS = elapsed, .HeldMS = held};
+    return km_lock_observer(&event);
+}
+
+// O_NOFOLLOW excludes symlinks, not hard links. Never write diagnostic metadata
+// through an alias of a user file, including aliases added during a lock wait.
+static bool km_lock_metadata_safe(int fd) {
+    struct stat info;
+    return !fstat(fd, &info) && S_ISREG(info.st_mode) && info.st_nlink == 1;
+}
+
+int km_file_lock(int fd, so_String path, so_String kind, bool wait) {
+    if (!km_lock_metadata_safe(fd)) return -1;
+    int64_t started = km_now();
+    bool waiting = false;
+    for (;;) {
+        if (km_cli_signal_pending()) return -4;
+        if (!flock(fd, LOCK_EX | LOCK_NB)) break;
+        if (errno == EINTR) return -4;
+        if (errno != EWOULDBLOCK && errno != EAGAIN) return -1;
+        if (!wait) { km_lock_notice(fd, path, kind, "busy", 0); return -2; }
+        waiting = true;
+        if (!km_lock_notice(fd, path, kind, "waiting", km_now() - started)) return -4;
+        struct timespec pause = {.tv_nsec = 100000000};
+        if (nanosleep(&pause, NULL) && errno == EINTR) return -4;
+        if (km_cli_signal_pending()) return -4;
+    }
+    if (km_cli_signal_pending()) { flock(fd, LOCK_UN); return -4; }
+    char data[320];
+    int n = snprintf(data, sizeof(data), "kame-lock-v1 %ld %llu %lld\n%s\n", (long)getpid(),
+                     km_lock_process_start(getpid()), (long long)km_lock_wall_ms(), km_lock_command);
+    // Diagnostics must never turn a successfully acquired lock into a failure.
+    if (km_lock_metadata_safe(fd) && !ftruncate(fd, 0)) { ssize_t wrote = pwrite(fd, data, (size_t)n, 0); (void)wrote; }
+    if (waiting) km_lock_notice(fd, path, kind, "acquired", km_now() - started);
+    return 0;
+}
+
+void km_file_unlock(int fd) {
+    // Clear while still holding the lock; never unlink/replace the lock inode.
+    if (km_lock_metadata_safe(fd)) { int ignored = ftruncate(fd, 0); (void)ignored; }
+    flock(fd, LOCK_UN);
+}
+
 int km_host_cache_lock(km_host *host, so_String name, int stripe) {
     if (!host || stripe < 0 || stripe >= 256) return -1;
+    if (km_cli_signal_pending()) return -4;
     if (km_cache_lock_refs[stripe] != 0) {
         host->cache_lock_refs[stripe]++;
         km_cache_lock_refs[stripe]++;
         return 0;
     }
     if (km_windows_jobs_needed()) {
-        if (!km_windows_cache_lock(stripe)) return -1;
+        int status = km_windows_cache_lock(stripe);
+        if (status != 0) return status;
         host->cache_lock_refs[stripe] = 1;
         km_cache_lock_refs[stripe] = 1;
         return 0;
@@ -911,10 +1081,10 @@ int km_host_cache_lock(km_host *host, so_String name, int stripe) {
     int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
     free(path);
     if (fd < 0) return -1;
-    while (flock(fd, LOCK_EX) != 0) {
-        if (errno == EINTR) continue;
+    int status = km_file_lock(fd, name, (so_String){"cache", 5}, true);
+    if (status != 0) {
         close(fd);
-        return -1;
+        return status;
     }
     host->cache_lock_refs[stripe] = 1;
     km_cache_lock_fd[stripe] = fd;
@@ -929,7 +1099,7 @@ void km_host_cache_unlock(km_host *host, int stripe) {
     if (km_windows_jobs_needed()) { km_windows_cache_unlock(stripe); return; }
     int fd = km_cache_lock_fd[stripe];
     km_cache_lock_fd[stripe] = -1;
-    if (fd >= 0) { flock(fd, LOCK_UN); close(fd); }
+    if (fd >= 0) { km_file_unlock(fd); close(fd); }
 }
 
 static int km_spawn_failed(km_host *host, int64_t id, const char *message) {

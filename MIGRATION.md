@@ -56,6 +56,14 @@ verbatim strings keep their own rules. In the new grammar, nested applications
 may intentionally invoke computed callables; do not remove their parentheses as
 though every nested form were an obsolete wrapper.
 
+## Environment references
+
+`env.NAME` now reads the named environment variable in Kame as well as Kash,
+including `@{env.NAME}` interpolation. It uses the same grants, phase checks and
+dependency tracking as `(env "NAME")`; that call spelling is unchanged. It does
+not expose a whole-environment record. If existing Kame code uses a lexical record
+named `env`, rename that record or use `(get "NAME" env)` for its fields instead.
+
 ## Typed configuration
 
 Replace `--define-value NAME=LITERAL` with `--set NAME=LITERAL`:

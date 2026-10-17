@@ -3,6 +3,7 @@ package ownership
 
 import (
 	"kame/core"
+	"kame/host/posix"
 	"solod.dev/so/c"
 	"solod.dev/so/mem"
 	"solod.dev/so/path"
@@ -27,10 +28,13 @@ func km_own_supported() bool { return false }
 func Supported() bool { return km_own_supported() }
 
 //so:extern nodecay
-func km_own_open(root string, create bool, wait bool, status *c.Int) *nativeStore {
-	_, _, _, _ = root, create, wait, status
+func km_own_open(root string, create bool, status *c.Int) *nativeStore {
+	_, _, _ = root, create, status
 	return nil
 }
+
+//so:extern
+func km_own_lock_fd(s *nativeStore) c.Int { _ = s; return -1 }
 
 //so:extern
 func km_own_close(s *nativeStore) { _ = s }
@@ -112,7 +116,7 @@ func (s *Store) Open(create bool) bool {
 }
 
 // Acquire serializes producers, while inspection/protection/cleanup stay
-// fail-fast. Signal delivery interrupts the blocking advisory lock wait.
+// fail-fast. The shared POSIX wait reports contention and observes signals.
 func (s *Store) Acquire() bool {
 	return s.open(true, true)
 }
@@ -122,9 +126,19 @@ func (s *Store) open(create bool, wait bool) bool {
 		return true
 	}
 	var status c.Int
-	s.native = km_own_open(s.Root, create, wait, &status)
+	s.native = km_own_open(s.Root, create, &status)
 	s.Status = int(status)
+	if s.native != nil {
+		lockPath := path.Join(s.Alloc, s.Root, ".kame/outputs/lock")
+		s.Status = posix.LockFile(int(km_own_lock_fd(s.native)), lockPath, "project", wait)
+		mem.FreeString(s.Alloc, lockPath)
+		if s.Status != 0 {
+			km_own_close(s.native)
+			s.native = nil
+		}
+	}
 	if s.native != nil && km_own_root(s.native, s.ID[:]) != 0 {
+		posix.UnlockFile(int(km_own_lock_fd(s.native)))
 		km_own_close(s.native)
 		s.native = nil
 		s.Status = -1
@@ -136,7 +150,10 @@ func (s *Store) Free() {
 	if s == nil {
 		return
 	}
-	km_own_close(s.native)
+	if s.native != nil {
+		posix.UnlockFile(int(km_own_lock_fd(s.native)))
+		km_own_close(s.native)
+	}
 	mem.FreeString(s.Alloc, s.Root)
 	mem.Free(s.Alloc, s)
 }

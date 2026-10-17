@@ -4,6 +4,16 @@ import (
 	"solod.dev/so/mem"
 )
 
+// CacheLockStatus keeps cancellation distinct from an unavailable cache, which
+// may otherwise degrade to execution without cache coordination.
+type CacheLockStatus int
+
+const (
+	CacheLockUnavailable CacheLockStatus = iota
+	CacheLockAcquired
+	CacheLockCancelled
+)
+
 // ProgramHost is the complete host contract for materializing targets: process
 // execution plus the filesystem and clock the build runtime needs. Solod does
 // not support embedded interfaces, so every method is declared directly. It
@@ -26,7 +36,7 @@ type ProgramHost interface {
 	WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error
 	Mkdir(name string, perm uint32) error
 	Remove(name string) error
-	LockCache(path string, stripe int) bool
+	LockCache(path string, stripe int) CacheLockStatus
 	UnlockCache(stripe int)
 	Now() int64
 	Monotonic() int64

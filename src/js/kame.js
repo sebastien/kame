@@ -179,6 +179,7 @@ let terminalOutcomes = new Set();
 let startedOutcomes = new Set();
 let formatCounts = { completed: 0, failed: 0, cancelled: 0 };
 let watchIdle = false;
+const cliLockWaits = new Map();
 let watchCycle = 0, watchCycleStatus = '', watchCycleElapsed = 0;
 // lastDiagnostic holds the rich diagnostic from the most recent failed target
 // event, so the trailing --json diagnostic matches the native duplicate.
@@ -360,14 +361,25 @@ function shortField(text, width) {
 function redrawDashboard() {
   if (dashboardRows && (stderr.columns !== dashboardWidth || stderr.rows !== dashboardHeight)) { clearDashboard(); return; }
   if (!liveDashboard()) { clearDashboard(); return; }
-  if (!buildProgress || stdout.writableNeedDrain || stderr.writableNeedDrain) return;
-  if (watchIdle && dashboardRows) return;
+  if ((!buildProgress && !cliLockWaits.size) || stdout.writableNeedDrain || stderr.writableNeedDrain) return;
+  if (watchIdle && dashboardRows && !cliLockWaits.size) return;
   const now = performance.now();
   if (now - dashboardLast < 100) return;
   dashboardLast = now;
   const erase = '\x1b[1A\r\x1b[2K'.repeat(dashboardRows);
   const width = stderr.columns, height = stderr.rows;
   dashboardWidth = width; dashboardHeight = height;
+  if (cliLockWaits.size) {
+    const event = cliLockWaits.values().next().value;
+    const lines = [
+      `  ${styled('message.warning', '! BLOCKED')}  ${shortField(`${event.kind} lock · ${lockDuration(event.elapsedMs)}`, width - 15)}`,
+      lockField('lock:', event.path, 'value.path', width),
+      lockField('owner:', lockOwnerText(event.owner), 'value.tool', width),
+    ];
+    stderr.write(`${erase}${lines.join('\n')}\n`);
+    dashboardRows = lines.length;
+    return;
+  }
   const heading = `${presentationCommand}${presentationSubject ? ` ${shortField(presentationSubject, Math.floor(width / 3))}` : ''}${watchCycle ? ` · cycle ${watchCycle}` : ''}`;
   const lines = [styled('heading', shortField(watchIdle ? `${heading} · waiting · ${watchCycleStatus} · ${watchCycleElapsed}ms` : `${heading} · active · ${Math.max(0, Math.floor(performance.now() - buildStartedAt))}ms`, width - 2))];
   let running = 0, ready = 0, hidden = 0;
@@ -408,6 +420,44 @@ function observeCLIEvent(event) {
   }
 }
 
+function lockOwnerText(owner) {
+  if (!owner) return 'unavailable';
+  return `PID ${owner.pid}${owner.command ? ` — ${owner.command}` : ''} (recorded)`;
+}
+
+function lockDuration(milliseconds) { return `${(Math.max(0, milliseconds) / 1000).toFixed(1)}s`; }
+
+function lockField(label, value, token, width = 0) {
+  const clean = value.replace(/[\x00-\x1f\x7f]/gu, '?');
+  return `  ${styled(label === 'Ctrl-C' ? 'message.tip' : 'text.muted', label.padEnd(8))}${styled(token, width ? shortField(clean, width - 12) : clean)}`;
+}
+
+function reportCacheLock(lock, state, owner, elapsedMs, context, notice) {
+  const event = { schema: 1, type: `lock-${state}`, kind: 'cache', path: lock, elapsedMs, owner: owner ? {
+    pid: owner.pid, command: typeof owner.command === 'string' ? owner.command.slice(0, 128).replace(/[\x00-\x1f\x7f]/gu, '?') : '', verified: false,
+    ...(Number.isFinite(owner.acquiredAt) && owner.acquiredAt <= Date.now() ? { heldMs: Math.max(0, Date.now() - owner.acquiredAt) } : {}),
+  } : null };
+  if (context.api === true) { if (notice) context.events?.push(event); return; }
+  if (state === 'waiting') cliLockWaits.set(lock, event); else cliLockWaits.delete(lock);
+  if (notice) {
+    if (context.json) stdout.write(`${JSON.stringify(event)}\n`);
+    else if (context.human) {
+      clearDashboard();
+      if (state === 'acquired') stderr.write(`${styled('status.success', `  ✓ lock acquired after ${lockDuration(elapsedMs)}; continuing`)}\n`);
+      else {
+        const time = `waiting ${lockDuration(elapsedMs)}${event.owner?.heldMs === undefined ? '' : ` · held ${lockDuration(event.owner.heldMs)}`}`;
+        stderr.write(`\n  ${styled('message.warning', '! BLOCKED')}  waiting for exclusive cache lock\n${[
+          lockField('lock:', lock, 'value.path'),
+          lockField('owner:', lockOwnerText(event.owner), 'value.tool'),
+          lockField('time:', time, 'text.muted'),
+          lockField('Ctrl-C', 'cancel this invocation; leave the lock in place', 'text.muted'),
+        ].join('\n')}\n\n`);
+      }
+    }
+  }
+  redrawDashboard();
+}
+
 // cacheEntryPath stores one opaque host cache record under the project cache
 // root, keyed by the runtime's opaque byte key.
 function cacheEntryPath(key) {
@@ -420,8 +470,20 @@ function cacheLockPath(key) {
 
 function lockOwnerAlive(owner) {
   if (!Number.isSafeInteger(owner?.pid) || owner.pid <= 0) return false;
-  try { process.kill(owner.pid, 0); return true; }
+  try {
+    process.kill(owner.pid, 0);
+    const start = lockProcessStart(owner.pid);
+    return !owner.start || !start || owner.start === start;
+  }
   catch (error) { return error.code === 'EPERM'; }
+}
+
+function lockProcessStart(pid) {
+  if (process.platform !== 'linux') return undefined;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/u)[19];
+  } catch { return undefined; }
 }
 
 async function waitForCacheLock(signal) {
@@ -439,55 +501,68 @@ async function waitForCacheLock(signal) {
   });
 }
 
-async function acquireCacheLock(key, signal) {
+async function acquireCacheLock(key, context) {
+  const signal = context.signal;
   const lock = cacheLockPath(key);
   await mkdir(dirname(lock), { recursive: true });
   const ownerFile = join(lock, 'owner.json');
   const token = randomBytes(16).toString('hex');
-  for (;;) {
-    if (signal?.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
-    try {
-      mkdirSync(lock);
+  const started = performance.now();
+  let waiting = false, lastNotice = -5000;
+  try {
+    for (;;) {
+      if (signal?.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
       try {
-        writeFileSync(ownerFile, JSON.stringify({ pid: process.pid, token }), { flag: 'wx', mode: 0o600 });
-      } catch (error) {
-        rmSync(lock, { recursive: true, force: true });
-        throw error;
-      }
-      let released = false;
-      const release = async () => {
-        if (released) return;
-        released = true;
+        mkdirSync(lock);
         try {
-          const owner = JSON.parse(await readFile(ownerFile, 'utf8'));
-          if (owner.pid === process.pid && owner.token === token) await rm(lock, { recursive: true, force: true });
+          const owner = { pid: process.pid, token, start: lockProcessStart(process.pid), acquiredAt: Date.now(), command: context.api === true ? 'node (Kame API)' : `kame ${presentationCommand}${presentationSubject ? ` ${presentationSubject}` : ''}` };
+          writeFileSync(ownerFile, JSON.stringify(owner), { flag: 'wx', mode: 0o600 });
+          if (waiting) reportCacheLock(lock, 'acquired', owner, Math.floor(performance.now() - started), context, true);
         } catch (error) {
-          if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
-        } finally {
-          activeCacheLocks.delete(release);
+          rmSync(lock, { recursive: true, force: true });
+          throw error;
         }
-      };
-      activeCacheLocks.add(release);
-      return release;
-    } catch (error) {
-      if (error.code !== 'EEXIST') throw error;
-      let stale = false;
-      try {
-        const owner = JSON.parse(await readFile(ownerFile, 'utf8'));
-        stale = !lockOwnerAlive(owner);
-      } catch (ownerError) {
-        if (ownerError.code === 'ENOENT' || ownerError instanceof SyntaxError) {
-          try { stale = Date.now() - statSync(lock).mtimeMs > 2000; } catch (statError) { if (statError.code === 'ENOENT') stale = true; else throw statError; }
-        } else if (ownerError.code === 'ENOENT') stale = true;
-        else throw ownerError;
+        let released = false;
+        const release = async () => {
+          if (released) return;
+          released = true;
+          try {
+            const owner = JSON.parse(await readFile(ownerFile, 'utf8'));
+            if (owner.pid === process.pid && owner.token === token) await rm(lock, { recursive: true, force: true });
+          } catch (error) {
+            if (error.code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+          } finally {
+            activeCacheLocks.delete(release);
+          }
+        };
+        activeCacheLocks.add(release);
+        return release;
+      } catch (error) {
+        if (error.code !== 'EEXIST') throw error;
+        let stale = false;
+        let owner;
+        try {
+          owner = JSON.parse(await readFile(ownerFile, 'utf8'));
+          stale = !lockOwnerAlive(owner);
+        } catch (ownerError) {
+          if (ownerError.code === 'ENOENT' || ownerError instanceof SyntaxError) {
+            try { stale = Date.now() - statSync(lock).mtimeMs > 2000; } catch (statError) { if (statError.code === 'ENOENT') stale = true; else throw statError; }
+          } else if (ownerError.code === 'ENOENT') stale = true;
+          else throw ownerError;
+        }
+        if (stale) {
+          await rm(lock, { recursive: true, force: true });
+          continue;
+        }
+        waiting = true;
+        const elapsedMs = Math.floor(performance.now() - started);
+        const notice = elapsedMs - lastNotice >= 5000;
+        if (notice) lastNotice = elapsedMs;
+        reportCacheLock(lock, 'waiting', lockOwnerAlive(owner) ? owner : null, elapsedMs, context, notice);
+        await waitForCacheLock(signal);
       }
-      if (stale) {
-        await rm(lock, { recursive: true, force: true });
-        continue;
-      }
-      await waitForCacheLock(signal);
     }
-  }
+  } finally { if (context.api !== true) cliLockWaits.delete(lock); }
 }
 
 const cacheRecordsPerBackend = 1024;
@@ -1417,7 +1492,7 @@ class Module {
       if (!this.cacheLeases.has(owner)) {
         // Publish acquisition before yielding, so unlock/cleanup also waits for
         // an acquisition racing cancellation and duplicate acquire requests.
-        this.cacheLeases.set(owner, acquireCacheLock(key, context.signal));
+        this.cacheLeases.set(owner, acquireCacheLock(key, context));
       }
       try { await this.cacheLeases.get(owner); }
       catch (error) { return this.completeFailure(instance, request, error.code ?? 'FS_ERR', `cannot acquire cache lock: ${error.message}`); }

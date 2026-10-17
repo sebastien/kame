@@ -153,25 +153,84 @@ manifest_entry() {
 }
 
 lock_dir=$cache/.lock
+lock_owned=0
+lock_color=auto
+lock_color_next=0
+for lock_arg in "$@"; do
+	if [ "$lock_color_next" = 1 ]; then
+		lock_color=$lock_arg
+		lock_color_next=0
+		continue
+	fi
+	case $lock_arg in
+	--) break ;;
+	--color) lock_color_next=1 ;;
+	--color=*) lock_color=${lock_arg#*=} ;;
+	esac
+done
+lock_reset="" lock_warning="" lock_path="" lock_owner="" lock_muted="" lock_success=""
+if [ "$lock_color" = always ] || {
+	[ "$lock_color" != never ] && [ -z "${NO_COLOR:-}" ] &&
+	[ "${CLICOLOR:-}" != 0 ] && [ "${TERM:-}" != dumb ] &&
+	{ [ -t 2 ] || { [ -n "${CLICOLOR_FORCE:-}" ] && [ "$CLICOLOR_FORCE" != 0 ]; }; }
+}; then
+	lock_reset=$(printf '\033[0m')
+	lock_warning=$(printf '\033[93m')
+	lock_path=$(printf '\033[36m')
+	lock_owner=$(printf '\033[1m')
+	lock_muted=$(printf '\033[2m')
+	lock_success=$(printf '\033[32m')
+fi
+
+lock_field() {
+	lock_label_color=$lock_muted
+	[ "$1" != Ctrl-C ] || lock_label_color=$lock_path
+	printf '  %s%-8s%s%s%s%s\n' "$lock_label_color" "$1" "$lock_reset" "$2" "$3" "$lock_reset" >&2
+}
 
 acquire_lock() {
 	mkdir -p "$cache_root" "$cache"
+	wait_started=""
+	next_notice=0
 	while ! mkdir "$lock_dir" 2>/dev/null; do
 		holder=""
 		if [ -f "$lock_dir/pid" ]; then
 			holder=$(cat "$lock_dir/pid" 2>/dev/null || true)
 		fi
+		case $holder in *[!0-9]* | 0) holder="" ;; esac
 		if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
 			rm -rf "$lock_dir"
 			continue
 		fi
+		now=$(date +%s)
+		[ -n "$wait_started" ] || wait_started=$now
+		if [ "$now" -ge "$next_notice" ]; then
+			printf '\n  %s! BLOCKED%s  waiting for exclusive provisioning lock\n' "$lock_warning" "$lock_reset" >&2
+			lock_field 'lock:' "$lock_path" "$lock_dir"
+			if [ -n "$holder" ]; then
+				lock_field 'owner:' "$lock_owner" "PID $holder — kame launcher (provisioning; recorded)"
+			else
+				lock_field 'owner:' "$lock_owner" 'unavailable'
+			fi
+			lock_field 'time:' "$lock_muted" "waiting $((now - wait_started)).0s"
+			lock_field 'Ctrl-C' "$lock_muted" 'cancel this invocation; leave the lock in place'
+			printf '\n' >&2
+			next_notice=$((now + 5))
+		fi
 		sleep 0.1
 	done
+	lock_owned=1
 	printf '%s\n' "$$" >"$lock_dir/pid"
+	if [ -n "$wait_started" ]; then
+		printf '  %s✓ lock acquired after %s.0s; continuing%s\n' "$lock_success" "$(($(date +%s) - wait_started))" "$lock_reset" >&2
+	fi
 }
 
 release_lock() {
-	rm -rf "$lock_dir"
+	if [ "$lock_owned" = 1 ]; then
+		rm -rf "$lock_dir"
+		lock_owned=0
+	fi
 }
 
 ensure_manifest() {
@@ -333,7 +392,9 @@ select_backend() {
 	printf '%s' "$backend"
 }
 
-trap release_lock EXIT INT TERM
+trap release_lock EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 acquire_lock
 backend=$(select_backend)
 case $backend in

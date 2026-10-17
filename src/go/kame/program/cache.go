@@ -356,9 +356,10 @@ func (p *Program) validateRecord(entry *instance, fingerprint []byte, data []byt
 // cacheLookupResult reports a cached record, a hit, or a pending forwarded
 // lookup the producer must resume.
 type cacheLookupResult struct {
-	Record  cacheRecord
-	Hit     bool
-	Waiting bool
+	Record    cacheRecord
+	Hit       bool
+	Waiting   bool
+	Cancelled bool
 	// MissReason borrows a stable code; classification adds no host observations.
 	MissReason string
 }
@@ -373,9 +374,15 @@ func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLooku
 		stripe := int(key[0])
 		lockPath := p.cacheLockPath(key)
 		mem.FreeSlice(p.Alloc, key)
-		locked := p.mkdirParent(lockPath) && p.Host.LockCache(lockPath, stripe)
+		status := host.CacheLockUnavailable
+		if p.mkdirParent(lockPath) {
+			status = p.Host.LockCache(lockPath, stripe)
+		}
 		mem.FreeString(p.Alloc, lockPath)
-		if !locked {
+		if status == host.CacheLockCancelled {
+			return cacheLookupResult{Cancelled: true}
+		}
+		if status != host.CacheLockAcquired {
 			entry.CacheReady = false
 			p.cacheWarning(entry, "CACHE_LOCK", "cache miss lock unavailable; running without cache coordination")
 			return cacheLookupResult{MissReason: "proof-unverifiable"}
@@ -392,22 +399,24 @@ func (p *Program) cacheLookup(c *core.EngineContext, entry *instance) cacheLooku
 		if entry.cacheWaitingLock {
 			entry.cacheWaitingLock = false
 			if completion.Diagnostic.Code != "" {
+				cancelled := completion.Diagnostic.Code == "EXEC_CANCELLED"
 				completion.Diagnostic.Free(p.Alloc)
 				completion.Value.Free(p.Alloc)
 				p.releaseCacheLock(entry)
 				entry.CacheReady = false
-				return cacheLookupResult{MissReason: "proof-unverifiable"}
+				return cacheLookupResult{Cancelled: cancelled, MissReason: "proof-unverifiable"}
 			}
 			completion.Diagnostic.Free(p.Alloc)
 			completion.Value.Free(p.Alloc)
 			return p.cacheLookupForwarded(c, entry)
 		}
 		if completion.Diagnostic.Code != "" {
+			cancelled := completion.Diagnostic.Code == "EXEC_CANCELLED"
 			completion.Diagnostic.Free(p.Alloc)
 			completion.Value.Free(p.Alloc)
 			p.releaseCacheLock(entry)
 			entry.CacheReady = false
-			return cacheLookupResult{MissReason: "proof-unverifiable"}
+			return cacheLookupResult{Cancelled: cancelled, MissReason: "proof-unverifiable"}
 		}
 		if completion.Value.Kind == core.Nil {
 			completion.Value.Free(p.Alloc)

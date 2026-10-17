@@ -265,6 +265,10 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 	state := p.Instances[index].FileContext
 	if state.Phase == -1 {
 		lookup := p.cacheLookup(c, &p.Instances[index])
+		if lookup.Cancelled {
+			p.failRule(c, index, failure(p.Alloc, "EXEC_CANCELLED", "cancelled while waiting for cache"))
+			return core.ProducerFailed
+		}
 		if lookup.Waiting {
 			return core.ProducerSubmitted
 		}
