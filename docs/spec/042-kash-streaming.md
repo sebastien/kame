@@ -48,7 +48,27 @@ Names use ASCII letters/underscore initially, then letters, digits, underscore,
 or hyphen. The scope ports `in`, `out`, and `err` remain reserved, not generally
 available external endpoints.
 
-Stream operands, balance, and runtime topology inspection remain subsequent work. Process channels
+Live positional operands support `<&`, `<&name`, and `<(graph)` on hosts with
+validated pipe-backed operand paths. Each operand consumes one channel; `<&`
+claims the current upstream connection instead of also feeding stdin. An
+independent `< path` can still provide stdin. Anonymous producer graphs start
+with their receiver under the same graph owner, and their data is never captured
+or implicitly materialized. Argv list splicing is completed before the host maps
+argument ports to inherited descriptors. Pipes are non-seekable; external tools
+requiring seekable files must use an explicitly materialized file instead.
+Native POSIX uses inherited descriptors. Node uses one owned `dd` relay per
+argument into a private FIFO pathname: reopening its existing FIFO descriptor
+after a fast producer exits can otherwise block forever. Relays perform a real
+reader/writer open rendezvous, retain bounded byte buffers, and are joined/reaped
+with the graph. A fixed POSIX shell opens the FIFO and acknowledges readiness
+before becoming `dd`; user commands and stream bytes are never shell source.
+This also lets an early receiver exit unblock and close a never-opened operand
+without a permanent dummy writer. FIFO names are removed after completion/cancellation.
+This is pipe transport, not regular-file materialization.
+Native Windows and hosts without usable descriptor paths or FIFO support reject operands with
+`KASH_STREAM_OPERAND_UNSUPPORTED` before launching or truncating outputs.
+
+Balance and runtime topology inspection remain subsequent work. Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing
 dependency observer before launching their owning graph, and consume their

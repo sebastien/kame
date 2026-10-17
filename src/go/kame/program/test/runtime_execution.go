@@ -45,6 +45,7 @@ type fakeRemoteHost struct {
 }
 
 func (h *fakeRemoteHost) SupportsExecutor(name string, version string) bool { _, _ = h, name; return name == "fake" && version == "v1" }
+func (h *fakeRemoteHost) SupportsStreamOperands() bool { _ = h; return false }
 func (h *fakeRemoteHost) Start(request host.ProcessRequest) bool {
 	h.StartCount++
 	h.SawRequest = request.Executor == "fake" && request.ExecutorVersion == "v1"
@@ -106,6 +107,7 @@ func (h *fakeRemoteHost) Monotonic() int64 { return h.base.Monotonic() }
 
 func (h *countingReadDirHost) Start(request host.ProcessRequest) bool { return h.memory.Start(request) }
 func (h *countingReadDirHost) SupportsExecutor(name string, version string) bool { return h.memory.SupportsExecutor(name, version) }
+func (h *countingReadDirHost) SupportsStreamOperands() bool { return h.memory.SupportsStreamOperands() }
 func (h *countingReadDirHost) Pump(waitMS int) bool                   { return h.memory.Pump(waitMS) }
 func (h *countingReadDirHost) Next() host.ProcessEventResult          { return h.memory.Next() }
 func (h *countingReadDirHost) Cancel(id int64) bool                   { return h.memory.Cancel(id) }

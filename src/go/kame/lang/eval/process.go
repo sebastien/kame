@@ -19,6 +19,7 @@ type captureState struct {
 	Program *Program
 	PredicateScope *Scope
 	Predicates []*expr.Expr
+	OperandSlots []core.Value
 	Alloc  mem.Allocator
 	Index  int
 	Stage  int
@@ -46,6 +47,8 @@ func freeCaptureState(a mem.Allocator, value any) {
 	if s.PredicateScope != nil { s.PredicateScope.Free() }
 	for i := range s.Predicates { expr.Free(a, s.Predicates[i]) }
 	slices.Free(a, s.Predicates)
+	for i := range s.OperandSlots { s.OperandSlots[i].Free(a) }
+	slices.Free(a, s.OperandSlots)
 	for i := range s.Argv {
 		s.Argv[i].Free(a)
 	}
@@ -202,6 +205,14 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		}
 		for state.Index < len(stage.Items) {
 			word := stage.Items[state.Index]
+			if word.Kind == expr.CommandOperand {
+				if len(state.Argv) == 0 { return failure(c.Run, "EXPR_INVALID", word.Span, "live stream operand cannot be an executable") }
+				slot := []core.Value{{Kind: core.Int, Int: int64(state.Index+1)}, {Kind: core.Int, Int: int64(len(state.Argv))}}
+				state.OperandSlots = slices.Append(state.Alloc, state.OperandSlots, core.NewList(state.Alloc, slot))
+				state.Argv = slices.Append(state.Alloc, state.Argv, core.NewString(state.Alloc, "<stream>"))
+				state.Index++
+				continue
+			}
 			if word.Kind == expr.CommandSetup {
 				// Computed environments may fetch credentials. A dry-run defers
 				// this runtime boundary instead of demanding or fabricating a record.
@@ -364,6 +375,11 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		timeout := state.Timeout
 		if timeout == 0 { timeout = c.TimeoutMS }
 		state.Setups = slices.Append(state.Alloc, state.Setups, host.StageSetupPayload(state.Alloc, state.Cwd, timeout, environment))
+		if len(state.OperandSlots) != 0 {
+			setup := &state.Setups[len(state.Setups)-1]
+			setup.Record = slices.Append(state.Alloc, setup.Record, core.RecordField{Key: owned(state.Alloc, "operandSlots"), Value: core.NewList(state.Alloc, state.OperandSlots)})
+			for i := range state.OperandSlots { state.OperandSlots[i].Free(state.Alloc) }; slices.Free(state.Alloc, state.OperandSlots); state.OperandSlots = nil
+		}
 		if e.Topology {
 			host.ConfigureRedirections(state.Alloc, &state.Setups[len(state.Setups)-1], state.Input, state.Output, state.Append)
 			mem.FreeString(state.Alloc, state.Input); mem.FreeString(state.Alloc, state.Output)
@@ -400,18 +416,29 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if !demandProcessInput(c, state.Input) { return Result{Waiting: true} }
 	configured := false
 	for i := range e.Items { for j := range e.Items[i].Items { if e.Items[i].Items[j].Kind == expr.CommandSetup { configured = true } } }
-	payload := host.ArgvPayload(c.Run, state.Stages[0].List)
+	var payload core.Value
 	if e.Topology || configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
-		payload.Free(c.Run)
 		payload = host.PipelinePayload(c.Run, state.Stages)
-	}
+	} else { payload = host.ArgvPayload(c.Run, state.Stages[0].List) }
 	if e.Topology {
 		var kinds, edges, framed []core.Value
 		for i := range e.Items { kind := ""; if e.Items[i].Kind == expr.CommandMux { kind = e.Items[i].Text }; kinds = slices.Append(c.Run, kinds, core.NewString(c.Run, kind)) }
 		for i := range e.StreamKinds { framed = slices.Append(c.Run, framed, core.Value{Kind: core.Bool, Bool: e.StreamKinds[i] == 1}) }
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "framed"), Value: core.NewList(c.Run, framed)})
 		slices.Free(c.Run, framed)
-		for i := range e.Edges { edge := []core.Value{{Kind: core.Int, Int: int64(e.Edges[i].From)}, {Kind: core.Int, Int: int64(e.Edges[i].To)}}; edges = slices.Append(c.Run, edges, core.NewList(c.Run, edge)) }
+		for i := range e.Edges {
+			connection := e.Edges[i]
+			edge := []core.Value{{Kind: core.Int, Int: int64(connection.From)}, {Kind: core.Int, Int: int64(connection.To)}}
+			value := core.NewList(c.Run, edge)
+			if connection.Argument != 0 {
+				actual := 0
+				slots := host.PayloadList(state.Setups[connection.To], "operandSlots")
+				for j := range slots { if len(slots[j].List) == 2 && slots[j].List[0].Int == int64(connection.Argument) { actual = int(slots[j].List[1].Int) } }
+				if actual == 0 { value.Free(c.Run); payload.Free(c.Run); for j := range kinds { kinds[j].Free(c.Run) }; slices.Free(c.Run, kinds); for j := range edges { edges[j].Free(c.Run) }; slices.Free(c.Run, edges); return failure(c.Run, "KASH_DOUBLE_CONSUME", e.Span, "live operand lost its expanded argument slot") }
+				value.List = slices.Append(c.Run, value.List, core.Value{Kind: core.Int, Int: int64(actual)})
+			}
+			edges = slices.Append(c.Run, edges, value)
+		}
 		host.ConfigureTopology(c.Run, &payload, kinds, edges)
 		for i := range kinds { kinds[i].Free(c.Run) }; slices.Free(c.Run, kinds)
 		for i := range edges { edges[i].Free(c.Run) }; slices.Free(c.Run, edges)

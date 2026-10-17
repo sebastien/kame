@@ -45,6 +45,7 @@ func resolveProcessChannels(c *Context, authored *expr.Expr, graph *expr.Expr) R
 		if input < 0 { return failure(c.Run, "KASH_CHANNEL_UNBOUND", node.Span, "channel writer has no connected source") }
 		if output >= 0 && graph.Edges[input].From != i && graph.Edges[output].To != i {
 			graph.Edges[input].To = graph.Edges[output].To
+			graph.Edges[input].Argument = graph.Edges[output].Argument
 			copy(graph.Edges[output:], graph.Edges[output+1:]); graph.Edges = graph.Edges[:len(graph.Edges)-1]
 			expr.Free(c.Run, node)
 			copy(graph.Items[i:], graph.Items[i+1:]); graph.Items = graph.Items[:len(graph.Items)-1]

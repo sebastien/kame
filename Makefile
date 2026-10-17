@@ -158,6 +158,7 @@ test-wasm: wasm-check
 	tests/T042-01-kash-topology.sh
 	tests/T042-02-kash-framing.sh
 	tests/T042-03-kash-channels.sh
+	tests/T042-04-kash-operands.sh
 	tests/T036-01-cli-presentation.sh
 	tests/T036-02-cli-reuse-reasons.sh
 

@@ -349,7 +349,11 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
     case host_RequestWriteFile:
       return 2u;
     case host_RequestProcess:
-      if (host_PayloadList(request.Payload, so_str("kinds")).len != 0) return 32u;
+      if (host_PayloadList(request.Payload, so_str("kinds")).len != 0) {
+        so_Slice edges = host_PayloadList(request.Payload, so_str("edges"));
+        for (so_int i = 0; i < edges.len; i++) if (((core_Value *)edges.ptr)[i].List.len == 3) return 33u;
+        return 32u;
+      }
       if (kame_wasm_string_eq(host_PayloadText(request.Payload, so_str("op")), "recipe")) return 16u;
       if (host_PayloadSetups(request.Payload).len != 0 || host_PayloadText(request.Payload, so_str("input")).len != 0 || host_PayloadText(request.Payload, so_str("output")).len != 0) return 15u;
       if (host_PayloadStages(request.Payload).len != 0) return 14u;

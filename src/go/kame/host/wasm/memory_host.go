@@ -281,6 +281,8 @@ func (h *MemoryHost) Monotonic() int64 {
 	return h.Time
 }
 
+func (h *MemoryHost) SupportsStreamOperands() bool { _ = h; return false }
+
 func (h *MemoryHost) SupportsExecutor(name string, version string) bool {
 	_, _ = h, version
 	return name == "" || name == "local"

@@ -112,6 +112,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 		if ((grouped || branch) && p.s.Text[p.pos] == ')') || (grouped && p.s.Text[p.pos] == ',') { break }
 		if stage.Kind == CommandMux && (stage.Text == "merge" || stage.Text == "broadcast") && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
 			stage = p.node(CommandStage, p.pos)
+			input = false
 			e.Items = slices.Append(p.a, e.Items, stage)
 			continue
 		}
@@ -208,9 +209,11 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				mux.Span.End = p.pos
 				e.Items = slices.Append(p.a, e.Items, mux)
 				stage = mux
+				input = false
 				continue
 			}
 			stage = p.node(CommandStage, p.pos)
+			input = false
 			e.Items = slices.Append(p.a, e.Items, stage)
 			p.commandSpace(capture || grouped || branch)
 			continue
@@ -233,12 +236,34 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			break
 		}
 		if stage.Kind == CommandGroup || stage.Kind == CommandMux || stage.Kind == CommandReader || stage.Kind == CommandWriter { p.error(p.pos, p.pos+1, "expected a process connection or statement end after graph operand"); break }
+		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos] == '<' && (p.s.Text[p.pos+1] == '&' || p.s.Text[p.pos+1] == '(') {
+			if p.pos > start && !commandWhitespace(p.s.Text[p.pos-1]) { p.error(p.pos, p.pos+2, "live stream operands must be standalone arguments"); break }
+			if !hasExecutable(stage) { p.error(p.pos, p.pos+2, "live stream operands cannot be command heads"); break }
+			operand := p.node(CommandOperand, p.pos)
+			producer := p.s.Text[p.pos+1] == '('
+			p.pos += 2
+			if producer {
+				p.commandSpace(true)
+				operand.Body = slices.Append(p.a, operand.Body, p.commandPipeline(p.pos, false, false, true))
+				if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' { p.error(operand.Span.Start, p.pos, "unclosed live producer graph") } else { p.pos++ }
+			} else {
+				from := p.pos
+				for p.pos < len(p.s.Text) && channelNameByte(p.s.Text[p.pos], p.pos == from) { p.pos++ }
+				operand.Text = p.s.Text[from:p.pos]
+				if operand.Text != "" && !ChannelName(operand.Text) { p.error(from, p.pos, "invalid or reserved channel name") }
+			}
+			if p.pos < len(p.s.Text) && !commandWhitespace(p.s.Text[p.pos]) && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != ',' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '>' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '#' { p.error(operand.Span.Start, p.pos+1, "live stream operands must be standalone arguments") }
+			operand.Span.End = p.pos
+			stage.Items = slices.Append(p.a, stage.Items, operand)
+			if len(p.diags) != 0 { break }
+			continue
+		}
 		if p.s.Text[p.pos] == '<' || p.s.Text[p.pos] == '>' {
 			from := p.pos
 			op := p.s.Text[p.pos:p.pos+1]
 			p.pos++
 			if op == ">" && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '>' { p.pos++; op = ">>" }
-			if op == "<" && (input || len(e.Items) != 1) { p.error(from, p.pos, "stdin redirection conflicts with pipeline input or earlier redirection"); break }
+			if op == "<" && input { p.error(from, p.pos, "duplicate stdin redirection"); break }
 			if op != "<" && output { p.error(from, p.pos, "duplicate stdout redirection"); break }
 			p.commandSpace(capture)
 			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') { p.error(from, p.pos, "expected redirection path"); break }
@@ -290,6 +315,13 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 		p.error(start, p.pos, "expected Kash executable")
 	}
 	if stage.Kind == CommandMux && stage.Text == "broadcast" { p.error(stage.Span.Start, p.pos, "broadcast requires a destination group") }
+	for i := 1; i < len(e.Items); i++ {
+		candidate := e.Items[i]
+		if candidate.Kind != CommandStage { continue }
+		claimed := false
+		for j := range candidate.Items { word := candidate.Items[j]; if word.Kind == CommandOperand && word.Text == "" && len(word.Body) == 0 { claimed = true } }
+		for j := range candidate.Items { word := candidate.Items[j]; if word.Kind == CommandRedirection && word.Text == "<" && !claimed { p.error(word.Span.Start, word.Span.End, "stdin redirection conflicts with pipeline input") } }
+	}
 	if stage.Span.End == stage.Span.Start { stage.Span.End = p.pos }
 	e.Span.End = p.pos
 	if len(e.Body) != 0 && e.Body[0].Async { e.Async = true; e.Body[0].Async = false }

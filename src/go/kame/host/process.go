@@ -87,7 +87,7 @@ type ProcessStage struct {
 	Output string
 	Append bool
 }
-type ProcessEdge struct { From int; To int }
+type ProcessEdge struct { From int; To int; Argument int }
 type ProcessStageResult struct {
 	Status int
 	Signal int
@@ -157,6 +157,7 @@ type ProcessEventResult struct {
 // request immediately; callers must not await a terminal event for it. Hosts may
 // still queue a rejection diagnostic, which does not imply active ownership.
 type ProcessHost interface {
+	SupportsStreamOperands() bool
 	SupportsExecutor(name string, version string) bool
 	Start(ProcessRequest) bool
 	Pump(waitMS int) bool

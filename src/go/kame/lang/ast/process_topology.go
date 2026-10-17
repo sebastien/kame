@@ -41,6 +41,7 @@ func (e *astEncoder) processTopology(value *expr.Expr) {
 			e.BeginObject()
 			e.Str("from"); e.Int(int64(edge.From))
 			e.Str("to"); e.Int(int64(edge.To))
+			if edge.Argument != 0 { e.Str("argumentItem"); e.Int(int64(edge.Argument)) }
 			e.EndObject()
 		}
 		e.EndArray()

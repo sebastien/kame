@@ -1309,7 +1309,22 @@ fail:
 // Go structs. OS pipes carry intermediate bytes directly, with backpressure.
 int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output) {
     so_Slice empty = {0};
-    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty, NULL, NULL);
+    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty, empty, NULL, NULL);
+}
+
+bool km_stream_operands_supported(void) {
+    if (km_windows_jobs_needed()) return false;
+    int descriptors[2];
+    if (pipe(descriptors)) return false;
+    char name[64];
+    snprintf(name, sizeof(name), "/dev/fd/%d", descriptors[0]);
+    int reopened = open(name, O_RDONLY);
+    struct stat original, exposed;
+    bool supported = reopened >= 0 && !fstat(descriptors[0], &original) && !fstat(reopened, &exposed) &&
+        original.st_dev == exposed.st_dev && original.st_ino == exposed.st_ino;
+    if (reopened >= 0) close(reopened);
+    close(descriptors[0]); close(descriptors[1]);
+    return supported;
 }
 
 // One long-running native operator node, owned and reaped like a process stage.
@@ -1470,7 +1485,7 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
     return result;
 }
 
-int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends, km_stream_item stream_item, void *stream_context) {
+int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends, so_Slice operand_arguments, km_stream_item stream_item, void *stream_context) {
     if (!host) return -1;
     if (host->rejected_sequence) return -2;
     if (!id || lengths.len < 1 || lengths.len > INT_MAX / 2 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid graph request");
@@ -1479,6 +1494,8 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     if (topology && (kinds.len != lengths.len || input_paths.len != lengths.len || output_paths.len != lengths.len || appends.len != lengths.len || connections.len % 2 || connections.len > INT_MAX / 2)) return km_spawn_failed(host, id, "invalid graph topology");
     so_int *node_kinds = kinds.ptr, *links = connections.ptr;
     int edge_count = topology ? (int)connections.len / 2 : (int)lengths.len - 1;
+    if (topology && operand_arguments.len != edge_count) return km_spawn_failed(host, id, "invalid argument ports");
+    so_int *ports = operand_arguments.ptr;
     for (int i = 0; topology && i < connections.len; i++) if (links[i] < 0 || links[i] >= lengths.len) return km_spawn_failed(host, id, "invalid graph edge");
     for (int i = 0; i < host->len; i++) if (host->processes[i].id == id) return km_spawn_failed(host, id, "request ID already active");
     so_int *counts = lengths.ptr;
@@ -1489,6 +1506,14 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     }
     if (total != arguments.len) return km_spawn_failed(host, id, "invalid graph argv");
     int n = (int)lengths.len;
+    bool live_operands = false;
+    for (int i = 0; topology && i < edge_count; i++) {
+        int target = (int)links[i * 2 + 1];
+        if (ports[i] < 0 || (ports[i] && (node_kinds[target] || ports[i] >= counts[target]))) return km_spawn_failed(host, id, "invalid live stream operand");
+        if (ports[i]) live_operands = true;
+        for (int j = 0; ports[i] && j < i; j++) if (links[j * 2 + 1] == target && ports[j] == ports[i]) return km_spawn_failed(host, id, "duplicate live stream operand");
+    }
+    if (live_operands && !km_stream_operands_supported()) return km_spawn_failed(host, id, "live stream operands are unsupported by this host");
     if (directories.len != n || environment_lengths.len != n || timeouts.len != n) return km_spawn_failed(host, id, "invalid graph setup");
     so_int *envcounts = environment_lengths.ptr;
     int64_t *stage_timeouts = timeouts.ptr;
@@ -1500,6 +1525,8 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     if (envtotal != environment.len) return km_spawn_failed(host, id, "invalid graph environment");
     int out[2] = {-1,-1}, err[2] = {-1,-1}, execerr[2] = {-1,-1};
     int *edges = malloc((size_t)(edge_count ? edge_count : 1) * 2 * sizeof(int));
+    int *operand_fds = malloc((size_t)(edge_count ? edge_count : 1) * sizeof(int));
+    if (operand_fds) for (int i = 0; i < edge_count; i++) operand_fds[i] = -1;
     int *stage_inputs = malloc((size_t)n * sizeof(int)), *stage_outputs = malloc((size_t)n * sizeof(int));
     bool *truncate_outputs = calloc((size_t)n, sizeof(bool));
     if (stage_inputs) for (int i = 0; i < n; i++) stage_inputs[i] = -1;
@@ -1513,7 +1540,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     p.stages = calloc((size_t)n, sizeof(km_stage));
     if (p.stages && topology) for (int i = 0; i < n; i++) p.stages[i].operator_kind = (int)node_kinds[i] & 15;
     if (edges) for (int i = 0; i < edge_count * 2; i++) edges[i] = -1;
-    bool ok = edges && stage_inputs && stage_outputs && truncate_outputs && argv && envp && cwd && p.stages && input_name && output_name;
+    bool ok = edges && operand_fds && stage_inputs && stage_outputs && truncate_outputs && argv && envp && cwd && p.stages && input_name && output_name;
     so_String *args = arguments.ptr, *envs = environment.ptr, *dirs = directories.ptr;
     int at = 0;
     for (int i = 0; ok && i < n; i++) {
@@ -1540,6 +1567,18 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     }
     // Exec closes every unused descriptor, including the shared launch channel.
     for (int i = 0; ok && i < edge_count * 2; i++) if (fcntl(edges[i], F_SETFD, FD_CLOEXEC) < 0) ok = false;
+    // Allocate collision-free inherited descriptors before opening/truncating
+    // outputs. Other children retain CLOEXEC; only the receiving child clears it.
+    for (int i = 0; ok && topology && i < edge_count; i++) if (ports[i]) {
+        operand_fds[i] = fcntl(edges[i * 2], F_DUPFD, 3);
+        char name[64];
+        int size = snprintf(name, sizeof(name), "/dev/fd/%d", operand_fds[i]);
+        if (operand_fds[i] < 0 || size < 0 || size >= (int)sizeof(name) || fcntl(operand_fds[i], F_SETFD, FD_CLOEXEC) < 0) { ok = false; break; }
+        char *path = strdup(name);
+        if (!path) { ok = false; break; }
+        int target = (int)links[i * 2 + 1], argument = (int)ports[i];
+        free(argv[target][argument]); argv[target][argument] = path;
+    }
     if (ok && (fcntl(execerr[1], F_SETFD, FD_CLOEXEC) < 0 || km_set_nonblock(out[0]) || km_set_nonblock(err[0]) || km_set_nonblock(execerr[0]))) ok = false;
     if (ok && host->len == host->cap) {
         int cap = host->cap ? host->cap * 2 : 4;
@@ -1626,8 +1665,9 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
                 output = stage_outputs[i] >= 0 ? stage_outputs[i] : out[1];
                 for (int j = 0; !node_kinds[i] && j < edge_count; j++) {
                     if (links[j * 2] == i) output = edges[j * 2 + 1];
-                    if (links[j * 2 + 1] == i) { if (stage_inputs[i] < 0 && input >= 0) close(input); input = edges[j * 2]; }
+                    if (links[j * 2 + 1] == i && !ports[j]) { if (stage_inputs[i] < 0 && input >= 0) close(input); input = edges[j * 2]; }
                 }
+                for (int j = 0; j < edge_count; j++) if (ports[j] && links[j * 2 + 1] == i && fcntl(operand_fds[j], F_SETFD, 0) < 0) { int error = errno; write(execerr[1], &error, sizeof(error)); _exit(127); }
             }
             if (setpgid(0, 0) || input < 0 || dup2(input, STDIN_FILENO) < 0 || dup2(output, STDOUT_FILENO) < 0 || dup2(err[1], STDERR_FILENO) < 0 || chdir(cwd[i]) < 0) {
                 int error = errno; write(execerr[1], &error, sizeof(error)); _exit(127);
@@ -1672,6 +1712,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     km_free_strings(cwd, n); free(input_name); free(output_name);
     km_close(&inputfd); km_close(&outputfd);
     if (edges) { for (int i = 0; i < edge_count * 2; i++) km_close(&edges[i]); free(edges); }
+    if (operand_fds) { for (int i = 0; i < edge_count; i++) km_close(&operand_fds[i]); free(operand_fds); }
     if (stage_inputs) { for (int i = 0; i < n; i++) km_close(&stage_inputs[i]); free(stage_inputs); }
     if (stage_outputs) { for (int i = 0; i < n; i++) km_close(&stage_outputs[i]); free(stage_outputs); }
     free(truncate_outputs);

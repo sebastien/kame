@@ -13,19 +13,26 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 	if request.Input != "" || request.Output != "" { return "KASH_DOUBLE_CONSUME" }
 	incoming := slices.Make[int](a, n)
 	outgoing := slices.Make[int](a, n)
+	stdin := slices.Make[int](a, n)
 	defer slices.Free(a, incoming)
 	defer slices.Free(a, outgoing)
+	defer slices.Free(a, stdin)
 	for i := range request.Edges {
 		edge := request.Edges[i]
 		if edge.From < 0 || edge.From >= n || edge.To < 0 || edge.To >= n { return "KASH_MUX_ARITY" }
+		if edge.Argument < 0 { return "KASH_MUX_ARITY" }
+		if edge.Argument == 0 { stdin[edge.To]++ } else {
+			if request.Stages[edge.To].Kind != "" || edge.Argument >= len(request.Stages[edge.To].Argv) { return "KASH_MUX_ARITY" }
+			for j := 0; j < i; j++ { previous := request.Edges[j]; if previous.To == edge.To && previous.Argument == edge.Argument { return "KASH_DOUBLE_CONSUME" } }
+		}
 		incoming[edge.To]++; outgoing[edge.From]++
 	}
 	for i := range request.Stages {
 		stage := request.Stages[i]
 		if stage.Framed && outgoing[i] == 0 { return "KASH_FRAME_MISMATCH" }
 		if stage.Kind == "" {
-			if len(stage.Argv) == 0 || incoming[i] > 1 || outgoing[i] > 1 { return "KASH_MUX_ARITY" }
-			if (incoming[i] != 0 && stage.Input != "") || (outgoing[i] != 0 && stage.Output != "") { return "KASH_DOUBLE_CONSUME" }
+			if len(stage.Argv) == 0 || stdin[i] > 1 || outgoing[i] > 1 { return "KASH_MUX_ARITY" }
+			if (stdin[i] != 0 && stage.Input != "") || (outgoing[i] != 0 && stage.Output != "") { return "KASH_DOUBLE_CONSUME" }
 		} else {
 			if len(stage.Argv) != 0 || stage.Input != "" || stage.Output != "" { return "KASH_MUX_ARITY" }
 			if stage.Kind == "frame" || stage.Kind == "encode" || stage.Kind == "copy" {

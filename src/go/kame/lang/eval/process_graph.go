@@ -29,6 +29,7 @@ func (p *Program) captureTopology(e *expr.Expr, c *Context) Result {
 
 func hasProcessTopology(e *expr.Expr) bool {
 	for i := range e.Items { if e.Items[i].Kind == expr.CommandGroup || e.Items[i].Kind == expr.CommandMux || e.Items[i].Kind == expr.CommandReader || e.Items[i].Kind == expr.CommandWriter { return true } }
+	for i := range e.Items { for j := range e.Items[i].Items { if e.Items[i].Items[j].Kind == expr.CommandOperand { return true } } }
 	return false
 }
 
@@ -39,6 +40,12 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 	slices.Free(c.Run, ports.Inputs)
 	slices.Free(c.Run, ports.Outputs)
 	if flat.Text != "" { return failure(c.Run, flat.Text, flat.Span, "process connection has incompatible endpoint cardinality or disposition") }
+	for i := range flat.Items {
+		if flat.Items[i].Kind != expr.CommandStage || flat.Items[i].Int == 0 { continue }
+		claims := 0
+		for j := range flat.Edges { if flat.Edges[j].To == i && flat.Edges[j].Argument == 0 { flat.Edges[j].Argument = int(flat.Items[i].Int); claims++ } }
+		if claims != 1 { return failure(c.Run, "KASH_CHANNEL_UNBOUND", flat.Items[i].Span, "<& requires exactly one current upstream channel") }
+	}
 	if r := resolveProcessChannels(c, e, flat); r.Diagnostic.Code != "" { return r }
 	if !acyclicProcessGraph(c, flat) { return failure(c.Run, "KASH_GRAPH_CYCLE", e.Span, "named channels introduce unsupported feedback") }
 	if r := prepareStreamKinds(c, flat); r.Diagnostic.Code != "" { return r }
@@ -46,7 +53,7 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 	for i := range flat.Items {
 		node := flat.Items[i]
 		incoming, outgoing := 0, 0
-		for j := range flat.Edges { if flat.Edges[j].From == i { outgoing++ }; if flat.Edges[j].To == i { incoming++ } }
+		for j := range flat.Edges { if flat.Edges[j].From == i { outgoing++ }; if flat.Edges[j].To == i && flat.Edges[j].Argument == 0 { incoming++ } }
 		redirected := false
 		for j := 0; node.Kind == expr.CommandStage && j < len(node.Items); j++ {
 			word := node.Items[j]
@@ -69,7 +76,8 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 		if e.Kind == expr.CommandReader { ports.Outputs = slices.Append(c.Run, ports.Outputs, index) } else { ports.Inputs = slices.Append(c.Run, ports.Inputs, index) }
 		return ports
 	}
-	if e.Kind == expr.CommandStage || e.Kind == expr.CommandInput {
+	if e.Kind == expr.CommandStage { return lowerStreamOperandStage(c, e, flat) }
+	if e.Kind == expr.CommandInput {
 		index := len(flat.Items)
 		node := expr.Clone(c.Run, e)
 		if e.Kind == expr.CommandInput { node.Kind, node.Text = expr.CommandMux, "copy" }

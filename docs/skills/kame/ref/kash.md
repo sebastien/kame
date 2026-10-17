@@ -198,8 +198,8 @@ The enclosing invocation owns all stages and native operator workers, including
 when the complete graph ends in `&`. Failure cancels peers. Capture rejects
 multiple unmerged terminal stdout streams; redirect unwanted outputs or merge
 them explicitly. Windows currently rejects these new graph forms before launch;
-ordinary linear pipelines remain available. Live stream arguments are not
-implemented yet.
+ordinary linear pipelines remain available. Live stream arguments also require
+a host with validated pipe-backed operand paths.
 
 Explicit line framing enables pure Boolean filters and frame-safe merge:
 
@@ -258,6 +258,29 @@ byte/framed data kind. Separate sequential writer/reader statements are invalid.
 Use `&name | cat > ./file` for a file sink. Names are ASCII identifiers (hyphens
 allowed after the first character); `in`, `out`, and `err` are reserved scope
 ports and are not available as general named endpoints.
+
+### Live stream arguments
+
+```kash
+diff -u <(generate-old) <(generate-new)
+generate | diff -u <& ./baseline
+```
+
+`<(graph)` starts a concurrent producer in the receiver's owned graph. `<&name`
+consumes a declared channel at that argument position; `<&` claims the current
+upstream channel there, leaving stdin closed unless an independent `< path` is
+provided. Duplicate claims fail before launch. These are standalone arguments,
+not mixed word fragments, executable heads, captured strings, or temporary files.
+Argument positions remain correct after ordinary argv list splicing.
+
+Native external programs receive inherited pipe-backed `/dev/fd/N` paths. Node
+uses private FIFO paths and one owned POSIX `dd` transport relay per operand,
+avoiding FIFO reopen/EOF races. No regular file stores the stream. These inputs are
+non-seekable and live only for the graph's lifetime; do not use them with tools
+requiring seekable regular files. Producers are joined on success and reaped on
+failure, capture overflow, timeout, or cancellation. Unsupported hosts, including
+native Windows, fail with `KASH_STREAM_OPERAND_UNSUPPORTED` without launching or
+truncating output files.
 
 ## Named execution context
 

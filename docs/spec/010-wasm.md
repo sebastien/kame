@@ -327,6 +327,26 @@ Calls accept active or parked request handles belonging to the same instance;
 stale/foreign handles fail without changing the active request. The call cannot
 submit host work or suspend. A missing export means framed execution is unsupported.
 
+Live stream operands use request kind **33** with the same topology descriptor.
+Edges may now be `[from, to, argument]`, where a positive `argument` is the actual
+zero-based argv index (never index 0). Ordinary `[from, to]` edges still feed
+stdin. Hosts enforce one incoming stdin edge, unique argument slots, one reader
+per source output, valid slot bounds, and byte encoding at executable boundaries.
+The evaluator resolves authored slots after list splicing; descriptor argv values
+at injected slots are placeholders, not usable filesystem paths. The host maps
+them to live pipe paths only at launch. Node uses private FIFO paths with owned
+POSIX `dd` relays and a real FIFO open rendezvous; native POSIX can use inherited
+descriptors directly. No capture, trimming, expression
+parsing, or temporary-file materialization is permitted. Kind 33 prevents older
+hosts from silently treating an argument connection as stdin. Unsupported hosts
+must report `KASH_STREAM_OPERAND_UNSUPPORTED` before launching/truncating anything.
+
+Native `ProcessHost` / `ProgramHost` implementations expose
+`SupportsStreamOperands() bool`; return false unless live pipe-backed operands
+are validated for that backend. `ProcessEdge.Argument` uses the same zero/stdin,
+positive/argv convention. Static parse inspection instead reports the one-based
+authored AST item as `argumentItem`, because inspection cannot expand argv values.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly

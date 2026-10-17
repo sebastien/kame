@@ -210,6 +210,12 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str(value.Text)
 	}
 	if value.Kind == expr.CommandStream || value.Kind == expr.CommandReader || value.Kind == expr.CommandWriter { e.Str("channel"); e.Str(value.Text) }
+	if value.Kind == expr.CommandOperand {
+		e.Str("sourceKind")
+		if len(value.Body) != 0 { e.Str("producer") } else if value.Text == "" { e.Str("current") } else { e.Str("named") }
+		e.Str("source")
+		if len(value.Body) != 0 { e.expr(value.Body[0]) } else if value.Text == "" { e.Str("current") } else { e.Str(value.Text) }
+	}
 	if value.Kind == expr.Reference || value.Kind == expr.EnvironmentReference {
 		e.Str("parts")
 		e.BeginArray()
@@ -379,6 +385,7 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
+	if k == expr.CommandOperand { return "stream-operand" }
 	if k == expr.CommandStream { return "channel-declaration" }
 	if k == expr.CommandReader { return "channel-reader" }
 	if k == expr.CommandWriter { return "channel-writer" }

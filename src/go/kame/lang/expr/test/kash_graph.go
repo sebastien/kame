@@ -21,6 +21,10 @@ func TestProcessGroupsAndMuxRoundTrip(t *testing.T) {
 		"$((printf a >&reports, &reports | cat))",
 		"$(printf a |(broadcast) (>&left, >&right))",
 		"$((printf a |(frame :lines) |(filter :true | cat >&reports) | cat, &reports | cat))",
+		"$(diff -u <(printf a) <(printf b))",
+		"$(printf a | cat <&)",
+		"$(printf a | cat < ./stdin <& <(printf b))",
+		"$(cat <&reports)",
 	}
 	for i := range texts {
 		r := expr.Parse(t.Allocator(), "graph.km", texts[i])

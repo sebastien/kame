@@ -1402,14 +1402,14 @@ class Module {
     } finally {
       clearTimeout(cleanupTimer);
       if (notifyCancellation) bodySignal.removeEventListener('abort', notifyCancellation);
-      if ([3, 13, 14, 15, 16, 32].includes(kind)) this.processGroups.delete(`${instance}:${rawRequest}`);
+      if ([3, 13, 14, 15, 16, 32, 33].includes(kind)) this.processGroups.delete(`${instance}:${rawRequest}`);
     }
   }
 
   async dispatch(instance, request, kind, payload, data, context, key, record, rawRequest) {
     const grants = context.grants;
     if (kind === 26) return this.pluginCallback(instance, request, payload, context);
-    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32].includes(kind)) {
+    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33].includes(kind)) {
       const response = await this.customHostRequest(instance, request, kind, payload, data, context, key, record);
       if (response !== undefined) return response;
     }
@@ -1557,12 +1557,12 @@ class Module {
       const encoded = this.write(value);
       return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
     }
-    if (kind === 13 || kind === 14 || kind === 15 || kind === 32) {
+    if (kind === 13 || kind === 14 || kind === 15 || kind === 32 || kind === 33) {
       if (!grants.run) return this.deny(instance, request);
       const decoded = JSON.parse(payload);
       const serviceReadyProbe = kind === 15 && decoded.serviceReady === true;
       const stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
-      const redirections = kind === 15 || kind === 32 ? decoded : { input: '', output: '', append: false };
+      const redirections = kind === 15 || kind === 32 || kind === 33 ? decoded : { input: '', output: '', append: false };
       for (const [field, capability] of [['input', 'read'], ['output', 'write']]) {
         const name = redirections[field];
         if (typeof name !== 'string' || name.includes('\0')) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid redirection path');
@@ -1805,7 +1805,7 @@ class Module {
     const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 ? 'read'
       : kind === 2 ? 'write'
         : kind === 4 ? 'env'
-          : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 || kind === 32 ? 'run' : null;
+          : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 || kind === 32 || kind === 33 ? 'run' : null;
     if (capability && !context.grants[capability]) return this.deny(instance, request, capability);
     if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 || kind === 2) && typeof payload === 'string') {
       const grantKind = kind === 2 ? 'write' : 'read';
@@ -1817,14 +1817,14 @@ class Module {
       }
       if (roots !== null && roots !== undefined && names.some((name) => !pathGranted(resolve(context.cwd ?? process.cwd(), name), roots))) return this.deny(instance, request, grantKind);
     }
-    if (capability === 'run' && context.runRoots !== null && context.runRoots !== undefined && [13, 14, 15, 32].includes(kind)) {
+    if (capability === 'run' && context.runRoots !== null && context.runRoots !== undefined && [13, 14, 15, 32, 33].includes(kind)) {
       let stages, decoded;
       try {
         decoded = JSON.parse(payload);
         stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
       } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process request'); }
       if (!Array.isArray(stages) || stages.some((args, i) => {
-        if (kind === 32 && Array.isArray(args) && args.length === 0 && ['merge', 'broadcast'].includes(decoded.kinds?.[i])) return false;
+        if ((kind === 32 || kind === 33) && Array.isArray(args) && args.length === 0 && ['merge', 'broadcast', 'frame', 'encode', 'filter', 'copy'].includes(decoded.kinds?.[i])) return false;
         return !Array.isArray(args) || typeof args[0] !== 'string' || !args[0].includes('/') || !pathGranted(resolve(context.cwd ?? process.cwd(), args[0]), context.runRoots);
       })) return this.deny(instance, request, 'run');
     }
@@ -2943,20 +2943,24 @@ function processDeadline(milliseconds, callback) {
 function prepareByteTopology(stages, context) {
   if (context.kinds === undefined) return null;
   const invalid = (code = 'KASH_MUX_ARITY') => { throw Object.assign(new Error('invalid process graph topology'), { code }); };
-  if (process.platform === 'win32') throw Object.assign(new Error('streaming process graphs are not supported by this Windows host'), { code: 'HOST_FAIL' });
+  if (process.platform === 'win32') throw Object.assign(new Error('streaming process graphs are not supported by this Windows host'), { code: Array.isArray(context.edges) && context.edges.some((edge) => Array.isArray(edge) && edge[2] > 0) ? 'KASH_STREAM_OPERAND_UNSUPPORTED' : 'HOST_FAIL' });
   const { kinds, edges, setup } = context;
   if (!Array.isArray(stages) || !stages.length || !Array.isArray(kinds) || kinds.length !== stages.length || !Array.isArray(edges) || !Array.isArray(setup) || setup.length !== stages.length || context.input || context.output) invalid();
   const inputs = stages.map(() => []), outputs = stages.map(() => []);
   for (let i = 0; i < edges.length; i++) {
     const edge = edges[i];
-    if (!Array.isArray(edge) || edge.length !== 2 || edge.some((node) => !Number.isInteger(node) || node < 0 || node >= stages.length)) invalid();
+    if (!Array.isArray(edge) || ![2, 3].includes(edge.length) || edge.slice(0, 2).some((node) => !Number.isInteger(node) || node < 0 || node >= stages.length)) invalid();
+    const argument = edge[2] ?? 0;
+    if (!Number.isSafeInteger(argument) || argument < 0 || (argument && (kinds[edge[1]] !== '' || !Array.isArray(stages[edge[1]]) || argument >= stages[edge[1]].length))) invalid();
+    if (argument && inputs[edge[1]].some((previous) => edges[previous][2] === argument)) invalid('KASH_DOUBLE_CONSUME');
     outputs[edge[0]].push(i); inputs[edge[1]].push(i);
   }
   for (let i = 0; i < stages.length; i++) {
     if (!Array.isArray(stages[i]) || !['', 'merge', 'broadcast', 'frame', 'encode', 'filter', 'copy'].includes(kinds[i])) invalid();
     if (!kinds[i]) {
-      if (!stages[i].length || inputs[i].length > 1 || outputs[i].length > 1) invalid();
-      if ((inputs[i].length && setup[i].input) || (outputs[i].length && setup[i].output)) invalid('KASH_DOUBLE_CONSUME');
+      const stdin = inputs[i].filter((edge) => !(edges[edge][2] ?? 0));
+      if (!stages[i].length || stdin.length > 1 || outputs[i].length > 1) invalid();
+      if ((stdin.length && setup[i].input) || (outputs[i].length && setup[i].output)) invalid('KASH_DOUBLE_CONSUME');
     } else {
       if (stages[i].length || setup[i].input || setup[i].output) invalid();
       if (kinds[i] === 'merge') { if (inputs[i].length < 2 || outputs[i].length !== 1) invalid(); }
@@ -3123,10 +3127,23 @@ function runArgvCapture(stages, context) {
       executables = stages.map((args, i) => topology?.kinds[i] ? null : argvExecutable(args[0], configurations[i].env, configurations[i].cwd));
     }
     catch { resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot start process' }); return; }
+    const argumentEdges = topology ? topology.edges.map((edge, index) => edge[2] > 0 ? index : -1).filter((edge) => edge >= 0) : [];
     let pipes;
     const terminalOperators = topology ? topology.kinds.map((kind, node) => kind && !topology.outputs[node].length ? node : -1).filter((node) => node >= 0) : [];
     try { pipes = pipelinePipes(topology ? topology.edges.length + terminalOperators.length : stages.length - 1); }
-    catch { resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot create pipeline pipes (POSIX mkfifo required)' }); return; }
+    catch { resolveRun({ ok: false, code: argumentEdges.length ? 'KASH_STREAM_OPERAND_UNSUPPORTED' : 'HOST_FAIL', message: 'cannot create pipeline pipes (POSIX mkfifo required)' }); return; }
+    let operandFiles, relayExecutable, relayShell;
+    try {
+      if (argumentEdges.length) {
+        relayExecutable = argvExecutable(existsSync('/usr/bin/dd') ? '/usr/bin/dd' : '/bin/dd', process.env);
+        relayShell = argvExecutable('/bin/sh', process.env);
+        operandFiles = streamOperandFifos(argumentEdges.length);
+      }
+    } catch {
+      for (const pipe of pipes) { closeSync(pipe.read); closeSync(pipe.write); }
+      resolveRun({ ok: false, code: 'KASH_STREAM_OPERAND_UNSUPPORTED', message: 'live stream operands require POSIX FIFO rendezvous support (mkfifo, sh, and dd)' });
+      return;
+    }
     let input, output;
     const stageInputs = [], stageOutputs = [];
     try {
@@ -3144,10 +3161,12 @@ function runArgvCapture(stages, context) {
       if (output !== undefined) closeSync(output);
       for (const fd of [...stageInputs, ...stageOutputs]) if (fd !== undefined) closeSync(fd);
       for (const pipe of pipes) { closeSync(pipe.read); closeSync(pipe.write); }
+      operandFiles?.dispose();
       resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot open process redirection' });
       return;
     }
     const children = [];
+    const operandStates = new Map(argumentEdges.map((edge) => [edge, { ready: false, done: false, anchor: undefined }]));
     const results = [];
     const chunks = [];
     const limit = context.captureLimit > 0 ? context.captureLimit : 1024 * 1024;
@@ -3201,6 +3220,7 @@ function runArgvCapture(stages, context) {
       if (remaining !== 0) return;
       for (const cancel of timers) cancel();
       context.signal?.removeEventListener('abort', cancelled);
+      try { operandFiles?.dispose(); } catch (error) { failure ??= { ok: false, code: 'HOST_FAIL', message: `cannot release stream operand: ${error.message}` }; }
       if (publicationFailure !== null) { rejectRun(publicationFailure); return; }
       if (failure !== null) { resolveRun(failure); return; }
       let status = 0, signal = 0;
@@ -3220,13 +3240,26 @@ function runArgvCapture(stages, context) {
     try {
       for (let i = 0; i < stages.length && failure === null; i++) {
         if (topology?.kinds[i]) continue;
-        const args = stages[i];
+        const args = [...stages[i]];
         const configuration = configurations[i];
-        const inputEdge = topology?.inputs[i][0], outputEdge = topology?.outputs[i][0];
+        const inputEdge = topology?.inputs[i].find((edge) => !(topology.edges[edge][2] ?? 0)), outputEdge = topology?.outputs[i][0];
+        const operands = topology ? topology.inputs[i].filter((edge) => topology.edges[edge][2] > 0) : [];
+        for (const edge of operands) args[topology.edges[edge][2]] = operandFiles.names[argumentEdges.indexOf(edge)];
         const childInput = topology ? inputEdge === undefined ? stageInputs[i] ?? 'ignore' : pipes[inputEdge].read : i === 0 ? input ?? 'ignore' : process.platform === 'win32' ? 'pipe' : pipes[i - 1].read;
         const childOutput = topology ? outputEdge === undefined ? stageOutputs[i] ?? 'pipe' : pipes[outputEdge].write : i === stages.length - 1 ? output ?? 'pipe' : process.platform === 'win32' ? 'pipe' : pipes[i].write;
         const child = spawn(executables[i], args.slice(1), { argv0: args[0], shell: false, stdio: [childInput, childOutput, 'pipe'], env: configuration.env, cwd: configuration.cwd, detached: true });
         children.push(child);
+        child.once('exit', () => {
+          for (const edge of operands) {
+            const state = operandStates.get(edge);
+            if (state.ready || state.done) continue;
+            // A receiver may never open its operand. Wake a blocked transport
+            // open, retaining this anchor only until its explicit ready byte.
+            // Once closed, normal closed-reader/SIGPIPE propagation applies.
+            try { state.anchor = openSync(operandFiles.names[argumentEdges.indexOf(edge)], fsConstants.O_RDWR | fsConstants.O_NONBLOCK); }
+            catch (error) { stop('HOST_FAIL', `cannot close stream operand: ${error.message}`); }
+          }
+        });
         if (process.platform === 'win32' && i > 0) {
           const upstream = children[i - 1].stdout;
           const closeInput = () => {
@@ -3274,6 +3307,35 @@ function runArgvCapture(stages, context) {
           if (context.stream) publishReader(child.stdout, receive, () => failure !== null || context.signal?.aborted);
           else child.stdout.on('data', receive);
         }
+      }
+      // Named FIFOs need a real open rendezvous. A fixed POSIX helper opens the
+      // output, acknowledges it on fd 4, then becomes dd. No user command or
+      // stream data is parsed by this shell: paths are separate quoted argv.
+      // The acknowledgement also makes a never-opened operand cancellable
+      // without timing guesses or a permanent anchor that suppresses EOF.
+      // ponytail: one owned POSIX relay per argument; replace with an anonymous
+      // pipe binding if Node gains a supported pipe()/FD-transfer API.
+      if (failure === null) for (let slot = 0; slot < argumentEdges.length; slot++) {
+        const edge = argumentEdges[slot];
+        const state = operandStates.get(edge);
+        const relay = spawn(relayShell, ['-c', 'exec 3>"$1"; printf r >&4; exec "$2" bs=16384 >&3', 'kame-stream', operandFiles.names[slot], relayExecutable], { shell: false, stdio: [pipes[edge].read, 'ignore', 'ignore', 'ignore', 'pipe'], env: { PATH: '/usr/bin:/bin', LC_ALL: 'C' }, detached: true });
+        children.push(relay); remaining++;
+        track(relay, context.processGroup, context.finalizing);
+        const readyStream = relay.stdio?.[4];
+        readyStream?.once('data', () => {
+          state.ready = true;
+          if (state.anchor !== undefined) { closeSync(state.anchor); state.anchor = undefined; }
+          readyStream.destroy();
+        });
+        readyStream?.on('error', (error) => stop('HOST_FAIL', `stream operand handshake failed: ${error.message}`));
+        relay.once('error', () => stop('HOST_FAIL', 'cannot start stream operand relay'));
+        relay.once('close', (status, signalName) => {
+          state.done = true;
+          if (state.anchor !== undefined) { closeSync(state.anchor); state.anchor = undefined; }
+          const result = { status: status ?? 0, signal: osConstants.signals[signalName] ?? 0, outcome: 0 };
+          if (result.status || result.signal) stopGraph(result);
+          remaining--; finish();
+        });
       }
       if (topology && failure === null) for (let i = 0; i < stages.length; i++) if (topology.kinds[i]) {
         const failMux = (code, message) => {
@@ -3339,6 +3401,21 @@ function runArgvCapture(stages, context) {
 // Node's 'pipe' stdio uses socketpairs on Unix; unread bytes on an early close
 // can turn SIGPIPE into ECONNRESET/exit 1. Pass real blocking FIFO descriptors to
 // the children instead. mkfifo is a POSIX host utility, never a user shell.
+function streamOperandFifos(count) {
+  const directory = mkdtempSync(join(tmpdir(), 'kame-operands-'));
+  const names = Array.from({ length: count }, (_, index) => join(directory, String(index)));
+  const dispose = () => {
+    for (const name of names) { try { unlinkSync(name); } catch (error) { if (error.code !== 'ENOENT') throw error; } }
+    try { rmdirSync(directory); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  };
+  try {
+    const utility = existsSync('/usr/bin/mkfifo') ? '/usr/bin/mkfifo' : '/bin/mkfifo';
+    const result = spawnSync(utility, names, { shell: false, stdio: 'ignore', timeout: 1000, killSignal: 'SIGKILL' });
+    if (result.error || result.status !== 0 || names.some((name) => !statSync(name).isFIFO())) throw new Error('FIFO operands unavailable');
+    return { names, dispose };
+  } catch (error) { dispose(); throw error; }
+}
+
 function pipelinePipes(count) {
   if (count === 0) return [];
   if (process.platform === 'win32') return [];

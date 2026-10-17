@@ -1,6 +1,7 @@
 package host_test
 
 import (
+	"kame/core"
 	"kame/host"
 	"solod.dev/so/testing"
 )
@@ -29,4 +30,26 @@ func TestProcessTopologyRejectsPrivateFramesAtByteBoundaries(t *testing.T) {
 	request.Stages = stages[:2]
 	request.Edges = edges[:1]
 	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_FRAME_MISMATCH" { t.Error("private framed presentation accepted") }
+}
+
+func TestProcessTopologyArgumentPortsAreBoundedAndUnique(t *testing.T) {
+	stages := []host.ProcessStage{{Argv: []string{"a"}}, {Argv: []string{"b"}}, {Argv: []string{"cat", "<stream>", "<stream>"}, Input: "independent-stdin"}}
+	edges := []host.ProcessEdge{{From: 0, To: 2, Argument: 1}, {From: 1, To: 2, Argument: 2}}
+	request := host.ProcessRequest{Topology: true, Stages: stages, Edges: edges}
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "" { t.Error("independent argument ports conflicted with stdin") }
+	edges[1].Argument = 1
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_DOUBLE_CONSUME" { t.Error("duplicate argument slot accepted") }
+	edges[1].Argument = 3
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_MUX_ARITY" { t.Error("out-of-bounds argument slot accepted") }
+}
+
+func TestPipelinePayloadAllowsLeadingNativeNodes(t *testing.T) {
+	a := t.Allocator()
+	operator := core.NewList(a, nil)
+	argument := core.NewString(a, "/bin/cat")
+	executable := core.NewList(a, []core.Value{argument})
+	argument.Free(a)
+	payload := host.PipelinePayload(a, []core.Value{operator, executable})
+	if host.PayloadPath(payload) != "/bin/cat" { t.Error("leading native node hid executable identity") }
+	payload.Free(a); executable.Free(a); operator.Free(a)
 }

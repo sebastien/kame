@@ -54,6 +54,7 @@ const (
 	CommandStream
 	CommandReader
 	CommandWriter
+	CommandOperand
 )
 
 type ReferenceKind int
@@ -130,7 +131,7 @@ type Expr struct {
 	Expansion string
 }
 
-type CommandEdge struct { From int; To int }
+type CommandEdge struct { From int; To int; Argument int }
 
 type Result struct {
 	Alloc       mem.Allocator
@@ -1272,6 +1273,10 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	if e.Kind == CommandStream { b.WriteString("stream "); b.WriteString(e.Text); return }
 	if e.Kind == CommandReader { b.WriteByte('&'); b.WriteString(e.Text); return }
 	if e.Kind == CommandWriter { b.WriteString(">&"); b.WriteString(e.Text); return }
+	if e.Kind == CommandOperand {
+		if len(e.Body) != 0 { b.WriteString("<("); writeProcess(b, e.Body[0]); b.WriteByte(')') } else { b.WriteString("<&"); b.WriteString(e.Text) }
+		return
+	}
 	if e.Kind == CommandGroup { b.WriteByte('('); for i := range e.Items { if i != 0 { b.WriteString(", ") }; writeProcess(b, e.Items[i]) }; b.WriteByte(')'); return }
 	if e.Kind == CommandRedirection { b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
 	if e.Kind == CommandSetup { b.WriteByte(':'); b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }

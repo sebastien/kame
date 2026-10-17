@@ -99,8 +99,19 @@ func (p *Program) drainRequests() {
 			setups := host.PayloadSetups(request.Payload)
 			kinds := host.PayloadList(request.Payload, "kinds")
 			var edges []host.ProcessEdge
+			validEdges := true
 			connections := host.PayloadList(request.Payload, "edges")
-			for i := range connections { if len(connections[i].List) == 2 { edges = slices.Append(p.Alloc, edges, host.ProcessEdge{From: int(connections[i].List[0].Int), To: int(connections[i].List[1].Int)}) } }
+			for i := range connections {
+				items := connections[i].List
+				valid := connections[i].Kind == core.List && (len(items) == 2 || len(items) == 3)
+				for j := range items { if items[j].Kind != core.Int || int64(int(items[j].Int)) != items[j].Int { valid = false } }
+				if !valid { validEdges = false; continue }
+				if len(items) == 2 || len(items) == 3 {
+					edge := host.ProcessEdge{From: int(items[0].Int), To: int(items[1].Int)}
+					if len(items) == 3 { edge.Argument = int(items[2].Int) }
+					edges = slices.Append(p.Alloc, edges, edge)
+				}
+			}
 			for i := range graphs {
 				var arguments []string
 				for j := range graphs[i].List {
@@ -170,7 +181,14 @@ func (p *Program) drainRequests() {
 			processRequest := host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 			processRequest.Topology, processRequest.Edges = len(kinds) != 0, edges
 			processRequest.StreamItem, processRequest.StreamContext = eval.StreamItemCallback, p.Eval
-			if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(processRequest) {
+			hasOperands := false
+			for i := range edges { if edges[i].Argument != 0 { hasOperands = true } }
+			unsupported := hasOperands && p.Host != nil && !p.Host.SupportsStreamOperands()
+			if !validEdges {
+				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "KASH_MUX_ARITY", "invalid process graph edge descriptor")})
+			} else if unsupported {
+				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "KASH_STREAM_OPERAND_UNSUPPORTED", "host cannot expose a live inherited descriptor operand")})
+			} else if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(processRequest) {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "HOST_FAIL", "cannot start shell request")})
 			} else {
 				display := processDisplayFromHost(p.Alloc, processRequest)

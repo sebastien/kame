@@ -91,7 +91,8 @@ func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []
 }
 
 //so:extern nodecay
-func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, streamItem func(any, int64, int, []byte) int, streamContext any) c.Int {
+func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, streamItem func(any, int64, int, []byte) int, streamContext any) c.Int {
+	_ = operandArguments
 	_, _ = streamItem, streamContext
 	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput, kinds, edges, inputs, outputs, appends
 	return 0
@@ -184,6 +185,11 @@ func New(a mem.Allocator) *Host {
 
 func (h *Host) SupportsExecutor(name string, version string) bool { _, _ = h, version; return name == "" || name == "local" }
 
+//so:extern
+func km_stream_operands_supported() bool { return false }
+
+func (h *Host) SupportsStreamOperands() bool { _ = h; return km_stream_operands_supported() }
+
 // Start returns false when the request was not admitted; callers must settle
 // failure immediately rather than wait for an event. A failed terminal may also
 // be queued for diagnostics, but nil hosts or an occupied emergency rejection
@@ -202,7 +208,7 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		var directories, environment []string
 		var environmentLengths []int
 		var timeouts []int64
-		var kinds, edges, appends []int
+		var kinds, edges, appends, operandArguments []int
 		var inputs, outputs []string
 		for i := range request.Stages {
 			if request.Topology {
@@ -253,10 +259,11 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		}
 		ok := false
 		if request.Topology {
-			for i := range request.Edges { edges = slices.Append(h.Alloc, edges, request.Edges[i].From); edges = slices.Append(h.Alloc, edges, request.Edges[i].To) }
-			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, request.StreamItem, request.StreamContext) == 0
+			for i := range request.Edges { edges = slices.Append(h.Alloc, edges, request.Edges[i].From); edges = slices.Append(h.Alloc, edges, request.Edges[i].To); operandArguments = slices.Append(h.Alloc, operandArguments, request.Edges[i].Argument) }
+			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, request.StreamItem, request.StreamContext) == 0
 		} else { ok = km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append) == 0 }
 		slices.Free(h.Alloc, kinds); slices.Free(h.Alloc, edges); slices.Free(h.Alloc, inputs); slices.Free(h.Alloc, outputs); slices.Free(h.Alloc, appends)
+		slices.Free(h.Alloc, operandArguments)
 		slices.Free(h.Alloc, arguments)
 		slices.Free(h.Alloc, lengths)
 		slices.Free(h.Alloc, directories)

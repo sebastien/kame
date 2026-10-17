@@ -58,7 +58,8 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 			adapter := addStreamNode(c, graph, "encode", graph.Items[edge.To].Span)
 			graph.StreamKinds = slices.Append(c.Run, graph.StreamKinds, 0)
 			graph.Edges[i].To = adapter
-			graph.Edges = slices.Append(c.Run, graph.Edges, expr.CommandEdge{From: adapter, To: edge.To})
+			graph.Edges[i].Argument = 0
+			graph.Edges = slices.Append(c.Run, graph.Edges, expr.CommandEdge{From: adapter, To: edge.To, Argument: edge.Argument})
 		}
 	}
 	nodes := len(graph.Items)

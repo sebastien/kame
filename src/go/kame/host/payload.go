@@ -369,7 +369,9 @@ func PipelinePayload(a mem.Allocator, stages []core.Value) core.Value {
 	}
 	e.EndArray()
 	e.Flush()
-	fields := []core.RecordField{{Key: FieldStages, Value: core.NewList(a, stages)}, {Key: FieldData, Value: core.NewString(a, b.String())}, {Key: FieldPath, Value: core.NewString(a, stages[0].List[0].Text)}}
+	program := ""
+	for i := range stages { if len(stages[i].List) != 0 { program = stages[i].List[0].Text; break } }
+	fields := []core.RecordField{{Key: FieldStages, Value: core.NewList(a, stages)}, {Key: FieldData, Value: core.NewString(a, b.String())}, {Key: FieldPath, Value: core.NewString(a, program)}}
 	payload := core.NewRecord(a, fields)
 	for i := range fields {
 		fields[i].Value.Free(a)
