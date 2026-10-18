@@ -163,6 +163,29 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			if end < len(text) && text[end] != '\n' && text[end] != ';' && text[end] != '#' {
 				s.error(end, end+1, "unexpected Kash definition value; expected statement separator")
 			}
+		} else if word == "defer" {
+			p.Pos = wordEnd
+			for p.Pos < len(text) && space(text[p.Pos]) { p.Pos++ }
+			if p.Pos == len(text) || text[p.Pos] == '\n' || text[p.Pos] == ';' || text[p.Pos] == '#' {
+				s.error(start, p.Pos, "defer requires a command or parenthesized expression")
+				break
+			}
+			var part expr.Prefix
+			if text[p.Pos] == '(' && !expr.IsCommandGroup(text, p.Pos) { part = expr.ParseKashValuePrefix(s.Alloc, s.Source, p.Pos) } else { part = expr.ParseCommandPrefix(s.Alloc, s.Source, p.Pos) }
+			s.takeDiagnostics(part.Diagnostics)
+			if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery { s.error(start, part.End, "defer requires one parenthesized Kame expression, not a Kash value recovery") }
+			if part.Expr != nil && part.Expr.Kind == expr.CommandGraph && (part.Expr.Async || len(part.Expr.Body) != 0) {
+				s.error(start, part.End, "deferred commands cannot use & or command fallback; defer a Kash callable for compound cleanup")
+			}
+			e := mem.Alloc[expr.Expr](s.Alloc)
+			e.Kind, e.Span = expr.KashDefer, source.Span{Start: start, End: part.End}
+			e.Items = slices.Append(s.Alloc, e.Items, part.Expr)
+			expr.SetCommandChannels(s.Alloc, e, p.Channels)
+			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
+			p.Pos = part.End
+			end := p.Pos
+			for end < len(text) && space(text[end]) { end++ }
+			if end < len(text) && text[end] != '\n' && text[end] != ';' && text[end] != '#' { s.error(end, end+1, "defer requires one command or expression") }
 		} else if text[start] == '(' && !expr.IsCommandGroup(text, start) {
 			part := expr.ParseKashValuePrefix(s.Alloc, s.Source, start)
 			s.takeDiagnostics(part.Diagnostics)

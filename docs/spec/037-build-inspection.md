@@ -156,6 +156,9 @@ prerequisites or turn source-loading observations into executable stages.
 `plan` combines these inventories with the selected producer details: source
 location and rule, captures, arguments, relevant configuration and tools,
 declared outputs, resolved prerequisites, freshness, and known reuse policy.
+A definition producer is a symbol: human output shows one compact definition
+line (`NAME = expression`, or the function form), not a freshness, capture, or
+span record. JSON keeps those structured fields and adds the same compact `text`.
 Unrendered recipe text may be shown as source, not as an executed or fully
 expanded command. Metadata and generator provenance retain their established
 meaning.

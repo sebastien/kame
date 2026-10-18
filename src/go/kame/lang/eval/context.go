@@ -32,6 +32,9 @@ type Context struct {
 	DefinitionNamespace    [32]byte
 	HasDefinitionNamespace bool
 	ScriptGroup            int64
+	Deferred               *DeferScope
+	PrepareDeferred        *expr.Expr
+	Finalizing             bool
 	RecipeNode             int64
 	TimeoutMS              int64
 	Frames                 []diagnostic.Frame

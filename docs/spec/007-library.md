@@ -353,6 +353,8 @@ Filesystem operations issue host requests and require capabilities:
 | `lstat` | `read` | Inspect the final path component without following its symlink |
 | `readlink` | `read` | Return the final symlink's exact UTF-8 target text, without resolving it |
 | `wildcard` | `read` | Return the sorted, duplicate-free union of one or more filesystem patterns |
+| `files` | `read` | `wildcard` restricted to regular files: `(files PATTERNS...)` is `(wildcard :+files PATTERNS...)` |
+| `dirs` | `read` | `wildcard` restricted to directories: `(dirs PATTERNS...)` is `(wildcard :+dir PATTERNS...)` |
 
 `read`, `stat`, and `wildcard` register file or glob dependencies before
 returning. `exists?` also registers a dependency so creation or removal can
@@ -554,6 +556,7 @@ executable metadata checks do not grant access to user read operations.
   classification as computed outputs/prerequisites in planning/materialization,
   including basenames that would otherwise be valid logical task names.
 - Wildcard results are sorted and recursive `**` crosses directories.
+- `files` and `dirs` match `wildcard` with `:+files` and `:+dir`. They reject kind flags; unions and exclusions stay on `wildcard`.
 - Unquoted glob expressions and explicit `wildcard` calls agree for empty,
   singleton and multiple matches; unioning expanded lists never re-globs their
   filenames or loses their membership dependencies.

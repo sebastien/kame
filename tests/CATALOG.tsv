@@ -1,5 +1,16 @@
 # CLI conformance test catalog. One row per test script.
 # Columns: file<TAB>spec<TAB>category<TAB>covers
+tests/T042-01-kash-topology.sh	042	kash	Explicit point-to-point topology, merge/broadcast, bounded streams, validation, ownership and generated build dependencies
+tests/T042-02-kash-framing.sh	042	kash	Exact UTF-8 line frames, pure predicates, lexical next/otherwise joins, bounded records and predicate-aware build reuse
+tests/T042-03-kash-channels.sh	042	kash	Lexical named channels, single-writer/single-reader validation, alias compaction and cycle rejection
+tests/T042-04-kash-operands.sh	042	kash	Live anonymous/named argv operands, expanded argument ports, unseekable streams, bounded transport and cancellation
+tests/T042-05-kash-scheduling.sh	042	kash	Framed round-robin balance, explicit working budgets, backpressure and effect-free policy validation
+tests/T042-06-kash-lossy.sh	042	kash	Bounded drop-new/drop-old/latest broadcast queues, protected in-flight records and forwarded descriptor validation
+tests/T042-07-kash-metrics.sh	042	kash	Terminal graph outcomes, payload counters, queue high-water marks and unknown measurement preservation
+tests/T042-08-kash-live.sh	042	kash	Coalesced live graph snapshots, sampled operator waits and native/WASM terminal accounting
+tests/T042-09-kash-ordering.sh	042	kash	Explicit ready/strict framed merge ordering, whole-record turns, EOF, composed graphs and timeout ownership
+tests/T042-10-kash-failure-policy.sh	042	kash	Graph-wide ordinary-exit collection, deterministic status, fatal errors, recovery, async ownership and static policy conflicts
+tests/T042-11-kash-each.sh	042	kash	Explicit bounded per-record workers, exact stdin/EOF, ordered stdout, setup reuse, grants, cancellation and telemetry
 tests/T043-01-lang-finalization.sh	043	lang	Native/WASM finally! values, callbacks and aliases, validation, accepted/discarded effects, lexical retention, deadlines, SIGINT during body/cleanup and mandatory teardown
 tests/T016-03-lang-template-boundaries.sh	016	lang	Reference/call distinction, zero-argument and computed-callable calls, directive slots, nested selections, raw/escaped and inert brace text, headers/paths/tools, canonical formatting and native/WASM parity
 tests/T017-20-kash-context-environment.sh	017	kash	Expression statements, computed stage env records, ordered local overrides, validation and secret-safe traces, named args/inputs/outputs/changed inputs, rule-frame retention and native/WASM formatting parity
@@ -112,6 +123,8 @@ tests/T017-15-kash-match.sh	017	kash	Kash match patterns, lexical captures, subj
 tests/T017-16-kash-environment.sh	017	kash	Explicit Kash environment lookup, scoped grants, reserved bindings and native/WASM parity
 tests/T017-17-eval-process-expressions.sh	017	eval	Expression run/pipe graphs, structured results, lazy replay safety and native/WASM parity
 tests/T017-18-kash-async.sh	017	kash	Async graph ownership, lazy handles, repeat-safe await, joins, cancellation and native/WASM parity
+tests/T017-22-kash-defer.sh	017	kash	Invocation-scoped command/expression defer, snapshots, retained lazy values, LIFO cleanup, errors, cancellation, authority and temporary-workspace preservation
+tests/T017-23-kash-operations.sh	017	kash	Exact environment/capture bytes, non-disclosing validation and traces, selected status policy, finite fail-fast/collected work, bounded fresh retries and executable cookbook
 tests/T010-20-wasm-build-includes.sh	010	wasm	Build and inspection includes, nested source loading, cycles, duplicate declarations with original locations and distinct include-site provenance, repeated contributions and authored diagnostic parity
 tests/T007-09-lib-wildcard-union.sh	007	lib	Sorted multi-pattern unions, deduplication, independent dependency membership and native/WASM file input parity
 tests/T004-19-lang-rule-header-composition.sh	004	lang	Mixed expression and interpolated inputs, quoted paths, alternative <- rule separator, expanded inspection and native/WASM ordering

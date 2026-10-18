@@ -194,7 +194,11 @@ Definitions in a statement sequence are registered lazily before that sequence
 runs. Duplicate names in one sequence are errors. Each selected control branch
 has a child lexical scope; its definitions may shadow outer bindings but do not
 escape. Unselected branches are never registered or evaluated. Statements run
-in source order; an unhandled failure stops the sequence.
+in source order; an unhandled failure stops the sequence. Completed top-level
+statements retain their demanded lazy values through the combined runner
+invocation, including finalization. Releasing a statement handle must not cancel
+and recompute an effectful definition at the next statement. Separate callable
+invocations and iteration callbacks still execute their own fresh calls.
 
 Newlines and unquoted `;` terminate ordinary statements outside nested syntax.
 Embedded expressions may span lines using their existing delimiter rules.
@@ -714,6 +718,80 @@ embedded Kame syntax are not process operators.
 `first &; second` or a newline. Parentheses do not introduce shell subshells or
 raw process grouping. `&&` and `||` are unsupported and produce diagnostics.
 
+## Deferred cleanup
+
+`defer COMMAND` registers a process graph for cleanup. `defer (EXPRESSION)`
+registers one parenthesized Kame expression. Neither runs the deferred action at
+registration. The statement is parsed with its source before any execution, and
+formatting retains the command/expression boundary.
+Quote an external executable named `defer` at statement position; a lazy
+definition named `defer` remains an ordinary definition.
+
+```kash
+created = $(mktemp -d ./workspace.XXXXXX)
+directory = (if (ends? "\n" created) (slice 0 -1 created) created)
+defer rm -rf $directory
+defer (out! "finishing\n")
+```
+
+Registration occurs only in a reached runtime statement. Parse, format,
+planning and dry-run do not evaluate deferred actions or their operands.
+Commands evaluate and validate argv, redirection paths and stage setup at
+registration, retaining completed operands across suspension. This can demand a
+lazy definition or run an explicit capture needed to obtain an operand. It does
+not open/truncate redirection destinations or launch the deferred graph. Typed
+environments retain their ordinary secrecy, authority and validation boundaries.
+Captured values are data, never generated source.
+
+Expressions instead retain their AST, lexical scope and execution context and
+evaluate the complete expression during cleanup. Branch-local bindings survive
+until then. Ordinary laziness remains: an undemanded definition may first execute
+during cleanup. Use an explicit demand or command operand when creation must
+precede registration. Expression results are discarded, not interpreted as
+executables or implicitly printed.
+
+Cleanup belongs to the enclosing Kash invocation: a recipe, constructed callable,
+or the top-level ordered runner session. Branch exit does not finalize it; nested
+Kash callables have independent stacks. Actions execute once in reverse
+registration order. Normal completion joins owned async work before cleanup;
+failure/cancellation cancels and reaps that work before cleanup starts. A deferred
+expression may start async work, but the action joins it before advancing.
+Terminal `&` on a deferred command is invalid. Direct command fallback is also
+invalid in this initial form: defer a call to an authored Kash callable for
+compound recovery. Terminal exit acceptance `?` remains supported. An action
+cannot append to its closing stack; a nested callable may own a new stack.
+
+Finalization uses a separate five-second budget per invocation stack, starting
+after user processes have been reaped. Process timeouts are capped by the
+remaining budget and any tighter inherited/stage limit. If the budget is
+exhausted, report unrun actions rather than claiming successful cleanup. This is
+a cooperative runtime/process deadline, not preemption of arbitrary blocking
+custom host implementations. Cleanup retains original capabilities.
+
+Try remaining actions after an action fails, while budget remains. If work
+otherwise succeeded, cleanup failure fails the invocation. Otherwise preserve the
+primary error/cancellation and report cleanup diagnostics as supplementary
+context. `?` on a deferred command explicitly accepts only its ordinary supported
+exit categories; it cannot suppress timeout, capability denial or cancellation.
+SIGKILL, runtime crash, unavailable host services and forced second interruption
+can prevent finalization. Remote effects are not rolled back.
+
+`defer` attempts authored cleanup; it does not prove filesystem ownership. Only
+remove freshly created private resources whose paths were retained safely. Never
+infer ownership from a glob, shared directory or predictable `.tmp` suffix.
+Deferred `write!` actions execute immediately, including in failed recipes, rather
+than waiting for successful artifact publication. `yield!` is not a deferred
+artifact-publication mechanism. Ordinary redirection is not atomic output
+publication. Keep staged artifact publication and historical `do clean` ownership
+separate.
+
+Forwarded hosts must explicitly begin and pump finalization before freeing a
+cancelled runtime. The shared `kame_wasm_finalization_tick` driver services both
+Kame `finally!` and Kash `defer`, including cleanup request deadlines. The additive
+`kame_wasm_finalize_begin` entry point is available for Kash-only hosts; ordinary
+step and completion calls service its requests under original grants and a fresh
+cleanup cancellation/deadline context. Free alone cannot execute host actions.
+
 ## Control statements
 
 Kash adds block control statements around its commands. A block is introduced by
@@ -885,6 +963,19 @@ stage, and source information but do not embed captured stdout/stderr in causes;
 live forwarding and explicit capture remain separate channels.
 
 ## Acceptance tests
+
+- Deferred commands snapshot operands once; expressions preserve lexical bindings
+  and evaluate only during cleanup. Neither opens an output at registration,
+  executes in an unselected branch or runs during dry-run.
+- Demanded top-level lazy effect values survive successive statement handles;
+  distinct calls and retry attempts remain fresh.
+- Cleanup is invocation-scoped, LIFO and once-only across suspension, on success,
+  failure, denied capabilities, timeout and supported interruption paths.
+- User processes are reaped before cleanup; cleanup-started async work is joined.
+  Failed cleanup does not skip later actions or mask the primary failure, and
+  exhausted budgets/host limitations are reported.
+- Temporary-workspace examples preserve unrelated files. No automatic ownership,
+  atomic-redirection, crash-finalization or remote-rollback guarantee is implied.
 
 - `$name`, `$project.name`, and `${name}` resolve the same Kame bindings.
 - `$PATH` does not read the environment, while `$env.PATH` does.

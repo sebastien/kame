@@ -2,10 +2,11 @@ package cli
 
 import (
 	"kame/core"
-	"kame/lang/eval"
+	"solod.dev/so/encoding/json"
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
+	"solod.dev/so/strings"
 )
 
 func reportField(value core.Value, key string) core.Value {
@@ -27,9 +28,13 @@ func reportText(out io.Writer, text string, token string, styled bool) {
 	plain := true
 	for i := range text { if text[i] < 32 || text[i] == 127 { plain = false; break } }
 	if plain { Style(out, token, text, styled); return }
-	escaped := eval.Display(mem.System, core.Value{Kind: core.String, Text: text})
+	var buffer strings.Builder
+	e := json.NewEncoder(&buffer)
+	e.Str(text); e.Flush()
+	escaped := strings.ReplaceAll(mem.System, buffer.String(), "\x7f", "\\u007f")
 	Style(out, token, escaped, styled)
 	mem.FreeString(mem.System, escaped)
+	buffer.Free()
 }
 
 func reportReferences(resource core.Value, producers core.Value, dependencies core.Value) int {
@@ -118,6 +123,10 @@ func writeInspectionReport(out io.Writer, doc core.Value, styled bool) {
 		io.WriteString(out, "  producers\n")
 		for i := range producers.List {
 			p := producers.List[i]
+			if reportField(p, "kind").Text == "definition" && reportField(p, "text").Text != "" {
+				io.WriteString(out, "    "); reportText(out, reportField(p, "text").Text, "value.literal", styled); io.WriteString(out, "\n")
+				continue
+			}
 			io.WriteString(out, "    "); reportText(out, reportField(p, "target").Text, "value.target", styled); io.WriteString(out, " · "+reportField(p, "kind").Text+"\n")
 			for j := range p.Record {
 				field := p.Record[j]

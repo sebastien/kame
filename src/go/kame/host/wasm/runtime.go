@@ -48,6 +48,7 @@ type Runtime struct {
 	BuildRetainBytes   int
 	Handle             *program.Handle
 	Watching           bool
+	Finalizing         bool
 	WatchHandles       []*program.Handle
 	Environment        []string
 	ToolPaths          []program.Tool
@@ -149,6 +150,7 @@ func newRuntime(a mem.Allocator, arena *Heap, name string, source string) Runtim
 	evalProgram.DirectHostRequests = true
 	runtime := mem.Alloc[Runtime](a)
 	runtime.Alloc, runtime.Arena, runtime.Engine, runtime.Eval, runtime.Parsed, runtime.Registry = a, arena, engine, evalProgram, parsed, registry
+	evalProgram.SetDefinitionEffectSink(sessionEffect, runtime)
 	runtime.Host = NewMemoryHost(a)
 	runtime.Directory = pureText(a, ".")
 	runtime.Environment = nil
@@ -357,6 +359,20 @@ func (r *Runtime) ListJSON(query string) PureResult {
 	}
 	var buffer = bytes.NewBuffer(r.Alloc, nil)
 	r.Program.WriteTargetList(&buffer, query)
+	text := pureText(r.Alloc, buffer.String())
+	buffer.Free()
+	return PureResult{Text: text}
+}
+
+// ListReportJSON adds kind and read-only freshness for human catalogue output.
+func (r *Runtime) ListReportJSON(query string) PureResult {
+	if r == nil || r.Program == nil {
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
+	}
+	var buffer = bytes.NewBuffer(r.Alloc, nil)
+	r.Program.WriteTargetReport(&buffer, query)
+	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Free()
 	return PureResult{Text: text}
@@ -766,7 +782,8 @@ func (r *Runtime) Step() host.NextResult {
 	}
 	if r.Program != nil {
 		r.configureFinalization()
-		if r.Handle != nil {
+		if r.Finalizing { r.Program.Eval.AdvanceFinalization() }
+		if r.Handle != nil || r.Finalizing {
 			r.Program.Tick(0)
 		}
 		if outbound := r.Program.NextOutbound(); outbound.OK {
@@ -780,6 +797,7 @@ func (r *Runtime) Step() host.NextResult {
 	}
 	r.configureFinalization()
 	r.Eval.PollFinalizers()
+	if r.Finalizing { r.Eval.AdvanceFinalization() }
 	r.Engine.Step()
 	for r.FinalizationEnabled {
 		cancel := r.Engine.NextCancellation()
@@ -838,6 +856,23 @@ func (r *Runtime) Cancel() bool {
 }
 
 func (r *Runtime) Result() RuntimeResult {
+	if r != nil && r.Finalizing {
+		p := r.finalizationProgram()
+		if p != nil && !p.AdvanceFinalization() { return RuntimeResult{} }
+		result := r.result()
+		if p != nil {
+			d := p.FinalizationDiagnostic(r.Alloc)
+			if result.Diagnostic.Code == "" { result.Diagnostic = d } else if d.Code != "" {
+				result.Diagnostic.Notes = slices.Append(r.Alloc, result.Diagnostic.Notes, pureText(r.Alloc, "deferred cleanup failed: "+d.Code+": "+d.Message))
+				d.Free(r.Alloc)
+			}
+		}
+		return result
+	}
+	return r.result()
+}
+
+func (r *Runtime) result() RuntimeResult {
 	if r == nil {
 		return RuntimeResult{}
 	}

@@ -128,6 +128,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	}
 	if state.Stage == len(e.Items) && !demandProcessInput(c, state.Input) { return Result{Waiting: true} }
 	if state.Done {
+		if c.PrepareDeferred == e { return Result{} }
 		if state.Output != "" { c.Emit(EffectProcessWrite, []byte(state.Output)) }
 		return Result{Value: state.Value.Clone(c.Run)}
 	}
@@ -401,6 +402,11 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		state.Argv = nil
 		state.Stage++
 		state.Index = 0
+	}
+	if c.PrepareDeferred == e {
+		p.appendDefer(e, c, state)
+		state.Done = true
+		return Result{}
 	}
 	if p.DryRun {
 		if state.Async || e.Async { return Result{Value: core.Value{Kind: core.Process, Process: p}} }

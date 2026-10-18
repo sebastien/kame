@@ -40,6 +40,15 @@ func TestReportPreservesNestedEnvelopeNames(t *testing.T) {
 	}
 }
 
+func TestTargetReportGroupsKindsAndKeepsStatusReadableWithoutColor(t *testing.T) {
+	document := `{"schema":1,"type":"list","entries":[{"name":"./out","group":"artifacts","status":"missing"},{"name":"test","group":"tasks","status":"built"},{"name":"build","group":"rules","status":""},{"name":"daemon","group":"services","status":""},{"name":"package","group":"tasks","status":"outdated"},{"name":"./bad\u001b[31m","group":"artifacts","status":"unknown"}]}`
+	var out strings.Builder
+	defer out.Free()
+	if !cli.WriteReport(&out, "list", document, false) || out.String() != "list\n  Rules\n    build\n  Services\n    daemon\n  Tasks\n    test  ok\n    package  out of date\n  Artifacts\n    ./out  missing\n    \"./bad\\u001b[31m\"  unknown\n" {
+		t.Error("target groups, match ordering, status labels or terminal escaping changed: "+out.String())
+	}
+}
+
 func TestInspectionBoundariesGroupDistinctAttributesByPath(t *testing.T) {
 	document := `{"schema":2,"type":"outputs","depth":1,"resources":[{"id":1,"key":{"kind":"file"},"display":"./result","roles":["artifact"],"status":"missing"}],"producers":[{"id":1,"resource":1}],"dependencies":[],"deferred":[{"producer":1,"reason":"runtime-discovery"},{"resource":1,"producer":1,"reason":"opaque-process-io"},{"resource":1,"producer":1,"reason":"runtime-discovery"}]}`
 	var out strings.Builder

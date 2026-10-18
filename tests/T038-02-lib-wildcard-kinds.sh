@@ -37,16 +37,21 @@ for backend in native wasm; do
 	}
 	test-step "$backend union masks, flag order, duplicates and computed flags"
 	check '["./assets/file"]' '(wildcard :+files ./assets/*)'
+	check '["./assets/file"]' '(files ./assets/*)'
 	check '["./assets/nested"]' '(wildcard ./assets/* :+dir)'
+	check '["./assets/nested"]' '(dirs ./assets/*)'
 	check '["./assets/dangling" "./assets/dirlink" "./assets/linkfile" "./assets/loop"]' '(wildcard :+symlinks ./assets/*)'
 	check '["./assets/dangling" "./assets/dirlink" "./assets/file" "./assets/linkfile" "./assets/loop"]' '(wildcard :+files ./assets/* :+symlinks :-dir :+files)'
 	check '["./assets/file" "./assets/nested"]' '(wildcard :-symlinks ./assets/* :+files :+dir)'
 	check '["./assets/fifo"]' '(wildcard :-files :-dir :-symlinks ./assets/*)'
 	check '["./assets/file"]' '(let [flags ["+files" "-symlinks"]] (wildcard flags.0 ./assets/* flags.1))'
 	check '["./+files"]' '(wildcard :+files ./+files)'
+	check '["./+files"]' '(files ./+files)'
 	test-step "$backend traversal, literal matches, dangling links and empty results"
 	check '["./assets/file" "./assets/nested/sub"]' '(wildcard :+files ./assets/** ./assets/nested/*)'
+	check '["./assets/file" "./assets/nested/sub"]' '(files ./assets/** ./assets/nested/*)'
 	check '["./assets/nested"]' '(wildcard :+dir ./assets/**)'
+	check '["./assets/nested"]' '(dirs ./assets/**)'
 	check '["./assets/dangling"]' '(wildcard :+symlinks ./assets/dangling)'
 	check '["./assets/nested/dangling"]' '(wildcard :+symlinks ./assets/*/dangling)'
 	check '[]' '(wildcard :+files ./absent/**)'
@@ -54,7 +59,7 @@ for backend in native wasm; do
 	check ':true' '(get "regular" (lstat ./assets/file))'
 	check ':false' '(get "regular" (lstat ./assets/linkfile))'
 	test-step "$backend invalid flags and real metadata errors"
-	for expression in '(wildcard :+files)' '(wildcard :-dir :-symlinks)' '(wildcard :+files :-files ./assets/*)' '(wildcard :-symlinks :+symlinks ./assets/*)' '(wildcard "+unknown" ./assets/*)' '(wildcard "-unknown" ./assets/*)' '(wildcard "+files/child")'; do reject EXPR_INVALID "$expression"; done
+	for expression in '(wildcard :+files)' '(wildcard :-dir :-symlinks)' '(wildcard :+files :-files ./assets/*)' '(wildcard :-symlinks :+symlinks ./assets/*)' '(wildcard "+unknown" ./assets/*)' '(wildcard "-unknown" ./assets/*)' '(wildcard "+files/child")' '(files)' '(dirs)' '(files :+dir ./assets/*)' '(dirs :+files ./assets/*)' '(files "+files")'; do reject EXPR_INVALID "$expression"; done
 	reject FS_ERR '(wildcard :+files ./assets/loop/*)'
 	test-step "$backend memory resources expose normalized entry kinds"
 	check '["mem://masks/root"]' '(wildcard :+dir (resource "mem://masks/*"))' --allow-read=mem://masks/ --allow-write=mem://masks/ -c '(write! (resource "mem://masks/root/input") "x")'

@@ -18,7 +18,7 @@ import { Socket } from 'node:net';
 import process, { argv, env, stderr, stdout } from 'node:process';
 
 // Numeric graph kinds are part of the stable WASM ABI.
-const graphKinds = Object.freeze({ inputs: 0, outputs: 1, span: 2, planRoots: 3, list: 4 });
+const graphKinds = Object.freeze({ inputs: 0, outputs: 1, span: 2, planRoots: 3, list: 4, listReport: 5 });
 
 // Children run in their own process group so a signal terminates the whole
 // tree, and a forced termination reports 128 plus the signal number.
@@ -218,6 +218,7 @@ function resolveColor(color, format, destination = stderr) {
 }
 
 const semanticStyles = {
+  'target.rule': '33', 'target.service': '36', 'target.task': '35', 'target.artifact': '34',
   heading: '1', 'value.target': '1', 'value.symbol': '1', 'value.tool': '1', 'value.option': '1', 'diagnostic.code': '1',
   'value.path': '36', location: '36', 'message.info': '36', 'status.running': '36', 'progress.complete': '36',
   'message.tip': '1;36', 'message.warning': '93', 'status.retrying': '93', 'status.cancelled': '33',
@@ -253,8 +254,22 @@ function writeReport(heading, document) {
     if (label === 'path' && value === '') text = 'unavailable';
     stdout.write(`${'  '.repeat(depth)}${label ? `${styled('value.symbol', label, outputColor)}: ` : ''}${styled(['source', 'path', 'target', ''].includes(label) ? 'value.path' : 'value.literal', text, outputColor)}\n`);
   };
-  if (data.schema === 2) writeInspectionReport(data, write);
+  if (data.type === 'list') writeTargetReport(data);
+  else if (data.schema === 2) writeInspectionReport(data, write);
   else write(data, '', 1, true);
+}
+
+function writeTargetReport(doc) {
+  if (!doc.entries.length) stdout.write('  no entries\n');
+  for (const [group, heading, token] of [['rules', 'Rules', 'target.rule'], ['services', 'Services', 'target.service'], ['tasks', 'Tasks', 'target.task'], ['artifacts', 'Artifacts', 'target.artifact']]) {
+    const entries = doc.entries.filter((entry) => entry.group === group);
+    if (!entries.length) continue;
+    stdout.write(`  ${styled(token, heading, outputColor)}\n`);
+    for (const entry of entries) {
+      const [label, statusToken] = entry.status === 'built' ? ['ok', 'status.success'] : entry.status === 'outdated' ? ['out of date', 'message.warning'] : [entry.status, entry.status === 'missing' ? 'status.failed' : 'text.muted'];
+      stdout.write(`    ${styled(token, shortReportField(entry.name), outputColor)}${label ? `  ${styled(statusToken, label, outputColor)}` : ''}\n`);
+    }
+  }
 }
 
 function writeInspectionReport(doc, write) {
@@ -294,6 +309,10 @@ function writeInspectionReport(doc, write) {
   if (doc.type === 'plan') {
     stdout.write('  producers\n');
     for (const p of producers) {
+      if (p.kind === 'definition' && p.text) {
+        stdout.write(`    ${text(p.text, 'value.literal')}\n`);
+        continue;
+      }
       stdout.write(`    ${text(p.target, 'value.target')} · ${p.kind}\n`);
       for (const [key, value] of Object.entries(p)) if (!['id', 'resource', 'target', 'kind', 'outputs'].includes(key)) write(value, key, 3);
     }
@@ -2057,7 +2076,7 @@ class Module {
     if (context.signal?.aborted) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
-    let failure;
+    let failure, primaryDiagnostic;
     try {
       const compiled = this.write(source);
       if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
@@ -2087,6 +2106,7 @@ class Module {
       return this.copyResult(instance);
     } catch (error) {
       failure = error;
+      primaryDiagnostic = lastDiagnostic;
       throw error;
     } finally {
       try {
@@ -2095,6 +2115,7 @@ class Module {
         if (failure && diagnostic) failure.diagnostics = [diagnostic];
       } finally {
         this.exports.kame_wasm_instance_free(instance);
+        if (failure) lastDiagnostic = primaryDiagnostic;
       }
     }
   }
@@ -2321,7 +2342,7 @@ class Module {
     if (externalSignal?.aborted) cancel();
     context.concurrent = true;
     context.signal = cancellation.signal;
-    let hostError;
+    let hostError, primaryDiagnostic;
     let targetStarted = false;
     let failure;
     try {
@@ -2361,6 +2382,7 @@ class Module {
       return { kind, bytes: this.copyResult(instance), events: context.events?.slice() ?? [] };
     } catch (error) {
       failure = error;
+      primaryDiagnostic = lastDiagnostic;
       throw error;
     } finally {
       try {
@@ -2376,6 +2398,7 @@ class Module {
           this.exports.kame_wasm_instance_free(instance);
         }
       } finally {
+        if (failure) lastDiagnostic = primaryDiagnostic;
         invocationDisposals.delete(disposal);
         disposed();
       }
@@ -2516,7 +2539,7 @@ class Module {
     invocationCancellations.add(cancellation);
     context.concurrent = true;
     context.signal = cancellation.signal;
-    let hostError;
+    let hostError, primaryError, primaryDiagnostic;
     try {
       if (this.exports.kame_wasm_source_compile(instance, 0, 0) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
       this.registerPlugins(instance, context);
@@ -2573,18 +2596,26 @@ class Module {
       return 0;
     } catch (error) {
       if (error.code === 'RECIPE_TIMEOUT') this.exports.kame_wasm_finalization_tick?.(instance, process.hrtime.bigint(), 2);
+      primaryError = error;
+      primaryDiagnostic = lastDiagnostic;
       if (inv.json && lastDiagnostic !== null) return 1;
       throw error;
     } finally {
+      cancellation.abort();
+      await Promise.all(pending);
       try {
-        cancellation.abort();
-        await Promise.all(pending);
-        await this.cleanupInstance(instance, context);
+        try {
+          const diagnostic = await this.cleanupInstance(instance, context);
+          if (diagnostic && primaryError) primaryError.diagnostics = [{ ...diagnostic, code: primaryError.code, message: primaryError.message }];
+          else if (diagnostic && !interruptedStatus) throw Object.assign(new Error(diagnostic.message), { code: diagnostic.code, diagnostics: [diagnostic] });
+        }
+        catch (error) { if (!primaryError && !interruptedStatus) throw error; reportWatchError(error); }
+      } finally {
         invocationCancellations.delete(cancellation);
         this.exports.kame_wasm_instance_free(instance);
-      } finally {
-        invocationDisposals.delete(disposal);
+        if (primaryError) lastDiagnostic = primaryDiagnostic;
         disposed();
+        invocationDisposals.delete(disposal);
       }
     }
   }
@@ -4122,7 +4153,15 @@ async function runList(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
   if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
   primarySource = source;
-  const bytes = await module.graphJSON(source.compiled, inv.targets[0] || '', 0, graphKinds.list, false, source.name);
+  let context;
+  if (!jsonMode) {
+    context = contextFor(inv);
+    context.inspection = true;
+    context.grants.write = false;
+    context.grants.run = false;
+    context.inspectionGrants = context.portableGrants;
+  }
+  const bytes = await module.graphJSON(source.compiled, inv.targets[0] || '', 0, jsonMode ? graphKinds.list : graphKinds.listReport, false, source.name, context);
   writeReport('list', JSON.parse(Buffer.from(bytes).toString('utf8')));
   return 0;
 }
@@ -4157,7 +4196,7 @@ async function runGraph(module, inv, sourceDirectory) {
 }
 
 function shortReportField(text) {
-  return /[\x00-\x1f\x7f]/u.test(text) ? JSON.stringify(text) : text;
+  return /[\x00-\x1f\x7f]/u.test(text) ? JSON.stringify(text).replaceAll('\x7f', '\\u007f') : text;
 }
 
 async function runTools(module, inv, sourceDirectory) {

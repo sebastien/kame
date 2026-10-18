@@ -156,11 +156,14 @@ func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 	}
 	if plan.Rule == nil {
 		for i := range p.Eval.Definitions {
-			definition := p.Eval.Definitions[i]
-			if definition.Name != plan.Target { continue }
-			location := p.Eval.LocateSource(p.Parsed.Source.Name, definition.Span)
+			item := p.Eval.Definitions[i]
+			if item.Name != plan.Target { continue }
+			location := p.Eval.LocateSource(p.Parsed.Source.Name, item.Span)
 			e.Str("source"); e.Str(location.Source)
 			e.Str("span"); e.BeginObject(); e.Str("start"); e.Int(int64(location.Span.Start)); e.Str("end"); e.Int(int64(location.Span.End)); e.EndObject()
+			text := definition.FormatCompact(p.Alloc, item)
+			e.Str("text"); e.Str(text)
+			mem.FreeString(p.Alloc, text)
 			break
 		}
 		return

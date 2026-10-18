@@ -44,6 +44,7 @@ func Register(r *eval.Registry) bool {
 		observation(r, "read", opRead, 1, 1, eval.Read) && observation(r, "exists?", opExists, 1, 1, eval.Read) &&
 		observation(r, "stat", opStat, 1, 1, eval.Read) && observation(r, "lstat", opLstat, 1, 1, eval.Read) &&
 		observation(r, "readlink", opReadlink, 1, 1, eval.Read) && observation(r, "wildcard", opWildcard, 1, -1, eval.Read) &&
+		observation(r, "files", opFiles, 1, -1, eval.Read) && observation(r, "dirs", opDirs, 1, -1, eval.Read) &&
 		registerWrite(r) && observation(r, "env", opEnv, 1, 1, eval.Env) &&
 		process(r, "sh!", opSh, 1, 2) &&
 		process(r, "shell-template!", opShellTemplate, 2, 2) &&
@@ -70,6 +71,7 @@ func callback(r *eval.Registry, name string, call eval.OperationCall, min int, m
 func observation(r *eval.Registry, name string, call eval.OperationCall, min int, max int, capability eval.Capability) bool {
 	operation := eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Capabilities: []eval.Capability{capability}, Category: eval.ObservationOperation, Phases: eval.AllPhases, Behavior: eval.ReadsHost | eval.TracksDependency, Version: version}
 	if name == "wildcard" { operation.Preflight = wildcardPreflight }
+	if name == "files" || name == "dirs" { operation.Preflight = kindShorthandPreflight }
 	return r.Add(operation)
 }
 

@@ -20,7 +20,7 @@ func (r *Runtime) FinalizationTick(nowNS int64, stopping bool) bool {
 	r.configureFinalization()
 	p := r.finalizationProgram()
 	if p == nil { return false }
-	if stopping { p.BeginFinalization() }
+	if stopping { r.Finalizing = true; p.BeginFinalization() }
 	p.PollFinalizers()
 	if r.Session != nil && r.Handle != nil { r.Session.Observe(r.Handle) }
 	return p.Finalizing()
@@ -36,6 +36,7 @@ func (r *Runtime) configureFinalization() {
 	p := r.finalizationProgram()
 	if p == nil { return }
 	p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = runtimeFinalizationNow, runtimeFinalizationQuiet, r
+	if r.Program == nil { p.ProcessesQuiet, p.ProcessesQuietState = runtimeDefersQuiet, r }
 	if r.Program == nil { p.SetDefinitionEffectSink(runtimeFinalizationEffect, r) }
 }
 
@@ -53,6 +54,15 @@ func runtimeFinalizationEffect(value any, effect eval.Effect) {
 	copy := effect
 	copy.Data = slices.Clone(r.Alloc, effect.Data)
 	r.Effects = slices.Append(r.Alloc, r.Effects, copy)
+}
+
+func runtimeDefersQuiet(value any, owner int64, group int64) bool {
+	r := value.(*Runtime)
+	for i := range r.FinalizationRequests {
+		node := r.FinalizationRequests[i].NodeID
+		if node == owner || r.Eval.ProcessInGroup(node, group) { return false }
+	}
+	return true
 }
 
 func (r *Runtime) trackFinalizationRequest(next host.NextResult) {
@@ -98,9 +108,19 @@ func (r *Runtime) ResultDiagnosticJSON() PureResult {
 	if r == nil { return PureResult{} }
 	node := r.Node
 	if r.Program != nil && r.Handle != nil { node = r.Handle.Node }
-	if node == nil || node.Diagnostic.Code == "" { return PureResult{} }
+	var d diagnostic.Diagnostic
+	if node != nil { d = node.Diagnostic.Clone(r.Alloc) }
+	if p := r.finalizationProgram(); p != nil {
+		cleanup := p.FinalizationDiagnostic(r.Alloc)
+		if d.Code == "" { d = cleanup } else if cleanup.Code != "" {
+			d.Notes = slices.Append(r.Alloc, d.Notes, pureText(r.Alloc, "deferred cleanup failed: "+cleanup.Code+": "+cleanup.Message))
+			cleanup.Free(r.Alloc)
+		}
+	}
+	defer d.Free(r.Alloc)
+	if d.Code == "" { return PureResult{} }
 	buffer := bytes.NewBuffer(r.Alloc, nil)
-	program.WriteJSONDiagnostic(&buffer, node.Diagnostic)
+	program.WriteJSONDiagnostic(&buffer, d)
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Free()
 	return PureResult{Text: text}

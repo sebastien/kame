@@ -177,6 +177,8 @@ environment values can invalidate a consumer.
 | `lstat` | `(lstat PATH)` | read | No-follow final-component metadata, with a portable `link` boolean; parents still follow links. |
 | `readlink` | `(readlink PATH)` | read | Exact UTF-8 target text; relative targets stay relative, dangling links work; invalid text/absent paths/non-links report `FS_ERR`. |
 | `wildcard` | `(wildcard [FLAG...] PATTERN-OR-PATH-LIST...)` | read | Sorted, duplicate-free union; at least one pattern/path-list operand is required. Each pattern tracks membership. |
+| `files` | `(files PATTERN-OR-PATH-LIST...)` | read | `(wildcard :+files ...)`. Rejects kind flags. |
+| `dirs` | `(dirs PATTERN-OR-PATH-LIST...)` | read | `(wildcard :+dir ...)`. Rejects kind flags. |
 | `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other supported values use the effect-output encoding described below, not scalar-only `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
 | `env` | `(env NAME)` | env | Environment value. |
 | `sh!` | `(sh! [OPTIONS] COMMAND)` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
@@ -217,7 +219,8 @@ identical duplicates are harmless, opposite flags for one kind and unknown flags
 report `EXPR_INVALID`. Pass flags as scalar operands, not list members.
 
 ```kame
-(wildcard :+files ./src/**/*.c)
+(files ./src/**/*.c)
+(dirs ./assets/*)
 (wildcard :+files :+symlinks ./assets/**)
 ```
 

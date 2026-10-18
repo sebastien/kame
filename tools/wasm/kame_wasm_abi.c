@@ -682,6 +682,15 @@ uint32_t kame_wasm_session_work_begin(uint64_t handle, uint32_t index) {
   return KAME_WASM_OK;
 }
 
+__attribute__((export_name("kame_wasm_finalize_begin")))
+uint32_t kame_wasm_finalize_begin(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (!instance) return KAME_WASM_HANDLE_INVALID;
+  if (!instance->runtime) return KAME_WASM_STATE_INVALID;
+  return wasm_Runtime_BeginFinalization(instance->runtime) ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
 /* Set the working directory the build runtime canonicalizes against. Must be
  * called before kame_wasm_prepare, kame_wasm_target_begin, or kame_wasm_plan. */
 uint32_t kame_wasm_set_directory(uint64_t handle, uint32_t directory, uint32_t directory_len) {
@@ -939,19 +948,21 @@ uint32_t kame_wasm_inspection_grant(uint64_t handle, uint32_t capability, uint32
 
 /* Schema-2 inputs/outputs (kind 0/1), schema-1 span (2), or a shared-root
  * inspection plan (3, target bytes contain a JSON string array), or a declared
- * target list (4, target bytes contain an optional search query). */
+ * target list/report (4/5, target bytes contain an optional search query). */
 uint32_t kame_wasm_graph(uint64_t handle, uint32_t target, uint32_t target_len, int32_t depth, uint32_t kind, uint32_t expand, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
   if (instance->runtime == NULL || out_len == 0u || (target_len != 0u && target == 0u)) return KAME_WASM_STATE_INVALID;
-  if (kind > KAME_WASM_GRAPH_LIST || depth < -1) return KAME_WASM_STATE_INVALID;
+  if (kind > KAME_WASM_GRAPH_LIST_REPORT || depth < -1) return KAME_WASM_STATE_INVALID;
   *(uint32_t *)(uintptr_t)out_len = 0u;
   if (instance->has_pending) return KAME_WASM_HOST_NEEDED;
   instance->diagnostic_len = 0u;
   so_String name = (so_String){(const char *)(uintptr_t)target, (so_int)target_len};
   wasm_PureResult result;
-  if (kind == KAME_WASM_GRAPH_LIST) {
+  if (kind == KAME_WASM_GRAPH_LIST_REPORT) {
+    result = wasm_Runtime_ListReportJSON(instance->runtime, name);
+  } else if (kind == KAME_WASM_GRAPH_LIST) {
     result = wasm_Runtime_ListJSON(instance->runtime, name);
   } else if (kind == KAME_WASM_GRAPH_SPAN) {
     result = wasm_Runtime_SpanJSON(instance->runtime, name, (so_int)depth, expand != 0u);

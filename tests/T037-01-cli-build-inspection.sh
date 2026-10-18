@@ -70,6 +70,7 @@ for backend in native wasm; do
   "${runner[@]}" do plan --output text -C "$project" >"$project/$backend.text" 2>"$project/error"
   if [ "$(grep -c '^    ./version · runtime-discovery · opaque-process-io$' "$project/$backend.text")" = 1 ]; then test-ok "$backend boundaries group attributes by path"; else test-fail "$backend verbose discovery boundaries"; fi
    if grep -q '^    ./src/one.c \[1\]$' "$project/$backend.text" && grep -q '^    ./version \[3\] · missing$' "$project/$backend.text" && grep -q 'parallel eligible' "$project/$backend.text" && ! grep -Eq '^      (producer|consumer):' "$project/$backend.text"; then test-ok "$backend compact human resource/stage report"; else test-fail "$backend human facts missing"; fi
+   if grep -F -x -q '    SOURCES = (wildcard ./src/*.c)' "$project/$backend.text" && ! grep -F -q 'SOURCES · definition' "$project/$backend.text"; then test-ok "$backend definition symbols are one compact line"; else test-fail "$backend definition symbol layout"; fi
   "${runner[@]}" do outputs --output text -C "$project" >"$project/$backend.outputs.text" 2>"$project/error"
   if jq -e '.direction == "downstream" and (.items | length == 0)' "$project/$backend.outputs.json" >/dev/null; then test-ok "$backend default has no downstream artifacts"; else test-fail "$backend outputs walked upstream"; fi
   for kind in inputs; do

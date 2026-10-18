@@ -45,6 +45,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	p := mem.Alloc[Program](a)
 	p.Alloc, p.Engine, p.Eval, p.Parsed, p.Host = a, engine, compiled.Program, parsed, options.Host
+	p.Eval.ProcessesQuiet, p.Eval.ProcessesQuietState = deferredProcessesQuiet, p
 	// Build invocations have an argument frame even when no operands were given.
 	p.Eval.SetDefinitionArgs(nil)
 	configurationError := p.configureParameters(options.Defines, options.Parameters, options.Environment)
@@ -376,6 +377,7 @@ func (p *Program) Free() {
 		for p.Eval.Finalizing() { p.tick(10) }
 	}
 	p.Eval.CancelProcesses()
+	p.Eval.CancelDefers()
 	rule.FreeRule(p.Alloc, p.automaticCleanRule)
 	p.clearInspection()
 	freeStrings(p.Alloc, p.Configuration)

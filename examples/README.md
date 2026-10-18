@@ -62,6 +62,7 @@ bash tests/T013-04-meta-layer-examples.sh
 | Typed argv, explicit expression boundaries, command capture | `shell/01-values.kash` and its runnable README commands |
 | Process streams and redirection versus value transformations | `shell/02-pipelines.kash` |
 | Command/value recovery and branch selection | `shell/03-recovery.kash` |
+| Temporary workspaces, defer, explicit status policy and finite retry | `shell/04-operations.kash` and the [operational cookbook](../docs/kash-cookbook.md) |
 | Native source composition and explicit subprocess boundaries | `composition/publication/` |
 | Demand, invalidation, subscriptions, generations and streams | `reactive/README.md`, `engine/` |
 

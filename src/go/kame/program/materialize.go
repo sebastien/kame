@@ -415,6 +415,7 @@ func (h *Handle) poll(release bool) HandleResult {
 	if h.Definition && h.Node.Current && h.Node.State != core.NodeFailed && h.Node.State != core.NodeCancelled {
 		value := h.Node.Latest.Clone(h.Program.Alloc)
 		if release && h.Root != nil {
+			h.retainSessionStatement()
 			h.Program.Engine.Release(h.Root)
 			h.Root = nil
 			h.Program.drainCancellations()
@@ -425,6 +426,7 @@ func (h *Handle) poll(release bool) HandleResult {
 		return HandleResult{}
 	}
 	if release && h.Root != nil {
+		h.retainSessionStatement()
 		h.Program.Engine.Release(h.Root)
 		h.Root = nil
 		h.Program.drainCancellations()

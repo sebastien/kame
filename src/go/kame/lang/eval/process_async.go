@@ -29,34 +29,8 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	task.Finalizer = c.finalizer
 	task.FinalizerCleanup = c.finalizer != nil && c.finalizer.Stage >= 2
 	task.Graph.Async = false
-	task.Context = Context{Program: p, Scope: c.Scope, Run: p.Alloc, Cwd: owned(p.Alloc, c.Cwd), Source: owned(p.Alloc, c.Source), HasArgs: c.HasArgs, HasEnvironment: c.HasEnvironment, Phase: c.Phase, DirectHostRequests: c.DirectHostRequests, DependencyObserver: c.DependencyObserver, ResolverState: c.ResolverState, ResolveDefinition: c.ResolveDefinition, ToolResolver: c.ToolResolver}
-	task.Context.ScriptGroup, task.Context.TimeoutMS = c.ScriptGroup, c.TimeoutMS
-	task.Context.RecipeNode = c.RecipeNode
-	task.Context.finalizer = c.finalizer
-	task.Context.DefinitionNamespace, task.Context.HasDefinitionNamespace = c.DefinitionNamespace, c.HasDefinitionNamespace
-	task.Context.DependencyContextObserver = c.DependencyContextObserver
-	for i := range c.Environment { task.Context.Environment = slices.Append(p.Alloc, task.Context.Environment, owned(p.Alloc, c.Environment[i])) }
-	c.Scope.Retain()
-	for i := range c.Grants {
-		grant := Grant{Capability: c.Grants[i].Capability}
-		for j := range c.Grants[i].Names { grant.Names = slices.Append(p.Alloc, grant.Names, owned(p.Alloc, c.Grants[i].Names[j])) }
-		task.Context.Grants = slices.Append(p.Alloc, task.Context.Grants, grant)
-	}
-	for i := range c.Args { task.Context.Args = slices.Append(p.Alloc, task.Context.Args, c.Args[i].Clone(p.Alloc)) }
-	for i := range c.Inputs { task.Context.Inputs = slices.Append(p.Alloc, task.Context.Inputs, c.Inputs[i].Clone(p.Alloc)) }
-	for i := range c.Outputs { task.Context.Outputs = slices.Append(p.Alloc, task.Context.Outputs, c.Outputs[i].Clone(p.Alloc)) }
-	for i := range c.RuleFrames {
-		frame := RuleFrame{FileRule: c.RuleFrames[i].FileRule, ServiceRule: c.RuleFrames[i].ServiceRule}
-		for j := range c.RuleFrames[i].Inputs { frame.Inputs = slices.Append(p.Alloc, frame.Inputs, c.RuleFrames[i].Inputs[j].Clone(p.Alloc)) }
-        for j := range c.RuleFrames[i].NewerInputs { frame.NewerInputs = slices.Append(p.Alloc, frame.NewerInputs, c.RuleFrames[i].NewerInputs[j].Clone(p.Alloc)) }
-		for j := range c.RuleFrames[i].Outputs { frame.Outputs = slices.Append(p.Alloc, frame.Outputs, c.RuleFrames[i].Outputs[j].Clone(p.Alloc)) }
-		task.Context.RuleFrames = slices.Append(p.Alloc, task.Context.RuleFrames, frame)
-	}
-	task.Prepared = mem.Alloc[captureState](p.Alloc)
-	s := task.Prepared
-	s.Alloc, s.Stage, s.Input, s.Output, s.Append = p.Alloc, prepared.Stage, owned(p.Alloc, prepared.Input), owned(p.Alloc, prepared.Output), prepared.Append
-	for i := range prepared.Stages { s.Stages = slices.Append(p.Alloc, s.Stages, prepared.Stages[i].Clone(p.Alloc)) }
-	for i := range prepared.Setups { s.Setups = slices.Append(p.Alloc, s.Setups, prepared.Setups[i].Clone(p.Alloc)) }
+	task.Context = p.retainExecutionContext(c)
+	task.Prepared = clonePreparedProcess(p.Alloc, prepared)
 	var buffer [strconv.MaxIntBase10Len]byte
 	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<process:"+strconv.Itoa(buffer[:], len(p.Processes))+">")
 	task.Node = p.Engine.Add(key, runProcessTask, task)
@@ -75,6 +49,7 @@ func runProcessTask(engine *core.EngineContext, id int64) core.ProducerResult {
 	task := engine.Context().(*processTask)
 	c := task.Context
 	c.Engine, c.Run, c.Requests = engine, engine.Allocator(), task.Program.Requests
+	c.Resume(engine)
 	if task.Prepared != nil {
 		c.operationStart, c.operationEnd = task.Graph.Span.Start, task.Graph.Span.End
 		c.SetOperationState(task.Prepared, freeCaptureState)
@@ -137,6 +112,7 @@ func (p *Program) CancelProcesses() {
 	if p == nil || p.Engine == nil { return }
 	for i := range p.Processes {
 		task := p.Processes[i]
+		if task.Context.Finalizing { continue }
 		if task.FinalizerCleanup && task.Finalizer != nil && !task.Finalizer.Expired && task.Finalizer.Stage < 4 { continue }
 		if task.Root != nil { p.Engine.Release(task.Root); task.Root = nil }
 		if task.LauncherRoot != nil { p.Engine.Release(task.LauncherRoot); task.LauncherRoot = nil }
@@ -151,20 +127,53 @@ func (p *Program) ProcessRecipeNode(node int64) int64 {
 
 func freeProcessTask(a mem.Allocator, task *processTask) {
 	if task.Prepared != nil { freeCaptureState(a, task.Prepared) }
-	task.Context.Scope.Free()
 	expr.Free(a, task.Graph)
-	mem.FreeString(a, task.Context.Cwd)
-	mem.FreeString(a, task.Context.Source)
-	for i := range task.Context.Environment { mem.FreeString(a, task.Context.Environment[i]) }
-	slices.Free(a, task.Context.Environment)
-	for i := range task.Context.Args { task.Context.Args[i].Free(a) }
-	slices.Free(a, task.Context.Args)
-	for i := range task.Context.Inputs { task.Context.Inputs[i].Free(a) }
-	slices.Free(a, task.Context.Inputs)
-	for i := range task.Context.Outputs { task.Context.Outputs[i].Free(a) }
-	slices.Free(a, task.Context.Outputs)
-	for i := range task.Context.RuleFrames {
-		frame := task.Context.RuleFrames[i]
+	freeExecutionContext(a, &task.Context)
+	mem.Free(a, task)
+}
+
+// Async work and deferred actions must retain the same authority and lexical frame.
+func (p *Program) retainExecutionContext(c *Context) Context {
+	result := *c
+	result.Engine, result.Requests, result.Effects, result.WritePaths = nil, nil, nil, nil
+	result.Run, result.PrepareDeferred = p.Alloc, nil
+	result.Cwd, result.Source, result.CallPath = owned(p.Alloc, c.Cwd), owned(p.Alloc, c.Source), owned(p.Alloc, c.CallPath)
+	result.Environment, result.Grants, result.Args, result.Inputs, result.Outputs, result.RuleFrames, result.Frames = nil, nil, nil, nil, nil, nil, nil
+	c.Scope.Retain()
+	for i := range c.Environment { result.Environment = slices.Append(p.Alloc, result.Environment, owned(p.Alloc, c.Environment[i])) }
+	for i := range c.Grants {
+		grant := Grant{Capability: c.Grants[i].Capability}
+		for j := range c.Grants[i].Names { grant.Names = slices.Append(p.Alloc, grant.Names, owned(p.Alloc, c.Grants[i].Names[j])) }
+		result.Grants = slices.Append(p.Alloc, result.Grants, grant)
+	}
+	for i := range c.Args { result.Args = slices.Append(p.Alloc, result.Args, c.Args[i].Clone(p.Alloc)) }
+	for i := range c.Inputs { result.Inputs = slices.Append(p.Alloc, result.Inputs, c.Inputs[i].Clone(p.Alloc)) }
+	for i := range c.Outputs { result.Outputs = slices.Append(p.Alloc, result.Outputs, c.Outputs[i].Clone(p.Alloc)) }
+	for i := range c.RuleFrames {
+		frame := RuleFrame{FileRule: c.RuleFrames[i].FileRule, ServiceRule: c.RuleFrames[i].ServiceRule}
+		for j := range c.RuleFrames[i].Inputs { frame.Inputs = slices.Append(p.Alloc, frame.Inputs, c.RuleFrames[i].Inputs[j].Clone(p.Alloc)) }
+		for j := range c.RuleFrames[i].NewerInputs { frame.NewerInputs = slices.Append(p.Alloc, frame.NewerInputs, c.RuleFrames[i].NewerInputs[j].Clone(p.Alloc)) }
+		for j := range c.RuleFrames[i].Outputs { frame.Outputs = slices.Append(p.Alloc, frame.Outputs, c.RuleFrames[i].Outputs[j].Clone(p.Alloc)) }
+		result.RuleFrames = slices.Append(p.Alloc, result.RuleFrames, frame)
+	}
+	return result
+}
+
+func freeExecutionContext(a mem.Allocator, context *Context) {
+	context.Scope.Free()
+	mem.FreeString(a, context.Cwd)
+	mem.FreeString(a, context.Source)
+	mem.FreeString(a, context.CallPath)
+	for i := range context.Environment { mem.FreeString(a, context.Environment[i]) }
+	slices.Free(a, context.Environment)
+	for i := range context.Args { context.Args[i].Free(a) }
+	slices.Free(a, context.Args)
+	for i := range context.Inputs { context.Inputs[i].Free(a) }
+	slices.Free(a, context.Inputs)
+	for i := range context.Outputs { context.Outputs[i].Free(a) }
+	slices.Free(a, context.Outputs)
+	for i := range context.RuleFrames {
+		frame := context.RuleFrames[i]
 		for j := range frame.Inputs { frame.Inputs[j].Free(a) }
 		for j := range frame.Outputs { frame.Outputs[j].Free(a) }
         for j := range frame.NewerInputs { frame.NewerInputs[j].Free(a) }
@@ -172,11 +181,18 @@ func freeProcessTask(a mem.Allocator, task *processTask) {
 		slices.Free(a, frame.Inputs)
 		slices.Free(a, frame.Outputs)
 	}
-	slices.Free(a, task.Context.RuleFrames)
-	for i := range task.Context.Grants {
-		for j := range task.Context.Grants[i].Names { mem.FreeString(a, task.Context.Grants[i].Names[j]) }
-		slices.Free(a, task.Context.Grants[i].Names)
+	slices.Free(a, context.RuleFrames)
+	for i := range context.Grants {
+		for j := range context.Grants[i].Names { mem.FreeString(a, context.Grants[i].Names[j]) }
+		slices.Free(a, context.Grants[i].Names)
 	}
-	slices.Free(a, task.Context.Grants)
-	mem.Free(a, task)
+	slices.Free(a, context.Grants)
+}
+
+func clonePreparedProcess(a mem.Allocator, prepared *captureState) *captureState {
+	s := mem.Alloc[captureState](a)
+	s.Alloc, s.Stage, s.Input, s.Output, s.Append = a, prepared.Stage, owned(a, prepared.Input), owned(a, prepared.Output), prepared.Append
+	for i := range prepared.Stages { s.Stages = slices.Append(a, s.Stages, prepared.Stages[i].Clone(a)) }
+	for i := range prepared.Setups { s.Setups = slices.Append(a, s.Setups, prepared.Setups[i].Clone(a)) }
+	return s
 }

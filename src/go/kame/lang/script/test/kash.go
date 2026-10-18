@@ -163,3 +163,42 @@ func TestKashListSpreadPreservesReferenceAndFormat(t *testing.T) {
 		bad.Free()
 	}
 }
+
+func TestKashDeferRetainsCommandAndExpressionBoundaries(t *testing.T) {
+	a := t.Allocator()
+	s := script.ParseKash(a, "defer.kash", "defer printf \"%s\" $value\nif true\n  defer (out! value)\n\"defer\" literal\n")
+	defer s.Free()
+	if len(s.Diagnostics) != 0 || len(s.Items) != 3 { t.Fatal("defer did not parse"); return }
+	e := s.Items[0].Expression
+	if e.Kind != expr.KashDefer || e.Span.Start != 0 || e.Items[0].Kind != expr.CommandGraph || s.Items[1].Expression.Items[0].Body[0].Items[0].Kind != expr.Application { t.Error("defer lost authored boundaries") }
+	cloned := expr.Clone(a, e)
+	defer expr.Free(a, cloned)
+	text := expr.Compact(a, cloned)
+	defer mem.FreeString(a, text)
+	if text != "defer printf %s $value" { t.Error("defer clone/format changed command semantics") }
+	formatted := script.Format(a, s)
+	defer mem.FreeString(a, formatted)
+	again := script.ParseKash(a, "formatted.kash", formatted)
+	defer again.Free()
+	if len(again.Diagnostics) != 0 || again.Items[2].Expression.Kind != expr.CommandGraph { t.Error("formatter changed literal command named defer") }
+	invalid := []string{"defer", "defer # missing", "defer (nop) trailing", "defer (nop) ?? 1", "defer true &", "defer false ? true"}
+	for i := range invalid {
+		bad := script.ParseKash(a, "invalid.kash", invalid[i])
+		if len(bad.Diagnostics) == 0 { t.Error("invalid defer accepted: "+invalid[i]) }
+		bad.Free()
+	}
+}
+
+func TestKashDeferredGroupsRetainLexicalChannels(t *testing.T) {
+	a := t.Allocator()
+	s := script.ParseKash(a, "defer-channels.kash", "stream cleanup\ndefer (printf A >&cleanup, &cleanup | cat)\nprintf body\n")
+	defer s.Free()
+	if len(s.Diagnostics) != 0 || len(s.Items) != 3 { t.Fatal("deferred graph did not parse"); return }
+	graph := s.Items[1].Expression.Items[0]
+	if graph.Kind != expr.CommandGraph || graph.Items[0].Kind != expr.CommandGroup || len(graph.Channels) != 1 || graph.Channels[0] != "cleanup" { t.Error("deferred group lost graph ownership or lexical channels") }
+	formatted := script.Format(a, s)
+	defer mem.FreeString(a, formatted)
+	copy := script.ParseKash(a, "formatted.kash", formatted)
+	defer copy.Free()
+	if len(copy.Diagnostics) != 0 || copy.Items[1].Expression.Items[0].Kind != expr.CommandGraph { t.Error("deferred group formatting changed parser ownership") }
+}

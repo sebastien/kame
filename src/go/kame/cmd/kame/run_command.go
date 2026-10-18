@@ -183,6 +183,25 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	} else {
 		p.Eval.SetDefinitionEffectSink(writeExprEffect, &output)
 	}
+	status := runSessionWork(session, inv, out, errOut, fragments, loaded)
+	p.Eval.BeginFinalization()
+	progress := buildProgress{}
+	for !p.Eval.AdvanceFinalization() {
+		if signal := posix.TakeSignal(); signal < 0 { return 128-signal }
+		tickCLIProgram(p, 10, errOut, inv.JSON)
+		drainEvents(p, out, errOut, inv.JSON, &progress)
+	}
+	d := p.Eval.FinalizationDiagnostic(mem.System)
+	if d.Code != "" {
+		emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), d, inv.JSON, fragments, loaded)
+		if status == 0 { status = 1 }
+	}
+	d.Free(mem.System)
+	return status
+}
+
+func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer, errOut io.Writer, fragments []program.Fragment, loaded []buildSource) int {
+	p := session.Program
 	workStart := 0
 	startedAt := time.Now().UnixNano()
 	if len(inv.Inputs) == 1 && inv.Inputs[0].Lang == "kmk" && inv.TimeoutMS == 0 {
@@ -202,7 +221,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	defer last.Free(mem.System)
 	progress := buildProgress{}
 	for i := workStart; i <= len(session.Work); i++ {
-		if i == len(session.Work) && len(p.Eval.Processes) == 0 {
+		if i == len(session.Work) && len(p.Eval.Processes) == 0 && len(session.Deferred.Actions) == 0 {
 			break
 		}
 		started := session.Start(i)

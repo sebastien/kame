@@ -78,7 +78,7 @@ The runtime already cancels/reaps owned process graphs and services. That is not
 a promise to remove files written by external programs or reverse earlier effects.
 Kash `if` and command fallback can handle recoverable process failures, but do not
 run a cleanup arm on capability denial or cancellation. A separate `clean` target
-is not an automatically invoked finalizer. Native `write`/`yield` publication
+is not an automatically invoked finalizer. Native `write!`/`yield!` publication
 does not make a whole multi-output recipe or external command transactional.
 
 **Kame support:** [scoped finalization](spec/043-kame-finalization.md) provides
@@ -87,10 +87,18 @@ bounded cancellation, async ownership and primary-error preservation. This is
 native/WASM expression-driver support, not evidence of SDK workflow coverage.
 It does not acquire resources safely on its own, prove deletion ownership,
 bracket deferred shell recipes or make publication transactional. Temporary
-resource APIs, Kash cleanup syntax and remote rollback remain separate questions.
+resource APIs and remote rollback remain separate questions.
 Test failed publication and interruption, not only a nonzero tool exit. Do not
 add persistent mutable Bash sessions, sourcing or traps merely to transliterate
 shell libraries. An explicit external-shell recipe remains an authored boundary.
+
+**Kash support:** invocation-scoped `defer COMMAND` and `defer (EXPRESSION)`
+provide explicit authored cleanup. Actions run LIFO after joining user work, or
+after cancellation/reaping on failure, preserving primary errors and capability
+boundaries. See [Kash](skills/kame/ref/kash.md#deferred-cleanup). This does not add
+ownership-enforcing temporary-resource APIs, safe deletion of arbitrary paths or
+transactional redirection. Fresh private workspaces remain an author responsibility;
+atomic publication of externally generated artifacts is separate follow-up work.
 
 ## Vendor tools and SDK workflows stay outside the language (K27)
 

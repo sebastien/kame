@@ -24,7 +24,11 @@ func (p *Program) captureTopology(e *expr.Expr, c *Context) Result {
 	for i := range e.Body { flat.Body = slices.Append(c.Run, flat.Body, expr.Clone(c.Run, e.Body[i])) }
 	r := prepareProcessGraph(c, e, flat)
 	if r.Diagnostic.Code != "" { return r }
-	return p.capture(flat, c)
+	previous := c.PrepareDeferred
+	if previous == e { c.PrepareDeferred = flat }
+	r = p.capture(flat, c)
+	c.PrepareDeferred = previous
+	return r
 }
 
 func hasProcessTopology(e *expr.Expr) bool {

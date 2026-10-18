@@ -18,6 +18,11 @@ type Program struct {
 	OperationFunctions []*Function
 	KashFunctions      []*Function
 	NextScriptGroup    int64
+	DeferScopes        []*DeferScope
+	DeferStopping      bool
+	// ProcessesQuiet must wait for host terminal delivery, not just node cancellation.
+	ProcessesQuiet     func(any, int64, int64) bool
+	ProcessesQuietState any
 	// DryRun suppresses invocation-owned process, write and output effects.
 	DryRun bool
 	// GeneratedFile identifies reads that may be deferred during dry-run.
@@ -234,6 +239,7 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.explicitDefinitionOverrides)
 	p.freeSourceParts()
+	p.freeDefers()
 	for i := range p.Processes {
 		freeProcessTask(p.Alloc, p.Processes[i])
 	}

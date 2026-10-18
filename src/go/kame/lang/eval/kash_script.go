@@ -2,6 +2,7 @@ package eval
 
 import (
 	"kame/core"
+	"kame/diagnostic"
 	"kame/host"
 	"kame/lang/script"
 	"kame/lang/source"
@@ -103,11 +104,15 @@ type kashInvocation struct {
 	TimedIndex     int
 	RemainingMS    int64
 	TimeoutLimitMS int64
+	Deferred       *DeferScope
+	Finishing      bool
+	Primary        diagnostic.Diagnostic
 }
 
 func freeKashInvocation(a mem.Allocator, value any) {
 	state := value.(*kashInvocation)
 	state.Program.cancelScriptGroup(state.Group)
+	state.Primary.Free(a)
 	state.Scope.Free()
 	if state.OwnParsed {
 		state.Parsed.Free()
@@ -173,6 +178,7 @@ func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Va
 		state.Parsed, state.Scope = parsed, newScope(p.Alloc, scope)
 		p.NextScriptGroup++
 		state.Group = p.NextScriptGroup
+		state.Deferred = p.NewDeferScope(state.Group, c.Engine.NodeID())
 		for i := range parsed.Items {
 			item := parsed.Items[i]
 			if item.Kind != script.Definition {
@@ -193,8 +199,10 @@ func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Va
 	}
 	previousArgs, previousHasArgs, previousScope := c.Args, c.HasArgs, c.Scope
 	previousGroup, previousPath, previousSource := c.ScriptGroup, c.CallPath, c.Source
+	previousDeferred := c.Deferred
 	previousTimeout := c.TimeoutMS
 	c.Args, c.HasArgs, c.Scope, c.ScriptGroup = args, true, state.Scope, state.Group
+	c.Deferred = state.Deferred
 	c.CallPath = invocationPath(c.Run, previousPath, -1, int(state.Group))
 	// Constructed scripts have independent authored spans; direct recipe offsets
 	// are mapped back to their source by the build runtime.
@@ -203,6 +211,7 @@ func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Va
 	mem.FreeString(c.Run, c.CallPath)
 	c.Args, c.HasArgs, c.Scope = previousArgs, previousHasArgs, previousScope
 	c.ScriptGroup, c.CallPath, c.Source = previousGroup, previousPath, previousSource
+	c.Deferred = previousDeferred
 	c.TimeoutMS = previousTimeout
 	if r.Diagnostic.Code != "" {
 		p.cancelScriptGroup(state.Group)
@@ -218,6 +227,31 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 	for i := range state.WritePaths {
 		c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i]))
 	}
+	if !state.Finishing {
+		r := p.advanceKashBody(state, c)
+		if r.Waiting { return r }
+		state.Finishing = true
+		state.Primary = r.Diagnostic.Clone(p.Alloc)
+		r.Free(c.Run)
+		if state.Primary.Code != "" { p.cancelScriptGroup(state.Group) }
+	}
+	r := p.finishDefers(state.Deferred, c, state.Primary.Code != "")
+	if r.Waiting { return r }
+	if state.Primary.Code != "" {
+		primary := state.Primary.Clone(c.Run)
+		if r.Diagnostic.Code != "" {
+			primary.Notes = slices.Append(c.Run, primary.Notes, owned(c.Run, "deferred cleanup failed: "+r.Diagnostic.Code+": "+r.Diagnostic.Message))
+			for i := range r.Diagnostic.Notes { primary.Notes = slices.Append(c.Run, primary.Notes, owned(c.Run, r.Diagnostic.Notes[i])) }
+		}
+		r.Free(c.Run)
+		return Result{Diagnostic: primary}
+	}
+	if r.Diagnostic.Code != "" { return r }
+	r.Free(c.Run)
+	return Result{Value: state.Value.Clone(c.Run)}
+}
+
+func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 	for state.Index < len(state.Parsed.Items) {
 		item := state.Parsed.Items[state.Index]
 		if item.Kind != script.Command && item.Kind != script.Expression {

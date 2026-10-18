@@ -14,6 +14,12 @@ func Style(out io.Writer, token string, text string, enabled bool) {
 		switch token {
 		case "target.task":
 			sequence = "\x1b[35m" // purple: named tasks
+		case "target.rule":
+			sequence = "\x1b[33m"
+		case "target.service":
+			sequence = "\x1b[36m"
+		case "target.artifact":
+			sequence = "\x1b[34m"
 		case "worker.tool":
 			sequence = "\x1b[33m" // gold: executable/operation
 		case "path.basename":
@@ -56,6 +62,11 @@ func WriteReport(out io.Writer, heading string, data string, styled bool) bool {
 	}
 	Style(out, "heading", heading, styled)
 	io.WriteString(out, "\n")
+	if reportField(value, "type").Text == "list" {
+		writeTargetReport(out, value, styled)
+		value.Free(mem.System)
+		return true
+	}
 	if reportField(value, "schema").Int == 2 {
 		writeInspectionReport(out, value, styled)
 		value.Free(mem.System)
