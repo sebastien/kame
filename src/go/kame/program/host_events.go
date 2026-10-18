@@ -1128,6 +1128,7 @@ func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
 		}
 		slices.Free(a, stages)
 	}
+	if len(event.EdgeMetrics) != 0 { value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "edgeMetrics"), Value: host.ProcessMetricsPayload(a, event.EdgeMetrics)}) }
 	return value
 }
 

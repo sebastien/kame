@@ -97,6 +97,18 @@ type ProcessStageResult struct {
 	Outcome ProcessOutcome
 }
 
+// Measurement: 0 unavailable, 1 completed write, 2 read, 3 queued completed
+// write. Byte channels have Items/DroppedItems == -1 (unknown, not zero).
+type ProcessEdgeMetrics struct {
+	Measurement int
+	Bytes int64
+	Items int64
+	DroppedItems int64
+	QueueHighWaterBytes int64
+	QueueHighWaterItems int64
+	Saturated bool
+}
+
 // ProcessEvent owns Data, Stdout, Stderr, and Diagnostic and must be released
 // with Free after its receiver has consumed or transferred them.
 type ProcessEvent struct {
@@ -117,6 +129,7 @@ type ProcessEvent struct {
 	// It lets diagnostics report whether retained process output was truncated.
 	RetainBytes int
 	Stages []ProcessStageResult
+	EdgeMetrics []ProcessEdgeMetrics
 	// Outputs carries remote artifact bytes. Local process hosts leave it empty.
 	Outputs []ExecutionArtifact
 }
@@ -140,6 +153,7 @@ func (e *ProcessEvent) Free(a mem.Allocator) {
 	slices.Free(a, e.Stdout)
 	slices.Free(a, e.Stderr)
 	slices.Free(a, e.Stages)
+	slices.Free(a, e.EdgeMetrics)
 	for i := range e.Outputs {
 		e.Outputs[i].Free(a)
 	}

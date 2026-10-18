@@ -67,10 +67,15 @@ type nativeEvent struct {
 	retainBytes       c.Int
 	stageData         *c.Int
 	stageCount        c.Int
+	metricData        *int64
+	metricCount       c.Int
 }
 
 //so:extern
 func km_host_new() *nativeHost { return nil }
+
+//so:extern
+func km_event_metric_field(event *nativeEvent, index c.Int, field c.Int) int64 { _, _, _ = event, index, field; return 0 }
 
 //so:extern nodecay
 func km_file_modtime(name string, link bool) int64 { _, _ = name, link; return 0 }
@@ -332,6 +337,9 @@ func (h *Host) Next() host.ProcessEventResult {
 	e := host.ProcessEvent{Kind: host.ProcessEventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: host.ProcessOutcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated, RetainBytes: int(raw.retainBytes)}
 	for i := 0; i < int(raw.stageCount); i++ {
 		e.Stages = slices.Append(h.Alloc, e.Stages, host.ProcessStageResult{Status: int(km_event_stage_field(&raw, c.Int(i), 0)), Signal: int(km_event_stage_field(&raw, c.Int(i), 1)), Outcome: host.ProcessOutcome(km_event_stage_field(&raw, c.Int(i), 2))})
+	}
+	for i := 0; i < int(raw.metricCount); i++ {
+		e.EdgeMetrics = slices.Append(h.Alloc, e.EdgeMetrics, host.ProcessEdgeMetrics{Measurement: int(km_event_metric_field(&raw, c.Int(i), 0)), Bytes: km_event_metric_field(&raw, c.Int(i), 1), Items: km_event_metric_field(&raw, c.Int(i), 2), DroppedItems: km_event_metric_field(&raw, c.Int(i), 3), QueueHighWaterBytes: km_event_metric_field(&raw, c.Int(i), 4), QueueHighWaterItems: km_event_metric_field(&raw, c.Int(i), 5), Saturated: km_event_metric_field(&raw, c.Int(i), 6) != 0})
 	}
 	km_event_free(&raw)
 	return host.ProcessEventResult{Event: e, OK: true}

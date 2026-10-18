@@ -301,8 +301,29 @@ timing. EOF drains retained records, and early child closure still fails the
 graph. Lossy policies require frames and are forbidden for `merge`/`balance`.
 `:overflow block` is the default lossless path, without an extra pending queue.
 
-Alternate ordering/failure policies, per-item workers, and runtime buffer/drop
-metrics are not implemented yet.
+### Terminal graph telemetry
+
+Graph Result records have a `graph` field with terminal nodes and edges. For
+example, inside a Kash source/build session:
+
+```kash
+result = ((kash """printf "a\nb\n" |(frame :lines) |(broadcast) (cat > ./left, cat > ./right)"""))
+(out! (json result.graph))
+```
+
+Nodes expose prepared IDs, kinds, executable paths, terminal states, and exit
+outcomes. Edges expose stream kinds and measured payload `bytes`, framed `items`,
+`droppedItems`, `queueHighWaterBytes`, and `queueHighWaterItems`. Envelope headers
+do not count. `measurement` distinguishes `completed-write`, `read`, and
+`unavailable`; partial failed writes are not completed writes. Byte edges have
+nil item counters. Direct external-to-external pipes are not instrumented, so
+their measurements are nil rather than invented zeroes. Non-queue edges have
+nil queue high-water marks. Counters saturate at 2^53-1 and set `saturated`.
+
+Telemetry does not capture stdout, infer build dependencies, or change failure
+handling. Missing telemetry from a host remains explicitly unavailable. This is
+terminal Result metadata, not live blocked/backpressure inspection. Alternate
+ordering/failure policies, per-item workers, and live inspection remain pending.
 
 ### Live stream arguments
 

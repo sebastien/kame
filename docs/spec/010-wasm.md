@@ -374,6 +374,23 @@ closure still fails the graph; dropping a record is never a failure by itself.
 Hosts must reject missing/malformed policies before launching/truncating anything,
 not silently downgrade them to a lossless or unbounded implementation.
 
+Topology process completions may add `edgeMetrics`, an edge-aligned array of
+seven-integer rows: `[measurement, bytes, items, droppedItems, queueHighWaterBytes,
+queueHighWaterItems, saturated]`. Measurement 0 means unavailable, 1 means
+completed operator writes, 2 means operator reads, and 3 means queued completed
+operator writes with measured high-water marks. Items/drops are -1 on byte edges;
+public graph Results expose them as nil. All counters are exact, nonnegative,
+and at most 2^53-1; saturation sets the final field to 1. Frame headers are not
+payload bytes. Partial writes are not counted as completed writes. Rows are
+validated before publication, including queue limits and stream kinds.
+
+The field is optional: older hosts and uninstrumented direct OS pipes remain
+explicitly unknown. It does not require a new request kind or WASM export.
+Statement/Result completions retain it through JSON; successful stdout captures
+still complete as text. Native `ProcessEvent.EdgeMetrics` supplies the same
+data through `ProcessMetricsPayload`. Graph Results add terminal node topology,
+tracked executable paths, and per-node outcomes without rerunning predicates.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly

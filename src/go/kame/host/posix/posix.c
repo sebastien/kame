@@ -12,6 +12,7 @@
 #include <sys/ioctl.h>
 #include <sys/file.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
 #include <signal.h>
 #if defined(__COSMOPOLITAN__)
 #include <spawn.h>
@@ -61,6 +62,8 @@ extern int sys_waitid(int, int, void *, int, void *);
 enum { KM_STARTED, KM_STDOUT, KM_STDERR, KM_TERMINAL };
 enum { KM_EXITED, KM_TIMED_OUT, KM_CANCELLED, KM_FAILED };
 enum { KM_QUEUE_LIMIT = 256 * 1024, KM_CHUNK = 16 * 1024, KM_GRACE_MS = 100 };
+enum { KM_METRIC_FIELDS = 7, KM_METRIC_MODE = 0, KM_METRIC_BYTES, KM_METRIC_ITEMS,
+       KM_METRIC_DROPS, KM_METRIC_HIGH_BYTES, KM_METRIC_HIGH_ITEMS, KM_METRIC_SATURATED };
 
 // Host diagnostics use stable codes from docs/spec/011-diagnostics.md.
 #define KM_HOSTF "HOST_FAIL"
@@ -90,6 +93,8 @@ typedef struct km_process {
     int stage_count;
     bool topology;
     int failed_stage;
+    int64_t *metrics;
+    int metric_count;
     // Mandatory events survive queue allocation failure without allocating.
     km_event pending[2];
     uint64_t pending_sequence[2];
@@ -454,6 +459,7 @@ static void km_free_event(km_event *event) {
     if (event->diagnostic != (const so_byte *)km_allocation_diagnostic) free(event->diagnostic);
     free(event->output); free(event->errorOutput);
     free(event->stageData);
+    free(event->metricData);
     memset(event, 0, sizeof(*event));
 }
 
@@ -766,6 +772,7 @@ static void km_release_process(km_process *p) {
     km_windows_job_close(&p->job);
     for (int i = 0; i < p->stage_count; i++) km_windows_job_close(&p->stages[i].job);
     free(p->stages);
+    if (p->metrics) munmap(p->metrics, (size_t)p->metric_count * KM_METRIC_FIELDS * sizeof(int64_t));
     for (int i = 0; i < 2; i++) if (p->pending_sequence[i]) km_free_event(&p->pending[i]);
     memset(p, 0, sizeof(*p)); p->outfd = p->errfd = p->execfd = -1;
 }
@@ -799,6 +806,13 @@ static void km_emit_terminal(km_host *host, km_process *p, int outcome, const ch
                 event.stageData[i * 3 + 2] = p->stages[i].outcome;
             }
         }
+    }
+    // Telemetry is optional: an allocation failure must not turn successful
+    // work into a failed graph. Missing measurements remain explicitly unknown.
+    if (p->metrics && p->exited) {
+        size_t size = (size_t)p->metric_count * KM_METRIC_FIELDS * sizeof(int64_t);
+        event.metricData = km_event_allocate() ? malloc(size) : NULL;
+        if (event.metricData) { memcpy(event.metricData, p->metrics, size); event.metricCount = p->metric_count; }
     }
     if (diagnostic) km_diagnostic(&event, KM_HOSTF, diagnostic);
     km_push(host, p, event);
@@ -1356,6 +1370,38 @@ static void km_mux_close_unowned(int node, int *edges, so_int *links, int count)
 
 enum { KM_RECORD_LIMIT = 64 * 1024, KM_FRAME_ENCODING = 120, KM_RECORD_TOO_LONG = 121, KM_PREDICATE_FAILED = 124, KM_BUFFER_LIMIT = 126 };
 
+// These globals belong to one forked operator, never to the host or another
+// invocation. Each edge has one measurement owner. The parent snapshots only
+// after every child exits; live concurrent reads would require atomic fields.
+static int64_t *km_worker_metrics;
+static int *km_worker_pipes;
+static so_int *km_worker_links;
+static int km_worker_node, km_worker_edges;
+
+static void km_metric_add(int64_t *metric, int field, int64_t count) {
+    const int64_t limit = INT64_C(9007199254740991); // exact on both native and JS
+    if (count > limit - metric[field]) { metric[field] = limit; metric[KM_METRIC_SATURATED] = 1; }
+    else metric[field] += count;
+}
+
+static void km_metric_read(int fd, int length) {
+    if (!km_worker_metrics || length <= 0) return;
+    for (int i = 0; i < km_worker_edges; i++) {
+        int64_t *metric = km_worker_metrics + i * KM_METRIC_FIELDS;
+        if (metric[KM_METRIC_MODE] == 2 && km_worker_links[i * 2 + 1] == km_worker_node && km_worker_pipes[i * 2] == fd) {
+            km_metric_add(metric, KM_METRIC_BYTES, length); return;
+        }
+    }
+}
+
+static void km_metric_write(int edge, int payload) {
+    if (!km_worker_metrics) return;
+    int64_t *metric = km_worker_metrics + edge * KM_METRIC_FIELDS;
+    if (metric[KM_METRIC_MODE] != 1 && metric[KM_METRIC_MODE] != 3) return;
+    km_metric_add(metric, KM_METRIC_BYTES, payload);
+    if (metric[KM_METRIC_ITEMS] >= 0) km_metric_add(metric, KM_METRIC_ITEMS, 1);
+}
+
 static bool km_mux_write(int fd, const unsigned char *data, size_t length) {
     while (length) {
         ssize_t written = write(fd, data, length);
@@ -1374,7 +1420,11 @@ static int km_mux_send(int node, int kind, int *edges, so_int *links, int count,
     for (int i = 0; i < count; i++) if (links[i * 2] == node) {
         bool deliver = (kind != 5 && kind != 7) || output == selected;
         output++;
-        if (deliver && !km_mux_write(edges[i * 2 + 1], data, (size_t)length)) return 125;
+        if (deliver) {
+            if (!km_mux_write(edges[i * 2 + 1], data, (size_t)length)) return 125;
+            int header = km_worker_metrics && km_worker_metrics[i * KM_METRIC_FIELDS + KM_METRIC_ITEMS] >= 0 ? 4 : 0;
+            km_metric_write(i, length - header);
+        }
     }
     if (!output && !km_mux_write(STDOUT_FILENO, data, (size_t)length)) return 125;
     return 0;
@@ -1392,6 +1442,7 @@ static int km_mux_frame(int node, int *edges, so_int *links, int count,
         ssize_t n;
         do { n = read(input, chunk, sizeof(chunk)); } while (n < 0 && errno == EINTR);
         if (n < 0) { result = 125; break; }
+        km_metric_read(input, (int)n);
         for (int i = 0; i < n || (!n && length); i++) {
             if (n) {
                 if (length == KM_RECORD_LIMIT) { result = KM_RECORD_TOO_LONG; break; }
@@ -1418,6 +1469,7 @@ typedef struct km_queued_record { unsigned char *data; int length, offset; } km_
 typedef struct km_record_queue {
     km_queued_record *pending, flight;
     int head, count, bytes;
+    int edge;
 } km_record_queue;
 
 static km_queued_record km_queue_pop(km_record_queue *queue, int limit) {
@@ -1431,16 +1483,22 @@ static km_queued_record km_queue_pop(km_record_queue *queue, int limit) {
 static bool km_queue_push(km_record_queue *queue, int limit, int budget, int policy,
                           unsigned char *data, int length) {
     int payload = length - 4;
-    if (policy == 1 && (queue->count == limit || queue->bytes + payload > budget)) return true;
+    int64_t *metric = km_worker_metrics ? km_worker_metrics + queue->edge * KM_METRIC_FIELDS : NULL;
+    if (policy == 1 && (queue->count == limit || queue->bytes + payload > budget)) { if (metric) km_metric_add(metric, KM_METRIC_DROPS, 1); return true; }
     while (queue->count && (policy == 3 || queue->count == limit || queue->bytes + payload > budget)) {
         km_queued_record old = km_queue_pop(queue, limit);
         free(old.data);
+        if (metric) km_metric_add(metric, KM_METRIC_DROPS, 1);
     }
     unsigned char *copy = malloc((size_t)length);
     if (!copy) return false;
     memcpy(copy, data, (size_t)length);
     queue->pending[(queue->head + queue->count) % limit] = (km_queued_record){.data = copy, .length = length};
     queue->count++; queue->bytes += payload;
+    if (metric) {
+        if (queue->bytes > metric[KM_METRIC_HIGH_BYTES]) metric[KM_METRIC_HIGH_BYTES] = queue->bytes;
+        if (queue->count > metric[KM_METRIC_HIGH_ITEMS]) metric[KM_METRIC_HIGH_ITEMS] = queue->count;
+    }
     return true;
 }
 
@@ -1465,6 +1523,7 @@ static int km_run_lossy_broadcast(int node, int *edges, so_int *links, int count
     int at = 1;
     for (int i = 0; i < count; i++) if (links[i * 2] == node) {
         int fd = edges[i * 2 + 1], flags = fcntl(fd, F_GETFL);
+        queues[at - 1].edge = i;
         fds[at++].fd = fd;
         if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK)) { result = 125; goto cleanup; }
     }
@@ -1498,7 +1557,7 @@ static int km_run_lossy_broadcast(int node, int *edges, so_int *links, int count
             if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) continue;
             if (n <= 0) { result = 125; break; }
             flight->offset += (int)n;
-            if (flight->offset == flight->length) { free(flight->data); *flight = (km_queued_record){0}; }
+            if (flight->offset == flight->length) { km_metric_write(queue->edge, flight->length - 4); free(flight->data); *flight = (km_queued_record){0}; }
         }
         if (result || fds[0].fd < 0 || !fds[0].revents) continue;
         ssize_t n;
@@ -1531,7 +1590,9 @@ cleanup:
 }
 
 static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
-                      int item_limit, int64_t id, km_stream_item item, void *context) {
+                      int item_limit, int64_t *metrics, int64_t id, km_stream_item item, void *context) {
+    km_worker_metrics = metrics; km_worker_pipes = edges; km_worker_links = links;
+    km_worker_node = node; km_worker_edges = count;
     int kind = mode & 15;
     bool framed = (mode & 16) || kind == 4;
     int budget = mode >> 8;
@@ -1577,6 +1638,7 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
             size_t capacity = framed ? (size_t)(frame->need - frame->length) : (size_t)budget;
             do { n = read(inputs[next].fd, data, capacity); } while (n < 0 && errno == EINTR);
             if (n < 0) { result = 125; break; }
+            km_metric_read(inputs[next].fd, (int)n);
             if (!n) {
                 if (framed && frame->length) { result = 125; break; }
                 close(inputs[next].fd); inputs[next].fd = -1; active--; continue;
@@ -1669,6 +1731,19 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     char **cwd = calloc((size_t)n, sizeof(char *));
     km_process p = {.id = id, .outfd = -1, .errfd = -1, .execfd = -1, .direct = true, .retain = (int)retain, .stage_count = n, .topology = topology, .failed_stage = -1};
     p.stages = calloc((size_t)n, sizeof(km_stage));
+    if (topology && edge_count && (size_t)edge_count <= SIZE_MAX / (KM_METRIC_FIELDS * sizeof(int64_t))) {
+        size_t size = (size_t)edge_count * KM_METRIC_FIELDS * sizeof(int64_t);
+        void *mapping = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        if (mapping != MAP_FAILED) {
+            p.metrics = mapping; p.metric_count = edge_count;
+            for (int i = 0; i < edge_count; i++) {
+                int from = (int)links[i * 2], to = (int)links[i * 2 + 1];
+                int64_t *metric = p.metrics + i * KM_METRIC_FIELDS;
+                metric[KM_METRIC_MODE] = node_kinds[from] ? ((node_kinds[from] >> 5) & 3) ? 3 : 1 : node_kinds[to] ? 2 : 0;
+                metric[KM_METRIC_ITEMS] = metric[KM_METRIC_DROPS] = node_kinds[from] & 16 ? 0 : -1;
+            }
+        }
+    }
     if (p.stages && topology) for (int i = 0; i < n; i++) p.stages[i].operator_kind = (int)node_kinds[i] & 15;
     if (edges) for (int i = 0; i < edge_count * 2; i++) edges[i] = -1;
     bool ok = edges && operand_fds && stage_inputs && stage_outputs && truncate_outputs && argv && envp && cwd && p.stages && input_name && output_name;
@@ -1809,7 +1884,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
             if (topology) for (int j = 0; j < n; j++) { if (stage_inputs[j] >= 0 && stage_inputs[j] != input) close(stage_inputs[j]); if (stage_outputs[j] >= 0) close(stage_outputs[j]); }
             if (!topology || !node_kinds[i]) for (int j = 0; j < edge_count * 2; j++) close(edges[j]);
             close(out[0]); close(out[1]); close(err[0]); close(err[1]); close(execerr[0]);
-            if (topology && node_kinds[i]) { close(execerr[1]); _exit(km_run_mux(i, (int)node_kinds[i], edges, links, edge_count, (int)((so_int *)item_limits.ptr)[i], id, stream_item, stream_context)); }
+            if (topology && node_kinds[i]) { close(execerr[1]); _exit(km_run_mux(i, (int)node_kinds[i], edges, links, edge_count, (int)((so_int *)item_limits.ptr)[i], p.metrics, id, stream_item, stream_context)); }
             if (ready[0] >= 0) {
                 char token = 0;
                 ssize_t nread;
@@ -1852,6 +1927,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
         if (p.stages) { km_signal(&p, SIGKILL); km_wait_graph(&p); }
         if (p.stages) for (int i = 0; i < n; i++) km_windows_job_close(&p.stages[i].job);
         free(p.stages); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]);
+        if (p.metrics) munmap(p.metrics, (size_t)p.metric_count * KM_METRIC_FIELDS * sizeof(int64_t));
         return km_spawn_failed(host, id, "graph spawn failed");
     }
     p.outfd = out[0]; p.errfd = err[0]; p.execfd = execerr[0]; p.deadline = timeout ? km_now() + timeout : 0;
@@ -1862,6 +1938,11 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
 int km_event_stage_field(km_event *event, int index, int field) {
     if (!event || index < 0 || index >= event->stageCount || field < 0 || field > 2) return 0;
     return event->stageData[index * 3 + field];
+}
+
+int64_t km_event_metric_field(km_event *event, int index, int field) {
+    if (!event || index < 0 || index >= event->metricCount || field < 0 || field >= KM_METRIC_FIELDS) return 0;
+    return event->metricData[index * KM_METRIC_FIELDS + field];
 }
 
 static void km_exec_ready(km_host *host, km_process *p) {

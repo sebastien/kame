@@ -2997,24 +2997,43 @@ function prepareByteTopology(stages, context) {
     if (!Number.isSafeInteger(policy) || policy < 0 || policy > 3 || !Number.isSafeInteger(items) || items < 0 || items > 1024 || (!policy && items) || (policy && kinds[node] !== 'broadcast') || (policy === 3 && items > 1)) invalid();
     if (policy && !framed[node]) invalid('KASH_FRAME_REQUIRED');
   }
-  return { kinds, edges, inputs, outputs, framed, buffers, overflows, bufferItems };
+  const edgeMetrics = edges.map(([from, to]) => [kinds[from] ? overflows[from] ? 3 : 1 : kinds[to] ? 2 : 0, 0, framed[from] ? 0 : -1, framed[from] ? 0 : -1, 0, 0, 0]);
+  return { kinds, edges, inputs, outputs, framed, buffers, overflows, bufferItems, edgeMetrics };
+}
+
+function metricAdd(metric, field, amount) {
+  if (!metric) return;
+  if (amount > Number.MAX_SAFE_INTEGER - metric[field]) { metric[field] = Number.MAX_SAFE_INTEGER; metric[6] = 1; }
+  else metric[field] += amount;
+}
+
+function metricWrite(metric, length) {
+  if (!metric || ![1, 3].includes(metric[0])) return;
+  metricAdd(metric, 1, length - (metric[2] >= 0 ? 4 : 0));
+  if (metric[2] >= 0) metricAdd(metric, 2, 1);
 }
 
 // Paused merges, broadcasts, and balancing share one bounded pump. Each turn
 // retains one chunk/record until its assigned destinations flush; incomplete
 // records are bounded per input. Defaults are 16 KiB bytes / 64 KiB records.
-function startByteMux(readers, writers, fail, done, kind = '', framed = false, item = null, budget = 0, overflow = 0, itemLimit = 0) {
+function startByteMux(readers, writers, fail, done, kind = '', framed = false, item = null, budget = 0, overflow = 0, itemLimit = 0, metrics = null) {
   let cursor = 0, destination = 0, scheduled = false, pending = false, closing = false, disposed = false;
   const recordLimit = budget || 64 * 1024, byteLimit = budget || 16 * 1024;
   const queueLimit = itemLimit || (overflow === 3 ? 1 : 64);
   const queues = overflow ? writers.map(() => ({ pending: [], bytes: 0, writing: false, ending: false })) : [];
+  const writerIndices = writers.map((_, index) => index);
   const states = readers.map(() => ({ data: framed || kind === 'frame' || kind === 'encode' ? Buffer.alloc(recordLimit + 4) : null, length: 0, need: 4, chunk: null, offset: 0 }));
   const operatorError = (status) => { fail(status); return null; };
-  const readItem = (reader, state) => {
+  const readChunk = (reader, size, index) => {
+    const chunk = reader.read(size), metric = metrics?.inputs[index];
+    if (chunk !== null && metric?.[0] === 2) metricAdd(metric, 1, chunk.length);
+    return chunk;
+  };
+  const readItem = (reader, state, index) => {
     if (kind === 'frame') {
       for (;;) {
         if (state.chunk === null) {
-          state.chunk = reader.read(Math.min(16 * 1024, reader.readableLength || 16 * 1024));
+          state.chunk = readChunk(reader, Math.min(16 * 1024, reader.readableLength || 16 * 1024), index);
           state.offset = 0;
           if (state.chunk === null) {
             if (!reader.readableEnded || !state.length) return null;
@@ -3037,9 +3056,9 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
       state.length = 0;
       return record;
     }
-    if (!framed && kind !== 'encode') return reader.read(Math.min(byteLimit, reader.readableLength || byteLimit));
+    if (!framed && kind !== 'encode') return readChunk(reader, Math.min(byteLimit, reader.readableLength || byteLimit), index);
     for (;;) {
-      const chunk = reader.read(Math.min(state.need - state.length, reader.readableLength || state.need - state.length));
+      const chunk = readChunk(reader, Math.min(state.need - state.length, reader.readableLength || state.need - state.length), index);
       if (chunk === null) {
         if (reader.readableEnded && state.length) return operatorError(124);
         return null;
@@ -3077,6 +3096,7 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
     queue.writing = true;
     writer.write(record, (cause) => {
       if (cause) error(cause);
+      else metricWrite(metrics?.outputs[index], record.length);
       queue.writing = false;
       flushQueue(index);
     });
@@ -3086,11 +3106,13 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
     let retained;
     for (let index = 0; index < queues.length; index++) {
       const queue = queues[index];
-      if (overflow === 1 && (queue.pending.length === queueLimit || queue.bytes + payload > recordLimit)) continue;
+      const metric = metrics?.outputs[index];
+      if (overflow === 1 && (queue.pending.length === queueLimit || queue.bytes + payload > recordLimit)) { metricAdd(metric, 3, 1); continue; }
       // ponytail: shifts are bounded by 1024 records; use a ring if profiled hot.
-      while (queue.pending.length && (overflow === 3 || queue.pending.length === queueLimit || queue.bytes + payload > recordLimit)) queue.bytes -= queue.pending.shift().length - 4;
+      while (queue.pending.length && (overflow === 3 || queue.pending.length === queueLimit || queue.bytes + payload > recordLimit)) { queue.bytes -= queue.pending.shift().length - 4; metricAdd(metric, 3, 1); }
       retained ??= Buffer.from(record); // Never retain the mutable assembler view.
       queue.pending.push(retained); queue.bytes += payload;
+      if (metric) { metric[4] = Math.max(metric[4], queue.bytes); metric[5] = Math.max(metric[5], queue.pending.length); }
       flushQueue(index);
     }
   };
@@ -3104,24 +3126,26 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
     if (pending || closing || disposed) return;
     for (let offset = 0; offset < readers.length; offset++) {
       const next = (cursor + offset) % readers.length, reader = readers[next];
-      const chunk = readItem(reader, states[next]);
+      const chunk = readItem(reader, states[next], next);
       if (disposed) return;
       if (chunk === null) continue;
       cursor = (next + 1) % readers.length;
       if (overflow) { queueRecord(chunk); schedule(); return; }
       pending = true;
-      let destinations = writers;
+      let destinations = writerIndices;
       if (kind === 'filter') {
         const selected = item(0, chunk.subarray(4));
         if (selected < 0) { operatorError(-selected); return; }
-        destinations = [writers[selected ? 0 : 1]];
+        const index = selected ? 0 : 1;
+        destinations = [index];
       } else if (kind === 'balance') {
-        destinations = [writers[destination]];
+        destinations = [destination];
         destination = (destination + 1) % writers.length;
       }
       let outstanding = destinations.length;
-      for (const writer of destinations) writer.write(chunk, (cause) => {
+      for (const index of destinations) writers[index].write(chunk, (cause) => {
         if (cause) error(cause);
+        else metricWrite(metrics?.outputs[index], chunk.length);
         if (--outstanding === 0) { pending = false; schedule(); }
       });
       return;
@@ -3281,12 +3305,14 @@ function runArgvCapture(stages, context) {
       }
       if (graphFailure !== null) { status = graphFailure.signal ? 128 + graphFailure.signal : graphFailure.status; signal = graphFailure.signal; }
       // Let the portable evaluator classify exit failure before decoding output.
-      if (!context.acceptExit && (status !== 0 || signal !== 0)) { resolveRun({ ok: true, value: { status, signal, stages: results, stdout: '' } }); return; }
-      if (context.stream) { resolveRun({ ok: true, value: { status, signal, stages: results, stdout: '' } }); return; }
+      const terminal = { status, signal, stages: results, stdout: '' };
+      if (topology) terminal.edgeMetrics = topology.edgeMetrics;
+      if ((!context.acceptExit && (status !== 0 || signal !== 0)) || context.stream) { resolveRun({ ok: true, value: terminal }); return; }
       let output;
       try { output = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)); }
       catch { resolveRun({ ok: false, code: 'CAPTURE_ENCODING', message: 'command substitution output is not valid UTF-8' }); return; }
-      resolveRun({ ok: true, value: { status, signal, stages: results, stdout: output } });
+      terminal.stdout = output;
+      resolveRun({ ok: true, value: terminal });
       });
     };
     try {
@@ -3432,7 +3458,7 @@ function runArgvCapture(stages, context) {
           results[i] ??= { status: 0, signal: 0, outcome: 0 };
           remaining--;
           finish();
-        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i]));
+        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i], { inputs: topology.inputs[i].map((edge) => topology.edgeMetrics[edge]), outputs: outputEdges.map((edge) => topology.edgeMetrics[edge]) }));
         remaining++;
       }
     } catch { stop('HOST_FAIL', 'cannot start process'); }

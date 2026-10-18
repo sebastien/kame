@@ -103,8 +103,26 @@ Lossy modes require framing and are not available on `merge` or exactly-once
 `balance`. `:overflow block` remains the lossless default, with the existing
 one-transfer backpressure path and no additional pending queue.
 
-Alternate ordering/failure policies, explicit per-item workers, and runtime
-graph state/transfer/drop metrics remain subsequent Slice E work.
+Graph Result records now include terminal `graph.nodes` and `graph.edges`.
+Nodes retain prepared IDs (including adapters), operator kinds, tracked executable
+paths, terminal states, and per-node status/signal/outcome. Edges retain endpoints,
+stream kinds, and authored argument slots. Operator-owned edges expose payload
+bytes and complete framed-item counts; lossy outputs also expose dropped records
+and pending-queue payload/item high-water marks. Private four-byte envelopes are
+excluded. `measurement` is `completed-write`, `read`, or `unavailable`: completed
+writes do not include partially completed writes, and reader-side byte counts
+measure bytes actually read by an operator. Direct external-to-external pipes
+remain uninstrumented; unavailable counters are nil, never fabricated zeroes.
+Byte edges have no item counts. Missing host telemetry is supported explicitly.
+Counters saturate at 2^53-1 with `saturated: true`, so native and Node keep exact
+portable integers. Native workers use an invocation-owned shared mapping with
+one writer per edge; the parent snapshots only after all children exit. Telemetry
+allocation failure leaves measurements unavailable rather than failing work.
+This is terminal Result metadata, not a live snapshot API or an implicit output
+effect; existing capture values and failure diagnostics keep their contracts.
+
+Alternate ordering/failure policies, explicit per-item workers, and live runtime
+state/backpressure inspection remain subsequent Slice E work.
 Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing

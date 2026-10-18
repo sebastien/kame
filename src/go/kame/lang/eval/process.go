@@ -168,6 +168,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if (e.Kind == expr.CommandResult || e.Kind == expr.CommandGraph) && r.Diagnostic.Code == "" {
 			r.Value.Free(c.Run)
 			r = processResult(c.Run, completion.Value, e.Span)
+			if r.Diagnostic.Code == "" && e.Topology { r = processGraphResult(c.Run, r, e, completion.Value, state.Stages) }
 		}
 		if e.Kind == expr.CommandTest && r.Diagnostic.Code == "" {
 			r.Value.Free(c.Run)

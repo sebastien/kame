@@ -161,6 +161,7 @@ test-wasm: wasm-check
 	tests/T042-04-kash-operands.sh
 	tests/T042-05-kash-scheduling.sh
 	tests/T042-06-kash-lossy.sh
+	tests/T042-07-kash-metrics.sh
 	tests/T036-01-cli-presentation.sh
 	tests/T036-02-cli-reuse-reasons.sh
 

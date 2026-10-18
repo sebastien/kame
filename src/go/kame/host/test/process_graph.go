@@ -83,3 +83,14 @@ func TestLossyBroadcastRequiresFramesAndBoundedPendingStorage(t *testing.T) {
 	stages[1].Kind, stages[1].Framed, stages[2].Framed = "copy", false, false
 	if host.ProcessTopologyError(t.Allocator(), request) != "KASH_FRAME_REQUIRED" { t.Error("lossy byte broadcast accepted") }
 }
+
+func TestMetricsPayloadPreservesUnknownsAndOwnedRows(t *testing.T) {
+	metrics := []host.ProcessEdgeMetrics{{Measurement: 1, Bytes: 9, Items: 3}, {Items: -1, DroppedItems: -1}, {Measurement: 3, Bytes: 1024, Items: 1, DroppedItems: 511, QueueHighWaterBytes: 2048, QueueHighWaterItems: 2}}
+	value := host.ProcessMetricsPayload(t.Allocator(), metrics)
+	if len(value.List) != 3 || len(value.List[0].List) != 7 { t.Error("invalid metrics row schema") } else {
+		if value.List[0].List[1].Int != 9 || value.List[0].List[2].Int != 3 { t.Error("payload counters were lost") }
+		if value.List[1].List[2].Int != -1 { t.Error("an unavailable measurement became zero") }
+		if value.List[2].List[3].Int != 511 || value.List[2].List[5].Int != 2 { t.Error("queue/drop counters were lost") }
+	}
+	value.Free(t.Allocator())
+}
