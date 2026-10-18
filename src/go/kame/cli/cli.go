@@ -215,8 +215,11 @@ func parseCommand(command string, args []string) Invocation {
 		parseGraph(&inv, args, false)
 		return inv
 	}
-	// Cat executes; tools only inspects. Both use command-specific build validation.
+	// Cat executes; tools and list only inspect. Reuse build source/config options.
 	parseBuild(&inv, args)
+	if inv.OK && command == "list" && len(inv.Targets) > 1 {
+		inv.fail("OPT_VALUE_INVALID", "list accepts at most one query")
+	}
 	if inv.OK && command == "cat" && inv.DryRun {
 		inv.fail("OPT_CONFLICT", "cat does not support dry-run")
 	}
@@ -239,7 +242,7 @@ func parseCommand(command string, args []string) Invocation {
 }
 
 func isCommand(command string) bool {
-	return command == "" || command == "build" || command == "help" || command == "run" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt" || command == "render" || command == "cache"
+	return command == "" || command == "build" || command == "help" || command == "run" || command == "list" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt" || command == "render" || command == "cache"
 }
 
 // RemovedCommandMessage keeps native/WASM migration diagnostics identical.
@@ -320,7 +323,7 @@ func parseBuild(inv *Invocation, args []string) {
 			inv.fail("OPT_UNKNOWN", "unknown option: "+arg)
 			return
 		}
-		if assignmentOperand(inv, arg) {
+		if inv.Name != "list" && assignmentOperand(inv, arg) {
 			if inv.Error.Code != "" {
 				return
 			}

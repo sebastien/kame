@@ -17,7 +17,7 @@ import { constants as osConstants, tmpdir } from 'node:os';
 import process, { argv, env, stderr, stdout } from 'node:process';
 
 // Numeric graph kinds are part of the stable WASM ABI.
-const graphKinds = Object.freeze({ inputs: 0, outputs: 1, span: 2, planRoots: 3 });
+const graphKinds = Object.freeze({ inputs: 0, outputs: 1, span: 2, planRoots: 3, list: 4 });
 
 // Children run in their own process group so a signal terminates the whole
 // tree, and a forced termination reports 128 plus the signal number.
@@ -2179,7 +2179,7 @@ class Module {
       // The legacy ABI slot expands span queries or selects affected plans.
       const flag = queryOption ? 1 : 0;
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_graph(handle, targetBytes.pointer, targetBytes.length, depth, kind, flag, dst, dstLen, lengthPointer);
-    }, name, context);
+    }, name, context, kind !== graphKinds.list);
   }
 
   async toolNames(source, name) {
@@ -3474,10 +3474,11 @@ async function discoverBuildSource(module, inv, sourceDirectory, watchedSources 
   parts.force = inv.force ? 1 : 0;
   parts.environment = environment;
   const compiled = parts.length === 1 && !inv.defines.length && !inv.parameters.length && !inv.toolOverrides.length && !environment.length && !inv.force ? source.text : parts;
-  // Tools has a command operand ("check"), not a target; normalize its roots
-  // only after the caller strips that operand. Sessions normalize in Go.
-  const targets = inv.name === 'tools' ? inv.targets : await module.targetOperands(compiled, inv.targets, name);
-  if (inv.name !== 'tools' && targets.length === 0) throw Object.assign(new Error('no target was requested and no default target is defined'), { code: 'TGT_NO_DEFAULT' });
+  // Tools has a command operand; list has a search query, not a build root.
+  // Neither should normalize operands or implicitly select default.
+  const catalogue = inv.name === 'tools' || inv.name === 'list';
+  const targets = catalogue ? inv.targets : await module.targetOperands(compiled, inv.targets, name);
+  if (!catalogue && targets.length === 0) throw Object.assign(new Error('no target was requested and no default target is defined'), { code: 'TGT_NO_DEFAULT' });
   return { name, text: source.text, compiled, targets };
 }
 
@@ -3612,6 +3613,15 @@ async function runFmt(module, inv) {
 
 async function runPlan(module, inv, sourceDirectory) {
   return runGraph(module, inv, sourceDirectory);
+}
+
+async function runList(module, inv, sourceDirectory) {
+  const source = await discoverBuildSource(module, inv, sourceDirectory);
+  if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
+  primarySource = source;
+  const bytes = await module.graphJSON(source.compiled, inv.targets[0] || '', 0, graphKinds.list, false, source.name);
+  writeReport('list', JSON.parse(Buffer.from(bytes).toString('utf8')));
+  return 0;
 }
 
 async function runGraph(module, inv, sourceDirectory) {
@@ -4271,6 +4281,7 @@ async function dispatchCommand(module, inv, noArguments) {
   if (inv.name === 'parse') return runParse(module, inv);
   if (inv.name === 'fmt') return runFmt(module, inv);
   if (inv.name === 'plan') return runPlan(module, inv, sourceDirectory);
+  if (inv.name === 'list') return runList(module, inv, sourceDirectory);
   if (inv.name === 'inputs' || inv.name === 'outputs' || inv.name === 'span') return runGraph(module, inv, sourceDirectory);
   if (inv.name === 'tools') return runTools(module, inv, sourceDirectory);
   if (inv.name === 'cat') {

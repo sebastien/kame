@@ -188,6 +188,9 @@ func runDoCommand(command string, args []string, in io.Reader, out io.Writer, er
 	if command == "plan" {
 		return runPlan(args, out, errOut)
 	}
+	if command == "list" {
+		return runList(args, out, errOut)
+	}
 	if command == "cat" {
 		return runCat(args, out, errOut)
 	}

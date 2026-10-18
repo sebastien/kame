@@ -19,6 +19,30 @@ func runPlan(args []string, out io.Writer, errOut io.Writer) int {
 	return runGraph(args, out, errOut, "plan")
 }
 
+func runList(args []string, out io.Writer, errOut io.Writer) int {
+	parsed := cli.Parse("list", args)
+	applyInvocationPresentation(&parsed)
+	defer parsed.Free()
+	if !parsed.OK {
+		cliError(errOut, parsed.Error.Code, parsed.Error.Message)
+		return 2
+	}
+	session := openBuildSession(parsed, errOut, true)
+	defer session.Free()
+	if session.Status != 0 { return session.Status }
+	query := ""
+	if len(parsed.Targets) != 0 { query = parsed.Targets[0] }
+	var buffer = bytes.NewBuffer(mem.System, nil)
+	defer buffer.Free()
+	session.Program.WriteTargetList(&buffer, query)
+	if parsed.JSON {
+		io.WriteString(out, buffer.String()+"\n")
+	} else {
+		cli.WriteReport(out, "list", buffer.String(), stdoutColor)
+	}
+	return 0
+}
+
 func runTools(args []string, out io.Writer, errOut io.Writer) int {
 	parsed := cli.Parse("tools", args)
 	applyInvocationPresentation(&parsed)

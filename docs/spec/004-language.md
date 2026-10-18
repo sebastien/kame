@@ -773,6 +773,8 @@ without interpolation are static literal inputs, including literal wildcard byte
 Decoding never performs a second interpolation pass on escaped or computed text,
 or a second literal-backslash decoding pass before capture matching. Capture and
 diagnostic spans retain authored source coordinates, including preceding escapes.
+Interpolated pattern values retain their pattern escape semantics, while literal
+and interpolated string backslashes remain decoded data.
 AST JSON uses `pattern` consistently for output and prerequisite capture patterns,
 and `template` for decoded string/interpolation syntax, without duplicate keys.
 Schema 1 retains `template` as a legacy alias for capture-only operands.

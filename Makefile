@@ -92,6 +92,7 @@ test-wasm: wasm-check
 	tests/T005-06-eval-truth-capture.sh
 	tests/T009-13-cli-configuration.sh
 	tests/T009-16-cli-script-output.sh
+	tests/T009-18-cli-list.sh
 	tests/T009-14-cli-watch.sh
 	tests/T004-19-lang-rule-header-composition.sh
 	tests/T004-10-lang-line-continuations.sh
