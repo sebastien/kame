@@ -181,7 +181,35 @@ closed-reader acceptance, or unbounded error/output history is introduced.
 Static inspection, live snapshots, and terminal Results expose the effective
 graph failure policy. Runtime-discovered build dependencies remain engine edges.
 
-Explicit per-item workers remain subsequent Slice E work.
+Explicit per-item workers are available as `source |(frame :lines) |(each)
+command args`. Each complete input record starts one directly executed command
+with its exact payload on stdin, followed by EOF. Empty input starts no command.
+The template's argv, tools, grants, cwd, environment, and redirections are prepared
+once before graph launch; record text is never parsed or substituted into argv.
+Live operand claims and stdin redirections are invalid on a worker template.
+
+Each operator has exactly one active executable at a time, one <=64 KiB input
+record, and bounded byte transport; stdin and stdout progress concurrently.
+Output is a byte stream concatenating complete worker outputs in input order.
+Explicit reframing is required before a framed rejoin; a worker's output need not
+have the input's cardinality. Redirections are opened once per graph, not once
+per record. For explicit bounded parallelism, balance records across multiple
+`|(each)` branches. No implicit pool, batch materialization, retries, or per-record
+outcome history is retained. Children created by authored executables remain
+subject to the existing process-tree ownership rules, not a new process quota.
+
+Ordinary nonzero worker exits fail fast by default. Under graph-wide collection,
+remaining records and siblings finish; the worker node retains its last nonzero
+exit and the graph retains the usual prepared-node aggregate ordering. Signals,
+launch/transport errors, timeouts, and cancellation remain fatal. A template's
+`:timeout` bounds the entire operator lifetime (including input waits), not each
+record independently. All workers belong to their invocation, including async
+and anonymous-producer graphs. Static topology, snapshots, and terminal Results
+identify worker nodes as `each`; static inspection reports `maxWorkers: 1`.
+
+Slices A–E are implemented with the bounded policies above. Additional scheduling
+strategies, worker pools, branch isolation/retries, and other framing formats are
+future extensions, not implicit behavior.
 Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing
@@ -327,10 +355,11 @@ Initial operator vocabulary:
 | --- | ---: | ---: | --- |
 | `|(merge)` | N | 1 | Combine independent inputs; no global ordering guarantee. |
 | `|(broadcast)` | 1 | N | Deliver each complete item to every output. |
-| `|(balance)` | 1 | N | Deliver each item to exactly one output (default policy TBD). |
+| `|(balance)` | 1 | N | Deliver each framed item to exactly one output in strict round-robin order. |
 | `|(filter P | branch)` | 1 | 2 | Selected to branch; unmatched to remainder. |
 | `|(frame ...)` | 1 | 1 | Establish explicit framing for subsequent item-aware operations. |
 | `|(encode ...)` | 1 | 1 | Encode items to bytes for external processes. |
+| `|(each) command args` | 1 | 1 | Start one directly executed worker per framed stdin record; ordered byte stdout, one active worker. |
 
 Operators are extensible as library-provided stream transformations, but any extension MUST declare input/output cardinalities, input/output data kinds, buffering contract, failure behavior, and whether it is pure, effectful, or process-starting. Builtin multiplexors use dedicated syntax and AST nodes, not textual rewriting of commands.
 
@@ -344,6 +373,20 @@ produce |(broadcast) (consumer-a, consumer-b)
 ```
 
 All members start concurrently when the enclosing graph runs.
+
+A member beginning with `|(...)` takes its input from the group's owning fan-out,
+just as a conditional branch can begin with an adapter. This permits bounded
+parallel per-record workers without hidden process pools:
+
+```kash
+source |(frame :lines) |(balance) (
+    |(each) worker-a > ./left,
+    |(each) worker-b > ./right
+)
+```
+
+Such input ports still require exactly one connection; a stand-alone group does
+not invent upstream data.
 
 **Parser constraint:** ordinary parenthesized Kame expressions remain valid. Process-group parsing applies only in Kash *process operand* position, and only when the parentheses contain a top-level comma between process expressions. A single `(A)` retains its existing Kame-expression meaning; it is not a process group. This deliberately avoids conflating arrays with process groups. Nested commas inside quotes, expression delimiters, arguments, or `<(...)` do not count.
 

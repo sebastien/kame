@@ -364,7 +364,26 @@ isolation, retry, or permission to ignore broken pipes. A peer that never closes
 can still wait indefinitely unless the invocation has a deadline. Graph inspection,
 snapshots, and Results expose the effective policy.
 
-Per-item workers remain pending.
+### Explicit per-record commands
+
+```kash
+source |(frame :lines) |(each) command args
+```
+
+One directly executed process receives one exact record on stdin and then EOF.
+Empty input starts none. The argv/environment/cwd template is prepared once;
+record data is never parsed as shell text or interpolated into arguments.
+One active worker per operator preserves order and bounds memory. Stdout remains
+bytes; explicitly `|(frame :lines)` before a framed rejoin. Redirected stdout is
+opened once for the whole graph, not truncated for each record. Live operands and
+stdin redirections cannot be used on the template. For parallelism, use explicit
+`balance` branches: `|(balance) (|(each) worker-a, |(each) worker-b)`.
+
+Workers use normal grants, failures, recovery, cancellation, and async ownership.
+`:failure collect` lets later records run after ordinary nonzero exits, retaining
+the last nonzero status for the worker node. Signals and launch/transport errors
+are still fatal. A template `:timeout` covers the whole operator lifetime. There
+is no unbounded per-record status history or implicit retry.
 
 ### Live stream arguments
 

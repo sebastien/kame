@@ -350,6 +350,8 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       return 2u;
     case host_RequestProcess:
       if (host_PayloadList(request.Payload, so_str("kinds")).len != 0) {
+        so_Slice kinds = host_PayloadList(request.Payload, so_str("kinds"));
+        for (so_int i = 0; i < kinds.len; i++) if (kame_wasm_string_eq(((core_Value *)kinds.ptr)[i].Text, "each")) return 38u;
         if (host_PayloadInt(request.Payload, so_str("failurePolicy")) == 1) return 37u;
         if (host_PayloadList(request.Payload, so_str("orders")).len != 0) return 36u;
         if (host_PayloadList(request.Payload, so_str("overflows")).len != 0) return 35u;

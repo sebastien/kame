@@ -37,6 +37,9 @@ func TestProcessGroupsAndMuxRoundTrip(t *testing.T) {
 		"$((printf a, printf b) |(merge :order ready) cat)",
 		"$((printf a, printf b) |(merge :failure collect) cat)",
 		"$(printf a |(broadcast :failure fail-fast) (cat, cat))",
+		"$(printf a |(frame :lines) |(each) cat)",
+		"$(printf a |(frame :lines) |(balance) (|(each) cat, |(each) cat))",
+		"$(printf a |(frame :lines) |(each) sh -c \"cat; printf done\" | cat)",
 	}
 	for i := range texts {
 		r := expr.Parse(t.Allocator(), "graph.km", texts[i])

@@ -29,7 +29,7 @@ func (e *astEncoder) processTopology(value *expr.Expr) {
 			node := flat.Items[i]
 			e.BeginObject()
 			e.Str("id"); e.Int(int64(i))
-			e.Str("kind"); if node.Kind == expr.CommandStage { e.Str("process") } else { e.Str(node.Text) }
+			e.Str("kind"); if node.Each { e.Str("each"); e.Str("maxWorkers"); e.Int(1) } else if node.Kind == expr.CommandStage { e.Str("process") } else { e.Str(node.Text) }
 			e.Str("span"); e.span(node.Span)
 			e.Str("outputKind"); if flat.StreamKinds[i] == 1 { e.Str("lines") } else { e.Str("bytes") }
 			if node.Kind == expr.CommandMux {

@@ -36,6 +36,7 @@ func processGraphResult(a mem.Allocator, result Result, graph *expr.Expr, comple
 		kind, program, state := node.Text, "", "unknown"
 		status, signal, outcome := int64(0), int64(0), int64(0)
 		if node.Kind == expr.CommandStage { kind = "process"; if i < len(argv) && len(argv[i].List) != 0 { program = argv[i].List[0].Text } }
+		if node.Each { kind = "each" }
 		known := 0
 		if i < len(stages) { for j := range stages[i].Record { field := stages[i].Record[j]; if (field.Key == "status" || field.Key == "signal" || field.Key == "outcome") && field.Value.Kind == core.Int { known++ } } }
 		if known == 3 {

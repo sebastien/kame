@@ -58,3 +58,12 @@ func TestGraphFailureCollectionInspectionAndConflicts(t *testing.T) {
 	text = "(printf a, printf b) |(merge :failure collect) |(broadcast :failure fail-fast) (cat, cat)"
 	if ast.WriteAST(&other, "kash", "conflict.kash", text) != 0 || !strings.Contains(other.String(), "KASH_FAILURE_POLICY") { t.Error("conflicting graph failure policies not diagnosed statically") }
 }
+
+func TestEachWorkerInspectionRequiresFramesBeforeArgumentEvaluation(t *testing.T) {
+	buffer := bytes.NewBuffer(t.Allocator(), nil); defer buffer.Free()
+	text := "printf a |(frame :lines) |(each) cat $(touch ./must-not-run)"
+	if ast.WriteAST(&buffer, "kash", "each.kash", text) != 0 || !strings.Contains(buffer.String(), "\"kind\":\"each\"") || !strings.Contains(buffer.String(), "\"maxWorkers\":1") { t.Error("per-record worker template not inspectable") }
+	other := bytes.NewBuffer(t.Allocator(), nil); defer other.Free()
+	text = "printf a |(each) cat $(touch ./must-not-run)"
+	if ast.WriteAST(&other, "kash", "unframed.kash", text) != 0 || !strings.Contains(other.String(), "KASH_FRAME_REQUIRED") { t.Error("unframed worker not rejected statically") }
+}

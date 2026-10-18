@@ -18,7 +18,7 @@ func addStreamNode(c *Context, graph *expr.Expr, kind string, span source.Span) 
 // Bytes are 0; framed lines are 1. On framed edges the hosts transport a
 // length-prefixed raw payload, so a partial EOF line remains a distinct item.
 func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
-	for i := range graph.Items { kind := -1; if graph.Items[i].Kind == expr.CommandStage { kind = 0 }; graph.StreamKinds = slices.Append(c.Run, graph.StreamKinds, kind) }
+	for i := range graph.Items { kind := -1; if graph.Items[i].Kind == expr.CommandStage && !graph.Items[i].Each { kind = 0 }; graph.StreamKinds = slices.Append(c.Run, graph.StreamKinds, kind) }
 	for {
 		progress, remaining := false, false
 		for i := range graph.Items {
@@ -39,7 +39,10 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 			if node.StreamOverflow != 0 && input != 1 { return failure(c.Run, "KASH_FRAME_REQUIRED", node.Span, "lossy broadcast requires explicit record framing") }
 			if node.StreamOrder != 0 && input != 1 { return failure(c.Run, "KASH_FRAME_REQUIRED", node.Span, "round-robin merge requires explicit record framing") }
 			output := input
-			if node.Text == "frame" {
+			if node.Each {
+				if input != 1 { return failure(c.Run, "KASH_FRAME_REQUIRED", node.Span, "per-record workers require explicit record framing") }
+				output = 0
+			} else if node.Text == "frame" {
 				if input != 0 { return failure(c.Run, "KASH_FRAME_MISMATCH", node.Span, "frame :lines requires bytes") }
 				output = 1
 			} else if node.Text == "encode" || node.Text == "filter" || node.Text == "balance" {
@@ -56,7 +59,7 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 	edges := len(graph.Edges)
 	for i := 0; i < edges; i++ {
 		edge := graph.Edges[i]
-		if graph.StreamKinds[edge.From] == 1 && graph.Items[edge.To].Kind == expr.CommandStage {
+		if graph.StreamKinds[edge.From] == 1 && graph.Items[edge.To].Kind == expr.CommandStage && !graph.Items[edge.To].Each {
 			adapter := addStreamNode(c, graph, "encode", graph.Items[edge.To].Span)
 			graph.StreamKinds = slices.Append(c.Run, graph.StreamKinds, 0)
 			graph.Edges[i].To = adapter

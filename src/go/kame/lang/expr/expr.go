@@ -102,6 +102,7 @@ type Expr struct {
 	StreamOverflow int // 0 block, 1 drop-new, 2 drop-old, 3 latest
 	StreamOrder int // 0 ready, 1 strict framed round-robin (merge only)
 	StreamFailure int // 0 inherited, 1 explicit fail-fast, 2 collect external exit statuses
+	Each bool // prepared command template: one process per framed stdin record
 	BufferItems int
 	Exit string
 	Channels []string

@@ -430,6 +430,20 @@ Native `ProcessRequest.CollectFailures` has the same contract and requires topol
 execution. Static annotations are reconciled in the evaluator before submission;
 they are never evaluated configuration or implicit failure acceptance.
 
+Process request kind **38** requires explicit per-record execution. At least one
+node has kind `each`, nonempty prepared argv, exactly one framed stdin edge, no
+argument edges, and byte stdout. The descriptor requires all four node-aligned
+policy arrays and an integer `failurePolicy` of 0 (fail-fast) or 1 (collect).
+Worker argv is authorized like a process, never skipped like a built-in mux.
+Unknown hosts must reject 38, not launch one long-running command instead.
+
+Each node starts at most one worker at a time, passing exactly one decoded framed
+payload to stdin and then EOF. Stdout is bounded byte transport, concatenated in
+record order. Empty input starts no worker. Redirections and setup are prepared
+once; timeout is for the entire operator. Ordinary exits retain executable status
+identity, even when their values coincide with mux diagnostic codes. A worker node
+retains its last nonzero status under collection; no per-record history is sent.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly

@@ -165,6 +165,7 @@ test-wasm: wasm-check
 	tests/T042-08-kash-live.sh
 	tests/T042-09-kash-ordering.sh
 	tests/T042-10-kash-failure-policy.sh
+	tests/T042-11-kash-each.sh
 	tests/T036-01-cli-presentation.sh
 	tests/T036-02-cli-reuse-reasons.sh
 

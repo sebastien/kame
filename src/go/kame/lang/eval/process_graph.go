@@ -118,6 +118,17 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			slices.Free(c.Run, ports.Outputs); ports.Outputs = slices.Append(c.Run, []int{}, merge)
 		}
 		slices.Free(c.Run, joined)
+		if connection.Kind == expr.CommandMux && connection.Text == "each" {
+			if len(ports.Outputs) != 1 || i + 1 >= len(e.Items) || e.Items[i + 1].Kind != expr.CommandStage { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span; return ports }
+			i++
+			template := expr.Clone(c.Run, e.Items[i]); template.Each = true
+			for j := range template.Items { if template.Items[j].Kind == expr.CommandOperand { flat.Text, flat.Span = "KASH_DOUBLE_CONSUME", template.Items[j].Span } }
+			right := lowerProcessGraph(c, template, flat); expr.Free(c.Run, template)
+			if len(right.Inputs) != 1 || len(right.Outputs) != 1 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span
+			} else { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[0], To: right.Inputs[0]}) }
+			slices.Free(c.Run, ports.Outputs); slices.Free(c.Run, right.Inputs); ports.Outputs = right.Outputs
+			continue
+		}
 		if connection.Kind == expr.CommandMux && (connection.Text == "frame" || connection.Text == "encode" || connection.Text == "filter") {
 			if len(ports.Outputs) != 1 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span }
 			index := len(flat.Items)

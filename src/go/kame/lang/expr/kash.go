@@ -87,7 +87,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 	if capture { kind = CommandCapture }
 	e := p.node(kind, start)
 	stage := p.node(CommandStage, p.pos)
-	if branch { p.commandSpace(true); if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '|' { stage.Kind = CommandInput } }
+	if branch || grouped { p.commandSpace(true); if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '|' { stage.Kind = CommandInput } }
 	e.Items = slices.Append(p.a, e.Items, stage)
 	input, output := false, false
 	for {
@@ -110,7 +110,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			break
 		}
 		if ((grouped || branch) && p.s.Text[p.pos] == ')') || (grouped && p.s.Text[p.pos] == ',') { break }
-		if stage.Kind == CommandMux && (stage.Text == "merge" || stage.Text == "broadcast" || stage.Text == "balance") && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
+		if stage.Kind == CommandMux && (stage.Text == "merge" || stage.Text == "broadcast" || stage.Text == "balance" || stage.Text == "each") && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
 			stage = p.node(CommandStage, p.pos)
 			input = false
 			e.Items = slices.Append(p.a, e.Items, stage)
@@ -200,7 +200,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 						mux.Body = slices.Append(p.a, mux.Body, p.commandPipeline(p.pos, false, false, true))
 					}
 				} else if mux.Text == "merge" || mux.Text == "broadcast" || mux.Text == "balance" { p.streamPolicy(mux) }
-				if (mux.Text != "merge" && mux.Text != "broadcast" && mux.Text != "balance" && mux.Text != "frame" && mux.Text != "encode" && mux.Text != "filter") || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || len(p.diags) != 0 {
+				if (mux.Text != "merge" && mux.Text != "broadcast" && mux.Text != "balance" && mux.Text != "frame" && mux.Text != "encode" && mux.Text != "filter" && mux.Text != "each") || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || len(p.diags) != 0 {
 					p.error(mux.Span.Start, p.pos, "invalid Kash stream operator")
 					freeExpr(p.a, mux)
 					break

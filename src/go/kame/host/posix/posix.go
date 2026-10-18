@@ -227,6 +227,7 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				if request.Stages[i].Kind == "filter" { kind = 5 }
 				if request.Stages[i].Kind == "copy" { kind = 6 }
 				if request.Stages[i].Kind == "balance" { kind = 7 }
+				if request.Stages[i].Kind == "each" { kind = 8 }
 				if request.Stages[i].Framed { kind += 16 }
 				kind += request.Stages[i].Overflow * 32
 				kind += request.Stages[i].Order * 128

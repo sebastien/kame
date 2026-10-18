@@ -787,7 +787,7 @@ static void km_release_process(km_process *p) {
     for (int i = 0; i < p->stage_count; i++) km_windows_job_close(&p->stages[i].job);
     free(p->stages);
     if (p->metrics) munmap(p->metrics, (size_t)p->metric_count * KM_METRIC_FIELDS * sizeof(int64_t));
-    if (p->live_states) munmap(p->live_states, (size_t)p->stage_count * sizeof(int));
+    if (p->live_states) munmap(p->live_states, (size_t)p->stage_count * 2 * sizeof(int));
     for (int i = 0; i < 2; i++) if (p->pending_sequence[i]) km_free_event(&p->pending[i]);
     memset(p, 0, sizeof(*p)); p->outfd = p->errfd = p->execfd = -1;
 }
@@ -1619,6 +1619,115 @@ cleanup:
     return result;
 }
 
+// Explicit per-record workers reuse one supervisor/process group. Only one
+// payload and one child are active; stdin and stdout progress concurrently so
+// a child may write more than a pipe's capacity before it consumes its input.
+static int km_each_child(int node, int *edges, so_int *links, int count,
+                          char **argv, char **envp, unsigned char *record, int size,
+                          int *failure) {
+    int input[2] = {-1, -1}, output[2] = {-1, -1}, launch[2] = {-1, -1};
+    pid_t child = -1;
+    int result = 0, status = 0;
+    if (pipe(input) || pipe(output) || pipe(launch)) goto failed;
+    for (int i = 0; i < 2; i++) if (fcntl(launch[i], F_SETFD, FD_CLOEXEC) < 0) goto failed;
+    child = fork();
+    if (child < 0) goto failed;
+    if (!child) {
+        close(launch[0]);
+        if (dup2(input[0], STDIN_FILENO) < 0 || dup2(output[1], STDOUT_FILENO) < 0) {
+            int error = errno; write(launch[1], &error, sizeof(error)); _exit(127);
+        }
+        close(input[0]); close(input[1]); close(output[0]); close(output[1]);
+        signal(SIGPIPE, SIG_DFL);
+        km_exec_argv(argv, envp);
+        int error = errno; write(launch[1], &error, sizeof(error)); _exit(127);
+    }
+    km_close(&input[0]); km_close(&output[1]); km_close(&launch[1]);
+    if (km_set_nonblock(input[1]) || km_set_nonblock(output[0])) goto failed;
+    int offset = 0;
+    unsigned char chunk[KM_CHUNK];
+    while (input[1] >= 0 || output[0] >= 0) {
+        struct pollfd fds[2] = {{.fd = input[1], .events = POLLOUT}, {.fd = output[0], .events = POLLIN}};
+        int ready;
+        km_worker_wait(KM_RUNNING); // arbitrary executable internal waits are unknown
+        do { ready = poll(fds, 2, -1); } while (ready < 0 && errno == EINTR);
+        if (ready < 0) goto failed;
+        if (input[1] >= 0 && fds[0].revents) {
+            ssize_t n = write(input[1], record + offset, (size_t)(size - offset));
+            if (n < 0 && errno != EINTR && errno != EAGAIN) goto failed;
+            if (n > 0) offset += (int)n;
+            if (offset == size) km_close(&input[1]);
+        }
+        if (output[0] >= 0 && fds[1].revents) {
+            ssize_t n = read(output[0], chunk, sizeof(chunk));
+            if (n < 0 && errno != EINTR && errno != EAGAIN) goto failed;
+            if (!n) km_close(&output[0]);
+            if (n > 0 && km_mux_send(node, 8, edges, links, count, chunk, (int)n, 0)) goto failed;
+        }
+    }
+    pid_t waited;
+    do { waited = waitpid(child, &status, 0); } while (waited < 0 && errno == EINTR);
+    if (waited != child) goto failed;
+    child = -1;
+    int error;
+    ssize_t n;
+    do { n = read(launch[0], &error, sizeof(error)); } while (n < 0 && errno == EINTR);
+    if (n != 0) goto failed;
+    if (WIFSIGNALED(status)) {
+        int sig = WTERMSIG(status);
+        signal(sig, SIG_DFL); raise(sig); _exit(128 + sig);
+    }
+    result = WEXITSTATUS(status);
+    goto cleanup;
+failed:
+    __atomic_store_n(failure, 1, __ATOMIC_RELAXED);
+    result = 125;
+    if (child > 0) { kill(child, SIGKILL); while (waitpid(child, &status, 0) < 0 && errno == EINTR) {} }
+cleanup:
+    for (int i = 0; i < 2; i++) { km_close(&input[i]); km_close(&output[i]); km_close(&launch[i]); }
+    return result;
+}
+
+static int km_run_each(int node, int *edges, so_int *links, int count,
+                        char **argv, char **envp, int64_t *metrics, int *states,
+                        int *failure, bool collect) {
+    km_worker_state = states + node;
+    km_worker_metrics = metrics; km_worker_pipes = edges; km_worker_links = links;
+    km_worker_node = node; km_worker_edges = count;
+    km_mux_close_unowned(node, edges, links, count);
+    signal(SIGPIPE, SIG_IGN); signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL);
+    int input = -1, result = 0;
+    for (int i = 0; i < count; i++) if (links[i * 2 + 1] == node) input = edges[i * 2];
+    unsigned char *record = malloc(KM_RECORD_LIMIT + 4);
+    if (!record || input < 0) { __atomic_store_n(failure, 1, __ATOMIC_RELAXED); free(record); return 125; }
+    for (;;) {
+        int length = 0, need = 4;
+        while (length < need) {
+            km_worker_wait(KM_WAIT_INPUT);
+            ssize_t n = read(input, record + length, (size_t)(need - length));
+            if (n < 0 && errno == EINTR) continue;
+            if (!n && !length) goto complete;
+            if (n <= 0) goto failed;
+            length += (int)n;
+            if (length == 4 && need == 4) {
+                uint32_t size = 0;
+                for (int i = 0; i < 4; i++) size |= (uint32_t)record[i] << (8 * i);
+                if (!size || size > KM_RECORD_LIMIT) goto failed;
+                need += (int)size;
+            }
+        }
+        km_worker_wait(KM_RUNNING);
+        int status = km_each_child(node, edges, links, count, argv, envp, record + 4, length - 4, failure);
+        if (status) result = status;
+        if (__atomic_load_n(failure, __ATOMIC_RELAXED) || (status && !collect)) break;
+    }
+    goto complete;
+failed:
+    __atomic_store_n(failure, 1, __ATOMIC_RELAXED); result = 125;
+complete:
+    free(record); return result;
+}
+
 static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
                       int item_limit, int64_t *metrics, int *states, int64_t id, km_stream_item item, void *context) {
     km_worker_state = states ? states + node : NULL;
@@ -1773,7 +1882,9 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     p.collect_failures = collect_failures;
     p.stages = calloc((size_t)n, sizeof(km_stage));
     if (topology) {
-        void *mapping = mmap(NULL, (size_t)n * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        // First half: advisory wait states. Second half: authoritative worker
+        // transport/launch errors, distinct from arbitrary executable statuses.
+        void *mapping = mmap(NULL, (size_t)n * 2 * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
         if (mapping != MAP_FAILED) { p.live_states = mapping; for (int i = 0; i < n; i++) p.live_states[i] = KM_RUNNING; }
     }
     if (topology && edge_count && (size_t)edge_count <= SIZE_MAX / (KM_METRIC_FIELDS * sizeof(int64_t))) {
@@ -1792,6 +1903,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     if (p.stages && topology) for (int i = 0; i < n; i++) p.stages[i].operator_kind = (int)node_kinds[i] & 15;
     if (edges) for (int i = 0; i < edge_count * 2; i++) edges[i] = -1;
     bool ok = edges && operand_fds && stage_inputs && stage_outputs && truncate_outputs && argv && envp && cwd && p.stages && input_name && output_name;
+    for (int i = 0; topology && i < n; i++) if ((node_kinds[i] & 15) == 8 && !p.live_states) ok = false;
     so_String *args = arguments.ptr, *envs = environment.ptr, *dirs = directories.ptr;
     int at = 0;
     for (int i = 0; ok && i < n; i++) {
@@ -1929,7 +2041,11 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
             if (topology) for (int j = 0; j < n; j++) { if (stage_inputs[j] >= 0 && stage_inputs[j] != input) close(stage_inputs[j]); if (stage_outputs[j] >= 0) close(stage_outputs[j]); }
             if (!topology || !node_kinds[i]) for (int j = 0; j < edge_count * 2; j++) close(edges[j]);
             close(out[0]); close(out[1]); close(err[0]); close(err[1]); close(execerr[0]);
-            if (topology && node_kinds[i]) { close(execerr[1]); _exit(km_run_mux(i, (int)node_kinds[i], edges, links, edge_count, (int)((so_int *)item_limits.ptr)[i], p.metrics, p.live_states, id, stream_item, stream_context)); }
+            if (topology && node_kinds[i]) {
+                close(execerr[1]);
+                if ((node_kinds[i] & 15) == 8) _exit(km_run_each(i, edges, links, edge_count, argv[i], envp[i], p.metrics, p.live_states, p.live_states + n + i, collect_failures));
+                _exit(km_run_mux(i, (int)node_kinds[i], edges, links, edge_count, (int)((so_int *)item_limits.ptr)[i], p.metrics, p.live_states, id, stream_item, stream_context));
+            }
             if (ready[0] >= 0) {
                 char token = 0;
                 ssize_t nread;
@@ -1973,7 +2089,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
         if (p.stages) for (int i = 0; i < n; i++) km_windows_job_close(&p.stages[i].job);
         free(p.stages); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]);
         if (p.metrics) munmap(p.metrics, (size_t)p.metric_count * KM_METRIC_FIELDS * sizeof(int64_t));
-        if (p.live_states) munmap(p.live_states, (size_t)n * sizeof(int));
+        if (p.live_states) munmap(p.live_states, (size_t)n * 2 * sizeof(int));
         return km_spawn_failed(host, id, "graph spawn failed");
     }
     p.outfd = out[0]; p.errfd = err[0]; p.execfd = execerr[0]; p.deadline = timeout ? km_now() + timeout : 0;
@@ -2090,7 +2206,8 @@ static void km_reap(km_host *host, km_process *p) {
         for (int i = 0; i < p->stage_count; i++) {
             km_stage *s = &p->stages[i];
             if (km_observe_child(s->pid, &s->exited, &s->reaped, &s->status, &s->signal) < 0) { km_fail(host, p, "waitpid failed"); return; }
-            if (p->topology && !p->terminating && p->failed_stage < 0 && s->exited && (s->status || s->signal) && (!p->collect_failures || s->operator_kind || s->signal)) {
+            if (s->operator_kind == 8 && s->exited && p->live_states && __atomic_load_n(p->live_states + p->stage_count + i, __ATOMIC_RELAXED)) { km_fail(host, p, "per-record worker launch or transport failed"); return; }
+            if (p->topology && !p->terminating && p->failed_stage < 0 && s->exited && (s->status || s->signal) && (!p->collect_failures || (s->operator_kind && s->operator_kind != 8) || s->signal)) {
                 p->failed_stage = i;
                 p->status = s->signal ? 128 + s->signal : s->status; p->signal = s->signal;
                 km_signal(p, SIGKILL);
@@ -2098,7 +2215,7 @@ static void km_reap(km_host *host, km_process *p) {
             // A framing/predicate failure can close upstream before the parent
             // observes its exit. Preserve the causal operator diagnostic over
             // a resulting SIGPIPE, never reinterpret an executable's exit code.
-            if (p->topology && !p->terminating && s->operator_kind && s->exited && !s->signal && ((s->status >= 120 && s->status <= 124) || s->status == KM_BUFFER_LIMIT)) {
+            if (p->topology && !p->terminating && s->operator_kind && s->operator_kind != 8 && s->exited && !s->signal && ((s->status >= 120 && s->status <= 124) || s->status == KM_BUFFER_LIMIT)) {
                 p->failed_stage = i; p->status = s->status; p->signal = 0;
             }
             if (!s->exited) all = false;

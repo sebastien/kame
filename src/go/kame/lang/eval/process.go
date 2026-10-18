@@ -423,7 +423,8 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	} else { payload = host.ArgvPayload(c.Run, state.Stages[0].List) }
 	if e.Topology {
 		var kinds, edges, framed []core.Value
-		for i := range e.Items { kind := ""; if e.Items[i].Kind == expr.CommandMux { kind = e.Items[i].Text }; kinds = slices.Append(c.Run, kinds, core.NewString(c.Run, kind)) }
+		workers := false
+		for i := range e.Items { kind := ""; if e.Items[i].Kind == expr.CommandMux { kind = e.Items[i].Text }; if e.Items[i].Each { kind, workers = "each", true }; kinds = slices.Append(c.Run, kinds, core.NewString(c.Run, kind)) }
 		for i := range e.StreamKinds { framed = slices.Append(c.Run, framed, core.Value{Kind: core.Bool, Bool: e.StreamKinds[i] == 1}) }
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "framed"), Value: core.NewList(c.Run, framed)})
 		slices.Free(c.Run, framed)
@@ -455,10 +456,10 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			orders = slices.Append(c.Run, orders, core.Value{Kind: core.Int, Int: int64(e.Items[i].StreamOrder)})
 			if e.Items[i].StreamOrder != 0 { ordered = true }
 		}
-		if configuredBuffer || ordered || collect { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "buffers"), Value: core.NewList(c.Run, buffers)}) }
-		if ordered || collect { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "orders"), Value: core.NewList(c.Run, orders)}) }
-		if collect { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "failurePolicy"), Value: core.Value{Kind: core.Int, Int: 1}}) }
-		if lossy || ordered || collect {
+		if configuredBuffer || ordered || collect || workers { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "buffers"), Value: core.NewList(c.Run, buffers)}) }
+		if ordered || collect || workers { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "orders"), Value: core.NewList(c.Run, orders)}) }
+		if collect || workers { policy := int64(0); if collect { policy = 1 }; payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "failurePolicy"), Value: core.Value{Kind: core.Int, Int: policy}}) }
+		if lossy || ordered || collect || workers {
 			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "overflows"), Value: core.NewList(c.Run, overflows)})
 			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "bufferItems"), Value: core.NewList(c.Run, itemLimits)})
 		}
