@@ -143,6 +143,21 @@ uninstantiated patterns and opaque process reads are completeness boundaries,
 not evidence that a historical artifact is unused. When a boundary prevents a
 required safety decision, preserve the candidate and explain why.
 
+Native verification accepts static prerequisites, including decoded quoted
+strings without interpolation. These receive the same external-input protection
+as explicit path atoms; quoted wildcard bytes do not trigger discovery. Computed,
+interpolated, wildcard and capture prerequisites, target arguments and generated
+declarations still make the whole context unverifiable. This is a conservative
+implementation boundary, not permission to ignore unrelated-looking consumers.
+
+Read-only evaluation in the base configuration is not a proof of complete input
+membership: a parent rule can supply a scoped `KAME_NAME` override that selects a
+different external input. Captures and target arguments likewise vary by instance.
+Freshness records and inspection of `default` describe reached instances, not all
+possible consumers. Broader verification must account for those contexts before
+relaxing the whole-context refusal; it must not guess that an unused-looking rule
+cannot protect a historical explicit write.
+
 ## Eligibility and filesystem boundary
 
 The following checks apply to each recorded member:
@@ -226,6 +241,16 @@ busy projects and cancellation produce nonzero exit status. Safety-preserved
 artifacts are not command failures, but must be conspicuous in the summary;
 success does not mean every historical artifact disappeared. JSON carries the
 same decisions and reasons without process or recipe events.
+
+When declaration discovery causes `context-unverifiable` preservation, report
+the first blocking declaration without its evaluated configuration or source
+excerpt. Native JSON adds a top-level `contextBlocker` with `reason`, and, when
+available, authored `source`, zero-based half-open `span`, and one-based `line`
+and display `column`. Human output carries the same reason and source position.
+Reasons distinguish `target-arguments`, `computed-prerequisite`,
+`interpolated-prerequisite`, `wildcard-prerequisite`, `capture-prerequisite`,
+`generated-declarations` and `unhashable-arguments`. A blocker explains a refusal;
+it does not change eligibility, counts or exit status.
 
 ## Acceptance criteria
 

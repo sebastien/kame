@@ -75,10 +75,10 @@ static int km_own_dir(int parent, const char *name, bool create) {
     return fd;
 }
 
-km_own_store *km_own_open(so_String root, bool create, bool wait, int *status) {
+km_own_store *km_own_open(so_String root, bool create, int *status) {
     *status = -3;
 #if defined(_WIN32) || defined(__wasi__)
-    (void)root; (void)create; (void)wait;
+    (void)root; (void)create;
     return NULL;
 #else
 #if defined(__COSMOPOLITAN__)
@@ -107,17 +107,14 @@ km_own_store *km_own_open(so_String root, bool create, bool wait, int *status) {
         if (lock >= 0) close(lock);
         close(records); close(kame); close(project); *status = -3; return NULL;
     }
-    if (flock(lock, wait ? LOCK_EX : LOCK_EX | LOCK_NB)) {
-        int failure = errno;
-        close(lock); close(records); close(kame); close(project);
-        *status = failure == EINTR ? -4 : -2; return NULL;
-    }
     km_own_store *s = calloc(1, sizeof(*s));
     if (!s) { close(lock); close(records); close(kame); close(project); *status = -1; return NULL; }
     s->root = project; s->kame = kame; s->records = records; s->lock = lock;
     *status = 0; return s;
 #endif
 }
+
+int km_own_lock_fd(km_own_store *s) { return s->lock; }
 
 void km_own_close(km_own_store *s) {
     if (!s) return;

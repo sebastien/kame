@@ -147,6 +147,8 @@ Use inspection commands to verify a migration or diagnose a target without
 guessing how Kame selected it:
 
 ```sh
+kame do list                      # all declared targets and artifacts
+kame do list biuld                # find exact, partial, or close spellings
 kame do plan ./build/app
 kame do inputs --depth -1 ./build/app
 kame do outputs --depth -1 src/main.c
@@ -158,11 +160,27 @@ kame -n ./build/app
 
 | Command | Output and behavior |
 | --- | --- |
+| `do list [QUERY]` | All declared rule outputs when omitted; otherwise exact, prefix, substring, then typo matches. Never builds targets. |
 | `do plan [--affected] [--depth N] [RESOURCE...]` | Upstream prerequisites by default; `--affected` shows downstream potential rebuild work and stages. Shared graph for multiple roots. |
 | `do inputs [--depth N] [TARGET]` | Reachable input files and separately labeled logical/configuration prerequisites. |
 | `do outputs [--depth N] [RESOURCE]` | Downstream declared outputs potentially affected by a resource change, including intermediate and sibling outputs; excludes the resource's own producer. |
 | `do span [--expand] [--depth N] [TARGET]` | Separate static inputs/outputs from evaluation-dependent inputs; `--json` retains the span document. `--expand` evaluates dynamic definitions without executing recipes. |
 | `do cat [TARGET]` | Materialize one target, then write exact file bytes or a definition value (text and top-level bytes raw, other JSON-native values as plain JSON) without a newline; nested bytes are not JSON-compatible. |
+
+`list` includes named tasks, services, file artifacts (even when missing), all
+sibling outputs, computed/generated declarations, and unexpanded output patterns
+such as `./build/{name}.o`. It excludes ordinary value definitions, input-only
+files, and the implicit automatic-clean target. It needs no `default` target and
+does not traverse prerequisites or enumerate possible pattern instances.
+
+List matching is case-sensitive. Exact names rank first, then prefixes,
+substrings, and close spellings, with alphabetical ties. Typo matching checks the
+full name (ignoring a leading `./`) and file basename, allowing one insertion,
+deletion, substitution, or adjacent-letter swap; queries of at least five Unicode
+characters allow two edits. No matches returns an empty successful result.
+`list --json` emits one string array; text output lists one name per line under a
+`list` heading. Source selection and configuration use `-f`, `-c`, `-C`,
+`--define`, and `--set`; use `--` for a dash-prefixed query.
 
 `plan`, `inputs`, and `outputs` default to depth `-1` (unlimited); `span` defaults
 to `1`. Depth `0` returns no dependency inventory; `1` reports direct resources.
@@ -201,6 +219,18 @@ Explicit `do clean` never invokes an authored `clean` recipe. This differs from
 Cleanup requires renewed ownership validation and race-resistant host removal;
 unsupported hosts must preserve artifacts and report the limitation. This is
 the intended contract, not a claim that every installed backend implements it.
+
+The native POSIX host implements this surface where the required filesystem
+guarantees are available. Node/WASM, including npm, currently refuses all
+`do clean` modes with exit status 1 and supplies no implicit `clean` target.
+Authored `clean` tasks still run normally; neither backend's explicit command
+delegates to them. See [backend support](../../../ref-installation.md#automatic-cleanup-support).
+
+Native cleanup accepts static quoted prerequisites and protects their decoded
+external-input paths. Dynamic prerequisites, target arguments and generated rules
+still withhold whole-context verification. For `context-unverifiable` preservation,
+human output identifies the first blocking declaration; JSON adds `contextBlocker`
+with the reason and available authored source/span and line/column, without values.
 
 ## Format and parse Kame sources
 

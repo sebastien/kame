@@ -39,6 +39,8 @@ type Target struct {
 	Template   bool
 	TargetForm *template.Target
 	Expansion  *template.String
+	// Decoded distinguishes resolved string data from authored target escapes.
+	Decoded    bool
 }
 type Input struct {
 	OrderOnly   bool
@@ -330,15 +332,17 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 		span := words[i]
 		text := p.s.Text[span.Start:span.End]
 		value := targetValue(text)
-		if hasExpansion(value) {
+		var expansion *template.String
+		if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
+			expansion = p.quotedTemplate(span)
+			if literal, ok := literalTemplate(expansion); ok { value = literal }
+		}
+		_, literal := literalTemplate(expansion)
+		if (expansion != nil && !literal) || (expansion == nil && hasExpansion(value)) {
 			start, end := span.Start, span.End
-			if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
-				start++
-				end--
-			}
-			expansion := template.ParseStringRange(p.a, p.s, start, end)
-			for j := range expansion.Diagnostics {
-				p.diags = slices.Append(p.a, p.diags, expansion.Diagnostics[j])
+			if expansion == nil {
+				expansion = template.ParseStringRange(p.a, p.s, start, end)
+				p.takeDiagnostics(expansion.Diagnostics)
 			}
 			kind := TargetString
 			if text[0] != '"' && len(expansion.Parts) == 1 && (expansion.Parts[0].Kind == template.Expression || expansion.Parts[0].Kind == template.Reference) {
@@ -348,6 +352,7 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 			continue
 		}
 		path, templated := explicitPath(value), hasTemplate(value)
+		if expansion != nil && !path { p.error(span.Start, span.End, "quoted literal output requires an explicit file path; use ./ for a file path") }
 		if !path && !templated && !validName(value) {
 			p.error(span.Start, span.End, "invalid rule target; use ./ for a file path")
 		}
@@ -357,10 +362,16 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 		} else if templated {
 			kind = TargetTemplate
 		}
-		output := Target{Kind: kind, Text: text, Span: span, Path: path, Template: templated}
+		output := Target{Kind: kind, Text: text, Span: span, Path: path, Template: templated, Expansion: expansion}
 		if templated {
-			output.TargetForm = template.ParseTarget(p.a, p.s.Name, value)
-			p.takeTargetDiagnostics(output.TargetForm.Diagnostics, span.Start)
+			offset := span.Start
+			if expansion != nil {
+				output.TargetForm = template.ParseQuotedTarget(p.a, p.s.Name, text, value)
+				offset++
+			} else {
+				output.TargetForm = template.ParseTarget(p.a, p.s.Name, value)
+			}
+			p.takeTargetDiagnostics(output.TargetForm.Diagnostics, offset)
 		}
 		r.Outputs = slices.Append(p.a, r.Outputs, output)
 	}
@@ -410,6 +421,44 @@ func (p *parser) validateArguments(r *Rule) {
 
 func hasExpansion(text string) bool { return strings.Contains(text, "@(") || strings.Contains(text, "@{") }
 
+// Quoted header operands share expression-string decoding, but retain their
+// authored Text for formatting. Transfer decoded parts without evaluating them.
+func (p *parser) quotedTemplate(span source.Span) *template.String {
+	parsed := expr.ParseQuotedTemplatePrefix(p.a, p.s, span.Start)
+	p.takeDiagnostics(parsed.Diagnostics)
+	slices.Free(p.a, parsed.Diagnostics)
+	value := mem.Alloc[template.String](p.a)
+	value.Alloc, value.Span = p.a, span
+	if parsed.Expr == nil || parsed.Expr.Kind != expr.String || parsed.End != span.End {
+		p.error(span.Start, span.End, "expected one quoted rule operand")
+	} else {
+		for i := range parsed.Expr.Parts {
+			part := &parsed.Expr.Parts[i]
+			kind := template.Literal
+			if part.Expr != nil { kind = template.Expression; if part.Form == "@{" { kind = template.Reference } }
+			value.Parts = slices.Append(p.a, value.Parts, template.Part{Kind: kind, Text: part.Text, Expr: part.Expr, Span: part.Span})
+			part.Text, part.Expr = "", nil
+		}
+	}
+	expr.Free(p.a, parsed.Expr)
+	return value
+}
+
+func literalTemplate(value *template.String) (string, bool) {
+	if value == nil { return "", false }
+	if len(value.Parts) == 0 { return "", true }
+	if len(value.Parts) == 1 && value.Parts[0].Kind == template.Literal { return value.Parts[0].Text, true }
+	return "", false
+}
+
+// LiteralInput returns borrowed, decoded text only when no discovery or
+// evaluation is needed. Quoted wildcard/capture bytes remain literal inputs.
+func LiteralInput(input Input) (string, bool) {
+	if input.Kind == InputName || input.Kind == InputPath { return input.Text, true }
+	if input.Kind == InputString { return literalTemplate(input.Template) }
+	return "", false
+}
+
 func (p *parser) ruleInputs(r *Rule, start int, end int) {
 	items := ranges(p.a, p.s.Text, start, end)
 	ordered := false
@@ -443,7 +492,7 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 		input := Input{OrderOnly: ordered, Kind: InputName, Text: text, Span: span}
 		if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
 			input.Kind = InputString
-			input.Template = template.ParseStringRange(p.a, p.s, span.Start+1, span.End-1)
+			input.Template = p.quotedTemplate(span)
 		} else if hasExpansion(text) {
 			input.Kind = InputString
 			input.Template = template.ParseStringRange(p.a, p.s, span.Start, span.End)
@@ -480,7 +529,7 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 
 func (p *parser) classify(r *Rule) {
 	for i := range r.Outputs {
-		if r.Outputs[i].Expansion != nil {
+		if r.Outputs[i].Kind == TargetExpression || r.Outputs[i].Kind == TargetString {
 			return
 		}
 	}
@@ -520,7 +569,7 @@ func ResolveOutputs(a mem.Allocator, s *source.Source, authored *Rule, outputs [
 	p := parser{a: a, s: s}
 	for i := range outputs {
 		output := outputs[i]
-		value := targetValue(output.Text)
+		value := output.Text
 		output.Path, output.Template = explicitPath(value), hasTemplate(value)
 		output.Kind = TargetName
 		if output.Path {
@@ -532,13 +581,19 @@ func ResolveOutputs(a mem.Allocator, s *source.Source, authored *Rule, outputs [
 			p.error(output.Span.Start, output.Span.End, "invalid rule target; use ./ for a file path")
 		}
 		if output.Template {
-			output.TargetForm = template.ParseTarget(a, s.Name, value)
+			if output.TargetForm == nil {
+				if output.Decoded {
+					output.TargetForm = template.ParseDecodedTarget(a, s.Name, value)
+				} else {
+					output.TargetForm = template.ParseTarget(a, s.Name, value)
+				}
+			}
 			for j := range output.TargetForm.Diagnostics {
 				p.error(output.Span.Start, output.Span.End, output.TargetForm.Diagnostics[j].Message)
 			}
 		}
 		for j := range r.Outputs {
-			if targetValue(r.Outputs[j].Text) == value {
+			if r.Outputs[j].Text == value {
 				p.error(output.Span.Start, output.Span.End, "duplicate rule output")
 			}
 		}

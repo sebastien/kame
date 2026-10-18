@@ -232,6 +232,18 @@ func ParsePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
+// ParseQuotedTemplatePrefix decodes a quoted template without classifying its
+// literal text as an expression pattern. Nested expressions keep normal grammar.
+func ParseQuotedTemplatePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
+	p := parser{a: a, s: s, pos: start}
+	if start < 0 || start >= len(s.Text) || s.Text[start] != '"' {
+		p.error(start, start, "expected quoted string")
+		return Prefix{End: start, Diagnostics: p.diags}
+	}
+	e := p.quoted(false)
+	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
+}
+
 // ParseExpansionPrefix shares reference/call boundaries across all text surfaces.
 // End includes the closing delimiter; malformed openers can remain literal in
 // document text, while strings and paths retain strict parser diagnostics.
@@ -398,7 +410,7 @@ func (p *parser) stringOrVerbatim() *Expr {
 	n := 0
 	for p.pos+n < len(p.s.Text) && p.s.Text[p.pos+n] == '"' { n++ }
 	if n >= 3 { return p.verbatim(n) }
-	return p.quoted()
+	return p.quoted(true)
 }
 
 // verbatim parses a raw multi-line string literal delimited by N>=3 quotes.
@@ -720,7 +732,7 @@ func (p *parser) reference() *Expr {
 		e.Reference = slices.Append(p.a, e.Reference, ReferencePart{Kind: kind, Text: text, Span: source.Span{Start: partStart, End: p.pos}})
 	}
 	e.Span.End = p.pos
-	if p.kash && name.Text == "env" {
+	if name.Text == "env" {
 		if len(e.Reference) < 2 || e.Reference[1].Kind != ReferenceName { p.error(start, p.pos, "environment namespace requires a named variable") } else {
 			e.Kind = EnvironmentReference
 			variable := p.node(Symbol, e.Reference[1].Span.Start)
@@ -1058,7 +1070,7 @@ func (p *parser) lambda(start int) *Expr {
 	p.pos++; lambda.Span.End = p.pos; return lambda
 }
 
-func (p *parser) quoted() *Expr {
+func (p *parser) quoted(patterns bool) *Expr {
 	start := p.pos; p.pos++
 	e := p.node(String, start)
 	var text strings.Builder
@@ -1068,7 +1080,7 @@ func (p *parser) quoted() *Expr {
 		b := p.s.Text[p.pos]
 		if b == '"' {
 			p.addTextPart(e, &text, partStart, p.pos)
-			p.classifyStringPattern(e, start, p.pos)
+			if patterns { p.classifyStringPattern(e, start, p.pos) }
 			p.pos++; e.Span.End = p.pos; text.Free(); return e
 		}
 		if b == '\\' {

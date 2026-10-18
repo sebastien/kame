@@ -142,6 +142,51 @@ func TestRuleHeaderBalancesQuotedAndExpressionInputs(t *testing.T) {
 	}
 }
 
+func TestQuotedOperandsDecodeWithoutChangingAuthoredText(t *testing.T) {
+	a := t.Allocator()
+	text := "\"./out \\\"quote\" : \"./in\\tfile\""
+	parsed := rule.ParseRule(a, "quoted.kmk", text)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Outputs) != 1 || len(parsed.Rule.Inputs) != 1 { t.Fatal("quoted operands did not parse"); return }
+	output := parsed.Rule.Outputs[0]
+	if !output.Path || output.Expansion == nil || output.Expansion.Parts[0].Text != "./out \"quote" { t.Error("quoted output lost its decoded path") }
+	input, literal := rule.LiteralInput(parsed.Rule.Inputs[0])
+	if !literal || input != "./in\tfile" { t.Error("quoted prerequisite was not recognized as decoded literal text") }
+	formatted := rule.FormatRule(a, parsed.Rule)
+	defer mem.FreeString(a, formatted)
+	if formatted != text { t.Error("formatting changed quoted spelling") }
+	dynamic := rule.ParseRule(a, "dynamic.kmk", "./out : \"@{ROOT}/input\"")
+	defer dynamic.Free()
+	if _, literal := rule.LiteralInput(dynamic.Rule.Inputs[0]); literal { t.Error("interpolated prerequisite was treated as static") }
+}
+
+func TestQuotedCapturesKeepDecodedBackslashesAndAuthoredSpans(t *testing.T) {
+	a := t.Allocator()
+	texts := []string{`"./out\\dir/{name}.o" :`, `"./out\t{name}.o" :`, `"./out\\{name}.o" :`, `"./out\"/{name:~[a-z]+}.o" :`}
+	targets := []string{"./out\\dir/demo.o", "./out\tdemo.o", "./out\\demo.o", "./out\"/demo.o"}
+	starts := []int{12, 8, 8, 9}
+	ends := []int{18, 14, 14, 23}
+	for i := range texts {
+		parsed := rule.ParseRule(a, "quoted.kmk", texts[i])
+		if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Outputs) != 1 || parsed.Rule.Outputs[0].TargetForm == nil {
+			t.Error("quoted capture did not parse"); parsed.Free(); continue
+		}
+		form := parsed.Rule.Outputs[0].TargetForm
+		// Target spans are relative to the authored quoted content, not decoded text.
+		if !sameSpan(form.Parts[1].Span, starts[i]-1, ends[i]-1) { t.Errorf("capture span = %d:%d", form.Parts[1].Span.Start+1, form.Parts[1].Span.End+1) }
+		match := form.MatchTarget(a, targets[i])
+		if match == nil || len(match.Captures) != 1 || match.Captures[0].Text != "demo" { t.Error("quoted capture changed decoded matching text") }
+		match.Free(a)
+		formatted := rule.FormatRule(a, parsed.Rule)
+		if formatted != texts[i] { t.Error("quoted capture did not retain authored formatting") }
+		mem.FreeString(a, formatted)
+		parsed.Free()
+	}
+	invalid := rule.ParseRule(a, "invalid.kmk", `"./out\t{name" :`)
+	defer invalid.Free()
+	if len(invalid.Diagnostics) != 1 || !sameSpan(invalid.Diagnostics[0].Span, 8, 13) { t.Error("quoted capture diagnostic lost authored coordinates") }
+}
+
 func TestRecipeTemplateRecoversMalformedExpansion(t *testing.T) {
 	result := rule.ParseRule(t.Allocator(), "test.km", "default : dep\n\techo @(name")
 	defer result.Free()

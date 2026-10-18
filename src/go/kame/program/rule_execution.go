@@ -369,10 +369,22 @@ func freePlanInputs(a mem.Allocator, values []PlanInput, owned bool) {
 }
 
 func (p *Program) mkdirParent(name string) bool {
-	if core.IsMemoryResourceURIName(name) {
-		return true
+	parent := ""
+	if core.IsResourceURIName(name) {
+		parsed := core.ParseResourceURI(mem.System, name)
+		if parsed.Error != "" { parsed.URI.Free(); return false }
+		if parsed.URI.Scheme == "mem" { parsed.URI.Free(); return true }
+		// Traverse decoded path segments, then retain URI identity for the host.
+		// path.Dir on the whole URI collapses :// and creates local "file:" trees.
+		directory := path.Dir(mem.System, parsed.URI.Path)
+		mem.FreeString(mem.System, parsed.URI.Path)
+		parsed.URI.Path = directory
+		if directory == "/" { parsed.URI.Free(); return true }
+		parent = parsed.URI.Canonical(mem.System)
+		parsed.URI.Free()
+	} else {
+		parent = path.Dir(mem.System, name)
 	}
-	parent := path.Dir(mem.System, name)
 	defer mem.FreeString(mem.System, parent)
 	if parent == "." || parent == "/" {
 		return true

@@ -1066,6 +1066,51 @@ func TestRuntimeForwardsRuleRecipe(t *testing.T) {
 	result.Free(a)
 }
 
+func TestRuntimeCancelledCacheRequestsDoNotCommitEffects(t *testing.T) {
+	a := t.Allocator()
+	kinds := []host.RequestKind{host.RequestCacheLock, host.RequestCacheGet}
+	for _, cancelledKind := range kinds {
+		started := wasm.NewRuntime(a, "task cached :\n\t@(write! ./side \"changed\")\n\t@(out! \"unexpected\")\n")
+		started.Result.Free(a)
+		if started.Runtime == nil { t.Fatal("runtime did not compile"); return }
+		r := started.Runtime
+		if !r.SetForwarding(true) { r.Free(); t.Fatal("forwarding was rejected"); return }
+		requested := r.RequestTarget("cached")
+		ok := requested.Code == ""
+		requested.Free(a)
+		if !ok { r.Free(); t.Fatal("target request failed"); return }
+		cancelled, done := false, false
+		for i := 0; i < 64 && !done; i++ {
+			next := r.Step()
+			if next.OK {
+				request := next.Request
+				d := diagnostic.Diagnostic{}
+				if request.Kind == cancelledKind {
+					cancelled = true
+					d = diagnostic.Diagnostic{Code: "EXEC_CANCELLED", Message: "cancelled cache request", Severity: diagnostic.Error}
+				} else if request.Kind != host.RequestCacheLock && request.Kind != host.RequestCacheUnlock {
+					t.Error("cancelled cache request submitted execution or another cache request")
+				}
+				r.Complete(request, core.Value{Kind: core.Nil}, d)
+				request.Free(a)
+			}
+			result := r.Result()
+			done = result.Done
+			if done && result.Diagnostic.Code != "EXEC_CANCELLED" { t.Error("cache cancellation degraded to a cache miss") }
+			result.Free(a)
+		}
+		if !cancelled || !done { t.Error("cache cancellation did not terminate the target") }
+		for r.NextEventJSON() {
+			line := make([]byte, r.EventJSONLength())
+			if !r.EventJSONCopy(line) { t.Error("event copy failed"); break }
+			if strings.Contains(string(line), `"type":"stdout"`) || strings.Contains(string(line), `"type":"effect"`) || strings.Contains(string(line), `"type":"target-completed"`) {
+				t.Error("cancelled cache request published task effects or success")
+			}
+		}
+		r.Free()
+	}
+}
+
 func TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "service daemon : ; [stop: [grace-ms: 0]]\n\twhile :; do sleep 1; done\ntask consumer : daemon\n\ttrue\n")

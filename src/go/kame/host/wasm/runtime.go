@@ -349,6 +349,19 @@ func (r *Runtime) PlanJSON(target string, expand bool) PureResult {
 	return PureResult{Text: text}
 }
 
+// ListJSON returns declared rule outputs without selecting or building a root.
+func (r *Runtime) ListJSON(query string) PureResult {
+	if r == nil || r.Program == nil {
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
+	}
+	var buffer = bytes.NewBuffer(r.Alloc, nil)
+	r.Program.WriteTargetList(&buffer, query)
+	text := pureText(r.Alloc, buffer.String())
+	buffer.Free()
+	return PureResult{Text: text}
+}
+
 // GraphJSON returns a schema-2 input or output inventory.
 func (r *Runtime) GraphJSON(target string, depth int, kind string) PureResult {
 	if r == nil || r.Program == nil {

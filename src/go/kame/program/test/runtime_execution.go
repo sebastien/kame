@@ -100,7 +100,7 @@ func (h *fakeRemoteHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry,
 func (h *fakeRemoteHost) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error { return h.base.WriteFileAtomic(name, data, perm, durable) }
 func (h *fakeRemoteHost) Mkdir(name string, perm uint32) error { return h.base.Mkdir(name, perm) }
 func (h *fakeRemoteHost) Remove(name string) error { return h.base.Remove(name) }
-func (h *fakeRemoteHost) LockCache(path string, stripe int) bool { return h.base.LockCache(path, stripe) }
+func (h *fakeRemoteHost) LockCache(path string, stripe int) host.CacheLockStatus { return h.base.LockCache(path, stripe) }
 func (h *fakeRemoteHost) UnlockCache(stripe int) { h.base.UnlockCache(stripe) }
 func (h *fakeRemoteHost) Now() int64 { return h.base.Now() }
 func (h *fakeRemoteHost) Monotonic() int64 { return h.base.Monotonic() }
@@ -128,7 +128,7 @@ func (h *countingReadDirHost) Mkdir(name string, perm uint32) error {
 	return h.memory.Mkdir(name, perm)
 }
 func (h *countingReadDirHost) Remove(name string) error { return h.memory.Remove(name) }
-func (h *countingReadDirHost) LockCache(path string, stripe int) bool {
+func (h *countingReadDirHost) LockCache(path string, stripe int) host.CacheLockStatus {
 	return h.memory.LockCache(path, stripe)
 }
 func (h *countingReadDirHost) UnlockCache(stripe int) { h.memory.UnlockCache(stripe) }
@@ -1813,6 +1813,32 @@ func TestDynamicExternalFileDependencyIsCurrent(t *testing.T) {
 	compiled.Free(a)
 	parsed.Free()
 	registry.Free()
+}
+
+func TestFileURIWritePreservesHostProtocolParents(t *testing.T) {
+	a := t.Allocator()
+	memory := wasm.NewMemoryHost(a)
+	uri := "file:///virtual/parent%252F%23%3F/deep/output.txt"
+	parsed := script.Parse(a, "uri-write.kmk", "publish :\n\t@(write! (resource \""+uri+"\") \"uri\")\n")
+	defer parsed.Free()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	// The compiled program owns and frees its host.
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: memory, Directory: ".", Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"file:///virtual/"}}}})
+	defer compiled.Free(a)
+	if compiled.Program == nil { t.Fatal("file URI publication did not compile"); return }
+	defer compiled.Program.Free()
+	result := compiled.Program.Materialize("publish")
+	defer result.Free(a)
+	if result.Diagnostic.Code != "" { t.Error("file URI publication failed: " + result.Diagnostic.Code) }
+	data, err := memory.ReadFile(a, uri)
+	defer mem.FreeSlice(a, data)
+	if err != nil || string(data) != "uri" { t.Error("file URI publication changed host resource identity") }
+	if len(memory.Dirs) != 3 || !slices.Contains(memory.Dirs, "file:///virtual/parent%252F%23%3F/deep") { t.Error("file URI parents were not canonically encoded") }
+	for i := range memory.Dirs {
+		if !core.IsResourceURIName(memory.Dirs[i]) { t.Error("file URI parent escaped its host protocol") }
+	}
 }
 
 func TestResourceURIInputUsesCanonicalMemoryIdentity(t *testing.T) {

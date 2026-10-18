@@ -25,7 +25,35 @@ for backend in native wasm; do
   # Bash supplies different '_' and SHLVL values for foreground/background commands.
   # Keep the child environment equal when comparing a warm build with a watch.
   if [ "$backend" = native ]; then runner=(env _=kame-environment-test SHLVL=1 "$CLI_BIN"); else runner=(env _=kame-environment-test SHLVL=1 node "$CLI_ROOT/dist/kame.js"); fi
- cat > "$project/Makefile.kmk" <<'KMK'
+  test-step "$backend Kame environment references share named read authority"
+  NO_COLOR='two words' "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c '[env.NO_COLOR (env "NO_COLOR") "@{env.NO_COLOR}" (let [read-env env] (read-env "NO_COLOR"))]' > "$project/out" 2> "$project/err"
+  if [ "$(cat "$project/out")" = '["two words" "two words" "two words" "two words"]' ]; then test-ok "$backend expression, interpolation and existing env operation agree"; else test-fail "$backend environment reference values"; fi
+  NO_COLOR='two words' "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c '(let [env [NO_COLOR: "local"]] [env.NO_COLOR (get "NO_COLOR" env)])' > "$project/out" 2> "$project/err"
+  if [ "$(cat "$project/out")" = '["two words" "local"]' ]; then test-ok "$backend environment namespace is distinct from lexical record access"; else test-fail "$backend lexical binding changed environment authority"; fi
+  env -u NO_COLOR "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c env.NO_COLOR > "$project/out" 2> "$project/err"
+  if [ "$(cat "$project/out")" = :nil ]; then test-ok "$backend missing environment reference yields nil"; else test-fail "$backend missing environment reference"; fi
+  NO_COLOR= "${runner[@]}" do run --lang expr --allow-env=NO_COLOR -c env.NO_COLOR > "$project/out" 2> "$project/err"
+  if [ "$(cat "$project/out")" = '""' ]; then test-ok "$backend empty environment reference stays distinct from nil"; else test-fail "$backend empty environment reference"; fi
+  for source in 'env.NO_COLOR' '(? env.NO_COLOR "fallback")' '"@{env.NO_COLOR}"' 'env.OTHER_COLOR'; do
+    status=0
+    NO_COLOR=reference-secret OTHER_COLOR=reference-secret "${runner[@]}" do run --lang expr --allow-env=UNRELATED_REFERENCE -c "$source" > "$project/out" 2> "$project/err" || status=$?
+    if [ "$status" = 1 ] && grep -q CAP_DENIED "$project/err" && [ ! -s "$project/out" ] && ! grep -q reference-secret "$project/err"; then test-ok "$backend denied reference remains protected"; else test-fail "$backend environment reference bypassed authority"; fi
+  done
+  "${runner[@]}" do run --lang expr -c '(if :false env.NO_COLOR "lazy")' > "$project/out" 2> "$project/err"
+  if [ "$(cat "$project/out")" = '"lazy"' ]; then test-ok "$backend unselected environment reference performs no read"; else test-fail "$backend eager environment reference"; fi
+  for language in km kmk; do
+    source=$'COLOR = env.NO_COLOR\n(out! COLOR)'
+    entries=()
+    if [ "$language" = kmk ]; then source=$'COLOR = env.NO_COLOR\nshow :\n\t@(out! COLOR)'; entries=(show); fi
+    NO_COLOR='two words' "${runner[@]}" do run --lang "$language" --allow-env=NO_COLOR -c "$source" "${entries[@]}" > "$project/out" 2> "$project/err"
+    if [ "$(cat "$project/out")" = 'two words' ]; then test-ok "$backend $language definitions read named environment"; else test-fail "$backend $language environment reference"; fi
+  done
+  NO_COLOR='two words' "${runner[@]}" do render --allow-env=NO_COLOR --comment plain -c '@{env.NO_COLOR}' > "$project/out" 2> "$project/err"
+  if [ "$(cat "$project/out")" = 'two words' ]; then test-ok "$backend document interpolation reads named environment"; else test-fail "$backend template environment reference"; fi
+  status=0
+  NO_COLOR=reference-secret "${runner[@]}" do plan --json --allow-env=NO_COLOR -c '@{env.NO_COLOR} :' > "$project/out" 2> "$project/err" || status=$?
+  if [ "$status" = 1 ] && grep -Eq 'PHASE_INVALID|CAP_DENIED' "$project/out" && ! grep -q reference-secret "$project/out" "$project/err"; then test-ok "$backend environment references cannot read during output registration"; else test-fail "$backend registration widened environment authority"; fi
+  cat > "$project/Makefile.kmk" <<'KMK'
 root : child local ; env "MODE=first" "MODE=debug" "MESSAGE=spaces; equal=ok"
 child :
 	printf '%s|%s' "$MODE" "$MESSAGE" > child-log
@@ -57,7 +85,7 @@ retry : ; env "MODE=retry"
 	printf %s "$MODE" > @>; printf x >> file-runs
 SETTING = "authored"
 NEXT = (env "NEXT")
-MODE = (env "MODE")
+MODE = env.MODE
 (mode) = (str MODE)
 VALUE = (mode)
 definition-root : definition-cached ; env "MODE=debug" "KAME_SETTING=debug"
@@ -360,7 +388,7 @@ task pure-task : ./input
 	@(yield! "pure")
 ./overridden : ./input ; env "ENV_SIGNATURE_BINARY=fixed"
 	printf %s "$ENV_SIGNATURE_BINARY" > @>; printf x >> overridden-runs
-READ_ENV = (env "ENV_SIGNATURE_BINARY")
+READ_ENV = env.ENV_SIGNATURE_BINARY
 (indirect-env) = (str READ_ENV)
 task pure-read-task : ./input
 	@(out! (indirect-env))

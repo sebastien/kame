@@ -7,7 +7,7 @@ import (
 )
 
 func TestPresentationEveryCommand(t *testing.T) {
-	commands := []string{"", "run", "plan", "cat", "inputs", "outputs", "span", "tools", "parse", "fmt", "render", "cache", "help"}
+	commands := []string{"", "run", "list", "plan", "cat", "inputs", "outputs", "span", "tools", "parse", "fmt", "render", "cache", "help"}
 	for i := range commands {
 		inv := cli.Parse(commands[i], []string{"--output=json"})
 		if inv.Output != "json" || !inv.JSON {

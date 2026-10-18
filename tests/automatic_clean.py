@@ -193,13 +193,117 @@ def capture_faults(binary: str, base: Path) -> None:
 			assert reasons(clean(binary, root, status=1, env=env)) == {"recovery-required"}
 
 
+def quotedInputs(binary: str, base: Path) -> None:
+	for index, name in enumerate(('input file', 'input"quote', 'input\\slash', 'input\ttab', 'literal*.txt', 'literal{name:*}-{other}.txt', 'input@(missing)')):
+		root = base / f'quoted-input-{index}'
+		inputPath = './' + name
+		quoted = json.dumps(inputPath).replace('@', '\\@')
+		project(root, f'SHELL = kash\ndefault : "./build/out file"\n"./build/out file" : {quoted}\n\t(yield! (read (first inputs)))\n')
+		(root / name).write_text('quoted seed')
+		run(binary, root)
+		before = {p.name: p.read_bytes() for p in records(root)}
+		assert clean(binary, root, dry=True)['wouldRemove'] == 1
+		assert before == {p.name: p.read_bytes() for p in records(root)}
+		assert clean(binary, root)['removed'] == 1
+		assert (root / name).read_text() == 'quoted seed'
+		assert not (root / 'build/out file').exists()
+
+	root = base / 'quoted-external-input'
+	project(root)
+	run(binary, root)
+	(root / 'Makefile.kmk').write_text('default :\nconsumer : "./build/out"\n')
+	assert reasons(clean(binary, root)) == {'current-source-or-external-input'}
+	assert (root / 'build/out').read_text() == 'seed\n'
+
+
+def contextBlockers(binary: str, base: Path) -> None:
+	cases = [
+		('target-arguments', 'unused {variant} :\n', '{variant}'),
+		('computed-prerequisite', 'unused : @(nop ./input)\n', '@(nop ./input)'),
+		('interpolated-prerequisite', 'BASE = "./"\nunused : "@{BASE}input"\n', '"@{BASE}input"'),
+		('wildcard-prerequisite', 'unused : ./sources/*.txt\n', './sources/*.txt'),
+		('capture-prerequisite', './unused/{name} : ./source/{name}\n', './source/{name}'),
+		('generated-declarations', 'generate batch = [[kind: "task" target: "unused" inputs: [] order-only: [] recipe: []]]\n', None),
+	]
+	for reason, declaration, token in cases:
+		root = base / reason
+		project(root, '(include ./rules.kmk)\ndefault : ./build/out\n./build/out : ./input\n\tcp @< @>\n')
+		text = 'SECRET = "cleanup-secret-must-not-appear"\n' + declaration
+		(root / 'rules.kmk').write_text(text)
+		run(binary, root)
+		before = {p.name: p.read_bytes() for p in records(root)}
+		for dry in (True, False):
+			report = clean(binary, root, dry=dry)
+			assert reasons(report) == {'context-unverifiable'}, report
+			blocker = report['contextBlocker']
+			assert blocker['reason'] == reason, blocker
+			assert Path(blocker['source']).resolve() == root / 'rules.kmk', blocker
+			span = blocker['span']
+			assert text[span['start']:span['end']] == (token or declaration.rstrip('\n')), blocker
+			prefix = text[:span['start']]
+			assert blocker['line'] == prefix.count('\n') + 1, blocker
+			assert blocker['column'] == len(prefix.rsplit('\n', 1)[-1]) + 1, blocker
+			assert 'cleanup-secret' not in json.dumps(report), report
+			assert before == {p.name: p.read_bytes() for p in records(root)}
+		result = subprocess.run([binary, 'do', 'clean', '-C', str(root)], capture_output=True, text=True, timeout=20)
+		assert result.returncode == 0, (result.stdout, result.stderr)
+		assert reason in result.stderr and 'rules.kmk:' in result.stderr, result.stderr
+		assert 'cleanup-secret' not in result.stderr, result.stderr
+		assert (root / 'build/out').read_text() == 'seed\n'
+
+
+def scopedConsumer(binary: str, base: Path) -> None:
+	# Base-scope evaluation would miss this external input selected by a parent.
+	root = base / 'scoped-consumer'
+	project(root, 'SOURCE ?= "./unselected"\ndefault : produce\nproduce : ; [shell: kash]\n\t(write! ./important "keep")\nscoped : reader ; env "KAME_SOURCE=./important"\nreader : @{SOURCE}\n\t@(out! SOURCE)\n')
+	run(binary, root)
+	assert run(binary, root, 'scoped').stdout == './important'
+	before = {p.name: p.read_bytes() for p in records(root)}
+	for dry in (True, False):
+		report = clean(binary, root, dry=dry)
+		assert reasons(report) == {'context-unverifiable'}, report
+		assert report['contextBlocker']['reason'] == 'computed-prerequisite', report
+		assert (root / 'important').read_text() == 'keep'
+		assert before == {p.name: p.read_bytes() for p in records(root)}
+
+
+def wasmBoundary(binary: str, wrapper: str, base: Path) -> None:
+	root = base / 'wasm-boundary'
+	project(root)
+	run(binary, root)
+	before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+	for options in ([], ['--dry-run'], ['--keep', './build/out'], ['--release', './build/out']):
+		for jsonMode in (False, True):
+			result = subprocess.run(['node', wrapper, 'do', 'clean', '-C', str(root), *options, *(['--json'] if jsonMode else [])], capture_output=True, text=True, timeout=20)
+			assert result.returncode == 1, (options, result.stdout, result.stderr)
+			if jsonMode:
+				report = json.loads(result.stdout)
+				assert reasons(report) == {'unsafe-or-unsupported-host-operation'}, report
+				assert report['removed'] == report['wouldRemove'] == 0 and report['status'] == 1, report
+				assert not result.stderr, result.stderr
+			else:
+				assert not result.stdout and 'descriptor-relative output ownership is unavailable' in result.stderr, result
+			assert before == {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+	result = subprocess.run(['node', wrapper, '-C', str(root), 'clean'], capture_output=True, text=True, timeout=20)
+	assert result.returncode == 1 and 'TGT_NO_RULE' in result.stderr, result
+	assert before == {str(p.relative_to(root)): p.read_bytes() for p in root.rglob('*') if p.is_file()}
+	with (root / 'Makefile.kmk').open('a') as source:
+		source.write('clean : ; [shell: kash]\n\t(out! "authored-clean")\n')
+	result = subprocess.run(['node', wrapper, '-C', str(root), 'clean'], capture_output=True, text=True, timeout=20)
+	assert result.returncode == 0 and result.stdout == 'authored-clean', result
+	result = subprocess.run(['node', wrapper, 'do', 'clean', '-C', str(root)], capture_output=True, text=True, timeout=20)
+	assert result.returncode == 1 and not result.stdout, result
+	assert (root / 'build/out').read_text() == 'seed\n'
+	assert {p.name: p.read_bytes() for p in records(root)} == {Path(name).name: data for name, data in before.items() if name.endswith('.record')}
+
+
 # -----------------------------------------------------------------------------
 #
 # API
 #
 # -----------------------------------------------------------------------------
 
-def main(binary: str) -> None:
+def main(binary: str, wrapper: str = '') -> None:
 	with tempfile.TemporaryDirectory(prefix="automatic-clean-", dir="/tmp/opencode") as directory:
 		base = Path(directory)
 		root = base / "accumulation"
@@ -408,6 +512,11 @@ def main(binary: str) -> None:
 		assert "build-context-invalid" in reasons(report) and report["preserved"] == 1
 		assert (root / "build/out").exists()
 
+		quotedInputs(binary, base)
+		contextBlockers(binary, base)
+		scopedConsumer(binary, base)
+		if wrapper:
+			wasmBoundary(binary, wrapper, base)
 		live_boundaries(binary, base)
 		capture_faults(binary, base)
 
@@ -415,6 +524,6 @@ def main(binary: str) -> None:
 
 
 if __name__ == "__main__":
-	main(str(Path(sys.argv[1]).resolve()))
+	main(str(Path(sys.argv[1]).resolve()), str(Path(sys.argv[2]).resolve()) if len(sys.argv) > 2 else '')
 
 # EOF

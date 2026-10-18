@@ -6,8 +6,10 @@ import (
 	"kame/lang/eval"
 	"kame/lang/rule"
 	"kame/lang/source"
+	"kame/lang/template"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strings"
 )
 
 type outputResolution struct {
@@ -46,8 +48,51 @@ func (p *Program) appendOutput(value core.Value, span source.Span, outputs *[]ru
 	if (value.Kind != core.String && value.Kind != core.Pattern) || value.Text == "" {
 		return p.outputDiagnostic(span, "EXPR_INVALID", "rule outputs require nonempty strings or patterns")
 	}
-	*outputs = slices.Append(p.Alloc, *outputs, rule.Target{Text: cloneText(p.Alloc, value.Text), Span: span})
+	*outputs = slices.Append(p.Alloc, *outputs, rule.Target{Text: cloneText(p.Alloc, value.Text), Span: span, Decoded: value.Kind == core.String})
 	return diagnostic.Diagnostic{}
+}
+
+// Output registration must retain pattern provenance that ordinary text rendering
+// intentionally discards. Lists keep the same space-separated rendering as Render.
+func appendOutputText(a mem.Allocator, b *strings.Builder, value core.Value, patterns *[]source.Span) bool {
+	if value.Kind == core.List {
+		for i := range value.List {
+			if i != 0 { b.WriteByte(' ') }
+			if !appendOutputText(a, b, value.List[i], patterns) { return false }
+		}
+		return true
+	}
+	text, ok := eval.Stringify(a, value)
+	if !ok { return false }
+	if value.Kind == core.Pattern {
+		*patterns = slices.Append(a, *patterns, source.Span{Start: b.Len(), End: b.Len()+len(text)})
+	}
+	b.WriteString(text)
+	mem.FreeString(a, text)
+	return true
+}
+
+func (p *Program) renderOutput(output rule.Target, context *eval.Context, patterns *[]source.Span) eval.Result {
+	b := strings.NewBuilder(p.Alloc)
+	defer b.Free()
+	for i := range output.Expansion.Parts {
+		part := &output.Expansion.Parts[i]
+		if part.Kind == template.Literal { b.WriteString(part.Text); continue }
+		var result eval.Result
+		if part.Expr != nil {
+			result = p.Eval.EvaluateWith(part.Expr, context)
+		} else {
+			// Keep the ordinary selector/tool diagnostics and planning restrictions.
+			one := template.String{Parts: output.Expansion.Parts[i:i+1], Span: part.Span}
+			result = p.Eval.Render(p.Alloc, &one, p.Eval.Scope, context)
+		}
+		if result.Waiting || result.Completed || result.Stream != nil || result.Diagnostic.Code != "" || context.PhaseInvalid() || len(context.Effects) != 0 { return result }
+		ok := appendOutputText(p.Alloc, &b, result.Value, patterns)
+		kind := result.Value.Kind
+		result.Free(p.Alloc)
+		if !ok { return eval.Result{Diagnostic: p.outputDiagnostic(part.Span, "EXPR_INVALID", "cannot render "+core.KindName(kind)+" as text; use an explicit conversion")} }
+	}
+	return eval.Result{Value: core.NewString(p.Alloc, b.String())}
 }
 
 func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
@@ -71,10 +116,11 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 			continue
 		}
 		var result eval.Result
+		var patterns []source.Span
 		if output.Kind == rule.TargetExpression {
 			result = p.Eval.EvaluateWith(output.Expansion.Parts[0].Expr, &context)
 		} else {
-			result = p.Eval.Render(p.Alloc, output.Expansion, p.Eval.Scope, &context)
+			result = p.renderOutput(output, &context, &patterns)
 		}
 		if result.Waiting || result.Completed || result.Stream != nil || context.PhaseInvalid() || len(context.Effects) != 0 {
 			d = p.outputDiagnostic(output.Span, "PHASE_INVALID", "rule outputs must resolve without host requests or effects")
@@ -82,7 +128,12 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 			d = p.outputDiagnostic(output.Span, result.Diagnostic.Code, result.Diagnostic.Message)
 		} else {
 			d = p.appendOutput(result.Value, output.Span, &outputs)
+			if d.Code == "" && len(patterns) != 0 {
+				last := &outputs[len(outputs)-1]
+				last.TargetForm = template.ParseMixedTarget(p.Alloc, p.Parsed.Source.Name, last.Text, patterns)
+			}
 		}
+		slices.Free(p.Alloc, patterns)
 		result.Free(p.Alloc)
 		if d.Code == "PHASE_INVALID" || d.Code == "CAP_DENIED" { p.registrationTip(&d) }
 		if d.Code != "" {
@@ -98,6 +149,7 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 	if d.Code != "" {
 		for i := range outputs {
 			mem.FreeString(p.Alloc, outputs[i].Text)
+			outputs[i].TargetForm.Free()
 		}
 		slices.Free(p.Alloc, outputs)
 		return outputResolution{Diagnostic: d}

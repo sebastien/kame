@@ -119,14 +119,15 @@ for backend, runner in [('native', [native]), ('wasm', ['node', wasm])]:
             for kind in ['stdout', 'stderr']:
                 assert sum(len(event['data']) for event in events if event['type'] == kind) == 8192
     # A retained watch uses the same configured limit.
-    with (work / 'watch.json').open('w+') as out, (work / 'watch.err').open('w+') as err:
+    with (work / 'watch.json').open('w') as out, (work / 'watch.err').open('w+') as err:
         process = subprocess.Popen(runner + ['--watch', '--json', '-C', str(work), '--log-limit', '1024', 'failed'],
                                    stdout=out, stderr=err, start_new_session=True)
         try:
             deadline = time.monotonic() + 15
             while True:
-                out.seek(0)
-                lines = out.read().splitlines(keepends=True)
+                # A separate descriptor avoids moving the child's shared stdout
+                # offset while it is writing a JSON record.
+                lines = (work / 'watch.json').read_text().splitlines(keepends=True)
                 events = [json.loads(line) for line in lines if line.endswith('\n')]
                 failed = [event for event in events if event['type'] == 'target-failed']
                 if failed:

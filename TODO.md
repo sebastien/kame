@@ -19,9 +19,6 @@ Completed work and historical audit results are not retained here.
   harness rebuilds and rerun artifact/build-mode checks without changing Git HEAD.
    Validate the exact release tree; development-tree passes do not establish
    published-asset conformance. See [test requirements](docs/spec/013-tests.md).
-   The current development tree has `VERSION` 0.3.1 but `package.json` 0.3.0;
-   this blocks `T015-06-dist-release-scripts.sh` before its release fixtures run.
-   Resolve release metadata deliberately before claiming a complete gate pass.
 
 ## Remaining repository-review remediation
 

@@ -32,6 +32,13 @@ can have multiple outputs; logical task/service rules have exactly one.
 Do not mix path and name outputs. With no selected target, request literal
 `default`, not the first rule.
 
+`"./out file"` registers the decoded file path, not a filename containing quotes.
+Quoted outputs and prerequisites use expression-string escapes; formatting keeps
+their authored spelling. Quoted prerequisites without interpolation stay literal,
+including wildcard bytes.
+Quoted capture outputs preserve decoded literal backslashes; AST capture spans
+refer to authored source, and capture patterns use the `pattern` field.
+
 File freshness uses content, not modification time. Touching unchanged bytes
 does not rebuild; changing an input or output's bytes invalidates reuse even
 with preserved timestamps. The first run establishes a successful record, and

@@ -21,6 +21,21 @@ func sameSpan(span source.Span, start int, end int) bool {
 	return span.Start == start && span.End == end
 }
 
+func TestQuotedTemplatePrefixKeepsOnlyNestedPatternClassification(t *testing.T) {
+	a := t.Allocator()
+	s := source.New(a, "header", `"./out\\dir/{name}.@(nop "{inner:*}")" :`)
+	defer s.Free(a)
+	parsed := expr.ParseQuotedTemplatePrefix(a, s, 0)
+	defer expr.Free(a, parsed.Expr)
+	defer slices.Free(a, parsed.Diagnostics)
+	if len(parsed.Diagnostics) != 0 || parsed.Expr == nil || len(parsed.Expr.Parts) != 2 {
+		t.Fatal("quoted template did not parse"); return
+	}
+	if parsed.Expr.Pattern != nil || parsed.Expr.Parts[0].Text != "./out\\dir/{name}." || parsed.Expr.Parts[1].Expr.Items[1].Pattern == nil {
+		t.Error("quoted template classification leaked into literals or out of nested expressions")
+	}
+}
+
 func TestCommandAcceptanceOwnsWholePipelineAndSurvivesClone(t *testing.T) {
 	a := t.Allocator()
 	r := parse(t, "$(printf \"literal?\" | cat?)")
@@ -58,11 +73,11 @@ func TestCommandRecoveryIsRightAssociative(t *testing.T) {
 	if formatted != canonical || len(again.Expr.Body) != 1 { t.Error("recovery did not survive clone and canonical formatting") }
 }
 
-func TestEnvironmentNamespaceIsConfinedToKashSyntax(t *testing.T) {
+func TestEnvironmentNamespaceIsSharedWithKashSyntax(t *testing.T) {
 	a := t.Allocator()
 	r := parse(t, "(cat env.NAME $(printf $env.NAME $env.OTHER))")
 	defer r.Free()
-	if r.Expr.Items[1].Kind != expr.Reference { t.Error("ordinary Kame env reference was changed") }
+	if r.Expr.Items[1].Kind != expr.EnvironmentReference || r.Expr.Items[1].Kash || len(r.Expr.Items[1].Items) != 1 { t.Error("Kame environment lookup was not explicit in the AST") }
 	stage := r.Expr.Items[2].Items[0]
 	for i := 1; i < len(stage.Items); i++ {
 		reference := stage.Items[i].Parts[0].Expr
@@ -74,7 +89,16 @@ func TestEnvironmentNamespaceIsConfinedToKashSyntax(t *testing.T) {
 	defer mem.FreeString(a, formatted)
 	again := parse(t, formatted)
 	defer again.Free()
-	if again.Expr.Items[1].Kind != expr.Reference || again.Expr.Items[2].Items[0].Items[1].Parts[0].Expr.Kind != expr.EnvironmentReference { t.Error("formatting changed the environment namespace boundary") }
+	if again.Expr.Items[1].Kind != expr.EnvironmentReference || again.Expr.Items[2].Items[0].Items[1].Parts[0].Expr.Kind != expr.EnvironmentReference { t.Error("formatting changed the environment namespace boundary") }
+}
+
+func TestEnvironmentNamespaceRequiresNamedVariable(t *testing.T) {
+	inputs := []string{"env.0", "env.{NAME,OTHER}", "env...1"}
+	for i := range inputs {
+		r := expr.Parse(t.Allocator(), "test.km", inputs[i])
+		if len(r.Diagnostics) == 0 { t.Error("environment lookup accepted an unnamed variable") }
+		r.Free()
+	}
 }
 
 func TestCommandCaptureBoundaries(t *testing.T) {

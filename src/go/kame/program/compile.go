@@ -338,6 +338,15 @@ func duplicateLiteral(p *Program, candidate *rule.Rule) diagnostic.Diagnostic {
 		if candidate.Outputs[i].Template {
 			continue
 		}
+		for j := 0; j < i; j++ {
+			if candidate.Outputs[j].Template { continue }
+			first := p.canonicalTarget(candidate.Outputs[j].Text, candidate.Kind == rule.FileRule)
+			second := p.canonicalTarget(candidate.Outputs[i].Text, candidate.Kind == rule.FileRule)
+			equal := first == second
+			mem.FreeString(p.Alloc, first)
+			mem.FreeString(p.Alloc, second)
+			if equal { return p.outputDiagnostic(candidate.Outputs[i].Span, "PARSE_ERR", "duplicate rule output") }
+		}
 		for j := range p.Rules {
 			other := p.Rules[j].Rule
 			if (other.Kind == rule.FileRule) != (candidate.Kind == rule.FileRule) {

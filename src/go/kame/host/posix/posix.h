@@ -52,14 +52,26 @@ int km_host_cancel(km_host *, int64_t, bool);
 int km_host_stop(km_host *, int64_t, int64_t);
 void km_host_cancel_all(km_host *);
 int km_host_active(km_host *);
+// 0 acquired, -4 cancelled, -1 unavailable. Cancellation is not a cache miss.
 int km_host_cache_lock(km_host *, so_String, int);
 void km_host_cache_unlock(km_host *, int);
+typedef struct km_lock_event {
+    so_String State, Kind, Path;
+    int64_t OwnerPID;
+    so_String OwnerCommand;
+    bool OwnerVerified;
+    int64_t ElapsedMS, HeldMS;
+} km_lock_event;
+void km_cli_observe_locks(bool (*)(km_lock_event *), so_String);
+int km_file_lock(int, so_String, so_String, bool);
+void km_file_unlock(int);
 void km_host_force_waitpid_failure(km_host *);
 void km_event_force_allocation_failure(int);
 void km_event_free(km_event *);
 void km_host_free(km_host *);
 int km_cli_install_signals(void);
 int km_cli_take_signal(void);
+bool km_cli_signal_pending(void);
 // timeout_ns: 0 unbounded, negative already expired. Returns 0 success,
 // 1 deadline exhausted, -1 I/O failure; written is valid on every exit.
 int km_cli_write_output(int, so_Slice, int64_t, so_int *);

@@ -51,6 +51,53 @@ func (t *Target) Free() {
 }
 
 func ParseTarget(a mem.Allocator, name string, text string) *Target {
+	return parseTarget(a, name, text, true, nil)
+}
+
+// ParseDecodedTarget parses captures in a resolved string. Backslashes outside
+// capture groups are already decoded data, not another layer of target escapes.
+func ParseDecodedTarget(a mem.Allocator, name string, text string) *Target {
+	return parseTarget(a, name, text, false, nil)
+}
+
+// ParseMixedTarget preserves canonical escapes only in interpolated pattern
+// segments; all other bytes are decoded string data. Spans index text bytes.
+func ParseMixedTarget(a mem.Allocator, name string, text string, patterns []source.Span) *Target {
+	escaped := slices.Make[bool](a, len(text))
+	for i := range patterns {
+		for pos := patterns[i].Start; pos < patterns[i].End; pos++ { escaped[pos] = true }
+	}
+	t := parseTarget(a, name, text, false, escaped)
+	slices.Free(a, escaped)
+	return t
+}
+
+// ParseQuotedTarget keeps decoded matching text but authored content coordinates.
+// Authored must be one quoted string whose expression-string decoding is decoded.
+// Decoded must outlive the target, as with ParseTarget.
+func ParseQuotedTarget(a mem.Allocator, name string, authored string, decoded string) *Target {
+	t := ParseDecodedTarget(a, name, decoded)
+	var offsets []int
+	for pos := 1; pos < len(authored)-1; {
+		offsets = slices.Append(a, offsets, pos-1)
+		if authored[pos] == '\\' && pos+1 < len(authored)-1 { pos += 2 } else { pos++ }
+	}
+	offsets = slices.Append(a, offsets, len(authored)-2)
+	for i := range t.Parts {
+		span := t.Parts[i].Span
+		t.Parts[i].Span = source.Span{Start: offsets[span.Start], End: offsets[span.End]}
+	}
+	for i := range t.Diagnostics {
+		span := t.Diagnostics[i].Span
+		t.Diagnostics[i].Span = source.Span{Start: offsets[span.Start], End: offsets[span.End]}
+	}
+	slices.Free(a, offsets)
+	t.Source.Free(a)
+	t.Source = source.New(a, name, authored[1:len(authored)-1])
+	return t
+}
+
+func parseTarget(a mem.Allocator, name string, text string, escapes bool, escaped []bool) *Target {
 	// Captures borrow the caller's text, not the Source clone: the caller
 	// text must outlive the Target. Free releases the Source clone plus
 	// owned literal texts only.
@@ -59,7 +106,7 @@ func ParseTarget(a mem.Allocator, name string, text string) *Target {
 	t.Alloc, t.Source = a, s
 	start, pos := 0, 0
 	for pos < len(text) {
-		if text[pos] == '\\' && pos+1 < len(text) {
+		if targetEscape(escapes, escaped, pos) && text[pos] == '\\' && pos+1 < len(text) {
 			pos += 2
 			continue
 		}
@@ -68,7 +115,7 @@ func ParseTarget(a mem.Allocator, name string, text string) *Target {
 			continue
 		}
 		if start < pos {
-			t.Parts = slices.Append(a, t.Parts, TargetPart{Kind: TargetLiteral, Text: targetLiteral(a, text[start:pos]), Span: source.Span{Start: start, End: pos}})
+			t.Parts = slices.Append(a, t.Parts, TargetPart{Kind: TargetLiteral, Text: targetLiteral(a, text[start:pos], start, escapes, escaped), Span: source.Span{Start: start, End: pos}})
 		}
 		groupStart := pos
 		pos++
@@ -163,7 +210,7 @@ func ParseTarget(a mem.Allocator, name string, text string) *Target {
 		start = pos
 	}
 	if start < len(text) {
-		t.Parts = slices.Append(a, t.Parts, TargetPart{Kind: TargetLiteral, Text: targetLiteral(a, text[start:]), Span: source.Span{Start: start, End: len(text)}})
+		t.Parts = slices.Append(a, t.Parts, TargetPart{Kind: TargetLiteral, Text: targetLiteral(a, text[start:], start, escapes, escaped), Span: source.Span{Start: start, End: len(text)}})
 	}
 	return t
 }
@@ -181,11 +228,16 @@ func appendRegexTargetPart(a mem.Allocator, target *Target, text string, groupSt
 	target.Parts = slices.Append(a, target.Parts, TargetPart{Kind: Capture, Name: name, Pattern: text[regexStart:groupEnd], Regex: parsed.Pattern, Span: source.Span{Start: groupStart, End: groupEnd+1}})
 }
 
-func targetLiteral(a mem.Allocator, text string) string {
+func targetEscape(escapes bool, escaped []bool, pos int) bool {
+	return escapes || (len(escaped) != 0 && escaped[pos])
+}
+
+func targetLiteral(a mem.Allocator, text string, offset int, escapes bool, escaped []bool) string {
+	if !escapes && len(escaped) == 0 { return owned(a, text) }
 	var out strings.Builder
 	out = strings.NewBuilder(a)
 	for i := 0; i < len(text); i++ {
-		if text[i] == '\\' && i+1 < len(text) {
+		if targetEscape(escapes, escaped, offset+i) && text[i] == '\\' && i+1 < len(text) {
 			i++
 			out.WriteByte(text[i])
 		} else {

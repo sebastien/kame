@@ -49,15 +49,15 @@ def watch(command: list[str], project: Path, environment: dict[str, str]) -> int
 		'one :\n\t(write! ./one (join "," FILES))\n'
 		'two :\n\t(write! ./two (join "," FILES))\n'
 		'isolated :\n\t(write! ./isolated (join "," ./other/*.txt))\n')
-	with (project / 'watch-log').open('w+') as log, (project / 'watch-err').open('w+') as err:
+	with (project / 'watch-log').open('w') as log, (project / 'watch-err').open('w') as err:
 		process = subprocess.Popen(command + ['--json', '--watch', 'one', 'two', 'isolated'],
 			cwd=project, env=environment, stdout=log, stderr=err, start_new_session=True)
 		def settled(expected: str, cycles: int) -> None:
 			deadline = time.monotonic() + 10
 			while time.monotonic() < deadline:
 				assert process.poll() is None, 'watch exited before settling'
-				log.seek(0)
-				events = [json.loads(line) for line in log.read().splitlines() if line.endswith('}')]
+				# A separate reader must not move the child's stdout file offset.
+				events = [json.loads(line) for line in (project / 'watch-log').read_text().splitlines(keepends=True) if line.endswith('\n')]
 				if (sum(event.get('type') == 'watch-idle' for event in events) >= cycles
 					and all((project / name).exists() and (project / name).read_text() == expected
 						for name in ('one', 'two'))):
@@ -78,13 +78,10 @@ def watch(command: list[str], project: Path, environment: dict[str, str]) -> int
 			(project / 'items/b.txt').unlink()
 			settled('', 5)
 			assert (project / 'isolated').stat().st_mtime_ns == isolatedStamp, 'unrelated root rebuilt'
-			log.seek(0)
-			before = log.read()
+			before = (project / 'watch-log').read_text()
 			time.sleep(.3)
-			log.seek(0)
-			assert log.read() == before, 'settled watch spins while idle'
-			err.seek(0)
-			assert not err.read(), 'watch emitted stderr'
+			assert (project / 'watch-log').read_text() == before, 'settled watch spins while idle'
+			assert not (project / 'watch-err').read_text(), 'watch emitted stderr'
 		finally:
 			if process.poll() is None:
 				os.killpg(process.pid, signal.SIGTERM)

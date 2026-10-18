@@ -15,6 +15,8 @@ import (
 // WriteAST parses text as lang and writes its schema-1 AST JSON to out. It
 // returns 0 on success and 1 when the source has errors or encoding fails. The
 // JSON is written even when the parse has diagnostics, matching the CLI.
+// Rule captures use pattern; capture-only operands retain template as a legacy
+// alias. Quoted operands use template for their decoded string/interpolation AST.
 func WriteAST(out io.Writer, lang string, name string, text string) int {
 	enc := newASTEncoder(out, lang, name)
 	failed := false
@@ -585,11 +587,14 @@ func (e *astEncoder) rule(value *rule.Rule) {
 			e.template(o.Expansion)
 		}
 		if o.TargetForm != nil {
-			e.Str("template")
 			offset := o.Span.Start
 			if len(o.Text) >= 2 && o.Text[0] == '"' && o.Text[len(o.Text)-1] == '"' {
 				offset++
 			}
+			// Schema 1 keeps the legacy capture-only template alias. Pattern is
+			// stable regardless of whether a separate string template is present.
+			if o.Expansion == nil { e.Str("template"); e.target(o.TargetForm, offset) }
+			e.Str("pattern")
 			e.target(o.TargetForm, offset)
 		}
 		e.EndObject()
@@ -638,6 +643,8 @@ func (e *astEncoder) rule(value *rule.Rule) {
 		}
 		if in.TargetForm != nil {
 			e.Str("template")
+			e.target(in.TargetForm, in.Span.Start)
+			e.Str("pattern")
 			e.target(in.TargetForm, in.Span.Start)
 		}
 		e.EndObject()

@@ -10,7 +10,7 @@ import (
 )
 
 func TestHelpDistinguishesInspectionFromMaterialization(t *testing.T) {
-	topics := []string{"cat", "plan", "inputs", "outputs", "span", "tools"}
+	topics := []string{"cat", "list", "plan", "inputs", "outputs", "span", "tools"}
 	for i := range topics {
 		text := cli.HelpText(topics[i])
 		if topics[i] == "cat" {

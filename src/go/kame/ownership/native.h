@@ -3,7 +3,8 @@
 typedef struct km_own_store km_own_store;
 typedef struct km_own_file km_own_file;
 bool km_own_supported(void);
-km_own_store *km_own_open(so_String, bool, bool, int *);
+km_own_store *km_own_open(so_String, bool, int *);
+int km_own_lock_fd(km_own_store *);
 void km_own_close(km_own_store *);
 int km_own_root(km_own_store *, so_Slice);
 km_own_file *km_own_read(km_own_store *, so_String, bool, int *);

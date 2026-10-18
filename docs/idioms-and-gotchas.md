@@ -101,7 +101,10 @@ checks, with the symlink boundary described in
 [the capability contract](spec/005-evaluation.md#capabilities). Grants do not
 contain a child process's filesystem, network or environment access.
 
-Even a normal build needs an environment-read grant for `(env "NO_COLOR")`.
+`env.NO_COLOR` reads the same tracked value as `(env "NO_COLOR")` in Kame and
+Kash expressions; interpolation can use `@{env.NO_COLOR}`. Even a normal build
+needs an environment-read grant. The `env.` namespace is not a lexical record;
+bare `env` remains the callable operation in Kame, not a whole-environment value.
 Shell `NO_COLOR=1` affects inherited processes and CLI presentation but does not
 configure a declared Kame `NO_COLOR` definition. Use `kame NO_COLOR=1`,
 `KAME_NO_COLOR=1 kame`, or a typed `--set` for definition configuration. None of
@@ -111,7 +114,7 @@ actually intended, preserving other required grants under the replacement policy
 For an authored opt-in color setting:
 
 ```kame
-COLOR_DISABLED ?= (not (blank? (env "NO_COLOR")))
+COLOR_DISABLED ?= (not (blank? env.NO_COLOR))
 ```
 
 ```sh

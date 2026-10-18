@@ -12,6 +12,16 @@ import tempfile
 import time
 
 
+# Function: uniqueObject
+# Reject duplicate JSON fields instead of silently discarding semantic facts.
+def uniqueObject(items: list[tuple[str, object]]) -> dict[str, object]:
+	result: dict[str, object] = {}
+	for key, value in items:
+		assert key not in result, ('duplicate JSON field', key)
+		result[key] = value
+	return result
+
+
 # Function: check
 # Run one isolated source fixture; failures cannot contaminate another case.
 def check(command: list[str], source: str, target: str, *,
@@ -58,6 +68,7 @@ def check(command: list[str], source: str, target: str, *,
 			return
 		assert result.returncode == 0, (arguments, result.stdout, result.stderr)
 		plan = json.loads(result.stdout)
+		assert plan['producers'], plan
 		resources = {resource['id']: resource for resource in plan['resources']}
 		assert [resources[item]['display'] for item in plan['producers'][0]['outputs']] == outputs, plan
 		assert plan['producers'][0]['target'] == target, plan
@@ -66,9 +77,13 @@ def check(command: list[str], source: str, target: str, *,
 				if edge['producer'] == 1 and edge.get('group')] == inputs, plan
 		assert not (project / 'forbidden').exists(), 'planning ran a recipe'
 		if formatting:
+			parsed = run(['do', 'parse', '--json', '--lang', 'script', 'Makefile.kmk'])
+			assert parsed.returncode == 0, parsed.stderr
+			json.loads(parsed.stdout, object_pairs_hook=uniqueObject)
 			formatted = run(['do', 'fmt', '--lang', 'script', 'Makefile.kmk'])
 			assert formatted.returncode == 0, formatted.stderr
-			assert '@(' in formatted.stdout or '@{' in formatted.stdout, 'formatter erased computed syntax'
+			if '@(' in source or '@{' in source:
+				assert '@(' in formatted.stdout or '@{' in formatted.stdout, 'formatter erased computed syntax'
 			(project / 'formatted.kmk').write_text(formatted.stdout)
 			again = run(['do', 'fmt', '--lang', 'script', 'formatted.kmk'])
 			assert again.returncode == 0 and again.stdout == formatted.stdout, again.stderr
@@ -178,7 +193,57 @@ def main() -> None:
 		('configured override', 'ROOT = "./old"\n@{ROOT}/{name}.o :\n', './new/demo.o',
 			dict(outputs=['./new/demo.o'], overrides=['--define', 'ROOT=./new'])),
 	]
+	for name in ('plain', 'out file', 'out"quote', 'out\\slash', 'out\ttab', 'out\nline', 'out@(missing)'):
+		output = './' + name
+		quoted = json.dumps(output).replace('@', '\\@')
+		cases.append(('quoted literal ' + repr(name), f'SHELL = kash\n{quoted} : ./src/demo.c\n\tcat @< > @>\n', output,
+			dict(outputs=[output], inputs=['./src/demo.c'], build=True, formatting=True)))
+	for sibling in ('./second', '@(joinpath ./ "second")'):
+		cases.append(('quoted grouped output ' + sibling,
+			f'SHELL = kash\n"./out file" {sibling} : ./src/demo.c\n\tcat @< > (nth 0 outputs)\n\tcat @< > (nth 1 outputs)\n',
+			'./out file', dict(outputs=['./out file', './second'], build=True, formatting=True)))
+	cases.append(('quoted capture', 'SHELL = kash\n"./out dir/{name}.o" : ./src/{name}.c\n\tcat @< > @>\n', './out dir/demo.o',
+		dict(outputs=['./out dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
+	for prefix in ('./out\\dir/', './out\t', './out\\'):
+		quoted = json.dumps(prefix + '{name}.o')
+		output = prefix + 'demo.o'
+		cases.append(('quoted escaped capture ' + repr(prefix),
+			f'SHELL = kash\n{quoted} : ./src/{{name}}.c\n\tcat @< > @>\n', output,
+			dict(outputs=[output], inputs=['./src/demo.c'], build=True, formatting=True)))
+		cases.append(('computed escaped capture ' + repr(prefix),
+			f'SHELL = kash\nROOT = {json.dumps(prefix.rstrip("/"))}\n"@{{ROOT}}/{{name}}.o" : ./src/{{name}}.c\n\tcat @< > @>\n', prefix.rstrip('/') + '/demo.o',
+			dict(outputs=[prefix.rstrip('/') + '/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
+	cases.append(('computed string capture with backslash',
+		'SHELL = kash\n@(str "./out\\\\dir/" "{" "name" "}.o") : ./src/{name}.c\n\tcat @< > @>\n', './out\\dir/demo.o',
+		dict(outputs=['./out\\dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
+	cases.append(('computed pattern capture with backslash',
+		'SHELL = kash\nPATTERN = ./out\\\\dir/{name:*}.o\n@{PATTERN} : ./src/{name}.c\n\tcat @< > @>\n', './out\\dir/demo.o',
+		dict(outputs=['./out\\dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
+	for header in ('@{PATTERN}', '"@{PATTERN}"'):
+		cases.append(('pattern segment provenance ' + header,
+			f'SHELL = kash\nPATTERN = ./out\\\\dir/{{name:*}}.o\n{header} : ./src/{{name}}.c\n\tcat @< > @>\n', './out\\dir/demo.o',
+			dict(outputs=['./out\\dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
+		for definition, output in (
+			('ROOT = "./out\\\\dir"\nPATTERN = @{ROOT}/{name:*}.o', './out\\dir/demo.o'),
+			('PATTERN = ./out\\dir/{name:*}.o', './outdir/demo.o'),
+		):
+			cases.append(('pattern spelling provenance ' + header + definition,
+				f'SHELL = kash\n{definition}\n{header} : ./src/{{name}}.c\n\tcat @< > @>\n', output,
+				dict(outputs=[output], inputs=['./src/demo.c'], build=True, formatting=True)))
+	for header in ('@{ROOT}{name}.o', '"@{ROOT}{name}.o"'):
+		cases.append(('literal-only pattern segment ' + header,
+			f'SHELL = kash\nROOT = (pattern "./out\\\\\\\\dir/")\n{header} : ./src/{{name}}.c\n\tcat @< > @>\n', './out\\dir/demo.o',
+			dict(outputs=['./out\\dir/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
+	for header in ('@{PATTERN}@{TAIL}', '"@{PATTERN}@{TAIL}"', '"@{PATTERN}\\\\tail.o"', '"@(nop [PATTERN TAIL])"'):
+		output = './out\\dir/demo' + (' ' if '[PATTERN TAIL]' in header else '') + '\\tail.o'
+		cases.append(('mixed pattern and decoded backslashes ' + header,
+			f'SHELL = kash\nPATTERN = ./out\\\\dir/{{name:*}}\nTAIL = "\\\\tail.o"\n{header} : ./src/{{name}}.c\n\tcat @< > @>\n', output,
+			dict(outputs=[output], inputs=['./src/demo.c'], build=True, formatting=True)))
+	cases.append(('pattern escaped braces remain literal',
+		'SHELL = kash\nPATTERN = ./out\\{literal\\}/{name:*}.o\n"@{PATTERN}" : ./src/{name}.c\n\tcat @< > @>\n', './out{literal}/demo.o',
+		dict(outputs=['./out{literal}/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)))
 	invalid = [
+		('quoted logical output', '"chosen" :\n', 'PARSE_ERR'),
 		('missing explicit prefix', 'ROOT = "build"\n@{ROOT}/{name}.o :\n', 'PARSE_ERR'),
 		('empty list', '@(nop []) :\n', 'EXPR_INVALID'),
 		('nil only', '@(nop :nil) :\n', 'EXPR_INVALID'),
@@ -193,6 +258,8 @@ def main() -> None:
 		('duplicate within rule', '@(nop [./one ./one]) :\n', 'PARSE_ERR'),
 		('generated collision', '@(str "./one") :\ngenerate batch = [[kind: "file" target: "./one" inputs: [] order-only: [] recipe: ["touch forbidden"]]]\n', 'TGT_AMBIG'),
 		('malformed resolved pattern', '@(str "./" "{" "name") :\n', 'PARSE_ERR'),
+		('malformed mixed resolved pattern', 'PATTERN = ./out\\\\dir/{name:*}\n"@{PATTERN}{bad" :\n', 'PARSE_ERR'),
+		('mixed pattern cleanup after later failure', 'PATTERN = ./out\\\\dir/{name:*}\n"@{PATTERN}" @(first [42]) :\n', 'EXPR_INVALID'),
 		('missing reference', '@{missing} :\n', 'REF_MISSING'),
 		('capture unavailable', 'ROOT = (str "./" name)\n@{ROOT}/{name}.o :\n', 'REF_MISSING'),
 		('definition cycle', 'ROOT = (OTHER)\nOTHER = (ROOT)\n@{ROOT} :\n', 'DEP_CYCLE'),
@@ -209,6 +276,8 @@ def main() -> None:
 		('included producer location', '(include ./included.kmk)\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
 		('competing source patterns', './out/{name}.o : ./src/{name}.c\n\ttouch forbidden\n./out/{name}.o : ./src/{name}.cpp\n\ttouch forbidden\n', 'out/demo.o', {'code': 'TGT_AMBIG'}),
 		('canonical duplicate outputs', './out/../same :\n\ttouch forbidden\n./same :\n\ttouch forbidden\n', 'same', {'code': 'TGT_AMBIG'}),
+		('quoted canonical duplicate', '"./out/../same" :\n\ttouch forbidden\n./same :\n\ttouch forbidden\n', 'same', {'code': 'TGT_AMBIG'}),
+		('quoted grouped canonical duplicate', '"./out/../same" ./same :\n\ttouch forbidden\n', 'same', {'code': 'PARSE_ERR'}),
 	])
 	for name, source, target, options in cases:
 		try:

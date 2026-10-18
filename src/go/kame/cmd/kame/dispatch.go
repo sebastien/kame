@@ -51,6 +51,11 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	startedAt := time.Now()
 	command := streamCommand(args)
 	dashboardCommand = command
+	lockOut, lockErr, lockWaiting, lockLastNotice = out, errOut, false, 0
+	ownerCommand := lockCommand(args, command)
+	posix.ObserveLocks(observeLock, ownerCommand)
+	mem.FreeString(mem.System, ownerCommand)
+	defer finishLockPresentation()
 	dryRun := (command == "build" || command == "run" || command == "cache") && hasDryRun(args)
 	dashboardDryRun = dryRun
 	if command != "" && cliDiagnosticJSON {
@@ -182,6 +187,9 @@ func runDoCommand(command string, args []string, in io.Reader, out io.Writer, er
 	}
 	if command == "plan" {
 		return runPlan(args, out, errOut)
+	}
+	if command == "list" {
+		return runList(args, out, errOut)
 	}
 	if command == "cat" {
 		return runCat(args, out, errOut)

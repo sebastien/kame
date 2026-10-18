@@ -51,3 +51,18 @@ func TestValueASTPreservesCommentItems(t *testing.T) {
 		t.Error("value AST dropped authored comments")
 	}
 }
+
+func TestRuleCapturePatternFieldAndAuthoredCoordinates(t *testing.T) {
+	a := t.Allocator()
+	texts := []string{`"./out\t{name}.o" :`, `./out/{name}.o : ./in/{name}.c`, `"./out\"/{name:~[a-z]+}.o" :`}
+	for i := range texts {
+		buffer := bytes.NewBuffer(a, nil)
+		if ast.WriteAST(&buffer, "rule", "captures", texts[i]) != 0 { t.Error("capture AST failed") }
+		text := buffer.String()
+		if !strings.Contains(text, `"pattern":{"kind":"target-template"`) { t.Error("capture AST lacks stable pattern field") }
+		if i == 0 && (!strings.Contains(text, `"span":{"start":8,"end":14},"kind":"capture"`) || !strings.Contains(text, `"pattern":{"kind":"target-template","span":{"start":1,"end":16}`)) { t.Error("quoted target AST lost authored content or capture spans") }
+		if i == 1 && strings.Count(text, `"template":{"kind":"target-template"`) != 2 { t.Error("schema-1 legacy template aliases disappeared") }
+		if i == 2 && (!strings.Contains(text, `"span":{"start":9,"end":23},"kind":"capture"`) || !strings.Contains(text, `"regex":true`) || !strings.Contains(text, `"pattern":{"kind":"target-template","span":{"start":1,"end":25}`)) { t.Error("quoted regex target AST lost authored coordinates") }
+		buffer.Free()
+	}
+}

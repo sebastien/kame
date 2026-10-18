@@ -262,8 +262,18 @@ func (h *Host) Remove(name string) error {
 	return os.Remove(path.Path)
 }
 
-func (h *Host) LockCache(name string, stripe int) bool {
-	return h != nil && h.native != nil && km_host_cache_lock(h.native, name, c.Int(stripe)) == 0
+func (h *Host) LockCache(name string, stripe int) host.CacheLockStatus {
+	if h == nil || h.native == nil {
+		return host.CacheLockUnavailable
+	}
+	status := km_host_cache_lock(h.native, name, c.Int(stripe))
+	if status == -4 {
+		return host.CacheLockCancelled
+	}
+	if status != 0 {
+		return host.CacheLockUnavailable
+	}
+	return host.CacheLockAcquired
 }
 
 func (h *Host) UnlockCache(stripe int) {

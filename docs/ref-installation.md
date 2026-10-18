@@ -20,6 +20,19 @@ with OpenBSD 7.5+: use Node/WASM there. The table describes backend selection,
 not proof of conformance on every host. Check [remaining host validation](../TODO.md)
 and the corresponding CI run before depending on platform-specific behavior.
 
+### Automatic cleanup support
+
+Ownership-aware `do clean` is implemented by the native POSIX host, with Linux
+acceptance coverage. It requires descriptor-relative filesystem operations and
+project locking; native/APE Windows currently lacks that support. Selecting a
+native backend alone does not establish conformance on every operating system.
+
+The Node/WASM CLI (including npm) refuses `do clean`, `--dry-run`, `--keep` and
+`--release` with exit status 1 and preserves files and ownership records. It does
+not supply an implicit `clean` target. An authored `clean` remains an ordinary
+task on either backend; `do clean` never invokes it or falls back to directory-wide
+removal. Cache eviction through `do cache clean` is a separate operation.
+
 ## Verify a release before running it
 
 Choose an existing tag from [GitHub Releases](https://github.com/sebastien/kame/releases).
