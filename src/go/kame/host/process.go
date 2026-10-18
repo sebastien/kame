@@ -57,6 +57,7 @@ type ProcessRequest struct {
 	Argv        []string
 	Stages      []ProcessStage
 	Topology    bool
+	CollectFailures bool // collect ordinary external exit statuses; signals/operators remain fatal
 	Edges       []ProcessEdge
 	Input       string
 	Output      string

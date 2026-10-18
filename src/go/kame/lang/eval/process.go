@@ -443,6 +443,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		host.ConfigureTopology(c.Run, &payload, kinds, edges)
 		var buffers, overflows, itemLimits, orders []core.Value
 		configuredBuffer, lossy, ordered := false, false, false
+		collect := e.StreamFailure == 2
 		for i := range e.Items {
 			budget := int64(0)
 			if e.Items[i].Kind == expr.CommandMux { budget = e.Items[i].Int }
@@ -454,9 +455,10 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			orders = slices.Append(c.Run, orders, core.Value{Kind: core.Int, Int: int64(e.Items[i].StreamOrder)})
 			if e.Items[i].StreamOrder != 0 { ordered = true }
 		}
-		if configuredBuffer || ordered { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "buffers"), Value: core.NewList(c.Run, buffers)}) }
-		if ordered { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "orders"), Value: core.NewList(c.Run, orders)}) }
-		if lossy || ordered {
+		if configuredBuffer || ordered || collect { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "buffers"), Value: core.NewList(c.Run, buffers)}) }
+		if ordered || collect { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "orders"), Value: core.NewList(c.Run, orders)}) }
+		if collect { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "failurePolicy"), Value: core.Value{Kind: core.Int, Int: 1}}) }
+		if lossy || ordered || collect {
 			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "overflows"), Value: core.NewList(c.Run, overflows)})
 			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "bufferItems"), Value: core.NewList(c.Run, itemLimits)})
 		}

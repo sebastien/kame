@@ -89,6 +89,23 @@ func TestNativeSnapshotQueueCoalesces(t *testing.T) {
 	if snapshots != 1 { t.Error("native queue retained snapshot history") }
 }
 
+func TestNativeFailureCollectionJoinsOrdinaryExits(t *testing.T) {
+	h := posix.New(t.Allocator()); defer h.Free()
+	stages := []host.ProcessStage{
+		{Argv: []string{"/bin/sh", "-c", "exit 7"}},
+		{Argv: []string{"/bin/sh", "-c", "sleep 0.05; printf kept; exit 9"}, Environment: []string{"PATH=/usr/bin:/bin"}},
+		{Kind: "merge"}, {Argv: []string{"/bin/cat"}},
+	}
+	edges := []host.ProcessEdge{{From: 0, To: 2}, {From: 1, To: 2}, {From: 2, To: 3}}
+	if !h.Start(host.ProcessRequest{ID: 989, Topology: true, CollectFailures: true, Stages: stages, Edges: edges, RetainBytes: 32}) { t.Fatal("collect graph rejected"); return }
+	var terminal posix.Event
+	events := drain(t, h, &terminal)
+	defer slices.Free(t.Allocator(), events)
+	if terminal.Status != 9 || string(terminal.Stdout) != "kept" || len(terminal.Stages) != 4 { t.Error("failure collection lost sibling output or deterministic status")
+	} else if terminal.Stages[0].Status != 7 || terminal.Stages[1].Status != 9 || terminal.Stages[3].Status != 0 { t.Error("collected per-stage exits were overwritten") }
+	for i := range events { events[i].Free(t.Allocator()) }
+}
+
 func request(a mem.Allocator, id int64, script string) posix.Request {
 	return posix.Request{ID: id, Shell: slices.Clone(a, []string{"/bin/sh", "-c"}), Script: slices.Clone(a, []byte(script)), Directory: ".", Environment: slices.Clone(a, []string{"PATH=/usr/bin:/bin"}), RetainBytes: 1024}
 }

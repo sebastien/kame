@@ -345,7 +345,26 @@ buffer. It does not recover original source order when branches change record
 counts. Avoid strict ordering when a producer depends on another input being
 consumed first. Implicit branch rejoins retain ready ordering.
 
-Alternate failure policies and per-item workers remain pending.
+### Graph failure collection
+
+```kash
+(check-a, check-b) |(merge :failure collect) cat
+```
+
+The default `:failure fail-fast` cancels peers on failure. `:failure collect`
+instead lets siblings finish after ordinary nonzero executable exits. It applies
+to the **whole owning graph**, including anonymous producers; contradictory
+explicit policies are rejected before launch. It still reports failure, retaining
+every stage's outcome and selecting the last failing prepared stage's status.
+Use existing `?` or recovery explicitly to handle that failure.
+
+Signals (including SIGPIPE), launch errors, operator/framing/predicate errors,
+timeouts, and cancellation still stop the graph. Collection is not branch
+isolation, retry, or permission to ignore broken pipes. A peer that never closes
+can still wait indefinitely unless the invocation has a deadline. Graph inspection,
+snapshots, and Results expose the effective policy.
+
+Per-item workers remain pending.
 
 ### Live stream arguments
 

@@ -350,6 +350,7 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       return 2u;
     case host_RequestProcess:
       if (host_PayloadList(request.Payload, so_str("kinds")).len != 0) {
+        if (host_PayloadInt(request.Payload, so_str("failurePolicy")) == 1) return 37u;
         if (host_PayloadList(request.Payload, so_str("orders")).len != 0) return 36u;
         if (host_PayloadList(request.Payload, so_str("overflows")).len != 0) return 35u;
         if (host_PayloadList(request.Payload, so_str("buffers")).len != 0) return 34u;

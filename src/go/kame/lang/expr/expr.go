@@ -101,6 +101,7 @@ type Expr struct {
 	StreamKinds []int
 	StreamOverflow int // 0 block, 1 drop-new, 2 drop-old, 3 latest
 	StreamOrder int // 0 ready, 1 strict framed round-robin (merge only)
+	StreamFailure int // 0 inherited, 1 explicit fail-fast, 2 collect external exit statuses
 	BufferItems int
 	Exit string
 	Channels []string

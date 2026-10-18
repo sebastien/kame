@@ -110,6 +110,7 @@ func (p *Program) drainRequests() {
 			orders := host.PayloadList(request.Payload, "orders")
 			var edges []host.ProcessEdge
 			validEdges := true
+			for i := range request.Payload.Record { field := request.Payload.Record[i]; if field.Key == "failurePolicy" && (field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1) { validEdges = false } }
 			if len(buffers) != 0 && len(buffers) != len(graphs) { validEdges = false }
 			for i := range buffers { if buffers[i].Kind != core.Int || buffers[i].Int < 0 || buffers[i].Int > 65536 { validEdges = false } }
 			if (len(overflows) != 0 && len(overflows) != len(graphs)) || (len(itemLimits) != 0 && len(itemLimits) != len(graphs)) { validEdges = false }
@@ -201,6 +202,8 @@ func (p *Program) drainRequests() {
 			}
 			processRequest := host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 			processRequest.Topology, processRequest.Edges = len(kinds) != 0, edges
+			processRequest.CollectFailures = host.PayloadInt(request.Payload, "failurePolicy") == 1
+			if processRequest.CollectFailures && !processRequest.Topology { validEdges = false }
 			processRequest.StreamItem, processRequest.StreamContext = eval.StreamItemCallback, p.Eval
 			hasOperands := false
 			for i := range edges { if edges[i].Argument != 0 { hasOperands = true } }

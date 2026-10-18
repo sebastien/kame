@@ -20,6 +20,7 @@ func snapshotTopology(a mem.Allocator, payload core.Value) core.Value {
 		{Key: "edges", Value: core.NewList(a, host.PayloadList(payload, "edges"))},
 		{Key: "framed", Value: core.NewList(a, host.PayloadList(payload, "framed"))},
 		{Key: "programs", Value: core.NewList(a, programs)},
+		{Key: "failurePolicy", Value: core.Value{Kind: core.Int, Int: host.PayloadInt(payload, "failurePolicy")}},
 	}
 	value := core.NewRecord(a, fields)
 	for i := range fields { fields[i].Value.Free(a) }
@@ -85,7 +86,8 @@ func (p *Program) processGraphSnapshot(request host.Request, value core.Value) b
 		measured = slices.Append(p.Alloc, measured, core.NewRecord(p.Alloc, parts))
 		fields[1].Value.Free(p.Alloc); fields[5].Value.Free(p.Alloc); slices.Free(p.Alloc, parts)
 	}
-	fields := []core.RecordField{{Key: "terminal", Value: core.Value{Kind: core.Bool, Bool: false}}, {Key: "nodes", Value: core.NewList(p.Alloc, nodes)}, {Key: "edges", Value: core.NewList(p.Alloc, measured)}}
+	policy := "fail-fast"; if host.PayloadInt(pending.Graph, "failurePolicy") == 1 { policy = "collect" }
+	fields := []core.RecordField{{Key: "terminal", Value: core.Value{Kind: core.Bool, Bool: false}}, {Key: "nodes", Value: core.NewList(p.Alloc, nodes)}, {Key: "edges", Value: core.NewList(p.Alloc, measured)}, {Key: "failure", Value: core.NewString(p.Alloc, policy)}}
 	graph := core.NewRecord(p.Alloc, fields)
 	for i := range fields { fields[i].Value.Free(p.Alloc) }
 	for i := range nodes { nodes[i].Free(p.Alloc) }; slices.Free(p.Alloc, nodes)

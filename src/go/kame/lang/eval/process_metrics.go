@@ -82,7 +82,7 @@ func processGraphResult(a mem.Allocator, result Result, graph *expr.Expr, comple
 		edges = slices.Append(a, edges, core.NewRecord(a, fields))
 		for j := range fields { fields[j].Value.Free(a) }
 	}
-	fields := []core.RecordField{{Key: "nodes", Value: core.NewList(a, nodes)}, {Key: "edges", Value: core.NewList(a, edges)}, {Key: "terminal", Value: core.Value{Kind: core.Bool, Bool: true}}}
+	fields := []core.RecordField{{Key: "nodes", Value: core.NewList(a, nodes)}, {Key: "edges", Value: core.NewList(a, edges)}, {Key: "terminal", Value: core.Value{Kind: core.Bool, Bool: true}}, {Key: "failure", Value: core.NewString(a, expr.StreamFailureName(graph.StreamFailure))}}
 	value := core.NewRecord(a, fields)
 	for i := range fields { fields[i].Value.Free(a) }
 	for i := range nodes { nodes[i].Free(a) }; slices.Free(a, nodes)

@@ -162,8 +162,26 @@ ordering when branches depend on each other's consumption. Existing fail-fast,
 recovery, async ownership, timeout, and cancellation contracts remain unchanged.
 Static inspection distinguishes the selected strategy without evaluation.
 
-Alternate failure policies and explicit per-item workers remain subsequent
-Slice E work.
+Graph-wide failure collection is available as `:failure collect` on merge,
+broadcast, or balance. Omitted policies inherit the owning graph's policy;
+the default is `fail-fast`. Multiple explicit annotations in one graph must
+agree, including annotations inside anonymous stream operands. Conflicts fail
+with `KASH_FAILURE_POLICY` during static graph construction. This is an owner
+policy, not local branch isolation.
+
+Collection waits for siblings after ordinary nonzero executable exits, preserving
+their output, EOF, and per-stage outcomes. A graph still fails if any collected
+status is nonzero: the aggregate is the last failing prepared stage, not the
+last observed exit. `?`, graph recovery, and owned async completion remain the
+explicit ways to accept or handle it. Launch/capability failures, signalled exits
+(including SIGPIPE), mux I/O errors, framing/predicate/buffer failures, timeouts,
+and cancellation remain immediately fatal. Collector waits can still require an
+invocation deadline when a peer never closes; no implicit detachment, retries,
+closed-reader acceptance, or unbounded error/output history is introduced.
+Static inspection, live snapshots, and terminal Results expose the effective
+graph failure policy. Runtime-discovered build dependencies remain engine edges.
+
+Explicit per-item workers remain subsequent Slice E work.
 Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing
@@ -647,6 +665,14 @@ Each channel has an explicit end state. A writer close produces EOF after queued
 
 A failed stage fails the owning graph by default, including subprocess non-zero exit, launch failure, unhandled predicate failure, invalid framing, timeout, or early I/O failure. The existing `017-kash.md` process recovery (`?`, acceptance, and async ownership) is retained at the enclosing graph level; per-branch isolation/retry policies may be introduced explicitly later.
 
+An explicit `:failure collect` annotation on a merge/broadcast/balance changes
+only normal nonzero executable exits: siblings may finish and drain before the
+owning graph reports failure. It applies throughout that constructed graph;
+contradictory explicit annotations are static errors. Signals, operator failures,
+launch failures, deadlines, and cancellation still stop all owned work. Collected
+stage outcomes are retained independently; aggregate status uses the last failing
+prepared node. This is collection, not branch isolation or implicit acceptance.
+
 Cancel the remaining reachable graph, close its channel endpoints, reap children and nested `<(...)` producers, and release buffers and temporary resources. On normal completion, the invocation joins all owned branches before reporting a successful result; there are no detached implicit daemons.
 
 ### 10.3 SIGPIPE and early consumers
@@ -747,6 +773,7 @@ Graph lowering expands the AST into process nodes, mux nodes, ports, and point-t
 | `KASH_PREDICATE_FAILED` | Predicate evaluation fails. |
 | `KASH_STREAM_OPERAND_UNSUPPORTED` | Host/executable cannot accept a live injected stream. |
 | `KASH_GRAPH_CYCLE` | Unsupported feedback cycle. |
+| `KASH_FAILURE_POLICY` | Conflicting explicit failure policies in one owning graph. |
 | `KASH_AMBIGUOUS_CAPTURE` | Capture would expose more than one unmerged output. |
 
 Existing Kame/Kash capability, phase, timeout, executable, and process errors remain authoritative where applicable.

@@ -416,6 +416,20 @@ missing/malformed policy arrays before launch or redirection truncation; older
 hosts must reject the unknown request kind rather than silently reorder output.
 Kinds 32–35 retain their existing default ready-merge semantics.
 
+Process request kind **37** requires graph-wide failure collection. It carries
+`failurePolicy: 1` and all four node-aligned `orders`, `buffers`, `overflows`, and
+`bufferItems` arrays, including defaults. Missing/non-integer/out-of-range policy
+values and incomplete arrays are rejected before effects. Kind 37 cannot silently
+downgrade to fail-fast by omitting the field or setting it to zero. Older kinds
+retain fail-fast defaults when no policy is present. Unknown hosts must reject 37.
+
+Collection preserves ordinary external nonzero exit statuses while allowing
+other owned stages to finish; aggregate status is the last failing prepared node.
+Signals, launch errors, operator errors, timeouts, and cancellation remain fatal.
+Native `ProcessRequest.CollectFailures` has the same contract and requires topology
+execution. Static annotations are reconciled in the evaluator before submission;
+they are never evaluated configuration or implicit failure acceptance.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly

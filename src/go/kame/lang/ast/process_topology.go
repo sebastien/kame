@@ -14,6 +14,7 @@ func (e *astEncoder) processTopology(value *expr.Expr) {
 	r := eval.InspectProcessTopology(mem.System, value, flat)
 	defer r.Free(mem.System)
 	e.Str("topology"); e.BeginObject()
+	e.Str("failure"); e.Str(expr.StreamFailureName(flat.StreamFailure))
 	if len(value.Channels) != 0 {
 		e.Str("channels"); e.BeginArray()
 		for i := range value.Channels { e.Str(value.Channels[i]) }
@@ -46,7 +47,7 @@ func (e *astEncoder) processTopology(value *expr.Expr) {
 					e.Str("queueBufferBytes"); e.Int(budget)
 					e.Str("inFlightRecords"); e.Int(1)
 				}
-				e.Str("failure"); e.Str("fail-fast")
+				e.Str("failure"); e.Str(expr.StreamFailureName(flat.StreamFailure))
 				if node.Text == "balance" { e.Str("strategy"); e.Str("round-robin") }
 				if node.Text == "merge" {
 					e.Str("ordering"); if node.StreamOrder == 1 { e.Str("round-robin") } else { e.Str("per-input") }

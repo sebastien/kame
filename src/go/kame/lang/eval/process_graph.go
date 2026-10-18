@@ -41,6 +41,12 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 	slices.Free(c.Run, ports.Outputs)
 	if flat.Text != "" { return failure(c.Run, flat.Text, flat.Span, "process connection has incompatible endpoint cardinality or disposition") }
 	for i := range flat.Items {
+		node := flat.Items[i]
+		if node.StreamFailure == 0 { continue }
+		if flat.StreamFailure != 0 && flat.StreamFailure != node.StreamFailure { return failure(c.Run, "KASH_FAILURE_POLICY", node.Span, "conflicting graph-wide failure policies") }
+		flat.StreamFailure = node.StreamFailure
+	}
+	for i := range flat.Items {
 		if flat.Items[i].Kind != expr.CommandStage || flat.Items[i].Int == 0 { continue }
 		claims := 0
 		for j := range flat.Edges { if flat.Edges[j].To == i && flat.Edges[j].Argument == 0 { flat.Edges[j].Argument = int(flat.Items[i].Int); claims++ } }

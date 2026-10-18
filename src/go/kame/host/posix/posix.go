@@ -96,7 +96,8 @@ func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []
 }
 
 //so:extern nodecay
-func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, itemLimits []int, streamItem func(any, int64, int, []byte) int, streamContext any) c.Int {
+func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, itemLimits []int, streamItem func(any, int64, int, []byte) int, streamContext any, collectFailures bool) c.Int {
+	_ = collectFailures
 	_, _ = operandArguments, itemLimits
 	_, _ = streamItem, streamContext
 	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput, kinds, edges, inputs, outputs, appends
@@ -200,6 +201,7 @@ func (h *Host) SupportsStreamOperands() bool { _ = h; return km_stream_operands_
 // be queued for diagnostics, but nil hosts or an occupied emergency rejection
 // slot cannot queue another one. Only true transfers active process ownership.
 func (h *Host) Start(request host.ProcessRequest) bool {
+	if request.CollectFailures && !request.Topology { return false }
 	if request.Directory == "" {
 		request.Directory = "."
 	}
@@ -271,7 +273,7 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		ok := false
 		if request.Topology {
 			for i := range request.Edges { edges = slices.Append(h.Alloc, edges, request.Edges[i].From); edges = slices.Append(h.Alloc, edges, request.Edges[i].To); operandArguments = slices.Append(h.Alloc, operandArguments, request.Edges[i].Argument) }
-			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, itemLimits, request.StreamItem, request.StreamContext) == 0
+			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, itemLimits, request.StreamItem, request.StreamContext, request.CollectFailures) == 0
 		} else { ok = km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append) == 0 }
 		slices.Free(h.Alloc, kinds); slices.Free(h.Alloc, edges); slices.Free(h.Alloc, inputs); slices.Free(h.Alloc, outputs); slices.Free(h.Alloc, appends)
 		slices.Free(h.Alloc, operandArguments)

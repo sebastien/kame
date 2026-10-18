@@ -49,3 +49,12 @@ func TestOrderedMergeInspectionRetainsStrictPolicyWithoutEffects(t *testing.T) {
 	if ast.WriteAST(&buffer, "kash", "ordered.kash", text) != 0 { t.Error("ordered graph failed inspection") }
 	if !strings.Contains(buffer.String(), "\"ordering\":\"round-robin\"") || !strings.Contains(buffer.String(), "\"bufferBytes\":8") { t.Error("ordered policy lost during preparation/clone") }
 }
+
+func TestGraphFailureCollectionInspectionAndConflicts(t *testing.T) {
+	buffer := bytes.NewBuffer(t.Allocator(), nil); defer buffer.Free()
+	text := "(printf $(touch ./must-not-run), printf b) |(merge :failure collect) cat"
+	if ast.WriteAST(&buffer, "kash", "collect.kash", text) != 0 || !strings.Contains(buffer.String(), "\"failure\":\"collect\"") { t.Error("graph-wide collection policy not inspectable") }
+	other := bytes.NewBuffer(t.Allocator(), nil); defer other.Free()
+	text = "(printf a, printf b) |(merge :failure collect) |(broadcast :failure fail-fast) (cat, cat)"
+	if ast.WriteAST(&other, "kash", "conflict.kash", text) != 0 || !strings.Contains(other.String(), "KASH_FAILURE_POLICY") { t.Error("conflicting graph failure policies not diagnosed statically") }
+}

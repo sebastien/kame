@@ -93,6 +93,7 @@ typedef struct km_process {
     km_stage *stages;
     int stage_count;
     bool topology;
+    bool collect_failures;
     int failed_stage;
     int64_t *metrics;
     int metric_count;
@@ -1337,7 +1338,7 @@ fail:
 // Go structs. OS pipes carry intermediate bytes directly, with backpressure.
 int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output) {
     so_Slice empty = {0};
-    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty, empty, empty, NULL, NULL);
+    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty, empty, empty, NULL, NULL, false);
 }
 
 bool km_stream_operands_supported(void) {
@@ -1716,11 +1717,12 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
     return result;
 }
 
-int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends, so_Slice operand_arguments, so_Slice item_limits, km_stream_item stream_item, void *stream_context) {
+int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends, so_Slice operand_arguments, so_Slice item_limits, km_stream_item stream_item, void *stream_context, bool collect_failures) {
     if (!host) return -1;
     if (host->rejected_sequence) return -2;
     if (!id || lengths.len < 1 || lengths.len > INT_MAX / 2 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid graph request");
     bool topology = kinds.len != 0;
+    if (collect_failures && !topology) return km_spawn_failed(host, id, "failure collection requires a topology graph");
     if (topology && km_windows_jobs_needed()) return km_spawn_failed(host, id, "streaming process graphs are not supported by this Windows host");
     if (topology && (kinds.len != lengths.len || input_paths.len != lengths.len || output_paths.len != lengths.len || appends.len != lengths.len || connections.len % 2 || connections.len > INT_MAX / 2)) return km_spawn_failed(host, id, "invalid graph topology");
     so_int *node_kinds = kinds.ptr, *links = connections.ptr;
@@ -1768,6 +1770,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     char ***envp = calloc((size_t)n, sizeof(char **));
     char **cwd = calloc((size_t)n, sizeof(char *));
     km_process p = {.id = id, .outfd = -1, .errfd = -1, .execfd = -1, .direct = true, .retain = (int)retain, .stage_count = n, .topology = topology, .failed_stage = -1};
+    p.collect_failures = collect_failures;
     p.stages = calloc((size_t)n, sizeof(km_stage));
     if (topology) {
         void *mapping = mmap(NULL, (size_t)n * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -2087,7 +2090,7 @@ static void km_reap(km_host *host, km_process *p) {
         for (int i = 0; i < p->stage_count; i++) {
             km_stage *s = &p->stages[i];
             if (km_observe_child(s->pid, &s->exited, &s->reaped, &s->status, &s->signal) < 0) { km_fail(host, p, "waitpid failed"); return; }
-            if (p->topology && !p->terminating && p->failed_stage < 0 && s->exited && (s->status || s->signal)) {
+            if (p->topology && !p->terminating && p->failed_stage < 0 && s->exited && (s->status || s->signal) && (!p->collect_failures || s->operator_kind || s->signal)) {
                 p->failed_stage = i;
                 p->status = s->signal ? 128 + s->signal : s->status; p->signal = s->signal;
                 km_signal(p, SIGKILL);
