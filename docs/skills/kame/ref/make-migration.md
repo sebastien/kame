@@ -13,7 +13,7 @@ Before editing, classify every Make target:
 
 | Make construct | Kame model |
 | --- | --- |
-| A target that produces a file | A rule with explicit `./` or absolute output paths |
+| A target that produces a file | A rule with explicit `./`, `../`, or absolute output paths |
 | `.PHONY` target | Bare Kame task; it is always stale |
 | Expensive task whose result can be reused | `task NAME : ...`; Kame caches a successful result using rule, inputs, dynamic dependencies, and execution configuration |
 | First Make target / `.DEFAULT_GOAL` | A literal Kame target named `default` |
@@ -27,8 +27,8 @@ phony target and runs each time it is reached. A `task` is a cached task, not a
 synonym for `.PHONY`.
 
 Kame does **not** select the first rule as the default. With no requested
-target, it runs a target literally named `default`; if none exists, it lists
-the available literal targets.
+target, it runs a target literally named `default`; if none exists, it fails
+with `TGT_NO_DEFAULT` and lists the available named targets.
 
 ## Syntax mapping
 
@@ -61,6 +61,7 @@ GNU Make:
 all: build/app
 
 build/%.o: src/%.c
+	mkdir -p $(@D)
 	cc -c $< -o $@
 
 build/app: build/main.o build/util.o
@@ -86,7 +87,7 @@ clean :
 ```
 
 The `./` prefixes classify the outputs and inputs as file resources. `default`
-and `clean` are bare targets and therefore run every time they are selected.
+and `clean` are bare tasks and therefore run every time they are reached.
 Kame creates parent directories for declared file outputs before executing a
 file-rule recipe.
 
@@ -126,11 +127,11 @@ files; they are not valid `if` bodies. Legacy line includes and
    ```
 
 5. Run the target, then run it again. A file rule with accepted current outputs
-    and real declared/discovered dependencies should skip; an inputless file
-    rule or bare task should run again. Use `--force` only when intentionally
-    bypassing freshness and cached-task hits. File reuse compares content digests:
-    a metadata-only touch does not rebuild, while changed bytes invalidate even
-    with preserved timestamps. A first run establishes the successful record.
+   and real declared/discovered dependencies should skip; an inputless file
+   rule or bare task should run again. Use `--force` only when intentionally
+   bypassing freshness and cached-task hits. File reuse compares content digests:
+   a metadata-only touch does not rebuild, while changed bytes invalidate even
+   with preserved timestamps. A first run establishes the successful record.
 6. Add patterns, generated inputs, and cached tasks only after the direct
    graph is correct.
 

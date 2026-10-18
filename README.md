@@ -18,13 +18,14 @@ for builds, tests, provisioning, and deployment, with familiar dependency rules
 and fewer shell/expression clashes. It combines file artifacts, always-run and
 cached tasks, and managed services on one incremental engine.
 
-Use its Lisp-like expressions, value scripts, templates, build rules, or typed
-Kash process scripts independently, then compose them as a project grows.
+`kame` uses a Lisp-like expression language that embeds nicely into shell. Its
+rule language is close to `make` with fewer annoyances (no shell-clashing `$`,
+nor forcing tabs). Rules can be written in *Kash* a modern non-interactive shell
+optimised for safety and process coordination, an ideal replacement to bash
+fro scripting.
 
-The runtime and executable examples in this checkout use `@{ref}` / `@(call)`,
-`--set`, mixed Kash expression words and pipe-preserving formatting. Older
-installed builds may use earlier syntax; see [MIGRATION.md](MIGRATION.md) before
-updating downstream sources.
+Use a CLI built from matching sources. For older syntax, follow
+[MIGRATION.md](MIGRATION.md); formatting does not migrate code.
 
 ## Get started
 
@@ -39,9 +40,8 @@ kame do run --lang expr -c '(join " " ["hello" "world"])'
 # "hello world"
 ```
 
-For released binaries, the Node/WASM pair, npm, and verified launcher setup,
-see [installation and backends](docs/ref-installation.md). A version in the
-source tree does not establish that its release has been published.
+For released binaries, Node/WASM, npm, and verified launcher setup, see
+[installation and backends](docs/ref-installation.md).
 
 ### Your first build
 
@@ -85,48 +85,25 @@ but its unchanged file prerequisite can be reused.
 
 ## Build example
 
-For a C project with sources/headers under `src/` and includes under `lib/h/`:
+Compile C sources under `src/`, tracking headers in both `src/` and `lib/h/`:
 
 ```kame
-# Definitions lazily bind names to expressions/values
-cc = "gcc"
-include-path = ./lib/h
+# Lazy definitions compute the source, header, and output sets.
+sources = (wildcard ./src/**/*.c)
+headers = (concat (wildcard ./src/**/*.h) (wildcard ./lib/h/**/*.h))
+objects = (map (sub ./src/{path:**}.c ./build/{path}.o) sources)
 
-# Paths and wildcards are first class: wildcard expansions are values
-sources-c = (wildcard ./src/**/*.c)
-headers = (wildcard ./src/**/*.h)
+default : @{objects}
 
-# Every definition RHS is an expression; combine referenced lists explicitly
-sources = (concat sources-c headers)
-
-# Pattern substitution remaps paths, and map applies it to every source
-objects = (map (sub ./src/{path:**}.c ./build/{path}.o) sources-c)
-
-# Default rule will be triggered when no argument is given
-default : build
-
-# Inputs can be paths, target names, or values from expression expansions
-build : @{objects}
-	echo @(count objects) products built from @(count sources) inputs
-
-# Target templates capture the matching target and expand it in inputs
+# Captures connect each output to its source; all headers are prerequisites.
 ./build/{path:**}.o : ./src/{path}.c @{headers}
-	# No clash with the shell's $, more natural shorthands @< inputs @> outputs.
 	mkdir -p @(dirname @>)
-	@{cc} -I @{include-path} -c @< -o @>
-	echo compiled @< to @>
-
-archive : @{sources}
-	tar cvfz archive-$(date +%F).tar.gz @<*
-	echo created archive of size $(du -shc @<*)
-
-# Shows statistics about this project.
-stats :
-	echo @(count sources) input files
-	du -shc @{sources}
-	echo @(count objects) object files
-	du -shc @(filter ([path] (exists? path)) objects)
+	@{x/cc} -I ./lib/h -c @< -o @>
 ```
+
+`wildcard` tracks discovery, `sub` remaps paths, and `@{x/cc}` resolves and tracks
+the compiler. The recipe creates the output directory and compiles one source;
+changing a declared header invalidates dependent objects.
 
 ## Find your way
 

@@ -38,12 +38,18 @@ materialize a result once; a persistent host can maintain requested results as
 tracked resources change. These are two uses of the reactive model, not two
 unrelated programming models.
 
-## The live publication experience to add
+## Keep the publication current
 
-A user-facing live runner is not currently exposed by the CLI. When it is,
-reuse the [composition project](../composition/publication/README.md) rather
-than inventing a separate showcase. Keep the index requested while showing
-both its current result and graph events.
+The CLI exposes a persistent build session through `--watch` on native and
+Node/WASM hosts. From the repository root, with `kame` on PATH:
+
+```sh
+cd examples/composition/publication
+kame --watch ./public/index.txt
+```
+
+Leave it running and try these changes from another terminal. Inspect
+`public/index.txt` after each build; stop the watcher with Ctrl-C.
 
 | Experiment | Observable result |
 | --- | --- |
@@ -53,15 +59,16 @@ both its current result and graph events.
 | Edit an unrelated file | No dependent work runs |
 | Cause a recipe failure, then correct it | Failure is visible; the corrected generation recovers |
 
-Show `current -> invalidated -> recomputing -> current` and result revisions,
-not just a refreshing output. Each experiment should run in the same engine
-session: an external loop repeatedly launching `kame` would not demonstrate
-persistent subscriptions.
+Input changes invalidate resources in the retained engine, rather than launching
+a new CLI invocation. For build-cycle events, use
+`kame --json --watch ./public/index.txt`; the engine demo above exposes
+subscriptions and result revisions more directly.
 
-Source hot replacement is a separate capability from resource invalidation.
-Do not promise that changing definitions or rule files updates a running graph
-until the live host supports it. Likewise, reactivity is not permission to replay
-arbitrary effects: keep deployment an explicit action, not a watched recipe.
+Changing definitions or rule files reloads the source graph into a new program
+after active work settles. Malformed sources produce diagnostics and remain
+watched for repair. This is distinct from invalidating resources in an unchanged
+program. Reactivity is not permission to replay arbitrary effects: keep deployment
+an explicit action, not a watched recipe. See the [watch contract](../../docs/spec/020-watch.md).
 
 The intended moment of recognition:
 

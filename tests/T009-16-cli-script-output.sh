@@ -24,7 +24,7 @@ deploy {path} :
 	@(out! path)
 KMK
 for backend in native wasm; do
-	if [ "$backend" = native ]; then command=("$CLI_BIN"); else command=(node "$CLI_ROOT/dist/kame.js"); fi
+	if [ "$backend" = native ]; then command=(env -C "$work" "$CLI_BIN"); else command=(env -C "$work" node "$CLI_ROOT/dist/kame.js"); fi
 	check() {
 		local expected="$1"; shift
 		local status=0

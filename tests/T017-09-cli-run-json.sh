@@ -30,7 +30,7 @@ parity 0 "$work/values.km" name name
 parity 0 -l kash -c 'printf bytes' -l km -c '42'
 parity 0 -l kash -c 'printf "\\377"' -l expr -c ':nil'
 if jq -e -s 'any(.type == "stdout" and .encoding == "base64" and .data == "/w==") and any(.type == "target-value" and .value.kind == "nil")' "$work/native" >/dev/null; then test-ok "binary streams and nil values are represented structurally"; else test-fail "binary/nil JSON encoding"; fi
-parity 0 "$work/rules.kmk" build -c '42'
+parity 0 -C "$work" "$work/rules.kmk" build -c '42'
 parity 0 "$work/includes.km"
 
 test-step "runtime failures preserve metadata without fabricated values"

@@ -31,13 +31,23 @@ KAME_BUILD_MODE=release "$CLI_ROOT/src/sh/generate-version.sh"
 if cmp -s "$metadata" "$TMPDIR/version-before" && [ "$(stat -c %y "$metadata")" = "$before" ] && ! rg -q 'const buildMode' "$metadata"; then test-ok "shared version source is independent of artifact mode"; else test-fail "mode switch rewrote generated source"; fi
 
 test-step "establish successful artifact execution contexts"
-# GNU Make does not publish Kame's scoped file-context records. Materialize once
-# before testing reuse so an old/missing context record is not called unchanged.
-"$CLI_ROOT/build/kame.debug" --json -C "$CLI_ROOT" ./build/kame.debug ./dist/kame > "$TMPDIR/context-events" 2> "$TMPDIR/context-err"
+# The test task holds the repository output lock, so exercise incremental reuse
+# in a scratch project rather than recursively locking CLI_ROOT.
+context_project="$TMPDIR/artifact-context"
+mkdir -p "$context_project/build" "$context_project/dist"
+printf debug > "$context_project/debug-input"
+printf release > "$context_project/release-input"
+cat > "$context_project/Makefile.kmk" <<'KMK'
+./build/kame.debug : ./debug-input
+	cp @< @>
+./dist/kame : ./release-input
+	cp @< @>
+KMK
+timeout 30 "$CLI_ROOT/build/kame.debug" --json -C "$context_project" ./build/kame.debug ./dist/kame > "$TMPDIR/context-events" 2> "$TMPDIR/context-err"
 
 test-step "Kame skips unchanged debug and release file outputs"
-debug_before="$(stat -c %y "$CLI_ROOT/build/kame.debug")"
-release_before="$(stat -c %y "$CLI_ROOT/dist/kame")"
-"$CLI_ROOT/build/kame.debug" --json -C "$CLI_ROOT" ./build/kame.debug ./dist/kame > "$TMPDIR/build-events" 2> "$TMPDIR/build-err"
-if [ "$(stat -c %y "$CLI_ROOT/build/kame.debug")" = "$debug_before" ] && [ "$(stat -c %y "$CLI_ROOT/dist/kame")" = "$release_before" ] && ! rg -q '"type":"process-started"' "$TMPDIR/build-events"; then test-ok "unchanged artifact modes do not relink"; else test-fail "unchanged Kame native outputs relinked"; fi
+debug_before="$(stat -c %y "$context_project/build/kame.debug")"
+release_before="$(stat -c %y "$context_project/dist/kame")"
+timeout 30 "$CLI_ROOT/build/kame.debug" --json -C "$context_project" ./build/kame.debug ./dist/kame > "$TMPDIR/build-events" 2> "$TMPDIR/build-err"
+if [ "$(stat -c %y "$context_project/build/kame.debug")" = "$debug_before" ] && [ "$(stat -c %y "$context_project/dist/kame")" = "$release_before" ] && ! rg -q '"type":"process-started"' "$TMPDIR/build-events"; then test-ok "unchanged artifact modes do not relink"; else test-fail "unchanged Kame native outputs relinked"; fi
 test-end

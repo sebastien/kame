@@ -48,14 +48,14 @@ task native-included :
 	Write-Output 'native-include-ok'
 
 task native-path :
-	@(out (run "cmd.exe" "/c" "echo native-path-ok"))
+	@(out! (run! "cmd.exe" "/c" "echo native-path-ok"))
 '@ | Set-Content -Encoding ascii (Join-Path $project 'native-child.kmk')
 	@'
 task native-pipeline :
-	@(out (pipe (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-one-started yes; [Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 65536; $s=[Console]::OpenStandardOutput(); for ($i=1; $i -le 32; $i++) { $s.Write($b,0,$b.Length); if (($i % 4) -eq 0) { Set-Content pipeline-stage-one-bytes ($i * $b.Length) } }; Set-Content pipeline-stage-one-done yes") (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-two-started yes; $s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r; if ($n -le 8192 -or ($n % 262144) -lt $r) { Set-Content pipeline-stage-two-bytes $n } }; Set-Content pipeline-stage-two-done yes; [Console]::Write($n)")))
+	@(out! (pipe! (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-one-started yes; [Console]::Error.Write('native-pipeline-stderr'); $b=New-Object byte[] 65536; $s=[Console]::OpenStandardOutput(); for ($i=1; $i -le 32; $i++) { $s.Write($b,0,$b.Length); if (($i % 4) -eq 0) { Set-Content pipeline-stage-one-bytes ($i * $b.Length) } }; Set-Content pipeline-stage-one-done yes") (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-stage-two-started yes; $s=[Console]::OpenStandardInput(); $n=0; $b=New-Object byte[] 8192; while (($r=$s.Read($b,0,$b.Length)) -gt 0) { $n += $r; if ($n -le 8192 -or ($n % 262144) -lt $r) { Set-Content pipeline-stage-two-bytes $n } }; Set-Content pipeline-stage-two-done yes; [Console]::Write($n)")))
 
 task native-pipeline-eof :
-	@(out (pipe (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-eof-producer-started yes; Set-Content pipeline-eof-producer-done yes") (run "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-eof-consumer-started yes; $s=[Console]::OpenStandardInput(); $v=$s.ReadByte(); Set-Content pipeline-eof-consumer-read $v; [Console]::Write($v)")))
+	@(out! (pipe! (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-eof-producer-started yes; Set-Content pipeline-eof-producer-done yes") (run! "powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "Set-Content pipeline-eof-consumer-started yes; $s=[Console]::OpenStandardInput(); $v=$s.ReadByte(); Set-Content pipeline-eof-consumer-read $v; [Console]::Write($v)")))
 '@ | Add-Content -Encoding ascii (Join-Path $project 'Makefile.kmk')
 	@'
 task native-timeout :

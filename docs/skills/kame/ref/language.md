@@ -46,8 +46,9 @@ whole-line `#` and `//` comments. Kash uses word-start `#` comments and treats
 
 Use `do parse` and `do fmt` with an explicit language when inspecting a
 fragment. `expr`, `template`, and `rule` select individual grammars; `script`
-selects the composite grammar; `km` and `kmk` are also accepted; `kash` selects
-process scripts. Script tooling handles top-level value expressions.
+selects the composite grammar. `km` selects value programs without rules;
+`kmk` selects rule programs; `kash` selects process scripts. Script tooling
+handles top-level value expressions.
 Executable `do run` languages are only `km`, `kmk`, `kash`, and `expr`.
 `do parse --lang template` inspects inline syntax; `do fmt --lang template
 --comment STYLE` canonicalizes document directives, preserving non-directive bytes.

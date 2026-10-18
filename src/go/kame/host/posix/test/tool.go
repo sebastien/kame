@@ -97,7 +97,7 @@ func removeToolTestDirectory(directory string) {
 
 func TestToolResolutionPlatformPolicyAndLinuxFiles(t *testing.T) {
 	var buffer [os.MaxPathLen]byte
-	directory, err := os.MkdirTemp(buffer[:], "/tmp/opencode", "kame-tools-")
+	directory, err := os.MkdirTemp(buffer[:], "", "kame-tools-")
 	if err != nil {
 		t.Fatal("create tool directory")
 		return
@@ -135,7 +135,7 @@ func TestToolResolutionPlatformPolicyAndLinuxFiles(t *testing.T) {
 		t.Error("POSIX accepted file without executable bits")
 	}
 	mem.FreeString(a, resolved)
-	// Linux resolves //tmp/opencode/... to the same fixture; the Windows policy
+	// Linux resolves the double-slash absolute path to the same fixture; the Windows policy
 	// sees a valid UNC path, not a rooted path with a fictitious drive-less cwd.
 	windowsDirectory := "/" + directory
 	windows := posix.ResolveToolForPlatform(a, "runner", windowsDirectory, []string{"pAtH=//missing/share;" + windowsDirectory, "Pathext=.EXE"}, true)

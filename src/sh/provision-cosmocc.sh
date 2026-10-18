@@ -2,7 +2,7 @@
 set -eu
 
 destination=${1:-build/tools/cosmocc}
-archive_url=${COSMOCC_URL:-https://cosmo.zip/pub/cosmocc/cosmocc-4.0.2.zip}
+archive_url=${COSMOCC_URL:-https://github.com/jart/cosmopolitan/releases/download/4.0.2/cosmocc-4.0.2.zip}
 expected_sha256=${COSMOCC_SHA256:-85b8c37a406d862e656ad4ec14be9f6ce474c1b436b9615e91a55208aced3f44}
 
 case "$expected_sha256" in

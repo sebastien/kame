@@ -1,8 +1,7 @@
 # Build a personal blog with kame
 
-Documentation snippets use the specified `@{ref}` / `@(call)` syntax. The
-executable build files and installed backend may lag it; this documentation
-update does not migrate those files or establish runtime support.
+The build file and snippets use `@{ref}` / `@(call)` syntax. Use a CLI built
+from matching sources; older installed versions may use earlier syntax.
 
 In this tutorial we will build a minimalist personal blog — an author
 page, blog posts, and projects — from Markdown files into plain
@@ -35,16 +34,15 @@ First, build everything:
 ../../build/kame.debug
 ```
 
-You will see one line per target and a final summary:
+The CLI reports target completion and a final summary. The build produces:
 
 ```text
-[./build/index.html] complete
-[./build/author.html] complete
-[./build/posts/hello-world.html] complete
-[./build/projects/this-site.html] complete
-[./build/style.css] complete
-[default] complete
-Summary: ... targets complete
+build/index.html
+build/author.html
+build/posts/hello-world.html
+build/projects/this-site.html
+build/style.css
+build/tools/row.sh
 ```
 
 Now open the result:

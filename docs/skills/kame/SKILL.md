@@ -11,11 +11,9 @@ engine. These surfaces share expressions and values, not one interchangeable
 outer grammar. They can be used independently; a value or template task does
 not need a build file.
 
-These references and this checkout's executable examples use `@{ref}` /
-`@(call)`, `--set`, mixed Kash expression words and pipe-preserving formatting.
-Older installed builds may use earlier syntax. Check help and small parse/run
-probes before claiming support; update downstream sources explicitly using the
-repository's `MIGRATION.md`, not an automatic formatter migration.
+Use references and examples with a matching executable. Check help and small
+parse/run probes before claiming support. Migrate older sources explicitly using
+the repository's `MIGRATION.md`; formatting does not migrate syntax.
 
 ## Choose the language first
 
@@ -77,11 +75,10 @@ zero-argument function in template text.
 Build rules declare resources explicitly:
 
 ```kame
-SOURCES = (wildcard ./src/*.c)
-
 default : ./build/app
 
 ./build/{name}.o : ./src/{name}.c
+	mkdir -p @(dirname @>)
 	cc -c @< -o @>
 
 ./build/app : ./build/main.o ./build/util.o

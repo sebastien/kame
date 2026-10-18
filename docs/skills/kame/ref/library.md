@@ -2,9 +2,9 @@
 
 Kame operations are ordinary expression calls: `(name argument...)`. Arguments
 are evaluated before the operation runs, except the replacement operand of
-pattern `sub`/`replace`: it is evaluated only after matching, with local captures.
-Unless noted, invalid arity or value
-types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
+pattern `sub`: it is evaluated only after matching, with local captures. The
+deprecated alias `replace` follows the same rule. Unless noted, invalid arity or
+value types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 
 Transformations take parameters first and their subject last: `(f PARAMS VALUE)`.
 Optional parameters also precede the subject, so `(VALUE | f PARAMS)` is the same
@@ -83,8 +83,8 @@ Callbacks run in input order. `map` and `flatmap` require `(FUNCTION LIST)`;
 | --- | --- | --- |
 | `map` | `(map FUNCTION LIST)` | One callback result per item. |
 | `flatmap` | `(flatmap FUNCTION LIST)` | Maps and flattens one list level; every callback result must be a list. |
-| `filter` | `(filter PREDICATE-OR-VALUE LIST)` | Items whose predicate is true or equal to `VALUE`. |
-| `filter-out` | `(filter-out PREDICATE-OR-VALUE LIST)` | Items whose predicate is false or unequal to `VALUE`. |
+| `filter` | `(filter PREDICATE-OR-VALUE LIST)` | With a callable, keep items whose predicate result is truthy; otherwise, keep items equal to `VALUE`. |
+| `filter-out` | `(filter-out PREDICATE-OR-VALUE LIST)` | With a callable, keep items whose predicate result is false or nil; otherwise, keep items unequal to `VALUE`. |
 | `has?` | `(has? ITEM LIST)` | Exact membership using value equality, including nested lists/records and exact numeric equality. Validates the full operands before matching. |
 | `reduce` | `(reduce FUNCTION [INITIAL] LIST)` | Left fold with `(accumulator item)` callbacks. Without `INITIAL`, the first item is the accumulator; an empty list produces `:nil`. |
 | `concat` | `(concat VALUE...)` | Flattens list arguments one level and appends scalar arguments. |
@@ -233,17 +233,17 @@ invalidate consumers even when the set of path names stays unchanged.
 
 ## Build effects
 
-These operations are meaningful in a rule recipe expression. Bytes are
-emitted raw; other supported values use a separate effect-output encoder
-(nil as `nil`, booleans, integers, floats, text, patterns, lists and records in
-stable syntax) and emitted. Unrenderable values (callables, resources)
-still report `EXPR_INVALID`.
+These operations emit output during standalone evaluation and defer output
+while rendering a rule recipe. Bytes are emitted raw; other supported values
+are emitted using a separate effect-output encoder (nil as `nil`, booleans,
+integers, floats, text, patterns, lists and records in stable syntax).
+Unrenderable values (callables, resources) still report `EXPR_INVALID`.
 
 | Operation | Signature | Effect |
 | --- | --- | --- |
 | `out!` | `(out! VALUE...)` | In a rule, defers bytes to the target's stdout. Standalone evaluation writes to stdout and returns the combined output. |
 | `err!` | `(err! VALUE...)` | In a rule, defers bytes to the target's stderr. Standalone evaluation writes to stderr and returns the combined output. |
-| `yield!` | `(yield! VALUE...)` | Supplies the bytes for a declared file output. Standalone evaluation writes to stdout and returns nil. It is valid only for a file rule with one output. |
+| `yield!` | `(yield! VALUE...)` | In a rule, supplies bytes for exactly one declared file output. Standalone evaluation writes to stdout and returns nil. |
 
 Do not combine a nonempty shell recipe with `yield!`; Kame reports an output
 conflict rather than choosing a producer.

@@ -10,9 +10,8 @@ alphabetically.
 
 A **source** is named UTF-8 text being parsed, such as a `Makefile.kmk` or an
 inline `-c` command. A **span** is a zero-based, half-open byte range within one
-source. AST nodes and diagnostics retain spans so Kame can point back to authored
-text. A span is not a display line and column; those are derived when a
-diagnostic is rendered.
+source, retained by AST nodes and diagnostics. Display lines and columns are
+derived from spans when rendering diagnostics.
 
 ### Token and atom
 
@@ -42,8 +41,9 @@ written as `./out/file`.
 
 An **expression** is language syntax that evaluates to a **value**. Values are
 immutable tagged runtime data: nil, boolean, number, string, bytes, list, record,
-callable, resource reference, or pattern. A callable is valid while it is being
-evaluated, but cannot be published or cached as an ordinary value.
+callable, resource reference, pattern, or process handle. A callable is valid
+while it is being evaluated, but cannot be published or cached as an ordinary
+value.
 
 ### Definition
 
@@ -54,18 +54,19 @@ own resource namespace, so it can have the same spelling as a named rule.
 
 ### Scope, binding, and lexical function
 
-A **scope** is a parent-linked mapping from names to **bindings**. A binding can
-hold a value, operation, lazy definition, or **lexical function**. A lexical
-function retains its defining scope, then evaluates with a child scope containing
-its arguments. Function definitions, lambdas, and placeholder sections use this
-same callable model.
+A **scope** maps names to **bindings** and links to a parent scope. A binding holds
+a value, operation, lazy definition, or **lexical function**. Lexical functions
+retain their defining scope and evaluate in a child scope containing arguments.
+Function definitions, lambdas, and placeholder sections share this callable model.
 
 ### Reference
 
 A **reference** starts with a name and follows components such as record keys,
 list indexes, slices, or selections: `project.name`, `files.0`, or
-`config.{host,port}`. References operate on already evaluated values; they are
-not target dependencies by themselves.
+`config.{host,port}`. These references select values; they do not themselves
+declare target dependencies. The special **environment reference** `env.NAME`
+performs a tracked, capability-checked read in both Kame and Kash. It is not a
+field lookup on a lexical record; bare `env` remains a callable in Kame.
 
 ### Control form
 
@@ -81,9 +82,8 @@ dependencies and effects never run.
 A **string template** is text containing literal segments and Kame expansions.
 `@{reference}` reads a binding; `@` followed by a parenthesized Kame expression
 evaluates it, so `@(function)` is a zero-argument call. Bare `{(...)}` does not
-interpolate. A **selector** is an expansion whose value comes from the nearest
-rule or function
-context: `@<` is the first rule input, `@>` the first output, and `@_` the first
+interpolate. A **selector** reads the nearest rule or function context:
+`@<` is the first rule input, `@>` the first output, and `@_` the first
 function argument. Templates are rendered; they are not shell syntax.
 
 ### Target template and capture
@@ -142,12 +142,11 @@ rule kind determines whether it identifies a file, task, cached task, or service
 
 ### Target, output, input, and artifact
 
-A **target** is the thing requested from a program, such as `build` or
-`./build/app`. A rule's declared **outputs** are the targets or paths it claims
-to produce; its **inputs** are the declared prerequisites. A file **artifact** is
-the resulting filesystem object, not the target declaration itself. A bare input
-name is a symbolic resource; an explicit path input without a producing rule must
-already exist.
+A **target** is a requested result, such as `build` or `./build/app`. A rule's
+**outputs** are the targets or paths it claims to produce; its **inputs** are
+declared prerequisites. A file **artifact** is the resulting filesystem object,
+not its declaration. A bare input name is a symbolic resource; an explicit path
+input without a producing rule must already exist.
 
 ### Recipe
 
@@ -182,7 +181,7 @@ File content is compared by digest, not oldest-output/newest-input timestamps;
 metadata observations are tracked separately. Missing outputs or unverifiable
 proofs prevent reuse, as does having no reusable material input. Phony tasks
 always run; cached tasks use their matching successful fingerprint/manifest.
-See `docs/spec/006-runtime.md` and `docs/spec/008-cache.md`.
+See the [runtime](spec/006-runtime.md) and [cache](spec/008-cache.md) contracts.
 
 ### Materialize
 
@@ -271,6 +270,21 @@ engine **coalesces** intermediate updates while preserving an oldest pending
 value, a newest value, and terminal state.
 
 ## Streams and execution
+
+### Process graph, channel, and framing
+
+A **process graph** connects concurrently running commands and stream operators.
+A **channel** carries bytes or explicitly framed records between graph ports;
+it is not an engine dependency edge. **Framing** marks record boundaries, such as
+LF/CRLF-delimited lines, while retaining exact payload bytes. These process
+streams are distinct from the engine's value-stream protocol below.
+
+### Process handle
+
+A **process handle** is an opaque value for asynchronous process work owned by
+the current invocation. `(run! :async :true ...)` returns one; `(await handle)`
+observes its result. Handles cannot be serialized or cached, and asynchronous
+work is joined or cancelled before its invocation ends, not detached.
 
 ### Source and materializer
 
@@ -367,7 +381,4 @@ evaluation, definition, rule, or script boundary crossed while the diagnostic
 propagated; it is context, not a second error location. A **cause** preserves the
 bounded underlying host or process outcome without replacing Kame's diagnosis.
 
-For normative detail, see the specifications in `docs/spec/`, especially
-`001-architecture.md`, `002-engine.md`, `004-language.md`, `005-evaluation.md`,
-`006-runtime.md`, `007-library.md`, `008-cache.md`, `010-wasm.md`,
-`011-diagnostics.md`, `012-streams.md`, and `014-patterns.md`.
+For normative definitions, use the [specification index](spec/README.md).

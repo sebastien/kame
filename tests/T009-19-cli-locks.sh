@@ -2,7 +2,7 @@
 # Spec: docs/spec/009-cli.md — observable lock waits and busy ownership
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
-test-start "T009-18 lock diagnostics"
+test-start "T009-19 lock diagnostics"
 cli_require_tools
 cli_build
 make -C "$CLI_ROOT" dist-wasm >/dev/null

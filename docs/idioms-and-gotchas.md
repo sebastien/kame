@@ -1,9 +1,9 @@
 # Idioms and gotchas
 
-Use `.km` for values, `.kmk` for build rules, and `.kash` (or `.ksh`) for
-processes. These are independent entry points that can share a program through
-ordered file and `-c` operands. Use `do run --lang expr` for expressions and
-`do run --lang kash` for processes.
+Use `.km` for values, `.kmk` for build rules, and `.kash`/`.ksh` for processes.
+Ordered file and `-c` operands can share definitions in one `do run` session;
+the first fragment establishes capability defaults. See the
+[CLI reference](skills/kame/ref/cli.md) for invocation details.
 
 ## Values and references
 
@@ -25,8 +25,8 @@ strings. Bytes print directly. Do not infer string splitting from display.
 
 `.km` scripts emit only explicit `out!`/`err!` output, not their final value.
 Use `--print-result` for canonical result display, or select a named entry.
-`expr` still displays its result even when it also calls `out!`; no output-call
-heuristic changes the framing. Machine-readable scripts should use `(out! DATA)`.
+`expr` displays its result even when it also calls `out!`. For exact output
+without result framing, use a `.km` script with `(out! DATA)`.
 Program operands after `--` are literal strings in `args` (`@*`), with indexed
 access through `args.0`. A quoted `NAME=VALUE` is literal configuration even
 when VALUE ends in a source suffix or contains expression-looking text.
@@ -48,21 +48,25 @@ absence, and `(= NUMBER 0)` for zero. `count` is not valid on nil or numbers.
 filter, not a change to splitting semantics:
 
 ```kame
-(split " " "")                              # [""]
-(filter-out "" (split " " ""))              # []
-(filter-out "" (split " " " py  js "))      # ["py" "js"]
-(has? "py" ["pypy" "js"])                   # :false: exact membership
+# [""]
+(split " " "")
+# []
+(filter-out "" (split " " ""))
+# ["py" "js"]
+(filter-out "" (split " " " py  js "))
+# :false: exact membership
+(has? "py" ["pypy" "js"])
 ```
 
 This tokenizer handles ASCII spaces, not tabs/newlines or shell quoting. Prefer
 typed lists (`--set 'MODULES=["py" "js"]'`) when the setting is structured data.
 
-Command capture preserves stdout, including every trailing newline. `(strip
-$(git rev-parse HEAD))` is an explicit identifier conversion, not a capture
+Command capture preserves stdout, including every trailing newline.
+`(strip $(git rev-parse HEAD))` is an explicit identifier conversion, not a capture
 default. For a path tool promising one terminal LF, remove exactly that byte
 with `ends?`/`slice`, preserving whitespace/newlines belonging to the path.
-See [SDK migration boundaries](sdk-migration-boundaries.md) for the helper
-assessment, concrete failure-cleanup cases, and vendor/SDK workflow boundaries.
+See [SDK migration boundaries](sdk-migration-boundaries.md) for workflow and
+failure-cleanup examples.
 
 ## Paths, sources, and authority
 
@@ -89,14 +93,14 @@ the containing source, while evaluation paths use the selected working directory
 `(joinpath ./deps/sdk ./etc/file)` stays `"./deps/sdk/etc/file"`. Do not replace
 path joining with concatenation just to retain file-rule classification.
 
-An initial value/expression invocation denies host operations by default:
+Value/expression invocations deny host operations by default; grant only what is
+needed:
 
 ```sh
 kame do run --lang expr --allow-read=. -c '(wildcard ./docs/*.md)'
 ```
 
-Read, write, run, and environment authority are separate. Later fragments do not
-implicitly broaden the first fragment's policy. Filesystem roots are lexical
+Read, write, run, and environment authority are separate. Filesystem roots are lexical
 checks, with the symlink boundary described in
 [the capability contract](spec/005-evaluation.md#capabilities). Grants do not
 contain a child process's filesystem, network or environment access.
@@ -109,7 +113,7 @@ Shell `NO_COLOR=1` affects inherited processes and CLI presentation but does not
 configure a declared Kame `NO_COLOR` definition. Use `kame NO_COLOR=1`,
 `KAME_NO_COLOR=1 kame`, or a typed `--set` for definition configuration. None of
 those grants an environment read; use `--allow-env=NO_COLOR` when a read is
-actually intended, preserving other required grants under the replacement policy.
+intended. Explicit grant options replace defaults, so repeat other needed grants.
 
 For an authored opt-in color setting:
 
@@ -122,11 +126,9 @@ NO_COLOR=1 kame --allow-read=. --allow-write=. --allow-run --allow-env=NO_COLOR 
 ```
 
 This restores the usual build grants and permits only the named environment
-read. The setting treats unset/empty `NO_COLOR` as enabled color and nonempty
-text as disabled color. Read values participate in freshness; unrelated names
-remain unavailable to Kame expressions. Child programs are not sandboxed by
-these grants. The SDK must adopt such a setting explicitly; a CLI grant alone
-does not change its color policy.
+read. The definition treats unset/empty `NO_COLOR` as color enabled and nonempty
+text as color disabled. The read participates in freshness; a grant alone does
+not make a program adopt this setting.
 
 ## Build expressions and shell recipes
 
@@ -135,7 +137,7 @@ persist between its lines. Port Make recipes that relied on one shell per line
 carefully. `SHELL = kash` selects direct Kash instead: use `$name` and
 `(EXPRESSION)`, not document-template expansion.
 
-Kame selectors use `@>` for outputs, `@<` for the first input, and `@<*` for
+Kame selectors use `@>` for the first output, `@<` for the first input, and `@<*` for
 all normal inputs. `@<?` selects unique normal file inputs whose content digest
 changed since the successful run, or all normal file inputs when any output or
 the record is missing. Forced execution does not invent changed inputs. It
@@ -169,7 +171,7 @@ WASM_CC = "@{WASM_SDK}/bin/clang"
 The plain quoted `$(...)` stays literal until the recipe shell sees the rendered
 text. This is a workaround, not a dependency-tracked resolver: it can run once
 per use and is not reflected as a resolved executable in the plan. Unquoted
-`$(...)` is now an embedded Kash process expression and a trailing `/suffix`
+`$(...)` is an embedded Kash process expression and a trailing `/suffix`
 is not part of that atom. Do not use Make's `$$` habit blindly: raw recipe text
 is shell-owned, so `$HOME` is a shell expansion; `$$` means the shell process ID.
 

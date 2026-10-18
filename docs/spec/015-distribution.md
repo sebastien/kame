@@ -40,9 +40,9 @@ The Cosmopolitan APE provides the native CLI on its supported hosts.
 The pinned Cosmopolitan 4.0.2 loader is incompatible with OpenBSD 7.5 and later:
 its syscall entry points are rejected by `pinsyscalls(2)`. Those OpenBSD
 releases should use the Node/WASM pair instead.
-Native CI outputs and Windows bundles remain available for development/testing,
-but are never collected by `dist-release`. Neither platform placeholders nor
-stale outputs under `dist/native/` may enter a release.
+Manual native CI outputs and Windows bundles remain available for
+development/testing, but are never collected by `dist-release`. Neither platform
+placeholders nor stale outputs under `dist/native/` may enter a release.
 The Homebrew formula and Scoop manifest live in `etc/kame.rb` and
 `etc/kame.json`; both pin the version and digest of `kame.com`. Scoop renames
 that download to `kame.exe`. They are not release attachments.
@@ -183,8 +183,12 @@ Darwin, FreeBSD, NetBSD, and the Windows POSIX layers (`MINGW*`,
 `MSYS*`, `CYGWIN*`), on `x86_64`/`amd64` and `aarch64`/`arm64`.
 `src/sh/test-ape.sh` runs the APE through the POSIX shell adapter,
 checks version output, executes a recipe with an explicit environment, and
-checks timeout cleanup. `.github/workflows/ape-platforms.yml` runs that test
-against one artifact on Linux, Darwin, Windows POSIX, FreeBSD and NetBSD.
+checks timeout cleanup. `.github/workflows/ape-platforms.yml` builds the APE and
+WASM pair once on Ubuntu and tests the same artifacts downstream. It runs the
+APE shell test on Linux, Darwin, FreeBSD and NetBSD, and the PowerShell native
+CLI acceptance test on Windows. Windows also runs the packaged Node/WASM CLI.
+The build job retains Linux core/host tests, WASM ABI and CLI checks, and signed
+release packaging tests with ephemeral test keys; it never publishes a release.
 
 The `wasm` backend requires a JavaScript runtime. `KAME_JS` names it;
 otherwise `node` is used. The runtime must be Node 18 or later. The launcher
@@ -302,10 +306,12 @@ Release assets are built with these targets, additive to the existing
   `etc/kame.json` using `dist/kame.com` and `VERSION`; commit these definitions
   before publication. Release staging never modifies tracked files.
 - `dist-native` builds the current host's full native CLI and places it at
-  `dist/native/PLATFORM/kame`; `.github/workflows/native-artifacts.yml` uploads
-  Linux and macOS x64/ARM64 host builds, and
-  `.github/workflows/native-bsd-artifacts.yml` uploads FreeBSD, NetBSD and
-  OpenBSD x64 development builds, not release attachments.
+  `dist/native/PLATFORM/kame`; the manual-only
+  `.github/workflows/native-artifacts.yml` uploads Linux and macOS x64/ARM64
+  development builds, not release attachments. This toolchain matrix runs only
+  through `workflow_dispatch`, not on pushes or pull requests; its success is
+  not required to build the portable distribution. There is no separate BSD
+  native-artifact workflow; BSD distribution uses the APE or WASM artifacts.
 
 Install the Scoop definition from a source checkout:
 
@@ -404,9 +410,9 @@ the canonical build.
   run `node tools/windows/test-launcher.mjs dist/windows` after
   `make dist-windows`; it exercises the packaged CLI, launcher contract, recipe
   timeout and descendant-process reaping.
-  `.github/workflows/windows-launcher.yml` builds the bundle and runs this test
-  on `windows-latest`. Passing a cross-compile alone does not establish
-  Windows-host conformance.
+  `.github/workflows/ape-platforms.yml` builds the bundle alongside the portable
+  release artifacts and runs this test on `windows-latest`. Passing a
+  cross-compile alone does not establish Windows-host conformance.
 - `kame-windows-x64.exe` runs directly on Windows without Node and satisfies
   the native CLI contract in 035. Acceptance includes version and PowerShell
   recipes, 64 KiB pipeline writes, EOF closure, 2 MiB transfer, cache, watch and
@@ -421,11 +427,13 @@ the canonical build.
   or verifiers, wrong signing keys, and correctly signed releases whose version
   differs from `KAME_VERSION`, without executing or publishing unverified bytes.
 - Cache root selection honors `KAME_HOME`, then `XDG_DATA_HOME`, then `HOME`.
-- Native POSIX package/host tests and version execution run on Linux and macOS
-  x64/ARM64 plus FreeBSD, NetBSD and OpenBSD x64. The native artifact
-  workflows retain hosted execution results; unrun jobs are not conformance
-  evidence.
+- Linux native package/host tests run automatically. Additional native source
+  builds on Linux and macOS x64/ARM64 are manual development checks. The native
+  artifact workflow retains hosted
+  execution results; disabled automatic triggers and unrun jobs are not
+  conformance evidence.
 - APE host conformance runs a minimal standalone Cosmopolitan executable
   before the Kame CLI checks, so loader failures are distinct from application
-  startup failures on each tested host. OpenBSD is covered by native artifact
-  tests because Cosmopolitan 4.0.2 APEs fail OpenBSD syscall pinning.
+  startup failures on each tested host. OpenBSD uses the Node/WASM fallback
+  because Cosmopolitan 4.0.2 APEs fail OpenBSD syscall pinning. BSD native source
+  builds are not covered by CI and are not a portable-release gate.

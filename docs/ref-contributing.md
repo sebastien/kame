@@ -12,8 +12,9 @@ From the repository root, provide:
 
 - Go 1.26.0 or newer and Solod 0.4.0 (`src/go/kame/go.mod`).
 - GNU Make, Clang with native development headers/linker, Bash, and Python 3.
-- For CLI tests: `jq`, `timeout`, `flock`, `sha256sum`, `ps`, `touch`, `mktemp`,
-  `diff`, `realpath`, and `readlink`; some platforms need GNU utilities on PATH.
+- For CLI tests: `jq`, `rg` (ripgrep), `timeout`, `flock`, `sha256sum`, `ps`,
+  `touch`, `mktemp`, `diff`, `realpath`, and `readlink`; some platforms need GNU
+  utilities on PATH.
 - Node.js 18+ for WASM execution/tests; WASI SDK 34 for building the module.
   Mise's `mise.toml` provisions only that SDK, not Go, Solod, or all host tools.
 - `gofmt` and `shfmt` when using `make fmt`.
@@ -35,8 +36,9 @@ SDK, then `CC=clang make dist-wasm`. Without Mise, use
 must contain `bin/clang` and `bin/wasm-ld`, and supplies compiler-rt as well.
 `WASM_CC`/`WASM_LD` can override the individual tools but do not replace the
 SDK directory requirement. APE uses pinned Cosmocc provisioning:
-`make dist-ape`, or `src/sh/build-ape.sh` without Make. Provisioning may download
-tools. None of these commands publishes a release.
+`make dist-ape`, or `src/sh/build-ape.sh` without Make. First-time provisioning
+downloads tools and requires `curl`, `unzip`, and `sha256sum` or `shasum`.
+None of these commands publishes a release.
 
 ## Repository map
 

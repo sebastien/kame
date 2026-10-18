@@ -62,8 +62,8 @@ for backend in native wasm; do
 	check '界childafter"Ada!"' do run --print-result -C "$work/cwd" "$work/main.km"
 	check '42' do run --print-result "$work/repeated.km"
 	check '"Ada"' do run --print-result "$work/absolute.km"
-	check 'childmain' do run "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
-	check 'childmain' do run "$work/rules.kmk" build
+	check 'childmain' do run -C "$work" "$work/rules.kmk" build -c 'name = "Ada"' -c 'name'
+	check 'childmain' do run -C "$work" "$work/rules.kmk" build
 	# A physical file's spelling must not classify it as an inline/stdin source.
 	original_command=("${command[@]}")
 	command=(env -C "$work/nested" "${command[@]}")

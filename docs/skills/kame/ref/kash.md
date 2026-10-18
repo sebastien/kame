@@ -3,7 +3,8 @@
 Kash (`.kash`, or equivalent `.ksh`) is a process language, not a system shell
 or KornShell. It embeds Kame expressions and values without converting them
 to shell text. `.kmk` recipes default to shell scripts; `SHELL = kash` or
-header metadata `; [shell: kash]` selects direct Kash parsing, without a document-template pass.
+header metadata `; [shell: kash]` selects direct Kash parsing, without a
+document-template pass.
 
 Native and WASM execution implement definitions, command words, substitutions,
 pipelines, redirections, stage setup, control blocks, recovery, and invocation-owned
@@ -19,16 +20,15 @@ cat $files | wc -l
 echo revision=$revision
 ```
 
-Definitions/functions are lazy. Their RHS uses the same expression grammar as
-`.km`/`.kmk`; Kash RHSs additionally accept
-`??` compositions.
+Definitions/functions are lazy. Their right-hand sides use `.km`/`.kmk`
+expression grammar, plus Kash `??` compositions.
 Statements run in source order; newlines or `;` separate them. Word-start `#`
 introduces a comment; `//` is literal. Branch-local definitions do not escape.
 
 A statement beginning with `(EXPRESSION)` evaluates for effects, discards its
 result, and propagates failure. Nil, records, and process-result records are not
 executables and do not print implicitly. There is no `do (EXPRESSION)` form.
-For a computed executable, bind its value and use `$command` at the command head.
+For a computed executable, bind its value and use `$command` at command position.
 
 ## Explicit boundaries and argv
 
@@ -82,8 +82,7 @@ their value grammar. Calls/effects retain completed values across suspension;
 results are never reparsed as words or source.
 
 `"--config-path=(js-biome-config)"` is literal, not a call. Quote or escape literal
-parentheses outside quotes. `$config` / `${config}` remain the reference forms;
-bare braces do not add another substitution syntax. In a delegated Kame
+parentheses. Bare braces do not substitute values. In a delegated Kame
 expression, path interpolation still uses `@{ref}` / `@(call)`, not raw-word
 fragments. Formatting preserves calls versus literal parentheses, list-splicing
 boundaries, and authored value pipes rather than converting them to nested calls.
@@ -98,9 +97,8 @@ expressions directly; JSON serialization and escaping helpers are unnecessary.
 
 When switching from external-shell templates, replace `@{name}` with `$name`,
 and call expansions such as `@(join ":" files)` with `(join ":" files)`.
-Replace document `@if`/`@for`
-generation with Kash control or explicit source construction. For a command
-represented as an argv list, explicitly spread the executable and arguments:
+Replace document `@if`/`@for` generation with Kash control or explicit source
+construction. For an argv list, explicitly spread the executable and arguments:
 
 ```kame
 SHELL = kash
@@ -151,6 +149,8 @@ stage environment entries. An ordinary filename argument does not declare a
 dependency; an input redirection does. Grants do not sandbox an executable's
 internal filesystem access.
 
+### Stage environments
+
 `:env $EXPORTS` or `:env (EXPRESSION)` supplies a typed environment record,
 also accepted by `(run! :env EXPORTS ...)`. Keys must match
 `[A-Za-z_][A-Za-z0-9_]*`; values must be strings without NUL. Empty strings are
@@ -165,6 +165,8 @@ occurs only on reached runtime stages; dry-run defers it, and ordinary read/env/
 grants still apply. Effects and completed values survive suspension without replay.
 Computed values are excluded from normal diagnostics/lifecycle traces, but callers
 must still avoid placing secrets in authored literals, argv, or explicit output.
+
+### Capture and failure
 
 Capture preserves valid UTF-8 stdout exactly, including empty output and trailing
 newlines; stderr remains live. Capture is limited (default 1 MiB), never silently
@@ -197,7 +199,7 @@ comma remains a Kame expression.
 The enclosing invocation owns all stages and native operator workers, including
 when the complete graph ends in `&`. Failure cancels peers. Capture rejects
 multiple unmerged terminal stdout streams; redirect unwanted outputs or merge
-them explicitly. Windows currently rejects these new graph forms before launch;
+them explicitly. Windows rejects these graph forms before launch;
 ordinary linear pipelines remain available. Live stream arguments also require
 a host with validated pipe-backed operand paths.
 
@@ -205,7 +207,7 @@ Explicit line framing enables pure Boolean filters and frame-safe merge:
 
 ```kash
 cat ./events |(frame :lines)
-    |(filter (contains item "ERROR") | cat > ./errors)
+    |(filter (includes? "ERROR" item) | cat > ./errors)
     | cat > ./normal
 ```
 
@@ -227,8 +229,8 @@ pipeline. Rejoining an external command's output requires explicit reframing:
 
 ```kash
 cat ./events |(frame :lines)
-    |(filter (contains item "legacy") | normalize |(frame :lines) >&)
-    |(filter (contains item "invalid") | cat > ./rejected)
+    |(filter (includes? "legacy" item) | normalize |(frame :lines) >&)
+    |(filter (includes? "invalid" item) | cat > ./rejected)
     | cat > ./accepted
 ```
 
@@ -301,34 +303,6 @@ timing. EOF drains retained records, and early child closure still fails the
 graph. Lossy policies require frames and are forbidden for `merge`/`balance`.
 `:overflow block` is the default lossless path, without an extra pending queue.
 
-### Terminal graph telemetry
-
-Graph Result records have a `graph` field with terminal nodes and edges. For
-example, inside a Kash source/build session:
-
-```kash
-result = ((kash """printf "a\nb\n" |(frame :lines) |(broadcast) (cat > ./left, cat > ./right)"""))
-(out! (json result.graph))
-```
-
-Nodes expose prepared IDs, kinds, executable paths, terminal states, and exit
-outcomes. Edges expose stream kinds and measured payload `bytes`, framed `items`,
-`droppedItems`, `queueHighWaterBytes`, and `queueHighWaterItems`. Envelope headers
-do not count. `measurement` distinguishes `completed-write`, `read`, and
-`unavailable`; partial failed writes are not completed writes. Byte edges have
-nil item counters. Direct external-to-external pipes are not instrumented, so
-their measurements are nil rather than invented zeroes. Non-queue edges have
-nil queue high-water marks. Counters saturate at 2^53-1 and set `saturated`.
-
-Telemetry does not capture stdout, infer build dependencies, or change failure
-handling. Missing telemetry from a host remains explicitly unavailable. This is
-terminal Result metadata. Live progress also appears in `process-snapshot` JSON
-and embedding events: prepared node IDs carry running/input-wait/output-wait
-states, and edge IDs carry sampled counters. Samples coalesce when unread and
-are normally at least 100 ms apart. Native live counters are individually atomic,
-not transactional across fields; use terminal Results for final accounting.
-External processes do not expose internal waits, and high-water marks are not
-current queue occupancy. Wait states are I/O interest, not deadlock detection.
 ### Explicit merge ordering
 
 ```kash
@@ -408,6 +382,34 @@ failure, capture overflow, timeout, or cancellation. Unsupported hosts, includin
 native Windows, fail with `KASH_STREAM_OPERAND_UNSUPPORTED` without launching or
 truncating output files.
 
+### Graph telemetry
+
+Graph Result records have a `graph` field with terminal nodes and edges:
+
+```kash
+result = ((kash """printf "a\nb\n" |(frame :lines) |(broadcast) (cat > ./left, cat > ./right)"""))
+(out! (json result.graph))
+```
+
+Nodes expose prepared IDs, kinds, executable paths, terminal states, and exit
+outcomes. Edges expose stream kinds and measured payload `bytes`, framed `items`,
+`droppedItems`, `queueHighWaterBytes`, and `queueHighWaterItems`. Envelope headers
+do not count. `measurement` distinguishes `completed-write`, `read`, and
+`unavailable`; partial failed writes are not completed writes. Byte edges have
+nil item counters. Direct external-to-external pipes are not instrumented, so
+their measurements are nil, not zero. Non-queue edges have nil queue high-water
+marks. Counters saturate at 2^53-1 and set `saturated`.
+
+Telemetry does not capture stdout, infer build dependencies, or change failure
+handling. Missing host telemetry is explicitly unavailable. Live progress appears
+in `process-snapshot` JSON and embedding events: prepared node IDs carry
+running/input-wait/output-wait states, and edge IDs carry sampled counters.
+Samples coalesce when unread and are normally at least 100 ms apart. Native
+live counters are individually atomic, not transactional across fields; use
+terminal Results for final accounting. External processes do not expose internal
+waits, and high-water marks are not current queue occupancy. Wait states indicate
+I/O interest, not deadlock detection.
+
 ## Named execution context
 
 | Name | Compact form | Value |
@@ -459,6 +461,11 @@ scoped to the selected arm.
 - `LEFT ?? RIGHT` recovers a nil/failed value in Kash RHSs, not raw commands or
   inside Kame expressions. It is distinct from Kame's unknown-reference `?` form.
 - Recovery never suppresses capability denial or cancellation.
+- `&&`, `||`, shell subshell grouping, and single-quoted shell strings are not
+  supported. Use Kash control statements or Kame special forms.
+
+### Async ownership
+
 - Terminal `&` starts the entire graph asynchronously; normal session completion
   joins outstanding work. It is not daemonization or detachment.
 - To bind a handle, use `job = (run! :async :true "worker")`, then demand
@@ -468,8 +475,6 @@ scoped to the selected arm.
   `stages`, `stdoutCaptured`, and `stderrCaptured`; streams are live, not retained.
 - `await` is repeat-safe. Unobserved async failures fail the final invocation join;
   source failure/interruption cancels and reaps every outstanding graph.
-- `&&`, `||`, shell subshell grouping, and single-quoted shell strings are not
-  supported. Use Kash control statements or Kame special forms.
 
 ### Deferred cleanup
 
@@ -480,13 +485,15 @@ defer rm -rf $directory
 defer (out! "finishing\n")
 ```
 
-`defer COMMAND` snapshots validated argv/setup/redirection operands now, without
-launching the graph or opening its output. `defer (EXPRESSION)` retains the
-expression and lexical scope and evaluates it during cleanup. Both register only
-when reached at runtime; dry-run does neither. Expressions keep normal laziness:
-an undemanded resource definition may first run during cleanup. Commands can
-demand it while snapshotting. Demanded top-level lazy values are retained through
-the invocation rather than recaptured by each statement.
+| Form | Registration | Cleanup |
+| --- | --- | --- |
+| `defer COMMAND` | Snapshot validated argv/setup/redirection operands; do not launch or open output. | Execute the prepared graph. |
+| `defer (EXPRESSION)` | Retain the expression and lexical scope. | Evaluate the expression. |
+
+Registration occurs only when reached at runtime, never during dry-run.
+Expressions keep normal laziness: an undemanded resource definition may first
+run during cleanup; commands can demand it while snapshotting. Demanded
+top-level lazy values persist through the invocation, not per statement.
 
 The enclosing recipe, constructed callable or top-level runner invocation owns a
 LIFO stack; branches do not create a cleanup lifetime. Normal exit joins user work
@@ -509,9 +516,9 @@ crash or blocking custom host can prevent cleanup.
 Deferred `write!` executes during cleanup even in a failed recipe, not as a
 successful output-publication effect. `defer` does not establish ownership or make
 `>` atomic. Only remove freshly created private resources; don't infer ownership
-of shared paths. `if`/fallback
-are not finalizers, `do clean` is historical cleanup, and killing a process does
-not roll back remote operations. See the [operational cookbook](../../../kash-cookbook.md)
+of shared paths. `if`/fallback are not finalizers, `do clean` is historical
+cleanup, and killing a process does not roll back remote operations.
+See the [operational cookbook](../../../kash-cookbook.md)
 and [SDK migration boundaries](../../../sdk-migration-boundaries.md).
 
 ## Run and inspect

@@ -33,6 +33,6 @@ for backend in native wasm; do
  "${runner[@]}" -C "$project" default >"$project/value" 2>"$project/error"
  if [ "$(cat "$project/value")" = -O2 ]; then test-ok "$backend computed configuration reaches recipe"; else test-fail "$backend computed definition"; fi
   "${runner[@]}" do plan --json -C "$project" default >"$project/plan" 2>"$project/error"
- if grep -q release.txt "$project/plan" && ! grep -q debug.txt "$project/plan"; then test-ok "$backend computed input reaches planning"; else test-fail "$backend computed input plan"; fi
+  if jq -e '[.resources[] | select(.key.kind == "file") | select(.roles | index("input")) | select(.roles | index("configuration") | not) | .display] == ["./release.txt"]' "$project/plan" >/dev/null; then test-ok "$backend computed input reaches planning"; else test-fail "$backend computed input plan"; fi
 done
 test-end

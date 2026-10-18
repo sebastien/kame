@@ -1,13 +1,9 @@
 # Language contract migration note
 
-This note explains the breaking syntax changes used by the runtime, executable
-examples and fixtures in this checkout. Update downstream sources explicitly and
-use a matching executable; older installed builds may use the previous grammar.
-Release validation and other remaining work are tracked in [TODO.md](TODO.md).
-
-This is a clean break: no legacy parser mode, compatibility aliases, migration
-command or formatter migration flag is required. Update authored sources
-explicitly; ordinary formatting must not guess an older source's intent.
+This note maps older source syntax to this checkout's language contract. Use a
+matching executable and update downstream sources explicitly: there is no legacy
+parser mode or automatic formatter migration. Formatting preserves meaning; it
+does not guess an older source's intent.
 
 ## References and calls
 
@@ -20,10 +16,9 @@ Version: @(version)
 Files: @(join ", " files)
 ```
 
-`@` prefixes the complete parenthesized Kame expression. Thus `@(version)`
-evaluates `(version)`, a zero-argument call, rather than reading `version`.
-Reading a callable through `@{version}` does not invoke it and cannot render it
-as text. There is no runtime-type fallback in either direction.
+`@(version)` evaluates `(version)`, a zero-argument call. `@{version}` reads a
+binding; if that binding is callable, it cannot render as text. Neither form
+changes meaning based on the value's runtime type.
 
 When updating a source written for the prior grammar, review each expansion:
 
@@ -52,13 +47,13 @@ their separate meaning. Do not confuse them with `@{name}` lookups.
 
 Directive argument slots are unchanged: `@if(enabled)` reads a value and
 `@if((predicate))` calls without arguments. Selectors, escapes, raw regions and
-verbatim strings keep their own rules. In the new grammar, nested applications
-may intentionally invoke computed callables; do not remove their parentheses as
-though every nested form were an obsolete wrapper.
+verbatim strings keep their own rules. Nested applications can invoke computed
+callables; do not remove their parentheses as though every nested form were an
+obsolete wrapper.
 
 ## Environment references
 
-`env.NAME` now reads the named environment variable in Kame as well as Kash,
+`env.NAME` reads the named environment variable in Kame as well as Kash,
 including `@{env.NAME}` interpolation. It uses the same grants, phase checks and
 dependency tracking as `(env "NAME")`; that call spelling is unchanged. It does
 not expose a whole-environment record. If existing Kame code uses a lexical record
@@ -106,10 +101,9 @@ delegated Kame expression, path interpolation still uses `@{ref}` / `@(call)`.
 
 ## Formatting and boundary checks
 
-Value pipes remain pipes; nested calls remain nested calls. Formatting only
-normalizes their spacing/layout and preserves placeholder positions. Remove
-workarounds that deliberately leave pipes noncanonical only after verifying the
-formatter implements this contract.
+Formatting preserves authored pipes, nested calls, and placeholder positions;
+only spacing and layout change. Noncanonical-pipe workarounds are unnecessary
+with a matching formatter.
 
 Use `joinpath` for paths, not concatenation to save a prefix: it preserves an
 explicit relative anchor, for example `(joinpath ./sdk "src")` is `"./sdk/src"`.
@@ -124,11 +118,10 @@ interpretation or authority. Definition configuration and `--env` do not grant
 `(env NAME)` access. Reading a computed record can use `(get "stdout" (sh! COMMAND))`
 or a bound `result.stdout`; no postfix call-result field syntax is introduced.
 
-Coordinate runtime changes with executable sources and fixture/golden updates.
-Review parser ownership before editing text, especially raw/verbatim content and
-external-shell versus direct-Kash recipes. Then check parsing/formatting,
-planning/dry-run, targeted behavior, and the native/leak/WASM gates. Documentation
-checks alone do not establish runtime conformance.
+Validate migrated sources with parsing/formatting, planning/dry-run, and targeted
+execution. Preserve raw/verbatim content and distinguish external-shell from
+direct-Kash recipes. Runtime changes also require fixture updates and the
+native/leak/WASM gates; documentation checks alone do not establish conformance.
 
 Authoritative contracts: [language](docs/spec/004-language.md),
 [templates](docs/spec/016-templates.md), [CLI](docs/spec/009-cli.md),

@@ -1,18 +1,6 @@
-name: Native CLI artifacts
+name: Native CLI artifacts (manual)
 
 on:
-  push:
-    paths:
-      - '.github/workflows/native-artifacts.yml'
-      - 'Makefile'
-      - 'src/go/kame/**'
-      - 'src/sh/**'
-  pull_request:
-    paths:
-      - '.github/workflows/native-artifacts.yml'
-      - 'Makefile'
-      - 'src/go/kame/**'
-      - 'src/sh/**'
   workflow_dispatch:
 
 permissions:
@@ -30,6 +18,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: src/go/kame/go.mod
+          cache-dependency-path: src/go/kame/go.sum
       - name: Install Solod compiler
         shell: bash
         run: |
@@ -41,7 +30,7 @@ jobs:
         run: make dist-native
       - name: Run host-native CLI
         shell: bash
-        run: "./dist/native/$(python3 src/sh/platform_id.py)/kame --version"
+        run: '"./dist/native/$(python3 src/sh/platform_id.py)/kame" --version'
       - uses: actions/upload-artifact@v4
         with:
           name: native-${{ runner.os }}-${{ runner.arch }}

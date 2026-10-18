@@ -22,6 +22,12 @@ Completed work and historical audit results are not retained here.
 
 ## Remaining repository-review remediation
 
+- [ ] Validate every element of `sorted`/`unique` before comparing: unsupported
+  singleton inputs such as `(sorted [[1]])` and `(unique [[1]])` currently pass.
+  Preserve the scalar-only [library contract](docs/skills/kame/ref/library.md).
+- [ ] Settle the [streaming boundaries](docs/spec/042-kash-streaming.md#12-unresolved-boundaries-and-extensions)
+  for zero-terminal multi-branch capture and whitespace-separated channel stdin.
+  Preserve the existing empty-string result for redirected linear capture.
 - [ ] Run Windows pipeline stream-error and taskkill/grace cleanup conformance
   on a real host. Natural watch invalidation cancellation is covered on Linux.
 - [ ] Validate Windows direct-argv PATH/PATHEXT, cross-drive cwd and resolved-tool

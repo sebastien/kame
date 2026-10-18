@@ -14,14 +14,14 @@ typedef struct {
 static so_R_ptr_err native_cli_deny_alloc(void *self, so_int size, so_int align) {
     native_cli_denied_attempts *attempts = self;
     attempts->allocations++;
-    mem_NoAllocator denied = {0};
+    mem_NoAllocator denied = {};
     return mem_NoAllocator_Alloc(&denied, size, align);
 }
 
 static so_R_ptr_err native_cli_deny_realloc(void *self, void *ptr, so_int old_size, so_int new_size, so_int align) {
     native_cli_denied_attempts *attempts = self;
     attempts->reallocations++;
-    mem_NoAllocator denied = {0};
+    mem_NoAllocator denied = {};
     return mem_NoAllocator_Realloc(&denied, ptr, old_size, new_size, align);
 }
 

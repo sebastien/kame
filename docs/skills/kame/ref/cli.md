@@ -17,10 +17,9 @@ working directory.
 
 File-backed Kame sources can use `(include PATH)` to merge shared definitions and
 rules under the caller's language. Literal relative paths resolve from the
-including source, expanded
-depth-first, and reject active-ancestry cycles. Repeated nonrecursive includes
-expand again; duplicate declarations still fail registration. Inline `-c` /
-`--command` sources cannot load selected includes.
+including source; includes expand depth-first and reject active-ancestry cycles.
+Repeated nonrecursive includes expand again; duplicate declarations still fail
+registration. Inline `-c` / `--command` sources cannot load selected includes.
 
 ## Execute values, rules, and processes
 
@@ -33,8 +32,8 @@ kame do run -c 'name = "Ada"' -c '(out! (uppercase name))'
 ```
 
 Direct source execution is shorthand for `do run`. Execution accepts ordered,
-repeatable file/`-f` and `-c` fragments sharing one scope and engine. Parse all
-fragments before effects. Suffixes infer `km`, `kmk`, or `kash` (`.ksh` aliases
+repeatable file/`-f` and `-c` fragments sharing one scope and engine. All fragments
+are parsed before effects. Suffixes infer `km`, `kmk`, or `kash` (`.ksh` aliases
 `.kash`); inline/stdin defaults to `km`. `--lang km|kmk|kash|expr` overrides
 subsequent fragments until changed, not earlier ones. `expr` accepts exactly
 one expression. Parse/format modes `template`, `rule`, and `script` are not
@@ -54,9 +53,9 @@ Use `do run --lang expr` for expressions and `do run --lang kash` for processes.
 Native and WASM runner
 sessions support `--json` JSON Lines events for values, processes and diagnostics.
 
-`.km` scripts emit only explicit `out!`/`err!` effects by default, including inline
-`-c` scripts and implicit `default` definitions. `--print-result` also displays
-the final script value; `expr` and explicitly selected entries retain canonical
+`.km` scripts emit only explicit output effects (such as `out!`/`err!`) by default,
+including inline `-c` scripts and implicit `default` definitions. `--print-result`
+also displays the final script value; `expr` and explicitly selected entries retain canonical
 result display. This never depends on whether `out!` ran. Migrate implicit-display
 scripts with `(out! VALUE)` for exact data, a named entry, or `--print-result`.
 
@@ -118,20 +117,21 @@ configuration, not `env.NAME=VALUE` child-environment setup or an `(env NAME)`
 read grant. `do render --define` instead supplies template payload fields.
 
 Use `--set 'SDK_MODULES=["py" "js"]'` or `--set FLAG=:false`
-for typed configuration. Accepted data is nil, booleans, finite numbers, plain
-strings/symbols/paths, lists, and records with unique keys, nested below 256
-levels. References, applications, interpolation, pattern values, wildcard paths,
+for typed configuration; `--set=NAME=LITERAL` is also accepted. This configures
+declared values, not task arguments, child environments, or template payloads.
+Accepted data is nil, booleans, finite numbers, plain strings/symbols/paths,
+lists, and records with unique keys, nested below 256 levels. References,
+applications, interpolation, pattern values, wildcard paths,
 captures, and callables are rejected before any work runs. Verbatim strings can
 carry interpolation-looking data literally. This option does not grant effects
-or evaluate arbitrary expressions, and is not a template-render payload option.
+or evaluate arbitrary expressions.
 Repeated `--define`/`--set` options share last-option-wins precedence;
 bare `NAME=VALUE` parameters retain their existing final precedence and string
 semantics. `KAME_<NAME>` remains string configuration. Inspection JSON preserves
 typed values rather than rendering them as strings.
 
-`--set=NAME=LITERAL` is also accepted. This configures declared values, not task
-arguments or child environments. `--define-value` is not a compatibility alias;
-use `--set`. In particular, `--set FLAG=:false` supplies false, whereas
+`--define-value` is not a compatibility alias; use `--set`.
+In particular, `--set FLAG=:false` supplies false, whereas
 `FLAG=:false` supplies the truthy string `:false`. No default-type inference
 occurs. Template-render payloads retain their separate `--define` interface.
 

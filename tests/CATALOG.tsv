@@ -74,6 +74,8 @@ tests/T010-07-wasm-cat.sh	010	wasm	dist/kame.js do cat and primary materializati
 tests/T010-08-wasm-glob.sh	010	wasm	Wildcard host requests match native output byte-for-byte and require a read grant
 tests/T010-09-wasm-parse.sh	010	wasm	dist/kame.js do parse matches native AST JSON for all languages, stdin, and errors
 tests/T009-17-cli-options.sh	009	cli	Native/WASM source options, action placement, help, validation and dry-run effect boundaries
+tests/T009-18-cli-list.sh	009	cli	Read-only declared target listing, typo matching, content/cache status, configuration, color and native/WASM parity
+tests/T009-19-cli-locks.sh	009	cli	Native, Node and launcher lock ownership, location, elapsed waits, terminal presentation, interruption and recovery
 tests/T010-10-wasm-fmt.sh	010	wasm	dist/kame.js do fmt matches native canonical output, check, in-place, stdin, and usage errors
 tests/T010-11-wasm-plan.sh	010	wasm	dist/kame.js do plan JSON matches native for captures, dynamic inputs, and missing targets
 tests/T037-01-cli-build-inspection.sh	037	cli	Recursive resource inventories, shared producers, stages, deferred discovery and native/WASM parity
@@ -99,6 +101,7 @@ tests/T013-01-meta-catalog.sh	013	meta	Catalog and test-name consistency
 tests/T013-02-meta-hygiene.sh	013	meta	Fixtures are never modified and scratch dirs stay in the test path
 tests/T013-03-meta-binary.sh	013	meta	Binary contract, no-op rebuilds, cross-copy determinism
 tests/T013-06-meta-testing.sh	013	meta	Fatal/abort failure logging and termination, result summaries and cleanup, Desktop isolation, Bash harness execution and standalone JSON Lines values
+tests/T013-07-meta-kmk-native.sh	013	meta	Kame native compiler configuration, pinned toolchains, effect-free inspection, incremental platform copies and automatic output ownership
 tests/T014-01-patterns-sections.sh	014	patterns	Placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs
 tests/T015-01-dist-launcher.sh	015	dist	Pinned/latest runtime selection without shell self-update, ESM provisioning, checksums, cache reuse, backend selection, bootstrap delegation, and retired-init migration guidance
 tests/T015-02-dist-launcher-backends.sh	015	dist	Launcher APE probe fallback, forced backends, missing manifest, no-download, concurrency, and cache roots

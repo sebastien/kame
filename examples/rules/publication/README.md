@@ -1,7 +1,7 @@
 # A tiny publication
 
-The syntax below follows the specified contract; the executable rule file and
-installed backend may lag it. Documentation updates do not migrate that file.
+These commands match the executable rule file in this checkout. Use a matching
+CLI build; older installed versions may use earlier syntax.
 
 **Question:** How do we describe a set of results instead of a fixed sequence of
 commands?

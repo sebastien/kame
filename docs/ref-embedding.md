@@ -1,9 +1,8 @@
 # Embedding Kame
 
-Use embedding when a host application needs values, builds, or watch events
-without parsing human CLI output. A **client** owns reusable **programs** compiled
-from source; programs evaluate expressions or build named targets. A **watch**
-keeps a build session alive until explicitly closed.
+Embed Kame to evaluate values, build targets, or consume watch events without
+parsing human CLI output. A **client** owns reusable **programs** compiled from
+source; a **watch** keeps a build session alive until explicitly closed.
 
 JavaScript runs the freestanding WASM engine with Node host services. Python is
 an asynchronous subprocess client for the CLI, not a Python WASM binding.
@@ -43,7 +42,9 @@ try {
 ```
 
 Importing does not dispatch the CLI. `src/js/kame.js` also works with an explicit
-`wasmPath` or `KAME_WASM`; otherwise it needs adjacent `kame.wasm`. No bare-package embedding export is configured.
+`wasmPath` or `KAME_WASM`; otherwise it needs adjacent `kame.wasm`. No bare-package
+embedding export is configured.
+
 `compile(source, { name, language })` defaults to `input.km` and `script` parsing;
 the filename alone does not select a parser. `kame.parse(language, source)` returns
 an AST document, `kame.format(language, source)` formatted text, and `program.ast`
@@ -83,16 +84,20 @@ asyncio.run(main())
 accepts explicit `language`. Program expression evaluation requires `km`.
 Each operation launches a CLI process; compiled sources live in temporary files.
 
-## Results and authority
+## Results
 
 - Pure evaluation returns text, not a native JS/Python value: `42`, `:true`,
   `[value: 1]`, or a quoted Kame string. Byte results can be raw UTF-8 text.
   Python returns captured stdout with trailing newlines removed, so `out!` output
   is mixed with the displayed result; stderr is not part of that value.
-- Both builds return `{ results, events }` in target/event order; `targets` accepts one string or multiple names.
+- Both build APIs return `{ results, events }` in target/event order; `targets`
+  accepts one string or multiple names.
   For `answer = 42`, JS has `results: [{ target: 'answer', kind: 1, value: '42' }]`;
   Python has `results: [{'target': 'answer', 'value': {'kind': 'int', 'data': 42}}]`.
   Python uses `None` when no matching value event exists. Events are JSON records.
+
+## Authority
+
 - JS grants are arrays, e.g. `[{ capability: 'read', names: ['./data'] }]`.
   Capabilities are `read`, `write`, `run`, `env`; omitted grants deny all four.
   An included grant with `names: []` (or omitted `names`) is **unrestricted** for
@@ -128,22 +133,26 @@ Return exactly one completion: `{ type: 'bytes', value: Uint8Array }`,
 `{ type: 'nil' }`, or `{ type: 'failure', code: string, message: string }`.
 The expected completion depends on request kind; see the [WASM ABI](spec/010-wasm.md).
 Denied requests do not reach the callback. Throws reject the request; late results
-after cancellation are ignored, and an unresolved callback does not block disposal.
+after cancellation are ignored. Without an active finalizer, cancellation can
+abandon an unresolved callback. With an armed `finally!`, cleanup and disposal wait
+for callback settlement so cleanup cannot race ongoing host work. Callbacks must
+observe `request.signal`, stop their work, and settle on cancellation.
 Python has no host-request callback API.
 
-## Cancellation, watches, and cleanup
+## Lifecycle
 
-Kash `defer` actions run as part of invocation completion/finalization, retaining
-the original grants. Cancellation reaps user processes before executing cleanup;
-it is not remote rollback or a guarantee under SIGKILL/crash. See the
-[operational cookbook](kash-cookbook.md). Low-level WASM embedders must call
-the shared `kame_wasm_finalization_tick` driver and pump ordinary step/completion
-requests before freeing an interrupted instance (`kame_wasm_finalize_begin` is
-also available to Kash-only hosts). Freeing memory alone cannot execute cleanup.
+### Cancellation and disposal
 
 - JS operations accept `signal: controller.signal`; `controller.abort()` cancels
   work (`EXEC_CANCELLED`). Await `program.dispose()` or `kame.dispose()` in
   `finally`; both are idempotent and await owned cleanup. Later calls fail `DISPOSED`.
+- Cancel Python request tasks with `task.cancel()` and await them; cancellation
+  terminates/reaps owned processes (process groups on POSIX). `await program.close()`
+  also removes temporary source files; `async with Kame(...)` closes all owned work.
+  Failures raise `KameError` with `returncode`/`stderr`; JS errors expose `code`.
+
+### Watches
+
 - JS `await program.watch(targets, options)` yields `{ snapshot, events }` batches.
   `watch.snapshot()` copies current state; after detecting changes, pass resource
   records from `snapshot.resources` to `watch.invalidate(resources)`. Keep consuming
@@ -152,7 +161,15 @@ also available to Kash-only hosts). Freeing memory alone cannot execute cleanup.
 - Python watches require `kmk` and yield individual CLI JSON events, not snapshots;
   filesystem watching is performed by the CLI. There is no `invalidate` method.
   Always `await watch.close()` in `finally`; a loop break alone does not close it.
-- Cancel Python request tasks with `task.cancel()` and await them; cancellation
-  terminates/reaps owned processes (process groups on POSIX). `await program.close()`
-  also removes temporary source files; `async with Kame(...)` closes all owned work.
-  Failures raise `KameError` with `returncode`/`stderr`; JS errors expose `code`.
+
+### Finalization
+
+Kash `defer` actions run during invocation completion/finalization with the
+original grants. Cancellation reaps user processes before cleanup; this is not
+remote rollback or a guarantee under SIGKILL/crash. See the
+[operational cookbook](kash-cookbook.md).
+
+Low-level WASM embedders must call the shared `kame_wasm_finalization_tick`
+driver and pump ordinary step/completion requests before freeing an interrupted
+instance (`kame_wasm_finalize_begin` is also available to Kash-only hosts).
+Freeing memory alone cannot execute cleanup.

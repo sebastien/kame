@@ -1,8 +1,8 @@
 # SDK migration boundaries
 
-The SDK review distinguishes existing language semantics from workflow policy.
-These decisions cover K24–K27 in the SDK proposal ledger; they do not promise
-complete SDK parity or authorize unrelated workflow implementations.
+Use these boundaries when migrating SDK workflows: preserve Kame's value and
+process semantics, and keep vendor-specific policy in the SDK. Language support
+does not imply complete SDK workflow coverage.
 
 ## Truth is not emptiness (K24)
 
@@ -55,15 +55,13 @@ promises a CRLF terminator, rather than guessing whether CR belongs to the data.
 For example, a path containing a terminal LF must retain that LF after removing
 the additional LF printed by a line-oriented path tool.
 
-**Helper assessment:** no new native trim/chomp operation is required. Existing
-`ends?`/`slice` express the one-terminator contract without recursion or changing
-capture semantics. A future trailing-newline-only helper would need an explicit
-one-versus-all and LF-versus-CRLF contract, including whitespace and newline-only
-tests. It must remain opt-in; never implement it as automatic capture trimming.
+`ends?`/`slice` express this contract without a native trim/chomp operation. Any
+future helper must specify one versus all terminators and LF versus CRLF, with
+whitespace and newline-only tests. Trimming must remain opt-in.
 
 ## Failure cleanup is an ownership question (K26)
 
-Concrete SDK cases, based on `src/km/sdk` in `sdk.km`:
+SDK cases from `sdk.km/src/km/sdk`:
 
 | Case | Existing behavior / real need | Boundary |
 | --- | --- | --- |
@@ -74,31 +72,27 @@ Concrete SDK cases, based on `src/km/sdk` in `sdk.km`:
 | Release/deployment (`release.kmk`) | A tag may exist locally after push failure; deployment can fail after remote changes. | Preserve the failure and support explicit retry/reconciliation. Do not automatically delete tags or undo remote work. |
 | Terraform (`tf.kmk`) | A failed provider operation may leave useful state, logs, and partial remote changes. | Preserve state and diagnostics; let the vendor tool govern recovery. Workspace synchronization/deletion is separate, explicit SDK policy. |
 
-The runtime already cancels/reaps owned process graphs and services. That is not
-a promise to remove files written by external programs or reverse earlier effects.
-Kash `if` and command fallback can handle recoverable process failures, but do not
-run a cleanup arm on capability denial or cancellation. A separate `clean` target
-is not an automatically invoked finalizer. Native `write!`/`yield!` publication
-does not make a whole multi-output recipe or external command transactional.
+The runtime cancels/reaps owned process graphs and services; it does not remove
+external programs' files or reverse earlier effects. Choose the right cleanup scope:
 
-**Kame support:** [scoped finalization](spec/043-kame-finalization.md) provides
-`finally!` over body and cleanup callables in execution contexts, including
-bounded cancellation, async ownership and primary-error preservation. This is
-native/WASM expression-driver support, not evidence of SDK workflow coverage.
-It does not acquire resources safely on its own, prove deletion ownership,
-bracket deferred shell recipes or make publication transactional. Temporary
-resource APIs and remote rollback remain separate questions.
-Test failed publication and interruption, not only a nonzero tool exit. Do not
-add persistent mutable Bash sessions, sourcing or traps merely to transliterate
-shell libraries. An explicit external-shell recipe remains an authored boundary.
+- [`finally!`](spec/043-kame-finalization.md) scopes body and cleanup callables in
+  native/WASM execution contexts, with bounded cancellation, async ownership and
+  primary-error preservation. It does not bracket deferred shell recipes.
+- Kash [`defer COMMAND` / `defer (EXPRESSION)`](skills/kame/ref/kash.md#deferred-cleanup)
+  registers invocation-scoped actions. They run LIFO after user work joins, or
+  after cancellation/reaping on failure, preserving primary errors and grants.
+- Kash `if` and command fallback handle recoverable failures, not cleanup on
+  capability denial or cancellation. A separate `clean` target is not a finalizer.
 
-**Kash support:** invocation-scoped `defer COMMAND` and `defer (EXPRESSION)`
-provide explicit authored cleanup. Actions run LIFO after joining user work, or
-after cancellation/reaping on failure, preserving primary errors and capability
-boundaries. See [Kash](skills/kame/ref/kash.md#deferred-cleanup). This does not add
-ownership-enforcing temporary-resource APIs, safe deletion of arbitrary paths or
-transactional redirection. Fresh private workspaces remain an author responsibility;
-atomic publication of externally generated artifacts is separate follow-up work.
+Neither finalizer safely acquires resources on its own, proves deletion ownership,
+or makes redirection/publication transactional. Fresh private workspaces remain
+the author's responsibility; temporary-resource APIs, atomic publication of
+external artifacts, and remote rollback are separate contracts. Native
+`write!`/`yield!` publication is not a transaction for a multi-output recipe.
+
+Test failed publication and interruption, not only nonzero tool exits. Do not add
+persistent mutable Bash sessions, sourcing or traps merely to transliterate shell
+libraries. An explicit external-shell recipe remains an authored boundary.
 
 ## Vendor tools and SDK workflows stay outside the language (K27)
 
@@ -128,4 +122,3 @@ Escalate only a minimal language-capability reproduction: typed argument loss,
 missing scoped environment support, tracked input/output ownership, unsafe
 publication, or a concrete cancellation-cleanup requirement. Keep that request
 separate from the vendor-specific implementation and its live integration tests.
-Documenting these boundaries completes the scope assessment, not those workflows.

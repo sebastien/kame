@@ -97,6 +97,56 @@ function test_set_verbosity {
 }
 test_set_verbosity "$KAME_TEST_VERBOSITY" || test_set_verbosity compact
 
+# Persistent per-test durations used by harness.sh for a rough ETA.
+TEST_RUNTIME_CACHE_DIR="${TEST_RUNTIME_CACHE_DIR:-$BASE_PATH/build/tests/runtime-cache}"
+
+function test_runtime_cache_record {
+	local file
+	[[ "${2:-}" =~ ^[0-9]+$ ]] || return 1
+	mkdir -p "$TEST_RUNTIME_CACHE_DIR" || return 1
+	file="$TEST_RUNTIME_CACHE_DIR/${1##*/}.seconds"
+	printf '%s\n' "$2" >"$file"
+}
+
+function test_runtime_format_seconds {
+	local seconds="$1"
+	if [ "$seconds" -ge 3600 ]; then
+		printf '%dh%02dm' "$((seconds / 3600))" "$(((seconds % 3600) / 60))"
+	elif [ "$seconds" -ge 60 ]; then
+		printf '%dm%02ds' "$((seconds / 60))" "$((seconds % 60))"
+	else
+		printf '%ds' "$seconds"
+	fi
+}
+
+function test_runtime_eta {
+	local total=$# cached=0 missing=0 samples=0 sum=0 estimate=0 sample seconds average file
+	[ "$total" -gt 0 ] || { printf 'done'; return; }
+	for sample in "$TEST_RUNTIME_CACHE_DIR"/*.seconds; do
+		[ -f "$sample" ] || continue
+		if IFS= read -r seconds <"$sample" && [[ "$seconds" =~ ^[0-9]+$ ]]; then
+			sum=$((sum + seconds))
+			samples=$((samples + 1))
+		fi
+	done
+	for sample in "$@"; do
+		file="$TEST_RUNTIME_CACHE_DIR/${sample##*/}.seconds"
+		if [ -r "$file" ] && IFS= read -r seconds <"$file" && [[ "$seconds" =~ ^[0-9]+$ ]]; then
+			estimate=$((estimate + (seconds > 0 ? seconds : 1)))
+			cached=$((cached + 1))
+		else
+			missing=$((missing + 1))
+		fi
+	done
+	if [ "$missing" -gt 0 ]; then
+		[ "$samples" -gt 0 ] || { printf 'unknown'; return; }
+		average=$(((sum + samples - 1) / samples))
+		[ "$average" -gt 0 ] || average=1
+		estimate=$((estimate + missing * average))
+	fi
+	printf '~%s (%d/%d cached)' "$(test_runtime_format_seconds "$estimate")" "$cached" "$total"
+}
+
 # --
 # ## Color library
 if [ -z "${NOCOLOR:-}" ] && [ -n "${TERM:-}" ] && tput setaf 1 &>/dev/null; then

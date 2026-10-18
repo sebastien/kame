@@ -3,7 +3,9 @@
 ## Contract
 
 The source build provisions Cosmocc 4.0.2 from the versioned archive
-`https://cosmo.zip/pub/cosmocc/cosmocc-4.0.2.zip`. The archive SHA-256 is
+`https://github.com/jart/cosmopolitan/releases/download/4.0.2/cosmocc-4.0.2.zip`.
+Using the official GitHub release avoids a separate download-host dependency in
+GitHub Actions. The archive SHA-256 is
 `85b8c37a406d862e656ad4ec14be9f6ce474c1b436b9615e91a55208aced3f44`.
 The value is pinned from the published `cosmo-build` 3.0.0 toolchain source and
 must be checked before extraction. `COSMOCC_URL` may select a mirror of the

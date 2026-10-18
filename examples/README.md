@@ -3,11 +3,10 @@
 **Describe values. Describe dependencies. Describe processes. Then discover
 the computation they describe together.**
 
-Documentation snippets and executable examples use `@{ref}` / `@(call)`.
-Use an executable built from matching sources; older installed builds may use
-earlier syntax. See [the migration note](../MIGRATION.md) for downstream updates.
+Use a CLI built from matching sources; see [the migration note](../MIGRATION.md)
+for older syntax.
 
-## Three independent entrances, one shared reveal
+## Three entry points, one shared engine
 
 | Lesson | Question | Source | Status |
 | --- | --- | --- | --- |
@@ -15,7 +14,7 @@ earlier syntax. See [the migration note](../MIGRATION.md) for downstream updates
 | [Rules](rules/README.md) | What must exist, and what does it depend on? | `.kmk` | Runnable |
 | [Kash](shell/README.md) | How should processes cooperate? | `.kash` | Standalone sources runnable |
 | [Composition](composition/publication/README.md) | How do the descriptions fit together? | All three | Values, rules, and subprocess orchestration runnable |
-| [Reactivity](reactive/README.md) | How does a requested computation stay current? | Persistent engine | Engine demo runnable; live publication runner future work |
+| [Reactivity](reactive/README.md) | How does a requested computation stay current? | Persistent engine | Engine demo and CLI `--watch` runnable |
 
 Follow the rows in order for the guided path, or enter through whichever layer
 you need. Each standalone lesson has its own inputs. The common project is a

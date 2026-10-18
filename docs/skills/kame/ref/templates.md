@@ -15,9 +15,8 @@ arguments, and `@(count files)` calls with an argument. There is no extra wrappe
 implicit callable invocation or fallback from a noncallable call to a lookup.
 Use `@(nop VALUE)` for another atom, such as a literal list. Lists render with
 one space between items; nil renders empty. Records need explicit JSON encoding
-(`json`); bytes need
-explicit UTF-8 conversion (`text`) rather than direct interpolation. `str` is
-scalar-only and does not serialize records.
+(`json`); bytes need explicit UTF-8 conversion (`text`) rather than direct
+interpolation. `str` is scalar-only and does not serialize records.
 
 | Rule selector | Meaning |
 | --- | --- |
@@ -122,22 +121,29 @@ CARD = """
 <h1>@{title}</h1>
 """
 
+default = (render [title: "Hello"] "html" CARD)
+```
+
+Run this value script with `--print-result` or select its `default` entry to
+display the rendered card. The literal's content is untouched until `render`;
+a longer quote delimiter allows triple quotes in its content. `template-cat` is
+the document-rendering lowering primitive (nil is empty and lists join with
+spaces); `text` converts valid UTF-8 bytes to a string.
+
+To render a file-backed template into a declared build output, use `yield!`:
+
+```kame
 default : ./build/page.html
 
 ./build/page.html : ./page.html
 	@(yield! (render [title: "Hello"] ./page.html))
 ```
 
-The literal's content is untouched until `render`; a longer quote delimiter
-allows triple quotes in its content. `template-cat` is the document-rendering
-lowering primitive (nil is empty and lists join with spaces);
-`text` converts valid UTF-8 bytes to a string.
-
 ## Recipes and verification
 
-External-shell recipes are `plain` document templates rendering to one shell script. You can
-use `@if`/`@for` directives there; selected non-directive lines remain shell
-text, with recipe-local state persisting between lines.
+External-shell recipes are `plain` document templates rendered as one shell
+script. You can use `@if`/`@for` directives there; selected non-directive lines
+remain shell text, with recipe-local state persisting between lines.
 
 Direct Kash recipes (`SHELL = kash` or `[shell: kash]`) are parsed as Kash,
 not expanded as document templates; see [Kash](./kash.md).

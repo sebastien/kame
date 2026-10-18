@@ -27,13 +27,22 @@ else
 fi
 
 test-step "second build invocation skips generated version source"
-cli_run --dir "$CLI_ROOT" --env "HOME=$HOME" --env TMPDIR=/tmp -- --force --json ./src/go/kame/cmd/kame/version_generated.go
+self_project="$TMPDIR/self-build"
+mkdir -p "$self_project/src/sh" "$self_project/src/go/kame/cmd/kame"
+cp "$CLI_ROOT/VERSION" "$self_project/VERSION"
+cp -p "$CLI_ROOT/src/sh/generate-version.sh" "$self_project/src/sh/generate-version.sh"
+cp "$CLI_ROOT/src/go/kame/cmd/kame/version_generated.go" "$self_project/src/go/kame/cmd/kame/version_generated.go"
+cat >"$self_project/Makefile.kmk" <<'KMK'
+./src/go/kame/cmd/kame/version_generated.go : ./VERSION ./src/sh/generate-version.sh
+	./src/sh/generate-version.sh
+KMK
+cli_run --dir "$self_project" --env "HOME=$HOME" --env TMPDIR=/tmp -- --force --json ./src/go/kame/cmd/kame/version_generated.go
 cli_expect_status 0
 if ! grep -q '"type":"process-started"' "$CLI_OUT"; then
 	test-fail "forced version generation did not run: $(cat "$CLI_OUT")"
 fi
 
-cli_run --dir "$CLI_ROOT" --env "HOME=$HOME" --env TMPDIR=/tmp -- --json ./src/go/kame/cmd/kame/version_generated.go
+cli_run --dir "$self_project" --env "HOME=$HOME" --env TMPDIR=/tmp -- --json ./src/go/kame/cmd/kame/version_generated.go
 cli_expect_status 0
 if grep -q '"type":"process-started"' "$CLI_OUT"; then
 	test-fail "fresh version source ran again: $(cat "$CLI_OUT")"
@@ -42,10 +51,15 @@ else
 fi
 
 test-step "self-build source prerequisites are declared"
-if grep -Fq '(wildcard ./src/go/kame/**/*.go)' "$CLI_ROOT/Makefile.kmk" && grep -Fq './src/go/kame/cmd/kame/version_generated.go :' "$CLI_ROOT/Makefile.kmk"; then
-	test-ok "build rules declare Go sources and generated version input"
-else
-	test-fail "build rules are missing source or generated version inputs"
-fi
+cli_run --dir "$CLI_ROOT" -- do inputs --json ./build/kame.debug
+cli_expect_status 0
+cli_expect_json_query "$CLI_OUT" '[.resources[] | select(.key.kind == "file") | .display] | contains([
+  "./src/go/kame/cmd/kame/main.go",
+  "./src/go/kame/host/posix/posix.c",
+  "./src/go/kame/host/posix/posix.h",
+  "./src/go/kame/cmd/kame/version_generated.go",
+  "./VERSION",
+  "./src/sh/generate-version.sh"
+])' true
 
 test-end

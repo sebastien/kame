@@ -69,7 +69,7 @@ for backend in native wasm; do
   status=0
   "${runner[@]}" -C "$shorthand" env.HOST=local unknown=value >"$project/value" 2>"$project/error" || status=$?
   if [ "$status" = 1 ] && [ ! -s "$project/value" ]; then test-ok "$backend unknown parameter before default effects"; else test-fail "$backend unknown parameter"; fi
-  "${runner[@]}" -f "$shorthand/Makefile.kmk" env.HOST=session port=8004 >"$project/value" 2>"$project/error"
+  "${runner[@]}" -C "$shorthand" -f "$shorthand/Makefile.kmk" env.HOST=session port=8004 >"$project/value" 2>"$project/error"
   if [ "$(cat "$project/value")" = 'session:8004' ]; then test-ok "$backend explicit source parameter shorthand"; else test-fail "$backend explicit source shorthand"; fi
   "${runner[@]}" do run --print-result -c 'port = "authored"' -c 'port' port=literal.km >"$project/value" 2>"$project/error"
   if [ "$(cat "$project/value")" = '"literal.km"' ]; then test-ok "$backend value-source literal parameter preserves statement execution"; else test-fail "$backend value-source parameter"; fi

@@ -9,8 +9,9 @@ Scripts compose existing parsers rather than inventing another value language.
 | `script` | General composite parse/format grammar; not a `do run` language name. |
 
 Whole-line `#` and `//` comments are accepted. Balanced expressions may span
-lines. Indentation without a preceding rule is invalid. Rule programs execute
-selected targets, not top-level expressions as an alternate entry mechanism.
+lines. In `kmk`/`script`, indentation without a preceding rule is invalid; `km`
+accepts leading statement indentation. Rule programs execute selected targets,
+not top-level expressions as an alternate entry mechanism.
 
 ## Definitions are lazy
 
@@ -40,7 +41,9 @@ such as `./file` remain valid atoms. Quoted values now use expression-string
 escapes/interpolation and pattern syntax; use verbatim strings for inert data.
 `SHELL = kash` remains the
 built-in constructor reference; use `SHELL = "bash"` or
-`SHELL = ["/bin/bash" "-eu"]` for external shells. CLI overrides remain literal.
+`SHELL = ["/bin/bash" "-euc"]` for external shells. An argv list must include the
+interpreter's command-text flag (`-c` here); a string shell adds it automatically.
+CLI overrides remain literal.
 
 ## Declarative contributions
 
@@ -74,10 +77,10 @@ kame do run --print-result -c 'name = "Ada"' -c '(uppercase name)'
 ```
 
 Without named entries, `.km` runs expression statements in source order but
-emits only explicit `out!`/`err!` effects. `--print-result` opts into final value
-display, independent of whether an output operation ran. `expr` retains result
-display. Entries display only named definitions, skipping
-unrelated statements; selecting a function value does not implicitly call it.
+emits only explicit output effects, such as `out!`/`err!`. `--print-result` opts
+into final value display, independent of whether an output operation ran. `expr`
+retains result display. Named entries display the selected definitions and skip unrelated
+statements; selecting a function value does not implicitly call it.
 A definitions-only value session falls back to the combined `default` when
 there is no other executable work; without it, it reports `TGT_NO_DEFAULT`.
 A definitions-only fragment may simply supply bindings for a later fragment.
@@ -98,13 +101,13 @@ Each operand is a literal explicit path atom or noninterpolated double-quoted
 string (escapes are decoded). Empty paths, NUL, globs/patterns, interpolation and
 computed operands are invalid. Paths resolve relative to the containing file,
 not evaluation cwd. Included text inherits the caller's outer language, not its
-filename suffix. Includes
-expand depth-first at their declaration position and share scope/source order.
+filename suffix. Includes expand depth-first at their declaration position and
+share scope and source order.
 Active-ancestry cycles are errors (lexical path identity, not physical realpath).
-Repeated nonrecursive includes expand again;
-ordinary registration still rejects duplicate declarations. Inline `-c` sources
-have no include base and cannot include files. Value programs cannot introduce rules through
-includes; Kash inclusion is not provided by this directive.
+Repeated nonrecursive includes expand again; ordinary registration still rejects
+duplicate declarations. Inline `-c` sources have no include base and cannot
+include files. Value programs cannot introduce rules through includes; this
+directive does not provide Kash inclusion.
 
 `(include? PATH)` skips only a missing file, not other loading errors. Only
 selected includes are loaded, tracked or cycle-checked; selected missing optional

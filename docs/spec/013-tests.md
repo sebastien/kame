@@ -99,6 +99,10 @@ human stdout/stderr, never the append-only result log or exit codes.
   and prints one line per file (`EOK`/`EFAIL`, elapsed, path). On failure it
   replays the captured log, so a red test remains fully debuggable while a
   passing suite stays small. In `verbose`, it streams suite output instead.
+- The harness persists each test's last whole-second runtime under
+  `build/tests/runtime-cache/`, outside the cleared log directory. It estimates
+  the initial and remaining time from cached durations, using their mean for
+  tests without samples; the estimate is marked unknown until a sample exists.
 - Incidental helper traces (`test_log_message`, expected-failure command echo,
   CLI build output) are verbose-only; the CLI build log is retained and shown
   if the build fails.

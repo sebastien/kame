@@ -3,12 +3,11 @@
 **Question:** Can commands feel like shell while using the same values and
 functions as a Kame value program?
 
-These `.kash` sources follow [the Kash specification](../../docs/spec/017-kash.md).
-The CLI accepts standalone Kash through `do run`. Run the three lessons with
-Kame; do not execute them with Bash. T013-04 runs them from isolated copies.
-No build file or publication project is required.
+Run these four `.kash` lessons with Kame, not Bash. No build file or publication
+project is required. `T013-04` tests the first three from isolated copies;
+`T017-23` covers the fourth.
 
-The invocation for these lessons is:
+From this directory, with `kame` on PATH:
 
 ```sh
 kame do run ./01-values.kash
@@ -17,8 +16,8 @@ kame do run ./03-recovery.kash
 kame do run ./04-operations.kash
 ```
 
-`04-operations.kash` adds explicit status validation, finite retry and a temporary
-workspace with invocation-scoped `defer`. It is covered by `T017-23`; see the
+`04-operations.kash` adds status validation, finite retry and a temporary
+workspace with invocation-scoped `defer`; see the
 [operational cookbook](../../docs/kash-cookbook.md) for its contracts and limits.
 
 ## 1. Commands receive values
@@ -36,16 +35,16 @@ uppercase names. There is no shell word splitting, implicit globbing, or
 reparsing of values as commands. `"$names"` would be an error: a quoted word
 cannot splice a list.
 
-**Try now:** Embedded command capture is available in the current CLI:
+**Try now:** Capture commands inside a value expression:
 
 ```sh
 kame do run --lang expr --allow-run -c '(let [names ["hello world.txt" "second.txt"]] $(printf "[%s]\n" $names))'
 kame do run --lang expr --allow-run -c '(uppercase (strip $(printf "hello\n")))'
 ```
 
-These exercise the actual expression/process boundary without pretending to run
-a standalone `.kash` source. The first prints the two bracketed names; the
-second prints `HELLO`. Omitting `--allow-run` denies process execution.
+These expressions return captured strings, displayed with quotes and escaped
+newlines. The second returns `"HELLO"`. Omitting `--allow-run` denies process
+execution.
 
 **Change:** Put `a; echo surprise` in the names list. It should remain one
 literal argument, not execute another command.

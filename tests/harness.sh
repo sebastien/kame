@@ -38,10 +38,18 @@ while [ $# -gt 0 ]; do
 done
 
 if [ $# == 0 ]; then
-	FILES=$(find "$BASE" -name "*.*")
+	mapfile -t FILES < <(find "$BASE" -name "*.*")
 else
-	FILES=$*
+	FILES=("$@")
 fi
+
+TESTS=()
+for TEST in "${FILES[@]}"; do
+	case "$TEST" in
+		*/lib-*.sh | */harness.sh | */data/*) ;;
+		*/*.sh) TESTS+=("$TEST") ;;
+	esac
+done
 
 # Per-test output is captured here and shown only for failures (or streamed
 # live in verbose mode).
@@ -50,44 +58,45 @@ mkdir -p "$LOG_DIR"
 find "$LOG_DIR" -mindepth 1 -delete 2>/dev/null || true
 
 test-start
+test_log "${DIM}ETA: $(test_runtime_eta "${TESTS[@]}")${RESET}"
 
-for TEST in $FILES; do
-	case "$TEST" in
-	*/lib-*.sh) ;;
-	*/harness.sh) ;;
-	*/data/*) ;;
-	*/*.sh)
-		export TEST_COUNT
-		rel="$(test-repo-path "$TEST")"
-		log="$LOG_DIR/$rel.log"
-		mkdir -p "$(dirname "$log")"
-		started=$SECONDS
-		status=0
-		if [ "$TEST_VERBOSE" = 1 ]; then
-			if [ "$TEST_COUNT" -gt 1 ]; then
-				test_log_separator
-			fi
-			test-run "${DIM}»${PURPLE}" "$TEST" || status=$?
-		else
-			env -C "$ORIGINAL_PATH" bash "$TEST" >"$log" 2>&1 || status=$?
+for ((index = 0; index < ${#TESTS[@]}; index++)); do
+	TEST="${TESTS[$index]}"
+	export TEST_COUNT
+	rel="$(test-repo-path "$TEST")"
+	log="$LOG_DIR/$rel.log"
+	mkdir -p "$(dirname "$log")"
+	started=$SECONDS
+	status=0
+	if [ "$TEST_VERBOSE" = 1 ]; then
+		if [ "$TEST_COUNT" -gt 1 ]; then
+			test_log_separator
 		fi
-		elapsed=$((SECONDS - started))
-		if [ "$status" -eq 0 ]; then
-			[ "$TEST_VERBOSE" = 1 ] || test_log "${GREEN}EOK  ${RESET}${GREEN}${elapsed}s${RESET}  ${YELLOW}${rel}"
-			test-ok
-		else
-			test_log "${RED}EFAIL ${RESET}${RED}${elapsed}s${RESET}  ${YELLOW}${rel}"
-			if [ "$TEST_VERBOSE" != 1 ] && [ -s "$log" ]; then
-				test_log "${DIM}----- $rel -----${RESET}"
-				while IFS= read -r line; do
-					test_log "$line"
-				done <"$log"
-				test_log "${DIM}----- end $rel -----${RESET}"
-			fi
-			test-fail "Unit test failed: $rel"
+		test-run "${DIM}»${PURPLE}" "$TEST" || status=$?
+	else
+		env -C "$ORIGINAL_PATH" bash "$TEST" >"$log" 2>&1 || status=$?
+	fi
+	elapsed=$((SECONDS - started))
+	test_runtime_cache_record "$rel" "$elapsed" || true
+	remaining=("${TESTS[@]:$((index + 1))}")
+	eta="$(test_runtime_eta "${remaining[@]}")"
+	if [ "$status" -eq 0 ]; then
+		[ "$TEST_VERBOSE" = 1 ] || test_log "${GREEN}EOK  ${RESET}${GREEN}${elapsed}s${RESET}  ${YELLOW}${rel}  ${DIM}ETA $eta${RESET}"
+		test-ok
+	else
+		test_log "${RED}EFAIL ${RESET}${RED}${elapsed}s${RESET}  ${YELLOW}${rel}  ${DIM}ETA $eta${RESET}"
+		if [ "$TEST_VERBOSE" != 1 ] && [ -s "$log" ]; then
+			test_log "${DIM}----- $rel -----${RESET}"
+			while IFS= read -r line; do
+				test_log "$line"
+			done <"$log"
+			test_log "${DIM}----- end $rel -----${RESET}"
 		fi
-		;;
-	esac
+		test-fail "Unit test failed: $rel"
+	fi
+	if [ "$TEST_VERBOSE" = 1 ]; then
+		test_log "${DIM}ETA after $rel: $eta${RESET}"
+	fi
 done
 
 [ "$TEST_VERBOSE" = 1 ] || test_log_separator

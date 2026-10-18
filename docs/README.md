@@ -1,9 +1,7 @@
 # Kame documentation
 
-References, executable examples and fixtures use `@{ref}` / `@(call)`, `--set`,
-mixed Kash expression words and pipe-preserving formatting. Older installed
-builds may use earlier syntax; follow [the migration note](../MIGRATION.md) and
-use an executable built from the matching sources.
+Use these references and examples with a CLI built from matching sources.
+For older syntax, follow [the migration note](../MIGRATION.md).
 
 ## Start here
 
@@ -32,10 +30,10 @@ use an executable built from the matching sources.
 
 ## Normative specifications
 
-The [specification index](spec/README.md) covers the language, engine, host
-boundaries, interfaces and acceptance requirements. Specs define intended
-behavior; references teach it. When they disagree, the applicable specification
-governs. A specification is not an implementation-status report.
+The [specification index](spec/README.md) covers language, engine, host boundaries,
+interfaces and acceptance requirements. Specs define intended behavior, not
+implementation status; references explain usage. The applicable spec governs
+when they disagree.
 
 ## Workflow scope assessments
 
@@ -47,7 +45,5 @@ tutorials or promises of new native operations.
 
 ## Remaining work
 
-[TODO.md](../TODO.md) is the single consolidated backlog. Completed planning and
-historical audit records are discarded rather than maintained as parallel ledgers.
-[tests/CATALOG.tsv](../tests/CATALOG.tsv) is the CLI suite inventory, not proof
-that every specification is implemented or that every test passes.
+[TODO.md](../TODO.md) is the single backlog; [tests/CATALOG.tsv](../tests/CATALOG.tsv)
+is the CLI suite inventory, not a conformance or pass report.

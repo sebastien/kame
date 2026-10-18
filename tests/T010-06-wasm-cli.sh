@@ -203,7 +203,7 @@ cat >"$work/Shell.kmk" <<'EOF'
 task shell-choice :
 	echo should-not-run
 EOF
-run --shell "$work/missing-shell" --shell -c -f "$work/Shell.kmk" shell-choice
+run -C "$work" --shell "$work/missing-shell" --shell -c -f "$work/Shell.kmk" shell-choice
 if [ "$status" = 1 ] && grep -q 'spawn .*missing-shell.*ENOENT' "$work/err"; then
 	test-ok "recipe execution uses the selected shell"
 else

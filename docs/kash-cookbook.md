@@ -1,11 +1,10 @@
 # Operational Kash cookbook
 
-Use a build from this checkout, not merely a binary with the same version label.
-Run `make build/kame.debug dist-wasm`, then use `build/kame.debug` or
-`node dist/kame.js` in place of `kame`. Pipeline/routing syntax and atomic
-publication of externally generated artifacts are separate work.
+For this checkout, run `make build/kame.debug dist-wasm`, then use
+`build/kame.debug` or `node dist/kame.js` in place of `kame`.
+See the [Kash reference](skills/kame/ref/kash.md) for syntax and process topology.
 
-The harmless, complete example is
+A complete, harmless example is
 [`examples/shell/04-operations.kash`](../examples/shell/04-operations.kash).
 Run it from a disposable writable directory. It creates a private workspace and
 removes it with `defer`; no credentials, installation or network are involved.
@@ -18,8 +17,8 @@ command = (concat prefix ["printf" "<%s>" "two words" ""])
 $...command tail
 ```
 
-Compose an optional empty prefix with the actual executable first: the final
-command list must not be empty. A prefix may contain a wrapper and its arguments.
+The optional prefix may be empty or contain a wrapper and its arguments; the
+final list must start with an executable.
 Spreading preserves empty arguments, quotes, newlines and spaces, rejects nested
 lists and never interprets argument bytes as source. CLI callers can supply
 closed list data with `--set`, not joined shell strings.
@@ -54,9 +53,8 @@ operator or finalizer. Cancellation/capability denial cannot be swallowed.
 Command conditions test exit status; expression conditions use Kame truth.
 Only nil and false are false; zero and empty strings/lists are true.
 
-Strict pipelines still count every stage, including SIGPIPE. Do not infer success
-from the final stage or weaken checks to hide a failed downloader. Future
-early-close policy and routing syntax are separate from these changes.
+Pipelines count every stage's failure, including SIGPIPE. Do not infer success
+from the final stage or weaken checks to hide a failed downloader.
 
 ## Finite work and bounded retry
 
@@ -111,10 +109,10 @@ within a separate five-second stack budget; tighter process timeouts still apply
 SIGKILL/crash/forced shutdown can prevent cleanup. Blocking custom hosts are not
 preempted by a process timeout. Finalization retains the original grants.
 
-This attempts authored cleanup; it is not ownership enforcement. It does not make
-`tool > ./final` atomic, restore a truncated file, or reverse remote changes.
-Generate into staging and publish explicitly after success. Atomic publication
-of external artifacts is follow-up work; `do clean` is not a finalizer.
+Cleanup does not enforce ownership, make `tool > ./final` atomic, restore a
+truncated file, or reverse remote changes. Generate into staging and publish
+explicitly after success; `defer` provides no atomic-publication contract for
+external artifacts. `do clean` is not a finalizer.
 
 ## Environments, captures and tool lookup
 
@@ -165,7 +163,7 @@ reads; arbitrary filename arguments do not automatically declare dependencies.
 `write!`/`yield!` retain their phase/publication contracts, not a promise of a
 transactional multi-output external recipe.
 
-## Evidence and debugging boundaries
+## Checks and debugging
 
 Linux native and WASM/Node checks include:
 
@@ -178,8 +176,8 @@ Linux native and WASM/Node checks include:
 | Background joins and failures | `T017-18-kash-async.sh` |
 | Streaming and slow-consumer pressure | `T017-03-eval-pipelines.sh`, `T012-04-streams-backpressure.sh` |
 
-Parser success is not runtime evidence. These tests do not newly certify other
-platforms: Windows job-assignment and non-Linux APE descendant-retirement
+Parser success is not runtime evidence, and these checks do not certify other
+platforms. Windows job-assignment and non-Linux APE descendant-retirement
 limitations remain explicit in the native host source.
 
 For nonsecret debugging, print typed argv using `json` and retain the authored cwd

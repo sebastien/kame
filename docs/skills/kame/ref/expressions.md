@@ -40,9 +40,9 @@ bytes inserted by interpolation remain literal. Capture-pattern groups take
 precedence over globs. Raw Kash command words do not glob; embedded Kame
 expressions do. See [wildcard selection](./library.md#wildcard-selection).
 
-Empty records and bytes are also true. For strings, bytes, lists, or records,
-use `(= (count VALUE) 0)` for emptiness and `(> (count VALUE) 0)` for nonemptiness;
-`count` does not accept nil, booleans, or numbers. Test absence with
+Empty byte sequences and records are also true. For strings, bytes, lists, or
+records, use `(= (count VALUE) 0)` for emptiness and `(> (count VALUE) 0)` for
+nonemptiness; `count` does not accept nil, booleans, or numbers. Test absence with
 `(= VALUE :nil)` and numeric zero with `(= VALUE 0)` instead. Whitespace is data.
 `and`/`or` retain the deciding operand, so `(or "" "fallback")` returns `""`.
 Source-composition `if` shares this truthiness; test collection emptiness explicitly.
@@ -161,7 +161,8 @@ enumerate files; interpolated strings and raw Kash words remain separate data.
 
 `$(printf "hello\n")` is an expression atom whose contents parse as Kash.
 It captures UTF-8 stdout exactly, including trailing newlines; it does not
-evaluate Kame expressions by itself. Execution needs a run grant and a phase
+parse its contents as a Kame expression. Use Kash's `(EXPRESSION)` boundaries
+to compute typed command arguments. Execution needs a run grant and a phase
 allowing processes. Plain `"$(command)"` is literal text. Use explicit string
 interpolation to demand capture. See [Kash](./kash.md) for process semantics.
 

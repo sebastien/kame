@@ -24,14 +24,13 @@ and the corresponding CI run before depending on platform-specific behavior.
 
 Ownership-aware `do clean` is implemented by the native POSIX host, with Linux
 acceptance coverage. It requires descriptor-relative filesystem operations and
-project locking; native/APE Windows currently lacks that support. Selecting a
-native backend alone does not establish conformance on every operating system.
+project locking; native/APE Windows currently lacks that support.
 
-The Node/WASM CLI (including npm) refuses `do clean`, `--dry-run`, `--keep` and
-`--release` with exit status 1 and preserves files and ownership records. It does
-not supply an implicit `clean` target. An authored `clean` remains an ordinary
-task on either backend; `do clean` never invokes it or falls back to directory-wide
-removal. Cache eviction through `do cache clean` is a separate operation.
+The Node/WASM CLI (including npm) rejects `do clean`, including its `--dry-run`,
+`--keep` and `--release` forms, with exit status 1; files and ownership records
+remain intact. An authored `clean` is an ordinary task on either backend, never
+an implicit target or fallback for `do clean`. Cache eviction through
+`do cache clean` is separate.
 
 ## Verify a release before running it
 
@@ -95,6 +94,7 @@ Homebrew/Scoop definitions live in [`etc/`](../etc/README.md), not release asset
 From the checkout root, with a published version and the same trusted PEM key:
 
 ```sh
+export KAME_VERSION
 export KAME_RELEASE_PUBKEY_B64_OVERRIDE="$(openssl pkey -pubin \
   -in "$KAME_RELEASE_PUBLIC_KEY" -outform DER | openssl base64 -A)"
 bin/kame --help

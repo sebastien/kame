@@ -45,7 +45,7 @@ for backend in native wasm; do
     source=$'COLOR = env.NO_COLOR\n(out! COLOR)'
     entries=()
     if [ "$language" = kmk ]; then source=$'COLOR = env.NO_COLOR\nshow :\n\t@(out! COLOR)'; entries=(show); fi
-    NO_COLOR='two words' "${runner[@]}" do run --lang "$language" --allow-env=NO_COLOR -c "$source" "${entries[@]}" > "$project/out" 2> "$project/err"
+    NO_COLOR='two words' timeout 30 "${runner[@]}" do run --lang "$language" --allow-env=NO_COLOR -C "$project" -c "$source" "${entries[@]}" > "$project/out" 2> "$project/err"
     if [ "$(cat "$project/out")" = 'two words' ]; then test-ok "$backend $language definitions read named environment"; else test-fail "$backend $language environment reference"; fi
   done
   NO_COLOR='two words' "${runner[@]}" do render --allow-env=NO_COLOR --comment plain -c '@{env.NO_COLOR}' > "$project/out" 2> "$project/err"

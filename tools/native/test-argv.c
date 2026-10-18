@@ -234,7 +234,11 @@ static int exec_error(char **argv, char **envp) {
 
 int main(void) {
     policy();
-    char directory[] = "/tmp/opencode/kame-argv-XXXXXX";
+    char directory[PATH_MAX];
+    const char *temporary = getenv("TMPDIR");
+    int length = snprintf(directory, sizeof(directory), "%s/kame-argv-XXXXXX",
+                          temporary && *temporary ? temporary : "/tmp");
+    assert(length > 0 && (size_t)length < sizeof(directory));
     assert(mkdtemp(directory));
     char file[PATH_MAX], path[PATH_MAX + 32];
     snprintf(file, sizeof(file), "%s/tool", directory);

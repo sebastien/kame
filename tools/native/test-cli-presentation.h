@@ -185,14 +185,15 @@ static void presentation_TestTargetDurationUsesLifecycleClock(void) {
     event.Kind = program_TargetCompleted; event.MonotonicNS = 1123000000;
     observeOutcome(event, &progress);
     writeTargetOutcome(native_writer(&out), event, so_str("done"), so_str("status.success"));
-    assert(native_equal(&out, "[target] 0.1s - ✓\n"));
+    // Terminal output pads the gap between the target and its duration.
+    assert(presentation_prefix(bytes_Buffer_String(&out), "[target] ") && presentation_suffix(bytes_Buffer_String(&out), " 0.1s - ✓\n"));
     event.Generation = 2; event.Kind = program_TargetStarted; event.MonotonicNS = 2000000000;
     observeOutcome(event, &progress);
     event.Kind = program_TargetCompleted; event.MonotonicNS = 2045000000;
     observeOutcome(event, &progress);
     bytes_Buffer_Reset(&out);
     writeTargetOutcome(native_writer(&out), event, so_str("done"), so_str("status.success"));
-    assert(native_equal(&out, "[target] 0.0s - ✓\n"));
+    assert(presentation_prefix(bytes_Buffer_String(&out), "[target] ") && presentation_suffix(bytes_Buffer_String(&out), " 0.0s - ✓\n"));
     presentation_end(&out);
 }
 

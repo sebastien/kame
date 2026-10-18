@@ -115,8 +115,8 @@ empty expansions preserve barriers. Output registration remains pure.
 
 Canonical recipe indentation is one tab; additional shell indentation survives.
 The first body line establishes the prefix shared by nonblank body lines.
-All rendered lines execute as one shell script, so `cd`, variables, and shell
-control flow persist. System-shell recipes retain document-template expansion;
+External-shell recipe lines execute as one script, so `cd`, variables, and shell
+control flow persist. These recipes retain document-template expansion;
 interpolation does not automatically shell-quote values. Selecting `[shell: kash]`
 or `SHELL = kash` parses the authored body directly as Kash. Use `$reference`
 and `(EXPRESSION)` for typed argv, without serialization or template escaping.

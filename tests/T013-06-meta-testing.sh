@@ -105,4 +105,25 @@ for verbosity in -q -v; do
     test-contains "$scratch/harness.out" EOK && test-ok "harness success summary"
   done
 done
+
+test-step "harness caches runtimes and reports a remaining-time estimate"
+runtime_cache="$scratch/runner/build/tests/runtime-cache"
+mkdir -p "$runtime_cache"
+printf '17\n' >"$runtime_cache/bash-fixture.sh.seconds"
+previous_cache="$TEST_RUNTIME_CACHE_DIR"
+TEST_RUNTIME_CACHE_DIR="$runtime_cache"
+test-expect "$(test_runtime_eta tests/new-fixture.sh)" '~17s (0/1 cached)' "uncached runtime uses cached mean"
+TEST_RUNTIME_CACHE_DIR="$previous_cache"
+status=0
+(cd "$scratch/runner" && env HOME="$scratch/home" NOCOLOR=1 \
+  TEST_RUNTIME_CACHE_DIR="$runtime_cache" timeout --kill-after=2 10 \
+  bash tests/harness.sh -q tests/bash-fixture.sh) \
+  >"$scratch/harness.out" 2>"$scratch/harness.err" || status=$?
+test-expect "$status" 0 "cached ETA harness status"
+test-contains "$scratch/harness.err" 'ETA: ~17s (1/1 cached)' && test-ok "cached runtime appears in ETA"
+if IFS= read -r recorded <"$runtime_cache/bash-fixture.sh.seconds" && [[ "$recorded" =~ ^[0-9]+$ ]]; then
+  test-ok "harness records the latest runtime"
+else
+  test-fail "harness records the latest runtime"
+fi
 test-end

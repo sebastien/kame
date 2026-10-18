@@ -473,7 +473,7 @@ stage environment PATH changes or a Kame binding named `PATH`, as specified by
 `038-direct-kash-and-values.md`. Choosing a child environment is distinct from
 reading an environment variable into a Kame value.
 
-A command may use `run` setup keys for process configuration:
+A command may use `run!` setup keys for process configuration:
 
 ```kame
 (run! :cwd build-dir :timeout 10 :NODE_ENV "production" "npm" "test")
@@ -547,14 +547,18 @@ Authored source excerpts, explicit output, argv values, and child output are not
 secret channels and are not automatically redacted; callers must not print or
 place secrets in those channels.
 
-The expression-level `run` additionally accepts `:async` with a boolean value;
+The expression-level `run!` additionally accepts `:async` with a boolean value;
 true returns a process handle instead of awaiting completion. This key is
 reserved and rejected in raw stage setup: raw async execution uses terminal `&`
-on the entire graph. `pipe` constructs and executes its stages together rather
+on the entire graph. `pipe!` constructs and executes its stages together rather
 than awaiting each stage independently; stage-level async flags are invalid
 within it.
 
 ## Pipelines and redirection
+
+A process graph may be linear or use the groups, channels, framing and
+multiplexors defined by [Kash streaming](042-kash-streaming.md). That specification
+refines the linear-pipeline rules below; neither form is a shell subshell.
 
 A raw command pipeline is a first-class Kash process expression:
 
@@ -581,9 +585,9 @@ Expression result spaces stay inside the single path; they do not create argv
 or redirection operators. Empty paths, NUL, lists and nonscalar results are
 errors. The same authored spans, retained operand evaluation and capability
 checks as argv words apply. Each stage may have at most one stdin and one stdout
-redirection. A pipeline edge and a
-redirection cannot both supply the same stream: `<` is allowed only on the first
-stage and `>`/`>>` only on the last. Conflicts are errors, not silently overridden.
+redirection. A pipeline edge and a redirection cannot both supply the same stream.
+In a linear pipeline, `<` is therefore allowed only on the first stage and
+`>`/`>>` only on the last. Conflicts are errors, not silently overridden.
 `>` creates or truncates; `>>` creates or appends. Stderr redirection, descriptor
 duplication, and here-documents are not defined by this specification.
 
@@ -594,10 +598,13 @@ commands inherit invocation stdin. If the source is stdin, commands without `<`
 receive closed stdin rather than consuming source text. Command substitutions
 without `<` also receive closed stdin.
 
-The graph fails if any stage exits non-zero or by signal, including SIGPIPE.
-Its aggregate status is the rightmost failing stage's status, or zero if every
-stage succeeds; all per-stage statuses are retained. A signal contributes
-`128 + signal` to aggregate exit status. Launch failures and timeouts are
+Under the default fail-fast policy, the graph fails if any stage exits non-zero
+or by signal, including SIGPIPE. Explicit owner-wide failure collection follows
+[Kash streaming](042-kash-streaming.md); it does not accept failed exits or defer
+fatal failures.
+For a linear pipeline, aggregate status is the rightmost failing stage's status,
+or zero if every stage succeeds; all per-stage statuses are retained. A signal
+contributes `128 + signal` to aggregate exit status. Launch failures and timeouts are
 failures, not successful zero exits. On launch failure, timeout, cancellation,
 or capture-limit failure, all remaining stages are terminated and reaped. A
 stage timeout terminates the whole graph; the invocation timeout additionally
@@ -617,13 +624,12 @@ Kame's value pipe remains distinct and is used inside an expression boundary:
 emit (sources | map render)
 ```
 
-The pipe between raw command stages is a process stream; the pipe inside
-Parenthesized expressions have the value-pipe semantics specified by `004-language.md`.
+The pipe between raw command stages is a process stream; pipes inside embedded
+Kame expressions have the value-pipe semantics specified by `004-language.md`.
 
 ## Process lifecycle and recovery
 
-Appending `&` starts a command or pipeline asynchronously and immediately yields
-its `Process`/`Result` value:
+Appending `&` starts a process graph asynchronously and yields a `Process` handle:
 
 ```kash
 watch-assets &
@@ -715,8 +721,10 @@ value operands and is an error in raw commands. Operators inside quotes or
 embedded Kame syntax are not process operators.
 
 `&` must be followed by a statement terminator: `first & second` requires
-`first &; second` or a newline. Parentheses do not introduce shell subshells or
-raw process grouping. `&&` and `||` are unsupported and produce diagnostics.
+`first &; second` or a newline. Parentheses do not introduce shell subshells;
+comma-separated process groups and stream-operator binding follow
+[Kash streaming](042-kash-streaming.md). `&&` and `||` are unsupported and produce
+diagnostics.
 
 ## Deferred cleanup
 
@@ -909,23 +917,25 @@ or retained without a capture request. Results are not argv scalars. The concret
 core representation is implementation-defined, but these observable distinctions
 are required and must not depend on the backend.
 
-The current synchronous representation is a record exposing `status`, `signal`,
-`stages`, `stdoutCaptured`, and `stderrCaptured`. Each stage exposes `status`,
-`signal`, and `outcome`, in source order. Raw commands and expression-level
-`run`/`pipe` stream output and set both capture flags to false; the result does
+The synchronous record interface exposes `status`, `signal`, `stages`,
+`stdoutCaptured`, and `stderrCaptured`. Each stage exposes `status`, `signal`,
+and `outcome`, in prepared stage/node order (source order for a linear pipeline).
+Streaming graph Results additionally expose the terminal `graph` metadata defined
+by [Kash streaming](042-kash-streaming.md). Raw commands and expression-level
+`run!`/`pipe!` stream output and set both capture flags to false; the result does
 not contain retained stdout or stderr. A result may be inspected through ordinary
 Kame references, but cannot be passed directly as an argv argument.
 
 The Kash parser may own statement, pipeline, redirection, async, and recovery
 AST nodes. Every embedded expression and reference must retain the normal Kame
-AST node and source span. Lowering Kash nodes to `run`, `pipe`, and associated
+AST node and source span. Lowering Kash nodes to `run!`, `pipe!`, and associated
 process operations must preserve Kame's laziness, capability checks, dynamic
 dependencies, and diagnostics. Block control statements lower to the Kame `if`
 and `match` special forms: a command condition lowers to a process-status
 predicate, a parenthesized condition to the Kame expression, a `match` subject to a
 value, and each branch body to a nested Kash statement sequence.
 
-Pipeline lowering is descriptive, not eager evaluation of independent `run`
+Pipeline lowering is descriptive, not eager evaluation of independent `run!`
 calls: the whole graph must be constructed before any stage starts. Execution
 state survives evaluator suspension without repeating completed statements,
 substitutions, effects, or process launches. Request correlation includes the
