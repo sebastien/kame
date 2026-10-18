@@ -21,6 +21,11 @@ func (p *Program) pump(wait int) {
 			break
 		}
 		event := next.Event
+		if event.Kind == host.ProcessSnapshot {
+			value := host.ProcessSnapshotPayload(p.Alloc, event.StageStates, event.EdgeMetrics)
+			p.processGraphSnapshot(host.Request{ID: event.ID}, value)
+			value.Free(p.Alloc); event.Free(p.Alloc); continue
+		}
 		if entry := p.serviceProbeForRequest(event.ID); entry != nil {
 			if event.Kind == host.ProcessTerminal {
 				p.completeServiceReadyProbe(entry, event)
@@ -80,6 +85,7 @@ func (p *Program) drainRequests() {
 			if request.Kind == host.RequestProcess {
 				display := processDisplayFromPayload(p.Alloc, request.Payload, p.Options.Shell)
 				pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated}
+				pending.Graph = snapshotTopology(p.Alloc, request.Payload)
 				p.Pending = slices.Append(p.Alloc, p.Pending, pending)
 			}
 			// Ownership transfers to the outbound queue; the embedding host
@@ -204,6 +210,7 @@ func (p *Program) drainRequests() {
 			} else {
 				display := processDisplayFromHost(p.Alloc, processRequest)
 				pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Capture: capture, Stream: stream, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated}
+				pending.Graph = snapshotTopology(p.Alloc, request.Payload)
 				p.Pending = slices.Append(p.Alloc, p.Pending, pending)
 			}
 			slices.Free(p.Alloc, scopedEnvironment)
@@ -1237,6 +1244,7 @@ func freePendingRequest(a mem.Allocator, pending *pendingRequest) {
 	if pending == nil { return }
 	mem.FreeString(a, pending.Program)
 	freeStrings(a, pending.Argv)
+	pending.Graph.Free(a)
 	*pending = pendingRequest{}
 }
 

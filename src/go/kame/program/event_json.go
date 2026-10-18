@@ -95,6 +95,7 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 		e.Str("value")
 		encodeValue(a, &e, event.Value)
 	}
+	if event.Kind == ProcessSnapshot { e.Str("graph"); core.EncodeValueJSON(a, &e, event.Value) }
 	if event.Cached {
 		e.Str("cached")
 		e.Bool(true)
@@ -376,6 +377,7 @@ func encodeCause(e *json.Encoder, cause diagnostic.Cause) {
 }
 
 func eventType(kind EventKind) string {
+	if kind == ProcessSnapshot { return "process-snapshot" }
 	if kind == TargetReason { return "target-reason" }
 	if kind == TargetStarted {
 		return "target-started"

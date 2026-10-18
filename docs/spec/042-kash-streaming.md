@@ -116,13 +116,36 @@ remain uninstrumented; unavailable counters are nil, never fabricated zeroes.
 Byte edges have no item counts. Missing host telemetry is supported explicitly.
 Counters saturate at 2^53-1 with `saturated: true`, so native and Node keep exact
 portable integers. Native workers use an invocation-owned shared mapping with
-one writer per edge; the parent snapshots only after all children exit. Telemetry
+one writer per edge; terminal counters are sampled after all children exit. Telemetry
 allocation failure leaves measurements unavailable rather than failing work.
-This is terminal Result metadata, not a live snapshot API or an implicit output
-effect; existing capture values and failure diagnostics keep their contracts.
+This is terminal Result metadata, not an implicit output effect; existing capture
+values and failure diagnostics keep their contracts.
 
-Alternate ordering/failure policies, explicit per-item workers, and live runtime
-state/backpressure inspection remain subsequent Slice E work.
+Live progress is available as `process-snapshot` events in `--json` output and
+program/embedding event streams. `graph.terminal` is false. Nodes contain prepared
+`id`, `kind`, tracked `program`, and `state`; edges contain endpoints, stream kind,
+expanded `argvIndex` slots (zero for stdin, unlike authored `argumentItem`),
+their prepared edge-array `id`, and the same named
+measurements as terminal Results. IDs are scoped by the event's request,
+node/generation/attempt identity. Hosts sample at most every 100 ms (plus Node's
+launch/final sample), and unread snapshots coalesce per request at the native
+host, program event queue, and JavaScript embedding event collector. Stream
+records and stdout are never retained by inspection. The Node timer is owned by
+the process request and cancelled on all completion paths.
+
+Operator states distinguish `running`, `waiting-input`, and `waiting-output`;
+finished nodes report terminal states when known. Wait states describe pending
+I/O interest, not a deadlock diagnosis: lossy broadcast can wait for output while
+continuing to accept input. External processes expose running/exit state only;
+their internal waits and OS pipe occupancy remain unknown. Live counter fields
+are independently sampled relaxed atomics on native hosts, not a transactional
+snapshot; cross-field conservation is guaranteed only for completed successful
+graphs. Queue high-water marks are not current queue occupancy. Progress is
+advisory: allocation failure may omit samples, and terminal Results remain the
+authoritative final measurements. No new build prerequisites are inferred.
+
+Alternate ordering/failure policies and explicit per-item workers remain
+subsequent Slice E work.
 Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing

@@ -133,6 +133,7 @@ const (
 	CacheWarning
 	ServiceState
 	TargetReason
+	ProcessSnapshot
 )
 
 type Event struct {
@@ -324,6 +325,7 @@ type Program struct {
 }
 
 type pendingRequest struct {
+	Graph core.Value // owned prepared topology for live inspection, never stdout
 	Capture          bool
 	Stream           bool
 	Program          string

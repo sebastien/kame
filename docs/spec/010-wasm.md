@@ -391,6 +391,23 @@ still complete as text. Native `ProcessEvent.EdgeMetrics` supplies the same
 data through `ProcessMetricsPayload`. Graph Results add terminal node topology,
 tracked executable paths, and per-node outcomes without rerunning predicates.
 
+Optional `kame_wasm_process_snapshot(handle, request, data, length)` accepts a
+canonical JSON object with `states` (one integer per prepared node: 0 unknown,
+1 running, 2 waiting-input, 3 waiting-output, 4 completed, 5 failed, 6 cancelled,
+7 timed-out) and optional `edgeMetrics` rows in the completion format above.
+The export validates the owned active/parked process request, memory range, 1 MiB
+wire cap, node/edge counts, state range, and counter shape/ranges. It emits a
+coalesced `process-snapshot` event, never completes a request. Events carry
+`graph: {terminal:false,nodes:[{id,kind,program,state}],edges:[{id,from,to,kind,argvIndex,measurement,...}]}` with
+prepared IDs scoped by request and node/generation/attempt identity. Standalone
+expression evaluations have no target event stream and ignore progress.
+
+The Node host uses the optional export only when available, samples every 100 ms
+plus launch/final samples, reuses bounded WASM scratch space, and cancels its timer
+before completion. Missing support does not downgrade execution semantics.
+Live fields are independent observations, not a cross-field transaction. Final
+Result counters retain the stronger post-completion contract.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly

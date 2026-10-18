@@ -1334,6 +1334,26 @@ int32_t kame_wasm_stream_item(uint64_t handle, uint64_t request, int32_t node, u
       (so_Slice){.ptr = (void *)(uintptr_t)data, .len = length, .cap = length});
 }
 
+/* Optional progress bridge; does not complete or detach the request. */
+__attribute__((export_name("kame_wasm_process_snapshot")))
+uint32_t kame_wasm_process_snapshot(uint64_t handle, uint64_t request, uint32_t data, uint32_t length) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (!instance || !instance->runtime || !data || !length || length > 1048576u ||
+      (uint64_t)data + length > (uint64_t)__builtin_wasm_memory_size(0) * 65536u ||
+      !request || wasm_Table_Owner(kame_wasm_table(), (wasm_Handle)request) != instance->owner) return KAME_WASM_STATE_INVALID;
+  host_Request *pending = NULL;
+  if (instance->has_pending && instance->request == request) pending = &instance->pending;
+  for (kame_wasm_parked_request *saved = instance->parked; !pending && saved; saved = saved->next)
+    if (saved->request == request) pending = &saved->pending;
+  if (!pending || pending->Kind != host_RequestProcess) return KAME_WASM_STATE_INVALID;
+  core_Value value = (core_Value){};
+  if (!wasm_CompletionValueFromJSON(instance->runtime->Alloc, (so_Slice){(so_byte *)(uintptr_t)data, length, length}, &value)) return KAME_WASM_STATE_INVALID;
+  bool valid = wasm_Runtime_ProcessGraphSnapshot(instance->runtime, *pending, value);
+  core_Value_Free(&value, instance->runtime->Alloc);
+  return valid ? KAME_WASM_OK : KAME_WASM_STATE_INVALID;
+}
+
 __attribute__((export_name("kame_wasm_process_started_request")))
 uint32_t kame_wasm_process_started_request(uint64_t handle, uint64_t request) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);

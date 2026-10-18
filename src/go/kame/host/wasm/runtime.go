@@ -641,6 +641,10 @@ func (r *Runtime) StreamItem(request host.Request, node int, raw []byte) int {
 	return -eval.StreamPredicateFailure
 }
 
+func (r *Runtime) ProcessGraphSnapshot(request host.Request, value core.Value) bool {
+	return r != nil && (r.Program == nil || r.Program.ProcessGraphSnapshot(request, value))
+}
+
 func (r *Runtime) ProcessStream(request host.Request, stderr bool, data []byte) {
 	if r != nil && r.Program != nil {
 		r.Program.ProcessStream(request, stderr, data)

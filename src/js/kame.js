@@ -1589,7 +1589,15 @@ class Module {
         new Uint8Array(this.exports.memory.buffer, pointer, chunk.length).set(chunk);
         return this.exports.kame_wasm_stream_item(instance, request, node, pointer, chunk.length);
       };
-      const completion = await runArgvCapture(stages, { ...context, ...redirections, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); return this.startedProcessGroup(instance, context, rawRequest); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
+      const onSnapshot = this.exports.kame_wasm_process_snapshot && [32, 33, 34, 35].includes(kind) ? (value) => {
+        const data = new TextEncoder().encode(JSON.stringify(value));
+        if (data.length > 1048576) return; // Progress is optional, never fail a large graph for inspection.
+        const pointer = this.scratch('processSnapshot', data.length || 1);
+        new Uint8Array(this.exports.memory.buffer, pointer, data.length).set(data);
+        const status = this.exports.kame_wasm_process_snapshot(instance, request, pointer, data.length);
+        if (status === 0) this.drainEvents(instance, context);
+      } : null;
+      const completion = await runArgvCapture(stages, { ...context, ...redirections, onSnapshot, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); return this.startedProcessGroup(instance, context, rawRequest); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout);
@@ -2177,7 +2185,11 @@ class Module {
         // add build lifecycle output or count toward build summaries.
         if (!json && context.api !== true && event.resource?.kind === 'definition') continue;
         if (context.api !== true && (json || human)) observeCLIEvent(event);
-        context.events?.push(event);
+        if (context.events) {
+          const previous = event.type === 'process-snapshot' ? context.events.findIndex((old) => old.type === event.type && old.request === event.request) : -1;
+          if (previous >= 0) context.events[previous] = event;
+          else context.events.push(event);
+        }
       }
       if (context.api === true) {
         continue;
@@ -3016,7 +3028,7 @@ function metricWrite(metric, length) {
 // Paused merges, broadcasts, and balancing share one bounded pump. Each turn
 // retains one chunk/record until its assigned destinations flush; incomplete
 // records are bounded per input. Defaults are 16 KiB bytes / 64 KiB records.
-function startByteMux(readers, writers, fail, done, kind = '', framed = false, item = null, budget = 0, overflow = 0, itemLimit = 0, metrics = null) {
+function startByteMux(readers, writers, fail, done, kind = '', framed = false, item = null, budget = 0, overflow = 0, itemLimit = 0, metrics = null, setState = () => {}) {
   let cursor = 0, destination = 0, scheduled = false, pending = false, closing = false, disposed = false;
   const recordLimit = budget || 64 * 1024, byteLimit = budget || 16 * 1024;
   const queueLimit = itemLimit || (overflow === 3 ? 1 : 64);
@@ -3094,11 +3106,13 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
     const record = queue.pending.shift();
     queue.bytes -= record.length - 4;
     queue.writing = true;
+    setState(3);
     writer.write(record, (cause) => {
       if (cause) error(cause);
       else metricWrite(metrics?.outputs[index], record.length);
       queue.writing = false;
       flushQueue(index);
+      if (!queues.some((queue) => queue.writing || queue.pending.length)) setState(closing ? 1 : 2);
     });
   };
   const queueRecord = (record) => {
@@ -3124,6 +3138,7 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
   const pump = () => {
     scheduled = false;
     if (pending || closing || disposed) return;
+    setState(1);
     for (let offset = 0; offset < readers.length; offset++) {
       const next = (cursor + offset) % readers.length, reader = readers[next];
       const chunk = readItem(reader, states[next], next);
@@ -3132,6 +3147,7 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
       cursor = (next + 1) % readers.length;
       if (overflow) { queueRecord(chunk); schedule(); return; }
       pending = true;
+      setState(3);
       let destinations = writerIndices;
       if (kind === 'filter') {
         const selected = item(0, chunk.subarray(4));
@@ -3150,6 +3166,7 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
       });
       return;
     }
+    setState(overflow && queues.some((queue) => queue.writing || queue.pending.length) ? 3 : 2);
     if (readers.every((reader) => reader.readableEnded)) {
       closing = true;
       if (overflow) queues.forEach((_, index) => flushQueue(index));
@@ -3244,6 +3261,7 @@ function runArgvCapture(stages, context) {
     const children = [];
     const operandStates = new Map(argumentEdges.map((edge) => [edge, { ready: false, done: false, anchor: undefined }]));
     const results = [];
+    const liveStates = stages.map(() => 1);
     const chunks = [];
     const limit = context.captureLimit > 0 ? context.captureLimit : 1024 * 1024;
     let length = 0;
@@ -3295,6 +3313,7 @@ function runArgvCapture(stages, context) {
       finishing = false;
       if (remaining !== 0) return;
       for (const cancel of timers) cancel();
+      if (topology && context.onSnapshot) publish(context.onSnapshot, { states: liveStates, edgeMetrics: topology.edgeMetrics });
       context.signal?.removeEventListener('abort', cancelled);
       try { operandFiles?.dispose(); } catch (error) { failure ??= { ok: false, code: 'HOST_FAIL', message: `cannot release stream operand: ${error.message}` }; }
       if (publicationFailure !== null) { rejectRun(publicationFailure); return; }
@@ -3368,6 +3387,7 @@ function runArgvCapture(stages, context) {
         child.once('error', () => stop('HOST_FAIL', 'cannot start process'));
         child.once('close', (status, signalName) => {
           results[i] = { status: status ?? 0, signal: osConstants.signals[signalName] ?? 0, outcome: 0 };
+          liveStates[i] = status || signalName ? 5 : 4;
           if (topology && failure === null && graphFailure === null && (results[i].status || results[i].signal)) {
             stopGraph(results[i]);
           }
@@ -3417,6 +3437,7 @@ function runArgvCapture(stages, context) {
       }
       if (topology && failure === null) for (let i = 0; i < stages.length; i++) if (topology.kinds[i]) {
         const failMux = (code, message) => {
+          liveStates[i] = 5;
           if (Number.isInteger(code)) {
             results[i] = { status: code, signal: 0, outcome: 0 };
             stopGraph(results[i]);
@@ -3456,9 +3477,10 @@ function runArgvCapture(stages, context) {
           return writer;
         }), failMux, () => {
           results[i] ??= { status: 0, signal: 0, outcome: 0 };
+          if (liveStates[i] !== 5) liveStates[i] = failure !== null || graphFailure !== null ? 6 : 4;
           remaining--;
           finish();
-        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i], { inputs: topology.inputs[i].map((edge) => topology.edgeMetrics[edge]), outputs: outputEdges.map((edge) => topology.edgeMetrics[edge]) }));
+        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i], { inputs: topology.inputs[i].map((edge) => topology.edgeMetrics[edge]), outputs: outputEdges.map((edge) => topology.edgeMetrics[edge]) }, (state) => { if (!results[i] && liveStates[i] !== 5) liveStates[i] = state; }));
         remaining++;
       }
     } catch { stop('HOST_FAIL', 'cannot start process'); }
@@ -3472,6 +3494,12 @@ function runArgvCapture(stages, context) {
       }
     }
     launched = true;
+    if (topology && context.onSnapshot && failure === null) {
+      const snapshot = () => publish(context.onSnapshot, { states: [...liveStates], edgeMetrics: topology.edgeMetrics });
+      snapshot();
+      const timer = setInterval(snapshot, 100);
+      timers.push(() => clearInterval(timer));
+    }
     finish();
   });
 }

@@ -23,3 +23,12 @@ func ProcessMetricsPayload(a mem.Allocator, metrics []ProcessEdgeMetrics) core.V
 	for i := range rows { rows[i].Free(a) }; slices.Free(a, rows)
 	return value
 }
+
+func ProcessSnapshotPayload(a mem.Allocator, states []int, metrics []ProcessEdgeMetrics) core.Value {
+	var values []core.Value
+	for i := range states { values = slices.Append(a, values, core.Value{Kind: core.Int, Int: int64(states[i])}) }
+	fields := []core.RecordField{{Key: "states", Value: core.NewList(a, values)}, {Key: "edgeMetrics", Value: ProcessMetricsPayload(a, metrics)}}
+	value := core.NewRecord(a, fields)
+	for i := range fields { fields[i].Value.Free(a) }; slices.Free(a, values)
+	return value
+}

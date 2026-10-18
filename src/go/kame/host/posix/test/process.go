@@ -65,6 +65,30 @@ const waitBudget = 5 * time.Second
 // child's output queue before it starts consuming events.
 const saturationBudget = 100 * time.Millisecond
 
+func TestNativeSnapshotQueueCoalesces(t *testing.T) {
+	h := posix.New(t.Allocator()); defer h.Free()
+	stages := []host.ProcessStage{
+		{Argv: []string{"/bin/sh", "-c", "sleep 1; printf a"}, Directory: ".", Environment: []string{"PATH=/usr/bin:/bin"}},
+		{Argv: []string{"/bin/sh", "-c", "printf b"}, Directory: ".", Environment: []string{"PATH=/usr/bin:/bin"}},
+		{Kind: "merge"},
+		{Argv: []string{"/bin/cat"}, Directory: "."},
+	}
+	edges := []host.ProcessEdge{{From: 0, To: 2}, {From: 1, To: 2}, {From: 2, To: 3}}
+	if !h.Start(host.ProcessRequest{ID: 988, Directory: ".", Topology: true, Stages: stages, Edges: edges}) { t.Fatal("graph rejected"); return }
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) { if !h.Pump(20) { t.Error("snapshot pump failed"); return } }
+	snapshots := 0
+	for {
+		next := h.Next(); if !next.OK { break }
+		if next.Event.Kind == host.ProcessSnapshot {
+			snapshots++
+			if len(next.Event.StageStates) != 4 || len(next.Event.EdgeMetrics) != 3 { t.Error("snapshot lost prepared IDs") }
+		}
+		next.Event.Free(t.Allocator())
+	}
+	if snapshots != 1 { t.Error("native queue retained snapshot history") }
+}
+
 func request(a mem.Allocator, id int64, script string) posix.Request {
 	return posix.Request{ID: id, Shell: slices.Clone(a, []string{"/bin/sh", "-c"}), Script: slices.Clone(a, []byte(script)), Directory: ".", Environment: slices.Clone(a, []string{"PATH=/usr/bin:/bin"}), RetainBytes: 1024}
 }

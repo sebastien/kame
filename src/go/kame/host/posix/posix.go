@@ -336,7 +336,8 @@ func (h *Host) Next() host.ProcessEventResult {
 	}
 	e := host.ProcessEvent{Kind: host.ProcessEventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: host.ProcessOutcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated, RetainBytes: int(raw.retainBytes)}
 	for i := 0; i < int(raw.stageCount); i++ {
-		e.Stages = slices.Append(h.Alloc, e.Stages, host.ProcessStageResult{Status: int(km_event_stage_field(&raw, c.Int(i), 0)), Signal: int(km_event_stage_field(&raw, c.Int(i), 1)), Outcome: host.ProcessOutcome(km_event_stage_field(&raw, c.Int(i), 2))})
+		if e.Kind == host.ProcessSnapshot { e.StageStates = slices.Append(h.Alloc, e.StageStates, int(km_event_stage_field(&raw, c.Int(i), 0)))
+		} else { e.Stages = slices.Append(h.Alloc, e.Stages, host.ProcessStageResult{Status: int(km_event_stage_field(&raw, c.Int(i), 0)), Signal: int(km_event_stage_field(&raw, c.Int(i), 1)), Outcome: host.ProcessOutcome(km_event_stage_field(&raw, c.Int(i), 2))}) }
 	}
 	for i := 0; i < int(raw.metricCount); i++ {
 		e.EdgeMetrics = slices.Append(h.Alloc, e.EdgeMetrics, host.ProcessEdgeMetrics{Measurement: int(km_event_metric_field(&raw, c.Int(i), 0)), Bytes: km_event_metric_field(&raw, c.Int(i), 1), Items: km_event_metric_field(&raw, c.Int(i), 2), DroppedItems: km_event_metric_field(&raw, c.Int(i), 3), QueueHighWaterBytes: km_event_metric_field(&raw, c.Int(i), 4), QueueHighWaterItems: km_event_metric_field(&raw, c.Int(i), 5), Saturated: km_event_metric_field(&raw, c.Int(i), 6) != 0})

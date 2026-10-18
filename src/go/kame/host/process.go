@@ -23,6 +23,7 @@ const (
 	ProcessStdout
 	ProcessStderr
 	ProcessTerminal
+	ProcessSnapshot
 )
 
 // ProcessDiagnostic carries a stable host diagnostic code and its owned message.
@@ -130,6 +131,7 @@ type ProcessEvent struct {
 	RetainBytes int
 	Stages []ProcessStageResult
 	EdgeMetrics []ProcessEdgeMetrics
+	StageStates []int // snapshot only: unknown/running/input/output/completed/failed/cancelled/timed-out
 	// Outputs carries remote artifact bytes. Local process hosts leave it empty.
 	Outputs []ExecutionArtifact
 }
@@ -154,6 +156,7 @@ func (e *ProcessEvent) Free(a mem.Allocator) {
 	slices.Free(a, e.Stderr)
 	slices.Free(a, e.Stages)
 	slices.Free(a, e.EdgeMetrics)
+	slices.Free(a, e.StageStates)
 	for i := range e.Outputs {
 		e.Outputs[i].Free(a)
 	}

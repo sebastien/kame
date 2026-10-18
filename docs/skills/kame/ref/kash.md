@@ -322,8 +322,14 @@ nil queue high-water marks. Counters saturate at 2^53-1 and set `saturated`.
 
 Telemetry does not capture stdout, infer build dependencies, or change failure
 handling. Missing telemetry from a host remains explicitly unavailable. This is
-terminal Result metadata, not live blocked/backpressure inspection. Alternate
-ordering/failure policies, per-item workers, and live inspection remain pending.
+terminal Result metadata. Live progress also appears in `process-snapshot` JSON
+and embedding events: prepared node IDs carry running/input-wait/output-wait
+states, and edge IDs carry sampled counters. Samples coalesce when unread and
+are normally at least 100 ms apart. Native live counters are individually atomic,
+not transactional across fields; use terminal Results for final accounting.
+External processes do not expose internal waits, and high-water marks are not
+current queue occupancy. Wait states are I/O interest, not deadlock detection.
+Alternate ordering/failure policies and per-item workers remain pending.
 
 ### Live stream arguments
 
