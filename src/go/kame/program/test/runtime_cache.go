@@ -126,7 +126,8 @@ func TestCompleteTaskFingerprintVector(t *testing.T) {
 	fingerprintAt:=13+int(identityLength)
 	if fingerprintAt+32>len(data) { mem.FreeSlice(a,data);t.Fatal("record fingerprint is truncated");return }
 	fingerprint:=program.FingerprintHex(data[fingerprintAt:fingerprintAt+32])
-  if fingerprint!="2b2a500123d75c36ededba2f40673df4355bfd002eb52203189a680f24476d45" { t.Errorf("complete task fingerprint = %s",fingerprint) }
+  // The manifest now includes the read-only source/context proof for task status.
+  if fingerprint!="23ed4f24ecfd7f0b6ae5b0e1cb02a78db5c1373516d4d106d1a0ce7d8829420b" { t.Errorf("complete task fingerprint = %s",fingerprint) }
 	mem.FreeString(mem.System,fingerprint);mem.FreeSlice(a,data)
 }
 

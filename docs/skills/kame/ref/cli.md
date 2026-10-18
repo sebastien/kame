@@ -170,16 +170,28 @@ kame -n ./build/app
 `list` includes named tasks, services, file artifacts (even when missing), all
 sibling outputs, computed/generated declarations, and unexpanded output patterns
 such as `./build/{name}.o`. It excludes ordinary value definitions, input-only
-files, and the implicit automatic-clean target. It needs no `default` target and
-does not traverse prerequisites or enumerate possible pattern instances.
+files, and the implicit automatic-clean target. Catalogue discovery needs no
+`default` target and does not plan prerequisites or enumerate possible pattern
+instances; human status checks may follow previously recorded artifact producers.
 
 List matching is case-sensitive. Exact names rank first, then prefixes,
 substrings, and close spellings, with alphabetical ties. Typo matching checks the
 full name (ignoring a leading `./`) and file basename, allowing one insertion,
 deletion, substitution, or adjacent-letter swap; queries of at least five Unicode
 characters allow two edits. No matches returns an empty successful result.
-`list --json` emits one string array; text output lists one name per line under a
-`list` heading. Source selection and configuration use `-f`, `-c`, `-C`,
+`list --json` retains one unstyled string array. Human output groups names under
+**Rules** (bare named rules and unexpanded patterns), **Services**, **Tasks**
+(explicit cached `task` declarations), and **Artifacts**, omitting empty groups.
+Each group has a distinct color; query ranking is retained within each group.
+Tasks and artifacts show **ok** (green), **out of date** (amber), or **missing**
+(red). A missing task has no successful cache record for its default argument
+bindings. Required task arguments, unavailable observations, and unverifiable
+reuse proofs show a muted **unknown**, never a guessed success. Status checks
+validate recorded content/resource signatures, not modification times, and never
+render recipes, evaluate prerequisite expressions, start services, or write cache
+records. Freshness proofs for task caches written before this feature remain
+unknown until a subsequent successful execution records the proof.
+Source selection and configuration use `-f`, `-c`, `-C`,
 `--define`, and `--set`; use `--` for a dash-prefixed query.
 
 `plan`, `inputs`, and `outputs` default to depth `-1` (unlimited); `span` defaults

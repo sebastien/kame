@@ -364,6 +364,20 @@ func (r *Runtime) ListJSON(query string) PureResult {
 	return PureResult{Text: text}
 }
 
+// ListReportJSON adds kind and read-only freshness for human catalogue output.
+func (r *Runtime) ListReportJSON(query string) PureResult {
+	if r == nil || r.Program == nil {
+		a := runtimeAllocator(r)
+		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
+	}
+	var buffer = bytes.NewBuffer(r.Alloc, nil)
+	r.Program.WriteTargetReport(&buffer, query)
+	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
+	text := pureText(r.Alloc, buffer.String())
+	buffer.Free()
+	return PureResult{Text: text}
+}
+
 // GraphJSON returns a schema-2 input or output inventory.
 func (r *Runtime) GraphJSON(target string, depth int, kind string) PureResult {
 	if r == nil || r.Program == nil {

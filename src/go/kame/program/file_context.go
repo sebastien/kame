@@ -200,9 +200,7 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 	state.Checkpoint = c.CheckpointDependencies()
 	entry.AcceptedRecord.Free(p.Alloc)
 	entry.AcceptedRecord.Implementation = p.fileImplementation(entry, rendered)
-	if entry.Rule.Kind == rule.FileRule {
-		entry.AcceptedRecord.Guard = p.fileGuard(entry)
-	}
+	entry.AcceptedRecord.Guard = p.fileGuard(entry)
 	if entry.Rule.Kind == rule.CachedTaskRule {
 		entry.FileContext = state
 		state.Phase = -1

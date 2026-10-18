@@ -27,7 +27,8 @@ enum kame_wasm_graph_kind {
   KAME_WASM_GRAPH_OUTPUTS = 1,
   KAME_WASM_GRAPH_SPAN = 2,
   KAME_WASM_GRAPH_PLAN_ROOTS = 3,
-  KAME_WASM_GRAPH_LIST = 4
+  KAME_WASM_GRAPH_LIST = 4,
+  KAME_WASM_GRAPH_LIST_REPORT = 5
 };
 
 /* Normalize a JSON string array against prepared build declarations. */
@@ -224,10 +225,12 @@ uint32_t kame_wasm_plan(uint64_t instance, uint32_t target, uint32_t target_len,
                         uint32_t expand, uint32_t dst, uint32_t dst_len,
                         uint32_t out_len);
 /* kind 0=inputs, 1=outputs (schema 2), 2=span (schema 1), 3=plan (schema 2),
- * 4=list (JSON string array). For kind 3 target is a JSON string array of roots;
- * for kind 4 it is an optional search query; otherwise it is one target.
+ * 4=list (JSON string array), 5=list report (grouped entries with status).
+ * For kind 3 target is a JSON string array of roots; for kinds 4/5 it is an
+ * optional search query; otherwise it is one target.
  * depth -1 is unbounded; expand expands span or selects affected plan roots.
- * List ignores depth/expand and never plans or materializes targets. */
+ * List ignores depth/expand and never plans or materializes targets.
+ * List report may yield HOST_NEEDED for read-only freshness checks. */
 uint32_t kame_wasm_graph(uint64_t instance, uint32_t target, uint32_t target_len,
                          int32_t depth, uint32_t kind, uint32_t expand,
                          uint32_t dst, uint32_t dst_len, uint32_t out_len);

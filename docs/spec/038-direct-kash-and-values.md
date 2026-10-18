@@ -313,10 +313,16 @@ Filtering changes emitted matches, not traversal through ordinary directories.
 For example, `:+files` still discovers files under nested directories:
 
 ```kame
-(wildcard :+files @{PATH_SRC}/sh/**/*.sh)
+(files @{PATH_SRC}/sh/**/*.sh)
+(dirs ./assets/*)
 (wildcard :+files :+symlinks ./assets/**)
 (wildcard :-dir :-symlinks ./assets/**)
 ```
+
+`(files PATTERNS...)` and `(dirs PATTERNS...)` are fixed-kind shorthands for
+`wildcard` with `:+files` and `:+dir`. They accept the same patterns and
+expanded path lists, track the same membership, and reject kind flags. A union
+or exclusion still uses `wildcard`.
 
 Results retain canonical paths, sorted duplicate-free union semantics, and
 tracking for empty patterns. Traversal sources may be shared across filter sets,
@@ -337,7 +343,7 @@ aliases and template primitives, rather than inferring effects from suffixes.
 | Category | Canonical operations | Contract |
 | --- | --- | --- |
 | Pure computation/construction | `str`, `json`, collections, lexical paths, `kash` | No host action merely from construction |
-| Tracked observations | `read`, `exists?`, `stat`, `wildcard`, `env`, `tool`, `render`, `await` | Retain dependency/phase contracts; render can read templates; await joins already-started work |
+| Tracked observations | `read`, `exists?`, `stat`, `wildcard`, `files`, `dirs`, `env`, `tool`, `render`, `await` | Retain dependency/phase contracts; render can read templates; await joins already-started work |
 | File/output actions | `write!`, `yield!`, `out!`, `err!` | Mutation/publication/output under existing authority and publication contracts |
 | Process actions | `run!`, `pipe!`, `sh!`, `shell-template!` | Preserve existing process grants, results, ownership, and failure semantics |
 | Control effect | `fail!` | Raise an authored diagnostic and abort the current computation |

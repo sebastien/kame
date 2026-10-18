@@ -165,13 +165,14 @@ func (p *Program) WriteInspection(out io.Writer, targets []string, depth int, ki
 	}
 	for i := range g.Producers {
 		if len(g.Producers[i].Outputs) == 0 { continue }
-		result := p.inspectArtifactStatus(g.Producers[i].Plan)
+		result := p.inspectTargetStatus(g.Producers[i].Plan)
 		if result.Waiting {
 			p.retainInspection(&g)
 			return diagnostic.Diagnostic{}
 		}
 		for j := range g.Producers[i].Outputs {
-			status := result.State.Statuses[j]
+			status := "unknown"
+			if result.State != nil { status = result.State.Statuses[j] }
 			if g.Producers[i].ContextUnknown && status != "missing" { status = "unknown" }
 			g.Resources[g.Producers[i].Outputs[j]-1].Status = status
 		}

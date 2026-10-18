@@ -118,6 +118,7 @@ func HelpText(topic string) string {
 		}
 		if topic == "list" {
 			b.WriteString("No query lists all declared rule outputs, including missing artifacts and unexpanded patterns.\nA query ranks exact names, prefixes, substrings, then close spellings (including swapped letters).\nMatching is case-sensitive; ties and unfiltered results are alphabetical. No matches is an empty successful result.\nJSON: one string array. Ordinary value definitions and implicit clean are not listed.\n")
+			b.WriteString("Human output groups Rules, Services, Tasks (cached), and Artifacts in distinct colors.\nTask/artifact status: green ok, amber out of date, red missing; muted unknown when proof is unavailable.\nA missing task has no successful cache record; required task arguments remain unknown.\n")
 		}
 		if topic == "list" || topic == "plan" || topic == "cat" || topic == "tools" || topic == "inputs" || topic == "outputs" || topic == "span" {
 			b.WriteString("Source: one -f FILE or -c TEXT; -C DIR, --define NAME=VALUE, --set NAME=LITERAL, --tool NAME=PATH.\n")

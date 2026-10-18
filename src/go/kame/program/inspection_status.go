@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/host"
 	"kame/lang/eval"
+	"kame/lang/rule"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
@@ -20,9 +21,11 @@ type inspectionStatusState struct {
 	Pending bool
 	Unknown bool
 	Changed bool
+	Missing bool
 }
 
 type inspectionStatusResult struct {
+	// A nil State leaves the status unknown if a resolver cannot be registered.
 	State *inspectionStatusState
 	Waiting bool
 }
@@ -39,7 +42,7 @@ func (s *inspectionStatusState) free(a mem.Allocator) {
 	mem.Free(a, s)
 }
 
-func (p *Program) inspectArtifactStatus(plan Plan) inspectionStatusResult {
+func (p *Program) inspectTargetStatus(plan Plan) inspectionStatusResult {
 	index := -1
 	for i := range p.Instances {
 		if p.Instances[i].InspectionStatus != nil && sameInspectionPlan(p.Instances[i].Plan, plan) { index = i; break }
@@ -48,9 +51,10 @@ func (p *Program) inspectArtifactStatus(plan Plan) inspectionStatusResult {
 		index = len(p.Instances)
 		state := mem.Alloc[instanceState](p.Alloc)
 		state.Program, state.Index = p, index
-		key := core.NewResourceKey(p.Alloc, core.ResourceTarget, "\x00inspection-status:"+plan.Key.Name)
+		key := core.NewResourceKey(p.Alloc, core.ResourceTarget, "\x00inspection-status:"+resourceKindName(plan.Key.Kind)+":"+plan.Key.Name)
 		node := p.Engine.AddOwned(key, produceInspectionStatus, state, freeInstanceState)
 		key.Free(p.Alloc)
+		if node == nil { mem.Free(p.Alloc, state); return inspectionStatusResult{} }
 		p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: plan.Rule, Node: node, Plan: clonePlan(p.Alloc, plan), Captures: cloneCaptures(p.Alloc, plan.Captures), Inspection: true, InspectionStatus: mem.Alloc[inspectionStatusState](p.Alloc)})
 		p.Instances[index].inspectionRoot = p.Engine.RequestRoot(node)
 	}
@@ -93,12 +97,10 @@ func (p *Program) inspectionStatusRead(c *core.EngineContext, index int, kind ho
 	}
 	if kind == host.RequestCacheGet {
 		path := p.fileContextPath(entry)
-		data, err := p.Host.ReadFile(p.Alloc, path)
+		if entry.Rule.Kind == rule.CachedTaskRule { mem.FreeString(p.Alloc, path); path = p.cachePath(entry) }
+		completion := p.fileCompletion(host.Request{}, host.OpFileContent, path)
 		mem.FreeString(p.Alloc, path)
-		value := core.Value{}
-		if err == nil { value = core.NewBytes(p.Alloc, data) }
-		mem.FreeSlice(p.Alloc, data)
-		return inspectionStatusReply{Completion: core.Completion{Value: value, HasValue: err == nil}}
+		return inspectionStatusReply{Completion: completion}
 	}
 	return inspectionStatusReply{Completion: p.fileCompletion(host.Request{}, op, name)}
 }
@@ -123,7 +125,12 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 		entry.InspectionStatus = s
 	}
 	context := eval.Context{Run: p.Alloc, Cwd: p.Options.Directory, Grants: p.Options.Grants}
-	for s.Phase == 0 && s.Index < len(entry.Plan.Outputs) {
+	task := entry.Rule.Kind == rule.CachedTaskRule
+	if task && p.Options.CacheDisabled {
+		s.Statuses = slices.Append(p.Alloc, s.Statuses, "outdated")
+		return core.ProducerCompleted
+	}
+	for s.Phase == 0 && !task && s.Index < len(entry.Plan.Outputs) {
 		name := p.canonicalTarget(entry.Plan.Outputs[s.Index], true)
 		if (!p.Forwarding && p.Host == nil) || !context.Allows(eval.Read, name) {
 			s.Outputs = slices.Append(p.Alloc, s.Outputs, core.Signature{})
@@ -152,17 +159,34 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 		name := p.canonicalTarget(entry.Plan.Outputs[0], true)
 		identity.appendText(name); mem.FreeString(p.Alloc, name)
 		identity.state.Sum(entry.FileContextKey[:])
+		if task {
+			key := p.cacheKey(entry)
+			copy(entry.FileContextKey[:], key)
+			slices.Free(p.Alloc, key)
+			if !p.Forwarding && p.Host == nil { s.Unknown = true; s.Phase = 3 }
+		}
 	}
 	if s.Phase == 1 {
 		reply := p.inspectionStatusRead(c, index, host.RequestCacheGet, "", "")
 		if reply.Waiting { return core.ProducerSubmitted }
-		valid := reply.Completion.Diagnostic.Code == "" && reply.Completion.Value.Kind == core.Bytes && core.DecodeSignatureRecord(p.Alloc, reply.Completion.Value.Bytes, &s.Stored)
+		valid := false
+		if reply.Completion.Diagnostic.Code == "" && reply.Completion.HasValue {
+			s.Missing = reply.Completion.Value.Kind == core.Nil
+			if reply.Completion.Value.Kind == core.Bytes {
+				data := reply.Completion.Value.Bytes
+				if task {
+					record := p.validateRecord(entry, nil, data)
+					if record.Hit { valid = core.DecodeSignatureRecord(p.Alloc, record.Record.Manifest, &s.Stored) }
+					record.Record.Free(p.Alloc)
+				} else { valid = core.DecodeSignatureRecord(p.Alloc, data, &s.Stored) }
+			}
+		}
 		reply.Completion.Value.Free(p.Alloc); reply.Completion.Diagnostic.Free(p.Alloc)
 		if !valid || !s.Stored.Guard.Equal(p.fileGuard(entry)) { s.Unknown = true; s.Phase = 3 } else { s.Phase = 2 }
 		for i := range s.Stored.Inputs { kind := s.Stored.Inputs[i].Key.Kind; if kind == core.ResourceTask || kind == core.ResourceTarget || kind == core.ResourceService { s.Unknown = true; s.Phase = 3 } }
-		if valid && len(s.Stored.Outputs) == len(s.Outputs) {
+		if !task && valid && len(s.Stored.Outputs) == len(s.Outputs) {
 			for i := range s.Outputs { if s.Outputs[i].Mode != core.SignatureUnavailable && !s.Outputs[i].Equal(s.Stored.Outputs[i].Signature) { s.Changed = true } }
-		} else if valid { s.Changed = true }
+		} else if !task && valid { s.Changed = true }
 	}
 	// Resolve tools through the existing metadata-only observer before checking
 	// file facts: a tool's file-value signature is not a hash of its binary bytes.
@@ -215,11 +239,15 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 		s.Index++
 	}
 	entry.AcceptedRecord.Inputs = s.Stored.Inputs
-	material := p.fileHasMaterialInputs(entry)
+	material := task || p.fileHasMaterialInputs(entry)
 	entry.AcceptedRecord.Inputs = nil
 	status := "built"
 	if s.Unknown { status = "unknown" }
 	if s.Changed || entry.Rule.Always || p.Options.Force || !material || p.cacheBlockedByBareTask(entry) { status = "outdated" }
+	if task {
+		if s.Missing { status = "missing" }
+		s.Statuses = slices.Append(p.Alloc, s.Statuses, status)
+	}
 	for i := range s.Outputs {
 		current := status
 		if s.Outputs[i].Mode == core.SignatureMissing { current = "missing" }

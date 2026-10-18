@@ -259,6 +259,48 @@ func wildcardPreflight(c *eval.Context, arguments []*expr.Expr) eval.Result {
 	return eval.Result{}
 }
 
+func opFiles(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	return wildcardShorthand(c, v, "files", "+files")
+}
+
+func opDirs(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	return wildcardShorthand(c, v, "dirs", "+dir")
+}
+
+// files and dirs are wildcard with a fixed entry kind. Extra kind flags stay
+// on wildcard, where unions and exclusions are explicit.
+func wildcardShorthand(c *eval.Context, v []core.Value, name string, flag string) eval.Result {
+	for i := range v {
+		value := v[i]
+		if value.Kind == core.String && len(value.Text) != 0 && (value.Text[0] == '+' || value.Text[0] == '-') {
+			discardArgCallables(c, v)
+			return c.InvalidOperation(name + " does not accept kind flags; use wildcard")
+		}
+	}
+	flagValue := core.NewString(c.Run, flag)
+	args := slices.Append(c.Run, nil, flagValue)
+	for i := range v { args = slices.Append(c.Run, args, v[i]) }
+	result := opWildcard(c, nil, args)
+	flagValue.Free(c.Run)
+	slices.Free(c.Run, args)
+	return result
+}
+
+func kindShorthandPreflight(c *eval.Context, arguments []*expr.Expr) eval.Result {
+	for i := range arguments {
+		e := arguments[i]
+		text := ""
+		if e.Kind == expr.Symbol { text = e.Text }
+		if e.Kind == expr.String && e.Pattern == nil && len(e.Parts) == 1 && e.Parts[0].Expr == nil { text = e.Parts[0].Text }
+		if len(text) != 0 && (text[0] == '+' || text[0] == '-') {
+			return c.InvalidOperation("kind shorthand does not accept kind flags; use wildcard")
+		}
+	}
+	return eval.Result{}
+}
+
 func opWildcard(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	var patterns []core.Value

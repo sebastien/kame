@@ -34,10 +34,11 @@ func runList(args []string, out io.Writer, errOut io.Writer) int {
 	if len(parsed.Targets) != 0 { query = parsed.Targets[0] }
 	var buffer = bytes.NewBuffer(mem.System, nil)
 	defer buffer.Free()
-	session.Program.WriteTargetList(&buffer, query)
 	if parsed.JSON {
+		session.Program.WriteTargetList(&buffer, query)
 		io.WriteString(out, buffer.String()+"\n")
 	} else {
+		session.Program.WriteTargetReport(&buffer, query)
 		cli.WriteReport(out, "list", buffer.String(), stdoutColor)
 	}
 	return 0
