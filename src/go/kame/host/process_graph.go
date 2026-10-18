@@ -29,6 +29,7 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 	}
 	for i := range request.Stages {
 		stage := request.Stages[i]
+		if stage.Order < 0 || stage.Order > 1 || (stage.Order != 0 && stage.Kind != "merge") { return "KASH_MUX_ARITY" }
 		if stage.BufferBytes < 0 || stage.BufferBytes > 65536 || (stage.BufferBytes != 0 && stage.Kind != "merge" && stage.Kind != "broadcast" && stage.Kind != "balance") { return "KASH_MUX_ARITY" }
 		if stage.Overflow < 0 || stage.Overflow > 3 || stage.BufferItems < 0 || stage.BufferItems > 1024 || (stage.Overflow == 0 && stage.BufferItems != 0) || (stage.Overflow != 0 && stage.Kind != "broadcast") || (stage.Overflow == 3 && stage.BufferItems > 1) { return "KASH_MUX_ARITY" }
 		if stage.Framed && outgoing[i] == 0 { return "KASH_FRAME_MISMATCH" }
@@ -75,6 +76,7 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 		if stage.Kind == "encode" || stage.Kind == "" { expected = false }
 		if stage.Kind == "balance" && !input { return "KASH_FRAME_REQUIRED" }
 		if stage.Overflow != 0 && !input { return "KASH_FRAME_REQUIRED" }
+		if stage.Order != 0 && !input { return "KASH_FRAME_REQUIRED" }
 		if stage.Framed != expected || (stage.Kind == "frame" && input) || ((stage.Kind == "filter" || stage.Kind == "encode") && !input) || (stage.Kind == "" && input) { return "KASH_FRAME_MISMATCH" }
 	}
 	return ""

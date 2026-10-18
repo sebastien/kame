@@ -329,7 +329,23 @@ are normally at least 100 ms apart. Native live counters are individually atomic
 not transactional across fields; use terminal Results for final accounting.
 External processes do not expose internal waits, and high-water marks are not
 current queue occupancy. Wait states are I/O interest, not deadlock detection.
-Alternate ordering/failure policies and per-item workers remain pending.
+### Explicit merge ordering
+
+```kash
+(source-a |(frame :lines), source-b |(frame :lines))
+  |(merge :order round-robin :buffer 4096) cat
+```
+
+`:order ready` is the default fair ready-input scheduler. `:order round-robin`
+waits for each open input's next whole record in port order, beginning with the
+first input, and skips inputs only after EOF. Unequal lengths and partial final
+lines remain lossless. Strict ordering requires framing and respects the same
+per-input byte budget; fast inputs backpressure instead of filling a reorder
+buffer. It does not recover original source order when branches change record
+counts. Avoid strict ordering when a producer depends on another input being
+consumed first. Implicit branch rejoins retain ready ordering.
+
+Alternate failure policies and per-item workers remain pending.
 
 ### Live stream arguments
 

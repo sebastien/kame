@@ -149,6 +149,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("operator"); e.Str(value.Text)
 		if value.Int != 0 { e.Str("bufferBytes"); e.Int(value.Int) }
 		if value.StreamOverflow != 0 { e.Str("overflow"); e.Str(expr.StreamOverflowName(value.StreamOverflow)); e.Str("bufferItems"); e.Int(int64(value.BufferItems)) }
+		if value.StreamOrder != 0 { e.Str("order"); e.Str("round-robin") }
 		if len(value.Body) != 0 { e.Str("selected"); e.expr(value.Body[0]) }
 	}
 	if value.Exit != "" { e.Str("rejoin"); e.Str(value.Exit) }

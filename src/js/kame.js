@@ -1402,14 +1402,14 @@ class Module {
     } finally {
       clearTimeout(cleanupTimer);
       if (notifyCancellation) bodySignal.removeEventListener('abort', notifyCancellation);
-      if ([3, 13, 14, 15, 16, 32, 33, 34, 35].includes(kind)) this.processGroups.delete(`${instance}:${rawRequest}`);
+      if ([3, 13, 14, 15, 16, 32, 33, 34, 35, 36].includes(kind)) this.processGroups.delete(`${instance}:${rawRequest}`);
     }
   }
 
   async dispatch(instance, request, kind, payload, data, context, key, record, rawRequest) {
     const grants = context.grants;
     if (kind === 26) return this.pluginCallback(instance, request, payload, context);
-    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35].includes(kind)) {
+    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35, 36].includes(kind)) {
       const response = await this.customHostRequest(instance, request, kind, payload, data, context, key, record);
       if (response !== undefined) return response;
     }
@@ -1557,12 +1557,12 @@ class Module {
       const encoded = this.write(value);
       return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
     }
-    if (kind === 13 || kind === 14 || kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35) {
+    if (kind === 13 || kind === 14 || kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36) {
       if (!grants.run) return this.deny(instance, request);
       const decoded = JSON.parse(payload);
       const serviceReadyProbe = kind === 15 && decoded.serviceReady === true;
       const stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
-      const redirections = kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35 ? decoded : { input: '', output: '', append: false };
+      const redirections = kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36 ? decoded : { input: '', output: '', append: false };
       redirections.wireKind = kind;
       for (const [field, capability] of [['input', 'read'], ['output', 'write']]) {
         const name = redirections[field];
@@ -1589,7 +1589,7 @@ class Module {
         new Uint8Array(this.exports.memory.buffer, pointer, chunk.length).set(chunk);
         return this.exports.kame_wasm_stream_item(instance, request, node, pointer, chunk.length);
       };
-      const onSnapshot = this.exports.kame_wasm_process_snapshot && [32, 33, 34, 35].includes(kind) ? (value) => {
+      const onSnapshot = this.exports.kame_wasm_process_snapshot && [32, 33, 34, 35, 36].includes(kind) ? (value) => {
         const data = new TextEncoder().encode(JSON.stringify(value));
         if (data.length > 1048576) return; // Progress is optional, never fail a large graph for inspection.
         const pointer = this.scratch('processSnapshot', data.length || 1);
@@ -1814,7 +1814,7 @@ class Module {
     const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 ? 'read'
       : kind === 2 ? 'write'
         : kind === 4 ? 'env'
-          : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 || kind === 32 || kind === 33 || kind === 34 || kind === 35 ? 'run' : null;
+          : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36 ? 'run' : null;
     if (capability && !context.grants[capability]) return this.deny(instance, request, capability);
     if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 || kind === 2) && typeof payload === 'string') {
       const grantKind = kind === 2 ? 'write' : 'read';
@@ -1826,14 +1826,14 @@ class Module {
       }
       if (roots !== null && roots !== undefined && names.some((name) => !pathGranted(resolve(context.cwd ?? process.cwd(), name), roots))) return this.deny(instance, request, grantKind);
     }
-    if (capability === 'run' && context.runRoots !== null && context.runRoots !== undefined && [13, 14, 15, 32, 33, 34, 35].includes(kind)) {
+    if (capability === 'run' && context.runRoots !== null && context.runRoots !== undefined && [13, 14, 15, 32, 33, 34, 35, 36].includes(kind)) {
       let stages, decoded;
       try {
         decoded = JSON.parse(payload);
         stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
       } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process request'); }
       if (!Array.isArray(stages) || stages.some((args, i) => {
-        if ((kind === 32 || kind === 33 || kind === 34 || kind === 35) && Array.isArray(args) && args.length === 0 && ['merge', 'broadcast', 'balance', 'frame', 'encode', 'filter', 'copy'].includes(decoded.kinds?.[i])) return false;
+        if ((kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36) && Array.isArray(args) && args.length === 0 && ['merge', 'broadcast', 'balance', 'frame', 'encode', 'filter', 'copy'].includes(decoded.kinds?.[i])) return false;
         return !Array.isArray(args) || typeof args[0] !== 'string' || !args[0].includes('/') || !pathGranted(resolve(context.cwd ?? process.cwd(), args[0]), context.runRoots);
       })) return this.deny(instance, request, 'run');
     }
@@ -2955,9 +2955,10 @@ function processDeadline(milliseconds, callback) {
 // portable evaluator owns language semantics; this is the host trust boundary.
 function prepareByteTopology(stages, context) {
   const invalid = (code = 'KASH_MUX_ARITY') => { throw Object.assign(new Error('invalid process graph topology'), { code }); };
-  if (context.kinds === undefined) { if ([32, 33, 34, 35].includes(context.wireKind)) invalid(); return null; }
+  if (context.kinds === undefined) { if ([32, 33, 34, 35, 36].includes(context.wireKind)) invalid(); return null; }
   if (context.wireKind === 34 && !Array.isArray(context.buffers)) invalid();
   if (context.wireKind === 35 && (!Array.isArray(context.overflows) || !Array.isArray(context.bufferItems))) invalid();
+  if (context.wireKind === 36 && [context.orders, context.buffers, context.overflows, context.bufferItems].some((policy) => !Array.isArray(policy))) invalid();
   if (process.platform === 'win32') throw Object.assign(new Error('streaming process graphs are not supported by this Windows host'), { code: Array.isArray(context.edges) && context.edges.some((edge) => Array.isArray(edge) && edge[2] > 0) ? 'KASH_STREAM_OPERAND_UNSUPPORTED' : 'HOST_FAIL' });
   const { kinds, edges, setup } = context;
   if (!Array.isArray(stages) || !stages.length || !Array.isArray(kinds) || kinds.length !== stages.length || !Array.isArray(edges) || !Array.isArray(setup) || setup.length !== stages.length || context.input || context.output) invalid();
@@ -3009,8 +3010,11 @@ function prepareByteTopology(stages, context) {
     if (!Number.isSafeInteger(policy) || policy < 0 || policy > 3 || !Number.isSafeInteger(items) || items < 0 || items > 1024 || (!policy && items) || (policy && kinds[node] !== 'broadcast') || (policy === 3 && items > 1)) invalid();
     if (policy && !framed[node]) invalid('KASH_FRAME_REQUIRED');
   }
+  const orders = context.orders === undefined ? stages.map(() => 0) : context.orders;
+  if (!Array.isArray(orders) || orders.length !== stages.length || orders.some((order, node) => !Number.isSafeInteger(order) || order < 0 || order > 1 || (order && kinds[node] !== 'merge'))) invalid();
+  if (orders.some((order, node) => order && !framed[node])) invalid('KASH_FRAME_REQUIRED');
   const edgeMetrics = edges.map(([from, to]) => [kinds[from] ? overflows[from] ? 3 : 1 : kinds[to] ? 2 : 0, 0, framed[from] ? 0 : -1, framed[from] ? 0 : -1, 0, 0, 0]);
-  return { kinds, edges, inputs, outputs, framed, buffers, overflows, bufferItems, edgeMetrics };
+  return { kinds, edges, inputs, outputs, framed, buffers, overflows, bufferItems, orders, edgeMetrics };
 }
 
 function metricAdd(metric, field, amount) {
@@ -3028,7 +3032,7 @@ function metricWrite(metric, length) {
 // Paused merges, broadcasts, and balancing share one bounded pump. Each turn
 // retains one chunk/record until its assigned destinations flush; incomplete
 // records are bounded per input. Defaults are 16 KiB bytes / 64 KiB records.
-function startByteMux(readers, writers, fail, done, kind = '', framed = false, item = null, budget = 0, overflow = 0, itemLimit = 0, metrics = null, setState = () => {}) {
+function startByteMux(readers, writers, fail, done, kind = '', framed = false, item = null, budget = 0, overflow = 0, itemLimit = 0, metrics = null, setState = () => {}, order = 0) {
   let cursor = 0, destination = 0, scheduled = false, pending = false, closing = false, disposed = false;
   const recordLimit = budget || 64 * 1024, byteLimit = budget || 16 * 1024;
   const queueLimit = itemLimit || (overflow === 3 ? 1 : 64);
@@ -3143,7 +3147,10 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
       const next = (cursor + offset) % readers.length, reader = readers[next];
       const chunk = readItem(reader, states[next], next);
       if (disposed) return;
-      if (chunk === null) continue;
+      if (chunk === null) {
+        if (order && !reader.readableEnded) { setState(2); return; }
+        continue;
+      }
       cursor = (next + 1) % readers.length;
       if (overflow) { queueRecord(chunk); schedule(); return; }
       pending = true;
@@ -3480,7 +3487,7 @@ function runArgvCapture(stages, context) {
           if (liveStates[i] !== 5) liveStates[i] = failure !== null || graphFailure !== null ? 6 : 4;
           remaining--;
           finish();
-        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i], { inputs: topology.inputs[i].map((edge) => topology.edgeMetrics[edge]), outputs: outputEdges.map((edge) => topology.edgeMetrics[edge]) }, (state) => { if (!results[i] && liveStates[i] !== 5) liveStates[i] = state; }));
+        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i], { inputs: topology.inputs[i].map((edge) => topology.edgeMetrics[edge]), outputs: outputEdges.map((edge) => topology.edgeMetrics[edge]) }, (state) => { if (!results[i] && liveStates[i] !== 5) liveStates[i] = state; }, topology.orders[i]));
         remaining++;
       }
     } catch { stop('HOST_FAIL', 'cannot start process'); }

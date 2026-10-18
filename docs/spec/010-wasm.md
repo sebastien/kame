@@ -408,6 +408,14 @@ before completion. Missing support does not downgrade execution semantics.
 Live fields are independent observations, not a cross-field transaction. Final
 Result counters retain the stronger post-completion contract.
 
+Process request kind **36** requires explicit merge-order support. Its descriptor
+adds a node-aligned `orders` integer array (0 ready, 1 strict framed round-robin)
+and always includes `buffers`, `overflows`, and `bufferItems`, including defaults.
+Only merge nodes may use order 1, and their inputs must be framed. Hosts reject
+missing/malformed policy arrays before launch or redirection truncation; older
+hosts must reject the unknown request kind rather than silently reorder output.
+Kinds 32–35 retain their existing default ready-merge semantics.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly

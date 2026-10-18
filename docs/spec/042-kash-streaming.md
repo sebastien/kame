@@ -144,8 +144,26 @@ graphs. Queue high-water marks are not current queue occupancy. Progress is
 advisory: allocation failure may omit samples, and terminal Results remain the
 authoritative final measurements. No new build prerequisites are inferred.
 
-Alternate ordering/failure policies and explicit per-item workers remain
-subsequent Slice E work.
+Explicit merge ordering is available as `|(merge :order ready|round-robin)`.
+`ready` is the unchanged default: fair service of ready inputs without a global
+event-order guarantee. `round-robin` requires framed inputs and takes one whole
+record from each still-open input in prepared input-edge order, beginning with
+the first. It waits for the current input even when another is ready, advances
+only after the full record is forwarded, and skips an input only after EOF.
+Unequal producers and empty producers therefore drain losslessly. Working
+buffers remain bounded per input by `:buffer`; no reorder history, implicit
+spooling, or new per-record process is introduced. Byte streams reject strict
+ordering before effects because read chunks are not records.
+
+This is deterministic port-turn ordering, not reconstruction of original source
+identity after filters or transformations change cardinality. It may intentionally
+stall fast branches and can expose application-level demand deadlocks; use ready
+ordering when branches depend on each other's consumption. Existing fail-fast,
+recovery, async ownership, timeout, and cancellation contracts remain unchanged.
+Static inspection distinguishes the selected strategy without evaluation.
+
+Alternate failure policies and explicit per-item workers remain subsequent
+Slice E work.
 Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing
@@ -596,6 +614,12 @@ Buffers are measured in bytes for byte channels and bytes-plus-item counts for f
 ### 9.3 Merge ordering and fairness
 
 `|(merge)` and the merge implied by `>&`/`>@` preserve per-input byte order; for framed channels they additionally preserve complete-item boundaries. They do **not** promise global event order or original source order. A merger must avoid starvation of ready inputs; a deterministic round-robin-ready scheduler is a suitable baseline, without promising deterministic output across timing-dependent runs.
+
+Implemented explicit `|(merge :order ready)` selects that default. Explicit
+`|(merge :order round-robin)` instead waits for one complete framed record from
+each open input in port order and skips EOF inputs. Turns advance on whole
+records, never private frame-header fragments. This stronger policy intentionally
+propagates slow-input backpressure. It is not an original-source ordered rejoin.
 
 **Ordered rejoin**, if added, must be explicit; it requires sequence identity, bounded lookahead, and potentially stalling a fast branch behind a slow one.
 

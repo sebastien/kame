@@ -145,8 +145,8 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 		if connection.Kind == expr.CommandMux { policy = connection.Text }
 		if policy == "merge" && (i+1 == len(e.Items) || e.Items[i+1].Kind == expr.CommandMux) {
 			if len(ports.Outputs) < 2 { flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span }
-			merge := addStreamNode(c, flat, "merge", connection.Span)
-			flat.Items[merge].Int = connection.Int
+			merge := len(flat.Items)
+			flat.Items = slices.Append(c.Run, flat.Items, expr.Clone(c.Run, connection))
 			for j := range ports.Outputs { flat.Edges = slices.Append(c.Run, flat.Edges, expr.CommandEdge{From: ports.Outputs[j], To: merge}) }
 			slices.Free(c.Run, ports.Outputs); ports.Outputs = slices.Append(c.Run, []int{}, merge)
 			continue

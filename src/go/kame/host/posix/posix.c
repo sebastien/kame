@@ -1625,6 +1625,8 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
     km_worker_node = node; km_worker_edges = count;
     int kind = mode & 15;
     bool framed = (mode & 16) || kind == 4;
+    bool ordered = (mode & 128) != 0;
+    if (ordered && (kind != 1 || !framed)) return 125;
     int budget = mode >> 8;
     if (!budget) budget = framed ? KM_RECORD_LIMIT : KM_CHUNK;
     if (budget < 1 || budget > KM_RECORD_LIMIT) return 125;
@@ -1658,11 +1660,13 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
     while (active && !result) {
         int ready;
         km_worker_wait(KM_WAIT_INPUT);
-        do { ready = poll(inputs, (nfds_t)readers, -1); } while (ready < 0 && errno == EINTR);
+        if (ordered) while (inputs[cursor].fd < 0) cursor = (cursor + 1) % readers;
+        do { ready = ordered ? poll(inputs + cursor, 1, -1) : poll(inputs, (nfds_t)readers, -1); } while (ready < 0 && errno == EINTR);
         km_worker_wait(KM_RUNNING);
         if (ready < 0) { result = 125; break; }
         for (int offset = 0; offset < readers; offset++) {
             int next = (cursor + offset) % readers;
+            if (ordered && offset != 0) break;
             if (inputs[next].fd < 0 || !inputs[next].revents) continue;
             ssize_t n;
             km_frame_input *frame = framed ? &frames[next] : NULL;
@@ -1673,9 +1677,11 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
             km_metric_read(inputs[next].fd, (int)n);
             if (!n) {
                 if (framed && frame->length) { result = 125; break; }
-                close(inputs[next].fd); inputs[next].fd = -1; active--; continue;
+                close(inputs[next].fd); inputs[next].fd = -1; active--;
+                if (ordered) { cursor = (next + 1) % readers; break; }
+                continue;
             }
-            cursor = (next + 1) % readers;
+            if (!ordered) cursor = (next + 1) % readers;
             int length = (int)n, selected = 0;
             if (framed) {
                 frame->length += (int)n;

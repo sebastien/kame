@@ -94,3 +94,14 @@ func TestMetricsPayloadPreservesUnknownsAndOwnedRows(t *testing.T) {
 	}
 	value.Free(t.Allocator())
 }
+
+func TestOrderedMergeRequiresFramesAndClosedPolicy(t *testing.T) {
+	stages := []host.ProcessStage{{Argv: []string{"a"}}, {Argv: []string{"b"}}, {Kind: "merge", Order: 1}, {Argv: []string{"c"}}}
+	edges := []host.ProcessEdge{{From: 0, To: 2}, {From: 1, To: 2}, {From: 2, To: 3}}
+	request := host.ProcessRequest{Topology: true, Stages: stages, Edges: edges}
+	if host.ProcessTopologyError(t.Allocator(), request) != "KASH_FRAME_REQUIRED" { t.Error("ordered byte merge accepted") }
+	stages[2].Order = 2
+	if host.ProcessTopologyError(t.Allocator(), request) != "KASH_MUX_ARITY" { t.Error("unknown merge ordering accepted") }
+	stages[2].Order = 0; stages[0].Order = 1
+	if host.ProcessTopologyError(t.Allocator(), request) != "KASH_MUX_ARITY" { t.Error("ordering accepted on an executable") }
+}

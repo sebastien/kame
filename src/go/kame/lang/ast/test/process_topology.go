@@ -42,3 +42,10 @@ func TestLossyInspectionReportsPendingAndProtectedFlightBounds(t *testing.T) {
 	fields := []string{"\"overflow\":\"drop-old\"", "\"queueItems\":8", "\"queueBufferBytes\":4096", "\"inFlightRecords\":1"}
 	for _, field := range fields { if !strings.Contains(buffer.String(), field) { t.Errorf("missing lossy bound: %s", field) } }
 }
+
+func TestOrderedMergeInspectionRetainsStrictPolicyWithoutEffects(t *testing.T) {
+	buffer := bytes.NewBuffer(t.Allocator(), nil); defer buffer.Free()
+	text := "(printf $(touch ./must-not-run) |(frame :lines), printf b |(frame :lines)) |(merge :order round-robin :buffer 8) |(encode :lines)"
+	if ast.WriteAST(&buffer, "kash", "ordered.kash", text) != 0 { t.Error("ordered graph failed inspection") }
+	if !strings.Contains(buffer.String(), "\"ordering\":\"round-robin\"") || !strings.Contains(buffer.String(), "\"bufferBytes\":8") { t.Error("ordered policy lost during preparation/clone") }
+}

@@ -48,7 +48,10 @@ func (e *astEncoder) processTopology(value *expr.Expr) {
 				}
 				e.Str("failure"); e.Str("fail-fast")
 				if node.Text == "balance" { e.Str("strategy"); e.Str("round-robin") }
-				if node.Text == "merge" { e.Str("ordering"); e.Str("per-input"); e.Str("strategy"); e.Str("round-robin-ready") }
+				if node.Text == "merge" {
+					e.Str("ordering"); if node.StreamOrder == 1 { e.Str("round-robin") } else { e.Str("per-input") }
+					e.Str("strategy"); if node.StreamOrder == 1 { e.Str("round-robin") } else { e.Str("round-robin-ready") }
+				}
 			}
 			if node.Kind == expr.CommandMux && node.Text == "filter" { e.Str("predicateSpan"); e.span(node.Items[0].Span) }
 			e.EndObject()

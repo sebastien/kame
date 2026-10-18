@@ -78,6 +78,7 @@ type ExecutorDescriptor struct {
 }
 
 type ProcessStage struct {
+	Order int // 0 ready, 1 strict framed round-robin (merge only)
 	BufferBytes int // zero selects the host's bounded default; native muxes only
 	Overflow int // 0 block, 1 drop-new, 2 drop-old, 3 latest; framed broadcast only
 	BufferItems int // pending records per destination; excludes one in-flight record

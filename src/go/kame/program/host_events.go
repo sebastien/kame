@@ -107,6 +107,7 @@ func (p *Program) drainRequests() {
 			buffers := host.PayloadList(request.Payload, "buffers")
 			overflows := host.PayloadList(request.Payload, "overflows")
 			itemLimits := host.PayloadList(request.Payload, "bufferItems")
+			orders := host.PayloadList(request.Payload, "orders")
 			var edges []host.ProcessEdge
 			validEdges := true
 			if len(buffers) != 0 && len(buffers) != len(graphs) { validEdges = false }
@@ -114,6 +115,8 @@ func (p *Program) drainRequests() {
 			if (len(overflows) != 0 && len(overflows) != len(graphs)) || (len(itemLimits) != 0 && len(itemLimits) != len(graphs)) { validEdges = false }
 			for i := range overflows { if overflows[i].Kind != core.Int || overflows[i].Int < 0 || overflows[i].Int > 3 { validEdges = false } }
 			for i := range itemLimits { if itemLimits[i].Kind != core.Int || itemLimits[i].Int < 0 || itemLimits[i].Int > 1024 { validEdges = false } }
+			if len(orders) != 0 && len(orders) != len(graphs) { validEdges = false }
+			for i := range orders { if orders[i].Kind != core.Int || orders[i].Int < 0 || orders[i].Int > 1 { validEdges = false } }
 			connections := host.PayloadList(request.Payload, "edges")
 			for i := range connections {
 				items := connections[i].List
@@ -135,6 +138,7 @@ func (p *Program) drainRequests() {
 				if i < len(buffers) { stage.BufferBytes = int(buffers[i].Int) }
 				if i < len(overflows) { stage.Overflow = int(overflows[i].Int) }
 				if i < len(itemLimits) { stage.BufferItems = int(itemLimits[i].Int) }
+				if i < len(orders) { stage.Order = int(orders[i].Int) }
 				if i < len(kinds) { stage.Kind = kinds[i].Text }
 				framed := host.PayloadList(request.Payload, "framed")
 				if i < len(framed) { stage.Framed = framed[i].Bool }

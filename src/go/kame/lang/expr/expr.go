@@ -100,6 +100,7 @@ type Expr struct {
 	Edges []CommandEdge
 	StreamKinds []int
 	StreamOverflow int // 0 block, 1 drop-new, 2 drop-old, 3 latest
+	StreamOrder int // 0 ready, 1 strict framed round-robin (merge only)
 	BufferItems int
 	Exit string
 	Channels []string

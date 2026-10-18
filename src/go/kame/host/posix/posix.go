@@ -227,6 +227,7 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				if request.Stages[i].Kind == "balance" { kind = 7 }
 				if request.Stages[i].Framed { kind += 16 }
 				kind += request.Stages[i].Overflow * 32
+				kind += request.Stages[i].Order * 128
 				// Low bits retain kind/framing; higher bits carry a <=64 KiB budget.
 				kind += request.Stages[i].BufferBytes * 256
 				kinds = slices.Append(h.Alloc, kinds, kind)

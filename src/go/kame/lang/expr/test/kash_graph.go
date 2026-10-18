@@ -33,6 +33,8 @@ func TestProcessGroupsAndMuxRoundTrip(t *testing.T) {
 		"$(printf a |(frame :lines) |(broadcast :overflow drop-old) (cat, cat))",
 		"$(printf a |(frame :lines) |(broadcast :overflow latest :items 1) (cat, cat))",
 		"$((printf a, printf b) |(merge :overflow block) cat)",
+		"$((printf a |(frame :lines), printf b |(frame :lines)) |(merge :order round-robin :buffer 8) cat)",
+		"$((printf a, printf b) |(merge :order ready) cat)",
 	}
 	for i := range texts {
 		r := expr.Parse(t.Allocator(), "graph.km", texts[i])
