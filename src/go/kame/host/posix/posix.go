@@ -91,8 +91,8 @@ func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []
 }
 
 //so:extern nodecay
-func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, streamItem func(any, int64, int, []byte) int, streamContext any) c.Int {
-	_ = operandArguments
+func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, itemLimits []int, streamItem func(any, int64, int, []byte) int, streamContext any) c.Int {
+	_, _ = operandArguments, itemLimits
 	_, _ = streamItem, streamContext
 	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput, kinds, edges, inputs, outputs, appends
 	return 0
@@ -208,7 +208,7 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		var directories, environment []string
 		var environmentLengths []int
 		var timeouts []int64
-		var kinds, edges, appends, operandArguments []int
+		var kinds, edges, appends, operandArguments, itemLimits []int
 		var inputs, outputs []string
 		for i := range request.Stages {
 			if request.Topology {
@@ -221,9 +221,11 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				if request.Stages[i].Kind == "copy" { kind = 6 }
 				if request.Stages[i].Kind == "balance" { kind = 7 }
 				if request.Stages[i].Framed { kind += 16 }
+				kind += request.Stages[i].Overflow * 32
 				// Low bits retain kind/framing; higher bits carry a <=64 KiB budget.
 				kind += request.Stages[i].BufferBytes * 256
 				kinds = slices.Append(h.Alloc, kinds, kind)
+				itemLimits = slices.Append(h.Alloc, itemLimits, request.Stages[i].BufferItems)
 				inputs = slices.Append(h.Alloc, inputs, request.Stages[i].Input)
 				outputs = slices.Append(h.Alloc, outputs, request.Stages[i].Output)
 				appendOutput := 0; if request.Stages[i].Append { appendOutput = 1 }
@@ -263,10 +265,11 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		ok := false
 		if request.Topology {
 			for i := range request.Edges { edges = slices.Append(h.Alloc, edges, request.Edges[i].From); edges = slices.Append(h.Alloc, edges, request.Edges[i].To); operandArguments = slices.Append(h.Alloc, operandArguments, request.Edges[i].Argument) }
-			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, request.StreamItem, request.StreamContext) == 0
+			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, itemLimits, request.StreamItem, request.StreamContext) == 0
 		} else { ok = km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append) == 0 }
 		slices.Free(h.Alloc, kinds); slices.Free(h.Alloc, edges); slices.Free(h.Alloc, inputs); slices.Free(h.Alloc, outputs); slices.Free(h.Alloc, appends)
 		slices.Free(h.Alloc, operandArguments)
+		slices.Free(h.Alloc, itemLimits)
 		slices.Free(h.Alloc, arguments)
 		slices.Free(h.Alloc, lengths)
 		slices.Free(h.Alloc, directories)

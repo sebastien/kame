@@ -350,6 +350,7 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       return 2u;
     case host_RequestProcess:
       if (host_PayloadList(request.Payload, so_str("kinds")).len != 0) {
+        if (host_PayloadList(request.Payload, so_str("overflows")).len != 0) return 35u;
         if (host_PayloadList(request.Payload, so_str("buffers")).len != 0) return 34u;
         so_Slice edges = host_PayloadList(request.Payload, so_str("edges"));
         for (so_int i = 0; i < edges.len; i++) if (((core_Value *)edges.ptr)[i].List.len == 3) return 33u;

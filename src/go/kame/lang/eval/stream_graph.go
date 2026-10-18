@@ -36,6 +36,7 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 			if !ready { continue }
 			node := graph.Items[i]
 			if count == 0 { return failure(c.Run, "KASH_MUX_ARITY", node.Span, "stream operator requires an input") }
+			if node.StreamOverflow != 0 && input != 1 { return failure(c.Run, "KASH_FRAME_REQUIRED", node.Span, "lossy broadcast requires explicit record framing") }
 			output := input
 			if node.Text == "frame" {
 				if input != 0 { return failure(c.Run, "KASH_FRAME_MISMATCH", node.Span, "frame :lines requires bytes") }

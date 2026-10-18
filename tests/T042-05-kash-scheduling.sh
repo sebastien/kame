@@ -66,7 +66,8 @@ stream right
 	expect "named balance output retains framed transport" cmp -s "$left" "$work/expected"
 	printf '2\n4\n' >"$work/expected"
 	expect "second named output is an independent channel" cmp -s "$right" "$work/expected"
-	run_case '$(cat <(printf "1\n2\n3\n4\n" |(frame :lines) |(balance :buffer 2) (cat, cat) |(merge :buffer 3) cat) | sort)' 0 '' expr
+	# External worker stdout is bytes; reframe it before assuming line-safe merge.
+	run_case '$(cat <(printf "1\n2\n3\n4\n" |(frame :lines) |(balance :buffer 2) (cat |(frame :lines), cat |(frame :lines)) |(merge :buffer 3) cat) | sort)' 0 '' expr
 	expect "injected balanced producers own one explicit merge" grep -Fq '"1\n2\n3\n4\n"' "$work/$backend.out"
 
 	test-step "$backend: byte and record budgets are lossless, explicit, and bounded"

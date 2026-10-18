@@ -99,10 +99,15 @@ func (p *Program) drainRequests() {
 			setups := host.PayloadSetups(request.Payload)
 			kinds := host.PayloadList(request.Payload, "kinds")
 			buffers := host.PayloadList(request.Payload, "buffers")
+			overflows := host.PayloadList(request.Payload, "overflows")
+			itemLimits := host.PayloadList(request.Payload, "bufferItems")
 			var edges []host.ProcessEdge
 			validEdges := true
 			if len(buffers) != 0 && len(buffers) != len(graphs) { validEdges = false }
 			for i := range buffers { if buffers[i].Kind != core.Int || buffers[i].Int < 0 || buffers[i].Int > 65536 { validEdges = false } }
+			if (len(overflows) != 0 && len(overflows) != len(graphs)) || (len(itemLimits) != 0 && len(itemLimits) != len(graphs)) { validEdges = false }
+			for i := range overflows { if overflows[i].Kind != core.Int || overflows[i].Int < 0 || overflows[i].Int > 3 { validEdges = false } }
+			for i := range itemLimits { if itemLimits[i].Kind != core.Int || itemLimits[i].Int < 0 || itemLimits[i].Int > 1024 { validEdges = false } }
 			connections := host.PayloadList(request.Payload, "edges")
 			for i := range connections {
 				items := connections[i].List
@@ -122,6 +127,8 @@ func (p *Program) drainRequests() {
 				}
 				stage := host.ProcessStage{Argv: arguments}
 				if i < len(buffers) { stage.BufferBytes = int(buffers[i].Int) }
+				if i < len(overflows) { stage.Overflow = int(overflows[i].Int) }
+				if i < len(itemLimits) { stage.BufferItems = int(itemLimits[i].Int) }
 				if i < len(kinds) { stage.Kind = kinds[i].Text }
 				framed := host.PayloadList(request.Payload, "framed")
 				if i < len(framed) { stage.Framed = framed[i].Bool }
@@ -189,7 +196,7 @@ func (p *Program) drainRequests() {
 			for i := range edges { if edges[i].Argument != 0 { hasOperands = true } }
 			unsupported := hasOperands && p.Host != nil && !p.Host.SupportsStreamOperands()
 			if !validEdges {
-				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "KASH_MUX_ARITY", "invalid process graph edge descriptor")})
+				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "KASH_MUX_ARITY", "invalid process graph descriptor")})
 			} else if unsupported {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "KASH_STREAM_OPERAND_UNSUPPORTED", "host cannot expose a live inherited descriptor operand")})
 			} else if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(processRequest) {

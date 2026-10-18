@@ -78,6 +78,8 @@ type ExecutorDescriptor struct {
 
 type ProcessStage struct {
 	BufferBytes int // zero selects the host's bounded default; native muxes only
+	Overflow int // 0 block, 1 drop-new, 2 drop-old, 3 latest; framed broadcast only
+	BufferItems int // pending records per destination; excludes one in-flight record
 	Framed bool // output uses the private framed-line transport
 	Kind string // empty for an executable; otherwise a native stream operator
 	Argv []string

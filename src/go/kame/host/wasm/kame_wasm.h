@@ -88,7 +88,8 @@ enum kame_wasm_request_kind {
   // Older hosts must reject this kind, never reinterpret it as a pipeline.
   KAME_WASM_REQUEST_PROCESS_TOPOLOGY = 32,
   KAME_WASM_REQUEST_PROCESS_OPERANDS = 33,
-  KAME_WASM_REQUEST_PROCESS_POLICIES = 34
+  KAME_WASM_REQUEST_PROCESS_POLICIES = 34,
+  KAME_WASM_REQUEST_PROCESS_LOSSY = 35
 };
 
 /* Terminal process outcomes reported by kame_wasm_process_terminal. */

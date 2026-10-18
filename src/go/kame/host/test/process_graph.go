@@ -67,3 +67,19 @@ func TestBalanceRequiresFramesAndValidatedWorkingBudget(t *testing.T) {
 	stages[0].BufferBytes = 4
 	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_MUX_ARITY" { t.Error("working budget accepted on an executable") }
 }
+
+func TestLossyBroadcastRequiresFramesAndBoundedPendingStorage(t *testing.T) {
+	stages := []host.ProcessStage{{Argv: []string{"source"}}, {Kind: "frame", Framed: true}, {Kind: "broadcast", Framed: true, Overflow: 1, BufferBytes: 4096, BufferItems: 4}, {Kind: "encode"}, {Kind: "encode"}, {Argv: []string{"left"}}, {Argv: []string{"right"}}}
+	edges := []host.ProcessEdge{{From: 0, To: 1}, {From: 1, To: 2}, {From: 2, To: 3}, {From: 2, To: 4}, {From: 3, To: 5}, {From: 4, To: 6}}
+	request := host.ProcessRequest{Topology: true, Stages: stages, Edges: edges}
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "" { t.Errorf("lossy broadcast rejected: %s", code) }
+	stages[2].BufferItems = 1025
+	if host.ProcessTopologyError(t.Allocator(), request) != "KASH_MUX_ARITY" { t.Error("unbounded pending queue accepted") }
+	stages[2].BufferItems, stages[2].Overflow = 2, 3
+	if host.ProcessTopologyError(t.Allocator(), request) != "KASH_MUX_ARITY" { t.Error("latest accepted more than one pending item") }
+	stages[2].BufferItems, stages[2].Overflow, stages[2].Kind = 1, 1, "balance"
+	if host.ProcessTopologyError(t.Allocator(), request) != "KASH_MUX_ARITY" { t.Error("lossy exactly-once balance accepted") }
+	stages[2].Kind = "broadcast"
+	stages[1].Kind, stages[1].Framed, stages[2].Framed = "copy", false, false
+	if host.ProcessTopologyError(t.Allocator(), request) != "KASH_FRAME_REQUIRED" { t.Error("lossy byte broadcast accepted") }
+}

@@ -1309,7 +1309,7 @@ fail:
 // Go structs. OS pipes carry intermediate bytes directly, with backpressure.
 int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output) {
     so_Slice empty = {0};
-    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty, empty, NULL, NULL);
+    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty, empty, empty, NULL, NULL);
 }
 
 bool km_stream_operands_supported(void) {
@@ -1414,8 +1414,124 @@ static int km_mux_frame(int node, int *edges, so_int *links, int count,
 
 typedef struct km_frame_input { unsigned char *data; int length, need; } km_frame_input;
 
+typedef struct km_queued_record { unsigned char *data; int length, offset; } km_queued_record;
+typedef struct km_record_queue {
+    km_queued_record *pending, flight;
+    int head, count, bytes;
+} km_record_queue;
+
+static km_queued_record km_queue_pop(km_record_queue *queue, int limit) {
+    km_queued_record record = queue->pending[queue->head];
+    queue->pending[queue->head] = (km_queued_record){0};
+    queue->head = (queue->head + 1) % limit;
+    queue->count--; queue->bytes -= record.length - 4;
+    return record;
+}
+
+static bool km_queue_push(km_record_queue *queue, int limit, int budget, int policy,
+                          unsigned char *data, int length) {
+    int payload = length - 4;
+    if (policy == 1 && (queue->count == limit || queue->bytes + payload > budget)) return true;
+    while (queue->count && (policy == 3 || queue->count == limit || queue->bytes + payload > budget)) {
+        km_queued_record old = km_queue_pop(queue, limit);
+        free(old.data);
+    }
+    unsigned char *copy = malloc((size_t)length);
+    if (!copy) return false;
+    memcpy(copy, data, (size_t)length);
+    queue->pending[(queue->head + queue->count) % limit] = (km_queued_record){.data = copy, .length = length};
+    queue->count++; queue->bytes += payload;
+    return true;
+}
+
+// Each destination has a bounded pending ring plus one protected in-flight
+// record. Never evict a partially written envelope: that would corrupt framing.
+static int km_run_lossy_broadcast(int node, int *edges, so_int *links, int count,
+                                  int budget, int limit, int policy) {
+    int outputs = 0, input = -1;
+    for (int i = 0; i < count; i++) {
+        if (links[i * 2] == node) outputs++;
+        if (links[i * 2 + 1] == node) input = edges[i * 2];
+    }
+    if (input < 0 || outputs < 2 || policy < 1 || policy > 3 || limit < 0 || limit > 1024) return 125;
+    if (!limit) limit = policy == 3 ? 1 : 64;
+    if (policy == 3 && limit != 1) return 125;
+    struct pollfd *fds = calloc((size_t)outputs + 1, sizeof(*fds));
+    km_record_queue *queues = calloc((size_t)outputs, sizeof(*queues));
+    unsigned char *record = malloc((size_t)budget + 4);
+    int result = 0;
+    if (!fds || !queues || !record) { result = 125; goto cleanup; }
+    fds[0] = (struct pollfd){.fd = input, .events = POLLIN};
+    int at = 1;
+    for (int i = 0; i < count; i++) if (links[i * 2] == node) {
+        int fd = edges[i * 2 + 1], flags = fcntl(fd, F_GETFL);
+        fds[at++].fd = fd;
+        if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK)) { result = 125; goto cleanup; }
+    }
+    for (int i = 0; i < outputs; i++) {
+        queues[i].pending = calloc((size_t)limit, sizeof(km_queued_record));
+        if (!queues[i].pending) { result = 125; goto cleanup; }
+    }
+    int active = outputs, length = 0, need = 4;
+    while (active && !result) {
+        for (int i = 0; i < outputs; i++) {
+            km_record_queue *queue = &queues[i];
+            if (fds[i + 1].fd < 0) continue;
+            if (fds[0].fd < 0 && !queue->count && !queue->flight.data) {
+                close(fds[i + 1].fd); fds[i + 1].fd = -1; active--;
+            }
+            fds[i + 1].events = queue->count || queue->flight.data ? POLLOUT : 0;
+        }
+        if (!active) break;
+        int ready;
+        do { ready = poll(fds, (nfds_t)outputs + 1, -1); } while (ready < 0 && errno == EINTR);
+        if (ready < 0) { result = 125; break; }
+        for (int i = 0; i < outputs; i++) {
+            if (fds[i + 1].revents & (POLLERR | POLLHUP | POLLNVAL)) { result = 125; break; }
+            if (!(fds[i + 1].revents & POLLOUT)) continue;
+            km_record_queue *queue = &queues[i];
+            if (!queue->flight.data && queue->count) queue->flight = km_queue_pop(queue, limit);
+            km_queued_record *flight = &queue->flight;
+            if (!flight->data) continue;
+            ssize_t n;
+            do { n = write(fds[i + 1].fd, flight->data + flight->offset, (size_t)(flight->length - flight->offset)); } while (n < 0 && errno == EINTR);
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) continue;
+            if (n <= 0) { result = 125; break; }
+            flight->offset += (int)n;
+            if (flight->offset == flight->length) { free(flight->data); *flight = (km_queued_record){0}; }
+        }
+        if (result || fds[0].fd < 0 || !fds[0].revents) continue;
+        ssize_t n;
+        do { n = read(fds[0].fd, record + length, (size_t)(need - length)); } while (n < 0 && errno == EINTR);
+        if (n < 0) { result = 125; break; }
+        if (!n) {
+            if (length) { result = 125; break; }
+            close(fds[0].fd); fds[0].fd = -1; continue;
+        }
+        length += (int)n;
+        if (length != need) continue;
+        if (need == 4) {
+            uint32_t size = 0;
+            for (int j = 0; j < 4; j++) size |= (uint32_t)record[j] << (j * 8);
+            if (!size || size > KM_RECORD_LIMIT) { result = KM_RECORD_TOO_LONG; break; }
+            if (size > (uint32_t)budget) { result = KM_BUFFER_LIMIT; break; }
+            need = 4 + (int)size;
+        } else {
+            for (int i = 0; i < outputs; i++) if (!km_queue_push(&queues[i], limit, budget, policy, record, length)) { result = 125; break; }
+            length = 0; need = 4;
+        }
+    }
+cleanup:
+    if (queues) for (int i = 0; i < outputs; i++) {
+        while (queues[i].count) { km_queued_record old = km_queue_pop(&queues[i], limit); free(old.data); }
+        free(queues[i].flight.data); free(queues[i].pending);
+    }
+    free(record); free(queues); free(fds);
+    return result;
+}
+
 static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
-                      int64_t id, km_stream_item item, void *context) {
+                      int item_limit, int64_t id, km_stream_item item, void *context) {
     int kind = mode & 15;
     bool framed = (mode & 16) || kind == 4;
     int budget = mode >> 8;
@@ -1429,6 +1545,12 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
     }
     km_mux_close_unowned(node, edges, links, count);
     signal(SIGPIPE, SIG_DFL); signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL);
+    int overflow = (mode >> 5) & 3;
+    if (overflow) {
+        free(inputs);
+        if (kind != 2 || !framed || readers != 1) return 125;
+        return km_run_lossy_broadcast(node, edges, links, count, budget, item_limit, overflow);
+    }
     if (kind == 3) { free(inputs); return km_mux_frame(node, edges, links, count, id, item, context); }
     km_frame_input *frames = framed ? calloc((size_t)readers, sizeof(*frames)) : NULL;
     if (framed && !frames) { free(inputs); return 125; }
@@ -1494,7 +1616,7 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
     return result;
 }
 
-int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends, so_Slice operand_arguments, km_stream_item stream_item, void *stream_context) {
+int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends, so_Slice operand_arguments, so_Slice item_limits, km_stream_item stream_item, void *stream_context) {
     if (!host) return -1;
     if (host->rejected_sequence) return -2;
     if (!id || lengths.len < 1 || lengths.len > INT_MAX / 2 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid graph request");
@@ -1503,7 +1625,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     if (topology && (kinds.len != lengths.len || input_paths.len != lengths.len || output_paths.len != lengths.len || appends.len != lengths.len || connections.len % 2 || connections.len > INT_MAX / 2)) return km_spawn_failed(host, id, "invalid graph topology");
     so_int *node_kinds = kinds.ptr, *links = connections.ptr;
     int edge_count = topology ? (int)connections.len / 2 : (int)lengths.len - 1;
-    if (topology && operand_arguments.len != edge_count) return km_spawn_failed(host, id, "invalid argument ports");
+    if (topology && (operand_arguments.len != edge_count || item_limits.len != lengths.len)) return km_spawn_failed(host, id, "invalid graph ports or limits");
     so_int *ports = operand_arguments.ptr;
     for (int i = 0; topology && i < connections.len; i++) if (links[i] < 0 || links[i] >= lengths.len) return km_spawn_failed(host, id, "invalid graph edge");
     for (int i = 0; i < host->len; i++) if (host->processes[i].id == id) return km_spawn_failed(host, id, "request ID already active");
@@ -1687,7 +1809,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
             if (topology) for (int j = 0; j < n; j++) { if (stage_inputs[j] >= 0 && stage_inputs[j] != input) close(stage_inputs[j]); if (stage_outputs[j] >= 0) close(stage_outputs[j]); }
             if (!topology || !node_kinds[i]) for (int j = 0; j < edge_count * 2; j++) close(edges[j]);
             close(out[0]); close(out[1]); close(err[0]); close(err[1]); close(execerr[0]);
-            if (topology && node_kinds[i]) { close(execerr[1]); _exit(km_run_mux(i, (int)node_kinds[i], edges, links, edge_count, id, stream_item, stream_context)); }
+            if (topology && node_kinds[i]) { close(execerr[1]); _exit(km_run_mux(i, (int)node_kinds[i], edges, links, edge_count, (int)((so_int *)item_limits.ptr)[i], id, stream_item, stream_context)); }
             if (ready[0] >= 0) {
                 char token = 0;
                 ssize_t nread;

@@ -86,8 +86,25 @@ fixed 64 KiB ceiling. Explicit merge budgets also apply when followed directly b
 another adapter. Static inspection reports effective budgets, cardinalities,
 scheduling, ordering, and fail-fast/blocking policies without evaluating options.
 
-Lossy overflow modes, alternate ordering/failure policies, explicit per-item
-workers, and runtime graph state/transfer metrics remain subsequent Slice E work.
+Framed `broadcast` additionally accepts `:overflow drop-new`, `drop-old`, or
+`latest`. These are explicit lossy policies with independent queues per output:
+drop-new discards a new record when the pending queue is full; drop-old evicts
+oldest pending records until the new record fits; latest replaces every pending
+record with the newest. `:items N` bounds pending records (1..1024, default 64).
+Latest retains exactly one pending record and accepts only `:items 1`.
+`:buffer` bounds both input assembly and each output's pending payload bytes.
+Each output may additionally hold one in-flight record, also at most `:buffer`
+payload bytes; it is never evicted, even while partially written. Private frame
+headers, bounded queue metadata, kernel pipes, and Node stream buffers are extra.
+Surviving records retain their original order and complete framing, but which
+records survive is scheduling-dependent. EOF drains retained records before
+closing every destination. A failed/closed child still fails the whole graph.
+Lossy modes require framing and are not available on `merge` or exactly-once
+`balance`. `:overflow block` remains the lossless default, with the existing
+one-transfer backpressure path and no additional pending queue.
+
+Alternate ordering/failure policies, explicit per-item workers, and runtime
+graph state/transfer/drop metrics remain subsequent Slice E work.
 Process channels
 are distinct from both reactive-engine streams and build dependency edges.
 Explicit stdin redirections demand build-produced inputs through the existing

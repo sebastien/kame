@@ -279,8 +279,30 @@ payload assembly, excluding the private four-byte frame header. A larger record
 fails with `KASH_BUFFER_LIMIT`. Kernel pipes and bounded host stream buffers are
 additional; this is not a total graph memory limit. Defaults are 16 KiB for byte
 transfer and 64 KiB per framed input. Invalid or computed policies fail before
-execution. Lossy buffering, alternate policies, per-item workers, and runtime
-buffer metrics are not implemented yet.
+execution.
+
+Framed `broadcast` can opt into independent lossy destination queues:
+
+```kash
+source |(frame :lines)
+  |(broadcast :buffer 4096 :items 8 :overflow drop-old) (audit, monitor)
+```
+
+- `drop-new`: discard a new record when its pending destination queue is full.
+- `drop-old`: evict oldest pending records until the newest fits.
+- `latest`: retain only the newest pending record (`:items 1`).
+
+`:items` bounds pending records per output (1..1024, default 64; latest uses 1).
+`:buffer` also bounds each output's pending payload bytes. One additional
+in-flight record per output is protected from replacement, so partial writes
+cannot corrupt framing. Headers, queue metadata, and bounded host/OS buffers are
+additional. Retained records stay ordered; which records survive depends on
+timing. EOF drains retained records, and early child closure still fails the
+graph. Lossy policies require frames and are forbidden for `merge`/`balance`.
+`:overflow block` is the default lossless path, without an extra pending queue.
+
+Alternate ordering/failure policies, per-item workers, and runtime buffer/drop
+metrics are not implemented yet.
 
 ### Live stream arguments
 

@@ -462,6 +462,11 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 		if len(framed) != 0 { e.Str("framed"); e.BeginArray(); for i := range framed { e.Bool(framed[i].Bool) }; e.EndArray() }
 		buffers := PayloadList(*payload, "buffers")
 		if len(buffers) != 0 { e.Str("buffers"); e.BeginArray(); for i := range buffers { e.Int(buffers[i].Int) }; e.EndArray() }
+		policyFields := []string{"overflows", "bufferItems"}
+		for _, name := range policyFields {
+			values := PayloadList(*payload, name)
+			if len(values) != 0 { e.Str(name); e.BeginArray(); for i := range values { e.Int(values[i].Int) }; e.EndArray() }
+		}
 		e.Str("edges"); e.BeginArray()
 		edges := PayloadList(*payload, "edges")
 		for i := range edges { e.BeginArray(); for j := range edges[i].List { e.Int(edges[i].List[j].Int) }; e.EndArray() }

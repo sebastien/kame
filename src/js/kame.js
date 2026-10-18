@@ -1402,14 +1402,14 @@ class Module {
     } finally {
       clearTimeout(cleanupTimer);
       if (notifyCancellation) bodySignal.removeEventListener('abort', notifyCancellation);
-      if ([3, 13, 14, 15, 16, 32, 33, 34].includes(kind)) this.processGroups.delete(`${instance}:${rawRequest}`);
+      if ([3, 13, 14, 15, 16, 32, 33, 34, 35].includes(kind)) this.processGroups.delete(`${instance}:${rawRequest}`);
     }
   }
 
   async dispatch(instance, request, kind, payload, data, context, key, record, rawRequest) {
     const grants = context.grants;
     if (kind === 26) return this.pluginCallback(instance, request, payload, context);
-    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34].includes(kind)) {
+    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35].includes(kind)) {
       const response = await this.customHostRequest(instance, request, kind, payload, data, context, key, record);
       if (response !== undefined) return response;
     }
@@ -1557,12 +1557,13 @@ class Module {
       const encoded = this.write(value);
       return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
     }
-    if (kind === 13 || kind === 14 || kind === 15 || kind === 32 || kind === 33 || kind === 34) {
+    if (kind === 13 || kind === 14 || kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35) {
       if (!grants.run) return this.deny(instance, request);
       const decoded = JSON.parse(payload);
       const serviceReadyProbe = kind === 15 && decoded.serviceReady === true;
       const stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
-      const redirections = kind === 15 || kind === 32 || kind === 33 || kind === 34 ? decoded : { input: '', output: '', append: false };
+      const redirections = kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35 ? decoded : { input: '', output: '', append: false };
+      redirections.wireKind = kind;
       for (const [field, capability] of [['input', 'read'], ['output', 'write']]) {
         const name = redirections[field];
         if (typeof name !== 'string' || name.includes('\0')) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid redirection path');
@@ -1805,7 +1806,7 @@ class Module {
     const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 ? 'read'
       : kind === 2 ? 'write'
         : kind === 4 ? 'env'
-          : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 || kind === 32 || kind === 33 || kind === 34 ? 'run' : null;
+          : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 || kind === 32 || kind === 33 || kind === 34 || kind === 35 ? 'run' : null;
     if (capability && !context.grants[capability]) return this.deny(instance, request, capability);
     if ((kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 || kind === 2) && typeof payload === 'string') {
       const grantKind = kind === 2 ? 'write' : 'read';
@@ -1817,14 +1818,14 @@ class Module {
       }
       if (roots !== null && roots !== undefined && names.some((name) => !pathGranted(resolve(context.cwd ?? process.cwd(), name), roots))) return this.deny(instance, request, grantKind);
     }
-    if (capability === 'run' && context.runRoots !== null && context.runRoots !== undefined && [13, 14, 15, 32, 33, 34].includes(kind)) {
+    if (capability === 'run' && context.runRoots !== null && context.runRoots !== undefined && [13, 14, 15, 32, 33, 34, 35].includes(kind)) {
       let stages, decoded;
       try {
         decoded = JSON.parse(payload);
         stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
       } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid process request'); }
       if (!Array.isArray(stages) || stages.some((args, i) => {
-        if ((kind === 32 || kind === 33 || kind === 34) && Array.isArray(args) && args.length === 0 && ['merge', 'broadcast', 'balance', 'frame', 'encode', 'filter', 'copy'].includes(decoded.kinds?.[i])) return false;
+        if ((kind === 32 || kind === 33 || kind === 34 || kind === 35) && Array.isArray(args) && args.length === 0 && ['merge', 'broadcast', 'balance', 'frame', 'encode', 'filter', 'copy'].includes(decoded.kinds?.[i])) return false;
         return !Array.isArray(args) || typeof args[0] !== 'string' || !args[0].includes('/') || !pathGranted(resolve(context.cwd ?? process.cwd(), args[0]), context.runRoots);
       })) return this.deny(instance, request, 'run');
     }
@@ -2941,8 +2942,10 @@ function processDeadline(milliseconds, callback) {
 // Validate the wire graph before opening files or launching any stage. The
 // portable evaluator owns language semantics; this is the host trust boundary.
 function prepareByteTopology(stages, context) {
-  if (context.kinds === undefined) return null;
   const invalid = (code = 'KASH_MUX_ARITY') => { throw Object.assign(new Error('invalid process graph topology'), { code }); };
+  if (context.kinds === undefined) { if ([32, 33, 34, 35].includes(context.wireKind)) invalid(); return null; }
+  if (context.wireKind === 34 && !Array.isArray(context.buffers)) invalid();
+  if (context.wireKind === 35 && (!Array.isArray(context.overflows) || !Array.isArray(context.bufferItems))) invalid();
   if (process.platform === 'win32') throw Object.assign(new Error('streaming process graphs are not supported by this Windows host'), { code: Array.isArray(context.edges) && context.edges.some((edge) => Array.isArray(edge) && edge[2] > 0) ? 'KASH_STREAM_OPERAND_UNSUPPORTED' : 'HOST_FAIL' });
   const { kinds, edges, setup } = context;
   if (!Array.isArray(stages) || !stages.length || !Array.isArray(kinds) || kinds.length !== stages.length || !Array.isArray(edges) || !Array.isArray(setup) || setup.length !== stages.length || context.input || context.output) invalid();
@@ -2984,17 +2987,27 @@ function prepareByteTopology(stages, context) {
     const expected = kind === 'frame' || kind === 'filter' ? true : kind === 'encode' || kind === '' ? false : input;
     if (framed[node] !== expected || (kind === 'frame' && input) || (['filter', 'encode'].includes(kind) && !input) || (!kind && input)) invalid('KASH_FRAME_MISMATCH');
   }
-  const buffers = context.buffers ?? stages.map(() => 0);
+  const buffers = context.buffers === undefined ? stages.map(() => 0) : context.buffers;
   if (!Array.isArray(buffers) || buffers.length !== stages.length || buffers.some((budget, node) => !Number.isSafeInteger(budget) || budget < 0 || budget > 65536 || (budget && !['merge', 'broadcast', 'balance'].includes(kinds[node])))) invalid();
-  return { kinds, edges, inputs, outputs, framed, buffers };
+  const overflows = context.overflows === undefined ? stages.map(() => 0) : context.overflows;
+  const bufferItems = context.bufferItems === undefined ? stages.map(() => 0) : context.bufferItems;
+  if (!Array.isArray(overflows) || overflows.length !== stages.length || !Array.isArray(bufferItems) || bufferItems.length !== stages.length) invalid();
+  for (let node = 0; node < stages.length; node++) {
+    const policy = overflows[node], items = bufferItems[node];
+    if (!Number.isSafeInteger(policy) || policy < 0 || policy > 3 || !Number.isSafeInteger(items) || items < 0 || items > 1024 || (!policy && items) || (policy && kinds[node] !== 'broadcast') || (policy === 3 && items > 1)) invalid();
+    if (policy && !framed[node]) invalid('KASH_FRAME_REQUIRED');
+  }
+  return { kinds, edges, inputs, outputs, framed, buffers, overflows, bufferItems };
 }
 
 // Paused merges, broadcasts, and balancing share one bounded pump. Each turn
 // retains one chunk/record until its assigned destinations flush; incomplete
 // records are bounded per input. Defaults are 16 KiB bytes / 64 KiB records.
-function startByteMux(readers, writers, fail, done, kind = '', framed = false, item = null, budget = 0) {
+function startByteMux(readers, writers, fail, done, kind = '', framed = false, item = null, budget = 0, overflow = 0, itemLimit = 0) {
   let cursor = 0, destination = 0, scheduled = false, pending = false, closing = false, disposed = false;
   const recordLimit = budget || 64 * 1024, byteLimit = budget || 16 * 1024;
+  const queueLimit = itemLimit || (overflow === 3 ? 1 : 64);
+  const queues = overflow ? writers.map(() => ({ pending: [], bytes: 0, writing: false, ending: false })) : [];
   const states = readers.map(() => ({ data: framed || kind === 'frame' || kind === 'encode' ? Buffer.alloc(recordLimit + 4) : null, length: 0, need: 4, chunk: null, offset: 0 }));
   const operatorError = (status) => { fail(status); return null; };
   const readItem = (reader, state) => {
@@ -3048,9 +3061,39 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
   let outputs = writers.length;
   const dispose = () => {
     disposed = true;
+    for (const queue of queues) { queue.pending.length = 0; queue.bytes = 0; }
     for (const stream of [...readers, ...writers]) stream.destroy();
   };
   const error = (cause) => { if (!disposed) fail(['EPIPE', 'ECONNRESET'].includes(cause.code) ? 'RECIPE_FAIL' : 'HOST_FAIL', `process operator I/O failed: ${cause.message}`); };
+  const flushQueue = (index) => {
+    const queue = queues[index], writer = writers[index];
+    if (disposed || queue.writing || queue.ending) return;
+    if (!queue.pending.length) {
+      if (closing) { queue.ending = true; writer.end(() => writer.destroy()); }
+      return;
+    }
+    const record = queue.pending.shift();
+    queue.bytes -= record.length - 4;
+    queue.writing = true;
+    writer.write(record, (cause) => {
+      if (cause) error(cause);
+      queue.writing = false;
+      flushQueue(index);
+    });
+  };
+  const queueRecord = (record) => {
+    const payload = record.length - 4;
+    let retained;
+    for (let index = 0; index < queues.length; index++) {
+      const queue = queues[index];
+      if (overflow === 1 && (queue.pending.length === queueLimit || queue.bytes + payload > recordLimit)) continue;
+      // ponytail: shifts are bounded by 1024 records; use a ring if profiled hot.
+      while (queue.pending.length && (overflow === 3 || queue.pending.length === queueLimit || queue.bytes + payload > recordLimit)) queue.bytes -= queue.pending.shift().length - 4;
+      retained ??= Buffer.from(record); // Never retain the mutable assembler view.
+      queue.pending.push(retained); queue.bytes += payload;
+      flushQueue(index);
+    }
+  };
   const schedule = () => {
     if (scheduled || pending || closing || disposed) return;
     scheduled = true;
@@ -3065,6 +3108,7 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
       if (disposed) return;
       if (chunk === null) continue;
       cursor = (next + 1) % readers.length;
+      if (overflow) { queueRecord(chunk); schedule(); return; }
       pending = true;
       let destinations = writers;
       if (kind === 'filter') {
@@ -3084,7 +3128,8 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
     }
     if (readers.every((reader) => reader.readableEnded)) {
       closing = true;
-      for (const writer of writers) writer.end(() => writer.destroy());
+      if (overflow) queues.forEach((_, index) => flushQueue(index));
+      else for (const writer of writers) writer.end(() => writer.destroy());
     }
   };
   for (const reader of readers) {
@@ -3093,10 +3138,10 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
     reader.on('end', schedule);
     reader.on('close', () => { if (!disposed && !reader.readableEnded) error(new Error('upstream closed before EOF')); });
   }
-  for (const writer of writers) {
+  for (const [index, writer] of writers.entries()) {
     writer.on('error', error);
     writer.on('close', () => {
-      if (!disposed && !closing) error(Object.assign(new Error('downstream closed early'), { code: 'EPIPE' }));
+      if (!disposed && (overflow ? !queues[index].ending : !closing)) error(Object.assign(new Error('downstream closed early'), { code: 'EPIPE' }));
       if (--outputs === 0) done();
     });
   }
@@ -3387,7 +3432,7 @@ function runArgvCapture(stages, context) {
           results[i] ??= { status: 0, signal: 0, outcome: 0 };
           remaining--;
           finish();
-        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i]));
+        }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i]));
         remaining++;
       }
     } catch { stop('HOST_FAIL', 'cannot start process'); }

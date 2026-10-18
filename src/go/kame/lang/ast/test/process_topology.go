@@ -33,3 +33,12 @@ func TestSchedulingInspectionReportsEffectiveClosedPolicies(t *testing.T) {
 	fields := []string{"\"kind\":\"balance\"", "\"bufferBytes\":4096", "\"bufferBytes\":8192", "\"strategy\":\"round-robin\"", "\"strategy\":\"round-robin-ready\"", "\"overflow\":\"block\"", "\"failure\":\"fail-fast\"", "\"outputCount\":2"}
 	for _, field := range fields { if !strings.Contains(buffer.String(), field) { t.Errorf("missing scheduling metadata: %s", field) } }
 }
+
+func TestLossyInspectionReportsPendingAndProtectedFlightBounds(t *testing.T) {
+	buffer := bytes.NewBuffer(t.Allocator(), nil)
+	defer buffer.Free()
+	text := "printf $(touch ./must-not-run) |(frame :lines) |(broadcast :buffer 4096 :items 8 :overflow drop-old) (cat, cat)"
+	if ast.WriteAST(&buffer, "kash", "lossy.kash", text) != 0 { t.Error("lossy topology failed inspection") }
+	fields := []string{"\"overflow\":\"drop-old\"", "\"queueItems\":8", "\"queueBufferBytes\":4096", "\"inFlightRecords\":1"}
+	for _, field := range fields { if !strings.Contains(buffer.String(), field) { t.Errorf("missing lossy bound: %s", field) } }
+}

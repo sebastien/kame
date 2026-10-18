@@ -40,7 +40,12 @@ func (e *astEncoder) processTopology(value *expr.Expr) {
 				if budget == 0 { budget = 16384; if flat.StreamKinds[i] == 1 || node.Text == "encode" { budget = 65536 } }
 				e.Str("bufferBytes"); e.Int(budget)
 				e.Str("bufferScope"); e.Str("per-input")
-				e.Str("overflow"); e.Str("block")
+				e.Str("overflow"); e.Str(expr.StreamOverflowName(node.StreamOverflow))
+				if node.StreamOverflow != 0 {
+					e.Str("queueItems"); e.Int(int64(node.BufferItems))
+					e.Str("queueBufferBytes"); e.Int(budget)
+					e.Str("inFlightRecords"); e.Int(1)
+				}
 				e.Str("failure"); e.Str("fail-fast")
 				if node.Text == "balance" { e.Str("strategy"); e.Str("round-robin") }
 				if node.Text == "merge" { e.Str("ordering"); e.Str("per-input"); e.Str("strategy"); e.Str("round-robin-ready") }

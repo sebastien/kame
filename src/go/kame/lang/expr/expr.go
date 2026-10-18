@@ -99,6 +99,8 @@ type Expr struct {
 	Topology bool
 	Edges []CommandEdge
 	StreamKinds []int
+	StreamOverflow int // 0 block, 1 drop-new, 2 drop-old, 3 latest
+	BufferItems int
 	Exit string
 	Channels []string
 	Async bool

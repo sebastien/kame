@@ -440,16 +440,24 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			edges = slices.Append(c.Run, edges, value)
 		}
 		host.ConfigureTopology(c.Run, &payload, kinds, edges)
-		var buffers []core.Value
-		configuredBuffer := false
+		var buffers, overflows, itemLimits []core.Value
+		configuredBuffer, lossy := false, false
 		for i := range e.Items {
 			budget := int64(0)
 			if e.Items[i].Kind == expr.CommandMux { budget = e.Items[i].Int }
 			if budget != 0 { configuredBuffer = true }
 			buffers = slices.Append(c.Run, buffers, core.Value{Kind: core.Int, Int: budget})
+			overflows = slices.Append(c.Run, overflows, core.Value{Kind: core.Int, Int: int64(e.Items[i].StreamOverflow)})
+			itemLimits = slices.Append(c.Run, itemLimits, core.Value{Kind: core.Int, Int: int64(e.Items[i].BufferItems)})
+			if e.Items[i].StreamOverflow != 0 { lossy = true }
 		}
 		if configuredBuffer { payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "buffers"), Value: core.NewList(c.Run, buffers)}) }
+		if lossy {
+			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "overflows"), Value: core.NewList(c.Run, overflows)})
+			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "bufferItems"), Value: core.NewList(c.Run, itemLimits)})
+		}
 		slices.Free(c.Run, buffers)
+		slices.Free(c.Run, overflows); slices.Free(c.Run, itemLimits)
 		for i := range kinds { kinds[i].Free(c.Run) }; slices.Free(c.Run, kinds)
 		for i := range edges { edges[i].Free(c.Run) }; slices.Free(c.Run, edges)
 	}

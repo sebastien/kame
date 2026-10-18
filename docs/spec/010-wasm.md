@@ -360,6 +360,20 @@ one output in edge order, round-robin, and blocks until that assignment is
 delivered. It closes every output at EOF, including never-assigned outputs.
 It neither starts per-record workers nor drops/skips records for a slow child.
 
+Lossy framed broadcasts use request kind **35**, taking precedence over kinds
+33/34 when argument inputs or explicit byte budgets are also present. They add
+mandatory stage-aligned integer arrays `overflows` (0 block, 1 drop-new,
+2 drop-old, 3 latest) and `bufferItems` (0 default, otherwise 1..1024). Nonzero
+overflow is valid only on framed `broadcast`. Block requires zero pending-item
+limit; latest accepts zero/default or one. The evaluator supplies effective
+defaults (64 pending items, or one for latest). A byte budget bounds input
+assembly and queued payload bytes per output; one additional immutable in-flight
+record per output is protected until its write completes. Frame headers and
+bounded queue metadata are extra. EOF flushes retained records. Destination
+closure still fails the graph; dropping a record is never a failure by itself.
+Hosts must reject missing/malformed policies before launching/truncating anything,
+not silently downgrade them to a lossless or unbounded implementation.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly
