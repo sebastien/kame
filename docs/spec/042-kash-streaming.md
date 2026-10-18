@@ -1,10 +1,10 @@
 # Kash Streaming, Channels, and Multiplexing
 
-> This is a proposed extension to Kash, not a description of current Kame behavior. Syntax tagged **proposed** is subject to parser and implementation validation. Sections marked **Open** identify decisions requiring language-design agreement.
+> The implementation status and acceptance matrix describe supported POSIX native and WASM/Node behavior. The design discussion also preserves proposed extensions; it is not a promise of full draft conformance. Remaining extensions are identified in section 15.
 
 ## Implementation status
 
-The first implementation slice supports process groups, byte-oriented `merge`
+The implemented baseline supports process groups, byte-oriented `merge`
 and lossless `broadcast`, explicit point-to-point topology, per-stage file
 redirections, whole-graph acceptance/recovery/async ownership, and ambiguous
 capture rejection on POSIX native and WASM/Node hosts. Ordinary linear pipelines
@@ -920,60 +920,78 @@ Do not lower a muxed graph into a sequence of independent eager `run!` calls. La
 
 ## 14. Acceptance criteria
 
+Checked criteria apply to the supported POSIX native and WASM/Node hosts, with
+the bounded contracts in the implementation status above. They do not assert
+native Windows streaming support, transactional live measurements, automatic
+seekability detection, or implicit spool-to-file behavior.
+
+| Coverage | Executable evidence |
+| --- | --- |
+| Compatibility, topology, launch validation, ownership, generated dependencies | `tests/T042-01-kash-topology.sh`, existing `T017-*` regressions, So parser/evaluator suites |
+| Framing, lexical branches and joins, pure predicates, build reuse | `tests/T042-02-kash-framing.sh`, So stream-predicate tests |
+| Lexical named channels, duplicate endpoints, cycles | `tests/T042-03-kash-channels.sh` |
+| Live argument ports, unsupported hosts, seek failures, cancellation | `tests/T042-04-kash-operands.sh` |
+| Balance, bounded buffers, lossy queues, strict ordering | `tests/T042-05-kash-scheduling.sh`, `T042-06-kash-lossy.sh`, `T042-09-kash-ordering.sh` |
+| Terminal counters, sampled wait states, effect-free inspection | `tests/T042-07-kash-metrics.sh`, `T042-08-kash-live.sh`, So AST/snapshot tests |
+| Fail-fast/collection, explicit per-record workers | `tests/T042-10-kash-failure-policy.sh`, `T042-11-kash-each.sh` |
+
+Stream operands are unseekable pipes/FIFOs. A receiving command that requires a
+seekable file reports its own I/O error (for example `ESPIPE`) and the graph
+reports failure; Kash does not infer that requirement or silently materialize data.
+
 ### Parsing / compatibility
 
-- [ ] Existing `A | B | C` remains a byte-stream pipeline.
-- [ ] Existing `$(...)`, Kame expression parentheses, value pipes, typed arguments, `?`, `??`, and terminal `&` retain semantics.
-- [ ] `(A, B)` in process position parses as a process group; `[A B]` remains a Kame collection, not a process group.
-- [ ] `A | (B, C)` fails rather than silently broadcasting.
-- [ ] `(A, B) | C` fails rather than silently merging.
-- [ ] `A |(broadcast) (B, C)` and `(A, B) |(merge) C` construct valid point-to-point edges.
-- [ ] `2>&1` is not silently interpreted as Bash descriptor duplication.
+- [x] Existing `A | B | C` remains a byte-stream pipeline.
+- [x] Existing `$(...)`, Kame expression parentheses, value pipes, typed arguments, `?`, `??`, and terminal `&` retain semantics.
+- [x] `(A, B)` in process position parses as a process group; `[A B]` remains a Kame collection, not a process group.
+- [x] `A | (B, C)` fails rather than silently broadcasting.
+- [x] `(A, B) | C` fails rather than silently merging.
+- [x] `A |(broadcast) (B, C)` and `(A, B) |(merge) C` construct valid point-to-point edges.
+- [x] `2>&1` is not silently interpreted as Bash descriptor duplication.
 
 ### Conditional branches
 
-- [ ] `A |(filter P | B) | C` diverts matched items to B and sends only unmatched items to C.
-- [ ] Nested filters can further partition a selected branch.
-- [ ] `>&` returns B's output immediately downstream of its enclosing filter; it never re-enters the same filter.
-- [ ] `>@` bypasses subsequent contiguous conditional filters and rejoins at the first ordinary stage.
-- [ ] Nested `>@` resolves to its lexical chain, not an outer chain.
-- [ ] `>@` with no otherwise continuation fails before launching processes.
-- [ ] Branches with different output data kinds need not rejoin; explicit rejoin enforces compatible framing.
+- [x] `A |(filter P | B) | C` diverts matched items to B and sends only unmatched items to C.
+- [x] Nested filters can further partition a selected branch.
+- [x] `>&` returns B's output immediately downstream of its enclosing filter; it never re-enters the same filter.
+- [x] `>@` bypasses subsequent contiguous conditional filters and rejoins at the first non-filter continuation.
+- [x] Nested `>@` resolves to its lexical chain, not an outer chain.
+- [x] `>@` with no otherwise continuation fails before launching processes.
+- [x] Branches with different output data kinds need not rejoin; explicit rejoin enforces compatible framing.
 
 ### Named channels and injection
 
-- [ ] One named channel has exactly one writer and one reader; duplicates are static errors.
-- [ ] `&name` and `>&name` endpoints are resolved in one graph-construction scope.
-- [ ] `<&` claims the current upstream channel as a positional operand, not stdin; double consumption fails.
-- [ ] `<&name` supplies a single live named-channel operand; `<(...)` starts a child producer graph without eager capture.
-- [ ] Unsupported OS injection or a seekability requirement produces a diagnostic rather than silent materialization.
+- [x] One named channel has exactly one writer and one reader; duplicates are static errors.
+- [x] `&name` and `>&name` endpoints are resolved in one graph-construction scope.
+- [x] `<&` claims the current upstream channel as a positional operand, not stdin; double consumption fails.
+- [x] `<&name` supplies a single live named-channel operand; `<(...)` starts a child producer graph without eager capture.
+- [x] Unsupported OS injection or a seekability requirement produces a diagnostic rather than silent materialization, as qualified above.
 
 ### Runtime
 
-- [ ] Every graph is validated for tools, grants, redirections, cardinalities, framing, and cycles before launch.
-- [ ] Broadcast is lossless and bounded under a slow consumer; balance delivers each item once.
-- [ ] Merge and branch rejoin preserve per-source item order and item boundaries; cross-source ordering is not falsely guaranteed.
-- [ ] Closing one of several merge inputs does not prematurely close the merged output.
-- [ ] Failures cancel/reap all owned stages and nested process-substitution producers.
-- [ ] A top-level `&` returns an owned async graph handle, not detached subprocesses.
-- [ ] `$(...)` rejects ambiguous unmerged multiple terminal outputs; no implicit concatenation.
-- [ ] Graph inspection reports resolved edges, rejoin targets, and buffer/backpressure states.
+- [x] Every graph is validated for tools, grants, redirections, cardinalities, framing, and cycles before launch.
+- [x] Default broadcast is lossless and bounded under a slow consumer; balance delivers each item once. Lossy broadcast requires an explicit policy.
+- [x] Merge and branch rejoin preserve per-source item order and item boundaries; cross-source ordering is not falsely guaranteed.
+- [x] Closing one of several merge inputs does not prematurely close the merged output.
+- [x] Default fail-fast and fatal errors cancel/reap all owned stages and nested process-substitution producers; explicit collection joins ordinary failed exits instead.
+- [x] A top-level `&` returns an owned async graph handle, not detached subprocesses.
+- [x] `$(...)` rejects ambiguous unmerged multiple terminal outputs; no implicit concatenation.
+- [x] Graph inspection reports resolved edges and rejoin targets; live snapshots report sampled operator waits, while terminal Results retain authoritative completed-write counters and queue high-water marks.
+- [x] Explicit `|(each)` workers remain bounded, preserve record order, require normal grants, and retain invocation ownership under async execution and cancellation.
 
-## 15. Open design decisions
+## 15. Design decisions and remaining extensions
 
-These are deliberately left explicit rather than presenting untested syntax as settled.
-
-- **O1 — Process-group delimiter.** Should a top-level comma inside `(A, B)` be sufficient to disambiguate a process group from `(Kame expression)`? Alternative: a dedicated grouped-process prefix.
-- **O2 — Larger named graph scopes.** Are process groups sufficient to construct all named-channel graphs, or should Kash add a `flow:`/`graph:` block for multi-line declarations and concurrency?
-- **O3 — Terminal branch stdout and capture.** Confirm where a side branch's unconnected stdout goes (public sink versus explicit required sink), especially in `$(...)` and build recipes.
-- **O4 — Predicate truth and framing defaults.** Require Boolean results? Is line framing implicit for textual `filter`, or must it always be authored as `|(frame :lines)`? This draft chooses explicit framing for correctness.
-- **O5 — Unary adapters and operator arguments.** Finalize `|(frame :lines)`, `|(encode :lines)`, and parameter syntax; ensure they compose cleanly with `|(...)` as a connection operator.
-- **O6 — Port selection.** Add explicit stderr routing, e.g. `A.err` or `|(from :err)`, without conflicting with existing Kash word and redirection grammar.
-- **O7 — `>@` chain boundary.** Confirm that the first non-conditional ordinary stage defines 'otherwise', and specify how nested non-filter mux operators affect this boundary.
-- **O8 — Merge and stream types.** Confirm whether framed items retain original raw bytes alongside decoded Kame values, and how mixed byte/framed merges must be adapted.
-- **O9 — Process launch strategy.** Eager graph startup is easiest to reason about, but conditionally activated/never-used branches might benefit from lazy launch; exact rules must preserve backpressure and completion.
-- **O10 — Portability.** Decide what guarantees `<(...)` and `<&name` can offer across POSIX and native Windows, especially for external commands requiring seekable paths.
-- **O11 — Branch terminal defaults.** Whether `|(filter P | B)` without a branch exit should discard B's stdout, display it, or require explicit ownership; reject silent data loss and unexpected capture concatenation.
+- **O1 — Resolved:** top-level commas disambiguate process groups only in process position; ordinary Kame expressions retain their parser.
+- **O2 — Bounded scope implemented:** lexical declarations resolve within one constructed graph. Larger `flow:`/`graph:` blocks remain an extension.
+- **O3 / O11 — Resolved:** unconnected terminal stdout uses the public sink. Capture requires exactly one unredirected terminal; no implicit discard or concatenation.
+- **O4 — Resolved:** predicates return Boolean values and require explicit line framing. No effects, host observations, dynamic evaluation, or suspension are permitted.
+- **O5 — Resolved:** unary adapters and closed literal policy options compose as `|(...)`; unknown or computed policy values fail before effects.
+- **O6 — Extension:** explicit stderr graph ports remain unsupported; `2>&1` is rejected, not reinterpreted.
+- **O7 — Resolved:** `>@` skips the enclosing chain's contiguous filters and rejoins at its first non-filter continuation. Nested chains remain lexical.
+- **O8 — Resolved:** private framed transport preserves exact UTF-8 payload bytes. External stages receive decoded bytes and require explicit reframing before a framed rejoin.
+- **O9 — Resolved baseline:** prepare the graph before eager startup of long-running stages. Explicit `each` templates alone launch new executables per record; other lazy activation is an extension.
+- **O10 — Partial portability:** POSIX native uses inherited descriptors; Node uses owned FIFO rendezvous relays. Windows streaming/injection is rejected before launch/truncation. Seekable-file-only commands fail visibly; automatic requirement detection/materialization is not implemented.
+- Worker pools, additional scheduling/framing formats, branch isolation/retries, and stronger live diagnostic guarantees remain extensions, not unfinished implicit defaults.
 
 ## 16. Recommended initial implementation slice
 

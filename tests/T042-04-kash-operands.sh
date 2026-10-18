@@ -60,6 +60,8 @@ stream right
 (printf a >&left, printf b >&right, cat <&left <&right)' 0 '' kash
 	expect "named positional streams do not conflate stdin" grep -qx ab "$work/$backend.out"
 	run_case 'diff -u <(printf same) <(printf same)' 0 '' kash
+	run_case '$(node -e "const fs = require(\"node:fs\"); fs.readSync(fs.openSync(process.argv[1], \"r\"), Buffer.alloc(1), 0, 1, 0)" <(printf a))' 1 RECIPE_FAIL
+	expect "seekability requirements fail visibly instead of materializing a file" grep -q ESPIPE "$work/$backend.err"
 	run_case '$(head -c 1 <(yes))' 1 RECIPE_FAIL
 	run_case '$(head -c 1 <(yes) ?)' 0
 	run_case '$(true <(printf ignored) ?)' 0
