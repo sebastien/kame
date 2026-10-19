@@ -131,15 +131,16 @@ calls, not infix operators.
 ## Patterns and processes
 
 ```kame
-(map (sub ./src/{name:*}.c ./build/{name}.o)
+(sub ./src/{name:*}.c ./build/{name}.o
   [./src/main.c ./src/util.c])
 ```
 
 Expression match patterns use `{*}`, `{**}`, `{name:*}`, or `{name:**}`;
-expansion patterns use `{name}` or `{_N}`. The pattern form of `sub` with
-two arguments produces a callable; nonmatches remain unchanged. `replace` is a
-deprecated alias. `(match? PATTERN [TEXT])` tests a full-string match, returning
-a unary predicate when `TEXT` is omitted. Use it for filtering. Rule captures
+expansion patterns use `{name}` or `{_N}`. Pass a string or list of strings
+directly as the third operand of pattern `sub`; no `map` is needed for a list.
+With two arguments it produces a callable; nonmatches remain unchanged.
+`replace` is a deprecated alias. `(match? PATTERN [TEXT])` tests a full-string
+match, returning a unary predicate when `TEXT` is omitted. Use it for filtering. Rule captures
 have a related but distinct grammar; see [Rules](./rules.md).
 `(pattern TEXT)` constructs and validates a pattern from runtime text. Regex
 matcher groups are `{name:~REGEX}` or `{~REGEX}`; `regex-match`, `capture`, and
@@ -170,7 +171,7 @@ interpolation to demand capture. See [Kash](./kash.md) for process semantics.
 
 ```sh
 kame do run --lang expr -c '(join "," ["a" "b"])'
-kame do run --lang expr --allow-read=./src -c '(wildcard ./src/*.c)'
+kame do run --lang expr --allow-read=./src -c './src/*.c'
 printf '%s\n' '(join "," ["a" "b"])' | kame do parse --lang expr
 ```
 

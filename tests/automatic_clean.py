@@ -255,7 +255,7 @@ def contextBlockers(binary: str, base: Path) -> None:
 def scopedConsumer(binary: str, base: Path) -> None:
 	# Base-scope evaluation would miss this external input selected by a parent.
 	root = base / 'scoped-consumer'
-	project(root, 'SOURCE ?= "./unselected"\ndefault : produce\nproduce : ; [shell: kash]\n\t(write! ./important "keep")\nscoped : reader ; env "KAME_SOURCE=./important"\nreader : @{SOURCE}\n\t@(out! SOURCE)\n')
+	project(root, 'SOURCE ?= "./unselected"\ndefault : produce\nproduce : ; [shell: kash]\n\t(write! ./important "keep")\nscoped : reader ; env "KAME_SOURCE=./important"\nreader : @{SOURCE} ; [shell: kash]\n\t(out! SOURCE)\n')
 	run(binary, root)
 	assert run(binary, root, 'scoped').stdout == './important'
 	before = {p.name: p.read_bytes() for p in records(root)}
@@ -484,7 +484,7 @@ def main(binary: str, wrapper: str = '') -> None:
 		assert (root / "build/out").exists()
 
 		root = base / "yield-and-write"
-		project(root, 'default : ./empty\n./empty : ./input\n\t@(write! "./side" "side")\n\t@(yield! "")\n')
+		project(root, 'default : ./empty\n./empty : ./input ; [shell: kash]\n\t(write! "./side" "side")\n\t(yield! "")\n')
 		run(binary, root)
 		assert (root / "empty").stat().st_size == 0 and (root / "side").read_text() == "side"
 		assert len(records(root)) == 2

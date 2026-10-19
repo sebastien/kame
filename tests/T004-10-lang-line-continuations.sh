@@ -27,8 +27,8 @@ second"""
   @{dir}a
 	cat @<* \
 	 > @>
-default : ./out
-	@(out! (join "," words))
+default : ./out ; [shell: kash]
+	(out! (join "," words))
 KMK
 for backend in native wasm; do
 	test-step "$backend continued definitions, expressions and headers"

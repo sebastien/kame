@@ -145,6 +145,8 @@ func appendDisplay(a mem.Allocator, out *[]byte, value core.Value) {
 				*out = appendTextBytes(a, *out, ">")
 			} else if value.Text == "kash" {
 				*out = appendTextBytes(a, *out, "<kash-constructor>")
+			} else if value.Text == "kame" {
+				*out = appendTextBytes(a, *out, "kame")
 			} else {
 				*out = appendTextBytes(a, *out, "<kash-script>")
 			}

@@ -151,7 +151,7 @@ def nativeLocks(binary: str, root: Path) -> None:
 
 def nativeCache(binary: str, root: Path) -> None:
 	root.mkdir()
-	(root / "Makefile.kmk").write_text('task cached :\n\t@(write! ./side "changed")\n\t@(out! "cached")\n')
+	(root / "Makefile.kmk").write_text('task cached : ; [shell: kash]\n\t(write! ./side "changed")\n\t(out! "cached")\n')
 	seed = subprocess.run([binary, "cached"], cwd=root, capture_output=True, text=True, timeout=5)
 	assert seed.returncode == 0, seed
 	(root / "side").unlink()
@@ -189,7 +189,7 @@ def nativeCache(binary: str, root: Path) -> None:
 def nativeHardlinks(binary: str, root: Path) -> None:
 	"""Keep hard-linked user files intact during acquisition and release."""
 	root.mkdir()
-	(root / "Makefile.kmk").write_text('task cached :\n\t@(out! "cached")\nhold :\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n')
+	(root / "Makefile.kmk").write_text('task cached : ; [shell: kash]\n\t(out! "cached")\nhold :\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n')
 	important = root / "important"
 	important.write_bytes(b"keep this file\n")
 	projectLock = root / ".kame/outputs/lock"
@@ -225,7 +225,7 @@ def nativeHardlinks(binary: str, root: Path) -> None:
 
 def nodeLocks(script: str, root: Path) -> None:
 	root.mkdir()
-	(root / "Makefile.kmk").write_text('task cached :\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n\t@(out! "cached")\n')
+	(root / "Makefile.kmk").write_text('task cached :\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n\tprintf cached\n')
 	with ExitStack() as stack:
 		owner = start(stack, ["node", script, "cached"], root, "owner")
 		waitFor(lambda: (root / "ready").exists(), owner)

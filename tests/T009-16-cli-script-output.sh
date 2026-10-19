@@ -18,10 +18,10 @@ default = (out! "default\n")
 KM
 cat >"$work/config.kmk" <<'KMK'
 SDK_PATH = "original"
-default :
-	@(out! SDK_PATH)
-deploy {path} :
-	@(out! path)
+default : ; [shell: kash]
+	(out! SDK_PATH)
+deploy {path} : ; [shell: kash]
+	(out! path)
 KMK
 for backend in native wasm; do
 	if [ "$backend" = native ]; then command=(env -C "$work" "$CLI_BIN"); else command=(env -C "$work" node "$CLI_ROOT/dist/kame.js"); fi

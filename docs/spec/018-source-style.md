@@ -316,7 +316,7 @@ and a larger definition whose structure is visible:
 
 ```kame
 # Content discovery
-CONTENT = (sorted (wildcard ./src/pages/*.md))
+CONTENT = ./src/pages/*.md
 PAGES = (map page-data CONTENT)
 
 # Navigation

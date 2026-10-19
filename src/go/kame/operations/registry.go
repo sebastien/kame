@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v17"
+const version = "v18"
 
 // Register describes every standard operation explicitly. Categories describe
 // the operation itself; callable/template effects still propagate dynamically.
@@ -48,12 +48,12 @@ func Register(r *eval.Registry) bool {
 		registerWrite(r) && observation(r, "env", opEnv, 1, 1, eval.Env) &&
 		process(r, "sh!", opSh, 1, 2) &&
 		process(r, "shell-template!", opShellTemplate, 2, 2) &&
-		contract(r, "out!", opOut, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.EmitsOutput) &&
-		contract(r, "err!", opErr, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.EmitsOutput) &&
-		contract(r, "yield!", opYield, 1, -1, eval.OutputOperation, eval.RuntimePhases, eval.PublishesFile) &&
+		contract(r, "out!", opOut, 1, -1, eval.OutputOperation, eval.EvaluationAllowed, eval.EmitsOutput) &&
+		contract(r, "err!", opErr, 1, -1, eval.OutputOperation, eval.EvaluationAllowed, eval.EmitsOutput) &&
+		contract(r, "yield!", opYield, 1, -1, eval.OutputOperation, eval.EvaluationAllowed, eval.PublishesFile) &&
 		pure(r, "nop", opNop, 0, -1) &&
-		contract(r, "now", opNow, 0, 0, eval.VolatileOperation, eval.RuntimePhases, eval.ReadsClock) &&
-		contract(r, "monotonic", opMonotonic, 0, 0, eval.VolatileOperation, eval.RuntimePhases, eval.ReadsClock)
+		contract(r, "now", opNow, 0, 0, eval.VolatileOperation, eval.EvaluationAllowed, eval.ReadsClock) &&
+		contract(r, "monotonic", opMonotonic, 0, 0, eval.VolatileOperation, eval.EvaluationAllowed, eval.ReadsClock)
 }
 
 func contract(r *eval.Registry, name string, call eval.OperationCall, min int, max int, category eval.OperationCategory, phases eval.PhaseMask, behavior eval.OperationBehavior) bool {
@@ -84,5 +84,5 @@ func registerRender(r *eval.Registry) bool {
 }
 
 func registerWrite(r *eval.Registry) bool {
-	return r.Add(eval.Operation{Name: "write!", Call: opWrite, MinArity: 2, MaxArity: 2, Capabilities: []eval.Capability{eval.Write}, Category: eval.OutputOperation, Phases: eval.RuntimePhases, Behavior: eval.PublishesFile, Version: version})
+	return r.Add(eval.Operation{Name: "write!", Call: opWrite, MinArity: 2, MaxArity: 2, Capabilities: []eval.Capability{eval.Write}, Category: eval.OutputOperation, Phases: eval.EvaluationAllowed, Behavior: eval.PublishesFile, Version: version})
 }

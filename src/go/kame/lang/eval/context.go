@@ -203,7 +203,7 @@ func FreeEffects(a mem.Allocator, effects []Effect) {
 
 func (c *Context) Emit(kind EffectKind, data []byte) {
 	if c.PurePredicate { c.phaseInvalid = true; return }
-	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
+	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase || c.Phase == RenderingPhase {
 		c.phaseInvalid = true
 		return
 	}
@@ -213,7 +213,7 @@ func (c *Context) Emit(kind EffectKind, data []byte) {
 	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: kind, Data: slices.Clone(c.Run, data), Span: c.Span})
 }
 func (c *Context) EmitWrite(name string, data []byte) {
-	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
+	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase || c.Phase == RenderingPhase {
 		c.phaseInvalid = true
 		return
 	}
@@ -390,7 +390,7 @@ func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 		c.phaseInvalid = true
 		return 0
 	}
-	if c.Phase == ResolvingPhase && kind != host.RequestReadFile && kind != host.RequestEnvironment {
+	if (c.Phase == ResolvingPhase || c.Phase == RenderingPhase) && kind != host.RequestReadFile && kind != host.RequestEnvironment {
 		c.phaseInvalid = true
 		return 0
 	}

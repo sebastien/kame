@@ -1,8 +1,8 @@
 # A captured target template maps each source file to its corresponding output.
-posts = (wildcard ./content/posts/*.md)
-projects = (wildcard ./content/projects/*.md)
-post-html = (map (replace ./content/posts/{name:*}.md ./build/posts/{name}.html) posts)
-project-html = (map (replace ./content/projects/{name:*}.md ./build/projects/{name}.html) projects)
+posts = ./content/posts/*.md
+projects = ./content/projects/*.md
+post-html = (sub ./content/posts/{name:*}.md ./build/posts/{name}.html posts)
+project-html = (sub ./content/projects/{name:*}.md ./build/projects/{name}.html projects)
 
 default : ./build/index.html ./build/author.html @{post-html} @{project-html} ./build/style.css
 

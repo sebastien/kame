@@ -161,7 +161,7 @@ func TestPatternReplacementEffectsAreDemandedOnlyOnMatch(t *testing.T) {
 					if len(parsed.Diagnostics) != 0 { t.Error("replacement effect test parse failed") }
 					context := eval.Context{Program: p, Scope: p.Scope, Run: a, Phase: phases[j]}
 					result := p.EvaluateWith(parsed.Expr, &context)
-					blocked := k == 0 && (phases[j] == eval.PlanningPhase || phases[j] == eval.ResolvingPhase)
+					blocked := k == 0 && phases[j] != eval.EvaluatePhase
 					if blocked {
 						if !context.PhaseInvalid() || len(context.Effects) != 0 { t.Error("replacement metadata authorized read-only output") }
 					} else {

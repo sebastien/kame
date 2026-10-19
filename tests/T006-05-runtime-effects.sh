@@ -20,17 +20,12 @@ test-step "out and err effects keep their streams and order"
 	cd effects
 	cli_run -- -f Effects.kmk default
 	cli_expect_status 0
-	# Deferred effects commit in source order before the one shell command.
-	cli_expect_stdout "first
+	# Direct Kash runs commands before publishing deferred effects in source order.
+	cli_expect_stdout "command-last
+first
 third
-command-last
 "
 	cli_expect_stderr_contains 'second-error'
-	if grep -q 'command-last' <(head -2 "$CLI_OUT"); then
-		test-fail "shell command output ran before deferred effects"
-	else
-		test-ok "deferred effects preceded the shell command"
-	fi
 )
 
 test-step "dry-run suppresses effects without running the command"

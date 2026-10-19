@@ -73,11 +73,11 @@ func freeCaptureState(a mem.Allocator, value any) {
 
 func (p *Program) capture(e *expr.Expr, c *Context) Result {
 	if c.PurePredicate { return failure(c.Run, "KASH_PREDICATE_EFFECT", e.Span, "stream predicates cannot execute processes") }
+	if c.Phase != EvaluatePhase {
+		return failure(c.Run, "PHASE_INVALID", e.Span, "process execution is invalid in this phase")
+	}
 	if !e.Topology && hasProcessTopology(e) {
 		return p.captureTopology(e, c)
-	}
-	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
-		return failure(c.Run, "PHASE_INVALID", e.Span, "process execution is invalid in this phase")
 	}
 	if !c.allowed(Run) {
 		return failure(c.Run, "CAP_DENIED", e.Span, "command substitution requires run capability")

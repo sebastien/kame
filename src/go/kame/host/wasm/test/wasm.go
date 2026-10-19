@@ -483,7 +483,7 @@ func TestInspectionReplacementReusesCancelledSharedRead(t *testing.T) {
 
 func TestInspectionRecordedToolResolutionPublishesHostRequest(t *testing.T) {
 	a := t.Allocator()
-	started := wasm.NewRuntime(a, "./result : ./seed\n\t@(yield! (if x/test-tool (read ./seed) \"\"))\n")
+	started := wasm.NewRuntime(a, "./result : ./seed ; [shell: kame]\n\t(if x/test-tool (read ./seed) \"\")\n")
 	if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
 	r := started.Runtime
 	defer r.Free()
@@ -1070,7 +1070,7 @@ func TestRuntimeCancelledCacheRequestsDoNotCommitEffects(t *testing.T) {
 	a := t.Allocator()
 	kinds := []host.RequestKind{host.RequestCacheLock, host.RequestCacheGet}
 	for _, cancelledKind := range kinds {
-		started := wasm.NewRuntime(a, "task cached :\n\t@(write! ./side \"changed\")\n\t@(out! \"unexpected\")\n")
+		started := wasm.NewRuntime(a, "task cached : ; [shell: kash]\n\t(write! ./side \"changed\")\n\t(out! \"unexpected\")\n")
 		started.Result.Free(a)
 		if started.Runtime == nil { t.Fatal("runtime did not compile"); return }
 		r := started.Runtime

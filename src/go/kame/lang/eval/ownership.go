@@ -67,6 +67,8 @@ type Function struct {
 	// OperationName is the registry key for FunctionOperation, not a discriminator.
 	OperationName       string
 	KashConstructor     bool
+	// KameSelector marks the shell value that publishes one expression as a file.
+	KameSelector        bool
 	KashScript          *script.Script
 	Kind                FunctionKind
 	Parameters          []expr.Parameter

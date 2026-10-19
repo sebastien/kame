@@ -179,9 +179,9 @@ environment values can invalidate a consumer.
 | `wildcard` | `(wildcard [FLAG...] PATTERN-OR-PATH-LIST...)` | read | Sorted, duplicate-free union; at least one pattern/path-list operand is required. Each pattern tracks membership. |
 | `files` | `(files PATTERN-OR-PATH-LIST...)` | read | `(wildcard :+files ...)`. Rejects kind flags. |
 | `dirs` | `(dirs PATTERN-OR-PATH-LIST...)` | read | `(wildcard :+dir ...)`. Rejects kind flags. |
-| `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other supported values use the effect-output encoding described below, not scalar-only `str`. Writes immediately in expression execution; defers an atomic write while rendering a build. Invalid while planning. |
+| `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other supported values use the effect-output encoding described below, not scalar-only `str`. Writes immediately in expression execution; defers an atomic write in direct Kash recipes. Invalid during planning or read-only rule computation/expansion. |
 | `env` | `(env NAME)` | env | Environment value. |
-| `sh!` | `(sh! [OPTIONS] COMMAND)` | run | Collected status/stdout/stderr record; allowed in explicit evaluation, demanded lazy runtime values, and Kash recipe expressions. Invalid during planning or direct build-template rendering. |
+| `sh!` | `(sh! [OPTIONS] COMMAND)` | run | Collected status/stdout/stderr record. Allowed in explicit evaluation and direct Kash. Invalid during planning, shell-template expansion, and value-producing Kame bodies, including through a reached lazy definition. |
 | `shell-template!` | `(shell-template! FRAGMENTS VALUES)` | run | Collected shell call with POSIX-quoted dynamic strings; FRAGMENTS has one more string than VALUES. Same phase policy as sh!. |
 
 `sh!` accepts only an empty OPTIONS record, such as `(parse-json "{}")`, until
@@ -194,8 +194,9 @@ artifacts. URI grants use canonical roots; see
 `(tool NAME)` and `x/NAME` resolve executables against startup PATH or `--tool`
 overrides, not recipe PATH, and track the chosen executable. Tool lookup needs
 a build/source session; internal metadata checks do not grant user read access.
-`(now)` and `(monotonic)` request host clocks and return integer nanoseconds;
-neither needs a grant, but both are invalid during planning/output resolution.
+`(now)` and `(monotonic)` request host clocks and return integer nanoseconds.
+Neither needs a grant. Both are invalid during planning, output resolution,
+shell-template expansion, and value-producing Kame bodies.
 
 Standalone `kame do run --lang expr` denies these capabilities by default; grant only the
 needed roots, names, or process access with its `--allow-*` options.
@@ -204,8 +205,11 @@ see [Kash](./kash.md).
 
 ### Wildcard selection
 
-Unquoted glob paths evaluate to tracked lists before the call. `wildcard` accepts
-these expanded lists without reinterpreting their filenames as patterns.
+Prefer direct glob expressions for ordinary discovery: `sources = ./src/**/*.c`
+already yields a sorted, duplicate-free tracked list, even for zero or one match.
+Use `wildcard` for computed string patterns, sorted/deduplicated unions, or
+entry-kind filters. It accepts expanded lists without reinterpreting their
+filenames as patterns.
 
 | Flags | Entry kind |
 | --- | --- |
@@ -233,17 +237,19 @@ invalidate consumers even when the set of path names stays unchanged.
 
 ## Build effects
 
-These operations emit output during standalone evaluation and defer output
-while rendering a rule recipe. Bytes are emitted raw; other supported values
+These operations emit output during standalone evaluation or direct Kash
+execution, not during shell-template expansion. Bytes are emitted raw; other
+supported values
 are emitted using a separate effect-output encoder (nil as `nil`, booleans,
 integers, floats, text, patterns, lists and records in stable syntax).
 Unrenderable values (callables, resources) still report `EXPR_INVALID`.
 
 | Operation | Signature | Effect |
 | --- | --- | --- |
-| `out!` | `(out! VALUE...)` | In a rule, defers bytes to the target's stdout. Standalone evaluation writes to stdout and returns the combined output. |
-| `err!` | `(err! VALUE...)` | In a rule, defers bytes to the target's stderr. Standalone evaluation writes to stderr and returns the combined output. |
-| `yield!` | `(yield! VALUE...)` | In a rule, supplies bytes for exactly one declared file output. Standalone evaluation writes to stdout and returns nil. |
+| `out!` | `(out! VALUE...)` | In direct Kash, emits bytes to the target's stdout. Standalone evaluation writes to stdout and returns the combined output. |
+| `err!` | `(err! VALUE...)` | In direct Kash, emits bytes to the target's stderr. Standalone evaluation writes to stderr and returns the combined output. |
+| `yield!` | `(yield! VALUE...)` | In direct Kash, supplies bytes for exactly one declared file output. Standalone evaluation writes to stdout and returns nil. |
 
-Do not combine a nonempty shell recipe with `yield!`; Kame reports an output
-conflict rather than choosing a producer.
+Shell-template expansion and value-producing Kame bodies reject effects. Return
+text or bytes from `[shell: kame]` instead of expanding `@(yield! ...)`.
+Choose one producer: a value-producing Kame body or a Bash/Kash action program.

@@ -39,6 +39,25 @@ func (p *Program) IsKashConstructor(v core.Value) bool {
 	return f.Kind == FunctionInvocation && f.KashConstructor
 }
 
+// KameSelector is the shell value selected by the name kame. The string "kame"
+// remains an external executable. The selector is not a script constructor.
+func (p *Program) KameSelector() core.Value {
+	if p.kameSelector == nil {
+		f := mem.Alloc[Function](p.Alloc)
+		f.Kind, f.Owner, f.KameSelector = FunctionInvocation, p, true
+		p.kameSelector = f
+	}
+	return core.Value{Kind: core.Callable, Callable: p.kameSelector, CallableOwner: p, Text: "kame"}
+}
+
+func (p *Program) IsKameSelector(v core.Value) bool {
+	if v.Kind != core.Callable || v.CallableOwner != p || v.Callable == nil {
+		return false
+	}
+	f := v.Callable.(*Function)
+	return f.Kind == FunctionInvocation && f.KameSelector
+}
+
 type kashConstruction struct{ Function *Function }
 
 func freeKashConstruction(a mem.Allocator, state any) { mem.Free(a, state.(*kashConstruction)) }
@@ -161,7 +180,7 @@ func (p *Program) RunKash(text string, c *Context, span source.Span) Result {
 }
 
 func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Value, c *Context) Result {
-	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase {
+	if c.Phase != EvaluatePhase {
 		return failure(c.Run, "PHASE_INVALID", c.Span, "Kash execution is invalid in this phase")
 	}
 	if c.Engine == nil {

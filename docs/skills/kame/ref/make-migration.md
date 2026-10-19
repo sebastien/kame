@@ -156,21 +156,20 @@ Do not copy GNU Make syntax for these constructs; use the Kame-specific model:
 Use Kame definitions and expression operations for deterministic build data;
 use explicit prerequisite rules to generate files; and use the normal rule
 recipe as the process interface (shell by default, or explicitly selected Kash).
-Collected `sh!` calls are invalid during
-planning and direct template rendering. Demanded lazy values and Kash recipe
-expressions may call `sh!` in their runtime phase, subject to run grants and
-the target environment. Compilation never launches them.
+Collected `sh!` calls belong in standalone execution or direct Kash recipes,
+subject to run grants and the target environment. Lazy definitions do not bypass
+the read-only planning and template-expansion phases.
 
 For dynamic source discovery, prefer an explicit definition:
 
 ```kame
-SOURCES = (wildcard ./src/*.c)
+SOURCES = ./src/*.c
 
 ./build/sources.txt : @{SOURCES}
 	printf '%s\n' @{SOURCES} > @>
 ```
 
-`wildcard` records a dependency on the glob result, so later membership changes
+The glob expression records a dependency on its result, so later membership changes
 can invalidate the consuming rule.
 
 ## Migration review checklist

@@ -30,8 +30,8 @@ cat >"$project/Makefile.kmk" <<'KMK'
 SDK ?= "./default"
 SDK ?= (read "must-not-be-read")
 normal = "authored"
-default :
-	@(out! SDK)
+default : ; [shell: kash]
+	(out! SDK)
 KMK
 typed="$TMPDIR/typed"
 mkdir -p "$typed"

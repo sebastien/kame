@@ -5,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/template"
@@ -395,6 +396,7 @@ func (p *Program) Free() {
 		p.Instances[i].Service.Free(p.Alloc)
 		freeStrings(p.Alloc, p.Instances[i].Environment)
 		freeStrings(p.Alloc, p.Instances[i].Shell)
+		expr.Free(p.Alloc, p.Instances[i].KameExpression)
 		mem.FreeString(p.Alloc, p.Instances[i].Executor)
 		mem.FreeString(p.Alloc, p.Instances[i].ExecutorVersion)
 		for j := range p.Instances[i].ExecutionInputs { p.Instances[i].ExecutionInputs[j].Free(p.Alloc) }

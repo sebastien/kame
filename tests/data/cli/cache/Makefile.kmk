@@ -5,6 +5,6 @@ task report : ./config.txt
 
 task default : report
 
-task env-report :
-	echo 'env=@(env "CACHE_VALUE")' >> ./runs.log
-	@(out! (str "env=" (env "CACHE_VALUE") "\n"))
+task env-report : ; [shell: kash]
+	echo (str "env=" (env "CACHE_VALUE")) >> ./runs.log
+	(out! (str "env=" (env "CACHE_VALUE") "\n"))

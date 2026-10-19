@@ -1,17 +1,17 @@
 # Yield and effect fixtures (specs 006 and 007).
-./yield.out :
-	@(yield! "declared content")
+./yield.out : ; [shell: kame]
+	"declared content"
 
-./dynamic-yield.out :
-	@(yield! (str (count (wildcard ./src/*.c))))
+./dynamic-yield.out : ; [shell: kame]
+	(str (count (wildcard ./src/*.c)))
 
 ./conflict.out :
 	@(yield! "declared")
 	echo command
 
-./write.out :
-	@(write! "./generated.txt" "written payload")
+./write.out : ; [shell: kash]
+	(write! "./generated.txt" "written payload")
 	echo done > @>
 
-task yielded-task :
-	@(yield! "not allowed")
+task yielded-task : ; [shell: kash]
+	(yield! "not allowed")

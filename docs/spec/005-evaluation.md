@@ -63,8 +63,8 @@ paths still require `/`, `./`, or `../`. Lazy scoped definitions and suspended o
 async evaluations retain the same frames as compact selectors.
 
 Parsing is context-independent. A demanded process substitution requires both
-a phase permitting process execution and the applicable run grant. Planning or
-resolution fails with `PHASE_INVALID`; absent grants fail with `CAP_DENIED`;
+a phase permitting process execution and the applicable run grant. Planning,
+resolution and rendering fail with `PHASE_INVALID`; absent grants fail with `CAP_DENIED`;
 authorized but unavailable host services fail with `HOST_FAIL`. Redirections
 and explicit environment lookups require their own grants. Capability denial
 and cancellation are not recoverable through Kash fallback operators. Existing

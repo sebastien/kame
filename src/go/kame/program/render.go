@@ -56,6 +56,9 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	scope := p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
     context.Scope = scope
     defer scope.Free()
+	if entry.KameExpression != nil {
+		return p.renderKame(entry, context)
+	}
     if entry.Rule.BodyDoc != nil {
         return p.renderDocument(entry, context)
     }
@@ -118,6 +121,40 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 	result := renderResult{Commands: cloneText(p.Alloc, b.String()), Effects: effects, WritePaths: writePaths, LineSpans: spans, Deferred: deferred}
 	mem.Free(p.Alloc, context)
 	return result
+}
+
+// The expression computes data; publication belongs to the rule, not evaluation.
+func (p *Program) renderKame(entry *instance, context *eval.Context) renderResult {
+	defer mem.Free(p.Alloc, context)
+	expression := entry.KameExpression
+	result := p.Eval.EvaluateWith(expression, context)
+	defer eval.FreeEffects(p.Alloc, context.Effects)
+	defer freeStrings(p.Alloc, context.WritePaths)
+	defer result.Free(p.Alloc)
+	defer eval.ReleaseCallable(p.Alloc, &result.Value)
+	if result.Waiting { return renderResult{Waiting: true} }
+	if result.Diagnostic.Code != "" {
+		if p.Options.DryRun && result.Diagnostic.Code == "READ_DEFERRED" { return renderResult{Deferred: true} }
+		d := result.Diagnostic
+		result.Diagnostic = diagnostic.Diagnostic{}
+		return renderResult{Diagnostic: d}
+	}
+	span := expression.Span
+	if context.PhaseInvalid() || len(context.Effects) != 0 {
+		return renderResult{Diagnostic: failureAt(p.Alloc, "PHASE_INVALID", diagnostic.Span{Start: span.Start, End: span.End}, "Kame bodies compute artifact content without effects")}
+	}
+	var data []byte
+	if result.Value.Kind == core.String {
+		data = []byte(result.Value.Text)
+	} else if result.Value.Kind == core.Bytes {
+		data = result.Value.Bytes
+	} else {
+		return renderResult{Diagnostic: failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: span.Start, End: span.End}, "a Kame body must return text or bytes; use json for structured content")}
+	}
+	// Reuse the rule's atomic publication and forwarding machinery, including empty data.
+	effects := slices.Make[eval.Effect](p.Alloc, 1)
+	effects[0] = eval.Effect{Kind: eval.EffectYield, Data: slices.Clone(p.Alloc, data), Span: span}
+	return renderResult{Effects: effects}
 }
 
 func diagnosticFromSource(a mem.Allocator, code string, message string, start int, end int, src string) diagnostic.Diagnostic {

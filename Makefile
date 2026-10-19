@@ -61,6 +61,7 @@ wasm-check: wasm wasm-portable
 	node tools/wasm/test-abi.mjs build/wasm/kame.wasm
 
 test-wasm: wasm-check
+	bash tests/T044-01-runtime-kame-rule-bodies.sh
 	tests/T043-01-lang-finalization.sh
 	tests/T010-01-wasm-loader.sh
 	tests/T010-02-wasm-abi.sh

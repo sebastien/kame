@@ -11,14 +11,14 @@ default : ./build/app
 	echo compile-@> >> ./runs.log
 	sh tools/compile @> @<
 
-./build/version.txt :
-	@(yield! (join "" ["version " VERSION]))
+./build/version.txt : ; [shell: kame]
+	(join "" ["version " VERSION])
 
 task bundle : ./build/app
 	sh tools/link ./build/bundle.tar @<
 
-task report :
-	@(out! "sources=@(count SOURCES)\n")
+task report : ; [shell: kash]
+	(out! "sources=@(count SOURCES)\n")
 
 task clean :
 	rm -rf ./build

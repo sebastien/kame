@@ -128,7 +128,7 @@ agree, including suspension and replay of selected expansion effects.
 ```kame
 PRODUCT_BY_NAME =
   (filter-out (match? ./{*}.{*})
-    (map (sub ./journal/{name:*} ./{name}) SOURCES_JOURNAL))
+    (sub ./journal/{name:*} ./{name} SOURCES_JOURNAL))
 ```
 
 For `SOURCES_JOURNAL = ["./journal/foo" "./journal/bar.txt"]`, this produces

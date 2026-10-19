@@ -15,8 +15,8 @@ mode = "release"
 flags = [debug: "-O0" release: "-O2"]
 selected = (get mode flags)
 inputs = [debug: [./debug.txt] release: [./release.txt]]
-default : @(get mode inputs)
-	@(out! selected)
+default : @(get mode inputs) ; [shell: kash]
+	(out! selected)
 KMK
 printf debug >"$project/debug.txt"
 printf release >"$project/release.txt"

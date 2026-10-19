@@ -161,6 +161,9 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 		if name == "kash" && context.Program != nil {
 			return Result{Value: context.Program.KashConstructor()}
 		}
+		if name == "kame" && context.Program != nil {
+			return Result{Value: context.Program.KameSelector()}
+		}
 		if IsSpecialForm(name) {
 			return failure(context.Run, "EXPR_INVALID", span, "special form is not a callable value: "+name)
 		}

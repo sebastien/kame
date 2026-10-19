@@ -39,8 +39,12 @@ a rule program. See [CLI](./ref/cli.md) for invocation and capability policy.
    script, render one template, or inspect one rule before expanding it.
 3. **Keep language boundaries explicit.** Use expressions for values, document
    directives for text structure, rule headers for dependencies, and Kash for
-   direct process graphs. Recipes default to shell text; `SHELL = kash` or
-   `; [shell: kash]` selects direct Kash parsing, without template expansion.
+   direct process graphs. `[shell: kame]` selects one expression returning the
+   single file artifact's text or bytes. Its computation and shell-template
+   expansion are read-only, including reached lazy definitions. Recipes default
+   to shell text; `SHELL = kame` or `; [shell: kame]` selects a content
+   expression, and `SHELL = kash` or `; [shell: kash]` selects direct Kash
+   parsing, without template expansion.
 4. **Compose without erasing context.** File-backed `(include ./path.km)` or
    `(include ./path.kmk)` is relative to its containing source and inherits the
    caller's language, not the included suffix. `do run` can share
@@ -71,6 +75,12 @@ Values use whitespace-separated lists and records, not comma-separated items:
 Only `:nil` and `:false` are false. Definitions are lazy, not mutable shell
 assignments. Use `@{name}` to render a reference and `@(name)` to call a
 zero-argument function in template text.
+
+Prefer the simplest value form: `sources = ./src/**/*.c` already discovers a
+sorted, tracked list. Reserve `wildcard` for computed string patterns, unions,
+entry-kind filters, or an explicit Kash argument boundary. Pattern `sub` accepts
+lists directly: `(sub MATCH EXPANSION sources)` needs no surrounding `map`.
+Keep `map` when teaching callbacks or applying a genuinely per-item function.
 
 Build rules declare resources explicitly:
 

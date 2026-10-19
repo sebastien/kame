@@ -17,6 +17,7 @@ type Program struct {
 	StreamStates []*captureState
 	OperationFunctions []*Function
 	KashFunctions      []*Function
+	kameSelector       *Function
 	NextScriptGroup    int64
 	DeferScopes        []*DeferScope
 	DeferStopping      bool
@@ -264,6 +265,7 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.OperationMemos)
 	p.freeKashFunctions()
+	mem.Free(p.Alloc, p.kameSelector)
 	for i := range p.OperationFunctions {
 		mem.Free(p.Alloc, p.OperationFunctions[i])
 	}
@@ -491,11 +493,7 @@ func (p *Program) definition(engine *core.EngineContext, state *definitionState)
 		context.FinalizationForbidden = state.FinalizationForbidden
 		context.RuleFrames = state.RuleFrames
 		context.DependencyContextObserver = p.DefinitionDependencyContextObserver
-		// Lazy values may perform evaluation-only host operations during render.
-		// Dynamic prerequisite resolution remains read-only.
-		if context.Phase == RenderingPhase {
-			context.Phase = EvaluatePhase
-		}
+		// Definitions inherit the caller's read-only render policy.
 	}
 	result := Result{}
 	if state.InvalidRuleFrames {

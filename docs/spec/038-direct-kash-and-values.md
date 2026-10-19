@@ -2,6 +2,10 @@
 
 ## Purpose and precedence
 
+Specification `044-value-producing-rule-bodies.md` supersedes build-template
+effects: shell-template expansion is read-only, and `[shell: kame]` bodies
+return artifact content directly. Direct Kash remains an action program.
+
 Kash is a typed process language, not template-generated shell text. A Kash
 program has the same parsing and evaluation semantics whether authored as a
 standalone source, a rule recipe, a service recipe, or a constructed callable.

@@ -78,7 +78,7 @@ func runProcessTask(engine *core.EngineContext, id int64) core.ProducerResult {
 
 func (p *Program) awaitProcess(e *expr.Expr, c *Context) Result {
 	if len(e.Items) != 2 { return failure(c.Run, "EXPR_INVALID", e.Span, "await requires one process handle") }
-	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase { return failure(c.Run, "PHASE_INVALID", e.Span, "await is invalid in this phase") }
+	if c.Phase != EvaluatePhase { return failure(c.Run, "PHASE_INVALID", e.Span, "await is invalid in this phase") }
 	r := p.evaluate(c.Engine, c.Scope, e.Items[1], c)
 	if r.Waiting || r.Diagnostic.Code != "" { return r }
 	if r.Value.Kind != core.Process { r.Free(c.Run); return failure(c.Run, "EXPR_INVALID", e.Span, "await requires a process handle") }

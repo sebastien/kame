@@ -16,10 +16,10 @@ cli_build
 project="$TMPDIR/wasm-cache-lock"
 mkdir -p "$project"
 cat >"$project/Makefile.kmk" <<'EOF_MAKE'
-task cached :
+task cached : ; [shell: kash]
 	sleep 0.4
 	echo run >> runs.log
-	@(out! "locked-output")
+	(out! "locked-output")
 EOF_MAKE
 
 # Start two independent Node hosts against the same cold identity.
@@ -107,10 +107,10 @@ test-step "an interrupted waiter leaves the lock owner undisturbed"
 waiters="$TMPDIR/wasm-cache-lock-waiters"
 mkdir -p "$waiters"
 cat >"$waiters/Makefile.kmk" <<'EOF_WAITERS'
-task cached :
+task cached : ; [shell: kash]
 	sleep 1
 	echo run >> runs.log
-	@(out! "waiter-output")
+	(out! "waiter-output")
 EOF_WAITERS
 (cd "$waiters" && node "$CLI_ROOT/dist/kame.js" cached) >"$waiters/owner.out" 2>"$waiters/owner.err" &
 owner_pid=$!
@@ -147,7 +147,7 @@ const directory = join(process.argv[3], 'embedding-cache-cleanup');
 mkdirSync(directory);
 process.chdir(directory);
 const owner = await Kame.create();
-const program = await owner.compile('task cached :\n\t@(out! "reused")\n', { name: 'cache.kmk' });
+const program = await owner.compile('task cached : ; [shell: kash]\n\t(out! "reused")\n', { name: 'cache.kmk' });
 const prototype = Object.getPrototypeOf(program.module);
 const dispatch = prototype.dispatch;
 const options = { cwd: directory, grants: [{ capability: 'read', names: [directory] }, { capability: 'write', names: [directory] }, { capability: 'run', names: [] }] };

@@ -1,5 +1,5 @@
 # Named functions and anonymous functions use the same expression language.
-(page source) = (replace ./notes/{name:*}.txt ./public/{name}.txt source)
+(page source) = (sub ./notes/{name:*}.txt ./public/{name}.txt source)
 sources = [./notes/world.txt ./notes/hello.txt ./notes/hello.txt]
 pages = (map page sources)
 ordered = (pages | unique | sorted)

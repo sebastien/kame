@@ -44,7 +44,7 @@ for backend in native wasm; do
   for language in km kmk; do
     source=$'COLOR = env.NO_COLOR\n(out! COLOR)'
     entries=()
-    if [ "$language" = kmk ]; then source=$'COLOR = env.NO_COLOR\nshow :\n\t@(out! COLOR)'; entries=(show); fi
+    if [ "$language" = kmk ]; then source=$'COLOR = env.NO_COLOR\nshow : ; [shell: kash]\n\t(out! COLOR)'; entries=(show); fi
     NO_COLOR='two words' timeout 30 "${runner[@]}" do run --lang "$language" --allow-env=NO_COLOR -C "$project" -c "$source" "${entries[@]}" > "$project/out" 2> "$project/err"
     if [ "$(cat "$project/out")" = 'two words' ]; then test-ok "$backend $language definitions read named environment"; else test-fail "$backend $language environment reference"; fi
   done
@@ -106,8 +106,9 @@ COLLECTED = (sh! "printf %s \"$MODE\"; printf captured-error >&2")
 COLLECTED_VALUE = (text (get "stdout" COLLECTED))
 collected-root : collected-cached ; env "MODE=debug"
 collected-release-root : collected-cached ; env "MODE=release"
-task collected-cached :
-	printf %s @{COLLECTED_VALUE} > collected-log; printf x >> collected-runs
+task collected-cached : ; [shell: kash]
+	printf %s $COLLECTED_VALUE > collected-log
+	printf x >> collected-runs
 kash-collected : ; [shell: kash env: [MODE: "kash"]]
 	value = (sh! "printf %s \"$MODE\"")
 	printf %s (text (get "stdout" value))
@@ -167,10 +168,10 @@ KMK
  if "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk definition-phase > "$project/out" 2> "$project/err"; then test-fail "$backend launched definition during input resolution"; elif rg -q PHASE_INVALID "$project/err" && [ ! -e "$project/forbidden-phase" ]; then test-ok "$backend scoped definitions keep dynamic inputs read-only"; else test-fail "$backend scoped definition phase"; fi
  if "${runner[@]}" -C "$project" definition-cycle > "$project/out" 2> "$project/err"; then test-fail "$backend accepted scoped definition cycle"; elif rg -q DEP_CYCLE "$project/err" && [ ! -e "$project/forbidden-cycle" ]; then test-ok "$backend scoped definition cycles fail without effects"; else test-fail "$backend scoped cycle diagnostic"; fi
  test-step "$backend forwards target environments into collected shell requests"
- MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk collected-root > "$project/out" 2> "$project/err"
- MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk collected-root > "$project/out" 2> "$project/err"
+  MODE=ambient "${runner[@]}" --allow-run --allow-write -C "$project" -f Makefile.kmk collected-root > "$project/out" 2> "$project/err"
+  MODE=ambient "${runner[@]}" --allow-run --allow-write -C "$project" -f Makefile.kmk collected-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/collected-log")" = debug ] && [ "$(cat "$project/collected-runs")" = x ]; then test-ok "$backend collected shell inherits target snapshot and cache identity"; else test-fail "$backend collected shell scoped cache"; fi
- MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk collected-release-root > "$project/out" 2> "$project/err"
+  MODE=ambient "${runner[@]}" --allow-run --allow-write -C "$project" -f Makefile.kmk collected-release-root > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/collected-log")" = release ] && [ "$(cat "$project/collected-runs")" = xx ]; then test-ok "$backend collected shell changes with inherited environment"; else test-fail "$backend collected shell changed context"; fi
  MODE=ambient "${runner[@]}" --allow-run -C "$project" -f Makefile.kmk kash-collected > "$project/out" 2> "$project/err"
  if [ "$(cat "$project/out")" = kash ]; then test-ok "$backend collected shell in structured recipes inherits metadata"; else test-fail "$backend structured collected shell snapshot"; fi
@@ -382,18 +383,18 @@ task shell-task : ./input
 	sh ./binary-read kash-file kash-file-runs
 task kash-task : ./input ; [shell: kash]
 	sh ./binary-read kash-task kash-task-runs
-task pure-task : ./input
-	@(out! "pure")
-./pure-file : ./input
-	@(yield! "pure")
+task pure-task : ./input ; [shell: kash]
+	(out! "pure")
+./pure-file : ./input ; [shell: kame]
+	"pure"
 ./overridden : ./input ; env "ENV_SIGNATURE_BINARY=fixed"
 	printf %s "$ENV_SIGNATURE_BINARY" > @>; printf x >> overridden-runs
 READ_ENV = env.ENV_SIGNATURE_BINARY
 (indirect-env) = (str READ_ENV)
-task pure-read-task : ./input
-	@(out! (indirect-env))
-./pure-read-file : ./input
-	@(yield! (indirect-env))
+task pure-read-task : ./input ; [shell: kash]
+	(out! (indirect-env))
+./pure-read-file : ./input ; [shell: kame]
+	(indirect-env)
 KMK
   cat > "$child_env/binary-read" <<'SH'
 printf %s "$ENV_SIGNATURE_BINARY" > "$1"

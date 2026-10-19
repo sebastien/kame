@@ -18,7 +18,7 @@ not top-level expressions as an alternate entry mechanism.
 ```kame
 VERSION = "1.2.3"
 FLAGS = ["-Wall" "-Wextra"]
-SOURCES = (wildcard ./src/*.c)
+SOURCES = ./src/*.c
 (greet name) = (str "Hello, " name)
 default = (greet "Ada")
 ```

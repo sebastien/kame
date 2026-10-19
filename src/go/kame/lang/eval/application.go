@@ -191,6 +191,10 @@ func ReleaseCallable(a mem.Allocator, value *core.Value) { freeCallables(a, valu
 
 func (p *Program) prepareOperation(operation *Operation, count int, context *Context, span source.Span) Result {
 	_ = p
+	if context.Phase == RenderingPhase && (operation.Category == OutputOperation || operation.Category == ProcessOperation || operation.Category == VolatileOperation) {
+		context.MarkPhaseInvalid()
+		return failure(context.Run, "PHASE_INVALID", span, "`"+operation.Name+"` is invalid in a value-producing rule body or shell-template expansion; return artifact content with [shell: kame] or execute actions in Kash")
+	}
 	if context.PurePredicate && operation.Category != PureOperation { return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations") }
 	if context.deferred { return Result{Completed: true} }
 	// A dependency may publish while a host operation is outstanding. Keep its
@@ -244,6 +248,10 @@ func (p *Program) invokeOperation(operation *Operation, values []core.Value, arg
 	}
 	context.OperationName, context.operationArguments = previousName, previousArguments
 	context.activeCapabilities, context.Span, context.operationStart, context.operationEnd = previousCapabilities, previousSpan, previousStart, previousEnd
+	if context.Phase == RenderingPhase && context.phaseInvalid {
+		result.Free(context.Run)
+		return failure(context.Run, "PHASE_INVALID", span, "rule body computation and shell-template expansion cannot perform effects")
+	}
 	if context.denied {
 		result.Free(context.Run)
 		return failure(context.Run, "CAP_DENIED", span, "`"+operation.Name+"` requires a capability that was not granted")
@@ -302,6 +310,11 @@ func (p *Program) callValues(function *Function, values []core.Value, context *C
 		previousStart, previousEnd := context.operationStart, context.operationEnd
 		context.operationStart, context.operationEnd = span.Start, span.End
 		var result Result
+		if function.KameSelector {
+			discardCallValues(context.Run, values)
+			context.operationStart, context.operationEnd = previousStart, previousEnd
+			return failure(context.Run, "EXPR_INVALID", span, "kame selects a value-producing recipe; it is not callable")
+		}
 		if function.KashConstructor {
 			result = p.constructKash(values, context, span)
 		} else {

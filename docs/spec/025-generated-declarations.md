@@ -29,7 +29,7 @@ a target family and discover membership in computed prerequisites:
 ```kame
 ./build/{name}.o : ./src/{name}.c
 	cc -c @< -o @>
-sources : @(wildcard ./src/*.c)
+sources : ./src/*.c
 ```
 
 For a compiler with known sibling outputs, declare them together:

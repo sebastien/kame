@@ -214,6 +214,8 @@ type parser struct {
 	diags []source.Diagnostic
 	kash bool
 	commandGroup bool
+	// Rule indentation is structural, including inside multiline string data.
+	indent string
 }
 
 func Parse(a mem.Allocator, name string, text string) *Result {
@@ -230,6 +232,20 @@ func Parse(a mem.Allocator, name string, text string) *Result {
 func ParsePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	p := parser{a: a, s: s, pos: start}
 	e := p.expression()
+	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
+}
+
+// ParseRange parses exactly one expression, retaining authored source offsets.
+// A nonempty structural indent is stripped from multiline string content.
+// The caller owns the expression and diagnostics; source text stays borrowed.
+func ParseRange(a mem.Allocator, s *source.Source, start int, end int, indent string) Prefix {
+	bounded := source.Borrow(a, s.Name, s.Text[:end])
+	defer mem.Free(a, bounded)
+	p := parser{a: a, s: bounded, pos: start, indent: indent}
+	p.skipSpace()
+	e := p.expression()
+	p.skipSpace()
+	if e != nil && p.pos != end { p.error(p.pos, p.pos+1, "unexpected trailing input; expected one Kame expression") }
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
@@ -431,7 +447,13 @@ func (p *parser) verbatim(n int) *Expr {
 			e := p.node(String, start)
 			e.Verbatim, e.VerbatimLen = true, n
 			if len(content) != 0 {
-				e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, content), Span: source.Span{Start: contentStart, End: p.pos}})
+				var value string
+				if p.indent != "" {
+					value = strings.ReplaceAll(p.a, content, "\n"+p.indent, "\n")
+				} else {
+					value = sourceText(p.a, content)
+				}
+				e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: value, Span: source.Span{Start: contentStart, End: p.pos}})
 			}
 			p.pos += n
 			e.Span.End = p.pos
@@ -1108,6 +1130,7 @@ func (p *parser) quoted(patterns bool) *Expr {
 			continue
 		}
 		text.WriteByte(b); p.pos++
+		if b == '\n' && p.indent != "" && strings.HasPrefix(p.s.Text[p.pos:], p.indent) { p.pos += len(p.indent) }
 	}
 	text.Free(); p.error(start, p.pos, "unclosed string"); return e
 }
@@ -1184,6 +1207,7 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 		if p.s.Text[pos] == '\\' && pos+1 < end { pos += 2 } else { pos++ }
 		sourceStarts = slices.Append(p.a, sourceStarts, from)
 		sourceEnds = slices.Append(p.a, sourceEnds, pos)
+		if p.s.Text[from] == '\n' && p.indent != "" && strings.HasPrefix(p.s.Text[pos:], p.indent) { pos += len(p.indent) }
 	}
 	parsed := ParsePatternText(p.a, text, 0)
 	for i := range parsed.Pattern.Parts {

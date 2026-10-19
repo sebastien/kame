@@ -9,10 +9,10 @@ cli_build
 work="$TMPDIR/dry-run"
 mkdir -p "$work"
 cat >"$work/rules.kmk" <<'KMK'
-build :
-	@(out! "rule-out")
-	@(err! "rule-err")
-	@(write! "protected" "rule-write")
+build : ; [shell: kash]
+	(out! "rule-out")
+	(err! "rule-err")
+	(write! "protected" "rule-write")
 	touch recipe-ran
 KMK
 cat >"$work/values.km" <<'KM'
@@ -73,15 +73,15 @@ for backend in native wasm; do
 	printf seed >"$generated/seed"
 	cat >"$generated/Makefile.kmk" <<'KMK'
 default : ./second
-./first : ./seed
-	@(yield! (read @<))
-./second : ./first
-	@(yield! (read @<))
+./first : ./seed ; [shell: kame]
+	(read @<)
+./second : ./first ; [shell: kame]
+	(read @<)
 GENERATED = (read ./first)
 lazy : ./first
 	@(nop GENERATED "")
 bad : ./first
-	@(yield! (read @<))
+	@(nop (read @<) "")
 	@(read ./unrelated-missing)
 KMK
 	status=0

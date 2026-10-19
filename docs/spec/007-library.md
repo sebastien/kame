@@ -420,24 +420,24 @@ is traversed, so `./linked/**/*.js` can enumerate its target, while
 retain the authored lexical path. This prevents recursive symlink cycles; name
 linked roots explicitly rather than expanding recursive traversal implicitly.
 
-`write!` is immediate only in explicit expression execution. During build
-rendering it becomes a deferred effect committed during execution. It is
-invalid during planning.
+`write!` is immediate only in explicit expression execution. In direct Kash
+recipes it becomes a deferred effect committed during execution. It is invalid
+during planning, shell-template expansion, and value-producing Kame bodies.
 
 ## Build Effects
 
 | Name | Contract |
 | --- | --- |
-| `out!` | Defer values for stdout |
-| `err!` | Defer values for stderr |
-| `yield!` | Append bytes or text to one declarative file output |
+| `out!` | In direct Kash or standalone evaluation, emit stdout |
+| `err!` | In direct Kash or standalone evaluation, emit stderr |
+| `yield!` | In direct Kash, append bytes or text to one declarative file output |
 | `nop` | Return its final argument, or nil |
 
 During standalone evaluation, `out!` and `err!` both emit their arguments and
 return their concatenated output (text unless any argument is bytes). `yield!`
-emits to the evaluation output context and returns nil. During rule rendering,
-all three retain their nil result so an effect expression contributes no shell
-command text; `yield!` remains the declarative file-output effect.
+emits to the evaluation output context and returns nil. Shell-template expansion
+and value-producing Kame rule bodies reject these actions with `PHASE_INVALID`.
+Kame bodies return artifact content instead; see `044-value-producing-rule-bodies.md`.
 
 Effect output is not scalar `str` conversion: it accepts raw bytes and text
 conversion of nil, booleans, numbers, strings, patterns, lists and records.
@@ -445,8 +445,8 @@ Collection output uses the output encoder's JSON-like text, not a guarantee of
 JSON compatibility or reparsable Kame display. Callables and resources are
 rejected. Use `json` when a consumer requires JSON.
 
-Effects record their source position. Evaluating or rerendering an effect does
-not perform it. The runtime commits it once for the accepted generation.
+Effects record their source position. Direct Kash recipes retain their deferred
+publication contract. The runtime commits content once for the accepted generation.
 Every build effect is invalid during planning and returns `PHASE_INVALID`.
 
 ## Shell Operations
@@ -475,11 +475,12 @@ OPTIONS, when present, must be an empty record (for example `(parse-json "{}")`)
 Nonempty options are rejected with `EXPR_INVALID` until options are supported.
 Streaming process
 events remain available through runtime execution, not as a list accumulated by
-the operation. `sh!` is allowed in explicit expression execution but is
-invalid during planning and direct build-template rendering with `PHASE_INVALID`.
-Demanded lazy values and Kash recipe expressions evaluate in their runtime phase;
-when bound to a target, their collected shell calls inherit its environment and
-retain the invocation run policy. Declaration registration never launches them.
+the operation. `sh!` is allowed in explicit expression execution and direct Kash
+recipes, but it is invalid during planning, resolution, shell-template expansion,
+and value-producing Kame bodies with `PHASE_INVALID`. A lazy definition inherits
+the phase of the computation that demands it. When a Kash recipe is bound to a
+target, its collected shell calls inherit that environment and retain the
+invocation run policy. Declaration registration never launches them.
 
 `shell-template! FRAGMENTS VALUES` is the tagged-template form for constructing
 a shell script from trusted source and dynamic string values. Both arguments
@@ -494,17 +495,18 @@ interpreted as an option or path by the invoked program.
 
 The constructed script is submitted and collected like `sh!`: it requires
 `run`, returns the same status/stdout/stderr record, inherits a target's
-environment, and is invalid during planning and direct build-template
-rendering. Dry-run submits no process and returns an empty string. Invalid
+environment, and is invalid during planning, shell-template expansion, and
+value-producing Kame bodies. Dry-run submits no process and returns an empty string. Invalid
 list types, non-string elements, or fragment/value count mismatch return
 `EXPR_INVALID` without submitting a process.
 
 ## Clock Operations
 
 Clock operations read the host clocks. They are effectful: they submit host
-requests and are invalid during planning and resolving with `PHASE_INVALID`,
-because a plan must not depend on the time at which it was computed. They are
-allowed in explicit expression execution and in build rendering.
+requests and are invalid during planning, resolution, shell-template expansion,
+and value-producing Kame bodies with `PHASE_INVALID`, because those phases must
+not depend on the time at which they ran. They are allowed in explicit expression
+execution and direct Kash recipes.
 
 | Name | Contract |
 | --- | --- |
@@ -562,7 +564,9 @@ executable metadata checks do not grant access to user read operations.
   filenames or loses their membership dependencies.
 - Reads and globs register canonical dynamic dependencies.
 - Denied read, write, run, or environment access performs no host action.
-- Deferred `out!`, `err!`, `yield!`, and `write!` effects commit once after rerender.
+- Direct Kash `yield!` and `write!` effects retain their accepted-generation
+  publication contract. Rule content computation and shell-template expansion
+  reject output actions; they never rerender actions into command text.
 - `sh!` captures status and separate byte-bounded stdout/stderr, enforces run
   capability and phase restrictions, and rejects nonempty options records.
 - `shell-template!` requires one more trusted fragment than dynamic string

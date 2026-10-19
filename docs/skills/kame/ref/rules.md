@@ -68,7 +68,7 @@ Inputs may be logical targets, paths, target templates, quoted values, or
 reference/call expansions. Lists from input expressions flatten recursively:
 
 ```kame
-SOURCES = (wildcard ./src/*.c)
+SOURCES = ./src/*.c
 
 ./build/sources.txt : @{SOURCES}
 	printf '%s\n' @{SOURCES} > @>
@@ -124,6 +124,19 @@ Header settings `; [shell: kash env: [MODE: mode]]` resolve purely before
 prerequisite execution; `shell` overrides build-wide `SHELL`. The legacy suffix
 `; env "MODE=release"` is an alternative, not an additional metadata record.
 
+Select `; [shell: kame]` for a value-producing body instead of a process program:
+
+```kame
+./greeting.txt : ./name.txt ; [shell: kame]
+	(str "Hello, " (strip (text (read @<))) "!\n")
+```
+
+Exactly one expression returns text or bytes, and the rule atomically publishes
+that content to exactly one file output. No implicit serialization or newline is
+added. `SHELL = kame` selects the same producer when a rule has no per-rule
+`shell`. The string `"kame"` is an executable, not the selector. Computation is
+read-only, including reached lazy definitions and helpers.
+
 Use `@<`, `@<*`, and `@>` for first normal input, all normal inputs, and first
 output. In file recipes, `@<?` selects normal file inputs whose content changed
 since the successful run; missing outputs or records select all normal file
@@ -137,16 +150,14 @@ not just file artifacts. Lexical bindings take precedence; missing rule context
 and disallowed changed-input access retain selector diagnostics. Use `$inputs`
 and `(first outputs)` in direct Kash, or `@{inputs}` in external-shell templates.
 
-| Expression while rendering | Build behavior |
+| Expression while computing content or expanding a shell template | Build behavior |
 | --- | --- |
-| `(out! VALUE...)` / `(err! VALUE...)` | Defer stdout/stderr output. |
-| `(yield! VALUE...)` | Atomically supply one declared file output's content. |
-| `(write! PATH VALUE)` | Defer an atomic write. |
-| `(wildcard PATTERN)` / `(read PATH)` | Discover a dependency. |
+| `out!`, `err!`, `yield!`, `write!`, processes, clocks | Rejected with `PHASE_INVALID`. Execute actions in Bash or direct Kash instead. |
+| Glob paths such as `./src/*.c` / `(read PATH)` | Discover a dependency. |
 | `(render PAYLOAD PATH)` | Read/render a tracked template with tracked expression dependencies. |
 
-`yield!` requires exactly one file output. Do not combine it with nonempty
-shell commands; Kame reports a producer conflict.
+In direct Kash, `(yield! VALUE...)` remains an explicit content-publication action
+requiring exactly one file output. It is not a template expansion.
 
 Known sibling artifacts belong in one grouped declaration, for example
 `./out/{name}.js ./out/{name}.map : ./src/{name}.ts`. Configured output lists

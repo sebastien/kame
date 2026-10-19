@@ -48,7 +48,7 @@ value.
 ### Definition
 
 A **definition** is a top-level named value or function declaration, for example
-`sources = (wildcard ./src/*.c)`. Definitions are lazy: the first use evaluates a
+`sources = ./src/*.c`. Definitions are lazy: the first use evaluates a
 definition node, and concurrent consumers share that work. A definition has its
 own resource namespace, so it can have the same spelling as a named rule.
 
@@ -305,16 +305,17 @@ never sent to node subscribers.
 
 The program runtime uses the phases **compile → plan → schedule → render →
 execute**. An operation may be valid only in particular phases: planning cannot
-perform effects, rendering records effects without committing them, and execution
-commits the accepted render's effects.
+perform effects, rule-body computation and shell-template expansion are read-only,
+and execution runs the selected producer and publishes its accepted output.
 
 ### Effect and yield
 
-An **effect** is a deferred action recorded while rendering: `out!` and `err!`
-write to the corresponding runtime streams, and `write!` can write a file.
+An **effect** is an explicit runtime action: `out!` and `err!` write to the
+corresponding runtime streams, and `write!` can write a file.
 **Yield** is the declarative effect that appends content for exactly one file-rule
-output. Yield cannot share an accepted render with a nonempty shell command,
-because Kame must have one unambiguous owner for that output.
+output in direct Kash. A **value-producing rule body**, selected with
+`[shell: kame]`, instead returns text or bytes and lets the rule publish them.
+Neither it nor shell-template expansion can perform effects.
 
 In standalone evaluation, the context flushes successful `out!`, `err!`, and
 `yield!` effects to its output streams instead. This happens only after the

@@ -12,26 +12,25 @@ project="$TMPDIR/project"
 mkdir -p "$project"
 printf 'bytes\000\377\n' >"$project/input.bin"
 cat >"$project/Makefile.kmk" <<'KMK'
-./nested/out.bin : ./input.bin
-	@(out! "before\n")
-	@(write! "./side.txt" "side")
-	@(out! "after\n")
-	@(yield! (read ./input.bin))
-	@(yield! "tail")
+./nested/out.bin : ./input.bin ; [shell: kash]
+	(out! "before\n")
+	(write! "./side.txt" "side")
+	(out! "after\n")
+	(yield! (read ./input.bin))
+	(yield! "tail")
 default : ./nested/out.bin
 	cat @<
-./empty :
-	@(yield! "")
-./blocked :
-	@(yield! "failure")
+./empty : ; [shell: kame]
+	""
+./blocked : ; [shell: kame]
+	"failure"
 ./shell/nested.out :
 	printf shell > @>
 ./missing :
 	true
 ./no-shell :
-	@(out! "")
-./written :
-	@(write! "./written" "written")
+./written : ; [shell: kash]
+	(write! "./written" "written")
 ./bad-parent/output :
 	printf blocked > @>
 KMK

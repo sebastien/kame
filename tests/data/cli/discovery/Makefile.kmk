@@ -1,2 +1,2 @@
-task where :
-	@(out! "Makefile.kmk\n")
+task where : ; [shell: kash]
+	(out! "Makefile.kmk\n")

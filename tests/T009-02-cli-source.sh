@@ -60,7 +60,7 @@ fixture_copy discovery explicit
 )
 
 test-step "inline source with -c and --command="
-INLINE=$'task hi :\n\t@(out! "inline\\n")'
+INLINE=$'task hi : ; [shell: kash]\n\t(out! "inline\\n")'
 cli_run -- -l kmk -c "$INLINE" hi
 cli_expect_status 0
 cli_expect_stdout "inline
@@ -70,13 +70,13 @@ test-step "file includes merge rules and definitions in source order"
 mkdir -p includes
 cat > includes/child.kmk <<'EOF'
 name = "included"
-task child :
-	@(out! "child\n")
+task child : ; [shell: kash]
+	(out! "child\n")
 EOF
 cat > includes/Makefile.kmk <<'EOF'
 (include ./child.kmk)
-task default : child
-	@(out! "@{name}\n")
+task default : child ; [shell: kash]
+	(out! "@{name}\n")
 EOF
 (
 	cd includes

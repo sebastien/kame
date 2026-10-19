@@ -10,7 +10,7 @@ the CLI on your PATH (or the absolute path to `build/kame.debug`).
 ## 1. From an expression to a program
 
 ```sh
-kame do run --lang expr -c '(map (sub ./notes/{name:*}.txt ./public/{name}.txt) [./notes/hello.txt ./notes/world.txt])'
+kame do run --lang expr -c '(sub ./notes/{name:*}.txt ./public/{name}.txt [./notes/hello.txt ./notes/world.txt])'
 kame -f ./01-values.km pages
 kame -f ./01-values.km publication
 ```
@@ -62,11 +62,11 @@ kame --allow-read=. -f ./03-resources.km publication
 The count changes from `2` to `3`. Remove only the `third.txt` you just created
 when finished. There are still no generated pages.
 
-Unlike the literal list, `wildcard` records a filesystem dependency. In standalone
+Unlike the literal list, a glob expression records a filesystem dependency. In standalone
 expression execution and standalone `.km` programs it requires an explicit read grant:
 
 ```sh
-kame do run --lang expr --allow-read -c '(wildcard ./notes/*.txt)'
+kame do run --lang expr --allow-read -c './notes/*.txt'
 ```
 
 **Understand:** Resource discovery feeds the same value language; it is not a

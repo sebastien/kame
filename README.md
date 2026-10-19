@@ -50,8 +50,8 @@ In an empty directory, save this as `Makefile.kmk`. Indent the recipe with a tab
 ```kame
 default : ./greeting.txt
 
-./greeting.txt : ./name.txt
-	@(yield! (str "Hello, " (strip (text (read @<))) "!\n"))
+./greeting.txt : ./name.txt ; [shell: kame]
+	(str "Hello, " (strip (text (read @<))) "!\n")
 ```
 
 ```sh
@@ -65,9 +65,31 @@ kame                       # rebuild: greeting.txt now contains Hello, Lin!
 ```
 
 `./greeting.txt` is a file target, `default` is a bare task, and `@<` selects
-the first input. `yield!` supplies the output bytes without an external command.
+the first input. A Kame body returns text or bytes; the rule atomically publishes
+that content to its single file output, without an external command.
 File freshness compares content, not timestamps; the bare task is always reached,
 but its unchanged file prerequisite can be reused.
+
+## Syntax at a glance
+
+| Syntax | Meaning |
+| --- | --- |
+| `name = EXPR` | Lazy definition; a bare `name` reads its value. |
+| `"text"`, `42`, `:true`, `:false`, `:nil` | Literal values; only false and nil are false in conditions. |
+| `["a" "b"]`, `[name: "app"]` | List and record; items are whitespace-separated, not comma-separated. |
+| `(f x)`, `([x] (uppercase x))` | Function call and anonymous function. |
+| `(files \| map f)` | Value pipe: equivalent to `(map f files)`, not a process stream. |
+| `./out : ./in`, `build : ./out` | File rule and always-run bare task; indent the body below the header. |
+| `task build : ./in`, `service server :` | Cached task and managed service. |
+| `@{name}`, `@(f x)` | Read a value or evaluate a call in a string/template, including shell recipes. |
+| `@<`, `@<*`, `@>` | First normal input, all normal inputs, first output in rule context. |
+| `{name}`, `{path:**}` | Rule captures: one path segment or a path spanning directories; reuse captures in inputs. |
+| `@{x/cc}` | Resolve and track the `cc` executable in a shell recipe. |
+| `; [shell: kame]`, `; [shell: kash]` | Header metadata: compute artifact content or run typed Kash commands instead of shell text. |
+| Kash `$name`, `$(command)`, `a \| b` | Pass a typed value, capture stdout, or connect process streams. |
+
+Expressions compute values; templates render text; Kash connects processes.
+See the [language reference](docs/skills/kame/ref/language.md) for details.
 
 ## Design goals
 
@@ -75,7 +97,8 @@ but its unchanged file prerequisite can be reused.
   distinguish file artifacts, bare tasks, cached tasks, and services explicitly.
 - **Clear language boundaries.** Expressions compute values; external-shell
   recipes use `@{ref}` / `@(call)` expansions and run as one script. Direct Kash
-  recipes pass typed argv without generating shell text. No `.PHONY` or `.ONESHELL`.
+  recipes pass typed argv without generating shell text. Kame bodies compute
+  artifact content directly. Template expansion is read-only. No `.PHONY` or `.ONESHELL`.
 - **Demand-driven computation.** Lazy definitions, dynamic dependencies, streaming,
   and watch invalidation share one engine, informed by
   [Build Systems à La Carte](https://dl.acm.org/doi/10.1145/3236774).
@@ -89,9 +112,9 @@ Compile C sources under `src/`, tracking headers in both `src/` and `lib/h/`:
 
 ```kame
 # Lazy definitions compute the source, header, and output sets.
-sources = (wildcard ./src/**/*.c)
-headers = (concat (wildcard ./src/**/*.h) (wildcard ./lib/h/**/*.h))
-objects = (map (sub ./src/{path:**}.c ./build/{path}.o) sources)
+sources = ./src/**/*.c
+headers = (concat ./src/**/*.h ./lib/h/**/*.h)
+objects = (sub ./src/{path:**}.c ./build/{path}.o sources)
 
 default : @{objects}
 
@@ -101,8 +124,8 @@ default : @{objects}
 	@{x/cc} -I ./lib/h -c @< -o @>
 ```
 
-`wildcard` tracks discovery, `sub` remaps paths, and `@{x/cc}` resolves and tracks
-the compiler. The recipe creates the output directory and compiles one source;
+Glob paths track discovery, `sub` remaps path lists, and `@{x/cc}` tracks the
+compiler. The recipe creates the output directory and compiles one source;
 changing a declared header invalidates dependent objects.
 
 ## Find your way

@@ -1,6 +1,6 @@
 # Deferred effect ordering and dry-run fixture.
-default :
-	@(out! "first\n")
-	@(err! "second-error\n")
-	@(out! "third\n")
+default : ; [shell: kash]
+	(out! "first\n")
+	(err! "second-error\n")
+	(out! "third\n")
 	echo command-last

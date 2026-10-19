@@ -26,13 +26,16 @@ func (p *Program) fileGuard(entry *instance) core.Signature {
 func (p *Program) fileGuardWithImplementation(entry *instance, settings core.Signature) core.Signature {
 	var sink hashSink
 	sink.state = core.NewDigest()
-	sink.appendText("kame-file-preflight-v1")
+	// Old accepted renders must not hide actions now forbidden during expansion.
+	sink.appendText("kame-file-preflight-v2")
 	// ponytail: a whole-source guard conservatively falls back to rendering after
 	// any code edit; fingerprint reached definitions if edit-time cost warrants it.
 	source := p.sourceSignature()
 	sink.state.Write(source.Digest[:])
 	sink.state.Write(settings.Digest[:])
-	if entry.Kash {
+	if entry.KameExpression != nil {
+		sink.appendText("kame")
+	} else if entry.Kash {
 		sink.appendText("kash")
 	} else {
 		sink.appendText("shell")

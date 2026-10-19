@@ -53,7 +53,7 @@ sweep_dir diag-sweep FEATURE_UNSUP ./unsupported.out
 test-step "execution diagnostics"
 sweep_dir diag-sweep RECIPE_FAIL ./failing.out
 sweep_dir diag-sweep OUTPUT_MISSING ./missing.out
-sweep_dir diag-sweep OUTPUT_CONFLICT ./conflict.out
+sweep_dir diag-sweep PHASE_INVALID ./conflict.out
 sweep_dir diag-sweep RECIPE_TIMEOUT --timeout 100 ./timeout.out
 
 test-step "language and capability diagnostics"

@@ -153,7 +153,7 @@ func TestWildcardTraversalPrunesUnrelatedSubtrees(t *testing.T) {
 	memory.SetFile("src/keep/one.go", []byte("keep"))
 	memory.SetFile("src/noise/deep/level/file.txt", []byte("noise"))
 	host := &countingReadDirHost{memory: memory}
-	parsed := script.Parse(a, "glob.kmk", "./output :\n\t@(yield! (json (wildcard \"./src/*/*.go\")))\n")
+	parsed := script.Parse(a, "glob.kmk", "./output : ; [shell: kame]\n\t(json (wildcard \"./src/*/*.go\"))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
@@ -452,7 +452,7 @@ func TestCaptureRedirectionDependenciesAndEffects(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./input :\n\tprintf source > @>\nrun :\n\t@(nop $(cat < input > output))\n")
+	parsed := script.Parse(a, "test.kmk", "./input :\n\tprintf source > @>\nrun : ; [shell: kash]\n\t(nop $(cat < input > output))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1225,7 +1225,7 @@ func TestYieldWritesFileOutput(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield! \"yielded\")\n")
+	parsed := script.Parse(a, "test.kmk", "./output : ; [shell: kash]\n\t(yield! \"yielded\")\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1267,7 +1267,7 @@ func TestYieldRejectsShellCommand(t *testing.T) {
 		return
 	}
 	result := compiled.Program.Materialize("./output")
-	if result.Diagnostic.Code != "OUTPUT_CONFLICT" {
+	if result.Diagnostic.Code != "PHASE_INVALID" {
 		t.Errorf("yield conflict = %s", result.Diagnostic.Code)
 	}
 	if result.Diagnostic.Span.Start <= 0 || result.Diagnostic.Span.End > len(source) || !containsSubstring(source[result.Diagnostic.Span.Start:result.Diagnostic.Span.End], "yield") {
@@ -1819,7 +1819,7 @@ func TestFileURIWritePreservesHostProtocolParents(t *testing.T) {
 	a := t.Allocator()
 	memory := wasm.NewMemoryHost(a)
 	uri := "file:///virtual/parent%252F%23%3F/deep/output.txt"
-	parsed := script.Parse(a, "uri-write.kmk", "publish :\n\t@(write! (resource \""+uri+"\") \"uri\")\n")
+	parsed := script.Parse(a, "uri-write.kmk", "publish : ; [shell: kash]\n\t(write! (resource \""+uri+"\") \"uri\")\n")
 	defer parsed.Free()
 	registry := eval.NewRegistry(a)
 	defer registry.Free()
@@ -1845,7 +1845,7 @@ func TestResourceURIInputUsesCanonicalMemoryIdentity(t *testing.T) {
 	a := t.Allocator()
 	memory := wasm.NewMemoryHost(a)
 	inputURI := "mem://workspace/src/input.txt"
-	parsed := script.Parse(a, "resource.kmk", "./output : @(list (resource \"mem://workspace/src/./input.txt\"))\n\t@(yield! (read (resource \"mem://workspace/src/input.txt\")))\n")
+	parsed := script.Parse(a, "resource.kmk", "./output : @(list (resource \"mem://workspace/src/./input.txt\")) ; [shell: kame]\n\t(read (resource \"mem://workspace/src/input.txt\"))\n")
 	registry := eval.NewRegistry(a)
 	if !operations.Register(registry) {
 		t.Fatal("library registration failed")
@@ -1923,7 +1923,7 @@ func TestWriteOperationDefersUntilExecution(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(write! \"./output\" \"written\")\n")
+	parsed := script.Parse(a, "test.kmk", "./output : ; [shell: kash]\n\t(write! \"./output\" \"written\")\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
@@ -1947,7 +1947,7 @@ func TestWriteOperationDefersUntilExecution(t *testing.T) {
 	registry.Free()
 }
 
-func TestRecipeRenderingRetainsEffectsAndTrimsDocumentEndings(t *testing.T) {
+func TestRecipeRenderingRejectsEffectsWithDocumentEndings(t *testing.T) {
 	a := t.Allocator()
 	bodies := []string{
 		"\t@(write! \"./output\" \"written\")\n\t@(out! \"rendered\")\n\tprintf command >> @>\n",
@@ -1969,10 +1969,10 @@ func TestRecipeRenderingRetainsEffectsAndTrimsDocumentEndings(t *testing.T) {
 		}
 		if i != 0 && parsed.Items[0].Rule.BodyDoc == nil { t.Error("document rendering was not selected") }
 		result := compiled.Program.Materialize("./output")
-		if result.Diagnostic.Code != "" { t.Error("recipe rendering failed: " + result.Diagnostic.Code) }
+		if result.Diagnostic.Code != "PHASE_INVALID" { t.Error("recipe rendering accepted an effect: " + result.Diagnostic.Code) }
 		result.Free(a)
 		data, readErr := os.ReadFile(a, dir + "/output")
-		if readErr != nil || string(data) != "writtencommand" { t.Error("rendered write effect or shell command was lost") }
+		if readErr == nil { t.Error("rejected template wrote an output") }
 		mem.FreeSlice(a, data)
 		seen := false
 		for {
@@ -1981,7 +1981,7 @@ func TestRecipeRenderingRetainsEffectsAndTrimsDocumentEndings(t *testing.T) {
 			if next.Event.Kind == program.Stdout && string(next.Event.Data) == "rendered" { seen = true }
 			next.Event.Free(a)
 		}
-		if !seen { t.Error("rendered output effect was lost") }
+		if seen { t.Error("rejected template emitted output") }
 		compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
 		_ = os.Remove(dir)
 	}
@@ -1996,7 +1996,7 @@ func TestWriteOperationCoercesValue(t *testing.T) {
 		return
 	}
 	defer os.Remove(dir)
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(write! \"./output\" 42)\n")
+	parsed := script.Parse(a, "test.kmk", "./output : ; [shell: kash]\n\t(write! \"./output\" 42)\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
@@ -2033,7 +2033,7 @@ func TestReadOperationResumesDuringRendering(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield! (str (count (read \"./input\"))))\n")
+	parsed := script.Parse(a, "test.kmk", "./output : ; [shell: kame]\n\t(str (count (read \"./input\")))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
@@ -2070,7 +2070,7 @@ func TestWildcardRelativePathDoesNotLeak(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output :\n\t@(yield! (json (wildcard \"./*\")))\n")
+	parsed := script.Parse(a, "test.kmk", "./output : ; [shell: kame]\n\t(json (wildcard \"./*\"))\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
@@ -2107,7 +2107,7 @@ func TestRenderFreesLineSpansWhenLaterLineWaits(t *testing.T) {
 		t.Fatal("input write failed")
 		return
 	}
-	parsed := script.Parse(a, "test.kmk", "./output :\n\tkept\n\t@(yield! (str (count (read \"./input\"))))\n")
+	parsed := script.Parse(a, "test.kmk", "./output :\n\tprintf kept\n\tprintf '%s' @(str (count (read \"./input\"))) > @>\n")
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Read, Names: []string{"."}}}})
@@ -2116,8 +2116,8 @@ func TestRenderFreesLineSpansWhenLaterLineWaits(t *testing.T) {
 		return
 	}
 	result := compiled.Program.Materialize("./output")
-	if result.Diagnostic.Code != "OUTPUT_CONFLICT" {
-		t.Errorf("yield conflict = %s", result.Diagnostic.Code)
+	if result.Diagnostic.Code != "" {
+		t.Errorf("read-only template failed = %s", result.Diagnostic.Code)
 	}
 	result.Free(a)
 	compiled.Program.Free()

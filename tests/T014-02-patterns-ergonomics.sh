@@ -11,14 +11,14 @@ make dist-wasm >/dev/null
 project="$TMPDIR/project"
 mkdir -p "$project"
 cat >"$project/Makefile.kmk" <<'KMK'
-{name:*} :
-	@(out! name)
-exact :
-	@(out! "literal")
-aws-shell\@{role-account} :
-	@(out! role-account)
+{name:*} : ; [shell: kash]
+	(out! name)
+exact : ; [shell: kash]
+	(out! "literal")
+aws-shell\@{role-account} : ; [shell: kash]
+	(out! role-account)
 KMK
-printf 'aws-shell\\@{role-account} :\n\t@(out! role-account)\n' >"$project/named.kmk"
+printf 'aws-shell\\@{role-account} : ; [shell: kash]\n\t(out! role-account)\n' >"$project/named.kmk"
 mkdir -p "$project/src/txto/blog/2026/deep"
 touch "$project/src/txto/blog/foo.txto" "$project/src/txto/blog/2026/deep/foo.txto" "$project/src/txto/blog/skip.txto"
 cat >"$project/replace.kmk" <<'KMK'
@@ -26,8 +26,8 @@ SOURCES_TXTO = (wildcard ./src/txto/**/*.txto)
 FILTERED = (filter-out ([x] (includes? "skip" x)) SOURCES_TXTO)
 BUILD_JSON = (replace ./src/txto/{prefix:**}/{name:*}.txto ./build/data/{prefix}/{name}.json FILTERED)
 SECTION = (replace ./src/txto/{prefix:**}/{name:*}.txto ./build/data/{prefix}/{name}.json)
-./result : @{SOURCES_TXTO}
-	@(yield! (join "\n" BUILD_JSON))
+./result : @{SOURCES_TXTO} ; [shell: kame]
+	(join "\n" BUILD_JSON)
 KMK
 cp "$project/replace.kmk" "$project/replace.original"
 mkdir -p "$project/journal"

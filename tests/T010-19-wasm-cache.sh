@@ -17,9 +17,9 @@ cli_build
 project="$TMPDIR/wasm-cache"
 mkdir -p "$project"
 cat >"$project/Makefile.kmk" <<'EOF'
-task cached :
+task cached : ; [shell: kash]
 	echo run >> runs.log
-	@(out! "cached-output")
+	(out! "cached-output")
 EOF
 
 runs() {
@@ -52,9 +52,9 @@ test-step "the wasm cache matches native"
 native="$TMPDIR/wasm-cache-native"
 mkdir -p "$native"
 cat >"$native/Makefile.kmk" <<'EOF'
-task cached :
+task cached : ; [shell: kash]
 	echo run >> runs.log
-	@(out! "cached-output")
+	(out! "cached-output")
 EOF
 (cd "$native" && "$CLI_BIN" cached) >"$native/out1.txt" 2>/dev/null
 (cd "$native" && "$CLI_BIN" cached) >"$native/out2.txt" 2>/dev/null

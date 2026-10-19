@@ -127,7 +127,7 @@ KMK
   status_project="$TMPDIR/status-$backend"
   mkdir -p "$status_project"
   printf one >"$status_project/seed"
-  printf './result : ./seed\n\t@(yield! (read ./seed))\n' >"$status_project/Makefile.kmk"
+  printf './result : ./seed ; [shell: kame]\n\t(read ./seed)\n' >"$status_project/Makefile.kmk"
   "${runner[@]}" do plan --json -C "$status_project" ./result >"$project/status" 2>"$project/error"
   if jq -e 'any(.resources[]; .display == "./result" and .status == "missing")' "$project/status" >/dev/null; then test-ok "$backend absent artifact is missing"; else test-fail "$backend missing status"; fi
   "${runner[@]}" -C "$status_project" ./result >"$project/value" 2>"$project/error"
@@ -239,10 +239,10 @@ KMK
   printf trigger >"$freshness/trigger"
   printf one >"$freshness/source"
   cat >"$freshness/Makefile.kmk" <<'KMK'
-./generated : ./source
-	@(yield! (read ./source))
-./out : ./trigger ./generated
-	@(yield! (read ./generated))
+./generated : ./source ; [shell: kame]
+	(read ./source)
+./out : ./trigger ./generated ; [shell: kame]
+	(read ./generated)
 KMK
   "${runner[@]}" -C "$freshness" ./out >"$project/value" 2>"$project/error"
   printf two >"$freshness/source"

@@ -106,7 +106,7 @@ awk '/^## Build example$/ { example = 1 } example && /^```kame$/ { code = 1; nex
 printf 'main\n' >"$readme_project/src/main.c"
 printf 'util\n' >"$readme_project/src/demo/util.c"
 printf 'header\n' >"$readme_project/src/demo/common.h"
-cat >"$readme_project/bin/gcc" <<'SH'
+cat >"$readme_project/bin/cc" <<'SH'
 #!/bin/sh
 set -eu
 while [ "$#" -gt 0 ]; do
@@ -119,12 +119,11 @@ while [ "$#" -gt 0 ]; do
 done
 exit 1
 SH
-chmod +x "$readme_project/bin/gcc"
+chmod +x "$readme_project/bin/cc"
 cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" -- -n
 cli_expect_status 0
 cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" --
 cli_expect_status 0
-cli_expect_stdout_contains "2 products built from 3 inputs"
 cli_expect_file "$readme_project/build/main.o"
 cli_expect_file "$readme_project/build/demo/util.o"
 cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" --
@@ -134,9 +133,6 @@ if [ "$(wc -l <"$readme_project/compiled.log")" -eq 2 ]; then
 else
 	test-fail "README artifacts recompiled despite unchanged inputs"
 fi
-cli_run --dir "$readme_project" --env "PATH=$readme_project/bin:$PATH" -- stats
-cli_expect_status 0
-cli_expect_stdout_contains "3 input files" "2 object files"
 
 test-step "unknown do command is a usage error with a hint"
 cli_run -- do bogus

@@ -24,6 +24,7 @@ process-oriented outer syntax, using the same Kame expression/value language.
 | `@(f x)` in template text | Evaluate `(f x)` and render its value as text. |
 | `@(f)` in template text | Invoke `f` with no arguments and render the result. |
 | `(f x)` in a Kash word | Supply a typed standalone value or a scalar fragment of a mixed word. |
+| Expression in a `[shell: kame]` rule body | Compute text or bytes for the rule's single file artifact, without actions. |
 | `$(command)` in an expression or Kash word | Parse the contents as Kash and capture stdout, subject to execution policy. |
 | `$(command)` in a plain Kame string/document | Literal text unless explicitly inside expression interpolation. |
 | `$(command)` in recipe text | Owned by the selected interpreter: shell by default, Kash when explicitly configured. |

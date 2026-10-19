@@ -14,15 +14,15 @@ cli_build
 project="$TMPDIR/cache-lock"
 mkdir -p "$project"
 cat >"$project/Makefile.kmk" <<'SRC'
-task cached :
+task cached : ; [shell: kash]
 	echo cached >> runs.log
 	sleep 0.6
-	@(out! "cached-result")
+	(out! "cached-result")
 
-task slow :
+task slow : ; [shell: kash]
 	echo slow >> slow.log
 	sleep 1
-	@(out! "slow-result")
+	(out! "slow-result")
 SRC
 
 # Two independent processes see the same cold identity. The second must wait

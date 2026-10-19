@@ -62,6 +62,7 @@ test_log "${DIM}ETA: $(test_runtime_eta "${TESTS[@]}")${RESET}"
 
 for ((index = 0; index < ${#TESTS[@]}; index++)); do
 	TEST="${TESTS[$index]}"
+	progress=$(printf '%*d/%d' "${#TESTS[@]}" "$((index + 1))" "${#TESTS[@]}")
 	export TEST_COUNT
 	rel="$(test-repo-path "$TEST")"
 	log="$LOG_DIR/$rel.log"
@@ -81,10 +82,10 @@ for ((index = 0; index < ${#TESTS[@]}; index++)); do
 	remaining=("${TESTS[@]:$((index + 1))}")
 	eta="$(test_runtime_eta "${remaining[@]}")"
 	if [ "$status" -eq 0 ]; then
-		[ "$TEST_VERBOSE" = 1 ] || test_log "${GREEN}EOK  ${RESET}${GREEN}${elapsed}s${RESET}  ${YELLOW}${rel}  ${DIM}ETA $eta${RESET}"
+		[ "$TEST_VERBOSE" = 1 ] || test_log "${DIM}[$progress]${RESET} ${GREEN}EOK  ${RESET}${GREEN}${elapsed}s${RESET}  ${YELLOW}${rel}  ${DIM}ETA $eta${RESET}"
 		test-ok
 	else
-		test_log "${RED}EFAIL ${RESET}${RED}${elapsed}s${RESET}  ${YELLOW}${rel}  ${DIM}ETA $eta${RESET}"
+		test_log "${DIM}[$progress]${RESET} ${RED}FAIL ${RESET}${RED}${elapsed}s${RESET}  ${YELLOW}${rel}  ${DIM}ETA $eta${RESET}"
 		if [ "$TEST_VERBOSE" != 1 ] && [ -s "$log" ]; then
 			test_log "${DIM}----- $rel -----${RESET}"
 			while IFS= read -r line; do

@@ -127,14 +127,14 @@ Only `incremental-rebuilds.html` is new; `hello-world.html` and
 `this-site.html` kept their timestamps. Changing one input's content rebuilt
 that page plus the index, nothing else.
 
-The index rule declares its inputs with the stdlib:
+The index rule declares its inputs with tracked glob expressions:
 
 ```kame
-posts = (wildcard ./content/posts/*.md)
+posts = ./content/posts/*.md
 ./build/index.html : @{posts} @{projects} ./templates/header.html ./templates/footer.html ./build/tools/row.sh
 ```
 
-Adding a `.md` file changes the `wildcard` result, so the index
+Adding a `.md` file changes the glob result, so the index
 rebuilds. See the full dependency closure with:
 
 ```sh

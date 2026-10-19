@@ -50,6 +50,8 @@ Kash executes argv directly:
   implicit splitting, shell reparsing, or globbing; raw `*.c` is literal.
 - A standalone unquoted list expansion splices scalar items: `$files` or
   `(wildcard ./src/*.c)`. Empty lists contribute no arguments.
+  In a definition, `files = ./src/*.c` already evaluates the glob; the call
+  wrapper is useful at a command argument boundary, where raw paths stay literal.
 - `$...name` requires a flat list. At command position it must be nonempty, with
   a nonempty string/path executable first and initial arguments afterward.
   Following words append arguments; an empty command list is an error. Ordinary

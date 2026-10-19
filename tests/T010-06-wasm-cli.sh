@@ -26,8 +26,8 @@ run() {
 test-step "-C resolves relative explicit files in both option orders"
 mkdir -p "$work/project"
 cat > "$work/project/Makefile.kmk" <<'EOF'
-task default :
-	@(out! "directory-ok\n")
+task default : ; [shell: kash]
+	(out! "directory-ok\n")
 EOF
 for args in first last absolute discover plan; do
 	case "$args" in

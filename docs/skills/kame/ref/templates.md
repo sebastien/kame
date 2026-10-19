@@ -52,8 +52,9 @@ application shorthand: `@if(exists? ./file)` equals `@if((exists? ./file))`.
 `@if(enabled)` reads a value; `@if((predicate))` calls without arguments.
 Formatters prefer the shorthand. Multi-argument `for`, `let`, and `include`
 keep explicit slots, so applications there need parentheses:
-`@for([item] (wildcard ./src/*.c))`, `@let(name (str first last))`, and
+`@for([item] (get mode inputs))`, `@let(name (str first last))`, and
 `@include((str ./pages/ name) payload)`. No optional-slot guessing is performed.
+Use a glob directly when no call is needed: `@for([item] ./src/*.c)`.
 
 ```html
 <h1>@{title}</h1>
@@ -130,13 +131,13 @@ a longer quote delimiter allows triple quotes in its content. `template-cat` is
 the document-rendering lowering primitive (nil is empty and lists join with
 spaces); `text` converts valid UTF-8 bytes to a string.
 
-To render a file-backed template into a declared build output, use `yield!`:
+To render a file-backed template into a declared build output, return its content:
 
 ```kame
 default : ./build/page.html
 
-./build/page.html : ./page.html
-	@(yield! (render [title: "Hello"] ./page.html))
+./build/page.html : ./page.html ; [shell: kame]
+	(render [title: "Hello"] ./page.html)
 ```
 
 ## Recipes and verification

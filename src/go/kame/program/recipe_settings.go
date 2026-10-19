@@ -5,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/source"
@@ -128,7 +129,16 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	freeStrings(p.Alloc, entry.Shell)
 	entry.Shell = nil
 	entry.Kash = false
-	if explicit {
+	expr.Free(p.Alloc, entry.KameExpression)
+	entry.KameExpression = nil
+	kame := false
+	if explicit && p.Eval.IsKameSelector(shell) {
+		kame = true
+		if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 || entry.Executor != "local" {
+			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell kame requires exactly one local file output")
+		}
+		if d := p.parseKameRecipe(entry); d.Code != "" { return d }
+	} else if explicit {
 		if p.Eval.IsKashConstructor(shell) {
 			entry.Kash = true
 		} else if shell.Kind == core.String && shell.Text != "" && strings.IndexByte(shell.Text, 0) < 0 {
@@ -138,17 +148,17 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 			for i := range shell.List {
 				v := shell.List[i]
 				if v.Kind != core.String || strings.IndexByte(v.Text, 0) >= 0 || (i == 0 && v.Text == "") {
-					return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kash, an executable string, or a nonempty string argv list")
+					return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kame, kash, an executable string, or a nonempty string argv list")
 				}
 				entry.Shell = slices.Append(p.Alloc, entry.Shell, cloneText(p.Alloc, v.Text))
 			}
 		} else {
-			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kash, an executable string, or a nonempty string argv list")
+			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell requires kame, kash, an executable string, or a nonempty string argv list")
 		}
 	} else {
 		entry.Shell = cloneStrings(p.Alloc, p.Options.Shell)
 	}
-	if !entry.Kash {
+	if !entry.Kash && !kame {
 		for i := range entry.Rule.RecipeDiagnostics {
 			d := entry.Rule.RecipeDiagnostics[i]
 			if d.Severity >= source.Error { return failureAt(p.Alloc, d.Code, diagnostic.Span{Start: d.Span.Start, End: d.Span.End}, d.Message) }
@@ -176,6 +186,27 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 		return failureAt(p.Alloc, "PHASE_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "recipe settings cannot perform effects")
 	}
 	return diagnostic.Diagnostic{}
+}
+
+func (p *Program) parseKameRecipe(entry *instance) diagnostic.Diagnostic {
+	if len(entry.Rule.Body) == 0 {
+		return failureAt(p.Alloc, "PARSE_ERR", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "a Kame body requires one expression")
+	}
+	body := entry.Rule.Body
+	parsed := expr.ParseRange(p.Alloc, p.Parsed.Source, body[0].Span.Start, body[len(body)-1].Span.End, recipeIndent(p.Parsed.Source.Text, body[0].Span.Start))
+	defer slices.Free(p.Alloc, parsed.Diagnostics)
+	entry.KameExpression = parsed.Expr
+	if len(parsed.Diagnostics) != 0 {
+		d := parsed.Diagnostics[0]
+		return failureAt(p.Alloc, d.Code, diagnostic.Span{Start: d.Span.Start, End: d.Span.End}, d.Message)
+	}
+	return diagnostic.Diagnostic{}
+}
+
+func recipeIndent(text string, start int) string {
+	line := start
+	for line > 0 && text[line-1] != '\n' { line-- }
+	return text[line:start]
 }
 
 func (p *Program) freeSettingsContext(state *recipeSettingsResolver, c *eval.Context) {

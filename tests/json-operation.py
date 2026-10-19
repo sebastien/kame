@@ -27,20 +27,20 @@ for expression in expressions:
 with tempfile.TemporaryDirectory(prefix='kame-json-') as directory:
     project = Path(directory)
     (project / 'Makefile.kmk').write_text('''default : ./page.html
-./data.json :
-	@(yield! "{\\\"title\\\":\\\"Generated\\\"}")
-./page.html :
-	@(yield! (let [data (parse-json (text (read ./data.json)))] data.title))
+./data.json : ; [shell: kame]
+	"{\\\"title\\\":\\\"Generated\\\"}"
+./page.html : ; [shell: kame]
+	(let [data (parse-json (text (read ./data.json)))] data.title)
 ''')
     result = subprocess.run([str(native)], cwd=project, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert (project / 'page.html').read_text() == 'Generated'
     # Absolute requests must select relative template producers too.
     (project / 'Makefile.kmk').write_text('''default : ./page.html
-./{name:*}.json :
-	@(yield! "{\\\"title\\\":\\\"Template\\\"}")
-./page.html :
-	@(yield! (let [data (parse-json (text (read ./other.json)))] data.title))
+./{name:*}.json : ; [shell: kame]
+	"{\\\"title\\\":\\\"Template\\\"}"
+./page.html : ; [shell: kame]
+	(let [data (parse-json (text (read ./other.json)))] data.title)
 ''')
     result = subprocess.run([str(native)], cwd=project, capture_output=True, timeout=30)
     assert result.returncode == 0, result.stderr

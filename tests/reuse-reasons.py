@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (project / 'input').write_text('unchanged')
     # Guarded reuse must skip derived-value evaluation, not merely publication.
     (project / 'extra.json').write_text('"A"')
-    guarded = 'SHELL = /bin/sh\nPAYLOAD = (parse-json (text (read "./extra.json")))\n./guarded : ./input\n\t@(yield! PAYLOAD)\n'
+    guarded = 'SHELL = /bin/sh\nPAYLOAD = (parse-json (text (read "./extra.json")))\n./guarded : ./input ; [shell: kame]\n\tPAYLOAD\n'
     first = reasons(run(guarded, ['--json', './guarded']))
     # Native file-context reads expose an opaque failure; forwarding establishes absence.
     assert any(e['reason'] in ('record-missing', 'proof-unverifiable') for e in first), first
@@ -128,7 +128,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not any(e['reason'] == 'input-changed' for e in selected), selected
     assert not reasons(run(explain, ['--json', './explained']))
     # Cached-task lookup must retain the same missing/invalid distinction.
-    cached_reason = 'task reason-cached :\n\t@(out! "cached reason")\n'
+    cached_reason = 'task reason-cached : ; [shell: kash]\n\t(out! "cached reason")\n'
     selected = reasons(run(cached_reason, ['--json', 'reason-cached']))
     assert [e['reason'] for e in selected] == ['record-missing'], selected
     assert not reasons(run(cached_reason, ['--json', 'reason-cached']))

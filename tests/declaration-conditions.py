@@ -32,8 +32,8 @@ with tempfile.TemporaryDirectory() as temporary:
         return result
 
     (project / 'config.kmk').write_text('(selected wanted) = (eq mode wanted)\n')
-    (project / 'debug.kmk').write_text('label = "debug"\nchosen :\n\t@(out! label)\ndebug-only :\n')
-    (project / 'release.kmk').write_text('label = "release"\nchosen :\n\t@(out! label)\nrelease-only :\n')
+    (project / 'debug.kmk').write_text('label = "debug"\nchosen : ; [shell: kash]\n\t(out! label)\ndebug-only :\n')
+    (project / 'release.kmk').write_text('label = "release"\nchosen : ; [shell: kash]\n\t(out! label)\nrelease-only :\n')
     build = ('mode ?= "debug"\n(include ./config.kmk)\n'
         '(if (selected "debug") (include ./debug.kmk) (include ./release.kmk))\n'
         '(if :false (include ./missing.kmk) :nil)\n'
@@ -103,7 +103,7 @@ with tempfile.TemporaryDirectory() as temporary:
     (project / 'second.km').write_text(second)
     run(['do', 'run', '--print-result', '-f', 'first.km', '-f', 'second.km'], '42')
     run(['do', 'run', '--print-result', '-f', 'first.km', '-l', 'km', '-c', ':true\n(if (eq mode "debug") 42 0)\n'], '42')
-    inline_build = 'chosen :\n\t@(out! (if :true "inline" "wrong"))\n'
+    inline_build = 'chosen : ; [shell: kash]\n\t(out! (if :true "inline" "wrong"))\n'
     run(['do', 'run', '-l', 'kmk', '-c', inline_build, 'chosen'], 'inline')
     # Includes require a file-backed source, even when conditionally reached.
     run(['do', 'run', '-l', 'km', '-c', '(if :true (include ./missing.km))\n'], code='FEATURE_UNSUP')

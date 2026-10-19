@@ -153,7 +153,6 @@ meaning by themselves.
 | `PLUGIN_FAIL` | error | Plugin host/process reports an operation failure |
 | `PLUGIN_TIMEOUT` | error | Plugin operation exceeded its timeout |
 | `OUTPUT_MISSING` | error | Successful recipe omitted a declared output |
-| `OUTPUT_CONFLICT` | error | Declarative yield conflicts with a shell command |
 | `CACHE_UNUSABLE` | warning | Cache record or manifest cannot be used |
 | `CLEAN_STATE` | error/warning | Output ownership cannot be persisted or cleanup requires safety/recovery review; uncertain production is a warning when ordinary publication remains valid |
 | `CLEAN_BUSY` | error | A cooperating producer, service or cleanup operation holds the project cleanup boundary |

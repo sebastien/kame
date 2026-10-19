@@ -97,7 +97,7 @@ Value/expression invocations deny host operations by default; grant only what is
 needed:
 
 ```sh
-kame do run --lang expr --allow-read=. -c '(wildcard ./docs/*.md)'
+kame do run --lang expr --allow-read=. -c './docs/*.md'
 ```
 
 Read, write, run, and environment authority are separate. Filesystem roots are lexical
@@ -213,7 +213,7 @@ including a filtered wildcard result. `**` captures can backtrack across path
 segments. Anchor the source prefix to avoid copying it into the destination:
 
 ```kame
-SOURCES = (filter-out ([x] (includes? "draft" x)) (wildcard ./src/**/*.txto))
+SOURCES = (filter-out ([x] (includes? "draft" x)) ./src/**/*.txto)
 OUTPUTS = (sub ./src/{path:**}.txto ./build/{path}.json SOURCES)
 ```
 

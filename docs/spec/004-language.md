@@ -890,6 +890,12 @@ uses `$reference` and `(EXPRESSION)` for typed values; legacy `@(...)` and
 `\@(...)` structural boundaries are invalid. Generated Kash is explicit through
 `(kash TEXT)`. Argument values remain inert data.
 
+`SHELL = kame` or per-rule `[shell: kame]` instead selects one value expression. It returns text
+or bytes which the rule atomically publishes to its single file output; no
+template expansion or process is involved. Content computation and external-shell
+template expansion are read-only, including reached lazy definitions. See
+`044-value-producing-rule-bodies.md` for selection and publication contracts.
+
 An external-shell recipe body is a `plain`-style document template (`016-templates.md`). A
 whole-line, keyword-gated directive (`@if`, `@elif`, `@else`, `@for`, `@with`,
 `@let`, `@include`, `@raw`, `@end`) is removed together with its rule indent and

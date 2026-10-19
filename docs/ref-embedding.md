@@ -25,7 +25,7 @@ try {
   const values = await kame.compile('answer = 42\n');
   console.log(await values.evaluate('(count [1 2 3])')); // 3
   console.log((await values.build('answer')).results[0].value); // 42
-  const program = await kame.compile('./hello.txt :\n\t@(yield! "hello")\n',
+  const program = await kame.compile('./hello.txt : ; [shell: kame]\n\t"hello"\n',
     { name: 'example.kmk' });
   await program.build('./hello.txt', {
     cwd,
@@ -71,7 +71,7 @@ async def main():
             values = await kame.compile('answer = 42\n')
             print((await values.build('answer'))['results'][0]['value']['data'])  # 42
             program = await kame.compile(
-                './hello.txt :\n\t@(yield! "hello")\n', name='example.kmk')
+                './hello.txt : ; [shell: kame]\n\t"hello"\n', name='example.kmk')
             await program.build('./hello.txt', grants={'read': ['.'], 'write': ['.']})
             print(Path(cwd, 'hello.txt').read_text())  # hello
 

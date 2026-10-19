@@ -32,12 +32,12 @@ test-step "yield may compute its content from dynamic dependencies"
 	cli_expect_file ./dynamic-yield.out '1'
 )
 
-test-step "yield with a shell command is OUTPUT_CONFLICT"
+test-step "artifact effects during shell expansion are PHASE_INVALID"
 (
 	cd yield
 	cli_run -- ./conflict.out
 	cli_expect_status 1
-	cli_expect_stderr_contains 'OUTPUT_CONFLICT'
+	cli_expect_stderr_contains 'PHASE_INVALID'
 	cli_expect_printable "$CLI_ERR"
 )
 

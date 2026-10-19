@@ -107,10 +107,11 @@ without whitespace are malformed, not silently separated.
 
 Multi-argument directives retain explicit argument slots: `@for([item] LIST SEP)`,
 `@let(NAME EXPR)`, and `@include(PATH PAYLOAD)`. Applications in these slots still
-need their own parentheses, for example `@for([item] (wildcard ./src/*.c))`,
+need their own parentheses, for example `@for([item] (get mode inputs))`,
 `@let(name (str first last))`, or `@include((str ./pages/ name) payload)`.
 Unparenthesized tokens are never guessed to be a computed list/path plus optional
 separator/payload. `@end(KIND)` is a literal block label, not an expression call.
+Glob expressions need no call wrapper: `@for([item] ./src/*.c)`.
 
 Formatting removes redundant application parentheses only for single-expression
 directives with arguments. Zero-argument calls, lambda delimiters, explicit
@@ -363,8 +364,8 @@ CARD = """
 
 default : ./build/post.html
 
-./build/post.html :
-	@(yield! (render [post: [title: "Hello, world" pinned: :true]] "html" CARD))
+./build/post.html : ; [shell: kame]
+	(render [post: [title: "Hello, world" pinned: :true]] "html" CARD)
 ```
 
 The content between the opening and closing runs of `"""` is raw: no escape

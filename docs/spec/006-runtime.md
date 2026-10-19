@@ -236,12 +236,13 @@ missing output still require execution. Rendering may establish a new dependency
 set, whose current values and output proof must be validated before reuse.
 `always` and `--force` execute.
 
-Operations that cannot be deferred, including collected `sh!`, are invalid in
-planning and direct build-template rendering and return `PHASE_INVALID`.
-Demanded lazy values and Kash recipe expressions evaluate in their runtime
-phase, where collected shell calls may execute with the target environment and
-invocation run grants, as specified in 007. Dynamic prerequisites retain their
-read-only phase; registration never launches these calls.
+Operations that cannot be deferred, including collected `sh!`, clocks, and
+output actions, are invalid during planning and during shell-template expansion
+or Kame content computation. They return `PHASE_INVALID`. Direct Kash recipes
+evaluate in the execution phase, where those actions may run with the target
+environment and invocation grants, as specified in 007. A reached lazy definition
+inherits the phase of the computation that demands it. Dynamic prerequisites
+retain their read-only phase; registration never launches these calls.
 
 ## File Rules
 
@@ -312,16 +313,23 @@ After capture rendering, duplicate output paths are `PARSE_ERR`.
 
 ## Yield and Effects
 
-`yield` appends bytes to declarative output content. It is valid only for a file
-rule with exactly one output. If the same accepted render contains any nonempty
-shell command, rendering fails with `OUTPUT_CONFLICT`; the runtime does not inspect
-shell syntax to infer output ownership. Yielded content is written atomically
-during execution.
+`shell` selects one producer. `[shell: kame]` or `SHELL = kame` selects one Kame
+expression. It returns text or bytes, and the rule atomically publishes those
+bytes to its single local file output. No process is started. Tasks, services,
+grouped outputs and remote execution are rejected. See
+`044-value-producing-rule-bodies.md`.
 
-`out` and `err` are deferred effects. Dry-run reports them but does not write
-them. Normal execution commits all non-process effects in recipe source order
-before starting the one shell script. This preserves one shell session without
-claiming effect interleaving between its commands.
+`[shell: kash]` or `SHELL = kash` executes the authored body as Kash. In that
+program, `(yield! ...)` appends bytes for exactly one file output. It is an
+execution action, not a template expansion. `(out! ...)` and `(err! ...)` are
+likewise Kash actions.
+
+An external-shell recipe expands its body as a read-only template, then runs one
+shell process. Expansion and Kame content computation reject `out!`, `err!`,
+`yield!`, `write!`, process execution and clock reads with `PHASE_INVALID`,
+including through reached helpers and lazy definitions. The shell performs its
+own actions after expansion. Dry-run computes available Kame content but does
+not publish it. A failed computation leaves an existing artifact untouched.
 
 ## Execution Events
 
@@ -528,8 +536,9 @@ bytes is a separate operation used by `cat`.
   groups wait for all prior prerequisites, preserve failure blocking, and retain
   normal/order-only input semantics on native and WASM.
 - Requests for two sibling outputs share one rule-instance execution.
-- `yield` atomically writes one output and rejects tasks or multiple outputs.
-- `yield` combined with any nonempty rendered command returns `OUTPUT_CONFLICT`.
+- `[shell: kame]` publishes exact text or bytes for one local file output and does not start a process.
+- Shell-template expansion and Kame content computation reject output actions, processes and clocks with `PHASE_INVALID`.
+- Direct Kash `yield!` writes one file output and rejects tasks or multiple outputs.
 - Command failure prevents dependent execution and carries mapped source span.
 - Cancelling a target leaves no process group running.
 - A representative project builds and then skips its unchanged file target on

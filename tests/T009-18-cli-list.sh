@@ -93,21 +93,21 @@ for backend in native wasm; do
 build : ./result checked
 service daemon :
 	touch forbidden-service
-task checked : ./seed
-	@(out! (text (read ./seed)))
+task checked : ./seed ; [shell: kash]
+	(out! (text (read ./seed)))
 task never : ./seed
 	touch forbidden-task
 task parameterized {mode} :
-task defaulted {mode=debug} : ./seed
-	@(out! mode)
-./result : ./seed
-	@(yield! (read ./seed))
+task defaulted {mode=debug} : ./seed ; [shell: kash]
+	(out! mode)
+./result : ./seed ; [shell: kame]
+	(read ./seed)
 ./absent : ./seed
 	touch forbidden-file
-./downstream : ./obj/one.o
-	@(yield! (read ./obj/one.o))
-./obj/{name}.o : ./src/{name}.c
-	@(yield! (read (first inputs)))
+./downstream : ./obj/one.o ; [shell: kame]
+	(read ./obj/one.o)
+./obj/{name}.o : ./src/{name}.c ; [shell: kame]
+	(read (first inputs))
 ./pair ./pair.map : ./seed
 	cat ./seed > ./pair
 	cp ./pair ./pair.map

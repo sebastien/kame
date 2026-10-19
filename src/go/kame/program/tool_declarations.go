@@ -2,6 +2,7 @@ package program
 
 import (
  "kame/lang/expr"
+ "kame/lang/rule"
  "kame/lang/script"
  "kame/lang/template"
  "solod.dev/so/mem"
@@ -45,6 +46,13 @@ func (p *Program) declareTemplateTools(value *template.String) {
 }
 
 func (p *Program) declareBuildTools(parsed *script.Script) {
+ shellIsKame := false
+ for i := range parsed.Items {
+  definition := parsed.Items[i].Definition
+  if definition != nil && definition.Name == "SHELL" && definition.Expression != nil && definition.Expression.Kind == expr.Name && definition.Expression.Text == "kame" {
+   shellIsKame = true
+  }
+ }
  for i := range parsed.Items {
   item := parsed.Items[i]
   p.declareExpressionTools(item.Expression)
@@ -54,8 +62,26 @@ func (p *Program) declareBuildTools(parsed *script.Script) {
   if item.Rule != nil {
    for j := range item.Rule.Inputs { p.declareTemplateTools(item.Rule.Inputs[j].Template) }
    for j := range item.Rule.Body { p.declareTemplateTools(item.Rule.Body[j].Template) }
+   if len(item.Rule.Body) != 0 && ruleSelectsKame(item.Rule, shellIsKame) {
+    body := item.Rule.Body
+    value := expr.ParseRange(p.Alloc, parsed.Source, body[0].Span.Start, body[len(body)-1].Span.End, recipeIndent(parsed.Source.Text, body[0].Span.Start))
+    if len(value.Diagnostics) == 0 { p.declareExpressionTools(value.Expr) }
+    expr.Free(p.Alloc, value.Expr)
+    slices.Free(p.Alloc, value.Diagnostics)
+   }
   }
  }
+}
+
+func ruleSelectsKame(rule *rule.Rule, shellIsKame bool) bool {
+ if rule.Metadata != nil {
+  for i := range rule.Metadata.Fields {
+   field := rule.Metadata.Fields[i]
+   if field.Key != "shell" { continue }
+   return field.Value != nil && field.Value.Kind == expr.Name && field.Value.Text == "kame"
+  }
+ }
+ return shellIsKame
 }
 
 func (p *Program) plannedTools() []Tool {

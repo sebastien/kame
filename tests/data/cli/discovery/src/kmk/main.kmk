@@ -1,2 +1,2 @@
-task where :
-	@(out! "src/kmk/main.kmk\n")
+task where : ; [shell: kash]
+	(out! "src/kmk/main.kmk\n")

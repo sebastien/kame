@@ -290,7 +290,7 @@ Runner dry-run works for pure km/expr/Kash as well as mixed rule sessions.
 
 ```sh
 kame do run --lang expr -c '(join "," ["a" "b"])'
-kame do run --lang expr --allow-read=./src -c '(wildcard ./src/*.c)'
+kame do run --lang expr --allow-read=./src -c './src/*.c'
 kame do run --lang expr --allow-env=HOME -c '(env "HOME")'
 ```
 

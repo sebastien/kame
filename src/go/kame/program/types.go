@@ -6,6 +6,7 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/rule"
 	"kame/lang/script"
 	"kame/lang/template"
@@ -390,6 +391,7 @@ type instance struct {
 	ServiceRestartTimerID  int64
 	Shell                  []string
 	Kash                   bool
+	KameExpression         *expr.Expr
 	Executor               string
 	ExecutorVersion        string
 	ExecutionInputs        []host.ExecutionArtifact

@@ -5,6 +5,34 @@ matching executable and update downstream sources explicitly: there is no legacy
 parser mode or automatic formatter migration. Formatting preserves meaning; it
 does not guess an older source's intent.
 
+## Rule bodies produce artifacts
+
+Replace artifact-writing template expansions with a value-producing Kame body:
+
+```kame
+# Before
+./greeting.txt : ./name.txt
+	@(yield! (str "Hello, " (strip (text (read @<))) "!\n"))
+
+# After
+./greeting.txt : ./name.txt ; [shell: kame]
+	(str "Hello, " (strip (text (read @<))) "!\n")
+```
+
+The body is exactly one expression returning text or bytes, with no implicit
+serialization or added newline. The rule atomically publishes the result to its
+single file output. Reads, templates and environment lookups remain tracked;
+writes, output effects, processes and clocks are rejected, including through lazy
+definitions. `[shell: kame]` and `SHELL = kame` select that producer. The string
+`"kame"` is an executable name, not the selector. A per-rule `shell` overrides
+build-wide `SHELL`.
+
+External-shell template expansion is also read-only. For action-oriented recipes,
+select `[shell: kash]` and write ordinary `(out! ...)`, `(err! ...)`, `(write! ...)`
+or `(yield! ...)` statements without the `@` prefix. Bash recipes should perform
+their effects in Bash, not during interpolation. Standalone Kame execution and
+direct Kash action semantics are unchanged. Formatting does not migrate bodies.
+
 ## References and calls
 
 Templates and expression strings distinguish lookup from invocation:

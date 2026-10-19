@@ -140,7 +140,7 @@ assert.ok(Array.isArray(built.events));
 built.events.push({ type: 'caller-mutation' });
 assert.equal((await answer.build('answer')).events.some((event) => event.type === 'caller-mutation'), false);
 await assert.rejects(kame.compile('x = 1\nx = 2\n'), (error) => ['DEF_INVALID', 'PARSE_ERR'].includes(error.code));
-const shared = await kame.compile('a : shared\nb : shared\nshared :\n\t@(out! "once")\n', { name: 'shared.kmk' });
+const shared = await kame.compile('a : shared\nb : shared\nshared : ; [shell: kash]\n\t(out! "once")\n', { name: 'shared.kmk' });
 const sharedBuild = await shared.build(['a', 'b']);
 assert.equal(sharedBuild.events.filter((event) => event.type === 'target-started' && event.target === 'shared').length, 1);
 assert.deepEqual(sharedBuild.results.map((result) => result.target), ['a', 'b']);
@@ -262,7 +262,7 @@ try {
   const spawnProcess = childProcess.spawn;
   const platform = Object.getOwnPropertyDescriptor(process, 'platform');
   const expression = '(pipe! (run! "/bin/sh" "-c" "exec sleep 30 # producer") (run! "/bin/sh" "-c" "exec sleep 30 # consumer"))';
-  const faultProgram = await kame.compile(`probe :\n\t@${expression}\n`, { name: 'fault.kmk' });
+  const faultProgram = await kame.compile(`probe : ; [shell: kash]\n\t${expression}\n`, { name: 'fault.kmk' });
   for (const failure of ['publication', 'EIO']) {
     const children = [];
     const controller = new AbortController();
@@ -306,7 +306,7 @@ try {
       : closure === 'read-one' ? 'read line; printf "%s\\n" "$line" # consumer'
       : closure === 'close-stdin-live' ? `exec 0<&-; sleep 0.1; printf done > ${marker} # consumer`
       : `cat >/dev/null; printf done > ${marker} # consumer`;
-    const source = `probe :\n\t@(pipe! (run! "/bin/sh" "-c" ${JSON.stringify(producer)}) (run! "/bin/sh" "-c" ${JSON.stringify(consumer)}))\n`;
+    const source = `probe : ; [shell: kash]\n\t(pipe! (run! "/bin/sh" "-c" ${JSON.stringify(producer)}) (run! "/bin/sh" "-c" ${JSON.stringify(consumer)}))\n`;
     const early = await kame.compile(source, { name: 'early.kmk' });
     const children = [];
     let injected = false;
@@ -349,8 +349,8 @@ try {
   // Actual kind-23 service cancellation must find every independently
   // detached pipeline stage by raw event identity, not the opaque ABI handle.
   const stage = (name) => `(run! "/bin/sh" "-c" "trap '' TERM; echo $$ > ${join(directory, name)}; while :; do sleep 1; done")`;
-  const pipeline = await kame.compile(`service daemon : ; [ready: [argv: ["test" "-f" "stage-two.pid"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 0]]\n\t@(pipe! ${stage('stage-one.pid')} ${stage('stage-two.pid')})\nconsumer : daemon\n\twhile [ ! -f release-pipeline ]; do sleep 0.01; done\n`, { name: 'pipeline.kmk' });
-  const peer = await kame.compile(`service daemon : ; [ready: [argv: ["test" "-f" "peer-two.pid"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 0]]\n\t@(pipe! ${stage('peer-one.pid')} ${stage('peer-two.pid')})\nconsumer : daemon\n\twhile [ ! -f release-peer ]; do sleep 0.01; done\nsecond : daemon\n\ttrue\n`, { name: 'peer.kmk' });
+  const pipeline = await kame.compile(`service daemon : ; [shell: kash ready: [argv: ["test" "-f" "stage-two.pid"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 0]]\n\t(pipe! ${stage('stage-one.pid')} ${stage('stage-two.pid')})\nconsumer : daemon\n\twhile [ ! -f release-pipeline ]; do sleep 0.01; done\n`, { name: 'pipeline.kmk' });
+  const peer = await kame.compile(`service daemon : ; [shell: kash ready: [argv: ["test" "-f" "peer-two.pid"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 0]]\n\t(pipe! ${stage('peer-one.pid')} ${stage('peer-two.pid')})\nconsumer : daemon\n\twhile [ ! -f release-peer ]; do sleep 0.01; done\nsecond : daemon\n\ttrue\n`, { name: 'peer.kmk' });
   const controller = new AbortController();
   const options = { cwd: directory, signal: controller.signal, grants: [{ capability: 'run', names: [] }, { capability: 'read', names: [directory] }, { capability: 'write', names: [directory] }] };
   const deadline = setTimeout(() => controller.abort(), 5000);
@@ -427,7 +427,7 @@ try {
     // A retained input change, unlike build disposal, naturally queues a
     // cancellation while the detached service pipeline is still live.
     writeFileSync(join(directory, 'automatic-input'), 'before');
-    const automatic = await kame.compile(`service daemon : ./automatic-input ; [ready: [argv: ["test" "-f" "automatic-two.pid"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 0]]\n\t@(pipe! ${stage('automatic-one.pid')} ${stage('automatic-two.pid')})\nconsumer : daemon\n\ttrue\n`, { name: 'automatic.kmk' });
+    const automatic = await kame.compile(`service daemon : ./automatic-input ; [shell: kash ready: [argv: ["test" "-f" "automatic-two.pid"] interval-ms: 10 timeout-ms: 3000] stop: [grace-ms: 0]]\n\t(pipe! ${stage('automatic-one.pid')} ${stage('automatic-two.pid')})\nconsumer : daemon\n\ttrue\n`, { name: 'automatic.kmk' });
     let automaticWatch;
     try {
       automaticWatch = await automatic.watch('consumer', options);
