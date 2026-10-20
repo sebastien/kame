@@ -79,6 +79,29 @@ for mode in fatal abort silent-fatal silent-abort success failure diff json-vali
   done
 done
 
+test-step "signals exit helpers instead of returning to deleted scratch directories"
+for lifecycle in start init; do
+  for signal in INT TERM; do
+    case_dir="$scratch/signal-$lifecycle-$signal"
+    mkdir -p "$case_dir"
+    status=0
+    # shellcheck disable=SC2016 # The child expands these variables.
+    (cd "$scratch" && env HELPERS="$scratch/runner/tests" CASE_DIR="$case_dir" \
+      bash -c 'source "$HELPERS/lib-testing.sh"; test-"$1" cancellation; printf "%s\n" "$TEST_PATH" >"$CASE_DIR/path"; kill -s "$2" "$$"; touch "$CASE_DIR/continued"' bash "$lifecycle" "$signal") \
+      >"$case_dir/out" 2>"$case_dir/err" || status=$?
+    want_status=130
+    [ "$signal" != TERM ] || want_status=143
+    test-expect "$status" "$want_status" "$lifecycle/$signal exit status"
+    cli_expect_no_file "$case_dir/continued"
+    cli_expect_no_file "$(cat "$case_dir/path")"
+    if grep -Eq 'EOK|EFAIL|Unmanaged error' "$case_dir/err"; then
+      test-fail "cancellation printed a normal result"
+    else
+      test-ok "cancellation has no misleading result"
+    fi
+  done
+done
+
 test-step "failed diffs do not touch Desktop files"
 cli_expect_file "$scratch/home/Desktop/a.txt" $'valuable-a\n'
 cli_expect_file "$scratch/home/Desktop/b.txt" $'valuable-b\n'
@@ -117,7 +140,7 @@ TEST_RUNTIME_CACHE_DIR="$previous_cache"
 status=0
 (cd "$scratch/runner" && env HOME="$scratch/home" NOCOLOR=1 \
   TEST_RUNTIME_CACHE_DIR="$runtime_cache" timeout --kill-after=2 10 \
-  bash tests/harness.sh -q tests/bash-fixture.sh) \
+  bash tests/harness.sh -q -j 1 tests/bash-fixture.sh) \
   >"$scratch/harness.out" 2>"$scratch/harness.err" || status=$?
 test-expect "$status" 0 "cached ETA harness status"
 test-contains "$scratch/harness.err" 'ETA: ~17s (1/1 cached)' && test-ok "cached runtime appears in ETA"

@@ -8,8 +8,8 @@ make dist-wasm >/dev/null
 cli_build
 for backend in native wasm; do
  test-step "$backend interpreter metadata and reusable script lifecycle"
- python3 "$CLI_ROOT/tests/recipe-settings.py" "$CLI_ROOT" "$backend" "$CLI_BIN"
- python3 "$CLI_ROOT/tests/kash-recipes.py" "$CLI_ROOT" "$backend" "$CLI_BIN"
+  python3 "$CLI_ROOT/tests/recipe-settings.py" "$CLI_ROOT" "$backend" "$CLI_BIN" values
+  python3 "$CLI_ROOT/tests/kash-recipes.py" "$CLI_ROOT" "$backend" "$CLI_BIN" values
  test-ok "$backend Kash recipes and script calls"
 done
 test-end

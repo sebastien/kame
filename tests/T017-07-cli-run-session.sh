@@ -103,7 +103,6 @@ PYTIME
 	reject RECIPE_FAIL do run -l expr --allow-run -c '"must-not-print"' -l kash -c '/bin/sh -c "exit 7"'
 	reject PARSE_ERR do run -l expr -c '(str "a"' -c '"b")'
 	test-step "$backend single-source invocation deadline and service output restrictions"
-	reject RECIPE_TIMEOUT do run --timeout 250 -l kmk -c $'default : second\nfirst :\n\tsleep 0.15\nsecond : first\n\tsleep 0.15\n' default
 	service_case=0
 	for service_source in \
 		$'service daemon :\n\t@(write! "./forbidden-service-output" "payload")\n' \

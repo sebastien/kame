@@ -61,7 +61,30 @@ binaries and create temporary fixtures; run them from the checkout root.
 ```sh
 CC=clang make build/kame.debug
 tests/harness.sh -q tests/T013-04-meta-layer-examples.sh
+# Four workers by default on Bash 5.1+; explicitly serialize when debugging.
+KAME_TEST_JOBS=1 make test-cli
 ```
+
+Concurrency only applies to reviewed entries in `tests/PARALLEL.tsv`, with a reason
+for each entry. All unlisted tests run alone after the pool drains; new tests are
+exclusive by default. Review helper scripts too before adding a parallel-safe row.
+
+Mixed suites separate their value/format/finite-output checks from lifecycle work:
+
+| Parallel portion | Exclusive companion |
+| --- | --- |
+| `T004-16` computed outputs | `T004-20` target replacement watch |
+| `T006-06` environment/cache values | `T006-10` warm-watch restoration |
+| `T007-14` data and digest vectors | `T007-15` dangling-symlink watch |
+| `T017-19`, `T017-07`, `T017-17` finite recipes/sessions/graphs | `T017-25` deadlines and failed background work |
+| `T017-22` finite deferred cleanup | `T017-24` cleanup deadlines/cancellation |
+| `T036-01` byte/JSON presentation | `T036-03` terminals and watch |
+| `T038-01` direct recipe values | `T038-06` services and executable watch |
+
+Both portions remain in the full CLI and explicit WASM gates. The Python helpers
+still default to `all` when called directly; wrappers select their portion. Timing
+budgets and failure checks are unchanged. Digest vectors batch successful pure
+evaluations to avoid a CLI/WASM startup for each value; rejection cases stay isolated.
 
 | Command | Coverage |
 | --- | --- |
@@ -78,6 +101,10 @@ revision; see [TODO.md](../TODO.md). A workflow that only builds an artifact or
 runs `--version` is not evidence that the whole suite passed. In particular,
 cross-compiling Windows does not establish real-host process cleanup acceptance.
 The [test catalog](../tests/CATALOG.tsv) is an inventory, not a pass report.
+The portable memory-cache backend is covered by `TestCachedTaskUsesPortableMemoryBackend`
+in `make test-so`; no separate shell wrapper recompiles that package.
+Native and WASM artifacts rebuild only when declared inputs change. Use
+`make -B TARGET` to force rebuilding after a compiler or build-flag change.
 
 ## Documentation changes
 

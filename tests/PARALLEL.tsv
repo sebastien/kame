@@ -1,0 +1,68 @@
+# Reviewed parallel-safe tests. Columns: file<TAB>reason
+# Everything else runs exclusively after this pool drains, including new tests.
+# Review test bodies and their helpers before adding a row: isolated writes,
+# no shared-artifact mutation after prebuild, no timing-sensitive assertions.
+tests/T004-01-lang-parse-matrix.sh	Read-only fixture parsing with private captures; no timing assertions
+tests/T004-02-lang-parse-invalid.sh	Read-only invalid fixtures and private EOF inputs; no timing assertions
+tests/T004-03-lang-parse-io.sh	Parser stdin and error cases use private files
+tests/T004-04-lang-parse-usage.sh	Parser option validation has no filesystem effects
+tests/T004-05-lang-parse-goldens.sh	Goldens are copied into private scratch space
+tests/T004-06-lang-fmt-canonical.sh	Read-only fixture formatting with private outputs
+tests/T004-07-lang-fmt-modes.sh	In-place formatting only modifies copied fixtures
+tests/T004-08-lang-format-stability.sh	Read-only fixtures and private AST comparisons
+tests/T004-09-lang-parse-rules.sh	Standalone rule parsing only reads shared fixtures
+tests/T004-13-lang-declaration-conditions.sh	Conditional includes, source composition and diagnostics use private projects without watch sessions
+tests/T004-16-lang-computed-outputs.sh	Computed-output values, formatting and publication use private projects; watch replacement is in T004-20
+tests/T004-17-lang-definition-expressions.sh	Definition, override and format checks use private files without timing assertions
+tests/T004-18-lang-contributions.sh	List contributions and scoped settings use private projects without watch sessions
+tests/T005-01-eval-values.sh	Literal and interpolation evaluation has no host effects
+tests/T005-02-eval-references.sh	Reference and selector evaluation has no host effects
+tests/T005-03-eval-specials.sh	Special forms and value pipes have no host effects
+tests/T005-04-eval-args.sh	Argument and input-source checks only use private files
+tests/T005-05-eval-errors.sh	Diagnostic and depth checks have no permitted host effects
+tests/T006-05-runtime-effects.sh	Effects and dry-run checks only modify copied fixtures
+tests/T006-06-runtime-environment.sh	Scoped environments, cached observations and private-file signatures; warm watch scenarios are in T006-10
+tests/T007-01-lib-general.sh	Pure operations and a private copy of the legacy fixture
+tests/T007-02-lib-collections.sh	Collection operations have no host effects
+tests/T007-03-lib-text.sh	Text and ANSI string values; no terminal or timing measurements
+tests/T007-04-lib-path.sh	Lexical path operations do not modify the filesystem
+tests/T007-05-lib-fs.sh	Filesystem reads and discovery use copied fixtures
+tests/T007-06-lib-grants.sh	Grant and shell checks use private files and child environments
+tests/T007-07-lib-errors.sh	Operation failure diagnostics have no host effects
+tests/T007-09-lib-wildcard-union.sh	Membership changes only affect a private project; no watch session
+tests/T007-10-lib-record-lookup.sh	Computed lookups and build planning use a private project
+tests/T007-12-lib-operation-values.sh	Operation values and callbacks use private fixtures; no timing assertions
+tests/T007-13-lib-structural-equality.sh	Equality vectors and byte fixtures use private files
+tests/T007-14-lib-native-data.sh	All digest and filesystem vectors use private files; dangling-link watch is in T007-15
+tests/T008-01-cache-hit.sh	Cache and environment invalidation use a private cache and run log
+tests/T009-01-cli-help.sh	Help and README smoke builds use private projects and a mock compiler
+tests/T009-02-cli-source.sh	Discovery and include mutations only affect copied fixtures
+tests/T009-03-cli-targets.sh	Target builds and execution counts only affect copied fixtures
+tests/T009-04-cli-json.sh	Event, byte and color assertions use copied fixtures without timing thresholds
+tests/T009-05-cli-plan.sh	Read-only inspection and timestamp mutations use copied fixtures
+tests/T009-06-cli-cat.sh	Artifact and value output only uses private files
+tests/T009-07-cli-graph.sh	Read-only graph inspection uses copied fixtures
+tests/T009-13-cli-configuration.sh	Configuration and typed overrides only modify private projects
+tests/T009-17-cli-options.sh	CLI grammar matrix uses a private project; watch and timeout options are rejected or validated without timing assertions
+tests/T009-18-cli-list.sh	Listing, typo matching and cache-status checks use private projects without watch sessions
+tests/T010-06-wasm-cli.sh	CLI identity, option and expression parity use private wrapper copies and read-only shared artifacts
+tests/T011-04-diag-language-boundaries.sh	Parser and authority errors use private files with no process timing assertions
+tests/T013-04-meta-layer-examples.sh	Lessons run in private copies and use content-based invalidation
+tests/T014-02-patterns-ergonomics.sh	Pattern, glob and format probes only mutate a private project; no watch sessions
+tests/T016-03-lang-template-boundaries.sh	Template, format and recipe probes use private files without watch sessions
+tests/T018-01-lang-source-style.sh	Formatter and parser matrix only writes private files
+tests/T017-20-kash-context-environment.sh	Child environments, context values and reuse use private projects without time-based assertions
+tests/T017-19-kash-recipes.sh	Finite recipe settings and callable values use private projects; deadlines and failed background-work cleanup are in T017-25
+tests/T017-07-cli-run-session.sh	Finite shared-session and preflight probes use private files; shared deadline is in T017-25
+tests/T017-16-kash-environment.sh	Explicit environment namespace and formatting use private fixtures and child environments
+tests/T017-17-eval-process-expressions.sh	Finite process graph values and policy checks use private files; overrun deadline is in T017-25
+tests/T017-21-kash-words.sh	Scalar words, local setup and rejection probes use private fixtures with no overrun assertions
+tests/T017-23-kash-operations.sh	Finite exact-byte and failure-policy checks use private files; signal tests terminate only their own child and assert status, not timing
+tests/T017-22-kash-defer.sh	Finite deferred values, ordering, authority and formatting use private projects; deadline and cancellation checks are in T017-24
+tests/T036-01-cli-presentation.sh	Command, JSON and byte-output matrix uses private projects; terminal timing and watch are in T036-03
+tests/T036-02-cli-reuse-reasons.sh	Reuse decisions and metadata-preserving edits use private caches without watch sessions
+tests/T038-01-kash-direct-recipes.sh	Typed data, publication, tools and formatting use private projects; service and watch ownership are in T038-06
+tests/T042-02-kash-framing.sh	Finite framed streams assert bytes and record counts, not timing, using private sinks and no cancellation scenarios
+tests/T042-03-kash-channels.sh	Finite channel graphs and static validation use private sinks with no timing thresholds or cancellation scenarios
+tests/T037-01-cli-build-inspection.sh	Inspection and artifact-status checks use private projects; service bodies are never executed
+tests/T044-01-runtime-kame-rule-bodies.sh	Artifact publication and effect rejection use private projects without timing assertions

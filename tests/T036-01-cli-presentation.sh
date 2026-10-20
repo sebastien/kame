@@ -6,7 +6,7 @@ test-start "T036-01 CLI presentation"
 test-step "build both hosts"
 cli_build
 make -C "$CLI_ROOT" dist-wasm >/dev/null
-test-step "command, JSON, exact-byte, watch, and terminal matrix"
-python3 "$CLI_ROOT/tests/cli-presentation.py" "$CLI_BIN" "$CLI_ROOT/dist/kame.js"
+test-step "command, JSON and exact-byte presentation matrix"
+python3 "$CLI_ROOT/tests/cli-presentation.py" "$CLI_BIN" "$CLI_ROOT/dist/kame.js" values
 test-ok "native and WASM presentation contracts"
 test-end

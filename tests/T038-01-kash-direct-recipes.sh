@@ -185,20 +185,6 @@ KMK
 	reject USER_ERROR ./failed
 	if [ ! -e "$work/failed-side" ] && [ ! -e "$work/failed" ]; then test-ok "$backend failed recipe leaves no staged output"; else test-fail "$backend failure published writes"; fi
 	if timeout 15 "${runner[@]}" do plan -C "$work" --json ./failed >"$work/plan" 2>"$work/err" && [ ! -e "$work/failed-side" ]; then test-ok "$backend inspection does not execute the recipe"; else test-fail "$backend inspection boundary"; cat "$work/err"; fi
-	test-step "$backend managed service keeps direct Kash ownership"
-	cat >"$work/Makefile.kmk" <<'KMK'
-SHELL = kash
-service daemon : ; [ready: [argv: ["test" "-f" "service-ready"] interval-ms: 10 timeout-ms: 3000]]
-	sh -c (nop """touch service-ready; printf %s "$$" > service-pid; exec sleep 30""")
-consumer : daemon
-	printf service
-KMK
-	check service consumer
-	if [ -s "$work/service-pid" ]; then
-		pid="$(cat "$work/service-pid")"
-		for attempt in {1..100}; do if ! kill -0 "$pid" 2>/dev/null; then break; fi; sleep .01; done
-		if ! kill -0 "$pid" 2>/dev/null; then test-ok "$backend service released its process"; else test-fail "$backend service process survived"; kill "$pid" 2>/dev/null || true; fi
-	else test-fail "$backend service did not start"; fi
 	test-step "$backend every reached command head is a tracked tool"
 	mkdir -p "$work/startup tools" "$work/child tools"
 	printf '#!/bin/sh\nprintf startup\n' >"$work/startup tools/kame-direct-tool"
@@ -244,15 +230,6 @@ KMK
 	printf '#!/bin/sh\nprintf second > "$1"\nprintf x >> tool-runs\n' >"$work/cached-tool"
 	check '' ./cached
 	if [ "$(cat "$work/tool-runs")" = xx ] && [ "$(cat "$work/cached")" = second ]; then test-ok "$backend changed executable invalidates reuse"; else test-fail "$backend executable freshness"; fi
-	test-step "$backend retained watch observes executable edits"
-	timeout 20 "${runner[@]}" -C "$work" --json --watch ./cached >"$work/watch.log" 2>"$work/watch.err" &
-	watcher=$!
-	for attempt in {1..200}; do if grep -q '"type":"watch-idle"' "$work/watch.log"; then break; fi; sleep .025; done
-	printf '#!/bin/sh\nprintf watched > "$1"\nprintf x >> tool-runs\n' >"$work/cached-tool"
-	for attempt in {1..300}; do if [ "$(cat "$work/cached")" = watched ] && [ "$(grep -c '"type":"watch-idle"' "$work/watch.log")" -ge 2 ]; then break; fi; sleep .025; done
-	if [ "$(cat "$work/cached")" = watched ]; then test-ok "$backend watch retains executable dependency"; else test-fail "$backend executable watch"; cat "$work/watch.err"; fi
-	kill -TERM "$watcher" 2>/dev/null || true
-	wait "$watcher" 2>/dev/null || true
 	test-step "$backend parenthesized formatting and AST parity"
 	printf '%s\n' '$...CMD $...{project.args}' >"$work/spread.kash"
 	"${runner[@]}" do fmt --lang kash "$work/spread.kash" >"$work/spread.fmt"

@@ -12,7 +12,7 @@ if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
 fi
 
 output="$root/src/go/kame/cmd/kame/version_generated.go"
-temporary="$output.tmp"
+temporary="$(mktemp "$output.tmp.XXXXXX")"
 trap 'rm -f "$temporary"' EXIT
 cat >"$temporary" <<EOF
 // Code generated from repository/build metadata; DO NOT EDIT.

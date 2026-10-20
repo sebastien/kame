@@ -3,9 +3,9 @@
 # =============================================================================
 #
 # Kame discovers Makefile.kmk before the GNU Makefile. The target graph matches
-# Makefile. File artifacts use content freshness instead of Make's .PHONY
-# binaries, so a repeated native or wasm build is skipped when declared inputs
-# are unchanged. `kame --force TARGET` rebuilds anyway.
+# Makefile. File artifacts use content freshness instead of Make's timestamps;
+# repeated native or wasm builds are skipped when declared inputs are unchanged.
+# `kame --force TARGET` rebuilds anyway.
 #
 # Recipes are Kash, not a shell. A nonzero command fails the recipe. Overrides
 # are Kame configuration: a build does not grant environment reads, so a raw
@@ -205,6 +205,7 @@ TEST_WASM =
     ./tests/T007-12-lib-operation-values.sh
     ./tests/T007-13-lib-structural-equality.sh
     ./tests/T007-14-lib-native-data.sh
+    ./tests/T007-15-runtime-symlink-watch.sh
     ./tests/T005-06-eval-truth-capture.sh
     ./tests/T009-13-cli-configuration.sh
     ./tests/T009-16-cli-script-output.sh
@@ -218,6 +219,7 @@ TEST_WASM =
     ./tests/T004-14-lang-rule-positional-captures.sh
     ./tests/T004-15-lang-rule-regex-captures.sh
     ./tests/T004-16-lang-computed-outputs.sh
+    ./tests/T004-20-runtime-computed-outputs-watch.sh
     ./tests/T004-17-lang-definition-expressions.sh
     ./tests/T004-18-lang-contributions.sh
     ./tests/T012-02-streams-live-cli.sh
@@ -226,6 +228,7 @@ TEST_WASM =
     ./tests/T006-03-runtime-always.sh
     ./tests/T006-04-runtime-order-only.sh
     ./tests/T006-06-runtime-environment.sh
+    ./tests/T006-10-runtime-environment-watch.sh
     ./tests/T006-07-runtime-newer-inputs.sh
     ./tests/T010-21-wasm-build-effects.sh
     ./tests/T010-22-wasm-memory.sh
@@ -263,18 +266,22 @@ TEST_WASM =
     ./tests/T017-17-eval-process-expressions.sh
     ./tests/T017-18-kash-async.sh
     ./tests/T017-19-kash-recipes.sh
+    ./tests/T017-25-kash-recipe-deadlines.sh
     ./tests/T017-20-kash-context-environment.sh
     ./tests/T017-21-kash-words.sh
     ./tests/T017-22-kash-defer.sh
+    ./tests/T017-24-kash-defer-lifecycle.sh
     ./tests/T017-23-kash-operations.sh
     ./tests/T011-04-diag-language-boundaries.sh
     ./tests/T038-01-kash-direct-recipes.sh
+    ./tests/T038-06-kash-recipe-lifecycle.sh
     ./tests/T038-02-lib-wildcard-kinds.sh
     ./tests/T038-03-lib-text-json.sh
     ./tests/T038-04-lib-action-names.sh
     ./tests/T040-01-cli-automatic-clean.sh
     ./tests/T041-01-patterns-predicates-and-substitution.sh
     ./tests/T036-01-cli-presentation.sh
+    ./tests/T036-03-cli-presentation-lifecycle.sh
     ./tests/T036-02-cli-reuse-reasons.sh]
 
 # --- Aggregate targets ------------------------------------------------------
@@ -469,14 +476,15 @@ test-examples :
 test-go : ./src/go/kame/cmd/kame/version_generated.go ./build/kame.debug test-native-lifecycle
 	:cwd $KAME_DIR :KAME_NATIVE_FORMAT_TEST_BINARY (abspath ./build/kame.debug) :KAME_NATIVE_CLI_TEST_BINARY (abspath ./build/kame.debug) go test ./cmd/kame
 
-test-cli : ./build/kame.debug ./tests/harness.sh
+test-cli : ./build/kame.debug dist-wasm ./tests/harness.sh
 	./tests/harness.sh
 
 test-cli-options : ./build/kame.debug dist-wasm ./tests/T009-17-cli-options.sh
 	./tests/T009-17-cli-options.sh
 
-test-presentation : ./build/kame.debug dist-wasm ./tests/T036-01-cli-presentation.sh ./tests/T036-02-cli-reuse-reasons.sh
+test-presentation : ./build/kame.debug dist-wasm ./tests/T036-01-cli-presentation.sh ./tests/T036-03-cli-presentation-lifecycle.sh ./tests/T036-02-cli-reuse-reasons.sh
 	./tests/T036-01-cli-presentation.sh
+	./tests/T036-03-cli-presentation-lifecycle.sh
 	./tests/T036-02-cli-reuse-reasons.sh
 
 test-inspection : ./build/kame.debug dist-wasm ./tests/T037-01-cli-build-inspection.sh
@@ -491,7 +499,7 @@ test-sanitize : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycl
 	:cwd $KAME_DIR :CC clang so test -check=sanitize -panic=abort ./...
 	:cwd $EXAMPLES_DIR :CC clang so test -check=sanitize -panic=abort ./...
 
-test-leaks : ./build/kame.sanitize test-native-lifecycle test-native-host
+test-leaks : ./build/kame.sanitize dist-wasm test-native-lifecycle test-native-host
 	leak_scripts = (filter-out ./tests/T013-03-meta-binary.sh (files ./tests/T*.sh))
 	:cwd $KAME_DIR :CC clang :KAME_NATIVE_FORMAT_TEST_BINARY (abspath ./build/kame.sanitize) :KAME_NATIVE_CLI_TEST_BINARY (abspath ./build/kame.sanitize) go test -asan ./cmd/kame
 	:cwd $KAME_DIR :CC clang so test -check=sanitize -panic=abort ./...

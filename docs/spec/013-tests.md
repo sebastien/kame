@@ -68,9 +68,34 @@ tests/
 
 ## Harness contract
 
-- `tests/harness.sh [-q|-v] [FILE...]` runs every `tests/**/*.sh` except
+- `tests/harness.sh [-q|-v] [-j JOBS] [FILE...]` runs every `tests/**/*.sh` except
   `lib-*.sh`, `harness.sh`, and anything under `tests/data/`.
 - Each test is a separate process started from the repository root.
+- The harness executes a source snapshot so editing its file cannot corrupt an
+  active loop. Suite invocations in one checkout hold an exclusive lock around
+  shared artifacts and logs; test subprocesses do not inherit that lock descriptor.
+- INT/TERM cancels the suite without reporting interrupted tests as failures or
+  scheduling more tests. Lock waits and artifact prebuilds are cancellable too.
+  The harness snapshots worker descendants before terminating parents, including
+  watch processes in separate sessions, bounds shutdown with a forced kill,
+  reaps workers, and exits 130/143. Helper signal
+  handlers clean up and exit rather than returning into a deleted scratch tree.
+- On Bash 5.1+, execution defaults to four workers; older Bash remains sequential.
+  `-j JOBS` or `KAME_TEST_JOBS` sets the pool size (`1` makes the run sequential).
+  The bounded worker pool immediately refills a freed slot. Only tests
+  explicitly reviewed in `tests/PARALLEL.tsv` join that pool; each row contains a
+  repository-relative script path and a safety reason. All other tests, including
+  new or unclassified scripts, run exclusively after the entire pool drains, in
+  their original selection order, even if a parallel test failed. No test is skipped.
+- Parallel-safe review includes the script's helpers: writes must be fixture-local,
+  shared artifacts must remain unchanged after prebuild, and assertions must not
+  rely on timing thresholds. Watch, backpressure, cancellation, terminal-timing and
+  shared-artifact build checks remain exclusive unless specifically reviewed.
+  A missing parallel list makes every test exclusive; in parallel mode, malformed
+  entries fail before execution. Verbose output remains sequential and preserves
+  selection order.
+  Parallel runs prebuild native and WASM artifacts before starting workers and
+  schedule only the safe pool longest-first using cached durations.
 - `test-start` creates a scratch directory under `build/tests/`, exports it as
   `TMPDIR`, and changes into it; `test-end` reports and removes it.
 - Results are recorded in an append-only file inside the scratch directory, so
@@ -103,6 +128,8 @@ human stdout/stderr, never the append-only result log or exit codes.
   `build/tests/runtime-cache/`, outside the cleared log directory. It estimates
   the initial and remaining time from cached durations, using their mean for
   tests without samples; the estimate is marked unknown until a sample exists.
+  Durations measure each worker's own execution, not time spent waiting for other
+  tests. Parallel output labels the sum as work remaining, not wall-clock ETA.
 - Incidental helper traces (`test_log_message`, expected-failure command echo,
   CLI build output) are verbose-only; the CLI build log is retained and shown
   if the build fails.

@@ -12,7 +12,7 @@ WASM_MAX_MEMORY ?= 67108864
 WASM_STACK_SIZE ?= 524288
 
 
-.PHONY: build dist dist-native dist-ape dist-release dist-wasm dist-windows wasm wasm-check wasm-portable wasm-translate test-wasm version-source build/kame.debug build/kame.sanitize dist/kame dist/kame.com \
+.PHONY: build dist dist-native dist-ape dist-release dist-wasm dist-windows wasm wasm-check wasm-portable wasm-translate test-wasm version-source \
 	test test-so test-native-host test-native-lifecycle test-examples test-go test-cli test-presentation test-reuse-reasons test-all test-sanitize test-leaks fmt clean demo
 
 build: dist
@@ -34,7 +34,7 @@ test-examples:
 test-go: $(KAME_DIR)/cmd/kame/version_generated.go build/kame.debug test-native-lifecycle
 	cd $(KAME_DIR) && KAME_NATIVE_FORMAT_TEST_BINARY="$(CURDIR)/build/kame.debug" KAME_NATIVE_CLI_TEST_BINARY="$(CURDIR)/build/kame.debug" go test ./cmd/kame
 
-test-cli: build/kame.debug
+test-cli: build/kame.debug dist-wasm
 	tests/harness.sh
 
 .PHONY: test-cli-options
@@ -43,6 +43,7 @@ test-cli-options: build/kame.debug dist-wasm
 
 test-presentation: build/kame.debug dist-wasm
 	tests/T036-01-cli-presentation.sh
+	tests/T036-03-cli-presentation-lifecycle.sh
 	tests/T036-02-cli-reuse-reasons.sh
 
 test-reuse-reasons: build/kame.debug dist-wasm
@@ -90,6 +91,7 @@ test-wasm: wasm-check
 	tests/T007-12-lib-operation-values.sh
 	tests/T007-13-lib-structural-equality.sh
 	tests/T007-14-lib-native-data.sh
+	tests/T007-15-runtime-symlink-watch.sh
 	tests/T005-06-eval-truth-capture.sh
 	tests/T009-13-cli-configuration.sh
 	tests/T009-16-cli-script-output.sh
@@ -103,6 +105,7 @@ test-wasm: wasm-check
 	tests/T004-14-lang-rule-positional-captures.sh
 	tests/T004-15-lang-rule-regex-captures.sh
 	tests/T004-16-lang-computed-outputs.sh
+	tests/T004-20-runtime-computed-outputs-watch.sh
 	tests/T004-17-lang-definition-expressions.sh
 	tests/T004-18-lang-contributions.sh
 	tests/T012-02-streams-live-cli.sh
@@ -111,6 +114,7 @@ test-wasm: wasm-check
 	tests/T006-03-runtime-always.sh
 	tests/T006-04-runtime-order-only.sh
 	tests/T006-06-runtime-environment.sh
+	tests/T006-10-runtime-environment-watch.sh
 	tests/T006-07-runtime-newer-inputs.sh
 	tests/T010-21-wasm-build-effects.sh
 	tests/T010-22-wasm-memory.sh
@@ -148,12 +152,15 @@ test-wasm: wasm-check
 	tests/T017-17-eval-process-expressions.sh
 	tests/T017-18-kash-async.sh
 	tests/T017-19-kash-recipes.sh
+	tests/T017-25-kash-recipe-deadlines.sh
 	tests/T017-20-kash-context-environment.sh
 	tests/T017-21-kash-words.sh
 	tests/T017-22-kash-defer.sh
+	tests/T017-24-kash-defer-lifecycle.sh
 	tests/T017-23-kash-operations.sh
 	tests/T011-04-diag-language-boundaries.sh
 	tests/T038-01-kash-direct-recipes.sh
+	tests/T038-06-kash-recipe-lifecycle.sh
 	tests/T038-02-lib-wildcard-kinds.sh
 	tests/T038-03-lib-text-json.sh
 	tests/T038-04-lib-action-names.sh
@@ -171,6 +178,7 @@ test-wasm: wasm-check
 	tests/T042-10-kash-failure-policy.sh
 	tests/T042-11-kash-each.sh
 	tests/T036-01-cli-presentation.sh
+	tests/T036-03-cli-presentation-lifecycle.sh
 	tests/T036-02-cli-reuse-reasons.sh
 
 test-all: test test-leaks
@@ -179,7 +187,7 @@ test-sanitize: $(KAME_DIR)/cmd/kame/version_generated.go test-native-lifecycle t
 	cd $(KAME_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 	cd $(EXAMPLES_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 
-test-leaks: build/kame.sanitize test-native-lifecycle test-native-host
+test-leaks: build/kame.sanitize dist-wasm test-native-lifecycle test-native-host
 	cd $(KAME_DIR) && KAME_NATIVE_FORMAT_TEST_BINARY="$(CURDIR)/build/kame.sanitize" KAME_NATIVE_CLI_TEST_BINARY="$(CURDIR)/build/kame.sanitize" CC=clang go test -asan ./cmd/kame
 	cd $(KAME_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
 	cd $(EXAMPLES_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
@@ -212,7 +220,7 @@ dist/native/$(KAME_PLATFORM)/kame: dist/kame
 # the wasi-sdk toolchain can still build the native CLI.
 dist-wasm: dist/kame.wasm dist/kame.js
 
-dist/kame.wasm: wasm
+dist/kame.wasm: build/wasm/kame.wasm
 	mkdir -p dist
 	cp build/wasm/kame.wasm dist/kame.wasm
 

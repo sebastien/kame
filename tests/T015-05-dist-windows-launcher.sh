@@ -35,7 +35,7 @@ else
 fi
 
 test-step "cross compile and package the Windows executable with runtime assets"
-make dist-windows >/dev/null
+make dist/kame-windows-x64.zip >/dev/null
 if python3 - dist/kame-windows-x64.zip <<'PY'
 import pathlib
 import sys

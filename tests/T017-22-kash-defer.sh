@@ -43,7 +43,6 @@ for backend in native wasm; do
 	check last 'defer printf last; defer (fail! "cleanup failure"); (fail! "primary failure")' USER_ERROR
 	if grep -q 'primary failure' "$work/err" && grep -q 'cleanup failure' "$work/err"; then test-ok "$backend preserves primary and cleanup diagnostics"; else test-fail "$backend lost failure context"; fi
 	check last 'defer false ?; defer printf last'
-	check '' 'defer sleep 30' RECIPE_TIMEOUT
 	test-step "$backend source is parsed before effects; read-only execution never registers cleanup"
 	check '' $'printf forbidden\ndefer printf x &' PARSE_ERR
 	check '' $'printf forbidden\ndefer' PARSE_ERR
@@ -61,47 +60,6 @@ for backend in native wasm; do
 	check '' 'unused = $(mktemp -d ./owned.XXXXXX)'
 	check '' 'directory = (strip $(mktemp -d ./owned.XXXXXX)); defer rm -rf $directory; touch ${directory}/partial; false' RECIPE_FAIL
 	if [ "$(cat "$work/unrelated")" = keep ] && ! compgen -G "$work/owned.*" >/dev/null; then test-ok "$backend removes only authored temporary workspace"; else test-fail "$backend temporary ownership example"; fi
-	test-step "$backend cancellation reaps user work before command/expression finalizers"
-	cat >"$work/worker" <<'SH'
-#!/bin/sh
-printf '%s' "$$" > worker.pid
-exec sleep 30
-SH
-	cat >"$work/cleanup" <<'SH'
-#!/bin/sh
-if kill -0 "$(cat worker.pid)" 2>/dev/null; then exit 9; fi
-printf reaped > reaped
-SH
-	chmod +x "$work/worker" "$work/cleanup"
-	for scenario in signal timeout background combined; do
-		rm -f "$work/worker.pid" "$work/reaped" "$work/expression-cleaned" "$work/finally-cleaned"
-		text='defer (write! ./expression-cleaned "yes"); defer ./cleanup; ./worker'
-		options=()
-		if [ "$scenario" = timeout ]; then options=(--timeout 150); fi
-		if [ "$scenario" = background ]; then text='defer (write! ./expression-cleaned "yes"); defer ./cleanup; ./worker &; sh -c "while test ! -s worker.pid; do sleep .01; done"; (fail! "stop")'; fi
-		if [ "$scenario" = combined ]; then
-			text='defer (write! ./expression-cleaned "yes"); defer ./cleanup; (finally! ([] (run! "./worker")) ([] (write! ./finally-cleaned "yes")))'
-		fi
-		if [ "$scenario" = signal ] || [ "$scenario" = combined ]; then
-			"${runner[@]}" do run -C "$work" --allow-run --allow-write -l kash -c "$text" >"$work/out" 2>"$work/err" &
-			watchdog=$!
-			for attempt in {1..500}; do [ -s "$work/worker.pid" ] && break; sleep .01; done
-			# Signal the runner itself: GNU timeout can deliver TERM twice, which
-			# intentionally requests forced shutdown instead of normal finalization.
-			kill -TERM "$watchdog"
-			for attempt in {1..1000}; do kill -0 "$watchdog" 2>/dev/null || break; sleep .01; done
-			if kill -0 "$watchdog" 2>/dev/null; then kill -KILL "$watchdog"; fi
-		else
-			timeout -k 2 15 "${runner[@]}" do run -C "$work" --allow-run --allow-write -l kash "${options[@]}" -c "$text" >"$work/out" 2>"$work/err" &
-			watchdog=$!
-		fi
-		status=0
-		wait "$watchdog" || status=$?
-		if [ -e "$work/reaped" ] && [ -e "$work/expression-cleaned" ] && [ "$status" != 0 ] && [ "$status" != 137 ]; then test-ok "$backend $scenario reaps before finalization"; else test-fail "$backend $scenario cleanup (status $status)"; cat "$work/err"; fi
-		if [ "$scenario" = combined ]; then
-			if [ -e "$work/finally-cleaned" ]; then test-ok "$backend finally! and defer both finalize on interruption"; else test-fail "$backend combined finalization lost finally! cleanup"; fi
-		fi
-	done
 	test-step "$backend deferred cleanup in direct Kash recipes"
 	cat >"$work/Makefile.kmk" <<'KMK'
 SHELL = kash

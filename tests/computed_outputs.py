@@ -168,8 +168,15 @@ def check_output_membership(command: list[str]) -> None:
 # Function: main
 # Exercise both successful expansion and registration failures before effects.
 def main() -> None:
-	root, backend, binary = sys.argv[1:]
+	root, backend, binary = sys.argv[1:4]
+	part = sys.argv[4] if len(sys.argv) > 4 else 'all'
+	if part not in ('all', 'values', 'watch'):
+		raise SystemExit('expected all, values or watch')
 	command = [binary] if backend == 'native' else ['node', str(Path(root) / 'dist/kame.js')]
+	if part == 'watch':
+		check_watch(command)
+		print(f'{backend}: computed output watch passed')
+		return
 	cases = [
 		('interpolated capture', 'ROOT = "./build"\n@{ROOT}/{name}.o : ./src/{name}.c\n\tcat @< > @>\n', './build/demo.o',
 			dict(outputs=['./build/demo.o'], inputs=['./src/demo.c'], build=True, formatting=True)),
@@ -285,17 +292,19 @@ def main() -> None:
 		except (AssertionError, subprocess.TimeoutExpired) as error:
 			failures.append(name)
 			print(f'{backend}: FAIL {name}: {error}', file=sys.stderr)
-	try:
-		check_watch(command)
-	except (AssertionError, subprocess.TimeoutExpired) as error:
-		failures.append('watch target replacement')
-		print(f'{backend}: FAIL watch target replacement: {error}', file=sys.stderr)
+	if part == 'all':
+		try:
+			check_watch(command)
+		except (AssertionError, subprocess.TimeoutExpired) as error:
+			failures.append('watch target replacement')
+			print(f'{backend}: FAIL watch target replacement: {error}', file=sys.stderr)
 	try:
 		check_output_membership(command)
 	except (AssertionError, subprocess.TimeoutExpired) as error:
 		failures.append('output membership')
 		print(f'{backend}: FAIL output membership: {error}', file=sys.stderr)
-	print(f'{backend}: {len(cases) + 2 - len(failures)}/{len(cases) + 2} computed output cases passed')
+	total = len(cases) + 1 + (part == 'all')
+	print(f'{backend}: {total - len(failures)}/{total} computed output cases passed')
 	if failures:
 		raise SystemExit(1)
 

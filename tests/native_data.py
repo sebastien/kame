@@ -11,10 +11,44 @@ import tempfile
 import time
 
 
+def check_watch(command, environment):
+	"""Observe a dangling symlink changing between two absent destinations."""
+	with tempfile.TemporaryDirectory() as directory:
+		project = Path(directory)
+		(project / 'anchor').write_text('anchor')
+		os.symlink('absent', project / 'dangling')
+		(project / 'Makefile.kmk').write_text('task watch-link : ./anchor\n\tprintf %s @(readlink ./dangling) > watched\n')
+		with (project / 'watch.log').open('w') as log:
+			process = subprocess.Popen(command + ['--watch', 'watch-link'], cwd=project, env=environment, stdout=log, stderr=log, start_new_session=True)
+			try:
+				for target in ['absent', 'also-absent']:
+					if target != 'absent':
+						(project / 'dangling').unlink()
+						os.symlink(target, project / 'dangling')
+					deadline = time.monotonic() + 15
+					while not (project / 'watched').exists() or (project / 'watched').read_text() != target:
+						assert process.poll() is None, (project / 'watch.log').read_text()
+						assert time.monotonic() < deadline, (project / 'watch.log').read_text()
+						time.sleep(0.05)
+			finally:
+				if process.poll() is None: os.killpg(process.pid, signal.SIGTERM)
+				try: process.wait(timeout=5)
+				except subprocess.TimeoutExpired:
+					os.killpg(process.pid, signal.SIGKILL)
+					process.wait(timeout=5)
+
+
 def main():
-	root, backend, binary = sys.argv[1:]
+	root, backend, binary = sys.argv[1:4]
+	part = sys.argv[4] if len(sys.argv) > 4 else 'all'
+	if part not in ('all', 'values', 'watch'):
+		raise SystemExit('expected all, values or watch')
 	command = [binary] if backend == 'native' else ['node', str(Path(root) / 'dist/kame.js')]
 	environment = {key: value for key, value in os.environ.items() if not key.startswith('KAME_')}
+	if part == 'watch':
+		check_watch(command, environment)
+		print(f'{backend}: native data watch passed')
+		return
 	checks = 0
 	with tempfile.TemporaryDirectory() as directory:
 		project = Path(directory)
@@ -25,12 +59,18 @@ def main():
 			result = run('do', 'run', '--print-result', *flags, '-c', expression)
 			assert result.returncode == 0 and result.stdout.strip() == expected, (expression, result.stdout, result.stderr)
 			checks += 1
+		def values(samples, *flags):
+			# Keep every vector, but pay CLI/WASM startup once for independent successes.
+			nonlocal checks
+			value('[' + ' '.join(expression for expression, _ in samples) + ']',
+				'[' + ' '.join(expected for _, expected in samples) + ']', *flags)
+			checks += len(samples) - 1
 		def reject(expression, code='EXPR_INVALID', *flags):
 			nonlocal checks
 			result = run('do', 'run', *flags, '-c', expression)
 			assert result.returncode == 1 and code in result.stderr, (expression, result.stdout, result.stderr)
 			checks += 1
-		for expression in [
+		expressions = [
 			'(eq (items [z: 1 a: [x: [2 :nil]]]) [[key: "z" value: 1] [key: "a" value: [x: [2 :nil]]]])',
 			'(eq (items (set "z" :nil [z: 1 a: 2])) [[key: "z" value: :nil] [key: "a" value: 2]])',
 			'(eq (items (set "a" 2 [z: 1])) [[key: "z" value: 1] [key: "a" value: 2]])',
@@ -43,17 +83,22 @@ def main():
 			'(record? (parse-json "{}"))', '(list? [])', '(string? "")',
 			'(not (record? []))', '(not (list? :nil))', '(not (string? "{x:*}"))',
 			'(not (string? [f: ([x] x)]))', '(not (list? ([x] x)))',
-		]: value(expression, ':true')
+		]
+		values([(expression, ':true') for expression in expressions])
 		for expression in ['(items [])', '(set "x" 1 [])', '(set 0 2 [x: 1])', '(merge [x: 1] [])', '(items (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(set "x" ([x] x) (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(merge (parse-json "{\\"x\\":1,\\"x\\":2}"))', '(digest "md5" "abc")', '(digest "sha1" 42)', '(digest :nil "abc")']:
 			reject(expression)
 		for algorithm in ['sha1', 'sha256', 'sha512']:
+			samples = []
 			for text in ['', 'abc', 'é\u0000\n']:
 				literal = '(parse-json ' + json.dumps(json.dumps(text)) + ')'
-				value(f'(digest "{algorithm}" {literal})', json.dumps(hashlib.new(algorithm, text.encode()).hexdigest()))
+				samples.append((f'(digest "{algorithm}" {literal})', json.dumps(hashlib.new(algorithm, text.encode()).hexdigest())))
 			for length in [0, 1, 55, 56, 63, 64, 65, 111, 112, 127, 128, 129, 10000, 1000000]:
 				data = bytes((i * 37) % 256 for i in range(length))
-				(project / 'data').write_bytes(data)
-				value(f'(digest "{algorithm}" (read ./data))', json.dumps(hashlib.new(algorithm, data).hexdigest()), '--allow-read')
+				name = f'data-{length}'
+				(project / name).write_bytes(data)
+				samples.append((f'(digest "{algorithm}" (read ./{name}))', json.dumps(hashlib.new(algorithm, data).hexdigest())))
+			values(samples, '--allow-read')
+		(project / 'data').write_bytes(data)
 		(project / 'anchor').write_text('anchor')
 		value('(eq (get "data" (set "data" (read ./data) [data: :nil])) (read ./data))', ':true', '--allow-read')
 		value('(not (string? (read ./data)))', ':true', '--allow-read')
@@ -115,27 +160,9 @@ def main():
 			assert (project / 'seen').read_text() == target
 		assert (project / 'runs').read_text() == 'xx', 'link target observation was not revalidated'
 		checks += 1
-		# Both old and new targets are absent: content/existence cannot detect this change.
-		(project / 'Makefile.kmk').write_text('task watch-link : ./anchor\n\tprintf %s @(readlink ./dangling) > watched\n')
-		with (project / 'watch.log').open('w') as log:
-			process = subprocess.Popen(command + ['--watch', 'watch-link'], cwd=project, env=environment, stdout=log, stderr=log, start_new_session=True)
-			try:
-				for target in ['absent', 'also-absent']:
-					if target != 'absent':
-						(project / 'dangling').unlink()
-						os.symlink(target, project / 'dangling')
-					deadline = time.monotonic() + 15
-					while not (project / 'watched').exists() or (project / 'watched').read_text() != target:
-						assert process.poll() is None, (project / 'watch.log').read_text()
-						assert time.monotonic() < deadline, (project / 'watch.log').read_text()
-						time.sleep(0.05)
-				checks += 1
-			finally:
-				if process.poll() is None: os.killpg(process.pid, signal.SIGTERM)
-				try: process.wait(timeout=5)
-				except subprocess.TimeoutExpired:
-					os.killpg(process.pid, signal.SIGKILL)
-					process.wait(timeout=5)
+	if part == 'all':
+		check_watch(command, environment)
+		checks += 1
 	print(f'{backend}: {checks} native data checks passed')
 
 

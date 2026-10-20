@@ -217,7 +217,7 @@ umask 0077
 function test-init {
 	test-start "$@"
 	# We ensure the exit is called
-	trap test-end EXIT INT TERM ERR
+	trap test-end EXIT ERR
 }
 
 # Function(internal): test_step_reveal
@@ -680,6 +680,14 @@ function test_signal_exit {
 }
 
 trap test_signal_err ERR
-trap test_signal_exit EXIT INT TERM
+function test_signal_cancel {
+	trap - EXIT ERR INT TERM
+	test_cleanup
+	exit "$1"
+}
+
+trap test_signal_exit EXIT
+trap 'test_signal_cancel 130' INT
+trap 'test_signal_cancel 143' TERM
 
 # EOF

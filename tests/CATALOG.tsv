@@ -16,7 +16,7 @@ tests/T016-03-lang-template-boundaries.sh	016	lang	Reference/call distinction, z
 tests/T017-20-kash-context-environment.sh	017	kash	Expression statements, computed stage env records, ordered local overrides, validation and secret-safe traces, named args/inputs/outputs/changed inputs, rule-frame retention and native/WASM formatting parity
 tests/T017-21-kash-words.sh	017	kash	Mixed scalar expression fragments in argv, command heads, redirections and setup; quoting, typed splicing, retained operands, prelaunch rejection and native/WASM format parity
 tests/T011-04-diag-language-boundaries.sh	011	diag	Reference/call recovery, actual scalar kinds and destinations, selector literal escapes, Kash literal at-sign quoting and format stability, file prefixes, environment grants, rule settings placement, secret-safe human/plain/JSON host parity
-tests/T036-01-cli-presentation.sh	036	cli	Native/WASM presentation modes, global options, exact bytes, JSON results, static errors, watch boundaries and terminal fallback
+tests/T036-01-cli-presentation.sh	036	cli	Native/WASM presentation modes, global options, exact bytes, JSON results and static errors; lifecycle checks are T036-03
 tests/T036-02-cli-reuse-reasons.sh	036	cli	Native/WASM file and task reuse reasons, missing/corrupt records, guard/input/output/configuration/environment changes, force/always, deduplication and privacy
 tests/T004-16-lang-computed-outputs.sh	004	lang	Pure computed output paths and names, captures, list flattening, overrides, validation, diagnostics, formatting and native/WASM parity
 tests/T004-17-lang-definition-expressions.sh	004	lang	Expression RHSs across km/kmk/Kash, typed atoms, aliases, function bodies, laziness, defaults, cycles, literal overrides, migration errors and formatting parity
@@ -53,7 +53,6 @@ tests/T007-07-lib-errors.sh	007	lib	Operation arity and kind failures carry mess
 tests/T008-01-cache-hit.sh	008	cache	Record creation, cache hits, --force, input and environment invalidation
 tests/T008-02-cache-records.sh	008	cache	Corrupted records are misses and are rewritten
 tests/T008-03-cache-fingerprint.sh	008	cache	Glob membership, bare-dependency blocking, and rule body invalidation
-tests/T008-04-cache-memory-backend.sh	008	cache	Portable in-memory task cache publication, shared identity, and validated hits
 tests/T009-01-cli-help.sh	009	cli	Help and version plus executable README build/reuse and docs/idioms-and-gotchas.md value, wildcard, and pattern examples
 tests/T009-02-cli-source.sh	009	cli	Source discovery order, -f/-c/-C, option validation
 tests/T009-03-cli-targets.sh	009	cli	Target selection, default resolution, sharing, definitions, ambiguity
@@ -126,7 +125,7 @@ tests/T017-15-kash-match.sh	017	kash	Kash match patterns, lexical captures, subj
 tests/T017-16-kash-environment.sh	017	kash	Explicit Kash environment lookup, scoped grants, reserved bindings and native/WASM parity
 tests/T017-17-eval-process-expressions.sh	017	eval	Expression run/pipe graphs, structured results, lazy replay safety and native/WASM parity
 tests/T017-18-kash-async.sh	017	kash	Async graph ownership, lazy handles, repeat-safe await, joins, cancellation and native/WASM parity
-tests/T017-22-kash-defer.sh	017	kash	Invocation-scoped command/expression defer, snapshots, retained lazy values, LIFO cleanup, errors, cancellation, authority and temporary-workspace preservation
+tests/T017-22-kash-defer.sh	017	kash	Invocation-scoped command/expression defer, snapshots, retained lazy values, LIFO cleanup, errors, authority and temporary-workspace preservation; lifecycle checks are T017-24
 tests/T017-23-kash-operations.sh	017	kash	Exact environment/capture bytes, non-disclosing validation and traces, selected status policy, finite fail-fast/collected work, bounded fresh retries and executable cookbook
 tests/T010-20-wasm-build-includes.sh	010	wasm	Build and inspection includes, nested source loading, cycles, duplicate declarations with original locations and distinct include-site provenance, repeated contributions and authored diagnostic parity
 tests/T007-09-lib-wildcard-union.sh	007	lib	Sorted multi-pattern unions, deduplication, independent dependency membership and native/WASM file input parity
@@ -165,7 +164,7 @@ tests/T010-25-wasm-watch-abi.sh	010	wasm	Public watch ABI query/copy semantics, 
 tests/T004-13-lang-declaration-conditions.sh	004	lang	Pure when/otherwise/end declaration selection, gated includes, literal configuration, nested inactive branches, source/session parity and authored diagnostics
 tests/T004-14-lang-rule-positional-captures.sh	004	lang	Anonymous rule captures, positional input references, and scope bindings on native and WASM
 tests/T004-15-lang-rule-regex-captures.sh	004	lang	Regex output capture matching, named input rendering, positional recipe bindings and canonical formatting on native and WASM
-tests/T017-19-kash-recipes.sh	017	kash	Selected shell policies, structured recipe cache/retry/timeout, reusable scripts and invocation-owned callable lifetime on both hosts
+tests/T017-19-kash-recipes.sh	017	kash	Selected shell policies, structured recipe cache/retry, reusable scripts and invocation-owned callable lifetime on both hosts; deadlines are T017-25
 tests/T009-14-cli-watch.sh	009	cli	Native shared watch roots, scoped environments and grants across invalidation/source reload, preserved timestamps, malformed-source recovery, optional-include and failed-root repair, obsolete-input subscription cleanup, bounded unread watch output, idle settled roots, active recipe-child cleanup, changed graph, active-input invalidation and denied-effect protection
 tests/T009-15-cli-target-arguments.sh	009	cli	Native target arguments in plan JSON, defaults, dependency scope, identity, diagnostics, dry-run and watch invalidation
 tests/T015-07-dist-cosmocc-integrity.sh	015	dist	Cosmocc provisioning pins a versioned archive, verifies its SHA-256 before extraction, and rejects mismatches
@@ -181,3 +180,11 @@ tests/T040-01-cli-automatic-clean.sh	040	cli	Native historical accumulation, no-
 tests/T041-01-patterns-predicates-and-substitution.sh	041	patterns	Native/WASM boolean predicates, callable filtering, nonmatch-preserving substitution, deprecated alias and unchanged resub
 tests/T015-06-dist-release-scripts.sh	015	dist	Manual release preflight and mocked publication: pushed revision, clean tree, tag/release conflicts, API failures, flat launcher assets, operator paths, key guards, npm-only recovery/no-op/auth retry/processing delays, and missing APE toolchain
 tests/T044-01-runtime-kame-rule-bodies.sh	044	runtime	Native/WASM value-producing rule bodies, exact artifact bytes, dependency invalidation, reuse, dry-run and effect rejection
+tests/T013-08-meta-harness.sh	013	meta	Reviewed parallel pool, exclusive fallback and phase isolation, worker refill, failure logs, per-process durations, metadata validation and empty selection
+tests/T004-20-runtime-computed-outputs-watch.sh	004	runtime	Native/WASM retained computed target index replacement on source changes
+tests/T007-15-runtime-symlink-watch.sh	007	runtime	Native/WASM watch invalidation when a dangling symlink changes between absent destinations
+tests/T017-24-kash-defer-lifecycle.sh	017	kash	Default deferred-cleanup deadline, interruption, timeout and background-work reaping before finalizers
+tests/T036-03-cli-presentation-lifecycle.sh	036	cli	Native/WASM terminal resizing, cursor ownership, fallback and watch-cycle shutdown
+tests/T038-06-kash-recipe-lifecycle.sh	038	kash	Native/WASM direct Kash service ownership and retained executable-change watch invalidation
+tests/T006-10-runtime-environment-watch.sh	006	runtime	Native/WASM warm watch restores discovered file, task and definition dependencies and suppresses equal-result downstream generations
+tests/T017-25-kash-recipe-deadlines.sh	017	kash	Native/WASM shared recipe deadlines and failed background-work cleanup

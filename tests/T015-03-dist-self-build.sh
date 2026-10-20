@@ -19,6 +19,15 @@ version_file="$CLI_ROOT/src/go/kame/cmd/kame/version_generated.go"
 before="$(sha256sum "$version_file")"
 "$CLI_ROOT/src/sh/generate-version.sh"
 "$CLI_ROOT/src/sh/generate-version.sh"
+test-step "concurrent metadata generation uses independent temporary files"
+pids=()
+for _attempt in {1..8}; do
+	"$CLI_ROOT/src/sh/generate-version.sh" &
+	pids+=("$!")
+done
+for pid in "${pids[@]}"; do
+	if wait "$pid"; then test-ok "concurrent version generation completed"; else test-fail "concurrent version generation failed"; fi
+done
 after="$(sha256sum "$version_file")"
 if [ "$before" = "$after" ]; then
 	test-ok "version metadata did not change"

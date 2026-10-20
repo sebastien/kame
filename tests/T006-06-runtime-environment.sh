@@ -8,17 +8,6 @@ cli_require_tools
 cli_build
 cd "$CLI_ROOT"
 make dist-wasm >/dev/null
-wait_watch_idle() {
-  local events="$1" target="$2"
-  for attempt in {1..100}; do
-    if jq -e -s --arg target "$target" 'any(.[]; .type == "target-completed" and .target == $target) and any(.[]; .type == "watch-idle" and .cycle == 1 and .status == "success")' "$events" >/dev/null 2>&1; then return; fi
-    sleep 0.05
-  done
-  kill -TERM "$watch_pid" 2>/dev/null || true
-  wait "$watch_pid" 2>/dev/null || true
-  cat "$events" >&2
-  test-fatal "$backend watch did not complete its initial cycle for $target"
-}
 for backend in native wasm; do
  project="$TMPDIR/$backend"
  mkdir -p "$project"
@@ -260,22 +249,6 @@ KMK
   printf D > "$signatures/input"
   "${runner[@]}" -C "$signatures" ./downstream > "$project/out" 2> "$project/err"
   if [ "$(cat "$signatures/child-runs")" = xx ] && [ "$(cat "$signatures/parent-runs")" = x ]; then test-ok "$backend equal generated results suppress downstream recipe execution"; else test-fail "$backend consumer tracked producer inputs instead of results"; fi
-  test-step "$backend watch suppresses unchanged downstream generations"
-   "${runner[@]}" --output json --watch -C "$signatures" ./downstream > "$project/equal-watch-out" 2> "$project/equal-watch-err" &
-   watch_pid=$!
-   wait_watch_idle "$project/equal-watch-out" ./downstream
-  printf F > "$signatures/input"
-  for attempt in {1..100}; do
-     if [ "$(cat "$signatures/child-runs")" = xxx ] && jq -e -s '[.[] | select(.type == "target-completed" and .target == "./constant")] | length >= 2' "$project/equal-watch-out" >/dev/null 2>&1; then break; fi
-    sleep 0.05
-  done
-  kill -TERM "$watch_pid" 2>/dev/null || true
-  wait "$watch_pid" 2>/dev/null || true
-     if [ "$(cat "$signatures/child-runs")" = xxx ] && [ "$(cat "$signatures/parent-runs")" = x ] && jq -e -s '([.[] | select(.type == "target-started" and .target == "./downstream")] | length == 1) and ([.[] | select(.type == "target-completed" and .target == "./constant")] | length >= 2)' "$project/equal-watch-out" >/dev/null; then test-ok "$backend equal result preserved the downstream generation"; else
-      cat "$project/equal-watch-out" >&2
-     cat "$project/equal-watch-err" >&2
-     test-fail "$backend equal result restarted a downstream generation (child=$(cat "$signatures/child-runs"), parent=$(cat "$signatures/parent-runs"))"
-   fi
   test-step "$backend validates consumed override values"
   KAME_VALUE=first "${runner[@]}" -C "$signatures" ./override > "$project/out" 2> "$project/err"
   KAME_VALUE=second "${runner[@]}" -C "$signatures" ./override > "$project/out" 2> "$project/err"
@@ -287,20 +260,6 @@ KMK
   touch -r "$signatures/stamp" "$signatures/extra"
   "${runner[@]}" -C "$signatures" ./discovered > "$project/out" 2> "$project/err"
   if [ "$(cat "$signatures/discovered")" = B ]; then test-ok "$backend execution-time read bytes invalidate reuse"; else test-fail "$backend execution-time read stayed fresh"; fi
-  test-step "$backend warm watch restores discovered edges and notices byte edits"
-   "${runner[@]}" --output json --watch -C "$signatures" ./discovered > "$project/watch-out" 2> "$project/watch-err" &
-   watch_pid=$!
-   wait_watch_idle "$project/watch-out" ./discovered
-  cp -p "$signatures/extra" "$signatures/stamp"
-  printf C > "$signatures/extra"
-  touch -r "$signatures/stamp" "$signatures/extra"
-  for attempt in {1..100}; do
-    if [ "$(cat "$signatures/discovered")" = C ]; then break; fi
-    sleep 0.05
-  done
-  kill -TERM "$watch_pid" 2>/dev/null || true
-  wait "$watch_pid" 2>/dev/null || true
-  if [ "$(cat "$signatures/discovered")" = C ]; then test-ok "$backend warm watch tracks restored execution-time reads"; else test-fail "$backend warm watch lost discovered dependency"; fi
   test-step "$backend cached tasks validate post-execution observations"
   "${runner[@]}" -C "$signatures" read-task > "$project/out" 2> "$project/err"
   touch "$signatures/input"
@@ -311,20 +270,6 @@ KMK
   touch -r "$signatures/stamp" "$signatures/extra"
   "${runner[@]}" -C "$signatures" read-task > "$project/out" 2> "$project/err"
   if [ "$(cat "$signatures/task-runs")" = xx ] && [ "$(cat "$signatures/task-output")" = D ]; then test-ok "$backend task execution-time read invalidates cache"; else test-fail "$backend task execution-time read was not persisted"; fi
-  test-step "$backend warm task watch restores execution-time dependencies"
-   "${runner[@]}" --output json --watch -C "$signatures" read-task > "$project/task-watch-out" 2> "$project/task-watch-err" &
-   watch_pid=$!
-   wait_watch_idle "$project/task-watch-out" read-task
-  cp -p "$signatures/extra" "$signatures/stamp"
-  printf E > "$signatures/extra"
-  touch -r "$signatures/stamp" "$signatures/extra"
-  for attempt in {1..100}; do
-    if [ "$(cat "$signatures/task-output")" = E ] && [ "$(cat "$signatures/task-runs")" = xxx ]; then break; fi
-    sleep 0.05
-  done
-  kill -TERM "$watch_pid" 2>/dev/null || true
-  wait "$watch_pid" 2>/dev/null || true
-  if [ "$(cat "$signatures/task-output")" = E ] && [ "$(cat "$signatures/task-runs")" = xxx ]; then test-ok "$backend warm task watch tracks accepted execution reads"; else test-fail "$backend warm task watch lost execution reads"; fi
   test-step "$backend cache misses discard obsolete branch observations"
   for target in branch-task ./branch-file; do
     rm -f "$signatures/left"
@@ -353,24 +298,12 @@ KMK
     "${runner[@]}" -C "$signatures" "$target" > "$project/out" 2> "$project/err"
   done
   if [ "$(cat "$signatures/definition-output")" = two ] && [ "$(cat "$signatures/definition-file")" = two ] && [ "$(cat "$signatures/definition-runs")" = xx ] && [ "$(cat "$signatures/definition-file-runs")" = xx ]; then test-ok "$backend definition reads invalidate and then reuse"; else test-fail "$backend definition observations did not follow current bytes"; fi
-  test-step "$backend warm watch restores definition resource edges"
-   "${runner[@]}" --output json --watch -C "$signatures" definition-task > "$project/definition-watch-out" 2> "$project/definition-watch-err" &
-   watch_pid=$!
-   wait_watch_idle "$project/definition-watch-out" definition-task
-  printf three > "$signatures/definition-input"
-  for attempt in {1..100}; do
-    if [ "$(cat "$signatures/definition-output")" = three ] && [ "$(cat "$signatures/definition-runs")" = xxx ]; then break; fi
-    sleep 0.05
-  done
-  kill -TERM "$watch_pid" 2>/dev/null || true
-  wait "$watch_pid" 2>/dev/null || true
-  if [ "$(cat "$signatures/definition-output")" = three ] && [ "$(cat "$signatures/definition-runs")" = xxx ]; then test-ok "$backend warm definition cache hit retains file reads"; else test-fail "$backend warm definition watch lost resource interest"; fi
   test-step "$backend restores consumed execution-time definition overrides"
   for value in first second; do
     KAME_CONTENT="$value" "${runner[@]}" -C "$signatures" definition-task > "$project/out" 2> "$project/err"
      KAME_CONTENT="$value" "${runner[@]}" -C "$signatures" definition-task > "$project/out" 2> "$project/err"
   done
-  if [ "$(cat "$signatures/definition-output")" = second ] && [ "$(cat "$signatures/definition-runs")" = xxxxx ]; then test-ok "$backend execution-time overrides invalidate only when consumed values change"; else test-fail "$backend execution-time override restoration was stale or nonreusable"; fi
+   if [ "$(cat "$signatures/definition-output")" = second ] && [ "$(cat "$signatures/definition-runs")" = xxxx ]; then test-ok "$backend execution-time overrides invalidate only when consumed values change"; else test-fail "$backend execution-time override restoration was stale or nonreusable"; fi
   test-step "$backend fingerprints binary environment reads for shell and Kash"
   child_env="$project/child-environment"
   mkdir -p "$child_env"

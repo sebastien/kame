@@ -134,14 +134,12 @@ for project in rules/publication composition/publication; do
 	test-step "$project: selective changes, shared inputs and graph growth"
 	(
 		cd "$project"
-		sleep 1
 		printf 'edited hello\n' >./notes/hello.txt
 		cli_run --
 		cli_expect_status 0
 		cli_expect_stdout_contains 'rendered ./public/hello.txt' 'assembled ./public/index.txt'
 		not_rendered ./public/world.txt
 		cli_expect_file ./public/hello.txt $'LITTLE PUBLICATION\nEDITED HELLO\n'
-		sleep 1
 		printf 'LITTLE PUBLICATION, REVISED\n' >./banner.txt
 		cli_run --
 		cli_expect_status 0

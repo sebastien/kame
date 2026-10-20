@@ -61,7 +61,6 @@ for backend in native wasm; do
 	reject RECIPE_FAIL '(pipe! (run! "sh" "-c" "exit 3") (run! "sh" "-c" "exit 7"))'
 	if grep -q 'status 7' "$work/err"; then test-ok "$backend selects the rightmost failure"; else test-fail "$backend aggregate status"; fi
 	reject TOOL_MISSING '(run! "kame-missing-process-expression")'
-	reject RECIPE_TIMEOUT '(run! :timeout 0.05 "sleep" "30")'
 	status=0
 	"${command[@]}" do run --allow-run=/bin/printf -l expr -c '(run! "printf" "forbidden")' >"$work/out" 2>"$work/err" || status=$?
 	if [ "$status" = 1 ] && grep -q CAP_DENIED "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend scoped grants forbid PATH lookup"; else test-fail "$backend run broadened grants"; fi

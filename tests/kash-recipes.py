@@ -6,7 +6,10 @@ import subprocess
 import sys
 import tempfile
 
-root, backend, binary = sys.argv[1:]
+root, backend, binary = sys.argv[1:4]
+part = sys.argv[4] if len(sys.argv) > 4 else 'all'
+if part not in ('all', 'values', 'lifecycle'):
+    raise SystemExit('expected all, values or lifecycle')
 root = Path(root)
 command = [binary] if backend == 'native' else ['node', str(root / 'dist/kame.js')]
 cases = 0
@@ -31,6 +34,13 @@ with tempfile.TemporaryDirectory() as temporary:
     def expression(text, expected=None, code=None, args=None):
         return invoke(['do', 'run', '--print-result', '--allow-run', '--allow-read', '--allow-write', '-c', text] + (args or []), expected, code)
 
+    def check_deadline():
+        recipe('SHELL = kash\nchosen :\n\tsleep .08\n\tsleep .08\n', ['--timeout', '120', 'chosen'], code='RECIPE_TIMEOUT')
+    if part == 'lifecycle':
+        check_deadline()
+        print(f'{backend}: {cases} Kash deadline cases passed')
+        raise SystemExit(0)
+
     # Authored recipes are direct Kash; constructing source is explicit.
     recipe('SHELL = kash\ncommand = (kash "printf generated")\nchosen :\n\t(command)\n', expected='generated')
     recipe('SHELL = kash\nname = "build value"\nchosen :\n\tprintf %s "$name"\n', expected='build value')
@@ -46,7 +56,8 @@ with tempfile.TemporaryDirectory() as temporary:
     assert (project / 'nested/result').read_text() == 'artifact'
     recipe('SHELL = kash\n./async-result :\n\tsh -c "sleep .03; printf async > async-result" &\n', ['./async-result'])
     assert (project / 'async-result').read_text() == 'async'
-    recipe('SHELL = kash\nchosen :\n\tsleep .08\n\tsleep .08\n', ['--timeout', '120', 'chosen'], code='RECIPE_TIMEOUT')
+    if part == 'all':
+        check_deadline()
     recipe('SHELL = kash\nchosen :\n\tsh -c "if test -f retried; then printf success; else touch retried; exit 1; fi"\n', ['--retry', '1', 'chosen'], expected='success')
 
     (project / 'fresh-input').write_text('input')

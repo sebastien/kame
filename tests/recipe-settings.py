@@ -6,7 +6,10 @@ import subprocess
 import sys
 import tempfile
 
-root, backend, binary = sys.argv[1:]
+root, backend, binary = sys.argv[1:4]
+part = sys.argv[4] if len(sys.argv) > 4 else 'all'
+if part not in ('all', 'values', 'lifecycle'):
+    raise SystemExit('expected all, values or lifecycle')
 root = Path(root)
 command = [binary] if backend == 'native' else ['node', str(root / 'dist/kame.js')]
 cases = 0
@@ -25,6 +28,14 @@ with tempfile.TemporaryDirectory() as temporary:
                 assert result.stdout == expected, (text, result)
         cases += 1
         return result
+    def check_lifecycle():
+        run('chosen : ; [shell: kash]\n\t/bin/sleep .08\n\t/bin/sleep .08\n\t/usr/bin/touch forbidden\n', ['--timeout', '120', 'chosen'], code='RECIPE_TIMEOUT')
+        assert not (project / 'forbidden').exists()
+        run('chosen : ; [shell: kash]\n\t/bin/sleep 30 &\n\t/usr/bin/false\n', code='RECIPE_FAIL')
+    if part == 'lifecycle':
+        check_lifecycle()
+        print(f'{backend}: {cases} recipe lifecycle cases passed')
+        raise SystemExit(0)
     run('chosen : ; [shell: kash]\n\t/usr/bin/printf hello\n', expected='hello')
     cached = 'task chosen : ; [shell: kash]\n\t/bin/sh -c "printf x >> cache-runs; printf cached; printf warning >&2"\n'
     first = run(cached, ['--json', 'chosen'])
@@ -46,9 +57,8 @@ with tempfile.TemporaryDirectory() as temporary:
     retry = 'chosen : ; [shell: kash env: [MODE: "scoped"]]\n\t/bin/sh ./retry-stage.sh\n'
     run(retry, ['--retry', '1', 'chosen'], expected='recovered')
     assert (project / 'retry-runs').read_text() == 'scopedscoped'
-    run('chosen : ; [shell: kash]\n\t/bin/sleep .08\n\t/bin/sleep .08\n\t/usr/bin/touch forbidden\n', ['--timeout', '120', 'chosen'], code='RECIPE_TIMEOUT')
-    assert not (project / 'forbidden').exists()
-    run('chosen : ; [shell: kash]\n\t/bin/sleep 30 &\n\t/usr/bin/false\n', code='RECIPE_FAIL')
+    if part == 'all':
+        check_lifecycle()
     run('chosen : ; [shell: "/bin/sh"]\n\tprintf shell\n', expected='shell')
     run('chosen : ; [shell: ["/bin/sh" "-c"]]\n\tprintf argv\n', expected='argv')
     run('SHELL = (first (list kash))\nchosen :\n\t/usr/bin/printf global\n', expected='global')

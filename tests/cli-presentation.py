@@ -94,7 +94,7 @@ def terminal(host: list[str], cwd: Path, mode: str, width: int = 80, resize: boo
 	return bytes(output)
 
 
-def check_host(host: list[str], root: Path) -> None:
+def check_host(host: list[str], root: Path, part: str = 'all') -> None:
 	native = len(host) == 1
 	project = root / ("native" if len(host) == 1 else "wasm")
 	project.mkdir()
@@ -104,6 +104,9 @@ def check_host(host: list[str], root: Path) -> None:
 	large_artifact = bytes(range(256)) * 1024 + b"unterminated"
 	(project / "large-artifact").write_bytes(large_artifact)
 	(project / "empty").write_bytes(b"")
+	if part == 'lifecycle':
+		check_lifecycle(host, project)
+		return
 	for color, environment, expected in [
 		("always", {"NO_COLOR": "1"}, True),
 		("never", {"CLICOLOR_FORCE": "1"}, False),
@@ -209,6 +212,13 @@ def check_host(host: list[str], root: Path) -> None:
 		assert (value[0] if isinstance(value, list) else value)["type"] == "diagnostic"
 	assert invoke(host, ["do", "run", "--lang", "expr", "-c", '"--json"'], project).stdout == b'"--json"'
 	assert invoke(host, ["do", "run", "--lang", "expr", "-c", "42", "--", "--json"], project).stdout == b"42"
+	if part == 'all':
+		check_lifecycle(host, project)
+
+
+def check_lifecycle(host: list[str], project: Path) -> None:
+	"""Check terminal reflow, raw child cursor ownership and watch shutdown."""
+	native = len(host) == 1
 	for width in [40, 80]:
 		frame = terminal(host, project, "ansi", width)
 		assert b"\x1b[1A" in frame and (b"[default]" if native else b"1 running") in frame, frame
@@ -282,9 +292,12 @@ def check_host(host: list[str], root: Path) -> None:
 
 
 if __name__ == "__main__":
+	part = sys.argv[3] if len(sys.argv) > 3 else 'all'
+	if part not in ('all', 'values', 'lifecycle'):
+		raise SystemExit('expected all, values or lifecycle')
 	with tempfile.TemporaryDirectory(prefix="kame-presentation-") as directory:
 		for host in [[str(Path(sys.argv[1]).resolve())], ["node", str(Path(sys.argv[2]).resolve())]]:
-			check_host(host, Path(directory))
+			check_host(host, Path(directory), part)
 	print("presentation matrix passed")
 
 # EOF
