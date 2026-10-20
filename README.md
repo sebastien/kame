@@ -20,32 +20,42 @@ cached tasks, and managed services on one incremental engine.
 
 `kame` uses a Lisp-like expression language that embeds nicely into shell. Its
 rule language is close to `make` with fewer annoyances (no shell-clashing `$`,
-nor forcing tabs). Rules can be written in *Kash* a modern non-interactive shell
-optimised for safety and process coordination, an ideal replacement to bash
-fro scripting.
+nor forcing tabs).
 
-Use a CLI built from matching sources. For older syntax, follow
-[MIGRATION.md](MIGRATION.md); formatting does not migrate code.
+`kash` is an improve non-interactive shell that can be used for rules. Kash
+is optimised for safety and process coordination, an ideal replacement for bash
+glueing and coordinating processes.
 
-## Get started
+## Quick start
 
-From a checkout, install Go 1.26.0+, Solod 0.4.0, GNU Make, Clang, and Python 3
-as described in the [contributor guide](docs/ref-contributing.md), then build:
+`kame` is available in WASM through NPM, which is the easiest way to run
+it on all platforms:
 
 ```sh
-CC=clang make dist
-export PATH="$PWD/dist:$PATH"
-kame --version
-kame do run --lang expr -c '(join " " ["hello" "world"])'
-# "hello world"
+bun x @ssebastien/kame@0.3.1 --version
+# or, with npm
+npm x --yes @ssebastien/kame@0.3.1 -- --version
 ```
 
-For released binaries, Node/WASM, npm, and verified launcher setup, see
-[installation and backends](docs/ref-installation.md).
+But for everyday use (on Windows/MacOS/Linux/BSD), you will want to get the
+standalone APE from the
+[v0.3.1 release](https://github.com/sebastien/kame/releases/tag/v0.3.1):
 
-### Your first build
+```sh
+curl -fLO https://github.com/sebastien/kame/releases/download/v0.3.1/kame.com
+chmod +x kame.com
+./kame.com --version
+```
 
-In an empty directory, save this as `Makefile.kmk`. Indent the recipe with a tab:
+Neither route needs a compiler toolchain. The npm package runs on Node.js 18+;
+the APE covers Linux, macOS, FreeBSD, NetBSD, and Windows (rename it to
+`kame.exe`).
+
+### Makefile.kmk
+
+`kame` offers a [bootstrap Makefile](Makefile) for Make users. It automatically
+discovers `Makefile.kmk`, `make.kmk`, or `src/kmk/main.kmk`. A `Makefile.kmk`
+looks like this:
 
 ```kame
 default : ./greeting.txt

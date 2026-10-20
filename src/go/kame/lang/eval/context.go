@@ -17,7 +17,7 @@ import (
 type Context struct {
 	// Stream predicates may compute values, but may not observe or mutate host
 	// state, suspend, start processes, or dynamically parse code.
-	PurePredicate bool
+	PurePredicate         bool
 	Program               *Program
 	Engine                *core.EngineContext
 	TrackUnvalidatedReads bool
@@ -78,12 +78,12 @@ type Context struct {
 	ReserveEnv         bool
 	DisableMemo        bool
 	// Dynamic expressions must not lend callable ASTs past their parse lifetime.
-	CloneCallableAST bool
+	CloneCallableAST      bool
 	FinalizationForbidden bool
-	evaluationDepth  int
-	finalizer *FinalizerState
-	deferred bool
-	dependencyFailure diagnostic.Diagnostic
+	evaluationDepth       int
+	finalizer             *FinalizerState
+	deferred              bool
+	dependencyFailure     diagnostic.Diagnostic
 }
 
 type operationState struct {
@@ -185,9 +185,9 @@ const (
 type Effect struct {
 	// Host-only transport metadata; never grants authority or enters value data.
 	FinalizationDeadlineNS int64
-	Kind EffectKind
-	Data []byte
-	Span source.Span
+	Kind                   EffectKind
+	Data                   []byte
+	Span                   source.Span
 }
 
 func (e *Effect) Free(a mem.Allocator) {
@@ -202,7 +202,10 @@ func FreeEffects(a mem.Allocator, effects []Effect) {
 }
 
 func (c *Context) Emit(kind EffectKind, data []byte) {
-	if c.PurePredicate { c.phaseInvalid = true; return }
+	if c.PurePredicate {
+		c.phaseInvalid = true
+		return
+	}
 	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase || c.Phase == RenderingPhase {
 		c.phaseInvalid = true
 		return
@@ -224,10 +227,12 @@ func (c *Context) EmitWrite(name string, data []byte) {
 func (c *Context) PhaseInvalid() bool { return c.phaseInvalid }
 
 func (c *Context) ArgumentSpan(index int) source.Span {
-	if index >= 0 && index < len(c.operationArguments) { return c.operationArguments[index].Span }
+	if index >= 0 && index < len(c.operationArguments) {
+		return c.operationArguments[index].Span
+	}
 	return c.Span
 }
-func (c *Context) MarkPhaseInvalid()  { c.phaseInvalid = true }
+func (c *Context) MarkPhaseInvalid() { c.phaseInvalid = true }
 
 // RuleFrame supplies the inputs and outputs for one enclosing rule evaluation.
 // Selectors use the most recently pushed frame.
@@ -318,7 +323,10 @@ func canonicalPath(a mem.Allocator, cwd string, name string) string {
 }
 
 func (c *Context) Dependency(key core.ResourceKey) bool {
-	if c.PurePredicate { c.phaseInvalid = true; return false }
+	if c.PurePredicate {
+		c.phaseInvalid = true
+		return false
+	}
 	if c.Engine == nil {
 		return false
 	}
@@ -340,7 +348,9 @@ func (c *Context) Dependency(key core.ResourceKey) bool {
 			c.dependencyFailure = d.Clone(c.Run)
 			current = false
 		}
-	} else { current = c.Engine.Dependency(key) }
+	} else {
+		current = c.Engine.Dependency(key)
+	}
 	mem.FreeString(c.Run, resourcePath)
 	return current
 }
@@ -377,8 +387,13 @@ func (c *Context) Observe(key core.ResourceKey, aspect core.ObservationAspect, s
 // Submit queues an owned request and records its generated ID on the active
 // engine node. The host completes it using the request correlation data.
 func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
-	if c.PurePredicate { c.phaseInvalid = true; return 0 }
-	if c.deferred { return 0 }
+	if c.PurePredicate {
+		c.phaseInvalid = true
+		return 0
+	}
+	if c.deferred {
+		return 0
+	}
 	if c.finalizer != nil && c.Engine != nil && c.Program.FinalizationNow != nil {
 		deadline := c.Program.FinalizerDeadline(c.Engine.NodeID())
 		if deadline != 0 && c.Program.FinalizationNow(c.Program.FinalizationHost) >= deadline {
@@ -433,9 +448,13 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 		for i := range stages {
 			if i < len(setups) {
 				input, output := host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput)
-				if (input != "" && !c.Allows(Read, input)) || (output != "" && !c.Allows(Write, output)) { return false }
+				if (input != "" && !c.Allows(Read, input)) || (output != "" && !c.Allows(Write, output)) {
+					return false
+				}
 			}
-			if i < len(kinds) && (kinds[i].Text == "merge" || kinds[i].Text == "broadcast" || kinds[i].Text == "balance" || kinds[i].Text == "frame" || kinds[i].Text == "encode" || kinds[i].Text == "filter" || kinds[i].Text == "copy") { continue }
+			if i < len(kinds) && (kinds[i].Text == "merge" || kinds[i].Text == "broadcast" || kinds[i].Text == "balance" || kinds[i].Text == "frame" || kinds[i].Text == "encode" || kinds[i].Text == "filter" || kinds[i].Text == "copy") {
+				continue
+			}
 			if stages[i].Kind != core.List || len(stages[i].List) == 0 || stages[i].List[0].Kind != core.String || !authorizeExecutable(c, stages[i].List[0].Text) {
 				return false
 			}
@@ -534,9 +553,19 @@ func (c *Context) Call(callable core.Value, values []core.Value) Result {
 }
 
 func borrowableValue(value core.Value, depth int) bool {
-	if depth >= 256 { return false }
-	for i := range value.List { if !borrowableValue(value.List[i], depth+1) { return false } }
-	for i := range value.Record { if !borrowableValue(value.Record[i].Value, depth+1) { return false } }
+	if depth >= 256 {
+		return false
+	}
+	for i := range value.List {
+		if !borrowableValue(value.List[i], depth+1) {
+			return false
+		}
+	}
+	for i := range value.Record {
+		if !borrowableValue(value.Record[i].Value, depth+1) {
+			return false
+		}
+	}
 	return true
 }
 

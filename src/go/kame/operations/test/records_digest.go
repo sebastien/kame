@@ -31,16 +31,23 @@ func TestRecordOperationsAndKindPredicates(t *testing.T) {
 	}
 	for i := range texts {
 		result := evaluate(t, p, texts[i])
-		if result.Diagnostic.Code != "" || result.Value.Kind != core.Bool || !result.Value.Bool { t.Error("record/predicate check failed: "+texts[i]) }
+		if result.Diagnostic.Code != "" || result.Value.Kind != core.Bool || !result.Value.Bool {
+			t.Error("record/predicate check failed: " + texts[i])
+		}
 		result.Free(a)
 	}
 	invalid := []string{`(items [([x] x)])`, `(set ([x] x) 3 [f: ([x] x)])`, `(merge [f: ([x] x)] [([x] x)])`, `(digest "sha1" [f: ([x] x)])`}
 	for i := range invalid {
 		result := evaluate(t, p, invalid[i])
-		if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("invalid native record/digest argument accepted") }
+		if result.Diagnostic.Code != "EXPR_INVALID" {
+			t.Error("invalid native record/digest argument accepted")
+		}
 		result.Free(a)
 	}
-	engine.Free(); p.Free(); parsed.Free(); registry.Free()
+	engine.Free()
+	p.Free()
+	parsed.Free()
+	registry.Free()
 }
 
 func TestStandardDigestVectors(t *testing.T) {
@@ -58,11 +65,18 @@ func TestStandardDigestVectors(t *testing.T) {
 	}
 	for i := range texts {
 		result := evaluate(t, p, texts[i])
-		if result.Diagnostic.Code != "" || result.Value.Text != expected[i] { t.Error("standard digest vector failed") }
+		if result.Diagnostic.Code != "" || result.Value.Text != expected[i] {
+			t.Error("standard digest vector failed")
+		}
 		result.Free(a)
 	}
 	result := evaluate(t, p, `(digest "SHA-512" "abc")`)
-	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("unknown digest algorithm accepted") }
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("unknown digest algorithm accepted")
+	}
 	result.Free(a)
-	engine.Free(); p.Free(); parsed.Free(); registry.Free()
+	engine.Free()
+	p.Free()
+	parsed.Free()
+	registry.Free()
 }

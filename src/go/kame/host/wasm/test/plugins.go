@@ -11,7 +11,10 @@ import (
 func TestRuntimeRegistersPluginOperationsBeforeEvaluation(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "")
-	if started.Runtime == nil { t.Fatal("runtime did not compile"); return }
+	if started.Runtime == nil {
+		t.Fatal("runtime did not compile")
+		return
+	}
 	runtime := started.Runtime
 	defer runtime.Free()
 	declarations := []byte(`[{"name":"example","version":"1","operations":[{"name":"example-run","version":"2","minArity":1,"maxArity":1}]}]`)

@@ -60,8 +60,12 @@ func TestFileReadsObserveContentExistenceAndMetadataSeparately(t *testing.T) {
 		if op == host.OpStat {
 			value = core.NewRecord(a, []core.RecordField{{Key: "size", Value: core.Value{Kind: core.Int, Int: 1}}})
 		}
-		if op == host.OpLstat { value = core.NewRecord(a, []core.RecordField{{Key: "link", Value: core.Value{Kind: core.Bool, Bool: true}}}) }
-		if op == host.OpReadlink { value = core.NewString(a, "target") }
+		if op == host.OpLstat {
+			value = core.NewRecord(a, []core.RecordField{{Key: "link", Value: core.Value{Kind: core.Bool, Bool: true}}})
+		}
+		if op == host.OpReadlink {
+			value = core.NewString(a, "target")
+		}
 		engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, HasValue: true, Value: value})
 		request.Free(a)
 	}
@@ -90,8 +94,12 @@ func TestFileReadsObserveContentExistenceAndMetadataSeparately(t *testing.T) {
 		if item.Aspect == core.ObservationMetadata {
 			metadata = true
 		}
-		if item.Aspect == core.ObservationLinkMetadata { linkMetadata = true }
-		if item.Aspect == core.ObservationLinkTarget { linkTarget = true }
+		if item.Aspect == core.ObservationLinkMetadata {
+			linkMetadata = true
+		}
+		if item.Aspect == core.ObservationLinkTarget {
+			linkTarget = true
+		}
 	}
 	if !content || !existence || !metadata || !linkMetadata || !linkTarget {
 		t.Error("consumed file view was not observed")

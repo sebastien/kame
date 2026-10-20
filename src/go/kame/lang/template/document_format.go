@@ -220,8 +220,10 @@ func canonicalDirective(a mem.Allocator, d dirOut, blocks *[]int) string {
 			// Only one-expression directives can safely omit an application's
 			// own parentheses. Keep zero-argument calls distinct from references.
 			if (d.Kind == dirIf || d.Kind == dirElif || d.Kind == dirWith || d.Kind == dirMatch || d.Kind == dirCase) && d.Args[i].Kind == expr.Application && d.Args[i].AuthoredPipe == nil && len(d.Args[i].Items) > 1 {
-				out.WriteString(formatted[1:len(formatted)-1])
-			} else { out.WriteString(formatted) }
+				out.WriteString(formatted[1 : len(formatted)-1])
+			} else {
+				out.WriteString(formatted)
+			}
 			mem.FreeString(a, formatted)
 		}
 		out.WriteString(")")

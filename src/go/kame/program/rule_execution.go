@@ -222,7 +222,9 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 		values, outputs := makeRuleInputValues(p.Alloc, inputs, resourceInputs), makeValues(p.Alloc, entry.Plan.Outputs)
 		dependencyState := renderDependencyState{Program: p, Index: index, Inspection: entry.Inspection}
 		context := &eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: entry.EnvironmentClaimed, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.ResolvingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: values, Outputs: outputs}}}
-		if entry.Inspection { context.Environment, context.HasEnvironment = p.Options.Environment, p.Options.Environment != nil }
+		if entry.Inspection {
+			context.Environment, context.HasEnvironment = p.Options.Environment, p.Options.Environment != nil
+		}
 		p.bindDefinitionEnvironment(context)
 		scope := p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
 		context.Scope = scope
@@ -269,7 +271,9 @@ func (p *Program) resolveInputs(c *core.EngineContext, entry *instance) inputsRe
 			resourceInputs[j].Computed = true
 			resourceInputs[j].Group = group
 		}
-		if input.SequenceEnd && len(resourceInputs) > before { resourceInputs[len(resourceInputs)-1].SequenceEnd = true }
+		if input.SequenceEnd && len(resourceInputs) > before {
+			resourceInputs[len(resourceInputs)-1].SequenceEnd = true
+		}
 		for j := before; j < len(inputs); j++ {
 			dynamicInputs = slices.Append(p.Alloc, dynamicInputs, cloneText(p.Alloc, inputs[j]))
 		}
@@ -372,14 +376,23 @@ func (p *Program) mkdirParent(name string) bool {
 	parent := ""
 	if core.IsResourceURIName(name) {
 		parsed := core.ParseResourceURI(mem.System, name)
-		if parsed.Error != "" { parsed.URI.Free(); return false }
-		if parsed.URI.Scheme == "mem" { parsed.URI.Free(); return true }
+		if parsed.Error != "" {
+			parsed.URI.Free()
+			return false
+		}
+		if parsed.URI.Scheme == "mem" {
+			parsed.URI.Free()
+			return true
+		}
 		// Traverse decoded path segments, then retain URI identity for the host.
 		// path.Dir on the whole URI collapses :// and creates local "file:" trees.
 		directory := path.Dir(mem.System, parsed.URI.Path)
 		mem.FreeString(mem.System, parsed.URI.Path)
 		parsed.URI.Path = directory
-		if directory == "/" { parsed.URI.Free(); return true }
+		if directory == "/" {
+			parsed.URI.Free()
+			return true
+		}
 		parent = parsed.URI.Canonical(mem.System)
 		parsed.URI.Free()
 	} else {

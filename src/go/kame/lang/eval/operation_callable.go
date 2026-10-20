@@ -9,7 +9,9 @@ import (
 func (p *Program) newOperationCallable(name string) core.Value {
 	for i := range p.OperationFunctions {
 		f := p.OperationFunctions[i]
-		if f.OperationName == name { return core.Value{Kind: core.Callable, Callable: f, CallableOwner: p, Text: f.OperationName} }
+		if f.OperationName == name {
+			return core.Value{Kind: core.Callable, Callable: f, CallableOwner: p, Text: f.OperationName}
+		}
 	}
 	f := mem.Alloc[Function](p.Alloc)
 	f.Kind, f.Owner, f.OperationName = FunctionOperation, p, name
@@ -22,6 +24,8 @@ func (p *Program) newOperationCallable(name string) core.Value {
 }
 
 func (p *Program) operationForCallable(f *Function) *Operation {
-	if f.Owner != p { return nil }
+	if f.Owner != p {
+		return nil
+	}
 	return p.Registry.lookup(f.OperationName)
 }

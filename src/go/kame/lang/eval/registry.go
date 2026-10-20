@@ -27,19 +27,19 @@ type OperationCall func(*Context, any, []core.Value) Result
 type ContextFree func(mem.Allocator, any)
 
 type Operation struct {
-	ScopedFinalizer bool
-	Name         string
-	Call         OperationCall
-	Context      any
-	FreeContext  ContextFree
-	MinArity     int
-	MaxArity     int // -1 accepts any remaining arguments.
-	Capabilities []Capability
+	ScopedFinalizer         bool
+	Name                    string
+	Call                    OperationCall
+	Context                 any
+	FreeContext             ContextFree
+	MinArity                int
+	MaxArity                int // -1 accepts any remaining arguments.
+	Capabilities            []Capability
 	ConditionalCapabilities []Capability
-	Category     OperationCategory
-	Phases       PhaseMask
-	Behavior     OperationBehavior
-	Version      string
+	Category                OperationCategory
+	Phases                  PhaseMask
+	Behavior                OperationBehavior
+	Version                 string
 	// DeferredReplacement retains operand 2 only when operand 1 is a pattern.
 	DeferredReplacement bool
 	// Preflight validates authored constraints without demanding operands.
@@ -82,7 +82,9 @@ func NewRegistry(a mem.Allocator) *Registry {
 }
 
 func (r *Registry) Add(operation Operation) bool {
-	if operation.DeferredReplacement && (operation.MinArity != 2 || operation.MaxArity != 3) { return false }
+	if operation.DeferredReplacement && ((operation.MinArity != 2 && operation.MinArity != 3) || operation.MaxArity != 3) {
+		return false
+	}
 	if r == nil || operation.Name == "" || operation.Call == nil || IsSpecialForm(operation.Name) || r.lookup(operation.Name) != nil || !operation.ValidContract() {
 		return false
 	}

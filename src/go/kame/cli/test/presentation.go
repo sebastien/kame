@@ -7,7 +7,7 @@ import (
 )
 
 func TestPresentationEveryCommand(t *testing.T) {
-	commands := []string{"", "run", "list", "plan", "cat", "inputs", "outputs", "span", "tools", "parse", "fmt", "render", "cache", "help"}
+	commands := []string{"", "run", "list", "pick", "plan", "cat", "inputs", "outputs", "span", "tools", "parse", "fmt", "render", "cache", "help"}
 	for i := range commands {
 		inv := cli.Parse(commands[i], []string{"--output=json"})
 		if inv.Output != "json" || !inv.JSON {
@@ -41,11 +41,11 @@ func TestReportPreservesNestedEnvelopeNames(t *testing.T) {
 }
 
 func TestTargetReportGroupsKindsAndKeepsStatusReadableWithoutColor(t *testing.T) {
-	document := `{"schema":1,"type":"list","entries":[{"name":"./out","group":"artifacts","status":"missing"},{"name":"test","group":"tasks","status":"built"},{"name":"build","group":"rules","status":""},{"name":"daemon","group":"services","status":""},{"name":"package","group":"tasks","status":"outdated"},{"name":"./bad\u001b[31m","group":"artifacts","status":"unknown"}]}`
+	document := `{"schema":1,"type":"list","entries":[{"name":"./out","group":"artifacts","status":"missing"},{"name":"test","group":"tasks","status":"built"},{"name":"build","group":"rules","status":"","summary":"Build project"},{"name":"daemon","group":"services","status":"","summary":"Run daemon"},{"name":"package","group":"tasks","status":"outdated"},{"name":"./bad\u001b[31m","group":"artifacts","status":"unknown"},{"name":"./{name}.o","group":"artifacts","status":""}]}`
 	var out strings.Builder
 	defer out.Free()
-	if !cli.WriteReport(&out, "list", document, false) || out.String() != "list\n  Rules\n    build\n  Services\n    daemon\n  Tasks\n    test  ok\n    package  out of date\n  Artifacts\n    ./out  missing\n    \"./bad\\u001b[31m\"  unknown\n" {
-		t.Error("target groups, match ordering, status labels or terminal escaping changed: "+out.String())
+	if !cli.WriteReport(&out, "list", document, false) || out.String() != "list\n  Rules\n    build  Build project\n  Services\n    daemon  Run daemon\n  Tasks\n    test  ok\n    package  out of date\n  Artifacts\n    ./{name}.o\n    ./out  missing\n    \"./bad\\u001b[31m\"  unknown\n" {
+		t.Error("target groups, match ordering, status labels or terminal escaping changed: " + out.String())
 	}
 }
 
@@ -93,7 +93,9 @@ func TestPresentationRespectsValuesAndLiteralTail(t *testing.T) {
 func TestPresentationOptionsStayOutOfSourceSelection(t *testing.T) {
 	options := []string{"-o", "--output", "--color", "--diagnostic-format"}
 	for i := range options {
-		if !cli.OptionTakesValue(options[i]) { t.Error("global value option missing from dispatch grammar") }
+		if !cli.OptionTakesValue(options[i]) {
+			t.Error("global value option missing from dispatch grammar")
+		}
 		if cli.AppendsCommands([]string{options[i], "-c", "chosen"}) {
 			t.Error("global option value was mistaken for inline source")
 		}

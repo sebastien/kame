@@ -24,7 +24,9 @@ func (p *Program) pump(wait int) {
 		if event.Kind == host.ProcessSnapshot {
 			value := host.ProcessSnapshotPayload(p.Alloc, event.StageStates, event.EdgeMetrics)
 			p.processGraphSnapshot(host.Request{ID: event.ID}, value)
-			value.Free(p.Alloc); event.Free(p.Alloc); continue
+			value.Free(p.Alloc)
+			event.Free(p.Alloc)
+			continue
 		}
 		if entry := p.serviceProbeForRequest(event.ID); entry != nil {
 			if event.Kind == host.ProcessTerminal {
@@ -110,23 +112,59 @@ func (p *Program) drainRequests() {
 			orders := host.PayloadList(request.Payload, "orders")
 			var edges []host.ProcessEdge
 			validEdges := true
-			for i := range request.Payload.Record { field := request.Payload.Record[i]; if field.Key == "failurePolicy" && (field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1) { validEdges = false } }
-			if len(buffers) != 0 && len(buffers) != len(graphs) { validEdges = false }
-			for i := range buffers { if buffers[i].Kind != core.Int || buffers[i].Int < 0 || buffers[i].Int > 65536 { validEdges = false } }
-			if (len(overflows) != 0 && len(overflows) != len(graphs)) || (len(itemLimits) != 0 && len(itemLimits) != len(graphs)) { validEdges = false }
-			for i := range overflows { if overflows[i].Kind != core.Int || overflows[i].Int < 0 || overflows[i].Int > 3 { validEdges = false } }
-			for i := range itemLimits { if itemLimits[i].Kind != core.Int || itemLimits[i].Int < 0 || itemLimits[i].Int > 1024 { validEdges = false } }
-			if len(orders) != 0 && len(orders) != len(graphs) { validEdges = false }
-			for i := range orders { if orders[i].Kind != core.Int || orders[i].Int < 0 || orders[i].Int > 1 { validEdges = false } }
+			for i := range request.Payload.Record {
+				field := request.Payload.Record[i]
+				if field.Key == "failurePolicy" && (field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1) {
+					validEdges = false
+				}
+			}
+			if len(buffers) != 0 && len(buffers) != len(graphs) {
+				validEdges = false
+			}
+			for i := range buffers {
+				if buffers[i].Kind != core.Int || buffers[i].Int < 0 || buffers[i].Int > 65536 {
+					validEdges = false
+				}
+			}
+			if (len(overflows) != 0 && len(overflows) != len(graphs)) || (len(itemLimits) != 0 && len(itemLimits) != len(graphs)) {
+				validEdges = false
+			}
+			for i := range overflows {
+				if overflows[i].Kind != core.Int || overflows[i].Int < 0 || overflows[i].Int > 3 {
+					validEdges = false
+				}
+			}
+			for i := range itemLimits {
+				if itemLimits[i].Kind != core.Int || itemLimits[i].Int < 0 || itemLimits[i].Int > 1024 {
+					validEdges = false
+				}
+			}
+			if len(orders) != 0 && len(orders) != len(graphs) {
+				validEdges = false
+			}
+			for i := range orders {
+				if orders[i].Kind != core.Int || orders[i].Int < 0 || orders[i].Int > 1 {
+					validEdges = false
+				}
+			}
 			connections := host.PayloadList(request.Payload, "edges")
 			for i := range connections {
 				items := connections[i].List
 				valid := connections[i].Kind == core.List && (len(items) == 2 || len(items) == 3)
-				for j := range items { if items[j].Kind != core.Int || int64(int(items[j].Int)) != items[j].Int { valid = false } }
-				if !valid { validEdges = false; continue }
+				for j := range items {
+					if items[j].Kind != core.Int || int64(int(items[j].Int)) != items[j].Int {
+						valid = false
+					}
+				}
+				if !valid {
+					validEdges = false
+					continue
+				}
 				if len(items) == 2 || len(items) == 3 {
 					edge := host.ProcessEdge{From: int(items[0].Int), To: int(items[1].Int)}
-					if len(items) == 3 { edge.Argument = int(items[2].Int) }
+					if len(items) == 3 {
+						edge.Argument = int(items[2].Int)
+					}
 					edges = slices.Append(p.Alloc, edges, edge)
 				}
 			}
@@ -136,13 +174,25 @@ func (p *Program) drainRequests() {
 					arguments = slices.Append(p.Alloc, arguments, graphs[i].List[j].Text)
 				}
 				stage := host.ProcessStage{Argv: arguments}
-				if i < len(buffers) { stage.BufferBytes = int(buffers[i].Int) }
-				if i < len(overflows) { stage.Overflow = int(overflows[i].Int) }
-				if i < len(itemLimits) { stage.BufferItems = int(itemLimits[i].Int) }
-				if i < len(orders) { stage.Order = int(orders[i].Int) }
-				if i < len(kinds) { stage.Kind = kinds[i].Text }
+				if i < len(buffers) {
+					stage.BufferBytes = int(buffers[i].Int)
+				}
+				if i < len(overflows) {
+					stage.Overflow = int(overflows[i].Int)
+				}
+				if i < len(itemLimits) {
+					stage.BufferItems = int(itemLimits[i].Int)
+				}
+				if i < len(orders) {
+					stage.Order = int(orders[i].Int)
+				}
+				if i < len(kinds) {
+					stage.Kind = kinds[i].Text
+				}
 				framed := host.PayloadList(request.Payload, "framed")
-				if i < len(framed) { stage.Framed = framed[i].Bool }
+				if i < len(framed) {
+					stage.Framed = framed[i].Bool
+				}
 				if i < len(setups) {
 					stage.Input, stage.Output, stage.Append = host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput), host.PayloadAppend(setups[i])
 					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
@@ -203,10 +253,16 @@ func (p *Program) drainRequests() {
 			processRequest := host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 			processRequest.Topology, processRequest.Edges = len(kinds) != 0, edges
 			processRequest.CollectFailures = host.PayloadInt(request.Payload, "failurePolicy") == 1
-			if processRequest.CollectFailures && !processRequest.Topology { validEdges = false }
+			if processRequest.CollectFailures && !processRequest.Topology {
+				validEdges = false
+			}
 			processRequest.StreamItem, processRequest.StreamContext = eval.StreamItemCallback, p.Eval
 			hasOperands := false
-			for i := range edges { if edges[i].Argument != 0 { hasOperands = true } }
+			for i := range edges {
+				if edges[i].Argument != 0 {
+					hasOperands = true
+				}
+			}
 			unsupported := hasOperands && p.Host != nil && !p.Host.SupportsStreamOperands()
 			if !validEdges {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "KASH_MUX_ARITY", "invalid process graph descriptor")})
@@ -260,10 +316,16 @@ func (p *Program) ProcessStarted(request host.Request) {
 // its request. Expression operations complete separately with their structured
 // result, after the host reports this lifecycle event.
 func (p *Program) ProcessExited(request host.Request) {
-	if p.serviceProbeForRequest(request.ID) != nil { return }
+	if p.serviceProbeForRequest(request.ID) != nil {
+		return
+	}
 	entry := p.instanceForRequest(request.ID)
-	if entry == nil { entry = p.serviceForProcessRequest(request.ID) }
-	if entry == nil { entry = p.streamInstance(request.NodeID) }
+	if entry == nil {
+		entry = p.serviceForProcessRequest(request.ID)
+	}
+	if entry == nil {
+		entry = p.streamInstance(request.NodeID)
+	}
 	if entry == nil && p.Eval != nil {
 		nodeID := p.Eval.ProcessRecipeNode(request.NodeID)
 		for i := range p.Instances {
@@ -273,7 +335,9 @@ func (p *Program) ProcessExited(request host.Request) {
 			}
 		}
 	}
-	if entry != nil { p.emitProcess(entry, ProcessExited, request.ID) }
+	if entry != nil {
+		p.emitProcess(entry, ProcessExited, request.ID)
+	}
 }
 
 func (p *Program) serviceSpawned(entry *instance) {
@@ -852,17 +916,28 @@ func (p *Program) completeRequest(request host.Request) {
 		filename := p.canonicalTarget(name, true)
 		data := host.PayloadBytes(request.Payload, host.FieldData)
 		index := -1
-		for i := range p.Instances { if p.Instances[i].Node.ID == request.NodeID { index = i; break } }
+		for i := range p.Instances {
+			if p.Instances[i].Node.ID == request.NodeID {
+				index = i
+				break
+			}
+		}
 		if p.Options.Ownership != nil {
 			if index >= 0 {
 				completion.Diagnostic = p.beginOwnership(&p.Instances[index], "", nil, []string{filename})
-			} else { completion.Diagnostic = p.Options.Ownership(p.Options.OwnershipState, p, []string{filename}, "tracked-write", false) }
+			} else {
+				completion.Diagnostic = p.Options.Ownership(p.Options.OwnershipState, p, []string{filename}, "tracked-write", false)
+			}
 		}
 		ok := completion.Diagnostic.Code == "" && p.mkdirParent(filename) && p.Host.WriteFileAtomic(filename, data, 0o644, false) == nil
 		if !ok {
-			if completion.Diagnostic.Code == "" { completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot write file") }
+			if completion.Diagnostic.Code == "" {
+				completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot write file")
+			}
 		} else {
-			if p.Options.Ownership != nil && index < 0 { completion.Diagnostic = p.Options.Ownership(p.Options.OwnershipState, p, []string{filename}, "tracked-write", true) }
+			if p.Options.Ownership != nil && index < 0 {
+				completion.Diagnostic = p.Options.Ownership(p.Options.OwnershipState, p, []string{filename}, "tracked-write", true)
+			}
 			completion.Value, completion.HasValue = core.Value{Kind: core.Nil}, true
 		}
 		mem.FreeString(p.Alloc, filename)
@@ -1011,7 +1086,9 @@ func (p *Program) complete(event host.ProcessEvent) {
 		processDirectory, targetIdentity := p.Options.Directory, entry.Plan.Target
 		if entry.Executor != "" && entry.Executor != "local" {
 			processEnvironment, processDirectory = entry.MetadataEnvironment, "."
-			if len(entry.ExecutionOutputs) != 0 { targetIdentity = entry.ExecutionOutputs[0] }
+			if len(entry.ExecutionOutputs) != 0 {
+				targetIdentity = entry.ExecutionOutputs[0]
+			}
 		}
 		request := host.ProcessRequest{ID: retryID, Target: targetIdentity, Generation: node.Generation, Attempt: node.Attempt, Executor: entry.Executor, ExecutorVersion: entry.ExecutorVersion, Shell: entry.Shell, Script: []byte(entry.Script), Directory: processDirectory, Environment: processEnvironment, Inputs: entry.ExecutionInputs, Outputs: entry.ExecutionOutputs, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 		request.IdempotencyKey = entry.ExecutionKey
@@ -1032,7 +1109,9 @@ func (p *Program) complete(event host.ProcessEvent) {
 	} else {
 		d.Free(p.Alloc)
 	}
-	if entry != nil && entry.Rule.Kind == rule.FileRule { p.releaseRemoteExecution(entry) }
+	if entry != nil && entry.Rule.Kind == rule.FileRule {
+		p.releaseRemoteExecution(entry)
+	}
 }
 
 // attachProcessContext preserves the runtime diagnosis and carries only bounded
@@ -1142,7 +1221,9 @@ func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
 		}
 		slices.Free(a, stages)
 	}
-	if len(event.EdgeMetrics) != 0 { value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "edgeMetrics"), Value: host.ProcessMetricsPayload(a, event.EdgeMetrics)}) }
+	if len(event.EdgeMetrics) != 0 {
+		value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "edgeMetrics"), Value: host.ProcessMetricsPayload(a, event.EdgeMetrics)})
+	}
 	return value
 }
 
@@ -1216,14 +1297,20 @@ func (p *Program) emitProcess(entry *instance, kind EventKind, requestID int64) 
 	event := Event{Kind: kind, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: requestID}
 	for i := range p.Pending {
 		pending := &p.Pending[i]
-		if pending.ID != requestID { continue }
+		if pending.ID != requestID {
+			continue
+		}
 		event.Program, event.Argv, event.DisplayTruncated = pending.Program, pending.Argv, pending.DisplayTruncated
 		if kind == ProcessStarted {
 			pending.Started, pending.StartedNS = true, 0
-			if p.Host != nil { pending.StartedNS = p.Host.Monotonic() }
+			if p.Host != nil {
+				pending.StartedNS = p.Host.Monotonic()
+			}
 		} else if kind == ProcessExited && pending.Started && p.Host != nil {
 			finished := p.Host.Monotonic()
-			if finished >= pending.StartedNS { event.RuntimeMS, event.HasRuntime = (finished-pending.StartedNS)/1000000, true }
+			if finished >= pending.StartedNS {
+				event.RuntimeMS, event.HasRuntime = (finished-pending.StartedNS)/1000000, true
+			}
 		}
 		break
 	}
@@ -1248,14 +1335,20 @@ func (p *Program) retirePendingRequest(id int64) pendingRequest {
 }
 
 func freePendingRequest(a mem.Allocator, pending *pendingRequest) {
-	if pending == nil { return }
+	if pending == nil {
+		return
+	}
 	mem.FreeString(a, pending.Program)
 	freeStrings(a, pending.Argv)
 	pending.Graph.Free(a)
 	*pending = pendingRequest{}
 }
 
-type processDisplay struct { Program string; Argv []string; Truncated bool }
+type processDisplay struct {
+	Program   string
+	Argv      []string
+	Truncated bool
+}
 
 const maxProcessDisplayStages = 4
 const maxProcessDisplayTokens = 32
@@ -1273,26 +1366,53 @@ func processDisplayFromPayload(a mem.Allocator, payload core.Value, shell []stri
 	truncated := false
 	argv := host.PayloadArgv(payload)
 	if len(argv) != 0 {
-		for i := range argv { appendProcessDisplayToken(a, &raw, argv[i].Text, &truncated) }
+		for i := range argv {
+			appendProcessDisplayToken(a, &raw, argv[i].Text, &truncated)
+		}
 	} else {
 		stages := host.PayloadStages(payload)
 		if len(stages) != 0 {
 			kinds := host.PayloadList(payload, "kinds")
-			if len(kinds) != 0 { appendProcessDisplayToken(a, &raw, "graph", &truncated) }
-			if len(stages) > maxProcessDisplayStages { truncated = true }
+			if len(kinds) != 0 {
+				appendProcessDisplayToken(a, &raw, "graph", &truncated)
+			}
+			if len(stages) > maxProcessDisplayStages {
+				truncated = true
+			}
 			stageCount := len(stages)
-			if stageCount > maxProcessDisplayStages { stageCount = maxProcessDisplayStages }
+			if stageCount > maxProcessDisplayStages {
+				stageCount = maxProcessDisplayStages
+			}
 			for i := 0; i < stageCount; i++ {
-				if i != 0 { separator := "|"; if len(kinds) != 0 { separator = ";" }; appendProcessDisplayToken(a, &raw, separator, &truncated) }
-				if i < len(kinds) && kinds[i].Text != "" { appendProcessDisplayToken(a, &raw, kinds[i].Text, &truncated) }
-				for j := range stages[i].List { appendProcessDisplayToken(a, &raw, stages[i].List[j].Text, &truncated) }
+				if i != 0 {
+					separator := "|"
+					if len(kinds) != 0 {
+						separator = ";"
+					}
+					appendProcessDisplayToken(a, &raw, separator, &truncated)
+				}
+				if i < len(kinds) && kinds[i].Text != "" {
+					appendProcessDisplayToken(a, &raw, kinds[i].Text, &truncated)
+				}
+				for j := range stages[i].List {
+					appendProcessDisplayToken(a, &raw, stages[i].List[j].Text, &truncated)
+				}
 			}
 		} else {
 			shellArgv := host.PayloadList(payload, "shell")
-			if len(shellArgv) == 0 { for i := range shell { appendProcessDisplayToken(a, &raw, shell[i], &truncated) }
-			} else { for i := range shellArgv { appendProcessDisplayToken(a, &raw, shellArgv[i].Text, &truncated) } }
+			if len(shellArgv) == 0 {
+				for i := range shell {
+					appendProcessDisplayToken(a, &raw, shell[i], &truncated)
+				}
+			} else {
+				for i := range shellArgv {
+					appendProcessDisplayToken(a, &raw, shellArgv[i].Text, &truncated)
+				}
+			}
 			script := host.PayloadText(payload, host.FieldScript)
-			if script != "" { appendProcessDisplayToken(a, &raw, script, &truncated) }
+			if script != "" {
+				appendProcessDisplayToken(a, &raw, script, &truncated)
+			}
 		}
 	}
 	display := boundedProcessDisplay(a, raw)
@@ -1305,20 +1425,42 @@ func processDisplayFromHost(a mem.Allocator, request host.ProcessRequest) proces
 	var raw []string
 	truncated := false
 	if len(request.Argv) != 0 {
-		for i := range request.Argv { appendProcessDisplayToken(a, &raw, request.Argv[i], &truncated) }
+		for i := range request.Argv {
+			appendProcessDisplayToken(a, &raw, request.Argv[i], &truncated)
+		}
 	} else if len(request.Stages) != 0 {
-		if request.Topology { appendProcessDisplayToken(a, &raw, "graph", &truncated) }
-		if len(request.Stages) > maxProcessDisplayStages { truncated = true }
+		if request.Topology {
+			appendProcessDisplayToken(a, &raw, "graph", &truncated)
+		}
+		if len(request.Stages) > maxProcessDisplayStages {
+			truncated = true
+		}
 		stageCount := len(request.Stages)
-		if stageCount > maxProcessDisplayStages { stageCount = maxProcessDisplayStages }
+		if stageCount > maxProcessDisplayStages {
+			stageCount = maxProcessDisplayStages
+		}
 		for i := 0; i < stageCount; i++ {
-			if i != 0 { separator := "|"; if request.Topology { separator = ";" }; appendProcessDisplayToken(a, &raw, separator, &truncated) }
-			if request.Stages[i].Kind != "" { appendProcessDisplayToken(a, &raw, request.Stages[i].Kind, &truncated) }
-			for j := range request.Stages[i].Argv { appendProcessDisplayToken(a, &raw, request.Stages[i].Argv[j], &truncated) }
+			if i != 0 {
+				separator := "|"
+				if request.Topology {
+					separator = ";"
+				}
+				appendProcessDisplayToken(a, &raw, separator, &truncated)
+			}
+			if request.Stages[i].Kind != "" {
+				appendProcessDisplayToken(a, &raw, request.Stages[i].Kind, &truncated)
+			}
+			for j := range request.Stages[i].Argv {
+				appendProcessDisplayToken(a, &raw, request.Stages[i].Argv[j], &truncated)
+			}
 		}
 	} else {
-		for i := range request.Shell { appendProcessDisplayToken(a, &raw, request.Shell[i], &truncated) }
-		if len(request.Script) != 0 { appendProcessDisplayToken(a, &raw, string(request.Script), &truncated) }
+		for i := range request.Shell {
+			appendProcessDisplayToken(a, &raw, request.Shell[i], &truncated)
+		}
+		if len(request.Script) != 0 {
+			appendProcessDisplayToken(a, &raw, string(request.Script), &truncated)
+		}
 	}
 	display := boundedProcessDisplay(a, raw)
 	display.Truncated = display.Truncated || truncated
@@ -1330,31 +1472,57 @@ func boundedProcessDisplay(a mem.Allocator, raw []string) processDisplay {
 	const maxBytes = 160
 	const maxArgs = 8
 	display := processDisplay{}
-	if len(raw) == 0 { return display }
+	if len(raw) == 0 {
+		return display
+	}
 	program := raw[0]
-	if len(program) > maxBytes { program = truncateProcessText(a, program, maxBytes); display.Truncated = true
-	} else { program = cloneText(a, program) }
+	if len(program) > maxBytes {
+		program = truncateProcessText(a, program, maxBytes)
+		display.Truncated = true
+	} else {
+		program = cloneText(a, program)
+	}
 	display.Program = program
 	used := len(program)
 	for i := 1; i < len(raw); i++ {
-		if len(display.Argv) == maxArgs { display.Truncated = true; break }
-		remaining := maxBytes-used
-		if remaining <= 0 { display.Truncated = true; break }
+		if len(display.Argv) == maxArgs {
+			display.Truncated = true
+			break
+		}
+		remaining := maxBytes - used
+		if remaining <= 0 {
+			display.Truncated = true
+			break
+		}
 		value := raw[i]
-		if len(value) > remaining { value = truncateProcessText(a, value, remaining); display.Truncated = true
-		} else { value = cloneText(a, value) }
+		if len(value) > remaining {
+			value = truncateProcessText(a, value, remaining)
+			display.Truncated = true
+		} else {
+			value = cloneText(a, value)
+		}
 		display.Argv = slices.Append(a, display.Argv, value)
 		used += len(value)
-		if display.Truncated { break }
+		if display.Truncated {
+			break
+		}
 	}
 	return display
 }
 
 func truncateProcessText(a mem.Allocator, value string, limit int) string {
-	if limit <= 0 { return cloneText(a, "") }
-	if limit <= 3 { return cloneText(a, "..."[:limit]) }
-	end := limit-3
-	if end > len(value) { end = len(value) }
-	for end > 0 && end < len(value) && value[end]&0xc0 == 0x80 { end-- }
+	if limit <= 0 {
+		return cloneText(a, "")
+	}
+	if limit <= 3 {
+		return cloneText(a, "..."[:limit])
+	}
+	end := limit - 3
+	if end > len(value) {
+		end = len(value)
+	}
+	for end > 0 && end < len(value) && value[end]&0xc0 == 0x80 {
+		end--
+	}
 	return cloneText(a, value[:end]+"...")
 }

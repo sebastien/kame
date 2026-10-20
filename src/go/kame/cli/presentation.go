@@ -112,7 +112,7 @@ func OptionTakesValue(arg string) bool {
 	return isBuildValueOption(arg) || arg == "-o" || arg == "--output" ||
 		arg == "--color" || arg == "--diagnostic-format" || arg == "-l" || arg == "--lang" ||
 		arg == "--entry" || arg == "--depth" || arg == "--indent" ||
-		arg == "--indent-width" || arg == "--comment"
+		arg == "--indent-width" || arg == "--comment" || arg == "--picker"
 }
 
 func assignPresentationOption(inv *Invocation, option string, value string) bool {

@@ -39,14 +39,14 @@ test-step "build failures report the stable code and a message"
 	cd diag-format
 	cli_run -- ./failing.out
 	cli_expect_status 1
-	cli_expect_stderr_contains 'error RECIPE_FAIL: recipe exited unsuccessfully'
+	cli_expect_stderr_contains 'error[RECIPE_FAIL]: [./failing.out] recipe exited unsuccessfully'
 )
 
-test-step "source-qualified parse diagnostics keep the source prefix"
+test-step "source-qualified parse diagnostics have a separate location block"
 printf 'value = (unclosed\n' >broken.kmk
-cli_run -- -f broken.kmk anything
+cli_run -- --diagnostic-format plain -f broken.kmk anything
 cli_expect_status 1
-	if grep -Eq '^[^:]+:[0-9]+:[0-9]+: error PARSE_ERR: .+' "$CLI_ERR"; then
+	if grep -Eq '^  --> [^:]+:[0-9]+:[0-9]+$' "$CLI_ERR" && grep -Eq '^error\[PARSE_ERR\]: .+' "$CLI_ERR"; then
 	test-ok "parse diagnostic is source-qualified"
 else
 	test-fail "parse diagnostic layout: $(test_fmt_line "$(cat "$CLI_ERR")")"

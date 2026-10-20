@@ -24,28 +24,51 @@ func TestDeferredExpressionsFinalizeAndReleaseRetainedScopes(t *testing.T) {
 		host := wasm.NewMemoryHost(a)
 		fragments := []program.Fragment{{Name: "test.kash", Lang: "kash", Text: texts[scenario]}}
 		compiled := program.CompileSession(a, fragments, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Write}}})
-		if compiled.Session == nil { compiled.Free(a); t.Fatal("defer session did not compile"); return }
+		if compiled.Session == nil {
+			compiled.Free(a)
+			t.Fatal("defer session did not compile")
+			return
+		}
 		s := compiled.Session
 		failed := false
 		for i := 0; i <= len(s.Work); i++ {
 			start := s.Start(i)
-			if start.Handle == nil { t.Error("cannot start statement"); break }
+			if start.Handle == nil {
+				t.Error("cannot start statement")
+				break
+			}
 			h := start.Handle
-			for tick := 0; tick < 200 && !h.Node.Current && h.Node.State != core.NodeFailed; tick++ { s.Program.Tick(0) }
+			for tick := 0; tick < 200 && !h.Node.Current && h.Node.State != core.NodeFailed; tick++ {
+				s.Program.Tick(0)
+			}
 			if h.Node.State == core.NodeFailed {
 				failed = true
-				if h.Node.Diagnostic.Code != "USER_ERROR" || h.Node.Diagnostic.Message != "primary failure" { t.Error("cleanup masked primary failure") }
-			} else if !h.Node.Current { t.Error("statement/finalization did not finish") }
+				if h.Node.Diagnostic.Code != "USER_ERROR" || h.Node.Diagnostic.Message != "primary failure" {
+					t.Error("cleanup masked primary failure")
+				}
+			} else if !h.Node.Current {
+				t.Error("statement/finalization did not finish")
+			}
 			h.Free()
-			if failed { break }
+			if failed {
+				break
+			}
 		}
 		s.Program.Eval.BeginFinalization()
-		for tick := 0; tick < 200 && !s.Program.Eval.AdvanceFinalization(); tick++ { s.Program.Tick(0) }
-		if !s.Program.Eval.AdvanceFinalization() { t.Error("external finalization did not complete") }
+		for tick := 0; tick < 200 && !s.Program.Eval.AdvanceFinalization(); tick++ {
+			s.Program.Tick(0)
+		}
+		if !s.Program.Eval.AdvanceFinalization() {
+			t.Error("external finalization did not complete")
+		}
 		data, err := host.ReadFile(a, "cleanup")
-		if err != nil || string(data) != "retained" { t.Error("deferred write lost scope or failed to run") }
+		if err != nil || string(data) != "retained" {
+			t.Error("deferred write lost scope or failed to run")
+		}
 		mem.FreeSlice(a, data)
-		if (scenario != 0) != failed { t.Error("unexpected primary result") }
+		if (scenario != 0) != failed {
+			t.Error("unexpected primary result")
+		}
 		s.Free()
 		compiled.Free(a)
 	}

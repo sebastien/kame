@@ -1,5 +1,6 @@
 /build/
 /dist/
+/tests/**/*.sh.log.result
 /src/go/kame/cmd/kame/version_generated.go
 .kame/
 .memo/memory/*

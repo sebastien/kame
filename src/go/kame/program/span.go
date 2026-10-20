@@ -14,7 +14,7 @@ type spanNode struct {
 }
 
 type spanResult struct {
-	Waiting bool
+	Waiting    bool
 	Static     []string
 	Dynamic    []string
 	Outputs    []string
@@ -25,14 +25,21 @@ type spanResult struct {
 func (p *Program) WriteSpan(out io.Writer, target string, depth int, expand bool) diagnostic.Diagnostic {
 	p.InspectionWaiting = false
 	defer p.finishInspection()
-	if depth < -1 { p.clearInspection(); return failure(p.Alloc, "OPT_VALUE_INVALID", "invalid span depth") }
+	if depth < -1 {
+		p.clearInspection()
+		return failure(p.Alloc, "OPT_VALUE_INVALID", "invalid span depth")
+	}
 	targets := []string{target}
 	kind := "span"
-	if expand { kind = "expanded-span" }
+	if expand {
+		kind = "expanded-span"
+	}
 	g := inspectionGraph{Program: p}
 	defer g.free()
 	var pending *inspectionGraph
-	if p.pendingInspection != nil { pending = p.pendingInspection.(*inspectionGraph) }
+	if p.pendingInspection != nil {
+		pending = p.pendingInspection.(*inspectionGraph)
+	}
 	if pending != nil && pending.sameQuery(targets, depth, kind) {
 		g = *pending
 		mem.Free(p.Alloc, pending)
@@ -42,7 +49,10 @@ func (p *Program) WriteSpan(out io.Writer, target string, depth int, expand bool
 		g.QueryTargets, g.QueryKind, g.QueryDepth = cloneStrings(p.Alloc, targets), cloneText(p.Alloc, kind), depth
 	}
 	span := p.spanValues(target, depth, expand)
-	if span.Waiting { p.retainInspection(&g); return diagnostic.Diagnostic{} }
+	if span.Waiting {
+		p.retainInspection(&g)
+		return diagnostic.Diagnostic{}
+	}
 	if span.Diagnostic.Code != "" {
 		return span.Diagnostic
 	}
@@ -111,7 +121,9 @@ func (p *Program) spanValues(target string, depth int, expand bool) spanResult {
 				freeStrings(p.Alloc, result.Dynamic)
 				freeStrings(p.Alloc, result.Outputs)
 				freeStrings(p.Alloc, visited)
-				for i := cursor+1; i < len(pending); i++ { mem.FreeString(p.Alloc, pending[i].Target) }
+				for i := cursor + 1; i < len(pending); i++ {
+					mem.FreeString(p.Alloc, pending[i].Target)
+				}
 				slices.Free(p.Alloc, pending)
 				return spanResult{Waiting: true}
 			}

@@ -43,26 +43,42 @@ func TestProcessGroupsAndMuxRoundTrip(t *testing.T) {
 	}
 	for i := range texts {
 		r := expr.Parse(t.Allocator(), "graph.km", texts[i])
-		if len(r.Diagnostics) != 0 { t.Error("process group failed to parse"); r.Free(); continue }
+		if len(r.Diagnostics) != 0 {
+			t.Error("process group failed to parse")
+			r.Free()
+			continue
+		}
 		clone := expr.Clone(t.Allocator(), r.Expr)
 		formatted := expr.Format(t.Allocator(), clone)
 		expr.Free(t.Allocator(), clone)
 		copy := expr.Parse(t.Allocator(), "formatted.km", formatted)
-		if len(copy.Diagnostics) != 0 { t.Error("formatted graph did not reparse") }
+		if len(copy.Diagnostics) != 0 {
+			t.Error("formatted graph did not reparse")
+		}
 		again := expr.Format(t.Allocator(), copy.Expr)
-		if again != formatted { t.Errorf("graph formatting is not idempotent: %s -> %s", formatted, again) }
-		mem.FreeString(t.Allocator(), formatted); mem.FreeString(t.Allocator(), again)
-		copy.Free(); r.Free()
+		if again != formatted {
+			t.Errorf("graph formatting is not idempotent: %s -> %s", formatted, again)
+		}
+		mem.FreeString(t.Allocator(), formatted)
+		mem.FreeString(t.Allocator(), again)
+		copy.Free()
+		r.Free()
 	}
 }
 
 func TestProcessGroupDiscriminationAndMalformedGraphs(t *testing.T) {
 	values := []string{"(nop [1 2])", "(str \"a,b\")", "(nop $(printf \"a,b\"))", "(nop ./a{b,c})"}
-	for i := range values { if expr.IsCommandGroup(values[i], 0) { t.Error("value expression was classified as a process group") } }
+	for i := range values {
+		if expr.IsCommandGroup(values[i], 0) {
+			t.Error("value expression was classified as a process group")
+		}
+	}
 	invalid := []string{"$((printf a,) |(merge) cat)", "$((, printf b) |(merge) cat)", "$((printf a, printf b)", "$(printf a |(unknown) cat)", "$(printf a |(broadcast))", "$(printf a 2>&1)", "$(printf a |(balance))", "$(printf a |(broadcast :buffer 0) (cat, cat))", "$(printf a |(broadcast :buffer 65537) (cat, cat))", "$(printf a |(balance :strategy random) (cat, cat))", "$(printf a |(merge :strategy round-robin) cat)", "$(printf a |(balance :buffer (read! ./config)) (cat, cat))", "$(printf a |(balance :buffer 4 :buffer 8) (cat, cat))"}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
-		if len(r.Diagnostics) == 0 { t.Error("malformed process graph was accepted") }
+		if len(r.Diagnostics) == 0 {
+			t.Error("malformed process graph was accepted")
+		}
 		r.Free()
 	}
 }

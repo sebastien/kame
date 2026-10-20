@@ -33,7 +33,9 @@ func rejectStrandedCapture(a mem.Allocator, value *core.Value, span source.Span)
 }
 
 func (p *Program) body(scope *Scope, body []*expr.Expr, context *Context) Result {
-	if context.finalizer != nil && context.Engine != nil && len(body) != 0 { return p.finalizerBody(scope, body, context) }
+	if context.finalizer != nil && context.Engine != nil && len(body) != 0 {
+		return p.finalizerBody(scope, body, context)
+	}
 	result := Result{Value: core.Value{Kind: core.Nil}}
 	for i := range body {
 		// Discard: intermediates never escape, so release callables as well

@@ -10,10 +10,10 @@ import (
 // reasonIdentity owns only the fields needed for generation-local deduplication.
 // Published Event records have a separate lifetime in the program event queue.
 type reasonIdentity struct {
-	Decision string
-	Code string
+	Decision   string
+	Code       string
 	Dependency core.ResourceKey
-	Aspect string
+	Aspect     string
 }
 
 func (p *Program) clearReasonIdentities(entry *instance) {
@@ -53,8 +53,12 @@ func reasonAspect(aspect core.ObservationAspect) string {
 	if aspect == core.ObservationMetadata {
 		return "metadata"
 	}
-	if aspect == core.ObservationLinkMetadata { return "link-metadata" }
-	if aspect == core.ObservationLinkTarget { return "link-target" }
+	if aspect == core.ObservationLinkMetadata {
+		return "link-metadata"
+	}
+	if aspect == core.ObservationLinkTarget {
+		return "link-target"
+	}
 	return "value"
 }
 

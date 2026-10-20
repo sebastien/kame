@@ -29,7 +29,7 @@ sweep_dir() {
 	fi
 	cli_expect_printable "$CLI_OUT"
 	cli_expect_printable "$CLI_ERR"
-	if grep -Eq "[A-Z_]+: .+" "$CLI_ERR" || grep -Eq "[A-Z_]+: .+" "$CLI_OUT" || grep -Eq '"message":"[^"]+' "$CLI_OUT"; then
+	if grep -Eq "[A-Z_]+\]?: .+" "$CLI_ERR" || grep -Eq "[A-Z_]+\]?: .+" "$CLI_OUT" || grep -Eq '"message":"[^"]+' "$CLI_OUT"; then
 		test-ok "$code message non-empty"
 	else
 		test-fail "$code message empty"

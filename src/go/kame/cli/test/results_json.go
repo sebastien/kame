@@ -15,7 +15,9 @@ func TestResultJSONPreservesCommandEnvelopes(t *testing.T) {
 	expected := "{\"schema\":1,\"type\":\"invocation-started\",\"command\":\"build\",\"dryRun\":true}\n" +
 		"{\"schema\":1,\"type\":\"summary\",\"command\":\"fmt\",\"status\":\"different\",\"exitStatus\":1,\"elapsedMS\":12}\n" +
 		"{\"schema\":1,\"type\":\"watch-cycle-finished\",\"cycle\":2,\"status\":\"success\",\"elapsedMS\":24,\"completed\":3,\"failed\":0,\"cancelled\":0}\n"
-	if buffer.String() != expected { t.Error("command result JSON changed") }
+	if buffer.String() != expected {
+		t.Error("command result JSON changed")
+	}
 	buffer.Free()
 }
 
@@ -27,9 +29,13 @@ func TestDataResultJSONPreservesEmptyAndBinaryBytes(t *testing.T) {
 		buffer := bytes.NewBuffer(a, nil)
 		cli.WriteDataResult(&buffer, "artifact", "", "chosen", "", false, []byte(data[i]), true)
 		encoding := "utf-8"
-		if i > 1 { encoding = "base64" }
+		if i > 1 {
+			encoding = "base64"
+		}
 		expected := "{\"schema\":1,\"type\":\"artifact\",\"target\":\"chosen\",\"data\":\"" + encoded[i] + "\",\"encoding\":\"" + encoding + "\"}\n"
-		if buffer.String() != expected { t.Error("artifact result lost byte encoding") }
+		if buffer.String() != expected {
+			t.Error("artifact result lost byte encoding")
+		}
 		buffer.Free()
 	}
 }

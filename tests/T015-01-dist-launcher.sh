@@ -166,7 +166,7 @@ fi
 test-step "the bootstrap Makefile caches the executable and delegates"
 project="$root/project"
 mkdir -p "$project"
-cp "$CLI_ROOT/Makefile.bootstrap" "$project/Makefile"
+cp "$CLI_ROOT/Makefile" "$project/Makefile"
 set +e
 out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory hello 2>&1)"
 status=$?
@@ -186,83 +186,68 @@ fi
 
 out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory KAME_RELEASE_URL=file:///nonexistent first second)"
 if [ "$out" = $'ape:first\nape:second' ]; then
-	test-ok "bootstrap verifies once and delegates multiple goals in order"
+	test-ok "bootstrap delegates multiple goals in order"
 else
 	test-fail "bootstrap multiple goals: out=$out"
 fi
+out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory CC=asdas CFLAGS='-O0 -g' first second)"
+if [ "$out" = $'ape:first CFLAGS=-O0 -g CC=asdas\nape:second CFLAGS=-O0 -g CC=asdas' ]; then
+	test-ok "bootstrap forwards multiple goals and command-line bindings"
+else
+	test-fail "bootstrap bindings: out=$out"
+fi
 
-test-step "bootstrap rejects unverified downloads before installation"
-make_bin=$(command -v make)
-wrong_key=$(openssl genpkey -algorithm ED25519 | openssl pkey -pubout -outform DER | openssl base64 -A)
-for defect in artifact signature missing-entry wrong-key missing-key missing-verifier wrong-version; do
-	bootstrap_release="$root/bootstrap-$defect"
-	cp -R "$release" "$bootstrap_release"
-	key="$RELEASE_TEST_KEY_B64"
-	bootstrap_path="$PATH"
-	message='release manifest signature is invalid'
-	case "$defect" in
-	artifact) printf '\n# altered executable\n' >>"$bootstrap_release/kame.com"; message='checksum mismatch' ;;
-	signature) printf 'invalid' >"$bootstrap_release/SHA256SUMS.sig" ;;
-	missing-entry)
-		message='missing manifest entry'
-		grep -v '  kame.com$' "$bootstrap_release/SHA256SUMS" >"$root/without-ape"
-		mv "$root/without-ape" "$bootstrap_release/SHA256SUMS"
-		openssl pkeyutl -sign -inkey "$root/keys/signing.pem" -rawin -in "$bootstrap_release/SHA256SUMS" -out "$bootstrap_release/SHA256SUMS.sig"
-		;;
-	wrong-key) key="$wrong_key" ;;
-	missing-key) key=""; message='verification key is not configured' ;;
-	missing-verifier) bootstrap_path="$tools"; message='no signature verifier' ;;
-	wrong-version)
-		message='release version does not match KAME_VERSION'
-		printf '0.0.0\n' >"$bootstrap_release/VERSION"
-		release_test_sign "$bootstrap_release" 0.0.0 old-release "$root/keys"
-		;;
-	esac
-	bootstrap_bin="$root/bootstrap-cache/$defect"
-	status=0
-	(cd "$project" && PATH="$bootstrap_path" "$make_bin" --no-print-directory \
-		KAME="$bootstrap_bin" KAME_RELEASE_URL="file://$bootstrap_release" \
-		KAME_RELEASE_PUBKEY_B64= KAME_RELEASE_PUBKEY_B64_OVERRIDE="$key" hello) >"$root/bootstrap-out" 2>"$root/bootstrap-err" || status=$?
-	if [ "$status" -ne 0 ] && grep -q "$message" "$root/bootstrap-err" && [ ! -e "$bootstrap_bin" ] && \
-		! grep -q 'ape:hello' "$root/bootstrap-out" && \
-		! compgen -G "$bootstrap_bin.tmp.*" >/dev/null; then
-		test-ok "bootstrap $defect fails without installing, executing or retaining temporary downloads"
+
+if command -v bmake >/dev/null 2>&1; then
+	out="$(unset KAME; cd "$project" && HOME="$root/boot-bmake" bmake hello 2>&1)"
+	if [ "$out" = "ape:hello" ] && [ -x "$root/boot-bmake/.cache/kame/bin/kame-9.9.9" ]; then
+		test-ok "bsd make downloads once and forwards the goal"
 	else
-		test-fail "bootstrap $defect: status=$status out=$(cat "$root/bootstrap-out") err=$(cat "$root/bootstrap-err")"
+		test-fail "bsd make bootstrap: out=$out"
 	fi
+	out="$(unset KAME; cd "$project" && HOME="$root/boot-bmake" bmake CC=asdas CFLAGS='-O0 -g' first second 2>&1)"
+	if [ "$out" = $'ape:first CC=asdas CFLAGS=-O0 -g\nape:second CC=asdas CFLAGS=-O0 -g' ]; then
+		test-ok "bsd make forwards multiple goals and bindings"
+	else
+		test-fail "bsd make bindings: out=$out"
+	fi
+fi
+
+test-step "GNU and BSD make preserve binding punctuation as one literal argument"
+cat >"$project/argv" <<'SH'
+#!/bin/sh
+printf '<%s>\n' "$@"
+SH
+chmod +x "$project/argv"
+punctuation=$(cat <<'TEXT'
+space "double" 'single' back\slash $dollar $$double `touch injected` $(touch injected) ; & | < > ( ) * ? [x] # = end
+TEXT
+)
+for make_command in make bmake; do
+	if ! command -v "$make_command" >/dev/null 2>&1; then continue; fi
+	for value in "$punctuation" '' 'leading  middle  trailing ' $'tab\tvalue'; do
+		status=0
+		out="$(cd "$project" && "$make_command" KAME="$project/argv" "VALUE=$value" first second 2>&1)" || status=$?
+		expected=$(printf '<first>\n<VALUE=%s>\n<second>\n<VALUE=%s>' "$value" "$value")
+		if [ "$status" = 0 ] && [ "$out" = "$expected" ] && [ ! -e "$project/injected" ]; then
+			test-ok "$make_command preserves binding bytes and argv boundaries"
+		else
+			test-fail "$make_command punctuation: status=$status out=$out expected=$expected"
+		fi
+	done
 done
 
-test-step "bootstrap verifies cached executables and retained manifests offline"
-bootstrap_bin="$root/boot-home/.cache/kame/bin/kame-9.9.9"
-for defect in artifact signature missing-manifest wrong-version; do
-	message='release manifest signature is invalid'
-	if [ "$defect" = artifact ]; then
-		printf '\n# cached tampering\n' >>"$bootstrap_bin"
-		message='checksum mismatch'
-	elif [ "$defect" = signature ]; then
-		printf 'invalid' >"$bootstrap_bin.SHA256SUMS.sig"
-	elif [ "$defect" = missing-manifest ]; then
-		rm "$bootstrap_bin.SHA256SUMS"
-	else
-		message='release version does not match KAME_VERSION'
-		cp "$root/bootstrap-wrong-version/kame.com" "$bootstrap_bin"
-		cp "$root/bootstrap-wrong-version/SHA256SUMS" "$bootstrap_bin.SHA256SUMS"
-		cp "$root/bootstrap-wrong-version/SHA256SUMS.sig" "$bootstrap_bin.SHA256SUMS.sig"
-		cp "$root/bootstrap-wrong-version/VERSION" "$bootstrap_bin.VERSION"
-	fi
-	status=0
-	(cd "$project" && "$make_bin" --no-print-directory KAME="$bootstrap_bin" KAME_RELEASE_URL=file:///nonexistent hello) >"$root/bootstrap-out" 2>"$root/bootstrap-err" || status=$?
-	if [ "$status" -ne 0 ] && grep -q "$message" "$root/bootstrap-err" && ! grep -q 'ape:hello' "$root/bootstrap-out" && \
-		! compgen -G "$bootstrap_bin.tmp.*" >/dev/null; then
-		test-ok "bootstrap rejects cached $defect tampering without downloads or execution"
-	else
-		test-fail "cached bootstrap $defect: status=$status out=$(cat "$root/bootstrap-out")"
-	fi
-	cp "$release/kame.com" "$bootstrap_bin"
-	cp "$release/SHA256SUMS" "$bootstrap_bin.SHA256SUMS"
-	cp "$release/SHA256SUMS.sig" "$bootstrap_bin.SHA256SUMS.sig"
-	cp "$release/VERSION" "$bootstrap_bin.VERSION"
-done
+test-step "a failed bootstrap download installs nothing"
+status=0
+missing="$root/missing-kame"
+out="$(unset KAME; cd "$project" && HOME="$root/boot-home" make --no-print-directory \
+	KAME="$missing" KAME_RELEASE_URL=file:///nonexistent hello 2>&1)" || status=$?
+if [ "$status" -ne 0 ] && [ ! -e "$missing" ] && [ ! -e "$missing.tmp" ] && ! grep -q 'ape:hello' <<<"$out"; then
+	test-ok "failed download does not install or execute"
+else
+	test-fail "failed download: status=$status out=$out"
+fi
+
 
 test-step "retired init fails before downloads and preserves project files"
 init_project="$root/init-project"

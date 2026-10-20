@@ -1,6 +1,6 @@
 {
 	"name": "@ssebastien/kame",
-	"version": "0.3.1",
+	"version": "0.3.2",
 	"description": "Build tool for projects described with Kame",
 	"license": "BSD-3-Clause",
 	"type": "module",
@@ -11,6 +11,7 @@
 		"kame": "dist/kame.js"
 	},
 	"files": [
+		"VERSION",
 		"dist/kame.js",
 		"dist/kame.wasm"
 	]

@@ -33,6 +33,9 @@ type NextResult struct {
 	OK      bool
 }
 
+// HasRequests reports local work that must be serviced before waiting on the host.
+func (q *Queue) HasRequests() bool { return q != nil && len(q.items) != 0 }
+
 // Next transfers the oldest request payload to its caller.
 func (q *Queue) Next() NextResult {
 	if q == nil || len(q.items) == 0 {

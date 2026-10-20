@@ -29,7 +29,8 @@ func TestQuotedTemplatePrefixKeepsOnlyNestedPatternClassification(t *testing.T) 
 	defer expr.Free(a, parsed.Expr)
 	defer slices.Free(a, parsed.Diagnostics)
 	if len(parsed.Diagnostics) != 0 || parsed.Expr == nil || len(parsed.Expr.Parts) != 2 {
-		t.Fatal("quoted template did not parse"); return
+		t.Fatal("quoted template did not parse")
+		return
 	}
 	if parsed.Expr.Pattern != nil || parsed.Expr.Parts[0].Text != "./out\\dir/{name}." || parsed.Expr.Parts[1].Expr.Items[1].Pattern == nil {
 		t.Error("quoted template classification leaked into literals or out of nested expressions")
@@ -40,28 +41,40 @@ func TestCommandAcceptanceOwnsWholePipelineAndSurvivesClone(t *testing.T) {
 	a := t.Allocator()
 	r := parse(t, "$(printf \"literal?\" | cat?)")
 	defer r.Free()
-	if r.Expr == nil || !r.Expr.AcceptExit || len(r.Expr.Items) != 2 { t.Fatal("acceptance did not bind to the complete pipeline"); return }
+	if r.Expr == nil || !r.Expr.AcceptExit || len(r.Expr.Items) != 2 {
+		t.Fatal("acceptance did not bind to the complete pipeline")
+		return
+	}
 	copy := expr.Clone(a, r.Expr)
 	defer expr.Free(a, copy)
 	formatted := expr.Format(a, copy)
 	defer mem.FreeString(a, formatted)
-	if formatted != "$(printf \"literal?\" | cat ?)" { t.Error("acceptance or literal suffix lost in canonical format") }
+	if formatted != "$(printf \"literal?\" | cat ?)" {
+		t.Error("acceptance or literal suffix lost in canonical format")
+	}
 	again := parse(t, formatted)
 	defer again.Free()
-	if !again.Expr.AcceptExit { t.Error("formatting changed accepted exit policy") }
+	if !again.Expr.AcceptExit {
+		t.Error("formatting changed accepted exit policy")
+	}
 }
 
 func TestReferenceSuffixIsNotCommandAcceptance(t *testing.T) {
 	r := parse(t, "$(printf $name?)")
 	defer r.Free()
-	if r.Expr == nil || r.Expr.AcceptExit { t.Error("reference suffix became process acceptance") }
+	if r.Expr == nil || r.Expr.AcceptExit {
+		t.Error("reference suffix became process acceptance")
+	}
 }
 
 func TestCommandRecoveryIsRightAssociative(t *testing.T) {
 	a := t.Allocator()
 	r := parse(t, "$(false | cat ? false ? printf fallback?)")
 	defer r.Free()
-	if len(r.Expr.Items) != 2 || len(r.Expr.Body) != 1 || len(r.Expr.Body[0].Body) != 1 || !r.Expr.Body[0].Body[0].AcceptExit { t.Fatal("recovery did not bind after pipelines, right-associatively"); return }
+	if len(r.Expr.Items) != 2 || len(r.Expr.Body) != 1 || len(r.Expr.Body[0].Body) != 1 || !r.Expr.Body[0].Body[0].AcceptExit {
+		t.Fatal("recovery did not bind after pipelines, right-associatively")
+		return
+	}
 	cloned := expr.Clone(a, r.Expr)
 	defer expr.Free(a, cloned)
 	formatted := expr.Format(a, cloned)
@@ -70,18 +83,24 @@ func TestCommandRecoveryIsRightAssociative(t *testing.T) {
 	defer again.Free()
 	canonical := expr.Format(a, again.Expr)
 	defer mem.FreeString(a, canonical)
-	if formatted != canonical || len(again.Expr.Body) != 1 { t.Error("recovery did not survive clone and canonical formatting") }
+	if formatted != canonical || len(again.Expr.Body) != 1 {
+		t.Error("recovery did not survive clone and canonical formatting")
+	}
 }
 
 func TestEnvironmentNamespaceIsSharedWithKashSyntax(t *testing.T) {
 	a := t.Allocator()
 	r := parse(t, "(cat env.NAME $(printf $env.NAME $env.OTHER))")
 	defer r.Free()
-	if r.Expr.Items[1].Kind != expr.EnvironmentReference || r.Expr.Items[1].Kash || len(r.Expr.Items[1].Items) != 1 { t.Error("Kame environment lookup was not explicit in the AST") }
+	if r.Expr.Items[1].Kind != expr.EnvironmentReference || r.Expr.Items[1].Kash || len(r.Expr.Items[1].Items) != 1 {
+		t.Error("Kame environment lookup was not explicit in the AST")
+	}
 	stage := r.Expr.Items[2].Items[0]
 	for i := 1; i < len(stage.Items); i++ {
 		reference := stage.Items[i].Parts[0].Expr
-		if reference.Kind != expr.EnvironmentReference || !reference.Kash || len(reference.Items) != 1 { t.Error("Kash environment lookup was not explicit in the AST") }
+		if reference.Kind != expr.EnvironmentReference || !reference.Kash || len(reference.Items) != 1 {
+			t.Error("Kash environment lookup was not explicit in the AST")
+		}
 	}
 	cloned := expr.Clone(a, r.Expr)
 	defer expr.Free(a, cloned)
@@ -89,14 +108,18 @@ func TestEnvironmentNamespaceIsSharedWithKashSyntax(t *testing.T) {
 	defer mem.FreeString(a, formatted)
 	again := parse(t, formatted)
 	defer again.Free()
-	if again.Expr.Items[1].Kind != expr.EnvironmentReference || again.Expr.Items[2].Items[0].Items[1].Parts[0].Expr.Kind != expr.EnvironmentReference { t.Error("formatting changed the environment namespace boundary") }
+	if again.Expr.Items[1].Kind != expr.EnvironmentReference || again.Expr.Items[2].Items[0].Items[1].Parts[0].Expr.Kind != expr.EnvironmentReference {
+		t.Error("formatting changed the environment namespace boundary")
+	}
 }
 
 func TestEnvironmentNamespaceRequiresNamedVariable(t *testing.T) {
 	inputs := []string{"env.0", "env.{NAME,OTHER}", "env...1"}
 	for i := range inputs {
 		r := expr.Parse(t.Allocator(), "test.km", inputs[i])
-		if len(r.Diagnostics) == 0 { t.Error("environment lookup accepted an unnamed variable") }
+		if len(r.Diagnostics) == 0 {
+			t.Error("environment lookup accepted an unnamed variable")
+		}
 		r.Free()
 	}
 }
@@ -116,9 +139,13 @@ func TestCommandCaptureBoundaries(t *testing.T) {
 	}
 	formatted := expr.Format(t.Allocator(), r.Expr)
 	copy := expr.Parse(t.Allocator(), "formatted.km", formatted)
-	if len(copy.Diagnostics) != 0 { t.Error("formatted command capture did not reparse") }
+	if len(copy.Diagnostics) != 0 {
+		t.Error("formatted command capture did not reparse")
+	}
 	again := expr.Format(t.Allocator(), copy.Expr)
-	if formatted != again { t.Error("command formatting is not idempotent") }
+	if formatted != again {
+		t.Error("command formatting is not idempotent")
+	}
 	mem.FreeString(t.Allocator(), again)
 	copy.Free()
 	mem.FreeString(t.Allocator(), formatted)
@@ -130,11 +157,15 @@ func TestCommandCaptureRejectsUnsupportedAndMalformedSyntax(t *testing.T) {
 	inputs := []string{"$()", "$(printf", "$(printf \"unterminated)", "$(echo |)", "$(| cat)", "$(echo || cat)", "$(echo >)", "$(echo && echo)", "$(echo ${})", "$(echo ${name)", "$(echo @macro)", "$(echo 'literal')", "$(echo \"\\q\")"}
 	for i := range inputs {
 		r := expr.Parse(t.Allocator(), "bad.km", inputs[i])
-		if len(r.Diagnostics) == 0 { t.Error("malformed or unsupported process syntax was accepted") }
+		if len(r.Diagnostics) == 0 {
+			t.Error("malformed or unsupported process syntax was accepted")
+		}
 		r.Free()
 	}
 	plain := parse(t, "\"$(echo literal)\"")
-	if plain.Expr.Kind != expr.String || len(plain.Expr.Parts) != 1 || plain.Expr.Parts[0].Expr != nil { t.Error("plain expression string executed a substitution") }
+	if plain.Expr.Kind != expr.String || len(plain.Expr.Parts) != 1 || plain.Expr.Parts[0].Expr != nil {
+		t.Error("plain expression string executed a substitution")
+	}
 	plain.Free()
 }
 
@@ -143,11 +174,17 @@ func TestNamespacedReferencesRemainDistinctFromPaths(t *testing.T) {
 	kinds := []expr.Kind{expr.Name, expr.Reference, expr.Name, expr.Path, expr.Path, expr.Path, expr.Name, expr.CommandCapture}
 	for i := range inputs {
 		r := parse(t, inputs[i])
-		if len(r.Diagnostics) != 0 || r.Expr.Kind != kinds[i] { t.Error("namespaced reference changed path classification") }
+		if len(r.Diagnostics) != 0 || r.Expr.Kind != kinds[i] {
+			t.Error("namespaced reference changed path classification")
+		}
 		formatted := expr.Format(t.Allocator(), r.Expr)
-		if formatted != inputs[i] { t.Error("formatting changed namespaced reference") }
+		if formatted != inputs[i] {
+			t.Error("formatting changed namespaced reference")
+		}
 		copy := parse(t, formatted)
-		if len(copy.Diagnostics) != 0 || copy.Expr.Kind != kinds[i] { t.Error("namespaced reference failed to reparse") }
+		if len(copy.Diagnostics) != 0 || copy.Expr.Kind != kinds[i] {
+			t.Error("namespaced reference failed to reparse")
+		}
 		copy.Free()
 		mem.FreeString(t.Allocator(), formatted)
 		r.Free()
@@ -155,7 +192,9 @@ func TestNamespacedReferencesRemainDistinctFromPaths(t *testing.T) {
 	invalid := []string{"inputs/", "inputs//changed", "inputs/42"}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
-		if len(r.Diagnostics) == 0 { t.Error("invalid namespace segment was accepted") }
+		if len(r.Diagnostics) == 0 {
+			t.Error("invalid namespace segment was accepted")
+		}
 		r.Free()
 	}
 }
@@ -180,10 +219,14 @@ func TestCommandWordFormattingUsesSafeBareWords(t *testing.T) {
 	for i := range inputs {
 		r := parse(t, inputs[i])
 		formatted := expr.Format(t.Allocator(), r.Expr)
-		if formatted != want[i] { t.Error("command word formatting added unnecessary quotes or lost required quotes") }
+		if formatted != want[i] {
+			t.Error("command word formatting added unnecessary quotes or lost required quotes")
+		}
 		copy := parse(t, formatted)
 		again := expr.Format(t.Allocator(), copy.Expr)
-		if formatted != again { t.Error("safe bare word formatting is not idempotent") }
+		if formatted != again {
+			t.Error("safe bare word formatting is not idempotent")
+		}
 		mem.FreeString(t.Allocator(), again)
 		mem.FreeString(t.Allocator(), formatted)
 		copy.Free()
@@ -207,7 +250,9 @@ func TestCommandWordFormattingPreservesLiteralSlashSuffix(t *testing.T) {
 				t.Error("formatting merged a slash suffix into a reference or enabled list splicing")
 			}
 			again := expr.Format(a, copy.Expr)
-			if formatted != again { t.Error("slash suffix formatting is not idempotent") }
+			if formatted != again {
+				t.Error("slash suffix formatting is not idempotent")
+			}
 			mem.FreeString(a, again)
 		}
 		copy.Free()
@@ -221,12 +266,18 @@ func TestKashExpressionBoundaryUsesKameValues(t *testing.T) {
 	kinds := []expr.Kind{expr.Application, expr.Application, expr.Lambda, expr.Application, expr.Name, expr.Application, expr.Section}
 	for i := range inputs {
 		r := parse(t, inputs[i])
-		if len(r.Diagnostics) == 0 && r.Expr.Items[0].Items[1].Parts[0].Expr.Kind != kinds[i] { t.Error("Kash boundary changed the Kame value grammar") }
+		if len(r.Diagnostics) == 0 && r.Expr.Items[0].Items[1].Parts[0].Expr.Kind != kinds[i] {
+			t.Error("Kash boundary changed the Kame value grammar")
+		}
 		formatted := expr.Format(t.Allocator(), r.Expr)
 		copy := expr.Parse(t.Allocator(), "formatted.km", formatted)
-		if len(copy.Diagnostics) != 0 { t.Error("Kash value boundary did not reparse") }
+		if len(copy.Diagnostics) != 0 {
+			t.Error("Kash value boundary did not reparse")
+		}
 		again := expr.Format(t.Allocator(), copy.Expr)
-		if formatted != again { t.Error("Kash value boundary formatting is not idempotent") }
+		if formatted != again {
+			t.Error("Kash value boundary formatting is not idempotent")
+		}
 		mem.FreeString(t.Allocator(), again)
 		mem.FreeString(t.Allocator(), formatted)
 		copy.Free()
@@ -236,11 +287,15 @@ func TestKashExpressionBoundaryUsesKameValues(t *testing.T) {
 
 func TestCommandPipelineParserBoundaries(t *testing.T) {
 	r := parse(t, "$(printf \"a|b\"|tr (\"a\" | uppercase) X | cat)")
-	if len(r.Expr.Items) != 3 || r.Expr.Items[0].Kind != expr.CommandStage || r.Expr.Items[0].Items[1].Parts[0].Text != "a|b" { t.Error("pipeline stage or quoted operator boundary was lost") }
+	if len(r.Expr.Items) != 3 || r.Expr.Items[0].Kind != expr.CommandStage || r.Expr.Items[0].Items[1].Parts[0].Text != "a|b" {
+		t.Error("pipeline stage or quoted operator boundary was lost")
+	}
 	formatted := expr.Format(t.Allocator(), r.Expr)
 	copy := parse(t, formatted)
 	again := expr.Format(t.Allocator(), copy.Expr)
-	if formatted != again { t.Error("pipeline formatter is not idempotent") }
+	if formatted != again {
+		t.Error("pipeline formatter is not idempotent")
+	}
 	mem.FreeString(t.Allocator(), formatted)
 	mem.FreeString(t.Allocator(), again)
 	copy.Free()
@@ -249,35 +304,50 @@ func TestCommandPipelineParserBoundaries(t *testing.T) {
 
 func TestCommandRedirectionsRetainBoundaries(t *testing.T) {
 	r := parse(t, "$(< ${input} cat | cat >> $output)")
-	if len(r.Expr.Items) != 2 || r.Expr.Items[0].Items[0].Kind != expr.CommandRedirection || r.Expr.Items[1].Items[1].Text != ">>" { t.Error("redirection syntax was not retained in its stage") }
+	if len(r.Expr.Items) != 2 || r.Expr.Items[0].Items[0].Kind != expr.CommandRedirection || r.Expr.Items[1].Items[1].Text != ">>" {
+		t.Error("redirection syntax was not retained in its stage")
+	}
 	formatted := expr.Format(t.Allocator(), r.Expr)
 	copy := parse(t, formatted)
 	again := expr.Format(t.Allocator(), copy.Expr)
-	if formatted != again { t.Error("redirection formatting is not idempotent") }
+	if formatted != again {
+		t.Error("redirection formatting is not idempotent")
+	}
 	mem.FreeString(t.Allocator(), formatted)
 	mem.FreeString(t.Allocator(), again)
-	copy.Free(); r.Free()
+	copy.Free()
+	r.Free()
 	invalid := []string{"$(> file)", "$(cat <)", "$(cat >)", "$(cat << file)", "$(cat >>> file)", "$(cat < one < two)", "$(cat > one >> two)", "$(cat > file | cat)", "$(cat | cat < file)"}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
-		if len(r.Diagnostics) == 0 { t.Error("conflicting or malformed redirection was accepted") }
+		if len(r.Diagnostics) == 0 {
+			t.Error("conflicting or malformed redirection was accepted")
+		}
 		r.Free()
 	}
 }
 
 func TestCommandSetupParserAndFormatter(t *testing.T) {
 	r := parse(t, "$(:cwd ${directory} :timeout (nop 0.1) :MODE production cat | :MODE test cat :ordinary)")
-	if r.Expr.Items[0].Items[0].Kind != expr.CommandSetup || r.Expr.Items[0].Items[0].Text != "cwd" || r.Expr.Items[1].Items[2].Kind != expr.CommandWord { t.Error("stage setup lost its syntax boundary") }
+	if r.Expr.Items[0].Items[0].Kind != expr.CommandSetup || r.Expr.Items[0].Items[0].Text != "cwd" || r.Expr.Items[1].Items[2].Kind != expr.CommandWord {
+		t.Error("stage setup lost its syntax boundary")
+	}
 	formatted := expr.Format(t.Allocator(), r.Expr)
 	copy := parse(t, formatted)
 	again := expr.Format(t.Allocator(), copy.Expr)
-	if formatted != again { t.Error("stage setup formatting is not idempotent") }
-	mem.FreeString(t.Allocator(), formatted); mem.FreeString(t.Allocator(), again)
-	copy.Free(); r.Free()
+	if formatted != again {
+		t.Error("stage setup formatting is not idempotent")
+	}
+	mem.FreeString(t.Allocator(), formatted)
+	mem.FreeString(t.Allocator(), again)
+	copy.Free()
+	r.Free()
 	invalid := []string{"$(:cwd)", "$(:cwd x)", "$(:cwd x :cwd y cat)", "$(:X a :X b cat)", "$(:async true cat)", "$(:9BAD x cat)", "$(:bad-key x cat)", "$(:timeout | cat)"}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
-		if len(r.Diagnostics) == 0 { t.Error("invalid stage setup was accepted") }
+		if len(r.Diagnostics) == 0 {
+			t.Error("invalid stage setup was accepted")
+		}
 		r.Free()
 	}
 }
@@ -332,16 +402,28 @@ func TestStringInterpolationQuoteBoundaries(t *testing.T) {
 	// Quotes inside interpolation start nested expressions, not the outer close.
 	r := parse(t, `(cat "@(nop " (str [VALUE]) ")")`)
 	defer r.Free()
-	if r.Expr == nil || len(r.Expr.Items) != 2 { t.Fatal("nested quote boundary changed"); return }
+	if r.Expr == nil || len(r.Expr.Items) != 2 {
+		t.Fatal("nested quote boundary changed")
+		return
+	}
 	value := r.Expr.Items[1]
-	if len(value.Parts) != 1 || value.Parts[0].Expr == nil { t.Fatal("missing interpolation"); return }
+	if len(value.Parts) != 1 || value.Parts[0].Expr == nil {
+		t.Fatal("missing interpolation")
+		return
+	}
 	inner := value.Parts[0].Expr
-	if inner.Kind == expr.Application && len(inner.Items) == 2 { inner = inner.Items[1] }
-	if inner.Kind != expr.String || len(inner.Parts) != 1 || inner.Parts[0].Text != " (str [VALUE]) " { t.Error("nested expression string parsed incorrectly") }
+	if inner.Kind == expr.Application && len(inner.Items) == 2 {
+		inner = inner.Items[1]
+	}
+	if inner.Kind != expr.String || len(inner.Parts) != 1 || inner.Parts[0].Text != " (str [VALUE]) " {
+		t.Error("nested expression string parsed incorrectly")
+	}
 	invalid := []string{`"@("`, `"@(name"`, `"@(cat "x" "y")`}
 	for i := range invalid {
 		bad := expr.Parse(a, "boundary.km", invalid[i])
-		if len(bad.Diagnostics) == 0 { t.Error("unterminated interpolation/string accepted") }
+		if len(bad.Diagnostics) == 0 {
+			t.Error("unterminated interpolation/string accepted")
+		}
 		bad.Free()
 	}
 }
@@ -366,7 +448,9 @@ func TestSelectorsAndInertBraceTextRetainSpans(t *testing.T) {
 		t.Error("bare brace text was interpreted as interpolation")
 	}
 	formatted := expr.Format(t.Allocator(), string.Expr)
-	if formatted != "\"Bundle {(count files)}\"" { t.Errorf("Format() = %s", formatted) }
+	if formatted != "\"Bundle {(count files)}\"" {
+		t.Errorf("Format() = %s", formatted)
+	}
 	mem.FreeString(t.Allocator(), formatted)
 }
 
@@ -376,12 +460,18 @@ func TestFormattingNeverMigratesLiteralInterpolationText(t *testing.T) {
 	expected := []string{`"outer {(count files)} end"`, `"\@(missing) {(missing)}"`, `"""@(missing) {(missing)}"""`, `"nested @(str "x@(count files)y") end"`, `"\@(missing){name:*}"`}
 	for i := range inputs {
 		parsed := expr.Parse(a, "migration.km", inputs[i])
-		if len(parsed.Diagnostics) != 0 { t.Error("migration input did not parse") }
+		if len(parsed.Diagnostics) != 0 {
+			t.Error("migration input did not parse")
+		}
 		formatted := expr.Format(a, parsed.Expr)
-		if formatted != expected[i] { t.Errorf("canonical interpolation = %q, want %q", formatted, expected[i]) }
+		if formatted != expected[i] {
+			t.Errorf("canonical interpolation = %q, want %q", formatted, expected[i])
+		}
 		copy := expr.Parse(a, "canonical.km", formatted)
 		again := expr.Format(a, copy.Expr)
-		if len(copy.Diagnostics) != 0 || again != formatted { t.Error("literal-preserving formatting was not idempotent") }
+		if len(copy.Diagnostics) != 0 || again != formatted {
+			t.Error("literal-preserving formatting was not idempotent")
+		}
 		mem.FreeString(a, again)
 		copy.Free()
 		mem.FreeString(a, formatted)
@@ -398,28 +488,43 @@ func TestValidSelectorRequiresCompleteSelector(t *testing.T) {
 func TestInvalidReferenceSliceReportsParseError(t *testing.T) {
 	r := expr.Parse(t.Allocator(), "test.km", "files.1...4")
 	defer r.Free()
-	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "PARSE_ERR" { t.Error("invalid reference slice was accepted") }
+	if len(r.Diagnostics) != 1 || r.Diagnostics[0].Code != "PARSE_ERR" {
+		t.Error("invalid reference slice was accepted")
+	}
 }
 
 func TestPathAndPipeChain(t *testing.T) {
 	path := parse(t, "./src/main.c")
 	defer path.Free()
-	if path.Expr.Kind != expr.Path || path.Expr.Text != "./src/main.c" { t.Error("explicit path did not parse") }
+	if path.Expr.Kind != expr.Path || path.Expr.Text != "./src/main.c" {
+		t.Error("explicit path did not parse")
+	}
 	chain := parse(t, "(value | first | second b)")
 	defer chain.Free()
-	if chain.Expr.Kind != expr.Application || chain.Expr.AuthoredPipe == nil || len(chain.Expr.AuthoredPipe.Items) != 3 || chain.Expr.AuthoredPipe.Items[2].Items[0].Text != "second" || chain.Expr.Items[2].Kind != expr.Application { t.Error("pipe chain lost authored or evaluation structure") }
+	if chain.Expr.Kind != expr.Application || chain.Expr.AuthoredPipe == nil || len(chain.Expr.AuthoredPipe.Items) != 3 || chain.Expr.AuthoredPipe.Items[2].Items[0].Text != "second" || chain.Expr.Items[2].Kind != expr.Application {
+		t.Error("pipe chain lost authored or evaluation structure")
+	}
 }
 
 func TestPlaceholderSectionParsesAndFormats(t *testing.T) {
 	r := parse(t, "((f _ __ ___))")
 	defer r.Free()
-	if r.Expr == nil || r.Expr.Kind != expr.Section || len(r.Expr.Parameters) != 3 || len(r.Expr.Body) != 1 { t.Error("placeholder section did not parse"); return }
+	if r.Expr == nil || r.Expr.Kind != expr.Section || len(r.Expr.Parameters) != 3 || len(r.Expr.Body) != 1 {
+		t.Error("placeholder section did not parse")
+		return
+	}
 	body := r.Expr.Body[0]
-	if body.Kind != expr.Application || len(body.Items) != 4 || body.Items[1].Kind != expr.Placeholder || body.Items[1].Int != 0 || body.Items[3].Int != 2 { t.Error("section placeholders did not classify") }
+	if body.Kind != expr.Application || len(body.Items) != 4 || body.Items[1].Kind != expr.Placeholder || body.Items[1].Int != 0 || body.Items[3].Int != 2 {
+		t.Error("section placeholders did not classify")
+	}
 	formatted := expr.Format(t.Allocator(), r.Expr)
-	if formatted != "((f _0 _1 _2))" { t.Errorf("Format() = %s", formatted) }
+	if formatted != "((f _0 _1 _2))" {
+		t.Errorf("Format() = %s", formatted)
+	}
 	copy := parse(t, formatted)
-	if copy.Expr == nil || copy.Expr.Kind != expr.Section || len(copy.Expr.Parameters) != 3 { t.Error("formatted section did not re-parse") }
+	if copy.Expr == nil || copy.Expr.Kind != expr.Section || len(copy.Expr.Parameters) != 3 {
+		t.Error("formatted section did not re-parse")
+	}
 	copy.Free()
 	mem.FreeString(t.Allocator(), formatted)
 }
@@ -427,109 +532,175 @@ func TestPlaceholderSectionParsesAndFormats(t *testing.T) {
 func TestPlaceholderRecognitionStaysContextual(t *testing.T) {
 	section := parse(t, "((f _1))")
 	defer section.Free()
-	if section.Expr == nil || section.Expr.Kind != expr.Section || len(section.Expr.Parameters) != 2 { t.Error("digit placeholder did not classify"); return }
-	if section.Expr.Body[0].Items[1].Int != 1 { t.Error("placeholder index was wrong") }
+	if section.Expr == nil || section.Expr.Kind != expr.Section || len(section.Expr.Parameters) != 2 {
+		t.Error("digit placeholder did not classify")
+		return
+	}
+	if section.Expr.Body[0].Items[1].Int != 1 {
+		t.Error("placeholder index was wrong")
+	}
 	repeat := parse(t, "((cons _ _))")
 	defer repeat.Free()
-	if repeat.Expr == nil || repeat.Expr.Kind != expr.Section || len(repeat.Expr.Parameters) != 1 { t.Error("repeated placeholder did not reuse one argument") }
+	if repeat.Expr == nil || repeat.Expr.Kind != expr.Section || len(repeat.Expr.Parameters) != 1 {
+		t.Error("repeated placeholder did not reuse one argument")
+	}
 	names := parse(t, "(f _)")
 	defer names.Free()
-	if names.Expr == nil || names.Expr.Kind != expr.Application || len(names.Expr.Items) != 2 || names.Expr.Items[1].Kind != expr.Name { t.Error("placeholder outside a section stayed a name") }
+	if names.Expr == nil || names.Expr.Kind != expr.Application || len(names.Expr.Items) != 2 || names.Expr.Items[1].Kind != expr.Name {
+		t.Error("placeholder outside a section stayed a name")
+	}
 	longer := parse(t, "(_0x)")
 	defer longer.Free()
-	if longer.Expr == nil || longer.Expr.Kind != expr.Application || longer.Expr.Items[0].Kind != expr.Name { t.Error("underscore-prefixed name became a placeholder") }
+	if longer.Expr == nil || longer.Expr.Kind != expr.Application || longer.Expr.Items[0].Kind != expr.Name {
+		t.Error("underscore-prefixed name became a placeholder")
+	}
 	call := parse(t, "((f))")
 	defer call.Free()
-	if call.Expr == nil || call.Expr.Kind != expr.Application { t.Error("placeholder-free nested call became a section") }
+	if call.Expr == nil || call.Expr.Kind != expr.Application {
+		t.Error("placeholder-free nested call became a section")
+	}
 }
 
 func TestPatternPathsClassify(t *testing.T) {
 	r := parse(t, "./{**}/{*}.c")
 	defer r.Free()
-	if r.Expr == nil || r.Expr.Kind != expr.Path || r.Expr.Pattern == nil { t.Error("match pattern path did not classify"); return }
-	if r.Expr.Pattern.Matchers != 2 || r.Expr.Pattern.References != 0 || r.Expr.Text != "./{**}/{*}.c" { t.Error("match pattern groups were wrong") }
+	if r.Expr == nil || r.Expr.Kind != expr.Path || r.Expr.Pattern == nil {
+		t.Error("match pattern path did not classify")
+		return
+	}
+	if r.Expr.Pattern.Matchers != 2 || r.Expr.Pattern.References != 0 || r.Expr.Text != "./{**}/{*}.c" {
+		t.Error("match pattern groups were wrong")
+	}
 	expand := parse(t, "./build/{_0}/{_1}.c")
 	defer expand.Free()
-	if expand.Expr == nil || expand.Expr.Pattern == nil || expand.Expr.Pattern.References != 2 || expand.Expr.Pattern.Matchers != 0 { t.Error("expansion pattern path did not classify") }
+	if expand.Expr == nil || expand.Expr.Pattern != nil || len(expand.Expr.Parts) != 5 || expand.Expr.Parts[1].Form != "{" || expand.Expr.Parts[3].Form != "{" {
+		t.Error("positional value path did not lower to interpolation")
+	}
 	named := parse(t, "./build/{name}.o")
 	defer named.Free()
-	if named.Expr == nil || named.Expr.Pattern == nil || named.Expr.Pattern.References != 1 { t.Error("named reference did not classify") }
+	if named.Expr == nil || named.Expr.Pattern != nil || len(named.Expr.Parts) != 3 || named.Expr.Parts[1].Form != "{" {
+		t.Error("named value path did not lower to interpolation")
+	}
 	plain := parse(t, "./src/main.c")
 	defer plain.Free()
-	if plain.Expr == nil || plain.Expr.Pattern != nil { t.Error("plain path became a pattern") }
+	if plain.Expr == nil || plain.Expr.Pattern != nil {
+		t.Error("plain path became a pattern")
+	}
 	regex := parse(t, `(nop ./{name:~[a-z]+}.txt)`)
 	defer regex.Free()
 	if regex.Expr == nil || len(regex.Diagnostics) != 0 || len(regex.Expr.Items) != 2 || regex.Expr.Items[1].Pattern == nil || regex.Expr.Items[1].Pattern.Matchers != 1 {
 		t.Error("regex path pattern did not stay within one expression atom")
 	} else {
 		formatted := expr.Format(t.Allocator(), regex.Expr)
-		if formatted != `(nop ./{name:~[a-z]+}.txt)` { t.Error("regex path expression formatting changed") }
+		if formatted != `(nop ./{name:~[a-z]+}.txt)` {
+			t.Error("regex path expression formatting changed")
+		}
 		mem.FreeString(t.Allocator(), formatted)
 	}
 	invalidRegex := expr.Parse(t.Allocator(), "regex.km", `(str ./{name:~(a|)}.txt)`)
-	if len(invalidRegex.Diagnostics) != 1 { t.Error("malformed regex path did not report one source diagnostic") }
-	if len(invalidRegex.Diagnostics) != 0 && invalidRegex.Diagnostics[0].Span.Start != 16 { t.Error("malformed regex path diagnostic start was shifted") }
-	if len(invalidRegex.Diagnostics) != 0 && invalidRegex.Diagnostics[0].Span.End != 17 { t.Error("malformed regex path diagnostic end was shifted") }
+	if len(invalidRegex.Diagnostics) != 1 {
+		t.Error("malformed regex path did not report one source diagnostic")
+	}
+	if len(invalidRegex.Diagnostics) != 0 && invalidRegex.Diagnostics[0].Span.Start != 16 {
+		t.Error("malformed regex path diagnostic start was shifted")
+	}
+	if len(invalidRegex.Diagnostics) != 0 && invalidRegex.Diagnostics[0].Span.End != 17 {
+		t.Error("malformed regex path diagnostic end was shifted")
+	}
 	invalidRegex.Free()
 	invalidRegexString := expr.Parse(t.Allocator(), "regex.km", `"x\n{name:~(a|)}"`)
-	if len(invalidRegexString.Diagnostics) != 1 || !sameSpan(invalidRegexString.Diagnostics[0].Span, 13, 14) { t.Error("malformed regex string lost its authored source span after escapes") }
+	if len(invalidRegexString.Diagnostics) != 1 || !sameSpan(invalidRegexString.Diagnostics[0].Span, 13, 14) {
+		t.Error("malformed regex string lost its authored source span after escapes")
+	}
 	invalidRegexString.Free()
 	escaped := parse(t, "./a\\{b}.c")
 	defer escaped.Free()
-	if escaped.Expr == nil || escaped.Expr.Pattern != nil || escaped.Expr.Text != "./a\\{b}.c" { t.Error("escaped brace path became a pattern") }
+	if escaped.Expr == nil || escaped.Expr.Pattern != nil || escaped.Expr.Text != "./a\\{b}.c" {
+		t.Error("escaped brace path became a pattern")
+	}
 }
 
 func TestPatternStringsClassifyAndFormat(t *testing.T) {
 	r := parse(t, "\"./{**}/{*}.c\"")
 	defer r.Free()
-	if r.Expr == nil || r.Expr.Kind != expr.String || r.Expr.Pattern == nil || r.Expr.Pattern.Matchers != 2 { t.Error("pattern string did not classify"); return }
-	if len(r.Expr.Parts) != 0 { t.Error("pattern string kept string parts") }
+	if r.Expr == nil || r.Expr.Kind != expr.String || r.Expr.Pattern == nil || r.Expr.Pattern.Matchers != 2 {
+		t.Error("pattern string did not classify")
+		return
+	}
+	if len(r.Expr.Parts) != 0 {
+		t.Error("pattern string kept string parts")
+	}
 	formatted := expr.Format(t.Allocator(), r.Expr)
-	if formatted != "\"./{**}/{*}.c\"" { t.Errorf("Format() = %s", formatted) }
+	if formatted != "\"./{**}/{*}.c\"" {
+		t.Errorf("Format() = %s", formatted)
+	}
 	mem.FreeString(t.Allocator(), formatted)
 	escaped := parse(t, "\"line\\n{*}\"")
 	defer escaped.Free()
-	if escaped.Expr == nil || escaped.Expr.Pattern == nil || escaped.Expr.Text != "line\n{*}" { t.Error("quoted-string escapes were not decoded before pattern parsing") }
+	if escaped.Expr == nil || escaped.Expr.Pattern == nil || escaped.Expr.Text != "line\n{*}" {
+		t.Error("quoted-string escapes were not decoded before pattern parsing")
+	}
 	formatted = expr.Format(t.Allocator(), escaped.Expr)
-	if formatted != "\"line\\n{*}\"" { t.Errorf("escaped pattern Format() = %s", formatted) }
+	if formatted != "\"line\\n{*}\"" {
+		t.Errorf("escaped pattern Format() = %s", formatted)
+	}
 	mem.FreeString(t.Allocator(), formatted)
 	interp := parse(t, "\"@(count files)/*.c\"")
 	defer interp.Free()
-	if interp.Expr == nil || interp.Expr.Pattern != nil { t.Error("interpolated string became a pattern") }
+	if interp.Expr == nil || interp.Expr.Pattern != nil {
+		t.Error("interpolated string became a pattern")
+	}
 }
 
 func TestPortableRegexPatternsAndBudget(t *testing.T) {
 	a := t.Allocator()
 	parsed := expr.ParsePatternText(a, "{name:~[a-z]+}-{~(ab|cd)+}", 0)
-	if len(parsed.Diagnostics) != 0 { t.Error("valid portable regex pattern did not parse") }
+	if len(parsed.Diagnostics) != 0 {
+		t.Error("valid portable regex pattern did not parse")
+	}
 	formatted := expr.CanonicalPattern(a, parsed.Pattern)
-	if formatted != "{name:~[a-z]+}-{~(ab|cd)+}" { t.Error("regex pattern formatting changed its spelling") }
+	if formatted != "{name:~[a-z]+}-{~(ab|cd)+}" {
+		t.Error("regex pattern formatting changed its spelling")
+	}
 	matched := parsed.Pattern.MatchText(a, "demo-abcd")
-	if !matched.Matched || len(matched.Captures) != 2 || matched.Captures[0] != "demo" || matched.Captures[1] != "abcd" { t.Error("regex pattern did not return positional captures") }
+	if !matched.Matched || len(matched.Captures) != 2 || matched.Captures[0] != "demo" || matched.Captures[1] != "abcd" {
+		t.Error("regex pattern did not return positional captures")
+	}
 	slices.Free(a, matched.Captures)
 	mem.FreeString(a, formatted)
 	parsed.Pattern.Free(a)
 	slices.Free(a, parsed.Diagnostics)
 
 	invalid := expr.ParsePatternText(a, "x{name:~(a|)}", 5)
-	if len(invalid.Diagnostics) != 1 || !sameSpan(invalid.Diagnostics[0].Span, 15, 16) { t.Errorf("invalid regex diagnostic span = %v", invalid.Diagnostics) }
+	if len(invalid.Diagnostics) != 1 || !sameSpan(invalid.Diagnostics[0].Span, 15, 16) {
+		t.Errorf("invalid regex diagnostic span = %v", invalid.Diagnostics)
+	}
 	invalid.Pattern.Free(a)
 	slices.Free(a, invalid.Diagnostics)
 	invalidForms := []string{"{~a{2}}", "{~\\p{L}}", "{~[z-a]}"}
 	for i := range invalidForms {
 		invalid = expr.ParsePatternText(a, invalidForms[i], 0)
-		if len(invalid.Diagnostics) == 0 { t.Error("unsupported or malformed regex syntax was accepted") }
+		if len(invalid.Diagnostics) == 0 {
+			t.Error("unsupported or malformed regex syntax was accepted")
+		}
 		invalid.Pattern.Free(a)
 		slices.Free(a, invalid.Diagnostics)
 	}
 
 	bounded := expr.ParsePatternText(a, "{~a*}z", 0)
-	if len(bounded.Diagnostics) != 0 { t.Fatal("budget regex did not parse"); return }
+	if len(bounded.Diagnostics) != 0 {
+		t.Fatal("budget regex did not parse")
+		return
+	}
 	var subject strings.Builder
 	subject = strings.NewBuilder(a)
-	for i := 0; i < 1600; i++ { subject.WriteByte('a') }
+	for i := 0; i < 1600; i++ {
+		subject.WriteByte('a')
+	}
 	result := bounded.Pattern.MatchText(a, subject.String())
-	if !result.Limited || result.Matched { t.Error("regex state budget did not fail closed") }
+	if !result.Limited || result.Matched {
+		t.Error("regex state budget did not fail closed")
+	}
 	slices.Free(a, result.Captures)
 	subject.Free()
 	bounded.Pattern.Free(a)
@@ -539,13 +710,19 @@ func TestPortableRegexPatternsAndBudget(t *testing.T) {
 func TestMixedPatternGroupsAreRejected(t *testing.T) {
 	r := expr.Parse(t.Allocator(), "test.km", "./{**}/{name}.c")
 	defer r.Free()
-	if len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "PARSE_ERR" { t.Error("mixed matcher and reference groups were accepted") }
+	if len(r.Diagnostics) == 0 || r.Diagnostics[0].Code != "PARSE_ERR" {
+		t.Error("mixed matcher and reference groups were accepted")
+	}
 	plain := parse(t, "./{*.c}")
 	defer plain.Free()
-	if plain.Expr == nil || plain.Expr.Pattern != nil || plain.Expr.Text != "./{*.c}" { t.Error("structurally invalid matcher did not stay a plain path") }
+	if plain.Expr == nil || plain.Expr.Pattern != nil || plain.Expr.Text != "./{*.c}" {
+		t.Error("structurally invalid matcher did not stay a plain path")
+	}
 	literal := parse(t, "\"literal \\{ brace\"")
 	defer literal.Free()
-	if literal.Expr == nil || literal.Expr.Pattern != nil { t.Error("escaped-brace string became a pattern") }
+	if literal.Expr == nil || literal.Expr.Pattern != nil {
+		t.Error("escaped-brace string became a pattern")
+	}
 }
 
 func TestComparisonOperatorsParseAsNameAtoms(t *testing.T) {
@@ -558,7 +735,9 @@ func TestComparisonOperatorsParseAsNameAtoms(t *testing.T) {
 	checkOp(t, ">=")
 	bad := expr.Parse(t.Allocator(), "test.km", "===")
 	defer bad.Free()
-	if len(bad.Diagnostics) == 0 { t.Error("malformed operator run was accepted") }
+	if len(bad.Diagnostics) == 0 {
+		t.Error("malformed operator run was accepted")
+	}
 }
 
 func checkOp(t *testing.T, text string) {
@@ -592,15 +771,23 @@ func TestVerbatimLiteralIsRawAndRoundTrips(t *testing.T) {
 		return
 	}
 	formatted := expr.Format(t.Allocator(), r.Expr)
-	if formatted != "\"\"\"hello @(x) world\"\"\"" { t.Errorf("Format() = %q", formatted) }
+	if formatted != "\"\"\"hello @(x) world\"\"\"" {
+		t.Errorf("Format() = %q", formatted)
+	}
 	copy := parse(t, formatted)
-	if copy.Expr == nil || !copy.Expr.Verbatim || len(copy.Expr.Parts) != 1 || copy.Expr.Parts[0].Text != "hello @(x) world" { t.Error("formatted verbatim did not re-parse") }
+	if copy.Expr == nil || !copy.Expr.Verbatim || len(copy.Expr.Parts) != 1 || copy.Expr.Parts[0].Text != "hello @(x) world" {
+		t.Error("formatted verbatim did not re-parse")
+	}
 	copy.Free()
 	mem.FreeString(t.Allocator(), formatted)
 	long := parse(t, "\"\"\"\"has \"\"\" inside\"\"\"\"")
 	defer long.Free()
-	if long.Expr == nil || !long.Expr.Verbatim || long.Expr.VerbatimLen != 4 || long.Expr.Parts[0].Text != "has \"\"\" inside" { t.Error("longer verbatim delimiter did not round-trip") }
+	if long.Expr == nil || !long.Expr.Verbatim || long.Expr.VerbatimLen != 4 || long.Expr.Parts[0].Text != "has \"\"\" inside" {
+		t.Error("longer verbatim delimiter did not round-trip")
+	}
 	unclosed := expr.Parse(t.Allocator(), "test.km", "\"\"\"open")
 	defer unclosed.Free()
-	if len(unclosed.Diagnostics) == 0 || unclosed.Diagnostics[0].Code != "TPL_PARSE" { t.Error("unclosed verbatim literal was not TPL_PARSE") }
+	if len(unclosed.Diagnostics) == 0 || unclosed.Diagnostics[0].Code != "TPL_PARSE" {
+		t.Error("unclosed verbatim literal was not TPL_PARSE")
+	}
 }

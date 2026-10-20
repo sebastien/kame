@@ -13,11 +13,14 @@ release_test_keys "$root/keys"
 test-step "stage only runtime assets, ignoring stale native and installer outputs"
 staging="$root/staging"
 mkdir -p "$staging/dist/native/darwin-arm64" "$staging/src/sh"
-mkdir -p "$staging/tools/wasm"
-for directory in cli core diagnostic host lang operations plugins program; do
-	mkdir -p "$staging/src/go/kame/$directory"
-done
 cp Makefile VERSION "$staging/"
+# Exercise the real staging task through Make's Kame delegation, without the
+# artifact producers: this fixture supplies already-built runtime assets.
+awk '
+	/^SHELL =/ || /^\(configured / || /^(KAME_)?RELEASE_(PUBLIC_KEY|SIGNING_KEY|REVISION) \?=/ { print }
+	/^dist-release :/ { release = 1 }
+	release { print; if ($0 == "") exit }
+' Makefile.kmk >"$staging/Makefile.kmk"
 cp src/sh/release_manifest.py "$staging/src/sh/"
 for artifact in kame.com kame.wasm kame.js; do
 	cp "dist/$artifact" "$staging/dist/"
@@ -25,8 +28,7 @@ done
 printf 'fixture artifact for darwin-arm64\n' >"$staging/dist/native/darwin-arm64/kame"
 printf 'stale launcher\n' >"$staging/dist/kame"
 printf 'stale Windows bundle\n' >"$staging/dist/kame-windows-x64.zip"
-make -C "$staging" --old-file=dist/kame.com --old-file=dist/kame.wasm \
-	--old-file=dist/kame.js KAME_PLATFORM=test-staging WASM_SOURCES= KAME_SOURCES= dist-release \
+make -C "$staging" KAME="$CLI_BIN" dist-release \
 	KAME_RELEASE_PUBLIC_KEY="$root/keys/verification.pem" \
 	KAME_RELEASE_SIGNING_KEY="$root/keys/signing.pem" KAME_RELEASE_REVISION=test-fixture >/dev/null
 release="$staging/dist/release"

@@ -30,7 +30,10 @@ func TestCanonicalTransformationPipes(t *testing.T) {
 		}
 		result.Free(a)
 	}
-	p.Free(); source.Free(); r.Free(); engine.Free()
+	p.Free()
+	source.Free()
+	r.Free()
+	engine.Free()
 }
 
 func TestLiteralSubSignatureErrors(t *testing.T) {
@@ -43,10 +46,15 @@ func TestLiteralSubSignatureErrors(t *testing.T) {
 	checks := []string{`(sub "a" "b")`, `(sub 1 "b" "a")`, `(sub "a" 1 "a")`, `(sub "a" "b" [])`, `(replace "a" "b")`}
 	for i := range checks {
 		result := evaluate(t, p, checks[i])
-		if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("literal substitution must report a signature error: " + checks[i]) }
+		if result.Diagnostic.Code != "EXPR_INVALID" {
+			t.Error("literal substitution must report a signature error: " + checks[i])
+		}
 		result.Free(a)
 	}
-	p.Free(); source.Free(); r.Free(); engine.Free()
+	p.Free()
+	source.Free()
+	r.Free()
+	engine.Free()
 }
 
 func TestShRejectsUnsupportedOptionsBeforeDryRun(t *testing.T) {
@@ -64,16 +72,23 @@ func TestShRejectsUnsupportedOptionsBeforeDryRun(t *testing.T) {
 	}
 	for i := range checks {
 		parsed := expr.Parse(a, "sh.km", checks[i])
-		if len(parsed.Diagnostics) != 0 { t.Error("shell convention test did not parse") }
+		if len(parsed.Diagnostics) != 0 {
+			t.Error("shell convention test did not parse")
+		}
 		context := eval.Context{Program: p, Scope: p.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Run}}}
 		result := p.EvaluateWith(parsed.Expr, &context)
 		if i < 3 {
-			if result.Diagnostic.Code != "" || result.Waiting || result.Value.Kind != core.String { t.Error("empty/no shell options rejected: " + checks[i]) }
+			if result.Diagnostic.Code != "" || result.Waiting || result.Value.Kind != core.String {
+				t.Error("empty/no shell options rejected: " + checks[i])
+			}
 		} else if result.Diagnostic.Code != "EXPR_INVALID" || result.Waiting {
 			t.Error("unsupported shell options silently ignored: " + checks[i])
 		}
 		result.Free(a)
 		parsed.Free()
 	}
-	p.Free(); source.Free(); r.Free(); engine.Free()
+	p.Free()
+	source.Free()
+	r.Free()
+	engine.Free()
 }

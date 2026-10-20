@@ -40,9 +40,9 @@ type Cancellation struct {
 }
 
 type EngineContext struct {
-	engine     *Engine
-	node       *Node
-	completion Completion
+	engine          *Engine
+	node            *Node
+	completion      Completion
 	dependencyError Diagnostic
 }
 
@@ -83,13 +83,29 @@ func (c *EngineContext) ForgetDependency(key ResourceKey) {
 	n := c.node
 	for i := range n.Dynamic {
 		d := n.Dynamic[i]
-		if d.Key.Kind != key.Kind || d.Key.Name != key.Name { continue }
+		if d.Key.Kind != key.Kind || d.Key.Name != key.Name {
+			continue
+		}
 		removeDependent(d, n)
 		copy(n.Dynamic[i:], n.Dynamic[i+1:])
 		n.Dynamic = n.Dynamic[:len(n.Dynamic)-1]
-		for j := range n.Observed { if n.Observed[j] == d { copy(n.Observed[j:], n.Observed[j+1:]); n.Observed = n.Observed[:len(n.Observed)-1]; break } }
-		for j := range n.OrderOnly { if n.OrderOnly[j] == d { copy(n.OrderOnly[j:], n.OrderOnly[j+1:]); n.OrderOnly = n.OrderOnly[:len(n.OrderOnly)-1]; break } }
-		if n.Interest != 0 { c.engine.interest(d, -n.Interest) }
+		for j := range n.Observed {
+			if n.Observed[j] == d {
+				copy(n.Observed[j:], n.Observed[j+1:])
+				n.Observed = n.Observed[:len(n.Observed)-1]
+				break
+			}
+		}
+		for j := range n.OrderOnly {
+			if n.OrderOnly[j] == d {
+				copy(n.OrderOnly[j:], n.OrderOnly[j+1:])
+				n.OrderOnly = n.OrderOnly[:len(n.OrderOnly)-1]
+				break
+			}
+		}
+		if n.Interest != 0 {
+			c.engine.interest(d, -n.Interest)
+		}
 		return
 	}
 }
@@ -114,7 +130,9 @@ func (c *EngineContext) TryDependency(key ResourceKey) bool { return c.dependenc
 
 // DependencyDiagnostic returns a borrowed diagnostic for an observed edge.
 func (c *EngineContext) DependencyDiagnostic(key ResourceKey) Diagnostic {
-	if c.dependencyError.Code != "" { return c.dependencyError }
+	if c.dependencyError.Code != "" {
+		return c.dependencyError
+	}
 	dep := c.engine.find(key)
 	if dep != nil && slices.Contains(c.node.Observed, dep) && (dep.State == NodeFailed || dep.State == NodeCancelled) {
 		// Recovery consumed an error, not a missing resource or an ordinary value.
@@ -129,7 +147,10 @@ func (c *EngineContext) dependency(key ResourceKey, observed bool) bool {
 	dep := c.engine.node(key)
 	if dep == nil || dep == c.node || reaches(dep, c.node) {
 		d := Diagnostic{Code: DiagnosticDependencyCycle, Severity: diagnostic.Error, Message: "dependency cycle"}
-		if observed { c.dependencyError = d; return true }
+		if observed {
+			c.dependencyError = d
+			return true
+		}
 		if c.node.Key.Kind == ResourceDefinition {
 			d.Frames = slices.Append(c.engine.Alloc, d.Frames, diagnostic.Frame{Label: "definition"})
 		}

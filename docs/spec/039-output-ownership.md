@@ -36,8 +36,10 @@ execution. A manifest-plus-pattern design can enumerate downstream prerequisites
 provided each member already has an unambiguous registered producer. A sequenced
 prerequisite can build the manifest before discovering those input names.
 
-Literal producers retain precedence over pattern producers. Competing matching
-patterns are rejected without probing source files. Canonically identical literal
+Literal producers retain precedence over pattern producers. Structurally nested
+file patterns follow `045-rule-precedence.md`; competing undominated patterns
+are rejected without probing source files. Grouped producers cannot claim a
+sibling owned by another selected instance. Canonically identical literal
 outputs are rejected at registration. Output ownership never follows a wildcard
 or changes according to which source happens to exist.
 

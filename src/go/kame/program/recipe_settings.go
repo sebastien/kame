@@ -72,10 +72,14 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	}
 	if entry.Rule.Kind == rule.ServiceRule {
 		span := diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}
-		if entry.Rule.Metadata != nil { span = diagnostic.Span{Start: entry.Rule.Metadata.Span.Start, End: entry.Rule.Metadata.Span.End} }
+		if entry.Rule.Metadata != nil {
+			span = diagnostic.Span{Start: entry.Rule.Metadata.Span.Start, End: entry.Rule.Metadata.Span.End}
+		}
 		var config ServiceConfig
 		d := parseServiceConfig(p.Alloc, metadata, span, &config)
-		if d.Code != "" { return d }
+		if d.Code != "" {
+			return d
+		}
 		entry.Service.Free(p.Alloc)
 		entry.Service = config
 	}
@@ -83,6 +87,9 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	for i := range metadata.Record {
 		field := metadata.Record[i]
 		if field.Key == "executor" {
+			if entry.Rule.Kind != rule.FileRule {
+				continue
+			}
 			if field.Value.Kind != core.String || strings.IndexByte(field.Value.Text, 0) >= 0 {
 				return failure(p.Alloc, "EXPR_INVALID", "executor metadata requires a local or registered remote executor string")
 			}
@@ -137,7 +144,9 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 		if entry.Rule.Kind != rule.FileRule || len(entry.Plan.Outputs) != 1 || entry.Executor != "local" {
 			return failureAt(p.Alloc, "EXPR_INVALID", diagnostic.Span{Start: entry.Rule.Header.Start, End: entry.Rule.Header.End}, "shell kame requires exactly one local file output")
 		}
-		if d := p.parseKameRecipe(entry); d.Code != "" { return d }
+		if d := p.parseKameRecipe(entry); d.Code != "" {
+			return d
+		}
 	} else if explicit {
 		if p.Eval.IsKashConstructor(shell) {
 			entry.Kash = true
@@ -161,7 +170,9 @@ func (p *Program) recipeSettings(index int) diagnostic.Diagnostic {
 	if !entry.Kash && !kame {
 		for i := range entry.Rule.RecipeDiagnostics {
 			d := entry.Rule.RecipeDiagnostics[i]
-			if d.Severity >= source.Error { return failureAt(p.Alloc, d.Code, diagnostic.Span{Start: d.Span.Start, End: d.Span.End}, d.Message) }
+			if d.Severity >= source.Error {
+				return failureAt(p.Alloc, d.Code, diagnostic.Span{Start: d.Span.Start, End: d.Span.End}, d.Message)
+			}
 		}
 	}
 	freeStrings(p.Alloc, entry.MetadataEnvironment)
@@ -205,7 +216,9 @@ func (p *Program) parseKameRecipe(entry *instance) diagnostic.Diagnostic {
 
 func recipeIndent(text string, start int) string {
 	line := start
-	for line > 0 && text[line-1] != '\n' { line-- }
+	for line > 0 && text[line-1] != '\n' {
+		line--
+	}
 	return text[line:start]
 }
 
@@ -300,15 +313,21 @@ func (p *Program) kashDiagnostic(index int, d diagnostic.Diagnostic) diagnostic.
 }
 
 func (p *Program) kashDiagnosticText(index int, text string, d diagnostic.Diagnostic) diagnostic.Diagnostic {
-	if d.Source != "" && d.Source != "<recipe>" { return d }
+	if d.Source != "" && d.Source != "<recipe>" {
+		return d
+	}
 	entry := &p.Instances[index]
 	d.Span = diagnostic.Span{Start: kashAuthoredOffset(entry, text, d.Span.Start), End: kashAuthoredOffset(entry, text, d.Span.End)}
 	for i := range d.Frames {
 		frame := &d.Frames[i]
-		if frame.Source != "<recipe>" { continue }
+		if frame.Source != "<recipe>" {
+			continue
+		}
 		frame.Span = diagnostic.Span{Start: kashAuthoredOffset(entry, text, frame.Span.Start), End: kashAuthoredOffset(entry, text, frame.Span.End)}
 		location := p.Eval.LocateSource(p.Parsed.Source.Name, source.Span{Start: frame.Span.Start, End: frame.Span.End})
-		if d.Owned { mem.FreeString(p.Alloc, frame.Source) }
+		if d.Owned {
+			mem.FreeString(p.Alloc, frame.Source)
+		}
 		frame.Source = cloneText(p.Alloc, location.Source)
 		frame.Span = diagnostic.Span{Start: location.Span.Start, End: location.Span.End}
 	}
@@ -323,12 +342,19 @@ func (p *Program) kashDiagnosticText(index int, text string, d diagnostic.Diagno
 func kashAuthoredOffset(entry *instance, text string, offset int) int {
 	line, start := 0, 0
 	for i := 0; i < len(text) && i < offset; i++ {
-		if text[i] == '\n' { line++; start = i+1 }
+		if text[i] == '\n' {
+			line++
+			start = i + 1
+		}
 	}
-	if line >= len(entry.LineSpans) { return entry.Rule.Header.End }
+	if line >= len(entry.LineSpans) {
+		return entry.Rule.Header.End
+	}
 	span := entry.LineSpans[line]
-	position := span.Start+offset-start
-	if position > span.End { position = span.End }
+	position := span.Start + offset - start
+	if position > span.End {
+		position = span.End
+	}
 	return position
 }
 

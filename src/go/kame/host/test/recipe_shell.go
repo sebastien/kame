@@ -40,23 +40,31 @@ func TestRecipePayloadPreservesSelectedShellArguments(t *testing.T) {
 }
 
 func TestCollectedShellPayloadRetainsExplicitEmptyEnvironment(t *testing.T) {
-    a := t.Allocator()
-    payload := host.ScopedProcessPayload(a, "true", nil)
-    var decoded core.Value
-    if !core.ParseJSON(a, []byte(host.PayloadText(payload, host.FieldData)), &decoded) {
-        t.Fatal("invalid scoped process descriptor")
-        payload.Free(a)
-        return
-    }
+	a := t.Allocator()
+	payload := host.ScopedProcessPayload(a, "true", nil)
+	var decoded core.Value
+	if !core.ParseJSON(a, []byte(host.PayloadText(payload, host.FieldData)), &decoded) {
+		t.Fatal("invalid scoped process descriptor")
+		payload.Free(a)
+		return
+	}
 	foundWire, foundNative, foundCapture := false, false, false
 	for i := range decoded.Record {
-		if decoded.Record[i].Key == host.FieldEnvironment && decoded.Record[i].Value.Kind == core.List && len(decoded.Record[i].Value.List) == 0 { foundWire = true }
-		if decoded.Record[i].Key == host.FieldCapture && decoded.Record[i].Value.Kind == core.Bool && decoded.Record[i].Value.Bool { foundCapture = true }
+		if decoded.Record[i].Key == host.FieldEnvironment && decoded.Record[i].Value.Kind == core.List && len(decoded.Record[i].Value.List) == 0 {
+			foundWire = true
+		}
+		if decoded.Record[i].Key == host.FieldCapture && decoded.Record[i].Value.Kind == core.Bool && decoded.Record[i].Value.Bool {
+			foundCapture = true
+		}
 	}
 	for i := range payload.Record {
-		if payload.Record[i].Key == host.FieldEnvironment && payload.Record[i].Value.Kind == core.List && len(payload.Record[i].Value.List) == 0 { foundNative = true }
+		if payload.Record[i].Key == host.FieldEnvironment && payload.Record[i].Value.Kind == core.List && len(payload.Record[i].Value.List) == 0 {
+			foundNative = true
+		}
 	}
-	if !foundWire || !foundNative || !foundCapture || len(host.PayloadList(decoded, "outputs")) != 0 { t.Error("empty process environment or capture semantics were omitted, or outputs introduced") }
-    decoded.Free(a)
-    payload.Free(a)
+	if !foundWire || !foundNative || !foundCapture || len(host.PayloadList(decoded, "outputs")) != 0 {
+		t.Error("empty process environment or capture semantics were omitted, or outputs introduced")
+	}
+	decoded.Free(a)
+	payload.Free(a)
 }

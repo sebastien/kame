@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 
-COMMANDS = ["run", "plan", "inputs", "outputs", "span", "tools", "parse", "fmt", "render", "cat", "cache", "clean", "help"]
+COMMANDS = ["run", "plan", "inputs", "outputs", "span", "tools", "parse", "fmt", "render", "cat", "cache", "clean", "help", "pick"]
 
 
 def invoke(host: list[str], args: list[str], cwd: Path, text: str = "", status: int = 0) -> subprocess.CompletedProcess[str]:
@@ -96,7 +96,7 @@ def checkHost(host: list[str], project: Path) -> None:
 		("plan", ["-c", "default :"]), ("inputs", ["-c", "default :"]),
 		("outputs", ["-c", "default :"]), ("span", ["-c", "default :"]),
 		("tools", ["-c", "default :"]), ("cat", ["-c", 'default = "BAD"']),
-		("cache", ["clean"]), ("clean", []),
+		("cache", ["clean"]), ("clean", []), ("pick", []),
 	]:
 		for directory in ["absent-directory", "nested/value.km"]:
 			result = invoke(host, ["do", command, "-C", directory, *tail], project, status=1)

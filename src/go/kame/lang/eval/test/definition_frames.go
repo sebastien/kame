@@ -30,7 +30,9 @@ func TestScopedDefinitionsOwnDistinctRuleFrames(t *testing.T) {
 	}
 	engine.Request(left)
 	engine.Request(right)
-	for i := 0; i < 12; i++ { engine.Step() }
+	for i := 0; i < 12; i++ {
+		engine.Step()
+	}
 	if !left.Current || left.Latest.Kind != core.List || len(left.Latest.List) != 1 || left.Latest.List[0].Text != "first" {
 		t.Error("nested definition lost its owned nearest rule snapshot: " + left.Diagnostic.Code + " " + left.Diagnostic.Message)
 	}
@@ -38,7 +40,9 @@ func TestScopedDefinitionsOwnDistinctRuleFrames(t *testing.T) {
 		t.Error("different rule reused another selector result: " + right.Diagnostic.Code + " " + right.Diagnostic.Message)
 	}
 	engine.Request(nonfile)
-	for i := 0; i < 12; i++ { engine.Step() }
+	for i := 0; i < 12; i++ {
+		engine.Step()
+	}
 	if nonfile.Diagnostic.Code != "SEL_NO_CONTEXT" {
 		t.Error("nonfile definition inherited an outer file frame")
 	}
@@ -64,7 +68,9 @@ func TestScopedDefinitionsRejectUnavailableRuleFrameIdentity(t *testing.T) {
 	mem.Free(a, second)
 	engine.Request(left)
 	engine.Request(right)
-	for i := 0; i < 12; i++ { engine.Step() }
+	for i := 0; i < 12; i++ {
+		engine.Step()
+	}
 	if left.Diagnostic.Code != "EXPR_INVALID" || left.Diagnostic.Message != "rule frame values require stable content signatures" || right.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("unavailable frame identity was silently cached")
 	}

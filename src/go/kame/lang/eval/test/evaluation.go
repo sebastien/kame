@@ -195,7 +195,9 @@ func TestBindingNamesUseDefinitionGrammar(t *testing.T) {
 	}
 	for i := range invalid {
 		result := evaluate(t, program, invalid[i])
-		if result.Diagnostic.Code != "DEF_INVALID" { t.Error("namespaced reference was accepted as a binding name or parameter") }
+		if result.Diagnostic.Code != "DEF_INVALID" {
+			t.Error("namespaced reference was accepted as a binding name or parameter")
+		}
 		result.Free(a)
 	}
 	valid := []string{
@@ -206,7 +208,9 @@ func TestBindingNamesUseDefinitionGrammar(t *testing.T) {
 	}
 	for i := range valid {
 		result := evaluate(t, program, valid[i])
-		if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 { t.Error("ordinary binding name or parameter was rejected") }
+		if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
+			t.Error("ordinary binding name or parameter was rejected")
+		}
 		result.Free(a)
 	}
 	engine.Free()
@@ -1241,22 +1245,32 @@ func TestCommandCaptureExecutionPolicy(t *testing.T) {
 		context := eval.Context{Program: program, Scope: program.Scope, Run: a, Grants: []eval.Grant{{Capability: eval.Run}}}
 		context.Phase = eval.PlanningPhase
 		result := program.EvaluateWith(expression.Expr, &context)
-		if result.Diagnostic.Code != "PHASE_INVALID" { t.Error("planning authorized a process") }
+		if result.Diagnostic.Code != "PHASE_INVALID" {
+			t.Error("planning authorized a process")
+		}
 		result.Free(a)
 		context.Phase = eval.ResolvingPhase
 		result = program.EvaluateWith(expression.Expr, &context)
-		if result.Diagnostic.Code != "PHASE_INVALID" { t.Error("resolution authorized a process") }
+		if result.Diagnostic.Code != "PHASE_INVALID" {
+			t.Error("resolution authorized a process")
+		}
 		result.Free(a)
 		context.Phase = eval.EvaluatePhase
 		context.Grants = nil
 		result = program.EvaluateWith(expression.Expr, &context)
-		if result.Diagnostic.Code != "CAP_DENIED" { t.Error("missing run capability was not denied") }
+		if result.Diagnostic.Code != "CAP_DENIED" {
+			t.Error("missing run capability was not denied")
+		}
 		result.Free(a)
 		context.Grants = []eval.Grant{{Capability: eval.Run}}
 		result = program.EvaluateWith(expression.Expr, &context)
-		if result.Diagnostic.Code != "HOST_FAIL" { t.Error("missing execution host was not diagnosed") }
+		if result.Diagnostic.Code != "HOST_FAIL" {
+			t.Error("missing execution host was not diagnosed")
+		}
 		result.Free(a)
-		if program.Requests.Next().OK { t.Error("invalid execution context submitted a request") }
+		if program.Requests.Next().OK {
+			t.Error("invalid execution context submitted a request")
+		}
 		expression.Free()
 	}
 	engine.Free()
@@ -1519,10 +1533,14 @@ func TestRecursiveEvaluationDepthIsBoundedAndRestored(t *testing.T) {
 	texts := []string{`(walk "x,y\n")`, `(walk (reduce ([TEXT STEP] (str TEXT TEXT)) "x,y\n" [1 2 3 4 5 6 7 8 9 10]))`, `(walk "x,y\n")`, `(count (reduce ([TEXT STEP] (str TEXT TEXT)) "x,y\n" [1 2 3 4 5 6 7 8 9 10]))`}
 	for i := range texts {
 		expression := expr.Parse(a, "call.km", texts[i])
-		if len(expression.Diagnostics) != 0 { t.Error("depth fixture failed to parse") }
+		if len(expression.Diagnostics) != 0 {
+			t.Error("depth fixture failed to parse")
+		}
 		result := program.EvaluateWith(expression.Expr, &context)
 		if i == 1 {
-			if result.Diagnostic.Code != "EVAL_DEPTH" { t.Error("deep recursion did not report EVAL_DEPTH") }
+			if result.Diagnostic.Code != "EVAL_DEPTH" {
+				t.Error("deep recursion did not report EVAL_DEPTH")
+			}
 		} else if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || (i == 3 && result.Value.Int != 4096) || (i != 3 && result.Value.Int != 0) {
 			t.Error("bounded recursion/fold failed or depth was not restored")
 		}
@@ -1819,22 +1837,24 @@ func TestPlainPathValuesMaterializeAsText(t *testing.T) {
 }
 
 func TestOperationWrappedDefinitionCycleOwnsDiagnosticFrames(t *testing.T) {
-    a := t.Allocator()
-    engine := core.NewEngine(a)
-    registry := eval.NewRegistry(a)
-    operations.Register(registry)
-    parsed := script.Parse(a, "cycle.km", "value = (str value)")
-    program := eval.Compile(a, engine, parsed, registry)
-    node := program.Definition("value")
-    engine.Request(node)
-    for i := 0; i < 6; i++ { engine.Step() }
-    if node.State != core.NodeFailed || node.Diagnostic.Code != "DEP_CYCLE" || node.Diagnostic.Severity != diagnostic.Error {
-        t.Error("operation cycle overwrote the engine failure")
-    }
-    cloned := node.Diagnostic.Clone(a)
-    cloned.Free(a)
-    engine.Free()
-    program.Free()
-    parsed.Free()
-    registry.Free()
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	parsed := script.Parse(a, "cycle.km", "value = (str value)")
+	program := eval.Compile(a, engine, parsed, registry)
+	node := program.Definition("value")
+	engine.Request(node)
+	for i := 0; i < 6; i++ {
+		engine.Step()
+	}
+	if node.State != core.NodeFailed || node.Diagnostic.Code != "DEP_CYCLE" || node.Diagnostic.Severity != diagnostic.Error {
+		t.Error("operation cycle overwrote the engine failure")
+	}
+	cloned := node.Diagnostic.Clone(a)
+	cloned.Free(a)
+	engine.Free()
+	program.Free()
+	parsed.Free()
+	registry.Free()
 }

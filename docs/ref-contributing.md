@@ -104,7 +104,7 @@ The [test catalog](../tests/CATALOG.tsv) is an inventory, not a pass report.
 The portable memory-cache backend is covered by `TestCachedTaskUsesPortableMemoryBackend`
 in `make test-so`; no separate shell wrapper recompiles that package.
 Native and WASM artifacts rebuild only when declared inputs change. Use
-`make -B TARGET` to force rebuilding after a compiler or build-flag change.
+`kame --force TARGET` to force rebuilding after a compiler or build-flag change.
 
 ## Documentation changes
 

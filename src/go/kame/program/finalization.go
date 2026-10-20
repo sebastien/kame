@@ -8,6 +8,10 @@ func finalizationNow(state any) int64 {
 func finalizationQuiet(state any, node int64, generation int64) bool {
 	p := state.(*Program)
 	_ = generation // A stale cancelled request must still be reaped.
-	for i := range p.Pending { if p.Pending[i].NodeID == node { return false } }
+	for i := range p.Pending {
+		if p.Pending[i].NodeID == node {
+			return false
+		}
+	}
 	return true
 }

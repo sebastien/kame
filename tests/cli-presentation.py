@@ -19,7 +19,7 @@ import tempfile
 import termios
 import time
 
-COMMANDS = ["run", "plan", "inputs", "outputs", "span", "tools", "parse", "fmt", "render", "cat", "cache", "help"]
+COMMANDS = ["run", "plan", "inputs", "outputs", "span", "tools", "parse", "fmt", "render", "cat", "cache", "help", "pick"]
 ENVIRONMENT = {**os.environ, "TERM": "xterm", "NO_COLOR": "", "CLICOLOR": "1", "CLICOLOR_FORCE": "0"}
 
 
@@ -254,11 +254,20 @@ def check_lifecycle(host: list[str], project: Path) -> None:
 	failed = invoke(host, ["--output", "ansi", "--color", "always"], project, status=1)
 	if native:
 		assert b"\x1b[35mbroken\x1b[0m" in failed.stderr and b" - \x1b[1;31mfailed\x1b[0m" in failed.stderr, failed.stderr
-		assert b"  RECIPE_FAIL: recipe exited unsuccessfully (status 7)" in failed.stderr, failed.stderr
 	else:
 		failure_line = next(line for line in failed.stderr.splitlines() if b"error [broken] failed" in line)
-		assert b"RECIPE_FAIL" in failure_line and b"status 7" in failure_line and b"\x1b[" in failure_line, failed.stderr
+		assert b"RECIPE_FAIL" not in failure_line and b"status 7" not in failure_line and b"\x1b[" in failure_line, failed.stderr
+	clean = re.sub(rb"\x1b\[[0-9;]*m", b"", failed.stderr)
+	assert clean.count(b"RECIPE_FAIL") == 1 and clean.count(b"status 7") == 1, failed.stderr
+	assert b"error[RECIPE_FAIL]: [broken] recipe exited unsuccessfully" in clean, failed.stderr
 	assert b"started [" not in failed.stderr and b"finished in" not in failed.stderr, failed.stderr
+	(project / "Makefile.kmk").write_text('root : broken\nbroken : ; [shell: kash]\n\t$(sh -c "exit 123")\n')
+	for mode in ["ansi", "text"]:
+		for diagnostic_format in ["human", "plain"]:
+			capture = invoke(host, ["--output", mode, "--diagnostic-format", diagnostic_format, "--color", "never", "root"], project, status=1)
+			assert capture.stderr.count(b"RECIPE_FAIL") == 1 and capture.stderr.count(b"status 123") == 1, capture.stderr
+			assert b"error[RECIPE_FAIL]: [broken] command substitution exited unsuccessfully" in capture.stderr, capture.stderr
+			assert b"caused by: process exited (status 123)" in capture.stderr, capture.stderr
 	(project / "Makefile.kmk").write_text("task default :\n\tsleep 0.4\n")
 	# A child can own cursor state; once it does, the presenter must stop rewriting.
 	(project / "Makefile.kmk").write_text("task default :\n\tsleep 0.15; printf '\\033[31mraw-control' 1>&2; sleep 0.15\n")

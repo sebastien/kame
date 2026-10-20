@@ -69,10 +69,16 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 		e.Str(event.State)
 	}
 	if event.Kind == TargetReason {
-		e.Str("decision"); e.Str(event.Decision)
-		e.Str("reason"); e.Str(event.Reason)
-		e.Str("message"); e.Str(event.Message)
-		if event.Aspect != "" { e.Str("aspect"); e.Str(event.Aspect) }
+		e.Str("decision")
+		e.Str(event.Decision)
+		e.Str("reason")
+		e.Str(event.Reason)
+		e.Str("message")
+		e.Str(event.Message)
+		if event.Aspect != "" {
+			e.Str("aspect")
+			e.Str(event.Aspect)
+		}
 	}
 	if event.Program != "" {
 		e.Str("program")
@@ -95,7 +101,10 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 		e.Str("value")
 		encodeValue(a, &e, event.Value)
 	}
-	if event.Kind == ProcessSnapshot { e.Str("graph"); core.EncodeValueJSON(a, &e, event.Value) }
+	if event.Kind == ProcessSnapshot {
+		e.Str("graph")
+		core.EncodeValueJSON(a, &e, event.Value)
+	}
 	if event.Cached {
 		e.Str("cached")
 		e.Bool(true)
@@ -141,8 +150,12 @@ func resourceKindName(kind core.ResourceKind) string {
 	if kind == core.ResourceGlob {
 		return "glob"
 	}
-	if kind == core.ResourceTool { return "tool" }
-	if kind == core.ResourceOperation { return "operation" }
+	if kind == core.ResourceTool {
+		return "tool"
+	}
+	if kind == core.ResourceOperation {
+		return "operation"
+	}
 	return "environment"
 }
 
@@ -377,8 +390,12 @@ func encodeCause(e *json.Encoder, cause diagnostic.Cause) {
 }
 
 func eventType(kind EventKind) string {
-	if kind == ProcessSnapshot { return "process-snapshot" }
-	if kind == TargetReason { return "target-reason" }
+	if kind == ProcessSnapshot {
+		return "process-snapshot"
+	}
+	if kind == TargetReason {
+		return "target-reason"
+	}
 	if kind == TargetStarted {
 		return "target-started"
 	}

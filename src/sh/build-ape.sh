@@ -3,7 +3,7 @@
 #
 # The APE is a single multi-OS binary that runs the full native CLI on Linux,
 # macOS, Windows and the BSDs with no Node, no WASM runtime and no make. It is
-# what `bin/kame` and `Makefile.bootstrap` provision as the `ape` backend, so
+# what `bin/kame` and `Makefile` provision as the `ape` backend, so
 # `-f Makefile.kmk TARGET` drives a project without any other tool.
 #
 # This mirrors the `dist/kame.com` rule in Makefile/Makefile.kmk: provision the

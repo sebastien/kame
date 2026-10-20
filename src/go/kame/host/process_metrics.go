@@ -12,23 +12,36 @@ func ProcessMetricsPayload(a mem.Allocator, metrics []ProcessEdgeMetrics) core.V
 	var rows []core.Value
 	for i := range metrics {
 		m := metrics[i]
-		saturated := int64(0); if m.Saturated { saturated = 1 }
+		saturated := int64(0)
+		if m.Saturated {
+			saturated = 1
+		}
 		values := []int64{int64(m.Measurement), m.Bytes, m.Items, m.DroppedItems, m.QueueHighWaterBytes, m.QueueHighWaterItems, saturated}
 		var fields []core.Value
-		for j := range values { fields = slices.Append(a, fields, core.Value{Kind: core.Int, Int: values[j]}) }
+		for j := range values {
+			fields = slices.Append(a, fields, core.Value{Kind: core.Int, Int: values[j]})
+		}
 		rows = slices.Append(a, rows, core.NewList(a, fields))
 		slices.Free(a, fields)
 	}
 	value := core.NewList(a, rows)
-	for i := range rows { rows[i].Free(a) }; slices.Free(a, rows)
+	for i := range rows {
+		rows[i].Free(a)
+	}
+	slices.Free(a, rows)
 	return value
 }
 
 func ProcessSnapshotPayload(a mem.Allocator, states []int, metrics []ProcessEdgeMetrics) core.Value {
 	var values []core.Value
-	for i := range states { values = slices.Append(a, values, core.Value{Kind: core.Int, Int: int64(states[i])}) }
+	for i := range states {
+		values = slices.Append(a, values, core.Value{Kind: core.Int, Int: int64(states[i])})
+	}
 	fields := []core.RecordField{{Key: "states", Value: core.NewList(a, values)}, {Key: "edgeMetrics", Value: ProcessMetricsPayload(a, metrics)}}
 	value := core.NewRecord(a, fields)
-	for i := range fields { fields[i].Value.Free(a) }; slices.Free(a, values)
+	for i := range fields {
+		fields[i].Value.Free(a)
+	}
+	slices.Free(a, values)
 	return value
 }

@@ -20,7 +20,9 @@ func TestLossyPoliciesAreClosedAndUnambiguous(t *testing.T) {
 	}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
-		if len(r.Diagnostics) == 0 { t.Errorf("invalid lossy policy accepted: %s", invalid[i]) }
+		if len(r.Diagnostics) == 0 {
+			t.Errorf("invalid lossy policy accepted: %s", invalid[i])
+		}
 		r.Free()
 	}
 }

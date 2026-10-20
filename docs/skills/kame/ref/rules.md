@@ -78,6 +78,17 @@ Declare actual file inputs; a bare task prerequisite alone does not establish
 artifact freshness. For aggregates over computed membership, render the
 computed set as well as declaring it, and test additions/removals.
 
+Computed-root prerequisites share expression path parsing, so authored capture
+references compose with symbol prefixes directly:
+
+```kame
+@{PATH_BUILD}/{path:**}.js : @{PATH_SRC}/js/{path}.js
+```
+
+The prerequisite resolves `path` from the matched output. An expression such as
+`@(nop @{PATH_SRC}/js/{path}.js)` works too. Quoted prerequisite tokens keep
+bare `{path}` literal; inserted text is never reparsed as capture syntax.
+
 ## Captures
 
 ```kame
@@ -96,6 +107,14 @@ can reuse them as `{_0}`/`{_1}`. Named captures also occupy positional slots.
 Regex captures `{name:~REGEX}` and `{~REGEX}` use the portable bounded matcher;
 see [Pattern extensions](../../../spec/029-pattern-extensions.md).
 
+Literal outputs win over templates. For file templates with one `*` or `**`
+capture, a structurally narrower literal prefix/suffix takes precedence;
+`./www/xml/{path:**}.html` overrides `./www/{path:**}.html`, and `*` narrows
+`**`. Equal or incomparable matches remain `TGT_AMBIG`, independent of rule
+order. Selection never probes sources or retries a broader rule after a missing
+input. Regex and multi-capture overlaps retain ambiguity. Grouped outputs must
+all select the same producer instance. See [Rule precedence](../../../spec/045-rule-precedence.md).
+
 Single named tasks can declare required/defaulted arguments:
 `deploy {environment} {region=us-east} :`. Invoke with
 `kame deploy environment=production`; these string bindings are distinct from
@@ -110,6 +129,23 @@ content freshness. Commas separate input sequence groups: later groups are
 evaluated and requested after earlier groups complete, not a global barrier across
 targets. `a : @{PREP}, @{BUILD}` splices computed lists into authored groups;
 empty expansions preserve barriers. Output registration remains pure.
+
+## Rule metadata
+
+Header metadata is an extensible record. Existing fields such as `shell`, `env`,
+file-rule `executor`, and service lifecycle settings keep their built-in behavior;
+other fields are accepted as custom metadata. Duplicate fields remain invalid.
+Use a literal `summary` string to document a target; `kame do list` displays it.
+The target name and rule kind still come from the declaration, not custom
+`name` or `kind` fields.
+
+```kame
+service cloudflare-dev : ; [summary: "Run wrangler dev" kind: "service"]
+	wrangler dev
+
+cloudflare-login : ; [summary: "Log in to wrangler" kind: "task"]
+	wrangler login
+```
 
 ## Recipes and effects
 

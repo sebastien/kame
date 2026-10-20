@@ -21,7 +21,9 @@ func TestSignedSymbolsRetainTextSpansAndFormatting(t *testing.T) {
 		}
 		cloned := expr.Clone(a, parsed.Expr)
 		formatted := expr.Format(a, cloned)
-		if formatted != texts[i] { t.Error("signed symbol formatting changed its spelling") }
+		if formatted != texts[i] {
+			t.Error("signed symbol formatting changed its spelling")
+		}
 		again := expr.Parse(a, "formatted.km", formatted)
 		if len(again.Diagnostics) != 0 || again.Expr == nil || again.Expr.Kind != expr.Symbol || again.Expr.Text != texts[i][1:] {
 			t.Error("formatted signed symbol did not round-trip")
@@ -37,7 +39,9 @@ func TestSignedSymbolsRequireOrdinaryNames(t *testing.T) {
 	texts := []string{":+", ":-", ":+1", ":-1", ":++files", ":--files", ":+ files", ":-dir/child", ":+dir.name"}
 	for i := range texts {
 		parsed := expr.Parse(t.Allocator(), "invalid.km", texts[i])
-		if len(parsed.Diagnostics) == 0 { t.Error("malformed signed symbol was accepted: " + texts[i]) }
+		if len(parsed.Diagnostics) == 0 {
+			t.Error("malformed signed symbol was accepted: " + texts[i])
+		}
 		parsed.Free()
 	}
 }

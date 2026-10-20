@@ -48,7 +48,7 @@ func TestRecipeDocumentScannerRespectsValuesPrefixesAndRawClosing(t *testing.T) 
 		"@else_foo\n\t@raw/path\n\t@end2",
 	}
 	for _, body := range bodies {
-		parsed := rule.ParseRule(a, "literal.kmk", "build : dep\n\t" + body)
+		parsed := rule.ParseRule(a, "literal.kmk", "build : dep\n\t"+body)
 		if len(parsed.Diagnostics) != 0 || parsed.Rule == nil || parsed.Rule.BodyDoc != nil {
 			t.Error("recipe scanner promoted value contents or keyword prefixes to a document")
 		}
@@ -64,7 +64,7 @@ func TestRecipeDocumentScannerRespectsValuesPrefixesAndRawClosing(t *testing.T) 
 func TestRawRecipeKeepsMalformedContentsLiteral(t *testing.T) {
 	bodies := []string{"literal @(broken ", "literal @if() text "}
 	for _, body := range bodies {
-		parsed := rule.ParseRule(t.Allocator(), "raw.kmk", "build : dep\n\t@raw\n\t" + body + "@end(raw)")
+		parsed := rule.ParseRule(t.Allocator(), "raw.kmk", "build : dep\n\t@raw\n\t"+body+"@end(raw)")
 		if len(parsed.Diagnostics) != 0 || parsed.Rule == nil || parsed.Rule.BodyDoc == nil || len(parsed.Rule.BodyDoc.Diagnostics) != 0 {
 			t.Error("raw recipe document parsed malformed literal contents or missed closing")
 		} else if len(parsed.Rule.BodyDoc.Root.Items) != 2 || len(parsed.Rule.BodyDoc.Root.Items[1].Parts) != 1 || parsed.Rule.BodyDoc.Root.Items[1].Parts[0].Text != "\t"+body {

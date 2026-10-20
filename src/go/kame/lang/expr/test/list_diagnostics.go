@@ -29,9 +29,13 @@ func TestListAdjacentItemsStillNeedWhitespace(t *testing.T) {
 		r := expr.Parse(t.Allocator(), "list.km", text)
 		found := false
 		for i := range r.Diagnostics {
-			if r.Diagnostics[i].Code == "PARSE_ERR" && r.Diagnostics[i].Message == "list items need whitespace" { found = true }
+			if r.Diagnostics[i].Code == "PARSE_ERR" && r.Diagnostics[i].Message == "list items need whitespace" {
+				found = true
+			}
 		}
-		if !found { t.Error("adjacent list items lost their whitespace diagnostic") }
+		if !found {
+			t.Error("adjacent list items lost their whitespace diagnostic")
+		}
 		r.Free()
 	}
 }

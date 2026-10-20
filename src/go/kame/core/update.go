@@ -50,7 +50,9 @@ type Subscription struct {
 
 func (s *Subscription) pushValue(event Event) {
 	if len(s.values) == 8 {
-		for i := 1; i < len(s.values); i++ { s.values[i].Value.Free(s.Alloc) }
+		for i := 1; i < len(s.values); i++ {
+			s.values[i].Value.Free(s.Alloc)
+		}
 		s.values = s.values[:1]
 	}
 	s.values = slices.Append(s.Alloc, s.values, event)
@@ -69,8 +71,12 @@ func (s *Subscription) Next() Event {
 	if len(s.updates) != 0 && (len(s.values) == 0 || s.updates[0].Order < s.values[0].Order) {
 		return s.popUpdate()
 	}
-	if len(s.values) != 0 { return s.popValue() }
-	if s.terminal.Kind != UpdateNone { return takeEvent(&s.terminal) }
+	if len(s.values) != 0 {
+		return s.popValue()
+	}
+	if s.terminal.Kind != UpdateNone {
+		return takeEvent(&s.terminal)
+	}
 	return Event{}
 }
 
@@ -96,14 +102,22 @@ func takeEvent(event *Event) Event {
 }
 
 func (s *Subscription) free() {
-	for i := range s.values { s.values[i].Value.Free(s.Alloc) }
-	slices.Free(s.Alloc, s.values); slices.Free(s.Alloc, s.updates)
-	s.unsubbed = true; mem.Free(s.Alloc, s)
+	for i := range s.values {
+		s.values[i].Value.Free(s.Alloc)
+	}
+	slices.Free(s.Alloc, s.values)
+	slices.Free(s.Alloc, s.updates)
+	s.unsubbed = true
+	mem.Free(s.Alloc, s)
 }
 
 func terminal(n *Node) Event {
 	kind := UpdateCompleted
-	if n.State == NodeFailed { kind = UpdateFailed }
-	if n.State == NodeCancelled { kind = UpdateCancelled }
+	if n.State == NodeFailed {
+		kind = UpdateFailed
+	}
+	if n.State == NodeCancelled {
+		kind = UpdateCancelled
+	}
 	return Event{Kind: kind, Diagnostic: n.Diagnostic}
 }

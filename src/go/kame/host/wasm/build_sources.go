@@ -29,34 +29,24 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 	}
 	total := 0
 	for i := range inputs {
-		valid, hasName, hasText := inputs[i].Kind == core.Record, false, false
+		valid, hasName, hasText := validDescriptorSource(inputs[i]), false, false
 		for j := range inputs[i].Record {
 			field := inputs[i].Record[j]
 			if field.Key == "name" {
 				hasName = true
-				if field.Value.Kind != core.String {
-					valid = false
-				}
 			}
 			if field.Key == "text" {
 				hasText = true
-				if field.Value.Kind != core.String {
-					valid = false
-				}
 			}
-			if field.Key == "offset" && field.Value.Kind != core.Int {
-				valid = false
-			}
-			if field.Key == "includes" && !validDescriptorIncludes(field.Value) { valid = false }
 		}
 		name := host.PayloadText(inputs[i], "name")
 		offset := host.PayloadInt(inputs[i], "offset")
-		if !valid || !hasName || !hasText || name == "" || offset < 0 || offset > 2147483647 {
+		if !valid || !hasName || !hasText || name == "" {
 			r.freeBuildSources()
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid build source fragment")}
 		}
 		text := host.PayloadText(inputs[i], "text")
-		if int64(len(text)) > 2147483647-offset {
+		if !validDescriptorSourceSpan(inputs[i]) {
 			r.freeBuildSources()
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "build source span exceeds instance range")}
 		}

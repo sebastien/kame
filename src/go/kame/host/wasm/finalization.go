@@ -1,8 +1,8 @@
 package wasm
 
 import (
-	"kame/host"
 	"kame/diagnostic"
+	"kame/host"
 	"kame/lang/eval"
 	"kame/program"
 	"solod.dev/so/bytes"
@@ -13,31 +13,52 @@ import (
 // its monotonic deadline. stopping begins disposal; the caller must keep
 // servicing requests until this method reports no armed scopes.
 func (r *Runtime) FinalizationTick(nowNS int64, stopping bool) bool {
-	if r == nil { return false }
+	if r == nil {
+		return false
+	}
 	// A stale tick cannot extend a deadline or make armed scopes disappear.
-	if nowNS < r.FinalizationNS { nowNS = r.FinalizationNS }
+	if nowNS < r.FinalizationNS {
+		nowNS = r.FinalizationNS
+	}
 	r.FinalizationEnabled, r.FinalizationNS = true, nowNS
 	r.configureFinalization()
 	p := r.finalizationProgram()
-	if p == nil { return false }
-	if stopping { r.Finalizing = true; p.BeginFinalization() }
+	if p == nil {
+		return false
+	}
+	if stopping {
+		r.Finalizing = true
+		p.BeginFinalization()
+	}
 	p.PollFinalizers()
-	if r.Session != nil && r.Handle != nil { r.Session.Observe(r.Handle) }
+	if r.Session != nil && r.Handle != nil {
+		r.Session.Observe(r.Handle)
+	}
 	return p.Finalizing()
 }
 
 func (r *Runtime) finalizationProgram() *eval.Program {
-	if r.Program != nil { return r.Program.Eval }
+	if r.Program != nil {
+		return r.Program.Eval
+	}
 	return r.Eval
 }
 
 func (r *Runtime) configureFinalization() {
-	if !r.FinalizationEnabled { return }
+	if !r.FinalizationEnabled {
+		return
+	}
 	p := r.finalizationProgram()
-	if p == nil { return }
+	if p == nil {
+		return
+	}
 	p.FinalizationNow, p.FinalizationQuiet, p.FinalizationHost = runtimeFinalizationNow, runtimeFinalizationQuiet, r
-	if r.Program == nil { p.ProcessesQuiet, p.ProcessesQuietState = runtimeDefersQuiet, r }
-	if r.Program == nil { p.SetDefinitionEffectSink(runtimeFinalizationEffect, r) }
+	if r.Program == nil {
+		p.ProcessesQuiet, p.ProcessesQuietState = runtimeDefersQuiet, r
+	}
+	if r.Program == nil {
+		p.SetDefinitionEffectSink(runtimeFinalizationEffect, r)
+	}
 }
 
 func runtimeFinalizationNow(value any) int64 { r := value.(*Runtime); return r.FinalizationNS }
@@ -45,7 +66,11 @@ func runtimeFinalizationNow(value any) int64 { r := value.(*Runtime); return r.F
 func runtimeFinalizationQuiet(value any, node int64, generation int64) bool {
 	r := value.(*Runtime)
 	_ = generation
-	for i := range r.FinalizationRequests { if r.FinalizationRequests[i].NodeID == node { return false } }
+	for i := range r.FinalizationRequests {
+		if r.FinalizationRequests[i].NodeID == node {
+			return false
+		}
+	}
 	return true
 }
 
@@ -60,13 +85,17 @@ func runtimeDefersQuiet(value any, owner int64, group int64) bool {
 	r := value.(*Runtime)
 	for i := range r.FinalizationRequests {
 		node := r.FinalizationRequests[i].NodeID
-		if node == owner || r.Eval.ProcessInGroup(node, group) { return false }
+		if node == owner || r.Eval.ProcessInGroup(node, group) {
+			return false
+		}
 	}
 	return true
 }
 
 func (r *Runtime) trackFinalizationRequest(next host.NextResult) {
-	if !r.FinalizationEnabled || !next.OK { return }
+	if !r.FinalizationEnabled || !next.OK {
+		return
+	}
 	request := host.Request{ID: next.Request.ID, NodeID: next.Request.NodeID, Generation: next.Request.Generation, Attempt: next.Request.Attempt, Kind: next.Request.Kind}
 	r.FinalizationRequests = slices.Append(r.Alloc, r.FinalizationRequests, request)
 }
@@ -83,21 +112,29 @@ func (r *Runtime) retireFinalizationRequest(id int64) {
 
 func (r *Runtime) FinalizationBudget(node int64) int64 {
 	p := r.finalizationProgram()
-	if p == nil { return 0 }
+	if p == nil {
+		return 0
+	}
 	return p.FinalizerBudget(node)
 }
 
 func (r *Runtime) FinalizationPending() bool {
-	if r == nil { return false }
+	if r == nil {
+		return false
+	}
 	p := r.finalizationProgram()
 	return p != nil && p.Finalizing()
 }
 
 func (r *Runtime) FinalizationTimeout(nowNS int64) bool {
-	if r == nil { return false }
+	if r == nil {
+		return false
+	}
 	r.FinalizationTick(nowNS, false)
 	p := r.finalizationProgram()
-	if p == nil { return false }
+	if p == nil {
+		return false
+	}
 	p.BeginFinalizationWith(diagnostic.Diagnostic{Code: "RECIPE_TIMEOUT", Severity: diagnostic.Error, Message: "invocation timed out"})
 	return p.Finalizing()
 }
@@ -105,20 +142,30 @@ func (r *Runtime) FinalizationTimeout(nowNS int64) bool {
 // ResultDiagnosticJSON copies the terminal diagnostic without consuming output,
 // releasing roots or losing the secondary failures recorded during teardown.
 func (r *Runtime) ResultDiagnosticJSON() PureResult {
-	if r == nil { return PureResult{} }
+	if r == nil {
+		return PureResult{}
+	}
 	node := r.Node
-	if r.Program != nil && r.Handle != nil { node = r.Handle.Node }
+	if r.Program != nil && r.Handle != nil {
+		node = r.Handle.Node
+	}
 	var d diagnostic.Diagnostic
-	if node != nil { d = node.Diagnostic.Clone(r.Alloc) }
+	if node != nil {
+		d = node.Diagnostic.Clone(r.Alloc)
+	}
 	if p := r.finalizationProgram(); p != nil {
 		cleanup := p.FinalizationDiagnostic(r.Alloc)
-		if d.Code == "" { d = cleanup } else if cleanup.Code != "" {
+		if d.Code == "" {
+			d = cleanup
+		} else if cleanup.Code != "" {
 			d.Notes = slices.Append(r.Alloc, d.Notes, pureText(r.Alloc, "deferred cleanup failed: "+cleanup.Code+": "+cleanup.Message))
 			cleanup.Free(r.Alloc)
 		}
 	}
 	defer d.Free(r.Alloc)
-	if d.Code == "" { return PureResult{} }
+	if d.Code == "" {
+		return PureResult{}
+	}
 	buffer := bytes.NewBuffer(r.Alloc, nil)
 	program.WriteJSONDiagnostic(&buffer, d)
 	text := pureText(r.Alloc, buffer.String())

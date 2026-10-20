@@ -13,22 +13,52 @@ func TestValueJSONStrictKindsOrderingAndEscapes(t *testing.T) {
 	var value core.Value
 	core.ParseJSON(a, []byte(`{"z":null,"a":[true,"\u0001\n\"\\"]}`), &value)
 	var data []byte
-	if !core.ValueJSON(a, value, &data) || string(data) != `{"a":[true,"\u0001\n\"\\"],"z":null}` { t.Error("JSON key order or control escaping failed") }
+	if !core.ValueJSON(a, value, &data) || string(data) != `{"a":[true,"\u0001\n\"\\"],"z":null}` {
+		t.Error("JSON key order or control escaping failed")
+	}
 	slices.Free(a, data)
 	value.Free(a)
 	invalidUTF8 := []byte{0xff}
 	values := []core.Value{{Kind: core.Bytes, Bytes: []byte("text")}, {Kind: core.Float, Float: math.Inf(1)}, {Kind: core.Float, Float: math.Inf(-1)}, {Kind: core.Float, Float: math.NaN()}, {Kind: core.String, Text: string(invalidUTF8)}}
 	for i := range values {
 		data = nil
-		if core.ValueJSON(a, values[i], &data) { t.Error("non-JSON value accepted"); slices.Free(a, data) }
+		if core.ValueJSON(a, values[i], &data) {
+			t.Error("non-JSON value accepted")
+			slices.Free(a, data)
+		}
 		nested := core.NewList(a, []core.Value{values[i]})
 		data = nil
-		if core.ValueJSON(a, nested, &data) { t.Error("nested non-JSON value accepted"); slices.Free(a, data) }
+		if core.ValueJSON(a, nested, &data) {
+			t.Error("nested non-JSON value accepted")
+			slices.Free(a, data)
+		}
 		nested.Free(a)
 	}
 }
 
-func TestCatValueJSONEncodesNativeValues(t *testing.T) {
+func TestPresentationValueJSONPolicy(t *testing.T) {
+	a := t.Allocator()
+	invalid := []byte{0xff}
+	values := []core.Value{
+		{Kind: core.String, Text: string(invalid)},
+		{Kind: core.Record, Record: []core.RecordField{{Key: string(invalid), Value: core.Value{Kind: core.Int, Int: 1}}}},
+		{Kind: core.Bytes, Bytes: []byte("text")},
+	}
+	for i := range values {
+		var data []byte
+		if core.ValueJSON(a, values[i], &data) {
+			t.Error("strict JSON accepted presentation-only data")
+		}
+		slices.Free(a, data)
+		data = nil
+		if !core.PresentationValueJSON(a, values[i], &data) {
+			t.Error("presentation JSON rejected its documented string/byte policy")
+		}
+		slices.Free(a, data)
+	}
+}
+
+func TestPresentationValueJSONEncodesNativeValues(t *testing.T) {
 	a := t.Allocator()
 	cases := slices.Make[string](a, 22)
 	cases[0], cases[1] = `null`, `null`
@@ -49,7 +79,7 @@ func TestCatValueJSONEncodesNativeValues(t *testing.T) {
 			continue
 		}
 		var data []byte
-		ok := core.CatValueJSON(a, value, &data)
+		ok := core.PresentationValueJSON(a, value, &data)
 		value.Free(a)
 		if !ok {
 			t.Error("JSON-native value rejected: " + cases[i])
@@ -63,31 +93,31 @@ func TestCatValueJSONEncodesNativeValues(t *testing.T) {
 	slices.Free(a, cases)
 }
 
-func TestCatValueJSONRejectsNonNativeValues(t *testing.T) {
+func TestPresentationValueJSONRejectsNonNativeValues(t *testing.T) {
 	a := t.Allocator()
 	pattern := core.NewPattern(a, "{name:*}")
 	var data []byte
-	if core.CatValueJSON(a, pattern, &data) {
+	if core.PresentationValueJSON(a, pattern, &data) {
 		t.Error("pattern value accepted as JSON")
 		mem.FreeSlice(a, data)
 	}
 	pattern.Free(a)
 	resource := core.NewResource(a, core.ResourceFile, "./input")
-	if core.CatValueJSON(a, resource, &data) {
+	if core.PresentationValueJSON(a, resource, &data) {
 		t.Error("resource value accepted as JSON")
 		mem.FreeSlice(a, data)
 	}
 	resource.Free(a)
-	if core.CatValueJSON(a, core.Value{Kind: core.Callable}, &data) {
+	if core.PresentationValueJSON(a, core.Value{Kind: core.Callable}, &data) {
 		t.Error("callable value accepted as JSON")
 		mem.FreeSlice(a, data)
 	}
-	if core.CatValueJSON(a, core.Value{Kind: core.Process}, &data) {
+	if core.PresentationValueJSON(a, core.Value{Kind: core.Process}, &data) {
 		t.Error("process value accepted as JSON")
 		mem.FreeSlice(a, data)
 	}
 	binary := core.NewBytes(a, []byte{0xff, 0xfe})
-	if core.CatValueJSON(a, binary, &data) {
+	if core.PresentationValueJSON(a, binary, &data) {
 		t.Error("binary bytes accepted as JSON")
 		mem.FreeSlice(a, data)
 	}
@@ -97,7 +127,7 @@ func TestCatValueJSONRejectsNonNativeValues(t *testing.T) {
 	nested := core.NewList(a, items)
 	items[0].Free(a)
 	slices.Free(a, items)
-	if core.CatValueJSON(a, nested, &data) {
+	if core.PresentationValueJSON(a, nested, &data) {
 		t.Error("nested pattern accepted as JSON")
 		mem.FreeSlice(a, data)
 	}

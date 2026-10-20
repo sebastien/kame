@@ -75,7 +75,10 @@ type nativeEvent struct {
 func km_host_new() *nativeHost { return nil }
 
 //so:extern
-func km_event_metric_field(event *nativeEvent, index c.Int, field c.Int) int64 { _, _, _ = event, index, field; return 0 }
+func km_event_metric_field(event *nativeEvent, index c.Int, field c.Int) int64 {
+	_, _, _ = event, index, field
+	return 0
+}
 
 //so:extern nodecay
 func km_file_modtime(name string, link bool) int64 { _, _ = name, link; return 0 }
@@ -173,6 +176,34 @@ func km_cli_environment_names_case_insensitive() bool { return false }
 //so:extern nodecay
 func km_cli_environment_copy(out []byte) c.Int { _ = out; return 0 }
 
+//so:extern nodecay
+func km_pick_select(executable string, argv []string, input string, selection []byte, selected *int) c.Int {
+	_ = executable
+	_ = argv
+	_ = input
+	_ = selection
+	_ = selected
+	return -2
+}
+
+// Pick runs an interactive line filter and stores an owned selection.
+// Status 0 is a selection. 130 is cancel, 127 is not found, 1 is no match,
+// 2 is a picker error, -2 is an unsupported host, -3 is no terminal, and -1
+// is I/O failure.
+func Pick(executable string, args []string, input string, selection *string) int {
+	buffer := mem.AllocSlice[byte](mem.System, 1<<16, 1<<16)
+	defer mem.FreeSlice(mem.System, buffer)
+	var selected int
+	status := km_pick_select(executable, args, input, buffer, &selected)
+	if status != 0 || selected <= 0 || selected > len(buffer) {
+		return int(status)
+	}
+	owned := slices.Make[byte](mem.System, selected)
+	copy(owned, buffer[:selected])
+	*selection = string(owned)
+	return 0
+}
+
 type Host struct {
 	Alloc  mem.Allocator
 	native *nativeHost
@@ -189,7 +220,10 @@ func New(a mem.Allocator) *Host {
 	return h
 }
 
-func (h *Host) SupportsExecutor(name string, version string) bool { _, _ = h, version; return name == "" || name == "local" }
+func (h *Host) SupportsExecutor(name string, version string) bool {
+	_, _ = h, version
+	return name == "" || name == "local"
+}
 
 //so:extern
 func km_stream_operands_supported() bool { return false }
@@ -201,14 +235,18 @@ func (h *Host) SupportsStreamOperands() bool { _ = h; return km_stream_operands_
 // be queued for diagnostics, but nil hosts or an occupied emergency rejection
 // slot cannot queue another one. Only true transfers active process ownership.
 func (h *Host) Start(request host.ProcessRequest) bool {
-	if request.CollectFailures && !request.Topology { return false }
+	if request.CollectFailures && !request.Topology {
+		return false
+	}
 	if request.Directory == "" {
 		request.Directory = "."
 	}
 	if h == nil || h.native == nil {
 		return false
 	}
-	if request.Topology && host.ProcessTopologyError(h.Alloc, request) != "" { return false }
+	if request.Topology && host.ProcessTopologyError(h.Alloc, request) != "" {
+		return false
+	}
 	if len(request.Stages) != 0 {
 		var arguments []string
 		var lengths []int
@@ -220,15 +258,33 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		for i := range request.Stages {
 			if request.Topology {
 				kind := 0
-				if request.Stages[i].Kind == "merge" { kind = 1 }
-				if request.Stages[i].Kind == "broadcast" { kind = 2 }
-				if request.Stages[i].Kind == "frame" { kind = 3 }
-				if request.Stages[i].Kind == "encode" { kind = 4 }
-				if request.Stages[i].Kind == "filter" { kind = 5 }
-				if request.Stages[i].Kind == "copy" { kind = 6 }
-				if request.Stages[i].Kind == "balance" { kind = 7 }
-				if request.Stages[i].Kind == "each" { kind = 8 }
-				if request.Stages[i].Framed { kind += 16 }
+				if request.Stages[i].Kind == "merge" {
+					kind = 1
+				}
+				if request.Stages[i].Kind == "broadcast" {
+					kind = 2
+				}
+				if request.Stages[i].Kind == "frame" {
+					kind = 3
+				}
+				if request.Stages[i].Kind == "encode" {
+					kind = 4
+				}
+				if request.Stages[i].Kind == "filter" {
+					kind = 5
+				}
+				if request.Stages[i].Kind == "copy" {
+					kind = 6
+				}
+				if request.Stages[i].Kind == "balance" {
+					kind = 7
+				}
+				if request.Stages[i].Kind == "each" {
+					kind = 8
+				}
+				if request.Stages[i].Framed {
+					kind += 16
+				}
 				kind += request.Stages[i].Overflow * 32
 				kind += request.Stages[i].Order * 128
 				// Low bits retain kind/framing; higher bits carry a <=64 KiB budget.
@@ -237,7 +293,10 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				itemLimits = slices.Append(h.Alloc, itemLimits, request.Stages[i].BufferItems)
 				inputs = slices.Append(h.Alloc, inputs, request.Stages[i].Input)
 				outputs = slices.Append(h.Alloc, outputs, request.Stages[i].Output)
-				appendOutput := 0; if request.Stages[i].Append { appendOutput = 1 }
+				appendOutput := 0
+				if request.Stages[i].Append {
+					appendOutput = 1
+				}
 				appends = slices.Append(h.Alloc, appends, appendOutput)
 			}
 			lengths = slices.Append(h.Alloc, lengths, len(request.Stages[i].Argv))
@@ -273,10 +332,20 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		}
 		ok := false
 		if request.Topology {
-			for i := range request.Edges { edges = slices.Append(h.Alloc, edges, request.Edges[i].From); edges = slices.Append(h.Alloc, edges, request.Edges[i].To); operandArguments = slices.Append(h.Alloc, operandArguments, request.Edges[i].Argument) }
+			for i := range request.Edges {
+				edges = slices.Append(h.Alloc, edges, request.Edges[i].From)
+				edges = slices.Append(h.Alloc, edges, request.Edges[i].To)
+				operandArguments = slices.Append(h.Alloc, operandArguments, request.Edges[i].Argument)
+			}
 			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, itemLimits, request.StreamItem, request.StreamContext, request.CollectFailures) == 0
-		} else { ok = km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append) == 0 }
-		slices.Free(h.Alloc, kinds); slices.Free(h.Alloc, edges); slices.Free(h.Alloc, inputs); slices.Free(h.Alloc, outputs); slices.Free(h.Alloc, appends)
+		} else {
+			ok = km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append) == 0
+		}
+		slices.Free(h.Alloc, kinds)
+		slices.Free(h.Alloc, edges)
+		slices.Free(h.Alloc, inputs)
+		slices.Free(h.Alloc, outputs)
+		slices.Free(h.Alloc, appends)
 		slices.Free(h.Alloc, operandArguments)
 		slices.Free(h.Alloc, itemLimits)
 		slices.Free(h.Alloc, arguments)
@@ -340,8 +409,11 @@ func (h *Host) Next() host.ProcessEventResult {
 	}
 	e := host.ProcessEvent{Kind: host.ProcessEventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: host.ProcessOutcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated, RetainBytes: int(raw.retainBytes)}
 	for i := 0; i < int(raw.stageCount); i++ {
-		if e.Kind == host.ProcessSnapshot { e.StageStates = slices.Append(h.Alloc, e.StageStates, int(km_event_stage_field(&raw, c.Int(i), 0)))
-		} else { e.Stages = slices.Append(h.Alloc, e.Stages, host.ProcessStageResult{Status: int(km_event_stage_field(&raw, c.Int(i), 0)), Signal: int(km_event_stage_field(&raw, c.Int(i), 1)), Outcome: host.ProcessOutcome(km_event_stage_field(&raw, c.Int(i), 2))}) }
+		if e.Kind == host.ProcessSnapshot {
+			e.StageStates = slices.Append(h.Alloc, e.StageStates, int(km_event_stage_field(&raw, c.Int(i), 0)))
+		} else {
+			e.Stages = slices.Append(h.Alloc, e.Stages, host.ProcessStageResult{Status: int(km_event_stage_field(&raw, c.Int(i), 0)), Signal: int(km_event_stage_field(&raw, c.Int(i), 1)), Outcome: host.ProcessOutcome(km_event_stage_field(&raw, c.Int(i), 2))})
+		}
 	}
 	for i := 0; i < int(raw.metricCount); i++ {
 		e.EdgeMetrics = slices.Append(h.Alloc, e.EdgeMetrics, host.ProcessEdgeMetrics{Measurement: int(km_event_metric_field(&raw, c.Int(i), 0)), Bytes: km_event_metric_field(&raw, c.Int(i), 1), Items: km_event_metric_field(&raw, c.Int(i), 2), DroppedItems: km_event_metric_field(&raw, c.Int(i), 3), QueueHighWaterBytes: km_event_metric_field(&raw, c.Int(i), 4), QueueHighWaterItems: km_event_metric_field(&raw, c.Int(i), 5), Saturated: km_event_metric_field(&raw, c.Int(i), 6) != 0})

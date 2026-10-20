@@ -17,7 +17,9 @@ func TestCaptureGlobValidationRetainsDiagnostics(t *testing.T) {
 		parsed := expr.ParsePatternText(a, text, 13)
 		target := template.ParseTarget(a, "glob", text)
 		if i < 5 {
-			if len(parsed.Diagnostics) != 0 || len(target.Diagnostics) != 0 { t.Errorf("valid capture glob %q was rejected", pattern) }
+			if len(parsed.Diagnostics) != 0 || len(target.Diagnostics) != 0 {
+				t.Errorf("valid capture glob %q was rejected", pattern)
+			}
 		} else if len(parsed.Diagnostics) == 0 || len(target.Diagnostics) != 1 {
 			t.Errorf("invalid capture glob %q was accepted", pattern)
 		} else {

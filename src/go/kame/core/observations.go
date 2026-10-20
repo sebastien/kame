@@ -74,9 +74,9 @@ type SignatureRecord struct {
 	Implementation Signature
 	// Guard proves that recorded derived values can be reused without evaluation.
 	// It is a fast-path condition, not part of semantic result equality.
-	Guard          Signature
-	Inputs         []Observation
-	Outputs        []Observation
+	Guard   Signature
+	Inputs  []Observation
+	Outputs []Observation
 }
 
 func sameObservations(left []Observation, right []Observation) bool {

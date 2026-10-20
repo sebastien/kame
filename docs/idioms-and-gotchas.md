@@ -204,9 +204,11 @@ A nonmatching subject remains unchanged under `sub` (or its deprecated alias
 as a predicate for `filter`/`filter-out`. Keep match patterns and expansion
 patterns distinct; their capture/reference groups have different roles.
 Patterns can start with a capture, and bare targets can capture: `{name:*}`
-or `aws-shell-{role-account}`. Exact targets win over templates; two matching
-templates remain ambiguous. Required/optional standalone target arguments are
-implemented separately from captures; see [spec 022](spec/022-target-arguments.md).
+or `aws-shell-{role-account}`. Exact targets win over templates; structurally
+nested single-capture file templates follow [spec 045](spec/045-rule-precedence.md).
+Other competing templates remain ambiguous. Required/optional standalone target
+arguments are implemented separately from captures; see
+[spec 022](spec/022-target-arguments.md).
 
 Three-argument pattern replacement accepts a string or any list of strings,
 including a filtered wildcard result. `**` captures can backtrack across path

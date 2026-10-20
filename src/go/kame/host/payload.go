@@ -31,7 +31,7 @@ const (
 	OpRead           = "read"
 	OpFileContent    = "file-content"
 	OpToolContent    = "tool-content"
-	OpOutputContent = "output-content"
+	OpOutputContent  = "output-content"
 	OpExists         = "exists"
 	OpOutputExists   = "output-exists"
 	OpFileTimes      = "file-times"
@@ -370,7 +370,12 @@ func PipelinePayload(a mem.Allocator, stages []core.Value) core.Value {
 	e.EndArray()
 	e.Flush()
 	program := ""
-	for i := range stages { if len(stages[i].List) != 0 { program = stages[i].List[0].Text; break } }
+	for i := range stages {
+		if len(stages[i].List) != 0 {
+			program = stages[i].List[0].Text
+			break
+		}
+	}
 	fields := []core.RecordField{{Key: FieldStages, Value: core.NewList(a, stages)}, {Key: FieldData, Value: core.NewString(a, b.String())}, {Key: FieldPath, Value: core.NewString(a, program)}}
 	payload := core.NewRecord(a, fields)
 	for i := range fields {
@@ -455,22 +460,58 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 	e.EndArray()
 	kinds := PayloadList(*payload, "kinds")
 	if len(kinds) != 0 {
-		e.Str("kinds"); e.BeginArray()
-		for i := range kinds { e.Str(kinds[i].Text) }
+		e.Str("kinds")
+		e.BeginArray()
+		for i := range kinds {
+			e.Str(kinds[i].Text)
+		}
 		e.EndArray()
 		framed := PayloadList(*payload, "framed")
-		if len(framed) != 0 { e.Str("framed"); e.BeginArray(); for i := range framed { e.Bool(framed[i].Bool) }; e.EndArray() }
+		if len(framed) != 0 {
+			e.Str("framed")
+			e.BeginArray()
+			for i := range framed {
+				e.Bool(framed[i].Bool)
+			}
+			e.EndArray()
+		}
 		buffers := PayloadList(*payload, "buffers")
-		if len(buffers) != 0 { e.Str("buffers"); e.BeginArray(); for i := range buffers { e.Int(buffers[i].Int) }; e.EndArray() }
+		if len(buffers) != 0 {
+			e.Str("buffers")
+			e.BeginArray()
+			for i := range buffers {
+				e.Int(buffers[i].Int)
+			}
+			e.EndArray()
+		}
 		policyFields := []string{"overflows", "bufferItems", "orders"}
 		for _, name := range policyFields {
 			values := PayloadList(*payload, name)
-			if len(values) != 0 { e.Str(name); e.BeginArray(); for i := range values { e.Int(values[i].Int) }; e.EndArray() }
+			if len(values) != 0 {
+				e.Str(name)
+				e.BeginArray()
+				for i := range values {
+					e.Int(values[i].Int)
+				}
+				e.EndArray()
+			}
 		}
-		for i := range payload.Record { if payload.Record[i].Key == "failurePolicy" { e.Str("failurePolicy"); e.Int(payload.Record[i].Value.Int) } }
-		e.Str("edges"); e.BeginArray()
+		for i := range payload.Record {
+			if payload.Record[i].Key == "failurePolicy" {
+				e.Str("failurePolicy")
+				e.Int(payload.Record[i].Value.Int)
+			}
+		}
+		e.Str("edges")
+		e.BeginArray()
 		edges := PayloadList(*payload, "edges")
-		for i := range edges { e.BeginArray(); for j := range edges[i].List { e.Int(edges[i].List[j].Int) }; e.EndArray() }
+		for i := range edges {
+			e.BeginArray()
+			for j := range edges[i].List {
+				e.Int(edges[i].List[j].Int)
+			}
+			e.EndArray()
+		}
 		e.EndArray()
 	}
 	e.Str("input")
@@ -496,9 +537,12 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 	setups := PayloadSetups(*payload)
 	for i := range setups {
 		e.BeginObject()
-		e.Str(FieldInput); e.Str(PayloadText(setups[i], FieldInput))
-		e.Str(FieldOutput); e.Str(PayloadText(setups[i], FieldOutput))
-		e.Str(FieldAppend); e.Bool(PayloadAppend(setups[i]))
+		e.Str(FieldInput)
+		e.Str(PayloadText(setups[i], FieldInput))
+		e.Str(FieldOutput)
+		e.Str(PayloadText(setups[i], FieldOutput))
+		e.Str(FieldAppend)
+		e.Bool(PayloadAppend(setups[i]))
 		e.Str(FieldCwd)
 		e.Str(PayloadText(setups[i], FieldCwd))
 		e.Str(FieldTimeout)

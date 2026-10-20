@@ -13,7 +13,7 @@ cli_build
 test-step "operation contracts identify operands instead of generic arguments"
 cli_run -- do run --lang expr -c '(first 1)'
 cli_expect_status 1
-cli_expect_stderr_contains '<command:1>:1:8: error EXPR_INVALID: `first` argument 1 expects list; got int' 'while operation first'
+cli_expect_stderr_contains '<command:1>:1:8' 'error[EXPR_INVALID]: `first` argument 1 expects list; got int' '#0  operation first'
 if grep -q 'result = (nop' "$CLI_ERR"; then
 	test-fail "expression diagnostic exposes the driver's synthetic wrapper"
 else
@@ -66,7 +66,7 @@ else
 fi
 cli_run -- -l kmk -c "$tools" bad
 cli_expect_status 1
-cli_expect_stderr_contains 'TOOL_MISSING' '@{x/kame-definitely-missing-tool}' 'while rule bad'
+cli_expect_stderr_contains 'TOOL_MISSING' '@{x/kame-definitely-missing-tool}' 'rule bad'
 cli_run -- do tools check -c "$tools"
 cli_expect_status 2
 cli_expect_stderr_contains 'tools check requires at least one target'
@@ -124,10 +124,10 @@ leaf :
 EOF
 cli_run -- -C include-project root
 cli_expect_status 1
-cli_expect_stderr_contains 'rules.kmk:2:17: error EXPR_INVALID:' 'required by root -> leaf'
+cli_expect_stderr_contains 'rules.kmk:2:17' 'error[EXPR_INVALID]:' 'required by root -> leaf'
 cli_run -- -C include-project local
 cli_expect_status 1
-cli_expect_stderr_contains 'Makefile.kmk:4:17: error EXPR_INVALID:' '@(first 1)'
+cli_expect_stderr_contains 'Makefile.kmk:4:17' 'error[EXPR_INVALID]:' '@(first 1)'
 
 test-step "diagnostic causes omit captured output but retain outcome and capture metadata"
 cli_run -- --json --log-limit 4 -l kmk -c $'fails :\n\tprintf diagnostic-secret-output\n\tprintf diagnostic-secret-error >&2\n\texit 7\n' fails

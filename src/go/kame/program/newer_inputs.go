@@ -10,10 +10,10 @@ import (
 
 // One accepted content snapshot serves every newer-input selector in a rule render.
 type newerInputState struct {
-	Paths   []string
-	Names   []string
-	Ready   bool
-	Values  []core.Value
+	Paths  []string
+	Names  []string
+	Ready  bool
+	Values []core.Value
 }
 
 // Scan authored source so selectors reached through helpers share the snapshot.

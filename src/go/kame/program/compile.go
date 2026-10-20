@@ -156,7 +156,9 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		p.Free()
 		return result
 	}
-	if options.AutomaticClean != nil { p.EnableAutomaticClean(options.AutomaticClean, options.AutomaticCleanState) }
+	if options.AutomaticClean != nil {
+		p.EnableAutomaticClean(options.AutomaticClean, options.AutomaticCleanState)
+	}
 	p.nextRequest = 1 << 32
 	result.Program = p
 	return result
@@ -298,16 +300,22 @@ func CompileMany(a mem.Allocator, sources []CompileSource, registry *eval.Regist
 // Remap every located fact before appending already-authored include frames.
 // Primary and related locations can belong to different include occurrences.
 func qualifyCompileDiagnostic(a mem.Allocator, d *diagnostic.Diagnostic, combined string, sources []CompileSource, offsets []int) {
-	if len(sources) == 0 { return }
+	if len(sources) == 0 {
+		return
+	}
 	for i := range d.Frames {
-		if d.Frames[i].Source == combined { qualifyCompileLocation(a, &d.Frames[i].Source, &d.Frames[i].Span, sources, offsets) }
+		if d.Frames[i].Source == combined {
+			qualifyCompileLocation(a, &d.Frames[i].Source, &d.Frames[i].Span, sources, offsets)
+		}
 	}
 	if d.Source == combined {
 		owner := qualifyCompileLocation(a, &d.Source, &d.Span, sources, offsets)
 		appendIncludeFrames(a, d, sources[owner].Includes)
 	}
 	for i := range d.Related {
-		if d.Related[i].Source != combined { continue }
+		if d.Related[i].Source != combined {
+			continue
+		}
 		owner := qualifyCompileLocation(a, &d.Related[i].Source, &d.Related[i].Span, sources, offsets)
 		appendIncludeFrames(a, d, sources[owner].Includes)
 	}
@@ -315,23 +323,32 @@ func qualifyCompileDiagnostic(a mem.Allocator, d *diagnostic.Diagnostic, combine
 
 func qualifyCompileLocation(a mem.Allocator, name *string, span *diagnostic.Span, sources []CompileSource, offsets []int) int {
 	owner := 0
-	for i := 1; i < len(sources); i++ { if offsets[i] <= span.Start { owner = i } }
+	for i := 1; i < len(sources); i++ {
+		if offsets[i] <= span.Start {
+			owner = i
+		}
+	}
 	mem.FreeString(a, *name)
 	*name = cloneText(a, sources[owner].Name)
-	span.Start += sources[owner].Offset-offsets[owner]
-	span.End += sources[owner].Offset-offsets[owner]
+	span.Start += sources[owner].Offset - offsets[owner]
+	span.End += sources[owner].Offset - offsets[owner]
 	return owner
 }
 
 func appendIncludeFrames(a mem.Allocator, d *diagnostic.Diagnostic, frames []diagnostic.Frame) {
-	for i := len(frames)-1; i >= 0; i-- {
+	for i := len(frames) - 1; i >= 0; i-- {
 		frame := frames[i]
 		found := false
 		for j := range d.Frames {
 			other := d.Frames[j]
-			if other.Kind == frame.Kind && other.Label == frame.Label && other.Source == frame.Source && other.Span.Start == frame.Span.Start && other.Span.End == frame.Span.End { found = true; break }
+			if other.Kind == frame.Kind && other.Label == frame.Label && other.Source == frame.Source && other.Span.Start == frame.Span.Start && other.Span.End == frame.Span.End {
+				found = true
+				break
+			}
 		}
-		if !found { d.Frames = slices.Append(a, d.Frames, diagnostic.Frame{Kind: cloneText(a, frame.Kind), Label: cloneText(a, frame.Label), Source: cloneText(a, frame.Source), Span: frame.Span}) }
+		if !found {
+			d.Frames = slices.Append(a, d.Frames, diagnostic.Frame{Kind: cloneText(a, frame.Kind), Label: cloneText(a, frame.Label), Source: cloneText(a, frame.Source), Span: frame.Span})
+		}
 	}
 }
 
@@ -341,13 +358,17 @@ func duplicateLiteral(p *Program, candidate *rule.Rule) diagnostic.Diagnostic {
 			continue
 		}
 		for j := 0; j < i; j++ {
-			if candidate.Outputs[j].Template { continue }
+			if candidate.Outputs[j].Template {
+				continue
+			}
 			first := p.canonicalTarget(candidate.Outputs[j].Text, candidate.Kind == rule.FileRule)
 			second := p.canonicalTarget(candidate.Outputs[i].Text, candidate.Kind == rule.FileRule)
 			equal := first == second
 			mem.FreeString(p.Alloc, first)
 			mem.FreeString(p.Alloc, second)
-			if equal { return p.outputDiagnostic(candidate.Outputs[i].Span, "PARSE_ERR", "duplicate rule output") }
+			if equal {
+				return p.outputDiagnostic(candidate.Outputs[i].Span, "PARSE_ERR", "duplicate rule output")
+			}
 		}
 		for j := range p.Rules {
 			other := p.Rules[j].Rule
@@ -361,7 +382,9 @@ func duplicateLiteral(p *Program, candidate *rule.Rule) diagnostic.Diagnostic {
 					equal := first == second
 					mem.FreeString(p.Alloc, first)
 					mem.FreeString(p.Alloc, second)
-					if equal { return p.producerAmbiguity(candidate.Outputs[i].Text, other.Outputs[k], candidate.Outputs[i]) }
+					if equal {
+						return p.producerAmbiguity(candidate.Outputs[i].Text, other.Outputs[k], candidate.Outputs[i])
+					}
 				}
 			}
 		}
@@ -375,7 +398,9 @@ func (p *Program) Free() {
 	}
 	if !p.Forwarding {
 		p.Eval.BeginFinalization()
-		for p.Eval.Finalizing() { p.tick(10) }
+		for p.Eval.Finalizing() {
+			p.tick(10)
+		}
 	}
 	p.Eval.CancelProcesses()
 	p.Eval.CancelDefers()
@@ -390,7 +415,9 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.Options.RemoteExecutors)
 	for i := range p.Instances {
-		if p.Instances[i].InspectionStatus != nil { p.Instances[i].InspectionStatus.free(p.Alloc) }
+		if p.Instances[i].InspectionStatus != nil {
+			p.Instances[i].InspectionStatus.free(p.Alloc)
+		}
 		slices.Free(p.Alloc, p.Instances[i].Artifacts)
 		p.Instances[i].Plan.Free(p.Alloc)
 		p.Instances[i].Service.Free(p.Alloc)
@@ -399,7 +426,9 @@ func (p *Program) Free() {
 		expr.Free(p.Alloc, p.Instances[i].KameExpression)
 		mem.FreeString(p.Alloc, p.Instances[i].Executor)
 		mem.FreeString(p.Alloc, p.Instances[i].ExecutorVersion)
-		for j := range p.Instances[i].ExecutionInputs { p.Instances[i].ExecutionInputs[j].Free(p.Alloc) }
+		for j := range p.Instances[i].ExecutionInputs {
+			p.Instances[i].ExecutionInputs[j].Free(p.Alloc)
+		}
 		slices.Free(p.Alloc, p.Instances[i].ExecutionInputs)
 		freeStrings(p.Alloc, p.Instances[i].ExecutionOutputs)
 		freeStrings(p.Alloc, p.Instances[i].MetadataEnvironment)
@@ -449,7 +478,9 @@ func (p *Program) Free() {
 	slices.Free(p.Alloc, p.Events)
 	slices.Free(p.Alloc, p.Rules)
 	slices.Free(p.Alloc, p.Tools)
-	for i := range p.Pending { freePendingRequest(p.Alloc, &p.Pending[i]) }
+	for i := range p.Pending {
+		freePendingRequest(p.Alloc, &p.Pending[i])
+	}
 	slices.Free(p.Alloc, p.Pending)
 	for i := range p.Outbound {
 		p.Outbound[i].Free(p.Alloc)

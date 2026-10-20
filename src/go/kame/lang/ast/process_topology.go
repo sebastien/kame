@@ -13,58 +13,125 @@ func (e *astEncoder) processTopology(value *expr.Expr) {
 	defer expr.Free(mem.System, flat)
 	r := eval.InspectProcessTopology(mem.System, value, flat)
 	defer r.Free(mem.System)
-	e.Str("topology"); e.BeginObject()
-	e.Str("failure"); e.Str(expr.StreamFailureName(flat.StreamFailure))
+	e.Str("topology")
+	e.BeginObject()
+	e.Str("failure")
+	e.Str(expr.StreamFailureName(flat.StreamFailure))
 	if len(value.Channels) != 0 {
-		e.Str("channels"); e.BeginArray()
-		for i := range value.Channels { e.Str(value.Channels[i]) }
+		e.Str("channels")
+		e.BeginArray()
+		for i := range value.Channels {
+			e.Str(value.Channels[i])
+		}
 		e.EndArray()
 	}
 	if r.Diagnostic.Code != "" {
-		e.Str("diagnostic"); e.Str(r.Diagnostic.Code)
-		e.Str("span"); e.span(flat.Span)
+		e.Str("diagnostic")
+		e.Str(r.Diagnostic.Code)
+		e.Str("span")
+		e.span(flat.Span)
 	} else {
-		e.Str("nodes"); e.BeginArray()
+		e.Str("nodes")
+		e.BeginArray()
 		for i := range flat.Items {
 			node := flat.Items[i]
 			e.BeginObject()
-			e.Str("id"); e.Int(int64(i))
-			e.Str("kind"); if node.Each { e.Str("each"); e.Str("maxWorkers"); e.Int(1) } else if node.Kind == expr.CommandStage { e.Str("process") } else { e.Str(node.Text) }
-			e.Str("span"); e.span(node.Span)
-			e.Str("outputKind"); if flat.StreamKinds[i] == 1 { e.Str("lines") } else { e.Str("bytes") }
+			e.Str("id")
+			e.Int(int64(i))
+			e.Str("kind")
+			if node.Each {
+				e.Str("each")
+				e.Str("maxWorkers")
+				e.Int(1)
+			} else if node.Kind == expr.CommandStage {
+				e.Str("process")
+			} else {
+				e.Str(node.Text)
+			}
+			e.Str("span")
+			e.span(node.Span)
+			e.Str("outputKind")
+			if flat.StreamKinds[i] == 1 {
+				e.Str("lines")
+			} else {
+				e.Str("bytes")
+			}
 			if node.Kind == expr.CommandMux {
 				inputs, outputs := 0, 0
-				for j := range flat.Edges { if flat.Edges[j].To == i { inputs++ }; if flat.Edges[j].From == i { outputs++ } }
-				e.Str("inputCount"); e.Int(int64(inputs))
-				e.Str("outputCount"); e.Int(int64(outputs))
-				budget := node.Int
-				if budget == 0 { budget = 16384; if flat.StreamKinds[i] == 1 || node.Text == "encode" { budget = 65536 } }
-				e.Str("bufferBytes"); e.Int(budget)
-				e.Str("bufferScope"); e.Str("per-input")
-				e.Str("overflow"); e.Str(expr.StreamOverflowName(node.StreamOverflow))
-				if node.StreamOverflow != 0 {
-					e.Str("queueItems"); e.Int(int64(node.BufferItems))
-					e.Str("queueBufferBytes"); e.Int(budget)
-					e.Str("inFlightRecords"); e.Int(1)
+				for j := range flat.Edges {
+					if flat.Edges[j].To == i {
+						inputs++
+					}
+					if flat.Edges[j].From == i {
+						outputs++
+					}
 				}
-				e.Str("failure"); e.Str(expr.StreamFailureName(flat.StreamFailure))
-				if node.Text == "balance" { e.Str("strategy"); e.Str("round-robin") }
+				e.Str("inputCount")
+				e.Int(int64(inputs))
+				e.Str("outputCount")
+				e.Int(int64(outputs))
+				budget := node.Int
+				if budget == 0 {
+					budget = 16384
+					if flat.StreamKinds[i] == 1 || node.Text == "encode" {
+						budget = 65536
+					}
+				}
+				e.Str("bufferBytes")
+				e.Int(budget)
+				e.Str("bufferScope")
+				e.Str("per-input")
+				e.Str("overflow")
+				e.Str(expr.StreamOverflowName(node.StreamOverflow))
+				if node.StreamOverflow != 0 {
+					e.Str("queueItems")
+					e.Int(int64(node.BufferItems))
+					e.Str("queueBufferBytes")
+					e.Int(budget)
+					e.Str("inFlightRecords")
+					e.Int(1)
+				}
+				e.Str("failure")
+				e.Str(expr.StreamFailureName(flat.StreamFailure))
+				if node.Text == "balance" {
+					e.Str("strategy")
+					e.Str("round-robin")
+				}
 				if node.Text == "merge" {
-					e.Str("ordering"); if node.StreamOrder == 1 { e.Str("round-robin") } else { e.Str("per-input") }
-					e.Str("strategy"); if node.StreamOrder == 1 { e.Str("round-robin") } else { e.Str("round-robin-ready") }
+					e.Str("ordering")
+					if node.StreamOrder == 1 {
+						e.Str("round-robin")
+					} else {
+						e.Str("per-input")
+					}
+					e.Str("strategy")
+					if node.StreamOrder == 1 {
+						e.Str("round-robin")
+					} else {
+						e.Str("round-robin-ready")
+					}
 				}
 			}
-			if node.Kind == expr.CommandMux && node.Text == "filter" { e.Str("predicateSpan"); e.span(node.Items[0].Span) }
+			if node.Kind == expr.CommandMux && node.Text == "filter" {
+				e.Str("predicateSpan")
+				e.span(node.Items[0].Span)
+			}
 			e.EndObject()
 		}
 		e.EndArray()
-		e.Str("edges"); e.BeginArray()
+		e.Str("edges")
+		e.BeginArray()
 		for i := range flat.Edges {
 			edge := flat.Edges[i]
 			e.BeginObject()
-			e.Str("from"); e.Int(int64(edge.From))
-			e.Str("to"); e.Int(int64(edge.To))
-			if edge.Argument != 0 { e.Str("argumentItem"); e.Int(int64(edge.Argument)) }
+			e.Str("from")
+			e.Int(int64(edge.From))
+			e.Str("to")
+			e.Int(int64(edge.To))
+			if edge.Argument != 0 {
+				e.Str("argumentItem")
+				e.Int(int64(edge.Argument))
+			}
 			e.EndObject()
 		}
 		e.EndArray()

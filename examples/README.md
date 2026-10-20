@@ -3,8 +3,8 @@
 **Describe values. Describe dependencies. Describe processes. Then discover
 the computation they describe together.**
 
-Use a CLI built from matching sources; see [the migration note](../MIGRATION.md)
-for older syntax.
+Use a CLI built from matching sources; see the
+[language overview](../docs/skills/kame/ref/language.md) for current syntax.
 
 ## Three entry points, one shared engine
 

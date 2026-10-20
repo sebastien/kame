@@ -14,7 +14,9 @@ import (
 func (r *Runtime) TargetOperandsJSON(encoded string) PureResult {
 	if r == nil || r.Program == nil {
 		a := mem.System
-		if r != nil { a = r.Alloc }
+		if r != nil {
+			a = r.Alloc
+		}
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "no compiled build source")}
 	}
 	var value core.Value

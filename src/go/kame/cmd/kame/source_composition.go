@@ -14,23 +14,30 @@ import (
 	"solod.dev/so/os"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
-	"solod.dev/so/strings"
 )
 
-func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, authored *source.Source, lang string) program.PredicateResult {
-	b := strings.NewBuilder(mem.System)
-	defer b.Free()
-	b.WriteString(s.SelectionPrefix)
+func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, authored *source.Source, lang string, includes []diagnostic.Frame) program.PredicateResult {
+	sources := slices.Clone(mem.System, s.SelectionPrefix)
 	for i := range s.Parts {
-		writeSelectionDefinitions(&b, s.Parts[i].Name, s.Parts[i].Text, lang)
+		sources = selectionDefinitions(sources, s.Parts[i], lang)
 	}
-	result := program.CompositionCondition(mem.System, authored.Name, b.String(), authored.Text[condition.Span.Start:condition.Span.End], s.SelectionDefines, s.SelectionEnvironment)
+	defer slices.Free(mem.System, sources)
+	directory := s.SelectionDirectory
+	buffer := mem.AllocSlice[byte](mem.System, os.MaxPathLen, os.MaxPathLen)
+	defer mem.FreeSlice(mem.System, buffer)
+	if !path.IsAbs(directory) {
+		cwd, err := os.Getwd(buffer)
+		if err != nil || cwd == "" {
+			sourceError(out, "FS_ERR", "cannot resolve configuration evaluation directory", s.JSON)
+			s.Status = 1
+			return program.PredicateResult{Diagnostic: diagnostic.Diagnostic{Code: "FS_ERR"}}
+		}
+		directory = path.Join(mem.System, cwd, directory)
+		defer mem.FreeString(mem.System, directory)
+	}
+	result := program.CompositionConditionSources(mem.System, sources, program.CompileSource{Name: authored.Name, Text: authored.Text[condition.Span.Start:condition.Span.End], Offset: condition.Span.Start, Includes: includes}, s.SelectionDefines, s.SelectionEnvironment, directory)
 	if result.Diagnostic.Code != "" {
-		view := result.Diagnostic
-		view.Owned = false
-		view.Source = authored.Name
-		view.Span = diagnostic.Span{Start: condition.Span.Start, End: condition.Span.End}
-		emitDiagnostic(out, view, s.JSON, authored)
+		emitDiagnostic(out, result.Diagnostic, s.JSON, authored)
 		s.Status = 1
 	}
 	return result
@@ -51,7 +58,7 @@ func (s *buildSource) expandSourceComposition(fileIndex int, expression *expr.Ex
 		return false
 	}
 	for i := 1; i+1 < len(expression.Items); i += 2 {
-		result := s.compositionCondition(expression.Items[i], out, authored, lang)
+		result := s.compositionCondition(expression.Items[i], out, authored, lang, s.Files[fileIndex].Includes)
 		selected := result.Selected
 		failed := result.Diagnostic.Code != ""
 		result.Diagnostic.Free(mem.System)
@@ -113,26 +120,26 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 	return expandIncludesLanguage(s, len(s.Files)-1, out, lang)
 }
 
-func inlineRunSource(name string, text string, lang string, json bool, defines []string, environment []string, out io.Writer, prefix string) buildSource {
-	result := buildSource{JSON: json, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), environment)}
+func inlineRunSource(name string, text string, lang string, json bool, defines []string, environment []string, out io.Writer, prefix []program.CompileSource, directory string) buildSource {
+	result := buildSource{JSON: json, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), environment), SelectionDirectory: directory}
 	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: name, Text: text, Parent: -1})
 	if !expandIncludesLanguage(&result, 0, out, lang) {
 		result.Status = 1
 	}
-	result.SelectionPrefix = ""
+	result.SelectionPrefix = nil
 	result.SelectionDefines = nil
 	return result
 }
 
-func selectionPrefix(fragments []program.Fragment) string {
-	b := strings.NewBuilder(mem.System)
-	defer b.Free()
+func selectionPrefix(fragments []program.Fragment) []program.CompileSource {
+	var sources []program.CompileSource
 	for i := range fragments {
 		if fragments[i].Lang == "km" || fragments[i].Lang == "kmk" {
-			writeSelectionDefinitions(&b, fragments[i].Name, fragments[i].Text, fragments[i].Lang)
+			f := fragments[i]
+			sources = selectionDefinitions(sources, program.CompileSource{Name: f.Name, Text: f.Text, Offset: f.Offset, Includes: f.Includes}, f.Lang)
 		}
 	}
-	return cloneCommandText(b.String())
+	return sources
 }
 
 // selectionOverrides returns an owned slice of borrowed declaration-selection
@@ -149,39 +156,39 @@ func loadRunSourceInput(inv cli.Invocation, input cli.RunInput, fragments []prog
 	defines := selectionOverrides(inv.Defines, inv.Parameters)
 	defer slices.Free(mem.System, defines)
 	prefix := selectionPrefix(fragments)
-	defer mem.FreeString(mem.System, prefix)
+	defer slices.Free(mem.System, prefix)
 	if input.Kind == "discover" {
 		return loadBuildSourceWithPrefix(buildArguments{Directory: inv.Directory, JSON: inv.JSON, Defines: defines, Environment: inv.Environment}, out, true, prefix)
 	}
 	name := input.Value
 	if path.IsAbs(name) {
-		return readRunSourceConfigured(name, out, input.Lang, inv.JSON, defines, inv.Environment, prefix)
+		return readRunSourceConfigured(name, out, input.Lang, inv.JSON, defines, inv.Environment, prefix, inv.Directory)
 	}
 	resolved := path.Join(mem.System, inv.Directory, name)
 	defer mem.FreeString(mem.System, resolved)
-	return readRunSourceConfigured(resolved, out, input.Lang, inv.JSON, defines, inv.Environment, prefix)
+	return readRunSourceConfigured(resolved, out, input.Lang, inv.JSON, defines, inv.Environment, prefix, inv.Directory)
 }
 
 func inlineRunSourceInput(inv cli.Invocation, name string, text string, lang string, fragments []program.Fragment, out io.Writer) buildSource {
 	defines := selectionOverrides(inv.Defines, inv.Parameters)
 	defer slices.Free(mem.System, defines)
 	prefix := selectionPrefix(fragments)
-	defer mem.FreeString(mem.System, prefix)
-	return inlineRunSource(name, text, lang, inv.JSON, defines, inv.Environment, out, prefix)
+	defer slices.Free(mem.System, prefix)
+	return inlineRunSource(name, text, lang, inv.JSON, defines, inv.Environment, out, prefix, inv.Directory)
 }
 
 // Predicate configuration consists only of declarations. Value statements and
 // recipes retain their own grammar and execute later in the composed session.
-func writeSelectionDefinitions(b *strings.Builder, name string, text string, lang string) {
-	authored := source.New(mem.System, name, text)
+func selectionDefinitions(sources []program.CompileSource, part program.CompileSource, lang string) []program.CompileSource {
+	authored := source.New(mem.System, part.Name, part.Text)
 	defer authored.Free(mem.System)
-	parsed := script.ParseFragment(mem.System, authored, lang, 0, len(text))
+	parsed := script.ParseFragment(mem.System, authored, lang, 0, len(part.Text))
 	defer parsed.Free()
 	for i := range parsed.Items {
 		item := parsed.Items[i]
 		if item.Kind == script.Definition {
-			b.WriteString(text[item.Span.Start:item.Span.End])
-			b.WriteByte('\n')
+			sources = slices.Append(mem.System, sources, program.CompileSource{Name: part.Name, Text: part.Text[item.Span.Start:item.Span.End], Offset: part.Offset + item.Span.Start, Includes: part.Includes})
 		}
 	}
+	return sources
 }

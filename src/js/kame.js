@@ -218,6 +218,7 @@ function resolveColor(color, format, destination = stderr) {
 }
 
 const semanticStyles = {
+	'worker.tool': '33',
   'target.rule': '33', 'target.service': '36', 'target.task': '35', 'target.artifact': '34',
   heading: '1', 'value.target': '1', 'value.symbol': '1', 'value.tool': '1', 'value.option': '1', 'diagnostic.code': '1',
   'value.path': '36', location: '36', 'message.info': '36', 'status.running': '36', 'progress.complete': '36',
@@ -679,7 +680,7 @@ function marker(text, lineStart, start, end, lineEnd) {
   let out = '';
   let column = 1;
   for (let i = lineStart; i < start;) {
-    if (text[i] === '\t') { out += '\t'; column += 8 - (column - 1) % 8; i++; continue; }
+    if (text[i] === '\t') { const cells = 8 - (column - 1) % 8; out += ' '.repeat(cells); column += cells; i++; continue; }
     const rune = runeAt(text, i);
     out += ' '.repeat(displayWidth(rune.code));
     column += displayWidth(rune.code);
@@ -699,19 +700,47 @@ function marker(text, lineStart, start, end, lineEnd) {
   return `${out}^${'~'.repeat(width - 1)}\n`;
 }
 
-function wrappedExcerpt(text, lineStart, lineEnd, start, end, width) {
-  if (lineStart === lineEnd) return `\n${marker(text, lineStart, start, end, lineEnd)}`;
+function excerptText(text) {
+  let column = 1;
   let out = '';
-  let marked = false;
-  let segmentStart = lineStart;
-  while (segmentStart < lineEnd) {
-    const segmentEnd = excerptSegmentEnd(text, segmentStart, lineEnd, width);
-    out += `${text.slice(segmentStart, segmentEnd)}\n`;
-    if (!marked && start >= segmentStart && (start < segmentEnd || (segmentEnd === lineEnd && start === segmentEnd))) {
-      out += marker(text, segmentStart, start, end, segmentEnd);
-      marked = true;
-    }
-    segmentStart = segmentEnd;
+  for (const char of text) {
+    const cells = char === '\t' ? 8 - (column - 1) % 8 : displayWidth(char.codePointAt(0));
+    out += char === '\t' ? ' '.repeat(cells) : char;
+    column += cells;
+  }
+  return out;
+}
+
+function diagnosticExcerpt(text, lineStart, lineEnd, start, end, width, line, token) {
+  const rich = diagnosticFormat === 'human';
+  const style = rich && diagnosticColor;
+  const number = line ? String(line) : '';
+  const rail = rich ? ' │ ' : ' | ';
+  const ellipsis = rich ? '…' : '...';
+  const ellipsisWidth = rich ? 1 : 3;
+  const gutter = line ? ` ${number}${rail}` : `    ${rail}`;
+  width = Math.max(8, width - number.length - 4 - (line ? 0 : 3));
+  let windowStart = lineStart;
+  let windowEnd = excerptSegmentEnd(text, windowStart, lineEnd, width);
+  const focusLimit = excerptSegmentEnd(text, lineStart, lineEnd, width - ellipsisWidth);
+  if ((start >= focusLimit || end > focusLimit) && windowEnd < lineEnd) {
+    const column = sourcePosition(text.slice(lineStart, start), start - lineStart).column - 1;
+    const context = Math.max(0, Math.min(Math.floor(width / 3), width - 2 * ellipsisWidth - 2));
+    if (column > context) windowStart = excerptSegmentEnd(text, lineStart, start, column - context);
+  }
+  const left = windowStart > lineStart;
+  if (left) width -= ellipsisWidth;
+  windowEnd = excerptSegmentEnd(text, windowStart, lineEnd, width);
+  const right = windowEnd < lineEnd;
+  if (right) windowEnd = excerptSegmentEnd(text, windowStart, lineEnd, width - ellipsisWidth);
+  let out = styled('structure', gutter, style) + (left ? styled('text.muted', ellipsis, style) : '')
+    + excerptText(text.slice(windowStart, windowEnd)) + (right ? styled('text.muted', ellipsis, style) : '') + '\n';
+  if (line) {
+    const mark = marker(text, windowStart, start, end, windowEnd).trimEnd();
+    const indent = mark.search(/\S/u);
+    const range = !rich ? mark.slice(indent) : mark.length - indent === 1 ? '╵' : `╰${'─'.repeat(mark.length - indent - 2)}╯`;
+    out += ' '.repeat(number.length + 1) + styled('structure', rail, style) + (left ? ' '.repeat(ellipsisWidth) : '')
+      + mark.slice(0, indent) + styled(token, range, style) + '\n';
   }
   return out;
 }
@@ -727,70 +756,66 @@ function severityName(severity) {
 function renderDiagnostic(d, source, width) {
   if (width < 20) width = 80;
   let out = '';
-  const renderSource = diagnosticSource(d.source, source);
   const style = diagnosticColor && diagnosticFormat === 'human';
   const label = styled(`message.${severityName(d.severity)}`, severityName(d.severity), style);
   const code = styled('diagnostic.code', d.code, style);
+  out += `${label}[${code}]: ${d.target ? `[${d.target}] ` : ''}${d.message}\n`;
   if (d.target) {
-    if (diagnosticFormat === 'human') out += `${label} [${d.target}] ${code}\n`;
-    else out += `${d.target} failed: ${d.code}\n`;
     if (d.targetStack && d.targetStack.length > 1) {
       out += `  required by ${d.targetStack.join(' -> ')}\n`;
     }
   }
-  const span = d.span ?? { start: 0, end: 0 };
-  if (d.source && renderSource && d.source === renderSource.name) {
-    const sourceStart = sourceIndex(renderSource.text, span.start);
-    const sourceEnd = sourceIndex(renderSource.text, span.end);
-    const pos = sourcePosition(renderSource.text, sourceStart);
-    out += `${d.source}:${pos.line}:${pos.column}: ${label} ${code}: ${d.message}\n`;
-    let start = sourceStart;
-    if (start < 0) start = 0;
-    if (start > renderSource.text.length) start = renderSource.text.length;
-    const [lineStart, lineEnd] = lineBounds(renderSource.text, start);
-    out += wrappedExcerpt(renderSource.text, lineStart, lineEnd, start, sourceEnd, width);
-  } else if (d.source) {
-    out += `${d.source}: ${label} ${code}: ${d.message}\n`;
-  } else {
-    out += `${label} ${code}: ${d.message}\n`;
+  out += diagnosticSourceBlock(d.source, d.span, source, width, `message.${severityName(d.severity)}`);
+  if (d.frames?.length) out += `\n${styled('heading', 'Trace (innermost first)', style)}\n`;
+  for (const [i, frame] of (d.frames ?? []).entries()) {
+    const rich = diagnosticFormat === 'human';
+    const branch = rich ? i === d.frames.length - 1 ? '  ╰─ ' : '  ├─ ' : '  ';
+    const labelToken = frame.kind === 'definition' ? 'target.task' : frame.kind === 'include' ? 'value.path' : 'worker.tool';
+    out += styled('structure', branch, style) + styled('text.muted', `#${i}  `, style)
+      + (frame.kind ? styled('text.muted', `${frame.kind} `, style) : '') + styled(labelToken, frame.label, style);
+    const frameSource = frame.source && diagnosticSource(frame.source, source);
+    let start, lineStart, lineEnd;
+    if (frame.source) {
+      let location = frame.source;
+      if (frameSource?.name === frame.source) {
+        start = sourceIndex(frameSource.text, frame.span?.start ?? 0);
+        const pos = sourcePosition(frameSource.text, start);
+        location += `:${pos.line}:${pos.column}`;
+        [lineStart, lineEnd] = lineBounds(frameSource.text, start);
+      }
+      out += styled('structure', rich ? ' · ' : ' at ', style) + styled('location', location, style);
+    }
+    out += '\n';
+    if (frameSource && frameSource.name === frame.source && ![d, ...d.frames.slice(0, i)].some((earlier) => earlier.source === frame.source && lineBounds(frameSource.text, sourceIndex(frameSource.text, earlier.span?.start ?? 0))[0] === lineStart)) {
+      out += diagnosticExcerpt(frameSource.text, lineStart, lineEnd, start, sourceIndex(frameSource.text, frame.span?.end ?? 0), width, 0, '');
+    }
   }
   for (const note of d.notes ?? []) out += `note: ${note}\n`;
   for (const related of d.related ?? []) {
-    out += 'note: ';
-    if (related.source) {
-      const relatedSource = diagnosticSource(related.source, renderSource);
-      if (relatedSource && relatedSource.name === related.source) {
-        const pos = sourcePosition(relatedSource.text, sourceIndex(relatedSource.text, (related.span ?? { start: 0 }).start));
-        out += `${related.source}:${pos.line}:${pos.column}: `;
-      } else {
-        out += `${related.source}: `;
-      }
-    }
-    out += `${related.message}\n`;
+    out += `note: ${related.message}\n`;
+    out += diagnosticSourceBlock(related.source, related.span, source, width, 'location');
   }
-  for (const frame of d.frames ?? []) {
-    out += 'while ';
-    if (frame.kind) out += `${frame.kind} `;
-    out += frame.label;
-    if (frame.source) {
-      const frameSource = diagnosticSource(frame.source, renderSource);
-      if (frameSource && frameSource.name === frame.source) {
-        const pos = sourcePosition(frameSource.text, sourceIndex(frameSource.text, (frame.span ?? { start: 0 }).start));
-        out += ` at ${frame.source}:${pos.line}:${pos.column}`;
-      } else {
-        out += ` at ${frame.source}`;
-      }
-    }
-    out += '\n';
-  }
-  for (const tip of d.tips ?? []) out += `help: ${tip}\n`;
+  for (const tip of d.tips ?? []) out += `${styled('message.tip', 'help: ', style)}${tip}\n`;
   if (d.cause && d.cause.kind) {
-    out += `caused by: ${d.cause.message}`;
+    out += `caused by: ${d.cause.message || (d.cause.kind === 'process' ? 'process exited' : d.cause.kind)}`;
     if (d.cause.status !== undefined) out += ` (status ${d.cause.status})`;
     if (d.cause.signal !== undefined) out += ` (signal ${d.cause.signal})`;
     out += '\n';
   }
   return out;
+}
+
+function diagnosticSourceBlock(name, span, primary, width, token) {
+  if (!name) return '';
+  const style = diagnosticFormat === 'human' && diagnosticColor;
+  const arrow = styled('structure', diagnosticFormat === 'human' ? '  ╭─ ' : '  --> ', style);
+  const source = diagnosticSource(name, primary);
+  if (!source || source.name !== name) return arrow + styled('location', name, style) + '\n';
+  const start = sourceIndex(source.text, span?.start ?? 0);
+  const end = sourceIndex(source.text, span?.end ?? 0);
+  const pos = sourcePosition(source.text, start);
+  const [lineStart, lineEnd] = lineBounds(source.text, start);
+  return arrow + styled('location', `${name}:${pos.line}:${pos.column}`, style) + '\n' + diagnosticExcerpt(source.text, lineStart, lineEnd, start, end, width, pos.line, token);
 }
 
 // diagnosticSource uses the primary source when the names match, otherwise
@@ -839,12 +864,12 @@ function humanEvent(bytes) {
     return;
   }
   if (event.type === 'target-failed') {
-    stderr.write(`${styled('status.failed', `error [${event.target}] failed${outcomeCause(event.diagnostic)}`)}\n`);
+    stderr.write(`${styled('status.failed', `error [${event.target}] failed`)}\n`);
     if (event.diagnostic) lastDiagnostic = event.diagnostic;
     return;
   }
   if (event.type === 'target-cancelled') {
-    stderr.write(`${styled('status.cancelled', `cancelled [${event.target}] cancelled${outcomeCause(event.diagnostic)}`)}\n`);
+    stderr.write(`${styled('status.cancelled', `cancelled [${event.target}] cancelled`)}\n`);
     if (event.diagnostic) lastDiagnostic = event.diagnostic;
     return;
   }
@@ -857,12 +882,6 @@ function humanEvent(bytes) {
   }
 }
 
-function outcomeCause(diagnostic) {
-  if (!diagnostic?.code) return '';
-  const cause = diagnostic.cause;
-  return ` ${diagnostic.code}: ${diagnostic.message}${cause?.status !== undefined ? ` (status ${cause.status})` : ''}${cause?.signal !== undefined ? ` (signal ${cause.signal})` : ''}`;
-}
-
 function eventData(event) {
   if (event.data === undefined) return '';
   if (event.encoding === 'base64') return Buffer.from(event.data, 'base64');
@@ -872,7 +891,7 @@ function eventData(event) {
 function printSummary(counts = buildProgress, status = 0, elapsedMS = performance.now() - buildStartedAt, command = presentationCommand) {
   clearDashboard();
   const label = status >= 128 || (counts.cancelled && !counts.failed && status) ? 'cancelled' : status && (presentationCommand !== 'fmt' || invocationHadDiagnostic) ? 'error' : 'done';
-  stderr.write(`${styled(label === 'done' ? 'status.success' : label === 'error' ? 'status.failed' : 'status.cancelled', label)} ${command} · ${counts.completed} ${presentationCommand === 'fmt' ? 'files' : 'targets'} complete · ${counts.failed} failed · ${counts.cancelled} cancelled · ${Math.max(0, Math.floor(elapsedMS))}ms\n`);
+  stderr.write(`${styled(label === 'done' ? 'status.success' : label === 'error' ? 'status.failed' : 'status.cancelled', `${label} `)}${command} · ${counts.completed} ${presentationCommand === 'fmt' ? 'files' : 'targets'} complete · ${counts.failed} failed · ${counts.cancelled} cancelled · ${Math.max(0, Math.floor(elapsedMS))}ms\n`);
 }
 
 function diagnosticError(text, fallbackCode) {
@@ -4034,7 +4053,7 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
   const append = (end) => {
     const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), offset: start, ...(includes.length ? { includes } : {}) };
     parts.push(part);
-    selection.parts.push(document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => new TextDecoder().decode(bytes.subarray(item.span.start, item.span.end))).join('\n'));
+    selection.parts.push(...document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => ({ name, text: slice(item.span), offset: item.span.start, ...(includes.length ? { includes } : {}) })));
   };
   const include = async (path, optional, span) => {
     if (!fileBacked) {
@@ -4074,12 +4093,12 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
       const condition = args[i];
       let selected;
       try {
-        selected = await module.compositionCondition({ name, prefix: selection.parts.join('\n'), predicate: slice(condition.span), defines: selection.defines, environment: selection.environment });
+        selected = await module.compositionCondition({ sources: selection.parts, condition: { name, text: slice(condition.span), offset: condition.span.start, ...(includes.length ? { includes } : {}) }, defines: selection.defines, environment: selection.environment, directory: process.cwd() });
       } catch (error) {
         primarySource = { name, text };
-        error.span = condition.span;
+        error.span ??= condition.span;
         const details = error.diagnostics ?? [{ code: error.code ?? 'EXPR_INVALID', severity: 'error', message: error.message }];
-        error.diagnostics = details.map((detail) => ({ ...detail, source: name, span: condition.span }));
+        error.diagnostics = details.map((detail) => detail.source ? detail : { ...detail, source: name, span: condition.span });
         throw error;
       }
       if (selected) return compose(args[i + 1]);
@@ -4803,6 +4822,10 @@ async function dispatchCommand(module, inv, noArguments) {
   sourceTexts.clear();
   const sourceDirectory = process.cwd();
   applyDirectory(inv);
+  if (inv.name === 'pick') {
+    diagnostic('FEATURE_UNSUP', 'interactive pick requires the native POSIX CLI');
+    return 1;
+  }
   if (inv.name === 'help') {
     const topic = inv.args[0] || 'do';
     const help = await module.parseCLI('@help', [topic, '--output', outputMode]);

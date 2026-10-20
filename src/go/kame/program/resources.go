@@ -37,7 +37,10 @@ func (p *Program) InvalidateResource(key core.ResourceKey) {
 func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 	if key.Kind == core.ResourceGlob {
 		result := p.wildcard(key.Name)
-		if result.Diagnostic.Code != "" { result.Diagnostic.Free(p.Alloc); return cloneText(p.Alloc, "unavailable") }
+		if result.Diagnostic.Code != "" {
+			result.Diagnostic.Free(p.Alloc)
+			return cloneText(p.Alloc, "unavailable")
+		}
 		value := result.Value
 		b := strings.NewBuilder(p.Alloc)
 		for i := range value.List {
@@ -56,7 +59,10 @@ func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 	completion.Value.Free(p.Alloc)
 	if completion.Diagnostic.Code != "" {
 		completion.Diagnostic.Free(p.Alloc)
-		if !metadataObserved { mem.FreeString(p.Alloc, name); return cloneText(p.Alloc, "unavailable") }
+		if !metadataObserved {
+			mem.FreeString(p.Alloc, name)
+			return cloneText(p.Alloc, "unavailable")
+		}
 	}
 	if signature.Mode == core.SignatureMissing && !metadataObserved {
 		mem.FreeString(p.Alloc, name)

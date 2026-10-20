@@ -20,7 +20,10 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 			// Its content is unavailable, not a failed no-follow metadata view.
 			if op == host.OpFileContent {
 				link := p.Host.Lstat(filename)
-				if link.Exists && link.Info.Symlink { completion.Value, completion.HasValue = core.Value{Kind: core.Bool}, true; return completion }
+				if link.Exists && link.Info.Symlink {
+					completion.Value, completion.HasValue = core.Value{Kind: core.Bool}, true
+					return completion
+				}
 			}
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot stat file")
 			return completion
@@ -66,20 +69,30 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 	}
 	if op == host.OpReadlink {
 		result := p.Host.Readlink(p.Alloc, filename)
-		if result.Failed { mem.FreeString(p.Alloc, result.Target); completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot read symbolic link"); return completion }
+		if result.Failed {
+			mem.FreeString(p.Alloc, result.Target)
+			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot read symbolic link")
+			return completion
+		}
 		completion.Value, completion.HasValue = core.NewString(p.Alloc, result.Target), true
 		mem.FreeString(p.Alloc, result.Target)
 		return completion
 	}
 	if op == host.OpStat || op == host.OpLstat {
 		var result host.StatResult
-		if op == host.OpLstat { result = p.Host.Lstat(filename) } else { result = p.Host.Stat(filename) }
+		if op == host.OpLstat {
+			result = p.Host.Lstat(filename)
+		} else {
+			result = p.Host.Stat(filename)
+		}
 		if !result.Exists {
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot stat file")
 			return completion
 		}
 		fields := []core.RecordField{{Key: "name", Value: core.NewString(p.Alloc, name)}, {Key: "size", Value: core.Value{Kind: core.Int, Int: result.Info.Size}}, {Key: "mode", Value: core.Value{Kind: core.Int, Int: int64(result.Info.Mode)}}, {Key: "dir", Value: core.Value{Kind: core.Bool, Bool: result.Info.IsDir}}, {Key: "link", Value: core.Value{Kind: core.Bool, Bool: result.Info.Symlink}}, {Key: "regular", Value: core.Value{Kind: core.Bool, Bool: result.Info.Regular}}}
-		if op == host.OpStat { fields = fields[:4] }
+		if op == host.OpStat {
+			fields = fields[:4]
+		}
 		completion.Value, completion.HasValue = core.NewRecord(p.Alloc, fields), true
 		for i := range fields {
 			fields[i].Value.Free(p.Alloc)
@@ -111,7 +124,9 @@ func (p *Program) wildcard(pattern string) core.Completion {
 	failed := false
 	p.collectGlob(pattern, start, root, &names, &failed)
 	if failed {
-		for i := range names { mem.FreeString(p.Alloc, names[i]) }
+		for i := range names {
+			mem.FreeString(p.Alloc, names[i])
+		}
 		slices.Free(p.Alloc, names)
 		return core.Completion{Diagnostic: failure(p.Alloc, "FS_ERR", "cannot traverse wildcard path")}
 	}
@@ -168,7 +183,9 @@ func joinFilesystemPath(a mem.Allocator, directory string, child string) string 
 		// POSIX directory entries are decoded names. Join in path space, then
 		// serialize once; memory-host entries already use canonical URI spelling.
 		name := directory
-		if name == "file://" { name = "file:///" }
+		if name == "file://" {
+			name = "file:///"
+		}
 		parsed := core.ParseResourceURI(a, name)
 		if parsed.Error == "" {
 			joined := path.Join(a, parsed.URI.Path, child)
@@ -236,10 +253,16 @@ func globRoot(a mem.Allocator, pattern string) string {
 }
 
 func (p *Program) collectGlob(pattern string, pos int, directory string, names *[]string, failed *bool) {
-	if *failed { return }
+	if *failed {
+		return
+	}
 	if pos >= len(pattern) {
 		info := p.Host.Lstat(directory)
-		if info.Failed { *failed = true } else if info.Exists { *names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, directory)) }
+		if info.Failed {
+			*failed = true
+		} else if info.Exists {
+			*names = slices.Append(p.Alloc, *names, cloneText(p.Alloc, directory))
+		}
 		return
 	}
 	end := pos
@@ -282,9 +305,15 @@ func (p *Program) collectGlob(pattern string, pos int, directory string, names *
 	if !meta {
 		name := joinFilesystemPath(p.Alloc, directory, segment)
 		var info host.StatResult
-		if end == len(pattern) { info = p.Host.Lstat(name) } else { info = p.Host.Stat(name) }
+		if end == len(pattern) {
+			info = p.Host.Lstat(name)
+		} else {
+			info = p.Host.Stat(name)
+		}
 		if !info.Exists {
-			if info.Failed { *failed = true }
+			if info.Failed {
+				*failed = true
+			}
 			mem.FreeString(p.Alloc, name)
 			return
 		}
@@ -323,7 +352,9 @@ func (p *Program) globDirectoryFailed(directory string) bool {
 }
 
 func (p *Program) collectDescendants(directory string, names *[]string, failed *bool) {
-	if *failed { return }
+	if *failed {
+		return
+	}
 	entries, err := p.Host.ReadDir(p.Alloc, directory)
 	if err != nil {
 		*failed = *failed || p.globDirectoryFailed(directory)

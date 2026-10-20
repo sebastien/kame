@@ -61,15 +61,17 @@ type Invocation struct {
 	Defines          []string
 	Parameters       []string
 	ToolOverrides    []string
-	Depth            int
-	Expand           bool
-	Affected         bool
-	Targets          []string
-	Files            []string
-	Args             []string
-	Inputs           []RunInput
-	OK               bool
-	Error            Diagnostic
+	// Picker borrows the --picker executable name. It is not a shell command.
+	Picker   string
+	Depth    int
+	Expand   bool
+	Affected bool
+	Targets  []string
+	Files    []string
+	Args     []string
+	Inputs   []RunInput
+	OK       bool
+	Error    Diagnostic
 }
 
 // Free releases parser-owned arrays, normalized typed defines and HelpResult.
@@ -93,7 +95,9 @@ func (inv *Invocation) Free() {
 	slices.Free(mem.System, inv.Files)
 	slices.Free(mem.System, inv.Args)
 	for i := range inv.Defines {
-		if definition.ParseOverride(inv.Defines[i]).Typed { mem.FreeString(mem.System, inv.Defines[i]) }
+		if definition.ParseOverride(inv.Defines[i]).Typed {
+			mem.FreeString(mem.System, inv.Defines[i])
+		}
 	}
 	slices.Free(mem.System, inv.Defines)
 	slices.Free(mem.System, inv.Parameters)
@@ -178,6 +182,10 @@ func parseCommand(command string, args []string) Invocation {
 	}
 	if command == "clean" {
 		parseClean(&inv, args)
+		return inv
+	}
+	if command == "pick" {
+		parsePick(&inv, args)
 		return inv
 	}
 	if command == "" && SelectsRun(args) {
@@ -276,7 +284,7 @@ func parseBuild(inv *Invocation, args []string) {
 				break
 			}
 		}
-		if inv.Name != "" && inv.Name != "build" && inv.Name != "cat" && (option == "-n" || option == "--dry-run" || option == "--force" || option == "--verbose" || option == "-j" || option == "--jobs" || option == "--shell" || option == "--timeout" || option == "--retry" || option == "--log-limit" || option == "--capture-limit" || option == "--env") {
+		if inv.Name != "" && inv.Name != "build" && inv.Name != "cat" && inv.Name != "pick" && (option == "-n" || option == "--dry-run" || option == "--force" || option == "--verbose" || option == "-j" || option == "--jobs" || option == "--shell" || option == "--timeout" || option == "--retry" || option == "--log-limit" || option == "--capture-limit" || option == "--env") {
 			inv.fail("OPT_UNKNOWN", "execution option is not supported by "+inv.Name+": "+option)
 			return
 		}
@@ -333,7 +341,7 @@ func parseBuild(inv *Invocation, args []string) {
 		}
 		inv.Targets = slices.Append(mem.System, inv.Targets, arg)
 	}
-	if inv.Watch && inv.Name != "" && inv.Name != "build" {
+	if inv.Watch && inv.Name != "" && inv.Name != "build" && inv.Name != "pick" {
 		inv.fail("OPT_CONFLICT", "--watch is supported only for builds")
 		return
 	}
@@ -417,8 +425,11 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 			}
 		}
 		if equal <= 0 || !definition.ValidName(value[:equal]) {
-			if option == "--set" { inv.fail("OPT_VALUE_INVALID", "--set requires NAME=LITERAL with a valid name")
-			} else { inv.fail("OPT_VALUE_INVALID", "define must be NAME=VALUE with a valid name") }
+			if option == "--set" {
+				inv.fail("OPT_VALUE_INVALID", "--set requires NAME=LITERAL with a valid name")
+			} else {
+				inv.fail("OPT_VALUE_INVALID", "define must be NAME=VALUE with a valid name")
+			}
 			return false
 		}
 		if option == "--set" {
@@ -429,7 +440,7 @@ func assignBuildOption(inv *Invocation, option string, value string) bool {
 				inv.fail("OPT_VALUE_INVALID", "--set requires NAME=LITERAL (no names, interpolation, patterns, or calls)")
 				return false
 			}
-			value = cloneText(value[:equal]+":="+value[equal+1:])
+			value = cloneText(value[:equal] + ":=" + value[equal+1:])
 		}
 		inv.Defines = slices.Append(mem.System, inv.Defines, value)
 		return true

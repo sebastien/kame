@@ -33,6 +33,30 @@ func TestComputedOutputsRetainAuthoredSyntaxAndResolveCaptures(t *testing.T) {
 	registry.Free()
 }
 
+func TestComputedPrerequisitePathsResolveCaptures(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.Parse(a, "computed.kmk", "ROOT = \"./src\"\n./build/{path:**}.js : @{ROOT}/js/{path}.js, @(nop @{ROOT}/meta/{path}.json) | @{ROOT}/ready/{_0}\n")
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	compiled := program.Compile(a, parsed, registry, program.Options{})
+	if compiled.Program == nil {
+		t.Error("computed prerequisites did not compile")
+	} else {
+		planned := compiled.Program.Plan("./build/widgets/button.js")
+		if planned.Diagnostic.Code != "" || len(planned.Plan.Inputs) != 3 {
+			t.Error("computed prerequisites did not resolve")
+		} else if planned.Plan.Inputs[0] != "./src/js/widgets/button.js" || planned.Plan.Inputs[1] != "./src/meta/widgets/button.json" || planned.Plan.Inputs[2] != "./src/ready/widgets/button" {
+			t.Error("computed prerequisites retained literal capture text")
+		}
+		planned.Plan.Free(a)
+		planned.Diagnostic.Free(a)
+		compiled.Program.Free()
+	}
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
+}
+
 func TestComputedOutputFailureCleanup(t *testing.T) {
 	a := t.Allocator()
 	fixtures := []string{

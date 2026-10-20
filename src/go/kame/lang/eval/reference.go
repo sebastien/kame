@@ -157,18 +157,24 @@ func parseIndex(text string) (int, bool) {
 	}
 	index := uint(0)
 	limit := ^uint(0) >> 1
-	if negative { limit++ }
+	if negative {
+		limit++
+	}
 	for i := range text {
 		if text[i] < '0' || text[i] > '9' {
 			return 0, false
 		}
-		digit := uint(text[i]-'0')
-		if index > (limit-digit)/10 { return 0, false }
+		digit := uint(text[i] - '0')
+		if index > (limit-digit)/10 {
+			return 0, false
+		}
 		index = index*10 + digit
 	}
 	if negative {
-		if index == 0 { return 0, true }
-		return -int(index-1)-1, true
+		if index == 0 {
+			return 0, true
+		}
+		return -int(index-1) - 1, true
 	}
 	return int(index), true
 }
@@ -195,10 +201,10 @@ func runeOffset(text string, index int) int {
 }
 
 type sliceBounds struct {
-	Start int
-	End   int
+	Start      int
+	End        int
 	EndOmitted bool
-	OK    bool
+	OK         bool
 }
 
 func parseSlice(text string) sliceBounds {

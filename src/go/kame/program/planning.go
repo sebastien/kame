@@ -66,11 +66,35 @@ func (p *Program) Plan(target string) PlanResult {
 			}
 		}
 	}
+	if selected.Rule.Kind == rule.FileRule && len(plan.Outputs) > 1 {
+		for i := range plan.Outputs {
+			owner := p.selectRule(plan.Outputs[i])
+			conflict := owner.Rule != selected.Rule || !sameCaptures(owner.Captures, selected.Captures)
+			freeCaptures(p.Alloc, owner.Captures)
+			freeArguments(p.Alloc, owner.Arguments)
+			mem.FreeString(p.Alloc, owner.Target)
+			if owner.Diagnostic.Code != "" {
+				plan.Free(p.Alloc)
+				return PlanResult{Diagnostic: owner.Diagnostic}
+			}
+			if conflict {
+				d := failure(p.Alloc, "TGT_AMBIG", "grouped output selects another producer: "+plan.Outputs[i])
+				if owner.Rule != nil {
+					d.Free(p.Alloc)
+					d = p.producerAmbiguity(plan.Outputs[i], selected.Rule.Outputs[i], owner.Output)
+				}
+				plan.Free(p.Alloc)
+				return PlanResult{Diagnostic: d}
+			}
+		}
+	}
 	group := 1
 	for i := range selected.Rule.Inputs {
 		input := selected.Rule.Inputs[i]
 		inputGroup := group
-		if input.SequenceEnd { group++ }
+		if input.SequenceEnd {
+			group++
+		}
 		if input.Kind == rule.InputExpression || input.Kind == rule.InputString || input.Kind == rule.InputWildcard {
 			plan.Freshness = Unknown
 			before := len(plan.Inputs)
@@ -83,7 +107,9 @@ func (p *Program) Plan(target string) PlanResult {
 				plan.ResourceInputs[j].Computed = true
 				plan.ResourceInputs[j].Group = inputGroup
 			}
-			if input.SequenceEnd && len(plan.ResourceInputs) > before { plan.ResourceInputs[len(plan.ResourceInputs)-1].SequenceEnd = true }
+			if input.SequenceEnd && len(plan.ResourceInputs) > before {
+				plan.ResourceInputs[len(plan.ResourceInputs)-1].SequenceEnd = true
+			}
 			for j := before; j < len(plan.Inputs); j++ {
 				plan.DynamicInputs = slices.Append(p.Alloc, plan.DynamicInputs, cloneText(p.Alloc, plan.Inputs[j]))
 			}
@@ -150,13 +176,17 @@ func (p *Program) expandReadOnlyPlan(target string, yield bool, definitions bool
 		}
 		p.Instances = slices.Append(p.Alloc, p.Instances, instance{Rule: result.Plan.Rule, Captures: cloneCaptures(p.Alloc, result.Plan.Captures), Node: node, Plan: clonePlan(p.Alloc, result.Plan), Inspection: true})
 	}
-	if node.State == core.NodeCancelled || node.State == core.NodeFailed { p.restartInspectionNode(node) }
+	if node.State == core.NodeCancelled || node.State == core.NodeFailed {
+		p.restartInspectionNode(node)
+	}
 	if p.Instances[index].inspectionRoot == nil && node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
 		p.Instances[index].inspectionRoot = p.Engine.RequestRoot(node)
 	}
 	for node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
 		p.Tick(0)
-		if yield { p.drainRequests() }
+		if yield {
+			p.drainRequests()
+		}
 		if yield && (len(p.Outbound) != 0 || !p.Engine.HasWork()) && node.State != core.NodeComplete && node.State != core.NodeFailed && node.State != core.NodeCancelled {
 			result.Plan.Free(p.Alloc)
 			return PlanResult{Waiting: true}
@@ -194,8 +224,12 @@ func hasExpressionInput(r *rule.Rule) bool {
 }
 
 func sameInspectionPlan(left, right Plan) bool {
-	if left.Rule != right.Rule { return false }
-	if left.Rule == nil { return left.Key.Name == right.Key.Name }
+	if left.Rule != right.Rule {
+		return false
+	}
+	if left.Rule == nil {
+		return left.Key.Name == right.Key.Name
+	}
 	return sameCaptures(left.Captures, right.Captures) && sameArguments(left.Arguments, right.Arguments)
 }
 
@@ -211,8 +245,13 @@ func produceInspectionInputs(c *core.EngineContext, nodeID int64) core.ProducerR
 		context := eval.Context{Phase: eval.ResolvingPhase, Cwd: p.Options.Directory, Environment: p.Options.Environment, HasEnvironment: p.Options.Environment != nil}
 		p.bindDefinitionEnvironment(&context)
 		definition := p.Eval.DefinitionWith(p.Instances[state.Index].Plan.Target, &context)
-		if definition == nil { c.Fail(failure(p.Alloc, "TGT_NO_RULE", "no definition")); return core.ProducerFailed }
-		if !c.Dependency(definition.Key) { return core.ProducerWaiting }
+		if definition == nil {
+			c.Fail(failure(p.Alloc, "TGT_NO_RULE", "no definition"))
+			return core.ProducerFailed
+		}
+		if !c.Dependency(definition.Key) {
+			return core.ProducerWaiting
+		}
 		return core.ProducerCompleted
 	}
 	resolved := p.resolveInputs(c, &p.Instances[state.Index])
@@ -306,7 +345,9 @@ func resolvePlanDefinition(value any, key core.ResourceKey, context *eval.Contex
 	for i := range state.Resolving {
 		if state.Resolving[i] == key.Name {
 			d := failure(state.Program.Alloc, "DEP_CYCLE", "definition cycle")
-			for j := i; j < len(state.Resolving); j++ { d.TargetStack = slices.Append(state.Program.Alloc, d.TargetStack, cloneText(state.Program.Alloc, state.Resolving[j])) }
+			for j := i; j < len(state.Resolving); j++ {
+				d.TargetStack = slices.Append(state.Program.Alloc, d.TargetStack, cloneText(state.Program.Alloc, state.Resolving[j]))
+			}
 			d.TargetStack = slices.Append(state.Program.Alloc, d.TargetStack, cloneText(state.Program.Alloc, key.Name))
 			return eval.Result{Diagnostic: d}
 		}

@@ -21,7 +21,9 @@ func TestRemediation3NumericBounds(t *testing.T) {
 	}
 	for i := range texts {
 		r := evaluate(t, p, texts[i])
-		if r.Diagnostic.Code != "" || r.Value.Kind != core.Nil { t.Error("oversized nth index wrapped") }
+		if r.Diagnostic.Code != "" || r.Value.Kind != core.Nil {
+			t.Error("oversized nth index wrapped")
+		}
 		r.Free(a)
 	}
 	texts = []string{
@@ -30,7 +32,9 @@ func TestRemediation3NumericBounds(t *testing.T) {
 	}
 	for i := range texts {
 		r := evaluate(t, p, texts[i])
-		if r.Diagnostic.Code != "EXPR_INVALID" { t.Error("oversized slice bound wrapped") }
+		if r.Diagnostic.Code != "EXPR_INVALID" {
+			t.Error("oversized slice bound wrapped")
+		}
 		r.Free(a)
 	}
 	p.Free()

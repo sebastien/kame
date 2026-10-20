@@ -19,19 +19,19 @@ import (
 // Runtime is the portable, single-owner state machine used by the wasm ABI.
 // It deliberately neither performs host work nor creates a thread.
 type Runtime struct {
-	FinalizationEnabled bool
-	FinalizationNS int64
+	FinalizationEnabled  bool
+	FinalizationNS       int64
 	FinalizationRequests []host.Request
-	Alloc      mem.Allocator
-	Arena      *Heap
-	OwnArena   bool
-	Engine     *core.Engine
-	Eval       *eval.Program
-	Parsed     *script.Script
-	Registry   *eval.Registry
-	Node       *core.Node
-	Expr       *expr.Expr
-	ExprParsed *script.Script
+	Alloc                mem.Allocator
+	Arena                *Heap
+	OwnArena             bool
+	Engine               *core.Engine
+	Eval                 *eval.Program
+	Parsed               *script.Script
+	Registry             *eval.Registry
+	Node                 *core.Node
+	Expr                 *expr.Expr
+	ExprParsed           *script.Script
 	// Target mode uses the portable build runtime with an in-memory host. It is
 	// mutually exclusive with the single-expression mode above.
 	Host               *MemoryHost
@@ -372,7 +372,10 @@ func (r *Runtime) ListReportJSON(query string) PureResult {
 	}
 	var buffer = bytes.NewBuffer(r.Alloc, nil)
 	r.Program.WriteTargetReport(&buffer, query)
-	if r.Program.InspectionWaiting { buffer.Free(); return PureResult{HostNeeded: true} }
+	if r.Program.InspectionWaiting {
+		buffer.Free()
+		return PureResult{HostNeeded: true}
+	}
 	text := pureText(r.Alloc, buffer.String())
 	buffer.Free()
 	return PureResult{Text: text}
@@ -665,8 +668,12 @@ func (r *Runtime) ProcessExited(request host.Request) {
 }
 
 func (r *Runtime) StreamItem(request host.Request, node int, raw []byte) int {
-	if r.Program != nil { return r.Program.Eval.StreamItem(request.ID, node, raw) }
-	if r.Eval != nil { return r.Eval.StreamItem(request.ID, node, raw) }
+	if r.Program != nil {
+		return r.Program.Eval.StreamItem(request.ID, node, raw)
+	}
+	if r.Eval != nil {
+		return r.Eval.StreamItem(request.ID, node, raw)
+	}
 	return -eval.StreamPredicateFailure
 }
 
@@ -688,7 +695,9 @@ func (r *Runtime) ProcessRetainLimit(request host.Request) int {
 }
 
 func (r *Runtime) ProcessTerminal(request host.Request, stdout []byte, stderr []byte, status int, signal int, outcome int, code string, message string) {
-	if r != nil { r.retireFinalizationRequest(request.ID) }
+	if r != nil {
+		r.retireFinalizationRequest(request.ID)
+	}
 	if r != nil && r.Program != nil {
 		r.Program.ProcessTerminal(request, stdout, stderr, status, signal, outcome, code, message)
 	}
@@ -721,7 +730,9 @@ func runExpression(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		result.Free(c.Allocator())
 		return core.ProducerFailed
 	}
-	for i := range context.Effects { r.Effects = slices.Append(r.Alloc, r.Effects, context.Effects[i]) }
+	for i := range context.Effects {
+		r.Effects = slices.Append(r.Alloc, r.Effects, context.Effects[i])
+	}
 	slices.Free(r.Alloc, context.Effects)
 	context.Effects = nil
 	c.Publish(result.Value)
@@ -782,7 +793,9 @@ func (r *Runtime) Step() host.NextResult {
 	}
 	if r.Program != nil {
 		r.configureFinalization()
-		if r.Finalizing { r.Program.Eval.AdvanceFinalization() }
+		if r.Finalizing {
+			r.Program.Eval.AdvanceFinalization()
+		}
 		if r.Handle != nil || r.Finalizing {
 			r.Program.Tick(0)
 		}
@@ -797,11 +810,15 @@ func (r *Runtime) Step() host.NextResult {
 	}
 	r.configureFinalization()
 	r.Eval.PollFinalizers()
-	if r.Finalizing { r.Eval.AdvanceFinalization() }
+	if r.Finalizing {
+		r.Eval.AdvanceFinalization()
+	}
 	r.Engine.Step()
 	for r.FinalizationEnabled {
 		cancel := r.Engine.NextCancellation()
-		if cancel.RequestID == 0 { break }
+		if cancel.RequestID == 0 {
+			break
+		}
 		payload := host.ServiceCancelPayload(r.Alloc, cancel.RequestID, 0)
 		r.Eval.Requests.Submit(cancel.NodeID, cancel.Generation, cancel.Attempt, host.RequestProcessCancel, payload)
 		payload.Free(r.Alloc)
@@ -858,11 +875,15 @@ func (r *Runtime) Cancel() bool {
 func (r *Runtime) Result() RuntimeResult {
 	if r != nil && r.Finalizing {
 		p := r.finalizationProgram()
-		if p != nil && !p.AdvanceFinalization() { return RuntimeResult{} }
+		if p != nil && !p.AdvanceFinalization() {
+			return RuntimeResult{}
+		}
 		result := r.result()
 		if p != nil {
 			d := p.FinalizationDiagnostic(r.Alloc)
-			if result.Diagnostic.Code == "" { result.Diagnostic = d } else if d.Code != "" {
+			if result.Diagnostic.Code == "" {
+				result.Diagnostic = d
+			} else if d.Code != "" {
 				result.Diagnostic.Notes = slices.Append(r.Alloc, result.Diagnostic.Notes, pureText(r.Alloc, "deferred cleanup failed: "+d.Code+": "+d.Message))
 				d.Free(r.Alloc)
 			}

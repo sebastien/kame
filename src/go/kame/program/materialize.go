@@ -25,8 +25,8 @@ func (r *Result) Free(a mem.Allocator) {
 }
 
 type instanceState struct {
-	Program *Program
-	Index   int
+	Program  *Program
+	Index    int
 	Artifact string
 }
 type instanceResult struct {
@@ -140,7 +140,9 @@ func produceExternalValue(c *core.EngineContext, nodeID int64) core.ProducerResu
 			}
 			valid := completion.HasValue && completion.Value.Kind == core.List
 			for i := range completion.Value.List {
-				if completion.Value.List[i].Kind != core.String { valid = false }
+				if completion.Value.List[i].Kind != core.String {
+					valid = false
+				}
 			}
 			if !valid {
 				completion.Value.Free(c.Allocator())
@@ -151,7 +153,10 @@ func produceExternalValue(c *core.EngineContext, nodeID int64) core.ProducerResu
 			return core.ProducerCompleted
 		}
 		result := state.Program.wildcard(state.Name)
-		if result.Diagnostic.Code != "" { c.Fail(result.Diagnostic); return core.ProducerFailed }
+		if result.Diagnostic.Code != "" {
+			c.Fail(result.Diagnostic)
+			return core.ProducerFailed
+		}
 		c.Publish(result.Value)
 	} else {
 		c.Fail(failure(state.Program.Alloc, "HOST_FAIL", "invalid external resource"))
@@ -345,8 +350,9 @@ func (p *Program) Tick(wait int) {
 func (p *Program) tick(wait int) {
 	p.Eval.PollFinalizers()
 	p.tickServiceReadiness()
-	// Host polling must not sleep between runnable dependency evaluations.
-	if p.Engine.HasWork() {
+	// Pending host requests are local work too: synchronous reads must be
+	// serviced before sleeping for events from asynchronous processes.
+	if p.Engine.HasWork() || p.Eval.Requests.HasRequests() {
 		wait = 0
 	}
 	p.pump(wait)
@@ -369,7 +375,9 @@ func (p *Program) tick(wait int) {
 			}
 		}
 		p.Engine.Dispatch(ready[i])
-		if p.ObserveWork != nil && target != "" { p.ObserveWork(ready[i], target, false) }
+		if p.ObserveWork != nil && target != "" {
+			p.ObserveWork(ready[i], target, false)
+		}
 	}
 	slices.Free(p.Alloc, ready)
 	p.observeInstances()
@@ -525,7 +533,9 @@ func (p *Program) producerFor(target string) instanceResult {
 		mem.FreeString(p.Alloc, name)
 	}
 	node := p.Engine.AddOwned(key, produce, state, freeInstanceState)
-	if len(plan.Outputs) > 1 { key.Free(p.Alloc) }
+	if len(plan.Outputs) > 1 {
+		key.Free(p.Alloc)
+	}
 	if node == nil {
 		plan.Free(p.Alloc)
 		return instanceResult{Diagnostic: failure(p.Alloc, "TGT_AMBIG", "duplicate rule instance")}

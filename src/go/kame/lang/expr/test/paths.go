@@ -17,14 +17,22 @@ func TestInterpolatedPathsRetainStructuralChildren(t *testing.T) {
 			continue
 		}
 		path := parsed.Expr
-		if path.Kind == expr.CommandCapture { path = path.Items[0].Items[2].Parts[0].Expr }
-		if path.Kind != expr.Path || len(path.Parts) == 0 || path.Pattern != nil { t.Error("path lost its structural parts") }
+		if path.Kind == expr.CommandCapture {
+			path = path.Items[0].Items[2].Parts[0].Expr
+		}
+		if path.Kind != expr.Path || len(path.Parts) == 0 || path.Pattern != nil {
+			t.Error("path lost its structural parts")
+		}
 		cloned := expr.Clone(a, parsed.Expr)
 		formatted := expr.Format(a, cloned)
 		again := expr.Parse(a, "formatted.km", formatted)
-		if len(again.Diagnostics) != 0 { t.Error("formatted path did not reparse") }
+		if len(again.Diagnostics) != 0 {
+			t.Error("formatted path did not reparse")
+		}
 		canonical := expr.Format(a, again.Expr)
-		if canonical != formatted { t.Error("path formatting was not idempotent") }
+		if canonical != formatted {
+			t.Error("path formatting was not idempotent")
+		}
 		mem.FreeString(a, canonical)
 		again.Free()
 		mem.FreeString(a, formatted)
@@ -37,7 +45,9 @@ func TestInterpolatedPathsRejectMissingBoundaries(t *testing.T) {
 	texts := []string{`@(root)`, `@(root)suffix`, `./@()/file`, `./@(name`, `./@(nop "unclosed)/file`, `./@(root`}
 	for i := range texts {
 		parsed := expr.Parse(t.Allocator(), "invalid.km", texts[i])
-		if len(parsed.Diagnostics) == 0 { t.Error("malformed path was accepted") }
+		if len(parsed.Diagnostics) == 0 {
+			t.Error("malformed path was accepted")
+		}
 		parsed.Free()
 	}
 }
@@ -45,10 +55,16 @@ func TestInterpolatedPathsRejectMissingBoundaries(t *testing.T) {
 func TestGlobCharacterClassesKeepContainerBoundaries(t *testing.T) {
 	a := t.Allocator()
 	parsed := expr.Parse(a, "glob.km", `[./journal/[ab].md ./journal/[!x].md ./journal/[a\]].md ./journal/[@(get "name" [name: "b"])]]`)
-	if len(parsed.Diagnostics) != 0 || parsed.Expr == nil || len(parsed.Expr.Items) != 4 { t.Error("glob classes consumed list delimiters"); parsed.Free(); return }
+	if len(parsed.Diagnostics) != 0 || parsed.Expr == nil || len(parsed.Expr.Items) != 4 {
+		t.Error("glob classes consumed list delimiters")
+		parsed.Free()
+		return
+	}
 	formatted := expr.Format(a, parsed.Expr)
 	again := expr.Parse(a, "formatted.km", formatted)
-	if len(again.Diagnostics) != 0 || len(again.Expr.Items) != 4 { t.Error("formatted glob classes changed boundaries") }
+	if len(again.Diagnostics) != 0 || len(again.Expr.Items) != 4 {
+		t.Error("formatted glob classes changed boundaries")
+	}
 	again.Free()
 	mem.FreeString(a, formatted)
 	parsed.Free()

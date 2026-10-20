@@ -95,7 +95,9 @@ func (p *Program) preflightMiss(c *core.EngineContext, index int) core.ProducerR
 	// them. The subsequent render cannot recover them after preflight cleanup.
 	if p.needsNewerInputs(entry) {
 		names, resources := entry.Plan.Inputs, entry.Plan.ResourceInputs
-		if entry.Plan.Resolved { names, resources = entry.Plan.ResolvedInputs, entry.Plan.ResolvedResourceInputs }
+		if entry.Plan.Resolved {
+			names, resources = entry.Plan.ResolvedInputs, entry.Plan.ResolvedResourceInputs
+		}
 		p.prepareNewerInputs(c, index, names, resources)
 	}
 	p.freeFileContext(entry.FileContext)

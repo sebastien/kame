@@ -6,8 +6,8 @@ import (
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
-	"solod.dev/so/testing"
 	"solod.dev/so/strings"
+	"solod.dev/so/testing"
 )
 
 func contractNoop(c *eval.Context, state any, values []core.Value) eval.Result {
@@ -26,34 +26,48 @@ func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
 	for i := range names {
 		name := names[i]
 		replacement := name + "!"
-		if name == "shell" || name == "shellrun" || name == "shell!" || name == "shellrun!" { replacement = "sh!" }
-		if name == "set-field" { replacement = "set" }
-		if name == "regex-replace" { replacement = "resub" }
+		if name == "shell" || name == "shellrun" || name == "shell!" || name == "shellrun!" {
+			replacement = "sh!"
+		}
+		if name == "set-field" {
+			replacement = "set"
+		}
+		if name == "regex-replace" {
+			replacement = "resub"
+		}
 		texts := []string{name, "(" + name + " (fail! \"must not evaluate operands\"))"}
 		for j := range texts {
 			parsed := expr.Parse(a, "migration.km", texts[j])
 			context := eval.Context{Program: p, Scope: p.Scope, Run: a}
 			result := p.EvaluateWith(parsed.Expr, &context)
 			code := "REF_MISSING"
-			if j == 1 { code = "OP_UNKNOWN" }
-			if result.Diagnostic.Code != code || !strings.Contains(result.Diagnostic.Message, "`" + replacement + "`") || result.Diagnostic.Span.End-result.Diagnostic.Span.Start != len(name) {
+			if j == 1 {
+				code = "OP_UNKNOWN"
+			}
+			if result.Diagnostic.Code != code || !strings.Contains(result.Diagnostic.Message, "`"+replacement+"`") || result.Diagnostic.Span.End-result.Diagnostic.Span.Start != len(name) {
 				t.Error("missing action migration diagnostic: " + texts[j])
 			}
 			result.Free(a)
 			parsed.Free()
 		}
-		parsed := expr.Parse(a, "migration.km", "(let [" + name + " ([x] x)] (" + name + " 42))")
+		parsed := expr.Parse(a, "migration.km", "(let ["+name+" ([x] x)] ("+name+" 42))")
 		context := eval.Context{Program: p, Scope: p.Scope, Run: a}
 		result := p.EvaluateWith(parsed.Expr, &context)
-		if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 { t.Error("migration reserved a lexical binding: " + name) }
+		if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 42 {
+			t.Error("migration reserved a lexical binding: " + name)
+		}
 		result.Free(a)
 		parsed.Free()
 	}
-	if !r.Add(eval.Operation{Name: "out", Call: contractNoop}) { t.Error("custom legacy-named operation rejected") }
+	if !r.Add(eval.Operation{Name: "out", Call: contractNoop}) {
+		t.Error("custom legacy-named operation rejected")
+	}
 	parsed := expr.Parse(a, "migration.km", "(out)")
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a}
 	result := p.EvaluateWith(parsed.Expr, &context)
-	if result.Diagnostic.Code != "" { t.Error("migration replaced custom registration") }
+	if result.Diagnostic.Code != "" {
+		t.Error("migration replaced custom registration")
+	}
 	result.Free(a)
 	parsed.Free()
 	p.Free()
@@ -64,8 +78,12 @@ func TestActionMigrationPreservesBindingsAndDiagnostics(t *testing.T) {
 
 func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 	r := eval.NewRegistry(t.Allocator())
-	if !operations.Register(r) { t.Error("standard operation registration failed") }
-	if len(r.Items) != 97 { t.Error("standard operation count changed") }
+	if !operations.Register(r) {
+		t.Error("standard operation registration failed")
+	}
+	if len(r.Items) != 97 {
+		t.Error("standard operation count changed")
+	}
 	for i := range r.Items {
 		o := &r.Items[i]
 		if !o.HasContract() || !o.ValidContract() || !o.AllowsPhase(eval.EvaluatePhase) || o.Version == "" {
@@ -85,12 +103,14 @@ func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 			}
 		}
 		if o.Category == eval.OutputOperation || o.Category == eval.ProcessOperation || o.Category == eval.ControlOperation {
-			if !strings.HasSuffix(o.Name, "!") { t.Error("standard action lacks ! suffix: " + o.Name) }
+			if !strings.HasSuffix(o.Name, "!") {
+				t.Error("standard action lacks ! suffix: " + o.Name)
+			}
 		}
 		if o.Name == "fail!" && (o.Category != eval.ControlOperation || o.Phases != eval.AllPhases || len(o.Capabilities) != 0 || o.Behavior != eval.RaisesFailure) {
 			t.Error("authored failure must be available without host authority in all phases")
 		}
-		if o.Name == "render" && (len(o.Capabilities) != 0 || len(o.ConditionalCapabilities) != 1 || o.ConditionalCapabilities[0] != eval.Read || o.Behavior & eval.CallsCallable == 0) {
+		if o.Name == "render" && (len(o.Capabilities) != 0 || len(o.ConditionalCapabilities) != 1 || o.ConditionalCapabilities[0] != eval.Read || o.Behavior&eval.CallsCallable == 0) {
 			t.Error("inline render must not unconditionally require read authority; nested effects must propagate")
 		}
 		if o.Name == "tool" && (len(o.Capabilities) != 0 || len(o.ConditionalCapabilities) != 0 || o.Behavior != eval.TracksDependency) {
@@ -106,7 +126,9 @@ func TestStandardOperationAliasMetadata(t *testing.T) {
 	names := []string{"sub", "replace"}
 	var replacement *eval.Operation
 	for i := range r.Items {
-		if r.Items[i].Name == "replace" { replacement = &r.Items[i] }
+		if r.Items[i].Name == "replace" {
+			replacement = &r.Items[i]
+		}
 	}
 	if replacement == nil {
 		t.Error("standard aliases missing")
@@ -117,20 +139,28 @@ func TestStandardOperationAliasMetadata(t *testing.T) {
 		found := false
 		for j := range r.Items {
 			o := &r.Items[j]
-			if o.Name != names[i] { continue }
+			if o.Name != names[i] {
+				continue
+			}
 			found = true
 			base := replacement
 			if o.Category != base.Category || o.Phases != base.Phases || o.Behavior != base.Behavior || o.Version != base.Version || o.MinArity != base.MinArity || o.MaxArity != base.MaxArity || o.DeferredReplacement != base.DeferredReplacement || len(o.Capabilities) != len(base.Capabilities) || len(o.ConditionalCapabilities) != len(base.ConditionalCapabilities) {
 				t.Error("alias metadata differs: " + o.Name)
 			}
 			for k := range o.Capabilities {
-				if k < len(base.Capabilities) && o.Capabilities[k] != base.Capabilities[k] { t.Error("alias authority differs: " + o.Name) }
+				if k < len(base.Capabilities) && o.Capabilities[k] != base.Capabilities[k] {
+					t.Error("alias authority differs: " + o.Name)
+				}
 			}
 			for k := range o.ConditionalCapabilities {
-				if k < len(base.ConditionalCapabilities) && o.ConditionalCapabilities[k] != base.ConditionalCapabilities[k] { t.Error("alias conditional authority differs: " + o.Name) }
+				if k < len(base.ConditionalCapabilities) && o.ConditionalCapabilities[k] != base.ConditionalCapabilities[k] {
+					t.Error("alias conditional authority differs: " + o.Name)
+				}
 			}
 		}
-		if !found { t.Error("standard alias missing: " + names[i]) }
+		if !found {
+			t.Error("standard alias missing: " + names[i])
+		}
 	}
 	if replacement.Category != eval.PureOperation || replacement.Phases != eval.AllPhases || replacement.Behavior != eval.CallsCallable || !replacement.DeferredReplacement || len(replacement.Capabilities) != 0 || len(replacement.ConditionalCapabilities) != 0 {
 		t.Error("replacement propagation metadata must not grant effects")
@@ -157,18 +187,30 @@ func TestPatternReplacementEffectsAreDemandedOnlyOnMatch(t *testing.T) {
 					"(let [alias " + names[i] + "] (alias {name:*}.c (nop (out! name) name) " + subjects[k] + "))",
 				}
 				for n := range calls {
-					parsed := expr.Parse(a, "contracts.km", `(let [name "outer"] (nop ` + calls[n] + ` name))`)
-					if len(parsed.Diagnostics) != 0 { t.Error("replacement effect test parse failed") }
+					parsed := expr.Parse(a, "contracts.km", `(let [name "outer"] (nop `+calls[n]+` name))`)
+					if len(parsed.Diagnostics) != 0 {
+						t.Error("replacement effect test parse failed")
+					}
 					context := eval.Context{Program: p, Scope: p.Scope, Run: a, Phase: phases[j]}
 					result := p.EvaluateWith(parsed.Expr, &context)
 					blocked := k == 0 && phases[j] != eval.EvaluatePhase
 					if blocked {
-						if !context.PhaseInvalid() || len(context.Effects) != 0 { t.Error("replacement metadata authorized read-only output") }
+						if !context.PhaseInvalid() || len(context.Effects) != 0 {
+							t.Error("replacement metadata authorized read-only output")
+						}
 					} else {
-						if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "outer" || context.PhaseInvalid() { t.Error("replacement changed lexical capture isolation or demanded an unmatched effect") }
+						if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "outer" || context.PhaseInvalid() {
+							t.Error("replacement changed lexical capture isolation or demanded an unmatched effect")
+						}
 						if k == 0 {
-							if len(context.Effects) != 1 { t.Error("matched replacement did not emit exactly once") } else if context.Effects[0].Kind != eval.EffectOut || string(context.Effects[0].Data) != "inner" { t.Error("replacement output did not use match-local capture") }
-						} else if len(context.Effects) != 0 { t.Error("unmatched replacement emitted output") }
+							if len(context.Effects) != 1 {
+								t.Error("matched replacement did not emit exactly once")
+							} else if context.Effects[0].Kind != eval.EffectOut || string(context.Effects[0].Data) != "inner" {
+								t.Error("replacement output did not use match-local capture")
+							}
+						} else if len(context.Effects) != 0 {
+							t.Error("unmatched replacement emitted output")
+						}
 					}
 					result.Free(a)
 					eval.FreeEffects(a, context.Effects)
@@ -198,7 +240,9 @@ func TestRegistryRejectsPartialOperationContracts(t *testing.T) {
 		{Name: "invalid-conditional-capability", Call: contractNoop, Category: eval.ObservationOperation, Phases: eval.AllPhases, ConditionalCapabilities: []eval.Capability{eval.Capability(99)}},
 	}
 	for i := range cases {
-		if r.Add(cases[i]) { t.Error("accepted invalid contract: " + cases[i].Name) }
+		if r.Add(cases[i]) {
+			t.Error("accepted invalid contract: " + cases[i].Name)
+		}
 	}
 	if !r.Add(eval.Operation{Name: "custom", Call: contractNoop}) {
 		t.Error("legacy custom registrations must retain their runtime capability checks")

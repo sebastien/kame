@@ -26,30 +26,53 @@ func sha512Sum(data []byte, out []byte) {
 		0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c,
 		0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817,
 	}
-	blocks := len(data)/128+1
-	if len(data)%128 >= 112 { blocks++ }
+	blocks := len(data)/128 + 1
+	if len(data)%128 >= 112 {
+		blocks++
+	}
 	for block := 0; block < blocks; block++ {
 		var chunk [128]byte
-		start := block*128
-		if start < len(data) { copy(chunk[:], data[start:]) }
-		if start <= len(data) && len(data)-start < 128 { chunk[len(data)-start] = 0x80 }
+		start := block * 128
+		if start < len(data) {
+			copy(chunk[:], data[start:])
+		}
+		if start <= len(data) && len(data)-start < 128 {
+			chunk[len(data)-start] = 0x80
+		}
 		if block == blocks-1 {
-			length := uint64(len(data))*8
-			for i := 0; i < 8; i++ { chunk[127-i] = byte(length >> uint(i*8)) }
+			length := uint64(len(data)) * 8
+			for i := 0; i < 8; i++ {
+				chunk[127-i] = byte(length >> uint(i*8))
+			}
 		}
 		var w [80]uint64
-		for i := 0; i < 16; i++ { for j := 0; j < 8; j++ { w[i] = w[i]<<8 | uint64(chunk[i*8+j]) } }
+		for i := 0; i < 16; i++ {
+			for j := 0; j < 8; j++ {
+				w[i] = w[i]<<8 | uint64(chunk[i*8+j])
+			}
+		}
 		for i := 16; i < 80; i++ {
 			x, y := w[i-15], w[i-2]
-			w[i] = w[i-16]+(bits.RotateLeft64(x,-1)^bits.RotateLeft64(x,-8)^(x>>7))+w[i-7]+(bits.RotateLeft64(y,-19)^bits.RotateLeft64(y,-61)^(y>>6))
+			w[i] = w[i-16] + (bits.RotateLeft64(x, -1) ^ bits.RotateLeft64(x, -8) ^ (x >> 7)) + w[i-7] + (bits.RotateLeft64(y, -19) ^ bits.RotateLeft64(y, -61) ^ (y >> 6))
 		}
-		a,b,c,d,e,f,g,hv := h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7]
+		a, b, c, d, e, f, g, hv := h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]
 		for i := 0; i < 80; i++ {
-			t1 := hv+(bits.RotateLeft64(e,-14)^bits.RotateLeft64(e,-18)^bits.RotateLeft64(e,-41))+((e&f)^((^e)&g))+k[i]+w[i]
-			t2 := (bits.RotateLeft64(a,-28)^bits.RotateLeft64(a,-34)^bits.RotateLeft64(a,-39))+((a&b)^(a&c)^(b&c))
-			hv,g,f,e,d,c,b,a = g,f,e,d+t1,c,b,a,t1+t2
+			t1 := hv + (bits.RotateLeft64(e, -14) ^ bits.RotateLeft64(e, -18) ^ bits.RotateLeft64(e, -41)) + ((e & f) ^ ((^e) & g)) + k[i] + w[i]
+			t2 := (bits.RotateLeft64(a, -28) ^ bits.RotateLeft64(a, -34) ^ bits.RotateLeft64(a, -39)) + ((a & b) ^ (a & c) ^ (b & c))
+			hv, g, f, e, d, c, b, a = g, f, e, d+t1, c, b, a, t1+t2
 		}
-		h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d; h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=hv
+		h[0] += a
+		h[1] += b
+		h[2] += c
+		h[3] += d
+		h[4] += e
+		h[5] += f
+		h[6] += g
+		h[7] += hv
 	}
-	for i := range h { for j := 0; j < 8; j++ { out[i*8+j] = byte(h[i] >> uint(56-j*8)) } }
+	for i := range h {
+		for j := 0; j < 8; j++ {
+			out[i*8+j] = byte(h[i] >> uint(56-j*8))
+		}
+	}
 }

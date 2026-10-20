@@ -18,10 +18,16 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 		context = &fallback
 	}
 	var children []*expr.Expr
-	for i := range value.Parts { if value.Parts[i].Expr != nil { children = slices.Append(run, children, value.Parts[i].Expr) } }
+	for i := range value.Parts {
+		if value.Parts[i].Expr != nil {
+			children = slices.Append(run, children, value.Parts[i].Expr)
+		}
+	}
 	operands := p.argumentValues(scope, children, context, value.Span)
 	slices.Free(run, children)
-	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
+		return operands.Result
+	}
 	defer freeValuesWithCallables(run, operands.Values)
 	next := 0
 	b := strings.NewBuilder(run)
@@ -70,10 +76,14 @@ func (p *Program) Render(run mem.Allocator, value *template.String, scope *Scope
 		text, ok := stringify(run, r.Value)
 		if !ok {
 			kind := r.Value.Kind
-			if part.Kind == template.Selector { r.Free(run) }
+			if part.Kind == template.Selector {
+				r.Free(run)
+			}
 			return renderFailure(context.Run, part.Expr, part.Span, kind)
 		}
-		if part.Kind == template.Selector { r.Free(run) }
+		if part.Kind == template.Selector {
+			r.Free(run)
+		}
 		b.WriteString(text)
 		mem.FreeString(run, text)
 	}

@@ -4,7 +4,6 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/lang/rule"
-	"kame/lang/template"
 	"solod.dev/so/mem"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
@@ -51,9 +50,8 @@ func (p *Program) selectRule(target string) selection {
 	if file {
 		target = p.canonicalTarget(target, true)
 	}
-	var matched *rule.Rule
-	var matchedOutput rule.Target
-	var captures []template.CaptureValue
+	var candidates []producerCandidate
+	defer freeProducerCandidates(p.Alloc, &candidates)
 	for i := range p.Rules {
 		r := p.Rules[i].Rule
 		if (r.Kind == rule.FileRule) != file {
@@ -65,7 +63,7 @@ func (p *Program) selectRule(target string) selection {
 				continue
 			}
 			if !file && output.Text == target {
-				selected := selection{Rule: r, Target: cloneText(p.Alloc, selectedTarget)}
+				selected := selection{Rule: r, Output: output, Target: cloneText(p.Alloc, selectedTarget)}
 				if len(r.Arguments) != 0 {
 					binding := p.bindTargetArguments(r, assignments)
 					selected.Arguments, selected.Diagnostic = binding.Values, binding.Diagnostic
@@ -78,7 +76,7 @@ func (p *Program) selectRule(target string) selection {
 				mem.FreeString(p.Alloc, literal)
 				if matches {
 					mem.FreeString(p.Alloc, target)
-					return selection{Rule: r}
+					return selection{Rule: r, Output: output}
 				}
 			}
 		}
@@ -119,25 +117,19 @@ func (p *Program) selectRule(target string) selection {
 				}
 				return selection{Diagnostic: diagnostic.Diagnostic{Source: cloneText(p.Alloc, p.Parsed.Source.Name), Code: cloneText(p.Alloc, "PAT_LIMIT"), Severity: diagnostic.Error, Message: cloneText(p.Alloc, "regular-expression match exceeded its step budget"), Span: diagnostic.Span{Start: output.Span.Start, End: output.Span.End}, Target: cloneText(p.Alloc, selectedTarget), Owned: true}}
 			}
-			if matched != nil {
-				if matched != r || !sameCaptures(captures, match.Captures) {
+			for k := range candidates {
+				if candidates[k].Rule == r && !sameCaptures(candidates[k].Captures, match.Captures) {
 					match.Free(p.Alloc)
 					if relativeOwned {
 						mem.FreeString(p.Alloc, matchTarget)
 					}
-					freeCaptures(p.Alloc, captures)
 					if file {
 						mem.FreeString(p.Alloc, target)
 					}
-					return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, matchedOutput, output)}
+					return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, candidates[k].Output, output)}
 				}
-				match.Free(p.Alloc)
-				if relativeOwned {
-					mem.FreeString(p.Alloc, matchTarget)
-				}
-				continue
 			}
-			matched, matchedOutput, captures = r, output, cloneCaptures(p.Alloc, match.Captures)
+			candidates = slices.Append(p.Alloc, candidates, producerCandidate{Rule: r, Output: output, Captures: cloneCaptures(p.Alloc, match.Captures)})
 			match.Free(p.Alloc)
 			if relativeOwned {
 				mem.FreeString(p.Alloc, matchTarget)
@@ -147,7 +139,27 @@ func (p *Program) selectRule(target string) selection {
 	if file {
 		mem.FreeString(p.Alloc, target)
 	}
-	return selection{Rule: matched, Captures: captures, Target: cloneText(p.Alloc, selectedTarget)}
+	winner := -1
+	for i := range candidates {
+		dominated := false
+		if file {
+			for j := range candidates {
+				if i != j && p.moreSpecific(candidates[j].Output, candidates[i].Output) {
+					dominated = true
+					break
+				}
+			}
+		}
+		if dominated { continue }
+		if winner >= 0 && (candidates[winner].Rule != candidates[i].Rule || !sameCaptures(candidates[winner].Captures, candidates[i].Captures)) {
+			return selection{Ambiguous: true, Diagnostic: p.producerAmbiguity(selectedTarget, candidates[winner].Output, candidates[i].Output)}
+		}
+		winner = i
+	}
+	if winner < 0 { return selection{Target: cloneText(p.Alloc, selectedTarget)} }
+	chosen := selection{Rule: candidates[winner].Rule, Output: candidates[winner].Output, Captures: candidates[winner].Captures, Target: cloneText(p.Alloc, selectedTarget)}
+	candidates[winner].Captures = nil
+	return chosen
 }
 
 func firstSpace(text string) int {
@@ -252,14 +264,21 @@ func (p *Program) NormalizeTargetOperands(targets []string) []string {
 	for i := range targets {
 		configured := false
 		for j := range p.ParameterDefinitions {
-			if targets[i] == p.ParameterDefinitions[j] { configured = true; break }
+			if targets[i] == p.ParameterDefinitions[j] {
+				configured = true
+				break
+			}
 		}
-		if !configured { operands = slices.Append(p.Alloc, operands, targets[i]) }
+		if !configured {
+			operands = slices.Append(p.Alloc, operands, targets[i])
+		}
 	}
 	if (len(operands) == 0 || (isTargetAssignment(operands[0]) && !p.HasTarget(operands[0]))) && p.HasTarget("default") {
 		var defaults []string
 		defaults = slices.Append(p.Alloc, defaults, "default")
-		for i := range operands { defaults = slices.Append(p.Alloc, defaults, operands[i]) }
+		for i := range operands {
+			defaults = slices.Append(p.Alloc, defaults, operands[i])
+		}
 		slices.Free(p.Alloc, operands)
 		operands = defaults
 	}
@@ -293,23 +312,37 @@ func (p *Program) JoinTargetOperands(targets []string) []string {
 
 // CLI conveniences do not change the explicit path grammar in rule sources.
 func (p *Program) cliTarget(name string) string {
-	if isPath(name) || strings.HasPrefix(name, "../") || core.IsResourceURIName(name) || p.hasLogicalTarget(name) { return cloneText(p.Alloc, name) }
-	if !isTargetAssignment(name) && (hasSlash(name) || strings.Contains(name, ".") || p.HasTarget("./"+name)) { return cloneText(p.Alloc, "./"+name) }
+	if isPath(name) || strings.HasPrefix(name, "../") || core.IsResourceURIName(name) || p.hasLogicalTarget(name) {
+		return cloneText(p.Alloc, name)
+	}
+	if !isTargetAssignment(name) && (hasSlash(name) || strings.Contains(name, ".") || p.HasTarget("./"+name)) {
+		return cloneText(p.Alloc, "./"+name)
+	}
 	for i := range p.Rules {
 		for j := range p.Rules[i].Rule.Inputs {
 			input := p.Rules[i].Rule.Inputs[j]
-			if input.Kind == rule.InputPath && input.Text == "./"+name { return cloneText(p.Alloc, "./"+name) }
+			if input.Kind == rule.InputPath && input.Text == "./"+name {
+				return cloneText(p.Alloc, "./"+name)
+			}
 		}
 	}
 	return cloneText(p.Alloc, name)
 }
 
 func (p *Program) hasLogicalTarget(name string) bool {
-	if isPath(name) || strings.HasPrefix(name, "../") || core.IsResourceURIName(name) { return false }
+	if isPath(name) || strings.HasPrefix(name, "../") || core.IsResourceURIName(name) {
+		return false
+	}
 	for i := range p.Rules {
 		r := p.Rules[i].Rule
-		if r.Kind == rule.FileRule { continue }
-		for j := range r.Outputs { if !r.Outputs[j].Template && r.Outputs[j].Text == name { return true } }
+		if r.Kind == rule.FileRule {
+			continue
+		}
+		for j := range r.Outputs {
+			if !r.Outputs[j].Template && r.Outputs[j].Text == name {
+				return true
+			}
+		}
 	}
 	return p.Eval.Definition(name) != nil
 }

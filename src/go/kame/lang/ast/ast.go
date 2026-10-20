@@ -64,8 +64,8 @@ func WriteAST(out io.Writer, lang string, name string, text string) int {
 }
 
 type astEncoder struct {
-	enc json.Encoder
-	out io.Writer
+	enc          json.Encoder
+	out          io.Writer
 	processDepth int
 }
 
@@ -141,26 +141,53 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Null()
 		return
 	}
-	if value.AuthoredPipe != nil { e.expr(value.AuthoredPipe); return }
+	if value.AuthoredPipe != nil {
+		e.expr(value.AuthoredPipe)
+		return
+	}
 	if value.Pattern != nil {
 		e.pattern(value)
 		return
 	}
 	e.node(exprKind(value.Kind), value.Span)
 	if value.Kind == expr.CommandMux {
-		e.Str("operator"); e.Str(value.Text)
-		if value.Int != 0 { e.Str("bufferBytes"); e.Int(value.Int) }
-		if value.StreamOverflow != 0 { e.Str("overflow"); e.Str(expr.StreamOverflowName(value.StreamOverflow)); e.Str("bufferItems"); e.Int(int64(value.BufferItems)) }
-		if value.StreamOrder != 0 { e.Str("order"); e.Str("round-robin") }
-		if value.StreamFailure != 0 { e.Str("failure"); e.Str(expr.StreamFailureName(value.StreamFailure)) }
-		if len(value.Body) != 0 { e.Str("selected"); e.expr(value.Body[0]) }
+		e.Str("operator")
+		e.Str(value.Text)
+		if value.Int != 0 {
+			e.Str("bufferBytes")
+			e.Int(value.Int)
+		}
+		if value.StreamOverflow != 0 {
+			e.Str("overflow")
+			e.Str(expr.StreamOverflowName(value.StreamOverflow))
+			e.Str("bufferItems")
+			e.Int(int64(value.BufferItems))
+		}
+		if value.StreamOrder != 0 {
+			e.Str("order")
+			e.Str("round-robin")
+		}
+		if value.StreamFailure != 0 {
+			e.Str("failure")
+			e.Str(expr.StreamFailureName(value.StreamFailure))
+		}
+		if len(value.Body) != 0 {
+			e.Str("selected")
+			e.expr(value.Body[0])
+		}
 	}
-	if value.Exit != "" { e.Str("rejoin"); e.Str(value.Exit) }
+	if value.Exit != "" {
+		e.Str("rejoin")
+		e.Str(value.Exit)
+	}
 	process := value.Kind == expr.CommandGraph || value.Kind == expr.CommandCapture
 	if process {
 		if e.processDepth == 0 {
 			for i := range value.Items {
-				if value.Items[i].Kind == expr.CommandMux || value.Items[i].Kind == expr.CommandGroup || value.Items[i].Kind == expr.CommandReader || value.Items[i].Kind == expr.CommandWriter { e.processTopology(value); break }
+				if value.Items[i].Kind == expr.CommandMux || value.Items[i].Kind == expr.CommandGroup || value.Items[i].Kind == expr.CommandReader || value.Items[i].Kind == expr.CommandWriter {
+					e.processTopology(value)
+					break
+				}
 			}
 		}
 		e.processDepth++
@@ -168,7 +195,9 @@ func (e *astEncoder) expr(value *expr.Expr) {
 	if value.Kind == expr.ValuePipe {
 		e.Str("items")
 		e.BeginArray()
-		for i := range value.Items { e.expr(value.Items[i]) }
+		for i := range value.Items {
+			e.expr(value.Items[i])
+		}
 		e.EndArray()
 	}
 	if value.Kind == expr.Boolean {
@@ -202,7 +231,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 				}
 				e.Str("expression")
 				e.expr(p.Expr)
-				if value.Kind != expr.CommandWord { e.Str("form"); e.Str(p.Form) }
+				if value.Kind != expr.CommandWord {
+					e.Str("form")
+					e.Str(p.Form)
+				}
 			} else {
 				e.Str("text")
 				e.Str(p.Text)
@@ -215,12 +247,27 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("text")
 		e.Str(value.Text)
 	}
-	if value.Kind == expr.CommandStream || value.Kind == expr.CommandReader || value.Kind == expr.CommandWriter { e.Str("channel"); e.Str(value.Text) }
+	if value.Kind == expr.CommandStream || value.Kind == expr.CommandReader || value.Kind == expr.CommandWriter {
+		e.Str("channel")
+		e.Str(value.Text)
+	}
 	if value.Kind == expr.CommandOperand {
 		e.Str("sourceKind")
-		if len(value.Body) != 0 { e.Str("producer") } else if value.Text == "" { e.Str("current") } else { e.Str("named") }
+		if len(value.Body) != 0 {
+			e.Str("producer")
+		} else if value.Text == "" {
+			e.Str("current")
+		} else {
+			e.Str("named")
+		}
 		e.Str("source")
-		if len(value.Body) != 0 { e.expr(value.Body[0]) } else if value.Text == "" { e.Str("current") } else { e.Str(value.Text) }
+		if len(value.Body) != 0 {
+			e.expr(value.Body[0])
+		} else if value.Text == "" {
+			e.Str("current")
+		} else {
+			e.Str(value.Text)
+		}
 	}
 	if value.Kind == expr.Reference || value.Kind == expr.EnvironmentReference {
 		e.Str("parts")
@@ -314,7 +361,9 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("index")
 		e.Int(value.Int)
 	}
-	if process { e.processDepth-- }
+	if process {
+		e.processDepth--
+	}
 	e.EndObject()
 }
 
@@ -340,8 +389,14 @@ func (e *astEncoder) pattern(value *expr.Expr) {
 			e.Int(int64(p.Index))
 			next := 0
 			for j := range value.Parts {
-				if value.Parts[j].Expr == nil { continue }
-				if next == p.Index { e.Str("expr"); e.expr(value.Parts[j].Expr); break }
+				if value.Parts[j].Expr == nil {
+					continue
+				}
+				if next == p.Index {
+					e.Str("expr")
+					e.expr(value.Parts[j].Expr)
+					break
+				}
 				next++
 			}
 		}
@@ -373,7 +428,9 @@ func (e *astEncoder) pattern(value *expr.Expr) {
 }
 
 func patternPartKind(k expr.PatternPartKind) string {
-	if k == expr.PatternInterpolation { return "interpolation" }
+	if k == expr.PatternInterpolation {
+		return "interpolation"
+	}
 	if k == expr.PatternLiteral {
 		return "literal"
 	}
@@ -391,15 +448,33 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
-	if k == expr.CommandOperand { return "stream-operand" }
-	if k == expr.CommandStream { return "channel-declaration" }
-	if k == expr.CommandReader { return "channel-reader" }
-	if k == expr.CommandWriter { return "channel-writer" }
-	if k == expr.CommandInput { return "command-input" }
-	if k == expr.CommandGroup { return "command-group" }
-	if k == expr.CommandMux { return "command-mux" }
-	if k == expr.KashDefer { return "kash-defer" }
-	if k == expr.ValuePipe { return "value-pipe" }
+	if k == expr.CommandOperand {
+		return "stream-operand"
+	}
+	if k == expr.CommandStream {
+		return "channel-declaration"
+	}
+	if k == expr.CommandReader {
+		return "channel-reader"
+	}
+	if k == expr.CommandWriter {
+		return "channel-writer"
+	}
+	if k == expr.CommandInput {
+		return "command-input"
+	}
+	if k == expr.CommandGroup {
+		return "command-group"
+	}
+	if k == expr.CommandMux {
+		return "command-mux"
+	}
+	if k == expr.KashDefer {
+		return "kash-defer"
+	}
+	if k == expr.ValuePipe {
+		return "value-pipe"
+	}
 	if k == expr.EnvironmentReference {
 		return "environment-reference"
 	}
@@ -594,7 +669,10 @@ func (e *astEncoder) rule(value *rule.Rule) {
 			}
 			// Schema 1 keeps the legacy capture-only template alias. Pattern is
 			// stable regardless of whether a separate string template is present.
-			if o.Expansion == nil { e.Str("template"); e.target(o.TargetForm, offset) }
+			if o.Expansion == nil {
+				e.Str("template")
+				e.target(o.TargetForm, offset)
+			}
 			e.Str("pattern")
 			e.target(o.TargetForm, offset)
 		}

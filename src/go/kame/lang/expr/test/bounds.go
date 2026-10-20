@@ -30,14 +30,22 @@ func TestRemediation3PatternBudgets(t *testing.T) {
 	}
 	budget := 20
 	matched, limited := expr.MatchGlobBudget("*", "a", &budget)
-	if !matched || limited { t.Error("ordinary nonempty glob changed") }
+	if !matched || limited {
+		t.Error("ordinary nonempty glob changed")
+	}
 	matched, limited = expr.MatchGlobBudget("*", "", &budget)
-	if matched || limited { t.Error("empty star semantics changed") }
+	if matched || limited {
+		t.Error("empty star semantics changed")
+	}
 	budget = 1
 	matched, limited = expr.MatchGlobBudget("", "", &budget)
-	if !matched || limited || budget != 0 { t.Error("last allowed step failed") }
+	if !matched || limited || budget != 0 {
+		t.Error("last allowed step failed")
+	}
 	matched, limited = expr.MatchGlobBudget("", "", &budget)
-	if matched || !limited { t.Error("exhausted shared budget was reused") }
+	if matched || !limited {
+		t.Error("exhausted shared budget was reused")
+	}
 }
 
 func TestRemediation3SectionAndPatternPositions(t *testing.T) {
@@ -61,7 +69,9 @@ func TestRemediation3SectionAndPatternPositions(t *testing.T) {
 	}
 	r.Free()
 	parsed := expr.ParsePatternText(a, "{_18446744073709551616}", 0)
-	if len(parsed.Diagnostics) == 0 { t.Error("overflowing pattern position accepted") }
+	if len(parsed.Diagnostics) == 0 {
+		t.Error("overflowing pattern position accepted")
+	}
 	parsed.Pattern.Free(a)
 	slices.Free(a, parsed.Diagnostics)
 }

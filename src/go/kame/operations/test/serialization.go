@@ -20,13 +20,19 @@ func TestScalarTextAndExplicitJSONBoundaries(t *testing.T) {
 	for i := range texts {
 		r := evaluate(t, p, texts[i])
 		if i < len(wants) {
-			if r.Diagnostic.Code != "" || r.Value.Kind != core.String || r.Value.Text != wants[i] { t.Error("scalar text or JSON encoding failed") }
+			if r.Diagnostic.Code != "" || r.Value.Kind != core.String || r.Value.Text != wants[i] {
+				t.Error("scalar text or JSON encoding failed")
+			}
 			if i >= 2 {
 				var decoded core.Value
-				if !core.ParseJSON(a, []byte(r.Value.Text), &decoded) { t.Error("JSON result did not parse") }
+				if !core.ParseJSON(a, []byte(r.Value.Text), &decoded) {
+					t.Error("JSON result did not parse")
+				}
 				decoded.Free(a)
 			}
-		} else if r.Diagnostic.Code != "EXPR_INVALID" { t.Error("nontext or non-JSON value was accepted") }
+		} else if r.Diagnostic.Code != "EXPR_INVALID" {
+			t.Error("nontext or non-JSON value was accepted")
+		}
 		r.Free(a)
 	}
 	engine.Free()

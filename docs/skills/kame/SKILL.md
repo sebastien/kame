@@ -12,8 +12,8 @@ outer grammar. They can be used independently; a value or template task does
 not need a build file.
 
 Use references and examples with a matching executable. Check help and small
-parse/run probes before claiming support. Migrate older sources explicitly using
-the repository's `MIGRATION.md`; formatting does not migrate syntax.
+parse/run probes before claiming support. Update older sources explicitly against
+the current [language reference](./ref/language.md); formatting does not migrate syntax.
 
 ## Choose the language first
 

@@ -23,18 +23,29 @@ func TestComputedPatternMatchAndReplacement(t *testing.T) {
 		`(match "./src/demo.c" [@{ROOT}/{name:*}.@{EXT} name])`,
 		`(match? ./a*/@{EXT}/{name:*} "./abc/c/demo")`,
 		`(match? ./a*/@{EXT}/{name:*} "./a*/c/demo")`,
+		`(replace @{ROOT}/{**}.@{EXT} @{OUT}/{_0} "./src/demo.c")`,
 	}
 	for i := range texts {
-		r := evaluate(t, p, `(let [ROOT "./src" OUT """../out {literal}""" EXT "c"] ` + texts[i] + `)`)
-		if r.Diagnostic.Code != "" { t.Errorf("computed operation failed: %s", r.Diagnostic.Code) }
+		r := evaluate(t, p, `(let [ROOT "./src" OUT """../out {literal}""" EXT "c"] `+texts[i]+`)`)
+		if r.Diagnostic.Code != "" {
+			t.Errorf("computed operation failed: %s", r.Diagnostic.Code)
+		}
 		if i == 0 || i == 6 {
-			if r.Value.Kind != core.Bool || !r.Value.Bool { t.Error("computed match failed") }
+			if r.Value.Kind != core.Bool || !r.Value.Bool {
+				t.Error("computed match failed")
+			}
 		} else if i == 5 {
-			if r.Value.Kind != core.Bool || r.Value.Bool { t.Error("authored literal glob outside a capture became syntax") }
+			if r.Value.Kind != core.Bool || r.Value.Bool {
+				t.Error("authored literal glob outside a capture became syntax")
+			}
 		} else {
 			want := "demo"
-			if i == 1 || i == 3 { want = "../out {literal}/demo" }
-			if r.Value.Kind != core.String || r.Value.Text != want { t.Error("computed capture/expansion failed") }
+			if i == 1 || i == 3 || i == 7 {
+				want = "../out {literal}/demo"
+			}
+			if r.Value.Kind != core.String || r.Value.Text != want {
+				t.Error("computed capture/expansion failed")
+			}
 		}
 		r.Free(a)
 	}

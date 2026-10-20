@@ -99,7 +99,13 @@ func (r *Runtime) WatchStateJSON() PureResult {
 			e.Str(polled.Result.Path)
 		}
 		e.Str("kind")
-		if h.Definition { e.Int(1) } else if polled.Result.Path != "" { e.Int(2) } else { e.Int(0) }
+		if h.Definition {
+			e.Int(1)
+		} else if polled.Result.Path != "" {
+			e.Int(2)
+		} else {
+			e.Int(0)
+		}
 		e.EndObject()
 		polled.Result.Free(r.Alloc)
 	}

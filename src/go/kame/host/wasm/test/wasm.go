@@ -5,11 +5,11 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"kame/host/wasm"
+	"solod.dev/so/encoding/hex"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
 	"solod.dev/so/strings"
-	"solod.dev/so/encoding/hex"
 	"solod.dev/so/testing"
 )
 
@@ -211,13 +211,19 @@ func TestToolInspectionYieldsHostRequestsWithoutRunningRecipes(t *testing.T) {
 	for reads := 0; reads < 4; reads++ {
 		checked = r.ToolsCheckJSON("root")
 		waiting := checked.HostNeeded
-		if checked.Code != "" { t.Error("resumed tool inspection failed") }
+		if checked.Code != "" {
+			t.Error("resumed tool inspection failed")
+		}
 		checked.Free(a)
-		if !waiting { break }
+		if !waiting {
+			break
+		}
 		next = r.Step()
 		if !next.OK || next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, host.FieldOp) != host.OpWildcard || host.PayloadPath(next.Request.Payload) != "./input/*.txt" {
 			t.Error("resumed inspection requested an effect or a different resource")
-			if next.OK { next.Request.Free(a) }
+			if next.OK {
+				next.Request.Free(a)
+			}
 			break
 		}
 		items = []core.Value{core.NewString(a, "./input/needs.txt")}
@@ -243,63 +249,108 @@ func TestToolInspectionYieldsHostRequestsWithoutRunningRecipes(t *testing.T) {
 func TestPlanInspectionUsesSchemaTwoAndStableReadOnlyQueries(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "default : build\nbuild : ./output\n./output : @(wildcard ./src/*.txt)\n\ttouch forbidden\n")
-	if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
+	if started.Runtime == nil {
+		t.Error("compile failed")
+		started.Result.Free(a)
+		return
+	}
 	r := started.Runtime
 	unprepared := r.PlanRootsJSON("[\"default\"]", -1)
-	if unprepared.Code != "PHASE_INVALID" { t.Error("unprepared plan query was accepted") }
+	if unprepared.Code != "PHASE_INVALID" {
+		t.Error("unprepared plan query was accepted")
+	}
 	unprepared.Free(a)
 	r.SetFile("src/one.txt", []byte("one"))
 	r.InspectionGrant("read", "")
 	prepared := r.Prepare()
-	if prepared.Code != "" { t.Error("prepare failed") }
+	if prepared.Code != "" {
+		t.Error("prepare failed")
+	}
 	prepared.Free(a)
 	first := r.PlanJSON("default", false)
 	second := r.PlanJSON("default", true)
 	roots := r.PlanRootsJSON("[\"default\"]", -1)
-	if roots.Code != "" || roots.Text != first.Text { t.Error("shared-root plan changed the legacy plan payload") }
+	if roots.Code != "" || roots.Text != first.Text {
+		t.Error("shared-root plan changed the legacy plan payload")
+	}
 	roots.Free(a)
 	if first.Code != "" || first.HostNeeded || first.Text != second.Text || !strings.Contains(first.Text, "\"schema\":2") || !strings.Contains(first.Text, "\"display\":\"./src/one.txt\"") {
 		t.Error("schema, recursive automatic discovery, or query stability lost")
 	}
-	first.Free(a); second.Free(a)
-	if pending := r.Step(); pending.OK { t.Error("inspection queued an effect"); pending.Request.Free(a) }
+	first.Free(a)
+	second.Free(a)
+	if pending := r.Step(); pending.OK {
+		t.Error("inspection queued an effect")
+		pending.Request.Free(a)
+	}
 	r.Free()
 }
 
 func TestTargetOperandsUseCompiledDeclarations(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "")
-	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
+	if started.Runtime == nil {
+		t.Error("runtime did not compile")
+		started.Result.Free(a)
+		return
+	}
 	r := started.Runtime
 	unprepared := r.TargetOperandsJSON("[]")
-	if unprepared.Code != "PHASE_INVALID" { t.Error("unprepared operand query was accepted") }
+	if unprepared.Code != "PHASE_INVALID" {
+		t.Error("unprepared operand query was accepted")
+	}
 	unprepared.Free(a)
 	configured := r.SetBuildSources([]byte(`{"sources":[{"name":"included.kmk","text":"CONFIG = \"original\"\n./artifact :\nplain :\n"},{"name":"main.kmk","text":"default {region=west} :\ndeploy {region=west} :\n"}],"parameters":["CONFIG=changed"]}`))
-	if configured.Code != "" { t.Error("build descriptor failed"); configured.Free(a); r.Free(); return }
+	if configured.Code != "" {
+		t.Error("build descriptor failed")
+		configured.Free(a)
+		r.Free()
+		return
+	}
 	configured.Free(a)
 	prepared := r.Prepare()
-	if prepared.Code != "" { t.Error("prepare failed: " + prepared.Code + " " + prepared.Message); prepared.Free(a); r.Free(); return }
+	if prepared.Code != "" {
+		t.Error("prepare failed: " + prepared.Code + " " + prepared.Message)
+		prepared.Free(a)
+		r.Free()
+		return
+	}
 	prepared.Free(a)
 	inputs := []string{"[]", "[\"CONFIG=changed\"]", "[\"region=east\"]", "[\"deploy\",\"CONFIG=changed\",\"region=east\"]", "[\"plain\",\"./artifact\"]", "[\"deploy\",\"./artifact\"]"}
 	expected := []string{"[\"default\"]", "[\"default\"]", "[\"default region=east\"]", "[\"deploy region=east\"]", "[\"plain\",\"./artifact\"]", "[\"deploy\",\"./artifact\"]"}
 	for i := range inputs {
 		result := r.TargetOperandsJSON(inputs[i])
-		if result.Code != "" || result.Text != expected[i] { t.Error("target operands lost declaration-sensitive selection") }
+		if result.Code != "" || result.Text != expected[i] {
+			t.Error("target operands lost declaration-sensitive selection")
+		}
 		result.Free(a)
 	}
 	invalid := r.TargetOperandsJSON("[1]")
-	if invalid.Code != "OPT_VALUE_INVALID" { t.Error("invalid operands were accepted") }
+	if invalid.Code != "OPT_VALUE_INVALID" {
+		t.Error("invalid operands were accepted")
+	}
 	invalid.Free(a)
-	if pending := r.Step(); pending.OK { t.Error("operand selection queued host work"); pending.Request.Free(a) }
+	if pending := r.Step(); pending.OK {
+		t.Error("operand selection queued host work")
+		pending.Request.Free(a)
+	}
 	r.Free()
 	started = wasm.NewRuntime(a, "plain :\n")
-	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
+	if started.Runtime == nil {
+		t.Error("runtime did not compile")
+		started.Result.Free(a)
+		return
+	}
 	r = started.Runtime
 	prepared = r.Prepare()
-	if prepared.Code != "" { t.Error("prepare failed") }
+	if prepared.Code != "" {
+		t.Error("prepare failed")
+	}
 	prepared.Free(a)
 	result := r.TargetOperandsJSON("[]")
-	if result.Code != "" || result.Text != "[]" { t.Error("selection invented an undeclared default") }
+	if result.Code != "" || result.Text != "[]" {
+		t.Error("selection invented an undeclared default")
+	}
 	result.Free(a)
 	r.Free()
 }
@@ -320,10 +371,14 @@ func TestInspectionDisposalReclaimsRetainedRootsAndHostRequests(t *testing.T) {
 		r.InspectionGrant("", "")
 		r.InspectionGrant("read", "")
 		prepared := r.Prepare()
-		if prepared.Code != "" { t.Error("prepare failed") }
+		if prepared.Code != "" {
+			t.Error("prepare failed")
+		}
 		prepared.Free(a)
 		query := r.PlanJSON("root", false)
-		if !query.HostNeeded || query.Code != "" { t.Error("inspection did not suspend") }
+		if !query.HostNeeded || query.Code != "" {
+			t.Error("inspection did not suspend")
+		}
 		query.Free(a)
 		if phase > 0 {
 			next := r.Step()
@@ -333,10 +388,14 @@ func TestInspectionDisposalReclaimsRetainedRootsAndHostRequests(t *testing.T) {
 			if phase == 2 && next.OK {
 				r.Complete(next.Request, core.NewBytes(a, []byte("./leaf.txt")), diagnostic.Diagnostic{})
 			}
-			if next.OK { next.Request.Free(a) }
+			if next.OK {
+				next.Request.Free(a)
+			}
 			if phase == 2 {
 				query = r.PlanJSON("root", false)
-				if !query.HostNeeded || query.Code != "" { t.Error("nested inspection read did not suspend: " + query.Code + " " + query.Text) }
+				if !query.HostNeeded || query.Code != "" {
+					t.Error("nested inspection read did not suspend: " + query.Code + " " + query.Text)
+				}
 				query.Free(a)
 			}
 		}
@@ -347,7 +406,11 @@ func TestInspectionDisposalReclaimsRetainedRootsAndHostRequests(t *testing.T) {
 func TestArtifactStatusInspectionDisposalReclaimsPendingRead(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "./result : ./seed\n\ttouch forbidden\n")
-	if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
+	if started.Runtime == nil {
+		t.Error("runtime did not compile")
+		started.Result.Free(a)
+		return
+	}
 	r := started.Runtime
 	r.SetForwarding(true)
 	r.InspectionGrant("", "")
@@ -355,124 +418,232 @@ func TestArtifactStatusInspectionDisposalReclaimsPendingRead(t *testing.T) {
 	prepared := r.Prepare()
 	prepared.Free(a)
 	query := r.PlanJSON("./result", false)
-	if !query.HostNeeded || query.Code != "" { t.Error("artifact status did not yield a read") }
+	if !query.HostNeeded || query.Code != "" {
+		t.Error("artifact status did not yield a read")
+	}
 	query.Free(a)
 	next := r.Step()
-	if !next.OK || next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, host.FieldOp) != host.OpFileContent { t.Error("artifact status requested an effect instead of content") }
-	if next.OK { next.Request.Free(a) }
+	if !next.OK || next.Request.Kind != host.RequestReadFile || host.PayloadText(next.Request.Payload, host.FieldOp) != host.OpFileContent {
+		t.Error("artifact status requested an effect instead of content")
+	}
+	if next.OK {
+		next.Request.Free(a)
+	}
 	r.Free()
 }
 
 func inspectionLifecycleQuery(r *wasm.Runtime, mode int) wasm.PureResult {
-	if mode == 0 { return r.PlanJSON("root", false) }
-	if mode == 1 { return r.PlanJSON("./result", false) }
+	if mode == 0 {
+		return r.PlanJSON("root", false)
+	}
+	if mode == 1 {
+		return r.PlanJSON("./result", false)
+	}
 	return r.GraphJSON("./seed", -1, "outputs")
 }
 
 func assertInspectionRootsReleased(t *testing.T, r *wasm.Runtime) {
 	nodes := r.Program.Engine.TrackedNodes()
-	for i := range nodes { if nodes[i].Interest != 0 { t.Error("abandoned inspection retained engine interest") } }
+	for i := range nodes {
+		if nodes[i].Interest != 0 {
+			t.Error("abandoned inspection retained engine interest")
+		}
+	}
 	slices.Free(r.Alloc, nodes)
-	if r.Program.InspectionWaiting { t.Error("finished inspection still reports waiting") }
+	if r.Program.InspectionWaiting {
+		t.Error("finished inspection still reports waiting")
+	}
 }
 
 func TestInspectionReplacementCancelsAndRecovers(t *testing.T) {
 	a := t.Allocator()
 	// Input expansion, artifact status, and retained consumer discovery; replace
 	// both queued and host-owned reads with a valid, invalid, or failing query.
-	for mode := 0; mode < 3; mode++ { for replacement := 0; replacement < 7; replacement++ { for exposed := 0; exposed < 2; exposed++ {
-		started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\nroot : @(split \"\\n\" inputs)\nquiet :\n./result : ./seed\n\ttouch forbidden\n")
-		if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
-		r := started.Runtime
-		r.SetForwarding(true)
-		r.InspectionGrant("", "")
-		r.InspectionGrant("read", "")
-		prepared := r.Prepare()
-		if prepared.Code != "" { t.Error("prepare failed") }
-		prepared.Free(a)
-		query := inspectionLifecycleQuery(r, mode)
-		if !query.HostNeeded { t.Error("inspection did not suspend") }
-		query.Free(a)
-		var abandoned host.Request
-		if exposed != 0 {
-			next := r.Step()
-			if !next.OK || next.Request.Kind != host.RequestReadFile { t.Error("inspection did not expose a read") }
-			if next.OK { abandoned = next.Request }
+	for mode := 0; mode < 3; mode++ {
+		for replacement := 0; replacement < 7; replacement++ {
+			for exposed := 0; exposed < 2; exposed++ {
+				started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\nroot : @(split \"\\n\" inputs)\nquiet :\n./result : ./seed\n\ttouch forbidden\n")
+				if started.Runtime == nil {
+					t.Error("compile failed")
+					started.Result.Free(a)
+					return
+				}
+				r := started.Runtime
+				r.SetForwarding(true)
+				r.InspectionGrant("", "")
+				r.InspectionGrant("read", "")
+				prepared := r.Prepare()
+				if prepared.Code != "" {
+					t.Error("prepare failed")
+				}
+				prepared.Free(a)
+				query := inspectionLifecycleQuery(r, mode)
+				if !query.HostNeeded {
+					t.Error("inspection did not suspend")
+				}
+				query.Free(a)
+				var abandoned host.Request
+				if exposed != 0 {
+					next := r.Step()
+					if !next.OK || next.Request.Kind != host.RequestReadFile {
+						t.Error("inspection did not expose a read")
+					}
+					if next.OK {
+						abandoned = next.Request
+					}
+				}
+				query = inspectionLifecycleQuery(r, mode)
+				if !query.HostNeeded {
+					t.Error("same query did not preserve its suspended resolver")
+				}
+				query.Free(a)
+				if replacement == 0 {
+					query = r.PlanJSON("quiet", false)
+				}
+				if replacement == 1 {
+					query = r.GraphJSON("quiet", -2, "inputs")
+				}
+				if replacement == 2 {
+					query = r.PlanJSON("undeclared", false)
+				}
+				if replacement == 3 {
+					query = r.PlanQueryJSON("[", -1, true)
+				}
+				if replacement == 4 {
+					query = r.PlanQueryJSON("[]", -1, true)
+				}
+				if replacement == 5 {
+					query = r.PlanQueryJSON("[42]", -1, true)
+				}
+				if replacement == 6 {
+					query = r.SpanJSON("quiet", -1, false)
+				}
+				if query.HostNeeded || (replacement == 1 && !strings.Contains(query.Text, "OPT_VALUE_INVALID")) || (replacement == 2 && !strings.Contains(query.Text, "TGT_NO_RULE")) || (replacement >= 3 && replacement <= 5 && query.Code != "OPT_VALUE_INVALID") {
+					t.Error("replacement did not settle with its own result")
+				}
+				query.Free(a)
+				assertInspectionRootsReleased(t, r)
+				cancelled := false
+				for count := 0; count < 8; count++ {
+					next := r.Step()
+					if !next.OK {
+						break
+					}
+					if next.Request.Kind != host.RequestProcessCancel {
+						t.Error("abandoned query left a read or recipe queued")
+					} else {
+						cancelled = true
+					}
+					next.Request.Free(a)
+				}
+				if exposed != 0 && !cancelled {
+					t.Error("host-owned inspection request was not cancelled")
+				}
+				if abandoned.ID != 0 {
+					// Late content cannot satisfy the new generation's read.
+					r.Complete(abandoned, core.NewBytes(a, []byte("undeclared")), diagnostic.Diagnostic{})
+					abandoned.Free(a)
+				}
+				query = inspectionLifecycleQuery(r, mode)
+				for retry := 0; query.HostNeeded && retry < 24; retry++ {
+					query.Free(a)
+					next := r.Step()
+					if !next.OK {
+						t.Error("recovery lost its host request")
+						query = wasm.PureResult{}
+						break
+					}
+					if next.Request.Kind != host.RequestReadFile && next.Request.Kind != host.RequestCacheGet {
+						t.Error("recovery queued a recipe")
+					}
+					value := core.Value{Kind: core.Nil}
+					if strings.HasSuffix(host.PayloadPath(next.Request.Payload), "inputs.txt") {
+						value = core.NewBytes(a, []byte("quiet"))
+					}
+					r.Complete(next.Request, value, diagnostic.Diagnostic{})
+					next.Request.Free(a)
+					query = inspectionLifecycleQuery(r, mode)
+				}
+				if query.HostNeeded || !strings.Contains(query.Text, "\"schema\":2") || strings.Contains(query.Text, "EXEC_CANCELLED") || strings.Contains(query.Text, "TGT_NO_RULE") {
+					t.Error("inspection did not recover after replacement")
+				}
+				query.Free(a)
+				assertInspectionRootsReleased(t, r)
+				r.Free()
+			}
 		}
-		query = inspectionLifecycleQuery(r, mode)
-		if !query.HostNeeded { t.Error("same query did not preserve its suspended resolver") }
-		query.Free(a)
-		if replacement == 0 { query = r.PlanJSON("quiet", false) }
-		if replacement == 1 { query = r.GraphJSON("quiet", -2, "inputs") }
-		if replacement == 2 { query = r.PlanJSON("undeclared", false) }
-		if replacement == 3 { query = r.PlanQueryJSON("[", -1, true) }
-		if replacement == 4 { query = r.PlanQueryJSON("[]", -1, true) }
-		if replacement == 5 { query = r.PlanQueryJSON("[42]", -1, true) }
-		if replacement == 6 { query = r.SpanJSON("quiet", -1, false) }
-		if query.HostNeeded || (replacement == 1 && !strings.Contains(query.Text, "OPT_VALUE_INVALID")) || (replacement == 2 && !strings.Contains(query.Text, "TGT_NO_RULE")) || (replacement >= 3 && replacement <= 5 && query.Code != "OPT_VALUE_INVALID") { t.Error("replacement did not settle with its own result") }
-		query.Free(a)
-		assertInspectionRootsReleased(t, r)
-		cancelled := false
-		for count := 0; count < 8; count++ {
-			next := r.Step()
-			if !next.OK { break }
-			if next.Request.Kind != host.RequestProcessCancel { t.Error("abandoned query left a read or recipe queued") } else { cancelled = true }
-			next.Request.Free(a)
-		}
-		if exposed != 0 && !cancelled { t.Error("host-owned inspection request was not cancelled") }
-		if abandoned.ID != 0 {
-			// Late content cannot satisfy the new generation's read.
-			r.Complete(abandoned, core.NewBytes(a, []byte("undeclared")), diagnostic.Diagnostic{})
-			abandoned.Free(a)
-		}
-		query = inspectionLifecycleQuery(r, mode)
-		for retry := 0; query.HostNeeded && retry < 24; retry++ {
-			query.Free(a)
-			next := r.Step()
-			if !next.OK { t.Error("recovery lost its host request"); query = wasm.PureResult{}; break }
-			if next.Request.Kind != host.RequestReadFile && next.Request.Kind != host.RequestCacheGet { t.Error("recovery queued a recipe") }
-			value := core.Value{Kind: core.Nil}
-			if strings.HasSuffix(host.PayloadPath(next.Request.Payload), "inputs.txt") { value = core.NewBytes(a, []byte("quiet")) }
-			r.Complete(next.Request, value, diagnostic.Diagnostic{})
-			next.Request.Free(a)
-			query = inspectionLifecycleQuery(r, mode)
-		}
-		if query.HostNeeded || !strings.Contains(query.Text, "\"schema\":2") || strings.Contains(query.Text, "EXEC_CANCELLED") || strings.Contains(query.Text, "TGT_NO_RULE") { t.Error("inspection did not recover after replacement") }
-		query.Free(a)
-		assertInspectionRootsReleased(t, r)
-		r.Free()
-	} } }
+	}
 }
 
 func TestInspectionReplacementReusesCancelledSharedRead(t *testing.T) {
 	a := t.Allocator()
 	for span := 0; span < 2; span++ {
 		started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\na : @(split \"\\n\" inputs)\nb : @(split \"\\n\" inputs)\nquiet :\n")
-		if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
+		if started.Runtime == nil {
+			t.Error("compile failed")
+			started.Result.Free(a)
+			return
+		}
 		r := started.Runtime
-		r.SetForwarding(true); r.InspectionGrant("", ""); r.InspectionGrant("read", "")
-		prepared := r.Prepare(); prepared.Free(a)
+		r.SetForwarding(true)
+		r.InspectionGrant("", "")
+		r.InspectionGrant("read", "")
+		prepared := r.Prepare()
+		prepared.Free(a)
 		var query wasm.PureResult
-		if span == 0 { query = r.PlanJSON("a", false) } else { query = r.SpanJSON("a", -1, true) }
-		if !query.HostNeeded { t.Error("first query did not suspend") }
+		if span == 0 {
+			query = r.PlanJSON("a", false)
+		} else {
+			query = r.SpanJSON("a", -1, true)
+		}
+		if !query.HostNeeded {
+			t.Error("first query did not suspend")
+		}
 		query.Free(a)
 		old := r.Step()
-		if !old.OK || old.Request.Kind != host.RequestReadFile { t.Error("missing initial read"); if old.OK { old.Request.Free(a) }; r.Free(); continue }
-		if span == 0 { query = r.PlanJSON("b", false) } else { query = r.SpanJSON("b", -1, true) }
+		if !old.OK || old.Request.Kind != host.RequestReadFile {
+			t.Error("missing initial read")
+			if old.OK {
+				old.Request.Free(a)
+			}
+			r.Free()
+			continue
+		}
+		if span == 0 {
+			query = r.PlanJSON("b", false)
+		} else {
+			query = r.SpanJSON("b", -1, true)
+		}
 		cancelled, reread := false, false
 		for retry := 0; query.HostNeeded && retry < 20; retry++ {
 			query.Free(a)
 			next := r.Step()
-			if !next.OK { t.Error("replacement lost shared read"); query = wasm.PureResult{}; break }
-			if next.Request.Kind == host.RequestProcessCancel { cancelled = true } else if next.Request.Kind == host.RequestReadFile {
-				if next.Request.ID == old.Request.ID || (next.Request.NodeID == old.Request.NodeID && next.Request.Generation == old.Request.Generation) { t.Error("replacement reused abandoned request identity") }
+			if !next.OK {
+				t.Error("replacement lost shared read")
+				query = wasm.PureResult{}
+				break
+			}
+			if next.Request.Kind == host.RequestProcessCancel {
+				cancelled = true
+			} else if next.Request.Kind == host.RequestReadFile {
+				if next.Request.ID == old.Request.ID || (next.Request.NodeID == old.Request.NodeID && next.Request.Generation == old.Request.Generation) {
+					t.Error("replacement reused abandoned request identity")
+				}
 				reread = true
 				r.Complete(next.Request, core.NewBytes(a, []byte("quiet")), diagnostic.Diagnostic{})
-			} else { t.Error("replacement requested an effect") }
+			} else {
+				t.Error("replacement requested an effect")
+			}
 			next.Request.Free(a)
-			if span == 0 { query = r.PlanJSON("b", false) } else { query = r.SpanJSON("b", -1, true) }
+			if span == 0 {
+				query = r.PlanJSON("b", false)
+			} else {
+				query = r.SpanJSON("b", -1, true)
+			}
 		}
-		if query.HostNeeded || !cancelled || !reread || !strings.Contains(query.Text, "\"schema\":") || strings.Contains(query.Text, "EXEC_CANCELLED") { t.Error("new resolver could not recover shared cancelled observation") }
+		if query.HostNeeded || !cancelled || !reread || !strings.Contains(query.Text, "\"schema\":") || strings.Contains(query.Text, "EXEC_CANCELLED") {
+			t.Error("new resolver could not recover shared cancelled observation")
+		}
 		query.Free(a)
 		r.Complete(old.Request, core.NewBytes(a, []byte("undeclared")), diagnostic.Diagnostic{})
 		old.Request.Free(a)
@@ -484,19 +655,33 @@ func TestInspectionReplacementReusesCancelledSharedRead(t *testing.T) {
 func TestInspectionRecordedToolResolutionPublishesHostRequest(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "./result : ./seed ; [shell: kame]\n\t(if x/test-tool (read ./seed) \"\")\n")
-	if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
+	if started.Runtime == nil {
+		t.Error("compile failed")
+		started.Result.Free(a)
+		return
+	}
 	r := started.Runtime
 	defer r.Free()
-	r.SetFile("seed", []byte("seed")); r.SetFile("test-tool", []byte("tool"))
+	r.SetFile("seed", []byte("seed"))
+	r.SetFile("test-tool", []byte("tool"))
 	r.SetToolPath("test-tool", "./test-tool")
 	r.InspectionGrant("read", "")
-	prepared := r.Prepare(); prepared.Free(a)
+	prepared := r.Prepare()
+	prepared.Free(a)
 	built := r.Program.Materialize("./result")
-	if built.Diagnostic.Code != "" { t.Error("record fixture failed: " + built.Diagnostic.Code); built.Free(a); return }
+	if built.Diagnostic.Code != "" {
+		t.Error("record fixture failed: " + built.Diagnostic.Code)
+		built.Free(a)
+		return
+	}
 	built.Free(a)
-	for i := range r.Program.Tools { r.Program.Tools[i].Resolved = false }
+	for i := range r.Program.Tools {
+		r.Program.Tools[i].Resolved = false
+	}
 	key := core.NewResourceKey(a, core.ResourceTool, "test-tool")
-	if node := r.Program.Engine.Lookup(key); node != nil { r.Program.Engine.Invalidate(node) }
+	if node := r.Program.Engine.Lookup(key); node != nil {
+		r.Program.Engine.Invalidate(node)
+	}
 	key.Free(a)
 	r.Program.Forwarding = true
 	query := r.PlanJSON("./result", false)
@@ -504,23 +689,40 @@ func TestInspectionRecordedToolResolutionPublishesHostRequest(t *testing.T) {
 	for retry := 0; query.HostNeeded && retry < 20; retry++ {
 		query.Free(a)
 		next := r.Step()
-		if !next.OK { t.Error("status yielded without its tool request"); query = wasm.PureResult{}; break }
-		if host.PayloadText(next.Request.Payload, host.FieldOp) == "resolve-tool" { resolved = true; next.Request.Free(a); query = wasm.PureResult{}; break }
+		if !next.OK {
+			t.Error("status yielded without its tool request")
+			query = wasm.PureResult{}
+			break
+		}
+		if host.PayloadText(next.Request.Payload, host.FieldOp) == "resolve-tool" {
+			resolved = true
+			next.Request.Free(a)
+			query = wasm.PureResult{}
+			break
+		}
 		if next.Request.Kind == host.RequestCacheGet {
 			encoded := hex.EncodeToString(a, host.CacheKey(next.Request.Payload))
 			name := ".kame/cache/file-context/" + encoded
 			memory := r.Program.Host.(*wasm.MemoryHost)
 			data, err := memory.ReadFile(a, name)
-			if err != nil { t.Error("record fixture was not published") }
+			if err != nil {
+				t.Error("record fixture was not published")
+			}
 			r.Complete(next.Request, core.NewBytes(a, data), diagnostic.Diagnostic{})
 			mem.FreeSlice(a, data)
 			mem.FreeString(a, encoded)
-		} else if next.Request.Kind == host.RequestReadFile { r.Complete(next.Request, core.NewBytes(a, []byte("seed")), diagnostic.Diagnostic{}) } else { t.Error("tool inspection requested an effect") }
+		} else if next.Request.Kind == host.RequestReadFile {
+			r.Complete(next.Request, core.NewBytes(a, []byte("seed")), diagnostic.Diagnostic{})
+		} else {
+			t.Error("tool inspection requested an effect")
+		}
 		next.Request.Free(a)
 		query = r.PlanJSON("./result", false)
 	}
 	query.Free(a)
-	if !resolved { t.Error("recorded unresolved tool was not queried") }
+	if !resolved {
+		t.Error("recorded unresolved tool was not queried")
+	}
 	r.Program.CancelInspection()
 	assertInspectionRootsReleased(t, r)
 }
@@ -528,18 +730,27 @@ func TestInspectionRecordedToolResolutionPublishesHostRequest(t *testing.T) {
 func TestInspectionStatusRefreshesBetweenCompletedQueries(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "./result : ./seed\n")
-	if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
+	if started.Runtime == nil {
+		t.Error("compile failed")
+		started.Result.Free(a)
+		return
+	}
 	r := started.Runtime
 	defer r.Free()
 	r.InspectionGrant("read", "")
-	prepared := r.Prepare(); prepared.Free(a)
+	prepared := r.Prepare()
+	prepared.Free(a)
 	first := r.PlanJSON("./result", false)
-	if first.Code != "" || first.HostNeeded || !strings.Contains(first.Text, "\"status\":\"missing\"") { t.Error("initial absent output was not missing") }
+	if first.Code != "" || first.HostNeeded || !strings.Contains(first.Text, "\"status\":\"missing\"") {
+		t.Error("initial absent output was not missing")
+	}
 	first.Free(a)
 	memory := r.Program.Host.(*wasm.MemoryHost)
 	memory.SetFile("result", []byte("present"))
 	second := r.PlanJSON("./result", false)
-	if second.Code != "" || second.HostNeeded || strings.Contains(second.Text, "\"status\":\"missing\"") || !strings.Contains(second.Text, "\"status\":\"unknown\"") { t.Error("completed status cache hid new output bytes") }
+	if second.Code != "" || second.HostNeeded || strings.Contains(second.Text, "\"status\":\"missing\"") || !strings.Contains(second.Text, "\"status\":\"unknown\"") {
+		t.Error("completed status cache hid new output bytes")
+	}
 	second.Free(a)
 	assertInspectionRootsReleased(t, r)
 }
@@ -547,33 +758,64 @@ func TestInspectionStatusRefreshesBetweenCompletedQueries(t *testing.T) {
 func TestInspectionStatusInvalidationRestartsPendingRead(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "./result : ./seed\n")
-	if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
+	if started.Runtime == nil {
+		t.Error("compile failed")
+		started.Result.Free(a)
+		return
+	}
 	r := started.Runtime
 	defer r.Free()
-	r.SetForwarding(true); r.InspectionGrant("", ""); r.InspectionGrant("read", "")
-	prepared := r.Prepare(); prepared.Free(a)
+	r.SetForwarding(true)
+	r.InspectionGrant("", "")
+	r.InspectionGrant("read", "")
+	prepared := r.Prepare()
+	prepared.Free(a)
 	query := r.PlanJSON("./result", false)
-	if !query.HostNeeded { t.Error("status query did not suspend") }
+	if !query.HostNeeded {
+		t.Error("status query did not suspend")
+	}
 	query.Free(a)
 	old := r.Step()
-	if !old.OK || old.Request.Kind != host.RequestReadFile { t.Error("missing status read"); if old.OK { old.Request.Free(a) }; return }
+	if !old.OK || old.Request.Kind != host.RequestReadFile {
+		t.Error("missing status read")
+		if old.OK {
+			old.Request.Free(a)
+		}
+		return
+	}
 	nodes := r.Program.Engine.TrackedNodes()
-	for i := range nodes { if nodes[i].ID == old.Request.NodeID { r.Program.Engine.Invalidate(nodes[i]) } }
+	for i := range nodes {
+		if nodes[i].ID == old.Request.NodeID {
+			r.Program.Engine.Invalidate(nodes[i])
+		}
+	}
 	slices.Free(a, nodes)
 	query = r.PlanJSON("./result", false)
 	reread := false
 	for retry := 0; query.HostNeeded && retry < 20; retry++ {
 		query.Free(a)
 		next := r.Step()
-		if !next.OK { t.Error("invalidated status lost request"); query = wasm.PureResult{}; break }
+		if !next.OK {
+			t.Error("invalidated status lost request")
+			query = wasm.PureResult{}
+			break
+		}
 		if next.Request.Kind == host.RequestReadFile {
-			if next.Request.NodeID == old.Request.NodeID && next.Request.Generation > old.Request.Generation { reread = true }
+			if next.Request.NodeID == old.Request.NodeID && next.Request.Generation > old.Request.Generation {
+				reread = true
+			}
 			r.Complete(next.Request, core.NewBytes(a, []byte("exists")), diagnostic.Diagnostic{})
-		} else if next.Request.Kind == host.RequestCacheGet { r.Complete(next.Request, core.Value{Kind: core.Nil}, diagnostic.Diagnostic{}) } else if next.Request.Kind != host.RequestProcessCancel { t.Error("status invalidation requested an effect") }
+		} else if next.Request.Kind == host.RequestCacheGet {
+			r.Complete(next.Request, core.Value{Kind: core.Nil}, diagnostic.Diagnostic{})
+		} else if next.Request.Kind != host.RequestProcessCancel {
+			t.Error("status invalidation requested an effect")
+		}
 		next.Request.Free(a)
 		query = r.PlanJSON("./result", false)
 	}
-	if query.HostNeeded || !reread || !strings.Contains(query.Text, "\"schema\":2") || strings.Contains(query.Text, "\"status\":\"missing\"") { t.Error("status generation retained stale progress") }
+	if query.HostNeeded || !reread || !strings.Contains(query.Text, "\"schema\":2") || strings.Contains(query.Text, "\"status\":\"missing\"") {
+		t.Error("status generation retained stale progress")
+	}
 	query.Free(a)
 	r.Complete(old.Request, core.Value{Kind: core.Nil}, diagnostic.Diagnostic{})
 	old.Request.Free(a)
@@ -582,8 +824,12 @@ func TestInspectionStatusInvalidationRestartsPendingRead(t *testing.T) {
 
 func TestInspectionReadFailureReleasesAndRetries(t *testing.T) {
 	a := t.Allocator()
-		started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\nroot : @(split \"\\n\" inputs)\nquiet :\n")
-	if started.Runtime == nil { t.Error("compile failed"); started.Result.Free(a); return }
+	started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\nroot : @(split \"\\n\" inputs)\nquiet :\n")
+	if started.Runtime == nil {
+		t.Error("compile failed")
+		started.Result.Free(a)
+		return
+	}
 	r := started.Runtime
 	defer r.Free()
 	r.SetForwarding(true)
@@ -593,14 +839,24 @@ func TestInspectionReadFailureReleasesAndRetries(t *testing.T) {
 	prepared.Free(a)
 	for attempt := 0; attempt < 2; attempt++ {
 		query := r.PlanJSON("root", false)
-		if !query.HostNeeded { t.Error("read failure poisoned the next query") }
+		if !query.HostNeeded {
+			t.Error("read failure poisoned the next query")
+		}
 		query.Free(a)
 		next := r.Step()
-		if !next.OK || next.Request.Kind != host.RequestReadFile { t.Error("missing inspection read"); if next.OK { next.Request.Free(a) }; return }
+		if !next.OK || next.Request.Kind != host.RequestReadFile {
+			t.Error("missing inspection read")
+			if next.OK {
+				next.Request.Free(a)
+			}
+			return
+		}
 		if attempt == 0 {
 			d := diagnostic.Diagnostic{Code: "FS_ERR", Message: "read failed"}
 			r.Complete(next.Request, core.Value{Kind: core.Nil}, d.Clone(a))
-		} else { r.Complete(next.Request, core.NewBytes(a, []byte("quiet")), diagnostic.Diagnostic{}) }
+		} else {
+			r.Complete(next.Request, core.NewBytes(a, []byte("quiet")), diagnostic.Diagnostic{})
+		}
 		next.Request.Free(a)
 		query = r.PlanJSON("root", false)
 		// A successful observation may be followed by the expression's content
@@ -608,13 +864,21 @@ func TestInspectionReadFailureReleasesAndRetries(t *testing.T) {
 		for retry := 0; attempt != 0 && query.HostNeeded && retry < 16; retry++ {
 			query.Free(a)
 			next = r.Step()
-			if !next.OK { t.Error("retry lost content read"); query = wasm.PureResult{}; break }
-			if next.Request.Kind != host.RequestReadFile { t.Error("retry requested an effect") }
+			if !next.OK {
+				t.Error("retry lost content read")
+				query = wasm.PureResult{}
+				break
+			}
+			if next.Request.Kind != host.RequestReadFile {
+				t.Error("retry requested an effect")
+			}
 			r.Complete(next.Request, core.NewBytes(a, []byte("quiet")), diagnostic.Diagnostic{})
 			next.Request.Free(a)
 			query = r.PlanJSON("root", false)
 		}
-		if query.HostNeeded || (attempt == 0 && !strings.Contains(query.Text, "FS_ERR")) || (attempt == 1 && !strings.Contains(query.Text, "\"schema\":2")) { t.Error("failed inspection did not settle or recover") }
+		if query.HostNeeded || (attempt == 0 && !strings.Contains(query.Text, "FS_ERR")) || (attempt == 1 && !strings.Contains(query.Text, "\"schema\":2")) {
+			t.Error("failed inspection did not settle or recover")
+		}
 		query.Free(a)
 		assertInspectionRootsReleased(t, r)
 	}
@@ -624,7 +888,11 @@ func TestConsumerInspectionResumesAndDisposesRetainedCatalogue(t *testing.T) {
 	a := t.Allocator()
 	for phase := 0; phase < 3; phase++ {
 		started := wasm.NewRuntime(a, "SOURCES = (wildcard ./src/*.txt)\n./first : @{SOURCES}\n./second : ./first\n")
-		if started.Runtime == nil { t.Error("runtime did not compile"); started.Result.Free(a); return }
+		if started.Runtime == nil {
+			t.Error("runtime did not compile")
+			started.Result.Free(a)
+			return
+		}
 		r := started.Runtime
 		r.SetForwarding(true)
 		r.InspectionGrant("", "")
@@ -632,14 +900,24 @@ func TestConsumerInspectionResumesAndDisposesRetainedCatalogue(t *testing.T) {
 		prepared := r.Prepare()
 		prepared.Free(a)
 		query := r.GraphJSON("./src/one.txt", -1, "outputs")
-		if !query.HostNeeded || query.Code != "" { t.Error("consumer discovery did not suspend") }
+		if !query.HostNeeded || query.Code != "" {
+			t.Error("consumer discovery did not suspend")
+		}
 		query.Free(a)
-		if phase == 0 { r.Free(); continue }
+		if phase == 0 {
+			r.Free()
+			continue
+		}
 		requests := 0
 		for requests < 20 {
 			next := r.Step()
-			if !next.OK { t.Error("missing inspection request"); break }
-			if next.Request.Kind != host.RequestReadFile && next.Request.Kind != host.RequestCacheGet { t.Error("inspection requested an effect") }
+			if !next.OK {
+				t.Error("missing inspection request")
+				break
+			}
+			if next.Request.Kind != host.RequestReadFile && next.Request.Kind != host.RequestCacheGet {
+				t.Error("inspection requested an effect")
+			}
 			if phase == 1 && host.PayloadText(next.Request.Payload, host.FieldOp) == host.OpFileContent {
 				next.Request.Free(a)
 				break // dispose during affected-artifact status, after discovery
@@ -656,12 +934,17 @@ func TestConsumerInspectionResumesAndDisposesRetainedCatalogue(t *testing.T) {
 			query = r.GraphJSON("./src/one.txt", -1, "outputs")
 			waiting := query.HostNeeded
 			if !waiting {
-				if query.Code != "" || !strings.Contains(query.Text, "\"target\":\"./first\"") || !strings.Contains(query.Text, "\"target\":\"./second\"") { t.Error("resumed catalogue lost consumers") }
+				if query.Code != "" || !strings.Contains(query.Text, "\"target\":\"./first\"") || !strings.Contains(query.Text, "\"target\":\"./second\"") {
+					t.Error("resumed catalogue lost consumers")
+				}
 				again := r.GraphJSON("./src/one.txt", -1, "outputs")
 				// A new query may re-observe released read-only definitions.
 				for retry := 0; again.HostNeeded && retry < 20; retry++ {
 					next = r.Step()
-					if !next.OK { t.Error("missing repeated inspection request"); break }
+					if !next.OK {
+						t.Error("missing repeated inspection request")
+						break
+					}
 					again.Free(a)
 					value = core.Value{Kind: core.Nil}
 					if host.PayloadText(next.Request.Payload, host.FieldOp) == host.OpWildcard {
@@ -673,13 +956,19 @@ func TestConsumerInspectionResumesAndDisposesRetainedCatalogue(t *testing.T) {
 					next.Request.Free(a)
 					again = r.GraphJSON("./src/one.txt", -1, "outputs")
 				}
-				if again.HostNeeded || again.Code != "" || again.Text != query.Text { t.Error("completed consumer query changed on repeat") }
+				if again.HostNeeded || again.Code != "" || again.Text != query.Text {
+					t.Error("completed consumer query changed on repeat")
+				}
 				again.Free(a)
 			}
 			query.Free(a)
-			if !waiting { break }
+			if !waiting {
+				break
+			}
 		}
-		if requests == 20 { t.Error("consumer inspection did not finish") }
+		if requests == 20 {
+			t.Error("consumer inspection did not finish")
+		}
 		r.Free()
 	}
 }
@@ -1072,13 +1361,24 @@ func TestRuntimeCancelledCacheRequestsDoNotCommitEffects(t *testing.T) {
 	for _, cancelledKind := range kinds {
 		started := wasm.NewRuntime(a, "task cached : ; [shell: kash]\n\t(write! ./side \"changed\")\n\t(out! \"unexpected\")\n")
 		started.Result.Free(a)
-		if started.Runtime == nil { t.Fatal("runtime did not compile"); return }
+		if started.Runtime == nil {
+			t.Fatal("runtime did not compile")
+			return
+		}
 		r := started.Runtime
-		if !r.SetForwarding(true) { r.Free(); t.Fatal("forwarding was rejected"); return }
+		if !r.SetForwarding(true) {
+			r.Free()
+			t.Fatal("forwarding was rejected")
+			return
+		}
 		requested := r.RequestTarget("cached")
 		ok := requested.Code == ""
 		requested.Free(a)
-		if !ok { r.Free(); t.Fatal("target request failed"); return }
+		if !ok {
+			r.Free()
+			t.Fatal("target request failed")
+			return
+		}
 		cancelled, done := false, false
 		for i := 0; i < 64 && !done; i++ {
 			next := r.Step()
@@ -1096,13 +1396,20 @@ func TestRuntimeCancelledCacheRequestsDoNotCommitEffects(t *testing.T) {
 			}
 			result := r.Result()
 			done = result.Done
-			if done && result.Diagnostic.Code != "EXEC_CANCELLED" { t.Error("cache cancellation degraded to a cache miss") }
+			if done && result.Diagnostic.Code != "EXEC_CANCELLED" {
+				t.Error("cache cancellation degraded to a cache miss")
+			}
 			result.Free(a)
 		}
-		if !cancelled || !done { t.Error("cache cancellation did not terminate the target") }
+		if !cancelled || !done {
+			t.Error("cache cancellation did not terminate the target")
+		}
 		for r.NextEventJSON() {
 			line := make([]byte, r.EventJSONLength())
-			if !r.EventJSONCopy(line) { t.Error("event copy failed"); break }
+			if !r.EventJSONCopy(line) {
+				t.Error("event copy failed")
+				break
+			}
 			if strings.Contains(string(line), `"type":"stdout"`) || strings.Contains(string(line), `"type":"effect"`) || strings.Contains(string(line), `"type":"target-completed"`) {
 				t.Error("cancelled cache request published task effects or success")
 			}
@@ -1209,7 +1516,7 @@ func TestRuntimeEmbeddingServiceLifecycleAndCleanupEvents(t *testing.T) {
 	}
 	for i := range states {
 		if states[i] != "" {
-			t.Errorf("embedding lifecycle state was not emitted: " + states[i])
+			t.Error("embedding lifecycle state was not emitted: " + states[i])
 		}
 	}
 }

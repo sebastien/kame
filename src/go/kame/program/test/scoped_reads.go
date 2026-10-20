@@ -49,7 +49,7 @@ func checkScopedDefinitionReads(t *testing.T, defines []string, expected string)
 	}
 	data, readErr := os.ReadFile(a, directory+"/runs")
 	if readErr != nil || string(data) != expected {
-		t.Error("scoped definition bytes: "+string(data)+"; expected: "+expected)
+		t.Error("scoped definition bytes: " + string(data) + "; expected: " + expected)
 	}
 	mem.FreeSlice(a, data)
 	compiled.Program.Free()

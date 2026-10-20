@@ -8,23 +8,25 @@ import (
 
 func (p *parser) ruleMetadata(r *Rule, start int, end int) {
 	start, end = trim(p.s.Text, start, end)
-	if start == end || p.s.Text[start] != '[' { p.ruleEnvironment(r, start, end); return }
+	if start == end || p.s.Text[start] != '[' {
+		p.ruleEnvironment(r, start, end)
+		return
+	}
 	parsed := expr.ParsePrefix(p.a, p.s, start)
 	p.takeDiagnostics(parsed.Diagnostics)
 	slices.Free(p.a, parsed.Diagnostics)
 	r.Metadata = parsed.Expr
-	if parsed.End != end || r.Metadata == nil || r.Metadata.Kind != expr.Record { p.error(start, end, "rule metadata must be a record"); return }
+	if parsed.End != end || r.Metadata == nil || r.Metadata.Kind != expr.Record {
+		p.error(start, end, "rule metadata must be a record")
+		return
+	}
 	for i := range r.Metadata.Fields {
 		field := r.Metadata.Fields[i]
-		if field.Key != "shell" && field.Key != "env" && !(r.Kind == FileRule && field.Key == "executor") && !(r.Kind == ServiceRule && serviceMetadataField(field.Key)) { p.error(field.Span.Start, field.Span.End, "unknown rule metadata field") }
-		for j := 0; j < i; j++ { if r.Metadata.Fields[j].Key == field.Key { p.error(field.Span.Start, field.Span.End, "duplicate rule metadata field") } }
-	}
-}
-
-func serviceMetadataField(name string) bool {
-	switch name {
-	case "ready", "health", "restart", "stop", "log-bytes": return true
-	default: return false
+		for j := 0; j < i; j++ {
+			if r.Metadata.Fields[j].Key == field.Key {
+				p.error(field.Span.Start, field.Span.End, "duplicate rule metadata field")
+			}
+		}
 	}
 }
 

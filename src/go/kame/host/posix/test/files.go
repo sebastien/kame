@@ -141,7 +141,9 @@ func TestPosixHostRejectsInvalidFileResourceURIs(t *testing.T) {
 	invalid := []string{"file://host/path", "file:///../../escape", "file:///bad%Q0", "file:///path?query", "file:///path#fragment"}
 	for _, name := range invalid {
 		parsed := core.ParseResourceURI(a, name)
-		if parsed.Error == "" { t.Error("invalid URI fixture was accepted: " + name) }
+		if parsed.Error == "" {
+			t.Error("invalid URI fixture was accepted: " + name)
+		}
 		stat := h.Stat(name)
 		link := h.Lstat(name)
 		if stat.Exists || !stat.Failed || link.Exists || !link.Failed {

@@ -20,8 +20,12 @@ func TestEmptyTopologyCannotFallBackToShell(t *testing.T) {
 	h := posix.New(t.Allocator())
 	defer h.Free()
 	request := host.ProcessRequest{ID: 987, Topology: true, Shell: []string{"/bin/sh", "-c"}, Script: []byte("exit 0")}
-	if h.Start(request) { t.Error("invalid topology was admitted as a shell request") }
-	if h.Active() != 0 { t.Error("invalid topology started owned work") }
+	if h.Start(request) {
+		t.Error("invalid topology was admitted as a shell request")
+	}
+	if h.Active() != 0 {
+		t.Error("invalid topology started owned work")
+	}
 }
 
 func nativeChildReaped(pid int64) bool {
@@ -52,7 +56,10 @@ func cleanupNativeDescendant(pid *int64) {
 }
 
 func cleanupNativeHost(h **posix.Host) {
-	if *h != nil { (*h).Free(); *h = nil }
+	if *h != nil {
+		(*h).Free()
+		*h = nil
+	}
 }
 
 func cleanupNativeOutput(a mem.Allocator, output *[]byte) { slices.Free(a, *output) }
@@ -66,7 +73,8 @@ const waitBudget = 5 * time.Second
 const saturationBudget = 100 * time.Millisecond
 
 func TestNativeSnapshotQueueCoalesces(t *testing.T) {
-	h := posix.New(t.Allocator()); defer h.Free()
+	h := posix.New(t.Allocator())
+	defer h.Free()
 	stages := []host.ProcessStage{
 		{Argv: []string{"/bin/sh", "-c", "sleep 1; printf a"}, Directory: ".", Environment: []string{"PATH=/usr/bin:/bin"}},
 		{Argv: []string{"/bin/sh", "-c", "printf b"}, Directory: ".", Environment: []string{"PATH=/usr/bin:/bin"}},
@@ -74,36 +82,60 @@ func TestNativeSnapshotQueueCoalesces(t *testing.T) {
 		{Argv: []string{"/bin/cat"}, Directory: "."},
 	}
 	edges := []host.ProcessEdge{{From: 0, To: 2}, {From: 1, To: 2}, {From: 2, To: 3}}
-	if !h.Start(host.ProcessRequest{ID: 988, Directory: ".", Topology: true, Stages: stages, Edges: edges}) { t.Fatal("graph rejected"); return }
+	if !h.Start(host.ProcessRequest{ID: 988, Directory: ".", Topology: true, Stages: stages, Edges: edges}) {
+		t.Fatal("graph rejected")
+		return
+	}
 	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) { if !h.Pump(20) { t.Error("snapshot pump failed"); return } }
+	for time.Now().Before(deadline) {
+		if !h.Pump(20) {
+			t.Error("snapshot pump failed")
+			return
+		}
+	}
 	snapshots := 0
 	for {
-		next := h.Next(); if !next.OK { break }
+		next := h.Next()
+		if !next.OK {
+			break
+		}
 		if next.Event.Kind == host.ProcessSnapshot {
 			snapshots++
-			if len(next.Event.StageStates) != 4 || len(next.Event.EdgeMetrics) != 3 { t.Error("snapshot lost prepared IDs") }
+			if len(next.Event.StageStates) != 4 || len(next.Event.EdgeMetrics) != 3 {
+				t.Error("snapshot lost prepared IDs")
+			}
 		}
 		next.Event.Free(t.Allocator())
 	}
-	if snapshots != 1 { t.Error("native queue retained snapshot history") }
+	if snapshots != 1 {
+		t.Error("native queue retained snapshot history")
+	}
 }
 
 func TestNativeFailureCollectionJoinsOrdinaryExits(t *testing.T) {
-	h := posix.New(t.Allocator()); defer h.Free()
+	h := posix.New(t.Allocator())
+	defer h.Free()
 	stages := []host.ProcessStage{
 		{Argv: []string{"/bin/sh", "-c", "exit 7"}},
 		{Argv: []string{"/bin/sh", "-c", "sleep 0.05; printf kept; exit 9"}, Environment: []string{"PATH=/usr/bin:/bin"}},
 		{Kind: "merge"}, {Argv: []string{"/bin/cat"}},
 	}
 	edges := []host.ProcessEdge{{From: 0, To: 2}, {From: 1, To: 2}, {From: 2, To: 3}}
-	if !h.Start(host.ProcessRequest{ID: 989, Topology: true, CollectFailures: true, Stages: stages, Edges: edges, RetainBytes: 32}) { t.Fatal("collect graph rejected"); return }
+	if !h.Start(host.ProcessRequest{ID: 989, Topology: true, CollectFailures: true, Stages: stages, Edges: edges, RetainBytes: 32}) {
+		t.Fatal("collect graph rejected")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
 	defer slices.Free(t.Allocator(), events)
-	if terminal.Status != 9 || string(terminal.Stdout) != "kept" || len(terminal.Stages) != 4 { t.Error("failure collection lost sibling output or deterministic status")
-	} else if terminal.Stages[0].Status != 7 || terminal.Stages[1].Status != 9 || terminal.Stages[3].Status != 0 { t.Error("collected per-stage exits were overwritten") }
-	for i := range events { events[i].Free(t.Allocator()) }
+	if terminal.Status != 9 || string(terminal.Stdout) != "kept" || len(terminal.Stages) != 4 {
+		t.Error("failure collection lost sibling output or deterministic status")
+	} else if terminal.Stages[0].Status != 7 || terminal.Stages[1].Status != 9 || terminal.Stages[3].Status != 0 {
+		t.Error("collected per-stage exits were overwritten")
+	}
+	for i := range events {
+		events[i].Free(t.Allocator())
+	}
 }
 
 func request(a mem.Allocator, id int64, script string) posix.Request {
@@ -111,7 +143,9 @@ func request(a mem.Allocator, id int64, script string) posix.Request {
 }
 
 func freeRequest(a mem.Allocator, r *posix.Request) {
-	slices.Free(a, r.Shell); slices.Free(a, r.Script); slices.Free(a, r.Environment)
+	slices.Free(a, r.Shell)
+	slices.Free(a, r.Script)
+	slices.Free(a, r.Environment)
 	*r = posix.Request{}
 }
 
@@ -119,20 +153,31 @@ func drain(t *testing.T, h *posix.Host, terminal *posix.Event) []posix.Event {
 	var events []posix.Event
 	deadline := time.Now().Add(waitBudget)
 	for terminal.Kind != posix.Terminal && time.Now().Before(deadline) {
-		if !h.Pump(10) { t.Error("host pump failed"); break }
+		if !h.Pump(10) {
+			t.Error("host pump failed")
+			break
+		}
 		for {
 			result := h.Next()
-			if !result.OK { break }
+			if !result.OK {
+				break
+			}
 			events = slices.Append(t.Allocator(), events, result.Event)
-			if result.Event.Kind == posix.Terminal { *terminal = result.Event }
+			if result.Event.Kind == posix.Terminal {
+				*terminal = result.Event
+			}
 		}
 	}
-	if terminal.Kind != posix.Terminal { t.Error("timed out waiting for terminal event") }
+	if terminal.Kind != posix.Terminal {
+		t.Error("timed out waiting for terminal event")
+	}
 	return events
 }
 
 func freeEvents(a mem.Allocator, events []posix.Event) {
-	for i := range events { events[i].Free(a) }
+	for i := range events {
+		events[i].Free(a)
+	}
 	slices.Free(a, events)
 }
 
@@ -141,12 +186,20 @@ func TestPipelineRetainsEveryStageStatus(t *testing.T) {
 	h := posix.New(a)
 	stages := []host.ProcessStage{{Argv: []string{"/bin/sh", "-c", "printf first >&2; exit 7"}}, {Argv: []string{"/bin/sh", "-c", "cat; printf second >&2; exit 9"}}, {Argv: []string{"/bin/cat"}}}
 	r := host.ProcessRequest{ID: 71, Stages: stages, Directory: ".", Environment: []string{"PATH=/bin:/usr/bin"}, RetainBytes: 1024}
-	if !h.Start(r) { t.Fatal("pipeline start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("pipeline start failed")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Outcome != posix.Exited || terminal.Status != 9 || len(terminal.Stages) != 3 { t.Error("pipeline lost aggregate status or stage results")
-	} else if terminal.Stages[0].Status != 7 || terminal.Stages[1].Status != 9 || terminal.Stages[2].Status != 0 { t.Error("pipeline did not retain every stage's status") }
-	if len(terminal.Stdout) != 0 || len(terminal.Stderr) != len("firstsecond") { t.Error("pipeline streams were not routed correctly") }
+	if terminal.Outcome != posix.Exited || terminal.Status != 9 || len(terminal.Stages) != 3 {
+		t.Error("pipeline lost aggregate status or stage results")
+	} else if terminal.Stages[0].Status != 7 || terminal.Stages[1].Status != 9 || terminal.Stages[2].Status != 0 {
+		t.Error("pipeline did not retain every stage's status")
+	}
+	if len(terminal.Stdout) != 0 || len(terminal.Stderr) != len("firstsecond") {
+		t.Error("pipeline streams were not routed correctly")
+	}
 	freeEvents(a, events)
 	h.Free()
 }
@@ -156,7 +209,10 @@ func TestPipelineStreamsBeyondCaptureLimit(t *testing.T) {
 	h := posix.New(a)
 	stages := []host.ProcessStage{{Argv: []string{"/bin/dd", "if=/dev/zero", "bs=4096", "count=1024"}}, {Argv: []string{"/bin/sh", "-c", "wc -c | tr -d '[:space:]'"}}}
 	r := host.ProcessRequest{ID: 72, Stages: stages, Directory: ".", Environment: []string{"PATH=/bin:/usr/bin"}, RetainBytes: 16}
-	if !h.Start(r) { t.Fatal("pipeline start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("pipeline start failed")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
 	if terminal.Outcome != posix.Exited || terminal.Status != 0 || terminal.StdoutTruncated || string(terminal.Stdout) != "4194304" {
@@ -172,15 +228,27 @@ func TestPipelineTimeoutAndLaunchFailureReapAllStages(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		h := posix.New(a)
 		second := "/bin/cat"
-		if i == 1 { second = "/no-such-kash-pipeline-executable" }
+		if i == 1 {
+			second = "/no-such-kash-pipeline-executable"
+		}
 		stages := []host.ProcessStage{{Argv: []string{"/bin/sh", "-c", "sleep 30"}}, {Argv: []string{second}}}
 		r := host.ProcessRequest{ID: 73, Stages: stages, Directory: ".", Environment: []string{"PATH=/bin:/usr/bin"}, TimeoutMS: 50, RetainBytes: 16}
-		if !h.Start(r) { t.Fatal("pipeline fork failed"); h.Free(); return }
+		if !h.Start(r) {
+			t.Fatal("pipeline fork failed")
+			h.Free()
+			return
+		}
 		var terminal posix.Event
 		events := drain(t, h, &terminal)
-		if i == 0 && terminal.Outcome != posix.TimedOut { t.Error("graph timeout was not propagated") }
-		if i == 1 && terminal.Outcome != posix.Failed { t.Error("stage launch failure was not propagated") }
-		if h.Active() != 0 || len(terminal.Stages) != 2 { t.Error("graph was not completely retired") }
+		if i == 0 && terminal.Outcome != posix.TimedOut {
+			t.Error("graph timeout was not propagated")
+		}
+		if i == 1 && terminal.Outcome != posix.Failed {
+			t.Error("stage launch failure was not propagated")
+		}
+		if h.Active() != 0 || len(terminal.Stages) != 2 {
+			t.Error("graph was not completely retired")
+		}
 		freeEvents(a, events)
 		h.Free()
 	}
@@ -191,27 +259,52 @@ func TestEnvironmentSnapshotIsCompleteAndOwned(t *testing.T) {
 	environment := posix.Environment(a)
 	defer posix.FreeEnvironment(a, environment)
 	foundPath := false
-	for i := range environment { if len(environment[i]) >= 5 && environment[i][:5] == "PATH=" { foundPath = true; break } }
-	if !foundPath { t.Error("environment snapshot does not include PATH") }
+	for i := range environment {
+		if len(environment[i]) >= 5 && environment[i][:5] == "PATH=" {
+			foundPath = true
+			break
+		}
+	}
+	if !foundPath {
+		t.Error("environment snapshot does not include PATH")
+	}
 }
 
 func TestStreamsStatusAndRetention(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 1, "printf out; printf err >&2; exit 7")
-	if !h.Start(r) { t.Fatal("start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("start failed")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
 	var out, err []byte
 	for i := range events {
-		if events[i].Kind == posix.Stdout { for j := range events[i].Data { out = slices.Append(a, out, events[i].Data[j]) } }
-		if events[i].Kind == posix.Stderr { for j := range events[i].Data { err = slices.Append(a, err, events[i].Data[j]) } }
+		if events[i].Kind == posix.Stdout {
+			for j := range events[i].Data {
+				out = slices.Append(a, out, events[i].Data[j])
+			}
+		}
+		if events[i].Kind == posix.Stderr {
+			for j := range events[i].Data {
+				err = slices.Append(a, err, events[i].Data[j])
+			}
+		}
 	}
-	if string(out) != "out" || string(err) != "err" { t.Error("streams were corrupted") }
-	if terminal.Outcome != posix.Exited || terminal.Status != 7 || string(terminal.Stdout) != "out" || string(terminal.Stderr) != "err" || terminal.RetainBytes != 1024 { t.Error("terminal result lost status, retention bound, or retained logs") }
-	if len(events) == 0 || events[len(events)-1].Kind != posix.Terminal { t.Error("terminal arrived before output was drained") }
+	if string(out) != "out" || string(err) != "err" {
+		t.Error("streams were corrupted")
+	}
+	if terminal.Outcome != posix.Exited || terminal.Status != 7 || string(terminal.Stdout) != "out" || string(terminal.Stderr) != "err" || terminal.RetainBytes != 1024 {
+		t.Error("terminal result lost status, retention bound, or retained logs")
+	}
+	if len(events) == 0 || events[len(events)-1].Kind != posix.Terminal {
+		t.Error("terminal arrived before output was drained")
+	}
 	freeEvents(a, events)
-	slices.Free(a, out); slices.Free(a, err)
+	slices.Free(a, out)
+	slices.Free(a, err)
 	freeRequest(a, &r)
 	h.Free()
 }
@@ -222,10 +315,15 @@ func TestOneShellEnvironmentAndDirectory(t *testing.T) {
 	r := request(a, 2, "value=ok\nprintf '%s:%s\\n' \"$value\" \"$KM_TEST\"\ncd /tmp\npwd")
 	slices.Free(a, r.Environment)
 	r.Environment = slices.Clone(a, []string{"PATH=/usr/bin:/bin", "KM_TEST=env"})
-	if !h.Start(r) { t.Fatal("start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("start failed")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Status != 0 || string(terminal.Stdout) != "ok:env\n/tmp\n" { t.Error("script was not one shell with its explicit environment") }
+	if terminal.Status != 0 || string(terminal.Stdout) != "ok:env\n/tmp\n" {
+		t.Error("script was not one shell with its explicit environment")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	h.Free()
@@ -237,13 +335,23 @@ func TestMissingShellIsOnlyFailedTerminal(t *testing.T) {
 	r := request(a, 3, "true")
 	slices.Free(a, r.Shell)
 	r.Shell = slices.Clone(a, []string{"/missing/kame-shell", "-c"})
-	if !h.Start(r) { t.Error("missing shell was not submitted") }
-	if h.Active() != 0 { t.Error("failed exec was exposed as an active process") }
+	if !h.Start(r) {
+		t.Error("missing shell was not submitted")
+	}
+	if h.Active() != 0 {
+		t.Error("failed exec was exposed as an active process")
+	}
 	h.Pump(10)
 	result := h.Next()
-	if !result.OK || result.Event.Kind != posix.Terminal || result.Event.Outcome != posix.Failed || result.Event.Diagnostic.Code != posix.DiagnosticHostFailure || result.Event.Diagnostic.Message == "" { t.Error("missing shell did not produce failed terminal") }
-	if result.OK { result.Event.Free(a) }
-	if h.Next().OK { t.Error("spawn failure emitted extra event") }
+	if !result.OK || result.Event.Kind != posix.Terminal || result.Event.Outcome != posix.Failed || result.Event.Diagnostic.Code != posix.DiagnosticHostFailure || result.Event.Diagnostic.Message == "" {
+		t.Error("missing shell did not produce failed terminal")
+	}
+	if result.OK {
+		result.Event.Free(a)
+	}
+	if h.Next().OK {
+		t.Error("spawn failure emitted extra event")
+	}
 	freeRequest(a, &r)
 	h.Free()
 }
@@ -252,11 +360,19 @@ func TestRejectedRequestIsOnlyFailedTerminal(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 0, "true")
-	if h.Start(r) { t.Error("request with ID 0 was accepted") }
+	if h.Start(r) {
+		t.Error("request with ID 0 was accepted")
+	}
 	result := h.Next()
-	if !result.OK || result.Event.Kind != posix.Terminal || result.Event.Outcome != posix.Failed || result.Event.Diagnostic.Code != posix.DiagnosticHostFailure || result.Event.Diagnostic.Message != "invalid request" { t.Error("rejected request did not produce one failed terminal") }
-	if result.OK { result.Event.Free(a) }
-	if h.Next().OK { t.Error("rejected request emitted extra event") }
+	if !result.OK || result.Event.Kind != posix.Terminal || result.Event.Outcome != posix.Failed || result.Event.Diagnostic.Code != posix.DiagnosticHostFailure || result.Event.Diagnostic.Message != "invalid request" {
+		t.Error("rejected request did not produce one failed terminal")
+	}
+	if result.OK {
+		result.Event.Free(a)
+	}
+	if h.Next().OK {
+		t.Error("rejected request emitted extra event")
+	}
 	freeRequest(a, &r)
 	h.Free()
 }
@@ -265,15 +381,26 @@ func TestDuplicateRequestIDIsRejected(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 500, "sleep 5 & wait")
-	if !h.Start(r) { t.Fatal("start failed"); return }
-	if h.Start(r) { t.Error("duplicate request ID was accepted") }
+	if !h.Start(r) {
+		t.Fatal("start failed")
+		return
+	}
+	if h.Start(r) {
+		t.Error("duplicate request ID was accepted")
+	}
 	result := h.Next()
-	if !result.OK || result.Event.Kind != posix.Terminal || result.Event.Outcome != posix.Failed || result.Event.Diagnostic.Message != "request ID already active" { t.Error("duplicate request did not report an already active ID") }
-	if result.OK { result.Event.Free(a) }
+	if !result.OK || result.Event.Kind != posix.Terminal || result.Event.Outcome != posix.Failed || result.Event.Diagnostic.Message != "request ID already active" {
+		t.Error("duplicate request did not report an already active ID")
+	}
+	if result.OK {
+		result.Event.Free(a)
+	}
 	h.CancelAll()
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Outcome != posix.Cancelled { t.Error("original process was not cancelled") }
+	if terminal.Outcome != posix.Cancelled {
+		t.Error("original process was not cancelled")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	h.Free()
@@ -288,19 +415,30 @@ func TestDynamicRequestStringsAndNULScript(t *testing.T) {
 	slices.Free(a, r.Environment)
 	key, value := "KM_"+"TEST", "en"+"v"
 	r.Environment = slices.Clone(a, []string{"PATH=/usr/bin:/bin", key + "=" + value})
-	if !h.Start(r) { t.Fatal("dynamic request strings failed"); return }
+	if !h.Start(r) {
+		t.Fatal("dynamic request strings failed")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Status != 0 || string(terminal.Stdout) != "env" { t.Error("dynamic request strings were not passed exactly") }
+	if terminal.Status != 0 || string(terminal.Stdout) != "env" {
+		t.Error("dynamic request strings were not passed exactly")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	r = request(a, 31, "true")
 	slices.Free(a, r.Script)
 	r.Script = slices.Clone(a, []byte{'t', 'r', 'u', 'e', 0, 'f', 'a', 'l', 's', 'e'})
-	if h.Start(r) { t.Error("NUL-containing script was accepted") }
+	if h.Start(r) {
+		t.Error("NUL-containing script was accepted")
+	}
 	result := h.Next()
-	if !result.OK || result.Event.Kind != posix.Terminal || result.Event.Outcome != posix.Failed { t.Error("NUL-containing script did not produce a failed terminal") }
-	if result.OK { result.Event.Free(a) }
+	if !result.OK || result.Event.Kind != posix.Terminal || result.Event.Outcome != posix.Failed {
+		t.Error("NUL-containing script did not produce a failed terminal")
+	}
+	if result.OK {
+		result.Event.Free(a)
+	}
 	freeRequest(a, &r)
 	h.Free()
 }
@@ -309,10 +447,15 @@ func TestEmptyScript(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 32, "")
-	if !h.Start(r) { t.Fatal("empty script start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("empty script start failed")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Outcome != posix.Exited || terminal.Status != 0 { t.Error("empty script did not exit successfully") }
+	if terminal.Outcome != posix.Exited || terminal.Status != 0 {
+		t.Error("empty script did not exit successfully")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	h.Free()
@@ -322,30 +465,52 @@ func TestCancellationAndTimeout(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 4, "sleep 5 & wait")
-	if !h.Start(r) { t.Fatal("start failed"); return }
-	if !h.Cancel(4) || !h.Cancel(4) { t.Error("cancellation was not idempotent") }
+	if !h.Start(r) {
+		t.Fatal("start failed")
+		return
+	}
+	if !h.Cancel(4) || !h.Cancel(4) {
+		t.Error("cancellation was not idempotent")
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Outcome != posix.Cancelled { t.Error("cancellation did not win terminal outcome") }
+	if terminal.Outcome != posix.Cancelled {
+		t.Error("cancellation did not win terminal outcome")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	r = request(a, 5, "trap '' TERM; printf READY; while :; do :; done")
 	r.TimeoutMS = 100
-	if !h.Start(r) { t.Fatal("timeout start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("timeout start failed")
+		return
+	}
 	ready := false
 	for attempt := 0; attempt < 100 && !ready; attempt++ {
-		if !h.Pump(10) { t.Fatal("host pump failed"); return }
+		if !h.Pump(10) {
+			t.Fatal("host pump failed")
+			return
+		}
 		for {
 			result := h.Next()
-			if !result.OK { break }
-			if result.Event.Kind == posix.Stdout && string(result.Event.Data) == "READY" { ready = true }
+			if !result.OK {
+				break
+			}
+			if result.Event.Kind == posix.Stdout && string(result.Event.Data) == "READY" {
+				ready = true
+			}
 			result.Event.Free(a)
 		}
 	}
-	if !ready { t.Fatal("timeout process did not install its TERM handler"); return }
+	if !ready {
+		t.Fatal("timeout process did not install its TERM handler")
+		return
+	}
 	terminal = posix.Event{}
 	events = drain(t, h, &terminal)
-	if terminal.Outcome != posix.TimedOut || terminal.Signal != 9 || h.Active() != 0 { t.Errorf("timeout did not kill and reap process group: kind=%d outcome=%d status=%d signal=%d active=%d", terminal.Kind, terminal.Outcome, terminal.Status, terminal.Signal, h.Active()) }
+	if terminal.Outcome != posix.TimedOut || terminal.Signal != 9 || h.Active() != 0 {
+		t.Errorf("timeout did not kill and reap process group: kind=%d outcome=%d status=%d signal=%d active=%d", terminal.Kind, terminal.Outcome, terminal.Status, terminal.Signal, h.Active())
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	h.Free()
@@ -355,22 +520,40 @@ func TestStopHonorsConfiguredGracePeriod(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 41, "trap '' TERM; printf READY; while :; do sleep 1; done")
-	if !h.Start(r) { t.Fatal("start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("start failed")
+		return
+	}
 	ready := false
 	for attempt := 0; attempt < 100 && !ready; attempt++ {
-		if !h.Pump(10) { t.Fatal("host pump failed"); return }
+		if !h.Pump(10) {
+			t.Fatal("host pump failed")
+			return
+		}
 		for {
 			result := h.Next()
-			if !result.OK { break }
-			if result.Event.Kind == posix.Stdout && string(result.Event.Data) == "READY" { ready = true }
+			if !result.OK {
+				break
+			}
+			if result.Event.Kind == posix.Stdout && string(result.Event.Data) == "READY" {
+				ready = true
+			}
 			result.Event.Free(a)
 		}
 	}
-	if !ready { t.Fatal("process did not install its TERM handler"); return }
-	if !h.Stop(41, 0) { t.Fatal("stop request was rejected"); return }
+	if !ready {
+		t.Fatal("process did not install its TERM handler")
+		return
+	}
+	if !h.Stop(41, 0) {
+		t.Fatal("stop request was rejected")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Outcome != posix.Cancelled || terminal.Signal != 9 { t.Error("zero grace period did not escalate to SIGKILL") }
+	if terminal.Outcome != posix.Cancelled || terminal.Signal != 9 {
+		t.Error("zero grace period did not escalate to SIGKILL")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	h.Free()
@@ -381,49 +564,83 @@ func TestRetainedPrefixAndBackpressure(t *testing.T) {
 	h := posix.New(a)
 	r := request(a, 6, "printf 12345")
 	r.RetainBytes = 3
-	if !h.Start(r) { t.Fatal("start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("start failed")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if string(terminal.Stdout) != "123" || !terminal.StdoutTruncated { t.Error("retained output was not a truncated byte prefix") }
+	if string(terminal.Stdout) != "123" || !terminal.StdoutTruncated {
+		t.Error("retained output was not a truncated byte prefix")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	r = request(a, 7, "dd if=/dev/zero bs=300000 count=1 2>/dev/null")
-	if !h.Start(r) { t.Fatal("large-output start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("large-output start failed")
+		return
+	}
 	other := request(a, 8, "printf other")
-	if !h.Start(other) { t.Fatal("second start failed"); return }
+	if !h.Start(other) {
+		t.Fatal("second start failed")
+		return
+	}
 	// Pump without consuming first so the large child fills its output queue;
 	// the unrelated child must then make progress through backpressure.
 	saturation := time.Now().Add(saturationBudget)
-	for time.Now().Before(saturation) { h.Pump(1) }
+	for time.Now().Before(saturation) {
+		h.Pump(1)
+	}
 	var streamed int
 	var sawOther bool
 	deadline := time.Now().Add(waitBudget)
 	for !sawOther && time.Now().Before(deadline) {
 		for {
 			result := h.Next()
-			if !result.OK { break }
-			if result.Event.ID == 8 && result.Event.Kind == posix.Stdout { sawOther = true }
+			if !result.OK {
+				break
+			}
+			if result.Event.ID == 8 && result.Event.Kind == posix.Stdout {
+				sawOther = true
+			}
 			if result.Event.ID == 7 && result.Event.Kind == posix.Stdout {
 				streamed += len(result.Event.Data)
-				for j := range result.Event.Data { if result.Event.Data[j] != 0 { t.Error("large-output stream was corrupted") } }
+				for j := range result.Event.Data {
+					if result.Event.Data[j] != 0 {
+						t.Error("large-output stream was corrupted")
+					}
+				}
 			}
 			result.Event.Free(a)
 		}
-		if !sawOther { h.Pump(1) }
+		if !sawOther {
+			h.Pump(1)
+		}
 	}
-	if !sawOther { t.Error("saturated output blocked an unrelated child") }
+	if !sawOther {
+		t.Error("saturated output blocked an unrelated child")
+	}
 	terminal = posix.Event{}
 	events = drain(t, h, &terminal)
 	for i := range events {
 		if events[i].ID == 7 && events[i].Kind == posix.Stdout {
 			streamed += len(events[i].Data)
-			for j := range events[i].Data { if events[i].Data[j] != 0 { t.Error("resumed output stream was corrupted") } }
+			for j := range events[i].Data {
+				if events[i].Data[j] != 0 {
+					t.Error("resumed output stream was corrupted")
+				}
+			}
 		}
 	}
-	if terminal.ID != 7 || terminal.Outcome != posix.Exited || terminal.StdoutTruncated != true { t.Error("saturated process did not resume to a terminal result") }
-	if streamed != 300000 { t.Errorf("saturated process dropped output: got %d bytes", streamed) }
+	if terminal.ID != 7 || terminal.Outcome != posix.Exited || terminal.StdoutTruncated != true {
+		t.Error("saturated process did not resume to a terminal result")
+	}
+	if streamed != 300000 {
+		t.Errorf("saturated process dropped output: got %d bytes", streamed)
+	}
 	freeEvents(a, events)
-	freeRequest(a, &r); freeRequest(a, &other)
+	freeRequest(a, &r)
+	freeRequest(a, &other)
 	h.Free()
 }
 
@@ -431,10 +648,15 @@ func TestClosingOneStreamDoesNotCloseTheOther(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 9, "exec 1>&-; printf stderr >&2")
-	if !h.Start(r) { t.Fatal("start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("start failed")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Status != 0 || string(terminal.Stderr) != "stderr" { t.Error("stderr was lost after stdout closed") }
+	if terminal.Status != 0 || string(terminal.Stderr) != "stderr" {
+		t.Error("stderr was lost after stdout closed")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
 	h.Free()
@@ -445,10 +667,14 @@ func TestRepeatedSpawnAndCancellation(t *testing.T) {
 	h := posix.New(a)
 	for i := 0; i < 16; i++ {
 		r := request(a, int64(100+i), "sleep 5 & wait")
-		if !h.Start(r) || !h.Cancel(r.ID) { t.Error("repeated request failed") }
+		if !h.Start(r) || !h.Cancel(r.ID) {
+			t.Error("repeated request failed")
+		}
 		var terminal posix.Event
 		events := drain(t, h, &terminal)
-		if terminal.Outcome != posix.Cancelled || h.Active() != 0 { t.Error("repeated cancellation did not reap its process") }
+		if terminal.Outcome != posix.Cancelled || h.Active() != 0 {
+			t.Error("repeated cancellation did not reap its process")
+		}
 		freeEvents(a, events)
 		freeRequest(a, &r)
 	}
@@ -459,31 +685,51 @@ func TestCancellationTerminatesBackgroundGrandchild(t *testing.T) {
 	a := t.Allocator()
 	h := posix.New(a)
 	r := request(a, 200, "sleep 5 & printf %s \"$!\"; wait")
-	if !h.Start(r) { t.Fatal("start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("start failed")
+		return
+	}
 	var check posix.Request
 	deadline := time.Now().Add(waitBudget)
 	for check.ID == 0 && time.Now().Before(deadline) {
-		if !h.Pump(10) { t.Fatal("host pump failed"); return }
+		if !h.Pump(10) {
+			t.Fatal("host pump failed")
+			return
+		}
 		for {
 			result := h.Next()
-			if !result.OK { break }
+			if !result.OK {
+				break
+			}
 			if result.Event.Kind == posix.Stdout {
 				check = request(a, 201, "kill -0 "+string(result.Event.Data))
-				if !h.Cancel(r.ID) { t.Error("failed to cancel process group") }
+				if !h.Cancel(r.ID) {
+					t.Error("failed to cancel process group")
+				}
 			}
 			result.Event.Free(a)
 		}
 	}
-	if check.ID == 0 { t.Fatal("background child pid was not streamed"); return }
+	if check.ID == 0 {
+		t.Fatal("background child pid was not streamed")
+		return
+	}
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Outcome != posix.Cancelled { t.Error("parent process was not cancelled") }
+	if terminal.Outcome != posix.Cancelled {
+		t.Error("parent process was not cancelled")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &r)
-	if !h.Start(check) { t.Fatal("child check did not start"); return }
+	if !h.Start(check) {
+		t.Fatal("child check did not start")
+		return
+	}
 	terminal = posix.Event{}
 	events = drain(t, h, &terminal)
-	if terminal.Status == 0 { t.Error("background grandchild survived cancellation") }
+	if terminal.Status == 0 {
+		t.Error("background grandchild survived cancellation")
+	}
 	freeEvents(a, events)
 	freeRequest(a, &check)
 	h.Free()
@@ -495,12 +741,19 @@ func TestWaitpidFailureEmitsHostFailure(t *testing.T) {
 	defer h.Free()
 	r := request(a, 300, "sleep 5")
 	defer freeRequest(a, &r)
-	if !h.Start(r) { t.Fatal("start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("start failed")
+		return
+	}
 	h.ForceWaitpidFailureForTest()
 	var terminal posix.Event
 	events := drain(t, h, &terminal)
-	if terminal.Kind != posix.Terminal || terminal.Outcome != posix.Failed || terminal.Diagnostic.Code != posix.DiagnosticHostFailure || terminal.Diagnostic.Message != "waitpid failed" { t.Error("waitpid failure did not emit HOST_FAIL terminal") }
-	if terminal.PID <= 0 || !nativeChildReaped(terminal.PID) { t.Error("failed child was forgotten before being reaped") }
+	if terminal.Kind != posix.Terminal || terminal.Outcome != posix.Failed || terminal.Diagnostic.Code != posix.DiagnosticHostFailure || terminal.Diagnostic.Message != "waitpid failed" {
+		t.Error("waitpid failure did not emit HOST_FAIL terminal")
+	}
+	if terminal.PID <= 0 || !nativeChildReaped(terminal.PID) {
+		t.Error("failed child was forgotten before being reaped")
+	}
 	freeEvents(a, events)
 }
 
@@ -513,8 +766,10 @@ func testNativeDescendantRetirement(t *testing.T, graph bool, terminalRetirement
 	// The child publishes its own PID after installing its handler. In the
 	// retirement case it then closes both streams but keeps running.
 	child := "trap \"\" TERM; echo $$; exec sleep 30"
-	if terminalRetirement { child = "trap \"\" TERM; echo $$; exec >/dev/null 2>&1; exec sleep 30" }
-	script := "/bin/sh -c '"+child+"' & exit 0"
+	if terminalRetirement {
+		child = "trap \"\" TERM; echo $$; exec >/dev/null 2>&1; exec sleep 30"
+	}
+	script := "/bin/sh -c '" + child + "' & exit 0"
 	r := request(a, 600, script)
 	defer freeRequest(a, &r)
 	// Slice literals lower to block-scoped C compound literals. Keep the
@@ -523,39 +778,74 @@ func testNativeDescendantRetirement(t *testing.T, graph bool, terminalRetirement
 	if graph {
 		r.Stages = stages
 	}
-	if !h.Start(r) { t.Fatal("descendant start failed"); return }
+	if !h.Start(r) {
+		t.Fatal("descendant start failed")
+		return
+	}
 	var leaderPID int64
 	var output []byte
 	defer cleanupNativeOutput(a, &output)
 	sawTerminal := false
 	deadline := time.Now().Add(waitBudget)
 	for time.Now().Before(deadline) {
-		if !h.Pump(10) { t.Fatal("host pump failed"); return }
+		if !h.Pump(10) {
+			t.Fatal("host pump failed")
+			return
+		}
 		for {
 			result := h.Next()
-			if !result.OK { break }
-			if result.Event.Kind == posix.Started { leaderPID = result.Event.PID }
-			if result.Event.Kind == posix.Stdout { for i := range result.Event.Data { output = slices.Append(a, output, result.Event.Data[i]) } }
-			if result.Event.Kind == posix.Terminal { sawTerminal = true }
+			if !result.OK {
+				break
+			}
+			if result.Event.Kind == posix.Started {
+				leaderPID = result.Event.PID
+			}
+			if result.Event.Kind == posix.Stdout {
+				for i := range result.Event.Data {
+					output = slices.Append(a, output, result.Event.Data[i])
+				}
+			}
+			if result.Event.Kind == posix.Terminal {
+				sawTerminal = true
+			}
 			result.Event.Free(a)
 		}
-		if childPID == 0 && strings.Contains(string(output), "\n") { childPID, _ = strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64) }
-		if childPID > 0 && ((terminalRetirement && sawTerminal) || (!terminalRetirement && leaderPID > 0 && nativeLeaderExited(leaderPID))) { break }
+		if childPID == 0 && strings.Contains(string(output), "\n") {
+			childPID, _ = strconv.ParseInt(strings.TrimSpace(string(output)), 10, 64)
+		}
+		if childPID > 0 && ((terminalRetirement && sawTerminal) || (!terminalRetirement && leaderPID > 0 && nativeLeaderExited(leaderPID))) {
+			break
+		}
 	}
 	if childPID <= 0 || (terminalRetirement && !sawTerminal) || (!terminalRetirement && (sawTerminal || !nativeLeaderExited(leaderPID))) {
-		t.Fatalf("did not reach descendant handshake: graph=%t retirement=%t leader=%d child=%d terminal=%t output=%s", graph, terminalRetirement, leaderPID, childPID, sawTerminal, string(output)); return
+		t.Fatalf("did not reach descendant handshake: graph=%t retirement=%t leader=%d child=%d terminal=%t output=%s", graph, terminalRetirement, leaderPID, childPID, sawTerminal, string(output))
+		return
 	}
-	if !terminalRetirement { cleanupNativeHost(&h) }
+	if !terminalRetirement {
+		cleanupNativeHost(&h)
+	}
 	deadline = time.Now().Add(waitBudget)
 	dead := false
-	for !dead && time.Now().Before(deadline) { dead = nativeDescendantDead(childPID); if !dead { time.Sleep(time.Millisecond) } }
-	if !dead { t.Error("owned descendant survived retirement") }
-	if dead { childPID = 0 }
+	for !dead && time.Now().Before(deadline) {
+		dead = nativeDescendantDead(childPID)
+		if !dead {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if !dead {
+		t.Error("owned descendant survived retirement")
+	}
+	if dead {
+		childPID = 0
+	}
 }
 
 func TestNativeDescendantsRetireWithHostAndTerminal(t *testing.T) {
 	previous := nativeSubreaper(true)
-	if previous < 0 { t.Skip("requires native Linux subreaping"); return }
+	if previous < 0 {
+		t.Skip("requires native Linux subreaping")
+		return
+	}
 	defer nativeSubreaper(previous != 0)
 	testNativeDescendantRetirement(t, false, false)
 	testNativeDescendantRetirement(t, true, false)
@@ -568,23 +858,36 @@ func TestCancelAllTerminatesActiveGroups(t *testing.T) {
 	h := posix.New(a)
 	first := request(a, 400, "sleep 5 & wait")
 	second := request(a, 401, "sleep 5 & wait")
-	if !h.Start(first) || !h.Start(second) { t.Fatal("start failed"); return }
+	if !h.Start(first) || !h.Start(second) {
+		t.Fatal("start failed")
+		return
+	}
 	h.CancelAll()
 	var terminals int
 	deadline := time.Now().Add(waitBudget)
 	for terminals != 2 && time.Now().Before(deadline) {
-		if !h.Pump(10) { t.Fatal("host pump failed"); return }
+		if !h.Pump(10) {
+			t.Fatal("host pump failed")
+			return
+		}
 		for {
 			result := h.Next()
-			if !result.OK { break }
+			if !result.OK {
+				break
+			}
 			if result.Event.Kind == posix.Terminal {
-				if result.Event.Outcome != posix.Cancelled { t.Error("cancel-all did not report cancellation") }
+				if result.Event.Outcome != posix.Cancelled {
+					t.Error("cancel-all did not report cancellation")
+				}
 				terminals++
 			}
 			result.Event.Free(a)
 		}
 	}
-	if terminals != 2 || h.Active() != 0 { t.Error("cancel-all left a process active") }
-	freeRequest(a, &first); freeRequest(a, &second)
+	if terminals != 2 || h.Active() != 0 {
+		t.Error("cancel-all left a process active")
+	}
+	freeRequest(a, &first)
+	freeRequest(a, &second)
 	h.Free()
 }

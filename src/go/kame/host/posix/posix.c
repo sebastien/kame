@@ -408,6 +408,117 @@ bool km_cli_environment_names_case_insensitive(void) {
 #endif
 }
 
+// The recipe host calls setpgid and captures every stdio stream, so an
+// interactive filter would not receive terminal signals. This helper leaves
+// the child in the foreground group, feeds the list on stdin, and returns
+// the selection from stdout. The filter opens /dev/tty for its UI.
+static void km_close(int *fd);
+static char *km_cstring(so_String value);
+static void km_free_strings(char **strings, int count);
+static int km_pick_write_fd(int fd, const char *data, int len) {
+    int written = 0;
+    while (written < len) {
+        ssize_t n = write(fd, data + written, (size_t)(len - written));
+        if (n > 0) { written += (int)n; continue; }
+        if (n < 0 && errno == EINTR) continue;
+        return -1;
+    }
+    return 0;
+}
+
+static int km_pick_read(int fd, so_Slice selection) {
+    if (selection.len <= 0 || !selection.ptr) return -1;
+    int got = 0, overflow = 0;
+    char discard[4096];
+    for (;;) {
+        ssize_t n = got < selection.len
+            ? read(fd, (char *)selection.ptr + got, (size_t)(selection.len - got))
+            : read(fd, discard, sizeof(discard));
+        if (n > 0) {
+            if (got < selection.len) got += (int)n;
+            else overflow = 1;
+            continue;
+        }
+        if (n == 0) return overflow ? -1 : got;
+        if (errno == EINTR) continue;
+        return -1;
+    }
+}
+
+static int km_pick_wait(pid_t pid) {
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return -1;
+    }
+    if (WIFEXITED(status)) return WEXITSTATUS(status);
+    if (WIFSIGNALED(status)) {
+        if (WTERMSIG(status) == SIGINT) return 130;
+        return 128 + WTERMSIG(status);
+    }
+    return -1;
+}
+
+int km_pick_select(so_String executable, so_Slice argv, so_String input, so_Slice selection, so_int *selected) {
+    int tty = -1, file = -1, argc = 0, built = 0, got = 0, line = 0, result = -1;
+    int out[2] = {-1, -1};
+    pid_t pid = -1;
+    char **child_argv = NULL;
+    so_String *items = NULL;
+    char path[] = "/tmp/kame-pick-XXXXXX";
+    char *bytes = NULL;
+    if (km_cli_environment_names_case_insensitive()) return -2;
+    if (!selected || executable.len <= 0 || !executable.ptr || argv.len < 0 || input.len < 0 || (input.len && !input.ptr)) return -1;
+    *selected = 0;
+    tty = open("/dev/tty", O_RDWR | O_CLOEXEC);
+    if (tty < 0) return -3;
+    close(tty);
+    argc = (int)argv.len;
+    child_argv = calloc((size_t)argc + 2, sizeof(char *));
+    if (!child_argv) return -1;
+    child_argv[0] = km_cstring(executable);
+    items = argv.len ? argv.ptr : NULL;
+    built = child_argv[0] != NULL;
+    for (int i = 0; built && i < argc; i++) {
+        child_argv[i + 1] = km_cstring(items[i]);
+        if (!child_argv[i + 1]) built = 0;
+    }
+    if (!built) { km_free_strings(child_argv, argc + 1); return -1; }
+    file = mkstemp(path);
+    if (file < 0) goto done;
+    unlink(path);
+    if (km_pick_write_fd(file, input.ptr, (int)input.len) != 0 || lseek(file, 0, SEEK_SET) < 0 || pipe(out) != 0) goto done;
+    pid = fork();
+    if (pid < 0) goto done;
+    if (pid == 0) {
+        if (dup2(file, STDIN_FILENO) < 0 || dup2(out[1], STDOUT_FILENO) < 0) _exit(127);
+        if (file != STDIN_FILENO) close(file);
+        close(out[0]);
+        if (out[1] != STDOUT_FILENO) close(out[1]);
+        execvp(child_argv[0], child_argv);
+        _exit(127);
+    }
+    km_close(&file);
+    km_close(&out[1]);
+    got = km_pick_read(out[0], selection);
+    result = km_pick_wait(pid);
+    pid = -1;
+    if (got < 0 || result < 0) { result = -1; goto done; }
+    if (result == 0) {
+        bytes = selection.ptr;
+        while (line < got && bytes[line] != '\n' && bytes[line] != '\r') line++;
+        if (line == got && got == selection.len) { result = -1; goto done; }
+        if (line == 0) result = 130;
+        else *selected = line;
+    }
+done:
+    if (pid > 0) km_pick_wait(pid);
+    km_close(&file);
+    km_close(&out[0]);
+    km_close(&out[1]);
+    km_free_strings(child_argv, argc + 1);
+    return result;
+}
+
 static int64_t km_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);

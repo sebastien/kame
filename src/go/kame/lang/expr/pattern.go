@@ -45,7 +45,9 @@ type Pattern struct {
 
 // Free releases pattern storage owned by allocator a.
 func (p *Pattern) Free(a mem.Allocator) {
-	if p == nil { return }
+	if p == nil {
+		return
+	}
 	for i := range p.Parts {
 		mem.FreeString(a, p.Parts[i].Text)
 		mem.FreeString(a, p.Parts[i].Pattern)
@@ -60,7 +62,9 @@ func (p *Pattern) Free(a mem.Allocator) {
 
 // Clone returns an independent pattern owned by allocator a.
 func (p *Pattern) Clone(a mem.Allocator) *Pattern {
-	if p == nil { return nil }
+	if p == nil {
+		return nil
+	}
 	copy := mem.Alloc[Pattern](a)
 	copy.Alloc = a
 	for i := range p.Parts {
@@ -101,7 +105,10 @@ func ParsePatternText(a mem.Allocator, text string, offset int) PatternParse {
 	pattern := mem.Alloc[Pattern](a)
 	pattern.Alloc = a
 	p.parse(pattern)
-	if p.pos < len(text) { p.fail(p.pos, len(text), "invalid pattern"); p.pos = len(text) }
+	if p.pos < len(text) {
+		p.fail(p.pos, len(text), "invalid pattern")
+		p.pos = len(text)
+	}
 	pattern.Matchers, pattern.References = countGroups(pattern)
 	return PatternParse{Pattern: pattern, Diagnostics: p.diags}
 }
@@ -123,7 +130,9 @@ func ParsePathPatternParts(a mem.Allocator, parts []StringPart) PatternParse {
 		}
 		p.text, p.offset, p.pos = part.Text, part.Span.Start, 0
 		p.parse(pattern)
-		if len(p.diags) != 0 { break }
+		if len(p.diags) != 0 {
+			break
+		}
 	}
 	pattern.Matchers, pattern.References = countGroups(pattern)
 	return PatternParse{Pattern: pattern, Diagnostics: p.diags}
@@ -136,8 +145,12 @@ func (p *patternParser) fail(start int, end int, message string) {
 func countGroups(pattern *Pattern) (int, int) {
 	matchers, references := 0, 0
 	for i := range pattern.Parts {
-		if pattern.Parts[i].Kind == PatternMatcher { matchers++ }
-		if pattern.Parts[i].Kind == PatternReference { references++ }
+		if pattern.Parts[i].Kind == PatternMatcher {
+			matchers++
+		}
+		if pattern.Parts[i].Kind == PatternReference {
+			references++
+		}
 	}
 	return matchers, references
 }
@@ -149,14 +162,20 @@ func (p *patternParser) parse(pattern *Pattern) {
 	for p.pos < len(p.text) {
 		b := p.text[p.pos]
 		if b == '\\' {
-			if p.pos+1 == len(p.text) { p.fail(p.pos, p.pos+1, "unfinished pattern escape"); break }
+			if p.pos+1 == len(p.text) {
+				p.fail(p.pos, p.pos+1, "unfinished pattern escape")
+				break
+			}
 			literal.WriteByte(p.text[p.pos+1])
 			p.pos += 2
 			continue
 		}
 		if b == '{' {
 			p.flushLiteral(pattern, &literal, literalStart, p.pos)
-			if !p.group(pattern) { literal.Free(); return }
+			if !p.group(pattern) {
+				literal.Free()
+				return
+			}
 			literalStart = p.pos
 			continue
 		}
@@ -168,7 +187,9 @@ func (p *patternParser) parse(pattern *Pattern) {
 }
 
 func (p *patternParser) flushLiteral(pattern *Pattern, literal *strings.Builder, start int, end int) {
-	if literal.Len() == 0 && start == end { return }
+	if literal.Len() == 0 && start == end {
+		return
+	}
 	pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternLiteral, Text: ownedText(p.a, literal.String()), Span: source.Span{Start: p.offset + start, End: p.offset + end}})
 	literal.Reset()
 }
@@ -182,14 +203,18 @@ func (p *patternParser) group(pattern *Pattern) bool {
 	if p.pos < len(p.text) && p.text[p.pos] == '*' {
 		cross := p.pos+1 < len(p.text) && p.text[p.pos+1] == '*'
 		end := p.pos + 1
-		if cross { end++ }
+		if cross {
+			end++
+		}
 		if end == len(p.text) || p.text[end] != '}' {
 			p.fail(start, end+1, "invalid anonymous matcher")
 			p.pos = end
 			return false
 		}
 		patternStr := "*"
-		if cross { patternStr = "**" }
+		if cross {
+			patternStr = "**"
+		}
 		pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternMatcher, Pattern: ownedText(p.a, patternStr), Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + end + 1}})
 		pattern.Names = slices.Append(p.a, pattern.Names, "")
 		pattern.Matchers++
@@ -198,10 +223,12 @@ func (p *patternParser) group(pattern *Pattern) bool {
 	}
 	if p.pos < len(p.text) && p.text[p.pos] == '_' && p.positional(p.pos+1) {
 		digitsEnd := p.pos + 1
-		for digitsEnd < len(p.text) && isPatternDigit(p.text[digitsEnd]) { digitsEnd++ }
+		for digitsEnd < len(p.text) && isPatternDigit(p.text[digitsEnd]) {
+			digitsEnd++
+		}
 		index := 0
 		for i := p.pos + 1; i < digitsEnd; i++ {
-			digit := int(p.text[i]-'0')
+			digit := int(p.text[i] - '0')
 			if index > (int(^uint(0)>>1)-digit)/10 {
 				p.fail(start, digitsEnd, "pattern position exceeds integer range")
 				p.pos = digitsEnd
@@ -220,7 +247,9 @@ func (p *patternParser) group(pattern *Pattern) bool {
 		return true
 	}
 	nameStart := p.pos
-	for p.pos < len(p.text) && isPatternNameContinue(p.text[p.pos]) { p.pos++ }
+	for p.pos < len(p.text) && isPatternNameContinue(p.text[p.pos]) {
+		p.pos++
+	}
 	name := p.text[nameStart:p.pos]
 	if len(name) == 0 {
 		p.fail(start, p.pos+1, "empty pattern group")
@@ -234,14 +263,24 @@ func (p *patternParser) group(pattern *Pattern) bool {
 		patternStart := p.pos
 		for p.pos < len(p.text) && p.text[p.pos] != '}' {
 			if p.text[p.pos] == '\\' {
-				if p.pos+1 == len(p.text) { p.fail(p.pos, p.pos+1, "unfinished pattern escape"); p.pos = len(p.text); return false }
+				if p.pos+1 == len(p.text) {
+					p.fail(p.pos, p.pos+1, "unfinished pattern escape")
+					p.pos = len(p.text)
+					return false
+				}
 				p.pos++
 			}
 			p.pos++
 		}
 		glob := p.text[patternStart:p.pos]
-		if p.pos == len(p.text) { p.fail(start, p.pos, "unclosed pattern group"); return false }
-		if !ValidGlob(glob) { p.fail(patternStart, p.pos, "invalid capture pattern"); return false }
+		if p.pos == len(p.text) {
+			p.fail(start, p.pos, "unclosed pattern group")
+			return false
+		}
+		if !ValidGlob(glob) {
+			p.fail(patternStart, p.pos, "invalid capture pattern")
+			return false
+		}
 		pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternMatcher, Text: ownedText(p.a, name), Pattern: ownedText(p.a, glob), Index: pattern.Matchers, Span: source.Span{Start: p.offset + start, End: p.offset + p.pos + 1}})
 		pattern.Names = slices.Append(p.a, pattern.Names, ownedText(p.a, name))
 		pattern.Matchers++
@@ -252,7 +291,10 @@ func (p *patternParser) group(pattern *Pattern) bool {
 		p.fail(start, p.pos+1, "unclosed pattern group")
 		return false
 	}
-	if !validPatternName(name) { p.fail(nameStart, p.pos, "invalid reference name"); return false }
+	if !validPatternName(name) {
+		p.fail(nameStart, p.pos, "invalid reference name")
+		return false
+	}
 	pattern.Parts = slices.Append(p.a, pattern.Parts, PatternPart{Kind: PatternReference, Text: ownedText(p.a, name), Index: -1, Span: source.Span{Start: p.offset + start, End: p.offset + p.pos + 1}})
 	pattern.References++
 	p.pos++
@@ -264,11 +306,16 @@ func (p *patternParser) regexMatcher(pattern *Pattern, name string, start int) b
 	regexStart := p.pos
 	for p.pos < len(p.text) {
 		if p.text[p.pos] == '\\' {
-			if p.pos+1 == len(p.text) { p.pos = len(p.text); break }
+			if p.pos+1 == len(p.text) {
+				p.pos = len(p.text)
+				break
+			}
 			p.pos += 2
 			continue
 		}
-		if p.text[p.pos] == '}' { break }
+		if p.text[p.pos] == '}' {
+			break
+		}
 		p.pos++
 	}
 	if p.pos == len(p.text) {
@@ -293,8 +340,12 @@ func (p *patternParser) regexMatcher(pattern *Pattern, name string, start int) b
 
 // positional reports whether text at start begins a canonical decimal index.
 func (p *patternParser) positional(start int) bool {
-	if start >= len(p.text) || !isPatternDigit(p.text[start]) { return false }
-	if p.text[start] == '0' { return start+1 < len(p.text) && p.text[start+1] == '}' }
+	if start >= len(p.text) || !isPatternDigit(p.text[start]) {
+		return false
+	}
+	if p.text[start] == '0' {
+		return start+1 < len(p.text) && p.text[start+1] == '}'
+	}
 	return true
 }
 
@@ -304,9 +355,13 @@ func isPatternNameContinue(b byte) bool {
 }
 
 func validPatternName(name string) bool {
-	if len(name) == 0 || !(name[0] == '_' || (name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z')) { return false }
+	if len(name) == 0 || !(name[0] == '_' || (name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z')) {
+		return false
+	}
 	for i := 1; i < len(name); i++ {
-		if !isPatternNameContinue(name[i]) { return false }
+		if !isPatternNameContinue(name[i]) {
+			return false
+		}
 	}
 	return true
 }
@@ -322,15 +377,22 @@ func CanonicalPattern(a mem.Allocator, pattern *Pattern) string {
 		part := pattern.Parts[i]
 		if part.Kind == PatternLiteral {
 			for j := 0; j < len(part.Text); j++ {
-				if part.Text[j] == '\\' || part.Text[j] == '{' || part.Text[j] == '}' { b.WriteByte('\\') }
+				if part.Text[j] == '\\' || part.Text[j] == '{' || part.Text[j] == '}' {
+					b.WriteByte('\\')
+				}
 				b.WriteByte(part.Text[j])
 			}
 			continue
 		}
 		b.WriteByte('{')
 		if part.Kind == PatternMatcher {
-			if part.Text != "" { b.WriteString(part.Text); b.WriteByte(':') }
-			if part.Regex { b.WriteByte('~') }
+			if part.Text != "" {
+				b.WriteString(part.Text)
+				b.WriteByte(':')
+			}
+			if part.Regex {
+				b.WriteByte('~')
+			}
 			b.WriteString(part.Pattern)
 		} else if part.Text != "" {
 			b.WriteString(part.Text)
@@ -366,22 +428,34 @@ func (p *Pattern) MatchText(a mem.Allocator, subject string) MatchResult {
 // and regex execution to one caller-owned bound. Exhaustion (including an
 // initially zero budget) fails closed with Limited and no captures.
 func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) MatchResult {
-	if budget == nil || *budget <= 0 { return MatchResult{Limited: true} }
+	if budget == nil || *budget <= 0 {
+		return MatchResult{Limited: true}
+	}
 	var slots []string
 	programs := slices.Make[*regexProgram](a, p.Matchers)
 	for i := range p.Parts {
 		part := p.Parts[i]
-		if part.Kind != PatternMatcher || !part.Regex { continue }
+		if part.Kind != PatternMatcher || !part.Regex {
+			continue
+		}
 		compiled := compileRegex(a, part.Pattern)
 		if !compiled.Valid {
-			for j := range programs { if programs[j] != nil { programs[j].Free(a) } }
+			for j := range programs {
+				if programs[j] != nil {
+					programs[j].Free(a)
+				}
+			}
 			slices.Free(a, programs)
 			return MatchResult{}
 		}
 		programs[part.Index] = compiled.Program
 	}
 	matched, limited := p.match(a, subject, 0, 0, &slots, programs, budget)
-	for i := range programs { if programs[i] != nil { programs[i].Free(a) } }
+	for i := range programs {
+		if programs[i] != nil {
+			programs[i].Free(a)
+		}
+	}
 	slices.Free(a, programs)
 	if !matched {
 		slices.Free(a, slots)
@@ -391,36 +465,65 @@ func (p *Pattern) MatchTextBudget(a mem.Allocator, subject string, budget *int) 
 }
 
 func (p *Pattern) match(a mem.Allocator, subject string, part int, offset int, slots *[]string, programs []*regexProgram, budget *int) (bool, bool) {
-	if !ChargeMatchStep(budget) { return false, true }
-	if part == len(p.Parts) { return offset == len(subject), false }
+	if !ChargeMatchStep(budget) {
+		return false, true
+	}
+	if part == len(p.Parts) {
+		return offset == len(subject), false
+	}
 	current := p.Parts[part]
 	if current.Kind == PatternLiteral {
-		if len(subject)-offset < len(current.Text) || subject[offset:offset+len(current.Text)] != current.Text { return false, false }
+		if len(subject)-offset < len(current.Text) || subject[offset:offset+len(current.Text)] != current.Text {
+			return false, false
+		}
 		return p.match(a, subject, part+1, offset+len(current.Text), slots, programs, budget)
 	}
-	if current.Kind == PatternReference { return false, false }
+	if current.Kind == PatternReference {
+		return false, false
+	}
 	previous, found := "", false
 	for i := 0; i < current.Index && i < len(p.Names) && i < len(*slots); i++ {
-		if p.Names[i] != "" && p.Names[i] == current.Text { previous, found = (*slots)[i], true; break }
+		if p.Names[i] != "" && p.Names[i] == current.Text {
+			previous, found = (*slots)[i], true
+			break
+		}
 	}
 	for end := offset + 1; end <= len(subject); end++ {
-		if !ChargeMatchStep(budget) { return false, true }
+		if !ChargeMatchStep(budget) {
+			return false, true
+		}
 		value := subject[offset:end]
-		if found && value != previous { continue }
+		if found && value != previous {
+			continue
+		}
 		if current.Regex {
 			matched, limited := regexFullMatch(a, programs[current.Index], value, budget)
-			if limited { return false, true }
-			if !matched { continue }
+			if limited {
+				return false, true
+			}
+			if !matched {
+				continue
+			}
 		} else {
 			matched, limited := MatchGlobBudget(current.Pattern, value, budget)
-			if limited { return false, true }
-			if !matched { continue }
+			if limited {
+				return false, true
+			}
+			if !matched {
+				continue
+			}
 		}
-		for len(*slots) <= current.Index { *slots = slices.Append(a, *slots, "") }
+		for len(*slots) <= current.Index {
+			*slots = slices.Append(a, *slots, "")
+		}
 		(*slots)[current.Index] = value
 		matched, limited := p.match(a, subject, part+1, end, slots, programs, budget)
-		if matched { return true, false }
-		if limited { return false, true }
+		if matched {
+			return true, false
+		}
+		if limited {
+			return false, true
+		}
 		(*slots)[current.Index] = ""
 	}
 	return false, false
@@ -444,12 +547,18 @@ func (p *Pattern) ExpandText(a mem.Allocator, match *Pattern, slots []string) Ex
 	defer b.Free()
 	for i := range p.Parts {
 		part := p.Parts[i]
-		if part.Kind != PatternReference { b.WriteString(part.Text); continue }
+		if part.Kind != PatternReference {
+			b.WriteString(part.Text)
+			continue
+		}
 		index := part.Index
 		if part.Text != "" {
 			index = -1
 			for j := range match.Names {
-				if match.Names[j] == part.Text { index = j; break }
+				if match.Names[j] == part.Text {
+					index = j
+					break
+				}
 			}
 		}
 		if index < 0 || index >= len(slots) {
@@ -468,8 +577,13 @@ func (p *Pattern) ExpandText(a mem.Allocator, match *Pattern, slots []string) Ex
 // ChargeMatchStep charges shared regex/glob/capture work. A negative budget
 // records an attempted step past the limit; zero remaining alone is not failure.
 func ChargeMatchStep(budget *int) bool {
-	if budget == nil { return false }
-	if *budget <= 0 { *budget = -1; return false }
+	if budget == nil {
+		return false
+	}
+	if *budget <= 0 {
+		*budget = -1
+		return false
+	}
 	*budget--
 	return true
 }
@@ -481,28 +595,46 @@ func MatchGlobBudget(pattern string, value string, budget *int) (bool, bool) {
 }
 
 func matchGlobAt(pattern string, value string, pi int, vi int, budget *int) bool {
-	if !ChargeMatchStep(budget) { return false }
-	if pi == len(pattern) { return vi == len(value) }
+	if !ChargeMatchStep(budget) {
+		return false
+	}
+	if pi == len(pattern) {
+		return vi == len(value)
+	}
 	if pattern[pi] == '*' {
 		cross := pi+1 < len(pattern) && pattern[pi+1] == '*'
 		next := pi + 1
-		if cross { next++ }
+		if cross {
+			next++
+		}
 		for end := vi + 1; end <= len(value); end++ {
-			if !ChargeMatchStep(budget) { return false }
-			if !cross && value[end-1] == '/' { break }
-			if matchGlobAt(pattern, value, next, end, budget) { return true }
-			if *budget < 0 { return false }
+			if !ChargeMatchStep(budget) {
+				return false
+			}
+			if !cross && value[end-1] == '/' {
+				break
+			}
+			if matchGlobAt(pattern, value, next, end, budget) {
+				return true
+			}
+			if *budget < 0 {
+				return false
+			}
 		}
 		return false
 	}
-	if pattern[pi] == '?' { return vi < len(value) && value[vi] != '/' && matchGlobAt(pattern, value, pi+1, vi+1, budget) }
+	if pattern[pi] == '?' {
+		return vi < len(value) && value[vi] != '/' && matchGlobAt(pattern, value, pi+1, vi+1, budget)
+	}
 	if pattern[pi] == '\\' {
 		return pi+1 < len(pattern) && vi < len(value) && pattern[pi+1] == value[vi] && matchGlobAt(pattern, value, pi+2, vi+1, budget)
 	}
 	if pattern[pi] == '[' {
 		end := pi + 1
 		for end < len(pattern) && pattern[end] != ']' {
-			if !ChargeMatchStep(budget) { return false }
+			if !ChargeMatchStep(budget) {
+				return false
+			}
 			end++
 		}
 		return end < len(pattern) && vi < len(value) && classMatches(pattern[pi+1:end], value[vi], budget) && matchGlobAt(pattern, value, end+1, vi+1, budget)
@@ -512,38 +644,64 @@ func matchGlobAt(pattern string, value string, pi int, vi int, budget *int) bool
 
 func classMatches(class string, value byte, budget *int) bool {
 	invert, i, matched := false, 0, false
-	if len(class) != 0 && class[0] == '!' { invert, i = true, 1 }
+	if len(class) != 0 && class[0] == '!' {
+		invert, i = true, 1
+	}
 	for i < len(class) {
-		if !ChargeMatchStep(budget) { return false }
+		if !ChargeMatchStep(budget) {
+			return false
+		}
 		if i+2 < len(class) && class[i+1] == '-' {
-			if value >= class[i] && value <= class[i+2] { matched = true }
+			if value >= class[i] && value <= class[i+2] {
+				matched = true
+			}
 			i += 3
 		} else {
-			if value == class[i] { matched = true }
+			if value == class[i] {
+				matched = true
+			}
 			i++
 		}
 	}
-	if invert { return !matched }
+	if invert {
+		return !matched
+	}
 	return matched
 }
 
 // ValidGlob reports whether a capture glob has valid escapes and character classes.
 func ValidGlob(pattern string) bool {
-	if len(pattern) == 0 { return false }
+	if len(pattern) == 0 {
+		return false
+	}
 	for i := 0; i < len(pattern); i++ {
 		if pattern[i] == '\\' {
 			i++
-			if i == len(pattern) { return false }
+			if i == len(pattern) {
+				return false
+			}
 			continue
 		}
-		if pattern[i] == '{' || pattern[i] == '}' || pattern[i] == ':' { return false }
+		if pattern[i] == '{' || pattern[i] == '}' || pattern[i] == ':' {
+			return false
+		}
 		if pattern[i] == '[' {
 			end := i + 1
-			if end < len(pattern) && pattern[end] == '!' { end++ }
-			if end == len(pattern) || pattern[end] == ']' { return false }
-			for end < len(pattern) && pattern[end] != ']' { end++ }
-			if end == len(pattern) { return false }
-			if !validGlobClass(pattern[i+1:end]) { return false }
+			if end < len(pattern) && pattern[end] == '!' {
+				end++
+			}
+			if end == len(pattern) || pattern[end] == ']' {
+				return false
+			}
+			for end < len(pattern) && pattern[end] != ']' {
+				end++
+			}
+			if end == len(pattern) {
+				return false
+			}
+			if !validGlobClass(pattern[i+1 : end]) {
+				return false
+			}
 			i = end
 		}
 	}
@@ -552,10 +710,14 @@ func ValidGlob(pattern string) bool {
 
 func validGlobClass(class string) bool {
 	start := 0
-	if class[0] == '!' { start = 1 }
+	if class[0] == '!' {
+		start = 1
+	}
 	for i := start; i < len(class); {
 		if i+2 < len(class) && class[i+1] == '-' {
-			if class[i] > class[i+2] { return false }
+			if class[i] > class[i+2] {
+				return false
+			}
 			i += 3
 		} else {
 			i++
@@ -565,7 +727,9 @@ func validGlobClass(class string) bool {
 }
 
 func ownedText(a mem.Allocator, text string) string {
-	if len(text) == 0 { return "" }
+	if len(text) == 0 {
+		return ""
+	}
 	b := mem.AllocSlice[byte](a, len(text), len(text))
 	copy(b, []byte(text))
 	return string(b)

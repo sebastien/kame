@@ -1,320 +1,46 @@
-KAME_DIR = src/go/kame
-EXAMPLES_DIR = examples
-# wasi-sdk is provisioned project-locally by Mise. Its LLVM bundle supplies
-# wasm-ld; unlike the asdf plugin shims, that binary lives beneath wasi-sdk/bin.
-WASM_SDK ?= $(shell mise where asdf:mise-plugins/mise-wasi-sdk 2>/dev/null)/wasi-sdk
-WASM_CC ?= $(WASM_SDK)/bin/clang
-WASM_LD ?= $(WASM_SDK)/bin/wasm-ld
-WASM_INITIAL_MEMORY ?= 16777216
-WASM_MAX_MEMORY ?= 67108864
-# Optimized evaluator frames must reach the 32-level depth guard before the
-# linear-memory stack is exhausted; nested async dispatch also needs headroom.
-WASM_STACK_SIZE ?= 524288
+# Install the author's GitHub release if needed, then forward goals to it.
+# Kame reads Makefile.kmk. BSD make and GNU make. `make` runs the default goal.
+KAME_VERSION ?= 0.3.1
+KAME ?= $(HOME)/.cache/kame/bin/kame-$(KAME_VERSION)
+KAME_RELEASE_URL ?= https://github.com/sebastien/kame/releases/download/v$(KAME_VERSION)
 
-
-.PHONY: build dist dist-native dist-ape dist-release dist-wasm dist-windows wasm wasm-check wasm-portable wasm-translate test-wasm version-source \
-	test test-so test-native-host test-native-lifecycle test-examples test-go test-cli test-presentation test-reuse-reasons test-all test-sanitize test-leaks fmt clean demo
-
-build: dist
-
-test: test-so test-examples test-go test-cli
-
-test-so: $(KAME_DIR)/cmd/kame/version_generated.go test-native-lifecycle test-native-host
-	cd $(KAME_DIR) && so test ./...
-
-test-native-lifecycle: $(KAME_DIR)/cmd/kame/version_generated.go
-	CC=clang bash tools/native/test-cli-lifecycle.sh
-
-test-native-host:
-	CC=clang bash tools/native/test-host.sh
-
-test-examples:
-	cd $(EXAMPLES_DIR) && so test ./...
-
-test-go: $(KAME_DIR)/cmd/kame/version_generated.go build/kame.debug test-native-lifecycle
-	cd $(KAME_DIR) && KAME_NATIVE_FORMAT_TEST_BINARY="$(CURDIR)/build/kame.debug" KAME_NATIVE_CLI_TEST_BINARY="$(CURDIR)/build/kame.debug" go test ./cmd/kame
-
-test-cli: build/kame.debug dist-wasm
-	tests/harness.sh
-
-.PHONY: test-cli-options
-test-cli-options: build/kame.debug dist-wasm
-	tests/T009-17-cli-options.sh
-
-test-presentation: build/kame.debug dist-wasm
-	tests/T036-01-cli-presentation.sh
-	tests/T036-03-cli-presentation-lifecycle.sh
-	tests/T036-02-cli-reuse-reasons.sh
-
-test-reuse-reasons: build/kame.debug dist-wasm
-	tests/T036-02-cli-reuse-reasons.sh
-
-.PHONY: test-inspection
-test-inspection: build/kame.debug dist-wasm
-	tests/T037-01-cli-build-inspection.sh
-
-wasm-portable:
-	src/sh/check-portable.sh
-
-wasm-check: wasm wasm-portable
-	$(CC) -std=c11 -Wall -Wextra -Werror -fsyntax-only tools/native/test-wasm-header.c
-	node tools/wasm/check-imports.mjs build/wasm/kame.wasm
-	node tools/wasm/test-abi.mjs build/wasm/kame.wasm
-
-test-wasm: wasm-check
-	bash tests/T044-01-runtime-kame-rule-bodies.sh
-	tests/T043-01-lang-finalization.sh
-	tests/T010-01-wasm-loader.sh
-	tests/T010-02-wasm-abi.sh
-	tests/T010-03-wasm-target.sh
-	tests/T010-04-wasm-forwarding.sh
-	tests/T010-05-wasm-rule-target.sh
-	tests/T010-06-wasm-cli.sh
-	tests/T010-07-wasm-cat.sh
-	tests/T010-08-wasm-glob.sh
-	tests/T010-09-wasm-parse.sh
-	tests/T010-10-wasm-fmt.sh
-	tests/T018-01-lang-source-style.sh
-	tests/T010-11-wasm-plan.sh
-	tests/T010-12-wasm-graph.sh
-	tests/T010-13-wasm-tools.sh
-	tests/T010-14-wasm-json.sh
-	tests/T010-15-wasm-process-control.sh
-	tests/T010-16-wasm-cancellation.sh
-	tests/T010-17-wasm-human-output.sh
-	tests/T010-18-wasm-clock.sh
-	tests/T010-19-wasm-cache.sh
-	tests/T010-20-wasm-build-includes.sh
-	tests/T007-09-lib-wildcard-union.sh
-	tests/T007-10-lib-record-lookup.sh
-	tests/T007-11-lib-tools.sh
-	tests/T007-12-lib-operation-values.sh
-	tests/T007-13-lib-structural-equality.sh
-	tests/T007-14-lib-native-data.sh
-	tests/T007-15-runtime-symlink-watch.sh
-	tests/T005-06-eval-truth-capture.sh
-	tests/T009-13-cli-configuration.sh
-	tests/T009-16-cli-script-output.sh
-	tests/T009-18-cli-list.sh
-	tests/T009-14-cli-watch.sh
-	tests/T004-19-lang-rule-header-composition.sh
-	tests/T004-10-lang-line-continuations.sh
-	tests/T004-11-lang-wildcard-inputs.sh
-	tests/T004-12-lang-optional-includes.sh
-	tests/T004-13-lang-declaration-conditions.sh
-	tests/T004-14-lang-rule-positional-captures.sh
-	tests/T004-15-lang-rule-regex-captures.sh
-	tests/T004-16-lang-computed-outputs.sh
-	tests/T004-20-runtime-computed-outputs-watch.sh
-	tests/T004-17-lang-definition-expressions.sh
-	tests/T004-18-lang-contributions.sh
-	tests/T012-02-streams-live-cli.sh
-	tests/T012-03-streams-large-output.sh
-	tests/T012-04-streams-backpressure.sh
-	tests/T006-03-runtime-always.sh
-	tests/T006-04-runtime-order-only.sh
-	tests/T006-06-runtime-environment.sh
-	tests/T006-10-runtime-environment-watch.sh
-	tests/T006-07-runtime-newer-inputs.sh
-	tests/T010-21-wasm-build-effects.sh
-	tests/T010-22-wasm-memory.sh
-	tests/T010-23-wasm-watch.sh
-	tests/T010-24-wasm-target-arguments.sh
-	tests/T010-25-wasm-watch-abi.sh
-	tests/T010-26-wasm-service-readiness.sh
-	tests/T010-27-wasm-generated-declarations.sh
-	tests/T010-28-cache-management.sh
-	tests/T010-29-cache-locking.sh
-	tests/T010-32-wasm-embedding-js.sh
-	tests/T010-33-wasm-embedding-python.sh
-	tests/T033-01-host-plugins.sh
-	tests/T014-02-patterns-ergonomics.sh
-	tests/T014-03-runtime-pattern-construction.sh
-	tests/T014-04-patterns-regex.sh
-	tests/T016-02-cli-template-extensions.sh
-	tests/T016-03-lang-template-boundaries.sh
-	tests/T016-01-cli-render.sh
-	tests/T017-02-wasm-capture.sh
-	tests/T017-03-eval-pipelines.sh
-	tests/T017-04-eval-redirections.sh
-	tests/T017-05-eval-setup.sh
-	tests/T017-06-kash-source.sh
-	tests/T017-07-cli-run-session.sh
-	tests/T017-08-cli-run-includes.sh
-	tests/T017-09-cli-run-json.sh
-	tests/T017-10-cli-run-dry-run.sh
-	tests/T017-11-kash-accept-exit.sh
-	tests/T017-12-kash-command-recovery.sh
-	tests/T017-13-kash-value-recovery.sh
-	tests/T017-14-kash-if.sh
-	tests/T017-15-kash-match.sh
-	tests/T017-16-kash-environment.sh
-	tests/T017-17-eval-process-expressions.sh
-	tests/T017-18-kash-async.sh
-	tests/T017-19-kash-recipes.sh
-	tests/T017-25-kash-recipe-deadlines.sh
-	tests/T017-20-kash-context-environment.sh
-	tests/T017-21-kash-words.sh
-	tests/T017-22-kash-defer.sh
-	tests/T017-24-kash-defer-lifecycle.sh
-	tests/T017-23-kash-operations.sh
-	tests/T011-04-diag-language-boundaries.sh
-	tests/T038-01-kash-direct-recipes.sh
-	tests/T038-06-kash-recipe-lifecycle.sh
-	tests/T038-02-lib-wildcard-kinds.sh
-	tests/T038-03-lib-text-json.sh
-	tests/T038-04-lib-action-names.sh
-	tests/T040-01-cli-automatic-clean.sh
-	tests/T041-01-patterns-predicates-and-substitution.sh
-	tests/T042-01-kash-topology.sh
-	tests/T042-02-kash-framing.sh
-	tests/T042-03-kash-channels.sh
-	tests/T042-04-kash-operands.sh
-	tests/T042-05-kash-scheduling.sh
-	tests/T042-06-kash-lossy.sh
-	tests/T042-07-kash-metrics.sh
-	tests/T042-08-kash-live.sh
-	tests/T042-09-kash-ordering.sh
-	tests/T042-10-kash-failure-policy.sh
-	tests/T042-11-kash-each.sh
-	tests/T036-01-cli-presentation.sh
-	tests/T036-03-cli-presentation-lifecycle.sh
-	tests/T036-02-cli-reuse-reasons.sh
-
-test-all: test test-leaks
-
-test-sanitize: $(KAME_DIR)/cmd/kame/version_generated.go test-native-lifecycle test-native-host
-	cd $(KAME_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
-	cd $(EXAMPLES_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
-
-test-leaks: build/kame.sanitize dist-wasm test-native-lifecycle test-native-host
-	cd $(KAME_DIR) && KAME_NATIVE_FORMAT_TEST_BINARY="$(CURDIR)/build/kame.sanitize" KAME_NATIVE_CLI_TEST_BINARY="$(CURDIR)/build/kame.sanitize" CC=clang go test -asan ./cmd/kame
-	cd $(KAME_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
-	cd $(EXAMPLES_DIR) && CC=clang so test -check=sanitize -panic=abort ./...
-	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 CLI_BIN="$(CURDIR)/build/kame.sanitize" tests/harness.sh $$(find tests -type f -name 'T*.sh' ! -name 'T013-03-meta-binary.sh')
-
-fmt: build/kame.debug
-	git ls-files -z -- '*.go' | xargs -0r gofmt -w
-	git ls-files -z -- '*.sh' | xargs -0r shfmt -w
-	./build/kame.debug do fmt -i Makefile.kmk
-
-clean:
-	rm -rf build dist
-
-demo:
-	cd $(EXAMPLES_DIR)/engine && so run ./demo
-
-dist: build/kame.debug dist/kame
-
-# Preserve a host-native CLI under a stable release platform identifier. A
-# release operator can collect these outputs from native CI jobs before signing.
-KAME_PLATFORM ?= $(shell python3 src/sh/platform_id.py)
-dist-native: dist/native/$(KAME_PLATFORM)/kame
-
-dist/native/$(KAME_PLATFORM)/kame: dist/kame
-	mkdir -p $(@D)
-	cp dist/kame $@
-	chmod +x $@
-
-# WebAssembly release artifacts. Kept out of the default dist so a host without
-# the wasi-sdk toolchain can still build the native CLI.
-dist-wasm: dist/kame.wasm dist/kame.js
-
-dist/kame.wasm: build/wasm/kame.wasm
-	mkdir -p dist
-	cp build/wasm/kame.wasm dist/kame.wasm
-
-dist/kame.js: src/js/kame.js
-	mkdir -p dist
-	cp src/js/kame.js dist/kame.js
-
-# Stage and sign the flat release assets. The release operator supplies both
-# key paths; neither private nor public key material is checked into source.
-KAME_RELEASE_PUBLIC_KEY ?=
-KAME_RELEASE_SIGNING_KEY ?=
-KAME_RELEASE_REVISION ?= $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
-dist-release: dist/kame.com dist/kame.wasm dist/kame.js
-	test -n "$(KAME_RELEASE_PUBLIC_KEY)" -a -f "$(KAME_RELEASE_PUBLIC_KEY)"
-	test -n "$(KAME_RELEASE_SIGNING_KEY)" -a -f "$(KAME_RELEASE_SIGNING_KEY)"
-	rm -rf dist/release
-	mkdir -p dist/release
-	cp dist/kame.com dist/release/kame.com
-	cp dist/kame.wasm dist/release/kame.wasm
-	cp dist/kame.js dist/release/kame.js
-	cp VERSION dist/release/VERSION
-	python3 src/sh/release_manifest.py --directory dist/release --version "$$(cat VERSION)" --revision "$(KAME_RELEASE_REVISION)" --public-key "$(KAME_RELEASE_PUBLIC_KEY)" --signing-key "$(KAME_RELEASE_SIGNING_KEY)"
-
-# Explicitly refresh checked-in package definitions before committing a release.
-.PHONY: package-manifests
-package-manifests: dist/kame.com
-	python3 src/sh/release_package_manifests.py --directory dist --output-directory etc --version "$$(cat VERSION)"
-
-dist-ape: dist/kame.com dist/ape-smoke.com
-
-dist/ape-smoke.com: tools/platform/ape-smoke.c build/tools/cosmocc-4.0.2/bin/cosmocc
-	mkdir -p $(@D)
-	build/tools/cosmocc-4.0.2/bin/cosmocc -O2 -o $@ tools/platform/ape-smoke.c
-dist/windows/kame.exe: $(wildcard $(KAME_DIR)/cmd/kame-launcher/*.go) dist/kame.js dist/kame.wasm
-	mkdir -p dist/windows
-	cd $(KAME_DIR) && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -o ../../../dist/windows/kame.exe ./cmd/kame-launcher
-	cp dist/kame.js dist/windows/kame.js
-	cp dist/kame.wasm dist/windows/kame.wasm
-
-dist/kame-windows-x64.zip: dist/windows/kame.exe
-	rm -f $@
-	cd dist/windows && zip -q ../kame-windows-x64.zip kame.exe kame.js kame.wasm
-
-dist/kame-windows-x64.exe: dist/kame.com
-	cp dist/kame.com $@
-
-dist-windows: dist/kame-windows-x64.zip dist/kame-windows-x64.exe
-
-# The freestanding portable runtime has no hosted imports.
-# WASM_LD is explicit because a host clang installation need not provide it.
-# Every file the module links. A file target keeps repeated test builds cheap:
-# relink only when a portable source changes.
-WASM_SOURCES := $(shell find $(KAME_DIR)/cli $(KAME_DIR)/core $(KAME_DIR)/diagnostic $(KAME_DIR)/host $(KAME_DIR)/lang $(KAME_DIR)/operations $(KAME_DIR)/plugins $(KAME_DIR)/program tools/wasm -type f \( -name '*.go' -o -name '*.c' -o -name '*.h' \))
-
-wasm-translate:
-	mkdir -p build/wasm/c
-	cd $(KAME_DIR) && so translate -o ../../../build/wasm/c ./host/wasm
-
-wasm: build/wasm/kame.wasm
-
-# Link only compiler-rt's math helpers, not WASI/libc. Query the SDK's default
-# target because the freestanding target has no runtime archive of its own.
-build/wasm/kame.wasm: $(WASM_SOURCES) $(KAME_DIR)/go.mod $(KAME_DIR)/go.sum Makefile
-	command -v $(WASM_CC)
-	command -v $(WASM_LD)
-	mkdir -p build/wasm/c
-	cd $(KAME_DIR) && so translate -o ../../../build/wasm/c ./host/wasm
-	builtins="$$("$(WASM_SDK)/bin/clang" -print-libgcc-file-name)" && \
-	test -f "$$builtins" && \
-	$(WASM_CC) --target=wasm32-unknown-unknown -Oz -fwrapv -ffreestanding -nostdlib -mexception-handling -mllvm -wasm-enable-sjlj -include tools/wasm/kame_wasm_panic.h -DSO_HEAP_SIZE=8388608 -fuse-ld=$(WASM_LD) -I build/wasm/c -I $(KAME_DIR)/host/wasm -Wl,--no-entry -Wl,--export-memory -Wl,-z,stack-size=$(WASM_STACK_SIZE) -Wl,--initial-memory=$(WASM_INITIAL_MEMORY) -Wl,--max-memory=$(WASM_MAX_MEMORY) -Wl,--export=kame_wasm_abi_version -Wl,--export=kame_wasm_alloc -Wl,--export=kame_wasm_free -Wl,--export=kame_wasm_event_header -Wl,--export=kame_wasm_copy -Wl,--export=kame_wasm_cli -Wl,--export=kame_wasm_eval_pure -Wl,--export=kame_wasm_parse -Wl,--export=kame_wasm_format -Wl,--export=kame_wasm_eval_source_pure -Wl,--export=kame_wasm_declaration_predicate -Wl,--export=kame_wasm_instance_create -Wl,--export=kame_wasm_instance_free -Wl,--export=kame_wasm_source_compile -Wl,--export=kame_wasm_register_plugins -Wl,--export=kame_wasm_set_source_name -Wl,--export=kame_wasm_expression_request -Wl,--export=kame_wasm_set_forwarding -Wl,--export=kame_wasm_set_directory -Wl,--export=kame_wasm_host_set_file -Wl,--export=kame_wasm_host_set_env -Wl,--export=kame_wasm_target_begin -Wl,--export=kame_wasm_watch_begin -Wl,--export=kame_wasm_watch_state -Wl,--export=kame_wasm_watch_invalidate -Wl,--export=kame_wasm_watch_cancel -Wl,--export=kame_wasm_prepare -Wl,--export=kame_wasm_plan -Wl,--export=kame_wasm_graph -Wl,--export=kame_wasm_tools -Wl,--export=kame_wasm_set_tool_path -Wl,--export=kame_wasm_tools_check -Wl,--export=kame_wasm_inspection_grant -Wl,--export=kame_wasm_target_event -Wl,--export=kame_wasm_process_started -Wl,--export=kame_wasm_process_stream -Wl,--export=kame_wasm_process_terminal -Wl,--export=kame_wasm_expression_begin -Wl,--export=kame_wasm_expression_cancel -Wl,--export=kame_wasm_expression_effect_kind -Wl,--export=kame_wasm_expression_effect_length -Wl,--export=kame_wasm_expression_effect_copy -Wl,--export=kame_wasm_step -Wl,--export=kame_wasm_next_event_header -Wl,--export=kame_wasm_next_request_kind -Wl,--export=kame_wasm_next_request_data_length -Wl,--export=kame_wasm_next_request_key_length -Wl,--export=kame_wasm_request_key_copy -Wl,--export=kame_wasm_next_request_record_length -Wl,--export=kame_wasm_request_record_copy -Wl,--export=kame_wasm_request_data_copy -Wl,--export=kame_wasm_event_payload_copy -Wl,--export=kame_wasm_event_discard -Wl,--export=kame_wasm_complete_bytes -Wl,--export=kame_wasm_complete_text -Wl,--export=kame_wasm_complete_nil -Wl,--export=kame_wasm_complete_json -Wl,--export=kame_wasm_complete_failure -Wl,--export=kame_wasm_result_copy -Wl,--export=kame_wasm_result_kind -Wl,--export=kame_wasm_diagnostic_length -Wl,--export=kame_wasm_diagnostic_copy -Wl,--export=kame_wasm_instance_diagnostic_length -Wl,--export=kame_wasm_instance_diagnostic_copy -Wl,--export=kame_wasm_instance_diagnostic_span $$(find build/wasm/c -name '*.c' -print) tools/wasm/kame_wasm_abi.c tools/wasm/kame_wasm_jump.c "$$builtins" -o build/wasm/kame.wasm
-
-$(KAME_DIR)/cmd/kame/version_generated.go: VERSION src/sh/generate-version.sh
-	src/sh/generate-version.sh
-
-version-source: $(KAME_DIR)/cmd/kame/version_generated.go
-
-KAME_SOURCES := $(shell find $(KAME_DIR) -type f \( -name '*.go' -o -name '*.c' -o -name '*.h' \))
-KAME_BUILD_INPUTS := $(KAME_DIR)/cmd/kame/version_generated.go $(KAME_SOURCES) $(KAME_DIR)/go.mod $(KAME_DIR)/go.sum $(KAME_DIR)/cmd/kame/build_mode.h Makefile
-
-build/kame.debug: $(KAME_BUILD_INPUTS)
-	mkdir -p build
-	cd $(KAME_DIR) && CFLAGS="$${CFLAGS:--O2} -DKAME_BUILD_MODE_DEBUG" so build -check=warn -o ../../../build/kame.debug ./cmd/kame
-
-build/kame.sanitize: $(KAME_BUILD_INPUTS)
-	mkdir -p build
-	cd $(KAME_DIR) && CC=clang CFLAGS="$${CFLAGS:--O2} -DKAME_BUILD_MODE_SANITIZE" so build -check=sanitize -panic=abort -o ../../../build/kame.sanitize ./cmd/kame
-
-dist/kame: $(KAME_BUILD_INPUTS)
-	mkdir -p dist
-	cd $(KAME_DIR) && CFLAGS="-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o ../../../dist/kame ./cmd/kame
-
-build/tools/cosmocc-4.0.2/bin/cosmocc: src/sh/provision-cosmocc.sh
-	src/sh/provision-cosmocc.sh build/tools/cosmocc-4.0.2
-
-dist/kame.com: build/tools/cosmocc-4.0.2/bin/cosmocc $(KAME_BUILD_INPUTS)
-	mkdir -p dist
-	cd $(KAME_DIR) && CC=$(CURDIR)/build/tools/cosmocc-4.0.2/bin/cosmocc CFLAGS="-O3 -s -DKAME_BUILD_MODE_RELEASE -DKAME_RUNTIME_APE" so build -assert=off -panic=exit -o ../../../dist/kame.com ./cmd/kame
+.PHONY: default FORCE $(.TARGETS)
+default: $(KAME)
+	@$(RUN)
+$(MAKEFILE_LIST): ;
+$(KAME):
+	@$(FETCH)
+%: $(KAME) FORCE
+	@$(RUN)
+FORCE: ;
+.DEFAULT:
+	@$(RUN)
+.BEGIN:
+	@if [ ! -x "$(KAME)" ]; then $(FETCH); fi
+FETCH = set -eu; mkdir -p "$$(dirname "$(KAME)")"; tmp="$(KAME).tmp"; trap 'rm -f "$$tmp"' EXIT; \
+	url="$(KAME_RELEASE_URL)/kame.com"; \
+	if command -v curl >/dev/null 2>&1; then curl -fsSL "$$url" -o "$$tmp"; \
+	elif command -v wget >/dev/null 2>&1; then wget -q -O "$$tmp" "$$url"; \
+	elif command -v fetch >/dev/null 2>&1; then fetch -o "$$tmp" "$$url"; \
+	else printf '%s\n' 'kame: no downloader (curl)' >&2; exit 1; fi; \
+	chmod +x "$$tmp"; mv "$$tmp" "$(KAME)"
+# Read bindings as data, never as shell source. GNU doubles dollars in MAKEFLAGS;
+# BSD expands them there, but exports the original command-line variable values.
+RUN = goal="$@"; \
+	eval "$$(awk -v gnu="$(MAKE_VERSION)" 'function bind() { \
+		if (token !~ /^[A-Za-z_][A-Za-z0-9_]*=/ || token ~ /^(KAME|KAME_VERSION|KAME_RELEASE_URL)=/) return; \
+		if (!gnu) { name = substr(token, 1, index(token, "=")); token = name ENVIRON[substr(name, 1, length(name) - 1)]; } \
+		printf "set -- \"$$@\" \047"; \
+		for (j = 1; j <= length(token); j++) { \
+			c = substr(token, j, 1); if (c == "\047") printf "\047\\\047\047"; else printf "%s", c; \
+		} printf "\047\n"; \
+	} BEGIN { \
+		gnu = gnu ~ /\./; s = ENVIRON["MAKEFLAGS"]; token = ""; \
+		for (i = 1; i <= length(s); i++) { \
+			c = substr(s, i, 1); \
+			if (c == "\\") token = token substr(s, ++i, 1); \
+			else if (c ~ /[ \t]/) { bind(); token = ""; } \
+			else { if (gnu && c == "$$" && substr(s, i + 1, 1) == "$$") i++; token = token c; } \
+		} bind(); }')"; \
+	exec "$(KAME)" "$$goal" "$$@"
+# EOF

@@ -18,7 +18,9 @@ func TestMixedWordRetainsCompletedFragmentsAcrossSuspension(t *testing.T) {
 		`result = $(:timeout (once).(async) printf value)`,
 		`result = $(:MODE prefix-(once)-(async) printf value)`,
 	}
-	for i := range sources { checkMixedWordRetainedFragments(t, sources[i]) }
+	for i := range sources {
+		checkMixedWordRetainedFragments(t, sources[i])
+	}
 }
 
 func TestInterpolationRetainsCompletedCallsAcrossSuspension(t *testing.T) {
@@ -40,11 +42,15 @@ func TestInterpolationRetainsCompletedCallsAcrossSuspension(t *testing.T) {
 		node := p.Definition("result")
 		engine.Request(node)
 		request := stepUntilRequest(engine, p)
-		if !request.OK || state.Calls != 1 { t.Error("interpolation did not suspend after its first call") } else {
+		if !request.OK || state.Calls != 1 {
+			t.Error("interpolation did not suspend after its first call")
+		} else {
 			engine.Complete(core.Completion{NodeID: request.Request.NodeID, Generation: request.Request.Generation, Attempt: request.Request.Attempt, RequestID: request.Request.ID})
 			request.Request.Free(a)
 			stepUntilCurrent(engine, node)
-			if !node.Current || node.Latest.Text != "prefix-1-42.txt" || state.Calls != 1 || state.Effects != 1 { t.Error("interpolation replayed a completed call or effect") }
+			if !node.Current || node.Latest.Text != "prefix-1-42.txt" || state.Calls != 1 || state.Effects != 1 {
+				t.Error("interpolation replayed a completed call or effect")
+			}
 		}
 		engine.Free()
 		p.Free()
@@ -77,8 +83,12 @@ func checkMixedWordRetainedFragments(t *testing.T, source string) {
 		engine.Complete(core.Completion{NodeID: request.Request.NodeID, Generation: request.Request.Generation, Attempt: request.Request.Attempt, RequestID: request.Request.ID})
 		request.Request.Free(a)
 		stepUntilCurrent(engine, node)
-		if !node.Current || state.Calls != generation || state.Effects != generation { t.Error("completed fragment or effect replayed") }
-		if generation == 1 { engine.Invalidate(node) }
+		if !node.Current || state.Calls != generation || state.Effects != generation {
+			t.Error("completed fragment or effect replayed")
+		}
+		if generation == 1 {
+			engine.Invalidate(node)
+		}
 	}
 	engine.Free()
 	p.Free()

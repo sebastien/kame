@@ -24,8 +24,19 @@ func TestRuleMetadataUsesKameRecordExpressions(t *testing.T) {
 	}
 }
 
-func TestRuleMetadataRejectsUnknownAndDuplicateFields(t *testing.T) {
-	invalid := []string{"build : ; [shell: kash shell: kash]", "build : ; [other: 1]", "build : ; [kash]", "build : ; [shell: kash] extra"}
+func TestRuleMetadataAllowsCustomFieldsAndRejectsDuplicates(t *testing.T) {
+	accepted := []string{
+		`build : ; [name: "cloudflare-login" kind: "task" summary: "Log in to wrangler" custom: [note: "kept"]]`,
+		`service daemon : ; [summary: "Run daemon" custom: "value"]`,
+	}
+	for i := range accepted {
+		parsed := rule.ParseRule(t.Allocator(), "test.kmk", accepted[i])
+		if len(parsed.Diagnostics) != 0 {
+			t.Error("custom metadata field was rejected")
+		}
+		parsed.Free()
+	}
+	invalid := []string{"build : ; [shell: kash shell: kash]", "build : ; [summary: \"one\" summary: \"two\"]", "build : ; [kash]", "build : ; [shell: kash] extra"}
 	for i := range invalid {
 		parsed := rule.ParseRule(t.Allocator(), "test.kmk", invalid[i])
 		if len(parsed.Diagnostics) == 0 {
@@ -53,16 +64,11 @@ func TestServiceMetadataPreservesTypedLifecycleSettings(t *testing.T) {
 	}
 }
 
-func TestServiceMetadataRejectsUnknownAndNonServiceFields(t *testing.T) {
-	invalid := []string{
-		"service daemon : ; [unknown: 1]\n\ttrue\n",
-		"build : ; [ready: [argv: [\"probe\"]]]\n\ttrue\n",
-	}
-	for i := range invalid {
-		parsed := rule.ParseRule(t.Allocator(), "test.kmk", invalid[i])
-		if len(parsed.Diagnostics) == 0 {
-			t.Error("invalid service metadata was accepted")
-		}
-		parsed.Free()
+func TestServiceMetadataAllowsDocumentationFields(t *testing.T) {
+	source := "service daemon : ; [summary: \"Run daemon\" kind: \"service\" name: \"cloudflare-dev\" ready: [argv: [\"./daemon\" \"ready\"]]]\n\ttrue\n"
+	parsed := rule.ParseRule(t.Allocator(), "test.kmk", source)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || parsed.Rule.Kind != rule.ServiceRule {
+		t.Error("documentation metadata on a service was rejected")
 	}
 }

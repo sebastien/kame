@@ -25,10 +25,10 @@ func parseKash(s *Script, offset int) {
 }
 
 type kashParser struct {
-	Script *Script
-	Pos    int
-	Style  byte
-	Unit   int
+	Script   *Script
+	Pos      int
+	Style    byte
+	Unit     int
 	Channels []string
 }
 
@@ -81,17 +81,28 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 		word := text[start:wordEnd]
 		if word == "stream" {
 			p.Pos = wordEnd
-			for p.Pos < len(text) && space(text[p.Pos]) { p.Pos++ }
+			for p.Pos < len(text) && space(text[p.Pos]) {
+				p.Pos++
+			}
 			nameStart := p.Pos
-			for p.Pos < len(text) && !space(text[p.Pos]) && text[p.Pos] != '\n' && text[p.Pos] != ';' && text[p.Pos] != '#' { p.Pos++ }
+			for p.Pos < len(text) && !space(text[p.Pos]) && text[p.Pos] != '\n' && text[p.Pos] != ';' && text[p.Pos] != '#' {
+				p.Pos++
+			}
 			name := text[nameStart:p.Pos]
-			if !expr.ChannelName(name) || slices.Contains(p.Channels, name) { s.error(nameStart, p.Pos, "invalid, duplicate, or reserved stream declaration"); break }
+			if !expr.ChannelName(name) || slices.Contains(p.Channels, name) {
+				s.error(nameStart, p.Pos, "invalid, duplicate, or reserved stream declaration")
+				break
+			}
 			declaration := mem.Alloc[expr.Expr](s.Alloc)
 			declaration.Kind, declaration.Text, declaration.Span = expr.CommandStream, name, source.Span{Start: start, End: p.Pos}
 			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Expression, Span: declaration.Span, Expression: declaration})
 			p.Channels = slices.Append(s.Alloc, p.Channels, name)
-			for p.Pos < len(text) && space(text[p.Pos]) { p.Pos++ }
-			if p.Pos < len(text) && text[p.Pos] != '\n' && text[p.Pos] != ';' && text[p.Pos] != '#' { s.error(p.Pos, p.Pos+1, "stream declaration takes one channel name") }
+			for p.Pos < len(text) && space(text[p.Pos]) {
+				p.Pos++
+			}
+			if p.Pos < len(text) && text[p.Pos] != '\n' && text[p.Pos] != ';' && text[p.Pos] != '#' {
+				s.error(p.Pos, p.Pos+1, "stream declaration takes one channel name")
+			}
 			continue
 		}
 		if word == "elif" || word == "else" {
@@ -165,15 +176,23 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			}
 		} else if word == "defer" {
 			p.Pos = wordEnd
-			for p.Pos < len(text) && space(text[p.Pos]) { p.Pos++ }
+			for p.Pos < len(text) && space(text[p.Pos]) {
+				p.Pos++
+			}
 			if p.Pos == len(text) || text[p.Pos] == '\n' || text[p.Pos] == ';' || text[p.Pos] == '#' {
 				s.error(start, p.Pos, "defer requires a command or parenthesized expression")
 				break
 			}
 			var part expr.Prefix
-			if text[p.Pos] == '(' && !expr.IsCommandGroup(text, p.Pos) { part = expr.ParseKashValuePrefix(s.Alloc, s.Source, p.Pos) } else { part = expr.ParseCommandPrefix(s.Alloc, s.Source, p.Pos) }
+			if text[p.Pos] == '(' && !expr.IsCommandGroup(text, p.Pos) {
+				part = expr.ParseKashValuePrefix(s.Alloc, s.Source, p.Pos)
+			} else {
+				part = expr.ParseCommandPrefix(s.Alloc, s.Source, p.Pos)
+			}
 			s.takeDiagnostics(part.Diagnostics)
-			if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery { s.error(start, part.End, "defer requires one parenthesized Kame expression, not a Kash value recovery") }
+			if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery {
+				s.error(start, part.End, "defer requires one parenthesized Kame expression, not a Kash value recovery")
+			}
 			if part.Expr != nil && part.Expr.Kind == expr.CommandGraph && (part.Expr.Async || len(part.Expr.Body) != 0) {
 				s.error(start, part.End, "deferred commands cannot use & or command fallback; defer a Kash callable for compound cleanup")
 			}
@@ -184,8 +203,12 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 			p.Pos = part.End
 			end := p.Pos
-			for end < len(text) && space(text[end]) { end++ }
-			if end < len(text) && text[end] != '\n' && text[end] != ';' && text[end] != '#' { s.error(end, end+1, "defer requires one command or expression") }
+			for end < len(text) && space(text[end]) {
+				end++
+			}
+			if end < len(text) && text[end] != '\n' && text[end] != ';' && text[end] != '#' {
+				s.error(end, end+1, "defer requires one command or expression")
+			}
 		} else if text[start] == '(' && !expr.IsCommandGroup(text, start) {
 			part := expr.ParseKashValuePrefix(s.Alloc, s.Source, start)
 			s.takeDiagnostics(part.Diagnostics)

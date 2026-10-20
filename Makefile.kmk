@@ -2,8 +2,8 @@
 # kame -- Kame build file
 # =============================================================================
 #
-# Kame discovers Makefile.kmk before the GNU Makefile. The target graph matches
-# Makefile. File artifacts use content freshness instead of Make's timestamps;
+# Kame discovers Makefile.kmk before Makefile. Make forwards goals here.
+# File artifacts use content freshness instead of Make's timestamps;
 # repeated native or wasm builds are skipped when declared inputs are unchanged.
 # `kame --force TARGET` rebuilds anyway.
 #
@@ -177,6 +177,18 @@ WASM_EXPORT_FLAGS = (map ([name] (str "-Wl,--export=" name)) WASM_EXPORTS)
 # Cross-backend gate. Explicit, not a glob: test-wasm is a curated list.
 TEST_WASM =
   [
+    ./tests/T042-01-kash-topology.sh
+    ./tests/T042-02-kash-framing.sh
+    ./tests/T042-03-kash-channels.sh
+    ./tests/T042-04-kash-operands.sh
+    ./tests/T042-05-kash-scheduling.sh
+    ./tests/T042-06-kash-lossy.sh
+    ./tests/T042-07-kash-metrics.sh
+    ./tests/T042-08-kash-live.sh
+    ./tests/T042-09-kash-ordering.sh
+    ./tests/T042-10-kash-failure-policy.sh
+    ./tests/T042-11-kash-each.sh
+    ./tests/T044-01-runtime-kame-rule-bodies.sh
     ./tests/T043-01-lang-finalization.sh
     ./tests/T010-01-wasm-loader.sh
     ./tests/T010-02-wasm-abi.sh

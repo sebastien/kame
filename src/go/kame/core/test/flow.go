@@ -20,10 +20,10 @@ type releaseRecord struct {
 }
 
 type failingSequence struct {
-	Atoms   []core.Atom
-	Index   int
-	Record  *releaseRecord
-	Alloc   mem.Allocator
+	Atoms  []core.Atom
+	Index  int
+	Record *releaseRecord
+	Alloc  mem.Allocator
 }
 
 type sourceFixture struct {
@@ -34,14 +34,18 @@ func sourceFixtureProducer(c *core.EngineContext, nodeID int64) core.ProducerRes
 	_ = nodeID
 	state := c.Context().(*sourceFixture)
 	source := state.Source
-	if source == nil || !c.AttachSource(source) { return core.ProducerFailed }
+	if source == nil || !c.AttachSource(source) {
+		return core.ProducerFailed
+	}
 	state.Source = nil
 	return core.ProducerActive
 }
 
 func freeSourceFixture(a mem.Allocator, context any) {
 	state := context.(*sourceFixture)
-	if state.Source != nil { core.FreeSource(a, state.Source) }
+	if state.Source != nil {
+		core.FreeSource(a, state.Source)
+	}
 	mem.Free(a, state)
 }
 
@@ -82,7 +86,9 @@ func newSequence(a mem.Allocator, atoms []core.Atom) *core.Source {
 func pollFailingSequence(c *core.EngineContext, s *core.Source, out *core.Atom) core.PollResult {
 	_ = c
 	state := s.State.(*failingSequence)
-	if state.Index == len(state.Atoms) { return core.PollWaiting }
+	if state.Index == len(state.Atoms) {
+		return core.PollWaiting
+	}
 	*out = state.Atoms[state.Index]
 	state.Index++
 	return core.PollEmitted
@@ -165,7 +171,9 @@ func TestPollCompletedDiscardsUncommittedBatch(t *testing.T) {
 	m := core.NewMaterializer(a, newSequence(a, []core.Atom{{Kind: core.AtomChunk, Value: core.NewString(a, "discard")}}))
 	m.Next(nil)
 	step := m.Next(nil)
-	if step.Published || !step.Terminal { t.Error("PollCompleted committed an implicit batch") }
+	if step.Published || !step.Terminal {
+		t.Error("PollCompleted committed an implicit batch")
+	}
 	m.Free()
 }
 
@@ -174,7 +182,9 @@ func TestPollCompletedWithOpenCollectionFails(t *testing.T) {
 	m := core.NewMaterializer(a, newSequence(a, []core.Atom{{Kind: core.AtomStartCollection}}))
 	m.Next(nil)
 	step := m.Next(nil)
-	if !step.Terminal || step.Diagnostic.Code != core.DiagnosticExprValue { t.Error("PollCompleted accepted an open collection") }
+	if !step.Terminal || step.Diagnostic.Code != core.DiagnosticExprValue {
+		t.Error("PollCompleted accepted an open collection")
+	}
 	m.Free()
 }
 
@@ -205,7 +215,8 @@ func TestMaterializesEmptyNestedCollection(t *testing.T) {
 		{Kind: core.AtomEndCollection},
 		{Kind: core.AtomEndBatch},
 	}))
-	m.Next(nil); m.Next(nil)
+	m.Next(nil)
+	m.Next(nil)
 	step := m.Next(nil)
 	if !step.Published || step.Value.Kind != core.List || len(step.Value.List) != 1 || step.Value.List[0].Kind != core.List || len(step.Value.List[0].List) != 0 {
 		t.Error("empty nested collection was not materialized")
@@ -285,9 +296,13 @@ func TestNormalCompletionReleasesSourceOnce(t *testing.T) {
 	n := addSource(e, "normal", newFailingSequence(a, record, []core.Atom{{Kind: core.AtomEndStream}}))
 	e.Request(n)
 	e.Step()
-	if n.State != core.NodeComplete || record.Frees != 1 { t.Error("normal completion did not release source exactly once") }
+	if n.State != core.NodeComplete || record.Frees != 1 {
+		t.Error("normal completion did not release source exactly once")
+	}
 	e.Free()
-	if record.Frees != 1 { t.Error("engine teardown released completed source twice") }
+	if record.Frees != 1 {
+		t.Error("engine teardown released completed source twice")
+	}
 	mem.Free(a, record)
 }
 
@@ -313,7 +328,9 @@ func TestAtomInsideBatchReportsExprValue(t *testing.T) {
 	}))
 	m.Next(nil)
 	failed := m.Next(nil)
-	if !failed.Terminal || failed.Diagnostic.Code != core.DiagnosticExprValue { t.Error("atom inside batch did not report EXPR_INVALID") }
+	if !failed.Terminal || failed.Diagnostic.Code != core.DiagnosticExprValue {
+		t.Error("atom inside batch did not report EXPR_INVALID")
+	}
 	m.Free()
 }
 
@@ -335,11 +352,17 @@ func TestInvalidateAndCancelReleaseSources(t *testing.T) {
 	e.Request(pending)
 	e.Step()
 	e.Cancel(pending)
-	if cancelled.Freed { t.Error("cancellation ignored active subscriber interest") }
+	if cancelled.Freed {
+		t.Error("cancellation ignored active subscriber interest")
+	}
 	e.Unsubscribe(s)
-	if !cancelled.Freed || cancelled.Frees != 1 { t.Error("last interest did not cancel and release source exactly once") }
+	if !cancelled.Freed || cancelled.Frees != 1 {
+		t.Error("last interest did not cancel and release source exactly once")
+	}
 	e.Free()
-	if invalidated.Frees != 1 || cancelled.Frees != 1 { t.Error("engine teardown released cancelled sources twice") }
+	if invalidated.Frees != 1 || cancelled.Frees != 1 {
+		t.Error("engine teardown released cancelled sources twice")
+	}
 	mem.Free(a, invalidated)
 	mem.Free(a, cancelled)
 }

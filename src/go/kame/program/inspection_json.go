@@ -16,60 +16,115 @@ import (
 func inspectionLifetime(key core.ResourceKey) string {
 	switch key.Kind {
 	case core.ResourceFile:
-		if strings.HasPrefix(key.Name, "mem:") { return "host" }
+		if strings.HasPrefix(key.Name, "mem:") {
+			return "host"
+		}
 		return "persistent"
-	case core.ResourceService: return "interest"
-	case core.ResourceTarget, core.ResourceEnvironment: return "invocation"
-	case core.ResourceDefinition, core.ResourceOperation, core.ResourceTask, core.ResourceGlob: return "generation"
-	case core.ResourceTool: return "host"
+	case core.ResourceService:
+		return "interest"
+	case core.ResourceTarget, core.ResourceEnvironment:
+		return "invocation"
+	case core.ResourceDefinition, core.ResourceOperation, core.ResourceTask, core.ResourceGlob:
+		return "generation"
+	case core.ResourceTool:
+		return "host"
 	}
 	return "unknown"
 }
 
 func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind string) {
-	if kind == "affected" { kind = "plan" }
+	if kind == "affected" {
+		kind = "plan"
+	}
 	e := json.NewEncoder(out)
 	e.BeginObject()
-	e.Str("schema"); e.Int(2)
-	e.Str("type"); e.Str(kind)
-	e.Str("targets"); encodeStringArray(&e, targets)
-	e.Str("depth"); e.Int(int64(depth))
-	e.Str("scope"); e.Str("declared-and-read-only")
-	e.Str("direction"); if g.Downstream { e.Str("downstream") } else { e.Str("upstream") }
-	e.Str("truncated"); e.Bool(g.Truncated)
-	e.Str("resources"); e.BeginArray()
+	e.Str("schema")
+	e.Int(2)
+	e.Str("type")
+	e.Str(kind)
+	e.Str("targets")
+	encodeStringArray(&e, targets)
+	e.Str("depth")
+	e.Int(int64(depth))
+	e.Str("scope")
+	e.Str("declared-and-read-only")
+	e.Str("direction")
+	if g.Downstream {
+		e.Str("downstream")
+	} else {
+		e.Str("upstream")
+	}
+	e.Str("truncated")
+	e.Bool(g.Truncated)
+	e.Str("resources")
+	e.BeginArray()
 	for i := range g.Resources {
 		r := g.Resources[i]
 		e.BeginObject()
-		e.Str("id"); e.Int(int64(i+1))
-		e.Str("key"); encodeResourceKey(&e, r.Key)
-		e.Str("display"); e.Str(r.Display)
-		if r.Root { e.Str("root"); e.Bool(true) }
-		e.Str("roles"); e.BeginArray()
-		if r.Input { e.Str("input") }
-		if r.Artifact { e.Str("artifact") }
-		if r.Intermediate { e.Str("intermediate") }
-		if r.Product { e.Str("product") }
-		if r.Configuration { e.Str("configuration") }
+		e.Str("id")
+		e.Int(int64(i + 1))
+		e.Str("key")
+		encodeResourceKey(&e, r.Key)
+		e.Str("display")
+		e.Str(r.Display)
+		if r.Root {
+			e.Str("root")
+			e.Bool(true)
+		}
+		e.Str("roles")
+		e.BeginArray()
+		if r.Input {
+			e.Str("input")
+		}
+		if r.Artifact {
+			e.Str("artifact")
+		}
+		if r.Intermediate {
+			e.Str("intermediate")
+		}
+		if r.Product {
+			e.Str("product")
+		}
+		if r.Configuration {
+			e.Str("configuration")
+		}
 		e.EndArray()
-		e.Str("lifetime"); e.Str(inspectionLifetime(r.Key))
-		if r.Producer != 0 { e.Str("producer"); e.Int(int64(r.Producer)) }
-		if r.Potential { e.Str("unvisitedProducer"); e.Bool(true) }
-		if r.Artifact { e.Str("status"); e.Str(r.Status) }
+		e.Str("lifetime")
+		e.Str(inspectionLifetime(r.Key))
+		if r.Producer != 0 {
+			e.Str("producer")
+			e.Int(int64(r.Producer))
+		}
+		if r.Potential {
+			e.Str("unvisitedProducer")
+			e.Bool(true)
+		}
+		if r.Artifact {
+			e.Str("status")
+			e.Str(r.Status)
+		}
 		e.EndObject()
 	}
 	e.EndArray()
-	e.Str("producers"); e.BeginArray()
+	e.Str("producers")
+	e.BeginArray()
 	for i := range g.Producers {
 		entry := g.Producers[i]
 		plan := entry.Plan
 		e.BeginObject()
-		e.Str("id"); e.Int(int64(i+1))
-		e.Str("resource"); e.Int(int64(entry.Resource))
-		e.Str("target"); e.Str(plan.Target)
-		e.Str("kind"); e.Str(resourceKindName(plan.Key.Kind))
-		e.Str("outputs"); e.BeginArray()
-		for j := range entry.Outputs { e.Int(int64(entry.Outputs[j])) }
+		e.Str("id")
+		e.Int(int64(i + 1))
+		e.Str("resource")
+		e.Int(int64(entry.Resource))
+		e.Str("target")
+		e.Str(plan.Target)
+		e.Str("kind")
+		e.Str(resourceKindName(plan.Key.Kind))
+		e.Str("outputs")
+		e.BeginArray()
+		for j := range entry.Outputs {
+			e.Int(int64(entry.Outputs[j]))
+		}
 		e.EndArray()
 		// Retain established single-producer plan details, not its old untyped
 		// input/output arrays or a claim of established freshness.
@@ -77,71 +132,134 @@ func (g *inspectionGraph) write(out io.Writer, targets []string, depth int, kind
 		e.EndObject()
 	}
 	e.EndArray()
-	e.Str("dependencies"); e.BeginArray()
+	e.Str("dependencies")
+	e.BeginArray()
 	for i := range g.Dependencies {
 		d := g.Dependencies[i]
 		e.BeginObject()
-		e.Str("producer"); e.Int(int64(d.Producer))
-		e.Str("resource"); e.Int(int64(d.Resource))
-		e.Str("origin"); e.Str(d.Origin)
-		e.Str("orderOnly"); e.Bool(d.OrderOnly)
-		if d.Potential { e.Str("potential"); e.Bool(true) }
-		if d.Group != 0 { e.Str("group"); e.Int(int64(d.Group)) }
+		e.Str("producer")
+		e.Int(int64(d.Producer))
+		e.Str("resource")
+		e.Int(int64(d.Resource))
+		e.Str("origin")
+		e.Str(d.Origin)
+		e.Str("orderOnly")
+		e.Bool(d.OrderOnly)
+		if d.Potential {
+			e.Str("potential")
+			e.Bool(true)
+		}
+		if d.Group != 0 {
+			e.Str("group")
+			e.Int(int64(d.Group))
+		}
 		e.EndObject()
 	}
 	e.EndArray()
-	e.Str("stages"); e.BeginArray()
+	e.Str("stages")
+	e.BeginArray()
 	max := 0
-	for i := range g.Producers { if g.Producers[i].Stage > max { max = g.Producers[i].Stage } }
+	for i := range g.Producers {
+		if g.Producers[i].Stage > max {
+			max = g.Producers[i].Stage
+		}
+	}
 	for stage := 1; stage <= max; stage++ {
 		e.BeginObject()
-		e.Str("number"); e.Int(int64(stage))
-		e.Str("producers"); e.BeginArray()
-		for i := range g.Producers { if g.Producers[i].Stage == stage { e.Int(int64(i+1)) } }
-		e.EndArray(); e.EndObject()
+		e.Str("number")
+		e.Int(int64(stage))
+		e.Str("producers")
+		e.BeginArray()
+		for i := range g.Producers {
+			if g.Producers[i].Stage == stage {
+				e.Int(int64(i + 1))
+			}
+		}
+		e.EndArray()
+		e.EndObject()
 	}
 	e.EndArray()
-	e.Str("deferred"); e.BeginArray()
+	e.Str("deferred")
+	e.BeginArray()
 	for i := range g.Deferred {
 		d := g.Deferred[i]
 		e.BeginObject()
-		e.Str("reason"); e.Str(d.Reason)
-		if d.Producer != 0 { e.Str("producer"); e.Int(int64(d.Producer)) }
-		if d.Resource != 0 { e.Str("resource"); e.Int(int64(d.Resource)) }
+		e.Str("reason")
+		e.Str(d.Reason)
+		if d.Producer != 0 {
+			e.Str("producer")
+			e.Int(int64(d.Producer))
+		}
+		if d.Resource != 0 {
+			e.Str("resource")
+			e.Int(int64(d.Resource))
+		}
 		if d.Producer != 0 && g.Producers[d.Producer-1].Plan.Rule != nil {
 			span := g.Producers[d.Producer-1].Plan.RuleSpan
 			location := g.Program.Eval.LocateSource(g.Program.Parsed.Source.Name, source.Span{Start: span.Start, End: span.End})
-			e.Str("source"); e.Str(location.Source)
-			e.Str("span"); e.BeginObject(); e.Str("start"); e.Int(int64(location.Span.Start)); e.Str("end"); e.Int(int64(location.Span.End)); e.EndObject()
+			e.Str("source")
+			e.Str(location.Source)
+			e.Str("span")
+			e.BeginObject()
+			e.Str("start")
+			e.Int(int64(location.Span.Start))
+			e.Str("end")
+			e.Int(int64(location.Span.End))
+			e.EndObject()
 		}
 		e.EndObject()
 	}
 	e.EndArray()
 	if kind != "plan" {
-		e.Str("items"); e.BeginArray()
-		if depth != 0 { for i := range g.Resources { if (kind == "inputs" && g.Resources[i].Input) || (kind == "outputs" && g.Resources[i].Artifact) { e.Int(int64(i+1)) } } }
+		e.Str("items")
+		e.BeginArray()
+		if depth != 0 {
+			for i := range g.Resources {
+				if (kind == "inputs" && g.Resources[i].Input) || (kind == "outputs" && g.Resources[i].Artifact) {
+					e.Int(int64(i + 1))
+				}
+			}
+		}
 		e.EndArray()
 	}
-	e.EndObject(); e.Flush()
+	e.EndObject()
+	e.Flush()
 	io.WriteString(out, "\n")
 }
 
 func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
-	e.Str("freshness"); e.Str("unknown")
-	e.Str("captures"); e.BeginArray()
-	for i := range plan.Captures { e.BeginObject(); e.Str("name"); e.Str(plan.Captures[i].Name); e.Str("value"); e.Str(plan.Captures[i].Text); e.EndObject() }
+	e.Str("freshness")
+	e.Str("unknown")
+	e.Str("captures")
+	e.BeginArray()
+	for i := range plan.Captures {
+		e.BeginObject()
+		e.Str("name")
+		e.Str(plan.Captures[i].Name)
+		e.Str("value")
+		e.Str(plan.Captures[i].Text)
+		e.EndObject()
+	}
 	e.EndArray()
 	if len(plan.Arguments) != 0 {
-		e.Str("arguments"); e.BeginObject()
-		for i := range plan.Arguments { e.Str(plan.Arguments[i].Name); e.Str(plan.Arguments[i].Value) }
+		e.Str("arguments")
+		e.BeginObject()
+		for i := range plan.Arguments {
+			e.Str(plan.Arguments[i].Name)
+			e.Str(plan.Arguments[i].Value)
+		}
 		e.EndObject()
 	}
 	if len(plan.Configuration) != 0 {
-		e.Str("configuration"); e.BeginObject()
+		e.Str("configuration")
+		e.BeginObject()
 		for i := range plan.Configuration {
 			override := definition.ParseOverride(plan.Configuration[i])
 			e.Str(override.Name)
-			if !override.Typed { e.Str(override.Text); continue }
+			if !override.Typed {
+				e.Str(override.Text)
+				continue
+			}
 			literal := expr.Parse(p.Alloc, "<set>", override.Text)
 			value := p.Eval.Evaluate(p.Alloc, literal.Expr, p.Eval.Scope)
 			core.EncodeValueJSON(p.Alloc, e, value.Value)
@@ -151,67 +269,108 @@ func encodeInspectionDetails(p *Program, e *json.Encoder, plan *Plan) {
 		e.EndObject()
 	}
 	if plan.Generator != "" {
-		e.Str("generator"); e.BeginObject(); e.Str("name"); e.Str(plan.Generator)
-		e.Str("dependencies"); encodeStringArray(e, plan.GeneratorDependencies); e.EndObject()
+		e.Str("generator")
+		e.BeginObject()
+		e.Str("name")
+		e.Str(plan.Generator)
+		e.Str("dependencies")
+		encodeStringArray(e, plan.GeneratorDependencies)
+		e.EndObject()
 	}
 	if plan.Rule == nil {
 		for i := range p.Eval.Definitions {
 			item := p.Eval.Definitions[i]
-			if item.Name != plan.Target { continue }
+			if item.Name != plan.Target {
+				continue
+			}
 			location := p.Eval.LocateSource(p.Parsed.Source.Name, item.Span)
-			e.Str("source"); e.Str(location.Source)
-			e.Str("span"); e.BeginObject(); e.Str("start"); e.Int(int64(location.Span.Start)); e.Str("end"); e.Int(int64(location.Span.End)); e.EndObject()
+			e.Str("source")
+			e.Str(location.Source)
+			e.Str("span")
+			e.BeginObject()
+			e.Str("start")
+			e.Int(int64(location.Span.Start))
+			e.Str("end")
+			e.Int(int64(location.Span.End))
+			e.EndObject()
 			text := definition.FormatCompact(p.Alloc, item)
-			e.Str("text"); e.Str(text)
+			e.Str("text")
+			e.Str(text)
 			mem.FreeString(p.Alloc, text)
 			break
 		}
 		return
 	}
 	location := p.Eval.LocateSource(p.Parsed.Source.Name, source.Span{Start: plan.RuleSpan.Start, End: plan.RuleSpan.End})
-	e.Str("source"); e.Str(location.Source)
-	e.Str("rule"); e.BeginObject()
-	e.Str("start"); e.Int(int64(location.Span.Start))
-	e.Str("end"); e.Int(int64(location.Span.End))
+	e.Str("source")
+	e.Str(location.Source)
+	e.Str("rule")
+	e.BeginObject()
+	e.Str("start")
+	e.Int(int64(location.Span.Start))
+	e.Str("end")
+	e.Int(int64(location.Span.End))
 	start, end := plan.Rule.Header.Start, plan.Rule.Header.End
 	if start >= 0 && end >= start && end <= len(p.Parsed.Source.Text) {
-		e.Str("text"); e.Str(p.Parsed.Source.Text[start:end])
+		e.Str("text")
+		e.Str(p.Parsed.Source.Text[start:end])
 	}
 	e.EndObject()
 	if plan.Rule.Metadata != nil {
 		metadata := expr.Compact(p.Alloc, plan.Rule.Metadata)
-		e.Str("metadata"); e.Str(metadata)
+		e.Str("metadata")
+		e.Str(metadata)
 		mem.FreeString(p.Alloc, metadata)
 	}
 	if len(plan.Rule.Environment) != 0 {
-		e.Str("environment"); e.BeginArray()
-		for i := range plan.Rule.Environment { e.Str(plan.Rule.Environment[i].Value) }
+		e.Str("environment")
+		e.BeginArray()
+		for i := range plan.Rule.Environment {
+			e.Str(plan.Rule.Environment[i].Value)
+		}
 		e.EndArray()
 	}
-	if plan.Rule.Always { e.Str("always"); e.Bool(true) }
+	if plan.Rule.Always {
+		e.Str("always")
+		e.Bool(true)
+	}
 	e.Str("reusePolicy")
 	switch plan.Key.Kind {
 	case core.ResourceFile:
-		if plan.Rule.Always { e.Str("always") } else { e.Str("content-signatures") }
-	case core.ResourceTask: e.Str("fingerprint")
-	case core.ResourceService: e.Str("while-required")
-	default: e.Str("always")
+		if plan.Rule.Always {
+			e.Str("always")
+		} else {
+			e.Str("content-signatures")
+		}
+	case core.ResourceTask:
+		e.Str("fingerprint")
+	case core.ResourceService:
+		e.Str("while-required")
+	default:
+		e.Str("always")
 	}
 	// Retain established tool mappings without rendering recipe expressions.
-	e.Str("tools"); e.BeginObject()
+	e.Str("tools")
+	e.BeginObject()
 	var names []string
 	for i := range plan.Tools {
 		appendUniqueString(p.Alloc, &names, plan.Tools[i].Name)
-		e.Str(plan.Tools[i].Name); e.Str(plan.Tools[i].Path)
+		e.Str(plan.Tools[i].Name)
+		e.Str(plan.Tools[i].Path)
 	}
 	for i := range plan.Rule.Body {
 		t := plan.Rule.Body[i].Template
-		if t == nil { continue }
+		if t == nil {
+			continue
+		}
 		for j := range t.Parts {
 			part := t.Parts[j]
-			if part.Kind != template.Tool || slices.Contains(names, part.Text) { continue }
+			if part.Kind != template.Tool || slices.Contains(names, part.Text) {
+				continue
+			}
 			appendUniqueString(p.Alloc, &names, part.Text)
-			e.Str(part.Text); e.Str(p.ResolveTool(part.Text))
+			e.Str(part.Text)
+			e.Str(p.ResolveTool(part.Text))
 		}
 	}
 	freeStrings(p.Alloc, names)

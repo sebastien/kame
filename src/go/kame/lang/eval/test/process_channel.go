@@ -20,13 +20,27 @@ func TestNamedChannelsResolveBeforeAnyEvaluation(t *testing.T) {
 	codes := []string{"", "KASH_CHANNEL_DUP_WRITER", "KASH_CHANNEL_DUP_READER", "KASH_CHANNEL_UNBOUND", "KASH_CHANNEL_UNBOUND", "KASH_GRAPH_CYCLE"}
 	for i := range texts {
 		s := script.ParseKash(t.Allocator(), "channels.kash", texts[i])
-		if len(s.Diagnostics) != 0 { t.Errorf("channel fixture did not parse: %s", texts[i]); s.Free(); continue }
+		if len(s.Diagnostics) != 0 {
+			t.Errorf("channel fixture did not parse: %s", texts[i])
+			s.Free()
+			continue
+		}
 		var graph *expr.Expr
-		for j := range s.Items { e := s.Items[j].Expression; if e != nil && e.Kind == expr.CommandGraph { graph = e; break } }
+		for j := range s.Items {
+			e := s.Items[j].Expression
+			if e != nil && e.Kind == expr.CommandGraph {
+				graph = e
+				break
+			}
+		}
 		flat := mem.Alloc[expr.Expr](t.Allocator())
 		r := eval.InspectProcessTopology(t.Allocator(), graph, flat)
-		if r.Diagnostic.Code != codes[i] { t.Errorf("got %s want %s", r.Diagnostic.Code, codes[i]) }
-		if i == 0 && (len(flat.Items) != 2 || len(flat.Edges) != 1) { t.Error("named aliases created runtime workers instead of a direct pipe") }
+		if r.Diagnostic.Code != codes[i] {
+			t.Errorf("got %s want %s", r.Diagnostic.Code, codes[i])
+		}
+		if i == 0 && (len(flat.Items) != 2 || len(flat.Edges) != 1) {
+			t.Error("named aliases created runtime workers instead of a direct pipe")
+		}
 		r.Free(t.Allocator())
 		expr.Free(t.Allocator(), flat)
 		s.Free()

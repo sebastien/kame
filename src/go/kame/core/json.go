@@ -4,7 +4,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
-    "solod.dev/so/unicode/utf8"
+	"solod.dev/so/unicode/utf8"
 )
 
 // ParseJSON parses one canonical JSON document into an owned
@@ -12,7 +12,9 @@ import (
 // records and lists as canonical JSON and the engine owns the parsed value.
 // It reports false on any syntax or shape error, leaving out untouched.
 func ParseJSON(a mem.Allocator, data []byte, out *Value) bool {
-	if !utf8.Valid(data) { return false }
+	if !utf8.Valid(data) {
+		return false
+	}
 	p := jsonParser{alloc: a, data: data}
 	var value Value
 	ok := p.value(&value)
@@ -44,11 +46,13 @@ func (p *jsonParser) whitespace() {
 }
 
 func (p *jsonParser) value(out *Value) bool {
-    if p.depth >= 256 { return false }
-    p.depth++
-    valid := p.innerValue(out)
-    p.depth--
-    return valid
+	if p.depth >= 256 {
+		return false
+	}
+	p.depth++
+	valid := p.innerValue(out)
+	p.depth--
+	return valid
 }
 
 func (p *jsonParser) innerValue(out *Value) bool {
@@ -110,8 +114,12 @@ func (p *jsonParser) number(out *Value) bool {
 		digits++
 	}
 	numberStart := start
-	if p.data[start] == '-' { numberStart++ }
-	if digits > 1 && p.data[numberStart] == '0' { return false }
+	if p.data[start] == '-' {
+		numberStart++
+	}
+	if digits > 1 && p.data[numberStart] == '0' {
+		return false
+	}
 	if digits == 0 {
 		return false
 	}
@@ -223,14 +231,22 @@ func (p *jsonParser) escape(out *[]byte) bool {
 		*out = slices.Append(p.alloc, *out, '\t')
 	case 'u':
 		r, ok := p.hex4()
-		if !ok { return false }
-        if r >= 0xD800 && r <= 0xDBFF {
-            if p.pos+2 > len(p.data) || p.data[p.pos] != '\\' || p.data[p.pos+1] != 'u' { return false }
-            p.pos += 2
-            low, valid := p.hex4()
-            if !valid || low < 0xDC00 || low > 0xDFFF { return false }
-            r = 0x10000 + (r-0xD800)*0x400 + low-0xDC00
-        } else if r >= 0xDC00 && r <= 0xDFFF { return false }
+		if !ok {
+			return false
+		}
+		if r >= 0xD800 && r <= 0xDBFF {
+			if p.pos+2 > len(p.data) || p.data[p.pos] != '\\' || p.data[p.pos+1] != 'u' {
+				return false
+			}
+			p.pos += 2
+			low, valid := p.hex4()
+			if !valid || low < 0xDC00 || low > 0xDFFF {
+				return false
+			}
+			r = 0x10000 + (r-0xD800)*0x400 + low - 0xDC00
+		} else if r >= 0xDC00 && r <= 0xDFFF {
+			return false
+		}
 		*out = appendRune(p.alloc, *out, r)
 	default:
 		return false

@@ -98,7 +98,10 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 	if e == nil {
 		return
 	}
-	if e.AuthoredPipe != nil { writeLayout(a, b, e.AuthoredPipe, column, indent, tail); return }
+	if e.AuthoredPipe != nil {
+		writeLayout(a, b, e.AuthoredPipe, column, indent, tail)
+		return
+	}
 	if inlineFits(a, e, column, tail) {
 		writeExpr(b, e)
 		return
@@ -111,20 +114,24 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 			b.WriteString("| ")
 			stage := e.Items[i]
 			stageTail := 0
-			if i+1 == len(e.Items) { stageTail = tail+1 }
+			if i+1 == len(e.Items) {
+				stageTail = tail + 1
+			}
 			// The stage has no surrounding application parentheses here.
 			if inlineFits(a, stage, indent+2, stageTail) {
 				writeEmbedded(b, stage)
 				continue
 			}
 			for j := range stage.Items {
-				childColumn := indent+4
+				childColumn := indent + 4
 				if j != 0 {
 					layoutLine(b, indent+6)
-					childColumn = indent+6
+					childColumn = indent + 6
 				}
 				childTail := 0
-				if i+1 == len(e.Items) && j+1 == len(stage.Items) { childTail = tail+1 }
+				if i+1 == len(e.Items) && j+1 == len(stage.Items) {
+					childTail = tail + 1
+				}
 				writeLayout(a, b, stage.Items[j], childColumn, childColumn, childTail)
 			}
 		}

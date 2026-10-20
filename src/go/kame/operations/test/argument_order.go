@@ -74,8 +74,13 @@ func TestSubjectLastOperationsAndPipes(t *testing.T) {
 	}
 	for i := range invalid {
 		r := evaluate(t, p, invalid[i])
-		if r.Diagnostic.Code != "EXPR_INVALID" { t.Error("former argument order accepted: " + invalid[i]) }
+		if r.Diagnostic.Code != "EXPR_INVALID" {
+			t.Error("former argument order accepted: " + invalid[i])
+		}
 		r.Free(a)
 	}
-	engine.Free(); p.Free(); parsed.Free(); registry.Free()
+	engine.Free()
+	p.Free()
+	parsed.Free()
+	registry.Free()
 }

@@ -29,7 +29,9 @@ func (p *Program) emit(event Event) {
 
 // ObserveDefinition reports selected value roots; rule roots report themselves.
 func (p *Program) ObserveDefinition(h *Handle) {
-	if h == nil || !h.Definition || !h.Node.Current || h.valueRevision == h.Node.Revision { return }
+	if h == nil || !h.Definition || !h.Node.Current || h.valueRevision == h.Node.Revision {
+		return
+	}
 	n := h.Node
 	p.emit(Event{Kind: TargetValue, Target: h.Target, Key: n.Key, NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, Value: n.Latest.Clone(p.Alloc)})
 	p.emitNode(n, h.Target, TargetCompleted, diagnostic.Span{}, nil)

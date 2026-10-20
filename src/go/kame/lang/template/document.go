@@ -341,8 +341,14 @@ func (p *docParser) nextInlineBlockDirective(start int, end int) int {
 	for i := start; i < end; i++ {
 		innerStart, innerEnd := -1, -1
 		if p.style == "plain" {
-			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') { i++; continue }
-			if text[i] == '@' && i+1 < end && text[i+1] == '@' { i++; continue }
+			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') {
+				i++
+				continue
+			}
+			if text[i] == '@' && i+1 < end && text[i+1] == '@' {
+				i++
+				continue
+			}
 			if text[i] == '@' && i+1 < end && (text[i+1] == '(' || text[i+1] == '{') {
 				// Expression contents belong to the value parser, including strings
 				// containing directive-looking text.
@@ -1187,20 +1193,36 @@ func rawEndAt(text string, start int, end int) int {
 		return 0
 	}
 	pos := start + 1
-	if pos < end && text[pos] == '-' { pos++ }
-	if !hasPrefixAt(text, pos, end, "end") { return 0 }
+	if pos < end && text[pos] == '-' {
+		pos++
+	}
+	if !hasPrefixAt(text, pos, end, "end") {
+		return 0
+	}
 	pos += len("end")
 	labeled := pos < end && text[pos] == '('
 	if labeled {
 		pos++
-		for pos < end && templateSpace(text[pos]) { pos++ }
-		if !hasPrefixAt(text, pos, end, "raw") { return 0 }
+		for pos < end && templateSpace(text[pos]) {
+			pos++
+		}
+		if !hasPrefixAt(text, pos, end, "raw") {
+			return 0
+		}
 		pos += len("raw")
-		for pos < end && templateSpace(text[pos]) { pos++ }
-		if pos >= end || text[pos] != ')' { return 0 }
+		for pos < end && templateSpace(text[pos]) {
+			pos++
+		}
+		if pos >= end || text[pos] != ')' {
+			return 0
+		}
 		pos++
 	}
-	if pos < end && text[pos] == '-' { pos++ } else if !labeled && pos < end && isDirectiveWordContinuation(text[pos]) { return 0 }
+	if pos < end && text[pos] == '-' {
+		pos++
+	} else if !labeled && pos < end && isDirectiveWordContinuation(text[pos]) {
+		return 0
+	}
 	return pos
 }
 
@@ -1209,20 +1231,40 @@ func (p *docParser) nextRawEnd(start int, end int) bool {
 	for i := start; i < end; i++ {
 		innerStart, innerEnd, spanEnd := i, end, 0
 		if p.style == "plain" {
-			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') { i++; continue }
-			if text[i] == '@' && i+1 < end && text[i+1] == '@' { i++; continue }
+			if text[i] == '\\' && i+1 < end && (text[i+1] == '@' || text[i+1] == '\\') {
+				i++
+				continue
+			}
+			if text[i] == '@' && i+1 < end && text[i+1] == '@' {
+				i++
+				continue
+			}
 		} else if p.style == "html" || p.style == "c" || p.style == "powershell" {
 			open, close := "<!--", "-->"
-			if p.style == "c" { open, close = "/*", "*/" } else if p.style == "powershell" { open, close = "<#", "#>" }
-			if !hasPrefixAt(text, i, end, open) { continue }
+			if p.style == "c" {
+				open, close = "/*", "*/"
+			} else if p.style == "powershell" {
+				open, close = "<#", "#>"
+			}
+			if !hasPrefixAt(text, i, end, open) {
+				continue
+			}
 			closeStart := findFirst(text, i+len(open), end, close)
-			if closeStart < 0 { continue }
+			if closeStart < 0 {
+				continue
+			}
 			inner := trimRange(text, i+len(open), closeStart)
 			innerStart, innerEnd, spanEnd = inner.Start, inner.End, closeStart+len(close)
-		} else { return false }
+		} else {
+			return false
+		}
 		tokenEnd := rawEndAt(text, innerStart, innerEnd)
-		if tokenEnd == 0 || (spanEnd != 0 && tokenEnd != innerEnd) { continue }
-		if spanEnd == 0 { spanEnd = tokenEnd }
+		if tokenEnd == 0 || (spanEnd != 0 && tokenEnd != innerEnd) {
+			continue
+		}
+		if spanEnd == 0 {
+			spanEnd = tokenEnd
+		}
 		span := source.Span{Start: i, End: spanEnd}
 		p.inlineFound = inlineBlockDirective{Start: i, End: spanEnd, Dir: dirOut{Kind: dirEnd, Span: span, TrimLeft: text[innerStart+1] == '-', TrimRight: text[tokenEnd-1] == '-'}}
 		return true
@@ -1774,57 +1816,63 @@ func (p *docParser) parseArgs(pos int, innerEnd int) argsRes {
 
 // Parse diagnostics borrow strings; these complete messages must stay static.
 var forParameterShapes = [18]string{
-		"@for parameters must be a list of names; got invalid",
-		"@for parameters must be a list of names; got bool",
-		"@for parameters must be a list of names; got nil",
-		"@for parameters must be a list of names; got int",
-		"@for parameters must be a list of names; got float",
-		"@for parameters must be a list of names; got string",
-		"@for parameters must be a list of names; got symbol",
-		"@for parameters must be a list of names; got name",
-		"@for parameters must be a list of names; got path",
-		"@for parameters must be a list of names; got selector",
-		"@for parameters must be a list of names; got reference",
-		"@for parameters must be a list of names; got list",
-		"@for parameters must be a list of names; got record",
-		"@for parameters must be a list of names; got application",
-		"@for parameters must be a list of names; got lambda",
-		"@for parameters must be a list of names; got placeholder",
-		"@for parameters must be a list of names; got section",
-		"@for parameters must be a list of names; got command capture",
+	"@for parameters must be a list of names; got invalid",
+	"@for parameters must be a list of names; got bool",
+	"@for parameters must be a list of names; got nil",
+	"@for parameters must be a list of names; got int",
+	"@for parameters must be a list of names; got float",
+	"@for parameters must be a list of names; got string",
+	"@for parameters must be a list of names; got symbol",
+	"@for parameters must be a list of names; got name",
+	"@for parameters must be a list of names; got path",
+	"@for parameters must be a list of names; got selector",
+	"@for parameters must be a list of names; got reference",
+	"@for parameters must be a list of names; got list",
+	"@for parameters must be a list of names; got record",
+	"@for parameters must be a list of names; got application",
+	"@for parameters must be a list of names; got lambda",
+	"@for parameters must be a list of names; got placeholder",
+	"@for parameters must be a list of names; got section",
+	"@for parameters must be a list of names; got command capture",
 }
 
 var forParameterMembers = [18]string{
-		"@for parameter list must contain only names; got invalid",
-		"@for parameter list must contain only names; got bool",
-		"@for parameter list must contain only names; got nil",
-		"@for parameter list must contain only names; got int",
-		"@for parameter list must contain only names; got float",
-		"@for parameter list must contain only names; got string",
-		"@for parameter list must contain only names; got symbol",
-		"@for parameter list must contain only names; got name",
-		"@for parameter list must contain only names; got path",
-		"@for parameter list must contain only names; got selector",
-		"@for parameter list must contain only names; got reference",
-		"@for parameter list must contain only names; got list",
-		"@for parameter list must contain only names; got record",
-		"@for parameter list must contain only names; got application",
-		"@for parameter list must contain only names; got lambda",
-		"@for parameter list must contain only names; got placeholder",
-		"@for parameter list must contain only names; got section",
-		"@for parameter list must contain only names; got command capture",
+	"@for parameter list must contain only names; got invalid",
+	"@for parameter list must contain only names; got bool",
+	"@for parameter list must contain only names; got nil",
+	"@for parameter list must contain only names; got int",
+	"@for parameter list must contain only names; got float",
+	"@for parameter list must contain only names; got string",
+	"@for parameter list must contain only names; got symbol",
+	"@for parameter list must contain only names; got name",
+	"@for parameter list must contain only names; got path",
+	"@for parameter list must contain only names; got selector",
+	"@for parameter list must contain only names; got reference",
+	"@for parameter list must contain only names; got list",
+	"@for parameter list must contain only names; got record",
+	"@for parameter list must contain only names; got application",
+	"@for parameter list must contain only names; got lambda",
+	"@for parameter list must contain only names; got placeholder",
+	"@for parameter list must contain only names; got section",
+	"@for parameter list must contain only names; got command capture",
 }
 
 func forParameterMessage(kind expr.Kind, member bool) string {
 	if kind == expr.EnvironmentReference {
-		if member { return "@for parameter list must contain only names; got environment reference" }
+		if member {
+			return "@for parameter list must contain only names; got environment reference"
+		}
 		return "@for parameters must be a list of names; got environment reference"
 	}
 	if int(kind) < 0 || int(kind) >= len(forParameterShapes) {
-		if member { return "@for parameter list must contain only names; got expression" }
+		if member {
+			return "@for parameter list must contain only names; got expression"
+		}
 		return "@for parameters must be a list of names; got expression"
 	}
-	if member { return forParameterMembers[int(kind)] }
+	if member {
+		return forParameterMembers[int(kind)]
+	}
 	return forParameterShapes[int(kind)]
 }
 
@@ -1894,17 +1942,24 @@ func (p *docParser) inlineParts(lineStart int, contentEnd int, lineEnd int) []*e
 				expr.Free(p.a, prefix.Expr)
 				slices.Free(p.a, prefix.Diagnostics)
 				message := "unclosed template expression; expected ')'"
-				if text[i+1] == '{' { message = "unclosed reference expansion; expected '}'" }
-				p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Warning, Span: source.Span{Start: i, End: i+2}, Message: message})
+				if text[i+1] == '{' {
+					message = "unclosed reference expansion; expected '}'"
+				}
+				p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Warning, Span: source.Span{Start: i, End: i + 2}, Message: message})
 				items = slices.Append(p.a, items, newStringLit(p.a, "@", source.Span{Start: i, End: i + 1}))
 				i++
 				litStart = i
 				continue
 			}
-			for j := range prefix.Diagnostics { p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[j]) }
+			for j := range prefix.Diagnostics {
+				p.diags = slices.Append(p.a, p.diags, prefix.Diagnostics[j])
+			}
 			slices.Free(p.a, prefix.Diagnostics)
-			if prefix.Expr == nil { items = slices.Append(p.a, items, newStringLit(p.a, text[i:prefix.End+1], source.Span{Start: i, End: prefix.End+1}))
-			} else { items = slices.Append(p.a, items, prefix.Expr) }
+			if prefix.Expr == nil {
+				items = slices.Append(p.a, items, newStringLit(p.a, text[i:prefix.End+1], source.Span{Start: i, End: prefix.End + 1}))
+			} else {
+				items = slices.Append(p.a, items, prefix.Expr)
+			}
 			i = prefix.End + 1
 			litStart = i
 			continue
@@ -1993,7 +2048,7 @@ func (p *docParser) inlineExpr(start int, contentEnd int) inlineOut {
 	view.Text = p.s.Text[:contentEnd]
 	prefix := expr.ParseExpansionPrefix(p.a, view, start)
 	mem.Free(p.a, view)
-	return inlineOut{Expr: prefix.Expr, End: prefix.End-1, Closed: prefix.Closed, Diagnostics: prefix.Diagnostics}
+	return inlineOut{Expr: prefix.Expr, End: prefix.End - 1, Closed: prefix.Closed, Diagnostics: prefix.Diagnostics}
 }
 
 func newStringLit(a mem.Allocator, text string, span source.Span) *expr.Expr {

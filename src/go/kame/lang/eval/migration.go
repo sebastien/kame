@@ -7,7 +7,9 @@ import "kame/lang/source"
 // treated as standard-library aliases or renamed by their effect category.
 func missingOperation(c *Context, name string, span source.Span, reference bool) Result {
 	code := "OP_UNKNOWN"
-	if reference { code = "REF_MISSING" }
+	if reference {
+		code = "REF_MISSING"
+	}
 	if name == "cat" {
 		return failure(c.Run, code, span, "Kame cat was removed; use str for scalar text, join for collections, or json for serialization")
 	}
@@ -21,6 +23,8 @@ func missingOperation(c *Context, name string, span source.Span, reference bool)
 	case "write", "yield", "out", "err", "run", "pipe", "sh", "shell-template", "fail":
 		return failure(c.Run, code, span, "operation `"+name+"` was renamed to `"+name+"!`; action names require an explicit ! suffix")
 	}
-	if reference { return failure(c.Run, code, span, "unknown reference: "+name) }
+	if reference {
+		return failure(c.Run, code, span, "unknown reference: "+name)
+	}
 	return failure(c.Run, code, span, "unknown operation: "+name)
 }

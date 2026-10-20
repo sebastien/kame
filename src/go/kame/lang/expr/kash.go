@@ -33,11 +33,23 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	if start < len(s.Text) && s.Text[start] != '(' && s.Text[start] != '[' && s.Text[start] != '"' && s.Text[start] != '$' && s.Text[start] != '@' {
 		depth := 0
 		for i := start; i < len(s.Text); i++ {
-			if s.Text[i] == '\\' { i++; continue }
-			if s.Text[i] == '{' { depth++ }
-			if s.Text[i] == '}' && depth > 0 { depth-- }
-			if depth == 0 && s.Text[i] == ';' { bounded.Text = s.Text[:i]; break }
-			if depth == 0 && (s.Text[i] == ' ' || s.Text[i] == '\t' || s.Text[i] == '\n' || s.Text[i] == '\r') { break }
+			if s.Text[i] == '\\' {
+				i++
+				continue
+			}
+			if s.Text[i] == '{' {
+				depth++
+			}
+			if s.Text[i] == '}' && depth > 0 {
+				depth--
+			}
+			if depth == 0 && s.Text[i] == ';' {
+				bounded.Text = s.Text[:i]
+				break
+			}
+			if depth == 0 && (s.Text[i] == ' ' || s.Text[i] == '\t' || s.Text[i] == '\n' || s.Text[i] == '\r') {
+				break
+			}
 		}
 	}
 	p := parser{a: a, s: bounded, pos: start, kash: true}
@@ -50,19 +62,31 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 		if word.Bool {
 			e = word.Parts[0].Expr
 			word.Parts[0].Expr = nil
-		} else { p.error(start, p.pos, "definition value must be one Kame expression or standalone substitution") }
+		} else {
+			p.error(start, p.pos, "definition value must be one Kame expression or standalone substitution")
+		}
 		freeExpr(a, word)
-	} else { e = p.expression() }
+	} else {
+		e = p.expression()
+	}
 	p.s = s
 	mem.Free(a, bounded)
 	end := p.pos
-	for end < len(s.Text) && (s.Text[end] == ' ' || s.Text[end] == '\t' || s.Text[end] == '\r') { end++ }
+	for end < len(s.Text) && (s.Text[end] == ' ' || s.Text[end] == '\t' || s.Text[end] == '\r') {
+		end++
+	}
 	if len(p.diags) == 0 && end > p.pos && end+2 < len(s.Text) && s.Text[end:end+2] == "??" && commandWhitespace(s.Text[end+2]) {
-		rightStart := end+2
-		for rightStart < len(s.Text) && (s.Text[rightStart] == ' ' || s.Text[rightStart] == '\t' || s.Text[rightStart] == '\r') { rightStart++ }
-		if rightStart == len(s.Text) || s.Text[rightStart] == '\n' || s.Text[rightStart] == ';' || s.Text[rightStart] == '#' { p.error(end, rightStart, "expected value after ??") } else {
+		rightStart := end + 2
+		for rightStart < len(s.Text) && (s.Text[rightStart] == ' ' || s.Text[rightStart] == '\t' || s.Text[rightStart] == '\r') {
+			rightStart++
+		}
+		if rightStart == len(s.Text) || s.Text[rightStart] == '\n' || s.Text[rightStart] == ';' || s.Text[rightStart] == '#' {
+			p.error(end, rightStart, "expected value after ??")
+		} else {
 			right := ParseKashValuePrefix(a, s, rightStart)
-			for i := range right.Diagnostics { p.diags = slices.Append(a, p.diags, right.Diagnostics[i]) }
+			for i := range right.Diagnostics {
+				p.diags = slices.Append(a, p.diags, right.Diagnostics[i])
+			}
 			slices.Free(a, right.Diagnostics)
 			recovery := mem.Alloc[Expr](a)
 			recovery.Kind, recovery.Span = ValueRecovery, source.Span{Start: start, End: right.End}
@@ -84,18 +108,29 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 	p.commandGroup = grouped
 	p.kash = true
 	kind := CommandGraph
-	if capture { kind = CommandCapture }
+	if capture {
+		kind = CommandCapture
+	}
 	e := p.node(kind, start)
 	stage := p.node(CommandStage, p.pos)
-	if branch || grouped { p.commandSpace(true); if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '|' { stage.Kind = CommandInput } }
+	if branch || grouped {
+		p.commandSpace(true)
+		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '|' {
+			stage.Kind = CommandInput
+		}
+	}
 	e.Items = slices.Append(p.a, e.Items, stage)
 	input, output := false, false
 	for {
 		p.commandSpace(capture || grouped || branch)
 		if !capture && !grouped && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '\n' {
-			next := p.pos+1
-			for next < len(p.s.Text) && commandWhitespace(p.s.Text[next]) { next++ }
-			if next < len(p.s.Text) && p.s.Text[next] == '|' { p.pos = next }
+			next := p.pos + 1
+			for next < len(p.s.Text) && commandWhitespace(p.s.Text[next]) {
+				next++
+			}
+			if next < len(p.s.Text) && p.s.Text[next] == '|' {
+				p.pos = next
+			}
 		}
 		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos] == '\\' && p.s.Text[p.pos+1] == '\n' {
 			p.pos += 2
@@ -106,10 +141,14 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			continue
 		}
 		if p.pos == len(p.s.Text) {
-			if capture { p.error(start, p.pos, "unclosed Kash command substitution") }
+			if capture {
+				p.error(start, p.pos, "unclosed Kash command substitution")
+			}
 			break
 		}
-		if ((grouped || branch) && p.s.Text[p.pos] == ')') || (grouped && p.s.Text[p.pos] == ',') { break }
+		if ((grouped || branch) && p.s.Text[p.pos] == ')') || (grouped && p.s.Text[p.pos] == ',') {
+			break
+		}
 		if stage.Kind == CommandMux && (stage.Text == "merge" || stage.Text == "broadcast" || stage.Text == "balance" || stage.Text == "each") && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
 			stage = p.node(CommandStage, p.pos)
 			input = false
@@ -122,26 +161,50 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			e.Items[len(e.Items)-1] = stage
 			continue
 		}
-		if !capture && (p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#') { break }
-		if capture && p.s.Text[p.pos] == ';' { p.error(p.pos, p.pos+1, "command substitution contains exactly one process expression"); break }
+		if !capture && (p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#') {
+			break
+		}
+		if capture && p.s.Text[p.pos] == ';' {
+			p.error(p.pos, p.pos+1, "command substitution contains exactly one process expression")
+			break
+		}
 		if p.s.Text[p.pos] == '?' {
 			from := p.pos
 			p.pos++
-			if !hasExecutable(stage) { p.error(from, p.pos, "acceptance requires a complete process graph"); break }
-			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '?' { p.error(from, p.pos+1, "?? is not a raw-command operator"); break }
+			if !hasExecutable(stage) {
+				p.error(from, p.pos, "acceptance requires a complete process graph")
+				break
+			}
+			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '?' {
+				p.error(from, p.pos+1, "?? is not a raw-command operator")
+				break
+			}
 			stage.Span.End = from
 			separated := from > start && commandWhitespace(p.s.Text[from-1]) && p.pos < len(p.s.Text) && commandWhitespace(p.s.Text[p.pos])
 			p.commandSpace(capture)
-			if !capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '&' { e.AcceptExit = true; continue }
+			if !capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '&' {
+				e.AcceptExit = true
+				continue
+			}
 			if p.pos < len(p.s.Text) && !(((capture || grouped) && p.s.Text[p.pos] == ')') || (grouped && p.s.Text[p.pos] == ',') || (!capture && (p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#'))) {
-				if !separated { p.error(from, p.pos, "command recovery requires whitespace around ?"); break }
+				if !separated {
+					p.error(from, p.pos, "command recovery requires whitespace around ?")
+					break
+				}
 				e.Body = slices.Append(p.a, e.Body, p.commandGraph(p.pos, capture))
 				break
 			}
 			e.AcceptExit = true
-			if grouped { break }
-			if capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' { p.pos++; break }
-			if capture { p.error(start, p.pos, "unclosed Kash command substitution") }
+			if grouped {
+				break
+			}
+			if capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' {
+				p.pos++
+				break
+			}
+			if capture {
+				p.error(start, p.pos, "unclosed Kash command substitution")
+			}
 			break
 		}
 		if p.s.Text[p.pos] == '&' {
@@ -153,14 +216,23 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			}
 			from := p.pos
 			p.pos++
-			if capture || !hasExecutable(stage) { p.error(from, p.pos, "async syntax requires a complete command statement"); break }
+			if capture || !hasExecutable(stage) {
+				p.error(from, p.pos, "async syntax requires a complete command statement")
+				break
+			}
 			p.commandSpace(false)
-			if p.pos < len(p.s.Text) && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' { p.error(from, p.pos, "& must terminate the process expression"); break }
+			if p.pos < len(p.s.Text) && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
+				p.error(from, p.pos, "& must terminate the process expression")
+				break
+			}
 			e.Async = true
 			break
 		}
 		if p.s.Text[p.pos] == ')' {
-			if !capture { p.error(p.pos, p.pos+1, "unexpected Kash closing parenthesis"); break }
+			if !capture {
+				p.error(p.pos, p.pos+1, "unexpected Kash closing parenthesis")
+				break
+			}
 			stage.Span.End = p.pos
 			p.pos++
 			break
@@ -170,7 +242,10 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				p.error(p.pos, p.pos+1, "expected Kash executable before pipe")
 				break
 			}
-			if output { p.error(p.pos, p.pos+1, "stdout redirection conflicts with pipeline output"); break }
+			if output {
+				p.error(p.pos, p.pos+1, "stdout redirection conflicts with pipeline output")
+				break
+			}
 			stage.Span.End = p.pos
 			p.pos++
 			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '|' {
@@ -182,24 +257,38 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				p.pos++
 				p.commandSpace(true)
 				from := p.pos
-				for p.pos < len(p.s.Text) && setupKeyByte(p.s.Text[p.pos], p.pos == from) { p.pos++ }
+				for p.pos < len(p.s.Text) && setupKeyByte(p.s.Text[p.pos], p.pos == from) {
+					p.pos++
+				}
 				mux.Text = p.s.Text[from:p.pos]
 				p.commandSpace(true)
 				if mux.Text == "frame" || mux.Text == "encode" {
 					argument := p.expression()
-					if argument != nil { mux.Items = slices.Append(p.a, mux.Items, argument) }
-					if argument == nil || argument.Kind != Symbol || argument.Text != "lines" { p.error(mux.Span.Start, p.pos, "line adapters require :lines") }
+					if argument != nil {
+						mux.Items = slices.Append(p.a, mux.Items, argument)
+					}
+					if argument == nil || argument.Kind != Symbol || argument.Text != "lines" {
+						p.error(mux.Span.Start, p.pos, "line adapters require :lines")
+					}
 					p.commandSpace(true)
 				} else if mux.Text == "filter" {
 					predicate := p.expression()
-					if predicate != nil { mux.Items = slices.Append(p.a, mux.Items, predicate) }
+					if predicate != nil {
+						mux.Items = slices.Append(p.a, mux.Items, predicate)
+					}
 					p.commandSpace(true)
-					if p.pos == len(p.s.Text) || p.s.Text[p.pos] != '|' { p.error(mux.Span.Start, p.pos, "filter requires a predicate and selected branch") } else {
-						if p.pos+1 == len(p.s.Text) || p.s.Text[p.pos+1] != '(' { p.pos++ }
+					if p.pos == len(p.s.Text) || p.s.Text[p.pos] != '|' {
+						p.error(mux.Span.Start, p.pos, "filter requires a predicate and selected branch")
+					} else {
+						if p.pos+1 == len(p.s.Text) || p.s.Text[p.pos+1] != '(' {
+							p.pos++
+						}
 						p.commandSpace(true)
 						mux.Body = slices.Append(p.a, mux.Body, p.commandPipeline(p.pos, false, false, true))
 					}
-				} else if mux.Text == "merge" || mux.Text == "broadcast" || mux.Text == "balance" { p.streamPolicy(mux) }
+				} else if mux.Text == "merge" || mux.Text == "broadcast" || mux.Text == "balance" {
+					p.streamPolicy(mux)
+				}
 				if (mux.Text != "merge" && mux.Text != "broadcast" && mux.Text != "balance" && mux.Text != "frame" && mux.Text != "encode" && mux.Text != "filter" && mux.Text != "each") || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || len(p.diags) != 0 {
 					p.error(mux.Span.Start, p.pos, "invalid Kash stream operator")
 					freeExpr(p.a, mux)
@@ -221,79 +310,157 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 		if p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos:p.pos+2] == ">&" || p.s.Text[p.pos:p.pos+2] == ">@") {
 			from := p.pos
 			if p.s.Text[p.pos+1] == '&' && p.pos+2 < len(p.s.Text) && channelNameByte(p.s.Text[p.pos+2], true) {
-				if output || e.Exit != "" || stage.Kind == CommandWriter { p.error(from, from+2, "duplicate channel output disposition"); break }
-				if !hasExecutable(stage) && len(stage.Items) != 0 { p.error(from, from+2, "channel endpoints cannot carry stage setup or redirections"); break }
+				if output || e.Exit != "" || stage.Kind == CommandWriter {
+					p.error(from, from+2, "duplicate channel output disposition")
+					break
+				}
+				if !hasExecutable(stage) && len(stage.Items) != 0 {
+					p.error(from, from+2, "channel endpoints cannot carry stage setup or redirections")
+					break
+				}
 				endpoint := p.channelEndpoint(CommandWriter, 2)
-				if !hasExecutable(stage) { freeExpr(p.a, stage); e.Items[len(e.Items)-1] = endpoint } else { stage.Span.End = from; e.Items = slices.Append(p.a, e.Items, endpoint) }
+				if !hasExecutable(stage) {
+					freeExpr(p.a, stage)
+					e.Items[len(e.Items)-1] = endpoint
+				} else {
+					stage.Span.End = from
+					e.Items = slices.Append(p.a, e.Items, endpoint)
+				}
 				stage, output = endpoint, true
 				continue
 			}
-			if !branch || !hasExecutable(stage) || output || e.Exit != "" { p.error(from, from+2, "branch rejoin has no valid continuation scope"); p.diags[len(p.diags)-1].Code = "KASH_REJOIN_OUT_OF_SCOPE"; break }
-			e.Exit = "next"; if p.s.Text[from+1] == '@' { e.Exit = "otherwise" }
+			if !branch || !hasExecutable(stage) || output || e.Exit != "" {
+				p.error(from, from+2, "branch rejoin has no valid continuation scope")
+				p.diags[len(p.diags)-1].Code = "KASH_REJOIN_OUT_OF_SCOPE"
+				break
+			}
+			e.Exit = "next"
+			if p.s.Text[from+1] == '@' {
+				e.Exit = "otherwise"
+			}
 			p.pos += 2
 			p.commandSpace(true)
-			if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' { p.error(from, p.pos, "rejoin must be the final branch disposition"); break }
+			if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' {
+				p.error(from, p.pos, "rejoin must be the final branch disposition")
+				break
+			}
 			break
 		}
-		if stage.Kind == CommandGroup || stage.Kind == CommandMux || stage.Kind == CommandReader || stage.Kind == CommandWriter { p.error(p.pos, p.pos+1, "expected a process connection or statement end after graph operand"); break }
+		if stage.Kind == CommandGroup || stage.Kind == CommandMux || stage.Kind == CommandReader || stage.Kind == CommandWriter {
+			p.error(p.pos, p.pos+1, "expected a process connection or statement end after graph operand")
+			break
+		}
 		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos] == '<' && (p.s.Text[p.pos+1] == '&' || p.s.Text[p.pos+1] == '(') {
-			if p.pos > start && !commandWhitespace(p.s.Text[p.pos-1]) { p.error(p.pos, p.pos+2, "live stream operands must be standalone arguments"); break }
-			if !hasExecutable(stage) { p.error(p.pos, p.pos+2, "live stream operands cannot be command heads"); break }
+			if p.pos > start && !commandWhitespace(p.s.Text[p.pos-1]) {
+				p.error(p.pos, p.pos+2, "live stream operands must be standalone arguments")
+				break
+			}
+			if !hasExecutable(stage) {
+				p.error(p.pos, p.pos+2, "live stream operands cannot be command heads")
+				break
+			}
 			operand := p.node(CommandOperand, p.pos)
 			producer := p.s.Text[p.pos+1] == '('
 			p.pos += 2
 			if producer {
 				p.commandSpace(true)
 				operand.Body = slices.Append(p.a, operand.Body, p.commandPipeline(p.pos, false, false, true))
-				if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' { p.error(operand.Span.Start, p.pos, "unclosed live producer graph") } else { p.pos++ }
+				if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' {
+					p.error(operand.Span.Start, p.pos, "unclosed live producer graph")
+				} else {
+					p.pos++
+				}
 			} else {
 				from := p.pos
-				for p.pos < len(p.s.Text) && channelNameByte(p.s.Text[p.pos], p.pos == from) { p.pos++ }
+				for p.pos < len(p.s.Text) && channelNameByte(p.s.Text[p.pos], p.pos == from) {
+					p.pos++
+				}
 				operand.Text = p.s.Text[from:p.pos]
-				if operand.Text != "" && !ChannelName(operand.Text) { p.error(from, p.pos, "invalid or reserved channel name") }
+				if operand.Text != "" && !ChannelName(operand.Text) {
+					p.error(from, p.pos, "invalid or reserved channel name")
+				}
 			}
-			if p.pos < len(p.s.Text) && !commandWhitespace(p.s.Text[p.pos]) && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != ',' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '>' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '#' { p.error(operand.Span.Start, p.pos+1, "live stream operands must be standalone arguments") }
+			if p.pos < len(p.s.Text) && !commandWhitespace(p.s.Text[p.pos]) && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != ',' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '>' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '#' {
+				p.error(operand.Span.Start, p.pos+1, "live stream operands must be standalone arguments")
+			}
 			operand.Span.End = p.pos
 			stage.Items = slices.Append(p.a, stage.Items, operand)
-			if len(p.diags) != 0 { break }
+			if len(p.diags) != 0 {
+				break
+			}
 			continue
 		}
 		if p.s.Text[p.pos] == '<' || p.s.Text[p.pos] == '>' {
 			from := p.pos
-			op := p.s.Text[p.pos:p.pos+1]
+			op := p.s.Text[p.pos : p.pos+1]
 			p.pos++
-			if op == ">" && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '>' { p.pos++; op = ">>" }
-			if op == "<" && input { p.error(from, p.pos, "duplicate stdin redirection"); break }
-			if op != "<" && output { p.error(from, p.pos, "duplicate stdout redirection"); break }
+			if op == ">" && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '>' {
+				p.pos++
+				op = ">>"
+			}
+			if op == "<" && input {
+				p.error(from, p.pos, "duplicate stdin redirection")
+				break
+			}
+			if op != "<" && output {
+				p.error(from, p.pos, "duplicate stdout redirection")
+				break
+			}
 			p.commandSpace(capture)
-			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') { p.error(from, p.pos, "expected redirection path"); break }
+			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') {
+				p.error(from, p.pos, "expected redirection path")
+				break
+			}
 			redirection := p.node(CommandRedirection, from)
 			redirection.Text = op
 			redirection.Items = slices.Append(p.a, redirection.Items, p.commandWord(false))
 			redirection.Span.End = p.pos
 			stage.Items = slices.Append(p.a, stage.Items, redirection)
-			if op == "<" { input = true } else { output = true }
-			if len(p.diags) != 0 { break }
+			if op == "<" {
+				input = true
+			} else {
+				output = true
+			}
+			if len(p.diags) != 0 {
+				break
+			}
 			continue
 		}
 		if !hasExecutable(stage) && p.s.Text[p.pos] == ':' {
 			from := p.pos
 			p.pos++
 			keyStart := p.pos
-			for p.pos < len(p.s.Text) && setupKeyByte(p.s.Text[p.pos], p.pos == keyStart) { p.pos++ }
+			for p.pos < len(p.s.Text) && setupKeyByte(p.s.Text[p.pos], p.pos == keyStart) {
+				p.pos++
+			}
 			key := p.s.Text[keyStart:p.pos]
-			if key == "" || key == "async" || p.pos == len(p.s.Text) || (p.s.Text[p.pos] != ' ' && p.s.Text[p.pos] != '\t' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != '\r') { p.error(from, p.pos, "invalid Kash stage setup key"); break }
+			if key == "" || key == "async" || p.pos == len(p.s.Text) || (p.s.Text[p.pos] != ' ' && p.s.Text[p.pos] != '\t' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != '\r') {
+				p.error(from, p.pos, "invalid Kash stage setup key")
+				break
+			}
 			duplicate := false
-			for i := range stage.Items { if stage.Items[i].Kind == CommandSetup && stage.Items[i].Text == key { duplicate = true } }
-			if duplicate { p.error(from, p.pos, "duplicate Kash stage setup key"); break }
+			for i := range stage.Items {
+				if stage.Items[i].Kind == CommandSetup && stage.Items[i].Text == key {
+					duplicate = true
+				}
+			}
+			if duplicate {
+				p.error(from, p.pos, "duplicate Kash stage setup key")
+				break
+			}
 			p.commandSpace(capture)
-			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') { p.error(from, p.pos, "expected Kash stage setup value"); break }
+			if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') {
+				p.error(from, p.pos, "expected Kash stage setup value")
+				break
+			}
 			setup := p.node(CommandSetup, from)
 			setup.Text = key
 			setup.Items = slices.Append(p.a, setup.Items, p.commandWord(false))
 			setup.Span.End = p.pos
 			stage.Items = slices.Append(p.a, stage.Items, setup)
-			if len(p.diags) != 0 { break }
+			if len(p.diags) != 0 {
+				break
+			}
 			continue
 		}
 		if p.s.Text[p.pos] == '#' {
@@ -314,32 +481,66 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 	if !hasExecutable(stage) {
 		p.error(start, p.pos, "expected Kash executable")
 	}
-	if stage.Kind == CommandMux && (stage.Text == "broadcast" || stage.Text == "balance") { p.error(stage.Span.Start, p.pos, "fan-out requires a destination group") }
+	if stage.Kind == CommandMux && (stage.Text == "broadcast" || stage.Text == "balance") {
+		p.error(stage.Span.Start, p.pos, "fan-out requires a destination group")
+	}
 	for i := 1; i < len(e.Items); i++ {
 		candidate := e.Items[i]
-		if candidate.Kind != CommandStage { continue }
+		if candidate.Kind != CommandStage {
+			continue
+		}
 		claimed := false
-		for j := range candidate.Items { word := candidate.Items[j]; if word.Kind == CommandOperand && word.Text == "" && len(word.Body) == 0 { claimed = true } }
-		for j := range candidate.Items { word := candidate.Items[j]; if word.Kind == CommandRedirection && word.Text == "<" && !claimed { p.error(word.Span.Start, word.Span.End, "stdin redirection conflicts with pipeline input") } }
+		for j := range candidate.Items {
+			word := candidate.Items[j]
+			if word.Kind == CommandOperand && word.Text == "" && len(word.Body) == 0 {
+				claimed = true
+			}
+		}
+		for j := range candidate.Items {
+			word := candidate.Items[j]
+			if word.Kind == CommandRedirection && word.Text == "<" && !claimed {
+				p.error(word.Span.Start, word.Span.End, "stdin redirection conflicts with pipeline input")
+			}
+		}
 	}
-	if stage.Span.End == stage.Span.Start { stage.Span.End = p.pos }
+	if stage.Span.End == stage.Span.Start {
+		stage.Span.End = p.pos
+	}
 	e.Span.End = p.pos
-	if len(e.Body) != 0 && e.Body[0].Async { e.Async = true; e.Body[0].Async = false }
+	if len(e.Body) != 0 && e.Body[0].Async {
+		e.Async = true
+		e.Body[0].Async = false
+	}
 	p.kash = previousKash
 	p.commandGroup = previousGroup
 	return e
 }
 
 func (p *parser) commandSpace(capture bool) {
-	if capture { p.skipSpace(); return }
-	for p.pos < len(p.s.Text) && (p.s.Text[p.pos] == ' ' || p.s.Text[p.pos] == '\t' || p.s.Text[p.pos] == '\r') { p.pos++ }
+	if capture {
+		p.skipSpace()
+		return
+	}
+	for p.pos < len(p.s.Text) && (p.s.Text[p.pos] == ' ' || p.s.Text[p.pos] == '\t' || p.s.Text[p.pos] == '\r') {
+		p.pos++
+	}
 }
 
 func hasExecutable(stage *Expr) bool {
-	if stage.Kind == CommandMux || stage.Kind == CommandInput { return true }
-	if stage.Kind == CommandReader || stage.Kind == CommandWriter { return true }
-	if stage.Kind == CommandGroup { return len(stage.Items) >= 2 }
-	for i := range stage.Items { if stage.Items[i].Kind == CommandWord { return true } }
+	if stage.Kind == CommandMux || stage.Kind == CommandInput {
+		return true
+	}
+	if stage.Kind == CommandReader || stage.Kind == CommandWriter {
+		return true
+	}
+	if stage.Kind == CommandGroup {
+		return len(stage.Items) >= 2
+	}
+	for i := range stage.Items {
+		if stage.Items[i].Kind == CommandWord {
+			return true
+		}
+	}
 	return false
 }
 
@@ -387,9 +588,13 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			p.kash = true
 			inner := p.expression()
 			p.kash = previousKash
-			if inner != nil { e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "(", Span: source.Span{Start: from, End: p.pos}}) }
+			if inner != nil {
+				e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "(", Span: source.Span{Start: from, End: p.pos}})
+			}
 			partStart = p.pos
-			if len(p.diags) != 0 { break }
+			if len(p.diags) != 0 {
+				break
+			}
 			continue
 		}
 		if b == '\\' {
@@ -439,7 +644,9 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			inner := p.selector()
 			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: "selector", Span: source.Span{Start: start, End: p.pos}})
 			partStart = p.pos
-			if len(p.diags) != 0 { break }
+			if len(p.diags) != 0 {
+				break
+			}
 			continue
 		}
 		if b == '$' {
@@ -458,7 +665,11 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 				}
 				braced := p.pos < len(p.s.Text) && p.s.Text[p.pos] == '{'
 				if braced {
-					if spread { form = "$...{" } else { form = "${" }
+					if spread {
+						form = "$...{"
+					} else {
+						form = "${"
+					}
 					p.pos++
 				}
 				if p.pos == len(p.s.Text) || !isNameStart(p.s.Text[p.pos]) {
@@ -492,8 +703,12 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 			break
 		}
 		if !quoted {
-			if b == '{' || b == '[' { wordDelimiters++ }
-			if (b == '}' || b == ']') && wordDelimiters > 0 { wordDelimiters-- }
+			if b == '{' || b == '[' {
+				wordDelimiters++
+			}
+			if (b == '}' || b == ']') && wordDelimiters > 0 {
+				wordDelimiters--
+			}
 		}
 		text.WriteByte(b)
 		p.pos++
@@ -514,18 +729,32 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 
 // Bool records typed substitution semantics, not whether a literal needs quotes.
 func commandWordNeedsQuotes(e *Expr) bool {
-	if e.Bool { return false }
-	if len(e.Parts) == 0 { return true }
-	if len(e.Parts) == 1 && e.Parts[0].Expr != nil { return true }
+	if e.Bool {
+		return false
+	}
+	if len(e.Parts) == 0 {
+		return true
+	}
+	if len(e.Parts) == 1 && e.Parts[0].Expr != nil {
+		return true
+	}
 	for i := range e.Parts {
 		part := e.Parts[i]
-		if part.Expr != nil { continue }
+		if part.Expr != nil {
+			continue
+		}
 		// Keep grammar-sensitive literals quoted even outside executable position.
-		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer") { return true }
-		if i == 0 && len(part.Text) != 0 && (part.Text[0] == ':' || part.Text[0] == '#') { return true }
+		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer") {
+			return true
+		}
+		if i == 0 && len(part.Text) != 0 && (part.Text[0] == ':' || part.Text[0] == '#') {
+			return true
+		}
 		for j := 0; j < len(part.Text); j++ {
 			c := part.Text[j]
-			if commandWhitespace(c) || commandOperator(c) || c == ',' || c == ')' || c == '"' || c == '\\' || c == '$' || c == '@' { return true }
+			if commandWhitespace(c) || commandOperator(c) || c == ',' || c == ')' || c == '"' || c == '\\' || c == '$' || c == '@' {
+				return true
+			}
 		}
 	}
 	return false
@@ -535,13 +764,22 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 	// Expressions must stay outside command quotes. Quote only the adjacent
 	// literal/reference fragments, preserving scalar words versus typed splices.
 	mixedExpression := false
-	for i := range e.Parts { if e.Parts[i].Form == "(" { mixedExpression = true } }
+	for i := range e.Parts {
+		if e.Parts[i].Form == "(" {
+			mixedExpression = true
+		}
+	}
 	if mixedExpression {
-		if !e.Bool && len(e.Parts) == 1 { b.WriteString("\"\"") }
+		if !e.Bool && len(e.Parts) == 1 {
+			b.WriteString("\"\"")
+		}
 		for i := range e.Parts {
 			part := e.Parts[i]
-			if part.Form == "(" || part.Form == "path" || part.Form == "selector" { writeExpr(b, part.Expr); continue }
-			fragment := Expr{Kind: CommandWord, Parts: e.Parts[i:i+1]}
+			if part.Form == "(" || part.Form == "path" || part.Form == "selector" {
+				writeExpr(b, part.Expr)
+				continue
+			}
+			fragment := Expr{Kind: CommandWord, Parts: e.Parts[i : i+1]}
 			writeCommandWord(b, &fragment)
 		}
 		return
@@ -558,7 +796,9 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 				c := e.Parts[i+1].Text[0]
 				boundary = isNameContinue(c) || c == '/' || c == '.' || c == '?' || c == '!'
 			}
-			if boundary && !quoted { b.WriteByte('"') }
+			if boundary && !quoted {
+				b.WriteByte('"')
+			}
 			if part.Form == "$(" {
 				writeExpr(b, part.Expr)
 			} else if part.Form == "(" || part.Form == "selector" || part.Form == "path" {
@@ -572,7 +812,11 @@ func writeCommandWord(b *strings.Builder, e *Expr) {
 			}
 			// Literal suffixes must not become reference namespaces, names, fields or flags.
 			if boundary {
-				if quoted { b.WriteString("\"\"") } else { b.WriteByte('"') }
+				if quoted {
+					b.WriteString("\"\"")
+				} else {
+					b.WriteByte('"')
+				}
 			}
 			continue
 		}

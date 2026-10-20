@@ -10,7 +10,9 @@ import (
 // adapter to keep declaration validation in the portable runtime.
 func (r *Runtime) RegisterPluginsJSON(data []byte) PureResult {
 	a := mem.System
-	if r != nil { a = r.Alloc }
+	if r != nil {
+		a = r.Alloc
+	}
 	if r == nil || r.Registry == nil || r.Program != nil || r.Session != nil || r.Node != nil {
 		return PureResult{Code: pureText(a, "PHASE_INVALID"), Message: pureText(a, "plugin declarations must be registered before evaluation")}
 	}

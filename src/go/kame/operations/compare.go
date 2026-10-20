@@ -22,13 +22,17 @@ func opIs(c *eval.Context, s any, v []core.Value) eval.Result {
 
 func opHas(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	if v[1].Kind != core.List { return invalidArgument(c, v, 1, "list") }
+	if v[1].Kind != core.List {
+		return invalidArgument(c, v, 1, "list")
+	}
 	if !equalitySupported(v[0], 0) || !equalitySupported(v[1], 0) {
 		discardArgCallables(c, v)
 		return equalityFailure(c, v[0], v[1])
 	}
 	for i := range v[1].List {
-		if equalValues(v[0], v[1].List[i]) { return eval.Result{Value: core.Value{Kind: core.Bool, Bool: true}} }
+		if equalValues(v[0], v[1].List[i]) {
+			return eval.Result{Value: core.Value{Kind: core.Bool, Bool: true}}
+		}
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool}}
 }
@@ -99,22 +103,36 @@ func equalityFailure(c *eval.Context, left core.Value, right core.Value) eval.Re
 // depth limits; invalid or cyclic host-created containers fail rather than recurse
 // without bound. This does not allocate or serialize the operands.
 func compareEq(left core.Value, right core.Value) (bool, bool) {
-	if !equalitySupported(left, 0) || !equalitySupported(right, 0) { return false, false }
+	if !equalitySupported(left, 0) || !equalitySupported(right, 0) {
+		return false, false
+	}
 	return equalValues(left, right), true
 }
 
 func equalitySupported(value core.Value, depth int) bool {
-	if depth >= 256 { return false }
+	if depth >= 256 {
+		return false
+	}
 	switch value.Kind {
 	case core.Nil, core.Bool, core.Int, core.Float, core.String, core.Bytes:
 		return true
 	case core.List:
-		for i := range value.List { if !equalitySupported(value.List[i], depth+1) { return false } }
+		for i := range value.List {
+			if !equalitySupported(value.List[i], depth+1) {
+				return false
+			}
+		}
 		return true
 	case core.Record:
 		for i := range value.Record {
-			if !equalitySupported(value.Record[i].Value, depth+1) { return false }
-			for j := 0; j < i; j++ { if value.Record[i].Key == value.Record[j].Key { return false } }
+			if !equalitySupported(value.Record[i].Value, depth+1) {
+				return false
+			}
+			for j := 0; j < i; j++ {
+				if value.Record[i].Key == value.Record[j].Key {
+					return false
+				}
+			}
 		}
 		return true
 	}
@@ -122,9 +140,15 @@ func equalitySupported(value core.Value, depth int) bool {
 }
 
 func equalValues(left core.Value, right core.Value) bool {
-	if left.Kind == core.Int && right.Kind == core.Float { return equalIntFloat(left.Int, right.Float) }
-	if left.Kind == core.Float && right.Kind == core.Int { return equalIntFloat(right.Int, left.Float) }
-	if left.Kind != right.Kind { return false }
+	if left.Kind == core.Int && right.Kind == core.Float {
+		return equalIntFloat(left.Int, right.Float)
+	}
+	if left.Kind == core.Float && right.Kind == core.Int {
+		return equalIntFloat(right.Int, left.Float)
+	}
+	if left.Kind != right.Kind {
+		return false
+	}
 	switch left.Kind {
 	case core.Nil:
 		return true
@@ -137,26 +161,46 @@ func equalValues(left core.Value, right core.Value) bool {
 	case core.String:
 		return left.Text == right.Text
 	case core.Bytes:
-		if len(left.Bytes) != len(right.Bytes) { return false }
-		for i := range left.Bytes { if left.Bytes[i] != right.Bytes[i] { return false } }
+		if len(left.Bytes) != len(right.Bytes) {
+			return false
+		}
+		for i := range left.Bytes {
+			if left.Bytes[i] != right.Bytes[i] {
+				return false
+			}
+		}
 		return true
 	case core.List:
-		if len(left.List) != len(right.List) { return false }
-		for i := range left.List { if !equalValues(left.List[i], right.List[i]) { return false } }
+		if len(left.List) != len(right.List) {
+			return false
+		}
+		for i := range left.List {
+			if !equalValues(left.List[i], right.List[i]) {
+				return false
+			}
+		}
 		return true
 	case core.Record:
-		if len(left.Record) != len(right.Record) { return false }
+		if len(left.Record) != len(right.Record) {
+			return false
+		}
 		// ponytail: quadratic key matching avoids allocating an index; add one
 		// only if comparisons of large records become a measured bottleneck.
 		for i := range left.Record {
 			found := false
 			for j := range right.Record {
-				if left.Record[i].Key != right.Record[j].Key { continue }
-				if !equalValues(left.Record[i].Value, right.Record[j].Value) { return false }
+				if left.Record[i].Key != right.Record[j].Key {
+					continue
+				}
+				if !equalValues(left.Record[i].Value, right.Record[j].Value) {
+					return false
+				}
 				found = true
 				break
 			}
-			if !found { return false }
+			if !found {
+				return false
+			}
 		}
 		return true
 	}

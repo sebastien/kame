@@ -348,14 +348,20 @@ func TestPatternReplace(t *testing.T) {
 	}
 	for i := range captureExpressions {
 		result = evaluate(t, program, captureExpressions[i])
-		if result.Diagnostic.Code != "" || result.Value.Text != "demo" { t.Error("capture expression failed: " + captureExpressions[i]) }
+		if result.Diagnostic.Code != "" || result.Value.Text != "demo" {
+			t.Error("capture expression failed: " + captureExpressions[i])
+		}
 		result.Free(a)
 	}
 	result = evaluate(t, program, `(replace ./journal/{name:*} missing "./other/demo")`)
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "./other/demo" { t.Error("nonmatch evaluated replacement or lost subject") }
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "./other/demo" {
+		t.Error("nonmatch evaluated replacement or lost subject")
+	}
 	result.Free(a)
 	result = evaluate(t, program, `(map (replace ./journal/{name:*} (uppercase name)) ["./journal/a" "./journal/b"])`)
-	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "A" || result.Value.List[1].Text != "B" { t.Error("deferred captures did not bind per item") }
+	if result.Diagnostic.Code != "" || len(result.Value.List) != 2 || result.Value.List[0].Text != "A" || result.Value.List[1].Text != "B" {
+		t.Error("deferred captures did not bind per item")
+	}
 	result.Free(a)
 	result = evaluate(t, program, "(replace {name:*}.c 1 \"hello.c\")")
 	if result.Diagnostic.Code != "" || result.Value.Kind != core.String || result.Value.Text != "1" {
@@ -403,16 +409,16 @@ func TestPatternReplace(t *testing.T) {
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(replace ./{name:*}.c ./build/{missing}.o \"./a.c\")")
-	if result.Diagnostic.Code != "PAT_INVALID" {
+	if result.Diagnostic.Code != "REF_MISSING" {
 		t.Error("missing capture reference was not diagnosed")
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(replace ./{**}/{*}.c ./build/{_0}/{_9}.c \"./a/b.c\")")
-	if result.Diagnostic.Code != "PAT_INVALID" {
+	if result.Diagnostic.Code != "REF_MISSING" {
 		t.Error("out-of-range capture reference was not diagnosed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(replace ./x/{a} ./y/{a} \"./x\")")
+	result = evaluate(t, program, "(replace {a} ./y/{a} \"./x\")")
 	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("match pattern without matchers was accepted")
 	}
@@ -432,7 +438,7 @@ func TestPatternReplace(t *testing.T) {
 		t.Error("joinpath accepted a pattern")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(join \"-\" [\"a\" ./x/{n}.c])")
+	result = evaluate(t, program, "(join \"-\" [\"a\" ./x/{n:*}.c])")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
 		t.Error("join accepted a pattern element")
 	}
@@ -527,6 +533,11 @@ func TestRegexCaptureOperations(t *testing.T) {
 	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) (pattern (str "x{" "missing" "}")) "demo")`)
 	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("resub accepted a missing capture reference")
+	}
+	result.Free(a)
+	result = evaluate(t, program, `(resub ./{name:*} "x" "./a")`)
+	if result.Diagnostic.Code != "PAT_INVALID" {
+		t.Error("resub accepted a non-regex matcher")
 	}
 	result.Free(a)
 	result = evaluate(t, program, `(resub (pattern (str "{" "name:~[a-z]+}")) "x" :nil)`)

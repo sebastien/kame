@@ -44,7 +44,9 @@ func renderFailure(a mem.Allocator, expression *expr.Expr, span source.Span, act
 			tip = owned(a, "Use @("+name+") to invoke it; @{...} only reads the reference.")
 			mem.FreeString(a, name)
 			result.Diagnostic.Tips = slices.Append(a, result.Diagnostic.Tips, tip)
-		} else { result.Diagnostic.Tips = slices.Append(a, result.Diagnostic.Tips, owned(a, tip)) }
+		} else {
+			result.Diagnostic.Tips = slices.Append(a, result.Diagnostic.Tips, owned(a, tip))
+		}
 	}
 	return result
 }
@@ -52,7 +54,10 @@ func renderFailure(a mem.Allocator, expression *expr.Expr, span source.Span, act
 func (c *Context) InvalidRender(index int, actual core.Kind) Result {
 	var expression *expr.Expr
 	span := c.Span
-	if index >= 0 && index < len(c.operationArguments) { expression = c.operationArguments[index]; span = expression.Span }
+	if index >= 0 && index < len(c.operationArguments) {
+		expression = c.operationArguments[index]
+		span = expression.Span
+	}
 	return renderFailure(c.Run, expression, span, actual)
 }
 
@@ -65,13 +70,17 @@ func literalSelectorTip(a mem.Allocator, result Result) Result {
 
 func environmentDenied(a mem.Allocator, span source.Span, name string) Result {
 	message := "environment-read access denied"
-	if name != "" { message += " for "+name }
+	if name != "" {
+		message += " for " + name
+	}
 	result := failure(a, "CAP_DENIED", span, message)
 	result.Diagnostic.Tips = slices.Append(a, result.Diagnostic.Tips, owned(a, "Use scoped --allow-env=NAME; explicit grants replace defaults. Definition configuration and child environment settings do not authorize environment reads."))
 	return result
 }
 
-func (c *Context) EnvironmentDenied(name string) Result { return environmentDenied(c.Run, c.Span, name) }
+func (c *Context) EnvironmentDenied(name string) Result {
+	return environmentDenied(c.Run, c.Span, name)
+}
 
 func cloneFailureText(a mem.Allocator, text string) string {
 	if len(text) == 0 {

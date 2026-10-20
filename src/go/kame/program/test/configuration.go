@@ -4,8 +4,8 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host/posix"
-	"kame/lang/expr"
 	"kame/lang/eval"
+	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
@@ -18,11 +18,22 @@ func TestDefaultTargetNormalizationOwnsReplacementOperands(t *testing.T) {
 	registry := eval.NewRegistry(a)
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{})
-	if compiled.Program == nil { t.Error("compile failed"); compiled.Free(a); parsed.Free(); registry.Free(); return }
+	if compiled.Program == nil {
+		t.Error("compile failed")
+		compiled.Free(a)
+		parsed.Free()
+		registry.Free()
+		return
+	}
 	targets := compiled.Program.NormalizeTargetOperands([]string{"mode=release"})
-	if len(targets) != 1 || targets[0] != "default mode=release" { t.Error("assignment-only invocation did not normalize to default") }
+	if len(targets) != 1 || targets[0] != "default mode=release" {
+		t.Error("assignment-only invocation did not normalize to default")
+	}
 	program.FreeStrings(a, targets)
-	compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+	compiled.Program.Free()
+	compiled.Free(a)
+	parsed.Free()
+	registry.Free()
 }
 
 func TestBuildConfigurationOverridesAreLiteralOwnedAndVisible(t *testing.T) {
@@ -153,7 +164,9 @@ func TestUnknownParameterFailsCompilationAfterGeneration(t *testing.T) {
 	if compiled.Program != nil || len(compiled.Diagnostics) != 1 || compiled.Diagnostics[0].Code != "TGT_ARGUMENT" || compiled.Diagnostics[0].Message != "unknown parameter: unknown" {
 		t.Error("unknown parameter did not fail before exposing an executable program")
 	}
-	if compiled.Program != nil { compiled.Program.Free() }
+	if compiled.Program != nil {
+		compiled.Program.Free()
+	}
 	compiled.Free(a)
 	parsed.Free()
 	registry.Free()
@@ -168,13 +181,20 @@ func TestTypedConfigurationPrecedenceAndOwnedLiterals(t *testing.T) {
 	operations.Register(registry)
 	compiled := program.Compile(a, parsed, registry, program.Options{Defines: []string{"flag=literal", "flag:=:false", "modules:=[\"py\" \"js\"]"}, Environment: []string{"KAME_flag=ambient", "KAME_modules=ambient"}})
 	defer compiled.Free(a)
-	if compiled.Program == nil { t.Fatal("typed configuration did not compile"); return }
+	if compiled.Program == nil {
+		t.Fatal("typed configuration did not compile")
+		return
+	}
 	p := compiled.Program
 	defer p.Free()
 	r := p.Materialize("result")
-	if r.Diagnostic.Code != "" || r.Value.Kind != core.Record || len(r.Value.Record) != 2 || r.Value.Record[0].Value.Kind != core.Bool || r.Value.Record[0].Value.Bool || r.Value.Record[1].Value.Kind != core.List || len(r.Value.Record[1].Value.List) != 2 || r.Value.Record[1].Value.List[0].Text != "py" { t.Error("typed values lost type, precedence, or ownership") }
+	if r.Diagnostic.Code != "" || r.Value.Kind != core.Record || len(r.Value.Record) != 2 || r.Value.Record[0].Value.Kind != core.Bool || r.Value.Record[0].Value.Bool || r.Value.Record[1].Value.Kind != core.List || len(r.Value.Record[1].Value.List) != 2 || r.Value.Record[1].Value.List[0].Text != "py" {
+		t.Error("typed values lost type, precedence, or ownership")
+	}
 	r.Free(a)
-	if len(p.Configuration) != 2 || p.Configuration[0] != "flag:=:false" || p.Configuration[1] != "modules:=[\"py\" \"js\"]" { t.Error("configuration identity lost literal type") }
+	if len(p.Configuration) != 2 || p.Configuration[0] != "flag:=:false" || p.Configuration[1] != "modules:=[\"py\" \"js\"]" {
+		t.Error("configuration identity lost literal type")
+	}
 }
 
 func TestTypedConfigurationRejectsNonliteralEmbeddingInput(t *testing.T) {
@@ -187,12 +207,19 @@ func TestTypedConfigurationRejectsNonliteralEmbeddingInput(t *testing.T) {
 	invalid := []string{"flag:=(out! \"bad\")", "flag:=[(env \"HOME\")]", "flag:=missing", "flag:=\"@(missing)\"", "unknown:=:false", "f:=:false"}
 	for i := range invalid {
 		compiled := program.Compile(a, parsed, registry, program.Options{Defines: []string{invalid[i]}})
-		if compiled.Program != nil { t.Error("invalid embedding override was accepted"); compiled.Program.Free() }
-		if len(compiled.Diagnostics) == 0 || compiled.Diagnostics[0].Code != "DEF_INVALID" { t.Error("invalid typed configuration did not report DEF_INVALID") }
+		if compiled.Program != nil {
+			t.Error("invalid embedding override was accepted")
+			compiled.Program.Free()
+		}
+		if len(compiled.Diagnostics) == 0 || compiled.Diagnostics[0].Code != "DEF_INVALID" {
+			t.Error("invalid typed configuration did not report DEF_INVALID")
+		}
 		compiled.Free(a)
 	}
-	condition := program.DeclarationPredicate(a, "typed", "flag = :true\n", "flag", []string{"flag:=:false"}, nil)
-	if condition.Diagnostic.Code != "" || condition.Selected { t.Error("typed false did not select declaration conditions") }
+	condition := program.DeclarationPredicate(a, "typed", "flag = :true\n", "flag", []string{"flag:=:false"}, nil, "")
+	if condition.Diagnostic.Code != "" || condition.Selected {
+		t.Error("typed false did not select declaration conditions")
+	}
 	condition.Diagnostic.Free(a)
 }
 
@@ -205,17 +232,37 @@ func TestDuplicateDefinitionsRetainDistinctIncludeOccurrences(t *testing.T) {
 	second := []diagnostic.Frame{{Kind: "include", Label: "shared.kmk", Source: "main.kmk", Span: diagnostic.Span{Start: 23, End: 45}}}
 	sources := []program.CompileSource{{Name: "shared.kmk", Text: "SETTING = 1\n", Offset: 10, Includes: first}, {Name: "shared.kmk", Text: "SETTING = 2\n", Offset: 30, Includes: second}}
 	compiled := program.CompileMany(a, sources, registry, program.Options{})
-	if compiled.Program != nil { t.Error("duplicate definitions compiled"); compiled.Program.Free() }
-	if len(compiled.Diagnostics) != 1 { t.Error("missing duplicate diagnostic"); compiled.Free(a); return }
+	if compiled.Program != nil {
+		t.Error("duplicate definitions compiled")
+		compiled.Program.Free()
+	}
+	if len(compiled.Diagnostics) != 1 {
+		t.Error("missing duplicate diagnostic")
+		compiled.Free(a)
+		return
+	}
 	d := compiled.Diagnostics[0]
-	if d.Code != "DEF_INVALID" || d.Message != "duplicate definition: SETTING" || d.Source != "shared.kmk" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Source != "shared.kmk" || d.Related[0].Span.Start != 10 { t.Error("primary and original declarations lost authored locations") }
-	if len(d.Frames) != 2 || d.Frames[0].Span.Start != 23 || d.Frames[1].Span.Start != 0 || len(d.Tips) == 0 { t.Error("include occurrences or recovery lost after combined parser disposal") }
+	if d.Code != "DEF_INVALID" || d.Message != "duplicate definition: SETTING" || d.Source != "shared.kmk" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Source != "shared.kmk" || d.Related[0].Span.Start != 10 {
+		t.Error("primary and original declarations lost authored locations")
+	}
+	if len(d.Frames) != 2 || d.Frames[0].Span.Start != 23 || d.Frames[1].Span.Start != 0 || len(d.Tips) == 0 {
+		t.Error("include occurrences or recovery lost after combined parser disposal")
+	}
 	compiled.Free(a)
 	fragments := []program.Fragment{{Name: "shared.kmk", Text: "SETTING = 1\n", Lang: "km", Offset: 10, Includes: first}, {Name: "shared.kmk", Text: "SETTING = 2\n", Lang: "km", Offset: 30, Includes: second}}
 	session := program.CompileSession(a, fragments, registry, program.Options{})
-	if session.Session != nil { t.Error("duplicate session compiled"); session.Session.Free() }
-	if len(session.Diagnostics) != 1 { t.Error("missing session diagnostic"); session.Free(a); return }
+	if session.Session != nil {
+		t.Error("duplicate session compiled")
+		session.Session.Free()
+	}
+	if len(session.Diagnostics) != 1 {
+		t.Error("missing session diagnostic")
+		session.Free(a)
+		return
+	}
 	d = session.Diagnostics[0]
-	if d.Source != "shared.kmk" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Span.Start != 10 || len(d.Frames) != 2 { t.Error("session did not map every located diagnostic fact") }
+	if d.Source != "shared.kmk" || d.Span.Start != 30 || len(d.Related) != 1 || d.Related[0].Span.Start != 10 || len(d.Frames) != 2 {
+		t.Error("session did not map every located diagnostic fact")
+	}
 	session.Free(a)
 }

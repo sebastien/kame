@@ -16,10 +16,41 @@ func TestComputedSequenceGroups(t *testing.T) {
 	text := "a : @{PREP}, @{BUILD} | @{TOOLS}, ./ready"
 	parsed := rule.ParseRule(a, "groups.kmk", text)
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 4 { t.Error("computed sequence did not parse"); return }
-	if !parsed.Rule.Inputs[0].SequenceEnd || parsed.Rule.Inputs[1].SequenceEnd || !parsed.Rule.Inputs[2].SequenceEnd || !parsed.Rule.Inputs[3].OrderOnly { t.Error("computed sequence lost boundaries/purpose") }
+	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 4 {
+		t.Error("computed sequence did not parse")
+		return
+	}
+	if !parsed.Rule.Inputs[0].SequenceEnd || parsed.Rule.Inputs[1].SequenceEnd || !parsed.Rule.Inputs[2].SequenceEnd || !parsed.Rule.Inputs[3].OrderOnly {
+		t.Error("computed sequence lost boundaries/purpose")
+	}
 	formatted := rule.FormatRule(a, parsed.Rule)
-	if formatted != text { t.Error("computed sequence did not round trip") }
+	if formatted != text {
+		t.Error("computed sequence did not round trip")
+	}
+	mem.FreeString(a, formatted)
+}
+
+func TestComputedPrerequisitePathsRoundTrip(t *testing.T) {
+	a := t.Allocator()
+	text := "./build/{path:**}.js : @{ROOT}/js/{path}.js, ./meta/@{MODE}/{path}.json | @(str ROOT \"/ready\")/{_0}"
+	parsed := rule.ParseRule(a, "paths.kmk", text)
+	defer parsed.Free()
+	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Inputs) != 3 {
+		t.Error("computed prerequisite paths did not parse")
+		return
+	}
+	for i := range parsed.Rule.Inputs {
+		if parsed.Rule.Inputs[i].Kind != rule.InputExpression {
+			t.Error("computed path bypassed expression parsing")
+		}
+	}
+	if !parsed.Rule.Inputs[0].SequenceEnd || !parsed.Rule.Inputs[2].OrderOnly {
+		t.Error("computed path lost prerequisite grouping")
+	}
+	formatted := rule.FormatRule(a, parsed.Rule)
+	if formatted != text {
+		t.Error("computed prerequisite paths did not round trip")
+	}
 	mem.FreeString(a, formatted)
 }
 
@@ -36,7 +67,9 @@ func TestComputedOutputsPreserveExpressionsAndFormatting(t *testing.T) {
 		t.Error("output interpolation and list-splicing expressions were not distinguished")
 	}
 	formatted := rule.FormatRule(a, parsed.Rule)
-	if formatted != text { t.Error("formatting changed authored output expressions") }
+	if formatted != text {
+		t.Error("formatting changed authored output expressions")
+	}
 	mem.FreeString(a, formatted)
 }
 
@@ -147,17 +180,28 @@ func TestQuotedOperandsDecodeWithoutChangingAuthoredText(t *testing.T) {
 	text := "\"./out \\\"quote\" : \"./in\\tfile\""
 	parsed := rule.ParseRule(a, "quoted.kmk", text)
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Outputs) != 1 || len(parsed.Rule.Inputs) != 1 { t.Fatal("quoted operands did not parse"); return }
+	if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Outputs) != 1 || len(parsed.Rule.Inputs) != 1 {
+		t.Fatal("quoted operands did not parse")
+		return
+	}
 	output := parsed.Rule.Outputs[0]
-	if !output.Path || output.Expansion == nil || output.Expansion.Parts[0].Text != "./out \"quote" { t.Error("quoted output lost its decoded path") }
+	if !output.Path || output.Expansion == nil || output.Expansion.Parts[0].Text != "./out \"quote" {
+		t.Error("quoted output lost its decoded path")
+	}
 	input, literal := rule.LiteralInput(parsed.Rule.Inputs[0])
-	if !literal || input != "./in\tfile" { t.Error("quoted prerequisite was not recognized as decoded literal text") }
+	if !literal || input != "./in\tfile" {
+		t.Error("quoted prerequisite was not recognized as decoded literal text")
+	}
 	formatted := rule.FormatRule(a, parsed.Rule)
 	defer mem.FreeString(a, formatted)
-	if formatted != text { t.Error("formatting changed quoted spelling") }
+	if formatted != text {
+		t.Error("formatting changed quoted spelling")
+	}
 	dynamic := rule.ParseRule(a, "dynamic.kmk", "./out : \"@{ROOT}/input\"")
 	defer dynamic.Free()
-	if _, literal := rule.LiteralInput(dynamic.Rule.Inputs[0]); literal { t.Error("interpolated prerequisite was treated as static") }
+	if _, literal := rule.LiteralInput(dynamic.Rule.Inputs[0]); literal {
+		t.Error("interpolated prerequisite was treated as static")
+	}
 }
 
 func TestQuotedCapturesKeepDecodedBackslashesAndAuthoredSpans(t *testing.T) {
@@ -169,22 +213,32 @@ func TestQuotedCapturesKeepDecodedBackslashesAndAuthoredSpans(t *testing.T) {
 	for i := range texts {
 		parsed := rule.ParseRule(a, "quoted.kmk", texts[i])
 		if len(parsed.Diagnostics) != 0 || len(parsed.Rule.Outputs) != 1 || parsed.Rule.Outputs[0].TargetForm == nil {
-			t.Error("quoted capture did not parse"); parsed.Free(); continue
+			t.Error("quoted capture did not parse")
+			parsed.Free()
+			continue
 		}
 		form := parsed.Rule.Outputs[0].TargetForm
 		// Target spans are relative to the authored quoted content, not decoded text.
-		if !sameSpan(form.Parts[1].Span, starts[i]-1, ends[i]-1) { t.Errorf("capture span = %d:%d", form.Parts[1].Span.Start+1, form.Parts[1].Span.End+1) }
+		if !sameSpan(form.Parts[1].Span, starts[i]-1, ends[i]-1) {
+			t.Errorf("capture span = %d:%d", form.Parts[1].Span.Start+1, form.Parts[1].Span.End+1)
+		}
 		match := form.MatchTarget(a, targets[i])
-		if match == nil || len(match.Captures) != 1 || match.Captures[0].Text != "demo" { t.Error("quoted capture changed decoded matching text") }
+		if match == nil || len(match.Captures) != 1 || match.Captures[0].Text != "demo" {
+			t.Error("quoted capture changed decoded matching text")
+		}
 		match.Free(a)
 		formatted := rule.FormatRule(a, parsed.Rule)
-		if formatted != texts[i] { t.Error("quoted capture did not retain authored formatting") }
+		if formatted != texts[i] {
+			t.Error("quoted capture did not retain authored formatting")
+		}
 		mem.FreeString(a, formatted)
 		parsed.Free()
 	}
 	invalid := rule.ParseRule(a, "invalid.kmk", `"./out\t{name" :`)
 	defer invalid.Free()
-	if len(invalid.Diagnostics) != 1 || !sameSpan(invalid.Diagnostics[0].Span, 8, 13) { t.Error("quoted capture diagnostic lost authored coordinates") }
+	if len(invalid.Diagnostics) != 1 || !sameSpan(invalid.Diagnostics[0].Span, 8, 13) {
+		t.Error("quoted capture diagnostic lost authored coordinates")
+	}
 }
 
 func TestRecipeTemplateRecoversMalformedExpansion(t *testing.T) {

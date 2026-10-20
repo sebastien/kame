@@ -135,18 +135,28 @@ func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 }
 
 func (h *Host) Readlink(a mem.Allocator, name string) host.LinkResult {
-	if core.IsMemoryResourceURIName(name) { return host.LinkResult{Failed: true} }
+	if core.IsMemoryResourceURIName(name) {
+		return host.LinkResult{Failed: true}
+	}
 	path := h.hostPath(name)
 	defer h.freeHostPath(path)
-	if path.Error != nil { return host.LinkResult{Failed: true} }
+	if path.Error != nil {
+		return host.LinkResult{Failed: true}
+	}
 	// Solod Readlink silently truncates a full buffer. Grow until completeness is
 	// proven, never return a truncated target as an ownership check.
 	for size := 256; size <= 65536; size *= 2 {
 		buffer := slices.Make[byte](a, size)
 		text, err := os.Readlink(buffer, path.Path)
-		if err != nil { slices.Free(a, buffer); return host.LinkResult{Failed: true} }
+		if err != nil {
+			slices.Free(a, buffer)
+			return host.LinkResult{Failed: true}
+		}
 		if len(text) < size {
-			if !utf8.ValidString(text) { slices.Free(a, buffer); return host.LinkResult{Failed: true} }
+			if !utf8.ValidString(text) {
+				slices.Free(a, buffer)
+				return host.LinkResult{Failed: true}
+			}
 			result := host.LinkResult{Target: cloneText(a, text)}
 			slices.Free(a, buffer)
 			return result

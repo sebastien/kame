@@ -74,14 +74,44 @@ func descriptorStrings(value core.Value) bool {
 	return true
 }
 
-func validSessionFragment(value core.Value) bool {
+// Common authored-source fields are optional here. Each descriptor boundary
+// separately decides which fields are required and whether unknowns are allowed.
+func validDescriptorSource(value core.Value) bool {
 	if value.Kind != core.Record {
 		return false
 	}
 	for i := range value.Record {
 		field := value.Record[i]
 		switch field.Key {
-		case "name", "text", "lang", "comment":
+		case "name", "text":
+			if field.Value.Kind != core.String {
+				return false
+			}
+		case "offset":
+			if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 2147483647 {
+				return false
+			}
+		case "includes":
+			if !validDescriptorIncludes(field.Value) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func validDescriptorSourceSpan(value core.Value) bool {
+	return int64(len(host.PayloadText(value, "text"))) <= 2147483647-host.PayloadInt(value, "offset")
+}
+
+func validSessionFragment(value core.Value) bool {
+	if !validDescriptorSource(value) || !validDescriptorSourceSpan(value) {
+		return false
+	}
+	for i := range value.Record {
+		field := value.Record[i]
+		switch field.Key {
+		case "lang", "comment":
 			if field.Value.Kind != core.String {
 				return false
 			}
@@ -93,35 +123,47 @@ func validSessionFragment(value core.Value) bool {
 			if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1 {
 				return false
 			}
-		case "offset":
-			if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 2147483647 {
-				return false
-			}
-		case "includes":
-			if !validDescriptorIncludes(field.Value) { return false }
 		}
 	}
-	return int64(len(host.PayloadText(value, "text"))) <= 2147483647-host.PayloadInt(value, "offset")
+	return true
 }
 
 func validDescriptorIncludes(value core.Value) bool {
-	if value.Kind != core.List { return false }
+	if value.Kind != core.List {
+		return false
+	}
 	for i := range value.List {
 		frame := value.List[i]
-		if frame.Kind != core.Record { return false }
+		if frame.Kind != core.Record {
+			return false
+		}
 		fields := 0
 		for j := range frame.Record {
 			field := frame.Record[j]
 			if field.Key == "source" || field.Key == "label" {
-				if field.Value.Kind != core.String || field.Value.Text == "" { return false }
-				if field.Key == "source" { fields |= 1 } else { fields |= 2 }
+				if field.Value.Kind != core.String || field.Value.Text == "" {
+					return false
+				}
+				if field.Key == "source" {
+					fields |= 1
+				} else {
+					fields |= 2
+				}
 			}
 			if field.Key == "start" || field.Key == "end" {
-				if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 2147483647 { return false }
-				if field.Key == "start" { fields |= 4 } else { fields |= 8 }
+				if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 2147483647 {
+					return false
+				}
+				if field.Key == "start" {
+					fields |= 4
+				} else {
+					fields |= 8
+				}
 			}
 		}
-		if fields != 15 || host.PayloadInt(frame, "end") < host.PayloadInt(frame, "start") { return false }
+		if fields != 15 || host.PayloadInt(frame, "end") < host.PayloadInt(frame, "start") {
+			return false
+		}
 	}
 	return true
 }
@@ -136,6 +178,9 @@ func descriptorIncludes(a mem.Allocator, value core.Value) []diagnostic.Frame {
 }
 
 func freeDescriptorIncludes(a mem.Allocator, frames []diagnostic.Frame) {
-	for i := range frames { mem.FreeString(a, frames[i].Label); mem.FreeString(a, frames[i].Source) }
+	for i := range frames {
+		mem.FreeString(a, frames[i].Label)
+		mem.FreeString(a, frames[i].Source)
+	}
 	slices.Free(a, frames)
 }

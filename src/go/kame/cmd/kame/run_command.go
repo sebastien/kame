@@ -35,8 +35,8 @@ func runPrimarySession(args []string, in io.Reader, out io.Writer, errOut io.Wri
 
 type exprEffectOutput struct {
 	Program *program.Program
-	Out io.Writer
-	Err io.Writer
+	Out     io.Writer
+	Err     io.Writer
 }
 
 func writeExprEffect(value any, effect eval.Effect) {
@@ -148,7 +148,9 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	if ownership.Supported() {
 		ledger = mem.Alloc[outputLedger](mem.System)
 		ledger.Store = ownership.New(mem.System, directory)
-		if len(loaded) == 1 { ledger.Source = cleanupSource(&loaded[0]) }
+		if len(loaded) == 1 {
+			ledger.Source = cleanupSource(&loaded[0])
+		}
 		ledger.Out, ledger.Err, ledger.JSON = out, errOut, inv.JSON
 		programOptions.Ownership, programOptions.OwnershipState = recordProduction, ledger
 		programOptions.AutomaticClean, programOptions.AutomaticCleanState = automaticClean, ledger
@@ -187,14 +189,18 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	p.Eval.BeginFinalization()
 	progress := buildProgress{}
 	for !p.Eval.AdvanceFinalization() {
-		if signal := posix.TakeSignal(); signal < 0 { return 128-signal }
+		if signal := posix.TakeSignal(); signal < 0 {
+			return 128 - signal
+		}
 		tickCLIProgram(p, 10, errOut, inv.JSON)
 		drainEvents(p, out, errOut, inv.JSON, &progress)
 	}
 	d := p.Eval.FinalizationDiagnostic(mem.System)
 	if d.Code != "" {
 		emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), d, inv.JSON, fragments, loaded)
-		if status == 0 { status = 1 }
+		if status == 0 {
+			status = 1
+		}
 	}
 	d.Free(mem.System)
 	return status
@@ -259,15 +265,21 @@ func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer,
 				return 1
 			}
 			tickCLIProgram(p, 10, errOut, inv.JSON)
-			if inv.JSON { session.Observe(h) }
+			if inv.JSON {
+				session.Observe(h)
+			}
 			drainEvents(p, out, errOut, inv.JSON, &progress)
 			if signal := nativeOutputSignal(); signal != 0 {
 				p.Eval.BeginFinalization()
 				h.Cancel()
 				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
-				if !inv.JSON && len(h.Node.Diagnostic.Notes)+len(h.Node.Diagnostic.Related) != 0 { emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded) }
+				if !inv.JSON && len(h.Node.Diagnostic.Notes)+len(h.Node.Diagnostic.Related) != 0 {
+					emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded)
+				}
 				h.Free()
-				if signal < 0 { return 128 - signal }
+				if signal < 0 {
+					return 128 - signal
+				}
 				return 128 + signal
 			}
 			if code := nativeOutputFailure(); code != "" && h.Node.Diagnostic.Code == "" {
@@ -275,8 +287,12 @@ func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer,
 				h.Cancel()
 				finishSessionFinalizers(session, h, out, errOut, inv.JSON, &progress)
 				if h.Node.Diagnostic.Code != "" {
-					if !inv.JSON { emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded) }
-				} else { sourceError(diagnosticWriter(out, errOut, inv.JSON), code, "cleanup output delivery failed", inv.JSON) }
+					if !inv.JSON {
+						emitRunDiagnostic(errOut, h.Node.Diagnostic, false, fragments, loaded)
+					}
+				} else {
+					sourceError(diagnosticWriter(out, errOut, inv.JSON), code, "cleanup output delivery failed", inv.JSON)
+				}
 				h.Free()
 				return 1
 			}
@@ -347,8 +363,12 @@ func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer,
 
 func finishSessionFinalizers(session *program.Session, h *program.Handle, out io.Writer, errOut io.Writer, json bool, progress *buildProgress) {
 	p := session.Program
-	for p.Eval.Finalizing() { tickCLIProgram(p, 10, errOut, json) }
-	if json { session.Observe(h) }
+	for p.Eval.Finalizing() {
+		tickCLIProgram(p, 10, errOut, json)
+	}
+	if json {
+		session.Observe(h)
+	}
 	drainEvents(p, out, errOut, json, progress)
 }
 

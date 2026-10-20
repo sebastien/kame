@@ -8,14 +8,11 @@ import (
 	"solod.dev/so/unicode/utf8"
 )
 
-// CatValueJSON encodes definition values that `do cat` prints in human mode
-// as plain JSON. String and bytes values are written raw by the caller, so
-// only JSON-native values are accepted here: nil, booleans, finite numbers,
-// strings, lists, and records. Nested bytes are accepted when they hold valid
-// UTF-8 text and encoded as JSON strings; every other non-JSON value
-// (patterns, resources, callables, processes, binary bytes, and non-finite
-// floats) reports false, leaving out untouched.
-func CatValueJSON(a mem.Allocator, value Value, out *[]byte) bool {
+// PresentationValueJSON encodes values for human-facing output. Unlike ValueJSON,
+// it preserves record order, accepts UTF-8 bytes as strings, and passes ordinary
+// string/key bytes to the encoder without UTF-8 validation. It is not a canonical
+// serialization or a strict JSON-value validator. Failure leaves out unchanged.
+func PresentationValueJSON(a mem.Allocator, value Value, out *[]byte) bool {
 	return valueJSON(a, value, out, true)
 }
 
@@ -26,13 +23,13 @@ func ValueJSON(a mem.Allocator, value Value, out *[]byte) bool {
 
 // EncodeValueJSON writes a JSON-native value into an existing encoder.
 func EncodeValueJSON(a mem.Allocator, e *json.Encoder, value Value) bool {
-	return encodeCatValue(a, e, value, 0, false)
+	return encodeValueJSON(a, e, value, 0, false)
 }
 
-func valueJSON(a mem.Allocator, value Value, out *[]byte, allowBytes bool) bool {
+func valueJSON(a mem.Allocator, value Value, out *[]byte, presentation bool) bool {
 	var builder strings.Builder
 	e := json.NewEncoder(&builder)
-	if !encodeCatValue(a, &e, value, 0, allowBytes) {
+	if !encodeValueJSON(a, &e, value, 0, presentation) {
 		builder.Free()
 		return false
 	}
@@ -45,7 +42,7 @@ func valueJSON(a mem.Allocator, value Value, out *[]byte, allowBytes bool) bool 
 	return true
 }
 
-func encodeCatValue(a mem.Allocator, e *json.Encoder, value Value, depth int, allowBytes bool) bool {
+func encodeValueJSON(a mem.Allocator, e *json.Encoder, value Value, depth int, presentation bool) bool {
 	var order []int
 	defer slices.Free(a, order)
 	if depth >= 256 {
@@ -71,17 +68,19 @@ func encodeCatValue(a mem.Allocator, e *json.Encoder, value Value, depth int, al
 			e.Float(value.Float)
 		}
 	case String:
-		if !allowBytes && !utf8.Valid([]byte(value.Text)) { return false }
+		if !presentation && !utf8.Valid([]byte(value.Text)) {
+			return false
+		}
 		e.Str(value.Text)
 	case Bytes:
-		if !allowBytes || !utf8.Valid(value.Bytes) {
+		if !presentation || !utf8.Valid(value.Bytes) {
 			return false
 		}
 		e.Str(string(value.Bytes))
 	case List:
 		e.BeginArray()
 		for i := range value.List {
-			if !encodeCatValue(a, e, value.List[i], depth+1, allowBytes) {
+			if !encodeValueJSON(a, e, value.List[i], depth+1, presentation) {
 				return false
 			}
 		}
@@ -90,15 +89,19 @@ func encodeCatValue(a mem.Allocator, e *json.Encoder, value Value, depth int, al
 		order = slices.Make[int](a, len(value.Record))
 		for i := range order {
 			order[i] = i
-			if !allowBytes {
-				for j := i; j > 0 && value.Record[order[j]].Key < value.Record[order[j-1]].Key; j-- { order[j], order[j-1] = order[j-1], order[j] }
+			if !presentation {
+				for j := i; j > 0 && value.Record[order[j]].Key < value.Record[order[j-1]].Key; j-- {
+					order[j], order[j-1] = order[j-1], order[j]
+				}
 			}
 		}
 		e.BeginObject()
 		for _, i := range order {
-			if !allowBytes && !utf8.Valid([]byte(value.Record[i].Key)) { return false }
+			if !presentation && !utf8.Valid([]byte(value.Record[i].Key)) {
+				return false
+			}
 			e.Str(value.Record[i].Key)
-			if !encodeCatValue(a, e, value.Record[i].Value, depth+1, allowBytes) {
+			if !encodeValueJSON(a, e, value.Record[i].Value, depth+1, presentation) {
 				return false
 			}
 		}

@@ -117,6 +117,8 @@ func TestForParameterShapeDiagnostics(t *testing.T) {
 		doc.Free()
 	}
 	valid := template.ParseDocument(t.Allocator(), "for.tmpl", "@for([x] [1 2])@{x}@end(for)", "plain")
-	if len(valid.Diagnostics) != 0 { t.Error("valid @for parameters were rejected") }
+	if len(valid.Diagnostics) != 0 {
+		t.Error("valid @for parameters were rejected")
+	}
 	valid.Free()
 }

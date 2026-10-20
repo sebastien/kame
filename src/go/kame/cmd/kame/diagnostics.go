@@ -11,6 +11,7 @@ import (
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 	"solod.dev/so/slices"
+	"solod.dev/so/strconv"
 	"solod.dev/so/unicode/utf8"
 )
 
@@ -23,6 +24,26 @@ var diagnosticFormat = "plain"
 var diagnosticWidth = 80
 var cliDiagnosticOut io.Writer
 var cliDiagnosticJSON bool
+var diagnosticSources []*source.Source
+
+func rememberDiagnosticSource(name string, text string) {
+	for i := range diagnosticSources {
+		if diagnosticSources[i].Name == name {
+			diagnosticSources[i].Free(mem.System)
+			diagnosticSources[i] = source.New(mem.System, name, text)
+			return
+		}
+	}
+	diagnosticSources = slices.Append(mem.System, diagnosticSources, source.New(mem.System, name, text))
+}
+
+func restoreDiagnosticSources(previous []*source.Source) {
+	for i := range diagnosticSources {
+		diagnosticSources[i].Free(mem.System)
+	}
+	slices.Free(mem.System, diagnosticSources)
+	diagnosticSources = previous
+}
 
 func configureDiagnosticPresentation(options buildArguments) {
 	color, format := requestedDiagnosticColor, requestedDiagnosticFormat
@@ -140,7 +161,6 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 	if width < 20 {
 		width = 80
 	}
-	renderSource, loaded := diagnosticSource(d.Source, src)
 	styled := diagnosticColor == "always" && diagnosticFormat == "human"
 	token := "message.error"
 	if d.Severity == diagnostic.Warning {
@@ -148,13 +168,8 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 	} else if d.Severity == diagnostic.Fatal {
 		token = "message.fatal"
 	}
+	writeDiagnosticMessage(out, d, token, styled)
 	if d.Target != "" {
-		if diagnosticFormat == "human" {
-			cli.Style(out, token, diagnosticSeverity(d.Severity), styled)
-			fmt.Fprintf(out, " [%s] %s\n", d.Target, d.Code)
-		} else {
-			fmt.Fprintf(out, "%s failed: %s\n", d.Target, d.Code)
-		}
 		if len(d.TargetStack) > 1 {
 			io.WriteString(out, "  required by ")
 			for i := range d.TargetStack {
@@ -166,24 +181,14 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 			io.WriteString(out, "\n")
 		}
 	}
-	if d.Source != "" && renderSource != nil && d.Source == renderSource.Name {
-		position := renderSource.Position(d.Span.Start)
-		fmt.Fprintf(out, "%s:%d:%d: ", d.Source, position.Line, position.Column)
-		writeDiagnosticMessage(out, d, token, styled)
-		start := d.Span.Start
-		if start < 0 {
-			start = 0
-		}
-		if start > len(renderSource.Text) {
-			start = len(renderSource.Text)
-		}
-		lineStart, lineEnd := renderSource.LineBounds(start)
-		writeWrappedExcerpt(out, renderSource.Text, lineStart, lineEnd, start, d.Span.End, width)
-	} else if d.Source != "" {
-		io.WriteString(out, d.Source+": ")
-		writeDiagnosticMessage(out, d, token, styled)
-	} else {
-		writeDiagnosticMessage(out, d, token, styled)
+	writeDiagnosticSourceBlock(out, d.Source, d.Span, src, width, token)
+	if len(d.Frames) != 0 {
+		io.WriteString(out, "\n")
+		cli.Style(out, "heading", "Trace (innermost first)", styled)
+		io.WriteString(out, "\n")
+	}
+	for i := range d.Frames {
+		writeDiagnosticFrame(out, d, i, src, width, styled)
 	}
 	for i := range d.Notes {
 		io.WriteString(out, "note: ")
@@ -192,34 +197,25 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 	}
 	for i := range d.Related {
 		io.WriteString(out, "note: ")
-		if d.Related[i].Source != "" {
-			writeDiagnosticLocation(out, d.Related[i].Source, d.Related[i].Span.Start, renderSource)
-			io.WriteString(out, ": ")
-		}
 		io.WriteString(out, d.Related[i].Message)
 		io.WriteString(out, "\n")
-	}
-	for i := range d.Frames {
-		io.WriteString(out, "while ")
-		if d.Frames[i].Kind != "" {
-			io.WriteString(out, d.Frames[i].Kind)
-			io.WriteString(out, " ")
-		}
-		io.WriteString(out, d.Frames[i].Label)
-		if d.Frames[i].Source != "" {
-			io.WriteString(out, " at ")
-			writeDiagnosticLocation(out, d.Frames[i].Source, d.Frames[i].Span.Start, renderSource)
-		}
-		io.WriteString(out, "\n")
+		writeDiagnosticSourceBlock(out, d.Related[i].Source, d.Related[i].Span, src, width, "location")
 	}
 	for i := range d.Tips {
-		io.WriteString(out, "help: ")
+		cli.Style(out, "message.tip", "help: ", styled)
 		io.WriteString(out, d.Tips[i])
 		io.WriteString(out, "\n")
 	}
 	if d.Cause.Kind != "" {
 		io.WriteString(out, "caused by: ")
-		io.WriteString(out, d.Cause.Message)
+		message := d.Cause.Message
+		if message == "" {
+			message = d.Cause.Kind
+			if d.Cause.Kind == "process" {
+				message = "process exited"
+			}
+		}
+		io.WriteString(out, message)
 		if d.Cause.HasStatus {
 			fmt.Fprintf(out, " (status %d)", d.Cause.Status)
 		}
@@ -228,22 +224,28 @@ func cliDiagnosticWithSourceWidth(out io.Writer, d diagnostic.Diagnostic, src *s
 		}
 		io.WriteString(out, "\n")
 	}
-	if loaded {
-		renderSource.Free(mem.System)
-	}
 }
 
 func writeDiagnosticMessage(out io.Writer, d diagnostic.Diagnostic, token string, styled bool) {
 	cli.Style(out, token, diagnosticSeverity(d.Severity), styled)
-	io.WriteString(out, " ")
+	io.WriteString(out, "[")
 	cli.Style(out, "diagnostic.code", d.Code, styled)
-	io.WriteString(out, ": "+d.Message+"\n")
+	io.WriteString(out, "]: ")
+	if d.Target != "" {
+		fmt.Fprintf(out, "[%s] ", d.Target)
+	}
+	io.WriteString(out, d.Message+"\n")
 }
 
 // diagnosticSource uses the already parsed source when possible. A different
 // file-backed primary source is loaded only for rendering and is never exposed
 // to JSON or stored in the diagnostic.
 func diagnosticSource(name string, primary *source.Source) (*source.Source, bool) {
+	for i := range diagnosticSources {
+		if diagnosticSources[i].Name == name {
+			return diagnosticSources[i], false
+		}
+	}
 	if name == "" || (primary != nil && primary.Name == name && !primary.Expanded) {
 		return primary, false
 	}
@@ -256,35 +258,233 @@ func diagnosticSource(name string, primary *source.Source) (*source.Source, bool
 	return loaded, true
 }
 
-func writeDiagnosticLocation(out io.Writer, name string, offset int, primary *source.Source) {
+func writeDiagnosticSourceBlock(out io.Writer, name string, span diagnostic.Span, primary *source.Source, width int, token string) {
+	if name == "" {
+		return
+	}
 	src, loaded := diagnosticSource(name, primary)
+	styled := diagnosticColor == "always" && diagnosticFormat == "human"
+	arrow := "  --> "
+	if diagnosticFormat == "human" {
+		arrow = "  ╭─ "
+	}
+	cli.Style(out, "structure", arrow, styled)
 	if src != nil && src.Name == name {
-		position := src.Position(offset)
-		fmt.Fprintf(out, "%s:%d:%d", name, position.Line, position.Column)
+		start := span.Start
+		if start < 0 {
+			start = 0
+		}
+		if start > len(src.Text) {
+			start = len(src.Text)
+		}
+		position := src.Position(start)
+		writeStyledDiagnosticLocation(out, name, position.Line, position.Column, styled)
+		io.WriteString(out, "\n")
+		lineStart, lineEnd := src.LineBounds(start)
+		writeDiagnosticExcerpt(out, src.Text, lineStart, lineEnd, start, span.End, width, position.Line, token)
 	} else {
-		io.WriteString(out, name)
+		cli.Style(out, "location", name, styled)
+		io.WriteString(out, "\n")
 	}
 	if loaded {
 		src.Free(mem.System)
 	}
 }
 
-func writeWrappedExcerpt(out io.Writer, text string, lineStart int, lineEnd int, start int, end int, width int) {
-	if lineStart == lineEnd {
-		io.WriteString(out, "\n")
-		writeMarker(out, text, lineStart, start, end, lineEnd)
-		return
-	}
-	marked, segmentStart := false, lineStart
-	for segmentStart < lineEnd {
-		segmentEnd := excerptSegmentEnd(text, segmentStart, lineEnd, width)
-		io.WriteString(out, text[segmentStart:segmentEnd])
-		io.WriteString(out, "\n")
-		if !marked && start >= segmentStart && (start < segmentEnd || (segmentEnd == lineEnd && start == segmentEnd)) {
-			writeMarker(out, text, segmentStart, start, end, segmentEnd)
-			marked = true
+func writeStyledDiagnosticLocation(out io.Writer, name string, line int, column int, styled bool) {
+	var lineBuffer, columnBuffer [strconv.MaxIntBase10Len]byte
+	lineText := strconv.FormatInt(lineBuffer[:], int64(line), 10)
+	columnText := strconv.FormatInt(columnBuffer[:], int64(column), 10)
+	cli.Style(out, "location", name+":"+lineText+":"+columnText, styled)
+}
+
+func writeDiagnosticFrame(out io.Writer, d diagnostic.Diagnostic, index int, primary *source.Source, width int, styled bool) {
+	f := d.Frames[index]
+	branch, separator := "  ", " at "
+	if diagnosticFormat == "human" {
+		branch, separator = "  ├─ ", " · "
+		if index == len(d.Frames)-1 {
+			branch = "  ╰─ "
 		}
-		segmentStart = segmentEnd
+	}
+	cli.Style(out, "structure", branch, styled)
+	var buffer [strconv.MaxIntBase10Len]byte
+	cli.Style(out, "text.muted", "#"+strconv.FormatInt(buffer[:], int64(index), 10)+"  ", styled)
+	if f.Kind != "" {
+		cli.Style(out, "text.muted", f.Kind+" ", styled)
+	}
+	labelToken := "worker.tool"
+	if f.Kind == "definition" {
+		labelToken = "target.task"
+	}
+	if f.Kind == "include" {
+		labelToken = "value.path"
+	}
+	cli.Style(out, labelToken, f.Label, styled)
+	var src *source.Source
+	loaded := false
+	if f.Source != "" {
+		src, loaded = diagnosticSource(f.Source, primary)
+		cli.Style(out, "structure", separator, styled)
+		if src != nil && src.Name == f.Source {
+			position := src.Position(f.Span.Start)
+			writeStyledDiagnosticLocation(out, f.Source, position.Line, position.Column, styled)
+		} else {
+			cli.Style(out, "location", f.Source, styled)
+		}
+	}
+	io.WriteString(out, "\n")
+	if src != nil && src.Name == f.Source {
+		start := f.Span.Start
+		if start < 0 {
+			start = 0
+		}
+		if start > len(src.Text) {
+			start = len(src.Text)
+		}
+		lineStart, lineEnd := src.LineBounds(start)
+		if !diagnosticLineSeen(d, index, src, lineStart) {
+			writeDiagnosticExcerpt(out, src.Text, lineStart, lineEnd, start, f.Span.End, width, 0, "")
+		}
+	}
+	if loaded {
+		src.Free(mem.System)
+	}
+}
+
+// Share source lines, not frames: distinct contexts keep their labels/locations.
+func diagnosticLineSeen(d diagnostic.Diagnostic, index int, src *source.Source, lineStart int) bool {
+	for i := -1; i < index; i++ {
+		name, at := d.Source, d.Span.Start
+		if i >= 0 {
+			name, at = d.Frames[i].Source, d.Frames[i].Span.Start
+		}
+		if name != src.Name {
+			continue
+		}
+		if at < 0 {
+			at = 0
+		}
+		if at > len(src.Text) {
+			at = len(src.Text)
+		}
+		start, _ := src.LineBounds(at)
+		if start == lineStart {
+			return true
+		}
+	}
+	return false
+}
+
+// Keep one visual line around the focus, rather than wrapping a tiny suffix onto
+// another row. Positions remain authored; ellipses describe presentation only.
+func writeDiagnosticExcerpt(out io.Writer, text string, lineStart int, lineEnd int, start int, end int, width int, line int, token string) {
+	var buffer [strconv.MaxIntBase10Len]byte
+	number := strconv.FormatInt(buffer[:], int64(line), 10)
+	if line == 0 {
+		number = ""
+	}
+	rich := diagnosticFormat == "human"
+	styled := rich && diagnosticColor == "always"
+	rail, ellipsis, ellipsisWidth := " | ", "...", 3
+	if rich {
+		rail, ellipsis, ellipsisWidth = " │ ", "…", 1
+	}
+	gutter := " " + number + rail
+	if line == 0 {
+		gutter = "    " + rail
+	}
+	width -= len(number) + 4
+	if line == 0 {
+		width -= 3
+	}
+	if width < 8 {
+		width = 8
+	}
+	windowStart := lineStart
+	windowEnd := excerptSegmentEnd(text, windowStart, lineEnd, width)
+	focusLimit := excerptSegmentEnd(text, lineStart, lineEnd, width-ellipsisWidth)
+	if (start >= focusLimit || end > focusLimit) && windowEnd < lineEnd {
+		// Count display cells before the focus, using the original tab stops.
+		column := 0
+		for i := lineStart; i < start; {
+			if text[i] == '\t' {
+				column += 8 - column%8
+				i++
+				continue
+			}
+			r, size := utf8.DecodeRuneInString(text[i:])
+			if size == 0 {
+				break
+			}
+			column += source.DisplayWidth(r)
+			i += size
+		}
+		context := width / 3
+		if context > width-2*ellipsisWidth-2 {
+			context = width - 2*ellipsisWidth - 2
+		}
+		if context < 0 {
+			context = 0
+		}
+		if column > context {
+			windowStart = excerptSegmentEnd(text, lineStart, start, column-context)
+		}
+	}
+	left := windowStart > lineStart
+	if left {
+		width -= ellipsisWidth
+	}
+	windowEnd = excerptSegmentEnd(text, windowStart, lineEnd, width)
+	right := windowEnd < lineEnd
+	if right {
+		windowEnd = excerptSegmentEnd(text, windowStart, lineEnd, width-ellipsisWidth)
+	}
+	cli.Style(out, "structure", gutter, styled)
+	if left {
+		cli.Style(out, "text.muted", ellipsis, styled)
+	}
+	writeExcerptText(out, text[windowStart:windowEnd])
+	if right {
+		cli.Style(out, "text.muted", ellipsis, styled)
+	}
+	io.WriteString(out, "\n")
+	if line != 0 {
+		writeDiagnosticSpaces(out, len(number)+1)
+		cli.Style(out, "structure", rail, styled)
+		if left {
+			writeDiagnosticSpaces(out, ellipsisWidth)
+		}
+		writeMarker(out, text, windowStart, start, end, windowEnd, token, styled)
+	}
+}
+
+func writeDiagnosticSpaces(out io.Writer, count int) {
+	for i := 0; i < count; i++ {
+		io.WriteString(out, " ")
+	}
+}
+
+// Expand tabs before adding gutters so terminal tab stops cannot move markers.
+func writeExcerptText(out io.Writer, text string) {
+	column := 1
+	for i := 0; i < len(text); {
+		if text[i] == '\t' {
+			cells := 8 - (column-1)%8
+			for n := 0; n < cells; n++ {
+				io.WriteString(out, " ")
+			}
+			column += cells
+			i++
+		} else {
+			r, size := utf8.DecodeRuneInString(text[i:])
+			if size == 0 {
+				break
+			}
+			io.WriteString(out, text[i:i+size])
+			column += source.DisplayWidth(r)
+			i += size
+		}
 	}
 }
 
@@ -309,11 +509,13 @@ func excerptSegmentEnd(text string, start int, limit int, width int) int {
 	return i
 }
 
-func writeMarker(out io.Writer, text string, lineStart int, start int, end int, lineEnd int) {
+func writeMarker(out io.Writer, text string, lineStart int, start int, end int, lineEnd int, token string, styled bool) {
 	column := 1
 	for i := lineStart; i < start; {
 		if text[i] == '\t' {
-			io.WriteString(out, "\t")
+			for n := 0; n < 8-(column-1)%8; n++ {
+				io.WriteString(out, " ")
+			}
 			column += 8 - (column-1)%8
 			i++
 			continue
@@ -353,10 +555,24 @@ func writeMarker(out io.Writer, text string, lineStart int, start int, end int, 
 	if width < 1 {
 		width = 1
 	}
-	io.WriteString(out, "^")
-	for i := 1; i < width; i++ {
-		io.WriteString(out, "~")
+	head, unit, tail := "^", "~", "~"
+	if diagnosticFormat == "human" {
+		head, unit, tail = "╰", "─", "╯"
+		if width == 1 {
+			head = "╵"
+		}
 	}
+	length := len(head) + (width-1)*len(unit)
+	marker := mem.AllocSlice[byte](mem.System, length, length)
+	copy(marker, []byte(head))
+	for i := len(head); i < len(marker); i += len(unit) {
+		copy(marker[i:], []byte(unit))
+	}
+	if width > 1 {
+		copy(marker[len(marker)-len(tail):], []byte(tail))
+	}
+	cli.Style(out, token, string(marker), styled)
+	mem.FreeSlice(mem.System, marker)
 	io.WriteString(out, "\n")
 }
 

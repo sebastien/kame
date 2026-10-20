@@ -32,7 +32,8 @@ Literal phony, cached-task, and service rules share the source-level target
 namespace. Defining the same literal name in more than one of those rule kinds
 is `TGT_AMBIG` during compilation. A definition may share that name because it
 uses a distinct `definition` key; rule lookup wins and `@{NAME}` explicitly
-evaluates the definition. Overlapping templates remain a selection-time error.
+evaluates the definition. Unresolved template ambiguity remains a selection-time
+error after applying `045-rule-precedence.md`.
 
 Dynamic module imports are not supported.
 
@@ -52,12 +53,15 @@ source namespace. Selection of a path considers file rules:
 
 1. A literal output match wins over template matches.
 2. Otherwise every matching template is collected.
-3. Exactly one template match is selected.
-4. Multiple template matches fail with `TGT_AMBIG`.
+3. Discard structurally less-specific file templates as defined in
+   `045-rule-precedence.md`.
+4. Select the unique remaining rule instance; competing remaining instances
+   fail with `TGT_AMBIG`.
 5. No match fails with `TGT_NO_RULE` and may include a nearby-target suggestion.
 
-Registration order never resolves ambiguity. Captures from the selected output
-are available while rendering that rule's remaining outputs and inputs.
+Registration order and source existence never resolve ambiguity. Captures from
+the selected output are available while rendering that rule's remaining outputs
+and inputs.
 
 ## Planning
 
@@ -310,6 +314,8 @@ Every rendered output maps to that one node. Requests for sibling outputs share
 execution. If two outputs of one declaration both match a requested target but
 produce different captures, selection is ambiguous and returns `TGT_AMBIG`.
 After capture rendering, duplicate output paths are `PARSE_ERR`.
+Every rendered sibling must select this same rule instance; shadowed or ambiguous
+sibling ownership is `TGT_AMBIG` before execution (`045-rule-precedence.md`).
 
 ## Yield and Effects
 
@@ -494,7 +500,8 @@ bytes is a separate operation used by `cat`.
 
 - Compilation performs no filesystem or process operation.
 - A literal rule wins over a matching template rule.
-- Two matching templates produce `TGT_AMBIG` regardless of source order.
+- A structurally more-specific file template wins regardless of source order;
+  equal or incomparable remaining matches produce `TGT_AMBIG`.
 - Captures render corresponding input and output templates.
 - Bare symbolic dependencies select rules before definitions with the same
   name; explicit definition evaluation remains available through `@{NAME}`.

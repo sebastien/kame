@@ -6,6 +6,11 @@
 `sub` is the canonical substitution name, `replace` is a deprecated alias,
 nonmatches preserve their original strings, and `match?` provides predicates.
 
+Rooted value paths containing only `{name}`/`{_N}` references now resolve lexical
+string bindings rather than constructing expansion-pattern values; see
+`004-language.md`. Matcher groups and rootless expansion patterns remain pattern
+values. Use `(pattern TEXT)` to explicitly construct a rooted expansion pattern.
+
 This specification adds two expression-language features that remove common
 boilerplate from build scripts:
 

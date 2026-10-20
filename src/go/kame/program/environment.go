@@ -14,7 +14,9 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 	d := p.recipeSettings(index)
 	p.Instances[index].SettingsDiagnostic.Free(p.Alloc)
 	p.Instances[index].SettingsDiagnostic = d
-	if d.Code != "" { return false }
+	if d.Code != "" {
+		return false
+	}
 	entry := &p.Instances[index]
 	// The common inherited snapshot is already canonical and owned. Keep it
 	// instead of reconstructing it on every dependency-validation attempt.
@@ -28,7 +30,9 @@ func (p *Program) claimEnvironment(index int, inherited []string) bool {
 	for i := range p.Instances[index].Rule.Environment {
 		environment = p.setEnvironment(environment, p.Instances[index].Rule.Environment[i].Value)
 	}
-	for i := range p.Instances[index].MetadataEnvironment { environment = p.setEnvironment(environment, p.Instances[index].MetadataEnvironment[i]) }
+	for i := range p.Instances[index].MetadataEnvironment {
+		environment = p.setEnvironment(environment, p.Instances[index].MetadataEnvironment[i])
+	}
 	// Canonical order prevents equivalent inherited assignments from creating
 	// different cache fingerprints merely through authored ordering.
 	for i := 1; i < len(environment); i++ {
@@ -83,9 +87,14 @@ func sameEnvironment(left []string, right []string) bool {
 	}
 	ordered := true
 	for i := range left {
-		if left[i] != right[i] { ordered = false; break }
+		if left[i] != right[i] {
+			ordered = false
+			break
+		}
 	}
-	if ordered { return true }
+	if ordered {
+		return true
+	}
 	for i := range left {
 		found := false
 		for j := range right {
@@ -104,15 +113,23 @@ func sameEnvironment(left []string, right []string) bool {
 // Bind lazy definition identity to the same snapshot as recipe evaluation.
 // The digest contains no plaintext environment values in graph/event keys.
 func (p *Program) bindDefinitionEnvironment(context *eval.Context) {
-    _ = p
-    if !context.HasEnvironment { return }
-    var identity hashSink
-    identity.state = core.NewDigest()
-    identity.appendText("kame-definition-environment-v1")
-    identity.appendText(context.Cwd)
-     identity.appendU64(uint64(context.Phase))
-     for i := range context.RuleFrames { if context.RuleFrames[i].ServiceRule { identity.appendText("service-no-file-outputs") } }
-    for i := range context.Environment { identity.appendText(context.Environment[i]) }
-    identity.state.Sum(context.DefinitionNamespace[:])
-    context.HasDefinitionNamespace = true
+	_ = p
+	if !context.HasEnvironment {
+		return
+	}
+	var identity hashSink
+	identity.state = core.NewDigest()
+	identity.appendText("kame-definition-environment-v1")
+	identity.appendText(context.Cwd)
+	identity.appendU64(uint64(context.Phase))
+	for i := range context.RuleFrames {
+		if context.RuleFrames[i].ServiceRule {
+			identity.appendText("service-no-file-outputs")
+		}
+	}
+	for i := range context.Environment {
+		identity.appendText(context.Environment[i])
+	}
+	identity.state.Sum(context.DefinitionNamespace[:])
+	context.HasDefinitionNamespace = true
 }

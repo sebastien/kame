@@ -116,16 +116,6 @@ func writeTargetOutcome(out io.Writer, event program.Event, label string, token 
 		}
 		writeOutcomeRow(out, event.Target, timing.String(), token, width)
 		timing.Free()
-		if event.Diagnostic.Code != "" {
-			fmt.Fprintf(out, "  %s: %s", event.Diagnostic.Code, event.Diagnostic.Message)
-			if event.Diagnostic.Cause.HasStatus {
-				fmt.Fprintf(out, " (status %d)", event.Diagnostic.Cause.Status)
-			}
-			if event.Diagnostic.Cause.HasSignal {
-				fmt.Fprintf(out, " (signal %d)", event.Diagnostic.Cause.Signal)
-			}
-			io.WriteString(out, "\n")
-		}
 		return
 	}
 	var line = bytes.NewBuffer(mem.System, nil)
@@ -136,15 +126,6 @@ func writeTargetOutcome(out io.Writer, event program.Event, label string, token 
 		io.WriteString(&line, " failed")
 	} else {
 		io.WriteString(&line, " cancelled")
-	}
-	if event.Diagnostic.Code != "" {
-		fmt.Fprintf(&line, " %s: %s", event.Diagnostic.Code, event.Diagnostic.Message)
-		if event.Diagnostic.Cause.HasStatus {
-			fmt.Fprintf(&line, " (status %d)", event.Diagnostic.Cause.Status)
-		}
-		if event.Diagnostic.Cause.HasSignal {
-			fmt.Fprintf(&line, " (signal %d)", event.Diagnostic.Cause.Signal)
-		}
 	}
 	cli.Style(out, token, line.String(), diagnosticColor == "always")
 	io.WriteString(out, "\n")

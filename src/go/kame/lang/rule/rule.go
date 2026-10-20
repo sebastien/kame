@@ -40,7 +40,7 @@ type Target struct {
 	TargetForm *template.Target
 	Expansion  *template.String
 	// Decoded distinguishes resolved string data from authored target escapes.
-	Decoded    bool
+	Decoded bool
 }
 type Input struct {
 	OrderOnly   bool
@@ -132,11 +132,11 @@ func (r *Result) Free() {
 }
 
 type parser struct {
-	a     mem.Allocator
-	s     *source.Source
-	start int
-	end   int
-	diags []source.Diagnostic
+	a                      mem.Allocator
+	s                      *source.Source
+	start                  int
+	end                    int
+	diags                  []source.Diagnostic
 	deferRecipeDiagnostics bool
 }
 
@@ -163,11 +163,19 @@ func HasRuleSeparator(text string) bool {
 
 func misplacedSettings(text string) bool {
 	bracket := strings.IndexByte(text, '[')
-	if bracket < 0 || !strings.HasPrefix(strings.TrimSpace(text[bracket+1:]), "shell:") || source.TopLevelByte(text[:bracket], ':') >= 0 { return false }
+	if bracket < 0 || !strings.HasPrefix(strings.TrimSpace(text[bracket+1:]), "shell:") || source.TopLevelByte(text[:bracket], ':') >= 0 {
+		return false
+	}
 	head := strings.TrimSpace(text[:bracket])
-	if strings.HasSuffix(head, ";") { head = strings.TrimSpace(head[:len(head)-1]) }
-	if strings.HasPrefix(head, "task ") { head = strings.TrimSpace(head[5:]) }
-	if strings.HasPrefix(head, "service ") { head = strings.TrimSpace(head[8:]) }
+	if strings.HasSuffix(head, ";") {
+		head = strings.TrimSpace(head[:len(head)-1])
+	}
+	if strings.HasPrefix(head, "task ") {
+		head = strings.TrimSpace(head[5:])
+	}
+	if strings.HasPrefix(head, "service ") {
+		head = strings.TrimSpace(head[8:])
+	}
 	return validName(head) || explicitPath(head)
 }
 
@@ -335,7 +343,9 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 		var expansion *template.String
 		if len(text) >= 2 && text[0] == '"' && text[len(text)-1] == '"' {
 			expansion = p.quotedTemplate(span)
-			if literal, ok := literalTemplate(expansion); ok { value = literal }
+			if literal, ok := literalTemplate(expansion); ok {
+				value = literal
+			}
 		}
 		_, literal := literalTemplate(expansion)
 		if (expansion != nil && !literal) || (expansion == nil && hasExpansion(value)) {
@@ -352,7 +362,9 @@ func (p *parser) ruleTargets(r *Rule, start int, end int) {
 			continue
 		}
 		path, templated := explicitPath(value), hasTemplate(value)
-		if expansion != nil && !path { p.error(span.Start, span.End, "quoted literal output requires an explicit file path; use ./ for a file path") }
+		if expansion != nil && !path {
+			p.error(span.Start, span.End, "quoted literal output requires an explicit file path; use ./ for a file path")
+		}
 		if !path && !templated && !validName(value) {
 			p.error(span.Start, span.End, "invalid rule target; use ./ for a file path")
 		}
@@ -419,7 +431,9 @@ func (p *parser) validateArguments(r *Rule) {
 	}
 }
 
-func hasExpansion(text string) bool { return strings.Contains(text, "@(") || strings.Contains(text, "@{") }
+func hasExpansion(text string) bool {
+	return strings.Contains(text, "@(") || strings.Contains(text, "@{")
+}
 
 // Quoted header operands share expression-string decoding, but retain their
 // authored Text for formatting. Transfer decoded parts without evaluating them.
@@ -435,7 +449,12 @@ func (p *parser) quotedTemplate(span source.Span) *template.String {
 		for i := range parsed.Expr.Parts {
 			part := &parsed.Expr.Parts[i]
 			kind := template.Literal
-			if part.Expr != nil { kind = template.Expression; if part.Form == "@{" { kind = template.Reference } }
+			if part.Expr != nil {
+				kind = template.Expression
+				if part.Form == "@{" {
+					kind = template.Reference
+				}
+			}
 			value.Parts = slices.Append(p.a, value.Parts, template.Part{Kind: kind, Text: part.Text, Expr: part.Expr, Span: part.Span})
 			part.Text, part.Expr = "", nil
 		}
@@ -445,17 +464,27 @@ func (p *parser) quotedTemplate(span source.Span) *template.String {
 }
 
 func literalTemplate(value *template.String) (string, bool) {
-	if value == nil { return "", false }
-	if len(value.Parts) == 0 { return "", true }
-	if len(value.Parts) == 1 && value.Parts[0].Kind == template.Literal { return value.Parts[0].Text, true }
+	if value == nil {
+		return "", false
+	}
+	if len(value.Parts) == 0 {
+		return "", true
+	}
+	if len(value.Parts) == 1 && value.Parts[0].Kind == template.Literal {
+		return value.Parts[0].Text, true
+	}
 	return "", false
 }
 
 // LiteralInput returns borrowed, decoded text only when no discovery or
 // evaluation is needed. Quoted wildcard/capture bytes remain literal inputs.
 func LiteralInput(input Input) (string, bool) {
-	if input.Kind == InputName || input.Kind == InputPath { return input.Text, true }
-	if input.Kind == InputString { return literalTemplate(input.Template) }
+	if input.Kind == InputName || input.Kind == InputPath {
+		return input.Text, true
+	}
+	if input.Kind == InputString {
+		return literalTemplate(input.Template)
+	}
 	return "", false
 }
 
@@ -496,7 +525,20 @@ func (p *parser) ruleInputs(r *Rule, start int, end int) {
 		} else if hasExpansion(text) {
 			input.Kind = InputString
 			input.Template = template.ParseStringRange(p.a, p.s, span.Start, span.End)
-			if len(input.Template.Parts) == 1 && (input.Template.Parts[0].Kind == template.Expression || input.Template.Parts[0].Kind == template.Reference) { input.Kind = InputExpression }
+			if len(input.Template.Parts) == 1 && (input.Template.Parts[0].Kind == template.Expression || input.Template.Parts[0].Kind == template.Reference) {
+				input.Kind = InputExpression
+			}
+			// Computed path tokens use the expression path grammar, including
+			// authored {name} references, rather than a string-only template.
+			first := input.Template.Parts[0]
+			if input.Kind == InputString && (explicitPath(text) || (first.Expr != nil && first.Span.End < span.End && p.s.Text[first.Span.End] == '/')) {
+				parsed := expr.ParseRange(p.a, p.s, span.Start, span.End, "")
+				input.Template.Free()
+				input.Template = mem.Alloc[template.String](p.a)
+				input.Template.Alloc, input.Template.Span, input.Template.Diagnostics = p.a, span, parsed.Diagnostics
+				input.Template.Parts = slices.Append(p.a, input.Template.Parts, template.Part{Kind: template.Expression, Span: span, Expr: parsed.Expr})
+				input.Kind = InputExpression
+			}
 		} else if hasTemplate(text) {
 			input.Kind = InputTemplate
 			input.TargetForm = template.ParseTarget(p.a, p.s.Name, text)
@@ -666,10 +708,16 @@ func (p *parser) recipe(r *Rule, lineEnd int) {
 	// probes must not diagnose literal contents of a document's raw blocks.
 	for i := range r.Body {
 		line := r.Body[i].Template
-		if line == nil { continue }
+		if line == nil {
+			continue
+		}
 		if r.BodyDoc == nil {
 			for j := range line.Diagnostics {
-				if p.deferRecipeDiagnostics { r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, line.Diagnostics[j]) } else { p.diags = slices.Append(p.a, p.diags, line.Diagnostics[j]) }
+				if p.deferRecipeDiagnostics {
+					r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, line.Diagnostics[j])
+				} else {
+					p.diags = slices.Append(p.a, p.diags, line.Diagnostics[j])
+				}
 			}
 		}
 		slices.Free(p.a, line.Diagnostics)
@@ -693,7 +741,11 @@ func (p *parser) recipeDocument(r *Rule, indent string) {
 	}
 	doc := template.ParseDocumentRange(p.a, p.s, firstStart, lastEnd, "plain")
 	for i := range doc.Diagnostics {
-		if p.deferRecipeDiagnostics { r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, doc.Diagnostics[i]) } else { p.diags = slices.Append(p.a, p.diags, doc.Diagnostics[i]) }
+		if p.deferRecipeDiagnostics {
+			r.RecipeDiagnostics = slices.Append(p.a, r.RecipeDiagnostics, doc.Diagnostics[i])
+		} else {
+			p.diags = slices.Append(p.a, p.diags, doc.Diagnostics[i])
+		}
 	}
 	r.BodyDoc = doc
 }

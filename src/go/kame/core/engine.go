@@ -338,7 +338,9 @@ func (e *Engine) ready(n *Node) bool {
 	}
 	for i := range n.Static {
 		dependency := n.Static[i]
-		if n.tearingDown { continue }
+		if n.tearingDown {
+			continue
+		}
 		if dependency.State == NodeFailed || dependency.State == NodeCancelled {
 			n.complete(e, dependency.Diagnostic.Clone(e.Alloc))
 			return false
@@ -622,7 +624,10 @@ func (e *Engine) invalidate(n *Node, seen *[]*Node, retain bool, recursive bool)
 	}
 	*seen = slices.Append(e.Alloc, *seen, n)
 	n.invalidating = true
-	if e.beginTeardown(n, true) { n.invalidating = false; return }
+	if e.beginTeardown(n, true) {
+		n.invalidating = false
+		return
+	}
 	// Invalidating a child can remove its dynamic reverse edge from this node.
 	// Traverse a stable copy so that mutation cannot skip a sibling.
 	dependents := slices.Clone(e.Alloc, n.Dependents)
@@ -730,7 +735,9 @@ func (e *Engine) cancel(n *Node) {
 	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {
 		return
 	}
-	if e.beginTeardown(n, false) { return }
+	if e.beginTeardown(n, false) {
+		return
+	}
 	if n.materializer != nil {
 		n.materializer.Free()
 		n.materializer = nil
@@ -753,7 +760,9 @@ func (e *Engine) cancel(n *Node) {
 	if n.teardownDiagnostic.Code != "" {
 		n.Diagnostic = n.teardownDiagnostic
 		n.teardownDiagnostic = Diagnostic{}
-	} else { n.Diagnostic = Diagnostic{Code: DiagnosticCancelled} }
+	} else {
+		n.Diagnostic = Diagnostic{Code: DiagnosticCancelled}
+	}
 	e.emit(n, terminal(n))
 	for i := range n.Dependents {
 		if n.Dependents[i].State == NodeWaiting {

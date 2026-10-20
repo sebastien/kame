@@ -24,9 +24,15 @@ func TestStreamPredicatesArePureBooleanAndHostFree(t *testing.T) {
 	expected := []int{1, 1, 1, 0, -eval.StreamPredicateBoolean, -eval.StreamPredicateEffect, -eval.StreamPredicateEffect, -eval.StreamPredicateEffect, -eval.StreamPredicateEffect, -eval.StreamPredicateEffect}
 	for i := range texts {
 		r := expr.Parse(a, "predicate.km", texts[i])
-		if len(r.Diagnostics) != 0 { t.Errorf("predicate parse failed: %s", texts[i]); r.Free(); continue }
+		if len(r.Diagnostics) != 0 {
+			t.Errorf("predicate parse failed: %s", texts[i])
+			r.Free()
+			continue
+		}
 		actual := p.EvaluateStreamPredicate(r.Expr, p.Scope, []byte("a\r\n"))
-		if actual != expected[i] { t.Errorf("%s: got %d want %d", texts[i], actual, expected[i]) }
+		if actual != expected[i] {
+			t.Errorf("%s: got %d want %d", texts[i], actual, expected[i])
+		}
 		r.Free()
 	}
 	names := []string{"flag", "matching", "bad", "cycle"}
@@ -34,7 +40,9 @@ func TestStreamPredicatesArePureBooleanAndHostFree(t *testing.T) {
 	for i := range names {
 		r := expr.Parse(a, "predicate.km", names[i])
 		actual := p.EvaluateStreamPredicate(r.Expr, p.Scope, []byte("a\n"))
-		if actual != statuses[i] { t.Errorf("%s: got %d want %d", names[i], actual, statuses[i]) }
+		if actual != statuses[i] {
+			t.Errorf("%s: got %d want %d", names[i], actual, statuses[i])
+		}
 		r.Free()
 	}
 }

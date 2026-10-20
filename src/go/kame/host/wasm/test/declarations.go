@@ -3,6 +3,7 @@ package wasm_test
 import (
 	"kame/core"
 	"kame/host/wasm"
+	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
 
@@ -31,6 +32,57 @@ func TestDeclarationPredicateDescriptorIsTypedAndHostFree(t *testing.T) {
 		t.Error("declaration predicate exposed a host request")
 	}
 	result.Free(a)
+}
+
+func TestConfigurationConditionDirectoryDescriptor(t *testing.T) {
+	a := t.Allocator()
+	inputs := []string{
+		`{"directory":"/project","predicate":"(eq (abspath ./) \"/project\")"}`,
+		`{"directory":"/project","prefix":"root = (abspath ./)\n","predicate":"(eq root \"/project\")"}`,
+		`{"directory":"/project","sources":[{"name":"/sdk/defs.km","text":"root = (abspath ./)"}],"condition":{"name":"/sdk/main.km","text":"(eq root \"/project\")"}}`,
+	}
+	for i := range inputs {
+		result := wasm.RunCompositionCondition(a, []byte(inputs[i]))
+		if result.Code != "" || result.Text != "true" || result.HostNeeded {
+			t.Error("configuration directory was not propagated without host authority")
+		}
+		result.Free(a)
+	}
+	result := wasm.DeclarationPredicate(a, []byte(inputs[1]))
+	if result.Code != "" || result.Text != "true" || result.HostNeeded {
+		t.Error("declaration directory was not propagated")
+	}
+	result.Free(a)
+	result = wasm.RunCompositionCondition(a, []byte(`{"directory":42,"predicate":":true"}`))
+	if result.Code != "EXPR_INVALID" {
+		t.Error("non-string configuration directory was accepted")
+	}
+	result.Free(a)
+}
+
+func TestCompositionConditionAuthoredDescriptor(t *testing.T) {
+	a := t.Allocator()
+	result := wasm.RunCompositionCondition(a, []byte(`{"sources":[{"name":"defs.km","text":"value = (first 1)","offset":40}],"condition":{"name":"main.km","text":"value","offset":90}}`))
+	if result.Code != "EXPR_INVALID" || result.SpanStart != 55 || !strings.Contains(result.Text, `"source":"defs.km"`) || !strings.Contains(result.Text, `"kind":"condition"`) || !strings.Contains(result.Text, `"start":90`) {
+		t.Error("authored condition descriptor lost primary or outer condition origin: " + result.Text)
+	}
+	result.Free(a)
+	invalid := []string{
+		`{"sources":[],"predicate":":true"}`,
+		`{"sources":[],"condition":{"name":"a","text":":true"},"prefix":""}`,
+		`{"sources":false,"condition":{"name":"a","text":":true"}}`,
+		`{"sources":[{"name":"a","text":"x = 1","offset":-1}],"condition":{"name":"a","text":":true"}}`,
+		`{"sources":[],"condition":{"name":"a","text":true}}`,
+		`{"sources":[],"condition":{"name":"a","text":":true","offset":2147483647}}`,
+		`{"sources":[],"condition":{"name":"a","text":":true","unexpected":0}}`,
+	}
+	for i := range invalid {
+		result = wasm.RunCompositionCondition(a, []byte(invalid[i]))
+		if result.Code != "EXPR_INVALID" || result.HostNeeded {
+			t.Error("malformed authored condition descriptor was accepted")
+		}
+		result.Free(a)
+	}
 }
 
 func TestCompositionConditionDescriptorSharesValidationAndDiagnosticJSON(t *testing.T) {
@@ -81,8 +133,8 @@ func TestCompositionConditionDescriptorSharesValidationAndDiagnosticJSON(t *test
 				}
 			}
 		}
-		if code != result.Code || message != result.Message || source != "condition.km" {
-			t.Error("composition diagnostic JSON lost code/message/source")
+		if code != result.Code || message != result.Message || source != "" {
+			t.Error("composition diagnostic JSON lost code/message or claimed an unmapped authored source")
 		}
 	}
 	value.Free(a)

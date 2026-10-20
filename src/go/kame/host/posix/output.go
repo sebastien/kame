@@ -21,7 +21,11 @@ func km_cli_write_output(fd c.Int, data []byte, timeoutNS int64, written *int) c
 func WriteOutput(fd int, data []byte, timeoutNS int64) (int, error) {
 	written := 0
 	status := km_cli_write_output(c.Int(fd), data, timeoutNS, &written)
-	if status == 1 { return written, ErrOutputTimeout }
-	if status != 0 { return written, ErrOutputWrite }
+	if status == 1 {
+		return written, ErrOutputTimeout
+	}
+	if status != 0 {
+		return written, ErrOutputWrite
+	}
 	return written, nil
 }

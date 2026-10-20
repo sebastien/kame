@@ -15,40 +15,79 @@ func FormatKashControl(a mem.Allocator, e *Expr, indent string) string {
 
 func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
 	if e.Kind == KashMatch {
-		for j := 0; j < level; j++ { b.WriteString(indent) }
+		for j := 0; j < level; j++ {
+			b.WriteString(indent)
+		}
 		b.WriteString("match ")
 		writeKashValue(b, e.Body[0])
 		level++
-		for i := 1; i < len(e.Body); i++ { b.WriteByte('\n'); for j := 0; j < level; j++ { b.WriteString(indent) }; b.WriteString(e.Body[i].Text) }
+		for i := 1; i < len(e.Body); i++ {
+			b.WriteByte('\n')
+			for j := 0; j < level; j++ {
+				b.WriteString(indent)
+			}
+			b.WriteString(e.Body[i].Text)
+		}
 		b.WriteByte('\n')
 	}
 	for i := range e.Items {
 		branch := e.Items[i]
-		if i != 0 { b.WriteByte('\n') }
-		for j := 0; j < level; j++ { b.WriteString(indent) }
+		if i != 0 {
+			b.WriteByte('\n')
+		}
+		for j := 0; j < level; j++ {
+			b.WriteString(indent)
+		}
 		b.WriteString(branch.Text)
 		if len(branch.Items) != 0 {
 			b.WriteByte(' ')
-			if e.Kind == KashMatch { writeExpr(b, branch.Items[0]) } else if branch.Items[0].Kind == CommandTest { writeProcess(b, branch.Items[0]) } else { writeExpr(b, branch.Items[0]) }
+			if e.Kind == KashMatch {
+				writeExpr(b, branch.Items[0])
+			} else if branch.Items[0].Kind == CommandTest {
+				writeProcess(b, branch.Items[0])
+			} else {
+				writeExpr(b, branch.Items[0])
+			}
 		}
 		for j := range branch.Body {
 			statement := branch.Body[j]
 			b.WriteByte('\n')
-			if statement.Kind == KashIf || statement.Kind == KashMatch { writeKashControl(b, statement, indent, level+1); continue }
-			for k := 0; k <= level; k++ { b.WriteString(indent) }
-			if statement.Kind == KashComment { b.WriteString(statement.Text) } else if statement.Kind == KashDefinition {
-				if statement.Bool { b.WriteByte('(') }
+			if statement.Kind == KashIf || statement.Kind == KashMatch {
+				writeKashControl(b, statement, indent, level+1)
+				continue
+			}
+			for k := 0; k <= level; k++ {
+				b.WriteString(indent)
+			}
+			if statement.Kind == KashComment {
 				b.WriteString(statement.Text)
-				for k := range statement.Parameters { b.WriteByte(' '); b.WriteString(statement.Parameters[k].Name); if statement.Parameters[k].Rest { b.WriteString("...") } }
-				if statement.Bool { b.WriteByte(')') }
+			} else if statement.Kind == KashDefinition {
+				if statement.Bool {
+					b.WriteByte('(')
+				}
+				b.WriteString(statement.Text)
+				for k := range statement.Parameters {
+					b.WriteByte(' ')
+					b.WriteString(statement.Parameters[k].Name)
+					if statement.Parameters[k].Rest {
+						b.WriteString("...")
+					}
+				}
+				if statement.Bool {
+					b.WriteByte(')')
+				}
 				b.WriteString(" = ")
 				writeExpr(b, statement.Items[0])
-			} else { writeExpr(b, statement) }
+			} else {
+				writeExpr(b, statement)
+			}
 		}
 	}
 }
 
 func writeKashValue(b *strings.Builder, e *Expr) {
-	if e.Kind == Name || e.Kind == Reference || e.Kind == EnvironmentReference { b.WriteByte('$') }
+	if e.Kind == Name || e.Kind == Reference || e.Kind == EnvironmentReference {
+		b.WriteByte('$')
+	}
 	writeExpr(b, e)
 }

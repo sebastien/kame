@@ -57,15 +57,21 @@ func (p *Program) appendOutput(value core.Value, span source.Span, outputs *[]ru
 func appendOutputText(a mem.Allocator, b *strings.Builder, value core.Value, patterns *[]source.Span) bool {
 	if value.Kind == core.List {
 		for i := range value.List {
-			if i != 0 { b.WriteByte(' ') }
-			if !appendOutputText(a, b, value.List[i], patterns) { return false }
+			if i != 0 {
+				b.WriteByte(' ')
+			}
+			if !appendOutputText(a, b, value.List[i], patterns) {
+				return false
+			}
 		}
 		return true
 	}
 	text, ok := eval.Stringify(a, value)
-	if !ok { return false }
+	if !ok {
+		return false
+	}
 	if value.Kind == core.Pattern {
-		*patterns = slices.Append(a, *patterns, source.Span{Start: b.Len(), End: b.Len()+len(text)})
+		*patterns = slices.Append(a, *patterns, source.Span{Start: b.Len(), End: b.Len() + len(text)})
 	}
 	b.WriteString(text)
 	mem.FreeString(a, text)
@@ -77,20 +83,27 @@ func (p *Program) renderOutput(output rule.Target, context *eval.Context, patter
 	defer b.Free()
 	for i := range output.Expansion.Parts {
 		part := &output.Expansion.Parts[i]
-		if part.Kind == template.Literal { b.WriteString(part.Text); continue }
+		if part.Kind == template.Literal {
+			b.WriteString(part.Text)
+			continue
+		}
 		var result eval.Result
 		if part.Expr != nil {
 			result = p.Eval.EvaluateWith(part.Expr, context)
 		} else {
 			// Keep the ordinary selector/tool diagnostics and planning restrictions.
-			one := template.String{Parts: output.Expansion.Parts[i:i+1], Span: part.Span}
+			one := template.String{Parts: output.Expansion.Parts[i : i+1], Span: part.Span}
 			result = p.Eval.Render(p.Alloc, &one, p.Eval.Scope, context)
 		}
-		if result.Waiting || result.Completed || result.Stream != nil || result.Diagnostic.Code != "" || context.PhaseInvalid() || len(context.Effects) != 0 { return result }
+		if result.Waiting || result.Completed || result.Stream != nil || result.Diagnostic.Code != "" || context.PhaseInvalid() || len(context.Effects) != 0 {
+			return result
+		}
 		ok := appendOutputText(p.Alloc, &b, result.Value, patterns)
 		kind := result.Value.Kind
 		result.Free(p.Alloc)
-		if !ok { return eval.Result{Diagnostic: p.outputDiagnostic(part.Span, "EXPR_INVALID", "cannot render "+core.KindName(kind)+" as text; use an explicit conversion")} }
+		if !ok {
+			return eval.Result{Diagnostic: p.outputDiagnostic(part.Span, "EXPR_INVALID", "cannot render "+core.KindName(kind)+" as text; use an explicit conversion")}
+		}
 	}
 	return eval.Result{Value: core.NewString(p.Alloc, b.String())}
 }
@@ -135,7 +148,9 @@ func (p *Program) resolveOutputs(authored *rule.Rule) outputResolution {
 		}
 		slices.Free(p.Alloc, patterns)
 		result.Free(p.Alloc)
-		if d.Code == "PHASE_INVALID" || d.Code == "CAP_DENIED" { p.registrationTip(&d) }
+		if d.Code == "PHASE_INVALID" || d.Code == "CAP_DENIED" {
+			p.registrationTip(&d)
+		}
 		if d.Code != "" {
 			break
 		}

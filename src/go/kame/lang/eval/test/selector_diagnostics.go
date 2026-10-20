@@ -28,13 +28,17 @@ func TestSelectorMissingContextDiagnostics(t *testing.T) {
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a}
 	for i := range texts {
 		expression := expr.Parse(a, "selector.km", texts[i])
-		if len(expression.Diagnostics) != 0 { t.Error("selector fixture did not parse") }
+		if len(expression.Diagnostics) != 0 {
+			t.Error("selector fixture did not parse")
+		}
 		r := p.EvaluateWith(expression.Expr, &context)
 		expression.Free()
 		if r.Diagnostic.Code != "SEL_NO_CONTEXT" || r.Diagnostic.Message != messages[i] || !r.Diagnostic.Owned || r.Diagnostic.Span.Start != 1 || r.Diagnostic.Span.End != len(texts[i]) {
 			t.Error("missing selector context lost kind, ownership, or authored span")
 		}
-		if len(r.Diagnostic.Tips) != 1 || r.Diagnostic.Tips[0] != tips[i] { t.Error("missing selector context lost its owned remediation tip") }
+		if len(r.Diagnostic.Tips) != 1 || r.Diagnostic.Tips[0] != tips[i] {
+			t.Error("missing selector context lost its owned remediation tip")
+		}
 		r.Free(a)
 	}
 	p.Free()
@@ -55,7 +59,9 @@ func TestSelectorPresentContextIsNotMissing(t *testing.T) {
 	for _, text := range texts {
 		expression := expr.Parse(a, "selector.km", text)
 		r := p.EvaluateWith(expression.Expr, &context)
-		if r.Diagnostic.Code != "" || r.Value.Kind != core.Int || r.Value.Int != 7 { t.Error("explicit non-rule selector context was rejected") }
+		if r.Diagnostic.Code != "" || r.Value.Kind != core.Int || r.Value.Int != 7 {
+			t.Error("explicit non-rule selector context was rejected")
+		}
 		r.Free(a)
 		expression.Free()
 	}
@@ -66,8 +72,12 @@ func TestSelectorPresentContextIsNotMissing(t *testing.T) {
 		expression := expr.Parse(a, "selector.km", text)
 		r := p.EvaluateWith(expression.Expr, &context)
 		message := "selector index is empty"
-		if text == "@0" { message = "selector index out of range" }
-		if r.Diagnostic.Code != "SEL_INDEX_INVALID" || r.Diagnostic.Message != message { t.Error("present empty context was mislabeled as missing") }
+		if text == "@0" {
+			message = "selector index out of range"
+		}
+		if r.Diagnostic.Code != "SEL_INDEX_INVALID" || r.Diagnostic.Message != message {
+			t.Error("present empty context was mislabeled as missing")
+		}
 		r.Free(a)
 		expression.Free()
 	}
@@ -75,7 +85,9 @@ func TestSelectorPresentContextIsNotMissing(t *testing.T) {
 	for _, text := range emptyLists {
 		expression := expr.Parse(a, "selector.km", text)
 		r := p.EvaluateWith(expression.Expr, &context)
-		if r.Diagnostic.Code != "" || r.Value.Kind != core.List || len(r.Value.List) != 0 { t.Error("present empty context stopped supporting all-item selection") }
+		if r.Diagnostic.Code != "" || r.Value.Kind != core.List || len(r.Value.List) != 0 {
+			t.Error("present empty context stopped supporting all-item selection")
+		}
 		r.Free(a)
 		expression.Free()
 	}
@@ -83,7 +95,9 @@ func TestSelectorPresentContextIsNotMissing(t *testing.T) {
 	for _, text := range emptyCounts {
 		expression := expr.Parse(a, "selector.km", text)
 		r := p.EvaluateWith(expression.Expr, &context)
-		if r.Diagnostic.Code != "" || r.Value.Kind != core.Int || r.Value.Int != 0 { t.Error("present empty context stopped supporting count selection") }
+		if r.Diagnostic.Code != "" || r.Value.Kind != core.Int || r.Value.Int != 0 {
+			t.Error("present empty context stopped supporting count selection")
+		}
 		r.Free(a)
 		expression.Free()
 	}

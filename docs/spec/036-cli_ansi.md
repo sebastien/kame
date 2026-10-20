@@ -194,8 +194,9 @@ is green for success or red for failure. Named targets are purple; paths have a
 muted directory prefix and only their basename in bold. Worker tools use gold,
 and warnings/retries use amber. No whole-line color. Long subjects are clipped at grapheme boundaries rather
 than wrapping the outcome. Redirected output keeps unpadded, complete subjects.
-Failure details immediately below the target row include the diagnostic code,
-message, and established exit status or signal.
+Outcome rows do not repeat diagnostic details. The full diagnostic follows with
+one target-qualified severity/code/message headline under specification 011;
+established exit status or signal appears once in its cause block.
 
 Reasons retain specification 027's stable codes, certainty, privacy, and
 per-generation deduplication. A reevaluation decision is not a claim that a
@@ -366,17 +367,17 @@ stderr. Its canonical value remains the result; empty programs do not invent one
 ### Failure
 
 ```text
-[./build/app] failed                                      2.4s - ✗
-  RECIPE_FAIL: recipe exited unsuccessfully
+[./build/app]                                             2.4s - failed
+error[RECIPE_FAIL]: [./build/app] recipe exited unsuccessfully
   required by default -> ./build/app
 
-  Makefile.kmk:18:2
-  18 | cc @<* -o @>
-     | ^~~~~~~~~~~
+  ╭─ Makefile.kmk:18:2
+ 18 │ cc @<* -o @>
+    │ ╰──────────╯
 
-  caused by: cc exited with status 1
+caused by: process exited (status 1)
 
-build failed · 8 done · 1 failed · 2 cancelled · 2.4s - ✗
+8 complete · 1 failed · 2 cancelled                        2.4s - failed
 ```
 
 The authored location, process identity, and dependency stack are shown only when

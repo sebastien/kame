@@ -1,106 +1,153 @@
 package program
 
 import (
- "kame/lang/expr"
- "kame/lang/rule"
- "kame/lang/script"
- "kame/lang/template"
- "solod.dev/so/mem"
- "solod.dev/so/slices"
- "solod.dev/so/strings"
+	"kame/lang/expr"
+	"kame/lang/rule"
+	"kame/lang/script"
+	"kame/lang/template"
+	"solod.dev/so/mem"
+	"solod.dev/so/slices"
+	"solod.dev/so/strings"
 )
 
 func (p *Program) declareExpressionTools(value *expr.Expr) {
- if value == nil { return }
- if value.Kind == expr.Name && strings.HasPrefix(value.Text, "x/") { p.declareTool(value.Text[2:]) }
- if value.Kind == expr.CommandStage {
-  for i := range value.Items {
-   word := value.Items[i]
-   if word.Kind != expr.CommandWord { continue }
-   if len(word.Parts) == 1 && word.Parts[0].Expr == nil { p.declareTool(word.Parts[0].Text) }
-   break
-  }
- }
- if value.Kind == expr.Application && len(value.Items) == 2 && value.Items[0].Kind == expr.Name && value.Items[0].Text == "tool" {
-  argument := value.Items[1]
-  if argument.Kind == expr.Symbol || argument.Kind == expr.Path { p.declareTool(argument.Text) }
-  if argument.Kind == expr.String {
-   if len(argument.Parts) == 0 { p.declareTool(argument.Text) } else {
-    builder := strings.NewBuilder(p.Alloc)
-    literal := true
-    for i := range argument.Parts { if argument.Parts[i].Expr != nil { literal = false; break }; builder.WriteString(argument.Parts[i].Text) }
-    if literal { p.declareTool(builder.String()) }
-    builder.Free()
-   }
-  }
- }
- for i := range value.Items { p.declareExpressionTools(value.Items[i]) }
- for i := range value.Body { p.declareExpressionTools(value.Body[i]) }
- for i := range value.Fields { p.declareExpressionTools(value.Fields[i].Value) }
- for i := range value.Parts { p.declareExpressionTools(value.Parts[i].Expr) }
+	if value == nil {
+		return
+	}
+	if value.Kind == expr.Name && strings.HasPrefix(value.Text, "x/") {
+		p.declareTool(value.Text[2:])
+	}
+	if value.Kind == expr.CommandStage {
+		for i := range value.Items {
+			word := value.Items[i]
+			if word.Kind != expr.CommandWord {
+				continue
+			}
+			if len(word.Parts) == 1 && word.Parts[0].Expr == nil {
+				p.declareTool(word.Parts[0].Text)
+			}
+			break
+		}
+	}
+	if value.Kind == expr.Application && len(value.Items) == 2 && value.Items[0].Kind == expr.Name && value.Items[0].Text == "tool" {
+		argument := value.Items[1]
+		if argument.Kind == expr.Symbol || argument.Kind == expr.Path {
+			p.declareTool(argument.Text)
+		}
+		if argument.Kind == expr.String {
+			if len(argument.Parts) == 0 {
+				p.declareTool(argument.Text)
+			} else {
+				builder := strings.NewBuilder(p.Alloc)
+				literal := true
+				for i := range argument.Parts {
+					if argument.Parts[i].Expr != nil {
+						literal = false
+						break
+					}
+					builder.WriteString(argument.Parts[i].Text)
+				}
+				if literal {
+					p.declareTool(builder.String())
+				}
+				builder.Free()
+			}
+		}
+	}
+	for i := range value.Items {
+		p.declareExpressionTools(value.Items[i])
+	}
+	for i := range value.Body {
+		p.declareExpressionTools(value.Body[i])
+	}
+	for i := range value.Fields {
+		p.declareExpressionTools(value.Fields[i].Value)
+	}
+	for i := range value.Parts {
+		p.declareExpressionTools(value.Parts[i].Expr)
+	}
 }
 
 func (p *Program) declareTemplateTools(value *template.String) {
- if value == nil { return }
- for i := range value.Parts { p.declareExpressionTools(value.Parts[i].Expr) }
+	if value == nil {
+		return
+	}
+	for i := range value.Parts {
+		p.declareExpressionTools(value.Parts[i].Expr)
+	}
 }
 
 func (p *Program) declareBuildTools(parsed *script.Script) {
- shellIsKame := false
- for i := range parsed.Items {
-  definition := parsed.Items[i].Definition
-  if definition != nil && definition.Name == "SHELL" && definition.Expression != nil && definition.Expression.Kind == expr.Name && definition.Expression.Text == "kame" {
-   shellIsKame = true
-  }
- }
- for i := range parsed.Items {
-  item := parsed.Items[i]
-  p.declareExpressionTools(item.Expression)
-  if item.Definition != nil {
-   p.declareExpressionTools(item.Definition.Expression)
-  }
-  if item.Rule != nil {
-   for j := range item.Rule.Inputs { p.declareTemplateTools(item.Rule.Inputs[j].Template) }
-   for j := range item.Rule.Body { p.declareTemplateTools(item.Rule.Body[j].Template) }
-   if len(item.Rule.Body) != 0 && ruleSelectsKame(item.Rule, shellIsKame) {
-    body := item.Rule.Body
-    value := expr.ParseRange(p.Alloc, parsed.Source, body[0].Span.Start, body[len(body)-1].Span.End, recipeIndent(parsed.Source.Text, body[0].Span.Start))
-    if len(value.Diagnostics) == 0 { p.declareExpressionTools(value.Expr) }
-    expr.Free(p.Alloc, value.Expr)
-    slices.Free(p.Alloc, value.Diagnostics)
-   }
-  }
- }
+	shellIsKame := false
+	for i := range parsed.Items {
+		definition := parsed.Items[i].Definition
+		if definition != nil && definition.Name == "SHELL" && definition.Expression != nil && definition.Expression.Kind == expr.Name && definition.Expression.Text == "kame" {
+			shellIsKame = true
+		}
+	}
+	for i := range parsed.Items {
+		item := parsed.Items[i]
+		p.declareExpressionTools(item.Expression)
+		if item.Definition != nil {
+			p.declareExpressionTools(item.Definition.Expression)
+		}
+		if item.Rule != nil {
+			for j := range item.Rule.Inputs {
+				p.declareTemplateTools(item.Rule.Inputs[j].Template)
+			}
+			for j := range item.Rule.Body {
+				p.declareTemplateTools(item.Rule.Body[j].Template)
+			}
+			if len(item.Rule.Body) != 0 && ruleSelectsKame(item.Rule, shellIsKame) {
+				body := item.Rule.Body
+				value := expr.ParseRange(p.Alloc, parsed.Source, body[0].Span.Start, body[len(body)-1].Span.End, recipeIndent(parsed.Source.Text, body[0].Span.Start))
+				if len(value.Diagnostics) == 0 {
+					p.declareExpressionTools(value.Expr)
+				}
+				expr.Free(p.Alloc, value.Expr)
+				slices.Free(p.Alloc, value.Diagnostics)
+			}
+		}
+	}
 }
 
 func ruleSelectsKame(rule *rule.Rule, shellIsKame bool) bool {
- if rule.Metadata != nil {
-  for i := range rule.Metadata.Fields {
-   field := rule.Metadata.Fields[i]
-   if field.Key != "shell" { continue }
-   return field.Value != nil && field.Value.Kind == expr.Name && field.Value.Text == "kame"
-  }
- }
- return shellIsKame
+	if rule.Metadata != nil {
+		for i := range rule.Metadata.Fields {
+			field := rule.Metadata.Fields[i]
+			if field.Key != "shell" {
+				continue
+			}
+			return field.Value != nil && field.Value.Kind == expr.Name && field.Value.Text == "kame"
+		}
+	}
+	return shellIsKame
 }
 
 func (p *Program) plannedTools() []Tool {
- var tools []Tool
- for i := range p.Tools {
-  if !p.Tools[i].Declarative { continue }
-  p.toolPath(p.Tools[i].Name)
-  tools = slices.Append(p.Alloc, tools, Tool{Name: cloneText(p.Alloc, p.Tools[i].Name), Path: cloneText(p.Alloc, p.Tools[i].Path)})
- }
- return tools
+	var tools []Tool
+	for i := range p.Tools {
+		if !p.Tools[i].Declarative {
+			continue
+		}
+		p.toolPath(p.Tools[i].Name)
+		tools = slices.Append(p.Alloc, tools, Tool{Name: cloneText(p.Alloc, p.Tools[i].Name), Path: cloneText(p.Alloc, p.Tools[i].Path)})
+	}
+	return tools
 }
 
 func freeTools(a mem.Allocator, tools []Tool) {
- for i := range tools { mem.FreeString(a, tools[i].Name); mem.FreeString(a, tools[i].Path) }
- slices.Free(a, tools)
+	for i := range tools {
+		mem.FreeString(a, tools[i].Name)
+		mem.FreeString(a, tools[i].Path)
+	}
+	slices.Free(a, tools)
 }
 
 func cloneTools(a mem.Allocator, tools []Tool) []Tool {
- var cloned []Tool
- for i := range tools { cloned = slices.Append(a, cloned, Tool{Name: cloneText(a, tools[i].Name), Path: cloneText(a, tools[i].Path)}) }
- return cloned
+	var cloned []Tool
+	for i := range tools {
+		cloned = slices.Append(a, cloned, Tool{Name: cloneText(a, tools[i].Name), Path: cloneText(a, tools[i].Path)})
+	}
+	return cloned
 }

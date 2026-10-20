@@ -9,7 +9,7 @@ set -eu
 
 # Bootstrap initialization was retired; fail before selecting or downloading anything.
 if [ "${1:-}" = "init" ]; then
-	printf '%s\n' 'kame: init has been retired; copy Makefile.bootstrap from a source checkout, or run kame.com / the npm CLI directly.' >&2
+	printf '%s\n' 'kame: init has been retired; copy Makefile from a source checkout, or run kame.com / the npm CLI directly.' >&2
 	exit 1
 fi
 

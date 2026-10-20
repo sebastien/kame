@@ -87,7 +87,9 @@ func (p *Program) compileGeneratedDeclarations() diagnostic.Diagnostic {
 		eval.FreeEffects(p.Alloc, context.Effects)
 		if value.Diagnostic.Code != "" {
 			d := diagnosticFailureClone(p.Alloc, value.Diagnostic)
-			if d.Code == "PHASE_INVALID" || d.Code == "CAP_DENIED" { p.registrationTip(&d) }
+			if d.Code == "PHASE_INVALID" || d.Code == "CAP_DENIED" {
+				p.registrationTip(&d)
+			}
 			value.Free(p.Alloc)
 			freeStrings(p.Alloc, state.Stack)
 			freeStrings(p.Alloc, state.Dependencies)
@@ -337,7 +339,9 @@ func (p *Program) generatedCollision(candidate *rule.Rule, pending []*rule.Rule)
 	mem.FreeString(p.Alloc, selected.Target)
 	freeArguments(p.Alloc, selected.Arguments)
 	defer freeCaptures(p.Alloc, selected.Captures)
-	if selected.Diagnostic.Code != "" { return selected.Diagnostic }
+	if selected.Diagnostic.Code != "" {
+		return selected.Diagnostic
+	}
 	if selected.Rule != nil {
 		for i := range selected.Rule.Outputs {
 			output := selected.Rule.Outputs[i]
@@ -348,7 +352,9 @@ func (p *Program) generatedCollision(candidate *rule.Rule, pending []*rule.Rule)
 			mem.FreeString(p.Alloc, rendered)
 			mem.FreeString(p.Alloc, first)
 			mem.FreeString(p.Alloc, second)
-			if equal { return p.producerAmbiguity(target.Text, output, target) }
+			if equal {
+				return p.producerAmbiguity(target.Text, output, target)
+			}
 		}
 	}
 	key := cloneText(p.Alloc, target.Text)

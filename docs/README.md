@@ -1,7 +1,7 @@
 # Kame documentation
 
 Use these references and examples with a CLI built from matching sources.
-For older syntax, follow [the migration note](../MIGRATION.md).
+For current syntax, start with the [language overview](skills/kame/ref/language.md).
 
 ## Start here
 

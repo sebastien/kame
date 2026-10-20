@@ -23,7 +23,9 @@ func TestRemediation3ReferenceBounds(t *testing.T) {
 	}
 	for i := range texts {
 		r := evaluate(t, p, texts[i])
-		if r.Diagnostic.Code != "SEL_INDEX_INVALID" { t.Error("invalid reference bound accepted") }
+		if r.Diagnostic.Code != "SEL_INDEX_INVALID" {
+			t.Error("invalid reference bound accepted")
+		}
 		r.Free(a)
 	}
 	r := evaluate(t, p, "(let [xs [7 8]] xs.1..)")
@@ -35,9 +37,13 @@ func TestRemediation3ReferenceBounds(t *testing.T) {
 	context := eval.Context{Program: p, Scope: p.Scope, Run: a, Outputs: []core.Value{{Kind: core.Int, Int: 7}}}
 	for i := range selectors {
 		expression := expr.Parse(a, "selector.km", selectors[i])
-		if len(expression.Diagnostics) != 0 { t.Error("numeric selector fixture did not parse") }
+		if len(expression.Diagnostics) != 0 {
+			t.Error("numeric selector fixture did not parse")
+		}
 		r = p.EvaluateWith(expression.Expr, &context)
-		if r.Diagnostic.Code != "SEL_INDEX_INVALID" { t.Error("invalid selector bound accepted") }
+		if r.Diagnostic.Code != "SEL_INDEX_INVALID" {
+			t.Error("invalid selector bound accepted")
+		}
 		r.Free(a)
 		expression.Free()
 	}

@@ -73,7 +73,7 @@ cli_expect_status 0
 cli_expect_stdout_contains "Commands:"
 
 test-step "per-command help"
-for command in plan cat inputs outputs span parse fmt run; do
+for command in plan cat inputs outputs span parse fmt run pick; do
 	cli_run -- do "$command" --help
 	cli_expect_status 0
 	cli_expect_stdout_contains "Usage: kame do $command"

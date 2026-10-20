@@ -108,10 +108,12 @@ func (p *parser) stringParts() {
 	for p.pos < p.end {
 		if p.pos+4 < p.end && p.s.Text[p.pos:p.pos+4] == "@{x/" {
 			end := p.pos + 4
-			for end < p.end && (isToolNameByte(p.s.Text[end])) { end++ }
+			for end < p.end && (isToolNameByte(p.s.Text[end])) {
+				end++
+			}
 			if end > p.pos+4 && end < p.end && p.s.Text[end] == '}' {
 				p.literal(&literal, literalStart, p.pos)
-				p.parts = slices.Append(p.a, p.parts, Part{Kind: Tool, Text: p.s.Text[p.pos+4:end], Span: source.Span{Start: p.pos, End: end+1}})
+				p.parts = slices.Append(p.a, p.parts, Part{Kind: Tool, Text: p.s.Text[p.pos+4 : end], Span: source.Span{Start: p.pos, End: end + 1}})
 				p.pos, literalStart = end+1, end+1
 				continue
 			}
@@ -149,7 +151,9 @@ func (p *parser) stringParts() {
 				expr.Free(p.a, prefix.Expr)
 				slices.Free(p.a, prefix.Diagnostics)
 				message := "unclosed template expression; expected ')'"
-				if close == '}' { message = "unclosed reference expansion; expected '}'" }
+				if close == '}' {
+					message = "unclosed reference expansion; expected '}'"
+				}
 				p.diagnostic(source.Warning, start, start+2, message)
 				literal.WriteByte('@')
 				p.pos++

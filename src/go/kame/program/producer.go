@@ -185,7 +185,9 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 	if !entry.Kash && rendered.Commands != "" && !rendered.Waiting && rendered.Diagnostic.Code == "" {
 		// Opaque recipes consume the child snapshot; Kash records it on process submission.
 		environment := entry.Environment
-		if entry.Executor != "" && entry.Executor != "local" { environment = entry.MetadataEnvironment }
+		if entry.Executor != "" && entry.Executor != "local" {
+			environment = entry.MetadataEnvironment
+		}
 		c.Observe(core.ResourceKey{Kind: core.ResourceEnvironment, Name: eval.ProcessEnvironmentName}, eval.ProcessEnvironmentSignature(p.Alloc, environment))
 	}
 	if (entry.Rule.Kind == rule.FileRule || (entry.Rule.Kind == rule.CachedTaskRule && !p.Options.CacheDisabled && !p.Options.Force)) && !rendered.Waiting && rendered.Diagnostic.Code == "" && !entry.EnvironmentConflict && !entry.FileContextReady && !p.Options.DryRun {

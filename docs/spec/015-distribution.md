@@ -48,9 +48,9 @@ The Homebrew formula and Scoop manifest live in `etc/kame.rb` and
 that download to `kame.exe`. They are not release attachments.
 
 The launcher and bootstrap sections below describe source-tree helpers.
-Releases do not ship `kame` or `Makefile.bootstrap`. `init` and launcher
-self-update are retired; the checked-in launcher provisions only runtime
-assets, and the bootstrap template is copied manually from a source checkout.
+Releases do not ship the launcher. `init` and launcher self-update are
+retired; the checked-in launcher provisions only runtime assets. The repository
+`Makefile` is the bootstrap and is copied manually from a source checkout.
 
 `SHA256SUMS` contains one `<64-hex-lowercase>  <asset>` line per asset, sorted
 by asset name, using the conventional two-space separator.
@@ -255,44 +255,34 @@ unavailable, or download failed.
 
 ## Bootstrap Makefile
 
-`Makefile.bootstrap` is a source-tree template, not a release attachment.
-Copy it into a project manually, choose `KAME_VERSION` and configure a trusted
-verification key. `bin/kame init`, including its help forms, exits 1 with
-migration guidance before version selection, downloads or project writes.
-Projects can run `make -f Makefile.bootstrap TARGET...` without changing an
-existing Makefile, or inspect/include the sidecar themselves. The contract:
+The repository `Makefile` is the bootstrap. It is not a release attachment.
+Copy it into a project to replace that project's Makefile. `bin/kame init`,
+including its help forms, exits 1 with migration guidance before version
+selection, downloads or project writes. The contract:
 
-- Variables: `KAME_VERSION` (default `0.2.3`, pinned by the project),
-  `KAME_RELEASE_URL` (default the version's GitHub release), and `KAME`
-  (default `$(HOME)/.cache/kame/bin/kame-$(KAME_VERSION)`).
-- Source copies require a trusted key through `KAME_RELEASE_PUBKEY_B64` or
-  `KAME_RELEASE_PUBKEY_B64_OVERRIDE`; a key is never fetched from the asset server.
-- The first invocation downloads `kame.com`, `VERSION`, `SHA256SUMS`, and
-  `SHA256SUMS.sig` with curl, verifies the Ed25519 manifest signature and both
-  asset digests, and checks the signed version against `KAME_VERSION`. It then
-  atomically installs the executable and retains the signed manifest and version
-  beside it. Every reuse rechecks signature, digests and version without
-  downloading. Invalid or missing verification data fails closed. The bootstrap
+- Variables: `KAME_VERSION` (default `0.3.1`), `KAME_RELEASE_URL` (default that
+  version's GitHub release), and `KAME` (default
+  `$(HOME)/.cache/kame/bin/kame-$(KAME_VERSION)`).
+- The first run downloads `kame.com` from the author's GitHub release with
+  curl, wget, or fetch, marks it executable, and caches it. Later runs reuse
+  the cache and do not download. There is no signature check: the asset host is
+  the author's repository. A failed download leaves no executable. The bootstrap
   does not use the launcher's backend selection.
-- Every requested goal is `.PHONY`, depends on executable verification, and is
-  delegated via `@exec "$(KAME)" $@`.
-- A no-goal invocation delegates `default`.
-- The delegate's exit status is the build's exit status.
-- The template uses make and sh, requires OpenSSL for verification, and requires
-  curl for the first download.
+- Every requested goal is delegated via `@exec "$(KAME)" $@`. A no-goal
+  invocation delegates `default`. The delegate's exit status is the build's.
+- BSD make, GNU make, and POSIX `sh`.
 
 Documented limitations:
 
-- GNU make command-line variable assignments (`make FOO=bar`) and the flags
-  `-j`, `-n`, and `-k` are not forwarded; use `kame` directly for those.
-- Goals are forwarded as target names; recipe-level arguments are not
-  supported.
-- Only GNU make and POSIX `sh` are supported.
+- Each goal is a separate `kame` invocation, in order, with every command-line
+  binding (`make CC=clang CFLAGS=-O0 foo bar`). Make's own flags (`-j`, `-n`,
+  `-k`) are not forwarded.
+- `KAME`, `KAME_VERSION`, and `KAME_RELEASE_URL` configure the bootstrap and are
+  not passed on. Recipe-level arguments are not supported.
 
 ## Packaging
 
-Release assets are built with these targets, additive to the existing
-`Makefile`/`Makefile.kmk`:
+Release assets are built with these `Makefile.kmk` targets (`make` forwards them):
 
 - `dist/kame.wasm` copies the `wasm` build output to `dist/`.
 - `dist/kame.js` packages the JS CLI source.
@@ -421,11 +411,9 @@ the canonical build.
 - Retired `kame init`, including help forms, reports migration guidance without
   network access, cache creation or project writes.
 - Concurrent first invocations install exactly one verified artifact.
-- The bootstrap Makefile provisions once and forwards single, multiple, and
-  default goals in order with the delegate's exit status.
-- The bootstrap rejects tampered downloads and caches, missing verification data
-  or verifiers, wrong signing keys, and correctly signed releases whose version
-  differs from `KAME_VERSION`, without executing or publishing unverified bytes.
+- The bootstrap Makefile downloads once and forwards single, multiple, and
+  default goals in order with the delegate's exit status, on BSD make and GNU make.
+- A failed bootstrap download installs nothing and does not execute.
 - Cache root selection honors `KAME_HOME`, then `XDG_DATA_HOME`, then `HOME`.
 - Linux native package/host tests run automatically. Additional native source
   builds on Linux and macOS x64/ARM64 are manual development checks. The native

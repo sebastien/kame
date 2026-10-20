@@ -86,7 +86,9 @@ func (p *Program) memoScope(scope *Scope, c *Context) core.Signature {
 	d.Uint64(uint64(len(c.RuleFrames)))
 	for i := range c.RuleFrames {
 		frame := c.RuleFrames[i]
-		if frame.ServiceRule { d.Text("service") }
+		if frame.ServiceRule {
+			d.Text("service")
+		}
 		inputs := core.ValueSignature(core.Value{Kind: core.List, List: frame.Inputs})
 		outputs := core.ValueSignature(core.Value{Kind: core.List, List: frame.Outputs})
 		newer := core.ValueSignature(core.Value{Kind: core.List, List: frame.NewerInputs})
@@ -241,7 +243,9 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 		values = slices.Make[core.Value](c.Run, len(arguments))
 	}
 	for i := next; i < len(arguments); i++ {
-		if deferReplacement && i == 1 && values[0].Kind == core.Pattern { continue }
+		if deferReplacement && i == 1 && values[0].Kind == core.Pattern {
+			continue
+		}
 		facts, completedEffects, completedPaths := 0, len(c.Effects), len(c.WritePaths)
 		if c.Engine != nil {
 			facts = len(c.Engine.AcceptedObservations())
@@ -260,7 +264,10 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 			invalid := len(pattern.Diagnostics) != 0 || pattern.Pattern.Matchers == 0 || pattern.Pattern.References != 0
 			pattern.Pattern.Free(c.Run)
 			slices.Free(c.Run, pattern.Diagnostics)
-			if invalid { freeValuesWithCallables(c.Run, values); return argumentResult{Result: failure(c.Run, "PAT_INVALID", arguments[0].Span, "match pattern needs a matcher group")} }
+			if invalid {
+				freeValuesWithCallables(c.Run, values)
+				return argumentResult{Result: failure(c.Run, "PAT_INVALID", arguments[0].Span, "match pattern needs a matcher group")}
+			}
 		}
 	}
 	return argumentResult{Values: values}

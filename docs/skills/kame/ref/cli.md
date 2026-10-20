@@ -149,6 +149,7 @@ guessing how Kame selected it:
 ```sh
 kame do list                      # all declared targets and artifacts
 kame do list biuld                # find exact, partial, or close spellings
+kame do pick                      # choose a target or command interactively
 kame do plan ./build/app
 kame do inputs --depth -1 ./build/app
 kame do outputs --depth -1 src/main.c
@@ -161,6 +162,7 @@ kame -n ./build/app
 | Command | Output and behavior |
 | --- | --- |
 | `do list [QUERY]` | All declared rule outputs when omitted; otherwise exact, prefix, substring, then typo matches. Never builds targets. |
+| `do pick [--picker NAME]` | Interactive `fzf` (or `sk`, or `--picker`) list of targets, then `do` commands. Enter builds a target, asks for a target for `plan`/`inputs`/`outputs`/`span`/`cat`, runs `list`/`tools`/`help`, or prints usage for the rest. Esc exits 130. Native POSIX only. |
 | `do plan [--affected] [--depth N] [RESOURCE...]` | Upstream prerequisites by default; `--affected` shows downstream potential rebuild work and stages. Shared graph for multiple roots. |
 | `do inputs [--depth N] [TARGET]` | Reachable input files and separately labeled logical/configuration prerequisites. |
 | `do outputs [--depth N] [RESOURCE]` | Downstream declared outputs potentially affected by a resource change, including intermediate and sibling outputs; excludes the resource's own producer. |
@@ -183,6 +185,7 @@ characters allow two edits. No matches returns an empty successful result.
 **Rules** (bare named rules and unexpanded patterns), **Services**, **Tasks**
 (explicit cached `task` declarations), and **Artifacts**, omitting empty groups.
 Each group has a distinct color; query ranking is retained within each group.
+Literal rule metadata `summary` values appear beside their targets.
 Tasks and artifacts show **ok** (green), **out of date** (amber), or **missing**
 (red). A missing task has no successful cache record for its default argument
 bindings. Required task arguments, unavailable observations, and unverifiable
@@ -283,7 +286,7 @@ options. `cat` rejects watch/dry-run. Options may precede `tools check` and cach
 actions. `do cache clean -n` previews cache eviction without deleting records;
 it differs from ownership-aware `do clean -n`. `do help [--] COMMAND` accepts one
 topic only. The source launcher's retired `kame init` reports migration guidance
-without provisioning; copy `Makefile.bootstrap` from a checkout if needed.
+without provisioning; copy `Makefile` from a checkout if needed.
 Runner dry-run works for pure km/expr/Kash as well as mixed rule sessions.
 
 ## Evaluate a standalone expression

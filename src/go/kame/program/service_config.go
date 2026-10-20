@@ -35,7 +35,7 @@ func serviceField(record core.Value, name string) serviceConfigField {
 func serviceAllowedField(group string, name string) bool {
 	switch group {
 	case "root":
-		return name == "shell" || name == "env" || name == "ready" || name == "health" || name == "restart" || name == "stop" || name == "log-bytes"
+		return true
 	case "ready":
 		return name == "argv" || name == "interval-ms" || name == "timeout-ms"
 	case "health":

@@ -223,7 +223,29 @@ func replaceOne(c *eval.Context, state *replaceState, subject string) eval.Resul
 				fields = slices.Append(c.Run, fields, core.RecordField{Key: state.match.Names[i], Value: core.NewString(c.Run, matched.Captures[i])})
 			}
 		}
+		var positional []string
+		for i := range matched.Captures {
+			var buffer [32]byte
+			key := "_" + strconv.Itoa(buffer[:], i)
+			duplicate := false
+			for j := range fields {
+				if fields[j].Key == key {
+					duplicate = true
+					break
+				}
+			}
+			if duplicate {
+				continue
+			}
+			key = core.NewString(c.Run, key).Text
+			positional = slices.Append(c.Run, positional, key)
+			fields = slices.Append(c.Run, fields, core.RecordField{Key: key, Value: core.NewString(c.Run, matched.Captures[i])})
+		}
 		captures := core.NewRecord(c.Run, fields)
+		for i := range positional {
+			mem.FreeString(c.Run, positional[i])
+		}
+		slices.Free(c.Run, positional)
 		for i := range fields {
 			fields[i].Value.Free(c.Run)
 		}

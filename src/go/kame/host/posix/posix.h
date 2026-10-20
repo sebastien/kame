@@ -78,6 +78,11 @@ int km_cli_write_output(int, so_Slice, int64_t, so_int *);
 int km_cli_stderr_is_terminal(void);
 int km_cli_stderr_width(void);
 int km_cli_stdout_is_terminal(void);
+// Interactive filter. 0 selected, 1 no match, 2 picker error, 127 not found,
+// 130 cancelled, -1 host failure, -2 unsupported, -3 no terminal.
+// Does not join a new process group: the child must stay in the foreground
+// group so it can take the terminal. argv excludes the executable.
+int km_pick_select(so_String executable, so_Slice argv, so_String input, so_Slice selection, so_int *selected);
 int km_cli_stderr_height(void);
 int km_cli_environment_size(void);
 int km_cli_environment_copy(so_Slice);

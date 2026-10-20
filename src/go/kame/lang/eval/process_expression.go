@@ -18,14 +18,20 @@ func (p *Program) processExpression(e *expr.Expr, c *Context) Result {
 	if e.Items[0].Text == "run!" {
 		graph.Items = slices.Append(c.Run, graph.Items, mem.Alloc[expr.Expr](c.Run))
 		r := lowerProcessStage(c, graph.Items[0], e, false)
-		if r.Diagnostic.Code != "" { return r }
+		if r.Diagnostic.Code != "" {
+			return r
+		}
 	} else {
-		if len(e.Items) < 3 { return failure(c.Run, "EXPR_INVALID", e.Span, "pipe! requires at least two run! stages") }
+		if len(e.Items) < 3 {
+			return failure(c.Run, "EXPR_INVALID", e.Span, "pipe! requires at least two run! stages")
+		}
 		for i := 1; i < len(e.Items); i++ {
 			stage := mem.Alloc[expr.Expr](c.Run)
 			graph.Items = slices.Append(c.Run, graph.Items, stage)
 			r := lowerProcessStage(c, stage, e.Items[i], true)
-			if r.Diagnostic.Code != "" { return r }
+			if r.Diagnostic.Code != "" {
+				return r
+			}
 		}
 	}
 	return p.capture(graph, c)
@@ -42,16 +48,26 @@ func lowerProcessStage(c *Context, stage *expr.Expr, e *expr.Expr, pipeline bool
 		if !processSetupKey(key.Text) || (pipeline && key.Text == "async") {
 			return failure(c.Run, "EXPR_INVALID", key.Span, "invalid process setup key")
 		}
-		for j := range stage.Items { if stage.Items[j].Text == key.Text { return failure(c.Run, "EXPR_INVALID", key.Span, "duplicate process setup key") } }
-		if i+1 == len(e.Items) { return failure(c.Run, "EXPR_INVALID", key.Span, "process setup requires a value") }
+		for j := range stage.Items {
+			if stage.Items[j].Text == key.Text {
+				return failure(c.Run, "EXPR_INVALID", key.Span, "duplicate process setup key")
+			}
+		}
+		if i+1 == len(e.Items) {
+			return failure(c.Run, "EXPR_INVALID", key.Span, "process setup requires a value")
+		}
 		setup := mem.Alloc[expr.Expr](c.Run)
 		setup.Kind, setup.Text, setup.Span = expr.CommandSetup, key.Text, key.Span
 		setup.Items = slices.Append(c.Run, setup.Items, processExpressionWord(c.Run, e.Items[i+1]))
 		stage.Items = slices.Append(c.Run, stage.Items, setup)
 		i += 2
 	}
-	if i == len(e.Items) { return failure(c.Run, "EXPR_INVALID", e.Span, "run! requires an executable") }
-	for ; i < len(e.Items); i++ { stage.Items = slices.Append(c.Run, stage.Items, processExpressionWord(c.Run, e.Items[i])) }
+	if i == len(e.Items) {
+		return failure(c.Run, "EXPR_INVALID", e.Span, "run! requires an executable")
+	}
+	for ; i < len(e.Items); i++ {
+		stage.Items = slices.Append(c.Run, stage.Items, processExpressionWord(c.Run, e.Items[i]))
+	}
 	return Result{}
 }
 
@@ -63,10 +79,14 @@ func processExpressionWord(a mem.Allocator, e *expr.Expr) *expr.Expr {
 }
 
 func processSetupKey(key string) bool {
-	if key == "" { return false }
+	if key == "" {
+		return false
+	}
 	for i := 0; i < len(key); i++ {
 		b := key[i]
-		if b != '_' && !(b >= 'a' && b <= 'z') && !(b >= 'A' && b <= 'Z') && !(i > 0 && b >= '0' && b <= '9') { return false }
+		if b != '_' && !(b >= 'a' && b <= 'z') && !(b >= 'A' && b <= 'Z') && !(i > 0 && b >= '0' && b <= '9') {
+			return false
+		}
 	}
 	return true
 }
@@ -74,9 +94,13 @@ func processSetupKey(key string) bool {
 // Results retain completion metadata, never implicit stdout/stderr buffers.
 // A record is deliberately not an argv scalar; capture remains explicit.
 func processResult(a mem.Allocator, completion core.Value, span source.Span) Result {
-	if completion.Kind != core.Record { return failure(a, "HOST_FAIL", span, "process completion omitted its result") }
+	if completion.Kind != core.Record {
+		return failure(a, "HOST_FAIL", span, "process completion omitted its result")
+	}
 	status, signal := host.PayloadInt(completion, "status"), host.PayloadInt(completion, "signal")
-	if status == 0 && signal != 0 { status = 128 + signal }
+	if status == 0 && signal != 0 {
+		status = 128 + signal
+	}
 	var stages []core.Value
 	completed := host.PayloadStages(completion)
 	for i := range completed {
@@ -97,7 +121,9 @@ func processResult(a mem.Allocator, completion core.Value, span source.Span) Res
 	}
 	value := core.NewRecord(a, fields)
 	fields[2].Value.Free(a)
-	for i := range stages { stages[i].Free(a) }
+	for i := range stages {
+		stages[i].Free(a)
+	}
 	slices.Free(a, stages)
 	return Result{Value: value}
 }

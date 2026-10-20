@@ -8,8 +8,110 @@ import (
 	"kame/lang/script"
 	"kame/operations"
 	"kame/program"
+	"solod.dev/so/mem"
+	"solod.dev/so/path"
+	"solod.dev/so/strconv"
+	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
+
+func inputSnapshotAllocations(t *testing.T, count int) uint64 {
+	tracker := mem.Tracker{Allocator: t.Allocator()}
+	var a mem.Allocator = &tracker
+	memory := wasm.NewMemoryHost(a)
+	memory.Mkdir("inputs", 0o755)
+	memory.SetFile("extra", []byte("A"))
+	source := strings.NewBuilder(a)
+	defer source.Free()
+	source.WriteString("INPUTS = [")
+	for i := 0; i < count; i++ {
+		var digits [32]byte
+		name := core.NewString(a, "inputs/"+strconv.Itoa(digits[:], i))
+		memory.SetFile(name.Text, []byte("source"))
+		source.WriteString(" ./" + name.Text)
+		name.Free(a)
+	}
+	source.WriteString("]\n./output : @{INPUTS} ; [shell: kame]\n\t(text (read ./extra))\n")
+	parsed := script.Parse(a, "snapshot.kmk", source.String())
+	defer parsed.Free()
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	defer registry.Free()
+	allocations := uint64(0)
+	for phase := 0; phase < 4; phase++ {
+		if phase == 2 {
+			memory.SetFile("extra", []byte("B"))
+		}
+		if phase == 3 {
+			memory.SetFile("inputs/0", []byte("changed"))
+		}
+		compiled := program.Compile(a, parsed, registry, program.Options{Host: memory, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
+		if compiled.Program == nil {
+			memory.Free()
+			t.Fatal("snapshot program compile failed")
+			return 0
+		}
+		before := tracker.Stats()
+		result := compiled.Program.Materialize("./output")
+		after := tracker.Stats()
+		if phase == 1 {
+			allocations = after.Mallocs - before.Mallocs
+		}
+		if result.Diagnostic.Code != "" || result.Fresh != (phase == 1) {
+			t.Errorf("snapshot phase %d: %s, fresh=%t", phase, result.Diagnostic.Code, result.Fresh)
+		}
+		want := "A"
+		if phase >= 2 {
+			want = "B"
+		}
+		output, err := memory.ReadFile(a, "output")
+		if err != nil || string(output) != want {
+			t.Error("snapshot hid a changed input")
+		}
+		mem.FreeSlice(a, output)
+		result.Free(a)
+		var next *wasm.MemoryHost
+		if phase < 3 {
+			// A new Program must revalidate persisted proofs, not reuse live nodes.
+			next = wasm.NewMemoryHost(a)
+			dirs := []string{".", "inputs", ".kame/cache/file-context"}
+			for _, dir := range dirs {
+				next.Mkdir(dir, 0o755)
+				entries, readErr := memory.ReadDir(a, dir)
+				if readErr != nil {
+					t.Error("snapshot directory missing")
+				}
+				for i := range entries {
+					if !entries[i].IsDir {
+						name := path.Join(a, dir, entries[i].Name)
+						data, fileErr := memory.ReadFile(a, name)
+						if fileErr != nil {
+							t.Error("snapshot file missing")
+						}
+						next.SetFile(name, data)
+						mem.FreeSlice(a, data)
+						mem.FreeString(a, name)
+					}
+					mem.FreeString(a, entries[i].Name)
+				}
+				mem.FreeSlice(a, entries)
+			}
+		}
+		compiled.Program.Free()
+		compiled.Free(a)
+		memory = next
+	}
+	return allocations
+}
+
+func TestFileContextInputSnapshotAvoidsRepeatedGraphCollection(t *testing.T) {
+	small := inputSnapshotAllocations(t, 32)
+	large := inputSnapshotAllocations(t, 128)
+	// Four times the inputs must not produce quadratic graph-copy allocations.
+	if small == 0 || large > 5*small {
+		t.Errorf("freshness graph collection allocations grew from %d to %d", small, large)
+	}
+}
 
 // The forwarded ProgramHost deliberately contains unrelated bytes. Its
 // signature must come from outbound host completions, never MemoryHost.

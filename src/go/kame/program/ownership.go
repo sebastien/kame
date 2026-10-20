@@ -73,7 +73,7 @@ func (p *Program) EnableAutomaticClean(callback func(any, *Program) diagnostic.D
 // CleanupBlocker describes the first declaration preventing complete read-only
 // ownership verification. Its source is borrowed; it never contains values.
 type CleanupBlocker struct {
-	Reason string
+	Reason   string
 	Location eval.Location
 }
 
@@ -89,11 +89,19 @@ func (p *Program) CleanupContextBlocker() CleanupBlocker {
 		}
 		for j := range r.Inputs {
 			input := r.Inputs[j]
-			if _, literal := rule.LiteralInput(input); literal { continue }
+			if _, literal := rule.LiteralInput(input); literal {
+				continue
+			}
 			reason := "computed-prerequisite"
-			if input.Kind == rule.InputWildcard { reason = "wildcard-prerequisite" }
-			if input.Kind == rule.InputString { reason = "interpolated-prerequisite" }
-			if input.Kind == rule.InputTemplate { reason = "capture-prerequisite" }
+			if input.Kind == rule.InputWildcard {
+				reason = "wildcard-prerequisite"
+			}
+			if input.Kind == rule.InputString {
+				reason = "interpolated-prerequisite"
+			}
+			if input.Kind == rule.InputTemplate {
+				reason = "capture-prerequisite"
+			}
 			return p.cleanupBlocker(reason, input.Span)
 		}
 	}
@@ -112,7 +120,9 @@ func (p *Program) CleanupContextBlocker() CleanupBlocker {
 // guard. Unknown computed input membership and generated declarations withhold
 // deletion rather than treating incomplete discovery as absence of consumers.
 func (p *Program) CleanupContext() core.Signature {
-	if p.CleanupContextBlocker().Reason != "" { return core.Signature{} }
+	if p.CleanupContextBlocker().Reason != "" {
+		return core.Signature{}
+	}
 	var sink hashSink
 	sink.state = core.NewDigest()
 	sink.appendText("kame-clean-context-v1")

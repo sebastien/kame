@@ -13,9 +13,10 @@ type CommandInfo struct {
 	Summary string
 }
 
-var Commands = [14]CommandInfo{
+var Commands = [15]CommandInfo{
 	{Name: "run", Usage: "kame do run [OPTIONS] INPUT... [-- ARG...]", Summary: "execute ordered source fragments in one session"},
 	{Name: "list", Usage: "kame do list [OPTIONS] [QUERY]", Summary: "list declared targets and artifacts, with exact, partial, or typo matching"},
+	{Name: "pick", Usage: "kame do pick [--picker NAME] [OPTIONS]", Summary: "interactively choose a target or command"},
 	{Name: "plan", Usage: "kame do plan [--affected] [--depth N] [OPTIONS] [RESOURCE...]", Summary: "inspect prerequisites, or affected consumers, and dependency stages without execution"},
 	{Name: "inputs", Usage: "kame do inputs [--depth N] [OPTIONS] [TARGET]", Summary: "list all reachable input files and logical prerequisites"},
 	{Name: "outputs", Usage: "kame do outputs [--depth N] [OPTIONS] [RESOURCE]", Summary: "list downstream outputs potentially affected by a resource change"},
@@ -120,9 +121,15 @@ func HelpText(topic string) string {
 			b.WriteString("No query lists all declared rule outputs, including missing artifacts and unexpanded patterns.\nA query ranks exact names, prefixes, substrings, then close spellings (including swapped letters).\nMatching is case-sensitive; ties and unfiltered results are alphabetical. No matches is an empty successful result.\nJSON: one string array. Ordinary value definitions and implicit clean are not listed.\n")
 			b.WriteString("Human output groups Rules, Services, Tasks (cached), and Artifacts in distinct colors.\nTask/artifact status: green ok, amber out of date, red missing; muted unknown when proof is unavailable.\nA missing task has no successful cache record; required task arguments remain unknown.\n")
 		}
+		if topic == "pick" {
+			b.WriteString("Opens fzf, otherwise sk, or --picker NAME. --picker is an executable name, not a shell command.\nTargets come first, then do commands except pick. Esc cancels (exit 130) and runs nothing.\nA target builds. plan, inputs, outputs, span, and cat ask for a target, then run; cat materializes.\nlist, tools, and help run immediately. run, parse, fmt, render, clean, and cache print usage.\n")
+			b.WriteString("Source: one -f FILE or -c TEXT; -C DIR, --define NAME=VALUE, --set NAME=LITERAL, --tool NAME=PATH.\nExecution flags (-n, -j, --force, and the rest of the build set) apply to the chosen build or cat.\nRequires a terminal. Node, WASM, and Windows report FEATURE_UNSUP. Missing fzf/sk is PICK_UNAVAILABLE.\n")
+		}
 		if topic == "list" || topic == "plan" || topic == "cat" || topic == "tools" || topic == "inputs" || topic == "outputs" || topic == "span" {
 			b.WriteString("Source: one -f FILE or -c TEXT; -C DIR, --define NAME=VALUE, --set NAME=LITERAL, --tool NAME=PATH.\n")
-			if topic != "list" { b.WriteString("NAME=VALUE overrides a declared value or binds a task argument.\n") }
+			if topic != "list" {
+				b.WriteString("NAME=VALUE overrides a declared value or binds a task argument.\n")
+			}
 			b.WriteString("Capabilities: --allow-read[=ROOTS], --allow-write[=ROOTS], --allow-run[=ROOTS], --allow-env[=NAMES].\n")
 			if topic != "cat" {
 				b.WriteString("Inspection never executes recipes or applies deferred writes; execution-only flags are rejected.\n")

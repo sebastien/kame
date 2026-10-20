@@ -248,24 +248,34 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 	}
 	if !state.Finishing {
 		r := p.advanceKashBody(state, c)
-		if r.Waiting { return r }
+		if r.Waiting {
+			return r
+		}
 		state.Finishing = true
 		state.Primary = r.Diagnostic.Clone(p.Alloc)
 		r.Free(c.Run)
-		if state.Primary.Code != "" { p.cancelScriptGroup(state.Group) }
+		if state.Primary.Code != "" {
+			p.cancelScriptGroup(state.Group)
+		}
 	}
 	r := p.finishDefers(state.Deferred, c, state.Primary.Code != "")
-	if r.Waiting { return r }
+	if r.Waiting {
+		return r
+	}
 	if state.Primary.Code != "" {
 		primary := state.Primary.Clone(c.Run)
 		if r.Diagnostic.Code != "" {
 			primary.Notes = slices.Append(c.Run, primary.Notes, owned(c.Run, "deferred cleanup failed: "+r.Diagnostic.Code+": "+r.Diagnostic.Message))
-			for i := range r.Diagnostic.Notes { primary.Notes = slices.Append(c.Run, primary.Notes, owned(c.Run, r.Diagnostic.Notes[i])) }
+			for i := range r.Diagnostic.Notes {
+				primary.Notes = slices.Append(c.Run, primary.Notes, owned(c.Run, r.Diagnostic.Notes[i]))
+			}
 		}
 		r.Free(c.Run)
 		return Result{Diagnostic: primary}
 	}
-	if r.Diagnostic.Code != "" { return r }
+	if r.Diagnostic.Code != "" {
+		return r
+	}
 	r.Free(c.Run)
 	return Result{Value: state.Value.Clone(c.Run)}
 }

@@ -56,8 +56,8 @@ type PlanInput struct {
 	Group int
 	// Computed distinguishes expression-origin inputs from coincident literals.
 	Computed bool
-	Display     string
-	Key         core.ResourceKey
+	Display  string
+	Key      core.ResourceKey
 }
 
 type PlanResult struct {
@@ -140,25 +140,25 @@ const (
 type Event struct {
 	// Deadline for delivery of cleanup output, not a public event field.
 	FinalizationDeadlineNS int64
-	Decision string
-	Reason string
-	Message string
-	Aspect string
-	Kind             EventKind
-	Target           string
-	Key              core.ResourceKey
-	NodeID           int64
-	Generation       int64
-	Attempt          int64
-	RequestID        int64
-	DependencyID     int64
-	DependencyKey    core.ResourceKey
-	Effect           string
-	State            string
-	Program          string
-	Argv             []string
-	RuntimeMS        int64
-	HasRuntime       bool
+	Decision               string
+	Reason                 string
+	Message                string
+	Aspect                 string
+	Kind                   EventKind
+	Target                 string
+	Key                    core.ResourceKey
+	NodeID                 int64
+	Generation             int64
+	Attempt                int64
+	RequestID              int64
+	DependencyID           int64
+	DependencyKey          core.ResourceKey
+	Effect                 string
+	State                  string
+	Program                string
+	Argv                   []string
+	RuntimeMS              int64
+	HasRuntime             bool
 	// Native presentation timing; not part of the structured event schema.
 	MonotonicNS      int64
 	HasMonotonic     bool
@@ -177,12 +177,12 @@ type EventResult struct {
 }
 
 type Handle struct {
-	Session *Session
-	Program    *Program
-	Root       *core.Root
-	Node       *core.Node
-	Target     string
-	Definition bool
+	Session       *Session
+	Program       *Program
+	Root          *core.Root
+	Node          *core.Node
+	Target        string
+	Definition    bool
 	valueRevision int64
 }
 
@@ -238,12 +238,12 @@ type Options struct {
 	// Host executes recipe scripts and services the runtime's filesystem and
 	// clock. Compile transfers ownership to the Program, which releases it
 	// during Program.Free.
-	Host            host.ProgramHost
-	Directory       string
-	Shell           []string
-	Environment     []string
+	Host        host.ProgramHost
+	Directory   string
+	Shell       []string
+	Environment []string
 	// Defines explicitly overrides declared values with literal NAME=VALUE text.
-	Defines         []string
+	Defines []string
 	// Parameters is authored shorthand: definition overrides, target arguments,
 	// or assignment-shaped targets, classified against registered declarations.
 	Parameters      []string
@@ -274,9 +274,9 @@ type Options struct {
 	ResolveTool func(mem.Allocator, string, string, []string) string
 	// Ownership records actual production before effects and after successful
 	// publication. The caller owns State and its project lock until shutdown.
-	Ownership func(any, *Program, []string, string, bool) diagnostic.Diagnostic
-	OwnershipState any
-	AutomaticClean func(any, *Program) diagnostic.Diagnostic
+	Ownership           func(any, *Program, []string, string, bool) diagnostic.Diagnostic
+	OwnershipState      any
+	AutomaticClean      func(any, *Program) diagnostic.Diagnostic
 	AutomaticCleanState any
 }
 
@@ -289,34 +289,34 @@ type Tool struct {
 }
 
 type Program struct {
-	AutomaticClean func(any, *Program) diagnostic.Diagnostic
+	AutomaticClean      func(any, *Program) diagnostic.Diagnostic
 	AutomaticCleanState any
-	automaticCleanRule *rule.Rule
-	Alloc             mem.Allocator
-	Engine            *core.Engine
-	Eval              *eval.Program
-	Parsed            *script.Script
-	ParsedOwned       bool
-	Host              host.ProgramHost
-	Options           Options
-	Rules             []registeredRule
-	GeneratedRules    []*rule.Rule
-	ResolvedRules     []*rule.Rule
-	GeneratedRuleMeta []generatedRuleMeta
-	Tools             []Tool
+	automaticCleanRule  *rule.Rule
+	Alloc               mem.Allocator
+	Engine              *core.Engine
+	Eval                *eval.Program
+	Parsed              *script.Script
+	ParsedOwned         bool
+	Host                host.ProgramHost
+	Options             Options
+	Rules               []registeredRule
+	GeneratedRules      []*rule.Rule
+	ResolvedRules       []*rule.Rule
+	GeneratedRuleMeta   []generatedRuleMeta
+	Tools               []Tool
 	// Configuration owns the effective literal definition overrides.
-	Configuration     []string
+	Configuration []string
 	// ParameterDefinitions owns shorthand operands consumed as definition
 	// overrides, so target normalization can omit them; these are not declarations.
 	ParameterDefinitions []string
-	SourceSignature   core.Signature
-	Instances         []instance
-	Events            []Event
+	SourceSignature      core.Signature
+	Instances            []instance
+	Events               []Event
 	// Optional observation around actual scheduler dispatch, never a work request.
-	ObserveWork       func(*core.Node, string, bool)
-	nextRequest       int64
-	Pending           []pendingRequest
-	epoch             int64
+	ObserveWork func(*core.Node, string, bool)
+	nextRequest int64
+	Pending     []pendingRequest
+	epoch       int64
 	// Forwarding mirrors Options.ForwardRequests; Outbound holds requests an
 	// embedding host must service and complete.
 	InspectionWaiting bool
@@ -328,7 +328,7 @@ type Program struct {
 }
 
 type pendingRequest struct {
-	Graph core.Value // owned prepared topology for live inspection, never stdout
+	Graph            core.Value // owned prepared topology for live inspection, never stdout
 	Capture          bool
 	Stream           bool
 	Program          string
@@ -370,9 +370,9 @@ type generatedRuleMeta struct {
 	Dependencies []string
 }
 type instance struct {
-	Artifacts []*core.Node
-	OwnershipPaths []string
-	ReasonIdentities []reasonIdentity
+	Artifacts              []*core.Node
+	OwnershipPaths         []string
+	ReasonIdentities       []reasonIdentity
 	Service                ServiceConfig
 	ServiceState           string
 	ServiceProcessID       int64
@@ -421,7 +421,7 @@ type instance struct {
 	// Inspection instances resolve read-only inputs, definitions, or artifact status. They must not
 	// satisfy normal target lookup or participate in build execution.
 	Inspection           bool
-	InspectionStatus *inspectionStatusState
+	InspectionStatus     *inspectionStatusState
 	inspectionRoot       *core.Root
 	ForwardEffects       *forwardEffectsState
 	VerifyOutputs        bool
@@ -453,6 +453,7 @@ type instance struct {
 }
 type selection struct {
 	Rule       *rule.Rule
+	Output     rule.Target // Borrowed matched declaration output and authored span.
 	Captures   []template.CaptureValue
 	Arguments  []ArgumentValue
 	Target     string

@@ -52,14 +52,20 @@ assert.deepEqual(JSON.parse(diagnostic()).diagnostic.tips,
   ['use @< in a rule recipe, or pass the input value explicitly']);
 assert.equal(query({ predicate: ':false' }), 0);
 assert.equal(diagnostic(), '');
-assert.equal(query({ name: 'x', predicate: 'UNKNOWN' }), 5);
+// Legacy queries omit synthetic source names. Grow an authored include label
+// instead, without creating an oversized expression or changing the size limit.
+const largeDescriptor = (size) => ({ sources: [], condition: {
+  name: 'condition.km', text: 'UNKNOWN',
+  includes: [{ source: 'main.km', label: 'x'.repeat(size), start: 0, end: 1 }],
+} });
+assert.equal(query(largeDescriptor(1)), 5);
 const overhead = encoder.encode(diagnostic()).length - 1;
-assert.equal(query({ name: 'x'.repeat(65536 - overhead), predicate: 'UNKNOWN' }), 5);
+assert.equal(query(largeDescriptor(65536 - overhead)), 5);
 assert.equal(e.kame_wasm_instance_diagnostic_length(handle), 65536);
 assert.equal(JSON.parse(diagnostic()).diagnostic.code, 'REF_MISSING');
-assert.equal(query({ name: 'x'.repeat(65537 - overhead), predicate: 'UNKNOWN' }), 2);
+assert.equal(query(largeDescriptor(65537 - overhead)), 2);
 assert.match(diagnostic(), /^NO_MEMORY: composition diagnostic exceeds/);
-assert.equal(query({ name: 'x'.repeat(65536), predicate: 'UNKNOWN' }), 2);
+assert.equal(query(largeDescriptor(65536)), 2);
 assert.equal(diagnostic(), 'NO_MEMORY: composition diagnostic exceeds 65536-byte source capacity');
 assert.equal(query(descriptor), 5, 'bounded report overflow must remain recoverable');
 assert.equal(diagnostic(), saved);
@@ -82,7 +88,7 @@ if (process.argv[3]) {
   const directory = await mkdtemp('/tmp/opencode/kame-composition-diagnostics-');
   try {
     for (const [name, text, expected] of [
-      ['read', `${prefix}(if NamedRead (include ./missing.km) :nil)\n`, { frames: detail.frames }],
+      ['read', `${prefix}(if NamedRead (include ./missing.km) :nil)\n`, { frames: ['read', 'text', 'NamedRead', 'source selection'] }],
       ['tip', '(if @< (include ./missing.km) :nil)\n', { tips: ['use @< in a rule recipe, or pass the input value explicitly'] }],
       ['inline', null, { tips: ['save this fragment as a .km or .kmk file and run that file'] }],
     ]) {
@@ -97,7 +103,7 @@ if (process.argv[3]) {
         assert.equal(result.status, 1, result.stdout + result.stderr);
         const report = result.stdout.trim().split('\n').map((line) => JSON.parse(line))
           .find((event) => event.type === 'diagnostic').diagnostic;
-        if (expected.frames) assert.deepEqual(report.frames.map((frame) => frame.label), ['read', 'text', 'NamedRead']);
+        if (expected.frames) assert.deepEqual(report.frames.map((frame) => frame.label), expected.frames);
         if (expected.tips) assert.deepEqual(report.tips, expected.tips);
         diagnostics.push(report);
       }

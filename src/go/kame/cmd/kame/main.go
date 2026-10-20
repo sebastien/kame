@@ -47,8 +47,14 @@ func runBuild(args []string, out io.Writer, errOut io.Writer) int {
 	}
 	if len(parsed.Targets) == 1 && parsed.Targets[0] == "clean" && !session.Program.HasTarget("clean") {
 		cleanArgs := []string{"-C", parsed.Directory}
-		if parsed.DryRun { cleanArgs = slices.Append(mem.System, slices.Clone(mem.System, cleanArgs), "--dry-run") } else { cleanArgs = slices.Clone(mem.System, cleanArgs) }
-		if parsed.JSON { cleanArgs = slices.Append(mem.System, cleanArgs, "--json") }
+		if parsed.DryRun {
+			cleanArgs = slices.Append(mem.System, slices.Clone(mem.System, cleanArgs), "--dry-run")
+		} else {
+			cleanArgs = slices.Clone(mem.System, cleanArgs)
+		}
+		if parsed.JSON {
+			cleanArgs = slices.Append(mem.System, cleanArgs, "--json")
+		}
 		status := runClean(cleanArgs, out, errOut)
 		slices.Free(mem.System, cleanArgs)
 		return status
@@ -203,7 +209,10 @@ func (s *buildSession) Free() {
 	if s.Program != nil {
 		s.Program.Free()
 	}
-	if s.Ledger != nil { s.Ledger.Store.Free(); mem.Free(mem.System, s.Ledger) }
+	if s.Ledger != nil {
+		s.Ledger.Store.Free()
+		mem.Free(mem.System, s.Ledger)
+	}
 	if s.Registry != nil {
 		s.Registry.Free()
 	}

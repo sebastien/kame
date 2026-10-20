@@ -12,6 +12,16 @@ cd "$CLI_ROOT"
 release="$CLI_ROOT/src/sh/release.sh"
 build_ape="$CLI_ROOT/src/sh/build-ape.sh"
 
+test-step "the curated WASM gate retains topology and Kame recipe coverage"
+wasm_tests=$(sed -n '/^TEST_WASM =/,/^$/p' Makefile.kmk)
+for script in tests/T042-*.sh tests/T044-01-*.sh; do
+	if grep -Fq "./$script" <<<"$wasm_tests"; then
+		test-ok "$script is in TEST_WASM"
+	else
+		test-fail "$script is missing from TEST_WASM"
+	fi
+done
+
 test-step "distribution metadata agrees with the project license and version"
 if python3 - "$CLI_ROOT" <<'PYLICENSE'
 import json
@@ -140,6 +150,9 @@ release\ download*)
 		cat "$MOCK_ROOT/package.json"
 	fi
 	;;
+"api -H Accept: application/vnd.github.raw+json repos/$MOCK_REPO/contents/VERSION?ref="*)
+	printf '%s\n' "$MOCK_VERSION"
+	;;
 "api -H Accept: application/vnd.github.raw+json repos/$MOCK_REPO/contents/README.md?ref="* | \
 "api -H Accept: application/vnd.github.raw+json repos/$MOCK_REPO/contents/LICENSE.md?ref="*) echo 'tagged fixture' ;;
 *) echo "unexpected GitHub call: $*" >&2; exit 1 ;;
@@ -162,6 +175,10 @@ cat >"$mock_bin/npm" <<'SH'
 set -eu
 printf 'npm %s\n' "$*" >>"$MOCK_LOG"
 case "$*" in
+"whoami --registry https://registry.npmjs.org/")
+	[ "$MOCK_NPM_STATE" != unauthenticated ] || { echo 'npm error code E401' >&2; exit 1; }
+	printf 'release-operator\n'
+	;;
 "view $MOCK_PACKAGE@$MOCK_VERSION version --json --registry https://registry.npmjs.org/")
 	if [ "$MOCK_NPM_STATE" = api_failure ]; then
 		echo '{"error":{"code":"E401"}}'
@@ -194,6 +211,7 @@ case "$*" in
 "publish --access public --registry https://registry.npmjs.org/")
 	[ "$MOCK_NPM_STATE" != publish_failure ] || { echo 'npm authentication expired' >&2; exit 1; }
 	[ "$PWD" != "$MOCK_ROOT" ] && [ -f package.json ] || exit 1
+	[ "$(cat VERSION)" = "$MOCK_VERSION" ] || exit 1
 	grep -qx 'released JS' dist/kame.js && grep -qx 'released WASM' dist/kame.wasm || exit 1
 	touch "$MOCK_NPM_MARKER"
 	;;
@@ -365,11 +383,12 @@ else
 fi
 
 test-step "npm errors and mismatched tagged metadata fail safely"
-for state in api_failure publish_failure metadata_mismatch; do
+for state in unauthenticated api_failure publish_failure metadata_mismatch; do
 	MOCK_NPM_STATE=$state
 	run_release
 	if [ "$status" = 1 ] && ! grep -Eq '^(make|gh release (create|upload|edit))' "$MOCK_LOG" &&
-		{ [ "$state" = publish_failure ] || ! grep -q '^npm publish ' "$MOCK_LOG"; }; then
+		{ [ "$state" = publish_failure ] || ! grep -q '^npm publish ' "$MOCK_LOG"; } &&
+		{ [ "$state" != unauthenticated ] || { grep -q 'npm authentication is missing or expired' "$TMPDIR/err" && ! grep -q '^npm view ' "$MOCK_LOG" && ! grep -q '^gh release download ' "$MOCK_LOG"; }; }; then
 		test-ok "$state does not modify GitHub or publish an unsafe npm payload"
 	else
 		test-fail "$state: status=$status err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"

@@ -4,7 +4,7 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/lang/eval"
- "kame/lang/rule"
+	"kame/lang/rule"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/strings"
@@ -31,7 +31,9 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 		var spans []diagnostic.Span
 		for i := range entry.Rule.Body {
 			line := entry.Rule.Body[i]
-			if i != 0 { b.WriteByte('\n') }
+			if i != 0 {
+				b.WriteByte('\n')
+			}
 			b.WriteString(line.Text)
 			spans = slices.Append(p.Alloc, spans, diagnostic.Span{Start: line.Span.Start, End: line.Span.End})
 		}
@@ -40,28 +42,32 @@ func (p *Program) render(c *core.EngineContext, entry *instance, names []string)
 		return result
 	}
 	body := entry.Rule.Body
- resources := entry.Plan.ResourceInputs
- if entry.Plan.Resolved { resources = entry.Plan.ResolvedResourceInputs }
- inputs := makeRuleInputValues(p.Alloc, names, resources)
+	resources := entry.Plan.ResourceInputs
+	if entry.Plan.Resolved {
+		resources = entry.Plan.ResolvedResourceInputs
+	}
+	inputs := makeRuleInputValues(p.Alloc, names, resources)
 	outputs := makeValues(p.Alloc, entry.Plan.Outputs)
 	defer freeValues(p.Alloc, inputs)
 	defer freeValues(p.Alloc, outputs)
 	dependencyState := renderDependencyState{Program: p, Index: p.instanceIndex(entry.Node)}
- var newer []core.Value
- if entry.NewerInputs != nil { newer = entry.NewerInputs.Values }
+	var newer []core.Value
+	if entry.NewerInputs != nil {
+		newer = entry.NewerInputs.Values
+	}
 	context := mem.Alloc[eval.Context](p.Alloc)
 	*context = eval.Context{Program: p.Eval, Engine: c, Scope: p.Eval.Scope, Run: p.Alloc, Cwd: p.Options.Directory, Environment: entry.Environment, HasEnvironment: true, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: p.Eval.DefinitionArgsSet, Phase: eval.RenderingPhase, ResolverState: &dependencyState, DependencyObserver: observeRenderDependency, OperationObserver: observeRenderOperation, ToolResolver: resolveRenderTool, RuleFrames: []eval.RuleFrame{{Inputs: inputs, Outputs: outputs, FileRule: entry.Rule.Kind == rule.FileRule, ServiceRule: entry.Rule.Kind == rule.ServiceRule, NewerInputs: newer}}}
 	p.bindDefinitionEnvironment(context)
 	context.TrackUnvalidatedReads = true
 	scope := p.ruleScope(context, entry.Captures, entry.Plan.Arguments)
-    context.Scope = scope
-    defer scope.Free()
+	context.Scope = scope
+	defer scope.Free()
 	if entry.KameExpression != nil {
 		return p.renderKame(entry, context)
 	}
-    if entry.Rule.BodyDoc != nil {
-        return p.renderDocument(entry, context)
-    }
+	if entry.Rule.BodyDoc != nil {
+		return p.renderDocument(entry, context)
+	}
 	b := strings.NewBuilder(p.Alloc)
 	defer b.Free()
 	var spans []diagnostic.Span
@@ -132,9 +138,13 @@ func (p *Program) renderKame(entry *instance, context *eval.Context) renderResul
 	defer freeStrings(p.Alloc, context.WritePaths)
 	defer result.Free(p.Alloc)
 	defer eval.ReleaseCallable(p.Alloc, &result.Value)
-	if result.Waiting { return renderResult{Waiting: true} }
+	if result.Waiting {
+		return renderResult{Waiting: true}
+	}
 	if result.Diagnostic.Code != "" {
-		if p.Options.DryRun && result.Diagnostic.Code == "READ_DEFERRED" { return renderResult{Deferred: true} }
+		if p.Options.DryRun && result.Diagnostic.Code == "READ_DEFERRED" {
+			return renderResult{Deferred: true}
+		}
 		d := result.Diagnostic
 		result.Diagnostic = diagnostic.Diagnostic{}
 		return renderResult{Diagnostic: d}
@@ -275,11 +285,11 @@ func observeRenderDependency(value any, key core.ResourceKey) {
 		return
 	}
 	if resolved.Node != nil {
-  child := p.instanceIndex(resolved.Node)
-  if child >= 0 && !p.claimEnvironment(child, p.Instances[state.Index].Environment) {
-   p.Instances[state.Index].EnvironmentConflict = true
-   return
-  }
+		child := p.instanceIndex(resolved.Node)
+		if child >= 0 && !p.claimEnvironment(child, p.Instances[state.Index].Environment) {
+			p.Instances[state.Index].EnvironmentConflict = true
+			return
+		}
 		p.adoptTask(resolved.Node, p.Instances[state.Index].runEpoch)
 	}
 	entry := &p.Instances[state.Index]
@@ -375,12 +385,14 @@ func observeRenderOperation(value any, name string, version string) {
 // Lazy definition reads can discover produced files just as recipe expressions
 // do. Bind those producers before adding the demanding engine edge.
 func observeScopedDefinitionDependency(value any, key core.ResourceKey, context *eval.Context) {
-    p := value.(*Program)
-    p.Eval.DefinitionDependencyObserver(value, key)
-    if key.Kind != core.ResourceFile && key.Kind != core.ResourceTarget && key.Kind != core.ResourceTask { return }
-    node := p.Engine.Lookup(key)
-    index := p.instanceIndex(node)
-    if index >= 0 && !p.Instances[index].Inspection && !p.claimEnvironment(index, context.Environment) {
-        context.Engine.Fail(p.environmentFailure(index, "definition prerequisite has a different recipe environment"))
-    }
+	p := value.(*Program)
+	p.Eval.DefinitionDependencyObserver(value, key)
+	if key.Kind != core.ResourceFile && key.Kind != core.ResourceTarget && key.Kind != core.ResourceTask {
+		return
+	}
+	node := p.Engine.Lookup(key)
+	index := p.instanceIndex(node)
+	if index >= 0 && !p.Instances[index].Inspection && !p.claimEnvironment(index, context.Environment) {
+		context.Engine.Fail(p.environmentFailure(index, "definition prerequisite has a different recipe environment"))
+	}
 }

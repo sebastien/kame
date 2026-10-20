@@ -14,23 +14,23 @@ const (
 type Node struct {
 	// Teardown is invocation state, never cache data. BeginTeardown records an
 	// exit; the normal event driver advances Teardown before ending the generation.
-	BeginTeardown func(any, int64, int64) bool
-	Teardown Producer
-	TeardownContext any
+	BeginTeardown           func(any, int64, int64) bool
+	Teardown                Producer
+	TeardownContext         any
 	TeardownPreserveRequest bool
-	teardownDiagnostic Diagnostic
-	tearingDown bool
-	teardownRestart bool
-	teardownRoot *Root
-	ID           int64
-	Key          ResourceKey
-	Producer     Producer
-	Context      any
-	ContextFree  ContextFree
-	Latest       Value
-	Signature    Signature
-	Observations []Observation
-	Current      bool
+	teardownDiagnostic      Diagnostic
+	tearingDown             bool
+	teardownRestart         bool
+	teardownRoot            *Root
+	ID                      int64
+	Key                     ResourceKey
+	Producer                Producer
+	Context                 any
+	ContextFree             ContextFree
+	Latest                  Value
+	Signature               Signature
+	Observations            []Observation
+	Current                 bool
 	// ValidationPending keeps accepted state while dependencies are refreshed.
 	ValidationPending bool
 	DisableReuse      bool

@@ -173,7 +173,7 @@ func opCount(c *eval.Context, s any, v []core.Value) eval.Result {
 // transfers callable ownership; discarded fields/defaults release theirs.
 func opGet(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	record := len(v)-1
+	record := len(v) - 1
 	if v[record].Kind != core.Record {
 		return invalidArgument(c, v, record, "record")
 	}
@@ -239,7 +239,9 @@ func opNth(c *eval.Context, s any, v []core.Value) eval.Result {
 		return eval.Result{Value: core.Value{Kind: core.Nil}}
 	}
 	index := int(wideIndex)
-	if index < 0 { index += length }
+	if index < 0 {
+		index += length
+	}
 	if v[1].Kind == core.List {
 		result := v[1].List[index].Clone(c.Run)
 		for i := range v[1].List {

@@ -30,7 +30,7 @@ func Register(r *eval.Registry) bool {
 		pure(r, "unique", opUnique, 1, 1) && pure(r, "join", opJoin, 2, 2) && pure(r, "resource", opResource, 1, 1) &&
 		pure(r, "split", opSplit, 2, 2) && pure(r, "strip", opStrip, 1, 1) && pure(r, "pattern", opPattern, 1, 1) &&
 		callback(r, "sub", opReplace, 2, 3) && callback(r, "replace", opReplace, 2, 3) && pure(r, "match?", opMatch, 1, 2) && pure(r, "includes?", opIncludes, 2, 2) &&
-		pure(r, "regex-match", opRegexMatch, 2, 2) && pure(r, "resub", opResub, 3, 3) && pure(r, "capture", opCapture, 2, 2) &&
+		pure(r, "regex-match", opRegexMatch, 2, 2) && callback(r, "resub", opResub, 3, 3) && pure(r, "capture", opCapture, 2, 2) &&
 		pure(r, "starts?", opStarts, 2, 2) && pure(r, "ends?", opEnds, 2, 2) &&
 		pure(r, "black", opTerminalStyle, 1, 1) && pure(r, "red", opTerminalStyle, 1, 1) &&
 		pure(r, "green", opTerminalStyle, 1, 1) && pure(r, "yellow", opTerminalStyle, 1, 1) &&
@@ -57,7 +57,7 @@ func Register(r *eval.Registry) bool {
 }
 
 func contract(r *eval.Registry, name string, call eval.OperationCall, min int, max int, category eval.OperationCategory, phases eval.PhaseMask, behavior eval.OperationBehavior) bool {
-	return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Category: category, Phases: phases, Behavior: behavior, Version: version, DeferredReplacement: name == "replace" || name == "sub"})
+	return r.Add(eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Category: category, Phases: phases, Behavior: behavior, Version: version, DeferredReplacement: name == "replace" || name == "sub" || name == "resub"})
 }
 
 func pure(r *eval.Registry, name string, call eval.OperationCall, min int, max int) bool {
@@ -70,8 +70,12 @@ func callback(r *eval.Registry, name string, call eval.OperationCall, min int, m
 
 func observation(r *eval.Registry, name string, call eval.OperationCall, min int, max int, capability eval.Capability) bool {
 	operation := eval.Operation{Name: name, Call: call, MinArity: min, MaxArity: max, Capabilities: []eval.Capability{capability}, Category: eval.ObservationOperation, Phases: eval.AllPhases, Behavior: eval.ReadsHost | eval.TracksDependency, Version: version}
-	if name == "wildcard" { operation.Preflight = wildcardPreflight }
-	if name == "files" || name == "dirs" { operation.Preflight = kindShorthandPreflight }
+	if name == "wildcard" {
+		operation.Preflight = wildcardPreflight
+	}
+	if name == "files" || name == "dirs" {
+		operation.Preflight = kindShorthandPreflight
+	}
 	return r.Add(operation)
 }
 

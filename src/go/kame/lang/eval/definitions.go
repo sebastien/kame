@@ -14,7 +14,7 @@ import (
 )
 
 type Program struct {
-	StreamStates []*captureState
+	StreamStates       []*captureState
 	OperationFunctions []*Function
 	KashFunctions      []*Function
 	kameSelector       *Function
@@ -22,7 +22,7 @@ type Program struct {
 	DeferScopes        []*DeferScope
 	DeferStopping      bool
 	// ProcessesQuiet must wait for host terminal delivery, not just node cancellation.
-	ProcessesQuiet     func(any, int64, int64) bool
+	ProcessesQuiet      func(any, int64, int64) bool
 	ProcessesQuietState any
 	// DryRun suppresses invocation-owned process, write and output effects.
 	DryRun bool
@@ -47,15 +47,15 @@ type Program struct {
 	OperationStates []operationState
 	OperationMemos  []*operationMemo
 	Processes       []*processTask
-	finalizers []*FinalizerState
+	finalizers      []*FinalizerState
 	// The driver must keep polling through cancellation and acknowledge reaping
 	// before cleanup. A missing driver rejects finally! before arming it.
-	FinalizationNow func(any) int64
-	FinalizationQuiet func(any, int64, int64) bool
-	FinalizationHost any
+	FinalizationNow      func(any) int64
+	FinalizationQuiet    func(any, int64, int64) bool
+	FinalizationHost     any
 	FinalizationReadOnly bool
-	finalizationCause diagnostic.Diagnostic
-	SourceParts     []SourcePart
+	finalizationCause    diagnostic.Diagnostic
+	SourceParts          []SourcePart
 	// Grants provide the ambient capability policy for lazy definitions. Rule
 	// rendering supplies its own context policy from the runtime.
 	Grants []Grant
@@ -233,7 +233,9 @@ func (p *Program) Free() {
 	if p == nil {
 		return
 	}
-	for i := range p.finalizers { freeFinalizer(p.Alloc, p.finalizers[i]) }
+	for i := range p.finalizers {
+		freeFinalizer(p.Alloc, p.finalizers[i])
+	}
 	slices.Free(p.Alloc, p.finalizers)
 	for i := range p.explicitDefinitionOverrides {
 		mem.FreeString(p.Alloc, p.explicitDefinitionOverrides[i])
@@ -365,18 +367,18 @@ func (p *Program) Definition(name string) *core.Node {
 }
 
 type definitionState struct {
-	Program           *Program
-	Definition        *definition.Definition
-	Owned             bool
-	Environment       []string
-	Namespace         [32]byte
-	Scoped            bool
-	HasEnvironment bool
-	HasNamespace bool
+	Program               *Program
+	Definition            *definition.Definition
+	Owned                 bool
+	Environment           []string
+	Namespace             [32]byte
+	Scoped                bool
+	HasEnvironment        bool
+	HasNamespace          bool
 	FinalizationForbidden bool
-	RuleFrames        []RuleFrame
-	InvalidRuleFrames bool
-	Phase             Phase
+	RuleFrames            []RuleFrame
+	InvalidRuleFrames     bool
+	Phase                 Phase
 }
 
 func freeDefinitionState(a mem.Allocator, value any) {

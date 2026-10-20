@@ -13,10 +13,16 @@ import (
 func (p *Program) stringValue(scope *Scope, expression *expr.Expr, context *Context) Result {
 	parts := expression.Parts
 	var children []*expr.Expr
-	for i := range parts { if parts[i].Expr != nil { children = slices.Append(context.Run, children, parts[i].Expr) } }
+	for i := range parts {
+		if parts[i].Expr != nil {
+			children = slices.Append(context.Run, children, parts[i].Expr)
+		}
+	}
 	operands := p.argumentValues(scope, children, context, expression.Span)
 	slices.Free(context.Run, children)
-	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" { return operands.Result }
+	if operands.Result.Waiting || operands.Result.Diagnostic.Code != "" {
+		return operands.Result
+	}
 	defer freeValuesWithCallables(context.Run, operands.Values)
 	next := 0
 	b := strings.NewBuilder(context.Run)

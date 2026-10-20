@@ -64,7 +64,9 @@ func TestBuildSourceCompileFailureKeepsCompleteDiagnosticJSON(t *testing.T) {
 	if !strings.Contains(string(r.EventJSON), "second.kmk") || !strings.Contains(string(r.EventJSON), "DEF_INVALID") {
 		t.Error("compile diagnostic JSON lost source")
 	}
-	if !strings.Contains(string(r.EventJSON), "first.kmk") || !strings.Contains(string(r.EventJSON), "main.kmk") || !strings.Contains(string(r.EventJSON), "original declaration") { t.Error("compile diagnostic lost copied related location or include provenance") }
+	if !strings.Contains(string(r.EventJSON), "first.kmk") || !strings.Contains(string(r.EventJSON), "main.kmk") || !strings.Contains(string(r.EventJSON), "original declaration") {
+		t.Error("compile diagnostic lost copied related location or include provenance")
+	}
 }
 
 func TestBuildSourceDescriptorRejectsInvalidInputWithoutPoisoningRuntime(t *testing.T) {

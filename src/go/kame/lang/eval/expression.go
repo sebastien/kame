@@ -32,7 +32,10 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 		result = Result{Diagnostic: context.dependencyFailure}
 		context.dependencyFailure = diagnostic.Diagnostic{}
 	}
-	if context.deferred { result.Free(context.Run); result = Result{Completed: true} }
+	if context.deferred {
+		result.Free(context.Run)
+		result = Result{Completed: true}
+	}
 	context.ReserveEnv = previousEnv
 	context.Engine, context.Scope, context.Requests = previousEngine, previousScope, previousRequests
 	context.evaluationDepth--
@@ -75,7 +78,9 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return name(scope, expression.Text, expression.Span, context)
 	case expr.InvocationJoin:
 		r := p.joinProcesses(context)
-		if r.Waiting || r.Diagnostic.Code != "" { return r }
+		if r.Waiting || r.Diagnostic.Code != "" {
+			return r
+		}
 		r.Free(context.Run)
 		return p.finishDefers(context.Deferred, context, false)
 	case expr.KashDefer:
@@ -118,7 +123,9 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return placeholder(scope, expression, context)
 	case expr.Selector:
 		result := p.selector(expression.Text, expression.Span, context)
-		if expression.Expansion == "selector" { return literalSelectorTip(context.Run, result) }
+		if expression.Expansion == "selector" {
+			return literalSelectorTip(context.Run, result)
+		}
 		return result
 	}
 	return failure(context.Run, "EXPR_INVALID", expression.Span, "invalid expression")
@@ -190,7 +197,9 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	if b.Kind == bindingLocalDefinition {
 		return context.Program.localValue(b.Local, context)
 	}
-	if context.PurePredicate { return context.Program.EvaluateDefinition(b.Definition, context) }
+	if context.PurePredicate {
+		return context.Program.EvaluateDefinition(b.Definition, context)
+	}
 	if context.Engine == nil && context.ResolveDefinition != nil {
 		return context.ResolveDefinition(context.ResolverState, b.Definition, context)
 	}

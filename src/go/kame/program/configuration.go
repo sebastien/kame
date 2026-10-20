@@ -12,7 +12,9 @@ import (
 // Other assignment-shaped operands are validated after rule registration.
 func (p *Program) configureParameters(defines, parameters, environment []string) diagnostic.Diagnostic {
 	var effective []string
-	for i := range defines { effective = slices.Append(p.Alloc, effective, defines[i]) }
+	for i := range defines {
+		effective = slices.Append(p.Alloc, effective, defines[i])
+	}
 	for i := range parameters {
 		equal := strings.IndexByte(parameters[i], '=')
 		if equal > 0 && p.Eval.Definition(parameters[i][:equal]) != nil {
@@ -28,15 +30,29 @@ func (p *Program) configureParameters(defines, parameters, environment []string)
 func (p *Program) validateParameters(parameters []string) diagnostic.Diagnostic {
 	for i := range parameters {
 		equal := strings.IndexByte(parameters[i], '=')
-		if equal <= 0 || p.Eval.Definition(parameters[i][:equal]) != nil { continue }
+		if equal <= 0 || p.Eval.Definition(parameters[i][:equal]) != nil {
+			continue
+		}
 		known := false
 		for j := range p.Rules {
 			r := p.Rules[j].Rule
-			if r == nil { continue }
-			for k := range r.Arguments { if r.Arguments[k].Name == parameters[i][:equal] { known = true } }
-			for k := range r.Outputs { if !r.Outputs[k].Template && r.Outputs[k].Text == parameters[i] { known = true } }
+			if r == nil {
+				continue
+			}
+			for k := range r.Arguments {
+				if r.Arguments[k].Name == parameters[i][:equal] {
+					known = true
+				}
+			}
+			for k := range r.Outputs {
+				if !r.Outputs[k].Template && r.Outputs[k].Text == parameters[i] {
+					known = true
+				}
+			}
 		}
-		if !known { return failure(p.Alloc, "TGT_ARGUMENT", "unknown parameter: "+parameters[i][:equal]) }
+		if !known {
+			return failure(p.Alloc, "TGT_ARGUMENT", "unknown parameter: "+parameters[i][:equal])
+		}
 	}
 	return diagnostic.Diagnostic{}
 }
@@ -46,14 +62,18 @@ func (p *Program) configureDefinitions(defines, environment []string) diagnostic
 		override := definition.ParseOverride(defines[i])
 		if override.Name == "" || p.Eval.Definition(override.Name) == nil {
 			option := "--define"
-			if override.Typed { option = "--set" }
+			if override.Typed {
+				option = "--set"
+			}
 			return failure(p.Alloc, "DEF_INVALID", option+" must name a declared value definition")
 		}
 		if override.Typed {
 			parsed := expr.Parse(p.Alloc, "<set>", override.Text)
 			valid := len(parsed.Diagnostics) == 0 && expr.IsLiteral(parsed.Expr)
 			parsed.Free()
-			if !valid { return failure(p.Alloc, "DEF_INVALID", "--set requires a closed literal value for a declared value definition") }
+			if !valid {
+				return failure(p.Alloc, "DEF_INVALID", "--set requires a closed literal value for a declared value definition")
+			}
 		}
 	}
 	p.Eval.SetDefinitionOverrides(defines)
@@ -77,11 +97,17 @@ func (p *Program) configureDefinitions(defines, environment []string) diagnostic
 			continue
 		}
 		installed := false
-		if typed { installed = p.Eval.OverrideDefinitionValue(name, value) } else { installed = p.Eval.OverrideDefinition(name, value) }
+		if typed {
+			installed = p.Eval.OverrideDefinitionValue(name, value)
+		} else {
+			installed = p.Eval.OverrideDefinition(name, value)
+		}
 		if !installed {
 			return failure(p.Alloc, "DEF_INVALID", "cannot override an active definition")
 		}
-		if typed { prefix = name + ":=" }
+		if typed {
+			prefix = name + ":="
+		}
 		p.Configuration = slices.Append(p.Alloc, p.Configuration, cloneText(p.Alloc, prefix+value))
 	}
 	return diagnostic.Diagnostic{}

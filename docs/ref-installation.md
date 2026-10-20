@@ -109,7 +109,8 @@ assets offline. `KAME_VERSION=latest` requires a selector download on each
 invocation, even with a populated cache. A lone `--version` does not verify or
 provision runtime assets; use `--help` to test installation.
 
-`kame init` is retired. Copy `Makefile.bootstrap` from a trusted checkout and
-configure its version/key to delegate GNU Make goals. Its forwarding limits,
-launcher settings, and operator publication procedure are defined in the
+`kame init` is retired. Copy `Makefile` from a checkout. It installs the
+author's GitHub release when missing and forwards goals to it; Kame reads
+`Makefile.kmk`. No verification key is required. Forwarding limits and the
+operator publication procedure are defined in the
 [distribution specification](spec/015-distribution.md).

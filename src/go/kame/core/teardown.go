@@ -14,10 +14,18 @@ func (c *EngineContext) TeardownDiagnostic(d Diagnostic) {
 }
 
 // Teardown starts graceful disposal even when public roots are still retained.
-func (e *Engine) Teardown(n *Node) { if n != nil { e.beginTeardown(n, false) } }
+func (e *Engine) Teardown(n *Node) {
+	if n != nil {
+		e.beginTeardown(n, false)
+	}
+}
 
 func (e *Engine) LookupID(id int64) *Node {
-	for i := range e.nodes { if e.nodes[i].ID == id { return e.nodes[i] } }
+	for i := range e.nodes {
+		if e.nodes[i].ID == id {
+			return e.nodes[i]
+		}
+	}
 	return nil
 }
 
@@ -26,20 +34,26 @@ func (e *Engine) beginTeardown(n *Node, restart bool) bool {
 		n.teardownRestart = n.teardownRestart || restart
 		return true
 	}
-	if n.BeginTeardown == nil || !n.BeginTeardown(n.TeardownContext, n.ID, n.Generation) { return false }
+	if n.BeginTeardown == nil || !n.BeginTeardown(n.TeardownContext, n.ID, n.Generation) {
+		return false
+	}
 	n.tearingDown, n.teardownRestart = true, restart
 	if !n.TeardownPreserveRequest {
 		e.Interrupt(n)
 	}
 	n.teardownRoot = e.RequestRoot(n)
-	if !n.Submitted { n.State = NodeReady }
+	if !n.Submitted {
+		n.State = NodeReady
+	}
 	return true
 }
 
 // Interrupt withdraws one request without ending its generation. Hosts still
-	// owe cancellation/reaping; a completion for the withdrawn ID is stale.
+// owe cancellation/reaping; a completion for the withdrawn ID is stale.
 func (e *Engine) Interrupt(n *Node) {
-	if n == nil { return }
+	if n == nil {
+		return
+	}
 	if n.Submitted {
 		e.cancellations = slices.Append(e.Alloc, e.cancellations, Cancellation{NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, RequestID: n.HostRequestID})
 	}
@@ -53,7 +67,9 @@ func (e *Engine) Interrupt(n *Node) {
 	for i := range n.Dynamic {
 		d := n.Dynamic[i]
 		removeDependent(d, n)
-		if n.Interest != 0 { e.interest(d, -n.Interest) }
+		if n.Interest != 0 {
+			e.interest(d, -n.Interest)
+		}
 	}
 	slices.Free(e.Alloc, n.Dynamic)
 	slices.Free(e.Alloc, n.Observed)

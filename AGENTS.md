@@ -17,3 +17,6 @@ The memo subagent performs semantic consolidation using validated CLI commands
 and reports only meaningful changes, deferrals, or errors, not raw routine output.
 Other subagents must not independently record the same observations.
 
+
+Rules:
+- DO NOT touch README.md unless asked to

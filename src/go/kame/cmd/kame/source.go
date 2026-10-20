@@ -40,9 +40,10 @@ type buildSource struct {
 	Status  int
 	JSON    bool
 	// Borrowed configuration used only while expanding includes/branches.
-	SelectionPrefix      string
+	SelectionPrefix      []program.CompileSource
 	SelectionDefines     []string
 	SelectionEnvironment []string
+	SelectionDirectory   string
 }
 
 func freeBuildSource(source *buildSource) {
@@ -64,22 +65,22 @@ func freeBuildSource(source *buildSource) {
 
 func loadBuildSource(options buildArguments, errOut io.Writer, reportMissing bool) buildSource {
 	options.JSON = options.JSON || cliDiagnosticJSON
-	return loadBuildSourceWithPrefix(options, diagnosticWriter(cliDiagnosticOut, errOut, options.JSON), reportMissing, "")
+	return loadBuildSourceWithPrefix(options, diagnosticWriter(cliDiagnosticOut, errOut, options.JSON), reportMissing, nil)
 }
 
-func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportMissing bool, prefix string) buildSource {
+func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportMissing bool, prefix []program.CompileSource) buildSource {
 	defines := selectionOverrides(options.Defines, options.Parameters)
 	defer slices.Free(mem.System, defines)
 	if options.Command != "" {
-		return inlineRunSource("<command>", options.Command, "kmk", options.JSON, defines, options.Environment, errOut, prefix)
+		return inlineRunSource("<command>", options.Command, "kmk", options.JSON, defines, options.Environment, errOut, prefix, options.Directory)
 	}
 	if options.File != "" {
 		name := options.File
 		if path.IsAbs(name) {
-			return readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix)
+			return readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix, options.Directory)
 		}
 		name = path.Join(mem.System, options.Directory, name)
-		result := readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix)
+		result := readRunSourceConfigured(name, errOut, "kmk", options.JSON, defines, options.Environment, prefix, options.Directory)
 		mem.FreeString(mem.System, name)
 		return result
 	}
@@ -88,7 +89,7 @@ func loadBuildSourceWithPrefix(options buildArguments, errOut io.Writer, reportM
 		candidate := path.Join(mem.System, options.Directory, candidates[i])
 		_, statErr := os.Stat(candidate)
 		if statErr == nil {
-			result := readRunSourceConfigured(candidate, errOut, "kmk", options.JSON, defines, options.Environment, prefix)
+			result := readRunSourceConfigured(candidate, errOut, "kmk", options.JSON, defines, options.Environment, prefix, options.Directory)
 			mem.FreeString(mem.System, candidate)
 			return result
 		}
@@ -145,7 +146,7 @@ func sourceError(out io.Writer, code string, message string, json bool) {
 	emitDiagnostic(out, diagnostic.Diagnostic{Code: code, Message: message, Severity: diagnostic.Error}, true, nil)
 }
 
-func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bool, defines []string, environment []string, prefix string) buildSource {
+func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bool, defines []string, environment []string, prefix []program.CompileSource, directory string) buildSource {
 	canonical := path.Clean(mem.System, name)
 	data, readErr := os.ReadFile(mem.System, canonical)
 	if readErr != nil {
@@ -153,7 +154,7 @@ func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bo
 		mem.FreeString(mem.System, canonical)
 		return buildSource{Status: 1}
 	}
-	result := buildSource{JSON: json, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), environment)}
+	result := buildSource{JSON: json, SelectionPrefix: prefix, SelectionDefines: defines, SelectionEnvironment: mergeEnvironment(posix.Environment(mem.System), environment), SelectionDirectory: directory}
 	// Text wraps Data backing (zero-copy string conversion in Solod):
 	// freeBuildSource frees Data only, Text never outlives it.
 	result.Files = slices.Append(mem.System, result.Files, sourceFile{Name: canonical, Text: string(data), Data: data, OwnedName: true, FileBacked: true, Parent: -1})
@@ -162,13 +163,14 @@ func readRunSourceConfigured(name string, errOut io.Writer, lang string, json bo
 	} else if !expandIncludesLanguage(&result, 0, errOut, lang) {
 		result.Status = 1
 	}
-	result.SelectionPrefix = ""
+	result.SelectionPrefix = nil
 	result.SelectionDefines = nil
 	return result
 }
 
 func expandIncludesLanguage(s *buildSource, fileIndex int, errOut io.Writer, lang string) bool {
 	file := s.Files[fileIndex]
+	rememberDiagnosticSource(file.Name, file.Text)
 	authored := source.New(mem.System, file.Name, file.Text)
 	defer authored.Free(mem.System)
 	parsed := script.ParseFragment(mem.System, authored, lang, 0, len(file.Text))

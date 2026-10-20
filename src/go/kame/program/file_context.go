@@ -14,17 +14,19 @@ import (
 // File reuse and publication use one accepted signature record. The host only
 // transports resource facts and opaque record bytes, never freshness decisions.
 type fileContextState struct {
-	RecordReason string
-	Cached        cacheRecord
-	Rendered      renderResult
-	Stored        core.SignatureRecord
-	Phase         int
-	Index         int
-	Pending       bool
-	PendingKey    core.ResourceKey
-	PendingAspect core.ObservationAspect
-	Checkpoint    core.DependencyCheckpoint
-	Preflight     bool
+	RecordReason       string
+	Cached             cacheRecord
+	Rendered           renderResult
+	Stored             core.SignatureRecord
+	Phase              int
+	Index              int
+	Pending            bool
+	PendingKey         core.ResourceKey
+	PendingAspect      core.ObservationAspect
+	Checkpoint         core.DependencyCheckpoint
+	Preflight          bool
+	InputSnapshot      []core.Observation
+	InputSnapshotReady bool
 }
 
 func (p *Program) freeFileContext(state *fileContextState) {
@@ -40,6 +42,7 @@ func (p *Program) freeFileContext(state *fileContextState) {
 	state.Cached.Free(p.Alloc)
 	state.PendingKey.Free(p.Alloc)
 	state.Checkpoint.Free(p.Alloc)
+	core.FreeObservations(p.Alloc, state.InputSnapshot)
 	mem.Free(p.Alloc, state)
 }
 
@@ -105,14 +108,18 @@ func (p *Program) fileHasMaterialInputs(entry *instance) bool {
 	for i := range entry.AcceptedRecord.Inputs {
 		item := entry.AcceptedRecord.Inputs[i]
 		key := item.Key
-		if key.Kind == core.ResourceFile && item.Aspect == core.ObservationValue && p.isToolPath(key.Name) { continue }
+		if key.Kind == core.ResourceFile && item.Aspect == core.ObservationValue && p.isToolPath(key.Name) {
+			continue
+		}
 		if key.Kind == core.ResourceFile || key.Kind == core.ResourceGlob || key.Kind == core.ResourceDefinition || (key.Kind == core.ResourceEnvironment && key.Name != eval.ProcessEnvironmentName) {
 			return true
 		}
 	}
 	for i := range entry.Node.Dynamic {
 		dependency := entry.Node.Dynamic[i]
-		if dependency.Key.Kind == core.ResourceFile && p.isToolPath(dependency.Key.Name) { continue }
+		if dependency.Key.Kind == core.ResourceFile && p.isToolPath(dependency.Key.Name) {
+			continue
+		}
 		if !slices.Contains(entry.Node.OrderOnly, dependency) && (dependency.Key.Kind == core.ResourceFile || dependency.Key.Kind == core.ResourceGlob) {
 			return true
 		}
@@ -121,7 +128,11 @@ func (p *Program) fileHasMaterialInputs(entry *instance) bool {
 }
 
 func (p *Program) isToolPath(name string) bool {
-	for i := range p.Tools { if p.Tools[i].Resolved && p.Tools[i].Path == name { return true } }
+	for i := range p.Tools {
+		if p.Tools[i].Resolved && p.Tools[i].Path == name {
+			return true
+		}
+	}
 	return false
 }
 
@@ -226,7 +237,9 @@ func (p *Program) beginFileContext(c *core.EngineContext, index int, rendered re
 	mem.FreeString(p.Alloc, name)
 	if err == nil {
 		state.RecordReason = "record-invalid"
-		if core.DecodeSignatureRecord(p.Alloc, data, &state.Stored) { state.RecordReason = "" }
+		if core.DecodeSignatureRecord(p.Alloc, data, &state.Stored) {
+			state.RecordReason = ""
+		}
 	} else {
 		// The portable host returns an opaque read error, not an absence fact.
 		state.RecordReason = "proof-unverifiable"
@@ -263,6 +276,8 @@ func hasAcceptedObservation(values []core.Observation, item core.Observation) bo
 
 func (p *Program) continueFileContext(c *core.EngineContext, index int) core.ProducerResult {
 	state := p.Instances[index].FileContext
+	// Dependencies may have completed since the previous invocation.
+	state.InputSnapshotReady = false
 	if state.Phase == -1 {
 		lookup := p.cacheLookup(c, &p.Instances[index])
 		if lookup.Cancelled {
@@ -276,7 +291,9 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 		state.RecordReason = lookup.MissReason
 		if lookup.Hit {
 			state.RecordReason = "record-invalid"
-			if core.DecodeSignatureRecord(p.Alloc, lookup.Record.Manifest, &state.Stored) { state.RecordReason = "" }
+			if core.DecodeSignatureRecord(p.Alloc, lookup.Record.Manifest, &state.Stored) {
+				state.RecordReason = ""
+			}
 		}
 		state.Phase = 1
 	}
@@ -290,7 +307,9 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 		}
 		if completion.Diagnostic.Code == "" && completion.Value.Kind == core.Bytes {
 			state.RecordReason = "record-invalid"
-			if core.DecodeSignatureRecord(p.Alloc, completion.Value.Bytes, &state.Stored) { state.RecordReason = "" }
+			if core.DecodeSignatureRecord(p.Alloc, completion.Value.Bytes, &state.Stored) {
+				state.RecordReason = ""
+			}
 		} else if completion.Diagnostic.Code != "" {
 			state.RecordReason = "proof-unverifiable"
 		}
@@ -328,7 +347,9 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			} else {
 				p.reason(entry, "reevaluate", "guard-changed", "source/context guard changed", core.ResourceKey{}, "")
 			}
-			if !p.needsNewerInputs(entry) { return p.preflightMiss(c, index) }
+			if !p.needsNewerInputs(entry) {
+				return p.preflightMiss(c, index)
+			}
 			// Even a changed source/context needs the stored input digests and
 			// current outputs before rendering a newer-input selector.
 		} else {
@@ -340,13 +361,18 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 	if state.Phase == 1 && state.Stored.Implementation.Equal(p.Instances[index].AcceptedRecord.Implementation) {
 		for state.Index < len(state.Stored.Inputs) {
 			item := state.Stored.Inputs[state.Index]
-			inputs := p.acceptedInputs(&p.Instances[index])
-			present := hasAcceptedObservation(inputs, item)
-			core.FreeObservations(p.Alloc, inputs)
+			if !state.InputSnapshotReady {
+				core.FreeObservations(p.Alloc, state.InputSnapshot)
+				state.InputSnapshot = p.acceptedInputs(&p.Instances[index])
+				state.InputSnapshotReady = true
+			}
+			present := hasAcceptedObservation(state.InputSnapshot, item)
 			if present {
 				state.Index++
 				continue
 			}
+			// Restoring a missing observation can add facts or graph edges.
+			state.InputSnapshotReady = false
 			if item.Key.Kind == core.ResourceOperation {
 				signature := core.Signature{}
 				for i := range p.Eval.Registry.Items {
@@ -363,7 +389,9 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			if item.Key.Kind == core.ResourceEnvironment {
 				if item.Key.Name == eval.ProcessEnvironmentName {
 					environment := p.Instances[index].Environment
-					if p.Instances[index].Executor != "" && p.Instances[index].Executor != "local" { environment = p.Instances[index].MetadataEnvironment }
+					if p.Instances[index].Executor != "" && p.Instances[index].Executor != "local" {
+						environment = p.Instances[index].MetadataEnvironment
+					}
 					c.ObserveAspect(item.Key, item.Aspect, eval.ProcessEnvironmentSignature(p.Alloc, environment))
 					state.Index++
 					continue
@@ -445,8 +473,12 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			if item.Aspect == core.ObservationMetadata {
 				op = host.OpStat
 			}
-			if item.Aspect == core.ObservationLinkMetadata { op = host.OpLstat }
-			if item.Aspect == core.ObservationLinkTarget { op = host.OpReadlink }
+			if item.Aspect == core.ObservationLinkMetadata {
+				op = host.OpLstat
+			}
+			if item.Aspect == core.ObservationLinkTarget {
+				op = host.OpReadlink
+			}
 			if item.Key.Kind == core.ResourceGlob {
 				op = host.OpWildcard
 			}
@@ -497,7 +529,9 @@ func (p *Program) finishFileContext(c *core.EngineContext, index int) core.Produ
 	}
 	if entry.Plan.Freshness != Fresh {
 		decision := "execute"
-		if state.Preflight { decision = "reevaluate" }
+		if state.Preflight {
+			decision = "reevaluate"
+		}
 		if p.Options.Force {
 			p.reason(entry, decision, "forced", "forced execution", core.ResourceKey{}, "")
 		} else if entry.Rule.Always {

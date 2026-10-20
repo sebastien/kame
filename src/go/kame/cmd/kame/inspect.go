@@ -29,9 +29,13 @@ func runList(args []string, out io.Writer, errOut io.Writer) int {
 	}
 	session := openBuildSession(parsed, errOut, true)
 	defer session.Free()
-	if session.Status != 0 { return session.Status }
+	if session.Status != 0 {
+		return session.Status
+	}
 	query := ""
-	if len(parsed.Targets) != 0 { query = parsed.Targets[0] }
+	if len(parsed.Targets) != 0 {
+		query = parsed.Targets[0]
+	}
 	var buffer = bytes.NewBuffer(mem.System, nil)
 	defer buffer.Free()
 	if parsed.JSON {
@@ -322,7 +326,7 @@ func writeCatValue(out io.Writer, errOut io.Writer, value core.Value) bool {
 		return true
 	}
 	var data []byte
-	if !core.CatValueJSON(mem.System, value, &data) {
+	if !core.PresentationValueJSON(mem.System, value, &data) {
 		cliError(errOut, "VAL_NOT_JSON", "definition value has no JSON representation")
 		return false
 	}

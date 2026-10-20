@@ -26,8 +26,12 @@ func TestRecipeDocumentPreservesNewerInputSelector(t *testing.T) {
 		item := parsed.Rule.BodyDoc.Root.Items[i]
 		if item.Kind == expr.Selector {
 			found = true
-			if item.Text != "@<?" || item.Span.Start != 13 || item.Span.End != 16 { t.Error("recipe document changed newer-input selector or span") }
+			if item.Text != "@<?" || item.Span.Start != 13 || item.Span.End != 16 {
+				t.Error("recipe document changed newer-input selector or span")
+			}
 		}
 	}
-	if !found { t.Error("recipe document lost newer-input selector") }
+	if !found {
+		t.Error("recipe document lost newer-input selector")
+	}
 }

@@ -56,8 +56,8 @@ type Cause struct {
 type Diagnostic struct {
 	// Protected preserves unsuppressible control outcomes when an earlier
 	// ordinary diagnostic remains primary (for example, cleanup denial).
-	Protected bool
-	Cancelled bool
+	Protected   bool
+	Cancelled   bool
 	Source      string
 	Code        string
 	Severity    Severity

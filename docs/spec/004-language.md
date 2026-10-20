@@ -62,6 +62,11 @@ in included branch files, not directly in an `if` body. Ordinary value-only `if`
 remains a runtime expression. Both use the same truthiness: only `:nil` and
 `:false` are false; zero and empty collections or strings are true.
 
+Path operations in conditions use the caller's evaluation directory (including
+`-C`), just as at runtime. In particular, `abspath` resolves against that supplied
+directory without filesystem access, not against the included source's parent.
+This does not change source-relative resolution of literal include paths.
+
 Selection happens before final registration or execution. Conditions may use
 pure expressions and lazy definitions selected earlier in source order,
 including earlier selected includes and earlier explicit `.km` or `.kmk`
@@ -80,6 +85,15 @@ tracked or cycle-checked. Inline and stdin sources can contain composition `if`,
 but a selected include still requires a file-backed source. Unknown references,
 cycles, capability use and effectful operations fail with their ordinary codes
 before recipes or statements execute.
+
+Condition queries preserve authored origins for extracted declarations and the
+condition expression, including definitions from earlier inputs and selected
+includes. Failures identify the directly failing authored expression and retain
+the helper calls, lazy-definition evaluation, and selecting condition as
+propagation context, rather than replacing the failure location with the outer
+`if` condition. Native and embedding-host composition follow the provenance and
+source-backed backtrace requirements in `011-diagnostics.md`. Queries without
+authored origins must not report synthetic offsets as file locations.
 
 `include` and `include?` application heads are reserved structurally: they are
 invalid in value positions, conditions, definitions, lambdas, containers and
@@ -418,7 +432,7 @@ toward that limit. Larger placeholder positions are rejected before allocation.
 
 ### Pattern Literals
 
-An expression path atom with authored pattern groups, or a quoted string without
+An expression path atom with authored matcher groups, or a quoted string without
 interpolation whose text contains pattern groups, is a pattern value. Groups
 with glob content (`{*}`, `{**}`,
 `{name:*}`, `{name:**}`) are matchers; `{name}` and `{_N}` are expansion
@@ -426,14 +440,19 @@ references. Pattern values, matching, and the pattern form of `replace` are
 specified in `014-patterns.md`. Rule target templates are unchanged.
 
 Paths may interpolate literal prefixes and suffixes around fully authored groups:
-`@{ROOT}/{name:*}.@{EXT}` constructs a matcher and `@{OUT}/{name}` constructs an
-expansion reference pattern. Inserted values cannot inject pattern syntax.
+`@{ROOT}/{name:*}.@{EXT}` constructs a matcher. In rooted value paths containing
+only reference groups, `@{OUT}/{name}` and `./out/{name}` instead resolve `name`
+as a lexical string binding and produce path strings. Missing bindings report
+`REF_MISSING`; interpolation requires NUL-free strings. Rootless `{name}.o`
+remains an expansion pattern; `(pattern TEXT)` explicitly constructs rooted
+expansion patterns. Inserted values cannot inject pattern syntax.
 Interpolation inside a group is rejected; deliberate dynamic syntax uses
 `(pattern TEXT)`. These pattern paths do not enumerate filesystem globs. See
 `038-direct-kash-and-values.md` for roots, provenance and suspension.
 
-Pattern `replace` evaluates its replacement expression only after matching,
-with named captures available as local string bindings. Both `./{name}` and
+Pattern `sub`/`replace` and `resub` evaluate their replacement expression only
+after matching, with named and positional captures available as local string
+bindings. Both `./{name}` and
 `"@{name}"` can therefore use a `{name:*}` capture. This staged operation
 evaluation is distinct from the reserved special forms above.
 
@@ -744,9 +763,12 @@ INPUT = NAME | PATH | WILDCARD-PATH | TEMPLATE | QUOTED-STRING | INTERPOLATION |
 Whitespace inside quoted strings and balanced input expressions does not split
 header items. Each whole interpolation, such as `@{SOURCES}` or `@(sources)`,
 contributes a value independently; strings, resources, lists and nil are
-flattened in authored order. Quoted input tokens and interpolated paths such as
-`@{ROOT}/suffix` render one path through
-the shared template engine and retain dependencies of their expressions.
+flattened in authored order. Quoted input tokens use string-template rendering.
+Unquoted computed paths such as `@{ROOT}/suffix` or `@{ROOT}/js/{path}.js`
+use expression path parsing and evaluation, retaining expression dependencies
+and resolving authored reference groups against lexical rule-capture bindings.
+Quoted prerequisite tokens keep bare `{path}` literal; computed bytes are not
+reparsed for captures or interpolation syntax.
 An unquoted explicit path containing `*`, `?`, or `[` is a wildcard input.
 It lowers to the dependency-tracked `wildcard` operation, produces sorted files,
 and contributes no input when unmatched. Recursive `**` follows the library

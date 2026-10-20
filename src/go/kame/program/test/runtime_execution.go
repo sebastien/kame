@@ -17,50 +17,66 @@ import (
 )
 
 type countingReadDirHost struct {
-	memory    *wasm.MemoryHost
-	entries   int
-	rootReads int
-	deepReads int
+	memory        *wasm.MemoryHost
+	entries       int
+	rootReads     int
+	deepReads     int
+	blockingWaits int
 }
 
 type fakeRemoteHost struct {
-	base *posix.Host
-	allocator mem.Allocator
-	pending host.ProcessEvent
-	ready bool
-	SawRequest bool
-	SawInput bool
-	SawInputName bool
-	SawOutputName bool
+	base                 *posix.Host
+	allocator            mem.Allocator
+	pending              host.ProcessEvent
+	ready                bool
+	SawRequest           bool
+	SawInput             bool
+	SawInputName         bool
+	SawOutputName        bool
 	SawScopedEnvironment bool
-	OmitOutputs bool
-	OutputOverride string
-	FailFirst bool
-	StartCount int
-	RetryKeysMatch bool
-	firstKey [32]byte
-	OutcomeOverride host.ProcessOutcome
-	HasOutcomeOverride bool
-	StdoutTruncated bool
+	OmitOutputs          bool
+	OutputOverride       string
+	FailFirst            bool
+	StartCount           int
+	RetryKeysMatch       bool
+	firstKey             [32]byte
+	OutcomeOverride      host.ProcessOutcome
+	HasOutcomeOverride   bool
+	StdoutTruncated      bool
 }
 
-func (h *fakeRemoteHost) SupportsExecutor(name string, version string) bool { _, _ = h, name; return name == "fake" && version == "v1" }
+func (h *fakeRemoteHost) SupportsExecutor(name string, version string) bool {
+	_, _ = h, name
+	return name == "fake" && version == "v1"
+}
 func (h *fakeRemoteHost) SupportsStreamOperands() bool { _ = h; return false }
 func (h *fakeRemoteHost) Start(request host.ProcessRequest) bool {
 	h.StartCount++
 	h.SawRequest = request.Executor == "fake" && request.ExecutorVersion == "v1"
 	h.SawScopedEnvironment = len(request.Environment) == 1 && request.Environment[0] == "SAFE=sent"
-	if h.StartCount == 1 { h.firstKey = request.IdempotencyKey } else {
+	if h.StartCount == 1 {
+		h.firstKey = request.IdempotencyKey
+	} else {
 		h.RetryKeysMatch = true
-		for i := range h.firstKey { if h.firstKey[i] != request.IdempotencyKey[i] { h.RetryKeysMatch = false } }
+		for i := range h.firstKey {
+			if h.firstKey[i] != request.IdempotencyKey[i] {
+				h.RetryKeysMatch = false
+			}
+		}
 	}
 	h.SawInput = len(request.Inputs) == 1 && string(request.Inputs[0].Data) == "input-data"
-	if len(request.Inputs) == 1 { h.SawInputName = request.Inputs[0].Name == "input" }
-	if len(request.Outputs) != 1 { return false }
+	if len(request.Inputs) == 1 {
+		h.SawInputName = request.Inputs[0].Name == "input"
+	}
+	if len(request.Outputs) != 1 {
+		return false
+	}
 	h.SawOutputName = request.Outputs[0] == "out"
 	nameBytes := mem.AllocSlice[byte](h.allocator, len(request.Outputs[0]), len(request.Outputs[0]))
 	outputName := request.Outputs[0]
-	if h.OutputOverride != "" { outputName = h.OutputOverride }
+	if h.OutputOverride != "" {
+		outputName = h.OutputOverride
+	}
 	copy(nameBytes, outputName)
 	data := mem.AllocSlice[byte](h.allocator, len("remote-data"), len("remote-data"))
 	copy(data, "remote-data")
@@ -73,51 +89,76 @@ func (h *fakeRemoteHost) Start(request host.ProcessRequest) bool {
 		mem.FreeSlice(h.allocator, data)
 	}
 	status := 0
-	if h.FailFirst && h.StartCount == 1 { status = 1 }
+	if h.FailFirst && h.StartCount == 1 {
+		status = 1
+	}
 	outcome := host.ProcessExited
-	if h.HasOutcomeOverride { outcome = h.OutcomeOverride }
+	if h.HasOutcomeOverride {
+		outcome = h.OutcomeOverride
+	}
 	h.pending = host.ProcessEvent{Kind: host.ProcessTerminal, ID: request.ID, Outcome: outcome, Status: status, StdoutTruncated: h.StdoutTruncated, RetainBytes: 32, Outputs: outputs}
 	h.ready = true
 	return true
 }
 func (h *fakeRemoteHost) Pump(waitMS int) bool { _, _ = h, waitMS; return false }
 func (h *fakeRemoteHost) Next() host.ProcessEventResult {
-	if !h.ready { return host.ProcessEventResult{} }
+	if !h.ready {
+		return host.ProcessEventResult{}
+	}
 	event := h.pending
 	h.pending, h.ready = host.ProcessEvent{}, false
 	return host.ProcessEventResult{Event: event, OK: true}
 }
-func (h *fakeRemoteHost) Active() int { return h.base.Active() }
-func (h *fakeRemoteHost) Cancel(id int64) bool { return h.base.Cancel(id) }
+func (h *fakeRemoteHost) Active() int                       { return h.base.Active() }
+func (h *fakeRemoteHost) Cancel(id int64) bool              { return h.base.Cancel(id) }
 func (h *fakeRemoteHost) Stop(id int64, graceMS int64) bool { return h.base.Stop(id, graceMS) }
-func (h *fakeRemoteHost) CancelAll() { h.base.CancelAll() }
-func (h *fakeRemoteHost) Free() { h.base.Free() }
-func (h *fakeRemoteHost) Stat(name string) host.StatResult { return h.base.Stat(name) }
+func (h *fakeRemoteHost) CancelAll()                        { h.base.CancelAll() }
+func (h *fakeRemoteHost) Free()                             { h.base.Free() }
+func (h *fakeRemoteHost) Stat(name string) host.StatResult  { return h.base.Stat(name) }
 func (h *fakeRemoteHost) Lstat(name string) host.StatResult { return h.base.Lstat(name) }
-func (h *fakeRemoteHost) Readlink(a mem.Allocator, name string) host.LinkResult { return h.base.Readlink(a, name) }
-func (h *fakeRemoteHost) ReadFile(a mem.Allocator, name string) ([]byte, error) { return h.base.ReadFile(a, name) }
-func (h *fakeRemoteHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) { return h.base.ReadDir(a, name) }
-func (h *fakeRemoteHost) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error { return h.base.WriteFileAtomic(name, data, perm, durable) }
+func (h *fakeRemoteHost) Readlink(a mem.Allocator, name string) host.LinkResult {
+	return h.base.Readlink(a, name)
+}
+func (h *fakeRemoteHost) ReadFile(a mem.Allocator, name string) ([]byte, error) {
+	return h.base.ReadFile(a, name)
+}
+func (h *fakeRemoteHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
+	return h.base.ReadDir(a, name)
+}
+func (h *fakeRemoteHost) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error {
+	return h.base.WriteFileAtomic(name, data, perm, durable)
+}
 func (h *fakeRemoteHost) Mkdir(name string, perm uint32) error { return h.base.Mkdir(name, perm) }
-func (h *fakeRemoteHost) Remove(name string) error { return h.base.Remove(name) }
-func (h *fakeRemoteHost) LockCache(path string, stripe int) host.CacheLockStatus { return h.base.LockCache(path, stripe) }
+func (h *fakeRemoteHost) Remove(name string) error             { return h.base.Remove(name) }
+func (h *fakeRemoteHost) LockCache(path string, stripe int) host.CacheLockStatus {
+	return h.base.LockCache(path, stripe)
+}
 func (h *fakeRemoteHost) UnlockCache(stripe int) { h.base.UnlockCache(stripe) }
-func (h *fakeRemoteHost) Now() int64 { return h.base.Now() }
-func (h *fakeRemoteHost) Monotonic() int64 { return h.base.Monotonic() }
+func (h *fakeRemoteHost) Now() int64             { return h.base.Now() }
+func (h *fakeRemoteHost) Monotonic() int64       { return h.base.Monotonic() }
 
 func (h *countingReadDirHost) Start(request host.ProcessRequest) bool { return h.memory.Start(request) }
-func (h *countingReadDirHost) SupportsExecutor(name string, version string) bool { return h.memory.SupportsExecutor(name, version) }
+func (h *countingReadDirHost) SupportsExecutor(name string, version string) bool {
+	return h.memory.SupportsExecutor(name, version)
+}
 func (h *countingReadDirHost) SupportsStreamOperands() bool { return h.memory.SupportsStreamOperands() }
-func (h *countingReadDirHost) Pump(waitMS int) bool                   { return h.memory.Pump(waitMS) }
-func (h *countingReadDirHost) Next() host.ProcessEventResult          { return h.memory.Next() }
-func (h *countingReadDirHost) Cancel(id int64) bool                   { return h.memory.Cancel(id) }
-func (h *countingReadDirHost) Stop(id int64, graceMS int64) bool      { return h.memory.Stop(id, graceMS) }
-func (h *countingReadDirHost) CancelAll()                             { h.memory.CancelAll() }
-func (h *countingReadDirHost) Active() int                            { return h.memory.Active() }
-func (h *countingReadDirHost) Free()                                  { h.memory.Free() }
-func (h *countingReadDirHost) Stat(name string) host.StatResult       { return h.memory.Stat(name) }
-func (h *countingReadDirHost) Lstat(name string) host.StatResult      { return h.memory.Lstat(name) }
-func (h *countingReadDirHost) Readlink(a mem.Allocator, name string) host.LinkResult { return h.memory.Readlink(a, name) }
+func (h *countingReadDirHost) Pump(waitMS int) bool {
+	if waitMS > 0 {
+		h.blockingWaits++
+	}
+	return h.memory.Pump(waitMS)
+}
+func (h *countingReadDirHost) Next() host.ProcessEventResult     { return h.memory.Next() }
+func (h *countingReadDirHost) Cancel(id int64) bool              { return h.memory.Cancel(id) }
+func (h *countingReadDirHost) Stop(id int64, graceMS int64) bool { return h.memory.Stop(id, graceMS) }
+func (h *countingReadDirHost) CancelAll()                        { h.memory.CancelAll() }
+func (h *countingReadDirHost) Active() int                       { return h.memory.Active() }
+func (h *countingReadDirHost) Free()                             { h.memory.Free() }
+func (h *countingReadDirHost) Stat(name string) host.StatResult  { return h.memory.Stat(name) }
+func (h *countingReadDirHost) Lstat(name string) host.StatResult { return h.memory.Lstat(name) }
+func (h *countingReadDirHost) Readlink(a mem.Allocator, name string) host.LinkResult {
+	return h.memory.Readlink(a, name)
+}
 func (h *countingReadDirHost) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 	return h.memory.ReadFile(a, name)
 }
@@ -145,6 +186,48 @@ func (h *countingReadDirHost) ReadDir(a mem.Allocator, name string) ([]host.DirE
 	entries, err := h.memory.ReadDir(a, name)
 	h.entries += len(entries)
 	return entries, err
+}
+
+func TestTickDoesNotWaitForQueuedSynchronousReads(t *testing.T) {
+	a := t.Allocator()
+	memory := wasm.NewMemoryHost(a)
+	memory.SetFile("src/one.txt", []byte("one"))
+	memory.SetFile("src/two.txt", []byte("two"))
+	host := &countingReadDirHost{memory: memory}
+	parsed := script.Parse(a, "requests.kmk", "FILES = (files ./src/*.txt)\n")
+	defer parsed.Free()
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	defer registry.Free()
+	compiled := program.Compile(a, parsed, registry, program.Options{Host: host, Directory: ".", Grants: []eval.Grant{{Capability: eval.Read}}})
+	if compiled.Program == nil {
+		t.Fatal("read program compile failed")
+		return
+	}
+	defer compiled.Free(a)
+	p := compiled.Program
+	defer p.Free()
+	started := p.Start("FILES")
+	if started.Handle == nil {
+		started.Diagnostic.Free(a)
+		t.Fatal("read root failed to start")
+		return
+	}
+	defer started.Handle.Free()
+	for tick := 0; tick < 64 && !started.Handle.Node.Current; tick++ {
+		p.Tick(50)
+	}
+	if !started.Handle.Node.Current || len(started.Handle.Node.Latest.List) != 2 || host.rootReads == 0 {
+		t.Error("queued reads did not complete")
+	}
+	if host.blockingWaits != 0 {
+		t.Errorf("slept %d times with synchronous work pending", host.blockingWaits)
+	}
+	waits := host.blockingWaits
+	p.Tick(50)
+	if host.blockingWaits != waits+1 {
+		t.Error("idle scheduler no longer honors the caller's wait")
+	}
 }
 
 func TestWildcardTraversalPrunesUnrelatedSubtrees(t *testing.T) {
@@ -216,24 +299,45 @@ func TestRemoteFileRuleStagesInputsAndPublishesDeclaredOutput(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-")
-	if err != nil { t.Fatal("temporary directory failed"); return }
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
 	defer os.Remove(dir)
-	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil { t.Fatal("input setup failed"); return }
+	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil {
+		t.Fatal("input setup failed")
+		return
+	}
 	base := posix.New(a)
 	remote := &fakeRemoteHost{base: base, allocator: a}
 	parsed := script.Parse(a, "remote.kmk", "./out : ./input ; [executor: \"remote:fake\" env: [SAFE: \"sent\"]]\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, Environment: []string{"HOST_SECRET=ambient"}, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
-	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	if compiled.Program == nil {
+		t.Fatal("compile failed")
+		return
+	}
 	result := compiled.Program.Materialize("./out")
-	if result.Diagnostic.Code != "" { t.Error("remote materialization failed: " + result.Diagnostic.Code) }
+	if result.Diagnostic.Code != "" {
+		t.Error("remote materialization failed: " + result.Diagnostic.Code)
+	}
 	result.Free(a)
-	if !remote.SawRequest { t.Error("remote executor mismatch") }
-	if !remote.SawScopedEnvironment { t.Error("remote request contained ambient or missing rule environment") }
-	if !remote.SawInput || !remote.SawInputName { t.Error("remote input artifact mismatch") }
-	if !remote.SawOutputName { t.Error("remote output key mismatch") }
+	if !remote.SawRequest {
+		t.Error("remote executor mismatch")
+	}
+	if !remote.SawScopedEnvironment {
+		t.Error("remote request contained ambient or missing rule environment")
+	}
+	if !remote.SawInput || !remote.SawInputName {
+		t.Error("remote input artifact mismatch")
+	}
+	if !remote.SawOutputName {
+		t.Error("remote output key mismatch")
+	}
 	data, readErr := os.ReadFile(a, dir+"/out")
-	if readErr != nil || string(data) != "remote-data" { t.Error("remote output was not published") }
+	if readErr != nil || string(data) != "remote-data" {
+		t.Error("remote output was not published")
+	}
 	mem.FreeSlice(a, data)
 	compiled.Program.Free()
 	compiled.Free(a)
@@ -245,19 +349,34 @@ func TestRemoteFileRuleRejectsMissingDeclaredOutput(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-missing-")
-	if err != nil { t.Fatal("temporary directory failed"); return }
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
 	defer os.Remove(dir)
-	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil { t.Fatal("input setup failed"); return }
+	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil {
+		t.Fatal("input setup failed")
+		return
+	}
 	remote := &fakeRemoteHost{base: posix.New(a), allocator: a, OmitOutputs: true}
 	parsed := script.Parse(a, "remote-missing.kmk", "./out : ./input ; [executor: \"remote:fake\"]\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
-	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	if compiled.Program == nil {
+		t.Fatal("compile failed")
+		return
+	}
 	result := compiled.Program.Materialize("./out")
-	if result.Diagnostic.Code != "OUTPUT_MISSING" { t.Error("missing remote output returned " + result.Diagnostic.Code) }
+	if result.Diagnostic.Code != "OUTPUT_MISSING" {
+		t.Error("missing remote output returned " + result.Diagnostic.Code)
+	}
 	result.Free(a)
-	if remote.SawRequest != true { t.Error("configured remote executor was not called") }
-	if _, statErr := os.Stat(dir+"/out"); statErr == nil { t.Error("missing remote output was published") }
+	if remote.SawRequest != true {
+		t.Error("configured remote executor was not called")
+	}
+	if _, statErr := os.Stat(dir + "/out"); statErr == nil {
+		t.Error("missing remote output was published")
+	}
 	compiled.Program.Free()
 	compiled.Free(a)
 	parsed.Free()
@@ -268,18 +387,31 @@ func TestRemoteFileRuleRejectsUndeclaredOutput(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-undeclared-")
-	if err != nil { t.Fatal("temporary directory failed"); return }
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
 	defer os.Remove(dir)
-	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil { t.Fatal("input setup failed"); return }
+	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil {
+		t.Fatal("input setup failed")
+		return
+	}
 	remote := &fakeRemoteHost{base: posix.New(a), allocator: a, OutputOverride: "unexpected"}
 	parsed := script.Parse(a, "remote-undeclared.kmk", "./out : ./input ; [executor: \"remote:fake\"]\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
-	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	if compiled.Program == nil {
+		t.Fatal("compile failed")
+		return
+	}
 	result := compiled.Program.Materialize("./out")
-	if result.Diagnostic.Code != "HOST_FAIL" { t.Error("undeclared remote output returned " + result.Diagnostic.Code) }
+	if result.Diagnostic.Code != "HOST_FAIL" {
+		t.Error("undeclared remote output returned " + result.Diagnostic.Code)
+	}
 	result.Free(a)
-	if _, statErr := os.Stat(dir+"/out"); statErr == nil { t.Error("undeclared remote output was published") }
+	if _, statErr := os.Stat(dir + "/out"); statErr == nil {
+		t.Error("undeclared remote output was published")
+	}
 	compiled.Program.Free()
 	compiled.Free(a)
 	parsed.Free()
@@ -290,16 +422,26 @@ func TestRemoteFileRuleRequiresRegisteredExecutor(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-unregistered-")
-	if err != nil { t.Fatal("temporary directory failed"); return }
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
 	defer os.Remove(dir)
 	parsed := script.Parse(a, "remote-unregistered.kmk", "./out : ; [executor: \"remote:missing\"]\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir})
-	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	if compiled.Program == nil {
+		t.Fatal("compile failed")
+		return
+	}
 	result := compiled.Program.Materialize("./out")
-	if result.Diagnostic.Code != "FEATURE_UNSUP" { t.Error("unregistered remote executor returned " + result.Diagnostic.Code) }
+	if result.Diagnostic.Code != "FEATURE_UNSUP" {
+		t.Error("unregistered remote executor returned " + result.Diagnostic.Code)
+	}
 	result.Free(a)
-	if _, statErr := os.Stat(dir+"/out"); statErr == nil { t.Error("unregistered remote rule ran locally") }
+	if _, statErr := os.Stat(dir + "/out"); statErr == nil {
+		t.Error("unregistered remote rule ran locally")
+	}
 	compiled.Program.Free()
 	compiled.Free(a)
 	parsed.Free()
@@ -317,19 +459,34 @@ func TestRemoteCancellationDoesNotPublishOutputsAndKeepsTruncation(t *testing.T)
 func runRemoteTerminalFailure(t *testing.T, a mem.Allocator, label string, outcome host.ProcessOutcome, expectedCode string, truncated bool) {
 	dirBuffer := make([]byte, os.MaxPathLen)
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-"+label+"-")
-	if err != nil { t.Fatal("temporary directory failed"); return }
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
 	defer os.Remove(dir)
-	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil { t.Fatal("input setup failed"); return }
+	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil {
+		t.Fatal("input setup failed")
+		return
+	}
 	remote := &fakeRemoteHost{base: posix.New(a), allocator: a, OutcomeOverride: outcome, HasOutcomeOverride: true, StdoutTruncated: truncated}
 	parsed := script.Parse(a, "remote-"+label+".kmk", "./out : ./input ; [executor: \"remote:fake\"]\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
-	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	if compiled.Program == nil {
+		t.Fatal("compile failed")
+		return
+	}
 	result := compiled.Program.Materialize("./out")
-	if result.Diagnostic.Code != expectedCode { t.Error("remote terminal outcome returned " + result.Diagnostic.Code) }
-	if truncated && !result.Diagnostic.Cause.StdoutTruncated { t.Error("remote truncation metadata was lost") }
+	if result.Diagnostic.Code != expectedCode {
+		t.Error("remote terminal outcome returned " + result.Diagnostic.Code)
+	}
+	if truncated && !result.Diagnostic.Cause.StdoutTruncated {
+		t.Error("remote truncation metadata was lost")
+	}
 	result.Free(a)
-	if _, statErr := os.Stat(dir+"/out"); statErr == nil { t.Error("failed remote execution published output") }
+	if _, statErr := os.Stat(dir + "/out"); statErr == nil {
+		t.Error("failed remote execution published output")
+	}
 	compiled.Program.Free()
 	compiled.Free(a)
 	parsed.Free()
@@ -340,20 +497,35 @@ func TestRemoteRetryReusesIdempotencyKeyAndPublishesOnlySuccess(t *testing.T) {
 	a := t.Allocator()
 	dirBuffer := make([]byte, os.MaxPathLen)
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-remote-retry-")
-	if err != nil { t.Fatal("temporary directory failed"); return }
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
 	defer os.Remove(dir)
-	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil { t.Fatal("input setup failed"); return }
+	if os.WriteFile(dir+"/input", []byte("input-data"), 0o644) != nil {
+		t.Fatal("input setup failed")
+		return
+	}
 	remote := &fakeRemoteHost{base: posix.New(a), allocator: a, FailFirst: true}
 	parsed := script.Parse(a, "remote-retry.kmk", "./out : ./input ; [executor: \"remote:fake\"]\n\ttrue\n")
 	registry := eval.NewRegistry(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: remote, Directory: dir, RetryCount: 1, RemoteExecutors: []host.ExecutorDescriptor{{Name: "fake", Version: "v1"}}})
-	if compiled.Program == nil { t.Fatal("compile failed"); return }
+	if compiled.Program == nil {
+		t.Fatal("compile failed")
+		return
+	}
 	result := compiled.Program.Materialize("./out")
-	if result.Diagnostic.Code != "" { t.Error("remote retry failed: " + result.Diagnostic.Code) }
+	if result.Diagnostic.Code != "" {
+		t.Error("remote retry failed: " + result.Diagnostic.Code)
+	}
 	result.Free(a)
-	if remote.StartCount != 2 || !remote.RetryKeysMatch { t.Error("remote retry did not reuse its idempotency key") }
+	if remote.StartCount != 2 || !remote.RetryKeysMatch {
+		t.Error("remote retry did not reuse its idempotency key")
+	}
 	data, readErr := os.ReadFile(a, dir+"/out")
-	if readErr != nil || string(data) != "remote-data" { t.Error("remote retry did not publish its successful output") }
+	if readErr != nil || string(data) != "remote-data" {
+		t.Error("remote retry did not publish its successful output")
+	}
 	mem.FreeSlice(a, data)
 	compiled.Program.Free()
 	compiled.Free(a)
@@ -1356,7 +1528,7 @@ func TestServiceRootCanWaitForReadinessAndRelease(t *testing.T) {
 
 func TestServiceStopUsesConfiguredGracePeriod(t *testing.T) {
 	a := t.Allocator()
-	parsed := script.Parse(a, "service.kmk", "service daemon : ; [stop: [grace-ms: 0]]\n\ttrap '' TERM; while :; do sleep 1; done\n")
+	parsed := script.Parse(a, "service.kmk", "service daemon : ; [stop: [grace-ms: 0] summary: \"Run daemon\" kind: \"service\" name: \"daemon\"]\n\ttrap '' TERM; while :; do sleep 1; done\n")
 	registry := eval.NewRegistry(a)
 	host := posix.New(a)
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: host})
@@ -1827,17 +1999,28 @@ func TestFileURIWritePreservesHostProtocolParents(t *testing.T) {
 	// The compiled program owns and frees its host.
 	compiled := program.Compile(a, parsed, registry, program.Options{Host: memory, Directory: ".", Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"file:///virtual/"}}}})
 	defer compiled.Free(a)
-	if compiled.Program == nil { t.Fatal("file URI publication did not compile"); return }
+	if compiled.Program == nil {
+		t.Fatal("file URI publication did not compile")
+		return
+	}
 	defer compiled.Program.Free()
 	result := compiled.Program.Materialize("publish")
 	defer result.Free(a)
-	if result.Diagnostic.Code != "" { t.Error("file URI publication failed: " + result.Diagnostic.Code) }
+	if result.Diagnostic.Code != "" {
+		t.Error("file URI publication failed: " + result.Diagnostic.Code)
+	}
 	data, err := memory.ReadFile(a, uri)
 	defer mem.FreeSlice(a, data)
-	if err != nil || string(data) != "uri" { t.Error("file URI publication changed host resource identity") }
-	if len(memory.Dirs) != 3 || !slices.Contains(memory.Dirs, "file:///virtual/parent%252F%23%3F/deep") { t.Error("file URI parents were not canonically encoded") }
+	if err != nil || string(data) != "uri" {
+		t.Error("file URI publication changed host resource identity")
+	}
+	if len(memory.Dirs) != 3 || !slices.Contains(memory.Dirs, "file:///virtual/parent%252F%23%3F/deep") {
+		t.Error("file URI parents were not canonically encoded")
+	}
 	for i := range memory.Dirs {
-		if !core.IsResourceURIName(memory.Dirs[i]) { t.Error("file URI parent escaped its host protocol") }
+		if !core.IsResourceURIName(memory.Dirs[i]) {
+			t.Error("file URI parent escaped its host protocol")
+		}
 	}
 }
 
@@ -1957,32 +2140,56 @@ func TestRecipeRenderingRejectsEffectsWithDocumentEndings(t *testing.T) {
 	for i := range bodies {
 		dirBuffer := make([]byte, os.MaxPathLen)
 		dir, err := os.MkdirTemp(dirBuffer, "", "kame-render-ownership-")
-		if err != nil { t.Fatal("temporary directory failed"); return }
-		parsed := script.Parse(a, "render.kmk", "./output :\n" + bodies[i])
+		if err != nil {
+			t.Fatal("temporary directory failed")
+			return
+		}
+		parsed := script.Parse(a, "render.kmk", "./output :\n"+bodies[i])
 		registry := eval.NewRegistry(a)
 		operations.Register(registry)
 		compiled := program.Compile(a, parsed, registry, program.Options{Host: posix.New(a), Directory: dir, Grants: []eval.Grant{{Capability: eval.Write, Names: []string{"."}}}})
 		if compiled.Program == nil || len(compiled.Diagnostics) != 0 {
-			if compiled.Program != nil { compiled.Program.Free() }
-			compiled.Free(a); parsed.Free(); registry.Free(); _ = os.Remove(dir)
-			t.Fatal("recipe ownership fixture did not compile"); return
+			if compiled.Program != nil {
+				compiled.Program.Free()
+			}
+			compiled.Free(a)
+			parsed.Free()
+			registry.Free()
+			_ = os.Remove(dir)
+			t.Fatal("recipe ownership fixture did not compile")
+			return
 		}
-		if i != 0 && parsed.Items[0].Rule.BodyDoc == nil { t.Error("document rendering was not selected") }
+		if i != 0 && parsed.Items[0].Rule.BodyDoc == nil {
+			t.Error("document rendering was not selected")
+		}
 		result := compiled.Program.Materialize("./output")
-		if result.Diagnostic.Code != "PHASE_INVALID" { t.Error("recipe rendering accepted an effect: " + result.Diagnostic.Code) }
+		if result.Diagnostic.Code != "PHASE_INVALID" {
+			t.Error("recipe rendering accepted an effect: " + result.Diagnostic.Code)
+		}
 		result.Free(a)
-		data, readErr := os.ReadFile(a, dir + "/output")
-		if readErr == nil { t.Error("rejected template wrote an output") }
+		data, readErr := os.ReadFile(a, dir+"/output")
+		if readErr == nil {
+			t.Error("rejected template wrote an output")
+		}
 		mem.FreeSlice(a, data)
 		seen := false
 		for {
 			next := compiled.Program.NextEvent()
-			if !next.OK { break }
-			if next.Event.Kind == program.Stdout && string(next.Event.Data) == "rendered" { seen = true }
+			if !next.OK {
+				break
+			}
+			if next.Event.Kind == program.Stdout && string(next.Event.Data) == "rendered" {
+				seen = true
+			}
 			next.Event.Free(a)
 		}
-		if seen { t.Error("rejected template emitted output") }
-		compiled.Program.Free(); compiled.Free(a); parsed.Free(); registry.Free()
+		if seen {
+			t.Error("rejected template emitted output")
+		}
+		compiled.Program.Free()
+		compiled.Free(a)
+		parsed.Free()
+		registry.Free()
 		_ = os.Remove(dir)
 	}
 }

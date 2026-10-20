@@ -40,35 +40,35 @@ type ProcessRequest struct {
 	// other nodes return 0/1 or a negative reserved operator status. Native
 	// operator workers call this against their fork snapshot, never per item
 	// through a host request or a new process.
-	StreamItem func(any, int64, int, []byte) int
-	StreamContext any
-	ID          int64
-	Target      string
-	Generation  int64
-	Attempt     int64
+	StreamItem     func(any, int64, int, []byte) int
+	StreamContext  any
+	ID             int64
+	Target         string
+	Generation     int64
+	Attempt        int64
 	IdempotencyKey [32]byte
 	// Executor is "local" or a registered remote executor name. An empty value
 	// is interpreted as local for existing embedders.
 	Executor        string
 	ExecutorVersion string
-	Shell       []string
+	Shell           []string
 	// Argv executes directly instead of appending Script to Shell.
 	// A nonempty Argv also closes stdin for command substitution.
-	Argv        []string
-	Stages      []ProcessStage
-	Topology    bool
+	Argv            []string
+	Stages          []ProcessStage
+	Topology        bool
 	CollectFailures bool // collect ordinary external exit statuses; signals/operators remain fatal
-	Edges       []ProcessEdge
-	Input       string
-	Output      string
-	Append      bool
-	Script      []byte
-	Directory   string
-	Environment []string
-	Inputs      []ExecutionArtifact
-	Outputs     []string
-	TimeoutMS   int64
-	RetainBytes int
+	Edges           []ProcessEdge
+	Input           string
+	Output          string
+	Append          bool
+	Script          []byte
+	Directory       string
+	Environment     []string
+	Inputs          []ExecutionArtifact
+	Outputs         []string
+	TimeoutMS       int64
+	RetainBytes     int
 }
 
 // ExecutorDescriptor binds a stable remote executor name to its implementation
@@ -79,37 +79,41 @@ type ExecutorDescriptor struct {
 }
 
 type ProcessStage struct {
-	Order int // 0 ready, 1 strict framed round-robin (merge only)
-	BufferBytes int // zero selects the host's bounded default; native muxes only
-	Overflow int // 0 block, 1 drop-new, 2 drop-old, 3 latest; framed broadcast only
-	BufferItems int // pending records per destination; excludes one in-flight record
-	Framed bool // output uses the private framed-line transport
-	Kind string // empty for an executable; otherwise a native stream operator
-	Argv []string
-	Directory string
+	Order       int    // 0 ready, 1 strict framed round-robin (merge only)
+	BufferBytes int    // zero selects the host's bounded default; native muxes only
+	Overflow    int    // 0 block, 1 drop-new, 2 drop-old, 3 latest; framed broadcast only
+	BufferItems int    // pending records per destination; excludes one in-flight record
+	Framed      bool   // output uses the private framed-line transport
+	Kind        string // empty for an executable; otherwise a native stream operator
+	Argv        []string
+	Directory   string
 	Environment []string
-	TimeoutMS int64
-	Input string
-	Output string
-	Append bool
+	TimeoutMS   int64
+	Input       string
+	Output      string
+	Append      bool
 }
-type ProcessEdge struct { From int; To int; Argument int }
+type ProcessEdge struct {
+	From     int
+	To       int
+	Argument int
+}
 type ProcessStageResult struct {
-	Status int
-	Signal int
+	Status  int
+	Signal  int
 	Outcome ProcessOutcome
 }
 
 // Measurement: 0 unavailable, 1 completed write, 2 read, 3 queued completed
 // write. Byte channels have Items/DroppedItems == -1 (unknown, not zero).
 type ProcessEdgeMetrics struct {
-	Measurement int
-	Bytes int64
-	Items int64
-	DroppedItems int64
+	Measurement         int
+	Bytes               int64
+	Items               int64
+	DroppedItems        int64
 	QueueHighWaterBytes int64
 	QueueHighWaterItems int64
-	Saturated bool
+	Saturated           bool
 }
 
 // ProcessEvent owns Data, Stdout, Stderr, and Diagnostic and must be released
@@ -131,7 +135,7 @@ type ProcessEvent struct {
 	// RetainBytes is the per-stream capture bound used for this terminal event.
 	// It lets diagnostics report whether retained process output was truncated.
 	RetainBytes int
-	Stages []ProcessStageResult
+	Stages      []ProcessStageResult
 	EdgeMetrics []ProcessEdgeMetrics
 	StageStates []int // snapshot only: unknown/running/input/output/completed/failed/cancelled/timed-out
 	// Outputs carries remote artifact bytes. Local process hosts leave it empty.
@@ -140,9 +144,9 @@ type ProcessEvent struct {
 
 // ExecutionArtifact is a copied file at the remote workspace boundary.
 type ExecutionArtifact struct {
-	Name string
-	Data []byte
-	Mode uint32
+	Name   string
+	Data   []byte
+	Mode   uint32
 	Digest [32]byte
 }
 

@@ -215,7 +215,7 @@ func filter(c *eval.Context, s any, v []core.Value, invert bool) eval.Result {
 }
 func opReduce(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	subject := len(v)-1
+	subject := len(v) - 1
 	if v[0].Kind != core.Callable {
 		return invalidArgument(c, v, 0, "callable")
 	}
@@ -276,7 +276,7 @@ func opConcat(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 func opSlice(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	subject := len(v)-1
+	subject := len(v) - 1
 	if v[0].Kind != core.Int {
 		return invalidArgument(c, v, 0, "int")
 	}

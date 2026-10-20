@@ -22,7 +22,9 @@ func (p *Program) OverrideDefinition(name, text string) bool {
 func (p *Program) OverrideDefinitionValue(name, text string) bool {
 	parsed := expr.Parse(p.Alloc, "<set>", text)
 	defer parsed.Free()
-	if len(parsed.Diagnostics) != 0 || !expr.IsLiteral(parsed.Expr) { return false }
+	if len(parsed.Diagnostics) != 0 || !expr.IsLiteral(parsed.Expr) {
+		return false
+	}
 	return p.overrideDefinition(name, parsed.Expr)
 }
 
@@ -134,7 +136,9 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 	state.FinalizationForbidden = context.forbidsFinalization()
 	// A restriction-only view does not redefine ordinary lazy-definition effect
 	// timing. Existing target namespaces still carry their original phase policy.
-	if !context.HasDefinitionNamespace { state.Phase = EvaluatePhase }
+	if !context.HasDefinitionNamespace {
+		state.Phase = EvaluatePhase
+	}
 	state.InvalidRuleFrames = invalidFrames
 	// Opaque or over-depth values cannot define a stable cached context. Reject
 	// them on evaluation rather than sharing zero digests or retaining processes.

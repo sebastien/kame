@@ -45,8 +45,8 @@ rendered as placeholders.
 | Field | Meaning | Human rendering |
 | --- | --- | --- |
 | `notes` | Short additional facts, suggestions, or qualifications. | `note:` lines |
-| `related` | An ordered list of related messages, each with `message`, `source`, and `span`. | source-qualified `note:` lines |
-| `frames` | Evaluation, definition, rule, or script boundaries crossed while propagating the failure. Each frame has a kind, label, and optional span. | `while …` or `called from …` context |
+| `related` | An ordered list of related messages, each with `message`, `source`, and `span`. | source-qualified notes with available source excerpts |
+| `frames` | Evaluation, definition, rule, include, or script boundaries crossed while propagating the failure. Each frame has a kind, label, and optional source location. | numbered evaluation backtrace with available source excerpts |
 | `target` | Current target when one target directly owns the failure. | headline subject |
 | `targetStack` | Ordered root-to-current target dependency path. | `required by a → b → target` |
 | `tips` | Concrete recovery actions. | `help:` lines |
@@ -90,6 +90,33 @@ span. Equivalent frames must be deduplicated in propagation order.
 Messages and all text retained in a diagnostic must outlive the parser,
 evaluator, or process callback that created them. Formatting a returned
 diagnostic after those stacks unwind must be safe.
+
+### Authored provenance and configuration queries
+
+Source extraction, include expansion, combined inputs, and temporary query
+programs must preserve mappings from evaluated expressions to authored source
+identities and byte offsets. Synthetic prefix offsets and predicate-local offsets
+are distinct coordinate spaces; neither may be reported as an offset into an
+authored file without an origin mapping. Resolve and retain diagnostic locations
+before temporary source maps or programs are released.
+
+When an authored origin is available, a configuration-condition failure points
+at the operation or expression that directly failed, including failures reached
+through lazy definitions and helper calls in other files. The selecting condition
+is outer propagation context, not a replacement primary location. Definition
+frames identify their declarations; call frames identify the authored call sites.
+Retain available include-site provenance that explains how those sources were
+selected. The same rules apply to native and embedding-host source composition.
+
+A query caller that supplies no authored origin must still receive useful frame
+kinds and labels, but synthetic locations must remain unqualified. Do not invent
+locations or discard known authored locations merely because other frames lack
+them. An outer boundary may supply a primary location only when no more specific
+authored primary location is known.
+
+This provenance does not change configuration purity, evaluation order, lazy
+semantics, diagnostic codes, or capability policy. In particular, a denied
+configuration operation must explain that runtime grants cannot authorize it.
 
 ## Severities
 
@@ -289,14 +316,17 @@ will remain enabled.
 Human diagnostics are written to stderr. They use this information hierarchy:
 
 ```text
-✗ {subject} failed · {code}
+{severity}[{code}]: [{subject}] {message}
   required by {root} → … → {subject}
 
-{source}:{line}:{column}: {severity} {code}: {message}
- {previous-line} │ {source text}
- {error-line}    │ {source text}
-                 │ {caret marker and, when useful, a short diagnosis}
- {next-line}     │ {source text}
+  ╭─ {source}:{line}:{column}
+ {line} │ {source text}
+      │ {span marker and, when useful, a short diagnosis}
+
+Trace (innermost first)
+  ├─ #0  {kind} {label} · {frame-source}:{line}:{column}
+  ╰─ #1  {outer-kind} {outer-label} · {outer-source}:{line}:{column}
+     │ {source text, only if this source line was not already shown}
 
 note: {additional context}
 note: {related-source}:{line}:{column}: {related context}
@@ -305,31 +335,80 @@ help: {concrete recovery action}
 caused by: {host or process outcome}
 ```
 
-The headline is shown for a target or command failure. `subject` is the failed
-target when known and `command` otherwise. A warning uses a warning headline;
-a standalone parser or evaluator diagnostic may omit the headline and begin at
-the source location. Every error must still show its specific message and all
-available context needed to understand its reason.
+Use one diagnostic headline in both human and plain output. `subject` is the
+failed target when known; otherwise omit the bracketed subject. Do not add a
+separate target/code headline. Lifecycle outcome rows retain target, timing and
+status only; they do not repeat the diagnostic code, message or cause metadata.
+Every error must still show its specific message and all available context
+needed to understand its reason.
 
-The source block is shown only when the primary span refers to available
-authored source. It uses one-based line and display-column coordinates. Tabs
-advance to the next eight-column boundary. The marker covers the failing span
-on its first line, is at least one column wide for an empty span, and never
-extends past that line. Include one preceding or following line only when it
+Source excerpts are shown for the primary location, located frames, and located
+related notes whenever the corresponding authored text is available. Primary and
+related blocks have numbered source-line gutters; compact trace excerpts use an
+unnumbered gutter because their frame rows already identify the line. Trace
+excerpts are indented beneath the frame label, not its tree branch. Gutters
+visually separate source text from diagnostic prose. Locations use contiguous `source:line:column` text
+for editor and terminal recognition. Coordinates are one-based lines and display
+columns. Tabs advance to the next eight-column boundary. The marker covers the
+visible part of the primary span on its first line, is at least one column wide
+for an empty span, and never extends past that line's visible text (except a
+point marker at EOF). Human span markers use box-drawing brackets (`╰──╯`) or
+a single-column tick (`╵`); plain output retains `^~~~`. Trace excerpts do not
+repeat span markers. Include one preceding or following line only when it
 makes the diagnosis clearer; do not add empty context merely to fill the
-template. The renderer accepts an explicit terminal width and uses a documented
-stable fallback when no width is available; wrapping is deterministic for a
-given width and never changes plain or JSON output.
+template. Keep excerpts on one visual line: clip long lines around the relevant
+span, indicating omitted prefixes/suffixes with ellipses, rather than wrapping
+short suffixes onto separate rows. Clipping respects display cells and UTF-8
+boundaries and keeps the focus visible. Locations remain authored coordinates,
+not viewport columns. The renderer accepts an explicit terminal width and uses
+a stable 80-column fallback; clipping is deterministic for a given width. Plain
+output uses a fixed 80-column viewport; JSON is never clipped.
 
 Use the authored Kame location, not a generated shell-script location.
 For a diagnostic without a source location, render the severity, code, and
 message without inventing a `<command>:1:1` location.
+Prefer retained authored text over rereading a file when it is available. Source
+text is presentation input, not an additional field in retained diagnostics or
+JSON. If text cannot be obtained, retain the known source identity and any
+resolvable coordinates without an excerpt; do not drop the frame or fabricate
+line and column values. Rendering must not evaluate expressions or expand values
+to obtain context.
 
 `notes` add facts or qualified suggestions; they do not repeat the primary
 message. `tips` state a concrete action and use `help:`. A target stack appears
-only for an actual nested target dependency. Frames appear from the immediate
-context outward, using wording such as `while evaluating definition "SOURCES"`
-or `called from Makefile.kmk:3:1: rule "build"`.
+only for an actual nested target dependency.
+
+### Evaluation backtrace
+
+When frames are present, human and plain output use a compact, visibly labelled
+`Trace` section stating `innermost first`. Number displayed frames
+consecutively from `#0`, retaining propagation order from the immediate context
+outward. Each entry uses one row for its kind, label, and available authored
+location. Show one source excerpt below a row only if that authored source line
+has not appeared in the primary block or an earlier frame; do not repeat source
+blocks or markers for overlapping operation/definition/call/condition frames.
+Unlocated frames still show their
+kind and label. Do not sort frames by source location or conflate definition
+forcing, function calls, include sites, and target dependencies: this is an
+evaluation trace, not a native implementation stack.
+
+Show all distinct frames by default; source-line sharing does not merge frames
+or discard their individual kinds, labels, or coordinates. Do not silently truncate the trace or
+require a verbose/debug option to see known locations and source lines. A frame
+may be represented in the primary source block rather than repeated in the
+numbered list only when that block explicitly identifies the same kind, label,
+source, and span. Sharing a location alone does not make two frames equivalent.
+This presentation-only omission must not remove frames from structured JSON.
+
+Use indentation and compact rows, without blank lines between frames, so the
+failure and its callers remain easy to scan without colour. Plain output uses the same information
+hierarchy and source excerpts with ASCII gutters and markers; rich human output
+uses Unicode rails and tree branches. With colour enabled, severity and primary
+markers use severity colours, locations are cyan, operation/call labels yellow,
+definition labels purple, and structural context muted. Notes and recovery tips
+follow the backtrace; underlying cause metadata follows Kame's explanation.
+Do not add evaluated arguments, local values, environment contents, or captured
+process output to explain frames.
 
 The `cause` block follows Kame's explanation. It distinguishes the
 interpreted diagnosis from the process outcome:
@@ -339,6 +418,11 @@ Outcome     build failed
 Diagnosis   recipe uses an unavailable executable
 Cause       sh exited with status 127
 ```
+
+Process exit status and signal belong in structured cause fields, not duplicated
+in the primary message or lifecycle rows. Render them once in the cause block.
+When a process cause has no message, use `process exited` before its metadata;
+other message-less causes use their kind. Never render an empty `caused by:`.
 
 Captured stdout and stderr are never retained or rendered in a diagnostic cause,
 even when they were not streamed. The cause may state that output was streamed
@@ -399,7 +483,7 @@ not a reduced summary. Existing schema-1 fields remain stable:
     "target": "build",
     "targetStack": ["all", "build"],
     "tips": ["check that the compiler is installed"],
-    "cause": { "kind": "process", "message": "sh exited with status 127", "program": "sh", "status": 127, "stderrTruncated": false, "stderrLimit": 65536 }
+    "cause": { "kind": "process", "message": "process exited", "program": "sh", "status": 127, "stderrTruncated": false, "stderrLimit": 65536 }
   }
 }
 ```
@@ -454,13 +538,40 @@ contain no ANSI escapes, and use no terminal-width-dependent wrapping.
   and does not mark a following line.
 - A propagated diagnostic renders its primary location, related location or
   frame context, and target stack without duplicating equivalent frames.
+- A source-selection condition calling a helper that forces lazy definitions
+  and fails in an operation reports that operation's authored primary location,
+  definition declarations, call sites, and outer condition context. Cover
+  definitions from included files and earlier inputs, and both native and
+  JavaScript/WASM composition paths. Purity failures retain their codes and
+  explain why runtime grants do not authorize conditions.
+- Extracted declaration and predicate origins resolve independently; no synthetic
+  offset is presented as an authored location. Queries without origins retain
+  unqualified frame labels rather than misleading coordinates.
+- Human and plain snapshots show compact, explicitly ordered, numbered frame rows
+  with inline locations, one source excerpt per distinct authored line, and a
+  primary span marker. Missing or
+  unreadable source does not suppress frames. Multiline spans mark only their
+  first line; empty spans, tabs, combining and wide Unicode, and narrow terminals
+  remain readable and deterministic. Long excerpts are clipped around the focus,
+  not wrapped; ellipses and marker alignment respect display-cell widths.
+- Human output uses Unicode structure and semantic colours for locations, labels,
+  markers and headings when enabled. Disabling colour retains the same Unicode
+  layout; explicit plain output has uncoloured ASCII structure. JSON retains complete frames
+  and spans independently of clipping or shared excerpts.
+- Distinct frame kinds or labels at the same source location remain visible.
+  Representing the immediate frame in the primary block does not lose its
+  identity or alter the complete structured JSON frame list.
 - A command failure renders Kame's diagnosis before its process cause and
   does not repeat output that was already streamed.
+- A failed target has one diagnostic headline, with its target inline. Lifecycle
+  rows do not repeat diagnostic details. Command-substitution failures render
+  status/signal metadata once in a nonempty cause block in human and plain output;
+  JSON retains the structured cause fields.
 - Human, plain, and JSON formatting represent the same code, message, source
   span, notes, frames, target context, tips, and bounded cause metadata.
 - Plain and redirected output contain no ANSI escape sequences; explicit colour
   selection and the documented colour environment variables are deterministic.
-- Given the same width, diagnostics wrap identically; plain and JSON output are
+- Given the same width, diagnostic excerpts clip identically; plain and JSON output are
   invariant across terminal widths.
 - Schema-1 diagnostic additions are optional, additive, and preserve the
   string-only `notes` representation. Causes expose capture truncation metadata

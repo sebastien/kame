@@ -79,4 +79,9 @@ compare "parse error" ./out.txt
 test-step "operand diagnostics after multibyte text retain native columns"
 compare "Unicode operand failure" -l kmk -c $'root :\n\t@(nop "界e\u0301") @(first 1)\n' root
 
+test-step "source-backed frames keep markers aligned after clipping and across lines"
+compare "wrapped operand failure" -l kmk -c $'root :\n\t@(nop "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") @(first 1)\n' root
+compare "multiline operand failure" -l kmk -c $'value = (first\n  1)\nroot :\n\t@{value}\n' root
+compare "coloured Unicode trace" --diagnostic-format human --color always -l kmk -c $'value = (first 1)\nroot :\n\t@{value}\n' root
+
 test-end

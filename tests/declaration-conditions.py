@@ -64,6 +64,23 @@ with tempfile.TemporaryDirectory() as temporary:
     (project / 'included.kmk').write_text('chosen :\n\tprintf included\n')
     (project / 'from-include.kmk').write_text('(include ./config-value.kmk)\n(if enabled (include ./included.kmk))\n')
     run(['-f', 'from-include.kmk', 'chosen'], 'included')
+    # Paths in conditions use evaluation cwd, not the included source directory.
+    (project / 'work').mkdir()
+    (project / 'sdk').mkdir()
+    (project / 'sdk' / 'selected.kmk').write_text('chosen : ; [shell: kash]\n\t(out! (abspath ./))\n')
+    for predicate in ['(abspath ./)', 'root', '(helper)']:
+        (project / 'sdk' / 'paths.kmk').write_text(
+            'expected ?= ""\nroot = (abspath ./)\n(helper) = (abspath ./child/..)\n'
+            f'(if (eq {predicate} expected) (include ./selected.kmk))\n')
+        for directory in ['.', 'work']:
+            expected = str(project / directory)
+            run(['-C', directory, '-f', str(project / 'sdk' / 'paths.kmk'),
+                '--define', f'expected={expected}', 'chosen'], expected)
+            run(['do', 'run', '-C', directory, '-f', str(project / 'sdk' / 'paths.kmk'),
+                '--define', f'expected={expected}', 'chosen'], expected)
+    # Inline conditions have the same cwd even though they cannot load includes.
+    run(['do', 'run', '-C', 'work', '--print-result', '-l', 'km', '-c',
+        f'(if (eq (abspath ./) {json.dumps(str(project / "work"))}) :nil (include ./missing.km))\n42\n'], '42')
     # Required active includes, active cycles and bad branch syntax still fail.
     (project / 'missing-active.kmk').write_text('(if :true (include ./absent.kmk))\nchosen :\n\ttouch should-not-run\n')
     run(['-f', 'missing-active.kmk', 'chosen'], code='FS_ERR')
@@ -112,7 +129,61 @@ with tempfile.TemporaryDirectory() as temporary:
     result = run(['--json', '-f', 'bad-predicate.kmk', 'chosen'], code='REF_MISSING')
     diagnostic = [json.loads(line)['diagnostic'] for line in result.stdout.splitlines() if json.loads(line).get('type') == 'diagnostic'][0]
     assert diagnostic['source'].endswith('bad-predicate.kmk')
-    assert diagnostic['span']['start'] == len('# é keeps byte offsets honest\n(if '.encode())
+    assert diagnostic['span']['start'] == len('# é keeps byte offsets honest\n(if (eq '.encode())
+
+    # Failing operands keep their own origins, not the outer selecting condition.
+    definitions = '# é source origins\nAVAILABLE = (sub {_0} "x" "y")\nMODULES = AVAILABLE\n(selected) = MODULES\n'
+    (project / 'trace-defs.km').write_text(definitions)
+    selecting = '(include ./trace-defs.km)\n(if (selected) (include ./absent.km))\n'
+    (project / 'trace-main.km').write_text(selecting)
+    result = run(['--json', 'do', 'run', '-f', 'trace-main.km'], code='PAT_INVALID')
+    diagnostic = next(json.loads(line)['diagnostic'] for line in result.stdout.splitlines() if json.loads(line).get('type') == 'diagnostic')
+    assert diagnostic['source'].endswith('trace-defs.km'), diagnostic
+    assert definitions.encode()[diagnostic['span']['start']:diagnostic['span']['end']] == b'{_0}', diagnostic
+    assert [frame['kind'] for frame in diagnostic['frames']] == ['operation', 'definition', 'definition', 'call', 'condition', 'include'], diagnostic
+    assert [frame['label'] for frame in diagnostic['frames'][:4]] == ['sub', 'AVAILABLE', 'MODULES', 'selected'], diagnostic
+    assert diagnostic['frames'][3]['span']['start'] == selecting.index('(selected)'), diagnostic
+    for display in ['human', 'plain']:
+        result = run(['--color', 'never', '--diagnostic-format', display, 'do', 'run', '-f', 'trace-main.km'], code='PAT_INVALID')
+        rail = '│' if display == 'human' else '|'
+        for excerpt in ['trace-defs.km:2:18', 'trace-defs.km:3:1', 'trace-main.km:2:5', f'2 {rail} AVAILABLE = (sub {{_0}} "x" "y")', '#0  operation sub', '#4  condition source selection', 'Trace (innermost first)']:
+            assert excerpt in result.stderr, (excerpt, result.stderr)
+        assert '\x1b' not in result.stderr
+        assert result.stderr.count('AVAILABLE = (sub') == 1, result.stderr
+        assert result.stderr.count('(if (selected)') == 1, result.stderr
+        assert len(result.stderr.splitlines()) < 18, result.stderr
+    result = run(['--color', 'always', '--diagnostic-format', 'human', 'do', 'run', '-f', 'trace-main.km'], code='PAT_INVALID')
+    for decoration in ['╭─', '├─', '╰─', '╯', '│', '\x1b[36m', '\x1b[33m', '\x1b[35m', '\x1b[1;31m']:
+        assert decoration in result.stderr, (decoration, result.stderr)
+    # Earlier explicit inputs retain their own origins too, without an include.
+    (project / 'trace-second.km').write_text('# later input\n(if (selected) (include ./absent.km))\n')
+    result = run(['--json', 'do', 'run', '-f', 'trace-defs.km', '-f', 'trace-second.km'], code='PAT_INVALID')
+    diagnostic = next(json.loads(line)['diagnostic'] for line in result.stdout.splitlines() if json.loads(line).get('type') == 'diagnostic')
+    assert diagnostic['source'].endswith('trace-defs.km'), diagnostic
+    assert diagnostic['frames'][-1]['source'].endswith('trace-second.km'), diagnostic
+    assert not any(frame['kind'] == 'include' for frame in diagnostic['frames']), diagnostic
+    # Both hosts render the same complete, uncoloured source-backed trace.
+    result = run(['--color', 'never', '--diagnostic-format', 'plain', 'do', 'run', '-l', 'km', '-c', '(if (first 1) (include ./absent.km))'], code='EXPR_INVALID')
+    assert result.stderr == '''error[EXPR_INVALID]: `first` argument 1 expects list; got int
+  --> <command:1>:1:12
+ 1 | (if (first 1) (include ./absent.km))
+   |            ^
+
+Trace (innermost first)
+  #0  operation first at <command:1>:1:5
+  #1  condition source selection at <command:1>:1:5
+''', result.stderr
+
+    point = run(['--color', 'never', '--diagnostic-format', 'human', 'do', 'run', '-l', 'expr', '-c', '(first 1)'], code='EXPR_INVALID')
+    assert '│        ╵' in point.stderr and '^' not in point.stderr, point.stderr
+
+    # Long excerpts keep the failure in one clipped viewport, without broken UTF-8.
+    for padding in ['x' * 120, '界' * 30 + 'e\u0301' * 10]:
+        expression = f'(let [unused "{padding}"] (first 1))'
+        result = run(['--color', 'never', '--diagnostic-format', 'plain', 'do', 'run', '-l', 'expr', '-c', expression], code='EXPR_INVALID')
+        excerpt = next(line for line in result.stderr.splitlines() if line.startswith(' 1 | '))
+        assert '...' in excerpt and '(first 1)' in excerpt, result.stderr
+        assert '\ufffd' not in result.stderr and len(excerpt) <= 80, result.stderr
 
     # Ordinary truthiness, multi-pair selection, nested bodies and nil/no-else.
     for predicate, expected in [(':false', '0'), (':nil', '0'), (':true', '42'),

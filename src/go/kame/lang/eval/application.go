@@ -126,10 +126,16 @@ func comparisonAlias(name string) (string, bool) {
 }
 
 func (p *Program) operation(scope *Scope, operation *Operation, arguments []*expr.Expr, context *Context, span source.Span) Result {
-	if context.PurePredicate && operation.Category != PureOperation { return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations") }
+	if context.PurePredicate && operation.Category != PureOperation {
+		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations")
+	}
 	if operation.ScopedFinalizer {
-		if context.forbidsFinalization() { return failure(context.Run, "PHASE_INVALID", span, "finally! is invalid in this execution phase") }
-		if state := p.findFinalizer(context, span); state != nil { return p.advanceFinalizer(state, context) }
+		if context.forbidsFinalization() {
+			return failure(context.Run, "PHASE_INVALID", span, "finally! is invalid in this execution phase")
+		}
+		if state := p.findFinalizer(context, span); state != nil {
+			return p.advanceFinalizer(state, context)
+		}
 	}
 	ready := p.prepareOperation(operation, len(arguments), context, span)
 	if ready.Waiting || ready.Completed || ready.Diagnostic.Code != "" {
@@ -195,8 +201,12 @@ func (p *Program) prepareOperation(operation *Operation, count int, context *Con
 		context.MarkPhaseInvalid()
 		return failure(context.Run, "PHASE_INVALID", span, "`"+operation.Name+"` is invalid in a value-producing rule body or shell-template expansion; return artifact content with [shell: kame] or execute actions in Kash")
 	}
-	if context.PurePredicate && operation.Category != PureOperation { return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations") }
-	if context.deferred { return Result{Completed: true} }
+	if context.PurePredicate && operation.Category != PureOperation {
+		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot call effectful or unclassified operations")
+	}
+	if context.deferred {
+		return Result{Completed: true}
+	}
 	// A dependency may publish while a host operation is outstanding. Keep its
 	// single request active until the engine supplies the matching completion;
 	// the resumed evaluation then snapshots every dependency at its latest value.
@@ -214,7 +224,9 @@ func (p *Program) prepareOperation(operation *Operation, count int, context *Con
 	}
 	for i := range operation.Capabilities {
 		if !context.allowed(operation.Capabilities[i]) {
-			if operation.Capabilities[i] == Env { return environmentDenied(context.Run, span, "") }
+			if operation.Capabilities[i] == Env {
+				return environmentDenied(context.Run, span, "")
+			}
 			message := "`" + operation.Name + "` requires a capability that was not granted"
 			if operation.Capabilities[i] == Read {
 				message += "; grant read access with --allow-read=ROOT"
@@ -286,7 +298,9 @@ func (p *Program) call(function *Function, arguments []*expr.Expr, context *Cont
 }
 
 func (p *Program) callValues(function *Function, values []core.Value, context *Context, span source.Span) Result {
-	if context.PurePredicate && function.Kind == FunctionInvocation { return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot invoke process scripts") }
+	if context.PurePredicate && function.Kind == FunctionInvocation {
+		return failure(context.Run, "KASH_PREDICATE_EFFECT", span, "stream predicates cannot invoke process scripts")
+	}
 	if function.Kind == FunctionOperation {
 		operation := p.operationForCallable(function)
 		if operation == nil {

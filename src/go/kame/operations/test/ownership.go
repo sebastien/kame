@@ -61,7 +61,9 @@ func TestCallableOwnershipRemediation(t *testing.T) {
 	}
 	result.Free(a)
 	result = evaluate(t, p, "((match? {*}) ([y] y) 1)")
-	if result.Diagnostic.Code != "EXPR_INVALID" { t.Error("native arity rejection missing") }
+	if result.Diagnostic.Code != "EXPR_INVALID" {
+		t.Error("native arity rejection missing")
+	}
 	result.Free(a)
 	result = evaluate(t, p, "(map ([x] (if (eq x 1) ([y] y) (uppercase 42))) [1 2])")
 	if result.Diagnostic.Code != "EXPR_INVALID" {
@@ -93,11 +95,15 @@ func TestContextCallBorrowsCallableOperands(t *testing.T) {
 	c := &eval.Context{Program: p, Scope: p.Scope, Run: a}
 	for i := 0; i < 2; i++ {
 		result := c.Call(identity.Value, []core.Value{operand.Value})
-		if result.Diagnostic.Code != "" || result.Value.Kind != core.Callable { t.Error("callable operand was not returned") }
+		if result.Diagnostic.Code != "" || result.Value.Kind != core.Callable {
+			t.Error("callable operand was not returned")
+		}
 		result.Free(a)
 	}
 	result := c.Call(operand.Value, []core.Value{{Kind: core.Int, Int: 42}})
-	if result.Diagnostic.Code != "" || result.Value.Int != 42 { t.Error("Call consumed its borrowed operand") }
+	if result.Diagnostic.Code != "" || result.Value.Int != 42 {
+		t.Error("Call consumed its borrowed operand")
+	}
 	result.Free(a)
 	operand.Free(a)
 	identity.Free(a)

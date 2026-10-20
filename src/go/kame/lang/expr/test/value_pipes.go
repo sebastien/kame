@@ -19,16 +19,24 @@ func TestValuePipeCloneAndFormattingPreserveAuthoredStructure(t *testing.T) {
 	}
 	for i := range inputs {
 		parsed := expr.Parse(a, "pipe.km", inputs[i])
-		if len(parsed.Diagnostics) != 0 { t.Error("pipe source did not parse"); parsed.Free(); continue }
+		if len(parsed.Diagnostics) != 0 {
+			t.Error("pipe source did not parse")
+			parsed.Free()
+			continue
+		}
 		cloned := expr.Clone(a, parsed.Expr)
 		parsed.Free()
 		compact := expr.Compact(a, cloned)
-		if compact != inputs[i] { t.Errorf("authored structure changed: %s", compact) }
+		if compact != inputs[i] {
+			t.Errorf("authored structure changed: %s", compact)
+		}
 		formatted := expr.Format(a, cloned)
 		expr.Free(a, cloned)
 		again := expr.Parse(a, "formatted.km", formatted)
 		canonical := expr.Format(a, again.Expr)
-		if len(again.Diagnostics) != 0 || canonical != formatted { t.Error("pipe format did not round trip") }
+		if len(again.Diagnostics) != 0 || canonical != formatted {
+			t.Error("pipe format did not round trip")
+		}
 		mem.FreeString(a, compact)
 		mem.FreeString(a, formatted)
 		mem.FreeString(a, canonical)

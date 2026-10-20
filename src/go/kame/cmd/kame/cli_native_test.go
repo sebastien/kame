@@ -149,7 +149,7 @@ func TestFormatCheckAndStandardInput(t *testing.T) {
 	}
 	out.Reset()
 	errOut.Reset()
-	if status := runNativeCLI(t, []string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "ok\n@end(if)"}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "<stdin>:2:1: error TPL_BLOCK:") {
+	if status := runNativeCLI(t, []string{"do", "fmt", "--lang", "template", "--comment", "plain"}, &input{text: "ok\n@end(if)"}, &out, &errOut); status != 1 || out.Len() != 0 || !strings.Contains(errOut.String(), "<stdin>:2:1") || !strings.Contains(errOut.String(), "error[TPL_BLOCK]:") {
 		t.Errorf("template format diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -347,7 +347,7 @@ func TestSpanExpandReportsExpressionInputs(t *testing.T) {
 func TestSourceDiagnosticRendersLocationAndExcerpt(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	if status := runNativeCLI(t, []string{"-c", "value = (\n"}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command:1>:1:9: error PARSE_ERR:") || !strings.Contains(errOut.String(), "value = (") || !strings.Contains(errOut.String(), "        ^") {
+	if status := runNativeCLI(t, []string{"-c", "value = (\n"}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command:1>:1:9") || !strings.Contains(errOut.String(), "error[PARSE_ERR]:") || !strings.Contains(errOut.String(), "value = (") || !strings.Contains(errOut.String(), "        ╵") {
 		t.Errorf("source diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }
@@ -355,7 +355,7 @@ func TestSourceDiagnosticRendersLocationAndExcerpt(t *testing.T) {
 func TestZeroWidthSourceDiagnosticRendersEOFLocation(t *testing.T) {
 	var out bytes.Buffer
 	var errOut bytes.Buffer
-	if status := runNativeCLI(t, []string{"-c", "\n\nvalue ="}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command:1>:3:8: error PARSE_ERR:") || !strings.Contains(errOut.String(), "value =") {
+	if status := runNativeCLI(t, []string{"-c", "\n\nvalue ="}, &input{}, &out, &errOut); status != 1 || !strings.Contains(errOut.String(), "<command:1>:3:8") || !strings.Contains(errOut.String(), "error[PARSE_ERR]:") || !strings.Contains(errOut.String(), "value =") {
 		t.Errorf("zero-width source diagnostic status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
 	}
 }

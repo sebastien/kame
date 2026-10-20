@@ -74,8 +74,8 @@ type ReferencePart struct {
 }
 
 type Field struct {
-	Key  string
-	Span source.Span
+	Key   string
+	Span  source.Span
 	Value *Expr
 }
 
@@ -97,47 +97,51 @@ type StringPart struct {
 type Expr struct {
 	// Topology and Edges are used only by prepared process graphs. Authored
 	// syntax retains groups and connections until graph validation/lowering.
-	Topology bool
-	Edges []CommandEdge
-	StreamKinds []int
-	StreamOverflow int // 0 block, 1 drop-new, 2 drop-old, 3 latest
-	StreamOrder int // 0 ready, 1 strict framed round-robin (merge only)
-	StreamFailure int // 0 inherited, 1 explicit fail-fast, 2 collect external exit statuses
-	Each bool // prepared command template: one process per framed stdin record
-	BufferItems int
-	Exit string
-	Channels []string
-	Async bool
-	Kash bool
+	Topology       bool
+	Edges          []CommandEdge
+	StreamKinds    []int
+	StreamOverflow int  // 0 block, 1 drop-new, 2 drop-old, 3 latest
+	StreamOrder    int  // 0 ready, 1 strict framed round-robin (merge only)
+	StreamFailure  int  // 0 inherited, 1 explicit fail-fast, 2 collect external exit statuses
+	Each           bool // prepared command template: one process per framed stdin record
+	BufferItems    int
+	Exit           string
+	Channels       []string
+	Async          bool
+	Kash           bool
 	// AcceptExit applies terminal Kash ? to the complete process graph.
-	AcceptExit bool
-	Kind       Kind
-	Span       source.Span
-	Text       string
-	TextOwned  bool
-	NamesOwned bool
-	Bool       bool
-	Rest       bool
-	Int        int64
-	Float      float64
-	Verbatim   bool
+	AcceptExit  bool
+	Kind        Kind
+	Span        source.Span
+	Text        string
+	TextOwned   bool
+	NamesOwned  bool
+	Bool        bool
+	Rest        bool
+	Int         int64
+	Float       float64
+	Verbatim    bool
 	VerbatimLen int
-	Parts      []StringPart
-	Reference  []ReferencePart
-	Items      []*Expr
-	Fields     []Field
-	Parameters []Parameter
+	Parts       []StringPart
+	Reference   []ReferencePart
+	Items       []*Expr
+	Fields      []Field
+	Parameters  []Parameter
 	// Body holds callable expressions, or one right-associative process fallback.
-	Body       []*Expr
-	Pattern    *Pattern
+	Body        []*Expr
+	Pattern     *Pattern
 	LiteralPath bool
 	// Applications produced by pipe lowering keep their authored source apart
 	// from executable children. Semantic visitors see only the ordinary call.
 	AuthoredPipe *Expr
-	Expansion string
+	Expansion    string
 }
 
-type CommandEdge struct { From int; To int; Argument int }
+type CommandEdge struct {
+	From     int
+	To       int
+	Argument int
+}
 
 type Result struct {
 	Alloc       mem.Allocator
@@ -156,7 +160,9 @@ type Prefix struct {
 }
 
 func (r *Result) Free() {
-	if r == nil { return }
+	if r == nil {
+		return
+	}
 	a := r.Alloc
 	freeExpr(a, r.Expr)
 	slices.Free(a, r.Diagnostics)
@@ -166,17 +172,27 @@ func (r *Result) Free() {
 }
 
 func freeExpr(a mem.Allocator, e *Expr) {
-	if e == nil { return }
-	if e.TextOwned { mem.FreeString(a, e.Text) }
+	if e == nil {
+		return
+	}
+	if e.TextOwned {
+		mem.FreeString(a, e.Text)
+	}
 	e.Pattern.Free(a)
 	freeExpr(a, e.AuthoredPipe)
 	for i := range e.Parts {
 		mem.FreeString(a, e.Parts[i].Text)
 		freeExpr(a, e.Parts[i].Expr)
 	}
-	for i := range e.Items { freeExpr(a, e.Items[i]) }
-	for i := range e.Fields { freeExpr(a, e.Fields[i].Value) }
-	for i := range e.Body { freeExpr(a, e.Body[i]) }
+	for i := range e.Items {
+		freeExpr(a, e.Items[i])
+	}
+	for i := range e.Fields {
+		freeExpr(a, e.Fields[i].Value)
+	}
+	for i := range e.Body {
+		freeExpr(a, e.Body[i])
+	}
 	// Section parameters are synthesized ("_0", ...) and allocator-owned;
 	// lambda parameters borrow source text and stay unfreed.
 	if e.Kind == Section || e.NamesOwned {
@@ -185,8 +201,12 @@ func freeExpr(a mem.Allocator, e *Expr) {
 		}
 	}
 	if e.NamesOwned {
-		for i := range e.Reference { mem.FreeString(a, e.Reference[i].Text) }
-		for i := range e.Fields { mem.FreeString(a, e.Fields[i].Key) }
+		for i := range e.Reference {
+			mem.FreeString(a, e.Reference[i].Text)
+		}
+		for i := range e.Fields {
+			mem.FreeString(a, e.Fields[i].Key)
+		}
 	}
 	slices.Free(a, e.Parts)
 	slices.Free(a, e.Reference)
@@ -196,7 +216,9 @@ func freeExpr(a mem.Allocator, e *Expr) {
 	slices.Free(a, e.Body)
 	slices.Free(a, e.Edges)
 	slices.Free(a, e.StreamKinds)
-	for i := range e.Channels { mem.FreeString(a, e.Channels[i]) }
+	for i := range e.Channels {
+		mem.FreeString(a, e.Channels[i])
+	}
 	slices.Free(a, e.Channels)
 	mem.Free(a, e)
 }
@@ -208,11 +230,11 @@ func Free(a mem.Allocator, e *Expr) { freeExpr(a, e) }
 func Clone(a mem.Allocator, e *Expr) *Expr { return cloneExpr(a, e) }
 
 type parser struct {
-	a     mem.Allocator
-	s     *source.Source
-	pos   int
-	diags []source.Diagnostic
-	kash bool
+	a            mem.Allocator
+	s            *source.Source
+	pos          int
+	diags        []source.Diagnostic
+	kash         bool
 	commandGroup bool
 	// Rule indentation is structural, including inside multiline string data.
 	indent string
@@ -223,7 +245,9 @@ func Parse(a mem.Allocator, name string, text string) *Result {
 	p.skipSpace()
 	e := p.expression()
 	p.skipSpace()
-	if e != nil && p.pos != len(p.s.Text) { p.error(p.pos, p.pos+1, "unexpected trailing input") }
+	if e != nil && p.pos != len(p.s.Text) {
+		p.error(p.pos, p.pos+1, "unexpected trailing input")
+	}
 	r := mem.Alloc[Result](a)
 	r.Alloc, r.Source, r.Expr, r.Diagnostics = a, p.s, e, p.diags
 	return r
@@ -245,7 +269,9 @@ func ParseRange(a mem.Allocator, s *source.Source, start int, end int, indent st
 	p.skipSpace()
 	e := p.expression()
 	p.skipSpace()
-	if e != nil && p.pos != end { p.error(p.pos, p.pos+1, "unexpected trailing input; expected one Kame expression") }
+	if e != nil && p.pos != end {
+		p.error(p.pos, p.pos+1, "unexpected trailing input; expected one Kame expression")
+	}
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
@@ -268,7 +294,11 @@ func ParseExpansionPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	p := parser{a: a, s: s, pos: start}
 	e := p.expansion()
 	closed := p.pos > start+2 && (s.Text[p.pos-1] == ')' || s.Text[p.pos-1] == '}')
-	for i := range p.diags { if strings.HasPrefix(p.diags[i].Message, "unclosed") { closed = false } }
+	for i := range p.diags {
+		if strings.HasPrefix(p.diags[i].Message, "unclosed") {
+			closed = false
+		}
+	}
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags, Closed: closed}
 }
 
@@ -279,7 +309,9 @@ func ParseKashExpressionPrefix(a mem.Allocator, s *source.Source, start int) Pre
 }
 
 func (p *parser) error(start int, end int, message string) {
-	if end > len(p.s.Text) { end = len(p.s.Text) }
+	if end > len(p.s.Text) {
+		end = len(p.s.Text)
+	}
 	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "PARSE_ERR", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
@@ -293,16 +325,24 @@ func (p *parser) skipSpace() int {
 	start := p.pos
 	for p.pos < len(p.s.Text) {
 		next := source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text))
-		if next != p.pos { p.pos = next; continue }
+		if next != p.pos {
+			p.pos = next
+			continue
+		}
 		b := p.s.Text[p.pos]
-		if b != ' ' && b != '\t' && b != '\n' && b != '\r' { break }
+		if b != ' ' && b != '\t' && b != '\n' && b != '\r' {
+			break
+		}
 		p.pos++
 	}
 	return p.pos - start
 }
 
 func (p *parser) expression() *Expr {
-	if p.pos == len(p.s.Text) { p.error(p.pos, p.pos, "expected expression"); return nil }
+	if p.pos == len(p.s.Text) {
+		p.error(p.pos, p.pos, "expected expression")
+		return nil
+	}
 	start := p.pos
 	switch p.s.Text[p.pos] {
 	case '(':
@@ -311,27 +351,41 @@ func (p *parser) expression() *Expr {
 		return p.list()
 	case '{':
 		e := p.path()
-		if e.Pattern == nil { p.error(start, p.pos, "expected a valid pattern group") }
+		if e.Pattern == nil {
+			p.error(start, p.pos, "expected a valid pattern group")
+		}
 		return e
 	case '"':
 		return p.stringOrVerbatim()
 	case ':':
 		return p.symbol()
 	case '@':
-		if p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') { return p.path() }
+		if p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') {
+			return p.path()
+		}
 		return p.selector()
 	case '$':
-		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' { return p.commandCapture() }
+		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '(' {
+			return p.commandCapture()
+		}
 	case '?':
 		p.pos++
 		e := p.node(Name, start)
 		e.Text = "?"
 		return e
 	}
-	if op := p.operator(); op != nil { return op }
-	if isNameStart(p.s.Text[p.pos]) { return p.reference() }
-	if p.s.Text[p.pos] == '/' || (p.s.Text[p.pos] == '.' && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '/' || (p.pos+2 < len(p.s.Text) && p.s.Text[p.pos+1] == '.' && p.s.Text[p.pos+2] == '/'))) { return p.path() }
-	if p.s.Text[p.pos] == '-' || isDigit(p.s.Text[p.pos]) { return p.number() }
+	if op := p.operator(); op != nil {
+		return op
+	}
+	if isNameStart(p.s.Text[p.pos]) {
+		return p.reference()
+	}
+	if p.s.Text[p.pos] == '/' || (p.s.Text[p.pos] == '.' && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '/' || (p.pos+2 < len(p.s.Text) && p.s.Text[p.pos+1] == '.' && p.s.Text[p.pos+2] == '/'))) {
+		return p.path()
+	}
+	if p.s.Text[p.pos] == '-' || isDigit(p.s.Text[p.pos]) {
+		return p.number()
+	}
 	p.error(start, start+1, "expected expression")
 	return nil
 }
@@ -350,41 +404,81 @@ func (p *parser) pathAtom(command bool) *Expr {
 	for p.pos < len(p.s.Text) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
 		b := p.s.Text[p.pos]
 		if b == '@' && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') {
-			if !command && patternDepth != 0 { p.error(p.pos, p.pos+2, "pattern groups must be fully authored; interpolation inside a group is invalid") }
-			if partStart < p.pos { e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}}) }
+			if !command && patternDepth != 0 {
+				p.error(p.pos, p.pos+2, "pattern groups must be fully authored; interpolation inside a group is invalid")
+			}
+			if partStart < p.pos {
+				e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}})
+			}
 			open := p.pos
-			form := "@("; if p.s.Text[open+1] == '{' { form = "@{" }
+			form := "@("
+			if p.s.Text[open+1] == '{' {
+				form = "@{"
+			}
 			inner := p.expansion()
-			if inner == nil { break }
+			if inner == nil {
+				break
+			}
 			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: open, End: p.pos}})
 			partStart = p.pos
 			if open == start && (p.pos == len(p.s.Text) || p.s.Text[p.pos] != '/') {
 				message := "a leading path expansion requires / after it"
-				if command { message = "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call; a leading path expansion requires / after it" }
+				if command {
+					message = "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call; a leading path expansion requires / after it"
+				}
 				p.error(start, p.pos, message)
 				break
 			}
 			continue
 		}
-		if b == '\\' && p.pos+1 < len(p.s.Text) { p.pos += 2; continue }
+		if b == '\\' && p.pos+1 < len(p.s.Text) {
+			p.pos += 2
+			continue
+		}
 		if characterClass {
-			if b == '\n' || b == '\r' { break }
-			if b == ']' { characterClass = false }
+			if b == '\n' || b == '\r' {
+				break
+			}
+			if b == ']' {
+				characterClass = false
+			}
 			p.pos++
 			continue
 		}
-		if b == '[' && !command && patternDepth == 0 { characterClass = true; p.pos++; continue }
-		if command && (commandOperator(b) || (p.commandGroup && b == ',' && patternDepth == 0)) { break }
-		if b == '{' { patternDepth++; p.pos++; continue }
-		if b == '}' && patternDepth > 0 { patternDepth--; p.pos++; continue }
-		if isDelimiter(b) && (patternDepth == 0 || b == ' ' || b == '\t' || b == '\n' || b == '\r') { break }
+		if b == '[' && !command && patternDepth == 0 {
+			characterClass = true
+			p.pos++
+			continue
+		}
+		if command && (commandOperator(b) || (p.commandGroup && b == ',' && patternDepth == 0)) {
+			break
+		}
+		if b == '{' {
+			patternDepth++
+			p.pos++
+			continue
+		}
+		if b == '}' && patternDepth > 0 {
+			patternDepth--
+			p.pos++
+			continue
+		}
+		if isDelimiter(b) && (patternDepth == 0 || b == ' ' || b == '\t' || b == '\n' || b == '\r') {
+			break
+		}
 		p.pos++
 	}
-	if characterClass { p.error(start, p.pos, "unclosed glob character class") }
-	if len(e.Parts) != 0 && partStart < p.pos { e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}}) }
+	if characterClass {
+		p.error(start, p.pos, "unclosed glob character class")
+	}
+	if len(e.Parts) != 0 && partStart < p.pos {
+		e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, p.s.Text[partStart:p.pos]), Span: source.Span{Start: partStart, End: p.pos}})
+	}
 	e.Span.End = p.pos
 	e.Text = p.s.Text[start:p.pos]
-	if !command { p.classifyPathPattern(e, start) }
+	if !command {
+		p.classifyPathPattern(e, start)
+	}
 	return e
 }
 
@@ -394,19 +488,35 @@ func (p *parser) pathAtom(command bool) *Expr {
 func (p *parser) operator() *Expr {
 	start := p.pos
 	text := p.s.Text
-	if start >= len(text) { return nil }
+	if start >= len(text) {
+		return nil
+	}
 	var end int
 	switch text[start] {
 	case '=':
-		if start+1 < len(text) && text[start+1] == '=' { end = start + 2 } else { end = start + 1 }
+		if start+1 < len(text) && text[start+1] == '=' {
+			end = start + 2
+		} else {
+			end = start + 1
+		}
 	case '!':
-		if start+1 < len(text) && text[start+1] == '=' { end = start + 2 } else { return nil }
+		if start+1 < len(text) && text[start+1] == '=' {
+			end = start + 2
+		} else {
+			return nil
+		}
 	case '<', '>':
-		if start+1 < len(text) && text[start+1] == '=' { end = start + 2 } else { end = start + 1 }
+		if start+1 < len(text) && text[start+1] == '=' {
+			end = start + 2
+		} else {
+			end = start + 1
+		}
 	default:
 		return nil
 	}
-	if end < len(text) && !isDelimiter(text[end]) { return nil }
+	if end < len(text) && !isDelimiter(text[end]) {
+		return nil
+	}
 	// Reject bare ! (not an operator) and malformed runs like ===.
 	// Valid operators are exactly =, ==, !=, <, >, <=, >=.
 	op := text[start:end]
@@ -425,8 +535,12 @@ func (p *parser) operator() *Expr {
 func (p *parser) stringOrVerbatim() *Expr {
 	// A run of 3+ quotes opens a verbatim literal.
 	n := 0
-	for p.pos+n < len(p.s.Text) && p.s.Text[p.pos+n] == '"' { n++ }
-	if n >= 3 { return p.verbatim(n) }
+	for p.pos+n < len(p.s.Text) && p.s.Text[p.pos+n] == '"' {
+		n++
+	}
+	if n >= 3 {
+		return p.verbatim(n)
+	}
 	return p.quoted(true)
 }
 
@@ -439,9 +553,14 @@ func (p *parser) verbatim(n int) *Expr {
 	contentStart := p.pos
 	text := p.s.Text
 	for p.pos < len(text) {
-		if text[p.pos] != '"' { p.pos++; continue }
+		if text[p.pos] != '"' {
+			p.pos++
+			continue
+		}
 		run := 0
-		for p.pos+run < len(text) && text[p.pos+run] == '"' { run++ }
+		for p.pos+run < len(text) && text[p.pos+run] == '"' {
+			run++
+		}
 		if run == n {
 			content := text[contentStart:p.pos]
 			e := p.node(String, start)
@@ -469,25 +588,39 @@ func (p *parser) verbatim(n int) *Expr {
 }
 
 func (p *parser) tplError(start int, end int, message string) {
-	if end > len(p.s.Text) { end = len(p.s.Text) }
+	if end > len(p.s.Text) {
+		end = len(p.s.Text)
+	}
 	p.diags = slices.Append(p.a, p.diags, source.Diagnostic{Code: "TPL_PARSE", Severity: source.Error, Span: source.Span{Start: start, End: end}, Message: message})
 }
 
-// classifyPathPattern reclassifies a path atom containing braces as a pattern
-// value. A structurally invalid group leaves the plain path and its braces
-// literal; a clean parse mixing matchers and references is a parse error.
+// classifyPathPattern recognizes matcher/expansion patterns and lowers rooted
+// reference-only paths to interpolation. Invalid groups leave braces literal;
+// a clean parse mixing matchers and references is a parse error.
 func (p *parser) classifyPathPattern(e *Expr, start int) {
-	if e.Text == "" || strings.IndexByte(e.Text, '{') < 0 { return }
+	if e.Text == "" || strings.IndexByte(e.Text, '{') < 0 {
+		return
+	}
 	var parsed PatternParse
-	if len(e.Parts) == 0 { parsed = ParsePatternText(p.a, e.Text, start) } else { parsed = ParsePathPatternParts(p.a, e.Parts) }
+	if len(e.Parts) == 0 {
+		parsed = ParsePatternText(p.a, e.Text, start)
+	} else {
+		parsed = ParsePathPatternParts(p.a, e.Parts)
+	}
 	if len(parsed.Diagnostics) != 0 {
 		regex := containsRegexGroupMarker(e.Text)
 		if len(e.Parts) != 0 {
 			regex = false
-			for i := range e.Parts { if e.Parts[i].Expr == nil && containsRegexGroupMarker(e.Parts[i].Text) { regex = true } }
+			for i := range e.Parts {
+				if e.Parts[i].Expr == nil && containsRegexGroupMarker(e.Parts[i].Text) {
+					regex = true
+				}
+			}
 		}
 		if regex {
-			for i := range parsed.Diagnostics { p.diags = slices.Append(p.a, p.diags, parsed.Diagnostics[i]) }
+			for i := range parsed.Diagnostics {
+				p.diags = slices.Append(p.a, p.diags, parsed.Diagnostics[i])
+			}
 		}
 		parsed.Pattern.Free(p.a)
 		slices.Free(p.a, parsed.Diagnostics)
@@ -509,23 +642,70 @@ func (p *parser) classifyPathPattern(e *Expr, start int) {
 		e.Text = CanonicalPattern(p.a, parsed.Pattern)
 	}
 	e.Pattern = parsed.Pattern
+	if e.Pattern.Matchers == 0 && (len(e.Parts) != 0 || strings.HasPrefix(e.Text, "/") || strings.HasPrefix(e.Text, "./") || strings.HasPrefix(e.Text, "../")) {
+		p.pathReferences(e)
+	}
+}
+
+// Reference-only value paths lower to ordinary path interpolation operands,
+// retaining authored forms while sharing evaluation, suspension and escaping.
+func (p *parser) pathReferences(e *Expr) {
+	previous := e.Parts
+	var parts []StringPart
+	next := 0
+	for i := range e.Pattern.Parts {
+		part := e.Pattern.Parts[i]
+		if part.Kind == PatternInterpolation {
+			for next < len(previous) && previous[next].Expr == nil {
+				next++
+			}
+			parts = slices.Append(p.a, parts, previous[next])
+			next++
+		} else if part.Kind == PatternReference {
+			name := mem.Alloc[Expr](p.a)
+			name.Kind, name.Span, name.Text = Name, part.Span, p.s.Text[part.Span.Start+1:part.Span.End-1]
+			parts = slices.Append(p.a, parts, StringPart{Expr: name, Form: "{", Span: part.Span})
+		} else {
+			parts = slices.Append(p.a, parts, StringPart{Text: sourceText(p.a, p.s.Text[part.Span.Start:part.Span.End]), Span: part.Span})
+		}
+	}
+	for i := range previous {
+		if previous[i].Expr == nil {
+			mem.FreeString(p.a, previous[i].Text)
+		}
+	}
+	slices.Free(p.a, previous)
+	e.Parts = parts
+	e.Pattern.Free(p.a)
+	e.Pattern = nil
 }
 
 func containsRegexGroupMarker(text string) bool {
 	for i := 0; i < len(text); i++ {
-		if text[i] == '\\' { i++; continue }
-		if text[i] != '{' { continue }
+		if text[i] == '\\' {
+			i++
+			continue
+		}
+		if text[i] != '{' {
+			continue
+		}
 		j := i + 1
-		if j < len(text) && text[j] == '~' { return true }
-		for j < len(text) && isNameContinue(text[j]) { j++ }
-		if j+1 < len(text) && text[j] == ':' && text[j+1] == '~' { return true }
+		if j < len(text) && text[j] == '~' {
+			return true
+		}
+		for j < len(text) && isNameContinue(text[j]) {
+			j++
+		}
+		if j+1 < len(text) && text[j] == ':' && text[j+1] == '~' {
+			return true
+		}
 	}
 	return false
 }
 
-func isNameStart(b byte) bool { return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
+func isNameStart(b byte) bool    { return b == '_' || (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') }
 func isNameContinue(b byte) bool { return isNameStart(b) || isDigit(b) || b == '-' }
-func isDigit(b byte) bool { return b >= '0' && b <= '9' }
+func isDigit(b byte) bool        { return b >= '0' && b <= '9' }
 
 type nameResult struct {
 	Text string
@@ -535,10 +715,16 @@ type nameResult struct {
 
 func (p *parser) name() nameResult {
 	start := p.pos
-	if p.pos == len(p.s.Text) || !isNameStart(p.s.Text[p.pos]) { return nameResult{} }
+	if p.pos == len(p.s.Text) || !isNameStart(p.s.Text[p.pos]) {
+		return nameResult{}
+	}
 	p.pos++
-	for p.pos < len(p.s.Text) && isNameContinue(p.s.Text[p.pos]) { p.pos++ }
-	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '?' || p.s.Text[p.pos] == '!') { p.pos++ }
+	for p.pos < len(p.s.Text) && isNameContinue(p.s.Text[p.pos]) {
+		p.pos++
+	}
+	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '?' || p.s.Text[p.pos] == '!') {
+		p.pos++
+	}
 	return nameResult{Text: p.s.Text[start:p.pos], Span: source.Span{Start: start, End: p.pos}, OK: true}
 }
 
@@ -546,91 +732,182 @@ func (p *parser) symbol() *Expr {
 	start := p.pos
 	p.pos++
 	nameStart := p.pos
-	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '+' || p.s.Text[p.pos] == '-') { p.pos++ }
-	name := p.name()
-	if !name.OK { p.error(start, p.pos, "expected symbol name"); return nil }
-	if nameStart != name.Span.Start { e := p.node(Symbol, start); e.Text = p.s.Text[nameStart:p.pos]; return e }
-	if name.Text == "true" || name.Text == "false" {
-		e := p.node(Boolean, start); e.Bool = name.Text == "true"; return e
+	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '+' || p.s.Text[p.pos] == '-') {
+		p.pos++
 	}
-	if name.Text == "nil" { return p.node(Nil, start) }
-	e := p.node(Symbol, start); e.Text = name.Text; return e
+	name := p.name()
+	if !name.OK {
+		p.error(start, p.pos, "expected symbol name")
+		return nil
+	}
+	if nameStart != name.Span.Start {
+		e := p.node(Symbol, start)
+		e.Text = p.s.Text[nameStart:p.pos]
+		return e
+	}
+	if name.Text == "true" || name.Text == "false" {
+		e := p.node(Boolean, start)
+		e.Bool = name.Text == "true"
+		return e
+	}
+	if name.Text == "nil" {
+		return p.node(Nil, start)
+	}
+	e := p.node(Symbol, start)
+	e.Text = name.Text
+	return e
 }
 
 func (p *parser) selector() *Expr {
 	start := p.pos
 	p.pos++
-	if p.pos == len(p.s.Text) { p.error(start, p.pos, "invalid selector"); return nil }
-	if p.s.Text[p.pos] == '<' || p.s.Text[p.pos] == '>' { p.pos++ }
-	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '*' || p.s.Text[p.pos] == '#' || p.s.Text[p.pos] == '_' || (p.s.Text[p.pos] == '?' && p.pos == start+2 && p.s.Text[start+1] == '<')) { p.pos++
+	if p.pos == len(p.s.Text) {
+		p.error(start, p.pos, "invalid selector")
+		return nil
+	}
+	if p.s.Text[p.pos] == '<' || p.s.Text[p.pos] == '>' {
+		p.pos++
+	}
+	if p.pos < len(p.s.Text) && (p.s.Text[p.pos] == '*' || p.s.Text[p.pos] == '#' || p.s.Text[p.pos] == '_' || (p.s.Text[p.pos] == '?' && p.pos == start+2 && p.s.Text[start+1] == '<')) {
+		p.pos++
 	} else {
-		for p.pos < len(p.s.Text) && (isDigit(p.s.Text[p.pos]) || p.s.Text[p.pos] == '.' || p.s.Text[p.pos] == '-') { p.pos++ }
+		for p.pos < len(p.s.Text) && (isDigit(p.s.Text[p.pos]) || p.s.Text[p.pos] == '.' || p.s.Text[p.pos] == '-') {
+			p.pos++
+		}
 	}
 	text := p.s.Text[start:p.pos]
-	if !ValidSelector(text) { p.error(start, p.pos, "invalid selector"); return nil }
-	e := p.node(Selector, start); e.Text = text; return e
+	if !ValidSelector(text) {
+		p.error(start, p.pos, "invalid selector")
+		return nil
+	}
+	e := p.node(Selector, start)
+	e.Text = text
+	return e
 }
 
 // ValidSelector reports whether text is a complete selector.
 func ValidSelector(text string) bool {
- if text == "@<?" { return true }
-	if len(text) < 2 || text[0] != '@' { return false }
+	if text == "@<?" {
+		return true
+	}
+	if len(text) < 2 || text[0] != '@' {
+		return false
+	}
 	i := 1
-	if text[i] == '<' || text[i] == '>' { i++ }
-	if i == len(text) { return true }
-	if text[i] == '*' || text[i] == '#' || text[i] == '_' { return i+1 == len(text) }
-	if text[i] == '-' { i++ }
+	if text[i] == '<' || text[i] == '>' {
+		i++
+	}
+	if i == len(text) {
+		return true
+	}
+	if text[i] == '*' || text[i] == '#' || text[i] == '_' {
+		return i+1 == len(text)
+	}
+	if text[i] == '-' {
+		i++
+	}
 	start := i
-	for i < len(text) && isDigit(text[i]) { i++ }
-	if i == start && !(i+1 < len(text) && text[i] == '.' && text[i+1] == '.') { return false }
-	if i == len(text) { return true }
-	if i+1 >= len(text) || text[i] != '.' || text[i+1] != '.' { return false }
+	for i < len(text) && isDigit(text[i]) {
+		i++
+	}
+	if i == start && !(i+1 < len(text) && text[i] == '.' && text[i+1] == '.') {
+		return false
+	}
+	if i == len(text) {
+		return true
+	}
+	if i+1 >= len(text) || text[i] != '.' || text[i+1] != '.' {
+		return false
+	}
 	i += 2
-	if i < len(text) && text[i] == '-' { i++ }
-	for i < len(text) && isDigit(text[i]) { i++ }
+	if i < len(text) && text[i] == '-' {
+		i++
+	}
+	for i < len(text) && isDigit(text[i]) {
+		i++
+	}
 	return i == len(text)
 }
 
 func (p *parser) number() *Expr {
 	start := p.pos
-	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos { p.pos++ }
+	for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) && source.ContinuationEnd(p.s.Text, p.pos, len(p.s.Text)) == p.pos {
+		p.pos++
+	}
 	text := p.s.Text[start:p.pos]
-	if !validNumber(text) { p.error(start, p.pos, "invalid number"); return nil }
+	if !validNumber(text) {
+		p.error(start, p.pos, "invalid number")
+		return nil
+	}
 	if hasFloat(text) {
 		value, err := strconv.ParseFloat(text, 64)
-		if err != nil { p.error(start, p.pos, "numeric overflow"); return nil }
-		e := p.node(Float, start); e.Float = value; return e
+		if err != nil {
+			p.error(start, p.pos, "numeric overflow")
+			return nil
+		}
+		e := p.node(Float, start)
+		e.Float = value
+		return e
 	}
 	negative := len(text) != 0 && text[0] == '-'
 	unsigned := text
-	if negative { unsigned = unsigned[1:] }
+	if negative {
+		unsigned = unsigned[1:]
+	}
 	base := 10
 	if len(unsigned) > 2 && unsigned[0] == '0' && (unsigned[1] == 'b' || unsigned[1] == 'o' || unsigned[1] == 'x') {
-		if unsigned[1] == 'b' { base = 2 } else if unsigned[1] == 'o' { base = 8 } else { base = 16 }
+		if unsigned[1] == 'b' {
+			base = 2
+		} else if unsigned[1] == 'o' {
+			base = 8
+		} else {
+			base = 16
+		}
 		unsigned = unsigned[2:]
 	}
 	limit := uint64(9223372036854775807)
-	if negative { limit++ }
+	if negative {
+		limit++
+	}
 	parsed := parseUnsigned(unsigned, base, limit)
-	if !parsed.OK { p.error(start, p.pos, "numeric overflow"); return nil }
+	if !parsed.OK {
+		p.error(start, p.pos, "numeric overflow")
+		return nil
+	}
 	e := p.node(Integer, start)
 	if negative {
-		if parsed.Value == uint64(9223372036854775807)+1 { e.Int = -9223372036854775807 - 1
-		} else { e.Int = -int64(parsed.Value) }
-	} else { e.Int = int64(parsed.Value) }
+		if parsed.Value == uint64(9223372036854775807)+1 {
+			e.Int = -9223372036854775807 - 1
+		} else {
+			e.Int = -int64(parsed.Value)
+		}
+	} else {
+		e.Int = int64(parsed.Value)
+	}
 	return e
 }
 
-type unsignedResult struct { Value uint64; OK bool }
+type unsignedResult struct {
+	Value uint64
+	OK    bool
+}
 
 func parseUnsigned(text string, base int, limit uint64) unsignedResult {
 	value := uint64(0)
 	for i := 0; i < len(text); i++ {
-		if text[i] == '_' { continue }
+		if text[i] == '_' {
+			continue
+		}
 		digit := uint64(text[i] - '0')
-		if text[i] >= 'a' && text[i] <= 'f' { digit = uint64(text[i]-'a') + 10 }
-		if text[i] >= 'A' && text[i] <= 'F' { digit = uint64(text[i]-'A') + 10 }
-		if value > (limit-digit)/uint64(base) { return unsignedResult{} }
+		if text[i] >= 'a' && text[i] <= 'f' {
+			digit = uint64(text[i]-'a') + 10
+		}
+		if text[i] >= 'A' && text[i] <= 'F' {
+			digit = uint64(text[i]-'A') + 10
+		}
+		if value > (limit-digit)/uint64(base) {
+			return unsignedResult{}
+		}
 		value = value*uint64(base) + digit
 	}
 	return unsignedResult{Value: value, OK: true}
@@ -641,52 +918,105 @@ func isDelimiter(b byte) bool {
 }
 
 func validDigits(text string, base int) bool {
-	if len(text) == 0 || text[0] == '_' || text[len(text)-1] == '_' { return false }
+	if len(text) == 0 || text[0] == '_' || text[len(text)-1] == '_' {
+		return false
+	}
 	lastUnderscore := false
 	for i := 0; i < len(text); i++ {
 		b := text[i]
-		if b == '_' { if lastUnderscore { return false }; lastUnderscore = true; continue }
+		if b == '_' {
+			if lastUnderscore {
+				return false
+			}
+			lastUnderscore = true
+			continue
+		}
 		lastUnderscore = false
 		value := int(b - '0')
-		if b >= 'a' && b <= 'f' { value = int(b-'a') + 10 }
-		if b >= 'A' && b <= 'F' { value = int(b-'A') + 10 }
-		if value < 0 || value >= base { return false }
+		if b >= 'a' && b <= 'f' {
+			value = int(b-'a') + 10
+		}
+		if b >= 'A' && b <= 'F' {
+			value = int(b-'A') + 10
+		}
+		if value < 0 || value >= base {
+			return false
+		}
 	}
 	return true
 }
 
 func hasFloat(text string) bool {
 	start := 0
-	if len(text) != 0 && text[0] == '-' { start++ }
-	if start+2 <= len(text) && text[start] == '0' && (text[start+1] == 'b' || text[start+1] == 'o' || text[start+1] == 'x') { return false }
-	for i := 0; i < len(text); i++ { if text[i] == '.' || text[i] == 'e' || text[i] == 'E' { return true } }
+	if len(text) != 0 && text[0] == '-' {
+		start++
+	}
+	if start+2 <= len(text) && text[start] == '0' && (text[start+1] == 'b' || text[start+1] == 'o' || text[start+1] == 'x') {
+		return false
+	}
+	for i := 0; i < len(text); i++ {
+		if text[i] == '.' || text[i] == 'e' || text[i] == 'E' {
+			return true
+		}
+	}
 	return false
 }
 
 func validNumber(text string) bool {
-	if len(text) == 0 { return false }
-	if text[0] == '-' { text = text[1:]; if len(text) == 0 { return false } }
+	if len(text) == 0 {
+		return false
+	}
+	if text[0] == '-' {
+		text = text[1:]
+		if len(text) == 0 {
+			return false
+		}
+	}
 	if len(text) > 2 && text[0] == '0' && (text[1] == 'b' || text[1] == 'o' || text[1] == 'x') {
-		base := 2; if text[1] == 'o' { base = 8 }; if text[1] == 'x' { base = 16 }
+		base := 2
+		if text[1] == 'o' {
+			base = 8
+		}
+		if text[1] == 'x' {
+			base = 16
+		}
 		return validDigits(text[2:], base)
 	}
 	if !hasFloat(text) {
-		if !validDigits(text, 10) { return false }
+		if !validDigits(text, 10) {
+			return false
+		}
 		return len(text) == 1 || text[0] != '0'
 	}
 	dot, exponent := -1, -1
 	for i := 0; i < len(text); i++ {
-		if text[i] == '.' { if dot != -1 { return false }; dot = i }
-		if text[i] == 'e' || text[i] == 'E' { if exponent != -1 { return false }; exponent = i }
+		if text[i] == '.' {
+			if dot != -1 {
+				return false
+			}
+			dot = i
+		}
+		if text[i] == 'e' || text[i] == 'E' {
+			if exponent != -1 {
+				return false
+			}
+			exponent = i
+		}
 	}
 	end := len(text)
 	if exponent != -1 {
 		end = exponent
 		i := exponent + 1
-		if i < len(text) && (text[i] == '+' || text[i] == '-') { i++ }
-		if !validDigits(text[i:], 10) { return false }
+		if i < len(text) && (text[i] == '+' || text[i] == '-') {
+			i++
+		}
+		if !validDigits(text[i:], 10) {
+			return false
+		}
 	}
-	if dot == -1 { return validDigits(text[:end], 10) }
+	if dot == -1 {
+		return validDigits(text[:end], 10)
+	}
 	return dot < end && validDigits(text[:dot], 10) && validDigits(text[dot+1:end], 10)
 }
 
@@ -696,8 +1026,12 @@ func (p *parser) reference() *Expr {
 	if name.Text == "x" && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '/' {
 		p.pos++
 		toolStart := p.pos
-		for p.pos < len(p.s.Text) && (isNameContinue(p.s.Text[p.pos]) || p.s.Text[p.pos] == '.') { p.pos++ }
-		if p.pos == toolStart { p.error(toolStart, p.pos, "x/ requires a tool name") }
+		for p.pos < len(p.s.Text) && (isNameContinue(p.s.Text[p.pos]) || p.s.Text[p.pos] == '.') {
+			p.pos++
+		}
+		if p.pos == toolStart {
+			p.error(toolStart, p.pos, "x/ requires a tool name")
+		}
 		e := p.node(Name, start)
 		e.Text = p.s.Text[start:p.pos]
 		return e
@@ -707,11 +1041,16 @@ func (p *parser) reference() *Expr {
 	for p.pos < len(p.s.Text) && p.s.Text[p.pos] == '/' {
 		p.pos++
 		segment := p.name()
-		if !segment.OK { p.error(start, p.pos, "expected reference name after /"); break }
+		if !segment.OK {
+			p.error(start, p.pos, "expected reference name after /")
+			break
+		}
 		name.Text, name.Span.End = p.s.Text[start:p.pos], p.pos
 	}
 	if p.pos == len(p.s.Text) || p.s.Text[p.pos] != '.' {
-		e := p.node(Name, start); e.Text = name.Text; return e
+		e := p.node(Name, start)
+		e.Text = name.Text
+		return e
 	}
 	e := p.node(Reference, start)
 	e.Reference = slices.Append(p.a, e.Reference, ReferencePart{Kind: ReferenceName, Text: name.Text, Span: name.Span})
@@ -721,42 +1060,77 @@ func (p *parser) reference() *Expr {
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '{' {
 			p.pos++
 			selectionStart := p.pos
-			for p.pos < len(p.s.Text) && p.s.Text[p.pos] != '}' { p.pos++ }
-			if p.pos == len(p.s.Text) { p.error(partStart, p.pos, "unclosed reference selection"); return e }
-			if !validSelection(p.s.Text[selectionStart:p.pos]) { p.error(selectionStart, p.pos, "invalid reference selection") }
+			for p.pos < len(p.s.Text) && p.s.Text[p.pos] != '}' {
+				p.pos++
+			}
+			if p.pos == len(p.s.Text) {
+				p.error(partStart, p.pos, "unclosed reference selection")
+				return e
+			}
+			if !validSelection(p.s.Text[selectionStart:p.pos]) {
+				p.error(selectionStart, p.pos, "invalid reference selection")
+			}
 			p.pos++
-			e.Reference = slices.Append(p.a, e.Reference, ReferencePart{Kind: ReferenceSelection, Text: p.s.Text[selectionStart:p.pos-1], Span: source.Span{Start: partStart, End: p.pos}})
+			e.Reference = slices.Append(p.a, e.Reference, ReferencePart{Kind: ReferenceSelection, Text: p.s.Text[selectionStart : p.pos-1], Span: source.Span{Start: partStart, End: p.pos}})
 			continue
 		}
 		componentStart := p.pos
 		if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos] == '.' && p.s.Text[p.pos+1] == '.' {
 			p.pos += 2
-			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '-' { p.pos++ }
-			for p.pos < len(p.s.Text) && isDigit(p.s.Text[p.pos]) { p.pos++ }
+			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '-' {
+				p.pos++
+			}
+			for p.pos < len(p.s.Text) && isDigit(p.s.Text[p.pos]) {
+				p.pos++
+			}
 		} else if p.pos < len(p.s.Text) && (isDigit(p.s.Text[p.pos]) || p.s.Text[p.pos] == '-') {
-			if p.s.Text[p.pos] == '-' { p.pos++ }
-			for p.pos < len(p.s.Text) && isDigit(p.s.Text[p.pos]) { p.pos++ }
+			if p.s.Text[p.pos] == '-' {
+				p.pos++
+			}
+			for p.pos < len(p.s.Text) && isDigit(p.s.Text[p.pos]) {
+				p.pos++
+			}
 			if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos] == '.' && p.s.Text[p.pos+1] == '.' {
 				p.pos += 2
-				if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '.' { p.pos++ }
-				if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '-' { p.pos++ }
-				for p.pos < len(p.s.Text) && isDigit(p.s.Text[p.pos]) { p.pos++ }
+				if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '.' {
+					p.pos++
+				}
+				if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '-' {
+					p.pos++
+				}
+				for p.pos < len(p.s.Text) && isDigit(p.s.Text[p.pos]) {
+					p.pos++
+				}
 			}
 		} else {
 			component := p.name()
-			if !component.OK { for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) && p.s.Text[p.pos] != '.' && p.s.Text[p.pos] != '}' { p.pos++ } }
+			if !component.OK {
+				for p.pos < len(p.s.Text) && !isDelimiter(p.s.Text[p.pos]) && p.s.Text[p.pos] != '.' && p.s.Text[p.pos] != '}' {
+					p.pos++
+				}
+			}
 		}
 		text := p.s.Text[componentStart:p.pos]
 		kind := ReferenceName
-		if hasSlice(text) { kind = ReferenceSlice; if !validSlice(text) { p.error(partStart, p.pos, "invalid reference slice") }
+		if hasSlice(text) {
+			kind = ReferenceSlice
+			if !validSlice(text) {
+				p.error(partStart, p.pos, "invalid reference slice")
+			}
 		} else if !validIndex(text) {
-			if !validName(text) { p.error(partStart, p.pos, "invalid reference component") }
-		} else { kind = ReferenceIndex }
+			if !validName(text) {
+				p.error(partStart, p.pos, "invalid reference component")
+			}
+		} else {
+			kind = ReferenceIndex
+		}
 		e.Reference = slices.Append(p.a, e.Reference, ReferencePart{Kind: kind, Text: text, Span: source.Span{Start: partStart, End: p.pos}})
 	}
 	e.Span.End = p.pos
 	if name.Text == "env" {
-		if len(e.Reference) < 2 || e.Reference[1].Kind != ReferenceName { p.error(start, p.pos, "environment namespace requires a named variable") } else {
+		if len(e.Reference) < 2 || e.Reference[1].Kind != ReferenceName {
+			p.error(start, p.pos, "environment namespace requires a named variable")
+		} else {
 			e.Kind = EnvironmentReference
 			variable := p.node(Symbol, e.Reference[1].Span.Start)
 			variable.Text, variable.Span = e.Reference[1].Text, e.Reference[1].Span
@@ -767,37 +1141,64 @@ func (p *parser) reference() *Expr {
 }
 
 func validName(text string) bool {
-	if len(text) == 0 || !isNameStart(text[0]) { return false }
+	if len(text) == 0 || !isNameStart(text[0]) {
+		return false
+	}
 	i := 1
-	for i < len(text) && isNameContinue(text[i]) { i++ }
-	if i < len(text) && (text[i] == '?' || text[i] == '!') { i++ }
+	for i < len(text) && isNameContinue(text[i]) {
+		i++
+	}
+	if i < len(text) && (text[i] == '?' || text[i] == '!') {
+		i++
+	}
 	return i == len(text)
 }
 
 func validIndex(text string) bool {
-	if len(text) == 0 { return false }
-	if text[0] == '-' { text = text[1:] }
+	if len(text) == 0 {
+		return false
+	}
+	if text[0] == '-' {
+		text = text[1:]
+	}
 	return validDigits(text, 10)
 }
 
 func hasSlice(text string) bool {
-	for i := 0; i+1 < len(text); i++ { if text[i] == '.' && text[i+1] == '.' { return true } }
+	for i := 0; i+1 < len(text); i++ {
+		if text[i] == '.' && text[i+1] == '.' {
+			return true
+		}
+	}
 	return false
 }
 
 func validSlice(text string) bool {
 	cut := -1
-	for i := 0; i+1 < len(text); i++ { if text[i] == '.' && text[i+1] == '.' { if cut != -1 { return false }; cut = i } }
-	if cut == -1 { return false }
+	for i := 0; i+1 < len(text); i++ {
+		if text[i] == '.' && text[i+1] == '.' {
+			if cut != -1 {
+				return false
+			}
+			cut = i
+		}
+	}
+	if cut == -1 {
+		return false
+	}
 	return (cut == 0 || validIndex(text[:cut])) && (cut+2 == len(text) || validIndex(text[cut+2:]))
 }
 
 func validSelection(text string) bool {
-	if len(text) == 0 { return false }
+	if len(text) == 0 {
+		return false
+	}
 	start := 0
 	for i := 0; i <= len(text); i++ {
 		if i == len(text) || text[i] == ',' {
-			if !validName(text[start:i]) { return false }
+			if !validName(text[start:i]) {
+				return false
+			}
 			start = i + 1
 		}
 	}
@@ -805,8 +1206,13 @@ func validSelection(text string) bool {
 }
 
 func (p *parser) list() *Expr {
-	start := p.pos; p.pos++; p.skipSpace()
-	if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ']' { p.pos++; return p.node(List, start) }
+	start := p.pos
+	p.pos++
+	p.skipSpace()
+	if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ']' {
+		p.pos++
+		return p.node(List, start)
+	}
 	list := p.node(List, start)
 	for p.pos < len(p.s.Text) {
 		mark := p.pos
@@ -815,20 +1221,41 @@ func (p *parser) list() *Expr {
 			p.pos++
 			record := p.node(Record, start)
 			value := p.itemAfterSpace()
-			if value == nil { freeExpr(p.a, list); freeExpr(p.a, record); return nil }
+			if value == nil {
+				freeExpr(p.a, list)
+				freeExpr(p.a, record)
+				return nil
+			}
 			record.Fields = slices.Append(p.a, record.Fields, Field{Key: name.Text, Span: name.Span, Value: value})
 			for p.pos < len(p.s.Text) && p.s.Text[p.pos] != ']' {
-				if p.skipSpace() == 0 { p.error(p.pos, p.pos+1, "record entries need whitespace"); break }
-				if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ']' { break }
+				if p.skipSpace() == 0 {
+					p.error(p.pos, p.pos+1, "record entries need whitespace")
+					break
+				}
+				if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ']' {
+					break
+				}
 				key := p.name()
-				if !key.OK || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ':' { p.error(p.pos, p.pos+1, "expected record key"); break }
+				if !key.OK || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ':' {
+					p.error(p.pos, p.pos+1, "expected record key")
+					break
+				}
 				p.pos++
 				value = p.itemAfterSpace()
-				if value == nil { break }
+				if value == nil {
+					break
+				}
 				record.Fields = slices.Append(p.a, record.Fields, Field{Key: key.Text, Span: key.Span, Value: value})
 			}
-			if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ']' { p.error(start, p.pos, "unclosed record"); freeExpr(p.a, list); return record }
-			p.pos++; record.Span.End = p.pos; freeExpr(p.a, list); return record
+			if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ']' {
+				p.error(start, p.pos, "unclosed record")
+				freeExpr(p.a, list)
+				return record
+			}
+			p.pos++
+			record.Span.End = p.pos
+			freeExpr(p.a, list)
+			return record
 		}
 		p.pos = mark
 		name = p.name()
@@ -841,18 +1268,30 @@ func (p *parser) list() *Expr {
 			p.pos = mark
 			item = p.expression()
 		}
-		if item == nil { break }
+		if item == nil {
+			break
+		}
 		list.Items = slices.Append(p.a, list.Items, item)
 		space := p.skipSpace()
-		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ']' { p.pos++; list.Span.End = p.pos; return list }
-		if p.pos < len(p.s.Text) && space == 0 { p.error(p.pos, p.pos+1, "list items need whitespace"); break }
+		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ']' {
+			p.pos++
+			list.Span.End = p.pos
+			return list
+		}
+		if p.pos < len(p.s.Text) && space == 0 {
+			p.error(p.pos, p.pos+1, "list items need whitespace")
+			break
+		}
 	}
 	p.error(start, p.pos, "unclosed list; expected ']'")
 	return list
 }
 
 func (p *parser) itemAfterSpace() *Expr {
-	if p.skipSpace() == 0 { p.error(p.pos, p.pos+1, "expected value after key"); return nil }
+	if p.skipSpace() == 0 {
+		p.error(p.pos, p.pos+1, "expected value after key")
+		return nil
+	}
 	return p.expression()
 }
 
@@ -864,9 +1303,13 @@ const MaxSectionArity = 4096
 // into a placeholder section. Nested sections and placeholder-free bodies are
 // left untouched.
 func (p *parser) classifySection(app *Expr) *Expr {
-	if len(app.Items) != 1 { return app }
+	if len(app.Items) != 1 {
+		return app
+	}
 	body := app.Items[0]
-	if body == nil || body.Kind == Section || !containsPlaceholder(body) { return app }
+	if body == nil || body.Kind == Section || !containsPlaceholder(body) {
+		return app
+	}
 	arity := int64(0)
 	reclassifyPlaceholders(body, &arity)
 	if arity > MaxSectionArity {
@@ -889,20 +1332,34 @@ func (p *parser) classifySection(app *Expr) *Expr {
 // containsPlaceholder reports whether the expression subtree contains a
 // placeholder name outside nested sections.
 func containsPlaceholder(e *Expr) bool {
-	if e == nil { return false }
-	if e.Kind == Section { return false }
-	if e.Kind == Name && placeholderIndex(e.Text) >= 0 { return true }
+	if e == nil {
+		return false
+	}
+	if e.Kind == Section {
+		return false
+	}
+	if e.Kind == Name && placeholderIndex(e.Text) >= 0 {
+		return true
+	}
 	for i := range e.Items {
-		if containsPlaceholder(e.Items[i]) { return true }
+		if containsPlaceholder(e.Items[i]) {
+			return true
+		}
 	}
 	for i := range e.Body {
-		if containsPlaceholder(e.Body[i]) { return true }
+		if containsPlaceholder(e.Body[i]) {
+			return true
+		}
 	}
 	for i := range e.Fields {
-		if containsPlaceholder(e.Fields[i].Value) { return true }
+		if containsPlaceholder(e.Fields[i].Value) {
+			return true
+		}
 	}
 	for i := range e.Parts {
-		if containsPlaceholder(e.Parts[i].Expr) { return true }
+		if containsPlaceholder(e.Parts[i].Expr) {
+			return true
+		}
 	}
 	return false
 }
@@ -910,64 +1367,114 @@ func containsPlaceholder(e *Expr) bool {
 // reclassifyPlaceholders converts placeholder names to placeholder atoms and
 // records the section arity.
 func reclassifyPlaceholders(e *Expr, arity *int64) {
-	if e == nil || e.Kind == Section { return }
+	if e == nil || e.Kind == Section {
+		return
+	}
 	if e.Kind == Name {
 		if index := placeholderIndex(e.Text); index >= 0 {
 			e.Kind = Placeholder
 			e.Int = int64(index)
-			if int64(index) >= *arity { *arity = int64(index) + 1 }
+			if int64(index) >= *arity {
+				*arity = int64(index) + 1
+			}
 			return
 		}
 	}
-	for i := range e.Items { reclassifyPlaceholders(e.Items[i], arity) }
-	for i := range e.Body { reclassifyPlaceholders(e.Body[i], arity) }
-	for i := range e.Fields { reclassifyPlaceholders(e.Fields[i].Value, arity) }
-	for i := range e.Parts { reclassifyPlaceholders(e.Parts[i].Expr, arity) }
+	for i := range e.Items {
+		reclassifyPlaceholders(e.Items[i], arity)
+	}
+	for i := range e.Body {
+		reclassifyPlaceholders(e.Body[i], arity)
+	}
+	for i := range e.Fields {
+		reclassifyPlaceholders(e.Fields[i].Value, arity)
+	}
+	for i := range e.Parts {
+		reclassifyPlaceholders(e.Parts[i].Expr, arity)
+	}
 }
 
 // placeholderIndex returns the positional index of a placeholder name, or -1
 // when the text is an ordinary name. Underscore runs index from their length
 // and underscore-prefixed canonical decimal digits index from their value.
 func placeholderIndex(text string) int {
-	if len(text) == 0 || text[0] != '_' { return -1 }
+	if len(text) == 0 || text[0] != '_' {
+		return -1
+	}
 	underscores := 0
-	for underscores < len(text) && text[underscores] == '_' { underscores++ }
-	if underscores == len(text) { return min(underscores - 1, MaxSectionArity) }
+	for underscores < len(text) && text[underscores] == '_' {
+		underscores++
+	}
+	if underscores == len(text) {
+		return min(underscores-1, MaxSectionArity)
+	}
 	rest := text[underscores:]
-	if underscores != 1 { return -1 }
-	if len(rest) > 1 && rest[0] == '0' { return -1 }
+	if underscores != 1 {
+		return -1
+	}
+	if len(rest) > 1 && rest[0] == '0' {
+		return -1
+	}
 	for i := 0; i < len(rest); i++ {
-		if !isDigit(rest[i]) { return -1 }
+		if !isDigit(rest[i]) {
+			return -1
+		}
 	}
 	index := 0
 	for i := 0; i < len(rest); i++ {
-		digit := int(rest[i]-'0')
+		digit := int(rest[i] - '0')
 		// Saturate only after validating all digits: oversized placeholders
 		// remain placeholders and receive the section arity diagnostic.
-		if index > (MaxSectionArity-digit)/10 { return MaxSectionArity }
+		if index > (MaxSectionArity-digit)/10 {
+			return MaxSectionArity
+		}
 		index = index*10 + digit
 	}
 	return index
 }
 
 func (p *parser) paren() *Expr {
-	start := p.pos; p.pos++; p.skipSpace()
-	if p.pos == len(p.s.Text) { p.error(start, p.pos, "unclosed application; expected ')'"); return nil }
-	if p.s.Text[p.pos] == ')' { p.pos++; p.error(start, p.pos, "empty application"); return nil }
-	if p.s.Text[p.pos] == '[' { return p.lambda(start) }
+	start := p.pos
+	p.pos++
+	p.skipSpace()
+	if p.pos == len(p.s.Text) {
+		p.error(start, p.pos, "unclosed application; expected ')'")
+		return nil
+	}
+	if p.s.Text[p.pos] == ')' {
+		p.pos++
+		p.error(start, p.pos, "empty application")
+		return nil
+	}
+	if p.s.Text[p.pos] == '[' {
+		return p.lambda(start)
+	}
 	first := p.expression()
-	if first == nil { if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' { p.pos++ }; return nil }
-	app := p.node(Application, start); app.Items = slices.Append(p.a, app.Items, first)
+	if first == nil {
+		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' {
+			p.pos++
+		}
+		return nil
+	}
+	app := p.node(Application, start)
+	app.Items = slices.Append(p.a, app.Items, first)
 	for p.pos < len(p.s.Text) {
 		space := p.skipSpace()
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' {
-			p.pos++; app.Span.End = p.pos
+			p.pos++
+			app.Span.End = p.pos
 			return p.classifySection(app)
 		}
 		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == '|' {
 			p.pos++
-			if p.skipSpace() == 0 { p.error(p.pos, p.pos, "pipe needs right expression"); return app }
-			if len(app.Items) != 1 { p.error(app.Span.Start, app.Span.End, "pipe left side must be one expression"); return app }
+			if p.skipSpace() == 0 {
+				p.error(p.pos, p.pos, "pipe needs right expression")
+				return app
+			}
+			if len(app.Items) != 1 {
+				p.error(app.Span.Start, app.Span.End, "pipe left side must be one expression")
+				return app
+			}
 			left := app.Items[0]
 			items := app.Items
 			app.Items = nil
@@ -975,8 +1482,18 @@ func (p *parser) paren() *Expr {
 			mem.Free(p.a, app)
 			return p.pipe(start, left)
 		}
-		if space == 0 { p.error(p.pos, p.pos+1, "application items need whitespace"); return app }
-		item := p.expression(); if item == nil { if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' { p.pos++ }; app.Span.End = p.pos; return app }
+		if space == 0 {
+			p.error(p.pos, p.pos+1, "application items need whitespace")
+			return app
+		}
+		item := p.expression()
+		if item == nil {
+			if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' {
+				p.pos++
+			}
+			app.Span.End = p.pos
+			return app
+		}
 		app.Items = slices.Append(p.a, app.Items, item)
 	}
 	p.error(start, p.pos, "unclosed application; expected ')'")
@@ -992,14 +1509,27 @@ func (p *parser) pipe(start int, left *Expr) *Expr {
 func (p *parser) pipeStage(start int, left *Expr, pipe *Expr) *Expr {
 	var right []*Expr
 	for p.pos < len(p.s.Text) && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '|' {
-		item := p.expression(); if item == nil { break }
+		item := p.expression()
+		if item == nil {
+			break
+		}
 		right = slices.Append(p.a, right, item)
-		if p.pos < len(p.s.Text) && p.s.Text[p.pos] != ')' && p.skipSpace() == 0 { p.error(p.pos, p.pos+1, "pipe items need whitespace"); break }
+		if p.pos < len(p.s.Text) && p.s.Text[p.pos] != ')' && p.skipSpace() == 0 {
+			p.error(p.pos, p.pos+1, "pipe items need whitespace")
+			break
+		}
 	}
-	if len(right) == 0 { p.error(p.pos, p.pos, "pipe needs right expression"); slices.Free(p.a, right); freeExpr(p.a, pipe); return left }
+	if len(right) == 0 {
+		p.error(p.pos, p.pos, "pipe needs right expression")
+		slices.Free(p.a, right)
+		freeExpr(p.a, pipe)
+		return left
+	}
 	if p.pos == len(p.s.Text) {
 		p.error(start, p.pos, "unclosed pipe")
-		for i := range right { freeExpr(p.a, right[i]) }
+		for i := range right {
+			freeExpr(p.a, right[i])
+		}
 		slices.Free(p.a, right)
 		freeExpr(p.a, pipe)
 		return left
@@ -1014,13 +1544,20 @@ func (p *parser) pipeStage(start int, left *Expr, pipe *Expr) *Expr {
 	used := false
 	for i := range right {
 		if right[i].Kind == Name && right[i].Text == "_" {
-			if used { result.Items = slices.Append(p.a, result.Items, cloneExpr(p.a, left))
-			} else { result.Items = slices.Append(p.a, result.Items, left) }
+			if used {
+				result.Items = slices.Append(p.a, result.Items, cloneExpr(p.a, left))
+			} else {
+				result.Items = slices.Append(p.a, result.Items, left)
+			}
 			freeExpr(p.a, right[i])
 			used = true
-		} else { result.Items = slices.Append(p.a, result.Items, right[i]) }
+		} else {
+			result.Items = slices.Append(p.a, result.Items, right[i])
+		}
 	}
-	if !used { result.Items = slices.Append(p.a, result.Items, left) }
+	if !used {
+		result.Items = slices.Append(p.a, result.Items, left)
+	}
 	slices.Free(p.a, right)
 	if p.s.Text[p.pos] == ')' {
 		p.pos++
@@ -1029,32 +1566,57 @@ func (p *parser) pipeStage(start int, left *Expr, pipe *Expr) *Expr {
 		return result
 	}
 	p.pos++
-	if p.skipSpace() == 0 { p.error(p.pos, p.pos, "pipe needs right expression"); freeExpr(p.a, pipe); return result }
+	if p.skipSpace() == 0 {
+		p.error(p.pos, p.pos, "pipe needs right expression")
+		freeExpr(p.a, pipe)
+		return result
+	}
 	return p.pipeStage(start, result, pipe)
 }
 
 func cloneExpr(a mem.Allocator, original *Expr) *Expr {
-	if original == nil { return nil }
+	if original == nil {
+		return nil
+	}
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
 	copy.Edges = slices.Clone(a, original.Edges)
 	copy.StreamKinds = slices.Clone(a, original.StreamKinds)
 	copy.Channels = nil
-	for i := range original.Channels { copy.Channels = slices.Append(a, copy.Channels, sourceText(a, original.Channels[i])) }
+	for i := range original.Channels {
+		copy.Channels = slices.Append(a, copy.Channels, sourceText(a, original.Channels[i]))
+	}
 	copy.AuthoredPipe = cloneExpr(a, original.AuthoredPipe)
 	copy.NamesOwned = true
-	if original.Text != "" { copy.Text, copy.TextOwned = sourceText(a, original.Text), true }
+	if original.Text != "" {
+		copy.Text, copy.TextOwned = sourceText(a, original.Text), true
+	}
 	copy.Parts, copy.Reference, copy.Items, copy.Fields, copy.Parameters, copy.Body, copy.Pattern = nil, nil, nil, nil, nil, nil, nil
-	if original.Pattern != nil { copy.Pattern = original.Pattern.Clone(a) }
+	if original.Pattern != nil {
+		copy.Pattern = original.Pattern.Clone(a)
+	}
 	for i := range original.Parts {
 		part := original.Parts[i]
-		if part.Expr != nil { part.Expr = cloneExpr(a, part.Expr) } else { part.Text = sourceText(a, part.Text) }
+		if part.Expr != nil {
+			part.Expr = cloneExpr(a, part.Expr)
+		} else {
+			part.Text = sourceText(a, part.Text)
+		}
 		copy.Parts = slices.Append(a, copy.Parts, part)
 	}
 	copy.Reference = slices.Clone(a, original.Reference)
-	for i := range copy.Reference { copy.Reference[i].Text = sourceText(a, original.Reference[i].Text) }
-	for i := range original.Items { copy.Items = slices.Append(a, copy.Items, cloneExpr(a, original.Items[i])) }
-	for i := range original.Fields { field := original.Fields[i]; field.Key = sourceText(a, field.Key); field.Value = cloneExpr(a, field.Value); copy.Fields = slices.Append(a, copy.Fields, field) }
+	for i := range copy.Reference {
+		copy.Reference[i].Text = sourceText(a, original.Reference[i].Text)
+	}
+	for i := range original.Items {
+		copy.Items = slices.Append(a, copy.Items, cloneExpr(a, original.Items[i]))
+	}
+	for i := range original.Fields {
+		field := original.Fields[i]
+		field.Key = sourceText(a, field.Key)
+		field.Value = cloneExpr(a, field.Value)
+		copy.Fields = slices.Append(a, copy.Fields, field)
+	}
 	copy.Parameters = slices.Clone(a, original.Parameters)
 	// Cloned parameter names must outlive the original source, just like
 	// reference components and record keys.
@@ -1063,7 +1625,9 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 			copy.Parameters[i].Name = sourceText(a, copy.Parameters[i].Name)
 		}
 	}
-	for i := range original.Body { copy.Body = slices.Append(a, copy.Body, cloneExpr(a, original.Body[i])) }
+	for i := range original.Body {
+		copy.Body = slices.Append(a, copy.Body, cloneExpr(a, original.Body[i]))
+	}
 	return copy
 }
 
@@ -1073,28 +1637,58 @@ func (p *parser) lambda(start int) *Expr {
 	p.skipSpace()
 	for p.pos < len(p.s.Text) && p.s.Text[p.pos] != ']' {
 		name := p.name()
-		if !name.OK { p.error(p.pos, p.pos+1, "expected parameter"); return lambda }
-		if p.kash && name.Text == "env" { p.error(name.Span.Start, name.Span.End, "env is reserved in Kash") }
+		if !name.OK {
+			p.error(p.pos, p.pos+1, "expected parameter")
+			return lambda
+		}
+		if p.kash && name.Text == "env" {
+			p.error(name.Span.Start, name.Span.End, "env is reserved in Kash")
+		}
 		rest := false
-		if p.pos+3 <= len(p.s.Text) && p.s.Text[p.pos:p.pos+3] == "..." { p.pos += 3; rest = true }
+		if p.pos+3 <= len(p.s.Text) && p.s.Text[p.pos:p.pos+3] == "..." {
+			p.pos += 3
+			rest = true
+		}
 		lambda.Parameters = slices.Append(p.a, lambda.Parameters, Parameter{Name: name.Text, Span: source.Span{Start: name.Span.Start, End: p.pos}, Rest: rest})
-		if rest && p.pos < len(p.s.Text) && p.s.Text[p.pos] != ']' { p.error(p.pos, p.pos+1, "rest parameter must be last") }
-		if p.pos < len(p.s.Text) && p.s.Text[p.pos] != ']' && p.skipSpace() == 0 { p.error(p.pos, p.pos+1, "parameters need whitespace"); return lambda }
+		if rest && p.pos < len(p.s.Text) && p.s.Text[p.pos] != ']' {
+			p.error(p.pos, p.pos+1, "rest parameter must be last")
+		}
+		if p.pos < len(p.s.Text) && p.s.Text[p.pos] != ']' && p.skipSpace() == 0 {
+			p.error(p.pos, p.pos+1, "parameters need whitespace")
+			return lambda
+		}
 	}
-	if p.pos == len(p.s.Text) { p.error(start, p.pos, "unclosed parameter list"); return lambda }
+	if p.pos == len(p.s.Text) {
+		p.error(start, p.pos, "unclosed parameter list")
+		return lambda
+	}
 	p.pos++
 	for p.pos < len(p.s.Text) && p.s.Text[p.pos] != ')' {
-		if p.skipSpace() == 0 { p.error(p.pos, p.pos+1, "lambda body needs whitespace"); return lambda }
-		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' { break }
-		body := p.expression(); if body == nil { return lambda }
+		if p.skipSpace() == 0 {
+			p.error(p.pos, p.pos+1, "lambda body needs whitespace")
+			return lambda
+		}
+		if p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' {
+			break
+		}
+		body := p.expression()
+		if body == nil {
+			return lambda
+		}
 		lambda.Body = slices.Append(p.a, lambda.Body, body)
 	}
-	if p.pos == len(p.s.Text) { p.error(start, p.pos, "unclosed lambda"); return lambda }
-	p.pos++; lambda.Span.End = p.pos; return lambda
+	if p.pos == len(p.s.Text) {
+		p.error(start, p.pos, "unclosed lambda")
+		return lambda
+	}
+	p.pos++
+	lambda.Span.End = p.pos
+	return lambda
 }
 
 func (p *parser) quoted(patterns bool) *Expr {
-	start := p.pos; p.pos++
+	start := p.pos
+	p.pos++
 	e := p.node(String, start)
 	var text strings.Builder
 	text = strings.NewBuilder(p.a)
@@ -1103,45 +1697,82 @@ func (p *parser) quoted(patterns bool) *Expr {
 		b := p.s.Text[p.pos]
 		if b == '"' {
 			p.addTextPart(e, &text, partStart, p.pos)
-			if patterns { p.classifyStringPattern(e, start, p.pos) }
-			p.pos++; e.Span.End = p.pos; text.Free(); return e
+			if patterns {
+				p.classifyStringPattern(e, start, p.pos)
+			}
+			p.pos++
+			e.Span.End = p.pos
+			text.Free()
+			return e
 		}
 		if b == '\\' {
-			if p.pos+1 == len(p.s.Text) { p.error(p.pos, p.pos+1, "unfinished escape"); break }
+			if p.pos+1 == len(p.s.Text) {
+				p.error(p.pos, p.pos+1, "unfinished escape")
+				break
+			}
 			p.pos++
 			escaped := p.s.Text[p.pos]
-			if escaped == 'n' { text.WriteByte('\n')
-			} else if escaped == 'r' { text.WriteByte('\r')
-			} else if escaped == 't' { text.WriteByte('\t')
-			} else if escaped == '"' || escaped == '\\' || escaped == '{' || escaped == '@' { text.WriteByte(escaped)
-			} else { p.error(p.pos-1, p.pos+1, "invalid string escape"); text.WriteByte(escaped) }
-			p.pos++; continue
+			if escaped == 'n' {
+				text.WriteByte('\n')
+			} else if escaped == 'r' {
+				text.WriteByte('\r')
+			} else if escaped == 't' {
+				text.WriteByte('\t')
+			} else if escaped == '"' || escaped == '\\' || escaped == '{' || escaped == '@' {
+				text.WriteByte(escaped)
+			} else {
+				p.error(p.pos-1, p.pos+1, "invalid string escape")
+				text.WriteByte(escaped)
+			}
+			p.pos++
+			continue
 		}
 		if b == '@' && p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos+1] == '(' || p.s.Text[p.pos+1] == '{') {
 			p.addTextPart(e, &text, partStart, p.pos)
 			open := p.pos
-			form := "@("; if p.s.Text[open+1] == '{' { form = "@{" }
+			form := "@("
+			if p.s.Text[open+1] == '{' {
+				form = "@{"
+			}
 			before := len(p.diags)
 			inner := p.expansion()
-			if inner == nil { text.Free(); e.Span.End = p.pos; return e }
+			if inner == nil {
+				text.Free()
+				e.Span.End = p.pos
+				return e
+			}
 			e.Parts = slices.Append(p.a, e.Parts, StringPart{Expr: inner, Form: form, Span: source.Span{Start: open, End: p.pos}})
-			if p.pos == len(p.s.Text) && len(p.diags) > before { text.Free(); e.Span.End = p.pos; return e }
+			if p.pos == len(p.s.Text) && len(p.diags) > before {
+				text.Free()
+				e.Span.End = p.pos
+				return e
+			}
 			partStart = p.pos
 			continue
 		}
-		text.WriteByte(b); p.pos++
-		if b == '\n' && p.indent != "" && strings.HasPrefix(p.s.Text[p.pos:], p.indent) { p.pos += len(p.indent) }
+		text.WriteByte(b)
+		p.pos++
+		if b == '\n' && p.indent != "" && strings.HasPrefix(p.s.Text[p.pos:], p.indent) {
+			p.pos += len(p.indent)
+		}
 	}
-	text.Free(); p.error(start, p.pos, "unclosed string"); return e
+	text.Free()
+	p.error(start, p.pos, "unclosed string")
+	return e
 }
 
 func (p *parser) expansion() *Expr {
 	open := p.pos
-	if p.pos+1 >= len(p.s.Text) || p.s.Text[p.pos] != '@' || (p.s.Text[p.pos+1] != '(' && p.s.Text[p.pos+1] != '{') { p.error(open, open+1, "expected @{reference} or @(function args...)"); return nil }
+	if p.pos+1 >= len(p.s.Text) || p.s.Text[p.pos] != '@' || (p.s.Text[p.pos+1] != '(' && p.s.Text[p.pos+1] != '{') {
+		p.error(open, open+1, "expected @{reference} or @(function args...)")
+		return nil
+	}
 	if p.s.Text[p.pos+1] == '(' {
 		p.pos++
 		inner := p.paren()
-		if inner != nil { inner.Expansion = "@(" }
+		if inner != nil {
+			inner.Expansion = "@("
+		}
 		return inner
 	}
 	p.pos += 2
@@ -1157,7 +1788,9 @@ func (p *parser) expansion() *Expr {
 			before := p.pos
 			extra := p.expression()
 			freeExpr(p.a, extra)
-			if p.pos == before { p.pos++ }
+			if p.pos == before {
+				p.pos++
+			}
 			p.skipSpace()
 		}
 	}
@@ -1172,12 +1805,16 @@ func (p *parser) expansion() *Expr {
 		p.error(innerStart, p.pos, "@{...} requires a reference; use @(function args...) for a call")
 	}
 	p.pos++
-	if inner != nil { inner.Expansion = "@{" }
+	if inner != nil {
+		inner.Expansion = "@{"
+	}
 	return inner
 }
 
 func (p *parser) addTextPart(e *Expr, text *strings.Builder, start int, end int) {
-	if text.Len() == 0 { return }
+	if text.Len() == 0 {
+		return
+	}
 	e.Parts = slices.Append(p.a, e.Parts, StringPart{Text: sourceText(p.a, text.String()), Span: source.Span{Start: start, End: end}})
 	text.Reset()
 }
@@ -1192,22 +1829,33 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 	var decoded strings.Builder
 	decoded = strings.NewBuilder(p.a)
 	for i := range e.Parts {
-		if e.Parts[i].Expr != nil { decoded.Free(); return }
+		if e.Parts[i].Expr != nil {
+			decoded.Free()
+			return
+		}
 		decoded.WriteString(e.Parts[i].Text)
 	}
 	text := sourceText(p.a, decoded.String())
 	decoded.Free()
 	defer mem.FreeString(p.a, text)
-	if text == "" || strings.IndexByte(text, '{') < 0 { return }
+	if text == "" || strings.IndexByte(text, '{') < 0 {
+		return
+	}
 	// Keep pattern-part spans anchored to the source even when an escape before
 	// a group makes source and decoded-string offsets differ.
 	var sourceStarts, sourceEnds []int
 	for pos := start + 1; pos < end; {
 		from := pos
-		if p.s.Text[pos] == '\\' && pos+1 < end { pos += 2 } else { pos++ }
+		if p.s.Text[pos] == '\\' && pos+1 < end {
+			pos += 2
+		} else {
+			pos++
+		}
 		sourceStarts = slices.Append(p.a, sourceStarts, from)
 		sourceEnds = slices.Append(p.a, sourceEnds, pos)
-		if p.s.Text[from] == '\n' && p.indent != "" && strings.HasPrefix(p.s.Text[pos:], p.indent) { pos += len(p.indent) }
+		if p.s.Text[from] == '\n' && p.indent != "" && strings.HasPrefix(p.s.Text[pos:], p.indent) {
+			pos += len(p.indent)
+		}
 	}
 	parsed := ParsePatternText(p.a, text, 0)
 	for i := range parsed.Pattern.Parts {
@@ -1221,7 +1869,9 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 		if span.Start >= 0 && span.Start < len(sourceStarts) {
 			startAt := sourceStarts[span.Start]
 			endAt := startAt
-			if span.End > span.Start && span.End <= len(sourceEnds) { endAt = sourceEnds[span.End-1] }
+			if span.End > span.Start && span.End <= len(sourceEnds) {
+				endAt = sourceEnds[span.End-1]
+			}
 			parsed.Diagnostics[i].Span = source.Span{Start: startAt, End: endAt}
 		}
 	}
@@ -1229,7 +1879,9 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 	slices.Free(p.a, sourceEnds)
 	if len(parsed.Diagnostics) != 0 {
 		if containsRegexGroupMarker(text) {
-			for i := range parsed.Diagnostics { p.diags = slices.Append(p.a, p.diags, parsed.Diagnostics[i]) }
+			for i := range parsed.Diagnostics {
+				p.diags = slices.Append(p.a, p.diags, parsed.Diagnostics[i])
+			}
 		}
 		parsed.Pattern.Free(p.a)
 		slices.Free(p.a, parsed.Diagnostics)
@@ -1246,7 +1898,9 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 		parsed.Pattern.Free(p.a)
 		return
 	}
-	for i := range e.Parts { mem.FreeString(p.a, e.Parts[i].Text) }
+	for i := range e.Parts {
+		mem.FreeString(p.a, e.Parts[i].Text)
+	}
 	slices.Free(p.a, e.Parts)
 	e.Parts = nil
 	e.TextOwned = true
@@ -1255,8 +1909,12 @@ func (p *parser) classifyStringPattern(e *Expr, start int, end int) {
 }
 
 func sourceText(a mem.Allocator, text string) string {
-	if len(text) == 0 { return "" }
-	b := mem.AllocSlice[byte](a, len(text), len(text)); copy(b, []byte(text)); return string(b)
+	if len(text) == 0 {
+		return ""
+	}
+	b := mem.AllocSlice[byte](a, len(text), len(text))
+	copy(b, []byte(text))
+	return string(b)
 }
 
 // Format returns allocator-owned canonical expression text.
@@ -1275,30 +1933,61 @@ func Compact(a mem.Allocator, e *Expr) string {
 
 func writeProcess(b *strings.Builder, e *Expr) {
 	for i := range e.Items {
-		if e.Items[i].Kind == CommandInput { continue }
+		if e.Items[i].Kind == CommandInput {
+			continue
+		}
 		if e.Items[i].Kind == CommandMux {
 			mux := e.Items[i]
-			b.WriteString(" |("); b.WriteString(mux.Text)
-			for j := range mux.Items { b.WriteByte(' '); writeExpr(b, mux.Items[j]) }
+			b.WriteString(" |(")
+			b.WriteString(mux.Text)
+			for j := range mux.Items {
+				b.WriteByte(' ')
+				writeExpr(b, mux.Items[j])
+			}
 			if mux.Text == "filter" && len(mux.Body) != 0 {
-				if len(mux.Body[0].Items) == 0 || mux.Body[0].Items[0].Kind != CommandInput { b.WriteString(" | ") }
+				if len(mux.Body[0].Items) == 0 || mux.Body[0].Items[0].Kind != CommandInput {
+					b.WriteString(" | ")
+				}
 				writeProcess(b, mux.Body[0])
 			}
-			b.WriteByte(')'); continue
+			b.WriteByte(')')
+			continue
 		}
-		if i != 0 { if e.Items[i].Kind == CommandWriter || (e.Items[i-1].Kind == CommandMux && (e.Items[i-1].Text == "merge" || e.Items[i-1].Text == "broadcast" || e.Items[i-1].Text == "balance")) { b.WriteByte(' ') } else { b.WriteString(" | ") } }
+		if i != 0 {
+			if e.Items[i].Kind == CommandWriter || (e.Items[i-1].Kind == CommandMux && (e.Items[i-1].Text == "merge" || e.Items[i-1].Text == "broadcast" || e.Items[i-1].Text == "balance")) {
+				b.WriteByte(' ')
+			} else {
+				b.WriteString(" | ")
+			}
+		}
 		writeExpr(b, e.Items[i])
 	}
-	if e.AcceptExit { b.WriteString(" ?") }
-	if len(e.Body) != 0 { b.WriteString(" ? "); writeProcess(b, e.Body[0]) }
-	if e.Async { b.WriteString(" &") }
-	if e.Exit == "next" { b.WriteString(" >&") }
-	if e.Exit == "otherwise" { b.WriteString(" >@") }
+	if e.AcceptExit {
+		b.WriteString(" ?")
+	}
+	if len(e.Body) != 0 {
+		b.WriteString(" ? ")
+		writeProcess(b, e.Body[0])
+	}
+	if e.Async {
+		b.WriteString(" &")
+	}
+	if e.Exit == "next" {
+		b.WriteString(" >&")
+	}
+	if e.Exit == "otherwise" {
+		b.WriteString(" >@")
+	}
 }
 
 func writeExpr(b *strings.Builder, e *Expr) {
-	if e == nil { return }
-	if e.AuthoredPipe != nil { writeExpr(b, e.AuthoredPipe); return }
+	if e == nil {
+		return
+	}
+	if e.AuthoredPipe != nil {
+		writeExpr(b, e.AuthoredPipe)
+		return
+	}
 	if e.Kind == ValuePipe {
 		b.WriteByte('(')
 		writeExpr(b, e.Items[0])
@@ -1309,120 +1998,330 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		b.WriteByte(')')
 		return
 	}
-	if e.Kind == ValueRecovery { writeExpr(b, e.Items[0]); b.WriteString(" ?? "); writeExpr(b, e.Items[1]); return }
-	if e.Kind == KashDefer { b.WriteString("defer "); writeExpr(b, e.Items[0]); return }
-	if e.Kind == CommandCapture || e.Kind == CommandGraph || e.Kind == CommandTest { if e.Kind == CommandCapture { b.WriteString("$(") }; writeProcess(b, e); if e.Kind == CommandCapture { b.WriteByte(')') }; return }
-	if e.Kind == CommandStage { for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }; return }
-	if e.Kind == CommandStream { b.WriteString("stream "); b.WriteString(e.Text); return }
-	if e.Kind == CommandReader { b.WriteByte('&'); b.WriteString(e.Text); return }
-	if e.Kind == CommandWriter { b.WriteString(">&"); b.WriteString(e.Text); return }
-	if e.Kind == CommandOperand {
-		if len(e.Body) != 0 { b.WriteString("<("); writeProcess(b, e.Body[0]); b.WriteByte(')') } else { b.WriteString("<&"); b.WriteString(e.Text) }
+	if e.Kind == ValueRecovery {
+		writeExpr(b, e.Items[0])
+		b.WriteString(" ?? ")
+		writeExpr(b, e.Items[1])
 		return
 	}
-	if e.Kind == CommandGroup { b.WriteByte('('); for i := range e.Items { if i != 0 { b.WriteString(", ") }; writeProcess(b, e.Items[i]) }; b.WriteByte(')'); return }
-	if e.Kind == CommandRedirection { b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
-	if e.Kind == CommandSetup { b.WriteByte(':'); b.WriteString(e.Text); b.WriteByte(' '); writeCommandWord(b, e.Items[0]); return }
-	if e.Kind == CommandWord { writeCommandWord(b, e); return }
-	if e.Kind == Boolean { if e.Bool { b.WriteString(":true") } else { b.WriteString(":false") }; return }
-	if e.Kind == Nil { b.WriteString(":nil"); return }
-	if e.Kind == Integer { var buf [strconv.MaxIntBase10Len]byte; b.WriteString(strconv.FormatInt(buf[:], e.Int, 10)); return }
+	if e.Kind == KashDefer {
+		b.WriteString("defer ")
+		writeExpr(b, e.Items[0])
+		return
+	}
+	if e.Kind == CommandCapture || e.Kind == CommandGraph || e.Kind == CommandTest {
+		if e.Kind == CommandCapture {
+			b.WriteString("$(")
+		}
+		writeProcess(b, e)
+		if e.Kind == CommandCapture {
+			b.WriteByte(')')
+		}
+		return
+	}
+	if e.Kind == CommandStage {
+		for i := range e.Items {
+			if i != 0 {
+				b.WriteByte(' ')
+			}
+			writeExpr(b, e.Items[i])
+		}
+		return
+	}
+	if e.Kind == CommandStream {
+		b.WriteString("stream ")
+		b.WriteString(e.Text)
+		return
+	}
+	if e.Kind == CommandReader {
+		b.WriteByte('&')
+		b.WriteString(e.Text)
+		return
+	}
+	if e.Kind == CommandWriter {
+		b.WriteString(">&")
+		b.WriteString(e.Text)
+		return
+	}
+	if e.Kind == CommandOperand {
+		if len(e.Body) != 0 {
+			b.WriteString("<(")
+			writeProcess(b, e.Body[0])
+			b.WriteByte(')')
+		} else {
+			b.WriteString("<&")
+			b.WriteString(e.Text)
+		}
+		return
+	}
+	if e.Kind == CommandGroup {
+		b.WriteByte('(')
+		for i := range e.Items {
+			if i != 0 {
+				b.WriteString(", ")
+			}
+			writeProcess(b, e.Items[i])
+		}
+		b.WriteByte(')')
+		return
+	}
+	if e.Kind == CommandRedirection {
+		b.WriteString(e.Text)
+		b.WriteByte(' ')
+		writeCommandWord(b, e.Items[0])
+		return
+	}
+	if e.Kind == CommandSetup {
+		b.WriteByte(':')
+		b.WriteString(e.Text)
+		b.WriteByte(' ')
+		writeCommandWord(b, e.Items[0])
+		return
+	}
+	if e.Kind == CommandWord {
+		writeCommandWord(b, e)
+		return
+	}
+	if e.Kind == Boolean {
+		if e.Bool {
+			b.WriteString(":true")
+		} else {
+			b.WriteString(":false")
+		}
+		return
+	}
+	if e.Kind == Nil {
+		b.WriteString(":nil")
+		return
+	}
+	if e.Kind == Integer {
+		var buf [strconv.MaxIntBase10Len]byte
+		b.WriteString(strconv.FormatInt(buf[:], e.Int, 10))
+		return
+	}
 	if e.Kind == Float {
 		var buf [strconv.MaxFloat64Len]byte
 		text := strconv.FormatFloat(buf[:], e.Float, 'g', -1, 64)
 		b.WriteString(text)
-		if !strings.ContainsAny(text, ".eE") { b.WriteString(".0") }
+		if !strings.ContainsAny(text, ".eE") {
+			b.WriteString(".0")
+		}
 		return
 	}
-	if e.Kind == Symbol { b.WriteByte(':'); b.WriteString(e.Text); return }
-	if e.Kind == Name { b.WriteString(e.Text); if e.Rest { b.WriteString("...") }; return }
+	if e.Kind == Symbol {
+		b.WriteByte(':')
+		b.WriteString(e.Text)
+		return
+	}
+	if e.Kind == Name {
+		b.WriteString(e.Text)
+		if e.Rest {
+			b.WriteString("...")
+		}
+		return
+	}
 	if e.Kind == Placeholder {
 		var buffer [strconv.MaxIntBase10Len]byte
 		b.WriteByte('_')
 		b.WriteString(strconv.FormatInt(buffer[:], e.Int, 10))
 		return
 	}
-	if e.Kind == Section { b.WriteByte('('); writeExpr(b, e.Body[0]); b.WriteByte(')'); return }
+	if e.Kind == Section {
+		b.WriteByte('(')
+		writeExpr(b, e.Body[0])
+		b.WriteByte(')')
+		return
+	}
 	if e.Kind == Path {
-		if len(e.Parts) == 0 { b.WriteString(e.Text); return }
+		if len(e.Parts) == 0 {
+			b.WriteString(e.Text)
+			return
+		}
 		for i := range e.Parts {
 			part := e.Parts[i]
-			if part.Expr == nil { b.WriteString(part.Text) } else { writeExpansion(b, part) }
+			if part.Expr == nil {
+				b.WriteString(part.Text)
+			} else {
+				writeExpansion(b, part)
+			}
 		}
 		return
 	}
-	if e.Kind == Selector { b.WriteString(e.Text); return }
-	if e.Kind == Reference || e.Kind == EnvironmentReference { writeReference(b, e); return }
-	if e.Kind == String { writeString(b, e); return }
-	if e.Kind == List { writeMany(b, '[', ']', e.Items); return }
-	if e.Kind == Application { writeMany(b, '(', ')', e.Items); return }
-	if e.Kind == Record { b.WriteByte('['); for i := range e.Fields { if i != 0 { b.WriteByte(' ') }; b.WriteString(e.Fields[i].Key); b.WriteString(": "); writeExpr(b, e.Fields[i].Value) }; b.WriteByte(']'); return }
-	if e.Kind == Lambda { b.WriteString("(["); for i := range e.Parameters { if i != 0 { b.WriteByte(' ') }; b.WriteString(e.Parameters[i].Name); if e.Parameters[i].Rest { b.WriteString("...") } }; b.WriteByte(']'); for i := range e.Body { b.WriteByte(' '); writeExpr(b, e.Body[i]) }; b.WriteByte(')') }
+	if e.Kind == Selector {
+		b.WriteString(e.Text)
+		return
+	}
+	if e.Kind == Reference || e.Kind == EnvironmentReference {
+		writeReference(b, e)
+		return
+	}
+	if e.Kind == String {
+		writeString(b, e)
+		return
+	}
+	if e.Kind == List {
+		writeMany(b, '[', ']', e.Items)
+		return
+	}
+	if e.Kind == Application {
+		writeMany(b, '(', ')', e.Items)
+		return
+	}
+	if e.Kind == Record {
+		b.WriteByte('[')
+		for i := range e.Fields {
+			if i != 0 {
+				b.WriteByte(' ')
+			}
+			b.WriteString(e.Fields[i].Key)
+			b.WriteString(": ")
+			writeExpr(b, e.Fields[i].Value)
+		}
+		b.WriteByte(']')
+		return
+	}
+	if e.Kind == Lambda {
+		b.WriteString("([")
+		for i := range e.Parameters {
+			if i != 0 {
+				b.WriteByte(' ')
+			}
+			b.WriteString(e.Parameters[i].Name)
+			if e.Parameters[i].Rest {
+				b.WriteString("...")
+			}
+		}
+		b.WriteByte(']')
+		for i := range e.Body {
+			b.WriteByte(' ')
+			writeExpr(b, e.Body[i])
+		}
+		b.WriteByte(')')
+	}
 }
 
 func writeMany(b *strings.Builder, open byte, close byte, items []*Expr) {
-	b.WriteByte(open); for i := range items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, items[i]) }; b.WriteByte(close)
+	b.WriteByte(open)
+	for i := range items {
+		if i != 0 {
+			b.WriteByte(' ')
+		}
+		writeExpr(b, items[i])
+	}
+	b.WriteByte(close)
 }
 
 func writeReference(b *strings.Builder, e *Expr) {
 	for i := range e.Reference {
 		part := e.Reference[i]
-		if i != 0 { b.WriteByte('.') }
-		if part.Kind == ReferenceSelection { b.WriteByte('{'); b.WriteString(part.Text); b.WriteByte('}')
-		} else { b.WriteString(part.Text) }
+		if i != 0 {
+			b.WriteByte('.')
+		}
+		if part.Kind == ReferenceSelection {
+			b.WriteByte('{')
+			b.WriteString(part.Text)
+			b.WriteByte('}')
+		} else {
+			b.WriteString(part.Text)
+		}
 	}
 }
 
 func writeString(b *strings.Builder, e *Expr) {
 	if e.Verbatim {
 		n := e.VerbatimLen
-		if n < 3 { n = 3 }
-		for i := 0; i < n; i++ { b.WriteByte('"') }
+		if n < 3 {
+			n = 3
+		}
+		for i := 0; i < n; i++ {
+			b.WriteByte('"')
+		}
 		for i := range e.Parts {
 			// Verbatim parts are always literal text.
 			b.WriteString(e.Parts[i].Text)
 		}
-		for i := 0; i < n; i++ { b.WriteByte('"') }
+		for i := 0; i < n; i++ {
+			b.WriteByte('"')
+		}
 		return
 	}
 	b.WriteByte('"')
 	if e.Pattern != nil {
 		for j := 0; j < len(e.Text); j++ {
 			c := e.Text[j]
-			if c == '"' || c == '\\' { b.WriteByte('\\'); b.WriteByte(c)
-			} else if c == '\n' { b.WriteString("\\n")
-			} else if c == '\r' { b.WriteString("\\r")
-			} else if c == '\t' { b.WriteString("\\t")
-			} else if c == '@' && j+1 < len(e.Text) && (e.Text[j+1] == '(' || e.Text[j+1] == '{') { b.WriteString("\\@")
-			} else { b.WriteByte(c) }
+			if c == '"' || c == '\\' {
+				b.WriteByte('\\')
+				b.WriteByte(c)
+			} else if c == '\n' {
+				b.WriteString("\\n")
+			} else if c == '\r' {
+				b.WriteString("\\r")
+			} else if c == '\t' {
+				b.WriteString("\\t")
+			} else if c == '@' && j+1 < len(e.Text) && (e.Text[j+1] == '(' || e.Text[j+1] == '{') {
+				b.WriteString("\\@")
+			} else {
+				b.WriteByte(c)
+			}
 		}
 		b.WriteByte('"')
 		return
 	}
 	for i := range e.Parts {
 		part := e.Parts[i]
-		if part.Expr != nil { writeExpansion(b, part); continue }
+		if part.Expr != nil {
+			writeExpansion(b, part)
+			continue
+		}
 		for j := 0; j < len(part.Text); j++ {
 			c := part.Text[j]
-			if c == '"' { b.WriteString("\\\"")
-			} else if c == '\\' { b.WriteString("\\\\")
-			} else if c == '\n' { b.WriteString("\\n")
-			} else if c == '\r' { b.WriteString("\\r")
-			} else if c == '\t' { b.WriteString("\\t")
-			} else if c == '@' && j+1 < len(part.Text) && (part.Text[j+1] == '(' || part.Text[j+1] == '{') { b.WriteByte('\\'); b.WriteByte(c)
-			} else { b.WriteByte(c) }
+			if c == '"' {
+				b.WriteString("\\\"")
+			} else if c == '\\' {
+				b.WriteString("\\\\")
+			} else if c == '\n' {
+				b.WriteString("\\n")
+			} else if c == '\r' {
+				b.WriteString("\\r")
+			} else if c == '\t' {
+				b.WriteString("\\t")
+			} else if c == '@' && j+1 < len(part.Text) && (part.Text[j+1] == '(' || part.Text[j+1] == '{') {
+				b.WriteByte('\\')
+				b.WriteByte(c)
+			} else {
+				b.WriteByte(c)
+			}
 		}
 	}
 	b.WriteByte('"')
 }
 
 func writeEmbedded(b *strings.Builder, e *Expr) {
-	if e.Kind != Application || e.AuthoredPipe != nil { writeExpr(b, e); return }
-	for i := range e.Items { if i != 0 { b.WriteByte(' ') }; writeExpr(b, e.Items[i]) }
+	if e.Kind != Application || e.AuthoredPipe != nil {
+		writeExpr(b, e)
+		return
+	}
+	for i := range e.Items {
+		if i != 0 {
+			b.WriteByte(' ')
+		}
+		writeExpr(b, e.Items[i])
+	}
 }
 
 func writeExpansion(b *strings.Builder, part StringPart) {
-	if part.Form == "@{" { b.WriteString("@{"); writeExpr(b, part.Expr); b.WriteByte('}'); return }
+	if part.Form == "{" {
+		b.WriteByte('{')
+		writeExpr(b, part.Expr)
+		b.WriteByte('}')
+		return
+	}
+	if part.Form == "@{" {
+		b.WriteString("@{")
+		writeExpr(b, part.Expr)
+		b.WriteByte('}')
+		return
+	}
 	b.WriteByte('@')
 	writeExpr(b, part.Expr)
 }

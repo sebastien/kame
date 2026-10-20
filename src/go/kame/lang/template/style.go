@@ -88,16 +88,36 @@ func lineStyle(line string) string {
 		return ""
 	}
 	line = line[start:end]
-	if directiveWrapper(line, "<!--", "-->") { return "html" }
-	if directiveWrapper(line, "/*", "*/") { return "c" }
-	if directiveWrapper(line, "<#", "#>") { return "powershell" }
-	if directiveLine(line, "//") { return "c" }
-	if directiveLine(line, "#") { return "hash" }
-	if directiveLine(line, "--") { return "dash" }
-	if directiveLine(line, ";") { return "semi" }
-	if directiveLine(line, "%") { return "percent" }
-	if len(line) >= 4 && (eqFold(line[:3], "rem") && horizontal(line[3])) && hasAtAfterSpace(line, 3) { return "batch" }
-	if len(line) >= 3 && line[:2] == "::" && hasAtAfterSpace(line, 2) { return "batch" }
+	if directiveWrapper(line, "<!--", "-->") {
+		return "html"
+	}
+	if directiveWrapper(line, "/*", "*/") {
+		return "c"
+	}
+	if directiveWrapper(line, "<#", "#>") {
+		return "powershell"
+	}
+	if directiveLine(line, "//") {
+		return "c"
+	}
+	if directiveLine(line, "#") {
+		return "hash"
+	}
+	if directiveLine(line, "--") {
+		return "dash"
+	}
+	if directiveLine(line, ";") {
+		return "semi"
+	}
+	if directiveLine(line, "%") {
+		return "percent"
+	}
+	if len(line) >= 4 && (eqFold(line[:3], "rem") && horizontal(line[3])) && hasAtAfterSpace(line, 3) {
+		return "batch"
+	}
+	if len(line) >= 3 && line[:2] == "::" && hasAtAfterSpace(line, 2) {
+		return "batch"
+	}
 	return ""
 }
 
@@ -110,20 +130,30 @@ func directiveWrapper(line string, open string, close string) bool {
 }
 
 func directiveLine(line string, prefix string) bool {
-	if len(line) < len(prefix) || line[:len(prefix)] != prefix { return false }
+	if len(line) < len(prefix) || line[:len(prefix)] != prefix {
+		return false
+	}
 	return hasAtAfterSpace(line, len(prefix))
 }
 
 func hasAtAfterSpace(line string, pos int) bool {
-	for pos < len(line) && horizontal(line[pos]) { pos++ }
+	for pos < len(line) && horizontal(line[pos]) {
+		pos++
+	}
 	return pos < len(line) && isDirectiveToken(line[pos:])
 }
 
 func isDirectiveToken(text string) bool {
-	if len(text) < 2 || text[0] != '@' { return false }
+	if len(text) < 2 || text[0] != '@' {
+		return false
+	}
 	i := 1
-	for i < len(text) && isKeywordLetter(text[i]) { i++ }
-	if i == 1 { return false }
+	for i < len(text) && isKeywordLetter(text[i]) {
+		i++
+	}
+	if i == 1 {
+		return false
+	}
 	switch text[1:i] {
 	case "if", "elif", "else", "for", "with", "let", "include", "raw", "end", "match", "case":
 		return true
@@ -132,8 +162,12 @@ func isDirectiveToken(text string) bool {
 }
 
 func trimHorizontal(text string, start int, end int) (int, int) {
-	for start < end && horizontal(text[start]) { start++ }
-	for end > start && horizontal(text[end-1]) { end-- }
+	for start < end && horizontal(text[start]) {
+		start++
+	}
+	for end > start && horizontal(text[end-1]) {
+		end--
+	}
 	return start, end
 }
 

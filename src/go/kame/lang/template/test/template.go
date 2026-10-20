@@ -224,30 +224,42 @@ func TestDirectiveExpressionShorthandAndCanonicalFormatting(t *testing.T) {
 	}
 	for i := range inputs {
 		doc := template.ParseDocument(a, "boundary.tmpl", inputs[i], "plain")
-		if len(doc.Diagnostics) != 0 { t.Error("directive shorthand did not parse") }
+		if len(doc.Diagnostics) != 0 {
+			t.Error("directive shorthand did not parse")
+		}
 		if i == 0 {
 			if doc.Root == nil || doc.Root.Kind != expr.Application || len(doc.Root.Items) != 2 || doc.Root.Items[1] == nil || doc.Root.Items[1].Kind != expr.Application || len(doc.Root.Items[1].Items) != 5 {
 				t.Error("directive shorthand has unexpected lowered structure")
 			} else {
 				condition := doc.Root.Items[1].Items[1]
-				if condition == nil || condition.Kind != expr.Application || !sameSpan(condition.Span, 4, 17) || len(condition.Items) != 3 || condition.Items[1] == nil || !sameSpan(condition.Items[1].Span, 7, 11) { t.Error("directive shorthand lost authored expression spans") }
+				if condition == nil || condition.Kind != expr.Application || !sameSpan(condition.Span, 4, 17) || len(condition.Items) != 3 || condition.Items[1] == nil || !sameSpan(condition.Items[1].Span, 7, 11) {
+					t.Error("directive shorthand lost authored expression spans")
+				}
 			}
 		}
 		doc.Free()
 		formatted := template.FormatDocument(a, "boundary.tmpl", inputs[i], "plain")
-		if !formatted.OK || formatted.Text != inputs[i] { t.Errorf("directive formatting changed canonical text: %q", formatted.Text) }
+		if !formatted.OK || formatted.Text != inputs[i] {
+			t.Errorf("directive formatting changed canonical text: %q", formatted.Text)
+		}
 		again := template.FormatDocument(a, "boundary.tmpl", formatted.Text, "plain")
-		if !again.OK || again.Text != formatted.Text { t.Error("directive formatting not idempotent") }
+		if !again.OK || again.Text != formatted.Text {
+			t.Error("directive formatting not idempotent")
+		}
 		again.Free()
 		formatted.Free()
 	}
 	legacy := template.FormatDocument(a, "boundary.html", "<!-- @if((eq name \"Ada\")) -->\nyes\n<!-- @end -->\n", "html")
-	if !legacy.OK || legacy.Text != "<!-- @if(eq name \"Ada\") -->\nyes\n<!-- @end(if) -->\n" { t.Error("directive formatting did not migrate redundant application boundary") }
+	if !legacy.OK || legacy.Text != "<!-- @if(eq name \"Ada\") -->\nyes\n<!-- @end(if) -->\n" {
+		t.Error("directive formatting did not migrate redundant application boundary")
+	}
 	legacy.Free()
 	invalid := []string{"@if()\nyes\n@end\n", "@if(eq name\nyes\n@end\n", "@with(\"a\"\"b\")\nyes\n@end\n", "@end(if extra)\n", "@for([item] (list \"a\") \",\" extra)\nyes\n@end\n"}
 	for i := range invalid {
 		doc := template.ParseDocument(a, "invalid.tmpl", invalid[i], "plain")
-		if len(doc.Diagnostics) == 0 { t.Error("malformed directive accepted") }
+		if len(doc.Diagnostics) == 0 {
+			t.Error("malformed directive accepted")
+		}
 		doc.Free()
 	}
 }
@@ -270,7 +282,9 @@ func TestFormattingPreservesEscapedAndRawTemplateBytes(t *testing.T) {
 	}
 	for i := range inputs {
 		formatted := template.FormatDocument(a, "escaped.tmpl", inputs[i], "plain")
-		if !formatted.OK || formatted.Text != inputs[i] { t.Errorf("formatting activated or changed escaped/raw text: %q", formatted.Text) }
+		if !formatted.OK || formatted.Text != inputs[i] {
+			t.Errorf("formatting activated or changed escaped/raw text: %q", formatted.Text)
+		}
 		formatted.Free()
 	}
 }

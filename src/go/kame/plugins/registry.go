@@ -11,68 +11,96 @@ import (
 )
 
 const (
-	DefaultMaxRequestBytes = 1 << 20
-	DefaultMaxResponseBytes = 1 << 20
-	DefaultTimeoutMS int64 = 30000
+	DefaultMaxRequestBytes        = 1 << 20
+	DefaultMaxResponseBytes       = 1 << 20
+	DefaultTimeoutMS        int64 = 30000
 )
 
 type Operation struct {
-	Name string
-	Version string
-	MinArity int
-	MaxArity int
-	Capabilities []eval.Capability
-	MaxRequestBytes int
+	Name             string
+	Version          string
+	MinArity         int
+	MaxArity         int
+	Capabilities     []eval.Capability
+	MaxRequestBytes  int
 	MaxResponseBytes int
-	TimeoutMS int64
+	TimeoutMS        int64
 }
 
 type Plugin struct {
-	Name string
-	Version string
-	TimeoutMS int64
-	MaxRequestBytes int
+	Name             string
+	Version          string
+	TimeoutMS        int64
+	MaxRequestBytes  int
 	MaxResponseBytes int
-	Operations []Operation
+	Operations       []Operation
 }
 
 type registration struct {
-	Alloc mem.Allocator
-	Plugin string
-	PluginVersion string
-	Operation string
+	Alloc            mem.Allocator
+	Plugin           string
+	PluginVersion    string
+	Operation        string
 	OperationVersion string
-	MinArity int
-	MaxArity int
-	MaxRequestBytes int
+	MinArity         int
+	MaxArity         int
+	MaxRequestBytes  int
 	MaxResponseBytes int
-	TimeoutMS int64
+	TimeoutMS        int64
 }
 
-type callState struct { RequestID int64 }
+type callState struct{ RequestID int64 }
 
 // Register validates every declaration before mutating the registry. Operation
 // calls become correlated RequestPlugin requests; hosts supply one validated
 // value or a diagnostic through the usual completion API. The allocator backing
 // retained declarations must outlive the registry, which releases them.
 func Register(a mem.Allocator, registry *eval.Registry, declarations []Plugin) bool {
-	if registry == nil { return false }
+	if registry == nil {
+		return false
+	}
 	for i := range declarations {
 		p := declarations[i]
-		if !validName(p.Name) || p.Version == "" || strings.IndexByte(p.Version, 0) >= 0 || len(p.Operations) == 0 { return false }
-		if p.TimeoutMS < 0 || p.TimeoutMS > DefaultTimeoutMS || p.MaxRequestBytes < 0 || p.MaxRequestBytes > DefaultMaxRequestBytes || p.MaxResponseBytes < 0 || p.MaxResponseBytes > DefaultMaxResponseBytes { return false }
-		for previous := 0; previous < i; previous++ { if declarations[previous].Name == p.Name { return false } }
+		if !validName(p.Name) || p.Version == "" || strings.IndexByte(p.Version, 0) >= 0 || len(p.Operations) == 0 {
+			return false
+		}
+		if p.TimeoutMS < 0 || p.TimeoutMS > DefaultTimeoutMS || p.MaxRequestBytes < 0 || p.MaxRequestBytes > DefaultMaxRequestBytes || p.MaxResponseBytes < 0 || p.MaxResponseBytes > DefaultMaxResponseBytes {
+			return false
+		}
+		for previous := 0; previous < i; previous++ {
+			if declarations[previous].Name == p.Name {
+				return false
+			}
+		}
 		for j := range p.Operations {
 			op := p.Operations[j]
-			if !validName(op.Name) || op.Version == "" || strings.IndexByte(op.Version, 0) >= 0 || op.MinArity < 0 || (op.MaxArity >= 0 && op.MaxArity < op.MinArity) { return false }
-			if op.MaxRequestBytes < 0 || op.MaxRequestBytes > DefaultMaxRequestBytes || op.MaxResponseBytes < 0 || op.MaxResponseBytes > DefaultMaxResponseBytes || op.TimeoutMS < 0 || op.TimeoutMS > DefaultTimeoutMS { return false }
-			if (p.MaxRequestBytes != 0 && op.MaxRequestBytes > p.MaxRequestBytes) || (p.MaxResponseBytes != 0 && op.MaxResponseBytes > p.MaxResponseBytes) || (p.TimeoutMS != 0 && op.TimeoutMS > p.TimeoutMS) { return false }
-			for k := 0; k < len(op.Capabilities); k++ { if op.Capabilities[k] < eval.Read || op.Capabilities[k] > eval.Env { return false } }
-			if eval.IsSpecialForm(op.Name) || registry.HasOperation(op.Name) { return false }
+			if !validName(op.Name) || op.Version == "" || strings.IndexByte(op.Version, 0) >= 0 || op.MinArity < 0 || (op.MaxArity >= 0 && op.MaxArity < op.MinArity) {
+				return false
+			}
+			if op.MaxRequestBytes < 0 || op.MaxRequestBytes > DefaultMaxRequestBytes || op.MaxResponseBytes < 0 || op.MaxResponseBytes > DefaultMaxResponseBytes || op.TimeoutMS < 0 || op.TimeoutMS > DefaultTimeoutMS {
+				return false
+			}
+			if (p.MaxRequestBytes != 0 && op.MaxRequestBytes > p.MaxRequestBytes) || (p.MaxResponseBytes != 0 && op.MaxResponseBytes > p.MaxResponseBytes) || (p.TimeoutMS != 0 && op.TimeoutMS > p.TimeoutMS) {
+				return false
+			}
+			for k := 0; k < len(op.Capabilities); k++ {
+				if op.Capabilities[k] < eval.Read || op.Capabilities[k] > eval.Env {
+					return false
+				}
+			}
+			if eval.IsSpecialForm(op.Name) || registry.HasOperation(op.Name) {
+				return false
+			}
 			for pj := 0; pj <= i; pj++ {
 				end := len(declarations[pj].Operations)
-				if pj == i { end = j }
-				for pk := 0; pk < end; pk++ { if declarations[pj].Operations[pk].Name == op.Name { return false } }
+				if pj == i {
+					end = j
+				}
+				for pk := 0; pk < end; pk++ {
+					if declarations[pj].Operations[pk].Name == op.Name {
+						return false
+					}
+				}
 			}
 		}
 	}
@@ -92,7 +120,10 @@ func Register(a mem.Allocator, registry *eval.Registry, declarations []Plugin) b
 			version := copyText(a, p.Version+"\x00"+op.Version)
 			added := registry.Add(eval.Operation{Name: op.Name, Call: invoke, Context: descriptor, FreeContext: freeRegistration, MinArity: op.MinArity, MaxArity: op.MaxArity, Capabilities: op.Capabilities, Version: version})
 			mem.FreeString(a, version)
-			if !added { freeRegistration(a, descriptor); return false }
+			if !added {
+				freeRegistration(a, descriptor)
+				return false
+			}
 		}
 	}
 	return true
@@ -101,19 +132,29 @@ func Register(a mem.Allocator, registry *eval.Registry, declarations []Plugin) b
 func validName(name string) bool { return name != "" && strings.IndexByte(name, 0) < 0 }
 
 func effectiveLimit(operation int, plugin int, defaultLimit int) int {
-	if operation != 0 { return operation }
-	if plugin != 0 { return plugin }
+	if operation != 0 {
+		return operation
+	}
+	if plugin != 0 {
+		return plugin
+	}
 	return defaultLimit
 }
 
 func effectiveTimeout(operation int64, plugin int64) int64 {
-	if operation != 0 { return operation }
-	if plugin != 0 { return plugin }
+	if operation != 0 {
+		return operation
+	}
+	if plugin != 0 {
+		return plugin
+	}
 	return DefaultTimeoutMS
 }
 
 func copyText(a mem.Allocator, text string) string {
-	if text == "" { return "" }
+	if text == "" {
+		return ""
+	}
 	b := mem.AllocSlice[byte](a, len(text), len(text))
 	copy(b, []byte(text))
 	return string(b)
@@ -135,7 +176,9 @@ func invoke(c *eval.Context, value any, args []core.Value) eval.Result {
 	state := value.(*registration)
 	if stored := c.OperationState(); stored != nil {
 		call := stored.(*callState)
-		if c.Completion().RequestID != call.RequestID { return eval.Result{Waiting: true} }
+		if c.Completion().RequestID != call.RequestID {
+			return eval.Result{Waiting: true}
+		}
 		completion := c.TakeCompletion()
 		c.ClearOperationState()
 		if completion.Diagnostic.Code != "" {
@@ -156,33 +199,50 @@ func invoke(c *eval.Context, value any, args []core.Value) eval.Result {
 			var decoded core.Value
 			valid := core.ParsePluginValueJSON(c.Run, []byte(completion.Value.Text), &decoded)
 			completion.Value.Free(c.Run)
-			if !valid { return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin returned an invalid value") }
+			if !valid {
+				return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin returned an invalid value")
+			}
 			return eval.Result{Value: decoded}
 		}
 		encoded := core.PluginValueJSON(c.Run, completion.Value)
 		completion.Value.Free(c.Run)
-		if encoded == nil { return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin returned an unsupported value") }
-		if len(encoded) > state.MaxResponseBytes { mem.FreeSlice(c.Run, encoded); return pluginFailure(c, "PLUGIN_LIMIT", "plugin result exceeds its byte limit") }
+		if encoded == nil {
+			return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin returned an unsupported value")
+		}
+		if len(encoded) > state.MaxResponseBytes {
+			mem.FreeSlice(c.Run, encoded)
+			return pluginFailure(c, "PLUGIN_LIMIT", "plugin result exceeds its byte limit")
+		}
 		var result core.Value
 		valid := core.ParsePluginValueJSON(c.Run, encoded, &result)
 		mem.FreeSlice(c.Run, encoded)
-		if !valid { return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin returned an invalid value") }
+		if !valid {
+			return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin returned an invalid value")
+		}
 		return eval.Result{Value: result}
 	}
 	requestBytes := 0
 	for i := range args {
 		encoded := core.PluginValueJSON(c.Run, args[i])
-		if encoded == nil { return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin arguments must be serializable Kame values") }
+		if encoded == nil {
+			return pluginFailure(c, "PLUGIN_PROTOCOL", "plugin arguments must be serializable Kame values")
+		}
 		requestBytes += len(encoded)
 		mem.FreeSlice(c.Run, encoded)
-		if requestBytes > state.MaxRequestBytes { return pluginFailure(c, "PLUGIN_LIMIT", "plugin request exceeds its byte limit") }
+		if requestBytes > state.MaxRequestBytes {
+			return pluginFailure(c, "PLUGIN_LIMIT", "plugin request exceeds its byte limit")
+		}
 	}
 	generation, attempt := int64(0), int64(0)
-	if c.Engine != nil { generation, attempt = c.Engine.Generation(), c.Engine.Attempt() }
+	if c.Engine != nil {
+		generation, attempt = c.Engine.Generation(), c.Engine.Attempt()
+	}
 	payload := host.PluginInvocationPayload(c.Run, state.Plugin, state.PluginVersion, state.Operation, state.OperationVersion, state.MaxRequestBytes, state.MaxResponseBytes, state.TimeoutMS, generation, attempt, args)
 	id := c.Submit(host.RequestPlugin, payload)
 	payload.Free(c.Run)
-	if id == 0 { return pluginFailure(c, "FEATURE_UNSUP", "plugin host request is unavailable") }
+	if id == 0 {
+		return pluginFailure(c, "FEATURE_UNSUP", "plugin host request is unavailable")
+	}
 	call := mem.Alloc[callState](c.Program.Alloc)
 	call.RequestID = id
 	c.SetOperationState(call, freeCallState)

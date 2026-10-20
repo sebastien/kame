@@ -199,7 +199,9 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 	status, removed, preserved, missing, wouldRemove := 0, 0, 0, 0, 0
 	contextUnverifiable := false
 	for i := range items {
-		if items[i].Reason == "context-unverifiable" { contextUnverifiable = true }
+		if items[i].Reason == "context-unverifiable" {
+			contextUnverifiable = true
+		}
 		if items[i].State == "error" {
 			status = 1
 		}
@@ -216,13 +218,17 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 			wouldRemove++
 		}
 	}
-	if !contextUnverifiable { blocker = program.CleanupBlocker{} }
+	if !contextUnverifiable {
+		blocker = program.CleanupBlocker{}
+	}
 	var position source.Position
 	for i := range session.Source.Files {
 		file := session.Source.Files[i]
 		if blocker.Location.Source != "" && file.Name == blocker.Location.Source {
 			text := file.Text
-			if file.Data != nil { text = string(file.Data) }
+			if file.Data != nil {
+				text = string(file.Data)
+			}
 			authored := source.Source{Text: text}
 			position = authored.Position(blocker.Location.Span.Start)
 			break
@@ -308,7 +314,9 @@ func performClean(directory string, store *ownership.Store, dry bool, jsonMode b
 			io.WriteString(errOut, "clean: context-unverifiable · "+blocker.Reason)
 			if blocker.Location.Source != "" {
 				io.WriteString(errOut, " · "+blocker.Location.Source)
-				if position.Line != 0 { fmt.Fprintf(errOut, ":%d:%d", position.Line, position.Column) }
+				if position.Line != 0 {
+					fmt.Fprintf(errOut, ":%d:%d", position.Line, position.Column)
+				}
 			}
 			io.WriteString(errOut, "\n")
 		}

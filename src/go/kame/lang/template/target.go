@@ -40,7 +40,9 @@ func (t *Target) Free() {
 		if t.Parts[i].Kind == TargetLiteral {
 			mem.FreeString(t.Alloc, t.Parts[i].Text)
 		}
-		if t.Parts[i].Regex != nil { t.Parts[i].Regex.Free(t.Alloc) }
+		if t.Parts[i].Regex != nil {
+			t.Parts[i].Regex.Free(t.Alloc)
+		}
 	}
 	slices.Free(t.Alloc, t.Parts)
 	slices.Free(t.Alloc, t.Diagnostics)
@@ -65,7 +67,9 @@ func ParseDecodedTarget(a mem.Allocator, name string, text string) *Target {
 func ParseMixedTarget(a mem.Allocator, name string, text string, patterns []source.Span) *Target {
 	escaped := slices.Make[bool](a, len(text))
 	for i := range patterns {
-		for pos := patterns[i].Start; pos < patterns[i].End; pos++ { escaped[pos] = true }
+		for pos := patterns[i].Start; pos < patterns[i].End; pos++ {
+			escaped[pos] = true
+		}
 	}
 	t := parseTarget(a, name, text, false, escaped)
 	slices.Free(a, escaped)
@@ -80,7 +84,11 @@ func ParseQuotedTarget(a mem.Allocator, name string, authored string, decoded st
 	var offsets []int
 	for pos := 1; pos < len(authored)-1; {
 		offsets = slices.Append(a, offsets, pos-1)
-		if authored[pos] == '\\' && pos+1 < len(authored)-1 { pos += 2 } else { pos++ }
+		if authored[pos] == '\\' && pos+1 < len(authored)-1 {
+			pos += 2
+		} else {
+			pos++
+		}
 	}
 	offsets = slices.Append(a, offsets, len(authored)-2)
 	for i := range t.Parts {
@@ -124,11 +132,16 @@ func parseTarget(a mem.Allocator, name string, text string, escapes bool, escape
 			pos++
 			for pos < len(text) {
 				if text[pos] == '\\' {
-					if pos+1 >= len(text) { pos = len(text); break }
+					if pos+1 >= len(text) {
+						pos = len(text)
+						break
+					}
 					pos += 2
 					continue
 				}
-				if text[pos] == '}' { break }
+				if text[pos] == '}' {
+					break
+				}
 				pos++
 			}
 			if pos == len(text) {
@@ -174,11 +187,16 @@ func parseTarget(a mem.Allocator, name string, text string, escapes bool, escape
 				pos++
 				for pos < len(text) {
 					if text[pos] == '\\' {
-						if pos+1 >= len(text) { pos = len(text); break }
+						if pos+1 >= len(text) {
+							pos = len(text)
+							break
+						}
 						pos += 2
 						continue
 					}
-					if text[pos] == '}' { break }
+					if text[pos] == '}' {
+						break
+					}
 					pos++
 				}
 				if pos == len(text) {
@@ -218,14 +236,18 @@ func parseTarget(a mem.Allocator, name string, text string, escapes bool, escape
 func appendRegexTargetPart(a mem.Allocator, target *Target, text string, groupStart int, regexStart int, groupEnd int, name string) {
 	parsed := expr.ParsePatternText(a, text[groupStart:groupEnd+1], groupStart)
 	if len(parsed.Diagnostics) != 0 || parsed.Pattern.Matchers != 1 || parsed.Pattern.References != 0 {
-		for i := range parsed.Diagnostics { target.Diagnostics = slices.Append(a, target.Diagnostics, parsed.Diagnostics[i]) }
-		if len(parsed.Diagnostics) == 0 { target.Diagnostics = slices.Append(a, target.Diagnostics, parseDiagnostic(groupStart, groupEnd+1, "invalid regular-expression capture group")) }
+		for i := range parsed.Diagnostics {
+			target.Diagnostics = slices.Append(a, target.Diagnostics, parsed.Diagnostics[i])
+		}
+		if len(parsed.Diagnostics) == 0 {
+			target.Diagnostics = slices.Append(a, target.Diagnostics, parseDiagnostic(groupStart, groupEnd+1, "invalid regular-expression capture group"))
+		}
 		parsed.Pattern.Free(a)
 		slices.Free(a, parsed.Diagnostics)
 		return
 	}
 	slices.Free(a, parsed.Diagnostics)
-	target.Parts = slices.Append(a, target.Parts, TargetPart{Kind: Capture, Name: name, Pattern: text[regexStart:groupEnd], Regex: parsed.Pattern, Span: source.Span{Start: groupStart, End: groupEnd+1}})
+	target.Parts = slices.Append(a, target.Parts, TargetPart{Kind: Capture, Name: name, Pattern: text[regexStart:groupEnd], Regex: parsed.Pattern, Span: source.Span{Start: groupStart, End: groupEnd + 1}})
 }
 
 func targetEscape(escapes bool, escaped []bool, pos int) bool {
@@ -233,7 +255,9 @@ func targetEscape(escapes bool, escaped []bool, pos int) bool {
 }
 
 func targetLiteral(a mem.Allocator, text string, offset int, escapes bool, escaped []bool) string {
-	if !escapes && len(escaped) == 0 { return owned(a, text) }
+	if !escapes && len(escaped) == 0 {
+		return owned(a, text)
+	}
 	var out strings.Builder
 	out = strings.NewBuilder(a)
 	for i := 0; i < len(text); i++ {
@@ -313,7 +337,9 @@ func (t *Target) MatchTargetBudget(a mem.Allocator, target string, budget *int) 
 }
 
 func (t *Target) match(a mem.Allocator, target string, part int, offset int, captures *[]CaptureValue, budget *int) (bool, bool) {
-	if !expr.ChargeMatchStep(budget) { return false, true }
+	if !expr.ChargeMatchStep(budget) {
+		return false, true
+	}
 	if part == len(t.Parts) {
 		return offset == len(target), false
 	}
@@ -335,7 +361,9 @@ func (t *Target) match(a mem.Allocator, target string, part int, offset int, cap
 		}
 	}
 	for end := offset + 1; end <= len(target); end++ {
-		if !expr.ChargeMatchStep(budget) { return false, true }
+		if !expr.ChargeMatchStep(budget) {
+			return false, true
+		}
 		value := target[offset:end]
 		if found && value != previous {
 			continue
@@ -343,17 +371,29 @@ func (t *Target) match(a mem.Allocator, target string, part int, offset int, cap
 		if p.Regex != nil {
 			result := p.Regex.MatchTextBudget(a, value, budget)
 			slices.Free(a, result.Captures)
-			if result.Limited { return false, true }
-			if !result.Matched { continue }
+			if result.Limited {
+				return false, true
+			}
+			if !result.Matched {
+				continue
+			}
 		} else {
 			matched, limited := expr.MatchGlobBudget(p.Pattern, value, budget)
-			if limited { return false, true }
-			if !matched { continue }
+			if limited {
+				return false, true
+			}
+			if !matched {
+				continue
+			}
 		}
 		*captures = slices.Append(a, *captures, CaptureValue{Name: p.Name, Text: value})
 		matched, limited := t.match(a, target, part+1, end, captures, budget)
-		if matched { return true, false }
-		if limited { return false, true }
+		if matched {
+			return true, false
+		}
+		if limited {
+			return false, true
+		}
 		*captures = (*captures)[:len(*captures)-1]
 	}
 	return false, false
@@ -374,7 +414,9 @@ func FormatTarget(a mem.Allocator, t *Target) string {
 		}
 		b.WriteByte('{')
 		if part.Name == "" {
-			if part.Regex != nil { b.WriteByte('~') }
+			if part.Regex != nil {
+				b.WriteByte('~')
+			}
 			b.WriteString(part.Pattern)
 			b.WriteByte('}')
 			continue

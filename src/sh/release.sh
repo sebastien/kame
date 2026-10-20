@@ -84,6 +84,11 @@ ensure_npm() {
 	local registry=https://registry.npmjs.org/ result published_version name attempt
 	npm_dir=$(mktemp -d "${TMPDIR:-/tmp}/kame-npm-release.XXXXXX")
 	trap 'rm -rf "$npm_dir"; if [ -n "${key_dir:-}" ]; then rm -rf "$key_dir"; fi' EXIT
+	if ! npm whoami --registry "$registry" >"$npm_dir/whoami.out" 2>"$npm_dir/whoami.err"; then
+		cat "$npm_dir/whoami.err" >&2
+		printf 'release: npm authentication is missing or expired; run npm login --registry %s and rerun src/sh/release.sh\n' "$registry" >&2
+		return 1
+	fi
 	if result=$(npm view "$package_name@$version" version --json --registry "$registry" 2>"$npm_dir/view.err"); then
 		published_version=$(printf '%s' "$result" | node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")))')
 		[ "$published_version" = "$version" ] || { printf 'release: npm returned an unexpected version\n' >&2; return 1; }
@@ -100,7 +105,7 @@ ensure_npm() {
 	# Use the immutable release, never possibly newer local dist/package files.
 	mkdir -p "$npm_dir/dist"
 	gh release download "$tag" --pattern kame.js --pattern kame.wasm --dir "$npm_dir/dist" "${repo_args[@]}" || return 1
-	for name in package.json README.md LICENSE.md; do
+	for name in package.json VERSION README.md LICENSE.md; do
 		gh api -H 'Accept: application/vnd.github.raw+json' "repos/$repo_slug/contents/$name?ref=$tag" >"$npm_dir/$name" || return 1
 	done
 	if ! node -e 'const p = require(process.argv[1]); process.exit(p.name === process.argv[2] && p.version === process.argv[3] ? 0 : 1)' "$npm_dir/package.json" "$package_name" "$version"; then

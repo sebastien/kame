@@ -56,6 +56,14 @@ Use `\@`/`\{` for literal openers; verbatim literals remain untouched.
 Single quotes are not string delimiters. Verbatim strings with matching runs
 of three or more double quotes preserve raw multiline content.
 
+Unquoted value paths also resolve authored `{name}` and `{_N}` groups as
+lexical string bindings: `(let [root "./src" path "widgets/button"]
+@{root}/js/{path}.js)` yields `./src/js/widgets/button.js`. This works with
+static roots too. Missing names report `REF_MISSING`; inserted values remain
+literal data. Matcher groups such as `{path:**}` still construct patterns.
+Rootless expansion patterns such as `{path}.js` retain pattern semantics;
+use `(pattern TEXT)` to explicitly construct a rooted expansion pattern.
+
 ## Calls, functions, and pipes
 
 ```kame
@@ -136,7 +144,9 @@ calls, not infix operators.
 ```
 
 Expression match patterns use `{*}`, `{**}`, `{name:*}`, or `{name:**}`;
-expansion patterns use `{name}` or `{_N}`. Pass a string or list of strings
+expansion patterns use `{name}` or `{_N}`. In rooted replacement paths these
+resolve capture-local bindings; `sub` and `resub` defer replacement evaluation
+until a match exists. Pass a string or list of strings
 directly as the third operand of pattern `sub`; no `map` is needed for a list.
 With two arguments it produces a callable; nonmatches remain unchanged.
 `replace` is a deprecated alias. `(match? PATTERN [TEXT])` tests a full-string

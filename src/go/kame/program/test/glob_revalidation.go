@@ -152,7 +152,9 @@ func TestGlobRevalidationSharedMembershipLocalAndForwarded(t *testing.T) {
 				}
 				for i := range roots {
 					polled := roots[i].PollRetained()
-					if !polled.Done || roots[i].Node.Interest == 0 { t.Error("settled glob root lost retained interest") }
+					if !polled.Done || roots[i].Node.Interest == 0 {
+						t.Error("settled glob root lost retained interest")
+					}
 					polled.Result.Free(a)
 				}
 			}
