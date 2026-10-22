@@ -16,6 +16,7 @@ type localDefinition struct {
 	Value         core.Value
 	Diagnostic    diagnostic.Diagnostic
 	Effects       []Effect
+	WritePaths    []string
 	EffectsHeld   bool
 	EffectAttempt int64
 }
@@ -41,7 +42,7 @@ func (p *Program) localValue(local *localDefinition, c *Context) Result {
 		return failure(c.Run, "DEP_CYCLE", local.Expression.Span, "cyclic branch definition")
 	}
 	local.Active = true
-	before := len(c.Effects)
+	before, beforePaths := len(c.Effects), len(c.WritePaths)
 	callerScope := c.Scope
 	r := p.evaluate(c.Engine, local.Scope, local.Expression, c)
 	c.Scope = callerScope
@@ -52,19 +53,17 @@ func (p *Program) localValue(local *localDefinition, c *Context) Result {
 			return failure(c.Run, "EXPR_INVALID", local.Expression.Span, "callable is invocation-scoped and cannot be stored as a definition; apply it immediately (for example, with map)")
 		}
 		local.Done, local.Value, local.Diagnostic = true, r.Value.Clone(local.Scope.Alloc), r.Diagnostic.Clone(local.Scope.Alloc)
+		for i := beforePaths; i < len(c.WritePaths); i++ {
+			local.WritePaths = slices.Append(local.Scope.Alloc, local.WritePaths, owned(local.Scope.Alloc, c.WritePaths[i]))
+		}
 		for i := before; i < len(c.Effects); i++ {
 			effect := c.Effects[i]
-			if p.DefinitionEffectSink != nil && r.Diagnostic.Code == "" {
-				p.DefinitionEffectSink(p.DefinitionEffectState, effect)
-			} else {
+			if p.DefinitionEffectSink == nil || r.Diagnostic.Code != "" || (effect.Kind != EffectOut && effect.Kind != EffectErr) {
 				local.Effects = slices.Append(local.Scope.Alloc, local.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(local.Scope.Alloc, effect.Data)})
 			}
 		}
 		if p.DefinitionEffectSink != nil && r.Diagnostic.Code == "" {
-			for i := before; i < len(c.Effects); i++ {
-				c.Effects[i].Free(c.Run)
-			}
-			c.Effects = c.Effects[:before]
+			p.streamControlOutput(c, before)
 			local.EffectsHeld = true
 		}
 		local.EffectAttempt = c.Engine.Attempt()
@@ -80,6 +79,9 @@ func replayLocalEffects(local *localDefinition, c *Context) {
 		effect := local.Effects[i]
 		c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)})
 	}
+	for i := range local.WritePaths {
+		c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, local.WritePaths[i]))
+	}
 	local.EffectAttempt = c.Engine.Attempt()
 }
 
@@ -90,6 +92,7 @@ type kashControlState struct {
 	Index        int
 	Value        core.Value
 	Effects      []Effect
+	WritePaths   []string
 	Subject      core.Value
 	SubjectReady bool
 }
@@ -100,23 +103,25 @@ func freeKashControlState(a mem.Allocator, value any) {
 	state.Value.Free(a)
 	state.Subject.Free(a)
 	FreeEffects(a, state.Effects)
+	for i := range state.WritePaths {
+		mem.FreeString(a, state.WritePaths[i])
+	}
+	slices.Free(a, state.WritePaths)
 	mem.Free(a, state)
 }
 
-func (p *Program) retainControlEffects(state *kashControlState, c *Context, scope *Scope, before int) {
+func (p *Program) retainControlEffects(state *kashControlState, c *Context, scope *Scope, before int, beforePaths int) {
+	for i := beforePaths; i < len(c.WritePaths); i++ {
+		state.WritePaths = slices.Append(p.Alloc, state.WritePaths, owned(p.Alloc, c.WritePaths[i]))
+	}
 	for i := before; i < len(c.Effects); i++ {
 		effect := c.Effects[i]
-		if p.DefinitionEffectSink != nil {
-			p.DefinitionEffectSink(p.DefinitionEffectState, effect)
-		} else {
+		if p.DefinitionEffectSink == nil || (effect.Kind != EffectOut && effect.Kind != EffectErr) {
 			state.Effects = slices.Append(p.Alloc, state.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(p.Alloc, effect.Data)})
 		}
 	}
 	if p.DefinitionEffectSink != nil {
-		for i := before; i < len(c.Effects); i++ {
-			c.Effects[i].Free(c.Run)
-		}
-		c.Effects = c.Effects[:before]
+		p.streamControlOutput(c, before)
 		for current := scope; current != nil; current = current.Parent {
 			for i := range current.Bindings {
 				b := current.Bindings[i]
@@ -125,6 +130,31 @@ func (p *Program) retainControlEffects(state *kashControlState, c *Context, scop
 				}
 			}
 		}
+	}
+}
+
+// Streaming sinks consume public output, never recipe-owned writes or yields.
+func (p *Program) streamControlOutput(c *Context, before int) {
+	kept := before
+	for i := before; i < len(c.Effects); i++ {
+		if c.Effects[i].Kind == EffectOut || c.Effects[i].Kind == EffectErr {
+			p.DefinitionEffectSink(p.DefinitionEffectState, c.Effects[i])
+			c.Effects[i].Free(c.Run)
+		} else {
+			c.Effects[kept] = c.Effects[i]
+			kept++
+		}
+	}
+	c.Effects = c.Effects[:kept]
+}
+
+func replayControlEffects(state *kashControlState, c *Context) {
+	for i := range state.Effects {
+		effect := state.Effects[i]
+		c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)})
+	}
+	for i := range state.WritePaths {
+		c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i]))
 	}
 }
 
@@ -143,12 +173,9 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		c.SetOperationState(state, freeKashControlState)
 	}
 	c.operationStart, c.operationEnd = previousStart, previousEnd
-	for i := range state.Effects {
-		effect := state.Effects[i]
-		c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(c.Run, effect.Data)})
-	}
+	replayControlEffects(state, c)
 	if e.Kind == expr.KashMatch && !state.SubjectReady {
-		before := len(c.Effects)
+		before, beforePaths := len(c.Effects), len(c.WritePaths)
 		r := p.evaluate(c.Engine, scope, e.Body[0], c)
 		if r.Waiting || r.Diagnostic.Code != "" {
 			return r
@@ -159,12 +186,12 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		}
 		state.Subject, state.SubjectReady = r.Value.Clone(p.Alloc), true
 		r.Free(c.Run)
-		p.retainControlEffects(state, c, scope, before)
+		p.retainControlEffects(state, c, scope, before, beforePaths)
 	}
 	for !state.Selected && state.Branch < len(e.Items) {
 		branch := e.Items[state.Branch]
 		selected := true
-		before := len(c.Effects)
+		before, beforePaths := len(c.Effects), len(c.WritePaths)
 		if len(branch.Items) != 0 {
 			r := p.evaluate(c.Engine, scope, branch.Items[0], c)
 			if r.Waiting || r.Diagnostic.Code != "" {
@@ -206,7 +233,7 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 			}
 			r.Free(c.Run)
 		}
-		p.retainControlEffects(state, c, scope, before)
+		p.retainControlEffects(state, c, scope, before, beforePaths)
 		if !selected {
 			state.Branch++
 			continue
@@ -215,43 +242,67 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		if state.Scope == nil {
 			state.Scope = newScope(p.Alloc, scope)
 		}
-		for i := range branch.Body {
-			d := branch.Body[i]
-			if d.Kind != expr.KashDefinition {
-				continue
-			}
-			for j := range state.Scope.Bindings {
-				if state.Scope.Bindings[j].Name == d.Text {
-					return failure(c.Run, "DEF_INVALID", d.Span, "branch definition conflicts with a match capture")
-				}
-			}
-			if d.Bool {
-				function := mem.Alloc[Function](p.Alloc)
-				function.Kind, function.Parameters, function.Expression, function.Scope = FunctionDefinition, d.Parameters, d.Items[0], state.Scope
-				state.Scope.setFunction(d.Text, function)
-			} else {
-				local := mem.Alloc[localDefinition](p.Alloc)
-				local.Expression, local.Scope = d.Items[0], state.Scope
-				state.Scope.appendBinding(binding{Kind: bindingLocalDefinition, Name: owned(p.Alloc, d.Text), Local: local})
-			}
+		initialized := p.kashBodyDefinitions(state.Scope, branch.Body, c)
+		if initialized.Diagnostic.Code != "" {
+			return initialized
 		}
 	}
 	if !state.Selected {
 		return Result{Value: core.Value{Kind: core.Nil}}
 	}
-	body := e.Items[state.Branch].Body
+	return p.kashBody(state, e.Items[state.Branch].Body, c)
+}
+
+func (p *Program) kashBodyDefinitions(scope *Scope, body []*expr.Expr, c *Context) Result {
+	for i := range body {
+		d := body[i]
+		if d.Kind != expr.KashDefinition {
+			continue
+		}
+		for j := range scope.Bindings {
+			if scope.Bindings[j].Name == d.Text {
+				return failure(c.Run, "DEF_INVALID", d.Span, "body definition conflicts with a local binding")
+			}
+		}
+		if d.Bool {
+			function := mem.Alloc[Function](p.Alloc)
+			function.Kind, function.Parameters, function.Expression, function.Scope = FunctionDefinition, d.Parameters, d.Items[0], scope
+			scope.setFunction(d.Text, function)
+		} else {
+			local := mem.Alloc[localDefinition](p.Alloc)
+			local.Expression, local.Scope = d.Items[0], scope
+			scope.appendBinding(binding{Kind: bindingLocalDefinition, Name: owned(p.Alloc, d.Text), Local: local})
+		}
+	}
+	return Result{}
+}
+
+func (p *Program) kashBody(state *kashControlState, body []*expr.Expr, c *Context) Result {
+	return p.kashBodyBudget(state, body, c, nil)
+}
+
+func (p *Program) kashBodyBudget(state *kashControlState, body []*expr.Expr, c *Context, budget *kashInvocation) Result {
 	for state.Index < len(body) {
 		statement := body[state.Index]
 		if statement.Kind == expr.KashDefinition || statement.Kind == expr.KashComment {
 			state.Index++
 			continue
 		}
-		before := len(c.Effects)
+		if budget != nil {
+			clock := p.kashBudget(budget, c)
+			if clock.Waiting || clock.Diagnostic.Code != "" {
+				return clock
+			}
+			if budget.TimeoutLimitMS > 0 {
+				c.TimeoutMS = budget.RemainingMS
+			}
+		}
+		before, beforePaths := len(c.Effects), len(c.WritePaths)
 		r := p.evaluate(c.Engine, state.Scope, statement, c)
 		if r.Waiting || r.Diagnostic.Code != "" {
 			return r
 		}
-		p.retainControlEffects(state, c, state.Scope, before)
+		p.retainControlEffects(state, c, state.Scope, before, beforePaths)
 		for i := range state.Scope.Bindings {
 			b := state.Scope.Bindings[i]
 			if b.Kind == bindingLocalDefinition && b.Local.Done {
@@ -260,11 +311,16 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 		}
 		state.Value.Free(p.Alloc)
 		state.Value = core.Value{}
-		if statement.Kind == expr.CommandGraph || statement.Kind == expr.KashIf || statement.Kind == expr.KashMatch {
+		if statement.Kind == expr.CommandGraph || expr.IsKashControl(statement.Kind) {
 			state.Value = r.Value.Clone(p.Alloc)
+		} else {
+			freeCallables(c.Run, &r.Value)
 		}
 		r.Free(c.Run)
 		state.Index++
+		if budget != nil {
+			budget.Index++
+		}
 	}
 	return Result{Value: state.Value.Clone(c.Run)}
 }

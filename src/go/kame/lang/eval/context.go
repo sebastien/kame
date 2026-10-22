@@ -303,6 +303,11 @@ func canonicalGrantName(a mem.Allocator, cwd string, name string) string {
 	return canonicalPath(a, cwd, name)
 }
 
+// CanonicalPath returns a Run-owned path using the evaluator's resource rules.
+func (c *Context) CanonicalPath(name string) string {
+	return canonicalPath(c.Run, c.Cwd, name)
+}
+
 func canonicalPath(a mem.Allocator, cwd string, name string) string {
 	if core.IsResourceURIName(name) {
 		parsed := core.ParseResourceURI(a, name)
@@ -432,6 +437,10 @@ func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool {
 	var capability Capability
 	switch kind {
+	case host.RequestPublishFile:
+		staged := host.PayloadText(payload, "staged")
+		destination := host.PayloadText(payload, "destination")
+		return staged != "" && destination != "" && c.Allows(Read, staged) && c.Allows(Write, staged) && c.Allows(Write, destination)
 	case host.RequestReadFile:
 		capability = Read
 	case host.RequestWriteFile:

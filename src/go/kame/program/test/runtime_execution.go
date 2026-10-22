@@ -128,6 +128,9 @@ func (h *fakeRemoteHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry,
 func (h *fakeRemoteHost) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error {
 	return h.base.WriteFileAtomic(name, data, perm, durable)
 }
+func (h *fakeRemoteHost) PublishFile(staged string, destination string) host.PublishResult {
+	return h.base.PublishFile(staged, destination)
+}
 func (h *fakeRemoteHost) Mkdir(name string, perm uint32) error { return h.base.Mkdir(name, perm) }
 func (h *fakeRemoteHost) Remove(name string) error             { return h.base.Remove(name) }
 func (h *fakeRemoteHost) LockCache(path string, stripe int) host.CacheLockStatus {
@@ -164,6 +167,9 @@ func (h *countingReadDirHost) ReadFile(a mem.Allocator, name string) ([]byte, er
 }
 func (h *countingReadDirHost) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error {
 	return h.memory.WriteFileAtomic(name, data, perm, durable)
+}
+func (h *countingReadDirHost) PublishFile(staged string, destination string) host.PublishResult {
+	return h.memory.PublishFile(staged, destination)
 }
 func (h *countingReadDirHost) Mkdir(name string, perm uint32) error {
 	return h.memory.Mkdir(name, perm)

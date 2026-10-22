@@ -52,7 +52,7 @@ func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
 		for j := range branch.Body {
 			statement := branch.Body[j]
 			b.WriteByte('\n')
-			if statement.Kind == KashIf || statement.Kind == KashMatch {
+			if IsKashControl(statement.Kind) {
 				writeKashControl(b, statement, indent, level+1)
 				continue
 			}

@@ -189,6 +189,7 @@ TEST_WASM =
     ./tests/T042-10-kash-failure-policy.sh
     ./tests/T042-11-kash-each.sh
     ./tests/T044-01-runtime-kame-rule-bodies.sh
+    ./tests/T046-01-kash-scripting.sh
     ./tests/T043-01-lang-finalization.sh
     ./tests/T010-01-wasm-loader.sh
     ./tests/T010-02-wasm-abi.sh
@@ -527,7 +528,7 @@ wasm-check : wasm wasm-portable ./tools/native/test-wasm-header.c ./tools/wasm/c
 	node ./tools/wasm/check-imports.mjs ./build/wasm/kame.wasm
 	node ./tools/wasm/test-abi.mjs ./build/wasm/kame.wasm
 
-# Kash has no loop. run! streams each script and fails the recipe on the first nonzero status.
+# map/run! streams each script and fails the recipe on the first nonzero status.
 test-wasm : wasm-check @{TEST_WASM}
 	(map ([script] (run! script)) TEST_WASM)
 

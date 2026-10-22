@@ -8,10 +8,24 @@ import (
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
+	"solod.dev/so/path"
+	"solod.dev/so/slices"
 	"solod.dev/so/time"
 )
 
-func main() { posix.InstallSignals(); os.Exit(Run(os.Args[1:], os.Stdin, os.Stdout, os.Stderr)) }
+func main() {
+	posix.InstallSignals()
+	args := os.Args[1:]
+	kash := len(os.Args) != 0 && path.Base(os.Args[0]) == "kash"
+	if kash {
+		args = cli.KashInterpreterArgs(args)
+	}
+	status := Run(args, os.Stdin, os.Stdout, os.Stderr)
+	if kash {
+		slices.Free(mem.System, args)
+	}
+	os.Exit(status)
+}
 
 // Run executes a command with explicit streams so the command behavior remains
 // independently testable from process startup.

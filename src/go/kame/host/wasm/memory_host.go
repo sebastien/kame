@@ -204,6 +204,11 @@ func (h *MemoryHost) WriteFileAtomic(name string, data []byte, perm uint32, dura
 	return nil
 }
 
+func (h *MemoryHost) PublishFile(staged string, destination string) host.PublishResult {
+	_, _, _ = h, staged, destination
+	return host.PublishResult{Code: "FS_UNSUPPORTED"}
+}
+
 func (h *MemoryHost) Mkdir(name string, perm uint32) error {
 	_ = perm
 	if h == nil {

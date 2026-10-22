@@ -173,6 +173,10 @@ func (s *Scope) Free() {
 			local.Value.Free(s.Alloc)
 			local.Diagnostic.Free(s.Alloc)
 			FreeEffects(s.Alloc, local.Effects)
+			for j := range local.WritePaths {
+				mem.FreeString(s.Alloc, local.WritePaths[j])
+			}
+			slices.Free(s.Alloc, local.WritePaths)
 			mem.Free(s.Alloc, local)
 		}
 		if s.Bindings[i].Kind == bindingFunction && s.Bindings[i].Function.Kind == FunctionDefinition {

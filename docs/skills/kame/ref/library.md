@@ -103,6 +103,7 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 | `split` | `(split SEPARATOR TEXT)` | Splits text on a nonempty literal separator, preserving empty fields; empty text produces `[""]`. |
 | `strip` | `(strip TEXT)` | Removes leading and trailing Unicode whitespace. |
 | `sub` | `(sub FROM TO TEXT)` | Replaces all literal `FROM` occurrences. |
+| `sub-token` | `(sub-token FROM TO TEXT)` | Replaces literal occurrences outside Unicode letter/number/underscore/hyphen boundaries. Search must be nonempty; replacement is literal and not rescanned. |
 | `sub` | `(sub MATCH-PATTERN EXPANSION [TEXT])` | Pattern substitution. Without `TEXT`, returns a one-argument callable suitable for `map`. Nonmatches remain unchanged. |
 | `replace` | Same signatures as `sub` | Deprecated alias with identical behavior; no runtime warning. |
 | `match?` | `(match? MATCH-PATTERN [TEXT])` | Anchored boolean match; without `TEXT`, returns a unary predicate suitable for `filter`/`filter-out`. Subjects must be strings. |
@@ -141,6 +142,9 @@ Recursive captures backtrack across segments. Two-argument replacement creates
 an invocation-owned callable, not printable/serializable definition data.
 Regex grammar and matching budgets are defined in
 [Pattern extensions](../../../spec/029-pattern-extensions.md).
+That grammar rejects lookaround and treats `\w` as literal `w`, not a word class.
+`sub-token` supplies global literal replacement with Python-style Unicode
+`[\w-]` boundaries using shared Unicode 15.0.0 tables; it is not a CSS parser.
 Use `match?`, not substitution, as a filtering predicate: unchanged strings are
 truthy. `resub` retains its separate nil-on-nonmatch contract. See
 [Pattern predicates and substitution](../../../spec/041-pattern-predicates-and-substitution.md).
@@ -180,6 +184,7 @@ environment values can invalidate a consumer.
 | `files` | `(files PATTERN-OR-PATH-LIST...)` | read | `(wildcard :+files ...)`. Rejects kind flags. |
 | `dirs` | `(dirs PATTERN-OR-PATH-LIST...)` | read | `(wildcard :+dir ...)`. Rejects kind flags. |
 | `write!` | `(write! PATH VALUE)` | write | Bytes write raw; other supported values use the effect-output encoding described below, not scalar-only `str`. Writes immediately in expression execution; defers an atomic write in direct Kash recipes. Invalid during planning or read-only rule computation/expansion. |
+| `publish!` | `(publish! STAGED DESTINATION)` | read + write | Immediately publishes a completed staged regular file without replacing any existing destination entry. Requires read/write on staging and write on destination. Returns `[published: :true stagedRemoved: :true]`. |
 | `env` | `(env NAME)` | env | Environment value. |
 | `sh!` | `(sh! [OPTIONS] COMMAND)` | run | Collected status/stdout/stderr record. Allowed in explicit evaluation and direct Kash. Invalid during planning, shell-template expansion, and value-producing Kame bodies, including through a reached lazy definition. |
 | `shell-template!` | `(shell-template! FRAGMENTS VALUES)` | run | Collected shell call with POSIX-quoted dynamic strings; FRAGMENTS has one more string than VALUES. Same phase policy as sh!. |
@@ -202,6 +207,42 @@ Standalone `kame do run --lang expr` denies these capabilities by default; grant
 needed roots, names, or process access with its `--allow-*` options.
 `run!`, `pipe!`, and `await` are process special forms, not registry operations;
 see [Kash](./kash.md).
+
+`publish!` supports local files on native POSIX and Node hosts. Memory resources,
+Windows, cross-filesystem publication and unavailable no-replace primitives fail
+with `FS_UNSUPPORTED`; existing entries, including dangling links, give
+`FS_EXISTS`. Staging must be caller-owned, stable and fully written, with trusted
+parent directories. Publication is atomic visibility, not crash durability, input
+race validation, or a multi-file transaction. `FS_PUBLISHED` means publication
+already occurred but subsequent work failed; its diagnostic cause records
+`published` and `stagedRemoved`. Never blindly retry or remove the destination.
+It is not deferred by recipe output handling and is suppressed during dry-run.
+In recipes, create staging with an external command: `write!` to staging may be
+deferred until successful recipe completion and is not a staging flush primitive.
+
+## Script option parsing
+
+`(parse-args SCHEMA ARGV)` is pure and takes an explicit list of strings. Each
+schema field contains `names`, `arity` (`:flag`, `:one`, `:many`), and `repeat`
+(`:append`, `:replace`, `:reject`; flags cannot append):
+
+```kash
+schema = [fonts: [names: ["-f" "--fonts"] arity: :many repeat: :append]]
+parsed = (parse-args schema args)
+fonts = parsed.options.fonts
+```
+
+The result has `options` and `operands`. All options are present; flags default to
+false, value options to empty lists. Value options always return lists. Repeated
+append preserves order. `:many` consumes one or more following non-option tokens
+until the next option or `--`. Long `--name=value` syntax supplies one value,
+including an empty or dash-prefixed value. Short attached/bundled options are not
+supported. Unknown dash-prefixed tokens are errors, not paths; use `./-path` or
+an attached long value. A lone `-` is data. After `--`, every token is an operand.
+Use `--` to separate operands from a preceding multi-value option. Missing values,
+unknown options, and rejected repeats give `ARGS_INVALID` with a zero-based index
+without disclosing argv values. Invalid schemas give `EXPR_INVALID`.
+See [Scripting and publication](../../../spec/046-kash-scripting-and-publication.md).
 
 ### Wildcard selection
 

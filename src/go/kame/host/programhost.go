@@ -35,6 +35,7 @@ type ProgramHost interface {
 	ReadFile(a mem.Allocator, name string) ([]byte, error)
 	ReadDir(a mem.Allocator, name string) ([]DirEntry, error)
 	WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error
+	PublishFile(staged string, destination string) PublishResult
 	Mkdir(name string, perm uint32) error
 	Remove(name string) error
 	LockCache(path string, stripe int) CacheLockStatus

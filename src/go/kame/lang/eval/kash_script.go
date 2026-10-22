@@ -361,7 +361,7 @@ func (p *Program) kashBudget(state *kashInvocation, c *Context) Result {
 		state.StartedAt, state.ClockStarted = now, true
 	}
 	elapsed := (now - state.StartedAt) / 1000000
-	if elapsed >= state.TimeoutLimitMS {
+	if state.TimeoutLimitMS > 0 && elapsed >= state.TimeoutLimitMS {
 		return failure(c.Run, "RECIPE_TIMEOUT", c.Span, "recipe timed out")
 	}
 	state.RemainingMS, state.TimedIndex = state.TimeoutLimitMS-elapsed, state.Index

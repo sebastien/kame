@@ -7,7 +7,7 @@
 // is parsed by the shared portable `cli` package inside the module via
 // kame_wasm_cli, so the native CLI and this wrapper accept the same words. This
 // file supplies only host capabilities and stream/exit policy.
-import { lstat, mkdir, mkdtemp, open, readFile, readlink, rename, rm, stat } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, open, readFile, readlink, rename, rm, stat, unlink } from 'node:fs/promises';
 import { accessSync, closeSync, constants as fsConstants, createWriteStream, existsSync, fstatSync, ftruncateSync, lstatSync, mkdtempSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, watch as fsWatch, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, join, normalize, resolve } from 'node:path';
@@ -1521,8 +1521,18 @@ class Module {
 
   async dispatch(instance, request, kind, payload, data, context, key, record, rawRequest) {
     const grants = context.grants;
+    if (kind === 39) {
+      if (!grants.read || !grants.write) return this.deny(instance, request);
+      let paths;
+      try { paths = JSON.parse(payload); } catch { return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid publication paths'); }
+      if (typeof paths?.staged !== 'string' || typeof paths?.destination !== 'string') return this.completeFailure(instance, request, 'HOST_FAIL', 'invalid publication paths');
+      for (const [capability, names] of [['read', [paths.staged]], ['write', [paths.staged, paths.destination]]]) {
+        const roots = context[`${capability}Roots`];
+        if (roots != null && names.some(name => !pathGranted(resolve(context.cwd ?? process.cwd(), filesystemPath(name)), roots))) return this.deny(instance, request, capability);
+      }
+    }
     if (kind === 26) return this.pluginCallback(instance, request, payload, context);
-    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35, 36, 37, 38].includes(kind)) {
+    if (context.hostRequest && [1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 18, 32, 33, 34, 35, 36, 37, 38, 39].includes(kind)) {
       const response = await this.customHostRequest(instance, request, kind, payload, data, context, key, record);
       if (response !== undefined) return response;
     }
@@ -1649,6 +1659,32 @@ class Module {
       if (!grants.read) return this.deny(instance, request, 'read');
       try { return this.completeJSON(instance, request, resourceWildcard(payload)); }
       catch { return this.completeFailure(instance, request, 'FS_ERR', 'cannot traverse wildcard path'); }
+    }
+    if (kind === 39) {
+      if (!grants.read || !grants.write) return this.deny(instance, request);
+      const { staged, destination } = JSON.parse(payload);
+      const result = { code: '', published: false, stagedRemoved: false };
+      if (process.platform === 'win32' || [staged, destination].some(name => name.startsWith('mem://'))) {
+        result.code = 'FS_UNSUPPORTED';
+      } else {
+        try {
+          const source = filesystemPath(staged), target = filesystemPath(destination);
+          if (!(await lstat(source)).isFile()) result.code = 'FS_ERR';
+          else {
+            // Do not race cancellation against this commit: always reconcile the
+            // link/unlink outcome before completing the request.
+            await link(source, target);
+            result.published = true;
+            await unlink(source);
+            result.stagedRemoved = true;
+          }
+        } catch (error) {
+          result.code = result.published ? 'FS_PUBLISHED'
+            : ['EEXIST', 'ENOTEMPTY'].includes(error.code) ? 'FS_EXISTS'
+              : ['EXDEV', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP'].includes(error.code) ? 'FS_UNSUPPORTED' : 'FS_ERR';
+        }
+      }
+      return this.completeJSON(instance, request, result);
     }
     if (kind === 2) {
       if (!grants.write) return this.deny(instance, request);
@@ -1925,7 +1961,7 @@ class Module {
 
   async customHostRequest(instance, request, kind, payload, data, context, key, record) {
     const capability = kind === 1 || kind === 5 || kind === 6 || kind === 7 || kind === 20 || kind === 27 || kind === 30 || kind === 31 ? 'read'
-      : kind === 2 ? 'write'
+      : kind === 2 || kind === 39 ? 'write'
         : kind === 4 ? 'env'
           : kind === 3 || kind === 13 || kind === 14 || kind === 15 || kind === 16 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36 || kind === 37 || kind === 38 ? 'run' : null;
     if (capability && !context.grants[capability]) return this.deny(instance, request, capability);
@@ -1973,13 +2009,13 @@ class Module {
       // With an armed finalizer, settling the callback is its acknowledgement
       // that host work has stopped. Racing abort would let cleanup touch a
       // resource while an abandoned callback still uses it.
-      result = await (context.signal && !context.finalizationActive ? Promise.race([work, aborted]) : work);
+      result = await (context.signal && !context.finalizationActive && kind !== 39 ? Promise.race([work, aborted]) : work);
     } catch (error) {
       return this.completeFailure(instance, request, error.code ?? 'HOST_FAIL', error.message ?? 'host request failed');
     } finally {
       if (abortListener) context.signal.removeEventListener('abort', abortListener);
     }
-    if (context.signal?.aborted) return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'invocation cancelled');
+    if (context.signal?.aborted && kind !== 39) return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'invocation cancelled');
     if (!result || typeof result !== 'object') return this.completeFailure(instance, request, 'HOST_FAIL', 'host callback returned no completion');
     if (result.type === 'bytes' && (result.value instanceof Uint8Array || Buffer.isBuffer(result.value))) {
       const bytes = this.write(result.value);

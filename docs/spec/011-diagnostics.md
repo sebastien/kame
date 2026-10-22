@@ -142,6 +142,7 @@ meaning by themselves.
 | `TOOL_MISSING` | error | Referenced tool was not found or is not executable |
 | `EXPR_INVALID` | error | Invalid expression value, type, or arity |
 | `JSON_INVALID` | error | Malformed JSON input |
+| `ARGS_INVALID` | error | Script argv violates a `parse-args` schema; identifies a zero-based argument index without disclosing argv values |
 | `USER_ERROR` | error | Explicit user failure from `fail!` |
 | `EVAL_DEPTH` | error | Recursive evaluation exceeds the 32-expression stack-depth limit |
 | `DEF_INVALID` | error | Invalid definition or binding form |
@@ -173,6 +174,9 @@ meaning by themselves.
 | `FINALIZE_TIMEOUT` | error | A finalizer exhausted its cleanup budget or could not start before the shared unwind deadline |
 | `HOST_FAIL` | error | Host request, spawn, pipe, wait, or signal failure |
 | `FS_ERR` | error | Filesystem read, write, stat, or glob failure |
+| `FS_EXISTS` | error | No-clobber publication found an existing destination entry; staging is preserved |
+| `FS_UNSUPPORTED` | error | The resource, host, or filesystem cannot provide the required safe publication primitive |
+| `FS_PUBLISHED` | error | Publication already committed but subsequent work failed; `cause.published` and `cause.stagedRemoved` preserve the outcome, not permission to retry or roll back |
 | `RES_INVALID` | error | Invalid resource identity, URI or protocol use |
 | `PLUGIN_CONFIG` | error | Invalid or conflicting plugin declarations |
 | `PLUGIN_PROTOCOL` | error | Invalid plugin request/response shape, identity or value |

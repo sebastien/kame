@@ -51,6 +51,9 @@ type Cause struct {
 	StdoutLimit       int
 	StderrLimit       int
 	OutputWasStreamed bool
+	HasPublication    bool
+	Published         bool
+	StagedRemoved     bool
 }
 
 type Diagnostic struct {

@@ -466,6 +466,40 @@ scoped to the selected arm.
 - `&&`, `||`, shell subshell grouping, and single-quoted shell strings are not
   supported. Use Kash control statements or Kame special forms.
 
+### List and conditional loops
+
+```kash
+for source in fonts
+	converter $source
+	verifier $source
+
+while probe --pending
+	worker --one
+```
+
+`for NAME in EXPRESSION` evaluates one list once, visits typed items in order,
+and returns nil without collecting results. Each iteration has a fresh lexical
+scope; local lazy definitions and the item binding do not escape. Empty lists do
+nothing. Redeclaring the item in its body is invalid. No assignment, `break`,
+`continue`, destructuring, loop `else`, or implicit parallelism is provided.
+
+`while` accepts the same command/expression conditions as `if` and tests before
+each iteration. Each condition visit invokes fresh work, but looking up an outer
+lazy definition still returns its memoized value. Re-evaluation does not imply
+fresh filesystem observations; use a command condition for live external probes.
+Even pure loops yield to the host for cancellation and deadline checks.
+
+Failures stop iteration under the ordinary recovery rules. Suspended bodies
+resume without repeating completed effects. Dry-run does not execute loop
+headers or bodies to discover iteration counts. `defer` remains invocation-owned
+and runs LIFO, not at the end of each iteration; call a Kash callable or use
+`finally!` for per-item cleanup. Explicit `&` can overlap later iterations and is
+still joined by the invocation. `map` remains supported for value-producing or
+callback-based iteration; streaming `|(each)` is a separate stdin-record feature.
+
+`for` and `while` are reserved statement headers. Use an explicit executable path
+or computed command head to run external programs with those names.
+
 ### Async ownership
 
 - Terminal `&` starts the entire graph asynchronously; normal session completion

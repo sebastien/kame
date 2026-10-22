@@ -132,6 +132,13 @@ Return exactly one completion: `{ type: 'bytes', value: Uint8Array }`,
 `{ type: 'text', value: string }`, `{ type: 'json', value: JSONValue }`,
 `{ type: 'nil' }`, or `{ type: 'failure', code: string, message: string }`.
 The expected completion depends on request kind; see the [WASM ABI](spec/010-wasm.md).
+Publication uses kind 39 with a JSON `{staged,destination}` payload. It requires
+read/write on staging and write on the destination, before invoking a callback.
+Return JSON `{code,published,stagedRemoved}`; an empty code means full success.
+Use `FS_EXISTS` for conflicts, `FS_UNSUPPORTED` when no safe primitive exists,
+and `FS_PUBLISHED` when publication committed but subsequent work failed. Never
+substitute a replacing rename or copy. Publication callbacks must settle the
+commit outcome even when cancelled; the driver does not race them against abort.
 Denied requests do not reach the callback. Throws reject the request; late results
 after cancellation are ignored. Without an active finalizer, cancellation can
 abandon an unresolved callback. With an armed `finally!`, cleanup and disposal wait

@@ -374,6 +374,12 @@ func encodeCause(e *json.Encoder, cause diagnostic.Cause) {
 		e.Str("outputWasStreamed")
 		e.Bool(true)
 	}
+	if cause.HasPublication {
+		e.Str("published")
+		e.Bool(cause.Published)
+		e.Str("stagedRemoved")
+		e.Bool(cause.StagedRemoved)
+	}
 	if cause.StdoutLimit > 0 || cause.StdoutTruncated {
 		e.Str("stdoutTruncated")
 		e.Bool(cause.StdoutTruncated)

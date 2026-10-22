@@ -81,7 +81,7 @@ func TestEveryStandardOperationDeclaresAContract(t *testing.T) {
 	if !operations.Register(r) {
 		t.Error("standard operation registration failed")
 	}
-	if len(r.Items) != 97 {
+	if len(r.Items) != 100 {
 		t.Error("standard operation count changed")
 	}
 	for i := range r.Items {

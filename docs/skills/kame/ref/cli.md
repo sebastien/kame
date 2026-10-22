@@ -39,6 +39,10 @@ subsequent fragments until changed, not earlier ones. `expr` accepts exactly
 one expression. Parse/format modes `template`, `rule`, and `script` are not
 execution language names.
 
+Invoking the native executable through a symlink named `kash` selects Kash,
+allows a source without a `.kash` suffix, and forwards arguments after the source
+to `args`. With no source, it reads Kash from stdin.
+
 Named entries follow the associated `km`/`kmk` source. Use `--entry NAME` if an
 entry resembles a source filename. Kash and expr accept no named entries.
 Arguments after `--` are program arguments; in discovered build mode they are

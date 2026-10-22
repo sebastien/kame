@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v18"
+const version = "v19-unicode15"
 
 // Register describes every standard operation explicitly. Categories describe
 // the operation itself; callable/template effects still propagate dynamically.
@@ -10,7 +10,7 @@ func Register(r *eval.Registry) bool {
 	return pure(r, "not", opNot, 1, 1) && pure(r, "bool", opBool, 1, 1) && pure(r, "blank?", opBlank, 1, 1) &&
 		contract(r, "fail!", opFail, 1, 1, eval.ControlOperation, eval.AllPhases, eval.RaisesFailure) &&
 		r.Add(eval.Operation{Name: "finally!", Call: opFinally, MinArity: 2, MaxArity: 3, Version: version, Category: eval.ControlOperation, Phases: eval.EvaluationAllowed, Behavior: eval.RaisesFailure | eval.CallsCallable | eval.ReadsClock, ScopedFinalizer: true}) &&
-		pure(r, "parse-json", opParseJSON, 1, 1) && pure(r, "str", opStr, 0, -1) && pure(r, "json", opJSON, 1, 1) && pure(r, "count", opCount, 1, 1) &&
+		pure(r, "parse-json", opParseJSON, 1, 1) && pure(r, "parse-args", opParseArgs, 2, 2) && pure(r, "sub-token", opSubToken, 3, 3) && pure(r, "str", opStr, 0, -1) && pure(r, "json", opJSON, 1, 1) && pure(r, "count", opCount, 1, 1) &&
 		pure(r, "eq", opEq, 2, 2) && pure(r, "is", opIs, 2, 2) && pure(r, "has?", opHas, 2, 2) &&
 		pure(r, "ne", opNe, 2, 2) && pure(r, "lt", opLt, 2, 2) &&
 		pure(r, "gt", opGt, 2, 2) && pure(r, "gte", opGte, 2, 2) && pure(r, "lte", opLte, 2, 2) &&
@@ -45,7 +45,7 @@ func Register(r *eval.Registry) bool {
 		observation(r, "stat", opStat, 1, 1, eval.Read) && observation(r, "lstat", opLstat, 1, 1, eval.Read) &&
 		observation(r, "readlink", opReadlink, 1, 1, eval.Read) && observation(r, "wildcard", opWildcard, 1, -1, eval.Read) &&
 		observation(r, "files", opFiles, 1, -1, eval.Read) && observation(r, "dirs", opDirs, 1, -1, eval.Read) &&
-		registerWrite(r) && observation(r, "env", opEnv, 1, 1, eval.Env) &&
+		registerWrite(r) && r.Add(eval.Operation{Name: "publish!", Call: opPublish, MinArity: 2, MaxArity: 2, Capabilities: []eval.Capability{eval.Read, eval.Write}, Category: eval.OutputOperation, Phases: eval.EvaluationAllowed, Behavior: eval.PublishesFile, Version: version}) && observation(r, "env", opEnv, 1, 1, eval.Env) &&
 		process(r, "sh!", opSh, 1, 2) &&
 		process(r, "shell-template!", opShellTemplate, 2, 2) &&
 		contract(r, "out!", opOut, 1, -1, eval.OutputOperation, eval.EvaluationAllowed, eval.EmitsOutput) &&

@@ -17,3 +17,4 @@ _Static_assert(KAME_WASM_REQUEST_TOOL_CONTENT == 28, "tool-content request");
 _Static_assert(KAME_WASM_REQUEST_OUTPUT_CONTENT == 29, "output-content request");
 _Static_assert(KAME_WASM_REQUEST_LSTAT == 30, "lstat request");
 _Static_assert(KAME_WASM_REQUEST_READLINK == 31, "readlink request");
+_Static_assert(KAME_WASM_REQUEST_PUBLISH_FILE == 39, "no-clobber publication request");

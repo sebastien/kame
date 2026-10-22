@@ -7,6 +7,10 @@ directly, parenthesized Kame expressions replace `@(...)` boundaries, and every
 reached command head resolves as a tracked tool. Its action names and syntax
 take precedence over action spellings in the examples below.
 
+`046-kash-scripting-and-publication.md` adds structured `for`/`while` blocks,
+pure script option parsing and token substitution, and host-backed no-clobber
+file publication, with explicit scope, replay, and filesystem safety contracts.
+
 Kash is Kame's command and process language. It makes command-oriented programs
 read like shell scripts while retaining Kame's typed values, lazy evaluation, and
 explicit dependency model.

@@ -327,6 +327,32 @@ static bool km_windows_job_terminate(int64_t job, int sig) { (void)job; (void)si
 static void km_windows_job_close(int64_t *job) { if (job) *job = 0; }
 #endif
 
+// Publication assumes caller-owned staging and trusted parent directories.
+// link() is the no-replace commit; never retry a post-commit unlink failure.
+int km_file_publish(so_String staged, so_String destination) {
+#if defined(__COSMOPOLITAN__)
+    if (IsWindows()) return 3;
+#endif
+    char *source = malloc((size_t)staged.len + 1);
+    char *target = malloc((size_t)destination.len + 1);
+    if (!source || !target) { free(source); free(target); return 4; }
+    memcpy(source, staged.ptr, (size_t)staged.len); source[staged.len] = 0;
+    memcpy(target, destination.ptr, (size_t)destination.len); target[destination.len] = 0;
+    int result = 4;
+    struct stat info;
+    if (memchr(source, 0, (size_t)staged.len) || memchr(target, 0, (size_t)destination.len)) goto done;
+    if (lstat(source, &info) || !S_ISREG(info.st_mode)) goto done;
+    if (link(source, target)) {
+        if (errno == EEXIST || errno == ENOTEMPTY) result = 1;
+        else if (errno == EXDEV || errno == ENOSYS || errno == EOPNOTSUPP) result = 3;
+        goto done;
+    }
+    result = unlink(source) ? 2 : 0;
+done:
+    free(source); free(target);
+    return result;
+}
+
 static volatile sig_atomic_t km_cli_signal = 0;
 static volatile sig_atomic_t km_cli_signal_count = 0;
 static volatile sig_atomic_t km_cli_first_signal_taken = 0;

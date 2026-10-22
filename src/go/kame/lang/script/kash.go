@@ -116,7 +116,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			s.error(start, wordEnd, "orphan Kash case keyword")
 			break
 		}
-		if word == "if" || word == "match" {
+		if word == "if" || word == "match" || word == "for" || word == "while" {
 			lineStart := start
 			for lineStart > 0 && text[lineStart-1] != '\n' {
 				lineStart--
@@ -129,8 +129,10 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			var e *expr.Expr
 			if word == "match" {
 				e = p.matchBlock(level, start, wordEnd)
+			} else if word == "for" {
+				e = p.forBlock(level, start, wordEnd)
 			} else {
-				e = p.ifBlock(level, start)
+				e = p.conditionalBlock(level, start)
 			}
 			expr.SetCommandChannels(s.Alloc, e, p.Channels)
 			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
@@ -272,7 +274,7 @@ func (p *kashParser) indentation(pos int) int {
 	return (end - start) / p.Unit
 }
 
-func (p *kashParser) ifBlock(level int, start int) *expr.Expr {
+func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
 	s, text := p.Script, p.Script.Source.Text
 	e := mem.Alloc[expr.Expr](s.Alloc)
 	e.Kind, e.Span.Start = expr.KashIf, start
@@ -284,6 +286,9 @@ func (p *kashParser) ifBlock(level int, start int) *expr.Expr {
 			wordEnd++
 		}
 		keyword := text[branchStart:wordEnd]
+		if keyword == "while" {
+			e.Kind = expr.KashWhile
+		}
 		if seenElse {
 			s.error(branchStart, wordEnd, "branch after else")
 			break
@@ -344,6 +349,9 @@ func (p *kashParser) ifBlock(level int, start int) *expr.Expr {
 		p.Pos = nextLine(text, end)
 		p.branchBody(branch, level+1)
 		branch.Span.End, e.Span.End = p.Pos, p.Pos
+		if e.Kind == expr.KashWhile {
+			break
+		}
 		if p.Pos == len(text) || len(s.Diagnostics) != 0 || p.indentation(p.Pos) != level {
 			break
 		}
@@ -356,6 +364,71 @@ func (p *kashParser) ifBlock(level int, start int) *expr.Expr {
 			break
 		}
 	}
+	return e
+}
+
+func (p *kashParser) forBlock(level int, start int, wordEnd int) *expr.Expr {
+	s, text := p.Script, p.Script.Source.Text
+	e := mem.Alloc[expr.Expr](s.Alloc)
+	e.Kind, e.Span.Start = expr.KashFor, start
+	branch := mem.Alloc[expr.Expr](s.Alloc)
+	branch.Kind, branch.Span.Start = expr.KashBranch, start
+	e.Items = slices.Append(s.Alloc, e.Items, branch)
+	pos := wordEnd
+	for pos < len(text) && space(text[pos]) {
+		pos++
+	}
+	nameStart := pos
+	for pos < len(text) && !space(text[pos]) && text[pos] != '\n' {
+		pos++
+	}
+	name := text[nameStart:pos]
+	if !definition.ValidName(name) || name == "env" {
+		s.error(nameStart, pos, "expected non-reserved loop binding name")
+		return e
+	}
+	e.Text = name
+	for pos < len(text) && space(text[pos]) {
+		pos++
+	}
+	if pos+2 >= len(text) || text[pos:pos+2] != "in" || !space(text[pos+2]) {
+		s.error(pos, pos, "expected in followed by one list expression")
+		return e
+	}
+	pos += 2
+	for pos < len(text) && space(text[pos]) {
+		pos++
+	}
+	if pos == len(text) || text[pos] == '\n' || text[pos] == '#' {
+		s.error(pos, pos, "expected loop iterable expression")
+		return e
+	}
+	part := expr.ParseKashValuePrefix(s.Alloc, s.Source, pos)
+	s.takeDiagnostics(part.Diagnostics)
+	branch.Items = slices.Append(s.Alloc, branch.Items, part.Expr)
+	if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery {
+		s.error(pos, part.End, "loop iterable requires one Kame expression")
+	}
+	end := part.End
+	for end < len(text) && space(text[end]) {
+		end++
+	}
+	if end < len(text) && text[end] != '\n' && text[end] != '#' {
+		s.error(end, end+1, "loop header must occupy its own line")
+	}
+	for end < len(text) && text[end] != '\n' {
+		end++
+	}
+	p.Pos = nextLine(text, end)
+	p.branchBody(branch, level+1)
+	for i := range branch.Body {
+		if branch.Body[i].Kind == expr.KashDefinition && branch.Body[i].Text == name {
+			s.error(branch.Body[i].Span.Start, branch.Body[i].Span.End, "body definition conflicts with loop binding")
+		}
+	}
+	branch.Text = owned(s.Alloc, "for "+name+" in")
+	branch.TextOwned = true
+	e.Span.End = p.Pos
 	return e
 }
 

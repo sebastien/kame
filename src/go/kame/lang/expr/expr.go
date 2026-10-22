@@ -56,7 +56,13 @@ const (
 	CommandWriter
 	CommandOperand
 	KashDefer
+	KashFor
+	KashWhile
 )
+
+func IsKashControl(kind Kind) bool {
+	return kind == KashIf || kind == KashMatch || kind == KashFor || kind == KashWhile
+}
 
 type ReferenceKind int
 

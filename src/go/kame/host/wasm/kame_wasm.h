@@ -84,6 +84,9 @@ enum kame_wasm_request_kind {
   KAME_WASM_REQUEST_CACHE_LOCK = 24,
   KAME_WASM_REQUEST_CACHE_UNLOCK = 25,
   KAME_WASM_REQUEST_PLUGIN = 26,
+  /* JSON {staged,destination}; complete with {code,published,stagedRemoved}.
+   * No replacing rename or copy fallback is permitted. */
+  KAME_WASM_REQUEST_PUBLISH_FILE = 39,
   KAME_WASM_REQUEST_FILE_CONTENT = 27,
   KAME_WASM_REQUEST_TOOL_CONTENT = 28,
   KAME_WASM_REQUEST_OUTPUT_CONTENT = 29,

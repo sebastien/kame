@@ -912,6 +912,36 @@ func (p *Program) completeRequest(request host.Request) {
 			op = host.OpRead
 		}
 		completion = p.fileCompletion(request, op, name)
+	} else if request.Kind == host.RequestPublishFile {
+		staged := p.canonicalTarget(host.PayloadText(request.Payload, "staged"), true)
+		destination := p.canonicalTarget(host.PayloadText(request.Payload, "destination"), true)
+		index := -1
+		for i := range p.Instances {
+			if p.Instances[i].Node.ID == request.NodeID {
+				index = i
+				break
+			}
+		}
+		if p.Options.Ownership != nil {
+			if index >= 0 {
+				completion.Diagnostic = p.beginOwnership(&p.Instances[index], "", nil, []string{destination})
+			} else {
+				completion.Diagnostic = p.Options.Ownership(p.Options.OwnershipState, p, []string{destination}, "tracked-write", false)
+			}
+		}
+		if completion.Diagnostic.Code == "" {
+			result := p.Host.PublishFile(staged, destination)
+			if result.Published && p.Options.Ownership != nil && index < 0 {
+				d := p.Options.Ownership(p.Options.OwnershipState, p, []string{destination}, "tracked-write", true)
+				if d.Code != "" {
+					result.Code = "FS_PUBLISHED"
+				}
+				d.Free(p.Alloc)
+			}
+			completion.Value, completion.HasValue = result.Value(p.Alloc), true
+		}
+		mem.FreeString(p.Alloc, staged)
+		mem.FreeString(p.Alloc, destination)
 	} else if request.Kind == host.RequestWriteFile {
 		filename := p.canonicalTarget(name, true)
 		data := host.PayloadBytes(request.Payload, host.FieldData)

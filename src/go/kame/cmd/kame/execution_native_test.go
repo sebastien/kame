@@ -176,6 +176,29 @@ func TestNativeCatSignalsCancelAndReap(t *testing.T) {
 	}
 }
 
+func TestNativeKashSymlinkRunsInterpreterSourceAndArguments(t *testing.T) {
+	binary := nativeCLIBinary(t)
+	directory := t.TempDir()
+	interpreter := filepath.Join(directory, "kash")
+	if err := os.Symlink(binary, interpreter); err != nil {
+		t.Fatal(err)
+	}
+	nativeCLIWrite(t, filepath.Join(directory, "script"), `printf "<%s>" $args`)
+	command := exec.Command(interpreter, "script", "one", "two words")
+	command.Dir = directory
+	output, err := command.CombinedOutput()
+	if err != nil || string(output) != "<one><two words>" {
+		t.Fatalf("kash symlink status=%v output=%q", err, output)
+	}
+	command = exec.Command(interpreter)
+	command.Dir = directory
+	command.Stdin = strings.NewReader("echo stdin\n")
+	output, err = command.CombinedOutput()
+	if err != nil || string(output) != "stdin\n" {
+		t.Fatalf("kash stdin status=%v output=%q", err, output)
+	}
+}
+
 func fileExists(name string) bool {
 	_, err := os.Stat(name)
 	return err == nil

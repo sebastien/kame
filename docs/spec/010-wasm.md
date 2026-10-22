@@ -444,6 +444,19 @@ once; timeout is for the entire operator. Ordinary exits retain executable statu
 identity, even when their values coincide with mux diagnostic codes. A worker node
 retains its last nonzero status under collection; no per-record history is sent.
 
+Publication request kind **39** carries JSON `{staged,destination}` for one
+completed staged regular file. Complete with JSON `{code,published,stagedRemoved}`;
+empty `code` requires both flags true. Existing destination entries give
+`FS_EXISTS`, unavailable safe primitives or cross-filesystem requests give
+`FS_UNSUPPORTED`, and post-commit failures give `FS_PUBLISHED` with the known
+commit/cleanup outcome. Never downgrade to replacing rename or copying. Hosts
+must reconcile commit outcomes before acknowledging cancellation. Node implements
+exclusive hard-link creation followed by staging unlink; memory hosts and Windows
+reject this operation. It requires read/write on staging and write on destination,
+including scoped grants before custom callbacks. Trusted parent directories and
+stable caller-owned staging are required; this is not crash durability or input
+compare-and-publish. See `046-kash-scripting-and-publication.md`.
+
 Each instance reserves a static emergency diagnostic slot at creation.
 Out-of-memory returns allocation-free `NO_MEMORY` through that slot. The module
 must not grow memory implicitly unless the embedding contract explicitly

@@ -58,6 +58,18 @@ from the final stage or weaken checks to hide a failed downloader.
 
 ## Finite work and bounded retry
 
+For a multi-command body, iterate directly over a typed list:
+
+```kash
+for file in files
+	checker $file
+	verifier $file
+```
+
+Items run in order, stop on failure, and have fresh lexical scopes. `defer`
+remains invocation-owned, not per-iteration cleanup. For a single callback or
+value-producing transformation the existing expression pattern remains useful:
+
 ```kash
 (map ([file] (run! "checker" file)) files)
 ```
@@ -82,6 +94,9 @@ attempts. Each call is fresh. Repeatedly referencing one lazy result is not
 retry; an unused definition has no effects. Suspension resumes without replay.
 CLI recipe retry is a different policy. Never apply either policy to deployments
 without explicitly establishing that repeating the operation is safe.
+
+`while probe --pending` supports live command conditions. Do not put the probe
+in a lazy outer definition and expect repeated lookup to refresh it.
 
 ## Temporary workspaces and `defer`
 
@@ -162,6 +177,26 @@ to `json`, not shell quoting. File-backed rendering and input redirection track
 reads; arbitrary filename arguments do not automatically declare dependencies.
 `write!`/`yield!` retain their phase/publication contracts, not a promise of a
 transactional multi-output external recipe.
+
+## Publish a staged file without clobbering
+
+```kash
+created = $(mktemp -d ./staging.XXXXXX)
+workspace = (if (ends? "\n" created) (slice 0 -1 created) created)
+defer rm -rf $workspace
+generator > ${workspace}/output
+(publish! (joinpath workspace "output") ./final.txt)
+```
+
+Choose private staging on the destination filesystem and finish every writer
+before publication. Existing destination entries cause `FS_EXISTS`; there is no
+replacing rename or copy fallback. Do not use recipe-deferred `write!` to create
+staging for an immediate publication. `FS_PUBLISHED` means the destination was
+already published but subsequent cleanup failed: inspect its diagnostic cause,
+do not retry or remove the destination as rollback. Only private staging is
+eligible for deferred cleanup. This operation assumes trusted parent directories
+and stable caller-owned staging; it does not guarantee crash durability or that
+original inputs stayed unchanged while processing.
 
 ## Checks and debugging
 

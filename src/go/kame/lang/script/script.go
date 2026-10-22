@@ -376,7 +376,7 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 			previousEnd = item.Span.End
 			continue
 		}
-		if item.Expression != nil && (item.Expression.Kind == expr.KashIf || item.Expression.Kind == expr.KashMatch) {
+		if item.Expression != nil && expr.IsKashControl(item.Expression.Kind) {
 			value := expr.FormatKashControl(a, item.Expression, indent)
 			b.WriteString(value)
 			mem.FreeString(a, value)

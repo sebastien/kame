@@ -91,6 +91,7 @@ int64_t km_file_modtime(so_String, bool);
 bool km_file_watch_stamp(so_String, so_Slice);
 int km_file_sync(void *);
 int km_file_sync_parent(so_String);
+int km_file_publish(so_String, so_String);
 typedef struct km_watch km_watch;
 km_watch *km_watch_new(void);
 void km_watch_begin(km_watch *);

@@ -16,6 +16,14 @@ type FileInfo struct {
 	Symlink bool
 }
 
+// PublishResult preserves the commit outcome even if staging cleanup fails.
+// Declared before ProgramHost: Solod emits interface wrappers in source order.
+type PublishResult struct {
+	Code          string
+	Published     bool
+	StagedRemoved bool
+}
+
 // StatResult is a single-return stat outcome. Solod cannot wrap a struct and an
 // error in one multi-return, so absence and failure are explicit flags:
 // Exists is true for a present path, Failed is true for any error other than

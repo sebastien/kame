@@ -6,6 +6,17 @@ import (
 	"solod.dev/so/slices"
 )
 
+// recordField borrows the first matching field, or returns nil when absent.
+// The caller must not free the returned value independently of the record.
+func recordField(record core.Value, key string) core.Value {
+	for i := range record.Record {
+		if record.Record[i].Key == key {
+			return record.Record[i].Value
+		}
+	}
+	return core.Value{}
+}
+
 func validRecord(value core.Value) bool {
 	if value.Kind != core.Record {
 		return false
