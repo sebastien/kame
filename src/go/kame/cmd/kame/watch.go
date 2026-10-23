@@ -247,11 +247,13 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 	lastRefresh := int64(0)
 	dirty := true
 	recompile, reported := false, false
+	cancelledForChange := false
+	var debounceDigits [24]byte
 	if !options.JSON {
 		if notifications {
-			io.WriteString(errOut, "Watching filesystem resources (OS notifications; 10s reconciliation; 100ms debounce)\n")
+			io.WriteString(errOut, "Watching filesystem resources (OS notifications; 10s reconciliation; "+strconv.Itoa(debounceDigits[:], options.WatchDebounceMS)+"ms debounce)\n")
 		} else {
-			io.WriteString(errOut, "Watching filesystem resources (200ms polling fallback; 100ms debounce)\n")
+			io.WriteString(errOut, "Watching filesystem resources (200ms polling fallback; "+strconv.Itoa(debounceDigits[:], options.WatchDebounceMS)+"ms debounce)\n")
 		}
 	}
 	status := 0
@@ -278,11 +280,15 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 				if !polled.Done {
 					busy = true
 				}
-				if polled.Done && polled.Result.Diagnostic.Code != "" && !reported {
+				cancelledDiagnostic := cancelledForChange && polled.Result.Diagnostic.Code == "EXEC_CANCELLED"
+				if polled.Done && polled.Result.Diagnostic.Code != "" && !reported && !cancelledDiagnostic {
 					cycleFailed = true
 					emitDiagnostic(diagnosticWriter(out, errOut, options.JSON), polled.Result.Diagnostic, options.JSON, session.Program.Parsed.Source)
 				}
 				polled.Result.Free(mem.System)
+			}
+			if cancelledForChange && session.Program.Host != nil && session.Program.Host.Active() != 0 {
+				busy = true
 			}
 			if !busy {
 				reported = true
@@ -295,6 +301,8 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			outcome := "success"
 			if cycleFailed || progress.Failed != 0 {
 				outcome = "failure"
+			} else if cancelledForChange {
+				outcome = "cancelled"
 			}
 			elapsed := int64(time.Since(cycleStarted)) / 1000000
 			dashboardCycleElapsed = elapsed
@@ -305,6 +313,8 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 				cycleStatus := 0
 				if outcome == "failure" {
 					cycleStatus = 1
+				} else if outcome == "cancelled" {
+					cycleStatus = 130
 				}
 				var digits [24]byte
 				writeHumanSummary(errOut, "watch cycle "+strconv.Itoa(digits[:], cycle), cycleStatus, elapsed, progress)
@@ -315,7 +325,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			flushCLIOutput(errOut)
 		}
 		now := time.Now().UnixNano() / 1000000
-		if (busy && now-lastRefresh >= 200) || (!busy && lastRefresh == 0) {
+		if !cancelledForChange && ((busy && now-lastRefresh >= 200) || (!busy && lastRefresh == 0)) {
 			count := len(resources)
 			refreshWatchResources(&resources, &session, options)
 			dirty = dirty || count != len(resources)
@@ -329,8 +339,10 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			interval = 200
 		}
 		if dirty || now-lastScan >= interval {
-			refreshWatchResources(&resources, &session, options)
-			notifications = syncWatchNotifications(watcher, session.Program, resources)
+			if !cancelledForChange {
+				refreshWatchResources(&resources, &session, options)
+				notifications = syncWatchNotifications(watcher, session.Program, resources)
+			}
 			dirty = false
 			for i := range resources {
 				stamp := scanWatchStamp(session.Program, &resources[i])
@@ -350,7 +362,15 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			}
 			lastScan = now
 		}
-		if len(pending) != 0 && !busy && now-lastChange >= 100 {
+		if options.CancelOnChange && busy && len(pending) != 0 && !cancelledForChange {
+			for i := range handles {
+				handles[i].Cancel()
+			}
+			// Async processes retain independent roots and their launcher's interest.
+			session.Program.Eval.CancelProcesses()
+			cancelledForChange = true
+		}
+		if len(pending) != 0 && !busy && now-lastChange >= int64(options.WatchDebounceMS) {
 			cycle++
 			dashboardCycle = cycle
 			cycleStarted = time.Now()
@@ -362,7 +382,9 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			if options.JSON {
 				cli.WriteWatchTransition(out, "watch-cycle-started", cycle, "", 0, 0, 0, 0)
 			}
-			if recompile || session.Program == nil {
+			// Cancelled definitions retain terminal state; replace the session
+			// so every root and resource is evaluated against the latest inputs.
+			if cancelledForChange || recompile || session.Program == nil {
 				freeWatchHandles(handles)
 				session.Free()
 				session = openBuildSession(options, errOut, true)
@@ -378,7 +400,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			}
 			slices.Free(mem.System, pending)
 			pending = nil
-			recompile, reported = false, false
+			recompile, reported, cancelledForChange = false, false, false
 			dirty = true
 		}
 		wait := 1000
@@ -388,8 +410,11 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 		if !notifications && wait > 200 {
 			wait = 200
 		}
-		if len(pending) != 0 && wait > 100 {
-			wait = 100
+		if len(pending) != 0 && !busy {
+			remaining := int(int64(options.WatchDebounceMS) - (now - lastChange))
+			if remaining > 0 && remaining < wait {
+				wait = remaining
+			}
 		}
 		if watcher.Wait(wait) != 0 {
 			dirty = true

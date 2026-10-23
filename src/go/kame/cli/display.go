@@ -56,6 +56,16 @@ func Style(out io.Writer, token string, text string, enabled bool) {
 // WriteReport renders the established machine document without rerunning a query
 // or maintaining a second set of inspection structs. Data remains unchanged.
 func WriteReport(out io.Writer, heading string, data string, styled bool) bool {
+	return writeReport(out, heading, data, styled, false)
+}
+
+// WriteGraphReport renders an inspection document, optionally including the
+// full producer details shown by verbose plan output.
+func WriteGraphReport(out io.Writer, heading string, data string, styled bool, verbose bool) bool {
+	return writeReport(out, heading, data, styled, verbose)
+}
+
+func writeReport(out io.Writer, heading string, data string, styled bool, verbose bool) bool {
 	var value core.Value
 	if !core.ParseJSON(mem.System, []byte(data), &value) {
 		return false
@@ -68,7 +78,7 @@ func WriteReport(out io.Writer, heading string, data string, styled bool) bool {
 		return true
 	}
 	if reportField(value, "schema").Int == 2 {
-		writeInspectionReport(out, value, styled)
+		writeInspectionReport(out, value, styled, verbose)
 		value.Free(mem.System)
 		return true
 	}

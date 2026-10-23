@@ -67,6 +67,29 @@ func TestDownstreamReportKeepsLogicalImpactRelationships(t *testing.T) {
 	out.Free()
 }
 
+func TestPlanReportHidesEmptyAndUnknownDetailsUnlessVerbose(t *testing.T) {
+	document := `{"schema":2,"type":"plan","depth":-1,"resources":[],"producers":[{"id":1,"resource":1,"target":"./out","kind":"file","outputs":[],"freshness":"unknown","captures":[],"source":"Makefile.kmk","tools":{},"reusePolicy":"content-signatures"}],"dependencies":[],"stages":[],"deferred":[]}`
+	var concise, verbose strings.Builder
+	defer concise.Free()
+	defer verbose.Free()
+	if !cli.WriteGraphReport(&concise, "plan", document, false, false) {
+		t.Error("concise plan report failed to render")
+		return
+	}
+	text := concise.String()
+	if strings.Contains(text, "freshness") || strings.Contains(text, "captures") || strings.Contains(text, "tools") || !strings.Contains(text, "source: Makefile.kmk") || !strings.Contains(text, "reusePolicy: \"content-signatures\"") {
+		t.Error("concise plan report hid meaningful details or retained empty ones: " + text)
+	}
+	if !cli.WriteGraphReport(&verbose, "plan", document, false, true) {
+		t.Error("verbose plan report failed to render")
+		return
+	}
+	text = verbose.String()
+	if !strings.Contains(text, "freshness: unknown") || !strings.Contains(text, "captures\n") || !strings.Contains(text, "tools\n") {
+		t.Error("verbose plan report omitted full producer details: " + text)
+	}
+}
+
 func TestPresentationRespectsValuesAndLiteralTail(t *testing.T) {
 	inv := cli.Presentation([]string{"-c", "--json", "--define", "--output", "--indent", "--json", "-o", "text", "--", "--json"})
 	defer inv.Free()

@@ -25,18 +25,20 @@ type Diagnostic struct {
 // Invocation is the normalized result of parsing one command line. Fields are a
 // superset of every command's needs; each command reads the ones it uses.
 type Invocation struct {
-	Name        string
-	Command     string
-	File        string
-	Directory   string
-	Jobs        int
-	DryRun      bool
-	Watch       bool
-	Force       bool
-	JSON        bool
-	Output      string
-	EarlyAction string
-	HelpTopic   string
+	Name            string
+	Command         string
+	File            string
+	Directory       string
+	Jobs            int
+	WatchDebounceMS int
+	DryRun          bool
+	Watch           bool
+	CancelOnChange  bool
+	Force           bool
+	JSON            bool
+	Output          string
+	EarlyAction     string
+	HelpTopic       string
 	// HelpResult owns the rendered response of the internal @help query.
 	// Command and ordinary option strings continue to borrow argv.
 	HelpResult       string
@@ -151,7 +153,7 @@ func parseCommand(command string, args []string) Invocation {
 	if command == "run" {
 		return parseRun(args, false)
 	}
-	inv := Invocation{Name: command, Directory: ".", Jobs: 1, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
+	inv := Invocation{Name: command, Directory: ".", Jobs: 1, WatchDebounceMS: 100, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
 	if command == "help" {
 		if len(args) != 0 && args[0] == "--" {
 			args = args[1:]
@@ -296,6 +298,17 @@ func parseBuild(inv *Invocation, args []string) {
 			inv.Watch = true
 			continue
 		}
+		if option == "--watch" {
+			inv.Watch = true
+			if value := arg[len("--watch="):]; !assignWatchDebounce(inv, value) {
+				return
+			}
+			continue
+		}
+		if arg == "--cancel" {
+			inv.CancelOnChange = true
+			continue
+		}
 		if arg == "--force" {
 			inv.Force = true
 			continue
@@ -341,6 +354,10 @@ func parseBuild(inv *Invocation, args []string) {
 		}
 		inv.Targets = slices.Append(mem.System, inv.Targets, arg)
 	}
+	if inv.CancelOnChange && !inv.Watch {
+		inv.fail("OPT_CONFLICT", "--cancel requires --watch")
+		return
+	}
 	if inv.Watch && inv.Name != "" && inv.Name != "build" && inv.Name != "pick" {
 		inv.fail("OPT_CONFLICT", "--watch is supported only for builds")
 		return
@@ -350,6 +367,20 @@ func parseBuild(inv *Invocation, args []string) {
 		return
 	}
 	inv.OK = true
+}
+
+func assignWatchDebounce(inv *Invocation, value string) bool {
+	if value == "" {
+		inv.fail("OPT_VALUE_INVALID", "watch debounce must be a nonnegative number of milliseconds")
+		return false
+	}
+	number, err := strconv.Atoi(value)
+	if err != nil || number < 0 {
+		inv.fail("OPT_VALUE_INVALID", "watch debounce must be a nonnegative number of milliseconds")
+		return false
+	}
+	inv.WatchDebounceMS = number
+	return true
 }
 
 // assignmentOperand records literal shorthand without deciding whether a name
@@ -560,6 +591,10 @@ func parseGraph(inv *Invocation, args []string, allowExpand bool) {
 				return
 			}
 			inv.Affected = true
+			continue
+		}
+		if arg == "--verbose" && inv.Name == "plan" {
+			inv.Verbose = true
 			continue
 		}
 		if arg == "--depth" {

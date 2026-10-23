@@ -328,7 +328,11 @@ func PickArgs(inv *Invocation, kind string, target string) []string {
 			args = appendNumber(args, "--capture-limit", int64(inv.CaptureLimit))
 		}
 		if inv.Watch && kind == "build" {
-			args = appendOwned(args, "--watch")
+			var debounce [strconv.MaxIntBase10Len]byte
+			args = appendOwned(args, "--watch="+strconv.FormatInt(debounce[:], int64(inv.WatchDebounceMS), 10))
+			if inv.CancelOnChange {
+				args = appendOwned(args, "--cancel")
+			}
 		}
 	}
 	if kind != "list" {

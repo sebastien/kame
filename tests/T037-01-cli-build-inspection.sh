@@ -50,6 +50,10 @@ KMK
 for backend in native wasm; do
   if [ "$backend" = native ]; then CLI_BIN="$native_bin"; else CLI_BIN="$wasm_bin"; fi
   runner=(inspection_run)
+  test-step "$backend keeps producer details concise unless verbose"
+  "${runner[@]}" do plan --output text -c './out : ./in' ./out >"$project/concise" 2>"$project/error"
+  "${runner[@]}" do plan --output text --verbose -c './out : ./in' ./out >"$project/verbose" 2>"$project/error"
+  if ! grep -Eq 'freshness: unknown|captures|tools' "$project/concise" && grep -q 'source: <command>' "$project/concise" && grep -q 'freshness: unknown' "$project/verbose" && grep -q captures "$project/verbose" && grep -q tools "$project/verbose"; then test-ok "$backend producer verbosity"; else test-fail "$backend producer verbosity"; fi
   test-step "$backend inventories concrete inputs, products and persistent intermediates"
   for kind in plan inputs outputs; do
     "${runner[@]}" do "$kind" --json -C "$project" >"$project/$backend.$kind.json" 2>"$project/error"
@@ -78,7 +82,7 @@ for backend in native wasm; do
     if grep -q '^    ./version · runtime-discovery · opaque-process-io$' "$project/$backend.$kind.text"; then test-ok "$backend $kind path-first boundaries"; else test-fail "$backend $kind boundary layout"; fi
     if grep -q '^    ./version \[3\] · missing$' "$project/$backend.$kind.text" && ! grep -Eq '^      (producer|consumer):| · (artifact|source file|generated input)' "$project/$backend.$kind.text"; then test-ok "$backend $kind one resource per line"; else test-fail "$backend verbose $kind inventory"; fi
   done
-  "${runner[@]}" do plan --output text -C "$project" ./version >"$project/detail" 2>"$project/error"
+  "${runner[@]}" do plan --output text --verbose -C "$project" ./version >"$project/detail" 2>"$project/error"
   if grep -q 'source' "$project/detail" && grep -q 'freshness' "$project/detail"; then test-ok "$backend selected target plan retains details"; else test-fail "$backend selected target details missing"; fi
   test-step "$backend shared roots, depth, and local sequence gates"
   "${runner[@]}" do plan --json -C "$project" ./bin/one ./bin/one.map >"$project/shared" 2>"$project/error"

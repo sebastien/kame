@@ -42,7 +42,7 @@ func AppendsCommands(args []string) bool {
 }
 
 func parseRun(args []string, discover bool) Invocation {
-	inv := Invocation{Name: "run", Directory: ".", Jobs: 1}
+	inv := Invocation{Name: "run", Directory: ".", Jobs: 1, WatchDebounceMS: 100}
 	if discover {
 		inv.Inputs = slices.Append(mem.System, inv.Inputs, RunInput{Kind: "discover", Lang: "kmk"})
 	}
@@ -293,7 +293,7 @@ func selectsWatch(args []string) bool {
 		if arg == "--" {
 			return false
 		}
-		if arg == "--watch" {
+		if arg == "--watch" || (len(arg) >= 8 && arg[:8] == "--watch=") {
 			return true
 		}
 		if OptionTakesValue(arg) {

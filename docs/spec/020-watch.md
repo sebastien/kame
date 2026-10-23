@@ -8,7 +8,8 @@ keeps interest in the latest graph; watching must not run every task repeatedly
 or create a new program on every timer tick.
 
 The host uses OS notifications to trigger fingerprint scans and debounces changes
-for 100 ms. Native Linux uses inotify (including Cosmopolitan when running on
+for 100 ms by default. `--watch=MS` sets the quiet period in milliseconds; bare
+`--watch` retains the default. Native Linux uses inotify (including Cosmopolitan when running on
 Linux); Node/WASM uses Node's built-in `fs.watch`. Healthy notification mode
 reconciles every 10 seconds. If any resource cannot be subscribed, the host falls
 back to 200 ms scans while retaining successful subscriptions. Other native
@@ -39,15 +40,23 @@ Idle hosts wait for notifications, cancellation or timer deadlines, rather than
 waking every 10 ms. Active builds retain short process-service ticks. Shutdown
 closes notification handles, including after source reload failures.
 
-The scanner runs while recipes execute. Input changes queue until the current
-build settles, then invalidate the affected resource keys in the retained engine.
+The scanner runs while recipes execute. By default, input changes queue until the
+current build settles, then invalidate the affected resource keys in the retained
+engine. With `--cancel`, the first fingerprinted change cancels and reaps the
+active watch roots immediately; further changes are coalesced until the configured
+quiet period before the roots restart. Source changes recompile the current graph
+after cancellation. The Python CLI wrapper exposes the same settings as
+`debounce_ms` and `cancel_on_change` on `KameProgram.watch`.
+A cancelled recipe is not transactional: writes it made before interruption are
+not rolled back, but its result is not accepted and the replacement cycle runs.
 A recipe publishing output newer than its changed input still reruns: timestamp
 freshness cannot erase the observed invalidation. Order-only dependencies retain
 their freshness exclusion. Obsolete resource subscriptions are dropped after
 the next successful graph evaluation.
 
-Source changes dispose the old program after active work settles and compile the
-current source graph before launching new effects. Malformed or missing sources
+Without `--cancel`, source changes dispose the old program after active work settles.
+With `--cancel`, cancellation and reaping precede replacement. Both paths compile
+the current source graph before launching new effects. Malformed or missing sources
 produce authored diagnostics and keep watching for repair. Failed attempts keep
 their attempted source paths; a successful compilation replaces that source set.
 Roots, environments, grants, tools, timeouts and retries use the invocation's
@@ -79,6 +88,8 @@ the selected CLI host's notification behavior.
   malformed input, recover after repair and replace changed dependency graphs.
 - An input changed after a recipe's read handshake produces a second build with
   the latest bytes even when the first output has a newer timestamp.
+- A burst of input changes produces one rebuild after the configured quiet period;
+  `--cancel` stops an active recipe and reaps its process tree before rebuilding.
 - Multiple roots share a prerequisite; idle watch does not rerun settled tasks.
 - Glob additions/removals, absent optional includes and missing source creation
   trigger the appropriate work. Produced outputs do not trigger rebuild loops.

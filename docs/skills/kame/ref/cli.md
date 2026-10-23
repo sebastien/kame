@@ -72,6 +72,7 @@ kame clean                   # run one bare task
 kame -f Build.kmk test       # select a source explicitly
 kame -C subproject default   # build from another directory
 kame -j 4 default test       # share one dependency graph across roots
+kame --watch=250 --cancel app # coalesce changes; stop stale active work
 kame -n ./build/app          # plan and render, with no effects or processes
 kame --force bundle          # ignore freshness and cached-task hits
 ```
@@ -95,7 +96,8 @@ Primary options:
 | `--retry N` | Retry failed commands up to `N` times. |
 | `--log-limit N` | Limit captured bytes per process stream. |
 | `--capture-limit N` | Limit each command substitution's captured stdout; default 1 MiB, independent of retained recipe logs. |
-| `--watch` | Rebuild tracked inputs; primary build mode only, not `do run`. |
+| `--watch[=MS]` | Rebuild tracked inputs after `MS` milliseconds without changes; default 100. Primary builds only, not `do run`. |
+| `--cancel` | With `--watch`, cancel active work on the first detected input change and restart after the debounce period. |
 | `--define NAME=VALUE` | Override a declared definition with literal string data. |
 | `--set NAME=LITERAL` | Override a declared definition with typed, closed Kame data. |
 | `--print-result` | In execution sessions, opt into final `.km` result display. |

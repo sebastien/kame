@@ -162,6 +162,19 @@ func TestPlanDoesNotMaterializeRecipe(t *testing.T) {
 	}
 }
 
+func TestPlanProducerDetailsAreConciseUnlessVerbose(t *testing.T) {
+	source := "./out : ./in"
+	var out, errOut bytes.Buffer
+	if status := runNativeCLI(t, []string{"do", "plan", "-c", source, "./out"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), "./out · file") || strings.Contains(out.String(), "freshness: unknown") || strings.Contains(out.String(), "captures") || strings.Contains(out.String(), "tools") {
+		t.Errorf("concise plan status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if status := runNativeCLI(t, []string{"do", "plan", "--verbose", "-c", source, "./out"}, &input{}, &out, &errOut); status != 0 || !strings.Contains(out.String(), "freshness: unknown") || !strings.Contains(out.String(), "captures") || !strings.Contains(out.String(), "tools") {
+		t.Errorf("verbose plan status=%d stdout=%q stderr=%q", status, out.String(), errOut.String())
+	}
+}
+
 func TestExpressionAndGraphInspection(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if status := runNativeCLI(t, []string{"do", "run", "--lang", "expr", "-c", "(join \",\" [\"a\" \"b\"])"}, &input{}, &out, &errOut); status != 0 || out.String() != "\"a,b\"" {

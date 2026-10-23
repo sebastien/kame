@@ -253,21 +253,28 @@ class KameProgram(_ProcessOwner):
             grants=grants,
         )
 
-    async def build(self, targets: str | Iterable[str], *, grants: Mapping[str, Iterable[str] | bool] | None = None) -> dict[str, Any]:
+    async def build(self, targets: str | Iterable[str], *, grants: Mapping[str, Iterable[str] | bool] | None = None, jobs: int | None = None) -> dict[str, Any]:
         self._check_open()
         selected = [targets] if isinstance(targets, str) else list(targets)
-        args = ["do", "run", "--json", "--lang", self.language, "-f", self._source_path, *selected]
+        args = ["do", "run"]
+        if jobs is not None:
+            args.extend(["--jobs", str(jobs)])
+        args.extend(["--json", "--lang", self.language, "-f", self._source_path, *selected])
         output = await self._run(args, grants=grants)
         events = [json.loads(line) for line in output.splitlines() if line.strip()]
         results = [{"target": target, "value": next((event.get("value") for event in reversed(events) if event.get("target") == target and "value" in event), None)} for target in selected]
         return {"results": results, "events": events}
 
-    async def watch(self, targets: str | Iterable[str], *, grants: Mapping[str, Iterable[str] | bool] | None = None) -> KameWatch:
+    async def watch(self, targets: str | Iterable[str], *, grants: Mapping[str, Iterable[str] | bool] | None = None, jobs: int | None = None, debounce_ms: int | None = None, cancel_on_change: bool = False) -> KameWatch:
         self._check_open()
         if self.language != "kmk":
             raise KameError("watch requires a .kmk rule program")
         selected = [targets] if isinstance(targets, str) else list(targets)
-        args = ["--watch", "--json", "-f", self._source_path, *selected]
+        args = ["--jobs", str(jobs)] if jobs is not None else []
+        args.append(f"--watch={debounce_ms}" if debounce_ms is not None else "--watch")
+        if cancel_on_change:
+            args.append("--cancel")
+        args.extend(["--json", "-f", self._source_path, *selected])
         argv = [self._owner.executable, *_grant_args(self._owner.grants if grants is None else grants), *args]
         process = await self._start(argv, cwd=self._owner.cwd, env=self._owner.env)
         watch = KameWatch(self, process)

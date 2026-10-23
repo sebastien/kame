@@ -55,3 +55,26 @@ func TestParseSourceCardinalityKeepsEstablishedDiagnostic(t *testing.T) {
 		t.Error("extra parse sources changed the established usage diagnostic")
 	}
 }
+
+func TestWatchOptions(t *testing.T) {
+	inv := cli.Parse("", []string{"--watch=200", "--cancel"})
+	if !inv.OK || !inv.Watch || inv.WatchDebounceMS != 200 || !inv.CancelOnChange {
+		t.Error("watch debounce or cancel option was not parsed")
+	}
+	inv.Free()
+
+	invalid := [][]string{{"--watch="}, {"--watch=-1"}, {"--watch=fast"}, {"--cancel"}}
+	for i := range invalid {
+		inv = cli.Parse("", invalid[i])
+		if inv.OK {
+			t.Error("invalid watch option was accepted")
+		}
+		inv.Free()
+	}
+
+	inv = cli.Parse("", []string{"--watch"})
+	if !inv.OK || inv.WatchDebounceMS != 100 {
+		t.Error("bare --watch did not retain the 100 ms default")
+	}
+	inv.Free()
+}

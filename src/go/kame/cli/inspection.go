@@ -36,6 +36,16 @@ func reportHas(values core.Value, text string) bool {
 	return false
 }
 
+func reportEmpty(value core.Value) bool {
+	switch value.Kind {
+	case core.List:
+		return len(value.List) == 0
+	case core.Record:
+		return len(value.Record) == 0
+	}
+	return false
+}
+
 func reportText(out io.Writer, text string, token string, styled bool) {
 	plain := true
 	for i := range text {
@@ -90,7 +100,7 @@ func reportBoundaryPath(boundary, resources, producers core.Value) string {
 	return text
 }
 
-func writeInspectionReport(out io.Writer, doc core.Value, styled bool) {
+func writeInspectionReport(out io.Writer, doc core.Value, styled bool, verbose bool) {
 	resources, producers := reportField(doc, "resources"), reportField(doc, "producers")
 	dependencies, deferred := reportField(doc, "dependencies"), reportField(doc, "deferred")
 	kind, depth := reportField(doc, "type").Text, reportField(doc, "depth").Int
@@ -202,6 +212,9 @@ func writeInspectionReport(out io.Writer, doc core.Value, styled bool) {
 			for j := range p.Record {
 				field := p.Record[j]
 				if field.Key == "id" || field.Key == "resource" || field.Key == "target" || field.Key == "kind" || field.Key == "outputs" {
+					continue
+				}
+				if !verbose && (reportEmpty(field.Value) || (field.Key == "freshness" && field.Value.Text == "unknown")) {
 					continue
 				}
 				writeReportValue(out, field.Value, field.Key, 3, styled, false)

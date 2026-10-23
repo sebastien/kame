@@ -1,4 +1,5 @@
 """Native source reload and input invalidation during an active recipe."""
+import json
 import os
 from pathlib import Path
 import select
@@ -116,6 +117,122 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-busy-') as directory:
             time.sleep(.35)
             (project / 'release').touch()
             wait_for(process, lambda: read(project / 'output') == 'after' and read(project / 'runs') == 'xx', error, 'invalidation after newer output publication')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-debounce-') as directory:
+    project = Path(directory)
+    (project / 'input').write_text('before')
+    (project / 'Makefile.kmk').write_text('./output : ./input\n\tprintf x >> runs; cp @< @>\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch=300', './output'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: read(project / 'output') == 'before' and read(project / 'runs') == 'x', error, 'initial debounced watch build')
+            (project / 'input').write_text('middle')
+            time.sleep(.08)
+            (project / 'input').write_text('after')
+            wait_for(process, lambda: read(project / 'output') == 'after' and read(project / 'runs') == 'xx', error, 'coalesced input changes')
+            time.sleep(.4)
+            assert read(project / 'runs') == 'xx', 'change burst triggered more than one rebuild'
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-change-') as directory:
+    project = Path(directory)
+    (project / 'input').write_text('before')
+    (project / 'Makefile.kmk').write_text(
+        './output : ./input\n'
+        '\tprintf x >> runs; if [ ! -e started ]; then touch started; sleep 60 & echo $! > child-pid; wait; fi; cp @< @>\n'
+    )
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch=200', '--cancel', '--json', './output'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: (project / 'started').exists() and (project / 'child-pid').exists(), error, 'cancel-on-change recipe start')
+            child_pid = int((project / 'child-pid').read_text())
+            (project / 'input').write_text('after')
+            def replacement_finished():
+                if read(project / 'output') != 'after' or read(project / 'runs') != 'xx':
+                    return False
+                events = [json.loads(line) for line in (project / 'stdout').read_text().splitlines() if line]
+                statuses = [event['status'] for event in events if event.get('type') == 'watch-cycle-finished']
+                return statuses == ['cancelled', 'success']
+
+            wait_for(process, replacement_finished, error, 'cancelled recipe restarted with latest input')
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                try:
+                    os.kill(child_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(.025)
+            else:
+                raise AssertionError(f'cancel-on-change left child process {child_pid} alive')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-async-') as directory:
+    project = Path(directory)
+    (project / 'input').write_text('before')
+    (project / 'Makefile.kmk').write_text(
+        './output : ./input ; [shell: kash]\n'
+        '\t/bin/sh -c "printf x >> runs; if [ ! -e started ]; then echo \\$\\$ > child-pid; touch started; exec sleep 60; fi" &\n'
+        '\t/bin/cp ./input ./output\n'
+    )
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch=200', '--cancel', '--json', './output'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: (project / 'started').exists(), error, 'async watch recipe start')
+            child_pid = int((project / 'child-pid').read_text())
+            (project / 'input').write_text('after')
+
+            def async_restarted():
+                if read(project / 'output') != 'after' or read(project / 'runs') != 'xx':
+                    return False
+                events = [json.loads(line) for line in (project / 'stdout').read_text().splitlines() if line]
+                return [event['status'] for event in events if event.get('type') == 'watch-cycle-finished'] == ['cancelled', 'success']
+
+            wait_for(process, async_restarted, error, 'cancelled async recipe restarted with latest input')
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                pass
+            else:
+                raise AssertionError(f'cancel-on-change left async process {child_pid} alive')
+            cases += 1
+        finally:
+            stop(process)
+    assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
+
+with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-definitions-') as directory:
+    project = Path(directory)
+    (project / 'input').write_text('before')
+    (project / 'Makefile.kmk').write_text(
+        'A = (sh! (str "printf %s " (text (read ./input)) " > observed"))\n'
+        'B = (sh! "printf x >> runs; if [ ! -e started ]; then touch started; sleep 60; fi")\n'
+    )
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--watch=200', '--cancel', '--json', 'A', 'B'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: read(project / 'observed') == 'before' and (project / 'started').exists(), error, 'watch definition roots started')
+            (project / 'input').write_text('after')
+
+            def definitions_restarted():
+                if read(project / 'observed') != 'after' or read(project / 'runs') != 'xx':
+                    return False
+                events = [json.loads(line) for line in (project / 'stdout').read_text().splitlines() if line]
+                return [event['status'] for event in events if event.get('type') == 'watch-cycle-finished'] == ['cancelled', 'success']
+
+            wait_for(process, definitions_restarted, error, 'cancelled definitions restart with fresh inputs')
             cases += 1
         finally:
             stop(process)

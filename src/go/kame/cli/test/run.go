@@ -60,6 +60,18 @@ func TestRunStdinAndExplicitUnknownSuffix(t *testing.T) {
 	}
 }
 
+func TestParameterizedWatchSelectsBuildMode(t *testing.T) {
+	args := []string{"--watch=200", "--cancel", "-f", "Makefile.kmk", "app"}
+	if cli.SelectsRun(args) || cli.AppendsCommands(args) {
+		t.Error("parameterized watch was routed through source execution")
+	}
+	inv := cli.Parse("", args)
+	defer inv.Free()
+	if !inv.OK || !inv.Watch || inv.WatchDebounceMS != 200 || !inv.CancelOnChange {
+		t.Error("parameterized watch did not select build mode")
+	}
+}
+
 func TestRunUsageErrors(t *testing.T) {
 	invalid := [][]string{
 		{}, {"--", "argument"}, {"--lang", "shell", "-c", "echo hello"}, {"-l"}, {"-c"}, {"--entry", "name", "values.km"}, {"script.mk"}, {"-f", "unknown"}, {"-", "-"}, {"--file=-", "-"}, {"process.kash", "unexpected-entry"}, {"--lang=expr", "-c", "42", "entry"}, {"values.km", "--entry="}, {"--allow-run=", "-c", "42"}, {"--capture-limit=0", "-c", "42"}, {"--unknown", "-c", "42"}, {"--jobs=1", "values.km"}, {"--force", "process.kash"}, {"--env=KEY=value", "values.km"},

@@ -288,7 +288,7 @@ func runGraph(args []string, out io.Writer, errOut io.Writer, kind string) int {
 			io.WriteString(&heading, " "+targets[i])
 		}
 		fmt.Fprintf(&heading, " · depth %d", graph.Depth)
-		cli.WriteReport(out, heading.String(), buffer.String(), stdoutColor)
+		cli.WriteGraphReport(out, heading.String(), buffer.String(), stdoutColor, graph.Verbose)
 		heading.Free()
 	}
 	return 0

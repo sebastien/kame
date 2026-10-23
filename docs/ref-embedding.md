@@ -166,7 +166,9 @@ Python has no host-request callback API.
   the iterator to drive work. Close the active watch before other program operations
   (`BUSY`). Always `await watch.close()` in `finally`, even after breaking iteration.
 - Python watches require `kmk` and yield individual CLI JSON events, not snapshots;
-  filesystem watching is performed by the CLI. There is no `invalidate` method.
+  filesystem watching is performed by the CLI. `program.watch(targets,
+  debounce_ms=200, cancel_on_change=True)` configures the quiet period and
+  cancels active work on a detected change. There is no `invalidate` method.
   Always `await watch.close()` in `finally`; a loop break alone does not close it.
 
 ### Finalization

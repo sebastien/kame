@@ -34,6 +34,20 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
         built["events"].clear()
         self.assertTrue((await program.build("answer"))["events"])
 
+    async def test_build_forwards_job_limit(self):
+        program = await self.client.compile("answer :\n\tprintf hi\n", name="jobs.kmk")
+        run = program._run
+        invocation = []
+
+        async def capture(args, **kwargs):
+            invocation.extend(args)
+            return await run(args, **kwargs)
+
+        with patch.object(program, "_run", capture):
+            built = await program.build("answer", jobs=2)
+        self.assertEqual(invocation[2:4], ["--jobs", "2"])
+        self.assertTrue(any(event["type"] == "target-completed" for event in built["events"]))
+
     async def test_grants_are_forwarded(self):
         (self.root / "data.txt").write_text("readable", encoding="utf-8")
         with self.assertRaises(KameError):
@@ -102,7 +116,16 @@ class KameClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_watch_yields_events_and_close_reaps(self):
         program = await self.client.compile("answer :\n\tprintf hi > answer\n", name="watch.kmk")
-        watch = await program.watch("answer")
+        start = program._start
+        invocation = []
+
+        async def capture(argv, **kwargs):
+            invocation.extend(argv)
+            return await start(argv, **kwargs)
+
+        with patch.object(program, "_start", capture):
+            watch = await program.watch("answer", jobs=2, debounce_ms=200, cancel_on_change=True)
+        self.assertEqual(invocation[1:5], ["--jobs", "2", "--watch=200", "--cancel"])
         events = []
         while not any(event["type"] == "watch-idle" for event in events):
             events.append(await asyncio.wait_for(watch.__anext__(), timeout=5))

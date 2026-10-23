@@ -17,7 +17,7 @@ var Commands = [15]CommandInfo{
 	{Name: "run", Usage: "kame do run [OPTIONS] INPUT... [-- ARG...]", Summary: "execute ordered source fragments in one session"},
 	{Name: "list", Usage: "kame do list [OPTIONS] [QUERY]", Summary: "list declared targets and artifacts, with exact, partial, or typo matching"},
 	{Name: "pick", Usage: "kame do pick [--picker NAME] [OPTIONS]", Summary: "interactively choose a target or command"},
-	{Name: "plan", Usage: "kame do plan [--affected] [--depth N] [OPTIONS] [RESOURCE...]", Summary: "inspect prerequisites, or affected consumers, and dependency stages without execution"},
+	{Name: "plan", Usage: "kame do plan [--affected] [--depth N] [--verbose] [OPTIONS] [RESOURCE...]", Summary: "inspect prerequisites, or affected consumers, and dependency stages without execution"},
 	{Name: "inputs", Usage: "kame do inputs [--depth N] [OPTIONS] [TARGET]", Summary: "list all reachable input files and logical prerequisites"},
 	{Name: "outputs", Usage: "kame do outputs [--depth N] [OPTIONS] [RESOURCE]", Summary: "list downstream outputs potentially affected by a resource change"},
 	{Name: "span", Usage: "kame do span [--expand] [--depth N] [OPTIONS] [TARGET]", Summary: "separate static and evaluation-dependent resources"},
@@ -44,7 +44,8 @@ const BuildHelp = `  -f, --file FILE         select/append source (repeatable in
   -C, --directory DIR     set working directory
   -j, --jobs N            maximum concurrent nodes (default 1)
   -n, --dry-run           plan/render without effects or processes
-      --watch             rebuild tracked inputs on native and WASM hosts
+      --watch[=MS]        rebuild after MS milliseconds without changes (default 100)
+      --cancel            cancel active work on the first detected change
       --force             bypass freshness and cached-task hits
       --verbose           detailed process and dependency events
       --define NAME=VALUE override a declared value with literal text
@@ -108,7 +109,7 @@ func HelpText(topic string) string {
 				b.WriteString("Default depth: unlimited. Read-only computed inputs resolve automatically. JSON: one schema-2 inspection document.\n")
 			}
 			if topic == "plan" {
-				b.WriteString("--affected follows consumers downstream; otherwise plan follows prerequisites upstream.\n")
+				b.WriteString("--affected follows consumers downstream; otherwise plan follows prerequisites upstream. --verbose shows empty and unknown producer details.\n")
 			}
 			if topic == "outputs" {
 				b.WriteString("Depth counts consumer hops. Outputs excludes the selected resource itself and unrelated prerequisites.\n")

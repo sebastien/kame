@@ -237,7 +237,7 @@ function configurePresentation(inv) {
   diagnosticColor = resolveColor(inv.color, 'human');
   outputColor = resolveColor(inv.color, 'human', stdout);
 }
-function writeReport(heading, document) {
+function writeReport(heading, document, verbose = false) {
   const data = typeof document === 'string' || Buffer.isBuffer(document) || document instanceof Uint8Array ? JSON.parse(Buffer.from(document).toString('utf8')) : document;
   if (jsonMode) { stdout.write(`${JSON.stringify(data)}\n`); return; }
   stdout.write(`${styled('heading', heading, outputColor)}\n`);
@@ -256,7 +256,7 @@ function writeReport(heading, document) {
     stdout.write(`${'  '.repeat(depth)}${label ? `${styled('value.symbol', label, outputColor)}: ` : ''}${styled(['source', 'path', 'target', ''].includes(label) ? 'value.path' : 'value.literal', text, outputColor)}\n`);
   };
   if (data.type === 'list') writeTargetReport(data);
-  else if (data.schema === 2) writeInspectionReport(data, write);
+  else if (data.schema === 2) writeInspectionReport(data, write, verbose);
   else write(data, '', 1, true);
 }
 
@@ -273,7 +273,7 @@ function writeTargetReport(doc) {
   }
 }
 
-function writeInspectionReport(doc, write) {
+function writeInspectionReport(doc, write, verbose) {
   const resources = doc.resources, producers = doc.producers;
   const downstream = doc.direction === 'downstream';
   const producer = (id) => producers.find((p) => p.id === id);
@@ -315,7 +315,11 @@ function writeInspectionReport(doc, write) {
         continue;
       }
       stdout.write(`    ${text(p.target, 'value.target')} · ${p.kind}\n`);
-      for (const [key, value] of Object.entries(p)) if (!['id', 'resource', 'target', 'kind', 'outputs'].includes(key)) write(value, key, 3);
+      for (const [key, value] of Object.entries(p)) {
+        if (['id', 'resource', 'target', 'kind', 'outputs'].includes(key)) continue;
+        if (!verbose && ((value !== null && typeof value === 'object' && Object.keys(value).length === 0) || (key === 'freshness' && value === 'unknown'))) continue;
+        write(value, key, 3);
+      }
     }
     stdout.write(`  stages · dependency ordering, not global barriers${doc.truncated || doc.deferred.length ? ' · partial' : ''}\n`);
     for (const stage of doc.stages) {
@@ -4246,7 +4250,7 @@ async function runGraph(module, inv, sourceDirectory) {
     else stderr.write(renderDiagnostic(result.diagnostic, source, 80));
     return 1;
   }
-  writeReport(`${inv.name} ${targets.join(' ')} · depth ${inv.depth}`, result);
+  writeReport(`${inv.name} ${targets.join(' ')} · depth ${inv.depth}`, result, inv.verbose);
   return 0;
 }
 
@@ -4584,8 +4588,11 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   let reported = new Set();
   let status = 0;
   let cycle = 0, cycleFinished = false, cycleFailed = false, cycleStarted = performance.now();
+  const debounceMS = Number.isInteger(inv.watchDebounceMS) ? inv.watchDebounceMS : 100;
+  let cancelledForChange = false, cycleCancelled = false;
   const startCycle = () => {
     clearDashboard(); cycle++; cycleStarted = performance.now(); cycleFinished = false; cycleFailed = false; watchIdle = false;
+    cycleCancelled = false;
     watchCycle = cycle;
     buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 }; terminalOutcomes.clear(); startedOutcomes.clear();
     buildStartedAt = cycleStarted;
@@ -4594,18 +4601,18 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
   const finishCycle = () => {
     if (cycleFinished) return;
     clearDashboard();
-    const outcome = cycleFailed || buildProgress.failed ? 'failure' : 'success';
+    const outcome = cycleFailed || buildProgress.failed ? 'failure' : cycleCancelled ? 'cancelled' : 'success';
     watchCycleStatus = outcome; watchCycleElapsed = Math.max(0, Math.floor(performance.now() - cycleStarted));
     if (jsonMode) {
       stdout.write(`${JSON.stringify({ schema: 1, type: 'watch-cycle-finished', cycle, status: outcome, elapsedMS: Math.max(0, Math.floor(performance.now() - cycleStarted)), completed: buildProgress.completed, failed: buildProgress.failed, cancelled: buildProgress.cancelled })}\n`);
       stdout.write(`${JSON.stringify({ schema: 1, type: 'watch-idle', cycle, status: outcome })}\n`);
     } else {
-      printSummary(buildProgress, outcome === 'failure' ? 1 : 0, watchCycleElapsed, `watch cycle ${cycle}`);
+      printSummary(buildProgress, outcome === 'failure' ? 1 : outcome === 'cancelled' ? 130 : 0, watchCycleElapsed, `watch cycle ${cycle}`);
       stderr.write(`watch · waiting for changes · last cycle ${outcome} · Ctrl+C to stop\n`);
     }
     cycleFinished = true; watchIdle = true;
   };
-  if (!inv.json) stderr.write('Watching filesystem resources (OS notifications; 10s reconciliation; 200ms polling fallback; 100ms debounce)\n');
+  if (!inv.json) stderr.write(`Watching filesystem resources (OS notifications; 10s reconciliation; 200ms polling fallback; ${debounceMS}ms debounce${inv.cancelOnChange ? '; cancel on change' : ''})\n`);
 
   const seedSources = async () => {
     for (const name of watchedSources) {
@@ -4716,7 +4723,17 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
         lastScan = now;
       }
 
-      if (pending.size && now - lastChange >= 100 && (!active || !module.watchSnapshot(watch).busy)) {
+      if (inv.cancelOnChange && active && busy && pending.size && !cancelledForChange) {
+        invocationCancellations.delete(watch.cancellation);
+        await module.disposeWatch(watch);
+        watch = null;
+        active = false;
+        cancelledForChange = true;
+        cycleCancelled = true;
+        finishCycle();
+      }
+
+      if (pending.size && now - lastChange >= debounceMS && (!active || !module.watchSnapshot(watch).busy)) {
         const sourceChanged = [...pending.values()].some((item) => item.kind === 'source');
         if (sourceChanged && active) {
           invocationCancellations.delete(watch.cancellation);
@@ -4725,7 +4742,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
           active = false;
         }
         if (sourceChanged || !active) {
-          fingerprints = new Map([...fingerprints].filter(([, record]) => record.source));
+          if (sourceChanged) fingerprints = new Map([...fingerprints].filter(([, record]) => record.source));
           reported = new Set();
           pending.clear();
           active = await compile();
@@ -4737,11 +4754,13 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
           pending.clear();
           reported = new Set();
         }
+        cancelledForChange = false;
         notifications.changed();
       }
       const interval = notifications.complete ? 10000 : 200;
       const scanDue = Math.max(1, interval - (Date.now() - lastScan));
-      await notifications.wait(Math.min(busy ? 10 : 1000, pending.size ? 100 : scanDue, scanDue));
+      const debounceWait = pending.size && now - lastChange < debounceMS ? debounceMS - (now - lastChange) : scanDue;
+      await notifications.wait(Math.min(busy ? 10 : 1000, debounceWait, scanDue));
     }
   } catch (error) {
     if (!cancellation.signal.aborted) {

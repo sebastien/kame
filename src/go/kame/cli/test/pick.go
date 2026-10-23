@@ -160,3 +160,18 @@ func TestPickGrammarForwardsExecutionFlagsAndRejectsTargets(t *testing.T) {
 		rejected.Free()
 	}
 }
+
+func TestPickForwardsWatchSettingsToBuild(t *testing.T) {
+	inv := cli.Parse("pick", []string{"--watch=250", "--cancel"})
+	defer inv.Free()
+	if !inv.OK || !inv.Watch || inv.WatchDebounceMS != 250 || !inv.CancelOnChange {
+		t.Fatal("pick watch options were not parsed")
+	}
+	args := cli.PickArgs(&inv, "build", "app")
+	text := joined(args)
+	if !strings.Contains(text, "--watch=250 --cancel") {
+		t.Error("pick dropped watch settings: " + text)
+	}
+	mem.FreeString(mem.System, text)
+	cli.FreeArgs(args)
+}
