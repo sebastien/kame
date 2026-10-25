@@ -73,6 +73,9 @@ type Context struct {
 	activeCapabilities []Capability
 	operationStart     int
 	operationEnd       int
+	captureBudget      int
+	captureBudgetStart int
+	captureBudgetEnd   int
 	completionConsumed bool
 	RecoverFailures    bool
 	ReserveEnv         bool
@@ -461,7 +464,7 @@ func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool
 					return false
 				}
 			}
-			if i < len(kinds) && (kinds[i].Text == "merge" || kinds[i].Text == "broadcast" || kinds[i].Text == "balance" || kinds[i].Text == "frame" || kinds[i].Text == "encode" || kinds[i].Text == "filter" || kinds[i].Text == "copy") {
+			if i < len(kinds) && (kinds[i].Text == "merge" || kinds[i].Text == "broadcast" || kinds[i].Text == "balance" || kinds[i].Text == "frame" || kinds[i].Text == "encode" || kinds[i].Text == "filter" || kinds[i].Text == "copy" || kinds[i].Text == "out" || kinds[i].Text == "err") {
 				continue
 			}
 			if stages[i].Kind != core.List || len(stages[i].List) == 0 || stages[i].List[0].Kind != core.String || !authorizeExecutable(c, stages[i].List[0].Text) {

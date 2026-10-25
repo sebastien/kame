@@ -138,8 +138,13 @@ def check_host(host: list[str], root: Path, part: str = 'all') -> None:
 			assert document["producers"][0]["configuration"] == {"type": "release", "schema": "v2"}, document
 		else:
 			text = re.sub(rb"\x1b\[[0-9;]*m", b"", plan.stdout)
-			assert b'        type: "release"\n' in text and b'        schema: "v2"\n' in text, text
+			assert b'configuration: {"type":"release","schema":"v2"}' in text, text
+			assert not re.search(rb"^ {8}(type|schema):", text, re.M), text
 			assert b"  schema: 1\n" not in text and b'  type: "plan"\n' not in text, text
+			verbose = invoke(host, args + ["--color", "always", "do", "plan", "--verbose", "--define", "type=release", "--define", "schema=v2"], project)
+			verbose_text = re.sub(rb"\x1b\[[0-9;]*m", b"", verbose.stdout)
+			producer_rows = [line for line in verbose_text.splitlines() if b"configuration: " in line]
+			assert len(producer_rows) == 1 and b"rule: {" in producer_rows[0], verbose_text
 		for command in ["plan", "inputs", "outputs", "span", "tools"]:
 			result = invoke(host, args + ["do", command], project)
 			assert not result.stderr

@@ -210,6 +210,11 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			for i := range stages {
 				if i < len(e.Items) && e.Items[i].Kind == expr.CommandMux && host.PayloadInt(stages[i], "status") == host.PayloadInt(completion.Value, "status") {
 					status := int(host.PayloadInt(stages[i], "status"))
+					if status == 125 && (e.Items[i].Text == "out" || e.Items[i].Text == "err") {
+						r.Free(c.Run)
+						r = failure(c.Run, "HOST_FAIL", e.Items[i].Span, "presentation output delivery failed")
+						break
+					}
 					if (status >= StreamEncoding && status <= StreamPredicateFailure) || status == StreamBufferLimit {
 						r.Free(c.Run)
 						r = streamFailure(c, status, e.Items[i].Span)
@@ -681,6 +686,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if e.AcceptExit {
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "acceptExit"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
+	if c.captureBudget > 0 && e.Span.Start == c.captureBudgetStart && e.Span.End == c.captureBudgetEnd {
+		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "captureLimit"), Value: core.Value{Kind: core.Int, Int: int64(c.captureBudget)}})
+	}
 	if e.Topology || configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
 		host.ConfigureStages(c.Run, &payload, state.Setups)
 	}
@@ -870,12 +878,20 @@ func captureValue(a mem.Allocator, value core.Value, span source.Span, acceptExi
 	if !hasStatus {
 		return failure(a, "HOST_FAIL", span, "process completion omitted status")
 	}
+	if (output.Kind == core.String && !utf8.Valid([]byte(output.Text))) || (output.Kind == core.Bytes && !utf8.Valid(output.Bytes)) {
+		return failure(a, "CAPTURE_ENCODING", span, "command substitution output is not valid UTF-8")
+	}
 	if !acceptExit && (status != 0 || signal != 0) {
 		if signal != 0 && status == 0 {
 			status = 128 + signal
 		}
 		r := failure(a, "RECIPE_FAIL", span, "command substitution exited unsuccessfully")
 		r.Diagnostic.Cause = diagnostic.Cause{Kind: owned(a, "process"), Message: owned(a, "process exited"), Status: int(status), HasStatus: true, Signal: int(signal), HasSignal: signal != 0}
+		if output.Kind == core.String && utf8.Valid([]byte(output.Text)) {
+			r.Value = output.Clone(a)
+		} else if output.Kind == core.Bytes && utf8.Valid(output.Bytes) {
+			r.Value = core.NewString(a, string(output.Bytes))
+		}
 		return r
 	}
 	if output.Kind == core.String {

@@ -235,6 +235,10 @@ func (p *Program) drainRequests() {
 			capture = capture && !stream
 			if capture {
 				retain = p.Options.CaptureLimit
+				limit := int(host.PayloadInt(request.Payload, "captureLimit"))
+				if limit > 0 && limit < retain {
+					retain = limit
+				}
 			}
 			if stream {
 				retain = 0

@@ -30,3 +30,10 @@ retried = (reduce ([previous number]
       (fail! "non-retryable failure")))) [status: 75 signal: 0] [1 2 3])
 (if (= retried.status 0) :nil (fail! "retry budget exhausted"))
 printf "recovered\n"
+
+# Lists sequence completed commands; || handles an ordinary process exit.
+sh -c "exit 7" || printf "fallback\n"
+
+# out joins capture; err forwards command stdout to the error sink.
+message = $(printf "payload" >&out && printf "progress\n" >&err)
+printf "captured=%s\n" $message

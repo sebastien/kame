@@ -64,7 +64,7 @@ func TestKashStatementDelimitersAndMultilineValues(t *testing.T) {
 }
 
 func TestKashRejectsMalformedAndUnsupportedSource(t *testing.T) {
-	invalid := []string{"name =\necho next", "name = one two", "name = a\nname = b", "(f X) = X\nf = 1", "value = ${name}suffix", "value = @(cat \"a\")suffix", "value = (cat \"a\" $name)", "echo |\necho next", "echo >\necho next", "echo > a | cat", "echo | cat < a", "echo $(printf one; printf two)", "if cat { echo yes }", "match value { echo yes }", "echo && cat", "value = 1 ??", "echo \"unclosed"}
+	invalid := []string{"name =\necho next", "name = one two", "name = a\nname = b", "(f X) = X\nf = 1", "value = ${name}suffix", "value = @(cat \"a\")suffix", "value = (cat \"a\" $name)", "echo |\necho next", "echo >\necho next", "echo > a | cat", "echo | cat < a", "echo $(printf one; printf two)", "if cat { echo yes }", "match value { echo yes }", "echo &&", "value = 1 ??", "echo \"unclosed"}
 	for i := range invalid {
 		s := script.ParseKash(t.Allocator(), "invalid.kash", invalid[i])
 		if len(s.Diagnostics) == 0 {
@@ -122,6 +122,63 @@ func TestKashIfRetainsNestedBodiesAndLocalDefinitions(t *testing.T) {
 	defer mem.FreeString(a, canonical)
 	if formatted != canonical {
 		t.Error("control formatting changed block nesting")
+	}
+}
+
+func TestKashCommandConditionListCanContinueAfterOperator(t *testing.T) {
+	sourceText := "if false ||\n\ttrue\n\tprintf yes\nelse\n\tprintf no"
+	s := script.ParseKash(t.Allocator(), "condition-list.kash", sourceText)
+	if len(s.Diagnostics) != 0 {
+		t.Error("multiline command condition list did not parse")
+	} else if s.Items[0].Expression.Items[0].Items[0].Kind != expr.CommandList || !s.Items[0].Expression.Items[0].Items[0].CommandCondition {
+		t.Error("conditional command list lost its condition marker")
+	}
+	s.Free()
+}
+
+func TestKashCommandConditionKeepsArgumentControlBoundaries(t *testing.T) {
+	valid := []string{
+		"if test \"$(printf x)\" = x\n\tprintf yes",
+		"if false || test \"$(printf x)\" = x\n\tprintf yes",
+		"if false\n\tprintf no\nelif test \"$(printf x)\" = x\n\tprintf yes",
+		"while test \"$(printf x)\" = y\n\tprintf no",
+		"if test \"$(false?)\" = \"\"\n\tprintf yes",
+	}
+	for i := range valid {
+		s := script.ParseKash(t.Allocator(), "condition.kash", valid[i])
+		if len(s.Diagnostics) != 0 {
+			t.Errorf("condition argument control was rejected: %s", valid[i])
+		}
+		s.Free()
+	}
+	invalid := []string{
+		"if true && false?\n\tprintf no",
+		"if false || false ? true\n\tprintf no",
+		"if true &\n\tprintf no",
+		"if $(printf x)\n\tprintf no",
+	}
+	for i := range invalid {
+		s := script.ParseKash(t.Allocator(), "invalid-condition.kash", invalid[i])
+		if len(s.Diagnostics) == 0 {
+			t.Errorf("condition control was accepted: %s", invalid[i])
+		}
+		s.Free()
+	}
+}
+
+func TestKashCommandListRejectsLeadingOperators(t *testing.T) {
+	invalid := []string{
+		"printf a\n|| printf b",
+		"printf a\n  || printf b",
+		"printf a\n&& printf b",
+		"if true\n\tprintf a\n\t|| printf b",
+	}
+	for i := range invalid {
+		s := script.ParseKash(t.Allocator(), "leading-operator.kash", invalid[i])
+		if len(s.Diagnostics) == 0 {
+			t.Errorf("leading command-list operator was accepted: %s", invalid[i])
+		}
+		s.Free()
 	}
 }
 

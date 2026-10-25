@@ -195,6 +195,9 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery {
 				s.error(start, part.End, "defer requires one parenthesized Kame expression, not a Kash value recovery")
 			}
+			if part.Expr != nil && part.Expr.Kind == expr.CommandList {
+				s.error(start, part.End, "defer requires one process graph; defer a Kash callable for a command list")
+			}
 			if part.Expr != nil && part.Expr.Kind == expr.CommandGraph && (part.Expr.Async || len(part.Expr.Body) != 0) {
 				s.error(start, part.End, "deferred commands cannot use & or command fallback; defer a Kash callable for compound cleanup")
 			}
@@ -313,9 +316,6 @@ func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
 			if valueStart == end || text[valueStart] == '#' {
 				s.error(wordEnd, end, "expected Kash condition")
 			} else {
-				view := mem.Alloc[source.Source](s.Alloc)
-				*view = *s.Source
-				view.Text = text[:end]
 				var condition expr.Prefix
 				if text[valueStart] == '(' {
 					condition = expr.ParseKashValuePrefix(s.Alloc, s.Source, valueStart)
@@ -326,13 +326,22 @@ func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
 						}
 					}
 				} else {
-					condition = expr.ParseCommandPrefix(s.Alloc, view, valueStart)
-					condition.Expr.Kind = expr.CommandTest
-					if condition.Expr.Async || condition.Expr.AcceptExit || len(condition.Expr.Body) != 0 || (valueStart+1 < end && text[valueStart:valueStart+2] == "$(") {
+					condition = expr.ParseCommandPrefix(s.Alloc, s.Source, valueStart)
+					if condition.Expr.Kind == expr.CommandList {
+						condition.Expr.CommandCondition = true
+						if condition.End > end {
+							end = condition.End
+							for end < len(text) && text[end] != '\n' {
+								end++
+							}
+						}
+					} else {
+						condition.Expr.Kind = expr.CommandTest
+					}
+					if hasCommandConditionControl(condition.Expr) || (valueStart+1 < end && text[valueStart:valueStart+2] == "$(") {
 						s.error(valueStart, end, "command conditions cannot use async, capture, acceptance or recovery")
 					}
 				}
-				mem.Free(s.Alloc, view)
 				s.takeDiagnostics(condition.Diagnostics)
 				branch.Items = slices.Append(s.Alloc, branch.Items, condition.Expr)
 				for condition.End < end && space(text[condition.End]) {
@@ -599,4 +608,24 @@ func (p *kashParser) valueHeader(start int, end int, kash bool) *expr.Expr {
 		s.error(start, end, "control header requires exactly one expression")
 	}
 	return value.Expr
+}
+
+func hasCommandConditionControl(e *expr.Expr) bool {
+	if e == nil {
+		return false
+	}
+	if e.Async || e.AcceptExit || e.Kind == expr.CommandCapture || ((e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest) && len(e.Body) != 0) {
+		return true
+	}
+	// Argument expressions have their own control boundaries. Only list
+	// operands belong to the command condition's control syntax.
+	if e.Kind != expr.CommandList {
+		return false
+	}
+	for i := range e.Items {
+		if hasCommandConditionControl(e.Items[i]) {
+			return true
+		}
+	}
+	return false
 }

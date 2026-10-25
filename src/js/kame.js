@@ -237,6 +237,12 @@ function configurePresentation(inv) {
   diagnosticColor = resolveColor(inv.color, 'human');
   outputColor = resolveColor(inv.color, 'human', stdout);
 }
+function processExitStatus(diagnostic, explicitRun) {
+  const cause = diagnostic?.cause;
+  if (!explicitRun || diagnostic?.code !== 'RECIPE_FAIL' || cause?.kind !== 'process' || !Number.isSafeInteger(cause.status)) return 1;
+  if (Number.isSafeInteger(cause.signal) && cause.signal > 0) return 128 + cause.signal;
+  return cause.status || 1;
+}
 function writeReport(heading, document, verbose = false) {
   const data = typeof document === 'string' || Buffer.isBuffer(document) || document instanceof Uint8Array ? JSON.parse(Buffer.from(document).toString('utf8')) : document;
   if (jsonMode) { stdout.write(`${JSON.stringify(data)}\n`); return; }
@@ -278,6 +284,13 @@ function writeInspectionReport(doc, write, verbose) {
   const downstream = doc.direction === 'downstream';
   const producer = (id) => producers.find((p) => p.id === id);
   const text = (value, token = 'value.path') => styled(token, shortReportField(value), outputColor);
+  const inlineField = (key, value) => {
+    const label = key === 'reusePolicy' ? 'reuse' : key;
+    const plain = ['', 'source', 'path', 'target', 'name', 'kind', 'freshness', 'backend', 'key', 'reuse'].includes(label) && typeof value === 'string' && value !== '' && !/[\s\x00-\x1f\x7f]/u.test(value);
+    const rendered = value === null ? ':nil' : typeof value === 'boolean' ? value ? ':true' : ':false' : typeof value === 'string' ? plain ? value : JSON.stringify(value) : typeof value === 'object' ? JSON.stringify(value) : String(value);
+    const token = ['source', 'path', 'target'].includes(label) ? 'value.path' : 'value.literal';
+    return `${styled('value.symbol', label, outputColor)}: ${styled(token, rendered, outputColor)}`;
+  };
   stdout.write('  scope: declared and read-only resolved\n');
   if (downstream) stdout.write('  direction: downstream · potentially affected, not guaranteed to rebuild\n');
   for (let section = 0; section < 3; section++) {
@@ -310,21 +323,20 @@ function writeInspectionReport(doc, write, verbose) {
   if (doc.type === 'plan') {
     stdout.write('  producers\n');
     for (const p of producers) {
-      if (p.kind === 'definition' && p.text) {
-        stdout.write(`    ${text(p.text, 'value.literal')}\n`);
-        continue;
-      }
-      stdout.write(`    ${text(p.target, 'value.target')} · ${p.kind}\n`);
+      const definition = p.kind === 'definition' && p.text;
+      let line = definition ? `    ${text(p.text, 'value.literal')}` : `    ${text(p.target, 'value.target')} · ${text(p.kind, 'value.literal')}`;
       for (const [key, value] of Object.entries(p)) {
         if (['id', 'resource', 'target', 'kind', 'outputs'].includes(key)) continue;
+        if (definition && key === 'text') continue;
+        if (!verbose && ['span', 'rule', 'text'].includes(key)) continue;
         if (!verbose && ((value !== null && typeof value === 'object' && Object.keys(value).length === 0) || (key === 'freshness' && value === 'unknown'))) continue;
-        write(value, key, 3);
+        line += ` · ${inlineField(key, value)}`;
       }
+      stdout.write(`${line}\n`);
     }
     stdout.write(`  stages · dependency ordering, not global barriers${doc.truncated || doc.deferred.length ? ' · partial' : ''}\n`);
     for (const stage of doc.stages) {
-      stdout.write(`    stage ${stage.number}${stage.producers.length > 1 ? ' · parallel eligible' : ''}\n`);
-      for (const id of stage.producers) stdout.write(`      ${text(producer(id).target, 'value.target')}\n`);
+      stdout.write(`    stage ${stage.number}${stage.producers.length > 1 ? ' · parallel eligible' : ''}${stage.producers.map((id) => ` · ${text(producer(id).target, 'value.target')}`).join('')}\n`);
     }
     for (const d of doc.dependencies.filter((d) => d.group > 1)) stdout.write(`    sequence barrier: ${text(producer(d.producer).target, 'value.target')} · group ${d.group} follows earlier groups\n`);
   }
@@ -2657,7 +2669,7 @@ class Module {
       if (error.code === 'RECIPE_TIMEOUT') this.exports.kame_wasm_finalization_tick?.(instance, process.hrtime.bigint(), 2);
       primaryError = error;
       primaryDiagnostic = lastDiagnostic;
-      if (inv.json && lastDiagnostic !== null) return 1;
+      if (inv.json && lastDiagnostic !== null) return processExitStatus(lastDiagnostic, inv.name === 'run');
       throw error;
     } finally {
       cancellation.abort();
@@ -3141,7 +3153,7 @@ function prepareByteTopology(stages, context) {
     outputs[edge[0]].push(i); inputs[edge[1]].push(i);
   }
   for (let i = 0; i < stages.length; i++) {
-    if (!Array.isArray(stages[i]) || !['', 'merge', 'broadcast', 'balance', 'frame', 'encode', 'filter', 'copy', 'each'].includes(kinds[i])) invalid();
+    if (!Array.isArray(stages[i]) || !['', 'merge', 'broadcast', 'balance', 'frame', 'encode', 'filter', 'copy', 'each', 'out', 'err'].includes(kinds[i])) invalid();
     if (!kinds[i] || kinds[i] === 'each') {
       const stdin = inputs[i].filter((edge) => !(edges[edge][2] ?? 0));
       if (!stages[i].length || stdin.length > 1 || outputs[i].length > 1) invalid();
@@ -3152,6 +3164,7 @@ function prepareByteTopology(stages, context) {
       if (kinds[i] === 'merge') { if (inputs[i].length < 2 || outputs[i].length !== 1) invalid(); }
       else if (kinds[i] === 'broadcast' || kinds[i] === 'balance') { if (inputs[i].length !== 1 || outputs[i].length < 2) invalid(); }
       else if (kinds[i] === 'filter') { if (inputs[i].length !== 1 || outputs[i].length !== 2) invalid(); }
+      else if (kinds[i] === 'out' || kinds[i] === 'err') { if (inputs[i].length !== 1 || outputs[i].length !== 0) invalid(); }
       else if (inputs[i].length !== 1 || outputs[i].length > 1) invalid();
     }
   }
@@ -3269,7 +3282,7 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
     for (const queue of queues) { queue.pending.length = 0; queue.bytes = 0; }
     for (const stream of [...readers, ...writers]) stream.destroy();
   };
-  const error = (cause) => { if (!disposed) fail(['EPIPE', 'ECONNRESET'].includes(cause.code) ? 'RECIPE_FAIL' : 'HOST_FAIL', `process operator I/O failed: ${cause.message}`); };
+  const error = (cause) => { if (!disposed) fail(['EPIPE', 'ECONNRESET'].includes(cause.code) && !['out', 'err'].includes(kind) ? 'RECIPE_FAIL' : 'HOST_FAIL', `process operator I/O failed: ${cause.message}`); };
   const flushQueue = (index) => {
     const queue = queues[index], writer = writers[index];
     if (disposed || queue.writing || queue.ending) return;
@@ -3508,7 +3521,7 @@ function runArgvCapture(stages, context) {
       // Let the portable evaluator classify exit failure before decoding output.
       const terminal = { status, signal, stages: results, stdout: '' };
       if (topology) terminal.edgeMetrics = topology.edgeMetrics;
-      if ((!context.acceptExit && (status !== 0 || signal !== 0)) || context.stream) { resolveRun({ ok: true, value: terminal }); return; }
+      if (context.stream) { resolveRun({ ok: true, value: terminal }); return; }
       let output;
       try { output = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)); }
       catch { resolveRun({ ok: false, code: 'CAPTURE_ENCODING', message: 'command substitution output is not valid UTF-8' }); return; }
@@ -3674,8 +3687,9 @@ function runArgvCapture(stages, context) {
           remaining++;
           reader.on('error', (error) => failMux('HOST_FAIL', error.message));
           reader.once('close', () => { remaining--; finish(); });
-          if (context.stream) publishReader(reader, receiveOutput, () => failure !== null || context.signal?.aborted);
-          else reader.on('data', receiveOutput);
+          const receive = topology.kinds[i] === 'err' ? (chunk) => publish((bytes) => { if (context.onStderr) context.onStderr(bytes); else stderr.write(bytes); }, chunk) : receiveOutput;
+          if (context.stream) publishReader(reader, receive, () => failure !== null || context.signal?.aborted);
+          else reader.on('data', receive);
         }
         operators.push(startByteMux(topology.inputs[i].map((edge) => {
           const reader = new Socket({ fd: pipes[edge].read, readable: true, writable: false });
@@ -4856,7 +4870,7 @@ async function dispatch(module, inv, noArguments) {
       if (streaming || inv.name === 'plan') for (const record of records) stdout.write(`${JSON.stringify(record)}\n`);
       else stdout.write(`${JSON.stringify(records.length === 1 ? records[0] : records)}\n`);
     } else for (const detail of details) stderr.write(renderDiagnostic(detail, primarySource, diagnosticFormat === 'human' ? stderr.columns || 80 : 80));
-    status = interruptedStatus || 1;
+    status = interruptedStatus || processExitStatus(details[0], inv.name === 'run');
   }
   clearDashboard();
   if (inv.name === 'fmt' && status && invocationHadDiagnostic) formatCounts.failed++;

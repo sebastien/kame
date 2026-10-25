@@ -30,6 +30,25 @@ func TestProcessTopologyValidation(t *testing.T) {
 	}
 }
 
+func TestReservedPresentationPortsAreTerminalSinks(t *testing.T) {
+	kinds := []string{"out", "err"}
+	for i := range kinds {
+		kind := kinds[i]
+		request := host.ProcessRequest{
+			Topology: true,
+			Stages:   []host.ProcessStage{{Argv: []string{"source"}}, {Kind: kind}},
+			Edges:    []host.ProcessEdge{{From: 0, To: 1}},
+		}
+		if code := host.ProcessTopologyError(t.Allocator(), request); code != "" {
+			t.Errorf("%s presentation sink rejected: %s", kind, code)
+		}
+		request.Edges = []host.ProcessEdge{{From: 0, To: 1}, {From: 1, To: 0}}
+		if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_MUX_ARITY" {
+			t.Errorf("%s presentation sink accepted a downstream edge: %s", kind, code)
+		}
+	}
+}
+
 func TestProcessTopologyRejectsPrivateFramesAtByteBoundaries(t *testing.T) {
 	stages := []host.ProcessStage{{Argv: []string{"source"}}, {Kind: "frame", Framed: true}, {Kind: "encode"}, {Argv: []string{"sink"}}}
 	edges := []host.ProcessEdge{{From: 0, To: 1}, {From: 1, To: 2}, {From: 2, To: 3}}

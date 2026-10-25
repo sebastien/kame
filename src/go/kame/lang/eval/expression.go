@@ -95,6 +95,8 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.application(scope, expression, context)
 	case expr.CommandCapture, expr.CommandGraph, expr.CommandTest:
 		return p.capture(expression, context)
+	case expr.CommandList:
+		return p.commandList(expression, context)
 	case expr.KashIf, expr.KashMatch:
 		return p.kashControl(scope, expression, context)
 	case expr.KashFor, expr.KashWhile:

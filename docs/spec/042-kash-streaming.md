@@ -474,12 +474,14 @@ an unaccepted nonzero result into success.
 
 ### 8.3 Capture and presentation
 
-`$(graph)` captures the designated graph output under existing UTF-8 and capture
-bounds; stderr remains live. More than one unredirected terminal stdout is
-`KASH_AMBIGUOUS_CAPTURE`: explicitly merge or redirect unrelated terminals.
-Never silently concatenate, discard, or bypass limits. The existing redirected
-linear-pipeline capture remains an empty string, without duplicating stdout;
-the zero-terminal multi-branch case is distinguished in §12.
+`$(graph)` captures the graph's terminal stdout and explicit `>&out` presentation
+ports under existing UTF-8 and capture bounds; stderr remains live. Explicit
+`>&err` and file redirections are noncapture dispositions. More than one output
+directed to the capture sink is `KASH_AMBIGUOUS_CAPTURE`: explicitly merge or
+redirect unrelated outputs. Never silently concatenate, discard, or bypass
+limits. Zero capture outputs produce an empty string, including a multi-branch
+graph whose outputs all use noncapture dispositions. The existing redirected
+linear-pipeline capture remains empty, without duplicating stdout.
 
 Noncapturing terminal stdout/stderr use the host's public sinks. These effects
 do not supply hidden readers/writers to graph channels or retain output in the
@@ -633,20 +635,30 @@ output is captured. Missing host telemetry does not imply unsupported execution.
 Acceptance makes no claim of seekability detection, implicit disk spooling,
 transactional live measurements, or native Windows streaming support.
 
-## 12. Unresolved boundaries and extensions
+## 12. Reserved presentation ports and remaining extensions
 
-These features are not implicit behavior and require separate design:
+`>&out` and `>&err` are reserved terminal presentation writers, not named
+channels or data edges. `out` inherits the current output sink (the capture sink
+inside `$(...)`); `err` inherits the current error sink and is excluded from
+capture. They may terminate selected branches or serve as sink-only graph
+writers. Framed payloads are encoded before presentation. A stdout port has one
+disposition, so conflicting graph/file/output-port destinations fail before
+launch. `in` remains reserved and unavailable; `<&name` remains a positional
+channel operand. Arbitrary descriptor duplication such as `2>&1` is unsupported.
+
+The zero-output rule is explicit: no capture-directed outputs yields an empty
+string, while more than one is `KASH_AMBIGUOUS_CAPTURE`. Each terminal stdout and
+explicit `>&out` counts as one output. Error ports, files, and internal channels
+do not count as capture outputs; named channels are counted at their resolved
+terminal destinations.
+
+The following features remain extensions requiring separate design:
 
 - Larger `flow:`/`graph:` construction blocks; lexical declarations in one
   constructed graph are already defined.
-- Explicit enclosing input/output/stderr ports, including reserved `in`/`out`/
-  `err` and descriptor duplication. Whether whitespace-separated
-  `command < &name` should mean channel stdin remains undecided; `<&name`
-  already means a positional operand.
-- Zero-terminal **multi-branch** capture: the one-output requirement and
-  `017`'s redirected-linear empty-capture rule do not specify this case
-  consistently. Multiple unredirected outputs are unambiguously rejected;
-  anonymous live producers require exactly one output.
+- Whether whitespace-separated `command < &name` should mean channel stdin
+  remains undecided; `<&name` already means a positional operand.
+- Anonymous live producers require exactly one output.
 - Other framers (`:jsonl`, `:length-prefixed`, typed sources), explicit chunking,
   weighted/key/readiness scheduling, worker pools, and bounded explicit disk
   spooling/materialization.

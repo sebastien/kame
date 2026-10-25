@@ -56,6 +56,33 @@ Only nil and false are false; zero and empty strings/lists are true.
 Pipelines count every stage's failure, including SIGPIPE. Do not infer success
 from the final stage or weaken checks to hide a failed downloader.
 
+## Sequence commands and route output deliberately
+
+```kash
+compile && verify && publish
+probe || use-cache
+
+message = $(printf "payload" >&out && printf "progress\n" >&err)
+printf "captured=%s\n" $message
+```
+
+Lists run left to right at equal precedence. `&&` selects the next command after
+effective success; `||` handles an ordinary process exit or signal, not launch,
+timeout, transport/capture, capability, evaluation, or operator failures. Use `?`
+when an exit should be accepted and inspected. Failed operand output remains in
+capture if a fallback runs; the capture limit applies cumulatively across the list.
+
+`>&out` routes command stdout to the current output sink, so inside `$(...)` it
+is captured. `>&err` sends stdout to the error sink and stays outside capture; it
+does not redirect a process's own stderr. These are presentation sinks, not named
+channels or descriptor duplication. The example writes `captured=payload` to
+stdout and `progress` to stderr.
+
+An unhandled executable exit from explicit `do run` preserves its process status;
+signals use `128 + signal`. Successful acceptance or recovery exits zero. For
+example, `kame do run --allow-run --lang kash -c 'sh -c "exit 42"'` exits 42.
+Build-target failure aggregation remains separate.
+
 ## Finite work and bounded retry
 
 For a multi-command body, iterate directly over a typed list:

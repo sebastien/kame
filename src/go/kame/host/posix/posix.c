@@ -1757,7 +1757,7 @@ static int km_mux_send(int node, int kind, int *edges, so_int *links, int count,
             km_metric_write(i, length - header);
         }
     }
-    if (!output && !km_mux_write(STDOUT_FILENO, data, (size_t)length)) return 125;
+	if (!output && !km_mux_write(kind == 10 ? STDERR_FILENO : STDOUT_FILENO, data, (size_t)length)) return 125;
     return 0;
 }
 
@@ -2054,7 +2054,7 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
         if (links[i * 2 + 1] == node) inputs[readers++] = (struct pollfd){.fd = edges[i * 2], .events = POLLIN};
     }
     km_mux_close_unowned(node, edges, links, count);
-    signal(SIGPIPE, SIG_DFL); signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL);
+    signal(SIGPIPE, kind == 9 || kind == 10 ? SIG_IGN : SIG_DFL); signal(SIGTERM, SIG_DFL); signal(SIGINT, SIG_DFL);
     int overflow = (mode >> 5) & 3;
     if (overflow) {
         free(inputs);

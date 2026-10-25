@@ -199,11 +199,24 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	if d.Code != "" {
 		emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), d, inv.JSON, fragments, loaded)
 		if status == 0 {
-			status = 1
+			status = processExitStatus(d, inv.Name == "run")
 		}
 	}
 	d.Free(mem.System)
 	return status
+}
+
+func processExitStatus(d diagnostic.Diagnostic, explicitRun bool) int {
+	if !explicitRun || d.Code != "RECIPE_FAIL" || d.Cause.Kind != "process" || !d.Cause.HasStatus {
+		return 1
+	}
+	if d.Cause.HasSignal && d.Cause.Signal != 0 {
+		return 128 + d.Cause.Signal
+	}
+	if d.Cause.Status == 0 {
+		return 1
+	}
+	return d.Cause.Status
 }
 
 func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer, errOut io.Writer, fragments []program.Fragment, loaded []buildSource) int {
@@ -233,8 +246,9 @@ func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer,
 		started := session.Start(i)
 		if started.Diagnostic.Code != "" {
 			emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), started.Diagnostic, inv.JSON, fragments, loaded)
+			status := processExitStatus(started.Diagnostic, inv.Name == "run")
 			started.Diagnostic.Free(mem.System)
-			return 1
+			return status
 		}
 		h := started.Handle
 		for {
@@ -320,9 +334,10 @@ func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer,
 				if !inv.JSON || inv.Name == "render" {
 					emitRunDiagnostic(diagnosticWriter(out, errOut, inv.JSON), polled.Result.Diagnostic, inv.JSON, fragments, loaded)
 				}
+				status := processExitStatus(polled.Result.Diagnostic, inv.Name == "run")
 				polled.Result.Free(mem.System)
 				h.Free()
-				return 1
+				return status
 			}
 			if i < len(session.Work) && session.Work[i].Value && session.Work[i].Display {
 				last.Free(mem.System)

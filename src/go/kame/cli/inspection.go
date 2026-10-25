@@ -2,10 +2,12 @@ package cli
 
 import (
 	"kame/core"
+	"kame/lang/eval"
 	"solod.dev/so/encoding/json"
 	"solod.dev/so/fmt"
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
+	"solod.dev/so/slices"
 	"solod.dev/so/strings"
 )
 
@@ -44,6 +46,43 @@ func reportEmpty(value core.Value) bool {
 		return len(value.Record) == 0
 	}
 	return false
+}
+
+func writeInlineReportField(out io.Writer, key string, value core.Value, styled bool) {
+	label := key
+	if label == "reusePolicy" {
+		label = "reuse"
+	}
+	Style(out, "value.symbol", label, styled)
+	io.WriteString(out, ": ")
+	if value.Kind == core.String {
+		plain := value.Text != "" && (label == "source" || label == "path" || label == "target" || label == "name" || label == "kind" || label == "freshness" || label == "backend" || label == "key" || label == "reuse")
+		for i := range value.Text {
+			if value.Text[i] <= ' ' || value.Text[i] == 127 {
+				plain = false
+				break
+			}
+		}
+		if plain {
+			token := "value.literal"
+			if label == "source" || label == "path" || label == "target" {
+				token = "value.path"
+			}
+			reportText(out, value.Text, token, styled)
+			return
+		}
+	}
+	if value.Kind == core.String || value.Kind == core.List || value.Kind == core.Record {
+		var data []byte
+		if core.PresentationValueJSON(mem.System, value, &data) {
+			Style(out, "value.literal", string(data), styled)
+			slices.Free(mem.System, data)
+			return
+		}
+	}
+	text := eval.Display(mem.System, value)
+	Style(out, "value.literal", text, styled)
+	mem.FreeString(mem.System, text)
 }
 
 func reportText(out io.Writer, text string, token string, styled bool) {
@@ -200,25 +239,33 @@ func writeInspectionReport(out io.Writer, doc core.Value, styled bool, verbose b
 		io.WriteString(out, "  producers\n")
 		for i := range producers.List {
 			p := producers.List[i]
-			if reportField(p, "kind").Text == "definition" && reportField(p, "text").Text != "" {
-				io.WriteString(out, "    ")
-				reportText(out, reportField(p, "text").Text, "value.literal", styled)
-				io.WriteString(out, "\n")
-				continue
-			}
+			definition := reportField(p, "kind").Text == "definition" && reportField(p, "text").Text != ""
 			io.WriteString(out, "    ")
-			reportText(out, reportField(p, "target").Text, "value.target", styled)
-			io.WriteString(out, " · "+reportField(p, "kind").Text+"\n")
+			if definition {
+				reportText(out, reportField(p, "text").Text, "value.literal", styled)
+			} else {
+				reportText(out, reportField(p, "target").Text, "value.target", styled)
+				io.WriteString(out, " · ")
+				reportText(out, reportField(p, "kind").Text, "value.literal", styled)
+			}
 			for j := range p.Record {
 				field := p.Record[j]
 				if field.Key == "id" || field.Key == "resource" || field.Key == "target" || field.Key == "kind" || field.Key == "outputs" {
 					continue
 				}
+				if definition && field.Key == "text" {
+					continue
+				}
+				if !verbose && (field.Key == "span" || field.Key == "rule" || field.Key == "text") {
+					continue
+				}
 				if !verbose && (reportEmpty(field.Value) || (field.Key == "freshness" && field.Value.Text == "unknown")) {
 					continue
 				}
-				writeReportValue(out, field.Value, field.Key, 3, styled, false)
+				io.WriteString(out, " · ")
+				writeInlineReportField(out, field.Key, field.Value, styled)
 			}
+			io.WriteString(out, "\n")
 		}
 		io.WriteString(out, "  stages · dependency ordering, not global barriers")
 		if reportField(doc, "truncated").Bool || len(deferred.List) != 0 {
@@ -233,13 +280,12 @@ func writeInspectionReport(out io.Writer, doc core.Value, styled bool, verbose b
 			if len(members.List) > 1 {
 				io.WriteString(out, " · parallel eligible")
 			}
-			io.WriteString(out, "\n")
 			for j := range members.List {
 				p := reportID(producers, members.List[j].Int)
-				io.WriteString(out, "      ")
+				io.WriteString(out, " · ")
 				reportText(out, reportField(p, "target").Text, "value.target", styled)
-				io.WriteString(out, "\n")
 			}
+			io.WriteString(out, "\n")
 		}
 		for i := range dependencies.List {
 			d := dependencies.List[i]

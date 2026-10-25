@@ -154,7 +154,7 @@ func TestCommandCaptureBoundaries(t *testing.T) {
 }
 
 func TestCommandCaptureRejectsUnsupportedAndMalformedSyntax(t *testing.T) {
-	inputs := []string{"$()", "$(printf", "$(printf \"unterminated)", "$(echo |)", "$(| cat)", "$(echo || cat)", "$(echo >)", "$(echo && echo)", "$(echo ${})", "$(echo ${name)", "$(echo @macro)", "$(echo 'literal')", "$(echo \"\\q\")"}
+	inputs := []string{"$()", "$(printf", "$(printf \"unterminated)", "$(echo |)", "$(| cat)", "$(echo ||)", "$(echo >)", "$(echo &&)", "$(echo ${})", "$(echo ${name)", "$(echo @macro)", "$(echo 'literal')", "$(echo \"\\q\")"}
 	for i := range inputs {
 		r := expr.Parse(t.Allocator(), "bad.km", inputs[i])
 		if len(r.Diagnostics) == 0 {

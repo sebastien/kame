@@ -285,7 +285,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.List || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
+	if value.Kind == expr.List || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.CommandList || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
 		if value.AcceptExit {
 			e.Str("acceptExit")
 			e.Bool(true)
@@ -300,6 +300,25 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.Str("items")
 		e.exprs(value.Items)
+		if value.Kind == expr.CommandList {
+			e.Str("operators")
+			e.BeginArray()
+			for i := range value.CommandOps {
+				e.BeginObject()
+				e.Str("text")
+				e.Str(value.CommandOps[i].Text)
+				e.Str("span")
+				e.span(value.CommandOps[i].Span)
+				e.Str("afterNewline")
+				e.Bool(value.CommandOps[i].AfterNewline)
+				e.EndObject()
+			}
+			e.EndArray()
+			e.Str("capture")
+			e.Bool(value.CommandListCapture)
+			e.Str("condition")
+			e.Bool(value.CommandCondition)
+		}
 	}
 	if value.Kind == expr.Record {
 		e.Str("fields")
@@ -510,6 +529,9 @@ func exprKind(k expr.Kind) string {
 	}
 	if k == expr.CommandGraph {
 		return "command-graph"
+	}
+	if k == expr.CommandList {
+		return "command-list"
 	}
 	if k == expr.CommandWord {
 		return "command-word"

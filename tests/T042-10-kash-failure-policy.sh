@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Spec: docs/spec/042-kash-streaming.md — explicit graph-wide exit collection
-# shellcheck disable=SC1091,SC2016
+# shellcheck disable=SC1010,SC1091,SC2016
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T042-10 Kash graph failure policy parity"
@@ -22,25 +22,25 @@ for backend in native wasm; do
 	output="$work/$backend-result"
 	marker="$work/$backend-joined"
 	test-step "$backend: ordinary exits are collected without accepting success"
-	run_case "(sh -c \"exit 7\", sh -c \"sleep 0.1; printf retained; touch $marker\") |(merge :failure collect) cat > $output" 1 RECIPE_FAIL
+	run_case "(sh -c \"exit 7\", sh -c \"sleep 0.1; printf retained; touch $marker\") |(merge :failure collect) cat > $output" 7 RECIPE_FAIL
 	expect "sibling reaches EOF before failure is reported" test -e "$marker"
 	expect "ordinary nonzero exit does not discard sibling output" test "$(cat "$output")" = retained
-	run_case "(sh -c \"exit 127\", sh -c \"sleep 0.1; printf kept\") |(merge :failure collect) cat > $output" 1 RECIPE_FAIL
+	run_case "(sh -c \"exit 127\", sh -c \"sleep 0.1; printf kept\") |(merge :failure collect) cat > $output" 127 RECIPE_FAIL
 	expect "an authored executable status 127 remains an ordinary exit" test "$(cat "$output")" = kept
-	run_case "(sh -c \"exit 7\", sh -c \"sleep 0.1; printf joined\") |(merge :failure collect) cat > $output &" 1 RECIPE_FAIL
+	run_case "(sh -c \"exit 7\", sh -c \"sleep 0.1; printf joined\") |(merge :failure collect) cat > $output &" 7 RECIPE_FAIL
 	expect "async collection owns its peers until joined" test "$(cat "$output")" = joined
 	run_case "(sh -c \"exit 7\", sh -c \"sleep 0.1; printf before-recovery\") |(merge :failure collect) cat > $output ? printf recovered"
 	expect "whole-graph recovery happens after sibling completion" test "$(cat "$output")" = before-recovery
 	expect "recovery remains explicit" grep -qx recovered "$work/$backend.out"
-	run_case "(sh -c \"printf 'a\\n'; exit 7\" |(frame :lines), sh -c \"printf 'b\\n'; exit 9\" |(frame :lines)) |(merge :failure collect :order round-robin) cat > $output" 1 RECIPE_FAIL
+	run_case "(sh -c \"printf 'a\\n'; exit 7\" |(frame :lines), sh -c \"printf 'b\\n'; exit 9\" |(frame :lines)) |(merge :failure collect :order round-robin) cat > $output" 9 RECIPE_FAIL
 	printf 'a\nb\n' >"$work/expected"
 	expect "strict ordering composes with collected producer failures" cmp -s "$output" "$work/expected"
-	run_case "cat <((sh -c \"exit 7\", sh -c \"sleep 0.1; printf operand\") |(merge :failure collect)) > $output" 1 RECIPE_FAIL
+	run_case "cat <((sh -c \"exit 7\", sh -c \"sleep 0.1; printf operand\") |(merge :failure collect)) > $output" 7 RECIPE_FAIL
 	expect "anonymous producers share their owning graph's collection policy" test "$(cat "$output")" = operand
 	test-step "$backend: fail-fast remains default and operator/signal failures remain fatal"
 	for policy in '' ':failure fail-fast'; do
 		late="$work/$backend-fast-${policy:+explicit}"
-		run_case "(sh -c \"exit 7\", sh -c \"sleep 1; touch $late\") |(merge $policy) cat > $output" 1 RECIPE_FAIL
+		run_case "(sh -c \"exit 7\", sh -c \"sleep 1; touch $late\") |(merge $policy) cat > $output" 7 RECIPE_FAIL
 		expect "fail-fast cancels unfinished sibling" test ! -e "$late"
 	done
 	late="$work/$backend-frame-late"
@@ -54,9 +54,9 @@ for backend in native wasm; do
 	expect "operator budget failure still cancels peers" test ! -e "$late"
 	late="$work/$backend-signal-late"
 	pid_token='\$\$'
-	run_case "(sh -c \"kill -TERM $pid_token\", sh -c \"sleep 1; touch $late\") |(merge :failure collect) cat > $output" 1 RECIPE_FAIL
+	run_case "(sh -c \"kill -TERM $pid_token\", sh -c \"sleep 1; touch $late\") |(merge :failure collect) cat > $output" 143 RECIPE_FAIL
 	expect "signal exits are not ordinary collected statuses" test ! -e "$late"
-	run_case "yes |(broadcast :failure collect) (head -c 1 > $output, cat > /dev/null)" 1 RECIPE_FAIL
+	run_case "yes |(broadcast :failure collect) (head -c 1 > $output, cat > /dev/null)" 141 RECIPE_FAIL
 	test-step "$backend: invalid and conflicting policies are effect-free"
 	marker="$work/$backend-invalid"
 	printf preserve >"$output"

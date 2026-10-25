@@ -99,7 +99,73 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 }
 
 func (p *parser) commandGraph(start int, capture bool) *Expr {
-	return p.commandPipeline(start, capture, false, false)
+	first := p.commandPipeline(start, capture, false, false)
+	if len(p.diags) != 0 {
+		return first
+	}
+	var operands []*Expr
+	var operators []CommandOperator
+	for p.pos+1 < len(p.s.Text) {
+		operator := p.s.Text[p.pos : p.pos+2]
+		if operator != "&&" && operator != "||" {
+			break
+		}
+		from := p.pos
+		if commandWhitespaceBeforeNewline(p.s.Text, from) {
+			p.error(from, from+2, "a command-list operator cannot start a new line")
+			break
+		}
+		p.pos += 2
+		afterNewline := false
+		for p.pos < len(p.s.Text) && commandWhitespace(p.s.Text[p.pos]) {
+			if p.s.Text[p.pos] == '\n' {
+				afterNewline = true
+			}
+			p.pos++
+		}
+		if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#' {
+			p.error(from, p.pos, "expected command after "+operator)
+			break
+		}
+		if len(operands) == 0 {
+			operands = slices.Append(p.a, operands, first)
+		}
+		operators = slices.Append(p.a, operators, CommandOperator{Text: operator, Span: source.Span{Start: from, End: from + 2}, AfterNewline: afterNewline})
+		next := p.commandPipeline(p.pos, capture, false, false)
+		operands = slices.Append(p.a, operands, next)
+		if len(p.diags) != 0 {
+			break
+		}
+	}
+	result := first
+	if len(operands) > 1 {
+		for i := range operands {
+			if operands[i].Async {
+				p.error(operands[i].Span.Start, operands[i].Span.End, "asynchronous command lists are not supported")
+				break
+			}
+		}
+		result = mem.Alloc[Expr](p.a)
+		result.Kind, result.Span, result.Kash = CommandList, source.Span{Start: start, End: p.pos}, true
+		result.CommandListCapture = capture
+		result.Items, result.CommandOps = operands, operators
+	}
+	if capture {
+		if p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' {
+			p.error(start, p.pos, "unclosed Kash command substitution")
+		} else {
+			p.pos++
+			result.Span.End = p.pos
+		}
+	}
+	return result
+}
+
+func commandWhitespaceBeforeNewline(text string, pos int) bool {
+	for pos > 0 && (text[pos-1] == ' ' || text[pos-1] == '\t' || text[pos-1] == '\r') {
+		pos--
+	}
+	return pos > 0 && text[pos-1] == '\n'
 }
 
 func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch bool) *Expr {
@@ -128,7 +194,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			for next < len(p.s.Text) && commandWhitespace(p.s.Text[next]) {
 				next++
 			}
-			if next < len(p.s.Text) && p.s.Text[next] == '|' {
+			if next < len(p.s.Text) && p.s.Text[next] == '|' && (next+1 == len(p.s.Text) || p.s.Text[next+1] != '|') {
 				p.pos = next
 			}
 		}
@@ -147,6 +213,12 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			break
 		}
 		if ((grouped || branch) && p.s.Text[p.pos] == ')') || (grouped && p.s.Text[p.pos] == ',') {
+			break
+		}
+		if p.pos+1 < len(p.s.Text) && ((p.s.Text[p.pos:p.pos+2] == "&&") || (p.s.Text[p.pos:p.pos+2] == "||")) {
+			if grouped || branch {
+				p.error(p.pos, p.pos+2, "command lists require a complete synchronous graph")
+			}
 			break
 		}
 		if stage.Kind == CommandMux && (stage.Text == "merge" || stage.Text == "broadcast" || stage.Text == "balance" || stage.Text == "each") && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
@@ -182,7 +254,11 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			stage.Span.End = from
 			separated := from > start && commandWhitespace(p.s.Text[from-1]) && p.pos < len(p.s.Text) && commandWhitespace(p.s.Text[p.pos])
 			p.commandSpace(capture)
-			if !capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '&' {
+			if p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos:p.pos+2] == "&&" || p.s.Text[p.pos:p.pos+2] == "||") {
+				e.AcceptExit = true
+				continue
+			}
+			if !capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == '&' && (p.pos+1 == len(p.s.Text) || p.s.Text[p.pos+1] != '&') {
 				e.AcceptExit = true
 				continue
 			}
@@ -191,23 +267,22 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 					p.error(from, p.pos, "command recovery requires whitespace around ?")
 					break
 				}
-				e.Body = slices.Append(p.a, e.Body, p.commandGraph(p.pos, capture))
+				e.Body = slices.Append(p.a, e.Body, p.commandPipeline(p.pos, capture, false, false))
 				break
 			}
 			e.AcceptExit = true
 			if grouped {
 				break
 			}
-			if capture && p.pos < len(p.s.Text) && p.s.Text[p.pos] == ')' {
-				p.pos++
-				break
-			}
-			if capture {
-				p.error(start, p.pos, "unclosed Kash command substitution")
-			}
 			break
 		}
 		if p.s.Text[p.pos] == '&' {
+			if p.pos+1 < len(p.s.Text) && p.s.Text[p.pos+1] == '&' {
+				if grouped || branch {
+					p.error(p.pos, p.pos+2, "command lists require a complete synchronous graph")
+				}
+				break
+			}
 			if len(stage.Items) == 0 && !hasExecutable(stage) && p.pos+1 < len(p.s.Text) && channelNameByte(p.s.Text[p.pos+1], true) {
 				freeExpr(p.a, stage)
 				stage = p.channelEndpoint(CommandReader, 1)
@@ -234,7 +309,6 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				break
 			}
 			stage.Span.End = p.pos
-			p.pos++
 			break
 		}
 		if p.s.Text[p.pos] == '|' {
@@ -572,7 +646,8 @@ func (p *parser) commandWord(allowSpread bool) *Expr {
 	partStart := p.pos
 	for p.pos < len(p.s.Text) {
 		b := p.s.Text[p.pos]
-		if !quoted && ((p.commandGroup && b == ',' && wordDelimiters == 0) || b == '?' || b == ')' || b == ';' || b == '|' || b == '<' || b == '>' || b == ' ' || b == '\t' || b == '\r' || b == '\n') {
+		listOperator := p.pos+1 < len(p.s.Text) && (p.s.Text[p.pos:p.pos+2] == "&&" || p.s.Text[p.pos:p.pos+2] == "||")
+		if !quoted && ((p.commandGroup && b == ',' && wordDelimiters == 0) || listOperator || b == '?' || b == ')' || b == ';' || b == '|' || b == '<' || b == '>' || b == ' ' || b == '\t' || b == '\r' || b == '\n') {
 			break
 		}
 		if b == '"' {

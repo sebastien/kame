@@ -68,7 +68,7 @@ func TestDownstreamReportKeepsLogicalImpactRelationships(t *testing.T) {
 }
 
 func TestPlanReportHidesEmptyAndUnknownDetailsUnlessVerbose(t *testing.T) {
-	document := `{"schema":2,"type":"plan","depth":-1,"resources":[],"producers":[{"id":1,"resource":1,"target":"./out","kind":"file","outputs":[],"freshness":"unknown","captures":[],"source":"Makefile.kmk","tools":{},"reusePolicy":"content-signatures"}],"dependencies":[],"stages":[],"deferred":[]}`
+	document := `{"schema":2,"type":"plan","depth":-1,"resources":[],"producers":[{"id":1,"resource":1,"target":"./out","kind":"file","outputs":[],"freshness":"unknown","captures":[],"source":"Makefile.kmk","span":{"start":0,"end":710},"rule":{"start":0,"end":710,"text":"install :"},"text":"producer source","tools":{},"reusePolicy":"content-signatures"},{"id":2,"resource":2,"target":"install","kind":"task","source":"Makefile.kmk","reusePolicy":"fingerprint"}],"dependencies":[],"stages":[{"number":1,"producers":[1,2]}],"deferred":[]}`
 	var concise, verbose strings.Builder
 	defer concise.Free()
 	defer verbose.Free()
@@ -77,16 +77,16 @@ func TestPlanReportHidesEmptyAndUnknownDetailsUnlessVerbose(t *testing.T) {
 		return
 	}
 	text := concise.String()
-	if strings.Contains(text, "freshness") || strings.Contains(text, "captures") || strings.Contains(text, "tools") || !strings.Contains(text, "source: Makefile.kmk") || !strings.Contains(text, "reusePolicy: \"content-signatures\"") {
-		t.Error("concise plan report hid meaningful details or retained empty ones: " + text)
+	if strings.Contains(text, "freshness") || strings.Contains(text, "captures") || strings.Contains(text, "tools") || strings.Contains(text, "start: 0") || strings.Contains(text, "producer source") || !strings.Contains(text, "    ./out · file · source: Makefile.kmk · reuse: content-signatures\n") || !strings.Contains(text, "    stage 1 · parallel eligible · ./out · install\n") {
+		t.Error("concise plan report was not compact and single-line: " + text)
 	}
 	if !cli.WriteGraphReport(&verbose, "plan", document, false, true) {
 		t.Error("verbose plan report failed to render")
 		return
 	}
 	text = verbose.String()
-	if !strings.Contains(text, "freshness: unknown") || !strings.Contains(text, "captures\n") || !strings.Contains(text, "tools\n") {
-		t.Error("verbose plan report omitted full producer details: " + text)
+	if !strings.Contains(text, "freshness: unknown") || !strings.Contains(text, "captures: []") || !strings.Contains(text, "tools: {}") || !strings.Contains(text, "rule: {\"start\":0,\"end\":710,\"text\":\"install :\"}") || !strings.Contains(text, "span: {\"start\":0,\"end\":710}") || strings.Contains(text, "rule\n") {
+		t.Error("verbose plan report omitted details or split a producer across lines: " + text)
 	}
 }
 

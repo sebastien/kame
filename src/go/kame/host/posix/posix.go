@@ -282,6 +282,12 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				if request.Stages[i].Kind == "each" {
 					kind = 8
 				}
+				if request.Stages[i].Kind == "out" {
+					kind = 9
+				}
+				if request.Stages[i].Kind == "err" {
+					kind = 10
+				}
 				if request.Stages[i].Framed {
 					kind += 16
 				}

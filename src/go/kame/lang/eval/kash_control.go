@@ -311,7 +311,7 @@ func (p *Program) kashBodyBudget(state *kashControlState, body []*expr.Expr, c *
 		}
 		state.Value.Free(p.Alloc)
 		state.Value = core.Value{}
-		if statement.Kind == expr.CommandGraph || expr.IsKashControl(statement.Kind) {
+		if statement.Kind == expr.CommandGraph || statement.Kind == expr.CommandList || expr.IsKashControl(statement.Kind) {
 			state.Value = r.Value.Clone(p.Alloc)
 		} else {
 			freeCallables(c.Run, &r.Value)

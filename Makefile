@@ -1,4 +1,5 @@
-# Install the author's GitHub release if needed, then forward goals to it.
+# == Kame Bootstrap script
+# Install  kame's GitHub release if needed, then forward goals to it.
 # Kame reads Makefile.kmk. BSD make and GNU make. `make` runs the default goal.
 KAME_VERSION ?= 0.3.1
 KAME ?= $(HOME)/.cache/kame/bin/kame-$(KAME_VERSION)

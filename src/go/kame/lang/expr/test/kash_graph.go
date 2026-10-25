@@ -20,6 +20,9 @@ func TestProcessGroupsAndMuxRoundTrip(t *testing.T) {
 		"$(printf a |(frame :lines) |(filter :true |(encode :lines) | cat > ./selected) | cat)",
 		"$((printf a >&reports, &reports | cat))",
 		"$(printf a |(broadcast) (>&left, >&right))",
+		"$(printf a >&out)",
+		"$(printf a >&err)",
+		"$(printf a |(broadcast) (>&out, >&err))",
 		"$((printf a |(frame :lines) |(filter :true | cat >&reports) | cat, &reports | cat))",
 		"$(diff -u <(printf a) <(printf b))",
 		"$(printf a | cat <&)",
@@ -66,6 +69,60 @@ func TestProcessGroupsAndMuxRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCommandListParseFormatBoundaries(t *testing.T) {
+	a := t.Allocator()
+	input := "$(printf a&&printf b ||\nprintf c)"
+	r := expr.Parse(a, "list.km", input)
+	if len(r.Diagnostics) != 0 || r.Expr.Kind != expr.CommandList || len(r.Expr.Items) != 3 || len(r.Expr.CommandOps) != 2 {
+		t.Error("command list lost its operands or operators")
+		r.Free()
+		return
+	}
+	if r.Expr.CommandOps[0].Text != "&&" || r.Expr.CommandOps[1].Text != "||" || !r.Expr.CommandOps[1].AfterNewline {
+		t.Error("command list lost operator order or multiline boundary")
+	}
+	formatted := expr.Format(a, r.Expr)
+	copy := expr.Parse(a, "formatted.km", formatted)
+	if len(copy.Diagnostics) != 0 {
+		t.Error("formatted command list did not reparse")
+	} else {
+		again := expr.Format(a, copy.Expr)
+		if again != formatted {
+			t.Error("command-list formatting is not idempotent")
+		}
+		mem.FreeString(a, again)
+	}
+	copy.Free()
+	mem.FreeString(a, formatted)
+	r.Free()
+
+	valid := []string{
+		"$(printf %s \"&&\")",
+		"$(printf %s (str \"||\"))",
+		"$(printf a ? && printf b)",
+	}
+	for i := range valid {
+		parsed := expr.Parse(a, "valid-list.km", valid[i])
+		if len(parsed.Diagnostics) != 0 {
+			t.Error("quoted, embedded, or accepted command-list boundary failed to parse")
+		}
+		parsed.Free()
+	}
+	invalid := []string{
+		"$(printf a\n || printf b)",
+		"$((printf a&&printf b, printf c))",
+		"$(printf a ||)",
+		"$(printf a && printf b &)",
+	}
+	for i := range invalid {
+		parsed := expr.Parse(a, "invalid-list.km", invalid[i])
+		if len(parsed.Diagnostics) == 0 {
+			t.Error("invalid command-list boundary was accepted")
+		}
+		parsed.Free()
+	}
+}
+
 func TestProcessGroupDiscriminationAndMalformedGraphs(t *testing.T) {
 	values := []string{"(nop [1 2])", "(str \"a,b\")", "(nop $(printf \"a,b\"))", "(nop ./a{b,c})"}
 	for i := range values {
@@ -73,7 +130,7 @@ func TestProcessGroupDiscriminationAndMalformedGraphs(t *testing.T) {
 			t.Error("value expression was classified as a process group")
 		}
 	}
-	invalid := []string{"$((printf a,) |(merge) cat)", "$((, printf b) |(merge) cat)", "$((printf a, printf b)", "$(printf a |(unknown) cat)", "$(printf a |(broadcast))", "$(printf a 2>&1)", "$(printf a |(balance))", "$(printf a |(broadcast :buffer 0) (cat, cat))", "$(printf a |(broadcast :buffer 65537) (cat, cat))", "$(printf a |(balance :strategy random) (cat, cat))", "$(printf a |(merge :strategy round-robin) cat)", "$(printf a |(balance :buffer (read! ./config)) (cat, cat))", "$(printf a |(balance :buffer 4 :buffer 8) (cat, cat))"}
+	invalid := []string{"$((printf a,) |(merge) cat)", "$((, printf b) |(merge) cat)", "$((printf a, printf b)", "$(printf a |(unknown) cat)", "$(printf a |(broadcast))", "$(printf a 2>&1)", "$(cat <&out)", "$(printf a >&in)", "$(printf a |(balance))", "$(printf a |(broadcast :buffer 0) (cat, cat))", "$(printf a |(broadcast :buffer 65537) (cat, cat))", "$(printf a |(balance :strategy random) (cat, cat))", "$(printf a |(merge :strategy round-robin) cat)", "$(printf a |(balance :buffer (read! ./config)) (cat, cat))", "$(printf a |(balance :buffer 4 :buffer 8) (cat, cat))"}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
 		if len(r.Diagnostics) == 0 {

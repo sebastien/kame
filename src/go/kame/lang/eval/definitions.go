@@ -25,7 +25,8 @@ type Program struct {
 	ProcessesQuiet      func(any, int64, int64) bool
 	ProcessesQuietState any
 	// DryRun suppresses invocation-owned process, write and output effects.
-	DryRun bool
+	DryRun       bool
+	CaptureLimit int
 	// GeneratedFile identifies reads that may be deferred during dry-run.
 	GeneratedFile      func(any, string) bool
 	GeneratedFileState any

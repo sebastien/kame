@@ -130,7 +130,7 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 				}
 			}
 		}
-		if outgoing == 0 && !redirected {
+		if outgoing == 0 && !redirected && !(node.Kind == expr.CommandMux && node.Text == "err") {
 			terminals++
 		}
 	}
@@ -147,7 +147,14 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 	}
 	if e.Kind == expr.CommandReader || e.Kind == expr.CommandWriter {
 		index := len(flat.Items)
-		flat.Items = slices.Append(c.Run, flat.Items, expr.Clone(c.Run, e))
+		node := expr.Clone(c.Run, e)
+		if node.Kind == expr.CommandWriter && (node.Text == "out" || node.Text == "err") {
+			node.Kind = expr.CommandMux
+			flat.Items = slices.Append(c.Run, flat.Items, node)
+			ports.Inputs = slices.Append(c.Run, ports.Inputs, index)
+			return ports
+		}
+		flat.Items = slices.Append(c.Run, flat.Items, node)
 		if e.Kind == expr.CommandReader {
 			ports.Outputs = slices.Append(c.Run, ports.Outputs, index)
 		} else {

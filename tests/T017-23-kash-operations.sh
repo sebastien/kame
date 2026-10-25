@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Spec: docs/spec/017-kash.md — exact data, explicit failure and finite effects
+# Specs: docs/spec/017-kash.md and
+#        docs/spec/047-kash-output-ports-and-command-lists.md
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
 test-start "T017-23 operational Kash contracts"
@@ -66,10 +67,22 @@ SH
 	rm "$work/attempts"
 	status=0
 	invoke -l kash -c '(map ([number] (run! "./probe" number)) [1 2 3])' >"$work/out" 2>"$work/err" || status=$?
-	if [ "$status" = 1 ] && [ "$(cat "$work/attempts")" = 1 ]; then test-ok "$backend map remains fail-fast"; else test-fail "$backend map ignored failure"; fi
-	test-step "$backend cookbook example is executable and cleans up its workspace"
+	if [ "$status" = 75 ] && [ "$(cat "$work/attempts")" = 1 ]; then
+		test-ok "$backend map remains fail-fast and preserves exit status"
+	else
+		test-fail "$backend map ignored failure or changed exit status"
+	fi
+	test-step "$backend cookbook lists and output ports run and clean up"
 	invoke -l kash "$CLI_ROOT/examples/shell/04-operations.kash" >"$work/out" 2>"$work/err"
-	printf 'typed argv\nfirst\nsecond\nrecovered\n' >"$work/expected"
-	if cmp -s "$work/out" "$work/expected" && ! compgen -G "$work/kash-example.*" >/dev/null; then test-ok "$backend operational example"; else test-fail "$backend cookbook example"; cat "$work/out" "$work/err"; fi
+	printf 'typed argv\nfirst\nsecond\nrecovered\nfallback\ncaptured=payload\n' >"$work/expected"
+	printf 'progress\n' >"$work/expected-err"
+	if cmp -s "$work/out" "$work/expected" \
+		&& cmp -s "$work/err" "$work/expected-err" \
+		&& ! compgen -G "$work/kash-example.*" >/dev/null; then
+		test-ok "$backend operational example"
+	else
+		test-fail "$backend cookbook example"
+		cat "$work/out" "$work/err"
+	fi
 done
 test-end

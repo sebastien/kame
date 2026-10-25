@@ -206,10 +206,11 @@ invocations and iteration callbacks still execute their own fresh calls.
 
 Newlines and unquoted `;` terminate ordinary statements outside nested syntax.
 Embedded expressions may span lines using their existing delimiter rules.
-Command substitutions may span lines but contain exactly one process expression,
-not a statement sequence or control block. Empty statements are ignored. Outside
-quotes and nested syntax, `#` at the start of a word introduces a comment through
-the end of the line. `//` is literal command text, not a Kash comment.
+Command substitutions may span lines and contain one synchronous process graph
+or command list, but not a statement sequence or control block. Empty statements
+are ignored. Outside quotes and nested syntax, `#` at the start of a word
+introduces a comment through the end of the line. `//` is literal command text,
+not a Kash comment.
 
 ## Expansion boundary
 
@@ -304,9 +305,9 @@ optionally with `render`; argv values and captured output are never compiled.
 
 ### Command substitution
 
-`$(COMMAND)` is command substitution. `COMMAND` is parsed with Kash command and
-pipeline syntax, runs as a process graph, and its standard output becomes the
-substitution value:
+`$(COMMAND)` is command substitution. `COMMAND` is parsed with Kash command,
+pipeline, and sequential-list syntax. Selected process graphs run in order, and
+their output to the enclosing output sink becomes the substitution value:
 
 ```kash
 revision = $(git rev-parse --short HEAD)
@@ -339,8 +340,11 @@ Opaque `.kmk` recipe text remains shell text: a raw recipe `$(...)` is interpret
 by the recipe's shell, not Kash. A substitution inside an explicit Kame recipe
 expansion is owned by the expression parser instead.
 
-Substitution captures only the final stage's stdout and does not also forward it
-to the enclosing stdout. Stderr remains live. The result is a Kame string:
+Substitution captures stdout directed to its output sink, including explicit
+`>&out`, and does not also forward it to the enclosing stdout. Explicit `>&err`
+remains live and is excluded from capture; it does not redirect executable stderr.
+Sequential capture lists share one cumulative byte limit and retain output from
+failed operands when `||` selects a fallback. The result is a Kame string:
 stdout must be valid UTF-8 and is preserved exactly, including trailing newlines
 and an empty result. No newline stripping or whitespace splitting occurs.
 Leading/trailing spaces and tabs, embedded line endings, CRLF, and newline-only
@@ -592,8 +596,11 @@ checks as argv words apply. Each stage may have at most one stdin and one stdout
 redirection. A pipeline edge and a redirection cannot both supply the same stream.
 In a linear pipeline, `<` is therefore allowed only on the first stage and
 `>`/`>>` only on the last. Conflicts are errors, not silently overridden.
-`>` creates or truncates; `>>` creates or appends. Stderr redirection, descriptor
-duplication, and here-documents are not defined by this specification.
+`>` creates or truncates; `>>` creates or appends. Reserved `>&out` and `>&err`
+route stdout to the enclosing presentation sinks as defined in
+[Kash streaming](042-kash-streaming.md); neither redirects the executable's own
+stderr. Redirecting executable stderr, arbitrary descriptor duplication, and
+here-documents are not defined by this specification.
 
 All stages start as one graph and communicate through bounded streaming pipes
 with backpressure. Intermediate stdout is not collected. Every stage's stderr
@@ -673,6 +680,15 @@ exit while retaining the command's diagnostic output; it does not silence stderr
 grep needle missing-file?
 ```
 
+`A && B` and `A || B` form a synchronous, left-to-right command list at equal
+precedence. `&&` selects its right operand after effective success; `||` selects
+it only after an ordinary process exit or signal. Launch, timeout, capture,
+capability, evaluation, and operator failures do not select `||`. Lists return
+the final executed operand's outcome; a final unhandled process exit propagates
+normally. Command conditions may contain lists, with an eligible final exit
+meaning false. Lists are not process-group members, live producers, or direct
+deferred commands. Compound lists cannot use terminal async `&`.
+
 `CMD ? ELSE` evaluates `ELSE` when the command fails:
 
 ```kash
@@ -715,8 +731,9 @@ From tightest to loosest, process syntax binds as follows:
 3. Pipeline `|`, in left-to-right stage order.
 4. Terminal acceptance `?`, applying to the complete pipeline.
 5. Recovery `? ELSE`, right-associative; `ELSE` is another process expression.
-6. Terminal async `&`, applying to the complete recovered expression.
-7. Statement separators `;` and newline.
+6. Sequential `&&` and `||`, equal precedence and left-associative.
+7. Terminal async `&`, applying to one complete graph/recovery expression.
+8. Statement separators `;` and newline.
 
 Outside a reference, a terminal unquoted `?` is acceptance even when attached to
 a word; quote or escape it for a literal filename suffix. `?` with a following
@@ -725,10 +742,10 @@ value operands and is an error in raw commands. Operators inside quotes or
 embedded Kame syntax are not process operators.
 
 `&` must be followed by a statement terminator: `first & second` requires
-`first &; second` or a newline. Parentheses do not introduce shell subshells;
-comma-separated process groups and stream-operator binding follow
-[Kash streaming](042-kash-streaming.md). `&&` and `||` are unsupported and produce
-diagnostics.
+`first &; second` or a newline. `A && B &` and `A || B &` are rejected before
+effects; separate statements such as `A &; B && C` remain valid. Parentheses do
+not introduce shell subshells; comma-separated process groups and stream-operator
+binding follow [Kash streaming](042-kash-streaming.md).
 
 ## Deferred cleanup
 
@@ -768,9 +785,11 @@ Kash callables have independent stacks. Actions execute once in reverse
 registration order. Normal completion joins owned async work before cleanup;
 failure/cancellation cancels and reaps that work before cleanup starts. A deferred
 expression may start async work, but the action joins it before advancing.
-Terminal `&` on a deferred command is invalid. Direct command fallback is also
-invalid in this initial form: defer a call to an authored Kash callable for
-compound recovery. Terminal exit acceptance `?` remains supported. An action
+Terminal `&` on a deferred command is invalid. Direct `? ELSE` command recovery
+is also invalid in this form: defer a call to an authored Kash callable for
+compound recovery. A direct `&&`/`||` command list is likewise invalid; a deferred
+Kash helper may contain a synchronous list. Terminal exit acceptance `?` remains
+supported. An action
 cannot append to its closing stack; a nested callable may own a new stack.
 
 Finalization uses a separate five-second budget per invocation stack, starting
@@ -827,10 +846,11 @@ does not emit a failure diagnostic for a non-zero status; that is an implicit
 `CMD?` scoped to the condition. `$(...)` is not a valid condition, because every
 non-nil string is true under Kame truth, so it would always be true.
 
-A command condition may be a pipeline with redirections, but not async or
-explicit acceptance/recovery syntax. Launch, timeout, capability, or evaluation
-failures propagate rather than being treated as false. Its stdout and stderr
-follow ordinary forwarding/redirection rules. An expression condition uses
+A command condition may be a pipeline or sequential list with redirections, but
+not async or explicit acceptance/graph-recovery syntax. The final eligible process
+exit means false; launch, timeout, capability, or evaluation failures propagate
+rather than being treated as false. Its stdout and stderr follow ordinary
+forwarding/redirection rules. An expression condition uses
 Kame truth: only nil and boolean false are false; even an empty string is true.
 Conditions and match subjects are evaluated once per execution, including across
 suspension and resumption for host requests.
@@ -1015,15 +1035,17 @@ live forwarding and explicit capture remain separate channels.
   phases, dependencies and executable tracking, and never reparse result bytes.
   Parse/format/parse is idempotent without turning calls into quoted literals or
   changing typed splicing on either host.
-- `$(COMMAND)` captures stdout and does not parse its contents as Kame syntax.
+- `$(COMMAND)` captures stdout and does not parse its contents as Kame syntax;
+  `>&out` joins that capture, while `>&err` remains live and excluded.
 - Command arguments containing whitespace remain one argument.
 - A raw wildcard is literal; `(wildcard PATH)` is evaluated as a Kame wildcard.
 - Raw command pipelines stream process data; parenthesized expression pipes
   use Kame value-pipe behavior.
 - `CMD?` retains diagnostics for accepted non-zero exits.
 - `LEFT ?? RIGHT` evaluates the fallback only for a nil or failed left side.
-- An `if` command condition is true on exit zero and false on a non-zero exit
-  without a failure diagnostic; a parenthesized condition uses Kame truth.
+- An `if` command condition, including a sequential list, is true on effective
+  success and false on an eligible final process exit; other failures propagate.
+  A parenthesized condition uses Kame truth.
 - `match`/`case` selects the first matching pattern, binds named captures as
   `$name` in that arm, and falls to `else` when nothing matches.
 - Only the selected control-statement branch runs; an unselected branch's
@@ -1038,7 +1060,8 @@ live forwarding and explicit capture remain separate channels.
   agree with their corresponding ordinary Kame expressions.
 - `$name.c` resolves a component; `${name}.c` appends a literal suffix.
 - Quoted/escaped operators are literal, empty quotes preserve an empty argument,
-  and invalid escapes, single quotes, `&&`, and `||` are rejected.
+  and invalid escapes and unsupported single-quote syntax are rejected. `&&` and
+  `||` are recognized only as sequential process-list operators.
 - Quoted `"--mtime=@0"` in direct Kash remains one literal argument through
   repeated formatting; unquoted reserved at-sign syntax receives Kash quoting
   guidance, not an unrelated template selector diagnostic.
@@ -1051,6 +1074,11 @@ live forwarding and explicit capture remain separate channels.
   seconds, and stage cwd governs relative redirection paths.
 - Substitution preserves empty stdout and trailing newlines, forwards stderr
   once, rejects invalid UTF-8, and fails rather than returning truncated capture.
+- `&&`/`||` are left-associative with equal precedence and select only on effective
+  success or eligible process exits. Skipped operands have no effects; a failed
+  unhandled list stops the statement sequence.
+- Output-port disposition, broadcast, error-only capture, output capture,
+  zero/multiple capture sinks, and process-exit status agree on native and WASM.
 - Pipelines exceeding pipe-buffer capacity stream without deadlock; failures in
   every stage, including SIGPIPE, contribute to aggregate failure.
 - Conflicting redirections fail; denied capabilities do not launch stages or

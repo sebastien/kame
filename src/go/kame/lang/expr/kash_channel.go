@@ -28,7 +28,8 @@ func (p *parser) channelEndpoint(kind Kind, prefix int) *Expr {
 	}
 	endpoint.Text = p.s.Text[start:p.pos]
 	endpoint.Span.End = p.pos
-	if !ChannelName(endpoint.Text) {
+	reservedOutput := kind == CommandWriter && (endpoint.Text == "out" || endpoint.Text == "err")
+	if !reservedOutput && !ChannelName(endpoint.Text) {
 		p.error(start, p.pos, "invalid or reserved channel name")
 	}
 	return endpoint

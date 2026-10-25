@@ -7,8 +7,9 @@ header metadata `; [shell: kash]` selects direct Kash parsing, without a
 document-template pass.
 
 Native and WASM execution implement definitions, command words, substitutions,
-pipelines, redirections, stage setup, control blocks, recovery, and invocation-owned
-async graphs. Both use the unified `do run` runner.
+pipelines, redirections, stage setup, control blocks, sequential command lists,
+reserved output ports, recovery, and invocation-owned async graphs. Both use the
+unified `do run` runner.
 
 ```kash
 name = "Ada Lovelace"
@@ -37,7 +38,7 @@ For a computed executable, bind its value and use `$command` at command position
 | `$name`, `$project.name`, `${name}` | Look up a Kame reference. |
 | `$...name`, `$...{project.command}` | Explicitly spread a flat argv list, including the executable at command position. |
 | `(EXPRESSION)` | Evaluate a parenthesized Kame expression, standalone or as an unquoted scalar word fragment. |
-| `$(COMMAND)` | Execute a Kash command/pipeline and capture stdout. |
+| `$(COMMAND)` | Execute a Kash graph or sequential list and capture its output sink. |
 | `$env.NAME` | Explicit lazy environment lookup, requiring an env grant. |
 
 `$PATH` is a Kame binding, never an implicit environment lookup. Use braces to
@@ -142,8 +143,11 @@ echo done >> ./log.txt
 Process `|` streams stdout with bounded backpressure; value pipes inside
 `(...)` transform values. `<` provides stdin; `>` replaces stdout's file;
 `>>` appends. Redirections belong to a stage and cannot conflict with a pipe:
-only the first stage may use `<`, only the last may use `>`/`>>`. Stderr
-redirection, descriptor duplication, and heredocs are not defined.
+only the first stage may use `<`, only the last may use `>`/`>>`. Reserved
+`>&out` and `>&err` route command stdout to the current output or error sink;
+inside `$(...)`, `out` joins capture and `err` stays live. Neither redirects the
+executable's own stderr. Arbitrary descriptor duplication (such as `2>&1`) and
+heredocs are not defined.
 
 Setup pairs precede the executable. `:cwd` sets stage cwd, `:timeout` is in
 seconds (unlike CLI `--timeout` in milliseconds), and other valid keys override
@@ -171,9 +175,35 @@ must still avoid placing secrets in authored literals, argv, or explicit output.
 ### Capture and failure
 
 Capture preserves valid UTF-8 stdout exactly, including empty output and trailing
-newlines; stderr remains live. Capture is limited (default 1 MiB), never silently
-truncated. Pipelines fail on any stage's nonzero/signal exit, including SIGPIPE;
-aggregate status is the rightmost failure. Failures/cancellation reap owned work.
+newlines; stderr remains live. Per captured graph, ordinary terminal stdout and
+`>&out` count as capture outputs; more than one is `KASH_AMBIGUOUS_CAPTURE`, while
+zero produces an empty string. Capture is limited (default 1 MiB), never silently
+truncated.
+Pipelines fail on any stage's nonzero/signal exit, including SIGPIPE; aggregate
+status is the last failing prepared stage/node. Failures/cancellation reap owned
+work.
+
+`A && B` and `A || B` form a synchronous, left-associative list at equal
+precedence. `&&` continues after effective success; `||` continues only after an
+ordinary process exit or signal. Other failures—launch, timeout, transport/capture,
+capability, evaluation, or operator errors—do not select `||`. Lists may appear in
+command conditions and `$(...)`, but not as graph members, live producers, direct
+deferred commands, or compound async commands. An unhandled failed list stops
+later statements.
+
+```kash
+compile && verify && publish
+probe || use-cache
+message = $(printf "payload" >&out && printf "progress\n" >&err)
+printf "captured=%s\n" $message
+```
+
+Here `message` is `payload`; `progress` is forwarded to the error sink. Sequential
+capture shares one limit and keeps failed-operand bytes if `||` runs a fallback.
+`?` accepts a nonzero or signal exit; an accepted result can continue through
+`&&` without erasing its recorded status. For explicit `do run`, unhandled executable exits
+preserve their status through nested runners; signal exits use `128 + signal`.
+Successful acceptance or recovery exits zero.
 
 Spaces, tabs, embedded line endings, CRLF, and every terminal newline are data.
 Use `strip` explicitly only when an identifier's contract permits removing all
@@ -454,17 +484,18 @@ match $target
 ```
 
 Indent nested bodies consistently; keywords occupy their own lines. Command
-conditions are true on exit zero; expression conditions use Kame truth. `$(...)`
-is not an `if` condition. Only selected branches execute; `match` captures are
-scoped to the selected arm.
+conditions are true on effective success and false on an eligible final process
+exit; other failures propagate. They may contain sequential lists. Expression
+conditions use Kame truth. `$(...)` is not an `if` condition. Only selected
+branches execute; `match` captures are scoped to the selected arm.
 
-- `CMD ?` accepts a nonzero process exit but leaves live stderr visible.
+- `CMD ?` accepts a nonzero or signal exit but leaves live stderr visible.
 - `CMD ? FALLBACK` runs a fallback process on recoverable command failure.
 - `LEFT ?? RIGHT` recovers a nil/failed value in Kash RHSs, not raw commands or
   inside Kame expressions. It is distinct from Kame's unknown-reference `?` form.
 - Recovery never suppresses capability denial or cancellation.
-- `&&`, `||`, shell subshell grouping, and single-quoted shell strings are not
-  supported. Use Kash control statements or Kame special forms.
+- Shell subshell grouping and single-quoted shell strings are not supported. Use
+  Kash control statements or Kame special forms for compound value logic.
 
 ### List and conditional loops
 
@@ -572,3 +603,6 @@ inherit scope, cwd, limits, and authority; changing parser cannot broaden them.
 Parsing/formatting never executes capture. Named entries are not accepted for
 Kash; program arguments follow `--`. Check backend support before claiming a
 standalone/process feature works, and never silently fall back to a shell.
+Normative details: [CLI](../../../spec/009-cli.md),
+[Kash](../../../spec/017-kash.md), [streaming](../../../spec/042-kash-streaming.md),
+and [output-port/list spec](../../../spec/047-kash-output-ports-and-command-lists.md).

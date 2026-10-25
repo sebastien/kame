@@ -103,6 +103,25 @@ func prepareStreamKinds(c *Context, graph *expr.Expr) Result {
 			graph.Edges = slices.Append(c.Run, graph.Edges, expr.CommandEdge{From: adapter, To: edge.To, Argument: edge.Argument})
 		}
 	}
+	for i := 0; i < len(graph.Items); i++ {
+		if graph.Items[i].Kind != expr.CommandMux || (graph.Items[i].Text != "out" && graph.Items[i].Text != "err") || graph.StreamKinds[i] != 1 {
+			continue
+		}
+		incoming := -1
+		for j := range graph.Edges {
+			if graph.Edges[j].To == i {
+				incoming = j
+			}
+		}
+		if incoming < 0 {
+			return failure(c.Run, "KASH_MUX_ARITY", graph.Items[i].Span, "presentation port requires one input")
+		}
+		adapter := addStreamNode(c, graph, "encode", graph.Items[i].Span)
+		graph.StreamKinds = slices.Append(c.Run, graph.StreamKinds, 0)
+		graph.Edges[incoming].To = adapter
+		graph.Edges = slices.Append(c.Run, graph.Edges, expr.CommandEdge{From: adapter, To: i})
+		graph.StreamKinds[i] = 0
+	}
 	nodes := len(graph.Items)
 	for i := 0; i < nodes; i++ {
 		if graph.StreamKinds[i] != 1 {

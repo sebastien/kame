@@ -35,6 +35,7 @@ const (
 	CommandRedirection
 	CommandSetup
 	CommandGraph
+	CommandList
 	ValueRecovery
 	CommandTest
 	KashIf
@@ -105,6 +106,7 @@ type Expr struct {
 	// syntax retains groups and connections until graph validation/lowering.
 	Topology       bool
 	Edges          []CommandEdge
+	CommandOps     []CommandOperator
 	StreamKinds    []int
 	StreamOverflow int  // 0 block, 1 drop-new, 2 drop-old, 3 latest
 	StreamOrder    int  // 0 ready, 1 strict framed round-robin (merge only)
@@ -116,23 +118,25 @@ type Expr struct {
 	Async          bool
 	Kash           bool
 	// AcceptExit applies terminal Kash ? to the complete process graph.
-	AcceptExit  bool
-	Kind        Kind
-	Span        source.Span
-	Text        string
-	TextOwned   bool
-	NamesOwned  bool
-	Bool        bool
-	Rest        bool
-	Int         int64
-	Float       float64
-	Verbatim    bool
-	VerbatimLen int
-	Parts       []StringPart
-	Reference   []ReferencePart
-	Items       []*Expr
-	Fields      []Field
-	Parameters  []Parameter
+	AcceptExit         bool
+	CommandListCapture bool
+	CommandCondition   bool
+	Kind               Kind
+	Span               source.Span
+	Text               string
+	TextOwned          bool
+	NamesOwned         bool
+	Bool               bool
+	Rest               bool
+	Int                int64
+	Float              float64
+	Verbatim           bool
+	VerbatimLen        int
+	Parts              []StringPart
+	Reference          []ReferencePart
+	Items              []*Expr
+	Fields             []Field
+	Parameters         []Parameter
 	// Body holds callable expressions, or one right-associative process fallback.
 	Body        []*Expr
 	Pattern     *Pattern
@@ -147,6 +151,12 @@ type CommandEdge struct {
 	From     int
 	To       int
 	Argument int
+}
+
+type CommandOperator struct {
+	Text         string
+	Span         source.Span
+	AfterNewline bool
 }
 
 type Result struct {
@@ -221,6 +231,7 @@ func freeExpr(a mem.Allocator, e *Expr) {
 	slices.Free(a, e.Parameters)
 	slices.Free(a, e.Body)
 	slices.Free(a, e.Edges)
+	slices.Free(a, e.CommandOps)
 	slices.Free(a, e.StreamKinds)
 	for i := range e.Channels {
 		mem.FreeString(a, e.Channels[i])
@@ -1587,6 +1598,7 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 	copy := mem.Alloc[Expr](a)
 	*copy = *original
 	copy.Edges = slices.Clone(a, original.Edges)
+	copy.CommandOps = slices.Clone(a, original.CommandOps)
 	copy.StreamKinds = slices.Clone(a, original.StreamKinds)
 	copy.Channels = nil
 	for i := range original.Channels {
@@ -1986,6 +1998,28 @@ func writeProcess(b *strings.Builder, e *Expr) {
 	}
 }
 
+func writeCommandList(b *strings.Builder, e *Expr) {
+	if e.CommandListCapture {
+		b.WriteString("$(")
+	}
+	for i := range e.Items {
+		if i != 0 {
+			operator := e.CommandOps[i-1]
+			b.WriteByte(' ')
+			b.WriteString(operator.Text)
+			if operator.AfterNewline {
+				b.WriteByte('\n')
+			} else {
+				b.WriteByte(' ')
+			}
+		}
+		writeProcess(b, e.Items[i])
+	}
+	if e.CommandListCapture {
+		b.WriteByte(')')
+	}
+}
+
 func writeExpr(b *strings.Builder, e *Expr) {
 	if e == nil {
 		return
@@ -2013,6 +2047,10 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	if e.Kind == KashDefer {
 		b.WriteString("defer ")
 		writeExpr(b, e.Items[0])
+		return
+	}
+	if e.Kind == CommandList {
+		writeCommandList(b, e)
 		return
 	}
 	if e.Kind == CommandCapture || e.Kind == CommandGraph || e.Kind == CommandTest {

@@ -77,6 +77,10 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 				if incoming[i] != 1 || outgoing[i] > 1 {
 					return "KASH_MUX_ARITY"
 				}
+			} else if stage.Kind == "out" || stage.Kind == "err" {
+				if incoming[i] != 1 || outgoing[i] != 0 {
+					return "KASH_MUX_ARITY"
+				}
 			} else if stage.Kind == "filter" {
 				if incoming[i] != 1 || outgoing[i] != 2 {
 					return "KASH_MUX_ARITY"
