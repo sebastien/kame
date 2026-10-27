@@ -1883,7 +1883,8 @@ static int km_run_lossy_broadcast(int node, int *edges, so_int *links, int count
         km_worker_wait(KM_RUNNING);
         if (ready < 0) { result = 125; break; }
         for (int i = 0; i < outputs; i++) {
-            if (fds[i + 1].revents & (POLLERR | POLLHUP | POLLNVAL)) { result = 125; break; }
+            if (fds[i + 1].revents & (POLLERR | POLLHUP)) { raise(SIGPIPE); result = 125; break; }
+            if (fds[i + 1].revents & POLLNVAL) { result = 125; break; }
             if (!(fds[i + 1].revents & POLLOUT)) continue;
             km_record_queue *queue = &queues[i];
             if (!queue->flight.data && queue->count) queue->flight = km_queue_pop(queue, limit);

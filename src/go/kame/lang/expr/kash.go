@@ -52,12 +52,9 @@ func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 			}
 		}
 	}
-	p := parser{a: a, s: bounded, pos: start, kash: true}
+	p := parser{a: a, s: bounded, pos: start, kash: true, valuePathStart: start + 1}
 	var e *Expr
-	if start+1 < len(s.Text) && (s.Text[start:start+2] == "@(" || s.Text[start:start+2] == "@{") {
-		p.error(start, start+2, "direct Kash has no template layer; use $name / ${name} for a reference or (function args...) for a call")
-		p.pos += 2
-	} else if start < len(s.Text) && s.Text[start] == '$' && (start+1 == len(s.Text) || s.Text[start+1] != '(') {
+	if start < len(s.Text) && s.Text[start] == '$' && (start+1 == len(s.Text) || s.Text[start+1] != '(') {
 		word := p.commandWord(false)
 		if word.Bool {
 			e = word.Parts[0].Expr
@@ -124,7 +121,7 @@ func (p *parser) commandGraph(start int, capture bool) *Expr {
 			p.pos++
 		}
 		if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == ';' || p.s.Text[p.pos] == '#' {
-			p.error(from, p.pos, "expected command after "+operator)
+			p.error(from, p.pos, "expected command after command-list operator")
 			break
 		}
 		if len(operands) == 0 {
@@ -819,7 +816,7 @@ func commandWordNeedsQuotes(e *Expr) bool {
 			continue
 		}
 		// Keep grammar-sensitive literals quoted even outside executable position.
-		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer") {
+		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer" || part.Text == "defn" || part.Text == "return") {
 			return true
 		}
 		if i == 0 && len(part.Text) != 0 && (part.Text[0] == ':' || part.Text[0] == '#') {

@@ -33,16 +33,56 @@ func validRecord(value core.Value) bool {
 
 func opKindPredicate(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
-	kind := core.Record
-	if c.OperationName == "list?" {
-		kind = core.List
+	matched := c.OperationName == core.KindName(v[0].Kind)+"?"
+	if c.OperationName == "number?" {
+		matched = v[0].Kind == core.Int || v[0].Kind == core.Float
 	}
-	if c.OperationName == "string?" {
-		kind = core.String
-	}
-	matched := v[0].Kind == kind
 	c.FreeCallable(&v[0])
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: matched}}
+}
+
+func opEmpty(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	value := v[0]
+	empty := (value.Kind == core.String && len(value.Text) == 0) ||
+		(value.Kind == core.Bytes && len(value.Bytes) == 0) ||
+		(value.Kind == core.List && len(value.List) == 0) ||
+		(value.Kind == core.Record && len(value.Record) == 0)
+	c.FreeCallable(&v[0])
+	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: empty}}
+}
+
+func opHasKey(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
+	}
+	if !validRecord(v[1]) {
+		return invalidArgument(c, v, 1, "record with unique keys")
+	}
+	found := false
+	for i := range v[1].Record {
+		if v[1].Record[i].Key == v[0].Text {
+			found = true
+			break
+		}
+	}
+	discardArgCallables(c, v)
+	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: found}}
+}
+
+func opSuccess(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	if !validRecord(v[0]) {
+		return invalidArgument(c, v, 0, "Result record with unique keys")
+	}
+	status, signal := recordField(v[0], "status"), recordField(v[0], "signal")
+	if status.Kind != core.Int || signal.Kind != core.Int {
+		discardArgCallables(c, v)
+		return c.InvalidOperation("requires integer status and signal fields")
+	}
+	discardArgCallables(c, v)
+	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: status.Int == 0 && signal.Int == 0}}
 }
 
 // Record traversal preserves stored field order and transfers nested callables.

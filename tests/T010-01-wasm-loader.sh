@@ -110,7 +110,7 @@ if failed="$("${cli[@]}" --lang expr -c '(fail! "stop")' 2>&1)"; then
 	exit 1
 fi
 case "$failed" in
-*"USER_ERROR: stop"*) ;;
+*"error[USER_ERROR]: stop"*) ;;
 *)
 	echo "WASM authored failure diagnostic = $failed" >&2
 	exit 1

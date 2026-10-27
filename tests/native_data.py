@@ -77,7 +77,7 @@ def main():
 			'(eq (merge) (parse-json "{}"))',
 			'(eq (items (merge [z: [x: 1] a: 2] [z: [y: 3] b: 4])) [[key: "z" value: [y: 3]] [key: "a" value: 2] [key: "b" value: 4]])',
 			'(let [r [x: 1]] (eq [(get "x" (set "x" 2 r)) r.x] [2 1]))',
-			'(eq (apply (get "value" (first (items [f: ([x] x)]))) [42]) [42])',
+			'(eq (apply (get "value" (first (items [f: ([x] x)]))) [42]) 42)',
 			'(eq (apply (get "f" (set "f" ([x] 42) [f: ([x] x)])) [0]) 42)',
 			'(eq (apply (get "f" (merge [f: ([x] x)] [f: ([x] 42)])) [0]) 42)',
 			'(record? (parse-json "{}"))', '(list? [])', '(string? "")',

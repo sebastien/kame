@@ -44,8 +44,7 @@ whitespace; it is not a default for paths, templates, JSON, or other captured da
 When a producer promises one terminal LF, remove exactly that framing byte:
 
 ```kame
-(without-final-lf TEXT) =
-  (if (ends? "\n" TEXT) (slice 0 -1 TEXT) TEXT)
+(line TEXT)
 ```
 
 This preserves leading whitespace, trailing spaces/tabs, embedded newlines, and
@@ -55,9 +54,8 @@ promises a CRLF terminator, rather than guessing whether CR belongs to the data.
 For example, a path containing a terminal LF must retain that LF after removing
 the additional LF printed by a line-oriented path tool.
 
-`ends?`/`slice` express this contract without a native trim/chomp operation. Any
-future helper must specify one versus all terminators and LF versus CRLF, with
-whitespace and newline-only tests. Trimming must remain opt-in.
+`line` removes exactly one terminal LF, not all terminators or an entire CRLF.
+Whitespace and newline-only tests cover this contract. Trimming remains opt-in.
 
 ## Failure cleanup is an ownership question (K26)
 

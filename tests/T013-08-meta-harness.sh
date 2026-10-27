@@ -3,6 +3,8 @@
 set -euo pipefail
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
+# The synthetic harness tests exercise their own prebuild behavior.
+unset KAME_TEST_PREBUILT
 
 test-start "T013-08 harness scheduling and results"
 repo="$TEST_PATH/runner"
@@ -81,6 +83,30 @@ if [ "$status" = 2 ]; then test-ok "invalid worker count rejected"; else test-fa
 
 test-step "an empty selection succeeds"
 if run_harness -j 1 tests/lib-testing.sh; then test-ok "empty selection succeeds"; else test-fail "empty selection failed"; fi
+
+test-step "prebuilt bootstrap requests stay within their project"
+bootstrap="$TEST_PATH/bootstrap"
+mkdir -p "$bootstrap/dist"
+cp "$CLI_ROOT/Makefile" "$bootstrap/Makefile"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >>"$BOOTSTRAP_CALLS"\n' >"$bootstrap/kame"
+chmod +x "$bootstrap/kame"
+touch "$bootstrap/dist/kame.js" "$bootstrap/dist/kame.wasm"
+export BOOTSTRAP_CALLS="$bootstrap/calls"
+if KAME_TEST_PREBUILT="$bootstrap" make -s -C "$bootstrap" KAME="$bootstrap/kame" dist-wasm &&
+   [ ! -e "$BOOTSTRAP_CALLS" ] &&
+   KAME_TEST_PREBUILT="$repo" make -s -C "$bootstrap" KAME="$bootstrap/kame" dist-wasm &&
+   grep -qx dist-wasm "$BOOTSTRAP_CALLS"; then
+	test-ok "prebuilt artifacts avoid nested builds only in their project"
+else
+	test-fail "prebuilt bootstrap project isolation"
+fi
+rm "$bootstrap/dist/kame.wasm"
+if KAME_TEST_PREBUILT="$bootstrap" make -s -C "$bootstrap" KAME="$bootstrap/kame" dist-wasm >/dev/null 2>&1; then
+	test-fail "missing prebuilt artifact was accepted"
+else
+	test-ok "missing prebuilt artifacts fail"
+fi
+
 test-step "the default uses reviewed workers when supported"
 harness_jobs=''
 status=0

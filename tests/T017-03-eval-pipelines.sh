@@ -36,15 +36,15 @@ parity '(map ([x] $(printf "%s" $x | tr a-z A-Z)) ["a" "b"])' 0
 parity '(str $(printf a | cat) $(printf b | cat))' 0
 
 test-step "all stages contribute to failure"
-parity '$(sh -c "exit 7" | cat)' 1 RECIPE_FAIL
+parity '$(sh -c "exit 7" | cat)' 7 RECIPE_FAIL
 grep -q 'status 7' "$work/native.err"
 grep -q 'status 7' "$work/wasm.err"
-parity '$(printf x | sh -c "cat; exit 9" | cat)' 1 RECIPE_FAIL
-parity '$(sh -c "exit 7" | sh -c "cat; exit 9" | cat)' 1 RECIPE_FAIL
+parity '$(printf x | sh -c "cat; exit 9" | cat)' 9 RECIPE_FAIL
+parity '$(sh -c "exit 7" | sh -c "cat; exit 9" | cat)' 9 RECIPE_FAIL
 grep -q 'status 9' "$work/native.err"
 grep -q 'status 9' "$work/wasm.err"
-parity '$(printf x | sh -c "cat; exit 11")' 1 RECIPE_FAIL
-parity '$(yes | head -c 1)' 1 RECIPE_FAIL
+parity '$(printf x | sh -c "cat; exit 11")' 11 RECIPE_FAIL
+parity '$(yes | head -c 1)' 141 RECIPE_FAIL
 grep -q 'status 141' "$work/native.err"
 grep -q 'status 141' "$work/wasm.err"
 parity '$(printf "\\377" | cat)' 1 CAPTURE_ENCODING
@@ -81,7 +81,8 @@ for operation in parse fmt; do
 	node "$CLI_ROOT/dist/kame.js" do "$operation" --lang expr "$work/expression.km" >"$work/wasm.out"
 	if cmp -s "$work/native.out" "$work/wasm.out"; then test-ok "$operation pipeline parity"; else test-fail "$operation pipeline parity"; fi
 done
-for invalid in '$(| cat)' '$(printf x |)' '$(printf x || cat)' '$(printf x | | cat)'; do
+parity '$(printf x || cat)' 0
+for invalid in '$(| cat)' '$(printf x |)' '$(printf x | | cat)'; do
 	parity "$invalid" 1 PARSE_ERR
 done
 

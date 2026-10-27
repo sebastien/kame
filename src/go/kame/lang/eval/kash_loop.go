@@ -121,7 +121,7 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 		state.Budget.Index++
 	}
 	r := p.kashBodyBudget(control, branch.Body, c, &state.Budget)
-	if r.Waiting || r.Diagnostic.Code != "" {
+	if r.Waiting || r.Returned || r.Diagnostic.Code != "" {
 		return r
 	}
 	r.Free(c.Run)

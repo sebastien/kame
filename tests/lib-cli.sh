@@ -84,6 +84,10 @@ function cli_sources_newer {
 # Function: cli_build
 # Builds the debug CLI once per suite; a no-op when the binary is current.
 function cli_build {
+	if [ "${KAME_TEST_PREBUILT:-}" = "$CLI_ROOT" ]; then
+		[ -x "$CLI_BIN" ] || { test-fail "CLI binary missing: $CLI_BIN"; exit 1; }
+		return 0
+	fi
 	if ! command -v so >/dev/null 2>&1; then
 		test-fail "the 'so' toolchain is not available"
 		exit 1

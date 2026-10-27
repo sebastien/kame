@@ -115,10 +115,10 @@ paths remain tracked for later creation.
 
 ```kame
 mode ?= "debug"
-(if (eq mode "debug")
+(if (eq? mode "debug")
   (include ./debug.kmk)
   (include ./release.kmk))
-(if (eq mode "local") (include? "local.kmk"))
+  (if (eq? mode "local") (include? "local.kmk"))
 ```
 
 A top-level `if` containing an include is composition-only: every body must be

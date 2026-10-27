@@ -153,6 +153,14 @@ func parseCommand(command string, args []string) Invocation {
 	if command == "run" {
 		return parseRun(args, false)
 	}
+	if command == "kash" {
+		prefixed := slices.Make[string](mem.System, len(args)+2)
+		prefixed[0], prefixed[1] = "--lang", "kash"
+		copy(prefixed[2:], args)
+		invocation := parseRun(prefixed, false)
+		slices.Free(mem.System, prefixed)
+		return invocation
+	}
 	inv := Invocation{Name: command, Directory: ".", Jobs: 1, WatchDebounceMS: 100, Lang: "script", Indent: "tabs", IndentWidth: 4, Depth: 1}
 	if command == "help" {
 		if len(args) != 0 && args[0] == "--" {
@@ -252,16 +260,13 @@ func parseCommand(command string, args []string) Invocation {
 }
 
 func isCommand(command string) bool {
-	return command == "" || command == "build" || command == "help" || command == "run" || command == "list" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt" || command == "render" || command == "cache"
+	return command == "" || command == "build" || command == "help" || command == "run" || command == "kash" || command == "list" || command == "plan" || command == "cat" || command == "inputs" || command == "outputs" || command == "span" || command == "tools" || command == "parse" || command == "fmt" || command == "render" || command == "cache"
 }
 
 // RemovedCommandMessage keeps native/WASM migration diagnostics identical.
 func RemovedCommandMessage(command string) string {
 	if command == "expr" {
 		return "do expr was removed; use kame do run --lang expr -c TEXT (or - for stdin)"
-	}
-	if command == "kash" {
-		return "do kash was removed; use kame do run FILE.kash"
 	}
 	return ""
 }

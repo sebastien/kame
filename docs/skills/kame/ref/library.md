@@ -9,7 +9,7 @@ value types produce `EXPR_INVALID`; capability failures produce `CAP_DENIED`.
 Transformations take parameters first and their subject last: `(f PARAMS VALUE)`.
 Optional parameters also precede the subject, so `(VALUE | f PARAMS)` is the same
 call. Only this order is accepted; there is no legacy-order detection. Comparisons
-retain `(gt LEFT RIGHT)` and conventional left/right semantics. Variadic operations
+retain `(gt? LEFT RIGHT)` and conventional left/right semantics. Variadic operations
 such as `str`, `concat`, `merge`, and `joinpath` retain authored operand order;
 special forms and internal template-lowering primitives have their own contracts.
 
@@ -38,21 +38,25 @@ different: it remains a deprecated alias for `sub` with identical behavior.
 | `fail!` | `(fail! MESSAGE)` | Raise `USER_ERROR` with an explicit string message. |
 | `count` | `(count VALUE)` | Number of string code points, bytes, list items, or record fields. |
 | `get` | `(get KEY [DEFAULT] RECORD)` | Computed string-key lookup; missing keys return nil or DEFAULT. DEFAULT is evaluated eagerly. |
-| `first` | `(first LIST)` | First item, or `:nil` for an empty list. |
+| `first` | `(first LIST-OR-TEXT)` | Equivalent to `(nth 0 VALUE)`, including Unicode strings and nil for empty input. |
 | `nth` | `(nth INDEX LIST-OR-TEXT)` | Indexed item/code point, or `:nil` when out of range; negative indexes count from the end. |
 | `list` | `(list VALUE...)` | A list containing the arguments. |
 | `nop` | `(nop VALUE...)` | Last argument, or `:nil` with no arguments. |
-| `apply` | `(apply FUNCTION LIST)` | Calls a function with list arguments. A one-argument function receives the list itself. |
+| `apply` | `(apply FUNCTION LIST)` | Spreads list elements as positional arguments, regardless of arity. Nest a list once to pass it as one argument. |
 | `items` | `(items RECORD)` | Ordered records `[key: STRING value: VALUE]`, preserving typed nested data. |
 | `set` | `(set KEY VALUE RECORD)` | Replace at the existing position, or append a new string key; nil is a value, not deletion. |
 | `merge` | `(merge RECORD...)` | Shallow right-biased merge; first-seen key order; no arguments return an empty record. |
-| `record?`, `list?`, `string?` | `(PREDICATE VALUE)` | Exact outer-kind boolean, including empty data; patterns/bytes are not strings. |
+| `nil?`, `bool?`, `int?`, `float?`, `string?`, `bytes?`, `list?`, `record?`, `callable?`, `resource?`, `pattern?`, `process?` | `(PREDICATE VALUE)` | Exact outer-kind boolean for every value, including opaque/callable data. |
+| `number?` | `(number? VALUE)` | Whether the value is int or float. |
+| `empty?` | `(empty? VALUE)` | Whether text, bytes, a list, or a record has zero length; false for nil and other kinds. |
+| `has-key?` | `(has-key? KEY RECORD)` | Whether a string key is present, even when its value is nil. |
+| `success?` | `(success? RESULT)` | Whether integer `status` and `signal` fields are both zero. Missing/malformed fields error; failures are not caught. |
 | `blank?` | `(blank? VALUE)` | True only for nil or an empty string; false, zero, whitespace, and empty collections are not blank. |
 | `digest` | `(digest ALGORITHM BYTES-OR-STRING)` | Raw bytes/UTF-8 SHA-1/256/512 digest, lowercase hex, without build fingerprint framing. SHA-1 is legacy-only. |
 
 Only `:false` and `:nil` are false. Other values are true.
 Truth conversion is not an emptiness test: zero and empty strings, bytes, lists,
-and records are true. Use `(> (count VALUE) 0)` for a nonempty collection/text;
+and records are true. Use `(not (empty? VALUE))` for known collection/text data;
 nil, booleans, and numbers are not valid `count` inputs. A nil-valued list item or
 record field still contributes to the count. See [Expressions](./expressions.md).
 
@@ -63,7 +67,7 @@ read, including every trailing newline and binary byte.
 
 ## Equality
 
-`eq`/`=` and `is`/`==` are identical value-equality operations; `ne`/`!=` negates
+`eq?`/`=`/`==` are identical value-equality operations; `ne?`/`!=` negates
 their result. Supported values are nil, booleans, numbers, strings, bytes, lists,
 and records. Lists compare in order; records compare by key/value regardless of
 field order. Bytes compare byte-for-byte and never equal strings. Different
@@ -71,8 +75,18 @@ supported kinds are unequal, except exact integer/float numeric equality.
 Patterns, resources, processes, callables, duplicate record keys, and values at
 depth 256 are invalid, even nested behind an earlier mismatch.
 
-Use `(eq A B)`, not `(eq (str A) (str B))`. `filter`/`filter-out` equality shorthand
+Use `(eq? A B)`, not `(eq? (str A) (str B))`. `filter`/`filter-out` equality shorthand
 uses this same contract. Ordering and `unique` remain scalar-only.
+
+Named ordering predicates are `lt?`, `gt?`, `lte?`, and `gte?`; symbolic operators
+remain available. Integers order exactly, including beyond 2^53; mixed int/float
+ordering does not round the integer to float. NaN is unordered and errors.
+`eq`, `is`, `ne`, `lt`, `gt`, `lte`, and `gte` remain compatibility aliases, not
+identity operations. New code should use predicates or symbols; there is no `is?`.
+
+`get` defaults are eager. For a lazy fallback, write
+`(if (has-key? key record) (get key record) (compute-default))`. This distinguishes
+absence from a present nil without introducing implicit lazy operation arguments.
 
 ## Collections
 
@@ -85,7 +99,7 @@ Callbacks run in input order. `map` and `flatmap` require `(FUNCTION LIST)`;
 | `flatmap` | `(flatmap FUNCTION LIST)` | Maps and flattens one list level; every callback result must be a list. |
 | `filter` | `(filter PREDICATE-OR-VALUE LIST)` | With a callable, keep items whose predicate result is truthy; otherwise, keep items equal to `VALUE`. |
 | `filter-out` | `(filter-out PREDICATE-OR-VALUE LIST)` | With a callable, keep items whose predicate result is false or nil; otherwise, keep items unequal to `VALUE`. |
-| `has?` | `(has? ITEM LIST)` | Exact membership using value equality, including nested lists/records and exact numeric equality. Validates the full operands before matching. |
+| `in?` | `(in? ITEM LIST)` | Exact membership using value equality, including nested lists/records and exact numeric equality. Validates the full operands before matching. |
 | `reduce` | `(reduce FUNCTION [INITIAL] LIST)` | Left fold with `(accumulator item)` callbacks. Without `INITIAL`, the first item is the accumulator; an empty list produces `:nil`. |
 | `concat` | `(concat VALUE...)` | Flattens list arguments one level and appends scalar arguments. |
 | `slice` | `(slice START [END] LIST-OR-TEXT)` | Half-open slice; negative bounds count from the end. |
@@ -95,6 +109,10 @@ Callbacks run in input order. `map` and `flatmap` require `(FUNCTION LIST)`;
 `sorted` and `unique` support nil, booleans, integers, floats, and strings; a
 mixed or unsupported list is invalid (including integer/float mixtures).
 
+`has?` remains a compatibility alias for `in?`. Record presence uses `has-key?`;
+text substring membership uses `includes?`. `bool` is a truth conversion, `not`
+is a logical operation, and neither is renamed with a predicate suffix.
+
 ## Text and patterns
 
 | Operation | Signature | Result |
@@ -102,6 +120,7 @@ mixed or unsupported list is invalid (including integer/float mixtures).
 | `join` | `(join SEPARATOR LIST)` | Joins a list of strings. |
 | `split` | `(split SEPARATOR TEXT)` | Splits text on a nonempty literal separator, preserving empty fields; empty text produces `[""]`. |
 | `strip` | `(strip TEXT)` | Removes leading and trailing Unicode whitespace. |
+| `line` | `(line TEXT)` | Removes one terminal LF, if present; preserves all other whitespace, including a preceding CR. |
 | `sub` | `(sub FROM TO TEXT)` | Replaces all literal `FROM` occurrences. |
 | `sub-token` | `(sub-token FROM TO TEXT)` | Replaces literal occurrences outside Unicode letter/number/underscore/hyphen boundaries. Search must be nonempty; replacement is literal and not rescanned. |
 | `sub` | `(sub MATCH-PATTERN EXPANSION [TEXT])` | Pattern substitution. Without `TEXT`, returns a one-argument callable suitable for `map`. Nonmatches remain unchanged. |
@@ -125,8 +144,8 @@ report `EXPR_INVALID` rather than constructing a pattern-substitution callable.
 
 `strip` is an explicit broad-whitespace conversion, not command-capture framing.
 To remove one known terminal LF while preserving other whitespace and earlier
-newlines, use `(if (ends? "\n" TEXT) (slice 0 -1 TEXT) TEXT)`. Do not infer a
-CRLF terminator or remove all terminal newlines unless the producer's protocol
+newlines, use `(line TEXT)`. Empty input stays empty; non-strings are invalid.
+Do not infer a CRLF terminator or remove all terminal newlines unless the producer's protocol
 requires it. Capture itself is lossless; see [Kash](./kash.md).
 
 See [Templates](./templates.md) for document directives, source resolution,

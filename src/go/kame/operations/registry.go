@@ -2,7 +2,7 @@ package operations
 
 import "kame/lang/eval"
 
-const version = "v19-unicode15"
+const version = "v20-unicode15"
 
 // Register describes every standard operation explicitly. Categories describe
 // the operation itself; callable/template effects still propagate dynamically.
@@ -14,6 +14,9 @@ func Register(r *eval.Registry) bool {
 		pure(r, "eq", opEq, 2, 2) && pure(r, "is", opIs, 2, 2) && pure(r, "has?", opHas, 2, 2) &&
 		pure(r, "ne", opNe, 2, 2) && pure(r, "lt", opLt, 2, 2) &&
 		pure(r, "gt", opGt, 2, 2) && pure(r, "gte", opGte, 2, 2) && pure(r, "lte", opLte, 2, 2) &&
+		pure(r, "eq?", opEq, 2, 2) && pure(r, "ne?", opNe, 2, 2) && pure(r, "lt?", opLt, 2, 2) &&
+		pure(r, "gt?", opGt, 2, 2) && pure(r, "gte?", opGte, 2, 2) && pure(r, "lte?", opLte, 2, 2) &&
+		pure(r, "in?", opHas, 2, 2) && pure(r, "has-key?", opHasKey, 2, 2) && pure(r, "success?", opSuccess, 1, 1) &&
 		pure(r, "template-cat", opTemplateCat, 0, -1) && pure(r, "text", opText, 1, 1) &&
 		registerRender(r) && pure(r, "template-items", opTemplateItems, 1, 1) &&
 		callback(r, "template-apply", opTemplateApply, 2, 2) &&
@@ -23,12 +26,16 @@ func Register(r *eval.Registry) bool {
 		callback(r, "apply", opApply, 2, 2) && pure(r, "list", opList, 0, -1) &&
 		pure(r, "items", opItems, 1, 1) && pure(r, "set", opSet, 3, 3) && pure(r, "merge", opMerge, 0, -1) &&
 		pure(r, "record?", opKindPredicate, 1, 1) && pure(r, "list?", opKindPredicate, 1, 1) && pure(r, "string?", opKindPredicate, 1, 1) &&
+		pure(r, "nil?", opKindPredicate, 1, 1) && pure(r, "bool?", opKindPredicate, 1, 1) && pure(r, "number?", opKindPredicate, 1, 1) &&
+		pure(r, "int?", opKindPredicate, 1, 1) && pure(r, "float?", opKindPredicate, 1, 1) && pure(r, "bytes?", opKindPredicate, 1, 1) &&
+		pure(r, "callable?", opKindPredicate, 1, 1) && pure(r, "resource?", opKindPredicate, 1, 1) &&
+		pure(r, "pattern?", opKindPredicate, 1, 1) && pure(r, "process?", opKindPredicate, 1, 1) && pure(r, "empty?", opEmpty, 1, 1) &&
 		pure(r, "digest", opDigest, 2, 2) &&
 		callback(r, "map", opMap, 2, 2) && callback(r, "flatmap", opFlatMap, 2, 2) &&
 		callback(r, "filter", opFilter, 2, 2) && callback(r, "filter-out", opFilterOut, 2, 2) && callback(r, "reduce", opReduce, 2, 3) &&
 		pure(r, "concat", opConcat, 0, -1) && pure(r, "slice", opSlice, 2, 3) && pure(r, "sorted", opSorted, 1, 1) &&
 		pure(r, "unique", opUnique, 1, 1) && pure(r, "join", opJoin, 2, 2) && pure(r, "resource", opResource, 1, 1) &&
-		pure(r, "split", opSplit, 2, 2) && pure(r, "strip", opStrip, 1, 1) && pure(r, "pattern", opPattern, 1, 1) &&
+		pure(r, "split", opSplit, 2, 2) && pure(r, "strip", opStrip, 1, 1) && pure(r, "line", opLine, 1, 1) && pure(r, "pattern", opPattern, 1, 1) &&
 		callback(r, "sub", opReplace, 2, 3) && callback(r, "replace", opReplace, 2, 3) && pure(r, "match?", opMatch, 1, 2) && pure(r, "includes?", opIncludes, 2, 2) &&
 		pure(r, "regex-match", opRegexMatch, 2, 2) && callback(r, "resub", opResub, 3, 3) && pure(r, "capture", opCapture, 2, 2) &&
 		pure(r, "starts?", opStarts, 2, 2) && pure(r, "ends?", opEnds, 2, 2) &&

@@ -4,6 +4,7 @@ import (
 	"kame/core"
 	"kame/diagnostic"
 	"kame/host"
+	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
 	"solod.dev/so/mem"
@@ -110,6 +111,8 @@ func (p *Program) freeKashFunctions() {
 type kashInvocation struct {
 	Program        *Program
 	Parsed         *script.Script
+	Items          []script.ScriptItem
+	Native         bool
 	OwnParsed      bool
 	Scope          *Scope
 	Group          int64
@@ -135,6 +138,9 @@ func freeKashInvocation(a mem.Allocator, value any) {
 	state.Scope.Free()
 	if state.OwnParsed {
 		state.Parsed.Free()
+	}
+	if state.Native {
+		slices.Free(a, state.Items)
 	}
 	freeCallables(a, &state.Value)
 	state.Value.Free(a)
@@ -180,7 +186,11 @@ func (p *Program) RunKash(text string, c *Context, span source.Span) Result {
 }
 
 func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Value, c *Context) Result {
-	if c.Phase != EvaluatePhase {
+	return p.invokeKashBody(parsed, nil, scope, args, c)
+}
+
+func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope *Scope, args []core.Value, c *Context) Result {
+	if c.Phase != EvaluatePhase || c.PurePredicate {
 		return failure(c.Run, "PHASE_INVALID", c.Span, "Kash execution is invalid in this phase")
 	}
 	if c.Engine == nil {
@@ -198,8 +208,29 @@ func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Va
 		p.NextScriptGroup++
 		state.Group = p.NextScriptGroup
 		state.Deferred = p.NewDeferScope(state.Group, c.Engine.NodeID())
-		for i := range parsed.Items {
-			item := parsed.Items[i]
+		if native != nil {
+			state.Native = true
+			initialized := p.kashBodyDefinitions(state.Scope, native.Body, c)
+			if initialized.Diagnostic.Code != "" {
+				freeKashInvocation(p.Alloc, state)
+				return initialized
+			}
+			for i := range native.Body {
+				e := native.Body[i]
+				kind := script.Expression
+				if e.Kind == expr.KashDefinition || e.Kind == expr.KashComment {
+					continue
+				}
+				if e.Kind == expr.CommandGraph || e.Kind == expr.CommandList || e.Kind == expr.KashReturn || expr.IsKashControl(e.Kind) {
+					kind = script.Command
+				}
+				state.Items = slices.Append(p.Alloc, state.Items, script.ScriptItem{Kind: kind, Expression: e, Span: e.Span})
+			}
+		} else {
+			state.Items = parsed.Items
+		}
+		for i := range state.Items {
+			item := state.Items[i]
 			if item.Kind != script.Definition {
 				continue
 			}
@@ -225,7 +256,9 @@ func (p *Program) invokeKash(parsed *script.Script, scope *Scope, args []core.Va
 	c.CallPath = invocationPath(c.Run, previousPath, -1, int(state.Group))
 	// Constructed scripts have independent authored spans; direct recipe offsets
 	// are mapped back to their source by the build runtime.
-	c.Source = parsed.Source.Name
+	if parsed != nil {
+		c.Source = parsed.Source.Name
+	}
 	r := p.advanceKash(state, c)
 	mem.FreeString(c.Run, c.CallPath)
 	c.Args, c.HasArgs, c.Scope = previousArgs, previousHasArgs, previousScope
@@ -281,8 +314,8 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 }
 
 func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
-	for state.Index < len(state.Parsed.Items) {
-		item := state.Parsed.Items[state.Index]
+	for state.Index < len(state.Items) {
+		item := state.Items[state.Index]
 		if item.Kind != script.Command && item.Kind != script.Expression {
 			state.Index++
 			continue
@@ -314,14 +347,18 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 		}
 		freeCallables(p.Alloc, &state.Value)
 		state.Value.Free(p.Alloc)
-		if item.Kind == script.Expression {
+		if item.Kind == script.Expression && !r.Returned {
 			freeCallables(p.Alloc, &r.Value)
 			r.Value.Free(p.Alloc)
 			state.Value = core.Value{}
 		} else {
 			state.Value = r.Value
 		}
-		state.Index++
+		if r.Returned {
+			state.Index = len(state.Items)
+		} else {
+			state.Index++
+		}
 	}
 	joined := p.joinProcesses(c)
 	if joined.Waiting || joined.Diagnostic.Code != "" {

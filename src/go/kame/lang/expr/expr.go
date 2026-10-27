@@ -59,6 +59,9 @@ const (
 	KashDefer
 	KashFor
 	KashWhile
+	ListSpread
+	KashFunction
+	KashReturn
 )
 
 func IsKashControl(kind Kind) bool {
@@ -253,6 +256,8 @@ type parser struct {
 	diags        []source.Diagnostic
 	kash         bool
 	commandGroup bool
+	// One-based root position: only a top-level Kash path stops at semicolons.
+	valuePathStart int
 	// Rule indentation is structural, including inside multiline string data.
 	indent string
 }
@@ -468,6 +473,9 @@ func (p *parser) pathAtom(command bool) *Expr {
 			continue
 		}
 		if command && (commandOperator(b) || (p.commandGroup && b == ',' && patternDepth == 0)) {
+			break
+		}
+		if p.valuePathStart == start+1 && b == ';' && patternDepth == 0 {
 			break
 		}
 		if b == '{' {
@@ -1235,6 +1243,9 @@ func (p *parser) list() *Expr {
 		mark := p.pos
 		name := p.name()
 		if name.OK && p.pos < len(p.s.Text) && p.s.Text[p.pos] == ':' {
+			if len(list.Items) != 0 {
+				p.error(mark, p.pos+1, "cannot mix list items and record fields")
+			}
 			p.pos++
 			record := p.node(Record, start)
 			value := p.itemAfterSpace()
@@ -1277,7 +1288,19 @@ func (p *parser) list() *Expr {
 		p.pos = mark
 		name = p.name()
 		var item *Expr
-		if name.OK && p.pos+3 <= len(p.s.Text) && p.s.Text[p.pos:p.pos+3] == "..." {
+		if mark+3 <= len(p.s.Text) && p.s.Text[mark:mark+3] == "..." {
+			p.pos = mark + 3
+			item = p.node(ListSpread, mark)
+			if p.pos == len(p.s.Text) || strings.ContainsAny(p.s.Text[p.pos:p.pos+1], " \t\r\n]") {
+				p.error(mark, p.pos, "list spread requires an adjacent expression")
+			} else {
+				operand := p.expression()
+				if operand != nil {
+					item.Items = slices.Append(p.a, item.Items, operand)
+				}
+			}
+			item.Span.End = p.pos
+		} else if name.OK && p.pos+3 <= len(p.s.Text) && p.s.Text[p.pos:p.pos+3] == "..." {
 			p.pos += 3
 			item = p.node(Name, mark)
 			item.Text, item.Rest = name.Text, true
@@ -2026,6 +2049,21 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	}
 	if e.AuthoredPipe != nil {
 		writeExpr(b, e.AuthoredPipe)
+		return
+	}
+	if e.Kind == ListSpread {
+		b.WriteString("...")
+		if len(e.Items) != 0 {
+			writeExpr(b, e.Items[0])
+		}
+		return
+	}
+	if e.Kind == KashReturn {
+		b.WriteString("return ")
+		writeKashValue(b, e.Items[0])
+		if e.AcceptExit {
+			b.WriteString(" ?")
+		}
 		return
 	}
 	if e.Kind == ValuePipe {

@@ -15,6 +15,7 @@ type Result struct {
 	Value      core.Value
 	Waiting    bool
 	Completed  bool
+	Returned   bool // call-local Kash control flow, consumed by its defn invocation
 	Stream     *core.Source
 	Diagnostic diagnostic.Diagnostic
 }

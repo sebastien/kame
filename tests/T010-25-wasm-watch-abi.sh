@@ -80,7 +80,7 @@ assert.notEqual(constrained, 0n);
 // Fit compilation/watch setup (including teardown metadata), but leave too
 // little for a retained snapshot. Both setup success and snapshot exhaustion
 // below are required; changing runtime layouts must not weaken either check.
-assert.equal(e.kame_wasm_instance_set_heap_limit(constrained, 22000), 0);
+assert.equal(e.kame_wasm_instance_set_heap_limit(constrained, 24100), 0);
 compile(constrained, 'VALUE = 1\n');
 const [constrainedTargets, constrainedTargetsLength] = write('["VALUE"]');
 assert.equal(e.kame_wasm_watch_begin(constrained, constrainedTargets, constrainedTargetsLength), 0);

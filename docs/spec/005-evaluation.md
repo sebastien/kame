@@ -106,7 +106,8 @@ Ordinary registered operations are callable values, including plugin operations:
 `(map uppercase ["a" "b"])`, `(filter exists? FILES)`, and
 `predicate = exists?` need no lambda wrapper. Lexical bindings shadow operation
 names. Comparison aliases (`=`, `==`, `!=`, `<`, `>`, `<=`, `>=`) also resolve to
-their canonical operation callables; their existing application-head syntax is
+their canonical predicate callables (`eq?` for both equality symbols, `ne?`,
+`lt?`, `gt?`, `lte?`, `gte?`); their existing application-head syntax is
 unchanged. Unknown lookup is `REF_MISSING`; a missing application-head operation
 is `OP_UNKNOWN`, and a known non-callable head is `EXPR_INVALID`.
 
@@ -432,6 +433,20 @@ List values evaluate their elements left-to-right. Record values evaluate
 values left-to-right and retain source key order for formatting; lookup does not
 depend on order.
 
+For a list spread (`004-language.md`), evaluate its operand once at that entry's
+position, require a list, and append its elements without recursively flattening
+them. Empty lists append nothing; nil, strings, bytes, records, and other
+non-lists fail `EXPR_INVALID` at the spread operand. Nil and container elements
+inside the spread list remain ordinary elements. A failing entry prevents later
+entries from being evaluated.
+
+Spread uses the ordinary scope, authority, phase, and dependency channels. It
+does not reinterpret elements as source, paths, globs, or argv. Unused definitions
+and unselected branches remain lazy. Across suspension, retain completed entries
+and operand evaluation state so a spread never repeats an accepted effect or
+duplicates inserted elements. Result ownership follows ordinary list values;
+spreading does not invalidate or mutate the operand list.
+
 Reference components resolve from left to right:
 
 - Name accesses a record key.
@@ -485,6 +500,10 @@ containment, which is outside the language capability model.
   definition named `_0` does not shadow a placeholder.
 - Lexical names override operation names only within their scope.
 - Arguments produce deterministic left-to-right diagnostics.
+- List spreads preserve entry order, empty lists, nil members, and nested
+  containers without mutating their operands. Non-list operands fail only when
+  demanded, stop later entries, and preserve ordinary phase/capability checks.
+  Suspended spread operands resume without repeated effects or duplicated items.
 - Glob expressions retain read/phase checks, empty membership dependencies and
   lazy selection; multiple consumers share their source on native and WASM.
 - Pattern replacement binds captures only while evaluating its selected

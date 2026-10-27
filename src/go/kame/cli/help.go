@@ -13,8 +13,9 @@ type CommandInfo struct {
 	Summary string
 }
 
-var Commands = [15]CommandInfo{
+var Commands = [16]CommandInfo{
 	{Name: "run", Usage: "kame do run [OPTIONS] INPUT... [-- ARG...]", Summary: "execute ordered source fragments in one session"},
+	{Name: "kash", Usage: "kame do kash [OPTIONS] INPUT... [-- ARG...]", Summary: "execute Kash source (alias for do run --lang kash)"},
 	{Name: "list", Usage: "kame do list [OPTIONS] [QUERY]", Summary: "list declared targets and artifacts, with exact, partial, or typo matching"},
 	{Name: "pick", Usage: "kame do pick [--picker NAME] [OPTIONS]", Summary: "interactively choose a target or command"},
 	{Name: "plan", Usage: "kame do plan [--affected] [--depth N] [--verbose] [OPTIONS] [RESOURCE...]", Summary: "inspect prerequisites, or affected consumers, and dependency stages without execution"},

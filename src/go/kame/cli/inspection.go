@@ -250,10 +250,10 @@ func writeInspectionReport(out io.Writer, doc core.Value, styled bool, verbose b
 			}
 			for j := range p.Record {
 				field := p.Record[j]
-				if field.Key == "id" || field.Key == "resource" || field.Key == "target" || field.Key == "kind" || field.Key == "outputs" {
+				if definition {
 					continue
 				}
-				if definition && field.Key == "text" {
+				if field.Key == "id" || field.Key == "resource" || field.Key == "target" || field.Key == "kind" || field.Key == "outputs" {
 					continue
 				}
 				if !verbose && (field.Key == "span" || field.Key == "rule" || field.Key == "text") {

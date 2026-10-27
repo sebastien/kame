@@ -269,12 +269,13 @@ function writeReport(heading, document, verbose = false) {
 function writeTargetReport(doc) {
   if (!doc.entries.length) stdout.write('  no entries\n');
   for (const [group, heading, token] of [['rules', 'Rules', 'target.rule'], ['services', 'Services', 'target.service'], ['tasks', 'Tasks', 'target.task'], ['artifacts', 'Artifacts', 'target.artifact']]) {
-    const entries = doc.entries.filter((entry) => entry.group === group);
+    let entries = doc.entries.filter((entry) => entry.group === group);
+    if (group === 'artifacts') entries = [...entries.filter((entry) => !entry.status), ...entries.filter((entry) => entry.status)];
     if (!entries.length) continue;
     stdout.write(`  ${styled(token, heading, outputColor)}\n`);
     for (const entry of entries) {
       const [label, statusToken] = entry.status === 'built' ? ['ok', 'status.success'] : entry.status === 'outdated' ? ['out of date', 'message.warning'] : [entry.status, entry.status === 'missing' ? 'status.failed' : 'text.muted'];
-      stdout.write(`    ${styled(token, shortReportField(entry.name), outputColor)}${label ? `  ${styled(statusToken, label, outputColor)}` : ''}\n`);
+      stdout.write(`    ${styled(token, shortReportField(entry.name), outputColor)}${label ? `  ${styled(statusToken, label, outputColor)}` : ''}${entry.summary ? `  ${styled('text.muted', shortReportField(entry.summary), outputColor)}` : ''}\n`);
     }
   }
 }
@@ -327,7 +328,7 @@ function writeInspectionReport(doc, write, verbose) {
       let line = definition ? `    ${text(p.text, 'value.literal')}` : `    ${text(p.target, 'value.target')} · ${text(p.kind, 'value.literal')}`;
       for (const [key, value] of Object.entries(p)) {
         if (['id', 'resource', 'target', 'kind', 'outputs'].includes(key)) continue;
-        if (definition && key === 'text') continue;
+        if (definition) continue;
         if (!verbose && ['span', 'rule', 'text'].includes(key)) continue;
         if (!verbose && ((value !== null && typeof value === 'object' && Object.keys(value).length === 0) || (key === 'freshness' && value === 'unknown'))) continue;
         line += ` · ${inlineField(key, value)}`;

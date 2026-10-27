@@ -2,7 +2,7 @@
 # Spec: docs/spec/013-tests.md — per-artifact version metadata and incrementality
 set -euo pipefail
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
-test-start "T013-05 per-artifact build mode"
+test-start "T013-09 per-artifact build mode"
 test-step "build current native artifacts"
 cli_require_tools
 cli_build

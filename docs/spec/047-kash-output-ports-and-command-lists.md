@@ -26,6 +26,10 @@ stage's own stderr into a graph/file, subshells, heredocs, backtick substitution
 process replacement, asynchronous compound command lists, and mutable bindings.
 `$(...)` remains the sole command-substitution syntax. Grants do not change.
 
+[Practical scripting](048-kash-practical-scripting.md) extends these boundaries
+with a restricted stderr-routing subset and selected ordinary exit acceptance;
+it preserves the output-port and effective-outcome distinctions below.
+
 ## 2. Reserved output ports
 
 ### Syntax and boundaries

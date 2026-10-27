@@ -1,4 +1,5 @@
-# Requires standalone Kash, including streaming pipelines and redirection.
+#!/usr/bin/env -S kame do kash
+# Requires Kame with streaming pipelines and redirection support.
 names = ["world" "hello" "hello"]
 
 # The outer pipe streams process output.
@@ -13,5 +14,6 @@ echo (count listing)
 
 # Writing the report is explicit, not an effect of computing its path.
 report = ./report.txt
-printf "%s" $listing > $report
+printf %s $listing > $report
 cat < $report
+printf "report complete\n" >> $report

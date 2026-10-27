@@ -14,6 +14,22 @@ func FormatKashControl(a mem.Allocator, e *Expr, indent string) string {
 }
 
 func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
+	if e.Kind == KashFunction {
+		for j := 0; j < level; j++ {
+			b.WriteString(indent)
+		}
+		b.WriteString("defn ")
+		b.WriteString(e.Text)
+		for i := range e.Parameters {
+			b.WriteByte(' ')
+			b.WriteString(e.Parameters[i].Name)
+			if e.Parameters[i].Rest {
+				b.WriteString("...")
+			}
+		}
+		writeKashBody(b, e.Body, indent, level+1)
+		return
+	}
 	if e.Kind == KashMatch {
 		for j := 0; j < level; j++ {
 			b.WriteString(indent)
@@ -49,38 +65,46 @@ func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
 				writeExpr(b, branch.Items[0])
 			}
 		}
-		for j := range branch.Body {
-			statement := branch.Body[j]
-			b.WriteByte('\n')
-			if IsKashControl(statement.Kind) {
-				writeKashControl(b, statement, indent, level+1)
-				continue
+		writeKashBody(b, branch.Body, indent, level+1)
+	}
+}
+
+func writeKashBody(b *strings.Builder, body []*Expr, indent string, level int) {
+	for j := range body {
+		statement := body[j]
+		b.WriteByte('\n')
+		if IsKashControl(statement.Kind) {
+			writeKashControl(b, statement, indent, level)
+			continue
+		}
+		if statement.Kind == KashDefinition && statement.Items[0].Kind == KashFunction {
+			writeKashControl(b, statement.Items[0], indent, level)
+			continue
+		}
+		for k := 0; k < level; k++ {
+			b.WriteString(indent)
+		}
+		if statement.Kind == KashComment {
+			b.WriteString(statement.Text)
+		} else if statement.Kind == KashDefinition {
+			if statement.Bool {
+				b.WriteByte('(')
 			}
-			for k := 0; k <= level; k++ {
-				b.WriteString(indent)
+			b.WriteString(statement.Text)
+			for k := range statement.Parameters {
+				b.WriteByte(' ')
+				b.WriteString(statement.Parameters[k].Name)
+				if statement.Parameters[k].Rest {
+					b.WriteString("...")
+				}
 			}
-			if statement.Kind == KashComment {
-				b.WriteString(statement.Text)
-			} else if statement.Kind == KashDefinition {
-				if statement.Bool {
-					b.WriteByte('(')
-				}
-				b.WriteString(statement.Text)
-				for k := range statement.Parameters {
-					b.WriteByte(' ')
-					b.WriteString(statement.Parameters[k].Name)
-					if statement.Parameters[k].Rest {
-						b.WriteString("...")
-					}
-				}
-				if statement.Bool {
-					b.WriteByte(')')
-				}
-				b.WriteString(" = ")
-				writeExpr(b, statement.Items[0])
-			} else {
-				writeExpr(b, statement)
+			if statement.Bool {
+				b.WriteByte(')')
 			}
+			b.WriteString(" = ")
+			writeExpr(b, statement.Items[0])
+		} else {
+			writeExpr(b, statement)
 		}
 	}
 }

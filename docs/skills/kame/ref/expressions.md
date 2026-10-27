@@ -16,6 +16,9 @@ do not accumulate depth across items.
 
 - Lists and records use whitespace, not commas. Do not mix keyed and unkeyed
   entries. Numbers, strings, explicit paths, booleans, and nil are values.
+- `[...prefix "printf" "%s\n"]` spreads a list expression one level into a list
+  literal. Empty lists insert nothing; non-lists error. Ordinary entries retain
+  nesting. Spread is not available in records, call arguments, or parameter lists.
 - Bare names are references; use `"app"` or `:app` for literal text. Symbols
   other than `:true`, `:false`, and `:nil` evaluate to their name without `:`.
 - Paths start with `./`, `../`, or `/`; nonglob paths are values, not file reads.
@@ -84,7 +87,7 @@ nested calls as distinct structures, including placeholder positions; only
 spacing/layout changes. This is value transformation, not a process pipe.
 Standard transformations put parameters (including optional ones) before their
 subject: `(nth 1 files)` or `(files | nth 1)`. Comparisons keep left/right order:
-`(gt LEFT RIGHT)`, so use `(VALUE | gt _ 3)` to test whether `VALUE > 3`.
+`(gt? LEFT RIGHT)`, so use `(VALUE | gt? _ 3)` to test whether `VALUE > 3`.
 See [Library](./library.md) for operation signatures; do not infer operand
 order from another language.
 
@@ -130,9 +133,10 @@ Use a lambda when adapting one to a callback. In addition to the forms below,
 | `(? VALUE...)` | First operand not failing with unknown-reference; not general error recovery. |
 | `(eval SOURCE)` | Evaluate expression text; not a script loader or replacement for native source composition. |
 
-Comparison heads `=`, `==`, `!=`, `<`, `>`, `<=`, `>=` alias `eq`, `is`, `ne`,
-`lt`, `gt`, `lte`, `gte`. Equality is kind-aware and recursive for bytes, lists,
-and records (record field order is ignored); `is` remains identical to `eq`.
+Comparison heads `=`, `==`, `!=`, `<`, `>`, `<=`, `>=` alias `eq?` (both equality
+symbols), `ne?`, `lt?`, `gt?`, `lte?`, `gte?`. Equality is kind-aware and recursive
+for bytes, lists, and records (record field order is ignored). Unsuffixed named
+comparisons remain compatibility aliases; `is` is equality, not identity.
 Opaque values are not comparable. These are prefix
 calls, not infix operators.
 

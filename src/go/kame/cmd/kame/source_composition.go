@@ -23,6 +23,7 @@ func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, 
 	}
 	defer slices.Free(mem.System, sources)
 	directory := s.SelectionDirectory
+	ownedDirectory := false
 	buffer := mem.AllocSlice[byte](mem.System, os.MaxPathLen, os.MaxPathLen)
 	defer mem.FreeSlice(mem.System, buffer)
 	if !path.IsAbs(directory) {
@@ -33,9 +34,12 @@ func (s *buildSource) compositionCondition(condition *expr.Expr, out io.Writer, 
 			return program.PredicateResult{Diagnostic: diagnostic.Diagnostic{Code: "FS_ERR"}}
 		}
 		directory = path.Join(mem.System, cwd, directory)
-		defer mem.FreeString(mem.System, directory)
+		ownedDirectory = true
 	}
 	result := program.CompositionConditionSources(mem.System, sources, program.CompileSource{Name: authored.Name, Text: authored.Text[condition.Span.Start:condition.Span.End], Offset: condition.Span.Start, Includes: includes}, s.SelectionDefines, s.SelectionEnvironment, directory)
+	if ownedDirectory {
+		mem.FreeString(mem.System, directory)
+	}
 	if result.Diagnostic.Code != "" {
 		emitDiagnostic(out, result.Diagnostic, s.JSON, authored)
 		s.Status = 1

@@ -63,3 +63,54 @@ func TestKashCallableDefinitionsPublishWithoutRelaxingClosurePolicy(t *testing.T
 	parsed.Free()
 	registry.Free()
 }
+
+func TestNativeKashFunctionsBindAndReturnWithoutHostProcesses(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	text := "result = (list (probe 75 1 2) (probe 0))\ndefn probe status rest...\n\tdefn nested code\n\t\treturn code ?\n\tif (= (count rest) 2)\n\t\treturn status ?\n\t(nested 3)\n\treturn (count rest)\n\t(fail! \"unreachable\")\n"
+	parsed := script.ParseKash(a, "functions.kash", text)
+	p := eval.Compile(a, engine, parsed, registry)
+	node := p.Definition("result")
+	engine.Request(node)
+	stepUntilCurrent(engine, node)
+	if !node.Current || node.Diagnostic.Code != "" || len(node.Latest.List) != 2 || node.Latest.List[0].Record[0].Value.Int != 75 || node.Latest.List[1].Record[0].Value.Int != 0 {
+		t.Error("native function failed to bind parameters, accept status, or unwind nested calls")
+	}
+	if request := p.Requests.Next(); request.OK {
+		request.Request.Free(a)
+		t.Error("native status return launched a host process")
+	}
+	engine.Free()
+	p.Free()
+	parsed.Free()
+	registry.Free()
+}
+
+func TestNativeKashFunctionsHaveFreshLocalDefinitions(t *testing.T) {
+	a := t.Allocator()
+	engine := core.NewEngine(a)
+	registry := eval.NewRegistry(a)
+	operations.Register(registry)
+	state := operationState{}
+	registry.Add(eval.Operation{Name: "tick", Call: countOperation, Context: &state, MinArity: 0, MaxArity: 0})
+	parsed := script.ParseKash(a, "fresh.kash", "defn probe\n\tlocal = (tick)\n\treturn local ?\nresult = (map ([unused] (probe)) [1 2 3])\n")
+	p := eval.Compile(a, engine, parsed, registry)
+	node := p.Definition("result")
+	engine.Request(node)
+	stepUntilCurrent(engine, node)
+	if !node.Current || node.Diagnostic.Code != "" || len(node.Latest.List) != 3 || state.Calls != 3 {
+		t.Error("separate native calls shared local effects")
+	} else {
+		for i := range node.Latest.List {
+			if node.Latest.List[i].Record[0].Value.Int != int64(i+1) {
+				t.Error("native call returned a stale local definition")
+			}
+		}
+	}
+	engine.Free()
+	p.Free()
+	parsed.Free()
+	registry.Free()
+}

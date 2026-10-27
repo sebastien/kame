@@ -1,0 +1,14 @@
+#!/usr/bin/env -S kame do kash
+# A configurable, ordered batch; values containing spaces stay one argument.
+options = (parse-args [prefix: [names: ["--prefix"] arity: :one repeat: :reject]] args)
+prefix = (if (empty? options.options.prefix) "checked" (first options.options.prefix))
+for name in ["first note" "second note"]
+	printf "%s: %s\n" $prefix $name
+workspace = (line $(mktemp -d ./kash-batch.XXXXXX))
+defer rm -rf $workspace
+touch ${workspace}/pending
+# Fresh command observations, not repeated lookup of a memoized definition.
+# The body removes the only queued marker, so this demonstration is bounded.
+while test -f ${workspace}/pending
+	printf "processed queued item\n"
+	rm ${workspace}/pending

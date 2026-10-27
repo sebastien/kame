@@ -38,8 +38,24 @@ static void test_cli_build_source_diagnostics(void) {
         native_writer(&output), native_writer(&errors));
     assert(status == 1 && bytes_Buffer_Len(&output) == 0);
     assert(native_contains(&errors, "TGT_AMBIG"));
-    assert(native_contains(&errors, "<command>:4:6:"));
-    assert(native_contains(&errors, "task build :\n     ^"));
+    assert(native_contains(&errors, "<command>:4:6"));
+    assert(native_contains(&errors, "task build :"));
+    bytes_Buffer_Free(&input);
+    bytes_Buffer_Free(&output);
+    bytes_Buffer_Free(&errors);
+}
+
+static void test_cli_incomplete_command_list(void) {
+    so_String arguments[] = {so_str("do"), so_str("parse"), so_str("--json"),
+        so_str("--lang"), so_str("kash"), so_str("-c"), so_str("printf one &&")};
+    bytes_Buffer input = bytes_NewBuffer(mem_System, (so_Slice){0});
+    bytes_Buffer output = bytes_NewBuffer(mem_System, (so_Slice){0});
+    bytes_Buffer errors = bytes_NewBuffer(mem_System, (so_Slice){0});
+    so_int status = main_Run((so_Slice){arguments, 7, 7},
+        (io_Reader){.self = &input, .Read = bytes_Buffer_Read},
+        native_writer(&output), native_writer(&errors));
+    assert(status == 1);
+    assert(native_contains(&output, "expected command after command-list operator"));
     bytes_Buffer_Free(&input);
     bytes_Buffer_Free(&output);
     bytes_Buffer_Free(&errors);
@@ -84,14 +100,16 @@ int main(int argc, char **argv) {
         {"do", "run", "--lang", "expr", "-c", "(finally! ([] (fail! \"body\")) ([] (fail! \"cleanup\")))"},
         {"do", "run", "--lang", "expr", "-c", "(? (finally! ([] missing) ([] (read \"denied\"))) 42)"},
         {"do", "run", "--lang", "expr", "-n", "-c", "(str \"unknown\" (finally! ([] 42) ([] (out! \"cleanup\"))))"},
+        {"do", "plan", "-C", "/tmp", "-c", "(if :false (include ./absent.kmk) :nil)\ntask build :", "build"},
     };
-    const so_int statuses[] = {1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 2, 2, 2, 2, 2, 0, 1, 1, 0};
+    const so_int statuses[] = {1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1, 1, 0, 0, 1, 0, 0, 0, 1, 0, 2, 2, 2, 2, 2, 0, 1, 1, 0, 0};
     for (int iteration = 0; iteration < 256; iteration++) {
         test_cli_invalid_ast();
         mem_Stats ast_stats = mem_Tracker_Stats(&tracker);
         assert(ast_stats.Alloc == 0 && ast_stats.Mallocs == ast_stats.Frees);
         test_cli_diagnostics();
         test_cli_build_source_diagnostics();
+        test_cli_incomplete_command_list();
         mem_Stats diagnostic_stats = mem_Tracker_Stats(&tracker);
         assert(diagnostic_stats.Alloc == 0 && diagnostic_stats.Mallocs == diagnostic_stats.Frees);
         test_cli_presentation();

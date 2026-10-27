@@ -1,0 +1,18 @@
+#!/usr/bin/env -S kame do kash
+workspace = (line $(mktemp -d ./kash-concurrency.XXXXXX))
+defer rm -rf $workspace
+
+# Definitions are lazy: demand both handles before awaiting either check.
+first = (run! :async :true "test" "-s" "./sample.txt")
+second = (run! :async :true "grep" "-q" "hello" "./sample.txt")
+(nop first second)
+(await first)
+(await second)
+# Awaiting again observes the same completion, not another launch.
+completion = (await first)
+printf "checks complete: %s\n" $completion.status
+
+# & is invocation-owned, not daemonization. Deferred actions run after the
+# background report writer joins; LIFO checks the report before removing it.
+printf "background report\n" > ${workspace}/report.txt &
+defer cat < ${workspace}/report.txt

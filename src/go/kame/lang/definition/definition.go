@@ -367,6 +367,9 @@ func FormatCompact(a mem.Allocator, d *Definition) string {
 }
 
 func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
+	if d.Expression != nil && d.Expression.Kind == expr.KashFunction {
+		return expr.FormatKashControl(a, d.Expression, "\t")
+	}
 	b := strings.NewBuilder(a)
 	headerWidth := expr.Columns(d.Name, 1) + 1
 	for i := range d.Parameters {

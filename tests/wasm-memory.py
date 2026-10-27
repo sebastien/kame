@@ -34,7 +34,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 result = subprocess.run(['node', str(host), *arguments], env=environment,
                     stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=15)
                 assert result.returncode == 1, (backend, channel, result.returncode)
-                assert b'error NO_MEMORY: instance heap exhausted\n' in result.stderr, result.stderr[-1000:]
+                assert b'error[NO_MEMORY]:' in result.stderr and b'instance heap exhausted\n' in result.stderr, result.stderr[-1000:]
                 assert b'file://' not in result.stderr and b'RuntimeError' not in result.stderr, result.stderr[-1000:]
                 assert pid_file.exists(), 'exhaustion happened before launching the process'
                 pid, group = map(int, pid_file.read_text().split())

@@ -11,6 +11,10 @@ take precedence over action spellings in the examples below.
 pure script option parsing and token substitution, and host-backed no-clobber
 file publication, with explicit scope, replay, and filesystem safety contracts.
 
+[Practical non-interactive Kash](048-kash-practical-scripting.md) extends this
+contract with standard-stream routing, eager bindings, structured transfers,
+local libraries, owned execution scopes, record iteration, and selected exits.
+
 Kash is Kame's command and process language. It makes command-oriented programs
 read like shell scripts while retaining Kame's typed values, lazy evaluation, and
 explicit dependency model.
@@ -150,8 +154,9 @@ select the recipe interpreter. Native and WASM runners implement these invocatio
 ## Source and statements
 
 A Kash source is a sequence of comments, blank lines, definitions, statements,
-and block control statements. `;` separates statements on a line. Definitions
-have the same shape and lazy semantics as Kame definitions:
+and block control statements. `;` separates statements on a line. Value and
+expression-bodied function definitions have the same shape and lazy semantics
+as Kame definitions; `defn` adds native block-bodied functions below:
 
 ```kash
 name = "John Smith"
@@ -190,13 +195,15 @@ substitution atoms; Kash owns their process contents, the other substitution
 wrappers, and recovery separators. `$REFERENCE`, `${REFERENCE}`,
 and infix `??` are not added to ordinary Kame expressions: use
 `(str "Hello, " WHO)`, not `(str "Hello, " $WHO)`. Existing Kame template
-expansions and expression-string interpolation retain their own rules. Functions
-retain Kame parameter and lazy evaluation semantics. All definition surfaces
-use expressions rather than word-list or recipe-template RHS syntax.
+expansions and expression-string interpolation retain their own rules. Expression-
+bodied functions retain Kame parameter and lazy evaluation semantics. These `=`
+definition surfaces use expressions rather than word-list or recipe-template RHS
+syntax; `defn` bodies instead use the Kash statement grammar.
 
-Definitions in a statement sequence are registered lazily before that sequence
-runs. Duplicate names in one sequence are errors. Each selected control branch
-has a child lexical scope; its definitions may shadow outer bindings but do not
+Definitions, including `defn` functions, in a statement sequence are registered
+before that sequence runs, without evaluating their values or bodies. Duplicate
+names in one sequence are errors. Each selected control branch has a child lexical
+scope; its definitions may shadow outer bindings but do not
 escape. Unselected branches are never registered or evaluated. Statements run
 in source order; an unhandled failure stops the sequence. Completed top-level
 statements retain their demanded lazy values through the combined runner
@@ -212,9 +219,135 @@ are ignored. Outside quotes and nested syntax, `#` at the start of a word
 introduces a comment through the end of the line. `//` is literal command text,
 not a Kash comment.
 
+## Indented function definitions
+
+`defn NAME PARAMETER...` defines a function whose body is a nonempty indented
+Kash statement sequence, using the existing block indentation and dedent rules:
+
+```kash
+defn probe workspace
+	if test -f "${workspace}/ready"
+		return 0
+	touch "${workspace}/ready"
+	return 75 ?
+
+result = (probe workspace)
+```
+
+The header occupies its own line, with no `=`, braces, `end`, or quoted source.
+Zero parameters are permitted. Names and parameters use the ordinary definition
+grammar, including one optional final `rest...` parameter; arity checks, duplicate
+parameter checks, and reserved bindings such as `env` are unchanged. `defn` is
+Kash statement syntax, not a Kame expression special form. `name = VALUE` and
+`(name PARAMETER...) = EXPRESSION` retain their current meanings; no separate
+`def` block syntax is introduced.
+
+The body is parsed with its containing source, including unused functions and
+unselected branches. Function registration performs no body effects, dependency
+discovery, process launch, or authorization checks. Functions share the enclosing
+sequence's definition namespace and forward visibility. Duplicate function/value
+names in one sequence are errors; nested scopes may shadow outer names under
+the ordinary binding rules. A nested function captures its defining lexical
+scope and cannot escape existing callable ownership/publication restrictions.
+
+Calling `(NAME ARGUMENT...)` uses ordinary Kame application syntax. Arguments
+evaluate left-to-right and bind typed parameters and the nearest `args` frame.
+The function executes its already-parsed body with fresh call-local definitions
+and its defining lexical scope, under the caller's execution policy, cwd, child
+environment, and limits. It cannot broaden grants. Each call owns an independent
+async/cleanup lifetime like a constructed Kash callable; branches and loop
+iterations do not create additional cleanup lifetimes. No source is generated,
+reparsed, or passed to a shell. Raw `probe workspace` remains an external command;
+this feature does not add implicit callable lookup in executable position.
+
+On fallthrough the function returns its final statement value, as existing Kash
+callables do. A final unhandled failure propagates normally. Calling the same
+function again executes a fresh body; resuming a suspended call instead continues
+its retained state without replaying statements or effects.
+
+### Status return
+
+`return STATUS` terminates the nearest lexically enclosing `defn` invocation,
+including from nested `if`, `match`, `for`, or `while` bodies. `STATUS` is one Kame
+expression or Kash reference operand (`$REFERENCE` / `${REFERENCE}`), not a raw
+command or implicitly captured word. It is evaluated once and must produce an
+integer from 0 through 255; other kinds and out-of-range values fail
+`EXPR_INVALID`. A missing operand is `PARSE_ERR`.
+
+Return produces a synchronous process-style `Result` with the requested `status`,
+`signal = 0`, an empty `stages` list, and both capture flags false. No host process
+or synthetic executable dependency is created. Output already streamed by the
+function remains streamed; return does not capture it. Status zero is success;
+nonzero status is an ordinary process-exit failure with the return statement's
+source location. An explicit terminal `?`, as in `return 75 ?`, accepts only that
+returned nonzero status and makes the Result available as a value. This mirrors
+existing `CMD ?` acceptance and permits callers to inspect a retry probe's status
+without a shell fixture. It does not accept failures evaluating `STATUS`, earlier
+body failures, or cleanup failures. Return does not take `? ELSE`, pipeline,
+redirection, or async modifiers. Existing caller-side value recovery keeps its
+normal failure categories.
+
+Use `(success? RESULT)` to test a returned status explicitly. For example,
+`if (success? (probe workspace))` tests the `status` and `signal` fields, whereas
+`if (probe workspace)` still applies Kame truth to the returned record and is
+true even for an accepted nonzero status. The probe must explicitly accept a
+nonzero return (`return 75 ?`) when the caller should inspect it; `success?` does
+not catch failures or broaden acceptance. Raw function names, expression calls
+followed by process operators, and pipeline/capture execution of callables are
+not introduced. Function return remains a status, not an arbitrary data-return
+form; expression-bodied Kame functions remain available for value computation.
+
+Return is control flow, not an exception selectable by `??` or command fallback
+inside the returning body. It skips later body statements, exits only its own
+function, and runs that invocation's deferred cleanup before the caller resumes.
+Owned async work follows the existing success/accepted-exit versus failure
+joining/cancellation rules. An invalid status instead unwinds as an evaluation
+failure. Cleanup failures retain the normal primary-failure and LIFO rules; a
+successful or accepted return cannot hide failed cleanup.
+
+`return` outside a lexically enclosing `defn` is `PARSE_ERR`, even in an unused
+branch. A nested function or separately constructed Kash script cannot return
+from its caller. `defer return ...` is invalid: cleanup cannot install a return
+for an invocation that is already finalizing. Quote external executables named
+`defn` or `return` at statement position; ordinary `name = VALUE` definition
+detection remains unchanged.
+
+### Explicit value construction
+
+List construction and producer framing use ordinary Kame expressions, not Kash
+word concatenation or implicit capture conversion:
+
+```kash
+prefix = []
+command = [...prefix "printf" "%s\n"]
+$...command "typed argv"
+
+workspace = (line $(mktemp -d ./kash-example.XXXXXX))
+defer rm -rf $workspace
+config = [name: "example" enabled: :true]
+(write! @{workspace}/config.json (json config))
+
+# || runs the fallback after an ordinary unsuccessful process exit.
+false || printf "fallback\n"
+```
+
+`...EXPRESSION` is list spread from `004-language.md`; `$...command` is argv
+spread. `(line TEXT)` removes one terminal LF under `007-library.md` without
+changing capture. `@{workspace}/config.json` is an existing interpolated Kame
+path expression, not a new Kash substitution. Bare `{workspace}/config.json`
+retains expansion-pattern semantics. Use `joinpath` when computed path joining
+and normalization are required, not merely to append an authored literal suffix.
+
 ## Expansion boundary
 
 Kash has these explicit value/process boundaries:
+
+Definition RHSs, return operands, and value headers use Kame expression parsing
+for interpolated path atoms, including a leading `@{ROOT}/suffix` or
+`@(root)/suffix`. These are paths, not document-template expansions. A standalone
+`@{ROOT}`, a standalone `@(root)`, or a suffix without the required path separator
+remains invalid at this boundary. Raw Kash words retain their own substitution
+rules. Parse/format/parse must preserve this distinction without evaluating code.
 
 | Form | Parser | Meaning |
 | --- | --- | --- |
@@ -350,7 +483,7 @@ and an empty result. No newline stripping or whitespace splitting occurs.
 Leading/trailing spaces and tabs, embedded line endings, CRLF, and newline-only
 stdout retain every byte. Identifier/path conversion belongs to an explicit
 consumer expression: `strip` removes all surrounding Unicode whitespace, while
-an `ends?`/`slice` expression can remove exactly one known terminal LF. The
+`(line TEXT)` removes exactly one terminal LF and preserves any preceding CR. The
 consumer must not infer a terminator that could be part of the payload. Any
 newline-removal helper remains opt-in and cannot change substitution framing.
 Binary capture is outside this specification.
@@ -503,11 +636,15 @@ It may combine fragments under the same rules as argv words:
 :cwd ./build/(variant) :MODE release-(variant) deploy
 ```
 
-`:cwd` is a directory relative to the invocation directory, `:timeout` is a
-positive number of seconds, and other keys matching `[A-Za-z_][A-Za-z0-9_]*`
-are environment overrides. Duplicate keys are errors. The process environment
-otherwise inherits the invocation's configured environment; explicit environment
-lookup still requires `env` access. Quoted or escaped leading colons are literal.
+`:cwd` is a directory relative to the enclosing execution context's effective
+cwd, which is the invocation directory outside child execution scopes. In a
+[`with` scope](048-kash-practical-scripting.md), relative stage overrides compose
+with that scope's cwd. `:timeout` is a positive number of seconds, and other keys
+matching `[A-Za-z_][A-Za-z0-9_]*` are environment overrides. Duplicate keys are
+errors. The process environment otherwise inherits the enclosing context's child
+environment, which is the invocation's configured environment outside child
+execution scopes; explicit environment lookup still requires `env` access.
+Quoted or escaped leading colons are literal.
 After the executable, colon-prefixed words are ordinary arguments. Each pipeline
 stage has independent setup keys. Reserved setup keys are not environment
 overrides. Invalid paths, keys, values, and missing executables are errors.
@@ -698,9 +835,9 @@ deploy ? echo "deployment failed; continuing"
 Acceptance handles only non-zero process exits, including signal exits; it does
 not accept launch, timeout, cancellation, argument, or capability errors.
 Command recovery handles non-zero exits, launch failures, and timeouts, but not
-capability denial, cancellation, or source/argument validation errors. A recovered
-failure emits no additional unhandled-failure diagnostic; live stderr is
-unchanged. A fallback failure propagates normally.
+capability denial, cancellation, or source, argument, or binding-validation errors.
+A recovered failure emits no additional unhandled-failure diagnostic; live stderr
+is unchanged. A fallback failure propagates normally.
 
 `LEFT ?? RIGHT` is value-level recovery. It evaluates `RIGHT` when `LEFT` is
 `nil` or fails; otherwise it returns `LEFT`:
@@ -719,8 +856,9 @@ expression.
 not a raw-command operator or an operator inside Kame expressions. It handles ordinary
 evaluation failures, including unknown references, host read failures, and
 substitution exit/launch/timeout/capture failures, but never capability denial,
-cancellation, or source/argument validation errors. Waiting for a host result is
-not failure. No fallback dependency or effect occurs unless selected.
+cancellation, or source, argument, or binding-validation errors, including
+`BINDING_UNINITIALIZED`. Waiting for a host result is not failure. No fallback
+dependency or effect occurs unless selected.
 
 ### Operator binding
 
@@ -757,8 +895,7 @@ Quote an external executable named `defer` at statement position; a lazy
 definition named `defer` remains an ordinary definition.
 
 ```kash
-created = $(mktemp -d ./workspace.XXXXXX)
-directory = (if (ends? "\n" created) (slice 0 -1 created) created)
+directory = (line $(mktemp -d ./workspace.XXXXXX))
 defer rm -rf $directory
 defer (out! "finishing\n")
 ```
@@ -780,8 +917,8 @@ precede registration. Expression results are discarded, not interpreted as
 executables or implicitly printed.
 
 Cleanup belongs to the enclosing Kash invocation: a recipe, constructed callable,
-or the top-level ordered runner session. Branch exit does not finalize it; nested
-Kash callables have independent stacks. Actions execute once in reverse
+`defn` call, or the top-level ordered runner session. Branch exit does not finalize
+it; nested Kash callables have independent stacks. Actions execute once in reverse
 registration order. Normal completion joins owned async work before cleanup;
 failure/cancellation cancels and reaps that work before cleanup starts. A deferred
 expression may start async work, but the action joins it before advancing.
@@ -828,8 +965,9 @@ cleanup cancellation/deadline context. Free alone cannot execute host actions.
 Kash adds block control statements around its commands. A block is introduced by
 a keyword line and holds one or more statements indented deeper than the keyword.
 Blocks nest, and dedenting to an existing enclosing level ends the inner block.
-Block keywords are `if`, `elif`, `else`, `match`, and `case`; a block statement
-is not `;`-separated.
+Block keywords include `if`, `elif`, `else`, `match`, `case`, `for`, `while`, and
+`defn`; a block statement is not `;`-separated. Function bodies use these same
+rules, not a separate braced or explicitly terminated block grammar.
 
 Input indentation may use tabs or spaces, but a source must use one style;
 spaces use a consistent positive unit. Each nested block is one unit deeper,
@@ -883,6 +1021,10 @@ dependencies, and effects never occur. `if`/`elif`/`else` and `match`/`case`
 delegate their tests and subjects to the Kame expression evaluator and their
 bodies to Kash statements, so they carry normal Kame values, dependencies, and
 diagnostics.
+
+A `return` in a selected function-body branch propagates through control blocks
+to its owning `defn` call. It is not a branch value and cannot be swallowed by
+lowering a branch or iteration to an ordinary expression callback.
 
 Each `case` header contains exactly one pattern expression accepted by Kame's
 `match` form. Subject type rules and capture matching are unchanged. Captures
@@ -959,6 +1101,12 @@ and `match` special forms: a command condition lowers to a process-status
 predicate, a parenthesized condition to the Kame expression, a `match` subject to a
 value, and each branch body to a nested Kash statement sequence.
 
+Function definitions retain their parameter and body ASTs and authored spans;
+they must not lower through `(kash TEXT)` source generation. Status return is a
+call-local control outcome distinct from normal values, failures, and suspension.
+It must survive branch/loop lowering and host suspension until its own call
+boundary performs finalization and exposes the Result or failure to the caller.
+
 Pipeline lowering is descriptive, not eager evaluation of independent `run!`
 calls: the whole graph must be constructed before any stage starts. Execution
 state survives evaluator suspension without repeating completed statements,
@@ -971,8 +1119,13 @@ Formatting must preserve the parser boundary:
 
 - `$REFERENCE`, `${REFERENCE}`, `(EXPRESSION)`, and `$(COMMAND)` retain their
   distinct forms.
-- Block keywords `if`, `elif`, `else`, `match`, and `case` remain on their own
-  line, and each nested block is one tab deeper than its keyword.
+- Block keywords `if`, `elif`, `else`, `match`, `case`, `for`, `while`, and `defn`
+  remain on their own line, and each nested block is one tab deeper than its
+  keyword.
+- Function headers retain parameter order and rest syntax. Return statements
+  retain their value-expression/reference boundary and explicit acceptance marker.
+  Formatting, cloning, and AST inspection preserve native bodies and returns,
+  never converting them to generated source strings or external commands.
 - A parenthesized Kame expression is formatted by the Kame expression
   formatter, preserving the single-expression versus parenthesized-form boundary.
 - A nested command substitution is formatted by the Kash formatter.
@@ -997,6 +1150,29 @@ stage, and source information but do not embed captured stdout/stderr in causes;
 live forwarding and explicit capture remain separate channels.
 
 ## Acceptance tests
+
+- `defn` supports zero, fixed, and rest parameters, lexical capture, forward
+  references, shadowing, nested definitions, and ordinary typed Kame calls.
+  Existing value/expression-function definitions and raw external command lookup
+  remain unchanged. Registration and unused bodies have no effects or grants.
+- Each function invocation gets fresh locals, argument frames, and cleanup/async
+  ownership. Nested and repeated calls do not share effectful local definitions;
+  resumed calls do not replay accepted statements or acquire stale completions.
+- `return 0` and `return 75 ?` expose process-style Results without launching a
+  process; unaccepted nonzero returns fail as process exits. Missing/invalid
+  statuses, errors computing the operand, and cleanup failures are not accepted
+  by the return marker. Status operands evaluate once across suspension.
+- Return from nested branches/loops skips remaining body work, runs call-local
+  cleanup once in LIFO order, joins or cancels/reaps owned work as appropriate,
+  and resumes only the immediate caller. Other calls and outer cleanup stacks
+  are unaffected. Unselected returns do not evaluate their operands.
+- Invalid `defn` headers, empty/misindented bodies, duplicate bindings, misplaced
+  returns, and deferred returns produce precise authored-source diagnostics.
+  Function parse/format/clone/AST inspection preserves native blocks, parameters,
+  comments, returns, and acceptance markers on both hosts.
+- List spread, `line` framing, interpolated path construction, native status
+  probes, and `false || printf "fallback\n"` need no implicit or explicit shell.
+  Ordinary capture still preserves every stdout byte.
 
 - Deferred commands snapshot operands once; expressions preserve lexical bindings
   and evaluate only during cleanup. Neither opens an output at registration,
@@ -1054,8 +1230,9 @@ live forwarding and explicit capture remain separate channels.
 - Existing `.kmk` recipes retain their shell-text behavior unless explicit
   Kash recipe metadata or `SHELL = kash` selects the portable interpreter.
 - Definition detection distinguishes `name = VALUE` from `echo name=value`;
-  function RHSs use Kame expressions, including command-substitution atoms, not
-  shell-style infix concatenation or Kash reference wrappers.
+  expression-bodied function RHSs use Kame expressions, including command-
+  substitution atoms, not shell-style infix concatenation or Kash reference
+  wrappers. `defn` instead owns a directly parsed indented Kash body.
 - Single-expression, shorthand application, lambda, and value-pipe boundaries
   agree with their corresponding ordinary Kame expressions.
 - `$name.c` resolves a component; `${name}.c` appends a literal suffix.

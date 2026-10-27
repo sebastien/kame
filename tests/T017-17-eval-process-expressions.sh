@@ -18,10 +18,10 @@ for backend in native wasm; do
 		if [ "$status" = 0 ] && [ "$(cat "$work/out")" = "$expected" ]; then test-ok "$backend process value"; else test-fail "$backend process value (status $status)"; cat "$work/err"; fi
 	}
 	reject() {
-		local code="$1" source="$2"
+		local code="$1" source="$2" expected="${3:-1}"
 		local status=0
 		"${command[@]}" do run --allow-run -C "$work" -l expr -c "$source" >"$work/out" 2>"$work/err" || status=$?
-		if [ "$status" = 1 ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend preserves $code"; else test-fail "$backend process failure"; cat "$work/err"; fi
+		if [ "$status" = "$expected" ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend preserves $code"; else test-fail "$backend process failure"; cat "$work/err"; fi
 	}
 	test-step "$backend streams argv graphs and exposes immutable completion metadata"
 	check 'hello0' '(let [r (run! "printf" "%s" "hello")] r.status)'
@@ -58,7 +58,7 @@ for backend in native wasm; do
 	if [ ! -e "$work/forbidden" ]; then test-ok "$backend invalid and unused graphs never launch"; else test-fail "$backend launched malformed graph"; fi
 	reject RECIPE_FAIL '(run! "false")'
 	reject RECIPE_FAIL '(pipe! (run! "false") (run! "true"))'
-	reject RECIPE_FAIL '(pipe! (run! "sh" "-c" "exit 3") (run! "sh" "-c" "exit 7"))'
+	reject RECIPE_FAIL '(pipe! (run! "sh" "-c" "exit 3") (run! "sh" "-c" "exit 7"))' 7
 	if grep -q 'status 7' "$work/err"; then test-ok "$backend selects the rightmost failure"; else test-fail "$backend aggregate status"; fi
 	reject TOOL_MISSING '(run! "kame-missing-process-expression")'
 	status=0

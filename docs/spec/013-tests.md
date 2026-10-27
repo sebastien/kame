@@ -193,12 +193,40 @@ coalescing, fairness, ownership and retained interest through reactive rebinding
 
 Native/WASM conformance covers:
 
+- Canonical `eq?`/`ne?`/`lt?`/`gt?`/`lte?`/`gte?` and `in?`, symbolic comparisons,
+  and compatibility aliases have the same results and callable contracts. Naming
+  checks enforce the explicit predicate inventory and logical/conversion exceptions.
+- Ordering adjacent integers beyond 2^53 and at int64 bounds is exact. Mixed
+  integer/float comparisons cover fractions, signed zero, infinities, and NaN
+  rejection without out-of-range casts on either host.
+- `apply` always spreads the argument list, including zero/unary/rest callables
+  and registry aliases. `first` agrees with `nth 0` for lists and Unicode strings.
+- Kind predicates accept opaque values without comparison or invocation; `empty?`
+  distinguishes empty containers from absence, zero, false, and whitespace.
+- `has-key?` distinguishes absent and nil-valued fields; lazy `if` computes only
+  the selected default. `get` remains eager. `success?` tests accepted status
+  Results, validates required fields, and never swallows unaccepted failures.
+- Leading interpolated path atoms parse consistently in Kash definitions, returns,
+  and value headers, while standalone template openers remain rejected.
+
 - Nil/false-only truth across boolean operations, expression conditions and
   filtering, including zero and empty text/bytes/lists/records. Explicit count
   checks distinguish emptiness from absence and preserve nil-valued members.
 - Lossless capture of whitespace, embedded line endings, CRLF, newline-only and
   empty stdout; typed reuse adds no splitting/reparse. Consumer conversion tests
-  distinguish broad `strip` from removal of exactly one known terminal LF.
+  distinguish broad `strip` from `(line TEXT)`, which removes exactly one terminal
+  LF and preserves a preceding CR and all other whitespace.
+- List spread with empty and multiple operands, nested and nil members, invalid
+  operand kinds, lazy selection, and suspension. Parse/format/clone/AST inspection
+  preserves spread syntax, and resumed operands neither replay effects nor append
+  duplicate elements. Record and call-argument spread remain invalid.
+- Indented `defn` functions with fixed/rest arguments, lexical capture, forward
+  references, fresh call-local definitions, nested calls, and unused bodies.
+  `return` unwinds only its own call through branches and loops; status validation,
+  accepted/unaccepted nonzero results, and call-local deferred cleanup agree on
+  both hosts. Invalid headers, empty bodies, duplicate bindings, and misplaced
+  returns fail before effects. Suspension never replays completed body statements
+  or return operands, and cleanup failures retain the primary failure.
 
 - Direct `.km`, `.kmk`, `.kash`, and `.ksh` execution versus `do run` equivalence.
 - Inline/stdin language selection and unknown-suffix validation without effects.

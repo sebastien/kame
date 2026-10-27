@@ -72,11 +72,11 @@ for backend in native wasm; do
 	run_case "printf abc |(broadcast) (cat > $left, cat > $right) &" 0 '' kash
 	expect "async graph joined its first branch" test "$(cat "$left")" = abc
 	expect "async graph joined both branches" cmp -s "$left" "$right"
-	run_case '$((sh -c "exit 7", sleep 30) |(merge) cat)' 1 RECIPE_FAIL
+	run_case '$((sh -c "exit 7", sleep 30) |(merge) cat)' 7 RECIPE_FAIL
 	run_case '$((sh -c "exit 7", sleep 30) |(merge) cat ?)' 0
 	run_case '$((sh -c "exit 7", sleep 30) |(merge) cat ? printf recovered)' 0
 	expect "recovery owns the graph" grep -Fq '"recovered"' "$work/$backend.out"
-	run_case '$((yes, yes) |(merge) head -c 1)' 1 RECIPE_FAIL
+	run_case '$((yes, yes) |(merge) head -c 1)' 141 RECIPE_FAIL
 	run_case '$((yes, yes) |(merge) cat)' 1 CAPTURE_LIMIT
 
 	test-step "$backend: timeout reaps source, peer, and native operators"

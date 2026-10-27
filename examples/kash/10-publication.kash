@@ -1,0 +1,19 @@
+#!/usr/bin/env -S kame do kash
+workspace = (line $(mktemp -d ./kash-publication.XXXXXX))
+defer rm -rf $workspace
+config = [title: "Notes \"preview\"" pages: ["first note" "second note"]]
+(write! @{workspace}/config.json (json config))
+# Validate the structured data before publishing any generated report.
+loaded = (parse-json (text (read @{workspace}/config.json)))
+(if (= (count loaded.pages) 2) :nil (fail! "expected two pages"))
+
+template = """Publication: @{title}
+"""
+(write! @{workspace}/staged.txt (render [title: loaded.title] template))
+# Live pipe-backed arguments are non-seekable streams, not captured strings
+# or temporary files. Both producers belong to diff's owning graph.
+diff -u <(cat < ${workspace}/staged.txt) <(printf "Publication: %s\n" $loaded.title)
+(publish! @{workspace}/staged.txt @{workspace}/published.txt)
+cat < ${workspace}/published.txt
+# Publication never replaces an existing entry. The harness also checks this
+# refusal; a failure is not permission to delete an existing destination.

@@ -59,7 +59,7 @@ func opLt(c *eval.Context, s any, v []core.Value) eval.Result {
 	ord, ok := compareOrdered(v[0], v[1])
 	if !ok {
 		discardArgCallables(c, v)
-		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two numbers or two strings")
+		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two non-NaN numbers or two strings")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: ord < 0}}
 }
@@ -69,7 +69,7 @@ func opGt(c *eval.Context, s any, v []core.Value) eval.Result {
 	ord, ok := compareOrdered(v[0], v[1])
 	if !ok {
 		discardArgCallables(c, v)
-		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two numbers or two strings")
+		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two non-NaN numbers or two strings")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: ord > 0}}
 }
@@ -79,7 +79,7 @@ func opGte(c *eval.Context, s any, v []core.Value) eval.Result {
 	ord, ok := compareOrdered(v[0], v[1])
 	if !ok {
 		discardArgCallables(c, v)
-		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two numbers or two strings")
+		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two non-NaN numbers or two strings")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: ord >= 0}}
 }
@@ -89,7 +89,7 @@ func opLte(c *eval.Context, s any, v []core.Value) eval.Result {
 	ord, ok := compareOrdered(v[0], v[1])
 	if !ok {
 		discardArgCallables(c, v)
-		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two numbers or two strings")
+		return c.InvalidOperation("cannot order " + core.KindName(v[0].Kind) + " and " + core.KindName(v[1].Kind) + "; expects two non-NaN numbers or two strings")
 	}
 	return eval.Result{Value: core.Value{Kind: core.Bool, Bool: ord <= 0}}
 }
@@ -213,13 +213,29 @@ func equalIntFloat(integer int64, floating float64) bool {
 	return floating >= -9223372036854775808.0 && floating < 9223372036854775808.0 && int64(floating) == integer && float64(integer) == floating
 }
 
-// orderingNumber preserves ordering's float64 coercion policy: large integers
-// can round to the same value. Equality deliberately uses exact integer checks.
-func orderingNumber(v core.Value) float64 {
-	if v.Kind == core.Float {
-		return v.Float
+// Compare without rounding an int64 operand to float64 or casting a float outside
+// int64 bounds. In-range integral float values round-trip exactly through int64.
+func compareIntFloat(integer int64, floating float64) int {
+	if floating >= 9223372036854775808.0 {
+		return -1
 	}
-	return float64(v.Int)
+	if floating < -9223372036854775808.0 {
+		return 1
+	}
+	truncated := int64(floating)
+	if integer < truncated {
+		return -1
+	}
+	if integer > truncated {
+		return 1
+	}
+	if float64(truncated) < floating {
+		return -1
+	}
+	if float64(truncated) > floating {
+		return 1
+	}
+	return 0
 }
 
 // compareOrdered orders numbers numerically and strings by UTF-8 bytes.
@@ -228,11 +244,19 @@ func compareOrdered(left core.Value, right core.Value) (int, bool) {
 	leftNum := left.Kind == core.Int || left.Kind == core.Float
 	rightNum := right.Kind == core.Int || right.Kind == core.Float
 	if leftNum && rightNum {
-		a, b := orderingNumber(left), orderingNumber(right)
-		if a < b {
+		if (left.Kind == core.Float && left.Float != left.Float) || (right.Kind == core.Float && right.Float != right.Float) {
+			return 0, false
+		}
+		if left.Kind == core.Int && right.Kind == core.Float {
+			return compareIntFloat(left.Int, right.Float), true
+		}
+		if left.Kind == core.Float && right.Kind == core.Int {
+			return -compareIntFloat(right.Int, left.Float), true
+		}
+		if (left.Kind == core.Int && left.Int < right.Int) || (left.Kind == core.Float && left.Float < right.Float) {
 			return -1, true
 		}
-		if a > b {
+		if (left.Kind == core.Int && left.Int > right.Int) || (left.Kind == core.Float && left.Float > right.Float) {
 			return 1, true
 		}
 		return 0, true

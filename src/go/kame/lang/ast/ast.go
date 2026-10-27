@@ -285,7 +285,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.List || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.CommandList || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
+	if value.Kind == expr.List || value.Kind == expr.ListSpread || value.Kind == expr.KashReturn || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.CommandList || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
 		if value.AcceptExit {
 			e.Str("acceptExit")
 			e.Bool(true)
@@ -352,7 +352,11 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("function")
 		e.Bool(value.Bool)
 	}
-	if value.Kind == expr.Lambda || value.Kind == expr.KashDefinition {
+	if value.Kind == expr.KashFunction {
+		e.Str("name")
+		e.Str(value.Text)
+	}
+	if value.Kind == expr.Lambda || value.Kind == expr.KashDefinition || value.Kind == expr.KashFunction {
 		e.Str("parameters")
 		e.BeginArray()
 		for i := range value.Parameters {
@@ -467,6 +471,15 @@ func (e *astEncoder) exprs(values []*expr.Expr) {
 	e.EndArray()
 }
 func exprKind(k expr.Kind) string {
+	if k == expr.ListSpread {
+		return "list-spread"
+	}
+	if k == expr.KashFunction {
+		return "kash-function"
+	}
+	if k == expr.KashReturn {
+		return "kash-return"
+	}
 	if k == expr.CommandOperand {
 		return "stream-operand"
 	}

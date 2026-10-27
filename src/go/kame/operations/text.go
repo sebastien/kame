@@ -62,6 +62,13 @@ func opStrip(c *eval.Context, s any, v []core.Value) eval.Result {
 	}
 	return eval.Result{Value: core.NewString(c.Run, strings.TrimSpace(value))}
 }
+func opLine(c *eval.Context, s any, v []core.Value) eval.Result {
+	_ = s
+	if v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "string")
+	}
+	return eval.Result{Value: core.NewString(c.Run, strings.TrimSuffix(v[0].Text, "\n"))}
+}
 func opReplace(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	if v[0].Kind != core.Pattern {

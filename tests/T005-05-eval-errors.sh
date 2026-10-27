@@ -19,7 +19,7 @@ diag() {
 	cli_expect_status 1 "$1"
 	cli_expect_stderr_contains "$2"
 	cli_expect_printable "$CLI_ERR"
-	if grep -Eq "$2: .+" "$CLI_ERR"; then
+	if grep -Eq "\\[$2\\]: .+" "$CLI_ERR"; then
 		test-ok "message present for $2"
 	else
 		test-fail "empty message for $2"

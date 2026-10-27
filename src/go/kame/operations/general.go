@@ -206,18 +206,10 @@ func opGet(c *eval.Context, s any, v []core.Value) eval.Result {
 }
 
 func opFirst(c *eval.Context, s any, v []core.Value) eval.Result {
-	_ = s
-	if v[0].Kind != core.List {
-		return invalidArgument(c, v, 0, "list")
+	if v[0].Kind != core.List && v[0].Kind != core.String {
+		return invalidArgument(c, v, 0, "list or string")
 	}
-	if len(v[0].List) == 0 {
-		return eval.Result{Value: core.Value{Kind: core.Nil}}
-	}
-	result := v[0].List[0].Clone(c.Run)
-	for i := 1; i < len(v[0].List); i++ {
-		c.FreeCallable(&v[0].List[i])
-	}
-	return eval.Result{Value: result}
+	return opNth(c, s, []core.Value{{Kind: core.Int}, v[0]})
 }
 func opNth(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
@@ -277,11 +269,7 @@ func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 	// at every later return, so conditional defers would also run on paths
 	// whose branch never executed (double free with rejected-argument cleanup).
 	if v[0].Kind == core.Callable && v[1].Kind == core.List {
-		arguments := applyArguments(c.Run, v[1], v[0])
-		result := c.Call(v[0], arguments.Values)
-		if arguments.Owned {
-			slices.Free(c.Run, arguments.Values)
-		}
+		result := c.Call(v[0], v[1].List)
 		discardArgCallables(c, v)
 		return result
 	}
@@ -291,22 +279,6 @@ func opApply(c *eval.Context, s any, v []core.Value) eval.Result {
 	return invalidArgument(c, v, 0, "callable")
 }
 
-type applyCall struct {
-	Values []core.Value
-	Owned  bool
-}
-
-func applyArguments(a mem.Allocator, values core.Value, function core.Value) applyCall {
-	callable := function.Callable.(*eval.Function)
-	// Unary functions consume the whole list; multi-parameter functions
-	// receive its items as positional arguments.
-	if len(callable.Parameters) == 1 || callable.Arity == 1 {
-		arguments := mem.AllocSlice[core.Value](a, 1, 1)
-		arguments[0] = values
-		return applyCall{Values: arguments, Owned: true}
-	}
-	return applyCall{Values: values.List}
-}
 func opList(c *eval.Context, s any, v []core.Value) eval.Result {
 	_ = s
 	return eval.Result{Value: core.NewList(c.Run, v)}

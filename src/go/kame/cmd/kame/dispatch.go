@@ -206,6 +206,13 @@ func validateCommandDirectory(command string, args []string, errOut io.Writer) b
 }
 
 func runDoCommand(command string, args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
+	if command == "kash" {
+		inv := cli.Parse(command, args)
+		applyInvocationPresentation(&inv)
+		status := runParsedSession(inv, in, out, errOut)
+		inv.Free()
+		return status
+	}
 	if command == "render" {
 		return runRender(args, in, out, errOut)
 	}

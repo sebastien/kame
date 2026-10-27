@@ -114,7 +114,7 @@ func cliError(out io.Writer, code string, message string) {
 		writeJSONDiagnostic(cliDiagnosticOut, diagnostic.Diagnostic{Code: code, Severity: diagnostic.Error, Message: message})
 		return
 	}
-	fmt.Fprintf(out, "error %s: %s\n", code, message)
+	fmt.Fprintf(out, "error[%s]: %s\n", code, message)
 }
 
 // writeEmergencyDiagnostic allocates no diagnostic text, allowing the CLI to

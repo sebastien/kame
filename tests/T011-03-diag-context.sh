@@ -13,7 +13,7 @@ cli_build
 test-step "operation contracts identify operands instead of generic arguments"
 cli_run -- do run --lang expr -c '(first 1)'
 cli_expect_status 1
-cli_expect_stderr_contains '<command:1>:1:8' 'error[EXPR_INVALID]: `first` argument 1 expects list; got int' '#0  operation first'
+cli_expect_stderr_contains '<command:1>:1:8' 'error[EXPR_INVALID]: `first` argument 1 expects list or string; got int' '#0  operation first'
 if grep -q 'result = (nop' "$CLI_ERR"; then
 	test-fail "expression diagnostic exposes the driver's synthetic wrapper"
 else
@@ -31,7 +31,7 @@ build=$'root : leaf\nleaf :\n\t@(first 1)\n'
 cli_run -- --json -l kmk -c "$build" root
 cli_expect_status 1
 diagnostic="$(jq -c 'select(.type == "diagnostic") | .diagnostic' "$CLI_OUT")"
-if jq -e '.code == "EXPR_INVALID" and .message == "`first` argument 1 expects list; got int" and .source == "<command:1>" and .target == "leaf" and .targetStack == ["root", "leaf"] and .frames[0].label == "first" and .frames[1].label == "leaf"' <<<"$diagnostic" >/dev/null; then
+if jq -e '.code == "EXPR_INVALID" and .message == "`first` argument 1 expects list or string; got int" and .source == "<command:1>" and .target == "leaf" and .targetStack == ["root", "leaf"] and .frames[0].label == "first" and .frames[1].label == "leaf"' <<<"$diagnostic" >/dev/null; then
 	test-ok "JSON retains precise failure and context"
 else
 	test-fail "unexpected diagnostic: $diagnostic"

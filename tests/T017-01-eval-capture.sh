@@ -40,7 +40,7 @@ cli_run -- do run --lang expr -c '$(printf denied)'
 cli_expect_status 1
 cli_expect_stderr_contains CAP_DENIED
 cli_run -- do run --lang expr --allow-run -c '$(sh -c "printf diagnostic >&2; exit 7")'
-cli_expect_status 1
+cli_expect_status 7
 cli_expect_stdout ''
 cli_expect_stderr_contains diagnostic
 cli_expect_stderr_contains RECIPE_FAIL

@@ -17,7 +17,7 @@ func TestPickClassifiesEveryCommand(t *testing.T) {
 	}
 	inspect := []string{"plan", "inputs", "outputs", "span", "cat"}
 	run := []string{"list", "tools", "help"}
-	usage := []string{"run", "parse", "fmt", "render", "clean", "cache"}
+	usage := []string{"run", "kash", "parse", "fmt", "render", "clean", "cache"}
 	for i := range inspect {
 		if cli.ClassifyPick("command", inspect[i]) != cli.PickInspect {
 			t.Error("inspect command was reclassified")

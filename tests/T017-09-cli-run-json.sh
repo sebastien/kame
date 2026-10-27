@@ -34,7 +34,7 @@ parity 0 -C "$work" "$work/rules.kmk" build -c '42'
 parity 0 "$work/includes.km"
 
 test-step "runtime failures preserve metadata without fabricated values"
-parity 1 -l kash -c '/bin/sh -c "printf secret; exit 7"' -l expr -c '42'
+parity 7 -l kash -c '/bin/sh -c "printf secret; exit 7"' -l expr -c '42'
 if jq -e -s 'any(.type == "target-failed" and .diagnostic.cause.status == 7) and (all(.type != "target-value")) and (all((.diagnostic.cause | has("stdout")) | not))' "$work/native" >/dev/null; then test-ok "failure retains exit status without captured diagnostic output"; else test-fail "failure event policy"; fi
 parity 1 -c '$(printf denied)'
 parity 1 --allow-run --capture-limit 1 -c '$(printf abc)'

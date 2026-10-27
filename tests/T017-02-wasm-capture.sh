@@ -74,7 +74,7 @@ for limit in 3 4; do
 	fi
 done
 parity '$(printf denied)' 1
-parity '$(sh -c "printf live >&2; exit 7")' 1 --allow-run
+parity '$(sh -c "printf live >&2; exit 7")' 7 --allow-run
 grep -q live "$work/native.err"
 grep -q live "$work/wasm.err"
 parity '$(printf "\\377")' 1 --allow-run

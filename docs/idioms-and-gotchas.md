@@ -39,8 +39,9 @@ overrides accept only closed literal data, never calls or references.
 ## Truth, emptiness, and captured identifiers
 
 Only nil and false are false; zero and empty text, bytes, lists, and records are
-true. Use `(> (count FILES) 0)` for a nonempty collection, `(= VALUE :nil)` for
-absence, and `(= NUMBER 0)` for zero. `count` is not valid on nil or numbers.
+true. Use `(not (empty? FILES))` for known collection data, `(nil? VALUE)` for
+absence (including opaque values), and `(= NUMBER 0)` for zero. `empty?` returns
+false for nil and non-container kinds. `count` is not valid on nil or numbers.
 `(or "" "fallback")` returns the empty string; it is not an emptiness default.
 
 `blank?` tests nil or empty text, not whitespace, false, zero or empty collections.
@@ -55,7 +56,7 @@ filter, not a change to splitting semantics:
 # ["py" "js"]
 (filter-out "" (split " " " py  js "))
 # :false: exact membership
-(has? "py" ["pypy" "js"])
+(in? "py" ["pypy" "js"])
 ```
 
 This tokenizer handles ASCII spaces, not tabs/newlines or shell quoting. Prefer
@@ -64,7 +65,8 @@ typed lists (`--set 'MODULES=["py" "js"]'`) when the setting is structured data.
 Command capture preserves stdout, including every trailing newline.
 `(strip $(git rev-parse HEAD))` is an explicit identifier conversion, not a capture
 default. For a path tool promising one terminal LF, remove exactly that byte
-with `ends?`/`slice`, preserving whitespace/newlines belonging to the path.
+with `(line TEXT)`, preserving whitespace/newlines belonging to the path and any
+preceding CR. Do not use broad whitespace trimming for a path producer.
 See [SDK migration boundaries](sdk-migration-boundaries.md) for workflow and
 failure-cleanup examples.
 

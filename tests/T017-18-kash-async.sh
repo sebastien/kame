@@ -58,7 +58,7 @@ for backend in native wasm; do
 	check '' 'job = (run! :async :true "touch" "forbidden"); completion = (await job); printf "%s" (str completion)' -n "$work/policy.kmk" noop
 	if [ ! -e "$work/forbidden" ]; then test-ok "$backend dry-run validates handles without launch"; else test-fail "$backend dry-run async"; fi
 	test-step "$backend rejects async outside complete command statements"
-	for text in 'printf hello && printf world' 'printf $(true &)' 'job = true &' $'if true &\n\tprintf forbidden' 'true & false'; do reject PARSE_ERR "$text"; done
+	for text in 'printf $(true &)' 'job = true &' $'if true &\n\tprintf forbidden' 'true & false'; do reject PARSE_ERR "$text"; done
 	test-step "$backend owned async work survives ordered fragment boundaries"
 	"${command[@]}" do run --allow-run -C "$work" -l kash -c 'job = (run! :async :true "sh" "-c" "while test ! -f gate; do sleep .01; done; printf async"); printf "%s" (bool job)' -l km -c $'(run! "printf" "next")\n(run! "touch" "gate")\ncompletion = (await job)\ncompletion.status' >"$work/out" 2>"$work/err"
 	if [ "$(cat "$work/out")" = truenextasync ]; then test-ok "$backend shared handle ownership"; else test-fail "$backend fragment-local handle"; cat "$work/err"; fi

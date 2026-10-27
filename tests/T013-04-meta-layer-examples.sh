@@ -18,27 +18,27 @@ mkdir -p ./rules ./composition
 cp -R "$CLI_ROOT/examples/rules/publication" ./rules/publication
 cp -R "$CLI_ROOT/examples/composition/publication" ./composition/publication
 cp -R "$CLI_ROOT/examples/composition/publication" ./composition-kash
-cp -R "$CLI_ROOT/examples/shell" ./shell
+cp -R "$CLI_ROOT/examples/kash" ./kash
 # A user may have run the lesson already. Remove only copied generated outputs.
 rm -rf ./rules/publication/public ./rules/publication/.kame
 rm -rf ./composition/publication/public ./composition/publication/.kame
 rm -rf ./composition-kash/public ./composition-kash/.kame
-rm -f ./shell/report.txt
+rm -f ./kash/report.txt
 test-ok "isolated example copies"
 
 test-step "standalone Kash process lessons execute from isolated copies"
 (
-	cd shell
+	cd kash
 	cli_run -- do run ./01-values.kash
 	cli_expect_status 0
-	cli_expect_stdout $'Little publication\n[hello world.txt]\n[second.txt]\n[HELLO WORLD.TXT]\n[SECOND.TXT]\nHELLO\n'
+	cli_expect_stdout $'Little publication\n[hello world.txt]\n[second.txt]\n[HELLO WORLD.TXT]\n[SECOND.TXT]\nHELLO\n<>\n<two words>\n<a; echo surprise>\nsource=./sample.txt\n'
 	cli_run -- do run ./02-pipelines.kash
 	cli_expect_status 0
 	cli_expect_stdout $'hello\nworld\nhello\nworld\n12\nhello\nworld\n'
-	cli_expect_file ./report.txt $'hello\nworld\n'
+	cli_expect_file ./report.txt $'hello\nworld\nreport complete\n'
 	cli_run -- do run ./03-recovery.kash
 	cli_expect_status 0
-	cli_expect_stdout $'continued after an accepted non-match\nno needle in the sample\nno result\npreview only\n'
+	cli_expect_stdout $'continued after an accepted non-match\nno needle in the sample\nno result\npreview only\nsample validated\nnote=intro\n'
 )
 
 test-step "value programs, functions, pipes, discovery and lazy failure"

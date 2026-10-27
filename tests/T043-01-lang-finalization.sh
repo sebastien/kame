@@ -15,6 +15,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 const [root, native, work] = process.argv.slice(2);
+// Write-capable invocations must not acquire the parent suite's project lock.
+process.chdir(work);
 const wrapper = process.env.KAME_TEST_WASM_WRAPPER ?? join(root, 'dist/kame.js');
 const wasmPath = process.env.KAME_TEST_WASM_PATH ?? join(root, 'dist/kame.wasm');
 process.env.KAME_WASM = wasmPath;

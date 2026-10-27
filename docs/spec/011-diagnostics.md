@@ -147,6 +147,7 @@ meaning by themselves.
 | `EVAL_DEPTH` | error | Recursive evaluation exceeds the 32-expression stack-depth limit |
 | `DEF_INVALID` | error | Invalid definition or binding form |
 | `DEF_ESCAPE` | error | Binding a callable into an ancestor would strand its captured scope; ordinary returned callables may retain their owners |
+| `BINDING_UNINITIALIZED` | error | Reserved eager binding read before initialization; nonrecoverable binding-validation failure, not an unknown reference |
 | `PAT_INVALID` | error | Invalid pattern combination or missing pattern capture reference |
 | `PAT_LIMIT` | error | Pattern matching exceeded its work budget |
 | `TPL_PARSE` | error | Malformed template directive, argument list, or verbatim literal |

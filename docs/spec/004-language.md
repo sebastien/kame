@@ -48,10 +48,10 @@ syntax at top level:
 
 ```kmk
 mode ?= "debug"
-(if (eq mode "debug")
+(if (eq? mode "debug")
   (include ./debug.kmk)
   (include ./release.kmk))
-(if (eq mode "local") (include? "local.kmk"))
+  (if (eq? mode "local") (include? "local.kmk"))
 ```
 
 An `if` containing a composition include is a composition-only form. Every body
@@ -238,6 +238,33 @@ List items and application arguments are separated by whitespace, not commas.
 A list containing `NAME:` entries is a record; every record key must have one
 following value. Mixed keyed and unkeyed list entries are rejected.
 
+### List spread
+
+A list literal may contain `...EXPRESSION` entries:
+
+```kame
+[...prefix "printf" "%s\n"]
+[0 ...[1 2] ...(map uppercase ["a" "b"]) 3]
+```
+
+The `...` prefix must be adjacent to one complete expression. It is list-item
+syntax, not a reference component or a general unary operation. The operand may
+be any expression, including a reference, list literal, application, or command
+substitution. Its value must be a list; evaluation inserts that list's elements
+in order, one level deep. An empty list inserts nothing. Ordinary entries retain
+their nesting, so `[prefix]` and `[...prefix]` are distinct.
+
+Spreads do not infer a record or merge record fields. A spread among keyed record
+entries, a missing operand, or a spread outside a list-item position is
+`PARSE_ERR`. Spreading a non-list is `EXPR_INVALID` when demanded, not a parse-time
+type check. This does not add application-argument spread or change lambda/rest
+parameter syntax. Kash's `$...REFERENCE` remains a separate argv construct.
+
+Formatting, cloning, and AST inspection preserve the authored spread marker and
+its operand span; formatting never replaces it with a `concat` application.
+
+### Applications
+
 An application is a parenthesized non-empty sequence. A parenthesized form
 whose first item is a parameter list is a lambda. An empty application is
 invalid.
@@ -371,16 +398,17 @@ name the comparison operations of `007-library.md`:
 
 | Symbol | Operation |
 | --- | --- |
-| `=` | `eq` |
-| `==` | `is` |
-| `!=` | `ne` |
-| `<` | `lt` |
-| `>` | `gt` |
-| `<=` | `lte` |
-| `>=` | `gte` |
+| `=` | `eq?` |
+| `==` | `eq?` |
+| `!=` | `ne?` |
+| `<` | `lt?` |
+| `>` | `gt?` |
+| `<=` | `lte?` |
+| `>=` | `gte?` |
 
-`=`/`eq` and `==`/`is` have identical strict, kind-aware semantics; `is` is the
-readable spelling of `eq`. The symbol and the spelled operation are aliases, and
+`=`/`eq?` and `==` have identical strict, kind-aware semantics. Former unsuffixed
+comparison names remain compatibility aliases under `007-library.md`.
+The symbol and the spelled operation are aliases, and
 canonical formatting preserves whichever spelling the source used. Elsewhere, `=`
 is the definition separator and `<`/`>` introduce selectors only after `@`, so
 these atoms conflict with no existing syntax.
@@ -1029,6 +1057,10 @@ expression definitions and verbatim string definitions remain supported.
   at the script edges; whitespace-only blank lines are canonicalized.
 - Expression parse/format/parse covers literals, lists, records, lambdas,
   references, selectors, and pipes.
+- List spreads parse and format with reference, literal, application, and capture
+  operands, retaining markers and source spans through cloning and AST output.
+  Missing operands, record spreads, and application-argument spreads are rejected
+  without changing rest parameters, slices, relative paths, or Kash argv spread.
 - Unquoted path globs parse as expressions in definitions, applications and
   containers, including bracket classes adjacent to list delimiters; quoted
   and escaped wildcard bytes remain literal.
@@ -1064,7 +1096,7 @@ expression definitions and verbatim string definitions remain supported.
 - `and`/`or` return the deciding operand and stop evaluating after it.
 - `match` selects the first matching clause, binds its named captures, and
   returns `:nil` when nothing matches without an `:else` clause.
-- `=`/`eq`, `==`/`is`, `!=`/`ne`, `<`/`lt`, `>`/`gt`, `<=`/`lte`, and `>=`/`gte`
+- `=`/`eq?`, `==`/`eq?`, `!=`/`ne?`, `<`/`lt?`, `>`/`gt?`, `<=`/`lte?`, and `>=`/`gte?`
   are aliases; `=` and `==` share one strict, kind-aware equality.
 - Symbolic operator atoms parse and format idempotently wherever an expression
   is allowed.

@@ -85,10 +85,21 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.finishDefers(context.Deferred, context, false)
 	case expr.KashDefer:
 		return p.registerDefer(expression, context)
+	case expr.KashFunction:
+		return p.nativeKash(expression, scope, context)
+	case expr.KashReturn:
+		return p.kashReturn(scope, expression, context)
 	case expr.Reference, expr.EnvironmentReference:
 		return p.reference(scope, expression, context)
 	case expr.List:
-		return p.list(scope, expression.Items, context)
+		return p.list(scope, expression, context)
+	case expr.ListSpread:
+		r := p.evaluate(engine, scope, expression.Items[0], context)
+		if !r.Waiting && r.Diagnostic.Code == "" && r.Value.Kind != core.List {
+			r.Free(context.Run)
+			return failure(context.Run, "EXPR_INVALID", expression.Items[0].Span, "list spread requires a list")
+		}
+		return r
 	case expr.Record:
 		return p.record(scope, expression.Fields, context)
 	case expr.Application:

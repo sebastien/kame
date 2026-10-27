@@ -68,7 +68,7 @@ Public transformations use `(f PARAMS VALUE)`, with all configuration, including
 optional operands, before the subject. Value pipes append their input, so direct
 calls and `(VALUE | f PARAMS)` have identical meaning. This is a breaking contract:
 operations do not detect or accept the former subject-first order. Comparisons
-keep conventional `(gt LEFT RIGHT)` semantics; variadic combiners retain authored
+keep conventional `(gt? LEFT RIGHT)` semantics; variadic combiners retain authored
 operand order. Special forms and internal template primitives are separate.
 
 Canonical changed signatures are `(nth INDEX VALUE)`, `(slice START [END] VALUE)`,
@@ -92,15 +92,19 @@ The general operations are:
 | `json` | Encode exactly one JSON-compatible value, including quoted scalar strings |
 | `count` | Length of string code points, bytes, list, or record |
 | `get` | `(get KEY [DEFAULT] RECORD)`: computed string key; missing keys return nil or DEFAULT |
-| `first` | First list item or nil |
+| `first` | First list item or string code point, equivalent to `(nth 0 VALUE)`; empty input returns nil |
 | `nth` | Indexed list or string item with negative indexes |
-| `apply` | Call a function with a list of arguments |
+| `apply` | `(apply FUNCTION LIST)` always spreads list elements as positional arguments, regardless of callable kind or arity |
 | `finally!` | Execution-only `(finally! [OPTIONS] BODY CLEANUP)`: zero-argument callbacks with bounded finalization under `043-kame-finalization.md` |
 | `list` | Return arguments as a list |
 | `items` | `(items RECORD)`: ordered `[key: STRING value: VALUE]` entries |
 | `set` | `(set KEY VALUE RECORD)`: immutable field replacement/insertion |
 | `merge` | `(merge RECORD...)`: shallow, right-biased immutable record merge |
-| `record?` / `list?` / `string?` | Exact kind tests on one value, without serialization |
+| `nil?` / `bool?` / `int?` / `float?` / `string?` / `bytes?` / `list?` / `record?` / `callable?` / `resource?` / `pattern?` / `process?` | Exact outer-kind tests on any value, without serialization |
+| `number?` | True for int or float, false for every other kind |
+| `empty?` | True exactly for zero-length strings, bytes, lists, or records; false for nil and all other kinds |
+| `has-key?` | `(has-key? KEY RECORD)` tests presence, including a field whose value is nil |
+| `success?` | `(success? RESULT)` tests integer `status` and `signal` fields for zero; malformed records/fields are `EXPR_INVALID` |
 | `digest` | `(digest ALGORITHM BYTES-OR-STRING)`: raw SHA digest as lowercase hexadecimal |
 
 `json` uses deterministic JSON for compatible scalars, lists and records with
@@ -120,6 +124,29 @@ flags = (get selected modes)
 ```
 
 The operation is pure and works in definitions, input headers, and planning.
+
+Presence and value lookup are separate: `(has-key? "key" [key: :nil])` is true,
+whereas `get` returns nil for both a missing key and a present nil value. Presence
+requires a string key and a record with unique keys. It does not evaluate a
+fallback. Keep `get` defaults eager; use ordinary lazy `if` with `has-key?` when
+computing a default may fail or perform effects. No new implicit lazy operand or
+lookup special form is introduced.
+
+`apply` has one argument-spreading contract for lexical functions, native Kash
+functions, registered operations, and variadic callables. Thus
+`(apply uppercase ["hello"])` is `(uppercase "hello")`, and
+`(apply ([xs...] xs) [1 2])` returns `[1 2]`. To pass a list as one argument, nest
+it once, e.g. `(apply count [[1 2]])`, or call `(count [1 2])` directly. Empty
+argument lists call with zero arguments and retain normal arity errors. The
+former unary-function whole-list heuristic is removed, not detected dynamically.
+
+Public named predicates use `?`; logical `not`, truth conversion `bool`, and
+symbolic comparison operators are deliberate exceptions. Predicates retain
+their documented domains: `nil?` and the kind tests accept every value, whereas
+`in?`, `has-key?`, and `success?` validate their collection/result operands.
+`empty?` is not absence or broad whitespace detection; `blank?` keeps its existing
+nil-or-empty-string behavior. Kind tests never invoke callables or compare opaque
+values. A synchronous process Result is a record, not a `process?` async handle.
 
 ### Scoped finalization
 
@@ -155,7 +182,7 @@ entries = (items updated)
 combined = (merge settings [version: "new" extra: 3])
 ```
 
-The three predicates return booleans for every value, including empty data, and
+The kind predicates return booleans for every value, including empty data, and
 inspect only the outer kind. A pattern is not a string, bytes are not strings,
 and a record/list containing callables remains a record/list. No JSON-prefix
 test, truth conversion, or implicit parsing occurs. SDK `object?` and `array?`
@@ -186,17 +213,19 @@ canonical; the symbolic aliases are equivalent and parse as expression atoms per
 
 | Name | Alias | Contract |
 | --- | --- | --- |
-| `eq` | `=` | Strict, kind-aware equality |
-| `is` | `==` | Identical to `eq` |
-| `ne` | `!=` | Negation of `eq` |
-| `lt` | `<` | Ascending order |
-| `gt` | `>` | Descending order |
-| `gte` | `>=` | Order at or after |
-| `lte` | `<=` | Order at or before |
+| `eq?` | `=`, `==` | Strict, kind-aware equality |
+| `ne?` | `!=` | Negation of `eq?` |
+| `lt?` | `<` | Ascending order |
+| `gt?` | `>` | Descending order |
+| `gte?` | `>=` | Order at or after |
+| `lte?` | `<=` | Order at or before |
 
-`eq`, `is`, and `ne` support nil, boolean, number, string, bytes, lists, and
-records. `is` remains an equality synonym, not reference identity; no new `is?`
-spelling is provided. The contract is recursive:
+`eq?` and `ne?` support nil, boolean, number, string, bytes, lists, and records.
+The former names `eq`, `is`, `ne`, `lt`, `gt`, `gte`, and `lte` remain compatibility
+aliases with identical contracts, including first-class callable use. New examples
+use canonical predicate names or symbolic operators. `is` is not identity; no
+additional `is?` family is introduced. Both equality symbols resolve to `eq?`.
+The contract is recursive:
 
 - Nil and booleans compare by value; `:nil` and `:false` are distinct.
 - Integers compare exactly, even outside the exact `float64` integer range.
@@ -227,11 +256,16 @@ Reordered records now compare equal, unlike their printed representations.
 `ne`/`!=` negates successful equality; unsupported-value errors still propagate.
 Boolean negation remains `not`.
 
-Ordering (`lt`, `gt`, `gte`, `lte`) is unchanged: only numbers and strings are
-accepted; mixed-kind or non-scalar arguments are `EXPR_INVALID`. Number ordering
-uses the existing float64 numeric comparison across integer/float, rather than
-the exact integer equality contract above; string ordering compares UTF-8 bytes. Bytes
-and collections have equality but no ordering.
+Ordering (`lt?`, `gt?`, `gte?`, `lte?`, and their aliases) accepts two numbers or
+two strings. Integer/integer ordering is exact across all int64 values, without
+float conversion. Integer/float ordering compares mathematical values without
+rounding the integer to float64, including fractional floats, signed zero,
+infinities, and floats at/outside int64 bounds. Float/float ordering uses numeric
+order; NaN is unordered and reports `EXPR_INVALID`. Comparable numbers that are
+equal under `eq?` compare at the same position; distinct adjacent large integers
+must not collapse into the same position. String ordering compares UTF-8 bytes.
+Other kind combinations and non-scalars are `EXPR_INVALID`. Bytes and collections
+have equality but no ordering.
 
 ## Collection Operations
 
@@ -243,7 +277,7 @@ The collection operations are:
 | `flatmap` | Map and flatten one list level |
 | `filter` | Keep items for which a predicate is true |
 | `filter-out` | Remove items for which a predicate is true |
-| `has?` | `(has? ITEM LIST)` tests exact membership with the recursive `eq` contract; full operands are validated before matching |
+| `in?` | `(in? ITEM LIST)` tests exact membership with the recursive `eq?` contract; full operands are validated before matching |
 | `reduce` | Fold a list from left to right |
 | `concat` | Concatenate lists or append scalar values |
 | `slice` | Half-open list or string slice |
@@ -253,6 +287,10 @@ The collection operations are:
 Callbacks are lexical functions evaluated in item order for deterministic
 effects and diagnostics. Their internally discovered host dependencies may run
 in parallel, but the resulting list preserves input order.
+
+`has?` remains a compatibility alias for list membership; it does not test record
+keys. Use `in?` for list membership, `has-key?` for record presence, and `includes?`
+for text substrings. The three domains are explicit and do not silently coerce.
 
 `filter` and `filter-out` accept `(PREDICATE LIST)`,
 or `(VALUE LIST)` as an equality shorthand. The shorthand retains or removes
@@ -275,6 +313,7 @@ The text operations are:
 | `join` | Join a list of scalar strings with a separator |
 | `split` | Split text by a nonempty literal separator, preserving empty fields (`""` produces `[""]`) |
 | `strip` | Trim Unicode whitespace |
+| `line` | `(line TEXT)` removes exactly one terminal LF from a string, if present |
 | `includes?` | Literal substring membership |
 | `starts?` | Literal prefix test |
 | `ends?` | Literal suffix test |
@@ -285,6 +324,27 @@ The text operations are:
 | `lowercase` | Unicode lowercase conversion supported by Solod |
 | `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white` | Wrap one string in the matching ANSI foreground sequence |
 | `bold`, `dim` | Wrap one string in the ANSI bold or dim sequence |
+
+`line` is a pure, one-argument string operation for explicit line framing. It
+returns its input unchanged when it has no terminal LF. It preserves leading
+and trailing spaces, earlier line endings, and any CR preceding the removed LF;
+it does not infer CRLF framing, select the first line, reject embedded newlines,
+or strip all trailing newlines. Empty input remains empty. Non-string operands
+and incorrect arity report `EXPR_INVALID`; bytes require explicit `text`
+conversion first. It is callable and usable in value pipes like other ordinary
+text operations.
+
+```kame
+(line "")          # ""
+(line "name")      # "name"
+(line " name \n")  # " name "
+(line "name\n\n")  # "name\n"
+(line "name\r\n")  # "name\r"
+```
+
+Command capture remains lossless. Consumers opt into framing with, for example,
+`(line $(mktemp -d ./workspace.XXXXXX))`; `strip` remains the broader Unicode
+whitespace conversion and is not a substitute when whitespace is data.
 
 Terminal style operations are pure string functions. They always include their
 ANSI start and reset sequences; they do not inspect whether stdout is a TTY.
@@ -541,6 +601,22 @@ executable metadata checks do not grant access to user read operations.
 
 ## Acceptance Tests
 
+- Canonical named predicates end in `?`, including `in?`; compatibility aliases
+  and symbolic comparisons preserve behavior and callable/phase contracts. `not`
+  and `bool` retain logical/conversion names without pretending to be kind tests.
+- `apply` spreads argument lists regardless of arity, with normal arity errors,
+  typed/rest argument binding, callable ownership, and once-only host suspension.
+- `first` and `nth 0` agree on empty/nonempty lists and Unicode strings.
+- Kind tests and `nil?` accept every core value kind, including opaque/callable
+  values. `empty?` detects empty text/bytes/lists/records only. `blank?` is unchanged.
+- `in?` preserves recursive membership validation. `has-key?` detects present nil
+  fields without conflating absence; invalid keys/records are rejected. `success?`
+  requires integer status/signal fields, rejects malformed Results, and has no
+  effect or recovery behavior.
+- Integer ordering is exact at int64 limits and beyond 2^53. Mixed int/float
+  ordering agrees with exact equality and handles fractions/infinities safely;
+  NaN is unordered rather than spuriously equal under ordering.
+
 - Every operation validates arity and value kinds without mutating arguments.
 - Pure operations issue no host request and register no dependency.
 - Collection callbacks preserve input order.
@@ -576,6 +652,10 @@ executable metadata checks do not grant access to user read operations.
 - Terminal style functions wrap strings with their documented ANSI sequences,
   compose using selective reset codes, reject nonstrings, and leave canonical
   value display unchanged.
+- `line` removes one terminal LF only, covering empty/no-LF input, leading and
+  trailing spaces, multiple terminal LFs, embedded newlines, CR-only and CRLF
+  input. Arity and non-string errors, callable aliases, and value pipes agree on
+  native and WASM; capture and `strip` behavior remain unchanged.
 - Pattern `sub` (and its deprecated `replace` alias) matches anchored, expands
   references, preserves the original string without a match, and accepts a
   callable through `map` and pipes. `resub` retains its separate

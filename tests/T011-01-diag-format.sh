@@ -26,12 +26,12 @@ fixture_copy errors diag-format
 test-step "CLI diagnostics use the documented layout"
 cli_run -- do run --lang expr --bogus
 cli_expect_status 2
-	cli_expect_stderr 'error OPT_UNKNOWN: unknown option: --bogus
+	cli_expect_stderr 'error[OPT_UNKNOWN]: unknown option: --bogus
 '
 
 cli_run -- do plan -f
 cli_expect_status 2
-	cli_expect_stderr 'error OPT_NO_VALUE: missing value for -f
+	cli_expect_stderr 'error[OPT_NO_VALUE]: missing value for -f
 '
 
 test-step "build failures report the stable code and a message"

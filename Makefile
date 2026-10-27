@@ -27,7 +27,17 @@ FETCH = set -eu; mkdir -p "$$(dirname "$(KAME)")"; tmp="$(KAME).tmp"; trap 'rm -
 	chmod +x "$$tmp"; mv "$$tmp" "$(KAME)"
 # Read bindings as data, never as shell source. GNU doubles dollars in MAKEFLAGS;
 # BSD expands them there, but exports the original command-line variable values.
+# The test suite prebuilds these artifacts before holding the project lock.
+# Nested test requests must not start another Kame against that same lock.
 RUN = goal="$@"; \
+	if [ -n "$${KAME_TEST_PREBUILT:-}" ] && [ "$$(pwd -P)" = "$$KAME_TEST_PREBUILT" ]; then \
+		case "$$goal" in \
+			wasm) [ -f build/wasm/kame.wasm ] && exit 0; exit 1 ;; \
+			dist-wasm) [ -f dist/kame.wasm ] && [ -f dist/kame.js ] && exit 0; exit 1 ;; \
+			dist/kame) [ -x dist/kame ] && exit 0; exit 1 ;; \
+			dist/kame-windows-x64.zip) [ -f dist/kame-windows-x64.zip ] && exit 0; exit 1 ;; \
+		esac; \
+	fi; \
 	eval "$$(awk -v gnu="$(MAKE_VERSION)" 'function bind() { \
 		if (token !~ /^[A-Za-z_][A-Za-z0-9_]*=/ || token ~ /^(KAME|KAME_VERSION|KAME_RELEASE_URL)=/) return; \
 		if (!gnu) { name = substr(token, 1, index(token, "=")); token = name ENVIRON[substr(name, 1, length(name) - 1)]; } \

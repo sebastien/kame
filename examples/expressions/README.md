@@ -79,4 +79,4 @@ as shown above, and direct `kame ./01-values.km --entry publication` execute it.
 Select the definition explicitly when inspecting these definitions-only lessons.
 
 Next: [rules](../rules/README.md), or enter independently through
-[Kash](../shell/README.md).
+[Kash](../kash/README.md).

@@ -21,8 +21,9 @@ cat $files | wc -l
 echo revision=$revision
 ```
 
-Definitions/functions are lazy. Their right-hand sides use `.km`/`.kmk`
-expression grammar, plus Kash `??` compositions.
+Value and expression-bodied function definitions are lazy. Their right-hand
+sides use `.km`/`.kmk` expression grammar, plus Kash `??` compositions. Native
+`defn` functions instead have directly parsed, indented Kash bodies.
 Statements run in source order; newlines or `;` separate them. Word-start `#`
 introduces a comment; `//` is literal. Branch-local definitions do not escape.
 
@@ -30,6 +31,40 @@ A statement beginning with `(EXPRESSION)` evaluates for effects, discards its
 result, and propagates failure. Nil, records, and process-result records are not
 executables and do not print implicitly. There is no `do (EXPRESSION)` form.
 For a computed executable, bind its value and use `$command` at command position.
+
+## Native functions
+
+```kash
+defn probe workspace
+	if test -f "${workspace}/ready"
+		return 0
+	touch "${workspace}/ready"
+	return 75 ?
+
+result = (probe workspace)
+```
+
+Headers use `defn NAME PARAMETER...` and may have no parameters or one final
+`rest...` parameter. Indentation ends the body: no braces or `end`. Call through
+ordinary Kame applications, not raw command lookup. Functions capture lexical
+bindings; each call gets fresh locals, arguments, and its own async/cleanup
+lifetime under the caller's grants and limits. Defining a function runs nothing.
+
+`return STATUS` exits only its function, even from nested branches or loops, and
+runs deferred cleanup before resuming the caller. Status must be an integer from
+0 through 255. Nonzero is a process-exit failure; `return 75 ?` explicitly accepts
+that status and returns an inspectable Result without launching a process.
+Acceptance never hides earlier failures, invalid statuses, or cleanup failures.
+`return` outside `defn` and deferred returns are invalid. Fallthrough keeps the
+ordinary Kash final-statement behavior.
+
+Test statuses with `if (success? (probe workspace))`, not `if (probe workspace)`:
+an accepted nonzero Result is still a truthy record. `success?` validates integer
+`status` and `signal` fields; it does not catch an unaccepted failure. Raw command
+lookup, pipelines, and process operators do not implicitly invoke functions.
+
+Use native functions for authored multi-command bodies. `(kash TEXT)` remains
+available when deliberately constructing script text is necessary.
 
 ## Explicit boundaries and argv
 
@@ -208,7 +243,7 @@ Successful acceptance or recovery exits zero.
 Spaces, tabs, embedded line endings, CRLF, and every terminal newline are data.
 Use `strip` explicitly only when an identifier's contract permits removing all
 surrounding whitespace. For a producer with one terminal LF, use
-`(if (ends? "\n" TEXT) (slice 0 -1 TEXT) TEXT)` to remove only that byte. Captured
+`(line TEXT)` to remove only that byte, preserving a preceding CR. Captured
 paths may themselves end in whitespace/newlines; do not trim them implicitly.
 
 ## Explicit process topology (POSIX)
@@ -546,8 +581,7 @@ or computed command head to run external programs with those names.
 ### Deferred cleanup
 
 ```kash
-created = $(mktemp -d ./workspace.XXXXXX)
-directory = (if (ends? "\n" created) (slice 0 -1 created) created)
+directory = (line $(mktemp -d ./workspace.XXXXXX))
 defer rm -rf $directory
 defer (out! "finishing\n")
 ```

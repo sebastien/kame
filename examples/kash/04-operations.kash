@@ -1,0 +1,39 @@
+#!/usr/bin/env -S kame do kash
+# Harmless operational examples; all temporary files belong to this invocation.
+prefix = []
+command = [...prefix "printf" "%s\n"]
+$...command "typed argv"
+
+# One terminal LF is framing here because mktemp is a line-oriented producer.
+workspace = (line $(mktemp -d ./kash-example.XXXXXX))
+defer rm -rf $workspace
+
+config = [name: "quotes: \" and newline\n" enabled: :true]
+(write! @{workspace}/config.json (json config))
+
+# Accept a chosen nonzero status without a shell fixture.
+defn attempt
+	return 1 ?
+result = (attempt)
+(if (and (= result.signal 0) (in? result.status [0 1])) :nil (fail! "unexpected status"))
+
+# Collection callbacks are ordered. Expression statements discard their results.
+(map ([item] (run! "printf" "%s\n" item)) ["first" "second"])
+
+# A native function simulates a transient failure. Paths remain typed arguments,
+# never generated source. Do not retry deployments without establishing safety.
+defn probe
+	if test -f ${workspace}/ready
+		return 0
+	touch ${workspace}/ready
+	return 75 ?
+retried = (reduce ([previous number] (if (success? previous) previous (if (and (= previous.signal 0) (= previous.status 75)) (probe) (fail! "non-retryable failure")))) [status: 75 signal: 0] [1 2 3])
+(if (success? retried) :nil (fail! "retry budget exhausted"))
+printf "recovered\n"
+
+# || runs the fallback after an ordinary unsuccessful process exit.
+false || printf "fallback\n"
+
+# out joins capture; err forwards command stdout to the error sink.
+message = $(printf payload >&out && printf "progress\n" >&err)
+printf "captured=%s\n" $message

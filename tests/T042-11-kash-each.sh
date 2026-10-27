@@ -56,14 +56,14 @@ for backend in native wasm; do
 	expect "stdout drains before the child reads a full 64KiB record" test "$(tr -d '[:space:]' <"$work/$backend.out")" = 327680
 	test-step "$backend: failures never become reserved operator diagnostics"
 	for status in 7 118 120 121 124 125 126 127; do
-		run_case "printf a |(frame :lines) |(each) sh -c \"cat > /dev/null; exit $status\"" 1 RECIPE_FAIL
+		run_case "printf a |(frame :lines) |(each) sh -c \"cat > /dev/null; exit $status\"" "$status" RECIPE_FAIL
 	done
-	run_case "printf \"a\\nb\\n\" |(frame :lines) |(each) sh -c \"cat; echo worker >> $marker; exit 7\"" 1 RECIPE_FAIL
+	run_case "printf \"a\\nb\\n\" |(frame :lines) |(each) sh -c \"cat; echo worker >> $marker; exit 7\"" 7 RECIPE_FAIL
 	expect "fail-fast launches no later record" test "$(wc -l <"$marker")" -eq 1
-	run_case '(printf "a\nb\n" |(frame :lines) |(each) sh -c "cat; exit 7", printf z) |(merge :failure collect) cat' 1 RECIPE_FAIL
+	run_case '(printf "a\nb\n" |(frame :lines) |(each) sh -c "cat; exit 7", printf z) |(merge :failure collect) cat' 7 RECIPE_FAIL
 	expect "collection processes all remaining records" test "$(tr -d z <"$work/$backend.out")" = $'a\nb'
 	run_case 'printf a |(frame :lines) |(each) /no-such-worker' 1
-	run_case "printf a |(frame :lines) |(each) sh -c \"cat > /dev/null; kill -TERM $pid_token\"" 1 RECIPE_FAIL
+	run_case "printf a |(frame :lines) |(each) sh -c \"cat > /dev/null; kill -TERM $pid_token\"" 143 RECIPE_FAIL
 	test-step "$backend: malformed/unsupported topology fails before effects"
 	printf preserve >"$output"
 	for text in "printf a |(each) cat > $output" "printf a |(frame :lines) |(each) cat <& > $output" "printf a |(frame :lines) |(each) cat < $work/large > $output"; do

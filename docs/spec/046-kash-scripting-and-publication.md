@@ -121,6 +121,8 @@ loops whose expressions never suspend.
 
 Initial scope excludes assignment, `break`, `continue`, loop `else`, index
 bindings, implicit parallelism, and destructuring.
+Eager immutable bindings, loop transfers, and incremental record iteration are
+defined separately in [practical scripting](048-kash-practical-scripting.md).
 
 ## 2. Pure command-line option parsing
 

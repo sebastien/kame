@@ -1,4 +1,5 @@
-# Requires standalone Kash, including command and value recovery.
+#!/usr/bin/env -S kame do kash
+# Requires Kame with command and value recovery support.
 
 # An expected non-zero exit is accepted, not confused with a fallback value.
 grep -q needle ./sample.txt ?
@@ -13,7 +14,16 @@ echo $result
 
 # Selecting a branch does not demand computations in the other branch.
 mode = "preview"
-if (eq mode "preview")
-    echo "preview only"
+if (eq? mode "preview")
+	echo "preview only"
+elif (eq? mode "check")
+	echo "validation only"
 else
-    no-such-publication-command
+	no-such-publication-command
+if grep -q hello ./sample.txt && test -s ./sample.txt
+	echo "sample validated"
+match ./notes/intro.txt
+	case ./notes/{name:*}.txt
+		printf "note=%s\n" $name
+	else
+		echo "not a note"

@@ -1,0 +1,17 @@
+#!/usr/bin/env -S kame do kash
+workspace = (line $(mktemp -d ./kash-streaming.XXXXXX))
+defer rm -rf $workspace
+stream errors
+
+# Both endpoints of the named channel live in this one concurrent graph.
+# Broadcast keeps a full audit; selected records leave the normal remainder.
+(printf "INFO start\nERROR failed\nINFO done\n" |(broadcast) (cat > ${workspace}/audit.txt,  |(frame :lines) |(filter (includes? "ERROR" item) | cat >&errors) | cat > ${workspace}/normal.txt), &errors | cat > ${workspace}/errors.txt)
+printf "errors:\n"
+cat < ${workspace}/errors.txt
+printf "normal:\n"
+cat < ${workspace}/normal.txt
+# Explicit merge makes one output from two concurrent sources. Sort here
+# because ready-order merge intentionally does not promise global ordering.
+(cat < ${workspace}/errors.txt, cat < ${workspace}/normal.txt) |(merge) sort > ${workspace}/merged.txt
+sort < ${workspace}/audit.txt > ${workspace}/expected.txt
+cmp ${workspace}/expected.txt ${workspace}/merged.txt

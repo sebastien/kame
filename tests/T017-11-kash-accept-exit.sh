@@ -21,9 +21,11 @@ for backend in native wasm; do
 	}
 	reject() {
 		local code="$1"; shift
+		local expected=1
+		[ "$code" != RECIPE_FAIL ] || expected=7
 		local status=0
 		"${command[@]}" "$@" >"$work/out" 2>"$work/err" || status=$?
-		if [ "$status" = 1 ] && grep -q "$code" "$work/err"; then test-ok "$backend never accepts $code"; else test-fail "$backend rejection (status $status)"; cat "$work/err"; fi
+		if [ "$status" = "$expected" ] && grep -q "$code" "$work/err"; then test-ok "$backend never accepts $code"; else test-fail "$backend rejection (status $status)"; cat "$work/err"; fi
 	}
 	test-step "$backend accepts only process exit failures"
 	check 'after' do run -l kash -c '/bin/sh -c "exit 7"?; printf after'

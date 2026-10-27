@@ -186,13 +186,21 @@ func TestDiscoveredBuildAppendsCommandsWithoutReinterpretingTargets(t *testing.T
 }
 
 func TestRemovedExecutionCommandsGiveMigrationHelp(t *testing.T) {
-	commands := []string{"expr", "kash"}
+	commands := []string{"expr"}
 	for i := range commands {
 		inv := cli.Parse(commands[i], []string{"-c", "42"})
 		if inv.OK || inv.Error.Code != "CMD_UNKNOWN" || inv.Error.Message != cli.RemovedCommandMessage(commands[i]) {
 			t.Error("removed execution command did not report migration help")
 		}
 		inv.Free()
+	}
+}
+
+func TestKashExecutionAliasUsesUnifiedRunner(t *testing.T) {
+	inv := cli.Parse("kash", []string{"-c", "printf hello", "--", "two words"})
+	defer inv.Free()
+	if !inv.OK || inv.Name != "run" || len(inv.Inputs) != 1 || inv.Inputs[0].Lang != "kash" || len(inv.Args) != 1 || inv.Args[0] != "two words" || cli.RemovedCommandMessage("kash") != "" {
+		t.Error("Kash alias lost runner language, arguments, or command identity")
 	}
 }
 

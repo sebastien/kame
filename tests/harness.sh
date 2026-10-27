@@ -8,6 +8,8 @@ if [ -z "${BASH_EXECUTION_STRING:-}" ]; then
 fi
 
 BASE="$(cd "$(dirname "$0")" &>/dev/null && pwd)"
+# Tests invoke make as independent clients, not recursive make recipes.
+unset MAKEFLAGS MFLAGS MAKELEVEL
 # shellcheck disable=SC1091
 source "$BASE/lib-testing.sh"
 
@@ -172,7 +174,7 @@ if [ "$JOBS" -gt 1 ] && [ "${#TESTS[@]}" -gt 0 ]; then
 	)
 	TESTS+=("${exclusive[@]}")
 	# Prebuild shared artifacts before concurrent standalone tests can race to build them.
-	if [ "$parallel_count" -gt 0 ]; then
+	if [ "$parallel_count" -gt 0 ] && [ -z "${KAME_TEST_PREBUILT:-}" ]; then
 		binary="$(realpath -m --relative-to="$BASE/.." "${CLI_BIN:-$BASE/../build/kame.debug}")"
 		run_setup make -C "$BASE/.." "$binary" dist-wasm 8>&-
 	fi

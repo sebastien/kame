@@ -5,7 +5,7 @@ For this checkout, run `make build/kame.debug dist-wasm`, then use
 See the [Kash reference](skills/kame/ref/kash.md) for syntax and process topology.
 
 A complete, harmless example is
-[`examples/shell/04-operations.kash`](../examples/shell/04-operations.kash).
+[`examples/kash/04-operations.kash`](../examples/kash/04-operations.kash).
 Run it from a disposable writable directory. It creates a private workspace and
 removes it with `defer`; no credentials, installation or network are involved.
 
@@ -13,7 +13,7 @@ removes it with `defer`; no credentials, installation or network are involved.
 
 ```kash
 prefix = []
-command = (concat prefix ["printf" "<%s>" "two words" ""])
+command = [...prefix "printf" "<%s>" "two words" ""]
 $...command tail
 ```
 
@@ -33,14 +33,15 @@ not shell grouping.
 ## Accept selected statuses only after explicit `?`
 
 ```kash
-attempt = (kash """$...args ?""")
+defn attempt command...
+	$...command ?
 result = (attempt "tidy" "-o" "./staged.html" "./input.html")
-(if (and (= result.signal 0) (has? result.status [0 1]))
+(if (and (= result.signal 0) (in? result.status [0 1]))
   :nil
   (fail! "Tidy failed; do not publish its output"))
 ```
 
-The callable is authored code, not generated command text. Args remain typed.
+The function is authored code, not generated command text. Args remain typed.
 Without `?`, an unsuccessful command stops execution. With `?`, inspect its
 existing completion record. This example rejects status 2 and signals; missing
 tools, timeouts and denied capabilities still fail. A nonempty output file is not
@@ -106,7 +107,8 @@ callable whose command uses `?`, then inspect every result. Use `reduce` with a
 small accumulator when retaining all callback results is unnecessary.
 
 ```kash
-probe = (kash """$...args ?""")
+defn probe command...
+	$...command ?
 result = (reduce ([previous number]
   (if (= previous.status 0) previous
     (if (and (= previous.signal 0) (= previous.status 75))
@@ -128,8 +130,7 @@ in a lazy outer definition and expect repeated lookup to refresh it.
 ## Temporary workspaces and `defer`
 
 ```kash
-created = $(mktemp -d ./workspace.XXXXXX)
-workspace = (if (ends? "\n" created) (slice 0 -1 created) created)
+workspace = (line $(mktemp -d ./workspace.XXXXXX))
 defer rm -rf $workspace
 ```
 
@@ -137,6 +138,10 @@ defer rm -rf $workspace
 whitespace. Command registration demands/snapshots the workspace path. Demanded
 top-level lazy values survive later statements and finalization. The directory
 is fresh and private: never substitute a shared directory, glob or existing path.
+
+Within Kame expressions, append an authored filename with
+`@{workspace}/config.json`; bare `{workspace}/config.json` is a pattern, not a
+lookup. `joinpath` remains useful when joining computed parts or normalizing.
 
 `defer (cleanup workspace)` evaluates the whole expression at cleanup, retaining
 its lexical scope. An undemanded definition stays lazy until then. Branches share
@@ -208,11 +213,10 @@ transactional multi-output external recipe.
 ## Publish a staged file without clobbering
 
 ```kash
-created = $(mktemp -d ./staging.XXXXXX)
-workspace = (if (ends? "\n" created) (slice 0 -1 created) created)
+workspace = (line $(mktemp -d ./staging.XXXXXX))
 defer rm -rf $workspace
 generator > ${workspace}/output
-(publish! (joinpath workspace "output") ./final.txt)
+(publish! @{workspace}/output ./final.txt)
 ```
 
 Choose private staging on the destination filesystem and finish every writer

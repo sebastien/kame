@@ -108,19 +108,19 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 func comparisonAlias(name string) (string, bool) {
 	switch name {
 	case "=":
-		return "eq", true
+		return "eq?", true
 	case "==":
-		return "is", true
+		return "eq?", true
 	case "!=":
-		return "ne", true
+		return "ne?", true
 	case "<":
-		return "lt", true
+		return "lt?", true
 	case ">":
-		return "gt", true
+		return "gt?", true
 	case "<=":
-		return "lte", true
+		return "lte?", true
 	case ">=":
-		return "gte", true
+		return "gte?", true
 	}
 	return "", false
 }
@@ -189,6 +189,17 @@ func (c *Context) EvaluateReplacement(value core.Value, captures core.Value, par
 	result := c.Program.evaluate(c.Engine, child, function.Expression, c)
 	c.CloneCallableAST = previousClone
 	child.Free()
+	if result.Diagnostic.Code == "REF_MISSING" && function.Expression.Kind == expr.Path {
+		for i := range function.Expression.Parts {
+			part := function.Expression.Parts[i]
+			if part.Form == "{" && part.Expr != nil && part.Expr.Kind == expr.Name &&
+				result.Diagnostic.Span.Start >= part.Span.Start && result.Diagnostic.Span.Start < part.Span.End {
+				span := source.Span{Start: result.Diagnostic.Span.Start, End: result.Diagnostic.Span.End}
+				result.Free(c.Run)
+				return failure(c.Run, "PAT_INVALID", span, "pattern reference is missing")
+			}
+		}
+	}
 	return result
 }
 

@@ -101,7 +101,7 @@ func TestPureOperations(t *testing.T) {
 		t.Error("function-first flatmap failed")
 	}
 	result.Free(a)
-	result = evaluate(t, program, "(apply ([values] (count values)) (list \"first\" \"second\"))")
+	result = evaluate(t, program, "(apply ([values] (count values)) [[\"first\" \"second\"]])")
 	if result.Diagnostic.Code != "" || result.Value.Int != 2 {
 		t.Error("list-consuming apply failed")
 	}
@@ -126,7 +126,7 @@ func TestOperationDiagnosticsRetainOperandAndContract(t *testing.T) {
 	scriptSource := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, scriptSource, registry)
 	cases := []diagnosticCase{
-		{Text: "(first 1)", Message: "`first` argument 1 expects list; got int", Operand: "1"},
+		{Text: "(first 1)", Message: "`first` argument 1 expects list or string; got int", Operand: "1"},
 		{Text: "(nth :false [1])", Message: "`nth` argument 1 expects int; got bool", Operand: ":false"},
 		{Text: "(slice 0 :false [1])", Message: "`slice` argument 2 expects int; got bool", Operand: ":false"},
 		{Text: "(join \"-\" [1])", Message: "`join` argument 2 item 1 expects string; got int", Operand: "[1]"},
@@ -409,12 +409,12 @@ func TestPatternReplace(t *testing.T) {
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(replace ./{name:*}.c ./build/{missing}.o \"./a.c\")")
-	if result.Diagnostic.Code != "REF_MISSING" {
+	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("missing capture reference was not diagnosed")
 	}
 	result.Free(a)
 	result = evaluate(t, program, "(replace ./{**}/{*}.c ./build/{_0}/{_9}.c \"./a/b.c\")")
-	if result.Diagnostic.Code != "REF_MISSING" {
+	if result.Diagnostic.Code != "PAT_INVALID" {
 		t.Error("out-of-range capture reference was not diagnosed")
 	}
 	result.Free(a)
@@ -711,8 +711,8 @@ func TestComputedRecordLookupTransfersSelectedCallables(t *testing.T) {
 		"(get (str \"t\" \"wo\") [one: 1 two: 2])",
 		"(get \"missing\" 7 [one: 1])",
 		"(get \"missing\" [one: 1])",
-		"(apply (get \"used\" ([x] x) [used: ([x] (str \"hello \" (join \" \" x))) unused: ([x] x)]) [\"Ada\"])",
-		"(apply (get \"missing\" ([x] (str \"fallback \" (join \" \" x))) [unused: ([x] x)]) [\"Ada\"])",
+		"(apply (get \"used\" ([x] x) [used: ([x] (str \"hello \" x)) unused: ([x] x)]) [\"Ada\"])",
+		"(apply (get \"missing\" ([x] (str \"fallback \" x)) [unused: ([x] x)]) [\"Ada\"])",
 		"(get 1 [one: 1])",
 	}
 	for i := range samples {

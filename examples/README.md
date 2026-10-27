@@ -12,7 +12,7 @@ Use a CLI built from matching sources; see the
 | --- | --- | --- | --- |
 | [Expressions](expressions/README.md) | What value do I want? | `.km` | Runnable directly or via `do run` / `-f FILE NAME` |
 | [Rules](rules/README.md) | What must exist, and what does it depend on? | `.kmk` | Runnable |
-| [Kash](shell/README.md) | How should processes cooperate? | `.kash` | Standalone sources runnable |
+| [Kash](kash/README.md) | How should processes cooperate? | `.kash` | Ten standalone workflows |
 | [Composition](composition/publication/README.md) | How do the descriptions fit together? | All three | Values, rules, and subprocess orchestration runnable |
 | [Reactivity](reactive/README.md) | How does a requested computation stay current? | Persistent engine | Engine demo and CLI `--watch` runnable |
 
@@ -48,6 +48,7 @@ inputs:
 
 ```sh
 bash tests/T013-04-meta-layer-examples.sh
+bash tests/T013-05-kash-examples.sh
 ```
 
 ## Component map
@@ -58,10 +59,12 @@ bash tests/T013-04-meta-layer-examples.sh
 | Functions, lambdas, patterns, value pipes | `expressions/02-functions.km` |
 | Resource discovery and tracked inputs | `expressions/03-resources.km` |
 | File artifacts, bare actions, captures, computed dependencies, recipes | `rules/publication/Makefile.kmk` |
-| Typed argv, explicit expression boundaries, command capture | `shell/01-values.kash` and its runnable README commands |
-| Process streams and redirection versus value transformations | `shell/02-pipelines.kash` |
-| Command/value recovery and branch selection | `shell/03-recovery.kash` |
-| Temporary workspaces, defer, explicit status policy and finite retry | `shell/04-operations.kash` and the [operational cookbook](../docs/kash-cookbook.md) |
+| Typed argv, explicit expression boundaries, command capture | `kash/01-values.kash` and its runnable README commands |
+| Process streams and redirection versus value transformations | `kash/02-pipelines.kash` |
+| Command/value recovery and branch selection | `kash/03-recovery.kash` |
+| Temporary workspaces, defer, explicit status policy and finite retry | `kash/04-operations.kash` and the [operational cookbook](../docs/kash-cookbook.md) |
+| Arguments, loops, stage environments, async ownership | `kash/05-batch.kash` through `kash/07-concurrency.kash` |
+| Framing, channels, fan-out, worker scheduling, live operands and publication | `kash/08-streaming.kash` through `kash/10-publication.kash` |
 | Native source composition and explicit subprocess boundaries | `composition/publication/` |
 | Demand, invalidation, subscriptions, generations and streams | `reactive/README.md`, `engine/` |
 

@@ -303,6 +303,9 @@ func (p *Program) kashBodyBudget(state *kashControlState, body []*expr.Expr, c *
 			return r
 		}
 		p.retainControlEffects(state, c, state.Scope, before, beforePaths)
+		if r.Returned {
+			return r
+		}
 		for i := range state.Scope.Bindings {
 			b := state.Scope.Bindings[i]
 			if b.Kind == bindingLocalDefinition && b.Local.Done {

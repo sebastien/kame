@@ -25,11 +25,12 @@ func parseKash(s *Script, offset int) {
 }
 
 type kashParser struct {
-	Script   *Script
-	Pos      int
-	Style    byte
-	Unit     int
-	Channels []string
+	Script    *Script
+	Pos       int
+	Style     byte
+	Unit      int
+	Channels  []string
+	Functions int
 }
 
 func (p *kashParser) sequence(level int) []ScriptItem {
@@ -79,6 +80,20 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			wordEnd++
 		}
 		word := text[start:wordEnd]
+		if word == "defn" && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
+			if !leading {
+				s.error(start, wordEnd, "function header must occupy its own line")
+				break
+			}
+			d := p.functionBlock(level, start, wordEnd)
+			for i := range items {
+				if items[i].Kind == Definition && items[i].Definition.Name == d.Name {
+					s.error(start, p.Pos, "duplicate Kash definition name")
+				}
+			}
+			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Definition, Span: d.Span, Definition: d})
+			continue
+		}
 		if word == "stream" {
 			p.Pos = wordEnd
 			for p.Pos < len(text) && space(text[p.Pos]) {
@@ -176,6 +191,9 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			if end < len(text) && text[end] != '\n' && text[end] != ';' && text[end] != '#' {
 				s.error(end, end+1, "unexpected Kash definition value; expected statement separator")
 			}
+		} else if word == "return" {
+			e := p.returnStatement(start, wordEnd)
+			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 		} else if word == "defer" {
 			p.Pos = wordEnd
 			for p.Pos < len(text) && space(text[p.Pos]) {
@@ -183,6 +201,10 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			}
 			if p.Pos == len(text) || text[p.Pos] == '\n' || text[p.Pos] == ';' || text[p.Pos] == '#' {
 				s.error(start, p.Pos, "defer requires a command or parenthesized expression")
+				break
+			}
+			if p.Pos+6 <= len(text) && text[p.Pos:p.Pos+6] == "return" && (p.Pos+6 == len(text) || space(text[p.Pos+6])) {
+				s.error(p.Pos, p.Pos+6, "cannot defer return")
 				break
 			}
 			var part expr.Prefix

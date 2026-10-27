@@ -73,7 +73,7 @@ for backend in native wasm; do
 	run_case 'printf "a\nb\n" |(frame :lines) |(broadcast :overflow latest) (cat |(frame :lines), cat |(frame :lines)) |(merge) |(encode :lines)' 0
 	expect "lossy fan-out composes with frame-safe explicit merging" awk '!/^[ab]$/ {exit 1} END {if(NR<2||NR>4) exit 1}' "$work/$backend.out"
 	run_case "printf \"abc\\n\" |(frame :lines) |(broadcast :buffer 2 :overflow drop-new) (cat > $left, cat > $right)" 1 KASH_BUFFER_LIMIT
-	run_case "yes |(frame :lines) |(broadcast :overflow latest) (head -n 1 > $left, cat > /dev/null)" 1 RECIPE_FAIL
+	run_case "yes |(frame :lines) |(broadcast :overflow latest) (head -n 1 > $left, cat > /dev/null)" 141 RECIPE_FAIL
 	status=0
 	timeout 10 "${command[@]}" 'do' run --lang kash --allow-run --timeout=200 -c 'yes |(frame :lines) |(broadcast :overflow drop-old :buffer 64 :items 2) (sleep 30, sleep 30)' >"$work/$backend.out" 2>"$work/$backend.err" || status=$?
 	if [ "$status" -eq 1 ] && grep -q RECIPE_TIMEOUT "$work/$backend.err"; then test-ok "$backend timeout cancels pressured lossy queues"; else test-fail "$backend pressured queue timeout: $status $(cat "$work/$backend.err")"; fi

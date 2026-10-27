@@ -73,6 +73,6 @@ the explicit value here makes the changing set part of the recipe too.
 Rule recipes currently run as one ordinary shell script. They are not Kash.
 `@{ref}` reads a binding and `@(function args...)` evaluates a call; shell
 redirection and `tr` remain
-shell operations. See [Kash](../../shell/README.md) for the independent process
+shell operations. See [Kash](../../kash/README.md) for the independent process
 language, or [composition](../../composition/publication/README.md) for the
 shared value program and rule file.

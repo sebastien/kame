@@ -109,7 +109,7 @@ for backend, runner in [('native', [native]), ('wasm', ['node', wasm])]:
             command = runner + (args[:2] + options + args[2:] if invocation == 'session' else options + args)
             result = subprocess.run(command,
                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=15)
-            assert result.returncode == 1 and not result.stderr, (backend, invocation, result)
+            assert result.returncode == (3 if invocation == 'session' else 1) and not result.stderr, (backend, invocation, result)
             events = [json.loads(line) for line in result.stdout.splitlines()]
             failed = next(event for event in events if event['type'] == 'target-failed')
             cause = failed['diagnostic']['cause']

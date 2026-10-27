@@ -1,5 +1,10 @@
 # CLI conformance test catalog. One row per test script.
 # Columns: file<TAB>spec<TAB>category<TAB>covers
+tests/T046-01-kash-scripting.sh	046	kash	Kash scripting and publication workflows
+tests/T047-01-kash-output-ports-and-command-lists.sh	047	kash	Kash output ports and command lists
+tests/T007-16-lib-consistency.sh	007	lib	Canonical predicates and in?, exact int/float ordering, uniform apply/first, kind/emptiness/record presence, explicit function success tests and leading Kash value paths on native/WASM
+tests/T017-26-kash-functions.sh	017	kash	Native indented functions, typed/rest arguments, nested status returns, fresh calls, cleanup/async ownership, list spread, line framing and native/WASM AST/format parity
+tests/T013-05-kash-examples.sh	013	kash	Ten isolated native/WASM Kash workflows, typed arguments, loops, environments, async cleanup, streaming workers and no-clobber publication
 tests/T042-01-kash-topology.sh	042	kash	Explicit point-to-point topology, merge/broadcast, bounded streams, validation, ownership and generated build dependencies
 tests/T042-02-kash-framing.sh	042	kash	Exact UTF-8 line frames, pure predicates, lexical next/otherwise joins, bounded records and predicate-aware build reuse
 tests/T042-03-kash-channels.sh	042	kash	Lexical named channels, single-writer/single-reader validation, alias compaction and cycle rejection
@@ -149,7 +154,7 @@ tests/T012-02-streams-live-cli.sh	012	streams	Human/JSON chunks reach pipes befo
 tests/T012-03-streams-large-output.sh	012	streams	8 MiB NUL/binary stdout and stderr remain lossless on native/WASM in human/JSON mode; bounded retention preserves failure truncation metadata
 tests/T006-03-runtime-always.sh	006	runtime	Always file outputs rerun once per root, preserve artifact/multiple-output semantics and formatter/AST/plan metadata, and reject missing outputs and named tasks on both hosts
 tests/T006-06-runtime-environment.sh	006	runtime	Scoped recipe environment inheritance, local overrides, root isolation, shared conflicts, cache identity, persisted file freshness, lazy definitions and functions, KAME_NAME precedence, grants, cycles, read-only input resolution, collected shell snapshots and literal metadata
-tests/T013-05-meta-build-mode.sh	013	meta	Debug/release/sanitizer artifact modes, mode-independent generated version source and unchanged Kame build incrementality
+tests/T013-09-meta-build-mode.sh	013	meta	Debug/release/sanitizer artifact modes, mode-independent generated version source and unchanged Kame build incrementality
 tests/T012-04-streams-backpressure.sh	012	streams	Unread stdout/stderr/JSON/argv pipes, cached replay and WASM watch output pause producers/runtime steps, then resume losslessly or cancel/timeout without hanging
 tests/T006-04-runtime-order-only.sh	006	runtime	Order-only scheduling and failures, freshness/cache exclusion, normal/read upgrades, expression inputs and metadata on both hosts
 tests/T006-07-runtime-newer-inputs.sh	006	runtime	Unique newer normal inputs, missing sibling outputs, scoped freshness, empty lists, captures, directories and context rejection on both hosts

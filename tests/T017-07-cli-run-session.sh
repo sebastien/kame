@@ -49,9 +49,11 @@ for backend in native wasm; do
 	}
 	reject() {
 		local code="$1"; shift
+		local expected=1
+		[ "$code" != RECIPE_FAIL ] || expected=7
 		local status=0
 		"${command[@]}" "$@" >"$work/out" 2>"$work/err" || status=$?
-		if [ "$status" = 1 ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend rejects before effects: $code"; else test-fail "$backend expected $code (status $status)"; cat "$work/err"; fi
+		if [ "$status" = "$expected" ] && grep -q "$code" "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend rejects before effects: $code"; else test-fail "$backend expected $code (status $status)"; cat "$work/err"; fi
 	}
 	test-step "$backend shared values, entries, forward references and final result"
 	check '' do run "$work/functions.km" -c '(greet name)' -c 'name = "Ada"'
@@ -136,10 +138,11 @@ PYTIME
 	reject PARSE_ERR -C "$work/cwd" build -c '['
 	reject DEF_INVALID -C "$work/cwd" build -c 'name = "duplicate"'
 	test-step "$backend removed commands give migration help"
-	for removed in expr kash; do
+	for removed in expr; do
 		status=0
 		"${command[@]}" do "$removed" -c '42' >"$work/out" 2>"$work/err" || status=$?
 		if [ "$status" = 2 ] && grep -q CMD_UNKNOWN "$work/err" && grep -q 'use kame do run' "$work/err" && [ ! -s "$work/out" ]; then test-ok "$backend migration for do $removed"; else test-fail "$backend migration for do $removed"; fi
 	done
+	check 'alias' do kash -c 'printf alias'
 done
 test-end

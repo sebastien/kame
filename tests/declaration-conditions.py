@@ -164,7 +164,7 @@ with tempfile.TemporaryDirectory() as temporary:
     assert not any(frame['kind'] == 'include' for frame in diagnostic['frames']), diagnostic
     # Both hosts render the same complete, uncoloured source-backed trace.
     result = run(['--color', 'never', '--diagnostic-format', 'plain', 'do', 'run', '-l', 'km', '-c', '(if (first 1) (include ./absent.km))'], code='EXPR_INVALID')
-    assert result.stderr == '''error[EXPR_INVALID]: `first` argument 1 expects list; got int
+    assert result.stderr == '''error[EXPR_INVALID]: `first` argument 1 expects list or string; got int
   --> <command:1>:1:12
  1 | (if (first 1) (include ./absent.km))
    |            ^

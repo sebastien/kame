@@ -46,6 +46,10 @@ func TestRecreatedLexicalScopeRetainsCompletedOperands(t *testing.T) {
 	checkRetainedOperands(t, "result = (let [local 1] (list (once) (async)))")
 }
 
+func TestListSpreadRetainsCompletedOperands(t *testing.T) {
+	checkRetainedOperands(t, "result = [...[(once)] ...(list (async))]")
+}
+
 func checkRetainedOperands(t *testing.T, source string) {
 	a := t.Allocator()
 	engine := core.NewEngine(a)

@@ -1,0 +1,13 @@
+#!/usr/bin/env -S kame do kash
+# Synthetic configuration only: never print real credential environments.
+workspace = (abspath (line $(mktemp -d ./kash-environment.XXXXXX)))
+defer rm -rf $workspace
+exports = [KASH_EXAMPLE_MODE: "preview" KASH_EXAMPLE_LABEL: "two words"]
+
+# Typed records and scalar overrides apply in authored order to one stage.
+:cwd $workspace :timeout 5 :env $exports :KASH_EXAMPLE_MODE checked printenv KASH_EXAMPLE_MODE KASH_EXAMPLE_LABEL > ${workspace}/config.txt
+cat < ${workspace}/config.txt
+:env $exports printenv KASH_EXAMPLE_MODE
+# Delivering a child environment does not change the Kame record or grant
+# environment reads. $env.NAME would require an explicit environment grant.
+printf "record=%s\n" $exports.KASH_EXAMPLE_MODE

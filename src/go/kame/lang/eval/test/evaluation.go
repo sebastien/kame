@@ -798,14 +798,14 @@ func TestApplyFormsReleaseCallables(t *testing.T) {
 	}
 	parsed := script.Parse(a, "test", "")
 	program := eval.Compile(a, engine, parsed, registry)
-	// One-parameter functions consume the whole list.
+	// All functions receive the list's positional arguments.
 	result := evaluate(t, program, "(apply ([x] x) [1])")
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 1 {
-		t.Error("apply unary list consumer failed")
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 1 {
+		t.Error("apply unary argument spreading failed")
 	}
 	result.Free(a)
 	result = evaluate(t, program, "((list 1) | apply ([x] x))")
-	if result.Diagnostic.Code != "" || result.Value.Kind != core.List || len(result.Value.List) != 1 {
+	if result.Diagnostic.Code != "" || result.Value.Kind != core.Int || result.Value.Int != 1 {
 		t.Error("piped apply failed")
 	}
 	result.Free(a)

@@ -151,6 +151,11 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 		b.WriteByte(']')
 		return
 	}
+	if e.Kind == ListSpread {
+		b.WriteString("...")
+		writeLayout(a, b, e.Items[0], column+3, indent+3, tail)
+		return
+	}
 	if e.Kind == Record {
 		b.WriteByte('[')
 		for i := range e.Fields {

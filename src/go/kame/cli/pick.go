@@ -35,7 +35,7 @@ func ClassifyPick(kind string, name string) PickAction {
 	if name == "list" || name == "tools" || name == "help" {
 		return PickRun
 	}
-	if name == "run" || name == "parse" || name == "fmt" || name == "render" || name == "clean" || name == "cache" {
+	if name == "run" || name == "kash" || name == "parse" || name == "fmt" || name == "render" || name == "clean" || name == "cache" {
 		return PickUsage
 	}
 	return PickNone

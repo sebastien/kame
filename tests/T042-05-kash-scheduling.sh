@@ -84,7 +84,7 @@ stream right
 	run_case '(printf "abcd\n" |(frame :lines), printf "x\n" |(frame :lines)) |(merge :buffer 4) |(encode :lines)' 1 KASH_BUFFER_LIMIT
 	run_case "printf \"abcd\\n\" |(frame :lines) |(balance :buffer 4) (cat > $left, cat > $right) ? printf recovered" 0
 	expect "budget failure participates in whole-graph recovery" grep -qx recovered "$work/$backend.out"
-	run_case "yes |(frame :lines) |(balance) (head -n 1 > $left, cat > /dev/null)" 1 RECIPE_FAIL
+	run_case "yes |(frame :lines) |(balance) (head -n 1 > $left, cat > /dev/null)" 141 RECIPE_FAIL
 
 	test-step "$backend: invalid scheduling fails before effects"
 	marker="$work/$backend-marker"

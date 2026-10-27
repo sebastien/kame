@@ -76,6 +76,15 @@ Only `:nil` and `:false` are false. Definitions are lazy, not mutable shell
 assignments. Use `@{name}` to render a reference and `@(name)` to call a
 zero-argument function in template text.
 
+Named predicates use `?`: `eq?`, `ne?`, `lt?`, `gt?`, `lte?`, `gte?`, and `in?`
+(list membership). Use `has-key?` for record presence, `nil?` for absence,
+`empty?` for zero-length containers, and `success?` for a process Result's status.
+Unsuffixed comparisons and list-membership `has?` remain compatibility aliases;
+`not` and `bool` retain logical/conversion names. `apply` always spreads its list
+as positional arguments. Kash `defn` bodies are indented, not quoted source;
+`return STATUS ?` permits explicit inspection of a nonzero result. Capture stays
+lossless; `(line $(producer))` removes one producer-specified terminal LF only.
+
 Prefer the simplest value form: `sources = ./src/**/*.c` already discovers a
 sorted, tracked list. Reserve `wildcard` for computed string patterns, unions,
 entry-kind filters, or an explicit Kash argument boundary. Pattern `sub` accepts

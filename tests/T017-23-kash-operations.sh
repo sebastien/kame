@@ -73,7 +73,7 @@ SH
 		test-fail "$backend map ignored failure or changed exit status"
 	fi
 	test-step "$backend cookbook lists and output ports run and clean up"
-	invoke -l kash "$CLI_ROOT/examples/shell/04-operations.kash" >"$work/out" 2>"$work/err"
+	invoke -l kash "$CLI_ROOT/examples/kash/04-operations.kash" >"$work/out" 2>"$work/err"
 	printf 'typed argv\nfirst\nsecond\nrecovered\nfallback\ncaptured=payload\n' >"$work/expected"
 	printf 'progress\n' >"$work/expected-err"
 	if cmp -s "$work/out" "$work/expected" \
