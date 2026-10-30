@@ -110,7 +110,8 @@ workspaces. `10-publication.kash` publishes within its private workspace, then
 cleans it; adapt the destination deliberately to retain a real artifact.
 
 The scripts have executable `kame do kash` shebangs; with Kame on PATH and an
-`env` supporting `-S`, `./05-batch.kash --prefix checked` also works.
+`env` supporting `-S`, `./05-batch.kash -- --prefix checked` also works.
+The `--` separates script arguments from Kame's interpreter options.
 Pass program arguments after `--` when using `kame do run`.
 
 These examples teach common workflows, not every operator policy. Lossy queues,

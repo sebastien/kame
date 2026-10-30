@@ -207,10 +207,28 @@ fi
 printf 'release: staging %s (revision %s)\n' "$tag" "$revision"
 
 # dist-release stages only the APE, WASM pair and verification metadata.
-make -C "$root" dist-release \
-	KAME_RELEASE_PUBLIC_KEY="$public_key" \
-	KAME_RELEASE_SIGNING_KEY="$signing_key" \
-	KAME_RELEASE_REVISION="$revision"
+# The Kame `release` target already holds the project lock while it builds the
+# prerequisites, so re-entering Kame through `make dist-release` would deadlock.
+if [ -n "${KAME_RELEASE_PREBUILT:-}" ]; then
+	rm -rf "$release_dir"
+	mkdir -p "$release_dir"
+	for name in kame.com kame.wasm kame.js; do
+		[ -f "$root/dist/$name" ] || {
+			printf 'release: missing prebuilt artifact dist/%s\n' "$name" >&2
+			exit 1
+		}
+		cp "$root/dist/$name" "$release_dir/$name"
+	done
+	cp "$root/VERSION" "$release_dir/VERSION"
+	python3 "$root/src/sh/release_manifest.py" \
+		--directory "$release_dir" --version "$version" --revision "$revision" \
+		--public-key "$public_key" --signing-key "$signing_key"
+else
+	make -C "$root" dist-release \
+		KAME_RELEASE_PUBLIC_KEY="$public_key" \
+		KAME_RELEASE_SIGNING_KEY="$signing_key" \
+		KAME_RELEASE_REVISION="$revision"
+fi
 
 [ -f "$release_dir/SHA256SUMS" ] && [ -f "$release_dir/SHA256SUMS.sig" ] || {
 	printf 'release: staging did not produce a signed manifest\n' >&2

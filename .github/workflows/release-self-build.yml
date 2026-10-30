@@ -1,0 +1,48 @@
+name: Published release self-build
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: 'Channel: auto, wasm, or ape'
+        required: false
+        default: auto
+      version:
+        description: 'Published version (default: latest)'
+        required: false
+  schedule:
+    - cron: '17 5 * * 1'
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  self-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CC: clang
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: src/go/kame/go.mod
+          cache-dependency-path: src/go/kame/go.sum
+      - name: Install Solod compiler
+        shell: bash
+        run: |
+          go install solod.dev/cmd/so@v0.4.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Build kame with a published release
+        env:
+          KAME_TEST_RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.version }}
+          KAME_TEST_CHANNEL: ${{ inputs.channel || 'auto' }}
+        run: bash src/sh/test-release-build.sh

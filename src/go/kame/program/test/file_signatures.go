@@ -214,3 +214,16 @@ func TestExternalFileContentSignaturesMatchNativeAndForwardedHosts(t *testing.T)
 		t.Error("read failure supplied a reusable signature")
 	}
 }
+
+func TestForwardedContentDigestMatchesByteContent(t *testing.T) {
+	fields := []core.RecordField{{Key: "sha256", Value: core.Value{Kind: core.String, Text: "559aead08264d5795d3909718cdd05abd49572e84fe55590eef31a88a08fdffd"}}}
+	actual := externalFileSignature(t, true, core.Value{Kind: core.Record, Record: fields})
+	if !actual.Equal(core.ContentSignature([]byte("A"))) {
+		t.Error("forwarded SHA-256 record changed content identity")
+	}
+	fields[0].Value.Text = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	actual = externalFileSignature(t, true, core.Value{Kind: core.Record, Record: fields})
+	if !actual.Equal(core.ContentSignature(nil)) {
+		t.Error("empty file digest was treated as missing")
+	}
+}

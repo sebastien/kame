@@ -16,6 +16,8 @@ fi
 
 test-step "version metadata is stable across invocations"
 version_file="$CLI_ROOT/src/go/kame/cmd/kame/version_generated.go"
+# Prebuilt suites may predate the current revision; normalize before comparing.
+"$CLI_ROOT/src/sh/generate-version.sh"
 before="$(sha256sum "$version_file")"
 "$CLI_ROOT/src/sh/generate-version.sh"
 "$CLI_ROOT/src/sh/generate-version.sh"

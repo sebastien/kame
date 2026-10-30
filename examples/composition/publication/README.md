@@ -41,6 +41,9 @@ second implementation of the page-name transformation is needed.
 **Change:** Add `notes/third.txt`. Request `publication`, then build. The source
 set, page set, graph, and output all grow from the same definition.
 
+`notes/index.txt` is reserved for the assembled `public/index.txt`; requesting
+`pages` or building the index rejects that source name explicitly.
+
 **Understand:** A value program can describe part of a meta-program: a value
 determines which computations must be orchestrated.
 

@@ -1,6 +1,7 @@
 package host
 
 import (
+	"kame/core"
 	"solod.dev/so/errors"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
@@ -106,6 +107,15 @@ func (r *MemoryResources) ReadFile(a mem.Allocator, uri string) ([]byte, error) 
 		return slices.Clone(a, r.Files[i].Data), nil
 	}
 	return nil, errors.New("memory resource does not exist")
+}
+
+func (r *MemoryResources) FileSignature(uri string) core.Signature {
+	if r != nil {
+		if i := r.fileIndex(uri); i >= 0 {
+			return core.ContentSignature(r.Files[i].Data)
+		}
+	}
+	return core.Signature{}
 }
 
 func (r *MemoryResources) ReadDir(a mem.Allocator, uri string) ([]DirEntry, error) {

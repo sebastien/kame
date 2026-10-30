@@ -42,7 +42,9 @@ try {
 `compile(source, options)` copies the source and its name into a reusable
 program descriptor and validates it before returning. Program operations may
 be repeated; each operation owns an isolated ABI instance so parser/runtime
-state and monotonic WASM scratch allocations cannot leak across operations.
+state cannot leak across operations. Within long-lived watches, copied inputs
+and results reuse bounded scratch slots and freed heap blocks; linear memory
+must plateau for repeated warm workloads (see `010-wasm.md`).
 `evaluate(expression, options)` returns a copied UTF-8 string in canonical
 Kame display form. `build(targets, options)` returns copied target values in
 canonical display form and a copied ordered event list.

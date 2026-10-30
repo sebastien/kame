@@ -37,6 +37,10 @@ jobs:
           bash tests/T010-06-wasm-cli.sh
           bash tests/T015-07-dist-cosmocc-integrity.sh
           bash tests/T015-04-dist-signed-release.sh
+      - name: Check WASM memory reuse and self-bootstrap
+        run: |
+          node tools/wasm/test-memory-reuse.mjs
+          node tools/wasm/test-self-build.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: kame-portable

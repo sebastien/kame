@@ -22,7 +22,15 @@ int memcmp(const void *left, const void *right, size_t size) {
 
 extern unsigned char __heap_base;
 
-static uint32_t kame_wasm_bump;
+/* Host-owned buffers and instance arenas share a reclaiming physical block
+ * list. Offsets survive memory.grow; no bookkeeping lives in the system heap. */
+typedef struct {
+  uint32_t length;
+  uint32_t data;
+  uint32_t requested;
+} kame_wasm_block;
+static uint32_t kame_wasm_begin, kame_wasm_end;
+static uint32_t kame_wasm_host_used, kame_wasm_host_peak;
 static char kame_wasm_diagnostic[256];
 static uint32_t kame_wasm_diagnostic_len;
 
@@ -147,25 +155,80 @@ uint32_t kame_wasm_alloc(uint32_t size, uint32_t alignment) {
   if (size == 0u) return 0u;
   if (alignment == 0u) alignment = 1u;
   if ((alignment & (alignment - 1u)) != 0u || alignment > 65536u) return 0u;
-  if (kame_wasm_bump == 0u) kame_wasm_bump = (uint32_t)(uintptr_t)&__heap_base;
-  uint32_t at = kame_wasm_align(kame_wasm_bump, alignment);
-  if (at < kame_wasm_bump || size > UINT32_MAX - at) return 0u;
-  uint32_t end = at + size;
-  uint32_t bytes = __builtin_wasm_memory_size(0) * 65536u;
-  if (end > bytes) {
-    uint32_t needed = end - bytes;
-    uint32_t pages = (needed + 65535u) / 65536u;
-    if (__builtin_wasm_memory_grow(0, pages) == UINT32_MAX) return 0u;
+  if (!kame_wasm_begin) {
+    kame_wasm_begin = kame_wasm_align((uint32_t)(uintptr_t)&__heap_base, 16u);
+    kame_wasm_end = kame_wasm_begin;
   }
-  kame_wasm_bump = end;
-  return at;
+  /* ponytail: first-fit physical scan; add an index only if profiling calls
+   * for it. Most hosts keep a small, bounded set of scratch buffers. */
+  uint32_t block = kame_wasm_begin;
+  while (block < kame_wasm_end) {
+    kame_wasm_block *header = (void *)(uintptr_t)block;
+    uint64_t data = ((uint64_t)block + sizeof(*header) + alignment - 1u) & ~(uint64_t)(alignment - 1u);
+    uint64_t end = (data + size + 15u) & ~(uint64_t)15u;
+    if (!header->data && end <= (uint64_t)block + header->length) {
+      uint32_t remaining = block + header->length - (uint32_t)end;
+      if (remaining >= 32u) {
+        kame_wasm_block *next = (void *)(uintptr_t)end;
+        *next = (kame_wasm_block){.length = remaining};
+        header->length = (uint32_t)end - block;
+      }
+      header->data = (uint32_t)data;
+      header->requested = size;
+      kame_wasm_host_used += header->length;
+      if (kame_wasm_host_used > kame_wasm_host_peak) kame_wasm_host_peak = kame_wasm_host_used;
+      return header->data;
+    }
+    block += header->length;
+  }
+  uint64_t data = ((uint64_t)block + sizeof(kame_wasm_block) + alignment - 1u) & ~(uint64_t)(alignment - 1u);
+  uint64_t end = (data + size + 15u) & ~(uint64_t)15u;
+  if (end > UINT32_MAX) return 0u;
+  uint64_t bytes = (uint64_t)__builtin_wasm_memory_size(0) * 65536u;
+  if (end > bytes && __builtin_wasm_memory_grow(0, (uint32_t)((end - bytes + 65535u) / 65536u)) == UINT32_MAX) return 0u;
+  kame_wasm_block *header = (void *)(uintptr_t)block;
+  *header = (kame_wasm_block){.length = (uint32_t)end - block, .data = (uint32_t)data, .requested = size};
+  kame_wasm_end = (uint32_t)end;
+  kame_wasm_host_used += header->length;
+  if (kame_wasm_host_used > kame_wasm_host_peak) kame_wasm_host_peak = kame_wasm_host_used;
+  return header->data;
 }
 
 uint32_t kame_wasm_free(uint32_t pointer, uint32_t size) {
-  (void)pointer;
-  (void)size;
-  return KAME_WASM_OK;
+  if (!pointer && !size) return KAME_WASM_OK;
+  uint32_t previous = 0u;
+  for (uint32_t block = kame_wasm_begin; block < kame_wasm_end;) {
+    kame_wasm_block *header = (void *)(uintptr_t)block;
+    if (header->data == pointer && pointer) {
+      if (header->requested != size) return KAME_WASM_STATE_INVALID;
+      kame_wasm_host_used -= header->length;
+      header->data = header->requested = 0u;
+      uint32_t next = block + header->length;
+      if (next < kame_wasm_end) {
+        kame_wasm_block *successor = (void *)(uintptr_t)next;
+        if (!successor->data) header->length += successor->length;
+      }
+      if (previous) {
+        kame_wasm_block *predecessor = (void *)(uintptr_t)previous;
+        if (!predecessor->data) {
+          predecessor->length += header->length;
+          block = previous;
+          header = predecessor;
+        }
+      }
+      if (block + header->length == kame_wasm_end) kame_wasm_end = block;
+      return KAME_WASM_OK;
+    }
+    previous = block;
+    block += header->length;
+  }
+  return KAME_WASM_STATE_INVALID;
 }
+
+__attribute__((export_name("kame_wasm_host_heap_used")))
+uint32_t kame_wasm_host_heap_used(void) { return kame_wasm_host_used; }
+__attribute__((export_name("kame_wasm_host_heap_peak")))
+uint32_t kame_wasm_host_heap_peak(void) { return kame_wasm_host_peak; }
 
 static void kame_wasm_u16(uint8_t *dst, uint32_t at, uint16_t value) {
   dst[at] = (uint8_t)value;
@@ -274,7 +337,9 @@ _Noreturn void kame_wasm_panic(const char *message) {
       instance->has_pending = false;
       instance->event_pinned = false;
       instance->request = instance->root = instance->node = 0u;
+      so_int peak = instance->heap.PeakBytes;
       wasm_Heap_Reset(&instance->heap);
+      instance->heap.PeakBytes = peak;
       kame_wasm_instance_set_static_diagnostic(instance, "NO_MEMORY", "instance heap exhausted");
     } else {
       kame_wasm_set_static_diagnostic("NO_MEMORY", "module heap exhausted");
@@ -297,6 +362,17 @@ static kame_wasm_instance *kame_wasm_instance_get(uint64_t handle) {
   kame_wasm_instance *instance = &kame_wasm_instances[(uint32_t)resolved.val];
   if (!instance->live || instance->owner != owner || instance->handle != handle) return NULL;
   return instance;
+}
+
+__attribute__((export_name("kame_wasm_instance_heap_used")))
+uint32_t kame_wasm_instance_heap_used(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  return instance ? (uint32_t)instance->heap.UsedBytes : 0u;
+}
+__attribute__((export_name("kame_wasm_instance_heap_peak")))
+uint32_t kame_wasm_instance_heap_peak(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  return instance ? (uint32_t)instance->heap.PeakBytes : 0u;
 }
 
 static so_String kame_wasm_request_payload(host_Request request) {
@@ -496,6 +572,11 @@ uint32_t kame_wasm_instance_free(uint64_t handle) {
     wasm_Runtime_Free(instance->runtime);
     instance->runtime = NULL;
   }
+  if (instance->arena != NULL) {
+    kame_wasm_free((uint32_t)(uintptr_t)instance->arena, instance->heap_limit);
+    instance->arena = NULL;
+    instance->heap = (wasm_Heap){};
+  }
   /* Release every handle owned by this instance, including its own. */
   wasm_Table_FreeAll(kame_wasm_table(), instance->owner);
   instance->live = false;
@@ -540,7 +621,7 @@ uint32_t kame_wasm_source_compile(uint64_t handle, uint32_t source, uint32_t sou
     return KAME_WASM_NO_MEMORY;
   }
   if (instance->arena == NULL) {
-    instance->arena = (char *)(uintptr_t)kame_wasm_alloc(KAME_WASM_ARENA_CAPACITY, 16u);
+    instance->arena = (char *)(uintptr_t)kame_wasm_alloc(instance->heap_limit, 16u);
     if (instance->arena == NULL) {
       kame_wasm_instance_set_static_diagnostic(instance, "NO_MEMORY", "cannot allocate instance arena");
       return KAME_WASM_NO_MEMORY;

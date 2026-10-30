@@ -4,7 +4,7 @@ tests/T046-01-kash-scripting.sh	046	kash	Kash scripting and publication workflow
 tests/T047-01-kash-output-ports-and-command-lists.sh	047	kash	Kash output ports and command lists
 tests/T007-16-lib-consistency.sh	007	lib	Canonical predicates and in?, exact int/float ordering, uniform apply/first, kind/emptiness/record presence, explicit function success tests and leading Kash value paths on native/WASM
 tests/T017-26-kash-functions.sh	017	kash	Native indented functions, typed/rest arguments, nested status returns, fresh calls, cleanup/async ownership, list spread, line framing and native/WASM AST/format parity
-tests/T013-05-kash-examples.sh	013	kash	Ten isolated native/WASM Kash workflows, typed arguments, loops, environments, async cleanup, streaming workers and no-clobber publication
+tests/T013-05-kash-examples.sh	013	kash	Ten isolated native/WASM Kash workflows, interpreter argument forwarding, loops, environments, async cleanup, streaming workers and no-clobber publication
 tests/T042-01-kash-topology.sh	042	kash	Explicit point-to-point topology, merge/broadcast, bounded streams, validation, ownership and generated build dependencies
 tests/T042-02-kash-framing.sh	042	kash	Exact UTF-8 line frames, pure predicates, lexical next/otherwise joins, bounded records and predicate-aware build reuse
 tests/T042-03-kash-channels.sh	042	kash	Lexical named channels, single-writer/single-reader validation, alias compaction and cycle rejection
@@ -27,7 +27,7 @@ tests/T004-16-lang-computed-outputs.sh	004	lang	Pure computed output paths and n
 tests/T004-17-lang-definition-expressions.sh	004	lang	Expression RHSs across km/kmk/Kash, typed atoms, aliases, function bodies, laziness, defaults, cycles, literal overrides, migration errors and formatting parity
 tests/T004-18-lang-contributions.sh	004	lang	Ordered lazy list contributions, includes and sessions, defaults, literal overrides, scoped environments, cycles, immutable definitions, type diagnostics and AST/format parity
 tests/T018-01-lang-source-style.sh	018	lang	Canonical structural layouts, 80-column Unicode/tab boundaries, definitions, literals, AST stability and native/WASM parity
-tests/T013-04-meta-layer-examples.sh	013	meta	Runnable value/rule/Kash lessons, source composition, selective rebuilding, graph growth and embedded Kash arguments
+tests/T013-04-meta-layer-examples.sh	013	meta	Runnable value/rule/Kash lessons, source composition, selective rebuilding, reserved index names, legacy projects and optional pandoc blog builds
 tests/T003-01-host-process.sh	003	host	Process streaming, exit codes, retry, shell, environment, cwd
 tests/T003-02-host-signals.sh	003	host	SIGINT/SIGTERM cancellation and process-group reaping
 tests/T004-01-lang-parse-matrix.sh	004	lang	Valid language fixtures parse to schema-1 ASTs through do parse
@@ -105,7 +105,7 @@ tests/T013-01-meta-catalog.sh	013	meta	Catalog and test-name consistency
 tests/T013-02-meta-hygiene.sh	013	meta	Fixtures are never modified and scratch dirs stay in the test path
 tests/T013-03-meta-binary.sh	013	meta	Binary contract, no-op rebuilds, cross-copy determinism
 tests/T013-06-meta-testing.sh	013	meta	Fatal/abort failure logging and termination, result summaries and cleanup, Desktop isolation, Bash harness execution and standalone JSON Lines values
-tests/T013-07-meta-kmk-native.sh	013	meta	Kame native compiler configuration, pinned toolchains, effect-free inspection, incremental platform copies and automatic output ownership
+tests/T013-07-meta-kmk-native.sh	013	meta	Kame native compiler configuration, pinned toolchains, effect-free inspection, incremental platform copies, automatic output ownership and WASM gate nested-Make lock avoidance
 tests/T014-01-patterns-sections.sh	014	patterns	Placeholder sections as lambda equivalents, section arity, pattern replace match/expand, patterns render as text in rule inputs
 tests/T015-01-dist-launcher.sh	015	dist	Pinned/latest runtime selection without shell self-update, ESM provisioning, checksums, cache reuse, backend selection, bootstrap delegation, and retired-init migration guidance
 tests/T015-02-dist-launcher-backends.sh	015	dist	Launcher APE probe fallback, forced backends, missing manifest, no-download, concurrency, and cache roots
@@ -159,7 +159,7 @@ tests/T012-04-streams-backpressure.sh	012	streams	Unread stdout/stderr/JSON/argv
 tests/T006-04-runtime-order-only.sh	006	runtime	Order-only scheduling and failures, freshness/cache exclusion, normal/read upgrades, expression inputs and metadata on both hosts
 tests/T006-07-runtime-newer-inputs.sh	006	runtime	Unique newer normal inputs, missing sibling outputs, scoped freshness, empty lists, captures, directories and context rejection on both hosts
 tests/T006-08-runtime-sequenced-inputs.sh	006	runtime	Parallel whitespace prerequisites, comma-separated sequencing barriers, later-group failure blocking, formatter preservation on native and WASM
-tests/T010-22-wasm-memory.sh	010	wasm	Allocation-free compile/completion/module exhaustion diagnostics, instance isolation and repeated reuse, with unrelated traps preserved; shell/argv stream publishers preserve diagnostics and reap children
+tests/T010-22-wasm-memory.sh	010	wasm	Allocation-free exhaustion diagnostics, instance isolation, coalescing host frees and arena reuse, bounded large-file fingerprints and watch-read memory plateaus; shell/argv stream publishers preserve diagnostics and reap children
 tests/T010-32-wasm-embedding-js.sh	010	wasm	Importable JS embedding compile/evaluate/build/watch, copied results, async host completion, grants and repeated deterministic disposal
 tests/T010-33-wasm-embedding-python.sh	010	wasm	Asynchronous Python embedding compile/evaluate/build/watch, copied results, grants, cancellation and repeated disposal
 tests/T033-01-host-plugins.sh	033	host	Evaluate/build/watch plugins; all canonical value kinds; identity, malformed declarations/responses, arity/capability, limits, timeout, cancellation, disposal and cleanup, with Windows descendant cleanup coverage
@@ -183,7 +183,7 @@ tests/T009-16-cli-script-output.sh	009	cli	Explicit script output, optional resu
 tests/T005-06-eval-truth-capture.sh	005	eval	Nil/false-only truth, empty bytes/records/text/lists, explicit count checks, operand-preserving short-circuiting, exact capture and opt-in LF framing on native and WASM
 tests/T040-01-cli-automatic-clean.sh	040	cli	Native historical accumulation, no-op non-acquisition, rule-change protection, keep/release, failed groups, copied roots, symlinks, corrupt ledgers, live build/watch locks, cancellation, capture substitution, recovery, crash retry and clean target precedence
 tests/T041-01-patterns-predicates-and-substitution.sh	041	patterns	Native/WASM boolean predicates, callable filtering, nonmatch-preserving substitution, deprecated alias and unchanged resub
-tests/T015-06-dist-release-scripts.sh	015	dist	Manual release preflight and mocked publication: pushed revision, clean tree, tag/release conflicts, API failures, flat launcher assets, operator paths, key guards, npm-only recovery/no-op/auth retry/processing delays, and missing APE toolchain
+tests/T015-06-dist-release-scripts.sh	015	dist	Manual release preflight and mocked publication: pushed revision, clean tree, tag/release conflicts, API failures, flat launcher assets, operator paths, key guards, npm-only recovery/no-op/auth retry/processing delays, prebuilt staging without nested Kame, and missing APE toolchain
 tests/T044-01-runtime-kame-rule-bodies.sh	044	runtime	Native/WASM value-producing rule bodies, exact artifact bytes, dependency invalidation, reuse, dry-run and effect rejection
 tests/T013-08-meta-harness.sh	013	meta	Reviewed parallel pool, exclusive fallback and phase isolation, worker refill, failure logs, per-process durations, metadata validation and empty selection
 tests/T004-20-runtime-computed-outputs-watch.sh	004	runtime	Native/WASM retained computed target index replacement on source changes

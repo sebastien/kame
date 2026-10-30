@@ -65,6 +65,17 @@ tests/harness.sh -q tests/T013-04-meta-layer-examples.sh
 KAME_TEST_JOBS=1 make test-cli
 ```
 
+Published-channel compatibility needs network access and the Solod toolchain:
+
+```sh
+src/sh/test-release-build.sh --channel auto
+```
+
+After building `dist-wasm`, `node tools/wasm/test-self-build.mjs` checks the
+current WASM's self-bootstrap and repeated warm-build memory budget without
+using a published binary. `node tools/wasm/test-memory-reuse.mjs` checks freed
+block/arena reuse and long-lived watch memory plateaus; it also runs in T010-22.
+
 Concurrency only applies to reviewed entries in `tests/PARALLEL.tsv`, with a reason
 for each entry. All unlisted tests run alone after the pool drains; new tests are
 exclusive by default. Review helper scripts too before adding a parallel-safe row.

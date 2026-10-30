@@ -151,6 +151,12 @@ func TestListReportDisabledTaskCacheDoesNotRequestHostProof(t *testing.T) {
 		return
 	}
 	defer compiled.Program.Free()
+	initial := bytes.NewBuffer(a, nil)
+	compiled.Program.WriteTargetReport(&initial, "")
+	if !strings.Contains(initial.String(), `"name":"checked","group":"tasks","status":"missing"`) {
+		t.Error("missing cache record was not reported as missing: " + initial.String())
+	}
+	initial.Free()
 	result := compiled.Program.Materialize("checked")
 	if result.Diagnostic.Code != "" {
 		t.Error("materialization failed: " + result.Diagnostic.Code)

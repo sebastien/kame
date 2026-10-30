@@ -2,5 +2,9 @@
 title = "Little publication"
 sources = ./notes/*.txt
 (page source) = (sub ./notes/{name:*}.txt ./public/{name}.txt source)
-pages = (map page sources)
+pages =
+  (if
+    (in? ./notes/index.txt sources)
+      (fail! "notes/index.txt is reserved for the publication index")
+    (map page sources))
 publication = [title: title sources: sources pages: pages count: (count pages)]

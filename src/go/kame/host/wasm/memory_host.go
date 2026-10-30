@@ -1,6 +1,7 @@
 package wasm
 
 import (
+	"kame/core"
 	"kame/host"
 	"solod.dev/so/errors"
 	"solod.dev/so/mem"
@@ -122,6 +123,15 @@ func (h *MemoryHost) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 		return slices.Clone(a, h.Files[i].Data), nil
 	}
 	return nil, errors.New("file does not exist")
+}
+
+func (h *MemoryHost) FileSignature(name string) core.Signature {
+	if h != nil {
+		if i := h.findFile(name); i >= 0 {
+			return core.ContentSignature(h.Files[i].Data)
+		}
+	}
+	return core.Signature{}
 }
 
 func (h *MemoryHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {

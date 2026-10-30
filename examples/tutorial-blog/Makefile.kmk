@@ -2,7 +2,8 @@
 posts = ./content/posts/*.md
 projects = ./content/projects/*.md
 post-html = (sub ./content/posts/{name:*}.md ./build/posts/{name}.html posts)
-project-html = (sub ./content/projects/{name:*}.md ./build/projects/{name}.html projects)
+project-html =
+  (sub ./content/projects/{name:*}.md ./build/projects/{name}.html projects)
 
 default : ./build/index.html ./build/author.html @{post-html} @{project-html} ./build/style.css
 

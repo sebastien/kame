@@ -118,7 +118,13 @@ func (p *Program) inspectionStatusRead(c *core.EngineContext, index int, kind ho
 			mem.FreeString(p.Alloc, path)
 			path = p.cachePath(entry)
 		}
-		completion := p.fileCompletion(host.Request{}, host.OpFileContent, path)
+		// Cache records need their actual bytes, not a content digest. Preserve
+		// absence as nil so an unbuilt task is "missing", not "unknown".
+		completion := core.Completion{HasValue: true}
+		info := p.Host.Stat(path)
+		if info.Exists || info.Failed {
+			completion = p.fileCompletion(host.Request{}, host.OpRead, path)
+		}
 		mem.FreeString(p.Alloc, path)
 		return inspectionStatusReply{Completion: completion}
 	}

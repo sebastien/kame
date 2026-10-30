@@ -239,6 +239,7 @@ func (s *Stream) Run(out io.Writer) StreamReport {
 	}
 	oldest := burstSub.Next()
 	last := oldest
+	retained := 1
 	terminal = core.Event{}
 	for {
 		event := burstSub.Next()
@@ -248,8 +249,10 @@ func (s *Stream) Run(out io.Writer) StreamReport {
 		}
 		freeEvent(a, last)
 		last = event
+		retained++
 	}
 	r.Coalesced = oldest.HasValue() && oldest.Revision == 1 && last.Revision == 12 &&
+		retained > 1 && retained < 12 &&
 		terminal.Kind == core.UpdateCompleted && terminal.Terminal()
 	freeEvent(a, last)
 	fmt.Fprintf(out, "burst coalesced to rev %d with terminal: %t\n", int(last.Revision), r.Coalesced)

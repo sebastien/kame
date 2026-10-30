@@ -5,6 +5,7 @@ import (
 	"kame/host"
 	"kame/lang/eval"
 	"kame/lang/rule"
+	"solod.dev/so/encoding/hex"
 	"solod.dev/so/mem"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
@@ -261,6 +262,15 @@ func contentObservation(value core.Value) core.Signature {
 	}
 	if value.Kind == core.Nil {
 		return core.Signature{Mode: core.SignatureMissing}
+	}
+	if value.Kind == core.Record && len(value.Record) == 1 && value.Record[0].Key == "sha256" && value.Record[0].Value.Kind == core.String {
+		text := value.Record[0].Value.Text
+		if len(text) == 64 {
+			result := core.Signature{Mode: core.SignatureContent}
+			if n, err := hex.Decode(result.Digest[:], []byte(text)); err == nil && n == 32 {
+				return result
+			}
+		}
 	}
 	return core.Signature{}
 }

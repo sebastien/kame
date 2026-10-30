@@ -51,6 +51,18 @@ for backend in native wasm; do
 	check 09-workers.kash $'ALPHA\nBETA\nGAMMA\nDELTA\n'
 	check 10-publication.kash $'Publication: Notes "preview"\n'
 
+	test-step "$backend interpreter argument separator"
+	status=0
+	if [ "$backend" = native ]; then
+		mkdir -p "$work/bin"
+		ln -s "$CLI_BIN" "$work/bin/kame"
+		(cd "$work" && PATH="$work/bin:$PATH" timeout 30 ./05-batch.kash -- --prefix "custom label") >"$work/out" 2>"$work/err" || status=$?
+	else
+		"${runner[@]}" do kash -C "$work" "$work/05-batch.kash" -- --prefix "custom label" >"$work/out" 2>"$work/err" || status=$?
+	fi
+	printf 'custom label: first note\ncustom label: second note\nprocessed queued item\n' >"$work/expected"
+	if [ "$status" = 0 ] && cmp -s "$work/out" "$work/expected"; then test-ok "$backend interpreter forwards script options"; else test-fail "$backend interpreter arguments (status $status)"; cat "$work/err"; fi
+
 	test-step "$backend failure cleanup and no-clobber publication"
 	printf 'unmatched\n' >"$work/sample.txt"
 	status=0

@@ -1,6 +1,7 @@
 package host
 
 import (
+	"kame/core"
 	"solod.dev/so/mem"
 )
 
@@ -32,7 +33,10 @@ type ProgramHost interface {
 	Stat(name string) StatResult
 	Lstat(name string) StatResult
 	Readlink(a mem.Allocator, name string) LinkResult
+	// ReadFile transfers ownership of its allocator-owned bytes to the caller.
 	ReadFile(a mem.Allocator, name string) ([]byte, error)
+	// FileSignature streams content; unavailable reads never prove equality.
+	FileSignature(name string) core.Signature
 	ReadDir(a mem.Allocator, name string) ([]DirEntry, error)
 	WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error
 	PublishFile(staged string, destination string) PublishResult

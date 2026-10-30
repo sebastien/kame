@@ -1,5 +1,5 @@
 // Focused long-lived raw ABI check. All loop inputs/outputs reuse host buffers:
-// system-heap growth must not be confused with the separate no-op-free bump.
+// system-heap growth must not be confused with the separate host-buffer heap.
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 
@@ -92,7 +92,8 @@ const settle = () => {
   assert.fail('watch did not settle');
 };
 settle();
-const bumpBaseline = e.kame_wasm_alloc(1, 1);
+const hostBaseline = e.kame_wasm_host_heap_used();
+const pagesBaseline = e.memory.buffer.byteLength;
 systemBaseline = e.kame_wasm_system_heap_used();
 let generation = 0n;
 for (let i = 0; i < 2000; i++) {
@@ -106,7 +107,8 @@ for (let i = 0; i < 2000; i++) {
   generation = last.generation;
   assert.equal(e.kame_wasm_system_heap_used(), systemBaseline, 'watch exhausted fixed system budget');
 }
-assert.equal(e.kame_wasm_alloc(1, 1), bumpBaseline + 1, 'loop must not grow host input bump');
+assert.equal(e.kame_wasm_host_heap_used(), hostBaseline, 'loop must not grow host allocations');
+assert.equal(e.memory.buffer.byteLength, pagesBaseline, 'loop must not grow linear memory');
 assert.ok(systemBaseline < 8 * 1024 * 1024);
 assert.equal(e.kame_wasm_watch_invalidate(handle, ...write('[{"kind":"file","name":"x"},{"kind":"file","name":"y"}]')), 0);
 const cancelledParked = awaitRequest();
@@ -118,4 +120,4 @@ assert.equal(e.kame_wasm_request_attach(handle, cancelledParked.request), 0, 'ca
 assert.equal(e.kame_wasm_complete_nil(handle, cancelledParked.request), 0);
 assert.equal(e.kame_wasm_complete_nil(handle, cancelledActive.request), 1);
 assert.equal(e.kame_wasm_instance_free(handle), 0);
-console.log(`PASS bounded handles: 2000 recompiles, 2000 two-root watch invalidations; system heap ${systemBaseline}/8388608 bytes; host bump +1 probe byte`);
+console.log(`PASS bounded handles: 2000 recompiles, 2000 two-root watch invalidations; system heap ${systemBaseline}/8388608 bytes; host allocations/pages stable`);

@@ -106,14 +106,20 @@ for (let i = 0; i < 5; i++) {
 // An unrelated out-of-bounds access remains a trap, rather than NO_MEMORY.
 assert.throws(() => e.kame_wasm_copy(0xffffffff, 1, output, 1), WebAssembly.RuntimeError);
 NODE
-  test-ok "compile/completion/module exhaustion recovers; other traps remain traps"
+	test-ok "compile/completion/module exhaustion recovers; other traps remain traps"
 else
-  test-fail "memory exhaustion ABI assertions failed"
+	test-fail "memory exhaustion ABI assertions failed"
 fi
 test-step "stream publisher exhaustion kills and reaps shell and argv children"
 if python3 "$CLI_ROOT/tests/wasm-memory.py" "$CLI_ROOT"; then
-  test-ok "stdout/stderr failures preserve NO_MEMORY after process cleanup"
+	test-ok "stdout/stderr failures preserve NO_MEMORY after process cleanup"
 else
-  test-fail "process publisher exhaustion assertions failed"
+	test-fail "process publisher exhaustion assertions failed"
+fi
+test-step "freed host blocks and instance arenas are reused; watch memory plateaus"
+if node tools/wasm/test-memory-reuse.mjs; then
+	test-ok "large fingerprints and repeated reads stay within memory budgets"
+else
+	test-fail "WASM memory reuse regression"
 fi
 test-end

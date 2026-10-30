@@ -12,7 +12,9 @@ import (
 // frees to coalesce without allocating bookkeeping. Unlike a bump arena, it
 // reclaims short-lived events while the compiled program remains alive.
 type Heap struct {
-	buf []byte
+	buf       []byte
+	UsedBytes int
+	PeakBytes int
 }
 
 const heapHeader = 12
@@ -25,6 +27,7 @@ func NewHeap(buf []byte) Heap {
 }
 
 func (h *Heap) Reset() {
+	h.UsedBytes, h.PeakBytes = 0, 0
 	if len(h.buf) >= heapHeader+4 && uint64(len(h.buf)) < uint64(heapNoPrevious) {
 		h.put(0, uint32(len(h.buf)))
 		h.put(4, heapNoPrevious)
@@ -60,6 +63,7 @@ func (h *Heap) Alloc(size int, align int) (any, error) {
 				h.split(block, data+size)
 				h.put(block+8, uint32(data))
 				h.put(data-4, uint32(block))
+				h.account(int(h.get(block)))
 				clear(h.buf[data : data+size])
 				return &h.buf[data], nil
 			}
@@ -67,6 +71,13 @@ func (h *Heap) Alloc(size int, align int) (any, error) {
 		block += length
 	}
 	return nil, mem.ErrOutOfMemory
+}
+
+func (h *Heap) account(delta int) {
+	h.UsedBytes += delta
+	if h.UsedBytes > h.PeakBytes {
+		h.PeakBytes = h.UsedBytes
+	}
 }
 
 // split keeps a usable remainder and updates its successor's predecessor.
@@ -108,6 +119,7 @@ func (h *Heap) Free(ptr any, size int, align int) {
 		return
 	}
 	block := h.block(ptr)
+	h.account(-int(h.get(block)))
 	h.put(block+8, 0)
 	h.mergeNext(block)
 	previous := h.get(block + 4)
@@ -121,9 +133,11 @@ func (h *Heap) Realloc(ptr any, oldSize int, newSize int, align int) (any, error
 		panic("wasm heap: invalid reallocation")
 	}
 	block := h.block(ptr)
+	oldLength := int(h.get(block))
 	data := int(h.get(block + 8))
 	if newSize <= oldSize {
 		h.split(block, data+newSize)
+		h.account(int(h.get(block)) - oldLength)
 		end := block + int(h.get(block))
 		if end < len(h.buf) && h.get(end+8) == 0 {
 			h.mergeNext(end)
@@ -134,6 +148,7 @@ func (h *Heap) Realloc(ptr any, oldSize int, newSize int, align int) (any, error
 	if end < len(h.buf) && h.get(end+8) == 0 && newSize <= end+int(h.get(end))-data {
 		h.mergeNext(block)
 		h.split(block, data+newSize)
+		h.account(int(h.get(block)) - oldLength)
 		clear(h.buf[data+oldSize : data+newSize])
 		return ptr, nil
 	}

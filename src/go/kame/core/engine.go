@@ -556,13 +556,10 @@ func (e *Engine) run(n *Node) *Node {
 	return n
 }
 
+// Complete consumes Value and Diagnostic, allocated with e.Alloc. The queue
+// owns them even for stale requests; callers must not free or reuse them.
 func (e *Engine) Complete(c Completion) {
-	queued := c
-	if c.HasValue {
-		queued.Value = c.Value.Clone(e.Alloc)
-		c.Value.Free(e.Alloc)
-	}
-	e.completions = slices.Append(e.Alloc, e.completions, queued)
+	e.completions = slices.Append(e.Alloc, e.completions, c)
 }
 
 func (e *Engine) accept(c Completion) *Node {

@@ -111,13 +111,19 @@ enum kame_wasm_process_outcome {
 /* Module ABI discovery and linear-memory ownership. Allocation grows exported
  * memory only as needed, never beyond the linker-provided maximum. Returned
  * ranges belong to the caller for the module lifetime, independently of engine
- * instances. Free is a no-op for this host-buffer bump allocator; reuse buffers
- * or use an operation-local module. Instance payloads use a reclaiming heap. */
+ * instances, until freed with the exact pointer and requested size. Freed
+ * blocks coalesce and are reused; invalid/double frees return STATE_INVALID.
+ * Linear memory does not shrink, but warm workloads must plateau. */
 uint32_t kame_wasm_abi_version(void);
 /* Diagnostic accounting for the separate fixed system heap, not host buffers. */
 uint32_t kame_wasm_system_heap_used(void);
 uint32_t kame_wasm_alloc(uint32_t size, uint32_t alignment);
 uint32_t kame_wasm_free(uint32_t pointer, uint32_t size);
+/* Physical live bytes (including block overhead) and high-water marks. */
+uint32_t kame_wasm_host_heap_used(void);
+uint32_t kame_wasm_host_heap_peak(void);
+uint32_t kame_wasm_instance_heap_used(uint64_t instance);
+uint32_t kame_wasm_instance_heap_peak(uint64_t instance);
 
 /* Encode the 48-byte event envelope at dst. Every 64-bit argument maps to a
  * JavaScript BigInt. The function returns a kame_wasm_status value. */

@@ -122,6 +122,9 @@ func (h *fakeRemoteHost) Readlink(a mem.Allocator, name string) host.LinkResult 
 func (h *fakeRemoteHost) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 	return h.base.ReadFile(a, name)
 }
+func (h *fakeRemoteHost) FileSignature(name string) core.Signature {
+	return h.base.FileSignature(name)
+}
 func (h *fakeRemoteHost) ReadDir(a mem.Allocator, name string) ([]host.DirEntry, error) {
 	return h.base.ReadDir(a, name)
 }
@@ -164,6 +167,9 @@ func (h *countingReadDirHost) Readlink(a mem.Allocator, name string) host.LinkRe
 }
 func (h *countingReadDirHost) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 	return h.memory.ReadFile(a, name)
+}
+func (h *countingReadDirHost) FileSignature(name string) core.Signature {
+	return h.memory.FileSignature(name)
 }
 func (h *countingReadDirHost) WriteFileAtomic(name string, data []byte, perm uint32, durable bool) error {
 	return h.memory.WriteFileAtomic(name, data, perm, durable)

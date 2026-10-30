@@ -15,6 +15,7 @@
 #   KAME_WASM_SDK=/path/to/wasi-sdk kame wasm
 #   kame dist-release KAME_RELEASE_PUBLIC_KEY=... KAME_RELEASE_SIGNING_KEY=...
 #   KAME_RELEASE_PUBLIC_KEY=... kame dist-release
+#   KAME_RELEASE_PUBLIC_KEY=... kame release [repo=OWNER/REPO] [notes=FILE]
 #
 # Inspect a change before running it:
 #   kame do plan TARGET
@@ -448,6 +449,21 @@ package-manifests : ./dist/kame.com ./VERSION ./src/sh/release_package_manifests
 	version = (strip (text (read ./VERSION)))
 	python3 ./src/sh/release_package_manifests.py --directory ./dist --output-directory ./etc --version $version
 
+# --- Release publication ----------------------------------------------------
+#
+# `dist-release` only stages and signs. `release` builds the runtime assets,
+# then runs the operator script, which verifies the pushed revision, stages,
+# uploads a draft and publishes it to GitHub and npm. Named arguments mirror the
+# script's optional flags; key paths still come from KAME_RELEASE_PUBLIC_KEY and
+# KAME_RELEASE_SIGNING_KEY. The target holds the project lock, so the script is
+# told the assets are prebuilt and stages them without re-entering Kame.
+
+release {repo=} {notes=} : ./dist/kame.com ./dist/kame.wasm ./dist/kame.js ./VERSION ./src/sh/release.sh ./src/sh/release_manifest.py
+	flags = (concat
+		(if (blank? repo) [] ["--repo" repo])
+		(if (blank? notes) [] ["--notes-file" notes]))
+	:KAME_RELEASE_PREBUILT "1" ./src/sh/release.sh $flags
+
 # --- Windows launcher -------------------------------------------------------
 #
 # The Go launcher and the copied WASM pair are one group. Make names only the
@@ -509,6 +525,11 @@ test-inspection : ./build/kame.debug dist-wasm ./tests/T037-01-cli-build-inspect
 test-reuse-reasons : ./build/kame.debug dist-wasm ./tests/T036-02-cli-reuse-reasons.sh
 	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-02-cli-reuse-reasons.sh
 
+# Published-channel compatibility check: network access and the Solod
+# toolchain are required, so this stays opt-in and outside the hermetic suite.
+test-release-build :
+	./src/sh/test-release-build.sh
+
 test-all : test test-leaks
 
 test-sanitize : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
@@ -532,8 +553,8 @@ wasm-check : wasm wasm-portable ./tools/native/test-wasm-header.c ./tools/wasm/c
 	node ./tools/wasm/test-abi.mjs ./build/wasm/kame.wasm
 
 # map/run! streams each script and fails the recipe on the first nonzero status.
-test-wasm : wasm-check @{TEST_WASM}
-	(map ([script] (run! script)) TEST_WASM)
+test-wasm : wasm-check ./build/kame.debug dist-wasm @{TEST_WASM}
+	(map ([script] (run! :env [KAME_TEST_PREBUILT: (abspath ".")] script)) TEST_WASM)
 
 # --- Formatting and cleanup -------------------------------------------------
 

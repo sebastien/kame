@@ -187,17 +187,29 @@ allocate.
 ## Memory
 
 The module uses a fixed-size backing buffer allocated on first source compilation
-and reused by that instance slot. The freestanding ABI reserves 16 MiB per
-compiled slot on demand, rather than reserving memory for every possible slot.
+and returned to the host allocator on instance destruction. The freestanding ABI
+reserves the instance's logical budget (16 MiB by default) per compiled slot on
+demand, rather than reserving memory for every possible slot.
 This accommodates the default 1 MiB Kash capture plus evaluator allocation and
 copy overhead. The module memory maximum still bounds simultaneous compiled
 instances and larger captures; an unavailable buffer reports `NO_MEMORY`.
 The default linear-memory stack is 512 KiB so optimized evaluator frames can
 reach the 32-level evaluation guard and return `EVAL_DEPTH` instead of trapping.
 Within each slot, a coalescing heap reclaims arbitrary freed blocks while the
-compiled program remains alive; instance destruction resets the supplied buffer.
-The JS host reuses separate geometrically grown scratch buffers for process
-chunks and event JSON. `kame_wasm_process_retain_limit(instance, request)` reports
+compiled program remains alive. The host allocator also splits and coalesces
+freed blocks: `kame_wasm_free(pointer, requestedSize)` returns a caller-owned
+buffer for reuse, rejecting invalid pointers, wrong sizes and double frees with
+`STATE_INVALID`. `(0, 0)` is a no-op. Live ranges survive unrelated allocations
+and frees; views must still be reacquired after memory growth. Linear memory
+cannot shrink, but repeated warm workloads must reuse their high-water capacity.
+The JS host reuses separate geometrically grown scratch buffers for copied
+inputs, requests, results, process chunks and event JSON, freeing replaced slots.
+Async inspection output buffers are operation-local and freed in `finally`.
+`kame_wasm_host_heap_used/peak()` and `kame_wasm_instance_heap_used/peak(handle)`
+report physical live/high-water bytes, including allocator overhead. Instance
+metrics are valid until destruction; the peak remains readable after exhaustion.
+They are separate from system-heap usage and exported linear-memory byte length.
+`kame_wasm_process_retain_limit(instance, request)` reports
 the portable process retention budget (zero request selects the pinned request;
 `UINT32_MAX` means invalid). Recipe hosts retain that prefix plus at most one
 sentinel byte, preserving terminal truncation metadata while forwarding every
@@ -246,18 +258,30 @@ kind 20 and cache requests when forwarding file rules. These metadata checks do
 not evaluate a user library read or broaden expression grants.
 
 External file observations use ABI kind 27 (`file-content`), with a canonical
-path payload. Complete with bytes for a readable regular file, nil for a missing
+path payload. Complete with bytes or JSON `{"sha256":"<64 hex digits>"}` for a
+readable regular file, nil for a missing
 path, false for a present non-regular path, or true for a present regular file
 whose bytes could not be read. A stat failure other than absence is a diagnostic,
 except kind 27 may return false when no-follow inspection proves a symbolic link
 whose target cannot be followed. Its link views remain inspectable; this does not
 supply a reusable content signature.
-The engine hashes the transported bytes; neither boolean state supplies a
-reusable signature. Kind 29 (`output-content`) uses the same protocol for declared
+The engine hashes transported bytes or validates the explicit digest record;
+neither boolean state supplies a reusable signature. A digest is the exact
+SHA-256 of file content, never metadata, a cached freshness decision, or a
+timestamp/size shortcut. The trusted filesystem host computes it in bounded
+chunks; native `ProgramHost.FileSignature` uses the same content algorithm.
+This keeps executables and large artifact observations out of the instance heap.
+Raw library reads still return actual bytes. Existing hosts may continue sending
+bytes, including through custom callbacks. Kind 29 (`output-content`) uses the same protocol for declared
 build outputs, under internal build authority rather than expression read grants.
 Kind 28 (`tool-content`) uses the same protocol for resolved
 executable dependencies, without requiring an additional user read grant.
 Embedding hosts must service these requests as well as user file reads.
+Native implementations of `ProgramHost` implement `FileSignature(name)` for
+content observations; return `SignatureUnavailable` on read failure. Native
+and memory hosts must produce the same `SignatureContent` SHA-256 as hashing
+the complete byte stream. Absence/non-regular classification remains the
+runtime's stat-based responsibility, not the digest method's.
 
 No-follow user filesystem requests are ABI kinds 30 (`lstat`) and 31 (`readlink`),
 using a canonical path payload and read capability checks. Kind 30 completes with
@@ -463,8 +487,8 @@ must not grow memory implicitly unless the embedding contract explicitly
 enables it.
 
 `kame_wasm_instance_set_heap_limit(handle, bytes)` sets a logical allocator
-budget from 1 byte through 16 MiB before compilation; the backing buffer size
-remains unchanged. Allocator exhaustion invalidates the affected instance
+budget from 1 byte through 16 MiB before compilation; the backing buffer is
+allocated to that budget on compilation. Allocator exhaustion invalidates the affected instance
 runtime: evaluator calls and result copies return `NO_MEMORY`, and `step` returns
 terminal state 2. Its emergency diagnostic remains readable and destruction
 remains valid. Create a new instance to resume work; other instances survive.
@@ -646,6 +670,11 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 - Repeated create, compile, evaluate, and free cycles exhaust no logical heap
   capacity.
 - An undersized heap produces a diagnostic rather than memory corruption.
+- `tools/wasm/test-memory-reuse.mjs` checks coalescing/alignment, exact frees,
+  repeated arena destruction, a 20 MiB content observation, and 600 watch reads.
+  Warm host allocations and linear-memory pages remain constant; 64–256 KiB reads
+  stay below a 2 MiB instance peak. These are allocation budgets, not RSS or
+  garbage-collector timing assertions.
 - The JavaScript wrapper copies payloads before further allocation and rejects
   use after disposal.
 - `node dist/kame.js --version` prints `kame VERSION (runtime=WASM)` and exits 0.

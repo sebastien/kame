@@ -1097,6 +1097,28 @@ function readResource(name) {
   return readFile(filesystemPath(name));
 }
 
+// Content observations return an exact SHA-256, not a stat-based cache key.
+// Keep raw reads separate: only callers that need bytes materialize the file.
+async function resourceDigest(name) {
+  const hash = createHash('sha256');
+  if (isMemoryResource(name)) {
+    const data = memoryResourceFiles.get(name);
+    if (!data) throw Object.assign(new Error('memory resource does not exist'), { code: 'ENOENT' });
+    hash.update(data);
+  } else {
+    const file = await open(filesystemPath(name), 'r');
+    try {
+      const buffer = Buffer.allocUnsafe(65536);
+      for (;;) {
+        const { bytesRead } = await file.read(buffer, 0, buffer.length, null);
+        if (!bytesRead) break;
+        hash.update(buffer.subarray(0, bytesRead));
+      }
+    } finally { await file.close(); }
+  }
+  return { sha256: hash.digest('hex') };
+}
+
 function statResource(name, options, noFollow = false) {
 	if (!isMemoryResource(name)) return (noFollow ? lstat : stat)(filesystemPath(name), options);
   if (memoryResourceFiles.has(name)) {
@@ -1224,6 +1246,7 @@ const REQUIRED_EXPORTS = [
   'memory',
   'kame_wasm_abi_version',
   'kame_wasm_alloc',
+  'kame_wasm_free',
   'kame_wasm_copy',
   'kame_wasm_instance_create',
   'kame_wasm_instance_free',
@@ -1322,21 +1345,24 @@ class Module {
   }
 
   // ABI calls copy these inputs before returning. Separate slots keep fields
-  // that are passed together alive, and geometric growth bounds abandoned
-  // buffers in the ABI's monotonic host allocator.
+  // that are passed together alive. Replaced buffers are returned to the host
+  // allocator; retained capacity is bounded by each slot's largest request.
   scratch(name, size, alignment = 1) {
     let buffer = this.scratchBuffers.get(name);
     if (!buffer || buffer.capacity < size) {
       const capacity = Math.max(64, 2 ** Math.ceil(Math.log2(Math.max(1, size))));
+      const previous = buffer;
       buffer = { pointer: this.allocate(capacity, alignment), capacity };
+      if (previous) this.exports.kame_wasm_free(previous.pointer, previous.capacity);
       this.scratchBuffers.set(name, buffer);
     }
     return buffer.pointer;
   }
 
-  write(bytes) {
+  write(bytes, slot) {
+    if (typeof slot !== 'string') throw new TypeError('ABI writes require a distinct scratch slot');
     const data = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes;
-    const pointer = this.allocate(data.length || 1);
+    const pointer = this.scratch(slot, data.length || 1);
     new Uint8Array(this.exports.memory.buffer, pointer, data.length).set(data);
     return { pointer, length: data.length };
   }
@@ -1348,14 +1374,14 @@ class Module {
   instanceDiagnostic(instance) {
     const length = this.exports.kame_wasm_instance_diagnostic_length(instance);
     if (length === 0) return null;
-    const pointer = this.allocate(length || 1);
+    const pointer = this.scratch('diagnostic', length || 1);
     if (this.exports.kame_wasm_instance_diagnostic_copy(instance, pointer, length) !== 0) return null;
     return this.decode(pointer, length);
   }
 
   instanceDiagnosticSpan(instance) {
-    const startPointer = this.allocate(4, 4);
-    const endPointer = this.allocate(4, 4);
+    const startPointer = this.scratch('spanStart', 4, 4);
+    const endPointer = this.scratch('spanEnd', 4, 4);
     if (this.exports.kame_wasm_instance_diagnostic_span(instance, startPointer, endPointer) !== 0) return null;
     const view = new DataView(this.exports.memory.buffer);
     return { start: view.getInt32(startPointer, true), end: view.getInt32(endPointer, true) };
@@ -1377,7 +1403,7 @@ class Module {
 
   completeJSON(instance, request, value) {
     const bytes = new TextEncoder().encode(encodeJSON(value));
-    const pointer = this.allocate(bytes.length || 1);
+    const pointer = this.scratch('completeJSON', bytes.length || 1);
     new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
     return this.exports.kame_wasm_complete_json(instance, request, pointer, bytes.length);
   }
@@ -1386,25 +1412,25 @@ class Module {
   // from a BigInt so large nanosecond clocks do not lose precision.
   completeInt(instance, request, value) {
     const bytes = new TextEncoder().encode(String(value));
-    const pointer = this.allocate(bytes.length || 1);
+    const pointer = this.scratch('completeInt', bytes.length || 1);
     new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
     return this.exports.kame_wasm_complete_json(instance, request, pointer, bytes.length);
   }
 
   completeFailure(instance, request, code, message) {
-    const codeBytes = this.write(code);
-    const messageBytes = this.write(message);
+    const codeBytes = this.write(code, 'failureCode');
+    const messageBytes = this.write(message, 'failureMessage');
     return this.exports.kame_wasm_complete_failure(instance, request, codeBytes.pointer, codeBytes.length, messageBytes.pointer, messageBytes.length);
   }
 
   // copyResult runs a query-then-copy through a "did the call copy a value"
   // helper. call(pointer, length, lengthPointer) returns a kame_wasm_status.
   copyQuery(call, instance) {
-    const lengthPointer = this.allocate(4, 4);
+    const lengthPointer = this.scratch('queryLength', 4, 4);
     const query = call(instance, 0, 0, lengthPointer);
     if (query !== 0 && query !== 3) throw diagnosticError(this.instanceDiagnostic(instance), 'EXPR_INVALID');
     const length = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
-    const output = this.allocate(length || 1);
+    const output = this.scratch('queryOutput', length || 1);
     if (call(instance, output, length, lengthPointer) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'EXPR_INVALID');
     return new Uint8Array(this.exports.memory.buffer, output, length).slice();
   }
@@ -1412,20 +1438,27 @@ class Module {
   async copyInspectionQuery(call, instance, context) {
     const lengthPointer = this.allocate(4, 4);
     let output = 0, capacity = 0;
-    for (;;) {
-      const query = call(instance, output, capacity, lengthPointer);
-      if (query === 0) {
-        const length = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
-        return new Uint8Array(this.exports.memory.buffer, output, length).slice();
+    try {
+      for (;;) {
+        const query = call(instance, output, capacity, lengthPointer);
+        if (query === 0) {
+          const length = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
+          return new Uint8Array(this.exports.memory.buffer, output, length).slice();
+        }
+        if (query === 3) {
+          if (output) this.exports.kame_wasm_free(output, capacity || 1);
+          output = 0;
+          capacity = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
+          output = this.allocate(capacity || 1);
+          continue;
+        }
+        if (query !== 6) throw diagnosticError(this.instanceDiagnostic(instance), `inspection query failed (${query})`);
+        if (this.exports.kame_wasm_step(instance) !== 1) throw Object.assign(new Error('inspection host request unavailable'), { code: 'HOST_FAIL' });
+        if (await this.service(instance, context) !== 0) throw Object.assign(new Error('inspection host completion failed'), { code: 'HOST_FAIL' });
       }
-      if (query === 3) {
-        capacity = new DataView(this.exports.memory.buffer, lengthPointer, 4).getUint32(0, true);
-        output = this.allocate(capacity || 1);
-        continue;
-      }
-      if (query !== 6) throw diagnosticError(this.instanceDiagnostic(instance), `inspection query failed (${query})`);
-      if (this.exports.kame_wasm_step(instance) !== 1) throw Object.assign(new Error('inspection host request unavailable'), { code: 'HOST_FAIL' });
-      if (await this.service(instance, context) !== 0) throw Object.assign(new Error('inspection host completion failed'), { code: 'HOST_FAIL' });
+    } finally {
+      if (output) this.exports.kame_wasm_free(output, capacity || 1);
+      this.exports.kame_wasm_free(lengthPointer, 4);
     }
   }
 
@@ -1441,7 +1474,7 @@ class Module {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
-      const bytes = this.write(JSON.stringify(descriptor));
+      const bytes = this.write(JSON.stringify(descriptor), 'conditionDescriptor');
       const result = this.copyQuery((handle, dst, capacity, length) => query(handle, bytes.pointer, bytes.length, dst, capacity, length), instance);
       return new TextDecoder().decode(result) === 'true';
     } catch (error) {
@@ -1458,8 +1491,8 @@ class Module {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
-      const commandBytes = this.write(command);
-      const argsBytes = this.write(args.join('\u0000'));
+      const commandBytes = this.write(command, 'command');
+      const argsBytes = this.write(args.join('\u0000'), 'commandArgs');
       const call = (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_cli(handle, commandBytes.pointer, commandBytes.length, argsBytes.pointer, argsBytes.length, dst, dstLen, lengthPointer);
       return JSON.parse(this.decode0(this.copyQuery(call, instance)));
     } finally {
@@ -1468,7 +1501,7 @@ class Module {
   }
 
   async service(instance, context) {
-    const header = this.allocate(48, 8);
+    const header = this.scratch('requestHeader', 48, 8);
     if (this.exports.kame_wasm_next_event_header(instance, header, 48) !== 0) throw Object.assign(new Error('request header unavailable'), { code: 'HOST_FAIL' });
     const view = new DataView(this.exports.memory.buffer, header, 48);
     const request = view.getBigUint64(20, true);
@@ -1482,7 +1515,7 @@ class Module {
     let data = null;
     if (kind === 2) {
       const dataLength = this.exports.kame_wasm_next_request_data_length(instance);
-      const dataPointer = this.allocate(dataLength || 1);
+      const dataPointer = this.scratch('requestData', dataLength || 1);
       if (this.exports.kame_wasm_request_data_copy(instance, dataPointer, dataLength) !== 0) throw Object.assign(new Error('request data copy failed'), { code: 'HOST_FAIL' });
       data = new Uint8Array(this.exports.memory.buffer, dataPointer, dataLength).slice();
     }
@@ -1490,17 +1523,17 @@ class Module {
     let record = null;
     if (kind === 10 || kind === 11 || kind === 12 || kind === 24 || kind === 25) {
       const keyLength = this.exports.kame_wasm_next_request_key_length(instance);
-      const keyPointer = this.allocate(keyLength || 1);
+      const keyPointer = this.scratch('requestKey', keyLength || 1);
       if (this.exports.kame_wasm_request_key_copy(instance, keyPointer, keyLength) !== 0) throw Object.assign(new Error('cache key copy failed'), { code: 'HOST_FAIL' });
       key = new Uint8Array(this.exports.memory.buffer, keyPointer, keyLength).slice();
       if (kind === 11) {
         const recordLength = this.exports.kame_wasm_next_request_record_length(instance);
-        const recordPointer = this.allocate(recordLength || 1);
+        const recordPointer = this.scratch('requestRecord', recordLength || 1);
         if (this.exports.kame_wasm_request_record_copy(instance, recordPointer, recordLength) !== 0) throw Object.assign(new Error('cache record copy failed'), { code: 'HOST_FAIL' });
         record = new Uint8Array(this.exports.memory.buffer, recordPointer, recordLength).slice();
       }
     }
-    const payloadPointer = this.allocate(payloadLength || 1);
+    const payloadPointer = this.scratch('requestPayload', payloadLength || 1);
     if (this.exports.kame_wasm_event_payload_copy(instance, payloadPointer, payloadLength) !== 0) throw Object.assign(new Error('request payload copy failed'), { code: 'HOST_FAIL' });
     const payload = this.decode(payloadPointer, payloadLength);
     if (context.concurrent && this.exports.kame_wasm_request_detach(instance, request) !== 0) throw Object.assign(new Error('cannot unpin host request'), { code: 'HOST_FAIL' });
@@ -1605,13 +1638,12 @@ class Module {
         return this.completeFailure(instance, request, 'FS_ERR', 'cannot stat file');
       }
       if (!info.isFile()) return this.completeJSON(instance, request, false);
-      // Transport bytes, not a host-chosen freshness decision or metadata hash.
-      let bytes;
-      try { bytes = await readResource(payload); }
+      // The host supplies content identity, never a freshness decision. Hash
+      // bounded chunks instead of copying executables into the instance heap.
+      let digest;
+      try { digest = await resourceDigest(payload); }
       catch { return this.completeJSON(instance, request, true); }
-      const pointer = this.allocate(bytes.length || 1);
-      new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
-      return this.exports.kame_wasm_complete_bytes(instance, request, pointer, bytes.length);
+      return this.completeJSON(instance, request, digest);
     }
     if (kind === 19) return this.completeJSON(instance, request, resourceExists(payload));
     if (kind === 18) {
@@ -1623,7 +1655,7 @@ class Module {
       if (!grants.read) return this.deny(instance, request, 'read');
       try {
         const bytes = await readResource(payload);
-        const pointer = this.allocate(bytes.length || 1);
+        const pointer = this.scratch('fileRead', bytes.length || 1);
         new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
         return this.exports.kame_wasm_complete_bytes(instance, request, pointer, bytes.length);
       } catch (error) {
@@ -1720,7 +1752,7 @@ class Module {
         if (at > 0 && entry.slice(0, at) === payload) value = entry.slice(at + 1);
       }
       if (value === undefined) return this.exports.kame_wasm_complete_nil(instance, request);
-      const encoded = this.write(value);
+      const encoded = this.write(value, 'environmentValue');
       return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
     }
     if (kind === 13 || kind === 14 || kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36 || kind === 37 || kind === 38) {
@@ -1766,7 +1798,7 @@ class Module {
       const completion = await runArgvCapture(stages, { ...context, ...redirections, onSnapshot, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); return this.startedProcessGroup(instance, context, rawRequest); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
       if (completion.ok) {
         if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
-          const encoded = this.write(completion.value.stdout);
+          const encoded = this.write(completion.value.stdout, 'captureStdout');
           const status = this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
           if (status !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
           this.drainEvents(instance, context);
@@ -1811,7 +1843,7 @@ class Module {
       }
       const completion = await runProcessDirect(payload, context);
       if (completion.ok) {
-        const encoded = this.write(completion.text);
+        const encoded = this.write(completion.text, 'processText');
         return this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
       }
       return this.completeFailure(instance, request, completion.code, completion.message);
@@ -1829,7 +1861,7 @@ class Module {
       } catch {
         return this.exports.kame_wasm_complete_nil(instance, request);
       }
-      const pointer = this.allocate(bytes.length || 1);
+      const pointer = this.scratch('cacheRead', bytes.length || 1);
       new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
       return this.exports.kame_wasm_complete_bytes(instance, request, pointer, bytes.length);
     }
@@ -1867,7 +1899,7 @@ class Module {
     let encoded;
     try { encoded = JSON.stringify(declarations); }
     catch { throw Object.assign(new Error('plugin declarations must be JSON serializable'), { code: 'PLUGIN_CONFIG' }); }
-    const bytes = this.write(encoded);
+    const bytes = this.write(encoded, 'publishResult');
     if (this.exports.kame_wasm_register_plugins(instance, bytes.pointer, bytes.length) !== 0) throw this.compileFailure(instance, 'PLUGIN_CONFIG');
   }
 
@@ -1971,7 +2003,7 @@ class Module {
     try { encoded = JSON.stringify(response.value); }
     catch { return this.completeFailure(instance, request, 'PLUGIN_PROTOCOL', 'invalid plugin result'); }
     const bytes = new TextEncoder().encode(encoded);
-    const pointer = this.allocate(bytes.length || 1);
+    const pointer = this.scratch('pluginResult', bytes.length || 1);
     new Uint8Array(this.exports.memory.buffer, pointer, bytes.length).set(bytes);
     return this.exports.kame_wasm_complete_text(instance, request, pointer, bytes.length);
   }
@@ -2035,11 +2067,11 @@ class Module {
     if (context.signal?.aborted && kind !== 39) return this.completeFailure(instance, request, 'EXEC_CANCELLED', 'invocation cancelled');
     if (!result || typeof result !== 'object') return this.completeFailure(instance, request, 'HOST_FAIL', 'host callback returned no completion');
     if (result.type === 'bytes' && (result.value instanceof Uint8Array || Buffer.isBuffer(result.value))) {
-      const bytes = this.write(result.value);
+      const bytes = this.write(result.value, 'customBytes');
       return this.exports.kame_wasm_complete_bytes(instance, request, bytes.pointer, bytes.length);
     }
     if (result.type === 'text' && typeof result.value === 'string') {
-      const bytes = this.write(result.value);
+      const bytes = this.write(result.value, 'customText');
       return this.exports.kame_wasm_complete_text(instance, request, bytes.pointer, bytes.length);
     }
     if (result.type === 'json') return this.completeJSON(instance, request, result.value);
@@ -2150,7 +2182,7 @@ class Module {
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     let failure, primaryDiagnostic;
     try {
-      const compiled = this.write(source);
+      const compiled = this.write(source, 'expressionSource');
       if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
       this.registerPlugins(instance, context);
       this.inspectionGrant(instance, '', '');
@@ -2159,10 +2191,10 @@ class Module {
         else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
       }
       if (context.cwd) {
-        const directory = this.write(context.cwd);
+        const directory = this.write(context.cwd, 'expressionDirectory');
         if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       }
-      const encoded = this.write(expression);
+      const encoded = this.write(expression, 'expression');
       if (this.exports.kame_wasm_expression_begin(instance, encoded.pointer, encoded.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'PARSE_ERR');
       for (;;) {
         await this.waitReady(instance, context);
@@ -2197,7 +2229,7 @@ class Module {
       const kind = this.exports.kame_wasm_expression_effect_kind(instance);
       if (kind === 0) return;
       const length = this.exports.kame_wasm_expression_effect_length(instance);
-      const pointer = this.allocate(length || 1);
+      const pointer = this.scratch('result', length || 1);
       if (this.exports.kame_wasm_expression_effect_copy(instance, pointer, length) !== 0) throw new Error('expression effect copy failed');
       const data = new Uint8Array(this.exports.memory.buffer, pointer, length).slice();
       if (kind === 2) stderr.write(data); else stdout.write(data);
@@ -2208,9 +2240,9 @@ class Module {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
-      const langBytes = this.write(lang);
-      const nameBytes = this.write(name);
-      const textBytes = this.write(text);
+      const langBytes = this.write(lang, 'parseLang');
+      const nameBytes = this.write(name, 'parseName');
+      const textBytes = this.write(text, 'parseText');
       const call = (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_parse(handle, langBytes.pointer, langBytes.length, nameBytes.pointer, nameBytes.length, textBytes.pointer, textBytes.length, dst, dstLen, lengthPointer);
       return this.copyQuery(call, instance);
     } finally {
@@ -2222,10 +2254,10 @@ class Module {
     const instance = this.exports.kame_wasm_instance_create();
     if (instance === 0n) throw Object.assign(new Error('cannot create WASM instance'), { code: 'NO_MEMORY' });
     try {
-      const langBytes = this.write(lang);
-      const nameBytes = this.write(name);
-      const textBytes = this.write(text);
-      const indentBytes = this.write(indentStyle);
+      const langBytes = this.write(lang, 'formatLang');
+      const nameBytes = this.write(name, 'formatName');
+      const textBytes = this.write(text, 'formatText');
+      const indentBytes = this.write(indentStyle, 'formatIndent');
       const call = (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_format(handle, langBytes.pointer, langBytes.length, nameBytes.pointer, nameBytes.length, textBytes.pointer, textBytes.length, indentBytes.pointer, indentBytes.length, indentWidth, dst, dstLen, lengthPointer);
       return this.copyQuery(call, instance);
     } finally {
@@ -2239,7 +2271,7 @@ class Module {
     try {
       this.compileBuild(instance, source, name);
       if (context) {
-        const directory = this.write(process.cwd());
+        const directory = this.write(process.cwd(), 'inspectionDirectory');
         if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0 || this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('inspection host forwarding unavailable'), { code: 'HOST_FAIL' });
         this.inspectionGrant(instance, '', '');
         for (const grant of context.inspectionGrants) {
@@ -2261,23 +2293,23 @@ class Module {
 
   compileBuild(instance, source, name, context = {}) {
     if (name) this.setSourceName(instance, name);
-    const compiled = this.write(Array.isArray(source) ? '' : source);
+    const compiled = this.write(Array.isArray(source) ? '' : source, 'buildSource');
     if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     if (Array.isArray(source)) {
       if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
-      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, parameters: source.parameters, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0 }));
+      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, parameters: source.parameters, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0 }), 'buildDescriptor');
       if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
   }
 
   setSourceName(instance, name) {
-    const bytes = this.write(name);
+    const bytes = this.write(name, 'sourceName');
     if (this.exports.kame_wasm_set_source_name(instance, bytes.pointer, bytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
   }
 
   async targetOperands(source, targets, name) {
     const bytes = await this.prepared(source, () => {
-      const operands = this.write(JSON.stringify(targets));
+      const operands = this.write(JSON.stringify(targets), 'operands');
       return (handle, dst, capacity, length) => this.exports.kame_wasm_target_operands(handle, operands.pointer, operands.length, dst, capacity, length);
     }, name, undefined, false);
     return JSON.parse(this.decode0(bytes));
@@ -2285,7 +2317,7 @@ class Module {
 
   async planJSON(source, target, expand, name, context) {
     return this.prepared(source, (instance) => {
-      const targetBytes = this.write(target);
+      const targetBytes = this.write(target, 'inputTarget');
       const flag = expand ? 1 : 0;
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_plan(handle, targetBytes.pointer, targetBytes.length, flag, dst, dstLen, lengthPointer);
     }, name, context);
@@ -2293,7 +2325,7 @@ class Module {
 
   async graphJSON(source, target, depth, kind, queryOption, name, context) {
     return this.prepared(source, (instance) => {
-      const targetBytes = this.write(target);
+      const targetBytes = this.write(target, 'outputTarget');
       // The legacy ABI slot expands span queries or selects affected plans.
       const flag = queryOption ? 1 : 0;
       return (handle, dst, dstLen, lengthPointer) => this.exports.kame_wasm_graph(handle, targetBytes.pointer, targetBytes.length, depth, kind, flag, dst, dstLen, lengthPointer);
@@ -2308,20 +2340,20 @@ class Module {
   }
 
   setToolPath(instance, name, path) {
-    const n = this.write(name);
-    const p = this.write(path);
+    const n = this.write(name, 'toolName');
+    const p = this.write(path, 'toolPath');
     if (this.exports.kame_wasm_set_tool_path(instance, n.pointer, n.length, p.pointer, p.length) !== 0) throw new Error('cannot supply tool path');
   }
 
   inspectionGrant(instance, capability, name) {
-    const c = this.write(capability);
-    const n = this.write(name);
+    const c = this.write(capability, 'grantCapability');
+    const n = this.write(name, 'grantName');
     if (this.exports.kame_wasm_inspection_grant(instance, c.pointer, c.length, n.pointer, n.length) !== 0) throw Object.assign(new Error('inspection capability policy unavailable'), { code: 'HOST_FAIL' });
   }
 
   async toolsCheck(source, target, name, context) {
     return this.prepared(source, (instance) => {
-      const t = this.write(target);
+      const t = this.write(target, 'planTarget');
       const query = context?.cliReport ? this.exports.kame_wasm_tools_check_report : this.exports.kame_wasm_tools_check;
       if (!query) throw Object.assign(new Error('tool-check presentation query unavailable'), { code: 'FEATURE_UNSUP' });
       return (handle, dst, dstLen, lengthPointer) => query(handle, t.pointer, t.length, dst, dstLen, lengthPointer);
@@ -2391,10 +2423,10 @@ class Module {
 
   processTerminal(instance, outcome, status, signal, stdoutBytes, stderrBytes, code, message, request) {
     if (request !== undefined && this.exports.kame_wasm_request_attach(instance, request) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
-    const stdout = this.write(stdoutBytes ?? new Uint8Array(0));
-    const stderr = this.write(stderrBytes ?? new Uint8Array(0));
-    const codeBytes = this.write(code);
-    const messageBytes = this.write(message);
+    const stdout = this.write(stdoutBytes ?? new Uint8Array(0), 'processStdout');
+    const stderr = this.write(stderrBytes ?? new Uint8Array(0), 'processStderr');
+    const codeBytes = this.write(code, 'processCode');
+    const messageBytes = this.write(message, 'processMessage');
     if (this.exports.kame_wasm_process_terminal(instance, status, signal, outcome, stdout.pointer, stdout.length, stderr.pointer, stderr.length, codeBytes.pointer, codeBytes.length, messageBytes.pointer, messageBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
   }
 
@@ -2421,7 +2453,7 @@ class Module {
       this.compileBuild(instance, source, name, context);
       this.registerPlugins(instance, context);
       for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
-      const directoryBytes = this.write(context.cwd ?? process.cwd());
+      const directoryBytes = this.write(context.cwd ?? process.cwd(), 'buildDirectory');
       if (this.exports.kame_wasm_set_directory(instance, directoryBytes.pointer, directoryBytes.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
       if (context.portableGrants) {
@@ -2432,7 +2464,7 @@ class Module {
         }
       }
       context.streaming = true;
-      const encoded = this.write(target);
+      const encoded = this.write(target, 'buildTarget');
       if (this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length) !== 0) throw this.compileFailure(instance, 'TGT_NO_RULE');
       targetStarted = true;
       for (;;) {
@@ -2535,7 +2567,7 @@ class Module {
       this.compileBuild(instance, source, name, context);
       this.registerPlugins(instance, context);
       for (const tool of tools) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context.toolCache));
-      const directory = this.write(context.cwd ?? process.cwd());
+      const directory = this.write(context.cwd ?? process.cwd(), 'watchDirectory');
       if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       if (this.exports.kame_wasm_set_forwarding(instance, 1) !== 0) throw Object.assign(new Error('request forwarding is unavailable'), { code: 'FEATURE_UNSUP' });
       if (context.portableGrants) {
@@ -2545,7 +2577,7 @@ class Module {
           else for (const name of grant.names) this.inspectionGrant(instance, grant.capability, name);
         }
       }
-      const targetsBytes = this.write(JSON.stringify(targets));
+      const targetsBytes = this.write(JSON.stringify(targets), 'watchTargets');
       if (this.exports.kame_wasm_watch_begin(instance, targetsBytes.pointer, targetsBytes.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
       return { instance, pending, cancellation, context, targets, hostError, live: true, externalSignal, cancel };
     } catch (error) {
@@ -2563,7 +2595,7 @@ class Module {
   }
 
   invalidateWatch(watch, resources) {
-    const bytes = this.write(JSON.stringify(resources));
+    const bytes = this.write(JSON.stringify(resources), 'invalidations');
     const status = this.exports.kame_wasm_watch_invalidate(watch.instance, bytes.pointer, bytes.length);
     if (status !== 0) throw diagnosticError(this.instanceDiagnostic(watch.instance), 'HOST_FAIL');
   }
@@ -2615,7 +2647,7 @@ class Module {
     try {
       if (this.exports.kame_wasm_source_compile(instance, 0, 0) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
       this.registerPlugins(instance, context);
-      const directory = this.write(process.cwd());
+      const directory = this.write(process.cwd(), 'runDirectory');
       if (this.exports.kame_wasm_set_directory(instance, directory.pointer, directory.length) !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
       this.inspectionGrant(instance, '', '');
       const grants = inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }];
@@ -2625,7 +2657,7 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }));
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');
@@ -2906,6 +2938,7 @@ export class Kame {
       program.module = null;
     }
     this.programs.clear();
+    this.module = null;
   }
 }
 
@@ -2938,8 +2971,8 @@ export class KameProgram {
 
   async evaluate(expression, options = {}) {
     return this.owner.operation(this, options, async (context) => this.serialized(async () => {
-      // Host allocations are monotonic: keep one module per operation, never
-      // reset an allocator that an active watch or another owner can still use.
+      // Isolate operation state; never reset an allocator that an active watch
+      // or another owner can still use. Long-lived watches reuse their buffers.
       const module = await Module.load(this.module.path);
       this.module = module;
       const result = await module.evaluate(this.source, expression, context);

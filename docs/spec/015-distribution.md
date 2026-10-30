@@ -295,6 +295,9 @@ Release assets are built with these `Makefile.kmk` targets (`make` forwards them
 - `make package-manifests` explicitly refreshes `etc/kame.rb` and
   `etc/kame.json` using `dist/kame.com` and `VERSION`; commit these definitions
   before publication. Release staging never modifies tracked files.
+- `make release` builds the runtime assets and runs the manual publication
+  wrapper below. It performs preflight before keys are read, then signs and
+  publishes the prebuilt assets; `dist-release` remains the staging-only task.
 - `dist-native` builds the current host's full native CLI and places it at
   `dist/native/PLATFORM/kame`; the manual-only
   `.github/workflows/native-artifacts.yml` uploads Linux and macOS x64/ARM64
@@ -321,21 +324,28 @@ Source-tree helper scripts live under `src/sh/`: build and provisioning helpers
 (`generate-version.sh`, `provision-cosmocc.sh`, `build-ape.sh`,
 `check-portable.sh`), release helpers (`platform_id.py`, `release_manifest.py`,
 `release_package_manifests.py`, `release.sh`) and harness helpers
-(`benchmark-cli.py`, `test-ape.sh`). The Go/WASM/C and Node tools stay under
-`tools/`.
+(`benchmark-cli.py`, `test-ape.sh`, `test-release-build.sh`). The Go/WASM/C and
+Node tools stay under `tools/`.
 
 ## Manual Publication
 
 Publishing is an explicit operator step; no workflow publishes a release.
-`src/sh/release.sh` wraps `dist-release` and the GitHub CLI:
+`make release` (or `kame release`) builds the runtime assets and runs
+`src/sh/release.sh`, which verifies preflight, then wraps the signed staging and
+the GitHub CLI:
 
 ```sh
 KAME_RELEASE_PUBLIC_KEY=verification.pem \
 KAME_RELEASE_SIGNING_KEY=signing.pem \
-  src/sh/release.sh
+  make release
 ```
 
-For a new release, before retrieving signing keys or building, it requires a clean tracked tree,
+The wrapper's optional flags are named arguments:
+`make release repo=OWNER/REPO` or `make release notes=NOTES.md`. They are
+forwarded as `--repo` and `--notes-file`; key paths still come from the
+environment.
+
+For a new release, before retrieving signing keys or signing, it requires a clean tracked tree,
 checks that the exact HEAD commit exists in the target GitHub repository, and
 refuses to overwrite an existing local/remote tag or draft release. The operator must push
 the commit first, including when releasing from a detached HEAD; the script
@@ -425,3 +435,15 @@ the canonical build.
   startup failures on each tested host. OpenBSD uses the Node/WASM fallback
   because Cosmopolitan 4.0.2 APEs fail OpenBSD syscall pinning. BSD native source
   builds are not covered by CI and are not a portable-release gate.
+- A published release can build the current checkout's `dist/kame` through the
+  npm/WASM CLI (`bunx`/`npx`) or the latest GitHub APE. The opt-in
+  `src/sh/test-release-build.sh` tries WASM first, falls back to the APE, and
+  fails only when neither channel self-builds;
+  `.github/workflows/release-self-build.yml` runs it on demand, weekly, and after
+  a release. It stays outside the hermetic suite because it requires network
+  access and the Solod toolchain.
+- The portable build workflow separately requires the current WASM module to
+  bootstrap `dist/kame` under its unchanged 16 MiB instance budget, then recheck
+  warm inputs in the same module without linear-memory growth. This hard gate
+  uses `tools/wasm/test-self-build.mjs`, not the published-channel fallback:
+  an older release's known WASM limitations cannot hide current regressions.

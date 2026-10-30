@@ -157,6 +157,21 @@ for project in rules/publication composition/publication; do
 		cli_expect_status 0
 		cli_expect_stdout_empty
 	)
+
+	test-step "$project: reject a note that collides with the index"
+	(
+		cd "$project"
+		printf 'reserved note\n' >./notes/index.txt
+		cli_run -- do plan ./public/index.txt
+		cli_expect_status 1
+		cli_expect_stderr_contains USER_ERROR 'notes/index.txt is reserved'
+		cli_run --
+		cli_expect_status 1
+		cli_expect_stderr_contains USER_ERROR 'notes/index.txt is reserved'
+		rm ./notes/index.txt
+		cli_run --
+		cli_expect_status 0
+	)
 done
 
 test-step "native source composition reuses the value program unchanged"
@@ -199,5 +214,71 @@ cli_expect_stdout '"HELLO"'
 cli_run -- do run --lang expr -c '$(printf denied)'
 cli_expect_status 1
 cli_expect_stderr_contains CAP_DENIED
+
+test-step "legacy language projects build from isolated copies"
+cp -R "$CLI_ROOT/examples/language" ./language
+for project in hello patterns; do
+	(
+		cd "language/$project"
+		rm -rf ./build ./.kame
+		cli_run -- do fmt -n ./*.kmk
+		cli_expect_status 0
+		cli_run --
+		cli_expect_status 0
+		if [ "$project" = hello ]; then
+			cli_expect_file ./build/greeting.txt $'Hello from Kame!\n'
+		else
+			for name in alpha beta; do
+				if cmp -s "./src/$name.txt" "./build/$name.txt"; then test-ok "$name copied"; else test-fail "$name output differs"; fi
+			done
+		fi
+	)
+done
+
+test-step "blog tutorial builds, discovers posts and rebuilds the index"
+if command -v pandoc >/dev/null 2>&1; then
+	cp -R "$CLI_ROOT/examples/tutorial-blog" ./blog
+	(
+		cd blog
+		rm -rf ./build ./.kame
+		cli_run -- do fmt -n ./Makefile.kmk
+		cli_expect_status 0
+		cli_run --
+		cli_expect_status 0
+		for file in index.html author.html posts/hello-world.html projects/this-site.html style.css tools/row.sh; do
+			if [ -s "./build/$file" ]; then test-ok "blog produced $file"; else test-fail "blog missing $file"; fi
+		done
+		cp -p ./build/index.html ./index-before
+		cp -p ./build/posts/hello-world.html ./post-before
+		cli_run --
+		cli_expect_status 0
+		if [ ! ./build/index.html -nt ./index-before ] && [ ! ./build/posts/hello-world.html -nt ./post-before ]; then
+			test-ok "unchanged blog outputs retain their timestamps"
+		else
+			test-fail "unchanged blog rebuilt outputs"
+		fi
+		printf '\nBody-only edit.\n' >>./content/posts/hello-world.md
+		cli_run --
+		cli_expect_status 0
+		if [ ./build/index.html -nt ./index-before ] && [ ./build/posts/hello-world.html -nt ./post-before ] && cmp -s ./index-before ./build/index.html; then
+			test-ok "body edit rebuilds both page and index without changing index contents"
+		else
+			test-fail "body edit did not match the documented rebuild behavior"
+		fi
+		printf '%s\n' '---' 'title: "Incremental rebuilds"' 'date: "2026-09-27"' 'description: "A new post."' '---' 'New post body.' >./content/posts/incremental-rebuilds.md
+		cli_run --
+		cli_expect_status 0
+		if [ -s ./build/posts/incremental-rebuilds.html ] && grep '<li>' ./build/index.html | head -1 | grep -Fq 'incremental-rebuilds.html'; then
+			test-ok "new post is built and listed first"
+		else
+			test-fail "blog did not discover or order the new post"
+		fi
+		cli_run -- clean
+		cli_expect_status 0
+		if [ ! -e ./build ]; then test-ok "blog clean removes generated files"; else test-fail "blog clean left build outputs"; fi
+	)
+else
+	test_log_message "SKIP blog execution: optional pandoc dependency is not installed"
+fi
 
 test-end

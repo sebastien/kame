@@ -5,6 +5,7 @@ import (
 	"kame/host"
 	"solod.dev/so/c"
 	"solod.dev/so/errors"
+	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
 	"solod.dev/so/slices"
@@ -132,6 +133,36 @@ func (h *Host) ReadFile(a mem.Allocator, name string) ([]byte, error) {
 		return nil, path.Error
 	}
 	return os.ReadFile(a, path.Path)
+}
+
+func (h *Host) FileSignature(name string) core.Signature {
+	if core.IsMemoryResourceURIName(name) {
+		return h.Memory.FileSignature(name)
+	}
+	path := h.hostPath(name)
+	defer h.freeHostPath(path)
+	if path.Error != nil {
+		return core.Signature{}
+	}
+	file, err := os.Open(path.Path)
+	if err != nil {
+		return core.Signature{}
+	}
+	defer file.Close()
+	var buffer [65536]byte
+	digest := core.NewDigest()
+	for {
+		n, readErr := file.Read(buffer[:])
+		digest.Write(buffer[:n])
+		if readErr == io.EOF {
+			result := core.Signature{Mode: core.SignatureContent}
+			digest.Sum(result.Digest[:])
+			return result
+		}
+		if readErr != nil || n == 0 {
+			return core.Signature{}
+		}
+	}
 }
 
 func (h *Host) Readlink(a mem.Allocator, name string) host.LinkResult {

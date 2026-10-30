@@ -51,6 +51,9 @@ bash tests/T013-04-meta-layer-examples.sh
 bash tests/T013-05-kash-examples.sh
 ```
 
+`T013-04` also checks the original language projects and, when `pandoc` is
+installed, the blog tutorial's build, incremental updates, and cleanup.
+
 ## Component map
 
 | Component | Start here |

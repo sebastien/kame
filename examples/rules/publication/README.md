@@ -59,6 +59,9 @@ The extra `rendered` and `assembled` messages expose work without making you
 interpret timestamps. Remove only your experimental third note when finished.
 The examples' regression test performs these experiments in temporary copies.
 
+`notes/index.txt` is reserved: its output would collide with the assembled
+`public/index.txt`. The `pages` definition rejects it with an explicit error.
+
 `sources` is a value. `pages` transforms that value. The index's rule header
 uses the result as dependencies. `{name}` connects each output to its source;
 `@<` and `@>` supply the first input and first output. The index also evaluates

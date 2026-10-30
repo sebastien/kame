@@ -5,6 +5,8 @@ set -euo pipefail
 
 # shellcheck disable=SC1091
 source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-bootstrap.sh"
+# shellcheck disable=SC1091
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib-release.sh"
 
 test-start "T015-06 release preflight, publication and APE helper arguments"
 cd "$CLI_ROOT"
@@ -73,6 +75,14 @@ for option in --repo --notes-file; do
 		test-fail "$option: status=$status err=$(cat "$TMPDIR/err")"
 	fi
 done
+
+test-step "kame release delegates to the publication wrapper"
+if grep -Eq '^release \{repo=\} \{notes=\} : ./dist/kame.com' Makefile.kmk &&
+	grep -Fq ':KAME_RELEASE_PREBUILT "1" ./src/sh/release.sh $flags' Makefile.kmk; then
+	test-ok "release target prebuilds assets and forwards repo and notes"
+else
+	test-fail "release target is missing or not wired to release.sh"
+fi
 
 # Exercise the real script in a committed, detached checkout, with only external
 # publishing/build commands mocked. No real keys, builds or remote writes.
@@ -426,6 +436,30 @@ if [ "$status" = 0 ] && grep -q '^npm publish ' "$MOCK_LOG"; then
 	test-ok "rerunning after failed npm authentication retries publication"
 else
 	test-fail "npm authentication retry: status=$status err=$(cat "$TMPDIR/err")"
+fi
+
+test-step "prebuilt release staging signs without re-entering Kame"
+# The Kame `release` target holds the project lock and builds these assets.
+# Staging must not call `make`, which would block on that same lock.
+cp VERSION package.json "$fixture/"
+git -C "$fixture" tag -d "v$MOCK_VERSION" >/dev/null 2>&1 || true
+mkdir -p "$fixture/dist" "$fixture/src/sh"
+cp src/sh/release_manifest.py "$fixture/src/sh/"
+for name in kame.com kame.wasm kame.js; do
+	printf 'prebuilt %s\n' "$name" >"$fixture/dist/$name"
+done
+release_test_keys "$TMPDIR/prebuilt-keys"
+MOCK_MODE=ok MOCK_NPM_STATE=present KAME_RELEASE_PREBUILT=1 \
+	KAME_RELEASE_PUBLIC_KEY="$TMPDIR/prebuilt-keys/verification.pem" \
+	KAME_RELEASE_SIGNING_KEY="$TMPDIR/prebuilt-keys/signing.pem" \
+	run_release --repo "$MOCK_REPO"
+if [ "$status" = 0 ] && ! grep -q '^make ' "$MOCK_LOG" &&
+	openssl pkeyutl -verify -pubin -inkey "$TMPDIR/prebuilt-keys/verification.pem" \
+		-rawin -in "$fixture/dist/release/SHA256SUMS" \
+		-sigfile "$fixture/dist/release/SHA256SUMS.sig" >/dev/null; then
+	test-ok "prebuilt assets are staged and signed without a nested Kame"
+else
+	test-fail "prebuilt staging: status=$status err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
 fi
 
 test-step "build-ape reports a missing compiler driver"

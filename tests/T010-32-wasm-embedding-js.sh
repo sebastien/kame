@@ -12,7 +12,7 @@ fi
 test-ok "WASM module and ESM entry point are current"
 
 test-step "imports, copied values, asynchronous host completion, grants, builds, watches and disposal"
-if node --input-type=module <<'NODE'
+if node --input-type=module <<'NODE'; then
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -74,7 +74,8 @@ for (const expression of ['(let [xs [7]] xs.-2147483648)', '(let [xs [7]] xs.0..
 assert.equal(await boundsProgram.evaluate('(let [xs [7 8]] xs.1..)'), '[8]');
 await boundsProgram.dispose();
 const formatted = await kame.format('script', 'value = 42\n');
-const hostPointer = kame.module.exports.kame_wasm_alloc(1, 1);
+const hostUsed = kame.module.exports.kame_wasm_host_heap_used();
+const hostPages = kame.module.exports.memory.buffer.byteLength;
 for (let i = 0; i < 100; i++) {
   const parsed = await kame.parse('script', `value = ${i}\n`);
   assert.equal(parsed.ast.items.length, 1);
@@ -82,7 +83,8 @@ for (let i = 0; i < 100; i++) {
   parsed.ast.items.length = 0;
   assert.equal(await kame.format('script', 'value = 42\n'), formatted);
 }
-assert.equal(kame.module.exports.kame_wasm_alloc(1, 1), hostPointer + 1, 'parse/format grew the retained owner host heap');
+assert.equal(kame.module.exports.kame_wasm_host_heap_used(), hostUsed, 'parse/format grew the retained owner host heap');
+assert.equal(kame.module.exports.memory.buffer.byteLength, hostPages, 'parse/format grew linear memory');
 const program = await kame.compile('value = (read "data.txt")\n', { name: 'embedded.km' });
 const ast = program.ast;
 assert.equal(ast.ast.items[0].kind, 'definition');
@@ -541,11 +543,11 @@ for (let i = 0; i < 100; i++) {
 await program.dispose();
 await kame.dispose();
 await kame.dispose();
+assert.equal(kame.module, null, 'disposed owner retained its WASM linear memory');
 await assert.rejects(kame.compile('value = 1\n'), (error) => error.code === 'DISPOSED');
 await assert.rejects(kame.parse('script', 'value = 1\n'), (error) => error.code === 'DISPOSED');
 await assert.rejects(kame.format('script', 'value = 1\n'), (error) => error.code === 'DISPOSED');
 NODE
-then
 	test-ok "JS embedding copies results, observes grants, completes async requests, and reuses 100 lifecycle cycles"
 else
 	test-fail "JS embedding API conformance failed"

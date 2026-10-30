@@ -86,8 +86,9 @@ pandoc @< --template ./templates/post.html -o @>
 ```
 
 `@<` is the first input (the `.md` file), `@>` is the first output
-(the `.html` file). Edit the Markdown body, rebuild, and reload: only
-that page changes.
+(the `.html` file). Edit the Markdown body, rebuild, and reload: that page
+and the index rebuild because both depend on the Markdown file. If only the
+body changed, the index's contents remain the same.
 
 Check what kame sees for this page:
 

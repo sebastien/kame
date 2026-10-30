@@ -3,6 +3,7 @@ package program
 import (
 	"kame/core"
 	"kame/host"
+	"solod.dev/so/encoding/hex"
 	"solod.dev/so/mem"
 	"solod.dev/so/path"
 	"solod.dev/so/slices"
@@ -38,14 +39,15 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 		if !result.Info.Regular {
 			return completion
 		}
-		// ponytail: the existing ReadFile contract buffers whole files; use
-		// chunked host reads when large-resource memory becomes a measured limit.
-		data, err := p.Host.ReadFile(p.Alloc, filename)
-		if err != nil {
+		signature := p.Host.FileSignature(filename)
+		if signature.Mode != core.SignatureContent {
 			return completion
 		}
-		completion.Value = core.NewBytes(p.Alloc, data)
-		mem.FreeSlice(p.Alloc, data)
+		var encoded [64]byte
+		hex.Encode(encoded[:], signature.Digest[:])
+		fields := []core.RecordField{{Key: "sha256", Value: core.NewString(p.Alloc, string(encoded[:]))}}
+		completion.Value = core.NewRecord(p.Alloc, fields)
+		fields[0].Value.Free(p.Alloc)
 		return completion
 	}
 	if op == host.OpRead {
@@ -54,8 +56,7 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot read file")
 			return completion
 		}
-		completion.Value, completion.HasValue = core.NewBytes(p.Alloc, data), true
-		mem.FreeSlice(p.Alloc, data)
+		completion.Value, completion.HasValue = core.Value{Kind: core.Bytes, Bytes: data}, true
 		return completion
 	}
 	if op == host.OpExists {

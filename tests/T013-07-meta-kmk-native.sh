@@ -99,4 +99,27 @@ platform_runs="$(cat "$work/platform-runs")"
 KAME_PLATFORM=alias-platform run dist-native KAME_PLATFORM=explicit-platform
 KAME_PLATFORM=alias-platform run dist-native
 if [ -x "$work/dist/native/explicit-platform/kame" ] && [ -x "$work/dist/native/alias-platform/kame" ] && [ "$(cat "$work/platform-runs")" = "$platform_runs" ]; then test-ok "platform assignment wins over alias without detection"; else test-fail "configured platform selection"; fi
+test-step "the WASM gate passes prebuilt artifacts to nested Make without relocking"
+gate="$TMPDIR/wasm-gate"
+mkdir -p "$gate/dist"
+cp "$CLI_ROOT/Makefile" "$gate/Makefile"
+touch "$gate/dist/kame.js" "$gate/dist/kame.wasm"
+printf 'SHELL = kash\nTEST_WASM = [./probe.sh]\n' >"$gate/Makefile.kmk"
+sed -n '/^test-wasm :/,/^$/p' "$CLI_ROOT/Makefile.kmk" |
+	sed 's/^test-wasm :.*/test-wasm :/' >>"$gate/Makefile.kmk"
+cat >"$gate/probe.sh" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+test "$KAME_TEST_PREBUILT" = "$PWD"
+make KAME="$GATE_CLI" dist-wasm
+touch nested-make-passed
+SH
+chmod +x "$gate/probe.sh"
+if GATE_CLI="$CLI_BIN" timeout 20 "$CLI_BIN" -C "$gate" test-wasm >"$gate/out" 2>"$gate/err" && [ -f "$gate/nested-make-passed" ]; then
+	test-ok "nested Make reused artifacts while the outer gate held the project lock"
+else
+	cat "$gate/out" "$gate/err"
+	test-fail "WASM gate attempted a nested build or dropped its prebuilt environment"
+fi
+
 test-end

@@ -24,6 +24,9 @@ fi
 
 test-step "switching mode does not rewrite shared generated metadata"
 metadata="$CLI_ROOT/src/go/kame/cmd/kame/version_generated.go"
+# Prebuilt suites skip cli_build's generation. Normalize first so the mode
+# switch, not a stale checkout revision, is what the comparison measures.
+"$CLI_ROOT/src/sh/generate-version.sh"
 before="$(stat -c %y "$metadata")"
 cp "$metadata" "$TMPDIR/version-before"
 KAME_BUILD_MODE=debug "$CLI_ROOT/src/sh/generate-version.sh"

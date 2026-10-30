@@ -104,6 +104,10 @@ tests/
   and `lib-cli.sh`), call `test-start`, run steps and assertions, and finish
   with `test-end`.
 
+The curated `test-wasm` gate prebuilds both its native debug driver and packaged
+WASM pair, then supplies `KAME_TEST_PREBUILT` to every script. Nested Make calls
+reuse these artifacts rather than waiting for the outer gate's project lock.
+
 ### Human output levels
 
 `KAME_TEST_VERBOSITY` selects the human output level, inherited by nested test

@@ -53,6 +53,7 @@ type FileSystem interface {
 	Stat(name string) StatResult
 	Lstat(name string) StatResult
 	Readlink(a mem.Allocator, name string) LinkResult
+	// ReadFile transfers ownership of its allocator-owned bytes to the caller.
 	ReadFile(a mem.Allocator, name string) ([]byte, error)
 	ReadDir(a mem.Allocator, name string) ([]DirEntry, error)
 	// WriteFileAtomic writes a sibling temporary and renames it into place. A

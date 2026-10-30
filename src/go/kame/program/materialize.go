@@ -94,7 +94,7 @@ func produceExternalFile(c *core.EngineContext, nodeID int64) core.ProducerResul
 }
 
 func publishExternalContent(c *core.EngineContext, state *externalFileState, completion core.Completion) core.ProducerResult {
-	if !completion.HasValue || (completion.Value.Kind != core.Nil && completion.Value.Kind != core.Bytes && completion.Value.Kind != core.Bool) {
+	if !completion.HasValue || (completion.Value.Kind != core.Nil && completion.Value.Kind != core.Bytes && completion.Value.Kind != core.Bool && contentObservation(completion.Value).Mode != core.SignatureContent) {
 		completion.Value.Free(c.Allocator())
 		c.Fail(failure(c.Allocator(), "HOST_FAIL", "invalid file content observation"))
 		return core.ProducerFailed
@@ -105,9 +105,7 @@ func publishExternalContent(c *core.EngineContext, state *externalFileState, com
 		signature.Mode = core.SignatureMissing
 	} else {
 		value = core.NewString(c.Allocator(), state.Name)
-		if completion.Value.Kind == core.Bytes {
-			signature = core.ContentSignature(completion.Value.Bytes)
-		}
+		signature = contentObservation(completion.Value)
 	}
 	completion.Value.Free(c.Allocator())
 	c.PublishSigned(value, signature)

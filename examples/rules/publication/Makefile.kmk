@@ -1,6 +1,10 @@
 # Calculated paths become dependencies, not commands.
 sources = ./notes/*.txt
-pages = (sub ./notes/{name:*}.txt ./public/{name}.txt sources)
+pages =
+  (if
+    (in? ./notes/index.txt sources)
+      (fail! "notes/index.txt is reserved for the publication index")
+    (sub ./notes/{name:*}.txt ./public/{name}.txt sources))
 
 default : ./public/index.txt
 
