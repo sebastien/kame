@@ -20,7 +20,7 @@ Usage:
 
   Key paths may be supplied with KAME_RELEASE_PUBLIC_KEY and
   KAME_RELEASE_SIGNING_KEY; otherwise they are fetched from littlesecrets.
-  Push the exact release commit to the target repository before running.
+  A missing release commit is published to release-vVERSION before staging.
   Reruns of a published GitHub release retry only missing npm publication.
 
   --repo OWNER/REPO   publish to another repository (default: current)
@@ -169,10 +169,29 @@ if ! git -C "$root" diff --quiet || ! git -C "$root" diff --cached --quiet; then
 fi
 
 revision=$(git -C "$root" rev-parse HEAD)
-if ! remote_revision=$(gh api "repos/$repo_slug/commits/$revision" --jq '.sha'); then
-	printf 'release: cannot resolve commit %s in %s; check GitHub access and push this exact commit before releasing\n' "$revision" "$repo_slug" >&2
-	printf 'release: from a detached HEAD, push it to a branch in %s (for example HEAD:refs/heads/release-%s)\n' "$repo_slug" "$tag" >&2
-	exit 1
+if ! remote_revision=$(gh api "repos/$repo_slug/commits/$revision" --jq '.sha' 2>/dev/null); then
+	# A detached jj/git HEAD is normal. Publish the exact release commit on a
+	# dedicated branch instead of requiring the operator to move main first.
+	branch="release-$tag"
+	printf 'release: commit %s is not on %s; creating %s\n' "$revision" "$repo_slug" "$branch" >&2
+	if ! gh api --method POST "repos/$repo_slug/git/refs" \
+		-f ref="refs/heads/$branch" -f sha="$revision" >/dev/null; then
+		printf 'release: cannot create branch %s; push %s to %s manually and retry\n' "$branch" "$revision" "$repo_slug" >&2
+		exit 1
+	fi
+	pushed=
+	for _attempt in 1 2 3 4 5; do
+		if remote_revision=$(gh api "repos/$repo_slug/commits/$revision" --jq '.sha' 2>/dev/null); then
+			pushed=1
+			break
+		fi
+		sleep 1
+	done
+	if [ -z "$pushed" ]; then
+		printf 'release: created %s but GitHub still cannot resolve %s; retry later\n' "$branch" "$revision" >&2
+		exit 1
+	fi
+	printf 'release: created %s at %s\n' "$branch" "$revision" >&2
 fi
 [ "$remote_revision" = "$revision" ] || { printf 'release: GitHub returned a different release revision\n' >&2; exit 1; }
 existing_tag=$(gh api "repos/$repo_slug/git/matching-refs/tags/$tag" --jq ".[] | select(.ref == \"refs/tags/$tag\") | .ref")

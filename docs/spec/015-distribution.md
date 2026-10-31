@@ -346,10 +346,12 @@ forwarded as `--repo` and `--notes-file`; key paths still come from the
 environment.
 
 For a new release, before retrieving signing keys or signing, it requires a clean tracked tree,
-checks that the exact HEAD commit exists in the target GitHub repository, and
-refuses to overwrite an existing local/remote tag or draft release. The operator must push
-the commit first, including when releasing from a detached HEAD; the script
-never pushes code automatically. Authentication/API failures stop preflight.
+checks that the exact HEAD commit is available in the target GitHub repository,
+and refuses to overwrite an existing local/remote tag or draft release. A
+detached working copy is fine: when the commit is missing remotely, the script
+creates a `release-vVERSION` branch at that exact revision through the GitHub
+API before staging. It never updates an existing branch or pushes unrelated
+code. Authentication/API failures stop preflight.
 It stages and signs `dist/release/`, creates a draft release for the `VERSION`
 tag, uploads the seven flat runtime/verification assets, verifies that every manifest
 asset is present, and only then publishes. `--repo` selects

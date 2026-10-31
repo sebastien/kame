@@ -452,11 +452,12 @@ package-manifests : ./dist/kame.com ./VERSION ./src/sh/release_package_manifests
 # --- Release publication ----------------------------------------------------
 #
 # `dist-release` only stages and signs. `release` builds the runtime assets,
-# then runs the operator script, which verifies the pushed revision, stages,
-# uploads a draft and publishes it to GitHub and npm. Named arguments mirror the
-# script's optional flags; key paths still come from KAME_RELEASE_PUBLIC_KEY and
-# KAME_RELEASE_SIGNING_KEY. The target holds the project lock, so the script is
-# told the assets are prebuilt and stages them without re-entering Kame.
+# then runs the operator script, which verifies or publishes the release
+# revision, stages, uploads a draft and publishes it to GitHub and npm. Named
+# arguments mirror the script's optional flags; key paths still come from
+# KAME_RELEASE_PUBLIC_KEY and KAME_RELEASE_SIGNING_KEY. The target holds the
+# project lock, so the script is told the assets are prebuilt and stages them
+# without re-entering Kame.
 
 release {repo=} {notes=} : ./dist/kame.com ./dist/kame.wasm ./dist/kame.js ./VERSION ./src/sh/release.sh ./src/sh/release_manifest.py
 	flags = (concat

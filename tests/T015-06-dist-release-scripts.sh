@@ -99,7 +99,7 @@ revision=$(git -C "$fixture" rev-parse HEAD)
 release="$fixture/src/sh/release.sh"
 export MOCK_REVISION="$revision" MOCK_REPO=owner/repo MOCK_ROOT="$fixture"
 export MOCK_LOG="$TMPDIR/commands.log" MOCK_ASSETS="$TMPDIR/assets.log" MOCK_NPM_MARKER="$TMPDIR/npm-published"
-export MOCK_NPM_CHECKS="$TMPDIR/npm-checks"
+export MOCK_BRANCH="$TMPDIR/release-branch" MOCK_NPM_CHECKS="$TMPDIR/npm-checks"
 MOCK_VERSION=$(cat VERSION)
 MOCK_PACKAGE=$(node -p "require('./package.json').name")
 export MOCK_VERSION MOCK_PACKAGE MOCK_NPM_STATE=missing
@@ -117,8 +117,16 @@ repo\ view*)
 	printf '%s\n' "$MOCK_REPO"
 	;;
 "api repos/$MOCK_REPO/commits/$MOCK_REVISION --jq .sha")
-	[ "$MOCK_MODE" != missing_commit ] || { echo 'No commit found (HTTP 422)' >&2; exit 1; }
+	case "$MOCK_MODE" in
+	missing_commit | branch_failure)
+		[ -f "$MOCK_BRANCH" ] || { echo 'No commit found (HTTP 422)' >&2; exit 1; }
+		;;
+	esac
 	printf '%s\n' "$MOCK_REVISION"
+	;;
+"api --method POST repos/$MOCK_REPO/git/refs -f ref=refs/heads/release-v$MOCK_VERSION -f sha=$MOCK_REVISION")
+	[ "$MOCK_MODE" != branch_failure ] || { echo 'HTTP 422' >&2; exit 1; }
+	touch "$MOCK_BRANCH"
 	;;
 "api --paginate repos/$MOCK_REPO/releases "*)
 	[ "$MOCK_MODE" != api_failure ] || { echo 'HTTP 500' >&2; exit 1; }
@@ -245,20 +253,31 @@ run_release() {
 	: >"$MOCK_ASSETS"
 	: >"$LITTLESECRETS_LOG"
 	: >"$MOCK_NPM_CHECKS"
-	rm -f "$MOCK_NPM_MARKER"
+	rm -f "$MOCK_NPM_MARKER" "$MOCK_BRANCH"
 	status=0
 	"$release" "$@" >"$TMPDIR/out" 2>"$TMPDIR/err" || status=$?
 }
 
-test-step "an unpushed detached commit fails before secrets or staging"
+test-step "an unpushed detached commit is published to a release branch"
 MOCK_MODE=missing_commit
 run_release --repo "$MOCK_REPO"
-if [ "$status" = 1 ] && grep -q "cannot resolve commit $revision in $MOCK_REPO" "$TMPDIR/err" &&
-	grep -q 'HEAD:refs/heads/release-' "$TMPDIR/err" && [ ! -s "$LITTLESECRETS_LOG" ] &&
+if [ "$status" = 1 ] && grep -q 'creating release-v' "$TMPDIR/err" &&
+	grep -q "^gh api --method POST repos/$MOCK_REPO/git/refs " "$MOCK_LOG" &&
+	grep -qx -- '-q get package.verification.pem' "$LITTLESECRETS_LOG" &&
 	! grep -Eq '^(make|npm|gh release)' "$MOCK_LOG"; then
-	test-ok "missing remote commit stops before any build or publication"
+	test-ok "unpushed commit is published before key retrieval and staging"
 else
-	test-fail "commit preflight: status=$status err=$(cat "$TMPDIR/err")"
+	test-fail "commit preflight: status=$status err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
+fi
+
+test-step "a failed release branch publication stops before keys"
+MOCK_MODE=branch_failure
+run_release
+if [ "$status" = 1 ] && grep -q 'cannot create branch release-v' "$TMPDIR/err" &&
+	[ ! -s "$LITTLESECRETS_LOG" ] && ! grep -Eq '^(make|npm|gh release)' "$MOCK_LOG"; then
+	test-ok "branch publication failure stops before secrets or staging"
+else
+	test-fail "branch failure: status=$status err=$(cat "$TMPDIR/err")"
 fi
 
 test-step "remote conflicts and API failures stop before secrets or staging"
