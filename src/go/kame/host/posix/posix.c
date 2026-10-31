@@ -1678,6 +1678,17 @@ static bool km_mux_keeps_fd(int fd, int node, int *edges, so_int *links, int cou
     return false;
 }
 
+// These globals belong to one forked operator, never to the host or another
+// invocation. Each edge has one measurement owner. Relaxed atomic fields let
+// the parent sample progress without stopping workers. A live row is not a
+// transactional cross-field snapshot; final rows are sampled after child exit.
+static int64_t *km_worker_metrics;
+static int *km_worker_state;
+static int *km_worker_pipes;
+static so_int *km_worker_links;
+static int km_worker_node, km_worker_edges;
+// km_mux_side_fd is the copy operator's file destination: written beside the
+// presentation edge and exempt from the worker's unowned-descriptor sweep.
 static int km_mux_side_fd = -1;
 
 static void km_mux_close_unowned(int node, int *edges, so_int *links, int count) {
@@ -1701,16 +1712,6 @@ static void km_mux_close_unowned(int node, int *edges, so_int *links, int count)
 }
 
 enum { KM_RECORD_LIMIT = 64 * 1024, KM_FRAME_ENCODING = 120, KM_RECORD_TOO_LONG = 121, KM_PREDICATE_FAILED = 124, KM_BUFFER_LIMIT = 126 };
-
-// These globals belong to one forked operator, never to the host or another
-// invocation. Each edge has one measurement owner. Relaxed atomic fields let
-// the parent sample progress without stopping workers. A live row is not a
-// transactional cross-field snapshot; final rows are sampled after child exit.
-static int64_t *km_worker_metrics;
-static int *km_worker_state;
-static int *km_worker_pipes;
-static so_int *km_worker_links;
-static int km_worker_node, km_worker_edges;
 
 static void km_worker_wait(int state) {
     if (km_worker_state) __atomic_store_n(km_worker_state, state, __ATOMIC_RELAXED);

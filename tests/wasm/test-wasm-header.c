@@ -1,7 +1,7 @@
 /* Standalone public ABI check; no generated Solod headers or runtime needed.
  * cc -std=c11 -Wall -Wextra -Werror -fsyntax-only tests/wasm/test-wasm-header.c
  */
-#include "../../src/go/kame/host/wasm/kame_wasm.h"
+#include "../../src/c/wasm/kame_wasm.h"
 
 _Static_assert(KAME_WASM_OK == 0, "OK status");
 _Static_assert(KAME_WASM_HANDLE_INVALID == 1, "invalid-handle status");

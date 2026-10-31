@@ -65,6 +65,15 @@ predicate, not builtins. N means at least two connected endpoints.
 | `A \|(frame :lines)` | 1:1 | Convert bytes into bounded line records. |
 | `A \|(encode :lines)` | 1:1 | Emit framed payload bytes without private envelopes. |
 | `A \|(each) command args` | 1:1 | Execute one prepared command per framed item; output bytes. |
+| `A \|(tee PATH)` | 1:1 | Copy the stream to PATH and to its continuation; `:append` keeps PATH. |
+
+`|(tee)` is a byte operator: it writes each chunk to PATH under `write`
+authority before forwarding it, so the file sees exactly the bytes the
+continuation sees. The continuation keeps the stage's presentation destination,
+including capture, and a file failure fails the graph like any operator I/O
+error. `:append` selects append instead of truncate. Tee never rewrites the
+upstream status: the copied graph reports its own exit. Resolved topology
+reports the host kind, so an inspected graph shows `copy` for a tee node.
 
 `|(...)` is dedicated graph syntax, neither command substitution nor a Kame
 application. Unary adapters compose with subsequent connections; `merge` may
@@ -625,6 +634,7 @@ Acceptance must cover the following contracts:
 | Compatibility/topology | Ordinary byte pipelines, Kame expressions/value pipes, typed argv, captures, recovery and async retain semantics; group discrimination/cardinality, no Bash duplication; invalid graphs launch/truncate nothing. | `tests/T042-01-kash-topology.sh`, `T017-*`, parser/evaluator suites |
 | Framing/branches | Exact LF/CRLF/partial EOF, empty input, UTF-8 and exact byte limits; Boolean host-free predicates; nested lexical next/otherwise joins, missing destinations and framed/raw mismatch; changed predicate context invalidates build reuse. | `tests/T042-02-kash-framing.sh`, stream-predicate tests |
 | Channels | One lexical writer/reader in one graph, inherited/body-local declarations, alias framing, terminal readers, duplicate/missing endpoints and cycles. | `tests/T042-03-kash-channels.sh` |
+| Tee | Exact copy to PATH with presentation preserved, truncate versus `:append`, missing/empty/NUL paths and denied `write` authority rejected before any file is opened or truncated, and upstream status unchanged. | `tests/T048-01-kash-stderr.sh`, evaluator suites |
 | Operands | Positional ownership distinct from stdin, list-spliced slots, concurrent anonymous/named producers, no capture/materialization; visible seek failure, unsupported-host preflight, early receiver/producer exit, cancellation and resource cleanup. | `tests/T042-04-kash-operands.sh` |
 | Scheduling/bounds | Slow-consumer lossless pressure, exactly-once round-robin balance, EOF for unassigned children; per-input payload budgets including delimiters; independent bounded lossy queues and non-evictable partial writes; strict merge turns, unequal/empty/slow producers. | `tests/T042-05-kash-scheduling.sh`, `T042-06-kash-lossy.sh`, `T042-09-kash-ordering.sh` |
 | Ownership/failure | Fatal/default failures cancel/reap all owned work, including anonymous producers and async graphs; collection preserves ordinary failed siblings and deterministic aggregate ordering but never masks fatal failures; explicit graph recovery/acceptance. | `tests/T042-01-kash-topology.sh`, `T042-10-kash-failure-policy.sh` |

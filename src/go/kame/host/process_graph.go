@@ -47,55 +47,36 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 	}
 	for i := range request.Stages {
 		stage := request.Stages[i]
-		if stage.Order < 0 || stage.Order > 1 || (stage.Order != 0 && stage.Kind != "merge") {
+		operator := LookupOperatorKind(stage.Kind)
+		if operator == nil {
 			return "KASH_MUX_ARITY"
 		}
-		if stage.BufferBytes < 0 || stage.BufferBytes > 65536 || (stage.BufferBytes != 0 && stage.Kind != "merge" && stage.Kind != "broadcast" && stage.Kind != "balance") {
+		if stage.Order < 0 || stage.Order > 1 || (stage.Order != 0 && !operator.Ordered) {
 			return "KASH_MUX_ARITY"
 		}
-		if stage.Overflow < 0 || stage.Overflow > 3 || stage.BufferItems < 0 || stage.BufferItems > 1024 || (stage.Overflow == 0 && stage.BufferItems != 0) || (stage.Overflow != 0 && stage.Kind != "broadcast") || (stage.Overflow == 3 && stage.BufferItems > 1) {
+		if stage.BufferBytes < 0 || stage.BufferBytes > 65536 || (stage.BufferBytes != 0 && !operator.Queue) {
+			return "KASH_MUX_ARITY"
+		}
+		if stage.Overflow < 0 || stage.Overflow > 3 || stage.BufferItems < 0 || stage.BufferItems > 1024 || (stage.Overflow == 0 && stage.BufferItems != 0) || (stage.Overflow != 0 && !operator.Lossy) || (stage.Overflow == 3 && stage.BufferItems > 1) {
 			return "KASH_MUX_ARITY"
 		}
 		if stage.Framed && outgoing[i] == 0 {
 			return "KASH_FRAME_MISMATCH"
 		}
-		if stage.Kind == "" || stage.Kind == "each" {
-			if len(stage.Argv) == 0 || stdin[i] > 1 || outgoing[i] > 1 {
-				return "KASH_MUX_ARITY"
-			}
-			if stage.Kind == "each" && stdin[i] != 1 {
+		if operator.Argv {
+			if len(stage.Argv) == 0 || stdin[i] < operator.MinIn || (operator.MaxIn >= 0 && stdin[i] > operator.MaxIn) || (operator.MaxOut >= 0 && outgoing[i] > operator.MaxOut) {
 				return "KASH_MUX_ARITY"
 			}
 			if (stdin[i] != 0 && stage.Input != "") || (outgoing[i] != 0 && stage.Output != "") {
 				return "KASH_DOUBLE_CONSUME"
 			}
-		} else {
-			if len(stage.Argv) != 0 || stage.Input != "" || (stage.Output != "" && stage.Kind != "copy") {
-				return "KASH_MUX_ARITY"
-			}
-			if stage.Kind == "frame" || stage.Kind == "encode" || stage.Kind == "copy" {
-				if incoming[i] != 1 || outgoing[i] > 1 {
-					return "KASH_MUX_ARITY"
-				}
-			} else if stage.Kind == "out" || stage.Kind == "err" {
-				if incoming[i] != 1 || outgoing[i] != 0 {
-					return "KASH_MUX_ARITY"
-				}
-			} else if stage.Kind == "filter" {
-				if incoming[i] != 1 || outgoing[i] != 2 {
-					return "KASH_MUX_ARITY"
-				}
-			} else if stage.Kind == "merge" {
-				if incoming[i] < 2 || outgoing[i] != 1 {
-					return "KASH_MUX_ARITY"
-				}
-			} else if stage.Kind == "broadcast" || stage.Kind == "balance" {
-				if incoming[i] != 1 || outgoing[i] < 2 {
-					return "KASH_MUX_ARITY"
-				}
-			} else {
-				return "KASH_MUX_ARITY"
-			}
+			continue
+		}
+		if len(stage.Argv) != 0 || stage.Input != "" || (stage.Output != "" && !operator.OutputFile) {
+			return "KASH_MUX_ARITY"
+		}
+		if incoming[i] < operator.MinIn || (operator.MaxIn >= 0 && incoming[i] > operator.MaxIn) || outgoing[i] < operator.MinOut || (operator.MaxOut >= 0 && outgoing[i] > operator.MaxOut) {
+			return "KASH_MUX_ARITY"
 		}
 	}
 	// Kahn's traversal also catches cycles through otherwise valid 1:1 nodes.
@@ -125,6 +106,10 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 	for cursor := range ready {
 		i := ready[cursor]
 		stage := request.Stages[i]
+		operator := LookupOperatorKind(stage.Kind)
+		if operator == nil {
+			return "KASH_MUX_ARITY"
+		}
 		input, found := false, false
 		for j := range request.Edges {
 			edge := request.Edges[j]
@@ -138,17 +123,20 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 			input, found = kind, true
 		}
 		expected := input
-		if stage.Kind == "frame" || stage.Kind == "filter" {
+		if operator.Frames == FramesFrame {
 			expected = true
 		}
-		if stage.Kind == "encode" || stage.Kind == "" || stage.Kind == "each" {
+		if operator.Frames == FramesUnframe {
 			expected = false
 		}
-		if stage.Kind == "each" && !input {
+		if operator.InputFrames == InputsRequireFrames && !input {
 			return "KASH_FRAME_REQUIRED"
 		}
-		if stage.Kind == "balance" && !input {
-			return "KASH_FRAME_REQUIRED"
+		if operator.InputFrames == InputsFramed && !input {
+			return "KASH_FRAME_MISMATCH"
+		}
+		if operator.InputFrames == InputsUnframed && input {
+			return "KASH_FRAME_MISMATCH"
 		}
 		if stage.Overflow != 0 && !input {
 			return "KASH_FRAME_REQUIRED"
@@ -156,7 +144,7 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 		if stage.Order != 0 && !input {
 			return "KASH_FRAME_REQUIRED"
 		}
-		if stage.Framed != expected || (stage.Kind == "frame" && input) || ((stage.Kind == "filter" || stage.Kind == "encode") && !input) || (stage.Kind == "" && input) {
+		if stage.Framed != expected {
 			return "KASH_FRAME_MISMATCH"
 		}
 	}

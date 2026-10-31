@@ -286,11 +286,14 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					setup.Free(state.Alloc)
 					return failure(c.Run, "EXPR_INVALID", stage.Span, "tee requires a path")
 				}
+				before := len(c.Effects)
+				beforePaths := len(c.WritePaths)
 				r := p.commandWord(stage.Items[0], c, "redirection")
 				if r.Waiting || r.Diagnostic.Code != "" {
 					setup.Free(state.Alloc)
 					return r
 				}
+				rememberArgumentEffects(state, c, before, beforePaths)
 				text, ok := processScalar(c.Run, r.Value)
 				r.Free(c.Run)
 				if !ok || text == "" {
@@ -317,7 +320,6 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			state.Stage++
 			continue
 		}
-		stdoutSet := false
 		for state.Index < len(stage.Items) {
 			word := stage.Items[state.Index]
 			if word.Kind == expr.CommandOperand {
@@ -408,7 +410,10 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					if state.ErrorMode != 0 {
 						return failure(c.Run, "EXPR_INVALID", word.Span, "duplicate stderr redirection")
 					}
-					if stdoutSet || word.Bool {
+					// A stdout disposition already parsed for this stage makes the
+					// alias copy that destination; otherwise stdout is still the
+					// presentation sink that a later disposition may replace.
+					if state.Output != "" || word.Bool {
 						state.ErrorMode = host.StderrStdout
 					} else {
 						state.ErrorMode = host.StderrPresentation
@@ -440,7 +445,6 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					state.ErrorMode = host.StderrFile
 				} else {
 					state.Output, state.Append = owned(state.Alloc, text), word.Text == ">>"
-					stdoutSet = true
 				}
 				mem.FreeString(c.Run, text)
 				state.Index++
@@ -665,10 +669,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		for i := range e.Items {
 			kind := ""
 			if e.Items[i].Kind == expr.CommandMux {
-				kind = e.Items[i].Text
-				if kind == "tee" {
-					kind = "copy"
-				}
+				kind = streamKind(e.Items[i].Text)
 			}
 			if e.Items[i].Each {
 				kind, workers = "each", true
@@ -809,6 +810,16 @@ func demandProcessInput(c *Context, name string) bool {
 	}
 	key.Free(c.Run)
 	return ready
+}
+
+// streamKind maps a surface operator to its host wire kind. Almost every
+// operator uses its own name; `tee` is a `copy` because copy is the host's
+// generic 1:1 pass-through that may own a side output file (host.OperatorKind).
+func streamKind(name string) string {
+	if name == "tee" {
+		return "copy"
+	}
+	return name
 }
 
 // Completed argument values are not reevaluated after a later argument waits.

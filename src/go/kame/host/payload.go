@@ -397,7 +397,9 @@ func PayloadStages(payload core.Value) []core.Value {
 	return nil
 }
 
-// ConfigureRedirections replaces only the wire spelling; argv stays structured.
+// ConfigureStderr records how a stage's stderr is routed: mode 0 keeps it live,
+// 1 writes path (truncating unless appendFile), 2 duplicates the stage stdout,
+// and 3 duplicates the presentation stdout a later disposition replaced.
 func ConfigureStderr(a mem.Allocator, payload *core.Value, path string, appendFile bool, mode int) {
 	fields := []core.RecordField{{Key: FieldError, Value: core.NewString(a, path)}, {Key: FieldErrorAppend, Value: core.Value{Kind: core.Bool, Bool: appendFile}}, {Key: FieldErrorMode, Value: core.Value{Kind: core.Int, Int: int64(mode)}}}
 	for i := range fields {
@@ -405,6 +407,7 @@ func ConfigureStderr(a mem.Allocator, payload *core.Value, path string, appendFi
 	}
 }
 
+// ConfigureRedirections replaces only the wire spelling; argv stays structured.
 func ConfigureRedirections(a mem.Allocator, payload *core.Value, input string, output string, appendOutput bool) {
 	fields := []core.RecordField{{Key: FieldInput, Value: core.NewString(a, input)}, {Key: FieldOutput, Value: core.NewString(a, output)}, {Key: FieldAppend, Value: core.Value{Kind: core.Bool, Bool: appendOutput}}}
 	for i := range fields {
@@ -584,8 +587,10 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 	b.Free()
 }
 
+// PayloadAppend is the named form of PayloadBool for the output-append field.
 func PayloadAppend(payload core.Value) bool { return PayloadBool(payload, FieldAppend) }
 
+// PayloadBool reads an optional boolean field; a missing field is false.
 func PayloadBool(payload core.Value, field string) bool {
 	for i := range payload.Record {
 		if payload.Record[i].Key == field {

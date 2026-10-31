@@ -50,8 +50,8 @@ tests/
   lib-cli.sh                       CLI binary, invocation, assertion helpers
   CATALOG.tsv                      machine-readable test catalog
   T<SSS>-<NN>-<category>-<topic>.sh
-  native/                          C harnesses: argv, posix, CLI lifecycle, wasm header
-  wasm/                            raw ABI probes, import/handle/memory gates
+  native/                          C harnesses: argv, posix, CLI lifecycle
+  wasm/                            raw ABI probes, the public header check, import/handle/memory gates
   windows/                         packaged launcher and PowerShell conformance
   platform/                        opt-in APE and published-channel gates
   py/                              Python embedding API suite
@@ -74,7 +74,9 @@ tests/
   run through make targets, `T010-*`, or CI; the catalog stays flat at the
   `tests/` root.
 - Top-level `tests/*.py` are kebab-case drivers for exactly one `T*` entry, run
-  as `python3 tests/<name>.py`. They are not catalog rows themselves.
+  as `python3 tests/<name>.py`. They are not catalog rows themselves. A driver
+  may ship a same-named support file beside it, such as the C fault shim
+  `automatic-clean-faults.c`.
 - Every catalog test script has one `CATALOG.tsv` row; `T013-01` enforces both
   directions plus the naming scheme.
 

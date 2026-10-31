@@ -151,7 +151,7 @@ def capture_faults(binary: str, base: Path) -> None:
 	if not sys.platform.startswith("linux"):
 		return
 	shim = base / "cleanup-faults.so"
-	source = Path(__file__).with_name("automatic_clean_faults.c")
+	source = Path(__file__).with_name("automatic-clean-faults.c")
 	subprocess.run(["cc", "-shared", "-fPIC", "-Wall", "-Wextra", "-Werror", "-o", str(shim), str(source), "-ldl"], check=True, timeout=20)
 	for mode in ("cancel-capture", "retire-crash", "replace-capture", "replace-occupied"):
 		root = base / mode

@@ -8,6 +8,7 @@
 # targets; they are programs, not catalog entries.
 tests/T046-01-kash-scripting.sh	046	kash	Kash scripting and publication workflows
 tests/T047-01-kash-output-ports-and-command-lists.sh	047	kash	Kash output ports and command lists
+tests/T048-01-kash-stderr.sh	048	kash	Stderr redirection order, capture and pipe aliases, tee copies and append, denial before effects
 tests/T007-16-lib-consistency.sh	007	lib	Canonical predicates and in?, exact int/float ordering, uniform apply/first, kind/emptiness/record presence, explicit function success tests and leading Kash value paths on native/WASM
 tests/T017-26-kash-functions.sh	017	kash	Native indented functions, typed/rest arguments, nested status returns, fresh calls, cleanup/async ownership, list spread, line framing and native/WASM AST/format parity
 tests/T013-05-kash-examples.sh	013	kash	Ten isolated native/WASM Kash workflows, interpreter argument forwarding, loops, environments, async cleanup, streaming workers and no-clobber publication

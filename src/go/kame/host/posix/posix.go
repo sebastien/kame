@@ -266,35 +266,8 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 			errorModes = slices.Append(h.Alloc, errorModes, request.Stages[i].ErrorMode)
 			if request.Topology {
 				kind := 0
-				if request.Stages[i].Kind == "merge" {
-					kind = 1
-				}
-				if request.Stages[i].Kind == "broadcast" {
-					kind = 2
-				}
-				if request.Stages[i].Kind == "frame" {
-					kind = 3
-				}
-				if request.Stages[i].Kind == "encode" {
-					kind = 4
-				}
-				if request.Stages[i].Kind == "filter" {
-					kind = 5
-				}
-				if request.Stages[i].Kind == "copy" {
-					kind = 6
-				}
-				if request.Stages[i].Kind == "balance" {
-					kind = 7
-				}
-				if request.Stages[i].Kind == "each" {
-					kind = 8
-				}
-				if request.Stages[i].Kind == "out" {
-					kind = 9
-				}
-				if request.Stages[i].Kind == "err" {
-					kind = 10
+				if operator := host.LookupOperatorKind(request.Stages[i].Kind); operator != nil {
+					kind = operator.Code
 				}
 				if request.Stages[i].Framed {
 					kind += 16

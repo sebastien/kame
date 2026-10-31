@@ -3,6 +3,7 @@ package host_test
 import (
 	"kame/core"
 	"kame/host"
+	"solod.dev/so/strings"
 	"solod.dev/so/testing"
 )
 
@@ -44,6 +45,39 @@ func TestPayloadRecordsExposePathsAndScripts(t *testing.T) {
 		t.Error("cache put payload was not readable")
 	}
 	put.Free(a)
+}
+
+func TestStderrRoutingSurvivesTheConfiguredGraph(t *testing.T) {
+	a := t.Allocator()
+	argv := []core.Value{core.NewString(a, "sh")}
+	command := core.NewList(a, argv)
+	payload := host.PipelinePayload(a, []core.Value{command})
+	command.Free(a)
+	for i := range argv {
+		argv[i].Free(a)
+	}
+	setup := host.StageSetupPayload(a, "", 0, nil)
+	host.ConfigureStderr(a, &setup, "./errors", true, host.StderrFile)
+	host.ConfigureStages(a, &payload, []core.Value{setup})
+	setups := host.PayloadSetups(payload)
+	if len(setups) != 1 {
+		t.Error("configured stage setup was lost")
+	} else {
+		if host.PayloadText(setups[0], host.FieldError) != "./errors" || !host.PayloadBool(setups[0], host.FieldErrorAppend) || host.PayloadInt(setups[0], host.FieldErrorMode) != host.StderrFile {
+			t.Error("stderr routing fields were not readable")
+		}
+		if host.PayloadBool(setups[0], host.FieldAppend) {
+			t.Error("stderr append leaked into the stdout append flag")
+		}
+	}
+	// The JavaScript host reads the same wire text, so the routing must be
+	// visible there even when no stdout redirection exists.
+	graph := host.PayloadText(payload, host.FieldData)
+	if !strings.Contains(graph, `"errorMode":1`) || !strings.Contains(graph, `"errorAppend":true`) || !strings.Contains(graph, `"error":"./errors"`) {
+		t.Error("configured graph text omitted stderr routing")
+	}
+	payload.Free(a)
+	setup.Free(a)
 }
 
 func TestServiceCancellationPayloadPreservesProcessIDAndGrace(t *testing.T) {

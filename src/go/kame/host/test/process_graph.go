@@ -143,6 +143,51 @@ func TestLossyBroadcastRequiresFramesAndBoundedPendingStorage(t *testing.T) {
 	}
 }
 
+func TestCopyOperatorOwnsOnlyASideOutputFile(t *testing.T) {
+	// `copy` is the 1:1 pass-through that may own a file beside its
+	// presentation edge; no other operator kind accepts an output file.
+	stages := []host.ProcessStage{{Argv: []string{"source"}}, {Kind: "copy", Output: "./log"}, {Argv: []string{"cat"}}}
+	edges := []host.ProcessEdge{{From: 0, To: 1}, {From: 1, To: 2}}
+	request := host.ProcessRequest{Topology: true, Stages: stages, Edges: edges}
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "" {
+		t.Errorf("copy side output rejected: %s", code)
+	}
+	stages[1].Output = ""
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "" {
+		t.Errorf("copy without a side output rejected: %s", code)
+	}
+
+	framed := []host.ProcessStage{{Argv: []string{"source"}}, {Kind: "frame", Framed: true}, {Kind: "encode"}, {Argv: []string{"cat"}}}
+	framedEdges := []host.ProcessEdge{{From: 0, To: 1}, {From: 1, To: 2}, {From: 2, To: 3}}
+	request.Stages, request.Edges = framed, framedEdges
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "" {
+		t.Errorf("valid frame/encode rejected: %s", code)
+	}
+	request.Stages[2].Output = "./log"
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_MUX_ARITY" {
+		t.Errorf("encode accepted an output file: %s", code)
+	}
+}
+
+func TestWorkerTemplateStillRequiresItsCommand(t *testing.T) {
+	// "each" launches a command template, so an empty argv is not a native
+	// operator with nothing to run.
+	stages := []host.ProcessStage{{Argv: []string{"source"}}, {Kind: "frame", Framed: true}, {Kind: "each"}, {Argv: []string{"cat"}}}
+	edges := []host.ProcessEdge{{From: 0, To: 1}, {From: 1, To: 2}, {From: 2, To: 3}}
+	request := host.ProcessRequest{Topology: true, Stages: stages, Edges: edges}
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_MUX_ARITY" {
+		t.Errorf("worker template without a command was accepted: %s", code)
+	}
+	stages[2].Argv = []string{"cat"}
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "" {
+		t.Errorf("worker template with a command was rejected: %s", code)
+	}
+	stages[2].Kind = "unknown"
+	if code := host.ProcessTopologyError(t.Allocator(), request); code != "KASH_MUX_ARITY" {
+		t.Errorf("unknown operator kind was accepted: %s", code)
+	}
+}
+
 func TestMetricsPayloadPreservesUnknownsAndOwnedRows(t *testing.T) {
 	metrics := []host.ProcessEdgeMetrics{{Measurement: 1, Bytes: 9, Items: 3}, {Items: -1, DroppedItems: -1}, {Measurement: 3, Bytes: 1024, Items: 1, DroppedItems: 511, QueueHighWaterBytes: 2048, QueueHighWaterItems: 2}}
 	value := host.ProcessMetricsPayload(t.Allocator(), metrics)

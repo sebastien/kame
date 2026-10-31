@@ -1762,19 +1762,25 @@ class Module {
       const stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
       const redirections = kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36 || kind === 37 || kind === 38 ? decoded : { input: '', output: '', append: false };
       redirections.wireKind = kind;
+      // Every declared destination must be a well-formed path covered by the
+      // matching grant. The helper returns the terminal result to propagate, or
+      // null when the path is allowed.
+      const redirectionPath = (path, capability, message) => {
+        if (typeof path !== 'string' || path.includes('\0')) return { result: this.completeFailure(instance, request, 'EXPR_INVALID', message) };
+        if (path && (!grants[capability] || !pathGranted(resolve(path), context[`${capability}Roots`]))) return { result: this.deny(instance, request) };
+        return null;
+      };
       for (const [field, capability] of [['input', 'read'], ['output', 'write']]) {
-        const name = redirections[field];
-        if (typeof name !== 'string' || name.includes('\0')) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid redirection path');
-        if (name && (!grants[capability] || !pathGranted(resolve(name), context[`${capability}Roots`]))) return this.deny(instance, request);
+        const name = redirectionPath(redirections[field], capability, 'invalid redirection path');
+        if (name) return name.result;
         for (const setup of redirections.setup ?? []) {
-          const path = setup[field] ?? '';
-          if (typeof path !== 'string' || path.includes('\0')) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid stage redirection path');
-          if (path && (!grants[capability] || !pathGranted(resolve(path), context[`${capability}Roots`]))) return this.deny(instance, request);
-          if (field === 'output') {
-            const errorPath = setup.error ?? '';
-            if (typeof errorPath !== 'string' || errorPath.includes('\0')) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid stage redirection path');
-            if (errorPath && (!grants.write || !pathGranted(resolve(errorPath), context.writeRoots))) return this.deny(instance, request);
-          }
+          const path = redirectionPath(setup[field] ?? '', capability, 'invalid stage redirection path');
+          if (path) return path.result;
+          // A stage stderr route is always a write, whether it names a file or
+          // duplicates the stage's stdout destination.
+          if (field !== 'output') continue;
+          const errorPath = redirectionPath(setup.error ?? '', 'write', 'invalid stage redirection path');
+          if (errorPath) return errorPath.result;
         }
       }
       if (context.runRoots !== null && context.runRoots !== undefined) {
@@ -3169,6 +3175,8 @@ function processDeadline(milliseconds, callback) {
 
 // Validate the wire graph before opening files or launching any stage. The
 // portable evaluator owns language semantics; this is the host trust boundary.
+// JavaScript-side mirror of host/operators.go: the native and JS hosts receive
+// the same wire kinds and must enforce the same cardinality rules.
 function prepareByteTopology(stages, context) {
   const invalid = (code = 'KASH_MUX_ARITY') => { throw Object.assign(new Error('invalid process graph topology'), { code }); };
   if (context.kinds === undefined) { if ([32, 33, 34, 35, 36, 37, 38].includes(context.wireKind) || context.failurePolicy !== undefined) invalid(); return null; }

@@ -218,7 +218,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			}
 			break
 		}
-		if stage.Kind == CommandMux && (stage.Text == "merge" || stage.Text == "broadcast" || stage.Text == "balance" || stage.Text == "each") && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
+		if stage.Kind == CommandMux && streamOperatorImplicitStage(stage.Text) && p.s.Text[p.pos] != '|' && p.s.Text[p.pos] != '?' && p.s.Text[p.pos] != '&' && p.s.Text[p.pos] != ')' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != ';' && p.s.Text[p.pos] != '#' {
 			stage = p.node(CommandStage, p.pos)
 			input = false
 			e.Items = slices.Append(p.a, e.Items, stage)
@@ -333,7 +333,9 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				}
 				mux.Text = p.s.Text[from:p.pos]
 				p.commandSpace(true)
-				if mux.Text == "frame" || mux.Text == "encode" {
+				operator := streamOperatorFor(mux.Text)
+				switch {
+				case operator != nil && operator.Argument == argumentLineAdapter:
 					argument := p.expression()
 					if argument != nil {
 						mux.Items = slices.Append(p.a, mux.Items, argument)
@@ -342,7 +344,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 						p.error(mux.Span.Start, p.pos, "line adapters require :lines")
 					}
 					p.commandSpace(true)
-				} else if mux.Text == "filter" {
+				case operator != nil && operator.Argument == argumentPredicate:
 					predicate := p.expression()
 					if predicate != nil {
 						mux.Items = slices.Append(p.a, mux.Items, predicate)
@@ -357,9 +359,9 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 						p.commandSpace(true)
 						mux.Body = slices.Append(p.a, mux.Body, p.commandPipeline(p.pos, false, false, true))
 					}
-				} else if mux.Text == "merge" || mux.Text == "broadcast" || mux.Text == "balance" {
+				case operator != nil && operator.Policy:
 					p.streamPolicy(mux)
-				} else if mux.Text == "tee" {
+				case operator != nil && operator.Argument == argumentPath:
 					if strings.HasPrefix(p.s.Text[p.pos:], ":append") && descriptorBoundary(p.s.Text, p.pos+7) {
 						p.pos += 7
 						mux.Bool = true
@@ -372,7 +374,7 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 						p.commandSpace(true)
 					}
 				}
-				if (mux.Text != "merge" && mux.Text != "broadcast" && mux.Text != "balance" && mux.Text != "frame" && mux.Text != "encode" && mux.Text != "filter" && mux.Text != "each" && mux.Text != "tee") || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || len(p.diags) != 0 {
+				if operator == nil || p.pos == len(p.s.Text) || p.s.Text[p.pos] != ')' || len(p.diags) != 0 {
 					p.error(mux.Span.Start, p.pos, "invalid Kash stream operator")
 					freeExpr(p.a, mux)
 					break
@@ -390,17 +392,17 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			p.commandSpace(capture || grouped || branch)
 			continue
 		}
-		if end, kind := attachedDescriptor(p.s.Text, p.pos); kind != 0 {
+		if end, kind := attachedDescriptor(p.s.Text, p.pos); kind != descriptorNone {
 			from := p.pos
-			if kind == 1 {
+			if kind == descriptorUnsupported {
 				p.error(from, end, "unsupported descriptor redirection")
 				break
 			}
 			op := "2>"
-			if kind == 3 {
+			if kind == descriptorErrorAppend {
 				op = "2>>"
 			}
-			if kind == 4 {
+			if kind == descriptorErrorAlias {
 				op = "2>&1"
 			}
 			target := stage
@@ -421,17 +423,23 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				break
 			}
 			p.pos = end
-			redirection := p.node(CommandRedirection, from)
-			redirection.Text = op
-			if op == "2>&1" {
-				redirection.Bool = aliasAfterWriter
-			} else {
+			// Parse the destination before creating the node: a rejected
+			// redirection must not leave an unattached expression behind.
+			var path *Expr
+			if op != "2>&1" {
 				p.commandSpace(capture)
 				if p.pos == len(p.s.Text) || p.s.Text[p.pos] == ')' || p.s.Text[p.pos] == '\n' || p.s.Text[p.pos] == '#' || (commandOperator(p.s.Text[p.pos]) && p.s.Text[p.pos] != '(') {
 					p.error(from, p.pos, "expected redirection path")
 					break
 				}
-				redirection.Items = slices.Append(p.a, redirection.Items, p.commandWord(false))
+				path = p.commandWord(false)
+			}
+			redirection := p.node(CommandRedirection, from)
+			redirection.Text = op
+			if op == "2>&1" {
+				redirection.Bool = aliasAfterWriter
+			} else {
+				redirection.Items = slices.Append(p.a, redirection.Items, path)
 			}
 			redirection.Span.End = p.pos
 			target.Items = slices.Append(p.a, target.Items, redirection)
@@ -697,18 +705,29 @@ func stderrRedirection(stage *Expr) bool {
 	return false
 }
 
-// attachedDescriptor recognizes a numeric descriptor glued to '>'.
-// kind 0 is an ordinary argument, 1 is unsupported, 2 is 2>, 3 is 2>>, 4 is 2>&1.
-func attachedDescriptor(text string, pos int) (int, int) {
+// descriptorKind classifies a numeric descriptor glued to '>'.
+type descriptorKind int
+
+const (
+	descriptorNone        descriptorKind = iota // not a descriptor: an ordinary argument
+	descriptorUnsupported                      // 3>, 1>&2, 2>&-: rejected, never guessed
+	descriptorErrorFile                        // 2>
+	descriptorErrorAppend                      // 2>>
+	descriptorErrorAlias                       // 2>&1
+)
+
+// attachedDescriptor recognizes a numeric descriptor glued to '>'. It returns
+// the end offset of the whole form and its kind.
+func attachedDescriptor(text string, pos int) (int, descriptorKind) {
 	if pos >= len(text) || text[pos] < '0' || text[pos] > '9' {
-		return pos, 0
+		return pos, descriptorNone
 	}
 	i := pos
 	for i < len(text) && text[i] >= '0' && text[i] <= '9' {
 		i++
 	}
 	if i == pos || i >= len(text) || text[i] != '>' {
-		return pos, 0
+		return pos, descriptorNone
 	}
 	digits := text[pos:i]
 	end := i + 1
@@ -716,21 +735,21 @@ func attachedDescriptor(text string, pos int) (int, int) {
 		end = i + 2
 	}
 	if digits != "2" {
-		return end, 1
+		return end, descriptorUnsupported
 	}
 	if i+1 < len(text) && text[i+1] == '>' {
-		return i + 2, 3
+		return i + 2, descriptorErrorAppend
 	}
 	if i+1 < len(text) && text[i+1] == '&' {
 		if i+2 < len(text) && text[i+2] == '1' && descriptorBoundary(text, i+3) {
-			return i + 3, 4
+			return i + 3, descriptorErrorAlias
 		}
 		if i+2 < len(text) {
 			end = i + 3
 		}
-		return end, 1
+		return end, descriptorUnsupported
 	}
-	return i + 1, 2
+	return i + 1, descriptorErrorFile
 }
 
 func descriptorBoundary(text string, pos int) bool {

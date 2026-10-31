@@ -84,7 +84,7 @@ type ProcessStage struct {
 	Overflow    int    // 0 block, 1 drop-new, 2 drop-old, 3 latest; framed broadcast only
 	BufferItems int    // pending records per destination; excludes one in-flight record
 	Framed      bool   // output uses the private framed-line transport
-	Kind        string // empty for an executable; otherwise a native stream operator
+	Kind        string // empty for an executable; otherwise a native stream operator row (see OperatorKind)
 	Argv        []string
 	Directory   string
 	Environment []string

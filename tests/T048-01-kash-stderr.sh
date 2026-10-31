@@ -42,6 +42,12 @@ printf "%s" $value'
 	check '<>' '' 'value = $(sh -c "printf out; printf err >&2" > ./captured 2>&1)
 printf "<%s>" $value'
 	if [ "$(cat "$work/captured")" = outerr ]; then test-ok "$backend file alias is not captured"; else test-fail "$backend file alias capture"; fi
+	test-step "$backend alias follows the reserved channels"
+	check a '' 'printf a >&out 2>&1'
+	check '' a 'printf a >&err 2>&1'
+	check oe '' 'sh -c "printf o; printf e >&2" >&out 2>&1'
+	check '' oe 'sh -c "printf o; printf e >&2" >&err 2>&1'
+	test-step "$backend capture and ambiguity"
 	check ab '' 'value = $(printf a 2>&1 && printf b 2>&1)
 printf "%s" $value'
 	reject KASH_AMBIGUOUS_CAPTURE 'value = $((printf a 2>&1, printf b 2>&1))

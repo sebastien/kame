@@ -278,7 +278,7 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			ports.Outputs = right.Outputs
 			continue
 		}
-		if connection.Kind == expr.CommandMux && (connection.Text == "frame" || connection.Text == "encode" || connection.Text == "filter" || connection.Text == "tee") {
+		if connection.Kind == expr.CommandMux && expr.StreamTakesArgument(connection.Text) {
 			if len(ports.Outputs) != 1 {
 				flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span
 			}

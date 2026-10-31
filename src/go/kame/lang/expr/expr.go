@@ -1998,13 +1998,23 @@ func writeProcess(b *strings.Builder, e *Expr) {
 			continue
 		}
 		if i != 0 {
-			if e.Items[i].Kind == CommandWriter || (e.Items[i-1].Kind == CommandMux && (e.Items[i-1].Text == "merge" || e.Items[i-1].Text == "broadcast" || e.Items[i-1].Text == "balance")) {
+			if e.Items[i].Kind == CommandWriter || (e.Items[i-1].Kind == CommandMux && streamOperatorFanOut(e.Items[i-1].Text)) {
 				b.WriteByte(' ')
 			} else {
 				b.WriteString(" | ")
 			}
 		}
 		writeExpr(b, e.Items[i])
+		// A stderr alias authored after `>&channel` belongs to the writer node,
+		// so it is emitted here to keep the AST and authored text equivalent.
+		if e.Items[i].Kind == CommandWriter && i != 0 && e.Items[i-1].Kind == CommandStage {
+			for j := range e.Items[i-1].Items {
+				item := e.Items[i-1].Items[j]
+				if item.Kind == CommandRedirection && item.Text == "2>&1" && item.Bool {
+					b.WriteString(" 2>&1")
+				}
+			}
+		}
 	}
 	if e.AcceptExit {
 		b.WriteString(" ?")
@@ -2105,11 +2115,19 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		return
 	}
 	if e.Kind == CommandStage {
+		first := true
 		for i := range e.Items {
-			if i != 0 {
+			item := e.Items[i]
+			// An alias that follows a separate channel writer is emitted with
+			// that writer, not inline with the stage it routes.
+			if item.Kind == CommandRedirection && item.Text == "2>&1" && item.Bool {
+				continue
+			}
+			if !first {
 				b.WriteByte(' ')
 			}
-			writeExpr(b, e.Items[i])
+			first = false
+			writeExpr(b, item)
 		}
 		return
 	}

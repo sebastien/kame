@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFile, mkdtemp, writeFile, rm, cp, open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Kame } from '../../src/js/kame.js';
 
-const wasmPath = process.env.KAME_WASM ?? 'build/wasm/kame.wasm';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const wasmPath = process.env.KAME_WASM ?? resolve(root, 'build/wasm/kame.wasm');
 const { instance: { exports: e } } = await WebAssembly.instantiate(await readFile(wasmPath), {});
 const alloc = (size, alignment = 1) => {
   const pointer = e.kame_wasm_alloc(size, alignment);
