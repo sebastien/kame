@@ -10,6 +10,6 @@ cd "$CLI_ROOT"
 make dist-wasm >/dev/null
 for backend in native wasm; do
 	test-step "$backend native data acceptance"
-	if python3 tests/native_data.py "$CLI_ROOT" "$backend" "$CLI_BIN" values; then test-ok "$backend typed data and symlinks"; else test-fail "$backend native data acceptance failed"; fi
+	if python3 tests/native-data.py "$CLI_ROOT" "$backend" "$CLI_BIN" values; then test-ok "$backend typed data and symlinks"; else test-fail "$backend native data acceptance failed"; fi
 done
 test-end

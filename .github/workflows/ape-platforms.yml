@@ -39,8 +39,8 @@ jobs:
           bash tests/T015-04-dist-signed-release.sh
       - name: Check WASM memory reuse and self-bootstrap
         run: |
-          node tools/wasm/test-memory-reuse.mjs
-          node tools/wasm/test-self-build.mjs
+          node tests/wasm/test-memory-reuse.mjs
+          node tests/wasm/test-self-build.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: kame-portable
@@ -62,7 +62,7 @@ jobs:
         with:
           name: kame-portable
           path: dist
-      - run: bash src/sh/test-ape.sh dist/kame.com dist/ape-smoke.com
+      - run: bash tests/platform/test-ape.sh dist/kame.com dist/ape-smoke.com
 
   darwin:
     runs-on: macos-15-intel
@@ -73,7 +73,7 @@ jobs:
         with:
           name: kame-portable
           path: dist
-      - run: bash src/sh/test-ape.sh dist/kame.com dist/ape-smoke.com
+      - run: bash tests/platform/test-ape.sh dist/kame.com dist/ape-smoke.com
 
   freebsd:
     runs-on: ubuntu-latest
@@ -88,7 +88,7 @@ jobs:
         with:
           release: '15.1'
           prepare: pkg install -y bash
-          run: bash src/sh/test-ape.sh dist/kame.com dist/ape-smoke.com
+          run: bash tests/platform/test-ape.sh dist/kame.com dist/ape-smoke.com
 
   netbsd:
     runs-on: ubuntu-latest
@@ -103,7 +103,7 @@ jobs:
         with:
           usesh: true
           prepare: /usr/sbin/pkg_add bash
-          run: bash src/sh/test-ape.sh dist/kame.com dist/ape-smoke.com
+          run: bash tests/platform/test-ape.sh dist/kame.com dist/ape-smoke.com
 
   windows:
     runs-on: windows-latest
@@ -119,8 +119,8 @@ jobs:
           name: kame-portable
           path: dist
       - name: Test WASM launcher and CLI on Windows
-        run: node tools/windows/test-launcher.mjs dist/windows
+        run: node tests/windows/test-launcher.mjs dist/windows
       - name: Test APE CLI on Windows without Node
         shell: pwsh
         timeout-minutes: 5
-        run: ./tools/windows/test-native-cli.ps1 dist/kame-windows-x64.exe
+        run: ./tests/windows/test-native-cli.ps1 dist/kame-windows-x64.exe

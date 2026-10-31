@@ -121,8 +121,9 @@ Binding order, tightest to loosest:
 6. Statement separators `;` and newline.
 
 Existing separator, quoting, and `??` value-recovery rules remain authoritative.
-`2>&1` must be rejected, never silently interpreted as Bash descriptor
-duplication. Output bytes, argument values, and Kame values are never reparsed
+Other numeric descriptors must be rejected, never silently interpreted as Bash
+descriptor duplication. The stderr subset is defined by
+[practical scripting](048-kash-practical-scripting.md). Output bytes, argument values, and Kame values are never reparsed
 as Kash. ASTs must retain operator kind, predicate/branch/substitution spans,
 and rejoin kind; formatting must preserve these parser boundaries.
 
@@ -644,7 +645,8 @@ capture. They may terminate selected branches or serve as sink-only graph
 writers. Framed payloads are encoded before presentation. A stdout port has one
 disposition, so conflicting graph/file/output-port destinations fail before
 launch. `in` remains reserved and unavailable; `<&name` remains a positional
-channel operand. Arbitrary descriptor duplication such as `2>&1` is unsupported.
+channel operand. Descriptor forms other than the stderr subset in
+[practical scripting](048-kash-practical-scripting.md) are unsupported.
 
 The zero-output rule is explicit: no capture-directed outputs yields an empty
 string, while more than one is `KASH_AMBIGUOUS_CAPTURE`. Each terminal stdout and

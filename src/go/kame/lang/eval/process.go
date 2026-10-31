@@ -28,6 +28,10 @@ type captureState struct {
 	Input          string
 	Output         string
 	Append         bool
+	Error          string
+	ErrorAppend    bool
+	ErrorMode      int
+	Stderr         bool
 	Setups         []core.Value
 	Environment    []core.Value
 	Cwd            string
@@ -73,6 +77,7 @@ func freeCaptureState(a mem.Allocator, value any) {
 	slices.Free(a, s.Stages)
 	mem.FreeString(a, s.Input)
 	mem.FreeString(a, s.Output)
+	mem.FreeString(a, s.Error)
 	mem.FreeString(a, s.Cwd)
 	for i := range s.Setups {
 		s.Setups[i].Free(a)
@@ -143,14 +148,18 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	for i := range state.WritePaths {
 		c.WritePaths = slices.Append(c.Run, c.WritePaths, owned(c.Run, state.WritePaths[i]))
 	}
-	if e.Topology {
+	if e.Topology || state.Stderr {
 		for i := range state.Setups {
 			output := host.PayloadText(state.Setups[i], host.FieldOutput)
 			if output != "" {
 				c.Emit(EffectProcessWrite, []byte(output))
 			}
+			errorPath := host.PayloadText(state.Setups[i], host.FieldError)
+			if errorPath != "" {
+				c.Emit(EffectProcessWrite, []byte(errorPath))
+			}
 			input := host.PayloadText(state.Setups[i], host.FieldInput)
-			if !demandProcessInput(c, input) {
+			if e.Topology && !demandProcessInput(c, input) {
 				return Result{Waiting: true}
 			}
 		}
@@ -158,6 +167,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if state.Recovering {
 		if state.Output != "" {
 			c.Emit(EffectProcessWrite, []byte(state.Output))
+		}
+		if state.Error != "" {
+			c.Emit(EffectProcessWrite, []byte(state.Error))
 		}
 		return p.capture(e.Body[0], c)
 	}
@@ -171,11 +183,17 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if state.Output != "" {
 			c.Emit(EffectProcessWrite, []byte(state.Output))
 		}
+		if state.Error != "" {
+			c.Emit(EffectProcessWrite, []byte(state.Error))
+		}
 		return Result{Value: state.Value.Clone(c.Run)}
 	}
 	if state.ID != 0 {
 		if state.Output != "" {
 			c.Emit(EffectProcessWrite, []byte(state.Output))
+		}
+		if state.Error != "" {
+			c.Emit(EffectProcessWrite, []byte(state.Error))
 		}
 		if c.Completion().RequestID != state.ID {
 			return Result{Waiting: true}
@@ -262,10 +280,44 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		stage := e.Items[state.Stage]
 		if stage.Kind == expr.CommandMux {
 			state.Stages = slices.Append(state.Alloc, state.Stages, core.NewList(state.Alloc, nil))
-			state.Setups = slices.Append(state.Alloc, state.Setups, host.StageSetupPayload(state.Alloc, "", 0, nil))
+			setup := host.StageSetupPayload(state.Alloc, "", 0, nil)
+			if stage.Text == "tee" {
+				if len(stage.Items) == 0 {
+					setup.Free(state.Alloc)
+					return failure(c.Run, "EXPR_INVALID", stage.Span, "tee requires a path")
+				}
+				r := p.commandWord(stage.Items[0], c, "redirection")
+				if r.Waiting || r.Diagnostic.Code != "" {
+					setup.Free(state.Alloc)
+					return r
+				}
+				text, ok := processScalar(c.Run, r.Value)
+				r.Free(c.Run)
+				if !ok || text == "" {
+					mem.FreeString(c.Run, text)
+					setup.Free(state.Alloc)
+					return failure(c.Run, "EXPR_INVALID", stage.Span, "tee requires one nonempty scalar path without NUL bytes")
+				}
+				cwd := state.Cwd
+				if cwd == "" {
+					cwd = c.Cwd
+				}
+				resolved := canonicalPath(state.Alloc, cwd, text)
+				mem.FreeString(c.Run, text)
+				if !c.Allows(Write, resolved) {
+					mem.FreeString(state.Alloc, resolved)
+					setup.Free(state.Alloc)
+					return failure(c.Run, "CAP_DENIED", stage.Span, "redirection access denied")
+				}
+				host.ConfigureRedirections(state.Alloc, &setup, "", resolved, stage.Bool)
+				c.Emit(EffectProcessWrite, []byte(resolved))
+				mem.FreeString(state.Alloc, resolved)
+			}
+			state.Setups = slices.Append(state.Alloc, state.Setups, setup)
 			state.Stage++
 			continue
 		}
+		stdoutSet := false
 		for state.Index < len(stage.Items) {
 			word := stage.Items[state.Index]
 			if word.Kind == expr.CommandOperand {
@@ -352,6 +404,18 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				continue
 			}
 			if word.Kind == expr.CommandRedirection {
+				if word.Text == "2>&1" {
+					if state.ErrorMode != 0 {
+						return failure(c.Run, "EXPR_INVALID", word.Span, "duplicate stderr redirection")
+					}
+					if stdoutSet || word.Bool {
+						state.ErrorMode = host.StderrStdout
+					} else {
+						state.ErrorMode = host.StderrPresentation
+					}
+					state.Index++
+					continue
+				}
 				before := len(c.Effects)
 				beforePaths := len(c.WritePaths)
 				r := p.commandWord(word.Items[0], c, "redirection")
@@ -367,8 +431,16 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				}
 				if word.Text == "<" {
 					state.Input = owned(state.Alloc, text)
+				} else if word.Text == "2>" || word.Text == "2>>" {
+					if state.ErrorMode != 0 {
+						mem.FreeString(c.Run, text)
+						return failure(c.Run, "EXPR_INVALID", word.Span, "duplicate stderr redirection")
+					}
+					state.Error, state.ErrorAppend = owned(state.Alloc, text), word.Text == "2>>"
+					state.ErrorMode = host.StderrFile
 				} else {
 					state.Output, state.Append = owned(state.Alloc, text), word.Text == ">>"
+					stdoutSet = true
 				}
 				mem.FreeString(c.Run, text)
 				state.Index++
@@ -457,12 +529,14 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		}
 		for i := range stage.Items {
 			word := stage.Items[i]
-			if word.Kind != expr.CommandRedirection {
+			if word.Kind != expr.CommandRedirection || word.Text == "2>&1" {
 				continue
 			}
 			text, capability := state.Output, Write
 			if word.Text == "<" {
 				text, capability = state.Input, Read
+			} else if word.Text == "2>" || word.Text == "2>>" {
+				text = state.Error
 			}
 			resolved := canonicalPath(state.Alloc, cwd, text)
 			if !c.Allows(capability, resolved) {
@@ -472,6 +546,8 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			mem.FreeString(state.Alloc, text)
 			if word.Text == "<" {
 				state.Input = resolved
+			} else if word.Text == "2>" || word.Text == "2>>" {
+				state.Error = resolved
 			} else {
 				state.Output = resolved
 			}
@@ -513,6 +589,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			slices.Free(state.Alloc, state.OperandSlots)
 			state.OperandSlots = nil
 		}
+		if state.ErrorMode != 0 {
+			state.Stderr = true
+			host.ConfigureStderr(state.Alloc, &state.Setups[len(state.Setups)-1], state.Error, state.ErrorAppend, state.ErrorMode)
+		}
+		mem.FreeString(state.Alloc, state.Error)
+		state.Error, state.ErrorAppend, state.ErrorMode = "", false, 0
 		if e.Topology {
 			host.ConfigureRedirections(state.Alloc, &state.Setups[len(state.Setups)-1], state.Input, state.Output, state.Append)
 			mem.FreeString(state.Alloc, state.Input)
@@ -572,7 +654,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		}
 	}
 	var payload core.Value
-	if e.Topology || configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
+	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || len(state.Stages) > 1 || state.Input != "" || state.Output != "" || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
 		payload = host.PipelinePayload(c.Run, state.Stages)
 	} else {
 		payload = host.ArgvPayload(c.Run, state.Stages[0].List)
@@ -584,6 +666,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			kind := ""
 			if e.Items[i].Kind == expr.CommandMux {
 				kind = e.Items[i].Text
+				if kind == "tee" {
+					kind = "copy"
+				}
 			}
 			if e.Items[i].Each {
 				kind, workers = "each", true
@@ -689,7 +774,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if c.captureBudget > 0 && e.Span.Start == c.captureBudgetStart && e.Span.End == c.captureBudgetEnd {
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "captureLimit"), Value: core.Value{Kind: core.Int, Int: int64(c.captureBudget)}})
 	}
-	if e.Topology || configured || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
+	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
 		host.ConfigureStages(c.Run, &payload, state.Setups)
 	}
 	if state.Async || e.Async {

@@ -1,5 +1,11 @@
 # CLI conformance test catalog. One row per test script.
 # Columns: file<TAB>spec<TAB>category<TAB>covers
+#
+# Opt-in gates are not catalogued because they need a built artifact, network
+# access or a foreign host: tests/platform/test-ape.sh (cross-platform APE) and
+# tests/platform/test-release-build.sh (published channel). tests/native/,
+# tests/wasm/ and tests/windows/ harnesses are invoked by T010-* or by make
+# targets; they are programs, not catalog entries.
 tests/T046-01-kash-scripting.sh	046	kash	Kash scripting and publication workflows
 tests/T047-01-kash-output-ports-and-command-lists.sh	047	kash	Kash output ports and command lists
 tests/T007-16-lib-consistency.sh	007	lib	Canonical predicates and in?, exact int/float ordering, uniform apply/first, kind/emptiness/record presence, explicit function success tests and leading Kash value paths on native/WASM

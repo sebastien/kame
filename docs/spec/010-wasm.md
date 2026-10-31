@@ -16,6 +16,9 @@ The WebAssembly module targets `wasm32-freestanding`. It includes:
 - Pure collection, text, and path operations.
 - Host-request operation stubs.
 - Shared portable CLI invocation parsing and command policy (`kame/cli`).
+- A hand-written C bridge in `src/c/wasm/`: the ABI contract header, the
+  pointer/length-to-slice adapter, the SjLj landing pad and the freestanding
+  panic hook. It carries no engine policy.
 
 It excludes POSIX, the native CLI executable/host implementation (`cmd/kame`),
 `os`, `conc`, `sync`, native process code, and direct filesystem access. The
@@ -524,7 +527,7 @@ node dist/kame.js do COMMAND [OPTIONS] [ARG...]
 ```
 
 Host-service conformance tests use this production wrapper, not a second test
-host implementation. `tools/kame-wasm.mjs` is limited to raw ABI information and
+host implementation. `tests/wasm/abi-probe.mjs` is limited to raw ABI information and
 self-tests (`--abi-info` and `--self-test`). Independent raw ABI tests retain
 coverage of synchronous queries, event headers, memory growth, handles and
 completion validation even when the production wrapper uses asynchronous calls.
@@ -670,7 +673,7 @@ The wrapper's stream exposes current-plus-future updates, not full replay.
 - Repeated create, compile, evaluate, and free cycles exhaust no logical heap
   capacity.
 - An undersized heap produces a diagnostic rather than memory corruption.
-- `tools/wasm/test-memory-reuse.mjs` checks coalescing/alignment, exact frees,
+- `tests/wasm/test-memory-reuse.mjs` checks coalescing/alignment, exact frees,
   repeated arena destruction, a 20 MiB content observation, and 600 watch reads.
   Warm host allocations and linear-memory pages remain constant; 64–256 KiB reads
   stay below a 2 MiB instance peak. These are allocation budgets, not RSS or

@@ -104,17 +104,29 @@ MOCK_VERSION=$(cat VERSION)
 MOCK_PACKAGE=$(node -p "require('./package.json').name")
 export MOCK_VERSION MOCK_PACKAGE MOCK_NPM_STATE=missing
 export LITTLESECRETS_LOG="$TMPDIR/secrets.log" MOCK_MODE=ok
+REAL_GIT=$(command -v git)
+export REAL_GIT
 cat >"$mock_bin/gh" <<'SH'
 #!/usr/bin/env bash
 set -eu
 [ "$PWD" = "$MOCK_ROOT" ] || { echo 'wrong working directory' >&2; exit 1; }
 printf 'gh %s\n' "$*" >>"$MOCK_LOG"
 case "$*" in
+"config get git_protocol") printf 'https\n' ;;
 repo\ view*)
-	# repo view takes a positional repository, not release commands' --repo.
-	[ "$*" = "repo view --json nameWithOwner --jq .nameWithOwner" ] ||
-		[ "$*" = "repo view $MOCK_REPO --json nameWithOwner --jq .nameWithOwner" ] || exit 1
-	printf '%s\n' "$MOCK_REPO"
+	case "$*" in
+	"repo view --json nameWithOwner --jq .nameWithOwner" | \
+		"repo view $MOCK_REPO --json nameWithOwner --jq .nameWithOwner")
+		printf '%s\n' "$MOCK_REPO"
+		;;
+	"repo view $MOCK_REPO --json sshUrl --jq .sshUrl")
+		printf 'git@github.com:%s.git\n' "$MOCK_REPO"
+		;;
+	"repo view $MOCK_REPO --json url --jq .url")
+		printf 'https://github.com/%s\n' "$MOCK_REPO"
+		;;
+	*) echo "unexpected repository query: $*" >&2; exit 1 ;;
+	esac
 	;;
 "api repos/$MOCK_REPO/commits/$MOCK_REVISION --jq .sha")
 	case "$MOCK_MODE" in
@@ -123,10 +135,6 @@ repo\ view*)
 		;;
 	esac
 	printf '%s\n' "$MOCK_REVISION"
-	;;
-"api --method POST repos/$MOCK_REPO/git/refs -f ref=refs/heads/release-v$MOCK_VERSION -f sha=$MOCK_REVISION")
-	[ "$MOCK_MODE" != branch_failure ] || { echo 'HTTP 422' >&2; exit 1; }
-	touch "$MOCK_BRANCH"
 	;;
 "api --paginate repos/$MOCK_REPO/releases "*)
 	[ "$MOCK_MODE" != api_failure ] || { echo 'HTTP 500' >&2; exit 1; }
@@ -175,6 +183,18 @@ release\ download*)
 "api -H Accept: application/vnd.github.raw+json repos/$MOCK_REPO/contents/LICENSE.md?ref="*) echo 'tagged fixture' ;;
 *) echo "unexpected GitHub call: $*" >&2; exit 1 ;;
 esac
+SH
+cat >"$mock_bin/git" <<'SH'
+#!/usr/bin/env bash
+for arg in "$@"; do
+	if [ "$arg" = push ]; then
+		printf 'git %s\n' "$*" >>"$MOCK_LOG"
+		[ "$MOCK_MODE" != branch_failure ] || { echo 'push rejected' >&2; exit 1; }
+		touch "$MOCK_BRANCH"
+		exit 0
+	fi
+done
+exec "$REAL_GIT" "$@"
 SH
 cat >"$mock_bin/make" <<'SH'
 #!/bin/sh
@@ -245,7 +265,7 @@ cat >"$mock_bin/littlesecrets" <<'SH'
 printf '%s\n' "$*" >>"$LITTLESECRETS_LOG"
 exit 1
 SH
-chmod +x "$mock_bin/gh" "$mock_bin/make" "$mock_bin/npm" "$mock_bin/littlesecrets" "$mock_bin/sleep"
+chmod +x "$mock_bin/gh" "$mock_bin/git" "$mock_bin/make" "$mock_bin/npm" "$mock_bin/littlesecrets" "$mock_bin/sleep"
 export PATH="$mock_bin:$PATH"
 unset KAME_RELEASE_PUBLIC_KEY KAME_RELEASE_SIGNING_KEY
 run_release() {
@@ -261,8 +281,8 @@ run_release() {
 test-step "an unpushed detached commit is published to a release branch"
 MOCK_MODE=missing_commit
 run_release --repo "$MOCK_REPO"
-if [ "$status" = 1 ] && grep -q 'creating release-v' "$TMPDIR/err" &&
-	grep -q "^gh api --method POST repos/$MOCK_REPO/git/refs " "$MOCK_LOG" &&
+if [ "$status" = 1 ] && grep -q 'publishing release-v' "$TMPDIR/err" &&
+	grep -q "^git .* push https://github.com/$MOCK_REPO .*:refs/heads/release-v$MOCK_VERSION$" "$MOCK_LOG" &&
 	grep -qx -- '-q get package.verification.pem' "$LITTLESECRETS_LOG" &&
 	! grep -Eq '^(make|npm|gh release)' "$MOCK_LOG"; then
 	test-ok "unpushed commit is published before key retrieval and staging"
@@ -273,7 +293,7 @@ fi
 test-step "a failed release branch publication stops before keys"
 MOCK_MODE=branch_failure
 run_release
-if [ "$status" = 1 ] && grep -q 'cannot create branch release-v' "$TMPDIR/err" &&
+if [ "$status" = 1 ] && grep -q 'cannot publish release-v' "$TMPDIR/err" &&
 	[ ! -s "$LITTLESECRETS_LOG" ] && ! grep -Eq '^(make|npm|gh release)' "$MOCK_LOG"; then
 	test-ok "branch publication failure stops before secrets or staging"
 else

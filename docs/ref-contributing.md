@@ -48,8 +48,10 @@ None of these commands publishes a release.
 | `src/go/kame/lang`, `operations` | Parsers, evaluation, templates, Kash, standard operations. |
 | `src/go/kame/host`, `cmd`, `cli` | Host adapters, entry points, shared CLI support. |
 | `src/js`, `src/py` | WASM wrapper/Node CLI and async Python CLI client. |
-| `src/sh`, `tools` | Build, distribution, platform, ABI, and harness helpers. |
-| `tests`, `examples` | Black-box fixtures/catalog and runnable consumer lessons. |
+| `src/c/wasm` | Freestanding C ABI linked into `dist/kame.wasm`. |
+| `src/sh` | Build, provisioning, release and benchmark helpers. |
+| `tests` | Black-box CLI catalog plus native/wasm/windows/platform/python harnesses and fixtures. |
+| `examples` | Runnable consumer lessons. |
 | `docs/spec`, `docs/skills/kame` | Normative contracts and practical agent/user references. |
 | `.github/workflows` | Platform/artifact-specific CI; inspect each workflow's actual checks. |
 
@@ -68,12 +70,12 @@ KAME_TEST_JOBS=1 make test-cli
 Published-channel compatibility needs network access and the Solod toolchain:
 
 ```sh
-src/sh/test-release-build.sh --channel auto
+tests/platform/test-release-build.sh --channel auto
 ```
 
-After building `dist-wasm`, `node tools/wasm/test-self-build.mjs` checks the
+After building `dist-wasm`, `node tests/wasm/test-self-build.mjs` checks the
 current WASM's self-bootstrap and repeated warm-build memory budget without
-using a published binary. `node tools/wasm/test-memory-reuse.mjs` checks freed
+using a published binary. `node tests/wasm/test-memory-reuse.mjs` checks freed
 block/arena reuse and long-lived watch memory plateaus; it also runs in T010-22.
 
 Concurrency only applies to reviewed entries in `tests/PARALLEL.tsv`, with a reason

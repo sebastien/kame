@@ -45,4 +45,4 @@ jobs:
         env:
           KAME_TEST_RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.version }}
           KAME_TEST_CHANNEL: ${{ inputs.channel || 'auto' }}
-        run: bash src/sh/test-release-build.sh
+        run: bash tests/platform/test-release-build.sh

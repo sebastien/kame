@@ -40,9 +40,9 @@ km_host *km_host_new(void);
 // start/start_graph: 0 admitted, -1 failed with a queued terminal, -2 not
 // admitted because the allocation-free rejected-event slot needs Next draining.
 int km_host_start(km_host *, int64_t, so_Slice, so_Slice, so_String, so_Slice, int64_t, so_int, bool);
-int km_host_start_graph(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool);
+int km_host_start_graph(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool, so_Slice, so_Slice, so_Slice);
 typedef so_int (*km_stream_item)(void *, int64_t, so_int, so_Slice);
-int km_host_start_topology(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, km_stream_item, void *, bool);
+int km_host_start_topology(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, km_stream_item, void *, bool);
 bool km_stream_operands_supported(void);
 int km_event_stage_field(km_event *, int, int);
 int64_t km_event_metric_field(km_event *, int, int);

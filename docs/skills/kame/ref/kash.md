@@ -181,8 +181,10 @@ Process `|` streams stdout with bounded backpressure; value pipes inside
 only the first stage may use `<`, only the last may use `>`/`>>`. Reserved
 `>&out` and `>&err` route command stdout to the current output or error sink;
 inside `$(...)`, `out` joins capture and `err` stays live. Neither redirects the
-executable's own stderr. Arbitrary descriptor duplication (such as `2>&1`) and
-heredocs are not defined.
+executable's own stderr. `2> PATH` and `2>> PATH` replace or append that stderr
+file. `2>&1` copies stdout's destination at that point, so `> file 2>&1` merges
+both into the file and `2>&1 > file` leaves stderr on the previous stdout.
+`3>`, `1>&2`, and heredocs are not defined.
 
 Setup pairs precede the executable. `:cwd` sets stage cwd, `:timeout` is in
 seconds (unlike CLI `--timeout` in milliseconds), and other valid keys override
@@ -258,7 +260,9 @@ cat ./input |(broadcast) (cat > ./audit, wc -c)
 
 `merge` preserves each producer's byte order, with no cross-producer ordering or
 record-boundary guarantee. `broadcast` delivers all bytes to every destination;
-a slow destination eventually backpressures the source. Every edge is bounded.
+a slow destination eventually backpressures the source. `|(tee PATH)` copies the
+stream to that file and to its continuation; `|(tee :append PATH)` does not
+truncate. A failing upstream status is unchanged. Every edge is bounded.
 Groups can nest and contain pipelines. Commas inside quoted words or embedded
 expressions do not separate members. `(EXPRESSION)` without a process-level
 comma remains a Kame expression.

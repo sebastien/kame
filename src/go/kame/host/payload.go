@@ -21,6 +21,9 @@ const (
 	FieldInput       = "input"
 	FieldOutput      = "output"
 	FieldAppend      = "append"
+	FieldError       = "error"
+	FieldErrorAppend = "errorAppend"
+	FieldErrorMode   = "errorMode"
 	FieldCapture     = "capture"
 	FieldSetup       = "setup"
 	FieldCwd         = "cwd"
@@ -395,6 +398,13 @@ func PayloadStages(payload core.Value) []core.Value {
 }
 
 // ConfigureRedirections replaces only the wire spelling; argv stays structured.
+func ConfigureStderr(a mem.Allocator, payload *core.Value, path string, appendFile bool, mode int) {
+	fields := []core.RecordField{{Key: FieldError, Value: core.NewString(a, path)}, {Key: FieldErrorAppend, Value: core.Value{Kind: core.Bool, Bool: appendFile}}, {Key: FieldErrorMode, Value: core.Value{Kind: core.Int, Int: int64(mode)}}}
+	for i := range fields {
+		payload.Record = slices.Append(a, payload.Record, core.RecordField{Key: core.NewString(a, fields[i].Key).Text, Value: fields[i].Value})
+	}
+}
+
 func ConfigureRedirections(a mem.Allocator, payload *core.Value, input string, output string, appendOutput bool) {
 	fields := []core.RecordField{{Key: FieldInput, Value: core.NewString(a, input)}, {Key: FieldOutput, Value: core.NewString(a, output)}, {Key: FieldAppend, Value: core.Value{Kind: core.Bool, Bool: appendOutput}}}
 	for i := range fields {
@@ -543,6 +553,12 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 		e.Str(PayloadText(setups[i], FieldOutput))
 		e.Str(FieldAppend)
 		e.Bool(PayloadAppend(setups[i]))
+		e.Str(FieldError)
+		e.Str(PayloadText(setups[i], FieldError))
+		e.Str(FieldErrorAppend)
+		e.Bool(PayloadBool(setups[i], FieldErrorAppend))
+		e.Str(FieldErrorMode)
+		e.Int(PayloadInt(setups[i], FieldErrorMode))
 		e.Str(FieldCwd)
 		e.Str(PayloadText(setups[i], FieldCwd))
 		e.Str(FieldTimeout)
@@ -568,9 +584,11 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 	b.Free()
 }
 
-func PayloadAppend(payload core.Value) bool {
+func PayloadAppend(payload core.Value) bool { return PayloadBool(payload, FieldAppend) }
+
+func PayloadBool(payload core.Value, field string) bool {
 	for i := range payload.Record {
-		if payload.Record[i].Key == FieldAppend {
+		if payload.Record[i].Key == field {
 			return payload.Record[i].Value.Bool
 		}
 	}

@@ -82,8 +82,9 @@ KAME_INPUTS =
       ./Makefile.kmk]
     (filter-out ./src/go/kame/cmd/kame/version_generated.go KAME_SOURCES))
 
-# Same roots as Makefile's wasm `find`. cmd/ is excluded so a version bump
-# does not relink the module. ownership/ is not part of that link set.
+# Portable link set: the Go packages that translate to freestanding C, plus the
+# hand-written C ABI shim in src/c/wasm. cmd/ is excluded so a version bump does
+# not relink the module. ownership/ is not part of that link set.
 WASM_SOURCE_DIRS =
   [
     ./src/go/kame/cli
@@ -94,7 +95,7 @@ WASM_SOURCE_DIRS =
     ./src/go/kame/operations
     ./src/go/kame/plugins
     ./src/go/kame/program
-    ./tools/wasm]
+    ./src/c/wasm]
 
 WASM_SOURCES =
   (flatmap
@@ -192,6 +193,7 @@ TEST_WASM =
     ./tests/T044-01-runtime-kame-rule-bodies.sh
     ./tests/T046-01-kash-scripting.sh
     ./tests/T047-01-kash-output-ports-and-command-lists.sh
+    ./tests/T048-01-kash-stderr.sh
     ./tests/T043-01-lang-finalization.sh
     ./tests/T010-01-wasm-loader.sh
     ./tests/T010-02-wasm-abi.sh
@@ -348,7 +350,7 @@ version-source : ./src/go/kame/cmd/kame/version_generated.go
 	mkdir -p ./dist
 	:cwd $KAME_DIR :CC (abspath ./build/tools/cosmocc-4.0.2/bin/cosmocc) :CFLAGS "-O3 -s -DKAME_BUILD_MODE_RELEASE -DKAME_RUNTIME_APE" so build -assert=off -panic=exit -o (abspath ./dist/kame.com) ./cmd/kame
 
-./dist/ape-smoke.com : ./tools/platform/ape-smoke.c ./build/tools/cosmocc-4.0.2/bin/cosmocc
+./dist/ape-smoke.com : ./tests/platform/ape-smoke.c ./build/tools/cosmocc-4.0.2/bin/cosmocc
 	mkdir -p (dirname (first outputs))
 	./build/tools/cosmocc-4.0.2/bin/cosmocc -O2 -o (first outputs) (first inputs)
 
@@ -394,13 +396,13 @@ wasm-translate :
 	sources = (files ./build/wasm/c/**/*.c)
 	$cc --target=wasm32-unknown-unknown -Oz -fwrapv -ffreestanding -nostdlib \
 		-mexception-handling -mllvm -wasm-enable-sjlj \
-		-include ./tools/wasm/kame_wasm_panic.h -DSO_HEAP_SIZE=8388608 \
-		(str "-fuse-ld=" ld) -I ./build/wasm/c -I ./src/go/kame/host/wasm \
+		-include ./src/c/wasm/kame_wasm_panic.h -DSO_HEAP_SIZE=8388608 \
+		(str "-fuse-ld=" ld) -I ./build/wasm/c \
 		-Wl,--no-entry -Wl,--export-memory (str "-Wl,-z,stack-size=" stack) \
 		(str "-Wl,--initial-memory=" initial) (str "-Wl,--max-memory=" maxmem) \
 		$WASM_EXPORT_FLAGS \
 		$sources \
-		./tools/wasm/kame_wasm_abi.c ./tools/wasm/kame_wasm_jump.c \
+		./src/c/wasm/kame_wasm_abi.c ./src/c/wasm/kame_wasm_jump.c \
 		$builtins -o (first outputs)
 
 wasm : ./build/wasm/kame.wasm
@@ -497,11 +499,11 @@ test : test-so test-examples test-go test-cli
 test-so : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
 	:cwd $KAME_DIR so test ./...
 
-test-native-lifecycle : ./src/go/kame/cmd/kame/version_generated.go ./tools/native/test-cli-lifecycle.sh
-	:CC clang bash ./tools/native/test-cli-lifecycle.sh
+test-native-lifecycle : ./src/go/kame/cmd/kame/version_generated.go ./tests/native/test-cli-lifecycle.sh
+	:CC clang bash ./tests/native/test-cli-lifecycle.sh
 
-test-native-host : ./tools/native/test-host.sh
-	:CC clang bash ./tools/native/test-host.sh
+test-native-host : ./tests/native/test-host.sh
+	:CC clang bash ./tests/native/test-host.sh
 
 test-examples :
 	:cwd $EXAMPLES_DIR so test ./...
@@ -529,7 +531,7 @@ test-reuse-reasons : ./build/kame.debug dist-wasm ./tests/T036-02-cli-reuse-reas
 # Published-channel compatibility check: network access and the Solod
 # toolchain are required, so this stays opt-in and outside the hermetic suite.
 test-release-build :
-	./src/sh/test-release-build.sh
+	./tests/platform/test-release-build.sh
 
 test-all : test test-leaks
 
@@ -547,11 +549,11 @@ test-leaks : ./build/kame.sanitize dist-wasm ./dist/kame ./dist/kame-windows-x64
 wasm-portable : ./src/sh/check-portable.sh
 	./src/sh/check-portable.sh
 
-wasm-check : wasm wasm-portable ./tools/native/test-wasm-header.c ./tools/wasm/check-imports.mjs ./tools/wasm/test-abi.mjs
+wasm-check : wasm wasm-portable ./tests/wasm/test-wasm-header.c ./tests/wasm/check-imports.mjs ./tests/wasm/test-abi.mjs
 	cc = (if (blank? CC) "cc" CC)
-	$cc -std=c11 -Wall -Wextra -Werror -fsyntax-only ./tools/native/test-wasm-header.c
-	node ./tools/wasm/check-imports.mjs ./build/wasm/kame.wasm
-	node ./tools/wasm/test-abi.mjs ./build/wasm/kame.wasm
+	$cc -std=c11 -Wall -Wextra -Werror -fsyntax-only ./tests/wasm/test-wasm-header.c
+	node ./tests/wasm/check-imports.mjs ./build/wasm/kame.wasm
+	node ./tests/wasm/test-abi.mjs ./build/wasm/kame.wasm
 
 # map/run! streams each script and fails the recipe on the first nonzero status.
 test-wasm : wasm-check ./build/kame.debug dist-wasm @{TEST_WASM}

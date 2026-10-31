@@ -12,7 +12,7 @@ trap 'rm -rf "$temporary"' EXIT
 mapfile -t sources < <(find "$temporary/c" -name '*.c' ! -path '*/main.c')
 "${CC:-clang}" -std=gnu11 -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
   -I "$temporary/c" -I "$root/src/go/kame/host/posix" \
-  "$root/tools/native/test-cli-lifecycle.c" "${sources[@]}" -lm -lpthread \
+  "$root/tests/native/test-cli-lifecycle.c" "${sources[@]}" -lm -lpthread \
   -o "$temporary/cli-lifecycle"
 cd "$root"
 ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \

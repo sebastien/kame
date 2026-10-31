@@ -50,6 +50,12 @@ tests/
   lib-cli.sh                       CLI binary, invocation, assertion helpers
   CATALOG.tsv                      machine-readable test catalog
   T<SSS>-<NN>-<category>-<topic>.sh
+  native/                          C harnesses: argv, posix, CLI lifecycle, wasm header
+  wasm/                            raw ABI probes, import/handle/memory gates
+  windows/                         packaged launcher and PowerShell conformance
+  platform/                        opt-in APE and published-channel gates
+  py/                              Python embedding API suite
+  *.py                             kebab-case drivers for one T* entry
   data/cli/<fixture>/              build trees, inputs, scripts
   data/lang/                       shared language fixtures
   data/README.md                   fixture catalog and conventions
@@ -63,13 +69,19 @@ tests/
   `patterns`, `dist`, or `kash`. Later governing specs may reuse these labels.
 - `lib-*.sh` files are support libraries and are never executed as tests.
 - Nothing under `tests/data/` is executed as a test.
-- Every test script has one `CATALOG.tsv` row; `T013-01` enforces both
+- `tests/native/`, `tests/wasm/`, `tests/windows/`, `tests/platform/` and
+  `tests/py/` hold harness programs and opt-in gates, not catalog entries. They
+  run through make targets, `T010-*`, or CI; the catalog stays flat at the
+  `tests/` root.
+- Top-level `tests/*.py` are kebab-case drivers for exactly one `T*` entry, run
+  as `python3 tests/<name>.py`. They are not catalog rows themselves.
+- Every catalog test script has one `CATALOG.tsv` row; `T013-01` enforces both
   directions plus the naming scheme.
 
 ## Harness contract
 
-- `tests/harness.sh [-q|-v] [-j JOBS] [FILE...]` runs every `tests/**/*.sh` except
-  `lib-*.sh`, `harness.sh`, and anything under `tests/data/`.
+- `tests/harness.sh [-q|-v] [-j JOBS] [FILE...]` runs every `tests/*.sh` except
+  `lib-*.sh` and `harness.sh`; nested harness directories are never discovered.
 - Each test is a separate process started from the repository root.
 - The harness executes a source snapshot so editing its file cannot corrupt an
   active loop. Suite invocations in one checkout hold an exclusive lock around
@@ -322,7 +334,7 @@ Conformance for [043-kame-finalization.md](043-kame-finalization.md) covers:
 ## Suite acceptance criteria
 
 - `tests/harness.sh` exits 0 on a clean checkout after `make test-cli`.
-- Every test file has a catalog row and every row resolves to a file.
+- Every catalog test file has a row and every row resolves to a file.
 - No test writes under `tests/data`.
 - Normalized event streams and artifacts are identical across fresh copies.
 - Fixing a defect never weakens a test: assertions cite their governing spec in
@@ -357,7 +369,7 @@ Tracker. It requires zero live bytes and balanced allocation/free counts after
 each invocation, with ASan/UBSan and LeakSanitizer enabled. This tests manual
 lifetimes directly, independently of Go stubs or GC settings.
 
-`tools/native/test-cli-{diagnostics,presentation,ast}.h` retain private-unit
+`tests/native/test-cli-{diagnostics,presentation,ast}.h` retain private-unit
 assertions against that generated CLI, including the partial AST error golden
 that differs from the public CLI diagnostic stream. These cases repeat under the
 same tracker and sanitizer gate. CLI subprocess tests use `*_native_test.go` and

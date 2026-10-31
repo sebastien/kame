@@ -126,7 +126,7 @@ exec 8>"$BASE/../build/tests/.harness.lock"
 run_setup flock -x 8
 
 if [ $# == 0 ]; then
-	mapfile -t FILES < <(find "$BASE" -name "*.*")
+	mapfile -t FILES < <(find "$BASE" -maxdepth 1 -name "*.sh")
 else
 	FILES=("$@")
 fi

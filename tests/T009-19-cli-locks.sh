@@ -7,6 +7,6 @@ cli_require_tools
 cli_build
 make -C "$CLI_ROOT" dist-wasm >/dev/null
 test-step "lock location, owner, elapsed wait, interruption and recovery"
-python3 "$CLI_ROOT/tests/lock_diagnostics.py" "$CLI_BIN" "$CLI_ROOT/dist/kame.js"
+python3 "$CLI_ROOT/tests/lock-diagnostics.py" "$CLI_BIN" "$CLI_ROOT/dist/kame.js"
 test-ok "native, Node and launcher waits identify their blocker"
 test-end

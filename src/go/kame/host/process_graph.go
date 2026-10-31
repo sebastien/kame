@@ -70,7 +70,7 @@ func ProcessTopologyError(a mem.Allocator, request ProcessRequest) string {
 				return "KASH_DOUBLE_CONSUME"
 			}
 		} else {
-			if len(stage.Argv) != 0 || stage.Input != "" || stage.Output != "" {
+			if len(stage.Argv) != 0 || stage.Input != "" || (stage.Output != "" && stage.Kind != "copy") {
 				return "KASH_MUX_ARITY"
 			}
 			if stage.Kind == "frame" || stage.Kind == "encode" || stage.Kind == "copy" {

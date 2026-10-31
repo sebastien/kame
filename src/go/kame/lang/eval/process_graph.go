@@ -115,6 +115,7 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 			}
 		}
 		redirected := false
+		aliasBefore := false
 		for j := 0; node.Kind == expr.CommandStage && j < len(node.Items); j++ {
 			word := node.Items[j]
 			if word.Kind != expr.CommandRedirection {
@@ -123,7 +124,10 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 			if word.Text == "<" && incoming != 0 {
 				return failure(c.Run, "KASH_DOUBLE_CONSUME", word.Span, "stdin redirection conflicts with graph input")
 			}
-			if word.Text != "<" {
+			if word.Text == "2>&1" && !redirected && !word.Bool {
+				aliasBefore = true
+			}
+			if word.Text == ">" || word.Text == ">>" {
 				redirected = true
 				if outgoing != 0 {
 					return failure(c.Run, "KASH_DOUBLE_CONSUME", word.Span, "stdout redirection conflicts with graph output")
@@ -132,12 +136,40 @@ func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 		}
 		if outgoing == 0 && !redirected && !(node.Kind == expr.CommandMux && node.Text == "err") {
 			terminals++
+		} else if aliasBefore && !outgoingCommand(flat, i) && !outgoingCapture(flat, i) {
+			terminals++
 		}
 	}
 	if e.Kind == expr.CommandCapture && terminals > 1 {
 		return failure(c.Run, "KASH_AMBIGUOUS_CAPTURE", e.Span, "capture requires one unmerged terminal stdout")
 	}
 	return Result{}
+}
+
+func outgoingCommand(flat *expr.Expr, node int) bool {
+	for i := range flat.Edges {
+		if flat.Edges[i].From != node || flat.Edges[i].Argument != 0 {
+			continue
+		}
+		target := flat.Items[flat.Edges[i].To]
+		if target.Kind == expr.CommandStage {
+			return true
+		}
+	}
+	return false
+}
+
+func outgoingCapture(flat *expr.Expr, node int) bool {
+	for i := range flat.Edges {
+		if flat.Edges[i].From != node || flat.Edges[i].Argument != 0 {
+			continue
+		}
+		target := flat.Items[flat.Edges[i].To]
+		if target.Kind == expr.CommandMux && target.Text == "out" {
+			return true
+		}
+	}
+	return false
 }
 
 func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
@@ -246,7 +278,7 @@ func lowerProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) graphPorts {
 			ports.Outputs = right.Outputs
 			continue
 		}
-		if connection.Kind == expr.CommandMux && (connection.Text == "frame" || connection.Text == "encode" || connection.Text == "filter") {
+		if connection.Kind == expr.CommandMux && (connection.Text == "frame" || connection.Text == "encode" || connection.Text == "filter" || connection.Text == "tee") {
 			if len(ports.Outputs) != 1 {
 				flat.Text, flat.Span = "KASH_MUX_ARITY", connection.Span
 			}

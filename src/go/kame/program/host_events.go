@@ -195,6 +195,7 @@ func (p *Program) drainRequests() {
 				}
 				if i < len(setups) {
 					stage.Input, stage.Output, stage.Append = host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput), host.PayloadAppend(setups[i])
+					stage.Error, stage.ErrorAppend, stage.ErrorMode = host.PayloadText(setups[i], host.FieldError), host.PayloadBool(setups[i], host.FieldErrorAppend), int(host.PayloadInt(setups[i], host.FieldErrorMode))
 					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
 					values := host.PayloadList(setups[i], host.FieldEnvironment)
 					for j := range values {

@@ -104,4 +104,11 @@ else
 	test-fail "WASM output-omission policy failed"
 fi
 
+test-step "JSON expressions and generated reads agree across hosts"
+if python3 "$CLI_ROOT/tests/json-operation.py"; then
+	test-ok "parse-json values, failures and template-produced reads match native"
+else
+	test-fail "JSON parity or generated-read regression"
+fi
+
 test-end

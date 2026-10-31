@@ -11,7 +11,7 @@ make dist-wasm >/dev/null
 status=0
 for backend in native wasm; do
 	test-step "$backend computed output acceptance"
-	if python3 tests/computed_outputs.py "$CLI_ROOT" "$backend" "$CLI_BIN" values; then
+	if python3 tests/computed-outputs.py "$CLI_ROOT" "$backend" "$CLI_BIN" values; then
 		test-ok "$backend computed outputs"
 	else
 		status=1

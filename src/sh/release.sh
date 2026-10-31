@@ -173,10 +173,13 @@ if ! remote_revision=$(gh api "repos/$repo_slug/commits/$revision" --jq '.sha' 2
 	# A detached jj/git HEAD is normal. Publish the exact release commit on a
 	# dedicated branch instead of requiring the operator to move main first.
 	branch="release-$tag"
-	printf 'release: commit %s is not on %s; creating %s\n' "$revision" "$repo_slug" "$branch" >&2
-	if ! gh api --method POST "repos/$repo_slug/git/refs" \
-		-f ref="refs/heads/$branch" -f sha="$revision" >/dev/null; then
-		printf 'release: cannot create branch %s; push %s to %s manually and retry\n' "$branch" "$revision" "$repo_slug" >&2
+	case "$(gh config get git_protocol 2>/dev/null || printf https)" in
+	ssh) push_url=$(gh repo view "$repo_slug" --json sshUrl --jq .sshUrl) ;;
+	*) push_url=$(gh repo view "$repo_slug" --json url --jq .url) ;;
+	esac
+	printf 'release: commit %s is not on %s; publishing %s\n' "$revision" "$repo_slug" "$branch" >&2
+	if ! git -C "$root" -c credential.helper= -c credential.helper='!gh auth git-credential' push "$push_url" "$revision:refs/heads/$branch"; then
+		printf 'release: cannot publish %s to %s; push it manually and retry\n' "$branch" "$repo_slug" >&2
 		exit 1
 	fi
 	pushed=
@@ -188,10 +191,10 @@ if ! remote_revision=$(gh api "repos/$repo_slug/commits/$revision" --jq '.sha' 2
 		sleep 1
 	done
 	if [ -z "$pushed" ]; then
-		printf 'release: created %s but GitHub still cannot resolve %s; retry later\n' "$branch" "$revision" >&2
+		printf 'release: published %s but GitHub still cannot resolve %s; retry later\n' "$branch" "$revision" >&2
 		exit 1
 	fi
-	printf 'release: created %s at %s\n' "$branch" "$revision" >&2
+	printf 'release: published %s at %s\n' "$branch" "$revision" >&2
 fi
 [ "$remote_revision" = "$revision" ] || { printf 'release: GitHub returned a different release revision\n' >&2; exit 1; }
 existing_tag=$(gh api "repos/$repo_slug/git/matching-refs/tags/$tag" --jq ".[] | select(.ref == \"refs/tags/$tag\") | .ref")

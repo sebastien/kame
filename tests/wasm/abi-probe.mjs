@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import process, { argv, stderr, stdout } from 'node:process';
 
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const wasmPath = process.env.KAME_WASM ? resolve(process.env.KAME_WASM) : resolve(root, 'build/wasm/kame.wasm');
 const requiredExports = [
   'memory',
@@ -47,7 +47,7 @@ const requiredExports = [
 ];
 
 function usage() {
-  stdout.write(`Usage: node tools/kame-wasm.mjs --abi-info | --self-test\n`);
+  stdout.write(`Usage: node tests/wasm/abi-probe.mjs --abi-info | --self-test\n`);
   stdout.write(`Loads KAME_WASM or build/wasm/kame.wasm with Node's WebAssembly API.\n`);
 }
 

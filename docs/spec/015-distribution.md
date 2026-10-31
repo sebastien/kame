@@ -181,7 +181,7 @@ no download. A `KAME_BIN` that is not executable is fatal.
 APE hosts are the `uname -s`/`uname -m` pairs Cosmopolitan supports: Linux,
 Darwin, FreeBSD, NetBSD, and the Windows POSIX layers (`MINGW*`,
 `MSYS*`, `CYGWIN*`), on `x86_64`/`amd64` and `aarch64`/`arm64`.
-`src/sh/test-ape.sh` runs the APE through the POSIX shell adapter,
+`tests/platform/test-ape.sh` runs the APE through the POSIX shell adapter,
 checks version output, executes a recipe with an explicit environment, and
 checks timeout cleanup. `.github/workflows/ape-platforms.yml` builds the APE and
 WASM pair once on Ubuntu and tests the same artifacts downstream. It runs the
@@ -323,9 +323,10 @@ existing build rules.
 Source-tree helper scripts live under `src/sh/`: build and provisioning helpers
 (`generate-version.sh`, `provision-cosmocc.sh`, `build-ape.sh`,
 `check-portable.sh`), release helpers (`platform_id.py`, `release_manifest.py`,
-`release_package_manifests.py`, `release.sh`) and harness helpers
-(`benchmark-cli.py`, `test-ape.sh`, `test-release-build.sh`). The Go/WASM/C and
-Node tools stay under `tools/`.
+`release_package_manifests.py`, `release.sh`) and the benchmark driver
+(`benchmark-cli.py`). Native, WASM and Windows harnesses live under `tests/`
+alongside the CLI catalog; the opt-in APE and published-channel gates are
+`tests/platform/test-ape.sh` and `tests/platform/test-release-build.sh`.
 
 ## Manual Publication
 
@@ -349,9 +350,10 @@ For a new release, before retrieving signing keys or signing, it requires a clea
 checks that the exact HEAD commit is available in the target GitHub repository,
 and refuses to overwrite an existing local/remote tag or draft release. A
 detached working copy is fine: when the commit is missing remotely, the script
-creates a `release-vVERSION` branch at that exact revision through the GitHub
-API before staging. It never updates an existing branch or pushes unrelated
-code. Authentication/API failures stop preflight.
+publishes that exact revision to a `release-vVERSION` branch using the
+configured git protocol before staging. It never force-pushes, rewrites an
+existing branch, or pushes unrelated code. Authentication/API failures stop
+preflight.
 It stages and signs `dist/release/`, creates a draft release for the `VERSION`
 tag, uploads the seven flat runtime/verification assets, verifies that every manifest
 asset is present, and only then publishes. `--repo` selects
@@ -409,7 +411,7 @@ the canonical build.
 - `kame-windows-x64.zip` contains exactly `kame.exe`, `kame.js`, and
   `kame.wasm`; the native launcher preserves argv, standard streams, working
   directory, environment and the Node process exit status. On a Windows host,
-  run `node tools/windows/test-launcher.mjs dist/windows` after
+  run `node tests/windows/test-launcher.mjs dist/windows` after
   `make dist-windows`; it exercises the packaged CLI, launcher contract, recipe
   timeout and descendant-process reaping.
   `.github/workflows/ape-platforms.yml` builds the bundle alongside the portable
@@ -439,7 +441,7 @@ the canonical build.
   builds are not covered by CI and are not a portable-release gate.
 - A published release can build the current checkout's `dist/kame` through the
   npm/WASM CLI (`bunx`/`npx`) or the latest GitHub APE. The opt-in
-  `src/sh/test-release-build.sh` tries WASM first, falls back to the APE, and
+  `tests/platform/test-release-build.sh` tries WASM first, falls back to the APE, and
   fails only when neither channel self-builds;
   `.github/workflows/release-self-build.yml` runs it on demand, weekly, and after
   a release. It stays outside the hermetic suite because it requires network
@@ -447,5 +449,5 @@ the canonical build.
 - The portable build workflow separately requires the current WASM module to
   bootstrap `dist/kame` under its unchanged 16 MiB instance budget, then recheck
   warm inputs in the same module without linear-memory growth. This hard gate
-  uses `tools/wasm/test-self-build.mjs`, not the published-channel fallback:
+  uses `tests/wasm/test-self-build.mjs`, not the published-channel fallback:
   an older release's known WASM limitations cannot hide current regressions.

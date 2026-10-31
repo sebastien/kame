@@ -1,5 +1,5 @@
 // Run from the repository root:
-// Compile tools/native/test-posix.c with clang -std=gnu11 -Wall -Wextra -Werror
+// Compile tests/native/test-posix.c with clang -std=gnu11 -Wall -Wextra -Werror
 // -fsanitize=address,undefined, then run the resulting binary.
 // Also fat-link with build/tools/cosmocc-4.0.2/bin/cosmocc -O0 -std=gnu11:
 // Windows-only symbols must not leak into the aarch64 image without optimization.

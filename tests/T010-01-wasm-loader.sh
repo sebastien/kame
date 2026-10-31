@@ -8,7 +8,7 @@ make wasm >/dev/null
 # Exercise the production host, not a second implementation of its services.
 export KAME_WASM="${KAME_WASM:-$ROOT/build/wasm/kame.wasm}"
 cli=(node ./src/js/kame.js do run)
-info="$(node ./tools/kame-wasm.mjs --self-test)"
+info="$(node ./tests/wasm/abi-probe.mjs --self-test)"
 for export in memory kame_wasm_abi_version kame_wasm_alloc kame_wasm_copy kame_wasm_event_header kame_wasm_eval_pure; do
 	case "$info" in
 	*"\"$export\""*) ;;

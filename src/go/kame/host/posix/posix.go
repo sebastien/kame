@@ -93,15 +93,16 @@ func km_host_start(h *nativeHost, id int64, shell []string, script []byte, direc
 }
 
 //so:extern nodecay
-func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool) c.Int {
-	_, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput
+func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, errorPaths []string, errorAppends []int, errorModes []int) c.Int {
+	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput, errorPaths, errorAppends, errorModes
 	return 0
 }
 
 //so:extern nodecay
-func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, itemLimits []int, streamItem func(any, int64, int, []byte) int, streamContext any, collectFailures bool) c.Int {
+func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, itemLimits []int, errorPaths []string, errorAppends []int, errorModes []int, streamItem func(any, int64, int, []byte) int, streamContext any, collectFailures bool) c.Int {
 	_ = collectFailures
 	_, _ = operandArguments, itemLimits
+	_, _, _ = errorPaths, errorAppends, errorModes
 	_, _ = streamItem, streamContext
 	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput, kinds, edges, inputs, outputs, appends
 	return 0
@@ -253,9 +254,16 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		var directories, environment []string
 		var environmentLengths []int
 		var timeouts []int64
-		var kinds, edges, appends, operandArguments, itemLimits []int
-		var inputs, outputs []string
+		var kinds, edges, appends, operandArguments, itemLimits, errorAppends, errorModes []int
+		var inputs, outputs, errorPaths []string
 		for i := range request.Stages {
+			errorPaths = slices.Append(h.Alloc, errorPaths, request.Stages[i].Error)
+			errorAppend := 0
+			if request.Stages[i].ErrorAppend {
+				errorAppend = 1
+			}
+			errorAppends = slices.Append(h.Alloc, errorAppends, errorAppend)
+			errorModes = slices.Append(h.Alloc, errorModes, request.Stages[i].ErrorMode)
 			if request.Topology {
 				kind := 0
 				if request.Stages[i].Kind == "merge" {
@@ -343,9 +351,9 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				edges = slices.Append(h.Alloc, edges, request.Edges[i].To)
 				operandArguments = slices.Append(h.Alloc, operandArguments, request.Edges[i].Argument)
 			}
-			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, itemLimits, request.StreamItem, request.StreamContext, request.CollectFailures) == 0
+			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, itemLimits, errorPaths, errorAppends, errorModes, request.StreamItem, request.StreamContext, request.CollectFailures) == 0
 		} else {
-			ok = km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append) == 0
+			ok = km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, errorPaths, errorAppends, errorModes) == 0
 		}
 		slices.Free(h.Alloc, kinds)
 		slices.Free(h.Alloc, edges)
@@ -354,6 +362,9 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		slices.Free(h.Alloc, appends)
 		slices.Free(h.Alloc, operandArguments)
 		slices.Free(h.Alloc, itemLimits)
+		slices.Free(h.Alloc, errorPaths)
+		slices.Free(h.Alloc, errorAppends)
+		slices.Free(h.Alloc, errorModes)
 		slices.Free(h.Alloc, arguments)
 		slices.Free(h.Alloc, lengths)
 		slices.Free(h.Alloc, directories)

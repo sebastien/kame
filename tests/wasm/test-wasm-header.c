@@ -1,5 +1,5 @@
 /* Standalone public ABI check; no generated Solod headers or runtime needed.
- * cc -std=c11 -Wall -Wextra -Werror -fsyntax-only tools/native/test-wasm-header.c
+ * cc -std=c11 -Wall -Wextra -Werror -fsyntax-only tests/wasm/test-wasm-header.c
  */
 #include "../../src/go/kame/host/wasm/kame_wasm.h"
 

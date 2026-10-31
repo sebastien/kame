@@ -1,4 +1,4 @@
-// Raw ABI regressions; run after linking: node tools/wasm/test-abi.mjs [module]
+// Raw ABI regressions; run after linking: node tests/wasm/test-abi.mjs [module]
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 

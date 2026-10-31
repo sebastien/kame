@@ -13,7 +13,7 @@ test-step "freestanding module imports nothing"
 make wasm >/dev/null
 export KAME_WASM="${KAME_WASM:-$CLI_ROOT/build/wasm/kame.wasm}"
 cli=(node ./src/js/kame.js do run --lang expr --allow-read)
-if import_output="$(node tools/wasm/check-imports.mjs "$KAME_WASM")"; then
+if import_output="$(node tests/wasm/check-imports.mjs "$KAME_WASM")"; then
 	test-ok "$import_output"
 else
 	test-fail "freestanding module imported a hosted symbol"

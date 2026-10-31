@@ -92,7 +92,19 @@ type ProcessStage struct {
 	Input       string
 	Output      string
 	Append      bool
+	// ErrorMode: 0 live stderr, 1 file, 2 dup this stage's stdout, 3 dup the
+	// presentation stdout that a later stdout disposition replaced.
+	Error       string
+	ErrorAppend bool
+	ErrorMode   int
 }
+
+const (
+	StderrLive         = 0
+	StderrFile         = 1
+	StderrStdout       = 2
+	StderrPresentation = 3
+)
 type ProcessEdge struct {
 	From     int
 	To       int

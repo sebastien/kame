@@ -1981,6 +1981,9 @@ func writeProcess(b *strings.Builder, e *Expr) {
 			mux := e.Items[i]
 			b.WriteString(" |(")
 			b.WriteString(mux.Text)
+			if mux.Text == "tee" && mux.Bool {
+				b.WriteString(" :append")
+			}
 			for j := range mux.Items {
 				b.WriteByte(' ')
 				writeExpr(b, mux.Items[j])
@@ -2149,6 +2152,9 @@ func writeExpr(b *strings.Builder, e *Expr) {
 	}
 	if e.Kind == CommandRedirection {
 		b.WriteString(e.Text)
+		if e.Text == "2>&1" {
+			return
+		}
 		b.WriteByte(' ')
 		writeCommandWord(b, e.Items[0])
 		return

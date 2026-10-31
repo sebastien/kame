@@ -1,6 +1,6 @@
 // Linux policy/native checks, not Windows runtime conformance:
 // clang -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined
-// tools/native/test-argv.c -o /tmp/opencode/test-argv && /tmp/opencode/test-argv
+// tests/native/test-argv.c -o /tmp/opencode/test-argv && /tmp/opencode/test-argv
 // Fat-link the same source with cosmocc -O0 and -O3 (including aarch64).
 #include <assert.h>
 #include <errno.h>

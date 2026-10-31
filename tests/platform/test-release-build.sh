@@ -30,7 +30,7 @@ usage() {
 Build this checkout's dist/kame with a published kame.
 
 Usage:
-  src/sh/test-release-build.sh [OPTIONS]
+  tests/platform/test-release-build.sh [OPTIONS]
 
 Options:
   --channel auto|wasm|ape   auto tries WASM, then the APE (default: auto)

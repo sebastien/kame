@@ -130,7 +130,7 @@ func TestProcessGroupDiscriminationAndMalformedGraphs(t *testing.T) {
 			t.Error("value expression was classified as a process group")
 		}
 	}
-	invalid := []string{"$((printf a,) |(merge) cat)", "$((, printf b) |(merge) cat)", "$((printf a, printf b)", "$(printf a |(unknown) cat)", "$(printf a |(broadcast))", "$(printf a 2>&1)", "$(cat <&out)", "$(printf a >&in)", "$(printf a |(balance))", "$(printf a |(broadcast :buffer 0) (cat, cat))", "$(printf a |(broadcast :buffer 65537) (cat, cat))", "$(printf a |(balance :strategy random) (cat, cat))", "$(printf a |(merge :strategy round-robin) cat)", "$(printf a |(balance :buffer (read! ./config)) (cat, cat))", "$(printf a |(balance :buffer 4 :buffer 8) (cat, cat))"}
+	invalid := []string{"$((printf a,) |(merge) cat)", "$((, printf b) |(merge) cat)", "$((printf a, printf b)", "$(printf a |(unknown) cat)", "$(printf a |(broadcast))", "$(printf a 3> ./out)", "$(printf a 1>&2)", "$(printf a 2>&-)", "$(cat <&out)", "$(printf a >&in)", "$(printf a |(balance))", "$(printf a |(broadcast :buffer 0) (cat, cat))", "$(printf a |(broadcast :buffer 65537) (cat, cat))", "$(printf a |(balance :strategy random) (cat, cat))", "$(printf a |(merge :strategy round-robin) cat)", "$(printf a |(balance :buffer (read! ./config)) (cat, cat))", "$(printf a |(balance :buffer 4 :buffer 8) (cat, cat))"}
 	for i := range invalid {
 		r := expr.Parse(t.Allocator(), "invalid.km", invalid[i])
 		if len(r.Diagnostics) == 0 {

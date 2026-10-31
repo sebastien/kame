@@ -117,7 +117,7 @@ else
 	test-fail "process publisher exhaustion assertions failed"
 fi
 test-step "freed host blocks and instance arenas are reused; watch memory plateaus"
-if node tools/wasm/test-memory-reuse.mjs; then
+if node tests/wasm/test-memory-reuse.mjs; then
 	test-ok "large fingerprints and repeated reads stay within memory budgets"
 else
 	test-fail "WASM memory reuse regression"

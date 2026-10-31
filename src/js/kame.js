@@ -1770,6 +1770,11 @@ class Module {
           const path = setup[field] ?? '';
           if (typeof path !== 'string' || path.includes('\0')) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid stage redirection path');
           if (path && (!grants[capability] || !pathGranted(resolve(path), context[`${capability}Roots`]))) return this.deny(instance, request);
+          if (field === 'output') {
+            const errorPath = setup.error ?? '';
+            if (typeof errorPath !== 'string' || errorPath.includes('\0')) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid stage redirection path');
+            if (errorPath && (!grants.write || !pathGranted(resolve(errorPath), context.writeRoots))) return this.deny(instance, request);
+          }
         }
       }
       if (context.runRoots !== null && context.runRoots !== undefined) {
@@ -3194,7 +3199,7 @@ function prepareByteTopology(stages, context) {
       if (kinds[i] === 'each' && stdin.length !== 1) invalid();
       if ((stdin.length && setup[i].input) || (outputs[i].length && setup[i].output)) invalid('KASH_DOUBLE_CONSUME');
     } else {
-      if (stages[i].length || setup[i].input || setup[i].output) invalid();
+      if (stages[i].length || setup[i].input || (setup[i].output && kinds[i] !== 'copy')) invalid();
       if (kinds[i] === 'merge') { if (inputs[i].length < 2 || outputs[i].length !== 1) invalid(); }
       else if (kinds[i] === 'broadcast' || kinds[i] === 'balance') { if (inputs[i].length !== 1 || outputs[i].length < 2) invalid(); }
       else if (kinds[i] === 'filter') { if (inputs[i].length !== 1 || outputs[i].length !== 2) invalid(); }
@@ -3312,11 +3317,19 @@ function startByteMux(readers, writers, fail, done, kind = '', framed = false, i
   };
   let outputs = writers.length;
   const dispose = () => {
+    if (disposed) return;
     disposed = true;
     for (const queue of queues) { queue.pending.length = 0; queue.bytes = 0; }
     for (const stream of [...readers, ...writers]) stream.destroy();
   };
-  const error = (cause) => { if (!disposed) fail(['EPIPE', 'ECONNRESET'].includes(cause.code) && !['out', 'err'].includes(kind) ? 'RECIPE_FAIL' : 'HOST_FAIL', `process operator I/O failed: ${cause.message}`); };
+  // A copy must be able to finish after an upstream exit without waiting for
+  // the graph cancellation that would otherwise drop unread bytes.
+  dispose.retain = kind === 'copy';
+  const error = (cause) => {
+    if (disposed) return;
+    dispose();
+    fail(['EPIPE', 'ECONNRESET'].includes(cause.code) && !['out', 'err'].includes(kind) ? 'RECIPE_FAIL' : 'HOST_FAIL', `process operator I/O failed: ${cause.message}`);
+  };
   const flushQueue = (index) => {
     const queue = queues[index], writer = writers[index];
     if (disposed || queue.writing || queue.ending) return;
@@ -3428,7 +3441,7 @@ function runArgvCapture(stages, context) {
     return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid process argv' });
   }
   const setups = context.setup ?? [];
-  if (!Array.isArray(setups) || (setups.length !== 0 && setups.length !== stages.length) || setups.some((setup) => typeof setup.cwd !== 'string' || setup.cwd.includes('\0') || !Number.isSafeInteger(setup.timeoutMS) || setup.timeoutMS < 0 || !Array.isArray(setup.environment) || setup.environment.some((entry) => typeof entry !== 'string' || entry.includes('\0') || !/^[A-Za-z_][A-Za-z0-9_]*=/.test(entry)))) {
+  if (!Array.isArray(setups) || (setups.length !== 0 && setups.length !== stages.length) || setups.some((setup) => typeof setup.cwd !== 'string' || setup.cwd.includes('\0') || !Number.isSafeInteger(setup.timeoutMS) || setup.timeoutMS < 0 || !Array.isArray(setup.environment) || setup.environment.some((entry) => typeof entry !== 'string' || entry.includes('\0') || !/^[A-Za-z_][A-Za-z0-9_]*=/.test(entry)) || (setup.errorMode !== undefined && (!Number.isSafeInteger(setup.errorMode) || setup.errorMode < 0 || setup.errorMode > 3)) || (setup.errorMode === 1 && (typeof setup.error !== 'string' || setup.error.length === 0 || setup.error.includes('\0'))))) {
     return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid stage setup' });
   }
   return new Promise((resolveRun, rejectRun) => {
@@ -3451,7 +3464,7 @@ function runArgvCapture(stages, context) {
     catch { resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot start process' }); return; }
     const argumentEdges = topology ? topology.edges.map((edge, index) => edge[2] > 0 ? index : -1).filter((edge) => edge >= 0) : [];
     let pipes;
-    const terminalOperators = topology ? topology.kinds.map((kind, node) => kind && !topology.outputs[node].length && !setups[node].output ? node : -1).filter((node) => node >= 0) : [];
+    const terminalOperators = topology ? topology.kinds.map((kind, node) => kind && !topology.outputs[node].length && (!setups[node].output || kind === 'copy') ? node : -1).filter((node) => node >= 0) : [];
     try { pipes = pipelinePipes(topology ? topology.edges.length + terminalOperators.length : stages.length - 1); }
     catch { resolveRun({ ok: false, code: argumentEdges.length ? 'KASH_STREAM_OPERAND_UNSUPPORTED' : 'HOST_FAIL', message: 'cannot create pipeline pipes (POSIX mkfifo required)' }); return; }
     let operandFiles, relayExecutable, relayShell;
@@ -3467,7 +3480,7 @@ function runArgvCapture(stages, context) {
       return;
     }
     let input, output;
-    const stageInputs = [], stageOutputs = [];
+    const stageInputs = [], stageOutputs = [], stageErrors = [];
     try {
       // Input opens first: missing sources must not truncate destinations.
       if (context.input) input = openSync(context.input, 'r');
@@ -3478,10 +3491,13 @@ function runArgvCapture(stages, context) {
         const truncate = stageOutputs.map((fd, i) => !setups[i].append && fstatSync(fd).isFile());
         for (let i = 0; i < stageOutputs.length; i++) if (truncate[i]) ftruncateSync(stageOutputs[i], 0);
       }
+      for (let i = 0; i < stages.length; i++) if (setups[i]?.errorMode === 1) stageErrors[i] = openSync(setups[i].error, fsConstants.O_WRONLY | fsConstants.O_CREAT | (setups[i].errorAppend ? fsConstants.O_APPEND : 0), 0o666);
+      const truncateErrors = stageErrors.map((fd, i) => !setups[i].errorAppend && fstatSync(fd).isFile());
+      for (let i = 0; i < stageErrors.length; i++) if (truncateErrors[i]) ftruncateSync(stageErrors[i], 0);
     } catch {
       if (input !== undefined) closeSync(input);
       if (output !== undefined) closeSync(output);
-      for (const fd of [...stageInputs, ...stageOutputs]) if (fd !== undefined) closeSync(fd);
+      for (const fd of [...stageInputs, ...stageOutputs, ...stageErrors]) if (fd !== undefined) closeSync(fd);
       for (const pipe of pipes) { closeSync(pipe.read); closeSync(pipe.write); }
       operandFiles?.dispose();
       resolveRun({ ok: false, code: 'HOST_FAIL', message: 'cannot open process redirection' });
@@ -3516,8 +3532,8 @@ function runArgvCapture(stages, context) {
       if (failure !== null || graphFailure !== null) return;
       graphFailure = result;
       stopCompletion = Promise.all(children.map((child) => signalProcessTree(child, 'SIGKILL')));
-      for (const dispose of operators) dispose();
-      for (const stream of operatorStreams) stream.destroy();
+      for (const dispose of operators) if (!dispose.retain) dispose();
+      for (const stream of operatorStreams) if (!stream.retainOnFailure) stream.destroy();
       syncOutputReaders();
     };
     const publish = (callback, chunk) => {
@@ -3572,8 +3588,27 @@ function runArgvCapture(stages, context) {
         const operands = topology ? topology.inputs[i].filter((edge) => topology.edges[edge][2] > 0) : [];
         for (const edge of operands) args[topology.edges[edge][2]] = operandFiles.names[argumentEdges.indexOf(edge)];
         const childInput = topology ? inputEdge === undefined ? stageInputs[i] ?? 'ignore' : pipes[inputEdge].read : i === 0 ? input ?? 'ignore' : process.platform === 'win32' ? 'pipe' : pipes[i - 1].read;
-        const childOutput = topology ? outputEdge === undefined ? stageOutputs[i] ?? 'pipe' : pipes[outputEdge].write : i === stages.length - 1 ? output ?? 'pipe' : process.platform === 'win32' ? 'pipe' : pipes[i].write;
-        const child = spawn(executables[i], args.slice(1), { argv0: args[0], shell: false, stdio: [childInput, childOutput, 'pipe'], env: configuration.env, cwd: configuration.cwd, detached: true });
+        let childOutput = topology ? outputEdge === undefined ? stageOutputs[i] ?? 'pipe' : pipes[outputEdge].write : i === stages.length - 1 ? output ?? 'pipe' : process.platform === 'win32' ? 'pipe' : pipes[i].write;
+        const outputTarget = outputEdge === undefined ? undefined : topology.edges[outputEdge][1];
+        const targetKind = outputTarget === undefined ? '' : topology.kinds[outputTarget];
+        const commandPipe = topology ? outputTarget !== undefined && targetKind !== 'out' && targetKind !== 'err' : i !== stages.length - 1;
+        const mode = setups[i]?.errorMode ?? 0;
+        let childError = 'pipe';
+        let sharePipe = false;
+        let readErrorAsStdout = false;
+        if (mode === 1) childError = stageErrors[i];
+        else if (mode === 2 || (mode === 3 && (commandPipe || childOutput === 'pipe'))) {
+          if (childOutput === 'pipe' && process.platform !== 'win32') sharePipe = true;
+          else childError = childOutput;
+        } else if (mode === 3) readErrorAsStdout = true;
+        let shared;
+        if (sharePipe) {
+          shared = pipelinePipes(1)[0];
+          childOutput = shared.write;
+          childError = shared.write;
+        }
+        const child = spawn(executables[i], args.slice(1), { argv0: args[0], shell: false, stdio: [childInput, childOutput, childError], env: configuration.env, cwd: configuration.cwd, detached: true });
+        if (shared) closeSync(shared.write);
         children.push(child);
         child.once('exit', () => {
           for (const edge of operands) {
@@ -3612,7 +3647,8 @@ function runArgvCapture(stages, context) {
         const cancel = configuration.timeoutMS > 0 ? processDeadline(configuration.timeoutMS, () => stop('RECIPE_TIMEOUT', 'stage timed out')) : () => {};
         timers.push(cancel);
         child.once('exit', cancel);
-        publishReader(child.stderr, (chunk) => { publish((bytes) => { if (context.onStderr) context.onStderr(bytes); else stderr.write(bytes); }, chunk); }, () => failure !== null || context.signal?.aborted);
+        const liveStderr = mode === 0;
+        if (child.stderr !== null && liveStderr) publishReader(child.stderr, (chunk) => { publish((bytes) => { if (context.onStderr) context.onStderr(bytes); else stderr.write(bytes); }, chunk); }, () => failure !== null || context.signal?.aborted);
         child.once('error', () => stop('HOST_FAIL', 'cannot start process'));
         child.once('close', (status, signalName) => {
           results[i] = { status: status ?? 0, signal: osConstants.signals[signalName] ?? 0, outcome: 0 };
@@ -3623,16 +3659,26 @@ function runArgvCapture(stages, context) {
           remaining--;
           finish();
         });
-        if (child.stdout !== null) {
+        const stdoutStream = shared ? new Socket({ fd: shared.read, readable: true, writable: false }) : child.stdout;
+        if (shared) operatorStreams.push(stdoutStream);
         const receive = (chunk) => {
           if (context.stream) { publish(context.onStdout, chunk); return; }
           if (context.discardStdout) return;
-            length += chunk.length;
-            if (length > limit) stop('CAPTURE_LIMIT', 'command substitution exceeded capture limit');
-            else if (failure === null) chunks.push(chunk);
-          };
-          if (context.stream) publishReader(child.stdout, receive, () => failure !== null || context.signal?.aborted);
-          else child.stdout.on('data', receive);
+          length += chunk.length;
+          if (length > limit) stop('CAPTURE_LIMIT', 'command substitution exceeded capture limit');
+          else if (failure === null) chunks.push(chunk);
+        };
+        if (stdoutStream !== null) {
+          if (context.stream) publishReader(stdoutStream, receive, () => failure !== null || context.signal?.aborted);
+          else stdoutStream.on('data', receive);
+        }
+        if (readErrorAsStdout && child.stderr !== null) {
+          if (context.stream) publishReader(child.stderr, receive, () => failure !== null || context.signal?.aborted);
+          else child.stderr.on('data', receive);
+        }
+        if (mode === 2 && childError === 'pipe' && child.stderr !== null) {
+          if (context.stream) publishReader(child.stderr, receive, () => failure !== null || context.signal?.aborted);
+          else child.stderr.on('data', receive);
         }
       }
       // Named FIFOs need a real open rendezvous. A fixed POSIX helper opens the
@@ -3710,11 +3756,12 @@ function runArgvCapture(stages, context) {
           } else stop(code, message);
         };
         const outputEdges = [...topology.outputs[i]];
-        if (!outputEdges.length && !setups[i].output) {
+        if (!outputEdges.length && (!setups[i].output || topology.kinds[i] === 'copy')) {
           const edge = topology.edges.length + terminalOperators.indexOf(i);
           outputEdges.push(edge);
           const reader = new Socket({ fd: pipes[edge].read, readable: true, writable: false });
           pipes[edge].read = undefined;
+          reader.retainOnFailure = topology.kinds[i] === 'copy';
           operatorStreams.push(reader);
           // Join presentation EOF too: the writer may close before this reader
           // has delivered its last bytes to capture or the public output queue.
@@ -3728,21 +3775,24 @@ function runArgvCapture(stages, context) {
         operators.push(startByteMux(topology.inputs[i].map((edge) => {
           const reader = new Socket({ fd: pipes[edge].read, readable: true, writable: false });
           pipes[edge].read = undefined;
+          reader.retainOnFailure = topology.kinds[i] === 'copy';
           operatorStreams.push(reader);
           reader.on('error', (error) => failMux(['EPIPE', 'ECONNRESET'].includes(error.code) ? 'RECIPE_FAIL' : 'HOST_FAIL', error.message));
           return reader;
-        }), setups[i].output ? [(() => {
+        }), [...(setups[i].output ? [(() => {
           const writer = createWriteStream('', { fd: stageOutputs[i], autoClose: true });
           stageOutputs[i] = undefined;
+          writer.retainOnFailure = topology.kinds[i] === 'copy';
           operatorStreams.push(writer);
           return writer;
-        })()] : outputEdges.map((edge) => {
+        })()] : []), ...outputEdges.map((edge) => {
           const writer = new Socket({ fd: pipes[edge].write, readable: false, writable: true });
           pipes[edge].write = undefined;
+          writer.retainOnFailure = topology.kinds[i] === 'copy';
           operatorStreams.push(writer);
           writer.on('error', (error) => failMux(['EPIPE', 'ECONNRESET'].includes(error.code) ? 'RECIPE_FAIL' : 'HOST_FAIL', error.message));
           return writer;
-        }), failMux, () => {
+        })], failMux, () => {
           results[i] ??= workerResult;
           if (liveStates[i] !== 5) liveStates[i] = failure !== null || graphFailure !== null ? 6 : 4;
           if (results[i].status || results[i].signal) liveStates[i] = 5;
@@ -3753,7 +3803,7 @@ function runArgvCapture(stages, context) {
       }
     } catch { stop('HOST_FAIL', 'cannot start process'); }
     finally {
-      for (const fd of [input, output, ...stageInputs, ...stageOutputs]) {
+      for (const fd of [input, output, ...stageInputs, ...stageOutputs, ...stageErrors]) {
         if (fd !== undefined) { try { closeSync(fd); } catch { stop('HOST_FAIL', 'cannot close redirection'); } }
       }
       for (const pipe of pipes) for (const fd of [pipe.read, pipe.write]) {
