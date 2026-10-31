@@ -56,7 +56,7 @@ def events(root: Path, name: str) -> list[dict]:
 	return [json.loads(line) for line in (root / f"{name}.out").read_text().splitlines()]
 
 
-def terminalWait(command: list[str], root: Path, *, color: bool = True, environment: dict | None = None, dashboard: bool = True, width: int = 100) -> None:
+def terminalWait(command: list[str], root: Path, *, color: bool = True, environment: dict | None = None, dashboard: bool = True, width: int = 100, lockPath: str = "/") -> None:
 	with ExitStack() as stack:
 		master, slave = pty.openpty()
 		stack.callback(os.close, master)
@@ -76,13 +76,13 @@ def terminalWait(command: list[str], root: Path, *, color: bool = True, environm
 				return b"BLOCKED" in log and b"Ctrl-C" in log
 			return log.count(b"BLOCKED") >= 2 and b"\x1b[1A" in log and b"waiting " in log
 		waitFor(refreshed, process)
-		assert b"owner:" in log and str(root).encode() in log, log
+		assert b"owner:" in log and lockPath.encode() in log, log
 		if color:
 			assert all(sequence in log for sequence in [b"\x1b[93m", b"\x1b[36m", b"\x1b[1m", b"\x1b[2m"]), log
 		else:
 			assert not SGR.search(log), log
 		plain = SGR.sub(b"", log).decode()
-		assert re.search(r"  lock: +/", plain) and re.search(r"  time: +waiting \d+\.\d+s", plain), plain
+		assert re.search(r"  lock: +" + re.escape(lockPath), plain) and re.search(r"  time: +waiting \d+\.\d+s", plain), plain
 		if dashboard:
 			beforeResize = len(log)
 			fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 20, 0, 0))
@@ -96,20 +96,24 @@ def terminalWait(command: list[str], root: Path, *, color: bool = True, environm
 
 def nativeLocks(binary: str, root: Path) -> None:
 	root.mkdir()
-	(root / "Makefile.kmk").write_text('TOKEN = "default"\ndefault :\n\tprintf "result\\n"\nhold :\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n')
+	(root / "Makefile.kmk").write_text('TOKEN = "default"\ndefault :\n\tprintf "result\\n"\nhold :\n\ttouch ready\n\twhile [ ! -f release ]; do sleep 0.05; done\n\tprintf "held\\n"\n')
 	with ExitStack() as stack:
 		owner = start(stack, [binary, "--define", "TOKEN=secret-not-for-lock-logs", "hold"], root, "owner")
 		waitFor(lambda: (root / "ready").exists(), owner)
-		text = start(stack, [binary, "--output=text", "--color=always"], root, "text")
-		structured = start(stack, [binary, "--json", "--color=always", "-f", "Makefile.kmk"], root, "json")
-		watch = start(stack, [binary, "--output=text", "--color=never", "--watch"], root, "watch")
+		# A disjoint target runs while the owner holds the shared project lease
+		# and the task lock. It must not wait for either.
+		free = subprocess.run([binary], cwd=root, capture_output=True, text=True, timeout=5)
+		assert free.returncode == 0 and free.stdout == "result\n", free
+		text = start(stack, [binary, "--output=text", "--color=always", "hold"], root, "text")
+		structured = start(stack, [binary, "--json", "--color=always", "-f", "Makefile.kmk", "hold"], root, "json")
+		watch = start(stack, [binary, "--output=text", "--color=never", "--watch", "hold"], root, "watch")
 		waitFor(lambda: "BLOCKED" in (root / "text.err").read_text(), text)
 		waitFor(lambda: '"type":"lock-waiting"' in (root / "json.out").read_text(), structured)
 		waitFor(lambda: "BLOCKED" in (root / "watch.err").read_text(), watch)
 		lock = root / ".kame/outputs/lock"
 		for name in ["text", "watch"]:
 			log = (root / f"{name}.err").read_text()
-			assert str(lock) in log and f"PID {owner.pid}" in log and "kame hold" in log, log
+			assert "task lock" in log and "hold" in log and f"PID {owner.pid}" in log, log
 			assert "secret-not-for-lock-logs" not in log
 		assert not (root / "text.out").read_text(), "wait notice contaminated data stdout"
 		assert b"\x1b[93m" in (root / "text.err").read_bytes()
@@ -118,19 +122,19 @@ def nativeLocks(binary: str, root: Path) -> None:
 		assert report.returncode == 1, report
 		busy = json.loads(report.stdout)
 		assert busy["type"] == "clean-result" and busy["lock"]["path"] == str(lock), busy
-		assert busy["lock"]["owner"]["pid"] == owner.pid, busy
+		assert busy["lock"]["owner"]["pid"] in {owner.pid, text.pid, structured.pid, watch.pid}, busy
 		assert "secret-not-for-lock-logs" not in report.stdout
 		protection = subprocess.run([binary, "do", "clean", "--json", "--keep", "./out"], cwd=root, capture_output=True, text=True, timeout=3)
-		assert protection.returncode == 1 and str(lock) in protection.stdout and str(owner.pid) in protection.stdout, protection
+		assert protection.returncode == 1 and str(lock) in protection.stdout and "PID " in protection.stdout, protection
 		if sys.platform == "linux":
 			assert busy["lock"]["owner"]["verified"] is True, busy
 		stop(watch)
 		assert watch.returncode != 0 and owner.poll() is None and lock.exists()
-		terminalWait([binary, "--color=always"], root)
-		terminalWait([binary, "--color=always"], root, width=40)
-		terminalWait([binary, "--color=never"], root, color=False)
-		terminalWait([binary], root, color=False, environment={"NO_COLOR": "1"})
-		terminalWait([binary], root, color=False, environment={"TERM": "dumb"}, dashboard=False)
+		terminalWait([binary, "--color=always", "hold"], root, lockPath="hold")
+		terminalWait([binary, "--color=always", "hold"], root, width=40, lockPath="hold")
+		terminalWait([binary, "--color=never", "hold"], root, color=False, lockPath="hold")
+		terminalWait([binary, "hold"], root, color=False, environment={"NO_COLOR": "1"}, lockPath="hold")
+		terminalWait([binary, "hold"], root, color=False, environment={"TERM": "dumb"}, dashboard=False, lockPath="hold")
 		# A long wait must stay visibly alive without flooding redirected logs.
 		waitFor(lambda: (root / "text.err").read_text().count("BLOCKED") >= 2, text)
 		assert (root / "text.err").read_text().count("BLOCKED") == 2
@@ -138,15 +142,45 @@ def nativeLocks(binary: str, root: Path) -> None:
 		assert owner.wait(timeout=3) == 0
 		assert text.wait(timeout=3) == 0
 		assert structured.wait(timeout=3) == 0
-		assert (root / "text.out").read_text() == "result\n"
+		assert (root / "text.out").read_text() == "held\n"
 		assert "lock acquired after" in (root / "text.err").read_text()
 		assert b"\x1b[32m" in (root / "text.err").read_bytes()
 		lockEvents = [event for event in events(root, "json") if event["type"].startswith("lock-")]
 		assert lockEvents[0]["type"] == "lock-waiting" and lockEvents[0]["owner"]["pid"] == owner.pid, lockEvents
+		assert lockEvents[0]["kind"] == "task" and lockEvents[0]["path"] == "hold", lockEvents
 		assert lockEvents[-1]["type"] == "lock-acquired" and lockEvents[-1]["elapsedMs"] >= 5000, lockEvents
 		assert not (root / "json.err").read_text()
 		assert not SGR.search((root / "json.out").read_bytes())
 		assert lock.read_bytes() == b"", "released lock retained stale owner metadata"
+
+
+def groupedResources(binary: str, root: Path) -> None:
+	"""A grouped producer locks every declared sibling, not just the requested one."""
+	root.mkdir()
+	(root / "input").write_text("seed\n")
+	(root / "Makefile.kmk").write_text("./build/one ./build/two : ./input\n\tmkdir -p ./build\n\tcp @< ./build/one\n\tcp @< ./build/two\n\ttouch grouped\n\tread reply < ./gate\n")
+	os.mkfifo(root / "gate")
+	with ExitStack() as stack:
+		first = start(stack, [binary, "./build/one"], root, "first")
+		waitFor(lambda: (root / "grouped").exists(), first)
+		second = start(stack, [binary, "./build/two"], root, "second")
+		waitFor(lambda: "BLOCKED" in (root / "second.err").read_text(), second)
+		log = (root / "second.err").read_text()
+		assert "output lock" in log and str(root / "build/one") in log, log
+		assert second.poll() is None, second.communicate()
+		(root / "grouped").unlink()
+		for name, process in [("first", first), ("second", second)]:
+			deadline = time.monotonic() + 10
+			while True:
+				try:
+					fd = os.open(root / "gate", os.O_WRONLY | os.O_NONBLOCK)
+					break
+				except OSError:
+					assert process.poll() is None and time.monotonic() < deadline, f"no reader for {name}"
+					time.sleep(0.01)
+			os.write(fd, b"continue\n")
+			os.close(fd)
+			assert process.wait(timeout=10) == 0, (root / f"{name}.err").read_text()
 
 
 def nativeCache(binary: str, root: Path) -> None:
@@ -286,6 +320,7 @@ def main() -> None:
 	with tempfile.TemporaryDirectory(prefix="kame-lock-diagnostics-", dir="/tmp/opencode") as directory:
 		root = Path(directory)
 		nativeLocks(binary, root / "native")
+		groupedResources(binary, root / "grouped")
 		nativeCache(binary, root / "cache")
 		nativeHardlinks(binary, root / "hardlinks")
 		nodeLocks(script, root / "node")

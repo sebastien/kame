@@ -63,8 +63,8 @@ typedef struct km_lock_event {
     int64_t ElapsedMS, HeldMS;
 } km_lock_event;
 void km_cli_observe_locks(bool (*)(km_lock_event *), so_String);
-int km_file_lock(int, so_String, so_String, bool);
-void km_file_unlock(int);
+int km_file_lock(int, so_String, so_String, bool, bool);
+void km_file_unlock(int, bool);
 void km_host_force_waitpid_failure(km_host *);
 void km_event_force_allocation_failure(int);
 void km_event_free(km_event *);

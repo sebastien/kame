@@ -99,6 +99,39 @@ func recordProduction(state any, p *program.Program, paths []string, producer st
 	return diagnostic.Diagnostic{Code: cloneCommandText(code), Message: cloneCommandText(message), Severity: diagnostic.Error, Owned: true}
 }
 
+// lockProduction serializes concurrent producers on declared outputs and on
+// target names whose recipes declare no file outputs. The batch is already
+// sorted by name; a partial acquisition is released before reporting failure.
+func lockProduction(state any, resources []program.LockedResource) diagnostic.Diagnostic {
+	ledger := state.(*outputLedger)
+	for i := range resources {
+		if ledger.Store.LockResource(resources[i].Name, resources[i].Kind) {
+			continue
+		}
+		status := ledger.Store.Status
+		for j := 0; j < i; j++ {
+			ledger.Store.UnlockResource(resources[j].Name, resources[j].Kind)
+		}
+		if status == -4 {
+			return diagnostic.Diagnostic{Code: cloneCommandText("EXEC_CANCELLED"), Message: cloneCommandText("cancelled while waiting for " + resources[i].Kind + " lock"), Severity: diagnostic.Error, Owned: true}
+		}
+		code := "CLEAN_STATE"
+		message := "cannot coordinate concurrent production; " + resources[i].Kind + " lock unavailable"
+		if status == -2 {
+			code, message = "CLEAN_BUSY", "project is busy with another producer"
+		}
+		return diagnostic.Diagnostic{Code: cloneCommandText(code), Message: cloneCommandText(message), Severity: diagnostic.Error, Owned: true}
+	}
+	return diagnostic.Diagnostic{}
+}
+
+func unlockProduction(state any, resources []program.LockedResource) {
+	ledger := state.(*outputLedger)
+	for i := range resources {
+		ledger.Store.UnlockResource(resources[i].Name, resources[i].Kind)
+	}
+}
+
 func cleanRoot(directory string) string {
 	if path.IsAbs(directory) {
 		return path.Clean(mem.System, directory)

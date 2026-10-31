@@ -478,8 +478,9 @@ else
 fi
 
 test-step "prebuilt release staging signs without re-entering Kame"
-# The Kame `release` target holds the project lock and builds these assets.
-# Staging must not call `make`, which would block on that same lock.
+# The Kame `release` target holds the shared project lease and has built these
+# assets. Staging must not call `make`, which would repeat that production and
+# can wait on the same output locks.
 cp VERSION package.json "$fixture/"
 git -C "$fixture" tag -d "v$MOCK_VERSION" >/dev/null 2>&1 || true
 mkdir -p "$fixture/dist" "$fixture/src/sh"

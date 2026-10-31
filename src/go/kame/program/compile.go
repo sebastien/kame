@@ -69,6 +69,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	p.Options.ResolveTool = options.ResolveTool
 	p.Options.Ownership, p.Options.OwnershipState = options.Ownership, options.OwnershipState
+	p.Options.LockResources, p.Options.UnlockResources, p.Options.ResourcesState = options.LockResources, options.UnlockResources, options.ResourcesState
 	p.Options.CaptureLimit = options.CaptureLimit
 	if p.Options.CaptureLimit <= 0 {
 		p.Options.CaptureLimit = 1024 * 1024
@@ -440,6 +441,7 @@ func (p *Program) Free() {
 			p.freeKashContext(p.Instances[i].KashContext)
 		}
 		p.freeFileContext(p.Instances[i].FileContext)
+		p.releaseResources(&p.Instances[i])
 		freeStrings(p.Alloc, p.Instances[i].OwnershipPaths)
 		p.Instances[i].AcceptedRecord.Free(p.Alloc)
 		p.freeNewerInputs(p.Instances[i].NewerInputs)

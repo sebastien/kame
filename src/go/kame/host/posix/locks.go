@@ -27,21 +27,24 @@ func ObserveLocks(observer func(*LockEvent) bool, command string) {
 }
 
 //so:extern nodecay
-func km_file_lock(fd c.Int, name string, kind string, wait bool) c.Int {
-	_, _, _, _ = fd, name, kind, wait
+func km_file_lock(fd c.Int, name string, kind string, wait bool, shared bool) c.Int {
+	_, _, _, _, _ = fd, name, kind, wait, shared
 	return -1
 }
 
 // LockFile preserves flock semantics: 0 acquired, -2 busy, -4 interrupted,
 // -1 host failure. Nonwaiting callers receive a busy observation, not a wait.
-func LockFile(fd int, name string, kind string, wait bool) int {
-	return int(km_file_lock(c.Int(fd), name, kind, wait))
+// Shared leases let producers coexist while exclusive cleanup excludes them.
+func LockFile(fd int, name string, kind string, wait bool, shared bool) int {
+	return int(km_file_lock(c.Int(fd), name, kind, wait, shared))
 }
 
 //so:extern
-func km_file_unlock(fd c.Int) { _ = fd }
+func km_file_unlock(fd c.Int, clear bool) { _, _ = fd, clear }
 
-func UnlockFile(fd int) { km_file_unlock(c.Int(fd)) }
+// UnlockFile never unlinks the lock inode. Clear only when this holder is the
+// sole owner; shared peers may still rely on the recorded metadata.
+func UnlockFile(fd int, clear bool) { km_file_unlock(c.Int(fd), clear) }
 
 //so:extern
 func km_cli_signal_pending() bool { return false }

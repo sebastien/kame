@@ -129,7 +129,7 @@ func writeLockRow(out io.Writer, label string, value string, token string, width
 }
 
 func writeLockHeading(out io.Writer, event *posix.LockEvent, width int) {
-	status, detail := "! BLOCKED", "waiting for exclusive "+event.Kind+" lock"
+	status, detail := "! BLOCKED", "waiting for "+event.Kind+" lock"
 	if event.State == "busy" {
 		status, detail = "! BUSY", "exclusive "+event.Kind+" lock"
 	}

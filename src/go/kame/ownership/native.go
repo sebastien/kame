@@ -36,6 +36,15 @@ func km_own_open(root string, create bool, status *c.Int) *nativeStore {
 //so:extern
 func km_own_lock_fd(s *nativeStore) c.Int { _ = s; return -1 }
 
+//so:extern nodecay
+func km_own_resource_fd(s *nativeStore, name string, status *c.Int) c.Int {
+	_, _, _ = s, name, status
+	return -1
+}
+
+//so:extern
+func km_own_fd_close(fd c.Int) { _ = fd }
+
 //so:extern
 func km_own_close(s *nativeStore) { _ = s }
 
@@ -84,6 +93,21 @@ func km_own_restore(s *nativeStore, name string, token string) c.Int {
 	return -1
 }
 
+const (
+	leaseNone = iota
+	leaseShared
+	leaseExclusive
+)
+
+// heldLock is one process-wide reference to a resource lock file. Producers of
+// disjoint outputs or different targets coexist; a repeated key only raises the
+// reference count, matching the cache stripe behavior.
+type heldLock struct {
+	Key  string
+	FD   int
+	Refs int
+}
+
 type Store struct {
 	Alloc       mem.Allocator
 	Root        string
@@ -93,6 +117,8 @@ type Store struct {
 	PollCancel  func(any) bool
 	CancelState any
 	Interrupted bool
+	lease       int
+	locks       []heldLock
 }
 
 func (s *Store) cancelled() bool {
@@ -111,47 +137,186 @@ func New(a mem.Allocator, root string) *Store {
 	return s
 }
 
+// Open takes the exclusive project lease without waiting. Protection and
+// cleanup stay fail-fast while producers hold a shared lease.
 func (s *Store) Open(create bool) bool {
-	return s.open(create, false)
+	return s.exclusive(create)
 }
 
-// Acquire serializes producers, while inspection/protection/cleanup stay
-// fail-fast. The shared POSIX wait reports contention and observes signals.
+// Acquire admits a producer under the shared project lease. Concurrent
+// producers coexist; cleanup still requires the exclusive lease.
 func (s *Store) Acquire() bool {
-	return s.open(true, true)
+	return s.lockLease(true, true, true)
 }
 
-func (s *Store) open(create bool, wait bool) bool {
+func (s *Store) openNative(create bool) bool {
 	if s.native != nil {
 		return true
 	}
 	var status c.Int
 	s.native = km_own_open(s.Root, create, &status)
 	s.Status = int(status)
-	if s.native != nil {
-		lockPath := path.Join(s.Alloc, s.Root, ".kame/outputs/lock")
-		s.Status = posix.LockFile(int(km_own_lock_fd(s.native)), lockPath, "project", wait)
-		mem.FreeString(s.Alloc, lockPath)
-		if s.Status != 0 {
-			km_own_close(s.native)
-			s.native = nil
-		}
+	if s.native == nil {
+		return false
 	}
-	if s.native != nil && km_own_root(s.native, s.ID[:]) != 0 {
-		posix.UnlockFile(int(km_own_lock_fd(s.native)))
+	if km_own_root(s.native, s.ID[:]) != 0 {
 		km_own_close(s.native)
 		s.native = nil
 		s.Status = -1
+		return false
 	}
-	return s.native != nil
+	return true
+}
+
+func (s *Store) leasePath() string {
+	return path.Join(s.Alloc, s.Root, ".kame/outputs/lock")
+}
+
+func (s *Store) lockLease(create bool, wait bool, shared bool) bool {
+	if !s.openNative(create) {
+		return false
+	}
+	if s.lease == leaseExclusive || (shared && s.lease == leaseShared) {
+		return true
+	}
+	lockPath := s.leasePath()
+	defer mem.FreeString(s.Alloc, lockPath)
+	if s.lease == leaseShared {
+		// flock conversion is not atomic; release before requesting exclusive.
+		posix.UnlockFile(int(km_own_lock_fd(s.native)), false)
+		s.lease = leaseNone
+	}
+	status := posix.LockFile(int(km_own_lock_fd(s.native)), lockPath, "project", wait, shared)
+	s.Status = status
+	if status != 0 {
+		return false
+	}
+	if shared {
+		s.lease = leaseShared
+	} else {
+		s.lease = leaseExclusive
+	}
+	return true
+}
+
+// exclusive upgrades a shared lease and restores it when the exclusive attempt
+// is busy or cancelled, so the rest of this run keeps the cleanup boundary.
+func (s *Store) exclusive(create bool) bool {
+	wasShared := s.lease == leaseShared
+	if s.lockLease(create, false, false) {
+		return true
+	}
+	failed := s.Status
+	if wasShared && s.native != nil {
+		lockPath := s.leasePath()
+		restored := posix.LockFile(int(km_own_lock_fd(s.native)), lockPath, "project", true, true)
+		mem.FreeString(s.Alloc, lockPath)
+		if restored == 0 {
+			s.lease = leaseShared
+		}
+	}
+	s.Status = failed
+	return false
+}
+
+// share downgrades an exclusive lease after cleanup so later producers in this
+// run remain concurrent with other invocations.
+func (s *Store) share() bool {
+	if s.lease == leaseExclusive {
+		posix.UnlockFile(int(km_own_lock_fd(s.native)), true)
+		s.lease = leaseNone
+	}
+	return s.lockLease(false, true, true)
+}
+
+// finishClean restores the lease that existed before an in-process cleanup.
+// A producer keeps its shared boundary; a standalone clean releases exclusivity
+// instead of blocking other invocations for the remainder of the run.
+func (s *Store) finishClean(shared bool) {
+	if s.native == nil {
+		return
+	}
+	if shared {
+		s.share()
+		return
+	}
+	if s.lease == leaseExclusive {
+		posix.UnlockFile(int(km_own_lock_fd(s.native)), true)
+		s.lease = leaseNone
+	}
+}
+
+// LockResource serializes one declared output path or target name. Waits are
+// cancellable and reported through the shared lock observer.
+func (s *Store) LockResource(name string, kind string) bool {
+	if name == "" || !s.Acquire() {
+		return false
+	}
+	identity := kind + "\x00" + name
+	lockKey := key(s.Alloc, identity)
+	for i := range s.locks {
+		if s.locks[i].Key == lockKey {
+			mem.FreeString(s.Alloc, lockKey)
+			s.locks[i].Refs++
+			s.Status = 0
+			return true
+		}
+	}
+	var status c.Int
+	fd := int(km_own_resource_fd(s.native, lockKey, &status))
+	if fd < 0 {
+		mem.FreeString(s.Alloc, lockKey)
+		s.Status = int(status)
+		return false
+	}
+	s.Status = posix.LockFile(fd, name, kind, true, false)
+	if s.Status != 0 {
+		km_own_fd_close(c.Int(fd))
+		mem.FreeString(s.Alloc, lockKey)
+		return false
+	}
+	s.locks = slices.Append(s.Alloc, s.locks, heldLock{Key: lockKey, FD: fd, Refs: 1})
+	return true
+}
+
+func (s *Store) UnlockResource(name string, kind string) {
+	identity := kind + "\x00" + name
+	lockKey := key(s.Alloc, identity)
+	for i := range s.locks {
+		if s.locks[i].Key != lockKey {
+			continue
+		}
+		s.locks[i].Refs--
+		if s.locks[i].Refs > 0 {
+			mem.FreeString(s.Alloc, lockKey)
+			return
+		}
+		posix.UnlockFile(s.locks[i].FD, true)
+		km_own_fd_close(c.Int(s.locks[i].FD))
+		mem.FreeString(s.Alloc, s.locks[i].Key)
+		last := len(s.locks) - 1
+		s.locks[i] = s.locks[last]
+		s.locks = s.locks[:last]
+		mem.FreeString(s.Alloc, lockKey)
+		return
+	}
+	mem.FreeString(s.Alloc, lockKey)
 }
 
 func (s *Store) Free() {
 	if s == nil {
 		return
 	}
+	for i := range s.locks {
+		posix.UnlockFile(s.locks[i].FD, true)
+		km_own_fd_close(c.Int(s.locks[i].FD))
+		mem.FreeString(s.Alloc, s.locks[i].Key)
+	}
+	slices.Free(s.Alloc, s.locks)
 	if s.native != nil {
-		posix.UnlockFile(int(km_own_lock_fd(s.native)))
+		if s.lease != leaseNone {
+			posix.UnlockFile(int(km_own_lock_fd(s.native)), s.lease == leaseExclusive)
+		}
 		km_own_close(s.native)
 	}
 	mem.FreeString(s.Alloc, s.Root)

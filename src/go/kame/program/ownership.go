@@ -33,10 +33,91 @@ func (p *Program) beginOwnership(entry *instance, commands string, effects []eva
 			mem.FreeString(p.Alloc, name)
 		}
 	}
+	// Lock resources before the uncertain production record and any effects.
+	if d := p.holdResources(entry); d.Code != "" {
+		return d
+	}
 	if len(entry.OwnershipPaths) == 0 {
 		return diagnostic.Diagnostic{}
 	}
 	return p.Options.Ownership(p.Options.OwnershipState, p, entry.OwnershipPaths, entry.Plan.Target, false)
+}
+
+// holdResources serializes concurrent producers on declared outputs and on the
+// target name of recipes without declared file outputs. Paths are acquired as
+// one sorted batch; repeated calls for the same instance add nothing.
+func (p *Program) holdResources(entry *instance) diagnostic.Diagnostic {
+	if p.Options.LockResources == nil || p.Options.DryRun {
+		return diagnostic.Diagnostic{}
+	}
+	var fresh []LockedResource
+	if entry.Rule.Kind != rule.FileRule && !heldResource(entry.Resources, entry.Plan.Target, "task") {
+		fresh = slices.Append(p.Alloc, fresh, LockedResource{Name: cloneText(p.Alloc, entry.Plan.Target), Kind: cloneText(p.Alloc, "task")})
+	}
+	for i := range entry.OwnershipPaths {
+		if heldResource(entry.Resources, entry.OwnershipPaths[i], "output") {
+			continue
+		}
+		fresh = slices.Append(p.Alloc, fresh, LockedResource{Name: cloneText(p.Alloc, entry.OwnershipPaths[i]), Kind: cloneText(p.Alloc, "output")})
+	}
+	if len(fresh) == 0 {
+		slices.Free(p.Alloc, fresh)
+		return diagnostic.Diagnostic{}
+	}
+	sortResourceBatch(fresh)
+	d := p.Options.LockResources(p.Options.ResourcesState, fresh)
+	if d.Code != "" {
+		freeResources(p.Alloc, fresh)
+		slices.Free(p.Alloc, fresh)
+		return d
+	}
+	for i := range fresh {
+		entry.Resources = slices.Append(p.Alloc, entry.Resources, fresh[i])
+	}
+	slices.Free(p.Alloc, fresh)
+	return diagnostic.Diagnostic{}
+}
+
+func heldResource(resources []LockedResource, name string, kind string) bool {
+	for i := range resources {
+		if resources[i].Kind == kind && resources[i].Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// sortResourceBatch keeps cross-process acquisition order stable for the paths
+// a producer declares. Task names never collide with declared paths.
+func sortResourceBatch(resources []LockedResource) {
+	for i := 1; i < len(resources); i++ {
+		item := resources[i]
+		j := i - 1
+		for j >= 0 && strings.Compare(resources[j].Name, item.Name) > 0 {
+			resources[j+1] = resources[j]
+			j--
+		}
+		resources[j+1] = item
+	}
+}
+
+func freeResources(a mem.Allocator, resources []LockedResource) {
+	for i := range resources {
+		mem.FreeString(a, resources[i].Name)
+		mem.FreeString(a, resources[i].Kind)
+	}
+}
+
+func (p *Program) releaseResources(entry *instance) {
+	if len(entry.Resources) == 0 {
+		return
+	}
+	if p.Options.UnlockResources != nil {
+		p.Options.UnlockResources(p.Options.ResourcesState, entry.Resources)
+	}
+	freeResources(p.Alloc, entry.Resources)
+	slices.Free(p.Alloc, entry.Resources)
+	entry.Resources = nil
 }
 
 func (p *Program) commitOwnership(entry *instance) diagnostic.Diagnostic {

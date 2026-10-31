@@ -153,6 +153,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		}
 		ledger.Out, ledger.Err, ledger.JSON = out, errOut, inv.JSON
 		programOptions.Ownership, programOptions.OwnershipState = recordProduction, ledger
+		programOptions.LockResources, programOptions.UnlockResources, programOptions.ResourcesState = lockProduction, unlockProduction, ledger
 		programOptions.AutomaticClean, programOptions.AutomaticCleanState = automaticClean, ledger
 	}
 	defer freeOutputLedger(ledger)

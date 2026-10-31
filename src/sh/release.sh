@@ -229,8 +229,9 @@ fi
 printf 'release: staging %s (revision %s)\n' "$tag" "$revision"
 
 # dist-release stages only the APE, WASM pair and verification metadata.
-# The Kame `release` target already holds the project lock while it builds the
-# prerequisites, so re-entering Kame through `make dist-release` would deadlock.
+# The Kame `release` target already holds the shared project lease while it
+# builds the prerequisites; re-entering Kame through `make dist-release` would
+# duplicate that production and can wait on the same output locks.
 if [ -n "${KAME_RELEASE_PREBUILT:-}" ]; then
 	rm -rf "$release_dir"
 	mkdir -p "$release_dir"

@@ -228,6 +228,56 @@ inside strings, templates and Kash words keeps the chain on one physical line
 without rewriting it into calls. Kash process pipelines retain their separate
 streaming syntax and are not value-pipe conversions.
 
+### Kash Process Graphs
+
+A Kash statement stays on one line unless its process graph nests a group or a
+`|(filter …)` branch. Expansion is structural, not width-driven: a graph with
+neither form keeps the inline layout at any length.
+
+An expanded graph keeps its subject on the first line and starts every following
+stage or operator on a new line one indentation level deeper, beginning with `|`:
+
+```kash
+printf "a\nb\n" |(frame :lines) |(balance) (|(each) cat > ./first.txt, |(each) cat > ./second.txt) |(merge :order round-robin) cat
+```
+
+becomes
+
+```kash
+printf "a\nb\n"
+	|(frame :lines)
+	|(balance) (
+		 |(each) cat > ./first.txt,
+		 |(each) cat > ./second.txt
+	)
+	|(merge :order round-robin) cat
+```
+
+A group opens on the operator line, puts each member on its own line one level
+deeper, separates members with `,`, and returns the closing `)` to the group's
+own level. A member that continues with further operators indents from the
+member, not from the group.
+
+Destinations are not pipes. A fan-out operator's destinations (`merge`,
+`broadcast`, `balance`) and an implicit-stage command (`each`) follow their
+operator after a single space. The `|` an author may write before an
+implicit-stage command carries no structural meaning, so formatting canonicalizes
+it to the space form:
+
+```kash
+printf "a\n" |(frame :lines) |(each) cat
+```
+
+An operator's own spelling stays on its line: `|(tee PATH)` and
+`|(tee :append PATH)` are written as authored, and a `2>&1` written after
+`>&channel` follows that writer because the alias copies the channel
+destination. Statement suffixes `?`, `? fallback`, `&`, `>&` and `>@` stay
+attached to their own statement.
+
+Compact and expanded layouts describe the same graph. Formatting an expanded
+statement again leaves it unchanged, never moves a stage across an operator, and
+reparsing it preserves the graph structure exactly.
+
 ### Lists and Records
 
 Short collections remain inline:
@@ -300,7 +350,8 @@ Use these expression layouts in expression sources, value scripts, and build
 definitions. They do not replace surrounding language grammars:
 
 - Rule headers and recipes retain their own formatting contracts.
-- Kash statements and process pipelines retain their own syntax and ordering.
+- Kash statements and process pipelines retain their own syntax and ordering,
+  expanding only as *Kash Process Graphs* describes above.
 - Template text and verbatim strings remain literal content, not source to be
   reindented. Inline interpolations use compact expression formatting; they
   must not introduce physical line breaks into their enclosing text.
@@ -361,3 +412,7 @@ the transformations next, and find rules or execution at the end of the file.
   repeated placeholders, multiline operands, comments, and compact expressions
   in strings, templates, rule headers and Kash words; no calls/effects execute
   merely to choose or preserve the structure.
+- Kash process graphs expand for nested groups and filter branches only, keep
+  fan-out destinations and implicit-stage commands off the pipe syntax, and stay
+  byte-identical across repeated formatting with an unchanged graph after
+  reparsing.

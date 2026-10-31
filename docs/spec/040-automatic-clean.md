@@ -202,10 +202,19 @@ ownership release. Recovery is a user-visible safety boundary, not successful
 cleanup or a reason to recursively remove staging contents.
 
 Serialize cleanup against cooperating Kame builds, tracked writes and ownership
-updates for the same project. Watch invocations must quiesce their producers or
-make cleanup fail as busy; they must not immediately race to rebuild removed
-outputs. Revalidate under the protected cleanup operation, not only during a
-previous dry-run. Locking Kame does not lock editors or arbitrary external tools.
+updates for the same project. Producers hold a shared project lease for their
+run; cleanup and protection require that lease exclusively and fail as busy while
+any producer holds it. Concurrent producers coordinate their declared artifact
+paths and the target names of recipes without declared file outputs. Undeclared
+side effects of different targets remain outside that coordination, exactly like
+opaque shell side effects elsewhere in this contract. Destinations discovered
+during execution acquire their resource lock before the write, while
+declaration-time paths use a stable acquisition order. Resource lock files under
+`.kame/outputs/locks/` are empty coordination inodes; cleanup and cache cleaning
+never remove them. Watch invocations must quiesce their producers or make cleanup
+fail as busy; they must not immediately race to rebuild removed outputs.
+Revalidate under the protected cleanup operation, not only during a previous
+dry-run. Locking Kame does not lock editors or arbitrary external tools.
 
 No guarantee is made against malicious or uncooperative writers modifying a
 file through an already open handle during cleanup, or tampering with trusted
@@ -276,6 +285,8 @@ it does not change eligibility, counts or exit status.
   permission failures and unavailable race-resistant host operations remove no
   affected files and produce explicit diagnostics.
 - Cooperating concurrent builds and watch producers cannot race cleanup.
+  Disjoint declared producers run concurrently; identical declared outputs or
+  target names serialize, and cleanup still excludes every producer.
   Dry-run decisions are revalidated during actual removal.
 - Interrupted partial cleanup retains unresolved entries and is safely retryable;
   a second clean resolves previously removed members without deleting replacements.

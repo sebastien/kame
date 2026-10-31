@@ -97,8 +97,8 @@ km_own_store *km_own_open(so_String root, bool create, int *status) {
     int kame = km_own_dir(project, ".kame", create);
     int records = kame < 0 ? kame : km_own_dir(kame, "outputs", create);
     if (records < 0) { if (kame >= 0) close(kame); close(project); *status = records == -4 ? 1 : records; return NULL; }
-    // ponytail: one exclusive project lock serializes producers and cleanup;
-    // introduce finer build leases only if concurrent invocation demand warrants it.
+    // Producers hold a shared lease for their run; cleanup takes it exclusively.
+    // Declared outputs and target names coordinate concurrent producers.
     int flags = O_RDWR | O_NOFOLLOW | O_CLOEXEC;
     if (create) flags |= O_CREAT;
     int lock = openat(records, "lock", flags, 0600);
@@ -115,6 +115,25 @@ km_own_store *km_own_open(so_String root, bool create, int *status) {
 }
 
 int km_own_lock_fd(km_own_store *s) { return s->lock; }
+
+// Resource locks live in a private subdirectory of the ownership store. The
+// caller supplies a 64-hex key; the file is opened descriptor-relative with no
+// symlink following, and Posix LockFile rejects multiply linked inodes.
+int km_own_resource_fd(km_own_store *s, so_String name, int *status) {
+    *status = -3;
+    char *text = km_own_text(name);
+    if (!s || !text || strlen(text) != 64) { free(text); return -1; }
+    int locks = km_own_dir(s->records, "locks", true);
+    if (locks < 0) { free(text); *status = locks == -4 ? 1 : locks; return -1; }
+    int fd = openat(locks, text, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0600);
+    int error = errno;
+    close(locks); free(text);
+    if (fd < 0) { *status = error == ENOENT ? 1 : -3; return -1; }
+    *status = 0;
+    return fd;
+}
+
+void km_own_fd_close(int fd) { if (fd >= 0) close(fd); }
 
 void km_own_close(km_own_store *s) {
     if (!s) return;

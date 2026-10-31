@@ -4,7 +4,16 @@ defer rm -rf $workspace
 
 # Each complete record goes to exactly one branch, in round-robin order.
 # Each branch is long-lived; each starts one tr process per assigned record.
-printf "alpha\nbeta\ngamma\ndelta\n" |(frame :lines) |(balance :strategy round-robin :buffer 4096) ( |(each) | tr a-z A-Z > ${workspace}/odd.txt,  |(each) | tr a-z A-Z > ${workspace}/even.txt)
+printf "alpha\nbeta\ngamma\ndelta\n"
+	|(frame :lines)
+	|(balance :strategy round-robin :buffer 4096) (
+		 |(each) tr a-z A-Z > ${workspace}/odd.txt,
+		 |(each) tr a-z A-Z > ${workspace}/even.txt
+	)
 # Strict merge alternates whole records, not arbitrary byte chunks. This
 # restores this example's order only because workers preserve record counts.
-(cat < ${workspace}/odd.txt |(frame :lines), cat < ${workspace}/even.txt |(frame :lines)) |(merge :order round-robin :buffer 4096) cat
+(
+	cat < ${workspace}/odd.txt |(frame :lines),
+	cat < ${workspace}/even.txt |(frame :lines)
+)
+	|(merge :order round-robin :buffer 4096) cat

@@ -50,3 +50,55 @@ func TestMalformedChannelDeclarationsFailParsing(t *testing.T) {
 		s.Free()
 	}
 }
+
+func TestStreamingGraphFormatting(t *testing.T) {
+	a := t.Allocator()
+	inputs := []string{
+		"printf a |(broadcast) (cat > ./left, cat > ./right)\n",
+		"(printf a, printf b) |(merge) cat\n",
+		"printf a |(frame :lines) |(balance) (|(each) cat, |(each) cat)\n",
+		"printf a |(frame :lines) |(filter :true | cat > ./selected) | cat\n",
+		"if true\n\tprintf a |(broadcast) (cat, cat)\n",
+		"stream reports\n(printf a >&reports 2>&1, &reports | cat)\n",
+		"printf a |(broadcast) (cat, cat) ?\n",
+		"printf a |(broadcast) (cat, cat) ? printf fallback\n",
+		"printf a |(broadcast) (cat, cat) &\n",
+		"(printf a |(broadcast) (cat > ./audit, |(frame :lines) |(filter :true | cat >&errors) | cat > ./normal), &errors | cat)\n",
+	}
+	for i := range inputs {
+		s := script.ParseKash(a, "stream.kash", inputs[i])
+		if len(s.Diagnostics) != 0 {
+			t.Errorf("input failed to parse: %s", inputs[i])
+			s.Free()
+			continue
+		}
+		formatted := script.FormatWithIndent(a, s, "  ")
+		if i == 0 && formatted != "printf a\n  |(broadcast) (\n    cat > ./left,\n    cat > ./right\n  )\n" {
+			t.Errorf("unexpected streaming layout: %s", formatted)
+		}
+		copy := script.ParseKash(a, "formatted.kash", formatted)
+		if len(copy.Diagnostics) != 0 {
+			t.Errorf("formatted graph did not parse: %s", formatted)
+		} else {
+			for j := range s.Items {
+				if s.Items[j].Expression != nil && s.Items[j].Expression.Kind == expr.CommandGraph {
+					before := expr.Compact(a, s.Items[j].Expression)
+					after := expr.Compact(a, copy.Items[j].Expression)
+					if before != after {
+						t.Errorf("formatting changed graph: %s -> %s", before, after)
+					}
+					mem.FreeString(a, before)
+					mem.FreeString(a, after)
+				}
+			}
+			again := script.FormatWithIndent(a, copy, "  ")
+			if formatted != again {
+				t.Errorf("graph formatting is not idempotent: %s -> %s", formatted, again)
+			}
+			mem.FreeString(a, again)
+		}
+		mem.FreeString(a, formatted)
+		copy.Free()
+		s.Free()
+	}
+}

@@ -1097,6 +1097,8 @@ void km_cli_observe_locks(bool (*observer)(km_lock_event *), so_String command) 
 
 // Metadata is advisory and never authorizes lock removal or acquisition. Linux
 // kernel records verify the current holder, including non-Kame flock users.
+// A shared project lease is recorded as a READ flock, so both modes identify an
+// owner; an exclusive holder wins when both are present.
 static long km_lock_kernel_owner(int fd) {
 #if defined(__linux__) || defined(__COSMOPOLITAN__)
 #if defined(__COSMOPOLITAN__)
@@ -1113,9 +1115,11 @@ static long km_lock_kernel_owner(int fd) {
     while (fgets(line, sizeof(line), locks)) {
         if (sscanf(line, "%*u: %15s %15s %15s %ld %x:%x:%llu", type, mode, access,
                    &candidate, &device_major, &device_minor, &inode) == 7 &&
-            !strcmp(type, "FLOCK") && !strcmp(access, "WRITE") && candidate > 0 &&
-            device_major == major(st.st_dev) && device_minor == minor(st.st_dev) && inode == st.st_ino) {
-            pid = candidate; break;
+            !strcmp(type, "FLOCK") && (!strcmp(access, "WRITE") || !strcmp(access, "READ")) &&
+            candidate > 0 && device_major == major(st.st_dev) && device_minor == minor(st.st_dev) &&
+            inode == st.st_ino) {
+            pid = candidate;
+            if (!strcmp(access, "WRITE")) break;
         }
     }
     fclose(locks);
@@ -1197,13 +1201,14 @@ static bool km_lock_metadata_safe(int fd) {
     return !fstat(fd, &info) && S_ISREG(info.st_mode) && info.st_nlink == 1;
 }
 
-int km_file_lock(int fd, so_String path, so_String kind, bool wait) {
+int km_file_lock(int fd, so_String path, so_String kind, bool wait, bool shared) {
     if (!km_lock_metadata_safe(fd)) return -1;
     int64_t started = km_now();
     bool waiting = false;
+    int mode = (shared ? LOCK_SH : LOCK_EX) | LOCK_NB;
     for (;;) {
         if (km_cli_signal_pending()) return -4;
-        if (!flock(fd, LOCK_EX | LOCK_NB)) break;
+        if (!flock(fd, mode)) break;
         if (errno == EINTR) return -4;
         if (errno != EWOULDBLOCK && errno != EAGAIN) return -1;
         if (!wait) { km_lock_notice(fd, path, kind, "busy", 0); return -2; }
@@ -1223,9 +1228,12 @@ int km_file_lock(int fd, so_String path, so_String kind, bool wait) {
     return 0;
 }
 
-void km_file_unlock(int fd) {
+// A shared lease release leaves holder metadata in place unless this process is
+// the last peer: converting the lock to exclusive is the only way to know.
+void km_file_unlock(int fd, bool clear) {
     // Clear while still holding the lock; never unlink/replace the lock inode.
-    if (km_lock_metadata_safe(fd)) { int ignored = ftruncate(fd, 0); (void)ignored; }
+    if (!clear && !flock(fd, LOCK_EX | LOCK_NB)) clear = true;
+    if (clear && km_lock_metadata_safe(fd)) { int ignored = ftruncate(fd, 0); (void)ignored; }
     flock(fd, LOCK_UN);
 }
 
@@ -1249,7 +1257,7 @@ int km_host_cache_lock(km_host *host, so_String name, int stripe) {
     int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
     free(path);
     if (fd < 0) return -1;
-    int status = km_file_lock(fd, name, (so_String){"cache", 5}, true);
+    int status = km_file_lock(fd, name, (so_String){"cache", 5}, true, false);
     if (status != 0) {
         close(fd);
         return status;
@@ -1267,7 +1275,7 @@ void km_host_cache_unlock(km_host *host, int stripe) {
     if (km_windows_jobs_needed()) { km_windows_cache_unlock(stripe); return; }
     int fd = km_cache_lock_fd[stripe];
     km_cache_lock_fd[stripe] = -1;
-    if (fd >= 0) { km_file_unlock(fd); close(fd); }
+    if (fd >= 0) { km_file_unlock(fd, true); close(fd); }
 }
 
 static int km_spawn_failed(km_host *host, int64_t id, const char *message) {
@@ -1690,6 +1698,11 @@ static int km_worker_node, km_worker_edges;
 // km_mux_side_fd is the copy operator's file destination: written beside the
 // presentation edge and exempt from the worker's unowned-descriptor sweep.
 static int km_mux_side_fd = -1;
+
+// Only the copy operator separates its file destination from the stream it
+// presents. Every other node, "each" included, keeps an explicit file as its
+// own stdout; a side sink there would truncate a file nobody writes.
+static inline bool km_side_sink(int node_kind) { return (node_kind & 15) == 6; }
 
 static void km_mux_close_unowned(int node, int *edges, so_int *links, int count) {
     // Unlike exec, a native worker does not apply FD_CLOEXEC automatically.
@@ -2365,7 +2378,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
                 input = stage_inputs[i] >= 0 ? stage_inputs[i] : open("/dev/null", O_RDONLY);
                 // A copy node's file is a side write. Presentation stays on the
                 // capture pipe so a terminal tee is not swallowed by the file.
-                output = !node_kinds[i] && stage_outputs[i] >= 0 ? stage_outputs[i] : out[1];
+                output = !km_side_sink((int)node_kinds[i]) && stage_outputs[i] >= 0 ? stage_outputs[i] : out[1];
                 for (int j = 0; !node_kinds[i] && j < edge_count; j++) {
                     if (links[j * 2] == i) output = edges[j * 2 + 1];
                     if (links[j * 2 + 1] == i && !ports[j]) { if (stage_inputs[i] < 0 && input >= 0) close(input); input = edges[j * 2]; }
@@ -2386,7 +2399,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
             if ((i == 0 || topology) && input != STDIN_FILENO) close(input);
             if (i != 0 && inputfd >= 0) close(inputfd);
             if (outputfd >= 0) close(outputfd);
-            int side = topology && node_kinds[i] ? stage_outputs[i] : -1;
+            int side = topology && km_side_sink((int)node_kinds[i]) ? stage_outputs[i] : -1;
             if (topology) for (int j = 0; j < n; j++) { if (stage_inputs[j] >= 0 && stage_inputs[j] != input) close(stage_inputs[j]); if (stage_outputs[j] >= 0 && stage_outputs[j] != side) close(stage_outputs[j]); }
             for (int j = 0; j < n; j++) if (stage_errors[j] >= 0 && stage_errors[j] != STDERR_FILENO) close(stage_errors[j]);
             if (!topology || !node_kinds[i]) for (int j = 0; j < edge_count * 2; j++) close(edges[j]);

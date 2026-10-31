@@ -162,6 +162,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 		session.Ledger.Store = ownership.New(mem.System, options.Directory)
 		session.Ledger.Out, session.Ledger.Err, session.Ledger.JSON = cliDiagnosticOut, errOut, options.JSON
 		programOptions.Ownership, programOptions.OwnershipState = recordProduction, session.Ledger
+		programOptions.LockResources, programOptions.UnlockResources, programOptions.ResourcesState = lockProduction, unlockProduction, session.Ledger
 		programOptions.AutomaticClean, programOptions.AutomaticCleanState = automaticClean, session.Ledger
 	}
 	compiled := program.CompileMany(mem.System, session.Source.Parts, session.Registry, programOptions)

@@ -385,7 +385,7 @@ func FormatWithIndent(a mem.Allocator, s *Script, indent string) string {
 		}
 		value := ""
 		if s.Kash {
-			value = expr.Compact(a, item.Expression)
+			value = expr.FormatKashStatement(a, item.Expression, indent)
 		} else {
 			value = expr.Format(a, item.Expression)
 		}

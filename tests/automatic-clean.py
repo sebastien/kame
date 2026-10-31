@@ -77,36 +77,39 @@ def stop(process: subprocess.Popen[str]) -> tuple[str, str]:
 
 def live_boundaries(binary: str, base: Path) -> None:
 	root = base / "live-build"
-	project(root, "default : ./build/out\n./build/out : ./input\n\tcp @< @>\n\tprintf started > ./started\n\tread reply < ./gate\n")
+	project(root, "default : ./build/out ./build/other\n./build/out : ./input\n\tcp @< @>\n\tprintf started > ./started\n\tread reply < ./gate\n./build/other : ./input\n\tcp @< @>\n\tprintf other-started > ./other-started\n\tread reply < ./other-gate\n")
 	os.mkfifo(root / "gate")
-	builder = subprocess.Popen([binary, "-C", str(root)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+	os.mkfifo(root / "other-gate")
+	builder = subprocess.Popen([binary, "-C", str(root), "./build/out"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 	other = None
+	waiting = None
 	try:
 		wait_file(root / "started", builder)
 		assert reasons(clean(binary, root, status=1)) == {"project-busy"}
-		before = {p.name: p.read_bytes() for p in records(root)}
-		other = subprocess.Popen([binary, "-C", str(root)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-		time.sleep(0.05)
+		# Disjoint declared outputs proceed under the shared lease.
+		other = subprocess.Popen([binary, "-C", str(root), "./build/other"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+		wait_file(root / "other-started", other)
 		assert other.poll() is None, other.communicate()
+		# The same declared output waits for the running producer.
+		before = {p.name: p.read_bytes() for p in records(root)}
+		waiting = subprocess.Popen([binary, "-C", str(root), "./build/out"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+		time.sleep(0.2)
+		assert waiting.poll() is None, waiting.communicate()
 		assert before == {p.name: p.read_bytes() for p in records(root)}
-		waiting = subprocess.Popen([binary, "-C", str(root)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-		try:
-			time.sleep(0.05)
-			assert waiting.poll() is None, waiting.communicate()
-		finally:
-			stop(waiting)
+		stop(waiting)
 		assert waiting.returncode != 0
 		assert before == {p.name: p.read_bytes() for p in records(root)}
-		deadline = time.monotonic() + 20
-		while True:
-			try:
-				fd = os.open(root / "gate", os.O_WRONLY | os.O_NONBLOCK)
-				break
-			except OSError:
-				assert builder.poll() is None and time.monotonic() < deadline
-				time.sleep(0.01)
-		os.write(fd, b"continue\n")
-		os.close(fd)
+		for gate in ("gate", "other-gate"):
+			deadline = time.monotonic() + 20
+			while True:
+				try:
+					fd = os.open(root / gate, os.O_WRONLY | os.O_NONBLOCK)
+					break
+				except OSError:
+					assert builder.poll() is None and other.poll() is None and time.monotonic() < deadline
+					time.sleep(0.01)
+			os.write(fd, b"continue\n")
+			os.close(fd)
 		out, err = builder.communicate(timeout=20)
 		assert builder.returncode == 0, (out, err)
 		out, err = other.communicate(timeout=20)
@@ -115,7 +118,9 @@ def live_boundaries(binary: str, base: Path) -> None:
 		stop(builder)
 		if other is not None:
 			stop(other)
-	assert clean(binary, root)["removed"] == 1
+		if waiting is not None:
+			stop(waiting)
+	assert clean(binary, root)["removed"] == 2
 
 	root = base / "cancelled-build"
 	project(root, "default : ./build/out\n./build/out : ./input\n\tcp @< @>\n\tprintf started > ./started\n\tread reply < ./gate\n")

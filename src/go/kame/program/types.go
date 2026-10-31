@@ -273,11 +273,25 @@ type Options struct {
 	// recipe references a tool. A nil callback uses paths supplied by the host.
 	ResolveTool func(mem.Allocator, string, string, []string) string
 	// Ownership records actual production before effects and after successful
-	// publication. The caller owns State and its project lock until shutdown.
-	Ownership           func(any, *Program, []string, string, bool) diagnostic.Diagnostic
-	OwnershipState      any
+	// publication. The caller owns State and the project cleanup lease until
+	// shutdown; producers hold it shared and cleanup takes it exclusively.
+	Ownership      func(any, *Program, []string, string, bool) diagnostic.Diagnostic
+	OwnershipState any
+	// LockResources serializes concurrent producers on declared artifact paths
+	// and on target names whose recipes have no declared outputs. It runs
+	// before effects, and UnlockResources follows terminal completion.
+	LockResources       func(any, []LockedResource) diagnostic.Diagnostic
+	UnlockResources     func(any, []LockedResource)
+	ResourcesState      any
 	AutomaticClean      func(any, *Program) diagnostic.Diagnostic
 	AutomaticCleanState any
+}
+
+// LockedResource is one producer-held resource: a canonical output path or a
+// target name. Kind distinguishes the two namespaces for lock reporting.
+type LockedResource struct {
+	Name string
+	Kind string
 }
 
 // Tool records a globally declared command and its resolved executable path.
@@ -372,6 +386,7 @@ type generatedRuleMeta struct {
 type instance struct {
 	Artifacts              []*core.Node
 	OwnershipPaths         []string
+	Resources              []LockedResource
 	ReasonIdentities       []reasonIdentity
 	Service                ServiceConfig
 	ServiceState           string

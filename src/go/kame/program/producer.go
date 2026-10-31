@@ -20,6 +20,7 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	p := state.Program
 	entry := &p.Instances[state.Index]
 	if !entry.started || entry.startedGeneration != c.Generation() {
+		p.releaseResources(entry)
 		freeStrings(p.Alloc, entry.OwnershipPaths)
 		entry.OwnershipPaths = nil
 		p.clearReasonIdentities(entry)

@@ -1972,6 +1972,51 @@ func Compact(a mem.Allocator, e *Expr) string {
 	return text
 }
 
+// writeMuxHead writes an operator's name and leading arguments. The compact
+// and expanded process writers share it so an operator's spelling cannot drift
+// between layouts.
+func writeMuxHead(b *strings.Builder, mux *Expr) {
+	b.WriteString(mux.Text)
+	if mux.Text == "tee" && mux.Bool {
+		b.WriteString(" :append")
+	}
+	for j := range mux.Items {
+		b.WriteByte(' ')
+		writeExpr(b, mux.Items[j])
+	}
+}
+
+// joinsWithSpace reports whether items[i] continues the previous operator
+// instead of starting a piped stage. A fan-out operator's destinations and an
+// implicit-stage command are not pipes: only an authored `|` is.
+func joinsWithSpace(items []*Expr, i int) bool {
+	if i == 0 {
+		return false
+	}
+	if items[i].Kind == CommandWriter {
+		return true
+	}
+	if items[i-1].Kind != CommandMux {
+		return false
+	}
+	return streamOperatorFanOut(items[i-1].Text) || streamOperatorImplicitStage(items[i-1].Text)
+}
+
+// writeWriterAlias emits a stderr alias authored after `>&channel`. The alias
+// belongs to the writer node, so it is written after that node rather than with
+// the stage whose items hold it.
+func writeWriterAlias(b *strings.Builder, items []*Expr, i int) {
+	if i == 0 || items[i].Kind != CommandWriter || items[i-1].Kind != CommandStage {
+		return
+	}
+	for j := range items[i-1].Items {
+		item := items[i-1].Items[j]
+		if item.Kind == CommandRedirection && item.Text == "2>&1" && item.Bool {
+			b.WriteString(" 2>&1")
+		}
+	}
+}
+
 func writeProcess(b *strings.Builder, e *Expr) {
 	for i := range e.Items {
 		if e.Items[i].Kind == CommandInput {
@@ -1980,14 +2025,7 @@ func writeProcess(b *strings.Builder, e *Expr) {
 		if e.Items[i].Kind == CommandMux {
 			mux := e.Items[i]
 			b.WriteString(" |(")
-			b.WriteString(mux.Text)
-			if mux.Text == "tee" && mux.Bool {
-				b.WriteString(" :append")
-			}
-			for j := range mux.Items {
-				b.WriteByte(' ')
-				writeExpr(b, mux.Items[j])
-			}
+			writeMuxHead(b, mux)
 			if mux.Text == "filter" && len(mux.Body) != 0 {
 				if len(mux.Body[0].Items) == 0 || mux.Body[0].Items[0].Kind != CommandInput {
 					b.WriteString(" | ")
@@ -1998,23 +2036,14 @@ func writeProcess(b *strings.Builder, e *Expr) {
 			continue
 		}
 		if i != 0 {
-			if e.Items[i].Kind == CommandWriter || (e.Items[i-1].Kind == CommandMux && streamOperatorFanOut(e.Items[i-1].Text)) {
+			if joinsWithSpace(e.Items, i) {
 				b.WriteByte(' ')
 			} else {
 				b.WriteString(" | ")
 			}
 		}
 		writeExpr(b, e.Items[i])
-		// A stderr alias authored after `>&channel` belongs to the writer node,
-		// so it is emitted here to keep the AST and authored text equivalent.
-		if e.Items[i].Kind == CommandWriter && i != 0 && e.Items[i-1].Kind == CommandStage {
-			for j := range e.Items[i-1].Items {
-				item := e.Items[i-1].Items[j]
-				if item.Kind == CommandRedirection && item.Text == "2>&1" && item.Bool {
-					b.WriteString(" 2>&1")
-				}
-			}
-		}
+		writeWriterAlias(b, e.Items, i)
 	}
 	if e.AcceptExit {
 		b.WriteString(" ?")

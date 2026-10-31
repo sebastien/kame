@@ -75,12 +75,17 @@ func (s *Store) Clean(context [32]byte, verified bool, dry bool, protected []str
 	if s.cancelled() {
 		return slices.Append(s.Alloc, items, Decision{State: "error", Reason: "cleanup-cancelled"})
 	}
+	shared := s.lease == leaseShared
 	if !s.Open(false) {
 		if s.Status != 1 {
 			items = slices.Append(s.Alloc, items, Decision{State: "error", Reason: statusReason(s.Status)})
 		}
 		return items
 	}
+	// Automatic cleanup runs inside a producer process. Restore exactly the
+	// prior lease so later tasks stay coordinated without over-serializing runs
+	// that did not already hold the shared boundary.
+	defer s.finishClean(shared)
 	size := int(km_own_list(s.native, nil))
 	if size < 0 {
 		return slices.Append(s.Alloc, items, Decision{State: "error", Reason: "ledger-unreadable"})
