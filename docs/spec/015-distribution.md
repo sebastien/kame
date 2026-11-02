@@ -295,9 +295,9 @@ Release assets are built with these `Makefile.kmk` targets (`make` forwards them
 - `make package-manifests` explicitly refreshes `etc/kame.rb` and
   `etc/kame.json` using `dist/kame.com` and `VERSION`; commit these definitions
   before publication. Release staging never modifies tracked files.
-- `make release` builds the runtime assets and runs the manual publication
-  wrapper below. It performs preflight before keys are read, then signs and
-  publishes the prebuilt assets; `dist-release` remains the staging-only task.
+- `make release` runs the manual publication wrapper below. It performs
+  preflight before reading keys and builds assets only for a new release;
+  `dist-release` remains the staging-only task.
 - `dist-native` builds the current host's full native CLI and places it at
   `dist/native/PLATFORM/kame`; the manual-only
   `.github/workflows/native-artifacts.yml` uploads Linux and macOS x64/ARM64
@@ -331,9 +331,9 @@ alongside the CLI catalog; the opt-in APE and published-channel gates are
 ## Manual Publication
 
 Publishing is an explicit operator step; no workflow publishes a release.
-`make release` (or `kame release`) builds the runtime assets and runs
-`src/sh/release.sh`, which verifies preflight, then wraps the signed staging and
-the GitHub CLI:
+`make release` runs `src/sh/release.sh` outside the Kame progress display, so
+npm's interactive approval remains visible. The script checks for an existing
+release before building, then wraps signed staging and the GitHub CLI:
 
 ```sh
 KAME_RELEASE_PUBLIC_KEY=verification.pem \

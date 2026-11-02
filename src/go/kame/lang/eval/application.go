@@ -150,7 +150,8 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 			return checked
 		}
 	}
-	operands := p.argumentValuesMode(scope, arguments, context, span, operation.DeferredReplacement)
+	effects, paths := len(context.Effects), len(context.WritePaths)
+	operands := p.argumentValuesMode(scope, arguments, context, span, operation.DeferredReplacement, operation.Name)
 	if operands.Result.Waiting || operands.Result.Completed || operands.Result.Diagnostic.Code != "" {
 		return operands.Result
 	}
@@ -164,7 +165,13 @@ func (p *Program) operation(scope *Scope, operation *Operation, arguments []*exp
 		operands.Values[1] = core.Value{Kind: core.Callable, Callable: function}
 	}
 	context.Scope = scope
+	completedEffects, completedPaths := len(context.Effects), len(context.WritePaths)
 	result := p.invokeOperation(operation, operands.Values, arguments, context, span)
+	// A suspended operation owns its progress, but its completed operands also
+	// need to survive: rebuilding a large glob list on every lstat is quadratic.
+	if result.Waiting && p.retainArguments(scope, context, span, operation.Name, operands.Values, len(arguments), operands.Facts, effects, completedEffects, paths, completedPaths) {
+		return result
+	}
 	// Operations release consumed callable wrappers; release only value storage.
 	freeValues(context.Run, operands.Values)
 	return result

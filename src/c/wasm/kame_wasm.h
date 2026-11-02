@@ -145,6 +145,15 @@ uint32_t kame_wasm_copy(uint32_t dst, uint32_t dst_len,
 uint32_t kame_wasm_cli(uint64_t instance, uint32_t command, uint32_t command_len,
                        uint32_t args, uint32_t args_len,
                        uint32_t dst, uint32_t dst_len, uint32_t out_len);
+/* Render a bounded CLI presentation snapshot. Query/copy is read-only. */
+uint32_t kame_wasm_present(uint64_t instance, uint32_t snapshot, uint32_t snapshot_len,
+                          uint32_t dst, uint32_t dst_len, uint32_t out_len);
+/* Mutate invocation presentation once; scope namespaces execution instances. */
+uint32_t kame_wasm_present_observe(uint64_t instance, uint64_t scope, int64_t now_ns,
+                                  uint32_t data, uint32_t length);
+/* Opt-in CLI boundary: prepare one dispatch, query/copy its observation, then step. */
+uint32_t kame_wasm_work_prepare(uint64_t instance, uint32_t dst, uint32_t capacity,
+                               uint32_t out_len);
 uint32_t kame_wasm_eval_pure(uint32_t source, uint32_t source_len,
                              uint32_t dst, uint32_t dst_len, uint32_t out_len);
 /* Parse lang ("expr"|"template"|"rule"|"script") and copy its schema-1 AST JSON

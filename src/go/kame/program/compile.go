@@ -406,6 +406,8 @@ func (p *Program) Free() {
 	}
 	p.Eval.CancelProcesses()
 	p.Eval.CancelDefers()
+	slices.Free(p.Alloc, p.workReady)
+	p.workReady = nil
 	rule.FreeRule(p.Alloc, p.automaticCleanRule)
 	p.clearInspection()
 	freeStrings(p.Alloc, p.Configuration)

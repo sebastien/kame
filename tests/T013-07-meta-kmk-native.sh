@@ -11,6 +11,8 @@ work="$TMPDIR/project"
 mkdir -p "$work/bin" "$work/src/go/kame" "$work/src/sh"
 sed -n '/^SHELL =/,/^# --- Source sets/p; /^# --- Native binaries/,/^# --- WebAssembly/p' \
 	"$CLI_ROOT/Makefile.kmk" | sed 's/@{KAME_INPUTS}/.\/seed/g' >"$work/Makefile.kmk"
+# Toolchain provisioning is tested separately; this fixture stubs the compiler.
+printf '\ntoolchain :\n' >>"$work/Makefile.kmk"
 printf seed >"$work/seed"
 printf unused >"$work/src/sh/platform_id.py"
 cat >"$work/src/sh/provision-cosmocc.sh" <<'SH'

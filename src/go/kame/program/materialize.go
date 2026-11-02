@@ -345,7 +345,7 @@ func (p *Program) Tick(wait int) {
 	p.tick(wait)
 }
 
-func (p *Program) tick(wait int) {
+func (p *Program) readyForTick(wait int) []*core.Node {
 	p.Eval.PollFinalizers()
 	p.tickServiceReadiness()
 	// Pending host requests are local work too: synchronous reads must be
@@ -362,23 +362,82 @@ func (p *Program) tick(wait int) {
 	if jobs <= 0 {
 		jobs = 1
 	}
-	ready := p.Engine.Ready(jobs)
+	return p.Engine.Ready(jobs)
+}
+
+type WorkObservation struct {
+	Node       int64
+	Generation int64
+	Attempt    int64
+	Target     string
+}
+
+// PrepareWork establishes the next dispatch boundary without running that
+// evaluator. Repeated calls before Tick return the same borrowed observation.
+// Hosts that do not request this boundary retain the ordinary batched tick.
+func (p *Program) PrepareWork() WorkObservation {
+	if !p.workPrepared {
+		p.workReady = p.readyForTick(0)
+		p.workIndex = 0
+		p.workPrepared = true
+	}
+	if p.workIndex >= len(p.workReady) {
+		return WorkObservation{}
+	}
+	node := p.workReady[p.workIndex]
+	if !p.Engine.CanDispatch(node) {
+		return WorkObservation{}
+	}
+	index := p.instanceIndex(node)
+	if index < 0 || p.Instances[index].Inspection {
+		return WorkObservation{}
+	}
+	return WorkObservation{Node: node.ID, Generation: node.Generation, Attempt: node.Attempt, Target: p.Instances[index].Plan.Target}
+}
+
+func (p *Program) tick(wait int) {
+	if p.workPrepared && !p.workDispatching {
+		if p.workIndex < len(p.workReady) {
+			node := p.workReady[p.workIndex]
+			p.workIndex++
+			p.workDispatching = true
+			p.dispatchWork(node)
+			p.workDispatching = false
+		}
+		if p.workIndex >= len(p.workReady) {
+			slices.Free(p.Alloc, p.workReady)
+			p.workReady = nil
+			p.workPrepared = false
+			p.workIndex = 0
+		}
+		p.observeInstances()
+		return
+	}
+	ready := p.readyForTick(wait)
 	for i := range ready {
-		target := ""
-		if p.ObserveWork != nil {
-			index := p.instanceIndex(ready[i])
-			if index >= 0 && !p.Instances[index].Inspection {
-				target = p.Instances[index].Plan.Target
-				p.ObserveWork(ready[i], target, true)
-			}
-		}
-		p.Engine.Dispatch(ready[i])
-		if p.ObserveWork != nil && target != "" {
-			p.ObserveWork(ready[i], target, false)
-		}
+		p.dispatchWork(ready[i])
 	}
 	slices.Free(p.Alloc, ready)
 	p.observeInstances()
+}
+
+func (p *Program) dispatchWork(node *core.Node) {
+	if !p.Engine.CanDispatch(node) {
+		p.Engine.Dispatch(node) // Release the stale claim without observing work.
+		return
+	}
+	target := ""
+	if p.ObserveWork != nil {
+		index := p.instanceIndex(node)
+		if index >= 0 && !p.Instances[index].Inspection {
+			target = p.Instances[index].Plan.Target
+			p.ObserveWork(node, target, true)
+		}
+	}
+	p.Engine.Dispatch(node)
+	if p.ObserveWork != nil && target != "" {
+		p.ObserveWork(node, target, false)
+	}
 }
 
 func (h *Handle) Cancel() {

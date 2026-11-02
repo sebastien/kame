@@ -53,6 +53,22 @@ assert.equal(e.kame_wasm_step(healthy), 2);
 assert.equal(e.kame_wasm_result_copy(healthy, output, 128, length), 0);
 assert.equal(Buffer.from(e.memory.buffer, output, 2).toString(), '42');
 assert.equal(e.kame_wasm_instance_free(healthy), 0);
+// Invalid source still allocates an arena. Changing its logical size afterward
+// used to make recompilation overwrite neighboring host buffers and leak frees.
+const invalid = write('(');
+const boundedParse = e.kame_wasm_instance_create();
+assert.equal(e.kame_wasm_instance_set_heap_limit(boundedParse, 65536), 0);
+const beforeParse = e.kame_wasm_host_heap_used();
+assert.equal(e.kame_wasm_source_compile(boundedParse, ...invalid), 5);
+const neighbor = alloc(16384);
+new Uint8Array(e.memory.buffer, neighbor, 16384).fill(0xa5);
+assert.equal(e.kame_wasm_instance_set_heap_limit(boundedParse, 262144), 4);
+assert.equal(e.kame_wasm_instance_set_heap_limit(boundedParse, 32768), 4);
+assert.equal(e.kame_wasm_source_compile(boundedParse, 0, 0), 0);
+assert.ok(new Uint8Array(e.memory.buffer, neighbor, 16384).every((byte) => byte === 0xa5));
+assert.equal(e.kame_wasm_free(neighbor, 16384), 0);
+assert.equal(e.kame_wasm_instance_free(boundedParse), 0);
+assert.equal(e.kame_wasm_host_heap_used(), beforeParse);
 // Exhaust the engine while copying an actual asynchronous host completion.
 const handle = e.kame_wasm_instance_create();
 assert.equal(e.kame_wasm_instance_set_heap_limit(handle, 65536), 0);

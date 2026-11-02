@@ -25,6 +25,76 @@ Presentation is observational. It must not request extra dependencies, execute
 effects, or alter scheduling merely to populate a display. Native and WASM CLIs
 expose equivalent information where their hosts establish the same facts.
 
+### Shared presentation boundary
+
+The build runtime already separates portable program behavior from host effects.
+CLI presentation follows the same boundary: **one portable presenter** owns
+human layout and lifecycle accounting; each backend owns terminal detection,
+stream publication, clocks, and event delivery. Native uses the presenter
+directly. The JavaScript CLI calls the same compiled presenter in the WASM
+module rather than maintaining a second dashboard renderer. The browser and
+embedding APIs need not adopt a terminal interface.
+
+The presenter accepts invocation metadata, established target/process/service
+events, internal-dispatch observations, and explicit presentation inputs (mode,
+styling policy, terminal capabilities and dimensions, monotonic time). It owns
+worker slots, per-generation outcome counts, change-reason deduplication, text
+lines, ANSI frames, and human summaries. It does not infer work from elapsed
+time or target-start events, inspect files or environment, run processes, poll
+the terminal, or decide exit status. Host-only notices such as cache-lock waits
+enter as presentation observations; they do not acquire a second renderer.
+
+Lifecycle state is invocation-owned and execution-instance-scoped. Terminal
+outcomes count once per scope, resource identity, node and generation. Duplicate
+starts preserve the original timestamp; late exits from older generations or
+attempts cannot clear a current worker, and late process starts cannot resurrect
+a terminal target. Distinct requests within the same attempt remain distinct
+workers. Watch cycle reset releases outcome identities/counts without removing
+active workers or ready services; full disposal releases both.
+
+The native and JavaScript adapters establish facts and publish the presenter's
+ordered output to stdout or stderr. They pass raw recipe bytes through without
+reformatting or routing them through the human renderer. Before raw terminal
+output, resize, or diagnostics, the presenter supplies the required clear or
+redraw transition; the adapter performs the write. The adapter must not draw its
+own progress footer or terminal outcome row. JSON event serialization retains
+its existing schema and framing; display ticks are not JSON events. Version
+identity and platform-specific host failures retain their separate contracts.
+
+The WASM ABI supplies bounded, invocation-owned operations to submit host
+observations and presentation inputs and retrieve ordered display output.
+Animation ticks may query the presenter for a new frame; unchanged frames
+produce no output. Do not retain an unbounded log or bypass sink backpressure. In
+particular, asynchronous host requests must not block a redraw while the engine
+is idle. The JavaScript adapter remains responsible for scheduling ticks and
+forwarding terminal and process signals; the presenter never blocks waiting for
+JavaScript. The portable package cannot import POSIX or the native executable.
+
+This is a CLI presentation boundary, not a requirement to move process spawning,
+filesystem access, terminal control, or the whole command dispatcher into the
+portable engine. Keep one authoritative formatter per human mode; a second
+JavaScript implementation of ANSI or text is not a fallback strategy.
+
+### Migration order
+
+1. Extract the native event accounting, human lifecycle lines, outcome rows,
+   summary, and dashboard layout behind an invocation-owned portable presenter.
+   Inject time and terminal facts; retain the existing native host adapter.
+2. Make internal work dispatch an observable runtime fact on both backends.
+   Include synchronous evaluator work, without treating queued parents as
+   occupied workers. Keep process and service identities distinct.
+3. Add a presentation ABI for the JavaScript CLI. Replace its duplicate event
+   accounting and human layout with presenter calls; preserve its asynchronous
+   host work, raw stream transport, and CLI-only fast version response.
+4. Bring remaining shared human formatting (diagnostics and inspection reports)
+   through portable formatters where it does not require host I/O. Keep
+   platform-specific identity and host facts in adapters. Remove duplicate
+   JavaScript formatters after parity tests, not before.
+
+Each stage retains `text` and `json` contracts. Extract reusable behavior before
+introducing more runtime interfaces; do not replace the existing `ProgramHost`
+with a single interface that mixes execution and terminal presentation.
+
 The ANSI interface is an inline dashboard, not a fullscreen TUI. It preserves
 scrollback, does not enter alternate-screen or raw-input mode, and does not consume
 stdin intended for sources or child processes. Menus, prompts, mouse interaction,
@@ -186,7 +256,7 @@ The upper region is an append-only event log preserved in scrollback. It contain
 ANSI target rows lead with `[target-name]`, without redundant `done` or `error`
 prefixes. Successful rows align the measured target duration and `✓` at the right
 edge, for example `40.8s - ✓`, matching the tally's `ELAPSED - STATUS` order.
-All native ANSI durations use seconds with one decimal place, including worker,
+All CLI ANSI durations use seconds with one decimal place, including worker,
 target, cycle, and invocation durations. Duration spans the target lifecycle, including
 dependency work and reuse validation, not just a child's runtime. Missing timing
 is omitted rather than fabricated. Only the outcome
@@ -231,7 +301,7 @@ Below the log, the replaceable region contains:
    the right edge of that same line. Empty process counts are omitted; global
    `building` status does not claim that a child process is currently running.
 
-The native presenter retains its previous frame and overwrites only changed rows.
+The shared presenter retains its previous frame and overwrites only changed rows.
 Timer updates never erase and rebuild the entire pane. Log batches and their
 replacement footer are published together, with synchronized terminal updates
 where supported; there must be no timed interval with a blank status pane.
@@ -256,11 +326,13 @@ active and may be reused after completion.
 | Attempt | Retry attempt when greater than the initial attempt |
 
 A target-started event alone does not establish an occupied execution worker.
-The native CLI observes actual scheduler dispatch so synchronous Kame evaluation,
+The runtime exposes actual scheduler dispatch so synchronous Kame evaluation,
 rendering, and declarative effects can occupy a worker even without a child
-process. It draws the owning target before dispatch, labels it `evaluating` with
-tool `kame`, and releases the slot as soon as that dispatch returns. This observer
-does not claim queued parents are running and does not change scheduling.
+process. The presenter draws the owning target before dispatch, labels it
+`evaluating` with tool `kame`, and releases the slot as soon as that dispatch
+returns. Both CLI backends receive this observation; it must not depend on the
+native scheduler callback alone. This observer does not claim queued parents
+are running and does not change scheduling.
 Waiting parents are not shown as fake running workers. A started target may be
 evaluating or validating reuse rather than queued: never infer a waiting tally by
 subtracting process workers from started targets. Where execution phase is not observable, use a qualified active state
@@ -478,7 +550,7 @@ Human reports use consistent spelling independently of their theme:
 | Literal value | Canonical Kame display: quoted strings/patterns, `:nil`, `:true`, `:false`, lists and records |
 | Source location | `source:line:column`, one-based display coordinates; no invented coordinates |
 | Count or measured progress | Integer with a named unit or labelled category; `6/10 files`, not an unexplained percentage |
-| Duration | Native ANSI: seconds with one decimal place, such as `1.4s`; other human presentations use explicit units; unknown duration is omitted |
+| Duration | CLI ANSI: seconds with one decimal place, such as `1.4s`; other human presentations use explicit units; unknown duration is omitted |
 | Byte size | Explicit unit; JSON retains integer bytes even when a human table uses a scaled unit |
 | Missing information | A labelled `unknown`/`unavailable` state or omitted optional field, never an invented zero |
 
@@ -765,5 +837,16 @@ entries, and deferred discovery is not rendered as an empty set.
   identically across runs.
 - Native and WASM agree on command grammar, payloads, reason semantics, counting,
   and privacy. Timing is checked for type/non-negativity, not exact equality.
+- Both CLI backends exercise the same portable presenter with fixed event,
+  terminal-size, styling and monotonic-clock fixtures. Interactive pseudo-terminal
+  tests compare completed rows and successive ANSI dashboard frames after
+  normalizing elapsed times and backend-specific host facts; redirected ANSI,
+  text and JSON retain their separate byte and schema checks. Include an active
+  synchronous evaluation with no child process, resize, unterminated child output,
+  stream backpressure, and a terminal outcome while other workers remain active.
+- The WASM wrapper does not emit an independent `active · Nms` dashboard or
+  `done [target] complete` ANSI row in place of the shared layout. For a build
+  with the same established work, both CLIs display the worker count, active
+  worker rows, requested target, and right-aligned tally with the same wording.
 - Rendering failure and signal paths restore terminal state where possible;
   allocation failure retains static emergency diagnostics.

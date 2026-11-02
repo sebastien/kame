@@ -5,9 +5,15 @@ KAME_VERSION ?= 0.3.1
 KAME ?= $(HOME)/.cache/kame/bin/kame-$(KAME_VERSION)
 KAME_RELEASE_URL ?= https://github.com/sebastien/kame/releases/download/v$(KAME_VERSION)
 
-.PHONY: default FORCE $(.TARGETS)
+.PHONY: default release FORCE $(.TARGETS)
 default: $(KAME)
 	@$(RUN)
+# Publish outside Kame's progress display; the script builds only for new releases.
+release: FORCE
+	@set --; \
+		if [ -n "$${repo:-}" ]; then set -- "$$@" --repo "$$repo"; fi; \
+		if [ -n "$${notes:-}" ]; then set -- "$$@" --notes-file "$$notes"; fi; \
+		exec ./src/sh/release.sh "$$@"
 $(MAKEFILE_LIST): ;
 $(KAME):
 	@$(FETCH)

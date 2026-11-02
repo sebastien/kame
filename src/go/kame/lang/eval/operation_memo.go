@@ -17,6 +17,7 @@ type operationMemo struct {
 	Span       source.Span
 	Source     string
 	CallPath   string
+	Operation  string
 	Scope      core.Signature
 	Values     []core.Value
 	Next       int
@@ -28,6 +29,7 @@ type operationMemo struct {
 type argumentResult struct {
 	Values []core.Value
 	Result Result
+	Facts  int
 }
 
 func (p *Program) freeOperationMemo(state *operationMemo) {
@@ -42,6 +44,7 @@ func (p *Program) freeOperationMemo(state *operationMemo) {
 	slices.Free(a, state.WritePaths)
 	mem.FreeString(a, state.Source)
 	mem.FreeString(a, state.CallPath)
+	mem.FreeString(a, state.Operation)
 	mem.Free(a, state)
 }
 
@@ -134,7 +137,7 @@ func (p *Program) memoScope(scope *Scope, c *Context) core.Signature {
 	return signature
 }
 
-func (p *Program) findArgumentMemo(c *Context, span source.Span) *operationMemo {
+func (p *Program) findArgumentMemo(c *Context, span source.Span, operation string) *operationMemo {
 	if c.Engine == nil {
 		return nil
 	}
@@ -146,7 +149,7 @@ func (p *Program) findArgumentMemo(c *Context, span source.Span) *operationMemo 
 	}
 	for i := range p.OperationMemos {
 		state := p.OperationMemos[i]
-		if state.NodeID == c.Engine.NodeID() && state.Span.Start == span.Start && state.Span.End == span.End && state.Source == c.Source && state.CallPath == c.CallPath {
+		if state.NodeID == c.Engine.NodeID() && state.Span.Start == span.Start && state.Span.End == span.End && state.Source == c.Source && state.CallPath == c.CallPath && state.Operation == operation {
 			return state
 		}
 	}
@@ -216,17 +219,22 @@ func (p *Program) memoCurrent(state *operationMemo, c *Context, scope *Scope) bo
 }
 
 func (p *Program) argumentValues(scope *Scope, arguments []*expr.Expr, c *Context, span source.Span) argumentResult {
-	return p.argumentValuesMode(scope, arguments, c, span, false)
+	return p.argumentValuesMode(scope, arguments, c, span, false, "")
 }
 
-func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Context, span source.Span, deferReplacement bool) argumentResult {
+func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Context, span source.Span, deferReplacement bool, operation string) argumentResult {
 	effects, paths := len(c.Effects), len(c.WritePaths)
-	state := p.findArgumentMemo(c, span)
+	// Lowered wrappers (e.g. template-cat and render) can share one source span.
+	state := p.findArgumentMemo(c, span, operation)
 	var values []core.Value
 	next := 0
+	facts := -1
 	if state != nil {
 		if p.memoCurrent(state, c, scope) && len(state.Values) == len(arguments) {
 			values, next = state.Values, state.Next
+			if next == len(arguments) {
+				facts = len(state.Inputs)
+			}
 			state.Values = nil
 			for i := range state.Effects {
 				effect := state.Effects[i]
@@ -252,7 +260,7 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 		}
 		r := p.evaluate(c.Engine, scope, arguments[i], c)
 		if r.Waiting || r.Completed || r.Diagnostic.Code != "" {
-			if r.Waiting && i != 0 && p.retainArguments(scope, c, span, values, i, facts, effects, completedEffects, paths, completedPaths) {
+			if r.Waiting && i != 0 && p.retainArguments(scope, c, span, operation, values, i, facts, effects, completedEffects, paths, completedPaths) {
 				return argumentResult{Result: r}
 			}
 			freeValuesWithCallables(c.Run, values)
@@ -270,10 +278,13 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 			}
 		}
 	}
-	return argumentResult{Values: values}
+	if facts < 0 && c.Engine != nil {
+		facts = len(c.Engine.AcceptedObservations())
+	}
+	return argumentResult{Values: values, Facts: facts}
 }
 
-func (p *Program) retainArguments(scope *Scope, c *Context, span source.Span, values []core.Value, next int, facts int, effects int, completedEffects int, paths int, completedPaths int) bool {
+func (p *Program) retainArguments(scope *Scope, c *Context, span source.Span, operation string, values []core.Value, next int, facts int, effects int, completedEffects int, paths int, completedPaths int) bool {
 	for i := 0; i < next; i++ {
 		if values[i].HasCallable() {
 			return false
@@ -286,6 +297,7 @@ func (p *Program) retainArguments(scope *Scope, c *Context, span source.Span, va
 	state := mem.Alloc[operationMemo](c.Run)
 	state.Alloc, state.NodeID, state.Generation, state.Span = c.Run, c.Engine.NodeID(), c.Engine.Generation(), span
 	state.Source, state.CallPath = owned(c.Run, c.Source), owned(c.Run, c.CallPath)
+	state.Operation = owned(c.Run, operation)
 	state.Scope, state.Values, state.Next = signature, values, next
 	// ponytail: a conservative fact prefix avoids introducing expression nodes;
 	// collect precise per-operand provenance only if invalidation cost warrants it.

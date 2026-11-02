@@ -26,10 +26,14 @@ extern unsigned char __heap_base;
  * list. Offsets survive memory.grow; no bookkeeping lives in the system heap. */
 typedef struct {
   uint32_t length;
+  uint32_t previous;
   uint32_t data;
   uint32_t requested;
+  uint32_t free_next;
+  uint32_t free_previous;
 } kame_wasm_block;
 static uint32_t kame_wasm_begin, kame_wasm_end;
+static uint32_t kame_wasm_free_heads[32], kame_wasm_last;
 static uint32_t kame_wasm_host_used, kame_wasm_host_peak;
 static char kame_wasm_diagnostic[256];
 static uint32_t kame_wasm_diagnostic_len;
@@ -51,6 +55,7 @@ typedef struct {
   uint32_t heap_limit;
   wasm_Heap heap;
   wasm_Runtime *runtime;
+  wasm_Presentation *presentation;
   host_Request pending;
   kame_wasm_parked_request *parked;
   bool has_pending;
@@ -151,43 +156,79 @@ static uint32_t kame_wasm_align(uint32_t value, uint32_t alignment) {
 
 uint32_t kame_wasm_abi_version(void) { return KAME_WASM_EVENT_SCHEMA; }
 
+static uint32_t kame_wasm_size_class(uint32_t length) {
+  uint32_t result = 0u;
+  while (length > 1u) { length >>= 1u; result++; }
+  return result;
+}
+
+static void kame_wasm_link_free(uint32_t block) {
+  kame_wasm_block *header = (void *)(uintptr_t)block;
+  uint32_t class = kame_wasm_size_class(header->length);
+  header->free_previous = 0u;
+  header->free_next = kame_wasm_free_heads[class];
+  if (kame_wasm_free_heads[class]) ((kame_wasm_block *)(uintptr_t)kame_wasm_free_heads[class])->free_previous = block;
+  kame_wasm_free_heads[class] = block;
+}
+
+static void kame_wasm_unlink_free(uint32_t block) {
+  kame_wasm_block *header = (void *)(uintptr_t)block;
+  if (header->free_previous) ((kame_wasm_block *)(uintptr_t)header->free_previous)->free_next = header->free_next;
+  else kame_wasm_free_heads[kame_wasm_size_class(header->length)] = header->free_next;
+  if (header->free_next) ((kame_wasm_block *)(uintptr_t)header->free_next)->free_previous = header->free_previous;
+}
+
 uint32_t kame_wasm_alloc(uint32_t size, uint32_t alignment) {
   if (size == 0u) return 0u;
   if (alignment == 0u) alignment = 1u;
   if ((alignment & (alignment - 1u)) != 0u || alignment > 65536u) return 0u;
+  uint64_t minimum = (uint64_t)size + sizeof(kame_wasm_block) + 4u;
+  if (minimum > UINT32_MAX) return 0u;
   if (!kame_wasm_begin) {
     kame_wasm_begin = kame_wasm_align((uint32_t)(uintptr_t)&__heap_base, 16u);
     kame_wasm_end = kame_wasm_begin;
   }
-  /* ponytail: first-fit physical scan; add an index only if profiling calls
-   * for it. Most hosts keep a small, bounded set of scratch buffers. */
-  uint32_t block = kame_wasm_begin;
-  while (block < kame_wasm_end) {
-    kame_wasm_block *header = (void *)(uintptr_t)block;
-    uint64_t data = ((uint64_t)block + sizeof(*header) + alignment - 1u) & ~(uint64_t)(alignment - 1u);
-    uint64_t end = (data + size + 15u) & ~(uint64_t)15u;
-    if (!header->data && end <= (uint64_t)block + header->length) {
-      uint32_t remaining = block + header->length - (uint32_t)end;
-      if (remaining >= 32u) {
-        kame_wasm_block *next = (void *)(uintptr_t)end;
-        *next = (kame_wasm_block){.length = remaining};
-        header->length = (uint32_t)end - block;
+  /* Search only free blocks. Live buffers carry a back-reference for locating
+   * their header; physical predecessor links allow adjacent coalescing. */
+  uint32_t block;
+  for (uint32_t class = kame_wasm_size_class((uint32_t)minimum); class < 32u; class++) {
+    block = kame_wasm_free_heads[class];
+    while (block) {
+      kame_wasm_block *header = (void *)(uintptr_t)block;
+      uint64_t data = ((uint64_t)block + sizeof(*header) + 4u + alignment - 1u) & ~(uint64_t)(alignment - 1u);
+      uint64_t end = (data + size + 15u) & ~(uint64_t)15u;
+      if (end <= (uint64_t)block + header->length) {
+        kame_wasm_unlink_free(block);
+        uint32_t remaining = block + header->length - (uint32_t)end;
+        if (remaining >= sizeof(*header) + 4u + 16u) {
+          kame_wasm_block *next = (void *)(uintptr_t)end;
+          *next = (kame_wasm_block){.length = remaining, .previous = block};
+          uint32_t successor = block + header->length;
+          if (successor < kame_wasm_end) ((kame_wasm_block *)(uintptr_t)successor)->previous = (uint32_t)end;
+          else kame_wasm_last = (uint32_t)end;
+          header->length = (uint32_t)end - block;
+          kame_wasm_link_free((uint32_t)end);
+        }
+        header->data = (uint32_t)data;
+        header->requested = size;
+        memcpy((void *)(uintptr_t)(data - 4u), &block, 4u);
+        kame_wasm_host_used += header->length;
+        if (kame_wasm_host_used > kame_wasm_host_peak) kame_wasm_host_peak = kame_wasm_host_used;
+        return header->data;
       }
-      header->data = (uint32_t)data;
-      header->requested = size;
-      kame_wasm_host_used += header->length;
-      if (kame_wasm_host_used > kame_wasm_host_peak) kame_wasm_host_peak = kame_wasm_host_used;
-      return header->data;
+      block = header->free_next;
     }
-    block += header->length;
   }
-  uint64_t data = ((uint64_t)block + sizeof(kame_wasm_block) + alignment - 1u) & ~(uint64_t)(alignment - 1u);
+  block = kame_wasm_end;
+  uint64_t data = ((uint64_t)block + sizeof(kame_wasm_block) + 4u + alignment - 1u) & ~(uint64_t)(alignment - 1u);
   uint64_t end = (data + size + 15u) & ~(uint64_t)15u;
   if (end > UINT32_MAX) return 0u;
   uint64_t bytes = (uint64_t)__builtin_wasm_memory_size(0) * 65536u;
   if (end > bytes && __builtin_wasm_memory_grow(0, (uint32_t)((end - bytes + 65535u) / 65536u)) == UINT32_MAX) return 0u;
   kame_wasm_block *header = (void *)(uintptr_t)block;
-  *header = (kame_wasm_block){.length = (uint32_t)end - block, .data = (uint32_t)data, .requested = size};
+  *header = (kame_wasm_block){.length = (uint32_t)end - block, .previous = kame_wasm_last, .data = (uint32_t)data, .requested = size};
+  memcpy((void *)(uintptr_t)(data - 4u), &block, 4u);
+  kame_wasm_last = block;
   kame_wasm_end = (uint32_t)end;
   kame_wasm_host_used += header->length;
   if (kame_wasm_host_used > kame_wasm_host_peak) kame_wasm_host_peak = kame_wasm_host_used;
@@ -196,33 +237,51 @@ uint32_t kame_wasm_alloc(uint32_t size, uint32_t alignment) {
 
 uint32_t kame_wasm_free(uint32_t pointer, uint32_t size) {
   if (!pointer && !size) return KAME_WASM_OK;
-  uint32_t previous = 0u;
-  for (uint32_t block = kame_wasm_begin; block < kame_wasm_end;) {
-    kame_wasm_block *header = (void *)(uintptr_t)block;
-    if (header->data == pointer && pointer) {
-      if (header->requested != size) return KAME_WASM_STATE_INVALID;
-      kame_wasm_host_used -= header->length;
-      header->data = header->requested = 0u;
-      uint32_t next = block + header->length;
-      if (next < kame_wasm_end) {
-        kame_wasm_block *successor = (void *)(uintptr_t)next;
-        if (!successor->data) header->length += successor->length;
-      }
-      if (previous) {
-        kame_wasm_block *predecessor = (void *)(uintptr_t)previous;
-        if (!predecessor->data) {
-          predecessor->length += header->length;
-          block = previous;
-          header = predecessor;
-        }
-      }
-      if (block + header->length == kame_wasm_end) kame_wasm_end = block;
-      return KAME_WASM_OK;
-    }
-    previous = block;
-    block += header->length;
+  if (!kame_wasm_begin || pointer < kame_wasm_begin + sizeof(kame_wasm_block) + 4u || pointer >= kame_wasm_end) return KAME_WASM_STATE_INVALID;
+  uint32_t block;
+  memcpy(&block, (const void *)(uintptr_t)(pointer - 4u), 4u);
+  if (block < kame_wasm_begin || block >= pointer || (block & 15u) || pointer - block < sizeof(kame_wasm_block) + 4u) return KAME_WASM_STATE_INVALID;
+  /* Payload bytes can impersonate both a header and its back-reference. Only
+   * physical allocation boundaries are authoritative, not caller-owned bytes.
+   * ponytail: middle frees scan O(n); use a separate boundary index if measured
+   * free throughput requires it. First/last blocks need no scan. */
+  if (block != kame_wasm_begin && block != kame_wasm_last) {
+    uint32_t current = kame_wasm_begin;
+    while (current < block) current += ((kame_wasm_block *)(uintptr_t)current)->length;
+    if (current != block) return KAME_WASM_STATE_INVALID;
   }
-  return KAME_WASM_STATE_INVALID;
+  kame_wasm_block *header = (void *)(uintptr_t)block;
+  if (header->data != pointer || header->requested != size || !size ||
+      header->length > kame_wasm_end - block || pointer - block >= header->length || size > header->length - (pointer - block)) return KAME_WASM_STATE_INVALID;
+  kame_wasm_host_used -= header->length;
+  header->data = header->requested = 0u;
+  uint32_t next = block + header->length;
+  if (next < kame_wasm_end) {
+    kame_wasm_block *successor = (void *)(uintptr_t)next;
+    if (!successor->data) {
+      kame_wasm_unlink_free(next);
+      header->length += successor->length;
+    }
+  }
+  if (header->previous) {
+    uint32_t previous = header->previous;
+    kame_wasm_block *predecessor = (void *)(uintptr_t)previous;
+    if (!predecessor->data) {
+      kame_wasm_unlink_free(previous);
+      predecessor->length += header->length;
+      header = predecessor;
+      block = previous;
+    }
+  }
+  next = block + header->length;
+  if (next == kame_wasm_end) {
+    kame_wasm_end = block;
+    kame_wasm_last = header->previous;
+  } else {
+    ((kame_wasm_block *)(uintptr_t)next)->previous = block;
+    kame_wasm_link_free(block);
+  }
+  return KAME_WASM_OK;
 }
 
 __attribute__((export_name("kame_wasm_host_heap_used")))
@@ -332,6 +391,7 @@ _Noreturn void kame_wasm_panic(const char *message) {
     if (instance != NULL) {
       instance->exhausted = true;
       instance->runtime = NULL;
+      instance->presentation = NULL;
       instance->pending = (host_Request){};
       instance->parked = NULL;
       instance->has_pending = false;
@@ -534,6 +594,7 @@ uint64_t kame_wasm_instance_create(void) {
     instance->source_len = 0u;
     instance->source_name_len = 0u;
     instance->runtime = NULL;
+    instance->presentation = NULL;
     instance->exhausted = false;
     instance->heap_limit = KAME_WASM_ARENA_CAPACITY;
     instance->pending = (host_Request){};
@@ -577,6 +638,7 @@ uint32_t kame_wasm_instance_free(uint64_t handle) {
     instance->arena = NULL;
     instance->heap = (wasm_Heap){};
   }
+  instance->presentation = NULL;
   /* Release every handle owned by this instance, including its own. */
   wasm_Table_FreeAll(kame_wasm_table(), instance->owner);
   instance->live = false;
@@ -610,6 +672,7 @@ uint32_t kame_wasm_source_compile(uint64_t handle, uint32_t source, uint32_t sou
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, true);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->presentation != NULL) return KAME_WASM_STATE_INVALID;
   if ((source_len != 0u && source == 0u)) return KAME_WASM_STATE_INVALID;
   instance->diagnostic_len = 0u;
   if (instance->has_pending || instance->parked) {
@@ -1188,6 +1251,17 @@ uint32_t kame_wasm_step(uint64_t handle) {
   return 0u;
 }
 
+uint32_t kame_wasm_work_prepare(uint64_t handle, uint32_t dst, uint32_t capacity, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (out_len == 0u || instance->runtime == NULL) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  if (instance->has_pending) return KAME_WASM_OK;
+  wasm_PureResult result = wasm_Runtime_PrepareWorkJSON(instance->runtime);
+  return kame_wasm_finish_query(instance, result, dst, capacity, out_len);
+}
+
 __attribute__((export_name("kame_wasm_result_diagnostic")))
 uint32_t kame_wasm_result_diagnostic(uint64_t handle, uint32_t dst, uint32_t dst_len, uint32_t out_len) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
@@ -1715,6 +1789,63 @@ uint32_t kame_wasm_cli(uint64_t handle, uint32_t command, uint32_t command_len, 
   return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len, instance->diagnostic, (uint32_t)sizeof(instance->diagnostic), &instance->diagnostic_len);
 }
 
+uint32_t kame_wasm_present(uint64_t handle, uint32_t snapshot, uint32_t snapshot_len,
+                           uint32_t dst, uint32_t dst_len, uint32_t out_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, true);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (out_len == 0u || snapshot_len > 1024u * 1024u || (snapshot_len && !snapshot)) return KAME_WASM_STATE_INVALID;
+  *(uint32_t *)(uintptr_t)out_len = 0u;
+  instance->diagnostic_len = 0u;
+  size_t mark = so_heap_mark();
+  so_String text = {(const char *)(uintptr_t)snapshot, (so_int)snapshot_len};
+  wasm_PureResult result = instance->presentation != NULL
+      ? wasm_Presentation_Render(instance->presentation, text)
+      : wasm_RenderPresentation(mem_System, text);
+  return kame_wasm_finish_pure(mark, result, dst, dst_len, out_len, instance->diagnostic,
+      (uint32_t)sizeof(instance->diagnostic), &instance->diagnostic_len);
+}
+
+uint32_t kame_wasm_present_observe(uint64_t handle, uint64_t scope, int64_t now_ns,
+                                   uint32_t data, uint32_t length) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, true);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  if (instance->runtime != NULL || length > 1024u * 1024u || (length && !data) || now_ns < 0) return KAME_WASM_STATE_INVALID;
+  wasm_Presentation *presentation = instance->presentation;
+  bool created_arena = false;
+  if (presentation == NULL) {
+    if (instance->arena == NULL) {
+      instance->arena = (char *)(uintptr_t)kame_wasm_alloc(instance->heap_limit, 16u);
+      if (instance->arena == NULL) return KAME_WASM_NO_MEMORY;
+      instance->heap = wasm_NewHeap((so_Slice){(so_byte *)instance->arena, (so_int)instance->heap_limit, (so_int)instance->heap_limit});
+      created_arena = true;
+    }
+    presentation = wasm_NewPresentation(&instance->heap);
+  }
+  size_t mark = so_heap_mark();
+  instance->diagnostic_len = 0u;
+  wasm_PureResult result = wasm_Presentation_Observe(presentation,
+      (so_String){(const char *)(uintptr_t)data, (so_int)length}, (int64_t)scope, now_ns);
+  uint32_t status = result.Code.len ? KAME_WASM_DIAGNOSTIC : KAME_WASM_OK;
+  if (status == KAME_WASM_OK) {
+    instance->presentation = presentation;
+  } else if (instance->presentation == NULL) {
+    /* Rejected observations retain no facts. Commit the instance mode only
+     * after validation, releasing any tentative presentation allocation. */
+    mem_Free(wasm_Presentation, presentation->Alloc, presentation);
+    if (created_arena) {
+      kame_wasm_free((uint32_t)(uintptr_t)instance->arena, instance->heap_limit);
+      instance->arena = NULL;
+      instance->heap = (wasm_Heap){};
+    }
+  }
+  if (result.Code.len) kame_wasm_instance_set_diagnostic(instance, result.Code, result.Message);
+  wasm_PureResult_Free(&result, mem_System);
+  so_heap_release(mark);
+  return status;
+}
+
 uint32_t kame_wasm_eval_pure(uint32_t source, uint32_t source_len,
                              uint32_t dst, uint32_t dst_len, uint32_t out_len) {
   KAME_WASM_CHECKPOINT(NULL, KAME_WASM_NO_MEMORY, true);
@@ -1766,7 +1897,7 @@ __attribute__((export_name("kame_wasm_instance_set_heap_limit")))
 uint32_t kame_wasm_instance_set_heap_limit(uint64_t handle, uint32_t limit) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
-  if (instance->runtime != NULL || instance->exhausted || limit == 0u || limit > KAME_WASM_ARENA_CAPACITY) return KAME_WASM_STATE_INVALID;
+  if (instance->arena != NULL || instance->runtime != NULL || instance->exhausted || limit == 0u || limit > KAME_WASM_ARENA_CAPACITY) return KAME_WASM_STATE_INVALID;
   instance->heap_limit = limit;
   return KAME_WASM_OK;
 }

@@ -226,12 +226,14 @@ def check_lifecycle(host: list[str], project: Path) -> None:
 	native = len(host) == 1
 	for width in [40, 80]:
 		frame = terminal(host, project, "ansi", width)
-		assert b"\x1b[1A" in frame and (b"[default]" if native else b"1 running") in frame, frame
+		assert re.search(rb"\x1b\[[0-9]*A", frame) and b"[default]" in frame, frame
 		assert b"started [" not in frame and b"finished in" not in frame and b"info [" not in frame, frame
+		assert len(re.findall(rb"\[default\] +\d+\.\ds - \xe2\x9c\x93", frame)) == 1, frame
+		assert b"workers: 1" in frame and b"target [default]" in frame, frame
+		assert b"done [" not in frame and b"error [" not in frame, frame
+		assert b"active \xc2\xb7" not in frame and b" waiting" not in frame and b" - building" in frame, frame
+		assert b"\x1b[?2026h" in frame and frame.count(b"\x1b[?2026h") == frame.count(b"\x1b[?2026l"), frame
 		if native:
-			assert len(re.findall(rb"\[default\] +\d+\.\ds - \xe2\x9c\x93", frame)) == 1, frame
-			assert b"workers: 1" in frame, frame
-			assert b"done [" not in frame and b"error [" not in frame, frame
 			# Timer-only updates must not repaint the separator or worker assignment.
 			assert frame.count(b"workers") <= 4, frame
 			assert b"idle" not in frame and b" waiting" not in frame and b" - building" in frame, frame
@@ -240,28 +242,22 @@ def check_lifecycle(host: list[str], project: Path) -> None:
 				transaction = batch.split(b"\x1b[?2026l", 1)[0]
 				if re.search(rb"\[default\] +\d+\.\ds - \xe2\x9c\x93", transaction):
 					assert b"workers" in transaction and (b"1 ok" if width < 60 else b"1 complete") in transaction, transaction
-		else:
-			assert frame.count(b"done [default] complete") == 1, frame
 		resized = terminal(host, project, "ansi", width, resize=True)
-		assert b"running" in resized and (b" - \xe2\x9c\x93" if native else b"done build") in resized, resized
+		assert b"running" in resized and b" - \xe2\x9c\x93" in resized, resized
 	assert b"\x1b" not in terminal(host, project, "text")
 	assert b"\x1b" not in terminal(host, project, "ansi", width=30)
-	if native:
-		# A pure Kame target executes without ever emitting process-started.
-		(project / "Makefile.kmk").write_text("task default :\n")
-		pure = terminal(host, project, "ansi")
-		assert b"evaluating" in pure and b"kame" in pure, pure
-		assert re.search(rb"\[default\] +\d+\.\ds - \xe2\x9c\x93", pure), pure
-		(project / "Makefile.kmk").write_text("task default :\n\tsleep 0.4\n")
+	# Both backends publish actual dispatch before synchronous Kame work, even
+	# when the target never emits process-started.
+	(project / "Makefile.kmk").write_text("task default :\n")
+	pure = terminal(host, project, "ansi")
+	assert b"evaluating" in pure and b"kame" in pure, pure
+	assert re.search(rb"\[default\] +\d+\.\ds - \xe2\x9c\x93", pure), pure
+	(project / "Makefile.kmk").write_text("task default :\n\tsleep 0.4\n")
 	fallback = invoke(host, ["--output", "ansi", "--force"], project)
 	assert b"started [" not in fallback.stderr and b"process [" not in fallback.stderr and b"info [" not in fallback.stderr, fallback.stderr
 	(project / "Makefile.kmk").write_text("task default : broken\ntask broken :\n\texit 7\n")
 	failed = invoke(host, ["--output", "ansi", "--color", "always"], project, status=1)
-	if native:
-		assert b"\x1b[35mbroken\x1b[0m" in failed.stderr and b" - \x1b[1;31mfailed\x1b[0m" in failed.stderr, failed.stderr
-	else:
-		failure_line = next(line for line in failed.stderr.splitlines() if b"error [broken] failed" in line)
-		assert b"RECIPE_FAIL" not in failure_line and b"status 7" not in failure_line and b"\x1b[" in failure_line, failed.stderr
+	assert b"\x1b[35mbroken\x1b[0m" in failed.stderr and b" - \x1b[1;31mfailed\x1b[0m" in failed.stderr, failed.stderr
 	clean = re.sub(rb"\x1b\[[0-9;]*m", b"", failed.stderr)
 	assert clean.count(b"RECIPE_FAIL") == 1 and clean.count(b"status 7") == 1, failed.stderr
 	assert b"error[RECIPE_FAIL]: [broken] recipe exited unsuccessfully" in clean, failed.stderr
@@ -310,7 +306,7 @@ if __name__ == "__main__":
 	if part not in ('all', 'values', 'lifecycle'):
 		raise SystemExit('expected all, values or lifecycle')
 	with tempfile.TemporaryDirectory(prefix="kame-presentation-") as directory:
-		for host in [[str(Path(sys.argv[1]).resolve())], ["node", str(Path(sys.argv[2]).resolve())]]:
+		for host in [[str(Path(sys.argv[1]).resolve())], [os.environ.get("KAME_JS_RUNTIME", "node"), str(Path(sys.argv[2]).resolve())]]:
 			check_host(host, Path(directory), part)
 	print("presentation matrix passed")
 

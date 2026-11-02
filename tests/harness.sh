@@ -16,11 +16,23 @@ source "$BASE/lib-testing.sh"
 # Give each worker its own process group, including its subprocesses.
 set -m
 declare -A running=()
+progress_enabled=0
+progress_owner=$BASHPID
+harness_progress_emit() {
+	[ "$progress_enabled" = 1 ] && [ "$BASHPID" = "$progress_owner" ] || return 0
+	# OSC 9;4: normal (1), error (2), or remove (0). Never write into logs.
+	printf '\033]9;4;%d;%d\033\134' "$1" "$2" >&2 || true
+}
+harness_progress_clear() {
+	harness_progress_emit 0 0
+}
+trap 'harness_progress_clear; test_signal_exit' EXIT
 cancel_tests() {
 	local status="$1" pid
 	local -a descendants=()
 	trap '' INT TERM
 	trap - EXIT ERR
+	harness_progress_clear
 	# Snapshot ancestry before killing parents: Python watch helpers use setsid,
 	# so their children are not necessarily in a worker's process group.
 	if [ "${#running[@]}" -gt 0 ]; then
@@ -197,6 +209,27 @@ fi
 pending=("${TESTS[@]}")
 completed=0
 total=${#TESTS[@]}
+progress_weights=()
+progress_total=0
+progress_completed=0
+progress_state=1
+if [ -t 2 ] && [ "${TERM:-dumb}" != dumb ] && [ "$total" -gt 0 ]; then
+	# Freeze ETA weights before workers update the runtime cache. No history
+	# means equal weights; uncached tests otherwise use the same mean as ETA.
+	average=$(test_runtime_average)
+	for file in "${TESTS[@]}"; do
+		weight=$average
+		cache="$TEST_RUNTIME_CACHE_DIR/${file##*/}.seconds"
+		if [ -r "$cache" ] && IFS= read -r cached <"$cache" && [[ "$cached" =~ ^[0-9]+$ ]]; then
+			weight=$cached
+		fi
+		[ "$weight" -gt 0 ] || weight=1
+		progress_weights+=("$weight")
+		progress_total=$((progress_total + weight))
+	done
+	progress_enabled=1
+	harness_progress_emit 1 0
+fi
 report_test() {
 	local index="$1" status="$2" elapsed="$3" rel log progress eta
 	rel="$(test-repo-path "${TESTS[$index]}")"
@@ -222,6 +255,11 @@ report_test() {
 	fi
 	if [ "$TEST_VERBOSE" = 1 ]; then
 		test_log "${DIM}ETA after $rel: $eta${RESET}"
+	fi
+	if [ "$progress_enabled" = 1 ]; then
+		progress_completed=$((progress_completed + progress_weights[index]))
+		[ "$status" -eq 0 ] || progress_state=2
+		harness_progress_emit "$progress_state" "$((100 * progress_completed / progress_total))"
 	fi
 }
 

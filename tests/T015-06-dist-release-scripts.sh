@@ -90,7 +90,7 @@ fixture="$TMPDIR/repository"
 mock_bin="$TMPDIR/mock-bin"
 mkdir -p "$fixture/src/sh" "$mock_bin"
 cp "$release" "$fixture/src/sh/release.sh"
-cp VERSION package.json "$fixture/"
+cp VERSION package.json Makefile "$fixture/"
 git -C "$fixture" init -q
 git -C "$fixture" add .
 git -C "$fixture" -c user.name=ReleaseTest -c user.email=release@example.invalid commit -qm fixture
@@ -107,7 +107,8 @@ export DISPLAY=:test
 unset WAYLAND_DISPLAY
 export LITTLESECRETS_LOG="$TMPDIR/secrets.log" MOCK_MODE=ok
 REAL_GIT=$(command -v git)
-export REAL_GIT
+REAL_MAKE=$(command -v make)
+export REAL_GIT REAL_MAKE
 cat >"$mock_bin/gh" <<'SH'
 #!/usr/bin/env bash
 set -eu
@@ -250,6 +251,7 @@ case "$*" in
 	;;
 "publish --access public --registry https://registry.npmjs.org/" | "publish --access public --registry https://registry.npmjs.org/ --browser=false")
 	[ "${MOCK_REQUIRE_TTY:-0}" = 0 ] || { [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; } || exit 1
+	[ "${MOCK_REQUIRE_TTY:-0}" = 0 ] || printf 'Authenticate at https://example.invalid/approve\n'
 	[ "$MOCK_NPM_STATE" != publish_failure ] || { echo 'npm authentication expired' >&2; exit 1; }
 	[ "$PWD" != "$MOCK_ROOT" ] && [ -f package.json ] || exit 1
 	[ "$(cat VERSION)" = "$MOCK_VERSION" ] || exit 1
@@ -428,11 +430,11 @@ test-step "headless interactive publication reaches npm's terminal"
 : >"$MOCK_LOG"
 rm -f "$MOCK_NPM_MARKER"
 status=0
-env -u DISPLAY -u WAYLAND_DISPLAY MOCK_REQUIRE_TTY=1 python3 - "$release" >"$TMPDIR/tty-out" 2>&1 <<'PY' || status=$?
+env -u DISPLAY -u WAYLAND_DISPLAY MOCK_REQUIRE_TTY=1 python3 - "$REAL_MAKE" -C "$fixture" release KAME=/bin/true repo=owner/repo >"$TMPDIR/tty-out" 2>&1 <<'PY' || status=$?
 import errno, os, pty, sys
 pid, fd = pty.fork()
 if pid == 0:
-    os.execv(sys.argv[1], [sys.argv[1]])
+    os.execv(sys.argv[1], sys.argv[1:])
 try:
     while data := os.read(fd, 4096):
         sys.stdout.buffer.write(data)
@@ -441,8 +443,10 @@ except OSError as e:
         raise
 sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))
 PY
-if [ "$status" = 0 ] && grep -qx 'npm publish --access public --registry https://registry.npmjs.org/ --browser=false' "$MOCK_LOG"; then
-	test-ok "npm receives the terminal and can show the approval URL without launching a browser"
+if [ "$status" = 0 ] && grep -qx 'npm publish --access public --registry https://registry.npmjs.org/ --browser=false' "$MOCK_LOG" &&
+	grep -q 'https://example.invalid/approve' "$TMPDIR/tty-out" &&
+	grep -q '^gh repo view owner/repo ' "$MOCK_LOG" && ! grep -q '^make ' "$MOCK_LOG"; then
+	test-ok "make release retries npm without building or obscuring terminal approval"
 else
 	test-fail "interactive npm: status=$status output=$(cat "$TMPDIR/tty-out") log=$(cat "$MOCK_LOG")"
 fi

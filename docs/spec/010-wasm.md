@@ -16,6 +16,8 @@ The WebAssembly module targets `wasm32-freestanding`. It includes:
 - Pure collection, text, and path operations.
 - Host-request operation stubs.
 - Shared portable CLI invocation parsing and command policy (`kame/cli`).
+- Shared CLI presentation state and layout under `036-cli_ansi.md`; the module
+  computes display output but performs no terminal I/O.
 - A hand-written C bridge in `src/c/wasm/`: the ABI contract header, the
   pointer/length-to-slice adapter, the SjLj landing pad and the freestanding
   panic hook. It carries no engine policy.
@@ -540,6 +542,60 @@ progress and human diagnostics on stderr), and the same exit statuses (0 for
 success, 1 for parse, evaluation, build, or cache failure, 2 for usage errors,
 and 128 plus the signal number for forced termination). `--json` emits execution
 JSON Lines with `schema: 1`; static inspection uses its command-specific framing.
+Human progress, outcome rows, and the live dashboard use the portable presenter
+specified in `036-cli_ansi.md`. JavaScript supplies terminal facts, schedules
+nonblocking display updates, and publishes the resulting bytes; it does not
+reimplement the ANSI or text layout. Process streams remain host-owned and
+byte-exact. Presentation ABI calls are scoped to the CLI invocation and do not
+change the public event JSON or the host-request protocol.
+
+`kame_wasm_present(instance, snapshot, snapshot_len, dst, capacity, out_len)`
+is the read-only presentation query. A zero-capacity query reports the required
+byte count; copying the same snapshot must not consume events or advance
+presentation state. The copied JSON snapshot selects `frame`, `paint`, `outcome`,
+or `summary`. Frames supply command/subject, dry-run/watch-cycle metadata,
+terminal dimensions, styling, established counts and worker facts, and elapsed
+milliseconds. Paint supplies old/new frames and their owned row counts. Outcomes
+supply target, outcome and optional measured timing; summaries supply command,
+exit status, diagnostic presence and counts. Results are display bytes, not JSON
+events. Inputs are bounded to 1 MiB and dimensions/worker lists to 4096; invalid
+snapshots fail explicitly. This rendering query is not an alternative source of
+execution facts.
+
+`kame_wasm_present_observe(instance, scope, now_ns, data, length)` mutates the
+invocation-owned portable presentation state exactly once. It consumes a copied
+target/process/service observation, or a private `work-started`/`work-finished`
+dispatch observation. `scope` namespaces execution-instance identities within one
+CLI invocation; equal node IDs and generations from different instances cannot
+collide. `now_ns` is an explicit nonnegative monotonic timestamp, never wall time.
+The presenter owns deduplication, worker slots, retries, service occupancy, target
+timing and terminal counts. The wrapper queries counts but does not recompute
+them. Malformed observations fail without mutating established state.
+
+The first valid observation creates a dedicated presentation arena on an otherwise
+unused instance. A rejected first observation retains no arena and does not
+prevent later source compilation or heap-limit configuration. `reset` releases
+all prior state; `cycle` releases target outcome identities and counts but
+preserves active workers and ready services. Instance free releases the arena.
+Source compilation and presentation state are mutually
+exclusive on one handle. Rendering with `tracked: true` uses this state instead
+of host-supplied counts/workers. `op: "counts"` returns the four aggregate counts;
+tracked outcomes include the original event and decimal-string `scope` to select
+their measured timing. `nowNS` supplies the current render timestamp. Repeated
+query/copy calls neither consume events nor reset timing or counts.
+
+`kame_wasm_work_prepare(instance, dst, capacity, out_len)` establishes an optional
+CLI pre-dispatch boundary. It prepares the same deterministic ready batch as a
+normal tick and reports only the next actual target dispatch. Repeated queries
+before `step` return the same observation without dispatching it. The following
+step executes that item; later prepare/step calls finish the retained batch in
+the original order before selecting another batch. Cancelled or invalidated
+claims cannot dispatch or acquire an evaluating worker. The CLI publishes an
+`evaluating` worker before the synchronous call and retires that observation as
+soon as the call returns, including failures. Queued parents do not acquire
+workers. Hosts that do not request this boundary keep ordinary batched stepping;
+embedding APIs and public event JSON gain no animation events or terminal I/O.
+
 `plan`, `inputs`, and `outputs` follow the recursive, read-only schema-2 contract
 in `037-build-inspection.md`, including stages and explicit deferred discovery.
 Host-backed resolution resumes through the inspection host protocol, never an

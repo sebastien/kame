@@ -177,11 +177,11 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			}
 			fmt.Fprintf(errOut, "started [%s]\n", event.Target)
 		} else if event.Kind == program.TargetCompleted {
-			writeTargetOutcome(errOut, event, "done", "status.success")
+			writeTargetOutcome(errOut, event)
 		} else if event.Kind == program.TargetFailed {
-			writeTargetOutcome(errOut, event, "error", "status.failed")
+			writeTargetOutcome(errOut, event)
 		} else if event.Kind == program.TargetCancelled {
-			writeTargetOutcome(errOut, event, "cancelled", "status.cancelled")
+			writeTargetOutcome(errOut, event)
 		} else if event.Kind == program.CacheWarning {
 			emitDiagnostic(errOut, event.Diagnostic, false, p.Parsed.Source)
 		} else if event.Kind == program.ServiceState {

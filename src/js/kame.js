@@ -170,18 +170,18 @@ let outputColor = false;
 let presentationCommand = 'build';
 let presentationSubject = '';
 let invocationHadDiagnostic = false;
-let cliWorkers = [];
 let dashboardRows = 0;
 let dashboardWidth = 0, dashboardHeight = 0;
+let dashboardFrame = '';
+let presentationModule = null;
+let presentationDryRun = false;
 let dashboardUnsafe = false;
 let dashboardPending = false;
 let dashboardLast = 0;
-let terminalOutcomes = new Set();
-let startedOutcomes = new Set();
 let formatCounts = { completed: 0, failed: 0, cancelled: 0 };
 let watchIdle = false;
 const cliLockWaits = new Map();
-let watchCycle = 0, watchCycleStatus = '', watchCycleElapsed = 0;
+let watchCycle = 0, watchCycleElapsed = 0;
 // lastDiagnostic holds the rich diagnostic from the most recent failed target
 // event, so the trailing --json diagnostic matches the native duplicate.
 let lastDiagnostic = null;
@@ -373,6 +373,7 @@ function clearDashboard() {
   }
   if (dashboardRows) stderr.write('\x1b[1A\r\x1b[2K'.repeat(dashboardRows));
   dashboardRows = 0;
+  dashboardFrame = '';
 }
 function rawPublication(destination, bytes) {
   if (destination.isTTY) {
@@ -416,46 +417,32 @@ function redrawDashboard() {
     ];
     stderr.write(`${erase}${lines.join('\n')}\n`);
     dashboardRows = lines.length;
+    dashboardFrame = `${lines.join('\n')}\n`;
     return;
   }
-  const heading = `${presentationCommand}${presentationSubject ? ` ${shortField(presentationSubject, Math.floor(width / 3))}` : ''}${watchCycle ? ` · cycle ${watchCycle}` : ''}`;
-  const lines = [styled('heading', shortField(watchIdle ? `${heading} · waiting · ${watchCycleStatus} · ${watchCycleElapsed}ms` : `${heading} · active · ${Math.max(0, Math.floor(performance.now() - buildStartedAt))}ms`, width - 2))];
-  let running = 0, ready = 0, hidden = 0;
-  for (let i = 0; i < cliWorkers.length; i++) {
-    const worker = cliWorkers[i];
-    if (!worker) continue;
-    if (worker.ready) { ready++; continue; }
-    running++;
-    if (lines.length >= height - 3) { hidden++; continue; }
-    lines.push(shortField(`  ${i}  ${shortField(worker.target, Math.floor(width / 2) - 8)}  ${worker.state || 'running'}${width >= 80 ? `  ${shortField(worker.program, Math.floor(width / 4) - 8)}  ${Math.max(0, Math.floor(now - worker.started))}ms` : ''}`, width - 2));
-  }
-  lines.push(shortField(`${running} running · ${Math.max(0, buildProgress.active - running - ready)} waiting · ${buildProgress.completed} done · ${buildProgress.failed} failed`, width - 2));
-  if (hidden || ready) lines.push(shortField(`${hidden} hidden active · ${ready} ready services`, width - 2));
-  stderr.write(`${erase}${lines.join('\n')}\n`); dashboardRows = lines.length;
+  const frame = presentationModule.present({ op: 'frame', command: presentationCommand, subject: presentationSubject,
+    dryRun: presentationDryRun, idle: watchIdle, cycle: watchCycle, width, height, color: diagnosticColor,
+    elapsedMS: watchIdle ? watchCycleElapsed : Math.max(0, Math.floor(now - buildStartedAt)), tracked: true,
+  });
+  const lines = frame.trimEnd().split('\n');
+  const update = presentationModule.present({ op: 'paint', frame, previous: dashboardFrame, previousRows: dashboardRows, rows: lines.length });
+  if (update) stderr.write(`\x1b[?2026h${update}\x1b[?2026l`);
+  dashboardRows = lines.length; dashboardFrame = frame;
 }
-function observeCLIEvent(event) {
-  if (!buildProgress) buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
-  const identity = `${event.resource?.kind}:${event.resource?.name ?? event.target}:${event.node}:${event.generation}`;
-  if (event.type === 'target-started' && !startedOutcomes.has(identity) && !terminalOutcomes.has(identity)) { startedOutcomes.add(identity); buildProgress.active++; }
-  if (['target-completed', 'target-failed', 'target-cancelled'].includes(event.type)) {
-    if (!terminalOutcomes.has(identity)) {
-      terminalOutcomes.add(identity);
-      if (startedOutcomes.has(identity) && buildProgress.active) buildProgress.active--;
-      buildProgress[event.type === 'target-completed' ? 'completed' : event.type === 'target-failed' ? 'failed' : 'cancelled']++;
-    }
-  }
-  if (event.type === 'process-started' && event.program) {
-    if (cliWorkers.some((worker) => worker && worker.node === event.node && worker.target === event.target && worker.request === event.request && worker.generation === event.generation && worker.attempt === event.attempt && worker.program === event.program)) return;
-    let slot = cliWorkers.findIndex((worker) => !worker);
-    if (slot < 0) slot = cliWorkers.length;
-    cliWorkers[slot] = { node: event.node, target: event.target, generation: event.generation, attempt: event.attempt, request: event.request, program: event.program, started: performance.now(), ready: false };
-  }
-  for (let i = 0; i < cliWorkers.length; i++) {
-    const worker = cliWorkers[i];
-    if (!worker || worker.node !== event.node || worker.target !== event.target || worker.generation !== event.generation || event.attempt < worker.attempt) continue;
-    if (event.type === 'service-state') { worker.ready = ['ready', 'checking-health'].includes(event.state); worker.state = ['stopping', 'restarting'].includes(event.state) ? event.state === 'stopping' ? 'stopping' : 'retrying' : ''; }
-    if ((event.type === 'process-exited' && (event.request === undefined || worker.request === event.request)) || ['target-completed', 'target-failed', 'target-cancelled'].includes(event.type)) cliWorkers[i] = null;
-  }
+function observeCLIEvent(event, scope) {
+  if (!['target-started', 'target-completed', 'target-failed', 'target-cancelled', 'process-started', 'process-exited', 'service-state', 'work-started', 'work-finished'].includes(event.type)) return;
+  presentationModule.observePresentation(presentationEvent(event), scope);
+  buildProgress = JSON.parse(presentationModule.present({ op: 'counts' }));
+}
+function presentationEvent(event) {
+  // Do not copy diagnostics, argv, or stream payloads into lifecycle state.
+  return { type: event.type, node: event.node, generation: event.generation, attempt: event.attempt,
+    request: event.request, target: event.target, program: event.program, state: event.state,
+    resource: event.resource ? { kind: event.resource.kind, name: event.resource.name } : undefined };
+}
+function resetProgress() {
+  presentationModule.observePresentation({ type: 'cycle' });
+  buildProgress = JSON.parse(presentationModule.present({ op: 'counts' }));
 }
 
 function lockOwnerText(owner) {
@@ -847,7 +834,7 @@ function diagnosticSource(name, primary) {
   }
 }
 
-function humanEvent(bytes) {
+function humanEvent(bytes, scope) {
   const event = JSON.parse(new TextDecoder().decode(bytes));
   if (event.type === 'target-completed' && event.resource?.kind === 'definition') return;
   if (event.type === 'stdout') { rawPublication(stdout, eventData(event)); return; }
@@ -877,16 +864,16 @@ function humanEvent(bytes) {
     return;
   }
   if (event.type === 'target-completed') {
-    stderr.write(`${styled('status.success', `done [${event.target}] complete`)}\n`);
+    writeTargetOutcome(event, 'complete', scope);
     return;
   }
   if (event.type === 'target-failed') {
-    stderr.write(`${styled('status.failed', `error [${event.target}] failed`)}\n`);
+    writeTargetOutcome(event, 'failed', scope);
     if (event.diagnostic) lastDiagnostic = event.diagnostic;
     return;
   }
   if (event.type === 'target-cancelled') {
-    stderr.write(`${styled('status.cancelled', `cancelled [${event.target}] cancelled`)}\n`);
+    writeTargetOutcome(event, 'cancelled', scope);
     if (event.diagnostic) lastDiagnostic = event.diagnostic;
     return;
   }
@@ -905,10 +892,19 @@ function eventData(event) {
   return event.data;
 }
 
+function writeTargetOutcome(event, outcome, scope) {
+  stderr.write(presentationModule.present({ op: 'outcome', target: event.target, outcome, ansi: outputMode === 'ansi',
+    color: diagnosticColor, width: stderr.isTTY ? Math.max(0, (stderr.columns || 80) - 2) : 0,
+    tracked: true, event: presentationEvent(event), scope: String(BigInt.asIntN(64, scope)),
+  }));
+}
+
 function printSummary(counts = buildProgress, status = 0, elapsedMS = performance.now() - buildStartedAt, command = presentationCommand) {
   clearDashboard();
-  const label = status >= 128 || (counts.cancelled && !counts.failed && status) ? 'cancelled' : status && (presentationCommand !== 'fmt' || invocationHadDiagnostic) ? 'error' : 'done';
-  stderr.write(`${styled(label === 'done' ? 'status.success' : label === 'error' ? 'status.failed' : 'status.cancelled', `${label} `)}${command} · ${counts.completed} ${presentationCommand === 'fmt' ? 'files' : 'targets'} complete · ${counts.failed} failed · ${counts.cancelled} cancelled · ${Math.max(0, Math.floor(elapsedMS))}ms\n`);
+  stderr.write(presentationModule.present({ op: 'summary', command, status, counts, ansi: outputMode === 'ansi',
+    hadDiagnostic: invocationHadDiagnostic, elapsedMS: Math.max(0, Math.floor(elapsedMS)), color: diagnosticColor,
+    width: stderr.isTTY ? Math.max(0, (stderr.columns || 80) - 2) : 0,
+  }));
 }
 
 function diagnosticError(text, fallbackCode) {
@@ -1256,6 +1252,9 @@ const REQUIRED_EXPORTS = [
   'kame_wasm_parse',
   'kame_wasm_format',
   'kame_wasm_cli',
+  'kame_wasm_present',
+  'kame_wasm_present_observe',
+  'kame_wasm_work_prepare',
   'kame_wasm_target_operands',
   'kame_wasm_expression_begin',
   'kame_wasm_expression_cancel',
@@ -1485,6 +1484,33 @@ class Module {
       }
       throw error;
     } finally { this.exports.kame_wasm_instance_free(instance); }
+  }
+
+  present(snapshot) {
+    const temporary = this.presentationInstance === undefined;
+    const instance = temporary ? this.exports.kame_wasm_instance_create() : this.presentationInstance;
+    if (instance === 0n) throw Object.assign(new Error('cannot create presentation instance'), { code: 'NO_MEMORY' });
+    try {
+      const input = this.write(JSON.stringify({ ...snapshot, nowNS: Math.round(performance.now() * 1e6) }), 'presentationInput');
+      return this.decode0(this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_present(handle, input.pointer, input.length, dst, capacity, length), instance));
+    } finally { if (temporary) this.exports.kame_wasm_instance_free(instance); }
+  }
+
+  beginPresentation() {
+    this.presentationInstance = this.exports.kame_wasm_instance_create();
+    if (this.presentationInstance === 0n) { this.presentationInstance = undefined; throw Object.assign(new Error('cannot create presentation instance'), { code: 'NO_MEMORY' }); }
+  }
+
+  endPresentation() {
+    if (this.presentationInstance === undefined) return;
+    this.exports.kame_wasm_instance_free(this.presentationInstance);
+    this.presentationInstance = undefined;
+  }
+
+  observePresentation(event, scope = 0n) {
+    const input = this.write(JSON.stringify(event), 'presentationEvent');
+    const status = this.exports.kame_wasm_present_observe(this.presentationInstance, scope, BigInt(Math.round(performance.now() * 1e6)), input.pointer, input.length);
+    if (status !== 0) throw diagnosticError(this.instanceDiagnostic(this.presentationInstance), 'HOST_FAIL');
   }
 
   async parseCLI(command, args) {
@@ -2117,7 +2143,19 @@ class Module {
     const cancelling = context?.signal?.aborted === true;
     const finalizing = this.exports.kame_wasm_finalization_tick?.(instance, process.hrtime.bigint(), cancelling ? 1 : 0);
     if (cancelling && finalizing !== 1) throw Object.assign(new Error('invocation cancelled'), { code: 'EXEC_CANCELLED' });
-    return this.exports.kame_wasm_step(instance);
+    let work;
+    if (context?.api !== true && context?.human === true && liveDashboard()) {
+      const bytes = this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_work_prepare(handle, dst, capacity, length), instance);
+      if (bytes.length) {
+        work = JSON.parse(this.decode0(bytes));
+        observeCLIEvent(work, instance);
+        // A synchronous evaluator may not return in time for an animation tick.
+        dashboardLast = -Infinity;
+        redrawDashboard();
+      }
+    }
+    try { return this.exports.kame_wasm_step(instance); }
+    finally { if (work) observeCLIEvent({ ...work, type: 'work-finished' }, instance); }
   }
 
   async waitReady(instance, context) {
@@ -2395,7 +2433,7 @@ class Module {
         // Non-JSON expression roots only transport the rich failure; they do not
         // add build lifecycle output or count toward build summaries.
         if (!json && context.api !== true && event.resource?.kind === 'definition') continue;
-        if (context.api !== true && (json || human)) observeCLIEvent(event);
+        if (context.api !== true && (json || human)) observeCLIEvent(event, instance);
         if (context.events) {
           const previous = event.type === 'process-snapshot' ? context.events.findIndex((old) => old.type === event.type && old.request === event.request) : -1;
           if (previous >= 0) context.events[previous] = event;
@@ -2407,7 +2445,7 @@ class Module {
       } else if (json) {
         if (!context.render || !['target-value', 'target-completed'].includes(JSON.parse(this.decode0(bytes)).type)) stdout.write(bytes);
       } else if (human) {
-        humanEvent(bytes);
+        humanEvent(bytes, instance);
       }
     }
   }
@@ -4145,7 +4183,7 @@ async function runSession(module, inv, sourceDirectory) {
     const input = inv.inputs[0];
     if (input.kind !== 'stdin') return runPrimary(module, { ...inv, name: '', sourceName: input.kind === 'command' ? '<command:1>' : fragments[0].name, file: input.kind === 'file' ? resolve(sourceDirectory, fragments[0].name) : '', command: input.kind === 'command' ? input.value : '', targets: input.entries }, false, sourceDirectory);
   }
-  buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
+  resetProgress();
   buildStartedAt = performance.now();
   return module.runSession(fragments, inv, contextFor(inv));
 }
@@ -4700,7 +4738,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
     clearDashboard(); cycle++; cycleStarted = performance.now(); cycleFinished = false; cycleFailed = false; watchIdle = false;
     cycleCancelled = false;
     watchCycle = cycle;
-    buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 }; terminalOutcomes.clear(); startedOutcomes.clear();
+    resetProgress();
     buildStartedAt = cycleStarted;
     if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'watch-cycle-started', cycle })}\n`);
   };
@@ -4708,7 +4746,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
     if (cycleFinished) return;
     clearDashboard();
     const outcome = cycleFailed || buildProgress.failed ? 'failure' : cycleCancelled ? 'cancelled' : 'success';
-    watchCycleStatus = outcome; watchCycleElapsed = Math.max(0, Math.floor(performance.now() - cycleStarted));
+    watchCycleElapsed = Math.max(0, Math.floor(performance.now() - cycleStarted));
     if (jsonMode) {
       stdout.write(`${JSON.stringify({ schema: 1, type: 'watch-cycle-finished', cycle, status: outcome, elapsedMS: Math.max(0, Math.floor(performance.now() - cycleStarted)), completed: buildProgress.completed, failed: buildProgress.failed, cancelled: buildProgress.cancelled })}\n`);
       stdout.write(`${JSON.stringify({ schema: 1, type: 'watch-idle', cycle, status: outcome })}\n`);
@@ -4898,7 +4936,7 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
     return failure('BUILD_NO_SOURCE', 'no build source found');
   }
   primarySource = source;
-  buildProgress = { active: 0, completed: 0, failed: 0, cancelled: 0 };
+  resetProgress();
   buildStartedAt = performance.now();
   const context = contextFor(inv);
   context.human = inv.json !== true;
@@ -4936,6 +4974,14 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
 }
 
 async function dispatch(module, inv, noArguments) {
+  module.beginPresentation();
+  try { return await dispatchInvocation(module, inv, noArguments); }
+  finally { clearDashboard(); module.endPresentation(); }
+}
+
+async function dispatchInvocation(module, inv, noArguments) {
+  presentationModule = module;
+  presentationDryRun = inv.dryRun;
   configurePresentation(inv);
   if (noArguments && !['Makefile.kmk', 'make.kmk', 'src/kmk/main.kmk'].some((name) => existsSync(name))) {
     const help = await module.parseCLI('@help', ['--output', outputMode]);
@@ -4944,9 +4990,9 @@ async function dispatch(module, inv, noArguments) {
   presentationCommand = inv.name || 'build';
   presentationSubject = inv.targets[0] || (inv.inputs?.[0]?.kind === 'file' ? inv.inputs[0].value : inv.inputs?.length ? '<command:1>' : 'default');
   invocationHadDiagnostic = false;
-  cliWorkers = []; terminalOutcomes = new Set(); startedOutcomes = new Set(); dashboardRows = 0; dashboardUnsafe = false; dashboardPending = false; dashboardLast = 0;
+  dashboardRows = 0; dashboardFrame = ''; dashboardUnsafe = false; dashboardPending = false; dashboardLast = 0;
   watchIdle = false;
-  watchCycle = 0; watchCycleStatus = ''; watchCycleElapsed = 0;
+  watchCycle = 0; watchCycleElapsed = 0;
   formatCounts = { completed: 0, failed: 0, cancelled: 0 };
   const started = performance.now();
   if (inv.dryRun && !jsonMode) stderr.write(`info ${presentationCommand}: dry-run · no effects or processes\n`);
@@ -5091,6 +5137,7 @@ async function main() {
 
   installSignals();
   const module = await Module.load();
+  presentationModule = module;
   const presentation = await module.parseCLI('@presentation', args);
   configurePresentation(presentation);
   if (!presentation.ok) { diagnostic(presentation.error.code, presentation.error.message); return 2; }

@@ -103,19 +103,8 @@ func (g *inspectionGraph) discoverConsumers() diagnostic.Diagnostic {
 				g.ConsumerFailures = slices.Append(p.Alloc, g.ConsumerFailures, inspectionConsumerFailure{Resource: cursor + 1, Diagnostic: d})
 			}
 			if g.Waiting {
-				// visit has registered only this producer and its outputs before
-				// yielding input resolution. Retry it without replaying the catalogue.
-				producer := g.Resources[cursor].Producer
-				entry := &g.Producers[producer-1]
-				entry.Plan.Free(p.Alloc)
-				slices.Free(p.Alloc, entry.Outputs)
-				for i := range g.Resources {
-					if g.Resources[i].Producer == producer {
-						g.Resources[i].Producer = 0
-						g.Resources[i].Artifact = false
-					}
-				}
-				g.Producers = g.Producers[:producer-1]
+				// visit publishes a producer only after resolving its inputs.
+				// Retry this cursor without rebuilding the completed catalogue.
 				return diagnostic.Diagnostic{}
 			}
 		}

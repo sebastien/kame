@@ -49,6 +49,44 @@ for (let i = 0; i < 100; i++) {
   assert.equal(e.memory.buffer.byteLength, arenaPages, 'instance creation did not reuse freed arenas');
 }
 
+// Many live buffers and arbitrary free order exercise indexed exact frees and
+// both neighbors of split/coalesced blocks, not just one recycled scratch slot.
+const blocks = Array.from({ length: 4096 }, (_, i) => {
+  const size = 1 + i % 257;
+  const pointer = alloc(size, 2 ** (i % 7));
+  new Uint8Array(e.memory.buffer, pointer, size).fill(i % 251);
+  return { pointer, size };
+});
+assert.equal(e.kame_wasm_free(0xffffffff, 1), 4);
+assert.equal(e.kame_wasm_free(1, 1), 4);
+for (let i = 0; i < blocks.length; i++) {
+  const index = i * 97 % blocks.length;
+  const { pointer, size } = blocks[index];
+  assert.ok(new Uint8Array(e.memory.buffer, pointer, size).every((byte) => byte === index % 251), 'live host buffer was corrupted');
+  assert.equal(e.kame_wasm_free(pointer, size + 1), 4);
+  assert.equal(e.kame_wasm_free(pointer + 1, size), 4);
+  assert.equal(e.kame_wasm_free(pointer, size), 0);
+  assert.equal(e.kame_wasm_free(pointer, size), 4);
+}
+assert.equal(e.kame_wasm_host_heap_used(), 0);
+
+// Caller-owned payload can forge a plausible header and back-reference, but
+// an interior pointer must never free part of a live allocation.
+const live = alloc(256, 16);
+const forgedBlock = live, interior = forgedBlock + 32;
+const metadata = new DataView(e.memory.buffer);
+for (const [offset, value] of [[0, 64], [4, 0], [8, interior], [12, 16], [16, 0], [20, 0], [28, forgedBlock], [72, 1]]) {
+  metadata.setUint32(forgedBlock + offset, value, true);
+}
+const retained = e.kame_wasm_host_heap_used();
+assert.equal(e.kame_wasm_free(interior, 16), 4, 'payload-forged allocation header was accepted');
+assert.equal(e.kame_wasm_host_heap_used(), retained, 'interior free changed heap accounting');
+const neighbor = alloc(16, 1);
+assert.ok(neighbor + 16 <= live || neighbor >= live + 256, 'allocation overlapped a live buffer');
+assert.equal(e.kame_wasm_free(neighbor, 16), 0);
+assert.equal(e.kame_wasm_free(live, 256), 0);
+assert.equal(e.kame_wasm_host_heap_used(), 0);
+
 const directory = await mkdtemp(join(tmpdir(), 'kame-memory-'));
 const kame = await Kame.create({ wasmPath });
 try {

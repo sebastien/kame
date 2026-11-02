@@ -84,6 +84,72 @@ if [ "$status" = 2 ]; then test-ok "invalid worker count rejected"; else test-fa
 test-step "an empty selection succeeds"
 if run_harness -j 1 tests/lib-testing.sh; then test-ok "empty selection succeeds"; else test-fail "empty selection failed"; fi
 
+test-step "OSC progress uses ETA weights, falls back to counts, and restores the terminal"
+if python3 - "$repo" <<'PYOSC'; then
+import errno
+import os
+from pathlib import Path
+import pty
+import re
+import signal
+import subprocess
+import sys
+
+repo = Path(sys.argv[1])
+pattern = rb'\x1b\]9;4;(\d);(\d+)\x1b\\'
+
+def progress(name: str, files: list[str], durations: dict[str, int], term: str = 'xterm', cancel: bool = False) -> tuple[int, list[tuple[int, int]]]:
+	cache = repo / 'osc-cache' / name
+	cache.mkdir(parents=True)
+	for file, seconds in durations.items():
+		(cache / f'{file}.sh.seconds').write_text(f'{seconds}\n')
+	master, slave = pty.openpty()
+	environment = dict(os.environ, TERM=term, NOCOLOR='1', TEST_RUNTIME_CACHE_DIR=str(cache))
+	process = subprocess.Popen(['timeout', '15', 'bash', 'tests/harness.sh', '-q', '-j', '1', *files],
+		cwd=repo, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=slave)
+	os.close(slave)
+	output = bytearray()
+	try:
+		while True:
+			try:
+				chunk = os.read(master, 65536)
+			except OSError as error:
+				if error.errno != errno.EIO:
+					raise
+				break
+			if not chunk:
+				break
+			output.extend(chunk)
+			if cancel and re.search(pattern, output):
+				process.send_signal(signal.SIGTERM)
+				cancel = False
+	finally:
+		os.close(master)
+	status = process.wait(timeout=20)
+	process.stdout.close()
+	return status, [(int(state), int(percent)) for state, percent in re.findall(pattern, output)]
+
+files = ['tests/b.sh', 'tests/c.sh']
+assert progress('counts', files, {}) == (0, [(1, 0), (1, 50), (1, 100), (0, 0)])
+assert progress('eta', files, {'b': 1, 'c': 9}) == (0, [(1, 0), (1, 10), (1, 100), (0, 0)])
+assert progress('partial', files, {'b': 3}) == (0, [(1, 0), (1, 50), (1, 100), (0, 0)])
+assert progress('failure', ['tests/d.sh', 'tests/b.sh'], {'d': 9, 'b': 1}) == (1, [(1, 0), (2, 90), (2, 100), (0, 0)])
+assert progress('dumb', files, {}, term='dumb') == (0, [])
+assert progress('empty', ['tests/lib-testing.sh'], {}) == (0, [])
+(repo / 'tests/osc-wait.sh').write_text('sleep 60\n')
+status, sequences = progress('cancel', ['tests/osc-wait.sh'], {}, cancel=True)
+assert status == 143 and sequences[0] == (1, 0) and sequences[-1] == (0, 0), (status, sequences)
+PYOSC
+	test-ok "TTY progress is weighted, monotonic, count-based without history, and cleared on exit"
+else
+	test-fail "OSC progress protocol regression"
+fi
+if run_harness -j 1 tests/b.sh tests/c.sh && ! grep -Fq $'\033]9;4;' "$repo/output"; then
+	test-ok "redirected harness output contains no OSC progress sequences"
+else
+	test-fail "OSC progress leaked into redirected output"
+fi
+
 test-step "prebuilt bootstrap requests stay within their project"
 bootstrap="$TEST_PATH/bootstrap"
 mkdir -p "$bootstrap/dist"

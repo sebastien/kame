@@ -13,11 +13,12 @@ import (
 // reclaims short-lived events while the compiled program remains alive.
 type Heap struct {
 	buf       []byte
+	free      [32]uint32
 	UsedBytes int
 	PeakBytes int
 }
 
-const heapHeader = 12
+const heapHeader = 20
 const heapNoPrevious = uint32(0xffffffff)
 
 func NewHeap(buf []byte) Heap {
@@ -28,10 +29,14 @@ func NewHeap(buf []byte) Heap {
 
 func (h *Heap) Reset() {
 	h.UsedBytes, h.PeakBytes = 0, 0
+	for i := range h.free {
+		h.free[i] = heapNoPrevious
+	}
 	if len(h.buf) >= heapHeader+4 && uint64(len(h.buf)) < uint64(heapNoPrevious) {
 		h.put(0, uint32(len(h.buf)))
 		h.put(4, heapNoPrevious)
 		h.put(8, 0)
+		h.linkFree(0)
 	}
 }
 
@@ -49,17 +54,19 @@ func (h *Heap) Alloc(size int, align int) (any, error) {
 	if size <= 0 || align <= 0 || align&(align-1) != 0 {
 		panic("wasm heap: invalid size or alignment")
 	}
-	if len(h.buf) < heapHeader+4 || uint64(len(h.buf)) >= uint64(heapNoPrevious) || size > len(h.buf) || align > len(h.buf) {
+	if len(h.buf) < heapHeader+4 || uint64(len(h.buf)) >= uint64(heapNoPrevious) || size > len(h.buf)-heapHeader-4 || align > len(h.buf) {
 		return nil, mem.ErrOutOfMemory
 	}
 	base := uintptr(unsafe.Pointer(&h.buf[0]))
-	for block := 0; block < len(h.buf); {
-		length := int(h.get(block))
-		if h.get(block+8) == 0 {
+	for class := heapClass(size + heapHeader + 4); class < len(h.free); class++ {
+		for cursor := h.free[class]; cursor != heapNoPrevious; cursor = h.get(int(cursor) + 12) {
+			block := int(cursor)
+			length := int(h.get(block))
 			start := block + heapHeader + 4
 			padding := int((0 - (base + uintptr(start))) & uintptr(align-1))
 			data := start + padding
 			if data <= block+length && size <= block+length-data {
+				h.unlinkFree(block)
 				h.split(block, data+size)
 				h.put(block+8, uint32(data))
 				h.put(data-4, uint32(block))
@@ -68,9 +75,41 @@ func (h *Heap) Alloc(size int, align int) (any, error) {
 				return &h.buf[data], nil
 			}
 		}
-		block += length
 	}
 	return nil, mem.ErrOutOfMemory
+}
+
+// Size classes keep small requests from fragmenting the large free ranges.
+func heapClass(size int) int {
+	class := 0
+	for size > 1 {
+		size >>= 1
+		class++
+	}
+	return class
+}
+
+// Free-list links live in block headers, so allocation never walks live objects.
+func (h *Heap) linkFree(block int) {
+	class := heapClass(int(h.get(block)))
+	h.put(block+12, h.free[class])
+	h.put(block+16, heapNoPrevious)
+	if h.free[class] != heapNoPrevious {
+		h.put(int(h.free[class])+16, uint32(block))
+	}
+	h.free[class] = uint32(block)
+}
+
+func (h *Heap) unlinkFree(block int) {
+	next, previous := h.get(block+12), h.get(block+16)
+	if previous == heapNoPrevious {
+		h.free[heapClass(int(h.get(block)))] = next
+	} else {
+		h.put(int(previous)+12, next)
+	}
+	if next != heapNoPrevious {
+		h.put(int(next)+16, previous)
+	}
 }
 
 func (h *Heap) account(delta int) {
@@ -90,6 +129,7 @@ func (h *Heap) split(block int, end int) {
 	h.put(end, uint32(oldEnd-end))
 	h.put(end+4, uint32(block))
 	h.put(end+8, 0)
+	h.linkFree(end)
 	if oldEnd < len(h.buf) {
 		h.put(oldEnd+4, uint32(end))
 	}
@@ -104,10 +144,18 @@ func (h *Heap) block(ptr any) int {
 func (h *Heap) mergeNext(block int) {
 	end := block + int(h.get(block))
 	if end < len(h.buf) && h.get(end+8) == 0 {
+		free := h.get(block+8) == 0
+		if free {
+			h.unlinkFree(block)
+		}
+		h.unlinkFree(end)
 		end += int(h.get(end))
 		h.put(block, uint32(end-block))
 		if end < len(h.buf) {
 			h.put(end+4, uint32(block))
+		}
+		if free {
+			h.linkFree(block)
 		}
 	}
 }
@@ -121,6 +169,7 @@ func (h *Heap) Free(ptr any, size int, align int) {
 	block := h.block(ptr)
 	h.account(-int(h.get(block)))
 	h.put(block+8, 0)
+	h.linkFree(block)
 	h.mergeNext(block)
 	previous := h.get(block + 4)
 	if previous != heapNoPrevious && h.get(int(previous)+8) == 0 {

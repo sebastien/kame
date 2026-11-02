@@ -328,9 +328,15 @@ type Program struct {
 	Events               []Event
 	// Optional observation around actual scheduler dispatch, never a work request.
 	ObserveWork func(*core.Node, string, bool)
-	nextRequest int64
-	Pending     []pendingRequest
-	epoch       int64
+	// Prepared dispatch batches let a freestanding host publish work before a
+	// synchronous evaluator call. Selection/order are the same as a normal tick.
+	workPrepared    bool
+	workDispatching bool
+	workReady       []*core.Node
+	workIndex       int
+	nextRequest     int64
+	Pending         []pendingRequest
+	epoch           int64
 	// Forwarding mirrors Options.ForwardRequests; Outbound holds requests an
 	// embedding host must service and complete.
 	InspectionWaiting bool

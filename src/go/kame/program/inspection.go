@@ -36,6 +36,8 @@ type inspectionProducer struct {
 	State          int
 	Outputs        []int
 	ContextUnknown bool
+	Resolver       *core.Node
+	Generation     int64
 }
 
 type inspectionDependency struct {
@@ -69,6 +71,8 @@ type inspectionGraph struct {
 	ConsumerCursor   int
 	ConsumerReady    bool
 	ConsumerFailures []inspectionConsumerFailure
+	Cursor           int
+	Staged           bool
 }
 
 func (g *inspectionGraph) free() {
@@ -119,9 +123,9 @@ func (p *Program) WriteInspection(out io.Writer, targets []string, depth int, ki
 		mem.Free(p.Alloc, pending)
 		p.pendingInspection = nil
 		g.Waiting = false
-		// Upstream traversal restarts from its cached resolvers; unlike consumer
-		// discovery, visit has no cursor for partially expanded producers.
-		if kind == "plan" || kind == "inputs" {
+		// Completed producers remain valid across host yields, but invalidation
+		// must restart traversal rather than preserve a stale dependency graph.
+		if (kind == "plan" || kind == "inputs") && !g.resolversCurrent() {
 			g.free()
 			g = inspectionGraph{Program: p}
 		}
@@ -151,37 +155,42 @@ func (p *Program) WriteInspection(out io.Writer, targets []string, depth int, ki
 		}
 	} else {
 		// Breadth-first traversal gives shared resources their shortest root distance.
-		for cursor := 0; cursor < len(g.Resources); cursor++ {
-			if g.Resources[cursor].Configuration {
+		for g.Cursor < len(g.Resources) {
+			if g.Resources[g.Cursor].Configuration {
+				g.Cursor++
 				continue
 			}
-			if d := g.visit(cursor+1, depth); d.Code != "" {
+			if d := g.visit(g.Cursor+1, depth); d.Code != "" {
 				return d
 			}
 			if g.Waiting {
 				p.retainInspection(&g)
 				return diagnostic.Diagnostic{}
 			}
+			g.Cursor++
 		}
 	}
-	for i := range g.Producers {
-		if d := g.stage(i+1, nil); d.Code != "" {
-			return d
-		}
-	}
-	g.sequenceStages()
-	for pass := 0; pass < len(g.Producers); pass++ {
-		for i := range g.Dependencies {
-			d := g.Dependencies[i]
-			if d.Origin == "configuration" {
-				continue
-			}
-			parent := g.Producers[d.Producer-1]
-			child := g.Resources[d.Resource-1].Producer
-			if child != 0 && (parent.ContextUnknown || (parent.Plan.Rule != nil && (len(parent.Plan.Rule.Environment) != 0 || parent.Plan.Rule.Metadata != nil))) {
-				g.Producers[child-1].ContextUnknown = true
+	if !g.Staged {
+		for i := range g.Producers {
+			if d := g.stage(i+1, nil); d.Code != "" {
+				return d
 			}
 		}
+		g.sequenceStages()
+		for pass := 0; pass < len(g.Producers); pass++ {
+			for i := range g.Dependencies {
+				d := g.Dependencies[i]
+				if d.Origin == "configuration" {
+					continue
+				}
+				parent := g.Producers[d.Producer-1]
+				child := g.Resources[d.Resource-1].Producer
+				if child != 0 && (parent.ContextUnknown || (parent.Plan.Rule != nil && (len(parent.Plan.Rule.Environment) != 0 || parent.Plan.Rule.Metadata != nil))) {
+					g.Producers[child-1].ContextUnknown = true
+				}
+			}
+		}
+		g.Staged = true
 	}
 	for i := range g.Producers {
 		if len(g.Producers[i].Outputs) == 0 {
@@ -240,6 +249,16 @@ func (p *Program) WriteInspection(out io.Writer, targets []string, depth int, ki
 	}
 	g.write(out, targets, depth, kind)
 	return diagnostic.Diagnostic{}
+}
+
+func (g *inspectionGraph) resolversCurrent() bool {
+	for i := range g.Producers {
+		entry := g.Producers[i]
+		if entry.Resolver != nil && (entry.Resolver.Generation != entry.Generation || entry.Resolver.State != core.NodeComplete || entry.Resolver.ValidationPending) {
+			return false
+		}
+	}
+	return true
 }
 
 // CancelInspection releases suspended read-only query work without cancelling
@@ -517,6 +536,26 @@ func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
 		}
 	}
 	plan := base.Plan
+	observe := false
+	if limit != 0 && (plan.Rule == nil || hasExpressionInput(plan.Rule)) {
+		expanded := p.expandReadOnlyPlan(r.Request, p.Forwarding, true)
+		if expanded.Waiting {
+			plan.Free(p.Alloc)
+			g.Waiting = true
+			return diagnostic.Diagnostic{}
+		}
+		if expanded.Diagnostic.Code != "" {
+			if !p.unavailableGeneratedRead(expanded.Diagnostic) {
+				plan.Free(p.Alloc)
+				return g.contextDiagnostic(expanded.Diagnostic, resource)
+			}
+			expanded.Diagnostic.Free(p.Alloc)
+		} else {
+			plan.Free(p.Alloc)
+			plan = expanded.Plan
+		}
+		observe = true
+	}
 	producer := len(g.Producers) + 1
 	g.Producers = slices.Append(p.Alloc, g.Producers, inspectionProducer{Plan: plan, Resource: resource, Depth: r.Depth})
 	g.Resources[resource-1].Producer = producer
@@ -535,24 +574,8 @@ func (g *inspectionGraph) visit(resource, limit int) diagnostic.Diagnostic {
 			g.Producers[producer-1].Outputs = slices.Append(p.Alloc, g.Producers[producer-1].Outputs, id)
 		}
 	}
-	if plan.Rule == nil || hasExpressionInput(plan.Rule) {
-		expanded := p.expandReadOnlyPlan(r.Request, p.Forwarding, true)
-		if expanded.Waiting {
-			g.Waiting = true
-			return diagnostic.Diagnostic{}
-		}
-		if expanded.Diagnostic.Code != "" {
-			if !p.unavailableGeneratedRead(expanded.Diagnostic) {
-				return g.contextDiagnostic(expanded.Diagnostic, resource)
-			}
-			expanded.Diagnostic.Free(p.Alloc)
-			g.observed(producer, r.Depth+1)
-		} else {
-			g.Producers[producer-1].Plan.Free(p.Alloc)
-			g.Producers[producer-1].Plan = expanded.Plan
-			plan = expanded.Plan
-			g.observed(producer, r.Depth+1)
-		}
+	if observe {
+		g.observed(producer, r.Depth+1)
 	}
 	group := 1
 	for i := range plan.ResourceInputs {
@@ -651,6 +674,8 @@ func (g *inspectionGraph) observed(producer int, depth int) {
 	var pending []*core.Node
 	for i := range p.Instances {
 		if p.Instances[i].Inspection && p.Instances[i].InspectionStatus == nil && sameInspectionPlan(p.Instances[i].Plan, g.Producers[producer-1].Plan) {
+			g.Producers[producer-1].Resolver = p.Instances[i].Node
+			g.Producers[producer-1].Generation = p.Instances[i].Node.Generation
 			pending = slices.Append(p.Alloc, pending, p.Instances[i].Node)
 			break
 		}

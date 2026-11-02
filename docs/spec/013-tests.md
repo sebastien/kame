@@ -148,6 +148,11 @@ human stdout/stderr, never the append-only result log or exit codes.
   tests without samples; the estimate is marked unknown until a sample exists.
   Durations measure each worker's own execution, not time spent waiting for other
   tests. Parallel output labels the sum as work remaining, not wall-clock ETA.
+- With interactive stderr and a non-dumb terminal, the harness emits OSC 9;4
+  progress at startup and after each test. Percentages use the initial ETA
+  duration weights (the cached mean for unknown tests), or completed/total when
+  no timing history exists. Failures switch to error progress; completion and
+  cancellation clear the indicator. Redirected logs contain no progress codes.
 - Incidental helper traces (`test_log_message`, expected-failure command echo,
   CLI build output) are verbose-only; the CLI build log is retained and shown
   if the build fails.

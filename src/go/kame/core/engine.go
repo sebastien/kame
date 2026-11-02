@@ -433,10 +433,20 @@ func (e *Engine) Ready(capacity int) []*Node {
 
 // Dispatch starts one node returned by Ready. A claimed node starts once.
 func (e *Engine) Dispatch(n *Node) *Node {
-	if n == nil || !n.offered {
+	if !e.CanDispatch(n) {
+		if n != nil {
+			n.offered = false
+		}
 		return nil
 	}
 	return e.run(n)
+}
+
+// CanDispatch checks that a host-retained claim still belongs to live work.
+// Unlike Ready, this does not validate dependencies or advance the engine.
+func (e *Engine) CanDispatch(n *Node) bool {
+	_ = e
+	return n != nil && n.offered && n.Interest != 0 && n.Requested && (n.State == NodeIdle || n.State == NodeReady)
 }
 
 // DispatchRoot starts a newly requested independent root without reentering

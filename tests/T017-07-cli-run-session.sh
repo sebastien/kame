@@ -91,7 +91,7 @@ for backend in native wasm; do
 	reject TGT_NO_RULE do run -c '(out! "must-not-print")' "$work/values.km" missing
 	reject CAP_DENIED do run -c 'name = "Ada"' "$work/process.kash" "$work/functions.km"
 	reject CAP_DENIED do run -c '$(printf denied)'
-	reject CAP_DENIED do run -c 'name = "Ada"' "$work/rules.kmk" build
+	reject CAP_DENIED do run --output text -c 'name = "Ada"' "$work/rules.kmk" build
     if [ "$backend" = wasm ]; then
         if python3 - "$work/err" <<'PYTIME'
 import re, sys

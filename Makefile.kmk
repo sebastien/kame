@@ -114,6 +114,9 @@ WASM_EXPORTS =
     "kame_wasm_event_header"
     "kame_wasm_copy"
     "kame_wasm_cli"
+    "kame_wasm_present"
+    "kame_wasm_present_observe"
+    "kame_wasm_work_prepare"
     "kame_wasm_eval_pure"
     "kame_wasm_parse"
     "kame_wasm_format"
@@ -322,22 +325,35 @@ dist : ./build/kame.debug ./dist/kame
 
 version-source : ./src/go/kame/cmd/kame/version_generated.go
 
+# --- Toolchain --------------------------------------------------------------
+#
+# Rebuild the pinned translator after a Go upgrade, before parallel consumers
+# resolve it. Order-only edges keep this always-run check out of artifact inputs.
+toolchain : ./src/go/kame/go.mod
+	compiler = (tool "so")
+	current = (strip $(go env GOVERSION))
+	installed = (parse-json $(go version -m -json $compiler))
+	version = (strip $(:cwd $KAME_DIR go list -m -f "{{.Version}}" solod.dev))
+	if (or (ne installed.GoVersion current) (ne installed.Main.Version version))
+		echo "Rebuilding Solod ${version} with ${current}"
+		:GOBIN (dirname compiler) :GOTOOLCHAIN local go install "solod.dev/cmd/so@${version}"
+
 # --- Native binaries --------------------------------------------------------
 #
 # Each artifact embeds its own mode. Shared version metadata stays
 # target-independent, so switching modes does not rewrite it.
 
-./build/kame.debug : @{KAME_INPUTS}
+./build/kame.debug : @{KAME_INPUTS} | toolchain
 	mkdir -p ./build
 	cflags = (if (blank? CFLAGS) "-O2" CFLAGS)
 	:cwd $KAME_DIR :env (if (blank? CC) (merge) [CC: CC]) :CFLAGS (str cflags " -DKAME_BUILD_MODE_DEBUG") so build -check=warn -o (abspath ./build/kame.debug) ./cmd/kame
 
-./build/kame.sanitize : @{KAME_INPUTS}
+./build/kame.sanitize : @{KAME_INPUTS} | toolchain
 	mkdir -p ./build
 	cflags = (if (blank? CFLAGS) "-O2" CFLAGS)
 	:cwd $KAME_DIR :CC clang :CFLAGS (str cflags " -DKAME_BUILD_MODE_SANITIZE") so build -check=sanitize -panic=abort -o (abspath ./build/kame.sanitize) ./cmd/kame
 
-./dist/kame : @{KAME_INPUTS}
+./dist/kame : @{KAME_INPUTS} | toolchain
 	mkdir -p ./dist
 	:cwd $KAME_DIR :env (if (blank? CC) (merge) [CC: CC]) :CFLAGS "-O3 -DKAME_BUILD_MODE_RELEASE" so build -assert=off -panic=exit -o (abspath ./dist/kame) ./cmd/kame
 
@@ -346,7 +362,7 @@ version-source : ./src/go/kame/cmd/kame/version_generated.go
 ./build/tools/cosmocc-4.0.2/bin/cosmocc : ./src/sh/provision-cosmocc.sh
 	./src/sh/provision-cosmocc.sh ./build/tools/cosmocc-4.0.2
 
-./dist/kame.com : ./build/tools/cosmocc-4.0.2/bin/cosmocc @{KAME_INPUTS}
+./dist/kame.com : ./build/tools/cosmocc-4.0.2/bin/cosmocc @{KAME_INPUTS} | toolchain
 	mkdir -p ./dist
 	:cwd $KAME_DIR :CC (abspath ./build/tools/cosmocc-4.0.2/bin/cosmocc) :CFLAGS "-O3 -s -DKAME_BUILD_MODE_RELEASE -DKAME_RUNTIME_APE" so build -assert=off -panic=exit -o (abspath ./dist/kame.com) ./cmd/kame
 
@@ -377,11 +393,11 @@ dist-native : ./dist/kame ./src/sh/platform_id.py
 # WASI/libc. Query the SDK clang because the freestanding target has no
 # runtime archive of its own.
 
-wasm-translate :
+wasm-translate : | toolchain
 	mkdir -p ./build/wasm/c
 	:cwd $KAME_DIR so translate -o ../../../build/wasm/c ./host/wasm
 
-./build/wasm/kame.wasm : @{WASM_SOURCES} ./src/go/kame/go.mod ./src/go/kame/go.sum ./Makefile.kmk
+./build/wasm/kame.wasm : @{WASM_SOURCES} ./src/go/kame/go.mod ./src/go/kame/go.sum ./Makefile.kmk | toolchain
 	sdk = (if (blank? WASM_SDK) (str (strip $(mise where asdf:mise-plugins/mise-wasi-sdk)) "/wasi-sdk") WASM_SDK)
 	cc = (if (blank? WASM_CC) (str sdk "/bin/clang") WASM_CC)
 	ld = (if (blank? WASM_LD) (str sdk "/bin/wasm-ld") WASM_LD)
@@ -494,18 +510,21 @@ dist-windows : ./dist/kame-windows-x64.zip ./dist/kame-windows-x64.exe
 # Bare tasks always run. Do not cache them: a green record is not a reason to
 # skip a test, and an input list would not cover the compiler or the host.
 
-test : test-so test-examples test-go test-cli
+test : test-toolchain test-so test-examples test-go test-cli
 
-test-so : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
+test-toolchain : ./build/kame.debug ./tests/native/test-toolchain.sh
+	:KAME_TOOLCHAIN_TEST_BINARY (abspath ./build/kame.debug) bash ./tests/native/test-toolchain.sh
+
+test-so : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host | toolchain
 	:cwd $KAME_DIR so test ./...
 
-test-native-lifecycle : ./src/go/kame/cmd/kame/version_generated.go ./tests/native/test-cli-lifecycle.sh
+test-native-lifecycle : ./src/go/kame/cmd/kame/version_generated.go ./tests/native/test-cli-lifecycle.sh | toolchain
 	:CC clang bash ./tests/native/test-cli-lifecycle.sh
 
-test-native-host : ./tests/native/test-host.sh
+test-native-host : ./tests/native/test-host.sh | toolchain
 	:CC clang bash ./tests/native/test-host.sh
 
-test-examples :
+test-examples : | toolchain
 	:cwd $EXAMPLES_DIR so test ./...
 
 test-go : ./src/go/kame/cmd/kame/version_generated.go ./build/kame.debug test-native-lifecycle
@@ -535,18 +554,18 @@ test-release-build :
 
 test-all : test test-leaks
 
-test-sanitize : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host
+test-sanitize : ./src/go/kame/cmd/kame/version_generated.go test-native-lifecycle test-native-host | toolchain
 	:cwd $KAME_DIR :CC clang so test -check=sanitize -panic=abort ./...
 	:cwd $EXAMPLES_DIR :CC clang so test -check=sanitize -panic=abort ./...
 
-test-leaks : ./build/kame.sanitize dist-wasm ./dist/kame ./dist/kame-windows-x64.zip test-native-lifecycle test-native-host
+test-leaks : ./build/kame.sanitize dist-wasm ./dist/kame ./dist/kame-windows-x64.zip test-native-lifecycle test-native-host | toolchain
 	leak_scripts = (filter-out ./tests/T013-03-meta-binary.sh (files ./tests/T*.sh))
 	:cwd $KAME_DIR :CC clang :KAME_NATIVE_FORMAT_TEST_BINARY (abspath ./build/kame.sanitize) :KAME_NATIVE_CLI_TEST_BINARY (abspath ./build/kame.sanitize) go test -asan ./cmd/kame
 	:cwd $KAME_DIR :CC clang so test -check=sanitize -panic=abort ./...
 	:cwd $EXAMPLES_DIR :CC clang so test -check=sanitize -panic=abort ./...
 	:KAME_TEST_PREBUILT (abspath ".") :ASAN_OPTIONS "detect_leaks=1:halt_on_error=1" :UBSAN_OPTIONS "halt_on_error=1" :CLI_BIN (abspath ./build/kame.sanitize) ./tests/harness.sh $leak_scripts
 
-wasm-portable : ./src/sh/check-portable.sh
+wasm-portable : ./src/sh/check-portable.sh | toolchain
 	./src/sh/check-portable.sh
 
 wasm-check : wasm wasm-portable ./tests/wasm/test-wasm-header.c ./tests/wasm/check-imports.mjs ./tests/wasm/test-abi.mjs
@@ -569,5 +588,5 @@ fmt : ./build/kame.debug
 clean :
 	rm -rf ./build ./dist
 
-demo :
+demo : | toolchain
 	:cwd ./examples/engine so run ./demo

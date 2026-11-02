@@ -785,6 +785,36 @@ func (r *Runtime) CopyExpressionEffect(dst []byte) bool {
 	return true
 }
 
+// PrepareWorkJSON is an opt-in CLI dispatch boundary, separate from public
+// lifecycle events and from read-only presentation queries.
+func (r *Runtime) PrepareWorkJSON() PureResult {
+	if r == nil || r.Program == nil || r.Program.InspectionWaiting {
+		return PureResult{}
+	}
+	w := r.Program.PrepareWork()
+	if w.Target == "" {
+		return PureResult{}
+	}
+	var buffer = bytes.NewBuffer(r.Alloc, nil)
+	e := json.NewEncoder(&buffer)
+	e.BeginObject()
+	e.Str("type")
+	e.Str("work-started")
+	e.Str("node")
+	e.Int(w.Node)
+	e.Str("generation")
+	e.Int(w.Generation)
+	e.Str("attempt")
+	e.Int(w.Attempt)
+	e.Str("target")
+	e.Str(w.Target)
+	e.EndObject()
+	e.Flush()
+	result := PureResult{Text: pureText(r.Alloc, buffer.String())}
+	buffer.Free()
+	return result
+}
+
 // Step advances at most one engine action and transfers one host request to
 // its caller. A nil request means that no host work is currently required.
 func (r *Runtime) Step() host.NextResult {

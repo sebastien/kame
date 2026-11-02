@@ -6,7 +6,6 @@ import (
 	"solod.dev/so/io"
 	"solod.dev/so/mem"
 	"solod.dev/so/os"
-	"solod.dev/so/slices"
 	"solod.dev/so/time"
 )
 
@@ -104,13 +103,9 @@ func resetInvocationPresentation() {
 
 func freeInvocationPresentation(out io.Writer) {
 	clearDashboard(out)
-	for i := range workers {
-		mem.FreeString(mem.System, workers[i].Target)
-		mem.FreeString(mem.System, workers[i].Program)
-	}
-	slices.Free(mem.System, workers)
-	workers = nil
+	state := cli.ProgressState{Workers: workers, Outcomes: outcomes}
+	state.Free(mem.System)
+	workers, outcomes = state.Workers, state.Outcomes
 	mem.FreeString(mem.System, dashboardSubject)
 	dashboardSubject = ""
-	freeOutcomes()
 }

@@ -1,5 +1,5 @@
 // Included after the exact generated main.c and shared native buffer helpers.
-// Ledger: old TestName -> presentation_TestName (10 native cases).
+// Ledger: old TestName -> presentation_TestName (11 native cases).
 // Two Run-only tests remain in presentation_test.go (9 invocations).
 #include <assert.h>
 
@@ -57,18 +57,19 @@ static void presentation_TestDashboardLayoutAndGraphemeBounds(void) {
     bytes_Buffer out = presentation_begin();
     io_Writer writer = native_writer(&out);
     observeWorker((program_Event){.Kind = program_ProcessStarted, .Target = so_str("./build/main.o"), .Program = so_str("cc"), .RequestID = 7, .Generation = 1});
-    so_at(cliWorker, workers, 0).Started = 0;
+    so_at(cli_ProgressWorkerState, workers, 0).Started = 0;
     buildProgress progress = {.Completed = 8};
     renderDashboard(writer, &progress, 80, 12, 1200000000);
     assert(native_equal(&out, "── build · workers: 1\n  1  [./build/main.o]                  running      cc                    1.2s\n8 complete · 0 failed · 1 running                              1.2s - building\n"));
     so_String line = presentation_line(&out, 1);
-    assert(measureDisplayText(line, 1000).Cells == 78 && presentation_suffix(line, "1.2s"));
+    assert(line.len == 78 && presentation_suffix(line, "1.2s"));
     clearDashboard(writer);
     bytes_Buffer_Reset(&out);
     renderDashboard(writer, &progress, 40, 4, 1200000000);
     assert(native_contains(&out, "main.o]") && !native_contains(&out, "cc") && presentation_suffix(bytes_Buffer_String(&out), "1.2s - building\n"));
     line = presentation_line(&out, 1);
-    assert(measureDisplayText(line, 1000).Cells == 38 && presentation_suffix(line, "1.2s"));
+    // The truncated path includes a three-byte, one-cell ellipsis.
+    assert(line.len == 40 && presentation_suffix(line, "1.2s"));
     const char *graphemes[] = {"e\u0301", "界", "👩‍💻", "🇫🇷"};
     const char *fields[] = {"e\u0301xx", "界xx", "👩‍💻xx", "🇫🇷xx"};
     for (size_t i = 0; i < 4; i++) {
@@ -77,13 +78,13 @@ static void presentation_TestDashboardLayoutAndGraphemeBounds(void) {
         assert(presentation_prefix(bytes_Buffer_String(&out), graphemes[i]));
     }
     observeWorker((program_Event){.Kind = program_ProcessExited, .Target = so_str("./build/main.o"), .RequestID = 8, .Generation = 1});
-    assert(so_at(cliWorker, workers, 0).Target.len != 0);
+    assert(so_at(cli_ProgressWorkerState, workers, 0).Target.len != 0);
     observeWorker((program_Event){.Kind = program_ProcessExited, .Target = so_str("./build/main.o"), .RequestID = 7, .Generation = 0});
-    assert(so_at(cliWorker, workers, 0).Target.len != 0);
+    assert(so_at(cli_ProgressWorkerState, workers, 0).Target.len != 0);
     observeWorker((program_Event){.Kind = program_TargetCompleted, .NodeID = 8, .Target = so_str("./build/main.o"), .Generation = 1, .Attempt = 2});
-    assert(so_at(cliWorker, workers, 0).Target.len != 0);
+    assert(so_at(cli_ProgressWorkerState, workers, 0).Target.len != 0);
     observeWorker((program_Event){.Kind = program_TargetCompleted, .Target = so_str("./build/main.o"), .Generation = 1, .Attempt = 2});
-    assert(so_at(cliWorker, workers, 0).Target.len == 0);
+    assert(so_at(cli_ProgressWorkerState, workers, 0).Target.len == 0);
     bytes_Buffer_Reset(&out);
     progress.Completed = 9;
     renderDashboard(writer, &progress, 80, 12, 1300000000);
@@ -163,15 +164,17 @@ static void presentation_TestOutcomeColumnsAndRestrainedColor(void) {
     for (int i = 0; i < 40; i++) memcpy(long_target + 4 * i, "long", 4);
     long_target[160] = 0;
     const char *targets[] = {"short", long_target, "界👩‍💻e\u0301"};
+    // UTF-8 bytes beyond display cells: checkmark, then ellipsis or graphemes.
+    const int extra_bytes[] = {2, 4, 14};
     for (size_t i = 0; i < 3; i++) {
         bytes_Buffer_Reset(&out);
-        writeOutcomeRow(writer, (so_String){targets[i], (so_int)strlen(targets[i])}, so_str("0.1s - ✓"), so_str("status.success"), 38);
+        cli_WriteHumanOutcome(writer, (so_String){targets[i], (so_int)strlen(targets[i])}, so_str("completed"), true, 100, true, 38, false);
         so_String line = presentation_trim_newline(&out);
-        assert(measureDisplayText(line, 1000).Cells == 38 && presentation_suffix(line, "0.1s - ✓") && presentation_prefix(line, "["));
+        assert(line.len == 38 + extra_bytes[i] && presentation_suffix(line, "0.1s - ✓") && presentation_prefix(line, "["));
     }
     bytes_Buffer_Reset(&out);
     diagnosticColor = so_str("always");
-    writeOutcomeRow(writer, so_str("target"), so_str("failed"), so_str("status.failed"), 0);
+    cli_WriteHumanOutcome(writer, so_str("target"), so_str("failed"), true, 0, false, 0, true);
     assert(native_equal(&out, "\x1b[2m[\x1b[0m\x1b[35mtarget\x1b[0m\x1b[2m]\x1b[0m \x1b[1;31mfailed\x1b[0m\n"));
     diagnosticColor = so_str("never");
     presentation_end(&out);
@@ -184,7 +187,7 @@ static void presentation_TestTargetDurationUsesLifecycleClock(void) {
     observeOutcome(event, &progress);
     event.Kind = program_TargetCompleted; event.MonotonicNS = 1123000000;
     observeOutcome(event, &progress);
-    writeTargetOutcome(native_writer(&out), event, so_str("done"), so_str("status.success"));
+    writeTargetOutcome(native_writer(&out), event);
     // Terminal output pads the gap between the target and its duration.
     assert(presentation_prefix(bytes_Buffer_String(&out), "[target] ") && presentation_suffix(bytes_Buffer_String(&out), " 0.1s - ✓\n"));
     event.Generation = 2; event.Kind = program_TargetStarted; event.MonotonicNS = 2000000000;
@@ -192,7 +195,7 @@ static void presentation_TestTargetDurationUsesLifecycleClock(void) {
     event.Kind = program_TargetCompleted; event.MonotonicNS = 2045000000;
     observeOutcome(event, &progress);
     bytes_Buffer_Reset(&out);
-    writeTargetOutcome(native_writer(&out), event, so_str("done"), so_str("status.success"));
+    writeTargetOutcome(native_writer(&out), event);
     assert(presentation_prefix(bytes_Buffer_String(&out), "[target] ") && presentation_suffix(bytes_Buffer_String(&out), " 0.0s - ✓\n"));
     presentation_end(&out);
 }
@@ -203,19 +206,19 @@ static void presentation_TestDurationAndPathTheme(void) {
     writeDuration(writer, 40840);
     assert(native_equal(&out, "40.8s"));
     bytes_Buffer_Reset(&out);
-    writeOutcomeRow(writer, so_str("default"), so_str("40.8s - ✓"), so_str("status.success"), 78);
-    assert(presentation_suffix(bytes_Buffer_String(&out), "40.8s - ✓\n") && measureDisplayText(presentation_trim_newline(&out), 1000).Cells == 78);
+    cli_WriteHumanOutcome(writer, so_str("default"), so_str("completed"), true, 40840, true, 78, false);
+    assert(presentation_suffix(bytes_Buffer_String(&out), "40.8s - ✓\n") && presentation_trim_newline(&out).len == 80);
     bytes_Buffer_Reset(&out);
-    writeBuildTally(writer, (buildProgress){.Completed = 122}, 0, 40840, so_str("✓"), so_str("status.success"), 78);
-    assert(presentation_suffix(bytes_Buffer_String(&out), "40.8s - ✓\n") && measureDisplayText(presentation_trim_newline(&out), 1000).Cells == 78);
+    cli_WriteHumanSummary(writer, so_str("build"), 0, 40840, (cli_Progress){.Completed = 122}, true, false, 78, false);
+    assert(presentation_suffix(bytes_Buffer_String(&out), "40.8s - ✓\n") && presentation_trim_newline(&out).len == 81);
     bytes_Buffer_Reset(&out);
     diagnosticColor = so_str("always");
-    writeOutcomeRow(writer, so_str("./dist/www/page.html"), so_str("40.8s - ✓"), so_str("status.success"), 0);
+    cli_WriteHumanOutcome(writer, so_str("./dist/www/page.html"), so_str("completed"), true, 40840, true, 0, true);
     assert(native_contains(&out, "\x1b[2m./dist/www/\x1b[0m\x1b[1mpage.html\x1b[0m") && native_contains(&out, "40.8s - \x1b[32m✓\x1b[0m"));
     bytes_Buffer_Reset(&out);
     diagnosticColor = so_str("never");
-    writeTargetField(writer, so_str("./very/long/directory/page.html"), 16);
-    assert(presentation_suffix(bytes_Buffer_String(&out), "/page.html") && measureDisplayText(bytes_Buffer_String(&out), 1000).Cells <= 16);
+    cli_WriteHumanOutcome(writer, so_str("./very/long/directory/page.html"), so_str("completed"), true, 100, true, 28, false);
+    assert(native_contains(&out, "/page.html]") && presentation_trim_newline(&out).len == 32);
     presentation_end(&out);
 }
 
@@ -255,6 +258,18 @@ static void presentation_TestOutcomeCleanupAllowsSameIdentityInNextCycle(void) {
     presentation_end(&out);
 }
 
+static void presentation_TestDispatchRetiresItsOriginalIdentity(void) {
+    bytes_Buffer out = presentation_begin();
+    cli_ProgressState state = {0};
+    cli_ProgressState_ObserveWork(&state, mem_System, 7, 1, 0, so_str("target"), true, 0);
+    workers = state.Workers;
+    assert(so_at(cli_ProgressWorkerState, workers, 0).Internal);
+    core_Node node = {.ID = 7, .Generation = 2, .Attempt = 1};
+    observeNativeWork(&node, so_str("target"), false);
+    assert(so_at(cli_ProgressWorkerState, workers, 0).Target.len == 0);
+    presentation_end(&out);
+}
+
 static void test_cli_presentation(void) {
     presentation_TestDashboardLayoutAndGraphemeBounds();
     presentation_TestActiveWorkersSurviveHistoricalSlots();
@@ -266,4 +281,5 @@ static void test_cli_presentation(void) {
     presentation_TestOutcomeIdentityCountsOnce();
     presentation_TestFailureSummaryDoesNotBecomeCancellation();
     presentation_TestOutcomeCleanupAllowsSameIdentityInNextCycle();
+    presentation_TestDispatchRetiresItsOriginalIdentity();
 }

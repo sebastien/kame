@@ -822,6 +822,117 @@ func TestInspectionStatusInvalidationRestartsPendingRead(t *testing.T) {
 	assertInspectionRootsReleased(t, r)
 }
 
+func TestInspectionTraversalResumesAndRefreshesEarlierProducers(t *testing.T) {
+	a := t.Allocator()
+	started := wasm.NewRuntime(a, "root : first second\nfirst : @(split \"\\n\" (text (read \"./first.txt\")))\nsecond : @(split \"\\n\" (text (read \"./second.txt\")))\nold :\nnew :\nquiet :\n")
+	if started.Runtime == nil {
+		t.Error("compile failed")
+		started.Result.Free(a)
+		return
+	}
+	r := started.Runtime
+	defer r.Free()
+	r.SetForwarding(true)
+	r.InspectionGrant("", "")
+	r.InspectionGrant("read", "")
+	prepared := r.Prepare()
+	prepared.Free(a)
+	query := r.PlanJSON("root", false)
+	changed, reread := false, false
+	for retry := 0; query.HostNeeded && retry < 128; retry++ {
+		query.Free(a)
+		next := r.Step()
+		if !next.OK {
+			t.Error("resumed traversal lost its host request")
+			return
+		}
+		name := host.PayloadPath(next.Request.Payload)
+		value := core.Value{Kind: core.Nil}
+		if strings.HasSuffix(name, "first.txt") {
+			text := "old"
+			if changed {
+				text, reread = "new", true
+			}
+			value = core.NewBytes(a, []byte(text))
+		} else if strings.HasSuffix(name, "second.txt") {
+			if !changed {
+				r.Program.InvalidateResource(core.ResourceKey{Kind: core.ResourceFile, Name: "./first.txt"})
+				changed = true
+			}
+			value = core.NewBytes(a, []byte("quiet"))
+		} else if next.Request.Kind != host.RequestProcessCancel {
+			t.Error("inspection requested unexpected host work")
+		}
+		r.Complete(next.Request, value, diagnostic.Diagnostic{})
+		next.Request.Free(a)
+		query = r.PlanJSON("root", false)
+	}
+	if query.HostNeeded || query.Code != "" || !reread || !strings.Contains(query.Text, "\"name\":\"new\"") || strings.Contains(query.Text, "\"name\":\"old\"") {
+		t.Error("retained traversal lost inputs or kept an invalidated producer")
+	}
+	query.Free(a)
+	assertInspectionRootsReleased(t, r)
+}
+
+func TestInspectionPendingReadDoesNotRebuildCompletedGraph(t *testing.T) {
+	tracker := mem.Tracker{Allocator: t.Allocator()}
+	a := &tracker
+	started := wasm.NewRuntime(a, "root : first second\nfirst : @(split \"\\n\" (text (read \"./first.txt\")))\nsecond : @(split \"\\n\" (text (read \"./second.txt\")))\n")
+	if started.Runtime == nil {
+		t.Error("compile failed")
+		started.Result.Free(a)
+		return
+	}
+	r := started.Runtime
+	defer r.Free()
+	r.SetForwarding(true)
+	r.InspectionGrant("", "")
+	r.InspectionGrant("read", "")
+	prepared := r.Prepare()
+	prepared.Free(a)
+	inputs := strings.NewBuilder(a)
+	defer inputs.Free()
+	for i := 0; i < 128; i++ {
+		var digits [32]byte
+		inputs.WriteString("./leaf" + strconv.Itoa(digits[:], i) + "\n")
+	}
+	query := r.PlanJSON("root", false)
+	checked := false
+	for retry := 0; query.HostNeeded && retry < 32; retry++ {
+		query.Free(a)
+		next := r.Step()
+		if !next.OK {
+			t.Error("inspection lost its request")
+			return
+		}
+		if strings.HasSuffix(host.PayloadPath(next.Request.Payload), "second.txt") {
+			before := tracker.Stats().TotalAlloc
+			for repeat := 0; repeat < 16; repeat++ {
+				pending := r.PlanJSON("root", false)
+				if !pending.HostNeeded {
+					t.Error("pending read unexpectedly settled")
+				}
+				pending.Free(a)
+			}
+			if tracker.Stats().TotalAlloc-before > 128*1024 {
+				t.Error("host yields rebuilt the completed upstream graph")
+			}
+			r.Program.CancelInspection()
+			next.Request.Free(a)
+			checked = true
+			query = wasm.PureResult{}
+			break
+		}
+		r.Complete(next.Request, core.NewBytes(a, []byte(inputs.String())), diagnostic.Diagnostic{})
+		next.Request.Free(a)
+		query = r.PlanJSON("root", false)
+	}
+	query.Free(a)
+	if !checked {
+		t.Error("inspection did not reach the second producer")
+	}
+}
+
 func TestInspectionReadFailureReleasesAndRetries(t *testing.T) {
 	a := t.Allocator()
 	started := wasm.NewRuntime(a, "inputs = (text (read \"./inputs.txt\"))\nroot : @(split \"\\n\" inputs)\nquiet :\n")

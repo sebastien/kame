@@ -119,9 +119,8 @@ function test_runtime_format_seconds {
 	fi
 }
 
-function test_runtime_eta {
-	local total=$# cached=0 missing=0 samples=0 sum=0 estimate=0 sample seconds average file
-	[ "$total" -gt 0 ] || { printf 'done'; return; }
+function test_runtime_average {
+	local samples=0 sum=0 sample seconds average=0
 	for sample in "$TEST_RUNTIME_CACHE_DIR"/*.seconds; do
 		[ -f "$sample" ] || continue
 		if IFS= read -r seconds <"$sample" && [[ "$seconds" =~ ^[0-9]+$ ]]; then
@@ -129,6 +128,19 @@ function test_runtime_eta {
 			samples=$((samples + 1))
 		fi
 	done
+	if [ "$samples" -gt 0 ]; then
+		average=$(((sum + samples - 1) / samples))
+		[ "$average" -gt 0 ] || average=1
+	fi
+	printf '%s' "$average"
+}
+
+function test_runtime_eta {
+	local total=$# cached=0 missing=0 estimate=0 sample seconds average file
+	[ "$total" -gt 0 ] || {
+		printf 'done'
+		return
+	}
 	for sample in "$@"; do
 		file="$TEST_RUNTIME_CACHE_DIR/${sample##*/}.seconds"
 		if [ -r "$file" ] && IFS= read -r seconds <"$file" && [[ "$seconds" =~ ^[0-9]+$ ]]; then
@@ -139,9 +151,11 @@ function test_runtime_eta {
 		fi
 	done
 	if [ "$missing" -gt 0 ]; then
-		[ "$samples" -gt 0 ] || { printf 'unknown'; return; }
-		average=$(((sum + samples - 1) / samples))
-		[ "$average" -gt 0 ] || average=1
+		average=$(test_runtime_average)
+		[ "$average" -gt 0 ] || {
+			printf 'unknown'
+			return
+		}
 		estimate=$((estimate + missing * average))
 	fi
 	printf '~%s (%d/%d cached)' "$(test_runtime_format_seconds "$estimate")" "$cached" "$total"
