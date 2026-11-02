@@ -103,6 +103,8 @@ export MOCK_BRANCH="$TMPDIR/release-branch" MOCK_NPM_CHECKS="$TMPDIR/npm-checks"
 MOCK_VERSION=$(cat VERSION)
 MOCK_PACKAGE=$(node -p "require('./package.json').name")
 export MOCK_VERSION MOCK_PACKAGE MOCK_NPM_STATE=missing
+export DISPLAY=:test
+unset WAYLAND_DISPLAY
 export LITTLESECRETS_LOG="$TMPDIR/secrets.log" MOCK_MODE=ok
 REAL_GIT=$(command -v git)
 export REAL_GIT
@@ -246,7 +248,8 @@ case "$*" in
 		exit 1
 	fi
 	;;
-"publish --access public --registry https://registry.npmjs.org/")
+"publish --access public --registry https://registry.npmjs.org/" | "publish --access public --registry https://registry.npmjs.org/ --browser=false")
+	[ "${MOCK_REQUIRE_TTY:-0}" = 0 ] || { [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; } || exit 1
 	[ "$MOCK_NPM_STATE" != publish_failure ] || { echo 'npm authentication expired' >&2; exit 1; }
 	[ "$PWD" != "$MOCK_ROOT" ] && [ -f package.json ] || exit 1
 	[ "$(cat VERSION)" = "$MOCK_VERSION" ] || exit 1
@@ -419,6 +422,29 @@ if [ "$status" = 0 ] && grep -q '^gh release download ' "$MOCK_LOG" &&
 	test-ok "npm-only retry works without rebuilding, signing or modifying GitHub"
 else
 	test-fail "npm recovery: status=$status err=$(cat "$TMPDIR/err") log=$(cat "$MOCK_LOG")"
+fi
+
+test-step "headless interactive publication reaches npm's terminal"
+: >"$MOCK_LOG"
+rm -f "$MOCK_NPM_MARKER"
+status=0
+env -u DISPLAY -u WAYLAND_DISPLAY MOCK_REQUIRE_TTY=1 python3 - "$release" >"$TMPDIR/tty-out" 2>&1 <<'PY' || status=$?
+import errno, os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.argv[1], [sys.argv[1]])
+try:
+    while data := os.read(fd, 4096):
+        sys.stdout.buffer.write(data)
+except OSError as e:
+    if e.errno != errno.EIO:
+        raise
+sys.exit(os.waitstatus_to_exitcode(os.waitpid(pid, 0)[1]))
+PY
+if [ "$status" = 0 ] && grep -qx 'npm publish --access public --registry https://registry.npmjs.org/ --browser=false' "$MOCK_LOG"; then
+	test-ok "npm receives the terminal and can show the approval URL without launching a browser"
+else
+	test-fail "interactive npm: status=$status output=$(cat "$TMPDIR/tty-out") log=$(cat "$MOCK_LOG")"
 fi
 
 test-step "an already published npm version is a successful no-op"

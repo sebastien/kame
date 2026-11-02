@@ -112,7 +112,17 @@ ensure_npm() {
 		printf 'release: tagged npm package metadata does not match %s@%s\n' "$package_name" "$version" >&2
 		return 1
 	fi
-	if ! (cd "$npm_dir" && npm publish --access public --registry "$registry"); then
+	local -a browser_args=()
+	[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] || browser_args=(--browser=false)
+	# Kame captures recipe streams; npm needs a terminal to offer web approval.
+	if ! (
+		cd "$npm_dir"
+		if [ -r /dev/tty ] && [ -w /dev/tty ] && ( : </dev/tty ) 2>/dev/null; then
+			npm publish --access public --registry "$registry" ${browser_args[@]+"${browser_args[@]}"} </dev/tty >/dev/tty 2>&1
+		else
+			npm publish --access public --registry "$registry" ${browser_args[@]+"${browser_args[@]}"}
+		fi
+	); then
 		printf 'release: GitHub release %s is unchanged; fix npm authentication and rerun src/sh/release.sh to retry npm only\n' "$tag" >&2
 		return 1
 	fi
