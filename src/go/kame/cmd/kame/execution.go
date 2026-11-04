@@ -124,6 +124,7 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 		next := p.NextEvent()
 		if !next.OK {
 			restoreNativeOutputDeadline(previousOutput)
+			updateTaskbar(errOut)
 			redrawDashboard(errOut, progress)
 			publishDashboard(destination, messages.Bytes())
 			messages.Free()

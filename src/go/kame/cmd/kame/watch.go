@@ -321,6 +321,11 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 				io.WriteString(errOut, "watch · waiting for changes · last cycle "+outcome+" · Ctrl+C to stop\n")
 			}
 			cycleFinished, dashboardIdle = true, true
+			cycleStatus := 0
+			if outcome != "success" {
+				cycleStatus = 1
+			}
+			finishTaskbar(errOut, cycleStatus)
 			flushCLIOutput(out)
 			flushCLIOutput(errOut)
 		}
@@ -378,6 +383,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			invocationHadDiagnostic = false
 			progress = buildProgress{}
 			freeOutcomes()
+			startTaskbar(errOut)
 			dashboardStarted = presentationNow()
 			if options.JSON {
 				cli.WriteWatchTransition(out, "watch-cycle-started", cycle, "", 0, 0, 0, 0)

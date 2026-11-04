@@ -83,6 +83,24 @@ func renderPresentation(a mem.Allocator, text string, state *cli.ProgressState) 
 	defer value.Free(a)
 	var buffer = bytes.NewBuffer(a, nil)
 	defer buffer.Free()
+	if state != nil && presentationField(value, "op").Text == "estimate" {
+		now := presentationField(value, "nowNS")
+		if now.Kind != core.Int || now.Int < 0 {
+			return invalidPresentation(a)
+		}
+		estimate := state.Estimate(now.Int)
+		e := json.NewEncoder(&buffer)
+		e.BeginObject()
+		e.Str("known")
+		e.Bool(estimate.Known)
+		e.Str("remainingMS")
+		e.Int(estimate.RemainingMS)
+		e.Str("percent")
+		e.Int(int64(estimate.Percent))
+		e.EndObject()
+		e.Flush()
+		return PureResult{Text: pureText(a, buffer.String())}
+	}
 	if state != nil && presentationField(value, "op").Text == "counts" {
 		e := json.NewEncoder(&buffer)
 		e.BeginObject()

@@ -79,6 +79,8 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 		tools = slices.Append(r.Alloc, tools, fields[i].Text)
 	}
 	options := program.Options{TimeoutMS: host.PayloadInt(value, "timeoutMS"), RetryCount: int(host.PayloadInt(value, "retryCount")), ToolOverrides: tools, Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0, Force: host.PayloadInt(value, "force") != 0}
+	options.TrackTimings = host.PayloadInt(value, "trackTimings") != 0
+	options.TimingNow, options.TimingClock = runtimeFinalizationNow, r
 	options.RetainBytes = int(host.PayloadInt(value, "retainBytes"))
 	options.PrintResult = host.PayloadInt(value, "printResult") != 0
 	var parameters []string

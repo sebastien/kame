@@ -209,6 +209,15 @@ Each successful output is recorded the same way. The next invocation reuses it
 when that digest still matches. An external rewrite invalidates even when the
 new timestamp is older. A timestamp update that leaves the bytes alone does not.
 
+Symlink outputs are an exception: publication inspects the final component without
+following it and records the exact UTF-8 destination text under the link-target
+observation aspect. Links to directories, dangling links, and loops are valid
+outputs. Removing or retargeting a link, or replacing it with another entry kind,
+invalidates reuse. The linked directory is not recursively hashed. Ordinary file
+content reads still follow links and track the resolved bytes, not link identity.
+Publication does not grant automatic cleanup ownership of links or their referents;
+existing cleanup safety restrictions remain in force.
+
 Engine hashing is incremental; current host transport buffers a whole file.
 
 ## When to render

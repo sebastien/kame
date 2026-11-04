@@ -158,7 +158,7 @@ def capture_faults(binary: str, base: Path) -> None:
 	shim = base / "cleanup-faults.so"
 	source = Path(__file__).with_name("automatic-clean-faults.c")
 	subprocess.run(["cc", "-shared", "-fPIC", "-Wall", "-Wextra", "-Werror", "-o", str(shim), str(source), "-ldl"], check=True, timeout=20)
-	for mode in ("cancel-capture", "retire-crash", "replace-capture", "replace-occupied"):
+	for mode in ("cancel-capture", "retire-crash", "replace-capture", "replace-occupied", "replace-symlink"):
 		root = base / mode
 		project(root)
 		env = {**os.environ, "LD_PRELOAD": str(shim), "KAME_CLEAN_TEST_FAULT": mode}
@@ -184,6 +184,12 @@ def capture_faults(binary: str, base: Path) -> None:
 			assert (root / "build/out").read_text() == "seed\n"
 			assert records(root) and not list(state.glob("*.artifact"))
 			assert not list(state.glob("*.recovery"))
+		elif mode == 'replace-symlink':
+			assert reasons(clean(binary, root, env=env)) == {'artifact-changed'}
+			assert (root / 'build/out').is_symlink() and os.readlink(root / 'build/out') == '../input'
+			assert (root / 'input').read_text() == 'seed\n'
+			assert (root / 'build/test-original').read_text() == 'seed\n'
+			assert records(root) and not list(state.glob('*.artifact')) and not list(state.glob('*.recovery'))
 		elif mode == "replace-capture":
 			assert reasons(clean(binary, root, env=env)) == {"artifact-changed"}
 			assert (root / "build/out").read_text() == "replacement\n"
@@ -196,6 +202,66 @@ def capture_faults(binary: str, base: Path) -> None:
 			assert (state / f"{key}.artifact").read_text() == "replacement\n"
 			assert (root / "build/test-original").read_text() == "seed\n"
 			assert reasons(clean(binary, root, status=1, env=env)) == {"recovery-required"}
+
+	# Cancellation after capture must restore the link itself, even though its
+	# relative destination resolves differently inside the private ledger.
+	root = base / 'symlink-cancel-capture'
+	project(root, 'default : ./build/out\n./build/out : ./input\n\tln -s ../input @>\n')
+	env = {**os.environ, 'LD_PRELOAD': str(shim), 'KAME_CLEAN_TEST_FAULT': 'cancel-capture'}
+	run(binary, root, env=env)
+	state = root / '.kame/outputs'
+	(state / 'test-fault').touch()
+	report = clean(binary, root, status=1, env=env)
+	assert 'cleanup-cancelled' in reasons(report), report
+	assert (root / 'build/out').is_symlink() and os.readlink(root / 'build/out') == '../input'
+	assert (root / 'input').read_text() == 'seed\n'
+	assert records(root) and not list(state.glob('*.artifact')) and not list(state.glob('*.recovery'))
+
+
+def managedSymlinks(binary: str, base: Path) -> None:
+	for kind in ('file', 'directory', 'dangling', 'external', 'long'):
+		root = base / f'symlink-{kind}'
+		target = {'file': '../input', 'directory': '../source', 'dangling': '../missing', 'external': str(base / 'external-referent'), 'long': '../' + 'missing/' * 80}[kind]
+		project(root, f'default : ./build/out\n./build/out : ./input\n\tln -s "{target}" @>\n')
+		(root / 'source').mkdir()
+		(root / 'source/valuable').write_text('keep')
+		(base / 'external-referent').write_text('external')
+		result = run(binary, root)
+		assert 'CLEAN_STATE' not in result.stderr, result.stderr
+		output = root / 'build/out'
+		assert output.is_symlink() and os.readlink(output) == target
+		before = {p.name: p.read_bytes() for p in records(root)}
+		assert len(before) == 1
+		assert clean(binary, root, dry=True)['wouldRemove'] == 1
+		assert output.is_symlink() and before == {p.name: p.read_bytes() for p in records(root)}
+		assert clean(binary, root)['removed'] == 1
+		assert not output.is_symlink() and not output.exists() and not records(root)
+		assert (root / 'input').read_text() == 'seed\n'
+		assert (root / 'source/valuable').read_text() == 'keep'
+		assert (base / 'external-referent').read_text() == 'external'
+
+	for change in ('retarget', 'replace-link', 'replace-file', 'keep', 'release', 'failed'):
+		root = base / f'symlink-{change}'
+		project(root, 'default : ./build/out\n./build/out : ./input\n\tln -s ../input @>\n' + ('\texit 1\n' if change == 'failed' else ''))
+		run(binary, root, status=1 if change == 'failed' else 0)
+		output = root / 'build/out'
+		if change in ('retarget', 'replace-link', 'replace-file'):
+			# Keep the old inode alive to make same-text replacement unambiguous.
+			output.rename(root / 'original-link')
+			if change == 'replace-file':
+				output.write_text('valuable')
+			else:
+				output.symlink_to('../other' if change == 'retarget' else '../input')
+			expected = 'artifact-changed'
+		elif change in ('keep', 'release'):
+			protect(binary, root, '--' + change, './build/out')
+			expected = 'explicitly-protected' if change == 'keep' else None
+		else:
+			expected = 'uncertain-production'
+		report = clean(binary, root)
+		assert report['removed'] == 0 and reasons(report) == ({expected} if expected else set()), report
+		assert output.is_symlink() or output.read_text() == 'valuable'
+		assert (root / 'input').read_text() == 'seed\n'
 
 
 def quotedInputs(binary: str, base: Path) -> None:
@@ -517,6 +583,7 @@ def main(binary: str, wrapper: str = '') -> None:
 		assert "build-context-invalid" in reasons(report) and report["preserved"] == 1
 		assert (root / "build/out").exists()
 
+		managedSymlinks(binary, base)
 		quotedInputs(binary, base)
 		contextBlockers(binary, base)
 		scopedConsumer(binary, base)

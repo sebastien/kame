@@ -28,12 +28,18 @@ record formats, so cache identity and hit validation do not depend on storage.
 Its records last only as long as the memory host instance.
 
 `kame do cache list` prints a JSON array of managed regular files across the
-task, host, and file-context cache directories. Each entry has `backend`,
+task, host, file-context, and timing cache directories. Each entry has `backend`,
 `key`, and `bytes` fields. `kame do cache clean` removes regular record files
 from those directories. Both commands accept `-C DIR` or `--directory DIR` to
 select the project root; symlinks and subdirectories are left untouched.
 
 User target text is not used directly as an unchecked filesystem path.
+
+CLI timing history is advisory metadata, not an accepted computation record.
+Native retains up to 1024 regular records in `.kame/cache/timing`; WASM uses the
+existing bounded host-cache backend with domain-separated keys. Missing or
+malformed history means an unknown ETA, never a freshness failure. Cache clean
+also removes this history. See [036 CLI presentation](036-cli_ansi.md).
 
 ## Fingerprint
 

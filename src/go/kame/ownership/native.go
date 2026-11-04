@@ -52,8 +52,8 @@ func km_own_close(s *nativeStore) { _ = s }
 func km_own_root(s *nativeStore, data []byte) c.Int { _, _ = s, data; return -1 }
 
 //so:extern nodecay
-func km_own_read(s *nativeStore, name string, artifact bool, status *c.Int) *nativeFile {
-	_, _, _, _ = s, name, artifact, status
+func km_own_read(s *nativeStore, name string, artifact bool, links bool, status *c.Int) *nativeFile {
+	_, _, _, _, _ = s, name, artifact, links, status
 	return nil
 }
 
@@ -355,7 +355,7 @@ type observation struct {
 
 func (s *Store) observe(name string, artifact bool) observation {
 	var status c.Int
-	f := km_own_read(s.native, name, artifact, &status)
+	f := km_own_read(s.native, name, artifact, true, &status)
 	result := observation{Status: int(status)}
 	if f == nil {
 		return result
@@ -389,7 +389,7 @@ func (s *Store) observe(name string, artifact bool) observation {
 
 func (s *Store) read(name string) []byte {
 	var status c.Int
-	f := km_own_read(s.native, name, false, &status)
+	f := km_own_read(s.native, name, false, false, &status)
 	if f == nil {
 		s.Status = int(status)
 		return nil

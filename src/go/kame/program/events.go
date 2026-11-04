@@ -91,6 +91,9 @@ func (p *Program) observeInstances() {
 			p.releaseCacheLock(entry)
 			p.releaseResources(entry)
 		}
+		if kind == TargetCompleted {
+			p.timingSave(entry)
+		}
 		event := Event{Kind: kind, Target: entry.Plan.Target, Key: node.Key, NodeID: node.ID, Generation: node.Generation, Attempt: node.Attempt, RequestID: node.HostRequestID}
 		if node.Diagnostic.Code != "" {
 			event.Diagnostic = node.Diagnostic.Clone(p.Alloc)

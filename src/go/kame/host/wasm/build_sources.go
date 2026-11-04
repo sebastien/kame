@@ -90,6 +90,7 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 		r.BuildEnvironment = slices.Append(r.Alloc, r.BuildEnvironment, pureText(r.Alloc, environment[i].Text))
 	}
 	r.BuildForce = host.PayloadInt(descriptor, "force") != 0
+	r.BuildTrackTimings = host.PayloadInt(descriptor, "trackTimings") != 0
 	r.BuildTimeoutMS = host.PayloadInt(descriptor, "timeoutMS")
 	r.BuildRetryCount = int(host.PayloadInt(descriptor, "retryCount"))
 	r.BuildRetainBytes = int(host.PayloadInt(descriptor, "retainBytes"))
@@ -98,6 +99,7 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 
 func (r *Runtime) freeBuildSources() {
 	r.BuildForce = false
+	r.BuildTrackTimings = false
 	r.BuildRetainBytes = 0
 	for i := range r.BuildSources {
 		freeDescriptorIncludes(r.Alloc, r.BuildSources[i].Includes)
@@ -130,6 +132,8 @@ func (r *Runtime) freeBuildSources() {
 
 func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 	options.Force = r.BuildForce
+	options.TrackTimings = r.BuildTrackTimings
+	options.TimingNow, options.TimingClock = runtimeFinalizationNow, r
 	options.TimeoutMS, options.RetryCount = r.BuildTimeoutMS, r.BuildRetryCount
 	options.RetainBytes = r.BuildRetainBytes
 	options.Defines = r.BuildDefines

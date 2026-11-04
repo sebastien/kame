@@ -144,6 +144,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 		defines = nil
 	}
 	programOptions := program.Options{Host: posix.New(mem.System), Directory: directory, Environment: environment, Defines: defines, Parameters: inv.Parameters, ToolOverrides: inv.ToolOverrides, Shell: inv.Shell, Grants: grants, Jobs: inv.Jobs, CaptureLimit: inv.CaptureLimit, TimeoutMS: inv.TimeoutMS, DryRun: inv.DryRun, Force: inv.Force, CacheDisabled: inv.Force, RetryCount: inv.RetryCount, RetainBytes: inv.RetainBytes, ResolveTool: resolveBuildTool, PrintResult: inv.PrintResult}
+	programOptions.TrackTimings = true
 	var ledger *outputLedger
 	if ownership.Supported() {
 		ledger = mem.Alloc[outputLedger](mem.System)

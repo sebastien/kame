@@ -33,6 +33,13 @@ func TestWasmPresentationOwnsInvocationState(t *testing.T) {
 	done := `{"type":"target-completed","node":7,"generation":1,"target":"root","resource":{"kind":"task","name":"root"}}`
 	first := p.Observe(started, 5, 1000000000)
 	first.Free(mem.System)
+	history := p.Observe(`{"type":"target-estimate","node":7,"generation":1,"estimateMS":1000,"resource":{"kind":"task","name":"root"}}`, 5, 1000000000)
+	history.Free(mem.System)
+	estimate := p.Render(`{"op":"estimate","nowNS":1500000000}`)
+	if estimate.Code != "" || estimate.Text != `{"known":true,"remainingMS":500,"percent":50}` || p.State.Counts.Active != 1 {
+		t.Error("advisory estimate query changed lifecycle state or lost historical wall time")
+	}
+	estimate.Free(mem.System)
 	second := p.Observe(done, 5, 1123000000)
 	second.Free(mem.System)
 	counts := p.Render(`{"op":"counts"}`)

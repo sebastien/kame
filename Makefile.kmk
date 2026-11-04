@@ -250,6 +250,7 @@ TEST_WASM =
     ./tests/T006-04-runtime-order-only.sh
     ./tests/T006-06-runtime-environment.sh
     ./tests/T006-10-runtime-environment-watch.sh
+    ./tests/T006-11-runtime-symlink-outputs.sh
     ./tests/T006-07-runtime-newer-inputs.sh
     ./tests/T010-21-wasm-build-effects.sh
     ./tests/T010-22-wasm-memory.sh
@@ -304,6 +305,7 @@ TEST_WASM =
     ./tests/T041-01-patterns-predicates-and-substitution.sh
     ./tests/T036-01-cli-presentation.sh
     ./tests/T036-03-cli-presentation-lifecycle.sh
+    ./tests/T036-04-cli-osc-progress.sh
     ./tests/T036-02-cli-reuse-reasons.sh]
 
 # --- Aggregate targets ------------------------------------------------------
@@ -536,9 +538,10 @@ test-cli : ./build/kame.debug dist-wasm ./dist/kame ./dist/kame-windows-x64.zip 
 test-cli-options : ./build/kame.debug dist-wasm ./tests/T009-17-cli-options.sh
 	:KAME_TEST_PREBUILT (abspath ".") ./tests/T009-17-cli-options.sh
 
-test-presentation : ./build/kame.debug dist-wasm ./tests/T036-01-cli-presentation.sh ./tests/T036-03-cli-presentation-lifecycle.sh ./tests/T036-02-cli-reuse-reasons.sh
+test-presentation : ./build/kame.debug dist-wasm ./tests/T036-01-cli-presentation.sh ./tests/T036-03-cli-presentation-lifecycle.sh ./tests/T036-04-cli-osc-progress.sh ./tests/T036-02-cli-reuse-reasons.sh
 	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-01-cli-presentation.sh
 	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-03-cli-presentation-lifecycle.sh
+	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-04-cli-osc-progress.sh
 	:KAME_TEST_PREBUILT (abspath ".") ./tests/T036-02-cli-reuse-reasons.sh
 
 test-inspection : ./build/kame.debug dist-wasm ./tests/T037-01-cli-build-inspection.sh

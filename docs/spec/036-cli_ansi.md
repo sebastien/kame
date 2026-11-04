@@ -391,12 +391,44 @@ When a finite total is established, show units and optionally a bar:
 0  format sources    [######....]  6/10 files           0.3s
 ```
 
-- Do not estimate recipe completion from historical runtime.
+- Inline recipe rows do not present historical runtime as measured completion.
 - Do not parse arbitrary child output for progress percentages.
-- Do not show a build percentage while dependency discovery can change the total.
+- Do not show a measured build percentage while discovery can change the total.
 - Show completed counts without a denominator when the total is unknown.
 - An optional spinner is decorative; written state is sufficient without motion.
 - Show completed progress only after established success, not merely process exit.
+
+### Terminal taskbar ETA
+
+Interactive ANSI build and run invocations additionally emit OSC `9;4` on stderr.
+This terminal-level indicator is an **estimate of remaining wall time**, not a
+measured fraction of recipes or a freshness decision. It does not require the
+inline dashboard's minimum dimensions. Text, JSON, dry runs, redirected stderr,
+and `TERM=dumb` emit no taskbar controls. Unsupported terminals may ignore them.
+
+Successful executions retain advisory per-target durations in the existing cache
+infrastructure, separately from semantic signature records. Native uses the
+`timing` bucket; WASM uses opaque, domain-separated host-cache keys. These records
+include dependency waiting, so concurrent subtrees are not added together: ETA
+uses the longest remaining historical wall time among active targets. Existing
+cached-task execution durations are usable as a fallback. Cache-only invocations
+do not replace execution history with cache-lookup latency. Failed and cancelled
+executions do not replace successful history. Missing, malformed, unavailable,
+or out-of-range timing data never fails a build or changes freshness.
+
+Unknown or overrun history uses indeterminate state 3. Useful estimates use state
+1 with a nondecreasing percentage capped at 99 until invocation/cycle success;
+failure uses state 2 and cancellation may use paused state 4 before clearing.
+Discovery may make an estimate unavailable again, but never
+asserts a known work total. Success emits 100 only after normal completion.
+Every exit and cancellation clears the indicator with state 0. Watch clears it
+while idle and resets the estimate and percentage for each new cycle.
+
+Timing collection is opt-in for embedding runtimes; the CLIs collect history even
+when output is redirected, so later interactive invocations can use it. A
+`target-estimate` event carries optional advisory `estimateMS` metadata; it is not
+a display tick and does not affect established outcome counts. Native and WASM
+use the same portable estimate calculation and lifecycle identities.
 
 ## Presentation examples
 
@@ -627,6 +659,7 @@ reused display slot.
 | Event | Human presentation |
 | --- | --- |
 | `target-started` | Active target state; one text transition |
+| `target-estimate` | Advisory cached `estimateMS` for terminal taskbar ETA; no persistent human line |
 | `target-reason` | Text: persistent decision and established reason once; ANSI: routine reasons omitted |
 | `process-started` | Current tool, bounded argv, and process clock |
 | `process-exited` | Process outcome/runtime; not necessarily target completion |

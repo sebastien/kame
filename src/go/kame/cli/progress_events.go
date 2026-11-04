@@ -26,7 +26,7 @@ func ParseProgressObservation(value core.Value) ProgressObservation {
 			if f.Value.Kind != core.String {
 				return ProgressObservation{}
 			}
-		case "node", "generation", "attempt", "request":
+		case "node", "generation", "attempt", "request", "estimateMS":
 			if f.Value.Kind != core.Int || f.Value.Int < 0 {
 				return ProgressObservation{}
 			}
@@ -37,6 +37,8 @@ func ParseProgressObservation(value core.Value) ProgressObservation {
 	switch reportField(value, "type").Text {
 	case "target-started":
 		kind = program.TargetStarted
+	case "target-estimate":
+		kind = program.TargetEstimate
 	case "target-completed":
 		kind = program.TargetCompleted
 	case "target-failed":
@@ -86,7 +88,7 @@ func ParseProgressObservation(value core.Value) ProgressObservation {
 			return ProgressObservation{}
 		}
 	}
-	return ProgressObservation{OK: true, Work: work, Started: started, Event: program.Event{Kind: kind, NodeID: reportField(value, "node").Int, Generation: reportField(value, "generation").Int, Attempt: reportField(value, "attempt").Int, RequestID: reportField(value, "request").Int, Target: reportField(value, "target").Text, Program: reportField(value, "program").Text, State: reportField(value, "state").Text, Key: key}}
+	return ProgressObservation{OK: true, Work: work, Started: started, Event: program.Event{Kind: kind, EstimateMS: reportField(value, "estimateMS").Int, NodeID: reportField(value, "node").Int, Generation: reportField(value, "generation").Int, Attempt: reportField(value, "attempt").Int, RequestID: reportField(value, "request").Int, Target: reportField(value, "target").Text, Program: reportField(value, "program").Text, State: reportField(value, "state").Text, Key: key}}
 }
 
 func (s *ProgressState) Observe(a mem.Allocator, observation ProgressObservation, nowNS int64) {

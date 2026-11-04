@@ -45,6 +45,12 @@ with preserved timestamps. The first run establishes a successful record, and
 a file rule without declared or discovered dependencies is always stale.
 `always ./output : ./input` and `--force` bypass reuse.
 
+File outputs may be symlinks, including directory links and dangling links.
+Their identity is the exact destination text, not the contents of the referent;
+removal, retargeting, or replacement by another entry kind invalidates reuse.
+Content reads through a link still track resolved file bytes. Automatic cleanup
+can unlink unchanged managed symlink outputs and never traverses their referents.
+
 Outputs may also use reference/call expansions or interpolated tokens:
 
 ```kame

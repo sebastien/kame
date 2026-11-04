@@ -280,7 +280,7 @@ func (s *Store) Commit(paths []string, producer string, context [32]byte) bool {
 		observations = slices.Append(s.Alloc, observations, item)
 		if item.Status != 0 && item.Status != 1 {
 			slices.Free(s.Alloc, observations)
-			// A symlink/non-regular output can satisfy ordinary publication, but
+			// A directory or other unsupported output can satisfy publication, but
 			// cannot establish cleanup ownership. Leave its attempt uncertain.
 			s.Status = item.Status
 			if s.Status == -3 {

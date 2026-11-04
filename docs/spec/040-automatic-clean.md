@@ -165,7 +165,7 @@ The following checks apply to each recorded member:
 | Observation | Result |
 | --- | --- |
 | Missing member, established through a safe root-relative lookup | Resolve entry; remove nothing |
-| Unchanged owned regular file, equivalent context, no protection and safe host operation | Eligible for removal |
+| Unchanged owned regular file or symlink, equivalent context, no protection and safe host operation | Eligible for removal |
 | Modified, replaced, protected, uncertain or conflicting artifact | Preserve entry and file |
 | Changed, missing or unverifiable build context | Preserve entry and file |
 | Unsafe path, corrupt record, denied operation or unavailable host guarantee | Refuse removal and report error |
@@ -174,8 +174,11 @@ Absence must be established, not inferred from permission errors, unreadable
 parents or failed host requests. Missing-file retirement never follows symlinks
 or an unchecked path from a damaged record.
 
-Automatic cleanup is restricted to regular files strictly inside the recorded
-project root. Never remove the root, ownership state, a directory, a symlink,
+Automatic cleanup is restricted to regular files and symlinks strictly inside the
+recorded project root. Symlink identity includes the exact destination text and
+the link's own metadata, never referent bytes. Unlink only the unchanged managed
+link, including dangling links and links to directories or outside the root;
+never follow its destination. Never remove the root, ownership state, a directory,
 a special file or an out-of-root resource. Reject traversal, canonical aliases
 that escape the root and host-specific path ambiguity. Validate containment
 against actual host lookup semantics, including case handling and parent links,
@@ -281,7 +284,9 @@ it does not change eligibility, counts or exit status.
   remain uncertain and cannot use an older accepted record to authorize removal.
 - Cache cleaning preserves the ledger. Missing, corrupt or copied ownership
   state never triggers directory scanning or silent authority reconstruction.
-- Unsafe roots, parent symlink substitution, final symlinks, outside-root paths,
+- Unchanged managed symlinks, including dangling links and directory links, can
+  be unlinked without touching referents. Retargeted or replaced links survive.
+- Unsafe roots, parent symlink substitution, unmanaged final symlinks, outside-root paths,
   permission failures and unavailable race-resistant host operations remove no
   affected files and produce explicit diagnostics.
 - Cooperating concurrent builds and watch producers cannot race cleanup.

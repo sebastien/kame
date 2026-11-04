@@ -43,6 +43,7 @@ type Runtime struct {
 	BuildToolOverrides []string
 	BuildEnvironment   []string
 	BuildForce         bool
+	BuildTrackTimings  bool
 	BuildTimeoutMS     int64
 	BuildRetryCount    int
 	BuildRetainBytes   int

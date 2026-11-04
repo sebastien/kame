@@ -102,6 +102,8 @@ func resetInvocationPresentation() {
 }
 
 func freeInvocationPresentation(out io.Writer) {
+	emitTaskbar(out, 0, 0)
+	taskbarEnabled = false
 	clearDashboard(out)
 	state := cli.ProgressState{Workers: workers, Outcomes: outcomes}
 	state.Free(mem.System)

@@ -82,7 +82,7 @@ def terminal(host: list[str], cwd: Path, mode: str, width: int = 80, resize: boo
 			# Reads can lag queued old-size frames, and Node observes SIGWINCH
 			# asynchronously. Both presenters acknowledge unsafe reflow with a
 			# standalone newline (native frames end with synchronized-update off).
-			acknowledged = next((match.end() for match in re.finditer(rb"(?:\r\n|\x1b\[\?2026l)\r\n", output) if match.end() > resized_at), None)
+			acknowledged = next((match.end() for match in re.finditer(rb"(?:\r\n|\x1b\[\?2026l)(?:\x1b\]9;4;\d;\d+\x1b\\)*\r\n", output) if match.end() > resized_at), None)
 			assert acknowledged is not None, output
 			assert not re.search(rb"\x1b\[[0-9]*A", output[acknowledged:]), output
 	finally:
@@ -245,7 +245,9 @@ def check_lifecycle(host: list[str], project: Path) -> None:
 		resized = terminal(host, project, "ansi", width, resize=True)
 		assert b"running" in resized and b" - \xe2\x9c\x93" in resized, resized
 	assert b"\x1b" not in terminal(host, project, "text")
-	assert b"\x1b" not in terminal(host, project, "ansi", width=30)
+	small = terminal(host, project, "ansi", width=30)
+	# Taskbar progress does not own terminal rows or require a wide dashboard.
+	assert b"\x1b" not in re.sub(rb"\x1b\]9;4;\d;\d+\x1b\\", b"", small), small
 	# Both backends publish actual dispatch before synchronous Kame work, even
 	# when the target never emits process-started.
 	(project / "Makefile.kmk").write_text("task default :\n")

@@ -30,10 +30,11 @@ func runCache(args []string, out io.Writer, errOut io.Writer) int {
 		cliError(errOut, parsed.Error.Code, parsed.Error.Message)
 		return 2
 	}
-	var buckets = [3]cacheBucket{
+	var buckets = [4]cacheBucket{
 		{Name: "tasks", Directory: "tasks"},
 		{Name: "host", Directory: "host"},
 		{Name: "file-context", Directory: "file-context"},
+		{Name: "timing", Directory: "timing"},
 	}
 	if parsed.Args[0] == "list" {
 		var records []cacheListEntry

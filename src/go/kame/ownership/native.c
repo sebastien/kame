@@ -17,7 +17,7 @@
 // lookups never traverse symlinks. Status: 1 missing, 2 changed, -1 I/O,
 // -2 busy, -3 unsupported/unsafe. No C allocation crosses the public API.
 struct km_own_store { int root, kame, records, lock; unsigned long serial; };
-struct km_own_file { int fd; struct stat stamp; };
+struct km_own_file { int fd; struct stat stamp; char *name, *link; size_t size, offset; };
 
 bool km_own_supported(void) {
 #if defined(_WIN32) || defined(__wasi__)
@@ -172,19 +172,40 @@ int km_own_root(km_own_store *s, so_Slice data) {
     return 0;
 }
 
-km_own_file *km_own_read(km_own_store *s, so_String name, bool artifact, int *status) {
+km_own_file *km_own_read(km_own_store *s, so_String name, bool artifact, bool links, int *status) {
     *status = -3;
     char *text = km_own_text(name), *base = NULL;
     if (!s || !text) { free(text); return NULL; }
     int parent = km_own_parent(artifact ? s->root : s->records, text, &base, artifact ? s->kame : -1);
     if (parent < 0) { free(text); *status = parent == -4 ? 1 : parent; return NULL; }
+    struct stat info;
+    if (links && !fstatat(parent, base, &info, AT_SYMLINK_NOFOLLOW) && S_ISLNK(info.st_mode)) {
+        km_own_file *f = calloc(1, sizeof(*f));
+        if (!f) { close(parent); free(text); *status = -1; return NULL; }
+        f->fd = parent; f->stamp = info; f->name = strdup(base);
+        free(text);
+        // Hash the exact destination bytes, never the referent. Keep the parent
+        // descriptor and recheck the no-follow entry after reading those bytes.
+        size_t capacity = 256;
+        while (f->name && capacity <= 16 * 1024 * 1024) {
+            f->link = malloc(capacity);
+            if (!f->link) break;
+            ssize_t n = readlinkat(parent, f->name, f->link, capacity);
+            if (n >= 0 && (size_t)n < capacity) {
+                f->size = n; *status = 0; return f;
+            }
+            free(f->link); f->link = NULL;
+            if (n < 0) break;
+            capacity *= 2;
+        }
+        close(parent); free(f->name); free(f); *status = -1; return NULL;
+    }
     int fd = openat(parent, base, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
     int error = errno;
     close(parent); free(text);
     if (fd < 0) { *status = error == ENOENT ? 1 : -3; return NULL; }
-    struct stat info;
     if (fstat(fd, &info) || !S_ISREG(info.st_mode)) { close(fd); return NULL; }
-    km_own_file *f = malloc(sizeof(*f));
+    km_own_file *f = calloc(1, sizeof(*f));
     if (!f) { close(fd); *status = -1; return NULL; }
     f->fd = fd; f->stamp = info; *status = 0; return f;
 }
@@ -194,6 +215,13 @@ int km_own_stamp(km_own_file *f, so_Slice data) {
     km_own_metadata(&f->stamp, data.ptr); return 0;
 }
 int km_own_bytes(km_own_file *f, so_Slice data) {
+    if (f->name) {
+        size_t n = f->size - f->offset;
+        if (n > (size_t)data.len) n = data.len;
+        memcpy(data.ptr, f->link + f->offset, n);
+        f->offset += n;
+        return (int)n;
+    }
     ssize_t n;
     do { n = read(f->fd, data.ptr, data.len); } while (n < 0 && errno == EINTR);
     return (int)n;
@@ -201,11 +229,11 @@ int km_own_bytes(km_own_file *f, so_Slice data) {
 bool km_own_stable(km_own_file *f) {
     struct stat info;
     unsigned char a[48], b[48];
-    if (fstat(f->fd, &info)) return false;
+    if (f->name ? fstatat(f->fd, f->name, &info, AT_SYMLINK_NOFOLLOW) : fstat(f->fd, &info)) return false;
     km_own_metadata(&info, a); km_own_metadata(&f->stamp, b);
     return !memcmp(a, b, sizeof(a));
 }
-void km_own_file_close(km_own_file *f) { if (f) { close(f->fd); free(f); } }
+void km_own_file_close(km_own_file *f) { if (f) { close(f->fd); free(f->name); free(f->link); free(f); } }
 
 int km_own_write(km_own_store *s, so_String name, so_Slice data) {
     char *text = km_own_text(name);
@@ -234,7 +262,10 @@ int km_own_remove(km_own_store *s, so_String name) {
     struct stat info;
     int result = fstatat(s->records, text, &info, AT_SYMLINK_NOFOLLOW);
     if (result && errno == ENOENT) { free(text); return 0; }
-    if (result || !S_ISREG(info.st_mode)) { free(text); return -3; }
+    // Only captured artifacts may be links; ledger metadata stays regular-only.
+    size_t len = strlen(text);
+    bool artifact = len > 9 && !strcmp(text + len - 9, ".artifact");
+    if (result || (!S_ISREG(info.st_mode) && !(artifact && S_ISLNK(info.st_mode)))) { free(text); return -3; }
     result = unlinkat(s->records, text, 0) || fsync(s->records) ? -1 : 0;
     free(text); return result;
 }
@@ -270,7 +301,7 @@ int km_own_capture(km_own_store *s, so_String name, so_String token, so_Slice ex
     if (result) result = errno == ENOENT ? 1 : -1;
     else {
         km_own_metadata(&info, stamp);
-        if (!S_ISREG(info.st_mode) || memcmp(stamp, expected.ptr, sizeof(stamp))) result = 2;
+        if ((!S_ISREG(info.st_mode) && !S_ISLNK(info.st_mode)) || memcmp(stamp, expected.ptr, sizeof(stamp))) result = 2;
         else if (!fstatat(s->records, target, &occupied, AT_SYMLINK_NOFOLLOW) || errno != ENOENT) result = -3;
         else if (renameat(parent, base, s->records, target)) result = -1;
         else if (fsync(parent) || fsync(s->records)) result = -1;

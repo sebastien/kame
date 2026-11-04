@@ -38,6 +38,7 @@ function installSignals() {
       if (interruptedStatus) return;
       clearDashboard();
       interruptedStatus = 128 + (osConstants.signals[signal] ?? 0);
+      emitTaskbar(0, 0); taskbarEnabled = false;
       syncOutputReaders();
       const reaped = [...activeChildren].map((child) => new Promise((resolve) => child.once('close', resolve)));
       for (const cancellation of invocationCancellations) cancellation.abort();
@@ -363,6 +364,25 @@ function writeDataResult(type, fields, bytes, includeData = true) {
   }
   stdout.write(`${JSON.stringify(record)}\n`);
 }
+let taskbarEnabled = false, taskbarState = -1, taskbarPercent = 0;
+function emitTaskbar(state, percent) {
+  if (!taskbarEnabled || (taskbarState === state && taskbarPercent === percent)) return;
+  stderr.write(`\x1b]9;4;${state};${percent}\x1b\\`);
+  taskbarState = state; taskbarPercent = percent;
+}
+function updateTaskbar() {
+  if (!taskbarEnabled) return;
+  if (watchIdle) { emitTaskbar(0, 0); return; }
+  const estimate = JSON.parse(presentationModule.present({ op: 'estimate' }));
+  const percent = Math.max(taskbarPercent, estimate.known ? estimate.percent : 0);
+  emitTaskbar(buildProgress?.failed ? 2 : estimate.known ? 1 : 3, percent);
+}
+function finishTaskbar(status) {
+  if (taskbarState === 0) return;
+  const cancelled = status >= 128 || (buildProgress?.cancelled && !buildProgress?.failed);
+  emitTaskbar(status === 0 ? 1 : cancelled ? 4 : 2, status === 0 ? 100 : taskbarPercent);
+  emitTaskbar(0, 0);
+}
 function liveDashboard() {
   return !jsonMode && outputMode === 'ansi' && stderr.isTTY === true && env.TERM !== 'dumb' && stderr.columns >= 40 && stderr.rows >= 4 && !dashboardUnsafe && !dashboardPending;
 }
@@ -398,6 +418,7 @@ function shortField(text, width) {
   return `${result}…`;
 }
 function redrawDashboard() {
+  updateTaskbar();
   if (dashboardRows && (stderr.columns !== dashboardWidth || stderr.rows !== dashboardHeight)) { clearDashboard(); return; }
   if (!liveDashboard()) { clearDashboard(); return; }
   if ((!buildProgress && !cliLockWaits.size) || stdout.writableNeedDrain || stderr.writableNeedDrain) return;
@@ -430,17 +451,20 @@ function redrawDashboard() {
   dashboardRows = lines.length; dashboardFrame = frame;
 }
 function observeCLIEvent(event, scope) {
-  if (!['target-started', 'target-completed', 'target-failed', 'target-cancelled', 'process-started', 'process-exited', 'service-state', 'work-started', 'work-finished'].includes(event.type)) return;
+  if (!['target-started', 'target-estimate', 'target-completed', 'target-failed', 'target-cancelled', 'process-started', 'process-exited', 'service-state', 'work-started', 'work-finished'].includes(event.type)) return;
   presentationModule.observePresentation(presentationEvent(event), scope);
   buildProgress = JSON.parse(presentationModule.present({ op: 'counts' }));
 }
 function presentationEvent(event) {
   // Do not copy diagnostics, argv, or stream payloads into lifecycle state.
   return { type: event.type, node: event.node, generation: event.generation, attempt: event.attempt,
+    estimateMS: event.estimateMS,
     request: event.request, target: event.target, program: event.program, state: event.state,
     resource: event.resource ? { kind: event.resource.kind, name: event.resource.name } : undefined };
 }
 function resetProgress() {
+  taskbarState = -1; taskbarPercent = 0;
+  emitTaskbar(3, 0);
   presentationModule.observePresentation({ type: 'cycle' });
   buildProgress = JSON.parse(presentationModule.present({ op: 'counts' }));
 }
@@ -1654,6 +1678,18 @@ class Module {
     }
     if (kind === 27 || kind === 28 || kind === 29) {
       if (kind === 27 && !grants.read) return this.deny(instance, request, 'read');
+      if (kind === 29) {
+        try {
+          if ((await statResource(payload, undefined, true)).isSymbolicLink()) {
+            const bytes = await readlink(filesystemPath(payload), { encoding: 'buffer' });
+            if (bytes.length >= 65536) throw new Error('link target too large');
+            const target = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+            return this.completeJSON(instance, request, { link: target });
+          }
+        } catch (error) {
+          if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') return this.completeFailure(instance, request, 'FS_ERR', 'cannot inspect output');
+        }
+      }
       let info;
       try { info = await statResource(payload); }
       catch (error) {
@@ -2346,7 +2382,7 @@ class Module {
     if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     if (Array.isArray(source)) {
       if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
-      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, parameters: source.parameters, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0 }), 'buildDescriptor');
+      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, parameters: source.parameters, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, trackTimings: context.api === true ? 0 : 1, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0 }), 'buildDescriptor');
       if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
   }
@@ -2706,7 +2742,7 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
+      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, trackTimings: context.api === true ? 0 : 1, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');
@@ -4755,6 +4791,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       stderr.write(`watch · waiting for changes · last cycle ${outcome} · Ctrl+C to stop\n`);
     }
     cycleFinished = true; watchIdle = true;
+    finishTaskbar(outcome === 'success' ? 0 : 1);
   };
   if (!inv.json) stderr.write(`Watching filesystem resources (OS notifications; 10s reconciliation; 200ms polling fallback; ${debounceMS}ms debounce${inv.cancelOnChange ? '; cancel on change' : ''})\n`);
 
@@ -4976,7 +5013,7 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
 async function dispatch(module, inv, noArguments) {
   module.beginPresentation();
   try { return await dispatchInvocation(module, inv, noArguments); }
-  finally { clearDashboard(); module.endPresentation(); }
+  finally { emitTaskbar(0, 0); taskbarEnabled = false; clearDashboard(); module.endPresentation(); }
 }
 
 async function dispatchInvocation(module, inv, noArguments) {
@@ -4988,6 +5025,9 @@ async function dispatchInvocation(module, inv, noArguments) {
     stdout.write(help.help); return 0;
   }
   presentationCommand = inv.name || 'build';
+  taskbarEnabled = !jsonMode && outputMode === 'ansi' && !inv.dryRun && ['', 'run'].includes(inv.name) && stderr.isTTY === true && env.TERM !== 'dumb';
+  taskbarState = -1; taskbarPercent = 0;
+  emitTaskbar(3, 0);
   presentationSubject = inv.targets[0] || (inv.inputs?.[0]?.kind === 'file' ? inv.inputs[0].value : inv.inputs?.length ? '<command:1>' : 'default');
   invocationHadDiagnostic = false;
   dashboardRows = 0; dashboardFrame = ''; dashboardUnsafe = false; dashboardPending = false; dashboardLast = 0;
@@ -5019,6 +5059,7 @@ async function dispatchInvocation(module, inv, noArguments) {
   }
   const humanCounts = inv.name === 'fmt' ? formatCounts : buildProgress;
   if (!jsonMode && (inv.name !== 'fmt' || inv.check || (inv.inPlace && inv.files.length)) && humanCounts && humanCounts.completed + humanCounts.failed + humanCounts.cancelled !== 0) printSummary(humanCounts, status, performance.now() - started);
+  finishTaskbar(status);
   return status;
 }
 
@@ -5070,7 +5111,7 @@ async function dispatchCommand(module, inv, noArguments) {
 function runCache(inv) {
   const action = inv.args?.[0];
   if (action !== 'list' && action !== 'clean') throw Object.assign(new Error('cache requires the list or clean action'), { code: 'OPT_VALUE_INVALID' });
-  const buckets = [['tasks', '.kame/cache/tasks'], ['host', '.kame/cache/host'], ['file-context', '.kame/cache/file-context']];
+  const buckets = [['tasks', '.kame/cache/tasks'], ['host', '.kame/cache/host'], ['file-context', '.kame/cache/file-context'], ['timing', '.kame/cache/timing']];
   if (action === 'list') {
     const records = [];
     for (const [backend, relative] of buckets) {

@@ -135,6 +135,7 @@ const (
 	ServiceState
 	TargetReason
 	ProcessSnapshot
+	TargetEstimate
 )
 
 type Event struct {
@@ -158,6 +159,7 @@ type Event struct {
 	Program                string
 	Argv                   []string
 	RuntimeMS              int64
+	EstimateMS             int64
 	HasRuntime             bool
 	// Native presentation timing; not part of the structured event schema.
 	MonotonicNS      int64
@@ -235,6 +237,12 @@ func (h *Handle) Free() {
 
 type Options struct {
 	PrintResult bool
+	// TrackTimings records advisory wall-clock history, never freshness evidence.
+	TrackTimings bool
+	// TimingNow optionally supplies monotonic nanoseconds for a forwarding host.
+	// Its caller-owned clock must remain alive until the Program is freed.
+	TimingNow   func(any) int64
+	TimingClock any
 	// Host executes recipe scripts and services the runtime's filesystem and
 	// clock. Compile transfers ownership to the Program, which releases it
 	// during Program.Free.
@@ -390,6 +398,13 @@ type generatedRuleMeta struct {
 	Dependencies []string
 }
 type instance struct {
+	timingKey              [32]byte
+	timingStarted          int64
+	timingEstimate         int64
+	timingReady            bool
+	timingPending          bool
+	timingExecuted         bool
+	timingExecutedAt       int64
 	Artifacts              []*core.Node
 	OwnershipPaths         []string
 	Resources              []LockedResource

@@ -298,6 +298,10 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			return core.ProducerSubmitted
 		}
 		state.Cached = lookup.Record
+		if lookup.Hit && p.timingEnabled(&p.Instances[index]) {
+			// Legacy task records already carry execution duration in nanoseconds.
+			p.timingObserve(&p.Instances[index], lookup.Record.Duration/1000000)
+		}
 		state.RecordReason = lookup.MissReason
 		if lookup.Hit {
 			state.RecordReason = "record-invalid"

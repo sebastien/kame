@@ -46,7 +46,7 @@ for path in sys.argv[1:]:
     rows = json.load(open(path, encoding="utf-8"))
     assert rows, f"no records in {path}"
     assert all(set(row) == {"backend", "key", "bytes"} and row["bytes"] >= 0 for row in rows)
-    assert {row["backend"] for row in rows} <= {"tasks", "host", "file-context"}
+    assert {row["backend"] for row in rows} <= {"tasks", "host", "file-context", "timing"}
 PY
 then test-ok "native and wasm list managed record metadata"; else test-fail "cache list JSON is invalid"; fi
 

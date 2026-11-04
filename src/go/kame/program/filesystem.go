@@ -14,6 +14,27 @@ func (p *Program) fileCompletion(request host.Request, op string, name string) c
 	completion := core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID}
 	filename := p.canonicalTarget(name, true)
 	defer mem.FreeString(p.Alloc, filename)
+	if op == host.OpOutputContent {
+		info := p.Host.Lstat(filename)
+		if info.Failed {
+			completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot inspect output")
+			return completion
+		}
+		if info.Exists && info.Info.Symlink {
+			link := p.Host.Readlink(p.Alloc, filename)
+			if link.Failed {
+				mem.FreeString(p.Alloc, link.Target)
+				completion.Diagnostic = failure(p.Alloc, "FS_ERR", "cannot read symbolic link")
+				return completion
+			}
+			value := core.NewString(p.Alloc, link.Target)
+			mem.FreeString(p.Alloc, link.Target)
+			completion.Value = core.NewRecord(p.Alloc, []core.RecordField{{Key: "link", Value: value}})
+			value.Free(p.Alloc)
+			completion.HasValue = true
+			return completion
+		}
+	}
 	if op == host.OpFileContent || op == host.OpToolContent || op == host.OpOutputContent {
 		result := p.Host.Stat(filename)
 		if result.Failed {

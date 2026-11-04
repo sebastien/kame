@@ -10,9 +10,9 @@ func (p *Program) verifyForwardOutputs(c *core.EngineContext, index int) core.Pr
 	return p.observeFileOutputs(c, index, true)
 }
 
-// Native and forwarded publication validate the same physical bytes. Before a
-// cache decision, unavailable outputs cause a miss; after execution, absent or
-// unreadable declared outputs prevent publication.
+// Native and forwarded publication validate the same file bytes or link text.
+// Before a cache decision, unavailable outputs cause a miss; after execution,
+// absent or unreadable declared outputs prevent publication.
 func (p *Program) observeFileOutputs(c *core.EngineContext, index int, executed bool) core.ProducerResult {
 	entry := &p.Instances[index]
 	if entry.VerifyPending {
@@ -34,7 +34,7 @@ func (p *Program) observeFileOutputs(c *core.EngineContext, index int, executed 
 			entry.VerifyPending = true
 			return core.ProducerSubmitted
 		}
-		completion := p.fileCompletion(host.Request{}, host.OpFileContent, name)
+		completion := p.fileCompletion(host.Request{}, host.OpOutputContent, name)
 		mem.FreeString(p.Alloc, name)
 		if !p.acceptOutputObservation(c, index, completion, executed) {
 			return core.ProducerFailed
@@ -56,8 +56,13 @@ func (p *Program) observeFileOutputs(c *core.EngineContext, index int, executed 
 func (p *Program) acceptOutputObservation(c *core.EngineContext, index int, completion core.Completion, executed bool) bool {
 	entry := &p.Instances[index]
 	signature := core.Signature{}
+	aspect := core.ObservationContent
 	if completion.Diagnostic.Code == "" && completion.HasValue {
 		signature = contentObservation(completion.Value)
+		if completion.Value.Kind == core.Record && len(completion.Value.Record) == 1 && completion.Value.Record[0].Key == "link" && completion.Value.Record[0].Value.Kind == core.String {
+			aspect = core.ObservationLinkTarget
+			signature = core.ValueSignature(completion.Value.Record[0].Value)
+		}
 	}
 	completion.Value.Free(p.Alloc)
 	if executed && (completion.Diagnostic.Code != "" || signature.Mode != core.SignatureContent) {
@@ -70,7 +75,7 @@ func (p *Program) acceptOutputObservation(c *core.EngineContext, index int, comp
 	}
 	completion.Diagnostic.Free(p.Alloc)
 	name := p.canonicalTarget(entry.Plan.Outputs[entry.VerifyIndex], true)
-	item := core.Observation{Key: core.ResourceKey{Kind: core.ResourceFile, Name: name}, Aspect: core.ObservationContent, Signature: signature}
+	item := core.Observation{Key: core.ResourceKey{Kind: core.ResourceFile, Name: name}, Aspect: aspect, Signature: signature}
 	entry.AcceptedRecord.Outputs = appendAcceptedObservation(p.Alloc, entry.AcceptedRecord.Outputs, item)
 	item.Key.Free(p.Alloc)
 	entry.VerifyIndex++

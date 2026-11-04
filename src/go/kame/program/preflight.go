@@ -118,6 +118,10 @@ func (p *Program) dependencyContentSignature(key core.ResourceKey) core.Signatur
 		for i := range p.Instances[index].AcceptedRecord.Outputs {
 			item := p.Instances[index].AcceptedRecord.Outputs[i]
 			if item.Key.Name == key.Name {
+				// Link identity proves publication, not the contents of its referent.
+				if item.Aspect != core.ObservationContent {
+					return core.Signature{}
+				}
 				return item.Signature
 			}
 		}

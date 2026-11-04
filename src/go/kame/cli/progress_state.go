@@ -8,17 +8,19 @@ import (
 )
 
 type Outcome struct {
-	Scope      int64
-	Node       int64
-	Generation int64
-	Kind       core.ResourceKind
-	Name       string
-	Started    bool
-	Terminal   bool
-	StartedNS  int64
-	ElapsedMS  int64
-	HasTiming  bool
-	HostClock  bool
+	ProgressStartedNS int64
+	EstimateMS        int64
+	Scope             int64
+	Node              int64
+	Generation        int64
+	Kind              core.ResourceKind
+	Name              string
+	Started           bool
+	Terminal          bool
+	StartedNS         int64
+	ElapsedMS         int64
+	HasTiming         bool
+	HostClock         bool
 }
 
 type ProgressWorkerState struct {
@@ -69,7 +71,7 @@ func (s *ProgressState) freeWorker(a mem.Allocator, i int) {
 }
 
 func (s *ProgressState) ObserveOutcome(a mem.Allocator, event program.Event, nowNS int64) {
-	if event.Kind != program.TargetStarted && event.Kind != program.TargetCompleted && event.Kind != program.TargetFailed && event.Kind != program.TargetCancelled {
+	if event.Kind != program.TargetStarted && event.Kind != program.TargetCompleted && event.Kind != program.TargetFailed && event.Kind != program.TargetCancelled && event.Kind != program.TargetEstimate {
 		return
 	}
 	index := -1
@@ -80,9 +82,13 @@ func (s *ProgressState) ObserveOutcome(a mem.Allocator, event program.Event, now
 		}
 	}
 	if index < 0 {
+		if event.Kind == program.TargetEstimate {
+			return
+		}
 		s.Outcomes = slices.Append(a, s.Outcomes, Outcome{Scope: s.Scope, Node: event.NodeID, Generation: event.Generation, Kind: event.Key.Kind, Name: core.NewString(a, event.Key.Name).Text, Started: event.Kind == program.TargetStarted})
 		index = len(s.Outcomes) - 1
 		if event.Kind == program.TargetStarted {
+			s.Outcomes[index].ProgressStartedNS = nowNS
 			s.Outcomes[index].StartedNS = nowNS
 			s.Outcomes[index].HostClock = event.HasMonotonic
 			if event.HasMonotonic {
@@ -91,6 +97,12 @@ func (s *ProgressState) ObserveOutcome(a mem.Allocator, event program.Event, now
 			s.Counts.Active++
 			return
 		}
+	}
+	if event.Kind == program.TargetEstimate {
+		if event.EstimateMS > 0 && event.EstimateMS <= 7*24*60*60*1000 {
+			s.Outcomes[index].EstimateMS = event.EstimateMS
+		}
+		return
 	}
 	if event.Kind == program.TargetStarted || s.Outcomes[index].Terminal {
 		return

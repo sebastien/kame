@@ -250,7 +250,7 @@ func (s *Store) cleanMember(name string, context [32]byte, verified bool, dry bo
 	}
 	moved := s.observe(id+".artifact", false)
 	// Rename updates ctime. Compare object identity, mode, size, mtime and bytes;
-	// the descriptor observation also rejects changes while hashing the object.
+	// the no-follow observation also rejects changes while hashing the object.
 	if moved.Status != 0 || !equal(moved.Stamp[:40], r.Stamp[:40]) || !equal(moved.Digest[:], r.Digest[:]) || s.cancelled() {
 		if km_own_restore(s.native, r.Path, id+".artifact") != 0 {
 			result.State, result.Reason = "error", "recovery-required"

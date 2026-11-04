@@ -49,7 +49,7 @@ func validDescriptorOptions(value core.Value, session bool) bool {
 			if session && (field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 2147483647) {
 				return false
 			}
-		case "force":
+		case "force", "trackTimings":
 			if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1 {
 				return false
 			}

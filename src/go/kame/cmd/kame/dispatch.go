@@ -79,6 +79,7 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	defer finishLockPresentation()
 	dryRun := (command == "build" || command == "run" || command == "cache") && hasDryRun(args)
 	dashboardDryRun = dryRun
+	startTaskbar(errOut)
 	if command != "" && cliDiagnosticJSON {
 		cli.WriteInvocation(out, command, dryRun)
 	} else if dryRun {
@@ -126,6 +127,7 @@ func Run(args []string, in io.Reader, out io.Writer, errOut io.Writer) int {
 	if !cliDiagnosticJSON && command != "" && (command != "fmt" || formatHasResults) && (invocationCounts.Completed+invocationCounts.Failed+invocationCounts.Cancelled != 0) {
 		writeHumanSummary(errOut, command, status, int64(time.Since(startedAt))/1000000, invocationCounts)
 	}
+	finishTaskbar(errOut, status)
 	return status
 }
 

@@ -33,10 +33,12 @@ int renameat(int olddir, const char *oldname, int newdir, const char *newname) {
     int (*move)(int, const char *, int, const char *) = dlsym(RTLD_NEXT, "renameat");
     const char *requested = getenv("KAME_CLEAN_TEST_FAULT");
     const char *mode = suffix(newname, ".artifact") && requested && strcmp(requested, "retire-crash") ? take_fault(newdir) : NULL;
-    if (mode && (!strcmp(mode, "replace-capture") || !strcmp(mode, "replace-occupied"))) {
+    if (mode && (!strcmp(mode, "replace-capture") || !strcmp(mode, "replace-occupied") || !strcmp(mode, "replace-symlink"))) {
         // Substitute after Kame's no-follow stat but before its atomic capture.
         if (move(olddir, oldname, olddir, "test-original")) abort();
-        put_file(olddir, oldname, "replacement\n");
+        if (!strcmp(mode, "replace-symlink")) {
+            if (symlinkat("../input", olddir, oldname)) abort();
+        } else put_file(olddir, oldname, "replacement\n");
     }
     int result = move(olddir, oldname, newdir, newname);
     if (!result && mode) {

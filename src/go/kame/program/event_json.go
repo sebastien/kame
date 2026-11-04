@@ -90,6 +90,10 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 		e.Str("runtimeMS")
 		e.Int(event.RuntimeMS)
 	}
+	if event.Kind == TargetEstimate {
+		e.Str("estimateMS")
+		e.Int(event.EstimateMS)
+	}
 	if event.DisplayTruncated {
 		e.Str("displayTruncated")
 		e.Bool(true)
@@ -396,6 +400,9 @@ func encodeCause(e *json.Encoder, cause diagnostic.Cause) {
 }
 
 func eventType(kind EventKind) string {
+	if kind == TargetEstimate {
+		return "target-estimate"
+	}
 	if kind == ProcessSnapshot {
 		return "process-snapshot"
 	}

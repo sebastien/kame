@@ -68,6 +68,7 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 		p.Options.RemoteExecutors = slices.Append(a, p.Options.RemoteExecutors, host.ExecutorDescriptor{Name: cloneText(a, options.RemoteExecutors[i].Name), Version: cloneText(a, options.RemoteExecutors[i].Version)})
 	}
 	p.Options.ResolveTool = options.ResolveTool
+	p.Options.TrackTimings, p.Options.TimingNow, p.Options.TimingClock = options.TrackTimings, options.TimingNow, options.TimingClock
 	p.Options.Ownership, p.Options.OwnershipState = options.Ownership, options.OwnershipState
 	p.Options.LockResources, p.Options.UnlockResources, p.Options.ResourcesState = options.LockResources, options.UnlockResources, options.ResourcesState
 	p.Options.CaptureLimit = options.CaptureLimit

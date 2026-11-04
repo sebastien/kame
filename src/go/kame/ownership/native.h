@@ -9,7 +9,7 @@ int km_own_resource_fd(km_own_store *, so_String, int *);
 void km_own_fd_close(int);
 void km_own_close(km_own_store *);
 int km_own_root(km_own_store *, so_Slice);
-km_own_file *km_own_read(km_own_store *, so_String, bool, int *);
+km_own_file *km_own_read(km_own_store *, so_String, bool, bool, int *);
 int64_t km_own_size(km_own_file *);
 int km_own_stamp(km_own_file *, so_Slice);
 int km_own_bytes(km_own_file *, so_Slice);

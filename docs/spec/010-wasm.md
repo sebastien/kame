@@ -131,9 +131,15 @@ and authored byte `offset`, after initializing an empty source instance and
 before target execution or preparation. The portable compiler combines these
 fragments and maps diagnostic spans back to authored sources. No filesystem work
 occurs during compilation. Build and runner session descriptors carry `force`
-as 0 or 1, and `timeoutMS` and `retryCount` as nonnegative integers, into portable runtime options; `--force` bypasses file freshness and
-cached-task lookup on either host. Registration failures expose their complete diagnostic
-list through the target-event query, including in non-JSON presentation modes.
+as 0 or 1, and `timeoutMS` and `retryCount` as nonnegative integers, into portable
+runtime options; `--force` bypasses file freshness and cached-task lookup on
+either host. Registration failures expose their complete diagnostic list through
+the target-event query, including in non-JSON presentation modes.
+
+Optional `trackTimings` is 0 or 1. Timing collection defaults off for embedding
+clients; the CLI opts in. It uses the driver's existing monotonic tick clock and
+cache-get/put transport, without expression grants or new request kinds. Advisory
+`target-estimate` events carry `estimateMS`; they are not freshness evidence.
 
 Build source entries and session fragments may carry an outer-to-inner `includes`
 list. Each entry contains nonempty `source` and `label` strings (the including
@@ -279,6 +285,11 @@ This keeps executables and large artifact observations out of the instance heap.
 Raw library reads still return actual bytes. Existing hosts may continue sending
 bytes, including through custom callbacks. Kind 29 (`output-content`) uses the same protocol for declared
 build outputs, under internal build authority rather than expression read grants.
+For a final-component symbolic link, kind 29 instead completes with JSON
+`{"link":"<exact UTF-8 destination text>"}`, without following the link. This
+includes directory links, dangling links and loops. The engine records the string's
+value signature under the link-target aspect, distinct from regular-file content.
+Kinds 27 and 28 retain their ordinary followed-content semantics.
 Kind 28 (`tool-content`) uses the same protocol for resolved
 executable dependencies, without requiring an additional user read grant.
 Embedding hosts must service these requests as well as user file reads.

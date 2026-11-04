@@ -20,6 +20,8 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 	p := state.Program
 	entry := &p.Instances[state.Index]
 	if !entry.started || entry.startedGeneration != c.Generation() {
+		entry.timingReady, entry.timingPending, entry.timingExecuted = false, false, false
+		entry.timingEstimate = 0
 		p.releaseResources(entry)
 		freeStrings(p.Alloc, entry.OwnershipPaths)
 		entry.OwnershipPaths = nil
@@ -74,6 +76,9 @@ func produce(c *core.EngineContext, nodeID int64) core.ProducerResult {
 				return core.ProducerFailed
 			}
 		}
+	}
+	if timing := p.timingLoad(c, entry); timing != core.ProducerCompleted {
+		return timing
 	}
 	if entry.Rule == p.automaticCleanRule && p.AutomaticClean != nil {
 		if d := p.AutomaticClean(p.AutomaticCleanState, p); d.Code != "" {
@@ -264,6 +269,10 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 		p.reason(entry, "execute", "uncached-task", "uncached task", core.ResourceKey{}, "")
 	} else if entry.Rule.Kind == rule.CachedTaskRule && p.Options.CacheDisabled {
 		p.reason(entry, "execute", "proof-unverifiable", "cache disabled", core.ResourceKey{}, "")
+	}
+	entry.timingExecuted = commands != "" || len(effects) != 0 || len(writePaths) != 0
+	if entry.timingExecuted && p.timingEnabled(entry) {
+		entry.timingExecutedAt = p.timingNow()
 	}
 	if p.SessionPolicy && commands != "" && !entry.Kash {
 		allowed := false

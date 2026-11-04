@@ -197,6 +197,8 @@ tests/T004-20-runtime-computed-outputs-watch.sh	004	runtime	Native/WASM retained
 tests/T007-15-runtime-symlink-watch.sh	007	runtime	Native/WASM watch invalidation when a dangling symlink changes between absent destinations
 tests/T017-24-kash-defer-lifecycle.sh	017	kash	Default deferred-cleanup deadline, interruption, timeout and background-work reaping before finalizers
 tests/T036-03-cli-presentation-lifecycle.sh	036	cli	Native/WASM terminal resizing, cursor ownership, fallback and watch-cycle shutdown
+tests/T036-04-cli-osc-progress.sh	036	cli	Native/WASM OSC 9;4 cold/warm ETA progress, duration history, redirected output, failures and cancellation
 tests/T038-06-kash-recipe-lifecycle.sh	038	kash	Native/WASM direct Kash service ownership and retained executable-change watch invalidation
 tests/T006-10-runtime-environment-watch.sh	006	runtime	Native/WASM warm watch restores discovered file, task and definition dependencies and suppresses equal-result downstream generations
+tests/T006-11-runtime-symlink-outputs.sh	006	runtime	Native/WASM directory, dangling and looping symlink outputs, link identity reuse and replacement invalidation
 tests/T017-25-kash-recipe-deadlines.sh	017	kash	Native/WASM shared recipe deadlines and failed background-work cleanup
