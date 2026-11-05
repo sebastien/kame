@@ -436,6 +436,7 @@ uint32_t kame_wasm_instance_heap_peak(uint64_t handle) {
 }
 
 static so_String kame_wasm_request_payload(host_Request request) {
+  if (request.Kind == host_RequestRecordRead || request.Kind == host_RequestRecordClose) return host_PayloadText(request.Payload, so_str("data"));
   if (request.Kind == host_RequestPublishFile) return host_PayloadText(request.Payload, so_str("data"));
   if (request.Kind == host_RequestPlugin) return host_PayloadText(request.Payload, so_str("data"));
   if (request.Kind == host_RequestProcess || request.Kind == host_RequestPrepareOutputs) {
@@ -531,6 +532,10 @@ static uint32_t kame_wasm_request_kind(host_Request request) {
       return 26u;
     case host_RequestPublishFile:
       return 39u;
+    case host_RequestRecordRead:
+      return 40u;
+    case host_RequestRecordClose:
+      return 41u;
     default:
       return (uint32_t)request.Kind;
   }
@@ -805,6 +810,12 @@ __attribute__((export_name("kame_wasm_session_work_count")))
 uint32_t kame_wasm_session_work_count(uint64_t handle) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);
   return instance && instance->runtime ? (uint32_t)wasm_Runtime_SessionWorkCount(instance->runtime) : 0u;
+}
+
+__attribute__((export_name("kame_wasm_session_exit_status")))
+int32_t kame_wasm_session_exit_status(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  return instance && instance->runtime ? (int32_t)wasm_Runtime_SessionExitStatus(instance->runtime) : -1;
 }
 
 __attribute__((export_name("kame_wasm_session_work_kind")))
@@ -1642,6 +1653,33 @@ uint32_t kame_wasm_complete_json(uint64_t handle, uint64_t request, uint32_t dat
         diagnostic_Diagnostic_Clone(&diagnostic, instance->runtime->Alloc));
     kame_wasm_clear_completion(instance);
     return KAME_WASM_DIAGNOSTIC;
+  }
+  wasm_Runtime_Complete(instance->runtime, instance->pending, value, (diagnostic_Diagnostic){});
+  kame_wasm_clear_completion(instance);
+  return KAME_WASM_OK;
+}
+
+uint32_t kame_wasm_complete_capture(uint64_t handle, uint64_t request,
+                                  uint32_t metadata, uint32_t metadata_len,
+                                  uint32_t output, uint32_t output_len,
+                                  uint32_t error_output, uint32_t error_len) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  KAME_WASM_CHECKPOINT(instance, KAME_WASM_NO_MEMORY, false);
+  if (instance == NULL) return KAME_WASM_HANDLE_INVALID;
+  bool pending = false;
+  uint32_t status = kame_wasm_completion_target(instance, request, &pending);
+  if (status != KAME_WASM_OK) return status;
+  if (!pending) return KAME_WASM_OK;
+  if ((metadata_len && !metadata) || (output_len && !output) || (error_len && !error_output)) return KAME_WASM_STATE_INVALID;
+  if (metadata_len > INT32_MAX || output_len > INT32_MAX || error_len > INT32_MAX) return KAME_WASM_STATE_INVALID;
+  core_Value value = (core_Value){};
+  if (!wasm_CompletionValueFromJSON(instance->runtime->Alloc,
+      (so_Slice){(so_byte *)(uintptr_t)metadata, metadata_len, metadata_len}, &value) ||
+      !wasm_AppendCapturedBytes(instance->runtime->Alloc, &value,
+          (so_Slice){(so_byte *)(uintptr_t)output, output_len, output_len},
+          (so_Slice){(so_byte *)(uintptr_t)error_output, error_len, error_len})) {
+    core_Value_Free(&value, instance->runtime->Alloc);
+    return KAME_WASM_STATE_INVALID;
   }
   wasm_Runtime_Complete(instance->runtime, instance->pending, value, (diagnostic_Diagnostic){});
   kame_wasm_clear_completion(instance);

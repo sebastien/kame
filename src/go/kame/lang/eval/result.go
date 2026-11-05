@@ -12,12 +12,13 @@ import (
 )
 
 type Result struct {
-	Value      core.Value
-	Waiting    bool
-	Completed  bool
-	Returned   bool // call-local Kash control flow, consumed by its defn invocation
-	Stream     *core.Source
-	Diagnostic diagnostic.Diagnostic
+	Value        core.Value
+	Waiting      bool
+	Completed    bool
+	Returned     bool      // call-local Kash control flow, consumed by its defn invocation
+	LoopTransfer expr.Kind // KashBreak/KashContinue, consumed by the nearest loop.
+	Stream       *core.Source
+	Diagnostic   diagnostic.Diagnostic
 }
 
 func (r *Result) Free(a mem.Allocator) {

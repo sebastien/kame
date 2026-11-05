@@ -21,7 +21,7 @@ func parseKash(s *Script, offset int) {
 	s.Kash = true
 	p := kashParser{Script: s, Pos: offset}
 	s.Items = p.sequence(0)
-	validateValueScript(s)
+	validateKashComposition(s)
 }
 
 type kashParser struct {
@@ -31,6 +31,7 @@ type kashParser struct {
 	Unit      int
 	Channels  []string
 	Functions int
+	Loops     int
 }
 
 func (p *kashParser) sequence(level int) []ScriptItem {
@@ -80,6 +81,19 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			wordEnd++
 		}
 		word := text[start:wordEnd]
+		if word == "let" && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
+			d := p.eagerBinding(start, wordEnd)
+			if d == nil {
+				break
+			}
+			for i := range items {
+				if items[i].Kind == Definition && items[i].Definition.Name == d.Name {
+					s.error(start, p.Pos, "duplicate Kash definition name")
+				}
+			}
+			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Definition, Span: d.Span, Definition: d})
+			continue
+		}
 		if word == "defn" && definition.KashHeaderEnd(s.Alloc, s.Source, start) == 0 {
 			if !leading {
 				s.error(start, wordEnd, "function header must occupy its own line")
@@ -131,7 +145,7 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			s.error(start, wordEnd, "orphan Kash case keyword")
 			break
 		}
-		if word == "if" || word == "match" || word == "for" || word == "while" {
+		if word == "if" || word == "match" || word == "for" || word == "while" || word == "with" {
 			lineStart := start
 			for lineStart > 0 && text[lineStart-1] != '\n' {
 				lineStart--
@@ -142,7 +156,9 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 				}
 			}
 			var e *expr.Expr
-			if word == "match" {
+			if word == "with" {
+				e = p.withBlock(level, start, wordEnd)
+			} else if word == "match" {
 				e = p.matchBlock(level, start, wordEnd)
 			} else if word == "for" {
 				e = p.forBlock(level, start, wordEnd)
@@ -191,8 +207,19 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			if end < len(text) && text[end] != '\n' && text[end] != ';' && text[end] != '#' {
 				s.error(end, end+1, "unexpected Kash definition value; expected statement separator")
 			}
-		} else if word == "return" {
-			e := p.returnStatement(start, wordEnd)
+		} else if word == "break" || word == "continue" {
+			kind := expr.KashBreak
+			if word == "continue" {
+				kind = expr.KashContinue
+			}
+			e := p.loopTransferStatement(start, wordEnd, kind)
+			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
+		} else if word == "return" || word == "exit" {
+			kind := expr.KashReturn
+			if word == "exit" {
+				kind = expr.KashExit
+			}
+			e := p.transferStatement(start, wordEnd, kind)
 			items = slices.Append(s.Alloc, items, ScriptItem{Kind: Command, Span: e.Span, Expression: e})
 		} else if word == "defer" {
 			p.Pos = wordEnd
@@ -205,6 +232,18 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 			}
 			if p.Pos+6 <= len(text) && text[p.Pos:p.Pos+6] == "return" && (p.Pos+6 == len(text) || space(text[p.Pos+6])) {
 				s.error(p.Pos, p.Pos+6, "cannot defer return")
+				break
+			}
+			if p.Pos+4 <= len(text) && text[p.Pos:p.Pos+4] == "exit" && (p.Pos+4 == len(text) || space(text[p.Pos+4]) || text[p.Pos+4] == ';') {
+				s.error(p.Pos, p.Pos+4, "cannot defer exit")
+				break
+			}
+			deferredEnd := p.Pos
+			for deferredEnd < len(text) && !space(text[deferredEnd]) && text[deferredEnd] != '\n' && text[deferredEnd] != ';' {
+				deferredEnd++
+			}
+			if text[p.Pos:deferredEnd] == "break" || text[p.Pos:deferredEnd] == "continue" {
+				s.error(p.Pos, deferredEnd, "cannot defer a loop transfer")
 				break
 			}
 			var part expr.Prefix
@@ -378,7 +417,13 @@ func (p *kashParser) conditionalBlock(level int, start int) *expr.Expr {
 			}
 		}
 		p.Pos = nextLine(text, end)
+		if e.Kind == expr.KashWhile {
+			p.Loops++
+		}
 		p.branchBody(branch, level+1)
+		if e.Kind == expr.KashWhile {
+			p.Loops--
+		}
 		branch.Span.End, e.Span.End = p.Pos, p.Pos
 		if e.Kind == expr.KashWhile {
 			break
@@ -422,11 +467,17 @@ func (p *kashParser) forBlock(level int, start int, wordEnd int) *expr.Expr {
 	for pos < len(text) && space(text[pos]) {
 		pos++
 	}
-	if pos+2 >= len(text) || text[pos:pos+2] != "in" || !space(text[pos+2]) {
-		s.error(pos, pos, "expected in followed by one list expression")
+	records := pos+4 < len(text) && text[pos:pos+4] == "from" && space(text[pos+4])
+	if !records && (pos+2 >= len(text) || text[pos:pos+2] != "in" || !space(text[pos+2])) {
+		s.error(pos, pos, "expected in LIST or from SOURCE FRAME")
 		return e
 	}
-	pos += 2
+	if records {
+		e.Kind = expr.KashRecords
+		pos += 4
+	} else {
+		pos += 2
+	}
 	for pos < len(text) && space(text[pos]) {
 		pos++
 	}
@@ -444,6 +495,23 @@ func (p *kashParser) forBlock(level int, start int, wordEnd int) *expr.Expr {
 	for end < len(text) && space(text[end]) {
 		end++
 	}
+	if records {
+		frameStart := end
+		for end < len(text) && !space(text[end]) && text[end] != '\n' && text[end] != '#' {
+			end++
+		}
+		frame := text[frameStart:end]
+		if frame == ":lines" {
+			e.RecordFrame = ":lines"
+		} else if frame == ":nul" {
+			e.RecordFrame = ":nul"
+		} else {
+			s.error(frameStart, end, "record loop frame must be literal :lines or :nul")
+		}
+		for end < len(text) && space(text[end]) {
+			end++
+		}
+	}
 	if end < len(text) && text[end] != '\n' && text[end] != '#' {
 		s.error(end, end+1, "loop header must occupy its own line")
 	}
@@ -451,13 +519,19 @@ func (p *kashParser) forBlock(level int, start int, wordEnd int) *expr.Expr {
 		end++
 	}
 	p.Pos = nextLine(text, end)
+	p.Loops++
 	p.branchBody(branch, level+1)
+	p.Loops--
 	for i := range branch.Body {
-		if branch.Body[i].Kind == expr.KashDefinition && branch.Body[i].Text == name {
+		if (branch.Body[i].Kind == expr.KashDefinition || branch.Body[i].Kind == expr.KashLet) && branch.Body[i].Text == name {
 			s.error(branch.Body[i].Span.Start, branch.Body[i].Span.End, "body definition conflicts with loop binding")
 		}
 	}
-	branch.Text = owned(s.Alloc, "for "+name+" in")
+	if records {
+		branch.Text = owned(s.Alloc, "for "+name+" from")
+	} else {
+		branch.Text = owned(s.Alloc, "for "+name+" in")
+	}
 	branch.TextOwned = true
 	e.Span.End = p.Pos
 	return e
@@ -472,6 +546,14 @@ func (p *kashParser) branchBody(branch *expr.Expr, level int) {
 		var statement *expr.Expr
 		if item.Kind == Definition {
 			d := item.Definition
+			if d.Eager {
+				statement = d.Expression
+				d.Expression = nil
+				definition.Free(s.Alloc, d)
+				branch.Body = slices.Append(s.Alloc, branch.Body, statement)
+				hasStatement = true
+				continue
+			}
 			statement = mem.Alloc[expr.Expr](s.Alloc)
 			statement.Kind, statement.Text, statement.Bool, statement.Span = expr.KashDefinition, d.Name, d.Function, d.Span
 			statement.Items = slices.Append(s.Alloc, statement.Items, d.Expression)

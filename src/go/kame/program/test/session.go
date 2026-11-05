@@ -89,6 +89,48 @@ func TestSessionCannotCompleteSyntaxAcrossFragments(t *testing.T) {
 	}
 }
 
+func TestSessionSourceDirectoryUsesAuthoredTreesNotLabelsOrGeneratedSpans(t *testing.T) {
+	a := t.Allocator()
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	fragments := []program.Fragment{
+		{Name: "display-label", SourceDirectory: "/sdk/library", Lang: "km", Text: "(assets) = (source-dir)\n"},
+		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(assets)"},
+		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(eval \"(assets)\")"},
+		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "(eval \"(source-dir)\")"},
+		{Name: "caller", SourceDirectory: "/project", Lang: "expr", Text: "((eval \"([] (source-dir))\"))"},
+		{Name: "/pretend/file.kash", Lang: "expr", Text: "(source-dir)"},
+	}
+	compiled := program.CompileSession(a, fragments, registry, program.Options{Directory: "/caller"})
+	defer compiled.Free(a)
+	if compiled.Session == nil {
+		t.Fatal("source-directory session compilation failed")
+		return
+	}
+	s := compiled.Session
+	defer s.Free()
+	for i := range s.Work {
+		start := s.Start(i)
+		if start.Handle == nil {
+			t.Fatal("source-directory work was not scheduled")
+			return
+		}
+		h := start.Handle
+		for j := 0; j < 100 && !h.Node.Current && h.Node.Diagnostic.Code == ""; j++ {
+			s.Program.Tick(0)
+		}
+		if i < 2 {
+			if !h.Node.Current || h.Node.Latest.Text != "/sdk/library" {
+				t.Error("function borrowed caller cwd/source identity: " + h.Node.Diagnostic.Code)
+			}
+		} else if h.Node.Diagnostic.Code != "SEL_NO_CONTEXT" {
+			t.Error("generated source or display label acquired a file loading base")
+		}
+		h.Free()
+	}
+}
+
 func TestSessionScriptDisplayIsExplicit(t *testing.T) {
 	a := t.Allocator()
 	registry := eval.NewRegistry(a)

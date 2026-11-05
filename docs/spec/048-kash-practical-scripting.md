@@ -182,7 +182,7 @@ create none. Initializer work executes once per reached occurrence, not once per
 resumption. Captured scopes retain initialized values under normal ownership rules.
 
 `BINDING_UNINITIALIZED` is a nonrecoverable binding-validation failure, not
-`REF_MISSING`. Kash acceptance/recovery, `??`, and Kame's unknown-reference `?`
+`REF_MISSING`. Kash acceptance/recovery, `??`, and Kame's missing-lookup `?`
 cannot suppress it or select a fallback, including through lazy definitions or
 functions. Command conditions propagate it rather than treating it as false.
 Ordinary lazy failure memoization remains unchanged.
@@ -515,7 +515,7 @@ Cross-feature checks must also cover:
   bytes seen after a record reader breaks. Check handoffs both within a boundary
   and to the embedding caller after it returns.
 - Direct and indirect uninitialized reads retain `BINDING_UNINITIALIZED` through
-  `??`, unknown-reference recovery, and command conditions without running fallback
+  `??`, missing-lookup recovery, and command conditions without running fallback
   effects or treating the error as false; include lazy proxies and self-reference.
 - Relative stage cwd overrides compose with nested `with` scopes for authored
   graphs and `run!`, rather than rebasing at the invocation directory.

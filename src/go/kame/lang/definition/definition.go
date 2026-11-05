@@ -20,6 +20,7 @@ type Definition struct {
 	Name         string
 	NameSpan     source.Span
 	Function     bool
+	Eager        bool
 	Default      bool
 	Contribution bool
 	// Aggregate is evaluator-owned; Expression holds ordered operand expressions.
@@ -367,6 +368,9 @@ func FormatCompact(a mem.Allocator, d *Definition) string {
 }
 
 func formatDefinition(a mem.Allocator, d *Definition, compact bool) string {
+	if d.Eager {
+		return expr.Compact(a, d.Expression)
+	}
 	if d.Expression != nil && d.Expression.Kind == expr.KashFunction {
 		return expr.FormatKashControl(a, d.Expression, "\t")
 	}

@@ -5,7 +5,7 @@ idea of named targets and shell recipes, but it is not a Makefile parser or a
 drop-in replacement for GNU Make.
 
 Keep the existing `Makefile` while adding `Makefile.kmk`. Kame discovers only
-Kame sources: `Makefile.kmk`, `make.kmk`, and `src/kmk/main.kmk`, in that order.
+Kame sources: `Kamefile`, `Makefile.kmk`, `make.kmk`, and `src/kmk/main.kmk`, in that order.
 
 ## Translate the build model first
 

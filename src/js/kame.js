@@ -15,10 +15,16 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants as osConstants, tmpdir } from 'node:os';
 import { Socket } from 'node:net';
+import { isatty } from 'node:tty';
 import process, { argv, env, stderr, stdout } from 'node:process';
 
 // Numeric graph kinds are part of the stable WASM ABI.
 const graphKinds = Object.freeze({ inputs: 0, outputs: 1, span: 2, planRoots: 3, list: 4, listReport: 5 });
+
+// The native cli.BuildSourceCandidates list is authoritative; keep this mirror aligned.
+const BUILD_SOURCE_CANDIDATES = ['Kamefile', 'Makefile.kmk', 'make.kmk', 'src/kmk/main.kmk'];
+const BUILD_SOURCE_LIST = BUILD_SOURCE_CANDIDATES.join(', ');
+const BUILD_NO_SOURCE_MESSAGE = `no build source found (tried ${BUILD_SOURCE_LIST})`;
 
 // Children run in their own process group so a signal terminates the whole
 // tree, and a forced termination reports 128 plus the signal number.
@@ -1607,7 +1613,7 @@ class Module {
     // Copy and detach before yielding: another completion can change the ABI's
     // current request while public output waits for its reader.
     try {
-      if (kind !== 23) await waitOutputReady(context.signal);
+      if (kind !== 23 && kind !== 41) await waitOutputReady(context.signal);
       return await this.dispatch(instance, request, kind, payload, data, context, key, record, rawRequest);
     } catch (error) {
       const expired = cleanupMS !== 0 && context.signal?.aborted;
@@ -1621,6 +1627,59 @@ class Module {
 
   async dispatch(instance, request, kind, payload, data, context, key, record, rawRequest) {
     const grants = context.grants;
+    if (kind === 40 || kind === 41) {
+      let input;
+      try { input = JSON.parse(payload); } catch { return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid record reader'); }
+      if (!Number.isSafeInteger(input?.reader) || input.reader <= 0) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid record reader identity');
+      this.recordReaders ??= new Map();
+      const owner = `${instance}:${input.reader}`;
+      if (kind === 41) {
+        this.closeRecordReader(owner);
+        return this.exports.kame_wasm_complete_nil(instance, request);
+      }
+      const stdin = input.stdin === true;
+      if ((input.stdin !== undefined && typeof input.stdin !== 'boolean') || typeof input.path !== 'string' || input.path.includes('\0') || (stdin ? input.path !== '' : !input.path) || ![0, 10].includes(input.delimiter)) return this.completeFailure(instance, request, 'EXPR_INVALID', 'invalid record source or delimiter');
+      const name = stdin ? '' : resolve(context.cwd ?? process.cwd(), filesystemPath(input.path));
+      if (!stdin && (!grants.read || !pathGranted(name, context.readRoots))) return this.deny(instance, request, 'read');
+      if (stdin && (!Number.isSafeInteger(context.inputFD) || context.inputFD < 0)) return this.completeFailure(instance, request, 'FEATURE_UNSUP', 'no invocation input was supplied');
+      const claim = stdin ? this.stdinRecordReaders?.get(context.inputFD) : undefined;
+      if (claim && claim !== owner) return this.completeFailure(instance, request, 'KASH_DOUBLE_CONSUME', 'invocation input already has an active record reader');
+      let cursor = this.recordReaders.get(owner);
+      if (cursor && (cursor.name !== name || cursor.delimiter !== input.delimiter || Boolean(cursor.stdin) !== stdin || (stdin && cursor.inputFD !== context.inputFD))) return this.completeFailure(instance, request, 'EXPR_INVALID', 'record reader source changed');
+      try {
+        if (!cursor) {
+          if (stdin) cursor = this.openStdinRecord(context.inputFD, input.delimiter, owner);
+          else {
+            const fd = openSync(name, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
+            try { if (!fstatSync(fd).isFile()) throw new Error('record source must be a regular file'); }
+            catch (error) { closeSync(fd); throw error; }
+            cursor = { fd, name, delimiter: input.delimiter, offset: 0, buffer: Buffer.alloc(65537) };
+          }
+          this.recordReaders.set(owner, cursor);
+        }
+        let size = stdin ? await this.readStdinRecord(cursor, context) : 0;
+        while (!stdin && size < cursor.buffer.length) {
+          const count = readSync(cursor.fd, cursor.buffer, size, Math.min(4096, cursor.buffer.length - size), cursor.offset);
+          if (count === 0) break;
+          const end = cursor.buffer.indexOf(input.delimiter, size);
+          if (end >= size && end < size + count) {
+            cursor.offset += end - size + 1;
+            size = end + 1;
+            break;
+          }
+          size += count;
+          cursor.offset += count;
+        }
+        if (size > 65536) return this.completeFailure(instance, request, 'KASH_RECORD_LIMIT', 'record exceeds 64 KiB');
+        if (size === 0) return this.exports.kame_wasm_complete_nil(instance, request);
+        const pointer = this.scratch('recordBytes', size);
+        new Uint8Array(this.exports.memory.buffer, pointer, size).set(cursor.buffer.subarray(0, size));
+        return this.exports.kame_wasm_complete_text(instance, request, pointer, size);
+      } catch (error) {
+        this.closeRecordReader(owner);
+        return this.completeFailure(instance, request, ['FEATURE_UNSUP', 'EXEC_CANCELLED', 'RECIPE_TIMEOUT', 'KASH_RECORD_LIMIT'].includes(error.code) ? error.code : 'FS_ERR', `cannot read record source: ${error.message}`);
+      }
+    }
     if (kind === 39) {
       if (!grants.read || !grants.write) return this.deny(instance, request);
       let paths;
@@ -1709,7 +1768,8 @@ class Module {
     }
     if (kind === 19) return this.completeJSON(instance, request, resourceExists(payload));
     if (kind === 18) {
-      const resolved = resolveTool(payload, [], context.toolCache);
+      // The engine shares this observation; a new request is revalidation.
+      const resolved = resolveTool(payload);
       if (!resolved) return this.completeFailure(instance, request, 'TOOL_MISSING', `cannot resolve tool: ${payload}`);
       return this.completeJSON(instance, request, resolved);
     }
@@ -1824,6 +1884,7 @@ class Module {
       const stages = kind === 13 ? [decoded] : kind === 14 ? decoded : decoded.stages;
       const redirections = kind === 15 || kind === 32 || kind === 33 || kind === 34 || kind === 35 || kind === 36 || kind === 37 || kind === 38 ? decoded : { input: '', output: '', append: false };
       redirections.wireKind = kind;
+      if (redirections.capture && !this.exports.kame_wasm_complete_capture) return this.completeFailure(instance, request, 'FEATURE_UNSUP', 'host has no binary capture completion');
       // Every declared destination must be a well-formed path covered by the
       // matching grant. The helper returns the terminal result to propagate, or
       // null when the path is allowed.
@@ -1870,7 +1931,14 @@ class Module {
       } : null;
       const completion = await runArgvCapture(stages, { ...context, ...redirections, onSnapshot, discardStdout: serviceReadyProbe, onStarted: () => { this.processStarted(instance, detached ? request : undefined); return this.startedProcessGroup(instance, context, rawRequest); }, onStdout: redirections.stream ? (chunk) => { this.processStream(instance, false, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null, onStderr: serviceReadyProbe ? () => {} : context.streaming ? (chunk) => { this.processStream(instance, true, chunk, detached ? request : undefined); this.drainEvents(instance, context); } : null });
       if (completion.ok) {
-        if (!redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
+        if (redirections.capture) {
+          const { stdout, stderr, ...metadata } = completion.value;
+          const data = this.write(JSON.stringify(metadata), 'captureMetadata');
+          const output = this.write(stdout ?? Buffer.alloc(0), 'captureOutput');
+          const error = this.write(stderr ?? Buffer.alloc(0), 'captureError');
+          return this.exports.kame_wasm_complete_capture(instance, request, data.pointer, data.length, output.pointer, output.length, error.pointer, error.length);
+        }
+        if (!redirections.capture && !redirections.stream && completion.value.status === 0 && completion.value.signal === 0) {
           const encoded = this.write(completion.value.stdout, 'captureStdout');
           const status = this.exports.kame_wasm_complete_text(instance, request, encoded.pointer, encoded.length);
           if (status !== 0) throw diagnosticError(this.instanceDiagnostic(instance), 'HOST_FAIL');
@@ -2228,10 +2296,63 @@ class Module {
       this.drainExpressionEffects(instance);
     }
     const prefix = `${instance}:`;
+    for (const owner of this.recordReaders?.keys() ?? []) if (owner.startsWith(prefix)) this.closeRecordReader(owner);
     await Promise.all([...this.cacheWrites].filter(([owner]) => owner.startsWith(prefix)).map(([, writing]) => writing.catch(() => {})));
     await Promise.all([...this.cacheLeases.keys()].filter((owner) => owner.startsWith(prefix)).map((owner) => this.releaseCacheOwner(owner)));
     for (const owner of this.processGroups.keys()) if (owner.startsWith(prefix)) this.processGroups.delete(owner);
     return this.resultDiagnostic(instance);
+  }
+
+  closeRecordReader(owner) {
+    const cursor = this.recordReaders?.get(owner);
+    if (cursor) {
+      cursor.closed = true;
+      this.recordReaders.delete(owner);
+      if (cursor.stdin && this.stdinRecordReaders?.get(cursor.inputFD) === owner) this.stdinRecordReaders.delete(cursor.inputFD);
+      if (cursor.owned !== false) closeSync(cursor.fd);
+    }
+  }
+
+  openStdinRecord(inputFD, delimiter, owner) {
+    const stats = fstatSync(inputFD);
+    let fd = inputFD, owned = false, eof = false;
+    if (stats.isFIFO() && process.platform === 'linux') {
+      // Opening procfs creates an independent nonblocking file description for
+      // the same pipe. dup() would change the caller's shared status flags.
+      try { fd = openSync(`/proc/self/fd/${inputFD}`, fsConstants.O_RDONLY | fsConstants.O_NONBLOCK); owned = true; }
+      catch { throw Object.assign(new Error('cannot create a cancellation-safe pipe reader'), { code: 'FEATURE_UNSUP' }); }
+    } else if (!stats.isFile()) {
+      try { eof = stats.isCharacterDevice() && process.platform === 'linux' && realpathSync(`/proc/self/fd/${inputFD}`) === '/dev/null'; } catch {}
+      if (!eof) throw Object.assign(new Error('this Node stdin handle has no cancellation-safe reader (sockets and non-Linux pipes are unsupported)'), { code: 'FEATURE_UNSUP' });
+    }
+    this.stdinRecordReaders ??= new Map();
+    this.stdinRecordReaders.set(inputFD, owner);
+    return { fd, owned, eof, name: '', stdin: true, inputFD, delimiter, buffer: Buffer.alloc(65537), size: 0, closed: false };
+  }
+
+  async readStdinRecord(cursor, context) {
+    const deadline = context.timeoutMS > 0 ? performance.now() + context.timeoutMS : Infinity;
+    // ponytail: single-byte reads preserve every byte after a delimiter. A
+    // bounded peek transport can replace this if throughput becomes a problem.
+    for (;;) {
+      await new Promise((resolve) => setImmediate(resolve));
+      if (cursor.closed || context.signal?.aborted) throw Object.assign(new Error('record input cancelled'), { code: 'EXEC_CANCELLED' });
+      if (performance.now() >= deadline) throw Object.assign(new Error('record input timed out'), { code: 'RECIPE_TIMEOUT' });
+      if (cursor.eof) return 0;
+      for (let i = 0; i < 4096; i++) {
+        let count;
+        try { count = readSync(cursor.fd, cursor.buffer, cursor.size, 1, null); }
+        catch (error) {
+          if (!['EAGAIN', 'EWOULDBLOCK', 'EINTR'].includes(error.code)) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          break;
+        }
+        if (count === 0) { cursor.eof = true; const size = cursor.size; cursor.size = 0; return size; }
+        const byte = cursor.buffer[cursor.size++];
+        if (cursor.size > 65536) throw Object.assign(new Error('record exceeds 64 KiB'), { code: 'KASH_RECORD_LIMIT' });
+        if (byte === cursor.delimiter) { const size = cursor.size; cursor.size = 0; return size; }
+      }
+    }
   }
 
   resultDiagnostic(instance) {
@@ -2728,7 +2849,7 @@ class Module {
     invocationCancellations.add(cancellation);
     context.concurrent = true;
     context.signal = cancellation.signal;
-    let hostError, primaryError, primaryDiagnostic;
+    let hostError, primaryError, primaryDiagnostic, terminationStatus = -1;
     try {
       if (this.exports.kame_wasm_source_compile(instance, 0, 0) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
       this.registerPlugins(instance, context);
@@ -2742,7 +2863,7 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, trackTimings: context.api === true ? 0 : 1, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
+      const descriptor = this.write(JSON.stringify({ fragments, dataInput: Number.isSafeInteger(context.inputFD) && context.inputFD >= 0 ? 1 : 0, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, trackTimings: context.api === true ? 0 : 1, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');
@@ -2773,6 +2894,8 @@ class Module {
             await Promise.race([...pending, new Promise((resolve) => setTimeout(resolve, 10))]);
           }
         }
+        const exitStatus = this.exports.kame_wasm_session_exit_status?.(instance) ?? -1;
+        if (exitStatus >= 0) { terminationStatus = exitStatus; return exitStatus; }
         const bytes = this.copyResult(instance);
         if (!inv.json && !inv.dryRun && kind === 2) stdout.write(bytes);
         else if (!inv.json && !inv.dryRun && kind === 1) last = bytes;
@@ -2795,7 +2918,8 @@ class Module {
       try {
         try {
           const diagnostic = await this.cleanupInstance(instance, context);
-          if (diagnostic && primaryError) primaryError.diagnostics = [{ ...diagnostic, code: primaryError.code, message: primaryError.message }];
+          if (diagnostic?.termination && terminationStatus >= 0) { /* Reported by the exited work; preserve its terminal status. */ }
+          else if (diagnostic && primaryError) primaryError.diagnostics = [{ ...diagnostic, code: primaryError.code, message: primaryError.message }];
           else if (diagnostic && !interruptedStatus) throw Object.assign(new Error(diagnostic.message), { code: diagnostic.code, diagnostics: [diagnostic] });
         }
         catch (error) { if (!primaryError && !interruptedStatus) throw error; reportWatchError(error); }
@@ -3523,10 +3647,31 @@ function runArgvCapture(stages, context) {
     return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid process argv' });
   }
   const setups = context.setup ?? [];
+  if (!Array.isArray(setups)) return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid stage setup' });
+  const capture = context.capture;
+  if (capture !== undefined && (!capture || typeof capture !== 'object' || Array.isArray(capture) || stages.length !== 1 || topology || typeof capture.stdout !== 'boolean' || typeof capture.stderr !== 'boolean' || (!capture.stdout && !capture.stderr) || !Number.isSafeInteger(capture.stdoutLimit) || capture.stdoutLimit <= 0 || capture.stdoutLimit > 2147483647 || !Number.isSafeInteger(capture.stderrLimit) || capture.stderrLimit <= 0 || capture.stderrLimit > 2147483647 || (capture.stdout && (context.output || setups.some((setup) => setup.output))) || (capture.stderr && setups.some((setup) => setup.error || setup.errorMode)))) return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid or conflicting capture policy' });
+  if (!Array.isArray(setups) || setups.some((setup) => setup.acceptExit !== undefined && (!Array.isArray(setup.acceptExit) || setup.acceptExit.some((status) => !Number.isInteger(status) || status < 1 || status > 255) || new Set(setup.acceptExit).size !== setup.acceptExit.length))) return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid accepted exits' });
+  const effectiveStatus = (result, i) => result.effectiveStatus ?? (result.signal ? 128 + result.signal : setups[i]?.acceptExit?.includes(result.status) ? 0 : result.status);
+  const inputMode = context.inputMode ?? 'closed';
+  const inputRoot = context.inputRoot ?? 0;
+  if (!['closed', 'invocation'].includes(inputMode) || (inputMode === 'invocation' && (!Number.isSafeInteger(context.inputFD) || context.inputFD < 0 || !Number.isSafeInteger(inputRoot) || inputRoot < 0 || inputRoot >= stages.length || context.input || setups[inputRoot]?.input || (topology ? topology.kinds[inputRoot] || topology.inputs[inputRoot].some((edge) => !(topology.edges[edge][2] ?? 0)) : inputRoot !== 0)))) {
+    return Promise.resolve({ ok: false, code: 'FEATURE_UNSUP', message: 'unsupported or conflicting invocation input' });
+  }
+  // Validate the borrowed descriptor before opening/truncating any output.
+  if (inputMode === 'invocation') {
+    try { fstatSync(context.inputFD); }
+    catch { return Promise.resolve({ ok: false, code: 'HOST_FAIL', message: 'invalid invocation input descriptor' }); }
+  }
   if (!Array.isArray(setups) || (setups.length !== 0 && setups.length !== stages.length) || setups.some((setup) => typeof setup.cwd !== 'string' || setup.cwd.includes('\0') || !Number.isSafeInteger(setup.timeoutMS) || setup.timeoutMS < 0 || !Array.isArray(setup.environment) || setup.environment.some((entry) => typeof entry !== 'string' || entry.includes('\0') || !/^[A-Za-z_][A-Za-z0-9_]*=/.test(entry)) || (setup.errorMode !== undefined && (!Number.isSafeInteger(setup.errorMode) || setup.errorMode < 0 || setup.errorMode > 3)) || (setup.errorMode === 1 && (typeof setup.error !== 'string' || setup.error.length === 0 || setup.error.includes('\0'))))) {
     return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid stage setup' });
   }
   return new Promise((resolveRun, rejectRun) => {
+    const captured = { stdout: [], stderr: [] }, capturedBytes = { stdout: 0, stderr: 0 };
+    const retainCaptured = (name, chunk) => {
+      capturedBytes[name] += chunk.length;
+      if (capturedBytes[name] > capture[`${name}Limit`]) stop('CAPTURE_LIMIT', 'captured stream exceeded its byte limit');
+      else if (failure === null) captured[name].push(chunk);
+    };
     const childEnv = context.environmentExact ? {} : { ...process.env };
     for (const entry of context.environment ?? []) {
       const at = entry.indexOf('=');
@@ -3651,7 +3796,15 @@ function runArgvCapture(stages, context) {
       }
       if (graphFailure !== null) { status = graphFailure.signal ? 128 + graphFailure.signal : graphFailure.status; signal = graphFailure.signal; }
       // Let the portable evaluator classify exit failure before decoding output.
-      const terminal = { status, signal, stages: results, stdout: '' };
+      let effective = 0, effectiveSignal = 0;
+      for (let i = 0; i < results.length; i++) if (effectiveStatus(results[i], i)) { effective = effectiveStatus(results[i], i); effectiveSignal = results[i].signal; }
+      if (graphFailure !== null) { effective = graphFailure.effectiveStatus ?? (graphFailure.signal ? 128 + graphFailure.signal : graphFailure.status); effectiveSignal = graphFailure.signal; }
+      const terminal = { status, signal, effectiveStatus: effective, effectiveSignal, stages: results, stdout: '' };
+      if (capture) {
+        terminal.stdout = capture.stdout ? Buffer.concat(captured.stdout) : null;
+        terminal.stderr = capture.stderr ? Buffer.concat(captured.stderr) : null;
+        resolveRun({ ok: true, value: terminal }); return;
+      }
       if (topology) terminal.edgeMetrics = topology.edgeMetrics;
       if (context.stream) { resolveRun({ ok: true, value: terminal }); return; }
       let output;
@@ -3669,7 +3822,8 @@ function runArgvCapture(stages, context) {
         const inputEdge = topology?.inputs[i].find((edge) => !(topology.edges[edge][2] ?? 0)), outputEdge = topology?.outputs[i][0];
         const operands = topology ? topology.inputs[i].filter((edge) => topology.edges[edge][2] > 0) : [];
         for (const edge of operands) args[topology.edges[edge][2]] = operandFiles.names[argumentEdges.indexOf(edge)];
-        const childInput = topology ? inputEdge === undefined ? stageInputs[i] ?? 'ignore' : pipes[inputEdge].read : i === 0 ? input ?? 'ignore' : process.platform === 'win32' ? 'pipe' : pipes[i - 1].read;
+        const defaultInput = inputMode === 'invocation' && i === inputRoot ? context.inputFD : 'ignore';
+        const childInput = topology ? inputEdge === undefined ? stageInputs[i] ?? defaultInput : pipes[inputEdge].read : i === 0 ? input ?? defaultInput : process.platform === 'win32' ? 'pipe' : pipes[i - 1].read;
         let childOutput = topology ? outputEdge === undefined ? stageOutputs[i] ?? 'pipe' : pipes[outputEdge].write : i === stages.length - 1 ? output ?? 'pipe' : process.platform === 'win32' ? 'pipe' : pipes[i].write;
         const outputTarget = outputEdge === undefined ? undefined : topology.edges[outputEdge][1];
         const targetKind = outputTarget === undefined ? '' : topology.kinds[outputTarget];
@@ -3730,12 +3884,13 @@ function runArgvCapture(stages, context) {
         timers.push(cancel);
         child.once('exit', cancel);
         const liveStderr = mode === 0;
-        if (child.stderr !== null && liveStderr) publishReader(child.stderr, (chunk) => { publish((bytes) => { if (context.onStderr) context.onStderr(bytes); else stderr.write(bytes); }, chunk); }, () => failure !== null || context.signal?.aborted);
+        if (child.stderr !== null && liveStderr) publishReader(child.stderr, (chunk) => { if (capture?.stderr) retainCaptured('stderr', chunk); else publish((bytes) => { if (context.onStderr) context.onStderr(bytes); else stderr.write(bytes); }, chunk); }, () => failure !== null || context.signal?.aborted);
         child.once('error', () => stop('HOST_FAIL', 'cannot start process'));
         child.once('close', (status, signalName) => {
           results[i] = { status: status ?? 0, signal: osConstants.signals[signalName] ?? 0, outcome: 0 };
-          liveStates[i] = status || signalName ? 5 : 4;
-          if (topology && failure === null && graphFailure === null && (results[i].status || results[i].signal) && (!topology.failurePolicy || results[i].signal)) {
+          results[i].effectiveStatus = effectiveStatus(results[i], i);
+          liveStates[i] = results[i].effectiveStatus ? 5 : 4;
+          if (topology && failure === null && graphFailure === null && results[i].effectiveStatus && (!topology.failurePolicy || results[i].signal)) {
             stopGraph(results[i]);
           }
           remaining--;
@@ -3744,6 +3899,7 @@ function runArgvCapture(stages, context) {
         const stdoutStream = shared ? new Socket({ fd: shared.read, readable: true, writable: false }) : child.stdout;
         if (shared) operatorStreams.push(stdoutStream);
         const receive = (chunk) => {
+          if (capture?.stdout) { retainCaptured('stdout', chunk); return; }
           if (context.stream) { publish(context.onStdout, chunk); return; }
           if (context.discardStdout) return;
           length += chunk.length;
@@ -3793,7 +3949,7 @@ function runArgvCapture(stages, context) {
         });
       }
       if (topology && failure === null) for (let i = 0; i < stages.length; i++) if (topology.kinds[i]) {
-        let workerResult = { status: 0, signal: 0, outcome: 0 };
+        let workerResult = { status: 0, signal: 0, outcome: 0, effectiveStatus: 0 };
         const worker = (record, writer, next) => {
           if (failure !== null || graphFailure !== null) return;
           const args = stages[i], configuration = configurations[i];
@@ -3818,7 +3974,9 @@ function runArgvCapture(stages, context) {
           child.once('exit', () => { void signalProcessTree(child, 'SIGKILL'); });
           child.once('close', (status, signalName) => {
             const result = { status: status ?? 0, signal: osConstants.signals[signalName] ?? 0, outcome: 0 };
-            if (result.status || result.signal) { workerResult = result; if (!topology.failurePolicy || result.signal) { results[i] = result; liveStates[i] = 5; stopGraph(result); } }
+            const effective = effectiveStatus(result, i);
+            if (result.status || result.signal) workerResult = { ...result, effectiveStatus: effective || workerResult.effectiveStatus };
+            if (effective && (!topology.failurePolicy || result.signal)) { results[i] = workerResult; liveStates[i] = 5; stopGraph(workerResult); }
             children.splice(children.indexOf(child), 1);
             closed = true; remaining--; advance(); finish();
           });
@@ -3877,7 +4035,7 @@ function runArgvCapture(stages, context) {
         })], failMux, () => {
           results[i] ??= workerResult;
           if (liveStates[i] !== 5) liveStates[i] = failure !== null || graphFailure !== null ? 6 : 4;
-          if (results[i].status || results[i].signal) liveStates[i] = 5;
+          if (effectiveStatus(results[i], i)) liveStates[i] = 5;
           remaining--;
           finish();
         }, topology.kinds[i], topology.framed[i], (node, raw) => context.streamItem(node < 0 ? -1 : i, raw), topology.buffers[i], topology.overflows[i], topology.bufferItems[i], { inputs: topology.inputs[i].map((edge) => topology.edgeMetrics[edge]), outputs: outputEdges.map((edge) => topology.edgeMetrics[edge]) }, (state) => { if (!results[i] && liveStates[i] !== 5) liveStates[i] = state; }, topology.orders[i], worker));
@@ -4099,6 +4257,9 @@ function effectiveGrants(inv) {
 function contextFor(inv) {
   const runGrants = (inv.grants ?? []).filter((grant) => grant.capability === 'run');
   return {
+    // Match native data-input policy without initializing process.stdin and
+    // allowing libuv to change shared descriptor flags or read ahead.
+    inputFD: inv.name === 'run' && !isatty(0) && (inv.inputs ?? []).some((input) => input.lang !== 'kmk') && !(inv.inputs ?? []).some((input) => input.kind === 'stdin') ? 0 : undefined,
     portableGrants: inv.grants?.length ? inv.grants : inv.noDefaultGrants ? [] : [{ capability: 'read', names: [process.cwd()] }, { capability: 'write', names: [process.cwd()] }, { capability: 'run', names: [] }],
     toolCache: new Map(),
     grants: effectiveGrants(inv),
@@ -4145,7 +4306,7 @@ async function discoverSource(inv) {
       throw Object.assign(new Error(`cannot read file: ${error.message}`), { code: 'FS_ERR' });
     }
   }
-  for (const candidate of ['Makefile.kmk', 'make.kmk', 'src/kmk/main.kmk']) {
+  for (const candidate of BUILD_SOURCE_CANDIDATES) {
     if (existsSync(candidate)) return { name: candidate, text: await readFile(candidate, 'utf8') };
   }
   return null;
@@ -4201,7 +4362,7 @@ async function runSession(module, inv, sourceDirectory) {
     const fileBacked = input.kind === 'file' || input.kind === 'discover';
     if (input.kind === 'discover') {
       const source = await discoverSource({});
-      if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found (tried Makefile.kmk, make.kmk, src/kmk/main.kmk)');
+      if (source === null) return failure('BUILD_NO_SOURCE', BUILD_NO_SOURCE_MESSAGE);
       name = normalize(join(inv.directory || '.', source.name));
       text = source.text;
     } else if (input.kind === 'file') {
@@ -4210,10 +4371,10 @@ async function runSession(module, inv, sourceDirectory) {
       catch { return failure('FS_ERR', `cannot read source: ${input.value}`); }
     } else if (input.kind === 'stdin') { name = '<stdin>'; text = await readStdin(); }
     sourceTexts.set(name, text);
-    if (input.lang === 'km' || input.lang === 'kmk') {
+    if (input.lang === 'km' || input.lang === 'kmk' || input.lang === 'kash') {
       const parts = await expandSessionIncludes(module, sourceDirectory, name, text, input.lang, [], fileBacked, true, selection);
       for (let j = 0; j < parts.length; j++) fragments.push({ ...parts[j], lang: input.lang, entries: j + 1 === parts.length ? input.entries : [], inline: fileBacked && j + 1 === parts.length ? 0 : 1, skipStatements: input.entries.length ? 1 : 0 });
-    } else fragments.push({ name, text, lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1, comment: inv.comment, defines: inv.defines, check: inv.check ? 1 : 0 });
+    } else fragments.push({ name, text, ...(fileBacked ? { sourceDirectory: dirname(resolve(sourceDirectory, name)) } : {}), lang: input.lang, entries: input.entries, inline: fileBacked ? 0 : 1, comment: inv.comment, defines: inv.defines, check: inv.check ? 1 : 0 });
   }
   if (inv.inputs.length === 1 && inv.inputs[0].lang === 'kmk' && fragments.length === 1 && !inv.timeoutMS) {
     const input = inv.inputs[0];
@@ -4227,7 +4388,7 @@ async function runSession(module, inv, sourceDirectory) {
 async function discoverBuildSource(module, inv, sourceDirectory, watchedSources = null) {
   if (watchedSources && inv.file) watchedSources.add(resolve(inv.file));
   if (watchedSources && !inv.file && !inv.command) {
-    const candidates = ['Makefile.kmk', 'make.kmk', 'src/kmk/main.kmk'];
+    const candidates = BUILD_SOURCE_CANDIDATES;
     for (const candidate of candidates) {
       const path = resolve(process.cwd(), candidate);
       watchedSources.add(path);
@@ -4265,20 +4426,20 @@ async function expandSessionIncludes(module, sourceDirectory, name, text, lang, 
   const invalid = document.diagnostics.find((item) => item.severity === 'error');
   if (invalid) {
     primarySource = { name, text };
-    throw Object.assign(new Error(invalid.message), { code: invalid.code, span: invalid.span, diagnostics: document.diagnostics.filter((item) => item.severity === 'error').map((item) => ({ ...item, source: name })) });
+    throw Object.assign(new Error(invalid.message), { code: invalid.code, span: invalid.span, diagnostics: document.diagnostics.filter((item) => item.severity === 'error').map((item) => ({ ...item, source: name, ...(includes.length ? { frames: includes.map((frame) => ({ kind: 'include', source: frame.source, label: frame.label, span: { start: frame.start, end: frame.end } })) } : {}) })) });
   }
   const bytes = new TextEncoder().encode(text);
   const parts = [];
   const slice = (span) => new TextDecoder().decode(bytes.subarray(span.start, span.end));
   const append = (end) => {
-    const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), offset: start, ...(includes.length ? { includes } : {}) };
+    const part = { name, text: new TextDecoder().decode(bytes.subarray(start, end)), offset: start, ...(fileBacked ? { sourceDirectory: dirname(identity) } : {}), ...(includes.length ? { includes } : {}) };
     parts.push(part);
     selection.parts.push(...document.ast.items.filter((item) => item.kind === 'definition' && item.span.start >= start && item.span.end <= end).map((item) => ({ name, text: slice(item.span), offset: item.span.start, ...(includes.length ? { includes } : {}) })));
   };
   const include = async (path, optional, span) => {
     if (!fileBacked) {
       primarySource = { name, text };
-      const detail = { code: 'FEATURE_UNSUP', severity: 'error', message: `include requires a file-backed source; this fragment was supplied ${name === '<stdin>' ? 'on stdin' : 'inline'}`, source: name, span, tips: ['save this fragment as a .km or .kmk file and run that file'] };
+      const detail = { code: 'FEATURE_UNSUP', severity: 'error', message: `include requires a file-backed source; this fragment was supplied ${name === '<stdin>' ? 'on stdin' : 'inline'}`, source: name, span, tips: ['save this fragment as a .km, .kmk or .kash file and run that file'] };
       throw Object.assign(diagnosticError(`${detail.code}: ${detail.message}`, detail.code), { span, diagnostics: [detail] });
     }
     const included = normalize(isAbsolute(path) ? path : join(dirname(name), path));
@@ -4390,7 +4551,7 @@ async function runPlan(module, inv, sourceDirectory) {
 
 async function runList(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
-  if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
+  if (source === null) return failure('BUILD_NO_SOURCE', BUILD_NO_SOURCE_MESSAGE);
   primarySource = source;
   let context;
   if (!jsonMode) {
@@ -4407,7 +4568,7 @@ async function runList(module, inv, sourceDirectory) {
 
 async function runGraph(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
-  if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
+  if (source === null) return failure('BUILD_NO_SOURCE', BUILD_NO_SOURCE_MESSAGE);
   primarySource = source;
   const targets = source.targets;
   if (inv.name !== 'plan' && targets.length !== 1) return usageError('OPT_VALUE_INVALID', `${inv.name} requires exactly one target`);
@@ -4444,7 +4605,7 @@ async function runTools(module, inv, sourceDirectory) {
   if (!check && targets.length !== 0) return usageError('OPT_VALUE_INVALID', 'tools does not accept targets');
   if (check && targets.length === 0) return usageError('OPT_VALUE_INVALID', 'tools check requires at least one target');
   const source = await discoverBuildSource(module, inv, sourceDirectory);
-  if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
+  if (source === null) return failure('BUILD_NO_SOURCE', BUILD_NO_SOURCE_MESSAGE);
   primarySource = source;
   if (check) {
     targets = await module.targetOperands(source.compiled, targets, source.name);
@@ -4479,7 +4640,7 @@ async function runTools(module, inv, sourceDirectory) {
 
 async function runCat(module, inv, sourceDirectory) {
   const source = await discoverBuildSource(module, inv, sourceDirectory);
-  if (source === null) return failure('BUILD_NO_SOURCE', 'no build source found');
+  if (source === null) return failure('BUILD_NO_SOURCE', BUILD_NO_SOURCE_MESSAGE);
   primarySource = source;
   const targets = source.targets;
   if (targets.length !== 1) return usageError('OPT_VALUE_INVALID', 'cat requires exactly one target');
@@ -4811,7 +4972,7 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       source = await discoverBuildSource(module, inv, sourceDirectory, watchedSources);
       if (source === null) {
         cycleFailed = true;
-        if (!noArguments) reportWatchError(Object.assign(new Error('no build source found'), { code: 'BUILD_NO_SOURCE' }), null);
+        if (!noArguments) reportWatchError(Object.assign(new Error(BUILD_NO_SOURCE_MESSAGE), { code: 'BUILD_NO_SOURCE' }), null);
         await seedSources();
         return false;
       }
@@ -4970,7 +5131,7 @@ async function runPrimary(module, inv, noArguments, sourceDirectory) {
       stdout.write(help.help);
       return 0;
     }
-    return failure('BUILD_NO_SOURCE', 'no build source found');
+    return failure('BUILD_NO_SOURCE', BUILD_NO_SOURCE_MESSAGE);
   }
   primarySource = source;
   resetProgress();
@@ -5020,7 +5181,7 @@ async function dispatchInvocation(module, inv, noArguments) {
   presentationModule = module;
   presentationDryRun = inv.dryRun;
   configurePresentation(inv);
-  if (noArguments && !['Makefile.kmk', 'make.kmk', 'src/kmk/main.kmk'].some((name) => existsSync(name))) {
+  if (noArguments && !BUILD_SOURCE_CANDIDATES.some((name) => existsSync(name))) {
     const help = await module.parseCLI('@help', ['--output', outputMode]);
     stdout.write(help.help); return 0;
   }

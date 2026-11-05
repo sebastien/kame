@@ -69,6 +69,7 @@ type runtimeState struct {
 }
 
 type RuntimeResult struct {
+	Exit       diagnostic.Termination
 	Value      core.Value
 	Diagnostic core.Diagnostic
 	Done       bool
@@ -951,6 +952,11 @@ func (r *Runtime) result() RuntimeResult {
 			return RuntimeResult{}
 		}
 		result := poll.Result
+		if result.Exit.Requested {
+			out := RuntimeResult{Exit: result.Exit, Diagnostic: result.Diagnostic.Clone(r.Alloc), Done: true}
+			result.Free(r.Alloc)
+			return out
+		}
 		if result.Diagnostic.Code != "" {
 			d := result.Diagnostic.Clone(r.Alloc)
 			result.Free(r.Alloc)

@@ -13,6 +13,16 @@ func (p *Program) sourceSignature() core.Signature {
 		source.appendText(p.Parsed.Source.Text)
 		source.appendText(p.Eval.Script.Source.Name)
 		source.appendText(p.Eval.Script.Source.Text)
+		// Identical expanded text can originate in different library directories.
+		// File freshness must not reuse a result with a different source-dir value.
+		for i := range p.Eval.SourceParts {
+			part := p.Eval.SourceParts[i]
+			if part.Directory != "" {
+				source.appendText(part.Directory)
+				source.appendU64(uint64(part.Start))
+				source.appendU64(uint64(part.End))
+			}
+		}
 		p.SourceSignature.Mode = core.SignatureContent
 		source.state.Sum(p.SourceSignature.Digest[:])
 	}

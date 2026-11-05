@@ -65,17 +65,32 @@ func (p *kashParser) functionBlock(level int, start int, wordEnd int) *definitio
 	}
 	p.Pos = nextLine(text, pos)
 	p.Functions++
+	previousLoops := p.Loops
+	p.Loops = 0
 	p.branchBody(e, level+1)
+	p.Loops = previousLoops
 	p.Functions--
+	for i := range e.Body {
+		statement := e.Body[i]
+		if statement.Kind != expr.KashDefinition && statement.Kind != expr.KashLet {
+			continue
+		}
+		for j := range d.Parameters {
+			if statement.Text == d.Parameters[j].Name {
+				s.error(statement.Span.Start, statement.Span.End, "body definition conflicts with function parameter")
+			}
+		}
+	}
 	d.Span.End, e.Span.End = p.Pos, p.Pos
 	return d
 }
 
-func (p *kashParser) returnStatement(start int, wordEnd int) *expr.Expr {
+func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *expr.Expr {
 	s, text := p.Script, p.Script.Source.Text
+	keyword := text[start:wordEnd]
 	e := mem.Alloc[expr.Expr](s.Alloc)
-	e.Kind, e.Span.Start = expr.KashReturn, start
-	if p.Functions == 0 {
+	e.Kind, e.Span.Start = kind, start
+	if kind == expr.KashReturn && p.Functions == 0 {
 		s.error(start, wordEnd, "return requires an enclosing defn")
 	}
 	pos := wordEnd
@@ -83,7 +98,7 @@ func (p *kashParser) returnStatement(start int, wordEnd int) *expr.Expr {
 		pos++
 	}
 	if pos == len(text) || text[pos] == '\n' || text[pos] == ';' || text[pos] == '#' {
-		s.error(wordEnd, pos, "return requires a status expression")
+		s.error(wordEnd, pos, keyword+" requires a status expression")
 		p.Pos, e.Span.End = pos, pos
 		return e
 	}
@@ -91,13 +106,13 @@ func (p *kashParser) returnStatement(start int, wordEnd int) *expr.Expr {
 	s.takeDiagnostics(part.Diagnostics)
 	e.Items = slices.Append(s.Alloc, e.Items, part.Expr)
 	if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery {
-		s.error(pos, part.End, "return requires one status expression")
+		s.error(pos, part.End, keyword+" requires one status expression")
 	}
 	pos = part.End
 	for pos < len(text) && space(text[pos]) && text[pos] != '\n' {
 		pos++
 	}
-	if pos < len(text) && text[pos] == '?' {
+	if kind == expr.KashReturn && pos < len(text) && text[pos] == '?' {
 		e.AcceptExit = true
 		pos++
 	}
@@ -105,7 +120,7 @@ func (p *kashParser) returnStatement(start int, wordEnd int) *expr.Expr {
 		pos++
 	}
 	if pos < len(text) && text[pos] != '\n' && text[pos] != ';' && text[pos] != '#' {
-		s.error(pos, pos+1, "return accepts only a status and optional terminal ?")
+		s.error(pos, pos+1, keyword+" has unexpected trailing operands or process syntax")
 	}
 	p.Pos, e.Span.End = pos, pos
 	return e

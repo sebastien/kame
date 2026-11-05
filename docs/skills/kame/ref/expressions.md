@@ -85,6 +85,10 @@ lambda. Outside sections, underscore names remain ordinary names.
 chooses where to insert the value. Formatting preserves authored pipes and
 nested calls as distinct structures, including placeholder positions; only
 spacing/layout changes. This is value transformation, not a process pipe.
+
+An initial application may omit its inner parentheses: `(tool "git" | ?)`
+means `(? (tool "git"))`. A single subject remains a value, not a call; special
+forms such as `?` retain control of subject evaluation.
 Standard transformations put parameters (including optional ones) before their
 subject: `(nth 1 files)` or `(files | nth 1)`. Comparisons keep left/right order:
 `(gt? LEFT RIGHT)`, so use `(VALUE | gt? _ 3)` to test whether `VALUE > 3`.
@@ -130,7 +134,7 @@ Use a lambda when adapting one to a callback. In addition to the forms below,
 | `(and VALUE...)` / `(or VALUE...)` | Short-circuit and return the deciding operand. |
 | `(with RECORD BODY...)` | Bind record fields in a child scope. |
 | `(match SUBJECT [PATTERN BODY...]... [:else BODY...])` | First matching clause; captures are local to its body. |
-| `(? VALUE...)` | First operand not failing with unknown-reference; not general error recovery. |
+| `(? VALUE...)` | First operand without unprotected `REF_MISSING` or `TOOL_MISSING`, or nil if all are missing; does not skip successful nil/false or catch other errors. `(tool "git" \| ?)` makes tool lookup optional. |
 | `(eval SOURCE)` | Evaluate expression text; not a script loader or replacement for native source composition. |
 
 Comparison heads `=`, `==`, `!=`, `<`, `>`, `<=`, `>=` alias `eq?` (both equality

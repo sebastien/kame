@@ -185,6 +185,7 @@ dependencies. Relative paths use the current evaluation directory where needed.
 | `joinpath` | `(joinpath PART...)` | Joined, cleaned path; retains explicit relative anchoring when the first nonempty part is `.` or starts with `./`. Parent traversal still normalizes normally. |
 | `relpath` | `(relpath BASE TARGET)` | Target path relative to base. |
 | `abspath` | `(abspath PATH)` | Clean absolute path, resolving a relative path from the evaluation directory. |
+| `source-dir` | `(source-dir)` | Absolute lexical directory of the file containing the authored call; no filesystem probe or grant. Inline/stdin/constructed source without loading metadata reports `SEL_NO_CONTEXT`. |
 
 ## Filesystem, environment, and process operations
 
@@ -218,13 +219,17 @@ artifacts. URI grants use canonical roots; see
 `(tool NAME)` and `x/NAME` resolve executables against startup PATH or `--tool`
 overrides, not recipe PATH, and track the chosen executable. Tool lookup needs
 a build/source session; internal metadata checks do not grant user read access.
+`(tool NAME | ?)` (equivalently `(? (tool NAME))`) returns nil for ordinary
+unavailability using the same resolver. Empty/NUL names and nonstrings are invalid; capability
+and operational failures remain errors. Absence is tracked and refreshed on
+resource revalidation, without granting filesystem or environment reads.
 `(now)` and `(monotonic)` request host clocks and return integer nanoseconds.
 Neither needs a grant. Both are invalid during planning, output resolution,
 shell-template expansion, and value-producing Kame bodies.
 
 Standalone `kame do run --lang expr` denies these capabilities by default; grant only the
 needed roots, names, or process access with its `--allow-*` options.
-`run!`, `pipe!`, and `await` are process special forms, not registry operations;
+`run!`, `capture!`, `pipe!`, and `await` are process special forms, not registry operations;
 see [Kash](./kash.md).
 
 `publish!` supports local files on native POSIX and Node hosts. Memory resources,

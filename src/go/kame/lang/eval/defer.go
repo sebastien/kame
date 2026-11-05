@@ -17,19 +17,21 @@ const DeferTimeoutMS int64 = 5000
 // DeferScope belongs to one Kash invocation, not an indentation block. Its root
 // survives cancellation of the demanding node so hosts can finish unwinding it.
 type DeferScope struct {
-	Program      *Program
-	Owner        int64
-	Group        int64
-	Actions      []*deferredAction
-	Index        int
-	Node         *core.Node
-	Root         *core.Root
-	Done         bool
-	Observed     bool
-	Diagnostic   diagnostic.Diagnostic
-	ClockID      int64
-	StartedAt    int64
-	ClockStarted bool
+	Program             *Program
+	Owner               int64
+	Group               int64
+	CallPath            string
+	Actions             []*deferredAction
+	Index               int
+	Node                *core.Node
+	Root                *core.Root
+	Done                bool
+	Observed            bool
+	Diagnostic          diagnostic.Diagnostic
+	ClockID             int64
+	StartedAt           int64
+	ClockStarted        bool
+	InheritedDeadlineNS int64
 }
 
 type deferredAction struct {
@@ -105,7 +107,7 @@ func (p *Program) startDefers(s *DeferScope, aborting bool) {
 	if s.Node != nil {
 		return
 	}
-	if len(s.Actions) == 0 {
+	if len(s.Actions) == 0 && p.groupQuiet(s.Owner, s.Group) {
 		s.Done = true
 		return
 	}
@@ -205,7 +207,11 @@ func runDefers(engine *core.EngineContext, id int64) core.ProducerResult {
 		if !s.ClockStarted {
 			s.StartedAt, s.ClockStarted = now, true
 		}
-		remaining := DeferTimeoutMS - (now-s.StartedAt)/1000000
+		remainingNS := DeferTimeoutMS*1000000 - (now - s.StartedAt)
+		if s.InheritedDeadlineNS != 0 && s.InheritedDeadlineNS-now < remainingNS {
+			remainingNS = s.InheritedDeadlineNS - now
+		}
+		remaining := remainingNS / 1000000
 		if remaining <= 0 {
 			r := failure(a, "RECIPE_TIMEOUT", action.Expression.Span, "cleanup budget exhausted; remaining deferred actions were not run")
 			s.recordFailure(r.Diagnostic)
@@ -250,7 +256,9 @@ func runDeferredAction(engine *core.EngineContext, id int64) core.ProducerResult
 	action := engine.Context().(*deferredAction)
 	p := action.Program
 	c := action.Context
+	c.InputClosed = true
 	c.Engine, c.Run, c.Requests = engine, engine.Allocator(), p.Requests
+	c.CleanupDeadlineNS = p.FinalizerDeadline(engine.NodeID())
 	c.Resume(engine)
 	if action.Prepared != nil {
 		c.operationStart, c.operationEnd = action.Expression.Span.Start, action.Expression.Span.End
@@ -372,18 +380,23 @@ func (p *Program) CancelDefers() {
 func (p *Program) freeDefers() {
 	for i := range p.DeferScopes {
 		s := p.DeferScopes[i]
-		for j := range s.Actions {
-			action := s.Actions[j]
-			if action.Prepared != nil {
-				freeCaptureState(p.Alloc, action.Prepared)
-			}
-			freeExecutionContext(p.Alloc, &action.Context)
-			expr.Free(p.Alloc, action.Expression)
-			mem.Free(p.Alloc, action)
-		}
-		slices.Free(p.Alloc, s.Actions)
-		s.Diagnostic.Free(p.Alloc)
-		mem.Free(p.Alloc, s)
+		p.freeDeferScope(s)
 	}
 	slices.Free(p.Alloc, p.DeferScopes)
+}
+
+func (p *Program) freeDeferScope(s *DeferScope) {
+	for j := range s.Actions {
+		action := s.Actions[j]
+		if action.Prepared != nil {
+			freeCaptureState(p.Alloc, action.Prepared)
+		}
+		freeExecutionContext(p.Alloc, &action.Context)
+		expr.Free(p.Alloc, action.Expression)
+		mem.Free(p.Alloc, action)
+	}
+	slices.Free(p.Alloc, s.Actions)
+	s.Diagnostic.Free(p.Alloc)
+	mem.FreeString(p.Alloc, s.CallPath)
+	mem.Free(p.Alloc, s)
 }

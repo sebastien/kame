@@ -114,6 +114,18 @@ func writeKashGraph(b *strings.Builder, e *Expr, indent string, level int) {
 }
 
 func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
+	if e.Kind == KashWith {
+		for j := 0; j < level; j++ {
+			b.WriteString(indent)
+		}
+		b.WriteString("with")
+		for i := range e.Items {
+			b.WriteByte(' ')
+			writeExpr(b, e.Items[i])
+		}
+		writeKashBody(b, e.Body, indent, level+1)
+		return
+	}
 	if e.Kind == KashFunction {
 		for j := 0; j < level; j++ {
 			b.WriteString(indent)
@@ -164,6 +176,10 @@ func writeKashControl(b *strings.Builder, e *Expr, indent string, level int) {
 			} else {
 				writeExpr(b, branch.Items[0])
 			}
+		}
+		if e.Kind == KashRecords {
+			b.WriteByte(' ')
+			b.WriteString(e.RecordFrame)
 		}
 		writeKashBody(b, branch.Body, indent, level+1)
 	}

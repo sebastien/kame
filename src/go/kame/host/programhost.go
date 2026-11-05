@@ -35,6 +35,12 @@ type ProgramHost interface {
 	Readlink(a mem.Allocator, name string) LinkResult
 	// ReadFile transfers ownership of its allocator-owned bytes to the caller.
 	ReadFile(a mem.Allocator, name string) ([]byte, error)
+	// ReadRecord opens once per id. Empty name borrows inputFD exclusively;
+	// Waiting retains bounded progress without blocking. Values belong to a.
+	ReadRecord(a mem.Allocator, id int64, name string, delimiter int, inputFD int) RecordResult
+	// CloseRecord is idempotent, releases pending progress and claims, and never
+	// closes the caller's input descriptor or consumes future bytes.
+	CloseRecord(id int64)
 	// FileSignature streams content; unavailable reads never prove equality.
 	FileSignature(name string) core.Signature
 	ReadDir(a mem.Allocator, name string) ([]DirEntry, error)

@@ -16,6 +16,14 @@ func TestUnclosedPipeFreesDiscardedTrees(t *testing.T) {
 	}
 }
 
+func TestUnclosedInitialCallPipeFreesDiscardedTrees(t *testing.T) {
+	r := expr.Parse(t.Allocator(), "pipe.km", "(tool \"git\" | ?")
+	defer r.Free()
+	if len(r.Diagnostics) == 0 || r.Expr == nil || r.Expr.Kind != expr.Application || len(r.Expr.Items) != 2 {
+		t.Error("unclosed pipe did not preserve its initial application and diagnostics")
+	}
+}
+
 func TestNamedPatternTrailingEscapeHasAuthoredSpan(t *testing.T) {
 	a := t.Allocator()
 	parsed := expr.ParsePatternText(a, "{name:abc\\", 7)

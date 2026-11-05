@@ -52,6 +52,20 @@ func TestRunInferredLanguagesAndInlineAuthority(t *testing.T) {
 	inv.Free()
 }
 
+func TestRunKamefileLanguage(t *testing.T) {
+	names := []string{"Kamefile", "./Kamefile", "/project/Kamefile", "C:\\project\\Kamefile"}
+	for i := range names {
+		inv := cli.ParseRun([]string{names[i], "build"})
+		if !cli.SelectsRun([]string{names[i]}) || !inv.OK || len(inv.Inputs) != 1 || inv.Inputs[0].Lang != "kmk" || len(inv.Inputs[0].Entries) != 1 {
+			t.Error("Kamefile did not select a rule source")
+		}
+		inv.Free()
+	}
+	if cli.SelectsRun([]string{"NotKamefile"}) || cli.SelectsRun([]string{"kamefile"}) {
+		t.Error("Kamefile matching must use the exact case-sensitive basename")
+	}
+}
+
 func TestRunStdinAndExplicitUnknownSuffix(t *testing.T) {
 	inv := cli.ParseRun([]string{"--lang=expr", "-", "--lang", "kmk", "-f", "Makefile", "target", "--", "-"})
 	defer inv.Free()

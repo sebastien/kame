@@ -17,6 +17,17 @@ import (
 // Compile validates a parsed script and registers definitions and rule declarations.
 // It deliberately performs no host or filesystem work.
 func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, options Options) CompileResult {
+	return compileSources(a, parsed, registry, options, nil, nil)
+}
+
+func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Registry, options Options, sources []CompileSource, offsets []int) CompileResult {
+	// Attach lexical origins before registration can clone contribution ASTs or
+	// evaluate computed declarations. Display names alone never establish a base.
+	for i := range sources {
+		if sources[i].SourceDirectory != "" {
+			eval.SetScriptSourceOrigin(parsed, offsets[i], offsets[i]+len(sources[i].Text), i+1)
+		}
+	}
 	engine := core.NewEngine(a)
 	compiled := eval.CompileChecked(a, engine, parsed, registry)
 	result := CompileResult{Diagnostics: slices.Clone(a, compiled.Diagnostics)}
@@ -46,7 +57,14 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	p := mem.Alloc[Program](a)
 	p.Alloc, p.Engine, p.Eval, p.Parsed, p.Host = a, engine, compiled.Program, parsed, options.Host
+	p.Eval.ExitBoundary = true
+	for i := range sources {
+		p.Eval.AddSourcePart(sources[i].Name, offsets[i], offsets[i]+len(sources[i].Text), sources[i].Offset)
+		p.Eval.SetSourcePartDirectory(sources[i].SourceDirectory)
+		p.Eval.SetSourcePartIncludes(sources[i].Includes)
+	}
 	p.Eval.ProcessesQuiet, p.Eval.ProcessesQuietState = deferredProcessesQuiet, p
+	p.Eval.CloseRecordReader, p.Eval.RecordReaderState = closeRecordReader, p
 	// Build invocations have an argument frame even when no operands were given.
 	p.Eval.SetDefinitionArgs(nil)
 	configurationError := p.configureParameters(options.Defines, options.Parameters, options.Environment)
@@ -62,6 +80,12 @@ func Compile(a mem.Allocator, parsed *script.Script, registry *eval.Registry, op
 	}
 	p.Options.Directory, p.Options.DryRun, p.Options.Force, p.Options.RetainBytes, p.Options.Jobs = cloneText(a, options.Directory), options.DryRun, options.Force, options.RetainBytes, options.Jobs
 	p.Options.CacheRetainBytes, p.Options.CacheDisabled, p.Options.CacheManifestMax = options.CacheRetainBytes, options.CacheDisabled, options.CacheManifestMax
+	p.Options.HasInput, p.Options.InputFD = options.HasInput, options.InputFD
+	p.Eval.InputSupplied = options.HasInput
+	if options.HasInput {
+		p.Options.CacheDisabled = true
+		p.Options.Force = true
+	}
 	p.Options.TimeoutMS, p.Options.RetryCount, p.Options.Verbose = options.TimeoutMS, options.RetryCount, options.Verbose
 	p.Options.ToolOverrides = cloneStrings(a, options.ToolOverrides)
 	for i := range options.RemoteExecutors {
@@ -276,15 +300,12 @@ func CompileMany(a mem.Allocator, sources []CompileSource, registry *eval.Regist
 	}
 	text := cloneText(a, builder.String())
 	builder.Free()
-	parsed := script.Parse(a, sources[0].Name, text)
+	parsed := script.Parse(a, "<sources>", text)
 	parsed.Source.Expanded = len(sources) > 1 || sources[0].Offset != 0
 	mem.FreeString(a, text)
-	result := Compile(a, parsed, registry, options)
+	result := compileSources(a, parsed, registry, options, sources, offsets)
 	if result.Program != nil {
 		result.Program.ParsedOwned = true
-		for i := range sources {
-			result.Program.Eval.AddSourcePart(sources[i].Name, offsets[i], offsets[i]+len(sources[i].Text), sources[i].Offset)
-		}
 	}
 	for i := range result.Diagnostics {
 		// Diagnostics must outlive the temporary combined parser and the caller's
@@ -407,6 +428,13 @@ func (p *Program) Free() {
 	}
 	p.Eval.CancelProcesses()
 	p.Eval.CancelDefers()
+	slices.Free(p.Alloc, p.RecordReaders)
+	p.RecordReaders = nil
+	for i := range p.RecordRequests {
+		p.RecordRequests[i].Free(p.Alloc)
+	}
+	slices.Free(p.Alloc, p.RecordRequests)
+	p.RecordRequests = nil
 	slices.Free(p.Alloc, p.workReady)
 	p.workReady = nil
 	rule.FreeRule(p.Alloc, p.automaticCleanRule)
@@ -494,6 +522,7 @@ func (p *Program) Free() {
 	// An empty Outbound can still own a backing array after requests are popped.
 	slices.Free(p.Alloc, p.Outbound)
 	if p.Host != nil {
+		p.Eval.CloseRecordReader = nil
 		p.Host.Free()
 	}
 	p.Engine.Free()
@@ -510,6 +539,7 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.GeneratedRules)
 	slices.Free(p.Alloc, p.GeneratedRuleMeta)
+	p.Eval.CloseRecordReader = nil
 	p.Eval.Free()
 	if p.ParsedOwned && p.Parsed != nil {
 		p.Parsed.Free()

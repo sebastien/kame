@@ -216,6 +216,9 @@ func parseRun(args []string, discover bool) Invocation {
 }
 
 func runLanguage(name string) string {
+	if name == "Kamefile" || (len(name) > 8 && name[len(name)-8:] == "Kamefile" && (name[len(name)-9] == '/' || name[len(name)-9] == '\\')) {
+		return "kmk"
+	}
 	if len(name) >= 5 && name[len(name)-5:] == ".kash" {
 		return "kash"
 	}

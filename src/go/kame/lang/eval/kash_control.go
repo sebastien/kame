@@ -256,13 +256,17 @@ func (p *Program) kashControl(scope *Scope, e *expr.Expr, c *Context) Result {
 func (p *Program) kashBodyDefinitions(scope *Scope, body []*expr.Expr, c *Context) Result {
 	for i := range body {
 		d := body[i]
-		if d.Kind != expr.KashDefinition {
+		if d.Kind != expr.KashDefinition && d.Kind != expr.KashLet {
 			continue
 		}
 		for j := range scope.Bindings {
 			if scope.Bindings[j].Name == d.Text {
 				return failure(c.Run, "DEF_INVALID", d.Span, "body definition conflicts with a local binding")
 			}
+		}
+		if d.Kind == expr.KashLet {
+			scope.reserveEager(d.Text)
+			continue
 		}
 		if d.Bool {
 			function := mem.Alloc[Function](p.Alloc)
@@ -303,14 +307,14 @@ func (p *Program) kashBodyBudget(state *kashControlState, body []*expr.Expr, c *
 			return r
 		}
 		p.retainControlEffects(state, c, state.Scope, before, beforePaths)
-		if r.Returned {
-			return r
-		}
 		for i := range state.Scope.Bindings {
 			b := state.Scope.Bindings[i]
 			if b.Kind == bindingLocalDefinition && b.Local.Done {
 				b.Local.EffectsHeld = true
 			}
+		}
+		if r.Returned || r.LoopTransfer != expr.Invalid {
+			return r
 		}
 		state.Value.Free(p.Alloc)
 		state.Value = core.Value{}

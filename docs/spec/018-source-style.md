@@ -210,6 +210,11 @@ placeholders. Parsing retains enough authored structure to distinguish a pipe
 from its application-equivalent evaluation. Lowering for evaluation must not
 dictate source formatting or change evaluation order, multiplicity or effects.
 
+An initial application without inner parentheses, such as `(tool "git" | ?)`,
+retains that spelling; `((tool "git") | ?)` retains its explicit inner pair.
+If the initial application expands, its head follows `(` and its arguments
+continue on two-space-indented lines before the pipe stages.
+
 A short chain is inline with one space on each side of `|`. An expanded chain
 keeps its subject after `(` and puts each stage on a new two-space-indented line,
 beginning with `|` and one space:

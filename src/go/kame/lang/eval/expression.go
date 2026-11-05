@@ -22,9 +22,11 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 	}
 	context.evaluationDepth++
 	previousEnv := context.ReserveEnv
+	previousOrigin := context.SourceOrigin
 	previousEngine, previousScope, previousRequests := context.Engine, context.Scope, context.Requests
 	if expression != nil {
 		context.ReserveEnv = expression.Kash
+		context.SourceOrigin = expression.SourceOrigin
 	}
 	result := p.evaluateExpression(engine, scope, expression, context)
 	if context.dependencyFailure.Code != "" {
@@ -40,6 +42,7 @@ func (p *Program) evaluate(engine *core.EngineContext, scope *Scope, expression 
 	context.Engine, context.Scope, context.Requests = previousEngine, previousScope, previousRequests
 	context.evaluationDepth--
 	attachSource(&result, context)
+	context.SourceOrigin = previousOrigin
 	return result
 }
 
@@ -89,6 +92,17 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.nativeKash(expression, scope, context)
 	case expr.KashReturn:
 		return p.kashReturn(scope, expression, context)
+	case expr.KashLet:
+		return p.kashLet(scope, expression, context)
+	case expr.KashExit:
+		return p.kashExit(scope, expression, context)
+	case expr.KashWith:
+		return p.kashWith(scope, expression, context)
+	case expr.KashBreak, expr.KashContinue:
+		if context.Phase != EvaluatePhase || context.PurePredicate || context.loopDepth == 0 {
+			return failure(context.Run, "PHASE_INVALID", expression.Span, "loop transfer requires an active local loop")
+		}
+		return Result{LoopTransfer: expression.Kind}
 	case expr.Reference, expr.EnvironmentReference:
 		return p.reference(scope, expression, context)
 	case expr.List:
@@ -110,7 +124,7 @@ func (p *Program) evaluateExpression(engine *core.EngineContext, scope *Scope, e
 		return p.commandList(expression, context)
 	case expr.KashIf, expr.KashMatch:
 		return p.kashControl(scope, expression, context)
-	case expr.KashFor, expr.KashWhile:
+	case expr.KashFor, expr.KashWhile, expr.KashRecords:
 		return p.kashLoop(scope, expression, context)
 	case expr.ValueRecovery:
 		return p.recoverValue(scope, expression, context)
@@ -203,6 +217,18 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	if b.Kind == bindingValue {
 		return Result{Value: borrowValue(context.Run, b.Value)}
 	}
+	if b.Kind == bindingEager {
+		if !b.Initialized {
+			if context.Program.DryRun {
+				context.deferred = true
+				return Result{Completed: true}
+			}
+			r := failure(context.Run, "BINDING_UNINITIALIZED", span, "eager binding read before its initializer was reached")
+			r.Diagnostic.Protected = true
+			return r
+		}
+		return Result{Value: borrowValue(context.Run, b.Value)}
+	}
 	if b.Kind == bindingFunction {
 		// A definition can be returned from its defining let scope. Keep
 		// that scope alive until the returned value is consumed or rejected.
@@ -227,6 +253,7 @@ func name(scope *Scope, name string, span source.Span, context *Context) Result 
 	}
 	ready := false
 	if context.Engine != nil {
+		context.Program.bindDefinitionInput(key, context)
 		if context.RecoverFailures || context.Program.DryRun {
 			// Dry-run recipes must receive a lazy definition's deferred-read
 			// diagnostic before the engine propagates it as a target failure.

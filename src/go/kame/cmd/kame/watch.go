@@ -137,7 +137,7 @@ func refreshWatchResources(items *[]watchResource, session *buildSession, option
 		key := core.ResourceKey{Kind: core.ResourceFile, Name: options.File}
 		addWatchResource(items, session.Program, key, true)
 	} else if len(session.Source.Files) == 0 {
-		candidates := []string{"Makefile.kmk", "make.kmk", "src/kmk/main.kmk"}
+		candidates := cli.BuildSourceCandidates()
 		for i := range candidates {
 			name := path.Join(mem.System, options.Directory, candidates[i])
 			addWatchResource(items, session.Program, core.ResourceKey{Kind: core.ResourceFile, Name: name}, true)

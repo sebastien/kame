@@ -28,6 +28,24 @@ func TestEmptyTopologyCannotFallBackToShell(t *testing.T) {
 	}
 }
 
+func TestInvocationInputRejectsInvalidDispositionBeforeLaunch(t *testing.T) {
+	h := posix.New(t.Allocator())
+	defer h.Free()
+	stages := []host.ProcessStage{{Argv: []string{"/bin/cat"}}}
+	requests := []host.ProcessRequest{
+		{ID: 990, Stages: stages, InputMode: "unknown"},
+		{ID: 991, Stages: stages, InputMode: "invocation", InputFD: -1},
+		{ID: 992, Stages: stages, InputMode: "invocation", InputRoot: 1},
+		{ID: 993, Stages: stages, InputMode: "invocation", Input: "conflict"},
+		{ID: 994, InputMode: "invocation", Shell: []string{"/bin/sh", "-c"}, Script: []byte("exit 0")},
+	}
+	for i := range requests {
+		if h.Start(requests[i]) || h.Active() != 0 {
+			t.Error("invalid borrowed input launched owned work")
+		}
+	}
+}
+
 func nativeChildReaped(pid int64) bool {
 	c.Raw("pid_t result; do { result = waitpid((pid_t)pid, NULL, WNOHANG); } while (result < 0 && errno == EINTR); return result < 0 && errno == ECHILD;")
 	return false

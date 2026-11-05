@@ -16,7 +16,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		return failure(context.Run, "EXPR_INVALID", expression.Span, "empty application")
 	}
 	head := expression.Items[0]
-	if context.PurePredicate && head.Kind == expr.Name && (head.Text == "def" || head.Text == "eval" || head.Text == "run!" || head.Text == "pipe!" || head.Text == "await") {
+	if context.PurePredicate && head.Kind == expr.Name && (head.Text == "def" || head.Text == "eval" || head.Text == "run!" || head.Text == "capture!" || head.Text == "pipe!" || head.Text == "await") {
 		return failure(context.Run, "KASH_PREDICATE_EFFECT", expression.Span, "stream predicates require pure, nonblocking computations")
 	}
 	if head.Kind == expr.Name {
@@ -26,7 +26,7 @@ func (p *Program) application(scope *Scope, expression *expr.Expr, context *Cont
 		if head.Text == "await" {
 			return p.awaitProcess(expression, context)
 		}
-		if head.Text == "run!" || head.Text == "pipe!" {
+		if head.Text == "run!" || head.Text == "capture!" || head.Text == "pipe!" {
 			return p.processExpression(expression, context)
 		}
 		if head.Text == "?" {
@@ -439,7 +439,7 @@ func discardCallValues(a mem.Allocator, values []core.Value) {
 }
 
 func attachNamedFrame(result *Result, context *Context, span source.Span, kind string, label string) {
-	if result.Diagnostic.Code == "" {
+	if result.Diagnostic.Code == "" || result.Diagnostic.ExitOnly() {
 		return
 	}
 	a := context.Run

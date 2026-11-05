@@ -41,7 +41,7 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 		for j := range items {
 			entries = slices.Append(r.Alloc, entries, items[j].Text)
 		}
-		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), Includes: descriptorIncludes(r.Alloc, inputs[i]), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0, Comment: host.PayloadText(inputs[i], "comment"), Defines: defines, Check: host.PayloadInt(inputs[i], "check") != 0}
+		f := program.Fragment{Name: host.PayloadText(inputs[i], "name"), Text: host.PayloadText(inputs[i], "text"), SourceDirectory: host.PayloadText(inputs[i], "sourceDirectory"), Lang: host.PayloadText(inputs[i], "lang"), Entries: entries, Inline: host.PayloadInt(inputs[i], "inline") != 0, Offset: int(host.PayloadInt(inputs[i], "offset")), Includes: descriptorIncludes(r.Alloc, inputs[i]), SkipStatements: host.PayloadInt(inputs[i], "skipStatements") != 0, Comment: host.PayloadText(inputs[i], "comment"), Defines: defines, Check: host.PayloadInt(inputs[i], "check") != 0}
 		if f.Lang != "km" && f.Lang != "kmk" && f.Lang != "kash" && f.Lang != "expr" && f.Lang != "template" {
 			for j := range fragments {
 				freeDescriptorIncludes(r.Alloc, fragments[j].Includes)
@@ -79,6 +79,7 @@ func (r *Runtime) PrepareSession(data []byte) PureResult {
 		tools = slices.Append(r.Alloc, tools, fields[i].Text)
 	}
 	options := program.Options{TimeoutMS: host.PayloadInt(value, "timeoutMS"), RetryCount: int(host.PayloadInt(value, "retryCount")), ToolOverrides: tools, Host: r.Host, Directory: r.Directory, Jobs: 1, Environment: environment, Defines: overrides, Grants: grants, ForwardRequests: true, CaptureLimit: int(host.PayloadInt(value, "captureLimit")), DryRun: host.PayloadInt(value, "dryRun") != 0, Force: host.PayloadInt(value, "force") != 0}
+	options.HasInput = host.PayloadInt(value, "dataInput") == 1
 	options.TrackTimings = host.PayloadInt(value, "trackTimings") != 0
 	options.TimingNow, options.TimingClock = runtimeFinalizationNow, r
 	options.RetainBytes = int(host.PayloadInt(value, "retainBytes"))
@@ -138,6 +139,15 @@ func (r *Runtime) SessionWorkCount() int {
 		return 0
 	}
 	return len(r.Session.Work) + 1 // Final invocation-owned join, never a displayed value.
+}
+
+// SessionExitStatus is separate from result values and diagnostics. A negative
+// status means the ordered session has not requested termination.
+func (r *Runtime) SessionExitStatus() int {
+	if r.Session == nil || !r.Session.Exit.Requested {
+		return -1
+	}
+	return r.Session.Exit.Status
 }
 
 func (r *Runtime) SessionWorkKind(index int) uint32 {

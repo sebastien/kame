@@ -22,6 +22,8 @@ func TestAuthoredSourceFieldValidationAcrossDescriptors(t *testing.T) {
 		`{"name":"a","text":"","offset":2147483648}`,
 		`{"name":"a","text":"x","offset":2147483647}`,
 		`{"name":"a","text":"","includes":false}`,
+		`{"name":"a","text":"","sourceDirectory":false}`,
+		`{"name":"a","text":"","sourceDirectory":"relative"}`,
 	}
 	for i := range invalid {
 		fragment := invalid[i]
@@ -40,5 +42,24 @@ func TestAuthoredSourceFieldValidationAcrossDescriptors(t *testing.T) {
 			t.Error("invalid session source accepted: " + fragment)
 		}
 		session.Free(a)
+	}
+}
+
+func TestInvocationInputDescriptorRequiresAnExplicitBooleanInteger(t *testing.T) {
+	a := t.Allocator()
+	start := wasm.NewRuntime(a, "")
+	if start.Runtime == nil {
+		t.Fatal("create runtime")
+		return
+	}
+	r := start.Runtime
+	defer r.Free()
+	invalid := []string{"true", "\"stdin\"", "-1", "2", "[]"}
+	for i := range invalid {
+		result := r.PrepareSession([]byte(`{"fragments":[],"dataInput":` + invalid[i] + `}`))
+		if result.Code != "PARSE_ERR" {
+			t.Error("invalid data input policy accepted")
+		}
+		result.Free(a)
 	}
 }

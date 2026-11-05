@@ -22,6 +22,7 @@ func Register(r *eval.Registry) bool {
 		callback(r, "template-apply", opTemplateApply, 2, 2) &&
 		pure(r, "template-trim-start", opTemplateTrimStart, 1, 1) && pure(r, "template-trim-end", opTemplateTrimEnd, 1, 1) &&
 		contract(r, "tool", opTool, 1, 1, eval.ObservationOperation, eval.AllPhases, eval.TracksDependency) &&
+		pure(r, "source-dir", opSourceDir, 0, 0) &&
 		pure(r, "get", opGet, 2, 3) && pure(r, "first", opFirst, 1, 1) && pure(r, "nth", opNth, 2, 2) &&
 		callback(r, "apply", opApply, 2, 2) && pure(r, "list", opList, 0, -1) &&
 		pure(r, "items", opItems, 1, 1) && pure(r, "set", opSet, 3, 3) && pure(r, "merge", opMerge, 0, -1) &&

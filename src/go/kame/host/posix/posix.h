@@ -34,15 +34,17 @@ typedef struct km_event {
     int stageCount;
     int64_t *metricData;
     int metricCount;
+    int effectiveStatus;
+    int effectiveSignal;
 } km_event;
 
 km_host *km_host_new(void);
 // start/start_graph: 0 admitted, -1 failed with a queued terminal, -2 not
 // admitted because the allocation-free rejected-event slot needs Next draining.
 int km_host_start(km_host *, int64_t, so_Slice, so_Slice, so_String, so_Slice, int64_t, so_int, bool);
-int km_host_start_graph(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool, so_Slice, so_Slice, so_Slice);
+int km_host_start_graph(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool, so_Slice, so_Slice, so_Slice, so_int, so_int);
 typedef so_int (*km_stream_item)(void *, int64_t, so_int, so_Slice);
-int km_host_start_topology(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, km_stream_item, void *, bool);
+int km_host_start_topology(km_host *, int64_t, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, int64_t, so_int, so_String, so_String, bool, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, so_Slice, km_stream_item, void *, bool, so_int, so_int, so_Slice);
 bool km_stream_operands_supported(void);
 int km_event_stage_field(km_event *, int, int);
 int64_t km_event_metric_field(km_event *, int, int);
@@ -78,6 +80,12 @@ int km_cli_write_output(int, so_Slice, int64_t, so_int *);
 int km_cli_stderr_is_terminal(void);
 int km_cli_stderr_width(void);
 int km_cli_stdout_is_terminal(void);
+int km_cli_stdin_is_terminal(void);
+int km_record_open(so_String);
+int km_record_next(so_int, int64_t *, so_int, so_Slice);
+void km_record_close(so_int);
+int km_record_borrow(so_int);
+int km_record_byte(so_int);
 // Interactive filter. 0 selected, 1 no match, 2 picker error, 127 not found,
 // 130 cancelled, -1 host failure, -2 unsupported, -3 no terminal.
 // Does not join a new process group: the child must stay in the foreground

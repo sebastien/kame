@@ -41,6 +41,7 @@ uint32_t kame_wasm_target_operands(uint64_t instance, uint32_t data, uint32_t da
 uint32_t kame_wasm_session_compile(uint64_t handle, uint32_t data, uint32_t length);
 uint32_t kame_wasm_register_plugins(uint64_t handle, uint32_t data, uint32_t length);
 uint32_t kame_wasm_session_work_count(uint64_t handle);
+int32_t kame_wasm_session_exit_status(uint64_t handle);
 uint32_t kame_wasm_session_work_kind(uint64_t handle, uint32_t index);
 uint32_t kame_wasm_session_work_begin(uint64_t handle, uint32_t index);
 /* Cancel active execution, then pump step/completion until finalization is done.
@@ -87,6 +88,11 @@ enum kame_wasm_request_kind {
   /* JSON {staged,destination}; complete with {code,published,stagedRemoved}.
    * No replacing rename or copy fallback is permitted. */
   KAME_WASM_REQUEST_PUBLISH_FILE = 39,
+  /* JSON {reader,path,delimiter,stdin?}; stdin uses empty path and an exclusive
+   * borrowed-input claim. Cancellable; raw record includes delimiter, nil EOF. */
+  KAME_WASM_REQUEST_RECORD_READ = 40,
+  /* JSON {reader,path:"",delimiter:0}; idempotent release, complete with nil. */
+  KAME_WASM_REQUEST_RECORD_CLOSE = 41,
   KAME_WASM_REQUEST_FILE_CONTENT = 27,
   KAME_WASM_REQUEST_TOOL_CONTENT = 28,
   KAME_WASM_REQUEST_OUTPUT_CONTENT = 29,
@@ -354,7 +360,14 @@ uint32_t kame_wasm_complete_nil(uint64_t instance, uint64_t request);
  * such as stat records and glob lists cross the ABI as JSON; the engine owns
  * the parsed value and reports HOST_FAIL for malformed input. */
 uint32_t kame_wasm_complete_json(uint64_t instance, uint64_t request,
-                                 uint32_t data, uint32_t data_len);
+                               uint32_t data, uint32_t data_len);
+
+/* Structured process metadata plus exact byte streams, copied before return.
+ * Metadata must be a JSON record without stdout/stderr fields. */
+uint32_t kame_wasm_complete_capture(uint64_t instance, uint64_t request,
+                                  uint32_t metadata, uint32_t metadata_len,
+                                  uint32_t output, uint32_t output_len,
+                                  uint32_t error_output, uint32_t error_len);
 /* Completes the pinned request with an owned runtime diagnostic. Code and
  * message are copied before this call returns. */
 uint32_t kame_wasm_complete_failure(uint64_t instance, uint64_t request,

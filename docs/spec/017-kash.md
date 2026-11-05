@@ -849,8 +849,8 @@ revision = $(git rev-parse --short HEAD) ?? "unknown"
 
 These forms are deliberately distinct. `CMD?` accepts a process exit;
 `??` selects a fallback value or computation. Neither changes Kame's existing
-`?` special form, which handles unknown-reference recovery within a Kame
-expression.
+`?` special form, which handles missing-reference and missing-tool recovery within
+a Kame expression (spec 049), not general operational failure.
 
 `??` is valid only in Kash value compositions, including definition RHSs; it is
 not a raw-command operator or an operator inside Kame expressions. It handles ordinary

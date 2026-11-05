@@ -19,6 +19,9 @@ func (p *Program) ruleDiagnostic(d diagnostic.Diagnostic, entry *instance) diagn
 	if d.Target == "" {
 		d.Target = cloneText(p.Alloc, entry.Plan.Target)
 	}
+	if d.Cause.Kind == "exit" {
+		return d
+	}
 	if len(d.TargetStack) == 0 {
 		d.TargetStack = p.targetStack(entry)
 	}

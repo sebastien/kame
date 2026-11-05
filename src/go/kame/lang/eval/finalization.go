@@ -294,6 +294,9 @@ func (p *Program) advanceFinalizer(s *FinalizerState, caller *Context) Result {
 			return Result{Waiting: true}
 		}
 		s.Deadline = p.FinalizationNow(p.FinalizationHost) + s.TimeoutMS*1000000
+		if s.Context.CleanupDeadlineNS != 0 && s.Context.CleanupDeadlineNS < s.Deadline {
+			s.Deadline = s.Context.CleanupDeadlineNS
+		}
 		if s.Outcome.Diagnostic.Code != "" && s.UnwindDeadline != 0 && s.UnwindDeadline < s.Deadline {
 			s.Deadline = s.UnwindDeadline
 		}
@@ -305,6 +308,7 @@ func (p *Program) advanceFinalizer(s *FinalizerState, caller *Context) Result {
 		s.Stage = 2
 	}
 	if s.Stage == 2 {
+		c.InputClosed = true
 		if p.FinalizationNow(p.FinalizationHost) >= s.Deadline {
 			s.Expired = true
 			return p.advanceFinalizer(s, caller)
@@ -479,6 +483,9 @@ func (p *Program) Finalizing() bool {
 func (p *Program) BeginFinalization() {
 	if !p.DeferStopping {
 		p.DeferStopping = true
+		if p.CloseRecordReader != nil {
+			p.CloseRecordReader(p.RecordReaderState, 0)
+		}
 		p.CancelProcesses()
 	}
 	for i := range p.finalizers {
@@ -516,6 +523,9 @@ func (p *Program) FinalizerDeadline(node int64) int64 {
 			}
 		}
 		limit := s.StartedAt + DeferTimeoutMS*1000000
+		if s.InheritedDeadlineNS != 0 && s.InheritedDeadlineNS < limit {
+			limit = s.InheritedDeadlineNS
+		}
 		if owned && (deadline == 0 || limit < deadline) {
 			deadline = limit
 		}
@@ -530,6 +540,9 @@ func (p *Program) FinalizerDeadline(node int64) int64 {
 		t := p.Processes[i]
 		if t.Node.ID != node {
 			continue
+		}
+		if t.Context.CleanupDeadlineNS != 0 && (deadline == 0 || t.Context.CleanupDeadlineNS < deadline) {
+			deadline = t.Context.CleanupDeadlineNS
 		}
 		// Work started in the body of a scope nested inside cleanup still
 		// inherits the enclosing cleanup deadline, even before its own cleanup.

@@ -68,7 +68,8 @@ resolution and rendering fail with `PHASE_INVALID`; absent grants fail with `CAP
 authorized but unavailable host services fail with `HOST_FAIL`. Redirections
 and explicit environment lookups require their own grants. Capability denial
 and cancellation are not recoverable through Kash fallback operators. Existing
-Kame `?` continues to handle only `REF_MISSING`.
+Kame `?` handles only unprotected `REF_MISSING` and `TOOL_MISSING` failures
+(spec 049); operational failures remain errors.
 
 ## Output Registration Context
 
@@ -513,7 +514,9 @@ containment, which is outside the language capability model.
   updates.
 - A stale operation completion is not published.
 - Empty lists and strings are true; false and nil are false.
-- `?` suppresses only unknown-reference failures.
+- `?` suppresses only unprotected `REF_MISSING` and `TOOL_MISSING` failures,
+  preserves successful values including nil and false, and returns nil if all
+  operands are missing. Optional tool lookup retains tracked resolver observations.
 - `if` evaluates exactly one branch and returns the first true then-body, the
   trailing else, or nil; a missing operand count is `EXPR_INVALID`.
 - `and` and `or` short-circuit and return the deciding operand; an unselected

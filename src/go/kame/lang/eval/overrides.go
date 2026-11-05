@@ -186,7 +186,32 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 		return nil
 	}
 	node.Restartable = true
+	state.InputClosed, state.InputBound, state.InputGeneration = context.InputClosed, true, node.Generation
+	state.RecordBody = context.RecordBody
 	return node
+}
+
+// Bind once per generation at first demand, not in a new definition namespace:
+// changing input policy must not rerun an already memoized definition.
+func (p *Program) bindDefinitionInput(key core.ResourceKey, context *Context) {
+	if key.Kind != core.ResourceDefinition {
+		return
+	}
+	name := AuthoredDefinitionName(key.Name)
+	for i := range p.Definitions {
+		if p.Definitions[i].Name != name {
+			continue
+		}
+		node := p.Engine.Lookup(key)
+		if node != nil {
+			state := node.Context.(*definitionState)
+			if !state.InputBound || state.InputGeneration != node.Generation {
+				state.InputClosed, state.InputBound, state.InputGeneration = context.InputClosed, true, node.Generation
+				state.RecordBody = context.RecordBody
+			}
+		}
+		return
+	}
 }
 
 // DefinitionWith returns a lazy node bound to the caller's runtime snapshot.
@@ -194,9 +219,16 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 func (p *Program) DefinitionWith(name string, context *Context) *core.Node {
 	node := p.Definition(name)
 	if node == nil || context == nil || (!context.HasDefinitionNamespace && !context.needsFinalizationView()) {
+		if node != nil && context != nil {
+			p.bindDefinitionInput(node.Key, context)
+		}
 		return node
 	}
-	return p.scopedDefinition(node.Key, context)
+	scoped := p.scopedDefinition(node.Key, context)
+	if scoped != nil {
+		p.bindDefinitionInput(scoped.Key, context)
+	}
+	return scoped
 }
 
 // AuthoredDefinitionName removes invocation-only snapshot identity from a

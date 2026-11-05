@@ -14,6 +14,8 @@ import (
 )
 
 type Program struct {
+	// ExitBoundary is enabled only by a host runtime establishing an execution boundary.
+	ExitBoundary       bool
 	StreamStates       []*captureState
 	OperationFunctions []*Function
 	KashFunctions      []*Function
@@ -75,6 +77,10 @@ type Program struct {
 	DefinitionArgs     []core.Value
 	DefinitionArgsSet  bool
 	DefinitionCwd      string
+	InputSupplied      bool // Boundary supplied borrowed data stdin; never a reusable input identity.
+	NextRecordReader   int64
+	CloseRecordReader  func(any, int64) // ID zero releases all body readers on shutdown.
+	RecordReaderState  any
 	Valid              bool
 }
 
@@ -123,10 +129,10 @@ func CompileChecked(a mem.Allocator, engine *core.Engine, parsed *script.Script,
 			}
 		}
 		if previous != nil {
-			if item.Definition.Default {
+			if item.Definition.Default && !previous.Eager {
 				continue
 			}
-			if item.Definition.Contribution && !previous.Function {
+			if item.Definition.Contribution && !previous.Function && !previous.Eager {
 				continue
 			}
 			result.Diagnostics = slices.Append(a, result.Diagnostics, duplicateDefinition(a, parsed, previous, item.Definition))
@@ -184,8 +190,8 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 			p.registerContribution(d)
 			continue
 		}
-		if p.Scope.lookup(d.Name) != nil {
-			if d.Default {
+		if existing := p.Scope.lookup(d.Name); existing != nil {
+			if d.Default && existing.Kind != bindingEager {
 				continue
 			}
 			p.Valid = false
@@ -196,6 +202,10 @@ func Compile(a mem.Allocator, engine *core.Engine, parsed *script.Script, regist
 					break
 				}
 			}
+			continue
+		}
+		if d.Eager {
+			p.Scope.reserveEager(d.Name)
 			continue
 		}
 		if d.Function {
@@ -377,6 +387,10 @@ type definitionState struct {
 	HasEnvironment        bool
 	HasNamespace          bool
 	FinalizationForbidden bool
+	InputClosed           bool
+	RecordBody            bool
+	InputBound            bool
+	InputGeneration       int64
 	RuleFrames            []RuleFrame
 	InvalidRuleFrames     bool
 	Phase                 Phase
@@ -486,8 +500,17 @@ func freeDefinitionSource(source *core.Source) {
 }
 
 func (p *Program) definition(engine *core.EngineContext, state *definitionState) Result {
+	if !state.InputBound || state.InputGeneration != engine.Generation() {
+		if !state.Scoped {
+			state.InputClosed = false
+			state.RecordBody = false
+		}
+		state.InputBound, state.InputGeneration = true, engine.Generation()
+	}
 	d := state.Definition
 	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState, DirectHostRequests: p.DirectHostRequests}
+	context.InputClosed = state.InputClosed
+	context.RecordBody = state.RecordBody
 	if state.Scoped {
 		context.TrackUnvalidatedReads = true
 		context.Environment, context.HasEnvironment = state.Environment, state.HasEnvironment

@@ -82,7 +82,7 @@ func processGraphResult(a mem.Allocator, result Result, graph *expr.Expr, comple
 		if known == 3 {
 			status, signal, outcome = host.PayloadInt(stages[i], "status"), host.PayloadInt(stages[i], "signal"), host.PayloadInt(stages[i], "outcome")
 			state = "completed"
-			if status != 0 || signal != 0 || outcome != 0 {
+			if host.EffectiveStatus(stages[i]) != 0 || signal != 0 || outcome != 0 {
 				state = "failed"
 			}
 			if outcome == 1 {

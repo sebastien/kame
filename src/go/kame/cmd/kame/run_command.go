@@ -80,7 +80,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 				if j+1 != len(file.Parts) {
 					entries = nil
 				}
-				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, Offset: file.Parts[j].Offset, Includes: file.Parts[j].Includes, Lang: input.Lang, Entries: entries, Inline: j+1 != len(file.Parts), SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
+				fragments = slices.Append(mem.System, fragments, program.Fragment{Name: file.Parts[j].Name, Text: file.Parts[j].Text, SourceDirectory: file.Parts[j].SourceDirectory, Offset: file.Parts[j].Offset, Includes: file.Parts[j].Includes, Lang: input.Lang, Entries: entries, Inline: j+1 != len(file.Parts), SkipStatements: len(input.Entries) != 0, Comment: inv.Comment, Defines: inv.Defines, Check: inv.Check})
 			}
 			continue
 		} else if input.Kind == "stdin" {
@@ -97,7 +97,7 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 			name = cloneCommandText("<command:" + strconv.Itoa(buffer[:], i+1) + ">")
 			names = slices.Append(mem.System, names, name)
 		}
-		if input.Lang == "km" || input.Lang == "kmk" {
+		if input.Lang == "km" || input.Lang == "kmk" || input.Lang == "kash" {
 			file := inlineRunSourceInput(inv, name, text, input.Lang, fragments, diagnosticWriter(out, errOut, inv.JSON))
 			loaded = slices.Append(mem.System, loaded, file)
 			if file.Status != 0 {
@@ -145,6 +145,21 @@ func runParsedSession(inv cli.Invocation, in io.Reader, out io.Writer, errOut io
 	}
 	programOptions := program.Options{Host: posix.New(mem.System), Directory: directory, Environment: environment, Defines: defines, Parameters: inv.Parameters, ToolOverrides: inv.ToolOverrides, Shell: inv.Shell, Grants: grants, Jobs: inv.Jobs, CaptureLimit: inv.CaptureLimit, TimeoutMS: inv.TimeoutMS, DryRun: inv.DryRun, Force: inv.Force, CacheDisabled: inv.Force, RetryCount: inv.RetryCount, RetainBytes: inv.RetainBytes, ResolveTool: resolveBuildTool, PrintResult: inv.PrintResult}
 	programOptions.TrackTimings = true
+	for i := range inv.Inputs {
+		if inv.Name == "run" && inv.Inputs[i].Lang != "kmk" {
+			programOptions.HasInput = true
+		}
+	}
+	for i := range inv.Inputs {
+		if inv.Inputs[i].Kind == "stdin" {
+			programOptions.HasInput = false
+		}
+	}
+	// ponytail: data pipes/files only; interactive TTY input needs foreground
+	// process-group handoff rather than the host's isolated cancellation groups.
+	if posix.StdinIsTerminal() {
+		programOptions.HasInput = false
+	}
 	var ledger *outputLedger
 	if ownership.Supported() {
 		ledger = mem.Alloc[outputLedger](mem.System)
@@ -331,6 +346,15 @@ func runSessionWork(session *program.Session, inv cli.Invocation, out io.Writer,
 			polled := h.Poll()
 			if !polled.Done {
 				continue
+			}
+			if polled.Result.Exit.Requested {
+				if polled.Result.Diagnostic.Code != "" && !inv.JSON {
+					emitRunDiagnostic(errOut, polled.Result.Diagnostic, false, fragments, loaded)
+				}
+				status := polled.Result.Exit.Status
+				polled.Result.Free(mem.System)
+				h.Free()
+				return status
 			}
 			if polled.Result.Diagnostic.Code != "" {
 				if !inv.JSON || inv.Name == "render" {

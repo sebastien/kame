@@ -71,7 +71,7 @@ field lookup on a lexical record; bare `env` remains a callable in Kame.
 ### Control form
 
 A **control form** is a special form whose operands are evaluated only when
-selected. The language provides `?` (unknown-reference fallback), `if` (ordered
+selected. The language provides `?` (missing-reference/tool fallback), `if` (ordered
 test/then branches with an optional else), `and`/`or` (lazy conjunction and
 disjunction), `match` (pattern dispatch with capture binding), `let`, `def`, and
 `with`. A control form is not an eager operation: an unselected branch's

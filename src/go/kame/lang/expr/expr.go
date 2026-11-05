@@ -62,10 +62,16 @@ const (
 	ListSpread
 	KashFunction
 	KashReturn
+	KashLet
+	KashExit
+	KashWith
+	KashBreak
+	KashContinue
+	KashRecords
 )
 
 func IsKashControl(kind Kind) bool {
-	return kind == KashIf || kind == KashMatch || kind == KashFor || kind == KashWhile
+	return kind == KashIf || kind == KashMatch || kind == KashFor || kind == KashWhile || kind == KashWith || kind == KashRecords
 }
 
 type ReferenceKind int
@@ -103,18 +109,26 @@ type StringPart struct {
 	Form string
 }
 
-// Expr is immutable after parsing. All child storage is owned by Result.Alloc.
+// Expr is immutable during evaluation; the compiler first attaches SourceOrigin.
+// All child storage is owned by Result.Alloc.
 type Expr struct {
+	// SourceOrigin is compiler loading metadata (one-based), not authored syntax.
+	// Generated trees retain zero even if their byte spans overlap a source file.
+	SourceOrigin int
 	// Topology and Edges are used only by prepared process graphs. Authored
 	// syntax retains groups and connections until graph validation/lowering.
 	Topology       bool
 	Edges          []CommandEdge
 	CommandOps     []CommandOperator
 	StreamKinds    []int
-	StreamOverflow int  // 0 block, 1 drop-new, 2 drop-old, 3 latest
-	StreamOrder    int  // 0 ready, 1 strict framed round-robin (merge only)
-	StreamFailure  int  // 0 inherited, 1 explicit fail-fast, 2 collect external exit statuses
-	Each           bool // prepared command template: one process per framed stdin record
+	InputRoot      int    // Lowered topology only: unique main input root, or -1.
+	RecordFrame    string // Literal :lines or :nul for Kash record iteration.
+	StreamOverflow int    // 0 block, 1 drop-new, 2 drop-old, 3 latest
+	StreamOrder    int    // 0 ready, 1 strict framed round-robin (merge only)
+	StreamFailure  int    // 0 inherited, 1 explicit fail-fast, 2 collect external exit statuses
+	Each           bool   // prepared command template: one process per framed stdin record
+	TypedCapture   bool   // capture! result: selected streams are exact bytes, not text
+	CapturePolicy  *Expr  // Lowered capture! policy word; owned by this expression
 	BufferItems    int
 	Exit           string
 	Channels       []string
@@ -144,6 +158,8 @@ type Expr struct {
 	Body        []*Expr
 	Pattern     *Pattern
 	LiteralPath bool
+	// PipeCall retains an unparenthesized initial application on a ValuePipe.
+	PipeCall bool
 	// Applications produced by pipe lowering keep their authored source apart
 	// from executable children. Semantic visitors see only the ordinary call.
 	AuthoredPipe *Expr
@@ -199,6 +215,7 @@ func freeExpr(a mem.Allocator, e *Expr) {
 	}
 	e.Pattern.Free(a)
 	freeExpr(a, e.AuthoredPipe)
+	freeExpr(a, e.CapturePolicy)
 	for i := range e.Parts {
 		mem.FreeString(a, e.Parts[i].Text)
 		freeExpr(a, e.Parts[i].Expr)
@@ -1511,16 +1528,16 @@ func (p *parser) paren() *Expr {
 				p.error(p.pos, p.pos, "pipe needs right expression")
 				return app
 			}
-			if len(app.Items) != 1 {
-				p.error(app.Span.Start, app.Span.End, "pipe left side must be one expression")
-				return app
+			if len(app.Items) > 1 {
+				app.Span.End = app.Items[len(app.Items)-1].Span.End
+				return p.pipe(start, app, true)
 			}
 			left := app.Items[0]
 			items := app.Items
 			app.Items = nil
 			slices.Free(p.a, items)
 			mem.Free(p.a, app)
-			return p.pipe(start, left)
+			return p.pipe(start, left, false)
 		}
 		if space == 0 {
 			p.error(p.pos, p.pos+1, "application items need whitespace")
@@ -1540,9 +1557,13 @@ func (p *parser) paren() *Expr {
 	return app
 }
 
-func (p *parser) pipe(start int, left *Expr) *Expr {
+func (p *parser) pipe(start int, left *Expr, call bool) *Expr {
 	pipe := p.node(ValuePipe, start)
+	pipe.PipeCall = call
 	pipe.Items = slices.Append(p.a, pipe.Items, cloneExpr(p.a, left))
+	if call {
+		left = p.classifySection(left)
+	}
 	return p.pipeStage(start, left, pipe)
 }
 
@@ -1628,6 +1649,7 @@ func cloneExpr(a mem.Allocator, original *Expr) *Expr {
 		copy.Channels = slices.Append(a, copy.Channels, sourceText(a, original.Channels[i]))
 	}
 	copy.AuthoredPipe = cloneExpr(a, original.AuthoredPipe)
+	copy.CapturePolicy = cloneExpr(a, original.CapturePolicy)
 	copy.NamesOwned = true
 	if original.Text != "" {
 		copy.Text, copy.TextOwned = sourceText(a, original.Text), true
@@ -2093,6 +2115,14 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		writeExpr(b, e.AuthoredPipe)
 		return
 	}
+	if e.Kind == KashBreak || e.Kind == KashContinue {
+		if e.Kind == KashBreak {
+			b.WriteString("break")
+		} else {
+			b.WriteString("continue")
+		}
+		return
+	}
 	if e.Kind == ListSpread {
 		b.WriteString("...")
 		if len(e.Items) != 0 {
@@ -2100,17 +2130,32 @@ func writeExpr(b *strings.Builder, e *Expr) {
 		}
 		return
 	}
-	if e.Kind == KashReturn {
-		b.WriteString("return ")
+	if e.Kind == KashReturn || e.Kind == KashExit {
+		if e.Kind == KashExit {
+			b.WriteString("exit ")
+		} else {
+			b.WriteString("return ")
+		}
 		writeKashValue(b, e.Items[0])
 		if e.AcceptExit {
 			b.WriteString(" ?")
 		}
 		return
 	}
+	if e.Kind == KashLet {
+		b.WriteString("let ")
+		b.WriteString(e.Text)
+		b.WriteString(" = ")
+		writeExpr(b, e.Items[0])
+		return
+	}
 	if e.Kind == ValuePipe {
 		b.WriteByte('(')
-		writeExpr(b, e.Items[0])
+		if e.PipeCall {
+			writeEmbedded(b, e.Items[0])
+		} else {
+			writeExpr(b, e.Items[0])
+		}
 		for i := 1; i < len(e.Items); i++ {
 			b.WriteString(" | ")
 			writeEmbedded(b, e.Items[i])

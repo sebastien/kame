@@ -57,6 +57,9 @@ type Cause struct {
 }
 
 type Diagnostic struct {
+	// Exit is typed termination intent, retained independently of any cleanup
+	// failure. The evaluator's internal transfer is consumed at a host boundary.
+	Exit Termination
 	// Protected preserves unsuppressible control outcomes when an earlier
 	// ordinary diagnostic remains primary (for example, cleanup denial).
 	Protected   bool
@@ -75,6 +78,14 @@ type Diagnostic struct {
 	Cause       Cause
 	Owned       bool
 }
+
+type Termination struct {
+	Requested bool
+	Status    int
+}
+
+// ExitOnly identifies the internal control carrier, never a user-facing error.
+func (d *Diagnostic) ExitOnly() bool { return d.Exit.Requested && d.Code == "CONTROL_EXIT" }
 
 func (d *Diagnostic) Clone(a mem.Allocator) Diagnostic {
 	copy := *d

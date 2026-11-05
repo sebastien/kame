@@ -55,7 +55,7 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 			return PureResult{Code: pureText(r.Alloc, "NO_MEMORY"), Message: pureText(r.Alloc, "build sources exceed instance capacity")}
 		}
 		total += len(text)
-		r.BuildSources = slices.Append(r.Alloc, r.BuildSources, program.CompileSource{Name: pureText(r.Alloc, name), Text: pureText(r.Alloc, text), Offset: int(offset), Includes: descriptorIncludes(r.Alloc, inputs[i])})
+		r.BuildSources = slices.Append(r.Alloc, r.BuildSources, program.CompileSource{Name: pureText(r.Alloc, name), Text: pureText(r.Alloc, text), SourceDirectory: pureText(r.Alloc, host.PayloadText(inputs[i], "sourceDirectory")), Offset: int(offset), Includes: descriptorIncludes(r.Alloc, inputs[i])})
 	}
 	tools := host.PayloadList(descriptor, "toolOverrides")
 	for i := range tools {
@@ -105,6 +105,7 @@ func (r *Runtime) freeBuildSources() {
 		freeDescriptorIncludes(r.Alloc, r.BuildSources[i].Includes)
 		mem.FreeString(r.Alloc, r.BuildSources[i].Name)
 		mem.FreeString(r.Alloc, r.BuildSources[i].Text)
+		mem.FreeString(r.Alloc, r.BuildSources[i].SourceDirectory)
 	}
 	slices.Free(r.Alloc, r.BuildSources)
 	r.BuildSources = nil

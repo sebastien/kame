@@ -12,10 +12,24 @@ test-step "toolchain and binary"
 cli_require_tools
 cli_build
 
-test-step "discovery order: Makefile.kmk, then make.kmk, then src/kmk/main.kmk"
+test-step "discovery order: Kamefile, then Makefile.kmk, then make.kmk, then src/kmk/main.kmk"
 fixture_copy discovery order
 (
 	cd order
+	printf 'task where : ; [shell: kash]\n\t(out! "Kamefile\\n")\ndefault : where\n' > Kamefile
+	cli_run -- where
+	cli_expect_status 0
+	cli_expect_stdout $'Kamefile\n'
+	cli_run --
+	cli_expect_status 0
+	cli_expect_stdout $'Kamefile\n'
+	cli_run -- -f Kamefile where
+	cli_expect_status 0
+	cli_expect_stdout $'Kamefile\n'
+	cli_run -- ./Kamefile where
+	cli_expect_status 0
+	cli_expect_stdout $'Kamefile\n'
+	rm Kamefile
 	cli_run -- where
 	cli_expect_status 0
 	cli_expect_stdout "Makefile.kmk
@@ -36,7 +50,7 @@ fixture_copy discovery order
 	rm -rf src
 	cli_run -- where
 	cli_expect_status 1
-	cli_expect_stderr_contains "BUILD_NO_SOURCE" "Makefile.kmk" "make.kmk" "src/kmk/main.kmk"
+	cli_expect_stderr_contains "BUILD_NO_SOURCE" "Kamefile" "Makefile.kmk" "make.kmk" "src/kmk/main.kmk"
 )
 
 test-step "explicit file selection and --file= form"

@@ -169,6 +169,7 @@ type Event struct {
 	Data             []byte
 	Value            core.Value
 	Diagnostic       diagnostic.Diagnostic
+	Exit             diagnostic.Termination
 	Cached           bool
 	Truncated        bool
 }
@@ -236,6 +237,9 @@ func (h *Handle) Free() {
 }
 
 type Options struct {
+	// Borrow a descriptor without reading ahead or closing the caller's stream.
+	HasInput    bool
+	InputFD     int
 	PrintResult bool
 	// TrackTimings records advisory wall-clock history, never freshness evidence.
 	TrackTimings bool
@@ -307,10 +311,13 @@ type Tool struct {
 	Name        string
 	Path        string
 	Resolved    bool
+	Observed    bool
 	Declarative bool
 }
 
 type Program struct {
+	RecordReaders       []recordReaderOwner
+	RecordRequests      []host.Request
 	AutomaticClean      func(any, *Program) diagnostic.Diagnostic
 	AutomaticCleanState any
 	automaticCleanRule  *rule.Rule
@@ -356,6 +363,14 @@ type Program struct {
 }
 
 type pendingRequest struct {
+	TypedCapture     bool
+	CaptureStdout    bool
+	CaptureStderr    bool
+	StdoutLimit      int64
+	StderrLimit      int64
+	StdoutBytes      int64
+	StderrBytes      int64
+	CaptureOverflow  bool
 	Graph            core.Value // owned prepared topology for live inspection, never stdout
 	Capture          bool
 	Stream           bool
@@ -511,6 +526,8 @@ type CompileResult struct {
 type CompileSource struct {
 	Name string
 	Text string
+	// SourceDirectory is an absolute lexical loading base, never a display label.
+	SourceDirectory string
 	// Offset is the byte position of Text in its original source file.
 	Offset int
 	// Includes borrows the outer-to-inner authored inclusion path for this part.

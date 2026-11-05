@@ -78,11 +78,18 @@ func (p *Program) memoScope(scope *Scope, c *Context) core.Signature {
 	for i := range c.RenderStack {
 		d.Text(c.RenderStack[i])
 	}
-	args := core.ValueSignature(core.Value{Kind: core.List, List: c.Args})
-	if !args.Equal(args) {
-		return core.Signature{}
+	if c.sequencedOperand {
+		// Reached let/exit operands are execution progress, even when their
+		// arguments contain unhashable callables. CallPath identifies the call.
+		d.Text("sequenced-args")
+		d.Uint64(uint64(c.ScriptGroup))
+	} else {
+		args := core.ValueSignature(core.Value{Kind: core.List, List: c.Args})
+		if !args.Equal(args) {
+			return core.Signature{}
+		}
+		d.Write(args.Digest[:])
 	}
-	d.Write(args.Digest[:])
 	if c.HasArgs {
 		d.Text("args")
 	}
@@ -103,11 +110,20 @@ func (p *Program) memoScope(scope *Scope, c *Context) core.Signature {
 		d.Write(newer.Digest[:])
 	}
 	for current := scope; current != nil; current = current.Parent {
-		if current.Mutable {
+		if current.Mutable && !c.sequencedOperand {
 			return core.Signature{}
 		}
 		if current == p.Scope {
 			break
+		}
+		if c.sequencedOperand {
+			// The node, authored span, and CallPath already identify this retained
+			// statement/iteration. Do not demand lazy declarations or turn reserved
+			// eager slots/callables into unavailable progress identities. Within an
+			// sequenced operand, mutations are reached work, not a reason to replay.
+			d.Text("sequenced")
+			d.Uint64(uint64(c.ScriptGroup))
+			continue
 		}
 		d.Uint64(uint64(len(current.Bindings)))
 		// ponytail: unhashable local functions/definitions bypass retention;
@@ -286,7 +302,9 @@ func (p *Program) argumentValuesMode(scope *Scope, arguments []*expr.Expr, c *Co
 
 func (p *Program) retainArguments(scope *Scope, c *Context, span source.Span, operation string, values []core.Value, next int, facts int, effects int, completedEffects int, paths int, completedPaths int) bool {
 	for i := 0; i < next; i++ {
-		if values[i].HasCallable() {
+		// Sequenced evaluation retains its authored AST and lexical scopes;
+		// the memo can own callable operands until resumption or cancellation.
+		if values[i].HasCallable() && !c.sequencedOperand {
 			return false
 		}
 	}

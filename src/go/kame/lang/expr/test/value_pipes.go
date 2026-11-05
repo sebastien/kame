@@ -9,6 +9,11 @@ import (
 func TestValuePipeCloneAndFormattingPreserveAuthoredStructure(t *testing.T) {
 	a := t.Allocator()
 	inputs := []string{
+		`(tool "git" | ?)`,
+		`((tool "git") | ?)`,
+		`(tool "git" | ? _ "fallback")`,
+		`(str "a" "b" | uppercase | count)`,
+		`(tool "a-long-tool-name-that-exercises-the-multiline-value-pipe-formatting-layout-boundary" | ?)`,
 		`(value | first | second b)`,
 		`(value | pair _ _)`,
 		`(value | transform a _ b)`,

@@ -75,6 +75,34 @@ func validateValueScript(s *Script) {
 	}
 }
 
+// Kash composes literal, required includes only at the outermost sequence.
+// Functions and value expressions remain runtime syntax, never source loaders.
+func validateKashComposition(s *Script) {
+	for i := range s.Items {
+		item := &s.Items[i]
+		if item.Definition != nil {
+			s.compositionExpr(item.Definition.Expression, false)
+		}
+		leaf := CompositionInclude(item.Expression)
+		if item.Kind == Expression && leaf.OK && !leaf.Optional {
+			item.Kind, item.Include = Include, leaf.Path
+		} else {
+			s.compositionExpr(item.Expression, false)
+		}
+	}
+}
+
+// ValidateKashLibrary runs after loading, before any execution. Included source
+// may define functions with arbitrary bodies, but cannot run top-level work.
+func ValidateKashLibrary(s *Script) {
+	for i := range s.Items {
+		item := s.Items[i]
+		if (item.Kind != Comment && item.Kind != Definition && item.Kind != Include) || (item.Definition != nil && item.Definition.Eager) {
+			s.Diagnostics = slices.Append(s.Alloc, s.Diagnostics, source.Diagnostic{Code: "EXPR_INVALID", Severity: source.Error, Span: item.Span, Message: "Kash libraries allow only definitions, comments, and literal top-level includes"})
+		}
+	}
+}
+
 // One traversal visits every authored branch, including inactive branches and
 // interpolation expressions. Only if body slots inherit composition placement.
 func (s *Script) compositionExpr(e *expr.Expr, allowed bool) bool {

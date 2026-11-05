@@ -814,34 +814,7 @@ func (e *Engine) Free() {
 	slices.Free(e.Alloc, e.roots)
 	for i := range e.nodes {
 		n := e.nodes[i]
-		for j := range n.Subs {
-			n.Subs[j].free()
-		}
-		slices.Free(e.Alloc, n.Subs)
-		slices.Free(e.Alloc, n.Static)
-		slices.Free(e.Alloc, n.Dynamic)
-		slices.Free(e.Alloc, n.previousDynamic)
-		slices.Free(e.Alloc, n.Dependents)
-		slices.Free(e.Alloc, n.Observed)
-		slices.Free(e.Alloc, n.OrderOnly)
-		FreeObservations(e.Alloc, n.Observations)
-		if n.Current {
-			n.Latest.Free(e.Alloc)
-		}
-		if n.materializer != nil {
-			n.materializer.Free()
-		}
-		if n.ContextFree != nil {
-			n.ContextFree(e.Alloc, n.Context)
-		}
-		if n.HasCompletion {
-			n.Completion.Value.Free(e.Alloc)
-			n.Completion.Diagnostic.Free(e.Alloc)
-		}
-		n.Diagnostic.Free(e.Alloc)
-		n.Key.Free(e.Alloc)
-		n.teardownDiagnostic.Free(e.Alloc)
-		mem.Free(e.Alloc, n)
+		e.freeNode(n)
 	}
 	for i := range e.completions {
 		e.completions[i].Value.Free(e.Alloc)
@@ -852,6 +825,73 @@ func (e *Engine) Free() {
 	slices.Free(e.Alloc, e.cancellations)
 	slices.Free(e.Alloc, e.completions)
 	mem.Free(e.Alloc, e)
+}
+
+// Retire discards an unobserved terminal execution node. Callers must first
+// release every root and consumer edge, and must not retain the borrowed node.
+// Resource/definition nodes with subscribers or dependents are never removed.
+func (e *Engine) Retire(n *Node) bool {
+	index := -1
+	for i := range e.nodes {
+		if e.nodes[i] == n {
+			index = i
+			break
+		}
+	}
+	if index < 0 || n.Interest != 0 || len(n.Dependents) != 0 || len(n.Subs) != 0 || n.materializer != nil || n.Submitted || n.tearingDown || (n.State != NodeComplete && n.State != NodeFailed && n.State != NodeCancelled) {
+		return false
+	}
+	for i := range n.Static {
+		removeDependent(n.Static[i], n)
+	}
+	for i := range n.Dynamic {
+		removeDependent(n.Dynamic[i], n)
+	}
+	copy(e.nodes[index:], e.nodes[index+1:])
+	e.nodes = e.nodes[:len(e.nodes)-1]
+	for i := range e.nodeIndex {
+		if e.nodeIndex[i].node == n {
+			copy(e.nodeIndex[i:], e.nodeIndex[i+1:])
+			e.nodeIndex = e.nodeIndex[:len(e.nodeIndex)-1]
+			break
+		}
+	}
+	if e.lastRun == n {
+		e.lastRun = nil
+	}
+	e.freeNode(n)
+	return true
+}
+
+func (e *Engine) freeNode(n *Node) {
+	for i := range n.Subs {
+		n.Subs[i].free()
+	}
+	slices.Free(e.Alloc, n.Subs)
+	slices.Free(e.Alloc, n.Static)
+	slices.Free(e.Alloc, n.Dynamic)
+	slices.Free(e.Alloc, n.previousDynamic)
+	slices.Free(e.Alloc, n.Dependents)
+	slices.Free(e.Alloc, n.Observed)
+	slices.Free(e.Alloc, n.OrderOnly)
+	FreeObservations(e.Alloc, n.Observations)
+	if n.Current {
+		n.Latest.Free(e.Alloc)
+	}
+	if n.materializer != nil {
+		n.materializer.Free()
+	}
+	if n.ContextFree != nil {
+		n.ContextFree(e.Alloc, n.Context)
+	}
+	if n.HasCompletion {
+		n.Completion.Value.Free(e.Alloc)
+		n.Completion.Diagnostic.Free(e.Alloc)
+	}
+	n.Diagnostic.Free(e.Alloc)
+	n.Key.Free(e.Alloc)
+	n.teardownDiagnostic.Free(e.Alloc)
+	mem.Free(e.Alloc, n)
 }
 
 // TrackedNodes returns a caller-owned slice of borrowed runtime nodes.

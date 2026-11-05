@@ -108,7 +108,18 @@ func writeLayout(a mem.Allocator, b *strings.Builder, e *Expr, column int, inden
 	}
 	if e.Kind == ValuePipe {
 		b.WriteByte('(')
-		writeLayout(a, b, e.Items[0], column+1, indent, 0)
+		if e.PipeCall {
+			for i := range e.Items[0].Items {
+				childColumn := column + 1
+				if i != 0 {
+					layoutLine(b, indent+2)
+					childColumn = indent + 2
+				}
+				writeLayout(a, b, e.Items[0].Items[i], childColumn, childColumn, 0)
+			}
+		} else {
+			writeLayout(a, b, e.Items[0], column+1, indent, 0)
+		}
 		for i := 1; i < len(e.Items); i++ {
 			layoutLine(b, indent+2)
 			b.WriteString("| ")

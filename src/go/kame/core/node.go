@@ -65,6 +65,7 @@ type Node struct {
 }
 
 func (n *Node) HasActiveSource() bool { return n != nil && n.materializer != nil }
+func (n *Node) IsTearingDown() bool   { return n != nil && n.tearingDown }
 
 func (n *Node) complete(e *Engine, diagnostic Diagnostic) {
 	if n.State == NodeComplete || n.State == NodeFailed || n.State == NodeCancelled {

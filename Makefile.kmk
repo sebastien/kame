@@ -168,6 +168,7 @@ WASM_EXPORTS =
     "kame_wasm_complete_text"
     "kame_wasm_complete_nil"
     "kame_wasm_complete_json"
+    "kame_wasm_complete_capture"
     "kame_wasm_complete_failure"
     "kame_wasm_result_copy"
     "kame_wasm_result_kind"

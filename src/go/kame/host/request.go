@@ -36,6 +36,8 @@ const (
 	// RequestPlugin invokes one explicitly registered, versioned operation.
 	RequestPlugin
 	RequestPublishFile
+	RequestRecordRead
+	RequestRecordClose
 )
 
 // Request owns Payload until it is popped or the queue is freed.

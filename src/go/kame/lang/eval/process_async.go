@@ -30,6 +30,7 @@ func (p *Program) startProcess(e *expr.Expr, c *Context, prepared *captureState)
 	task.FinalizerCleanup = c.finalizer != nil && c.finalizer.Stage >= 2
 	task.Graph.Async = false
 	task.Context = p.retainExecutionContext(c)
+	task.Context.InputClosed = true
 	task.Prepared = clonePreparedProcess(p.Alloc, prepared)
 	var buffer [strconv.MaxIntBase10Len]byte
 	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<process:"+strconv.Itoa(buffer[:], len(p.Processes))+">")

@@ -18,8 +18,9 @@ var errMemoryNotEmpty = errors.New("directory is not empty")
 // supplied. docs/spec/010-wasm.md explicitly allows a browser host to map host
 // requests to an in-memory filesystem like this one.
 type MemoryHost struct {
-	Alloc mem.Allocator
-	Files []memoryFile
+	Readers []memoryRecordCursor
+	Alloc   mem.Allocator
+	Files   []memoryFile
 	// Dirs records directories created with Mkdir. Directories are otherwise
 	// derived from file paths; an explicit empty directory needs this list.
 	Dirs []string
@@ -307,6 +308,9 @@ func (h *MemoryHost) SupportsExecutor(name string, version string) bool {
 }
 
 func (h *MemoryHost) Start(request host.ProcessRequest) bool {
+	if request.InputMode != "" && request.InputMode != "closed" {
+		return false
+	}
 	_, _ = h, request
 	return false
 }
@@ -342,6 +346,10 @@ func (h *MemoryHost) Free() {
 	if h == nil {
 		return
 	}
+	for i := range h.Readers {
+		mem.FreeString(h.Alloc, h.Readers[i].Name)
+	}
+	slices.Free(h.Alloc, h.Readers)
 	for i := range h.Files {
 		mem.FreeString(h.Alloc, h.Files[i].Path)
 		slices.Free(h.Alloc, h.Files[i].Data)

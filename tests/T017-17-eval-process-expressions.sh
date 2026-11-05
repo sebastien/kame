@@ -35,8 +35,8 @@ for backend in native wasm; do
 	if cmp -s "$work/binary" "$work/expected-binary"; then test-ok "$backend process values never decode binary stdout"; else test-fail "$backend binary stream"; fi
 	check ':false' '(let [r (run! "true")] r.stdoutCaptured)'
 	check ':false' '(let [r (run! "true")] r.stderrCaptured)'
-	check '[[status: 0 signal: 0 outcome: 0]]' '(let [r (run! "true")] r.stages)'
-	check '[[status: 0 signal: 0 outcome: 0] [status: 0 signal: 0 outcome: 0]]' '(let [r (pipe! (run! "true") (run! "true"))] r.stages)'
+	check '[[status: 0 signal: 0 outcome: 0 effectiveStatus: 0]]' '(let [r (run! "true")] r.stages)'
+	check '[[status: 0 signal: 0 outcome: 0 effectiveStatus: 0] [status: 0 signal: 0 outcome: 0 effectiveStatus: 0]]' '(let [r (pipe! (run! "true") (run! "true"))] r.stages)'
 	check '0' '(let [r (run! "true")] r.signal)'
 	check 'literal :cwd0' '(let [r (run! "printf" "%s" "literal :cwd")] r.status)'
 	check '0' '(let [r (run! :VALUE "child value" "sh" "-c" "test \"$VALUE\" = \"child value\"")] r.status)'
@@ -71,6 +71,29 @@ for backend in native wasm; do
 	if [ ! -e "$work/forbidden" ] && [ ! -s "$work/out" ]; then test-ok "$backend dry-run does not launch expressions"; else test-fail "$backend dry-run effects"; fi
 	"${command[@]}" do run --allow-run --json -l expr -c '(let [r (pipe! (run! "printf" "hello") (run! "tr" "a-z" "A-Z"))] r)' >"$work/$backend.jsonl" 2>"$work/err"
 	if [ ! -s "$work/err" ] && jq -e -s 'all(.schema == 1 and .type != "diagnostic")' "$work/$backend.jsonl" >/dev/null; then test-ok "$backend structured JSON result"; else test-fail "$backend process JSON"; fi
+	test-step "$backend recipe captures preserve no-op builds"
+	cache_work="$work/cache-$backend"
+	mkdir -p "$cache_work"
+	cat >"$cache_work/Kamefile" <<'KAME'
+SHELL = kash
+./plain : ./input
+	let captured = $(sh -c "printf x >> plain-log; cat input")
+	(yield! captured)
+./typed : ./input
+	let captured = (capture! [stdout: :true] "sh" "-c" "printf x >> typed-log; cat input")
+	(yield! captured.stdout)
+KAME
+	for phase in first noop changed noop; do
+		if [ "$phase" != noop ]; then printf '%s' "$phase" >"$cache_work/input"; fi
+		"${command[@]}" do run --allow-run --allow-read --allow-write -C "$cache_work" ./Kamefile ./plain ./typed >"$work/out" 2>"$work/err"
+		expected=x
+		if [ "$(cat "$cache_work/input")" = changed ]; then expected=xx; fi
+		if cmp -s "$cache_work/input" "$cache_work/plain" && cmp -s "$cache_work/input" "$cache_work/typed" && [ "$(cat "$cache_work/plain-log")" = "$expected" ] && [ "$(cat "$cache_work/typed-log")" = "$expected" ]; then
+			test-ok "$backend $phase capture outputs and execution counts"
+		else
+			test-fail "$backend $phase capture freshness"; cat "$work/err"
+		fi
+	done
 done
 test-step "portable process result events"
 for backend in native wasm; do jq -cS 'del(.node,.request,.generation,.attempt,.elapsedMS)' "$work/$backend.jsonl" >"$work/$backend.norm"; done

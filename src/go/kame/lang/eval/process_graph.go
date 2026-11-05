@@ -63,6 +63,13 @@ func hasProcessTopology(e *expr.Expr) bool {
 // Build dependencies remain engine edges, not process-channel connections.
 func prepareProcessGraph(c *Context, e *expr.Expr, flat *expr.Expr) Result {
 	ports := lowerProcessGraph(c, e, flat)
+	flat.InputRoot = -1
+	if len(ports.Inputs) == 1 {
+		root := ports.Inputs[0]
+		if flat.Items[root].Kind == expr.CommandStage && flat.Items[root].Int == 0 {
+			flat.InputRoot = root
+		}
+	}
 	slices.Free(c.Run, ports.Inputs)
 	slices.Free(c.Run, ports.Outputs)
 	if flat.Text != "" {

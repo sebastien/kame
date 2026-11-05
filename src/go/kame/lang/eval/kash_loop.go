@@ -7,6 +7,12 @@ import (
 )
 
 type kashLoopState struct {
+	Program   *Program
+	ReaderID  int64
+	RequestID int64
+	Path      string
+	Delimiter int
+	Stdin     bool
 	Control   *kashControlState
 	Budget    kashInvocation
 	Iterable  core.Value
@@ -18,6 +24,8 @@ type kashLoopState struct {
 
 func freeKashLoop(a mem.Allocator, value any) {
 	state := value.(*kashLoopState)
+	closeKashReader(state)
+	mem.FreeString(a, state.Path)
 	freeKashControlState(a, state.Control)
 	freeCallables(a, &state.Iterable)
 	state.Iterable.Free(a)
@@ -42,6 +50,7 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 	}
 	if state == nil {
 		state = mem.Alloc[kashLoopState](p.Alloc)
+		state.Program = p
 		state.Control = mem.Alloc[kashControlState](p.Alloc)
 		state.Budget.TimedIndex = -1
 		state.Budget.TimeoutLimitMS = c.TimeoutMS
@@ -51,6 +60,15 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 	replayControlEffects(state.Control, c)
 	if state.Done {
 		return Result{}
+	}
+	if e.Kind == expr.KashRecords && !state.Ready {
+		r := p.kashRecordSource(scope, e, state, c)
+		if r.Waiting || r.Diagnostic.Code != "" {
+			return r
+		}
+		if state.Done {
+			return Result{}
+		}
 	}
 	if e.Kind == expr.KashFor && !state.Ready {
 		before, beforePaths := len(c.Effects), len(c.WritePaths)
@@ -70,7 +88,12 @@ func (p *Program) kashLoop(scope *Scope, e *expr.Expr, c *Context) Result {
 	}
 	previousPath, previousTimeout := c.CallPath, c.TimeoutMS
 	c.CallPath = invocationPath(c.Run, previousPath, e.Span.Start, state.Iteration)
+	c.loopDepth++
 	r := p.advanceKashLoop(scope, e, state, c)
+	if e.Kind == expr.KashRecords && (state.Done || r.Returned || r.Diagnostic.Code != "") {
+		closeKashReader(state)
+	}
+	c.loopDepth--
 	mem.FreeString(c.Run, c.CallPath)
 	c.CallPath, c.TimeoutMS = previousPath, previousTimeout
 	return r
@@ -92,6 +115,12 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 	}
 	control, branch := state.Control, e.Items[0]
 	if !state.InBody {
+		if e.Kind == expr.KashRecords {
+			r := p.kashRecordNext(e, state, c)
+			if r.Waiting || r.Diagnostic.Code != "" || state.Done {
+				return r
+			}
+		}
 		if e.Kind == expr.KashWhile {
 			before, beforePaths := len(c.Effects), len(c.WritePaths)
 			r := p.evaluate(c.Engine, scope, branch.Items[0], c)
@@ -108,8 +137,12 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 			}
 		}
 		control.Scope = newScope(p.Alloc, scope)
-		if e.Kind == expr.KashFor {
-			item := borrowValue(p.Alloc, state.Iterable.List[state.Iteration])
+		if e.Kind == expr.KashFor || e.Kind == expr.KashRecords {
+			value := state.Iterable
+			if e.Kind == expr.KashFor {
+				value = state.Iterable.List[state.Iteration]
+			}
+			item := borrowValue(p.Alloc, value)
 			control.Scope.setValue(e.Text, item)
 			item.Free(p.Alloc)
 		}
@@ -120,16 +153,30 @@ func (p *Program) advanceKashLoop(scope *Scope, e *expr.Expr, state *kashLoopSta
 		state.InBody = true
 		state.Budget.Index++
 	}
+	previousBody := c.RecordBody
+	if e.Kind == expr.KashRecords {
+		c.RecordBody = true
+	}
 	r := p.kashBodyBudget(control, branch.Body, c, &state.Budget)
+	c.RecordBody = previousBody
 	if r.Waiting || r.Returned || r.Diagnostic.Code != "" {
 		return r
 	}
+	transfer := r.LoopTransfer
 	r.Free(c.Run)
 	control.Scope.Free()
 	control.Scope = nil
 	control.Value.Free(p.Alloc)
 	control.Index = 0
 	state.InBody = false
+	if e.Kind == expr.KashRecords {
+		state.Iterable.Free(p.Alloc)
+		p.retireRecordProgress(c)
+	}
+	if transfer == expr.KashBreak {
+		state.Done = true
+		return Result{}
+	}
 	state.Iteration++
 	state.Budget.Index++
 	if e.Kind == expr.KashFor && state.Iteration == len(state.Iterable.List) {

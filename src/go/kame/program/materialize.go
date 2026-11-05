@@ -11,6 +11,7 @@ import (
 )
 
 type Result struct {
+	Exit       diagnostic.Termination
 	Path       string
 	Value      core.Value
 	Fresh      bool
@@ -346,6 +347,8 @@ func (p *Program) Tick(wait int) {
 }
 
 func (p *Program) readyForTick(wait int) []*core.Node {
+	p.closeAbandonedRecordReaders()
+	p.serviceRecordRequests()
 	p.Eval.PollFinalizers()
 	p.tickServiceReadiness()
 	// Pending host requests are local work too: synchronous reads must be
@@ -353,10 +356,14 @@ func (p *Program) readyForTick(wait int) []*core.Node {
 	if p.Engine.HasWork() || p.Eval.Requests.HasRequests() {
 		wait = 0
 	}
+	if len(p.RecordRequests) != 0 && (wait < 0 || wait > 1) {
+		wait = 1
+	}
 	p.pump(wait)
 	p.tickServiceReadiness()
 	p.tickServiceRestartTimers()
 	p.drainRequests()
+	p.serviceRecordRequests()
 	p.Engine.DrainCompletions()
 	jobs := p.Options.Jobs
 	if jobs <= 0 {
@@ -497,6 +504,14 @@ func (h *Handle) poll(release bool) HandleResult {
 		h.Program.drainCancellations()
 	}
 	if h.Node.State != core.NodeComplete {
+		if h.Node.Diagnostic.Exit.Requested {
+			d := h.Node.Diagnostic.Clone(h.Program.Alloc)
+			exit := d.Exit
+			if d.ExitOnly() {
+				d.Free(h.Program.Alloc)
+			}
+			return HandleResult{Done: true, Result: Result{Exit: exit, Diagnostic: d}}
+		}
 		return HandleResult{Done: true, Result: Result{Diagnostic: h.Node.Diagnostic.Clone(h.Program.Alloc)}}
 	}
 	if h.Definition {

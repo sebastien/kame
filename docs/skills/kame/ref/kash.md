@@ -32,6 +32,30 @@ result, and propagates failure. Nil, records, and process-result records are not
 executables and do not print implicitly. There is no `do (EXPRESSION)` form.
 For a computed executable, bind its value and use `$command` at command position.
 
+## Eager immutable bindings
+
+```kash
+let workspace = (line $(mktemp -d))
+defer rm -rf $workspace
+printf "%s\n" $workspace
+```
+
+`let NAME = VALUE` evaluates its initializer when execution reaches the statement,
+even if the name is never read. The immutable value is retained across suspension;
+completed initializer work is not replayed. Ordinary `NAME = VALUE` remains lazy.
+Each function call, selected branch, and loop iteration has fresh local bindings.
+
+Eager names are reserved throughout their lexical scope. Reading one before its
+statement is reached, including through a lazy definition or function, raises
+protected `BINDING_UNINITIALIZED`: it neither finds an outer name nor triggers the
+initializer, and recovery cannot hide it. Duplicate local declarations, parameter
+collisions, and reassignment are errors. `--define`, `--set`, and assignment-shaped
+configuration cannot override eager bindings; environment defaults do not replace
+them. Dry-run skips initializers and defers reads without effects.
+
+Eager declarations are executable statements, so included definition-only libraries
+cannot contain them at top level; their function bodies may use them.
+
 ## Native functions
 
 ```kash
@@ -65,6 +89,156 @@ lookup, pipelines, and process operators do not implicitly invoke functions.
 
 Use native functions for authored multi-command bodies. `(kash TEXT)` remains
 available when deliberately constructing script text is necessary.
+
+## Deliberate script exit
+
+`exit STATUS` evaluates one typed value and terminates the host-established
+execution boundary. Status must be an integer from 0 through 255. There is no
+implicit last status, acceptance `?`, process operator, or redirection.
+
+Unlike `return`, exit passes through functions, constructed scripts, branches,
+and loops. In an ordered runner session it also skips later fragments. In a Kash
+recipe it ends only that attempt; a successful file recipe still verifies and
+publishes its outputs. Embeddings receive a typed termination outcome, never an
+unconditional exit of the embedding process.
+
+Exit is not recoverable by `?`, `??`, fallback, or condition truth conversion.
+`exit 0` joins owned work before cleanup; nonzero exit cancels/reaps owned work.
+Registered defers run once in LIFO order under existing cleanup budgets. A job or
+cleanup failure can fail an otherwise successful exit, but cannot resume execution
+or select a fallback. A nonzero requested status survives cleanup failure.
+
+Direct `defer exit` is invalid. Indirect exit during finalization reports
+`PHASE_INVALID` before evaluating its operand. Exit without an execution boundary
+is also invalid. Dry-run does not evaluate exit operands or request termination.
+
+## Owned execution scopes
+
+```kash
+exports = [MODE: "release"]
+with :cwd ./project :env $exports
+	defer rm -f ./scratch
+	configure
+	compile
+verify-elsewhere
+```
+
+`with` starts a nonempty indented body with fresh locals and its own async/cleanup
+lifetime. Its header occupies its own line and accepts optional `:cwd VALUE` and
+`:env VALUE` pairs, each once, in either order. Values use the same scalar cwd and
+typed environment-record grammar as process stage setup. Unknown setup keys and
+block timeouts are not supported. Kame's expression `(with ...)` is unchanged.
+
+Setup evaluates left to right, once across suspension, in the enclosing context;
+all values are validated before entering the body. Relative cwd resolves against
+the enclosing cwd. Environment records override inherited child environment
+entries without granting environment-read access or changing startup tool lookup.
+Calls and deferred expressions inherit the effective context. A stage override
+such as `:cwd ./build pwd` inside `with :cwd ./project` uses `./project/build`.
+Neither the host's global cwd nor its environment is mutated.
+
+Each block joins its own work before normal completion, successful return, or
+successful exit, then runs its defers in LIFO order. Failure and unsuccessful
+return/exit cancel and reap that work first. Defers reached in ordinary branches
+or iterations belong to the enclosing execution scope, not to that iteration.
+Nested functions and `with` blocks retain their own lifetimes. Borrowed outer
+process handles are not adopted. Cleanup cannot restart an active cleanup budget.
+
+Cleanup finishes before the enclosing context resumes. Failure prevents an
+otherwise successful completion or return; a pending exit remains terminal.
+Normal completion preserves the body's ordinary final-statement value without
+printing it or collecting results. Context does not refresh memoized definitions,
+rebase materialized resources, or alter authored source identity. Dry-run evaluates
+neither setup nor body and acquires no scope or resources.
+
+## Loop transfers
+
+`break` ends the nearest enclosing `for` or `while`; `continue` skips the
+remaining body and starts its next iteration (rechecking a `while` condition).
+Both are standalone statements without operands, labels, status acceptance,
+redirections, or process operators. They require a lexically enclosing loop in
+the same function or script, even in an unreachable branch. They cannot be
+deferred or target a caller's loop.
+
+A transfer crossing a `with` scope joins that scope's work and runs its cleanup
+before reaching the loop. Join or cleanup failure replaces the transfer with a
+failure. Ordinary iteration defers remain owned by their enclosing execution
+scope; transfers neither run them early nor cancel that scope's async jobs.
+Loops inside cleanup may use their own local transfers. `continue` retains the
+normal iteration deadline and interruption checks.
+
+## Regular-file record loops
+
+```kash
+for line from ./events.jsonl :lines
+	let event = (parse-json line)
+	inspect $event.name
+
+for path from ./paths.list :nul
+	inspect $path
+```
+
+`from SOURCE FRAME` is distinct from materialized `in LIST`. SOURCE is one
+literal `:stdin`, or an expression or standalone reference yielding a nonempty local path string or
+`file:` resource. FRAME is literal `:lines` or `:nul`. The file is evaluated and
+opened once, requires read authority and regular-file storage, and participates
+in dependency tracking. It is not snapshotted against concurrent in-place writes.
+
+Records are UTF-8 text, without their LF/paired CRLF or NUL delimiter. Unpaired
+CR remains data; NUL framing preserves embedded CR/LF. Empty input has no records,
+consecutive delimiters produce empty records, and a final delimiter invents no
+extra item. A nonempty unterminated final record is valid. Each record is limited
+to 64 KiB including a present delimiter: excess reports `KASH_RECORD_LIMIT`,
+invalid UTF-8 reports `KASH_FRAME_ENCODING`, and neither becomes EOF/truncation.
+
+Bodies run sequentially with fresh locals and closed default command stdin;
+explicit independent file inputs remain valid. `break` stops without draining,
+`continue` advances, and readers close on completion, transfer, failure, or
+cancellation. Completed per-record operation and finished cleanup-scope state is
+retired. Invocation-owned values, process handles, constructed callables and
+outer-scope defers retain their existing lifetimes. Results are not collected.
+Use `with` or a callable for cleanup that must finish per record.
+
+`for line from :stdin :lines` reads the invocation's remaining input without a
+file grant. Closed input yields no records. One active reader claims that input;
+nested readers report `KASH_DOUBLE_CONSUME`, while body commands keep closed
+default input. On exit, the claim is released without closing the caller's
+descriptor or consuming bytes past the last delimiter. Pending reads obey
+cancellation and deadlines, without whole-input capture or per-record processes.
+Native hosts poll supplied descriptors. Node supports regular files and Linux
+pipes/FIFOs; sockets and other unsupported handles report `FEATURE_UNSUP` before
+reading. Interactive terminal input remains closed.
+
+## Local libraries and source identity
+
+File-backed scripts can compose shared definitions without executing a second
+runner or generating source:
+
+```kash
+(include ./lib/checks.kash)
+config = (joinpath (source-dir) "defaults.json")
+(check-config config)
+```
+
+Includes are literal, required, top-level forms, resolved relative to their
+containing source. Included files use Kash grammar regardless of suffix and may
+contain comments, lazy definitions, `defn` functions, and nested includes only.
+Inclusion does not demand definitions or run function bodies. All sources are
+parsed and validated before execution; definitions share the including namespace
+and forward visibility. Repeated inclusion expands again, so repeated declarations
+are errors. Cycles are rejected and include frames retain authored locations.
+
+`(source-dir)` returns the absolute lexical directory of the file containing the
+authored call, including inside an included function invoked from another source.
+It does not inspect cwd, resolve symlinks, or require a filesystem grant. Later
+asset reads retain their normal grants. Inline, stdin, and constructed source
+without file-backed metadata report `SEL_NO_CONTEXT`; a display label alone does
+not provide that metadata.
+
+Includes cannot appear inside functions, branches, or value expressions, or in
+inline/stdin/constructed source. Optional/computed includes, source search paths,
+namespaces, and load-time commands are not provided. Execution authority and
+ordinary cwd-relative paths are unchanged.
 
 ## Explicit boundaries and argv
 
@@ -186,11 +360,68 @@ file. `2>&1` copies stdout's destination at that point, so `> file 2>&1` merges
 both into the file and `2>&1 > file` leaves stderr on the previous stdout.
 `3>`, `1>&2`, and heredocs are not defined.
 
+`:accept-exit [1 7]` accepts only those ordinary nonzero exits for that stage;
+the list must contain distinct integers from 1 through 255. It also works on
+`run!`. Empty lists accept nothing extra. Validation precedes graph launch and
+output opening. Raw Result status stays unchanged, while `effectiveStatus`,
+conditions, joins and failure policy reflect acceptance. Accepted exits never
+hide an unaccepted peer/worker failure, signal, deadline, launch or transport error.
+
 Setup pairs precede the executable. `:cwd` sets stage cwd, `:timeout` is in
 seconds (unlike CLI `--timeout` in milliseconds), and other valid keys override
 stage environment entries. An ordinary filename argument does not declare a
 dependency; an input redirection does. Grants do not sandbox an executable's
 internal filesystem access.
+
+### Typed capture
+
+```kash
+let result = (capture! [stdout: :true stderr: :true stderrLimit: 4096] :accept-exit [1] "checker" "--report")
+printf %s (text result.stdout)
+```
+
+`capture! POLICY SETUP... EXECUTABLE ARGUMENTS...` runs one typed-argv command
+synchronously. Select stdout, stderr or both with booleans; omitted selections
+are false and at least one must be true. Positive integer `stdoutLimit` and
+`stderrLimit` independently default to the invocation capture limit. Unknown
+policy fields, invalid limits and `:async` fail before launch.
+
+Results retain raw status/stages and add exact `stdout`/`stderr` bytes (nil for
+unselected streams). Empty captured output is empty bytes. The matching
+`stdoutCaptured`/`stderrCaptured` flags indicate selection. Selected streams are
+not also published; unselected streams stay live. Use `text` for explicit UTF-8
+decoding, which can fail separately. NUL and trailing newlines remain intact.
+Each stream is drained concurrently within its own limit; overflow cancels owned
+work and reports `CAPTURE_LIMIT`, never successful truncation. Failure acceptance
+is explicit through `:accept-exit`; signals and fatal errors remain failures.
+Default input is closed. Pipelines, async capture and graph capture are not
+supported. See [Process inspection](../../../spec/049-process-inspection.md).
+
+### Invocation stdin
+
+File-backed and inline standalone value/Kash sessions borrow piped or
+file-redirected data stdin (interactive terminal input remains closed):
+
+```sh
+printf 'payload\n' | kame do run -l kash -c 'cat'
+```
+
+Foreground commands, including functions, `with`, `run!`, and `pipe!`, receive
+the remaining input at the main graph's unique source. Explicit file inputs and
+connections override it. A source before fan-out qualifies; multiple main sources
+do not, even if one is file-fed. Anonymous live-operand producers stay closed;
+current-stream operand receivers retain their closed default stdin.
+
+Captures (including nested helpers), background work, and cleanup receive closed
+default input. A session containing a stdin source fragment reserves all stdin for
+source loading instead. Ordinary build recipes and embeddings remain closed
+unless their host explicitly supplies data input.
+
+Sequential consumers share the remaining bytes, without copying, restarting, or
+parent-side read-ahead. Completing a command does not close the caller's stream.
+Supplied input needs no read grant; file redirections still do. Boundaries supplied
+opaque input conservatively disable execution reuse, including file freshness,
+because replaying output cannot reproduce consumption of a borrowed stream.
 
 ### Stage environments
 
@@ -531,7 +762,8 @@ branches execute; `match` captures are scoped to the selected arm.
 - `CMD ?` accepts a nonzero or signal exit but leaves live stderr visible.
 - `CMD ? FALLBACK` runs a fallback process on recoverable command failure.
 - `LEFT ?? RIGHT` recovers a nil/failed value in Kash RHSs, not raw commands or
-  inside Kame expressions. It is distinct from Kame's unknown-reference `?` form.
+  inside Kame expressions. It is distinct from Kame's missing-lookup `?` form,
+  which handles only unprotected `REF_MISSING` and `TOOL_MISSING` failures.
 - Recovery never suppresses capability denial or cancellation.
 - Shell subshell grouping and single-quoted shell strings are not supported. Use
   Kash control statements or Kame special forms for compound value logic.

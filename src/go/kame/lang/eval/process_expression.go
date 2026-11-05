@@ -7,6 +7,7 @@ import (
 	"kame/lang/source"
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strings"
 )
 
 // Lower syntax, not values: pipe must validate its complete shape before any
@@ -15,7 +16,12 @@ func (p *Program) processExpression(e *expr.Expr, c *Context) Result {
 	graph := mem.Alloc[expr.Expr](c.Run)
 	graph.Kind, graph.Span = expr.CommandResult, e.Span
 	defer expr.Free(c.Run, graph)
-	if e.Items[0].Text == "run!" {
+	if e.Items[0].Text == "run!" || e.Items[0].Text == "capture!" {
+		graph.TypedCapture = e.Items[0].Text == "capture!"
+		if graph.TypedCapture && len(e.Items) >= 3 {
+			// The policy is part of the capture invocation, not a stage setup.
+			graph.CapturePolicy = processExpressionWord(c.Run, e.Items[1])
+		}
 		graph.Items = slices.Append(c.Run, graph.Items, mem.Alloc[expr.Expr](c.Run))
 		r := lowerProcessStage(c, graph.Items[0], e, false)
 		if r.Diagnostic.Code != "" {
@@ -39,13 +45,21 @@ func (p *Program) processExpression(e *expr.Expr, c *Context) Result {
 
 func lowerProcessStage(c *Context, stage *expr.Expr, e *expr.Expr, pipeline bool) Result {
 	stage.Kind, stage.Span = expr.CommandStage, e.Span
-	if e.Kind != expr.Application || len(e.Items) == 0 || e.Items[0].Kind != expr.Name || e.Items[0].Text != "run!" {
+	if e.Kind != expr.Application || len(e.Items) == 0 || e.Items[0].Kind != expr.Name || (e.Items[0].Text != "run!" && (pipeline || e.Items[0].Text != "capture!")) {
 		return failure(c.Run, "EXPR_INVALID", e.Span, "pipe! stages must be run! applications")
 	}
 	i := 1
+	capture := e.Items[0].Text == "capture!"
+	if capture {
+		if len(e.Items) < 3 {
+			return failure(c.Run, "EXPR_INVALID", e.Span, "capture! requires a policy and executable")
+		}
+		i++
+	}
 	for i < len(e.Items) && e.Items[i].Kind == expr.Symbol {
 		key := e.Items[i]
-		if !processSetupKey(key.Text) || (pipeline && key.Text == "async") {
+		kind, valid := expr.ClassifySetupKey(key.Text)
+		if !valid || ((pipeline || capture) && kind == expr.SetupAsync) {
 			return failure(c.Run, "EXPR_INVALID", key.Span, "invalid process setup key")
 		}
 		for j := range stage.Items {
@@ -78,13 +92,13 @@ func processExpressionWord(a mem.Allocator, e *expr.Expr) *expr.Expr {
 	return word
 }
 
-func processSetupKey(key string) bool {
-	if key == "" {
+func validProcessEnvironment(value core.Value) bool {
+	if value.Kind != core.Record {
 		return false
 	}
-	for i := 0; i < len(key); i++ {
-		b := key[i]
-		if b != '_' && !(b >= 'a' && b <= 'z') && !(b >= 'A' && b <= 'Z') && !(i > 0 && b >= '0' && b <= '9') {
+	for i := range value.Record {
+		field := value.Record[i]
+		if !expr.ValidEnvironmentName(field.Key) || field.Value.Kind != core.String || strings.IndexByte(field.Value.Text, 0) >= 0 {
 			return false
 		}
 	}
@@ -111,6 +125,8 @@ func processResult(a mem.Allocator, completion core.Value, span source.Span) Res
 			{Key: "outcome", Value: core.Value{Kind: core.Int, Int: host.PayloadInt(stage, "outcome")}},
 		}
 		stages = slices.Append(a, stages, core.NewRecord(a, parts))
+		v := &stages[len(stages)-1]
+		v.Record = slices.Append(a, v.Record, core.RecordField{Key: owned(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(stage)}})
 	}
 	fields := []core.RecordField{
 		{Key: "status", Value: core.Value{Kind: core.Int, Int: status}},
@@ -120,6 +136,8 @@ func processResult(a mem.Allocator, completion core.Value, span source.Span) Res
 		{Key: "stderrCaptured", Value: core.Value{Kind: core.Bool}},
 	}
 	value := core.NewRecord(a, fields)
+	value.Record = slices.Append(a, value.Record, core.RecordField{Key: owned(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: host.EffectiveStatus(completion)}})
+	value.Record = slices.Append(a, value.Record, core.RecordField{Key: owned(a, "effectiveSignal"), Value: core.Value{Kind: core.Int, Int: host.EffectiveSignal(completion)}})
 	fields[2].Value.Free(a)
 	for i := range stages {
 		stages[i].Free(a)

@@ -5,6 +5,7 @@ import (
 	"kame/diagnostic"
 	"kame/host"
 	"solod.dev/so/mem"
+	"solod.dev/so/path"
 	"solod.dev/so/slices"
 )
 
@@ -49,6 +50,10 @@ func validDescriptorOptions(value core.Value, session bool) bool {
 			if session && (field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 2147483647) {
 				return false
 			}
+		case "dataInput":
+			if !session || field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1 {
+				return false
+			}
 		case "force", "trackTimings":
 			if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1 {
 				return false
@@ -85,6 +90,10 @@ func validDescriptorSource(value core.Value) bool {
 		switch field.Key {
 		case "name", "text":
 			if field.Value.Kind != core.String {
+				return false
+			}
+		case "sourceDirectory":
+			if field.Value.Kind != core.String || (field.Value.Text != "" && !path.IsAbs(field.Value.Text)) {
 				return false
 			}
 		case "offset":

@@ -53,13 +53,16 @@ type ProcessRequest struct {
 	ExecutorVersion string
 	Shell           []string
 	// Argv executes directly instead of appending Script to Shell.
-	// A nonempty Argv also closes stdin for command substitution.
+	// Default stdin is closed unless InputMode explicitly selects invocation input.
 	Argv            []string
 	Stages          []ProcessStage
 	Topology        bool
 	CollectFailures bool // collect ordinary external exit statuses; signals/operators remain fatal
 	Edges           []ProcessEdge
 	Input           string
+	InputMode       string // empty/closed or invocation; file and edge inputs override defaults.
+	InputRoot       int
+	InputFD         int // Borrowed host descriptor, never owned by the request.
 	Output          string
 	Append          bool
 	Script          []byte
@@ -79,6 +82,7 @@ type ExecutorDescriptor struct {
 }
 
 type ProcessStage struct {
+	Accepted    [256]bool
 	Order       int    // 0 ready, 1 strict framed round-robin (merge only)
 	BufferBytes int    // zero selects the host's bounded default; native muxes only
 	Overflow    int    // 0 block, 1 drop-new, 2 drop-old, 3 latest; framed broadcast only
@@ -105,15 +109,18 @@ const (
 	StderrStdout       = 2
 	StderrPresentation = 3
 )
+
 type ProcessEdge struct {
 	From     int
 	To       int
 	Argument int
 }
 type ProcessStageResult struct {
-	Status  int
-	Signal  int
-	Outcome ProcessOutcome
+	HasEffectiveStatus bool
+	EffectiveStatus    int
+	Status             int
+	Signal             int
+	Outcome            ProcessOutcome
 }
 
 // Measurement: 0 unavailable, 1 completed write, 2 read, 3 queued completed
@@ -131,19 +138,22 @@ type ProcessEdgeMetrics struct {
 // ProcessEvent owns Data, Stdout, Stderr, and Diagnostic and must be released
 // with Free after its receiver has consumed or transferred them.
 type ProcessEvent struct {
-	Kind            ProcessEventKind
-	ID              int64
-	PID             int64
-	PGID            int64
-	Outcome         ProcessOutcome
-	Status          int
-	Signal          int
-	Data            []byte
-	Diagnostic      ProcessDiagnostic
-	Stdout          []byte
-	Stderr          []byte
-	StdoutTruncated bool
-	StderrTruncated bool
+	HasEffectiveStatus bool
+	EffectiveStatus    int
+	EffectiveSignal    int
+	Kind               ProcessEventKind
+	ID                 int64
+	PID                int64
+	PGID               int64
+	Outcome            ProcessOutcome
+	Status             int
+	Signal             int
+	Data               []byte
+	Diagnostic         ProcessDiagnostic
+	Stdout             []byte
+	Stderr             []byte
+	StdoutTruncated    bool
+	StderrTruncated    bool
 	// RetainBytes is the per-stream capture bound used for this terminal event.
 	// It lets diagnostics report whether retained process output was truncated.
 	RetainBytes int

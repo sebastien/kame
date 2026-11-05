@@ -55,6 +55,16 @@ reject() {
 	fi
 }
 
+test-step "Kamefile discovery and explicit rule-language selection"
+mkdir -p "$work/kamefile"
+printf 'default : ; [shell: kash]\n\t(out! "Kamefile\\n")\n' >"$work/kamefile/Kamefile"
+printf 'invalid fallback (\n' >"$work/kamefile/Makefile.kmk"
+compare -C "$work/kamefile"
+compare -C "$work/kamefile" default
+compare -C "$work/kamefile" -f Kamefile default
+compare -C "$work/kamefile" ./Kamefile default
+compare do plan --json -C "$work/kamefile" default
+
 test-step "discovery and every inspection surface expand nested includes"
 compare -C "$work/project" default
 compare -C "$work/project" -f Makefile.kmk default

@@ -17,7 +17,7 @@ const defEscapeMessage = "function value escapes its scope; define it with (def 
 // ordinary registry operations. Special forms cannot be registered as operations.
 func IsSpecialForm(name string) bool {
 	switch name {
-	case "?", "let", "def", "eval", "if", "and", "or", "with", "match", "run!", "pipe!", "await", "include", "include?":
+	case "?", "let", "def", "eval", "if", "and", "or", "with", "match", "run!", "capture!", "pipe!", "await", "include", "include?":
 		return true
 	}
 	return false
@@ -53,7 +53,7 @@ func (p *Program) body(scope *Scope, body []*expr.Expr, context *Context) Result
 func (p *Program) fallback(scope *Scope, values []*expr.Expr, context *Context) Result {
 	for i := range values {
 		r := p.evaluate(context.Engine, scope, values[i], context)
-		if r.Waiting || r.Diagnostic.Protected || r.Diagnostic.Code != "REF_MISSING" {
+		if r.Waiting || r.Diagnostic.Protected || (r.Diagnostic.Code != "REF_MISSING" && r.Diagnostic.Code != "TOOL_MISSING") {
 			return r
 		}
 		r.Diagnostic.Free(context.Run)
@@ -95,6 +95,11 @@ func (p *Program) def(scope *Scope, values []*expr.Expr, context *Context, span 
 	}
 	if context.ReserveEnv && values[0].Text == "env" {
 		return failure(context.Run, "DEF_INVALID", values[0].Span, "env is reserved in Kash")
+	}
+	for i := range scope.Bindings {
+		if scope.Bindings[i].Kind == bindingEager && scope.Bindings[i].Name == values[0].Text {
+			return failure(context.Run, "DEF_INVALID", values[0].Span, "eager bindings cannot be reassigned")
+		}
 	}
 	if len(values) >= 3 && values[1].Kind == expr.List {
 		if context.ReserveEnv {

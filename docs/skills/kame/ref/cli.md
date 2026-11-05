@@ -12,8 +12,9 @@ With no target, Kame builds `default` when it exists; otherwise the invocation
 fails with `TGT_NO_DEFAULT` and reports the available named targets. Every
 target-taking command resolves targets this way. A bare invocation with no
 source prints help. Source discovery
-tries `Makefile.kmk`, `make.kmk`, then `src/kmk/main.kmk` below the selected
-working directory.
+tries `Kamefile`, `Makefile.kmk`, `make.kmk`, then `src/kmk/main.kmk` below the
+selected working directory. `Kamefile` uses the rule-program (`kmk`) language,
+including when selected explicitly with `-f` or as a positional source.
 
 File-backed Kame sources can use `(include PATH)` to merge shared definitions and
 rules under the caller's language. Literal relative paths resolve from the

@@ -3,7 +3,21 @@ package cli
 import (
 	"solod.dev/so/mem"
 	"solod.dev/so/slices"
+	"solod.dev/so/strings"
 )
+
+// BuildSourceCandidates returns the ordered build sources tried by discovery.
+// Native and Node runners share this list; keep the JS mirror aligned. Callers
+// must not mutate the returned slice.
+func BuildSourceCandidates() []string { return buildSourceCandidates }
+
+var buildSourceCandidates = []string{"Kamefile", "Makefile.kmk", "make.kmk", "src/kmk/main.kmk"}
+
+// BuildSourceList returns the candidates in human-readable diagnostic form.
+// The caller owns and frees the returned string.
+func BuildSourceList() string {
+	return strings.Join(mem.System, BuildSourceCandidates(), ", ")
+}
 
 // sourceOption shares file, inline, and directory spelling across language tools.
 // Inputs records selection even when an inline source is empty.

@@ -35,10 +35,12 @@ type Context struct {
 	Deferred               *DeferScope
 	PrepareDeferred        *expr.Expr
 	Finalizing             bool
+	CleanupDeadlineNS      int64 // Inherited cleanup budget; scopes cannot restart it.
 	RecipeNode             int64
 	TimeoutMS              int64
 	Frames                 []diagnostic.Frame
 	Source                 string
+	SourceOrigin           int
 	Grants                 []Grant
 	Inputs                 []core.Value
 	Outputs                []core.Value
@@ -80,6 +82,10 @@ type Context struct {
 	RecoverFailures    bool
 	ReserveEnv         bool
 	DisableMemo        bool
+	sequencedOperand   bool // Reached let/exit operands retain in-flight progress.
+	loopDepth          int  // Native function and constructed-script boundaries reset it.
+	InputClosed        bool // Capture, background and cleanup cannot recover invocation input.
+	RecordBody         bool // Body commands cannot steal the next record's default input.
 	// Dynamic expressions must not lend callable ASTs past their parse lifetime.
 	CloneCallableAST      bool
 	FinalizationForbidden bool
@@ -216,7 +222,7 @@ func (c *Context) Emit(kind EffectKind, data []byte) {
 	if c.Program != nil && c.Program.DryRun && (kind == EffectOut || kind == EffectErr) {
 		return
 	}
-	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: kind, Data: slices.Clone(c.Run, data), Span: c.Span})
+	c.Effects = slices.Append(c.Run, c.Effects, Effect{Kind: kind, Data: slices.Clone(c.Run, data), Span: c.Span, FinalizationDeadlineNS: c.CleanupDeadlineNS})
 }
 func (c *Context) EmitWrite(name string, data []byte) {
 	if c.Phase == PlanningPhase || c.Phase == ResolvingPhase || c.Phase == RenderingPhase {
@@ -438,6 +444,12 @@ func (c *Context) Submit(kind host.RequestKind, payload core.Value) int64 {
 }
 
 func (c *Context) requestAllowed(kind host.RequestKind, payload core.Value) bool {
+	if kind == host.RequestRecordRead {
+		if host.PayloadBool(payload, "stdin") {
+			return c.Program != nil && c.Program.InputSupplied && !c.InputClosed && host.PayloadPath(payload) == ""
+		}
+		return c.Allows(Read, host.PayloadPath(payload))
+	}
 	var capability Capability
 	switch kind {
 	case host.RequestPublishFile:

@@ -22,6 +22,9 @@ type countingReadDirHost struct {
 	rootReads     int
 	deepReads     int
 	blockingWaits int
+	recordWaiting bool
+	recordOpen    bool
+	recordCloses  int
 }
 
 type fakeRemoteHost struct {
@@ -50,6 +53,10 @@ func (h *fakeRemoteHost) SupportsExecutor(name string, version string) bool {
 	return name == "fake" && version == "v1"
 }
 func (h *fakeRemoteHost) SupportsStreamOperands() bool { _ = h; return false }
+func (h *fakeRemoteHost) ReadRecord(a mem.Allocator, id int64, name string, delimiter int, inputFD int) host.RecordResult {
+	return h.base.ReadRecord(a, id, name, delimiter, inputFD)
+}
+func (h *fakeRemoteHost) CloseRecord(id int64) { h.base.CloseRecord(id) }
 func (h *fakeRemoteHost) Start(request host.ProcessRequest) bool {
 	h.StartCount++
 	h.SawRequest = request.Executor == "fake" && request.ExecutorVersion == "v1"
@@ -144,6 +151,20 @@ func (h *fakeRemoteHost) Now() int64             { return h.base.Now() }
 func (h *fakeRemoteHost) Monotonic() int64       { return h.base.Monotonic() }
 
 func (h *countingReadDirHost) Start(request host.ProcessRequest) bool { return h.memory.Start(request) }
+func (h *countingReadDirHost) ReadRecord(a mem.Allocator, id int64, name string, delimiter int, inputFD int) host.RecordResult {
+	if h.recordWaiting {
+		h.recordOpen = true
+		return host.RecordResult{Waiting: true}
+	}
+	return h.memory.ReadRecord(a, id, name, delimiter, inputFD)
+}
+func (h *countingReadDirHost) CloseRecord(id int64) {
+	if h.recordOpen {
+		h.recordCloses++
+		h.recordOpen = false
+	}
+	h.memory.CloseRecord(id)
+}
 func (h *countingReadDirHost) SupportsExecutor(name string, version string) bool {
 	return h.memory.SupportsExecutor(name, version)
 }

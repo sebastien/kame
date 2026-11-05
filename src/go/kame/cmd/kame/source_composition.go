@@ -86,7 +86,7 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 		if file.Name == "<stdin>" {
 			message = "include requires a file-backed source; this fragment was supplied on stdin"
 		}
-		tips := []string{"save this fragment as a .km or .kmk file and run that file"}
+		tips := []string{"save this fragment as a .km, .kmk or .kash file and run that file"}
 		emitDiagnostic(out, diagnostic.Diagnostic{Source: file.Name, Code: "FEATURE_UNSUP", Severity: diagnostic.Error, Message: message, Span: diagnostic.Span{Start: span.Start, End: span.End}, Tips: tips}, s.JSON, authored)
 		return false
 	}
@@ -120,7 +120,7 @@ func (s *buildSource) expandSourceInclude(fileIndex int, name string, optional b
 	}
 	includes := slices.Clone(mem.System, file.Includes)
 	includes = slices.Append(mem.System, includes, diagnostic.Frame{Kind: "include", Label: includeName, Source: file.Name, Span: diagnostic.Span{Start: span.Start, End: span.End}})
-	s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), Data: data, OwnedName: true, FileBacked: true, Parent: fileIndex, Includes: includes})
+	s.Files = slices.Append(mem.System, s.Files, sourceFile{Name: includeName, Text: string(data), SourceDirectory: fileSourceDirectory(includeName), Data: data, OwnedName: true, FileBacked: true, Parent: fileIndex, Includes: includes})
 	return expandIncludesLanguage(s, len(s.Files)-1, out, lang)
 }
 

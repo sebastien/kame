@@ -412,6 +412,19 @@ func (p *Program) continueKashRecipe(c *core.EngineContext, index int) core.Prod
 	}
 	entry = &p.Instances[index]
 	entry.KashRunning = false
+	if result.Diagnostic.Exit.Requested {
+		status := result.Diagnostic.Exit.Status
+		if result.Diagnostic.ExitOnly() && status == 0 {
+			result.Diagnostic.Free(p.Alloc)
+		} else {
+			if result.Diagnostic.ExitOnly() {
+				result.Diagnostic.Free(p.Alloc)
+				result.Diagnostic = failure(p.Alloc, "RECIPE_FAIL", "recipe exited unsuccessfully")
+				result.Diagnostic.Cause = diagnostic.Cause{Kind: cloneText(p.Alloc, "exit"), HasStatus: true, Status: status}
+			}
+			result.Diagnostic.Exit = diagnostic.Termination{}
+		}
+	}
 	if result.Diagnostic.Code != "" {
 		if entry.retryCount < p.Options.RetryCount && !result.Diagnostic.Protected && result.Diagnostic.Code != "EXEC_CANCELLED" && result.Diagnostic.Code != "PARSE_ERR" {
 			entry.retryCount++

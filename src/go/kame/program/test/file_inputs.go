@@ -97,6 +97,44 @@ func TestFileInputsSkipShellAcrossProcesses(t *testing.T) {
 	}
 }
 
+func TestFileFreshnessTracksAuthoredSourceDirectory(t *testing.T) {
+	a := t.Allocator()
+	dirBuffer := make([]byte, os.MaxPathLen)
+	dir, err := os.MkdirTemp(dirBuffer, "", "kame-source-directory-")
+	if err != nil {
+		t.Fatal("temporary directory failed")
+		return
+	}
+	defer os.Remove(dir)
+	if os.WriteFile(dir+"/input", []byte("input"), 0o644) != nil {
+		t.Fatal("input write failed")
+		return
+	}
+	registry := eval.NewRegistry(a)
+	defer registry.Free()
+	operations.Register(registry)
+	directories := []string{"/sdk/first", "/sdk/first", "/sdk/second"}
+	for i := range directories {
+		sources := []program.CompileSource{
+			{Name: "helper.kmk", SourceDirectory: directories[i], Text: "(assets) = (source-dir)\n"},
+			{Name: "build.kmk", Text: "./output : ./input ; [shell: kame]\n\t(assets)\n"},
+		}
+		compiled := program.CompileMany(a, sources, registry, program.Options{Host: posix.New(a), Directory: dir})
+		if compiled.Program == nil {
+			compiled.Free(a)
+			t.Fatal("source-directory build compilation failed")
+			return
+		}
+		result := compiled.Program.Materialize("./output")
+		if result.Diagnostic.Code != "" || result.Fresh != (i == 1) || !tempMatches(t, dir+"/output", directories[i]) {
+			t.Error("source-directory change was hidden by file freshness: " + result.Diagnostic.Code)
+		}
+		result.Free(a)
+		compiled.Program.Free()
+		compiled.Free(a)
+	}
+}
+
 func TestFileInputsRebuildYieldDespiteOldDiscoveredMtime(t *testing.T) {
 	dirBuffer := make([]byte, os.MaxPathLen)
 	dir, err := os.MkdirTemp(dirBuffer, "", "kame-file-inputs-")

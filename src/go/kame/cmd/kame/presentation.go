@@ -47,7 +47,7 @@ func streamCommand(args []string) string {
 		return "run"
 	}
 	if len(args) == 0 {
-		candidates := []string{"Makefile.kmk", "make.kmk", "src/kmk/main.kmk"}
+		candidates := cli.BuildSourceCandidates()
 		found := false
 		for i := range candidates {
 			_, err := os.Stat(candidates[i])

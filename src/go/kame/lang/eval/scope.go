@@ -15,15 +15,17 @@ const (
 	bindingFunction
 	bindingDefinition
 	bindingLocalDefinition
+	bindingEager
 )
 
 type binding struct {
-	Kind       bindingKind
-	Name       string
-	Value      core.Value
-	Function   *Function
-	Definition core.ResourceKey
-	Local      *localDefinition
+	Kind        bindingKind
+	Name        string
+	Value       core.Value
+	Function    *Function
+	Definition  core.ResourceKey
+	Local       *localDefinition
+	Initialized bool
 }
 
 type bindingIndexEntry struct {
@@ -130,6 +132,10 @@ func (s *Scope) setDefinition(name string) {
 	s.appendBinding(binding{Kind: bindingDefinition, Name: owned(s.Alloc, name), Definition: key})
 }
 
+func (s *Scope) reserveEager(name string) {
+	s.appendBinding(binding{Kind: bindingEager, Name: owned(s.Alloc, name)})
+}
+
 func (s *Scope) lookup(name string) *binding {
 	for current := s; current != nil; current = current.Parent {
 		lo, hi := 0, len(current.bindingIndex)
@@ -161,7 +167,7 @@ func (s *Scope) Free() {
 	}
 	for i := range s.Bindings {
 		mem.FreeString(s.Alloc, s.Bindings[i].Name)
-		if s.Bindings[i].Kind == bindingValue {
+		if s.Bindings[i].Kind == bindingValue || s.Bindings[i].Kind == bindingEager {
 			freeCallables(s.Alloc, &s.Bindings[i].Value)
 			s.Bindings[i].Value.Free(s.Alloc)
 		}

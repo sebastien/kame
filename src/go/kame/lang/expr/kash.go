@@ -24,6 +24,13 @@ func ParseCommandPrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
 }
 
+// ParseCommandSetupValuePrefix shares stage setup's scalar/typed word grammar.
+func ParseCommandSetupValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
+	p := parser{a: a, s: s, pos: start}
+	e := p.commandWord(false)
+	return Prefix{Expr: e, End: p.pos, Diagnostics: p.diags}
+}
+
 // ParseKashValuePrefix adds Kash's reference wrappers, not word-list RHSs.
 func ParseKashValuePrefix(a mem.Allocator, s *source.Source, start int) Prefix {
 	// Kash owns top-level semicolons. Bound an atom's source view so number and
@@ -575,7 +582,8 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 				p.pos++
 			}
 			key := p.s.Text[keyStart:p.pos]
-			if key == "" || key == "async" || p.pos == len(p.s.Text) || (p.s.Text[p.pos] != ' ' && p.s.Text[p.pos] != '\t' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != '\r') {
+			kind, valid := ClassifySetupKey(key)
+			if !valid || kind == SetupAsync || p.pos == len(p.s.Text) || (p.s.Text[p.pos] != ' ' && p.s.Text[p.pos] != '\t' && p.s.Text[p.pos] != '\n' && p.s.Text[p.pos] != '\r') {
 				p.error(from, p.pos, "invalid Kash stage setup key")
 				break
 			}
@@ -596,7 +604,16 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 			}
 			setup := p.node(CommandSetup, from)
 			setup.Text = key
-			setup.Items = slices.Append(p.a, setup.Items, p.commandWord(false))
+			if key == "accept-exit" && p.s.Text[p.pos] == '[' {
+				word := p.node(CommandWord, p.pos)
+				word.Bool = true
+				inner := p.expression()
+				word.Parts = slices.Append(p.a, word.Parts, StringPart{Expr: inner, Form: "(", Span: inner.Span})
+				word.Span.End = p.pos
+				setup.Items = slices.Append(p.a, setup.Items, word)
+			} else {
+				setup.Items = slices.Append(p.a, setup.Items, p.commandWord(false))
+			}
 			setup.Span.End = p.pos
 			stage.Items = slices.Append(p.a, stage.Items, setup)
 			if len(p.diags) != 0 {
@@ -612,6 +629,9 @@ func (p *parser) commandPipeline(start int, capture bool, grouped bool, branch b
 		}
 		before := p.pos
 		word := p.commandWord(true)
+		if !hasExecutable(stage) && (p.s.Text[before:p.pos] == "exit" || p.s.Text[before:p.pos] == "with" || p.s.Text[before:p.pos] == "break" || p.s.Text[before:p.pos] == "continue") {
+			p.error(before, p.pos, "control keywords are statements, not process stages")
+		}
 		if word != nil {
 			stage.Items = slices.Append(p.a, stage.Items, word)
 		}
@@ -686,7 +706,7 @@ func hasExecutable(stage *Expr) bool {
 }
 
 func setupKeyByte(b byte, first bool) bool {
-	return b == '_' || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (!first && b >= '0' && b <= '9')
+	return b == '_' || (!first && b == '-') || (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || (!first && b >= '0' && b <= '9')
 }
 
 func commandWhitespace(b byte) bool { return b == ' ' || b == '\t' || b == '\r' || b == '\n' }
@@ -710,10 +730,10 @@ type descriptorKind int
 
 const (
 	descriptorNone        descriptorKind = iota // not a descriptor: an ordinary argument
-	descriptorUnsupported                      // 3>, 1>&2, 2>&-: rejected, never guessed
-	descriptorErrorFile                        // 2>
-	descriptorErrorAppend                      // 2>>
-	descriptorErrorAlias                       // 2>&1
+	descriptorUnsupported                       // 3>, 1>&2, 2>&-: rejected, never guessed
+	descriptorErrorFile                         // 2>
+	descriptorErrorAppend                       // 2>>
+	descriptorErrorAlias                        // 2>&1
 )
 
 // attachedDescriptor recognizes a numeric descriptor glued to '>'. It returns
@@ -951,7 +971,7 @@ func commandWordNeedsQuotes(e *Expr) bool {
 			continue
 		}
 		// Keep grammar-sensitive literals quoted even outside executable position.
-		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer" || part.Text == "defn" || part.Text == "return") {
+		if len(e.Parts) == 1 && (part.Text == "=" || part.Text == "if" || part.Text == "elif" || part.Text == "else" || part.Text == "match" || part.Text == "case" || part.Text == "defer" || part.Text == "defn" || part.Text == "return" || part.Text == "let" || part.Text == "exit" || part.Text == "with" || part.Text == "break" || part.Text == "continue") {
 			return true
 		}
 		if i == 0 && len(part.Text) != 0 && (part.Text[0] == ':' || part.Text[0] == '#') {

@@ -529,6 +529,14 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 	}
 	e.Str("input")
 	e.Str(PayloadText(*payload, FieldInput))
+	if mode := PayloadText(*payload, "inputMode"); mode != "" {
+		e.Str("inputMode")
+		e.Str(mode)
+		if mode == "invocation" {
+			e.Str("inputRoot")
+			e.Int(PayloadInt(*payload, "inputRoot"))
+		}
+	}
 	e.Str("output")
 	e.Str(PayloadText(*payload, FieldOutput))
 	e.Str("append")
@@ -545,11 +553,36 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 			e.Bool(payload.Record[i].Value.Bool)
 		}
 	}
+	for i := range payload.Record {
+		if payload.Record[i].Key != "capture" {
+			continue
+		}
+		// This is a closed, normalized policy, never argv or captured bytes.
+		e.Str("capture")
+		e.BeginObject()
+		policy := payload.Record[i].Value
+		e.Str("stdout")
+		e.Bool(PayloadBool(policy, "stdout"))
+		e.Str("stderr")
+		e.Bool(PayloadBool(policy, "stderr"))
+		e.Str("stdoutLimit")
+		e.Int(PayloadInt(policy, "stdoutLimit"))
+		e.Str("stderrLimit")
+		e.Int(PayloadInt(policy, "stderrLimit"))
+		e.EndObject()
+	}
 	e.Str("setup")
 	e.BeginArray()
 	setups := PayloadSetups(*payload)
 	for i := range setups {
 		e.BeginObject()
+		e.Str("acceptExit")
+		e.BeginArray()
+		accepted := PayloadList(setups[i], "acceptExit")
+		for j := range accepted {
+			e.Int(accepted[j].Int)
+		}
+		e.EndArray()
 		e.Str(FieldInput)
 		e.Str(PayloadText(setups[i], FieldInput))
 		e.Str(FieldOutput)

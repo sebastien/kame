@@ -33,6 +33,9 @@ type captureState struct {
 	ErrorMode      int
 	Stderr         bool
 	Setups         []core.Value
+	Accepted       core.Value
+	CapturePolicy  core.Value
+	PolicyDone     bool // capture! policy evaluated once across suspension
 	Environment    []core.Value
 	Cwd            string
 	Timeout        int64
@@ -83,6 +86,8 @@ func freeCaptureState(a mem.Allocator, value any) {
 		s.Setups[i].Free(a)
 	}
 	slices.Free(a, s.Setups)
+	s.Accepted.Free(a)
+	s.CapturePolicy.Free(a)
 	for i := range s.Environment {
 		s.Environment[i].Free(a)
 	}
@@ -111,7 +116,12 @@ func (p *Program) capture(e *expr.Expr, c *Context) Result {
 	}
 	previousStart, previousEnd := c.operationStart, c.operationEnd
 	c.operationStart, c.operationEnd = e.Span.Start, e.Span.End
+	previousInput := c.InputClosed
+	if e.Kind == expr.CommandCapture || e.TypedCapture || e.Async {
+		c.InputClosed = true
+	}
 	r := p.captureRequest(e, c)
+	c.InputClosed = previousInput
 	c.operationStart, c.operationEnd = previousStart, previousEnd
 	return r
 }
@@ -128,6 +138,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		state = mem.Alloc[captureState](p.Alloc)
 		state.Alloc = p.Alloc
 		c.SetOperationState(state, freeCaptureState)
+	}
+	if state.Async {
+		c.InputClosed = true
 	}
 	if e.Topology && state.Program == nil {
 		state.Program, state.PredicateScope = p, c.Scope
@@ -210,7 +223,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if !completion.HasValue {
 			return failure(c.Run, "HOST_FAIL", e.Span, "process completion omitted its result")
 		}
-		if e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult {
+		if (e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult) && !e.TypedCapture {
 			// A statement streams bytes; only status is interpreted, never stdout.
 			for i := range completion.Value.Record {
 				if completion.Value.Record[i].Key == "stdout" {
@@ -222,7 +235,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				}
 			}
 		}
-		r := captureValue(c.Run, completion.Value, e.Span, e.AcceptExit || e.Kind == expr.CommandTest)
+		r := captureValue(c.Run, completion.Value, e.Span, e.AcceptExit || e.Kind == expr.CommandTest, e.TypedCapture)
 		if e.Topology && r.Diagnostic.Code == "RECIPE_FAIL" {
 			stages := host.PayloadStages(completion.Value)
 			for i := range stages {
@@ -244,13 +257,16 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if (e.Kind == expr.CommandResult || e.Kind == expr.CommandGraph) && r.Diagnostic.Code == "" {
 			r.Value.Free(c.Run)
 			r = processResult(c.Run, completion.Value, e.Span)
+			if r.Diagnostic.Code == "" && e.TypedCapture {
+				r = typedCapturedResult(c, r, completion.Value, state.CapturePolicy, e.Span)
+			}
 			if r.Diagnostic.Code == "" && e.Topology {
 				r = processGraphResult(c.Run, r, e, completion.Value, state.Stages)
 			}
 		}
 		if e.Kind == expr.CommandTest && r.Diagnostic.Code == "" {
 			r.Value.Free(c.Run)
-			r.Value = core.Value{Kind: core.Bool, Bool: host.PayloadInt(completion.Value, "status") == 0 && host.PayloadInt(completion.Value, "signal") == 0}
+			r.Value = core.Value{Kind: core.Bool, Bool: host.EffectiveStatus(completion.Value) == 0 && host.PayloadInt(completion.Value, "signal") == 0}
 		}
 		if r.Diagnostic.Code == "RECIPE_FAIL" && !r.Diagnostic.Protected {
 			c.handledFinalizerFailure()
@@ -259,14 +275,8 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				if i >= len(e.Items) {
 					break
 				}
-				for j := range stages[i].Record {
-					field := stages[i].Record[j]
-					if (field.Key == "status" || field.Key == "signal") && field.Value.Int != 0 {
-						if e.Topology && field.Value.Int != host.PayloadInt(completion.Value, field.Key) {
-							continue
-						}
-						r.Diagnostic.Span.Start, r.Diagnostic.Span.End = e.Items[i].Span.Start, e.Items[i].Span.End
-					}
+				if status := host.EffectiveStatus(stages[i]); status != 0 && (!e.Topology || status == host.EffectiveStatus(completion.Value)) {
+					r.Diagnostic.Span.Start, r.Diagnostic.Span.End = e.Items[i].Span.Start, e.Items[i].Span.End
 				}
 			}
 		}
@@ -275,6 +285,30 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 			state.Value, state.Done = r.Value.Clone(state.Alloc), true
 		}
 		return p.captureRecovery(e, c, state, r)
+	}
+	if e.TypedCapture && !state.PolicyDone {
+		if e.CapturePolicy == nil {
+			return failure(c.Run, "EXPR_INVALID", e.Span, "capture policy is missing")
+		}
+		if !p.DryRun {
+			before, beforePaths := len(c.Effects), len(c.WritePaths)
+			previous := c.sequencedOperand
+			c.sequencedOperand = true
+			r := p.commandWord(e.CapturePolicy, c, "capture policy")
+			c.sequencedOperand = previous
+			if r.Waiting || r.Diagnostic.Code != "" {
+				return r
+			}
+			rememberArgumentEffects(state, c, before, beforePaths)
+			policy := normalizeCapturePolicy(c, r.Value, e.CapturePolicy.Span)
+			r.Free(c.Run)
+			if policy.Diagnostic.Code != "" {
+				return policy
+			}
+			state.CapturePolicy = policy.Value.Clone(state.Alloc)
+			policy.Free(c.Run)
+		}
+		state.PolicyDone = true
 	}
 	for state.Stage < len(e.Items) {
 		stage := e.Items[state.Stage]
@@ -333,9 +367,13 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				continue
 			}
 			if word.Kind == expr.CommandSetup {
+				kind, valid := expr.ClassifySetupKey(word.Text)
+				if !valid {
+					return failure(c.Run, "EXPR_INVALID", word.Span, "invalid process setup key")
+				}
 				// Computed environments may fetch credentials. A dry-run defers
 				// this runtime boundary instead of demanding or fabricating a record.
-				if word.Text == "env" && p.DryRun {
+				if (kind == expr.SetupEnvRecord || kind == expr.SetupAcceptExit) && p.DryRun {
 					state.Index++
 					continue
 				}
@@ -346,17 +384,20 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					return r
 				}
 				rememberArgumentEffects(state, c, before, beforePaths)
-				if word.Text == "env" {
-					if r.Value.Kind != core.Record {
+				switch kind {
+				case expr.SetupAcceptExit:
+					if !host.ValidAcceptedExits(r.Value) {
+						r.Free(c.Run)
+						return failure(c.Run, "EXPR_INVALID", word.Span, "accept-exit requires distinct integers from 1 through 255")
+					}
+					state.Accepted = r.Value.Clone(state.Alloc)
+					r.Free(c.Run)
+					state.Index++
+					continue
+				case expr.SetupEnvRecord:
+					if !validProcessEnvironment(r.Value) {
 						r.Free(c.Run)
 						return failure(c.Run, "EXPR_INVALID", word.Span, "stage env requires a record of valid environment names and string values without NUL")
-					}
-					for i := range r.Value.Record {
-						field := r.Value.Record[i]
-						if !processSetupKey(field.Key) || field.Value.Kind != core.String || strings.IndexByte(field.Value.Text, 0) >= 0 {
-							r.Free(c.Run)
-							return failure(c.Run, "EXPR_INVALID", word.Span, "stage env requires a record of valid environment names and string values without NUL")
-						}
 					}
 					for i := range r.Value.Record {
 						field := r.Value.Record[i]
@@ -365,8 +406,7 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					r.Free(c.Run)
 					state.Index++
 					continue
-				}
-				if word.Text == "async" {
+				case expr.SetupAsync:
 					if r.Value.Kind != core.Bool {
 						r.Free(c.Run)
 						return failure(c.Run, "EXPR_INVALID", word.Span, "async setup requires a boolean")
@@ -374,6 +414,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 					async := r.Value.Bool
 					r.Free(c.Run)
 					state.Async = async
+					if async {
+						c.InputClosed = true
+					}
 					state.Index++
 					continue
 				}
@@ -382,13 +425,13 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 				if !ok {
 					return failure(c.Run, "EXPR_INVALID", word.Span, "stage setup requires one scalar without NUL bytes")
 				}
-				if word.Text == "cwd" {
+				if kind == expr.SetupCwd {
 					if text == "" {
 						mem.FreeString(c.Run, text)
 						return failure(c.Run, "EXPR_INVALID", word.Span, "stage cwd must not be empty")
 					}
 					state.Cwd = canonicalPath(state.Alloc, c.Cwd, text)
-				} else if word.Text == "timeout" {
+				} else if kind == expr.SetupTimeout {
 					seconds, err := strconv.ParseFloat(text, 64)
 					if err != nil || !(seconds > 0 && seconds*1000 < 9007199254740991) {
 						mem.FreeString(c.Run, text)
@@ -583,7 +626,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		if timeout == 0 {
 			timeout = c.TimeoutMS
 		}
-		state.Setups = slices.Append(state.Alloc, state.Setups, host.StageSetupPayload(state.Alloc, state.Cwd, timeout, environment))
+		state.Setups = slices.Append(state.Alloc, state.Setups, host.StageSetupPayload(state.Alloc, cwd, timeout, environment))
+		if state.Accepted.Kind == core.List {
+			setup := &state.Setups[len(state.Setups)-1]
+			setup.Record = slices.Append(state.Alloc, setup.Record, core.RecordField{Key: owned(state.Alloc, "acceptExit"), Value: state.Accepted})
+			state.Accepted = core.Value{}
+		}
 		if len(state.OperandSlots) != 0 {
 			setup := &state.Setups[len(state.Setups)-1]
 			setup.Record = slices.Append(state.Alloc, setup.Record, core.RecordField{Key: owned(state.Alloc, "operandSlots"), Value: core.NewList(state.Alloc, state.OperandSlots)})
@@ -649,7 +697,15 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if !demandProcessInput(c, state.Input) {
 		return Result{Waiting: true}
 	}
-	configured := false
+	inputRoot := 0
+	if e.Topology {
+		inputRoot = e.InputRoot
+	}
+	inheritInput := p.InputSupplied && !c.InputClosed && !c.RecordBody && !state.Async && !e.Async && inputRoot >= 0 && state.Input == ""
+	if inheritInput && e.Topology && host.PayloadText(state.Setups[inputRoot], host.FieldInput) != "" {
+		inheritInput = false
+	}
+	configured := inheritInput || (c.Cwd != "" && c.Cwd != p.DefinitionCwd)
 	for i := range e.Items {
 		for j := range e.Items[i].Items {
 			if e.Items[i].Items[j].Kind == expr.CommandSetup {
@@ -766,6 +822,15 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if state.Input != "" || state.Output != "" {
 		host.ConfigureRedirections(c.Run, &payload, state.Input, state.Output, state.Append)
 	}
+	mode := "closed"
+	if inheritInput {
+		mode = "invocation"
+		c.UnvalidatedRead()
+	}
+	payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "inputMode"), Value: core.NewString(c.Run, mode)})
+	if inheritInput {
+		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "inputRoot"), Value: core.Value{Kind: core.Int, Int: int64(inputRoot)}})
+	}
 	if e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult {
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "stream"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
@@ -776,6 +841,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "captureLimit"), Value: core.Value{Kind: core.Int, Int: int64(c.captureBudget)}})
 	}
 	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
+		if state.CapturePolicy.Kind == core.Record {
+			payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "capture"), Value: state.CapturePolicy.Clone(c.Run)})
+		}
 		host.ConfigureStages(c.Run, &payload, state.Setups)
 	}
 	if state.Async || e.Async {
@@ -786,7 +854,9 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 		}
 		return r
 	}
-	if e.Kind == expr.CommandCapture {
+	// Recipe-local captures are execution steps, just like ordinary commands.
+	// Lazy definitions still revalidate external values before proving reuse.
+	if c.RecipeNode == 0 && (e.Kind == expr.CommandCapture || e.TypedCapture) {
 		c.UnvalidatedRead()
 	}
 	state.ID = c.Submit(host.RequestProcess, payload)
@@ -942,7 +1012,7 @@ func (p *Program) commandWord(e *expr.Expr, c *Context, destination string) Resu
 	return Result{Value: value}
 }
 
-func captureValue(a mem.Allocator, value core.Value, span source.Span, acceptExit bool) Result {
+func captureValue(a mem.Allocator, value core.Value, span source.Span, acceptExit bool, typed bool) Result {
 	// A host may complete a successful capture as text directly, avoiding JSON
 	// escaping and extra copies for large strings. Failures retain exit metadata.
 	if value.Kind == core.String {
@@ -974,7 +1044,9 @@ func captureValue(a mem.Allocator, value core.Value, span source.Span, acceptExi
 	if !hasStatus {
 		return failure(a, "HOST_FAIL", span, "process completion omitted status")
 	}
-	if (output.Kind == core.String && !utf8.Valid([]byte(output.Text))) || (output.Kind == core.Bytes && !utf8.Valid(output.Bytes)) {
+	status = host.EffectiveStatus(value)
+	signal = host.EffectiveSignal(value)
+	if !typed && ((output.Kind == core.String && !utf8.Valid([]byte(output.Text))) || (output.Kind == core.Bytes && !utf8.Valid(output.Bytes))) {
 		return failure(a, "CAPTURE_ENCODING", span, "command substitution output is not valid UTF-8")
 	}
 	if !acceptExit && (status != 0 || signal != 0) {
@@ -990,8 +1062,11 @@ func captureValue(a mem.Allocator, value core.Value, span source.Span, acceptExi
 		}
 		return r
 	}
+	if typed {
+		return Result{}
+	}
 	if output.Kind == core.String {
-		return captureValue(a, output, span, acceptExit)
+		return captureValue(a, output, span, acceptExit, false)
 	}
 	if output.Kind != core.Bytes {
 		return failure(a, "HOST_FAIL", span, "process completion omitted stdout")

@@ -150,7 +150,7 @@ func (r *Runtime) ResultDiagnosticJSON() PureResult {
 		node = r.Handle.Node
 	}
 	var d diagnostic.Diagnostic
-	if node != nil {
+	if node != nil && !node.Diagnostic.ExitOnly() {
 		d = node.Diagnostic.Clone(r.Alloc)
 	}
 	if p := r.finalizationProgram(); p != nil {

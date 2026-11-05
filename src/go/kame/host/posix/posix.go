@@ -69,6 +69,8 @@ type nativeEvent struct {
 	stageCount        c.Int
 	metricData        *int64
 	metricCount       c.Int
+	effectiveStatus   c.Int
+	effectiveSignal   c.Int
 }
 
 //so:extern
@@ -93,13 +95,16 @@ func km_host_start(h *nativeHost, id int64, shell []string, script []byte, direc
 }
 
 //so:extern nodecay
-func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, errorPaths []string, errorAppends []int, errorModes []int) c.Int {
+func km_host_start_graph(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, errorPaths []string, errorAppends []int, errorModes []int, inputFD int, inputRoot int) c.Int {
+	_, _ = inputFD, inputRoot
 	_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _ = h, id, arguments, lengths, directories, environment, environmentLengths, timeouts, timeoutMS, retainBytes, input, output, appendOutput, errorPaths, errorAppends, errorModes
 	return 0
 }
 
 //so:extern nodecay
-func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, itemLimits []int, errorPaths []string, errorAppends []int, errorModes []int, streamItem func(any, int64, int, []byte) int, streamContext any, collectFailures bool) c.Int {
+func km_host_start_topology(h *nativeHost, id int64, arguments []string, lengths []int, directories []string, environment []string, environmentLengths []int, timeouts []int64, timeoutMS int64, retainBytes int, input string, output string, appendOutput bool, kinds []int, edges []int, inputs []string, outputs []string, appends []int, operandArguments []int, itemLimits []int, errorPaths []string, errorAppends []int, errorModes []int, streamItem func(any, int64, int, []byte) int, streamContext any, collectFailures bool, inputFD int, inputRoot int, accepted []int) c.Int {
+	_ = accepted
+	_, _ = inputFD, inputRoot
 	_ = collectFailures
 	_, _ = operandArguments, itemLimits
 	_, _, _ = errorPaths, errorAppends, errorModes
@@ -166,6 +171,9 @@ func km_cli_stderr_width() c.Int { return 0 }
 func km_cli_stdout_is_terminal() c.Int { return 0 }
 
 //so:extern
+func km_cli_stdin_is_terminal() c.Int { return 0 }
+
+//so:extern
 func km_cli_stderr_height() c.Int { return 0 }
 
 //so:extern
@@ -206,9 +214,11 @@ func Pick(executable string, args []string, input string, selection *string) int
 }
 
 type Host struct {
-	Alloc  mem.Allocator
-	native *nativeHost
-	Memory *host.MemoryResources
+	Readers     []recordCursor
+	StdinRecord int64
+	Alloc       mem.Allocator
+	native      *nativeHost
+	Memory      *host.MemoryResources
 	// start anchors the monotonic clock at host creation.
 	start time.Time
 }
@@ -236,6 +246,27 @@ func (h *Host) SupportsStreamOperands() bool { _ = h; return km_stream_operands_
 // be queued for diagnostics, but nil hosts or an occupied emergency rejection
 // slot cannot queue another one. Only true transfers active process ownership.
 func (h *Host) Start(request host.ProcessRequest) bool {
+	if request.InputMode != "" && request.InputMode != "closed" && request.InputMode != "invocation" {
+		return false
+	}
+	inputFD := -1
+	if request.InputMode == "invocation" {
+		if h != nil && h.StdinRecord != 0 {
+			return false
+		}
+		if request.InputFD < 0 || request.InputFD > 2147483647 || request.InputRoot < 0 || request.InputRoot >= len(request.Stages) || request.Input != "" || (!request.Topology && request.InputRoot != 0) {
+			return false
+		}
+		if request.Stages[request.InputRoot].Input != "" || request.Stages[request.InputRoot].Kind != "" {
+			return false
+		}
+		for i := range request.Edges {
+			if request.Edges[i].To == request.InputRoot && request.Edges[i].Argument == 0 {
+				return false
+			}
+		}
+		inputFD = request.InputFD
+	}
 	if request.CollectFailures && !request.Topology {
 		return false
 	}
@@ -256,7 +287,14 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 		var timeouts []int64
 		var kinds, edges, appends, operandArguments, itemLimits, errorAppends, errorModes []int
 		var inputs, outputs, errorPaths []string
+		var accepted []int
 		for i := range request.Stages {
+			for status := 1; status < 256; status++ {
+				if request.Stages[i].Accepted[status] {
+					accepted = slices.Append(h.Alloc, accepted, i)
+					accepted = slices.Append(h.Alloc, accepted, status)
+				}
+			}
 			errorPaths = slices.Append(h.Alloc, errorPaths, request.Stages[i].Error)
 			errorAppend := 0
 			if request.Stages[i].ErrorAppend {
@@ -324,11 +362,10 @@ func (h *Host) Start(request host.ProcessRequest) bool {
 				edges = slices.Append(h.Alloc, edges, request.Edges[i].To)
 				operandArguments = slices.Append(h.Alloc, operandArguments, request.Edges[i].Argument)
 			}
-			ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, itemLimits, errorPaths, errorAppends, errorModes, request.StreamItem, request.StreamContext, request.CollectFailures) == 0
-		} else {
-			ok = km_host_start_graph(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, errorPaths, errorAppends, errorModes) == 0
 		}
+		ok = km_host_start_topology(h.native, request.ID, arguments, lengths, directories, environment, environmentLengths, timeouts, request.TimeoutMS, request.RetainBytes, request.Input, request.Output, request.Append, kinds, edges, inputs, outputs, appends, operandArguments, itemLimits, errorPaths, errorAppends, errorModes, request.StreamItem, request.StreamContext, request.CollectFailures, inputFD, request.InputRoot, accepted) == 0
 		slices.Free(h.Alloc, kinds)
+		slices.Free(h.Alloc, accepted)
 		slices.Free(h.Alloc, edges)
 		slices.Free(h.Alloc, inputs)
 		slices.Free(h.Alloc, outputs)
@@ -398,11 +435,13 @@ func (h *Host) Next() host.ProcessEventResult {
 		return EventResult{}
 	}
 	e := host.ProcessEvent{Kind: host.ProcessEventKind(raw.kind), ID: raw.id, PID: raw.pid, PGID: raw.pgid, Outcome: host.ProcessOutcome(raw.outcome), Status: int(raw.status), Signal: int(raw.signal), Data: cloneBytes(h.Alloc, raw.data, raw.dataLen), Diagnostic: cloneDiagnostic(h.Alloc, raw.diagnosticCode, raw.diagnosticCodeLen, raw.diagnostic, raw.diagnosticLen), Stdout: cloneBytes(h.Alloc, raw.output, raw.stdoutLen), Stderr: cloneBytes(h.Alloc, raw.errorOutput, raw.stderrLen), StdoutTruncated: raw.stdoutTruncated, StderrTruncated: raw.stderrTruncated, RetainBytes: int(raw.retainBytes)}
+	e.HasEffectiveStatus, e.EffectiveStatus = true, int(raw.effectiveStatus)
+	e.EffectiveSignal = int(raw.effectiveSignal)
 	for i := 0; i < int(raw.stageCount); i++ {
 		if e.Kind == host.ProcessSnapshot {
 			e.StageStates = slices.Append(h.Alloc, e.StageStates, int(km_event_stage_field(&raw, c.Int(i), 0)))
 		} else {
-			e.Stages = slices.Append(h.Alloc, e.Stages, host.ProcessStageResult{Status: int(km_event_stage_field(&raw, c.Int(i), 0)), Signal: int(km_event_stage_field(&raw, c.Int(i), 1)), Outcome: host.ProcessOutcome(km_event_stage_field(&raw, c.Int(i), 2))})
+			e.Stages = slices.Append(h.Alloc, e.Stages, host.ProcessStageResult{Status: int(km_event_stage_field(&raw, c.Int(i), 0)), Signal: int(km_event_stage_field(&raw, c.Int(i), 1)), Outcome: host.ProcessOutcome(km_event_stage_field(&raw, c.Int(i), 2)), HasEffectiveStatus: true, EffectiveStatus: int(km_event_stage_field(&raw, c.Int(i), 3))})
 		}
 	}
 	for i := 0; i < int(raw.metricCount); i++ {
@@ -452,6 +491,8 @@ func StderrIsTerminal() bool { return km_cli_stderr_is_terminal() != 0 }
 func StderrWidth() int { return int(km_cli_stderr_width()) }
 
 func StdoutIsTerminal() bool { return km_cli_stdout_is_terminal() != 0 }
+
+func StdinIsTerminal() bool { return km_cli_stdin_is_terminal() != 0 }
 
 func StderrHeight() int { return int(km_cli_stderr_height()) }
 
@@ -534,6 +575,12 @@ func (h *Host) Free() {
 	if h == nil {
 		return
 	}
+	for i := range h.Readers {
+		km_record_close(h.Readers[i].FD)
+		mem.FreeString(h.Alloc, h.Readers[i].Name)
+		slices.Free(h.Alloc, h.Readers[i].Data)
+	}
+	slices.Free(h.Alloc, h.Readers)
 	if h.native != nil {
 		km_host_free(h.native)
 		h.native = nil

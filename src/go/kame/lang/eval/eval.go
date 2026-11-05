@@ -96,11 +96,26 @@ func (p *Program) EvaluateDefinition(key core.ResourceKey, context *Context) Res
 }
 
 func attachSource(result *Result, context *Context) {
+	if result.Diagnostic.ExitOnly() {
+		return
+	}
 	// Context and program sources outlive their diagnostic results. Diagnostics
 	// borrowed from engine nodes must not be cloned or freed here; owned
 	// diagnostics copy the source so Free releases it consistently.
 	if result.Diagnostic.Code != "" && context.Source != "" && result.Diagnostic.Source == "" {
-		location := context.Program.LocateSource(context.Source, source.Span{Start: result.Diagnostic.Span.Start, End: result.Diagnostic.Span.End})
+		span := source.Span{Start: result.Diagnostic.Span.Start, End: result.Diagnostic.Span.End}
+		location := context.Program.LocateSource(context.Source, span)
+		if context.Program != nil && context.SourceOrigin > 0 && context.SourceOrigin <= len(context.Program.SourceParts) {
+			part := context.Program.SourceParts[context.SourceOrigin-1]
+			location = Location{Source: part.Name, Span: source.Span{Start: span.Start - part.Start + part.Offset, End: span.End - part.Start + part.Offset}}
+			for i := range part.Includes {
+				frame := part.Includes[i]
+				if result.Diagnostic.Owned {
+					frame.Kind, frame.Label, frame.Source = owned(context.Run, frame.Kind), owned(context.Run, frame.Label), owned(context.Run, frame.Source)
+				}
+				result.Diagnostic.Frames = slices.Append(context.Run, result.Diagnostic.Frames, frame)
+			}
+		}
 		result.Diagnostic.Span = diagnostic.Span{Start: location.Span.Start, End: location.Span.End}
 		if result.Diagnostic.Owned {
 			result.Diagnostic.Source = cloneFailureText(context.Run, location.Source)

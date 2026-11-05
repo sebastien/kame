@@ -55,6 +55,15 @@ changes; the freestanding module performs no filesystem watching.
 
 ## ABI
 
+Runner-session termination is separate from result values and diagnostics.
+After a session work item completes, `kame_wasm_session_exit_status` returns -1
+when no exit was requested, or a terminal status from 0 through 255. Drivers must
+stop requesting later work after termination. The portable runtime exposes the
+same typed intent in `RuntimeResult.Exit`; ordinary failure diagnostics remain
+available when jobs or cleanup fail. JSON lifecycle events carry a conditional
+`termination: {status: N}` field. A deliberate exit alone has no diagnostic or
+backtrace, and never unconditionally terminates the embedding process.
+
 The exported C ABI provides conceptual operations for:
 
 - Instance create and free.
@@ -148,6 +157,16 @@ source and included source), plus authored byte `start` and `end` offsets with
 never opens includes to reconstruct it. Invalid fields fail `PARSE_ERR` before
 registration. Compilation errors map primary and related locations separately
 and retain both inclusion paths, including distinct sites loading the same file.
+
+Build source entries and session fragments may also carry `sourceDirectory`, an
+absolute lexical directory supplied by the file loader. An omitted or empty value
+provides no file-backed context. It is independent of the display `name`, cwd, and
+the session's `inline` entry-selection flag. `(source-dir)` uses this metadata at
+its authored expression, including in functions called from another source;
+generated expressions do not acquire context through coincident byte spans.
+Nonstring or nonabsolute nonempty values fail `PARSE_ERR` before registration.
+Included Kash session fragments are definition-only libraries, validated before
+execution; the host expands their literal includes using the portable parser.
 
 ## Host Requests
 
@@ -327,6 +346,18 @@ configured graphs (kind 15, a JSON object with `stages`, `input`, `output`,
 invocation environment and limits; their own timeout terminates the whole graph
 but ceases when that stage exits. PATH lookup uses the effective stage environment
 and cwd. Setup does not broaden caller grants.
+Runner-session descriptors may opt into borrowed data input with integer
+`dataInput: 1` (omitted or zero means closed). The embedding host retains and
+services that stream; no input bytes or operating-system descriptors cross the
+WASM ABI. Configured process descriptors carry `inputMode: "closed"` or
+`"invocation"`, with a zero-based `inputRoot` for invocation mode. File paths and
+graph edges remain explicit independent input dispositions. Unknown modes or an
+unavailable invocation stream must fail before process launch or output
+truncation, never silently become EOF. Sequential requests share the remaining
+bytes without host read-ahead loss, and must not close the caller's stream.
+Input-supplied sessions conservatively disable cached execution and file
+freshness reuse. Native `program.Options` supplies the same opt-in with
+`HasInput` and borrowed `InputFD`; ordinary recipes and embeddings default closed.
 Redirection paths are authorized before opening; input opens before output so a
 missing source cannot truncate the destination. Redirected stdout is neither
 captured nor UTF-8 decoded. A pipeline is
@@ -338,8 +369,59 @@ signal, and per-stage status/signal/outcome records. A successful capture may
 complete directly as UTF-8 text to avoid escaping large strings through JSON.
 Launch failures, timeout, cancellation, and capture overflow terminate and reap
 all remaining stages before completing the request.
+Configured stage setup may include `acceptExit`, a list of distinct integers
+from 1 through 255. Only ordinary executable/each-worker exits are accepted.
+Hosts preserve raw status/signal and publish separate integer `effectiveStatus`
+on stage and aggregate completions, plus aggregate `effectiveSignal`. Zero
+effective status means effective success. Collection
+retains the last unaccepted worker in record order and the last effectively
+failing node in prepared order; a later accepted raw nonzero status cannot mask
+it. Signals and operator/launch/transport failures remain fatal.
+
+Single-command typed capture adds a normalized `capture` record with boolean
+`stdout`/`stderr` selections and positive integer `stdoutLimit`/`stderrLimit`.
+Validate it before execution; capture selected streams concurrently, suppress
+their publication, preserve unselected live streams, and cancel/reap on overflow.
+`kame_wasm_complete_capture(instance, request, metadata, metadata_len, output,
+output_len, error_output, error_len)` copies canonical JSON completion metadata
+(a record without stdout/stderr fields) and two exact byte buffers. Metadata
+retains stage, raw aggregate and effective status; the evaluator applies the
+request's stream selection, including empty bytes versus nil. Hosts without
+this binary completion reject capture before launch rather than decode bytes
+as text or expand them into JSON byte arrays.
+
+Watch invalidation batches also accept `{ "kind": "tool", "name": NAME }` to
+refresh a resolver observation, including a previously missing optional tool.
 Individual `free` operations still release owned engine objects where supported
 so native and WebAssembly behavior remain comparable.
+
+Incremental records use ABI kind **40**, JSON
+`{"reader":ID,"path":PATH,"delimiter":10|0}` with optional `"stdin":true`.
+Stdin requests have an empty path and borrow the invocation's remaining input
+without a file grant. IDs are instance-scoped positive
+integers. For file sources, the first read opens and validates a regular local file; later reads
+retain the same descriptor, path, delimiter, and offset. Read authority still
+applies. Complete with one raw string record including its delimiter, or nil
+for EOF. Transport raw bytes with `complete_text` without lossy decoding: the
+portable evaluator validates UTF-8, delimiter framing, and the 64 KiB record
+bound. Read/framing failures are diagnostics, never EOF or truncation. File
+read-ahead is bounded and must not discard the next record.
+
+Kind **41**, the same JSON shape with an empty path, releases that reader;
+complete with nil. Release is idempotent and must work during cancellation.
+Readers also close on instance disposal, and unsupported hosts reject these
+kinds rather than substituting whole-file capture. Native `ProgramHost`
+implements `ReadRecord` and `CloseRecord` with the same ownership contract.
+For stdin, hosts enforce an exclusive active claim (`KASH_DOUBLE_CONSUME` for a
+competing reader), stop exactly at the delimiter, and preserve the caller's
+descriptor and status flags. Pending reads must remain cancellable; closing the
+reader releases its claim and prevents future reads. Native `ReadRecord` accepts
+the borrowed input FD and returns `Waiting` while retaining bounded partial
+record progress; the runtime polls pending requests and cancels them on release.
+Node supports regular files and Linux pipes/FIFOs, reopening pipes through
+`/proc/self/fd/FD` with independent nonblocking flags. Unsupported handles,
+including Node sockets, report `FEATURE_UNSUP` before consuming bytes. No blocking
+thread-pool read, whole-input capture, or per-record subprocess is substituted.
 
 Explicit process topology uses ABI request kind **32**, not the linear pipeline
 kinds above. Its JSON descriptor adds parallel `kinds` (empty for executable

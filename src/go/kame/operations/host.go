@@ -7,6 +7,7 @@ import (
 	"kame/lang/eval"
 	"kame/lang/expr"
 	"solod.dev/so/mem"
+	"solod.dev/so/path"
 	"solod.dev/so/slices"
 	"solod.dev/so/strconv"
 	"solod.dev/so/strings"
@@ -204,15 +205,23 @@ func fileRequest(c *eval.Context, op string, value core.Value) eval.Result {
 		c.DiscardCallables(&value)
 		return c.InvalidArgument(0, "string or file resource", value.Kind)
 	}
+	if op == host.OpWildcard && value.GlobPattern != "" {
+		name = value.GlobPattern
+	}
+	// Scoped absolute cwd must reach the host as well as the graph edge. Keep
+	// boundary-relative logical names (including glob identities) host-owned.
+	resolved := ""
+	if path.IsAbs(c.Cwd) && (c.Program == nil || c.Cwd != c.Program.DefinitionCwd) {
+		resolved = c.CanonicalPath(name)
+		name = resolved
+	}
+	defer mem.FreeString(c.Run, resolved)
 	if !c.Allows(eval.Read, name) {
 		return failure("CAP_DENIED", "read access denied; grant the required path with --allow-read=ROOT")
 	}
 	kind := core.ResourceFile
 	if op == host.OpWildcard {
 		kind = core.ResourceGlob
-		if value.GlobPattern != "" {
-			name = value.GlobPattern
-		}
 	}
 	if !c.DirectHostRequests && !dependency(c, kind, name) {
 		return eval.Result{Waiting: true}

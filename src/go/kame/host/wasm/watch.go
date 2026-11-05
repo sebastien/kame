@@ -183,13 +183,16 @@ func (r *Runtime) InvalidateWatch(data []byte) PureResult {
 				}
 			}
 		}
-		if kind.Kind != core.String || (kind.Text != "file" && kind.Text != "glob") || name.Kind != core.String || name.Text == "" || strings.IndexByte(name.Text, 0) >= 0 {
+		if kind.Kind != core.String || (kind.Text != "file" && kind.Text != "glob" && kind.Text != "tool") || name.Kind != core.String || name.Text == "" || strings.IndexByte(name.Text, 0) >= 0 {
 			slices.Free(r.Alloc, keys)
 			return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "invalid watch resource key")}
 		}
 		resourceKind := core.ResourceFile
 		if kind.Text == "glob" {
 			resourceKind = core.ResourceGlob
+		}
+		if kind.Text == "tool" {
+			resourceKind = core.ResourceTool
 		}
 		keys = slices.Append(r.Alloc, keys, core.ResourceKey{Kind: resourceKind, Name: name.Text})
 	}

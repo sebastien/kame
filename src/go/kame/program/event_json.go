@@ -40,6 +40,7 @@ func WriteJSONEventWithAllocator(a mem.Allocator, out io.Writer, event Event) {
 	e.Int(event.Generation)
 	e.Str("attempt")
 	e.Int(event.Attempt)
+	encodeTermination(&e, event.Exit)
 	if event.Key.Name != "" {
 		e.Str("resource")
 		encodeResourceKey(&e, event.Key)
@@ -264,6 +265,7 @@ func WriteJSONDiagnostic(out io.Writer, d diagnostic.Diagnostic) {
 
 func encodeDiagnostic(e *json.Encoder, d diagnostic.Diagnostic) {
 	e.BeginObject()
+	encodeTermination(e, d.Exit)
 	e.Str("code")
 	e.Str(d.Code)
 	e.Str("severity")
@@ -334,6 +336,17 @@ func encodeDiagnostic(e *json.Encoder, d diagnostic.Diagnostic) {
 	if d.Cause.Kind != "" {
 		encodeCause(e, d.Cause)
 	}
+	e.EndObject()
+}
+
+func encodeTermination(e *json.Encoder, exit diagnostic.Termination) {
+	if !exit.Requested {
+		return
+	}
+	e.Str("termination")
+	e.BeginObject()
+	e.Str("status")
+	e.Int(int64(exit.Status))
 	e.EndObject()
 }
 

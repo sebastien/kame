@@ -180,6 +180,10 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		e.Str("rejoin")
 		e.Str(value.Exit)
 	}
+	if value.Kind == expr.KashRecords {
+		e.Str("frame")
+		e.Str(value.RecordFrame)
+	}
 	process := value.Kind == expr.CommandGraph || value.Kind == expr.CommandCapture
 	if process {
 		if e.processDepth == 0 {
@@ -243,7 +247,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.Selector || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashComment {
+	if value.Kind == expr.Symbol || value.Kind == expr.Name || value.Kind == expr.Path || value.Kind == expr.Selector || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashLet || value.Kind == expr.KashComment {
 		e.Str("text")
 		e.Str(value.Text)
 	}
@@ -285,7 +289,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.List || value.Kind == expr.ListSpread || value.Kind == expr.KashReturn || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.CommandList || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
+	if value.Kind == expr.List || value.Kind == expr.ListSpread || value.Kind == expr.KashReturn || value.Kind == expr.KashExit || value.Kind == expr.KashLet || value.Kind == expr.Application || value.Kind == expr.CommandCapture || value.Kind == expr.CommandStage || value.Kind == expr.CommandGroup || value.Kind == expr.CommandMux || value.Kind == expr.CommandRedirection || value.Kind == expr.CommandSetup || value.Kind == expr.CommandGraph || value.Kind == expr.CommandList || value.Kind == expr.ValueRecovery || value.Kind == expr.CommandTest || expr.IsKashControl(value.Kind) || value.Kind == expr.KashBranch || value.Kind == expr.KashDefinition || value.Kind == expr.KashDefer {
 		if value.AcceptExit {
 			e.Str("acceptExit")
 			e.Bool(true)
@@ -336,7 +340,7 @@ func (e *astEncoder) expr(value *expr.Expr) {
 		}
 		e.EndArray()
 	}
-	if value.Kind == expr.KashBranch {
+	if value.Kind == expr.KashBranch || value.Kind == expr.KashWith {
 		e.Str("body")
 		e.exprs(value.Body)
 	}
@@ -479,6 +483,24 @@ func exprKind(k expr.Kind) string {
 	}
 	if k == expr.KashReturn {
 		return "kash-return"
+	}
+	if k == expr.KashLet {
+		return "kash-let"
+	}
+	if k == expr.KashExit {
+		return "kash-exit"
+	}
+	if k == expr.KashWith {
+		return "kash-with"
+	}
+	if k == expr.KashBreak {
+		return "kash-break"
+	}
+	if k == expr.KashContinue {
+		return "kash-continue"
+	}
+	if k == expr.KashRecords {
+		return "kash-records"
 	}
 	if k == expr.CommandOperand {
 		return "stream-operand"
@@ -950,6 +972,10 @@ func (e *astEncoder) definition(value *definition.Definition) {
 	e.Str(value.Name)
 	e.Str("function")
 	e.Bool(value.Function)
+	if value.Eager {
+		e.Str("eager")
+		e.Bool(true)
+	}
 	if value.Default {
 		e.Str("default")
 		e.Bool(true)

@@ -4,13 +4,14 @@ import (
 	"kame/lang/expr"
 	"kame/lang/script"
 	"kame/lang/source"
+	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/testing"
 )
 
 func TestCompositionValueSurfacesRejectHiddenHeads(t *testing.T) {
 	a := t.Allocator()
-	cases := []string{"(include ./a.km)", "(if :false (include? ./a.km) :nil)", "unused = ([] (include ./a.km))", "if (if :true :false :true)\n\tunused = ([] (include? ./a.km))\n"}
+	cases := []string{"(include? ./a.km)", "(if :false (include ./a.km) :nil)", "unused = ([] (include ./a.km))", "if (if :true :false :true)\n\tunused = ([] (include? ./a.km))\n", "defn library\n\t(include ./a.km)\n"}
 	for i := range cases {
 		parsed := script.ParseKash(a, "hidden.kash", cases[i])
 		if len(parsed.Diagnostics) == 0 || parsed.Diagnostics[0].Code != "EXPR_INVALID" {
@@ -43,5 +44,34 @@ func TestCompositionValueSurfacesRejectHiddenHeads(t *testing.T) {
 	defer slices.Free(a, diagnostics)
 	if len(diagnostics) != 1 || diagnostics[0].Code != "EXPR_INVALID" {
 		t.Error("shared validation missed an unused lambda")
+	}
+}
+
+func TestKashLibraryCompositionAndFormatting(t *testing.T) {
+	a := t.Allocator()
+	parsed := script.ParseKash(a, "library.kash", "# library\n(include ./nested.km)\nvalue = 1\ndefn check\n\tprintf %s $value\n")
+	defer parsed.Free()
+	script.ValidateKashLibrary(parsed)
+	if len(parsed.Diagnostics) != 0 || parsed.Items[1].Kind != script.Include {
+		t.Fatal("literal Kash include or definition-only library rejected")
+		return
+	}
+	formatted := script.Format(a, parsed)
+	defer mem.FreeString(a, formatted)
+	again := script.ParseKash(a, "formatted.kash", formatted)
+	defer again.Free()
+	script.ValidateKashLibrary(again)
+	if len(again.Diagnostics) != 0 || again.Items[1].Kind != script.Include || again.Items[1].Include != "./nested.km" {
+		t.Error("Kash formatting changed library composition")
+	}
+	texts := []string{"printf side-effect", "(out! 1)", "if true\n\tprintf work\n", "let value = 1"}
+	for i := range texts {
+		text := texts[i]
+		invalid := script.ParseKash(a, "invalid.kash", text)
+		script.ValidateKashLibrary(invalid)
+		if len(invalid.Diagnostics) == 0 {
+			t.Error("library accepted top-level work: " + text)
+		}
+		invalid.Free()
 	}
 }

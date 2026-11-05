@@ -47,6 +47,24 @@ func (p *Program) pump(wait int) {
 		if event.Kind == host.ProcessStderr || event.Kind == host.ProcessStdout {
 			for i := range p.Pending {
 				if p.Pending[i].ID == event.ID && (p.Pending[i].Capture || p.Pending[i].Stream) {
+					pending := &p.Pending[i]
+					if pending.TypedCapture {
+						selected := false
+						if event.Kind == host.ProcessStdout && pending.CaptureStdout {
+							pending.StdoutBytes += int64(len(event.Data))
+							selected = true
+						} else if event.Kind == host.ProcessStderr && pending.CaptureStderr {
+							pending.StderrBytes += int64(len(event.Data))
+							selected = true
+						}
+						if selected {
+							if !pending.CaptureOverflow && (pending.StdoutBytes > pending.StdoutLimit || pending.StderrBytes > pending.StderrLimit) {
+								pending.CaptureOverflow = true
+								p.Host.Cancel(event.ID)
+							}
+							break
+						}
+					}
 					if event.Kind == host.ProcessStderr {
 						p.captureStderr(p.Pending[i], event.Data)
 					} else if p.Pending[i].Stream {
@@ -83,7 +101,17 @@ func (p *Program) drainRequests() {
 			return
 		}
 		request := next.Request
+		// DispatchRoot can queue async startup and its scope can cancel it in the
+		// same evaluator turn. Never launch a request the engine can no longer accept.
+		node := p.Engine.LookupID(request.NodeID)
+		if node == nil || !node.Submitted || node.State != core.NodeWaiting || node.Generation != request.Generation || node.Attempt != request.Attempt || node.HostRequestID != request.ID {
+			request.Free(p.Alloc)
+			continue
+		}
 		if p.Forwarding {
+			if request.Kind == host.RequestRecordRead {
+				p.noteRecordReader(request)
+			}
 			if request.Kind == host.RequestProcess {
 				display := processDisplayFromPayload(p.Alloc, request.Payload, p.Options.Shell)
 				pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated}
@@ -93,6 +121,15 @@ func (p *Program) drainRequests() {
 			// Ownership transfers to the outbound queue; the embedding host
 			// frees the request when it completes it.
 			p.Outbound = slices.Append(p.Alloc, p.Outbound, request)
+			continue
+		}
+		if request.Kind == host.RequestRecordRead {
+			p.noteRecordReader(request)
+			if !p.tryRecordRequest(request) {
+				p.RecordRequests = slices.Append(p.Alloc, p.RecordRequests, request)
+			} else {
+				request.Free(p.Alloc)
+			}
 			continue
 		}
 		if request.Kind == host.RequestProcess {
@@ -194,6 +231,14 @@ func (p *Program) drainRequests() {
 					stage.Framed = framed[i].Bool
 				}
 				if i < len(setups) {
+					accepted := host.PayloadList(setups[i], "acceptExit")
+					for j := range accepted {
+						if accepted[j].Kind != core.Int || accepted[j].Int < 1 || accepted[j].Int > 255 || stage.Accepted[accepted[j].Int] {
+							validEdges = false
+						} else {
+							stage.Accepted[accepted[j].Int] = true
+						}
+					}
 					stage.Input, stage.Output, stage.Append = host.PayloadText(setups[i], host.FieldInput), host.PayloadText(setups[i], host.FieldOutput), host.PayloadAppend(setups[i])
 					stage.Error, stage.ErrorAppend, stage.ErrorMode = host.PayloadText(setups[i], host.FieldError), host.PayloadBool(setups[i], host.FieldErrorAppend), int(host.PayloadInt(setups[i], host.FieldErrorMode))
 					stage.Directory, stage.TimeoutMS = host.PayloadText(setups[i], host.FieldCwd), host.PayloadInt(setups[i], host.FieldTimeout)
@@ -244,6 +289,21 @@ func (p *Program) drainRequests() {
 			if stream {
 				retain = 0
 			}
+			var typedPolicy core.Value
+			for i := range request.Payload.Record {
+				if request.Payload.Record[i].Key == "capture" && request.Payload.Record[i].Value.Kind == core.Record {
+					typedPolicy = request.Payload.Record[i].Value
+				}
+			}
+			if typedPolicy.Kind == core.Record {
+				retain = 0
+				if host.PayloadBool(typedPolicy, "stdout") {
+					retain = int(host.PayloadInt(typedPolicy, "stdoutLimit"))
+				}
+				if host.PayloadBool(typedPolicy, "stderr") && int(host.PayloadInt(typedPolicy, "stderrLimit")) > retain {
+					retain = int(host.PayloadInt(typedPolicy, "stderrLimit"))
+				}
+			}
 			environment := p.Options.Environment
 			var scopedEnvironment []string
 			for i := range request.Payload.Record {
@@ -257,6 +317,15 @@ func (p *Program) drainRequests() {
 			}
 			processRequest := host.ProcessRequest{ID: request.ID, Shell: p.Options.Shell, Argv: argv, Stages: stages, Input: host.PayloadText(request.Payload, host.FieldInput), Output: host.PayloadText(request.Payload, host.FieldOutput), Append: host.PayloadAppend(request.Payload), Script: []byte(script), Directory: p.Options.Directory, Environment: environment, TimeoutMS: p.Options.TimeoutMS, RetainBytes: retain}
 			processRequest.Topology, processRequest.Edges = len(kinds) != 0, edges
+			processRequest.InputMode = host.PayloadText(request.Payload, "inputMode")
+			processRequest.InputRoot = int(host.PayloadInt(request.Payload, "inputRoot"))
+			processRequest.InputFD = p.Options.InputFD
+			if processRequest.InputMode != "" && processRequest.InputMode != "closed" && processRequest.InputMode != "invocation" {
+				validEdges = false
+			}
+			if processRequest.InputMode == "invocation" && !p.Options.HasInput {
+				validEdges = false
+			}
 			processRequest.CollectFailures = host.PayloadInt(request.Payload, "failurePolicy") == 1
 			if processRequest.CollectFailures && !processRequest.Topology {
 				validEdges = false
@@ -278,6 +347,10 @@ func (p *Program) drainRequests() {
 			} else {
 				display := processDisplayFromHost(p.Alloc, processRequest)
 				pending := pendingRequest{ID: request.ID, NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, Capture: capture, Stream: stream, Program: display.Program, Argv: display.Argv, DisplayTruncated: display.Truncated}
+				if typedPolicy.Kind == core.Record {
+					pending.TypedCapture, pending.CaptureStdout, pending.CaptureStderr = true, host.PayloadBool(typedPolicy, "stdout"), host.PayloadBool(typedPolicy, "stderr")
+					pending.StdoutLimit, pending.StderrLimit = host.PayloadInt(typedPolicy, "stdoutLimit"), host.PayloadInt(typedPolicy, "stderrLimit")
+				}
 				pending.Graph = snapshotTopology(p.Alloc, request.Payload)
 				p.Pending = slices.Append(p.Alloc, p.Pending, pending)
 			}
@@ -864,7 +937,7 @@ func (p *Program) Complete(request host.Request, value core.Value, diagnostic di
 		p.completeServiceClock(entry, now)
 		return
 	}
-	if request.Kind == host.RequestTimer || request.Kind == host.RequestProcessCancel {
+	if request.Kind == host.RequestTimer || request.Kind == host.RequestProcessCancel || request.Kind == host.RequestRecordClose {
 		value.Free(p.Alloc)
 		diagnostic.Free(p.Alloc)
 		return
@@ -987,6 +1060,7 @@ func (p *Program) completeRequest(request host.Request) {
 }
 
 func (p *Program) drainCancellations() {
+	p.closeAbandonedRecordReaders()
 	for {
 		cancellation := p.Engine.NextCancellation()
 		if cancellation.RequestID == 0 {
@@ -1094,6 +1168,10 @@ func (p *Program) complete(event host.ProcessEvent) {
 		p.releaseCacheLock(entry)
 	}
 	if completedPending.ID != 0 && (completedPending.Capture || completedPending.Stream) {
+		if completedPending.TypedCapture && (completedPending.CaptureOverflow || (completedPending.CaptureStdout && event.StdoutTruncated) || (completedPending.CaptureStderr && event.StderrTruncated)) {
+			d.Free(p.Alloc)
+			d = failure(p.Alloc, "CAPTURE_LIMIT", "captured stream exceeded its byte limit")
+		}
 		if completedPending.Capture && event.StdoutTruncated {
 			d.Free(p.Alloc)
 			d = failure(p.Alloc, "CAPTURE_LIMIT", "command substitution exceeded capture limit")
@@ -1237,9 +1315,28 @@ func processProgram(p *Program) string {
 	return ""
 }
 
+// effectiveStatus fills the host-independent fallback used when an older host
+// does not publish selective-acceptance results. Signals remain failures.
+func effectiveStatus(status int, signal int, effective int, has bool) int {
+	if has {
+		return effective
+	}
+	if signal != 0 {
+		return 128 + signal
+	}
+	return status
+}
+
 func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
 	fields := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(event.Status)}}, {Key: "stdout", Value: core.NewBytes(a, event.Stdout)}, {Key: "stderr", Value: core.NewBytes(a, event.Stderr)}, {Key: "signal", Value: core.Value{Kind: core.Int, Int: int64(event.Signal)}}}
 	value := core.NewRecord(a, fields)
+	// Always publish the effective fields so every completion has one shape.
+	effectiveSignal := event.Signal
+	if event.HasEffectiveStatus {
+		effectiveSignal = event.EffectiveSignal
+	}
+	value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(event.Status, event.Signal, event.EffectiveStatus, event.HasEffectiveStatus))}})
+	value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "effectiveSignal"), Value: core.Value{Kind: core.Int, Int: int64(effectiveSignal)}})
 	for i := range fields {
 		fields[i].Value.Free(a)
 	}
@@ -1249,6 +1346,8 @@ func shellValue(a mem.Allocator, event host.ProcessEvent) core.Value {
 			stage := event.Stages[i]
 			parts := []core.RecordField{{Key: "status", Value: core.Value{Kind: core.Int, Int: int64(stage.Status)}}, {Key: "signal", Value: core.Value{Kind: core.Int, Int: int64(stage.Signal)}}, {Key: "outcome", Value: core.Value{Kind: core.Int, Int: int64(stage.Outcome)}}}
 			stages = slices.Append(a, stages, core.NewRecord(a, parts))
+			v := &stages[len(stages)-1]
+			v.Record = slices.Append(a, v.Record, core.RecordField{Key: cloneText(a, "effectiveStatus"), Value: core.Value{Kind: core.Int, Int: int64(effectiveStatus(stage.Status, stage.Signal, stage.EffectiveStatus, stage.HasEffectiveStatus))}})
 		}
 		value.Record = slices.Append(a, value.Record, core.RecordField{Key: cloneText(a, "stages"), Value: core.NewList(a, stages)})
 		for i := range stages {

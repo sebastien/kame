@@ -77,6 +77,8 @@ typedef struct km_stage {
     int64_t job;
     int64_t deadline;
     int status, signal, outcome, operator_kind;
+    unsigned char accepted[256];
+    int effective_status;
     bool exited, reaped, spawned_in_job;
 } km_stage;
 
@@ -392,6 +394,58 @@ bool km_cli_signal_pending(void) { return km_cli_signal_count != 0; }
 
 int km_cli_stderr_is_terminal(void) { return isatty(STDERR_FILENO); }
 int km_cli_stdout_is_terminal(void) { return isatty(STDOUT_FILENO); }
+int km_cli_stdin_is_terminal(void) { return isatty(STDIN_FILENO); }
+
+static char *km_cstring(so_String value);
+
+int km_record_open(so_String path) {
+    char *name = km_cstring(path);
+    if (!name) return -1;
+    int fd = open(name, O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    free(name);
+    struct stat info;
+    if (fd >= 0 && (fstat(fd, &info) || !S_ISREG(info.st_mode))) { close(fd); fd = -1; }
+    return fd;
+}
+
+int km_record_next(so_int fd, int64_t *offset, so_int delimiter, so_Slice buffer) {
+    int size = 0;
+    // Positional reads permit bounded look-ahead without retaining or losing
+    // bytes after a delimiter. This reader owns a regular-file descriptor.
+    while (size < buffer.len) {
+        size_t limit = (size_t)(buffer.len - size);
+        if (limit > 4096) limit = 4096;
+        ssize_t count;
+        do { count = pread((int)fd, (char *)buffer.ptr + size, limit, (off_t)*offset); } while (count < 0 && errno == EINTR);
+        if (count < 0) return -1;
+        if (count == 0) return size;
+        for (int i = 0; i < count; i++) if (((unsigned char *)buffer.ptr)[size+i] == delimiter) {
+            *offset += i + 1;
+            return size + i + 1 > 65536 ? -2 : size + i + 1;
+        }
+        size += (int)count;
+        *offset += count;
+    }
+    return -2;
+}
+
+void km_record_close(so_int fd) { close((int)fd); }
+
+int km_record_borrow(so_int fd) { return fcntl((int)fd, F_DUPFD_CLOEXEC, 3); }
+
+// -1 means no byte is ready, -2 is an error, zero is EOF, and 1..256 is a byte.
+int km_record_byte(so_int fd) {
+    struct pollfd ready = {.fd = (int)fd, .events = POLLIN};
+    int status;
+    do { status = poll(&ready, 1, 0); } while (status < 0 && errno == EINTR);
+    if (status < 0 || (status > 0 && (ready.revents & POLLNVAL))) return -2;
+    if (status == 0) return -1;
+    unsigned char byte;
+    ssize_t count;
+    do { count = read((int)fd, &byte, 1); } while (count < 0 && errno == EINTR);
+    if (count < 0) return errno == EAGAIN || errno == EWOULDBLOCK ? -1 : -2;
+    return count == 0 ? 0 : byte + 1;
+}
 
 int km_cli_stderr_height(void) {
     struct winsize size;
@@ -945,7 +999,7 @@ static void km_release_process(km_process *p) {
     for (int i = 0; i < p->stage_count; i++) km_windows_job_close(&p->stages[i].job);
     free(p->stages);
     if (p->metrics) munmap(p->metrics, (size_t)p->metric_count * KM_METRIC_FIELDS * sizeof(int64_t));
-    if (p->live_states) munmap(p->live_states, (size_t)p->stage_count * 2 * sizeof(int));
+    if (p->live_states) munmap(p->live_states, (size_t)p->stage_count * 3 * sizeof(int));
     for (int i = 0; i < 2; i++) if (p->pending_sequence[i]) km_free_event(&p->pending[i]);
     memset(p, 0, sizeof(*p)); p->outfd = p->errfd = p->execfd = -1;
 }
@@ -969,17 +1023,21 @@ static void km_emit_terminal(km_host *host, km_process *p, int outcome, const ch
     p->terminal = true;
     km_event event = { .kind = KM_TERMINAL, .id = p->id, .pid = p->pid, .pgid = p->pid, .outcome = outcome, .status = p->status, .signal = p->signal, .output = km_copy(p->stdout_data, p->stdout_len), .stdoutLen = p->stdout_len, .errorOutput = km_copy(p->stderr_data, p->stderr_len), .stderrLen = p->stderr_len, .stdoutTruncated = p->stdout_truncated, .stderrTruncated = p->stderr_truncated, .retainBytes = p->retain };
     if (p->stage_count) {
-        event.stageData = km_event_allocate() ? calloc((size_t)p->stage_count * 3, sizeof(int)) : NULL;
+        for (int i = 0; i < p->stage_count; i++) if (p->stages[i].effective_status) { event.effectiveStatus = p->stages[i].effective_status; event.effectiveSignal = p->stages[i].signal; }
+        if (p->failed_stage >= 0) { event.effectiveStatus = p->stages[p->failed_stage].effective_status; event.effectiveSignal = p->stages[p->failed_stage].signal; }
+        event.stageData = km_event_allocate() ? calloc((size_t)p->stage_count * 4, sizeof(int)) : NULL;
         if (!event.stageData) { outcome = event.outcome = KM_FAILED; diagnostic = "stage result allocation failed"; }
         else {
             event.stageCount = p->stage_count;
             for (int i = 0; i < p->stage_count; i++) {
-                event.stageData[i * 3] = p->stages[i].status;
-                event.stageData[i * 3 + 1] = p->stages[i].signal;
-                event.stageData[i * 3 + 2] = p->stages[i].outcome;
+                event.stageData[i * 4] = p->stages[i].status;
+                event.stageData[i * 4 + 1] = p->stages[i].signal;
+                event.stageData[i * 4 + 2] = p->stages[i].outcome;
+                event.stageData[i * 4 + 3] = p->stages[i].effective_status;
             }
         }
     }
+    else { event.effectiveStatus = p->signal ? 128 + p->signal : p->status; event.effectiveSignal = p->signal; }
     // Telemetry is optional: an allocation failure must not turn successful
     // work into a failed graph. Missing measurements remain explicitly unknown.
     if (p->metrics && p->exited) {
@@ -1659,9 +1717,9 @@ fail:
 
 // Flattened argv plus per-stage lengths keeps the ABI independent of generated
 // Go structs. OS pipes carry intermediate bytes directly, with backpressure.
-int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice error_paths, so_Slice error_appends, so_Slice error_modes) {
+int km_host_start_graph(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice error_paths, so_Slice error_appends, so_Slice error_modes, so_int input_fd, so_int input_root) {
     so_Slice empty = {0};
-    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty, empty, empty, error_paths, error_appends, error_modes, NULL, NULL, false);
+    return km_host_start_topology(host, id, arguments, lengths, directories, environment, environment_lengths, timeouts, timeout, retain, input_path, output_path, append_output, empty, empty, empty, empty, empty, empty, empty, error_paths, error_appends, error_modes, NULL, NULL, false, input_fd, input_root, empty);
 }
 
 bool km_stream_operands_supported(void) {
@@ -2023,7 +2081,7 @@ cleanup:
 
 static int km_run_each(int node, int *edges, so_int *links, int count,
                         char **argv, char **envp, int64_t *metrics, int *states,
-                        int *failure, bool collect) {
+                        int *failure, bool collect, unsigned char *accepted, int *effective) {
     km_worker_state = states + node;
     km_worker_metrics = metrics; km_worker_pipes = edges; km_worker_links = links;
     km_worker_node = node; km_worker_edges = count;
@@ -2052,7 +2110,8 @@ static int km_run_each(int node, int *edges, so_int *links, int count,
         km_worker_wait(KM_RUNNING);
         int status = km_each_child(node, edges, links, count, argv, envp, record + 4, length - 4, failure);
         if (status) result = status;
-        if (__atomic_load_n(failure, __ATOMIC_RELAXED) || (status && !collect)) break;
+        if (status && !accepted[status]) __atomic_store_n(effective, status, __ATOMIC_RELAXED);
+        if (__atomic_load_n(failure, __ATOMIC_RELAXED) || (status && !accepted[status] && !collect)) break;
     }
     goto complete;
 failed:
@@ -2159,7 +2218,7 @@ static int km_run_mux(int node, int mode, int *edges, so_int *links, int count,
     return result;
 }
 
-int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends, so_Slice operand_arguments, so_Slice item_limits, so_Slice error_paths, so_Slice error_appends, so_Slice error_modes, km_stream_item stream_item, void *stream_context, bool collect_failures) {
+int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Slice lengths, so_Slice directories, so_Slice environment, so_Slice environment_lengths, so_Slice timeouts, int64_t timeout, so_int retain, so_String input_path, so_String output_path, bool append_output, so_Slice kinds, so_Slice connections, so_Slice input_paths, so_Slice output_paths, so_Slice appends, so_Slice operand_arguments, so_Slice item_limits, so_Slice error_paths, so_Slice error_appends, so_Slice error_modes, km_stream_item stream_item, void *stream_context, bool collect_failures, so_int input_fd, so_int input_root, so_Slice accepted) {
     if (!host) return -1;
     if (host->rejected_sequence) return -2;
     if (!id || lengths.len < 1 || lengths.len > INT_MAX / 2 || timeout < 0 || retain < 0) return km_spawn_failed(host, id, "invalid graph request");
@@ -2181,6 +2240,11 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     }
     if (total != arguments.len) return km_spawn_failed(host, id, "invalid graph argv");
     int n = (int)lengths.len;
+    if (accepted.len % 2) return km_spawn_failed(host, id, "invalid accepted exits");
+    so_int *accept = accepted.ptr;
+    for (so_int j = 0; j < accepted.len; j += 2) {
+        if (accept[j] < 0 || accept[j] >= n || accept[j + 1] < 1 || accept[j + 1] > 255 || (topology && (node_kinds[accept[j]] & 15) != 0 && (node_kinds[accept[j]] & 15) != 8)) return km_spawn_failed(host, id, "invalid accepted exits");
+    }
     bool live_operands = false;
     for (int i = 0; topology && i < edge_count; i++) {
         int target = (int)links[i * 2 + 1];
@@ -2216,10 +2280,16 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     km_process p = {.id = id, .outfd = -1, .errfd = -1, .execfd = -1, .direct = true, .retain = (int)retain, .stage_count = n, .topology = topology, .failed_stage = -1};
     p.collect_failures = collect_failures;
     p.stages = calloc((size_t)n, sizeof(km_stage));
+    bool accepted_valid = true;
+    for (so_int j = 0; p.stages && j < accepted.len; j += 2) {
+        so_int stage = accept[j], status = accept[j + 1];
+        if (p.stages[stage].accepted[status]) accepted_valid = false;
+        p.stages[stage].accepted[status] = 1;
+    }
     if (topology) {
         // First half: advisory wait states. Second half: authoritative worker
         // transport/launch errors, distinct from arbitrary executable statuses.
-        void *mapping = mmap(NULL, (size_t)n * 2 * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        void *mapping = mmap(NULL, (size_t)n * 3 * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
         if (mapping != MAP_FAILED) { p.live_states = mapping; for (int i = 0; i < n; i++) p.live_states[i] = KM_RUNNING; }
     }
     if (topology && edge_count && (size_t)edge_count <= SIZE_MAX / (KM_METRIC_FIELDS * sizeof(int64_t))) {
@@ -2237,7 +2307,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     }
     if (p.stages && topology) for (int i = 0; i < n; i++) p.stages[i].operator_kind = (int)node_kinds[i] & 15;
     if (edges) for (int i = 0; i < edge_count * 2; i++) edges[i] = -1;
-    bool ok = edges && operand_fds && stage_inputs && stage_outputs && stage_errors && truncate_outputs && truncate_errors && argv && envp && cwd && p.stages && input_name && output_name;
+    bool ok = accepted_valid && edges && operand_fds && stage_inputs && stage_outputs && stage_errors && truncate_outputs && truncate_errors && argv && envp && cwd && p.stages && input_name && output_name;
     for (int i = 0; topology && i < n; i++) if ((node_kinds[i] & 15) == 8 && !p.live_states) ok = false;
     so_String *args = arguments.ptr, *envs = environment.ptr, *dirs = directories.ptr;
     int at = 0;
@@ -2287,6 +2357,14 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
     // Every argv is already validated. Open input before output so a missing
     // source cannot truncate the destination. Evaluator grants precede this call.
     if (ok && input_name[0]) { inputfd = open(input_name, O_RDONLY); if (inputfd < 0) ok = false; }
+    // Borrow the same open file description: no relay/read-ahead, no reopen or
+    // seek, and never close or change flags on the caller's descriptor.
+    if (ok && input_fd >= 0) {
+        int borrowed = fcntl((int)input_fd, F_DUPFD_CLOEXEC, 3);
+        if (borrowed < 0) ok = false;
+        else if (topology) stage_inputs[input_root] = borrowed;
+        else inputfd = borrowed;
+    }
     for (int i = 0; ok && topology && i < n; i++) {
         char *name = km_cstring(((so_String *)input_paths.ptr)[i]);
         if (!name) ok = false;
@@ -2397,6 +2475,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
                 int error = errno; write(execerr[1], &error, sizeof(error)); _exit(127);
             }
             if ((i == 0 || topology) && input != STDIN_FILENO) close(input);
+            if (input_fd > STDERR_FILENO && input_fd != input) close((int)input_fd);
             if (i != 0 && inputfd >= 0) close(inputfd);
             if (outputfd >= 0) close(outputfd);
             int side = topology && km_side_sink((int)node_kinds[i]) ? stage_outputs[i] : -1;
@@ -2406,7 +2485,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
             close(out[0]); close(out[1]); close(err[0]); close(err[1]); close(execerr[0]);
             if (topology && node_kinds[i]) {
                 close(execerr[1]);
-                if ((node_kinds[i] & 15) == 8) _exit(km_run_each(i, edges, links, edge_count, argv[i], envp[i], p.metrics, p.live_states, p.live_states + n + i, collect_failures));
+                if ((node_kinds[i] & 15) == 8) _exit(km_run_each(i, edges, links, edge_count, argv[i], envp[i], p.metrics, p.live_states, p.live_states + n + i, collect_failures, p.stages[i].accepted, p.live_states + 2 * n + i));
                 km_mux_side_fd = side;
                 _exit(km_run_mux(i, (int)node_kinds[i], edges, links, edge_count, (int)((so_int *)item_limits.ptr)[i], p.metrics, p.live_states, id, stream_item, stream_context));
             }
@@ -2455,7 +2534,7 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
         if (p.stages) for (int i = 0; i < n; i++) km_windows_job_close(&p.stages[i].job);
         free(p.stages); km_close(&out[0]); km_close(&err[0]); km_close(&execerr[0]);
         if (p.metrics) munmap(p.metrics, (size_t)p.metric_count * KM_METRIC_FIELDS * sizeof(int64_t));
-        if (p.live_states) munmap(p.live_states, (size_t)n * 2 * sizeof(int));
+        if (p.live_states) munmap(p.live_states, (size_t)n * 3 * sizeof(int));
         return km_spawn_failed(host, id, "graph spawn failed");
     }
     p.outfd = out[0]; p.errfd = err[0]; p.execfd = execerr[0]; p.deadline = timeout ? km_now() + timeout : 0;
@@ -2464,8 +2543,8 @@ int km_host_start_topology(km_host *host, int64_t id, so_Slice arguments, so_Sli
 }
 
 int km_event_stage_field(km_event *event, int index, int field) {
-    if (!event || index < 0 || index >= event->stageCount || field < 0 || field > 2) return 0;
-    return event->stageData[index * 3 + field];
+    if (!event || index < 0 || index >= event->stageCount || field < 0 || field > (event->kind == KM_TERMINAL ? 3 : 2)) return 0;
+    return event->stageData[index * (event->kind == KM_TERMINAL ? 4 : 3) + field];
 }
 
 int64_t km_event_metric_field(km_event *event, int index, int field) {
@@ -2572,8 +2651,12 @@ static void km_reap(km_host *host, km_process *p) {
         for (int i = 0; i < p->stage_count; i++) {
             km_stage *s = &p->stages[i];
             if (km_observe_child(s->pid, &s->exited, &s->reaped, &s->status, &s->signal) < 0) { km_fail(host, p, "waitpid failed"); return; }
+            if (s->exited) {
+                s->effective_status = s->signal ? 128 + s->signal : s->accepted[s->status] ? 0 : s->status;
+                if (s->operator_kind == 8 && !s->signal && p->live_states) s->effective_status = __atomic_load_n(p->live_states + 2 * p->stage_count + i, __ATOMIC_RELAXED);
+            }
             if (s->operator_kind == 8 && s->exited && p->live_states && __atomic_load_n(p->live_states + p->stage_count + i, __ATOMIC_RELAXED)) { km_fail(host, p, "per-record worker launch or transport failed"); return; }
-            if (p->topology && !p->terminating && p->failed_stage < 0 && s->exited && (s->status || s->signal) && (!p->collect_failures || (s->operator_kind && s->operator_kind != 8) || s->signal)) {
+            if (p->topology && !p->terminating && p->failed_stage < 0 && s->exited && s->effective_status && (!p->collect_failures || (s->operator_kind && s->operator_kind != 8) || s->signal)) {
                 p->failed_stage = i;
                 p->status = s->signal ? 128 + s->signal : s->status; p->signal = s->signal;
                 km_signal(p, SIGKILL);
@@ -2632,7 +2715,7 @@ static void km_snapshot(km_host *host, km_process *p, int64_t now) {
         km_stage *stage = &p->stages[i];
         int state = __atomic_load_n(p->live_states + i, __ATOMIC_RELAXED);
         if (stage->exited) {
-            state = stage->status || stage->signal || stage->outcome ? KM_STAGE_FAILED : KM_COMPLETED;
+            state = stage->effective_status || stage->signal || stage->outcome ? KM_STAGE_FAILED : KM_COMPLETED;
             if (stage->outcome == KM_CANCELLED) state = KM_STAGE_CANCELLED;
             if (stage->outcome == KM_TIMED_OUT) state = KM_STAGE_TIMEOUT;
         }

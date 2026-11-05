@@ -381,7 +381,11 @@ right are each replaced with the piped value:
 ```
 
 is equivalent to `(transform value a)`. A pipe must have expressions on both
-sides.
+sides. Multiple expressions before the first `|` form an initial application:
+`(tool "git" | ?)` is equivalent to `((tool "git") | ?)` and `(? (tool "git"))`.
+A single expression remains a value, not a zero-argument call. Pipe lowering
+does not evaluate the subject eagerly: special forms retain their ordinary
+evaluation control, including missing-lookup recovery with `?`.
 
 Parsing retains the authored chain and placeholder positions for source tools;
 evaluation may lower it to ordinary applications. Formatting preserves pipes as
@@ -417,7 +421,10 @@ these atoms conflict with no existing syntax.
 
 The evaluator recognizes these application heads specially:
 
-- `?` returns the first operand that does not fail with unknown-reference.
+- `?` returns the first operand that does not fail with `REF_MISSING` or
+  `TOOL_MISSING`, or nil when all operands are missing. It does not skip successful
+  nil or false values and does not suppress protected or other failures.
+  `(tool "git" | ?)` is equivalent to `(? (tool "git"))` (spec 049).
 - `let` evaluates sequential name/value bindings in a child lexical scope.
 - `def` binds a value or function in the current lexical scope:
   - `(def NAME value)` binds a value.

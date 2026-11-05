@@ -109,26 +109,29 @@ func (p *Program) freeKashFunctions() {
 }
 
 type kashInvocation struct {
-	Program        *Program
-	Parsed         *script.Script
-	Items          []script.ScriptItem
-	Native         bool
-	OwnParsed      bool
-	Scope          *Scope
-	Group          int64
-	Index          int
-	Value          core.Value
-	Effects        []Effect
-	WritePaths     []string
-	ClockID        int64
-	StartedAt      int64
-	ClockStarted   bool
-	TimedIndex     int
-	RemainingMS    int64
-	TimeoutLimitMS int64
-	Deferred       *DeferScope
-	Finishing      bool
-	Primary        diagnostic.Diagnostic
+	Program         *Program
+	Parsed          *script.Script
+	Items           []script.ScriptItem
+	Native          bool
+	OwnParsed       bool
+	Scope           *Scope
+	Group           int64
+	Index           int
+	Value           core.Value
+	Effects         []Effect
+	WritePaths      []string
+	ClockID         int64
+	StartedAt       int64
+	ClockStarted    bool
+	TimedIndex      int
+	RemainingMS     int64
+	TimeoutLimitMS  int64
+	Deferred        *DeferScope
+	Finishing       bool
+	Primary         diagnostic.Diagnostic
+	PropagateReturn bool
+	Returned        bool
+	LoopTransfer    expr.Kind
 }
 
 func freeKashInvocation(a mem.Allocator, value any) {
@@ -208,8 +211,14 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 		p.NextScriptGroup++
 		state.Group = p.NextScriptGroup
 		state.Deferred = p.NewDeferScope(state.Group, c.Engine.NodeID())
+		state.Deferred.CallPath = owned(p.Alloc, c.CallPath)
+		state.Deferred.InheritedDeadlineNS = c.CleanupDeadlineNS
+		if deadline := p.FinalizerDeadline(c.Engine.NodeID()); deadline != 0 && (state.Deferred.InheritedDeadlineNS == 0 || deadline < state.Deferred.InheritedDeadlineNS) {
+			state.Deferred.InheritedDeadlineNS = deadline
+		}
 		if native != nil {
 			state.Native = true
+			state.PropagateReturn = native.Kind == expr.KashWith
 			initialized := p.kashBodyDefinitions(state.Scope, native.Body, c)
 			if initialized.Diagnostic.Code != "" {
 				freeKashInvocation(p.Alloc, state)
@@ -235,6 +244,10 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 				continue
 			}
 			d := item.Definition
+			if d.Eager {
+				state.Scope.reserveEager(d.Name)
+				continue
+			}
 			if d.Function {
 				f := mem.Alloc[Function](p.Alloc)
 				f.Kind, f.Parameters, f.Expression, f.Scope, f.ParametersOwned, f.Definition = FunctionDefinition, convertParameters(p.Alloc, d.Parameters), d.Expression, state.Scope, true, d
@@ -251,7 +264,14 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 	previousGroup, previousPath, previousSource := c.ScriptGroup, c.CallPath, c.Source
 	previousDeferred := c.Deferred
 	previousTimeout := c.TimeoutMS
+	previousLoopDepth := c.loopDepth
+	if !state.PropagateReturn {
+		c.loopDepth = 0
+	}
 	c.Args, c.HasArgs, c.Scope, c.ScriptGroup = args, true, state.Scope, state.Group
+	if state.PropagateReturn {
+		c.HasArgs = previousHasArgs
+	}
 	c.Deferred = state.Deferred
 	c.CallPath = invocationPath(c.Run, previousPath, -1, int(state.Group))
 	// Constructed scripts have independent authored spans; direct recipe offsets
@@ -265,6 +285,7 @@ func (p *Program) invokeKashBody(parsed *script.Script, native *expr.Expr, scope
 	c.ScriptGroup, c.CallPath, c.Source = previousGroup, previousPath, previousSource
 	c.Deferred = previousDeferred
 	c.TimeoutMS = previousTimeout
+	c.loopDepth = previousLoopDepth
 	if r.Diagnostic.Code != "" {
 		p.cancelScriptGroup(state.Group)
 	}
@@ -287,9 +308,27 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 		state.Finishing = true
 		state.Primary = r.Diagnostic.Clone(p.Alloc)
 		r.Free(c.Run)
-		if state.Primary.Code != "" {
+		if state.Primary.Code != "" && !state.Primary.Exit.Requested {
 			p.cancelScriptGroup(state.Group)
 		}
+	}
+	if state.Primary.Exit.Requested {
+		if p.DefinitionEffectSink != nil {
+			// Reached public output precedes teardown, and must not be replayed
+			// when an exited invocation suspends in its join or cleanup.
+			p.streamControlOutput(c, 0)
+			kept := 0
+			for i := range state.Effects {
+				if state.Effects[i].Kind == EffectOut || state.Effects[i].Kind == EffectErr {
+					state.Effects[i].Free(p.Alloc)
+				} else {
+					state.Effects[kept] = state.Effects[i]
+					kept++
+				}
+			}
+			state.Effects = state.Effects[:kept]
+		}
+		return p.FinishExit(&state.Primary, state.Deferred, c)
 	}
 	r := p.finishDefers(state.Deferred, c, state.Primary.Code != "")
 	if r.Waiting {
@@ -310,12 +349,15 @@ func (p *Program) advanceKash(state *kashInvocation, c *Context) Result {
 		return r
 	}
 	r.Free(c.Run)
-	return Result{Value: state.Value.Clone(c.Run)}
+	return Result{Value: state.Value.Clone(c.Run), Returned: state.PropagateReturn && state.Returned, LoopTransfer: state.LoopTransfer}
 }
 
 func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 	for state.Index < len(state.Items) {
 		item := state.Items[state.Index]
+		if item.Kind == script.Definition && item.Definition.Eager {
+			item.Kind, item.Expression = script.Expression, item.Definition.Expression
+		}
 		if item.Kind != script.Command && item.Kind != script.Expression {
 			state.Index++
 			continue
@@ -330,15 +372,12 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 		before, beforePaths := len(c.Effects), len(c.WritePaths)
 		r := p.evaluate(c.Engine, state.Scope, item.Expression, c)
 		if r.Waiting || r.Diagnostic.Code != "" {
+			if r.Diagnostic.Exit.Requested {
+				p.retainKashEffects(state, c, before, beforePaths)
+			}
 			return r
 		}
-		for i := before; i < len(c.Effects); i++ {
-			effect := c.Effects[i]
-			state.Effects = slices.Append(p.Alloc, state.Effects, Effect{Kind: effect.Kind, Span: effect.Span, Data: slices.Clone(p.Alloc, effect.Data)})
-		}
-		for i := beforePaths; i < len(c.WritePaths); i++ {
-			state.WritePaths = slices.Append(p.Alloc, state.WritePaths, owned(p.Alloc, c.WritePaths[i]))
-		}
+		p.retainKashEffects(state, c, before, beforePaths)
 		for i := range state.Scope.Bindings {
 			b := state.Scope.Bindings[i]
 			if b.Kind == bindingLocalDefinition && b.Local.Done {
@@ -354,7 +393,9 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 		} else {
 			state.Value = r.Value
 		}
-		if r.Returned {
+		if r.Returned || r.LoopTransfer != expr.Invalid {
+			state.Returned = r.Returned
+			state.LoopTransfer = r.LoopTransfer
 			state.Index = len(state.Items)
 		} else {
 			state.Index++
@@ -370,6 +411,17 @@ func (p *Program) advanceKashBody(state *kashInvocation, c *Context) Result {
 		return failure(c.Run, "EXPR_INVALID", c.Span, "script result cannot retain a temporary callable")
 	}
 	return Result{Value: state.Value.Clone(c.Run)}
+}
+
+func (p *Program) retainKashEffects(state *kashInvocation, c *Context, before int, beforePaths int) {
+	for i := before; i < len(c.Effects); i++ {
+		effect := c.Effects[i]
+		effect.Data = slices.Clone(p.Alloc, effect.Data)
+		state.Effects = slices.Append(p.Alloc, state.Effects, effect)
+	}
+	for i := beforePaths; i < len(c.WritePaths); i++ {
+		state.WritePaths = slices.Append(p.Alloc, state.WritePaths, owned(p.Alloc, c.WritePaths[i]))
+	}
 }
 
 func (p *Program) kashBudget(state *kashInvocation, c *Context) Result {
@@ -411,6 +463,9 @@ func (p *Program) cancelScriptGroup(group int64) {
 		if task.Context.ScriptGroup != group {
 			continue
 		}
+		// The owning lifetime has joined or deliberately discarded this outcome;
+		// a later session-wide join must not re-raise its cancellation/failure.
+		task.Observed = true
 		if task.Root != nil {
 			p.Engine.Release(task.Root)
 			task.Root = nil

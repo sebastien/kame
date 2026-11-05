@@ -371,7 +371,7 @@ func freeRecordWithCallables(a mem.Allocator, values []core.RecordField) {
 // struct, names, sections, and parent. The breakingCycles guard prevents the
 // recursive frees from rediscovering the same cycle while it is dismantled.
 //
-// Only bindingValue callables participate. Section arguments and
+// Value and eager binding callables participate. Section arguments and
 // scope-owned definition functions are excluded: sections are owned storage
 // freed with the scope, definitions never retain their scope.
 func (s *Scope) breakCallableCycle() bool {

@@ -26,6 +26,11 @@ func produceTool(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		index = len(p.Tools) - 1
 	}
 	p.Tools[index].Declarative = true
+	if p.Tools[index].Observed && c.Completion().RequestID == 0 && (p.Forwarding || p.Options.ResolveTool != nil) {
+		p.Tools[index].Resolved = false
+		mem.FreeString(p.Alloc, p.Tools[index].Path)
+		p.Tools[index].Path = ""
+	}
 	if p.Forwarding && !p.Tools[index].Resolved {
 		completion := c.Completion()
 		if completion.RequestID == 0 {
@@ -39,6 +44,7 @@ func produceTool(c *core.EngineContext, nodeID int64) core.ProducerResult {
 			if completion.Diagnostic.Code == "TOOL_MISSING" {
 				completion.Value.Free(c.Allocator())
 				completion.Diagnostic.Free(c.Allocator())
+				p.Tools[index].Observed = true
 				c.Publish(core.Value{Kind: core.Nil})
 				return core.ProducerCompleted
 			}
@@ -52,6 +58,7 @@ func produceTool(c *core.EngineContext, nodeID int64) core.ProducerResult {
 		completion.Value.Free(c.Allocator())
 	}
 	resolved, ok := p.toolPath(state.Name)
+	p.Tools[index].Observed = true
 	if !ok {
 		c.Publish(core.Value{Kind: core.Nil})
 		return core.ProducerCompleted

@@ -15,17 +15,18 @@ import (
 )
 
 type Fragment struct {
-	Name           string
-	Text           string
-	Lang           string
-	Entries        []string
-	Inline         bool
-	SkipStatements bool
-	Comment        string
-	Defines        []string
-	Check          bool
-	Offset         int
-	Includes       []diagnostic.Frame
+	Name            string
+	Text            string
+	SourceDirectory string
+	Lang            string
+	Entries         []string
+	Inline          bool
+	SkipStatements  bool
+	Comment         string
+	Defines         []string
+	Check           bool
+	Offset          int
+	Includes        []diagnostic.Frame
 }
 
 type SessionWork struct {
@@ -49,6 +50,7 @@ type Session struct {
 	JoinExpression expr.Expr
 	Deferred       *eval.DeferScope
 	retained       []*core.Root
+	Exit           diagnostic.Termination
 }
 
 // JSON sessions share the build event encoder, including binary-safe streams.
@@ -91,12 +93,19 @@ func (s *Session) Observe(h *Handle) {
 		return
 	}
 	e := Event{Target: h.Target, Key: n.Key, NodeID: n.ID, Generation: n.Generation, Attempt: n.Attempt, Kind: TargetCompleted}
+	e.Exit = n.Diagnostic.Exit
 	if n.State == core.NodeFailed || n.State == core.NodeCancelled {
 		e.Kind = TargetFailed
 		if n.State == core.NodeCancelled {
 			e.Kind = TargetCancelled
 		}
-		e.Diagnostic = n.Diagnostic.Clone(p.Alloc)
+		if n.Diagnostic.ExitOnly() {
+			if n.Diagnostic.Exit.Status == 0 {
+				e.Kind = TargetCompleted
+			}
+		} else {
+			e.Diagnostic = n.Diagnostic.Clone(p.Alloc)
+		}
 	} else {
 		if s.active < len(s.Work) && s.Work[s.active].Display && !p.Options.DryRun {
 			value := e
@@ -143,7 +152,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 	var offsets []int
 	var sources []CompileSource
 	for i := range fragments {
-		sources = slices.Append(a, sources, CompileSource{Name: fragments[i].Name, Text: fragments[i].Text, Offset: fragments[i].Offset, Includes: fragments[i].Includes})
+		sources = slices.Append(a, sources, CompileSource{Name: fragments[i].Name, Text: fragments[i].Text, SourceDirectory: fragments[i].SourceDirectory, Offset: fragments[i].Offset, Includes: fragments[i].Includes})
 		offsets = slices.Append(a, offsets, b.Len())
 		b.WriteString(fragments[i].Text)
 		b.WriteByte('\n')
@@ -187,6 +196,9 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 			continue
 		}
 		part := script.ParseFragment(a, parsed.Source, f.Lang, offsets[i], offsets[i]+len(f.Text))
+		if f.Lang == "kash" && len(f.Includes) != 0 {
+			script.ValidateKashLibrary(part)
+		}
 		for j := range part.Diagnostics {
 			parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, part.Diagnostics[j])
 		}
@@ -195,6 +207,9 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 		for j := range part.Items {
 			item := part.Items[j]
 			parsed.Items = slices.Append(a, parsed.Items, item)
+			if len(f.Entries) == 0 && !f.SkipStatements && item.Kind == script.Definition && item.Definition.Eager {
+				work = slices.Append(a, work, SessionWork{Expression: item.Definition.Expression})
+			}
 			if item.Kind == script.Include || item.Kind == script.Composition {
 				parsed.Diagnostics = slices.Append(a, parsed.Diagnostics, source.Diagnostic{Code: "FEATURE_UNSUP", Severity: source.Error, Span: item.Span, Message: "source composition is required before declaration registration"})
 			}
@@ -225,7 +240,7 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 	if len(work) == 0 && (ruleFragments || (valueDefinitions && !kashFragments)) {
 		work = slices.Append(a, work, SessionWork{Target: cloneText(a, "default"), Value: !ruleFragments, Display: ruleFragments || options.PrintResult, ImplicitDefault: true})
 	}
-	compiled := Compile(a, parsed, registry, options)
+	compiled := compileSources(a, parsed, registry, options, sources, offsets)
 	p := compiled.Program
 	result := SessionCompile{}
 	for i := range compiled.Diagnostics {
@@ -275,9 +290,6 @@ func CompileSession(a mem.Allocator, fragments []Fragment, registry *eval.Regist
 			mem.FreeString(a, parsed.Source.Name)
 			parsed.Source.Name = cloneText(a, fragments[0].Name)
 			parsed.Source.Expanded = fragments[0].Offset != 0
-		}
-		for i := range fragments {
-			p.Eval.AddSourcePart(fragments[i].Name, offsets[i], offsets[i]+len(fragments[i].Text), fragments[i].Offset)
 		}
 		// Reject unknown static value entries before any prior statement executes.
 		for i := range work {
@@ -360,6 +372,10 @@ type statementState struct {
 	Expression *expr.Expr
 	Raw        bool
 	Deferred   *eval.DeferScope
+	Session    *Session
+	Primary    diagnostic.Diagnostic
+	Finishing  bool
+	Effects    []eval.Effect
 }
 
 func freeSessionWork(a mem.Allocator, work []SessionWork) {
@@ -369,7 +385,12 @@ func freeSessionWork(a mem.Allocator, work []SessionWork) {
 	slices.Free(a, work)
 }
 
-func freeStatement(a mem.Allocator, value any) { mem.Free(a, value.(*statementState)) }
+func freeStatement(a mem.Allocator, value any) {
+	state := value.(*statementState)
+	state.Primary.Free(a)
+	eval.FreeEffects(a, state.Effects)
+	mem.Free(a, state)
+}
 
 func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	_ = id
@@ -377,8 +398,37 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 	p := state.Program
 	context := eval.Context{Program: p.Eval, Engine: c, Run: c.Allocator(), Cwd: p.Options.Directory, Source: p.Parsed.Source.Name, Grants: p.Options.Grants, Args: p.Eval.DefinitionArgs, HasArgs: true, DependencyObserver: p.Eval.DefinitionDependencyObserver, ResolverState: p.Eval.DefinitionDependencyState}
 	context.Deferred = state.Deferred
-	r := p.Eval.EvaluateWith(state.Expression, &context)
-	if !r.Waiting && r.Diagnostic.Code == "" && p.Eval.DefinitionEffectSink != nil {
+	var r eval.Result
+	if !state.Finishing {
+		r = p.Eval.EvaluateWith(state.Expression, &context)
+		if r.Diagnostic.Exit.Requested {
+			state.Primary = r.Diagnostic.Clone(p.Alloc)
+			state.Finishing = true
+			state.Session.Exit = r.Diagnostic.Exit
+			for i := range context.Effects {
+				effect := context.Effects[i]
+				if p.Eval.DefinitionEffectSink != nil && (effect.Kind == eval.EffectOut || effect.Kind == eval.EffectErr) {
+					p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, effect)
+					continue
+				}
+				effect.Data = slices.Clone(p.Alloc, effect.Data)
+				state.Effects = slices.Append(p.Alloc, state.Effects, effect)
+			}
+			eval.FreeEffects(c.Allocator(), context.Effects)
+			context.Effects = nil
+			r.Free(c.Allocator())
+		}
+	}
+	if state.Finishing {
+		r = p.Eval.FinishExit(&state.Primary, state.Deferred, &context)
+		if !r.Waiting {
+			state.Session.Exit = r.Diagnostic.Exit
+		}
+	}
+	if !r.Waiting && (r.Diagnostic.Code == "" || r.Diagnostic.Exit.Requested) && p.Eval.DefinitionEffectSink != nil {
+		for i := range state.Effects {
+			p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, state.Effects[i])
+		}
 		for i := range context.Effects {
 			p.Eval.DefinitionEffectSink(p.Eval.DefinitionEffectState, context.Effects[i])
 		}
@@ -413,6 +463,9 @@ func runStatement(c *core.EngineContext, id int64) core.ProducerResult {
 }
 
 func (s *Session) Start(index int) HandleStart {
+	if s.Exit.Requested {
+		return HandleStart{Diagnostic: failure(s.Program.Alloc, "PHASE_INVALID", "execution session has terminated")}
+	}
 	s.reported = false
 	s.active = index
 	w := SessionWork{}
@@ -430,6 +483,7 @@ func (s *Session) Start(index int) HandleStart {
 	state := mem.Alloc[statementState](p.Alloc)
 	state.Program, state.Expression, state.Raw = p, w.Expression, w.Raw
 	state.Deferred = s.Deferred
+	state.Session = s
 	var buffer [strconv.MaxIntBase10Len]byte
 	key := core.NewResourceKey(p.Alloc, core.ResourceDefinition, "<statement:"+strconv.Itoa(buffer[:], index)+">")
 	node := p.Engine.AddOwned(key, runStatement, state, freeStatement)

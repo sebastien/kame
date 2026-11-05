@@ -59,8 +59,8 @@ a rule program. See [CLI](./ref/cli.md) for invocation and capability policy.
    the selected backend. Do not substitute a system shell for unsupported Kash.
 
 For GNU Make migration, inventory targets and metaprogramming first, keep the
-old `Makefile`, and add `Makefile.kmk`. Discovery tries `Makefile.kmk`,
-`make.kmk`, then `src/kmk/main.kmk`, never GNU Make's `Makefile`.
+old `Makefile`, and add `Kamefile` or `Makefile.kmk`. Discovery tries `Kamefile`,
+`Makefile.kmk`, `make.kmk`, then `src/kmk/main.kmk`, never GNU Make's `Makefile`.
 
 ## Essential conventions
 
