@@ -670,6 +670,7 @@ reused display slot.
 | `target-failed` | Diagnostic, failed count, and row release |
 | `target-cancelled` | Separate cancellation count and row release |
 | `cache-warning` | Persistent structured warning |
+| `input-warning` | Persistent structured input-stability warning |
 | `service-state` | Readiness, health, restart, and shutdown state |
 | `stdout`, `stderr` | Immediate stream publication under command output policy |
 

@@ -3,6 +3,7 @@ package core_test
 import (
 	"kame/core"
 	"solod.dev/so/math"
+	"solod.dev/so/mem"
 	"solod.dev/so/slices"
 	"solod.dev/so/testing"
 )
@@ -263,6 +264,30 @@ func TestObservationViewsRejectConflictsWithoutPoisoningOtherViews(t *testing.T)
 		t.Error("unknown resource view was accepted")
 	}
 	e.Free()
+}
+
+func metadataSignatureFor(a mem.Allocator, name string, size int64) core.Signature {
+	value := core.NewRecord(a, []core.RecordField{{Key: "name", Value: core.Value{Kind: core.String, Text: name}}, {Key: "size", Value: core.Value{Kind: core.Int, Int: size}}, {Key: "mode", Value: core.Value{Kind: core.Int, Int: 420}}, {Key: "dir", Value: core.Value{Kind: core.Bool}}})
+	signature := core.MetadataSignature(value)
+	value.Free(a)
+	return signature
+}
+
+func TestMetadataSignatureIgnoresCallerLabel(t *testing.T) {
+	a := t.Allocator()
+	absolute := metadataSignatureFor(a, "/work/input", 3)
+	relative := metadataSignatureFor(a, "./input", 3)
+	if !absolute.Equal(relative) || !absolute.Equal(absolute) {
+		t.Error("caller-facing name changed metadata identity")
+	}
+	changed := metadataSignatureFor(a, "./input", 4)
+	if absolute.Equal(changed) {
+		t.Error("metadata facts were ignored")
+	}
+	unavailable := core.MetadataSignature(core.Value{Kind: core.Bool, Bool: true})
+	if unavailable.Equal(unavailable) {
+		t.Error("non-record metadata was accepted as identity")
+	}
 }
 
 func TestAcceptedSignatureRecordRoundTripAndCorruption(t *testing.T) {

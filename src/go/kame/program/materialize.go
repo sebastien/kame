@@ -190,6 +190,7 @@ func (p *Program) Materialize(target string) Result {
 }
 
 func (p *Program) Start(target string) HandleStart {
+	p.clearChangedProductionInputs()
 	resolved := p.producerFor(target)
 	node, plan, d := resolved.Node, resolved.Plan, resolved.Diagnostic
 	if d.Code != "" {
@@ -418,6 +419,7 @@ func (p *Program) tick(wait int) {
 			p.workIndex = 0
 		}
 		p.observeInstances()
+		p.advanceProductionValidation()
 		return
 	}
 	ready := p.readyForTick(wait)
@@ -426,6 +428,7 @@ func (p *Program) tick(wait int) {
 	}
 	slices.Free(p.Alloc, ready)
 	p.observeInstances()
+	p.advanceProductionValidation()
 }
 
 func (p *Program) dispatchWork(node *core.Node) {
@@ -495,6 +498,9 @@ func (h *Handle) poll(release bool) HandleResult {
 		return HandleResult{Done: true, Result: Result{Value: value}}
 	}
 	if h.Node.State != core.NodeComplete && h.Node.State != core.NodeFailed && h.Node.State != core.NodeCancelled {
+		return HandleResult{}
+	}
+	if !h.Definition && h.Node.State == core.NodeComplete && h.Program.productionDirty {
 		return HandleResult{}
 	}
 	if release && h.Root != nil {

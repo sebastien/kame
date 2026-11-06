@@ -458,5 +458,8 @@ func eventType(kind EventKind) string {
 	if kind == ServiceState {
 		return "service-state"
 	}
+	if kind == InputWarning {
+		return "input-warning"
+	}
 	return "cache-warning"
 }

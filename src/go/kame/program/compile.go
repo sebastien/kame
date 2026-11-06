@@ -75,6 +75,7 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 	}
 	p.nextRequest = 1 << 60 // Evaluator queue request IDs start at one.
 	p.Forwarding = options.ForwardRequests
+	p.Options.Watch = options.Watch
 	if p.Host != nil && !p.Forwarding {
 		p.Eval.FinalizationNow, p.Eval.FinalizationQuiet, p.Eval.FinalizationHost = finalizationNow, finalizationQuiet, p
 	}
@@ -429,6 +430,7 @@ func (p *Program) Free() {
 	p.Eval.CancelProcesses()
 	p.Eval.CancelDefers()
 	slices.Free(p.Alloc, p.RecordReaders)
+	p.clearProductionChanges()
 	p.RecordReaders = nil
 	for i := range p.RecordRequests {
 		p.RecordRequests[i].Free(p.Alloc)

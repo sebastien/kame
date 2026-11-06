@@ -137,6 +137,13 @@ KMK
   "${runner[@]}" -C "$status_project" ./result >"$project/value" 2>"$project/error"
   "${runner[@]}" do plan --output text -C "$status_project" ./result >"$project/status" 2>"$project/error"
   if grep -q '^    ./result \[1\] · built$' "$project/status"; then test-ok "$backend accepted artifact is built"; else test-fail "$backend built status: $(cat "$project/status")"; fi
+  metadata_project="$TMPDIR/status-metadata-$backend"
+  mkdir -p "$metadata_project"
+  printf one >"$metadata_project/seed"
+  printf './result : ./seed ; [shell: kame]\n\t(str (get "size" (stat ./seed)))\n' >"$metadata_project/Makefile.kmk"
+  "${runner[@]}" -C "$metadata_project" ./result >"$project/metadata-value" 2>"$project/error"
+  "${runner[@]}" do plan --json -C "$metadata_project" ./result >"$project/metadata-status" 2>"$project/error"
+  if jq -e 'any(.resources[]; .display == "./result" and .status == "built")' "$project/metadata-status" >/dev/null; then test-ok "$backend metadata identity survives inspection"; else test-fail "$backend metadata status: $(cat "$project/metadata-status")"; fi
   cp -p "$status_project/seed" "$status_project/stamp"
   printf two >"$status_project/seed"
   touch -r "$status_project/stamp" "$status_project/seed"

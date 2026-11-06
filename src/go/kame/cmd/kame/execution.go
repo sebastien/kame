@@ -183,7 +183,7 @@ func drainEvents(p *program.Program, out io.Writer, errOut io.Writer, json bool,
 			writeTargetOutcome(errOut, event)
 		} else if event.Kind == program.TargetCancelled {
 			writeTargetOutcome(errOut, event)
-		} else if event.Kind == program.CacheWarning {
+		} else if event.Kind == program.CacheWarning || event.Kind == program.InputWarning {
 			emitDiagnostic(errOut, event.Diagnostic, false, p.Parsed.Source)
 		} else if event.Kind == program.ServiceState {
 			clearDashboard(errOut)

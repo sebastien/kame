@@ -340,6 +340,8 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 		if completion.Diagnostic.Code == "" {
 			if state.PendingAspect == core.ObservationContent {
 				signature = contentObservation(completion.Value)
+			} else if state.PendingAspect == core.ObservationMetadata || state.PendingAspect == core.ObservationLinkMetadata {
+				signature = core.MetadataSignature(completion.Value)
 			} else {
 				signature = core.ValueSignature(completion.Value)
 			}
@@ -507,6 +509,8 @@ func (p *Program) continueFileContext(c *core.EngineContext, index int) core.Pro
 			if completion.Diagnostic.Code == "" {
 				if item.Aspect == core.ObservationContent {
 					signature = contentObservation(completion.Value)
+				} else if item.Aspect == core.ObservationMetadata || item.Aspect == core.ObservationLinkMetadata {
+					signature = core.MetadataSignature(completion.Value)
 				} else {
 					signature = core.ValueSignature(completion.Value)
 				}

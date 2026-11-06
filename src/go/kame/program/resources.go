@@ -25,6 +25,7 @@ func (p *Program) FilesystemResources() []core.ResourceKey {
 
 // InvalidateResource clears a changed resource and all transitive consumers.
 func (p *Program) InvalidateResource(key core.ResourceKey) {
+	p.clearChangedProductionInputs()
 	node := p.Engine.Lookup(key)
 	if node != nil {
 		p.Engine.Revalidate(node)
@@ -78,7 +79,7 @@ func (p *Program) ResourceFingerprint(key core.ResourceKey) string {
 	ops := []string{host.OpStat, host.OpLstat, host.OpReadlink}
 	for i := range ops {
 		completion = p.fileCompletion(host.Request{}, ops[i], name)
-		metadata := core.ValueSignature(completion.Value)
+		metadata := core.MetadataSignature(completion.Value)
 		digest.Uint64(uint64(metadata.Mode))
 		digest.Write(metadata.Digest[:])
 		completion.Value.Free(p.Alloc)

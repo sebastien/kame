@@ -106,6 +106,16 @@ func TestWatchInvalidationBatchRejectsPartialMutation(t *testing.T) {
 		t.Error("malformed JSON partially changed graph state")
 	}
 	afterMalformed.Free(a)
+	invalidObservation := r.InvalidateWatch([]byte("[{\"kind\":\"file\",\"name\":\"input\"},{\"kind\":\"file\",\"name\":\"input\",\"observedOnly\":1}]"))
+	if invalidObservation.Code != "PARSE_ERR" {
+		t.Error("non-boolean observedOnly accepted")
+	}
+	invalidObservation.Free(a)
+	afterObservation := r.WatchStateJSON()
+	if before.Text != afterObservation.Text {
+		t.Error("invalid observed-only batch partially changed graph")
+	}
+	afterObservation.Free(a)
 	invalid := r.InvalidateWatch([]byte("[{\"kind\":\"file\",\"name\":\"input\"},{\"kind\":\"process\",\"name\":\"bad\"}]"))
 	if invalid.Code != "PARSE_ERR" {
 		t.Error("invalid batch accepted")

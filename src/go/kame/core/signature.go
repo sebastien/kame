@@ -146,6 +146,24 @@ func ValueSignature(value Value) Signature {
 	return out
 }
 
+// MetadataSignature fingerprints filesystem metadata. The returned name is a
+// caller-facing label, not a fact: resource keys already carry canonical path
+// identity, so relative and absolute probes agree.
+func MetadataSignature(value Value) Signature {
+	if value.Kind != Record || len(value.Record) > 6 {
+		return Signature{}
+	}
+	var fields [6]RecordField
+	count := 0
+	for i := range value.Record {
+		if value.Record[i].Key != "name" {
+			fields[count] = value.Record[i]
+			count++
+		}
+	}
+	return ValueSignature(Value{Kind: Record, Record: fields[:count]})
+}
+
 func (s *Digest) value(v Value, depth int) bool {
 	if depth >= 256 {
 		return false

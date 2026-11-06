@@ -287,6 +287,10 @@ func (p *Program) finishRenderedRule(c *core.EngineContext, index int, rendered 
 			return core.ProducerFailed
 		}
 	}
+	if commands != "" || len(effects) != 0 || len(writePaths) != 0 {
+		p.productionDirty = true
+		p.productionRevision++
+	}
 	if p.Forwarding {
 		pending := mem.Alloc[forwardEffectsState](p.Alloc)
 		pending.Commands = commands

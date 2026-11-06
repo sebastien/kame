@@ -156,6 +156,7 @@ func openBuildSessionForTools(options buildArguments, errOut io.Writer, reportMi
 	}
 	defer authored.Free(mem.System)
 	programOptions := program.Options{Host: posix.New(mem.System), Directory: options.Directory, Shell: options.Shell, Jobs: options.Jobs, DryRun: options.DryRun, Force: options.Force, CacheDisabled: options.Force, Environment: environment, Defines: options.Defines, Parameters: options.Parameters, ToolOverrides: options.ToolOverrides, TimeoutMS: options.TimeoutMS, RetryCount: options.RetryCount, RetainBytes: options.RetainBytes, CaptureLimit: options.CaptureLimit, Verbose: options.Verbose, Grants: grants, ResolveTool: resolveBuildTool}
+	programOptions.Watch = options.Watch
 	programOptions.TrackTimings = true
 	if ownership.Supported() {
 		session.Ledger = mem.Alloc[outputLedger](mem.System)

@@ -136,6 +136,7 @@ const (
 	TargetReason
 	ProcessSnapshot
 	TargetEstimate
+	InputWarning
 )
 
 type Event struct {
@@ -237,6 +238,7 @@ func (h *Handle) Free() {
 }
 
 type Options struct {
+	Watch bool
 	// Borrow a descriptor without reading ahead or closing the caller's stream.
 	HasInput    bool
 	InputFD     int
@@ -316,6 +318,11 @@ type Tool struct {
 }
 
 type Program struct {
+	productionDirty      bool
+	productionRevision   int64
+	productionValidation any
+	productionChanges    []core.ResourceKey
+
 	RecordReaders       []recordReaderOwner
 	RecordRequests      []host.Request
 	AutomaticClean      func(any, *Program) diagnostic.Diagnostic

@@ -870,7 +870,7 @@ function humanEvent(bytes, scope) {
   if (event.type === 'stdout') { rawPublication(stdout, eventData(event)); return; }
   if (event.type === 'stderr') { rawPublication(stderr, eventData(event)); return; }
   if (outputMode === 'ansi' && ['target-reason', 'process-started', 'process-exited', 'target-started', 'service-state'].includes(event.type)) return;
-  if (!['target-reason', 'process-started', 'process-exited', 'target-started', 'target-completed', 'target-failed', 'target-cancelled', 'service-state', 'cache-warning'].includes(event.type)) return;
+  if (!['target-reason', 'process-started', 'process-exited', 'target-started', 'target-completed', 'target-failed', 'target-cancelled', 'service-state', 'cache-warning', 'input-warning'].includes(event.type)) return;
   clearDashboard();
   if (event.type === 'target-reason') {
     stderr.write(`${styled('message.info', 'info')} [${event.target}] ${event.decision}: ${event.message}${event.dependency?.resource?.name ? `: ${event.dependency.resource.name}` : ''}\n`);
@@ -911,7 +911,7 @@ function humanEvent(bytes, scope) {
     stderr.write(`info [${event.target}] service ${event.state} (generation ${event.generation}, attempt ${event.attempt})\n`);
     return;
   }
-  if (event.type === 'cache-warning' && event.diagnostic) {
+  if (['cache-warning', 'input-warning'].includes(event.type) && event.diagnostic) {
     stderr.write(renderDiagnostic(event.diagnostic, primarySource, 80));
   }
 }
@@ -2024,6 +2024,10 @@ class Module {
       return this.exports.kame_wasm_complete_nil(instance, request);
     }
     if (kind === 12) {
+      // A completed producer may leave its record write queued without a
+      // completion. Await that write so invalidation cannot overtake it.
+      const writing = this.cacheWrites.get(this.cacheLeaseKey(instance, key));
+      if (writing) await writing.catch(() => {});
       try {
         rmSync(cacheEntryPath(key), { force: true });
       } catch (error) {
@@ -5043,6 +5047,12 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
         if (watch.hostError) throw watch.hostError;
         const snapshot = module.watchSnapshot(watch);
         busy = snapshot.busy;
+        if (!busy && !cycleFinished) {
+          for (const resource of snapshot.changedInputs ?? []) {
+            const key = watchKey(resource.kind, resource.name);
+            if (!pending.has(key)) { pending.set(key, resource); lastChange = Date.now(); }
+          }
+        }
         await syncWatchResources(snapshot);
         for (const root of snapshot.roots ?? []) {
           if (!root.done || !root.diagnosticJSON) continue;
@@ -5068,6 +5078,9 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
           const stamp = await scanWatchFingerprint(record);
           if (record.stamp === null) { record.stamp = stamp; continue; }
           if (stamp !== record.stamp) {
+            if (active && busy && !record.source && record.kind === 'file') {
+              module.invalidateWatch(watch, [{ kind: record.kind, name: record.name, observedOnly: true }]);
+            }
             clearDashboard();
             if (!jsonMode) stderr.write(`info watch: change queued: ${record.name}\n`);
             record.stamp = stamp;
@@ -5080,6 +5093,11 @@ async function runPrimaryWatch(module, inv, noArguments, sourceDirectory) {
       }
 
       if (inv.cancelOnChange && active && busy && pending.size && !cancelledForChange) {
+        const message = `cancelling active build; restart queued for changed inputs:\n${[...new Set([...pending.values()].map((item) => item.name))].map((name) => `  ${name}`).join('\n')}`;
+        const diagnostic = { code: 'INPUT_CHANGE_CANCELLED', severity: 'warning', message };
+        clearDashboard();
+        if (jsonMode) stdout.write(`${JSON.stringify({ schema: 1, type: 'input-warning', target: '', node: 0, generation: 0, attempt: 0, diagnostic })}\n`);
+        else stderr.write(renderDiagnostic(diagnostic, source, 80));
         invocationCancellations.delete(watch.cancellation);
         await module.disposeWatch(watch);
         watch = null;

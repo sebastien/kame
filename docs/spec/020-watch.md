@@ -80,7 +80,8 @@ notification arrived. Changes detected only after a cycle completes retain ordin
 watch change reporting; they do not retrospectively assert an inconsistent build.
 
 With `--cancel`, the change-triggered cancellation report identifies the changed
-paths and the pending restart. It replaces, rather than duplicates, the warning
+paths and the pending restart (`INPUT_CHANGE_CANCELLED`, transported as an
+`input-warning` event). It replaces, rather than duplicates, the warning
 for that cancelled cycle. Further confirmed changes join the coalesced change set.
 Neither mode accepts affected results as reusable before recovery. An inability
 to validate an input is not evidence of changed bytes and must not be presented
@@ -101,8 +102,23 @@ Automatic OS subscriptions are CLI-only; the JavaScript embedding API retains
 explicit `invalidate(resources)` for custom hosts. The Python wrapper inherits
 the selected CLI host's notification behavior.
 
+A file invalidation record with `observedOnly: true` instead records a host's
+fingerprinted change during active production without invalidating or cancelling
+the running graph. This preserves evidence of transient edits until completion
+validation; the host still queues an ordinary invalidation for the next cycle.
+The optional field must be boolean and obeys whole-batch validation. Watch
+snapshots include `changedInputs`, a list of confirmed changed file keys from the
+completed cycle, so completion validation can request recovery even without a
+filesystem notification.
+
 ## Acceptance
 
+- Changes during production yield one consolidated changed-path warning with
+  queued-rebuild guidance, not one warning per consumer or a manual restart hint.
+- Completion-detected changes queue recovery without an OS notification; observed-only
+  change evidence survives restoration of the baseline bytes without cancelling work.
+- Cancel-on-change reports the changed paths and restart once in human and JSON
+  output, without an additional inconsistent-build warning for the cancelled cycle.
 - Native and WASM reload an included source with preserved metadata, diagnose
   malformed input, recover after repair and replace changed dependency graphs.
 - An input changed after a recipe's read handshake produces a second build with

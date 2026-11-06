@@ -52,8 +52,12 @@ func TestForwardedDeclaredFileInputsUseEmbeddingFilesystem(t *testing.T) {
 			}
 		}
 		result := r.Result()
-		if !result.Done || requests != 1 {
-			t.Error("declared file did not complete with one request")
+		wantRequests := 1
+		if scenario == 0 {
+			wantRequests++ // Successful production revalidates the consumed input.
+		}
+		if !result.Done || requests != wantRequests {
+			t.Error("declared file did not complete with the expected validation reads")
 		}
 		result.Free(a)
 		r.Free()

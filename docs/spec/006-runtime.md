@@ -199,6 +199,11 @@ A regular file dependency is its canonical path and the SHA-256 of its
 contents. Size and modification time cannot prove that previously observed
 bytes remain unchanged. Modification time is not part of content identity.
 
+Metadata observations compare filesystem facts, excluding the returned `name`
+label: resource keys already provide canonical path identity. Probing the same
+path with an absolute rather than authored relative spelling is not a metadata
+change; the operation's returned label remains unchanged for its caller.
+
 A missing path is a distinct identity. Appearance, disappearance, or replacement
 by a non-regular file invalidates. Content reads follow ordinary host symlink
 resolution; unreadable or non-regular content cannot prove reuse. A glob records
@@ -360,6 +365,7 @@ Runtime execution emits:
 - Target completed.
 - Target failed.
 - Target cancelled.
+- Input stability warning.
 
 Events include target identity and enough source metadata for diagnostics.
 Direct streams are not truncated. Retained logs follow the configured byte cap.
@@ -524,7 +530,8 @@ the baseline. Validation is not filesystem locking or transactional isolation.
 
 ### Outcome and recovery
 
-When changes are detected, the build emits one consolidated warning listing the
+When changes are detected, the build emits one consolidated `INPUT_UNSTABLE`
+warning (`input-warning` in JSON event transport) listing the
 affected file paths without duplicates, using authored or working-directory-relative
 paths. It states that outputs may be inconsistent and, for a one-shot build,
 advises running the build again. Unverifiable inputs are identified separately
@@ -554,6 +561,16 @@ bytes is a separate operation used by `cat`.
 
 ## Acceptance Tests
 
+- Editing or deleting tracked inputs after production begins emits one warning
+  listing all established changed paths; execution success retains its exit status.
+- Declared and dynamically discovered inputs are validated through the actual
+  host on native and WASM; forwarded validation never consults a decoy local host.
+- Stable inputs, unchanged content timestamps, ordinary prerequisite production,
+  and changed order-only inputs do not produce false input-change warnings.
+- Unavailable input signatures are reported as unverifiable, not changed bytes.
+- Suspect file and cached-task records, including derived results, cannot be reused
+  on a subsequent build even after the original input bytes are restored. A stable
+  recovery build can establish fresh proofs again.
 - Reuse rejection reports its established reason for changed inputs, membership,
   outputs, implementation/guards, settings, and environment observations;
   unavailable proofs and explicit policy bypasses are distinguished from changes.

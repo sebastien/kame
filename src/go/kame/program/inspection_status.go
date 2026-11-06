@@ -349,7 +349,11 @@ func produceInspectionStatus(c *core.EngineContext, nodeID int64) core.ProducerR
 			if op == host.OpFileContent || op == host.OpToolContent {
 				signature = inspectionContent(reply.Completion)
 			} else if reply.Completion.Diagnostic.Code == "" && reply.Completion.HasValue {
-				signature = core.ValueSignature(reply.Completion.Value)
+				if item.Aspect == core.ObservationMetadata || item.Aspect == core.ObservationLinkMetadata {
+					signature = core.MetadataSignature(reply.Completion.Value)
+				} else {
+					signature = core.ValueSignature(reply.Completion.Value)
+				}
 			}
 			reply.Completion.Value.Free(p.Alloc)
 			reply.Completion.Diagnostic.Free(p.Alloc)

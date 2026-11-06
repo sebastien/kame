@@ -45,6 +45,7 @@ func (r *Runtime) RequestWatch(data []byte) PureResult {
 		r.WatchHandles = slices.Append(r.Alloc, r.WatchHandles, next.Handle)
 	}
 	r.Watching = true
+	r.Program.Options.Watch = true
 	return PureResult{}
 }
 
@@ -149,6 +150,17 @@ func (r *Runtime) WatchStateJSON() PureResult {
 	}
 	slices.Free(r.Alloc, keys)
 	e.EndArray()
+	e.Str("changedInputs")
+	e.BeginArray()
+	for _, key := range r.Program.ChangedProductionInputs() {
+		e.BeginObject()
+		e.Str("kind")
+		e.Str("file")
+		e.Str("name")
+		e.Str(key.Name)
+		e.EndObject()
+	}
+	e.EndArray()
 	e.EndObject()
 	e.Flush()
 	text := pureText(r.Alloc, buffer.String())
@@ -170,9 +182,12 @@ func (r *Runtime) InvalidateWatch(data []byte) PureResult {
 		return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "watch invalidations must be a bounded resource list")}
 	}
 	var keys []core.ResourceKey
+	var observedOnly []bool
+	defer slices.Free(r.Alloc, observedOnly)
 	for i := range batch.List {
 		item := batch.List[i]
 		var kind, name core.Value
+		observed := false
 		if item.Kind == core.Record {
 			for j := range item.Record {
 				if item.Record[j].Key == "kind" {
@@ -180,6 +195,13 @@ func (r *Runtime) InvalidateWatch(data []byte) PureResult {
 				}
 				if item.Record[j].Key == "name" {
 					name = item.Record[j].Value
+				}
+				if item.Record[j].Key == "observedOnly" {
+					if item.Record[j].Value.Kind != core.Bool {
+						slices.Free(r.Alloc, keys)
+						return PureResult{Code: pureText(r.Alloc, "PARSE_ERR"), Message: pureText(r.Alloc, "observedOnly must be a boolean")}
+					}
+					observed = item.Record[j].Value.Bool
 				}
 			}
 		}
@@ -195,9 +217,14 @@ func (r *Runtime) InvalidateWatch(data []byte) PureResult {
 			resourceKind = core.ResourceTool
 		}
 		keys = slices.Append(r.Alloc, keys, core.ResourceKey{Kind: resourceKind, Name: name.Text})
+		observedOnly = slices.Append(r.Alloc, observedOnly, observed)
 	}
 	for i := range keys {
-		r.Program.InvalidateResource(keys[i])
+		if observedOnly[i] {
+			r.Program.NoteProductionInputChange(keys[i])
+		} else {
+			r.Program.InvalidateResource(keys[i])
+		}
 	}
 	slices.Free(r.Alloc, keys)
 	return PureResult{}

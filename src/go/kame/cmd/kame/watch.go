@@ -248,6 +248,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 	dirty := true
 	recompile, reported := false, false
 	cancelledForChange := false
+	validationQueued := false
 	var debounceDigits [24]byte
 	if !options.JSON {
 		if notifications {
@@ -330,6 +331,19 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			flushCLIOutput(errOut)
 		}
 		now := time.Now().UnixNano() / 1000000
+		if !busy && !validationQueued && session.Program != nil {
+			for _, key := range session.Program.ChangedProductionInputs() {
+				found := false
+				for i := range pending {
+					found = found || (pending[i].Kind == key.Kind && pending[i].Name == key.Name)
+				}
+				if !found {
+					pending = slices.Append(mem.System, pending, key.Clone(mem.System))
+					lastChange = now
+				}
+			}
+			validationQueued = true
+		}
 		if !cancelledForChange && ((busy && now-lastRefresh >= 200) || (!busy && lastRefresh == 0)) {
 			count := len(resources)
 			refreshWatchResources(&resources, &session, options)
@@ -352,6 +366,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			for i := range resources {
 				stamp := scanWatchStamp(session.Program, &resources[i])
 				if stamp != resources[i].Stamp {
+					session.Program.NoteProductionInputChange(resources[i].Key)
 					clearDashboard(errOut)
 					if !options.JSON {
 						io.WriteString(errOut, "info watch: change queued: "+resources[i].Key.Name+"\n")
@@ -368,6 +383,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			lastScan = now
 		}
 		if options.CancelOnChange && busy && len(pending) != 0 && !cancelledForChange {
+			session.Program.ReportProductionCancellation(pending)
 			for i := range handles {
 				handles[i].Cancel()
 			}
@@ -407,6 +423,7 @@ func runWatch(options buildArguments, out io.Writer, errOut io.Writer) int {
 			slices.Free(mem.System, pending)
 			pending = nil
 			recompile, reported, cancelledForChange = false, false, false
+			validationQueued = false
 			dirty = true
 		}
 		wait := 1000

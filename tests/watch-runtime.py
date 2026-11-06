@@ -103,6 +103,39 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-generated-') as directory:
             stop(process)
     assert 'AddressSanitizer' not in error.read_text() and 'runtime error:' not in error.read_text(), error.read_text()
 
+with tempfile.TemporaryDirectory(prefix='kame-input-warning-') as directory:
+    project = Path(directory)
+    (project / 'input').write_text('before')
+    (project / 'Makefile.kmk').write_text('./output : ./input\n\tcp @< ./snapshot; touch ready; while [ ! -e release ]; do sleep .01; done; cp ./snapshot @>\n')
+    error = project / 'stderr'
+    with (project / 'stdout').open('w') as stdout, error.open('w') as stderr:
+        process = subprocess.Popen([*runner, '-C', directory, '--json', './output'], stdout=stdout, stderr=stderr)
+        try:
+            wait_for(process, lambda: (project / 'ready').exists(), error, 'one-shot input read handshake')
+            (project / 'input').write_text('after')
+            (project / 'release').touch()
+            assert process.wait(timeout=8) == 0, error.read_text()
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+    events = [json.loads(line) for line in (project / 'stdout').read_text().splitlines() if line]
+    warnings = [event for event in events if event.get('type') == 'input-warning']
+    assert len(warnings) == 1, events
+    assert warnings[0]['diagnostic']['code'] == 'INPUT_UNSTABLE', warnings
+    assert 'input' in warnings[0]['diagnostic']['message'] and 'run the build again' in warnings[0]['diagnostic']['message'], warnings
+    assert read(project / 'output') == 'before' and error.read_text() == ''
+    for record_root in (project / '.kame' / 'cache' / 'file-context', project / '.kame' / 'cache' / 'host'):
+        assert not any(path.is_file() and path.stat().st_size == 0 for path in record_root.glob('*')), ('suspect cache record was left as an empty file', record_root)
+    (project / 'input').write_text('before')
+    for shouldExecute in (True, False):
+        result = subprocess.run([*runner, '-C', directory, '--json', './output'], text=True, capture_output=True, timeout=8)
+        assert result.returncode == 0 and result.stderr == '', result
+        events = [json.loads(line) for line in result.stdout.splitlines() if line]
+        assert any(event.get('type') == 'process-started' for event in events) == shouldExecute, events
+        assert not any(event.get('type') == 'input-warning' for event in events), events
+    cases += 1
+
 with tempfile.TemporaryDirectory(prefix='kame-watch-busy-') as directory:
     project = Path(directory)
     (project / 'input').write_text('before')
@@ -117,6 +150,8 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-busy-') as directory:
             time.sleep(.35)
             (project / 'release').touch()
             wait_for(process, lambda: read(project / 'output') == 'after' and read(project / 'runs') == 'xx', error, 'invalidation after newer output publication')
+            wait_for(process, lambda: 'INPUT_UNSTABLE' in error.read_text(), error, 'consolidated input-change warning')
+            assert error.read_text().count('INPUT_UNSTABLE') == 1 and 'a rebuild is queued' in error.read_text(), error.read_text()
             cases += 1
         finally:
             stop(process)
@@ -164,6 +199,10 @@ with tempfile.TemporaryDirectory(prefix='kame-watch-cancel-change-') as director
                 return statuses == ['cancelled', 'success']
 
             wait_for(process, replacement_finished, error, 'cancelled recipe restarted with latest input')
+            events = [json.loads(line) for line in (project / 'stdout').read_text().splitlines() if line]
+            warnings = [event for event in events if event.get('type') == 'input-warning']
+            assert len(warnings) == 1 and warnings[0]['diagnostic']['code'] == 'INPUT_CHANGE_CANCELLED', warnings
+            assert 'input' in warnings[0]['diagnostic']['message'], warnings
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline:
                 try:
@@ -469,12 +508,15 @@ default : ./consumeA ./consumeB
         process = subprocess.Popen([*runner, '-C', directory, '--watch', 'default'], stdout=stdout, stderr=stderr)
         try:
             wait_for(process, lambda: read(project / 'consumeA.log') == 'x' and read(project / 'consumeB.log') == 'x', error, 'initial sibling consumers')
+            wait_for(process, lambda: error.read_text().count('last cycle success') >= 1, error, 'initial sibling input validation')
             (project / 'variable').write_text('A2')
             wait_for(process, lambda: read(project / 'consumeA.log') == 'xx', error, 'changed sibling consumer')
+            wait_for(process, lambda: error.read_text().count('last cycle success') >= 2, error, 'changed sibling input validation')
             assert read(project / 'consumeB.log') == 'x', error.read_text()
             # A second edit catches inconsistent first-generation acceptance.
             (project / 'variable').write_text('A3')
             wait_for(process, lambda: read(project / 'consumeA.log') == 'xxx', error, 'second sibling edit')
+            wait_for(process, lambda: error.read_text().count('last cycle success') >= 3, error, 'second sibling input validation')
             assert read(project / 'consumeB.log') == 'x', error.read_text()
             (project / 'constant').write_text('B2')
             wait_for(process, lambda: read(project / 'consumeB.log') == 'xx', error, 'other sibling consumer')

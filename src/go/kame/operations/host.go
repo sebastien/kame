@@ -144,6 +144,8 @@ func readRequest(c *eval.Context, kind host.RequestKind, payload core.Value) eva
 			if state.Value.Kind == core.Bytes {
 				state.Signature = core.ContentSignature(state.Value.Bytes)
 			}
+		} else if state.Op == host.OpStat || state.Op == host.OpLstat {
+			state.Signature = core.MetadataSignature(state.Value)
 		} else {
 			state.Signature = core.ValueSignature(state.Value)
 		}
