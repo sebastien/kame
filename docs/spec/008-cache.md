@@ -141,6 +141,11 @@ that limit makes the task uncacheable for that run and emits `CACHE_UNUSABLE` as
 a warning; execution itself may continue.
 
 Records are published after execution, so they include execution-time reads.
+Successful execution alone does not authorize reuse when inputs change during
+production. File and cached-task records also obey the runtime's
+[input-change validation and acceptance contract](006-runtime.md#inputs-changing-during-production);
+affected results cannot be retained as accepted proofs merely because their
+outputs or logs were already written.
 Reuse restores discovered resource edges and validates through the actual host,
 not a forwarding runtime's in-memory filesystem. The cache miss lock remains
 held through validation and successful publication. Logs are replayed only after

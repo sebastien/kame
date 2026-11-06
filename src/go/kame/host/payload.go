@@ -571,18 +571,25 @@ func writeConfiguredGraph(a mem.Allocator, payload *core.Value) {
 		e.Int(PayloadInt(policy, "stderrLimit"))
 		e.EndObject()
 	}
+	captureLimit := PayloadInt(*payload, "captureLimit")
+	if captureLimit > 0 {
+		e.Str("captureLimit")
+		e.Int(captureLimit)
+	}
 	e.Str("setup")
 	e.BeginArray()
 	setups := PayloadSetups(*payload)
 	for i := range setups {
 		e.BeginObject()
-		e.Str("acceptExit")
-		e.BeginArray()
 		accepted := PayloadList(setups[i], "acceptExit")
-		for j := range accepted {
-			e.Int(accepted[j].Int)
+		if len(accepted) != 0 {
+			e.Str("acceptExit")
+			e.BeginArray()
+			for j := range accepted {
+				e.Int(accepted[j].Int)
+			}
+			e.EndArray()
 		}
-		e.EndArray()
 		e.Str(FieldInput)
 		e.Str(PayloadText(setups[i], FieldInput))
 		e.Str(FieldOutput)

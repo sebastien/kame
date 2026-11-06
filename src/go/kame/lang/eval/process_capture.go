@@ -7,13 +7,17 @@ import (
 	"solod.dev/so/slices"
 )
 
+// DefaultCaptureLimit is the fallback byte bound shared by command substitution,
+// typed capture, and invocation policy when no explicit limit is configured.
+const DefaultCaptureLimit = 1024 * 1024
+
 func normalizeCapturePolicy(c *Context, policy core.Value, span source.Span) Result {
 	if policy.Kind != core.Record {
 		return failure(c.Run, "EXPR_INVALID", span, "capture policy requires a record")
 	}
 	limit := c.Program.CaptureLimit
 	if limit <= 0 {
-		limit = 1024 * 1024
+		limit = DefaultCaptureLimit
 	}
 	stdout, stderr := false, false
 	stdoutLimit, stderrLimit := int64(limit), int64(limit)

@@ -818,6 +818,12 @@ int32_t kame_wasm_session_exit_status(uint64_t handle) {
   return instance && instance->runtime ? (int32_t)wasm_Runtime_SessionExitStatus(instance->runtime) : -1;
 }
 
+__attribute__((export_name("kame_wasm_capture_limit")))
+int32_t kame_wasm_capture_limit(uint64_t handle) {
+  kame_wasm_instance *instance = kame_wasm_instance_get(handle);
+  return instance && instance->runtime ? (int32_t)wasm_Runtime_CaptureLimit(instance->runtime) : 0;
+}
+
 __attribute__((export_name("kame_wasm_session_work_kind")))
 uint32_t kame_wasm_session_work_kind(uint64_t handle, uint32_t index) {
   kame_wasm_instance *instance = kame_wasm_instance_get(handle);

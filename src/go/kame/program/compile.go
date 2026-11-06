@@ -64,7 +64,7 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 		p.Eval.SetSourcePartIncludes(sources[i].Includes)
 	}
 	p.Eval.ProcessesQuiet, p.Eval.ProcessesQuietState = deferredProcessesQuiet, p
-	p.Eval.CloseRecordReader, p.Eval.RecordReaderState = closeRecordReader, p
+	p.Eval.RecordReaderCloser = p
 	// Build invocations have an argument frame even when no operands were given.
 	p.Eval.SetDefinitionArgs(nil)
 	configurationError := p.configureParameters(options.Defines, options.Parameters, options.Environment)
@@ -97,7 +97,7 @@ func compileSources(a mem.Allocator, parsed *script.Script, registry *eval.Regis
 	p.Options.LockResources, p.Options.UnlockResources, p.Options.ResourcesState = options.LockResources, options.UnlockResources, options.ResourcesState
 	p.Options.CaptureLimit = options.CaptureLimit
 	if p.Options.CaptureLimit <= 0 {
-		p.Options.CaptureLimit = 1024 * 1024
+		p.Options.CaptureLimit = eval.DefaultCaptureLimit
 	}
 	if p.Options.RetryCount < 0 {
 		p.Options.RetryCount = 0
@@ -522,7 +522,7 @@ func (p *Program) Free() {
 	// An empty Outbound can still own a backing array after requests are popped.
 	slices.Free(p.Alloc, p.Outbound)
 	if p.Host != nil {
-		p.Eval.CloseRecordReader = nil
+		p.Eval.RecordReaderCloser = nil
 		p.Host.Free()
 	}
 	p.Engine.Free()
@@ -539,7 +539,7 @@ func (p *Program) Free() {
 	}
 	slices.Free(p.Alloc, p.GeneratedRules)
 	slices.Free(p.Alloc, p.GeneratedRuleMeta)
-	p.Eval.CloseRecordReader = nil
+	p.Eval.RecordReaderCloser = nil
 	p.Eval.Free()
 	if p.ParsedOwned && p.Parsed != nil {
 		p.Parsed.Free()

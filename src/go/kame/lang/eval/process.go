@@ -837,8 +837,12 @@ func (p *Program) captureRequest(e *expr.Expr, c *Context) Result {
 	if e.AcceptExit {
 		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "acceptExit"), Value: core.Value{Kind: core.Bool, Bool: true}})
 	}
+	captureLimit := p.CaptureLimit
 	if c.captureBudget > 0 && e.Span.Start == c.captureBudgetStart && e.Span.End == c.captureBudgetEnd {
-		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "captureLimit"), Value: core.Value{Kind: core.Int, Int: int64(c.captureBudget)}})
+		captureLimit = c.captureBudget
+	}
+	if captureLimit > 0 {
+		payload.Record = slices.Append(c.Run, payload.Record, core.RecordField{Key: owned(c.Run, "captureLimit"), Value: core.Value{Kind: core.Int, Int: int64(captureLimit)}})
 	}
 	if e.Topology || configured || state.Stderr || len(c.Environment) != 0 || c.TimeoutMS != 0 || e.Kind == expr.CommandGraph || e.Kind == expr.CommandTest || e.Kind == expr.CommandResult || e.AcceptExit {
 		if state.CapturePolicy.Kind == core.Record {

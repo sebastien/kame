@@ -148,40 +148,42 @@ func (p *Program) drainRequests() {
 			itemLimits := host.PayloadList(request.Payload, "bufferItems")
 			orders := host.PayloadList(request.Payload, "orders")
 			var edges []host.ProcessEdge
-			validEdges := true
+			validDescriptor := true
+			descriptorCode, descriptorMessage := "KASH_MUX_ARITY", "invalid process graph descriptor"
 			for i := range request.Payload.Record {
 				field := request.Payload.Record[i]
 				if field.Key == "failurePolicy" && (field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 1) {
-					validEdges = false
+					validDescriptor = false
+					descriptorCode, descriptorMessage = "KASH_FAILURE_POLICY", "invalid process failure policy"
 				}
 			}
 			if len(buffers) != 0 && len(buffers) != len(graphs) {
-				validEdges = false
+				validDescriptor = false
 			}
 			for i := range buffers {
 				if buffers[i].Kind != core.Int || buffers[i].Int < 0 || buffers[i].Int > 65536 {
-					validEdges = false
+					validDescriptor = false
 				}
 			}
 			if (len(overflows) != 0 && len(overflows) != len(graphs)) || (len(itemLimits) != 0 && len(itemLimits) != len(graphs)) {
-				validEdges = false
+				validDescriptor = false
 			}
 			for i := range overflows {
 				if overflows[i].Kind != core.Int || overflows[i].Int < 0 || overflows[i].Int > 3 {
-					validEdges = false
+					validDescriptor = false
 				}
 			}
 			for i := range itemLimits {
 				if itemLimits[i].Kind != core.Int || itemLimits[i].Int < 0 || itemLimits[i].Int > 1024 {
-					validEdges = false
+					validDescriptor = false
 				}
 			}
 			if len(orders) != 0 && len(orders) != len(graphs) {
-				validEdges = false
+				validDescriptor = false
 			}
 			for i := range orders {
 				if orders[i].Kind != core.Int || orders[i].Int < 0 || orders[i].Int > 1 {
-					validEdges = false
+					validDescriptor = false
 				}
 			}
 			connections := host.PayloadList(request.Payload, "edges")
@@ -194,7 +196,7 @@ func (p *Program) drainRequests() {
 					}
 				}
 				if !valid {
-					validEdges = false
+					validDescriptor = false
 					continue
 				}
 				if len(items) == 2 || len(items) == 3 {
@@ -234,7 +236,8 @@ func (p *Program) drainRequests() {
 					accepted := host.PayloadList(setups[i], "acceptExit")
 					for j := range accepted {
 						if accepted[j].Kind != core.Int || accepted[j].Int < 1 || accepted[j].Int > 255 || stage.Accepted[accepted[j].Int] {
-							validEdges = false
+							validDescriptor = false
+							descriptorCode, descriptorMessage = "EXPR_INVALID", "accept-exit requires distinct integers from 1 through 255"
 						} else {
 							stage.Accepted[accepted[j].Int] = true
 						}
@@ -321,14 +324,17 @@ func (p *Program) drainRequests() {
 			processRequest.InputRoot = int(host.PayloadInt(request.Payload, "inputRoot"))
 			processRequest.InputFD = p.Options.InputFD
 			if processRequest.InputMode != "" && processRequest.InputMode != "closed" && processRequest.InputMode != "invocation" {
-				validEdges = false
+				validDescriptor = false
+				descriptorCode, descriptorMessage = "EXPR_INVALID", "invalid process input mode"
 			}
 			if processRequest.InputMode == "invocation" && !p.Options.HasInput {
-				validEdges = false
+				validDescriptor = false
+				descriptorCode, descriptorMessage = "FEATURE_UNSUP", "invocation input was not supplied"
 			}
 			processRequest.CollectFailures = host.PayloadInt(request.Payload, "failurePolicy") == 1
 			if processRequest.CollectFailures && !processRequest.Topology {
-				validEdges = false
+				validDescriptor = false
+				descriptorCode, descriptorMessage = "KASH_FAILURE_POLICY", "collected failure policy requires a process graph"
 			}
 			processRequest.StreamItem, processRequest.StreamContext = eval.StreamItemCallback, p.Eval
 			hasOperands := false
@@ -338,8 +344,8 @@ func (p *Program) drainRequests() {
 				}
 			}
 			unsupported := hasOperands && p.Host != nil && !p.Host.SupportsStreamOperands()
-			if !validEdges {
-				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "KASH_MUX_ARITY", "invalid process graph descriptor")})
+			if !validDescriptor {
+				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, descriptorCode, descriptorMessage)})
 			} else if unsupported {
 				p.Engine.Complete(core.Completion{NodeID: request.NodeID, Generation: request.Generation, Attempt: request.Attempt, RequestID: request.ID, Diagnostic: failure(p.Alloc, "KASH_STREAM_OPERAND_UNSUPPORTED", "host cannot expose a live inherited descriptor operand")})
 			} else if (script == "" && !capture && !stream) || p.Host == nil || !p.Host.Start(processRequest) {

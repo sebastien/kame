@@ -28,8 +28,8 @@ func (p *Program) closeAbandonedRecordReaders() {
 	for i := len(p.RecordReaders) - 1; i >= 0; i-- {
 		reader := p.RecordReaders[i]
 		node := p.Engine.LookupID(reader.Node)
-		if node == nil || node.Generation != reader.Generation || (node.IsTearingDown() && !reader.Teardown) || node.State == core.NodeFailed || node.State == core.NodeCancelled {
-			closeRecordReader(p, reader.ID)
+		if node == nil || node.Generation != reader.Generation || (node.IsTearingDown() && !reader.Teardown) || node.State == core.NodeComplete || node.State == core.NodeFailed || node.State == core.NodeCancelled {
+			p.CloseRecordReader(reader.ID)
 		}
 	}
 }
@@ -83,13 +83,12 @@ func (p *Program) serviceRecordRequests() {
 	}
 }
 
-func closeRecordReader(state any, id int64) {
-	p := state.(*Program)
+func (p *Program) CloseRecordReader(id int64) {
 	// Zero is evaluator shutdown, not a wire reader ID. Cleanup may open new
 	// independent readers after this one-time release of body-owned resources.
 	if id == 0 {
 		for i := len(p.RecordReaders) - 1; i >= 0; i-- {
-			closeRecordReader(p, p.RecordReaders[i].ID)
+			p.CloseRecordReader(p.RecordReaders[i].ID)
 		}
 		return
 	}

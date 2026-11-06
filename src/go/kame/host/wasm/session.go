@@ -150,6 +150,21 @@ func (r *Runtime) SessionExitStatus() int {
 	return r.Session.Exit.Status
 }
 
+// CaptureLimit reports the effective invocation capture bound. Zero means no
+// session or build program has been compiled yet.
+func (r *Runtime) CaptureLimit() int {
+	if r == nil {
+		return 0
+	}
+	if r.Session != nil && r.Session.Program != nil {
+		return r.Session.Program.Options.CaptureLimit
+	}
+	if r.Program != nil {
+		return r.Program.Options.CaptureLimit
+	}
+	return 0
+}
+
 func (r *Runtime) SessionWorkKind(index int) uint32 {
 	if r.Session == nil || index < 0 || index >= len(r.Session.Work) {
 		return 0

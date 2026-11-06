@@ -230,20 +230,20 @@ func (p *kashParser) sequence(level int) []ScriptItem {
 				s.error(start, p.Pos, "defer requires a command or parenthesized expression")
 				break
 			}
-			if p.Pos+6 <= len(text) && text[p.Pos:p.Pos+6] == "return" && (p.Pos+6 == len(text) || space(text[p.Pos+6])) {
+			if standaloneKeyword(text, p.Pos, "return") {
 				s.error(p.Pos, p.Pos+6, "cannot defer return")
 				break
 			}
-			if p.Pos+4 <= len(text) && text[p.Pos:p.Pos+4] == "exit" && (p.Pos+4 == len(text) || space(text[p.Pos+4]) || text[p.Pos+4] == ';') {
+			if standaloneKeyword(text, p.Pos, "exit") {
 				s.error(p.Pos, p.Pos+4, "cannot defer exit")
 				break
 			}
-			deferredEnd := p.Pos
-			for deferredEnd < len(text) && !space(text[deferredEnd]) && text[deferredEnd] != '\n' && text[deferredEnd] != ';' {
-				deferredEnd++
+			if standaloneKeyword(text, p.Pos, "break") {
+				s.error(p.Pos, p.Pos+5, "cannot defer a loop transfer")
+				break
 			}
-			if text[p.Pos:deferredEnd] == "break" || text[p.Pos:deferredEnd] == "continue" {
-				s.error(p.Pos, deferredEnd, "cannot defer a loop transfer")
+			if standaloneKeyword(text, p.Pos, "continue") {
+				s.error(p.Pos, p.Pos+8, "cannot defer a loop transfer")
 				break
 			}
 			var part expr.Prefix
@@ -732,4 +732,14 @@ func hasCommandConditionControl(e *expr.Expr) bool {
 		}
 	}
 	return false
+}
+
+// standaloneKeyword reports whether text at pos is word followed by a statement
+// boundary: whitespace, line end, semicolon, or comment.
+func standaloneKeyword(text string, pos int, word string) bool {
+	if pos < 0 || pos+len(word) > len(text) || text[pos:pos+len(word)] != word {
+		return false
+	}
+	end := pos + len(word)
+	return end == len(text) || space(text[end]) || text[end] == '\n' || text[end] == ';' || text[end] == '#'
 }

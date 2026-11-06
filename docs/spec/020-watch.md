@@ -68,6 +68,25 @@ cancel active processes, reap descendants, dispose the runtime and exit with
 the usual signal-derived status. Module instance disposal also releases retained
 roots and ignores stale host completions.
 
+## Input-change reporting
+
+Watch cycles follow the runtime's
+[input-change validation contract](006-runtime.md#inputs-changing-during-production).
+With ordinary `--watch`, confirmed changes during active production produce one
+consolidated warning listing the affected input paths and stating that a rebuild
+is queued, rather than asking the user to restart manually. A change detected by
+completion validation must enter the pending invalidation set even if no filesystem
+notification arrived. Changes detected only after a cycle completes retain ordinary
+watch change reporting; they do not retrospectively assert an inconsistent build.
+
+With `--cancel`, the change-triggered cancellation report identifies the changed
+paths and the pending restart. It replaces, rather than duplicates, the warning
+for that cancelled cycle. Further confirmed changes join the coalesced change set.
+Neither mode accepts affected results as reusable before recovery. An inability
+to validate an input is not evidence of changed bytes and must not be presented
+as a confirmed change. Existing debounce, reaping, source-reload and recovery
+obligations remain unchanged.
+
 ## Freestanding boundary
 
 The module owns roots and dependency invalidation; it performs no filesystem

@@ -47,6 +47,7 @@ type Runtime struct {
 	BuildTimeoutMS     int64
 	BuildRetryCount    int
 	BuildRetainBytes   int
+	BuildCaptureLimit  int
 	Handle             *program.Handle
 	Watching           bool
 	Finalizing         bool

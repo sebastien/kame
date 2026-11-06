@@ -87,7 +87,14 @@ func (p *kashParser) functionBlock(level int, start int, wordEnd int) *definitio
 
 func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *expr.Expr {
 	s, text := p.Script, p.Script.Source.Text
-	keyword := text[start:wordEnd]
+	missing := "return requires a status expression"
+	single := "return requires one status expression"
+	trailing := "return has unexpected trailing operands or process syntax"
+	if kind == expr.KashExit {
+		missing = "exit requires a status expression"
+		single = "exit requires one status expression"
+		trailing = "exit has unexpected trailing operands or process syntax"
+	}
 	e := mem.Alloc[expr.Expr](s.Alloc)
 	e.Kind, e.Span.Start = kind, start
 	if kind == expr.KashReturn && p.Functions == 0 {
@@ -98,7 +105,7 @@ func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *
 		pos++
 	}
 	if pos == len(text) || text[pos] == '\n' || text[pos] == ';' || text[pos] == '#' {
-		s.error(wordEnd, pos, keyword+" requires a status expression")
+		s.error(wordEnd, pos, missing)
 		p.Pos, e.Span.End = pos, pos
 		return e
 	}
@@ -106,7 +113,7 @@ func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *
 	s.takeDiagnostics(part.Diagnostics)
 	e.Items = slices.Append(s.Alloc, e.Items, part.Expr)
 	if part.Expr != nil && part.Expr.Kind == expr.ValueRecovery {
-		s.error(pos, part.End, keyword+" requires one status expression")
+		s.error(pos, part.End, single)
 	}
 	pos = part.End
 	for pos < len(text) && space(text[pos]) && text[pos] != '\n' {
@@ -120,7 +127,7 @@ func (p *kashParser) transferStatement(start int, wordEnd int, kind expr.Kind) *
 		pos++
 	}
 	if pos < len(text) && text[pos] != '\n' && text[pos] != ';' && text[pos] != '#' {
-		s.error(pos, pos+1, keyword+" has unexpected trailing operands or process syntax")
+		s.error(pos, pos+1, trailing)
 	}
 	p.Pos, e.Span.End = pos, pos
 	return e

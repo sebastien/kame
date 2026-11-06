@@ -64,6 +64,11 @@ available when jobs or cleanup fail. JSON lifecycle events carry a conditional
 `termination: {status: N}` field. A deliberate exit alone has no diagnostic or
 backtrace, and never unconditionally terminates the embedding process.
 
+`kame_wasm_capture_limit` reports the effective invocation capture bound after a
+build or session program is compiled; zero means none has been compiled. It is
+the single default consulted by the native and Node hosts; configured graphs may
+carry a smaller `captureLimit` for a nested command-list budget.
+
 The exported C ABI provides conceptual operations for:
 
 - Instance create and free.
@@ -140,9 +145,9 @@ and authored byte `offset`, after initializing an empty source instance and
 before target execution or preparation. The portable compiler combines these
 fragments and maps diagnostic spans back to authored sources. No filesystem work
 occurs during compilation. Build and runner session descriptors carry `force`
-as 0 or 1, and `timeoutMS` and `retryCount` as nonnegative integers, into portable
-runtime options; `--force` bypasses file freshness and cached-task lookup on
-either host. Registration failures expose their complete diagnostic list through
+as 0 or 1, and `timeoutMS`, `retryCount`, and `captureLimit` as nonnegative
+integers, into portable runtime options; `--force` bypasses file freshness and
+cached-task lookup on either host. Registration failures expose their complete diagnostic list through
 the target-event query, including in non-JSON presentation modes.
 
 Optional `trackTimings` is 0 or 1. Timing collection defaults off for embedding
@@ -341,11 +346,11 @@ metadata watch must detect retargeting even when both referents are absent.
 Structured process requests distinguish direct argv (ABI kind 13, a JSON argv
 array) from pipelines (kind 14, a JSON array of stage argv arrays) and redirected
 configured graphs (kind 15, a JSON object with `stages`, `input`, `output`,
-`append`, and a parallel `setup` array). Each setup record carries `cwd`,
-`timeoutMS`, and `environment` (`KEY=value` overrides). Stages inherit the
-invocation environment and limits; their own timeout terminates the whole graph
-but ceases when that stage exits. PATH lookup uses the effective stage environment
-and cwd. Setup does not broaden caller grants.
+`append`, `captureLimit` when positive, and a parallel `setup` array). Each setup
+record carries `cwd`, `timeoutMS`, and `environment` (`KEY=value` overrides).
+Stages inherit the invocation environment and limits; their own timeout terminates
+the whole graph but ceases when that stage exits. PATH lookup uses the effective
+stage environment and cwd. Setup does not broaden caller grants.
 Runner-session descriptors may opt into borrowed data input with integer
 `dataInput: 1` (omitted or zero means closed). The embedding host retains and
 services that stream; no input bytes or operating-system descriptors cross the

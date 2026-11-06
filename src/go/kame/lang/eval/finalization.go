@@ -483,8 +483,8 @@ func (p *Program) Finalizing() bool {
 func (p *Program) BeginFinalization() {
 	if !p.DeferStopping {
 		p.DeferStopping = true
-		if p.CloseRecordReader != nil {
-			p.CloseRecordReader(p.RecordReaderState, 0)
+		if p.RecordReaderCloser != nil {
+			p.RecordReaderCloser.CloseRecordReader(0)
 		}
 		p.CancelProcesses()
 	}

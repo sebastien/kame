@@ -16,23 +16,3 @@ func ValidAcceptedExits(value core.Value) bool {
 	}
 	return true
 }
-
-// EffectiveStatus is separate from the retained raw aggregate. Older hosts
-// without selective acceptance keep their ordinary status contract.
-func EffectiveStatus(value core.Value) int64 {
-	for i := range value.Record {
-		if value.Record[i].Key == "effectiveStatus" && value.Record[i].Value.Kind == core.Int {
-			return value.Record[i].Value.Int
-		}
-	}
-	return PayloadInt(value, "status")
-}
-
-func EffectiveSignal(value core.Value) int64 {
-	for i := range value.Record {
-		if value.Record[i].Key == "effectiveSignal" && value.Record[i].Value.Kind == core.Int {
-			return value.Record[i].Value.Int
-		}
-	}
-	return PayloadInt(value, "signal")
-}

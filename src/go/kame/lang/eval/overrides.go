@@ -186,8 +186,7 @@ func (p *Program) scopedDefinition(key core.ResourceKey, context *Context) *core
 		return nil
 	}
 	node.Restartable = true
-	state.InputClosed, state.InputBound, state.InputGeneration = context.InputClosed, true, node.Generation
-	state.RecordBody = context.RecordBody
+	state.bindInputPolicy(node.Generation, context.InputClosed, context.RecordBody)
 	return node
 }
 
@@ -206,8 +205,7 @@ func (p *Program) bindDefinitionInput(key core.ResourceKey, context *Context) {
 		if node != nil {
 			state := node.Context.(*definitionState)
 			if !state.InputBound || state.InputGeneration != node.Generation {
-				state.InputClosed, state.InputBound, state.InputGeneration = context.InputClosed, true, node.Generation
-				state.RecordBody = context.RecordBody
+				state.bindInputPolicy(node.Generation, context.InputClosed, context.RecordBody)
 			}
 		}
 		return

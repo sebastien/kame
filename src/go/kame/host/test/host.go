@@ -76,6 +76,9 @@ func TestStderrRoutingSurvivesTheConfiguredGraph(t *testing.T) {
 	if !strings.Contains(graph, `"errorMode":1`) || !strings.Contains(graph, `"errorAppend":true`) || !strings.Contains(graph, `"error":"./errors"`) {
 		t.Error("configured graph text omitted stderr routing")
 	}
+	if strings.Contains(graph, `"acceptExit"`) {
+		t.Error("configured graph published an empty acceptExit list")
+	}
 	payload.Free(a)
 	setup.Free(a)
 }

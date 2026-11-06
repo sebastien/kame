@@ -94,6 +94,7 @@ func (r *Runtime) SetBuildSources(data []byte) PureResult {
 	r.BuildTimeoutMS = host.PayloadInt(descriptor, "timeoutMS")
 	r.BuildRetryCount = int(host.PayloadInt(descriptor, "retryCount"))
 	r.BuildRetainBytes = int(host.PayloadInt(descriptor, "retainBytes"))
+	r.BuildCaptureLimit = int(host.PayloadInt(descriptor, "captureLimit"))
 	return PureResult{}
 }
 
@@ -101,6 +102,7 @@ func (r *Runtime) freeBuildSources() {
 	r.BuildForce = false
 	r.BuildTrackTimings = false
 	r.BuildRetainBytes = 0
+	r.BuildCaptureLimit = 0
 	for i := range r.BuildSources {
 		freeDescriptorIncludes(r.Alloc, r.BuildSources[i].Includes)
 		mem.FreeString(r.Alloc, r.BuildSources[i].Name)
@@ -137,6 +139,7 @@ func (r *Runtime) compileBuild(options program.Options) program.CompileResult {
 	options.TimingNow, options.TimingClock = runtimeFinalizationNow, r
 	options.TimeoutMS, options.RetryCount = r.BuildTimeoutMS, r.BuildRetryCount
 	options.RetainBytes = r.BuildRetainBytes
+	options.CaptureLimit = r.BuildCaptureLimit
 	options.Defines = r.BuildDefines
 	options.Parameters = r.BuildParameters
 	options.ToolOverrides = r.BuildToolOverrides

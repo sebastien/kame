@@ -47,7 +47,7 @@ func validDescriptorOptions(value core.Value, session bool) bool {
 				return false
 			}
 		case "captureLimit":
-			if session && (field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 2147483647) {
+			if field.Value.Kind != core.Int || field.Value.Int < 0 || field.Value.Int > 2147483647 {
 				return false
 			}
 		case "dataInput":

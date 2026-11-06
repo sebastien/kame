@@ -10,8 +10,8 @@ import (
 )
 
 func closeKashReader(state *kashLoopState) {
-	if state.ReaderID != 0 && state.Program.CloseRecordReader != nil {
-		state.Program.CloseRecordReader(state.Program.RecordReaderState, state.ReaderID)
+	if state.ReaderID != 0 && state.Program.RecordReaderCloser != nil {
+		state.Program.RecordReaderCloser.CloseRecordReader(state.ReaderID)
 		state.ReaderID = 0
 	}
 }
@@ -30,7 +30,7 @@ func (p *Program) kashRecordSource(scope *Scope, e *expr.Expr, state *kashLoopSt
 			return r
 		}
 	}
-	if p.CloseRecordReader == nil {
+	if p.RecordReaderCloser == nil {
 		return failure(c.Run, "FEATURE_UNSUP", source.Span, "host does not support incremental record readers")
 	}
 	state.Delimiter = 10
@@ -139,6 +139,12 @@ func (p *Program) kashRecordNext(e *expr.Expr, state *kashLoopState, c *Context)
 	return Result{}
 }
 
+// callPathWithin reports whether callPath names path or a nested call below it.
+// Call paths use "/" only as a separator, so the prefix includes it.
+func callPathWithin(callPath string, path string) bool {
+	return callPath == path || strings.HasPrefix(callPath, path+"/")
+}
+
 // The completed record is never replayed. Discard its operation progress rather
 // than keeping one suspended-application history per input record. Async jobs
 // and invocation-owned defers retain their independently owned contexts.
@@ -148,7 +154,7 @@ func (p *Program) retireRecordProgress(c *Context) {
 	// their roots, consumer edges, worker nodes and contexts before the next item.
 	for i := range p.DeferScopes {
 		s := p.DeferScopes[i]
-		if !s.Done || !s.Observed || !(s.CallPath == c.CallPath || strings.HasPrefix(s.CallPath, c.CallPath+"/")) {
+		if !s.Done || !s.Observed || !callPathWithin(s.CallPath, c.CallPath) {
 			continue
 		}
 		if s.Root != nil {
@@ -163,7 +169,7 @@ func (p *Program) retireRecordProgress(c *Context) {
 		removed := false
 		for i := len(p.DeferScopes) - 1; i >= 0; i-- {
 			s := p.DeferScopes[i]
-			if !s.Done || !s.Observed || s.Root != nil || !(s.CallPath == c.CallPath || strings.HasPrefix(s.CallPath, c.CallPath+"/")) {
+			if !s.Done || !s.Observed || s.Root != nil || !callPathWithin(s.CallPath, c.CallPath) {
 				continue
 			}
 			if s.Node != nil {
@@ -204,7 +210,7 @@ func (p *Program) retireRecordProgress(c *Context) {
 func (p *Program) retireRecordNode(node int64, path string) {
 	for i := len(p.OperationStates) - 1; i >= 0; i-- {
 		state := p.OperationStates[i]
-		if state.NodeID != node || !(state.CallPath == path || strings.HasPrefix(state.CallPath, path+"/")) {
+		if state.NodeID != node || !callPathWithin(state.CallPath, path) {
 			continue
 		}
 		if state.Free != nil {
@@ -216,7 +222,7 @@ func (p *Program) retireRecordNode(node int64, path string) {
 	}
 	for i := len(p.OperationMemos) - 1; i >= 0; i-- {
 		state := p.OperationMemos[i]
-		if state.NodeID == node && (state.CallPath == path || strings.HasPrefix(state.CallPath, path+"/")) {
+		if state.NodeID == node && callPathWithin(state.CallPath, path) {
 			p.discardArgumentMemo(state)
 		}
 	}

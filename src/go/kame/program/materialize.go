@@ -509,6 +509,7 @@ func (h *Handle) poll(release bool) HandleResult {
 			exit := d.Exit
 			if d.ExitOnly() {
 				d.Free(h.Program.Alloc)
+				return HandleResult{Done: true, Result: Result{Exit: exit}}
 			}
 			return HandleResult{Done: true, Result: Result{Exit: exit, Diagnostic: d}}
 		}

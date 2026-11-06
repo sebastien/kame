@@ -31,7 +31,7 @@ func freeCommandListState(a mem.Allocator, value any) {
 func (p *Program) commandList(e *expr.Expr, c *Context) Result {
 	limit := p.CaptureLimit
 	if limit <= 0 {
-		limit = 1024 * 1024
+		limit = DefaultCaptureLimit
 	}
 	previousStart, previousEnd := c.operationStart, c.operationEnd
 	c.operationStart, c.operationEnd = e.Span.Start, e.Span.End

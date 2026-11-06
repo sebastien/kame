@@ -485,6 +485,66 @@ report under their own target identity. Unchanged reuse emits no change reason.
 Presentation, privacy, and JSON transport follow `027-job-presentation.md` and
 `009-cli.md`.
 
+## Inputs Changing During Production
+
+A build must report detected changes to tracked file inputs while it is producing
+outputs. This applies to one-shot builds as well as watch cycles. The purpose is
+to distinguish successful execution from confidence that its outputs correspond
+to stable inputs; it does not provide an immutable filesystem snapshot.
+
+### Observations and scope
+
+An input observation associates a canonical file resource and its consumed aspect
+with the signature used by the build. The build retains the relationship between
+that observation and its consumers, including shared and dynamically discovered
+dependencies. Identity follows [Content identity](#content-identity), not output
+timestamps or notification arrival alone.
+
+Known inputs have baseline observations before their dependent production begins,
+after required prerequisite production finishes. A dynamically discovered input
+joins validation when it is first observed; no claim is made about changes before
+that observation. Generated prerequisites are inputs to their consumers, but their
+expected production is not itself an input-change warning. Order-only inputs are
+excluded unless upgraded to consumed dependencies by a normal edge or read.
+
+Before reporting successful build completion, the runtime revalidates these
+observations against the host. A changed signature, disappearance, or appearance
+of a previously observed missing path establishes an input change. Unchanged
+content with a changed timestamp does not. An unreadable input or otherwise
+unavailable signature is reported as unverifiable, not asserted to have changed.
+This validation may perform additional reads of tracked inputs; the restriction
+on reads solely to explain reuse decisions does not prohibit it.
+
+The scope is tracked file observations, not arbitrary paths opened inside opaque
+processes. Validation does not discover additional dependencies or widen grants.
+Before/after observations need not detect an edit that is reverted between them,
+and no guarantee covers edits after the final observation. Independently detected
+changes during production remain evidence even if the final signature matches
+the baseline. Validation is not filesystem locking or transactional isolation.
+
+### Outcome and recovery
+
+When changes are detected, the build emits one consolidated warning listing the
+affected file paths without duplicates, using authored or working-directory-relative
+paths. It states that outputs may be inconsistent and, for a one-shot build,
+advises running the build again. Unverifiable inputs are identified separately
+from confirmed changes. Unchanged, verifiable inputs produce no warning. Ordinary
+diagnostic presentation and privacy follow `027-job-presentation.md` and `009-cli.md`.
+
+The warning alone does not change the exit status, convert successful recipes to
+failures, or trigger an automatic retry in a one-shot build. Existing execution
+failures retain their ordinary status. Already written files and external effects
+are not rolled back.
+
+A result affected by a changed or unverifiable input must not become an accepted
+freshness or cache proof. This also applies to results derived from it; unrelated
+results retain ordinary reuse eligibility. Any provisional acceptance must be
+invalidated before completion is reported. The next build must reevaluate affected
+work rather than accept the suspect outputs because their timestamps are newer,
+their bytes happen to match, or a record was written before validation. A later
+successful production with validated inputs may establish a new accepted record.
+Watch scheduling and cancellation follow [020 Watch](020-watch.md#input-change-reporting).
+
 ## Materialization Result
 
 Materializing a file target returns its path and status; it does not read the

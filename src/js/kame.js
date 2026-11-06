@@ -2486,6 +2486,7 @@ class Module {
         }
       }
       if (this.exports.kame_wasm_prepare(instance) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      if (context) this.recordCaptureLimit(instance, context);
       if (resolveTools) {
         const names = JSON.parse(this.decode0(this.copyQuery((handle, dst, capacity, length) => this.exports.kame_wasm_tools(handle, dst, capacity, length), instance)));
         for (const tool of names) this.setToolPath(instance, tool, resolveTool(tool, Array.isArray(source) ? source.toolOverrides : [], context?.toolCache));
@@ -2503,9 +2504,15 @@ class Module {
     if (this.exports.kame_wasm_source_compile(instance, compiled.pointer, compiled.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     if (Array.isArray(source)) {
       if (!this.exports.kame_wasm_set_build_sources) throw Object.assign(new Error('include source ABI unavailable'), { code: 'FEATURE_UNSUP' });
-      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, parameters: source.parameters, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, trackTimings: context.api === true ? 0 : 1, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0 }), 'buildDescriptor');
+      const descriptor = this.write(JSON.stringify({ sources: source, defines: source.defines, parameters: source.parameters, environment: source.environment, toolOverrides: source.toolOverrides, force: source.force, trackTimings: context.api === true ? 0 : 1, timeoutMS: context.timeoutMS ?? 0, retryCount: context.retryCount ?? 0, retainBytes: context.logLimit ?? 0, captureLimit: context.captureLimit ?? 0 }), 'buildDescriptor');
       if (this.exports.kame_wasm_set_build_sources(instance, descriptor.pointer, descriptor.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
     }
+    this.recordCaptureLimit(instance, context);
+  }
+
+  recordCaptureLimit(instance, context) {
+    const limit = this.exports.kame_wasm_capture_limit?.(instance) ?? 0;
+    if (limit > 0 && context) context.captureLimit = limit;
   }
 
   setSourceName(instance, name) {
@@ -2672,6 +2679,7 @@ class Module {
       context.streaming = true;
       const encoded = this.write(target, 'buildTarget');
       if (this.exports.kame_wasm_target_begin(instance, encoded.pointer, encoded.length) !== 0) throw this.compileFailure(instance, 'TGT_NO_RULE');
+      this.recordCaptureLimit(instance, context);
       targetStarted = true;
       for (;;) {
         await this.waitReady(instance, context);
@@ -2785,6 +2793,7 @@ class Module {
       }
       const targetsBytes = this.write(JSON.stringify(targets), 'watchTargets');
       if (this.exports.kame_wasm_watch_begin(instance, targetsBytes.pointer, targetsBytes.length) !== 0) throw this.compileFailure(instance, 'PARSE_ERR');
+      this.recordCaptureLimit(instance, context);
       return { instance, pending, cancellation, context, targets, hostError, live: true, externalSignal, cancel };
     } catch (error) {
       cancellation.abort();
@@ -2863,11 +2872,12 @@ class Module {
       }
       const environment = Object.entries(process.env).map(([name, value]) => `${name}=${value}`);
       environment.push(...inv.environment);
-      const descriptor = this.write(JSON.stringify({ fragments, dataInput: Number.isSafeInteger(context.inputFD) && context.inputFD >= 0 ? 1 : 0, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, trackTimings: context.api === true ? 0 : 1, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
+      const descriptor = this.write(JSON.stringify({ fragments, dataInput: Number.isSafeInteger(context.inputFD) && context.inputFD >= 0 ? 1 : 0, args: inv.args, toolOverrides: inv.toolOverrides, buildDefines: inv.name === 'render' ? [] : inv.defines, parameters: inv.parameters, environment, captureLimit: inv.captureLimit ?? context.captureLimit ?? 0, printResult: inv.printResult ? 1 : 0, json: inv.json ? 1 : 0, dryRun: inv.dryRun ? 1 : 0, force: inv.force ? 1 : 0, trackTimings: context.api === true ? 0 : 1, timeoutMS: inv.timeoutMS ?? 0, retryCount: inv.retryCount ?? 0, retainBytes: inv.logLimit ?? 0 }), 'runDescriptor');
       if (this.exports.kame_wasm_session_compile(instance, descriptor.pointer, descriptor.length) !== 0) {
         if (inv.json) { this.drainEvents(instance, context); return 1; }
         throw this.compileFailure(instance, 'PARSE_ERR');
       }
+      this.recordCaptureLimit(instance, context);
       context.streaming = true;
       context.human = !inv.json;
       context.render = inv.name === 'render';
@@ -3044,6 +3054,7 @@ function apiContext(options, signal) {
     hostRequest: options.hostRequest,
     json: false,
     human: false,
+    captureLimit: options.captureLimit ?? 0,
   };
 }
 
@@ -3650,6 +3661,8 @@ function runArgvCapture(stages, context) {
   if (!Array.isArray(setups)) return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid stage setup' });
   const capture = context.capture;
   if (capture !== undefined && (!capture || typeof capture !== 'object' || Array.isArray(capture) || stages.length !== 1 || topology || typeof capture.stdout !== 'boolean' || typeof capture.stderr !== 'boolean' || (!capture.stdout && !capture.stderr) || !Number.isSafeInteger(capture.stdoutLimit) || capture.stdoutLimit <= 0 || capture.stdoutLimit > 2147483647 || !Number.isSafeInteger(capture.stderrLimit) || capture.stderrLimit <= 0 || capture.stderrLimit > 2147483647 || (capture.stdout && (context.output || setups.some((setup) => setup.output))) || (capture.stderr && setups.some((setup) => setup.error || setup.errorMode)))) return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid or conflicting capture policy' });
+  const limit = context.captureLimit;
+  if (!context.stream && capture === undefined && (!Number.isSafeInteger(limit) || limit <= 0)) return Promise.resolve({ ok: false, code: 'FEATURE_UNSUP', message: 'process capture limit is unavailable' });
   if (!Array.isArray(setups) || setups.some((setup) => setup.acceptExit !== undefined && (!Array.isArray(setup.acceptExit) || setup.acceptExit.some((status) => !Number.isInteger(status) || status < 1 || status > 255) || new Set(setup.acceptExit).size !== setup.acceptExit.length))) return Promise.resolve({ ok: false, code: 'EXPR_INVALID', message: 'invalid accepted exits' });
   const effectiveStatus = (result, i) => result.effectiveStatus ?? (result.signal ? 128 + result.signal : setups[i]?.acceptExit?.includes(result.status) ? 0 : result.status);
   const inputMode = context.inputMode ?? 'closed';
@@ -3735,7 +3748,6 @@ function runArgvCapture(stages, context) {
     const results = [];
     const liveStates = stages.map(() => 1);
     const chunks = [];
-    const limit = context.captureLimit > 0 ? context.captureLimit : 1024 * 1024;
     let length = 0;
     let failure = null;
     let graphFailure = null;
@@ -4270,6 +4282,8 @@ function contextFor(inv) {
     environment: inv.environment ?? [],
     json: inv.json === true,
     timeoutMS: inv.timeoutMS ?? 0,
+    // Requested input to the portable program; recordCaptureLimit replaces it
+    // with the effective value once compilation succeeds.
     captureLimit: inv.captureLimit ?? 0,
     retryCount: inv.retryCount ?? 0,
     logLimit: inv.logLimit ?? 0,

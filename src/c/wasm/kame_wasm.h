@@ -42,6 +42,7 @@ uint32_t kame_wasm_session_compile(uint64_t handle, uint32_t data, uint32_t leng
 uint32_t kame_wasm_register_plugins(uint64_t handle, uint32_t data, uint32_t length);
 uint32_t kame_wasm_session_work_count(uint64_t handle);
 int32_t kame_wasm_session_exit_status(uint64_t handle);
+int32_t kame_wasm_capture_limit(uint64_t handle);
 uint32_t kame_wasm_session_work_kind(uint64_t handle, uint32_t index);
 uint32_t kame_wasm_session_work_begin(uint64_t handle, uint32_t index);
 /* Cancel active execution, then pump step/completion until finalization is done.

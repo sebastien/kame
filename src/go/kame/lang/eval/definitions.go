@@ -13,6 +13,12 @@ import (
 	"solod.dev/so/slices"
 )
 
+// RecordReaderCloser releases evaluator-owned record readers when a loop ends,
+// is cancelled, or the execution boundary shuts down. ID zero releases all.
+type RecordReaderCloser interface {
+	CloseRecordReader(id int64)
+}
+
 type Program struct {
 	// ExitBoundary is enabled only by a host runtime establishing an execution boundary.
 	ExitBoundary       bool
@@ -79,8 +85,7 @@ type Program struct {
 	DefinitionCwd      string
 	InputSupplied      bool // Boundary supplied borrowed data stdin; never a reusable input identity.
 	NextRecordReader   int64
-	CloseRecordReader  func(any, int64) // ID zero releases all body readers on shutdown.
-	RecordReaderState  any
+	RecordReaderCloser RecordReaderCloser // ID zero releases all body readers on shutdown.
 	Valid              bool
 }
 
@@ -396,6 +401,14 @@ type definitionState struct {
 	Phase                 Phase
 }
 
+// bindInputPolicy records demand-time input policy once per generation. A
+// scoped definition keeps the caller's policy; an unscoped definition starts
+// open and outside a record body for each new generation.
+func (s *definitionState) bindInputPolicy(generation int64, closed bool, recordBody bool) {
+	s.InputClosed, s.RecordBody = closed, recordBody
+	s.InputBound, s.InputGeneration = true, generation
+}
+
 func freeDefinitionState(a mem.Allocator, value any) {
 	state := value.(*definitionState)
 	if state.Owned {
@@ -501,11 +514,11 @@ func freeDefinitionSource(source *core.Source) {
 
 func (p *Program) definition(engine *core.EngineContext, state *definitionState) Result {
 	if !state.InputBound || state.InputGeneration != engine.Generation() {
-		if !state.Scoped {
-			state.InputClosed = false
-			state.RecordBody = false
+		if state.Scoped {
+			state.bindInputPolicy(engine.Generation(), state.InputClosed, state.RecordBody)
+		} else {
+			state.bindInputPolicy(engine.Generation(), false, false)
 		}
-		state.InputBound, state.InputGeneration = true, engine.Generation()
 	}
 	d := state.Definition
 	context := &Context{Program: p, Engine: engine, Scope: p.Scope, Run: p.Alloc, Requests: p.Requests, Cwd: p.DefinitionCwd, Source: p.Script.Source.Name, Grants: p.Grants, Args: p.DefinitionArgs, HasArgs: p.DefinitionArgsSet, DependencyObserver: p.DefinitionDependencyObserver, ResolverState: p.DefinitionDependencyState, DirectHostRequests: p.DirectHostRequests}
